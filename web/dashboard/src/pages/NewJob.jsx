@@ -6,10 +6,16 @@ function NewJob() {
   const navigate = useNavigate()
   const location = useLocation()
   const fileRef = useRef(null)
+  const transcriptRef = useRef(null)
 
-  const [mode, setMode] = useState('url') // 'url' or 'upload'
-  const [url, setUrl] = useState('')
+  // Local-first: the backend never downloads, so a video must be uploaded or
+  // reused from an earlier job.
+  const [mode, setMode] = useState('upload') // 'upload' or 'reuse'
   const [uploadFilename, setUploadFilename] = useState('')
+  const [transcriptFilename, setTranscriptFilename] = useState('')
+  const [transcriptOffset, setTranscriptOffset] = useState(0)
+  const [sourceUrl, setSourceUrl] = useState('')
+  const [uploadingTranscript, setUploadingTranscript] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
@@ -18,11 +24,10 @@ function NewJob() {
   // Config
   const [clips, setClips] = useState(7)
   const [ratio, setRatio] = useState('9:16')
-  const [source, setSource] = useState('youtube')
   const [fontStyle, setFontStyle] = useState('HORMOZI')
   const [whisperModel, setWhisperModel] = useState('large-v3')
   const [whisperDevice, setWhisperDevice] = useState('cuda')
-  const [aiProvider, setAiProvider] = useState('gemini')
+  const [aiProvider, setAiProvider] = useState('nvidia')
 
   // Toggles
   const [useBroll, setUseBroll] = useState(true)
@@ -40,10 +45,10 @@ function NewJob() {
     const reuseJob = location.state?.reuseJob
     if (reuseJob) {
       setReuseJobId(reuseJob.id)
-      setUrl(reuseJob.url || '')
       setUploadFilename(reuseJob.upload_filename || '')
+      setTranscriptFilename(reuseJob.transcript_filename || '')
+      setSourceUrl(reuseJob.source_url || '')
       setMode('reuse')
-      setSource(reuseJob.source || 'youtube')
       
       const config = reuseJob.config || {}
       if (config.clips !== undefined) setClips(config.clips)
@@ -84,14 +89,26 @@ function NewJob() {
     }
   }
 
+  const handleTranscriptUpload = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setUploadingTranscript(true)
+    setError('')
+    try {
+      const result = await uploadVideo(file)
+      setTranscriptFilename(result.filename)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setUploadingTranscript(false)
+    }
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
 
-    if (mode === 'url' && !url.trim()) {
-      setError('URL tidak boleh kosong')
-      return
-    }
     if (mode === 'upload' && !uploadFilename) {
       setError('Silakan upload video terlebih dahulu')
       return
@@ -104,8 +121,10 @@ function NewJob() {
     setSubmitting(true)
     try {
       const payload = {
-        ...(mode === 'url' ? { url: url.trim() } : { upload_filename: uploadFilename }),
-        source,
+        ...(uploadFilename ? { upload_filename: uploadFilename } : {}),
+        ...(transcriptFilename ? { transcript_filename: transcriptFilename } : {}),
+        ...(transcriptOffset ? { transcript_offset: Number(transcriptOffset) } : {}),
+        ...(sourceUrl.trim() ? { source_url: sourceUrl.trim() } : {}),
         clips,
         ratio,
         font_style: fontStyle,
@@ -151,13 +170,6 @@ function NewJob() {
           <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
             <button
               type="button"
-              className={`btn ${mode === 'url' ? 'btn-primary' : 'btn-secondary'} btn-sm`}
-              onClick={() => setMode('url')}
-            >
-              🔗 From URL
-            </button>
-            <button
-              type="button"
               className={`btn ${mode === 'upload' ? 'btn-primary' : 'btn-secondary'} btn-sm`}
               onClick={() => setMode('upload')}
             >
@@ -171,31 +183,6 @@ function NewJob() {
               🔁 Reuse Job
             </button>
           </div>
-
-          {mode === 'url' && (
-            <>
-              <div className="form-group">
-                <label className="form-label">Video URL</label>
-                <input
-                  className="form-input"
-                  type="url"
-                  placeholder="https://www.youtube.com/watch?v=..."
-                  value={url}
-                  onChange={(e) => setUrl(e.target.value)}
-                />
-                <p className="form-hint">Mendukung YouTube, TikTok, Instagram, Google Drive</p>
-              </div>
-              <div className="form-group" style={{ maxWidth: '200px' }}>
-                <label className="form-label">Platform</label>
-                <select className="form-select" value={source} onChange={(e) => setSource(e.target.value)}>
-                  <option value="youtube">YouTube</option>
-                  <option value="tiktok">TikTok</option>
-                  <option value="instagram">Instagram</option>
-                  <option value="gdrive">Google Drive</option>
-                </select>
-              </div>
-            </>
-          )}
 
           {mode === 'upload' && (
             <div className="form-group">
@@ -229,6 +216,68 @@ function NewJob() {
               )}
             </div>
           )}
+
+          {mode === 'upload' && (
+            <div className="form-group">
+              <label className="form-label">Transcript (opsional)</label>
+              {transcriptFilename ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <span style={{ color: 'var(--success)' }}>✅ {transcriptFilename}</span>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setTranscriptFilename('')}>
+                    Remove
+                  </button>
+                </div>
+              ) : (
+                <div>
+                  <input
+                    ref={transcriptRef}
+                    type="file"
+                    accept=".vtt,.srt,.json3"
+                    onChange={handleTranscriptUpload}
+                    style={{ display: 'none' }}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => transcriptRef.current?.click()}
+                    disabled={uploadingTranscript}
+                  >
+                    {uploadingTranscript ? <><span className="spinner"></span> Uploading...</> : '📝 Select Transcript File'}
+                  </button>
+                  <p className="form-hint">
+                    VTT, SRT, JSON3 — melewati Whisper sepenuhnya (jauh lebih cepat).
+                    Kosongkan untuk transkripsi dengan Whisper.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {mode === 'upload' && transcriptFilename && (
+            <div className="form-group" style={{ maxWidth: '200px' }}>
+              <label className="form-label">Transcript Offset (detik)</label>
+              <input
+                className="form-input"
+                type="number"
+                step="0.1"
+                value={transcriptOffset}
+                onChange={(e) => setTranscriptOffset(e.target.value)}
+              />
+              <p className="form-hint">Geser timestamp jika video sudah di-trim.</p>
+            </div>
+          )}
+
+          <div className="form-group">
+            <label className="form-label">Source Attribution (opsional)</label>
+            <input
+              className="form-input"
+              type="text"
+              placeholder="https://youtube.com/watch?v=... atau 'Podcast XYZ ep.42'"
+              value={sourceUrl}
+              onChange={(e) => setSourceUrl(e.target.value)}
+            />
+            <p className="form-hint">Hanya untuk kredit di deskripsi &amp; manifest. Tidak pernah diunduh.</p>
+          </div>
 
           {mode === 'reuse' && (
             <div className="form-group">
@@ -281,8 +330,8 @@ function NewJob() {
             <div className="form-group">
               <label className="form-label">AI Provider</label>
               <select className="form-select" value={aiProvider} onChange={(e) => setAiProvider(e.target.value)}>
-                <option value="gemini">Google Gemini</option>
                 <option value="nvidia">NVIDIA NIM</option>
+                <option value="gemini">Google Gemini</option>
               </select>
             </div>
             <div className="form-group">

@@ -71,7 +71,7 @@ function JobDetail() {
       <div className="page-header">
         <div>
           <h2>Job #{job.id}</h2>
-          <p>{job.url || job.upload_filename || 'Unknown source'}</p>
+          <p>{job.upload_filename || job.source_url || job.url || 'Unknown source'}</p>
         </div>
         <div style={{ display: 'flex', gap: '8px' }}>
           <span className={`badge badge-${job.status}`}>{job.status}</span>

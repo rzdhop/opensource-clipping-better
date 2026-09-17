@@ -110,6 +110,11 @@ class JobCreateRequest(BaseModel):
     use_dlp_subs: bool = False
 
     # AI
+    # Local-first inputs. `url` is retained transitionally; the pipeline never
+    # fetches it.
+    transcript_filename: Optional[str] = None
+    transcript_offset: float = 0.0
+    source_url: Optional[str] = None
     ai_provider: AIProvider = AIProvider.NVIDIA
     gemini_model: str = "gemini-3-flash-preview"
     face_detector: FaceDetector = FaceDetector.MEDIAPIPE

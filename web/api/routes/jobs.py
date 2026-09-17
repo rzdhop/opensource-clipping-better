@@ -61,10 +61,16 @@ def _job_to_response(job: dict) -> JobResponse:
 @router.post("", status_code=201)
 async def create_job(req: JobCreateRequest) -> JobResponse:
     """Create a new clipping job and submit it to the background queue."""
-    if not req.url and not req.upload_filename and not req.reuse_job_id:
+    # Local-first: a job needs a video on disk. `url` is no longer an input --
+    # nothing downloads it.
+    if not req.upload_filename and not req.reuse_job_id:
         raise HTTPException(
             status_code=400,
-            detail="Either 'url', 'upload_filename', or 'reuse_job_id' must be provided.",
+            detail=(
+                "Either 'upload_filename' or 'reuse_job_id' must be provided. "
+                "This pipeline does not download: upload the video (and "
+                "optionally a .vtt transcript) first."
+            ),
         )
 
     payload = req.model_dump()

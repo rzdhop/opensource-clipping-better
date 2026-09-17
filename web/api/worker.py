@@ -8,7 +8,6 @@ progress reporting via the job store.
 from __future__ import annotations
 
 import asyncio
-import glob
 import os
 import sys
 import traceback
@@ -74,93 +73,67 @@ def _run_pipeline_sync(job_id: str, payload: dict) -> None:
             step="download",
             step_number=1,
             total_steps=7,
-            message="Mengunduh video...",
+            message="Menyiapkan video sumber...",
             percent=5.0,
         )
 
         from clipping import engine
+        from clipping.runner import resolve_transcript
 
-        source_platform = getattr(cfg, "source_platform", "youtube")
+        # --- Step 1: resolve the source video (no downloads) ---
+        project_root = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "..")
+        )
 
-        # If upload file, skip download
         if payload.get("upload_filename"):
-            # Resolve absolute path to the project root (2 levels up from web/api)
-            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-            upload_path = os.path.join(project_root, "uploads", payload["upload_filename"])
-            if not os.path.exists(upload_path):
-                store.set_error(job_id, f"File upload tidak ditemukan: {payload['upload_filename']}")
+            upload_path = os.path.join(
+                project_root, "uploads", payload["upload_filename"]
+            )
+            if not os.path.isfile(upload_path):
+                store.set_error(
+                    job_id,
+                    f"File upload tidak ditemukan: {payload['upload_filename']}",
+                )
                 return
             cfg.file_video_asli = upload_path
-            store.update_progress(
-                job_id,
-                step="download",
-                step_number=1,
-                total_steps=7,
-                message="Menggunakan file upload.",
-                percent=14.0,
-            )
+            message = "Menggunakan file upload."
+        elif os.path.isfile(cfg.file_video_asli):
+            # Reuse-job path: an earlier job's video is still on disk.
+            message = "Menggunakan video dari job sebelumnya."
         else:
-            if not cfg.url_youtube:
-                if os.path.exists(cfg.file_video_asli):
-                    store.update_progress(
-                        job_id,
-                        step="download",
-                        step_number=1,
-                        total_steps=7,
-                        message="Bypass download: menggunakan video lama.",
-                        percent=14.0,
-                    )
-                else:
-                    store.set_error(job_id, "Video asli tidak ditemukan di Job ID tersebut. File mungkin sudah terhapus.")
-                    return
-            else:
-                engine.download_video(
-                    cfg.url_youtube,
-                    cfg.file_video_asli,
-                    getattr(cfg, "use_dlp_subs", False),
-                    getattr(cfg, "download_source_height", "max"),
-                    source_platform=source_platform,
-                )
-                store.update_progress(
-                    job_id,
-                    step="download",
-                    step_number=1,
-                    total_steps=7,
-                    message="Video berhasil diunduh.",
-                    percent=14.0,
-                )
+            store.set_error(
+                job_id,
+                "Video tidak ditemukan. Upload sebuah file video, atau pilih job "
+                "lama yang videonya masih ada.",
+            )
+            return
 
-        # --- Step 2: Transcribe ---
+        store.update_progress(
+            job_id,
+            step="download",
+            step_number=1,
+            total_steps=7,
+            message=message,
+            percent=14.0,
+        )
+
+        # --- Step 2: Transcript ---
         store.set_status(job_id, JobStatus.TRANSCRIBING)
         store.update_progress(
             job_id,
             step="transcribe",
             step_number=2,
             total_steps=7,
-            message="Memulai transkripsi...",
+            message=(
+                "Memuat transkrip lokal..."
+                if getattr(cfg, "transcript_path", None)
+                else "Memulai transkripsi..."
+            ),
             percent=15.0,
         )
 
-        transkrip_lengkap = ""
-        data_segmen = []
-
-        # Try YouTube JSON3 subs first
-        json3_files = glob.glob(cfg.file_video_asli.replace(".mp4", ".*.json3"))
-        file_json3 = json3_files[0] if json3_files else None
-
-        if source_platform == "youtube" and getattr(cfg, "use_dlp_subs", False) and file_json3 and os.path.exists(file_json3):
-            transkrip_lengkap, data_segmen = engine.parse_youtube_json3_subs(
-                file_json3, max_words_per_subtitle=cfg.max_kata_per_subtitle
-            )
-
-        if not transkrip_lengkap or not data_segmen:
-            transkrip_lengkap, data_segmen = engine.transcribe_video(
-                cfg.file_video_asli,
-                max_words_per_subtitle=cfg.max_kata_per_subtitle,
-                model_size=cfg.whisper_model,
-                device=cfg.whisper_device,
-                compute_type=cfg.whisper_compute_type,
-            )
+        # Shared with the CLI runner so the two cannot drift.
+        transkrip_lengkap, data_segmen = resolve_transcript(cfg)
 
         store.update_progress(
             job_id,

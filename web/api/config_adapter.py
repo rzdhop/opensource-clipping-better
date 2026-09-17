@@ -105,7 +105,23 @@ def build_config_from_payload(
             os.path.join(outputs_dir, "video_asli.mp4")
         )
 
+    # Local transcript (optional). Resolved against uploads/ like the video.
+    transcript_filename = payload.get("transcript_filename")
+    transcript_path = None
+    if transcript_filename:
+        candidate = os.path.abspath(
+            os.path.join(base_dir, "uploads", transcript_filename)
+        )
+        if os.path.isfile(candidate):
+            transcript_path = candidate
+
     cfg = SimpleNamespace(
+        # Local-first inputs
+        transcript_path=transcript_path,
+        transcript_offset=float(payload.get("transcript_offset", 0.0) or 0.0),
+        no_whisper=False,
+        source_url=payload.get("source_url"),
+        video_provided=bool(upload_filename),
         # Paths
         base_dir=base_dir,
         outputs_dir=outputs_dir,
