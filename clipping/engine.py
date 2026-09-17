@@ -370,6 +370,111 @@ def _build_account_classification_prompt() -> str:
 
 
 # ---- Retry Config ----
+# --- NVIDIA NIM retry policy -------------------------------------------------
+# Short backoff on purpose. Gemini's 60s+ linear ladder is tuned for quota
+# exhaustion; NVIDIA failures on this path are overwhelmingly malformed JSON,
+# and the only remedy for a bad sample is another sample.
+NVIDIA_MAX_ATTEMPTS = 3
+NVIDIA_BACKOFF_SECONDS = (5, 15)
+
+# Classified by exception class NAME so that `openai` is never imported at module
+# scope. An SDK rename would make an unknown error non-retryable, i.e. it fails
+# closed, which is the safe direction.
+_NVIDIA_RETRYABLE_EXC = {
+    "APIConnectionError",
+    "APITimeoutError",
+    "RateLimitError",
+    "InternalServerError",
+    "APIError",
+}
+_NVIDIA_FATAL_EXC = {
+    "AuthenticationError",
+    "PermissionDeniedError",
+    "NotFoundError",
+    "BadRequestError",
+    "UnprocessableEntityError",
+}
+
+
+def _nvidia_is_retryable(exc: Exception) -> bool:
+    """Whether *exc* is worth another sample."""
+    name = type(exc).__name__
+
+    if name in _NVIDIA_FATAL_EXC:
+        # A bad key or a malformed guided_json will never succeed on retry.
+        return False
+
+    status = getattr(exc, "status_code", None)
+    if isinstance(status, int):
+        if status in (408, 409, 429) or status >= 500:
+            return True
+        if 400 <= status < 500:
+            return False
+
+    if isinstance(exc, json.JSONDecodeError):
+        return True
+    if name in _NVIDIA_RETRYABLE_EXC:
+        return True
+    # Our own shape validation below raises ValueError; another sample may fix it.
+    return isinstance(exc, ValueError)
+
+
+def _extract_clip_list(content: str) -> list[dict]:
+    """Turn a raw NIM response into the clip list, or raise.
+
+    Every failure here is a ValueError or JSONDecodeError, i.e. retryable, so
+    the caller's loop can simply resample.
+    """
+    if not content or not content.strip():
+        raise ValueError("NVIDIA mengembalikan content kosong.")
+
+    content = content.strip()
+    if "```" in content:
+        content = re.sub(r"```(json)?", "", content).strip()
+        content = content.split("```")[0].strip()
+
+    hasil = json.loads(content)
+
+    # guided_json should return the array directly, but non-conforming models
+    # wrap it. Keep the unwrapper.
+    if isinstance(hasil, dict):
+        for key in ("clips", "data", "highlights"):
+            if isinstance(hasil.get(key), list):
+                hasil = hasil[key]
+                break
+        else:
+            hasil = [hasil]
+
+    if not isinstance(hasil, list):
+        raise ValueError(
+            f"Provider NVIDIA mengembalikan format non-list/dict: {type(hasil)}"
+        )
+    if not hasil:
+        # A schema-conformant empty array used to sail through here and detonate
+        # much later inside metadata.normalize_and_validate.
+        raise ValueError("NVIDIA mengembalikan array klip kosong.")
+
+    required = ("start_time", "end_time")
+    for idx, item in enumerate(hasil):
+        if not isinstance(item, dict):
+            raise ValueError(f"Klip #{idx} bukan object: {type(item)}")
+        missing = [k for k in required if k not in item]
+        if missing:
+            raise ValueError(f"Klip #{idx} kehilangan field wajib: {missing}")
+
+    return hasil
+
+
+def _make_nvidia_client(cfg):
+    """Build the NIM client. Split out so tests can substitute a fake."""
+    from openai import OpenAI
+
+    return OpenAI(
+        base_url="https://integrate.api.nvidia.com/v1",
+        api_key=cfg.api_key_nvidia,
+    )
+
+
 MAX_ATTEMPTS = 10
 INITIAL_WAIT_SECONDS = 60
 WAIT_INCREMENT_SECONDS = 30
@@ -809,17 +914,12 @@ Transkrip:
 
 def analyze_with_nvidia(transkrip_lengkap: str, cfg) -> list[dict]:
     """Analyze transcript using NVIDIA NIM API (OpenAI compatible)."""
-    from openai import OpenAI
-    
     print(f"[3/3] Menganalisis Top {cfg.jumlah_clip} momen menggunakan NVIDIA ({cfg.nvidia_model})...")
-    
+
     if not cfg.api_key_nvidia:
         raise ValueError("NVIDIA_API_KEY tidak ditemukan di environment.")
 
-    client = OpenAI(
-        base_url="https://integrate.api.nvidia.com/v1",
-        api_key=cfg.api_key_nvidia
-    )
+    client = _make_nvidia_client(cfg)
     
     prompt = get_analysis_prompt(transkrip_lengkap, cfg.jumlah_clip, cfg.durasi_hook, cfg=cfg)
     
@@ -972,61 +1072,86 @@ def analyze_with_nvidia(transkrip_lengkap: str, cfg) -> list[dict]:
         }
     }
 
-    completion = client.chat.completions.create(
-        model=cfg.nvidia_model,
-        messages=[
-            {"role": "system", "content": "You are a professional video editor and strategist. Return JSON only. Follow the provided JSON schema exactly."},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.5,
-        top_p=1,
-        max_tokens=16384,
-        extra_body={
-            "chat_template_kwargs": {"thinking": False},
-            "nvext": {
-                "guided_json": clips_schema
-            }
-        }
-    )
-    
-    content = completion.choices[0].message.content
-    
-    if "```" in content:
-        content = re.sub(r"```(json)?", "", content).strip()
-        content = content.split("```")[0].strip()
-        
-    hasil = json.loads(content)
-    
-    # Guided JSON should return an array directly if schema says type: array
-    # but we keep the unwrapper just in case of non-conforming fallbacks
-    if isinstance(hasil, dict):
-        for key in ["clips", "data", "highlights"]:
-            if key in hasil and isinstance(hasil[key], list):
-                hasil = hasil[key]
-                break
-                
-    if not isinstance(hasil, list):
-        if isinstance(hasil, dict):
-            return [hasil]
-        raise ValueError(f"Provider NVIDIA mengembalikan format non-list/dict: {type(hasil)}")
-        
-    return hasil
+    # The HTTP call and the parse share one retry loop deliberately: with
+    # guided_json in play, a malformed response is a *sampling* failure, and the
+    # only meaningful remedy is another sample.
+    failures: list[str] = []
+
+    for attempt in range(1, NVIDIA_MAX_ATTEMPTS + 1):
+        try:
+            print(f"   🔁 NVIDIA attempt {attempt}/{NVIDIA_MAX_ATTEMPTS}...")
+            completion = client.chat.completions.create(
+                model=cfg.nvidia_model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a professional video editor and strategist. "
+                            "Return JSON only. Follow the provided JSON schema exactly."
+                        ),
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                # Nudge toward determinism on each retry: if the last sample was
+                # malformed, a cooler one is likelier to conform.
+                temperature=max(0.0, 0.5 - 0.15 * (attempt - 1)),
+                top_p=1,
+                max_tokens=16384,
+                extra_body={
+                    "chat_template_kwargs": {"thinking": False},
+                    "nvext": {"guided_json": clips_schema},
+                },
+            )
+            content = completion.choices[0].message.content
+            return _extract_clip_list(content)
+
+        except Exception as exc:
+            failures.append(f"attempt {attempt}: {type(exc).__name__}: {exc}")
+            print(f"   ⚠️ NVIDIA attempt {attempt} gagal | {type(exc).__name__}: {exc}")
+
+            if not _nvidia_is_retryable(exc) or attempt == NVIDIA_MAX_ATTEMPTS:
+                detail = "\n  ".join(failures)
+                raise RuntimeError(
+                    f"Analisis NVIDIA gagal setelah {attempt} percobaan:\n  {detail}"
+                ) from exc
+
+            time.sleep(NVIDIA_BACKOFF_SECONDS[attempt - 1])
+
+    # Unreachable: the loop either returns or raises.
+    raise RuntimeError("Analisis NVIDIA gagal (loop selesai tanpa hasil).")
 
 
 def analyze_with_ai(transkrip_lengkap: str, cfg) -> list[dict]:
-    """Dispatcher for AI analysis based on provider."""
-    provider = getattr(cfg, "ai_provider", "gemini")
-    
+    """Dispatch transcript analysis to the configured provider.
+
+    There is deliberately no cross-provider fallback. The previous behaviour --
+    catch bare Exception and silently retry on Gemini -- was actively harmful:
+    a user who chose NVIDIA got billed on Gemini instead, with the real error
+    reduced to a single warning line. It is also how `openai` stayed an
+    undeclared dependency for so long, since ModuleNotFoundError was swallowed
+    along with everything else.
+    """
+    provider = getattr(cfg, "ai_provider", "nvidia")
+
     if provider == "nvidia":
-        if not cfg.api_key_nvidia:
-            print("⚠️ NVIDIA_API_KEY tidak ditemukan! Mencoba fallback ke Gemini...")
-        else:
-            try:
-                return analyze_with_nvidia(transkrip_lengkap, cfg)
-            except Exception as e:
-                print(f"⚠️ NVIDIA API gagal: {e}. Fallback ke Gemini...")
-    
-    return analyze_with_gemini(transkrip_lengkap, cfg)
+        if not getattr(cfg, "api_key_nvidia", ""):
+            raise RuntimeError(
+                "NVIDIA_API_KEY tidak ditemukan. Set di .env, atau jalankan "
+                "dengan --ai-provider gemini."
+            )
+        return analyze_with_nvidia(transkrip_lengkap, cfg)
+
+    if provider == "gemini":
+        if not getattr(cfg, "api_key_gemini", ""):
+            raise RuntimeError(
+                "GOOGLE_API_KEY tidak ditemukan. Set di .env, atau jalankan "
+                "dengan --ai-provider nvidia."
+            )
+        return analyze_with_gemini(transkrip_lengkap, cfg)
+
+    raise ValueError(
+        f"AI provider tidak dikenal: {provider!r} (pilihan: nvidia, gemini)"
+    )
 
 
 def analyze_with_gemini(
