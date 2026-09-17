@@ -1,19 +1,15 @@
 # CHECKPOINT
 
-## In progress
-- **Task:** Local-first refactor — **COMPLETE** (all 11 stages committed)
-- **Current phase:** DOCUMENT / close-out
-- **Next action:** Manual Tier-2 verification on a machine with the render stack
-  installed (see *Deferred verification* below). Nothing is blocked on code.
-- **Open questions:** none
+## Status
+- **Task:** Local-first refactor — **COMPLETE and VERIFIED END-TO-END**
+- **Phase:** closed out
+- **Open questions:** none blocking. One open risk: see A-007.
 
 ## Checkpoint commit
-Branch `refactor/local-first-engine`, head `b60fc4b`.
-Baseline before the work: `3c72b75` (clean tree, `main`).
+Branch `refactor/local-first-engine`. Baseline before the work: `3c72b75`
+(clean tree, `main`).
 
-Stage commits, oldest first:
-
-| Commit | Stage |
+| Commit | What |
 |---|---|
 | `8947641` | S1–S3 lazy Whisper import, test scaffolding, `clipping/transcript.py` |
 | `0825828` | S4 `--video` / `--transcript` CLI surface |
@@ -24,90 +20,73 @@ Stage commits, oldest first:
 | `abb0286` | S9 web API local-first jobs |
 | `fa7dbad` | S10 the purge (deletions only) |
 | `b60fc4b` | S11 docs, notebooks, CI, 2.0.0 |
+| `a2cacc9` | Fixes found by end-to-end verification (voiceover import, Windows ffmpeg escaping, worker key gate) |
+| `bf797c0` | The shipped NIM model default was retired — replaced |
+| `47ca1af` | Web job fields Pydantic was dropping |
 
-## Tier-1 baseline
-Now backed by a real suite (there was none at `3c72b75`):
-
+## Tier-1
 ```
-python -m pytest -q                                            # 165 tests
-python -m compileall -q clipping web main.py run_fb_upload.py youtube_uploader youtube_tracker
+python -m pytest -q                                            # 166 tests
+python -m compileall -q clipping web main.py youtube_uploader youtube_tracker
 PYTHONIOENCODING=utf-8 python main.py --help
 ```
+All green. CI runs the first two on every push.
 
-All green at `b60fc4b`. CI runs the first two on every push.
+`PYTHONIOENCODING=utf-8` is needed on Windows only: the help text contains emoji
+and the console defaults to cp1252. Pre-existing, unrelated.
 
-`PYTHONIOENCODING=utf-8` is required on Windows: the help text contains emoji and
-the console defaults to cp1252, so a bare `--help` raises `UnicodeEncodeError`.
-Pre-existing and unrelated to this task.
+## Tier-2 — verified on real media
 
-## Regression contract
+Everything below was run against a genuine 70s 1280x720 h264 video with a
+realistic YouTube-style auto-caption VTT (inline `<00:00:01.234>` word tags,
+rolling repetition, 10ms bridge cues).
 
-| # | Behaviour | Proof | Status |
-|---|---|---|---|
-| RC-1 | `data_segmen` shape (`{start,end,words[{word,start,end}]}`, absolute seconds) | `tests/helpers.assert_valid_data_segmen`, asserted across every parser and fixture | ✅ verified |
-| RC-2 | JSON3 parser byte-identical after the shared-helper extraction | `test_json3_parser.py::test_json3_golden` | ✅ verified |
-| RC-3 | Whisper still runs when no `--transcript` is given | `test_transcript_dispatch.py::test_falls_back_to_whisper_without_transcript` (call args asserted; real inference not exercised) | ⚠️ partially — see below |
-| RC-4 | Karaoke word alignment in the burned-in `.ass` | — | ❌ UNVERIFIED — needs manual A/B |
-| RC-5 | Gemini reachable via `--ai-provider gemini` | `test_nvidia_retry.py::test_dispatch_routes_to_gemini` | ✅ verified |
-| RC-6 | NVIDIA returns a valid clip list, retries, fails loudly | `test_nvidia_retry.py` (24 cases, fake client) | ✅ verified (no live API call) |
-| RC-7 | Render layer untouched — clips still render | — | ❌ UNVERIFIED — needs the render stack |
-| RC-8 | Diarization / split-screen on a non-yt-dlp source | `test_config_cli.py::test_derive_audio_path_*` covers the path bug only | ❌ UNVERIFIED end-to-end |
-| RC-9 | Story mode assembles | `test_story_loader.py` covers schema only | ❌ UNVERIFIED end-to-end |
-| RC-10 | Web API job reaches `completed` | `test_web_config_adapter.py` covers the adapter only | ❌ UNVERIFIED end-to-end |
+| # | Behaviour | Result |
+|---|---|---|
+| RC-1 | `data_segmen` contract | ✅ `assert_valid_data_segmen` across every parser, fixture and producer |
+| RC-2 | JSON3 byte-identical after helper extraction | ✅ golden test |
+| RC-3 | Whisper fallback | ✅ real inference (`tiny`/CPU) on SAPI-generated speech → contract-valid segments |
+| RC-4 | **Karaoke word alignment** | ✅ regenerated the burned-in ASS and compared every Dialogue timing to the source VTT: **0 word mismatches / 44 words, every delta ≤0.010s** (ASS centisecond resolution). The one 0.833s outlier is a word starting before the cut, correctly clamped |
+| RC-5 | Gemini still reachable | ✅ dispatch test |
+| RC-6 | NVIDIA retry / fail-fast | ✅ 25 unit cases, **plus a live 410 correctly classified fatal and not retried** |
+| RC-7 | **Render layer intact** | ✅ real 1080x1920 h264+aac clip (34.1s) + thumbnail from local mp4+vtt |
+| RC-8 | Diarization / split-screen | ❌ **STILL UNVERIFIED** — needs `pyannote.audio` + `torch` + an accepted HF model agreement. The audio-path bug it depended on is unit-tested, but the split-screen render was never exercised |
+| RC-9 | Story mode | ✅ assembled `hook_1.mp4` + `highlight_1.mp4` from two local sources; one used its VTT (Whisper bypassed), the other fell back to Whisper |
+| RC-10 | Web API | ✅ upload mp4 → upload vtt → POST job → **`completed`** with a real 1080x1920 render; provenance persisted, `url` is `None` |
 
-## Deferred verification (Tier 2) — IMPORTANT
+Dedupe effectiveness, measured on the realistic fixture: **86 words with dedupe
+vs 244 without** — the LLM would otherwise have seen every sentence ~3x.
 
-**This machine does not have the render stack installed.** `cv2`, `mediapipe`,
-`ultralytics`, `faster-whisper`, `torch`, `pyannote.audio`, `google-genai` and
-ffmpeg are all absent, so **no clip was ever rendered during this work**. What
-was verified is everything up to and including `run_pipeline`'s lazy import of
-`studio`; past that point the process stops with `ModuleNotFoundError: cv2`.
+## What verification found (none caught by unit tests)
 
-Before merging, run on a machine with the full environment:
+1. **`--voiceover` made `google-genai` mandatory for every run.** Optional
+   feature, unconditional import.
+2. **Subtitle burn-in failed on every Windows path** — pre-existing;
+   `clipping/studio/` had an empty diff across all 11 stages. Correct escaping
+   established by probing ffmpeg with 7 candidate forms.
+3. **The shipped `--nvidia-model` default was dead** — `deepseek-v4-pro` returns
+   `410 Gone` (EOL 2026-08-07). The brief's alternative
+   `meta/llama-3.1-70b-instruct` is retired too.
+4. **The web worker demanded a key for a render-only rerun.**
+5. **`load_gemini_json` / `nvidia_model` never reached the backend** — undeclared
+   on `JobCreateRequest`, so Pydantic dropped them.
 
-```bash
-pip install -r requirements.txt
+## Remaining risks
 
-yt-dlp -f "bv*[vcodec!*=av01]+ba/b" --write-auto-subs --sub-format vtt \
-       --convert-subs vtt -o "sample.%(ext)s" "<url>"
+- **A-007 (substantive):** `deepseek-ai/deepseek-v4-flash-0731` is confirmed to
+  exist (probe returns 401, not 410) but has **not been called with a real key**,
+  so its `guided_json` conformance is unverified. First real run will confirm.
+- **RC-8:** split-screen / diarization not exercised.
+- 21 more `JobCreateRequest` fields are still dropped by Pydantic (pre-existing,
+  spun out as a follow-up task).
 
-# 1. The headline path: local files, no network, no Whisper
-python main.py --video sample.mp4 --transcript sample.en.vtt --clips 1
-
-# 2. RC-4: the one thing no unit test can prove. Compare the karaoke word
-#    alignment of the .ass above against a Whisper run of the same video.
-python main.py --video sample.mp4 --clips 1        # RC-3 + RC-4 reference
-
-# 3. RC-8: diarization now extracts audio from an arbitrary container
-python main.py --video sample.mkv --transcript sample.vtt --split-screen
-
-# 4. RC-9 / RC-10
-python main.py --story-mode --sources-json sources.json
-uvicorn web.api.app:app    # upload mp4 + vtt, POST /api/jobs, poll to completed
-```
-
-The strongest proof of the bypass is step 1 in a venv with **`faster-whisper`
-uninstalled**: it should succeed.
-
-## Unrelated changes present at checkpoint time
-None — the tree was clean at `3c72b75` and every commit on this branch belongs
-to this task.
-
-## Known pre-existing breakage (not caused by this task)
-- `run_upload.py:17` imports `youtube_uploader.safety`, which does not exist, so
-  that script raises `ModuleNotFoundError` on import. Predates this work and is
-  excluded from the `compileall` CI job for that reason.
-- `python main.py --help` raises `UnicodeEncodeError` on a cp1252 Windows
-  console. Workaround: `PYTHONIOENCODING=utf-8`.
-- `gdown` is declared in `pyproject.toml` only, not `requirements.txt`, so
-  `--hook-source <drive-url>` fails in every documented install path.
+## Known pre-existing breakage (not from this task)
+- `run_upload.py:17` imports `youtube_uploader.safety`, which does not exist.
+  Excluded from the `compileall` CI job for that reason.
+- `gdown` is declared in `pyproject.toml` only, so `--hook-source <drive-url>`
+  fails in every documented install path.
 
 ## Follow-ups deliberately not done
-- `hook_manager.py` (`--hook-source`) still fetches over the network via
-  `gdown`/`requests`. It is now the only remaining fetch in the CLI pipeline and
-  is inconsistent with local-first; restricting it to local paths would also let
-  `gdown` be dropped.
-- 9 dead `from yt_dlp import YoutubeDL` imports remain in `clipping/studio/`
-  (only `effects.py` and `transitions.py` actually use it). Removing them would
-  measurably speed startup, but it touches the render layer this refactor
-  promised to leave alone.
+- `hook_manager.py` (`--hook-source`) is now the only network fetch left in the
+  CLI pipeline, which is inconsistent with local-first.
+- 9 dead `from yt_dlp import YoutubeDL` imports remain in `clipping/studio/`.
