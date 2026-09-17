@@ -2,10 +2,14 @@
 """
 OpenSource Clipping — AI Auto-Clipper & Teaser Generator
 
+Local-first: this tool downloads nothing. Acquire the video and (optionally) its
+transcript with your own tools, then point it at the files.
+
 Usage:
-    python main.py --url "https://..."      # run with required URL
-    python main.py --url "https://..." --clips 5 --ratio 16:9
-    python main.py --help                   # show all available options
+    python main.py --video talk.mp4
+    python main.py --video talk.mp4 --transcript talk.vtt   # skips Whisper
+    python main.py --video talk.mp4 --transcript talk.vtt --clips 5 --ratio 16:9
+    python main.py --help                                   # all options
 """
 
 import sys
@@ -29,7 +33,6 @@ def main():
         print(f"   Sources     : {cfg.sources_json_path}")
         print(f"   Rasio       : {cfg.pilihan_rasio}")
         print(f"   Output Dir  : {cfg.story_output_dir}")
-        print(f"   Skip DL     : {'YES' if cfg.skip_download else 'NO'}")
         print("=" * 70)
 
         run_story_pipeline(cfg)
@@ -68,11 +71,7 @@ def main():
     print("=" * 70)
     print(f"🎬 OpenSource Clipping v{version}")
     print("=" * 70)
-    if getattr(cfg, "video_provided", False):
-        print(f"   Video       : {os.path.basename(cfg.file_video_asli)}")
-    else:
-        # Legacy remote path, removed with the download layer.
-        print(f"   URL         : {cfg.url_youtube}")
+    print(f"   Video       : {os.path.basename(cfg.file_video_asli)}")
     # State the transcript source explicitly. The Whisper fallback is the slow
     # path and must never be taken without the user seeing it.
     if transcript_path:

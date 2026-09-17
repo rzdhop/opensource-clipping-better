@@ -26,13 +26,6 @@ class JobStatus(str, enum.Enum):
     CANCELLED = "cancelled"
 
 
-class SourcePlatform(str, enum.Enum):
-    YOUTUBE = "youtube"
-    TIKTOK = "tiktok"
-    INSTAGRAM = "instagram"
-    GDRIVE = "gdrive"
-
-
 class AspectRatio(str, enum.Enum):
     RATIO_9_16 = "9:16"
     RATIO_16_9 = "16:9"
@@ -72,15 +65,12 @@ class JobCreateRequest(BaseModel):
     """Payload to create a new clipping job."""
 
     # Source
-    url: Optional[str] = Field(None, description="Video URL to process")
     upload_filename: Optional[str] = Field(None, description="Filename of an uploaded video")
-    source: SourcePlatform = Field(SourcePlatform.YOUTUBE, description="Source platform")
     reuse_job_id: Optional[str] = Field(None, description="Existing Job ID to reuse its downloads and JSON")
 
     # Main settings
     clips: int = Field(7, ge=1, le=30, description="Number of clips to generate")
     ratio: AspectRatio = Field(AspectRatio.RATIO_9_16, description="Output aspect ratio")
-    source_height: str = Field("max", description="Source download max height")
     render_height: str = Field("1080", description="Target output height")
 
     # Content & Hook
@@ -107,11 +97,9 @@ class JobCreateRequest(BaseModel):
     whisper_model: str = "large-v3"
     whisper_device: WhisperDevice = WhisperDevice.CUDA
     whisper_compute_type: str = "float16"
-    use_dlp_subs: bool = False
 
     # AI
-    # Local-first inputs. `url` is retained transitionally; the pipeline never
-    # fetches it.
+    # Local-first inputs.
     transcript_filename: Optional[str] = None
     transcript_offset: float = 0.0
     source_url: Optional[str] = None
@@ -163,9 +151,12 @@ class JobResponse(BaseModel):
     status: JobStatus
     created_at: datetime
     updated_at: datetime
-    url: Optional[str] = None
     upload_filename: Optional[str] = None
-    source: SourcePlatform = SourcePlatform.YOUTUBE
+    transcript_filename: Optional[str] = None
+    source_url: Optional[str] = None
+    # Retained so job records created before the local-first purge still
+    # deserialize; never populated for new jobs.
+    url: Optional[str] = None
     config: dict = Field(default_factory=dict)
     progress: Optional[JobProgressEvent] = None
     clips: list[ClipDetail] = Field(default_factory=list)

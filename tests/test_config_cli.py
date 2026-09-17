@@ -139,14 +139,36 @@ def test_uppercase_extension_accepted(workdir):
     assert cfg.file_video_asli == os.path.abspath(str(upper))
 
 
-# ------------------------------------------------------------------- legacy
+# ------------------------------------------------------------------- purged
 
-def test_legacy_url_still_builds(workdir):
-    """--url keeps working until the purge stage; nothing breaks mid-refactor."""
-    cfg = build_config(["--url", "https://youtube.com/watch?v=x"])
-    assert cfg.url_youtube == "https://youtube.com/watch?v=x"
-    assert cfg.video_provided is False
-    assert cfg.file_video_asli.endswith("video_asli.mp4")
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--url", "https://youtube.com/watch?v=x"],
+        ["-u", "https://youtube.com/watch?v=x"],
+        ["--source", "tiktok"],
+        ["--tiktok"],
+        ["--source-height", "1080"],
+        ["--use-dlp-subs"],
+        ["--skip-download"],
+    ],
+)
+def test_download_flags_are_gone(workdir, video, argv):
+    """The download layer is removed; these flags must not silently no-op."""
+    with pytest.raises(SystemExit):
+        build_config(["--video", str(video), *argv])
+
+
+def test_no_download_attributes_on_cfg(video):
+    cfg = build_config(["--video", str(video)])
+    for attr in (
+        "url_youtube",
+        "source_platform",
+        "download_source_height",
+        "use_dlp_subs",
+        "skip_download",
+    ):
+        assert not hasattr(cfg, attr), f"cfg.{attr} survived the purge"
 
 
 # --------------------------------------------------------------- audio path

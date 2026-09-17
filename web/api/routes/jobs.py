@@ -48,8 +48,9 @@ def _job_to_response(job: dict) -> JobResponse:
         created_at=job.get("created_at", datetime.utcnow()),
         updated_at=job.get("updated_at", datetime.utcnow()),
         url=job.get("url"),
+        transcript_filename=job.get("transcript_filename"),
+        source_url=job.get("source_url"),
         upload_filename=job.get("upload_filename"),
-        source=job.get("source", "youtube"),
         config=job.get("config", {}),
         progress=progress,
         clips=clip_list,
@@ -86,9 +87,9 @@ async def create_job(req: JobCreateRequest) -> JobResponse:
         payload["load_gemini_json"] = True
         
     job_id = store.create_job(
-        url=req.url,
+        transcript_filename=req.transcript_filename,
+        source_url=req.source_url,
         upload_filename=req.upload_filename,
-        source=req.source.value if hasattr(req.source, "value") else req.source,
         config=payload,
         job_id=reuse_job_id
     )

@@ -19,7 +19,6 @@ from .models import (
     JobProgressEvent,
     JobResponse,
     JobStatus,
-    SourcePlatform,
 )
 
 
@@ -93,9 +92,9 @@ _load()
 # ---------------------------------------------------------------------------
 
 def create_job(
-    url: Optional[str] = None,
     upload_filename: Optional[str] = None,
-    source: str = "youtube",
+    transcript_filename: Optional[str] = None,
+    source_url: Optional[str] = None,
     config: dict | None = None,
     job_id: str | None = None,
 ) -> str:
@@ -108,9 +107,9 @@ def create_job(
             "status": JobStatus.QUEUED.value,
             "created_at": now,
             "updated_at": now,
-            "url": url,
             "upload_filename": upload_filename,
-            "source": source,
+            "transcript_filename": transcript_filename,
+            "source_url": source_url,
             "config": config or {},
             "progress": None,
             "clips": [],

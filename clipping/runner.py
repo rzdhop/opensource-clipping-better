@@ -148,19 +148,9 @@ def run_pipeline(cfg) -> list[dict]:
 
     # Step 1 — Ingest the source video.
     #
-    # Local-first: the pipeline assumes nothing about how the media was
-    # acquired. The legacy --url branch below is transitional and goes away with
-    # the download layer; the permanent contract is the existence check, which
-    # is exactly what download_video() used to guarantee on return.
-    if getattr(cfg, "url_youtube", None) and not getattr(cfg, "video_provided", False):
-        engine.download_video(
-            cfg.url_youtube,
-            cfg.file_video_asli,
-            getattr(cfg, "use_dlp_subs", False),
-            getattr(cfg, "download_source_height", "max"),
-            source_platform=getattr(cfg, "source_platform", "youtube"),
-        )
-
+    # Local-first: the pipeline acquires nothing. This existence check is the
+    # whole ingestion layer, and it is exactly the guarantee download_video()
+    # used to provide on return.
     if not os.path.isfile(cfg.file_video_asli):
         raise FileNotFoundError(
             f"Video sumber tidak ditemukan: {cfg.file_video_asli}"
@@ -343,7 +333,7 @@ def run_pipeline(cfg) -> list[dict]:
     # is omitted when unknown: metadata._build_youtube_description already
     # no-ops on a falsy value, and writing null into every manifest row just
     # pushes a useless field downstream to the uploaders.
-    declared_source = getattr(cfg, "source_url", None) or getattr(cfg, "url_youtube", None)
+    declared_source = getattr(cfg, "source_url", None)
     for row in render_manifest:
         row.setdefault("source_video", os.path.basename(cfg.file_video_asli))
         row.setdefault(

@@ -163,14 +163,6 @@ def run_story_pipeline(cfg) -> list[dict]:
     # ------------------------------------------------------------------
     cache_dir = source_manager.get_cache_dir(cfg.outputs_dir)
 
-    if getattr(cfg, "skip_download", False):
-        # Sources are local files now, so there is nothing to skip. Kept as a
-        # no-op so existing scripts and notebooks do not break on the flag.
-        print(
-            "\n[2/6] ℹ️ --skip-download tidak lagi berpengaruh "
-            "(semua source sudah lokal)."
-        )
-
     print(f"\n[2/6] Menyiapkan source lokal → {cache_dir}")
     cached_paths = source_manager.ingest_all_sources(source_registry, cache_dir)
 

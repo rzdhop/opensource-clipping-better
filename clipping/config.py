@@ -38,7 +38,6 @@ SWITCH_HOLD_DURATION = 2.0
 SWITCH_BLEND_DURATION = 0.0  # 0 = instant snap, >0 = smooth blend in seconds
 
 # Source Platform
-SOURCE_PLATFORM = "youtube"
 
 # 3. PENGATURAN SUBTITLE & TIPOGRAFI (ASS STYLE)
 USE_ADVANCED_TEXT = False
@@ -143,7 +142,6 @@ BGM_DIR = os.path.abspath(os.path.join(BASE_DIR, "assets", "bgm"))
 WHISPER_MODEL = "large-v3"
 WHISPER_DEVICE = "cuda"
 WHISPER_COMPUTE_TYPE = "float16"
-DOWNLOAD_SOURCE_HEIGHT = "max"
 VIDEO_QUALITY_CQ = 23
 VIDEO_QUALITY_CRF = 20
 VIDEO_PRESET = "auto"
@@ -172,26 +170,6 @@ def _parse_speakers(val: str) -> str | int:
     except ValueError:
         raise argparse.ArgumentTypeError(f"'{val}' is not a valid integer or 'auto'")
 
-
-def _parse_download_height(val: str) -> str | int:
-    """
-    Parse desired download source height.
-
-    Accepts:
-    - `max` to always prefer the highest available quality.
-    - positive integers like 1080, 1440, 2160 to cap source resolution.
-    """
-    if val.lower() == "max":
-        return "max"
-    try:
-        parsed = int(val)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError(
-            f"'{val}' is not valid. Use 'max' or an integer height (e.g. 1080, 1440, 2160)."
-        ) from exc
-    if parsed <= 0:
-        raise argparse.ArgumentTypeError("Download source height must be a positive integer.")
-    return parsed
 
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
@@ -225,22 +203,6 @@ def _build_parser() -> argparse.ArgumentParser:
 
     # --- Pengaturan utama ---
     p.add_argument(
-        "--url", "-u", required=False, default=None,
-        help="Video URL to process (supports YouTube, TikTok, Instagram, Google Drive). Required unless --story-mode is used.",
-    )
-    p.add_argument(
-        "--source",
-        choices=["youtube", "tiktok", "instagram", "gdrive"],
-        default=SOURCE_PLATFORM,
-        help="Video source platform. Determines download behavior and subtitle availability.",
-    )
-    p.add_argument(
-        "--tiktok",
-        action="store_true",
-        default=False,
-        help="[DEPRECATED] Use --source tiktok instead.",
-    )
-    p.add_argument(
         "--clips",
         "-n",
         type=int,
@@ -253,12 +215,6 @@ def _build_parser() -> argparse.ArgumentParser:
         default=PILIHAN_RASIO,
         choices=["9:16", "16:9", "1:1", "3:4", "4:5"],
         help="Output aspect ratio",
-    )
-    p.add_argument(
-        "--source-height",
-        type=_parse_download_height,
-        default=DOWNLOAD_SOURCE_HEIGHT,
-        help="Preferred source download max height. Use 'max' to fetch highest available quality.",
     )
     p.add_argument(
         "--render-height",
@@ -400,11 +356,6 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     # --- Whisper ---
-    p.add_argument(
-        "--use-dlp-subs",
-        action="store_true",
-        help="Use yt-dlp to download auto/manual subtitles to speed up process (skipping Whisper if found)",
-    )
     p.add_argument(
         "--whisper-model", default=WHISPER_MODEL, help="Faster-Whisper model size"
     )
@@ -636,12 +587,6 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Output directory for story clips (default: outputs/story_clips).",
     )
-    story_group.add_argument(
-        "--skip-download",
-        action="store_true",
-        default=False,
-        help="Skip source downloads and use existing cached files.",
-    )
 
     # --- Voice-Over Commentary Pipeline ---
     vo_group = p.add_argument_group("Voice-Over Commentary (TTS)")
@@ -789,7 +734,7 @@ def build_config(argv: list[str] | None = None) -> SimpleNamespace:
     if args.transcript and not args.video:
         parser.error("--transcript membutuhkan --video (transkrip tanpa video tidak bisa dirender).")
 
-    if not args.story_mode and not args.video and not args.url:
+    if not args.story_mode and not args.video:
         parser.error("--video is required unless --story-mode is used.")
 
     if args.video:
@@ -880,11 +825,8 @@ def build_config(argv: list[str] | None = None) -> SimpleNamespace:
         hf_token=os.environ.get("HF_TOKEN", ""),
         pexels_api_key=os.environ.get("PEXELS_API_KEY", ""),
         # Pengaturan utama
-        source_platform="tiktok" if args.tiktok else args.source,
-        url_youtube=args.url,
         jumlah_clip=args.clips,
         pilihan_rasio=args.ratio,
-        download_source_height=args.source_height,
         render_output_height=args.render_height,
         # Konten & Hook
         max_kata_per_subtitle=args.words_per_sub,
@@ -939,7 +881,6 @@ def build_config(argv: list[str] | None = None) -> SimpleNamespace:
         bgm_moods=BGM_MOODS,
         bgm_dir=BGM_DIR,
         # Whisper
-        use_dlp_subs=args.use_dlp_subs,
         whisper_model=args.whisper_model,
         whisper_device=args.whisper_device,
         whisper_compute_type=args.whisper_compute_type,
@@ -981,7 +922,6 @@ def build_config(argv: list[str] | None = None) -> SimpleNamespace:
             if args.story_output_dir
             else os.path.join(outputs_dir, "story_clips")
         ),
-        skip_download=args.skip_download,
         # Voice-Over Commentary
         voiceover=args.voiceover,
         voiceover_voice=args.voiceover_voice,

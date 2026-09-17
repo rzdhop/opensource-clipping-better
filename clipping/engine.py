@@ -1,7 +1,9 @@
 """
-clipping.engine — Download, Transcription & Gemini AI Analysis
+clipping.engine — Transcription & AI Analysis
 
-Maps to Cell 2 (The Engine) of the notebook.
+The download layer that used to live here is gone: this pipeline is local-first
+and acquires nothing. Media and transcripts arrive as local paths via --video
+and --transcript; see clipping.transcript for parsing.
 """
 
 import json
@@ -9,11 +11,9 @@ import os
 import re
 import time
 
-from yt_dlp import YoutubeDL
-
 # Transcript parsing lives in clipping.transcript (stdlib-only, so a --transcript
-# run never touches the ML stack). Re-exported here because web/api/worker.py and
-# the legacy runner path import these names from engine.
+# run never touches the ML stack). Re-exported here because callers reach for
+# engine.load_transcript alongside engine.transcribe_video.
 from .transcript import (  # noqa: F401
     TranscriptParseError,
     load_transcript,
@@ -24,222 +24,6 @@ from .transcript import (  # noqa: F401
 # NOTE: faster_whisper is imported lazily inside transcribe_video(). Importing it
 # here would drag CTranslate2/cuDNN into every `import clipping.engine`, which
 # defeats the --transcript bypass and makes the test suite require a GPU stack.
-
-
-# ==============================================================================
-# TAHAP 1: DOWNLOAD VIDEO
-# ==============================================================================
-
-def _build_ydl_format_selector(download_source_height: str | int) -> str:
-    """
-    Build a yt-dlp format selector string for source-quality preference.
-    """
-    # Skip AV1 codec as it lacks HW acceleration on many platforms (e.g., Colab T4)
-    # and causes decoding failures in OpenCV/FFmpeg software fallbacks.
-    # Note: Using [vcodec!*=av01] to safely ensure it does not contain 'av01' anywhere.
-    codec_filter = "[vcodec!*=av01]"
-
-    if download_source_height == "max":
-        return f"bestvideo{codec_filter}+bestaudio/best{codec_filter}"
-
-    try:
-        h_val = int(download_source_height)
-    except (ValueError, TypeError):
-        h_val = 0
-
-    if 0 < h_val <= 1080:
-        # For standard resolutions, strictly prefer native MP4 (H.264/AAC), ensuring no AV1 in mp4
-        return (
-            f"bestvideo[height<=?{h_val}][ext=mp4]{codec_filter}+bestaudio[ext=m4a]/"
-            f"bestvideo[height<=?{h_val}]{codec_filter}+bestaudio/"
-            f"best[height<=?{h_val}][ext=mp4]{codec_filter}/"
-            f"best[height<=?{h_val}]{codec_filter}"
-        )
-
-    return (
-        f"bestvideo[height<=?{download_source_height}]{codec_filter}+bestaudio/"
-        f"best[height<=?{download_source_height}]{codec_filter}"
-    )
-
-
-_PLATFORM_LABELS = {
-    "youtube": "YouTube",
-    "tiktok": "TikTok",
-    "instagram": "Instagram",
-    "gdrive": "Google Drive",
-}
-
-
-def _extract_gdrive_file_id(url: str) -> str | None:
-    """Extract the Google Drive file ID from various URL formats."""
-    import re as _re
-    m = _re.search(r"/d/([a-zA-Z0-9_-]+)", url)
-    if m:
-        return m.group(1)
-    m = _re.search(r"[?&]id=([a-zA-Z0-9_-]+)", url)
-    if m:
-        return m.group(1)
-    return None
-
-
-def _download_gdrive(url: str, output_path: str) -> None:
-    """Download a video from Google Drive using gdown (more reliable than yt-dlp)."""
-    import gdown
-
-    file_id = _extract_gdrive_file_id(url)
-    if not file_id:
-        raise RuntimeError(
-            f"Tidak dapat mengekstrak file ID dari URL Google Drive: {url}\n"
-            "      Format yang didukung:\n"
-            "        • https://drive.google.com/file/d/FILE_ID/view\n"
-            "        • https://drive.google.com/open?id=FILE_ID"
-        )
-
-    download_url = f"https://drive.google.com/uc?id={file_id}"
-    print(f"      📥 File ID: {file_id}")
-    gdown.download(download_url, output_path, quiet=False)
-
-
-def _ydl_progress_hook(d: dict) -> None:
-    """Render satu baris progress bar download dari data hook yt-dlp.
-
-    yt-dlp mengunduh stream video dan audio secara terpisah, jadi hook ini
-    dipanggil untuk masing-masing; newline saat "finished" menjaga tiap bar
-    berada di barisnya sendiri.
-    """
-    status = d.get("status")
-    if status == "downloading":
-        total = d.get("total_bytes") or d.get("total_bytes_estimate")
-        downloaded = d.get("downloaded_bytes", 0)
-        speed = d.get("speed")
-        eta = d.get("eta")
-        spd = f"{speed / 1024 / 1024:4.1f}MB/s" if speed else "  --MB/s"
-        eta_s = f"{eta:>3}s" if eta is not None else " --s"
-        if total:
-            pct = downloaded / total * 100
-            filled = int(20 * downloaded / total)
-            bar = "█" * filled + " " * (20 - filled)
-            print(
-                f"\r      Unduh: {pct:3.0f}%|{bar}| "
-                f"{downloaded / 1048576:.0f}/{total / 1048576:.0f}MB {spd} ETA {eta_s}   ",
-                end="", flush=True,
-            )
-        else:
-            # Ukuran tidak diketahui (live/streamed manifest) — tampilkan byte + speed saja.
-            print(
-                f"\r      Unduh: {downloaded / 1048576:.0f}MB {spd}   ",
-                end="", flush=True,
-            )
-    elif status == "finished":
-        print(flush=True)  # tutup baris bar untuk stream ini
-
-
-def download_video(
-    url: str,
-    output_path: str,
-    use_dlp_subs: bool = False,
-    download_source_height: str | int = "max",
-    source_platform: str = "youtube",
-) -> None:
-    """
-    Download a video to *output_path* with configurable source height.
-
-    Parameters
-    ----------
-    source_platform : str
-        One of ``"youtube"`` (default), ``"tiktok"``, ``"instagram"``,
-        or ``"gdrive"``.
-    """
-    platform_label = _PLATFORM_LABELS.get(source_platform, source_platform)
-    uses_youtube_format = source_platform == "youtube"
-
-    print(f"[1/3] Mendownload video dari {platform_label}...")
-    if download_source_height == "max":
-        print("      🎯 Source quality: highest available", flush=True)
-    else:
-        print(f"      🎯 Source quality: up to {download_source_height}p", flush=True)
-
-    # --- Google Drive: use gdown instead of yt-dlp ---
-    if source_platform == "gdrive":
-        _download_gdrive(url, output_path)
-        if not os.path.exists(output_path):
-            raise RuntimeError(
-                f"❌ Download dari Google Drive gagal — file tidak ditemukan di {output_path}"
-            )
-        print(f"      ✅ Video berhasil didownload dari Google Drive.", flush=True)
-        return
-
-    # --- Build yt-dlp options per platform ---
-    if uses_youtube_format:
-        # YouTube: complex format selector + AV1 filter + remote components
-        ydl_opts = {
-            "format": _build_ydl_format_selector(download_source_height),
-            "outtmpl": output_path,
-            "quiet": True,
-            "merge_output_format": "mp4",
-            "remote_components": ["ejs:github"],
-            "progress_hooks": [_ydl_progress_hook],
-            "extractor_args": {"youtube": ["player_client=android,web"]},
-        }
-    else:
-        # TikTok / Instagram: ensure video and audio are merged
-        # We explicitly prefer H.264 over H.265 (TikTok's bytevc1) to prevent 
-        # PyAV/faster-whisper from crashing with IndexError on Kaggle/Colab.
-        ydl_opts = {
-            "format": "bestvideo[vcodec^=h264]+bestaudio/best[vcodec^=h264]/best",
-            "outtmpl": output_path,
-            "quiet": True,
-            "merge_output_format": "mp4",
-            "progress_hooks": [_ydl_progress_hook],
-        }
-
-    # --- Subtitle download — only supported for YouTube ---
-    if use_dlp_subs and uses_youtube_format:
-        print("      Mencoba mencari subtitle bahasa otomatis (en / id)...")
-        import glob
-
-        for lang in ["en", "id"]:
-            ydl_opts_subs = ydl_opts.copy()
-            ydl_opts_subs.update({
-                "writesubtitles": True,
-                "writeautomaticsub": True,
-                "subtitleslangs": [lang],
-                "subtitlesformat": "json3",
-                "skip_download": True,  # Hanya fokus download subtitle
-            })
-
-            try:
-                with YoutubeDL(ydl_opts_subs) as ydl:
-                    ydl.download([url])
-
-                # Cek apakah json3 untuk bahasa ini benar-benar terdownload
-                if glob.glob(output_path.replace(".mp4", f".*.json3")):
-                    print(f"      ✅ Subtitle '{lang}' ditemukan. Melanjutkan ke video...")
-                    break
-            except Exception as e:
-                print(f"      ⚠️ Gagal menarik subtitle '{lang}' ({e}). Mencoba opsi selanjutnya...")
-    elif use_dlp_subs and not uses_youtube_format:
-        print(f"      ℹ️ {platform_label} tidak menyediakan subtitle otomatis. Whisper akan digunakan.")
-
-    # Jalankan download video terpisah dari urusan subtitle
-    with YoutubeDL(ydl_opts) as ydl:
-        # Extra step to verify resolution before downloading
-        try:
-            info = ydl.extract_info(url, download=False)
-            best_h = info.get("height", "unknown")
-            v_codec = info.get("vcodec", "unknown")
-            print(f"      ✅ Mendownload: {best_h}p (Codec: {v_codec})", flush=True)
-        except Exception as e:
-            print(f"      ⚠️ Gagal mengecek info detail: {e}", flush=True)
-
-        ydl.download([url])
-
-    # --- Post-download verification ---
-    if not os.path.exists(output_path):
-        raise RuntimeError(
-            f"❌ Download dari {platform_label} gagal — file video tidak ditemukan di {output_path}.\n"
-            "      Pastikan URL valid dan bisa diakses secara publik."
-        )
 
 
 # ==============================================================================
