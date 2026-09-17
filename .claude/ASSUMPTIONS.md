@@ -1,7 +1,15 @@
 # ASSUMPTIONS
 
 ## Unconfirmed
-- (none open)
+- **A-005** — The render layer is unaffected by this refactor. Reasoning: it reads
+  `cfg.file_video_asli` (unchanged in name, now absolute and local) and
+  `data_segmen` (contract pinned by `tests/helpers.assert_valid_data_segmen`).
+  **Not verified end-to-end** — this machine has no cv2/ffmpeg/mediapipe, so no
+  clip was rendered. See the deferred Tier-2 list in CHECKPOINT.md.
+- **A-006** — VTT-derived karaoke timing is visually acceptable. Inline
+  `<00:00:01.234>` tags are used verbatim where present, and even division
+  otherwise (the same approximation the pre-existing JSON3 parser used). Needs a
+  manual A/B against a Whisper run of the same video.
 
 ## Confirmed
 - **A-001** — The transcript contract consumed by `studio/subtitles.buat_file_ass`
@@ -20,3 +28,8 @@
 
 ## Invalidated
 - (none)
+
+## Notes
+A-005 and A-006 are the two open risks at close-out. Both are verification gaps
+rather than known defects, and both are listed with concrete commands in
+CHECKPOINT.md.
