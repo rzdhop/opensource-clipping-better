@@ -23,6 +23,48 @@
 
 ⚠️ **Low Maintenance Mode**: This project is currently in low maintenance mode as the author is focusing on other priorities.
 
+## 🔱 About this fork — the rzdhop refactor
+
+This is [**rzdhop**](https://github.com/rzdhop)'s fork of
+[NaufalRizqullah/opensource-clipping](https://github.com/NaufalRizqullah/opensource-clipping).
+It is not a mirror: the ingestion layer was rebuilt and the engine now runs
+local-first. If you are following the upstream README, these are the differences
+that will bite you.
+
+| Change | Why |
+|---|---|
+| **Nothing is downloaded** | `yt-dlp` ingestion was removed from the pipeline. YouTube's anti-bot telemetry, datacenter-IP bans and JS PoW challenges broke it constantly. You bring the `.mp4` yourself with whatever tool you like. |
+| **`--video` replaces `--url`** | A local file path is now the input. `--transcript` optionally takes a `.vtt`/`.srt`/`.json3` alongside it. |
+| **Whisper is optional** | Supply a transcript and it is skipped entirely. On a machine without a working CUDA stack, `faster-whisper` silently falls back to CPU, where a 20-minute video takes roughly 12 hours. `--no-whisper` turns the fallback into a hard error so it can never happen by accident. |
+| **NVIDIA NIM is the default provider** | Gemini is still reachable with `--ai-provider gemini`. There is no silent cross-provider fallback: if the provider you chose fails, it fails loudly rather than billing you on the other one. |
+| **English codebase** | Progress output, errors, comments and docstrings were translated from Indonesian. The AI prompt is deliberately still Indonesian — see below. |
+
+### Running without any heavy local model
+
+The pipeline can produce clips with no local transcription or language model at
+all — only the video stays local. Supply a transcript and use the default
+remote provider:
+
+```bash
+python main.py --video input.mp4 --transcript input.vtt --no-whisper
+```
+
+`--no-whisper` guarantees the slow path is never taken silently. Face tracking
+still runs locally via MediaPipe, which is lightweight and CPU-friendly;
+diarization (`--split-screen`, `--camera-switch`) additionally needs `pyannote`
+and an accepted HuggingFace model licence.
+
+### The AI prompt is still in Indonesian
+
+`get_analysis_prompt()` in `clipping/engine.py` was left untranslated on
+purpose. It defines the JSON contract the model must return, using Indonesian
+key names (`kata_utama`, `alasan`, `hastag`, `klasifikasi_akun`, …) that the
+pipeline reads back, and it explicitly requires three output fields
+(`title_indonesia`, `tiktok_title_id`, `tiktok_caption_id`) in Indonesian.
+Translating the prose around those keys risks changing the register of that
+output, and that cannot be verified without live API runs. If you translate it,
+keep every key name and enum value byte-identical.
+
 ## ✨ Features
 
 | Feature | Description |
