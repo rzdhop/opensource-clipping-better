@@ -2,11 +2,83 @@ import { useState, useRef, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { createJob, uploadVideo } from '../api'
 
+function formatBytes(bytes) {
+  if (!bytes && bytes !== 0) return '—'
+  if (bytes < 1024) return `${bytes} B`
+  const units = ['KB', 'MB', 'GB']
+  let value = bytes / 1024
+  let unit = 0
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024
+    unit += 1
+  }
+  return `${value.toFixed(value < 10 ? 1 : 0)} ${units[unit]}`
+}
+
+function formatDuration(seconds) {
+  if (!Number.isFinite(seconds) || seconds < 0) return null
+  if (seconds < 60) return `${Math.ceil(seconds)}s`
+  const mins = Math.floor(seconds / 60)
+  const secs = Math.round(seconds % 60)
+  if (mins < 60) return `${mins}m ${secs}s`
+  return `${Math.floor(mins / 60)}h ${mins % 60}m`
+}
+
+/**
+ * Byte counter, percentage and bar for an in-flight upload.
+ *
+ * A 2GB video over a slow link takes long enough that a bare spinner reads
+ * as "hung". `startedAt` drives the rate and the estimate; both are dropped
+ * once the bytes are away and the backend is still writing to disk, since
+ * the remaining wait is not a function of transfer rate.
+ */
+function UploadProgress({ progress, startedAt }) {
+  if (!progress) return null
+
+  const { loaded, total, percent, done } = progress
+  const elapsed = startedAt ? (Date.now() - startedAt) / 1000 : 0
+  const rate = elapsed > 0.5 ? loaded / elapsed : 0
+  const eta = rate > 0 && total ? formatDuration((total - loaded) / rate) : null
+
+  return (
+    <div style={{ marginTop: '12px' }}>
+      <div style={{
+        display: 'flex', justifyContent: 'space-between',
+        fontSize: '13px', marginBottom: '6px',
+      }}>
+        <span style={{ color: 'var(--text-secondary)' }}>
+          {done
+            ? 'Saving on the server…'
+            : `${formatBytes(loaded)}${total ? ` / ${formatBytes(total)}` : ''}`}
+        </span>
+        <span style={{ color: 'var(--accent-hover)' }}>
+          {percent === null ? 'Uploading…' : `${Math.floor(percent)}%`}
+        </span>
+      </div>
+
+      <div className="progress-bar-bg">
+        <div
+          className="progress-bar-fill"
+          style={{ width: percent === null ? '100%' : `${percent}%` }}
+        ></div>
+      </div>
+
+      {!done && rate > 0 && (
+        <p className="form-hint" style={{ marginTop: '6px' }}>
+          {formatBytes(rate)}/s{eta ? ` — about ${eta} remaining` : ''}
+        </p>
+      )}
+    </div>
+  )
+}
+
 function NewJob() {
   const navigate = useNavigate()
   const location = useLocation()
   const fileRef = useRef(null)
   const transcriptRef = useRef(null)
+  const uploadStartRef = useRef(null)
+  const transcriptStartRef = useRef(null)
 
   // Local-first: the backend never downloads, so a video must be uploaded or
   // reused from an earlier job.
@@ -17,6 +89,9 @@ function NewJob() {
   const [sourceUrl, setSourceUrl] = useState('')
   const [uploadingTranscript, setUploadingTranscript] = useState(false)
   const [uploading, setUploading] = useState(false)
+  // { loaded, total, percent, done } while an upload is in flight, else null.
+  const [uploadProgress, setUploadProgress] = useState(null)
+  const [transcriptProgress, setTranscriptProgress] = useState(null)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   const [reuseJobId, setReuseJobId] = useState('')
@@ -78,14 +153,17 @@ function NewJob() {
 
     setUploading(true)
     setError('')
+    uploadStartRef.current = Date.now()
+    setUploadProgress({ loaded: 0, total: file.size, percent: 0, done: false })
     try {
-      const result = await uploadVideo(file)
+      const result = await uploadVideo(file, setUploadProgress)
       setUploadFilename(result.filename)
       setMode('upload')
     } catch (err) {
       setError(err.message)
     } finally {
       setUploading(false)
+      setUploadProgress(null)
     }
   }
 
@@ -95,13 +173,16 @@ function NewJob() {
 
     setUploadingTranscript(true)
     setError('')
+    transcriptStartRef.current = Date.now()
+    setTranscriptProgress({ loaded: 0, total: file.size, percent: 0, done: false })
     try {
-      const result = await uploadVideo(file)
+      const result = await uploadVideo(file, setTranscriptProgress)
       setTranscriptFilename(result.filename)
     } catch (err) {
       setError(err.message)
     } finally {
       setUploadingTranscript(false)
+      setTranscriptProgress(null)
     }
   }
 
@@ -211,6 +292,7 @@ function NewJob() {
                   >
                     {uploading ? <><span className="spinner"></span> Uploading...</> : '📁 Select Video File'}
                   </button>
+                  <UploadProgress progress={uploadProgress} startedAt={uploadStartRef.current} />
                   <p className="form-hint">MP4, MKV, AVI, MOV, WebM (max 2GB)</p>
                 </div>
               )}
@@ -244,6 +326,7 @@ function NewJob() {
                   >
                     {uploadingTranscript ? <><span className="spinner"></span> Uploading...</> : '📝 Select Transcript File'}
                   </button>
+                  <UploadProgress progress={transcriptProgress} startedAt={transcriptStartRef.current} />
                   <p className="form-hint">
                     VTT, SRT, JSON3 — skips Whisper entirely (much faster).
                     Leave empty to transcribe with Whisper.

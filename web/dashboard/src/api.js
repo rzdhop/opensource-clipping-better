@@ -31,19 +31,65 @@ export async function deleteJob(jobId) {
   return res.json()
 }
 
-export async function uploadVideo(file, onProgress) {
-  const formData = new FormData()
-  formData.append('file', file)
+/**
+ * Upload a file, reporting progress as it goes.
+ *
+ * Uses XMLHttpRequest rather than fetch: fetch cannot report *upload*
+ * progress at all, which is why the onProgress argument here used to be
+ * accepted and then silently ignored. Videos are up to 2GB, so a spinner
+ * with no numbers is close to useless.
+ *
+ * onProgress receives { loaded, total, percent, done }. `total` is 0 and
+ * `percent` null when the browser reports the length as not computable.
+ * Resolves and rejects exactly as the old fetch version did, so callers
+ * that ignore progress keep working unchanged.
+ */
+export function uploadVideo(file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const formData = new FormData()
+    formData.append('file', file)
 
-  const res = await fetch(`${API_BASE}/upload`, {
-    method: 'POST',
-    body: formData,
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', `${API_BASE}/upload`)
+
+    xhr.upload.addEventListener('progress', (event) => {
+      if (!onProgress) return
+      const total = event.lengthComputable ? event.total : 0
+      onProgress({
+        loaded: event.loaded,
+        total,
+        percent: total ? (event.loaded / total) * 100 : null,
+        done: false,
+      })
+    })
+
+    // The bytes are all sent, but the backend still has to finish writing
+    // them to disk. Without this the bar sticks at 99% with no explanation.
+    xhr.upload.addEventListener('load', () => {
+      if (onProgress) {
+        onProgress({ loaded: file.size, total: file.size, percent: 100, done: true })
+      }
+    })
+
+    xhr.addEventListener('load', () => {
+      let body = {}
+      try {
+        body = JSON.parse(xhr.responseText)
+      } catch {
+        body = {}
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(body)
+      } else {
+        reject(new Error(body.detail || 'Upload failed'))
+      }
+    })
+
+    xhr.addEventListener('error', () => reject(new Error('Upload failed: network error')))
+    xhr.addEventListener('abort', () => reject(new Error('Upload cancelled')))
+
+    xhr.send(formData)
   })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.detail || 'Upload failed')
-  }
-  return res.json()
 }
 
 export async function fetchSettings() {
