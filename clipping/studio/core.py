@@ -153,7 +153,7 @@ def proses_klip(
         
     out_thm = os.path.join(cfg.outputs_dir, f"thumbnail_rank_{rank}.jpg")
 
-    # Ambil resolusi video asli untuk perhitungan posisi subtitle di dev-mode
+    # Get the original video resolution for subtitle position calculation in dev-mode
     cap_asli = cv2.VideoCapture(cfg.file_video_asli)
     sw = int(cap_asli.get(cv2.CAP_PROP_FRAME_WIDTH))
     sh = int(cap_asli.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -189,11 +189,11 @@ def proses_klip(
     }
 
     print(f"\n{'=' * 70}")
-    print(f"🔥 [Rank {rank}] Memproses clip")
-    print(f"📝 [Judul Indo]   : '{clip.get('title_indonesia', '-')}'")
-    print(f"📝 [Judul Inggris]: '{clip.get('title_inggris', '-')}'")
-    print(f"#️⃣ [Hastag]      : '{clip.get('hastag', '-')}'")
-    print(f"🧠 Encoder aktif  : {video_encoder['name']}")
+    print(f"🔥 [Rank {rank}] Processing clip")
+    print(f"📝 [Indo Title]   : '{clip.get('title_indonesia', '-')}'")
+    print(f"📝 [English Title]: '{clip.get('title_inggris', '-')}'")
+    print(f"#️⃣ [Hashtag]     : '{clip.get('hastag', '-')}'")
+    print(f"🧠 Active encoder : {video_encoder['name']}")
     print(f"{'=' * 70}")
 
     typography_plan = clip.get("typography_plan", [])
@@ -238,7 +238,7 @@ def proses_klip(
     broll_list = clip.get("broll_list", [])
     broll_aktif = []
     if cfg.use_broll and broll_list:
-        print(f"   🎥 Mendownload {len(broll_list)} video B-Roll dari Pexels...")
+        print(f"   🎥 Downloading {len(broll_list)} B-Roll video(s) from Pexels...")
         for i, br in enumerate(broll_list):
             q = br.get("search_query", "nature")
             file_broll = f"temp_broll_{rank}_{i}.mp4"
@@ -256,7 +256,7 @@ def proses_klip(
         use_hook_v2 = getattr(cfg, "hook_v2", False)
 
         if use_hook_v2:
-            print("   📸 [Hook V2] Rendering Multi-Hook Intro...")
+            print("   📸 [Hook V2] Rendering multi-hook intro...")
             h_ts_parts = []
             items = hook_v2_data.get("items", []) if hook_v2_data else []
 
@@ -272,7 +272,7 @@ def proses_klip(
                     if fi_end <= fi_start:
                         break
                     items.append({"start_time": fi_start, "end_time": fi_end, "text": ""})
-                print(f"   ⚠️ [Hook V2] AI tidak memberi items, fallback ke {len(items)} potongan dari hook timing.")
+                print(f"   ⚠️ [Hook V2] AI did not provide items, falling back to {len(items)} chunk(s) from hook timing.")
 
             out_w_v2, out_h_v2 = _get_render_dims(cfg, rasio, source_h=sh)
             flash_dur = getattr(cfg, "white_flash_duration", 0.12)
@@ -336,8 +336,8 @@ def proses_klip(
                     check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 )
                 h_ts_parts.append(trans_ts)
-                lbl = f"Transisi {i+1}" if i < len(items) - 1 else "Transisi akhir"
-                print(f"      ⚡ {lbl} ({trans_type}) berhasil ditambahkan.")
+                lbl = f"Transition {i+1}" if i < len(items) - 1 else "Final transition"
+                print(f"      ⚡ {lbl} ({trans_type}) added successfully.")
 
             # Concat all hook v2 pieces into h_ts
             if h_ts_parts:
@@ -360,7 +360,7 @@ def proses_klip(
         elif aktif_hook:
             get_x_h = None
             if use_split:
-                print("   📸 [Hook] Split-screen render (Custom Hook diabaikan untuk format ini saat ini atau digabung)...")
+                print("   📸 [Hook] Split-screen render (Custom Hook is ignored for this format for now, or merged)...")
                 get_x_h = buat_video_split_screen(
                     file_hook_src,
                     h_silent,
@@ -410,12 +410,12 @@ def proses_klip(
                     source_dim=source_dim,
                 )
 
-                print("   🎬 [Hook] FFmpeg burn subtitle + audio...")
+                print("   🎬 [Hook] FFmpeg burning subtitle + audio...")
                 esc_ass_hook = escape_ffmpeg_filter_value(os.path.abspath(a_hook))
                 esc_fontsdir = escape_ffmpeg_filter_value(os.path.abspath(cfg.font_dir))
                 vf_hook_list = [f"subtitles={esc_ass_hook}:fontsdir={esc_fontsdir}"]
             else:
-                print(f"   🎬 [Hook] Skip subtitle rendering {'(Custom Hook)' if custom_hook else ''}...")
+                print(f"   🎬 [Hook] Skipping subtitle rendering {'(Custom Hook)' if custom_hook else ''}...")
                 vf_hook_list = []
             
             if cfg.video_sharpen:
@@ -451,7 +451,7 @@ def proses_klip(
                 cmd_h, h_end - h_start, label=f"Rank {rank} Hook FFmpeg"
             )
             if rc_h != 0:
-                raise RuntimeError("FFmpeg hook gagal:\n" + "\n".join(err_h))
+                raise RuntimeError("FFmpeg hook failed:\n" + "\n".join(err_h))
 
         # MAIN
         keep_segments = clip.get("keep_segments")
@@ -553,16 +553,16 @@ def proses_klip(
             
             file_bgm = None
             if aktif_bgm:
-                print(f"   🎵 Mencari file BGM lokal (Mood: {bgm_mood})...")
+                print(f"   🎵 Searching for local BGM file (Mood: {bgm_mood})...")
                 file_bgm = get_local_bgm_file(bgm_mood, getattr(cfg, "bgm_dir", os.path.join(cfg.base_dir, "assets", "bgm")))
                 if not file_bgm and bgm_mood != "chill":
-                    print("   🔄 Fallback mencari BGM chill...")
+                    print("   🔄 Falling back to chill BGM search...")
                     file_bgm = get_local_bgm_file("chill", getattr(cfg, "bgm_dir", os.path.join(cfg.base_dir, "assets", "bgm")))
                 
                 if file_bgm:
-                    print(f"   ✅ BGM siap: {file_bgm}")
+                    print(f"   ✅ BGM ready: {file_bgm}")
                 else:
-                    print("   ⚠️ Folder BGM kosong atau file mp3 tidak ditemukan. Render lanjut tanpa BGM.")
+                    print("   ⚠️ BGM folder is empty or no mp3 file found. Continuing render without BGM.")
 
             if aktif_bgm and file_bgm:
                 print("   🎵 Applying BGM to segmented clip...")
@@ -657,16 +657,16 @@ def proses_klip(
                 
             file_bgm = None
             if aktif_bgm:
-                print(f"   🎵 Mencari file BGM lokal (Mood: {bgm_mood})...")
+                print(f"   🎵 Searching for local BGM file (Mood: {bgm_mood})...")
                 file_bgm = get_local_bgm_file(bgm_mood, getattr(cfg, "bgm_dir", os.path.join(cfg.base_dir, "assets", "bgm")))
                 if not file_bgm and bgm_mood != "chill":
-                    print("   🔄 Fallback mencari BGM chill...")
+                    print("   🔄 Falling back to chill BGM search...")
                     file_bgm = get_local_bgm_file("chill", getattr(cfg, "bgm_dir", os.path.join(cfg.base_dir, "assets", "bgm")))
                 
                 if file_bgm:
-                    print(f"   ✅ BGM siap: {file_bgm}")
+                    print(f"   ✅ BGM ready: {file_bgm}")
                 else:
-                    print("   ⚠️ Folder BGM kosong atau file mp3 tidak ditemukan. Render lanjut tanpa BGM.")
+                    print("   ⚠️ BGM folder is empty or no mp3 file found. Continuing render without BGM.")
 
             # --- Subtitle & BGM Encoding Loop (Handles dual output files if needed) ---
             runs = [m_silent] if not dev_dual else [m_silent, m_silent.replace(".ts", "_dev.ts")]
@@ -723,7 +723,7 @@ def proses_klip(
                     cmd_m, m_end - m_start, label=f"Rank {rank} Main FFmpeg{lbl_suffix}"
                 )
                 if rc_m != 0:
-                    raise RuntimeError(f"FFmpeg main{lbl_suffix} gagal:\n" + "\n".join(err_m))
+                    raise RuntimeError(f"FFmpeg main{lbl_suffix} failed:\n" + "\n".join(err_m))
 
         # VOICE-OVER INTRO GENERATION
         vo_ts = None
@@ -732,7 +732,7 @@ def proses_klip(
         if vo_data and os.path.exists(vo_data["audio_path"]):
             vo_ts = os.path.join(cfg.outputs_dir, f"vo_intro_{rank}.ts")
             vo_ts_dev = os.path.join(cfg.outputs_dir, f"vo_intro_{rank}_dev.ts")
-            print("   📸 [VO] Render voice-over intro (freeze frame + equalizer)...")
+            print("   📸 [VO] Rendering voice-over intro (freeze frame + equalizer)...")
             
             # Extract first frame
             frame_path = os.path.join(cfg.outputs_dir, f"vo_bg_{rank}.jpg")
@@ -743,10 +743,10 @@ def proses_klip(
                     "-vframes", "1", "-q:v", "2", frame_path
                 ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
             except subprocess.CalledProcessError as e:
-                raise RuntimeError(f"Gagal mengekstrak frame awal untuk VO Intro:\n{e.stderr}")
+                raise RuntimeError(f"Failed to extract first frame for VO Intro:\n{e.stderr}")
             
             try:
-                # Dapatkan durasi asli dari mp3 menggunakan ffprobe agar tidak terpotong
+                # Get the original duration from the mp3 using ffprobe so it isn't cut short
                 res = subprocess.run([
                     "ffprobe", "-v", "error", "-show_entries", "format=duration",
                     "-of", "default=noprint_wrappers=1:nokey=1", vo_data["audio_path"]
@@ -770,12 +770,12 @@ def proses_klip(
                 ass_vo_filter = ""
                 overlay_out = "[v_out]"
                 
-                # Buat file ASS subtitle khusus untuk VO intro jika ada segments
+                # Create a dedicated ASS subtitle file for the VO intro if segments are present
                 if not cfg.no_subs and vo_data.get("segments"):
                     ass_vo = os.path.join(cfg.outputs_dir, f"vo_subs_{rank}.ass")
                     buat_file_ass(
                         vo_data["segments"],
-                        0.0, # Waktu relatif mulai dari 0 karena ini file terpisah
+                        0.0, # Relative time starts from 0 because this is a separate file
                         vo_duration,
                         ass_vo,
                         rasio,
@@ -827,38 +827,38 @@ def proses_klip(
                 
                 wave_enabled = True
                 
-                # Ukuran wave
+                # Wave size
                 wave_w = 800
                 wave_h = 260
-                
-                # Smoothness visual
-                # Pakai 30 kalau render final 30fps
-                # Pakai 60 kalau render final 60fps
+
+                # Visual smoothness
+                # Use 30 if final render is 30fps
+                # Use 60 if final render is 60fps
                 wave_rate = 30
-                
-                # Biar tidak terlalu ramai
-                wave_lowpass = 300      # 250-400 cocok untuk VO
+
+                # So it doesn't look too busy
+                wave_lowpass = 300      # 250-400 works well for VO
                 wave_use_lowpass = True
-                
-                # Tampilan
-                wave_mode = "cline"     # cline lebih halus, line lebih tegas
+
+                # Appearance
+                wave_mode = "cline"     # cline is smoother, line is sharper
                 wave_color = "0x00FFFF"
-                wave_scale = "sqrt"     # sqrt lebih kalem dari linear
-                # Alternatif scale:
-                # "lin"  = linear/default, bentuk wave paling asli tapi bisa terlihat ramai/agresif
-                # "sqrt" = lebih smooth dan seimbang, cocok untuk VO
-                # "cbrt" = lebih kalem/soft dari sqrt, cocok jika wave masih terlalu ramai
-                # "log"  = detail kecil lebih terlihat, tapi kadang malah terasa lebih aktif/ramai
-                
-                
-                # Transparansi wave
-                wave_alpha = 0.65       # 0.4-0.8, makin kecil makin soft
-                
-                # Posisi overlay wave
+                wave_scale = "sqrt"     # sqrt is calmer than linear
+                # Scale alternatives:
+                # "lin"  = linear/default, most natural wave shape but can look busy/aggressive
+                # "sqrt" = smoother and more balanced, good for VO
+                # "cbrt" = calmer/softer than sqrt, use if the wave still feels too busy
+                # "log"  = small details are more visible, but can sometimes feel more active/busy
+
+
+                # Wave transparency
+                wave_alpha = 0.65       # 0.4-0.8, lower is softer
+
+                # Wave overlay position
                 wave_x = "(W-w)/2"
                 wave_y = "(H-h)/2"
-                
-                # Colorkey untuk hilangkan background hitam dari showwaves
+
+                # Colorkey to remove the black background from showwaves
                 wave_key_color = "0x000000"
                 wave_key_similarity = 0.1
                 wave_key_blend = 0.1
@@ -942,7 +942,7 @@ def proses_klip(
                 try:
                     subprocess.run(cmd_vo_base, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
                 except subprocess.CalledProcessError as e:
-                    raise RuntimeError(f"FFmpeg VO intro gagal (Rank {rank}):\nCommand: {' '.join(cmd_vo_base)}\nError:\n{e.stderr}")
+                    raise RuntimeError(f"FFmpeg VO intro failed (Rank {rank}):\nCommand: {' '.join(cmd_vo_base)}\nError:\n{e.stderr}")
                 
             if os.path.exists(frame_path):
                 os.remove(frame_path)
@@ -951,7 +951,7 @@ def proses_klip(
 
 
         # FINAL CONCAT
-        print("   🔗 [Final] Menyelesaikan clip akhir...")
+        print("   🔗 [Final] Finalizing the final clip...")
         
         # Calculate target dimensions for each run
         out_w_std, out_h_std = _get_render_dims(cfg, rasio, source_h=sh)
@@ -1085,11 +1085,11 @@ def proses_klip(
         manifest_item["video_exists"] = os.path.exists(out_vid)
         manifest_item["thumbnail_exists"] = os.path.exists(out_thm)
 
-        print(f"✅ [Rank {rank}] Selesai.")
+        print(f"✅ [Rank {rank}] Done.")
         return manifest_item
 
     except subprocess.CalledProcessError as e:
-        print(f"\n❌ ERROR: FFmpeg gagal. Error: {e}")
+        print(f"\n❌ ERROR: FFmpeg failed. Error: {e}")
         manifest_item["status"] = "failed"
         manifest_item["error"] = str(e)
         manifest_item["video_exists"] = os.path.exists(out_vid)
@@ -1097,7 +1097,7 @@ def proses_klip(
         return manifest_item
 
     except Exception as e:
-        print(f"\n❌ ERROR: Kegagalan tak terduga. Error: {e}")
+        print(f"\n❌ ERROR: Unexpected failure. Error: {e}")
         manifest_item["status"] = "failed"
         manifest_item["error"] = str(e)
         manifest_item["video_exists"] = os.path.exists(out_vid)

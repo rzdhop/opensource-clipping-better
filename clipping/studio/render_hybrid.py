@@ -92,25 +92,25 @@ def buat_video_hybrid(
         broll_data = []
 
     # =======================================================
-    # 🎛️ PARAMETER TUNING KAMERA
+    # 🎛️ CAMERA TUNING PARAMETERS
     # =======================================================
-    STEP_DETEKSI     = cfg.track_step if cfg.track_step is not None else 0.25   # AI mengecek wajah tiap 0.25 detik
-    # STEP_DETEKSI     = 0.5   # AI mengecek wajah tiap 0.5 detik
-    # STEP_DETEKSI     = max(0.5, (end_clip - start_clip) / 60.0)   # [OLD] AI mengecek wajah tiap max 0.5 atau sepanjang durasi (end_clip - start_clip) detik per menit
+    STEP_DETEKSI     = cfg.track_step if cfg.track_step is not None else 0.25   # AI checks the face every 0.25 seconds
+    # STEP_DETEKSI     = 0.5   # AI checks the face every 0.5 seconds
+    # STEP_DETEKSI     = max(0.5, (end_clip - start_clip) / 60.0)   # [OLD] AI checks the face every max 0.5s, or across the (end_clip - start_clip) duration in seconds per minute
 
-    DEADZONE_RATIO   = cfg.track_deadzone if cfg.track_deadzone is not None else 0.15  # 15% area tengah adalah zona aman (kamera tidak ikut gerak)
-    # DEADZONE_RATIO   = 0.25  # 25% area tengah adalah zona aman (kamera tidak ikut gerak)
-    # DEADZONE_RATIO   = 0.20  # [OLD] 20% area tengah adalah zona aman (kamera tidak ikut gerak)
+    DEADZONE_RATIO   = cfg.track_deadzone if cfg.track_deadzone is not None else 0.15  # 15% of the center area is the safe zone (camera doesn't follow movement)
+    # DEADZONE_RATIO   = 0.25  # 25% of the center area is the safe zone (camera doesn't follow movement)
+    # DEADZONE_RATIO   = 0.20  # [OLD] 20% of the center area is the safe zone (camera doesn't follow movement)
 
-    SMOOTH_FACTOR    = cfg.track_smooth if cfg.track_smooth is not None else 0.30  # Kecepatan kamera menyusul (30% jarak). Bikin pergerakan sangat mulus.
-    # SMOOTH_FACTOR    = 0.15  # Kecepatan kamera menyusul (15% jarak). Bikin pergerakan sangat mulus.
-    # SMOOTH_FACTOR    = 0.10  # [NEW; NOT USED]Kecepatan kamera menyusul (10% jarak). Bikin pergerakan sangat mulus.
+    SMOOTH_FACTOR    = cfg.track_smooth if cfg.track_smooth is not None else 0.30  # Camera catch-up speed (30% of the distance). Makes the movement very smooth.
+    # SMOOTH_FACTOR    = 0.15  # Camera catch-up speed (15% of the distance). Makes the movement very smooth.
+    # SMOOTH_FACTOR    = 0.10  # [NEW; NOT USED] Camera catch-up speed (10% of the distance). Makes the movement very smooth.
 
-    JITTER_THRESHOLD = cfg.track_jitter if cfg.track_jitter is not None else 5     # Abaikan pergeseran di bawah 5 pixel (Anti-getar/Micro-jitter)
-    # JITTER_THRESHOLD = 4     # [OLD] Abaikan pergeseran di bawah 4 pixel (Anti-getar/Micro-jitter)
+    JITTER_THRESHOLD = cfg.track_jitter if cfg.track_jitter is not None else 5     # Ignore shifts below 5 pixels (anti-shake/micro-jitter)
+    # JITTER_THRESHOLD = 4     # [OLD] Ignore shifts below 4 pixels (anti-shake/micro-jitter)
 
-    SNAP_THRESHOLD   = cfg.track_snap if cfg.track_snap is not None else 0.25  # Jika wajah lompat > 25% lebar layar, anggap ganti orang (Hard Cut)
-    # SNAP_THRESHOLD   = 0.30  # [NEW; NOT USED] Jika wajah lompat > 30% lebar layar, anggap ganti orang (Hard Cut)
+    SNAP_THRESHOLD   = cfg.track_snap if cfg.track_snap is not None else 0.25  # If the face jumps > 25% of screen width, assume a person change (hard cut)
+    # SNAP_THRESHOLD   = 0.30  # [NEW; NOT USED] If the face jumps > 30% of screen width, assume a person change (hard cut)
     # =======================================================
 
     video_encoder = detect_video_encoder(cfg)
@@ -119,7 +119,7 @@ def buat_video_hybrid(
     detector = None
     if cfg.face_detector == "yolo":
         if not os.path.exists(cfg.file_yolo_model):
-            print(f"   📥 Mendownload YOLOv8 Face Model ({cfg.yolo_size})...")
+            print(f"   📥 Downloading YOLOv8 Face Model ({cfg.yolo_size})...")
             import urllib.request
 
             urllib.request.urlretrieve(cfg.url_yolo_model, cfg.file_yolo_model)
@@ -168,9 +168,9 @@ def buat_video_hybrid(
     skip_tracking = getattr(cfg, "static_crop", False) and rasio in ["1:1", "3:4", "4:5"]
 
     if skip_tracking:
-        print(f"🧠 {label} - Static Crop aktif (tanpa face tracking)...", flush=True)
+        print(f"🧠 {label} - Static Crop active (no face tracking)...", flush=True)
     else:
-        print(f"🧠 {label} - Analisa wajah dimulai...", flush=True)
+        print(f"🧠 {label} - Face analysis starting...", flush=True)
 
     while current_time <= duration and not skip_tracking:
         cap.set(cv2.CAP_PROP_POS_MSEC, (start_clip + current_time) * 1000)
@@ -226,7 +226,7 @@ def buat_video_hybrid(
             min(100, int((current_time / duration) * 100)) if duration > 0 else 100
         )
         if detect_percent != last_detect_percent:
-            print(f"⏳ {label} - Analisa wajah: {detect_percent:3d}%", flush=True)
+            print(f"⏳ {label} - Face analysis: {detect_percent:3d}%", flush=True)
             last_detect_percent = detect_percent
 
         current_time += STEP_DETEKSI
@@ -343,7 +343,7 @@ def buat_video_hybrid(
         frame_count = 0
         last_render_percent = -1
 
-        print(f"🎬 {label} - Render frame dimulai...", flush=True)
+        print(f"🎬 {label} - Frame rendering starting...", flush=True)
 
         while True:
             ret, frame_utama = cap.read()
@@ -519,9 +519,9 @@ def buat_video_hybrid(
         return_code = writer.wait()
 
         if return_code != 0:
-            raise RuntimeError(f"FFmpeg writer gagal: {stderr_data[-1000:]}")
+            raise RuntimeError(f"FFmpeg writer failed: {stderr_data[-1000:]}")
 
-        print(f"✅ {label} selesai.", flush=True)
+        print(f"✅ {label} complete.", flush=True)
 
     finally:
         cap.release()
