@@ -1,16 +1,28 @@
 # CHECKPOINT
 
 ## In progress
-- **Task:** Declare the 21 `JobCreateRequest` fields Pydantic silently drops.
-- **Phase:** closed out — both stages committed green.
-- **Current stage:** none. Stage 1 `91b7712`, Stage 2 `832300c`.
-- **Next action:** none blocking. Tier-2 E2E is the one outstanding item.
-- **Checkpoint commit:** `300fa00` (clean tree) was the baseline; Tier-1 there
-  was **173 passed**. After both stages: **184 passed** (11 new).
-- **Open questions:** none. Tier-2 E2E was **not run** (no dev server confirmed)
-  and the human **accepted the deferral** when approving the merge to `main`.
-  Unit coverage of the job-creation path: `tests/test_web_job_fields.py` and
-  `tests/test_web_config_adapter.py`. No browser E2E was executed against RC-10.
+- **Task:** English translation + docker upload fix + fork README. **COMPLETE.**
+- **Phase:** closed out.
+- **Checkpoint commit:** `d845413` was the baseline for the i18n work.
+  Commits: `d845413` docker, `f6863b8` CI fix, `5ebd108` web i18n,
+  `326ef72` core i18n, `326ef72`+ studio i18n, `f3bad3a` README.
+- **Tier-1:** `python -m pytest -q` = **185 passed** locally;
+  **180 passed, 5 skipped** in a clean pytest-only venv matching CI.
+  `compileall` clean on the exact CI target list.
+- **Open questions:** none blocking. Two items need the human's machine:
+  (1) the docker fix is unverified against a live daemon; (2) Tier-2 E2E
+  still not run.
+
+### Translation contract (do not undo)
+Prose was translated; **identifiers were not renamed**. These stay Indonesian
+because they are data, not text — changing them breaks behaviour silently:
+- `get_analysis_prompt()` + its two JSON schemas in `clipping/engine.py`,
+  `get_commentary_prompt()` in `voiceover.py`, and `TARGET_ACCOUNTS`.
+- The `_looks_indonesian` stopword list in `metadata.py` (live detector).
+- Code tokens: `"khusus"`, `"utama"`, `"chill"`, `"jedag_jedug"`,
+  `"kata_utama"`, `title_indonesia`, `title_inggris`, `hastag`.
+- All ffmpeg filter graphs, ASS markup, codec names, colour codes and font
+  filenames in `clipping/studio/`.
 
 ### Findings that changed the brief
 - `reuse_job_id` is **LIVE**, not dead: `web/api/routes/jobs.py:67` validates it
@@ -75,6 +87,7 @@ rolling repetition, 10ms bridge cues).
 | RC-7 | **Render layer intact** | ✅ real 1080x1920 h264+aac clip (34.1s) + thumbnail from local mp4+vtt |
 | RC-8 | Diarization / split-screen | ❌ **STILL UNVERIFIED** — needs `pyannote.audio` + `torch` + an accepted HF model agreement. The audio-path bug it depended on is unit-tested, but the split-screen render was never exercised |
 | RC-9 | Story mode | ✅ assembled `hook_1.mp4` + `highlight_1.mp4` from two local sources; one used its VTT (Whisper bypassed), the other fell back to Whisper |
+| RC-12 | Stdlib-only CI suite | ✅ verified in a clean venv with pytest as the only dependency (180 passed, 5 skipped). Any new web test must be checked there, not just locally |
 | RC-11 | Job settings reach the pipeline | ✅ `tests/test_web_job_fields.py` — audit guard + round-trip for `video_cq`, `split_trigger`, `yolo_size`, `diarization_speakers`. Proven non-vacuous (8/11 fail against the pre-fix model) |
 | RC-10 | Web API | ✅ upload mp4 → upload vtt → POST job → **`completed`** with a real 1080x1920 render; provenance persisted, `url` is `None` |
 

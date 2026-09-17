@@ -98,3 +98,45 @@ divergence, and out of scope for a "declare the missing fields" task. Constraini
 `yolo_size` additionally closes a path-traversal surface: `config_adapter`
 interpolates it into both a local filename and a download URL.
 
+## DEC-010 — Translate prose to English; leave the AI prompts in Indonesian
+**Context.** The human asked for the codebase in English. An inventory found
+~477 translatable items, but also three classes of Indonesian text that are
+*data*, not prose: the `_looks_indonesian` stopword list (a live language
+detector), dict keys and comparison values (`"khusus"`, `"utama"`, `"chill"`,
+`"jedag_jedug"`, `"kata_utama"`, `title_indonesia`/`title_inggris`), and the
+~320-line AI prompt, which names ~15 Indonesian JSON keys the pipeline reads
+back and explicitly requires three output fields in Indonesian.
+**Decision.** Translate strings, comments, docstrings and UI copy. Do not rename
+identifiers. Leave `get_analysis_prompt()`, `get_commentary_prompt()`,
+`TARGET_ACCOUNTS` and the stopword list untouched.
+**Consequence.** Zero behaviour change: verified by 0 diff hunks inside the
+prompt and schema regions and by the suite. Translating the prompt was deferred
+because its effect on output register cannot be verified without live API runs
+(see A-007). Six test assertions on the old Indonesian text were updated to the
+new wording at equal specificity.
+
+## DEC-011 — Run the backend container as the host uid
+**Context.** Every upload failed with `EACCES` on `/app/uploads`. The compose
+bind mounts replace the image's directories, discarding the Dockerfile's
+build-time `chown appuser`; the mounted directory carries the host's ownership
+(uid 1000) while the process ran as `appuser`, created by `useradd -r` and so
+below uid 1000.
+**Decision.** Run the backend as `${DOCKER_UID:-1000}:${DOCKER_GID:-1000}`,
+make `/tmp/Ultralytics` world-writable, pin `HOME=/tmp`, ship `.env.example`.
+**Consequence.** Ownership matches by construction rather than by a `chmod` the
+user has to remember. Not verified against a live daemon — none was available
+in the authoring environment; verified only that compose parses and honours the
+override.
+
+## DEC-012 — The stdlib-only test suite is a hard constraint
+**Context.** `tests/test_web_job_fields.py` imported `web.api.models`, pulling in
+pydantic. CI installs pytest and nothing else, so collection aborted the entire
+run with exit 2. It passed locally because pydantic is installed there.
+**Decision.** The regression guard reads declared fields from `models.py` via
+`ast` instead of importing it. Round-trip tests use plain dicts, which
+`build_config_from_payload` already accepts. Only genuinely model-level tests
+use `importorskip`.
+**Consequence.** The guard keeps running in CI, which is the one place it
+matters. Any future web test must be checked against a pytest-only environment,
+not just a local one.
+
