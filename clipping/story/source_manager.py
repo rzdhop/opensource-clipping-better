@@ -45,24 +45,24 @@ def _ingest_single_source(source: dict, cache_dir: str) -> str:
 
     if os.path.exists(cached_path):
         size_mb = os.path.getsize(cached_path) / (1024 * 1024)
-        print(f"   ⏩ '{sid}' sudah ada di cache ({size_mb:.1f} MB), skip.")
+        print(f"   ⏩ '{sid}' already in cache ({size_mb:.1f} MB), skipping.")
         return cached_path
 
     local_path = source.get("local_path")
     if not local_path:
-        raise RuntimeError(f"❌ Source '{sid}' tidak punya 'local_path'.")
+        raise RuntimeError(f"❌ Source '{sid}' has no 'local_path'.")
     if not os.path.isfile(local_path):
         raise RuntimeError(
-            f"❌ Source '{sid}': file tidak ditemukan: {local_path}"
+            f"❌ Source '{sid}': file not found: {local_path}"
         )
     if os.path.getsize(local_path) == 0:
-        raise RuntimeError(f"❌ Source '{sid}': file kosong: {local_path}")
+        raise RuntimeError(f"❌ Source '{sid}': file is empty: {local_path}")
 
-    print(f"   📁 [{sid}] Menyalin file lokal: {local_path}")
+    print(f"   📁 [{sid}] Copying local file: {local_path}")
     shutil.copy2(local_path, cached_path)
 
     size_mb = os.path.getsize(cached_path) / (1024 * 1024)
-    print(f"   ✅ '{sid}' berhasil disalin ke cache ({size_mb:.1f} MB).")
+    print(f"   ✅ '{sid}' successfully copied to cache ({size_mb:.1f} MB).")
     return cached_path
 
 
@@ -90,7 +90,7 @@ def ingest_all_sources(
         Mapping of source_id → cached file path.
     """
     total = len(source_registry)
-    print(f"\n📦 Menyiapkan {total} sumber video lokal...\n")
+    print(f"\n📦 Preparing {total} local video sources...\n")
 
     paths: dict[str, str] = {}
     failed: list[str] = []
@@ -101,14 +101,14 @@ def ingest_all_sources(
             paths[sid] = _ingest_single_source(source, cache_dir)
         except Exception as e:
             # One bad source should not sink an otherwise valid story.
-            print(f"   ⚠️ GAGAL menyiapkan '{sid}': {e}")
+            print(f"   ⚠️ FAILED to prepare '{sid}': {e}")
             failed.append(sid)
 
     # --- Summary ---
     print(f"\n{'='*50}")
-    print(f"📦 Ingest Summary: {len(paths)}/{total} berhasil")
+    print(f"📦 Ingest Summary: {len(paths)}/{total} succeeded")
     if failed:
-        print(f"   ❌ Gagal: {', '.join(failed)}")
+        print(f"   ❌ Failed: {', '.join(failed)}")
     print(f"{'='*50}\n")
 
     return paths
@@ -151,5 +151,5 @@ def save_sources_status(
     with open(status_path, "w", encoding="utf-8") as f:
         json.dump({"sources": status_entries}, f, indent=2, ensure_ascii=False)
 
-    print(f"💾 Sources status disimpan ke: {status_path}")
+    print(f"💾 Sources status saved to: {status_path}")
     return status_path

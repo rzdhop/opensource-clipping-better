@@ -1,7 +1,7 @@
 """
 clipping.config — Master Configuration (Dashboard)
 
-Menyimpan semua default value dan membangun config dari CLI args.
+Holds all default values and builds the config from CLI args.
 """
 
 import argparse
@@ -16,17 +16,17 @@ except ImportError:
     pass
 
 # ==============================================================================
-# DEFAULT VALUES  (sama persis dengan Cell 0 notebook)
+# DEFAULT VALUES  (identical to notebook Cell 0)
 # ==============================================================================
 
 BASE_DIR = os.getcwd()
 FONT_DIR = os.path.abspath(os.path.join(BASE_DIR, "custom_fonts"))
 
-# 1. PENGATURAN UTAMA
+# 1. MAIN SETTINGS
 JUMLAH_CLIP = 7
 PILIHAN_RASIO = "9:16"
 
-# 2. PENGATURAN KONTEN & HOOK
+# 2. CONTENT & HOOK SETTINGS
 MAX_KATA_PER_SUBTITLE = 5
 DURASI_HOOK = 3
 USE_BROLL = True
@@ -39,7 +39,7 @@ SWITCH_BLEND_DURATION = 0.0  # 0 = instant snap, >0 = smooth blend in seconds
 
 # Source Platform
 
-# 3. PENGATURAN SUBTITLE & TIPOGRAFI (ASS STYLE)
+# 3. SUBTITLE & TYPOGRAPHY SETTINGS (ASS STYLE)
 USE_ADVANCED_TEXT = False
 USE_ADVANCED_TEXT_ON_HOOK = False
 USE_KARAOKE_EFFECT = True
@@ -105,22 +105,22 @@ DAFTAR_FONT = {
     },
 }
 
-# Khusus 9:16 (Vertikal)
+# Specific to 9:16 (Vertical)
 ASS_ALIGN_916 = 2
 ASS_MARGIN_916 = 450
 ASS_FONT_916 = 90
 SCALE_KATA_KHUSUS_916 = ASS_FONT_916 + 120
 
-# Khusus 16:9 (Horizontal)
+# Specific to 16:9 (Horizontal)
 ASS_ALIGN_169 = 2
 ASS_MARGIN_169 = 70
 ASS_FONT_169 = 80
 SCALE_KATA_KHUSUS_169 = ASS_FONT_169 + 120
 
-# Warna Kata Khusus  (Format ASS: BGR -> &H[Blue][Green][Red]&)
+# Highlighted Word Color  (ASS format: BGR -> &H[Blue][Green][Red]&)
 WARNA_KATA_KHUSUS = "&HFFFFFF&"
 
-# 4. PENGATURAN ASSET EKSTERNAL
+# 4. EXTERNAL ASSET SETTINGS
 NAMA_FONT_THUMBNAIL = "Montserrat-Black.ttf"
 URL_FONT_THUMBNAIL = (
     "https://github.com/JulietaUla/Montserrat/raw/master/fonts/ttf/Montserrat-Black.ttf"
@@ -129,12 +129,12 @@ URL_FONT_THUMBNAIL = (
 URL_GLITCH_VIDEO = "https://www.youtube.com/watch?v=5nBcNRYmjs0"
 URL_MEDIAPIPE_MODEL = "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_full_range/float16/latest/blaze_face_full_range.tflite"
 
-# 5. PENGATURAN Auto-BGM & Audio Ducking
+# 5. Auto-BGM & Audio Ducking SETTINGS
 USE_AUTO_BGM = True
 BGM_BASE_VOLUME = 0.25
 BGM_MODE = "ducking"  # 'ducking' = sidechain compress, 'background' = constant volume mix
 
-# Daftar mood yang didukung (sesuai nama folder di assets/bgm/)
+# List of supported moods (matches folder names under assets/bgm/)
 BGM_MOODS = ["chill", "epic", "sad", "upbeat", "suspense"]
 BGM_DIR = os.path.abspath(os.path.join(BASE_DIR, "assets", "bgm"))
 
@@ -181,7 +181,7 @@ def _build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
-    # --- Input lokal (local-first) ---
+    # --- Local input (local-first) ---
     # The pipeline assumes nothing about how the media was acquired: external
     # tools produce the .mp4 and the .vtt, and these flags point at them.
     p.add_argument(
@@ -205,7 +205,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Source attribution for the description/manifest only. Never fetched.",
     )
 
-    # --- Pengaturan utama ---
+    # --- Main settings ---
     p.add_argument(
         "--clips",
         "-n",
@@ -226,7 +226,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Target output height for the render. Use 'source' to match the source video height, or a number (e.g. 1080, 1440).",
     )
 
-    # --- Konten & Hook ---
+    # --- Content & Hook ---
     p.add_argument(
         "--words-per-sub",
         type=int,
@@ -339,7 +339,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
 
-    # --- Subtitle & Tipografi ---
+    # --- Subtitle & Typography ---
     p.add_argument(
         "--font-style",
         default=GAYA_FONT_AKTIF,
@@ -736,54 +736,54 @@ def build_config(argv: list[str] | None = None) -> SimpleNamespace:
     # Validate local inputs. These checks live here, beside the --image check
     # below, so a typo fails in ~40ms instead of after a model load or a render.
     if args.transcript and not args.video:
-        parser.error("--transcript membutuhkan --video (transkrip tanpa video tidak bisa dirender).")
+        parser.error("--transcript requires --video (a transcript without a video cannot be rendered).")
 
     if not args.story_mode and not args.video:
         parser.error("--video is required unless --story-mode is used.")
 
     if args.video:
         if not os.path.isfile(args.video):
-            parser.error(f"File video tidak ditemukan: {args.video}")
+            parser.error(f"Video file not found: {args.video}")
         valid_video_exts = (".mp4", ".mkv", ".mov", ".webm", ".avi", ".ts", ".flv", ".m4v")
         if not args.video.lower().endswith(valid_video_exts):
             parser.error(
-                f"Ekstensi video tidak didukung: {args.video}. "
-                f"Format yang didukung: {', '.join(valid_video_exts)}"
+                f"Unsupported video extension: {args.video}. "
+                f"Supported formats: {', '.join(valid_video_exts)}"
             )
 
     if args.transcript:
         if not os.path.isfile(args.transcript):
-            parser.error(f"File transkrip tidak ditemukan: {args.transcript}")
+            parser.error(f"Transcript file not found: {args.transcript}")
         valid_transcript_exts = (".vtt", ".srt", ".json3", ".json")
         if not args.transcript.lower().endswith(valid_transcript_exts):
             parser.error(
-                f"Format transkrip tidak didukung: {args.transcript}. "
-                f"Format yang didukung: {', '.join(valid_transcript_exts)}"
+                f"Unsupported transcript format: {args.transcript}. "
+                f"Supported formats: {', '.join(valid_transcript_exts)}"
             )
 
     if args.no_whisper and not args.transcript:
-        parser.error("--no-whisper membutuhkan --transcript.")
+        parser.error("--no-whisper requires --transcript.")
 
     # Validate watermark args
     if args.watermark:
         if not args.text and not args.image:
-            parser.error("--watermark membutuhkan --text atau --image.")
+            parser.error("--watermark requires --text or --image.")
         if not (1 <= args.opacity <= 100):
-            parser.error(f"--opacity harus antara 1-100, diberikan: {args.opacity}")
+            parser.error(f"--opacity must be between 1-100, given: {args.opacity}")
         if args.padding < 0:
-            parser.error(f"--padding tidak boleh negatif, diberikan: {args.padding}")
+            parser.error(f"--padding cannot be negative, given: {args.padding}")
         if args.watermark_font_size < 0:
-            parser.error(f"--watermark-font-size tidak boleh negatif, diberikan: {args.watermark_font_size}")
+            parser.error(f"--watermark-font-size cannot be negative, given: {args.watermark_font_size}")
         if not (1 <= args.watermark_scale <= 100):
-            parser.error(f"--watermark-scale harus antara 1-100, diberikan: {args.watermark_scale}")
+            parser.error(f"--watermark-scale must be between 1-100, given: {args.watermark_scale}")
         if args.image:
             if not os.path.exists(args.image):
-                parser.error(f"File watermark image tidak ditemukan: {args.image}")
+                parser.error(f"Watermark image file not found: {args.image}")
             valid_exts = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff")
             if not args.image.lower().endswith(valid_exts):
                 parser.error(
-                    f"Format file watermark image tidak didukung: {args.image}. "
-                    f"Format yang didukung: {', '.join(valid_exts)}"
+                    f"Unsupported watermark image format: {args.image}. "
+                    f"Supported formats: {', '.join(valid_exts)}"
                 )
 
     base_dir = os.getcwd()
@@ -828,11 +828,11 @@ def build_config(argv: list[str] | None = None) -> SimpleNamespace:
         api_key_gemini=os.environ.get("GOOGLE_API_KEY", ""),
         hf_token=os.environ.get("HF_TOKEN", ""),
         pexels_api_key=os.environ.get("PEXELS_API_KEY", ""),
-        # Pengaturan utama
+        # Main settings
         jumlah_clip=args.clips,
         pilihan_rasio=args.ratio,
         render_output_height=args.render_height,
-        # Konten & Hook
+        # Content & Hook
         max_kata_per_subtitle=args.words_per_sub,
         durasi_hook=args.hook_duration,
         hook_source=args.hook_source,
@@ -859,7 +859,7 @@ def build_config(argv: list[str] | None = None) -> SimpleNamespace:
         split_v_align=args.split_v_align,
         split_auto_zoom=args.split_auto_zoom,
         split_max_zoom=args.split_max_zoom,
-        # Subtitle & Tipografi
+        # Subtitle & Typography
         no_subs=args.no_subs,
         gaya_font_aktif=args.font_style,
         daftar_font=DAFTAR_FONT,

@@ -154,7 +154,7 @@ def test_empty_whisper_result_raises(tmp_path, monkeypatch):
     monkeypatch.setattr(runner.engine, "transcribe_video", lambda *a, **k: ("", []))
     cfg = make_cfg(tmp_path, transcript=None)
 
-    with pytest.raises(RuntimeError, match="kosong"):
+    with pytest.raises(RuntimeError, match="Transcript is empty"):
         runner.resolve_transcript(cfg)
 
 
@@ -176,7 +176,7 @@ def test_mismatch_warning(tmp_path, monkeypatch, capsys, duration, expect_warnin
     runner.resolve_transcript(cfg)
 
     out = capsys.readouterr().out
-    assert ("PERINGATAN" in out) is expect_warning
+    assert ("WARNING" in out) is expect_warning
 
 
 def test_mismatch_warning_never_raises(tmp_path, monkeypatch):

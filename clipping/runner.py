@@ -60,16 +60,16 @@ def _warn_on_transcript_video_mismatch(cfg, data_segmen) -> None:
 
     if transcript_end > duration * 1.1:
         print(
-            f"\n   ⚠️  PERINGATAN: transkrip berakhir di {transcript_end:.0f}s "
-            f"tetapi video hanya {duration:.0f}s. "
-            "Transkrip kemungkinan bukan milik video ini — subtitle bisa hilang "
-            "tanpa pesan error. Cek pasangan file, atau gunakan --transcript-offset.\n"
+            f"\n   ⚠️  WARNING: transcript ends at {transcript_end:.0f}s "
+            f"but the video is only {duration:.0f}s. "
+            "The transcript likely does not belong to this video — subtitles may go "
+            "missing with no error message. Check the file pairing, or use --transcript-offset.\n"
         )
     elif transcript_end < duration * 0.25:
         print(
-            f"\n   ⚠️  PERINGATAN: transkrip hanya mencakup {transcript_end:.0f}s "
-            f"dari video {duration:.0f}s ({transcript_end / duration:.0%}). "
-            "Klip di luar rentang itu tidak akan punya subtitle.\n"
+            f"\n   ⚠️  WARNING: transcript only covers {transcript_end:.0f}s "
+            f"of the {duration:.0f}s video ({transcript_end / duration:.0%}). "
+            "Clips outside that range will have no subtitles.\n"
         )
 
 
@@ -100,14 +100,14 @@ def resolve_transcript(cfg) -> tuple[str, list[dict]]:
         )
         total_kata = sum(len(seg["words"]) for seg in data_segmen)
         print(
-            f"   ✅ {len(data_segmen)} segmen, {total_kata} kata "
+            f"   ✅ {len(data_segmen)} segments, {total_kata} words "
             f"({data_segmen[0]['start']:.1f}s → {data_segmen[-1]['end']:.1f}s)"
         )
         _warn_on_transcript_video_mismatch(cfg, data_segmen)
     else:
         if getattr(cfg, "no_whisper", False):
             raise RuntimeError(
-                "--no-whisper aktif tetapi --transcript tidak diberikan."
+                "--no-whisper is active but --transcript was not given."
             )
         transkrip_lengkap, data_segmen = engine.transcribe_video(
             cfg.file_video_asli,
@@ -119,7 +119,7 @@ def resolve_transcript(cfg) -> tuple[str, list[dict]]:
 
     if not data_segmen:
         raise RuntimeError(
-            "Transkrip kosong — tidak ada yang bisa dianalisis atau dirender."
+            "Transcript is empty — there is nothing to analyze or render."
         )
 
     return transkrip_lengkap, data_segmen
@@ -156,7 +156,7 @@ def run_pipeline(cfg) -> list[dict]:
     # used to provide on return.
     if not os.path.isfile(cfg.file_video_asli):
         raise FileNotFoundError(
-            f"Video sumber tidak ditemukan: {cfg.file_video_asli}"
+            f"Source video not found: {cfg.file_video_asli}"
         )
 
     # Step 2 — Transcript (local file, or Whisper).
@@ -166,7 +166,7 @@ def run_pipeline(cfg) -> list[dict]:
     gemini_output_path = os.path.join(cfg.outputs_dir, "gemini_response.json")
     
     if getattr(cfg, "load_gemini_json", False) and os.path.exists(gemini_output_path):
-        print(f"\n🔄 [3/3] Memuat data AI ({cfg.ai_provider}) dari file lokal: {gemini_output_path}")
+        print(f"\n🔄 [3/3] Loading AI data ({cfg.ai_provider}) from local file: {gemini_output_path}")
         with open(gemini_output_path, "r", encoding="utf-8") as f:
             hasil_json = json.load(f)
     else:
@@ -175,7 +175,7 @@ def run_pipeline(cfg) -> list[dict]:
         # Save raw gemini json for future loading/reproduction
         with open(gemini_output_path, "w", encoding="utf-8") as f:
             json.dump(hasil_json, f, indent=4, ensure_ascii=False)
-        print(f"💾 Raw AI response tersimpan di: {gemini_output_path}")
+        print(f"💾 Raw AI response saved to: {gemini_output_path}")
 
     # Step 4 — Metadata normalisation
     hasil_json = metadata.normalize_and_validate(hasil_json)
@@ -196,7 +196,7 @@ def run_pipeline(cfg) -> list[dict]:
                 if getattr(cfg, "use_split_screen", False)
                 else "Camera-Switch"
             )
-            print(f"\n🎙️ [{mode_label}] Menjalankan speaker diarization...")
+            print(f"\n🎙️ [{mode_label}] Running speaker diarization...")
             audio_path = diarization_mod.derive_audio_path(
                 cfg.file_video_asli, getattr(cfg, "outputs_dir", None)
             )
@@ -212,7 +212,7 @@ def run_pipeline(cfg) -> list[dict]:
                 num_speakers_arg = "auto"
                 min_spk = max(1, max_faces)
                 max_spk = min_spk + 2
-                print(f"   ℹ️ Instruksi Pyannote: {min_spk} hingga {max_spk} speaker.")
+                print(f"   ℹ️ Pyannote instruction: {min_spk} to {max_spk} speakers.")
 
             diarization_data = diarization_mod.run_diarization(
                 audio_path,
@@ -225,8 +225,8 @@ def run_pipeline(cfg) -> list[dict]:
             if os.path.exists(audio_path):
                 os.remove(audio_path)
         except Exception as e:
-            print(f"⚠️ Diarization gagal: {e}")
-            print("   Fallback ke mode render biasa (tanpa split-screen).")
+            print(f"⚠️ Diarization failed: {e}")
+            print("   Falling back to normal render mode (no split-screen).")
             diarization_data = None
 
     # Step 6 — Video encoder & glitch
@@ -245,7 +245,7 @@ def run_pipeline(cfg) -> list[dict]:
 
     file_glitch_ts = None
     if cfg.use_hook_glitch:
-        print("⚙️ Menyiapkan Video Glitch Transisi...")
+        print("⚙️ Preparing Glitch Transition Video...")
         
         # Get source dimensions for proper glitch scaling
         import cv2
@@ -262,14 +262,14 @@ def run_pipeline(cfg) -> list[dict]:
 
     custom_hook_path = None
     if getattr(cfg, "hook_source", None):
-        print("\n🎣 Mengunduh sumber klip Hook kustom...")
+        print("\n🎣 Downloading custom Hook clip source...")
         custom_hook_path = hook_manager.download_custom_hook(cfg)
 
     # Step 5.5 — Generate Voice-Over (if enabled)
     if getattr(cfg, "voiceover", False):
         from . import voiceover
 
-        print(f"\n🎙️ Meng-generate Voice-Over untuk {len(hasil_json)} klip...")
+        print(f"\n🎙️ Generating Voice-Over for {len(hasil_json)} clips...")
         for klip in hasil_json:
             try:
                 # 1. Generate commentary script from snippet
@@ -311,7 +311,7 @@ def run_pipeline(cfg) -> list[dict]:
                         }
 
             except Exception as e:
-                print(f"   ⚠️ Gagal generate voice-over untuk Rank {klip['rank']}: {e}")
+                print(f"   ⚠️ Failed to generate voice-over for Rank {klip['rank']}: {e}")
 
     for klip in sorted(hasil_json, key=lambda x: x["rank"]):
         
@@ -356,7 +356,7 @@ def run_pipeline(cfg) -> list[dict]:
         json.dump(render_manifest, f, ensure_ascii=False, indent=2)
 
     print(
-        f"\n💾 Render manifest disimpan ke {manifest_path} ({len(render_manifest)} item)"
+        f"\n💾 Render manifest saved to {manifest_path} ({len(render_manifest)} item(s))"
     )
 
 

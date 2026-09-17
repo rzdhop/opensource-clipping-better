@@ -27,9 +27,9 @@ except ImportError:
 # ==============================================================================
 # AVAILABLE EDGE-TTS VOICES (REFERENCE)
 # ==============================================================================
-# Daftar voice edge-tts yang tersedia untuk referensi.
-# Gunakan value (string voice name) sebagai argumen `voice` di synthesize_voice().
-# Jalankan `edge-tts --list-voices` untuk daftar lengkap.
+# List of available edge-tts voices for reference.
+# Use the value (voice name string) as the `voice` argument in synthesize_voice().
+# Run `edge-tts --list-voices` for the full list.
 # GitHub: https://github.com/rany2/edge-tts
 # Preview: https://geeksta.net/tools/tts-samples/
 # Sample in git: https://github.com/yaph/tts-samples/blob/main/mp3/English/en-US-GuyNeural.mp3
@@ -40,17 +40,17 @@ AVAILABLE_VOICES = {
             "id-ID-ArdiNeural",
             "id-ID-GadisNeural",       # Note: despite name, check output
             "id-ID-ArdiNeural",         # Primary Indonesian male
-            # Edge-TTS hanya menyediakan 2 voice ID Indonesia (Ardi & Gadis).
-            # Alternatif Melayu (ms-MY) bisa digunakan untuk variasi:
-            "ms-MY-OsmanNeural",        # Malay male (mirip ID)
-            "ms-MY-YasminNeural",       # Malay female (mirip ID)
+            # Edge-TTS only provides 2 Indonesian voice IDs (Ardi & Gadis).
+            # Malay (ms-MY) alternatives can be used for variety:
+            "ms-MY-OsmanNeural",        # Malay male (similar to ID)
+            "ms-MY-YasminNeural",       # Malay female (similar to ID)
             "jv-ID-DimasNeural",        # Javanese male
         ],
         "female": [
             "id-ID-GadisNeural",        # Primary Indonesian female
             "jv-ID-SitiNeural",         # Javanese female
             "su-ID-TutiNeural",         # Sundanese female
-            "ms-MY-YasminNeural",       # Malay female (mirip ID)
+            "ms-MY-YasminNeural",       # Malay female (similar to ID)
             "su-ID-JajangNeural",       # Sundanese (check gender)
         ],
     },
@@ -229,15 +229,15 @@ def generate_commentary_script(transcript_snippet: str, cfg, style="analysis", l
     """Generate commentary script using Gemini AI."""
     if genai is None:
         raise RuntimeError(
-            "--voiceover membutuhkan google-genai. Install dengan "
-            "`pip install google-genai`, atau jalankan tanpa --voiceover."
+            "--voiceover requires google-genai. Install it with "
+            "`pip install google-genai`, or run without --voiceover."
         )
 
     print(f"   🧠 Generating {style} commentary script via Gemini ({language}, {length})...")
 
     api_key = cfg.api_key_gemini
     if not api_key:
-        raise ValueError("GOOGLE_API_KEY tidak ditemukan di environment atau config.")
+        raise ValueError("GOOGLE_API_KEY not found in environment or config.")
 
     client = genai.Client(api_key=api_key)
     prompt = get_commentary_prompt(transcript_snippet, style, language, length)

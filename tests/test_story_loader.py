@@ -94,7 +94,7 @@ def test_nonexistent_local_path_rejected(tmp_path):
         {"id": "a", "name": "A", "platform": "local", "local_path": "nope.mp4"}
     ])
 
-    with pytest.raises(ValueError, match="tidak ditemukan"):
+    with pytest.raises(ValueError, match="local_path not found"):
         loader.load_sources(path)
 
 
@@ -119,7 +119,7 @@ def test_bad_transcript_extension_rejected(tmp_path, media):
          "local_path": str(video), "transcript_path": str(bad)}
     ])
 
-    with pytest.raises(ValueError, match="tidak didukung"):
+    with pytest.raises(ValueError, match="unsupported transcript_path format"):
         loader.load_sources(path)
 
 

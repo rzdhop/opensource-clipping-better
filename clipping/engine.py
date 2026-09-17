@@ -27,7 +27,7 @@ from .transcript import (  # noqa: F401
 
 
 # ==============================================================================
-# TAHAP 2: TRANSKRIPSI WHISPER & JSON3 FALLBACK
+# STAGE 2: WHISPER TRANSCRIPTION & JSON3 FALLBACK
 # ==============================================================================
 
 def load_whisper_model(
@@ -45,14 +45,14 @@ def load_whisper_model(
         from faster_whisper import WhisperModel
     except ImportError as exc:  # pragma: no cover - depends on the install
         raise RuntimeError(
-            "faster-whisper tidak terinstall, jadi transkripsi in-process tidak bisa "
-            "dijalankan. Install dengan `pip install faster-whisper`, atau jalankan "
-            "dengan --transcript <file.vtt> untuk melewati Whisper sepenuhnya."
+            "faster-whisper is not installed, so in-process transcription cannot "
+            "run. Install it with `pip install faster-whisper`, or run "
+            "with --transcript <file.vtt> to skip Whisper entirely."
         ) from exc
 
     print(
-        f"      ⏳ Memuat model Whisper '{model_size}' ({device})"
-        " — unduhan pertama kali bisa memakan waktu...",
+        f"      ⏳ Loading Whisper model '{model_size}' ({device})"
+        " — the first download may take a while...",
         flush=True,
     )
     return WhisperModel(model_size, device=device, compute_type=compute_type)
@@ -81,7 +81,7 @@ def transcribe_video(
     Pass *model* to reuse an already-loaded WhisperModel across several files;
     otherwise one is built from *model_size*/*device*/*compute_type*.
     """
-    print("[2/3] Memulai transkripsi dengan Faster-Whisper (Level Per-Kata)...")
+    print("[2/3] Starting transcription with Faster-Whisper (Word-Level)...")
 
     # Faster-whisper produces no output until the first segment, so each phase is
     # announced -- otherwise a first CPU run (model download + full audio decode)
@@ -89,26 +89,26 @@ def transcribe_video(
     if model is None:
         model = load_whisper_model(model_size, device, compute_type)
 
-    print("      ⏳ Mendekode audio & mengekstrak fitur (belum ada output)...", flush=True)
+    print("      ⏳ Decoding audio & extracting features (no output yet)...", flush=True)
     segments, info = model.transcribe(video_path, beam_size=5, word_timestamps=True)
 
     transkrip_lengkap = ""
     data_segmen: list[dict] = []
 
-    # Progress bar berdasarkan timestamp audio. faster-whisper men-stream segmen
-    # secara lazy, jadi bar dimajukan ke waktu akhir tiap segmen saat tiba.
+    # Progress bar based on audio timestamp. faster-whisper streams segments
+    # lazily, so the bar advances to each segment's end time as it arrives.
     from tqdm import tqdm
 
     total_dur = round(info.duration, 2)
     progress = tqdm(
         total=total_dur,
         unit="s",
-        desc="      Transkripsi",
+        desc="      Transcribing",
         bar_format="{desc}: {percentage:3.0f}%|{bar}| {n:.0f}/{total:.0f}s [{elapsed}<{remaining}]",
     )
 
     for segment in segments:
-        # Clamp agar floating-point drift melewati durasi tidak overshoot.
+        # Clamp so floating-point drift past the duration doesn't overshoot.
         progress.update(min(segment.end, total_dur) - progress.n)
         transkrip_lengkap += f"[{segment.start:.1f} - {segment.end:.1f}] {segment.text}\n"
 
@@ -134,13 +134,13 @@ def transcribe_video(
                     })
                     chunk_words = []
 
-    progress.update(total_dur - progress.n)  # snap ke 100% saat selesai
+    progress.update(total_dur - progress.n)  # snap to 100% when done
     progress.close()
     return transkrip_lengkap, data_segmen
 
 
 # ==============================================================================
-# TAHAP 3: ANALISIS GEMINI AI
+# STAGE 3: GEMINI AI ANALYSIS
 # ==============================================================================
 
 TARGET_ACCOUNTS = {
@@ -231,7 +231,7 @@ def _extract_clip_list(content: str) -> list[dict]:
     the caller's loop can simply resample.
     """
     if not content or not content.strip():
-        raise ValueError("NVIDIA mengembalikan content kosong.")
+        raise ValueError("NVIDIA returned empty content.")
 
     content = content.strip()
     if "```" in content:
@@ -252,20 +252,20 @@ def _extract_clip_list(content: str) -> list[dict]:
 
     if not isinstance(hasil, list):
         raise ValueError(
-            f"Provider NVIDIA mengembalikan format non-list/dict: {type(hasil)}"
+            f"NVIDIA provider returned a non-list/dict format: {type(hasil)}"
         )
     if not hasil:
         # A schema-conformant empty array used to sail through here and detonate
         # much later inside metadata.normalize_and_validate.
-        raise ValueError("NVIDIA mengembalikan array klip kosong.")
+        raise ValueError("NVIDIA returned an empty clip array.")
 
     required = ("start_time", "end_time")
     for idx, item in enumerate(hasil):
         if not isinstance(item, dict):
-            raise ValueError(f"Klip #{idx} bukan object: {type(item)}")
+            raise ValueError(f"Clip #{idx} is not an object: {type(item)}")
         missing = [k for k in required if k not in item]
         if missing:
-            raise ValueError(f"Klip #{idx} kehilangan field wajib: {missing}")
+            raise ValueError(f"Clip #{idx} is missing required field(s): {missing}")
 
     return hasil
 
@@ -283,7 +283,7 @@ def _make_nvidia_client(cfg):
 MAX_ATTEMPTS = 10
 INITIAL_WAIT_SECONDS = 60
 WAIT_INCREMENT_SECONDS = 30
-REQUEST_TIMEOUT_MS = 15 * 60 * 1000  # 15 menit
+REQUEST_TIMEOUT_MS = 15 * 60 * 1000  # 15 minutes
 RETRYABLE_STATUS_CODES = {408, 429, 500, 502, 503, 504}
 
 
@@ -331,7 +331,7 @@ def _generate_json_with_retry(client, model, fallback_model, contents, config):
 
             text = getattr(response, "text", None)
             if not text or not text.strip():
-                raise ValueError("Gemini mengembalikan response.text kosong.")
+                raise ValueError("Gemini returned an empty response.text.")
 
             return json.loads(text)
 
@@ -341,7 +341,7 @@ def _generate_json_with_retry(client, model, fallback_model, contents, config):
             retryable = _is_retryable(exc)
 
             print(
-                f"[Gemini] Attempt {attempt}/{MAX_ATTEMPTS} gagal | "
+                f"[Gemini] Attempt {attempt}/{MAX_ATTEMPTS} failed | "
                 f"status={status_code} | error={exc}"
             )
 
@@ -349,12 +349,12 @@ def _generate_json_with_retry(client, model, fallback_model, contents, config):
                 break
 
             wait_seconds = INITIAL_WAIT_SECONDS + ((attempt - 1) * WAIT_INCREMENT_SECONDS)
-            print(f"[Gemini] Retry lagi dalam {wait_seconds} detik...")
+            print(f"[Gemini] Retrying again in {wait_seconds} seconds...")
             time.sleep(wait_seconds)
 
-    print(f"[Gemini] Percobaan dengan model utama ({model}) gagal.")
+    print(f"[Gemini] Attempts with the main model ({model}) failed.")
     if fallback_model:
-        print(f"[Gemini] Mencoba satu kali lagi dengan fallback model ({fallback_model})...")
+        print(f"[Gemini] Trying one more time with the fallback model ({fallback_model})...")
         try:
             response = client.models.generate_content(
                 model=fallback_model,
@@ -363,24 +363,24 @@ def _generate_json_with_retry(client, model, fallback_model, contents, config):
             )
             text = getattr(response, "text", None)
             if not text or not text.strip():
-                raise ValueError("Gemini fallback mengembalikan response.text kosong.")
+                raise ValueError("Gemini fallback returned an empty response.text.")
 
             return json.loads(text)
         except Exception as exc_fallback:
-            print(f"[Gemini] Fallback model gagal | error={exc_fallback}")
+            print(f"[Gemini] Fallback model failed | error={exc_fallback}")
             raise RuntimeError(
-                f"Gagal memanggil Gemini utama & fallback. "
-                f"Laporan Utama status={status_code}, error={last_exc} | "
-                f"Laporan Fallback error={exc_fallback}"
+                f"Failed to call Gemini main & fallback. "
+                f"Main report status={status_code}, error={last_exc} | "
+                f"Fallback report error={exc_fallback}"
             ) from exc_fallback
 
     raise RuntimeError(
-        f"Gagal memanggil Gemini setelah {MAX_ATTEMPTS} percobaan. Error terakhir: {last_exc}"
+        f"Failed to call Gemini after {MAX_ATTEMPTS} attempts. Last error: {last_exc}"
     ) from last_exc
 
 
-# ==== KONFIGURASI DURASI KLIP ====
-# Ubah nilai di bawah ini jika ingin mengganti batas durasi klip (dalam detik)
+# ==== CLIP DURATION CONFIGURATION ====
+# Change the values below to adjust the clip duration limits (in seconds)
 MIN_CLIP_DURATION = 20
 MAX_CLIP_DURATION = 179
 
@@ -719,10 +719,10 @@ Transkrip:
 
 def analyze_with_nvidia(transkrip_lengkap: str, cfg) -> list[dict]:
     """Analyze transcript using NVIDIA NIM API (OpenAI compatible)."""
-    print(f"[3/3] Menganalisis Top {cfg.jumlah_clip} momen menggunakan NVIDIA ({cfg.nvidia_model})...")
+    print(f"[3/3] Analyzing Top {cfg.jumlah_clip} moments using NVIDIA ({cfg.nvidia_model})...")
 
     if not cfg.api_key_nvidia:
-        raise ValueError("NVIDIA_API_KEY tidak ditemukan di environment.")
+        raise ValueError("NVIDIA_API_KEY not found in environment.")
 
     client = _make_nvidia_client(cfg)
     
@@ -912,18 +912,18 @@ def analyze_with_nvidia(transkrip_lengkap: str, cfg) -> list[dict]:
 
         except Exception as exc:
             failures.append(f"attempt {attempt}: {type(exc).__name__}: {exc}")
-            print(f"   ⚠️ NVIDIA attempt {attempt} gagal | {type(exc).__name__}: {exc}")
+            print(f"   ⚠️ NVIDIA attempt {attempt} failed | {type(exc).__name__}: {exc}")
 
             if not _nvidia_is_retryable(exc) or attempt == NVIDIA_MAX_ATTEMPTS:
                 detail = "\n  ".join(failures)
                 raise RuntimeError(
-                    f"Analisis NVIDIA gagal setelah {attempt} percobaan:\n  {detail}"
+                    f"NVIDIA analysis failed after {attempt} attempt(s):\n  {detail}"
                 ) from exc
 
             time.sleep(NVIDIA_BACKOFF_SECONDS[attempt - 1])
 
     # Unreachable: the loop either returns or raises.
-    raise RuntimeError("Analisis NVIDIA gagal (loop selesai tanpa hasil).")
+    raise RuntimeError("NVIDIA analysis failed (loop ended with no result).")
 
 
 def analyze_with_ai(transkrip_lengkap: str, cfg) -> list[dict]:
@@ -941,21 +941,21 @@ def analyze_with_ai(transkrip_lengkap: str, cfg) -> list[dict]:
     if provider == "nvidia":
         if not getattr(cfg, "api_key_nvidia", ""):
             raise RuntimeError(
-                "NVIDIA_API_KEY tidak ditemukan. Set di .env, atau jalankan "
-                "dengan --ai-provider gemini."
+                "NVIDIA_API_KEY not found. Set it in .env, or run "
+                "with --ai-provider gemini."
             )
         return analyze_with_nvidia(transkrip_lengkap, cfg)
 
     if provider == "gemini":
         if not getattr(cfg, "api_key_gemini", ""):
             raise RuntimeError(
-                "GOOGLE_API_KEY tidak ditemukan. Set di .env, atau jalankan "
-                "dengan --ai-provider nvidia."
+                "GOOGLE_API_KEY not found. Set it in .env, or run "
+                "with --ai-provider nvidia."
             )
         return analyze_with_gemini(transkrip_lengkap, cfg)
 
     raise ValueError(
-        f"AI provider tidak dikenal: {provider!r} (pilihan: nvidia, gemini)"
+        f"Unknown AI provider: {provider!r} (choices: nvidia, gemini)"
     )
 
 
@@ -967,7 +967,7 @@ def analyze_with_gemini(
     import google.genai as genai
     from google.genai import types
 
-    print(f"[3/3] Menganalisis Top {cfg.jumlah_clip} momen terbaik menggunakan Gemini...")
+    print(f"[3/3] Analyzing Top {cfg.jumlah_clip} best moments using Gemini...")
 
     prompt = get_analysis_prompt(transkrip_lengkap, cfg.jumlah_clip, cfg.durasi_hook, cfg=cfg)
 

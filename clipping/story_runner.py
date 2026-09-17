@@ -60,7 +60,7 @@ def _load_source_transcripts(
 
         # --- 1. Cached transcript -------------------------------------------
         if os.path.exists(out_path):
-            print(f"   ⏩ [{idx}/{total}] '{sid}' sudah ada transkrip, skip.")
+            print(f"   ⏩ [{idx}/{total}] '{sid}' already has a transcript, skipping.")
             try:
                 with open(out_path, "r", encoding="utf-8") as f:
                     transcripts[sid] = json.load(f)
@@ -69,7 +69,7 @@ def _load_source_transcripts(
                 pass  # corrupted cache -> fall through and rebuild
 
         if not os.path.exists(video_path):
-            print(f"   ⚠️ [{idx}/{total}] '{sid}' file tidak ditemukan, skip transkrip.")
+            print(f"   ⚠️ [{idx}/{total}] '{sid}' file not found, skipping transcript.")
             continue
 
         source = source_registry.get(sid, {})
@@ -90,7 +90,7 @@ def _load_source_transcripts(
             else:
                 if no_whisper:
                     raise RuntimeError(
-                        f"--no-whisper aktif tetapi source '{sid}' tidak punya "
+                        f"--no-whisper is active but source '{sid}' has no "
                         "'transcript_path'."
                     )
                 print(f"   🎤 [{idx}/{total}] Transcribing '{sid}'...")
@@ -117,11 +117,11 @@ def _load_source_transcripts(
                 json.dump(result, f, ensure_ascii=False, indent=2)
 
             transcripts[sid] = result
-            print(f"   ✅ '{sid}' siap ({len(segmen)} segmen).")
+            print(f"   ✅ '{sid}' ready ({len(segmen)} segments).")
 
         except Exception as e:
             # One bad source should not sink the whole story, but say so loudly.
-            print(f"   ⚠️ '{sid}' gagal disiapkan: {e}")
+            print(f"   ⚠️ '{sid}' failed to prepare: {e}")
 
     return transcripts
 
@@ -163,7 +163,7 @@ def run_story_pipeline(cfg) -> list[dict]:
     # ------------------------------------------------------------------
     cache_dir = source_manager.get_cache_dir(cfg.outputs_dir)
 
-    print(f"\n[2/6] Menyiapkan source lokal → {cache_dir}")
+    print(f"\n[2/6] Preparing local sources → {cache_dir}")
     cached_paths = source_manager.ingest_all_sources(source_registry, cache_dir)
 
     # Save ingest status
@@ -172,11 +172,11 @@ def run_story_pipeline(cfg) -> list[dict]:
     # ------------------------------------------------------------------
     # Step 3 — Resolve a transcript for each source
     # ------------------------------------------------------------------
-    print("\n[3/6] Menyiapkan transkrip tiap source...")
+    print("\n[3/6] Preparing transcript for each source...")
     transcripts = _load_source_transcripts(
         cached_paths, source_registry, cache_dir, cfg
     )
-    print(f"   📝 {len(transcripts)}/{len(cached_paths)} source(s) punya transkrip.")
+    print(f"   📝 {len(transcripts)}/{len(cached_paths)} source(s) have a transcript.")
 
     # ------------------------------------------------------------------
     # Step 4 — Load & validate recipe
@@ -201,7 +201,7 @@ def run_story_pipeline(cfg) -> list[dict]:
     print(f"\n[5/6] Assembling {len(clips)} clip(s)...")
     print(f"   Output dir: {story_output_dir}")
     print(f"   Ratio: {ratio}")
-    print(f"   Mode: kosongan (no subs, no text overlay)")
+    print(f"   Mode: clean (no subs, no text overlay)")
 
     manifest: list[dict] = []
 
@@ -263,7 +263,7 @@ def run_story_pipeline(cfg) -> list[dict]:
         json.dump(transcripts_summary, f, ensure_ascii=False, indent=2)
 
     print(f"\n{'='*70}")
-    print(f"✅ Story Clip selesai! {len(manifest)} clip(s) dirender.")
+    print(f"✅ Story Clip done! {len(manifest)} clip(s) rendered.")
     print(f"💾 Manifest: {manifest_path}")
     print(f"📝 Transcripts: {transcripts_index_path}")
     print(f"📁 Output: {story_output_dir}")

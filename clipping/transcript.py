@@ -71,7 +71,7 @@ def _parse_timestamp(text: str) -> float:
     """``"01:02:03.450"`` -> ``3723.45``; ``"02:03.450"`` -> ``123.45``."""
     match = _TS_PARSE.match(text.strip())
     if not match:
-        raise TranscriptParseError(f"Timestamp tidak valid: {text!r}")
+        raise TranscriptParseError(f"Invalid timestamp: {text!r}")
 
     hours, minutes, seconds, frac = match.groups()
     # ".5" means 500ms, not 5ms — pad right, not left.
@@ -157,9 +157,9 @@ def _enforce_monotonic(flat_words: list[dict], source_label: str) -> list[dict]:
         ratio = dropped / len(flat_words)
         if ratio > 0.05:
             print(
-                f"   ⚠️ {dropped} dari {len(flat_words)} kata ({ratio:.0%}) di "
-                f"{source_label} punya timestamp mundur dan dibuang. "
-                "Kemungkinan besar transkrip ini bukan milik video tersebut."
+                f"   ⚠️ {dropped} of {len(flat_words)} words ({ratio:.0%}) in "
+                f"{source_label} had backwards timestamps and were dropped. "
+                "This transcript is likely not a match for this video."
             )
     return kept
 
@@ -259,8 +259,8 @@ def _iter_cue_blocks(raw: str, path: str):
             # X-TIMESTAMP-MAP=...) share this block.
             if "X-TIMESTAMP-MAP" in block:
                 print(
-                    f"   ⚠️ {os.path.basename(path)} berisi X-TIMESTAMP-MAP "
-                    "(offset HLS). Offset diabaikan; timestamp dipakai apa adanya."
+                    f"   ⚠️ {os.path.basename(path)} contains X-TIMESTAMP-MAP "
+                    "(HLS offset). Offset is ignored; timestamps are used as-is."
                 )
             continue
 
@@ -323,12 +323,12 @@ def parse_vtt_subs(
         raw = handle.read()
 
     if not raw.strip():
-        raise TranscriptParseError(f"File transkrip kosong: {vtt_path}")
+        raise TranscriptParseError(f"Transcript file is empty: {vtt_path}")
 
     if "-->" not in raw:
         raise TranscriptParseError(
-            f"{vtt_path} tidak berisi satu pun cue WebVTT/SRT "
-            "(tidak ditemukan '-->'). Apakah file ini benar-benar subtitle?"
+            f"{vtt_path} does not contain a single WebVTT/SRT cue "
+            "('-->' not found). Is this file actually a subtitle file?"
         )
 
     flat_words: list[dict] = []
@@ -388,9 +388,9 @@ def parse_vtt_subs(
 
     if not flat_words:
         raise TranscriptParseError(
-            f"Tidak ada kata yang bisa diekstrak dari {vtt_path}. "
-            "Periksa apakah file benar-benar berisi subtitle (bukan hanya "
-            "[Music]/tag kosong)."
+            f"No words could be extracted from {vtt_path}. "
+            "Check whether the file actually contains subtitles (and not just "
+            "[Music]/empty tags)."
         )
 
     _deoverlap(flat_words)
@@ -416,7 +416,7 @@ def parse_youtube_json3_subs(
     sidecar, go transcribe". ``parse_vtt_subs`` raises instead, because a VTT is
     something the user explicitly asked for.
     """
-    print("[2/3] Memproses subtitle JSON3 dari YouTube...")
+    print("[2/3] Processing JSON3 subtitles from YouTube...")
 
     try:
         with open(json_path, "r", encoding="utf-8") as handle:
@@ -455,7 +455,7 @@ def parse_youtube_json3_subs(
         return _chunk_into_segments(flat_words, max_words_per_subtitle)
 
     except Exception as exc:  # noqa: BLE001 - preserved opportunistic behaviour
-        print(f"⚠️ Gagal memparsing JSON3: {exc}")
+        print(f"⚠️ Failed to parse JSON3: {exc}")
         return "", []
 
 
@@ -479,7 +479,7 @@ def load_transcript(
     This is the single entry point the pipeline uses for the Whisper bypass.
     """
     if not os.path.isfile(path):
-        raise FileNotFoundError(f"File transkrip tidak ditemukan: {os.path.abspath(path)}")
+        raise FileNotFoundError(f"Transcript file not found: {os.path.abspath(path)}")
 
     ext = os.path.splitext(path)[1].lower()
 
@@ -498,7 +498,7 @@ def load_transcript(
             # The JSON3 parser is intentionally forgiving, but an explicit
             # --transcript must never degrade into a silent Whisper run.
             raise TranscriptParseError(
-                f"Tidak ada segmen yang bisa diekstrak dari {path}."
+                f"No segments could be extracted from {path}."
             )
         if offset:
             flat = [w for seg in segmen for w in seg["words"]]
@@ -506,8 +506,8 @@ def load_transcript(
             transkrip, segmen = _chunk_into_segments(flat, max_words_per_subtitle)
     else:
         raise TranscriptParseError(
-            f"Format transkrip tidak didukung: {ext or '(tanpa ekstensi)'} "
-            f"— gunakan salah satu dari {', '.join(SUPPORTED_EXTENSIONS)}"
+            f"Unsupported transcript format: {ext or '(no extension)'} "
+            f"— use one of {', '.join(SUPPORTED_EXTENSIONS)}"
         )
 
     return transkrip, segmen

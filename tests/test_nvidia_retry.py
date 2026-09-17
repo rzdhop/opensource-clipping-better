@@ -103,9 +103,12 @@ def test_three_malformed_exhausts_and_raises(run):
         run(["bad one", "bad two", "bad three"])
 
     message = str(excinfo.value)
-    assert "3 percobaan" in message
-    # Every attempt is reported, not just the last.
-    assert message.count("attempt") == 3
+    assert "3 attempt(s)" in message
+    # Every attempt is reported, not just the last. Counts the per-attempt
+    # detail lines specifically: the summary line now also contains the word
+    # "attempt", so a bare count("attempt") would be 4 and would silently
+    # depend on the summary's wording.
+    assert message.count("\n  attempt ") == 3
 
 
 def test_exhaustion_makes_exactly_max_attempts(monkeypatch, cfg):
@@ -152,14 +155,14 @@ def test_auth_error_is_fatal_and_not_retried(run):
         run([_exc("AuthenticationError", 401), GOOD_JSON])
 
     # Stops after one attempt -- the second scripted item is never consumed.
-    assert "1 percobaan" in str(excinfo.value)
+    assert "1 attempt(s)" in str(excinfo.value)
 
 
 def test_bad_request_is_fatal(run):
     """A malformed guided_json will never succeed on retry."""
     with pytest.raises(RuntimeError) as excinfo:
         run([_exc("BadRequestError", 400), GOOD_JSON])
-    assert "1 percobaan" in str(excinfo.value)
+    assert "1 attempt(s)" in str(excinfo.value)
 
 
 def test_rate_limit_is_retried(run):
@@ -301,7 +304,7 @@ def test_dispatch_missing_gemini_key_fails(monkeypatch, cfg):
 
 def test_dispatch_unknown_provider(cfg):
     cfg.ai_provider = "openai"
-    with pytest.raises(ValueError, match="tidak dikenal"):
+    with pytest.raises(ValueError, match="Unknown AI provider"):
         engine.analyze_with_ai("transcript", cfg)
 
 
