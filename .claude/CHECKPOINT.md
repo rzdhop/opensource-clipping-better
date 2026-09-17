@@ -7,11 +7,10 @@
 - **Next action:** none blocking. Tier-2 E2E is the one outstanding item.
 - **Checkpoint commit:** `300fa00` (clean tree) was the baseline; Tier-1 there
   was **173 passed**. After both stages: **184 passed** (11 new).
-- **Open questions:** Tier-2 E2E was never answered — **deferred, not run**.
-  The change touches the job-creation request path (RC-10). Specs covering it:
-  `tests/test_web_job_fields.py` and `tests/test_web_config_adapter.py` cover it
-  at unit level, but no browser E2E was executed. Task is **not** fully closed
-  until the human acknowledges this deferral.
+- **Open questions:** none. Tier-2 E2E was **not run** (no dev server confirmed)
+  and the human **accepted the deferral** when approving the merge to `main`.
+  Unit coverage of the job-creation path: `tests/test_web_job_fields.py` and
+  `tests/test_web_config_adapter.py`. No browser E2E was executed against RC-10.
 
 ### Findings that changed the brief
 - `reuse_job_id` is **LIVE**, not dead: `web/api/routes/jobs.py:67` validates it
