@@ -56,6 +56,21 @@ See the *Migrating from `--url`* table in the README.
 
 ### Fixed
 
+- **The shipped `--nvidia-model` default was dead.** `deepseek-ai/deepseek-v4-pro`
+  reached end of life on 2026-08-07 and returns `410 Gone`, so every default
+  NVIDIA run failed. Now `deepseek-ai/deepseek-v4-flash-0731` (same family, so
+  the DeepSeek output fixup in `metadata.py` still applies). The default is
+  pinned by a test so the next retirement is a test failure, not a production
+  410. `meta/llama-3.1-70b-instruct` is retired too -- list current models at
+  `https://integrate.api.nvidia.com/v1/models`.
+- **Subtitle burn-in failed on every Windows path** (pre-existing).
+  `escape_ffmpeg_filter_value` escaped backslashes and single-escaped the colon;
+  ffmpeg needs forward slashes and a double-escaped colon, because a filter
+  option value is unescaped twice. POSIX output is unchanged.
+- **`--voiceover` made google-genai mandatory for everyone.** An optional
+  feature's dependency was imported unconditionally.
+- **The web dashboard's "Bypass AI" toggle still demanded an API key.**
+
 - **`openai` was never declared** in `requirements.txt` or `pyproject.toml`
   despite being imported by the NVIDIA provider.
 - **Diarization could read the video as its own audio.** The wav path came from

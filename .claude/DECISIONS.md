@@ -29,6 +29,7 @@ let provider exceptions propagate.
 billed on Gemini.
 
 ## DEC-004 — Keep `deepseek-ai/deepseek-v4-pro` as the NIM default
+**SUPERSEDED by DEC-007** — that model reached end of life on 2026-08-07.
 **Context.** The brief specifies `meta/llama-3.1-70b-instruct`.
 `metadata.py:136-141` already carries a DeepSeek-shaped output fixup, indicating
 DeepSeek is the model actually validated against this prompt.
@@ -50,3 +51,20 @@ never taken silently.
 **Decision.** Restrict both to their existing local paths.
 **Consequence.** `sources.json` schema becomes local-only — a breaking change for
 existing URL-based recipes.
+
+## DEC-007 — NIM default moves to `deepseek-ai/deepseek-v4-flash-0731`
+**Context.** End-to-end verification against the live API returned
+`410 Gone: deepseek-ai/deepseek-v4-pro has reached its end of life on
+2026-08-07`. The alternative named in the original brief,
+`meta/llama-3.1-70b-instruct`, is retired too (410, EOL 2026-08-2x). Both
+candidates considered in DEC-004 are therefore non-functional.
+Querying `https://integrate.api.nvidia.com/v1/models` shows
+`deepseek-ai/deepseek-v4-flash-0731` live (probe returns 401 auth-required, not
+410), and it is the same DeepSeek v4 family, so the DeepSeek-specific output
+fixup at `metadata.py:136-141` still applies.
+**Decision.** Default to `deepseek-ai/deepseek-v4-flash-0731`.
+**Consequence.** Preserves DEC-004's intent (stay on DeepSeek v4) with the
+smallest possible deviation. The default is pinned by a test so the next
+retirement surfaces as a test failure rather than a production 410. NOTE: the
+model has NOT been exercised against the real API -- no valid NVIDIA_API_KEY was
+available -- so its conformance to the `guided_json` schema is unverified.

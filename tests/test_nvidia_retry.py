@@ -61,7 +61,7 @@ def cfg():
         api_key_nvidia="test-key",
         api_key_gemini="",
         ai_provider="nvidia",
-        nvidia_model="deepseek-ai/deepseek-v4-pro",
+        nvidia_model="deepseek-ai/deepseek-v4-flash-0731",
         jumlah_clip=3,
         durasi_hook=3,
         hook_v2=False,

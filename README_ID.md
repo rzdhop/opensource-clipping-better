@@ -216,7 +216,7 @@ python main.py --video talk.mp4 --transcript talk.vtt --hook-source "URL_DRIVE_A
 python main.py --video talk.mp4 --transcript talk.vtt --render-height source --video-sharpen
 
 # Menggunakan NVIDIA NIM (DeepSeek-V3) sebagai pengganti Gemini
-python main.py --video talk.mp4 --transcript talk.vtt --ai-provider nvidia --nvidia-model "deepseek-ai/deepseek-v3"
+python main.py --video talk.mp4 --transcript talk.vtt --ai-provider nvidia --nvidia-model "deepseek-ai/deepseek-v4-flash-0731"
 
 # Output kotak untuk Instagram Feed (1:1)
 python main.py --video talk.mp4 --transcript talk.vtt --ratio "1:1" --clips 5
@@ -250,7 +250,7 @@ python main.py --help
 | `--clips`, `-n` | `7` | Jumlah klip highlight yang dihasilkan |
 | `--ratio`, `-r` | `9:16` | Rasio aspek output (`9:16`, `16:9`, `1:1`, `3:4`, `4:5`) |
 | `--ai-provider` | `gemini` | Provider AI untuk analisis (`gemini` atau `nvidia`). |
-| `--nvidia-model` | `deepseek...` | Nama model untuk NVIDIA NIM API (misal `deepseek-ai/deepseek-v3`). |
+| `--nvidia-model` | `deepseek-ai/deepseek-v4-flash-0731` | Model untuk NVIDIA NIM. Model kadang dipensiunkan; lihat daftar terkini di `https://integrate.api.nvidia.com/v1/models`. |
 | `--render-height` | `1080` | Target tinggi output render (`1080`, `1440`, `2160`, `source`) |
 | `--video-bitrate` | `auto` | Target bitrate video (misal 8M, 12M, auto). 'auto' menyesuaikan resolusi. |
 | `--video-sharpen` | — | Aktifkan filter penajaman (sharpening) ringan untuk hasil lebih jernih. |

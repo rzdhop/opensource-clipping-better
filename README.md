@@ -254,7 +254,7 @@ python main.py --video talk.mp4 --transcript talk.vtt --hook-source "DRIVE_URL_O
 python main.py --video talk.mp4 --transcript talk.vtt --render-height source --video-sharpen
 
 # Use NVIDIA NIM (DeepSeek-V3) instead of Gemini
-python main.py --video talk.mp4 --transcript talk.vtt --ai-provider nvidia --nvidia-model "deepseek-ai/deepseek-v4-pro"
+python main.py --video talk.mp4 --transcript talk.vtt --ai-provider nvidia --nvidia-model "deepseek-ai/deepseek-v4-flash-0731"
 
 # Square output for Instagram Feed (1:1)
 python main.py --video talk.mp4 --transcript talk.vtt --ratio "1:1" --clips 5
@@ -288,7 +288,7 @@ python main.py --help
 | `--clips`, `-n` | `7` | Number of highlight clips to generate |
 | `--ratio`, `-r` | `9:16` | Output aspect ratio (`9:16`, `16:9`, `1:1`, `3:4`, `4:5`) |
 | `--ai-provider` | `gemini` | AI provider for analysis (`gemini` or `nvidia`). |
-| `--nvidia-model` | `deepseek...` | Model name for NVIDIA NIM API (e.g. `deepseek-ai/deepseek-v3`). |
+| `--nvidia-model` | `deepseek-ai/deepseek-v4-flash-0731` | Model for NVIDIA NIM. Models are retired periodically; list current ones at `https://integrate.api.nvidia.com/v1/models`. |
 | `--render-height` | `1080` | Target render output height (`1080`, `1440`, `2160`, `source`) |
 | `--video-bitrate` | `auto` | Target video bitrate (e.g. 8M, 12M, auto). 'auto' scales based on resolution. |
 | `--video-sharpen` | — | Apply a subtle sharpening filter for clearer output. |

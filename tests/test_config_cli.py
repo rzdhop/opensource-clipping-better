@@ -201,7 +201,9 @@ def test_derive_audio_path_defaults_beside_source(tmp_path):
 def test_default_provider_is_nvidia(video):
     cfg = build_config(["--video", str(video)])
     assert cfg.ai_provider == "nvidia"
-    assert cfg.nvidia_model == "deepseek-ai/deepseek-v4-pro"
+    # Pinned so a model retirement shows up as a test failure, not a 410 in
+    # production. deepseek-v4-pro died on 2026-08-07 exactly this way.
+    assert cfg.nvidia_model == "deepseek-ai/deepseek-v4-flash-0731"
 
 
 def test_provider_can_be_overridden(video):

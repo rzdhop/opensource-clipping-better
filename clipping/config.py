@@ -152,7 +152,11 @@ RENDER_OUTPUT_HEIGHT = 1080
 # NVIDIA NIM is the default provider: open-weights models, free tier, and an
 # OpenAI-compatible endpoint. Gemini stays available via --ai-provider gemini.
 AI_PROVIDER = "nvidia"
-NVIDIA_MODEL = "deepseek-ai/deepseek-v4-pro"
+# deepseek-v4-pro reached end of life on 2026-08-07 and now returns 410.
+# This is its live same-family successor, so metadata.py's DeepSeek output
+# fixup still applies. Check https://integrate.api.nvidia.com/v1/models
+# if this one is ever retired too.
+NVIDIA_MODEL = "deepseek-ai/deepseek-v4-flash-0731"
 GEMINI_MODEL = "gemini-3-flash-preview"
 GEMINI_FALLBACK_MODEL = "gemini-2.5-flash"
 
@@ -393,7 +397,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--nvidia-model",
         default=NVIDIA_MODEL,
-        help="Model name for NVIDIA NIM API (e.g. deepseek-ai/deepseek-v3).",
+        help="Model name for NVIDIA NIM API. See https://integrate.api.nvidia.com/v1/models",
     )
     p.add_argument("--gemini-model", default=GEMINI_MODEL, help="Gemini model name")
     p.add_argument(
