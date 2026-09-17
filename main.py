@@ -46,20 +46,26 @@ def main():
         print("   Set via: export GOOGLE_API_KEY='your-key' atau buat file .env")
         sys.exit(1)
 
-    _PLATFORM_LABELS = {
-        "youtube": "YouTube",
-        "tiktok": "TikTok",
-        "instagram": "Instagram",
-        "gdrive": "Google Drive",
-    }
-    platform_key = getattr(cfg, "source_platform", "youtube")
-    platform_label = _PLATFORM_LABELS.get(platform_key, platform_key)
-    
+    import os
+
+    transcript_path = getattr(cfg, "transcript_path", None)
+
     print("=" * 70)
     print(f"🎬 OpenSource Clipping v{version}")
     print("=" * 70)
-    print(f"   Source      : {platform_label}")
-    print(f"   URL         : {cfg.url_youtube}")
+    if getattr(cfg, "video_provided", False):
+        print(f"   Video       : {os.path.basename(cfg.file_video_asli)}")
+    else:
+        # Legacy remote path, removed with the download layer.
+        print(f"   URL         : {cfg.url_youtube}")
+    # State the transcript source explicitly. The Whisper fallback is the slow
+    # path and must never be taken without the user seeing it.
+    if transcript_path:
+        print(f"   Transcript  : {os.path.basename(transcript_path)} (Whisper bypassed)")
+    else:
+        print(f"   Transcript  : none → Whisper ({cfg.whisper_model}, {cfg.whisper_device})")
+    if getattr(cfg, "source_url", None):
+        print(f"   Source Attr : {cfg.source_url}")
     print(f"   Jumlah Clip : {cfg.jumlah_clip}")
     print(f"   Rasio       : {cfg.pilihan_rasio}")
     print(f"   Font Style  : {cfg.gaya_font_aktif}")
@@ -72,7 +78,6 @@ def main():
     if cfg.use_split_screen:
         print(f"   Dynamic Split: {'ON' if cfg.use_dynamic_split else 'OFF'}")
         print(f"   Split Trigger: {cfg.split_trigger}")
-    print(f"   Whisper     : {cfg.whisper_model} ({cfg.whisper_device})")
     print(f"   Gemini      : {cfg.gemini_model}")
     if getattr(cfg, "watermark_enabled", False):
         wm_type = "Text" if cfg.watermark_text else "Image"
