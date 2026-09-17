@@ -121,3 +121,18 @@ def test_engine_reexports_parser():
 
     assert engine.parse_youtube_json3_subs is transcript.parse_youtube_json3_subs
     assert engine.load_transcript is transcript.load_transcript
+
+
+def test_transcript_line_granularity_differs_by_producer():
+    """Pin the documented asymmetry between the two transcript producers.
+
+    The chunked parsers break lines every ``max_words_per_subtitle`` words;
+    ``transcribe_video`` emits one line per Whisper segment. Both are fine as
+    prompt input, but the difference is easy to mistake for a bug, so it is
+    asserted here rather than left to be rediscovered.
+    """
+    transkrip, _ = transcript.parse_youtube_json3_subs(SAMPLE, max_words_per_subtitle=3)
+
+    for line in transkrip.splitlines():
+        words = line.split("] ", 1)[1].split()
+        assert len(words) <= 3

@@ -85,6 +85,21 @@ def assert_valid_transkrip(transkrip_lengkap, max_words_per_subtitle=None):
 
     ``get_analysis_prompt`` tells the model the transcript arrives as
     ``[detik_mulai - detik_selesai] teks`` (engine.py:606-607).
+
+    ``max_words_per_subtitle`` is OPTIONAL and applies only to the chunked
+    producers. The two transcript producers differ in line granularity, and this
+    predates the local-first refactor:
+
+    * ``parse_vtt_subs`` / ``parse_youtube_json3_subs`` emit one line per
+      ``max_words_per_subtitle`` chunk, because chunking is where their line
+      breaks come from.
+    * ``transcribe_video`` emits one line per *Whisper segment* -- a whole
+      sentence -- because it uses ``segment.text`` directly (engine.py:397),
+      independently of how ``data_segmen`` is chunked.
+
+    Only ``data_segmen`` is a contract; this string is prompt input, and the LLM
+    reads either granularity fine. Pass the limit only when testing a chunked
+    producer.
     """
     import re
 

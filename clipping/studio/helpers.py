@@ -22,13 +22,35 @@ def format_seconds(seconds):
 
 def escape_ffmpeg_filter_value(value: str) -> str:
     """
-    Escape a value so it is safe in FFmpeg filter expressions.
+    Escape a filesystem path so it is safe inside an FFmpeg filter expression.
+
+    Every caller passes ``os.path.abspath(...)``, so this is a path escaper.
+
+    Two things matter here, and both were established by testing forms against
+    ffmpeg directly rather than by reasoning about the docs:
+
+    1. Backslashes are converted to forward slashes rather than escaped. FFmpeg
+       accepts forward slashes on Windows, and escaping the separators instead
+       leaves libass with a mangled path.
+    2. The colon is escaped with *two* backslashes, not one. A filter option
+       value is unescaped twice on its way in -- once when the filtergraph is
+       split on ``:``, once by the filter itself -- so a single backslash is
+       consumed by the first pass and the drive letter still terminates the
+       option. ``C\\\\:/Users/...`` survives both passes.
+
+    On POSIX this is a no-op: those paths contain neither backslashes nor
+    colons, so the output is byte-identical to the previous behaviour.
 
     Args:
-        value: Raw value to place inside an FFmpeg filter string.
+        value: Raw path to place inside an FFmpeg filter string.
 
     Returns:
         Escaped value string for FFmpeg filter usage.
     """
-    return str(value).replace("\\", r"\\").replace(":", r"\:").replace("'", r"\'")
+    return (
+        str(value)
+        .replace("\\", "/")
+        .replace(":", "\\\\:")
+        .replace("'", r"\'")
+    )
 

@@ -11,12 +11,15 @@ import os
 from . import diarization as diarization_mod
 from . import engine, metadata, hook_manager
 
-# studio pulls in cv2/mediapipe/ultralytics and voiceover pulls in google-genai,
-# both at module scope. Importing them here would mean `import clipping.runner`
-# requires the full render stack, which defeats the --transcript bypass (a
-# transcript-only run would still load the very ML stack it exists to avoid) and
-# would force CI to install OpenCV just to test a text parser. They are imported
-# inside run_pipeline, at the point of first use.
+# studio pulls in cv2/mediapipe/ultralytics at module scope. Importing it here
+# would mean `import clipping.runner` requires the full render stack, which
+# defeats the --transcript bypass (a transcript-only run would still load the
+# very ML stack it exists to avoid) and would force CI to install OpenCV just to
+# test a text parser. It is imported inside run_pipeline, at first use.
+#
+# voiceover is imported inside the `if cfg.voiceover` branch, not here: it pulls
+# in google-genai, and an optional feature must not make its dependency
+# mandatory for every run.
 
 
 def probe_video_duration(video_path: str) -> float | None:
@@ -144,7 +147,7 @@ def run_pipeline(cfg) -> list[dict]:
         Render manifest (one dict per clip).
     """
 
-    from . import studio, voiceover
+    from . import studio
 
     # Step 1 — Ingest the source video.
     #
@@ -264,6 +267,8 @@ def run_pipeline(cfg) -> list[dict]:
 
     # Step 5.5 — Generate Voice-Over (if enabled)
     if getattr(cfg, "voiceover", False):
+        from . import voiceover
+
         print(f"\n🎙️ Meng-generate Voice-Over untuk {len(hasil_json)} klip...")
         for klip in hasil_json:
             try:

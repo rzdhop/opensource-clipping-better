@@ -56,7 +56,13 @@ def _run_pipeline_sync(job_id: str, payload: dict) -> None:
         # would fail every job the moment NVIDIA became the default.
         from clipping.config import missing_provider_key
 
-        missing = missing_provider_key(cfg)
+        # A render-only rerun (the dashboard's "Bypass AI" toggle) reuses a
+        # cached response and calls no provider, so it must not require a key.
+        # This mirrors the same skip in main.py.
+        cached_ai = os.path.join(cfg.outputs_dir, "gemini_response.json")
+        render_only = getattr(cfg, "load_gemini_json", False) and os.path.isfile(cached_ai)
+
+        missing = None if render_only else missing_provider_key(cfg)
         if missing:
             _, env_name = missing
             store.set_error(
