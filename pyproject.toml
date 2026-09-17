@@ -23,3 +23,11 @@ dependencies = [
 
 [project.scripts]
 clipping = "main:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"

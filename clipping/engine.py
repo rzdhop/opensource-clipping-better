@@ -10,7 +10,20 @@ import re
 import time
 
 from yt_dlp import YoutubeDL
-from faster_whisper import WhisperModel
+
+# Transcript parsing lives in clipping.transcript (stdlib-only, so a --transcript
+# run never touches the ML stack). Re-exported here because web/api/worker.py and
+# the legacy runner path import these names from engine.
+from .transcript import (  # noqa: F401
+    TranscriptParseError,
+    load_transcript,
+    parse_vtt_subs,
+    parse_youtube_json3_subs,
+)
+
+# NOTE: faster_whisper is imported lazily inside transcribe_video(). Importing it
+# here would drag CTranslate2/cuDNN into every `import clipping.engine`, which
+# defeats the --transcript bypass and makes the test suite require a GPU stack.
 
 
 # ==============================================================================
@@ -233,117 +246,6 @@ def download_video(
 # TAHAP 2: TRANSKRIPSI WHISPER & JSON3 FALLBACK
 # ==============================================================================
 
-def parse_youtube_json3_subs(json_path: str, max_words_per_subtitle: int = 5) -> tuple[str, list[dict]]:
-    """
-    Parse downloaded YouTube JSON3 subtitles into transkrip_lengkap and data_segmen.
-    Returns empty string/list if parsing fails.
-    """
-    import json
-
-    print("[2/3] Memproses subtitle JSON3 dari YouTube...")
-    transkrip_lengkap = ""
-    data_segmen = []
-
-    try:
-        with open(json_path, "r", encoding="utf-8") as f:
-            subs_data = json.load(f)
-
-        events = subs_data.get("events", [])
-
-        flat_words = []
-        for event in events:
-            # YouTube timestamps are in ms
-            t_start = event.get("tStartMs", 0) / 1000.0
-            d_duration = event.get("dDurationMs", 0) / 1000.0
-            event_end = t_start + d_duration
-
-            segs = event.get("segs", [])
-            for i, seg in enumerate(segs):
-                text = seg.get("utf8", "")
-                if not text.strip() or text == "\n":
-                    continue
-
-                # tOffsetMs is offset from t_start
-                offset = seg.get("tOffsetMs", 0) / 1000.0
-                seg_start = t_start + offset
-
-                # Determine end of this segment
-                if i < len(segs) - 1:
-                    next_offset = segs[i + 1].get("tOffsetMs", 0) / 1000.0
-                    seg_end = t_start + next_offset
-                else:
-                    seg_end = event_end
-
-                if seg_end <= seg_start:
-                    seg_end = seg_start + 1.0  # Fallback duration
-
-                # Clean up YouTube subtitle artifacts
-                clean_text = text.replace("\n", " ").replace("\u200b", "").strip()
-                # Remove HTML tags (e.g., <i>, </i>, <b>, </b>, <font color="...">)
-                clean_text = re.sub(r"<[^>]+>", "", clean_text)
-                # Remove YouTube annotation brackets: [Music], [Applause], [Laughter], etc.
-                clean_text = re.sub(r"\[[\w\s]+\]", "", clean_text)
-                # Remove speaker change markers: >> 
-                clean_text = re.sub(r">>\s*", "", clean_text)
-                # Remove music symbols: ♪, ♫, etc.
-                clean_text = re.sub(r"[♪♫♬♩]", "", clean_text)
-                # Remove leading dashes often used for speaker identification
-                clean_text = re.sub(r"^\s*-\s+", "", clean_text)
-                # Collapse multiple spaces into one
-                clean_text = re.sub(r"\s{2,}", " ", clean_text).strip()
-
-                if clean_text:
-                    # Memecah teks menjadi kata tunggal agar karaoke per-kata bekerja seperti whisper
-                    words_in_seg = clean_text.split()
-                    if not words_in_seg:
-                        continue
-
-                    duration_per_word = (seg_end - seg_start) / len(words_in_seg)
-
-                    for w_idx, w_text in enumerate(words_in_seg):
-                        w_start = seg_start + (w_idx * duration_per_word)
-                        w_end = w_start + duration_per_word
-
-                        flat_words.append({
-                            "word": w_text,
-                            "start": w_start,
-                            "end": w_end,
-                        })
-
-        # Adjust end times based on the start time of the next word to prevent overlaps
-        for i in range(len(flat_words) - 1):
-            if flat_words[i]["end"] > flat_words[i + 1]["start"]:
-                flat_words[i]["end"] = max(flat_words[i]["start"] + 0.1, flat_words[i + 1]["start"])
-
-        # Group them into segments
-        chunk_words = []
-        chunk_start = 0.0
-
-        for i, w in enumerate(flat_words):
-            if len(chunk_words) == 0:
-                chunk_start = w["start"]
-
-            chunk_words.append(w)
-
-            if len(chunk_words) == max_words_per_subtitle or i == len(flat_words) - 1:
-                chunk_text = " ".join([cw["word"] for cw in chunk_words])
-                chunk_end = w["end"]
-                transkrip_lengkap += f"[{chunk_start:.1f} - {chunk_end:.1f}] {chunk_text}\n"
-
-                data_segmen.append({
-                    "start": chunk_start,
-                    "end": chunk_end,
-                    "words": chunk_words,
-                })
-                chunk_words = []
-
-        return transkrip_lengkap, data_segmen
-
-    except Exception as e:
-        print(f"⚠️ Gagal memparsing JSON3: {e}")
-        return "", []
-
-
 def transcribe_video(
     video_path: str,
     max_words_per_subtitle: int = 5,
@@ -361,6 +263,15 @@ def transcribe_video(
     data_segmen : list[dict]
         Word-level segments grouped by *max_words_per_subtitle*.
     """
+    try:
+        from faster_whisper import WhisperModel
+    except ImportError as exc:  # pragma: no cover - depends on the install
+        raise RuntimeError(
+            "faster-whisper tidak terinstall, jadi transkripsi in-process tidak bisa "
+            "dijalankan. Install dengan `pip install faster-whisper`, atau jalankan "
+            "dengan --transcript <file.vtt> untuk melewati Whisper sepenuhnya."
+        ) from exc
+
     print("[2/3] Memulai transkripsi dengan Faster-Whisper (Level Per-Kata)...")
 
     # Langkah-langkah ini berjalan tanpa output di dalam faster-whisper sebelum
