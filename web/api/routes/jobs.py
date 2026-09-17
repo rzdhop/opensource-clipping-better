@@ -81,11 +81,21 @@ async def create_job(req: JobCreateRequest) -> JobResponse:
             payload[key] = value.value
 
     reuse_job_id = payload.pop("reuse_job_id", None)
-    
-    # If reusing, automatically flag to load existing Gemini JSON (if not explicitly set otherwise)
-    if reuse_job_id and "load_gemini_json" not in payload:
+
+    # Reusing a job means rerunning it against the AI output it already has, so
+    # default to loading that instead of paying for the analysis again.
+    #
+    # This must test model_fields_set, not the payload: load_gemini_json is a
+    # declared field, so model_dump() always includes the key (as False), and the
+    # old `"load_gemini_json" not in payload` check could never fire. Declaring
+    # the field is what silently disabled this -- a rerun then demanded an API
+    # key it did not need and failed with NVIDIA_API_KEY not found.
+    # model_fields_set contains only what the client actually sent, so an
+    # explicit `false` still wins.
+    if reuse_job_id and "load_gemini_json" not in req.model_fields_set:
         payload["load_gemini_json"] = True
-        
+
+
     job_id = store.create_job(
         transcript_filename=req.transcript_filename,
         source_url=req.source_url,
