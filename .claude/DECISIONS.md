@@ -81,3 +81,20 @@ platform is untouched.
 **Consequence.** One function changed in the render layer. The correct escaping
 was established empirically by probing ffmpeg with seven candidate forms rather
 than inferred from documentation.
+
+## DEC-009 — Mirror argparse `choices=` as enums; invent no numeric bounds
+**Context.** Declaring the 21 dropped `JobCreateRequest` fields raised the
+question of how much validation to mirror from `clipping/config.py`. An audit of
+that file found it enforces **no numeric range** for any of the 21 — the
+argparse `type=int/float` cast is the only check — but three flags do carry
+`choices=` allow-lists: `--split-trigger`, `--video-scale-algo`, `--yolo-size`.
+**Decision.** Add `SplitTrigger`, `VideoScaleAlgo` and `YoloSize` enums so the
+API rejects exactly what the CLI rejects. Add no `ge=`/`le=` bounds to the eight
+numeric fields. `diarization_speakers` is typed `Union[Literal["auto"], int]` to
+mirror `_parse_speakers`.
+**Consequence.** The two front ends accept the same value domain. A bound added
+on the API side only would have rejected payloads the CLI accepts — a silent
+divergence, and out of scope for a "declare the missing fields" task. Constraining
+`yolo_size` additionally closes a path-traversal surface: `config_adapter`
+interpolates it into both a local filename and a download URL.
+

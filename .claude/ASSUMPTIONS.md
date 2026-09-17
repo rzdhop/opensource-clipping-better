@@ -8,6 +8,15 @@
   was available. This is the one substantive open risk.
 
 ## Confirmed
+- **A-008** — The 21 undeclared `JobCreateRequest` fields are API-only: no part
+  of the dashboard sends them. *Confirmed by grep for all 21 names over the whole
+  of `web/dashboard/src` — zero matches. The task brief stated the dashboard sent
+  "several of them"; it does not.*
+- **A-009** — `reuse_job_id` is live, not dead. *Confirmed at
+  `web/api/routes/jobs.py:67` (validation) and `:83` (popped from the payload and
+  passed to `store.create_job(job_id=...)` to reuse a prior job directory). It is
+  absent from `config_adapter`/`worker` by design, because it is popped before the
+  payload reaches them.*
 - **A-001** — The transcript contract consumed by `studio/subtitles.buat_file_ass`
   is `{"start": float, "end": float, "words": [{"word","start","end"}]}` with no
   `"text"` key, and word-level timestamps are mandatory.
