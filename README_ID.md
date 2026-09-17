@@ -86,22 +86,24 @@ Path(".env").write_text(env_text, encoding="utf-8")
 
 **Cell 3: Eksekusi (Contoh termasuk fallback Kaggle untuk float32)**
 ```python
-URL_YOUTUBE = "https://www.youtube.com/watch?v=Dc4_aBFAYWE&pp=0gcJCdkKAYcqIYzv"
+# Siapkan file input dulu (cell sebelumnya), misalnya dengan yt-dlp:
+#   !yt-dlp -f "bv*[vcodec!*=av01]+ba/b" --write-auto-subs --sub-format vtt \
+#          --convert-subs vtt -o "talk.%(ext)s" "<URL>"
+VIDEO_FILE = "talk.mp4"
+TRANSCRIPT_FILE = "talk.en.vtt"   # kosongkan ("") untuk transkripsi dengan Whisper
 JUMLAH_CLIP = 10
 RASIO = "9:16"
 FONT_STYLE = "DEFAULT"
-GEMINI_MODEL = "gemini-3-flash-preview"
 # Gunakan 'float32' untuk limitasi hardware Kaggle, atau 'float16' untuk standar Colab T4
 WHISPER_COMPUTE_TYPE = "float32"
 
 !python main.py \
-  --url "{URL_YOUTUBE}" \
+  --video "{VIDEO_FILE}" --transcript "{TRANSCRIPT_FILE}" \
   --clips {JUMLAH_CLIP} \
   --ratio "{RASIO}" \
   --font-style "{FONT_STYLE}" \
   --hook-duration 3 \
   --words-per-sub 5 \
-  --gemini-model "{GEMINI_MODEL}" \
   --whisper-compute-type "{WHISPER_COMPUTE_TYPE}" \
   --no-bgm
 ```
@@ -161,42 +163,39 @@ pip install -r requirements.txt          # pip / Colab
 cp .env.sample .env
 # Edit file .env dan masukkan GOOGLE_API_KEY kamu
 
-# 4. Jalankan (Wajib sertakan --url)
-python main.py --url "https://youtube.com/watch?v=VIDEO_ID"
+# 4. Jalankan (arahkan ke file lokal Anda)
+python main.py --video talk.mp4 --transcript talk.vtt
 # 5. Contoh Eksekusi
 
 # Mode Standar (Default untuk 5 klip)
-python main.py --url "https://youtube.com/watch?v=VIDEO_ID" --clips 5 --ratio 16:9
+python main.py --video talk.mp4 --transcript talk.vtt --clips 5 --ratio 16:9
 
 # Prioritaskan kualitas source tertinggi yang tersedia (default)
-python main.py --url "https://youtube.com/watch?v=VIDEO_ID" --source-height max
 
 # Batasi kualitas source hingga 1440p (2K)
-python main.py --url "https://youtube.com/watch?v=VIDEO_ID" --source-height 1440
 
 # Tuning output lebih tajam (mode biasa maupun dynamic-split)
-python main.py --url "https://youtube.com/watch?v=VIDEO_ID" \
-  --source-height 2160 \
+python main.py --video talk.mp4 --transcript talk.vtt \
   --video-cq 19 \
   --video-crf 17 \
   --video-preset slow \
   --video-scale-algo lanczos
 
 # Mode Advanced (YOLOv8 GPU Face Tracking & Font Khusus)
-python main.py --url "https://youtube.com/watch?v=VIDEO_ID" \
+python main.py --video talk.mp4 --transcript talk.vtt \
   --clips 7 \
   --face-detector yolo \
   --yolo-size 8m \
   --font-style STORYTELLER
 
 # Mode Podcast Split-Screen (2 speaker, 9:16)
-python main.py --url "https://youtube.com/watch?v=PODCAST_ID" \
+python main.py --video podcast.mp4 --transcript podcast.vtt \
   --clips 3 \
   --ratio "9:16" \
   --split-screen
 
 # Mode Podcast Camera Switch (auto-switch ke speaker aktif, blurred pillarbox saat overlap)
-python main.py --url "https://youtube.com/watch?v=PODCAST_ID" \
+python main.py --video podcast.mp4 --transcript podcast.vtt \
   --clips 3 \
   --ratio "9:16" \
   --camera-switch \
@@ -204,38 +203,35 @@ python main.py --url "https://youtube.com/watch?v=PODCAST_ID" \
   --switch-blend-duration 0.0
 
 # Mode Multi-Speaker Podcast (3 speaker lintas 2 scene)
-python main.py --url "https://youtube.com/watch?v=PODCAST_ID" \
+python main.py --video podcast.mp4 --transcript podcast.vtt \
   --clips 3 \
   --ratio "9:16" \
   --camera-switch \
   --diarization-speakers 3
 
 # Custom Hook Manual (menggunakan klip .mp4 eksternal)
-python main.py --url "URL_VIDEO" --hook-source "URL_DRIVE_ATAU_PATH" --hook-source-start 5.0 --hook-duration 4
+python main.py --video talk.mp4 --transcript talk.vtt --hook-source "URL_DRIVE_ATAU_PATH" --hook-source-start 5.0 --hook-duration 4
 
 # Rendering Ultra-HD 2K (Download 1440p dan render resolusi vertikal 1440p native dengan penajaman)
-python main.py --url "URL_VIDEO" --source-height 1440 --render-height source --video-sharpen
+python main.py --video talk.mp4 --transcript talk.vtt --render-height source --video-sharpen
 
 # Menggunakan NVIDIA NIM (DeepSeek-V3) sebagai pengganti Gemini
-python main.py --url "URL_VIDEO" --ai-provider nvidia --nvidia-model "deepseek-ai/deepseek-v3"
+python main.py --video talk.mp4 --transcript talk.vtt --ai-provider nvidia --nvidia-model "deepseek-ai/deepseek-v4-flash-0731"
 
 # Output kotak untuk Instagram Feed (1:1)
-python main.py --url "URL_VIDEO" --ratio "1:1" --clips 5
+python main.py --video talk.mp4 --transcript talk.vtt --ratio "1:1" --clips 5
 
 # Output portrait Instagram/Facebook (4:5)
-python main.py --url "URL_VIDEO" --ratio "4:5" --clips 5
+python main.py --video talk.mp4 --transcript talk.vtt --ratio "4:5" --clips 5
 
 # Output portrait klasik (3:4)
-python main.py --url "URL_VIDEO" --ratio "3:4" --clips 5
+python main.py --video talk.mp4 --transcript talk.vtt --ratio "3:4" --clips 5
 
 # TikTok source
-python main.py --url "https://www.tiktok.com/@username/video/1234567890" --source tiktok --clips 3
 
 # Instagram source
-python main.py --url "https://www.instagram.com/reel/123456789/" --source instagram --clips 3
 
 # Google Drive source
-python main.py --url "https://drive.google.com/file/d/1234567890/view" --source gdrive --clips 3
 ```
 
 ## ⚙️ Opsi CLI
@@ -246,13 +242,15 @@ python main.py --help
 
 | Argumen | Default | Deskripsi |
 |---|---|---|
-| `--url`, `-u` | — | URL video yang akan diproses (Wajib) |
-| `--source` | `youtube` | Sumber video. Pilihan: `youtube`, `tiktok`, `instagram`, `gdrive`. |
+| `--video`, `-v` | — | Path ke file video lokal (wajib) |
+| `--transcript`, `-t` | — | Path ke `.vtt`/`.srt`/`.json3` lokal. Melewati Whisper sepenuhnya |
+| `--transcript-offset` | `0.0` | Geser semua timestamp transkrip sekian detik |
+| `--no-whisper` | — | Gagal keras alih-alih fallback ke Whisper |
+| `--source-url` | — | Atribusi untuk deskripsi/manifest saja. Tidak pernah diunduh |
 | `--clips`, `-n` | `7` | Jumlah klip highlight yang dihasilkan |
 | `--ratio`, `-r` | `9:16` | Rasio aspek output (`9:16`, `16:9`, `1:1`, `3:4`, `4:5`) |
-| `--source-height` | `max` | Batas tinggi resolusi source saat download (`max`, `1080`, `1440`, `2160`, dst.) |
 | `--ai-provider` | `gemini` | Provider AI untuk analisis (`gemini` atau `nvidia`). |
-| `--nvidia-model` | `deepseek...` | Nama model untuk NVIDIA NIM API (misal `deepseek-ai/deepseek-v3`). |
+| `--nvidia-model` | `deepseek-ai/deepseek-v4-flash-0731` | Model untuk NVIDIA NIM. Model kadang dipensiunkan; lihat daftar terkini di `https://integrate.api.nvidia.com/v1/models`. |
 | `--render-height` | `1080` | Target tinggi output render (`1080`, `1440`, `2160`, `source`) |
 | `--video-bitrate` | `auto` | Target bitrate video (misal 8M, 12M, auto). 'auto' menyesuaikan resolusi. |
 | `--video-sharpen` | — | Aktifkan filter penajaman (sharpening) ringan untuk hasil lebih jernih. |
@@ -283,7 +281,6 @@ python main.py --help
 | `--no-karaoke` | — | Gunakan teks biasa tanpa highlight karaoke |
 | `--advanced-text` | `False` | Aktifkan typografi kinetik (skala kata & animasi pop) |
 | `--advanced-text-hook` | `False` | Aktifkan typografi kinetik khusus untuk hook teaser |
-| `--use-dlp-subs` | — | Unduh dan gunakan subtitle bawaan YouTube untuk mempercepat proses (melewati Whisper) |
 | `--face-detector` | `mediapipe` | Model AI untuk crop wajah (`mediapipe` atau `yolo`) |
 | `--box-face-detection` | `False` | Tampilkan kotak kuning deteksi wajah (debug) |
 | `--dev-mode` | `False` | **[Eksperimental]** Aktifkan visualisasi konteks 16:9 untuk proses tracking/stabilisasi 9:16 |
@@ -375,34 +372,34 @@ Meniru gaya editing profesional dengan fokus penuh pada satu pembicara yang akti
 
 ```bash
 # 1. Clipping AI Standar (7 klip, 9:16)
-python main.py --url "URL_VIDEO"
+python main.py --video talk.mp4 --transcript talk.vtt
 
 # 2. Dynamic Split-Screen (Berbasis Visual, TANPA TOKEN)
-python main.py --url "URL_VIDEO" --split-screen --dynamic-split --split-trigger face
+python main.py --video talk.mp4 --transcript talk.vtt --split-screen --dynamic-split --split-trigger face
 
 # 3. Dynamic Split-Screen (Berbasis Audio, Sorot yang bicara, butuh HF_TOKEN)
-python main.py --url "URL_VIDEO" --split-screen --dynamic-split --split-trigger diarization
+python main.py --video talk.mp4 --transcript talk.vtt --split-screen --dynamic-split --split-trigger diarization
 
 # 4. Camera Switch Sinematik (Butuh HF_TOKEN)
-python main.py --url "URL_VIDEO" --camera-switch
+python main.py --video talk.mp4 --transcript talk.vtt --camera-switch
 
 # 5. Smart Separation Split-Screen (Auto-Zoom & Vertical Tracking)
-python main.py --url "URL_VIDEO" --split-screen --dynamic-split --split-trigger face --split-auto-zoom --split-v-align 0.4
+python main.py --video talk.mp4 --transcript talk.vtt --split-screen --dynamic-split --split-trigger face --split-auto-zoom --split-v-align 0.4
 
 # 6. Output kotak (1:1) dengan Split-Screen
-python main.py --url "URL_VIDEO" --ratio "1:1" --split-screen --dynamic-split --split-trigger face
+python main.py --video talk.mp4 --transcript talk.vtt --ratio "1:1" --split-screen --dynamic-split --split-trigger face
 
 # 7. Hook V2 + Segment Trimming (default)
-python main.py --url "URL_VIDEO" --hook-v2
+python main.py --video talk.mp4 --transcript talk.vtt --hook-v2
 
 # 8. Hook V2 + Silence Trimming Agresif
-python main.py --url "URL_VIDEO" --hook-v2 --silence-trim
+python main.py --video talk.mp4 --transcript talk.vtt --hook-v2 --silence-trim
 
 # 9. Hook V2 tanpa Segment Trimming (render penuh)
-python main.py --url "URL_VIDEO" --hook-v2 --no-segment-trim
+python main.py --video talk.mp4 --transcript talk.vtt --hook-v2 --no-segment-trim
 
 # 10. Hook V2 Custom: 4 micro-hooks dengan gaya glitch
-python main.py --url "URL_VIDEO" --hook-v2 --hook-v2-items 4 --hook-v2-style "glitch_fast"
+python main.py --video talk.mp4 --transcript talk.vtt --hook-v2 --hook-v2-items 4 --hook-v2-style "glitch_fast"
 ```
 
 > [!IMPORTANT]
@@ -422,10 +419,10 @@ Ketika Anda menggunakan argumen `--voiceover`, sistem akan:
 **Contoh Penggunaan:**
 ```bash
 # Voice-over bahasa Inggris (Menggunakan default en-US-AvaNeural dan bahasa Inggris)
-python main.py --url "URL_VIDEO" --voiceover
+python main.py --video talk.mp4 --transcript talk.vtt --voiceover
 
 # Voice-over bahasa Indonesia dengan gaya reaksi
-python main.py --url "URL_VIDEO" --voiceover --voiceover-lang id --voiceover-voice id-ID-ArdiNeural --voiceover-style reaction
+python main.py --video talk.mp4 --transcript talk.vtt --voiceover --voiceover-lang id --voiceover-voice id-ID-ArdiNeural --voiceover-style reaction
 ```
 
 **Opsi Konfigurasi:**
@@ -564,11 +561,8 @@ Untuk setiap klip, pipeline akan membuat folder `outputs/` dan menghasilkan:
 ## 🎛️ Penjelasan Parameter Konfigurasi
 
 **▶️ Pengaturan Utama**
-- `--url` : Link video sumber
-- `--source` : Sumber platform video (Pilihan: `youtube`, `tiktok`, `instagram`, `gdrive`). Default: `youtube`.
 - `--clips` : Berapa banyak klip yang ingin dihasilkan
 - `--ratio` : `9:16` untuk TikTok/Reels/Shorts, `16:9` untuk YouTube biasa, `1:1` untuk Instagram Feed, `3:4` untuk Pinterest, `4:5` untuk Instagram/Facebook Feed
-- `--source-height` : Batas resolusi source saat download (`max` = ambil kualitas tertinggi yang tersedia)
 - `--video-cq` : Nilai CQ untuk NVENC (default `23`). [15-20: Ultra HD, 21-25: Standar, 26-50: Buram/Kecil]
 - `--video-crf` : Nilai CRF untuk libx264 (default `20`). [15-20: Ultra HD, 21-25: Standar, 26-50: Buram/Kecil]
 - `--video-preset` : Override preset encoder. (Contoh: `slow`, `faster` untuk x264; `p7`, `p1` untuk NVENC)
@@ -600,7 +594,6 @@ Untuk setiap klip, pipeline akan membuat folder `outputs/` dan menghasilkan:
 - `--advanced-text-hook` : Aktifkan efek scaling kata khusus untuk teaser hook di awal video
 
 **⚙️ Pengaturan Engine Pendukung**
-- `--use-dlp-subs` : Aktifkan pengunduhan subtitle bawaan YouTube (jika tersedia) untuk bypass proses AI Whisper (sangat menghemat waktu komputasi).
 
 **🎙️ Pengaturan Split-Screen (Podcast)**
 - `--split-screen` : Aktifkan mode split-screen atas-bawah untuk video podcast. Mendukung **3+ speaker lintas scene**. Menggunakan **Pyannote** untuk mendeteksi siapa yang berbicara.
@@ -657,18 +650,17 @@ FONT_STYLE = "DEFAULT"
 GEMINI_MODEL = "gemini-2.0-flash"
 
 !python main.py \
-  --url "{URL_YOUTUBE}" \
+  --video "{VIDEO_FILE}" --transcript "{TRANSCRIPT_FILE}" \
   --clips {JUMLAH_CLIP} \
   --ratio "{RASIO}" \
   --font-style "{FONT_STYLE}" \
   --hook-duration 3 \
   --words-per-sub 5 \
   --face-detector yolo \
-  --gemini-model "{GEMINI_MODEL}" \
   --no-bgm \
   --no-subs \
   --no-broll \
-  --use-dlp-subs
+ 
 ```
 
 ### 2. Mode Split-Screen (Podcast)
@@ -682,13 +674,12 @@ FONT_STYLE = "DEFAULT"
 GEMINI_MODEL = "gemini-2.0-flash"
 
 !python main.py \
-  --url "{URL_YOUTUBE}" \
+  --video "{VIDEO_FILE}" --transcript "{TRANSCRIPT_FILE}" \
   --clips {JUMLAH_CLIP} \
   --ratio "{RASIO}" \
   --font-style "{FONT_STYLE}" \
   --hook-duration 3 \
   --words-per-sub 5 \
-  --gemini-model "{GEMINI_MODEL}" \
   --no-bgm \
   --no-subs \
   --no-broll \
@@ -696,7 +687,7 @@ GEMINI_MODEL = "gemini-2.0-flash"
   --dynamic-split \
   --split-trigger face \
   --face-detector yolo \
-  --use-dlp-subs
+ 
 ```
 
 ## 📺 Upload Otomatis ke YouTube

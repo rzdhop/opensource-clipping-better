@@ -4,50 +4,67 @@
     {
       "id": "velia_video_2",
       "name": "Velia Video 2",
-      "url": "https://www.tiktok.com/@veliachristyy/video/7616754309144890645?is_from_webapp=1",
-      "platform": "tiktok"
+      "platform": "local",
+      "local_path": "media/velia_video_2.mp4",
+      "transcript_path": "media/velia_video_2.vtt",
+      "origin_url": "https://www.tiktok.com/@veliachristyy/video/7616754309144890645?is_from_webapp=1"
     },
     {
       "id": "donny_video_2",
       "name": "Donny Video 2",
-      "url": "https://www.tiktok.com/@donnysucahyaa/video/7616771522279050516?is_from_webapp=1",
-      "platform": "tiktok"
+      "platform": "local",
+      "local_path": "media/donny_video_2.mp4",
+      "transcript_path": "media/donny_video_2.vtt",
+      "origin_url": "https://www.tiktok.com/@donnysucahyaa/video/7616771522279050516?is_from_webapp=1"
     },
     {
       "id": "velia_video_4",
       "name": "Velia Video 4",
-      "url": "https://www.tiktok.com/@veliachristyy/video/7618236972615699732?is_from_webapp=1",
-      "platform": "tiktok"
+      "platform": "local",
+      "local_path": "media/velia_video_4.mp4",
+      "transcript_path": "media/velia_video_4.vtt",
+      "origin_url": "https://www.tiktok.com/@veliachristyy/video/7618236972615699732?is_from_webapp=1"
     },
     {
       "id": "velia_video_6",
       "name": "Velia Video 6",
-      "url": "https://www.tiktok.com/@veliachristyy/video/7618579369887288596?is_from_webapp=1",
-      "platform": "tiktok"
+      "platform": "local",
+      "local_path": "media/velia_video_6.mp4",
+      "transcript_path": "media/velia_video_6.vtt",
+      "origin_url": "https://www.tiktok.com/@veliachristyy/video/7618579369887288596?is_from_webapp=1"
     },
     {
       "id": "donny_video_4",
       "name": "Donny Video 4",
-      "url": "https://www.tiktok.com/@donnysucahyaa/video/7618180629984791828?is_from_webapp=1&web_id=7629551131118945812",
-      "platform": "tiktok"
+      "platform": "local",
+      "local_path": "media/donny_video_4.mp4",
+      "transcript_path": "media/donny_video_4.vtt",
+      "origin_url": "https://www.tiktok.com/@donnysucahyaa/video/7618180629984791828?is_from_webapp=1&web_id=7629551131118945812"
     },
     {
       "id": "ugc_1",
       "name": "UGC 1",
-      "url": "https://www.tiktok.com/@_sukaapaajaaa_/video/7616803467201416468?is_from_webapp=1",
-      "platform": "tiktok"
+      "platform": "local",
+      "local_path": "media/ugc_1.mp4",
+      "transcript_path": "media/ugc_1.vtt",
+      "origin_url": "https://www.tiktok.com/@_sukaapaajaaa_/video/7616803467201416468?is_from_webapp=1"
     },
     {
       "id": "ugc_2",
       "name": "UGC 2",
-      "url": "https://www.tiktok.com/@sebatas_senja11/video/7616791994240617749?is_from_webapp=1",
-      "platform": "tiktok"
+      "platform": "local",
+      "local_path": "media/ugc_2.mp4",
+      "transcript_path": "media/ugc_2.vtt",
+      "origin_url": "https://www.tiktok.com/@sebatas_senja11/video/7616791994240617749?is_from_webapp=1"
     },
     {
       "id": "ugc_3",
       "name": "UGC 3",
-      "url": "https://www.instagram.com/reels/DV1T4CkCTcZ/",
-      "platform": "instagram"
+      "platform": "local",
+      "local_path": "media/ugc_3.mp4",
+      "transcript_path": "media/ugc_3.vtt",
+      "origin_url": "https://www.instagram.com/reels/DV1T4CkCTcZ/"
     }
-  ]
+  ],
+  "_note": "platform is 'local': this pipeline never downloads. Acquire each video with your own tool, put it at local_path, and optionally supply a transcript_path (.vtt/.srt/.json3) to skip Whisper for that source. origin_url is attribution only and is never fetched."
 }

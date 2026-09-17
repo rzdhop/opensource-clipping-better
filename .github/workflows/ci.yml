@@ -1,0 +1,29 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # Deliberately minimal. Every test in this suite is stdlib-only -- no
+      # torch, no mediapipe, no OpenCV, no ffmpeg, no GPU, no network. That is
+      # the payoff for keeping the heavy imports lazy in engine.py and
+      # runner.py: the transcript parser, the CLI surface, the NVIDIA retry
+      # logic and the web config adapter are all testable on their own.
+      - run: pip install pytest
+      - run: python -m pytest -q
+
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # Catches orphaned references in modules the test suite does not import.
+      - run: python -m compileall -q clipping web main.py run_upload.py run_fb_upload.py youtube_uploader youtube_tracker

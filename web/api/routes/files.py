@@ -38,7 +38,12 @@ async def upload_video(file: UploadFile = File(...)) -> dict:
         raise HTTPException(status_code=400, detail="No filename provided")
 
     # Validate extension
-    allowed_exts = {".mp4", ".mkv", ".avi", ".mov", ".webm", ".flv", ".ts"}
+    # Transcripts ride the same endpoint: they are tiny, and a second endpoint
+    # would duplicate the path-traversal and naming logic for no benefit.
+    allowed_exts = {
+        ".mp4", ".mkv", ".avi", ".mov", ".webm", ".flv", ".ts",
+        ".vtt", ".srt", ".json3",
+    }
     ext = os.path.splitext(file.filename)[1].lower()
     if ext not in allowed_exts:
         raise HTTPException(

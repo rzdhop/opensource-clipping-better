@@ -8,8 +8,15 @@ to speech using edge-tts. Supports word-level subtitle generation.
 import os
 import json
 import asyncio
-from google import genai
-from google.genai import types
+# Both dependencies belong to an optional feature (--voiceover), so neither is
+# allowed to break `import clipping.voiceover` for everyone else. The functions
+# that need them raise a clear error instead.
+try:
+    from google import genai
+    from google.genai import types
+except ImportError:  # pragma: no cover - depends on the install
+    genai = None
+    types = None
 
 try:
     import edge_tts
@@ -220,8 +227,14 @@ SCRIPT VOICE-OVER (Hanya teks yang dibacakan, tanpa tanda kutip di awal/akhir):"
 
 def generate_commentary_script(transcript_snippet: str, cfg, style="analysis", language="id", length="short") -> str:
     """Generate commentary script using Gemini AI."""
+    if genai is None:
+        raise RuntimeError(
+            "--voiceover membutuhkan google-genai. Install dengan "
+            "`pip install google-genai`, atau jalankan tanpa --voiceover."
+        )
+
     print(f"   🧠 Generating {style} commentary script via Gemini ({language}, {length})...")
-    
+
     api_key = cfg.api_key_gemini
     if not api_key:
         raise ValueError("GOOGLE_API_KEY tidak ditemukan di environment atau config.")

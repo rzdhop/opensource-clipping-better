@@ -7,7 +7,7 @@ This guide covers all the options for controlling video output quality, resoluti
 ## Resolution Pipeline
 
 ```
-Source Video → Download (--source-height) → Render (--render-height) → Final Output
+Local Source Video (--video) → Render (--render-height) → Final Output
    4K/2K/1080p       max / 1440 / 1080         source / 1440 / 1080
 ```
 
@@ -24,10 +24,8 @@ Controls the maximum resolution downloaded from the source platform:
 
 ```bash
 # Download highest quality available
-python main.py --url "VIDEO_URL" --source-height max
 
 # Cap at 1440p to save bandwidth
-python main.py --url "VIDEO_URL" --source-height 1440
 ```
 
 ### Render Output Height
@@ -43,10 +41,9 @@ Controls the final output video height:
 
 ```bash
 # Standard 1080p output
-python main.py --url "VIDEO_URL" --render-height 1080
+python main.py --video talk.mp4 --transcript talk.vtt --render-height 1080
 
 # Native 2K rendering
-python main.py --url "VIDEO_URL" --source-height 1440 --render-height source
 ```
 
 ---
@@ -75,10 +72,10 @@ python main.py --url "VIDEO_URL" --source-height 1440 --render-height source
 
 ```bash
 # Ultra-sharp output
-python main.py --url "VIDEO_URL" --video-cq 19 --video-crf 17
+python main.py --video talk.mp4 --transcript talk.vtt --video-cq 19 --video-crf 17
 
 # Smaller files (lower quality)
-python main.py --url "VIDEO_URL" --video-cq 28 --video-crf 25
+python main.py --video talk.mp4 --transcript talk.vtt --video-cq 28 --video-crf 25
 ```
 
 ---
@@ -95,10 +92,10 @@ Controls the speed vs. quality tradeoff of the encoding process:
 
 ```bash
 # Slow encoding for maximum quality
-python main.py --url "VIDEO_URL" --video-preset slow
+python main.py --video talk.mp4 --transcript talk.vtt --video-preset slow
 
 # Fast encoding for quick preview
-python main.py --url "VIDEO_URL" --video-preset veryfast
+python main.py --video talk.mp4 --transcript talk.vtt --video-preset veryfast
 ```
 
 > Use `auto` (default) to let the system choose the optimal preset.
@@ -115,7 +112,7 @@ python main.py --url "VIDEO_URL" --video-preset veryfast
 
 ```bash
 # High bitrate for maximum quality
-python main.py --url "VIDEO_URL" --video-bitrate 12M
+python main.py --video talk.mp4 --transcript talk.vtt --video-bitrate 12M
 ```
 
 ---
@@ -125,15 +122,14 @@ python main.py --url "VIDEO_URL" --video-bitrate 12M
 Apply a subtle sharpening filter for clearer output:
 
 ```bash
-python main.py --url "VIDEO_URL" --video-sharpen
+python main.py --video talk.mp4 --transcript talk.vtt --video-sharpen
 ```
 
 Best used in combination with high-resolution rendering:
 
 ```bash
 # Ultra-HD 2K with sharpening
-python main.py --url "VIDEO_URL" \
-  --source-height 1440 \
+python main.py --video talk.mp4 --transcript talk.vtt \
   --render-height source \
   --video-sharpen
 ```
@@ -152,7 +148,7 @@ Controls how the video is resized during rendering:
 | `area` | Good for downscaling | Fast |
 
 ```bash
-python main.py --url "VIDEO_URL" --video-scale-algo lanczos
+python main.py --video talk.mp4 --transcript talk.vtt --video-scale-algo lanczos
 ```
 
 ---
@@ -163,7 +159,7 @@ The engine can apply a dynamic ambient glow around the video edges (matching the
 
 ```bash
 # Apply edge glow to the entire video
-python main.py --url "VIDEO_URL" --edge-glow
+python main.py --video talk.mp4 --transcript talk.vtt --edge-glow
 ```
 
 ### Edge Glow Modes (`--edge-glow-mode`)
@@ -182,8 +178,7 @@ The underlying animation engine loops the glow effect. You can choose the render
 
 ### Maximum Quality (Slow)
 ```bash
-python main.py --url "VIDEO_URL" \
-  --source-height 2160 \
+python main.py --video talk.mp4 --transcript talk.vtt \
   --render-height source \
   --video-cq 18 \
   --video-crf 16 \
@@ -195,14 +190,13 @@ python main.py --url "VIDEO_URL" \
 
 ### Standard Quality (Default)
 ```bash
-python main.py --url "VIDEO_URL"
+python main.py --video talk.mp4 --transcript talk.vtt
 # Uses: source-height max, render-height 1080, cq 23, crf 20, lanczos
 ```
 
 ### Fast Preview (Low Quality)
 ```bash
-python main.py --url "VIDEO_URL" \
-  --source-height 1080 \
+python main.py --video talk.mp4 --transcript talk.vtt \
   --video-cq 30 \
   --video-crf 28 \
   --video-preset veryfast \
@@ -211,8 +205,7 @@ python main.py --url "VIDEO_URL" \
 
 ### TikTok/Reels Optimized
 ```bash
-python main.py --url "VIDEO_URL" \
-  --source-height 1440 \
+python main.py --video talk.mp4 --transcript talk.vtt \
   --render-height 1080 \
   --video-cq 21 \
   --video-crf 19 \

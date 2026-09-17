@@ -1,0 +1,20 @@
+WEBVTT - Example Title
+Kind: captions
+Language: en
+
+NOTE
+This note block contains --> an arrow
+which must never be read as a cue.
+
+STYLE
+::cue {
+  /* --> also not a cue */
+  color: yellow;
+}
+
+REGION
+id:speaker width:40%
+
+intro-cue-id
+00:00:02.000 --> 00:00:04.000
+actual subtitle text

@@ -59,7 +59,7 @@ Click the status pill or ✏️ button to edit. You can add extra metadata such 
 ### 5. Instant Clipping Command
 Ready to clip a video? Click the 📋 copy button on any video card to instantly copy the processing command:
 ```bash
-python main.py --url "https://www.youtube.com/watch?v=..."
+python main.py --video talk.mp4 --transcript talk.vtt
 ```
 *(You can configure your default preferred flags in the Settings panel)*
 

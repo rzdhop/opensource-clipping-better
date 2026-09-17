@@ -4,44 +4,51 @@
     {
       "id": "velia_video_2",
       "name": "Velia Video 2 - Pacaran Kontrak",
-      "url": "https://drive.google.com/file/d/REPLACE_FILE_ID/view",
-      "platform": "gdrive",
-      "local_path": null
+      "platform": "local",
+      "local_path": "media/velia_video_2.mp4",
+      "transcript_path": "media/velia_video_2.vtt",
+      "origin_url": "https://drive.google.com/file/d/REPLACE_FILE_ID/view"
     },
     {
       "id": "donny_video_2",
       "name": "Donny Video 2 - CEO Donny",
-      "url": "https://drive.google.com/file/d/REPLACE_FILE_ID/view",
-      "platform": "gdrive",
-      "local_path": null
+      "platform": "local",
+      "local_path": "media/donny_video_2.mp4",
+      "transcript_path": "media/donny_video_2.vtt",
+      "origin_url": "https://drive.google.com/file/d/REPLACE_FILE_ID/view"
     },
     {
       "id": "velia_video_4",
       "name": "Velia Video 4",
-      "url": "https://drive.google.com/file/d/REPLACE_FILE_ID/view",
-      "platform": "gdrive",
-      "local_path": null
+      "platform": "local",
+      "local_path": "media/velia_video_4.mp4",
+      "transcript_path": "media/velia_video_4.vtt",
+      "origin_url": "https://drive.google.com/file/d/REPLACE_FILE_ID/view"
     },
     {
       "id": "velia_video_6",
       "name": "Velia Video 6",
-      "url": "https://drive.google.com/file/d/REPLACE_FILE_ID/view",
-      "platform": "gdrive",
-      "local_path": null
+      "platform": "local",
+      "local_path": "media/velia_video_6.mp4",
+      "transcript_path": "media/velia_video_6.vtt",
+      "origin_url": "https://drive.google.com/file/d/REPLACE_FILE_ID/view"
     },
     {
       "id": "donny_video_4",
       "name": "Donny Video 4",
-      "url": "https://drive.google.com/file/d/REPLACE_FILE_ID/view",
-      "platform": "gdrive",
-      "local_path": null
+      "platform": "local",
+      "local_path": "media/donny_video_4.mp4",
+      "transcript_path": "media/donny_video_4.vtt",
+      "origin_url": "https://drive.google.com/file/d/REPLACE_FILE_ID/view"
     },
     {
       "id": "ugc_1_3",
       "name": "UGC Fan Clips 1-3",
-      "url": "https://drive.google.com/file/d/REPLACE_FILE_ID/view",
-      "platform": "gdrive",
-      "local_path": null
+      "platform": "local",
+      "local_path": "media/ugc_1_3.mp4",
+      "transcript_path": "media/ugc_1_3.vtt",
+      "origin_url": "https://drive.google.com/file/d/REPLACE_FILE_ID/view"
     }
-  ]
+  ],
+  "_note": "platform is 'local': this pipeline never downloads. Acquire each video with your own tool, put it at local_path, and optionally supply a transcript_path (.vtt/.srt/.json3) to skip Whisper for that source. origin_url is attribution only and is never fetched."
 }

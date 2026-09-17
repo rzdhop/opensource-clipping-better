@@ -30,13 +30,13 @@ Example Hook V2:
 
 ```bash
 # Enable Hook V2 (default 3 micro-hooks)
-python main.py --url "VIDEO_URL" --hook-v2
+python main.py --video talk.mp4 --transcript talk.vtt --hook-v2
 
 # Custom: 4 micro-hooks with glitch style
-python main.py --url "VIDEO_URL" --hook-v2 --hook-v2-items 4 --hook-v2-style "glitch_fast"
+python main.py --video talk.mp4 --transcript talk.vtt --hook-v2 --hook-v2-items 4 --hook-v2-style "glitch_fast"
 
 # Adjust flash transition duration
-python main.py --url "VIDEO_URL" --hook-v2 --white-flash-duration 0.15
+python main.py --video talk.mp4 --transcript talk.vtt --hook-v2 --white-flash-duration 0.15
 ```
 
 ### Parameters
@@ -86,13 +86,13 @@ Example:
 
 ```bash
 # Default: AI smart-trim
-python main.py --url "VIDEO_URL" --hook-v2
+python main.py --video talk.mp4 --transcript talk.vtt --hook-v2
 
 # Aggressive silence removal
-python main.py --url "VIDEO_URL" --hook-v2 --silence-trim
+python main.py --video talk.mp4 --transcript talk.vtt --hook-v2 --silence-trim
 
 # No trimming (full render)
-python main.py --url "VIDEO_URL" --hook-v2 --no-segment-trim
+python main.py --video talk.mp4 --transcript talk.vtt --hook-v2 --no-segment-trim
 ```
 
 ---
@@ -117,10 +117,10 @@ You can also use an external video file as a custom hook (Hook V1 only):
 
 ```bash
 # Use a local .mp4 file as the hook
-python main.py --url "VIDEO_URL" --hook-source "/path/to/hook.mp4" --hook-source-start 5.0 --hook-duration 4
+python main.py --video talk.mp4 --transcript talk.vtt --hook-source "/path/to/hook.mp4" --hook-source-start 5.0 --hook-duration 4
 
 # Use a Google Drive URL
-python main.py --url "VIDEO_URL" --hook-source "DRIVE_URL" --hook-source-start 2.0
+python main.py --video talk.mp4 --transcript talk.vtt --hook-source "DRIVE_URL" --hook-source-start 2.0
 ```
 
 Custom hooks automatically skip subtitle rendering to preserve the original visual quality.
@@ -131,16 +131,16 @@ Custom hooks automatically skip subtitle rendering to preserve the original visu
 
 ```bash
 # Hook V2 + Default segment trimming
-python main.py --url "VIDEO_URL" --hook-v2
+python main.py --video talk.mp4 --transcript talk.vtt --hook-v2
 
 # Hook V2 + Aggressive silence trimming + No B-roll
-python main.py --url "VIDEO_URL" --hook-v2 --silence-trim --no-broll
+python main.py --video talk.mp4 --transcript talk.vtt --hook-v2 --silence-trim --no-broll
 
 # Hook V2 + Full render (no trimming) + Custom font
-python main.py --url "VIDEO_URL" --hook-v2 --no-segment-trim --font-style CINEMATIC
+python main.py --video talk.mp4 --transcript talk.vtt --hook-v2 --no-segment-trim --font-style CINEMATIC
 
 # Segment trimming WITHOUT Hook V2
-python main.py --url "VIDEO_URL" --silence-trim
+python main.py --video talk.mp4 --transcript talk.vtt --silence-trim
 ```
 
 ---

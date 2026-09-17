@@ -1,7 +1,9 @@
 """
-clipping.engine — Download, Transcription & Gemini AI Analysis
+clipping.engine — Transcription & AI Analysis
 
-Maps to Cell 2 (The Engine) of the notebook.
+The download layer that used to live here is gone: this pipeline is local-first
+and acquires nothing. Media and transcripts arrive as local paths via --video
+and --transcript; see clipping.transcript for parsing.
 """
 
 import json
@@ -9,339 +11,51 @@ import os
 import re
 import time
 
-from yt_dlp import YoutubeDL
-from faster_whisper import WhisperModel
+# Transcript parsing lives in clipping.transcript (stdlib-only, so a --transcript
+# run never touches the ML stack). Re-exported here because callers reach for
+# engine.load_transcript alongside engine.transcribe_video.
+from .transcript import (  # noqa: F401
+    TranscriptParseError,
+    load_transcript,
+    parse_vtt_subs,
+    parse_youtube_json3_subs,
+)
 
-
-# ==============================================================================
-# TAHAP 1: DOWNLOAD VIDEO
-# ==============================================================================
-
-def _build_ydl_format_selector(download_source_height: str | int) -> str:
-    """
-    Build a yt-dlp format selector string for source-quality preference.
-    """
-    # Skip AV1 codec as it lacks HW acceleration on many platforms (e.g., Colab T4)
-    # and causes decoding failures in OpenCV/FFmpeg software fallbacks.
-    # Note: Using [vcodec!*=av01] to safely ensure it does not contain 'av01' anywhere.
-    codec_filter = "[vcodec!*=av01]"
-
-    if download_source_height == "max":
-        return f"bestvideo{codec_filter}+bestaudio/best{codec_filter}"
-
-    try:
-        h_val = int(download_source_height)
-    except (ValueError, TypeError):
-        h_val = 0
-
-    if 0 < h_val <= 1080:
-        # For standard resolutions, strictly prefer native MP4 (H.264/AAC), ensuring no AV1 in mp4
-        return (
-            f"bestvideo[height<=?{h_val}][ext=mp4]{codec_filter}+bestaudio[ext=m4a]/"
-            f"bestvideo[height<=?{h_val}]{codec_filter}+bestaudio/"
-            f"best[height<=?{h_val}][ext=mp4]{codec_filter}/"
-            f"best[height<=?{h_val}]{codec_filter}"
-        )
-
-    return (
-        f"bestvideo[height<=?{download_source_height}]{codec_filter}+bestaudio/"
-        f"best[height<=?{download_source_height}]{codec_filter}"
-    )
-
-
-_PLATFORM_LABELS = {
-    "youtube": "YouTube",
-    "tiktok": "TikTok",
-    "instagram": "Instagram",
-    "gdrive": "Google Drive",
-}
-
-
-def _extract_gdrive_file_id(url: str) -> str | None:
-    """Extract the Google Drive file ID from various URL formats."""
-    import re as _re
-    m = _re.search(r"/d/([a-zA-Z0-9_-]+)", url)
-    if m:
-        return m.group(1)
-    m = _re.search(r"[?&]id=([a-zA-Z0-9_-]+)", url)
-    if m:
-        return m.group(1)
-    return None
-
-
-def _download_gdrive(url: str, output_path: str) -> None:
-    """Download a video from Google Drive using gdown (more reliable than yt-dlp)."""
-    import gdown
-
-    file_id = _extract_gdrive_file_id(url)
-    if not file_id:
-        raise RuntimeError(
-            f"Tidak dapat mengekstrak file ID dari URL Google Drive: {url}\n"
-            "      Format yang didukung:\n"
-            "        • https://drive.google.com/file/d/FILE_ID/view\n"
-            "        • https://drive.google.com/open?id=FILE_ID"
-        )
-
-    download_url = f"https://drive.google.com/uc?id={file_id}"
-    print(f"      📥 File ID: {file_id}")
-    gdown.download(download_url, output_path, quiet=False)
-
-
-def _ydl_progress_hook(d: dict) -> None:
-    """Render satu baris progress bar download dari data hook yt-dlp.
-
-    yt-dlp mengunduh stream video dan audio secara terpisah, jadi hook ini
-    dipanggil untuk masing-masing; newline saat "finished" menjaga tiap bar
-    berada di barisnya sendiri.
-    """
-    status = d.get("status")
-    if status == "downloading":
-        total = d.get("total_bytes") or d.get("total_bytes_estimate")
-        downloaded = d.get("downloaded_bytes", 0)
-        speed = d.get("speed")
-        eta = d.get("eta")
-        spd = f"{speed / 1024 / 1024:4.1f}MB/s" if speed else "  --MB/s"
-        eta_s = f"{eta:>3}s" if eta is not None else " --s"
-        if total:
-            pct = downloaded / total * 100
-            filled = int(20 * downloaded / total)
-            bar = "█" * filled + " " * (20 - filled)
-            print(
-                f"\r      Unduh: {pct:3.0f}%|{bar}| "
-                f"{downloaded / 1048576:.0f}/{total / 1048576:.0f}MB {spd} ETA {eta_s}   ",
-                end="", flush=True,
-            )
-        else:
-            # Ukuran tidak diketahui (live/streamed manifest) — tampilkan byte + speed saja.
-            print(
-                f"\r      Unduh: {downloaded / 1048576:.0f}MB {spd}   ",
-                end="", flush=True,
-            )
-    elif status == "finished":
-        print(flush=True)  # tutup baris bar untuk stream ini
-
-
-def download_video(
-    url: str,
-    output_path: str,
-    use_dlp_subs: bool = False,
-    download_source_height: str | int = "max",
-    source_platform: str = "youtube",
-) -> None:
-    """
-    Download a video to *output_path* with configurable source height.
-
-    Parameters
-    ----------
-    source_platform : str
-        One of ``"youtube"`` (default), ``"tiktok"``, ``"instagram"``,
-        or ``"gdrive"``.
-    """
-    platform_label = _PLATFORM_LABELS.get(source_platform, source_platform)
-    uses_youtube_format = source_platform == "youtube"
-
-    print(f"[1/3] Mendownload video dari {platform_label}...")
-    if download_source_height == "max":
-        print("      🎯 Source quality: highest available", flush=True)
-    else:
-        print(f"      🎯 Source quality: up to {download_source_height}p", flush=True)
-
-    # --- Google Drive: use gdown instead of yt-dlp ---
-    if source_platform == "gdrive":
-        _download_gdrive(url, output_path)
-        if not os.path.exists(output_path):
-            raise RuntimeError(
-                f"❌ Download dari Google Drive gagal — file tidak ditemukan di {output_path}"
-            )
-        print(f"      ✅ Video berhasil didownload dari Google Drive.", flush=True)
-        return
-
-    # --- Build yt-dlp options per platform ---
-    if uses_youtube_format:
-        # YouTube: complex format selector + AV1 filter + remote components
-        ydl_opts = {
-            "format": _build_ydl_format_selector(download_source_height),
-            "outtmpl": output_path,
-            "quiet": True,
-            "merge_output_format": "mp4",
-            "remote_components": ["ejs:github"],
-            "progress_hooks": [_ydl_progress_hook],
-            "extractor_args": {"youtube": ["player_client=android,web"]},
-        }
-    else:
-        # TikTok / Instagram: ensure video and audio are merged
-        # We explicitly prefer H.264 over H.265 (TikTok's bytevc1) to prevent 
-        # PyAV/faster-whisper from crashing with IndexError on Kaggle/Colab.
-        ydl_opts = {
-            "format": "bestvideo[vcodec^=h264]+bestaudio/best[vcodec^=h264]/best",
-            "outtmpl": output_path,
-            "quiet": True,
-            "merge_output_format": "mp4",
-            "progress_hooks": [_ydl_progress_hook],
-        }
-
-    # --- Subtitle download — only supported for YouTube ---
-    if use_dlp_subs and uses_youtube_format:
-        print("      Mencoba mencari subtitle bahasa otomatis (en / id)...")
-        import glob
-
-        for lang in ["en", "id"]:
-            ydl_opts_subs = ydl_opts.copy()
-            ydl_opts_subs.update({
-                "writesubtitles": True,
-                "writeautomaticsub": True,
-                "subtitleslangs": [lang],
-                "subtitlesformat": "json3",
-                "skip_download": True,  # Hanya fokus download subtitle
-            })
-
-            try:
-                with YoutubeDL(ydl_opts_subs) as ydl:
-                    ydl.download([url])
-
-                # Cek apakah json3 untuk bahasa ini benar-benar terdownload
-                if glob.glob(output_path.replace(".mp4", f".*.json3")):
-                    print(f"      ✅ Subtitle '{lang}' ditemukan. Melanjutkan ke video...")
-                    break
-            except Exception as e:
-                print(f"      ⚠️ Gagal menarik subtitle '{lang}' ({e}). Mencoba opsi selanjutnya...")
-    elif use_dlp_subs and not uses_youtube_format:
-        print(f"      ℹ️ {platform_label} tidak menyediakan subtitle otomatis. Whisper akan digunakan.")
-
-    # Jalankan download video terpisah dari urusan subtitle
-    with YoutubeDL(ydl_opts) as ydl:
-        # Extra step to verify resolution before downloading
-        try:
-            info = ydl.extract_info(url, download=False)
-            best_h = info.get("height", "unknown")
-            v_codec = info.get("vcodec", "unknown")
-            print(f"      ✅ Mendownload: {best_h}p (Codec: {v_codec})", flush=True)
-        except Exception as e:
-            print(f"      ⚠️ Gagal mengecek info detail: {e}", flush=True)
-
-        ydl.download([url])
-
-    # --- Post-download verification ---
-    if not os.path.exists(output_path):
-        raise RuntimeError(
-            f"❌ Download dari {platform_label} gagal — file video tidak ditemukan di {output_path}.\n"
-            "      Pastikan URL valid dan bisa diakses secara publik."
-        )
+# NOTE: faster_whisper is imported lazily inside transcribe_video(). Importing it
+# here would drag CTranslate2/cuDNN into every `import clipping.engine`, which
+# defeats the --transcript bypass and makes the test suite require a GPU stack.
 
 
 # ==============================================================================
 # TAHAP 2: TRANSKRIPSI WHISPER & JSON3 FALLBACK
 # ==============================================================================
 
-def parse_youtube_json3_subs(json_path: str, max_words_per_subtitle: int = 5) -> tuple[str, list[dict]]:
-    """
-    Parse downloaded YouTube JSON3 subtitles into transkrip_lengkap and data_segmen.
-    Returns empty string/list if parsing fails.
-    """
-    import json
+def load_whisper_model(
+    model_size: str = "large-v3",
+    device: str = "cuda",
+    compute_type: str = "float16",
+):
+    """Build a Faster-Whisper model.
 
-    print("[2/3] Memproses subtitle JSON3 dari YouTube...")
-    transkrip_lengkap = ""
-    data_segmen = []
-
+    Split out so callers that transcribe several files (story mode) can build the
+    model once. large-v3 costs ~30s and several GB to load, and it was previously
+    rebuilt on every transcribe_video call.
+    """
     try:
-        with open(json_path, "r", encoding="utf-8") as f:
-            subs_data = json.load(f)
+        from faster_whisper import WhisperModel
+    except ImportError as exc:  # pragma: no cover - depends on the install
+        raise RuntimeError(
+            "faster-whisper tidak terinstall, jadi transkripsi in-process tidak bisa "
+            "dijalankan. Install dengan `pip install faster-whisper`, atau jalankan "
+            "dengan --transcript <file.vtt> untuk melewati Whisper sepenuhnya."
+        ) from exc
 
-        events = subs_data.get("events", [])
-
-        flat_words = []
-        for event in events:
-            # YouTube timestamps are in ms
-            t_start = event.get("tStartMs", 0) / 1000.0
-            d_duration = event.get("dDurationMs", 0) / 1000.0
-            event_end = t_start + d_duration
-
-            segs = event.get("segs", [])
-            for i, seg in enumerate(segs):
-                text = seg.get("utf8", "")
-                if not text.strip() or text == "\n":
-                    continue
-
-                # tOffsetMs is offset from t_start
-                offset = seg.get("tOffsetMs", 0) / 1000.0
-                seg_start = t_start + offset
-
-                # Determine end of this segment
-                if i < len(segs) - 1:
-                    next_offset = segs[i + 1].get("tOffsetMs", 0) / 1000.0
-                    seg_end = t_start + next_offset
-                else:
-                    seg_end = event_end
-
-                if seg_end <= seg_start:
-                    seg_end = seg_start + 1.0  # Fallback duration
-
-                # Clean up YouTube subtitle artifacts
-                clean_text = text.replace("\n", " ").replace("\u200b", "").strip()
-                # Remove HTML tags (e.g., <i>, </i>, <b>, </b>, <font color="...">)
-                clean_text = re.sub(r"<[^>]+>", "", clean_text)
-                # Remove YouTube annotation brackets: [Music], [Applause], [Laughter], etc.
-                clean_text = re.sub(r"\[[\w\s]+\]", "", clean_text)
-                # Remove speaker change markers: >> 
-                clean_text = re.sub(r">>\s*", "", clean_text)
-                # Remove music symbols: ♪, ♫, etc.
-                clean_text = re.sub(r"[♪♫♬♩]", "", clean_text)
-                # Remove leading dashes often used for speaker identification
-                clean_text = re.sub(r"^\s*-\s+", "", clean_text)
-                # Collapse multiple spaces into one
-                clean_text = re.sub(r"\s{2,}", " ", clean_text).strip()
-
-                if clean_text:
-                    # Memecah teks menjadi kata tunggal agar karaoke per-kata bekerja seperti whisper
-                    words_in_seg = clean_text.split()
-                    if not words_in_seg:
-                        continue
-
-                    duration_per_word = (seg_end - seg_start) / len(words_in_seg)
-
-                    for w_idx, w_text in enumerate(words_in_seg):
-                        w_start = seg_start + (w_idx * duration_per_word)
-                        w_end = w_start + duration_per_word
-
-                        flat_words.append({
-                            "word": w_text,
-                            "start": w_start,
-                            "end": w_end,
-                        })
-
-        # Adjust end times based on the start time of the next word to prevent overlaps
-        for i in range(len(flat_words) - 1):
-            if flat_words[i]["end"] > flat_words[i + 1]["start"]:
-                flat_words[i]["end"] = max(flat_words[i]["start"] + 0.1, flat_words[i + 1]["start"])
-
-        # Group them into segments
-        chunk_words = []
-        chunk_start = 0.0
-
-        for i, w in enumerate(flat_words):
-            if len(chunk_words) == 0:
-                chunk_start = w["start"]
-
-            chunk_words.append(w)
-
-            if len(chunk_words) == max_words_per_subtitle or i == len(flat_words) - 1:
-                chunk_text = " ".join([cw["word"] for cw in chunk_words])
-                chunk_end = w["end"]
-                transkrip_lengkap += f"[{chunk_start:.1f} - {chunk_end:.1f}] {chunk_text}\n"
-
-                data_segmen.append({
-                    "start": chunk_start,
-                    "end": chunk_end,
-                    "words": chunk_words,
-                })
-                chunk_words = []
-
-        return transkrip_lengkap, data_segmen
-
-    except Exception as e:
-        print(f"⚠️ Gagal memparsing JSON3: {e}")
-        return "", []
+    print(
+        f"      ⏳ Memuat model Whisper '{model_size}' ({device})"
+        " — unduhan pertama kali bisa memakan waktu...",
+        flush=True,
+    )
+    return WhisperModel(model_size, device=device, compute_type=compute_type)
 
 
 def transcribe_video(
@@ -350,6 +64,7 @@ def transcribe_video(
     model_size: str = "large-v3",
     device: str = "cuda",
     compute_type: str = "float16",
+    model=None,
 ) -> tuple[str, list[dict]]:
     """
     Transcribe *video_path* using Faster-Whisper.
@@ -360,18 +75,19 @@ def transcribe_video(
         Human-readable transcript with timestamps.
     data_segmen : list[dict]
         Word-level segments grouped by *max_words_per_subtitle*.
+
+    Notes
+    -----
+    Pass *model* to reuse an already-loaded WhisperModel across several files;
+    otherwise one is built from *model_size*/*device*/*compute_type*.
     """
     print("[2/3] Memulai transkripsi dengan Faster-Whisper (Level Per-Kata)...")
 
-    # Langkah-langkah ini berjalan tanpa output di dalam faster-whisper sebelum
-    # segmen pertama dihasilkan, jadi kita umumkan tiap fase — kalau tidak, run
-    # pertama di CPU (download model + decode seluruh audio) terlihat seperti hang.
-    print(
-        f"      ⏳ Memuat model Whisper '{model_size}' ({device})"
-        " — unduhan pertama kali bisa memakan waktu...",
-        flush=True,
-    )
-    model = WhisperModel(model_size, device=device, compute_type=compute_type)
+    # Faster-whisper produces no output until the first segment, so each phase is
+    # announced -- otherwise a first CPU run (model download + full audio decode)
+    # looks like a hang.
+    if model is None:
+        model = load_whisper_model(model_size, device, compute_type)
 
     print("      ⏳ Mendekode audio & mengekstrak fitur (belum ada output)...", flush=True)
     segments, info = model.transcribe(video_path, beam_size=5, word_timestamps=True)
@@ -459,6 +175,111 @@ def _build_account_classification_prompt() -> str:
 
 
 # ---- Retry Config ----
+# --- NVIDIA NIM retry policy -------------------------------------------------
+# Short backoff on purpose. Gemini's 60s+ linear ladder is tuned for quota
+# exhaustion; NVIDIA failures on this path are overwhelmingly malformed JSON,
+# and the only remedy for a bad sample is another sample.
+NVIDIA_MAX_ATTEMPTS = 3
+NVIDIA_BACKOFF_SECONDS = (5, 15)
+
+# Classified by exception class NAME so that `openai` is never imported at module
+# scope. An SDK rename would make an unknown error non-retryable, i.e. it fails
+# closed, which is the safe direction.
+_NVIDIA_RETRYABLE_EXC = {
+    "APIConnectionError",
+    "APITimeoutError",
+    "RateLimitError",
+    "InternalServerError",
+    "APIError",
+}
+_NVIDIA_FATAL_EXC = {
+    "AuthenticationError",
+    "PermissionDeniedError",
+    "NotFoundError",
+    "BadRequestError",
+    "UnprocessableEntityError",
+}
+
+
+def _nvidia_is_retryable(exc: Exception) -> bool:
+    """Whether *exc* is worth another sample."""
+    name = type(exc).__name__
+
+    if name in _NVIDIA_FATAL_EXC:
+        # A bad key or a malformed guided_json will never succeed on retry.
+        return False
+
+    status = getattr(exc, "status_code", None)
+    if isinstance(status, int):
+        if status in (408, 409, 429) or status >= 500:
+            return True
+        if 400 <= status < 500:
+            return False
+
+    if isinstance(exc, json.JSONDecodeError):
+        return True
+    if name in _NVIDIA_RETRYABLE_EXC:
+        return True
+    # Our own shape validation below raises ValueError; another sample may fix it.
+    return isinstance(exc, ValueError)
+
+
+def _extract_clip_list(content: str) -> list[dict]:
+    """Turn a raw NIM response into the clip list, or raise.
+
+    Every failure here is a ValueError or JSONDecodeError, i.e. retryable, so
+    the caller's loop can simply resample.
+    """
+    if not content or not content.strip():
+        raise ValueError("NVIDIA mengembalikan content kosong.")
+
+    content = content.strip()
+    if "```" in content:
+        content = re.sub(r"```(json)?", "", content).strip()
+        content = content.split("```")[0].strip()
+
+    hasil = json.loads(content)
+
+    # guided_json should return the array directly, but non-conforming models
+    # wrap it. Keep the unwrapper.
+    if isinstance(hasil, dict):
+        for key in ("clips", "data", "highlights"):
+            if isinstance(hasil.get(key), list):
+                hasil = hasil[key]
+                break
+        else:
+            hasil = [hasil]
+
+    if not isinstance(hasil, list):
+        raise ValueError(
+            f"Provider NVIDIA mengembalikan format non-list/dict: {type(hasil)}"
+        )
+    if not hasil:
+        # A schema-conformant empty array used to sail through here and detonate
+        # much later inside metadata.normalize_and_validate.
+        raise ValueError("NVIDIA mengembalikan array klip kosong.")
+
+    required = ("start_time", "end_time")
+    for idx, item in enumerate(hasil):
+        if not isinstance(item, dict):
+            raise ValueError(f"Klip #{idx} bukan object: {type(item)}")
+        missing = [k for k in required if k not in item]
+        if missing:
+            raise ValueError(f"Klip #{idx} kehilangan field wajib: {missing}")
+
+    return hasil
+
+
+def _make_nvidia_client(cfg):
+    """Build the NIM client. Split out so tests can substitute a fake."""
+    from openai import OpenAI
+
+    return OpenAI(
+        base_url="https://integrate.api.nvidia.com/v1",
+        api_key=cfg.api_key_nvidia,
+    )
+
+
 MAX_ATTEMPTS = 10
 INITIAL_WAIT_SECONDS = 60
 WAIT_INCREMENT_SECONDS = 30
@@ -898,17 +719,12 @@ Transkrip:
 
 def analyze_with_nvidia(transkrip_lengkap: str, cfg) -> list[dict]:
     """Analyze transcript using NVIDIA NIM API (OpenAI compatible)."""
-    from openai import OpenAI
-    
     print(f"[3/3] Menganalisis Top {cfg.jumlah_clip} momen menggunakan NVIDIA ({cfg.nvidia_model})...")
-    
+
     if not cfg.api_key_nvidia:
         raise ValueError("NVIDIA_API_KEY tidak ditemukan di environment.")
 
-    client = OpenAI(
-        base_url="https://integrate.api.nvidia.com/v1",
-        api_key=cfg.api_key_nvidia
-    )
+    client = _make_nvidia_client(cfg)
     
     prompt = get_analysis_prompt(transkrip_lengkap, cfg.jumlah_clip, cfg.durasi_hook, cfg=cfg)
     
@@ -1061,61 +877,86 @@ def analyze_with_nvidia(transkrip_lengkap: str, cfg) -> list[dict]:
         }
     }
 
-    completion = client.chat.completions.create(
-        model=cfg.nvidia_model,
-        messages=[
-            {"role": "system", "content": "You are a professional video editor and strategist. Return JSON only. Follow the provided JSON schema exactly."},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.5,
-        top_p=1,
-        max_tokens=16384,
-        extra_body={
-            "chat_template_kwargs": {"thinking": False},
-            "nvext": {
-                "guided_json": clips_schema
-            }
-        }
-    )
-    
-    content = completion.choices[0].message.content
-    
-    if "```" in content:
-        content = re.sub(r"```(json)?", "", content).strip()
-        content = content.split("```")[0].strip()
-        
-    hasil = json.loads(content)
-    
-    # Guided JSON should return an array directly if schema says type: array
-    # but we keep the unwrapper just in case of non-conforming fallbacks
-    if isinstance(hasil, dict):
-        for key in ["clips", "data", "highlights"]:
-            if key in hasil and isinstance(hasil[key], list):
-                hasil = hasil[key]
-                break
-                
-    if not isinstance(hasil, list):
-        if isinstance(hasil, dict):
-            return [hasil]
-        raise ValueError(f"Provider NVIDIA mengembalikan format non-list/dict: {type(hasil)}")
-        
-    return hasil
+    # The HTTP call and the parse share one retry loop deliberately: with
+    # guided_json in play, a malformed response is a *sampling* failure, and the
+    # only meaningful remedy is another sample.
+    failures: list[str] = []
+
+    for attempt in range(1, NVIDIA_MAX_ATTEMPTS + 1):
+        try:
+            print(f"   🔁 NVIDIA attempt {attempt}/{NVIDIA_MAX_ATTEMPTS}...")
+            completion = client.chat.completions.create(
+                model=cfg.nvidia_model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a professional video editor and strategist. "
+                            "Return JSON only. Follow the provided JSON schema exactly."
+                        ),
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                # Nudge toward determinism on each retry: if the last sample was
+                # malformed, a cooler one is likelier to conform.
+                temperature=max(0.0, 0.5 - 0.15 * (attempt - 1)),
+                top_p=1,
+                max_tokens=16384,
+                extra_body={
+                    "chat_template_kwargs": {"thinking": False},
+                    "nvext": {"guided_json": clips_schema},
+                },
+            )
+            content = completion.choices[0].message.content
+            return _extract_clip_list(content)
+
+        except Exception as exc:
+            failures.append(f"attempt {attempt}: {type(exc).__name__}: {exc}")
+            print(f"   ⚠️ NVIDIA attempt {attempt} gagal | {type(exc).__name__}: {exc}")
+
+            if not _nvidia_is_retryable(exc) or attempt == NVIDIA_MAX_ATTEMPTS:
+                detail = "\n  ".join(failures)
+                raise RuntimeError(
+                    f"Analisis NVIDIA gagal setelah {attempt} percobaan:\n  {detail}"
+                ) from exc
+
+            time.sleep(NVIDIA_BACKOFF_SECONDS[attempt - 1])
+
+    # Unreachable: the loop either returns or raises.
+    raise RuntimeError("Analisis NVIDIA gagal (loop selesai tanpa hasil).")
 
 
 def analyze_with_ai(transkrip_lengkap: str, cfg) -> list[dict]:
-    """Dispatcher for AI analysis based on provider."""
-    provider = getattr(cfg, "ai_provider", "gemini")
-    
+    """Dispatch transcript analysis to the configured provider.
+
+    There is deliberately no cross-provider fallback. The previous behaviour --
+    catch bare Exception and silently retry on Gemini -- was actively harmful:
+    a user who chose NVIDIA got billed on Gemini instead, with the real error
+    reduced to a single warning line. It is also how `openai` stayed an
+    undeclared dependency for so long, since ModuleNotFoundError was swallowed
+    along with everything else.
+    """
+    provider = getattr(cfg, "ai_provider", "nvidia")
+
     if provider == "nvidia":
-        if not cfg.api_key_nvidia:
-            print("⚠️ NVIDIA_API_KEY tidak ditemukan! Mencoba fallback ke Gemini...")
-        else:
-            try:
-                return analyze_with_nvidia(transkrip_lengkap, cfg)
-            except Exception as e:
-                print(f"⚠️ NVIDIA API gagal: {e}. Fallback ke Gemini...")
-    
-    return analyze_with_gemini(transkrip_lengkap, cfg)
+        if not getattr(cfg, "api_key_nvidia", ""):
+            raise RuntimeError(
+                "NVIDIA_API_KEY tidak ditemukan. Set di .env, atau jalankan "
+                "dengan --ai-provider gemini."
+            )
+        return analyze_with_nvidia(transkrip_lengkap, cfg)
+
+    if provider == "gemini":
+        if not getattr(cfg, "api_key_gemini", ""):
+            raise RuntimeError(
+                "GOOGLE_API_KEY tidak ditemukan. Set di .env, atau jalankan "
+                "dengan --ai-provider nvidia."
+            )
+        return analyze_with_gemini(transkrip_lengkap, cfg)
+
+    raise ValueError(
+        f"AI provider tidak dikenal: {provider!r} (pilihan: nvidia, gemini)"
+    )
 
 
 def analyze_with_gemini(

@@ -8,11 +8,13 @@ Complete reference for all command-line arguments. Run `python main.py --help` f
 
 | Argument | Default | Description |
 |---|---|---|
-| `--url`, `-u` | — | Video URL to process (**Required** unless `--story-mode`) |
-| `--source` | `youtube` | Video source platform: `youtube`, `tiktok`, `instagram`, `gdrive` |
+| `--video`, `-v` | — | Path to the local source video (required) |
+| `--transcript`, `-t` | — | Local `.vtt`/`.srt`/`.json3`. Skips Whisper entirely |
+| `--transcript-offset` | `0.0` | Shift every transcript timestamp by N seconds |
+| `--no-whisper` | — | Fail loudly instead of falling back to Whisper |
+| `--source-url` | — | Attribution for description/manifest only. Never fetched |
 | `--clips`, `-n` | `7` | Number of highlight clips to generate |
 | `--ratio`, `-r` | `9:16` | Output aspect ratio: `9:16`, `16:9`, `1:1`, `3:4`, `4:5` |
-| `--source-height` | `max` | Preferred source download max height (`max`, `1080`, `1440`, `2160`) |
 | `--render-height` | `1080` | Target output render height (`1080`, `1440`, `2160`, `source`) |
 
 ---
@@ -24,7 +26,7 @@ Complete reference for all command-line arguments. Run `python main.py --help` f
 | `--ai-provider` | `gemini` | AI provider for analysis: `gemini` or `nvidia` |
 | `--gemini-model` | `gemini-3-flash-preview` | Gemini model name |
 | `--gemini-fallback-model` | `gemini-2.5-flash` | Fallback model if main model fails |
-| `--nvidia-model` | `deepseek-ai/deepseek-v4-pro` | Model name for NVIDIA NIM API |
+| `--nvidia-model` | `deepseek-ai/deepseek-v4-flash-0731` | Model for NVIDIA NIM API. See `https://integrate.api.nvidia.com/v1/models` |
 | `--load-gemini-json` | `False` | Load saved `gemini_response.json` to bypass AI call |
 
 ---
@@ -124,7 +126,6 @@ Complete reference for all command-line arguments. Run `python main.py --help` f
 | `--whisper-model` | `large-v3` | Faster-Whisper model size |
 | `--whisper-device` | `cuda` | Device: `cuda`, `cpu`, `auto` |
 | `--whisper-compute-type` | `float16` | Compute type: `float32`, `float16`, `int8` |
-| `--use-dlp-subs` | — | Use YouTube's built-in subtitles (skips Whisper if found) |
 
 ---
 
@@ -187,4 +188,3 @@ Complete reference for all command-line arguments. Run `python main.py --help` f
 | `--story-recipe` | `story_recipe.json` | Path to story recipe JSON file |
 | `--sources-json` | `sources.json` | Path to sources registry JSON |
 | `--story-output-dir` | `outputs/story_clips` | Output directory for story clips |
-| `--skip-download` | `False` | Skip downloads, use cached files |

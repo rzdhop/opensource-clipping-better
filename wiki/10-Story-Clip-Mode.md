@@ -31,7 +31,6 @@ python main.py --story-mode \
 
 | Flag | Description |
 |---|---|
-| `--skip-download` | Skip downloads if all source videos are already cached |
 | `--story-output-dir` | Custom output directory (default: `outputs/story_clips`) |
 | `--ratio` | Override the global render ratio (default from recipe) |
 
@@ -78,24 +77,32 @@ Register all raw video sources here. Each source needs an `id`, `name`, `url`, a
     {
       "id": "speaker_a",
       "name": "Speaker A — Main Interview",
-      "url": "https://www.youtube.com/watch?v=ABC123",
-      "platform": "youtube"
+      "platform": "local",
+      "local_path": "media/speaker_a.mp4",
+      "transcript_path": "media/speaker_a.vtt",
+      "origin_url": "https://www.youtube.com/watch?v=ABC123"
     },
     {
       "id": "broll_city",
       "name": "City B-Roll Stock",
-      "url": "https://www.tiktok.com/@user/video/1234567890",
-      "platform": "tiktok"
+      "platform": "local",
+      "local_path": "media/broll_city.mp4"
     },
     {
       "id": "local_intro",
       "name": "Custom Intro Animation",
-      "url": "/path/to/intro.mp4",
-      "platform": "local"
+      "platform": "local",
+      "local_path": "media/intro.mp4"
     }
   ]
 }
 ```
+
+> **Every source is local.** This pipeline downloads nothing: acquire each video
+> with your own tool and point `local_path` at it. `transcript_path` is optional
+> (`.vtt`/`.srt`/`.json3`) and skips Whisper for that source. `origin_url` is
+> attribution only and is never fetched.
+
 
 ---
 
@@ -194,9 +201,9 @@ outputs/
 
 3. **Read Transcripts** — Check the auto-generated `*_transcript.json` files in `story_cache/` to find exact timestamps for quotes and moments.
 
-4. **Skip Downloads** — After your first run, use `--skip-download` to speed up iteration:
+4. **Cache reuse** — After the first run each source is cached in `outputs/story_cache/`, so re-runs skip the copy automatically:
    ```bash
-   python main.py --story-mode --skip-download --story-recipe story_recipe.json
+   python main.py --story-mode --story-recipe story_recipe.json
    ```
 
 ---

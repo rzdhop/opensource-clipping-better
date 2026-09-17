@@ -2,10 +2,14 @@
 """
 OpenSource Clipping — AI Auto-Clipper & Teaser Generator
 
+Local-first: this tool downloads nothing. Acquire the video and (optionally) its
+transcript with your own tools, then point it at the files.
+
 Usage:
-    python main.py --url "https://..."      # run with required URL
-    python main.py --url "https://..." --clips 5 --ratio 16:9
-    python main.py --help                   # show all available options
+    python main.py --video talk.mp4
+    python main.py --video talk.mp4 --transcript talk.vtt   # skips Whisper
+    python main.py --video talk.mp4 --transcript talk.vtt --clips 5 --ratio 16:9
+    python main.py --help                                   # all options
 """
 
 import sys
@@ -16,7 +20,7 @@ from clipping.config import build_config
 def main():
     cfg = build_config(sys.argv[1:])
 
-    version = "1.12.0"
+    version = "2.0.0"
 
     # ── Story Clip Mode ──────────────────────────────────────────────
     if getattr(cfg, "story_mode", False):
@@ -29,7 +33,6 @@ def main():
         print(f"   Sources     : {cfg.sources_json_path}")
         print(f"   Rasio       : {cfg.pilihan_rasio}")
         print(f"   Output Dir  : {cfg.story_output_dir}")
-        print(f"   Skip DL     : {'YES' if cfg.skip_download else 'NO'}")
         print("=" * 70)
 
         run_story_pipeline(cfg)
@@ -41,25 +44,42 @@ def main():
     # Lazy import so --help works without heavy deps
     from clipping.runner import run_pipeline
 
-    if not cfg.api_key_gemini:
-        print("❌ ERROR: GOOGLE_API_KEY environment variable tidak ditemukan.")
-        print("   Set via: export GOOGLE_API_KEY='your-key' atau buat file .env")
-        sys.exit(1)
+    # Gate on the *active* provider's key, and gate early: analyze_with_ai only
+    # runs after ingestion and transcription, so failing there wastes minutes.
+    #
+    # Skipped entirely for --load-gemini-json with a cached response, because a
+    # render-only rerun needs no API key at all. (The old gate exited even then.)
+    import os
 
-    _PLATFORM_LABELS = {
-        "youtube": "YouTube",
-        "tiktok": "TikTok",
-        "instagram": "Instagram",
-        "gdrive": "Google Drive",
-    }
-    platform_key = getattr(cfg, "source_platform", "youtube")
-    platform_label = _PLATFORM_LABELS.get(platform_key, platform_key)
-    
+    from clipping.config import missing_provider_key
+
+    cached_ai = os.path.join(cfg.outputs_dir, "gemini_response.json")
+    render_only = getattr(cfg, "load_gemini_json", False) and os.path.isfile(cached_ai)
+
+    if not render_only:
+        missing = missing_provider_key(cfg)
+        if missing:
+            _, env_name = missing
+            other = "gemini" if cfg.ai_provider == "nvidia" else "nvidia"
+            print(f"❌ ERROR: {env_name} tidak ditemukan (provider aktif: {cfg.ai_provider}).")
+            print(f"   Set via: export {env_name}='your-key' atau buat file .env")
+            print(f"   Atau ganti provider: --ai-provider {other}")
+            sys.exit(1)
+
+    transcript_path = getattr(cfg, "transcript_path", None)
+
     print("=" * 70)
     print(f"🎬 OpenSource Clipping v{version}")
     print("=" * 70)
-    print(f"   Source      : {platform_label}")
-    print(f"   URL         : {cfg.url_youtube}")
+    print(f"   Video       : {os.path.basename(cfg.file_video_asli)}")
+    # State the transcript source explicitly. The Whisper fallback is the slow
+    # path and must never be taken without the user seeing it.
+    if transcript_path:
+        print(f"   Transcript  : {os.path.basename(transcript_path)} (Whisper bypassed)")
+    else:
+        print(f"   Transcript  : none → Whisper ({cfg.whisper_model}, {cfg.whisper_device})")
+    if getattr(cfg, "source_url", None):
+        print(f"   Source Attr : {cfg.source_url}")
     print(f"   Jumlah Clip : {cfg.jumlah_clip}")
     print(f"   Rasio       : {cfg.pilihan_rasio}")
     print(f"   Font Style  : {cfg.gaya_font_aktif}")
@@ -72,8 +92,8 @@ def main():
     if cfg.use_split_screen:
         print(f"   Dynamic Split: {'ON' if cfg.use_dynamic_split else 'OFF'}")
         print(f"   Split Trigger: {cfg.split_trigger}")
-    print(f"   Whisper     : {cfg.whisper_model} ({cfg.whisper_device})")
-    print(f"   Gemini      : {cfg.gemini_model}")
+    active_model = cfg.nvidia_model if cfg.ai_provider == "nvidia" else cfg.gemini_model
+    print(f"   AI          : {cfg.ai_provider} ({active_model})")
     if getattr(cfg, "watermark_enabled", False):
         wm_type = "Text" if cfg.watermark_text else "Image"
         wm_content = cfg.watermark_text or cfg.watermark_image or "-"

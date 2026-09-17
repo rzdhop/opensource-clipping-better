@@ -1,13 +1,14 @@
 [project]
 name = "opensource-clipping"
-version = "1.12.0"
+version = "2.0.0"
 description = "AI Auto-Clipper & Teaser Generator — converts long videos into viral short-form clips"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "yt-dlp[default]",
+    "yt-dlp[default]",  # asset fetching only: studio/effects.py, studio/transitions.py, youtube_tracker
     "faster-whisper",
     "google-genai",
+    "openai",
     "mediapipe",
     "opencv-python",
     "Pillow",
@@ -23,3 +24,11 @@ dependencies = [
 
 [project.scripts]
 clipping = "main:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"

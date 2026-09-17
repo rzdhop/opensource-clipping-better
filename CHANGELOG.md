@@ -8,6 +8,91 @@ All notable changes to the **OpenSource Clipping** project will be documented in
 - **Patch (x.y.Z)**: Incremented for backward-compatible bug fixes or minor patches.
 
 
+## [v2.0.0] - 2026-09-17
+
+### The pipeline no longer downloads anything
+
+Ingestion via `yt-dlp` was the single largest source of production failures:
+YouTube's anti-bot telemetry, datacenter-IP bans and JS proof-of-work challenges
+break it in exactly the environments this project runs in (Colab, Kaggle, cloud
+VMs). Rather than keep fighting that, the engine now assumes nothing about how
+media was acquired. External tools produce the `.mp4` and the `.vtt`; the engine
+ingests local paths.
+
+### ⚠️ Breaking Changes
+
+1. **`--url` is gone**, along with `--source`, `--tiktok`, `--source-height` and
+   `--use-dlp-subs`. Use `--video FILE` and, optionally, `--transcript FILE`.
+   `--source-url` preserves the attribution line in descriptions and manifests.
+2. **NVIDIA NIM is the default AI provider.** Runs that relied on
+   `GOOGLE_API_KEY` with no provider flag now need `NVIDIA_API_KEY`, or an
+   explicit `--ai-provider gemini`.
+3. **No cross-provider fallback.** A provider failure is now a hard error.
+   Previously any exception — including `ModuleNotFoundError` for the undeclared
+   `openai` package — was swallowed and silently retried on Gemini, so users who
+   selected NVIDIA were in fact being billed on Gemini.
+4. **`sources.json` is local-only.** Every entry needs `platform: "local"` and a
+   `local_path`. Loading a remote entry raises an error that spells out the
+   replacement. `--skip-download` is removed.
+
+See the *Migrating from `--url`* table in the README.
+
+### Added
+
+- `--video`/`-v`, `--transcript`/`-t`, `--transcript-offset`, `--no-whisper`,
+  `--source-url`.
+- `clipping/transcript.py` — a dependency-free WebVTT/SRT/JSON3 parser.
+  YouTube auto-caption VTTs carry inline `<00:00:01.234>` word tags, which are
+  used directly for karaoke timing; cues without them divide evenly across their
+  words. Rolling auto-caption repetition is de-duplicated.
+- Optional per-source `transcript_path` in `sources.json`.
+- Transcript upload, offset and source-attribution fields in the Web Studio.
+- A transcript/video duration cross-check that warns on a mismatched pair.
+  Without it, the wrong `.vtt` renders clips with *silently* missing subtitles,
+  because `buat_file_ass` drops inverted segments without erroring.
+- The first test suite in this repo (165 tests) and a CI workflow. Every test is
+  stdlib-only: no GPU, ffmpeg, OpenCV or network.
+- 3-attempt retry with shape validation on the NVIDIA provider.
+
+### Fixed
+
+- **The shipped `--nvidia-model` default was dead.** `deepseek-ai/deepseek-v4-pro`
+  reached end of life on 2026-08-07 and returns `410 Gone`, so every default
+  NVIDIA run failed. Now `deepseek-ai/deepseek-v4-flash-0731` (same family, so
+  the DeepSeek output fixup in `metadata.py` still applies). The default is
+  pinned by a test so the next retirement is a test failure, not a production
+  410. `meta/llama-3.1-70b-instruct` is retired too -- list current models at
+  `https://integrate.api.nvidia.com/v1/models`.
+- **Subtitle burn-in failed on every Windows path** (pre-existing).
+  `escape_ffmpeg_filter_value` escaped backslashes and single-escaped the colon;
+  ffmpeg needs forward slashes and a double-escaped colon, because a filter
+  option value is unescaped twice. POSIX output is unchanged.
+- **`--voiceover` made google-genai mandatory for everyone.** An optional
+  feature's dependency was imported unconditionally.
+- **The web dashboard's "Bypass AI" toggle still demanded an API key.**
+
+- **`openai` was never declared** in `requirements.txt` or `pyproject.toml`
+  despite being imported by the NVIDIA provider.
+- **Diarization could read the video as its own audio.** The wav path came from
+  `cfg.file_video_asli.replace(".mp4", "_audio.wav")`, which silently no-ops on
+  `.MP4`, `.mkv` or `.mov`. Latent while yt-dlp always produced a lowercase
+  `.mp4`; reachable the moment `--video` accepts arbitrary containers.
+- **Whisper reloaded per source in story mode** — `large-v3` costs ~30s and
+  several GB, and an N-source story paid it N times.
+- **An empty clip array from the LLM** passed validation and failed later inside
+  `normalize_and_validate`.
+- `import clipping.engine` and `import clipping.runner` no longer drag in
+  CTranslate2, OpenCV, MediaPipe or google-genai.
+
+### Changed
+
+- The web worker's duplicated transcription logic is deleted; it now calls
+  `clipping.runner.resolve_transcript`, so the CLI and web paths cannot drift.
+- `yt-dlp` remains a dependency. It is still used for the glitch asset
+  (`studio/effects.py`), the transition pool (`studio/transitions.py`) and
+  YouTube Tracker metadata — none of which are ingestion.
+
+
 ## [v1.13.4] - 2026-08-01
 
 ### Added

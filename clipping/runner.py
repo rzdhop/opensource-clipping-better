@@ -9,15 +9,128 @@ import json
 import os
 
 from . import diarization as diarization_mod
-from . import engine, metadata, studio, hook_manager, voiceover
+from . import engine, metadata, hook_manager
+
+# studio pulls in cv2/mediapipe/ultralytics at module scope. Importing it here
+# would mean `import clipping.runner` requires the full render stack, which
+# defeats the --transcript bypass (a transcript-only run would still load the
+# very ML stack it exists to avoid) and would force CI to install OpenCV just to
+# test a text parser. It is imported inside run_pipeline, at first use.
+#
+# voiceover is imported inside the `if cfg.voiceover` branch, not here: it pulls
+# in google-genai, and an optional feature must not make its dependency
+# mandatory for every run.
+
+
+def probe_video_duration(video_path: str) -> float | None:
+    """Return *video_path*'s duration in seconds, or None if it cannot be read."""
+    try:
+        import cv2
+    except ImportError:
+        return None
+
+    cap = cv2.VideoCapture(video_path)
+    try:
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+    finally:
+        cap.release()
+
+    if not fps or fps <= 0 or not frames or frames <= 0:
+        return None
+    return frames / fps
+
+
+def _warn_on_transcript_video_mismatch(cfg, data_segmen) -> None:
+    """Warn when a transcript plainly does not belong to its video.
+
+    This is the single most likely mistake in the local-first workflow: the user
+    pairs an mp4 with the wrong .vtt. It does not raise, because legitimate cases
+    exist (a transcript covering only the first half of a long recording), but it
+    must be loud, because the failure mode is otherwise invisible —
+    ``buat_file_ass`` windows each clip by subtracting ``start_clip`` and
+    silently drops segments whose span inverts, so a mismatched pair renders
+    clean-looking clips with no subtitles and no error anywhere.
+    """
+    duration = probe_video_duration(cfg.file_video_asli)
+    if not duration or not data_segmen:
+        return
+
+    transcript_end = float(data_segmen[-1]["end"])
+
+    if transcript_end > duration * 1.1:
+        print(
+            f"\n   ⚠️  PERINGATAN: transkrip berakhir di {transcript_end:.0f}s "
+            f"tetapi video hanya {duration:.0f}s. "
+            "Transkrip kemungkinan bukan milik video ini — subtitle bisa hilang "
+            "tanpa pesan error. Cek pasangan file, atau gunakan --transcript-offset.\n"
+        )
+    elif transcript_end < duration * 0.25:
+        print(
+            f"\n   ⚠️  PERINGATAN: transkrip hanya mencakup {transcript_end:.0f}s "
+            f"dari video {duration:.0f}s ({transcript_end / duration:.0%}). "
+            "Klip di luar rentang itu tidak akan punya subtitle.\n"
+        )
+
+
+def resolve_transcript(cfg) -> tuple[str, list[dict]]:
+    """Return ``(transkrip_lengkap, data_segmen)`` for *cfg*'s source video.
+
+    A local ``--transcript`` bypasses Whisper entirely: ``engine.load_transcript``
+    is stdlib-only, so this path never imports CTranslate2 and never touches a
+    GPU. Otherwise Whisper runs on the local video.
+
+    Deliberately raises rather than falling back. A bad transcript must abort
+    here, in milliseconds, instead of surfacing as silently missing subtitles
+    after a 20-minute render.
+
+    Shared by ``run_pipeline`` and the web worker so the two cannot drift.
+    """
+    transcript_path = getattr(cfg, "transcript_path", None)
+
+    if transcript_path:
+        print(
+            f"[+] Local transcript injected ({os.path.basename(transcript_path)}). "
+            "Bypassing Whisper inference."
+        )
+        transkrip_lengkap, data_segmen = engine.load_transcript(
+            transcript_path,
+            max_words_per_subtitle=cfg.max_kata_per_subtitle,
+            offset=getattr(cfg, "transcript_offset", 0.0),
+        )
+        total_kata = sum(len(seg["words"]) for seg in data_segmen)
+        print(
+            f"   ✅ {len(data_segmen)} segmen, {total_kata} kata "
+            f"({data_segmen[0]['start']:.1f}s → {data_segmen[-1]['end']:.1f}s)"
+        )
+        _warn_on_transcript_video_mismatch(cfg, data_segmen)
+    else:
+        if getattr(cfg, "no_whisper", False):
+            raise RuntimeError(
+                "--no-whisper aktif tetapi --transcript tidak diberikan."
+            )
+        transkrip_lengkap, data_segmen = engine.transcribe_video(
+            cfg.file_video_asli,
+            max_words_per_subtitle=cfg.max_kata_per_subtitle,
+            model_size=cfg.whisper_model,
+            device=cfg.whisper_device,
+            compute_type=cfg.whisper_compute_type,
+        )
+
+    if not data_segmen:
+        raise RuntimeError(
+            "Transkrip kosong — tidak ada yang bisa dianalisis atau dirender."
+        )
+
+    return transkrip_lengkap, data_segmen
 
 
 def run_pipeline(cfg) -> list[dict]:
     """
     Run the full clipping pipeline:
-      1. Download YouTube video
-      2. Transcribe with Whisper
-      3. Analyse with Gemini AI
+      1. Ingest the local source video
+      2. Load the local transcript, or transcribe with Whisper
+      3. Analyse with the configured AI provider
       4. Normalize metadata
       5. Prepare glitch transition
       6. Render each clip
@@ -34,49 +147,20 @@ def run_pipeline(cfg) -> list[dict]:
         Render manifest (one dict per clip).
     """
 
-    # Step 1 — Download
-    source_platform = getattr(cfg, "source_platform", "youtube")
-    engine.download_video(
-        cfg.url_youtube,
-        cfg.file_video_asli,
-        getattr(cfg, "use_dlp_subs", False),
-        getattr(cfg, "download_source_height", "max"),
-        source_platform=source_platform,
-    )
+    from . import studio
 
-    # Step 2 — Transcribe
-    transkrip_lengkap = ""
-    data_segmen = []
-
-    import glob
-
-    # Mencari file json3 apapun (karena bahasanya bisa .id.json3 atau .en.json3)
-    json3_files = glob.glob(cfg.file_video_asli.replace(".mp4", ".*.json3"))
-    file_json3 = json3_files[0] if json3_files else None
-
-    # Only run YouTube JSON3 subtitle search for YouTube sources
-    if source_platform == "youtube":
-        if (
-            getattr(cfg, "use_dlp_subs", False)
-            and file_json3
-            and os.path.exists(file_json3)
-        ):
-            transkrip_lengkap, data_segmen = engine.parse_youtube_json3_subs(
-                file_json3, max_words_per_subtitle=cfg.max_kata_per_subtitle
-            )
-            if transkrip_lengkap and data_segmen:
-                print(
-                    f"✅ Berhasil memparsing subtitle dari YouTube ({os.path.basename(file_json3)}), melewati proses Whisper."
-                )
-
-    if not transkrip_lengkap or not data_segmen:
-        transkrip_lengkap, data_segmen = engine.transcribe_video(
-            cfg.file_video_asli,
-            max_words_per_subtitle=cfg.max_kata_per_subtitle,
-            model_size=cfg.whisper_model,
-            device=cfg.whisper_device,
-            compute_type=cfg.whisper_compute_type,
+    # Step 1 — Ingest the source video.
+    #
+    # Local-first: the pipeline acquires nothing. This existence check is the
+    # whole ingestion layer, and it is exactly the guarantee download_video()
+    # used to provide on return.
+    if not os.path.isfile(cfg.file_video_asli):
+        raise FileNotFoundError(
+            f"Video sumber tidak ditemukan: {cfg.file_video_asli}"
         )
+
+    # Step 2 — Transcript (local file, or Whisper).
+    transkrip_lengkap, data_segmen = resolve_transcript(cfg)
 
     # Step 3 — Gemini AI analysis
     gemini_output_path = os.path.join(cfg.outputs_dir, "gemini_response.json")
@@ -113,7 +197,9 @@ def run_pipeline(cfg) -> list[dict]:
                 else "Camera-Switch"
             )
             print(f"\n🎙️ [{mode_label}] Menjalankan speaker diarization...")
-            audio_path = cfg.file_video_asli.replace(".mp4", "_audio.wav")
+            audio_path = diarization_mod.derive_audio_path(
+                cfg.file_video_asli, getattr(cfg, "outputs_dir", None)
+            )
             diarization_mod.extract_audio(cfg.file_video_asli, audio_path)
             num_speakers_arg = getattr(cfg, "diarization_num_speakers", 2)
             min_spk = None
@@ -181,6 +267,8 @@ def run_pipeline(cfg) -> list[dict]:
 
     # Step 5.5 — Generate Voice-Over (if enabled)
     if getattr(cfg, "voiceover", False):
+        from . import voiceover
+
         print(f"\n🎙️ Meng-generate Voice-Over untuk {len(hasil_json)} klip...")
         for klip in hasil_json:
             try:
@@ -243,11 +331,24 @@ def run_pipeline(cfg) -> list[dict]:
         if hasil_render:
             render_manifest.append(hasil_render)
 
-    # Step 7 — Inject source metadata for attribution & safety tracking
+    # Step 7 — Inject provenance for attribution & safety tracking.
+    #
+    # With no download step there is no URL to record, so source_url becomes
+    # *declared* provenance (--source-url) rather than a fetch address. The key
+    # is omitted when unknown: metadata._build_youtube_description already
+    # no-ops on a falsy value, and writing null into every manifest row just
+    # pushes a useless field downstream to the uploaders.
+    declared_source = getattr(cfg, "source_url", None)
     for row in render_manifest:
-        # Attach source URL so metadata.py can auto-add source credit
-        if not row.get("source_url"):
-            row["source_url"] = getattr(cfg, "url_youtube", None)
+        row.setdefault("source_video", os.path.basename(cfg.file_video_asli))
+        row.setdefault(
+            "transcript_source",
+            os.path.basename(cfg.transcript_path)
+            if getattr(cfg, "transcript_path", None)
+            else f"whisper:{cfg.whisper_model}",
+        )
+        if declared_source and not row.get("source_url"):
+            row["source_url"] = declared_source
 
     # Step 8 — Save manifest
     manifest_path = os.path.join(cfg.outputs_dir, "render_manifest.json")

@@ -110,8 +110,8 @@ function Dashboard() {
             <Link to={`/job/${job.id}`} key={job.id} className="job-card">
               <div className="job-info">
                 <h3>
-                  {job.url ? new URL(job.url).hostname.replace('www.', '') : job.upload_filename || 'Upload'}
-                  {job.url && <span style={{ color: 'var(--text-muted)', fontWeight: 400, marginLeft: '8px', fontSize: '12px' }}>#{job.id}</span>}
+                  {job.upload_filename || job.source_url || job.url || 'Upload'}
+                  {<span style={{ color: 'var(--text-muted)', fontWeight: 400, marginLeft: '8px', fontSize: '12px' }}>#{job.id}</span>}
                 </h3>
                 <div className="job-meta">
                   <span>{formatDate(job.created_at)}</span>

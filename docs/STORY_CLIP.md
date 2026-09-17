@@ -32,7 +32,7 @@ python main.py --story-mode \
 ```
 
 **Additional CLI Options:**
-- `--skip-download`: Bypasses the connection check & download process if you are sure all raw videos are already available in the `outputs/story_cache/` folder. This significantly speeds up the assembly process when iterating on trim times.
+- Sources are local files. Each entry needs `platform: "local"` and a `local_path`; add an optional `transcript_path` (`.vtt`/`.srt`/`.json3`) to skip Whisper for that source. Cached copies live in `outputs/story_cache/` and are reused automatically on re-runs.
 - `--story-output-dir outputs/shopee_campaign`: Use this if you want to save the final results (MP4 clips) to a specific folder (instead of the default `outputs/story_clips/`).
 - `--ratio 1:1` or `--ratio 16:9`: Optional if you want to force a global render ratio even if `story_recipe.json` has provided a default ratio of `9:16`.
 
@@ -49,12 +49,20 @@ This file is responsible for registering all raw links to be used.
     {
       "id": "velia_2",
       "name": "Velia Video 2",
-      "url": "https://www.tiktok.com/@veliachristyy/video/761675...",
-      "platform": "tiktok"
+      "platform": "local",
+      "local_path": "media/velia_2.mp4",
+      "transcript_path": "media/velia_2.vtt",
+      "origin_url": "https://www.tiktok.com/@veliachristyy/video/761675..."
     }
   ]
 }
 ```
+
+> **Every source is local.** This pipeline downloads nothing: acquire each video
+> with your own tool and point `local_path` at it. `transcript_path` is optional
+> (`.vtt`/`.srt`/`.json3`) and skips Whisper for that source. `origin_url` is
+> attribution only and is never fetched.
+
 
 ## `story_recipe.json` Format
 

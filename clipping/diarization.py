@@ -14,6 +14,21 @@ import subprocess
 # ==============================================================================
 
 
+def derive_audio_path(video_path: str, outputs_dir: str | None = None) -> str:
+    """Return the temp .wav path for *video_path*.
+
+    Uses splitext rather than ``.replace(".mp4", ...)``: with a local ``--video``
+    the source may be ``.MP4``, ``.mkv`` or ``.mov``, and the old string surgery
+    silently no-opped on any of them, leaving audio_path == video_path.
+
+    When *outputs_dir* is given the wav is written there rather than beside the
+    source, which may live in a read-only directory the user does not own.
+    """
+    stem = os.path.splitext(os.path.basename(video_path))[0]
+    directory = outputs_dir or os.path.dirname(os.path.abspath(video_path))
+    return os.path.join(directory, f"{stem}_audio.wav")
+
+
 def extract_audio(video_path: str, audio_output_path: str) -> str:
     """
     Extract audio from video to WAV using FFmpeg.

@@ -38,7 +38,6 @@ SWITCH_HOLD_DURATION = 2.0
 SWITCH_BLEND_DURATION = 0.0  # 0 = instant snap, >0 = smooth blend in seconds
 
 # Source Platform
-SOURCE_PLATFORM = "youtube"
 
 # 3. PENGATURAN SUBTITLE & TIPOGRAFI (ASS STYLE)
 USE_ADVANCED_TEXT = False
@@ -143,7 +142,6 @@ BGM_DIR = os.path.abspath(os.path.join(BASE_DIR, "assets", "bgm"))
 WHISPER_MODEL = "large-v3"
 WHISPER_DEVICE = "cuda"
 WHISPER_COMPUTE_TYPE = "float16"
-DOWNLOAD_SOURCE_HEIGHT = "max"
 VIDEO_QUALITY_CQ = 23
 VIDEO_QUALITY_CRF = 20
 VIDEO_PRESET = "auto"
@@ -151,8 +149,14 @@ VIDEO_SCALE_ALGO = "lanczos"
 RENDER_OUTPUT_HEIGHT = 1080
 
 # AI Provider
-AI_PROVIDER = "gemini"
-NVIDIA_MODEL = "deepseek-ai/deepseek-v4-pro"
+# NVIDIA NIM is the default provider: open-weights models, free tier, and an
+# OpenAI-compatible endpoint. Gemini stays available via --ai-provider gemini.
+AI_PROVIDER = "nvidia"
+# deepseek-v4-pro reached end of life on 2026-08-07 and now returns 410.
+# This is its live same-family successor, so metadata.py's DeepSeek output
+# fixup still applies. Check https://integrate.api.nvidia.com/v1/models
+# if this one is ever retired too.
+NVIDIA_MODEL = "deepseek-ai/deepseek-v4-flash-0731"
 GEMINI_MODEL = "gemini-3-flash-preview"
 GEMINI_FALLBACK_MODEL = "gemini-2.5-flash"
 
@@ -171,49 +175,37 @@ def _parse_speakers(val: str) -> str | int:
         raise argparse.ArgumentTypeError(f"'{val}' is not a valid integer or 'auto'")
 
 
-def _parse_download_height(val: str) -> str | int:
-    """
-    Parse desired download source height.
-
-    Accepts:
-    - `max` to always prefer the highest available quality.
-    - positive integers like 1080, 1440, 2160 to cap source resolution.
-    """
-    if val.lower() == "max":
-        return "max"
-    try:
-        parsed = int(val)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError(
-            f"'{val}' is not valid. Use 'max' or an integer height (e.g. 1080, 1440, 2160)."
-        ) from exc
-    if parsed <= 0:
-        raise argparse.ArgumentTypeError("Download source height must be a positive integer.")
-    return parsed
-
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description="🎬 OpenSource Clipping — AI Auto-Clipper & Teaser Generator",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
+    # --- Input lokal (local-first) ---
+    # The pipeline assumes nothing about how the media was acquired: external
+    # tools produce the .mp4 and the .vtt, and these flags point at them.
+    p.add_argument(
+        "--video", "-v", default=None,
+        help="Path to the local source video (.mp4/.mkv/.mov/...). Required unless --story-mode is used.",
+    )
+    p.add_argument(
+        "--transcript", "-t", default=None,
+        help="Path to a local transcript (.vtt/.srt/.json3). If given, Whisper is skipped entirely.",
+    )
+    p.add_argument(
+        "--transcript-offset", type=float, default=0.0,
+        help="Shift every transcript timestamp by N seconds (for a video trimmed after its transcript was made).",
+    )
+    p.add_argument(
+        "--no-whisper", action="store_true", default=False,
+        help="Fail loudly instead of falling back to Whisper when --transcript is absent.",
+    )
+    p.add_argument(
+        "--source-url", default=None,
+        help="Source attribution for the description/manifest only. Never fetched.",
+    )
+
     # --- Pengaturan utama ---
-    p.add_argument(
-        "--url", "-u", required=False, default=None,
-        help="Video URL to process (supports YouTube, TikTok, Instagram, Google Drive). Required unless --story-mode is used.",
-    )
-    p.add_argument(
-        "--source",
-        choices=["youtube", "tiktok", "instagram", "gdrive"],
-        default=SOURCE_PLATFORM,
-        help="Video source platform. Determines download behavior and subtitle availability.",
-    )
-    p.add_argument(
-        "--tiktok",
-        action="store_true",
-        default=False,
-        help="[DEPRECATED] Use --source tiktok instead.",
-    )
     p.add_argument(
         "--clips",
         "-n",
@@ -227,12 +219,6 @@ def _build_parser() -> argparse.ArgumentParser:
         default=PILIHAN_RASIO,
         choices=["9:16", "16:9", "1:1", "3:4", "4:5"],
         help="Output aspect ratio",
-    )
-    p.add_argument(
-        "--source-height",
-        type=_parse_download_height,
-        default=DOWNLOAD_SOURCE_HEIGHT,
-        help="Preferred source download max height. Use 'max' to fetch highest available quality.",
     )
     p.add_argument(
         "--render-height",
@@ -375,11 +361,6 @@ def _build_parser() -> argparse.ArgumentParser:
 
     # --- Whisper ---
     p.add_argument(
-        "--use-dlp-subs",
-        action="store_true",
-        help="Use yt-dlp to download auto/manual subtitles to speed up process (skipping Whisper if found)",
-    )
-    p.add_argument(
         "--whisper-model", default=WHISPER_MODEL, help="Faster-Whisper model size"
     )
     p.add_argument(
@@ -416,7 +397,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--nvidia-model",
         default=NVIDIA_MODEL,
-        help="Model name for NVIDIA NIM API (e.g. deepseek-ai/deepseek-v3).",
+        help="Model name for NVIDIA NIM API. See https://integrate.api.nvidia.com/v1/models",
     )
     p.add_argument("--gemini-model", default=GEMINI_MODEL, help="Gemini model name")
     p.add_argument(
@@ -610,12 +591,6 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Output directory for story clips (default: outputs/story_clips).",
     )
-    story_group.add_argument(
-        "--skip-download",
-        action="store_true",
-        default=False,
-        help="Skip source downloads and use existing cached files.",
-    )
 
     # --- Voice-Over Commentary Pipeline ---
     vo_group = p.add_argument_group("Voice-Over Commentary (TTS)")
@@ -735,14 +710,59 @@ def _build_parser() -> argparse.ArgumentParser:
     return p
 
 
+# Which env var backs which provider. Used by the early key gates in main.py
+# and the web worker so a missing key fails in 40ms rather than after ingestion
+# and transcription have already run.
+PROVIDER_KEYS = {
+    "nvidia": ("api_key_nvidia", "NVIDIA_API_KEY"),
+    "gemini": ("api_key_gemini", "GOOGLE_API_KEY"),
+}
+
+
+def missing_provider_key(cfg) -> tuple[str, str] | None:
+    """Return ``(attr, ENV_NAME)`` when the active provider has no key, else None."""
+    provider = getattr(cfg, "ai_provider", AI_PROVIDER)
+    attr, env_name = PROVIDER_KEYS.get(provider, PROVIDER_KEYS[AI_PROVIDER])
+    if getattr(cfg, attr, ""):
+        return None
+    return attr, env_name
+
+
 def build_config(argv: list[str] | None = None) -> SimpleNamespace:
     """Parse CLI args and merge with defaults into a config namespace."""
     parser = _build_parser()
     args = parser.parse_args(argv)
 
-    # Validate: --url is required unless --story-mode is used
-    if not args.story_mode and not args.url:
-        parser.error("--url is required unless --story-mode is used.")
+    # Validate local inputs. These checks live here, beside the --image check
+    # below, so a typo fails in ~40ms instead of after a model load or a render.
+    if args.transcript and not args.video:
+        parser.error("--transcript membutuhkan --video (transkrip tanpa video tidak bisa dirender).")
+
+    if not args.story_mode and not args.video:
+        parser.error("--video is required unless --story-mode is used.")
+
+    if args.video:
+        if not os.path.isfile(args.video):
+            parser.error(f"File video tidak ditemukan: {args.video}")
+        valid_video_exts = (".mp4", ".mkv", ".mov", ".webm", ".avi", ".ts", ".flv", ".m4v")
+        if not args.video.lower().endswith(valid_video_exts):
+            parser.error(
+                f"Ekstensi video tidak didukung: {args.video}. "
+                f"Format yang didukung: {', '.join(valid_video_exts)}"
+            )
+
+    if args.transcript:
+        if not os.path.isfile(args.transcript):
+            parser.error(f"File transkrip tidak ditemukan: {args.transcript}")
+        valid_transcript_exts = (".vtt", ".srt", ".json3", ".json")
+        if not args.transcript.lower().endswith(valid_transcript_exts):
+            parser.error(
+                f"Format transkrip tidak didukung: {args.transcript}. "
+                f"Format yang didukung: {', '.join(valid_transcript_exts)}"
+            )
+
+    if args.no_whisper and not args.transcript:
+        parser.error("--no-whisper membutuhkan --transcript.")
 
     # Validate watermark args
     if args.watermark:
@@ -777,7 +797,20 @@ def build_config(argv: list[str] | None = None) -> SimpleNamespace:
         base_dir=base_dir,
         outputs_dir=outputs_dir,
         font_dir=font_dir,
-        file_video_asli=os.path.abspath(os.path.join(base_dir, "video_asli.mp4")),
+        # Local-first: --video IS the source of truth. Overriding this field
+        # rather than adding a parallel one means the whole render layer
+        # (runner, studio, diarization) becomes local-first for free, since it
+        # already reads cfg.file_video_asli everywhere.
+        file_video_asli=(
+            os.path.abspath(args.video)
+            if args.video
+            else os.path.abspath(os.path.join(base_dir, "video_asli.mp4"))
+        ),
+        video_provided=bool(args.video),
+        transcript_path=os.path.abspath(args.transcript) if args.transcript else None,
+        transcript_offset=args.transcript_offset,
+        no_whisper=args.no_whisper,
+        source_url=args.source_url,
         file_font_thumbnail=os.path.abspath(
             os.path.join(base_dir, NAMA_FONT_THUMBNAIL)
         ),
@@ -796,11 +829,8 @@ def build_config(argv: list[str] | None = None) -> SimpleNamespace:
         hf_token=os.environ.get("HF_TOKEN", ""),
         pexels_api_key=os.environ.get("PEXELS_API_KEY", ""),
         # Pengaturan utama
-        source_platform="tiktok" if args.tiktok else args.source,
-        url_youtube=args.url,
         jumlah_clip=args.clips,
         pilihan_rasio=args.ratio,
-        download_source_height=args.source_height,
         render_output_height=args.render_height,
         # Konten & Hook
         max_kata_per_subtitle=args.words_per_sub,
@@ -855,7 +885,6 @@ def build_config(argv: list[str] | None = None) -> SimpleNamespace:
         bgm_moods=BGM_MOODS,
         bgm_dir=BGM_DIR,
         # Whisper
-        use_dlp_subs=args.use_dlp_subs,
         whisper_model=args.whisper_model,
         whisper_device=args.whisper_device,
         whisper_compute_type=args.whisper_compute_type,
@@ -897,7 +926,6 @@ def build_config(argv: list[str] | None = None) -> SimpleNamespace:
             if args.story_output_dir
             else os.path.join(outputs_dir, "story_clips")
         ),
-        skip_download=args.skip_download,
         # Voice-Over Commentary
         voiceover=args.voiceover,
         voiceover_voice=args.voiceover_voice,

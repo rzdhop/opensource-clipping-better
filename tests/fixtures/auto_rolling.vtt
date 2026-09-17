@@ -1,0 +1,13 @@
+WEBVTT
+Kind: captions
+Language: en
+
+00:00:00.870 --> 00:00:03.000 align:start position:0%
+hello<00:00:01.200><c> world</c><00:00:01.800><c> this</c>
+
+00:00:03.000 --> 00:00:03.010 align:start position:0%
+hello world this
+
+00:00:03.010 --> 00:00:06.000 align:start position:0%
+hello world this
+is<00:00:04.000><c> rolling</c><00:00:04.500><c> captions</c>

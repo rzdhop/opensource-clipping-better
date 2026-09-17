@@ -59,7 +59,7 @@ NVIDIA_API_KEY=your-nvidia-api-key-here       # Optional (for NVIDIA NIM provide
 ### 4. Run Your First Clip
 
 ```bash
-python main.py --url "https://youtube.com/watch?v=VIDEO_ID"
+python main.py --video talk.mp4 --transcript talk.vtt
 ```
 
 That's it! The pipeline will:
@@ -93,22 +93,22 @@ outputs/
 
 ### Standard Clipping (7 clips, vertical)
 ```bash
-python main.py --url "VIDEO_URL" --clips 7 --ratio "9:16"
+python main.py --video talk.mp4 --transcript talk.vtt --clips 7 --ratio "9:16"
 ```
 
 ### Landscape Output (YouTube format)
 ```bash
-python main.py --url "VIDEO_URL" --ratio "16:9" --clips 5
+python main.py --video talk.mp4 --transcript talk.vtt --ratio "16:9" --clips 5
 ```
 
 ### Podcast with Split-Screen
 ```bash
-python main.py --url "PODCAST_URL" --split-screen --dynamic-split --split-trigger face
+python main.py --video podcast.mp4 --transcript podcast.vtt --split-screen --dynamic-split --split-trigger face
 ```
 
 ### No Subtitles, No BGM (Clean output)
 ```bash
-python main.py --url "VIDEO_URL" --no-subs --no-bgm --no-broll
+python main.py --video talk.mp4 --transcript talk.vtt --no-subs --no-bgm --no-broll
 ```
 
 ---
@@ -117,10 +117,6 @@ python main.py --url "VIDEO_URL" --no-subs --no-bgm --no-broll
 
 | Platform | Flag | Example |
 |---|---|---|
-| YouTube | `--source youtube` (default) | `--url "https://youtube.com/watch?v=..."` |
-| TikTok | `--source tiktok` | `--url "https://www.tiktok.com/@user/video/..."` |
-| Instagram | `--source instagram` | `--url "https://www.instagram.com/reel/..."` |
-| Google Drive | `--source gdrive` | `--url "https://drive.google.com/file/d/..."` |
 
 ---
 

@@ -39,7 +39,6 @@ from clipping.config import (
     WARNA_KATA_KHUSUS,
 )
 
-
 def build_config_from_payload(
     payload: dict,
     job_id: str,
@@ -73,26 +72,15 @@ def build_config_from_payload(
     font_dir = os.path.abspath(os.path.join(base_dir, "custom_fonts"))
     os.makedirs(font_dir, exist_ok=True)
 
-    # Resolve source platform
-    source_platform = payload.get("source", "youtube")
-
     # Resolve face detector model
     face_detector = payload.get("face_detector", "mediapipe")
     yolo_size = payload.get("yolo_size", "8m")
 
     # Resolve AI provider
-    ai_provider = payload.get("ai_provider", "gemini")
+    ai_provider = payload.get("ai_provider", "nvidia")
 
     # Resolve render height
     render_height = payload.get("render_height", str(RENDER_OUTPUT_HEIGHT))
-
-    # Resolve source height
-    source_height = payload.get("source_height", "max")
-    if source_height != "max":
-        try:
-            source_height = int(source_height)
-        except (ValueError, TypeError):
-            source_height = "max"
 
     # Determine video input path
     upload_filename = payload.get("upload_filename")
@@ -105,7 +93,23 @@ def build_config_from_payload(
             os.path.join(outputs_dir, "video_asli.mp4")
         )
 
+    # Local transcript (optional). Resolved against uploads/ like the video.
+    transcript_filename = payload.get("transcript_filename")
+    transcript_path = None
+    if transcript_filename:
+        candidate = os.path.abspath(
+            os.path.join(base_dir, "uploads", transcript_filename)
+        )
+        if os.path.isfile(candidate):
+            transcript_path = candidate
+
     cfg = SimpleNamespace(
+        # Local-first inputs
+        transcript_path=transcript_path,
+        transcript_offset=float(payload.get("transcript_offset", 0.0) or 0.0),
+        no_whisper=False,
+        source_url=payload.get("source_url"),
+        video_provided=bool(upload_filename),
         # Paths
         base_dir=base_dir,
         outputs_dir=outputs_dir,
@@ -129,11 +133,8 @@ def build_config_from_payload(
         hf_token=env.get("HF_TOKEN", os.environ.get("HF_TOKEN", "")),
         pexels_api_key=env.get("PEXELS_API_KEY", os.environ.get("PEXELS_API_KEY", "")),
         # Pengaturan utama
-        source_platform=source_platform,
-        url_youtube=payload.get("url"),
         jumlah_clip=payload.get("clips", 7),
         pilihan_rasio=payload.get("ratio", "9:16"),
-        download_source_height=source_height,
         render_output_height=render_height,
         # Konten & Hook
         max_kata_per_subtitle=payload.get("words_per_sub", 5),
@@ -188,14 +189,13 @@ def build_config_from_payload(
         bgm_moods=BGM_MOODS,
         bgm_dir=BGM_DIR,
         # Whisper
-        use_dlp_subs=payload.get("use_dlp_subs", False),
         whisper_model=payload.get("whisper_model", "large-v3"),
         whisper_device=payload.get("whisper_device", "cuda"),
         whisper_compute_type=payload.get("whisper_compute_type", "float16"),
         # AI
         ai_provider=ai_provider,
         api_key_nvidia=env.get("NVIDIA_API_KEY", os.environ.get("NVIDIA_API_KEY", "")),
-        nvidia_model=payload.get("nvidia_model", "deepseek-ai/deepseek-v4-pro"),
+        nvidia_model=payload.get("nvidia_model", "deepseek-ai/deepseek-v4-flash-0731"),
         gemini_model=payload.get("gemini_model", "gemini-3-flash-preview"),
         gemini_fallback_model=payload.get("gemini_fallback_model", GEMINI_FALLBACK_MODEL),
         load_gemini_json=payload.get("load_gemini_json", False),
@@ -226,7 +226,7 @@ def build_config_from_payload(
         story_recipe_path=None,
         sources_json_path=None,
         story_output_dir=None,
-        skip_download=False,
+
     )
 
     return cfg

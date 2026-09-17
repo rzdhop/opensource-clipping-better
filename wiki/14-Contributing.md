@@ -50,7 +50,7 @@ cp .env.sample .env
 # Edit .env with your keys
 
 # 4. Run a test
-python main.py --url "https://youtube.com/watch?v=TEST_VIDEO" --clips 1 --no-bgm --no-broll
+python main.py --video test.mp4 --transcript test.vtt --clips 1 --no-bgm --no-broll
 ```
 
 ---

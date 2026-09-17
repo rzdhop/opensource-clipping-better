@@ -47,7 +47,7 @@ Source Frame (16:9)
 
 ```bash
 # Use YOLO with medium model
-python main.py --url "VIDEO_URL" --face-detector yolo --yolo-size 8m
+python main.py --video talk.mp4 --transcript talk.vtt --face-detector yolo --yolo-size 8m
 ```
 
 ---
@@ -117,7 +117,7 @@ If you don't need face tracking for square/portrait ratios, use `--static-crop`:
 
 ```bash
 # Fast center crop without AI detection
-python main.py --url "VIDEO_URL" --ratio "1:1" --static-crop
+python main.py --video talk.mp4 --transcript talk.vtt --ratio "1:1" --static-crop
 ```
 
 This dramatically speeds up rendering by bypassing the face detection step entirely.
@@ -131,22 +131,22 @@ See the tracking algorithm in action with a 16:9 "Director's Console" view:
 
 ```bash
 # Visualize tracking (generates dev video only)
-python main.py --url "VIDEO_URL" --dev-mode
+python main.py --video talk.mp4 --transcript talk.vtt --dev-mode
 
 # Generate BOTH final output + dev visualization
-python main.py --url "VIDEO_URL" --dev-mode-with-output
+python main.py --video talk.mp4 --transcript talk.vtt --dev-mode-with-output
 
 # Merged side-by-side ultrawide view
-python main.py --url "VIDEO_URL" --dev-mode-with-output-merge
+python main.py --video talk.mp4 --transcript talk.vtt --dev-mode-with-output-merge
 ```
 
 ### Debug Overlays
 ```bash
 # Draw yellow bounding boxes around detected faces
-python main.py --url "VIDEO_URL" --box-face-detection
+python main.py --video talk.mp4 --transcript talk.vtt --box-face-detection
 
 # Draw crosshair tracking lines from face to crop boundaries
-python main.py --url "VIDEO_URL" --track-lines
+python main.py --video talk.mp4 --transcript talk.vtt --track-lines
 ```
 
 ---
