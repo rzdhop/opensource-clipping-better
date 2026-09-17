@@ -54,8 +54,8 @@ class FaceDetector(str, enum.Enum):
 
 
 class AIProvider(str, enum.Enum):
-    GEMINI = "gemini"
     NVIDIA = "nvidia"
+    GEMINI = "gemini"
 
 
 class WhisperDevice(str, enum.Enum):
@@ -110,7 +110,7 @@ class JobCreateRequest(BaseModel):
     use_dlp_subs: bool = False
 
     # AI
-    ai_provider: AIProvider = AIProvider.GEMINI
+    ai_provider: AIProvider = AIProvider.NVIDIA
     gemini_model: str = "gemini-3-flash-preview"
     face_detector: FaceDetector = FaceDetector.MEDIAPIPE
 
@@ -204,7 +204,7 @@ class SettingsResponse(BaseModel):
     default_font_style: str = "HORMOZI"
     default_whisper_model: str = "large-v3"
     default_whisper_device: str = "cuda"
-    default_ai_provider: str = "gemini"
+    default_ai_provider: str = "nvidia"
     gpu_available: bool = False
 
 

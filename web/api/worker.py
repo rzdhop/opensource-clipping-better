@@ -53,10 +53,17 @@ def _run_pipeline_sync(job_id: str, payload: dict) -> None:
         )
 
         # Validate API key
-        if not cfg.api_key_gemini:
+        # Gate on the ACTIVE provider's key. An unconditional Gemini check here
+        # would fail every job the moment NVIDIA became the default.
+        from clipping.config import missing_provider_key
+
+        missing = missing_provider_key(cfg)
+        if missing:
+            _, env_name = missing
             store.set_error(
                 job_id,
-                "GOOGLE_API_KEY tidak ditemukan. Set via Settings atau .env file.",
+                f"{env_name} tidak ditemukan (provider aktif: {cfg.ai_provider}). "
+                "Set via Settings atau .env file.",
             )
             return
 

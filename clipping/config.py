@@ -151,7 +151,9 @@ VIDEO_SCALE_ALGO = "lanczos"
 RENDER_OUTPUT_HEIGHT = 1080
 
 # AI Provider
-AI_PROVIDER = "gemini"
+# NVIDIA NIM is the default provider: open-weights models, free tier, and an
+# OpenAI-compatible endpoint. Gemini stays available via --ai-provider gemini.
+AI_PROVIDER = "nvidia"
 NVIDIA_MODEL = "deepseek-ai/deepseek-v4-pro"
 GEMINI_MODEL = "gemini-3-flash-preview"
 GEMINI_FALLBACK_MODEL = "gemini-2.5-flash"
@@ -757,6 +759,24 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     return p
+
+
+# Which env var backs which provider. Used by the early key gates in main.py
+# and the web worker so a missing key fails in 40ms rather than after ingestion
+# and transcription have already run.
+PROVIDER_KEYS = {
+    "nvidia": ("api_key_nvidia", "NVIDIA_API_KEY"),
+    "gemini": ("api_key_gemini", "GOOGLE_API_KEY"),
+}
+
+
+def missing_provider_key(cfg) -> tuple[str, str] | None:
+    """Return ``(attr, ENV_NAME)`` when the active provider has no key, else None."""
+    provider = getattr(cfg, "ai_provider", AI_PROVIDER)
+    attr, env_name = PROVIDER_KEYS.get(provider, PROVIDER_KEYS[AI_PROVIDER])
+    if getattr(cfg, attr, ""):
+        return None
+    return attr, env_name
 
 
 def build_config(argv: list[str] | None = None) -> SimpleNamespace:

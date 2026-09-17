@@ -81,7 +81,7 @@ def build_config_from_payload(
     yolo_size = payload.get("yolo_size", "8m")
 
     # Resolve AI provider
-    ai_provider = payload.get("ai_provider", "gemini")
+    ai_provider = payload.get("ai_provider", "nvidia")
 
     # Resolve render height
     render_height = payload.get("render_height", str(RENDER_OUTPUT_HEIGHT))

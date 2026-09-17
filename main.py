@@ -41,12 +41,27 @@ def main():
     # Lazy import so --help works without heavy deps
     from clipping.runner import run_pipeline
 
-    if not cfg.api_key_gemini:
-        print("❌ ERROR: GOOGLE_API_KEY environment variable tidak ditemukan.")
-        print("   Set via: export GOOGLE_API_KEY='your-key' atau buat file .env")
-        sys.exit(1)
-
+    # Gate on the *active* provider's key, and gate early: analyze_with_ai only
+    # runs after ingestion and transcription, so failing there wastes minutes.
+    #
+    # Skipped entirely for --load-gemini-json with a cached response, because a
+    # render-only rerun needs no API key at all. (The old gate exited even then.)
     import os
+
+    from clipping.config import missing_provider_key
+
+    cached_ai = os.path.join(cfg.outputs_dir, "gemini_response.json")
+    render_only = getattr(cfg, "load_gemini_json", False) and os.path.isfile(cached_ai)
+
+    if not render_only:
+        missing = missing_provider_key(cfg)
+        if missing:
+            _, env_name = missing
+            other = "gemini" if cfg.ai_provider == "nvidia" else "nvidia"
+            print(f"❌ ERROR: {env_name} tidak ditemukan (provider aktif: {cfg.ai_provider}).")
+            print(f"   Set via: export {env_name}='your-key' atau buat file .env")
+            print(f"   Atau ganti provider: --ai-provider {other}")
+            sys.exit(1)
 
     transcript_path = getattr(cfg, "transcript_path", None)
 
@@ -78,7 +93,8 @@ def main():
     if cfg.use_split_screen:
         print(f"   Dynamic Split: {'ON' if cfg.use_dynamic_split else 'OFF'}")
         print(f"   Split Trigger: {cfg.split_trigger}")
-    print(f"   Gemini      : {cfg.gemini_model}")
+    active_model = cfg.nvidia_model if cfg.ai_provider == "nvidia" else cfg.gemini_model
+    print(f"   AI          : {cfg.ai_provider} ({active_model})")
     if getattr(cfg, "watermark_enabled", False):
         wm_type = "Text" if cfg.watermark_text else "Image"
         wm_content = cfg.watermark_text or cfg.watermark_image or "-"

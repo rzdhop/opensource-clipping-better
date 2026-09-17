@@ -172,3 +172,46 @@ def test_derive_audio_path_defaults_beside_source(tmp_path):
 
     video = str(tmp_path / "sample.mp4")
     assert derive_audio_path(video) == str(tmp_path / "sample_audio.wav")
+
+
+# ------------------------------------------------------------- AI provider
+
+def test_default_provider_is_nvidia(video):
+    cfg = build_config(["--video", str(video)])
+    assert cfg.ai_provider == "nvidia"
+    assert cfg.nvidia_model == "deepseek-ai/deepseek-v4-pro"
+
+
+def test_provider_can_be_overridden(video):
+    cfg = build_config(["--video", str(video), "--ai-provider", "gemini"])
+    assert cfg.ai_provider == "gemini"
+
+
+@pytest.mark.parametrize(
+    "provider,key_attr,env_name",
+    [("nvidia", "api_key_nvidia", "NVIDIA_API_KEY"),
+     ("gemini", "api_key_gemini", "GOOGLE_API_KEY")],
+)
+def test_missing_provider_key_names_the_right_env_var(
+    video, monkeypatch, provider, key_attr, env_name
+):
+    from clipping.config import missing_provider_key
+
+    cfg = build_config(["--video", str(video), "--ai-provider", provider])
+    setattr(cfg, key_attr, "")
+    assert missing_provider_key(cfg) == (key_attr, env_name)
+
+    setattr(cfg, key_attr, "a-key")
+    assert missing_provider_key(cfg) is None
+
+
+def test_missing_provider_key_ignores_the_other_providers_key(video):
+    """The old gate checked GOOGLE_API_KEY unconditionally, which would fail
+    every NVIDIA run the moment NVIDIA became the default."""
+    from clipping.config import missing_provider_key
+
+    cfg = build_config(["--video", str(video), "--ai-provider", "nvidia"])
+    cfg.api_key_nvidia = "nv-key"
+    cfg.api_key_gemini = ""
+
+    assert missing_provider_key(cfg) is None
