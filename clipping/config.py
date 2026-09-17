@@ -197,6 +197,30 @@ def _build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
+    # --- Input lokal (local-first) ---
+    # The pipeline assumes nothing about how the media was acquired: external
+    # tools produce the .mp4 and the .vtt, and these flags point at them.
+    p.add_argument(
+        "--video", "-v", default=None,
+        help="Path to the local source video (.mp4/.mkv/.mov/...). Required unless --story-mode is used.",
+    )
+    p.add_argument(
+        "--transcript", "-t", default=None,
+        help="Path to a local transcript (.vtt/.srt/.json3). If given, Whisper is skipped entirely.",
+    )
+    p.add_argument(
+        "--transcript-offset", type=float, default=0.0,
+        help="Shift every transcript timestamp by N seconds (for a video trimmed after its transcript was made).",
+    )
+    p.add_argument(
+        "--no-whisper", action="store_true", default=False,
+        help="Fail loudly instead of falling back to Whisper when --transcript is absent.",
+    )
+    p.add_argument(
+        "--source-url", default=None,
+        help="Source attribution for the description/manifest only. Never fetched.",
+    )
+
     # --- Pengaturan utama ---
     p.add_argument(
         "--url", "-u", required=False, default=None,
@@ -740,9 +764,36 @@ def build_config(argv: list[str] | None = None) -> SimpleNamespace:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
-    # Validate: --url is required unless --story-mode is used
-    if not args.story_mode and not args.url:
-        parser.error("--url is required unless --story-mode is used.")
+    # Validate local inputs. These checks live here, beside the --image check
+    # below, so a typo fails in ~40ms instead of after a model load or a render.
+    if args.transcript and not args.video:
+        parser.error("--transcript membutuhkan --video (transkrip tanpa video tidak bisa dirender).")
+
+    if not args.story_mode and not args.video and not args.url:
+        parser.error("--video is required unless --story-mode is used.")
+
+    if args.video:
+        if not os.path.isfile(args.video):
+            parser.error(f"File video tidak ditemukan: {args.video}")
+        valid_video_exts = (".mp4", ".mkv", ".mov", ".webm", ".avi", ".ts", ".flv", ".m4v")
+        if not args.video.lower().endswith(valid_video_exts):
+            parser.error(
+                f"Ekstensi video tidak didukung: {args.video}. "
+                f"Format yang didukung: {', '.join(valid_video_exts)}"
+            )
+
+    if args.transcript:
+        if not os.path.isfile(args.transcript):
+            parser.error(f"File transkrip tidak ditemukan: {args.transcript}")
+        valid_transcript_exts = (".vtt", ".srt", ".json3", ".json")
+        if not args.transcript.lower().endswith(valid_transcript_exts):
+            parser.error(
+                f"Format transkrip tidak didukung: {args.transcript}. "
+                f"Format yang didukung: {', '.join(valid_transcript_exts)}"
+            )
+
+    if args.no_whisper and not args.transcript:
+        parser.error("--no-whisper membutuhkan --transcript.")
 
     # Validate watermark args
     if args.watermark:
@@ -777,7 +828,20 @@ def build_config(argv: list[str] | None = None) -> SimpleNamespace:
         base_dir=base_dir,
         outputs_dir=outputs_dir,
         font_dir=font_dir,
-        file_video_asli=os.path.abspath(os.path.join(base_dir, "video_asli.mp4")),
+        # Local-first: --video IS the source of truth. Overriding this field
+        # rather than adding a parallel one means the whole render layer
+        # (runner, studio, diarization) becomes local-first for free, since it
+        # already reads cfg.file_video_asli everywhere.
+        file_video_asli=(
+            os.path.abspath(args.video)
+            if args.video
+            else os.path.abspath(os.path.join(base_dir, "video_asli.mp4"))
+        ),
+        video_provided=bool(args.video),
+        transcript_path=os.path.abspath(args.transcript) if args.transcript else None,
+        transcript_offset=args.transcript_offset,
+        no_whisper=args.no_whisper,
+        source_url=args.source_url,
         file_font_thumbnail=os.path.abspath(
             os.path.join(base_dir, NAMA_FONT_THUMBNAIL)
         ),

@@ -229,7 +229,9 @@ def _run_pipeline_sync(job_id: str, payload: dict) -> None:
                     message="Menjalankan speaker diarization...",
                     percent=56.0,
                 )
-                audio_path = cfg.file_video_asli.replace(".mp4", "_audio.wav")
+                audio_path = diarization_mod.derive_audio_path(
+                    cfg.file_video_asli, getattr(cfg, "outputs_dir", None)
+                )
                 diarization_mod.extract_audio(cfg.file_video_asli, audio_path)
                 num_speakers_arg = getattr(cfg, "diarization_num_speakers", 2)
                 min_spk = None

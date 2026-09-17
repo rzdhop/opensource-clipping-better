@@ -113,7 +113,9 @@ def run_pipeline(cfg) -> list[dict]:
                 else "Camera-Switch"
             )
             print(f"\n🎙️ [{mode_label}] Menjalankan speaker diarization...")
-            audio_path = cfg.file_video_asli.replace(".mp4", "_audio.wav")
+            audio_path = diarization_mod.derive_audio_path(
+                cfg.file_video_asli, getattr(cfg, "outputs_dir", None)
+            )
             diarization_mod.extract_audio(cfg.file_video_asli, audio_path)
             num_speakers_arg = getattr(cfg, "diarization_num_speakers", 2)
             min_spk = None

@@ -1,0 +1,174 @@
+"""Tests for the local-first CLI surface.
+
+``build_config`` calls ``os.getcwd()`` and ``os.makedirs`` for ``outputs/`` and
+``custom_fonts/``, so every test runs inside ``tmp_path``.
+"""
+
+import os
+
+import pytest
+
+from clipping.config import build_config
+
+
+@pytest.fixture
+def workdir(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    return tmp_path
+
+
+@pytest.fixture
+def video(workdir):
+    path = workdir / "sample.mp4"
+    path.write_bytes(b"\x00")
+    return path
+
+
+@pytest.fixture
+def vtt(workdir):
+    path = workdir / "sample.vtt"
+    path.write_text(
+        "WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nhello world\n", encoding="utf-8"
+    )
+    return path
+
+
+# ------------------------------------------------------------------ happy path
+
+def test_video_sets_file_video_asli(video):
+    cfg = build_config(["--video", str(video)])
+
+    assert cfg.file_video_asli == os.path.abspath(str(video))
+    assert os.path.isabs(cfg.file_video_asli)
+    assert cfg.video_provided is True
+    assert cfg.transcript_path is None
+    assert cfg.no_whisper is False
+    assert cfg.transcript_offset == 0.0
+    assert cfg.source_url is None
+
+
+def test_transcript_is_absolute(video, vtt):
+    cfg = build_config(["--video", str(video), "--transcript", str(vtt)])
+
+    assert cfg.transcript_path == os.path.abspath(str(vtt))
+    assert os.path.isabs(cfg.transcript_path)
+
+
+def test_relative_paths_are_absolutised(workdir, video, vtt):
+    """Layer 4 (ffmpeg/OpenCV) must receive absolute paths regardless of input."""
+    cfg = build_config(["--video", "sample.mp4", "--transcript", "sample.vtt"])
+
+    assert cfg.file_video_asli == str(workdir / "sample.mp4")
+    assert cfg.transcript_path == str(workdir / "sample.vtt")
+
+
+def test_optional_flags(video, vtt):
+    cfg = build_config([
+        "--video", str(video),
+        "--transcript", str(vtt),
+        "--transcript-offset", "2.5",
+        "--no-whisper",
+        "--source-url", "Podcast XYZ ep.42",
+    ])
+
+    assert cfg.transcript_offset == 2.5
+    assert cfg.no_whisper is True
+    # Attribution is free text, never fetched, never validated as a URL.
+    assert cfg.source_url == "Podcast XYZ ep.42"
+
+
+def test_short_flags(video, vtt):
+    cfg = build_config(["-v", str(video), "-t", str(vtt)])
+    assert cfg.file_video_asli == os.path.abspath(str(video))
+    assert cfg.transcript_path == os.path.abspath(str(vtt))
+
+
+# -------------------------------------------------------------- fail-fast path
+
+def test_no_input_at_all_errors(workdir):
+    with pytest.raises(SystemExit):
+        build_config([])
+
+
+def test_missing_video_errors(workdir):
+    with pytest.raises(SystemExit):
+        build_config(["--video", "nope.mp4"])
+
+
+def test_missing_transcript_errors(video):
+    with pytest.raises(SystemExit):
+        build_config(["--video", str(video), "--transcript", "nope.vtt"])
+
+
+def test_transcript_without_video_errors(vtt):
+    with pytest.raises(SystemExit):
+        build_config(["--transcript", str(vtt)])
+
+
+def test_no_whisper_without_transcript_errors(video):
+    with pytest.raises(SystemExit):
+        build_config(["--video", str(video), "--no-whisper"])
+
+
+def test_unsupported_video_extension_errors(workdir):
+    bad = workdir / "sample.txt"
+    bad.write_bytes(b"\x00")
+    with pytest.raises(SystemExit):
+        build_config(["--video", str(bad)])
+
+
+def test_unsupported_transcript_extension_errors(workdir, video):
+    bad = workdir / "sample.txt"
+    bad.write_text("nope", encoding="utf-8")
+    with pytest.raises(SystemExit):
+        build_config(["--video", str(video), "--transcript", str(bad)])
+
+
+def test_directory_is_not_a_video(workdir):
+    """os.path.isfile, not os.path.exists -- a directory must not pass."""
+    d = workdir / "a_directory.mp4"
+    d.mkdir()
+    with pytest.raises(SystemExit):
+        build_config(["--video", str(d)])
+
+
+def test_uppercase_extension_accepted(workdir):
+    upper = workdir / "SAMPLE.MP4"
+    upper.write_bytes(b"\x00")
+    cfg = build_config(["--video", str(upper)])
+    assert cfg.file_video_asli == os.path.abspath(str(upper))
+
+
+# ------------------------------------------------------------------- legacy
+
+def test_legacy_url_still_builds(workdir):
+    """--url keeps working until the purge stage; nothing breaks mid-refactor."""
+    cfg = build_config(["--url", "https://youtube.com/watch?v=x"])
+    assert cfg.url_youtube == "https://youtube.com/watch?v=x"
+    assert cfg.video_provided is False
+    assert cfg.file_video_asli.endswith("video_asli.mp4")
+
+
+# --------------------------------------------------------------- audio path
+
+@pytest.mark.parametrize(
+    "name", ["sample.mp4", "SAMPLE.MP4", "My Talk.mkv", "clip.mov", "no_ext_case.webm"]
+)
+def test_derive_audio_path_handles_any_extension(tmp_path, name):
+    """The old cfg.file_video_asli.replace('.mp4', ...) silently no-opped on
+    anything that was not lowercase .mp4, leaving audio_path == video_path."""
+    from clipping.diarization import derive_audio_path
+
+    video = str(tmp_path / name)
+    out = derive_audio_path(video, str(tmp_path / "outputs"))
+
+    assert out != video
+    assert out.endswith("_audio.wav")
+    assert os.path.dirname(out) == str(tmp_path / "outputs")
+
+
+def test_derive_audio_path_defaults_beside_source(tmp_path):
+    from clipping.diarization import derive_audio_path
+
+    video = str(tmp_path / "sample.mp4")
+    assert derive_audio_path(video) == str(tmp_path / "sample_audio.wav")
