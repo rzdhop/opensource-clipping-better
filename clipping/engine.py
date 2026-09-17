@@ -219,12 +219,34 @@ _NVIDIA_FATAL_EXC = {
 }
 
 
+def _nvidia_rejects_response_format(exc: Exception) -> bool:
+    """Whether *exc* is the provider refusing the response_format parameter.
+
+    Distinct from a plain 400: the request is fine, the model simply does not
+    implement structured output. Retrying the same body cannot help, but
+    retrying *without* the parameter can. Matched on the message because the
+    OpenAI SDK surfaces this as a generic BadRequestError.
+    """
+    status = getattr(exc, "status_code", None)
+    if isinstance(status, int) and status != 400:
+        return False
+
+    message = str(exc).lower()
+    if "response_format" not in message and "json_schema" not in message:
+        return False
+
+    return any(
+        marker in message
+        for marker in ("unknown field", "unsupported", "not supported", "unrecognized", "invalid")
+    )
+
+
 def _nvidia_is_retryable(exc: Exception) -> bool:
     """Whether *exc* is worth another sample."""
     name = type(exc).__name__
 
     if name in _NVIDIA_FATAL_EXC:
-        # A bad key or a malformed guided_json will never succeed on retry.
+        # A bad key or a rejected schema will never succeed on retry.
         return False
 
     status = getattr(exc, "status_code", None)
@@ -895,10 +917,21 @@ def analyze_with_nvidia(transkrip_lengkap: str, cfg) -> list[dict]:
         }
     }
 
-    # The HTTP call and the parse share one retry loop deliberately: with
-    # guided_json in play, a malformed response is a *sampling* failure, and the
+    # The HTTP call and the parse share one retry loop deliberately: with a
+    # schema in play, a malformed response is a *sampling* failure, and the
     # only meaningful remedy is another sample.
     failures: list[str] = []
+
+    # Structured output is requested through the OpenAI-standard
+    # `response_format`, not NVIDIA's `nvext.guided_json`. The latter is what
+    # shipped, and the current default model rejects it outright:
+    #   400 unknown field `guided_json`, expected one of `greed_sampling`, ...
+    # Probing the live endpoint showed response_format={"type":"json_schema"}
+    # accepted and returning the array directly, so that is the primary path.
+    # Not every model on every provider supports it, so a 400 naming the
+    # parameter drops us to prompt-only for the remaining attempts, where
+    # _extract_clip_list and metadata.py's repair still apply.
+    use_response_format = True
 
     for attempt in range(1, NVIDIA_MAX_ATTEMPTS + 1):
         try:
@@ -920,10 +953,21 @@ def analyze_with_nvidia(transkrip_lengkap: str, cfg) -> list[dict]:
                 temperature=max(0.0, 0.5 - 0.15 * (attempt - 1)),
                 top_p=1,
                 max_tokens=16384,
-                extra_body={
-                    "chat_template_kwargs": {"thinking": False},
-                    "nvext": {"guided_json": clips_schema},
-                },
+                extra_body={"chat_template_kwargs": {"thinking": False}},
+                **(
+                    {
+                        "response_format": {
+                            "type": "json_schema",
+                            "json_schema": {
+                                "name": "viral_clips",
+                                "schema": clips_schema,
+                                "strict": True,
+                            },
+                        }
+                    }
+                    if use_response_format
+                    else {}
+                ),
             )
             content = completion.choices[0].message.content
             return _extract_clip_list(content)
@@ -931,6 +975,20 @@ def analyze_with_nvidia(transkrip_lengkap: str, cfg) -> list[dict]:
         except Exception as exc:
             failures.append(f"attempt {attempt}: {type(exc).__name__}: {exc}")
             print(f"   ⚠️ NVIDIA attempt {attempt} failed | {type(exc).__name__}: {exc}")
+
+            # A model that does not accept response_format says so with a 400
+            # naming it. That is not a sampling failure, so retrying identically
+            # is pointless -- drop the parameter and let the prompt carry the
+            # schema instead.
+            if use_response_format and _nvidia_rejects_response_format(exc):
+                print(
+                    "   ℹ️ This model does not accept response_format — falling "
+                    "back to prompt-only JSON for the remaining attempts.",
+                    flush=True,
+                )
+                use_response_format = False
+                if attempt < NVIDIA_MAX_ATTEMPTS:
+                    continue
 
             if not _nvidia_is_retryable(exc) or attempt == NVIDIA_MAX_ATTEMPTS:
                 detail = "\n  ".join(failures)

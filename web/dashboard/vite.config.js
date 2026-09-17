@@ -34,7 +34,11 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://backend:8000',
+        // 'backend' is the docker-compose service name, so it only resolves
+        // inside the compose network. Set VITE_API_TARGET to run the dashboard
+        // on the host against a local backend, e.g.
+        //   VITE_API_TARGET=http://127.0.0.1:8000 npm run dev
+        target: process.env.VITE_API_TARGET || 'http://backend:8000',
         changeOrigin: true,
         // Socket timeouts towards the backend, and for the incoming request.
         timeout: 0,

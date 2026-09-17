@@ -141,11 +141,38 @@ def test_retries_cool_the_temperature(run):
     assert client.calls[0]["temperature"] > client.calls[1]["temperature"]
 
 
-def test_guided_json_schema_is_sent(run):
+def test_the_schema_is_sent_via_response_format(run):
+    """Structured output goes through the OpenAI-standard response_format.
+
+    It used to go through extra_body["nvext"]["guided_json"], which the default
+    model rejects with a 400 -- confirmed against the live endpoint. This test
+    previously asserted that broken mechanism.
+    """
     _, client = run([GOOD_JSON])
-    extra = client.calls[0]["extra_body"]
-    assert "guided_json" in extra["nvext"]
-    assert extra["nvext"]["guided_json"]["type"] == "array"
+    rf = client.calls[0]["response_format"]
+
+    assert rf["type"] == "json_schema"
+    assert rf["json_schema"]["schema"]["type"] == "array"
+    assert rf["json_schema"]["strict"] is True
+
+
+def test_guided_json_is_no_longer_sent(run):
+    """Pin the removal: nvext.guided_json is a 400 on the shipped model."""
+    _, client = run([GOOD_JSON])
+
+    assert "nvext" not in client.calls[0].get("extra_body", {})
+
+
+def test_response_format_rejection_falls_back_to_prompt_only(run):
+    """A model that refuses the parameter should still produce clips."""
+    rejection = _exc("BadRequestError", 400)
+    rejection.args = ("400 - unknown field `response_format`",)
+
+    result, client = run([rejection, GOOD_JSON])
+
+    assert result == [GOOD_CLIP]
+    assert "response_format" in client.calls[0], "first attempt should try it"
+    assert "response_format" not in client.calls[1], "retry should drop it"
 
 
 # --------------------------------------------------------- error classing
@@ -314,3 +341,68 @@ def test_dispatch_routes_to_gemini(monkeypatch, cfg):
     monkeypatch.setattr(engine, "analyze_with_gemini", lambda *a, **k: [GOOD_CLIP])
 
     assert engine.analyze_with_ai("transcript", cfg) == [GOOD_CLIP]
+
+
+# ---------------------------------------------------------------------------
+# response_format rejection
+#
+# The shipped code asked for structured output via nvext.guided_json, which the
+# default model rejects outright:
+#   400 unknown field `guided_json`, expected one of `greed_sampling`, ...
+# Probing the live endpoint showed response_format={"type":"json_schema"} works,
+# so that is now the primary path -- but not every model implements it, and a
+# model that refuses it says so with a 400 naming the parameter. That is not a
+# sampling failure: retrying the same body cannot help, retrying without the
+# parameter can.
+# ---------------------------------------------------------------------------
+
+from clipping.engine import _nvidia_rejects_response_format
+
+
+class _Err(Exception):
+    def __init__(self, message, status_code=400):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+def test_unknown_response_format_field_is_detected():
+    exc = _Err("Error code: 400 - unknown field `response_format`, expected one of ...")
+
+    assert _nvidia_rejects_response_format(exc) is True
+
+
+def test_unsupported_json_schema_is_detected():
+    exc = _Err("400 - json_schema is not supported by this model")
+
+    assert _nvidia_rejects_response_format(exc) is True
+
+
+def test_an_ordinary_bad_request_is_not_mistaken_for_it():
+    """A 400 about something else must not silently drop structured output."""
+    exc = _Err("Error code: 400 - messages[0].content too long")
+
+    assert _nvidia_rejects_response_format(exc) is False
+
+
+def test_a_server_error_is_not_mistaken_for_it():
+    exc = _Err("500 - internal error mentioning response_format", status_code=500)
+
+    assert _nvidia_rejects_response_format(exc) is False
+
+
+def test_auth_failure_is_not_mistaken_for_it():
+    exc = _Err("401 - invalid api key", status_code=401)
+
+    assert _nvidia_rejects_response_format(exc) is False
+
+
+def test_the_real_guided_json_rejection_is_still_fatal():
+    """The message that actually shipped. It names guided_json, not
+    response_format, so it must NOT trigger the response_format fallback."""
+    exc = _Err(
+        "Error code: 400 - {'message': 'Failed to deserialize the JSON body into "
+        "the target type: unknown field `guided_json`, expected one of "
+        "`greed_sampling`, `use_raw_prompt`...'}"
+    )
+
+    assert _nvidia_rejects_response_format(exc) is False
