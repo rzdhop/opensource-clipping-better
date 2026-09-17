@@ -103,8 +103,13 @@ class JobCreateRequest(BaseModel):
     transcript_filename: Optional[str] = None
     transcript_offset: float = 0.0
     source_url: Optional[str] = None
+    # The dashboard has always sent this, but it was never declared here, so
+    # Pydantic dropped it and the "Bypass AI" toggle silently did nothing.
+    load_gemini_json: bool = False
     ai_provider: AIProvider = AIProvider.NVIDIA
     gemini_model: str = "gemini-3-flash-preview"
+    gemini_fallback_model: str = "gemini-2.5-flash"
+    nvidia_model: str = "deepseek-ai/deepseek-v4-flash-0731"
     face_detector: FaceDetector = FaceDetector.MEDIAPIPE
 
 

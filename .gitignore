@@ -16,6 +16,10 @@ outputs/
 *.ass
 *.jpg
 *.tflite
+# Models and fonts are downloaded into the working directory at run time
+# (cfg.base_dir is os.getcwd()), so they land in the repo root.
+*.ttf
+face_yolov*.pt
 # *.mp3
 custom_fonts/
 render_manifest*.json

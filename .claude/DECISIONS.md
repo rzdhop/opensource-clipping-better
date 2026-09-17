@@ -68,3 +68,16 @@ smallest possible deviation. The default is pinned by a test so the next
 retirement surfaces as a test failure rather than a production 410. NOTE: the
 model has NOT been exercised against the real API -- no valid NVIDIA_API_KEY was
 available -- so its conformance to the `guided_json` schema is unverified.
+
+## DEC-008 — Fix the Windows ffmpeg path escaping despite the "don't touch the render layer" rule
+**Context.** This refactor promised to leave `clipping/studio/` alone, and its
+diff across all 11 stages was empty. But end-to-end verification could not run at
+all on Windows: `escape_ffmpeg_filter_value` produced a path ffmpeg rejected, so
+every subtitle burn-in failed. The bug is pre-existing and had never surfaced
+because the project has only ever been run on Colab/Kaggle.
+**Decision.** Fix it, since it blocked verification of the whole refactor. Keep
+the change minimal and prove POSIX output is byte-identical so the primary
+platform is untouched.
+**Consequence.** One function changed in the render layer. The correct escaping
+was established empirically by probing ffmpeg with seven candidate forms rather
+than inferred from documentation.

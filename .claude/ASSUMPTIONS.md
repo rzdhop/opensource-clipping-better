@@ -1,15 +1,11 @@
 # ASSUMPTIONS
 
 ## Unconfirmed
-- **A-005** — The render layer is unaffected by this refactor. Reasoning: it reads
-  `cfg.file_video_asli` (unchanged in name, now absolute and local) and
-  `data_segmen` (contract pinned by `tests/helpers.assert_valid_data_segmen`).
-  **Not verified end-to-end** — this machine has no cv2/ffmpeg/mediapipe, so no
-  clip was rendered. See the deferred Tier-2 list in CHECKPOINT.md.
-- **A-006** — VTT-derived karaoke timing is visually acceptable. Inline
-  `<00:00:01.234>` tags are used verbatim where present, and even division
-  otherwise (the same approximation the pre-existing JSON3 parser used). Needs a
-  manual A/B against a Whisper run of the same video.
+- **A-007** — `deepseek-ai/deepseek-v4-flash-0731` honours the `nvext.guided_json`
+  schema as well as the retired `deepseek-v4-pro` did. The model is confirmed
+  live (probe returns 401 auth-required, not 410) and is the same v4 family, but
+  it has **not** been exercised against the real API — no valid `NVIDIA_API_KEY`
+  was available. This is the one substantive open risk.
 
 ## Confirmed
 - **A-001** — The transcript contract consumed by `studio/subtitles.buat_file_ass`
@@ -25,11 +21,19 @@
   *Confirmed by grep for `YoutubeDL(`.*
 - **A-004** — `-v` and `-t` are free as short flags; only `-u`, `-n`, `-r` are
   taken. *Confirmed by grep over `clipping/config.py`.*
+- **A-005** — The render layer is unaffected by this refactor. *Confirmed: a real
+  1080x1920 h264+aac clip plus thumbnail rendered end-to-end from a local mp4 +
+  vtt, after fixing a pre-existing Windows path-escaping bug that blocked all
+  subtitle burn-in (see DEC-008).*
+- **A-006** — VTT-derived karaoke timing is correct. *Confirmed: regenerated the
+  burned-in ASS and compared every Dialogue timing back to the source VTT — 0
+  word mismatches across 44 words, every delta <=0.010s (ASS centisecond
+  resolution). The single 0.833s outlier is a word starting before the clip cut,
+  correctly clamped to the clip start.*
 
 ## Invalidated
 - (none)
 
 ## Notes
-A-005 and A-006 are the two open risks at close-out. Both are verification gaps
-rather than known defects, and both are listed with concrete commands in
-CHECKPOINT.md.
+A-007 is the only substantive open risk at close-out: the replacement NIM model
+is confirmed to exist but has not been called with a real key.
