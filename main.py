@@ -31,13 +31,13 @@ def main():
         print("=" * 70)
         print(f"   Recipe      : {cfg.story_recipe_path}")
         print(f"   Sources     : {cfg.sources_json_path}")
-        print(f"   Rasio       : {cfg.pilihan_rasio}")
+        print(f"   Ratio       : {cfg.pilihan_rasio}")
         print(f"   Output Dir  : {cfg.story_output_dir}")
         print("=" * 70)
 
         run_story_pipeline(cfg)
 
-        print("\n✅ Selesai! Semua story clips telah dirender.")
+        print("\n✅ Done! All story clips have been rendered.")
         return
 
     # ── Normal Auto-Clip Mode ────────────────────────────────────────
@@ -61,9 +61,9 @@ def main():
         if missing:
             _, env_name = missing
             other = "gemini" if cfg.ai_provider == "nvidia" else "nvidia"
-            print(f"❌ ERROR: {env_name} tidak ditemukan (provider aktif: {cfg.ai_provider}).")
-            print(f"   Set via: export {env_name}='your-key' atau buat file .env")
-            print(f"   Atau ganti provider: --ai-provider {other}")
+            print(f"❌ ERROR: {env_name} not found (active provider: {cfg.ai_provider}).")
+            print(f"   Set via: export {env_name}='your-key' or create a .env file")
+            print(f"   Or switch provider: --ai-provider {other}")
             sys.exit(1)
 
     transcript_path = getattr(cfg, "transcript_path", None)
@@ -80,8 +80,8 @@ def main():
         print(f"   Transcript  : none → Whisper ({cfg.whisper_model}, {cfg.whisper_device})")
     if getattr(cfg, "source_url", None):
         print(f"   Source Attr : {cfg.source_url}")
-    print(f"   Jumlah Clip : {cfg.jumlah_clip}")
-    print(f"   Rasio       : {cfg.pilihan_rasio}")
+    print(f"   Clip Count  : {cfg.jumlah_clip}")
+    print(f"   Ratio       : {cfg.pilihan_rasio}")
     print(f"   Font Style  : {cfg.gaya_font_aktif}")
     print(f"   Subtitles   : {'OFF' if cfg.no_subs else 'ON'}")
     print(f"   B-Roll      : {'ON' if cfg.use_broll else 'OFF'}")
@@ -107,7 +107,7 @@ def main():
 
     run_pipeline(cfg)
 
-    print("\n✅ Selesai! Semua klip telah dirender.")
+    print("\n✅ Done! All clips have been rendered.")
 
 
 if __name__ == "__main__":

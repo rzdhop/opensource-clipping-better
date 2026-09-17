@@ -67,8 +67,8 @@ def _run_pipeline_sync(job_id: str, payload: dict) -> None:
             _, env_name = missing
             store.set_error(
                 job_id,
-                f"{env_name} tidak ditemukan (provider aktif: {cfg.ai_provider}). "
-                "Set via Settings atau .env file.",
+                f"{env_name} not found (active provider: {cfg.ai_provider}). "
+                "Set it via Settings or the .env file.",
             )
             return
 
@@ -79,7 +79,7 @@ def _run_pipeline_sync(job_id: str, payload: dict) -> None:
             step="download",
             step_number=1,
             total_steps=7,
-            message="Menyiapkan video sumber...",
+            message="Preparing source video...",
             percent=5.0,
         )
 
@@ -98,19 +98,19 @@ def _run_pipeline_sync(job_id: str, payload: dict) -> None:
             if not os.path.isfile(upload_path):
                 store.set_error(
                     job_id,
-                    f"File upload tidak ditemukan: {payload['upload_filename']}",
+                    f"Uploaded file not found: {payload['upload_filename']}",
                 )
                 return
             cfg.file_video_asli = upload_path
-            message = "Menggunakan file upload."
+            message = "Using uploaded file."
         elif os.path.isfile(cfg.file_video_asli):
             # Reuse-job path: an earlier job's video is still on disk.
-            message = "Menggunakan video dari job sebelumnya."
+            message = "Using video from a previous job."
         else:
             store.set_error(
                 job_id,
-                "Video tidak ditemukan. Upload sebuah file video, atau pilih job "
-                "lama yang videonya masih ada.",
+                "Video not found. Upload a video file, or pick an older job "
+                "whose video is still present.",
             )
             return
 
@@ -131,9 +131,9 @@ def _run_pipeline_sync(job_id: str, payload: dict) -> None:
             step_number=2,
             total_steps=7,
             message=(
-                "Memuat transkrip lokal..."
+                "Loading local transcript..."
                 if getattr(cfg, "transcript_path", None)
-                else "Memulai transkripsi..."
+                else "Starting transcription..."
             ),
             percent=15.0,
         )
@@ -146,7 +146,7 @@ def _run_pipeline_sync(job_id: str, payload: dict) -> None:
             step="transcribe",
             step_number=2,
             total_steps=7,
-            message="Transkripsi selesai.",
+            message="Transcription complete.",
             percent=35.0,
         )
 
@@ -157,7 +157,7 @@ def _run_pipeline_sync(job_id: str, payload: dict) -> None:
             step="analyze",
             step_number=3,
             total_steps=7,
-            message="Menganalisis dengan AI...",
+            message="Analyzing with AI...",
             percent=36.0,
         )
 
@@ -178,7 +178,7 @@ def _run_pipeline_sync(job_id: str, payload: dict) -> None:
             step="analyze",
             step_number=3,
             total_steps=7,
-            message=f"AI menemukan {len(hasil_json)} klip viral.",
+            message=f"AI found {len(hasil_json)} viral clips.",
             percent=50.0,
         )
 
@@ -194,7 +194,7 @@ def _run_pipeline_sync(job_id: str, payload: dict) -> None:
             step="metadata",
             step_number=4,
             total_steps=7,
-            message="Metadata dinormalisasi.",
+            message="Metadata normalized.",
             percent=55.0,
         )
 
@@ -212,7 +212,7 @@ def _run_pipeline_sync(job_id: str, payload: dict) -> None:
                     step="diarization",
                     step_number=5,
                     total_steps=7,
-                    message="Menjalankan speaker diarization...",
+                    message="Running speaker diarization...",
                     percent=56.0,
                 )
                 audio_path = diarization_mod.derive_audio_path(
@@ -244,7 +244,7 @@ def _run_pipeline_sync(job_id: str, payload: dict) -> None:
                     step="diarization",
                     step_number=5,
                     total_steps=7,
-                    message=f"Diarization gagal: {e}. Fallback ke mode biasa.",
+                    message=f"Diarization failed: {e}. Falling back to normal mode.",
                     percent=58.0,
                 )
                 diarization_data = None
@@ -256,7 +256,7 @@ def _run_pipeline_sync(job_id: str, payload: dict) -> None:
             step="render",
             step_number=6,
             total_steps=7,
-            message="Menyiapkan rendering...",
+            message="Preparing rendering...",
             percent=60.0,
         )
 
@@ -297,7 +297,7 @@ def _run_pipeline_sync(job_id: str, payload: dict) -> None:
                 step="render",
                 step_number=6,
                 total_steps=7,
-                message=f"Merender klip {clip_num}/{total_clips}...",
+                message=f"Rendering clip {clip_num}/{total_clips}...",
                 percent=60.0 + (35.0 * clip_num / total_clips),
             )
 
@@ -347,7 +347,7 @@ def _run_pipeline_sync(job_id: str, payload: dict) -> None:
             step="done",
             step_number=7,
             total_steps=7,
-            message=f"Selesai! {len(clips)} klip berhasil dirender.",
+            message=f"Done! {len(clips)} clips rendered successfully.",
             percent=100.0,
         )
 
@@ -360,7 +360,7 @@ def _run_pipeline_sync(job_id: str, payload: dict) -> None:
             step="error",
             step_number=0,
             total_steps=7,
-            message=f"Pipeline gagal: {error_msg}",
+            message=f"Pipeline failed: {error_msg}",
             percent=0.0,
         )
         print(f"[Worker] Job {job_id} failed:\n{tb}", file=sys.stderr)

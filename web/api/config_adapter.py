@@ -132,11 +132,11 @@ def build_config_from_payload(
         api_key_gemini=env.get("GOOGLE_API_KEY", os.environ.get("GOOGLE_API_KEY", "")),
         hf_token=env.get("HF_TOKEN", os.environ.get("HF_TOKEN", "")),
         pexels_api_key=env.get("PEXELS_API_KEY", os.environ.get("PEXELS_API_KEY", "")),
-        # Pengaturan utama
+        # Main settings
         jumlah_clip=payload.get("clips", 7),
         pilihan_rasio=payload.get("ratio", "9:16"),
         render_output_height=render_height,
-        # Konten & Hook
+        # Content & Hook
         max_kata_per_subtitle=payload.get("words_per_sub", 5),
         durasi_hook=payload.get("hook_duration", 3),
         hook_source=None,
@@ -163,7 +163,7 @@ def build_config_from_payload(
         split_v_align=payload.get("split_v_align", 0.5),
         split_auto_zoom=payload.get("split_auto_zoom", False),
         split_max_zoom=payload.get("split_max_zoom", 2.5),
-        # Subtitle & Tipografi
+        # Subtitle & Typography
         no_subs=payload.get("no_subs", False),
         gaya_font_aktif=payload.get("font_style", "HORMOZI"),
         daftar_font=DAFTAR_FONT,

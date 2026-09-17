@@ -110,11 +110,11 @@ function NewJob() {
     setError('')
 
     if (mode === 'upload' && !uploadFilename) {
-      setError('Silakan upload video terlebih dahulu')
+      setError('Please upload a video first')
       return
     }
     if (mode === 'reuse' && !reuseJobId.trim()) {
-      setError('Job ID tidak boleh kosong')
+      setError('Job ID cannot be empty')
       return
     }
 
@@ -157,7 +157,7 @@ function NewJob() {
       <div className="page-header">
         <div>
           <h2>New Clipping Job</h2>
-          <p>Generate viral short clips dari video panjang</p>
+          <p>Generate viral short clips from long-form video</p>
         </div>
       </div>
 
@@ -219,7 +219,7 @@ function NewJob() {
 
           {mode === 'upload' && (
             <div className="form-group">
-              <label className="form-label">Transcript (opsional)</label>
+              <label className="form-label">Transcript (optional)</label>
               {transcriptFilename ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                   <span style={{ color: 'var(--success)' }}>✅ {transcriptFilename}</span>
@@ -245,8 +245,8 @@ function NewJob() {
                     {uploadingTranscript ? <><span className="spinner"></span> Uploading...</> : '📝 Select Transcript File'}
                   </button>
                   <p className="form-hint">
-                    VTT, SRT, JSON3 — melewati Whisper sepenuhnya (jauh lebih cepat).
-                    Kosongkan untuk transkripsi dengan Whisper.
+                    VTT, SRT, JSON3 — skips Whisper entirely (much faster).
+                    Leave empty to transcribe with Whisper.
                   </p>
                 </div>
               )}
@@ -255,7 +255,7 @@ function NewJob() {
 
           {mode === 'upload' && transcriptFilename && (
             <div className="form-group" style={{ maxWidth: '200px' }}>
-              <label className="form-label">Transcript Offset (detik)</label>
+              <label className="form-label">Transcript Offset (seconds)</label>
               <input
                 className="form-input"
                 type="number"
@@ -263,20 +263,20 @@ function NewJob() {
                 value={transcriptOffset}
                 onChange={(e) => setTranscriptOffset(e.target.value)}
               />
-              <p className="form-hint">Geser timestamp jika video sudah di-trim.</p>
+              <p className="form-hint">Shift the timestamp if the video has already been trimmed.</p>
             </div>
           )}
 
           <div className="form-group">
-            <label className="form-label">Source Attribution (opsional)</label>
+            <label className="form-label">Source Attribution (optional)</label>
             <input
               className="form-input"
               type="text"
-              placeholder="https://youtube.com/watch?v=... atau 'Podcast XYZ ep.42'"
+              placeholder="https://youtube.com/watch?v=... or 'Podcast XYZ ep.42'"
               value={sourceUrl}
               onChange={(e) => setSourceUrl(e.target.value)}
             />
-            <p className="form-hint">Hanya untuk kredit di deskripsi &amp; manifest. Tidak pernah diunduh.</p>
+            <p className="form-hint">Only used for credit in the description &amp; manifest. Never downloaded.</p>
           </div>
 
           {mode === 'reuse' && (
@@ -285,11 +285,11 @@ function NewJob() {
               <input
                 className="form-input"
                 type="text"
-                placeholder="Contoh: d20b47341e08"
+                placeholder="Example: d20b47341e08"
                 value={reuseJobId}
                 onChange={(e) => setReuseJobId(e.target.value)}
               />
-              <p className="form-hint" style={{ marginTop: '4px' }}>Bypass download dengan job ID lama. (Jika menggunakan Clone & Rerun, biarkan form ini terisi).</p>
+              <p className="form-hint" style={{ marginTop: '4px' }}>Bypass download using an old job ID. (If using Clone & Rerun, leave this field filled in).</p>
             </div>
           )}
         </div>
