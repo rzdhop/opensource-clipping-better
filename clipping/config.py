@@ -8,6 +8,10 @@ import argparse
 import os
 from types import SimpleNamespace
 
+# Valid device / compute-type values live beside the resolver that
+# interprets them, so argparse and the resolver cannot disagree.
+from clipping.device import VALID_COMPUTE_TYPES, VALID_DEVICES
+
 try:
     from dotenv import load_dotenv
 
@@ -140,8 +144,8 @@ BGM_DIR = os.path.abspath(os.path.join(BASE_DIR, "assets", "bgm"))
 
 # Whisper
 WHISPER_MODEL = "large-v3"
-WHISPER_DEVICE = "cuda"
-WHISPER_COMPUTE_TYPE = "float16"
+WHISPER_DEVICE = "auto"
+WHISPER_COMPUTE_TYPE = "auto"
 VIDEO_QUALITY_CQ = 23
 VIDEO_QUALITY_CRF = 20
 VIDEO_PRESET = "auto"
@@ -366,13 +370,17 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--whisper-device",
         default=WHISPER_DEVICE,
-        choices=["cuda", "cpu", "auto"],
+        choices=list(VALID_DEVICES),
         help="Device for Whisper inference",
     )
     p.add_argument(
         "--whisper-compute-type",
         default=WHISPER_COMPUTE_TYPE,
-        help="Compute type for Whisper (float16, int8, etc.)",
+        choices=list(VALID_COMPUTE_TYPES),
+        help=(
+            "Compute type for Whisper. 'auto' pairs float16 with a GPU and int8 "
+            "with CPU; float16 on CPU is not supported and is downgraded"
+        ),
     )
 
     # --- Gemini & Face Detection ---

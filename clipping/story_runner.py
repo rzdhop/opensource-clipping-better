@@ -42,8 +42,8 @@ def _load_source_transcripts(
     from . import engine
 
     whisper_model = getattr(cfg, "whisper_model", "large-v3")
-    whisper_device = getattr(cfg, "whisper_device", "cuda")
-    whisper_compute = getattr(cfg, "whisper_compute_type", "float16")
+    whisper_device = getattr(cfg, "whisper_device", "auto")
+    whisper_compute = getattr(cfg, "whisper_compute_type", "auto")
     max_words = getattr(cfg, "max_kata_per_subtitle", 5)
     no_whisper = getattr(cfg, "no_whisper", False)
 

@@ -157,8 +157,8 @@ class JobCreateRequest(BaseModel):
 
     # Whisper
     whisper_model: str = "large-v3"
-    whisper_device: WhisperDevice = WhisperDevice.CUDA
-    whisper_compute_type: str = "float16"
+    whisper_device: WhisperDevice = WhisperDevice.AUTO
+    whisper_compute_type: str = "auto"
 
     # AI
     # Local-first inputs.

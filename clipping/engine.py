@@ -32,14 +32,18 @@ from .transcript import (  # noqa: F401
 
 def load_whisper_model(
     model_size: str = "large-v3",
-    device: str = "cuda",
-    compute_type: str = "float16",
+    device: str = "auto",
+    compute_type: str = "auto",
 ):
     """Build a Faster-Whisper model.
 
     Split out so callers that transcribe several files (story mode) can build the
     model once. large-v3 costs ~30s and several GB to load, and it was previously
     rebuilt on every transcribe_video call.
+
+    Device and compute type are resolved here rather than at each call site: the
+    CLI, story mode and the web worker all funnel through this function, and
+    resolving in one place is what stops the three of them drifting apart.
     """
     try:
         from faster_whisper import WhisperModel
@@ -50,20 +54,34 @@ def load_whisper_model(
             "with --transcript <file.vtt> to skip Whisper entirely."
         ) from exc
 
+    from clipping.device import resolve_whisper_runtime
+
+    device, compute_type = resolve_whisper_runtime(device, compute_type)
+
     print(
-        f"      ⏳ Loading Whisper model '{model_size}' ({device})"
+        f"      ⏳ Loading Whisper model '{model_size}' ({device}/{compute_type})"
         " — the first download may take a while...",
         flush=True,
     )
-    return WhisperModel(model_size, device=device, compute_type=compute_type)
+    try:
+        return WhisperModel(model_size, device=device, compute_type=compute_type)
+    except Exception as exc:
+        # CTranslate2 raises a bare ValueError naming neither the flag to change
+        # nor the alternative, which is how this cost the user two failed runs.
+        raise RuntimeError(
+            f"Whisper could not start on {device}/{compute_type}: {exc}\n"
+            "  If this mentions CUDA, the installed CTranslate2 is a CPU-only "
+            "build. Run with --whisper-device cpu --whisper-compute-type int8, "
+            "or skip Whisper entirely with --transcript <file.vtt>."
+        ) from exc
 
 
 def transcribe_video(
     video_path: str,
     max_words_per_subtitle: int = 5,
     model_size: str = "large-v3",
-    device: str = "cuda",
-    compute_type: str = "float16",
+    device: str = "auto",
+    compute_type: str = "auto",
     model=None,
 ) -> tuple[str, list[dict]]:
     """

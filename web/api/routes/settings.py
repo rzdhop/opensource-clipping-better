@@ -18,12 +18,16 @@ router = APIRouter(tags=["settings"])
 
 
 def _check_gpu() -> bool:
-    """Check if CUDA GPU is available."""
-    try:
-        import torch
-        return torch.cuda.is_available()
-    except ImportError:
-        return False
+    """Whether a GPU is usable for transcription.
+
+    Delegates to clipping.device so the health endpoint and the Whisper loader
+    cannot disagree. Asking torch alone was misleading: the default CTranslate2
+    wheel is CPU-only, so torch can report CUDA on a machine where Whisper
+    still cannot use it.
+    """
+    from clipping.device import whisper_cuda_available
+
+    return whisper_cuda_available()
 
 
 def _check_ffmpeg() -> bool:
