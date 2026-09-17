@@ -80,12 +80,34 @@ export function uploadVideo(file, onProgress) {
       }
       if (xhr.status >= 200 && xhr.status < 300) {
         resolve(body)
+        return
+      }
+      // Always surface the status. A bare "Upload failed" is undiagnosable,
+      // and the interesting failures for a large file (502/504 from the dev
+      // proxy, 413 from the backend) are told apart by the status alone.
+      if (body.detail) {
+        reject(new Error(`${body.detail} (HTTP ${xhr.status})`))
+      } else if (xhr.status === 502 || xhr.status === 504) {
+        reject(new Error(
+          `Upload failed: the dev proxy gave up (HTTP ${xhr.status}). The file ` +
+          `probably took longer than the proxy's request timeout. Check ` +
+          `"docker compose logs frontend".`
+        ))
       } else {
-        reject(new Error(body.detail || 'Upload failed'))
+        reject(new Error(`Upload failed (HTTP ${xhr.status || 'no response'})`))
       }
     })
 
-    xhr.addEventListener('error', () => reject(new Error('Upload failed: network error')))
+    // Fires on a connection reset or a timeout that closed the socket. The
+    // request never produced a status, so there is nothing more specific to
+    // report -- but say where to look, since the backend will have logged
+    // nothing at all in this case.
+    xhr.addEventListener('error', () => reject(new Error(
+      'Upload failed: the connection dropped before the server replied. ' +
+      'For a large file this is usually the dev proxy timing out -- check ' +
+      '"docker compose logs frontend".'
+    )))
+    xhr.addEventListener('timeout', () => reject(new Error('Upload failed: timed out')))
     xhr.addEventListener('abort', () => reject(new Error('Upload cancelled')))
 
     xhr.send(formData)
