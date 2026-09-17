@@ -246,22 +246,16 @@ def download_video(
 # TAHAP 2: TRANSKRIPSI WHISPER & JSON3 FALLBACK
 # ==============================================================================
 
-def transcribe_video(
-    video_path: str,
-    max_words_per_subtitle: int = 5,
+def load_whisper_model(
     model_size: str = "large-v3",
     device: str = "cuda",
     compute_type: str = "float16",
-) -> tuple[str, list[dict]]:
-    """
-    Transcribe *video_path* using Faster-Whisper.
+):
+    """Build a Faster-Whisper model.
 
-    Returns
-    -------
-    transkrip_lengkap : str
-        Human-readable transcript with timestamps.
-    data_segmen : list[dict]
-        Word-level segments grouped by *max_words_per_subtitle*.
+    Split out so callers that transcribe several files (story mode) can build the
+    model once. large-v3 costs ~30s and several GB to load, and it was previously
+    rebuilt on every transcribe_video call.
     """
     try:
         from faster_whisper import WhisperModel
@@ -272,17 +266,44 @@ def transcribe_video(
             "dengan --transcript <file.vtt> untuk melewati Whisper sepenuhnya."
         ) from exc
 
-    print("[2/3] Memulai transkripsi dengan Faster-Whisper (Level Per-Kata)...")
-
-    # Langkah-langkah ini berjalan tanpa output di dalam faster-whisper sebelum
-    # segmen pertama dihasilkan, jadi kita umumkan tiap fase — kalau tidak, run
-    # pertama di CPU (download model + decode seluruh audio) terlihat seperti hang.
     print(
         f"      ⏳ Memuat model Whisper '{model_size}' ({device})"
         " — unduhan pertama kali bisa memakan waktu...",
         flush=True,
     )
-    model = WhisperModel(model_size, device=device, compute_type=compute_type)
+    return WhisperModel(model_size, device=device, compute_type=compute_type)
+
+
+def transcribe_video(
+    video_path: str,
+    max_words_per_subtitle: int = 5,
+    model_size: str = "large-v3",
+    device: str = "cuda",
+    compute_type: str = "float16",
+    model=None,
+) -> tuple[str, list[dict]]:
+    """
+    Transcribe *video_path* using Faster-Whisper.
+
+    Returns
+    -------
+    transkrip_lengkap : str
+        Human-readable transcript with timestamps.
+    data_segmen : list[dict]
+        Word-level segments grouped by *max_words_per_subtitle*.
+
+    Notes
+    -----
+    Pass *model* to reuse an already-loaded WhisperModel across several files;
+    otherwise one is built from *model_size*/*device*/*compute_type*.
+    """
+    print("[2/3] Memulai transkripsi dengan Faster-Whisper (Level Per-Kata)...")
+
+    # Faster-whisper produces no output until the first segment, so each phase is
+    # announced -- otherwise a first CPU run (model download + full audio decode)
+    # looks like a hang.
+    if model is None:
+        model = load_whisper_model(model_size, device, compute_type)
 
     print("      ⏳ Mendekode audio & mengekstrak fitur (belum ada output)...", flush=True)
     segments, info = model.transcribe(video_path, beam_size=5, word_timestamps=True)

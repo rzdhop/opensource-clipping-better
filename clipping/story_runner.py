@@ -20,87 +20,108 @@ from .story import loader, source_manager, assembler
 # WHISPER TRANSCRIPTION FOR STORY SOURCES
 # ==============================================================================
 
-def _transcribe_sources(
+def _load_source_transcripts(
     cached_paths: dict[str, str],
+    source_registry: dict[str, dict],
     cache_dir: str,
     cfg,
 ) -> dict[str, dict]:
     """
-    Transcribe all cached source videos using Faster-Whisper.
+    Resolve a transcript for every cached source.
 
-    Parameters
-    ----------
-    cached_paths : dict[str, str]
-        Mapping of source_id → cached video file path.
-    cache_dir : str
-        Directory where transcript JSON files will be saved.
-    cfg : SimpleNamespace
-        Config with Whisper settings (model, device, compute_type).
+    Resolution order per source:
+      1. an existing ``<cache>/<sid>_transcript.json``;
+      2. the source's ``transcript_path`` (local .vtt/.srt/.json3) -- no Whisper;
+      3. Whisper on the cached video, unless ``--no-whisper`` is set.
 
     Returns
     -------
     dict[str, dict]
-        Mapping of source_id → {"transkrip": str, "segmen": list, "path": str}.
+        Mapping of source_id -> {"source_id", "transkrip", "segmen", "path"}.
     """
-    # Lazy import to avoid pulling in heavy deps
-    try:
-        from . import engine
-    except ImportError as e:
-        print(f"   ⚠️ Whisper tidak tersedia ({e}). Skip transkripsi.")
-        print(f"   💡 Install faster-whisper untuk mengaktifkan transkripsi.")
-        return {}
+    from . import engine
 
     whisper_model = getattr(cfg, "whisper_model", "large-v3")
     whisper_device = getattr(cfg, "whisper_device", "cuda")
     whisper_compute = getattr(cfg, "whisper_compute_type", "float16")
     max_words = getattr(cfg, "max_kata_per_subtitle", 5)
+    no_whisper = getattr(cfg, "no_whisper", False)
 
     transcripts: dict[str, dict] = {}
     total = len(cached_paths)
 
-    for idx, (sid, video_path) in enumerate(cached_paths.items(), 1):
-        transcript_path = os.path.join(cache_dir, f"{sid}_transcript.json")
+    # One Whisper model shared across every source that needs it. Previously the
+    # model was rebuilt inside transcribe_video on each call, so an N-source
+    # story paid the large-v3 load (~30s and several GB) N times.
+    shared_model = None
 
-        # Skip if already transcribed
-        if os.path.exists(transcript_path):
+    for idx, (sid, video_path) in enumerate(cached_paths.items(), 1):
+        out_path = os.path.join(cache_dir, f"{sid}_transcript.json")
+
+        # --- 1. Cached transcript -------------------------------------------
+        if os.path.exists(out_path):
             print(f"   ⏩ [{idx}/{total}] '{sid}' sudah ada transkrip, skip.")
             try:
-                with open(transcript_path, "r", encoding="utf-8") as f:
+                with open(out_path, "r", encoding="utf-8") as f:
                     transcripts[sid] = json.load(f)
                 continue
             except Exception:
-                pass  # Re-transcribe if JSON is corrupted
+                pass  # corrupted cache -> fall through and rebuild
 
         if not os.path.exists(video_path):
             print(f"   ⚠️ [{idx}/{total}] '{sid}' file tidak ditemukan, skip transkrip.")
             continue
 
-        print(f"   🎤 [{idx}/{total}] Transcribing '{sid}'...")
+        source = source_registry.get(sid, {})
+        declared_transcript = source.get("transcript_path")
+
         try:
-            transkrip, segmen = engine.transcribe_video(
-                video_path,
-                max_words_per_subtitle=max_words,
-                model_size=whisper_model,
-                device=whisper_device,
-                compute_type=whisper_compute,
-            )
+            # --- 2. Local transcript -> no Whisper --------------------------
+            if declared_transcript:
+                print(
+                    f"   [+] [{idx}/{total}] Local transcript injected for '{sid}' "
+                    f"({os.path.basename(declared_transcript)}). "
+                    "Bypassing Whisper inference."
+                )
+                transkrip, segmen = engine.load_transcript(
+                    declared_transcript, max_words_per_subtitle=max_words
+                )
+            # --- 3. Whisper -------------------------------------------------
+            else:
+                if no_whisper:
+                    raise RuntimeError(
+                        f"--no-whisper aktif tetapi source '{sid}' tidak punya "
+                        "'transcript_path'."
+                    )
+                print(f"   🎤 [{idx}/{total}] Transcribing '{sid}'...")
+                if shared_model is None:
+                    shared_model = engine.load_whisper_model(
+                        whisper_model, whisper_device, whisper_compute
+                    )
+                transkrip, segmen = engine.transcribe_video(
+                    video_path,
+                    max_words_per_subtitle=max_words,
+                    model_size=whisper_model,
+                    device=whisper_device,
+                    compute_type=whisper_compute,
+                    model=shared_model,
+                )
 
             result = {
                 "source_id": sid,
                 "transkrip": transkrip,
                 "segmen": segmen,
-                "path": transcript_path,
+                "path": out_path,
             }
-
-            # Save transcript JSON
-            with open(transcript_path, "w", encoding="utf-8") as f:
+            with open(out_path, "w", encoding="utf-8") as f:
                 json.dump(result, f, ensure_ascii=False, indent=2)
 
             transcripts[sid] = result
-            print(f"   ✅ '{sid}' berhasil ditranskrip ({len(segmen)} segmen).")
+            print(f"   ✅ '{sid}' siap ({len(segmen)} segmen).")
 
         except Exception as e:
-            print(f"   ⚠️ '{sid}' gagal ditranskrip: {e}")
+            # One bad source should not sink the whole story, but say so loudly.
+            print(f"   ⚠️ '{sid}' gagal disiapkan: {e}")
 
     return transcripts
 
@@ -138,40 +159,32 @@ def run_story_pipeline(cfg) -> list[dict]:
     source_registry = loader.load_sources(sources_path)
 
     # ------------------------------------------------------------------
-    # Step 2 — Download & cache all sources
+    # Step 2 — Ingest local sources into the cache
     # ------------------------------------------------------------------
-    skip_download = getattr(cfg, "skip_download", False)
     cache_dir = source_manager.get_cache_dir(cfg.outputs_dir)
 
-    if skip_download:
-        print("\n[2/6] ⏩ Skip download (--skip-download aktif)")
-        # Build paths from existing cache
-        cached_paths = {}
-        for sid, src in source_registry.items():
-            if src["platform"] == "local":
-                cached_paths[sid] = src["local_path"]
-            else:
-                cached = os.path.join(cache_dir, f"{sid}.mp4")
-                if os.path.exists(cached):
-                    cached_paths[sid] = cached
-                else:
-                    print(f"   ⚠️ Cache tidak ditemukan untuk '{sid}': {cached}")
-    else:
-        print(f"\n[2/6] Downloading sources → {cache_dir}")
-        download_height = getattr(cfg, "download_source_height", "max")
-        cached_paths = source_manager.download_all_sources(
-            source_registry, cache_dir, download_height
+    if getattr(cfg, "skip_download", False):
+        # Sources are local files now, so there is nothing to skip. Kept as a
+        # no-op so existing scripts and notebooks do not break on the flag.
+        print(
+            "\n[2/6] ℹ️ --skip-download tidak lagi berpengaruh "
+            "(semua source sudah lokal)."
         )
 
-    # Save download status
+    print(f"\n[2/6] Menyiapkan source lokal → {cache_dir}")
+    cached_paths = source_manager.ingest_all_sources(source_registry, cache_dir)
+
+    # Save ingest status
     source_manager.save_sources_status(source_registry, cached_paths, cfg.outputs_dir)
 
     # ------------------------------------------------------------------
-    # Step 3 — Transcribe each source with Whisper
+    # Step 3 — Resolve a transcript for each source
     # ------------------------------------------------------------------
-    print(f"\n[3/6] Transcribing sources with Whisper...")
-    transcripts = _transcribe_sources(cached_paths, cache_dir, cfg)
-    print(f"   📝 {len(transcripts)}/{len(cached_paths)} source(s) berhasil ditranskrip.")
+    print("\n[3/6] Menyiapkan transkrip tiap source...")
+    transcripts = _load_source_transcripts(
+        cached_paths, source_registry, cache_dir, cfg
+    )
+    print(f"   📝 {len(transcripts)}/{len(cached_paths)} source(s) punya transkrip.")
 
     # ------------------------------------------------------------------
     # Step 4 — Load & validate recipe

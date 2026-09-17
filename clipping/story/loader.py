@@ -15,7 +15,14 @@ from types import SimpleNamespace
 # SCHEMA CONSTANTS
 # ==============================================================================
 
-SUPPORTED_PLATFORMS = {"youtube", "tiktok", "instagram", "gdrive", "local"}
+# Local-first: story sources are files on disk. Remote fetching was removed with
+# the rest of the download layer; acquire media with your own tools and point
+# local_path at it.
+SUPPORTED_PLATFORMS = {"local"}
+
+# Recognised in old recipes purely so the error message can explain the migration
+# instead of saying "platform not known".
+_LEGACY_REMOTE_PLATFORMS = {"youtube", "tiktok", "instagram", "gdrive"}
 
 _REQUIRED_SOURCE_FIELDS = {"id", "name", "platform"}
 _REQUIRED_CLIP_FIELDS = {"clip_id", "title", "hook", "highlight"}
@@ -74,29 +81,51 @@ def load_sources(path: str) -> dict[str, dict]:
         sid = src["id"]
         platform = src["platform"]
 
+        if platform in _LEGACY_REMOTE_PLATFORMS:
+            # The error message is the migration guide -- anyone with an existing
+            # sources.json of URLs hits this, and should not have to read a diff.
+            raise ValueError(
+                "\n".join([
+                    f"Source '{sid}': platform '{platform}' tidak lagi didukung — "
+                    "pipeline ini tidak mengunduh apa pun.",
+                    "  Unduh videonya dengan tool Anda sendiri, lalu ubah entry ini menjadi:",
+                    f'    {{"id": "{sid}", "name": ..., "platform": "local",',
+                    '     "local_path": "media/namafile.mp4",',
+                    '     "transcript_path": "media/namafile.vtt"}}',
+                    '  URL lama bisa disimpan di field "origin_url" untuk atribusi.',
+                ])
+            )
+
         if platform not in SUPPORTED_PLATFORMS:
             raise ValueError(
                 f"Source '{sid}': platform '{platform}' tidak dikenal. "
-                f"Pilih dari: {SUPPORTED_PLATFORMS}"
+                f"Pilih dari: {sorted(SUPPORTED_PLATFORMS)}"
             )
 
-        # --- URL / local_path check ---
-        url = src.get("url")
+        # --- local_path is now mandatory ---
         local_path = src.get("local_path")
+        if not local_path:
+            raise ValueError(
+                f"Source '{sid}': membutuhkan 'local_path' (path ke file video lokal)."
+            )
+        if not os.path.isfile(local_path):
+            raise ValueError(
+                f"Source '{sid}': local_path tidak ditemukan: {local_path}"
+            )
 
-        if platform == "local":
-            if not local_path:
+        # --- transcript_path is optional; validate it when present so a typo
+        #     fails here rather than after a Whisper model has loaded ---
+        transcript_path = src.get("transcript_path")
+        if transcript_path:
+            if not os.path.isfile(transcript_path):
                 raise ValueError(
-                    f"Source '{sid}': platform 'local' membutuhkan 'local_path'."
+                    f"Source '{sid}': transcript_path tidak ditemukan: {transcript_path}"
                 )
-            if not os.path.exists(local_path):
+            valid_exts = (".vtt", ".srt", ".json3", ".json")
+            if not transcript_path.lower().endswith(valid_exts):
                 raise ValueError(
-                    f"Source '{sid}': local_path tidak ditemukan: {local_path}"
-                )
-        else:
-            if not url:
-                raise ValueError(
-                    f"Source '{sid}': platform '{platform}' membutuhkan 'url'."
+                    f"Source '{sid}': format transcript_path tidak didukung: "
+                    f"{transcript_path} (gunakan {', '.join(valid_exts)})"
                 )
 
         # --- Duplicate check ---
@@ -247,14 +276,18 @@ def resolve_scene_path(scene: dict, source_registry: dict, cache_dir: str) -> st
     sid = scene["source_id"]
     src = source_registry[sid]
 
-    if src["platform"] == "local":
-        return src["local_path"]
-
-    # For remote sources, expect the file in cache
+    # Prefer the cache copy, because that is the uniform <cache>/<id>.mp4 path
+    # the assembler addresses sources by. Fall back to the original file so a
+    # recipe still resolves before ingest has run.
     cached = os.path.join(cache_dir, f"{sid}.mp4")
-    if not os.path.exists(cached):
-        raise FileNotFoundError(
-            f"Cached video untuk source '{sid}' tidak ditemukan di {cached}. "
-            "Jalankan download terlebih dahulu."
-        )
-    return cached
+    if os.path.exists(cached):
+        return cached
+
+    local_path = src.get("local_path")
+    if local_path and os.path.isfile(local_path):
+        return local_path
+
+    raise FileNotFoundError(
+        f"Video untuk source '{sid}' tidak ditemukan — bukan di cache ({cached}) "
+        f"maupun di local_path ({local_path})."
+    )

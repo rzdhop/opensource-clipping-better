@@ -28,98 +28,61 @@ def get_cache_dir(outputs_dir: str) -> str:
 # SINGLE SOURCE DOWNLOAD
 # ==============================================================================
 
-def _download_single_source(
-    source: dict,
-    cache_dir: str,
-    download_source_height: str | int = "max",
-) -> str:
-    """
-    Download a single source video and cache it.
+def _ingest_single_source(source: dict, cache_dir: str) -> str:
+    """Copy a local source video into the story cache and return its path.
 
-    Parameters
-    ----------
-    source : dict
-        A source entry from ``sources.json`` (must have ``id``, ``platform``,
-        ``url`` or ``local_path``).
-    cache_dir : str
-        Directory to cache downloaded files.
-    download_source_height : str | int
-        Desired download resolution (passed to ``engine.download_video``).
-
-    Returns
-    -------
-    str
-        Absolute path to the cached (or local) video file.
+    Story sources are local files: nothing is fetched. The cache still exists so
+    the assembler can address every source by a uniform ``<cache>/<id>.mp4``
+    path regardless of where the original lives.
 
     Raises
     ------
     RuntimeError
-        If download fails.
+        If the source file is missing or empty.
     """
     sid = source["id"]
-    platform = source["platform"]
     cached_path = os.path.join(cache_dir, f"{sid}.mp4")
 
-    # --- Skip if already cached ---
     if os.path.exists(cached_path):
         size_mb = os.path.getsize(cached_path) / (1024 * 1024)
-        print(f"   ⏩ '{sid}' sudah ada di cache ({size_mb:.1f} MB), skip download.")
+        print(f"   ⏩ '{sid}' sudah ada di cache ({size_mb:.1f} MB), skip.")
         return cached_path
 
-    # --- Local file: copy to cache ---
-    if platform == "local":
-        local_path = source["local_path"]
-        print(f"   📁 [{sid}] Menyalin file lokal: {local_path}")
-        shutil.copy2(local_path, cached_path)
-        print(f"   ✅ '{sid}' berhasil disalin ke cache.")
-        return cached_path
-
-    # --- Remote: download using engine ---
-    url = source["url"]
-    print(f"   📥 [{sid}] Mendownload dari {platform}: {url}")
-
-    # Lazy import to avoid pulling in heavy deps (faster_whisper, yt_dlp)
-    from .. import engine
-
-    engine.download_video(
-        url=url,
-        output_path=cached_path,
-        use_dlp_subs=False,  # No subtitle download for story sources
-        download_source_height=download_source_height,
-        source_platform=platform,
-    )
-
-    if not os.path.exists(cached_path):
+    local_path = source.get("local_path")
+    if not local_path:
+        raise RuntimeError(f"❌ Source '{sid}' tidak punya 'local_path'.")
+    if not os.path.isfile(local_path):
         raise RuntimeError(
-            f"❌ Download gagal untuk source '{sid}' — "
-            f"file tidak ditemukan di {cached_path}"
+            f"❌ Source '{sid}': file tidak ditemukan: {local_path}"
         )
+    if os.path.getsize(local_path) == 0:
+        raise RuntimeError(f"❌ Source '{sid}': file kosong: {local_path}")
+
+    print(f"   📁 [{sid}] Menyalin file lokal: {local_path}")
+    shutil.copy2(local_path, cached_path)
 
     size_mb = os.path.getsize(cached_path) / (1024 * 1024)
-    print(f"   ✅ '{sid}' berhasil didownload ({size_mb:.1f} MB)")
+    print(f"   ✅ '{sid}' berhasil disalin ke cache ({size_mb:.1f} MB).")
     return cached_path
 
 
 # ==============================================================================
-# BATCH DOWNLOAD ALL SOURCES
+# BATCH INGEST ALL SOURCES
 # ==============================================================================
 
-def download_all_sources(
+def ingest_all_sources(
     source_registry: dict[str, dict],
     cache_dir: str,
-    download_source_height: str | int = "max",
 ) -> dict[str, str]:
     """
-    Download all sources listed in the registry.
+    Copy every source in the registry into the story cache.
 
     Parameters
     ----------
     source_registry : dict
         Mapping of source_id → source entry dict.
     cache_dir : str
-        Directory to cache downloaded files.
-    download_source_height : str | int
-        Desired download resolution.
+        Directory holding the cached copies.
 
     Returns
     -------
@@ -127,7 +90,7 @@ def download_all_sources(
         Mapping of source_id → cached file path.
     """
     total = len(source_registry)
-    print(f"\n📦 Mendownload {total} sumber video...\n")
+    print(f"\n📦 Menyiapkan {total} sumber video lokal...\n")
 
     paths: dict[str, str] = {}
     failed: list[str] = []
@@ -135,17 +98,15 @@ def download_all_sources(
     for idx, (sid, source) in enumerate(source_registry.items(), 1):
         print(f"[{idx}/{total}] Source: {source.get('name', sid)}")
         try:
-            path = _download_single_source(
-                source, cache_dir, download_source_height
-            )
-            paths[sid] = path
+            paths[sid] = _ingest_single_source(source, cache_dir)
         except Exception as e:
-            print(f"   ⚠️ GAGAL download '{sid}': {e}")
+            # One bad source should not sink an otherwise valid story.
+            print(f"   ⚠️ GAGAL menyiapkan '{sid}': {e}")
             failed.append(sid)
 
     # --- Summary ---
     print(f"\n{'='*50}")
-    print(f"📦 Download Summary: {len(paths)}/{total} berhasil")
+    print(f"📦 Ingest Summary: {len(paths)}/{total} berhasil")
     if failed:
         print(f"   ❌ Gagal: {', '.join(failed)}")
     print(f"{'='*50}\n")
