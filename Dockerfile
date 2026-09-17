@@ -50,6 +50,10 @@ RUN groupadd -r appuser && useradd -r -g appuser -d /app -s /sbin/nologin appuse
 # Create required directories
 RUN mkdir -p /app/uploads /app/outputs /app/custom_fonts /tmp/Ultralytics
 RUN chown -R appuser:appuser /app /tmp/Ultralytics
+# docker-compose overrides the runtime user to match the host's uid (see the
+# `user:` key there), and that uid is not appuser. Anything written outside the
+# bind mounts therefore has to be writable by an arbitrary uid.
+RUN chmod 777 /tmp/Ultralytics
 
 # Switch to non-root user
 USER appuser

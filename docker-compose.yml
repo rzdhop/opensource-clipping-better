@@ -2,6 +2,12 @@ services:
   backend:
     build: .
     container_name: osc-backend
+    # The bind mounts below replace the image's own directories, which throws
+    # away the Dockerfile's build-time `chown appuser`. What the container sees
+    # is the HOST's ownership, so it has to run as the host user that owns
+    # ./uploads and ./outputs -- otherwise every upload fails with EACCES.
+    # Override in .env when your uid is not 1000: DOCKER_UID=$(id -u).
+    user: "${DOCKER_UID:-1000}:${DOCKER_GID:-1000}"
     ports:
       - "8000:8000"
     volumes:
@@ -16,6 +22,9 @@ services:
       - HF_TOKEN=${HF_TOKEN:-}
       - NVIDIA_API_KEY=${NVIDIA_API_KEY:-}
       - MAX_CONCURRENT_JOBS=${MAX_CONCURRENT_JOBS:-1}
+      # `user:` above may be a uid with no /etc/passwd entry, which leaves HOME
+      # unset and makes libraries that cache under it fall over.
+      - HOME=/tmp
     restart: unless-stopped
     # Uncomment below for GPU support (requires NVIDIA Container Toolkit)
     # deploy:
