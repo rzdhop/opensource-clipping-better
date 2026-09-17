@@ -28,10 +28,10 @@ Four preset font styles are available:
 
 ```bash
 # Use Cinematic style
-python main.py --url "VIDEO_URL" --font-style CINEMATIC
+python main.py --video talk.mp4 --transcript talk.vtt --font-style CINEMATIC
 
 # Use Storyteller style
-python main.py --url "VIDEO_URL" --font-style STORYTELLER
+python main.py --video talk.mp4 --transcript talk.vtt --font-style STORYTELLER
 ```
 
 > **Note:** All fonts are auto-downloaded on first run. No manual font installation is needed.
@@ -44,13 +44,13 @@ By default, subtitles use a **karaoke highlight effect** where each word lights 
 
 ```bash
 # Default: karaoke highlight enabled
-python main.py --url "VIDEO_URL"
+python main.py --video talk.mp4 --transcript talk.vtt
 
 # Disable karaoke (use clean text instead)
-python main.py --url "VIDEO_URL" --no-karaoke
+python main.py --video talk.mp4 --transcript talk.vtt --no-karaoke
 
 # Disable all subtitles
-python main.py --url "VIDEO_URL" --no-subs
+python main.py --video talk.mp4 --transcript talk.vtt --no-subs
 ```
 
 ---
@@ -61,13 +61,13 @@ Control how many words appear on screen at once:
 
 ```bash
 # Default: 5 words per subtitle group
-python main.py --url "VIDEO_URL" --words-per-sub 5
+python main.py --video talk.mp4 --transcript talk.vtt --words-per-sub 5
 
 # Fewer words (faster reading, more subtitle changes)
-python main.py --url "VIDEO_URL" --words-per-sub 3
+python main.py --video talk.mp4 --transcript talk.vtt --words-per-sub 3
 
 # More words (slower reading, fewer changes)
-python main.py --url "VIDEO_URL" --words-per-sub 7
+python main.py --video talk.mp4 --transcript talk.vtt --words-per-sub 7
 ```
 
 ---
@@ -78,13 +78,13 @@ Advanced text animation with bounce/stagger effects and word scaling:
 
 ```bash
 # Enable kinetic typography on main clip
-python main.py --url "VIDEO_URL" --advanced-text
+python main.py --video talk.mp4 --transcript talk.vtt --advanced-text
 
 # Enable kinetic typography on hook teaser only
-python main.py --url "VIDEO_URL" --advanced-text-hook
+python main.py --video talk.mp4 --transcript talk.vtt --advanced-text-hook
 
 # Enable on both
-python main.py --url "VIDEO_URL" --advanced-text --advanced-text-hook
+python main.py --video talk.mp4 --transcript talk.vtt --advanced-text --advanced-text-hook
 ```
 
 ### What Kinetic Typography Does
@@ -113,16 +113,16 @@ Subtitle position is automatically adjusted based on the output aspect ratio:
 
 ```bash
 # Use a smaller/faster model
-python main.py --url "VIDEO_URL" --whisper-model medium
+python main.py --video talk.mp4 --transcript talk.vtt --whisper-model medium
 
 # Force CPU (if no CUDA GPU)
-python main.py --url "VIDEO_URL" --whisper-device cpu
+python main.py --video talk.mp4 --transcript talk.vtt --whisper-device cpu
 
 # Use int8 for lower VRAM usage
-python main.py --url "VIDEO_URL" --whisper-compute-type int8
+python main.py --video talk.mp4 --transcript talk.vtt --whisper-compute-type int8
 
 # Use float32 for Kaggle compatibility
-python main.py --url "VIDEO_URL" --whisper-compute-type float32
+python main.py --video talk.mp4 --transcript talk.vtt --whisper-compute-type float32
 ```
 
 ### YouTube Built-in Subtitles
@@ -130,12 +130,12 @@ python main.py --url "VIDEO_URL" --whisper-compute-type float32
 Skip Whisper entirely by using YouTube's own subtitles:
 
 ```bash
-python main.py --url "VIDEO_URL" --use-dlp-subs
+python main.py --video talk.mp4 --transcript talk.vtt --transcript talk.vtt
 ```
 
 This can significantly speed up processing. If YouTube subtitles are not available, the system automatically falls back to Whisper.
 
-> **Note:** `--use-dlp-subs` only works with YouTube sources. Other platforms always use Whisper.
+> **Note:** `--transcript` accepts `.vtt`, `.srt` and `.json3`. YouTube auto-caption VTTs carry per-word timing tags, which give the most accurate karaoke; other transcripts fall back to dividing each cue evenly across its words.
 
 ---
 
@@ -143,16 +143,16 @@ This can significantly speed up processing. If YouTube subtitles are not availab
 
 ```bash
 # Clean video without subtitles
-python main.py --url "VIDEO_URL" --no-subs
+python main.py --video talk.mp4 --transcript talk.vtt --no-subs
 
 # Clean text (no karaoke highlight)
-python main.py --url "VIDEO_URL" --no-karaoke
+python main.py --video talk.mp4 --transcript talk.vtt --no-karaoke
 
 # Maximum subtitle quality
-python main.py --url "VIDEO_URL" --font-style HORMOZI --words-per-sub 4 --advanced-text
+python main.py --video talk.mp4 --transcript talk.vtt --font-style HORMOZI --words-per-sub 4 --advanced-text
 
 # Fast processing (skip Whisper)
-python main.py --url "VIDEO_URL" --use-dlp-subs --no-karaoke
+python main.py --video talk.mp4 --transcript talk.vtt --transcript talk.vtt --no-karaoke
 ```
 
 ---

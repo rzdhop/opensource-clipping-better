@@ -49,12 +49,20 @@ File ini bertugas untuk meregistrasikan semua tautan mentahan yang akan dipakai.
     {
       "id": "velia_2",
       "name": "Velia Video 2",
-      "url": "https://www.tiktok.com/@veliachristyy/video/761675...",
-      "platform": "tiktok"
+      "platform": "local",
+      "local_path": "media/velia_2.mp4",
+      "transcript_path": "media/velia_2.vtt",
+      "origin_url": "https://www.tiktok.com/@veliachristyy/video/761675..."
     }
   ]
 }
 ```
+
+> **Every source is local.** This pipeline downloads nothing: acquire each video
+> with your own tool and point `local_path` at it. `transcript_path` is optional
+> (`.vtt`/`.srt`/`.json3`) and skips Whisper for that source. `origin_url` is
+> attribution only and is never fetched.
+
 
 ## Format `story_recipe.json`
 

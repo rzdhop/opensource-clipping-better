@@ -38,7 +38,7 @@ Get one at [aistudio.google.com/apikey](https://aistudio.google.com/apikey).
 1. Use a smaller Whisper model: `--whisper-model medium`
 2. Use int8 compute type: `--whisper-compute-type int8`
 3. Force CPU: `--whisper-device cpu`
-4. Use `--use-dlp-subs` to skip Whisper entirely (YouTube sources only)
+4. Supply `--transcript talk.vtt` to skip Whisper entirely
 
 ---
 
@@ -48,7 +48,7 @@ Get one at [aistudio.google.com/apikey](https://aistudio.google.com/apikey).
 
 **Fix:** Use float32:
 ```bash
-python main.py --url "VIDEO_URL" --whisper-compute-type float32
+python main.py --video talk.mp4 --transcript talk.vtt --whisper-compute-type float32
 ```
 
 ---
@@ -75,7 +75,7 @@ pip install --upgrade pyannote.audio
 
 **Alternative:** Use `--split-trigger face` which doesn't require a token:
 ```bash
-python main.py --url "VIDEO_URL" --split-screen --dynamic-split --split-trigger face
+python main.py --video talk.mp4 --transcript talk.vtt --split-screen --dynamic-split --split-trigger face
 ```
 
 ---
@@ -97,7 +97,6 @@ python main.py --url "VIDEO_URL" --split-screen --dynamic-split --split-trigger 
 
 **Fix:** The system automatically excludes AV1 (`av01`) codecs. If issues persist, try:
 ```bash
-python main.py --url "VIDEO_URL" --source-height 1080
 ```
 
 ---
@@ -158,7 +157,7 @@ Yes! The project is open source. However, ensure your BGM music is royalty-free 
 
 Use YouTube's built-in subtitles:
 ```bash
-python main.py --url "VIDEO_URL" --use-dlp-subs
+python main.py --video talk.mp4 --transcript talk.vtt --transcript talk.vtt
 ```
 
 ---
@@ -166,9 +165,6 @@ python main.py --url "VIDEO_URL" --use-dlp-subs
 ### Q: Can I process non-YouTube videos?
 
 Yes! Supported platforms:
-- TikTok: `--source tiktok`
-- Instagram: `--source instagram`
-- Google Drive: `--source gdrive`
 
 ---
 
@@ -177,7 +173,7 @@ Yes! Supported platforms:
 1. Find the `gemini_response.json` in your output directory
 2. Re-run with `--load-gemini-json` to skip the AI analysis step:
    ```bash
-   python main.py --url "VIDEO_URL" --load-gemini-json
+   python main.py --video talk.mp4 --transcript talk.vtt --load-gemini-json
    ```
 
 ---

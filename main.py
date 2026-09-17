@@ -20,7 +20,7 @@ from clipping.config import build_config
 def main():
     cfg = build_config(sys.argv[1:])
 
-    version = "1.12.0"
+    version = "2.0.0"
 
     # ── Story Clip Mode ──────────────────────────────────────────────
     if getattr(cfg, "story_mode", False):

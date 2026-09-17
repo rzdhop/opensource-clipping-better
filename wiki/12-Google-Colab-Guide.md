@@ -35,14 +35,14 @@ Path(".env").write_text(env_text, encoding="utf-8")
 ### Cell 3: Run
 
 ```python
-URL_YOUTUBE = "https://www.youtube.com/watch?v=YOUR_VIDEO_ID"
+SOURCE_URL = "https://www.youtube.com/watch?v=YOUR_VIDEO_ID"
 JUMLAH_CLIP = 7
 RASIO = "9:16"
 FONT_STYLE = "DEFAULT"
 GEMINI_MODEL = "gemini-3-flash-preview"
 
 !python main.py \
-  --url "{URL_YOUTUBE}" \
+  --video "{VIDEO_FILE}" --transcript "{TRANSCRIPT_FILE}" \
   --clips {JUMLAH_CLIP} \
   --ratio "{RASIO}" \
   --font-style "{FONT_STYLE}" \
@@ -59,14 +59,14 @@ GEMINI_MODEL = "gemini-3-flash-preview"
 ### Standard Clipping (Best Accuracy)
 
 ```python
-URL_YOUTUBE = "https://www.youtube.com/watch?v=VIDEO_ID"
+SOURCE_URL = "https://www.youtube.com/watch?v=VIDEO_ID"
 JUMLAH_CLIP = 7
 RASIO = "9:16"
 FONT_STYLE = "DEFAULT"
 GEMINI_MODEL = "gemini-2.0-flash"
 
 !python main.py \
-  --url "{URL_YOUTUBE}" \
+  --video "{VIDEO_FILE}" --transcript "{TRANSCRIPT_FILE}" \
   --clips {JUMLAH_CLIP} \
   --ratio "{RASIO}" \
   --font-style "{FONT_STYLE}" \
@@ -77,20 +77,20 @@ GEMINI_MODEL = "gemini-2.0-flash"
   --no-bgm \
   --no-subs \
   --no-broll \
-  --use-dlp-subs
+  --transcript talk.vtt
 ```
 
 ### Split-Screen Podcast
 
 ```python
-URL_YOUTUBE = "https://www.youtube.com/watch?v=PODCAST_ID"
+SOURCE_URL = "https://www.youtube.com/watch?v=PODCAST_ID"
 JUMLAH_CLIP = 3
 RASIO = "9:16"
 FONT_STYLE = "DEFAULT"
 GEMINI_MODEL = "gemini-2.0-flash"
 
 !python main.py \
-  --url "{URL_YOUTUBE}" \
+  --video "{VIDEO_FILE}" --transcript "{TRANSCRIPT_FILE}" \
   --clips {JUMLAH_CLIP} \
   --ratio "{RASIO}" \
   --font-style "{FONT_STYLE}" \
@@ -104,7 +104,7 @@ GEMINI_MODEL = "gemini-2.0-flash"
   --dynamic-split \
   --split-trigger face \
   --face-detector yolo \
-  --use-dlp-subs
+  --transcript talk.vtt
 ```
 
 ---
@@ -117,7 +117,7 @@ When running on **Kaggle** (which has limited T4 configurations), use `float32` 
 WHISPER_COMPUTE_TYPE = "float32"
 
 !python main.py \
-  --url "{URL_YOUTUBE}" \
+  --video "{VIDEO_FILE}" --transcript "{TRANSCRIPT_FILE}" \
   --clips 5 \
   --whisper-compute-type "{WHISPER_COMPUTE_TYPE}" \
   --no-bgm

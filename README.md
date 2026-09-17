@@ -27,8 +27,9 @@
 
 | Feature | Description |
 |---|---|
-| **AI Transcriber** | Word-level transcription using **Faster-Whisper** (large-v3) |
-| **AI Content Curator** | **Google Gemini** analyzes context, picks the most viral moments, and generates metadata |
+| **Local-First Ingestion** | Takes a local `.mp4` and an optional `.vtt`/`.srt`/`.json3`. Downloads nothing, so no anti-bot challenge or IP ban can break it |
+| **AI Transcriber** | Word-level transcription using **Faster-Whisper** (large-v3), or skipped entirely when you supply a transcript |
+| **AI Content Curator** | **NVIDIA NIM** (default) or **Google Gemini** analyzes context, picks the most viral moments, and generates metadata |
 | **Smart Auto-Framing** | Face-tracking via **[MediaPipe BlazeFace (Full-Range)](https://ai.google.dev/edge/mediapipe/solutions/vision/face_detector)** with Smooth Pan, Deadzone & anti-jitter algorithms |
 | **Cinematic Teaser Hook** | 3-second hook with dark overlay, cinematic bars, and **TV Glitch** transition |
 | **Karaoke Subtitles** | Word-by-word highlighted `.ASS` subtitles (Alex Hormozi / Veed style) |
@@ -54,8 +55,9 @@
 
 - **Python** 3.10+
 - **FFmpeg** installed and available in PATH
-- **CUDA GPU** recommended (for Whisper; CPU fallback available)
-- **Google Gemini API Key** ([get one here](https://aistudio.google.com/apikey))
+- **CUDA GPU** recommended, but only if you let Whisper transcribe. Supply `--transcript` and no GPU is needed at all.
+- **NVIDIA NIM API Key** — the default AI provider ([get one here](https://build.nvidia.com/))
+- **Google Gemini API Key** (optional — only for `--ai-provider gemini` and `--voiceover`) ([get one here](https://aistudio.google.com/apikey))
 - **Pexels API Key** (optional, for B-roll — [get one here](https://www.pexels.com/api/))
 - **HuggingFace Token** (optional, for split-screen / camera-switch — [get one here](https://huggingface.co/settings/tokens), requires accepting [Pyannote model agreement](https://huggingface.co/pyannote/speaker-diarization-3.1))
 
@@ -78,30 +80,34 @@ from pathlib import Path
 from google.colab import userdata
 
 # Store your keys in Colab Secrets first!
-GOOGLE_API_KEY = userdata.get("GOOGLE_API_KEY")
+# NVIDIA_API_KEY is the default provider; GOOGLE_API_KEY is only needed for
+# --ai-provider gemini or --voiceover.
+NVIDIA_API_KEY = userdata.get("NVIDIA_API_KEY")
 
-env_text = f"GOOGLE_API_KEY={GOOGLE_API_KEY}\n"
+env_text = f"NVIDIA_API_KEY={NVIDIA_API_KEY}\n"
 Path(".env").write_text(env_text, encoding="utf-8")
 ```
 
 **Cell 3: Execute (Example including Kaggle fallback for float32)**
 ```python
-URL_YOUTUBE = "https://www.youtube.com/watch?v=Dc4_aBFAYWE&pp=0gcJCdkKAYcqIYzv"
+# Acquire the inputs first (previous cell), e.g. with yt-dlp:
+#   !yt-dlp -f "bv*[vcodec!*=av01]+ba/b" --write-auto-subs --sub-format vtt \
+#          --convert-subs vtt -o "talk.%(ext)s" "<URL>"
+VIDEO_FILE = "talk.mp4"
+TRANSCRIPT_FILE = "talk.en.vtt"   # set to "" to transcribe with Whisper instead
 JUMLAH_CLIP = 10
 RASIO = "9:16"
 FONT_STYLE = "DEFAULT"
-GEMINI_MODEL = "gemini-3-flash-preview"
 # Use 'float32' for Kaggle CPU/T4 limitations, or 'float16' for standard Colab T4 GPUs
 WHISPER_COMPUTE_TYPE = "float32"
 
 !python main.py \
-  --url "{URL_YOUTUBE}" \
+  --video "{VIDEO_FILE}" --transcript "{TRANSCRIPT_FILE}" \
   --clips {JUMLAH_CLIP} \
   --ratio "{RASIO}" \
   --font-style "{FONT_STYLE}" \
   --hook-duration 3 \
   --words-per-sub 5 \
-  --gemini-model "{GEMINI_MODEL}" \
   --whisper-compute-type "{WHISPER_COMPUTE_TYPE}" \
   --no-bgm
 ```
@@ -148,6 +154,11 @@ The **Clipping Studio** is a browser-based dashboard hosted for free on **GitHub
 
 ## 🚀 Local Quick Start
 
+> **This tool downloads nothing.** It takes a local video file and, optionally, a
+> local transcript. Acquiring the media is your job and your tool's job — which
+> is precisely what makes the pipeline reliable, since nothing in it can be
+> broken by an anti-bot challenge or an IP ban.
+
 ```bash
 # 1. Clone the repo
 git clone https://github.com/your-username/opensource-clipping.git
@@ -159,44 +170,70 @@ pip install -r requirements.txt          # pip / Colab
 
 # 3. Set up API keys
 cp .env.sample .env
-# Edit .env and add your GOOGLE_API_KEY
+# Edit .env and add your NVIDIA_API_KEY (the default AI provider)
 
-# 4. Run (Must include --url)
-python main.py --url "https://youtube.com/watch?v=VIDEO_ID"
-# 5. Examples of Execution
+# 4. Acquire the inputs with your own tools. For example, with yt-dlp:
+yt-dlp -f "bv*[vcodec!*=av01]+ba/b" --write-auto-subs --sub-format vtt \
+       --convert-subs vtt -o "talk.%(ext)s" "https://youtube.com/watch?v=VIDEO_ID"
+# -> talk.mp4 and talk.en.vtt
+
+# 5. Run the engine on those local files
+python main.py --video talk.mp4 --transcript talk.en.vtt \
+               --source-url "https://youtube.com/watch?v=VIDEO_ID"
+```
+
+Passing `--transcript` skips Whisper entirely, which is usually the difference
+between minutes and hours — the CPU fallback takes roughly 12 hours for a 20
+minute video. Omit it and Whisper runs on the local file as before:
+
+```bash
+python main.py --video talk.mp4              # transcribes with Whisper
+python main.py --video talk.mp4 --no-whisper # refuses to, and says so
+```
+
+`--source-url` is attribution only. It is written into the description and the
+render manifest, and is never fetched, so free text like `"Podcast XYZ ep.42"`
+works just as well as a link.
+
+### Migrating from `--url`
+
+| Removed | Replacement |
+|---|---|
+| `--url URL` | Download it yourself, then `--video FILE`. Use `--source-url URL` to keep the credit line. |
+| `--source`, `--tiktok` | Not applicable — the platform no longer matters once the file is local. |
+| `--source-height N` | Your downloader's format selector, e.g. `yt-dlp -f "bv*[height<=1440]+ba"`. |
+| `--use-dlp-subs` | `--transcript FILE.vtt` (also accepts `.srt` and `.json3`). |
+| `--skip-download` (story mode) | Not applicable — every `sources.json` entry is `platform: "local"` with a `local_path`. |
+
+### Examples
+
+```bash
 
 # Standard run (Default options with 5 clips)
-python main.py --url "https://youtube.com/watch?v=VIDEO_ID" --clips 5 --ratio 16:9
-
-# Prefer highest available source quality (default behavior)
-python main.py --url "https://youtube.com/watch?v=VIDEO_ID" --source-height max
-
-# Cap source download to 1440p (2K)
-python main.py --url "https://youtube.com/watch?v=VIDEO_ID" --source-height 1440
+python main.py --video talk.mp4 --transcript talk.vtt --clips 5 --ratio 16:9
 
 # Sharper output tuning (works for normal and dynamic-split modes)
-python main.py --url "https://youtube.com/watch?v=VIDEO_ID" \
-  --source-height 2160 \
+python main.py --video talk.mp4 --transcript talk.vtt \
   --video-cq 19 \
   --video-crf 17 \
   --video-preset slow \
   --video-scale-algo lanczos
 
 # Advanced run (Using YOLOv8 GPU Face Tracking & Custom Fonts)
-python main.py --url "https://youtube.com/watch?v=VIDEO_ID" \
+python main.py --video talk.mp4 --transcript talk.vtt \
   --clips 7 \
   --face-detector yolo \
   --yolo-size 8m \
   --font-style STORYTELLER
 
 # Podcast Split-Screen (2 speakers, 9:16)
-python main.py --url "https://youtube.com/watch?v=PODCAST_ID" \
+python main.py --video podcast.mp4 --transcript podcast.vtt \
   --clips 3 \
   --ratio "9:16" \
   --split-screen
 
 # Podcast Camera Switch (auto-switches to active speaker, blurred pillarbox on overlap)
-python main.py --url "https://youtube.com/watch?v=PODCAST_ID" \
+python main.py --video podcast.mp4 --transcript podcast.vtt \
   --clips 3 \
   --ratio "9:16" \
   --camera-switch \
@@ -204,38 +241,35 @@ python main.py --url "https://youtube.com/watch?v=PODCAST_ID" \
   --switch-blend-duration 0.0
 
 # Multi-Speaker Podcast (3 speakers across 2 scenes)
-python main.py --url "https://youtube.com/watch?v=PODCAST_ID" \
+python main.py --video podcast.mp4 --transcript podcast.vtt \
   --clips 3 \
   --ratio "9:16" \
   --camera-switch \
   --diarization-speakers 3
 
 # Manual Custom Hook (using external .mp4 clip)
-python main.py --url "VIDEO_URL" --hook-source "DRIVE_URL_OR_PATH" --hook-source-start 5.0 --hook-duration 4
+python main.py --video talk.mp4 --transcript talk.vtt --hook-source "DRIVE_URL_OR_PATH" --hook-source-start 5.0 --hook-duration 4
 
 # Ultra-HD 2K Rendering (Fetch 1440p and render at native 1440p vertical resolution with sharpening)
-python main.py --url "VIDEO_URL" --source-height 1440 --render-height source --video-sharpen
+python main.py --video talk.mp4 --transcript talk.vtt --render-height source --video-sharpen
 
 # Use NVIDIA NIM (DeepSeek-V3) instead of Gemini
-python main.py --url "VIDEO_URL" --ai-provider nvidia --nvidia-model "deepseek-ai/deepseek-v4-pro"
+python main.py --video talk.mp4 --transcript talk.vtt --ai-provider nvidia --nvidia-model "deepseek-ai/deepseek-v4-pro"
 
 # Square output for Instagram Feed (1:1)
-python main.py --url "VIDEO_URL" --ratio "1:1" --clips 5
+python main.py --video talk.mp4 --transcript talk.vtt --ratio "1:1" --clips 5
 
 # Instagram/Facebook portrait (4:5)
-python main.py --url "VIDEO_URL" --ratio "4:5" --clips 5
+python main.py --video talk.mp4 --transcript talk.vtt --ratio "4:5" --clips 5
 
 # Classic portrait (3:4)
-python main.py --url "VIDEO_URL" --ratio "3:4" --clips 5
+python main.py --video talk.mp4 --transcript talk.vtt --ratio "3:4" --clips 5
 
 # TikTok source
-python main.py --url "https://www.tiktok.com/@username/video/1234567890" --source tiktok --clips 3
 
 # Instagram source
-python main.py --url "https://www.instagram.com/reel/123456789/" --source instagram --clips 3
 
 # Google Drive source
-python main.py --url "https://drive.google.com/file/d/1234567890/view" --source gdrive --clips 3
 ```
 
 ## ⚙️ CLI Options
@@ -246,11 +280,13 @@ python main.py --help
 
 | Argument | Default | Description |
 |---|---|---|
-| `--url`, `-u` | — | Video URL to process (Required) |
-| `--source` | `youtube` | Video source platform. Choices: `youtube`, `tiktok`, `instagram`, `gdrive`. |
+| `--video`, `-v` | — | Path to the local source video (required) |
+| `--transcript`, `-t` | — | Path to a local `.vtt`/`.srt`/`.json3`. Skips Whisper entirely |
+| `--transcript-offset` | `0.0` | Shift every transcript timestamp by N seconds |
+| `--no-whisper` | — | Fail loudly instead of falling back to Whisper |
+| `--source-url` | — | Attribution for the description/manifest only. Never fetched |
 | `--clips`, `-n` | `7` | Number of highlight clips to generate |
 | `--ratio`, `-r` | `9:16` | Output aspect ratio (`9:16`, `16:9`, `1:1`, `3:4`, `4:5`) |
-| `--source-height` | `max` | Preferred source download max height (`max`, `1080`, `1440`, `2160`, etc.) |
 | `--ai-provider` | `gemini` | AI provider for analysis (`gemini` or `nvidia`). |
 | `--nvidia-model` | `deepseek...` | Model name for NVIDIA NIM API (e.g. `deepseek-ai/deepseek-v3`). |
 | `--render-height` | `1080` | Target render output height (`1080`, `1440`, `2160`, `source`) |
@@ -283,7 +319,6 @@ python main.py --help
 | `--no-karaoke` | — | Use clean text instead of karaoke highlight |
 | `--advanced-text` | `False` | Enable kinetic typography (word scaling & animation) |
 | `--advanced-text-hook` | `False` | Enable kinetic typography specifically on the hook teaser |
-| `--use-dlp-subs` | — | Use YouTube's built-in subtitles to speed up process (skips Whisper if found) |
 | `--face-detector` | `mediapipe` | AI model for face tracking (`mediapipe` or `yolo`) |
 | `--box-face-detection` | `False` | Draw yellow bounding boxes for tracking debug |
 | `--dev-mode` | `False` | **[Experimental]** Enable 16:9 context visualization for 9:16 tracking/stabilization process |
@@ -377,34 +412,34 @@ Mimics professional editing by focusing only on the active speaker in full scree
 
 ```bash
 # 1. Standard AI Clipping (7 clips, 9:16)
-python main.py --url "VIDEO_URL"
+python main.py --video talk.mp4 --transcript talk.vtt
 
 # 2. Dynamic Split-Screen (Visual-based, NO TOKEN REQUIRED)
-python main.py --url "VIDEO_URL" --split-screen --dynamic-split --split-trigger face
+python main.py --video talk.mp4 --transcript talk.vtt --split-screen --dynamic-split --split-trigger face
 
 # 3. Dynamic Split-Screen (Audio-based, Highlight active speaker, needs HF_TOKEN)
-python main.py --url "VIDEO_URL" --split-screen --dynamic-split --split-trigger diarization
+python main.py --video talk.mp4 --transcript talk.vtt --split-screen --dynamic-split --split-trigger diarization
 
 # 4. Cinematic Camera Switch (Needs HF_TOKEN)
-python main.py --url "VIDEO_URL" --camera-switch
+python main.py --video talk.mp4 --transcript talk.vtt --camera-switch
 
 # 5. Smart Separation Split-Screen (Auto-Zoom & Vertical Track)
-python main.py --url "VIDEO_URL" --split-screen --dynamic-split --split-trigger face --split-auto-zoom --split-v-align 0.4
+python main.py --video talk.mp4 --transcript talk.vtt --split-screen --dynamic-split --split-trigger face --split-auto-zoom --split-v-align 0.4
 
 # 6. Square output (1:1) with Split-Screen
-python main.py --url "VIDEO_URL" --ratio "1:1" --split-screen --dynamic-split --split-trigger face
+python main.py --video talk.mp4 --transcript talk.vtt --ratio "1:1" --split-screen --dynamic-split --split-trigger face
 
 # 7. Hook V2 + Segment Trimming (default)
-python main.py --url "VIDEO_URL" --hook-v2
+python main.py --video talk.mp4 --transcript talk.vtt --hook-v2
 
 # 8. Hook V2 + Aggressive Silence Trimming
-python main.py --url "VIDEO_URL" --hook-v2 --silence-trim
+python main.py --video talk.mp4 --transcript talk.vtt --hook-v2 --silence-trim
 
 # 9. Hook V2 without Segment Trimming (full render)
-python main.py --url "VIDEO_URL" --hook-v2 --no-segment-trim
+python main.py --video talk.mp4 --transcript talk.vtt --hook-v2 --no-segment-trim
 
 # 10. Hook V2 Custom: 4 micro-hooks with glitch style
-python main.py --url "VIDEO_URL" --hook-v2 --hook-v2-items 4 --hook-v2-style "glitch_fast"
+python main.py --video talk.mp4 --transcript talk.vtt --hook-v2 --hook-v2-items 4 --hook-v2-style "glitch_fast"
 ```
 
 > [!IMPORTANT]
@@ -424,10 +459,10 @@ When you pass the `--voiceover` flag, the pipeline will:
 **Example Usage:**
 ```bash
 # Basic voice-over (Uses default en-US-AvaNeural and English language)
-python main.py --url "VIDEO_URL" --voiceover
+python main.py --video talk.mp4 --transcript talk.vtt --voiceover
 
 # Voice-over in Indonesian with reaction style
-python main.py --url "VIDEO_URL" --voiceover --voiceover-lang id --voiceover-voice id-ID-ArdiNeural --voiceover-style reaction
+python main.py --video talk.mp4 --transcript talk.vtt --voiceover --voiceover-lang id --voiceover-voice id-ID-ArdiNeural --voiceover-style reaction
 ```
 
 **Config Options:**
@@ -523,18 +558,17 @@ FONT_STYLE = "DEFAULT"
 GEMINI_MODEL = "gemini-2.0-flash"
 
 !python main.py \
-  --url "{URL_YOUTUBE}" \
+  --video "{VIDEO_FILE}" --transcript "{TRANSCRIPT_FILE}" \
   --clips {JUMLAH_CLIP} \
   --ratio "{RASIO}" \
   --font-style "{FONT_STYLE}" \
   --hook-duration 3 \
   --words-per-sub 5 \
   --face-detector yolo \
-  --gemini-model "{GEMINI_MODEL}" \
   --no-bgm \
   --no-subs \
   --no-broll \
-  --use-dlp-subs
+ 
 ```
 
 ### 2. Split-Screen Mode (Podcasts)
@@ -548,13 +582,12 @@ FONT_STYLE = "DEFAULT"
 GEMINI_MODEL = "gemini-2.0-flash"
 
 !python main.py \
-  --url "{URL_YOUTUBE}" \
+  --video "{VIDEO_FILE}" --transcript "{TRANSCRIPT_FILE}" \
   --clips {JUMLAH_CLIP} \
   --ratio "{RASIO}" \
   --font-style "{FONT_STYLE}" \
   --hook-duration 3 \
   --words-per-sub 5 \
-  --gemini-model "{GEMINI_MODEL}" \
   --no-bgm \
   --no-subs \
   --no-broll \
@@ -562,7 +595,7 @@ GEMINI_MODEL = "gemini-2.0-flash"
   --dynamic-split \
   --split-trigger face \
   --face-detector yolo \
-  --use-dlp-subs
+ 
 ```
 
 ## 📂 Project Structure

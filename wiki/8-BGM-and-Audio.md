@@ -20,7 +20,7 @@ OpenSource Clipping includes an automatic background music (BGM) system with two
 BGM volume automatically lowers when the speaker is talking, then rises during pauses. This provides a professional effect like premium podcasts and YouTube videos.
 
 ```bash
-python main.py --url "VIDEO_URL" --bgm-mode ducking
+python main.py --video talk.mp4 --transcript talk.vtt --bgm-mode ducking
 ```
 
 ### Constant Background
@@ -28,13 +28,13 @@ python main.py --url "VIDEO_URL" --bgm-mode ducking
 BGM plays at a stable, low volume throughout the video without any dynamic adjustments. Best for content with few pauses.
 
 ```bash
-python main.py --url "VIDEO_URL" --bgm-mode background
+python main.py --video talk.mp4 --transcript talk.vtt --bgm-mode background
 ```
 
 ### Disable BGM
 
 ```bash
-python main.py --url "VIDEO_URL" --no-bgm
+python main.py --video talk.mp4 --transcript talk.vtt --no-bgm
 ```
 
 ---
