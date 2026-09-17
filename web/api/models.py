@@ -6,9 +6,18 @@ from __future__ import annotations
 
 import enum
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional, Union
 
 from pydantic import BaseModel, Field
+
+# Render defaults are sourced from the CLI config so the API and the CLI cannot
+# drift apart: config_adapter falls back to these same constants.
+from clipping.config import (
+    VIDEO_PRESET,
+    VIDEO_QUALITY_CQ,
+    VIDEO_QUALITY_CRF,
+    VIDEO_SCALE_ALGO,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -57,6 +66,33 @@ class WhisperDevice(str, enum.Enum):
     AUTO = "auto"
 
 
+class SplitTrigger(str, enum.Enum):
+    """Mirrors ``--split-trigger`` choices in clipping/config.py:310."""
+    DIARIZATION = "diarization"
+    FACE = "face"
+
+
+class VideoScaleAlgo(str, enum.Enum):
+    """Mirrors ``--video-scale-algo`` choices in clipping/config.py:528."""
+    LANCZOS = "lanczos"
+    BICUBIC = "bicubic"
+    BILINEAR = "bilinear"
+    AREA = "area"
+
+
+class YoloSize(str, enum.Enum):
+    """Mirrors ``--yolo-size`` choices in clipping/config.py:387.
+
+    Constrained rather than free-form because config_adapter interpolates this
+    value into both a local model filename and a HuggingFace download URL.
+    """
+    V8N = "8n"
+    V8S = "8s"
+    V8M = "8m"
+    V8N_V2 = "8n_v2"
+    V9C = "9c"
+
+
 # ---------------------------------------------------------------------------
 # Job Creation Request
 # ---------------------------------------------------------------------------
@@ -87,11 +123,37 @@ class JobCreateRequest(BaseModel):
     # Hook V2
     hook_v2: bool = False
     hook_v2_items: int = Field(3, ge=2, le=6)
+    hook_v2_style: str = "controversial_fast_glitch"
+    white_flash_duration: float = 0.12
     no_segment_trim: bool = False
     silence_trim: bool = False
 
+    # Split screen, camera switch & diarization
+    use_dynamic_split: bool = False
+    split_trigger: SplitTrigger = SplitTrigger.DIARIZATION
+    split_zoom: float = 1.0
+    split_v_align: float = 0.5
+    split_auto_zoom: bool = False
+    split_max_zoom: float = 2.5
+    switch_hold_duration: float = 2.0
+    switch_blend_duration: float = 0.0
+    # "auto" or an explicit speaker count, matching _parse_speakers
+    # (clipping/config.py:169). Consumers do str(x).lower() == "auto".
+    diarization_speakers: Union[Literal["auto"], int] = "auto"
+
     # Subtitle & Typography
     font_style: FontStyle = FontStyle.HORMOZI
+    advanced_text: bool = False
+    advanced_text_hook: bool = False
+
+    # Render / encoding
+    video_cq: int = VIDEO_QUALITY_CQ
+    video_crf: int = VIDEO_QUALITY_CRF
+    video_bitrate: str = "auto"
+    video_sharpen: bool = False
+    video_preset: str = VIDEO_PRESET
+    video_scale_algo: VideoScaleAlgo = VideoScaleAlgo(VIDEO_SCALE_ALGO)
+    static_crop: bool = False
 
     # Whisper
     whisper_model: str = "large-v3"
@@ -111,6 +173,7 @@ class JobCreateRequest(BaseModel):
     gemini_fallback_model: str = "gemini-2.5-flash"
     nvidia_model: str = "deepseek-ai/deepseek-v4-flash-0731"
     face_detector: FaceDetector = FaceDetector.MEDIAPIPE
+    yolo_size: YoloSize = YoloSize.V8M
 
 
 # ---------------------------------------------------------------------------
