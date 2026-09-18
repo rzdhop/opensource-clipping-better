@@ -6,7 +6,17 @@
 - **Phase:** IMPLEMENT — 4 stages done: `8877645` SDK retries, `92e5ff8` time
   budget, `f8146e7` Whisper warning, `46d341c` propose-a-smaller-request.
   **Stage 5 done:** `c68eb3d` persist the transcript and let a re-run use it.
-- **Tier-1 final:** pytest **369 passed, 0 failed**; `compileall` clean.
+- **Tier-1 final:** pytest **369 passed, 0 failed** locally; `compileall` clean.
+- **Tier-1 under CI conditions (RC-12):** **346 passed, 18 skipped, 0 failed**,
+  matching CI's own counts. This host has no `ensurepip`, so the pytest-only
+  venv RC-12 asks for cannot be built here; simulate it instead with a
+  `sys.meta_path` finder that raises `ModuleNotFoundError` for every non-stdlib
+  import except pytest and the project, run with
+  `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`. Both details matter: a bare `ImportError`
+  is re-raised by `pytest.importorskip` instead of skipping, and without
+  disabling autoload the locally-installed pytest plugins load and fail.
+  **Run this before pushing any new test** — a green local run does not mean a
+  green CI, which is how `tqdm` got through.
 - **Destination:** fast-forward `main` and push once stage 5 lands (human asked
   to hold until then).
 - **Tier-1 now:** pytest **352 passed, 0 failed**; `compileall` clean.

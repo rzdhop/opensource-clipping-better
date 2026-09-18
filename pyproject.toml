@@ -7,6 +7,7 @@ requires-python = ">=3.10"
 dependencies = [
     "yt-dlp[default]",  # asset fetching only: studio/effects.py, studio/transitions.py, youtube_tracker
     "faster-whisper",
+    "tqdm",  # the transcription progress bar: clipping/engine.py
     "google-genai",
     "openai",
     "mediapipe",
