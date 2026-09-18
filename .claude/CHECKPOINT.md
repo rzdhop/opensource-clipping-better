@@ -1,21 +1,57 @@
 # CHECKPOINT
 
 ## In progress
-- **Task:** Live progress / debug feed in the dashboard. **COMPLETE.**
-- **Phase:** closed out.
-- **Checkpoint commit:** `5bdd31c` was the baseline. Stages:
-  `58c07a5` activity feed, `e83c364` progress fields, `19fd3d7` SSE,
-  `06fb8bc` the panel, `6c325df` list view + docs, `96d22ec` feed quality.
-- **Tier-1:** `python -m pytest -q` = **327 passed** locally;
-  **286 passed, 20 skipped** in a pytest-only venv matching CI (DEC-012);
-  `compileall` clean (needs `PYTHONPYCACHEPREFIX` locally — see below).
-- **Tier-2:** no E2E suite exists in this project (no playwright/cypress, no
-  test script in `web/dashboard/package.json`), so Tier 2 is browser
-  verification against the running containers — done, see below.
-- **Session finding:** local `main` was 8 commits BEHIND `origin/main`
-  (`242b1f6` vs `5bdd31c`) — the previous session pushed from elsewhere and this
-  checkout never caught up. Fast-forwarded. The repo-local git identity was
-  unset; set to the one the existing history uses.
+- **Task:** The dashboard scrolls sideways at phone width. `main.main-content`
+  renders wider than the viewport and every descendant is clipped on the right.
+- **Phase:** IMPLEMENT (approved plan, 2 stages).
+- **Checkpoint commit:** `105cddc` — clean tree, branch
+  `Feature/magical-greider-2955e5`. Roll back here.
+- **Tier-1 baseline at `105cddc`:** `python -m pytest -q` = **327 passed, 0
+  failed** (needs `PYTHONPYCACHEPREFIX` locally — see the root `__pycache__`
+  note below). `npm run build` in `web/dashboard` = **built in 2.30s**,
+  `index-CP1GcaYZ.css` 13.19 kB.
+- **Tier-2:** no E2E suite exists (no playwright/cypress, no test script in
+  `web/dashboard/package.json`). Tier 2 is browser measurement against a Vite
+  dev server; the human approved installing `node_modules` in the worktree and
+  running it on a spare port against the live backend on `:8000`.
+- **Next action:** Stage 1 — `.main-content{min-width:0}`, `.page-header` and
+  `.progress-steps` wrap, in `web/dashboard/src/index.css`.
+- **Open questions:** none.
+
+### Root cause, measured (do not re-derive)
+`.main-content` is a flex item of `.app-layout` (`display:flex`) with `flex: 1`
+and **no authored `min-width`**, so it keeps the flex default `min-width: auto`,
+which resolves to its **min-content width** and defeats `flex-shrink: 1`
+entirely. Measured in a 375px viewport: `main` = 427.234px, its `min-content` =
+427px, and setting `min-width: 0` in-page brings it to exactly 375px.
+
+The three suspects in the brief are all absent — `grep` finds **zero**
+`min-width` and **zero** `calc()` in the whole 897-line stylesheet, and the
+`@media (max-width: 768px)` block *does* correctly override `margin-left` and
+`padding`. The minimum is implicit, which is why it is not greppable.
+
+What feeds that min-content: `.page-header` (nowrap flex, 387px min-content) and
+`.progress-steps` (nowrap flex, 6–7 unshrinkable step labels).
+
+**Not phone-only.** At 820px — sidebar visible, media query *not* applied — a
+long `source_url` gives `scrollWidth` 959 vs `clientWidth` 805. That is why the
+rules go in the **base** declarations and not inside the media query.
+
+### Regression contract for this task (nothing here may break)
+| # | Must keep working | Proven by |
+|---|---|---|
+| R-1 | No horizontal document scroll on any route at 375px | `scrollWidth === clientWidth` on `/`, `/new`, `/settings` and two job detail pages |
+| R-2 | Same at 414px and 820px | same measurement at those widths |
+| R-3 | Desktop layout unchanged (sidebar 260px, content beside it) | measurement at 1280px + screenshot |
+| R-4 | Live activity panel still renders headline, last line, provider/model chip, `attempt N of M`, clip sub-bar, both clocks, quiet notice, severity-coloured feed | UNVERIFIED by test — browser check on a job page |
+| R-5 | The feed follows the tail only while the user has not scrolled up | UNVERIFIED by test — `.log-viewer` is **not** in the diff, so the scroll container is untouched |
+| R-6 | Job list cards still show percentage, step, time-on-step, retry counter | browser check on `/` |
+| R-7 | Python suite unaffected | `pytest` = 327 passed (CSS-only diff) |
+
+### Status of the previous task
+Live progress / debug feed — **COMPLETE**, stages `58c07a5`, `e83c364`,
+`19fd3d7`, `06fb8bc`, `6c325df`, `96d22ec`, docs `105cddc`. Its contract is
+below and still binding.
 
 ### The feature, in one line
 Everything the pipeline prints now reaches the job that printed it, and the job
