@@ -101,7 +101,10 @@ function NewJob() {
   const [ratio, setRatio] = useState('9:16')
   const [fontStyle, setFontStyle] = useState('HORMOZI')
   const [whisperModel, setWhisperModel] = useState('large-v3')
-  const [whisperDevice, setWhisperDevice] = useState('cuda')
+  // 'auto' matches the backend default: the resolver picks CUDA only when
+  // CTranslate2 can genuinely use it, and CPU otherwise. Defaulting the UI to
+  // 'cuda' made every dashboard job ask for a GPU that may not exist.
+  const [whisperDevice, setWhisperDevice] = useState('auto')
   const [aiProvider, setAiProvider] = useState('nvidia')
 
   // Toggles
@@ -429,9 +432,9 @@ function NewJob() {
             <div className="form-group">
               <label className="form-label">Device</label>
               <select className="form-select" value={whisperDevice} onChange={(e) => setWhisperDevice(e.target.value)}>
+                <option value="auto">Auto (detect GPU, else CPU)</option>
                 <option value="cuda">CUDA (GPU)</option>
                 <option value="cpu">CPU</option>
-                <option value="auto">Auto</option>
               </select>
             </div>
           </div>
