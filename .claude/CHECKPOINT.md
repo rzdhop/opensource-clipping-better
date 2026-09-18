@@ -1,6 +1,23 @@
 # CHECKPOINT
 
 ## In progress
+- **Task:** Close the four remaining follow-ups, then merge to `main` and push.
+  Scope approved by the human: (1) the remaining layout items, (2) the `gdown`
+  packaging bug, (3) `run_upload.py`'s broken `youtube_uploader.safety` import,
+  (4) the dead yt-dlp imports in `clipping/studio/`.
+- **Phase:** IMPLEMENT.
+- **Checkpoint commit:** `92e1c00` — clean tree, branch
+  `Feature/magical-greider-2955e5`, 4 commits ahead of `origin/main` and 0
+  behind. Roll back here.
+- **Tier-1 baseline at `92e1c00`:** pytest **327 passed, 0 failed**;
+  `npm run build` green.
+- **Destination:** fast-forward `main` to this branch and push to `origin/main`.
+  `main`, `origin/main` and the main checkout are all at `105cddc` and clean —
+  checked, nothing new landed there, so the merge is a true fast-forward.
+- **Next action:** layout remainder, then gdown, then the two agent-scoped
+  stages.
+
+## Previous task (closed)
 - **Task:** The dashboard scrolled sideways at phone width. **COMPLETE.**
 - **Phase:** closed out.
 - **Checkpoint commit:** `105cddc` was the baseline. Stages: `ac622fb` the
