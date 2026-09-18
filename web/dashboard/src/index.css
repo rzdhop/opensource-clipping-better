@@ -191,16 +191,25 @@ html, body {
   margin-bottom: 28px;
 }
 
+/*
+ * These carry raw job input -- a source URL or an uploaded filename, which is
+ * one unbreakable token. "anywhere" rather than "break-word" on purpose: only
+ * "anywhere" shrinks the element's min-content width, and min-content is what
+ * propagates back up the flex tree and widens the whole column. break-word
+ * wraps the visible text but leaves min-content at the full token width.
+ */
 .page-header h2 {
   font-size: 22px;
   font-weight: 700;
   letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
 }
 
 .page-header p {
   font-size: 13px;
   color: var(--text-secondary);
   margin-top: 4px;
+  overflow-wrap: anywhere;
 }
 
 /* --- Cards --- */
@@ -539,6 +548,8 @@ html, body {
   font-size: 14px;
   font-weight: 600;
   margin-bottom: 4px;
+  /* A long filename here blew the card's 1fr grid track out to 552px. */
+  overflow-wrap: anywhere;
 }
 
 .job-meta {
