@@ -3,7 +3,9 @@
 ## In progress
 - **Task:** Job `756c7ee8a2c3` burned 2h22m and produced nothing. Fix the NVIDIA
   retry behaviour, cap the time budget, and warn before a slow CPU Whisper run.
-- **Phase:** IMPLEMENT.
+- **Phase:** IMPLEMENT — 4 stages done: `8877645` SDK retries, `92e5ff8` time
+  budget, `f8146e7` Whisper warning, `46d341c` propose-a-smaller-request.
+- **Tier-1 now:** pytest **352 passed, 0 failed**; `compileall` clean.
 - **Checkpoint commit:** `d03fd41` — clean tree, branch
   `Feature/magical-greider-2955e5`, identical to `origin/main`. Roll back here.
 - **Tier-1 baseline at `d03fd41`:** pytest **327 passed, 0 failed**;
@@ -69,6 +71,17 @@ returned an **empty array** with `completion_tokens=2` — the same
 `ValueError: NVIDIA returned an empty clip array` the artifacts record from an
 earlier job. 3-clip requests never did this.
 
+### Verification of this round
+| # | Claim | Evidence |
+|---|---|---|
+| V-1 | Each visible attempt was 3 http requests | SDK source (`DEFAULT_MAX_RETRIES=2`, `_should_retry` true for >=500) + the job's own 5s/15s inter-attempt gaps + the impossibility of a 900s request under a 600s read timeout |
+| V-2 | The gateway cuts off at ~300s | Live probe: the job's exact payload returned 504 at **302.1s** in a single request |
+| V-3 | `max_tokens` is not the cause | 4096 and 16384 behave identically (124.0s empty array vs 302.1s 504) |
+| V-4 | The strict schema is not the cause | Dropping `response_format` entirely still 504s at **302.1s** |
+| V-5 | Clip count is the cause | 3 clips → **291.8s, 3911 tokens, 3 real clips**; 7 clips → 504. ~12–13 tok/s × ~1200 tok/clip ⇒ ~3 clips per 300s window |
+| V-6 | The live 504 will trigger the proposal | The probe read `status_code` off the real exception and printed `InternalServerError(504)`, exactly what `_nvidia_request_too_large` keys on |
+| V-7 | Unit behaviour | 352 tests; every new test checked against the pre-fix code — `KeyError: 'max_retries'`, the unbudgeted loop running all 3 attempts, the 3 proposal tests, and the duplicate CUDA warning reporting "appeared 2 times" |
+
 ### Regression contract for this task
 | # | Must keep working | Proven by |
 |---|---|---|
@@ -84,17 +97,8 @@ earlier job. 3-clip requests never did this.
   Scope approved by the human: (1) the remaining layout items, (2) the `gdown`
   packaging bug, (3) `run_upload.py`'s broken `youtube_uploader.safety` import,
   (4) the dead yt-dlp imports in `clipping/studio/`.
-- **Phase:** IMPLEMENT.
-- **Checkpoint commit:** `92e1c00` — clean tree, branch
-  `Feature/magical-greider-2955e5`, 4 commits ahead of `origin/main` and 0
-  behind. Roll back here.
-- **Tier-1 baseline at `92e1c00`:** pytest **327 passed, 0 failed**;
-  `npm run build` green.
-- **Destination:** fast-forward `main` to this branch and push to `origin/main`.
-  `main`, `origin/main` and the main checkout are all at `105cddc` and clean —
-  checked, nothing new landed there, so the merge is a true fast-forward.
-- **Next action:** layout remainder, then gdown, then the two agent-scoped
-  stages.
+- **Phase:** closed out. Pushed: `origin/main` moved `105cddc` → `d03fd41`,
+  and the main checkout was fast-forwarded to match.
 
 ## Previous task (closed)
 - **Task:** The dashboard scrolled sideways at phone width. **COMPLETE.**
