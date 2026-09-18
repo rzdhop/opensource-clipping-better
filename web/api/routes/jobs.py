@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -168,11 +168,29 @@ async def job_status_sse(job_id: str):
 
     async def event_stream():
         last_progress = None
+        # Cursor into the activity feed. Starts at 0 and replays what the store
+        # still holds: the client also loads the job over REST, and the two race,
+        # so the client dedupes on `seq` rather than us guessing where it is.
+        last_seq = 0
+        # Nothing may be happening for minutes at a time (one AI call, one clip
+        # rendering). Say so periodically, or an idle stream is indistinguishable
+        # from a dead one -- to the user and to any proxy in between.
+        ticks_since_output = 0
+        HEARTBEAT_TICKS = 15
         terminal_states = {
             JobStatus.COMPLETED.value,
             JobStatus.FAILED.value,
             JobStatus.CANCELLED.value,
         }
+
+        def feed_frame():
+            """Events recorded since the cursor, as one frame. None if there are none."""
+            nonlocal last_seq
+            new_events = store.get_events_since(job_id, last_seq)
+            if not new_events:
+                return None
+            last_seq = new_events[-1].get("seq", last_seq)
+            return json.dumps({"type": "events", "events": new_events}, default=str)
 
         while True:
             current_job = store.get_job(job_id)
@@ -200,11 +218,29 @@ async def job_status_sse(job_id: str):
                 "error": current_job.get("error"),
             }
 
+            sent = False
+
             # Only send if something changed
             event_json = json.dumps(event, default=str)
             if event_json != last_progress:
                 yield f"data: {event_json}\n\n"
                 last_progress = event_json
+                sent = True
+
+            frame = feed_frame()
+            if frame is not None:
+                yield f"data: {frame}\n\n"
+                sent = True
+
+            ticks_since_output = 0 if sent else ticks_since_output + 1
+            if ticks_since_output >= HEARTBEAT_TICKS:
+                ticks_since_output = 0
+                heartbeat = {
+                    "type": "heartbeat",
+                    "status": status,
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                }
+                yield f"data: {json.dumps(heartbeat)}\n\n"
 
             # Stop streaming on terminal states
             if status in terminal_states:
@@ -223,6 +259,11 @@ async def job_status_sse(job_id: str):
                         "clips": clip_data,
                     }
                     yield f"data: {json.dumps(final_event, default=str)}\n\n"
+                # The last lines the pipeline printed -- often the ones that say
+                # WHY it failed -- are recorded after the status flips.
+                tail = feed_frame()
+                if tail is not None:
+                    yield f"data: {tail}\n\n"
                 break
 
             await asyncio.sleep(1.0)
