@@ -35,6 +35,12 @@ def progress_of(job_id):
     return store_mod.get_job(job_id)["progress"]
 
 
+def printed(job_id):
+    """Feed entries the pipeline printed, excluding the worker's own steps."""
+    return [e["message"] for e in store_mod.get_events_since(job_id)
+            if e["source"] != "worker"]
+
+
 # ---------------------------------------------------------------------------
 # Who is being asked what
 # ---------------------------------------------------------------------------
@@ -173,6 +179,53 @@ def test_an_ordinary_line_becomes_the_detail_without_an_attempt(job):
     event = progress_of(job)
     assert event.detail == "🔥 [Rank 1] Processing clip"
     assert event.attempt is None
+
+
+def test_a_progress_bar_updates_the_detail_without_flooding_the_feed(job):
+    """Two 12s clips were enough to make bar redraws 90% of a 500-entry feed."""
+    from web.api import worker
+
+    store_mod.update_progress(
+        job, step="render", step_number=6, total_steps=7, message="Rendering...", percent=65.0,
+    )
+    for pct in (0, 2, 4, 6, 8, 10):
+        worker._record_pipeline_line(
+            job, f"⏳ Rank 1 Main - Face analysis: {pct:3d}%", "info", "stdout"
+        )
+
+    # The first tick is kept, so the feed still records that the stage started.
+    assert printed(job) == ["⏳ Rank 1 Main - Face analysis:   0%"]
+    # ...and the live number is in the detail, where it belongs.
+    assert progress_of(job).detail == "⏳ Rank 1 Main - Face analysis:  10%"
+
+
+def test_a_new_stage_is_not_folded_into_the_previous_bar(job):
+    from web.api import worker
+
+    store_mod.update_progress(
+        job, step="render", step_number=6, total_steps=7, message="Rendering...", percent=65.0,
+    )
+    worker._record_pipeline_line(job, "⏳ Rank 1 Main - Face analysis:  98%", "info", "stdout")
+    worker._record_pipeline_line(job, "⏳ Rank 1 Main - Render frame:  22% | 00:02 / 00:12", "info", "stdout")
+    worker._record_pipeline_line(job, "⏳ Rank 2 Main - Face analysis:   0%", "info", "stdout")
+
+    # Rank 2's bar is a different bar, not rank 1's one tick later.
+    assert len(printed(job)) == 3
+
+
+def test_the_retry_ladder_is_never_folded_away(job):
+    """It carries numbers but no percentage, which is what protects it."""
+    from web.api import worker
+
+    store_mod.update_progress(
+        job, step="analyze", step_number=3, total_steps=7, message="Asking...", percent=36.0,
+    )
+    worker._record_pipeline_line(job, "🔁 NVIDIA attempt 1/3...", "warn", "stdout")
+    worker._record_pipeline_line(job, "🔁 NVIDIA attempt 2/3...", "warn", "stdout")
+    worker._record_pipeline_line(job, "🔁 NVIDIA attempt 3/3...", "warn", "stdout")
+
+    assert len(printed(job)) == 3
+    assert progress_of(job).attempt == 3
 
 
 def test_a_very_long_line_is_trimmed_for_the_headline_but_kept_in_the_feed(job):

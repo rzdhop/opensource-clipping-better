@@ -68,15 +68,29 @@ LEVEL_ERROR = "error"
 _ERROR_MARKERS = ("❌", "Traceback (most recent call last)")
 _WARN_MARKERS = ("⚠️", "🔁")
 
+# "RuntimeError: NVIDIA analysis failed after 3 attempt(s):" — the line of a
+# traceback that actually says what went wrong, and the one a user needs to find
+# in a wall of frames.
+_EXCEPTION_LINE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*(Error|Exception|Exit)\b\s*:")
+
 _local = threading.local()
 _install_lock = threading.Lock()
 _installed = False
 
 
-def classify(line: str) -> str:
-    """Guess a severity for a line of pipeline output. Never raises."""
-    if any(marker in line for marker in _ERROR_MARKERS):
+def classify(line: str, source: str = "stdout") -> str:
+    """Guess a severity for a line of pipeline output. Never raises.
+
+    ``source`` matters: nothing in ``clipping/`` writes to stderr, so anything
+    captured there during a job is a problem — in practice the worker's failure
+    traceback. Its frames are not individually alarming, but they are not
+    ordinary narration either, so stderr's floor is a warning rather than an
+    error, and the markers still promote the lines that matter.
+    """
+    if any(marker in line for marker in _ERROR_MARKERS) or _EXCEPTION_LINE.match(line):
         return LEVEL_ERROR
+    if source == "stderr":
+        return LEVEL_WARN
     if any(marker in line for marker in _WARN_MARKERS):
         return LEVEL_WARN
     # "attempt 2 failed", "Diarization failed: ..." — a real problem the user
@@ -153,7 +167,12 @@ class _Tee:
                 if not line or line == state["last"]:
                     continue  # a redrawn progress bar repeats itself constantly
                 state["last"] = line
-                self._sink(job_id, line[:MAX_LINE_CHARS], classify(line), self._source)
+                self._sink(
+                    job_id,
+                    line[:MAX_LINE_CHARS],
+                    classify(line, self._source),
+                    self._source,
+                )
         finally:
             _local.recording = False
 

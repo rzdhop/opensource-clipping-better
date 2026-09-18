@@ -31,8 +31,21 @@ def _record_pipeline_line(job_id: str, message: str, level: str, source: str) ->
     The most recent line the pipeline printed IS the best answer to "what is it
     doing right now", so it becomes the current step's detail whatever it says.
     A retry counter additionally lands in a structured field.
+
+    A progress bar's redraws are the exception. They belong in the detail line,
+    which updates live, and not in the feed: two 12-second clips were enough to
+    make them 90% of a 500-entry buffer and evict the transcript warning and the
+    provider line with it. The first tick of each bar is kept, so the feed still
+    records that the stage started.
     """
-    store.append_event(job_id, message, level, source)
+    previous = store.last_event(job_id)
+    redraw = (
+        previous is not None
+        and previous.get("source") == source
+        and signals.is_progress_redraw(previous.get("message"), message)
+    )
+    if not redraw:
+        store.append_event(job_id, message, level, source)
     attempt = signals.attempt_from(message)
     store.refine_progress(
         job_id,

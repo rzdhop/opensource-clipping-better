@@ -320,6 +320,16 @@ def append_event(
         _persist(force=False)
 
 
+def last_event(job_id: str) -> Optional[dict]:
+    """A copy of the most recent feed entry, or None."""
+    with _lock:
+        job = _jobs.get(job_id)
+        if job is None:
+            return None
+        events = job.get("events") or []
+        return dict(events[-1]) if events else None
+
+
 def get_events_since(job_id: str, after_seq: int = 0) -> list[dict]:
     """Events recorded after ``after_seq``, oldest first.
 

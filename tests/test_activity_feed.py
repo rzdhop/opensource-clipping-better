@@ -179,6 +179,32 @@ def test_unknown_attributes_are_delegated_to_the_real_stream():
 # Severity
 # ---------------------------------------------------------------------------
 
+def test_stderr_is_never_just_information():
+    """Nothing in clipping/ writes to stderr, so anything there is a problem."""
+    frame = 'File "/app/clipping/engine.py", line 1023, in analyze_with_ai'
+    assert activity.classify(frame, "stdout") == "info"
+    assert activity.classify(frame, "stderr") == "warn"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "RuntimeError: NVIDIA analysis failed after 3 attempt(s):",
+        "ValueError: NVIDIA returned an empty clip array.",
+        "clipping.engine.ProviderError: nope",
+    ],
+)
+def test_the_line_that_says_what_went_wrong_is_an_error(line):
+    """The frames are noise; this is the line a user needs to find."""
+    assert activity.classify(line) == "error"
+    assert activity.classify(line, "stderr") == "error"
+
+
+def test_an_ordinary_colon_line_is_not_mistaken_for_an_exception():
+    assert activity.classify("✅ 276 segments, 1377 words (0.6s → 1213.2s)") == "info"
+    assert activity.classify("Local transcript injected: subtitles.vtt") == "info"
+
+
 @pytest.mark.parametrize(
     "line,expected",
     [
@@ -216,6 +242,34 @@ def test_levels_are_classified_from_the_pipeline_markers(line, expected):
 )
 def test_the_retry_ladder_is_read_out_of_the_printed_line(line, expected):
     assert signals.attempt_from(line) == expected
+
+
+# A real capture from a 12-second clip: the pipeline prints its bars with a
+# plain print(), so every tick is a whole new line.
+_BAR = "⏳ Rank 1 Main - Face analysis:  {}%"
+
+
+@pytest.mark.parametrize(
+    "previous,line,expected",
+    [
+        (_BAR.format(" 18"), _BAR.format(" 20"), True),
+        ("⏳ Rank 1 Main FFmpeg:  33% | 00:00:04 / 00:00:12",
+         "⏳ Rank 1 Main FFmpeg:  77% | 00:00:09 / 00:00:12", True),
+        # A different bar, or a different clip, is a new line worth keeping.
+        (_BAR.format(" 98"), "⏳ Rank 1 Main - Render frame:  22% | 00:02 / 00:12", False),
+        (_BAR.format(" 98"), "⏳ Rank 2 Main - Face analysis:   0%", False),
+        # No previous line to fold into.
+        (None, _BAR.format("  0"), False),
+        # THE case this must never collapse: the retry ladder carries numbers
+        # but no percentage, and folding it away would destroy the one thing the
+        # feed exists to show.
+        ("🔁 NVIDIA attempt 1/3...", "🔁 NVIDIA attempt 2/3...", False),
+        ("[Gemini] Attempt 1/10...", "[Gemini] Attempt 2/10...", False),
+        ("Rendering clip 1/7...", "Rendering clip 2/7...", False),
+    ],
+)
+def test_a_progress_bar_redraw_is_recognised(previous, line, expected):
+    assert signals.is_progress_redraw(previous, line) is expected
 
 
 def test_a_reworded_retry_print_degrades_rather_than_breaks():

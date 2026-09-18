@@ -32,6 +32,42 @@ _ATTEMPT = re.compile(r"attempt\s+(\d+)\s*/\s*(\d+)", re.IGNORECASE)
 _MAX_PLAUSIBLE_ATTEMPTS = 100
 
 
+# A progress bar redraws by printing the whole line again with a new number.
+# Requiring a percent sign is what keeps the retry counters out of this: they
+# carry numbers but never a percentage, and collapsing "attempt 1/3" into
+# "attempt 2/3" would destroy the one thing the feed exists to show.
+_PERCENT = re.compile(r"\d+\s*%")
+
+
+def _bar_identity(line: str) -> Optional[str]:
+    """What this progress bar IS, with its moving parts removed.
+
+    Everything before the percentage, which is the label — `⏳ Rank 1 Main -
+    Face analysis:`. Not a digit-blind normalization: that would make Rank 1 and
+    Rank 2 the same bar and fold a whole clip's progress into the previous
+    clip's. Everything after the percentage (ffmpeg's `| 00:00:04 / 00:00:12`)
+    moves too, so it plays no part in the identity either.
+    """
+    match = _PERCENT.search(line)
+    if match is None:
+        return None
+    return line[: match.start()].rstrip()
+
+
+def is_progress_redraw(previous: Optional[str], line: str) -> bool:
+    """Whether ``line`` is the previous progress bar, one tick later.
+
+    The pipeline prints its bars with a plain ``print`` rather than a carriage
+    return — `⏳ Rank 1 Main - Face analysis:  18%` — so one clip emits hundreds
+    of lines that differ only in the number. Unchecked they were 90% of the feed
+    and evicted everything worth reading from the ring buffer.
+    """
+    if not previous:
+        return False
+    identity = _bar_identity(line)
+    return identity is not None and identity == _bar_identity(previous)
+
+
 def attempt_from(line: str) -> Optional[tuple[int, int]]:
     """``(attempt, max_attempts)`` if this line is a retry counter, else None."""
     match = _ATTEMPT.search(line)
