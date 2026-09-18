@@ -166,3 +166,91 @@ def test_adapter_supplies_fields_runner_provenance_reads(upload_file, job_id):
 
     for attr in ("source_url", "file_video_asli", "whisper_model"):
         assert hasattr(cfg, attr), f"adapter is missing cfg.{attr}"
+
+
+# ------------------------------------------- picking up a saved transcript
+
+@pytest.fixture
+def job_outputs():
+    """Yield a factory making outputs/<job_id>/, cleaned up afterwards."""
+    created: list[pathlib.Path] = []
+
+    def _make(job_id: str) -> pathlib.Path:
+        d = PROJECT_ROOT / "outputs" / job_id
+        d.mkdir(parents=True, exist_ok=True)
+        created.append(d)
+        return d
+
+    yield _make
+    for d in created:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+SAVED_VTT = (
+    "WEBVTT\n\n00:00:01.000 --> 00:00:02.400\n"
+    "<00:00:01.000>hello <00:00:01.600>world\n\n"
+)
+
+
+def test_a_saved_transcript_is_picked_up_from_the_jobs_own_directory(job_outputs):
+    """A re-run must not redo Whisper. outputs_dir is a pure function of job_id
+    and reuse_job_id reuses the id, so the re-run lands in the same directory.
+    """
+    job_id = "t" + uuid.uuid4().hex[:11]
+    (job_outputs(job_id) / "transcript.vtt").write_text(SAVED_VTT, encoding="utf-8")
+
+    cfg = build_config_from_payload({}, job_id)
+
+    assert cfg.transcript_path is not None
+    assert cfg.transcript_path.endswith("transcript.vtt")
+    assert os.path.isfile(cfg.transcript_path)
+
+
+def test_no_saved_transcript_means_whisper_still_runs(job_outputs):
+    job_id = "t" + uuid.uuid4().hex[:11]
+    job_outputs(job_id)
+    assert build_config_from_payload({}, job_id).transcript_path is None
+
+
+def test_an_uploaded_transcript_wins_over_a_saved_one(upload_file, job_outputs):
+    """An explicit upload is the user saying what they want; never override it."""
+    job_id = "t" + uuid.uuid4().hex[:11]
+    (job_outputs(job_id) / "transcript.vtt").write_text(SAVED_VTT, encoding="utf-8")
+    name = upload_file("given.vtt", SAVED_VTT)
+
+    cfg = build_config_from_payload({"transcript_filename": name}, job_id)
+
+    assert cfg.transcript_path.endswith(name)
+    assert "outputs" not in cfg.transcript_path
+
+
+def test_the_offset_is_not_applied_to_a_saved_transcript(job_outputs):
+    """transcript_offset is a manual sync correction for a file the user
+    supplied. A saved one was generated from this very video, so its timings are
+    already right -- reapplying an old offset would desync every subtitle."""
+    job_id = "t" + uuid.uuid4().hex[:11]
+    (job_outputs(job_id) / "transcript.vtt").write_text(SAVED_VTT, encoding="utf-8")
+
+    cfg = build_config_from_payload({"transcript_offset": 4.5}, job_id)
+
+    assert cfg.transcript_path.endswith("transcript.vtt")
+    assert cfg.transcript_offset == 0.0
+
+
+def test_the_offset_still_applies_to_an_uploaded_transcript(upload_file):
+    name = upload_file("given.vtt", SAVED_VTT)
+    cfg = build_config_from_payload(
+        {"transcript_filename": name, "transcript_offset": 4.5}, "job123")
+    assert cfg.transcript_offset == 4.5
+
+
+def test_dedupe_is_disabled_only_for_a_saved_transcript(upload_file, job_outputs):
+    """The reader's dedupe drops a cue repeating the previous one -- right for
+    scraped captions, wrong for speech we transcribed ourselves."""
+    job_id = "t" + uuid.uuid4().hex[:11]
+    (job_outputs(job_id) / "transcript.vtt").write_text(SAVED_VTT, encoding="utf-8")
+    assert build_config_from_payload({}, job_id).transcript_dedupe is False
+
+    name = upload_file("given.vtt", SAVED_VTT)
+    cfg = build_config_from_payload({"transcript_filename": name}, "job456")
+    assert cfg.transcript_dedupe is True

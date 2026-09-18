@@ -12,6 +12,7 @@ import os
 from types import SimpleNamespace
 
 # Import defaults from existing config module
+from clipping.transcript import SAVED_TRANSCRIPT_NAME
 from clipping.config import (
     ASS_ALIGN_169,
     ASS_ALIGN_916,
@@ -96,6 +97,7 @@ def build_config_from_payload(
     # Local transcript (optional). Resolved against uploads/ like the video.
     transcript_filename = payload.get("transcript_filename")
     transcript_path = None
+    transcript_offset = float(payload.get("transcript_offset", 0.0) or 0.0)
     if transcript_filename:
         candidate = os.path.abspath(
             os.path.join(base_dir, "uploads", transcript_filename)
@@ -103,10 +105,36 @@ def build_config_from_payload(
         if os.path.isfile(candidate):
             transcript_path = candidate
 
+    # Nothing uploaded, but this job's own directory may already hold a
+    # transcript the worker saved on an earlier run. outputs_dir is a pure
+    # function of job_id and reuse_job_id reuses the id, so a re-run lands in
+    # the same directory and can skip Whisper entirely -- which is the
+    # difference between a re-run costing seconds and costing the 94 minutes a
+    # CPU transcription of a 20-minute video actually took.
+    #
+    # No request field and no flag: resolve_transcript already treats a non-null
+    # transcript_path as "skip Whisper", and a flag would land us back in
+    # DEC-015 territory, where model_dump() always contains declared fields.
+    transcript_dedupe = True
+    if transcript_path is None:
+        saved = os.path.join(outputs_dir, SAVED_TRANSCRIPT_NAME)
+        if os.path.isfile(saved):
+            transcript_path = saved
+            # We wrote this one, from this video. The reader's dedupe exists for
+            # scraped captions with rolling repetition; on real speech it would
+            # silently collapse a genuine "you know / you know" into one.
+            transcript_dedupe = False
+            # transcript_offset is a manual sync correction for a transcript the
+            # user supplied. This one was generated from this very video, so its
+            # timings are already right and applying the old offset would
+            # silently desync every subtitle.
+            transcript_offset = 0.0
+
     cfg = SimpleNamespace(
         # Local-first inputs
         transcript_path=transcript_path,
-        transcript_offset=float(payload.get("transcript_offset", 0.0) or 0.0),
+        transcript_offset=transcript_offset,
+        transcript_dedupe=transcript_dedupe,
         no_whisper=False,
         source_url=payload.get("source_url"),
         video_provided=bool(upload_filename),

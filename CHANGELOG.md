@@ -10,6 +10,51 @@ All notable changes to the **OpenSource Clipping** project will be documented in
 
 ## [Unreleased]
 
+### A 2h22m job that produced nothing
+
+One real job spent 94 minutes transcribing a 20-minute video on CPU, then 45
+minutes failing AI analysis, and lost everything. Each part turned out to be a
+separate defect.
+
+#### Fixed
+
+- **Every NVIDIA retry was silently three requests.** `_make_nvidia_client`
+  passed neither `max_retries` nor `timeout`, and the `openai` SDK defaults to
+  `max_retries=2` while retrying any status >= 500 — so a ladder reported as
+  three attempts had made nine. Now `max_retries=0` with an explicit 330s
+  timeout, making the ladder in `analyze_with_nvidia` the only retry policy.
+- **The analysis had no overall deadline.** `NVIDIA_TOTAL_BUDGET_SECONDS` caps
+  the whole ladder, checked *predictively* — an attempt that would outlast the
+  budget is never started.
+- **`run_upload.py` could not be imported**, let alone run: it referenced a
+  module deleted in a revert that never updated the CLI, and passed two keyword
+  arguments the callee no longer accepts.
+- **`gdown` was declared in `pyproject.toml` only**, so `--hook-source` with a
+  Drive URL raised `ImportError` in every documented install path.
+
+#### Added
+
+- **The transcript is saved.** A Whisper run now writes `transcript.vtt` into the
+  job's output directory, and a re-run of that job picks it up and skips Whisper
+  entirely. Previously the transcript existed only in memory and *any* later
+  failure destroyed it — on a CPU machine, 90+ minutes of work, thrown away even
+  on success.
+- **A slow CPU transcription says so up front**, with an estimate, as soon as the
+  audio duration is known — roughly 4.6x realtime, measured — and points at the
+  `.vtt` that would skip it.
+- **An impossible request proposes a smaller one.** Measured against the live
+  endpoint: generation runs at ~12-13 tokens/s and a clip costs ~1200 tokens, so
+  the gateway's ~300s window fits about three clips while the default asks for
+  seven. A failed run now names a clip count that would work instead of silently
+  shrinking the request.
+
+#### Known limitation
+
+`clips` still defaults to 7 and the API permits up to 30, against a provider that
+delivers ~3. The proposal makes that visible rather than fixing it; lowering the
+default is a product decision.
+
+
 ### The dashboard now says what the pipeline is doing
 
 A job sitting at 36% told the user nothing, and 36% is where the longest wait
