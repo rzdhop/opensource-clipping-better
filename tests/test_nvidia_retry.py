@@ -406,3 +406,45 @@ def test_the_real_guided_json_rejection_is_still_fatal():
     )
 
     assert _nvidia_rejects_response_format(exc) is False
+
+
+# ------------------------------------------------- the client's own retry policy
+
+def test_client_disables_the_sdks_own_retries(monkeypatch):
+    """The ladder in analyze_with_nvidia must be the ONLY retry policy.
+
+    Regression test for a real 2h22m job failure: the SDK defaults to
+    max_retries=2 and retries any status >= 500, so each of the 3 scripted
+    attempts was silently 3 http requests. Three deterministic 504s at ~300s
+    each cost 45 minutes instead of 15, and the log reported 3 attempts while
+    9 requests had been made.
+    """
+    captured = {}
+
+    class _FakeOpenAI:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    import sys
+    from types import ModuleType, SimpleNamespace
+
+    fake_module = ModuleType("openai")
+    fake_module.OpenAI = _FakeOpenAI
+    monkeypatch.setitem(sys.modules, "openai", fake_module)
+
+    engine._make_nvidia_client(SimpleNamespace(api_key_nvidia="k"))
+
+    assert captured["max_retries"] == 0, (
+        "the openai SDK retries >=500 twice by default; leaving that on "
+        "multiplies every attempt in the ladder by three"
+    )
+    assert captured["timeout"] == engine.NVIDIA_REQUEST_TIMEOUT_SECONDS
+    assert captured["base_url"] == "https://integrate.api.nvidia.com/v1"
+
+
+def test_request_timeout_exceeds_the_measured_gateway_limit():
+    """Probed live: the gateway 504s at ~302s. A shorter local timeout would
+    race it and replace an informative 504 with a bare client timeout."""
+    assert engine.NVIDIA_REQUEST_TIMEOUT_SECONDS > 300
+    # ...but not so long that a stalled request blocks for the SDK's 600s default
+    assert engine.NVIDIA_REQUEST_TIMEOUT_SECONDS < 600

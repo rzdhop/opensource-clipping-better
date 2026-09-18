@@ -200,6 +200,13 @@ def _build_account_classification_prompt() -> str:
 NVIDIA_MAX_ATTEMPTS = 3
 NVIDIA_BACKOFF_SECONDS = (5, 15)
 
+# The NIM gateway cuts a request off at ~300s: a probe against the live endpoint
+# returned 504 after 302.1s for the payload a real 20-minute job sends (1211s
+# transcript, 16384 max_tokens, 7 clips). Give the server slightly longer than
+# that so we receive its 504 -- which says something -- rather than racing it to
+# a local timeout, which says nothing.
+NVIDIA_REQUEST_TIMEOUT_SECONDS = 330
+
 # Classified by exception class NAME so that `openai` is never imported at module
 # scope. An SDK rename would make an unknown error non-retryable, i.e. it fails
 # closed, which is the safe direction.
@@ -317,6 +324,16 @@ def _make_nvidia_client(cfg):
     return OpenAI(
         base_url="https://integrate.api.nvidia.com/v1",
         api_key=cfg.api_key_nvidia,
+        # max_retries=0 is the important one. The SDK defaults to 2 and retries
+        # anything >= 500, so every attempt in the loop below was silently three
+        # http requests: a job that reported "attempt 3/3" had really made nine,
+        # and three deterministic 504s at ~300s each became 45 minutes of
+        # waiting instead of 15. The ladder below is the only retry policy this
+        # module has, and it must be the only one in force.
+        max_retries=0,
+        # The SDK's own default is 600s, twice the gateway's limit, so a stalled
+        # request would sit for ten minutes before anyone heard about it.
+        timeout=NVIDIA_REQUEST_TIMEOUT_SECONDS,
     )
 
 
