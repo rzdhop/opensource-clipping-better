@@ -191,6 +191,24 @@ class JobProgressEvent(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Job Activity Event
+# ---------------------------------------------------------------------------
+
+class JobEvent(BaseModel):
+    """One line of output the pipeline printed while this job was running.
+
+    Captured by :mod:`web.api.activity`, which tees stdout/stderr on the worker
+    thread. ``seq`` is a per-job counter rather than a list index because the
+    feed is a ring buffer and indices would shift as it drops from the front.
+    """
+    seq: int = 0
+    ts: Optional[datetime] = None
+    level: str = "info"
+    source: str = "stdout"
+    message: str
+
+
+# ---------------------------------------------------------------------------
 # Clip Detail
 # ---------------------------------------------------------------------------
 
@@ -230,6 +248,9 @@ class JobResponse(BaseModel):
     clips: list[ClipDetail] = Field(default_factory=list)
     error: Optional[str] = None
     log: list[str] = Field(default_factory=list)
+    # The pipeline's own console output. `log` keeps the coarse worker messages
+    # it always had; this is the detailed feed the dashboard tails live.
+    events: list[JobEvent] = Field(default_factory=list)
 
 
 class JobListResponse(BaseModel):

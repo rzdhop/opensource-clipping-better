@@ -13,6 +13,7 @@ from fastapi.responses import StreamingResponse
 
 from ..models import (
     JobCreateRequest,
+    JobEvent,
     JobListResponse,
     JobResponse,
     JobStatus,
@@ -56,6 +57,7 @@ def _job_to_response(job: dict) -> JobResponse:
         clips=clip_list,
         error=job.get("error"),
         log=job.get("log", []),
+        events=[JobEvent(**e) for e in job.get("events", []) if isinstance(e, dict)],
     )
 
 

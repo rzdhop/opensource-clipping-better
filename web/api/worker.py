@@ -16,7 +16,15 @@ from typing import Optional
 
 from .config_adapter import build_config_from_payload
 from .models import ClipDetail, JobStatus
+from . import activity
 from . import store
+
+# Tee stdout/stderr so everything the pipeline prints is recorded against the
+# job that printed it. Installed at import, which is after uvicorn has already
+# configured its own logging handlers against the real streams -- so server logs
+# keep going where they always went, and only worker threads inside
+# `activity.capture(...)` contribute to a job's feed.
+activity.install(store.append_event)
 
 # Semaphore to control max concurrent jobs
 MAX_CONCURRENT_JOBS = int(os.environ.get("MAX_CONCURRENT_JOBS", "1"))
@@ -39,6 +47,12 @@ def get_settings_env() -> dict[str, str]:
 
 
 def _run_pipeline_sync(job_id: str, payload: dict) -> None:
+    """Run the pipeline, attributing everything it prints to this job."""
+    with activity.capture(job_id):
+        _execute_pipeline(job_id, payload)
+
+
+def _execute_pipeline(job_id: str, payload: dict) -> None:
     """
     Run the clipping pipeline synchronously (called from thread pool).
 

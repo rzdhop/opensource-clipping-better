@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -22,8 +23,25 @@ from .models import (
 )
 
 
-_lock = threading.Lock()
+# Reentrant on purpose. The activity tee turns any `print` into a
+# `append_event`, which takes this lock — so a plain Lock would deadlock the
+# worker thread the moment anything printed while the lock was held. Nothing
+# does today; an RLock means nothing has to remember not to.
+_lock = threading.RLock()
 _jobs: dict[str, dict] = {}
+
+# The activity feed is a ring buffer. A long render prints thousands of lines
+# and the browser only ever shows the tail, so keeping everything would cost
+# memory and persistence time for nothing.
+MAX_EVENTS = 500
+
+# `_persist` re-serializes EVERY job on every call, under the lock. That was
+# affordable when only the 13 coarse worker messages triggered it; the pipeline's
+# own output arrives orders of magnitude faster. Event appends are therefore
+# throttled, while anything a client waits on (status, progress, completion)
+# still writes through immediately.
+_PERSIST_MIN_INTERVAL = 1.0
+_last_persist = 0.0
 
 # Resolve absolute path to the project root (2 levels up from web/api)
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -38,8 +56,19 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _persist() -> None:
-    """Write current job store to disk (best-effort)."""
+def _persist(force: bool = True) -> None:
+    """Write current job store to disk (best-effort).
+
+    ``force=False`` skips the write when one happened less than
+    ``_PERSIST_MIN_INTERVAL`` ago. The next unthrottled write — and every
+    status/progress change is one — flushes whatever was skipped, so nothing is
+    lost beyond a crash window that best-effort persistence already had.
+    """
+    global _last_persist
+    now = time.monotonic()
+    if not force and (now - _last_persist) < _PERSIST_MIN_INTERVAL:
+        return
+    _last_persist = now
     try:
         os.makedirs(os.path.dirname(PERSIST_PATH), exist_ok=True)
         serializable = {}
@@ -78,6 +107,9 @@ def _load() -> None:
             for key in ("created_at", "updated_at"):
                 if isinstance(entry.get(key), str):
                     entry[key] = datetime.fromisoformat(entry[key])
+            # Jobs persisted before the activity feed existed have neither key.
+            entry.setdefault("events", [])
+            entry.setdefault("event_seq", len(entry["events"]))
             _jobs[jid] = entry
     except Exception:
         pass
@@ -115,6 +147,8 @@ def create_job(
             "clips": [],
             "error": None,
             "log": [],
+            "events": [],
+            "event_seq": 0,
         }
         _persist()
     return job_id
@@ -147,6 +181,27 @@ def update_job(job_id: str, **kwargs) -> None:
         _persist()
 
 
+def _append_event_locked(job: dict, message: str, level: str, source: str) -> None:
+    """Append one feed entry. Caller must already hold ``_lock``.
+
+    Separate from :func:`append_event` so a caller that already holds the lock
+    does not depend on its reentrancy for ordinary work.
+    """
+    events = job.setdefault("events", [])
+    job["event_seq"] = job.get("event_seq", len(events)) + 1
+    events.append(
+        {
+            "seq": job["event_seq"],
+            "ts": _now().isoformat(),
+            "level": level,
+            "source": source,
+            "message": message,
+        }
+    )
+    if len(events) > MAX_EVENTS:
+        del events[: len(events) - MAX_EVENTS]
+
+
 def update_progress(
     job_id: str,
     step: str,
@@ -173,7 +228,44 @@ def update_progress(
         job["log"].append(f"[{step}] {message}")
         if len(job["log"]) > 500:
             job["log"] = job["log"][-500:]
+        _append_event_locked(
+            job, message, "error" if step == "error" else "step", "worker"
+        )
         _persist()
+
+
+def append_event(
+    job_id: str,
+    message: str,
+    level: str = "info",
+    source: str = "stdout",
+) -> None:
+    """Record one line of pipeline output against a job.
+
+    Called from the tee in :mod:`web.api.activity`, so it runs on the worker
+    thread for every line the pipeline prints. It must stay cheap: it does not
+    touch ``updated_at`` (which would make the SSE diff fire on every line) and
+    its persistence is throttled.
+    """
+    with _lock:
+        job = _jobs.get(job_id)
+        if job is None:
+            return
+        _append_event_locked(job, message, level, source)
+        _persist(force=False)
+
+
+def get_events_since(job_id: str, after_seq: int = 0) -> list[dict]:
+    """Events recorded after ``after_seq``, oldest first.
+
+    Sequence numbers rather than list indices, because the ring buffer drops
+    from the front and would silently shift any index the client is holding.
+    """
+    with _lock:
+        job = _jobs.get(job_id)
+        if job is None:
+            return []
+        return [e for e in job.get("events", []) if e.get("seq", 0) > after_seq]
 
 
 def set_status(job_id: str, status: JobStatus) -> None:
