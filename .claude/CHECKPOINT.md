@@ -1,6 +1,55 @@
 # CHECKPOINT
 
 ## In progress
+- **Task:** Job `756c7ee8a2c3` burned 2h22m and produced nothing. Fix the NVIDIA
+  retry behaviour, cap the time budget, and warn before a slow CPU Whisper run.
+- **Phase:** IMPLEMENT.
+- **Checkpoint commit:** `d03fd41` — clean tree, branch
+  `Feature/magical-greider-2955e5`, identical to `origin/main`. Roll back here.
+- **Tier-1 baseline at `d03fd41`:** pytest **327 passed, 0 failed**;
+  `compileall` clean; `npm run build` green.
+- **Scope approved by the human:** (1) stop the hidden SDK retries, (2) probe the
+  live endpoint, (3) cap the total time budget, (4) warn before a slow CPU
+  Whisper run. Explicitly out: changing the Whisper model default.
+
+### The 45 minutes were 9 requests, not 3 — measured, not inferred
+`_make_nvidia_client` (`clipping/engine.py:317`) builds `OpenAI(...)` with
+**neither `timeout` nor `max_retries`**. The installed SDK (2.24.0) defaults to
+`DEFAULT_MAX_RETRIES = 2` and a 600s read timeout, and
+`BaseClient._should_retry` returns `True` for any status >= 500 — so **504 is
+retried twice inside the SDK, invisibly**. Each `attempt N/3` line in the log is
+1 + 2 = **3 HTTP requests**; the ladder is 9 requests, reported as 3.
+
+Proof from the job's own timestamps, before any probe was run:
+- Gaps *between* attempts are **5s** and **15s** — exactly
+  `NVIDIA_BACKOFF_SECONDS = (5, 15)`. So all ~15 minutes elapsed *inside* one
+  `create()` call.
+- A single 900s request is impossible: it would have exceeded the SDK's 600s
+  read timeout and raised `APITimeoutError`, not `InternalServerError: 504`.
+
+### Live probe results (2026-09-18, real endpoint, `max_retries=0`)
+Each row is ONE http request. Model `deepseek-ai/deepseek-v4-flash-0731`.
+
+| Variant | Elapsed | Outcome |
+|---|---|---|
+| 60s transcript, 1024 tok, 1 clip | **144.1s** | OK — but `completion_tokens=2`, an empty clip array |
+| 1211s transcript, 16384 tok, 7 clips (what the job sent) | **302.1s** | **`InternalServerError: 504`** |
+
+So the gateway cuts a request off at **~300s**, and 3 × 302s ≈ the 15:09 / 15:08
+/ 15:07 seen per attempt. The endpoint is also simply slow right now: 144s to
+emit 2 tokens. The failure is generation time, not input size — the 1211s
+transcript is only ~27 KB.
+
+### Regression contract for this task
+| # | Must keep working | Proven by |
+|---|---|---|
+| N-1 | The retry ladder still retries genuine transient failures | `tests/test_nvidia_retry.py` (37 tests) stays green |
+| N-2 | Fatal errors (bad key, 4xx) still fail fast, not after 3 attempts | same suite |
+| N-3 | `response_format` 400-fallback to prompt-only still works | same suite |
+| N-4 | The activity feed still shows each attempt and its reason | it reads stdout; print sites unchanged |
+| N-5 | Gemini path untouched | `REQUEST_TIMEOUT_MS` at `:1120` is Gemini's and is not in this diff |
+
+## Previous task (closed)
 - **Task:** Close the four remaining follow-ups, then merge to `main` and push.
   **COMPLETE** — stages `eb1feca`, `d4d5c78`, `a269a8f`, `f296eb3`.
   Scope approved by the human: (1) the remaining layout items, (2) the `gdown`
