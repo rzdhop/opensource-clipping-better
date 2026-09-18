@@ -114,7 +114,7 @@ function LiveActivity({ job, events, streamState }) {
         {progress.provider && (
           <span className="chip chip-accent" title="The AI provider and model being asked">
             🤖 {progress.provider.toUpperCase()}
-            {progress.model && <span className="chip-sub">{progress.model}</span>}
+            {progress.model && <span className="chip-sub" title={progress.model}>{progress.model}</span>}
           </span>
         )}
         {progress.attempt && progress.max_attempts && (

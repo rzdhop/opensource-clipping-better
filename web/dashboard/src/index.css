@@ -782,6 +782,10 @@ html, body {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  /* The chip is white-space: nowrap, so without this it reports its full
+   * natural width as a minimum and pushes the page wide. At 320px the
+   * provider chip measured 285px against a 288px content box. */
+  max-width: 100%;
   padding: 4px 9px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-color);
@@ -807,7 +811,11 @@ html, body {
   font-family: var(--font-mono);
   font-size: 10px;
   color: var(--text-secondary);
-  max-width: 34ch;
+  /* 34ch is the intent; 100% is the guard. A model id like
+   * deepseek-ai/deepseek-v4-flash-0731 is shorter than 34ch on a wide screen
+   * and wider than the whole chip on a narrow one, where it now ellipsises
+   * instead of overflowing. The full id stays in the span's title. */
+  max-width: min(34ch, 100%);
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -910,10 +918,20 @@ html, body {
 }
 
 /* --- Config Form Grid --- */
+/*
+ * The New Job settings grid. This class existed but nothing referenced it --
+ * the grid was written as an inline style on the element instead, where no
+ * media query can reach it. The values here are the ones that markup used.
+ * minmax(min(300px, 100%), 1fr) rather than minmax(300px, 1fr): a bare 300px
+ * track floor stays 300px wide even when its container is narrower, so the
+ * column overflowed below a ~316px viewport. min() caps the floor at the
+ * container.
+ */
 .config-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
 }
 
 .config-section {

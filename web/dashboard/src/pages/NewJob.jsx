@@ -381,7 +381,7 @@ function NewJob() {
         </div>
 
         {/* Main Config */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '16px', marginBottom: '16px' }}>
+        <div className="config-grid">
           {/* Basic Settings */}
           <div className="config-section">
             <h4>🎯 Basic Settings</h4>
