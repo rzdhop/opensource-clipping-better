@@ -40,3 +40,8 @@ uploads/
 
 # YouTube Tracker local database
 youtube_tracker/*.sqlite3
+
+# Frontend dependencies. Never commit these: `npm install` in
+# web/dashboard/ produces ~480MB that the Docker build recreates anyway.
+node_modules/
+web/dashboard/node_modules/
