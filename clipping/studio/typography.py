@@ -20,7 +20,6 @@ import requests
 from mediapipe.tasks import python as mp_python
 from mediapipe.tasks.python import vision as mp_vision
 from PIL import Image, ImageDraw, ImageFont
-from yt_dlp import YoutubeDL
 
 FIREFOX_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:148.0) Gecko/20100101 Firefox/148.0"
 

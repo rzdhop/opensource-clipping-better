@@ -28,7 +28,6 @@ import requests
 from mediapipe.tasks import python as mp_python
 from mediapipe.tasks.python import vision as mp_vision
 from PIL import Image, ImageDraw, ImageFont
-from yt_dlp import YoutubeDL
 
 def _load_studio_internal_module(file_name: str, module_alias: str):
     module_path = os.path.join(os.path.dirname(__file__), file_name)
