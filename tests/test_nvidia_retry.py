@@ -448,3 +448,54 @@ def test_request_timeout_exceeds_the_measured_gateway_limit():
     assert engine.NVIDIA_REQUEST_TIMEOUT_SECONDS > 300
     # ...but not so long that a stalled request blocks for the SDK's 600s default
     assert engine.NVIDIA_REQUEST_TIMEOUT_SECONDS < 600
+
+
+# ------------------------------------------------------------ the time budget
+
+def test_budget_stops_an_attempt_that_cannot_finish_in_time(monkeypatch, cfg):
+    """A slow, deterministically-failing provider must not cost the full ladder.
+
+    The real job retried a ~302s 504 three times. With each request now bounded
+    at NVIDIA_REQUEST_TIMEOUT_SECONDS, a third attempt cannot fit inside the
+    budget, so it is never started.
+    """
+    clock = {"t": 0.0}
+    monkeypatch.setattr(engine.time, "monotonic", lambda: clock["t"])
+    monkeypatch.setattr(engine.time, "sleep", lambda s: None)
+
+    def _slow_504(**kwargs):
+        clock["t"] += 302.0          # what the live gateway actually took
+        raise _exc("InternalServerError", 504)
+
+    client = FakeClient([])
+    client.chat.completions.create = _slow_504
+    monkeypatch.setattr(engine, "_make_nvidia_client", lambda c: client)
+
+    with pytest.raises(RuntimeError) as err:
+        engine.analyze_with_nvidia("transcript", cfg)
+
+    msg = str(err.value)
+    assert "gave up after 2 attempt(s)" in msg, msg
+    assert "budget" in msg
+    # 2 x 302 = 604; a third would end at ~906s, past the 900s budget
+    assert "604s" in msg, msg
+
+
+def test_budget_does_not_interfere_when_attempts_are_fast(monkeypatch, cfg):
+    """A fast failure must still use the full ladder -- the budget is a ceiling,
+    not a shortcut."""
+    monkeypatch.setattr(engine.time, "sleep", lambda s: None)
+    client = FakeClient([_exc("InternalServerError", 503)] * engine.NVIDIA_MAX_ATTEMPTS)
+    monkeypatch.setattr(engine, "_make_nvidia_client", lambda c: client)
+
+    with pytest.raises(RuntimeError) as err:
+        engine.analyze_with_nvidia("transcript", cfg)
+
+    assert "failed after 3 attempt(s)" in str(err.value)
+    assert len(client.calls) == engine.NVIDIA_MAX_ATTEMPTS
+
+
+def test_budget_allows_two_full_length_attempts():
+    """If the budget could not fit two full requests, a single slow-but-healthy
+    call would be cut off, which would be a regression, not a fix."""
+    assert engine.NVIDIA_TOTAL_BUDGET_SECONDS >= 2 * engine.NVIDIA_REQUEST_TIMEOUT_SECONDS

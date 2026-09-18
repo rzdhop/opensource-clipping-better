@@ -207,6 +207,14 @@ NVIDIA_BACKOFF_SECONDS = (5, 15)
 # a local timeout, which says nothing.
 NVIDIA_REQUEST_TIMEOUT_SECONDS = 330
 
+# An overall deadline for the whole ladder, because bounding each request is not
+# the same as bounding the wait. The check before each attempt is *predictive* --
+# "could this attempt overrun the budget?" rather than "has it already?" -- since
+# a third attempt starting at 610s under a 900s budget would still end at ~940s.
+# 900s leaves room for two full-length attempts (2 x 330s) and refuses the third,
+# so the observed failure mode costs ~10 minutes instead of 45.
+NVIDIA_TOTAL_BUDGET_SECONDS = 900
+
 # Classified by exception class NAME so that `openai` is never imported at module
 # scope. An SDK rename would make an unknown error non-retryable, i.e. it fails
 # closed, which is the safe direction.
@@ -938,6 +946,14 @@ def analyze_with_nvidia(transkrip_lengkap: str, cfg) -> list[dict]:
     # schema in play, a malformed response is a *sampling* failure, and the
     # only meaningful remedy is another sample.
     failures: list[str] = []
+    started_at = time.monotonic()
+
+    def _budget_exhausted() -> bool:
+        """True when another attempt could outlast the budget."""
+        return (
+            time.monotonic() - started_at + NVIDIA_REQUEST_TIMEOUT_SECONDS
+            > NVIDIA_TOTAL_BUDGET_SECONDS
+        )
 
     # Structured output is requested through the OpenAI-standard
     # `response_format`, not NVIDIA's `nvext.guided_json`. The latter is what
@@ -1011,6 +1027,22 @@ def analyze_with_nvidia(transkrip_lengkap: str, cfg) -> list[dict]:
                 detail = "\n  ".join(failures)
                 raise RuntimeError(
                     f"NVIDIA analysis failed after {attempt} attempt(s):\n  {detail}"
+                ) from exc
+
+            # Stop before an attempt that cannot finish inside the budget. The
+            # alternative is what the 2h22m job did: keep paying full price for
+            # a failure that is reproducing identically every time.
+            if _budget_exhausted():
+                spent = int(time.monotonic() - started_at)
+                detail = "\n  ".join(failures)
+                print(
+                    f"   ⏱️ Giving up after {spent}s: another attempt would "
+                    f"exceed the {NVIDIA_TOTAL_BUDGET_SECONDS}s budget.",
+                    flush=True,
+                )
+                raise RuntimeError(
+                    f"NVIDIA analysis gave up after {attempt} attempt(s) and "
+                    f"{spent}s (budget {NVIDIA_TOTAL_BUDGET_SECONDS}s):\n  {detail}"
                 ) from exc
 
             time.sleep(NVIDIA_BACKOFF_SECONDS[attempt - 1])
