@@ -1,52 +1,75 @@
 # CHECKPOINT
 
 ## In progress
-- **Task:** The dashboard scrolls sideways at phone width. `main.main-content`
-  renders wider than the viewport and every descendant is clipped on the right.
-- **Phase:** IMPLEMENT (approved plan, 2 stages).
-- **Checkpoint commit:** `105cddc` — clean tree, branch
-  `Feature/magical-greider-2955e5`. Roll back here.
-- **Tier-1 baseline at `105cddc`:** `python -m pytest -q` = **327 passed, 0
-  failed** (needs `PYTHONPYCACHEPREFIX` locally — see the root `__pycache__`
-  note below). `npm run build` in `web/dashboard` = **built in 2.30s**,
-  `index-CP1GcaYZ.css` 13.19 kB.
-- **Tier-2:** no E2E suite exists (no playwright/cypress, no test script in
-  `web/dashboard/package.json`). Tier 2 is browser measurement against a Vite
-  dev server; the human approved installing `node_modules` in the worktree and
-  running it on a spare port against the live backend on `:8000`.
-- **Next action:** Stage 1 — `.main-content{min-width:0}`, `.page-header` and
-  `.progress-steps` wrap, in `web/dashboard/src/index.css`.
+- **Task:** The dashboard scrolled sideways at phone width. **COMPLETE.**
+- **Phase:** closed out.
+- **Checkpoint commit:** `105cddc` was the baseline. Stages: `ac622fb` the
+  content column, `cbc389b` unbreakable tokens. Artifacts: `36aa45f` (before),
+  and this commit.
+- **Tier-1:** `python -m pytest -q` = **327 passed, 0 failed** before and after
+  (needs `PYTHONPYCACHEPREFIX` locally — see the root `__pycache__` note below).
+  `npm run build` green; the stylesheet went 13.19 kB -> 13.38 kB.
+- **Tier-2:** no E2E suite exists in this project, so Tier 2 is browser
+  measurement — done, see below.
+- **Tier-3:** no test added. There is no frontend test infrastructure at all
+  (no vitest, no playwright, no `test` script in `web/dashboard/package.json`);
+  a real guard needs a headless browser asserting `scrollWidth == clientWidth`
+  per route, which is a new dependency and harness and so its own task. Listed
+  under follow-ups.
 - **Open questions:** none.
 
 ### Root cause, measured (do not re-derive)
 `.main-content` is a flex item of `.app-layout` (`display:flex`) with `flex: 1`
-and **no authored `min-width`**, so it keeps the flex default `min-width: auto`,
-which resolves to its **min-content width** and defeats `flex-shrink: 1`
+and **no authored `min-width`**, so it kept the flex default `min-width: auto`,
+which resolves to its **min-content width** and overrides `flex-shrink: 1`
 entirely. Measured in a 375px viewport: `main` = 427.234px, its `min-content` =
-427px, and setting `min-width: 0` in-page brings it to exactly 375px.
+427px, and `min-width: 0` brings it to exactly 375px.
 
-The three suspects in the brief are all absent — `grep` finds **zero**
+All three suspects in the original brief were absent — `grep` finds **zero**
 `min-width` and **zero** `calc()` in the whole 897-line stylesheet, and the
 `@media (max-width: 768px)` block *does* correctly override `margin-left` and
-`padding`. The minimum is implicit, which is why it is not greppable.
+`padding`. The minimum was implicit, which is why it was not greppable.
 
-What feeds that min-content: `.page-header` (nowrap flex, 387px min-content) and
-`.progress-steps` (nowrap flex, 6–7 unshrinkable step labels).
+**It was never a phone-only bug.** At 820px — sidebar on screen, media query not
+applied — a job page with a real `source_url` gave `scrollWidth` 959 against
+`clientWidth` 805. See DEC-016 for why the rules are base declarations.
 
-**Not phone-only.** At 820px — sidebar visible, media query *not* applied — a
-long `source_url` gives `scrollWidth` 959 vs `clientWidth` 805. That is why the
-rules go in the **base** declarations and not inside the media query.
+### Contract for the layout fix (do not undo)
+- `.main-content { min-width: 0 }` is load-bearing, not defensive. Remove it and
+  the column goes back to refusing to shrink below its widest child.
+- The wrap and `overflow-wrap` rules are **base declarations on purpose**
+  (DEC-016). Moving them into `@media (max-width: 768px)` re-breaks 769–1100px
+  while looking correct on every phone.
+- `overflow-wrap: anywhere`, **not** `break-word` (DEC-017). Only `anywhere`
+  reduces min-content width, and min-content is what travels back up the tree.
+  A `break-word` swap looks identical in a screenshot and leaves `scrollWidth`
+  wrong.
+- `.log-viewer` and every `.activity-*` rule are **outside this diff**. The feed
+  is contained because `.log-viewer` is its own scroll container; that is what
+  keeps `.activity-message`'s `word-break: break-word` from mattering.
 
-### Regression contract for this task (nothing here may break)
-| # | Must keep working | Proven by |
+### Verification of the layout fix (2026-09-18)
+Measured against a Vite dev server running **this worktree** on `:5174` against
+the live backend on `:8000`. The `:5173` server serves the main checkout and
+would not have shown the edit.
+
+| # | Contract item | Result |
 |---|---|---|
-| R-1 | No horizontal document scroll on any route at 375px | `scrollWidth === clientWidth` on `/`, `/new`, `/settings` and two job detail pages |
-| R-2 | Same at 414px and 820px | same measurement at those widths |
-| R-3 | Desktop layout unchanged (sidebar 260px, content beside it) | measurement at 1280px + screenshot |
-| R-4 | Live activity panel still renders headline, last line, provider/model chip, `attempt N of M`, clip sub-bar, both clocks, quiet notice, severity-coloured feed | UNVERIFIED by test — browser check on a job page |
-| R-5 | The feed follows the tail only while the user has not scrolled up | UNVERIFIED by test — `.log-viewer` is **not** in the diff, so the scroll container is untouched |
-| R-6 | Job list cards still show percentage, step, time-on-step, retry counter | browser check on `/` |
-| R-7 | Python suite unaffected | `pytest` = 327 passed (CSS-only diff) |
+| R-1 | No horizontal scroll at 375px | **PASS** — `scrollWidth == clientWidth == 375` on `/`, `/new`, `/settings` and three job pages; zero elements extend past the viewport |
+| R-2 | Same at 414px and 820px | **PASS** — 414/414 and 820/820 (805 where a scrollbar is present) |
+| R-3 | Desktop unchanged | **PASS** — at 1280px the sidebar is still 260px, `main` 1020px, and all six step dots sit on one row |
+| R-4 | Live activity panel intact | **PASS** — headline, `🤖 NVIDIA` + `deepseek-ai/deepseek-v4-flash-0731` chip, both clocks (`34m 41s on this step · 35m 55s total`), console header, 90 feed lines across three severity classes. `.chip-sub` measures 205px against its 204.697px `max-width` |
+| R-5 | Feed follows the tail only when not scrolled up | **PASS** — console scrolled to top stayed at `scrollTop 0` across a poll cycle. `.log-viewer` is not in the diff |
+| R-6 | Job cards keep their fields | **PASS** — cards 343px wide, still showing `36% · Analyzing with AI...` |
+| R-7 | Python suite unaffected | **PASS** — 327 passed, 0 failed |
+
+Two **stressed** cases, both real overflows found by injecting realistic content
+rather than by reading code, both fixed and re-measured at 375px:
+
+| Case | Before | After |
+|---|---|---|
+| Job page with a real YouTube `source_url` | `scrollWidth` 432 | 375 |
+| Job card with a long uploaded filename | `scrollWidth` 568, card 552px | 375 |
 
 ### Status of the previous task
 Live progress / debug feed — **COMPLETE**, stages `58c07a5`, `e83c364`,
@@ -106,8 +129,8 @@ stack. The panel rendered:
   delete it when convenient. It predates this work.
 - The repo-root `__pycache__/` is owned by root (from a docker run predating the
   uid fix), so a local `compileall` needs `PYTHONPYCACHEPREFIX`. CI is unaffected.
-- The dashboard scrolls sideways at 375px (`main.main-content` renders 427px).
-  Pre-existing; recorded as a follow-up, deliberately not in this diff.
+- ~~The dashboard scrolls sideways at 375px~~ — **FIXED** 2026-09-18
+  (`ac622fb`, `cbc389b`). See the layout-fix contract above.
 
 ### Verified against real services (previous task, 2026-09-17/18)
 | What | Evidence |
@@ -233,6 +256,19 @@ vs 244 without** — the LLM would otherwise have seen every sentence ~3x.
   fails in every documented install path.
 
 ## Follow-ups deliberately not done
+- **No frontend test infrastructure.** A `scrollWidth == clientWidth` guard per
+  route needs a headless browser (playwright/vitest + a harness), which is a
+  dependency decision of its own. Until then the layout fix has Tier-2 evidence
+  only.
+- **`web/dashboard` ships no lockfile.** Only `node_modules/` is gitignored, so
+  `npm install` produces an untracked `package-lock.json` that nothing pins.
+  That conflicts with the "pin and verify" rule; adding one is a dependency task.
+- **`.config-grid` (index.css:879, `minmax(200px, 1fr)`) is missing from the
+  media query** that fixes `.clip-grid` and `.settings-grid`. It fits inside
+  343px so it does not overflow today; it is the same defect class, latent.
+- **Inline `minmax(300px, 1fr)` at `NewJob.jsx:384`** is unreachable from any
+  media query and has only ~43px of headroom at 375px. It overflows below a
+  360px viewport. Wants `minmax(min(300px, 100%), 1fr)` — a JSX change.
 - `hook_manager.py` (`--hook-source`) is now the only network fetch left in the
   CLI pipeline, which is inconsistent with local-first.
 - 9 dead `from yt_dlp import YoutubeDL` imports remain in `clipping/studio/`.

@@ -4,6 +4,13 @@
 - (none open)
 
 ## Confirmed
+- **A-012** — The phone-width overflow is fixable in CSS alone; no JSX change is
+  needed. *Confirmed by measurement. The exploration flagged several inline
+  `style={{ display: 'flex' }}` rows that no stylesheet can reach — chiefly the
+  job header's action group at `JobDetail.jsx:255` — as probable blockers. They
+  are not: once `.page-header` wraps, that group measures 222px and fits inside
+  the 343px content box unchanged. Every route measured `scrollWidth ==
+  clientWidth` at 375, 414 and 820px with the diff confined to `index.css`.*
 - **A-011** — The pipeline's Python-level `print` output is enough to tell a user
   what is happening. *Confirmed against a live job on the running containers: the
   feed carried the transcript warning (34% of words dropped for backwards

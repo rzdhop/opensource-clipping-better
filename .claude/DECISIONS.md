@@ -222,3 +222,60 @@ because the ring buffer drops from the front and would shift any index a client
 was holding. The `RLock` removes a whole class of deadlock: the tee turns any
 `print` into a store write, so a plain `Lock` would hang the worker the moment
 anything printed while the lock was held.
+
+## DEC-016 — Responsive layout fixes go in the base declarations, not the mobile media query
+**Context.** The dashboard scrolled sideways at 375px. The obvious home for the
+fix was the existing `@media (max-width: 768px)` block, which is where the only
+other responsive rules in the stylesheet live. Measuring first showed that would
+have been wrong: at 820px — sidebar on screen, media query not applied — a job
+page carrying a real `source_url` gives `scrollWidth` 959 against `clientWidth`
+805. The bug is not a phone bug; it is a "content is wider than its column" bug,
+and the column is narrowest *relative to its content* in the 769–1100px range,
+where the sidebar still takes 260px.
+**Decision.** `min-width: 0`, `flex-wrap: wrap` and `overflow-wrap: anywhere`
+are base declarations on `.main-content`, `.page-header`, `.progress-steps`,
+`.page-header h2/p` and `.job-info h3`. Only the cosmetic
+`justify-content: flex-start` for already-wrapped steps is mobile-scoped, because
+that one genuinely is about the wrapped state and nothing else.
+**Consequence.** The stylesheet has a single breakpoint and no tablet range, so
+anything scoped to `max-width: 768px` silently leaves 769–1100px broken. Rules
+that express "this element must be allowed to shrink" belong unscoped; only
+rules that express "at this size, arrange differently" belong in the query. The
+cost is that `.page-header` and `.progress-steps` can now wrap at *any* width,
+including desktop — which is the correct fallback (wrapping beats clipping), and
+was verified not to trigger at 1280px.
+
+## DEC-017 — `overflow-wrap: anywhere`, never `break-word`, for job-supplied strings
+**Context.** The dashboard renders raw job input — `source_url`,
+`upload_filename`, `job.id`, model ids — as unbreakable single tokens. After
+`min-width: 0` let the content column shrink, those tokens still widened it:
+`scrollWidth` 432 on a job page with a YouTube URL, and 552px for a job card
+whose title was a long filename.
+**Decision.** Use `overflow-wrap: anywhere` on the elements that render raw job
+input.
+**Consequence.** The two values are not interchangeable here. `break-word` wraps
+the visible text but **does not reduce the element's min-content width**, and
+min-content is precisely the quantity that propagates back up through
+`min-width: auto` on every flex and grid item above it — so `break-word` would
+have looked fixed in a screenshot while `scrollWidth` stayed wrong. Note that
+`.activity-message` still uses `word-break: break-word` (the legacy alias) and
+so still contributes a full-token min-content; it is contained today only
+because `.log-viewer` is its own scroll container. If that container ever loses
+`overflow`, this is where the overflow will come back.
+
+---
+
+## Index note — duplicate IDs DEC-014 and DEC-015 (recorded 2026-09-18)
+Two IDs are used twice in this file, from two different sessions:
+
+| ID | Entry | Subject |
+|---|---|---|
+| DEC-014 | first | Whisper device detection asks CTranslate2, not torch |
+| DEC-014 | second | Read the pipeline's progress from its stdout, not from a callback |
+| DEC-015 | first | Optional-flag defaults must test `model_fields_set` |
+| DEC-015 | second | The activity feed is capped and its persistence throttled |
+
+Not renumbered: this file is append-only and IDs are never reused or changed,
+so rewriting them would invalidate every reference already made to them
+elsewhere. Cite these four by **subject as well as ID**. The next free ID after
+this note is **DEC-018**.
