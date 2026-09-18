@@ -5,6 +5,9 @@
   retry behaviour, cap the time budget, and warn before a slow CPU Whisper run.
 - **Phase:** IMPLEMENT — 4 stages done: `8877645` SDK retries, `92e5ff8` time
   budget, `f8146e7` Whisper warning, `46d341c` propose-a-smaller-request.
+  **Stage 5 in progress:** persist each job's transcript and let a re-run use it.
+- **Destination:** fast-forward `main` and push once stage 5 lands (human asked
+  to hold until then).
 - **Tier-1 now:** pytest **352 passed, 0 failed**; `compileall` clean.
 - **Checkpoint commit:** `d03fd41` — clean tree, branch
   `Feature/magical-greider-2955e5`, identical to `origin/main`. Roll back here.
@@ -81,6 +84,40 @@ earlier job. 3-clip requests never did this.
 | V-5 | Clip count is the cause | 3 clips → **291.8s, 3911 tokens, 3 real clips**; 7 clips → 504. ~12–13 tok/s × ~1200 tok/clip ⇒ ~3 clips per 300s window |
 | V-6 | The live 504 will trigger the proposal | The probe read `status_code` off the real exception and printed `InternalServerError(504)`, exactly what `_nvidia_request_too_large` keys on |
 | V-7 | Unit behaviour | 352 tests; every new test checked against the pre-fix code — `KeyError: 'max_retries'`, the unbudgeted loop running all 3 attempts, the 3 proposal tests, and the duplicate CUDA warning reporting "appeared 2 times" |
+
+### Live end-to-end against the real API (2026-09-18)
+Ran the real `analyze_with_nvidia` against the live endpoint with `clips=7`,
+on the *auto-degrade* build that preceded `46d341c`:
+
+```
+🔁 attempt 1/3 -> ⚠️ InternalServerError: 504
+✂️ 7 clips is more than this model can generate — asking for 3
+🔁 attempt 2/3 (3 clips) -> RESULT: 3 clips in 581.0s, ranks [1, 2, 3]
+```
+
+That is the evidence behind the number the proposal hands the user: **3 clips
+really does succeed on this endpoint immediately after a 7-clip 504**, and the
+581.0s total matches the probe (302s + 279s).
+
+### The transcript is discarded — found while checking the proposal's cost
+`resolve_transcript(cfg)` (`web/api/worker.py:221`) returns the transcript in
+memory and `analyze_with_ai` (`:244`) consumes it. **Nothing ever writes it to
+disk** — verified on a *successful* job too: `outputs/275d7caf2436/` holds
+`gemini_response.json`, the source mp4, clips, thumbnails and
+`render_manifest.json`, and no transcript. The failed job's directory is empty.
+
+Consequence, and why it matters here: the proposal added in `46d341c` tells the
+user to re-run with fewer clips, and on a CPU job doing so **re-runs the
+94-minute transcription**. Measured cost of the two designs:
+
+| | Time | Outcome |
+|---|---|---|
+| Auto-degrade (rejected in review) | 581s | 3 clips delivered |
+| Propose (chosen) + re-run on CPU | ~604s + **~94 min** | 3 clips, after a full re-transcribe |
+
+It is also a standalone bug: a 94-minute artifact is destroyed by any failure at
+or after analysis, in a project whose premise is local-first and which already
+accepts `--transcript file.vtt`. Stage 5 fixes it.
 
 ### Regression contract for this task
 | # | Must keep working | Proven by |
