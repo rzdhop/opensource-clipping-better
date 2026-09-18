@@ -1,13 +1,21 @@
 # ASSUMPTIONS
 
 ## Unconfirmed
-- **A-007** — `deepseek-ai/deepseek-v4-flash-0731` honours the `nvext.guided_json`
-  schema as well as the retired `deepseek-v4-pro` did. The model is confirmed
-  live (probe returns 401 auth-required, not 410) and is the same v4 family, but
-  it has **not** been exercised against the real API — no valid `NVIDIA_API_KEY`
-  was available. This is the one substantive open risk.
+- (none open)
 
 ## Confirmed
+- **A-007 — RESOLVED 2026-09-18, against the live API.**
+  `deepseek-ai/deepseek-v4-flash-0731` exists and authenticates, but it
+  **rejected** the `nvext.guided_json` the code was sending:
+  `400 unknown field 'guided_json'`. So the assumption was wrong and every real
+  analysis would have failed on the first attempt. Probing six mechanisms showed
+  `response_format={"type":"json_schema"}` accepted; after switching to it a live
+  call returned 2 clips with zero missing keys and
+  `metadata.normalize_and_validate` accepted the result. See DEC-013.
+- **A-010** — Whisper's device failure is a CTranslate2 property, not a torch
+  one. *Confirmed: this machine has ctranslate2 4.8.2 with
+  `get_cuda_device_count() == 0` and no torch at all, and reproduced both
+  reported crashes; `torch.cuda.is_available()` would not have detected it.*
 - **A-008** — The 21 undeclared `JobCreateRequest` fields are API-only: no part
   of the dashboard sends them. *Confirmed by grep for all 21 names over the whole
   of `web/dashboard/src` — zero matches. The task brief stated the dashboard sent
@@ -44,5 +52,5 @@
 - (none)
 
 ## Notes
-A-007 is the only substantive open risk at close-out: the replacement NIM model
-is confirmed to exist but has not been called with a real key.
+A-007 is closed. The remaining unverified areas are the CUDA branch of the
+device resolver (this host is CPU-only) and diarization / split-screen (RC-8).

@@ -140,3 +140,44 @@ use `importorskip`.
 matters. Any future web test must be checked against a pytest-only environment,
 not just a local one.
 
+## DEC-013 — Structured output moves to `response_format`, not `nvext.guided_json`
+**Context.** The first real analysis call ever made returned
+`400 unknown field 'guided_json'` from `deepseek-ai/deepseek-v4-flash-0731`.
+The endpoint was probed with six mechanisms: plain prompt, `json_object`,
+`json_schema`, `nvext.guided_json`, top-level `guided_json`, and
+`chat_template_kwargs`. `nvext.guided_json` was the ONLY one rejected.
+`response_format={"type":"json_schema","strict":true}` returned the array
+directly; `json_object` returned a `{"items": ...}` wrapper and invented
+content, so it is not a substitute.
+**Decision.** Send the schema via `response_format`. When a provider answers
+400 naming that parameter, drop it for the remaining attempts rather than
+burning identical retries, and let the prompt plus `_extract_clip_list` carry
+the shape.
+**Consequence.** The AI path works for the first time. The fallback keeps other
+models usable. Verified live: 2 clips, zero missing keys, normalization passed.
+
+## DEC-014 — Whisper device detection asks CTranslate2, not torch
+**Context.** Defaults of `cuda`/`float16` crashed on CPU-only installs, and
+`--whisper-device auto` was accepted but never resolved, so it crashed too.
+The obvious detector, `torch.cuda.is_available()`, is the wrong signal: Whisper
+runs on CTranslate2 and the default PyPI wheel is CPU-only, so torch can report
+a GPU that Whisper cannot use. This host additionally has Docker's `nvidia`
+runtime registered with no usable GPU, which defeats presence-based heuristics.
+**Decision.** New `clipping/device.py` resolves device and compute type from
+`ctranslate2.get_cuda_device_count()`, falling back to torch only if CTranslate2
+cannot be asked. Defaults become `auto` everywhere; resolution happens once in
+`load_whisper_model`.
+**Consequence.** A CPU-only machine works with no flags. The CUDA branch is
+unit-tested by injection but not exercised on real hardware here.
+
+## DEC-015 — Optional-flag defaults must test `model_fields_set`
+**Context.** `POST /api/jobs` auto-enabled `load_gemini_json` for a reused job
+via `"load_gemini_json" not in payload`. Once that field was declared on the
+model, `model_dump()` always included it, so the branch was dead and a rerun
+failed demanding an API key it did not need.
+**Decision.** Use `req.model_fields_set` to tell "not sent" from "sent as
+false".
+**Consequence.** Clone & Rerun works again. Any future "default this on unless
+the client said otherwise" logic must use the same mechanism -- the payload
+dict cannot express the distinction.
+
