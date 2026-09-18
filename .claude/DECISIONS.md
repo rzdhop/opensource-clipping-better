@@ -279,3 +279,28 @@ Not renumbered: this file is append-only and IDs are never reused or changed,
 so rewriting them would invalidate every reference already made to them
 elsewhere. Cite these four by **subject as well as ID**. The next free ID after
 this note is **DEC-018**.
+
+## DEC-018 — Finish the abandoned revert in `run_upload.py`, do not restore the feature
+**Context.** `run_upload.py` could not be imported: it referenced
+`youtube_uploader.safety`, deleted long ago. Investigating showed the module was
+added in `5bf93d5` and removed deliberately in `ec3010d`
+(`revert: remove safety checklist and manual approval from youtube_uploader`),
+which also stripped `safety_config` and `skip_approval` from
+`upload_manifest_to_youtube` — but never updated the CLI. So the file carried
+**two** breakages, and the intuitive fix (restore `safety.py`) would only have
+turned the `ImportError` into a `TypeError`.
+**Decision.** Finish the revert: delete the import, the `--safety-config` and
+`--no-approval` flags, the approval warning, and the two dead kwargs. Do not
+reinstate the guardrails. Keep `youtube_uploader/Safety.md` and
+`upload_safety.json`.
+**Consequence.** `run_upload.py` now matches `run_fb_upload.py` — written
+*after* the revert with no safety surface — and both READMEs, which document no
+safety flags. Nothing that functions was removed: the enforcement died in
+`ec3010d`, only references to it survived. The open **product** question is
+untouched and deliberately so: the guardrails (daily caps, minimum interval,
+manual approval) were originally written to fight YouTube bans, and were removed
+for automation, not because the risk went away. If they are ever wanted back,
+restore `git show 5bf93d5:youtube_uploader/safety.py` — **not** Safety.md's
+snippet, whose defaults (3/day, 2/run, 2h, queue 15) contradict the shipped
+`upload_safety.json` (2/day, 1/run, 24h, queue 7) and which pulls in an
+undeclared `pytz` and writes the config file back to disk.

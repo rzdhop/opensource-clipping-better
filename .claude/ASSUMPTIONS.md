@@ -47,9 +47,13 @@
 - **A-002** — `openai` is an undeclared dependency: imported at
   `clipping/engine.py:901`, present in neither `requirements.txt` nor
   `pyproject.toml`. *Confirmed by grep over both manifests.*
-- **A-003** — Only `studio/effects.py:86` and `studio/transitions.py:156` actually
-  call yt-dlp inside `clipping/studio/`; the other 9 module-scope imports are dead.
-  *Confirmed by grep for `YoutubeDL(`.*
+- **A-003 — CONFIRMED, and RESOLVED 2026-09-18 (`a269a8f`).** Only
+  `studio/effects.py:86` and `studio/transitions.py:156` actually call yt-dlp
+  inside `clipping/studio/`. *The call-site set was right; the count was not —
+  there were **10** dead imports across 12 files carrying one, not 9. Re-verified
+  by an AST pass rather than a grep: in each of the ten, `YoutubeDL` occurred
+  exactly once, as the import itself. The ten are deleted; afterwards no module
+  in `clipping/` uses the name unimported.*
 - **A-004** — `-v` and `-t` are free as short flags; only `-u`, `-n`, `-r` are
   taken. *Confirmed by grep over `clipping/config.py`.*
 - **A-005** — The render layer is unaffected by this refactor. *Confirmed: a real

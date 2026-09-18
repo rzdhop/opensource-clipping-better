@@ -2,6 +2,7 @@
 
 ## In progress
 - **Task:** Close the four remaining follow-ups, then merge to `main` and push.
+  **COMPLETE** — stages `eb1feca`, `d4d5c78`, `a269a8f`, `f296eb3`.
   Scope approved by the human: (1) the remaining layout items, (2) the `gdown`
   packaging bug, (3) `run_upload.py`'s broken `youtube_uploader.safety` import,
   (4) the dead yt-dlp imports in `clipping/studio/`.
@@ -87,6 +88,14 @@ rather than by reading code, both fixed and re-measured at 375px:
 |---|---|---|
 | Job page with a real YouTube `source_url` | `scrollWidth` 432 | 375 |
 | Job card with a long uploaded filename | `scrollWidth` 568, card 552px | 375 |
+
+### Verification of the follow-up round (2026-09-18)
+| Stage | Result |
+|---|---|
+| `eb1feca` layout remainder | `scrollWidth == clientWidth` on all five routes at **320**, 375 and 1280px. `.config-grid` renders the same three 303px columns at 1280px as the inline style did |
+| `d4d5c78` gdown | Declaration only; `pytest` 327 passed |
+| `a269a8f` dead imports | AST pass: `YoutubeDL` occurred exactly once in each of the ten (the import). Diff is 10 files / 10 deletions / 0 insertions. `compileall` clean, 327 tests green. **RC-7 not re-verified by a live render** — no cv2, no mediapipe, no docker access on this host |
+| `f296eb3` run_upload | With only the absent google-auth chain stubbed: `import run_upload` OK, `--help` builds, every kwarg it passes is accepted by `upload_manifest_to_youtube` |
 
 ### Status of the previous task
 Live progress / debug feed — **COMPLETE**, stages `58c07a5`, `e83c364`,
@@ -267,8 +276,15 @@ vs 244 without** — the LLM would otherwise have seen every sentence ~3x.
   (`91b7712`, `832300c`); guarded by `tests/test_web_job_fields.py`.
 
 ## Known pre-existing breakage (not from this task)
-- `run_upload.py:17` imports `youtube_uploader.safety`, which does not exist.
-  Excluded from the `compileall` CI job for that reason.
+- ~~`run_upload.py:17` imports `youtube_uploader.safety`~~ — **FIXED**
+  (`f296eb3`). **Two corrections to what this entry used to say:** it was *not*
+  excluded from the `compileall` CI job — `.github/workflows/ci.yml:29` has
+  always included `run_upload.py`, and `compileall` byte-compiles without
+  executing imports, so it structurally cannot catch a missing module. And the
+  file had **two** breakages, not one: the dead import plus two keyword
+  arguments (`safety_config`, `skip_approval`) that `upload_manifest_to_youtube`
+  no longer accepts, so restoring `safety.py` alone would only have turned the
+  `ImportError` into a `TypeError`. See DEC-018.
 - `gdown` is declared in `pyproject.toml` only, so `--hook-source <drive-url>`
   fails in every documented install path.
 
@@ -280,12 +296,30 @@ vs 244 without** — the LLM would otherwise have seen every sentence ~3x.
 - **`web/dashboard` ships no lockfile.** Only `node_modules/` is gitignored, so
   `npm install` produces an untracked `package-lock.json` that nothing pins.
   That conflicts with the "pin and verify" rule; adding one is a dependency task.
-- **`.config-grid` (index.css:879, `minmax(200px, 1fr)`) is missing from the
-  media query** that fixes `.clip-grid` and `.settings-grid`. It fits inside
-  343px so it does not overflow today; it is the same defect class, latent.
-- **Inline `minmax(300px, 1fr)` at `NewJob.jsx:384`** is unreachable from any
-  media query and has only ~43px of headroom at 375px. It overflows below a
-  360px viewport. Wants `minmax(min(300px, 100%), 1fr)` — a JSX change.
+- ~~`.config-grid` missing from the media query~~ and ~~inline
+  `minmax(300px, 1fr)` at `NewJob.jsx:384`~~ — **both FIXED** (`eb1feca`), and
+  both were mis-described. `.config-grid` was *dead CSS* that no JSX referenced,
+  not a rule missing a breakpoint; the grid now uses it. The NewJob grid does
+  not overflow at 375px or 320px — it breaks below ~316px — and the real
+  overflow at 320px was the provider chip, which nothing had listed.
+- **CI cannot catch an orphaned import.** `.github/workflows/ci.yml:28` claims
+  the `compileall` step "catches orphaned references in modules the test suite
+  does not import". It cannot — `compileall` byte-compiles without executing
+  imports, which is why `run_upload.py` stayed broken. A real guard is one line:
+  `python -c "import run_upload"`. Not added here because CI's installed deps
+  were not verified against it.
+- **The two dependency manifests diverge in both directions.**
+  `requirements.txt` carries 9 packages `pyproject.toml` lacks (`numpy<2.0.0`,
+  `pyannote.audio`, `torch`, `torchaudio`, `fastapi`, `uvicorn`,
+  `python-multipart`, `pydantic`, `edge-tts`). Only the `gdown` case was fixed;
+  reconciling them is a dependency task.
+- **Product question, not a bug: do YouTube uploads want guardrails again?**
+  `upload_safety.json` is tracked but orphaned, and `Safety.md` exists to
+  re-enable the feature. See DEC-018 — restore from `5bf93d5`, never from
+  Safety.md.
 - `hook_manager.py` (`--hook-source`) is now the only network fetch left in the
   CLI pipeline, which is inconsistent with local-first.
-- 9 dead `from yt_dlp import YoutubeDL` imports remain in `clipping/studio/`.
+- ~~9 dead `from yt_dlp import YoutubeDL` imports remain in `clipping/studio/`~~
+  — **FIXED** (`a269a8f`). The count was wrong: there were **10**, across 12
+  files carrying the import. `studio/effects.py` and `studio/transitions.py`
+  keep theirs (real call sites at `:86` and `:156`, per DEC-001).
