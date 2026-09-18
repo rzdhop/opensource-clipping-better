@@ -161,18 +161,33 @@ html, body {
   text-align: center;
 }
 
+/*
+ * min-width: 0 is load-bearing. .main-content is a flex item of .app-layout,
+ * and a flex item's default min-width: auto resolves to its min-content width,
+ * which overrides flex-shrink entirely. Without it the column cannot shrink
+ * below its widest unwrappable descendant: at a 375px viewport a job page
+ * rendered .main-content at 427px and every card was clipped on the right.
+ * It is not scoped to the mobile media query on purpose -- the same thing
+ * happens in the 769-1100px range, where the sidebar is still on screen.
+ */
 .main-content {
   flex: 1;
+  min-width: 0;
   margin-left: 260px;
   padding: 28px 32px;
   min-height: 100vh;
 }
 
 /* --- Page Header --- */
+/* Wraps so the title and the action group stack instead of forcing the whole
+ * column wide. On a job page the action group alone is ~222px, which does not
+ * fit beside the title in 343px of content box. */
 .page-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
   margin-bottom: 28px;
 }
 
@@ -442,11 +457,15 @@ html, body {
   transition: width var(--transition-slow);
 }
 
+/* Six or seven step labels, each with an unshrinkable dot, sum to more than a
+ * phone's width. row-gap only applies once they actually wrap. */
 .progress-steps {
   display: flex;
   justify-content: space-between;
+  flex-wrap: wrap;
   margin-top: 12px;
   gap: 4px;
+  row-gap: 10px;
 }
 
 .progress-step {
@@ -847,6 +866,12 @@ html, body {
   }
   .settings-grid {
     grid-template-columns: 1fr;
+  }
+  /* Once the steps wrap, space-between strands the last row's two items at
+   * opposite edges. Left-aligned reads as a continuation of the row above. */
+  .progress-steps {
+    justify-content: flex-start;
+    column-gap: 14px;
   }
 }
 
