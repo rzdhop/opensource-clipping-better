@@ -304,3 +304,37 @@ restore `git show 5bf93d5:youtube_uploader/safety.py` — **not** Safety.md's
 snippet, whose defaults (3/day, 2/run, 2h, queue 15) contradict the shipped
 `upload_safety.json` (2/day, 1/run, 24h, queue 7) and which pulls in an
 undeclared `pytz` and writes the config file back to disk.
+
+## DEC-019 — The SDK's own retry policy is disabled; the ladder in `engine.py` is the only one
+**Context.** Job `756c7ee8a2c3` reported three NVIDIA attempts and had made
+nine. `_make_nvidia_client` passed neither `max_retries` nor `timeout`, and the
+`openai` SDK (2.24.0) defaults to `max_retries=2` with `_should_retry` returning
+True for any status >= 500 — so every attempt in the visible ladder was silently
+1 + 2 HTTP requests. Three deterministic 504s at ~302s each cost 45 minutes
+instead of 15, and the log misreported what had happened.
+**Decision.** `max_retries=0` and an explicit
+`timeout=NVIDIA_REQUEST_TIMEOUT_SECONDS` (330s) on the client.
+**Consequence.** Two retry policies stacked multiplicatively, not additively,
+which is why the arithmetic was so far off. Any future client construction in
+this project must set `max_retries` explicitly — the SDK's default is not a safe
+one when the caller has its own ladder, and the failure is invisible because the
+SDK's retries produce no output. 330s is deliberately *above* the measured ~300s
+gateway limit so the server's 504 is received rather than raced to a local
+timeout: a 504 says the gateway gave up, a client timeout says nothing.
+`tests/test_nvidia_retry.py::test_client_disables_the_sdks_own_retries` pins it.
+
+## DEC-020 — The analysis has an overall time budget, checked predictively
+**Context.** Bounding each request is not the same as bounding the wait. With a
+330s per-request timeout the three-attempt ladder still runs to ~17 minutes, and
+against a provider failing deterministically every minute of that re-proves the
+same result.
+**Decision.** `NVIDIA_TOTAL_BUDGET_SECONDS = 900` caps the whole ladder. The
+check before each attempt asks whether the attempt *could* outlast the budget
+(`elapsed + REQUEST_TIMEOUT > BUDGET`), not whether the budget is already spent.
+**Consequence.** A retrospective check would be nearly useless here: a third
+attempt starting at 610s has not exceeded a 900s budget but ends at ~940s. The
+budget is deliberately >= two full-length requests, so a slow-but-healthy call is
+never cut off — cutting one off would be a regression dressed as a fix. For the
+observed failure the ladder now stops after 2 attempts and ~604s. The reason is
+printed, so it reaches the activity feed instead of the job simply ending
+sooner with no explanation.

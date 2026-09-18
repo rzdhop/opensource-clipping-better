@@ -35,10 +35,39 @@ Each row is ONE http request. Model `deepseek-ai/deepseek-v4-flash-0731`.
 | 60s transcript, 1024 tok, 1 clip | **144.1s** | OK — but `completion_tokens=2`, an empty clip array |
 | 1211s transcript, 16384 tok, 7 clips (what the job sent) | **302.1s** | **`InternalServerError: 504`** |
 
+| 1211s, 4096 tok, 7 clips | 124.0s | OK — but `completion_tokens=2`, empty array again |
+| 1211s, 16384 tok, **3 clips** | **291.8s** | **OK — 3911 tokens, 3 real clips** |
+| 1211s, 16384 tok, 7 clips, **no schema** | 302.1s | **504** |
+| 1211s, 4096 tok, **3 clips** | **278.8s** | **OK — 3371 tokens, 3 real clips** |
+
 So the gateway cuts a request off at **~300s**, and 3 × 302s ≈ the 15:09 / 15:08
-/ 15:07 seen per attempt. The endpoint is also simply slow right now: 144s to
-emit 2 tokens. The failure is generation time, not input size — the 1211s
-transcript is only ~27 KB.
+/ 15:07 seen per attempt. The failure is generation time, not input size — the
+1211s transcript is only ~27 KB.
+
+### What the probe ruled out, and what it implicates
+Two plausible causes are **eliminated**: `max_tokens` is not the driver (4096 vs
+16384 changes nothing about success), and neither is the strict `response_format`
+schema — dropping it entirely still 504s at 302.1s, so this is not
+constrained-decoding overhead.
+
+**Clip count is the driver.** The arithmetic closes:
+- Generation rate measured at **~12–13 tokens/s** (3911 tok / 291.8s; 3371 tok /
+  278.8s).
+- Cost per clip **~1200 tokens** (23 required fields each).
+- A 300s gateway window therefore allows **~3800 tokens ≈ 3 clips**.
+- 7 clips needs ~8400 tokens ≈ **~660s**, i.e. more than twice the limit. It can
+  never complete, which is why all three attempts failed identically.
+
+**The shipped default is `clips = 7`** (`web/api/models.py:108`,
+`Field(7, ge=1, le=30)`). So the default request is ~2.3x what this provider can
+deliver, and the documented maximum of 30 is ~10x unreachable — it would need
+roughly 3000s against a 300s limit. Even 3 clips lands at 291.8s against ~302s,
+about 3% of headroom.
+
+Unresolved and possibly separate: every 7-clip request that did *not* 504
+returned an **empty array** with `completion_tokens=2` — the same
+`ValueError: NVIDIA returned an empty clip array` the artifacts record from an
+earlier job. 3-clip requests never did this.
 
 ### Regression contract for this task
 | # | Must keep working | Proven by |
