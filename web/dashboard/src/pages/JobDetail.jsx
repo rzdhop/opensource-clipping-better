@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { fetchJob, deleteJob, createSSEConnection } from '../api'
+import { parseTime, formatDuration, formatClock, useSecondsTicker } from '../time'
 
 const STEPS = [
   { key: 'download', label: 'Source' },
@@ -27,41 +28,6 @@ function stepsFor(job) {
 }
 
 const TERMINAL = ['completed', 'failed', 'cancelled']
-
-// The backend sends UTC. `datetime.utcnow()` produces a string with no zone,
-// which JS would otherwise read as local time and report hours of "elapsed".
-function parseTime(value) {
-  if (!value) return null
-  const zoned = /([Zz]|[+-]\d{2}:?\d{2})$/.test(value)
-  const parsed = new Date(zoned ? value : `${value}Z`)
-  return Number.isNaN(parsed.getTime()) ? null : parsed
-}
-
-function formatDuration(ms) {
-  if (ms == null || ms < 0) return null
-  const total = Math.floor(ms / 1000)
-  const h = Math.floor(total / 3600)
-  const m = Math.floor((total % 3600) / 60)
-  const s = total % 60
-  if (h) return `${h}h ${String(m).padStart(2, '0')}m`
-  if (m) return `${m}m ${String(s).padStart(2, '0')}s`
-  return `${s}s`
-}
-
-function formatClock(value) {
-  const parsed = parseTime(value)
-  return parsed ? parsed.toLocaleTimeString([], { hour12: false }) : '--:--:--'
-}
-
-/** Re-render once a second so the elapsed clocks actually tick. */
-function useSecondsTicker(active) {
-  const [, setTick] = useState(0)
-  useEffect(() => {
-    if (!active) return
-    const id = setInterval(() => setTick(t => t + 1), 1000)
-    return () => clearInterval(id)
-  }, [active])
-}
 
 /**
  * The console. Follows the tail unless the user has scrolled up to read

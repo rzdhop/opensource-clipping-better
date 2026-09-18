@@ -8,6 +8,52 @@ All notable changes to the **OpenSource Clipping** project will be documented in
 - **Patch (x.y.Z)**: Incremented for backward-compatible bug fixes or minor patches.
 
 
+## [Unreleased]
+
+### The dashboard now says what the pipeline is doing
+
+A job sitting at 36% told the user nothing, and 36% is where the longest wait
+in the pipeline lives: one AI request that can walk a ten-attempt backoff ladder
+before it answers. The pipeline narrates itself in detail — the provider and
+model it is calling, each retry attempt, the Whisper device it settled on, every
+render sub-stage, the model downloads that look like a hang — but all of it went
+to the server's stdout, where the browser could not see it.
+
+#### Added
+
+- **Per-job activity feed.** `web/api/activity.py` tees stdout/stderr and
+  attributes every line to the job whose worker thread printed it. Exposed as
+  `events` on `GET /api/jobs/{id}` and streamed from
+  `GET /api/jobs/{id}/status`.
+- **Richer progress events.** `JobProgressEvent` now carries `provider`,
+  `model`, `attempt`/`max_attempts`, `clip_index`/`clip_total`, a free-form
+  `detail` (the last line the pipeline printed) and `step_started_at`.
+- **A heartbeat on the SSE stream**, so a job that is quiet for minutes is
+  distinguishable from a connection that died.
+- **A Live activity panel** on the job page: provider/model chip, retry counter,
+  time-on-step and total clocks, a per-clip sub-bar, and the pipeline's output
+  tailing live with timestamps and severity colours. The job list shows the
+  percentage, step and time-on-step for running jobs.
+
+#### Fixed
+
+- The progress step list was missing `diarization`, so every step dot went
+  inactive the moment that step ran. It is now present, and hidden for jobs
+  that never diarize rather than shown permanently complete.
+- `_persist()` re-serialized every job on every progress write. Event appends
+  are now throttled to at most one write per second; anything a client waits on
+  still writes through immediately.
+
+#### Notes
+
+- `clipping/` is untouched. The alternative — threading a progress callback
+  through `runner.py`, `engine.py` and `studio/core.py` — would have changed the
+  CLI pipeline's signatures and edited the render layer, for the same
+  user-visible result.
+- ffmpeg output is not captured: it is a subprocess writing to the real file
+  descriptors, so it remains in the server log.
+
+
 ## [v2.0.0] - 2026-09-17
 
 ### The pipeline no longer downloads anything
