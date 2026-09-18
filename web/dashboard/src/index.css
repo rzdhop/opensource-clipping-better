@@ -670,6 +670,169 @@ html, body {
   border-radius: 3px;
 }
 
+/* --- Live Activity --------------------------------------------------------
+   The panel that answers "what is it actually doing?" while a job runs. The
+   percentage alone cannot: one AI call holds at 36% for as long as the
+   provider's retry ladder runs, and one clip renders for minutes.
+   -------------------------------------------------------------------------- */
+
+.activity-card {
+  margin-bottom: 16px;
+}
+
+.activity-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.activity-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.activity-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.activity-pulse.running {
+  background: var(--success);
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.5);
+  animation: pulse-dot 1.5s infinite;
+}
+
+.activity-clocks {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.activity-dim {
+  color: var(--text-muted);
+  margin-left: 4px;
+}
+
+.activity-headline {
+  font-size: 13px;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.activity-detail {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--accent-hover);
+  margin: 6px 0 0;
+  word-break: break-word;
+}
+
+.activity-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.activity-chips:empty {
+  display: none;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  background: var(--bg-input);
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.chip-accent {
+  border-color: var(--border-accent);
+  background: var(--accent-dim);
+  color: var(--accent-hover);
+}
+
+.chip-warn {
+  border-color: rgba(245, 158, 11, 0.3);
+  background: var(--warning-dim);
+  color: var(--warning);
+}
+
+.chip-sub {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-secondary);
+  max-width: 34ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.activity-subbar {
+  margin-top: 12px;
+}
+
+.activity-quiet {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--info-dim);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.activity-console-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 16px 0 8px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.activity-console {
+  max-height: 260px;
+}
+
+.activity-line {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.activity-time {
+  color: var(--text-muted);
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.activity-message {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* The pipeline's own severity, so a retry or a dropped-transcript warning is
+   findable in a wall of output rather than buried in it. */
+.activity-step .activity-message { color: var(--text-primary); font-weight: 600; }
+.activity-warn .activity-message { color: var(--warning); }
+.activity-error .activity-message { color: var(--error); }
+
 /* --- Responsive --- */
 @media (max-width: 768px) {
   .sidebar {
