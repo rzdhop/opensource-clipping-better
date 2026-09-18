@@ -1,28 +1,35 @@
 # CHECKPOINT
 
 ## In progress
-- **Task:** English translation + docker upload fix + fork README. **COMPLETE.**
-- **Phase:** closed out.
-- **Checkpoint commit:** `d845413` was the baseline for the i18n work.
-  Commits: `d845413` docker, `f6863b8` CI fix, `5ebd108` web i18n,
-  `326ef72` core i18n, `326ef72`+ studio i18n, `f3bad3a` README.
-- **Tier-1:** `python -m pytest -q` = **185 passed** locally;
-  **180 passed, 5 skipped** in a clean pytest-only venv matching CI.
-  `compileall` clean on the exact CI target list.
-- **Open questions:** none blocking. Two items need the human's machine:
-  (1) the docker fix is unverified against a live daemon; (2) Tier-2 E2E
-  still not run.
+- **Task:** Make the app actually work end to end (upload, Whisper, live AI).
+- **Phase:** IMPLEMENT / verified. Docker container verification still pending.
+- **Unpushed commits:** `cafae92`, `2b28c80`, `7546db3`, `303eded`, `1d45ac7`
+  — github.com DNS is intermittently blocked from the authoring sandbox.
+- **Tier-1:** 239+ passed locally; clean pytest-only venv green (DEC-012).
 
-### Translation contract (do not undo)
-Prose was translated; **identifiers were not renamed**. These stay Indonesian
-because they are data, not text — changing them breaks behaviour silently:
-- `get_analysis_prompt()` + its two JSON schemas in `clipping/engine.py`,
-  `get_commentary_prompt()` in `voiceover.py`, and `TARGET_ACCOUNTS`.
-- The `_looks_indonesian` stopword list in `metadata.py` (live detector).
-- Code tokens: `"khusus"`, `"utama"`, `"chill"`, `"jedag_jedug"`,
-  `"kata_utama"`, `title_indonesia`, `title_inggris`, `hastag`.
-- All ffmpeg filter graphs, ASS markup, codec names, colour codes and font
-  filenames in `clipping/studio/`.
+### Verified against real services this session
+| What | Evidence |
+|---|---|
+| Whisper `cuda` + `float16` crashes | Real runs on ctranslate2 4.8.2, 0 CUDA devices, no torch |
+| `--whisper-device auto` | Resolves to cpu/int8; 5 segments, contract-valid |
+| **A-007** | **CLOSED.** Live call exposed `400 unknown field guided_json`; fixed via `response_format`, re-verified: 2 clips, zero missing keys |
+| Full CLI pipeline | Real 720x1280 clips rendered from a 72.9s source |
+| Live AI selection | Picked 7.6-30.5s and 54.5-70.8s with titles, hashtags, account classification |
+| Pexels B-roll | `download_pexels_broll` returned a 7.1MB clip |
+| Web API job | upload -> job -> transcribe -> render -> `completed` |
+| 21 job fields | `video_cq: 30`, `split_trigger: face` land over HTTP |
+| Reuse bypass | Same request that failed now auto-enables and completes |
+| Upload 250MB direct | HTTP 200 in 3.6s |
+| Upload 300MB via Vite proxy | Browser: `205 MB / 300 MB`, 68%, 48 MB/s, ETA |
+| Dashboard in English | Rendered in a browser |
+
+### Still unverified
+- **Docker containers** — image build was still exporting layers at close of
+  this stretch. The uid fix (`d845413`) has never run against a live daemon.
+- **The CUDA branch** of the device resolver: this host is CPU-only.
+- **Vite timeout fix** (`9a9adc5`): a 300MB upload succeeded through the proxy,
+  but on fast loopback it never approached the 300s window that actually broke.
+- RC-8 diarization / split-screen.
 
 ### Findings that changed the brief
 - `reuse_job_id` is **LIVE**, not dead: `web/api/routes/jobs.py:67` validates it
