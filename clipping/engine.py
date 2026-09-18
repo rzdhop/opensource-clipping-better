@@ -266,6 +266,67 @@ NVIDIA_REQUEST_TIMEOUT_SECONDS = 330
 # so the observed failure mode costs ~10 minutes instead of 45.
 NVIDIA_TOTAL_BUDGET_SECONDS = 900
 
+# Never degrade below this many clips -- one clip is still a usable result.
+NVIDIA_MIN_CLIPS = 1
+
+
+def _nvidia_request_too_large(exc: Exception) -> bool:
+    """Whether *exc* says the request asked for more than the provider can do.
+
+    Measured against the live endpoint: generation runs at ~12-13 tokens/s and a
+    clip costs ~1200 tokens (23 required fields), so the gateway's ~300s window
+    fits about three clips. A 7-clip request needs ~660s and cannot finish. It
+    fails in exactly two ways, and a probe reproduced both: the gateway gives up
+    (504), or the model returns an empty array instead of a partial one.
+
+    Neither is a sampling failure, so another identical sample is worthless --
+    which is precisely what the ladder used to do, three times, for 45 minutes.
+    """
+    if getattr(exc, "status_code", None) == 504:
+        return True
+    if type(exc).__name__ == "APITimeoutError":
+        # Our own timeout sits just above the gateway's, so this means the same
+        # thing: the request was too slow to finish.
+        return True
+    return isinstance(exc, ValueError) and "empty clip array" in str(exc)
+
+
+# What one request can actually produce, measured against the live endpoint:
+# generation runs at ~12-13 tokens/s, a clip costs ~1200 tokens (23 required
+# fields), and the gateway gives up at ~300s -- so ~3800 tokens, about 3 clips.
+# A 3-clip request came back in 291.8s, which is real but only ~3% of headroom.
+NVIDIA_CLIPS_WITHIN_BUDGET = 3
+
+
+def _suggested_clip_count(current: int) -> int:
+    """The largest clip count worth suggesting after *current* failed.
+
+    Capped at measured capacity rather than simply halved: halving a 30-clip
+    request suggests 15, which is still five times what the provider can do, and
+    an unusable suggestion is worse than none. Always strictly fewer than what
+    just failed, because suggesting the same number again is not a suggestion.
+    """
+    return max(NVIDIA_MIN_CLIPS, min(current - 1, NVIDIA_CLIPS_WITHIN_BUDGET))
+
+
+def _too_large_proposal(clips_wanted: int) -> str:
+    """The suggestion to show when the request could not have completed.
+
+    Deliberately a *proposal*, not an action. Silently returning three clips to
+    someone who asked for seven trades one surprise for another; naming the
+    number and letting them decide does not. Returns "" when there is nothing
+    smaller left to suggest.
+    """
+    if clips_wanted <= NVIDIA_MIN_CLIPS:
+        return ""
+    suggested = _suggested_clip_count(clips_wanted)
+    return (
+        f"   \U0001f4a1 {clips_wanted} clips is more than this model can generate "
+        f"before the gateway gives up (~300s, measured at ~12-13 tokens/s and "
+        f"~1200 tokens per clip). Try {suggested}: re-run with "
+        f"--clips {suggested}, or set Clips to {suggested} and use Clone & Rerun."
+    )
+
 # Classified by exception class NAME so that `openai` is never imported at module
 # scope. An SDK rename would make an unknown error non-retryable, i.e. it fails
 # closed, which is the safe direction.
@@ -843,7 +904,7 @@ def analyze_with_nvidia(transkrip_lengkap: str, cfg) -> list[dict]:
     client = _make_nvidia_client(cfg)
     
     prompt = get_analysis_prompt(transkrip_lengkap, cfg.jumlah_clip, cfg.durasi_hook, cfg=cfg)
-    
+
     # Define the strict schema for Guided JSON (NVIDIA NIM specific)
     clips_schema = {
         "type": "array",
@@ -997,6 +1058,7 @@ def analyze_with_nvidia(transkrip_lengkap: str, cfg) -> list[dict]:
     # schema in play, a malformed response is a *sampling* failure, and the
     # only meaningful remedy is another sample.
     failures: list[str] = []
+    saw_too_large = False
     started_at = time.monotonic()
 
     def _budget_exhausted() -> bool:
@@ -1060,6 +1122,13 @@ def analyze_with_nvidia(transkrip_lengkap: str, cfg) -> list[dict]:
             failures.append(f"attempt {attempt}: {type(exc).__name__}: {exc}")
             print(f"   ⚠️ NVIDIA attempt {attempt} failed | {type(exc).__name__}: {exc}")
 
+            # Remember the signature rather than acting on it. The ladder still
+            # gets its retry, because a single 504 can be a transient gateway
+            # blip rather than a capacity limit -- but if the run ends up
+            # failing, the error proposes the smaller request.
+            if _nvidia_request_too_large(exc):
+                saw_too_large = True
+
             # A model that does not accept response_format says so with a 400
             # naming it. That is not a sampling failure, so retrying identically
             # is pointless -- drop the parameter and let the prompt carry the
@@ -1076,8 +1145,12 @@ def analyze_with_nvidia(transkrip_lengkap: str, cfg) -> list[dict]:
 
             if not _nvidia_is_retryable(exc) or attempt == NVIDIA_MAX_ATTEMPTS:
                 detail = "\n  ".join(failures)
+                proposal = _too_large_proposal(cfg.jumlah_clip) if saw_too_large else ""
+                if proposal:
+                    print(proposal, flush=True)
                 raise RuntimeError(
                     f"NVIDIA analysis failed after {attempt} attempt(s):\n  {detail}"
+                    + (f"\n{proposal.strip()}" if proposal else "")
                 ) from exc
 
             # Stop before an attempt that cannot finish inside the budget. The
@@ -1091,9 +1164,13 @@ def analyze_with_nvidia(transkrip_lengkap: str, cfg) -> list[dict]:
                     f"exceed the {NVIDIA_TOTAL_BUDGET_SECONDS}s budget.",
                     flush=True,
                 )
+                proposal = _too_large_proposal(cfg.jumlah_clip) if saw_too_large else ""
+                if proposal:
+                    print(proposal, flush=True)
                 raise RuntimeError(
                     f"NVIDIA analysis gave up after {attempt} attempt(s) and "
                     f"{spent}s (budget {NVIDIA_TOTAL_BUDGET_SECONDS}s):\n  {detail}"
+                    + (f"\n{proposal.strip()}" if proposal else "")
                 ) from exc
 
             time.sleep(NVIDIA_BACKOFF_SECONDS[attempt - 1])

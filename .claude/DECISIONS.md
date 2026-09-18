@@ -338,3 +338,44 @@ never cut off — cutting one off would be a regression dressed as a fix. For th
 observed failure the ladder now stops after 2 attempts and ~604s. The reason is
 printed, so it reaches the activity feed instead of the job simply ending
 sooner with no explanation.
+
+## DEC-021 — An oversized request proposes a smaller one; it does not silently shrink it
+**Context.** The 504s were not transient. Probing the live endpoint measured
+generation at **~12–13 tokens/s** and **~1200 tokens per clip** (23 required
+fields), so the gateway's **~300s** window fits about **three** clips. The
+shipped default asks for **seven**, which needs ~660s and can never complete.
+All three attempts were re-sending an arithmetically impossible request. The
+probe also eliminated the two obvious alternative causes: `max_tokens` (4096 and
+16384 behave identically) and the strict `response_format` schema (removing it
+still 504s at 302.1s).
+**Decision.** When a run fails and any attempt failed with a "too much work"
+signature — a **504**, an **`APITimeoutError`**, or a schema-conformant **empty
+clip array** — the error carries a **proposal** naming a concrete smaller clip
+count and how to apply it (`--clips N`, or Clips + Clone & Rerun). The request
+is **never** silently shrunk, and an ordinary malformed sample proposes nothing.
+**Consequence.** An earlier version of this change degraded automatically —
+7 → 3 on the next attempt — and was rejected in review: silently returning three
+clips to someone who asked for seven trades one surprise for another, and the
+user cannot tell whether they got what they asked for. Proposing keeps the
+decision with the person who set the number.
+
+Three details are load-bearing:
+- **The proposal fires at the end of the ladder, not on the first 504.** A single
+  504 can be a gateway blip rather than a capacity limit, so the retry is still
+  spent; only a run that actually fails proposes. Tested, both ways.
+- **The suggestion is capped at measured capacity, not halved.** Half of a
+  30-clip request is 15 — still five times what the provider can do, and an
+  unusable suggestion is worse than none. `_suggested_clip_count` is
+  `min(current - 1, NVIDIA_CLIPS_WITHIN_BUDGET)`, so it is always strictly
+  fewer than what failed and never above what was measured to work.
+- **It is printed as well as raised.** `web/api` tees stdout into the activity
+  feed, so a proposal that only lived in the exception would reach a different
+  surface from the one the user is watching.
+
+**This still treats the symptom.** The underlying mismatch is that `clips`
+defaults to **7** and the API permits up to **30** (`web/api/models.py:108`,
+`Field(7, ge=1, le=30)`), while this provider delivers ~3; 30 would need ~3000s
+against a 300s ceiling. Lowering the default and the bound was offered and
+deliberately **not** taken — it silently gives every user fewer clips, which is
+a product decision. If the provider stays this slow, the default is the thing to
+revisit.

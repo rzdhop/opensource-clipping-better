@@ -499,3 +499,120 @@ def test_budget_allows_two_full_length_attempts():
     """If the budget could not fit two full requests, a single slow-but-healthy
     call would be cut off, which would be a regression, not a fix."""
     assert engine.NVIDIA_TOTAL_BUDGET_SECONDS >= 2 * engine.NVIDIA_REQUEST_TIMEOUT_SECONDS
+
+# ------------------------------------ proposing a smaller request after failure
+
+def test_a_504_failure_proposes_a_smaller_request(monkeypatch, cfg):
+    """The real failure: 7 clips needs ~660s against a ~300s gateway window.
+
+    Probed live -- ~12-13 tok/s and ~1200 tokens per clip -- so a 7-clip request
+    can never finish. The run still fails, but it says what would work.
+    """
+    cfg.jumlah_clip = 7
+    monkeypatch.setattr(engine.time, "sleep", lambda s: None)
+    client = FakeClient([_exc("InternalServerError", 504)] * engine.NVIDIA_MAX_ATTEMPTS)
+    monkeypatch.setattr(engine, "_make_nvidia_client", lambda c: client)
+
+    with pytest.raises(RuntimeError) as err:
+        engine.analyze_with_nvidia("transcript", cfg)
+
+    msg = str(err.value)
+    assert "Try 3" in msg, msg
+    assert "--clips 3" in msg
+    assert "Clone & Rerun" in msg
+
+
+def test_an_empty_clip_array_also_proposes(monkeypatch, cfg):
+    """The other way an oversized request fails: a schema-conformant empty array.
+
+    Observed in the probe on every 7-clip request that did not 504.
+    """
+    cfg.jumlah_clip = 7
+    monkeypatch.setattr(engine.time, "sleep", lambda s: None)
+    client = FakeClient(["[]"] * engine.NVIDIA_MAX_ATTEMPTS)
+    monkeypatch.setattr(engine, "_make_nvidia_client", lambda c: client)
+
+    with pytest.raises(RuntimeError) as err:
+        engine.analyze_with_nvidia("transcript", cfg)
+
+    assert "Try 3" in str(err.value)
+
+
+def test_a_transient_504_still_gets_its_retry(monkeypatch, cfg):
+    """A single 504 may be a gateway blip, not a capacity limit.
+
+    Proposing must not cost the ladder its retry, so a 504 followed by a good
+    sample succeeds normally -- and says nothing about clip counts.
+    """
+    cfg.jumlah_clip = 7
+    monkeypatch.setattr(engine.time, "sleep", lambda s: None)
+    client = FakeClient([_exc("InternalServerError", 504), GOOD_JSON])
+    monkeypatch.setattr(engine, "_make_nvidia_client", lambda c: client)
+
+    result = engine.analyze_with_nvidia("transcript", cfg)
+
+    assert len(result) == 1
+    assert len(client.calls) == 2
+    # the request is never silently shrunk -- both attempts ask for 7
+    for call in client.calls:
+        assert "Carikan 7 momen" in call["messages"][1]["content"]
+
+
+def test_an_ordinary_failure_proposes_nothing(monkeypatch, cfg):
+    """A malformed sample says nothing about size. Suggesting fewer clips there
+    would send the user chasing the wrong thing."""
+    cfg.jumlah_clip = 7
+    monkeypatch.setattr(engine.time, "sleep", lambda s: None)
+    client = FakeClient(["not json at all"] * engine.NVIDIA_MAX_ATTEMPTS)
+    monkeypatch.setattr(engine, "_make_nvidia_client", lambda c: client)
+
+    with pytest.raises(RuntimeError) as err:
+        engine.analyze_with_nvidia("transcript", cfg)
+
+    msg = str(err.value)
+    assert "Try" not in msg and "--clips" not in msg, msg
+
+
+def test_the_proposal_reaches_stdout_for_the_activity_feed(monkeypatch, cfg, capsys):
+    """web/api tees stdout into the job feed, so the proposal must be printed,
+    not only raised -- the exception text alone reaches a different surface."""
+    cfg.jumlah_clip = 7
+    monkeypatch.setattr(engine.time, "sleep", lambda s: None)
+    client = FakeClient([_exc("InternalServerError", 504)] * engine.NVIDIA_MAX_ATTEMPTS)
+    monkeypatch.setattr(engine, "_make_nvidia_client", lambda c: client)
+
+    with pytest.raises(RuntimeError):
+        engine.analyze_with_nvidia("transcript", cfg)
+
+    assert "Try 3" in capsys.readouterr().out
+
+
+def test_suggestion_is_capped_at_measured_capacity():
+    """Halving is not good enough: half of 30 is 15, still five times what the
+    provider can do, and an unusable suggestion is worse than none."""
+    assert engine._suggested_clip_count(30) == engine.NVIDIA_CLIPS_WITHIN_BUDGET
+    assert engine._suggested_clip_count(7) == engine.NVIDIA_CLIPS_WITHIN_BUDGET
+    # always strictly fewer than what just failed
+    assert engine._suggested_clip_count(3) == 2
+    assert engine._suggested_clip_count(2) == 1
+    assert engine._suggested_clip_count(1) == engine.NVIDIA_MIN_CLIPS
+
+
+def test_no_proposal_when_there_is_nothing_smaller_to_suggest():
+    assert _too_large_proposal_text(1) == ""
+
+
+def _too_large_proposal_text(n):
+    return engine._too_large_proposal(n)
+
+
+@pytest.mark.parametrize("exc, expected", [
+    (_exc("InternalServerError", 504), True),
+    (_exc("APITimeoutError"), True),
+    (ValueError("NVIDIA returned an empty clip array."), True),
+    (_exc("InternalServerError", 503), False),
+    (_exc("RateLimitError", 429), False),
+    (ValueError("Clip #0 is missing required field(s): ['rank']"), False),
+])
+def test_too_large_classification(exc, expected):
+    assert engine._nvidia_request_too_large(exc) is expected
