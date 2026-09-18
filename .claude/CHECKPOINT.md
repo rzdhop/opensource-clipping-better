@@ -5,7 +5,8 @@
   retry behaviour, cap the time budget, and warn before a slow CPU Whisper run.
 - **Phase:** IMPLEMENT — 4 stages done: `8877645` SDK retries, `92e5ff8` time
   budget, `f8146e7` Whisper warning, `46d341c` propose-a-smaller-request.
-  **Stage 5 in progress:** persist each job's transcript and let a re-run use it.
+  **Stage 5 done:** `c68eb3d` persist the transcript and let a re-run use it.
+- **Tier-1 final:** pytest **369 passed, 0 failed**; `compileall` clean.
 - **Destination:** fast-forward `main` and push once stage 5 lands (human asked
   to hold until then).
 - **Tier-1 now:** pytest **352 passed, 0 failed**; `compileall` clean.

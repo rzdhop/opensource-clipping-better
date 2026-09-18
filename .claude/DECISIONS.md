@@ -379,3 +379,44 @@ against a 300s ceiling. Lowering the default and the bound was offered and
 deliberately **not** taken — it silently gives every user fewer clips, which is
 a product decision. If the provider stays this slow, the default is the thing to
 revisit.
+
+## DEC-022 — A Whisper transcript is persisted, and a re-run detects it without a new flag
+**Context.** The transcript existed only in memory. Any failure at or after AI
+analysis destroyed it, and so did success — a completed job's directory holds
+`gemini_response.json`, the video, clips, thumbnails and the manifest, and no
+transcript. On the measured CPU job that was 94 minutes thrown away, and it made
+the "re-run with fewer clips" proposal of DEC-021 cost ~94 minutes to act on.
+**Decision.** `resolve_transcript` writes `transcript.vtt` into `cfg.outputs_dir`
+when Whisper actually ran, and `build_config_from_payload` falls back to that
+file when no transcript was uploaded. **No new request field and no flag.**
+**Consequence.** `resolve_transcript` already treats a non-null
+`transcript_path` as "skip Whisper", so detection alone is enough — and adding a
+flag would have landed back in DEC-015 territory, where `model_dump()` always
+contains declared fields and "default this on for a reuse" logic must test
+`model_fields_set`. That is the bug that broke Clone & Rerun once already, so
+the design deliberately avoids being able to repeat it. Because `outputs_dir` is
+a pure function of `job_id` and `reuse_job_id` reuses the id, Clone & Rerun
+lands in the same directory with no dashboard change.
+
+Four constraints the round-trip imposed, each a silent-corruption risk if missed:
+- **`dedupe` must be off for a file we wrote.** `parse_vtt_subs` drops a cue
+  whose text repeats the previous cue's — correct for scraped captions with
+  rolling repetition, wrong for speech: `you know / you know` came back as one
+  `you know`. Plumbed as `cfg.transcript_dedupe`, defaulting True.
+- **`transcript_offset` must not be reapplied.** It is a manual sync correction
+  for a *supplied* file. A saved one was generated from this very video, so an
+  old offset would desync every subtitle.
+- **The write is atomic** (temp + `os.replace`). The reader raises on a
+  malformed transcript and no endpoint can delete a file from an output
+  directory, so a half-written file would hard-fail every later re-run with no
+  recovery from the UI.
+- **Saving is best-effort.** A disk error must not fail a run whose expensive
+  work has already succeeded.
+
+Two accepted, tested losses: non-final word *ends* snap to the next word's start
+(harmless — `studio/subtitles.buat_file_ass` recomputes them identically, so the
+renderer never sees the originals), and segments are **re-chunked** by
+`max_words_per_subtitle` rather than preserved, because the reader flattens words
+while Whisper also breaks at its own segment ends. No word, order or start time
+is lost. Note the CLI's `outputs_dir` is shared rather than per-job, so
+consecutive CLI runs overwrite the file; only the web path is per-job.
