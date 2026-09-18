@@ -202,6 +202,18 @@ def _append_event_locked(job: dict, message: str, level: str, source: str) -> No
         del events[: len(events) - MAX_EVENTS]
 
 
+def _as_progress(value) -> Optional[JobProgressEvent]:
+    """Coerce a stored progress value to a model. Records loaded from disk are dicts."""
+    if value is None or isinstance(value, JobProgressEvent):
+        return value
+    if isinstance(value, dict):
+        try:
+            return JobProgressEvent(**value)
+        except Exception:
+            return None
+    return None
+
+
 def update_progress(
     job_id: str,
     step: str,
@@ -209,20 +221,40 @@ def update_progress(
     total_steps: int,
     message: str,
     percent: float = 0.0,
+    *,
+    provider: str | None = None,
+    model: str | None = None,
+    detail: str | None = None,
+    clip_index: int | None = None,
+    clip_total: int | None = None,
 ) -> None:
-    """Update progress on a running job."""
-    event = JobProgressEvent(
-        step=step,
-        step_number=step_number,
-        total_steps=total_steps,
-        message=message,
-        percent=percent,
-    )
+    """Advance a job to a new step."""
     with _lock:
         job = _jobs.get(job_id)
         if job is None:
             return
-        job["progress"] = event
+
+        # Time-in-step, not time-since-start: a step that has not changed keeps
+        # the clock it started with, so the UI can say "12m on this step".
+        previous = _as_progress(job.get("progress"))
+        if previous is not None and previous.step == step and previous.step_started_at:
+            step_started_at = previous.step_started_at
+        else:
+            step_started_at = _now()
+
+        job["progress"] = JobProgressEvent(
+            step=step,
+            step_number=step_number,
+            total_steps=total_steps,
+            message=message,
+            percent=percent,
+            provider=provider,
+            model=model,
+            detail=detail,
+            clip_index=clip_index,
+            clip_total=clip_total,
+            step_started_at=step_started_at,
+        )
         job["updated_at"] = _now()
         # Append to log
         job["log"].append(f"[{step}] {message}")
@@ -232,6 +264,39 @@ def update_progress(
             job, message, "error" if step == "error" else "step", "worker"
         )
         _persist()
+
+
+def refine_progress(
+    job_id: str,
+    *,
+    detail: str | None = None,
+    attempt: int | None = None,
+    max_attempts: int | None = None,
+) -> None:
+    """Update what the CURRENT step is doing, without advancing it.
+
+    Called for every line the pipeline prints, so it deliberately does not touch
+    ``updated_at`` or force a write: the SSE stream picks the change up on its
+    next tick, and persistence catches it with the next throttled write.
+    """
+    with _lock:
+        job = _jobs.get(job_id)
+        if job is None:
+            return
+        current = _as_progress(job.get("progress"))
+        if current is None:
+            return
+        updates = {}
+        if detail is not None:
+            updates["detail"] = detail
+        if attempt is not None:
+            updates["attempt"] = attempt
+        if max_attempts is not None:
+            updates["max_attempts"] = max_attempts
+        if not updates:
+            return
+        job["progress"] = current.model_copy(update=updates)
+        _persist(force=False)
 
 
 def append_event(

@@ -13,6 +13,7 @@ import threading
 import pytest
 
 from web.api import activity
+from web.api import signals
 
 
 def _tee(source="stdout"):
@@ -195,6 +196,35 @@ def test_levels_are_classified_from_the_pipeline_markers(line, expected):
 
 
 # ---------------------------------------------------------------------------
+# Retry ladder extraction
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "line,expected",
+    [
+        ("   🔁 NVIDIA attempt 2/3...", (2, 3)),
+        ("[Gemini] Attempt 3/10...", (3, 10)),
+        ("[Gemini] Attempt 10/10 failed | status=503 | error=overloaded", (10, 10)),
+        ("attempt 1 / 3", (1, 3)),
+        # Not a retry ladder.
+        ("🔥 [Rank 1] Processing clip", None),
+        ("Rendering clip 3/7...", None),
+        ("attempt 5/3", None),          # position past the end
+        ("attempt 0/3", None),          # ladders are 1-based
+        ("attempt 1/9999", None),       # implausible: a false positive
+    ],
+)
+def test_the_retry_ladder_is_read_out_of_the_printed_line(line, expected):
+    assert signals.attempt_from(line) == expected
+
+
+def test_a_reworded_retry_print_degrades_rather_than_breaks():
+    """The counter disappears; the line itself is still shown verbatim."""
+    assert signals.attempt_from("NVIDIA is having another go") is None
+    assert activity.classify("NVIDIA is having another go") == "info"
+
+
+# ---------------------------------------------------------------------------
 # The store side of the feed (needs pydantic -- see DEC-012)
 # ---------------------------------------------------------------------------
 
@@ -221,9 +251,11 @@ def store():
     try:
         yield _Sandbox()
     finally:
-        store_mod._persist = original_persist
+        # Delete BEFORE restoring: delete_job persists, and these tests must
+        # never write the real outputs/jobs.json.
         for job_id in created:
             store_mod.delete_job(job_id)
+        store_mod._persist = original_persist
 
 
 def test_pipeline_output_lands_on_the_job(store):

@@ -17,14 +17,37 @@ from typing import Optional
 from .config_adapter import build_config_from_payload
 from .models import ClipDetail, JobStatus
 from . import activity
+from . import signals
 from . import store
+
+# How much of a printed line is worth showing as the step's one-line detail.
+# The feed keeps the whole thing; this is just the headline.
+MAX_DETAIL_CHARS = 240
+
+
+def _record_pipeline_line(job_id: str, message: str, level: str, source: str) -> None:
+    """Sink for the activity tee: file the line, and let it refine the step.
+
+    The most recent line the pipeline printed IS the best answer to "what is it
+    doing right now", so it becomes the current step's detail whatever it says.
+    A retry counter additionally lands in a structured field.
+    """
+    store.append_event(job_id, message, level, source)
+    attempt = signals.attempt_from(message)
+    store.refine_progress(
+        job_id,
+        detail=message[:MAX_DETAIL_CHARS],
+        attempt=attempt[0] if attempt else None,
+        max_attempts=attempt[1] if attempt else None,
+    )
+
 
 # Tee stdout/stderr so everything the pipeline prints is recorded against the
 # job that printed it. Installed at import, which is after uvicorn has already
 # configured its own logging handlers against the real streams -- so server logs
 # keep going where they always went, and only worker threads inside
 # `activity.capture(...)` contribute to a job's feed.
-activity.install(store.append_event)
+activity.install(_record_pipeline_line)
 
 # Semaphore to control max concurrent jobs
 MAX_CONCURRENT_JOBS = int(os.environ.get("MAX_CONCURRENT_JOBS", "1"))
@@ -52,6 +75,34 @@ def _run_pipeline_sync(job_id: str, payload: dict) -> None:
         _execute_pipeline(job_id, payload)
 
 
+TOTAL_STEPS = 7
+
+
+def _transcript_plan(cfg) -> tuple[str, str]:
+    """What step 2 is about to do, and why it may take a very long time.
+
+    Whisper is the second place a job appears to hang, and the reason is never
+    visible: a CPU transcription of a long video runs for hours, and the first
+    run also downloads the model weights. Say so up front. The pipeline prints
+    the device it actually settles on, and that line arrives as the step detail.
+    """
+    transcript = getattr(cfg, "transcript_path", None)
+    if transcript:
+        return (
+            "Loading the transcript you supplied...",
+            f"Reading {os.path.basename(transcript)} — Whisper is skipped entirely.",
+        )
+    model = getattr(cfg, "whisper_model", None) or "?"
+    device = getattr(cfg, "whisper_device", None) or "auto"
+    compute = getattr(cfg, "whisper_compute_type", None) or "auto"
+    return (
+        f"Transcribing with Whisper {model}...",
+        f"Requested device {device}, compute {compute}. On CPU this is the slow "
+        "path and the first run also downloads the model. Supplying a .vtt "
+        "skips this step entirely.",
+    )
+
+
 def _execute_pipeline(job_id: str, payload: dict) -> None:
     """
     Run the clipping pipeline synchronously (called from thread pool).
@@ -59,10 +110,35 @@ def _execute_pipeline(job_id: str, payload: dict) -> None:
     This function updates the job store at each pipeline step so the
     frontend can poll or receive SSE progress updates.
     """
+    # Filled in once cfg exists, and attached to every progress event, so the
+    # dashboard can always say WHO is being asked rather than only that "AI" is.
+    # Declared before the try so the failure path can still emit.
+    ai = {"provider": None, "model": None}
+
+    def progress(step: str, step_number: int, message: str, percent: float, **extra):
+        store.update_progress(
+            job_id,
+            step=step,
+            step_number=step_number,
+            total_steps=TOTAL_STEPS,
+            message=message,
+            percent=percent,
+            provider=ai["provider"],
+            model=ai["model"],
+            **extra,
+        )
+
     try:
         # Build config from API payload
         cfg = build_config_from_payload(
             payload, job_id, env_overrides=_settings_env
+        )
+
+        ai["provider"] = str(getattr(cfg, "ai_provider", "") or "") or None
+        ai["model"] = (
+            getattr(cfg, "nvidia_model", None)
+            if ai["provider"] == "nvidia"
+            else getattr(cfg, "gemini_model", None)
         )
 
         # Validate API key
@@ -88,14 +164,7 @@ def _execute_pipeline(job_id: str, payload: dict) -> None:
 
         # --- Step 1: Download ---
         store.set_status(job_id, JobStatus.DOWNLOADING)
-        store.update_progress(
-            job_id,
-            step="download",
-            step_number=1,
-            total_steps=7,
-            message="Preparing source video...",
-            percent=5.0,
-        )
+        progress("download", 1, "Preparing source video...", 5.0)
 
         from clipping import engine
         from clipping.runner import resolve_transcript
@@ -128,51 +197,27 @@ def _execute_pipeline(job_id: str, payload: dict) -> None:
             )
             return
 
-        store.update_progress(
-            job_id,
-            step="download",
-            step_number=1,
-            total_steps=7,
-            message=message,
-            percent=14.0,
-        )
+        progress("download", 1, message, 14.0)
 
         # --- Step 2: Transcript ---
         store.set_status(job_id, JobStatus.TRANSCRIBING)
-        store.update_progress(
-            job_id,
-            step="transcribe",
-            step_number=2,
-            total_steps=7,
-            message=(
-                "Loading local transcript..."
-                if getattr(cfg, "transcript_path", None)
-                else "Starting transcription..."
-            ),
-            percent=15.0,
-        )
+        headline, detail = _transcript_plan(cfg)
+        progress("transcribe", 2, headline, 15.0, detail=detail)
 
         # Shared with the CLI runner so the two cannot drift.
         transkrip_lengkap, data_segmen = resolve_transcript(cfg)
 
-        store.update_progress(
-            job_id,
-            step="transcribe",
-            step_number=2,
-            total_steps=7,
-            message="Transcription complete.",
-            percent=35.0,
-        )
+        progress("transcribe", 2, "Transcription complete.", 35.0)
 
         # --- Step 3: AI Analysis ---
         store.set_status(job_id, JobStatus.ANALYZING)
-        store.update_progress(
-            job_id,
-            step="analyze",
-            step_number=3,
-            total_steps=7,
-            message="Analyzing with AI...",
-            percent=36.0,
+        progress(
+            "analyze",
+            3,
+            # The single longest opaque wait in the pipeline: one blocking call
+            # that can retry for tens of minutes without the percentage moving.
+            f"Asking {ai['provider'] or 'the AI provider'} for the best moments...",
+            36.0,
         )
 
         import json
@@ -187,14 +232,7 @@ def _execute_pipeline(job_id: str, payload: dict) -> None:
             with open(gemini_output_path, "w", encoding="utf-8") as f:
                 json.dump(hasil_json, f, indent=4, ensure_ascii=False)
 
-        store.update_progress(
-            job_id,
-            step="analyze",
-            step_number=3,
-            total_steps=7,
-            message=f"AI found {len(hasil_json)} viral clips.",
-            percent=50.0,
-        )
+        progress("analyze", 3, f"AI found {len(hasil_json)} viral clips.", 50.0)
 
         # --- Step 4: Metadata ---
         from clipping import metadata
@@ -203,14 +241,7 @@ def _execute_pipeline(job_id: str, payload: dict) -> None:
         metadata_path = os.path.join(cfg.outputs_dir, "metadata_preview.json")
         metadata.save_metadata_preview(hasil_json, path=metadata_path)
 
-        store.update_progress(
-            job_id,
-            step="metadata",
-            step_number=4,
-            total_steps=7,
-            message="Metadata normalized.",
-            percent=55.0,
-        )
+        progress("metadata", 4, "Metadata normalized.", 55.0)
 
         # --- Step 5: Diarization (optional) ---
         diarization_data = None
@@ -221,14 +252,7 @@ def _execute_pipeline(job_id: str, payload: dict) -> None:
             or getattr(cfg, "use_camera_switch", False)
         ) and studio._is_vertical_ratio(cfg.pilihan_rasio):
             try:
-                store.update_progress(
-                    job_id,
-                    step="diarization",
-                    step_number=5,
-                    total_steps=7,
-                    message="Running speaker diarization...",
-                    percent=56.0,
-                )
+                progress("diarization", 5, "Running speaker diarization...", 56.0)
                 audio_path = diarization_mod.derive_audio_path(
                     cfg.file_video_asli, getattr(cfg, "outputs_dir", None)
                 )
@@ -253,26 +277,17 @@ def _execute_pipeline(job_id: str, payload: dict) -> None:
                 if os.path.exists(audio_path):
                     os.remove(audio_path)
             except Exception as e:
-                store.update_progress(
-                    job_id,
-                    step="diarization",
-                    step_number=5,
-                    total_steps=7,
-                    message=f"Diarization failed: {e}. Falling back to normal mode.",
-                    percent=58.0,
+                progress(
+                    "diarization",
+                    5,
+                    f"Diarization failed: {e}. Falling back to normal mode.",
+                    58.0,
                 )
                 diarization_data = None
 
         # --- Step 6: Render Preparation ---
         store.set_status(job_id, JobStatus.RENDERING)
-        store.update_progress(
-            job_id,
-            step="render",
-            step_number=6,
-            total_steps=7,
-            message="Preparing rendering...",
-            percent=60.0,
-        )
+        progress("render", 6, "Preparing rendering...", 60.0)
 
         os.environ["OSC_VIDEO_SCALE_ALGO"] = str(getattr(cfg, "video_scale_algo", "lanczos"))
 
@@ -306,13 +321,13 @@ def _execute_pipeline(job_id: str, payload: dict) -> None:
 
         for idx, klip in enumerate(sorted(hasil_json, key=lambda x: x["rank"])):
             clip_num = idx + 1
-            store.update_progress(
-                job_id,
-                step="render",
-                step_number=6,
-                total_steps=7,
-                message=f"Rendering clip {clip_num}/{total_clips}...",
-                percent=60.0 + (35.0 * clip_num / total_clips),
+            progress(
+                "render",
+                6,
+                f"Rendering clip {clip_num}/{total_clips}...",
+                60.0 + (35.0 * clip_num / total_clips),
+                clip_index=clip_num,
+                clip_total=total_clips,
             )
 
             if custom_hook_path:
@@ -356,27 +371,13 @@ def _execute_pipeline(job_id: str, payload: dict) -> None:
             )
 
         store.set_clips(job_id, clips)
-        store.update_progress(
-            job_id,
-            step="done",
-            step_number=7,
-            total_steps=7,
-            message=f"Done! {len(clips)} clips rendered successfully.",
-            percent=100.0,
-        )
+        progress("done", 7, f"Done! {len(clips)} clips rendered successfully.", 100.0)
 
     except Exception as exc:
         tb = traceback.format_exc()
         error_msg = f"{type(exc).__name__}: {exc}"
         store.set_error(job_id, error_msg)
-        store.update_progress(
-            job_id,
-            step="error",
-            step_number=0,
-            total_steps=7,
-            message=f"Pipeline failed: {error_msg}",
-            percent=0.0,
-        )
+        progress("error", 0, f"Pipeline failed: {error_msg}", 0.0)
         print(f"[Worker] Job {job_id} failed:\n{tb}", file=sys.stderr)
 
 

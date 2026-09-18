@@ -189,6 +189,25 @@ class JobProgressEvent(BaseModel):
     percent: float = 0.0
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
+    # --- what is actually happening inside this step ----------------------
+    # `message` names the step; these say what it is doing right now, which is
+    # the difference between "Analyzing with AI..." for forty minutes and
+    # "NVIDIA, attempt 2 of 3".
+    #
+    # `detail` is the last line the pipeline printed. Keeping it generic rather
+    # than a fixed vocabulary means every step reports something useful without
+    # web/ having to know what clipping/ prints.
+    detail: Optional[str] = None
+    provider: Optional[str] = None      # "nvidia" | "gemini"
+    model: Optional[str] = None         # the exact model id being asked
+    attempt: Optional[int] = None       # retry ladder position, when retrying
+    max_attempts: Optional[int] = None
+    clip_index: Optional[int] = None    # render loop: clip N...
+    clip_total: Optional[int] = None    # ...of M
+    # When the CURRENT step began. The UI shows time-in-step, which is what
+    # tells a user whether something is stuck; time-since-creation does not.
+    step_started_at: Optional[datetime] = None
+
 
 # ---------------------------------------------------------------------------
 # Job Activity Event
