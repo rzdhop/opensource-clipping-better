@@ -1,11 +1,46 @@
 # CHECKPOINT
 
 ## In progress
-- **Task:** Make the app actually work end to end (upload, Whisper, live AI).
-- **Phase:** IMPLEMENT / verified. Docker container verification still pending.
-- **Unpushed commits:** `cafae92`, `2b28c80`, `7546db3`, `303eded`, `1d45ac7`
-  — github.com DNS is intermittently blocked from the authoring sandbox.
-- **Tier-1:** 239+ passed locally; clean pytest-only venv green (DEC-012).
+- **Task:** Live progress / debug feed in the dashboard — tell the user which
+  step is running, which AI provider+model is being called, and how long it has
+  been stuck there.
+- **Phase:** IMPLEMENT. Plan approved 2026-09-18 (all 5 stages, confined to
+  `web/`; `clipping/` is not touched). Containers restarted after the
+  fast-forward, so both now run `5bdd31c`.
+- **Checkpoint commit:** `5bdd31c` (clean tree, `main`).
+- **Tier-1 baseline at `5bdd31c`:** `python -m pytest -q` = **254 passed**,
+  exit 0.
+- **Session finding:** local `main` was 8 commits BEHIND `origin/main`
+  (`242b1f6` vs `5bdd31c`) — the previous session pushed from elsewhere and the
+  working tree never caught up. Fast-forwarded (`git merge --ff-only`). The
+  docker containers started at 08:26 from the stale tree and must be restarted
+  to pick the code up.
+- **Docker verification (containers live this session):**
+  - `d845413` container uid fix — **VERIFIED.** `osc-backend` runs
+    `uid=1001 gid=1001` (host `.env` sets `DOCKER_UID/GID=1001`), `/app/uploads`
+    and `/app/outputs` are owned `1001:1001`, a write probe inside the container
+    succeeded, `HOME=/tmp`, `/tmp/Ultralytics` is 0777.
+  - `9a9adc5` Vite timeout fix — **still unverified at runtime.** The new
+    `vite.config.js` is on disk and inside the container, but the running vite
+    process loaded the OLD config (started 08:26:48, file rewritten 08:29:32).
+  - CUDA branch of the device resolver — **as verified as this host allows.**
+    The branch logic is covered by injection/monkeypatch in
+    `tests/test_device_resolution.py` (`test_auto_with_cuda_picks_cuda_and_float16`,
+    `test_explicit_cuda_is_respected_when_available`,
+    `test_detection_uses_ctranslate2_when_it_reports_a_device`). Only
+    `whisper_cuda_available()` against a real CUDA-enabled CTranslate2 build
+    remains untestable here, and nothing short of a GPU box will close it.
+- **Open questions:** none blocking.
+
+### Stages (approved)
+1. Capture the pipeline's own stdout/stderr into a per-job structured event
+   feed. `web/api/{activity,store,models,worker}.py`. **Riskiest stage.**
+2. `JobProgressEvent` gains `detail`, `provider`, `model`, `attempt`,
+   `max_attempts`, `clip_index`, `clip_total`, `step_started_at`.
+3. SSE carries the new events incrementally, with a heartbeat.
+4. `JobDetail.jsx` "Live activity" panel: step + detail, provider/model chip,
+   elapsed timers, clip sub-bar, live console.
+5. `Dashboard.jsx` row detail + README/CHANGELOG.
 
 ### Verified against real services this session
 | What | Evidence |
