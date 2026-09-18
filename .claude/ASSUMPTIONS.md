@@ -4,6 +4,13 @@
 - (none open)
 
 ## Confirmed
+- **A-011** — The pipeline's Python-level `print` output is enough to tell a user
+  what is happening. *Confirmed against a live job on the running containers: the
+  feed carried the transcript warning (34% of words dropped for backwards
+  timestamps), the segment/word summary, the provider and model line, and the
+  NVIDIA retry ladder including `attempt 1 failed | ValueError: NVIDIA returned
+  an empty clip array`. Known gap: ffmpeg is a subprocess writing to the real
+  file descriptors, so its output is not captured — documented in the README.*
 - **A-007 — RESOLVED 2026-09-18, against the live API.**
   `deepseek-ai/deepseek-v4-flash-0731` exists and authenticates, but it
   **rejected** the `nvext.guided_json` the code was sending:
@@ -52,5 +59,9 @@
 - (none)
 
 ## Notes
-A-007 is closed. The remaining unverified areas are the CUDA branch of the
-device resolver (this host is CPU-only) and diarization / split-screen (RC-8).
+A-007 is closed. The container uid fix is verified against a live daemon
+(2026-09-18). The CUDA branch of the device resolver is verified by injection —
+`resolve_whisper_runtime` takes `cuda_available`, and three tests drive the
+CUDA-true path — so only `whisper_cuda_available()` against a real CUDA-enabled
+CTranslate2 build remains, which needs a GPU host and nothing less. Diarization /
+split-screen (RC-8) is still unexercised.

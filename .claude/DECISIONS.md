@@ -181,3 +181,44 @@ false".
 the client said otherwise" logic must use the same mechanism -- the payload
 dict cannot express the distinction.
 
+## DEC-014 — Read the pipeline's progress from its stdout, not from a callback
+**Context.** The dashboard could only say "Analyzing with AI..." at 36%, for as
+long as the provider took — up to a ten-attempt Gemini ladder with 60s-to-505s
+backoff plus a fallback model. The pipeline already prints everything the user
+needs (provider, model, each retry attempt and its reason, the Whisper device,
+every render sub-stage, the model downloads that look like a hang), but
+`run_pipeline(cfg)` and `studio.proses_klip(...)` expose no progress hook, so
+none of it could reach a caller.
+**Decision.** Tee `sys.stdout`/`sys.stderr` in `web/api/activity.py` and
+attribute each line to the job whose worker thread produced it, rather than
+threading an `on_progress` callback through `runner.py`, `engine.py` and
+`studio/core.py`.
+**Consequence.** `clipping/` is untouched, so the CLI pipeline's signatures and
+the render layer the regression contract protects are unchanged, and the feature
+covers every print site at once — including ones nobody enumerated. The tee
+always writes the real stream first and records inside a `try`, so it cannot
+break a print, and records only for threads inside `activity.capture(...)`, so
+uvicorn's logging is unaffected. The cost is the coupling's shape: severity is
+inferred from the pipeline's emoji, and `web/api/signals.py` — the one place
+that matches on wording — reads the retry counters. Reword those prints and the
+counter stops appearing while the line is still shown verbatim. The real limit
+is that ffmpeg is a subprocess writing to the real file descriptors, so its
+output is not in the feed; that is documented in the README.
+
+## DEC-015 — The activity feed is capped and its persistence throttled
+**Context.** `store._persist()` re-serializes every job in the store, under the
+lock, on every write. That was affordable when only the 13 coarse worker
+messages triggered it. The pipeline's own output arrives orders of magnitude
+faster.
+**Decision.** The feed is a 500-entry ring buffer with per-job sequence numbers;
+event appends call `_persist(force=False)`, which writes at most once per
+second. Every status and progress change still writes through immediately. The
+store lock became an `RLock`.
+**Consequence.** Persistence cost is bounded by wall-clock rather than by how
+chatty the pipeline is, and no client-visible transition is delayed — the next
+unthrottled write flushes whatever was skipped, within a crash window
+best-effort persistence already had. Sequence numbers rather than list indices
+because the ring buffer drops from the front and would shift any index a client
+was holding. The `RLock` removes a whole class of deadlock: the tee turns any
+`print` into a store write, so a plain `Lock` would hang the worker the moment
+anything printed while the lock was held.

@@ -1,48 +1,73 @@
 # CHECKPOINT
 
 ## In progress
-- **Task:** Live progress / debug feed in the dashboard — tell the user which
-  step is running, which AI provider+model is being called, and how long it has
-  been stuck there.
-- **Phase:** IMPLEMENT. Plan approved 2026-09-18 (all 5 stages, confined to
-  `web/`; `clipping/` is not touched). Containers restarted after the
-  fast-forward, so both now run `5bdd31c`.
-- **Checkpoint commit:** `5bdd31c` (clean tree, `main`).
-- **Tier-1 baseline at `5bdd31c`:** `python -m pytest -q` = **254 passed**,
-  exit 0.
+- **Task:** Live progress / debug feed in the dashboard. **COMPLETE.**
+- **Phase:** closed out.
+- **Checkpoint commit:** `5bdd31c` was the baseline. Stages:
+  `58c07a5` activity feed, `e83c364` progress fields, `19fd3d7` SSE,
+  `06fb8bc` the panel, `6c325df` list view + docs.
+- **Tier-1:** `python -m pytest -q` = **311 passed** locally;
+  **273 passed, 20 skipped** in a pytest-only venv matching CI (DEC-012);
+  `compileall` clean.
+- **Tier-2:** no E2E suite exists in this project (no playwright/cypress, no
+  test script in `web/dashboard/package.json`), so Tier 2 is browser
+  verification against the running containers — done, see below.
 - **Session finding:** local `main` was 8 commits BEHIND `origin/main`
-  (`242b1f6` vs `5bdd31c`) — the previous session pushed from elsewhere and the
-  working tree never caught up. Fast-forwarded (`git merge --ff-only`). The
-  docker containers started at 08:26 from the stale tree and must be restarted
-  to pick the code up.
-- **Docker verification (containers live this session):**
-  - `d845413` container uid fix — **VERIFIED.** `osc-backend` runs
-    `uid=1001 gid=1001` (host `.env` sets `DOCKER_UID/GID=1001`), `/app/uploads`
-    and `/app/outputs` are owned `1001:1001`, a write probe inside the container
-    succeeded, `HOME=/tmp`, `/tmp/Ultralytics` is 0777.
-  - `9a9adc5` Vite timeout fix — **still unverified at runtime.** The new
-    `vite.config.js` is on disk and inside the container, but the running vite
-    process loaded the OLD config (started 08:26:48, file rewritten 08:29:32).
-  - CUDA branch of the device resolver — **as verified as this host allows.**
-    The branch logic is covered by injection/monkeypatch in
-    `tests/test_device_resolution.py` (`test_auto_with_cuda_picks_cuda_and_float16`,
-    `test_explicit_cuda_is_respected_when_available`,
-    `test_detection_uses_ctranslate2_when_it_reports_a_device`). Only
-    `whisper_cuda_available()` against a real CUDA-enabled CTranslate2 build
-    remains untestable here, and nothing short of a GPU box will close it.
-- **Open questions:** none blocking.
+  (`242b1f6` vs `5bdd31c`) — the previous session pushed from elsewhere and this
+  checkout never caught up. Fast-forwarded. The repo-local git identity was
+  unset; set to the one the existing history uses.
 
-### Stages (approved)
-1. Capture the pipeline's own stdout/stderr into a per-job structured event
-   feed. `web/api/{activity,store,models,worker}.py`. **Riskiest stage.**
-2. `JobProgressEvent` gains `detail`, `provider`, `model`, `attempt`,
-   `max_attempts`, `clip_index`, `clip_total`, `step_started_at`.
-3. SSE carries the new events incrementally, with a heartbeat.
-4. `JobDetail.jsx` "Live activity" panel: step + detail, provider/model chip,
-   elapsed timers, clip sub-bar, live console.
-5. `Dashboard.jsx` row detail + README/CHANGELOG.
+### The feature, in one line
+Everything the pipeline prints now reaches the job that printed it, and the job
+page says which provider and model is being asked, which retry attempt it is on,
+which clip of how many is rendering, and how long it has been on this step.
 
-### Verified against real services this session
+### Contract for the activity feed (do not undo)
+- `clipping/` is **untouched**. Progress is read from the pipeline's stdout, not
+  from a callback (DEC-014). Do not thread `on_progress` through `runner.py` /
+  `engine.py` / `studio/core.py` without revisiting that decision.
+- The tee writes the real stream **first** and records inside a `try`. Recording
+  must never be able to break a `print`.
+- `store._lock` is an **RLock** on purpose: the tee turns any `print` into a
+  store write, so a plain `Lock` deadlocks the worker if anything prints while
+  the lock is held (DEC-015).
+- `web/api/signals.py` is the **only** place that matches on the pipeline's
+  wording. Keep it that way; everything else is generic.
+- Event appends use `_persist(force=False)`. Anything a client waits on
+  (status, progress, completion) must keep forcing.
+- ffmpeg output is **not** in the feed and cannot be — it is a subprocess on the
+  real file descriptors. Documented in the README; do not claim otherwise.
+
+### Docker / device verification (2026-09-18, live daemon)
+| Item | Status |
+|---|---|
+| `d845413` container uid | **VERIFIED.** `osc-backend` runs `uid=1001 gid=1001`; `/app/uploads` and `/app/outputs` owned `1001:1001`; in-container write probe OK; `HOME=/tmp`; `/tmp/Ultralytics` 0777. The host `.env` correctly sets `DOCKER_UID/GID=1001` (this host's uid is 1001, not 1000) |
+| CUDA branch of the device resolver | **As verified as a CPU-only host allows.** `resolve_whisper_runtime` takes an injectable `cuda_available`; `test_auto_with_cuda_picks_cuda_and_float16`, `test_explicit_cuda_is_respected_when_available` and `test_detection_uses_ctranslate2_when_it_reports_a_device` drive the CUDA-true path. Only `whisper_cuda_available()` against a real CUDA-enabled CTranslate2 build is left, and only a GPU host closes it |
+| `9a9adc5` Vite timeout | **VERIFIED at runtime.** After restarting the frontend so the new config was actually loaded: a 20MB upload rate-limited to 50KB/s through the dev proxy returned `HTTP 200 in 390.56s`. That is 90s past Node's default 300s `requestTimeout`, which is the timeout that used to kill the request with nothing in the backend log. The earlier 300MB test never reached the window because loopback was too fast |
+
+### Tier-2 — verified in a browser against the running containers
+A real job (`video.mp4` + `subtitles.vtt`, 2 clips) run end to end on the live
+stack. The panel rendered:
+- the provider/model chip `NVIDIA · deepseek-ai/deepseek-v4-flash-0731`
+- `attempt 2 of 3`, amber once past the first attempt
+- time-on-step and total, both ticking
+- the quiet notice after 45s of silence
+- the feed, severity-coloured, carrying things that were previously invisible:
+  `⚠️ 718 of 2095 words (34%) in subtitles.vtt had backwards timestamps and were
+  dropped` and `⚠️ NVIDIA attempt 1 failed | ValueError: NVIDIA returned an
+  empty clip array.`
+- the job list showing `36% · Asking nvidia... ⏱ 6m 26s`
+
+### Known state of the running stack
+- Job `d4a133c4e9cd` is stuck in `analyzing` forever: its worker thread died when
+  the containers were recreated at 08:26. It is a dead record, not a running job;
+  delete it when convenient. It predates this work.
+- The repo-root `__pycache__/` is owned by root (from a docker run predating the
+  uid fix), so a local `compileall` needs `PYTHONPYCACHEPREFIX`. CI is unaffected.
+- The dashboard scrolls sideways at 375px (`main.main-content` renders 427px).
+  Pre-existing; recorded as a follow-up, deliberately not in this diff.
+
+### Verified against real services (previous task, 2026-09-17/18)
 | What | Evidence |
 |---|---|
 | Whisper `cuda` + `float16` crashes | Real runs on ctranslate2 4.8.2, 0 CUDA devices, no torch |
@@ -59,12 +84,12 @@
 | Dashboard in English | Rendered in a browser |
 
 ### Still unverified
-- **Docker containers** — image build was still exporting layers at close of
-  this stretch. The uid fix (`d845413`) has never run against a live daemon.
-- **The CUDA branch** of the device resolver: this host is CPU-only.
-- **Vite timeout fix** (`9a9adc5`): a 300MB upload succeeded through the proxy,
-  but on fast loopback it never approached the 300s window that actually broke.
-- RC-8 diarization / split-screen.
+- **RC-8 diarization / split-screen.** Needs `pyannote.audio` + `torch` + an
+  accepted HuggingFace model agreement. Unchanged.
+- **`whisper_cuda_available()` against a real CUDA-enabled CTranslate2 build.**
+  Needs a GPU host; the branch logic around it is covered by injection.
+- Everything else previously carried here — the container uid fix, the Vite
+  timeout fix, the CUDA branch — is resolved above.
 
 ### Findings that changed the brief
 - `reuse_job_id` is **LIVE**, not dead: `web/api/routes/jobs.py:67` validates it
