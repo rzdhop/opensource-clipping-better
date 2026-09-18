@@ -54,7 +54,8 @@ def test_the_cuda_fallback_warning_is_not_printed_twice(monkeypatch, capsys):
     second call site to learn the device for the slow-run estimate would have
     repeated that warning into the activity feed.
     """
-    from types import SimpleNamespace
+    import sys
+    from types import ModuleType, SimpleNamespace
 
     class _Seg:
         start, end, text, words = 0.0, 1.0, "hai", []
@@ -68,6 +69,26 @@ def test_the_cuda_fallback_warning_is_not_printed_twice(monkeypatch, capsys):
     def _fake_load(model_size, device, compute_type):
         loaded["args"] = (model_size, device, compute_type)
         return _Model()
+
+    # CI installs pytest and nothing else -- see .github/workflows/ci.yml, which
+    # states every test here is stdlib-only. transcribe_video imports tqdm for
+    # its progress bar, so the stub keeps this test inside that contract instead
+    # of quietly requiring a dependency CI does not have.
+    class _NullBar:
+        n = 0.0
+
+        def __init__(self, *a, **k):
+            pass
+
+        def update(self, amount):
+            self.n += amount
+
+        def close(self):
+            pass
+
+    fake_tqdm = ModuleType("tqdm")
+    fake_tqdm.tqdm = _NullBar
+    monkeypatch.setitem(sys.modules, "tqdm", fake_tqdm)
 
     monkeypatch.setattr(engine, "load_whisper_model", _fake_load)
     monkeypatch.setattr("clipping.device.whisper_cuda_available", lambda: False)
