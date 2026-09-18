@@ -5,10 +5,10 @@
 - **Phase:** closed out.
 - **Checkpoint commit:** `5bdd31c` was the baseline. Stages:
   `58c07a5` activity feed, `e83c364` progress fields, `19fd3d7` SSE,
-  `06fb8bc` the panel, `6c325df` list view + docs.
-- **Tier-1:** `python -m pytest -q` = **311 passed** locally;
-  **273 passed, 20 skipped** in a pytest-only venv matching CI (DEC-012);
-  `compileall` clean.
+  `06fb8bc` the panel, `6c325df` list view + docs, `96d22ec` feed quality.
+- **Tier-1:** `python -m pytest -q` = **327 passed** locally;
+  **286 passed, 20 skipped** in a pytest-only venv matching CI (DEC-012);
+  `compileall` clean (needs `PYTHONPYCACHEPREFIX` locally — see below).
 - **Tier-2:** no E2E suite exists in this project (no playwright/cypress, no
   test script in `web/dashboard/package.json`), so Tier 2 is browser
   verification against the running containers — done, see below.
@@ -37,6 +37,12 @@ which clip of how many is rendering, and how long it has been on this step.
   (status, progress, completion) must keep forcing.
 - ffmpeg output is **not** in the feed and cannot be — it is a subprocess on the
   real file descriptors. Documented in the README; do not claim otherwise.
+- **Progress-bar redraws must not enter the feed.** They go to `progress.detail`
+  only. Without this, two 12-second clips fill the 500-entry buffer (90% bars)
+  and evict everything worth reading. A bar's identity is the label *before* the
+  percentage — a digit-blind normalization folds Rank 2's bar into Rank 1's —
+  and the percent-sign requirement is what keeps the retry counters out of the
+  coalescing entirely.
 
 ### Docker / device verification (2026-09-18, live daemon)
 | Item | Status |
