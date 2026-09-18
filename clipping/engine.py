@@ -30,6 +30,42 @@ from .transcript import (  # noqa: F401
 # STAGE 2: WHISPER TRANSCRIPTION & JSON3 FALLBACK
 # ==============================================================================
 
+# Measured on this project's own CPU path: a 1211s video took ~93 minutes on
+# cpu/int8 with large-v3 at beam_size=5, i.e. ~4.6x realtime. It is a rough
+# guide, not a promise -- it scales with the host's cores -- but the order of
+# magnitude is the part that matters to someone deciding whether to wait.
+CPU_WHISPER_REALTIME_FACTOR = 4.6
+
+# Below this there is nothing worth warning about, and a notice on every short
+# clip would just be noise.
+CPU_WHISPER_WARN_THRESHOLD_SECONDS = 10 * 60
+
+
+def estimate_cpu_transcription_seconds(audio_seconds: float) -> float:
+    """Rough wall-clock estimate for transcribing *audio_seconds* on CPU."""
+    return audio_seconds * CPU_WHISPER_REALTIME_FACTOR
+
+
+def _warn_if_cpu_transcription_will_be_slow(audio_seconds: float, device: str) -> str | None:
+    """Return the warning for a slow CPU run, or None. Pure, so it is testable.
+
+    This exists because a real job spent 94 minutes here before anyone could
+    tell it was going to. The engine already skips Whisper entirely when a
+    transcript is supplied, which is the actual remedy -- so the warning names
+    it.
+    """
+    if device != "cpu":
+        return None
+    estimate = estimate_cpu_transcription_seconds(audio_seconds)
+    if estimate < CPU_WHISPER_WARN_THRESHOLD_SECONDS:
+        return None
+    return (
+        f"      \u26a0\ufe0f No GPU: transcribing {audio_seconds / 60:.0f} minutes of audio on "
+        f"CPU takes roughly {estimate / 60:.0f} minutes. Supplying a transcript "
+        f"(.vtt) with the video skips this step entirely."
+    )
+
+
 def load_whisper_model(
     model_size: str = "large-v3",
     device: str = "auto",
@@ -104,8 +140,16 @@ def transcribe_video(
     # Faster-whisper produces no output until the first segment, so each phase is
     # announced -- otherwise a first CPU run (model download + full audio decode)
     # looks like a hang.
+    # Resolved once here, not twice. resolve_whisper_runtime prints a warning
+    # when it has to fall back from CUDA, and it is idempotent, so passing the
+    # resolved pair down means load_whisper_model re-resolves to the same answer
+    # silently instead of repeating the warning into the activity feed.
+    from clipping.device import resolve_whisper_runtime
+
+    resolved_device, resolved_compute = resolve_whisper_runtime(device, compute_type)
+
     if model is None:
-        model = load_whisper_model(model_size, device, compute_type)
+        model = load_whisper_model(model_size, resolved_device, resolved_compute)
 
     print("      ⏳ Decoding audio & extracting features (no output yet)...", flush=True)
     segments, info = model.transcribe(video_path, beam_size=5, word_timestamps=True)
@@ -118,6 +162,13 @@ def transcribe_video(
     from tqdm import tqdm
 
     total_dur = round(info.duration, 2)
+
+    # The duration is only knowable once transcribe() has decoded the audio, so
+    # this is the earliest the estimate can be made -- still before the long part.
+    _slow_notice = _warn_if_cpu_transcription_will_be_slow(total_dur, resolved_device)
+    if _slow_notice:
+        print(_slow_notice, flush=True)
+
     progress = tqdm(
         total=total_dur,
         unit="s",
