@@ -49,7 +49,17 @@ youtube_tracker/*.sqlite3
 # web/dashboard/ produces ~480MB that the Docker build recreates anyway.
 node_modules/
 web/dashboard/node_modules/
-data/
+
+# Runtime secrets: the API token and the saved Settings values. Ignored, but the
+# DIRECTORY is tracked (via data/.gitkeep) on purpose. docker-compose bind-mounts
+# ./data, and Docker creates a missing bind-mount source as ROOT -- after which
+# the container, running as the host user, cannot write it. The symptom is not an
+# error page: the backend prints "Could not save the API token", the token then
+# CHANGES ON EVERY RESTART, and PUT /api/settings answers 200 while the write
+# silently fails. Keeping the directory in the repo means a fresh clone already
+# owns it and Docker never creates it.
+data/*
+!data/.gitkeep
 
 # The dashboard is built into the image, not committed.
 web/dashboard/dist/

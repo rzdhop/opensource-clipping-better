@@ -379,6 +379,38 @@ def test_secrets_never_enter_the_docker_build_context():
         assert secret in entries, f"{secret} is not in .dockerignore"
 
 
+def test_the_data_directory_is_tracked_but_its_contents_are_not():
+    """Both halves matter, and the second is the one that bites.
+
+    The directory is in the repo (data/.gitkeep) because docker-compose
+    bind-mounts ./data and Docker creates a MISSING bind-mount source as root --
+    after which the container, running as the host user, cannot write it. That
+    does not fail loudly: the backend prints "Could not save the API token", the
+    token then changes on every restart, and PUT /api/settings answers 200 while
+    the save silently fails. Observed on a real deployment.
+
+    The contents must stay ignored: they are the API token and every provider key
+    typed into the Settings page.
+    """
+    import subprocess
+
+    gitkeep = PROJECT_ROOT / "data" / ".gitkeep"
+    assert gitkeep.is_file(), "data/.gitkeep is gone; Docker will recreate data/ as root"
+
+    tracked = subprocess.run(
+        ["git", "ls-files", "data"],
+        cwd=PROJECT_ROOT, capture_output=True, text=True, check=True,
+    ).stdout.split()
+    assert tracked == ["data/.gitkeep"], f"data/ tracks more than .gitkeep: {tracked}"
+
+    for secret in ("data/api_token", "data/settings.json", "data/cookies.txt"):
+        check = subprocess.run(
+            ["git", "check-ignore", "-q", secret],
+            cwd=PROJECT_ROOT, capture_output=True,
+        )
+        assert check.returncode == 0, f"{secret} is NOT gitignored"
+
+
 def test_the_dashboard_mount_is_the_last_route_registered():
     """A Mount at "/" matches every path that reaches it, so any route declared
     after it is unreachable.

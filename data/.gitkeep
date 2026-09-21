@@ -1,0 +1,15 @@
+Runtime state lives here: api_token (0600) and settings.json. Both are
+gitignored; this file exists only so the directory itself is in the repo.
+
+Why that matters: docker-compose bind-mounts ./data, and Docker creates a
+missing bind-mount source as root. The container runs as the host user, so it
+then cannot write here -- and it does not fail loudly. The backend prints
+"Could not save the API token", the token changes on every restart, and
+PUT /api/settings answers 200 while the save silently fails.
+
+If you hit that anyway (an older clone, or the directory got recreated):
+
+    sudo chown -R "$(id -u):$(id -g)" data
+
+.dockerignore excludes this directory from the build context, so the token and
+your API keys never bake into an image layer.
