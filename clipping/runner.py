@@ -487,6 +487,15 @@ def run_pipeline(cfg) -> list[dict]:
         if declared_source and not row.get("source_url"):
             row["source_url"] = declared_source
 
+    # A .srt beside each clip. The burned-in subtitles cannot be edited,
+    # translated or turned off; a sidecar can. Written before the manifest is
+    # saved so `srt_path` lands in it.
+    from clipping import subtitles_export
+
+    subtitles_export.export_all(
+        data_segmen, render_manifest, cfg.outputs_dir, on_log=print
+    )
+
     # Step 8 — Save manifest
     manifest_path = os.path.join(cfg.outputs_dir, "render_manifest.json")
     with open(manifest_path, "w", encoding="utf-8") as f:

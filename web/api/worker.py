@@ -428,6 +428,14 @@ def _execute_pipeline(job_id: str, payload: dict) -> None:
             if hasil_render:
                 render_manifest.append(hasil_render)
 
+        # A .srt beside each clip, before the manifest is written so srt_path
+        # lands in it. Best-effort: the clips are already rendered.
+        from clipping import subtitles_export
+
+        subtitles_export.export_all(
+            data_segmen, render_manifest, cfg.outputs_dir, on_log=print
+        )
+
         # --- Save manifest ---
         manifest_path = os.path.join(cfg.outputs_dir, "render_manifest.json")
         with open(manifest_path, "w", encoding="utf-8") as f:
