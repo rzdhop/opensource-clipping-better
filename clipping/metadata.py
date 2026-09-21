@@ -87,14 +87,20 @@ def _build_tiktok_caption(caption, hashtags):
 
 
 def _looks_indonesian(text):
-    text = f" {_normalize_spaces(text).lower()} "
-    indikator = [
-        " yang ", " dan ", " untuk ", " dengan ", " karena ", " adalah ",
-        " bisa ", " tidak ", " lebih ", " dalam ", " pada ", " agar ",
-        " dari ", " ini ", " itu ", " juga ", " kalau ", " saat ",
-        " tentang ", " bikin ", " banget ", " jadi ", " sudah ",
-    ]
-    return any(w in text for w in indikator)
+    """Whether *text* reads as Indonesian. Drives warnings, never rejections.
+
+    Now one language of a general detector (``clipping/analysis/langdetect.py``)
+    rather than its own hardcoded list, so the pipeline has a single answer to
+    "what language is this" instead of two that can disagree. The behaviour is
+    unchanged: the same lenient any-stopword-hit rule, over a word list that is
+    a superset of the one that used to live here.
+
+    Imported lazily so this module keeps importing on its own, which the
+    stdlib-only test suite relies on.
+    """
+    from clipping.analysis.langdetect import looks_like
+
+    return looks_like(text, "id")
 
 
 # ==============================================================================
