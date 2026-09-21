@@ -28,6 +28,67 @@ os.makedirs(OUTPUTS_DIR, exist_ok=True)
 MAX_UPLOAD_SIZE = 2 * 1024 * 1024 * 1024
 
 
+# Transcripts ride the same endpoint: they are tiny, and a second endpoint would
+# duplicate the extension allow-list, the path-traversal sanitizing and the size
+# cap for no benefit.
+ALLOWED_UPLOAD_EXTS = {
+    ".mp4", ".mkv", ".avi", ".mov", ".webm", ".flv", ".ts",
+    ".vtt", ".srt", ".json3",
+}
+
+
+def sanitize_upload_name(filename):
+    """The on-disk name for *filename*: no spaces, no path separators."""
+    safe = filename.replace(" ", "_")
+    for ch in '<>:"/\\|?*#':
+        safe = safe.replace(ch, "")
+    return safe
+
+
+async def save_upload(file) -> str:
+    """Stream *file* into uploads/ and return its stored name.
+
+    Extracted from the endpoint so `POST /api/jobs/{id}/source` stores a file
+    exactly the same way -- same allow-list, same sanitizing, same size cap --
+    instead of growing a second, subtly different implementation.
+    """
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No filename provided")
+
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in ALLOWED_UPLOAD_EXTS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Unsupported file type: {ext}. "
+                f"Allowed: {', '.join(sorted(ALLOWED_UPLOAD_EXTS))}"
+            ),
+        )
+
+    safe_name = sanitize_upload_name(file.filename)
+    dest = os.path.join(UPLOAD_DIR, safe_name)
+
+    total_written = 0
+    with open(dest, "wb") as handle:
+        while True:
+            chunk = await file.read(1024 * 1024)
+            if not chunk:
+                break
+            total_written += len(chunk)
+            if total_written > MAX_UPLOAD_SIZE:
+                handle.close()
+                os.remove(dest)
+                raise HTTPException(
+                    status_code=413,
+                    detail=(
+                        f"File too large. Maximum size is "
+                        f"{MAX_UPLOAD_SIZE // (1024**3)}GB."
+                    ),
+                )
+            handle.write(chunk)
+    return safe_name
+
+
 @router.post("/api/upload")
 async def upload_video(file: UploadFile = File(...)) -> dict:
     """
@@ -39,45 +100,8 @@ async def upload_video(file: UploadFile = File(...)) -> dict:
     if not file.filename:
         raise HTTPException(status_code=400, detail="No filename provided")
 
-    # Validate extension
-    # Transcripts ride the same endpoint: they are tiny, and a second endpoint
-    # would duplicate the path-traversal and naming logic for no benefit.
-    allowed_exts = {
-        ".mp4", ".mkv", ".avi", ".mov", ".webm", ".flv", ".ts",
-        ".vtt", ".srt", ".json3",
-    }
-    ext = os.path.splitext(file.filename)[1].lower()
-    if ext not in allowed_exts:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unsupported file type: {ext}. Allowed: {', '.join(allowed_exts)}",
-        )
-
-    # Sanitize filename
-    safe_name = file.filename.replace(" ", "_")
-    for ch in '<>:"/\\|?*#':
-        safe_name = safe_name.replace(ch, "")
-
-    dest = os.path.join(UPLOAD_DIR, safe_name)
-
-    # Stream write to disk
-    total_written = 0
-    with open(dest, "wb") as f:
-        while True:
-            chunk = await file.read(1024 * 1024)  # 1MB chunks
-            if not chunk:
-                break
-            total_written += len(chunk)
-            if total_written > MAX_UPLOAD_SIZE:
-                f.close()
-                os.remove(dest)
-                raise HTTPException(
-                    status_code=413,
-                    detail=f"File too large. Maximum size is {MAX_UPLOAD_SIZE // (1024**3)}GB.",
-                )
-            f.write(chunk)
-
-    size_mb = total_written / (1024 * 1024)
+    safe_name = await save_upload(file)
+    size_mb = os.path.getsize(os.path.join(UPLOAD_DIR, safe_name)) / (1024 * 1024)
     return {
         "filename": safe_name,
         "size_mb": round(size_mb, 2),

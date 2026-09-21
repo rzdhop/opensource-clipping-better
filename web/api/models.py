@@ -27,6 +27,10 @@ from clipping.config import (
 class JobStatus(str, enum.Enum):
     QUEUED = "queued"
     DOWNLOADING = "downloading"
+    # The server tried to fetch source_url and was refused by the site. Not a
+    # failure: the job keeps its id, its settings and its output directory, and
+    # resumes as soon as a file is attached to POST /api/jobs/{id}/source.
+    NEEDS_UPLOAD = "needs_upload"
     TRANSCRIBING = "transcribing"
     ANALYZING = "analyzing"
     RENDERING = "rendering"

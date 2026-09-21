@@ -123,6 +123,55 @@ def _transcript_plan(cfg) -> tuple[str, str]:
     )
 
 
+def _server_fetch_enabled() -> bool:
+    from clipping.ingest import enabled
+
+    return enabled()
+
+
+def _try_fetch(job_id, url, cfg, progress):
+    """Attempt a server-side download. Returns ``(video, subtitle)`` or None.
+
+    None means the job has been parked in ``needs_upload`` with a message; the
+    caller must simply return. Failing the job instead would throw away its id,
+    its settings and its output directory for something the user can fix in one
+    step.
+    """
+    from clipping.ingest import FetchError, fetch
+
+    progress("download", 1, "Trying to download the source video...", 8.0)
+    dest = os.path.join(cfg.outputs_dir, "source")
+
+    try:
+        result = fetch(
+            url,
+            dest,
+            cookies_path=_cookies_path(),
+            pot_provider_url=os.environ.get("POT_PROVIDER_URL") or None,
+        )
+    except FetchError as exc:
+        store.set_error(job_id, f"Could not download {url}: {exc}")
+        return None
+
+    if result.needs_upload or not result.video_path:
+        store.set_status(job_id, JobStatus.NEEDS_UPLOAD)
+        store.set_error(job_id, result.error or "This server could not download the video.")
+        progress("download", 1, "Waiting for the video to be attached.", 8.0)
+        return None
+
+    return result.video_path, result.subtitle_path
+
+
+def _cookies_path():
+    """An optional cookies.txt, for sites that need a signed-in session."""
+    candidate = os.path.join(
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")),
+        "data",
+        "cookies.txt",
+    )
+    return candidate if os.path.isfile(candidate) else None
+
+
 def _execute_pipeline(job_id: str, payload: dict) -> None:
     """
     Run the clipping pipeline synchronously (called from thread pool).
@@ -209,6 +258,17 @@ def _execute_pipeline(job_id: str, payload: dict) -> None:
         elif os.path.isfile(cfg.file_video_asli):
             # Reuse-job path: an earlier job's video is still on disk.
             message = "Using video from a previous job."
+        elif payload.get("source_url") and _server_fetch_enabled():
+            fetched = _try_fetch(job_id, payload["source_url"], cfg, progress)
+            if fetched is None:
+                # Parked in needs_upload with an explanation, not failed: the
+                # job keeps its id, settings and output directory, and resumes
+                # the moment a file is attached.
+                return
+            cfg.file_video_asli, subtitle_path = fetched
+            if subtitle_path and not cfg.transcript_path:
+                cfg.transcript_path = subtitle_path
+            message = "Downloaded from the source URL."
         else:
             store.set_error(
                 job_id,

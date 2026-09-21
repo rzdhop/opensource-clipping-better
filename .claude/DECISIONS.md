@@ -737,3 +737,54 @@ A test asserts `token=` never appears in `api.js`.
 follow-up conflicting with the "pin and verify" rule. It is committed now: a
 production image that resolves its own dependency tree at build time is exactly
 what that rule exists to prevent.
+
+## DEC-039 — A refused download is a job state, not a failure
+**Context.** Server-side downloading was asked for, and it mostly will not
+work from here. Sites score a request by the IP's reputation before they look
+at cookies or proof-of-origin tokens, and this machine is in a datacenter
+range. The bgutil project says plainly that a PO token "may help your traffic
+seem more legitimate" — it is not a bypass.
+**Decision.** Try anyway, behind `ENABLE_SERVER_FETCH` (on by default), and
+when refused move the job to a new status, `needs_upload`, carrying a message
+that names both remedies. `POST /api/jobs/{id}/source` attaches a file and
+resumes **the same job**.
+**Consequence.** The job keeps its id, its settings and its output directory,
+so anything it already produced — notably a saved transcript (DEC-022) — is
+still there. Creating a fresh job instead would discard all of it to work
+around a download the user has already handled.
+
+Two distinctions are load-bearing and tested:
+- **A refusal is not a missing video.** A private or deleted video also fails
+  to "extract a player response", so the fatal markers are checked *first*;
+  otherwise the user is sent off to run a helper script for a video that no
+  longer exists.
+- **A missing yt-dlp parks the job too.** The remedy is identical to a refusal,
+  so an `ImportError` must not reach the user as a failed job with a Python
+  traceback they cannot act on. Found by running it: yt-dlp is not installed on
+  this host.
+
+## DEC-040 — The PC helper is the supported path, and it is stdlib-only
+**Context.** Downloads succeed from a home connection and fail from a VPS. The
+human has a Windows machine on the same tailnet.
+**Decision.** `tools/rzclips-fetch.py`: downloads with yt-dlp locally, uploads
+the video and its subtitles, creates the job, prints the URL. One command.
+**Consequence.** It imports nothing outside the standard library, asserted by a
+test that walks its AST — it has to run on a bare Windows Python where a
+dependency is something the user must install before the tool works at all. A
+second test checks every key it sends is a declared `JobCreateRequest` field,
+because an undeclared key is silently dropped by Pydantic, which is exactly how
+the "Bypass AI" toggle once did nothing.
+
+It prefers `json3` subtitles for the same reason the server does: that format
+carries YouTube's own per-word timings, and word timings are what the karaoke
+subtitles are built from.
+
+## DEC-041 — `clipping/ingest/fetch.py` is named `downloader.py`
+**Context.** The package exported a function `fetch` from a module `fetch`, so
+`from clipping.ingest import fetch` returned the function to some callers and
+the module to others. Thirty-five tests failed on it at once.
+**Decision.** Rename the module.
+**Consequence.** Renaming the module is better than renaming the function: the
+function's name is what callers read, and `ingest.fetch(url)` says what it
+does. Recorded because the failure mode is confusing out of proportion to the
+cause — an `AttributeError` on a module that plainly has the attribute.

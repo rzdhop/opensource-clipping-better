@@ -48,6 +48,11 @@ services:
       - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
       - LLM_CHAIN=${LLM_CHAIN:-}
       - STT_CHAIN=${STT_CHAIN:-}
+      # Server-side downloading. On by default and best-effort: sites refuse
+      # datacenter IPs often, and a refusal parks the job in `needs_upload`
+      # rather than failing it. Set to 0 to stop trying entirely.
+      - ENABLE_SERVER_FETCH=${ENABLE_SERVER_FETCH:-1}
+      - POT_PROVIDER_URL=${POT_PROVIDER_URL:-}
     restart: unless-stopped
     # Uncomment below for GPU support (requires NVIDIA Container Toolkit)
     # deploy:
@@ -57,6 +62,22 @@ services:
     #         - driver: nvidia
     #           count: 1
     #           capabilities: [gpu]
+
+  # Only started with `--profile pot`. Supplies proof-of-origin tokens to
+  # yt-dlp, which its own authors describe as something that "may help your
+  # traffic seem more legitimate" -- NOT a bypass. Worth trying if server-side
+  # downloads fail often; the reliable answer is still tools/rzclips-fetch.py
+  # on a machine with a home connection.
+  #
+  #   docker compose --profile pot up -d
+  #   # then set POT_PROVIDER_URL=http://bgutil:4416 in .env
+  bgutil:
+    image: brainicism/bgutil-ytdlp-pot-provider
+    container_name: osc-bgutil
+    profiles: ["pot"]
+    ports:
+      - "127.0.0.1:4416:4416"
+    restart: unless-stopped
 
   # Only started with `--profile domain`, for serving on your own domain.
   # Tailscale needs none of this; see docs/deploy-tailscale.md.

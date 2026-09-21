@@ -8,10 +8,11 @@ import asyncio
 import json
 from datetime import datetime, timezone
 
-from fastapi import Depends, APIRouter, HTTPException
+from fastapi import Depends, APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 
 from ..auth import require_token
+from .files import save_upload
 from ..models import (
     JobCreateRequest,
     JobEvent,
@@ -65,15 +66,19 @@ def _job_to_response(job: dict) -> JobResponse:
 @router.post("", status_code=201)
 async def create_job(req: JobCreateRequest) -> JobResponse:
     """Create a new clipping job and submit it to the background queue."""
-    # Local-first: a job needs a video on disk. `url` is no longer an input --
-    # nothing downloads it.
-    if not req.upload_filename and not req.reuse_job_id:
+    # A job needs a source: an upload, a previous job to reuse, or a URL the
+    # server can attempt to fetch. The URL is explicitly best-effort -- sites
+    # refuse datacenter IPs often -- and a refusal parks the job in
+    # `needs_upload` rather than failing it.
+    if not req.upload_filename and not req.reuse_job_id and not req.source_url:
         raise HTTPException(
             status_code=400,
             detail=(
-                "Either 'upload_filename' or 'reuse_job_id' must be provided. "
-                "This pipeline does not download: upload the video (and "
-                "optionally a .vtt transcript) first."
+                "A job needs one of 'upload_filename', 'reuse_job_id' or "
+                "'source_url'. Uploading the video (and optionally a "
+                ".vtt/.srt transcript) is the reliable path; 'source_url' asks "
+                "this server to try the download itself, which sites often "
+                "refuse from a datacenter IP."
             ),
         )
 
@@ -112,6 +117,49 @@ async def create_job(req: JobCreateRequest) -> JobResponse:
 
     job = store.get_job(job_id)
     return _job_to_response(job)
+
+
+@router.post("/{job_id}/source", status_code=200)
+async def attach_source(
+    job_id: str,
+    file: UploadFile = File(...),
+    subtitle: UploadFile | None = File(None),
+) -> JobResponse:
+    """Attach a video to a job waiting in ``needs_upload`` and resume it.
+
+    The job keeps its id, its settings and its output directory, so anything it
+    already produced -- notably a saved transcript (DEC-022) -- is still there.
+    Creating a new job instead would throw all of that away to fix a download
+    the user has already worked around.
+    """
+    job = store.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    status = job.get("status")
+    status = getattr(status, "value", status)
+    if status != JobStatus.NEEDS_UPLOAD.value:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"This job is '{status}', not '{JobStatus.NEEDS_UPLOAD.value}'. "
+                f"Only a job waiting for its source can have one attached."
+            ),
+        )
+
+    video_name = await save_upload(file)
+    subtitle_name = await save_upload(subtitle) if subtitle is not None else None
+
+    config = dict(job.get("config") or {})
+    config["upload_filename"] = video_name
+    if subtitle_name:
+        config["transcript_filename"] = subtitle_name
+
+    store.update_job(job_id, config=config, upload_filename=video_name,
+                     error=None, status=JobStatus.QUEUED)
+    await worker.submit_job(job_id, config)
+
+    return _job_to_response(store.get_job(job_id))
 
 
 @router.get("")

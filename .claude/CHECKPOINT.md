@@ -5,12 +5,13 @@
   device, auto-download of video + subtitles, SRT in/out, every feature kept.
   Plan approved by the human: `/home/ubuntu/.claude/plans/hey-here-is-sleepy-walrus.md`
   (11 stages; read it before resuming — it carries the root causes and the design).
-- **Phase:** IMPLEMENT — **Stages 1-7 DONE.** S1 rolling-display cue semantics +
+- **Phase:** IMPLEMENT — **Stages 1-8 DONE.** S1 rolling-display cue semantics +
   SRT writer (`5d46c81`); S2 the provider core (`52ac830`); S3 beats, snapping,
   presets and language detection (`cbe10f3`); S4 the three-pass analyzer
   (`e2856b6`, `ed447b6`), proven live; S5 hosted transcription (`f54d508`); S6 the
-  truth fixes (`818d748`); S7 auth, the static dashboard and Tailscale access.
-  Next: Stage 8, URL ingestion and the PC helper.
+  truth fixes (`818d748`); S7 auth, the static dashboard and Tailscale
+  access (`c53949b`); S8 URL ingestion and the PC helper. Next: Stage 9, SRT
+  export per clip.
 - **⚠️ Production was already broken before this work:** the shipped NVIDIA model
   `deepseek-ai/deepseek-v4-flash-0731` now returns **410 Gone** (it answered a
   real job on 2026-09-19 and was dead by 2026-09-21; the whole DeepSeek v4
@@ -22,9 +23,9 @@
   Roll back here.
 - **Tier-1 baseline at `f8ad8b4`:** pytest **369 passed, 0 failed**; `compileall`
   clean. (Needs `PYTHONPYCACHEPREFIX` locally — see the root `__pycache__` note.)
-- **Next action:** Stage 8 — `clipping/ingest/fetch.py` (yt-dlp behind a flag,
-  `needs_upload` status, `POST /api/jobs/{id}/source`) and the stdlib-only
-  `tools/rzclips-fetch.py` helper for `pops-1`.
+- **Next action:** Stage 9 — `clipping/subtitles_export.py`, called from the
+  render loop in both `clipping/runner.py` and `web/api/worker.py` inside a
+  `try/except OSError`, plus `srt_path` in the manifest.
 - **The human must now, before the app is reachable from the phone:**
   1. enable HTTPS certificates in the Tailscale admin console, then
      `tailscale serve --bg --https=443 http://127.0.0.1:8000`;
@@ -43,9 +44,9 @@
   then the chain runs on NVIDIA alone, which works: keyless links are skipped
   with a printed reason. `python tools/bench_llm.py` validates each key as it
   arrives and prints a suggested `LLM_CHAIN` ordered by measured speed.
-- **Tier-1 after Stage 7:** pytest **907 passed, 0 failed**; `compileall` clean.
-  Under the simulated pytest-only CI environment: **848 passed, 31 skipped, 0
-  failed**. Previously: 799 after S6, 782 after S5, (733 after S4, 648 after S3, 523 after S2, 368 after S1, 328 at
+- **Tier-1 after Stage 8:** pytest **960 passed, 0 failed**; `compileall` clean.
+  Under the simulated pytest-only CI environment: **900 passed, 32 skipped, 0
+  failed**. Previously: 848 after S7, 799 after S6, 782 after S5, (733 after S4, 648 after S3, 523 after S2, 368 after S1, 328 at
   baseline) — every new test runs in CI, none of them skipped.
 - **Stage 5 is NOT live-verified.** Audio extraction and chunking are (see
   below), but the hosted transcription call itself needs `GROQ_API_KEY`, which
