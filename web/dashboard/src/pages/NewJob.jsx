@@ -172,6 +172,10 @@ function NewJob() {
 
   // Config
   const [clips, setClips] = useState(7)
+  // Clip length. The API has accepted `platform` since the preset snapper
+  // landed and it drives clipping/analysis/snap.py, but the page never sent
+  // it -- so every job created here was 'auto' (20-75s) whatever you wanted.
+  const [platform, setPlatform] = useState('auto')
   const [ratio, setRatio] = useState('9:16')
   const [fontStyle, setFontStyle] = useState('HORMOZI')
   const [whisperModel, setWhisperModel] = useState('large-v3')
@@ -235,6 +239,7 @@ function NewJob() {
       const config = reuseJob.config || {}
       if (config.clips !== undefined) setClips(config.clips)
       if (config.ratio !== undefined) setRatio(config.ratio)
+      if (config.platform !== undefined) setPlatform(config.platform)
       if (config.render_height !== undefined) setRenderHeight(config.render_height)
       if (config.words_per_sub !== undefined) setWordsPerSub(config.words_per_sub)
       if (config.hook_duration !== undefined) setHookDuration(config.hook_duration)
@@ -338,6 +343,7 @@ function NewJob() {
       const jobFields = {
         clips,
         ratio,
+        platform,
         render_height: renderHeight,
         words_per_sub: Number(wordsPerSub),
         hook_duration: Number(hookDuration),
@@ -635,6 +641,21 @@ function NewJob() {
             <div className="form-group">
               <label className="form-label">Number of Clips</label>
               <input className="form-input" type="number" min="1" max="30" value={clips} onChange={(e) => setClips(parseInt(e.target.value) || 7)} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Clip Length</label>
+              <select className="form-select" value={platform} onChange={(e) => setPlatform(e.target.value)}>
+                <option value="auto">Auto — 20–75s, aims for 40s (posts anywhere)</option>
+                <option value="tiktok">TikTok — 15–90s, aims for 34s</option>
+                <option value="reels">Reels — 15–90s, aims for 30s</option>
+                <option value="shorts">Shorts — 15–59s, aims for 45s</option>
+                <option value="long">Long — 60–179s, aims for 90s</option>
+              </select>
+              <p className="form-hint">
+                The window each clip is snapped into. A moment shorter than the
+                minimum is grown into neighbouring sentences, or dropped if it
+                cannot reach it.
+              </p>
             </div>
             <div className="form-group">
               <label className="form-label">Aspect Ratio</label>
