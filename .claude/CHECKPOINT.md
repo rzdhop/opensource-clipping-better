@@ -1,185 +1,60 @@
 # CHECKPOINT
 
 ## In progress
-- **Task:** Re-architect into **rzdhop's clips** — free hosted AI endpoints, any
-  device, auto-download of video + subtitles, SRT in/out, every feature kept.
-  Plan approved by the human: `/home/ubuntu/.claude/plans/hey-here-is-sleepy-walrus.md`
-  (11 stages; read it before resuming — it carries the root causes and the design).
-- **Phase:** IMPLEMENT — **Stages 1-10 DONE.** S1 rolling-display cue semantics +
-  SRT writer (`5d46c81`); S2 the provider core (`52ac830`); S3 beats, snapping,
-  presets and language detection (`cbe10f3`); S4 the three-pass analyzer
-  (`e2856b6`, `ed447b6`), proven live; S5 hosted transcription (`f54d508`); S6 the
-  truth fixes (`818d748`); S7 auth, the static dashboard and Tailscale
-  access (`c53949b`); S8 URL ingestion and the PC helper
-  (`20102bd`); S9 SRT export (`3080932`); S10 the rename,
-  one version, API docs. Next: Stage 11, retiring the legacy analysis path.
-- **⚠️ Production was already broken before this work:** the shipped NVIDIA model
-  `deepseek-ai/deepseek-v4-flash-0731` now returns **410 Gone** (it answered a
-  real job on 2026-09-19 and was dead by 2026-09-21; the whole DeepSeek v4
-  family has left the NIM catalogue). The default is now
-  `google/gemma-4-31b-it`, picked by live benchmark — 6.0s and 31.3 tok/s
-  against the real workload, 3/3 schema-valid. See DEC-024.
-- **Branch:** `feature/rzdhop-clips-rearchitecture`, cut from `main` at `f8ad8b4`.
-- **Checkpoint commit:** `f8ad8b4` — clean tree, identical to `origin/main`.
-  Roll back here.
-- **Tier-1 baseline at `f8ad8b4`:** pytest **369 passed, 0 failed**; `compileall`
-  clean. (Needs `PYTHONPYCACHEPREFIX` locally — see the root `__pycache__` note.)
-- **STAGE 11 IS DELIBERATELY NOT DONE.** Its gate ("only after a full live job
-  has completed on the new path") is now met — the analysis and the render have
-  both run for real — but it **deletes the rollback**: `--ai-provider nvidia`
-  and `gemini` are what someone falls back to if the chain misbehaves in a way
-  no test covers, and the human has not yet run a single job themselves. It is
-  one commit whenever they want it. Everything it would remove is dead weight,
-  not a dependency: nothing on the new path imports it.
-- **What Stage 11 would do:** retire the legacy single-request analysis path
-  from `clipping/engine.py` (`get_analysis_prompt`, `TARGET_ACCOUNTS`,
-  `analyze_with_nvidia`, `analyze_with_gemini`) and rewrite
-  `tests/test_nvidia_retry.py` against `clipping/providers/llm.py`, preserving
-  N-1..N-5 as chain-level assertions. **Do this only after a full live job has
-  completed on the new path** — the analysis has been proven live, the render
-  has not, because this host has no cv2/mediapipe and no docker access.
-- **The human must now, before the app is reachable from the phone:**
-  1. enable HTTPS certificates in the Tailscale admin console, then
-     `tailscale serve --bg --https=443 http://127.0.0.1:8000`;
-  2. rebuild (`docker compose up -d --build`) and read the API token off the
-     startup log, or `docker compose exec backend cat /app/data/api_token`.
-  See `docs/deploy-tailscale.md`.
-- **Rollback for the new analysis:** `--ai-provider nvidia` (or `gemini`) runs
-  the original single-request path, which is still in `engine.py` untouched and
-  still covered by `tests/test_nvidia_retry.py`. Stage 11 retires it, and not
-  before a full live job has completed on the new path.
-- **Inspect before rendering:** `--dry-run-analysis` writes
-  `gemini_response.json` + `metadata_preview.json` and stops; re-run with
-  `--load-gemini-json` to render from them for free. It needs no render stack,
-  so it works on this host, which has no cv2 or mediapipe.
-- **The human still owes four keys** (Groq, Gemini, OpenRouter, Mistral). Until
-  then the chain runs on NVIDIA alone, which works: keyless links are skipped
-  with a printed reason. `python tools/bench_llm.py` validates each key as it
-  arrives and prints a suggested `LLM_CHAIN` ordered by measured speed.
-- **Tier-1 after Stage 10:** pytest **998 passed, 0 failed**; `compileall`
-  clean. Under the simulated pytest-only CI environment: **936 passed, 34
-  skipped, 0 failed**. Previously: 918 after S9, 900 after S8, 848 after S7, 799 after S6, 782 after S5, (733 after S4, 648 after S3, 523 after S2, 368 after S1, 328 at
-  baseline) — every new test runs in CI, none of them skipped.
-- **Stage 5 is NOT live-verified.** Audio extraction and chunking are (see
-  below), but the hosted transcription call itself needs `GROQ_API_KEY`, which
-  does not exist yet. Until then transcription still falls through to local
-  Whisper, which on this host is 4.6x realtime.
-- **Tier-1 after Stage 1:** pytest **409 passed, 0 failed**; `compileall` clean.
-  Under the simulated pytest-only CI environment: **368 passed, 20 skipped, 0
-  failed**, against a measured baseline of **328 passed, 20 skipped** — exactly
-  the 40 new tests, no new skips. The simulator must allow `pygments`,
-  `exceptiongroup` and `tomli`: pytest 8.4+ depends on pygments, so CI has it.
-- **Tier-2 owed to the human:** a live render on the running containers. This
-  host has no `cv2`/`mediapipe` and the docker socket is permission-denied, and
-  the running backend imported `clipping.transcript` before the fix, so it needs
-  `docker compose restart backend` before any job exercises the new parser.
-- **Open questions:** none blocking. The human must create the four API keys
-  (Groq, Gemini, OpenRouter, Mistral), enable HTTPS certificates in the Tailscale
-  admin console, and install Python + yt-dlp on `pops-1` before Stages 2/5/7/8
-  can be verified live.
-
-### Why this task exists — the two faults, both measured
-1. **The transcript loses ~35% of its words before the model sees it.** The
-   human's subtitle exports (DownloadYoutubeSubtitles.com, VTT and SRT alike)
-   carry single-line cues with **no inline word tags**, **unique text** and
-   **overlapping windows** (0.560→2.280, 1.439→3.800, 2.280→6.000 …).
-   `_expand_run_to_words` spreads each cue's words evenly across its own span,
-   so cue N+1's first words start before cue N's last words, and
-   `_enforce_monotonic` drops them. Dedupe cannot help — the text never repeats.
-   **Measured:** `uploads/subtitles.vtt` → 718 of 2095 words dropped today;
-   simulating the rolling-display clamp keeps **2095 of 2095**. That file has
-   371 cues and **zero** inline tags, and no existing fixture contains a single
-   overlapping cue pair, so the fix cannot move an existing test.
-2. **The analysis asks for more output than any free provider can produce.**
-   One request demands 22 required fields per clip (~1200 output tokens each)
-   from a model measured at ~12 tok/s behind a ~300s gateway: 7 clips needs
-   ~660s and can never finish, and it also exceeds Groq's 8k TPM. Five of those
-   fields are read by nothing. The replacement is three small passes with a
-   largest single generation of ~320 tokens. See the plan for the budget table.
-
-### Stage 4 proved out live — the first real clip set this project has made
-Ran the real three-pass analysis against the live NVIDIA endpoint on the
-human's own 20-minute French video, `--clips 3 --platform tiktok
---dry-run-analysis`. It succeeded in **~13 minutes on the slowest provider in
-the chain** — NVIDIA alone, because Groq and Gemini have no keys yet and were
-skipped with a printed reason, exactly as designed.
-
-| rank | span | duration | title (native / en) |
-|---|---|---|---|
-| 1 | 750.5 → 799.7 | 49s | Sa femme l'étrangle au lieu de l'appeler / His wife strangles him instead of calling him |
-| 2 | 0.4 → 35.4 | 35s | L'île des puceaux / The Virgin Island |
-| 3 | 1005.6 → 1052.9 | 47s | Un médecin qui fait ça avec son client ? / A doctor doing that with his client? |
-
-Every contract property was then checked against the transcript, not assumed:
-all three inside the 15-90s tiktok window, **zero overlap** between them, each
-starting on a beat boundary, each hook inside its clip, every b-roll starting
-after its hook ends, and **every emphasis word genuinely spoken** (`puceaux`,
-`viergent`, `bomboclat`, `virginité`). Output is in
-`outputs/{gemini_response,metadata_preview}.json`.
-
-The clips are also well spread (0s, 750s, 1005s), which is the re-rank pass
-doing what the monolith claimed to do and never could.
-
-### Stage 5, verified as far as a machine with no Groq key allows
-Audio extraction and chunk planning were run against the real video:
-
-| measurement | result |
-|---|---|
-| extraction time | 6.7s for a 20-minute video |
-| audio size | **39.3 MB** at 16 kHz mono FLAC, confirmed by `ffprobe` |
-| Groq free-tier cap | 25 MB — so this file genuinely needs splitting |
-| plan | 2 chunks (0→600s, 596→1211.3s), boundaries snapped to silence |
-
-The 39.3 MB is worth remembering: an earlier note here estimated 19-23 MB from
-the format alone and was wrong, because FLAC is variable-rate and this video has
-music under most of it. The planner derives bytes-per-second from the actual
-file, so a quiet interview of the same length stays one request.
-
-### RC-7 is CLOSED — the first complete run this project has ever had
-The render had never been exercised on this branch: this host has no
-`cv2`/`mediapipe` and the docker socket is permission-denied, so every earlier
-check was structural. Both were worked around by installing the render stack
-into an **isolated** `--target` directory (`/tmp/.../renderdeps`; system
-site-packages confirmed untouched) and running the pipeline against it:
-
-```
-PYTHONPATH=<renderdeps> python3 main.py --video uploads/video.mp4 \
-  --transcript <the French VTT> --no-whisper --clips 3 --platform tiktok \
-  --load-gemini-json --no-broll --no-bgm --no-hook
-```
-
-| clip | output | duration |
-|---|---|---|
-| 1 | `highlight_rank_1_ready.mp4` 1080x1920 h264+aac | 33.5s |
-| 2 | `highlight_rank_2_ready.mp4` 1080x1920 h264+aac | 30.0s |
-| 3 | `highlight_rank_3_ready.mp4` 1080x1920 h264+aac | 38.2s |
-
-Plus three thumbnails and three `.srt` sidecars. Frames were extracted and
-inspected: vertical face-tracked framing, French karaoke subtitles burned in
-with the current word highlighted, accents intact.
-
-Two things worth carrying forward:
-- **`studio/effects.py` imports `yt_dlp` at module scope**, so the render layer
-  cannot be imported without it even under `--no-hook`, which skips the only
-  feature that uses it. Declared in `requirements.txt` and documented by
-  DEC-001, so not a regression — but it is why the first attempt died after the
-  analysis had already succeeded.
-- **Rendered durations are shorter than the analysed spans** (33.5s from a 49s
-  span). That is `keep_segments` trimming dead air, derived from `drop_beats` —
-  the segment-trimming path working end to end.
+- **Task:** The clips render but the app cannot show them — the media viewer
+  plays nothing, Download saves a `.json`, direct URLs say "file not available".
+  Then land everything on `main`.
+  Plan approved by the human:
+  `/home/ubuntu/.claude/plans/i-want-the-code-breezy-starlight.md` (11 stages;
+  read it before resuming — it carries the root cause and the design).
+- **Phase:** CHECKPOINT done → next is Stage 1 (merge `origin/main`).
+- **Current stage:** Stage 0 complete. **Next action:** `git merge origin/main`,
+  resolve 11 conflicts with this branch winning every genuine clash.
+- **Open questions:** none. The human answered all three: merge and keep both
+  (this branch wins conflicts); access is **tailnet, plain HTTP, several
+  devices**; and all three adjacent log defects are in scope (font, thumbnails
+  + `.srt`, dead glitch URL).
+- **Root cause of the reported bug:** `c53949b` put `Depends(require_token)` on
+  the whole files router (`web/api/routes/files.py:15`) and the token is
+  deliberately header-only (`web/api/auth.py:88-105`). But
+  `JobDetail.jsx:312` (`<video src>`) and `:321` (`<a href download>`) are
+  browser requests, which cannot carry a header. Both get
+  `401 {"detail":"Missing or invalid API token."}`; because that body is
+  `application/json`, the `download` attribute saves it and the browser
+  rewrites the extension. **That JSON file IS the 401.** The clips on disk are
+  correct — job `2773bd83c7b6` has 7 `.mp4` + 7 `.srt` + 7 `.jpg`.
+- **Fix chosen:** HMAC-signed, expiring, per-file media URLs
+  (`?exp=&sig=`), accepted without a header. A session cookie was rejected
+  because the deployment is plain HTTP on a tailnet IP, where a `Secure`
+  cookie is **silently dropped** — login would appear to work and then 401
+  everything with no error anywhere. See DEC-025.
+- **Branch:** `feature/rzdhop-clips-rearchitecture`.
+- **Checkpoint commit:** `233b860` — clean tree. Roll back here.
+- **Tier-1 baseline at `233b860`:** pytest **1008 passed, 0 failed** (5.3s).
+  Run with `PYTHONPYCACHEPREFIX` set — see the root `__pycache__` note below.
+- **Where main stands:** local `main` is stale at `f8ad8b4` (the merge-base).
+  `origin/main` is `d5c502a`, 13 commits past it (persistent Settings, the
+  `openai_compat` provider, the reasoning-model JSON rescue); this branch is 16
+  past it. They conflict in 11 files.
+- **One merge hunk checked because it looked like a trap and is not:**
+  `NVIDIA_MODEL`. `origin/main` moved it to `nvidia/nemotron-3-super-120b-a12b`
+  after two DeepSeek models died; this branch has `google/gemma-4-31b-it`,
+  which is what the human's 18:12 run on 2026-09-21 actually succeeded with
+  (7 clips). Branch wins, and it is the better value, not a regression.
 
 ### Regression contract for this task
 | # | Must keep working | Proven by |
 |---|---|---|
-| RC-1 | The `data_segmen` contract | `tests/helpers.py::assert_valid_data_segmen` across every parser and producer |
-| RC-4 | Karaoke word alignment | **VERIFIED for Stage 1 without a render**: loaded the real `clipping/studio/subtitles.py` with `cv2`/`mediapipe`/`numpy`/`requests` stubbed (`buat_file_ass` touches none of them), regenerated the ASS and compared every highlighted word back to the source — **0 mismatches** across 4 fixtures plus a 60s window of the real French file, at 10ms tolerance (ASS centisecond resolution). A full ffmpeg render is still owed |
-| RC-7 | The render layer is intact | **VERIFIED by a real render** (see above): three 1080x1920 h264+aac clips with burned-in karaoke subtitles and thumbnails. `clipping/studio/` carries exactly one additive line (`viral_score` in the manifest). `tests/test_slim_schema_adapter.py` reads `studio/*.py` and `runner.py` by AST and asserts every clip key they access is produced by the adapter — proven non-vacuous by removing `typography_plan` and watching it fail |
-| RC-10 | Web API job → `completed` | live job on the running stack |
-| RC-11 | Job settings reach the pipeline | `tests/test_web_job_fields.py` |
-| RC-12 | Stdlib-only CI suite | every new test checked under the simulated pytest-only environment below |
-| N-1..N-5 | NVIDIA ladder semantics | `tests/test_nvidia_retry.py` stays green until Stage 11 rewrites it against the provider layer |
+| MC-1 | Every non-media route still refuses an unauthenticated request | `tests/test_auth_token.py` green **unchanged**, incl. `POST /api/shutdown`, `/api/jobs`, `/api/settings`, `/api/upload` |
+| MC-2 | A media signature is not a general credential | new negative battery: a valid clip signature pasted onto `/api/jobs`, `/api/settings`, `/api/upload`, `/api/shutdown` still 401s |
+| MC-3 | The outputs directory listing stays private | `tests/test_auth_token.py:271` (`GET /api/outputs/somejob` → 401) stays valid **by construction**: it has no `filename` path param, so it cannot satisfy the signature path |
+| MC-4 | The traversal guard still refuses | `tests/test_auth_token.py:309-360`; plus a new test that a valid signature does not let a traversal attempt through |
+| MC-5 | The manifest/worker contract stays exact | `tests/test_manifest_fields.py` |
+| MC-6 | The dashboard mount stays the last route | `test_the_dashboard_mount_is_the_last_route_registered` |
+| MC-7 | The token never travels in a URL | `test_the_token_never_travels_in_a_query_string`, plus a new sibling: a minted media URL never contains the token as a substring |
+| MC-8 | `outputs/jobs.json` is never rewritten by this change | new fields are derived on read; verified by mtime |
 
-## Previous task (closed)
+## Previous task (closed — rearchitecture stages 1-10)
 - **Task:** Job `756c7ee8a2c3` burned 2h22m and produced nothing. **COMPLETE** — 5 stages, last `c68eb3d`, plus `e5f473d`/`f8ad8b4` CI fixes.
 - **Phase:** closed out. Merged to `main` and pushed; `origin/main` is `f8ad8b4`.
 - Its findings (the NVIDIA 504 arithmetic, the live probes, the transcript
