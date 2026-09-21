@@ -181,3 +181,51 @@ false".
 the client said otherwise" logic must use the same mechanism -- the payload
 dict cannot express the distinction.
 
+
+## DEC-016 — One generic OpenAI-compatible provider, not a provider per vendor
+**Context.** The human was previously pointed at Groq, xAI (Grok) and Mistral as
+free analysis providers and found none of them usable, and the Settings page had
+nowhere to put such a key in any case. Checking the providers on 2026-09-21:
+xAI ended its free API tier in May 2025 and offers only conditional promo
+credits; Groq's and Mistral's docs still advertise a free tier, but the human's
+own attempt says otherwise. NVIDIA NIM and Google Gemini both still issue a key
+with no credit card. Meanwhile `analyze_with_nvidia` turned out to be ordinary
+OpenAI-SDK code with four NVIDIA-specific details in it.
+**Decision.** Keep NVIDIA and Gemini as the two recommended providers, and add a
+single `openai_compat` provider taking a base URL, a key and a model, with
+base-URL presets in the UI. No named Groq/Mistral/xAI providers.
+**Consequence.** One dispatcher branch and one `PROVIDER_KEYS` entry covers
+OpenRouter, Groq, Mistral, xAI, vLLM and Ollama alike, and anything else that
+appears later, without the enum, the argparse choices, the gate and the settings
+form growing per vendor. Three sub-decisions:
+- The id is `openai_compat`, not `openai`: a test already pins `"openai"` as an
+  *unknown* provider, and `OPENAI_API_KEY`/`OPENAI_BASE_URL` are read implicitly
+  by the `openai` SDK, so reusing those names would cross-talk with a real
+  OpenAI account. The env vars carry the same `_COMPAT` infix for that reason.
+- The API key stays required even for a local Ollama, which ignores it. Making
+  the gate conditional on the URL looking like localhost would put URL parsing
+  inside a security-adjacent check to save the user typing one word; the UI says
+  to enter any value instead.
+- `PROVIDER_REQUIRED_EXTRA` extends the fail-fast gate to the base URL and model.
+  A half-configured endpoint fails as surely as a missing key and should fail as
+  early — before ingestion and transcription have run.
+
+## DEC-017 — Settings persist to `.local/settings.json`, and an empty value clears
+**Context.** Everything entered on the Settings page lived in a module-level dict
+in `worker.py`, so a restart discarded every API key with no warning.
+**Decision.** Persist an allow-listed subset to `.local/settings.json`
+(overridable with `WEB_SETTINGS_FILE`), written atomically and owner-only, loaded
+from the app lifespan. An empty value removes an override rather than storing an
+empty string.
+**Consequence.** Three things follow, and each was the reason for a rejected
+alternative:
+- **Not `outputs/settings.json`.** `routes/files.py` serves that directory to
+  the browser. Its `".."` check happens to make the current route shape safe, but
+  a secrets file does not belong inside a served tree on principle.
+- **Not loaded at import**, the way `store.py` loads jobs. An import-time read of
+  a secrets file means any test importing the worker picks up the developer's
+  real keys.
+- **Empty means clear.** `config_adapter` resolves every key as
+  `env.get(NAME, os.environ.get(NAME, ""))`, so a persisted empty string would
+  shadow a working `.env` key permanently, with no way to undo it from the UI.
+  The bug was latent before persistence; storing values would have made it stick.

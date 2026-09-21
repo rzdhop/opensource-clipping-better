@@ -98,8 +98,9 @@ keep every key name and enum value byte-identical.
 - **Python** 3.10+
 - **FFmpeg** installed and available in PATH
 - **CUDA GPU** recommended, but only if you let Whisper transcribe. Supply `--transcript` and no GPU is needed at all.
-- **NVIDIA NIM API Key** — the default AI provider ([get one here](https://build.nvidia.com/))
-- **Google Gemini API Key** (optional — only for `--ai-provider gemini` and `--voiceover`) ([get one here](https://aistudio.google.com/apikey))
+- **NVIDIA NIM API Key** — the default AI provider, free with no credit card ([get one here](https://build.nvidia.com/))
+- **Google Gemini API Key** (optional — only for `--ai-provider gemini` and `--voiceover`), also free with no credit card ([get one here](https://aistudio.google.com/apikey))
+- **Any other OpenAI-compatible endpoint** (optional) — set `OPENAI_COMPAT_BASE_URL`, `OPENAI_COMPAT_API_KEY` and `OPENAI_COMPAT_MODEL`, then run with `--ai-provider openai_compat`. Works with OpenRouter, Groq, Mistral, xAI, a self-hosted vLLM or a local Ollama.
 - **Pexels API Key** (optional, for B-roll — [get one here](https://www.pexels.com/api/))
 - **HuggingFace Token** (optional, for split-screen / camera-switch — [get one here](https://huggingface.co/settings/tokens), requires accepting [Pyannote model agreement](https://huggingface.co/pyannote/speaker-diarization-3.1))
 
@@ -329,7 +330,9 @@ python main.py --help
 | `--source-url` | — | Attribution for the description/manifest only. Never fetched |
 | `--clips`, `-n` | `7` | Number of highlight clips to generate |
 | `--ratio`, `-r` | `9:16` | Output aspect ratio (`9:16`, `16:9`, `1:1`, `3:4`, `4:5`) |
-| `--ai-provider` | `gemini` | AI provider for analysis (`gemini` or `nvidia`). |
+| `--ai-provider` | `nvidia` | AI provider for analysis (`nvidia`, `gemini` or `openai_compat`). |
+| `--openai-compat-base-url` | `$OPENAI_COMPAT_BASE_URL` | Base URL of a custom OpenAI-compatible endpoint, including the version path. |
+| `--openai-compat-model` | `$OPENAI_COMPAT_MODEL` | Model id that endpoint expects. |
 | `--nvidia-model` | `deepseek-ai/deepseek-v4-flash-0731` | Model for NVIDIA NIM. Models are retired periodically; list current ones at `https://integrate.api.nvidia.com/v1/models`. |
 | `--render-height` | `1080` | Target render output height (`1080`, `1440`, `2160`, `source`) |
 | `--video-bitrate` | `auto` | Target video bitrate (e.g. 8M, 12M, auto). 'auto' scales based on resolution. |

@@ -1,6 +1,15 @@
 # ASSUMPTIONS
 
 ## Unconfirmed
+- **A-009** — Groq and Mistral do not reliably offer a usable free API key,
+  despite their own documentation describing free tiers on 2026-09-21. This rests
+  on the human's own attempt, not on a page we can cite, and it is the reason
+  neither is recommended anywhere in the UI. It does not affect correctness:
+  both are reachable through the generic `openai_compat` provider, which makes no
+  claim about their pricing. Recheck before ever promoting either to a
+  recommended provider. xAI is a separate and firmer case: its own pricing page
+  confirms the free API tier ended in May 2025.
+
 - (none open)
 
 ## Confirmed
