@@ -788,3 +788,161 @@ the module to others. Thirty-five tests failed on it at once.
 function's name is what callers read, and `ingest.fetch(url)` says what it
 does. Recorded because the failure mode is confusing out of proportion to the
 cause — an `AttributeError` on a module that plainly has the attribute.
+
+> **Renumbered on merge (2026-09-21).** DEC-042 to DEC-045 below arrived from
+> `origin/main` as DEC-023 to DEC-026. This branch had already published its own
+> DEC-023 to DEC-041 across 16 commits, so main's four moved rather than ours.
+> A commit message on `main` may still cite the old number:
+> DEC-023→042, 024→043, 025→044, 026→045. Main itself had already renumbered
+> these once (from DEC-016..019); that earlier mapping is superseded by this one.
+
+## DEC-042 — One generic OpenAI-compatible provider, not a provider per vendor
+**Context.** The human was previously pointed at Groq, xAI (Grok) and Mistral as
+free analysis providers and found none of them usable, and the Settings page had
+nowhere to put such a key in any case. Checking the providers on 2026-09-21:
+xAI ended its free API tier in May 2025 and offers only conditional promo
+credits; Groq's and Mistral's docs still advertise a free tier, but the human's
+own attempt says otherwise. NVIDIA NIM and Google Gemini both still issue a key
+with no credit card. Meanwhile `analyze_with_nvidia` turned out to be ordinary
+OpenAI-SDK code with four NVIDIA-specific details in it.
+**Decision.** Keep NVIDIA and Gemini as the two recommended providers, and add a
+single `openai_compat` provider taking a base URL, a key and a model, with
+base-URL presets in the UI. No named Groq/Mistral/xAI providers.
+**Consequence.** One dispatcher branch and one `PROVIDER_KEYS` entry covers
+OpenRouter, Groq, Mistral, xAI, vLLM and Ollama alike, and anything else that
+appears later, without the enum, the argparse choices, the gate and the settings
+form growing per vendor. Three sub-decisions:
+- The id is `openai_compat`, not `openai`: a test already pins `"openai"` as an
+  *unknown* provider, and `OPENAI_API_KEY`/`OPENAI_BASE_URL` are read implicitly
+  by the `openai` SDK, so reusing those names would cross-talk with a real
+  OpenAI account. The env vars carry the same `_COMPAT` infix for that reason.
+- The API key stays required even for a local Ollama, which ignores it. Making
+  the gate conditional on the URL looking like localhost would put URL parsing
+  inside a security-adjacent check to save the user typing one word; the UI says
+  to enter any value instead.
+- `PROVIDER_REQUIRED_EXTRA` extends the fail-fast gate to the base URL and model.
+  A half-configured endpoint fails as surely as a missing key and should fail as
+  early — before ingestion and transcription have run.
+
+## DEC-043 — Settings persist to `.local/settings.json`, and an empty value clears
+**Context.** Everything entered on the Settings page lived in a module-level dict
+in `worker.py`, so a restart discarded every API key with no warning.
+**Decision.** Persist an allow-listed subset to `.local/settings.json`
+(overridable with `WEB_SETTINGS_FILE`), written atomically and owner-only, loaded
+from the app lifespan. An empty value removes an override rather than storing an
+empty string.
+**Consequence.** Three things follow, and each was the reason for a rejected
+alternative:
+- **Not `outputs/settings.json`.** `routes/files.py` serves that directory to
+  the browser. Its `".."` check happens to make the current route shape safe, but
+  a secrets file does not belong inside a served tree on principle.
+- **Not loaded at import**, the way `store.py` loads jobs. An import-time read of
+  a secrets file means any test importing the worker picks up the developer's
+  real keys.
+- **Empty means clear.** `config_adapter` resolves every key as
+  `env.get(NAME, os.environ.get(NAME, ""))`, so a persisted empty string would
+  shadow a working `.env` key permanently, with no way to undo it from the UI.
+  The bug was latent before persistence; storing values would have made it stick.
+
+## DEC-044 — The NIM default leaves the DeepSeek family for NVIDIA's own model
+**Context.** `deepseek-ai/deepseek-v4-flash-0731` reached end of life at
+2026-09-21T08:00:00Z and returns 410, so every default job failed. This is the
+third death in this slot (DEC-004 `deepseek-v4-pro`, DEC-007 this one), and the
+DeepSeek chat family is now absent from the platform entirely — only
+`deepseek-coder-6.7b-instruct` remains, which is a code model.
+Four candidates were probed through the real production path:
+`nvidia/llama-3.1-nemotron-70b-instruct` and `mistralai/mistral-large-2-instruct`
+are listed in `/v1/models` but answer **404 for this account** — being listed is
+not the same as being available. `openai/gpt-oss-20b` worked but took 587s for a
+single clip. `nvidia/nemotron-3-super-120b-a12b` returned a complete
+schema-valid result in 62s.
+**Decision.** Default to `nvidia/nemotron-3-super-120b-a12b`.
+**Consequence.** The pinned default is NVIDIA's own current generation on
+NVIDIA's own endpoint, which is the least likely thing to be retired from under
+us. `metadata.py`'s so-called DeepSeek fixup is generic alias handling, so
+leaving the family costs nothing. **Verified live**, end to end: two real clips
+rendered at 720x1280 from a local mp4 + vtt. Note the retirements are not
+predictable — the test pinning this string is what turns the next one into a
+test failure instead of a production 410.
+
+## DEC-045 — Salvage the first well-formed JSON value when a direct parse fails
+**Context.** The first live run through the new `openai_compat` provider failed
+all three attempts with `JSONDecodeError`. The model had returned a valid
+`json_schema` array preceded by a bare `[` on its own line — a fragment of its
+reasoning scratchpad in the content. `finish_reason` was `stop`; nothing was
+truncated. NVIDIA's own path never hits this because it sends
+`extra_body={"chat_template_kwargs": {"thinking": False}}`, which suppresses the
+reasoning pass. An arbitrary OpenAI-compatible endpoint has no equivalent
+switch, and sending that NIM-only field to one would risk a 400.
+**Decision.** Keep the direct `json.loads` as the fast path. On failure only,
+scan for the first balanced JSON array or object, tracking string state and
+escapes so a bracket inside a title cannot truncate the span.
+**Consequence.** Reasoning models are usable through the generic provider
+without a vendor-specific flag. Salvaged content still passes through every
+existing shape check, so this cannot smuggle a malformed clip through, and
+unsalvageable content still raises retryably. Verified live: the same run that
+failed three times now succeeds on the first attempt and renders.
+
+## DEC-046 — Two custom-endpoint paths, kept side by side rather than collapsed
+**Context.** Merging `origin/main` into the rearchitecture branch brought two
+independent answers to the same need. This branch had built
+`clipping/providers/` — a six-provider registry (groq, gemini, nvidia,
+openrouter, mistral, **custom**), a chain runner, negotiated structured output
+and tolerant JSON extraction — reached with `--ai-provider chain` and configured
+by `LLM_CHAIN` + `LLM_CUSTOM_BASE_URL`/`LLM_CUSTOM_API_KEY`. `origin/main` had
+separately added `openai_compat`: a third *legacy single-request* provider
+alongside `nvidia` and `gemini`, configured by `OPENAI_COMPAT_*`, with a
+Settings-page card, a New Job selector, a fail-fast gate for its base URL and
+model (`PROVIDER_REQUIRED_EXTRA`), and 46 passing tests. The human's instruction
+was to keep both sides' work, with this branch winning genuine conflicts.
+**Decision.** Keep both. `PROVIDER_KEYS` holds all seven providers;
+`--ai-provider` accepts `chain, gemini, nvidia, openai_compat`; the chain's
+`custom` link and the legacy `openai_compat` provider coexist with separate env
+vars. Nothing from either side was deleted.
+**Consequence.** Three things follow.
+- **One redundant path, and it is the cheap option.** Collapsing them would have
+  silently changed the meaning of an existing `OPENAI_COMPAT_*` setup, deleted a
+  working feature and its 46 tests, and rewired a dashboard that merged in
+  cleanly. The redundancy mirrors one the branch already tolerates: `nvidia` and
+  `gemini` are legacy single-request paths that the chain also covers.
+- **`set(PROVIDER_KEYS) == set(registry.PROVIDERS)` stopped being true**, because
+  `openai_compat` is not a chain link. `test_every_registry_provider_has_a_key_mapping`
+  now asserts containment in the direction that matters (every chain provider has
+  a key mapping) instead of equality, and `PROVIDER_CASES` is split from
+  `CHAIN_ONLY_PROVIDERS` because the four chain-only providers are not valid
+  `--ai-provider` values and cannot be gated the same way.
+- **Which conflicts this branch actually won:** `AI_PROVIDER = "chain"` (not
+  `nvidia`), `NVIDIA_MODEL = "google/gemma-4-31b-it"` (not
+  `nvidia/nemotron-3-super-120b-a12b` — gemma is what the human's 7-clip run on
+  2026-09-21 succeeded with), the chain-aware `missing_provider_key`, and the
+  banner that prints a chain rather than one model name. Main's
+  `PROVIDER_REQUIRED_EXTRA` loop was folded *into* the chain-aware gate rather
+  than replacing it.
+
+## DEC-047 — Settings persist to data/, with main's two better behaviours
+**Context.** Both sides of the merge had independently built settings
+persistence, because both had hit the same bug: everything typed into the
+Settings page lived in a module-level dict in `worker.py`, so a restart threw
+every API key away silently. This branch wrote `data/settings.json`, loaded at
+worker import, chmod 0600 set on the temp file *before* the rename.
+`origin/main` wrote `.local/settings.json`, loaded from the app lifespan,
+with an explicit `PERSISTED_KEYS` allow-list and "an empty value clears".
+**Decision.** Keep this branch's file location and write mechanics; adopt main's
+loading point and its empty-clears semantics; adopt its allow-list.
+**Consequence.** Each half of that was chosen against a specific failure.
+- **`data/`, not `.local/`.** It is gitignored, bind-mounted by compose so a
+  container restart keeps the values, and excluded by `.dockerignore` (`f162ace`)
+  so the keys cannot bake into an image layer. It already holds `api_token`.
+  `test_default_path_is_not_under_outputs` moved from pinning `/.local/` to
+  pinning `/data/`; the invariant it exists for — not inside the tree
+  `routes/files.py` serves — is unchanged.
+- **Not loaded at import.** An import-time read of a secrets file means any test
+  that imports the worker picks up the developer's real keys. `load_settings_env()`
+  is called from the app lifespan instead.
+- **An empty value clears the override, it is not stored as `""`.**
+  `config_adapter` resolves every key as `env.get(NAME, os.environ.get(NAME, ""))`,
+  so a persisted `""` would shadow a working `.env` key forever with no way to
+  undo it from the UI. `test_values_are_coerced_to_strings` used to pin the
+  opposite and now pins this.
+- **Chmod before rename** is kept from this branch: setting the mode on the temp
+  file means the real path is never briefly world-readable.

@@ -12,6 +12,24 @@
 - **A-016** — The full image (torch, pyannote, ultralytics, faster-whisper) stays
   the default build because every feature must survive; a slim build is opt-in
   via a build arg. UNCONFIRMED.
+- **A-010** — NIM model ids in this project have a shelf life measured in weeks:
+  three defaults have now died in about six weeks. The current pin, after this merge, is
+  `google/gemma-4-31b-it` — this branch's value, chosen by live benchmark and
+  proven by the human's 7-clip run on 2026-09-21. `origin/main` had moved the
+  same slot to `nvidia/nemotron-3-super-120b-a12b` (DEC-044); that is the
+  documented fallback if gemma is retired, and it is a bet either way. `tests/test_config_cli.py` pins the string so the next retirement
+  surfaces as a test failure rather than a production 410. Also note: a model
+  listed by `/v1/models` may still answer 404 for a given account, so the
+  catalogue alone is not proof of availability.
+
+- **A-009** — Groq and Mistral do not reliably offer a usable free API key,
+  despite their own documentation describing free tiers on 2026-09-21. This rests
+  on the human's own attempt, not on a page we can cite, and it is the reason
+  neither is recommended anywhere in the UI. It does not affect correctness:
+  both are reachable through the generic `openai_compat` provider, which makes no
+  claim about their pricing. Recheck before ever promoting either to a
+  recommended provider. xAI is a separate and firmer case: its own pricing page
+  confirms the free API tier ended in May 2025.
 
 ## Confirmed
 - **A-012** — The phone-width overflow is fixable in CSS alone; no JSX change is

@@ -391,6 +391,45 @@ def _nvidia_is_retryable(exc: Exception) -> bool:
     return isinstance(exc, ValueError)
 
 
+def _first_json_value(text: str):
+    """Return the first complete JSON array or object in *text*, else None.
+
+    Scans for a balanced span rather than regexing, so nested structures and
+    braces inside strings are handled correctly. Only called after a direct
+    parse has already failed.
+    """
+    for opener, closer in (("[", "]"), ("{", "}")):
+        start = text.find(opener)
+        while start != -1:
+            depth = 0
+            in_string = False
+            escaped = False
+            for idx in range(start, len(text)):
+                char = text[idx]
+                if escaped:
+                    escaped = False
+                    continue
+                if char == "\\":
+                    escaped = True
+                    continue
+                if char == '"':
+                    in_string = not in_string
+                    continue
+                if in_string:
+                    continue
+                if char == opener:
+                    depth += 1
+                elif char == closer:
+                    depth -= 1
+                    if depth == 0:
+                        try:
+                            return json.loads(text[start:idx + 1])
+                        except json.JSONDecodeError:
+                            break  # try the next opener of this kind
+            start = text.find(opener, start + 1)
+    return None
+
+
 def _extract_clip_list(content: str) -> list[dict]:
     """Turn a raw NIM response into the clip list, or raise.
 
@@ -405,7 +444,21 @@ def _extract_clip_list(content: str) -> list[dict]:
         content = re.sub(r"```(json)?", "", content).strip()
         content = content.split("```")[0].strip()
 
-    hasil = json.loads(content)
+    try:
+        hasil = json.loads(content)
+    except json.JSONDecodeError:
+        # Reasoning models leak fragments of their own scratchpad into the
+        # content. A real observed response, from a model asked for a strict
+        # json_schema array, began with a bare "[" on its own line and then the
+        # actual array underneath -- finish_reason "stop", nothing truncated,
+        # simply unparseable. NVIDIA's own endpoint hides this because the NIM
+        # path suppresses the reasoning pass, but an arbitrary OpenAI-compatible
+        # endpoint has no such switch, so salvage the first well-formed value
+        # rather than burning a retry on a response that is already correct.
+        salvaged = _first_json_value(content)
+        if salvaged is None:
+            raise
+        hasil = salvaged
 
     # guided_json should return the array directly, but non-conforming models
     # wrap it. Keep the unwrapper.
@@ -437,13 +490,20 @@ def _extract_clip_list(content: str) -> list[dict]:
     return hasil
 
 
-def _make_nvidia_client(cfg):
-    """Build the NIM client. Split out so tests can substitute a fake."""
+NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
+
+
+def _make_openai_client(base_url: str, api_key: str):
+    """Build an OpenAI-SDK client for any compatible endpoint.
+
+    The import stays inside the function so that `openai` is only required by
+    the code paths that actually call a provider.
+    """
     from openai import OpenAI
 
     return OpenAI(
-        base_url="https://integrate.api.nvidia.com/v1",
-        api_key=cfg.api_key_nvidia,
+        base_url=base_url,
+        api_key=api_key,
         # max_retries=0 is the important one. The SDK defaults to 2 and retries
         # anything >= 500, so every attempt in the loop below was silently three
         # http requests: a job that reported "attempt 3/3" had really made nine,
@@ -454,6 +514,36 @@ def _make_nvidia_client(cfg):
         # The SDK's own default is 600s, twice the gateway's limit, so a stalled
         # request would sit for ten minutes before anyone heard about it.
         timeout=NVIDIA_REQUEST_TIMEOUT_SECONDS,
+    )
+
+
+def _make_nvidia_client(cfg):
+    """Build the NIM client. Split out so tests can substitute a fake."""
+    return _make_openai_client(NVIDIA_BASE_URL, cfg.api_key_nvidia)
+
+
+def _openai_compat_base_url(cfg) -> str:
+    """The configured custom endpoint, without a trailing slash."""
+    return str(getattr(cfg, "openai_compat_base_url", "") or "").rstrip("/")
+
+
+def _openai_compat_host(cfg) -> str:
+    """Host of the custom endpoint, for logging.
+
+    Only the host: some gateways carry a token in the URL path, and this string
+    ends up in job logs the user may share.
+    """
+    from urllib.parse import urlparse
+
+    url = _openai_compat_base_url(cfg)
+    return urlparse(url).netloc or url or "unconfigured"
+
+
+def _make_openai_compat_client(cfg):
+    """Build the client for a user-supplied endpoint. A test seam, as above."""
+    return _make_openai_client(
+        _openai_compat_base_url(cfg),
+        getattr(cfg, "api_key_openai_compat", ""),
     )
 
 
@@ -894,18 +984,28 @@ Transkrip:
 """
 
 
-def analyze_with_nvidia(transkrip_lengkap: str, cfg) -> list[dict]:
-    """Analyze transcript using NVIDIA NIM API (OpenAI compatible)."""
-    print(f"[3/3] Analyzing Top {cfg.jumlah_clip} moments using NVIDIA ({cfg.nvidia_model})...")
+def _analyze_openai_compatible(
+    transkrip_lengkap: str,
+    cfg,
+    *,
+    label: str,
+    model: str,
+    client,
+    extra_body: dict | None = None,
+) -> list[dict]:
+    """Run the clip analysis against any OpenAI-compatible chat endpoint.
 
-    if not cfg.api_key_nvidia:
-        raise ValueError("NVIDIA_API_KEY not found in environment.")
-
-    client = _make_nvidia_client(cfg)
-    
+    This is the whole of what used to be ``analyze_with_nvidia``. Nothing in it
+    is NVIDIA-specific: the prompt, the JSON schema, the retry policy and the
+    response_format fallback apply to any endpoint that speaks
+    ``chat.completions``. The caller supplies the three things that do differ --
+    a display *label*, the *model* id and an already-built *client* -- plus any
+    vendor-only ``extra_body``, which is sent only when non-empty so that a
+    provider never receives a parameter it does not implement.
+    """
     prompt = get_analysis_prompt(transkrip_lengkap, cfg.jumlah_clip, cfg.durasi_hook, cfg=cfg)
 
-    # Define the strict schema for Guided JSON (NVIDIA NIM specific)
+    # The strict output schema, sent via response_format below.
     clips_schema = {
         "type": "array",
         "items": {
@@ -1081,10 +1181,10 @@ def analyze_with_nvidia(transkrip_lengkap: str, cfg) -> list[dict]:
 
     for attempt in range(1, NVIDIA_MAX_ATTEMPTS + 1):
         try:
-            print(f"   🔁 NVIDIA attempt {attempt}/{NVIDIA_MAX_ATTEMPTS}...")
-            completion = client.chat.completions.create(
-                model=cfg.nvidia_model,
-                messages=[
+            print(f"   🔁 {label} attempt {attempt}/{NVIDIA_MAX_ATTEMPTS}...")
+            request = {
+                "model": model,
+                "messages": [
                     {
                         "role": "system",
                         "content": (
@@ -1096,31 +1196,31 @@ def analyze_with_nvidia(transkrip_lengkap: str, cfg) -> list[dict]:
                 ],
                 # Nudge toward determinism on each retry: if the last sample was
                 # malformed, a cooler one is likelier to conform.
-                temperature=max(0.0, 0.5 - 0.15 * (attempt - 1)),
-                top_p=1,
-                max_tokens=16384,
-                extra_body={"chat_template_kwargs": {"thinking": False}},
-                **(
-                    {
-                        "response_format": {
-                            "type": "json_schema",
-                            "json_schema": {
-                                "name": "viral_clips",
-                                "schema": clips_schema,
-                                "strict": True,
-                            },
-                        }
-                    }
-                    if use_response_format
-                    else {}
-                ),
-            )
+                "temperature": max(0.0, 0.5 - 0.15 * (attempt - 1)),
+                "top_p": 1,
+                "max_tokens": 16384,
+            }
+            # Vendor-only knobs are omitted entirely rather than sent as null,
+            # since a provider that does not know the field would 400 on it.
+            if extra_body:
+                request["extra_body"] = extra_body
+            if use_response_format:
+                request["response_format"] = {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "viral_clips",
+                        "schema": clips_schema,
+                        "strict": True,
+                    },
+                }
+
+            completion = client.chat.completions.create(**request)
             content = completion.choices[0].message.content
             return _extract_clip_list(content)
 
         except Exception as exc:
             failures.append(f"attempt {attempt}: {type(exc).__name__}: {exc}")
-            print(f"   ⚠️ NVIDIA attempt {attempt} failed | {type(exc).__name__}: {exc}")
+            print(f"   ⚠️ {label} attempt {attempt} failed | {type(exc).__name__}: {exc}")
 
             # Remember the signature rather than acting on it. The ladder still
             # gets its retry, because a single 504 can be a transient gateway
@@ -1176,7 +1276,52 @@ def analyze_with_nvidia(transkrip_lengkap: str, cfg) -> list[dict]:
             time.sleep(NVIDIA_BACKOFF_SECONDS[attempt - 1])
 
     # Unreachable: the loop either returns or raises.
-    raise RuntimeError("NVIDIA analysis failed (loop ended with no result).")
+    raise RuntimeError(f"{label} analysis failed (loop ended with no result).")
+
+
+def analyze_with_nvidia(transkrip_lengkap: str, cfg) -> list[dict]:
+    """Analyze the transcript with NVIDIA NIM."""
+    print(f"[3/3] Analyzing Top {cfg.jumlah_clip} moments using NVIDIA ({cfg.nvidia_model})...")
+
+    if not cfg.api_key_nvidia:
+        raise ValueError("NVIDIA_API_KEY not found in environment.")
+
+    return _analyze_openai_compatible(
+        transkrip_lengkap,
+        cfg,
+        label="NVIDIA",
+        model=cfg.nvidia_model,
+        # Looked up here, not captured as a default argument: the tests
+        # substitute a fake by patching this module attribute, and an
+        # import-time binding would quietly send them to the real endpoint.
+        client=_make_nvidia_client(cfg),
+        # NIM/vLLM-specific: suppresses the reasoning preamble on models that
+        # emit one. Other providers reject unknown fields, so it stays here
+        # rather than in the shared core.
+        extra_body={"chat_template_kwargs": {"thinking": False}},
+    )
+
+
+def analyze_with_openai_compat(transkrip_lengkap: str, cfg) -> list[dict]:
+    """Analyze the transcript with a user-supplied OpenAI-compatible endpoint.
+
+    Covers anything that speaks the OpenAI chat API -- OpenRouter, Groq,
+    Mistral, xAI, a self-hosted vLLM or a local Ollama -- without the project
+    having to carry a named provider for each one.
+    """
+    model = getattr(cfg, "openai_compat_model", "")
+    print(
+        f"[3/3] Analyzing Top {cfg.jumlah_clip} moments using a custom endpoint "
+        f"({_openai_compat_host(cfg)} / {model})..."
+    )
+
+    return _analyze_openai_compatible(
+        transkrip_lengkap,
+        cfg,
+        label=f"Custom endpoint ({_openai_compat_host(cfg)})",
+        model=model,
+        client=_make_openai_compat_client(cfg),
+    )
 
 
 def analyze_with_ai(transkrip_lengkap: str, cfg, *, data_segmen=None) -> list[dict]:
@@ -1240,8 +1385,27 @@ def analyze_with_ai(transkrip_lengkap: str, cfg, *, data_segmen=None) -> list[di
             )
         return analyze_with_gemini(transkrip_lengkap, cfg)
 
+    if provider == "openai_compat":
+        # A custom endpoint needs three things, not one. Checking all of them
+        # here keeps the failure at 40ms instead of surfacing as a confusing
+        # connection error after transcription has already run.
+        for value, env_name in (
+            (getattr(cfg, "api_key_openai_compat", ""), "OPENAI_COMPAT_API_KEY"),
+            (_openai_compat_base_url(cfg), "OPENAI_COMPAT_BASE_URL"),
+            (getattr(cfg, "openai_compat_model", ""), "OPENAI_COMPAT_MODEL"),
+        ):
+            if not value:
+                raise RuntimeError(
+                    f"{env_name} not found. A custom OpenAI-compatible endpoint "
+                    "needs a base URL, an API key and a model name. Set them in "
+                    ".env or on the Settings page, or run with "
+                    "--ai-provider nvidia."
+                )
+        return analyze_with_openai_compat(transkrip_lengkap, cfg)
+
     raise ValueError(
-        f"Unknown AI provider: {provider!r} (choices: chain, nvidia, gemini)"
+        f"Unknown AI provider: {provider!r} "
+        "(choices: chain, nvidia, gemini, openai_compat)"
     )
 
 

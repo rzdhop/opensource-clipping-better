@@ -439,12 +439,31 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--ai-provider",
-        choices=["chain", "gemini", "nvidia"],
+        choices=["chain", "gemini", "nvidia", "openai_compat"],
         default=AI_PROVIDER,
         help=(
             "How to analyse the transcript. 'chain' (default) runs the "
-            "three-pass analyzer over --llm-chain. 'nvidia' and 'gemini' are "
-            "the single-request legacy path, kept as an escape hatch."
+            "three-pass analyzer over --llm-chain. 'nvidia', 'gemini' and "
+            "'openai_compat' are the single-request legacy path, kept as an "
+            "escape hatch; 'openai_compat' points it at any OpenAI-compatible "
+            "endpoint you already have a key for."
+        ),
+    )
+    p.add_argument(
+        "--openai-compat-base-url",
+        default=None,
+        help=(
+            "Base URL of the OpenAI-compatible endpoint, including the version "
+            "path, e.g. https://openrouter.ai/api/v1. Defaults to "
+            "$OPENAI_COMPAT_BASE_URL. Only used with --ai-provider openai_compat."
+        ),
+    )
+    p.add_argument(
+        "--openai-compat-model",
+        default=None,
+        help=(
+            "Model id the custom endpoint expects. Defaults to "
+            "$OPENAI_COMPAT_MODEL. Only used with --ai-provider openai_compat."
         ),
     )
     p.add_argument(
@@ -828,6 +847,22 @@ PROVIDER_KEYS = {
     "openrouter": ("api_key_openrouter", "OPENROUTER_API_KEY"),
     "mistral": ("api_key_mistral", "MISTRAL_API_KEY"),
     "custom": ("api_key_custom", "LLM_CUSTOM_API_KEY"),
+    # The legacy single-request path's own custom endpoint, kept alongside the
+    # chain's "custom" link rather than folded into it: they are reached by
+    # different --ai-provider values and configured by different env vars, and
+    # collapsing them would have silently changed the meaning of an existing
+    # OPENAI_COMPAT_* setup. See DEC-046.
+    "openai_compat": ("api_key_openai_compat", "OPENAI_COMPAT_API_KEY"),
+}
+
+# Settings that are not keys but that a provider still cannot run without.
+# Same (attr, ENV_NAME) shape as PROVIDER_KEYS so the gate's return type and
+# every one of its callers stay unchanged.
+PROVIDER_REQUIRED_EXTRA = {
+    "openai_compat": (
+        ("openai_compat_base_url", "OPENAI_COMPAT_BASE_URL"),
+        ("openai_compat_model", "OPENAI_COMPAT_MODEL"),
+    ),
 }
 
 
@@ -870,10 +905,16 @@ def missing_provider_key(cfg) -> tuple[str, str] | None:
         first = chain[0].provider if chain else "groq"
         return PROVIDER_KEYS.get(first, PROVIDER_KEYS["groq"])
 
-    attr, env_name = PROVIDER_KEYS.get(provider, PROVIDER_KEYS.get("nvidia"))
-    if getattr(cfg, attr, ""):
-        return None
-    return attr, env_name
+    # A half-configured custom endpoint counts as missing: a base URL with no
+    # model name fails just as surely as an absent key, and it should fail just
+    # as early -- before ingestion and transcription have run.
+    required = (PROVIDER_KEYS.get(provider, PROVIDER_KEYS["nvidia"]),)
+    required += PROVIDER_REQUIRED_EXTRA.get(provider, ())
+
+    for attr, env_name in required:
+        if not getattr(cfg, attr, ""):
+            return attr, env_name
+    return None
 
 
 def build_config(argv: list[str] | None = None) -> SimpleNamespace:
@@ -1056,6 +1097,15 @@ def build_config(argv: list[str] | None = None) -> SimpleNamespace:
         # heard; beats guessing the language from stopwords afterwards.
         detected_language="",
         nvidia_model=args.nvidia_model,
+        # A flag wins over the environment; the environment is read here rather
+        # than at import so monkeypatched values still apply.
+        api_key_openai_compat=os.environ.get("OPENAI_COMPAT_API_KEY", ""),
+        openai_compat_base_url=(
+            args.openai_compat_base_url or os.environ.get("OPENAI_COMPAT_BASE_URL", "")
+        ),
+        openai_compat_model=(
+            args.openai_compat_model or os.environ.get("OPENAI_COMPAT_MODEL", "")
+        ),
         gemini_model=args.gemini_model,
         gemini_fallback_model=args.gemini_fallback_model,
         load_gemini_json=args.load_gemini_json,

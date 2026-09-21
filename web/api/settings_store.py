@@ -23,6 +23,36 @@ DATA_DIR = os.path.abspath(
 )
 SETTINGS_PATH = os.path.join(DATA_DIR, "settings.json")
 
+
+def settings_path():
+    """Where the settings file lives. ``WEB_SETTINGS_FILE`` overrides it."""
+    return os.environ.get("WEB_SETTINGS_FILE") or SETTINGS_PATH
+
+
+# Exactly what may be written to disk; anything else in the settings env is
+# runtime-only. An allow-list rather than "whatever the route was handed", so a
+# settings field added later cannot quietly start persisting arbitrary
+# environment variables (DEC-043).
+PERSISTED_KEYS = frozenset({
+    "GOOGLE_API_KEY",
+    "NVIDIA_API_KEY",
+    "GROQ_API_KEY",
+    "OPENROUTER_API_KEY",
+    "MISTRAL_API_KEY",
+    "LLM_CUSTOM_API_KEY",
+    "OPENAI_COMPAT_BASE_URL",
+    "OPENAI_COMPAT_API_KEY",
+    "OPENAI_COMPAT_MODEL",
+    "PEXELS_API_KEY",
+    "HF_TOKEN",
+    "DEFAULT_CLIPS",
+    "DEFAULT_RATIO",
+    "DEFAULT_FONT_STYLE",
+    "DEFAULT_WHISPER_MODEL",
+    "DEFAULT_WHISPER_DEVICE",
+    "DEFAULT_AI_PROVIDER",
+})
+
 # Values that are secrets. Listed explicitly rather than pattern-matched on
 # "KEY", so adding a setting cannot accidentally make it world-readable.
 SECRET_KEYS = frozenset({
@@ -32,6 +62,7 @@ SECRET_KEYS = frozenset({
     "OPENROUTER_API_KEY",
     "MISTRAL_API_KEY",
     "LLM_CUSTOM_API_KEY",
+    "OPENAI_COMPAT_API_KEY",
     "PEXELS_API_KEY",
     "HF_TOKEN",
 })
@@ -44,7 +75,7 @@ def load(path=None):
     from starting -- the user can always re-enter the values, but they cannot
     re-enter them into a server that will not boot.
     """
-    path = path or SETTINGS_PATH
+    path = path or settings_path()
     try:
         with open(path, "r", encoding="utf-8") as handle:
             data = json.load(handle)
@@ -52,7 +83,11 @@ def load(path=None):
         return {}
     if not isinstance(data, dict):
         return {}
-    return {str(k): "" if v is None else str(v) for k, v in data.items()}
+    return {
+        str(k): str(v)
+        for k, v in data.items()
+        if str(k) in PERSISTED_KEYS and v not in (None, "")
+    }
 
 
 def save(values, path=None):
@@ -62,15 +97,20 @@ def save(values, path=None):
     :func:`load`, which would silently drop every key after it. 0600 because the
     file holds API keys and the containing directory is bind-mounted.
     """
-    path = path or SETTINGS_PATH
+    path = path or settings_path()
     directory = os.path.dirname(path) or "."
+    payload = {
+        str(k): str(v)
+        for k, v in dict(values).items()
+        if str(k) in PERSISTED_KEYS and v not in (None, "")
+    }
 
     try:
         os.makedirs(directory, exist_ok=True)
         handle, tmp = tempfile.mkstemp(dir=directory, prefix=".settings-", suffix=".tmp")
         try:
             with os.fdopen(handle, "w", encoding="utf-8") as fh:
-                json.dump(dict(values), fh, indent=2, sort_keys=True)
+                json.dump(payload, fh, indent=2, sort_keys=True)
             # Set the mode on the temp file, so the real path is never briefly
             # world-readable between the rename and the chmod.
             os.chmod(tmp, 0o600)

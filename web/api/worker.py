@@ -68,25 +68,51 @@ MAX_CONCURRENT_JOBS = int(os.environ.get("MAX_CONCURRENT_JOBS", "1"))
 _semaphore = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
 _executor = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_JOBS)
 
-# Store settings overrides (API keys etc.) in memory
-# Loaded from data/settings.json at import so values entered in the dashboard
-# survive a restart. They used to live only here, which meant a
-# `docker compose restart` silently emptied them and the next job failed for a
-# key the user could still see listed as set.
-_settings_env: dict[str, str] = settings_store.load()
+# Settings overrides (API keys etc.): in memory for the running process, mirrored
+# to data/settings.json so a restart does not lose them. They used to live only
+# here, which meant a `docker compose restart` silently emptied them and the next
+# job failed for a key the user could still see listed as set.
+#
+# NOT loaded at import (DEC-043). An import-time read of a secrets file means any
+# test that imports this module picks up the developer's real keys. The app
+# lifespan calls load_settings_env() instead.
+_settings_env: dict[str, str] = {}
 
 
-def set_settings_env(env: dict[str, str]) -> None:
-    """Update runtime settings environment."""
-    global _settings_env
-    _settings_env.update(env)
-    # Write through, so the value is on disk before the response says it is set.
-    settings_store.save(_settings_env)
+def set_settings_env(env: dict[str, str], *, persist: bool = True) -> None:
+    """Update the runtime settings environment, and store it unless told not to.
+
+    An empty value REMOVES the override rather than storing an empty string
+    (DEC-043). config_adapter resolves every key as
+    ``env.get(NAME, os.environ.get(NAME, ""))``, so a stored "" would shadow a
+    perfectly good .env key forever, with no way to undo it from the UI.
+    """
+    for name, value in env.items():
+        if value == "" or value is None:
+            _settings_env.pop(name, None)
+        else:
+            _settings_env[name] = value
+
+    if persist:
+        # Write through, so the value is on disk before the response says it is set.
+        settings_store.save(_settings_env)
 
 
 def get_settings_env() -> dict[str, str]:
     """Get current settings environment."""
     return dict(_settings_env)
+
+
+def load_settings_env() -> int:
+    """Load stored settings into the runtime environment. Returns how many.
+
+    Called once from the app lifespan rather than at import: reading a secrets
+    file as an import side effect would mean any test that imports this module
+    picks up the developer's real keys.
+    """
+    stored = settings_store.load()
+    set_settings_env(stored, persist=False)
+    return len(stored)
 
 
 def _run_pipeline_sync(job_id: str, payload: dict) -> None:

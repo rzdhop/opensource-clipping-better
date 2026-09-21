@@ -11,6 +11,9 @@ import subprocess
 from fastapi import Depends, APIRouter
 
 from ..auth import require_token
+
+# Imported rather than repeated so the API cannot drift from the pipeline.
+from clipping.config import AI_PROVIDER, WHISPER_DEVICE
 from ..models import SettingsRequest, SettingsResponse, SystemHealthResponse
 from .. import store as job_store
 from .. import worker
@@ -57,6 +60,15 @@ async def get_settings() -> SettingsResponse:
     groq_key = env.get("GROQ_API_KEY", os.environ.get("GROQ_API_KEY", ""))
     openrouter_key = env.get("OPENROUTER_API_KEY", os.environ.get("OPENROUTER_API_KEY", ""))
     mistral_key = env.get("MISTRAL_API_KEY", os.environ.get("MISTRAL_API_KEY", ""))
+    compat_key = env.get(
+        "OPENAI_COMPAT_API_KEY", os.environ.get("OPENAI_COMPAT_API_KEY", "")
+    )
+    compat_url = env.get(
+        "OPENAI_COMPAT_BASE_URL", os.environ.get("OPENAI_COMPAT_BASE_URL", "")
+    )
+    compat_model = env.get(
+        "OPENAI_COMPAT_MODEL", os.environ.get("OPENAI_COMPAT_MODEL", "")
+    )
 
     return SettingsResponse(
         google_api_key_set=bool(google_key),
@@ -66,17 +78,24 @@ async def get_settings() -> SettingsResponse:
         groq_api_key_set=bool(groq_key),
         openrouter_api_key_set=bool(openrouter_key),
         mistral_api_key_set=bool(mistral_key),
+        # The key is reported as a boolean only; the URL and model are not
+        # secrets and both front ends need their values.
+        openai_compat_api_key_set=bool(compat_key),
+        openai_compat_base_url=compat_url,
+        openai_compat_model=compat_model,
         default_clips=int(env.get("DEFAULT_CLIPS", "7")),
         default_ratio=env.get("DEFAULT_RATIO", "9:16"),
         default_font_style=env.get("DEFAULT_FONT_STYLE", "HORMOZI"),
         default_whisper_model=env.get("DEFAULT_WHISPER_MODEL", "large-v3"),
-        # These two defaults were wrong and contradicted the rest of the
-        # codebase. "cuda" crashes on any machine without a working CUDA stack
-        # -- the failure clipping/device.py exists to prevent, and the reason
-        # two jobs in outputs/jobs.json died. "gemini" has not been the default
-        # provider since the local-first refactor.
-        default_whisper_device=env.get("DEFAULT_WHISPER_DEVICE", "auto"),
-        default_ai_provider=env.get("DEFAULT_AI_PROVIDER", "chain"),
+        # These two fall back to the REAL pipeline defaults, imported above, so
+        # the API cannot report a default the pipeline does not use. They used to
+        # say "cuda"/"gemini", wrong on both counts: "cuda" crashes on any
+        # machine without a working CUDA stack -- the failure clipping/device.py
+        # exists to prevent, and the reason two jobs in outputs/jobs.json died --
+        # and "gemini" has not been the default provider since the local-first
+        # refactor.
+        default_whisper_device=env.get("DEFAULT_WHISPER_DEVICE", WHISPER_DEVICE),
+        default_ai_provider=env.get("DEFAULT_AI_PROVIDER", AI_PROVIDER),
         gpu_available=_check_gpu(),
     )
 
@@ -100,6 +119,12 @@ async def update_settings(req: SettingsRequest) -> SettingsResponse:
         env_updates["OPENROUTER_API_KEY"] = req.openrouter_api_key
     if req.mistral_api_key is not None:
         env_updates["MISTRAL_API_KEY"] = req.mistral_api_key
+    if req.openai_compat_api_key is not None:
+        env_updates["OPENAI_COMPAT_API_KEY"] = req.openai_compat_api_key
+    if req.openai_compat_base_url is not None:
+        env_updates["OPENAI_COMPAT_BASE_URL"] = req.openai_compat_base_url
+    if req.openai_compat_model is not None:
+        env_updates["OPENAI_COMPAT_MODEL"] = req.openai_compat_model
     if req.default_clips is not None:
         env_updates["DEFAULT_CLIPS"] = str(req.default_clips)
     if req.default_ratio is not None:

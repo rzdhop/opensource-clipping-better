@@ -59,11 +59,13 @@ def main():
     if not render_only:
         missing = missing_provider_key(cfg)
         if missing:
+            from clipping.config import PROVIDER_KEYS
+
             _, env_name = missing
-            other = "gemini" if cfg.ai_provider == "nvidia" else "nvidia"
+            others = [p for p in PROVIDER_KEYS if p != cfg.ai_provider]
             print(f"❌ ERROR: {env_name} not found (active provider: {cfg.ai_provider}).")
             print(f"   Set via: export {env_name}='your-key' or create a .env file")
-            print(f"   Or switch provider: --ai-provider {other}")
+            print(f"   Or switch provider: --ai-provider {' | '.join(others)}")
             sys.exit(1)
 
     transcript_path = getattr(cfg, "transcript_path", None)

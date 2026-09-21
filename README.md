@@ -104,8 +104,9 @@ None of them are paid. Set whichever you have; the chain skips the rest.
 - **Python** 3.10+
 - **FFmpeg** installed and available in PATH
 - **CUDA GPU** recommended, but only if you let Whisper transcribe. Supply `--transcript` and no GPU is needed at all.
-- **NVIDIA NIM API Key** — the default AI provider ([get one here](https://build.nvidia.com/))
-- **Google Gemini API Key** (optional — only for `--ai-provider gemini` and `--voiceover`) ([get one here](https://aistudio.google.com/apikey))
+- **NVIDIA NIM API Key** — the default AI provider, free with no credit card ([get one here](https://build.nvidia.com/))
+- **Google Gemini API Key** (optional — only for `--ai-provider gemini` and `--voiceover`), also free with no credit card ([get one here](https://aistudio.google.com/apikey))
+- **Any other OpenAI-compatible endpoint** (optional) — set `OPENAI_COMPAT_BASE_URL`, `OPENAI_COMPAT_API_KEY` and `OPENAI_COMPAT_MODEL`, then run with `--ai-provider openai_compat`. Works with OpenRouter, Groq, Mistral, xAI, a self-hosted vLLM or a local Ollama.
 - **Pexels API Key** (optional, for B-roll — [get one here](https://www.pexels.com/api/))
 - **HuggingFace Token** (optional, for split-screen / camera-switch — [get one here](https://huggingface.co/settings/tokens), requires accepting [Pyannote model agreement](https://huggingface.co/pyannote/speaker-diarization-3.1))
 

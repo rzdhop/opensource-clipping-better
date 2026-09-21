@@ -41,6 +41,19 @@ async def lifespan(app: FastAPI):
             f"{', '.join(stale[:5])}{'...' if len(stale) > 5 else ''}"
         )
 
+    # Restore whatever was saved from the Settings page. Keys entered there used
+    # to vanish on every restart. Loaded HERE rather than at worker import time
+    # on purpose (DEC-043): an import-time read of a secrets file means any test
+    # that imports the worker picks up the developer's real keys.
+    from . import settings_store, worker
+
+    restored = worker.load_settings_env()
+    if restored:
+        print(
+            f"   🔐 Restored {restored} saved setting(s) from "
+            f"{settings_store.SETTINGS_PATH}"
+        )
+
     yield
     print("👋 Backend shutting down...")
 

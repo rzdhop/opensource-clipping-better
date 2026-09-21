@@ -226,7 +226,13 @@ def build_config_from_payload(
         whisper_compute_type=payload.get("whisper_compute_type", "auto"),
         # AI
         ai_provider=ai_provider,
-        llm_chain=payload.get("llm_chain", "") or "",
+        # A per-job chain wins; otherwise the one saved in Settings, then the
+        # process environment. Without the env fallback a chain typed into the
+        # dashboard was stored and then ignored.
+        llm_chain=(
+            payload.get("llm_chain", "")
+            or env.get("LLM_CHAIN", os.environ.get("LLM_CHAIN", ""))
+        ),
         stt_chain=payload.get("stt_chain", "") or "",
         detected_language="",
         platform=payload.get("platform", "auto"),
@@ -242,6 +248,19 @@ def build_config_from_payload(
         api_key_mistral=env.get("MISTRAL_API_KEY", os.environ.get("MISTRAL_API_KEY", "")),
         api_key_custom=env.get("LLM_CUSTOM_API_KEY", os.environ.get("LLM_CUSTOM_API_KEY", "")),
         nvidia_model=payload.get("nvidia_model", "google/gemma-4-31b-it"),
+        # Custom OpenAI-compatible endpoint (the legacy single-request path).
+        # The URL and key are credentials, so they come only from settings/env;
+        # the model may be overridden per job, falling back to the saved one.
+        api_key_openai_compat=env.get(
+            "OPENAI_COMPAT_API_KEY", os.environ.get("OPENAI_COMPAT_API_KEY", "")
+        ),
+        openai_compat_base_url=env.get(
+            "OPENAI_COMPAT_BASE_URL", os.environ.get("OPENAI_COMPAT_BASE_URL", "")
+        ),
+        openai_compat_model=(
+            payload.get("openai_compat_model", "")
+            or env.get("OPENAI_COMPAT_MODEL", os.environ.get("OPENAI_COMPAT_MODEL", ""))
+        ),
         gemini_model=payload.get("gemini_model", "gemini-3-flash-preview"),
         gemini_fallback_model=payload.get("gemini_fallback_model", GEMINI_FALLBACK_MODEL),
         load_gemini_json=payload.get("load_gemini_json", False),

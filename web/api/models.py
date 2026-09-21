@@ -65,6 +65,9 @@ class AIProvider(str, enum.Enum):
     # Single-request legacy path, kept as an escape hatch.
     NVIDIA = "nvidia"
     GEMINI = "gemini"
+    # Any endpoint that speaks the OpenAI chat API: OpenRouter, Groq, Mistral,
+    # xAI, a self-hosted vLLM, a local Ollama. Mirrors --ai-provider choices.
+    OPENAI_COMPAT = "openai_compat"
 
 
 class Platform(str, enum.Enum):
@@ -200,6 +203,10 @@ class JobCreateRequest(BaseModel):
     gemini_model: str = "gemini-3-flash-preview"
     gemini_fallback_model: str = "gemini-2.5-flash"
     nvidia_model: str = "google/gemma-4-31b-it"
+    # Per-job override for the custom endpoint's model. Empty means "use the
+    # one saved in Settings". The base URL and key are credentials and live
+    # only in Settings, never in a job payload.
+    openai_compat_model: str = ""
     face_detector: FaceDetector = FaceDetector.MEDIAPIPE
     yolo_size: YoloSize = YoloSize.V8M
 
@@ -319,6 +326,9 @@ class SettingsRequest(BaseModel):
     groq_api_key: Optional[str] = None
     openrouter_api_key: Optional[str] = None
     mistral_api_key: Optional[str] = None
+    openai_compat_base_url: Optional[str] = None
+    openai_compat_api_key: Optional[str] = None
+    openai_compat_model: Optional[str] = None
     # Defaults
     default_clips: Optional[int] = None
     default_ratio: Optional[AspectRatio] = None
@@ -337,12 +347,20 @@ class SettingsResponse(BaseModel):
     groq_api_key_set: bool = False
     openrouter_api_key_set: bool = False
     mistral_api_key_set: bool = False
+    openai_compat_api_key_set: bool = False
+    # Echoed back, unlike the keys, because the Settings page has to prefill
+    # them and New Job has to say which of the three is still missing.
+    openai_compat_base_url: str = ""
+    openai_compat_model: str = ""
     default_clips: int = 7
     default_ratio: str = "9:16"
     default_font_style: str = "HORMOZI"
     default_whisper_model: str = "large-v3"
-    default_whisper_device: str = "cuda"
-    default_ai_provider: str = "nvidia"
+    default_whisper_device: str = "auto"
+    # "chain" since the three-pass analyzer landed. tests/test_web_settings_defaults
+    # asserts this equals clipping.config.AI_PROVIDER, so the API cannot report a
+    # default the pipeline does not use.
+    default_ai_provider: str = "chain"
     gpu_available: bool = False
 
 

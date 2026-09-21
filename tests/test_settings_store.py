@@ -50,7 +50,11 @@ def test_values_are_coerced_to_strings(path):
     settings_store.save({"DEFAULT_CLIPS": 5, "EMPTY": None}, path)
     loaded = settings_store.load(path)
     assert loaded["DEFAULT_CLIPS"] == "5"
-    assert loaded["EMPTY"] == ""
+    # An empty value is NOT stored as "" -- it removes the override (DEC-043).
+    # config_adapter resolves every key as env.get(NAME, os.environ.get(NAME)),
+    # so a persisted "" would shadow a working .env key permanently, with no way
+    # to undo it from the UI. This assertion used to pin the opposite.
+    assert "EMPTY" not in loaded
 
 
 # ------------------------------------------------------------------ security

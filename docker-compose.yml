@@ -35,6 +35,9 @@ services:
       - PEXELS_API_KEY=${PEXELS_API_KEY:-}
       - HF_TOKEN=${HF_TOKEN:-}
       - NVIDIA_API_KEY=${NVIDIA_API_KEY:-}
+      - OPENAI_COMPAT_BASE_URL=${OPENAI_COMPAT_BASE_URL:-}
+      - OPENAI_COMPAT_API_KEY=${OPENAI_COMPAT_API_KEY:-}
+      - OPENAI_COMPAT_MODEL=${OPENAI_COMPAT_MODEL:-}
       - MAX_CONCURRENT_JOBS=${MAX_CONCURRENT_JOBS:-1}
       # `user:` above may be a uid with no /etc/passwd entry, which leaves HOME
       # unset and makes libraries that cache under it fall over.
@@ -48,6 +51,12 @@ services:
       - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
       - LLM_CHAIN=${LLM_CHAIN:-}
       - STT_CHAIN=${STT_CHAIN:-}
+      # The chain's "custom" link. .env.example has documented these since the
+      # provider layer landed, but they were never passed into the container, so
+      # a chain naming custom/<model> failed with "the 'custom' provider needs
+      # LLM_CUSTOM_BASE_URL set" no matter what the host .env said.
+      - LLM_CUSTOM_BASE_URL=${LLM_CUSTOM_BASE_URL:-}
+      - LLM_CUSTOM_API_KEY=${LLM_CUSTOM_API_KEY:-}
       # Server-side downloading. On by default and best-effort: sites refuse
       # datacenter IPs often, and a refusal parks the job in `needs_upload`
       # rather than failing it. Set to 0 to stop trying entirely.
