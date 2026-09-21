@@ -181,7 +181,7 @@ def build_config_from_payload(
         no_segment_trim=payload.get("no_segment_trim", False),
         silence_trim=payload.get("silence_trim", False),
         use_broll=payload.get("use_broll", True),
-        use_hook_glitch=payload.get("use_hook_glitch", True),
+        use_hook_glitch=payload.get("use_hook_glitch", False),
         use_auto_bgm=payload.get("use_auto_bgm", True),
         use_karaoke_effect=payload.get("use_karaoke_effect", True),
         use_split_screen=payload.get("use_split_screen", False),

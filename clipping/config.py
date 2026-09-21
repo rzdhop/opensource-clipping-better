@@ -34,7 +34,11 @@ PILIHAN_RASIO = "9:16"
 MAX_KATA_PER_SUBTITLE = 5
 DURASI_HOOK = 3
 USE_BROLL = True
-USE_HOOK_GLITCH = True
+# Off by default. The transition is a one-second full-frame effect dropped
+# between the hook and the body of every clip, and it fires on EVERY clip unless
+# asked not to -- an opt-out that most runs did not want. Enable per job in the
+# dashboard, or with --hook-glitch.
+USE_HOOK_GLITCH = False
 USE_SPLIT_SCREEN = False
 USE_CAMERA_SWITCH = False
 DIARIZATION_NUM_SPEAKERS = "auto"
@@ -310,6 +314,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Start time in seconds for the custom hook video",
     )
     p.add_argument("--no-broll", action="store_true", help="Disable B-roll footage")
+    # --hook-glitch turns it ON now that the default is off. --no-hook is kept
+    # and still wins, so an existing script that disables it explicitly keeps
+    # working and does not silently start enabling it.
+    p.add_argument("--hook-glitch", action="store_true",
+                   help="Enable the glitch transition between hook and body")
     p.add_argument("--no-hook", action="store_true", help="Disable hook glitch teaser")
     p.add_argument("--no-bgm", action="store_true", help="Disable background music")
     p.add_argument(
@@ -1048,7 +1057,7 @@ def build_config(argv: list[str] | None = None) -> SimpleNamespace:
         no_segment_trim=args.no_segment_trim,
         silence_trim=args.silence_trim,
         use_broll=not args.no_broll,
-        use_hook_glitch=not args.no_hook,
+        use_hook_glitch=(args.hook_glitch and not args.no_hook),
         use_auto_bgm=not args.no_bgm,
         use_karaoke_effect=not args.no_karaoke,
         use_split_screen=args.split_screen,

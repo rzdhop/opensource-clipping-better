@@ -133,7 +133,9 @@ class JobCreateRequest(BaseModel):
     words_per_sub: int = Field(5, ge=1, le=15)
     hook_duration: int = Field(3, ge=1, le=10)
     use_broll: bool = True
-    use_hook_glitch: bool = True
+    # Off by default: a one-second full-frame effect on every clip is an
+    # opt-in, not an opt-out. See clipping/config.USE_HOOK_GLITCH.
+    use_hook_glitch: bool = False
     use_auto_bgm: bool = True
     use_karaoke_effect: bool = True
     use_split_screen: bool = False

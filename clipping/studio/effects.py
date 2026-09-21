@@ -47,6 +47,11 @@ _get_render_dims = utils._get_render_dims
 _is_vertical_ratio = utils._is_vertical_ratio
 RATIO_MAP = utils.RATIO_MAP
 
+# v1 built the noise on a pure black base and rendered at 19/255 mean luma -- a
+# black frame a user reported as a bug. v2 uses a mid-grey base (~126/255).
+GLITCH_RECIPE_VERSION = 2
+
+
 def siapkan_glitch_video(rasio, cfg, video_encoder, source_h=1080, custom_dims=None):
     """
     Generate a 1-second VHS glitch transition video.
@@ -70,8 +75,12 @@ def siapkan_glitch_video(rasio, cfg, video_encoder, source_h=1080, custom_dims=N
     else:
         out_w, out_h = _get_render_dims(cfg, rasio, source_h=source_h)
 
-    # Use dimensions in filename to allow multiple cached versions
-    glitch_ts = f"glitch_ready_{out_w}x{out_h}.ts"
+    # Dimensions AND a recipe version in the filename. The cache is keyed by name
+    # and returned unconditionally, so without the version a machine that already
+    # had a glitch_ready_1080x1920.ts would keep serving the old one forever --
+    # which is exactly how the black-frame recipe would have survived this fix.
+    # Bump GLITCH_RECIPE_VERSION whenever the filter chain below changes.
+    glitch_ts = f"glitch_ready_{out_w}x{out_h}_v{GLITCH_RECIPE_VERSION}.ts"
     if os.path.exists(glitch_ts):
         return glitch_ts
 
@@ -132,11 +141,18 @@ def siapkan_glitch_video(rasio, cfg, video_encoder, source_h=1080, custom_dims=N
         # --- Fallback: generate VHS glitch noise via FFmpeg lavfi ---
         print("🎬 Generating glitch via FFmpeg lavfi...", flush=True)
         duration = 1.0
+        # The base is mid-grey, NOT black. `noise` adds a signed offset, so on a
+        # pure-black source every negative value clamps to 0 and only the
+        # positive half survives: the result measured 19/255 mean luma -- a black
+        # frame with faint speckle, which is what a user reported as a
+        # "blackscreen bug" one second into every clip. blackdetect never fired,
+        # because it is not quite black. On grey the noise spreads both ways and
+        # the same recipe measures 126/255, which reads as static.
         cmd = (
             [
                 "ffmpeg", "-y",
                 "-f", "lavfi",
-                "-i", f"color=c=black:s={out_w}x{out_h}:d={duration}:r=30",
+                "-i", f"color=c=gray:s={out_w}x{out_h}:d={duration}:r=30",
                 "-f", "lavfi",
                 "-i", "anullsrc=r=48000:cl=stereo",
                 "-t", str(duration),

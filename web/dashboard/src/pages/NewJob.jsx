@@ -206,7 +206,9 @@ function NewJob() {
 
   // Toggles
   const [useBroll, setUseBroll] = useState(true)
-  const [useHookGlitch, setUseHookGlitch] = useState(true)
+  // Off by default (clipping/config.USE_HOOK_GLITCH): the transition is a
+  // one-second full-frame effect on every clip, which is an opt-in.
+  const [useHookGlitch, setUseHookGlitch] = useState(false)
   const [useBgm, setUseBgm] = useState(true)
   const [useKaraoke, setUseKaraoke] = useState(true)
   const [noSubs, setNoSubs] = useState(false)
