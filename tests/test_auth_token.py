@@ -363,3 +363,14 @@ def test_traversal_attempts_over_http_are_refused(client, path):
     response = client.get(path, headers=BEARER)
     assert response.status_code in (400, 404)
     assert "root:" not in response.text
+
+
+def test_secrets_never_enter_the_docker_build_context():
+    """data/ holds the API token, the saved settings (every provider key) and an
+    optional cookies.txt. The Dockerfile does `COPY . .`, so anything not
+    excluded here is baked into an image layer, where it survives every later
+    deletion and travels with the image."""
+    ignore = (PROJECT_ROOT / ".dockerignore").read_text(encoding="utf-8")
+    entries = {line.strip().rstrip("/") for line in ignore.splitlines()}
+    for secret in ("data", ".env"):
+        assert secret in entries, f"{secret} is not in .dockerignore"

@@ -15,6 +15,10 @@ outputs/
 custom_fonts/
 .git/
 .env
+# Secrets. data/ holds the API token, the saved settings (every provider key)
+# and an optional cookies.txt. `COPY . .` in the Dockerfile would otherwise bake
+# all of it into an image layer, where it survives every later deletion.
+data/
 
 # Node
 node_modules/
