@@ -278,6 +278,8 @@ class ClipDetail(BaseModel):
     end_time: Optional[float] = None
     download_url: str
     thumbnail_url: Optional[str] = None
+    # A clip with no speech legitimately has no .srt, so this stays optional.
+    srt_url: Optional[str] = None
     metadata: dict = Field(default_factory=dict)
 
 

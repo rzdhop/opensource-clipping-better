@@ -173,3 +173,76 @@ def test_the_traversal_guard_still_refuses_a_signed_escape(client, tmp_path):
     response = client.get(signed(f"../{outside.name}"), headers=BEARER)
     assert response.status_code in (400, 404)
     assert re.search(r"Invalid path|not found", response.text, re.I)
+
+
+# ------------------------------------------------- thumbnails and .srt on a clip
+#
+# thumbnail_rank_N.jpg and highlight_rank_N.srt are written for every clip and
+# were never exposed: ClipDetail.thumbnail_url was declared and never set, so the
+# dashboard rendered a grid of black rectangles, and the .srt was reachable only
+# inside the opaque metadata blob. Derived on READ so the jobs already in
+# outputs/jobs.json -- which predate both fields -- work with no migration.
+
+def persisted_clip(**overrides):
+    """A clip record shaped like one written BEFORE these fields existed."""
+    record = {
+        "rank": 1,
+        "filename": CLIP,
+        "download_url": f"/api/outputs/{JOB}/{CLIP}",
+        "metadata": {
+            "rank": 1,
+            "video_path": f"/app/outputs/{JOB}/{CLIP}",
+            "thumbnail_path": f"/app/outputs/{JOB}/thumbnail_rank_1.jpg",
+            "srt_path": f"/app/outputs/{JOB}/highlight_rank_1.srt",
+        },
+    }
+    record.update(overrides)
+    return record
+
+
+def derive(record):
+    from web.api.models import ClipDetail
+    from web.api.routes.jobs import _derive_missing_urls
+
+    return _derive_missing_urls(ClipDetail(**record), JOB)
+
+
+def test_an_old_clip_record_gains_both_urls():
+    clip = derive(persisted_clip())
+    assert clip.thumbnail_url == f"/api/outputs/{JOB}/thumbnail_rank_1.jpg"
+    assert clip.srt_url == f"/api/outputs/{JOB}/highlight_rank_1.srt"
+
+
+def test_the_container_path_in_the_manifest_does_not_leak():
+    """metadata holds absolute CONTAINER paths (/app/outputs/...). Only the
+    basename may reach a URL, or the link would 404 off the host."""
+    clip = derive(persisted_clip())
+    assert "/app/" not in clip.thumbnail_url
+    assert "/app/" not in clip.srt_url
+
+
+def test_a_clip_with_no_subtitle_gets_no_srt_url():
+    """A clip with no speech legitimately has no .srt. It must be absent, not an
+    empty string that renders a dead button."""
+    record = persisted_clip()
+    record["metadata"] = dict(record["metadata"], srt_path=None)
+    clip = derive(record)
+    assert clip.srt_url is None
+    assert clip.thumbnail_url is not None
+
+
+def test_urls_already_present_are_not_overwritten():
+    """A record written by the current worker is already complete; deriving must
+    not second-guess it."""
+    record = persisted_clip(
+        thumbnail_url="/api/outputs/other/t.jpg",
+        srt_url="/api/outputs/other/s.srt",
+    )
+    clip = derive(record)
+    assert clip.thumbnail_url == "/api/outputs/other/t.jpg"
+    assert clip.srt_url == "/api/outputs/other/s.srt"
+
+
+def test_a_record_with_no_metadata_at_all_does_not_explode():
+    clip = derive(persisted_clip(metadata={}))
+    assert clip.thumbnail_url is None and clip.srt_url is None

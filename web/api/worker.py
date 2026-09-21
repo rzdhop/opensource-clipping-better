@@ -477,6 +477,14 @@ def _execute_pipeline(job_id: str, payload: dict) -> None:
             # testable (tests/test_manifest_fields.py) instead of permanently
             # excusing one dead name.
             filename = os.path.basename(entry.get("video_path") or "")
+            # thumbnail_rank_N.jpg and highlight_rank_N.srt are written for every
+            # clip and were never exposed: thumbnail_url was declared on
+            # ClipDetail and never set, so the dashboard showed a grid of black
+            # rectangles, and the .srt was reachable only inside the opaque
+            # metadata blob. Basenames, unsigned, exactly like download_url --
+            # routes/jobs.py signs all three on the way out.
+            thumb = os.path.basename(entry.get("thumbnail_path") or "")
+            srt = os.path.basename(entry.get("srt_path") or "")
             clips.append(
                 ClipDetail(
                     rank=entry.get("rank", 0),
@@ -488,6 +496,8 @@ def _execute_pipeline(job_id: str, payload: dict) -> None:
                     start_time=entry.get("start_time"),
                     end_time=entry.get("end_time"),
                     download_url=f"/api/outputs/{job_id}/{filename}",
+                    thumbnail_url=f"/api/outputs/{job_id}/{thumb}" if thumb else None,
+                    srt_url=f"/api/outputs/{job_id}/{srt}" if srt else None,
                     metadata=entry,
                 )
             )

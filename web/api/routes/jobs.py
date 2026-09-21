@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from datetime import datetime, timezone
 
 from fastapi import Depends, APIRouter, File, HTTPException, UploadFile
@@ -27,15 +28,48 @@ from .. import worker
 router = APIRouter(prefix="/api/jobs", tags=["jobs"], dependencies=[Depends(require_token)])
 
 
+def _derive_missing_urls(clip: ClipDetail, job_id: str) -> ClipDetail:
+    """Fill thumbnail_url / srt_url from the manifest blob when they are absent.
+
+    Derived on read rather than migrated, so the jobs already in
+    outputs/jobs.json work with zero writes. Every persisted clip carries its
+    whole manifest entry in ``metadata``, which already contains
+    ``thumbnail_path`` and ``srt_path`` -- verified against job 2773bd83c7b6,
+    whose seven clips predate both fields.
+
+    The alternative was a migration that rewrites outputs/jobs.json -- the single
+    unbacked record of every job this system has ever run -- on process start, to
+    add fields already recoverable from the file, and that would have to be
+    written again for the next field. worker.py still populates both at write
+    time so new records are self-describing, but the read path never depends on
+    it.
+    """
+    meta = clip.metadata if isinstance(clip.metadata, dict) else {}
+    updates = {}
+
+    if not clip.thumbnail_url:
+        name = os.path.basename(meta.get("thumbnail_path") or "")
+        if name:
+            updates["thumbnail_url"] = f"/api/outputs/{job_id}/{name}"
+
+    if not clip.srt_url:
+        name = os.path.basename(meta.get("srt_path") or "")
+        if name:
+            updates["srt_url"] = f"/api/outputs/{job_id}/{name}"
+
+    return clip.model_copy(update=updates) if updates else clip
+
+
 def _job_to_response(job: dict) -> JobResponse:
     """Convert internal job dict to API response model."""
     clips = job.get("clips", [])
+    job_id = job.get("id", "")
     clip_list = []
     for c in clips:
         if isinstance(c, ClipDetail):
-            clip_list.append(c)
+            clip_list.append(_derive_missing_urls(c, job_id))
         elif isinstance(c, dict):
-            clip_list.append(ClipDetail(**c))
+            clip_list.append(_derive_missing_urls(ClipDetail(**c), job_id))
 
     progress = job.get("progress")
     if progress and isinstance(progress, dict):

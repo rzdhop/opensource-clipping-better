@@ -169,6 +169,12 @@ def proses_klip(
         "ratio": rasio,
         "video_path": out_vid,
         "thumbnail_path": out_thm,
+        # Declared here, filled in after the render by
+        # clipping/subtitles_export.export_all -- which is why it starts as None.
+        # It has to be declared: tests/test_manifest_fields.py reads this literal
+        # by AST and asserts every manifest key web/api/worker.py consumes is
+        # written here, and the API now exposes the .srt to the dashboard.
+        "srt_path": None,
         "thumbnail_text": judul_en or judul or f"Highlight {rank}",
         "youtube_title_final": clip.get(
             "youtube_title_final", clip.get("title_inggris", "")
