@@ -264,6 +264,45 @@ def _nvidia_is_retryable(exc: Exception) -> bool:
     return isinstance(exc, ValueError)
 
 
+def _first_json_value(text: str):
+    """Return the first complete JSON array or object in *text*, else None.
+
+    Scans for a balanced span rather than regexing, so nested structures and
+    braces inside strings are handled correctly. Only called after a direct
+    parse has already failed.
+    """
+    for opener, closer in (("[", "]"), ("{", "}")):
+        start = text.find(opener)
+        while start != -1:
+            depth = 0
+            in_string = False
+            escaped = False
+            for idx in range(start, len(text)):
+                char = text[idx]
+                if escaped:
+                    escaped = False
+                    continue
+                if char == "\\":
+                    escaped = True
+                    continue
+                if char == '"':
+                    in_string = not in_string
+                    continue
+                if in_string:
+                    continue
+                if char == opener:
+                    depth += 1
+                elif char == closer:
+                    depth -= 1
+                    if depth == 0:
+                        try:
+                            return json.loads(text[start:idx + 1])
+                        except json.JSONDecodeError:
+                            break  # try the next opener of this kind
+            start = text.find(opener, start + 1)
+    return None
+
+
 def _extract_clip_list(content: str) -> list[dict]:
     """Turn a raw NIM response into the clip list, or raise.
 
@@ -278,7 +317,21 @@ def _extract_clip_list(content: str) -> list[dict]:
         content = re.sub(r"```(json)?", "", content).strip()
         content = content.split("```")[0].strip()
 
-    hasil = json.loads(content)
+    try:
+        hasil = json.loads(content)
+    except json.JSONDecodeError:
+        # Reasoning models leak fragments of their own scratchpad into the
+        # content. A real observed response, from a model asked for a strict
+        # json_schema array, began with a bare "[" on its own line and then the
+        # actual array underneath -- finish_reason "stop", nothing truncated,
+        # simply unparseable. NVIDIA's own endpoint hides this because the NIM
+        # path suppresses the reasoning pass, but an arbitrary OpenAI-compatible
+        # endpoint has no such switch, so salvage the first well-formed value
+        # rather than burning a retry on a response that is already correct.
+        salvaged = _first_json_value(content)
+        if salvaged is None:
+            raise
+        hasil = salvaged
 
     # guided_json should return the array directly, but non-conforming models
     # wrap it. Keep the unwrapper.
