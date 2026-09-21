@@ -83,7 +83,14 @@ DAFTAR_FONT = {
         "utama": {
             "nama": "Montserrat",
             "file": "Montserrat-Regular.ttf",
-            "url": "https://cdn.jsdelivr.net/fontsource/fonts/montserrat@latest/latin-400-normal.ttf",
+            # NOT the fontsource mirror. cdn.jsdelivr.net/fontsource/fonts/
+            # montserrat@latest/latin-400-normal.ttf serves a 48832-byte face
+            # whose name table says "Montserrat Thin", so libass found no family
+            # called "Montserrat" and every clip was burned in DejaVuSans while
+            # the pipeline printed "All fonts prepared successfully". This is the
+            # upstream project, and the same source the DEFAULT style above
+            # already uses. Verified: 445928 bytes, family "Montserrat".
+            "url": "https://raw.githubusercontent.com/JulietaUla/Montserrat/master/fonts/ttf/Montserrat-Regular.ttf",
             "bold": 0,
         },
         "khusus": {

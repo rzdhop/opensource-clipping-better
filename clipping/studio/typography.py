@@ -21,6 +21,8 @@ from mediapipe.tasks import python as mp_python
 from mediapipe.tasks.python import vision as mp_vision
 from PIL import Image, ImageDraw, ImageFont
 
+from clipping.fonts import font_family_name, font_file_declares
+
 FIREFOX_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:148.0) Gecko/20100101 Firefox/148.0"
 
 def _load_studio_internal_module(file_name: str, module_alias: str):
@@ -43,7 +45,8 @@ run_ffmpeg_with_progress = _ffmpeg_utils.run_ffmpeg_with_progress
 
 
 def download_google_font(
-    url, output_filename, font_dir, max_retry=10, min_valid_size=1000
+    url, output_filename, font_dir, max_retry=10, min_valid_size=1000,
+    expected_family=None,
 ):
     """
     Download a Google font file with retry and basic integrity checks.
@@ -54,6 +57,12 @@ def download_google_font(
         font_dir (str): Destination directory where the font will be saved.
         max_retry (int): Maximum network retry attempts before failing. Defaults to 10.
         min_valid_size (int): Minimum file size in bytes to consider the download valid. Defaults to 1000.
+        expected_family (str|None): The family name the config asks for. When
+            given, a cached file whose name table declares a DIFFERENT family is
+            treated as invalid and re-downloaded. Size alone used to be the whole
+            check, which is why a face named "Montserrat Thin" sat in
+            custom_fonts/ being reported as valid while every clip rendered in
+            DejaVuSans.
 
     Returns:
         bool: True if the font file is successfully downloaded and validated, False if it fails after all retries.
@@ -69,11 +78,26 @@ def download_google_font(
     temp_path = file_path + ".part"
 
     def is_valid(path):
-        return os.path.exists(path) and os.path.getsize(path) > min_valid_size
+        if not (os.path.exists(path) and os.path.getsize(path) > min_valid_size):
+            return False
+        if not expected_family:
+            return True
+        # A large file is not a correct file. Checked on the CACHED path too, so
+        # a wrong font already on disk is replaced rather than trusted forever --
+        # custom_fonts/ is bind-mounted, so "already on disk" is the normal case.
+        return font_file_declares(path, expected_family)
 
     if is_valid(file_path):
         print(f"   ✅ Font '{output_filename}' already exists and is valid.")
         return True
+
+    if expected_family and os.path.exists(file_path):
+        names = font_family_name(file_path)
+        declared = f"{names[0]} / {names[1]}" if names else "unreadable"
+        print(
+            f"   ♻️ Re-downloading '{output_filename}': it declares "
+            f"{declared}, not '{expected_family}'."
+        )
 
     headers = {
         "User-Agent": FIREFOX_UA,
@@ -212,8 +236,14 @@ def siapkan_font_tipografi(cfg):
     f_utama = daftar_font[gaya]["utama"]
     f_khusus = daftar_font[gaya]["khusus"]
 
-    ok_utama = download_google_font(f_utama["url"], f_utama["file"], font_dir)
-    ok_khusus = download_google_font(f_khusus["url"], f_khusus["file"], font_dir)
+    ok_utama = download_google_font(
+        f_utama["url"], f_utama["file"], font_dir,
+        expected_family=f_utama.get("nama"),
+    )
+    ok_khusus = download_google_font(
+        f_khusus["url"], f_khusus["file"], font_dir,
+        expected_family=f_khusus.get("nama"),
+    )
 
     path_utama = os.path.join(font_dir, f_utama["file"])
     path_khusus = os.path.join(font_dir, f_khusus["file"])
@@ -229,6 +259,28 @@ def siapkan_font_tipografi(cfg):
         and os.path.getsize(path_khusus) > 1000
     ):
         raise RuntimeError(f"Special font failed to prepare: {path_khusus}")
+
+    # Fail loudly rather than degrade silently. The ASS Fontname is f["nama"], so
+    # a file declaring a different family means libass will not find it and will
+    # substitute DejaVuSans -- and PIL, which loads the same file by path to
+    # measure line wrapping, will not substitute anything, so the .ass ends up
+    # with one font's metrics and another font's glyphs. That is exactly what
+    # happened on 2026-09-21, and nothing in the log said so.
+    for role, spec, path in (
+        ("Primary", f_utama, path_utama),
+        ("Special", f_khusus, path_khusus),
+    ):
+        wanted = spec.get("nama")
+        if wanted and not font_file_declares(path, wanted):
+            names = font_family_name(path)
+            declared = f"{names[0]!r} / {names[1]!r}" if names else "nothing readable"
+            raise RuntimeError(
+                f"{role} font {os.path.basename(path)} declares {declared}, but the "
+                f"'{gaya}' style asks for {wanted!r}. libass would silently fall "
+                f"back to a system font and every subtitle would render in the "
+                f"wrong typeface. Check the 'url' for this style in "
+                f"clipping/config.py DAFTAR_FONT."
+            )
 
     register_fonts_for_libass(font_dir)
     print(f"✅ All fonts prepared successfully in: {font_dir}")
