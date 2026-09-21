@@ -246,3 +246,74 @@ def test_urls_already_present_are_not_overwritten():
 def test_a_record_with_no_metadata_at_all_does_not_explode():
     clip = derive(persisted_clip(metadata={}))
     assert clip.thumbnail_url is None and clip.srt_url is None
+
+
+# ------------------------------------------------- signed URLs in a job response
+#
+# The fix, end to end: GET /api/jobs/{id} with a token returns URLs that a
+# browser can then fetch with NO credential at all.
+
+@pytest.fixture
+def job_with_clips(client, monkeypatch):
+    """A completed job in the store whose clip files exist under OUTPUTS_DIR."""
+    from web.api import store
+
+    record = {
+        "id": JOB,
+        "status": "completed",
+        "clips": [persisted_clip()],
+    }
+    monkeypatch.setattr(store, "get_job", lambda job_id: dict(record) if job_id == JOB else None)
+    return record
+
+
+def clip_from_api(client):
+    response = client.get(f"/api/jobs/{JOB}", headers=BEARER)
+    assert response.status_code == 200
+    return response.json()["clips"][0]
+
+
+@pytest.mark.parametrize("field", ["download_url", "thumbnail_url", "srt_url"])
+def test_every_media_url_in_a_job_response_is_signed(client, job_with_clips, field):
+    url = clip_from_api(client)[field]
+    assert "exp=" in url and "sig=" in url
+
+
+@pytest.mark.parametrize("field", ["download_url", "thumbnail_url", "srt_url"])
+def test_each_signed_url_is_fetchable_with_no_headers(client, job_with_clips, field):
+    """This single assertion is the reported bug, inverted: a request shaped
+    exactly like a <video src>, a poster load or a download click."""
+    url = clip_from_api(client)[field]
+    assert client.get(url).status_code == 200
+
+
+def test_two_consecutive_reads_return_identical_urls(client, job_with_clips):
+    """The bucketing property, asserted where it matters. If these differed, the
+    dashboard's re-fetch would hand <video> a new src and restart playback."""
+    assert clip_from_api(client) == clip_from_api(client)
+
+
+def test_the_api_token_is_nowhere_in_the_response(client, job_with_clips):
+    assert TEST_TOKEN not in client.get(f"/api/jobs/{JOB}", headers=BEARER).text
+
+
+def test_the_stored_record_is_left_unsigned(client, job_with_clips):
+    """Signing happens on the way out. A signed URL persisted into
+    outputs/jobs.json would carry an expiry that outlives the record."""
+    clip_from_api(client)
+    stored = job_with_clips["clips"][0]
+    assert "?" not in stored["download_url"]
+    assert "exp=" not in stored["download_url"]
+
+
+def test_a_job_list_signs_clips_too(client, job_with_clips, monkeypatch):
+    """GET /api/jobs is the second route through _job_to_response. An unsigned
+    URL here would work in the detail view and fail in the list."""
+    from web.api import store
+
+    monkeypatch.setattr(store, "list_jobs", lambda *a, **k: [dict(job_with_clips)])
+    response = client.get("/api/jobs", headers=BEARER)
+    assert response.status_code == 200
+    for job in response.json()["jobs"]:
+        for clip in job.get("clips", []):
+            assert "sig=" in clip["download_url"]

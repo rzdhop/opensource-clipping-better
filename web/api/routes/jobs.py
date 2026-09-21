@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from fastapi import Depends, APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 
-from ..auth import require_token
+from ..auth import media_url, require_token
 from .files import save_upload
 from ..models import (
     JobCreateRequest,
@@ -60,6 +60,42 @@ def _derive_missing_urls(clip: ClipDetail, job_id: str) -> ClipDetail:
     return clip.model_copy(update=updates) if updates else clip
 
 
+MEDIA_URL_FIELDS = ("download_url", "thumbnail_url", "srt_url")
+
+
+def _sign_clip_urls(clip: ClipDetail, job_id: str) -> ClipDetail:
+    """Replace the clip's media URLs with signed, expiring ones.
+
+    Done at SERIALIZATION time, not at render time, for two reasons. The stored
+    URLs in outputs/jobs.json must stay unsigned, or every persisted record would
+    carry an expiry that outlives it; and holding a valid token is then exactly
+    what mints a playable URL, because this is only reached through an
+    authenticated response.
+
+    The signature is stable inside its bucket (see auth.media_expiry), so two
+    consecutive requests for the same job return byte-identical URLs. That is
+    what keeps a re-render of the page from tearing down playback.
+    """
+    updates = {}
+    for field in MEDIA_URL_FIELDS:
+        url = getattr(clip, field, None)
+        # A URL that already has a query string has already been signed. Cannot
+        # happen through the store, which holds unsigned values, but signing a
+        # signed URL would produce a broken one silently.
+        if not url or "?" in url:
+            continue
+        name = url.rsplit("/", 1)[-1]
+        if name:
+            updates[field] = media_url(job_id, name)
+
+    return clip.model_copy(update=updates) if updates else clip
+
+
+def _clip_for_response(clip: ClipDetail, job_id: str) -> ClipDetail:
+    """A clip as the browser needs it: missing URLs derived, all of them signed."""
+    return _sign_clip_urls(_derive_missing_urls(clip, job_id), job_id)
+
+
 def _job_to_response(job: dict) -> JobResponse:
     """Convert internal job dict to API response model."""
     clips = job.get("clips", [])
@@ -67,9 +103,9 @@ def _job_to_response(job: dict) -> JobResponse:
     clip_list = []
     for c in clips:
         if isinstance(c, ClipDetail):
-            clip_list.append(_derive_missing_urls(c, job_id))
+            clip_list.append(_clip_for_response(c, job_id))
         elif isinstance(c, dict):
-            clip_list.append(_derive_missing_urls(ClipDetail(**c), job_id))
+            clip_list.append(_clip_for_response(ClipDetail(**c), job_id))
 
     progress = job.get("progress")
     if progress and isinstance(progress, dict):
@@ -331,11 +367,19 @@ async def job_status_sse(job_id: str):
                 if status == JobStatus.COMPLETED.value:
                     clips = current_job.get("clips", [])
                     clip_data = []
+                    # Decorated exactly like the HTTP response: derived URLs,
+                    # then signed. The dashboard currently throws these away and
+                    # re-fetches the job, so this is inert today -- but a
+                    # serialization site that emits UNSIGNED media URLs is what
+                    # the next consumer adopts by accident, and it is the same
+                    # one-line call.
                     for c in clips:
-                        if hasattr(c, "model_dump"):
-                            clip_data.append(c.model_dump())
+                        if isinstance(c, ClipDetail):
+                            clip_data.append(_clip_for_response(c, job_id).model_dump())
                         elif isinstance(c, dict):
-                            clip_data.append(c)
+                            clip_data.append(
+                                _clip_for_response(ClipDetail(**c), job_id).model_dump()
+                            )
                     final_event = {
                         "type": "completed",
                         "status": status,
