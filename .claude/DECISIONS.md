@@ -690,3 +690,50 @@ actually written failed on `output_file`.
 key — and the manifest/worker agreement becomes exact and testable rather than
 permanently excusing one dead name. The alternative, an allow-list entry, would
 have made the guard weaker every time something like this was found.
+
+## DEC-037 — One API token on every route; `/api/health` is the only exception
+**Context.** There was no authentication of any kind, and the backend bound
+`0.0.0.0:8000` on a machine with a public IP. Anyone who found the port could
+read every job, upload a 2 GB file, read back which API keys were configured, or
+call `POST /api/shutdown` — an unauthenticated kill switch.
+**Decision.** A bearer token checked with `hmac.compare_digest`, applied as a
+router-level dependency so a new route file cannot be added unprotected by
+accident. Generated on first start and stored 0600 in `data/api_token`; pinned
+with `API_TOKEN`. The port moves to `127.0.0.1`.
+**Consequence.** Generating rather than refusing to start is deliberate: a
+server that will not boot without a hand-written token is one people work around
+by disabling auth. `/api/health` stays open because a container healthcheck and
+a reverse proxy need it, and it reports only booleans and counts.
+
+The escape hatch `DISABLE_AUTH=1` exists for a developer's terminal and is
+asserted absent from both compose files by a test.
+
+**The bug worth remembering:** the dependency was first written
+`async def require_token(request)` with no annotation. FastAPI then treats
+`request` as a request-body field, so **every route answered 422** and the token
+was never examined — including the health check. Every unit test passed, because
+every function was individually correct. Only a live request showed it, which is
+why `tests/test_auth_token.py` now drives a real `TestClient` and asserts 401
+rather than 422.
+
+## DEC-038 — The dashboard is served by the API, and SSE moves off EventSource
+**Context.** The production image ran the **Vite dev server**. The dashboard
+also hardcodes `API_BASE = '/api'`, so it only ever worked same-origin.
+**Decision.** Build the dashboard into the image (`node:20-alpine` stage,
+`npm ci`) and mount `dist/` at `/` **after** the API routers. One origin, no
+CORS, `api.js` unchanged in that respect.
+**Consequence.** The `.:/app` bind mount in compose would have hidden the built
+dashboard behind the host's (gitignored, absent) directory, so an anonymous
+volume keeps the image's copy visible — the same trick `__pycache__` already
+uses two lines above. Without it the API would have silently fallen back to its
+"dashboard not built" JSON.
+
+`EventSource` cannot send headers, so the job stream is read with `fetch` and a
+`ReadableStream` instead. The easy alternative was `?token=...`, which puts the
+credential in access logs, browser history and every `Referer` the page sends.
+A test asserts `token=` never appears in `api.js`.
+
+`npm ci` needs a lockfile, and the project shipped none — recorded as a
+follow-up conflicting with the "pin and verify" rule. It is committed now: a
+production image that resolves its own dependency tree at build time is exactly
+what that rule exists to prevent.

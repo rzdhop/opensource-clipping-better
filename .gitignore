@@ -46,3 +46,6 @@ youtube_tracker/*.sqlite3
 node_modules/
 web/dashboard/node_modules/
 data/
+
+# The dashboard is built into the image, not committed.
+web/dashboard/dist/

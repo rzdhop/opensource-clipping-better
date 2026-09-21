@@ -1,0 +1,47 @@
+# Caddy in front of the API, for when you want a real domain.
+#
+# Caddy does TLS and rate limiting. It does NOT do authentication: the API
+# token does that, and it does it whether or not Caddy is in front. Putting
+# auth in the proxy instead would mean the app is unprotected the moment
+# someone reaches it another way.
+#
+# Set DOMAIN and ACME_EMAIL in .env, then:
+#   docker compose --profile domain up -d
+
+{$DOMAIN} {
+	encode zstd gzip
+
+	# Certificates are obtained and renewed automatically.
+	tls {$ACME_EMAIL}
+
+	# Uploads are videos of up to 2 GB, and a slow phone upload can take a
+	# long time. Caddy's defaults would cut both short.
+	request_body {
+		max_size 2GB
+	}
+
+	reverse_proxy backend:8000 {
+		# The job stream is Server-Sent Events: it must not be buffered, or the
+		# dashboard shows nothing until the job ends.
+		flush_interval -1
+
+		# A render can run for many minutes with the stream idle between
+		# progress lines.
+		transport http {
+			read_timeout 30m
+			write_timeout 30m
+		}
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

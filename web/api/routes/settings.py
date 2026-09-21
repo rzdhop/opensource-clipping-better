@@ -8,13 +8,14 @@ import os
 import shutil
 import subprocess
 
-from fastapi import APIRouter
+from fastapi import Depends, APIRouter
 
+from ..auth import require_token
 from ..models import SettingsRequest, SettingsResponse, SystemHealthResponse
 from .. import store as job_store
 from .. import worker
 
-router = APIRouter(tags=["settings"])
+router = APIRouter(tags=["settings"], dependencies=[Depends(require_token)])
 
 
 def _check_gpu() -> bool:

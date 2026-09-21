@@ -8,9 +8,10 @@ import asyncio
 import json
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException
+from fastapi import Depends, APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
+from ..auth import require_token
 from ..models import (
     JobCreateRequest,
     JobEvent,
@@ -22,7 +23,7 @@ from ..models import (
 from .. import store
 from .. import worker
 
-router = APIRouter(prefix="/api/jobs", tags=["jobs"])
+router = APIRouter(prefix="/api/jobs", tags=["jobs"], dependencies=[Depends(require_token)])
 
 
 def _job_to_response(job: dict) -> JobResponse:

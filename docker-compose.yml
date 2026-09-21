@@ -9,10 +9,21 @@ services:
     # Override in .env when your uid is not 1000: DOCKER_UID=$(id -u).
     user: "${DOCKER_UID:-1000}:${DOCKER_GID:-1000}"
     ports:
-      - "8000:8000"
+      # Bound to loopback, not 0.0.0.0. This host has a public IP, and the API
+      # was reachable from the internet with no authentication at all. Reach it
+      # over the tailnet with:
+      #   tailscale serve --bg --https=443 http://127.0.0.1:8000
+      # See docs/deploy-tailscale.md.
+      - "127.0.0.1:8000:8000"
     volumes:
       - .:/app
       - /app/__pycache__
+      # The bind mount above replaces /app wholesale, which would hide the
+      # dashboard the Dockerfile built into the image behind the host's
+      # (gitignored, usually absent) directory -- and the API would fall back to
+      # its "dashboard not built" JSON. This anonymous volume keeps the image's
+      # copy visible, the same trick __pycache__ uses on the line above.
+      - /app/web/dashboard/dist
       - ./outputs:/app/outputs
       - ./uploads:/app/uploads
       - ./custom_fonts:/app/custom_fonts
@@ -28,6 +39,15 @@ services:
       # `user:` above may be a uid with no /etc/passwd entry, which leaves HOME
       # unset and makes libraries that cache under it fall over.
       - HOME=/tmp
+      # Pin the API token here to keep it stable across rebuilds. Left unset,
+      # the backend generates one on first start and prints it.
+      - API_TOKEN=${API_TOKEN:-}
+      - PUBLIC_URL=${PUBLIC_URL:-}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
+      - LLM_CHAIN=${LLM_CHAIN:-}
+      - STT_CHAIN=${STT_CHAIN:-}
     restart: unless-stopped
     # Uncomment below for GPU support (requires NVIDIA Container Toolkit)
     # deploy:
@@ -38,14 +58,26 @@ services:
     #           count: 1
     #           capabilities: [gpu]
 
-  frontend:
-    build: ./web/dashboard
-    container_name: osc-frontend
+  # Only started with `--profile domain`, for serving on your own domain.
+  # Tailscale needs none of this; see docs/deploy-tailscale.md.
+  caddy:
+    image: caddy:2-alpine
+    container_name: osc-caddy
+    profiles: ["domain"]
     ports:
-      - "5173:5173"
+      - "80:80"
+      - "443:443"
     volumes:
-      - ./web/dashboard:/app
-      - /app/node_modules
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      - DOMAIN=${DOMAIN:-}
+      - ACME_EMAIL=${ACME_EMAIL:-}
     restart: unless-stopped
     depends_on:
       - backend
+
+volumes:
+  caddy_data:
+  caddy_config:

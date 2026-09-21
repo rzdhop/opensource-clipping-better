@@ -1,0 +1,27 @@
+# Development overlay: the Vite dev server with hot reload, on its own port.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+#
+# Production does not run this. The dashboard is built into the backend image
+# and served by the API, so there is one origin and no CORS.
+services:
+  backend:
+    environment:
+      # Re-allows the localhost:5173 origins the Vite server needs.
+      - DEV=1
+    ports:
+      # The dev proxy talks to the backend over the compose network, but
+      # exposing it on the host is convenient while developing.
+      - "127.0.0.1:8000:8000"
+
+  frontend:
+    build: ./web/dashboard
+    container_name: osc-frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./web/dashboard:/app
+      - /app/node_modules
+    restart: unless-stopped
+    depends_on:
+      - backend

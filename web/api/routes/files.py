@@ -7,10 +7,12 @@ from __future__ import annotations
 import os
 import shutil
 
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import Depends, APIRouter, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse
 
-router = APIRouter(tags=["files"])
+from ..auth import require_token
+
+router = APIRouter(tags=["files"], dependencies=[Depends(require_token)])
 
 # Resolve absolute path to the project root (2 levels up from web/api/routes)
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))

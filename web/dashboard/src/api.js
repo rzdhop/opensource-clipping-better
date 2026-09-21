@@ -1,19 +1,86 @@
 const API_BASE = '/api'
 
+/**
+ * The API token, kept in localStorage.
+ *
+ * Every request carries it in a header rather than a query parameter: a token
+ * in a URL ends up in access logs, browser history and any Referer the page
+ * sends. That choice is also why the job stream below is read with fetch
+ * instead of EventSource -- EventSource cannot send headers at all.
+ */
+const TOKEN_KEY = 'rzc_token'
+
+export function getToken() {
+  try {
+    return localStorage.getItem(TOKEN_KEY) || ''
+  } catch {
+    return ''   // private window, or site data blocked
+  }
+}
+
+export function setToken(token) {
+  try {
+    if (token) localStorage.setItem(TOKEN_KEY, token)
+    else localStorage.removeItem(TOKEN_KEY)
+  } catch {
+    /* nothing to do: the request below will 401 and the UI will ask again */
+  }
+}
+
+export function clearToken() {
+  setToken('')
+}
+
+function authHeaders(extra) {
+  const token = getToken()
+  return {
+    ...(extra || {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  }
+}
+
+/** Thrown on 401 so callers can route to the login screen. */
+export class UnauthorizedError extends Error {
+  constructor() {
+    super('Missing or invalid API token')
+    this.name = 'UnauthorizedError'
+  }
+}
+
+async function request(path, options = {}) {
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...options,
+    headers: authHeaders(options.headers),
+  })
+  if (res.status === 401) {
+    clearToken()
+    throw new UnauthorizedError()
+  }
+  return res
+}
+
+/** Verify a token against the API without storing it first. */
+export async function checkToken(token) {
+  const res = await fetch(`${API_BASE}/settings`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  return res.ok
+}
+
 export async function fetchJobs() {
-  const res = await fetch(`${API_BASE}/jobs`)
+  const res = await request('/jobs')
   if (!res.ok) throw new Error('Failed to fetch jobs')
   return res.json()
 }
 
 export async function fetchJob(jobId) {
-  const res = await fetch(`${API_BASE}/jobs/${jobId}`)
+  const res = await request(`/jobs/${jobId}`)
   if (!res.ok) throw new Error('Job not found')
   return res.json()
 }
 
 export async function createJob(payload) {
-  const res = await fetch(`${API_BASE}/jobs`, {
+  const res = await request('/jobs', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -26,7 +93,7 @@ export async function createJob(payload) {
 }
 
 export async function deleteJob(jobId) {
-  const res = await fetch(`${API_BASE}/jobs/${jobId}`, { method: 'DELETE' })
+  const res = await request(`/jobs/${jobId}`, { method: 'DELETE' })
   if (!res.ok) throw new Error('Failed to delete job')
   return res.json()
 }
@@ -51,6 +118,8 @@ export function uploadVideo(file, onProgress) {
 
     const xhr = new XMLHttpRequest()
     xhr.open('POST', `${API_BASE}/upload`)
+    const token = getToken()
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
 
     xhr.upload.addEventListener('progress', (event) => {
       if (!onProgress) return
@@ -115,13 +184,13 @@ export function uploadVideo(file, onProgress) {
 }
 
 export async function fetchSettings() {
-  const res = await fetch(`${API_BASE}/settings`)
+  const res = await request('/settings')
   if (!res.ok) throw new Error('Failed to fetch settings')
   return res.json()
 }
 
 export async function updateSettings(payload) {
-  const res = await fetch(`${API_BASE}/settings`, {
+  const res = await request('/settings', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -131,6 +200,7 @@ export async function updateSettings(payload) {
 }
 
 export async function fetchHealth() {
+  // Public: no token needed, so the login screen can show system status.
   const res = await fetch(`${API_BASE}/health`)
   if (!res.ok) throw new Error('Health check failed')
   return res.json()
@@ -139,24 +209,75 @@ export async function fetchHealth() {
 // `onStatus` reports 'live' | 'closed'. Without it the UI cannot tell a job
 // that is quiet from a stream that died, which are the two cases a user staring
 // at an unmoving progress bar most needs told apart.
+//
+// Read with fetch + ReadableStream rather than EventSource. EventSource cannot
+// send headers, so using it would have meant putting the API token in the query
+// string -- and from there into access logs, browser history and any Referer
+// the page sends. The returned object keeps EventSource's `close()` so callers
+// do not change.
 export function createSSEConnection(jobId, onMessage, onStatus) {
-  const eventSource = new EventSource(`${API_BASE}/jobs/${jobId}/status`)
+  const controller = new AbortController()
+  let closed = false
 
-  eventSource.onopen = () => { if (onStatus) onStatus('live') }
-
-  eventSource.onmessage = (event) => {
-    try {
-      const data = JSON.parse(event.data)
-      onMessage(data)
-    } catch (e) {
-      console.error('SSE parse error:', e)
-    }
+  const close = () => {
+    if (closed) return
+    closed = true
+    controller.abort()
   }
 
-  eventSource.onerror = () => {
-    eventSource.close()
+  const finish = () => {
+    if (closed) return
+    close()
     if (onStatus) onStatus('closed')
   }
 
-  return eventSource
+  ;(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/jobs/${jobId}/status`, {
+        headers: authHeaders({ Accept: 'text/event-stream' }),
+        signal: controller.signal,
+      })
+      if (!res.ok || !res.body) {
+        if (res.status === 401) clearToken()
+        finish()
+        return
+      }
+      if (onStatus) onStatus('live')
+
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (!closed) {
+        const { value, done } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+
+        // SSE frames are separated by a blank line; a frame can hold several
+        // `data:` lines, which are joined with newlines before parsing.
+        let split
+        while ((split = buffer.indexOf('\n\n')) !== -1) {
+          const frame = buffer.slice(0, split)
+          buffer = buffer.slice(split + 2)
+          const payload = frame
+            .split('\n')
+            .filter((line) => line.startsWith('data:'))
+            .map((line) => line.slice(5).trimStart())
+            .join('\n')
+          if (!payload) continue
+          try {
+            onMessage(JSON.parse(payload))
+          } catch (e) {
+            console.error('SSE parse error:', e)
+          }
+        }
+      }
+      finish()
+    } catch (e) {
+      if (e.name !== 'AbortError') console.error('SSE connection error:', e)
+      finish()
+    }
+  })()
+
+  return { close }
 }
