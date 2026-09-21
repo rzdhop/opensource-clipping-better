@@ -9,8 +9,8 @@
 - **Open questions:** none.
 - **Branch:** `feature/rzdhop-clips-rearchitecture`.
 - **Checkpoint commit:** `233b860` (pre-task). Tier-1 there: **1008 passed**.
-- **Tier-1 now:** pytest **1186 passed, 0 failed**. +178: 46 came from
-  `origin/main` in the merge, 132 are new here.
+- **Tier-1 now:** pytest **1187 passed, 0 failed**. +179: 46 came from
+  `origin/main` in the merge, 133 are new here.
 - **Tier-2:** this project has **no E2E browser suite** — no playwright, no
   cypress, no `e2e/` — so there is nothing to run. Done instead: the real app
   was started with the dashboard built in a scratch dir, and job
@@ -65,7 +65,24 @@ that signature on `/api/jobs` and `/api/shutdown` still 401, and
 burn: `fontselect: (Montserrat, 400, 0) -> Montserrat-Regular`, where the
 human's run said `-> DejaVuSans.ttf`.
 
-### ⚠️ Blocker the human must clear once, before building the dashboard
+### Deployed and verified on the real container (2026-09-21 20:36 UTC)
+The human rebuilt and started `rzc-backend`. Confirmed against it: every SPA
+route serves the app and `/assets/nope.js` still 404s; the served bundle is
+`index-tVovS33m.js`, the build carrying the JobDetail changes; all three clip
+URLs come back signed; the clip plays with **no headers** (200 `video/mp4`), a
+range request answers **206**, and `?download=1` returns a real ISO Media MP4 as
+`attachment; filename="highlight_rank_1_ready.mp4"`. The unsigned URL is still
+401, and a clip signature on `/api/jobs` is still 401.
+
+**One silent deployment bug was found in that log and fixed** (`d55271c`):
+`./data` is a bind mount, gitignored, so it does not exist in a fresh clone —
+and Docker creates a missing bind-mount source as **root**, after which the
+container (host uid, 1001 here) cannot write it. The API token could not be
+persisted, so it **changed on every restart**; and settings persistence answered
+200 while failing. Now `data/.gitkeep` is tracked so a clone owns the directory.
+On an older clone the one-time fix is `sudo chown -R "$(id -u):$(id -g)" data`.
+
+### ⚠️ Blocker the human must clear once, before building the dashboard LOCALLY
 `web/dashboard/node_modules` and `web/dashboard/dist` are both **empty
 root-owned directories** — mount points docker created — so `npm ci` dies with
 EACCES. Unrelated to this task, but it blocks the documented build step:
