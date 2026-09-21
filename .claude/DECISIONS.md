@@ -606,3 +606,55 @@ old placement made an analysis-only run impossible on a machine with no render
 stack — which is exactly the machine such a run is for. Found by trying it: the
 first `--dry-run-analysis` on this host died on `ModuleNotFoundError: cv2`
 before reaching the analysis it was meant to run.
+
+## DEC-032 — Transcription moves to hosted providers; local Whisper stays as a fallback
+**Context.** In-process Whisper is unusable on the hardware this runs on. On
+this ARM host, `faster-whisper` with `large-v3` on CPU measured **4.6x
+realtime** — 94 minutes for a 20-minute video — and there is no GPU to move it
+to. That single fact is what the local-first refactor was working around, and
+supplying a `.vtt` by hand was the workaround.
+**Decision.** `STT_CHAIN`, spelled like `LLM_CHAIN`: an ordered list tried in
+order, defaulting to
+`groq/whisper-large-v3-turbo,mistral/voxtral-mini-latest`. `--no-whisper`
+becomes an alias for `--stt-chain none`, and `local/faster-whisper` is a link
+like any other.
+**Consequence.** A video with no transcript now works in minutes instead of
+hours, for free. Three details are load-bearing:
+
+- **The output goes through `transcript._chunk_into_segments`**, the same
+  function the VTT and JSON3 parsers use. RC-1 then holds by construction
+  rather than by a second implementation happening to agree with the first.
+- **A hosted failure only falls back to local Whisper when the chain says so.**
+  Silently spending 94 minutes on CPU because a hosted call failed is exactly
+  the surprise this pipeline exists to prevent, so a chain with no `local/`
+  link raises instead.
+- **Voxtral's link omits `language`.** Mistral rejects
+  `timestamp_granularities` and `language` together, and word timings matter
+  more than a language hint — without them there is no karaoke.
+
+The provider also reports the language it heard, which is better evidence than
+the stopword detector guessing afterwards, so it is fed forward as
+`cfg.detected_language`.
+
+## DEC-033 — Audio is chunked on measured bytes, not on duration
+**Context.** Groq's free tier caps an upload at 25 MB. The obvious
+implementation assumes a bitrate and splits by the clock.
+**Decision.** Extract to 16 kHz mono FLAC — what every Whisper-family model
+resamples to anyway — then derive bytes-per-second from the **actual file** and
+split only when it does not fit, moving each boundary to the nearest silence
+within 15 seconds.
+**Consequence.** Measured on the real 20-minute video: **39.3 MB**, half again
+over the cap. An earlier draft of this note estimated 19-23 MB from the format
+alone and was simply wrong — FLAC is variable-rate, and this video has music
+under most of it. A quiet interview of the same length would fit in one
+request, and the derived rate gets both cases right where a fixed assumption
+gets one of them wrong.
+
+Two refinements came from running it rather than reasoning about it:
+- **Boundaries snap to silence**, so a cut never lands mid-word and the seam
+  has something for the overlap-dedupe to match on.
+- **A stub final chunk is absorbed.** The first real plan ended with a
+  10.8-second tail: its own upload, its own round trip, its own seam, and Groq
+  bills a 10-second minimum per request regardless. It is folded into the
+  previous chunk when the result still fits, and kept when it would not,
+  because a short chunk beats a rejected one.

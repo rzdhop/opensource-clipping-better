@@ -227,6 +227,8 @@ def build_config_from_payload(
         # AI
         ai_provider=ai_provider,
         llm_chain=payload.get("llm_chain", "") or "",
+        stt_chain=payload.get("stt_chain", "") or "",
+        detected_language="",
         platform=payload.get("platform", "auto"),
         output_language=payload.get("output_language", "auto"),
         dry_run_analysis=payload.get("dry_run_analysis", False),

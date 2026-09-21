@@ -5,10 +5,11 @@
   device, auto-download of video + subtitles, SRT in/out, every feature kept.
   Plan approved by the human: `/home/ubuntu/.claude/plans/hey-here-is-sleepy-walrus.md`
   (11 stages; read it before resuming — it carries the root causes and the design).
-- **Phase:** IMPLEMENT — **Stages 1-4 DONE.** S1 rolling-display cue semantics +
+- **Phase:** IMPLEMENT — **Stages 1-5 DONE.** S1 rolling-display cue semantics +
   SRT writer (`5d46c81`); S2 the provider core (`52ac830`); S3 beats, snapping,
-  presets and language detection (`cbe10f3`); S4 the three-pass analyzer, wired
-  in as the default. Next: Stage 5, hosted transcription.
+  presets and language detection (`cbe10f3`); S4 the three-pass analyzer
+  (`e2856b6`, `ed447b6`), proven live; S5 hosted transcription. Next: Stage 6,
+  the truth fixes (manifest `viral_score`, stale jobs, persisted settings).
 - **⚠️ Production was already broken before this work:** the shipped NVIDIA model
   `deepseek-ai/deepseek-v4-flash-0731` now returns **410 Gone** (it answered a
   real job on 2026-09-19 and was dead by 2026-09-21; the whole DeepSeek v4
@@ -20,8 +21,9 @@
   Roll back here.
 - **Tier-1 baseline at `f8ad8b4`:** pytest **369 passed, 0 failed**; `compileall`
   clean. (Needs `PYTHONPYCACHEPREFIX` locally — see the root `__pycache__` note.)
-- **Next action:** Stage 5 — hosted transcription (`clipping/providers/{stt,audio}.py`),
-  forked at `clipping/runner.py:resolve_transcript`. Needs `GROQ_API_KEY`.
+- **Next action:** Stage 6 — `viral_score` into `manifest_item`
+  (`clipping/studio/core.py:162-188`, the one sanctioned render-layer edit),
+  `store.fail_stale_jobs()` at startup, and `data/settings.json` persistence.
 - **Rollback for the new analysis:** `--ai-provider nvidia` (or `gemini`) runs
   the original single-request path, which is still in `engine.py` untouched and
   still covered by `tests/test_nvidia_retry.py`. Stage 11 retires it, and not
@@ -34,10 +36,14 @@
   then the chain runs on NVIDIA alone, which works: keyless links are skipped
   with a printed reason. `python tools/bench_llm.py` validates each key as it
   arrives and prints a suggested `LLM_CHAIN` ordered by measured speed.
-- **Tier-1 after Stage 4:** pytest **774 passed, 0 failed**; `compileall` clean.
-  Under the simulated pytest-only CI environment: **733 passed, 20 skipped, 0
-  failed** (648 after S3, 523 after S2, 368 after S1, 328 at baseline) — every
-  new test runs in CI, none of them skipped.
+- **Tier-1 after Stage 5:** pytest **823 passed, 0 failed**; `compileall` clean.
+  Under the simulated pytest-only CI environment: **782 passed, 20 skipped, 0
+  failed** (733 after S4, 648 after S3, 523 after S2, 368 after S1, 328 at
+  baseline) — every new test runs in CI, none of them skipped.
+- **Stage 5 is NOT live-verified.** Audio extraction and chunking are (see
+  below), but the hosted transcription call itself needs `GROQ_API_KEY`, which
+  does not exist yet. Until then transcription still falls through to local
+  Whisper, which on this host is 4.6x realtime.
 - **Tier-1 after Stage 1:** pytest **409 passed, 0 failed**; `compileall` clean.
   Under the simulated pytest-only CI environment: **368 passed, 20 skipped, 0
   failed**, against a measured baseline of **328 passed, 20 skipped** — exactly
@@ -93,6 +99,21 @@ after its hook ends, and **every emphasis word genuinely spoken** (`puceaux`,
 
 The clips are also well spread (0s, 750s, 1005s), which is the re-rank pass
 doing what the monolith claimed to do and never could.
+
+### Stage 5, verified as far as a machine with no Groq key allows
+Audio extraction and chunk planning were run against the real video:
+
+| measurement | result |
+|---|---|
+| extraction time | 6.7s for a 20-minute video |
+| audio size | **39.3 MB** at 16 kHz mono FLAC, confirmed by `ffprobe` |
+| Groq free-tier cap | 25 MB — so this file genuinely needs splitting |
+| plan | 2 chunks (0→600s, 596→1211.3s), boundaries snapped to silence |
+
+The 39.3 MB is worth remembering: an earlier note here estimated 19-23 MB from
+the format alone and was wrong, because FLAC is variable-rate and this video has
+music under most of it. The planner derives bytes-per-second from the actual
+file, so a quiet interview of the same length stays one request.
 
 ### Regression contract for this task
 | # | Must keep working | Proven by |

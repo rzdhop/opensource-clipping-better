@@ -197,6 +197,14 @@ GEMINI_FALLBACK_MODEL = "gemini-2.5-flash"
 LLM_CHAIN = os.environ.get("LLM_CHAIN", "").strip()
 LLM_TIMEOUT = 0  # 0 = use each provider's own default
 
+# Hosted transcription, same "<provider>/<model>" spelling. Empty uses the
+# default in clipping/providers/stt.py; "none" disables transcription entirely
+# (the modern spelling of --no-whisper); "local/faster-whisper" forces the
+# in-process path. Local Whisper is kept but is no longer the default: on a
+# CPU-only host it was measured at 4.6x realtime, i.e. 94 minutes for a
+# 20-minute video.
+STT_CHAIN = os.environ.get("STT_CHAIN", "").strip()
+
 
 # ==============================================================================
 # CLI PARSER
@@ -487,6 +495,16 @@ def _build_parser() -> argparse.ArgumentParser:
             "Each link is tried in order and every hop is printed; a provider "
             "not named here is never called. Defaults to $LLM_CHAIN, then to the "
             "shipped default in clipping/providers/registry.py."
+        ),
+    )
+    p.add_argument(
+        "--stt-chain",
+        default=STT_CHAIN,
+        help=(
+            "Ordered transcription chain, e.g. "
+            "'groq/whisper-large-v3-turbo,local/faster-whisper'. "
+            "'none' disables transcription (same as --no-whisper). Defaults to "
+            "$STT_CHAIN, then to hosted-first with a local fallback."
         ),
     )
     p.add_argument(
@@ -1033,6 +1051,10 @@ def build_config(argv: list[str] | None = None) -> SimpleNamespace:
         api_key_custom=os.environ.get("LLM_CUSTOM_API_KEY", ""),
         llm_chain=args.llm_chain,
         llm_timeout=args.llm_timeout,
+        stt_chain=args.stt_chain,
+        # Filled in by a hosted transcription provider that reports what it
+        # heard; beats guessing the language from stopwords afterwards.
+        detected_language="",
         nvidia_model=args.nvidia_model,
         gemini_model=args.gemini_model,
         gemini_fallback_model=args.gemini_fallback_model,

@@ -185,6 +185,9 @@ class JobCreateRequest(BaseModel):
     # Empty means "use $LLM_CHAIN, else the shipped default" — resolved in the
     # provider registry so one place owns it.
     llm_chain: str = ""
+    # Ordered transcription chain; empty uses the hosted-first default,
+    # "none" disables transcription, "local/faster-whisper" forces in-process.
+    stt_chain: str = ""
     platform: Platform = Platform.AUTO
     # "auto" follows the transcript's own language.
     output_language: str = "auto"

@@ -186,3 +186,137 @@ def test_mismatch_warning_never_raises(tmp_path, monkeypatch):
 
     _, segmen = runner.resolve_transcript(cfg)
     assert_valid_data_segmen(segmen)
+
+
+# ------------------------------------------------- hosted transcription fork
+
+def test_a_supplied_transcript_still_bypasses_everything(tmp_path, monkeypatch):
+    """The Whisper bypass is the premise of the whole local-first refactor and
+    must not be weakened by adding a hosted path beside it."""
+    from clipping import runner
+
+    called = []
+    monkeypatch.setattr(runner, "_transcribe", lambda cfg: called.append("transcribed"))
+
+    vtt = tmp_path / "t.vtt"
+    vtt.write_text("WEBVTT\n\n00:00:00.000 --> 00:00:02.000\nhello there\n",
+                   encoding="utf-8")
+    cfg = SimpleNamespace(
+        transcript_path=str(vtt), max_kata_per_subtitle=5, transcript_offset=0.0,
+        transcript_dedupe=True, outputs_dir=str(tmp_path), no_whisper=False,
+        file_video_asli="v.mp4",
+    )
+    runner.resolve_transcript(cfg)
+    assert called == []
+
+
+def test_stt_chain_none_is_the_modern_no_whisper(tmp_path):
+    from clipping import runner
+
+    cfg = SimpleNamespace(
+        transcript_path=None, max_kata_per_subtitle=5, outputs_dir=str(tmp_path),
+        no_whisper=False, stt_chain="none", file_video_asli="v.mp4",
+    )
+    with pytest.raises(RuntimeError) as info:
+        runner.resolve_transcript(cfg)
+    assert "--stt-chain none" in str(info.value)
+
+
+def test_no_hosted_key_falls_through_to_local_whisper(tmp_path, monkeypatch):
+    from clipping import engine, runner
+
+    monkeypatch.setattr(
+        engine, "transcribe_video",
+        lambda *a, **kw: ("[0.0 - 1.0] local\n",
+                          [{"start": 0.0, "end": 1.0,
+                            "words": [{"word": "local", "start": 0.0, "end": 1.0}]}]),
+    )
+    cfg = SimpleNamespace(
+        file_video_asli="v.mp4", max_kata_per_subtitle=5, whisper_model="tiny",
+        whisper_device="cpu", whisper_compute_type="int8", stt_chain="",
+        output_language="auto", api_key_groq="", api_key_mistral="",
+        api_key_nvidia="", api_key_gemini="", api_key_openrouter="",
+        api_key_custom="", outputs_dir=str(tmp_path),
+    )
+    _, segmen = runner._transcribe(cfg)
+    assert [w["word"] for s in segmen for w in s["words"]] == ["local"]
+
+
+def test_a_hosted_provider_is_used_when_its_key_is_set(tmp_path, monkeypatch):
+    from clipping import runner
+    from clipping.providers import stt as stt_mod
+
+    monkeypatch.setattr(
+        stt_mod, "transcribe",
+        lambda *a, **kw: ("[0.0 - 1.0] hosted\n",
+                          [{"start": 0.0, "end": 1.0,
+                            "words": [{"word": "hosted", "start": 0.0, "end": 1.0}]}],
+                          "fr"),
+    )
+    cfg = SimpleNamespace(
+        file_video_asli="v.mp4", max_kata_per_subtitle=5, whisper_model="tiny",
+        whisper_device="cpu", whisper_compute_type="int8", stt_chain="",
+        output_language="auto", api_key_groq="a-key", api_key_mistral="",
+        api_key_nvidia="", api_key_gemini="", api_key_openrouter="",
+        api_key_custom="", outputs_dir=str(tmp_path), detected_language="",
+    )
+    _, segmen = runner._transcribe(cfg)
+    assert [w["word"] for s in segmen for w in s["words"]] == ["hosted"]
+    # What the provider actually heard beats guessing from stopwords later.
+    assert cfg.detected_language == "fr"
+
+
+def test_a_hosted_failure_falls_back_to_local_when_the_chain_allows(tmp_path, monkeypatch):
+    from clipping import engine, runner
+    from clipping.providers import stt as stt_mod
+
+    def boom(*a, **kw):
+        raise RuntimeError("provider down")
+
+    monkeypatch.setattr(stt_mod, "transcribe", boom)
+    monkeypatch.setattr(
+        engine, "transcribe_video",
+        lambda *a, **kw: ("[0.0 - 1.0] local\n",
+                          [{"start": 0.0, "end": 1.0,
+                            "words": [{"word": "local", "start": 0.0, "end": 1.0}]}]),
+    )
+    cfg = SimpleNamespace(
+        file_video_asli="v.mp4", max_kata_per_subtitle=5, whisper_model="tiny",
+        whisper_device="cpu", whisper_compute_type="int8",
+        stt_chain="groq/whisper-large-v3-turbo,local/faster-whisper",
+        output_language="auto", api_key_groq="a-key", api_key_mistral="",
+        api_key_nvidia="", api_key_gemini="", api_key_openrouter="",
+        api_key_custom="", outputs_dir=str(tmp_path), detected_language="",
+    )
+    _, segmen = runner._transcribe(cfg)
+    assert [w["word"] for s in segmen for w in s["words"]] == ["local"]
+
+
+def test_a_hosted_failure_raises_when_the_chain_has_no_local_link(tmp_path, monkeypatch):
+    """Silently spending 94 minutes on CPU Whisper because a hosted call failed
+    is exactly the surprise this pipeline exists to avoid."""
+    from clipping import runner
+    from clipping.providers import stt as stt_mod
+
+    def boom(*a, **kw):
+        raise RuntimeError("provider down")
+
+    monkeypatch.setattr(stt_mod, "transcribe", boom)
+    cfg = SimpleNamespace(
+        file_video_asli="v.mp4", max_kata_per_subtitle=5, whisper_model="tiny",
+        whisper_device="cpu", whisper_compute_type="int8",
+        stt_chain="groq/whisper-large-v3-turbo",
+        output_language="auto", api_key_groq="a-key", api_key_mistral="",
+        api_key_nvidia="", api_key_gemini="", api_key_openrouter="",
+        api_key_custom="", outputs_dir=str(tmp_path), detected_language="",
+    )
+    with pytest.raises(RuntimeError):
+        runner._transcribe(cfg)
+
+
+def test_an_explicit_output_language_is_passed_as_a_transcription_hint():
+    from clipping import runner
+
+    assert runner._requested_language(SimpleNamespace(output_language="fr")) == "fr"
+    assert runner._requested_language(SimpleNamespace(output_language="auto")) is None
+    assert runner._requested_language(SimpleNamespace()) is None

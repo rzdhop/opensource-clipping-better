@@ -94,9 +94,94 @@ def _save_whisper_transcript(cfg, data_segmen: list[dict]) -> None:
     try:
         transcript_mod.write_vtt(data_segmen, path)
         print(f"   💾 Transcript saved to {os.path.basename(path)} — a re-run of "
-              f"this job will skip Whisper.")
+              f"this job will skip transcription.")
     except OSError as exc:
         print(f"   ⚠️ Could not save the transcript ({exc}). The run continues.")
+        return
+
+    # An SRT alongside it, for anything that reads subtitles rather than this
+    # pipeline. Written second and separately guarded: the VTT is what a re-run
+    # reads back, so failing to write the SRT must not cost the transcript.
+    srt_path = os.path.join(outputs_dir, transcript_mod.SAVED_TRANSCRIPT_SRT_NAME)
+    try:
+        transcript_mod.write_srt(data_segmen, srt_path)
+    except OSError as exc:
+        print(f"   ⚠️ Could not save {os.path.basename(srt_path)} ({exc}).")
+
+
+def _chain_is_none(cfg) -> bool:
+    """``--stt-chain none`` is the modern spelling of ``--no-whisper``."""
+    return str(getattr(cfg, "stt_chain", "") or "").strip().lower() == "none"
+
+
+def _transcribe(cfg) -> tuple[str, list[dict]]:
+    """Transcribe ``cfg.file_video_asli``, hosted first, local as a fallback.
+
+    In-process Whisper is kept, but it is no longer the default. On the ARM host
+    this was written for, ``faster-whisper`` with ``large-v3`` on CPU measured
+    **4.6x realtime** — 94 minutes for a 20-minute video — and there is no GPU
+    to move it to. A hosted call does the same work in about a minute, free.
+
+    ``--stt-chain none`` (and the older ``--no-whisper``) never reach here:
+    ``resolve_transcript`` raises first.
+    """
+    from clipping.config import provider_keys
+    from clipping.providers import stt as stt_mod
+
+    spec = getattr(cfg, "stt_chain", "") or stt_mod.DEFAULT_STT_CHAIN
+    chain = stt_mod.parse_stt_chain(spec)
+    hosted = [link for link in chain if link.provider != "local"]
+    keys = provider_keys(cfg)
+    usable = [link for link in hosted if keys.get(link.provider)]
+
+    if usable:
+        try:
+            transkrip, segmen, language = stt_mod.transcribe(
+                cfg.file_video_asli,
+                chain=usable,
+                keys=keys,
+                max_words_per_subtitle=cfg.max_kata_per_subtitle,
+                language=_requested_language(cfg),
+            )
+        except Exception as exc:  # noqa: BLE001 - fall through to local Whisper
+            print(f"   ⚠️ Hosted transcription failed | {exc}")
+            if not any(link.provider == "local" for link in chain):
+                raise
+            print("   ↩ Falling back to local Whisper, as the chain allows.")
+        else:
+            # What the provider heard beats guessing from stopwords later.
+            if language and not getattr(cfg, "detected_language", ""):
+                cfg.detected_language = language
+            return transkrip, segmen
+    elif hosted:
+        names = ", ".join(
+            f"{link.provider} ({PROVIDER_ENV.get(link.provider, '?')})"
+            for link in hosted
+        )
+        print(f"   ⏭ No key for any hosted transcription provider: {names}.")
+
+    return engine.transcribe_video(
+        cfg.file_video_asli,
+        max_words_per_subtitle=cfg.max_kata_per_subtitle,
+        model_size=cfg.whisper_model,
+        device=cfg.whisper_device,
+        compute_type=cfg.whisper_compute_type,
+    )
+
+
+def _requested_language(cfg):
+    """An explicit ``--output-language`` doubles as a transcription hint."""
+    value = str(getattr(cfg, "output_language", "") or "").strip().lower()
+    return value if value and value != "auto" else None
+
+
+PROVIDER_ENV = {
+    "groq": "GROQ_API_KEY",
+    "mistral": "MISTRAL_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+    "gemini": "GOOGLE_API_KEY",
+    "nvidia": "NVIDIA_API_KEY",
+}
 
 
 def resolve_transcript(cfg) -> tuple[str, list[dict]]:
@@ -137,17 +222,12 @@ def resolve_transcript(cfg) -> tuple[str, list[dict]]:
         )
         _warn_on_transcript_video_mismatch(cfg, data_segmen)
     else:
-        if getattr(cfg, "no_whisper", False):
+        if getattr(cfg, "no_whisper", False) or _chain_is_none(cfg):
             raise RuntimeError(
-                "--no-whisper is active but --transcript was not given."
+                "Transcription is disabled (--no-whisper / --stt-chain none) "
+                "but --transcript was not given."
             )
-        transkrip_lengkap, data_segmen = engine.transcribe_video(
-            cfg.file_video_asli,
-            max_words_per_subtitle=cfg.max_kata_per_subtitle,
-            model_size=cfg.whisper_model,
-            device=cfg.whisper_device,
-            compute_type=cfg.whisper_compute_type,
-        )
+        transkrip_lengkap, data_segmen = _transcribe(cfg)
 
     if not data_segmen:
         raise RuntimeError(
