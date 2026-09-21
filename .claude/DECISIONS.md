@@ -658,3 +658,35 @@ Two refinements came from running it rather than reasoning about it:
   bills a 10-second minimum per request regardless. It is folded into the
   previous chunk when the result still fits, and kept when it would not,
   because a short chunk beats a rejected one.
+
+## DEC-034 — Settings are persisted to a 0600 file, not held in a dict
+**Context.** API keys entered on the Settings page lived only in
+`worker._settings_env`. A restart emptied them silently, and the next job failed
+for a key the dashboard still showed as set.
+**Decision.** `web/api/settings_store.py` writes `data/settings.json`
+atomically with mode 0600, loaded at import and written through on every PUT.
+`data/` is gitignored and bind-mounted.
+**Consequence.** The mode is applied to the temp file *before* the rename, so
+the real path is never briefly world-readable. `load()` never raises: a corrupt
+file returns `{}` rather than stopping the server, because the user can re-enter
+values but cannot re-enter them into a server that will not boot.
+
+## DEC-035 — An interrupted job is failed at startup, but its error is not rewritten
+**Context.** A job whose worker thread died with the process stayed in a
+non-terminal status forever. `outputs/jobs.json` has held one in `analyzing`
+since 2026-09-18.
+**Decision.** `store.fail_stale_jobs()` runs in the app's lifespan startup.
+**Consequence.** It deliberately does **not** overwrite an existing `error`.
+Replacing a real diagnosis with "interrupted by a restart" would destroy the
+only record of why a job actually failed, which is worse than the stuck record
+it was written to fix.
+
+## DEC-036 — `output_file` is deleted rather than excused
+**Context.** A new guard asserting that every manifest key `worker.py` reads is
+actually written failed on `output_file`.
+**Decision.** Check the whole git history, find that no version of
+`studio/core.py` has ever written it, and delete the dead fallback.
+**Consequence.** Zero behaviour change — `video_path` is and always was the real
+key — and the manifest/worker agreement becomes exact and testable rather than
+permanently excusing one dead name. The alternative, an allow-list entry, would
+have made the guard weaker every time something like this was found.

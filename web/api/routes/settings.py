@@ -53,18 +53,29 @@ async def get_settings() -> SettingsResponse:
     pexels_key = env.get("PEXELS_API_KEY", os.environ.get("PEXELS_API_KEY", ""))
     hf_token = env.get("HF_TOKEN", os.environ.get("HF_TOKEN", ""))
     nvidia_key = env.get("NVIDIA_API_KEY", os.environ.get("NVIDIA_API_KEY", ""))
+    groq_key = env.get("GROQ_API_KEY", os.environ.get("GROQ_API_KEY", ""))
+    openrouter_key = env.get("OPENROUTER_API_KEY", os.environ.get("OPENROUTER_API_KEY", ""))
+    mistral_key = env.get("MISTRAL_API_KEY", os.environ.get("MISTRAL_API_KEY", ""))
 
     return SettingsResponse(
         google_api_key_set=bool(google_key),
         pexels_api_key_set=bool(pexels_key),
         hf_token_set=bool(hf_token),
         nvidia_api_key_set=bool(nvidia_key),
+        groq_api_key_set=bool(groq_key),
+        openrouter_api_key_set=bool(openrouter_key),
+        mistral_api_key_set=bool(mistral_key),
         default_clips=int(env.get("DEFAULT_CLIPS", "7")),
         default_ratio=env.get("DEFAULT_RATIO", "9:16"),
         default_font_style=env.get("DEFAULT_FONT_STYLE", "HORMOZI"),
         default_whisper_model=env.get("DEFAULT_WHISPER_MODEL", "large-v3"),
-        default_whisper_device=env.get("DEFAULT_WHISPER_DEVICE", "cuda"),
-        default_ai_provider=env.get("DEFAULT_AI_PROVIDER", "gemini"),
+        # These two defaults were wrong and contradicted the rest of the
+        # codebase. "cuda" crashes on any machine without a working CUDA stack
+        # -- the failure clipping/device.py exists to prevent, and the reason
+        # two jobs in outputs/jobs.json died. "gemini" has not been the default
+        # provider since the local-first refactor.
+        default_whisper_device=env.get("DEFAULT_WHISPER_DEVICE", "auto"),
+        default_ai_provider=env.get("DEFAULT_AI_PROVIDER", "chain"),
         gpu_available=_check_gpu(),
     )
 
@@ -82,6 +93,12 @@ async def update_settings(req: SettingsRequest) -> SettingsResponse:
         env_updates["HF_TOKEN"] = req.hf_token
     if req.nvidia_api_key is not None:
         env_updates["NVIDIA_API_KEY"] = req.nvidia_api_key
+    if req.groq_api_key is not None:
+        env_updates["GROQ_API_KEY"] = req.groq_api_key
+    if req.openrouter_api_key is not None:
+        env_updates["OPENROUTER_API_KEY"] = req.openrouter_api_key
+    if req.mistral_api_key is not None:
+        env_updates["MISTRAL_API_KEY"] = req.mistral_api_key
     if req.default_clips is not None:
         env_updates["DEFAULT_CLIPS"] = str(req.default_clips)
     if req.default_ratio is not None:

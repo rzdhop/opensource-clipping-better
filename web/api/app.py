@@ -22,6 +22,19 @@ from .routes import jobs, files, settings
 async def lifespan(app: FastAPI):
     """Application startup/shutdown lifecycle."""
     print("🚀 OpenSource Clipping Studio — Backend starting...")
+
+    # A job whose worker thread died with the previous process is stuck in a
+    # non-terminal status forever: nothing re-queues it and nothing fails it, so
+    # the dashboard shows a job that is running and never will be again.
+    from . import store as job_store
+
+    stale = job_store.fail_stale_jobs()
+    if stale:
+        print(
+            f"   ↻ Marked {len(stale)} interrupted job(s) as failed: "
+            f"{', '.join(stale[:5])}{'...' if len(stale) > 5 else ''}"
+        )
+
     yield
     print("👋 Backend shutting down...")
 

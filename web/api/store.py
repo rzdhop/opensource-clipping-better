@@ -95,6 +95,45 @@ def _persist(force: bool = True) -> None:
         pass  # best-effort persistence
 
 
+def fail_stale_jobs(reason="Interrupted by a server restart.") -> list[str]:
+    """Mark every non-terminal job failed. Called once at startup.
+
+    A job whose worker thread died with the process stays in `analyzing`
+    forever: nothing re-queues it and nothing marks it failed, so the dashboard
+    shows a job that is running and will never finish, and the health endpoint
+    counts it as occupying a worker slot. `outputs/jobs.json` currently holds
+    one such record from 2026-09-18.
+
+    Returns the ids it changed, so the caller can say how many.
+    """
+    from .models import JobStatus
+
+    terminal = {
+        JobStatus.COMPLETED,
+        JobStatus.FAILED,
+        JobStatus.CANCELLED,
+    }
+    changed: list[str] = []
+    with _lock:
+        for job_id, job in _jobs.items():
+            status = job.get("status") if isinstance(job, dict) else getattr(job, "status", None)
+            if status is None:
+                continue
+            value = getattr(status, "value", status)
+            if value in {getattr(t, "value", t) for t in terminal}:
+                continue
+            if isinstance(job, dict):
+                job["status"] = getattr(JobStatus.FAILED, "value", "failed")
+                job["error"] = reason
+            else:
+                job.status = JobStatus.FAILED
+                job.error = reason
+            changed.append(job_id)
+        if changed:
+            _persist(force=True)
+    return changed
+
+
 def _load() -> None:
     """Load persisted jobs from disk on startup."""
     global _jobs

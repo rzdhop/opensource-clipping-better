@@ -16,6 +16,9 @@ services:
       - ./outputs:/app/outputs
       - ./uploads:/app/uploads
       - ./custom_fonts:/app/custom_fonts
+      # Settings entered in the dashboard (API keys) live here. Without this
+      # mount they are lost on every `docker compose up --build`.
+      - ./data:/app/data
     environment:
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - PEXELS_API_KEY=${PEXELS_API_KEY:-}

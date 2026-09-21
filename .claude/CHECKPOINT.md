@@ -5,11 +5,11 @@
   device, auto-download of video + subtitles, SRT in/out, every feature kept.
   Plan approved by the human: `/home/ubuntu/.claude/plans/hey-here-is-sleepy-walrus.md`
   (11 stages; read it before resuming — it carries the root causes and the design).
-- **Phase:** IMPLEMENT — **Stages 1-5 DONE.** S1 rolling-display cue semantics +
+- **Phase:** IMPLEMENT — **Stages 1-6 DONE.** S1 rolling-display cue semantics +
   SRT writer (`5d46c81`); S2 the provider core (`52ac830`); S3 beats, snapping,
   presets and language detection (`cbe10f3`); S4 the three-pass analyzer
-  (`e2856b6`, `ed447b6`), proven live; S5 hosted transcription. Next: Stage 6,
-  the truth fixes (manifest `viral_score`, stale jobs, persisted settings).
+  (`e2856b6`, `ed447b6`), proven live; S5 hosted transcription (`f54d508`); S6 the
+  truth fixes. Next: Stage 7, auth + static dashboard + Tailscale.
 - **⚠️ Production was already broken before this work:** the shipped NVIDIA model
   `deepseek-ai/deepseek-v4-flash-0731` now returns **410 Gone** (it answered a
   real job on 2026-09-19 and was dead by 2026-09-21; the whole DeepSeek v4
@@ -21,9 +21,10 @@
   Roll back here.
 - **Tier-1 baseline at `f8ad8b4`:** pytest **369 passed, 0 failed**; `compileall`
   clean. (Needs `PYTHONPYCACHEPREFIX` locally — see the root `__pycache__` note.)
-- **Next action:** Stage 6 — `viral_score` into `manifest_item`
-  (`clipping/studio/core.py:162-188`, the one sanctioned render-layer edit),
-  `store.fail_stale_jobs()` at startup, and `data/settings.json` persistence.
+- **Next action:** Stage 7 — `web/api/auth.py` bearer token on every `/api`
+  router except health, the dashboard built statically and served by FastAPI at
+  `/`, the Vite container dropped from the production compose, a PWA manifest,
+  and `tailscale serve --bg --https=443 http://127.0.0.1:8000`.
 - **Rollback for the new analysis:** `--ai-provider nvidia` (or `gemini`) runs
   the original single-request path, which is still in `engine.py` untouched and
   still covered by `tests/test_nvidia_retry.py`. Stage 11 retires it, and not
@@ -36,9 +37,9 @@
   then the chain runs on NVIDIA alone, which works: keyless links are skipped
   with a printed reason. `python tools/bench_llm.py` validates each key as it
   arrives and prints a suggested `LLM_CHAIN` ordered by measured speed.
-- **Tier-1 after Stage 5:** pytest **823 passed, 0 failed**; `compileall` clean.
-  Under the simulated pytest-only CI environment: **782 passed, 20 skipped, 0
-  failed** (733 after S4, 648 after S3, 523 after S2, 368 after S1, 328 at
+- **Tier-1 after Stage 6:** pytest **848 passed, 0 failed**; `compileall` clean.
+  Under the simulated pytest-only CI environment: **799 passed, 21 skipped, 0
+  failed**. Previously: 782 after S5, (733 after S4, 648 after S3, 523 after S2, 368 after S1, 328 at
   baseline) — every new test runs in CI, none of them skipped.
 - **Stage 5 is NOT live-verified.** Audio extraction and chunking are (see
   below), but the hosted transcription call itself needs `GROQ_API_KEY`, which

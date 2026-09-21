@@ -161,6 +161,10 @@ def proses_klip(
 
     manifest_item = {
         "rank": rank,
+        # The dashboard's score badge reads this from the manifest
+        # (web/api/worker.py -> ClipDetail.viral_score -> JobDetail.jsx). It was
+        # never copied here, so the badge has always rendered empty.
+        "viral_score": clip.get("viral_score", 0),
         "status": "pending",
         "ratio": rasio,
         "video_path": out_vid,

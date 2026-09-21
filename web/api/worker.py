@@ -15,6 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
 from .config_adapter import build_config_from_payload
+from . import settings_store
 from .models import ClipDetail, JobStatus
 from . import activity
 from . import signals
@@ -68,13 +69,19 @@ _semaphore = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
 _executor = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_JOBS)
 
 # Store settings overrides (API keys etc.) in memory
-_settings_env: dict[str, str] = {}
+# Loaded from data/settings.json at import so values entered in the dashboard
+# survive a restart. They used to live only here, which meant a
+# `docker compose restart` silently emptied them and the next job failed for a
+# key the user could still see listed as set.
+_settings_env: dict[str, str] = settings_store.load()
 
 
 def set_settings_env(env: dict[str, str]) -> None:
     """Update runtime settings environment."""
     global _settings_env
     _settings_env.update(env)
+    # Write through, so the value is on disk before the response says it is set.
+    settings_store.save(_settings_env)
 
 
 def get_settings_env() -> dict[str, str]:
@@ -369,7 +376,13 @@ def _execute_pipeline(job_id: str, payload: dict) -> None:
         # --- Build clip details for the job store ---
         clips: list[ClipDetail] = []
         for entry in render_manifest:
-            filename = os.path.basename(entry.get("output_file") or entry.get("video_path") or "")
+            # "video_path" is the only name the manifest has ever used. This
+            # line used to try "output_file" first -- a key no version of
+            # clipping/studio/core.py has ever written, checked across the whole
+            # history. Removing it makes the manifest/worker agreement exact and
+            # testable (tests/test_manifest_fields.py) instead of permanently
+            # excusing one dead name.
+            filename = os.path.basename(entry.get("video_path") or "")
             clips.append(
                 ClipDetail(
                     rank=entry.get("rank", 0),
