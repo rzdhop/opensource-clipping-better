@@ -6,7 +6,11 @@ pin the storage contract, including the two rules that are easy to get wrong:
 an empty value CLEARS an override (rather than storing an empty string that
 would shadow ``.env`` forever), and loading must not rewrite the file.
 
-Stdlib-only (DEC-012): no pydantic, no FastAPI client.
+The storage half is stdlib-only and runs in CI, which installs pytest and
+nothing else (DEC-012). ``web.api.worker`` reaches pydantic through its own
+imports, so the handful of tests that need it fetch it lazily and skip where it
+is absent -- rather than importing it at module scope, which would abort
+collection and take the whole suite down with it.
 """
 
 import json
@@ -15,16 +19,27 @@ import pathlib
 
 import pytest
 
-from web.api import settings_store, worker
+from web.api import settings_store
 
 
 @pytest.fixture
 def store_path(tmp_path, monkeypatch):
-    """Point the store at a throwaway file and reset the in-memory env."""
-    path = tmp_path / "settings.json"
-    monkeypatch.setenv("WEB_SETTINGS_FILE", str(path))
-    monkeypatch.setattr(worker, "_settings_env", {})
-    return path
+    """Point the store at a throwaway file."""
+    monkeypatch.setenv("WEB_SETTINGS_FILE", str(tmp_path / "settings.json"))
+    return tmp_path / "settings.json"
+
+
+@pytest.fixture
+def worker(monkeypatch):
+    """The worker module with an empty settings env, or skip.
+
+    Importing it pulls in pydantic via config_adapter/models.
+    """
+    pytest.importorskip("pydantic")
+    from web.api import worker as worker_module
+
+    monkeypatch.setattr(worker_module, "_settings_env", {})
+    return worker_module
 
 
 # ------------------------------------------------------------- where it lives
@@ -99,14 +114,14 @@ def test_save_reports_failure_instead_of_raising(tmp_path, monkeypatch):
 
 # ------------------------------------------------------- the worker's view
 
-def test_set_settings_env_persists(store_path):
+def test_set_settings_env_persists(store_path, worker):
     worker.set_settings_env({"NVIDIA_API_KEY": "nv-1"})
 
     assert settings_store.load() == {"NVIDIA_API_KEY": "nv-1"}
     assert worker.get_settings_env() == {"NVIDIA_API_KEY": "nv-1"}
 
 
-def test_empty_value_clears_the_override(store_path):
+def test_empty_value_clears_the_override(store_path, worker):
     """Otherwise a stored "" would shadow a working .env key permanently."""
     worker.set_settings_env({"NVIDIA_API_KEY": "nv-1"})
     worker.set_settings_env({"NVIDIA_API_KEY": ""})
@@ -115,14 +130,14 @@ def test_empty_value_clears_the_override(store_path):
     assert settings_store.load() == {}
 
 
-def test_load_settings_env_restores_into_the_worker(store_path):
+def test_load_settings_env_restores_into_the_worker(store_path, worker):
     settings_store.save({"NVIDIA_API_KEY": "nv-1", "PEXELS_API_KEY": "px-1"})
 
     assert worker.load_settings_env() == 2
     assert worker.get_settings_env() == {"NVIDIA_API_KEY": "nv-1", "PEXELS_API_KEY": "px-1"}
 
 
-def test_load_does_not_rewrite_the_file(store_path):
+def test_load_does_not_rewrite_the_file(store_path, worker):
     settings_store.save({"NVIDIA_API_KEY": "nv-1"})
     before = store_path.read_bytes()
     mtime = os.stat(store_path).st_mtime_ns
