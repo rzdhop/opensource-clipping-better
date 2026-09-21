@@ -19,6 +19,9 @@ REAL_FIXTURES = [
     "with_notes.vtt",
     "entities_and_artifacts.vtt",
     "srt_style.srt",
+    # Overlapping rolling cues with no inline tags -- see test_rolling_cues.py.
+    "rolling_overlap.vtt",
+    "rolling_overlap.srt",
 ]
 
 

@@ -1,0 +1,15 @@
+1
+00:00:00,560 --> 00:00:02,280
+alpha bravo charlie delta
+
+2
+00:00:01,439 --> 00:00:03,800
+echo foxtrot golf hotel
+
+3
+00:00:02,280 --> 00:00:06,000
+india juliett
+
+4
+00:00:03,800 --> 00:00:08,360
+kilo lima mike november

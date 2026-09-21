@@ -1,32 +1,68 @@
 # CHECKPOINT
 
 ## In progress
-- **Task:** Job `756c7ee8a2c3` burned 2h22m and produced nothing. Fix the NVIDIA
-  retry behaviour, cap the time budget, and warn before a slow CPU Whisper run.
-- **Phase:** IMPLEMENT — 4 stages done: `8877645` SDK retries, `92e5ff8` time
-  budget, `f8146e7` Whisper warning, `46d341c` propose-a-smaller-request.
-  **Stage 5 done:** `c68eb3d` persist the transcript and let a re-run use it.
-- **Tier-1 final:** pytest **369 passed, 0 failed** locally; `compileall` clean.
-- **Tier-1 under CI conditions (RC-12):** **346 passed, 18 skipped, 0 failed**,
-  matching CI's own counts. This host has no `ensurepip`, so the pytest-only
-  venv RC-12 asks for cannot be built here; simulate it instead with a
-  `sys.meta_path` finder that raises `ModuleNotFoundError` for every non-stdlib
-  import except pytest and the project, run with
-  `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`. Both details matter: a bare `ImportError`
-  is re-raised by `pytest.importorskip` instead of skipping, and without
-  disabling autoload the locally-installed pytest plugins load and fail.
-  **Run this before pushing any new test** — a green local run does not mean a
-  green CI, which is how `tqdm` got through.
-- **Destination:** fast-forward `main` and push once stage 5 lands (human asked
-  to hold until then).
-- **Tier-1 now:** pytest **352 passed, 0 failed**; `compileall` clean.
-- **Checkpoint commit:** `d03fd41` — clean tree, branch
-  `Feature/magical-greider-2955e5`, identical to `origin/main`. Roll back here.
-- **Tier-1 baseline at `d03fd41`:** pytest **327 passed, 0 failed**;
-  `compileall` clean; `npm run build` green.
-- **Scope approved by the human:** (1) stop the hidden SDK retries, (2) probe the
-  live endpoint, (3) cap the total time budget, (4) warn before a slow CPU
-  Whisper run. Explicitly out: changing the Whisper model default.
+- **Task:** Re-architect into **rzdhop's clips** — free hosted AI endpoints, any
+  device, auto-download of video + subtitles, SRT in/out, every feature kept.
+  Plan approved by the human: `/home/ubuntu/.claude/plans/hey-here-is-sleepy-walrus.md`
+  (11 stages; read it before resuming — it carries the root causes and the design).
+- **Phase:** IMPLEMENT — **Stage 1 DONE** (rolling-display cue semantics + SRT
+  writer). Next: Stage 2, the provider core.
+- **Branch:** `feature/rzdhop-clips-rearchitecture`, cut from `main` at `f8ad8b4`.
+- **Checkpoint commit:** `f8ad8b4` — clean tree, identical to `origin/main`.
+  Roll back here.
+- **Tier-1 baseline at `f8ad8b4`:** pytest **369 passed, 0 failed**; `compileall`
+  clean. (Needs `PYTHONPYCACHEPREFIX` locally — see the root `__pycache__` note.)
+- **Next action:** Stage 2 — `clipping/providers/` (registry, llm, pacing, jsonx)
+  and `tools/bench_llm.py`. Nothing is wired into the pipeline in that stage.
+- **Tier-1 after Stage 1:** pytest **409 passed, 0 failed**; `compileall` clean.
+  Under the simulated pytest-only CI environment: **368 passed, 20 skipped, 0
+  failed**, against a measured baseline of **328 passed, 20 skipped** — exactly
+  the 40 new tests, no new skips. The simulator must allow `pygments`,
+  `exceptiongroup` and `tomli`: pytest 8.4+ depends on pygments, so CI has it.
+- **Tier-2 owed to the human:** a live render on the running containers. This
+  host has no `cv2`/`mediapipe` and the docker socket is permission-denied, and
+  the running backend imported `clipping.transcript` before the fix, so it needs
+  `docker compose restart backend` before any job exercises the new parser.
+- **Open questions:** none blocking. The human must create the four API keys
+  (Groq, Gemini, OpenRouter, Mistral), enable HTTPS certificates in the Tailscale
+  admin console, and install Python + yt-dlp on `pops-1` before Stages 2/5/7/8
+  can be verified live.
+
+### Why this task exists — the two faults, both measured
+1. **The transcript loses ~35% of its words before the model sees it.** The
+   human's subtitle exports (DownloadYoutubeSubtitles.com, VTT and SRT alike)
+   carry single-line cues with **no inline word tags**, **unique text** and
+   **overlapping windows** (0.560→2.280, 1.439→3.800, 2.280→6.000 …).
+   `_expand_run_to_words` spreads each cue's words evenly across its own span,
+   so cue N+1's first words start before cue N's last words, and
+   `_enforce_monotonic` drops them. Dedupe cannot help — the text never repeats.
+   **Measured:** `uploads/subtitles.vtt` → 718 of 2095 words dropped today;
+   simulating the rolling-display clamp keeps **2095 of 2095**. That file has
+   371 cues and **zero** inline tags, and no existing fixture contains a single
+   overlapping cue pair, so the fix cannot move an existing test.
+2. **The analysis asks for more output than any free provider can produce.**
+   One request demands 22 required fields per clip (~1200 output tokens each)
+   from a model measured at ~12 tok/s behind a ~300s gateway: 7 clips needs
+   ~660s and can never finish, and it also exceeds Groq's 8k TPM. Five of those
+   fields are read by nothing. The replacement is three small passes with a
+   largest single generation of ~320 tokens. See the plan for the budget table.
+
+### Regression contract for this task
+| # | Must keep working | Proven by |
+|---|---|---|
+| RC-1 | The `data_segmen` contract | `tests/helpers.py::assert_valid_data_segmen` across every parser and producer |
+| RC-4 | Karaoke word alignment | **VERIFIED for Stage 1 without a render**: loaded the real `clipping/studio/subtitles.py` with `cv2`/`mediapipe`/`numpy`/`requests` stubbed (`buat_file_ass` touches none of them), regenerated the ASS and compared every highlighted word back to the source — **0 mismatches** across 4 fixtures plus a 60s window of the real French file, at 10ms tolerance (ASS centisecond resolution). A full ffmpeg render is still owed |
+| RC-7 | The render layer is intact | `clipping/studio/` gets exactly one additive line (`viral_score` in the manifest); the Stage-4 AST guard proves every key it reads is produced |
+| RC-10 | Web API job → `completed` | live job on the running stack |
+| RC-11 | Job settings reach the pipeline | `tests/test_web_job_fields.py` |
+| RC-12 | Stdlib-only CI suite | every new test checked under the simulated pytest-only environment below |
+| N-1..N-5 | NVIDIA ladder semantics | `tests/test_nvidia_retry.py` stays green until Stage 11 rewrites it against the provider layer |
+
+## Previous task (closed)
+- **Task:** Job `756c7ee8a2c3` burned 2h22m and produced nothing. **COMPLETE** — 5 stages, last `c68eb3d`, plus `e5f473d`/`f8ad8b4` CI fixes.
+- **Phase:** closed out. Merged to `main` and pushed; `origin/main` is `f8ad8b4`.
+- Its findings (the NVIDIA 504 arithmetic, the live probes, the transcript
+  persistence design) are preserved below and in DEC-019..022.
 
 ### The 45 minutes were 9 requests, not 3 — measured, not inferred
 `_make_nvidia_client` (`clipping/engine.py:317`) builds `OpenAI(...)` with

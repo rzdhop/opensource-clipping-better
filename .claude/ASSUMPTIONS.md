@@ -1,7 +1,17 @@
 # ASSUMPTIONS
 
 ## Unconfirmed
-- (none open)
+- **A-013** — Output language defaults to the transcript's language (reported by
+  the hosted STT, else stopword detection); `output_language` overrides it.
+  English titles/keywords/hashtags are still produced alongside. UNCONFIRMED.
+- **A-014** — The default clip count stays 7 (DEC-021: no silent change). The
+  three-pass analyzer removes the reason it mattered. UNCONFIRMED.
+- **A-015** — Platform presets: `tiktok` 15–90 s (target 34), `reels` 15–90 (30),
+  `shorts` 15–59 (45), `auto` 20–75 (40), `long` 60–179 (90); cuts snap to
+  sentence boundaries. UNCONFIRMED.
+- **A-016** — The full image (torch, pyannote, ultralytics, faster-whisper) stays
+  the default build because every feature must survive; a slim build is opt-in
+  via a build arg. UNCONFIRMED.
 
 ## Confirmed
 - **A-012** — The phone-width overflow is fixable in CSS alone; no JSX change is

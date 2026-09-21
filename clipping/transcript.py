@@ -206,6 +206,46 @@ def _chunk_into_segments(
     return transkrip_lengkap, data_segmen
 
 
+def _effective_cue_end(
+    cue_start: float,
+    cue_end: float,
+    next_cue_start: float | None,
+    has_inline_tags: bool,
+) -> float:
+    """Return the span a cue's words were actually *spoken* in.
+
+    A cue's declared end is when it stops being **displayed**, which for rolling
+    captions is not when its words were spoken. Scraped auto-captions routinely
+    ship overlapping windows -- 0.560->2.280, 1.439->3.800, 2.280->6.000 -- where
+    each cue stays on screen until two cues later. Spreading a cue's words evenly
+    across that declared span (which is all ``_expand_run_to_words`` can do
+    without per-word tags) pushes them past the next cue's first words, and
+    ``_enforce_monotonic`` then drops them. Measured on a real 371-cue file:
+    **718 of 2095 words destroyed**, with the parser blaming the file.
+
+    So when the next cue opens while this one is still displayed, this one's
+    speech ended there. Clamping to ``next_cue_start`` keeps every word, in
+    order, with monotonic timings. Same file after the clamp: **2095 of 2095**.
+
+    Two guards keep the change from reaching anything it should not:
+
+    * ``has_inline_tags`` -- a cue carrying ``<00:00:01.234>`` word tags already
+      knows its own timings, so it is returned untouched. That is what keeps
+      YouTube's tagged rolling captions (``auto_rolling.vtt``) byte-identical.
+    * the strict ``cue_start < next_cue_start`` -- a next cue that starts *before*
+      this one is a genuinely mismatched transcript, not a rolling display.
+      ``_enforce_monotonic`` must still catch that, so it is left alone.
+
+    No floor is applied to the clamped span. A cue replaced 50ms after it opened
+    really did only get 50ms, and briefly-flashing words beat dropped words.
+    """
+    if has_inline_tags or next_cue_start is None:
+        return cue_end
+    if cue_start < next_cue_start < cue_end:
+        return next_cue_start
+    return cue_end
+
+
 def _expand_run_to_words(
     text: str, run_start: float, run_end: float
 ) -> list[dict]:
@@ -334,7 +374,12 @@ def parse_vtt_subs(
     flat_words: list[dict] = []
     prev_keys: set[str] = set()
 
-    for cue_start, cue_end, payload_lines in _iter_cue_blocks(raw, vtt_path):
+    # Materialized rather than streamed: a cue's real speech span depends on when
+    # the NEXT cue opens (see _effective_cue_end), which a generator cannot look
+    # ahead to.
+    cues = list(_iter_cue_blocks(raw, vtt_path))
+
+    for cue_idx, (cue_start, cue_end, payload_lines) in enumerate(cues):
         cleaned_lines = [
             _clean_subtitle_text(line, unescape=True) for line in payload_lines
         ]
@@ -360,6 +405,14 @@ def parse_vtt_subs(
 
         payload = "\n".join(kept_lines)
 
+        # Computed on the post-dedupe payload, so a cue whose carried-over lines
+        # held the only tags is treated as untagged -- which is what it now is.
+        has_inline_tags = bool(_INLINE_TS.search(payload))
+        next_cue_start = cues[cue_idx + 1][0] if cue_idx + 1 < len(cues) else None
+        effective_end = _effective_cue_end(
+            cue_start, cue_end, next_cue_start, has_inline_tags
+        )
+
         # Split on inline word timestamps. re.split with one capture group
         # alternates text/timestamp/text/..., so odd indices are the stamps.
         #
@@ -380,7 +433,7 @@ def parse_vtt_subs(
             cleaned = _clean_subtitle_text(run_text, unescape=True)
             if not cleaned:
                 continue
-            run_end = runs[idx + 1][0] if idx + 1 < len(runs) else cue_end
+            run_end = runs[idx + 1][0] if idx + 1 < len(runs) else effective_end
             flat_words.extend(_expand_run_to_words(cleaned, run_start, run_end))
 
     label = os.path.basename(vtt_path)
@@ -526,6 +579,97 @@ def write_vtt(data_segmen: list[dict], path: str) -> None:
     every later re-run with no way out from the UI.
     """
     text = render_vtt(data_segmen)
+    tmp = f"{path}.tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    os.replace(tmp, path)
+
+
+SAVED_TRANSCRIPT_SRT_NAME = "transcript.srt"
+
+
+def _format_srt_timestamp(seconds: float) -> str:
+    """``12.345`` -> ``00:00:12,345``. SRT uses a comma, WebVTT a period."""
+    seconds = max(0.0, float(seconds))
+    hours, rest = divmod(seconds, 3600)
+    minutes, secs = divmod(rest, 60)
+    return f"{int(hours):02d}:{int(minutes):02d}:{secs:06.3f}".replace(".", ",")
+
+
+def render_srt(
+    data_segmen: list[dict],
+    *,
+    clip_start: float = 0.0,
+    clip_end: float | None = None,
+) -> str:
+    """Serialize *data_segmen* to SubRip, optionally windowed to one clip.
+
+    SRT carries no word-level timing, so this is a lossier writer than
+    :func:`render_vtt` by format, not by choice: one cue per segment, its text
+    joined from the segment's words.
+
+    ``clip_start``/``clip_end`` window and **rebase**. That combination is the
+    whole point -- a subtitle file shipped next to ``highlight_rank_2.mp4`` must
+    start at zero, while ``data_segmen`` is always source-absolute (see this
+    module's header). Windowing is done on the *words*, not by clamping the
+    segment box, so a segment straddling the cut contributes only the words that
+    are actually inside it rather than a full line of text the viewer cannot
+    hear. The remaining span is then clamped to the window, so nothing extends
+    past the clip.
+
+    Indices are 1-based and contiguous over the cues actually emitted, which is
+    what players expect; a segment that contributes no words is skipped rather
+    than emitted empty.
+    """
+    lo = float(clip_start)
+    hi = float("inf") if clip_end is None else float(clip_end)
+
+    lines: list[str] = []
+    index = 0
+
+    for seg in data_segmen:
+        words = [
+            w
+            for w in (seg.get("words") or [])
+            if w["end"] > lo and w["start"] < hi
+        ]
+        if not words:
+            continue
+
+        start = max(float(words[0]["start"]), lo) - lo
+        end = min(float(words[-1]["end"]), hi) - lo
+        if end <= start:
+            continue
+
+        text = " ".join(str(w["word"]) for w in words).strip()
+        if not text:
+            continue
+
+        index += 1
+        lines.append(str(index))
+        lines.append(
+            f"{_format_srt_timestamp(start)} --> {_format_srt_timestamp(end)}"
+        )
+        lines.append(text)
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def write_srt(
+    data_segmen: list[dict],
+    path: str,
+    *,
+    clip_start: float = 0.0,
+    clip_end: float | None = None,
+) -> None:
+    """Write *data_segmen* to *path* as SubRip, atomically.
+
+    Atomic for the same reason as :func:`write_vtt`: a half-written file from a
+    killed process is indistinguishable from a real one, and nothing in the web
+    API can delete a file out of an output directory.
+    """
+    text = render_srt(data_segmen, clip_start=clip_start, clip_end=clip_end)
     tmp = f"{path}.tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
         fh.write(text)
