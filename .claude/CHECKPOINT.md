@@ -1,67 +1,66 @@
 # CHECKPOINT
 
-## In progress — provider settings, job guidance, render options
+## Last task — provider settings, job guidance, render options (COMPLETE, VERIFIED)
 - **Task:** Add a generic OpenAI-compatible analysis provider, persist the Settings
-  page values, add provider guidance + warnings to New Job, and expose the
-  render-quality options. Plan approved 2026-09-21.
-- **Phase:** IMPLEMENT
-- **Current stage:** S8 (env samples, compose, README, records) — S1-S7 done
-- **Next action:** env samples, docker-compose passthrough, README line, DEC-016/017, close-out
-- **Open questions:** none. The four CLARIFY questions were answered: one generic
-  `openai_compat` provider (not named Groq/Mistral/xAI), persist settings to a
-  git-ignored JSON file, preset + Advanced section on New Job, `docs/studio` static
-  UI out of scope.
-- **Checkpoint commit:** `5bdd31c` (clean tree apart from untracked
-  `web/dashboard/package-lock.json`, which stays unstaged).
-- **Tier-1 baseline at `5bdd31c`:** 254 passed; compileall green; `main.py --help` green.
+  page values, add provider guidance + warnings to New Job, expose the render
+  quality options. Plan approved 2026-09-21.
+- **Phase:** closed out. All 8 planned stages committed (S6 and S7 merged — see below).
+- **Open questions:** none.
+- **Baseline before the work:** `5bdd31c`, 254 tests passing.
+- **Tier-1 now:** 298 passed locally; **282 passed / 16 skipped in a clean
+  pytest-only venv**, which is what CI runs (DEC-012); compileall green;
+  `main.py --help` green.
 
-### Stage list
-S1 stale settings defaults · S2 persist settings to `.local/settings.json` ·
-S3 generic provider in engine + CLI (riskiest) · S4 web API surface ·
-S5 Settings page card · S6 New Job banner + warnings · S7 New Job preset +
-Advanced + dead-toggle removal · S8 env samples, compose, README, records.
+| Commit | What |
+|---|---|
+| `1d65fd7` | S1 stale settings defaults (`cuda`→`auto`, `gemini`→`nvidia`) |
+| `6a755cf` | S2 settings persist to `.local/settings.json` |
+| `96a92c2` | S3 generic `openai_compat` provider (engine + CLI) |
+| `140b752` | S4 web API surface for it |
+| `a0f7769` | S5 Settings page custom-endpoint card |
+| `a8505a7` | S6+S7 New Job banner, warnings, quality preset, Advanced, dead toggle removed |
+| `43a6f1a` | Fix: the new settings test aborted CI collection |
+| `a154579` | S8 env samples, compose passthrough, README, DEC-016/017, A-009 |
 
-## In progress
-- **Task:** Make the app actually work end to end (upload, Whisper, live AI).
-- **Phase:** IMPLEMENT / verified. Docker container verification still pending.
-- **Unpushed commits:** `cafae92`, `2b28c80`, `7546db3`, `303eded`, `1d45ac7`
-  — github.com DNS is intermittently blocked from the authoring sandbox.
-- **Tier-1:** 239+ passed locally; clean pytest-only venv green (DEC-012).
+**S6 and S7 were merged** into one commit: the warnings S6 adds depend on controls
+S7 introduces (split-screen and its trigger), so two commits on the same file
+could not have been reverted independently — the only reason to split them.
 
-### Verified against real services this session
+### Verified against a running stack (not just unit tests)
 | What | Evidence |
 |---|---|
-| Whisper `cuda` + `float16` crashes | Real runs on ctranslate2 4.8.2, 0 CUDA devices, no torch |
-| `--whisper-device auto` | Resolves to cpu/int8; 5 segments, contract-valid |
-| **A-007** | **CLOSED.** Live call exposed `400 unknown field guided_json`; fixed via `response_format`, re-verified: 2 clips, zero missing keys |
-| Full CLI pipeline | Real 720x1280 clips rendered from a 72.9s source |
-| Live AI selection | Picked 7.6-30.5s and 54.5-70.8s with titles, hashtags, account classification |
-| Pexels B-roll | `download_pexels_broll` returned a 7.1MB clip |
-| Web API job | upload -> job -> transcribe -> render -> `completed` |
-| 21 job fields | `video_cq: 30`, `split_trigger: face` land over HTTP |
-| Reuse bypass | Same request that failed now auto-enables and completes |
-| Upload 250MB direct | HTTP 200 in 3.6s |
-| Upload 300MB via Vite proxy | Browser: `205 MB / 300 MB`, 68%, 48 MB/s, ETA |
-| Dashboard in English | Rendered in a browser |
+| S1 fix is live | `GET /api/settings` returns `default_whisper_device: "auto"`, `default_ai_provider: "nvidia"` |
+| Settings survive a restart | PUT a custom endpoint → stop the backend → start it → `🔐 Restored 3 saved setting(s)` and all three values come back |
+| Empty value clears an override | PUT `""` for the base URL → the key is **absent** from the file, not stored empty |
+| Settings page | Rendered in a browser: NVIDIA first with its free-key link, custom-endpoint card with presets, "✅ Configured" in System Info |
+| New Job page | Banner, three-provider select, Fast/Balanced/Best chips, Advanced section all render |
+| Missing-key warning | Selecting Gemini (key unset) shows the analysis-step warning |
+| Diarization warning | Split screen + diarization with no HF token shows the switch-to-face warning |
+| Split trigger default | `face` in the UI, so the unverified pyannote path is not the default one a user hits |
+| Dead toggle | "YouTube Subs" absent from the rendered page |
+| **Payload round-trip** | Captured the real POST the browser sends (fetch stubbed, no live API call), fed it through `JobCreateRequest` + the adapter: **0 fields dropped**, and every Fast-preset value reached cfg (`render_output_height` 720, cq 30, crf 26, bilinear) |
+| Custom endpoint gate | With settings loaded from disk the worker gate passes; clearing the model returns `('openai_compat_model', 'OPENAI_COMPAT_MODEL')` |
 
-### Still unverified
-- **Docker containers** — image build was still exporting layers at close of
-  this stretch. The uid fix (`d845413`) has never run against a live daemon.
-- **The CUDA branch** of the device resolver: this host is CPU-only.
-- **Vite timeout fix** (`9a9adc5`): a 300MB upload succeeded through the proxy,
-  but on fast loopback it never approached the 300s window that actually broke.
-- RC-8 diarization / split-screen.
+### Not verified
+- **No live call was made to any provider with the new `openai_compat` path.** The
+  request is assembled and the client built, but no real custom endpoint was
+  contacted — doing so would spend the user's credits without asking. First real
+  run confirms it.
+- RC-8 (diarization / split-screen render) remains unexercised, as before. S7
+  makes split-screen reachable from the dashboard for the first time, which is
+  exactly why its trigger defaults to `face`.
+- Docker: the compose passthroughs were added but not run against a daemon.
 
-### Findings that changed the brief
-- `reuse_job_id` is **LIVE**, not dead: `web/api/routes/jobs.py:67` validates it
-  and `:83` pops it from the payload before the payload reaches
-  `config_adapter`/`worker`, feeding `store.create_job(job_id=...)` to reuse a
-  prior job directory. Correctly absent from those two modules.
-- The dashboard sends **none** of the 21 (grep over all of
-  `web/dashboard/src`). They are API-only fields today.
-- `clipping/config.py` enforces **no numeric range** for any of the 21 — the
-  `type=int/float` cast is the only check — so no `ge=`/`le=` bounds were
-  mirrored. Three flags do carry `choices=` allow-lists; those became enums.
+### Follow-ups deliberately not done
+- `docs/studio/*.html`, the static GitHub Pages UI: still has the dead
+  `use_dlp_subs` toggle, a two-provider select, no custom-endpoint field, and
+  still posts `url`/`source` fields the backend purged. It is now further behind
+  the React dashboard than it was.
+- `notebooks/Quick_Start.ipynb` and `kaggle-studio-server.ipynb` never collect
+  `NVIDIA_API_KEY`, so a default-provider run from either fails on a missing key.
+- `wiki/2-Getting-Started.md` still calls `NVIDIA_API_KEY` optional.
+- `use_camera_switch` is still unexposed in the dashboard; it always needs
+  diarization, with no `face` escape.
 
 ## Status of the previous task
 - **Task:** Local-first refactor — **COMPLETE and VERIFIED END-TO-END**
