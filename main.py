@@ -92,7 +92,20 @@ def main():
     if cfg.use_split_screen:
         print(f"   Dynamic Split: {'ON' if cfg.use_dynamic_split else 'OFF'}")
         print(f"   Split Trigger: {cfg.split_trigger}")
-    active_model = cfg.nvidia_model if cfg.ai_provider == "nvidia" else cfg.gemini_model
+    if cfg.ai_provider in ("chain", "auto"):
+        # The banner used to print cfg.gemini_model for anything that was not
+        # nvidia, which for a chain run named a model the job never calls.
+        from clipping.providers.registry import chain_from_env, describe, parse_chain
+
+        try:
+            links = parse_chain(cfg.llm_chain) if cfg.llm_chain else chain_from_env()
+            active_model = " → ".join(describe(link) for link in links)
+        except Exception:  # noqa: BLE001 - a bad chain is reported when it runs
+            active_model = cfg.llm_chain or "(invalid chain)"
+        print(f"   Platform    : {cfg.platform}")
+        print(f"   Language    : {cfg.output_language}")
+    else:
+        active_model = cfg.nvidia_model if cfg.ai_provider == "nvidia" else cfg.gemini_model
     print(f"   AI          : {cfg.ai_provider} ({active_model})")
     if getattr(cfg, "watermark_enabled", False):
         wm_type = "Text" if cfg.watermark_text else "Image"
@@ -107,7 +120,13 @@ def main():
 
     run_pipeline(cfg)
 
-    print("\n✅ Done! All clips have been rendered.")
+    if getattr(cfg, "dry_run_analysis", False):
+        # run_pipeline returned before the render loop, so saying otherwise
+        # would be a lie printed directly under the notice explaining that it
+        # stopped early.
+        print("\n✅ Done! Analysis only — nothing was rendered.")
+    else:
+        print("\n✅ Done! All clips have been rendered.")
 
 
 if __name__ == "__main__":

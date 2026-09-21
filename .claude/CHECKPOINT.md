@@ -71,6 +71,29 @@
    fields are read by nothing. The replacement is three small passes with a
    largest single generation of ~320 tokens. See the plan for the budget table.
 
+### Stage 4 proved out live — the first real clip set this project has made
+Ran the real three-pass analysis against the live NVIDIA endpoint on the
+human's own 20-minute French video, `--clips 3 --platform tiktok
+--dry-run-analysis`. It succeeded in **~13 minutes on the slowest provider in
+the chain** — NVIDIA alone, because Groq and Gemini have no keys yet and were
+skipped with a printed reason, exactly as designed.
+
+| rank | span | duration | title (native / en) |
+|---|---|---|---|
+| 1 | 750.5 → 799.7 | 49s | Sa femme l'étrangle au lieu de l'appeler / His wife strangles him instead of calling him |
+| 2 | 0.4 → 35.4 | 35s | L'île des puceaux / The Virgin Island |
+| 3 | 1005.6 → 1052.9 | 47s | Un médecin qui fait ça avec son client ? / A doctor doing that with his client? |
+
+Every contract property was then checked against the transcript, not assumed:
+all three inside the 15-90s tiktok window, **zero overlap** between them, each
+starting on a beat boundary, each hook inside its clip, every b-roll starting
+after its hook ends, and **every emphasis word genuinely spoken** (`puceaux`,
+`viergent`, `bomboclat`, `virginité`). Output is in
+`outputs/{gemini_response,metadata_preview}.json`.
+
+The clips are also well spread (0s, 750s, 1005s), which is the re-rank pass
+doing what the monolith claimed to do and never could.
+
 ### Regression contract for this task
 | # | Must keep working | Proven by |
 |---|---|---|
