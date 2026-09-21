@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { createJob, uploadVideo } from '../api'
+import { createJob, uploadVideo, fetchSettings } from '../api'
 
 function formatBytes(bytes) {
   if (!bytes && bytes !== 0) return '—'
@@ -22,6 +22,75 @@ function formatDuration(seconds) {
   const secs = Math.round(seconds % 60)
   if (mins < 60) return `${mins}m ${secs}s`
   return `${Math.floor(mins / 60)}h ${mins % 60}m`
+}
+
+/**
+ * Quality presets.
+ *
+ * These drive resolution and the two rate-control values, and deliberately
+ * leave video_preset and video_bitrate on "auto". The encoder is detected at
+ * run time (NVENC, AMF, VAAPI or libx264) and the same preset string is handed
+ * to whichever one wins -- but their vocabularies do not overlap ("veryfast"
+ * is meaningless to NVENC, "p1" to libx264), so pinning one would break the
+ * other. Bitrate already scales itself from the render height.
+ *
+ * Balanced is byte-for-byte the backend's own defaults, so leaving the preset
+ * alone changes nothing about how clips are rendered today.
+ */
+const QUALITY_PRESETS = {
+  fast: {
+    label: 'Fast',
+    desc: 'Draft — 720p, quickest render',
+    render_height: '720',
+    video_cq: 30,
+    video_crf: 26,
+    video_scale_algo: 'bilinear',
+  },
+  balanced: {
+    label: 'Balanced',
+    desc: 'Default — 1080p',
+    render_height: '1080',
+    video_cq: 23,
+    video_crf: 20,
+    video_scale_algo: 'lanczos',
+  },
+  best: {
+    label: 'Best',
+    desc: 'Highest quality — slowest',
+    render_height: '1080',
+    video_cq: 19,
+    video_crf: 17,
+    video_scale_algo: 'lanczos',
+  },
+}
+
+function matchPreset({ renderHeight, videoCq, videoCrf, videoScaleAlgo }) {
+  const found = Object.entries(QUALITY_PRESETS).find(([, p]) =>
+    p.render_height === String(renderHeight) &&
+    p.video_cq === Number(videoCq) &&
+    p.video_crf === Number(videoCrf) &&
+    p.video_scale_algo === videoScaleAlgo
+  )
+  return found ? found[0] : 'custom'
+}
+
+/** A one-line notice under the control it concerns. */
+function Notice({ kind = 'info', children }) {
+  const color = kind === 'warn' ? 'var(--warning)' : 'var(--info)'
+  const bg = kind === 'warn' ? 'var(--warning-dim)' : 'var(--info-dim)'
+  return (
+    <div style={{
+      background: bg,
+      borderRadius: 'var(--radius-sm)',
+      padding: '8px 10px',
+      marginTop: '8px',
+      fontSize: '12.5px',
+      color,
+      lineHeight: 1.45,
+    }}>
+      {children}
+    </div>
+  )
 }
 
 /**
@@ -96,6 +165,11 @@ function NewJob() {
   const [error, setError] = useState('')
   const [reuseJobId, setReuseJobId] = useState('')
 
+  // Which keys the backend holds. Used only to warn; a failure to load leaves
+  // it null and the form still works.
+  const [settings, setSettings] = useState(null)
+  const [showAdvanced, setShowAdvanced] = useState(false)
+
   // Config
   const [clips, setClips] = useState(7)
   const [ratio, setRatio] = useState('9:16')
@@ -106,6 +180,25 @@ function NewJob() {
   // 'cuda' made every dashboard job ask for a GPU that may not exist.
   const [whisperDevice, setWhisperDevice] = useState('auto')
   const [aiProvider, setAiProvider] = useState('nvidia')
+  const [openaiCompatModel, setOpenaiCompatModel] = useState('')
+
+  // Quality
+  const [quality, setQuality] = useState('balanced')
+  const [renderHeight, setRenderHeight] = useState(QUALITY_PRESETS.balanced.render_height)
+  const [videoCq, setVideoCq] = useState(QUALITY_PRESETS.balanced.video_cq)
+  const [videoCrf, setVideoCrf] = useState(QUALITY_PRESETS.balanced.video_crf)
+  const [videoScaleAlgo, setVideoScaleAlgo] = useState(QUALITY_PRESETS.balanced.video_scale_algo)
+
+  // Advanced
+  const [wordsPerSub, setWordsPerSub] = useState(5)
+  const [hookDuration, setHookDuration] = useState(3)
+  const [faceDetector, setFaceDetector] = useState('mediapipe')
+  const [yoloSize, setYoloSize] = useState('8m')
+  const [useSplitScreen, setUseSplitScreen] = useState(false)
+  // 'face' rather than the backend's 'diarization' default: face detection
+  // needs no HuggingFace token and no pyannote install, so the option works
+  // out of the box. The page always sends this explicitly.
+  const [splitTrigger, setSplitTrigger] = useState('face')
 
   // Toggles
   const [useBroll, setUseBroll] = useState(true)
@@ -115,8 +208,11 @@ function NewJob() {
   const [noSubs, setNoSubs] = useState(false)
   const [hookV2, setHookV2] = useState(false)
   const [silenceTrim, setSilenceTrim] = useState(false)
-  const [useDlpSubs, setUseDlpSubs] = useState(false)
   const [loadGeminiJson, setLoadGeminiJson] = useState(false)
+
+  useEffect(() => {
+    fetchSettings().then(setSettings).catch(() => setSettings(null))
+  }, [])
 
   // Load from location state if user clicked "Clone / Rerun"
   useEffect(() => {
@@ -127,28 +223,53 @@ function NewJob() {
       setTranscriptFilename(reuseJob.transcript_filename || '')
       setSourceUrl(reuseJob.source_url || '')
       setMode('reuse')
-      
+
+      // Every field this page can send is restored, so a clone reproduces the
+      // original job rather than silently resetting half of it to defaults.
       const config = reuseJob.config || {}
       if (config.clips !== undefined) setClips(config.clips)
       if (config.ratio !== undefined) setRatio(config.ratio)
+      if (config.render_height !== undefined) setRenderHeight(config.render_height)
+      if (config.words_per_sub !== undefined) setWordsPerSub(config.words_per_sub)
+      if (config.hook_duration !== undefined) setHookDuration(config.hook_duration)
       if (config.font_style !== undefined) setFontStyle(config.font_style)
       if (config.whisper_model !== undefined) setWhisperModel(config.whisper_model)
       if (config.whisper_device !== undefined) setWhisperDevice(config.whisper_device)
       if (config.ai_provider !== undefined) setAiProvider(config.ai_provider)
-      
+      if (config.openai_compat_model !== undefined) setOpenaiCompatModel(config.openai_compat_model)
+      if (config.face_detector !== undefined) setFaceDetector(config.face_detector)
+      if (config.yolo_size !== undefined) setYoloSize(config.yolo_size)
+      if (config.use_split_screen !== undefined) setUseSplitScreen(config.use_split_screen)
+      if (config.split_trigger !== undefined) setSplitTrigger(config.split_trigger)
+      if (config.video_cq !== undefined) setVideoCq(config.video_cq)
+      if (config.video_crf !== undefined) setVideoCrf(config.video_crf)
+      if (config.video_scale_algo !== undefined) setVideoScaleAlgo(config.video_scale_algo)
       if (config.use_broll !== undefined) setUseBroll(config.use_broll)
       if (config.use_hook_glitch !== undefined) setUseHookGlitch(config.use_hook_glitch)
       if (config.use_auto_bgm !== undefined) setUseBgm(config.use_auto_bgm)
       if (config.use_karaoke_effect !== undefined) setUseKaraoke(config.use_karaoke_effect)
       if (config.hook_v2 !== undefined) setHookV2(config.hook_v2)
       if (config.silence_trim !== undefined) setSilenceTrim(config.silence_trim)
-      if (config.use_dlp_subs !== undefined) setUseDlpSubs(config.use_dlp_subs)
       if (config.no_subs !== undefined) setNoSubs(config.no_subs)
-      
+
       // Default to true when cloning to save AI tokens, user can untoggle
       setLoadGeminiJson(true)
     }
   }, [location.state])
+
+  // Keep the preset chips honest when Advanced changes the values behind them.
+  useEffect(() => {
+    setQuality(matchPreset({ renderHeight, videoCq, videoCrf, videoScaleAlgo }))
+  }, [renderHeight, videoCq, videoCrf, videoScaleAlgo])
+
+  const applyPreset = (name) => {
+    const preset = QUALITY_PRESETS[name]
+    if (!preset) return
+    setRenderHeight(preset.render_height)
+    setVideoCq(preset.video_cq)
+    setVideoCrf(preset.video_crf)
+    setVideoScaleAlgo(preset.video_scale_algo)
+  }
 
   const handleFileUpload = async (e) => {
     const file = e.target.files?.[0]
@@ -204,17 +325,28 @@ function NewJob() {
 
     setSubmitting(true)
     try {
-      const payload = {
-        ...(uploadFilename ? { upload_filename: uploadFilename } : {}),
-        ...(transcriptFilename ? { transcript_filename: transcriptFilename } : {}),
-        ...(transcriptOffset ? { transcript_offset: Number(transcriptOffset) } : {}),
-        ...(sourceUrl.trim() ? { source_url: sourceUrl.trim() } : {}),
+      // Every job field this page sends, one key per line. The shape is
+      // load-bearing: tests/test_dashboard_payload_contract.py reads this block
+      // as text to check each key is declared on JobCreateRequest and is
+      // restored by Clone & Rerun.
+      const jobFields = {
         clips,
         ratio,
+        render_height: renderHeight,
+        words_per_sub: Number(wordsPerSub),
+        hook_duration: Number(hookDuration),
         font_style: fontStyle,
         whisper_model: whisperModel,
         whisper_device: whisperDevice,
         ai_provider: aiProvider,
+        openai_compat_model: openaiCompatModel,
+        face_detector: faceDetector,
+        yolo_size: yoloSize,
+        use_split_screen: useSplitScreen,
+        split_trigger: splitTrigger,
+        video_cq: Number(videoCq),
+        video_crf: Number(videoCrf),
+        video_scale_algo: videoScaleAlgo,
         use_broll: useBroll,
         use_hook_glitch: useHookGlitch,
         use_auto_bgm: useBgm,
@@ -222,8 +354,15 @@ function NewJob() {
         no_subs: noSubs,
         hook_v2: hookV2,
         silence_trim: silenceTrim,
-        use_dlp_subs: useDlpSubs,
         load_gemini_json: loadGeminiJson,
+      }
+
+      const payload = {
+        ...jobFields,
+        ...(uploadFilename ? { upload_filename: uploadFilename } : {}),
+        ...(transcriptFilename ? { transcript_filename: transcriptFilename } : {}),
+        ...(transcriptOffset ? { transcript_offset: Number(transcriptOffset) } : {}),
+        ...(sourceUrl.trim() ? { source_url: sourceUrl.trim() } : {}),
         ...(reuseJobId.trim() ? { reuse_job_id: reuseJobId.trim() } : {}),
       }
 
@@ -236,12 +375,61 @@ function NewJob() {
     }
   }
 
+  // --- warnings -----------------------------------------------------------
+  // A render-only rerun reuses the cached analysis and calls no provider, so
+  // it genuinely needs no key. This mirrors the same skip in web/api/worker.py.
+  const renderOnly = loadGeminiJson && Boolean(reuseJobId.trim())
+  const missingEndpointParts = [
+    settings && !settings.openai_compat_base_url ? 'base URL' : null,
+    settings && !settings.openai_compat_api_key_set ? 'API key' : null,
+    settings && !settings.openai_compat_model && !openaiCompatModel ? 'model' : null,
+  ].filter(Boolean)
+
+  const providerWarning = (() => {
+    if (!settings || renderOnly) return null
+    if (aiProvider === 'nvidia' && !settings.nvidia_api_key_set) {
+      return <>No NVIDIA API key yet, so this job will stop at the analysis step.
+        Add one under <strong>Settings</strong> — it is free at build.nvidia.com.</>
+    }
+    if (aiProvider === 'gemini' && !settings.google_api_key_set) {
+      return <>No Google API key yet, so this job will stop at the analysis step.
+        Add one under <strong>Settings</strong> — it is free at aistudio.google.com/apikey.</>
+    }
+    if (aiProvider === 'openai_compat' && missingEndpointParts.length) {
+      return <>The custom endpoint is missing its {missingEndpointParts.join(', ')}.
+        Fill it in under <strong>Settings</strong>, or pick NVIDIA or Gemini instead.</>
+    }
+    return null
+  })()
+
+  const transcriptAttached = Boolean(transcriptFilename)
+  const verticalRatio = ['9:16', '1:1', '3:4', '4:5'].includes(ratio)
+
   return (
     <div className="fade-in">
       <div className="page-header">
         <div>
           <h2>New Clipping Job</h2>
           <p>Generate viral short clips from long-form video</p>
+        </div>
+      </div>
+
+      {/* Which provider to use, and how to make this fast */}
+      <div className="card" style={{ marginBottom: '16px', background: 'var(--info-dim)' }}>
+        <div style={{ fontSize: '13px', lineHeight: 1.6 }}>
+          <strong>Set an AI key before you start.</strong> Picking the moments needs
+          one, and both recommended options are free with no credit card:{' '}
+          <a href="https://build.nvidia.com/" target="_blank" rel="noopener" style={{ color: 'var(--accent-hover)' }}>NVIDIA NIM</a>
+          {' '}(the default) or{' '}
+          <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" style={{ color: 'var(--accent-hover)' }}>Google Gemini</a>.
+          Already have a key from OpenRouter, Groq, Mistral, xAI or a local Ollama?
+          Choose <strong>Custom endpoint</strong> below and set it up in Settings.
+          <br />
+          <span style={{ color: 'var(--text-secondary)' }}>
+            Fastest run: upload a transcript alongside the video to skip
+            transcription entirely, and use the <strong>Fast</strong> quality preset
+            while you are still deciding what to keep.
+          </span>
         </div>
       </div>
 
@@ -375,9 +563,45 @@ function NewJob() {
                 value={reuseJobId}
                 onChange={(e) => setReuseJobId(e.target.value)}
               />
-              <p className="form-hint" style={{ marginTop: '4px' }}>Bypass download using an old job ID. (If using Clone & Rerun, leave this field filled in).</p>
+              <p className="form-hint" style={{ marginTop: '4px' }}>Reuse an earlier job's video and analysis. (If using Clone &amp; Rerun, leave this field filled in.)</p>
             </div>
           )}
+        </div>
+
+        {/* Quality preset */}
+        <div className="card" style={{ marginBottom: '16px' }}>
+          <h3 className="card-title" style={{ marginBottom: '6px' }}>🎚️ Quality</h3>
+          <p className="form-hint" style={{ marginBottom: '12px' }}>
+            Trades render time against output quality. Balanced is what every job
+            used before this control existed.
+          </p>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            {Object.entries(QUALITY_PRESETS).map(([name, preset]) => (
+              <button
+                key={name}
+                type="button"
+                className={`btn ${quality === name ? 'btn-primary' : 'btn-secondary'} btn-sm`}
+                onClick={() => applyPreset(name)}
+                title={preset.desc}
+              >
+                {preset.label}
+              </button>
+            ))}
+            {quality === 'custom' && (
+              <span style={{
+                alignSelf: 'center',
+                fontSize: '12.5px',
+                color: 'var(--text-tertiary)',
+              }}>
+                Custom — set in Advanced below
+              </span>
+            )}
+          </div>
+          <p className="form-hint" style={{ marginTop: '10px' }}>
+            {quality === 'custom'
+              ? `${renderHeight === 'source' ? 'Source' : `${renderHeight}p`} · CQ ${videoCq} / CRF ${videoCrf} · ${videoScaleAlgo}`
+              : QUALITY_PRESETS[quality].desc}
+          </p>
         </div>
 
         {/* Main Config */}
@@ -412,17 +636,42 @@ function NewJob() {
 
           {/* AI Settings */}
           <div className="config-section">
-            <h4>🤖 AI & Whisper</h4>
+            <h4>🤖 AI &amp; Whisper</h4>
             <div className="form-group">
               <label className="form-label">AI Provider</label>
               <select className="form-select" value={aiProvider} onChange={(e) => setAiProvider(e.target.value)}>
-                <option value="nvidia">NVIDIA NIM</option>
-                <option value="gemini">Google Gemini</option>
+                <option value="nvidia">NVIDIA NIM (free key)</option>
+                <option value="gemini">Google Gemini (free key)</option>
+                <option value="openai_compat">Custom endpoint (OpenAI-compatible)</option>
               </select>
+              {providerWarning && <Notice kind="warn">⚠️ {providerWarning}</Notice>}
             </div>
+
+            {aiProvider === 'openai_compat' && (
+              <div className="form-group">
+                <label className="form-label">Model for this job (optional)</label>
+                <input
+                  className="form-input"
+                  type="text"
+                  placeholder={settings?.openai_compat_model || 'Leave empty to use the one in Settings'}
+                  value={openaiCompatModel}
+                  onChange={(e) => setOpenaiCompatModel(e.target.value)}
+                />
+                <p className="form-hint">
+                  Overrides the saved model for this job only.
+                </p>
+              </div>
+            )}
+
             <div className="form-group">
               <label className="form-label">Whisper Model</label>
-              <select className="form-select" value={whisperModel} onChange={(e) => setWhisperModel(e.target.value)}>
+              <select
+                className="form-select"
+                value={whisperModel}
+                onChange={(e) => setWhisperModel(e.target.value)}
+                disabled={transcriptAttached}
+                style={{ opacity: transcriptAttached ? 0.5 : 1 }}
+              >
                 <option value="large-v3">large-v3 (Best quality)</option>
                 <option value="medium">medium (Balanced)</option>
                 <option value="small">small (Fast)</option>
@@ -431,11 +680,23 @@ function NewJob() {
             </div>
             <div className="form-group">
               <label className="form-label">Device</label>
-              <select className="form-select" value={whisperDevice} onChange={(e) => setWhisperDevice(e.target.value)}>
+              <select
+                className="form-select"
+                value={whisperDevice}
+                onChange={(e) => setWhisperDevice(e.target.value)}
+                disabled={transcriptAttached}
+                style={{ opacity: transcriptAttached ? 0.5 : 1 }}
+              >
                 <option value="auto">Auto (detect GPU, else CPU)</option>
                 <option value="cuda">CUDA (GPU)</option>
                 <option value="cpu">CPU</option>
               </select>
+              {transcriptAttached && (
+                <p className="form-hint">
+                  A transcript is attached, so Whisper is skipped and these two
+                  settings are unused.
+                </p>
+              )}
             </div>
           </div>
 
@@ -443,15 +704,147 @@ function NewJob() {
           <div className="config-section">
             <h4>✨ Features</h4>
             <ToggleRow label="B-Roll Footage" desc="Insert stock footage" checked={useBroll} onChange={setUseBroll} />
+            {useBroll && settings && !settings.pexels_api_key_set && (
+              <Notice>
+                ℹ️ No Pexels key, so B-roll will be skipped and the clips render
+                without it. Add one in Settings, or turn this off.
+              </Notice>
+            )}
             <ToggleRow label="Hook Glitch" desc="Glitch transition intro" checked={useHookGlitch} onChange={setUseHookGlitch} />
             <ToggleRow label="Background Music" desc="Auto BGM matching" checked={useBgm} onChange={setUseBgm} />
             <ToggleRow label="Karaoke Effect" desc="Word-by-word highlight" checked={useKaraoke} onChange={setUseKaraoke} />
             <ToggleRow label="Hook V2" desc="Multi-hook intro clips" checked={hookV2} onChange={setHookV2} />
             <ToggleRow label="Silence Trim" desc="Remove dead air" checked={silenceTrim} onChange={setSilenceTrim} />
-            <ToggleRow label="YouTube Subs" desc="Skip Whisper if available" checked={useDlpSubs} onChange={setUseDlpSubs} />
             <ToggleRow label="No Subtitles" desc="Render without text" checked={noSubs} onChange={setNoSubs} />
-            <ToggleRow label="Bypass AI" desc="Reuse gemini JSON (if exist)" checked={loadGeminiJson} onChange={setLoadGeminiJson} />
+            {noSubs && useKaraoke && (
+              <Notice>
+                ℹ️ "No Subtitles" removes all on-screen text, so the karaoke effect
+                above will have nothing to animate.
+              </Notice>
+            )}
+            <ToggleRow label="Bypass AI" desc="Reuse a previous analysis if one exists" checked={loadGeminiJson} onChange={setLoadGeminiJson} />
           </div>
+        </div>
+
+        {/* Advanced */}
+        <div className="card" style={{ marginBottom: '16px' }}>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={() => setShowAdvanced(!showAdvanced)}
+          >
+            {showAdvanced ? '▾' : '▸'} Advanced options
+          </button>
+
+          {showAdvanced && (
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+              gap: '16px',
+              marginTop: '16px',
+            }}>
+              <div className="config-section">
+                <h4>🖥️ Output</h4>
+                <div className="form-group">
+                  <label className="form-label">Resolution</label>
+                  <select className="form-select" value={renderHeight} onChange={(e) => setRenderHeight(e.target.value)}>
+                    <option value="720">720p (fastest)</option>
+                    <option value="1080">1080p</option>
+                    <option value="1440">1440p</option>
+                    <option value="source">Match the source</option>
+                  </select>
+                  <p className="form-hint">Short side of the frame. 9:16 at 1080 is 1080×1920.</p>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">GPU quality (CQ)</label>
+                  <input className="form-input" type="number" min="1" max="51" value={videoCq} onChange={(e) => setVideoCq(e.target.value)} />
+                  <p className="form-hint">Used on NVENC/AMF/VAAPI. Lower is better and bigger.</p>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">CPU quality (CRF)</label>
+                  <input className="form-input" type="number" min="1" max="51" value={videoCrf} onChange={(e) => setVideoCrf(e.target.value)} />
+                  <p className="form-hint">Used on libx264, when no hardware encoder is found.</p>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Scaling</label>
+                  <select className="form-select" value={videoScaleAlgo} onChange={(e) => setVideoScaleAlgo(e.target.value)}>
+                    <option value="lanczos">Lanczos (sharpest)</option>
+                    <option value="bicubic">Bicubic</option>
+                    <option value="bilinear">Bilinear (fastest)</option>
+                    <option value="area">Area</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="config-section">
+                <h4>💬 Subtitles &amp; hook</h4>
+                <div className="form-group">
+                  <label className="form-label">Words per subtitle</label>
+                  <input className="form-input" type="number" min="1" max="15" value={wordsPerSub} onChange={(e) => setWordsPerSub(e.target.value)} />
+                  <p className="form-hint">Fewer words reads faster on a phone.</p>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Hook duration (seconds)</label>
+                  <input className="form-input" type="number" min="1" max="10" value={hookDuration} onChange={(e) => setHookDuration(e.target.value)} />
+                </div>
+              </div>
+
+              <div className="config-section">
+                <h4>🙂 Face tracking</h4>
+                <div className="form-group">
+                  <label className="form-label">Detector</label>
+                  <select className="form-select" value={faceDetector} onChange={(e) => setFaceDetector(e.target.value)}>
+                    <option value="mediapipe">MediaPipe (light, CPU)</option>
+                    <option value="yolo">YOLO (better, heavier)</option>
+                  </select>
+                </div>
+                {faceDetector === 'yolo' && (
+                  <div className="form-group">
+                    <label className="form-label">YOLO model</label>
+                    <select className="form-select" value={yoloSize} onChange={(e) => setYoloSize(e.target.value)}>
+                      <option value="8n">8n (fastest)</option>
+                      <option value="8s">8s</option>
+                      <option value="8m">8m (default)</option>
+                      <option value="8n_v2">8n_v2</option>
+                      <option value="9c">9c (most accurate)</option>
+                    </select>
+                    <p className="form-hint">Downloaded once on first use.</p>
+                  </div>
+                )}
+              </div>
+
+              <div className="config-section">
+                <h4>👥 Split screen</h4>
+                <ToggleRow
+                  label="Split Screen"
+                  desc="Two-speaker podcast layout"
+                  checked={useSplitScreen}
+                  onChange={setUseSplitScreen}
+                />
+                {useSplitScreen && (
+                  <div className="form-group" style={{ marginTop: '12px' }}>
+                    <label className="form-label">Speaker detection</label>
+                    <select className="form-select" value={splitTrigger} onChange={(e) => setSplitTrigger(e.target.value)}>
+                      <option value="face">Face detection (no token needed)</option>
+                      <option value="diarization">Audio diarization (needs HF token)</option>
+                    </select>
+                  </div>
+                )}
+                {useSplitScreen && splitTrigger === 'diarization' && settings && !settings.hf_token_set && (
+                  <Notice kind="warn">
+                    ⚠️ Diarization needs a HuggingFace token and the pyannote model
+                    licence accepted. Switch to face detection to avoid both.
+                  </Notice>
+                )}
+                {useSplitScreen && !verticalRatio && (
+                  <Notice>
+                    ℹ️ Split screen only applies to vertical ratios, so it will be
+                    ignored at {ratio}.
+                  </Notice>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Error */}
