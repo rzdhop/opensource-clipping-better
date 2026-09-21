@@ -93,28 +93,6 @@ async def api_root():
     }
 
 
-# The built dashboard, served by this same app so the browser talks to one
-# origin and api.js needs no configuration. Mounted LAST: a mount at "/" would
-# otherwise swallow every /api route above it.
-#
-# html=True makes unknown paths fall back to index.html, which is what a
-# single-page app's client-side routes need in order to survive a refresh.
-_DIST = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "dashboard", "dist")
-)
-if os.path.isdir(_DIST):
-    app.mount("/", StaticFiles(directory=_DIST, html=True), name="ui")
-else:
-    @app.get("/")
-    async def _no_dashboard():
-        return {
-            "name": "rzdhop's clips",
-            "dashboard": "not built",
-            "hint": "run `npm ci && npm run build` in web/dashboard",
-            "docs": "/docs",
-            "health": "/api/health",
-        }
-
 import signal
 import asyncio
 
@@ -132,3 +110,39 @@ async def shutdown_server():
     
     asyncio.create_task(_shutdown())
     return {"status": "shutting down", "message": "Server is stopping..."}
+
+
+# ---------------------------------------------------------------------------
+# The dashboard mount goes at the very END of this file.
+#
+# A Mount at "/" matches every path that reaches it, so ANY route declared
+# after it is unreachable. This was not theoretical: the mount used to sit
+# above `POST /api/shutdown`, which meant that endpoint answered 405 instead of
+# running -- in production only, because the mount is skipped when dist/ is
+# absent, which is exactly the case on a dev box and in CI.
+#
+# Anything new goes above this line.
+# ---------------------------------------------------------------------------
+_DIST = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "dashboard", "dist")
+)
+
+# The check is for index.html, not for the directory. An empty dist/ exists in
+# two ordinary situations -- a build that failed halfway, and the anonymous
+# volume docker-compose creates as a mount point on the host -- and mounting
+# StaticFiles over an empty directory answers 404 for every page, including the
+# fallback below that would have explained the problem.
+if os.path.isfile(os.path.join(_DIST, "index.html")):
+    # html=True makes unknown paths fall back to index.html, which is what a
+    # single-page app's client-side routes need to survive a refresh.
+    app.mount("/", StaticFiles(directory=_DIST, html=True), name="ui")
+else:
+    @app.get("/")
+    async def _no_dashboard():
+        return {
+            "name": "rzdhop's clips",
+            "dashboard": "not built",
+            "hint": "run `npm ci && npm run build` in web/dashboard",
+            "docs": "/docs",
+            "health": "/api/health",
+        }

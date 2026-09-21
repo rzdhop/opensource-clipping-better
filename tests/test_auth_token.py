@@ -374,3 +374,62 @@ def test_secrets_never_enter_the_docker_build_context():
     entries = {line.strip().rstrip("/") for line in ignore.splitlines()}
     for secret in ("data", ".env"):
         assert secret in entries, f"{secret} is not in .dockerignore"
+
+
+def test_the_dashboard_mount_is_the_last_route_registered():
+    """A Mount at "/" matches every path that reaches it, so any route declared
+    after it is unreachable.
+
+    This was not theoretical: the mount sat above POST /api/shutdown, which
+    therefore answered 405 instead of running -- and only in production, because
+    the mount is skipped when web/dashboard/dist is absent, which is the case on
+    a dev box and in CI. The bug was invisible everywhere it was tested.
+    """
+    import ast
+
+    src = (PROJECT_ROOT / "web" / "api" / "app.py").read_text(encoding="utf-8")
+    tree = ast.parse(src)
+
+    mount_line = None
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "mount"):
+            mount_line = node.lineno
+
+    assert mount_line is not None, "the dashboard mount disappeared"
+
+    later_routes = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for decorator in node.decorator_list:
+            call = decorator if isinstance(decorator, ast.Call) else None
+            func = call.func if call else decorator
+            if not isinstance(func, ast.Attribute):
+                continue
+            if func.attr not in {"get", "post", "put", "delete", "patch"}:
+                continue
+            if not (isinstance(func.value, ast.Name) and func.value.id == "app"):
+                continue
+            # The fallback route inside the else: branch is part of the mount
+            # block itself, so it is allowed to sit beside it.
+            if node.name == "_no_dashboard":
+                continue
+            if decorator.lineno > mount_line:
+                later_routes.append(f"{node.name} (line {decorator.lineno})")
+
+    assert later_routes == [], (
+        "these routes are declared after the catch-all mount and are "
+        f"unreachable: {later_routes}"
+    )
+
+
+def test_an_empty_dist_falls_back_instead_of_serving_404s():
+    """An empty dist/ happens in two ordinary ways: a build that failed halfway,
+    and the anonymous volume docker-compose creates as a mount point on the
+    host. Mounting StaticFiles over it answers 404 for every page -- including
+    the fallback that would have explained the problem."""
+    src = (PROJECT_ROOT / "web" / "api" / "app.py").read_text(encoding="utf-8")
+    assert 'os.path.isfile(os.path.join(_DIST, "index.html"))' in src
+    assert "os.path.isdir(_DIST)" not in src
