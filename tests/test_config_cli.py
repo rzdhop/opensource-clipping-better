@@ -199,9 +199,20 @@ def test_derive_audio_path_defaults_beside_source(tmp_path):
 
 # ------------------------------------------------------------- AI provider
 
-def test_default_provider_is_nvidia(video):
+def test_default_provider_is_the_chain(video):
+    """The default analysis path is the three-pass analyzer over LLM_CHAIN.
+
+    The single-provider modes stay reachable: they are the escape hatch while
+    the new path proves itself, and the rollback if it does not.
+    """
     cfg = build_config(["--video", str(video)])
-    assert cfg.ai_provider == "nvidia"
+    assert cfg.ai_provider == "chain"
+    assert build_config(["--video", str(video), "--ai-provider", "nvidia"]).ai_provider == "nvidia"
+    assert build_config(["--video", str(video), "--ai-provider", "gemini"]).ai_provider == "gemini"
+
+
+def test_the_legacy_nvidia_model_default(video):
+    cfg = build_config(["--video", str(video)])
     # Pinned so a DELIBERATE change to the default is a visible decision.
     #
     # This assertion cannot do what it was originally written to do. DEC-007

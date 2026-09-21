@@ -124,9 +124,44 @@ def test_offset_defaults_to_zero_not_none(upload_file, job_id):
     assert cfg.transcript_offset == 0.0
 
 
-def test_ai_provider_defaults_to_nvidia(upload_file, job_id):
+def test_ai_provider_defaults_to_the_chain(upload_file, job_id):
+    """Must agree with JobCreateRequest.ai_provider, or a hand-built payload
+    takes a different analysis path from one the dashboard sent."""
     cfg = build_config_from_payload({"upload_filename": upload_file(".mp4")}, job_id)
+    assert cfg.ai_provider == "chain"
+
+
+def test_the_legacy_provider_is_still_reachable(upload_file, job_id):
+    cfg = build_config_from_payload(
+        {"upload_filename": upload_file(".mp4"), "ai_provider": "nvidia"}, job_id
+    )
     assert cfg.ai_provider == "nvidia"
+
+
+def test_chain_settings_reach_the_pipeline(upload_file, job_id):
+    cfg = build_config_from_payload(
+        {
+            "upload_filename": upload_file(".mp4"),
+            "llm_chain": "groq/openai/gpt-oss-120b,nvidia/x",
+            "platform": "tiktok",
+            "output_language": "fr",
+        },
+        job_id,
+    )
+    assert cfg.llm_chain == "groq/openai/gpt-oss-120b,nvidia/x"
+    assert cfg.platform == "tiktok"
+    assert cfg.output_language == "fr"
+
+
+def test_chain_provider_keys_prefer_the_settings_page(upload_file, job_id):
+    """env_overrides is the in-memory Settings store; it wins over the process
+    environment, exactly as the two original keys already do."""
+    cfg = build_config_from_payload(
+        {"upload_filename": upload_file(".mp4")},
+        job_id,
+        env_overrides={"GROQ_API_KEY": "from-settings"},
+    )
+    assert cfg.api_key_groq == "from-settings"
 
 
 # ----------------------------------------------------------------- anti-drift
@@ -150,14 +185,49 @@ def test_adapter_supplies_every_field_resolve_transcript_reads(upload_file, job_
         assert hasattr(cfg, attr), f"adapter is missing cfg.{attr}"
 
 
-def test_adapter_supplies_provider_key_fields(upload_file, job_id):
-    """worker.py gates on config.missing_provider_key(cfg)."""
-    from clipping.config import missing_provider_key
+def test_adapter_supplies_provider_key_fields(upload_file, job_id, monkeypatch):
+    """worker.py gates on config.missing_provider_key(cfg), so every attribute
+    that function reads has to exist on the adapter's namespace.
+
+    The key environment is cleared rather than inherited. An earlier version of
+    this test asserted the gate named one of two specific env vars, which passed
+    locally (a .env supplies NVIDIA_API_KEY, so the gate returned None) and
+    failed in CI, where nothing is set. The allowed names are now derived from
+    PROVIDER_KEYS so the set cannot go stale either.
+    """
+    from clipping.config import PROVIDER_KEYS, missing_provider_key
+
+    for attr, env_name in PROVIDER_KEYS.values():
+        monkeypatch.delenv(env_name, raising=False)
 
     cfg = build_config_from_payload({"upload_filename": upload_file(".mp4")}, job_id)
+    for attr, _env_name in PROVIDER_KEYS.values():
+        assert hasattr(cfg, attr), f"adapter is missing cfg.{attr}"
 
+    # With no key anywhere, the gate must name one -- and a real one.
     result = missing_provider_key(cfg)
-    assert result is None or result[1] in {"NVIDIA_API_KEY", "GOOGLE_API_KEY"}
+    assert result is not None
+    assert result[1] in {env for _attr, env in PROVIDER_KEYS.values()}
+
+
+def test_the_gate_passes_once_any_chain_provider_has_a_key(upload_file, job_id, monkeypatch):
+    """A chain whose FIRST provider is unconfigured is fine: that link is
+    skipped with a printed reason and the next one answers. Failing there would
+    make adding a second provider to the chain a downgrade."""
+    from clipping.config import PROVIDER_KEYS, missing_provider_key
+
+    for _attr, env_name in PROVIDER_KEYS.values():
+        monkeypatch.delenv(env_name, raising=False)
+
+    cfg = build_config_from_payload(
+        {
+            "upload_filename": upload_file(".mp4"),
+            "llm_chain": "groq/a,nvidia/b",
+        },
+        job_id,
+        env_overrides={"NVIDIA_API_KEY": "only-the-second-link"},
+    )
+    assert missing_provider_key(cfg) is None
 
 
 def test_adapter_supplies_fields_runner_provenance_reads(upload_file, job_id):

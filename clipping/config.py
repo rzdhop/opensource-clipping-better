@@ -152,10 +152,18 @@ VIDEO_PRESET = "auto"
 VIDEO_SCALE_ALGO = "lanczos"
 RENDER_OUTPUT_HEIGHT = 1080
 
+from clipping.analysis.presets import DEFAULT_PRESET, PRESET_NAMES
+
 # AI Provider
 # NVIDIA NIM is the default provider: open-weights models, free tier, and an
 # OpenAI-compatible endpoint. Gemini stays available via --ai-provider gemini.
-AI_PROVIDER = "nvidia"
+# "chain" walks LLM_CHAIN with the three-pass analyzer (clipping/analysis/).
+# "nvidia" / "gemini" are the single-provider legacy path: one request asking
+# for 22 fields per clip. That request is what never worked -- at ~1200 output
+# tokens per clip and a measured 12-13 tokens/s it cannot finish for more than
+# about three clips -- and it is kept only as an escape hatch while the new
+# path proves itself.
+AI_PROVIDER = "chain"
 # The third NIM default this project has had, because NVIDIA retires models
 # faster than anyone tracks them: deepseek-v4-pro died 2026-08-07, and
 # deepseek-v4-flash-0731 died between 2026-09-19 (when it still answered a real
@@ -423,9 +431,41 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--ai-provider",
-        choices=["gemini", "nvidia"],
+        choices=["chain", "gemini", "nvidia"],
         default=AI_PROVIDER,
-        help="AI provider for video analysis (gemini or nvidia).",
+        help=(
+            "How to analyse the transcript. 'chain' (default) runs the "
+            "three-pass analyzer over --llm-chain. 'nvidia' and 'gemini' are "
+            "the single-request legacy path, kept as an escape hatch."
+        ),
+    )
+    p.add_argument(
+        "--platform",
+        choices=list(PRESET_NAMES),
+        default=DEFAULT_PRESET,
+        help=(
+            "Target platform, which sets the clip duration window: "
+            "tiktok/reels 15-90s, shorts 15-59s, auto 20-75s, long 60-179s "
+            "(the pipeline's previous behaviour)."
+        ),
+    )
+    p.add_argument(
+        "--output-language",
+        default="auto",
+        help=(
+            "ISO-639-1 code for titles and captions, e.g. 'fr'. Defaults to "
+            "'auto', which follows the language of the transcript. English "
+            "titles, keywords and hashtags are produced either way."
+        ),
+    )
+    p.add_argument(
+        "--dry-run-analysis",
+        action="store_true",
+        help=(
+            "Run the analysis, write gemini_response.json and "
+            "metadata_preview.json, and stop before rendering. Lets an "
+            "expensive analysis be inspected once before any ffmpeg work."
+        ),
     )
     p.add_argument(
         "--nvidia-model",
@@ -789,9 +829,30 @@ def provider_keys(cfg) -> dict:
 
 
 def missing_provider_key(cfg) -> tuple[str, str] | None:
-    """Return ``(attr, ENV_NAME)`` when the active provider has no key, else None."""
+    """Return ``(attr, ENV_NAME)`` when the active provider has no key, else None.
+
+    For a chain, "has no key" means *no link at all* has one: a chain whose
+    first provider is unconfigured is fine, because that link is skipped with a
+    printed reason and the next one answers. Failing there would make adding a
+    second provider to the chain a downgrade.
+    """
     provider = getattr(cfg, "ai_provider", AI_PROVIDER)
-    attr, env_name = PROVIDER_KEYS.get(provider, PROVIDER_KEYS[AI_PROVIDER])
+
+    if provider in ("chain", "auto"):
+        from clipping.providers.registry import chain_from_env, parse_chain
+
+        spec = getattr(cfg, "llm_chain", "") or ""
+        try:
+            chain = parse_chain(spec) if spec else chain_from_env()
+        except Exception:  # noqa: BLE001 - a bad chain is reported when it runs
+            return None
+        available = provider_keys(cfg)
+        if any(link.provider in available for link in chain):
+            return None
+        first = chain[0].provider if chain else "groq"
+        return PROVIDER_KEYS.get(first, PROVIDER_KEYS["groq"])
+
+    attr, env_name = PROVIDER_KEYS.get(provider, PROVIDER_KEYS.get("nvidia"))
     if getattr(cfg, attr, ""):
         return None
     return attr, env_name
@@ -959,6 +1020,9 @@ def build_config(argv: list[str] | None = None) -> SimpleNamespace:
         whisper_compute_type=args.whisper_compute_type,
         # AI
         ai_provider=args.ai_provider,
+        platform=args.platform,
+        output_language=args.output_language,
+        dry_run_analysis=args.dry_run_analysis,
         api_key_nvidia=os.environ.get("NVIDIA_API_KEY", ""),
         # Chain providers. Read here rather than inside the provider layer so
         # every key in the process comes from one place and the web adapter can

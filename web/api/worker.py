@@ -241,7 +241,9 @@ def _execute_pipeline(job_id: str, payload: dict) -> None:
             with open(gemini_output_path, "r", encoding="utf-8") as f:
                 hasil_json = json.load(f)
         else:
-            hasil_json = engine.analyze_with_ai(transkrip_lengkap, cfg)
+            hasil_json = engine.analyze_with_ai(
+                transkrip_lengkap, cfg, data_segmen=data_segmen
+            )
             with open(gemini_output_path, "w", encoding="utf-8") as f:
                 json.dump(hasil_json, f, indent=4, ensure_ascii=False)
 

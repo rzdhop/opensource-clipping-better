@@ -56,8 +56,21 @@ class FaceDetector(str, enum.Enum):
 
 
 class AIProvider(str, enum.Enum):
+    # The three-pass analyzer over LLM_CHAIN. The default.
+    CHAIN = "chain"
+    # Single-request legacy path, kept as an escape hatch.
     NVIDIA = "nvidia"
     GEMINI = "gemini"
+
+
+class Platform(str, enum.Enum):
+    """Target platform, which sets the clip duration window."""
+
+    TIKTOK = "tiktok"
+    REELS = "reels"
+    SHORTS = "shorts"
+    AUTO = "auto"
+    LONG = "long"
 
 
 class WhisperDevice(str, enum.Enum):
@@ -168,7 +181,15 @@ class JobCreateRequest(BaseModel):
     # The dashboard has always sent this, but it was never declared here, so
     # Pydantic dropped it and the "Bypass AI" toggle silently did nothing.
     load_gemini_json: bool = False
-    ai_provider: AIProvider = AIProvider.NVIDIA
+    ai_provider: AIProvider = AIProvider.CHAIN
+    # Empty means "use $LLM_CHAIN, else the shipped default" — resolved in the
+    # provider registry so one place owns it.
+    llm_chain: str = ""
+    platform: Platform = Platform.AUTO
+    # "auto" follows the transcript's own language.
+    output_language: str = "auto"
+    # Run the analysis, save it, and stop before any ffmpeg work.
+    dry_run_analysis: bool = False
     gemini_model: str = "gemini-3-flash-preview"
     gemini_fallback_model: str = "gemini-2.5-flash"
     nvidia_model: str = "google/gemma-4-31b-it"

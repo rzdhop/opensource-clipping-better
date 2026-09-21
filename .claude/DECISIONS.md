@@ -506,3 +506,103 @@ and then ignores it is worse than one that refuses it — and an ordinary 400
 (a bad temperature, an oversized `max_tokens`) must not be mistaken for a schema
 refusal, or the client would silently strip the schema and accept whatever prose
 came back.
+
+## DEC-027 — Analysis becomes three small passes over sentence beats
+**Context.** The single-request design never produced a clip set. It asked for
+`clips` items each carrying 22 required fields — measured at ~1200 output tokens
+per clip — from a provider generating 12-13 tokens/s behind a gateway that gives
+up at ~300s. Seven clips needs ~660s and cannot finish; it also exceeds Groq's
+8000 tokens/minute in a single call. Every AI job in `outputs/jobs.json` failed,
+and the only "completed" job was a hand-written render probe.
+**Decision.** Split it:
+
+| pass | requests | largest generation |
+|---|---|---|
+| A candidate scan, one per ~45-beat window | ~4 for 20 minutes | ~320 tokens |
+| *(snap + dedupe — Python, no model)* | 0 | — |
+| B global re-rank | 1 | ~200 tokens |
+| C per-clip metadata | one per clip | ~280 tokens |
+
+**Consequence.** ~12 requests and ~19k tokens for a 20-minute video, with no
+generation over ~320 tokens — small enough for every free tier measured. Three
+properties come out of the split that the monolith did not have:
+
+- **The re-rank sees the whole video at once.** The monolith claimed to, and
+  never achieved it, because it could not finish.
+- **A failure is local.** A failed window loses one window's candidates; a
+  failed metadata request loses one clip's title, and that clip still renders.
+  Previously any failure lost the entire job.
+- **Hallucinated timings became impossible.** The model answers with beat ids,
+  never timestamps, and `beats.span_of` raises on an id that does not exist.
+
+## DEC-028 — The model chooses moments; Python chooses cuts
+**Context.** Asking a language model for a timestamp invites one that is
+plausible and wrong. A clip starting half a syllable early is glaring to a
+viewer and invisible in a JSON diff.
+**Decision.** `clipping/analysis/snap.py` owns every timing decision: sentence
+boundaries, the platform duration window, lead-in and tail clamped to
+neighbouring beats, and overlap rejection.
+**Consequence.** Two asymmetries are deliberate and tested. Growth prefers
+**forward**, because a candidate that is too short usually stops before its own
+payoff. Trimming removes beats from the **start**, never the end, because the
+payoff of a short-form clip is its last line — trimming from the end to fit a
+duration window produces a clip that stops before the reason it was chosen.
+
+A candidate that cannot be made to fit is dropped **with a printed reason**
+rather than silently, because a moment the model liked and the snapper refused
+is exactly what someone reading the log needs to see.
+
+## DEC-029 — The legacy key names live at one boundary, not in the model's prompt
+**Context.** The render layer, both uploaders and `metadata.normalize_and_validate`
+read a fixed set of clip keys — several Indonesian, one misspelled (`hastag`).
+Renaming them means editing a render layer with zero automated coverage (RC-7)
+that is verified only by live renders.
+**Decision.** `clipping/analysis/adapter.py` translates the slim output into
+those names. The model is asked for `title_native`; the adapter puts it in
+`title_indonesia`.
+**Consequence.** `clipping/studio/` is untouched, and the model never sees an
+Indonesian key name — which is also what stops it defaulting to Indonesian, the
+thing DEC-010 could not fix without live verification. A French video now gets a
+French title in a key called `title_indonesia`, which is ugly and correct.
+
+The guard is an **AST test**, not a convention: every key `clipping/studio/*`
+and `runner.py` read off a clip dict must appear in `LEGACY_KEYS`, in
+`PIPELINE_WRITTEN_KEYS` (things the pipeline writes itself, like `voiceover`),
+or in `NORMALIZER_KEYS`. It reads the render layer with `ast` rather than
+importing it, because those modules import cv2 and mediapipe at file scope and
+CI installs pytest and nothing else. Verified non-vacuous: removing
+`typography_plan` from the list fails the test.
+
+## DEC-030 — Five fields are no longer asked for, and five more are derived
+**Context.** An audit of the 22-field schema against every consumer found that
+much of it was never read.
+**Decision.** Not asked for at all: `recommended_visual_broll_hook` (read by
+nothing in the repo), `klasifikasi_akun` with its eight nested keys and the
+`TARGET_ACCOUNTS` personas (printed to the console, never used for routing), and
+the three `tiktok_*_id` variants (never reached `render_manifest.json`).
+Derived in Python: `typography_plan`, `broll_list`, `keep_segments`, `hook_v2`,
+`bgm_mood`.
+**Consequence.** Roughly 1200 output tokens per clip become ~280. Deriving also
+made two of them *correct* for the first time: the old prompt asked the model to
+emphasise words from the transcript and to keep b-roll out of the hook window,
+and nothing verified either. An emphasis word that is not actually spoken cannot
+be matched by `buat_file_ass` and would render unstyled — an invisible failure —
+so it is now dropped, and a b-roll placement that would cover the hook is moved.
+
+`keep_segments` and `hook_v2` are **omitted** rather than emitted empty:
+`studio/core.py:262` and `:456` have their own fallbacks, and an empty list
+suppresses them.
+
+## DEC-031 — `--dry-run-analysis`, and why `studio` is imported late
+**Context.** Analysis is the expensive, uncertain half; rendering is the slow,
+reliable half. Paying for both to inspect the first is wasteful, and on this
+ARM host the render is the longer part.
+**Decision.** `--dry-run-analysis` writes `gemini_response.json` and
+`metadata_preview.json` and stops. Re-running with `--load-gemini-json` renders
+from them for free.
+**Consequence.** `run_pipeline` no longer imports `clipping.studio` at the top.
+Every studio module imports cv2, mediapipe, PIL and numpy at file scope, so the
+old placement made an analysis-only run impossible on a machine with no render
+stack — which is exactly the machine such a run is for. Found by trying it: the
+first `--dry-run-analysis` on this host died on `ModuleNotFoundError: cv2`
+before reaching the analysis it was meant to run.

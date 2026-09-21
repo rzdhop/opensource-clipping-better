@@ -182,7 +182,11 @@ def run_pipeline(cfg) -> list[dict]:
         Render manifest (one dict per clip).
     """
 
-    from . import studio
+    # NOTE: `studio` is imported after the analysis, not here. Importing it
+    # pulls in cv2, mediapipe, PIL and numpy -- every studio module imports them
+    # at file scope -- which makes --dry-run-analysis impossible on a machine
+    # with no render stack, and that is exactly the machine an analysis-only run
+    # is for.
 
     # Step 1 — Ingest the source video.
     #
@@ -205,7 +209,9 @@ def run_pipeline(cfg) -> list[dict]:
         with open(gemini_output_path, "r", encoding="utf-8") as f:
             hasil_json = json.load(f)
     else:
-        hasil_json = engine.analyze_with_ai(transkrip_lengkap, cfg)
+        hasil_json = engine.analyze_with_ai(
+            transkrip_lengkap, cfg, data_segmen=data_segmen
+        )
         
         # Save raw gemini json for future loading/reproduction
         with open(gemini_output_path, "w", encoding="utf-8") as f:
@@ -218,6 +224,22 @@ def run_pipeline(cfg) -> list[dict]:
 
     metadata_path = os.path.join(cfg.outputs_dir, "metadata_preview.json")
     metadata.save_metadata_preview(hasil_json, path=metadata_path)
+
+    if getattr(cfg, "dry_run_analysis", False):
+        # Stop before any ffmpeg work. The analysis has been paid for and
+        # written to disk; a re-run with --load-gemini-json renders from it for
+        # free. Lets an expensive result be inspected once before committing to
+        # a render, which on this hardware is the longer half of the job.
+        print(
+            f"\n🔎 --dry-run-analysis: stopping before render.\n"
+            f"   Analysis:  {gemini_output_path}\n"
+            f"   Metadata:  {metadata_path}\n"
+            f"   Render it: re-run the same command with --load-gemini-json"
+        )
+        return hasil_json
+
+    # Everything past this point renders, so the render stack is needed now.
+    from . import studio
 
     # Step 5 — Diarization (split-screen / camera-switch)
     diarization_data = None

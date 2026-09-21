@@ -77,8 +77,12 @@ def build_config_from_payload(
     face_detector = payload.get("face_detector", "mediapipe")
     yolo_size = payload.get("yolo_size", "8m")
 
-    # Resolve AI provider
-    ai_provider = payload.get("ai_provider", "nvidia")
+    # Resolve AI provider. Must match JobCreateRequest.ai_provider's default:
+    # a payload built by hand (the API accepts one) otherwise takes a different
+    # path from one the dashboard sent, and
+    # test_declared_defaults_match_the_adapter_fallbacks exists because that
+    # class of divergence has bitten this file before.
+    ai_provider = payload.get("ai_provider", "chain")
 
     # Resolve render height
     render_height = payload.get("render_height", str(RENDER_OUTPUT_HEIGHT))
@@ -222,7 +226,19 @@ def build_config_from_payload(
         whisper_compute_type=payload.get("whisper_compute_type", "auto"),
         # AI
         ai_provider=ai_provider,
+        llm_chain=payload.get("llm_chain", "") or "",
+        platform=payload.get("platform", "auto"),
+        output_language=payload.get("output_language", "auto"),
+        dry_run_analysis=payload.get("dry_run_analysis", False),
         api_key_nvidia=env.get("NVIDIA_API_KEY", os.environ.get("NVIDIA_API_KEY", "")),
+        # Chain providers. env (the Settings page, in memory) wins over the
+        # process environment, exactly as the two original keys already do.
+        api_key_groq=env.get("GROQ_API_KEY", os.environ.get("GROQ_API_KEY", "")),
+        api_key_openrouter=env.get(
+            "OPENROUTER_API_KEY", os.environ.get("OPENROUTER_API_KEY", "")
+        ),
+        api_key_mistral=env.get("MISTRAL_API_KEY", os.environ.get("MISTRAL_API_KEY", "")),
+        api_key_custom=env.get("LLM_CUSTOM_API_KEY", os.environ.get("LLM_CUSTOM_API_KEY", "")),
         nvidia_model=payload.get("nvidia_model", "google/gemma-4-31b-it"),
         gemini_model=payload.get("gemini_model", "gemini-3-flash-preview"),
         gemini_fallback_model=payload.get("gemini_fallback_model", GEMINI_FALLBACK_MODEL),

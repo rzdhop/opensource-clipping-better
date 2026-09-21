@@ -5,10 +5,10 @@
   device, auto-download of video + subtitles, SRT in/out, every feature kept.
   Plan approved by the human: `/home/ubuntu/.claude/plans/hey-here-is-sleepy-walrus.md`
   (11 stages; read it before resuming — it carries the root causes and the design).
-- **Phase:** IMPLEMENT — **Stages 1-3 DONE.** S1 rolling-display cue semantics +
+- **Phase:** IMPLEMENT — **Stages 1-4 DONE.** S1 rolling-display cue semantics +
   SRT writer (`5d46c81`); S2 the provider core (`52ac830`); S3 beats, snapping,
-  presets and language detection. Next: Stage 4, the three-pass analyzer — the
-  stage that produces the first real clip set, and the riskiest one.
+  presets and language detection (`cbe10f3`); S4 the three-pass analyzer, wired
+  in as the default. Next: Stage 5, hosted transcription.
 - **⚠️ Production was already broken before this work:** the shipped NVIDIA model
   `deepseek-ai/deepseek-v4-flash-0731` now returns **410 Gone** (it answered a
   real job on 2026-09-19 and was dead by 2026-09-21; the whole DeepSeek v4
@@ -20,19 +20,24 @@
   Roll back here.
 - **Tier-1 baseline at `f8ad8b4`:** pytest **369 passed, 0 failed**; `compileall`
   clean. (Needs `PYTHONPYCACHEPREFIX` locally — see the root `__pycache__` note.)
-- **Next action:** Stage 4 — `clipping/analysis/{analyzer,prompts,schema,derive,adapter}.py`,
-  wired into `clipping/runner.py` step 3 and `web/api/worker.py:244`. Read the
-  plan's Stage 4 section first: the AST key guard and `--dry-run-analysis` are
-  the mitigations that keep RC-7 safe, and `--ai-provider nvidia_legacy` is the
-  instant rollback.
+- **Next action:** Stage 5 — hosted transcription (`clipping/providers/{stt,audio}.py`),
+  forked at `clipping/runner.py:resolve_transcript`. Needs `GROQ_API_KEY`.
+- **Rollback for the new analysis:** `--ai-provider nvidia` (or `gemini`) runs
+  the original single-request path, which is still in `engine.py` untouched and
+  still covered by `tests/test_nvidia_retry.py`. Stage 11 retires it, and not
+  before a full live job has completed on the new path.
+- **Inspect before rendering:** `--dry-run-analysis` writes
+  `gemini_response.json` + `metadata_preview.json` and stops; re-run with
+  `--load-gemini-json` to render from them for free. It needs no render stack,
+  so it works on this host, which has no cv2 or mediapipe.
 - **The human still owes four keys** (Groq, Gemini, OpenRouter, Mistral). Until
   then the chain runs on NVIDIA alone, which works: keyless links are skipped
   with a printed reason. `python tools/bench_llm.py` validates each key as it
   arrives and prints a suggested `LLM_CHAIN` ordered by measured speed.
-- **Tier-1 after Stage 3:** pytest **689 passed, 0 failed**; `compileall` clean.
-  Under the simulated pytest-only CI environment: **648 passed, 20 skipped, 0
-  failed** (523 after S2, 368 after S1, 328 at baseline) — every new test runs
-  in CI, none of them skipped.
+- **Tier-1 after Stage 4:** pytest **774 passed, 0 failed**; `compileall` clean.
+  Under the simulated pytest-only CI environment: **733 passed, 20 skipped, 0
+  failed** (648 after S3, 523 after S2, 368 after S1, 328 at baseline) — every
+  new test runs in CI, none of them skipped.
 - **Tier-1 after Stage 1:** pytest **409 passed, 0 failed**; `compileall` clean.
   Under the simulated pytest-only CI environment: **368 passed, 20 skipped, 0
   failed**, against a measured baseline of **328 passed, 20 skipped** — exactly
@@ -71,7 +76,7 @@
 |---|---|---|
 | RC-1 | The `data_segmen` contract | `tests/helpers.py::assert_valid_data_segmen` across every parser and producer |
 | RC-4 | Karaoke word alignment | **VERIFIED for Stage 1 without a render**: loaded the real `clipping/studio/subtitles.py` with `cv2`/`mediapipe`/`numpy`/`requests` stubbed (`buat_file_ass` touches none of them), regenerated the ASS and compared every highlighted word back to the source — **0 mismatches** across 4 fixtures plus a 60s window of the real French file, at 10ms tolerance (ASS centisecond resolution). A full ffmpeg render is still owed |
-| RC-7 | The render layer is intact | `clipping/studio/` gets exactly one additive line (`viral_score` in the manifest); the Stage-4 AST guard proves every key it reads is produced |
+| RC-7 | The render layer is intact | `clipping/studio/` is **unmodified so far** (Stage 6 adds one additive line). `tests/test_slim_schema_adapter.py` reads `studio/*.py` and `runner.py` by AST and asserts every clip key they access is produced by the adapter — proven non-vacuous by removing `typography_plan` and watching it fail |
 | RC-10 | Web API job → `completed` | live job on the running stack |
 | RC-11 | Job settings reach the pipeline | `tests/test_web_job_fields.py` |
 | RC-12 | Stdlib-only CI suite | every new test checked under the simulated pytest-only environment below |

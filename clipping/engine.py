@@ -1179,17 +1179,50 @@ def analyze_with_nvidia(transkrip_lengkap: str, cfg) -> list[dict]:
     raise RuntimeError("NVIDIA analysis failed (loop ended with no result).")
 
 
-def analyze_with_ai(transkrip_lengkap: str, cfg) -> list[dict]:
+def analyze_with_ai(transkrip_lengkap: str, cfg, *, data_segmen=None) -> list[dict]:
     """Dispatch transcript analysis to the configured provider.
 
-    There is deliberately no cross-provider fallback. The previous behaviour --
-    catch bare Exception and silently retry on Gemini -- was actively harmful:
-    a user who chose NVIDIA got billed on Gemini instead, with the real error
-    reduced to a single warning line. It is also how `openai` stayed an
-    undeclared dependency for so long, since ModuleNotFoundError was swallowed
-    along with everything else.
+    Three modes:
+
+    ``chain`` (the default) runs the three-pass analyzer in
+    ``clipping/analysis/`` over the ordered ``--llm-chain``. It needs
+    *data_segmen*, because it reasons in sentence beats rather than over a
+    flattened string.
+
+    ``nvidia`` and ``gemini`` are the original single-request path: one call
+    asking for 22 required fields per clip. That is the request that never
+    worked -- ~1200 output tokens per clip against a measured 12-13 tokens/s
+    and a ~300s gateway -- and it is kept only as an escape hatch.
+
+    There is still no *silent* cross-provider fallback. A chain is an ordered
+    list the user wrote down and every hop is printed; see DEC-023.
     """
-    provider = getattr(cfg, "ai_provider", "nvidia")
+    provider = getattr(cfg, "ai_provider", "chain")
+
+    if provider in ("chain", "auto"):
+        if data_segmen is None:
+            raise ValueError(
+                "The chain analyzer needs data_segmen; call "
+                "analyze_with_ai(transkrip, cfg, data_segmen=segments)."
+            )
+        from clipping.analysis import analyzer
+        from clipping.config import provider_keys
+        from clipping.providers.registry import chain_from_env, parse_chain
+
+        spec = getattr(cfg, "llm_chain", "") or ""
+        chain = parse_chain(spec) if spec else chain_from_env()
+        keys = provider_keys(cfg)
+        if not keys:
+            raise RuntimeError(
+                "No AI provider key is set. Add at least one of GROQ_API_KEY, "
+                "GOOGLE_API_KEY, NVIDIA_API_KEY, OPENROUTER_API_KEY or "
+                "MISTRAL_API_KEY to your .env."
+            )
+        print(
+            f"[3/3] Analyzing with the provider chain: "
+            f"{', '.join(f'{l.provider}/{l.model}' for l in chain)}"
+        )
+        return analyzer.analyze(data_segmen, cfg, chain=chain, keys=keys)
 
     if provider == "nvidia":
         if not getattr(cfg, "api_key_nvidia", ""):
@@ -1208,7 +1241,7 @@ def analyze_with_ai(transkrip_lengkap: str, cfg) -> list[dict]:
         return analyze_with_gemini(transkrip_lengkap, cfg)
 
     raise ValueError(
-        f"Unknown AI provider: {provider!r} (choices: nvidia, gemini)"
+        f"Unknown AI provider: {provider!r} (choices: chain, nvidia, gemini)"
     )
 
 
