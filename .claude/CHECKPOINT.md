@@ -128,12 +128,45 @@ the format alone and was wrong, because FLAC is variable-rate and this video has
 music under most of it. The planner derives bytes-per-second from the actual
 file, so a quiet interview of the same length stays one request.
 
+### RC-7 is CLOSED — the first complete run this project has ever had
+The render had never been exercised on this branch: this host has no
+`cv2`/`mediapipe` and the docker socket is permission-denied, so every earlier
+check was structural. Both were worked around by installing the render stack
+into an **isolated** `--target` directory (`/tmp/.../renderdeps`; system
+site-packages confirmed untouched) and running the pipeline against it:
+
+```
+PYTHONPATH=<renderdeps> python3 main.py --video uploads/video.mp4 \
+  --transcript <the French VTT> --no-whisper --clips 3 --platform tiktok \
+  --load-gemini-json --no-broll --no-bgm --no-hook
+```
+
+| clip | output | duration |
+|---|---|---|
+| 1 | `highlight_rank_1_ready.mp4` 1080x1920 h264+aac | 33.5s |
+| 2 | `highlight_rank_2_ready.mp4` 1080x1920 h264+aac | 30.0s |
+| 3 | `highlight_rank_3_ready.mp4` 1080x1920 h264+aac | 38.2s |
+
+Plus three thumbnails and three `.srt` sidecars. Frames were extracted and
+inspected: vertical face-tracked framing, French karaoke subtitles burned in
+with the current word highlighted, accents intact.
+
+Two things worth carrying forward:
+- **`studio/effects.py` imports `yt_dlp` at module scope**, so the render layer
+  cannot be imported without it even under `--no-hook`, which skips the only
+  feature that uses it. Declared in `requirements.txt` and documented by
+  DEC-001, so not a regression — but it is why the first attempt died after the
+  analysis had already succeeded.
+- **Rendered durations are shorter than the analysed spans** (33.5s from a 49s
+  span). That is `keep_segments` trimming dead air, derived from `drop_beats` —
+  the segment-trimming path working end to end.
+
 ### Regression contract for this task
 | # | Must keep working | Proven by |
 |---|---|---|
 | RC-1 | The `data_segmen` contract | `tests/helpers.py::assert_valid_data_segmen` across every parser and producer |
 | RC-4 | Karaoke word alignment | **VERIFIED for Stage 1 without a render**: loaded the real `clipping/studio/subtitles.py` with `cv2`/`mediapipe`/`numpy`/`requests` stubbed (`buat_file_ass` touches none of them), regenerated the ASS and compared every highlighted word back to the source — **0 mismatches** across 4 fixtures plus a 60s window of the real French file, at 10ms tolerance (ASS centisecond resolution). A full ffmpeg render is still owed |
-| RC-7 | The render layer is intact | `clipping/studio/` is **unmodified so far** (Stage 6 adds one additive line). `tests/test_slim_schema_adapter.py` reads `studio/*.py` and `runner.py` by AST and asserts every clip key they access is produced by the adapter — proven non-vacuous by removing `typography_plan` and watching it fail |
+| RC-7 | The render layer is intact | **VERIFIED by a real render** (see above): three 1080x1920 h264+aac clips with burned-in karaoke subtitles and thumbnails. `clipping/studio/` carries exactly one additive line (`viral_score` in the manifest). `tests/test_slim_schema_adapter.py` reads `studio/*.py` and `runner.py` by AST and asserts every clip key they access is produced by the adapter — proven non-vacuous by removing `typography_plan` and watching it fail |
 | RC-10 | Web API job → `completed` | live job on the running stack |
 | RC-11 | Job settings reach the pipeline | `tests/test_web_job_fields.py` |
 | RC-12 | Stdlib-only CI suite | every new test checked under the simulated pytest-only environment below |
