@@ -1024,3 +1024,54 @@ size — both when accepting a cached file and after a download.
   hairline-Thin metrics while libass drew DejaVu.
 - **It fails loudly now.** `siapkan_font_tipografi` raises and names both the
   declared and the wanted family, rather than printing success.
+
+## DEC-050 — The glitch transition is opt-in, and its cache key carries a recipe version
+**Context.** A user reported a "blackscreen like bug" about a second into every
+clip. It was the Hook Glitch transition. The lavfi fallback — the only path
+since the pinned source video went private (`URL_GLITCH_VIDEO`) — built its noise
+on `color=c=black`. `noise` adds a **signed** offset, so on pure black every
+negative value clamps to 0 and only the positive half survives: 19.2/255 mean
+luma, a black frame with faint speckle. `ffmpeg`'s own `blackdetect` never fired
+because it is not *quite* black.
+**Decision.** Base the noise on mid-grey (126.9/255, stddev 25.8 — actual
+static); default the effect **off** in all five places it is defined; and put a
+recipe version in the cached filename.
+**Consequence.**
+- **The default moves from opt-out to opt-in.** It is a one-second full-frame
+  effect inserted into *every* clip. `--hook-glitch` enables it from the CLI;
+  `--no-hook` is kept and still wins, so a script that disables it explicitly
+  does not silently start enabling it when the default flips.
+- **Five definitions, one value.** `clipping/config.USE_HOOK_GLITCH`,
+  `JobCreateRequest`, `config_adapter`, the CLI and `NewJob.jsx` each carry the
+  default; a test asserts they agree, because a mismatch means the dashboard and
+  the CLI disagree about what a job with no explicit setting does.
+- **`glitch_ready_{w}x{h}.ts` was the font bug's twin.** It is keyed by filename
+  and returned unconditionally when present — exactly like the stale
+  `custom_fonts/Montserrat-Regular.ttf` in DEC-049. Any machine that had
+  rendered once would have kept serving the black `.ts` forever, and this fix
+  would have looked inert. The key is now
+  `glitch_ready_{w}x{h}_v{GLITCH_RECIPE_VERSION}.ts`, so changing the filter
+  chain invalidates every cached file automatically and permanently. **This is
+  the second time a filename-keyed cache silently preserved a defect through its
+  own fix; treat any `if os.path.exists(x): return x` in this codebase as
+  suspect.**
+
+## DEC-051 — Clip length is a UI choice, defaulting to auto
+**Context.** `platform` selects the duration window every clip is snapped into
+(`clipping/analysis/presets.py` → `snap.py`): `auto` 20–75 s, `tiktok`/`reels`
+15–90 s, `shorts` 15–59 s, `long` 60–179 s. `JobCreateRequest` has declared the
+field since the snapper landed and it reaches `cfg`, but `NewJob.jsx` never sent
+it — so every job created from the dashboard was `auto` whatever the user
+intended. The reported clips came out 22–41 s, consistent with it.
+**Decision.** Add a Clip Length select offering all five presets, wired into the
+`jobFields` literal and the Clone & Rerun restore. The default stays `auto`.
+**Consequence.**
+- **Nothing is silently re-cut.** Widening `auto` instead would have changed the
+  output of every existing workflow to fix a missing control.
+- **Third instance of the same shape.** A field the backend declares and the
+  pipeline honours, with no control in the UI that is actually deployed — after
+  the AI provider select that could not reach `chain`, and the four chain
+  provider keys that still have no Settings field. Worth a sweep: the backend
+  contract and the dashboard drift apart silently, and only
+  `tests/test_dashboard_payload_contract.py` catches the reverse direction (a
+  key the page sends that the model does not declare).

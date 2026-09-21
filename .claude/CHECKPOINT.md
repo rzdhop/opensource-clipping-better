@@ -1,6 +1,58 @@
 # CHECKPOINT
 
 ## In progress
+- **Task:** Two defects the human found while using the deployed app: a
+  "blackscreen like bug" a second into every clip, and no way to make clips
+  longer. **Both fixed and committed**; the container is rebuilding.
+- **Phase:** IMPLEMENT complete → verify on the rebuilt container, then push.
+- **Checkpoint commit:** `ee2c1fe` (the media-access task, deployed and working).
+- **Tier-1:** pytest **1198 passed, 0 failed**.
+- **Next action:** once `docker compose up --build` finishes, confirm the Clip
+  Length select is present, render one clip with Hook Glitch ON and check the
+  transition frame is static (~126/255) rather than black (~19/255), then
+  `git push origin main`.
+
+### The black frame
+It was the **Hook Glitch** transition, and it was real. The lavfi fallback — the
+only path since the pinned source video went private — built its noise on
+`color=c=black`. `noise` adds a *signed* offset, so on pure black every negative
+value clamps to 0 and only the positive half survives: **19.2/255 mean luma**, a
+black frame with faint speckle. `blackdetect` never fired because it is not
+*quite* black, which is why nothing caught it. On mid-grey the identical chain
+measures **126.9/255, stddev 25.8** — actual static.
+
+Also flipped the default **off** in all five places it is defined (config
+constant, `JobCreateRequest`, `config_adapter`, the CLI, `NewJob.jsx`): a
+one-second full-frame effect on every clip is an opt-in. `--hook-glitch` enables
+it; `--no-hook` is kept and still wins.
+
+**The font bug's twin, caught before it bit:** `glitch_ready_{w}x{h}.ts` is
+cached by filename and returned unconditionally, exactly like
+`custom_fonts/Montserrat-Regular.ttf` was (DEC-049). Any machine that had
+rendered once would have kept the black `.ts` forever and the fix would have
+looked inert. The cache key now carries `GLITCH_RECIPE_VERSION` (now 2), so
+changing the filter chain invalidates every cached file automatically.
+
+### Clip length
+`platform` picks the window each clip is snapped into — `auto` 20–75s,
+`tiktok`/`reels` 15–90s, `shorts` 15–59s, `long` 60–179s. The API has declared
+it since the snapper landed and it reaches `cfg`, but `NewJob.jsx` never sent
+it, so every job from the UI was `auto` — which is why the reported clips came
+out 22–41s. Same class of gap as the provider select that could not reach
+`chain`. A Clip Length select now sends it; **default stays `auto`** so nothing
+is silently re-cut.
+
+### Still true from the previous task
+- `sudo chown -R "$(id -u):$(id -g)" data` on any older clone, or the API token
+  changes every restart and settings silently fail to save. Fixed at the source
+  by tracking `data/.gitkeep`.
+- Deploy with `docker compose rm -sfv backend && docker compose up -d --build
+  backend`. The `-v` matters; `down -v` would delete the Caddy certificates.
+- No E2E browser suite exists in this project.
+
+---
+
+## In progress
 - **Task:** The clips rendered but the app could not show them; then land
   everything on `main`. **COMPLETE — all stages committed and verified in a
   real browser.**
