@@ -946,3 +946,81 @@ loading point and its empty-clears semantics; adopt its allow-list.
   opposite and now pins this.
 - **Chmod before rename** is kept from this branch: setting the mode on the temp
   file means the real path is never briefly world-readable.
+
+## DEC-048 — Signed expiring media URLs, not a session cookie
+**Context.** After a clean 7-clip render the dashboard's player showed nothing,
+its Download button saved a `.json`, and a pasted clip URL said the file was not
+available. One cause: `c53949b` put `Depends(require_token)` on the whole files
+router, and the token is header-only by design — but `<video src>` and
+`<a href download>` are requests the *browser* makes and cannot carry a header.
+All three symptoms were the same `401 {"detail": ...}`; the `download`
+attribute saved that body and the browser renamed it to match its
+`application/json` type. Nothing tested it: `tests/test_auth_token.py:271` pinned
+`/api/outputs/...` → 401 as a *desired* invariant.
+**Decision.** `GET /api/outputs/{job}/{file}` also accepts `?exp=&sig=`, an HMAC
+over that one `(job_id, filename, exp)` triple keyed by `HMAC(token, context)`,
+minted when a job is serialized. An `HttpOnly` session cookie was rejected.
+**Consequence.** Five things, and the first is why the choice was forced.
+- **The deployment is plain HTTP on a tailnet IP, from several devices.** A
+  `Secure` cookie is *silently dropped* there: login appears to succeed and every
+  later request 401s with no error anywhere. Dropping `Secure` puts a
+  whole-API credential in cleartext across the tailnet, attached automatically to
+  every request the browser can be induced to make. A signature needs no
+  per-device setup — any device holding the token gets working URLs from its
+  first `GET /api/jobs/{id}`.
+- **The rule that the credential never travels in a URL still holds.** A
+  signature is not the credential: it opens one file, expires, and cannot be
+  reversed into the token. A leaked media URL reads one mp4 for a few hours; a
+  leaked cookie is the whole API, `POST /api/shutdown` included.
+- **Scoped by what the signature attests, not by route**, because
+  `test_every_router_requires_a_token` is an AST guard that every router keeps
+  its `dependencies=`. Three conditions must hold: the path is under
+  `/api/outputs/`, the route has **both** a `job_id` and a `filename` path
+  parameter, and the HMAC verifies with `exp` in the future. That second
+  condition is what keeps `GET /api/outputs/{job_id}` — the directory listing —
+  private, so its existing 401 assertion needed no change at all.
+- **`exp` is quantised into buckets of TTL/2.** With `now + ttl` every response
+  would mint a different URL for the same file, and handing a `<video>` a new
+  `src` tears down playback and discards the cached bytes — and the dashboard
+  re-fetches the job on every re-render. Bucketing makes the URL byte-identical
+  inside the window, and makes the tests deterministic without freezing a clock.
+- **Signed at serialization, never persisted.** `outputs/jobs.json` keeps
+  unsigned URLs, so no stored record carries an expiry that outlives it, and
+  holding a valid token is exactly what mints a playable URL. The new
+  `thumbnail_url`/`srt_url` are likewise *derived on read* from the manifest blob,
+  so the seven clips already on disk work with zero writes and no migration.
+- **Rejected:** fetching the mp4 in JS with the header and feeding `<video>` a
+  blob URL. It needs no backend change, and that is its only virtue: the whole
+  file must be in memory before the first frame, `Range`/seeking is destroyed,
+  and a 7-clip grid would buffer every clip on page load.
+
+## DEC-049 — A font is validated by the family it declares, not by its file size
+**Context.** Every clip rendered on 2026-09-21 burned its subtitles in
+DejaVuSans under a log line saying `✅ All fonts prepared successfully`. Not a
+`fontsdir` problem — all four burn sites pass it and it works. The configured URL
+(`cdn.jsdelivr.net/fontsource/fonts/montserrat@latest/latin-400-normal.ttf`)
+serves a 48832-byte face whose name table says **Montserrat Thin**, so libass
+found no family `Montserrat` and fontconfig substituted. Every *other* fontsource
+URL in the table is fine, so nothing about it invited suspicion.
+**Decision.** Point Montserrat at the upstream JulietaUla project (the source the
+DEFAULT style already used), and check the declared family — not just the file
+size — both when accepting a cached file and after a download.
+**Consequence.**
+- **The URL fix alone would have changed nothing.** The gate was
+  `getsize(path) > 1000`, so a wrong-but-large font is valid forever, and
+  `custom_fonts/` is bind-mounted — "already cached" is the normal case on every
+  machine. Checking the family is what makes the stale file get replaced.
+- **PIL made this nearly inert, and a failing test caught it.**
+  `ImageFont.truetype(PATH, size)` falls back to searching the *system* font
+  directories for a file of the same basename when the path will not load — and
+  `register_fonts_for_libass` copies these very fonts into
+  `~/.local/share/fonts`. A file of pure garbage therefore reported family
+  "Montserrat Thin", read from the stale installed copy. `font_family_name` opens
+  the file and passes PIL the handle. A validator that can silently inspect a
+  different file than the one asked about is worse than none.
+- **The damage was wider than the glyphs.** PIL loads the same file *by path* in
+  `clipping/studio/subtitles.py` to measure line wrapping and `\pos` centering,
+  where family names never apply and nothing substitutes. Every `.ass` carried
+  hairline-Thin metrics while libass drew DejaVu.
+- **It fails loudly now.** `siapkan_font_tipografi` raises and names both the
+  declared and the wanted family, rather than printing success.

@@ -111,3 +111,12 @@ A-015 (platform presets) are all now **confirmed by a live run**: the analysis
 produced French titles with English tags from a French video, and three clips
 inside the tiktok window. A-016 (the full image stays the default) is unchanged
 and untested — Stage 11 is where it would be.
+- **A-017** — A 12-hour media-URL TTL is long enough that expiry-mid-playback is
+  a tab left open overnight, and short enough that a URL pasted into a chat stops
+  working the same day. Both halves are judgement, not measurement. The
+  `onError` handler in JobDetail.jsx re-fetches once, so the overnight case
+  recovers rather than stalling; `MEDIA_URL_TTL` moves it. UNCONFIRMED.
+- **A-018** — Nobody relies on `/api/outputs/{id}/{file}` answering with
+  `Content-Disposition: attachment` by default. It now answers `inline` unless
+  `?download=1` is given. Only the dashboard and `docs/studio/` consume it, and
+  `docs/studio/` cannot authenticate against this API at all. UNCONFIRMED.

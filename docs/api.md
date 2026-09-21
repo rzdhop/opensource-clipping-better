@@ -4,6 +4,22 @@ Every route needs the API token except `GET /api/health`. Pass it as
 `Authorization: Bearer <token>` or `X-API-Key: <token>`. See
 [deploy-tailscale.md](deploy-tailscale.md) for where the token comes from.
 
+**The one exception: media URLs inside a job response.** A `<video src>` and an
+`<a href download>` are requests the *browser* makes, so they cannot carry a
+header — which is why, before this existed, the dashboard's player showed
+nothing and its Download button saved the 401's JSON body under a `.json`
+extension. The `download_url`, `thumbnail_url` and `srt_url` returned by
+`GET /api/jobs/{id}` therefore arrive carrying `?exp=…&sig=…` and may be
+fetched with no header at all.
+
+That is not the token in a URL, and the rule against putting it there still
+holds. The signature is an HMAC over one `(job_id, filename, exp)` triple keyed
+by a value *derived* from the token: it opens exactly that one file, expires
+(12 h by default, `MEDIA_URL_TTL`), cannot be reversed into the token, and is
+refused on every other path — including `GET /api/outputs/{id}`, the directory
+listing, which stays header-only. Holding a valid token is what mints these
+URLs, because they are generated when a job is serialized.
+
 Interactive docs are at `/docs` on the running server.
 
 ## The short version
@@ -47,8 +63,8 @@ python tools/rzclips-fetch.py --url "https://..." --server $BASE --token $API_TO
 | `GET` | `/api/jobs/{id}/status` | Server-Sent Events: progress and log lines. |
 | `POST` | `/api/jobs/{id}/source` | Attach a video to a job in `needs_upload`. |
 | `DELETE` | `/api/jobs/{id}` | Cancel if running, then delete. |
-| `GET` | `/api/outputs/{id}` | List a job's output files. |
-| `GET` | `/api/outputs/{id}/{file}` | Download one, including `.srt`. |
+| `GET` | `/api/outputs/{id}` | List a job's output files. Header-only; a media signature never opens it. |
+| `GET` | `/api/outputs/{id}/{file}` | Serve one, including `.srt`. Served `inline` so a `<video>` or `poster` can use it; add `?download=1` for `Content-Disposition: attachment`. Accepts a header **or** an `?exp=&sig=` pair. Range requests are supported, so seeking works. |
 | `GET`/`PUT` | `/api/settings` | API keys (write-only) and defaults. |
 
 ## Creating a job

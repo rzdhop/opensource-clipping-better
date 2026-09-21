@@ -1,5 +1,112 @@
 # CHECKPOINT
 
+## In progress
+- **Task:** The clips rendered but the app could not show them; then land
+  everything on `main`. **COMPLETE through Stage 9.** Remaining: Stage 10
+  (docs/artifacts — this file) and the fast-forward of `main`.
+  Plan: `/home/ubuntu/.claude/plans/i-want-the-code-breezy-starlight.md`
+- **Phase:** DOCUMENT. **Next action:** commit the artifacts, then
+  `git checkout main && git merge --ff-only feature/rzdhop-clips-rearchitecture
+  && git push origin main`.
+- **Open questions:** none.
+- **Branch:** `feature/rzdhop-clips-rearchitecture`.
+- **Checkpoint commit:** `233b860` (pre-task). Tier-1 there: **1008 passed**.
+- **Tier-1 now:** pytest **1176 passed, 0 failed**. +168: 46 came from
+  `origin/main` in the merge, 122 are new here.
+- **Tier-2 (E2E browser suite):** NOT run — the human has not been asked yet,
+  and this host cannot build the dashboard in place (see the blocker below).
+  **The task is not closed until they acknowledge that deferral.**
+
+### What was wrong, in one paragraph
+`c53949b` put `Depends(require_token)` on the whole files router and the token
+is header-only by design, but `<video src>` and `<a href download>` are requests
+the BROWSER makes and cannot carry a header. All three reported symptoms were
+one `401 {"detail": ...}`: the player got it instead of video, the `download`
+attribute saved that JSON body and the browser renamed it `.json`, and a pasted
+URL got it too. The clips were never the problem. Fixed by signed, expiring,
+per-file URLs (DEC-048).
+
+### Stages, all committed
+| # | Commit | What |
+|---|---|---|
+| 0 | `0b4ff43` | checkpoint + regression contract |
+| 1 | `5ac08b9` | merge `origin/main`, both provider paths kept (DEC-046/047) |
+| 2 | `114cef3` | HMAC sign/verify/mint helpers in `web/api/auth.py` |
+| 3 | `87477f4` | `require_token` accepts a media signature — **riskiest**, mutation-tested |
+| 4 | `17750e7` | inline vs `?download=1`; Range asserted live |
+| 5 | `516305b` | `thumbnail_url` + `srt_url`, derived on read |
+| 6 | `b19672f` | URLs signed at serialization — **the fix** |
+| 7 | `2fb25b1` | dashboard: poster, `.srt` button, expiry recovery |
+| 8 | `a383fa4` | the subtitle font was DejaVuSans on every clip (DEC-049) |
+| 9 | `9bfa0ff` | stop fetching the private glitch video |
+
+### Verified end to end, against the human's real job `2773bd83c7b6`
+All 7 clips: `.mp4` + `.jpg` + `.srt` fetched over HTTP with **no headers at
+all**, 206 on a Range request, `?download=1` giving `attachment` with the right
+filename, two consecutive reads returning byte-identical URLs, the token
+appearing nowhere in the response, the same URL stripped of its signature still
+`401 application/json` (the exact response that was being saved as `.json`),
+that signature on `/api/jobs` and `/api/shutdown` still 401, and
+`outputs/jobs.json` never written. The font fix was proved with a real libass
+burn: `fontselect: (Montserrat, 400, 0) -> Montserrat-Regular`, where the
+human's run said `-> DejaVuSans.ttf`.
+
+### ⚠️ Blocker the human must clear once, before building the dashboard
+`web/dashboard/node_modules` and `web/dashboard/dist` are both **empty
+root-owned directories** — mount points docker created — so `npm ci` dies with
+EACCES. Unrelated to this task, but it blocks the documented build step:
+
+```
+sudo rm -rf web/dashboard/node_modules web/dashboard/dist
+```
+
+The Docker build is unaffected (`.dockerignore` excludes both). The JSX in this
+task was verified by copying `web/dashboard/` to a scratch dir and building
+there: vite 6.4.3, 48 modules, clean.
+
+### Deploying this
+```
+docker compose rm -sfv backend && docker compose up -d --build backend
+```
+`rm -sfv`, **not** `docker compose down -v`: the latter also deletes the
+`caddy_data`/`caddy_config` volumes and any issued TLS certificates. The `-v`
+matters — the anonymous volume at `/app/web/dashboard/dist` survives
+`up --build`, so a rebuilt image otherwise keeps serving the old bundle and the
+fix looks like it did nothing.
+
+### Regression contract for this task — all green
+| # | Must keep working | Proven by |
+|---|---|---|
+| MC-1 | Every non-media route still refuses an unauthenticated request | `tests/test_auth_token.py`, green unchanged |
+| MC-2 | A media signature is not a general credential | a valid clip signature on `/api/jobs`, `/api/settings`, `/api/upload`, `/api/shutdown` → 401 |
+| MC-3 | The outputs listing stays private | `GET /api/outputs/{job}` has no `filename` param, so no signature can reach it |
+| MC-4 | The traversal guard still refuses | `tests/test_auth_token.py:309-360` plus a signed-escape test |
+| MC-5 | The manifest/worker contract stays exact | `tests/test_manifest_fields.py` — `srt_path` added to the literal, not worked around |
+| MC-6 | The dashboard mount stays last | `test_the_dashboard_mount_is_the_last_route_registered` |
+| MC-7 | The token never travels in a URL | `test_the_token_never_travels_in_a_query_string`, plus `test_the_token_is_not_in_the_url` |
+| MC-8 | `outputs/jobs.json` is never rewritten | derived on read; mtime unchanged after a live read |
+
+### Follow-ups deliberately not done
+- **`docs/studio/`** — the stale GitHub Pages client. Its `api.js` has no token
+  support and uses `EventSource`, which cannot send headers, so it is already
+  wholly non-functional against a token-gated API. Retire it, or give it a token
+  field and a `fetch`-based stream. Not a media-playback fix.
+- **`web/api/settings_store.PERSISTED_KEYS` has no UI for `GROQ_API_KEY`,
+  `OPENROUTER_API_KEY`, `MISTRAL_API_KEY` or `LLM_CUSTOM_*`.** The Settings page
+  covers Google, NVIDIA, Pexels, HF and the `openai_compat` trio only, so four of
+  the chain's providers can be configured by `.env` alone.
+- **Stage 11 of the previous task** (retiring the legacy analysis path) is still
+  deliberately undone, and is now *more* entangled: `openai_compat` joined that
+  path in the merge.
+
+---
+
+## History below this line
+
+Everything that follows is closed work, including the banner and sections
+that arrived from `origin/main` in the 2026-09-21 merge. Read it for
+context, not for what to do next.
+
 > **Two streams of work were merged on 2026-09-21.** Both are complete. One made
 > the analysis provider pluggable and reworked the job-creation UI; the other
 > fixed the NVIDIA retry behaviour, capped the time budget and persisted the
@@ -40,60 +147,6 @@ S7 introduces (split-screen and its trigger), so two commits on the same file
 could not have been reverted independently — the only reason to split them.
 
 ### Verified against a running stack (not just unit tests)
-
-## In progress
-- **Task:** The clips render but the app cannot show them — the media viewer
-  plays nothing, Download saves a `.json`, direct URLs say "file not available".
-  Then land everything on `main`.
-  Plan approved by the human:
-  `/home/ubuntu/.claude/plans/i-want-the-code-breezy-starlight.md` (11 stages;
-  read it before resuming — it carries the root cause and the design).
-- **Phase:** CHECKPOINT done → next is Stage 1 (merge `origin/main`).
-- **Current stage:** Stage 0 complete. **Next action:** `git merge origin/main`,
-  resolve 11 conflicts with this branch winning every genuine clash.
-- **Open questions:** none. The human answered all three: merge and keep both
-  (this branch wins conflicts); access is **tailnet, plain HTTP, several
-  devices**; and all three adjacent log defects are in scope (font, thumbnails
-  + `.srt`, dead glitch URL).
-- **Root cause of the reported bug:** `c53949b` put `Depends(require_token)` on
-  the whole files router (`web/api/routes/files.py:15`) and the token is
-  deliberately header-only (`web/api/auth.py:88-105`). But
-  `JobDetail.jsx:312` (`<video src>`) and `:321` (`<a href download>`) are
-  browser requests, which cannot carry a header. Both get
-  `401 {"detail":"Missing or invalid API token."}`; because that body is
-  `application/json`, the `download` attribute saves it and the browser
-  rewrites the extension. **That JSON file IS the 401.** The clips on disk are
-  correct — job `2773bd83c7b6` has 7 `.mp4` + 7 `.srt` + 7 `.jpg`.
-- **Fix chosen:** HMAC-signed, expiring, per-file media URLs
-  (`?exp=&sig=`), accepted without a header. A session cookie was rejected
-  because the deployment is plain HTTP on a tailnet IP, where a `Secure`
-  cookie is **silently dropped** — login would appear to work and then 401
-  everything with no error anywhere. See DEC-025.
-- **Branch:** `feature/rzdhop-clips-rearchitecture`.
-- **Checkpoint commit:** `233b860` — clean tree. Roll back here.
-- **Tier-1 baseline at `233b860`:** pytest **1008 passed, 0 failed** (5.3s).
-  Run with `PYTHONPYCACHEPREFIX` set — see the root `__pycache__` note below.
-- **Where main stands:** local `main` is stale at `f8ad8b4` (the merge-base).
-  `origin/main` is `d5c502a`, 13 commits past it (persistent Settings, the
-  `openai_compat` provider, the reasoning-model JSON rescue); this branch is 16
-  past it. They conflict in 11 files.
-- **One merge hunk checked because it looked like a trap and is not:**
-  `NVIDIA_MODEL`. `origin/main` moved it to `nvidia/nemotron-3-super-120b-a12b`
-  after two DeepSeek models died; this branch has `google/gemma-4-31b-it`,
-  which is what the human's 18:12 run on 2026-09-21 actually succeeded with
-  (7 clips). Branch wins, and it is the better value, not a regression.
-
-### Regression contract for this task
-| # | Must keep working | Proven by |
-|---|---|---|
-| MC-1 | Every non-media route still refuses an unauthenticated request | `tests/test_auth_token.py` green **unchanged**, incl. `POST /api/shutdown`, `/api/jobs`, `/api/settings`, `/api/upload` |
-| MC-2 | A media signature is not a general credential | new negative battery: a valid clip signature pasted onto `/api/jobs`, `/api/settings`, `/api/upload`, `/api/shutdown` still 401s |
-| MC-3 | The outputs directory listing stays private | `tests/test_auth_token.py:271` (`GET /api/outputs/somejob` → 401) stays valid **by construction**: it has no `filename` path param, so it cannot satisfy the signature path |
-| MC-4 | The traversal guard still refuses | `tests/test_auth_token.py:309-360`; plus a new test that a valid signature does not let a traversal attempt through |
-| MC-5 | The manifest/worker contract stays exact | `tests/test_manifest_fields.py` |
-| MC-6 | The dashboard mount stays the last route | `test_the_dashboard_mount_is_the_last_route_registered` |
-| MC-7 | The token never travels in a URL | `test_the_token_never_travels_in_a_query_string`, plus a new sibling: a minted media URL never contains the token as a substring |
-| MC-8 | `outputs/jobs.json` is never rewritten by this change | new fields are derived on read; verified by mtime |
 
 ## Previous task (closed — rearchitecture stages 1-10)
 - **Task:** Job `756c7ee8a2c3` burned 2h22m and produced nothing. **COMPLETE** — 5 stages, last `c68eb3d`, plus `e5f473d`/`f8ad8b4` CI fixes.

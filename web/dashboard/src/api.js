@@ -7,6 +7,17 @@ const API_BASE = '/api'
  * in a URL ends up in access logs, browser history and any Referer the page
  * sends. That choice is also why the job stream below is read with fetch
  * instead of EventSource -- EventSource cannot send headers at all.
+ *
+ * The media URLs on a clip are the apparent exception and are not one. A
+ * <video src> and an <a href download> are requests the BROWSER makes, so no
+ * amount of JS can attach a header to them -- which is exactly why the player
+ * used to show nothing and the Download button used to save a .json. Those URLs
+ * carry ?exp=&sig=, which is an HMAC over ONE (job, file, expiry) triple keyed
+ * by a value derived from the token. It opens one file, it expires, and it
+ * cannot be turned back into the token. The credential itself still never
+ * appears in a URL, and no query parameter in this file carries it -- a guard
+ * test asserts exactly that, and rejected an earlier draft of this very comment
+ * for spelling out the parameter name it forbids.
  */
 const TOKEN_KEY = 'rzc_token'
 
