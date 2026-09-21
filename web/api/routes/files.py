@@ -145,8 +145,18 @@ def resolve_output_path(job_id, filename=None):
 
 
 @router.get("/api/outputs/{job_id}/{filename}")
-async def serve_output(job_id: str, filename: str):
-    """Serve a rendered clip or other output file."""
+async def serve_output(job_id: str, filename: str, download: bool = False):
+    """Serve a rendered clip or other output file.
+
+    One endpoint, two dispositions. A ``<video src>`` and a ``poster`` need
+    ``inline``; the Download button needs ``attachment`` so the browser saves
+    rather than navigates. ``?download=1`` picks the second.
+
+    ``download`` is deliberately NOT part of the signed payload: it selects one
+    response header and confers no additional access, so signing it would force
+    two minted URLs per file for no security gain. tests/test_clip_serving.py
+    pins that as a property rather than leaving it to look like an oversight.
+    """
     file_path = resolve_output_path(job_id, filename)
     if not os.path.isfile(file_path):
         raise HTTPException(status_code=404, detail="File not found")
@@ -167,10 +177,19 @@ async def serve_output(job_id: str, filename: str):
     }
     media_type = media_types.get(ext, "application/octet-stream")
 
+    # Starlette's FileResponse defaults to content_disposition_type="attachment",
+    # which is why a pasted clip URL downloaded a file instead of playing it.
+    # `filename` is kept in both cases so an attachment still saves under its own
+    # name rather than as a bare job id.
+    #
+    # Range support needs no code here: FileResponse sets accept-ranges, answers
+    # 206 with Content-Range, honours If-Range and answers 416 on an unsatisfiable
+    # range (starlette 1.3.1). Seeking a clip therefore already works.
     return FileResponse(
         file_path,
         media_type=media_type,
         filename=filename,
+        content_disposition_type="attachment" if download else "inline",
     )
 
 
