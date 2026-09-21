@@ -27,6 +27,10 @@ metadata_preview.json
 
 # Secrets
 .env
+# Written by web/api/settings_store.py: the API keys entered on the
+# dashboard Settings page. .local/ is listed again below as a cache dir --
+# it is repeated here because THIS is the reason it must never be committed.
+.local/settings.json
 credentials.json
 youtube_token.json
 .credentials/

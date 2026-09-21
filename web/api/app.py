@@ -22,6 +22,15 @@ from .routes import jobs, files, settings
 async def lifespan(app: FastAPI):
     """Application startup/shutdown lifecycle."""
     print("🚀 OpenSource Clipping Studio — Backend starting...")
+
+    # Restore whatever was saved from the Settings page. Keys entered there used
+    # to vanish on every restart.
+    from . import settings_store, worker
+
+    restored = worker.load_settings_env()
+    if restored:
+        print(f"🔐 Restored {restored} saved setting(s) from {settings_store.settings_path()}")
+
     yield
     print("👋 Backend shutting down...")
 

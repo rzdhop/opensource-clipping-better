@@ -1,5 +1,26 @@
 # CHECKPOINT
 
+## In progress — provider settings, job guidance, render options
+- **Task:** Add a generic OpenAI-compatible analysis provider, persist the Settings
+  page values, add provider guidance + warnings to New Job, and expose the
+  render-quality options. Plan approved 2026-09-21.
+- **Phase:** IMPLEMENT
+- **Current stage:** S3 (generic provider in engine + CLI) — S1, S2 done
+- **Next action:** extract the NVIDIA analysis body into a shared OpenAI-compatible core, then add the `openai_compat` provider
+- **Open questions:** none. The four CLARIFY questions were answered: one generic
+  `openai_compat` provider (not named Groq/Mistral/xAI), persist settings to a
+  git-ignored JSON file, preset + Advanced section on New Job, `docs/studio` static
+  UI out of scope.
+- **Checkpoint commit:** `5bdd31c` (clean tree apart from untracked
+  `web/dashboard/package-lock.json`, which stays unstaged).
+- **Tier-1 baseline at `5bdd31c`:** 254 passed; compileall green; `main.py --help` green.
+
+### Stage list
+S1 stale settings defaults · S2 persist settings to `.local/settings.json` ·
+S3 generic provider in engine + CLI (riskiest) · S4 web API surface ·
+S5 Settings page card · S6 New Job banner + warnings · S7 New Job preset +
+Advanced + dead-toggle removal · S8 env samples, compose, README, records.
+
 ## In progress
 - **Task:** Make the app actually work end to end (upload, Whisper, live AI).
 - **Phase:** IMPLEMENT / verified. Docker container verification still pending.
