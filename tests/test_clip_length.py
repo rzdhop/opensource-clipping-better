@@ -36,16 +36,27 @@ def test_the_page_offers_every_preset_the_pipeline_knows():
 
 
 def test_the_default_is_still_auto():
-    """Adding the control must not silently re-cut everyone's clips."""
+    """Adding the control must not silently re-cut everyone's clips.
+
+    JobCreateRequest is read as TEXT rather than imported: importing it pulls in
+    pydantic, which CI does not install (DEC-012), and an importorskip would mean
+    this never runs on a push.
+    """
     from clipping.analysis.presets import DEFAULT_PRESET
-    from web.api.models import JobCreateRequest
 
     assert DEFAULT_PRESET == "auto"
-    assert JobCreateRequest.model_fields["platform"].default.value == "auto"
+
+    models = (PROJECT_ROOT / "web" / "api" / "models.py").read_text(encoding="utf-8")
+    assert "platform: Platform = Platform.AUTO" in models
+    assert '    AUTO = "auto"' in models
+
     assert "const [platform, setPlatform] = useState('auto')" in new_job_source()
 
 
 def test_the_api_carries_platform_through_to_the_pipeline():
+    import pytest
+
+    pytest.importorskip("pydantic")  # config_adapter imports the models
     from web.api.config_adapter import build_config_from_payload
 
     cfg = build_config_from_payload({"platform": "long"}, "jobid", env_overrides={})

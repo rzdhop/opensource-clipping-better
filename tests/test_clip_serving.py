@@ -201,6 +201,11 @@ def persisted_clip(**overrides):
 
 
 def derive(record):
+    # These five exercise the real ClipDetail, so they need pydantic, which CI
+    # does not install (DEC-012). Skipped there, like every other test in this
+    # file that touches the app.
+    pytest.importorskip("pydantic")
+    pytest.importorskip("fastapi")
     from web.api.models import ClipDetail
     from web.api.routes.jobs import _derive_missing_urls
 

@@ -99,12 +99,19 @@ def test_the_generated_frame_is_visibly_not_black(tmp_path):
 
 def test_the_transition_is_opt_in_everywhere():
     """One default in five places. A mismatch means the dashboard and the CLI
-    disagree about what a job with no explicit setting does."""
+    disagree about what a job with no explicit setting does.
+
+    JobCreateRequest is read as TEXT rather than imported. Importing it pulls in
+    pydantic, which CI does not install (DEC-012), so an importorskip here would
+    mean this guard never runs in the one place that checks every push -- and a
+    drifted default is exactly the kind of thing that survives on a dev box.
+    """
     from clipping import config
-    from web.api.models import JobCreateRequest
 
     assert config.USE_HOOK_GLITCH is False
-    assert JobCreateRequest.model_fields["use_hook_glitch"].default is False
+
+    models = (PROJECT_ROOT / "web" / "api" / "models.py").read_text(encoding="utf-8")
+    assert "use_hook_glitch: bool = False" in models
 
     adapter = (PROJECT_ROOT / "web" / "api" / "config_adapter.py").read_text(encoding="utf-8")
     assert 'payload.get("use_hook_glitch", False)' in adapter

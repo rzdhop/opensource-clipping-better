@@ -42,6 +42,27 @@ out 22–41s. Same class of gap as the provider select that could not reach
 `chain`. A Clip Length select now sends it; **default stays `auto`** so nothing
 is silently re-cut.
 
+### ⚠️ Run the CI suite, not just the local one, before pushing
+CI is `pip install pytest` and nothing else (DEC-012). A test that reaches
+`web.api.models` without a guard passes here and fails on every push. **101
+tests skip in that environment**, so a green local run proves less than it
+looks. Reproduce it exactly:
+
+```
+pip install --target /tmp/cilibs pytest
+PYTHONNOUSERSITE=1 PYTHONPATH=/tmp/cilibs python3 -m pytest -q
+```
+
+`PYTHONNOUSERSITE=1` is the load-bearing half: it hides `~/.local`, where
+pydantic, fastapi, httpx and cv2 live on this box. Expect
+**1069 passed, 101 skipped, 0 failed**.
+
+Two ways to handle a test that needs a heavy import, and the choice matters:
+`pytest.importorskip(...)` when the test genuinely exercises the object, but
+**read the source as text** when the test is a guard against drift — an
+importorskip on a guard means it never runs in the one place that checks every
+push.
+
 ### Still true from the previous task
 - `sudo chown -R "$(id -u):$(id -g)" data` on any older clone, or the API token
   changes every restart and settings silently fail to save. Fixed at the source
