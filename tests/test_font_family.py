@@ -184,3 +184,31 @@ def test_the_validator_reads_the_file_it_is_given_not_a_system_copy(tmp_path, mo
     # THIS file must be "unreadable".
     assert fonts.font_family_name(str(garbage)) is None
     assert fonts.font_file_declares(str(garbage), "Montserrat") is False
+
+
+# ------------------------------------------------------- the dead glitch source
+
+def test_the_glitch_source_is_not_a_private_youtube_video():
+    """Every run logged `Glitch download failed: [youtube] 5nBcNRYmjs0: Private
+    video` before falling back to the lavfi generator. Nothing broke, but a
+    yt-dlp attempt was spent on it each time and the warning looked like a real
+    failure in an otherwise clean log."""
+    from clipping import config
+
+    assert "5nBcNRYmjs0" not in (config.URL_GLITCH_VIDEO or "")
+
+
+def test_an_empty_glitch_url_means_generate_locally():
+    """siapkan_glitch_video already branches on a falsy url_glitch_video and says
+    so, so emptying it needs no new code path -- read from source, because
+    clipping/studio/effects.py imports cv2."""
+    import pathlib
+
+    source = (
+        pathlib.Path(__file__).resolve().parents[1]
+        / "clipping" / "studio" / "effects.py"
+    ).read_text(encoding="utf-8")
+
+    assert 'url_glitch = getattr(cfg, "url_glitch_video", None)' in source
+    assert "if url_glitch:" in source
+    assert "generating glitch locally" in source

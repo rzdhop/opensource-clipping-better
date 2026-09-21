@@ -137,7 +137,14 @@ URL_FONT_THUMBNAIL = (
     "https://github.com/JulietaUla/Montserrat/raw/master/fonts/ttf/Montserrat-Black.ttf"
 )
 
-URL_GLITCH_VIDEO = "https://www.youtube.com/watch?v=5nBcNRYmjs0"
+# Empty on purpose: the FFmpeg lavfi generator in clipping/studio/effects.py is
+# the intended path. The video that used to be pinned here
+# (youtube.com/watch?v=5nBcNRYmjs0) went private, so EVERY run spent a yt-dlp
+# attempt on it, printed "⚠️ Glitch download failed: Private video", and then
+# generated the transition locally anyway -- which is what it does now without
+# the detour or the alarming line. Set this to any URL yt-dlp can fetch to use a
+# real clip instead; siapkan_glitch_video already handles both cases.
+URL_GLITCH_VIDEO = ""
 URL_MEDIAPIPE_MODEL = "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_full_range/float16/latest/blaze_face_full_range.tflite"
 
 # 5. Auto-BGM & Audio Ducking SETTINGS
