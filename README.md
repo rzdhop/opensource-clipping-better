@@ -297,7 +297,7 @@ python main.py --video talk.mp4 --transcript talk.vtt --hook-source "DRIVE_URL_O
 python main.py --video talk.mp4 --transcript talk.vtt --render-height source --video-sharpen
 
 # Use NVIDIA NIM (DeepSeek-V3) instead of Gemini
-python main.py --video talk.mp4 --transcript talk.vtt --ai-provider nvidia --nvidia-model "deepseek-ai/deepseek-v4-flash-0731"
+python main.py --video talk.mp4 --transcript talk.vtt --ai-provider nvidia --nvidia-model "nvidia/nemotron-3-super-120b-a12b"
 
 # Square output for Instagram Feed (1:1)
 python main.py --video talk.mp4 --transcript talk.vtt --ratio "1:1" --clips 5
@@ -333,7 +333,7 @@ python main.py --help
 | `--ai-provider` | `nvidia` | AI provider for analysis (`nvidia`, `gemini` or `openai_compat`). |
 | `--openai-compat-base-url` | `$OPENAI_COMPAT_BASE_URL` | Base URL of a custom OpenAI-compatible endpoint, including the version path. |
 | `--openai-compat-model` | `$OPENAI_COMPAT_MODEL` | Model id that endpoint expects. |
-| `--nvidia-model` | `deepseek-ai/deepseek-v4-flash-0731` | Model for NVIDIA NIM. Models are retired periodically; list current ones at `https://integrate.api.nvidia.com/v1/models`. |
+| `--nvidia-model` | `nvidia/nemotron-3-super-120b-a12b` | Model for NVIDIA NIM. Models are retired periodically; list current ones at `https://integrate.api.nvidia.com/v1/models`. |
 | `--render-height` | `1080` | Target render output height (`1080`, `1440`, `2160`, `source`) |
 | `--video-bitrate` | `auto` | Target video bitrate (e.g. 8M, 12M, auto). 'auto' scales based on resolution. |
 | `--video-sharpen` | — | Apply a subtle sharpening filter for clearer output. |

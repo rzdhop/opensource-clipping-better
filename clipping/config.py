@@ -156,11 +156,14 @@ RENDER_OUTPUT_HEIGHT = 1080
 # NVIDIA NIM is the default provider: open-weights models, free tier, and an
 # OpenAI-compatible endpoint. Gemini stays available via --ai-provider gemini.
 AI_PROVIDER = "nvidia"
-# deepseek-v4-pro reached end of life on 2026-08-07 and now returns 410.
-# This is its live same-family successor, so metadata.py's DeepSeek output
-# fixup still applies. Check https://integrate.api.nvidia.com/v1/models
-# if this one is ever retired too.
-NVIDIA_MODEL = "deepseek-ai/deepseek-v4-flash-0731"
+# Third model in this slot: deepseek-v4-pro died 2026-08-07, its successor
+# deepseek-v4-flash-0731 died 2026-09-21, and the DeepSeek chat family is no
+# longer on the platform at all. This one is NVIDIA's own current generation,
+# on NVIDIA's own endpoint, which is the least likely thing here to be retired
+# out from under us. Verified live: 3 clips, every schema field populated, ~62s.
+# When it does go, list what is live at https://integrate.api.nvidia.com/v1/models
+# -- and note that a model can be LISTED yet still 404 for your account.
+NVIDIA_MODEL = "nvidia/nemotron-3-super-120b-a12b"
 GEMINI_MODEL = "gemini-3-flash-preview"
 GEMINI_FALLBACK_MODEL = "gemini-2.5-flash"
 

@@ -203,7 +203,7 @@ def test_default_provider_is_nvidia(video):
     assert cfg.ai_provider == "nvidia"
     # Pinned so a model retirement shows up as a test failure, not a 410 in
     # production. deepseek-v4-pro died on 2026-08-07 exactly this way.
-    assert cfg.nvidia_model == "deepseek-ai/deepseek-v4-flash-0731"
+    assert cfg.nvidia_model == "nvidia/nemotron-3-super-120b-a12b"
 
 
 def test_provider_can_be_overridden(video):

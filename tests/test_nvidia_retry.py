@@ -61,7 +61,7 @@ def cfg():
         api_key_nvidia="test-key",
         api_key_gemini="",
         ai_provider="nvidia",
-        nvidia_model="deepseek-ai/deepseek-v4-flash-0731",
+        nvidia_model="nvidia/nemotron-3-super-120b-a12b",
         jumlah_clip=3,
         durasi_hook=3,
         hook_v2=False,
@@ -530,3 +530,53 @@ def test_unknown_provider_lists_all_three_choices(cfg):
 
     with pytest.raises(ValueError, match="openai_compat"):
         engine.analyze_with_ai("transcript", cfg)
+
+
+# --------------------------------------------- salvaging a reasoning model's reply
+#
+# Observed live, from a reasoning model asked for a strict json_schema array via
+# a custom OpenAI-compatible endpoint: the content began with a bare "[" on its
+# own line, followed by the real array. finish_reason was "stop" and nothing was
+# truncated -- the model had simply leaked a fragment of its own scratchpad.
+# NVIDIA's own path never sees this because it suppresses the reasoning pass with
+# a NIM-only extra_body, but an arbitrary endpoint has no such switch.
+
+LEAKED = '[\n[{"rank": 1, "start_time": 0, "end_time": 8, "title_indonesia": "x"}]'
+
+
+def test_salvages_a_leading_scratchpad_fragment():
+    assert engine._extract_clip_list(LEAKED) == [
+        {"rank": 1, "start_time": 0, "end_time": 8, "title_indonesia": "x"}
+    ]
+
+
+def test_salvage_does_not_disturb_well_formed_content():
+    """The fast path must stay the fast path."""
+    assert engine._extract_clip_list(GOOD_JSON) == [GOOD_CLIP]
+
+
+def test_salvage_ignores_brackets_inside_strings():
+    """A naive regex would cut the span short at the ']' in the title."""
+    raw = 'preamble [{"start_time": 1, "end_time": 2, "title": "a]b}c"}] trailing'
+
+    assert engine._extract_clip_list(raw) == [
+        {"start_time": 1, "end_time": 2, "title": "a]b}c"}
+    ]
+
+
+def test_salvage_finds_an_object_when_there_is_no_array():
+    raw = 'Here you go:\n{"start_time": 1, "end_time": 2}\nhope that helps'
+
+    assert engine._extract_clip_list(raw) == [{"start_time": 1, "end_time": 2}]
+
+
+def test_unsalvageable_content_still_raises_retryably():
+    """Genuine rubbish must stay retryable, not be silently rescued."""
+    with pytest.raises((ValueError, json.JSONDecodeError)):
+        engine._extract_clip_list("the model apologised and returned prose")
+
+
+def test_salvaged_content_still_faces_the_shape_checks():
+    """Salvage must not become a way to smuggle an invalid clip through."""
+    with pytest.raises(ValueError, match="missing required field"):
+        engine._extract_clip_list('[\n[{"rank": 1, "title_indonesia": "no times"}]')

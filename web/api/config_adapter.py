@@ -195,7 +195,7 @@ def build_config_from_payload(
         # AI
         ai_provider=ai_provider,
         api_key_nvidia=env.get("NVIDIA_API_KEY", os.environ.get("NVIDIA_API_KEY", "")),
-        nvidia_model=payload.get("nvidia_model", "deepseek-ai/deepseek-v4-flash-0731"),
+        nvidia_model=payload.get("nvidia_model", "nvidia/nemotron-3-super-120b-a12b"),
         # Custom OpenAI-compatible endpoint. The URL and key are credentials,
         # so they come only from settings/env; the model may be overridden
         # per job, falling back to the saved one.

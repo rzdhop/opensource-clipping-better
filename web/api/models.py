@@ -174,7 +174,7 @@ class JobCreateRequest(BaseModel):
     ai_provider: AIProvider = AIProvider.NVIDIA
     gemini_model: str = "gemini-3-flash-preview"
     gemini_fallback_model: str = "gemini-2.5-flash"
-    nvidia_model: str = "deepseek-ai/deepseek-v4-flash-0731"
+    nvidia_model: str = "nvidia/nemotron-3-super-120b-a12b"
     # Per-job override for the custom endpoint's model. Empty means "use the
     # one saved in Settings". The base URL and key are credentials and live
     # only in Settings, never in a job payload.
