@@ -269,17 +269,78 @@ def media_signature_is_valid(job_id, filename, exp, sig, *, token=None, now=None
     return hmac.compare_digest(str(sig), expected)
 
 
+# Only a path under one of these may ever be opened by a signature instead of a
+# header. Not a route list: the scope comes from the three conditions in
+# signed_media_request_is_valid, all of which must hold.
+SIGNABLE_PREFIXES = ("/api/outputs/",)
+
+
+def signed_media_request_is_valid(request):
+    """Whether *request* carries a signature that attests this exact file.
+
+    Three independent conditions, all required:
+
+    1. the path is under SIGNABLE_PREFIXES;
+    2. the matched route has BOTH a ``job_id`` and a ``filename`` path
+       parameter -- Starlette fills ``path_params`` during routing, before
+       dependencies run;
+    3. the HMAC over that exact (job_id, filename, exp) triple verifies and
+       ``exp`` is still in the future.
+
+    Condition 2 is what keeps this tight, and it is worth spelling out.
+    ``GET /api/outputs/{job_id}`` -- the directory listing -- has no
+    ``filename`` parameter, so no signature can ever open it and it stays 401.
+    A signature minted for a clip, pasted onto ``/api/jobs``, ``/api/settings``,
+    ``/api/upload`` or ``/api/shutdown``, fails all three conditions.
+
+    The ``filename`` half of condition 2 is deliberately redundant with
+    media_signature_is_valid's own emptiness check -- a mutation test confirms
+    removing either one still keeps the listing private. Both are kept so that
+    refactoring one away later cannot quietly open it.
+
+    Never raises. A malformed request is a rejection, not an exception that
+    could escape into a 500 or, worse, into some caller's default of True.
+    """
+    try:
+        if not request.url.path.startswith(SIGNABLE_PREFIXES):
+            return False
+
+        params = request.path_params or {}
+        job_id = params.get("job_id")
+        filename = params.get("filename")
+        if not job_id or not filename:
+            return False
+
+        query = request.query_params
+        return media_signature_is_valid(
+            job_id, filename, query.get("exp"), query.get("sig")
+        )
+    except Exception:  # noqa: BLE001 - fail closed, whatever went wrong
+        return False
+
+
 async def require_token(request: "Request"):
-    """FastAPI dependency: 401 unless a valid token is presented."""
+    """FastAPI dependency: 401 unless a valid token or media signature is given.
+
+    The header is checked first; the signature is only consulted when no valid
+    token was presented, so nothing about the authenticated path changes.
+    """
     from fastapi import HTTPException
 
     if auth_disabled() or is_public(request.url.path):
         return
 
     presented = token_from_request(request.headers)
-    if not token_is_valid(presented, current_token()):
-        raise HTTPException(
-            status_code=401,
-            detail="Missing or invalid API token.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    if token_is_valid(presented, current_token()):
+        return
+
+    # A browser cannot send a header for a <video src> or an <a href download>,
+    # so one signed, expiring, single-file capability is accepted in its place.
+    if signed_media_request_is_valid(request):
+        return
+
+    raise HTTPException(
+        status_code=401,
+        detail="Missing or invalid API token.",
+        headers={"WWW-Authenticate": "Bearer"},
+    )

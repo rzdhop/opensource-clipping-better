@@ -11,7 +11,10 @@ environment; the wiring is checked by AST for the same reason.
 import ast
 import os
 import pathlib
+import re
 import stat
+import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -433,3 +436,120 @@ def test_an_empty_dist_falls_back_instead_of_serving_404s():
     src = (PROJECT_ROOT / "web" / "api" / "app.py").read_text(encoding="utf-8")
     assert 'os.path.isfile(os.path.join(_DIST, "index.html"))' in src
     assert "os.path.isdir(_DIST)" not in src
+
+
+# ---------------------------------- signed media URLs, over HTTP (needs fastapi)
+#
+# The bug these close: a <video src> and an <a href download> are requests the
+# BROWSER makes, so they cannot carry a header, and every /api/outputs/ route was
+# header-gated. The player showed nothing, the Download button saved the 401's
+# JSON body (the browser rewrote the extension to match application/json), and a
+# pasted URL said the file was not available.
+#
+# require_token now also accepts a signature that attests ONE file. These tests
+# exist because a mistake there FAILS OPEN and is silent -- the authenticated
+# path keeps working, so nothing else would tell us.
+
+TEST_TOKEN = "test-token-12345"
+
+
+@pytest.fixture
+def clip(tmp_path, monkeypatch):
+    """A real file under a temporary OUTPUTS_DIR, and its signed URL."""
+    pytest.importorskip("fastapi")
+    from web.api.routes import files as files_route
+
+    job_id = "abc123def456"
+    name = "highlight_rank_1_ready.mp4"
+    job_dir = tmp_path / job_id
+    job_dir.mkdir()
+    (job_dir / name).write_bytes(b"\x00" * 4096)
+
+    monkeypatch.setattr(files_route, "OUTPUTS_DIR", str(tmp_path))
+    monkeypatch.setattr(auth, "_TOKEN", None)
+    monkeypatch.setenv("API_TOKEN", TEST_TOKEN)
+
+    url = auth.media_url(job_id, name, token=TEST_TOKEN)
+    return SimpleNamespace(job_id=job_id, name=name, url=url, dir=job_dir)
+
+
+def test_a_signed_clip_url_needs_no_header_at_all(client, clip):
+    """The fix, stated as one assertion: a browser-shaped request works."""
+    response = client.get(clip.url)
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "video/mp4"
+
+
+def test_the_same_url_without_its_signature_is_still_refused(client, clip):
+    path = clip.url.split("?")[0]
+    assert client.get(path).status_code == 401
+
+
+def test_the_401_body_is_what_used_to_be_downloaded_as_json(client, clip):
+    """Kept as a named test because this response IS the reported symptom: the
+    download attribute saved this body and the browser renamed it to .json."""
+    response = client.get(clip.url.split("?")[0])
+    assert response.status_code == 401
+    assert response.headers["content-type"].startswith("application/json")
+
+
+@pytest.mark.parametrize("method,path", [
+    ("GET", "/api/jobs"),
+    ("GET", "/api/settings"),
+    ("POST", "/api/upload"),
+    ("POST", "/api/shutdown"),
+])
+def test_a_clip_signature_opens_nothing_else(client, clip, method, path):
+    """A media capability must not be a general credential. The query string is
+    reused verbatim on routes that have no business accepting it."""
+    query = clip.url.split("?", 1)[1]
+    assert client.request(method, f"{path}?{query}").status_code == 401
+
+
+def test_a_clip_signature_does_not_open_the_directory_listing(client, clip):
+    """GET /api/outputs/{job_id} has no `filename` path parameter, so it cannot
+    satisfy condition 2 and stays private. This is the invariant that lets
+    test_protected_routes_reject_a_missing_token keep its /api/outputs/somejob
+    case unchanged."""
+    query = clip.url.split("?", 1)[1]
+    assert client.get(f"/api/outputs/{clip.job_id}?{query}").status_code == 401
+
+
+def test_a_signature_for_one_clip_does_not_open_another(client, clip):
+    (clip.dir / "highlight_rank_2_ready.mp4").write_bytes(b"\x00" * 16)
+    query = clip.url.split("?", 1)[1]
+    other = f"/api/outputs/{clip.job_id}/highlight_rank_2_ready.mp4?{query}"
+    assert client.get(other).status_code == 401
+
+
+def test_an_expired_signature_is_refused(client, clip):
+    stale = auth.media_url(
+        clip.job_id, clip.name, token=TEST_TOKEN, now=time.time() - 10 * 86400
+    )
+    assert client.get(stale).status_code == 401
+
+
+def test_a_tampered_expiry_is_refused(client, clip):
+    exp = int(re.search(r"[?&]exp=(\d+)", clip.url).group(1))
+    assert client.get(clip.url.replace(f"exp={exp}", f"exp={exp + 86400}")).status_code == 401
+
+
+def test_a_garbage_signature_is_refused_not_a_500(client, clip):
+    assert client.get(clip.url.split("?")[0] + "?exp=abc&sig=zz").status_code == 401
+
+
+def test_a_signature_does_not_smuggle_a_traversal_through(client, clip, tmp_path):
+    """Signature verification runs BEFORE resolve_output_path, so the path guard
+    must still be the thing that refuses. If a signature could make the guard
+    moot, an attacker who obtained one clip URL could read any file on disk."""
+    secret = tmp_path.parent / "secret.txt"
+    secret.write_text("not yours", encoding="utf-8")
+    escape = f"../{secret.name}"
+    url = auth.media_url(clip.job_id, escape, token=TEST_TOKEN)
+    assert client.get(url).status_code in (400, 404)
+
+
+def test_a_valid_header_still_works_on_a_media_path(client, clip):
+    """The header path is unchanged: the signature is an addition, not a
+    replacement."""
+    assert client.get(clip.url.split("?")[0], headers=BEARER).status_code == 200

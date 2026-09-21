@@ -196,3 +196,85 @@ def test_a_filename_needing_escaping_still_round_trips():
     assert auth.media_signature_is_valid(
         JOB, awkward, exp, sig, token=TOKEN, now=NOW
     ) is True
+
+
+# ------------------------------------------- the three conditions, in isolation
+#
+# signed_media_request_is_valid requires all three to hold. Condition 1 (the path
+# prefix) cannot be exercised over HTTP today, because no route outside
+# /api/outputs/ has both a job_id and a filename path parameter -- it is there so
+# that adding one later cannot silently make signatures valid on it. So it is
+# tested directly, with a stub request. Without this, a mutation that deletes the
+# prefix check passes the whole HTTP suite.
+
+
+class StubURL:
+    def __init__(self, path):
+        self.path = path
+
+
+class StubRequest:
+    """The three attributes signed_media_request_is_valid reads."""
+
+    def __init__(self, path, path_params, query_params):
+        self.url = StubURL(path)
+        self.path_params = path_params
+        self.query_params = query_params
+
+
+def signed_request(path, *, job=JOB, filename=CLIP, params=None):
+    # Minted at the REAL clock, not NOW: signed_media_request_is_valid takes no
+    # `now` argument -- it is the production entry point and compares against
+    # time.time(). NOW is a fixed past instant, so a URL minted at it is expired.
+    url = auth.media_url(job, filename, token=TOKEN)
+    exp, sig = parts(url)
+    return StubRequest(
+        path,
+        params if params is not None else {"job_id": job, "filename": filename},
+        {"exp": str(exp), "sig": sig},
+    )
+
+
+def test_condition_1_the_path_must_be_under_a_signable_prefix(monkeypatch):
+    monkeypatch.setattr(auth, "_TOKEN", TOKEN)
+    good = signed_request(f"/api/outputs/{JOB}/{CLIP}")
+    assert auth.signed_media_request_is_valid(good) is True
+
+    # Same signature, same path params, same query -- only the path differs.
+    for path in ("/api/jobs", "/api/settings", "/api/upload", "/api/shutdown",
+                 "/api/outputs", "/apioutputs/x/y", "/"):
+        bad = signed_request(path)
+        assert auth.signed_media_request_is_valid(bad) is False, path
+
+
+def test_condition_2_both_path_params_are_required(monkeypatch):
+    monkeypatch.setattr(auth, "_TOKEN", TOKEN)
+    path = f"/api/outputs/{JOB}/{CLIP}"
+    for params in ({}, {"job_id": JOB}, {"filename": CLIP},
+                   {"job_id": JOB, "filename": ""}, {"job_id": "", "filename": CLIP}):
+        request = signed_request(path, params=params)
+        assert auth.signed_media_request_is_valid(request) is False, params
+
+
+def test_condition_3_the_signature_must_match_the_path_params(monkeypatch):
+    """The path params are what gets verified, so a signature for clip 1 paired
+    with clip 2's params fails even though the URL looks self-consistent."""
+    monkeypatch.setattr(auth, "_TOKEN", TOKEN)
+    request = signed_request(
+        f"/api/outputs/{JOB}/other.mp4",
+        params={"job_id": JOB, "filename": "other.mp4"},
+    )
+    assert auth.signed_media_request_is_valid(request) is False
+
+
+def test_a_request_that_raises_is_refused_not_propagated(monkeypatch):
+    """Fail closed. An exception escaping into a 500 would be bad; an exception
+    escaping into some caller's default of True would be a hole."""
+    monkeypatch.setattr(auth, "_TOKEN", TOKEN)
+
+    class Exploding:
+        @property
+        def url(self):
+            raise RuntimeError("boom")
+
+    assert auth.signed_media_request_is_valid(Exploding()) is False
