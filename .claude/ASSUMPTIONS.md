@@ -86,3 +86,10 @@ A-007 is closed. The container uid fix is verified against a live daemon
 CUDA-true path — so only `whisper_cuda_available()` against a real CUDA-enabled
 CTranslate2 build remains, which needs a GPU host and nothing less. Diarization /
 split-screen (RC-8) is still unexercised.
+
+## Notes on this round (2026-09-21)
+A-013 (output language follows the transcript), A-014 (clip default stays 7) and
+A-015 (platform presets) are all now **confirmed by a live run**: the analysis
+produced French titles with English tags from a French video, and three clips
+inside the tiktok window. A-016 (the full image stays the default) is unchanged
+and untested — Stage 11 is where it would be.

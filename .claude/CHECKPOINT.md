@@ -24,7 +24,14 @@
   Roll back here.
 - **Tier-1 baseline at `f8ad8b4`:** pytest **369 passed, 0 failed**; `compileall`
   clean. (Needs `PYTHONPYCACHEPREFIX` locally — see the root `__pycache__` note.)
-- **Next action:** Stage 11 — retire the legacy single-request analysis path
+- **STAGE 11 IS DELIBERATELY NOT DONE.** Its gate ("only after a full live job
+  has completed on the new path") is now met — the analysis and the render have
+  both run for real — but it **deletes the rollback**: `--ai-provider nvidia`
+  and `gemini` are what someone falls back to if the chain misbehaves in a way
+  no test covers, and the human has not yet run a single job themselves. It is
+  one commit whenever they want it. Everything it would remove is dead weight,
+  not a dependency: nothing on the new path imports it.
+- **What Stage 11 would do:** retire the legacy single-request analysis path
   from `clipping/engine.py` (`get_analysis_prompt`, `TARGET_ACCOUNTS`,
   `analyze_with_nvidia`, `analyze_with_gemini`) and rewrite
   `tests/test_nvidia_retry.py` against `clipping/providers/llm.py`, preserving
