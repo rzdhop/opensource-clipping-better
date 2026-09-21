@@ -9,11 +9,11 @@ dependencies = [
     "faster-whisper",
     "tqdm",  # the transcription progress bar: clipping/engine.py
     "google-genai",
-    "openai",
+    "openai>=2.24.0,<3",  # OpenAI-compatible client for every provider in clipping/providers/
     "mediapipe",
     "opencv-python",
     "Pillow",
-    "requests",
+    "requests>=2.33.0,<3",
     "python-dotenv",
     "google-api-python-client",
     "google-auth",

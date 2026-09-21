@@ -26,7 +26,7 @@ Complete reference for all command-line arguments. Run `python main.py --help` f
 | `--ai-provider` | `gemini` | AI provider for analysis: `gemini` or `nvidia` |
 | `--gemini-model` | `gemini-3-flash-preview` | Gemini model name |
 | `--gemini-fallback-model` | `gemini-2.5-flash` | Fallback model if main model fails |
-| `--nvidia-model` | `deepseek-ai/deepseek-v4-flash-0731` | Model for NVIDIA NIM API. See `https://integrate.api.nvidia.com/v1/models` |
+| `--nvidia-model` | `google/gemma-4-31b-it` | Model for NVIDIA NIM API. See `https://integrate.api.nvidia.com/v1/models` |
 | `--load-gemini-json` | `False` | Load saved `gemini_response.json` to bypass AI call |
 
 ---

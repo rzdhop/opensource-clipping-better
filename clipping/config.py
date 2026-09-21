@@ -156,13 +156,38 @@ RENDER_OUTPUT_HEIGHT = 1080
 # NVIDIA NIM is the default provider: open-weights models, free tier, and an
 # OpenAI-compatible endpoint. Gemini stays available via --ai-provider gemini.
 AI_PROVIDER = "nvidia"
-# deepseek-v4-pro reached end of life on 2026-08-07 and now returns 410.
-# This is its live same-family successor, so metadata.py's DeepSeek output
-# fixup still applies. Check https://integrate.api.nvidia.com/v1/models
-# if this one is ever retired too.
-NVIDIA_MODEL = "deepseek-ai/deepseek-v4-flash-0731"
+# The third NIM default this project has had, because NVIDIA retires models
+# faster than anyone tracks them: deepseek-v4-pro died 2026-08-07, and
+# deepseek-v4-flash-0731 died between 2026-09-19 (when it still answered a real
+# job) and 2026-09-21 (410 Gone). The whole DeepSeek v4 family is gone from the
+# catalogue; only deepseek-coder-6.7b remains, which is a coding model.
+#
+# Picked by measurement, not by reading a card. Against the real Pass-A workload
+# (~1700 tokens in, 500 out) on 2026-09-21, one http request each:
+#   google/gemma-4-31b-it          6.0s best / 31.3 tok/s  3/3 schema-valid
+#   openai/gpt-oss-20b            25.3s best / 12.4 tok/s  3/3 schema-valid
+#   nvidia/nemotron-3.5-lightning 73.0s -> prose, not JSON
+#   nvidia/nemotron-3-super-120b   4.5s -> malformed JSON
+# Re-run tools/bench_llm.py when this one dies too.
+#
+# NOTE: a test pinning this STRING cannot detect a retirement (DEC-007 believed
+# otherwise). What actually survives one is LLM_CHAIN: a dead link fails fast
+# with 410, is classified fatal, and the next provider answers.
+NVIDIA_MODEL = "google/gemma-4-31b-it"
 GEMINI_MODEL = "gemini-3-flash-preview"
 GEMINI_FALLBACK_MODEL = "gemini-2.5-flash"
+
+# The provider CHAIN used by the new analysis path. Unlike the single
+# --ai-provider above, this is an ordered list of "<provider>/<model>" links
+# tried in order, and every hop is printed. That is not the silent
+# cross-provider fallback DEC-003 forbade: it is a list the user wrote down, and
+# a provider absent from it is never contacted.
+#
+# The catalogue of providers, their free-tier limits and the default chain live
+# in clipping/providers/registry.py, which is stdlib-only and importable with no
+# SDK installed. Re-pick the models with tools/bench_llm.py.
+LLM_CHAIN = os.environ.get("LLM_CHAIN", "").strip()
+LLM_TIMEOUT = 0  # 0 = use each provider's own default
 
 
 # ==============================================================================
@@ -412,6 +437,23 @@ def _build_parser() -> argparse.ArgumentParser:
         "--gemini-fallback-model",
         default=GEMINI_FALLBACK_MODEL,
         help="Gemini fallback model name if main model fails",
+    )
+    p.add_argument(
+        "--llm-chain",
+        default=LLM_CHAIN,
+        help=(
+            "Ordered provider chain for AI analysis, e.g. "
+            "'groq/openai/gpt-oss-120b,nvidia/google/gemma-4-31b-it'. "
+            "Each link is tried in order and every hop is printed; a provider "
+            "not named here is never called. Defaults to $LLM_CHAIN, then to the "
+            "shipped default in clipping/providers/registry.py."
+        ),
+    )
+    p.add_argument(
+        "--llm-timeout",
+        type=int,
+        default=LLM_TIMEOUT,
+        help="Per-request timeout in seconds for chain providers (0 = provider default).",
     )
     p.add_argument(
         "--load-gemini-json",
@@ -724,7 +766,26 @@ def _build_parser() -> argparse.ArgumentParser:
 PROVIDER_KEYS = {
     "nvidia": ("api_key_nvidia", "NVIDIA_API_KEY"),
     "gemini": ("api_key_gemini", "GOOGLE_API_KEY"),
+    "groq": ("api_key_groq", "GROQ_API_KEY"),
+    "openrouter": ("api_key_openrouter", "OPENROUTER_API_KEY"),
+    "mistral": ("api_key_mistral", "MISTRAL_API_KEY"),
+    "custom": ("api_key_custom", "LLM_CUSTOM_API_KEY"),
 }
+
+
+def provider_keys(cfg) -> dict:
+    """``{provider_name: api_key}`` for every provider that has one.
+
+    This is what the chain runner is handed. A provider with no key is skipped
+    with a printed line rather than failing the run, so a partially-configured
+    chain degrades to the providers actually set up.
+    """
+    keys = {}
+    for name, (attr, _env) in PROVIDER_KEYS.items():
+        value = getattr(cfg, attr, "") or ""
+        if value:
+            keys[name] = value
+    return keys
 
 
 def missing_provider_key(cfg) -> tuple[str, str] | None:
@@ -899,6 +960,15 @@ def build_config(argv: list[str] | None = None) -> SimpleNamespace:
         # AI
         ai_provider=args.ai_provider,
         api_key_nvidia=os.environ.get("NVIDIA_API_KEY", ""),
+        # Chain providers. Read here rather than inside the provider layer so
+        # every key in the process comes from one place and the web adapter can
+        # override them per job exactly as it already does for the other two.
+        api_key_groq=os.environ.get("GROQ_API_KEY", ""),
+        api_key_openrouter=os.environ.get("OPENROUTER_API_KEY", ""),
+        api_key_mistral=os.environ.get("MISTRAL_API_KEY", ""),
+        api_key_custom=os.environ.get("LLM_CUSTOM_API_KEY", ""),
+        llm_chain=args.llm_chain,
+        llm_timeout=args.llm_timeout,
         nvidia_model=args.nvidia_model,
         gemini_model=args.gemini_model,
         gemini_fallback_model=args.gemini_fallback_model,

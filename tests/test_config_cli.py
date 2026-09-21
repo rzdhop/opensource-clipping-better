@@ -8,6 +8,7 @@ import os
 
 import pytest
 
+from clipping import config as config_module
 from clipping.config import build_config
 
 
@@ -201,9 +202,78 @@ def test_derive_audio_path_defaults_beside_source(tmp_path):
 def test_default_provider_is_nvidia(video):
     cfg = build_config(["--video", str(video)])
     assert cfg.ai_provider == "nvidia"
-    # Pinned so a model retirement shows up as a test failure, not a 410 in
-    # production. deepseek-v4-pro died on 2026-08-07 exactly this way.
-    assert cfg.nvidia_model == "deepseek-ai/deepseek-v4-flash-0731"
+    # Pinned so a DELIBERATE change to the default is a visible decision.
+    #
+    # This assertion cannot do what it was originally written to do. DEC-007
+    # claimed pinning the string would make "a model retirement show up as a
+    # test failure rather than a production 410" — it cannot: the string is
+    # still the string after NVIDIA retires the model. It did not catch
+    # deepseek-v4-pro (died 2026-08-07) and it did not catch
+    # deepseek-v4-flash-0731, which answered a real job on 2026-09-19 and
+    # returned 410 Gone on 2026-09-21.
+    #
+    # What actually survives a retirement is LLM_CHAIN: a dead link fails fast,
+    # is classified fatal rather than retried, and the next provider answers.
+    # See test_llm_negotiation.py::test_the_chain_advances_only_after_a_link_is_exhausted.
+    assert cfg.nvidia_model == "google/gemma-4-31b-it"
+
+
+def test_llm_chain_defaults_to_the_env_then_to_empty(video, monkeypatch):
+    """Empty means 'use the registry default', resolved in the provider layer
+    rather than baked into argparse, so one place owns the default."""
+    monkeypatch.delenv("LLM_CHAIN", raising=False)
+    cfg = build_config(["--video", str(video)])
+    assert cfg.llm_chain == ""
+
+
+def test_llm_chain_flag_is_carried_through(video):
+    cfg = build_config(
+        ["--video", str(video), "--llm-chain", "groq/openai/gpt-oss-120b,nvidia/x"]
+    )
+    assert cfg.llm_chain == "groq/openai/gpt-oss-120b,nvidia/x"
+
+
+def test_llm_timeout_flag(video):
+    cfg = build_config(["--video", str(video), "--llm-timeout", "45"])
+    assert cfg.llm_timeout == 45
+
+
+@pytest.mark.parametrize(
+    "provider,env_name",
+    [
+        ("groq", "GROQ_API_KEY"),
+        ("openrouter", "OPENROUTER_API_KEY"),
+        ("mistral", "MISTRAL_API_KEY"),
+        ("custom", "LLM_CUSTOM_API_KEY"),
+    ],
+)
+def test_chain_provider_keys_are_read_from_the_environment(
+    video, monkeypatch, provider, env_name
+):
+    monkeypatch.setenv(env_name, "secret-value")
+    cfg = build_config(["--video", str(video)])
+    attr = config_module.PROVIDER_KEYS[provider][0]
+    assert getattr(cfg, attr) == "secret-value"
+
+
+def test_provider_keys_collects_only_the_ones_that_are_set(video, monkeypatch):
+    """A partially-configured chain must degrade to the providers actually set
+    up, so the map handed to the chain runner holds no empty entries."""
+    for _attr, env_name in config_module.PROVIDER_KEYS.values():
+        monkeypatch.delenv(env_name, raising=False)
+    monkeypatch.setenv("GROQ_API_KEY", "g")
+    cfg = build_config(["--video", str(video)])
+    assert config_module.provider_keys(cfg) == {"groq": "g"}
+
+
+def test_every_registry_provider_has_a_key_mapping():
+    """A provider reachable in a chain but absent from PROVIDER_KEYS would be
+    permanently skipped for 'no API key' however the key was set."""
+    from clipping.providers.registry import PROVIDERS
+
+    assert set(config_module.PROVIDER_KEYS) == set(PROVIDERS)
+    for name, provider in PROVIDERS.items():
+        assert config_module.PROVIDER_KEYS[name][1] == provider.env_key
 
 
 def test_provider_can_be_overridden(video):

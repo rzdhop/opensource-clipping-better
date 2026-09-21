@@ -171,7 +171,7 @@ class JobCreateRequest(BaseModel):
     ai_provider: AIProvider = AIProvider.NVIDIA
     gemini_model: str = "gemini-3-flash-preview"
     gemini_fallback_model: str = "gemini-2.5-flash"
-    nvidia_model: str = "deepseek-ai/deepseek-v4-flash-0731"
+    nvidia_model: str = "google/gemma-4-31b-it"
     face_detector: FaceDetector = FaceDetector.MEDIAPIPE
     yolo_size: YoloSize = YoloSize.V8M
 

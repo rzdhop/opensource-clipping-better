@@ -420,3 +420,89 @@ renderer never sees the originals), and segments are **re-chunked** by
 while Whisper also breaks at its own segment ends. No word, order or start time
 is lost. Note the CLI's `outputs_dir` is shared rather than per-job, so
 consecutive CLI runs overwrite the file; only the web path is per-job.
+
+## DEC-023 — An explicit, configured provider chain is not the fallback DEC-003 forbade
+**Context.** Every heavy AI call now targets a free hosted endpoint, and free
+endpoints fail for reasons that have nothing to do with the request: a daily
+quota resets at midnight Pacific, a model is retired without notice, a gateway
+has a bad minute. Pinning the whole pipeline to one provider makes each of those
+a job failure. But DEC-003 removed cross-provider fallback for good reasons, and
+those reasons have not changed.
+**Decision.** Introduce `LLM_CHAIN`: an ordered list of `<provider>/<model>`
+links, tried in order, defined in `clipping/providers/registry.py` and
+overridable per run with `--llm-chain`.
+**Consequence.** What DEC-003 actually forbade was a *silent* fallback — bare
+`except Exception` that billed a user on Gemini when they had chosen NVIDIA,
+reducing the real error to one warning line, and which is how an undeclared
+`openai` dependency stayed invisible. A chain differs on every count that
+mattered:
+- it is a list the user wrote down, not a hidden second choice;
+- every hop is printed, including *why* the previous link was abandoned;
+- a provider absent from the chain is never contacted — enforced by
+  `test_a_provider_not_in_the_chain_is_never_contacted`, not merely intended;
+- a link with no key is skipped with a line saying which env var is missing,
+  rather than raising, so a partly-configured chain degrades to what is set up.
+
+The `analyze_with_ai` dispatcher keeps its no-silent-fallback behaviour for the
+single-provider modes. DEC-003 is scoped by this entry, not overturned.
+
+## DEC-024 — The NIM default is `google/gemma-4-31b-it`, chosen by measurement
+**Context.** `deepseek-ai/deepseek-v4-flash-0731` answered a real job on
+2026-09-19 and returned **410 Gone** on 2026-09-21. The entire DeepSeek v4
+family has left the NIM catalogue; only `deepseek-coder-6.7b-instruct` remains,
+which is a coding model. This is the **third** NIM default this project has had
+(`deepseek-v4-pro` died 2026-08-07, DEC-004 → DEC-007), so the shipped default
+was broken in production at the moment this was written.
+**Decision.** Benchmark the live catalogue against the real workload and pick on
+evidence. Measured 2026-09-21 with `tools/bench_llm.py`, ~1700 tokens in / 500
+out, one http request per sample:
+
+| model | best | tok/s | result |
+|---|---|---|---|
+| `google/gemma-4-31b-it` | **6.0s** | 31.3 | 3/3 schema-valid |
+| `openai/gpt-oss-20b` | 25.3s | 12.4 | 3/3 schema-valid |
+| `nvidia/nemotron-3.5-lightning-30b-a3b` | 73.0s | — | returned prose, not JSON |
+| `nvidia/nemotron-3-super-120b-a12b` | 4.5s | — | returned malformed JSON |
+
+**Consequence.** `google/gemma-4-31b-it` becomes the `--nvidia-model` default and
+the NVIDIA link of the default chain. Supersedes DEC-004 and DEC-007.
+
+Two corrections this forced, both worth more than the model choice itself:
+- **DEC-007's stated safeguard does not work.** It claimed pinning the model
+  string in a test would make "the next retirement surface as a test failure
+  rather than a production 410". It cannot: the string is still the string after
+  NVIDIA retires the model. It caught neither retirement. The assertion is kept
+  — a deliberate change to the default should still be a visible decision — but
+  its docstring now says plainly what it can and cannot do.
+- **What actually survives a retirement is the chain.** A dead link answers 410,
+  which `errors.classify` calls fatal, so it is abandoned without burning
+  retries and the next provider answers. That is a structural fix; a pinned
+  string is not.
+
+## DEC-025 — The SDK's retry policy is disabled for every provider, not just NVIDIA
+**Context.** DEC-019 set `max_retries=0` on the NIM client after discovering the
+SDK's default of 2 had turned a reported "attempt 3/3" into nine silent HTTP
+requests. The new provider layer builds a client for five more providers.
+**Decision.** `build_client` sets `max_retries=0` and an explicit per-provider
+timeout unconditionally, pinned by
+`test_the_sdks_own_retries_are_disabled`.
+**Consequence.** The ladder in `llm.py` is the only retry policy in force
+anywhere. The failure mode this prevents is invisible — the SDK's retries print
+nothing — so it has to be asserted rather than remembered.
+
+## DEC-026 — Structured output is negotiated per model and remembered per process
+**Context.** DEC-013 established the `response_format` ladder for one model.
+With five providers and any model the user names, the question "does this model
+accept a JSON schema?" has no fixed answer, and getting it wrong costs a whole
+attempt.
+**Decision.** `complete_json` walks `json_schema` → `json_object` → prompt-only,
+caching the level that worked for each `(provider, model)` pair. A schema
+rejection is not counted as a retry, because the request was never really made
+at that level.
+**Consequence.** Generalizes DEC-013 rather than replacing it, including its
+400-detection predicate. Two details are load-bearing and tested: the level is
+recorded only *after* the reply parses — a provider that accepts `json_schema`
+and then ignores it is worse than one that refuses it — and an ordinary 400
+(a bad temperature, an oversized `max_tokens`) must not be mistaken for a schema
+refusal, or the client would silently strip the schema and accept whatever prose
+came back.

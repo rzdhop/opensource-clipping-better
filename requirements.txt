@@ -2,12 +2,12 @@ yt-dlp
 faster-whisper
 tqdm
 google-genai
-openai
+openai>=2.24.0,<3  # the OpenAI-compatible client for every provider in clipping/providers/
 numpy<2.0.0
 mediapipe
 opencv-python
 Pillow
-requests
+requests>=2.33.0,<3
 gdown
 python-dotenv
 google-api-python-client

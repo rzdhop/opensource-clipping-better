@@ -5,15 +5,28 @@
   device, auto-download of video + subtitles, SRT in/out, every feature kept.
   Plan approved by the human: `/home/ubuntu/.claude/plans/hey-here-is-sleepy-walrus.md`
   (11 stages; read it before resuming — it carries the root causes and the design).
-- **Phase:** IMPLEMENT — **Stage 1 DONE** (rolling-display cue semantics + SRT
-  writer). Next: Stage 2, the provider core.
+- **Phase:** IMPLEMENT — **Stages 1-2 DONE.** S1 rolling-display cue semantics +
+  SRT writer (`5d46c81`); S2 the provider core. Next: Stage 3, beats and snapping.
+- **⚠️ Production was already broken before this work:** the shipped NVIDIA model
+  `deepseek-ai/deepseek-v4-flash-0731` now returns **410 Gone** (it answered a
+  real job on 2026-09-19 and was dead by 2026-09-21; the whole DeepSeek v4
+  family has left the NIM catalogue). The default is now
+  `google/gemma-4-31b-it`, picked by live benchmark — 6.0s and 31.3 tok/s
+  against the real workload, 3/3 schema-valid. See DEC-024.
 - **Branch:** `feature/rzdhop-clips-rearchitecture`, cut from `main` at `f8ad8b4`.
 - **Checkpoint commit:** `f8ad8b4` — clean tree, identical to `origin/main`.
   Roll back here.
 - **Tier-1 baseline at `f8ad8b4`:** pytest **369 passed, 0 failed**; `compileall`
   clean. (Needs `PYTHONPYCACHEPREFIX` locally — see the root `__pycache__` note.)
-- **Next action:** Stage 2 — `clipping/providers/` (registry, llm, pacing, jsonx)
-  and `tools/bench_llm.py`. Nothing is wired into the pipeline in that stage.
+- **Next action:** Stage 3 — `clipping/analysis/` beats, snapping, presets and
+  language detection. Pure functions, no network, nothing wired in yet.
+- **The human still owes four keys** (Groq, Gemini, OpenRouter, Mistral). Until
+  then the chain runs on NVIDIA alone, which works: keyless links are skipped
+  with a printed reason. `python tools/bench_llm.py` validates each key as it
+  arrives and prints a suggested `LLM_CHAIN` ordered by measured speed.
+- **Tier-1 after Stage 2:** pytest **564 passed, 0 failed**; `compileall` clean.
+  Under the simulated pytest-only CI environment: **523 passed, 20 skipped, 0
+  failed** (368 after S1, 328 at baseline) — every new test runs in CI.
 - **Tier-1 after Stage 1:** pytest **409 passed, 0 failed**; `compileall` clean.
   Under the simulated pytest-only CI environment: **368 passed, 20 skipped, 0
   failed**, against a measured baseline of **328 passed, 20 skipped** — exactly
