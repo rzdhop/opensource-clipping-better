@@ -151,13 +151,90 @@ def test_adapter_supplies_every_field_resolve_transcript_reads(upload_file, job_
 
 
 def test_adapter_supplies_provider_key_fields(upload_file, job_id):
-    """worker.py gates on config.missing_provider_key(cfg)."""
-    from clipping.config import missing_provider_key
+    """worker.py gates on config.missing_provider_key(cfg).
+
+    The expected env names are derived from the config tables rather than
+    listed here, so adding a provider cannot leave this assertion behind.
+    """
+    from clipping.config import (
+        PROVIDER_KEYS,
+        PROVIDER_REQUIRED_EXTRA,
+        missing_provider_key,
+    )
+
+    expected = {env for _, env in PROVIDER_KEYS.values()}
+    for extras in PROVIDER_REQUIRED_EXTRA.values():
+        expected |= {env for _, env in extras}
 
     cfg = build_config_from_payload({"upload_filename": upload_file(".mp4")}, job_id)
 
     result = missing_provider_key(cfg)
-    assert result is None or result[1] in {"NVIDIA_API_KEY", "GOOGLE_API_KEY"}
+    assert result is None or result[1] in expected
+
+
+# ------------------------------------------- custom OpenAI-compatible endpoint
+
+def test_custom_endpoint_credentials_come_from_settings(upload_file, job_id):
+    """The URL and key are credentials: settings/env only, never the payload."""
+    cfg = build_config_from_payload(
+        {"upload_filename": upload_file(".mp4"), "ai_provider": "openai_compat"},
+        job_id,
+        env_overrides={
+            "OPENAI_COMPAT_API_KEY": "compat-key",
+            "OPENAI_COMPAT_BASE_URL": "https://openrouter.ai/api/v1",
+            "OPENAI_COMPAT_MODEL": "saved-model",
+        },
+    )
+
+    assert cfg.ai_provider == "openai_compat"
+    assert cfg.api_key_openai_compat == "compat-key"
+    assert cfg.openai_compat_base_url == "https://openrouter.ai/api/v1"
+    assert cfg.openai_compat_model == "saved-model"
+
+
+def test_per_job_model_overrides_the_saved_one(upload_file, job_id):
+    cfg = build_config_from_payload(
+        {
+            "upload_filename": upload_file(".mp4"),
+            "ai_provider": "openai_compat",
+            "openai_compat_model": "per-job-model",
+        },
+        job_id,
+        env_overrides={"OPENAI_COMPAT_MODEL": "saved-model"},
+    )
+
+    assert cfg.openai_compat_model == "per-job-model"
+
+
+def test_empty_per_job_model_falls_back_to_the_saved_one(upload_file, job_id):
+    """The field defaults to "", which must mean 'use Settings', not 'unset'."""
+    cfg = build_config_from_payload(
+        {
+            "upload_filename": upload_file(".mp4"),
+            "ai_provider": "openai_compat",
+            "openai_compat_model": "",
+        },
+        job_id,
+        env_overrides={"OPENAI_COMPAT_MODEL": "saved-model"},
+    )
+
+    assert cfg.openai_compat_model == "saved-model"
+
+
+def test_half_configured_endpoint_is_caught_by_the_worker_gate(upload_file, job_id):
+    """What the web worker will actually do with an incomplete endpoint."""
+    from clipping.config import missing_provider_key
+
+    cfg = build_config_from_payload(
+        {"upload_filename": upload_file(".mp4"), "ai_provider": "openai_compat"},
+        job_id,
+        env_overrides={
+            "OPENAI_COMPAT_API_KEY": "compat-key",
+            "OPENAI_COMPAT_BASE_URL": "https://openrouter.ai/api/v1",
+        },
+    )
+
+    assert missing_provider_key(cfg) == ("openai_compat_model", "OPENAI_COMPAT_MODEL")
 
 
 def test_adapter_supplies_fields_runner_provenance_reads(upload_file, job_id):

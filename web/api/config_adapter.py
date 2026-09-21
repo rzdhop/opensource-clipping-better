@@ -196,6 +196,19 @@ def build_config_from_payload(
         ai_provider=ai_provider,
         api_key_nvidia=env.get("NVIDIA_API_KEY", os.environ.get("NVIDIA_API_KEY", "")),
         nvidia_model=payload.get("nvidia_model", "deepseek-ai/deepseek-v4-flash-0731"),
+        # Custom OpenAI-compatible endpoint. The URL and key are credentials,
+        # so they come only from settings/env; the model may be overridden
+        # per job, falling back to the saved one.
+        api_key_openai_compat=env.get(
+            "OPENAI_COMPAT_API_KEY", os.environ.get("OPENAI_COMPAT_API_KEY", "")
+        ),
+        openai_compat_base_url=env.get(
+            "OPENAI_COMPAT_BASE_URL", os.environ.get("OPENAI_COMPAT_BASE_URL", "")
+        ),
+        openai_compat_model=(
+            payload.get("openai_compat_model", "")
+            or env.get("OPENAI_COMPAT_MODEL", os.environ.get("OPENAI_COMPAT_MODEL", ""))
+        ),
         gemini_model=payload.get("gemini_model", "gemini-3-flash-preview"),
         gemini_fallback_model=payload.get("gemini_fallback_model", GEMINI_FALLBACK_MODEL),
         load_gemini_json=payload.get("load_gemini_json", False),

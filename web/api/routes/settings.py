@@ -56,12 +56,26 @@ async def get_settings() -> SettingsResponse:
     pexels_key = env.get("PEXELS_API_KEY", os.environ.get("PEXELS_API_KEY", ""))
     hf_token = env.get("HF_TOKEN", os.environ.get("HF_TOKEN", ""))
     nvidia_key = env.get("NVIDIA_API_KEY", os.environ.get("NVIDIA_API_KEY", ""))
+    compat_key = env.get(
+        "OPENAI_COMPAT_API_KEY", os.environ.get("OPENAI_COMPAT_API_KEY", "")
+    )
+    compat_url = env.get(
+        "OPENAI_COMPAT_BASE_URL", os.environ.get("OPENAI_COMPAT_BASE_URL", "")
+    )
+    compat_model = env.get(
+        "OPENAI_COMPAT_MODEL", os.environ.get("OPENAI_COMPAT_MODEL", "")
+    )
 
     return SettingsResponse(
         google_api_key_set=bool(google_key),
         pexels_api_key_set=bool(pexels_key),
         hf_token_set=bool(hf_token),
         nvidia_api_key_set=bool(nvidia_key),
+        # The key is reported as a boolean only; the URL and model are not
+        # secrets and both front ends need their values.
+        openai_compat_api_key_set=bool(compat_key),
+        openai_compat_base_url=compat_url,
+        openai_compat_model=compat_model,
         default_clips=int(env.get("DEFAULT_CLIPS", "7")),
         default_ratio=env.get("DEFAULT_RATIO", "9:16"),
         default_font_style=env.get("DEFAULT_FONT_STYLE", "HORMOZI"),
@@ -90,6 +104,12 @@ async def update_settings(req: SettingsRequest) -> SettingsResponse:
         env_updates["HF_TOKEN"] = req.hf_token
     if req.nvidia_api_key is not None:
         env_updates["NVIDIA_API_KEY"] = req.nvidia_api_key
+    if req.openai_compat_api_key is not None:
+        env_updates["OPENAI_COMPAT_API_KEY"] = req.openai_compat_api_key
+    if req.openai_compat_base_url is not None:
+        env_updates["OPENAI_COMPAT_BASE_URL"] = req.openai_compat_base_url
+    if req.openai_compat_model is not None:
+        env_updates["OPENAI_COMPAT_MODEL"] = req.openai_compat_model
     if req.default_clips is not None:
         env_updates["DEFAULT_CLIPS"] = str(req.default_clips)
     if req.default_ratio is not None:

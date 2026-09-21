@@ -5,8 +5,8 @@
   page values, add provider guidance + warnings to New Job, and expose the
   render-quality options. Plan approved 2026-09-21.
 - **Phase:** IMPLEMENT
-- **Current stage:** S4 (web API surface for the provider) — S1-S3 done
-- **Next action:** add openai_compat to the AIProvider enum, JobCreateRequest, Settings models, the adapter and the settings route
+- **Current stage:** S5 (Settings page card) — S1-S4 done, backend complete
+- **Next action:** add the custom-endpoint card to web/dashboard/src/pages/Settings.jsx
 - **Open questions:** none. The four CLARIFY questions were answered: one generic
   `openai_compat` provider (not named Groq/Mistral/xAI), persist settings to a
   git-ignored JSON file, preset + Advanced section on New Job, `docs/studio` static
