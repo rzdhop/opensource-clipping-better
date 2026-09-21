@@ -1,7 +1,7 @@
 services:
   backend:
     build: .
-    container_name: osc-backend
+    container_name: rzc-backend
     # The bind mounts below replace the image's own directories, which throws
     # away the Dockerfile's build-time `chown appuser`. What the container sees
     # is the HOST's ownership, so it has to run as the host user that owns
@@ -73,7 +73,7 @@ services:
   #   # then set POT_PROVIDER_URL=http://bgutil:4416 in .env
   bgutil:
     image: brainicism/bgutil-ytdlp-pot-provider
-    container_name: osc-bgutil
+    container_name: rzc-bgutil
     profiles: ["pot"]
     ports:
       - "127.0.0.1:4416:4416"
@@ -83,7 +83,7 @@ services:
   # Tailscale needs none of this; see docs/deploy-tailscale.md.
   caddy:
     image: caddy:2-alpine
-    container_name: osc-caddy
+    container_name: rzc-caddy
     profiles: ["domain"]
     ports:
       - "80:80"

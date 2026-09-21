@@ -17,7 +17,7 @@ from facebook_uploader import upload_manifest_to_facebook
 
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        description="OpenSource Clipping -- Facebook Pages Reels Auto-Uploader",
+        description="rzdhop's clips -- Facebook Pages Reels Auto-Uploader",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 

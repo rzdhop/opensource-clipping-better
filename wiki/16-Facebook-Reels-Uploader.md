@@ -1,6 +1,6 @@
 # 📱 Facebook Reels Uploader
 
-OpenSource Clipping includes a standalone Facebook Pages Reels auto-uploader and scheduler, enabling you to publish generated clips directly to your Facebook Page via the Meta Graph API.
+rzdhop's clips includes a standalone Facebook Pages Reels auto-uploader and scheduler, enabling you to publish generated clips directly to your Facebook Page via the Meta Graph API.
 
 ---
 

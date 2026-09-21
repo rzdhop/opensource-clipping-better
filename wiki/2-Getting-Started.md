@@ -1,6 +1,6 @@
 # 🚀 Getting Started
 
-This guide walks you through setting up OpenSource Clipping on your local machine.
+This guide walks you through setting up rzdhop's clips on your local machine.
 
 ---
 
@@ -25,7 +25,7 @@ This guide walks you through setting up OpenSource Clipping on your local machin
 
 ```bash
 git clone https://github.com/NaufalRizqullah/opensource-clipping.git
-cd opensource-clipping
+cd rzdhop-clips
 ```
 
 ### 2. Install Dependencies

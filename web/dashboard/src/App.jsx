@@ -45,8 +45,8 @@ function App() {
       {/* Sidebar */}
       <aside className="sidebar">
         <div className="sidebar-brand">
-          <h1>🎬 OSC Studio</h1>
-          <p>AI Auto-Clipper v1.0.7</p>
+          <h1>🎬 rzdhop's clips</h1>
+          <p>free-API clip generator</p>
         </div>
         <nav className="sidebar-nav">
           <NavLink to="/" end className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
@@ -68,7 +68,7 @@ function App() {
             Sign out
           </button>
           <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-            OpenSource Clipping
+            rzdhop's clips
           </div>
         </div>
       </aside>

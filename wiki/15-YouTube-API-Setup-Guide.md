@@ -141,7 +141,7 @@ Before creating OAuth credentials, Google requires you to configure a consent sc
 4. Your project structure should now look like:
 
    ```text
-   opensource-clipping/
+   rzdhop-clips/
    ├── .credentials/
    │   └── client_secret.json       ← Your OAuth Client JSON
    ├── youtube_uploader/

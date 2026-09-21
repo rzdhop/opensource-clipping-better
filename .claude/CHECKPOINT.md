@@ -5,13 +5,14 @@
   device, auto-download of video + subtitles, SRT in/out, every feature kept.
   Plan approved by the human: `/home/ubuntu/.claude/plans/hey-here-is-sleepy-walrus.md`
   (11 stages; read it before resuming — it carries the root causes and the design).
-- **Phase:** IMPLEMENT — **Stages 1-9 DONE.** S1 rolling-display cue semantics +
+- **Phase:** IMPLEMENT — **Stages 1-10 DONE.** S1 rolling-display cue semantics +
   SRT writer (`5d46c81`); S2 the provider core (`52ac830`); S3 beats, snapping,
   presets and language detection (`cbe10f3`); S4 the three-pass analyzer
   (`e2856b6`, `ed447b6`), proven live; S5 hosted transcription (`f54d508`); S6 the
   truth fixes (`818d748`); S7 auth, the static dashboard and Tailscale
   access (`c53949b`); S8 URL ingestion and the PC helper
-  (`20102bd`); S9 SRT export. Next: Stage 10, the rename to rzdhop's clips.
+  (`20102bd`); S9 SRT export (`3080932`); S10 the rename,
+  one version, API docs. Next: Stage 11, retiring the legacy analysis path.
 - **⚠️ Production was already broken before this work:** the shipped NVIDIA model
   `deepseek-ai/deepseek-v4-flash-0731` now returns **410 Gone** (it answered a
   real job on 2026-09-19 and was dead by 2026-09-21; the whole DeepSeek v4
@@ -23,12 +24,13 @@
   Roll back here.
 - **Tier-1 baseline at `f8ad8b4`:** pytest **369 passed, 0 failed**; `compileall`
   clean. (Needs `PYTHONPYCACHEPREFIX` locally — see the root `__pycache__` note.)
-- **Next action:** Stage 10 — rename to **rzdhop's clips**: README ×2,
-  `docs/*.html`, `wiki/*.md`, `web/api/app.py`, `main.py`, compose container
-  names, `pyproject.toml`, `package.json`, `index.html`, `App.jsx`, plus one
-  `__version__` and `docs/api.md`. **Do NOT rename:** the `clipping/` package,
-  any `clipping/studio/` symbol, `gemini_response.json`, `transcript.vtt`,
-  `highlight_rank_N_ready.mp4`, `OSC_VIDEO_SCALE_ALGO`, `outputs/jobs.json`.
+- **Next action:** Stage 11 — retire the legacy single-request analysis path
+  from `clipping/engine.py` (`get_analysis_prompt`, `TARGET_ACCOUNTS`,
+  `analyze_with_nvidia`, `analyze_with_gemini`) and rewrite
+  `tests/test_nvidia_retry.py` against `clipping/providers/llm.py`, preserving
+  N-1..N-5 as chain-level assertions. **Do this only after a full live job has
+  completed on the new path** — the analysis has been proven live, the render
+  has not, because this host has no cv2/mediapipe and no docker access.
 - **The human must now, before the app is reachable from the phone:**
   1. enable HTTPS certificates in the Tailscale admin console, then
      `tailscale serve --bg --https=443 http://127.0.0.1:8000`;
@@ -47,9 +49,9 @@
   then the chain runs on NVIDIA alone, which works: keyless links are skipped
   with a printed reason. `python tools/bench_llm.py` validates each key as it
   arrives and prints a suggested `LLM_CHAIN` ordered by measured speed.
-- **Tier-1 after Stage 9:** pytest **978 passed, 0 failed**; `compileall` clean.
-  Under the simulated pytest-only CI environment: **918 passed, 32 skipped, 0
-  failed**. Previously: 900 after S8, 848 after S7, 799 after S6, 782 after S5, (733 after S4, 648 after S3, 523 after S2, 368 after S1, 328 at
+- **Tier-1 after Stage 10:** pytest **998 passed, 0 failed**; `compileall`
+  clean. Under the simulated pytest-only CI environment: **936 passed, 34
+  skipped, 0 failed**. Previously: 918 after S9, 900 after S8, 848 after S7, 799 after S6, 782 after S5, (733 after S4, 648 after S3, 523 after S2, 368 after S1, 328 at
   baseline) — every new test runs in CI, none of them skipped.
 - **Stage 5 is NOT live-verified.** Audio extraction and chunking are (see
   below), but the hosted transcription call itself needs `GROQ_API_KEY`, which

@@ -1,10 +1,10 @@
 <br />
 <div align="center">
   <a href="https://github.com/NaufalRizqullah/opensource-clipping">
-    <img src="assets/images/opensource-clipping-logo-editable.svg" alt="Logo" width="350">
+    <img src="assets/images/rzdhop-clips-logo-editable.svg" alt="Logo" width="350">
   </a>
 
-  <h3 align="center">OpenSource Clipping</h3>
+  <h3 align="center">rzdhop's clips</h3>
 
   <p align="center">
     <strong>Ultimate AI Auto-Clipper & Teaser Generator</strong><br>
@@ -23,47 +23,53 @@
 
 ⚠️ **Low Maintenance Mode**: This project is currently in low maintenance mode as the author is focusing on other priorities.
 
-## 🔱 About this fork — the rzdhop refactor
+## 🔱 About this fork
 
 This is [**rzdhop**](https://github.com/rzdhop)'s fork of
 [NaufalRizqullah/opensource-clipping](https://github.com/NaufalRizqullah/opensource-clipping).
-It is not a mirror: the ingestion layer was rebuilt and the engine now runs
-local-first. If you are following the upstream README, these are the differences
-that will bite you.
+It is not a mirror. The render layer is the upstream project's, largely intact;
+everything in front of it has been rebuilt around one constraint: **run on free
+hosted AI endpoints, on hardware with no GPU, reachable from a phone.**
 
 | Change | Why |
 |---|---|
-| **Nothing is downloaded** | `yt-dlp` ingestion was removed from the pipeline. YouTube's anti-bot telemetry, datacenter-IP bans and JS PoW challenges broke it constantly. You bring the `.mp4` yourself with whatever tool you like. |
-| **`--video` replaces `--url`** | A local file path is now the input. `--transcript` optionally takes a `.vtt`/`.srt`/`.json3` alongside it. |
-| **Whisper is optional** | Supply a transcript and it is skipped entirely. On a machine without a working CUDA stack, `faster-whisper` silently falls back to CPU, where a 20-minute video takes roughly 12 hours. `--no-whisper` turns the fallback into a hard error so it can never happen by accident. |
-| **NVIDIA NIM is the default provider** | Gemini is still reachable with `--ai-provider gemini`. There is no silent cross-provider fallback: if the provider you chose fails, it fails loudly rather than billing you on the other one. |
-| **English codebase** | Progress output, errors, comments and docstrings were translated from Indonesian. The AI prompt is deliberately still Indonesian — see below. |
+| **The analysis is three small passes, not one big request** | The original asked one model for 22 fields per clip — roughly 1200 output tokens each — from providers that generate 12-13 tokens/s behind a 300-second gateway. Seven clips needs about 660 seconds, so it could never finish. It is now a candidate scan per transcript window, one global re-rank, and one small metadata request per clip. Nothing generates more than ~320 tokens at a time. |
+| **The model picks moments; Python picks cuts** | The model answers with sentence *ids*, never timestamps, so a hallucinated cut point is structurally impossible. Boundaries, duration windows, padding and overlap are decided in code. |
+| **Any OpenAI-compatible provider, as an ordered chain** | `LLM_CHAIN=groq/...,gemini/...,nvidia/...` — tried in order, every hop printed, a provider you did not list is never called. Free tiers go down and models get retired; a chain survives both. |
+| **Transcription is hosted too** | Groq's Whisper or Mistral's Voxtral, with word-level timestamps. Local `faster-whisper` is still available, but on a CPU-only machine it was measured at 4.6x realtime — 94 minutes for a 20-minute video. |
+| **Scraped subtitles actually work** | The parser was silently discarding a third of the words in any rolling-caption file (2095 words in, 1377 out). It now reads them all. |
+| **It has authentication** | Every API route needs a token. The backend binds loopback and is reached over Tailscale. It previously bound `0.0.0.0` with no auth at all. |
+| **`--video` replaces `--url`, and URLs are best-effort** | You can pass a `source_url` and the server will try, but sites refuse datacenter IPs often; a refusal parks the job in `needs_upload` instead of failing it. `tools/rzclips-fetch.py` downloads from your own machine and submits in one command. |
+| **Output follows the video's language** | Titles and captions are written in whatever language is spoken, with English titles and tags alongside. The prompt was previously Indonesian and produced Indonesian output regardless of input. |
 
-### Running without any heavy local model
-
-The pipeline can produce clips with no local transcription or language model at
-all — only the video stays local. Supply a transcript and use the default
-remote provider:
+### Running it
 
 ```bash
-python main.py --video input.mp4 --transcript input.vtt --no-whisper
+# A local file, with subtitles you already have.
+python main.py --video talk.mp4 --transcript talk.vtt --clips 5 --platform tiktok
+
+# No subtitles: transcribe on a hosted provider.
+python main.py --video talk.mp4 --clips 5
+
+# See what it would pick, before paying for a render.
+python main.py --video talk.mp4 --transcript talk.vtt --dry-run-analysis
 ```
 
-`--no-whisper` guarantees the slow path is never taken silently. Face tracking
-still runs locally via MediaPipe, which is lightweight and CPU-friendly;
-diarization (`--split-screen`, `--camera-switch`) additionally needs `pyannote`
-and an accepted HuggingFace model licence.
+The web API, the dashboard and the phone setup are in
+[docs/api.md](docs/api.md) and [docs/deploy-tailscale.md](docs/deploy-tailscale.md).
 
-### The AI prompt is still in Indonesian
+### Which keys you need
 
-`get_analysis_prompt()` in `clipping/engine.py` was left untranslated on
-purpose. It defines the JSON contract the model must return, using Indonesian
-key names (`kata_utama`, `alasan`, `hastag`, `klasifikasi_akun`, …) that the
-pipeline reads back, and it explicitly requires three output fields
-(`title_indonesia`, `tiktok_title_id`, `tiktok_caption_id`) in Indonesian.
-Translating the prose around those keys risks changing the register of that
-output, and that cannot be verified without live API runs. If you translate it,
-keep every key name and enum value byte-identical.
+None of them are paid. Set whichever you have; the chain skips the rest.
+
+| Key | For |
+|---|---|
+| `GROQ_API_KEY` | Fastest LLM, and free Whisper transcription. Start here. |
+| `GOOGLE_API_KEY` | Gemini. Largest free daily request budget. |
+| `NVIDIA_API_KEY` | NVIDIA NIM. Slow, but no published daily cap. |
+| `OPENROUTER_API_KEY`, `MISTRAL_API_KEY` | Further fallbacks. |
+| `PEXELS_API_KEY` | B-roll. Optional. |
+| `HF_TOKEN` | Speaker diarization for split-screen. Optional. |
 
 ## ✨ Features
 
@@ -111,7 +117,7 @@ Open a new Google Colab notebook, set the Runtime to **T4 GPU**, and create the 
 **Cell 1: Setup & Clone**
 ```python
 !rm -rf ./* ./.*
-!git clone https://github.com/your-username/opensource-clipping.git .
+!git clone https://github.com/your-username/rzdhop-clips.git .
 !pip install -r requirements.txt
 ```
 
@@ -164,7 +170,7 @@ WHISPER_COMPUTE_TYPE = "float32"
 
 The **Clipping Studio** is a browser-based dashboard hosted for free on **GitHub Pages** that connects to a Kaggle/Colab notebook as its backend — giving you a full GUI to control the AI clipping pipeline without any local setup.
 
-**🔗 Open Studio:** [naufalrizqullah.github.io/opensource-clipping/studio/](https://naufalrizqullah.github.io/opensource-clipping/studio/)
+**🔗 Open Studio:** [naufalrizqullah.github.io/rzdhop-clips/studio/](https://naufalrizqullah.github.io/rzdhop-clips/studio/)
 
 ### How It Works
 
@@ -184,7 +190,7 @@ The **Clipping Studio** is a browser-based dashboard hosted for free on **GitHub
 
 1. **Start the backend** — Open `notebooks/Kaggle_Studio_Server.ipynb` in Kaggle (or Colab), add your API keys to Secrets, and run all cells. Copy the **Public URL** from the output.
 
-2. **Open the Studio** — Visit [the Studio page](https://naufalrizqullah.github.io/opensource-clipping/studio/) in your browser.
+2. **Open the Studio** — Visit [the Studio page](https://naufalrizqullah.github.io/rzdhop-clips/studio/) in your browser.
 
 3. **Connect** — Click the **Connect** button in the sidebar, paste the tunnel URL, and click **Test & Connect**.
 
@@ -232,8 +238,8 @@ The same feed is on the API: `GET /api/jobs/{id}` returns it as `events`, and
 
 ```bash
 # 1. Clone the repo
-git clone https://github.com/your-username/opensource-clipping.git
-cd opensource-clipping
+git clone https://github.com/your-username/rzdhop-clips.git
+cd rzdhop-clips
 
 # 2. Install dependencies (pick one)
 pip install -r requirements.txt          # pip / Colab
@@ -427,7 +433,7 @@ python main.py --help
 
 ## 📐 Aspect Ratios
 
-OpenSource Clipping supports **5 output aspect ratios**. All vertical/square ratios include **face-tracking** by default to keep the subject centered.
+rzdhop's clips supports **5 output aspect ratios**. All vertical/square ratios include **face-tracking** by default to keep the subject centered.
 
 | Ratio | Output | Face Tracking | Best For |
 |---|---|---|---|
@@ -672,7 +678,7 @@ GEMINI_MODEL = "gemini-2.0-flash"
 ## 📂 Project Structure
 
 ```text
-opensource-clipping/
+rzdhop-clips/
 ├── main.py                  # CLI entry point
 ├── run_upload.py            # YouTube auto-uploader CLI
 ├── run_fb_upload.py         # Facebook Pages Reels uploader CLI

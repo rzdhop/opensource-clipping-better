@@ -1,6 +1,6 @@
 # 🎙️ Podcast Modes
 
-OpenSource Clipping provides two intelligent rendering modes specifically designed for podcast-style videos with multiple speakers. Both modes support **3+ speakers across multiple scenes**.
+rzdhop's clips provides two intelligent rendering modes specifically designed for podcast-style videos with multiple speakers. Both modes support **3+ speakers across multiple scenes**.
 
 ---
 

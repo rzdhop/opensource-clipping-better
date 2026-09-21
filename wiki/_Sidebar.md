@@ -1,4 +1,4 @@
-**🎬 OpenSource Clipping**
+**🎬 rzdhop's clips**
 
 * [[Home|Home]]
 * [[Getting Started|Getting-Started]]

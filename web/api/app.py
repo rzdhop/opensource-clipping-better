@@ -1,7 +1,7 @@
 """
 web.api.app — FastAPI Application Entry Point
 
-OpenSource Clipping Studio — Web GUI Backend
+rzdhop's clips — Web API
 
 Run with:
     uvicorn web.api.app:app --host 0.0.0.0 --port 8000 --reload
@@ -16,6 +16,8 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from clipping import __version__
+
 from .auth import announce, require_token
 from .routes import jobs, files, settings
 
@@ -23,7 +25,7 @@ from .routes import jobs, files, settings
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application startup/shutdown lifecycle."""
-    print("🚀 OpenSource Clipping Studio — Backend starting...")
+    print(f"🚀 rzdhop's clips v{__version__} — backend starting...")
 
     # A job whose worker thread died with the previous process is stuck in a
     # non-terminal status forever: nothing re-queues it and nothing fails it, so
@@ -44,9 +46,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="OpenSource Clipping Studio",
-    description="AI Auto-Clipper & Teaser Generator — Web GUI API",
-    version="1.12.0",
+    title="rzdhop's clips",
+    description="Turn long videos into vertical short-form clips.",
+    version=__version__,
     lifespan=lifespan,
 )
 
@@ -84,8 +86,8 @@ app.include_router(settings.router)
 @app.get("/api")
 async def api_root():
     return {
-        "name": "OpenSource Clipping Studio",
-        "version": "1.13.0",
+        "name": "rzdhop's clips",
+        "version": __version__,
         "docs": "/docs",
         "health": "/api/health",
     }
@@ -106,7 +108,7 @@ else:
     @app.get("/")
     async def _no_dashboard():
         return {
-            "name": "OpenSource Clipping Studio",
+            "name": "rzdhop's clips",
             "dashboard": "not built",
             "hint": "run `npm ci && npm run build` in web/dashboard",
             "docs": "/docs",

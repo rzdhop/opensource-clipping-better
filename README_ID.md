@@ -1,10 +1,10 @@
 <br />
 <div align="center">
   <a href="https://github.com/NaufalRizqullah/opensource-clipping">
-    <img src="assets/images/opensource-clipping-logo-editable.svg" alt="Logo" width="350">
+    <img src="assets/images/rzdhop-clips-logo-editable.svg" alt="Logo" width="350">
   </a>
 
-  <h3 align="center">OpenSource Clipping</h3>
+  <h3 align="center">rzdhop's clips</h3>
 
   <p align="center">
     <strong>Ultimate AI Auto-Clipper & Teaser Generator</strong><br>
@@ -67,7 +67,7 @@ Buka notebook Google Colab baru, pastikan Runtime memakai **T4 GPU**, lalu jalan
 **Cell 1: Setup & Clone**
 ```python
 !rm -rf ./* ./.*
-!git clone https://github.com/your-username/opensource-clipping.git .
+!git clone https://github.com/your-username/rzdhop-clips.git .
 !pip install -r requirements.txt
 ```
 
@@ -118,7 +118,7 @@ WHISPER_COMPUTE_TYPE = "float32"
 
 **Clipping Studio** adalah dashboard berbasis browser yang di-hosting gratis di **GitHub Pages** dan terhubung ke notebook Kaggle/Colab sebagai backend — memberikan GUI lengkap untuk mengontrol pipeline AI clipping tanpa setup lokal.
 
-**🔗 Buka Studio:** [naufalrizqullah.github.io/opensource-clipping/studio/](https://naufalrizqullah.github.io/opensource-clipping/studio/)
+**🔗 Buka Studio:** [naufalrizqullah.github.io/rzdhop-clips/studio/](https://naufalrizqullah.github.io/rzdhop-clips/studio/)
 
 ### Cara Kerja
 
@@ -138,7 +138,7 @@ WHISPER_COMPUTE_TYPE = "float32"
 
 1. **Jalankan backend** — Buka `notebooks/Kaggle_Studio_Server.ipynb` di Kaggle (atau Colab), tambahkan API key ke Secrets, lalu run semua cell. Salin **Public URL** dari output.
 
-2. **Buka Studio** — Kunjungi [halaman Studio](https://naufalrizqullah.github.io/opensource-clipping/studio/) di browser.
+2. **Buka Studio** — Kunjungi [halaman Studio](https://naufalrizqullah.github.io/rzdhop-clips/studio/) di browser.
 
 3. **Connect** — Klik tombol **Connect** di sidebar, paste URL tunnel, lalu klik **Test & Connect**.
 
@@ -152,8 +152,8 @@ WHISPER_COMPUTE_TYPE = "float32"
 
 ```bash
 # 1. Clone repo
-git clone https://github.com/your-username/opensource-clipping.git
-cd opensource-clipping
+git clone https://github.com/your-username/rzdhop-clips.git
+cd rzdhop-clips
 
 # 2. Install dependensi (pilih salah satu)
 pip install -r requirements.txt          # pip / Colab
@@ -316,7 +316,7 @@ python main.py --help
 
 ## 📐 Rasio Aspek
 
-OpenSource Clipping mendukung **5 rasio aspek output**. Semua rasio vertikal/kotak menyertakan **face-tracking** secara default untuk menjaga subjek tetap di tengah frame.
+rzdhop's clips mendukung **5 rasio aspek output**. Semua rasio vertikal/kotak menyertakan **face-tracking** secara default untuk menjaga subjek tetap di tengah frame.
 
 | Rasio | Resolusi Output | Face Tracking | Cocok Untuk |
 |---|---|---|---|
@@ -493,7 +493,7 @@ Contoh:
 ## 📂 Struktur Proyek
 
 ```text
-opensource-clipping/
+rzdhop-clips/
 ├── main.py                  # Entry point CLI
 ├── run_upload.py            # CLI auto-uploader YouTube
 ├── run_fb_upload.py         # CLI auto-uploader Facebook Pages Reels

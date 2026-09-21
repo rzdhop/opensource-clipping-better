@@ -1,6 +1,6 @@
 # 📝 Subtitles & Typography
 
-OpenSource Clipping generates word-by-word karaoke-style subtitles using the `.ASS` subtitle format, with support for kinetic typography and multiple font presets.
+rzdhop's clips generates word-by-word karaoke-style subtitles using the `.ASS` subtitle format, with support for kinetic typography and multiple font presets.
 
 ---
 

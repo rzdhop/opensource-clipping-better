@@ -1,6 +1,6 @@
 # 🎵 BGM & Audio
 
-OpenSource Clipping includes an automatic background music (BGM) system with two professional mixing modes.
+rzdhop's clips includes an automatic background music (BGM) system with two professional mixing modes.
 
 ---
 

@@ -1,6 +1,6 @@
 # 📤 YouTube Auto-Upload
 
-OpenSource Clipping includes a standalone YouTube auto-uploader with scheduling support, allowing you to automatically publish generated clips with full metadata.
+rzdhop's clips includes a standalone YouTube auto-uploader with scheduling support, allowing you to automatically publish generated clips with full metadata.
 
 ---
 

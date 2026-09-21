@@ -1,6 +1,6 @@
 # YouTube Tracker
 
-**Local YouTube Playlist Snapshot Tracker** for the OpenSource Clipping workflow.
+**Local YouTube Playlist Snapshot Tracker** for the rzdhop's clips workflow.
 
 Track which YouTube videos you've already used for clipping — across playlists, channels, and manual picks. All data stays local in a SQLite database.
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-OpenSource Clipping — AI Auto-Clipper & Teaser Generator
+rzdhop's clips — AI Auto-Clipper & Teaser Generator
 
 Local-first: this tool downloads nothing. Acquire the video and (optionally) its
 transcript with your own tools, then point it at the files.
@@ -20,14 +20,14 @@ from clipping.config import build_config
 def main():
     cfg = build_config(sys.argv[1:])
 
-    version = "2.0.0"
+    from clipping import __version__ as version
 
     # ── Story Clip Mode ──────────────────────────────────────────────
     if getattr(cfg, "story_mode", False):
         from clipping.story_runner import run_story_pipeline
 
         print("=" * 70)
-        print(f"🎬 OpenSource Clipping v{version} — Story Clip Mode")
+        print(f"🎬 rzdhop's clips v{version} — Story Clip Mode")
         print("=" * 70)
         print(f"   Recipe      : {cfg.story_recipe_path}")
         print(f"   Sources     : {cfg.sources_json_path}")
@@ -69,7 +69,7 @@ def main():
     transcript_path = getattr(cfg, "transcript_path", None)
 
     print("=" * 70)
-    print(f"🎬 OpenSource Clipping v{version}")
+    print(f"🎬 rzdhop's clips v{version}")
     print("=" * 70)
     print(f"   Video       : {os.path.basename(cfg.file_video_asli)}")
     # State the transcript source explicitly. The Whisper fallback is the slow

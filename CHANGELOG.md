@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to the **OpenSource Clipping** project will be documented in this file.
+All notable changes to the **rzdhop's clips** project will be documented in this file.
 
 **The Standard Structure (SemVer)**
 - **Major (X.y.z)**: Incremented for incompatible API changes (breaking changes).
@@ -670,7 +670,7 @@ See the *Migrating from `--url`* table in the README.
 ## [v1.0.0] - 2026-04-27
 
 ### Added
-- **🎉 MAJOR STABLE RELEASE**: The 1.0.0 release graduates the `opensource-clipping` pipeline into a fully production-ready state! It finalizes all major milestone features including the multi-provider AI backend, High-Resolution renders, and the highly robust Dynamic Split-Screen / Camera-Tracking engines.
+- **🎉 MAJOR STABLE RELEASE**: The 1.0.0 release graduates the `rzdhop-clips` pipeline into a fully production-ready state! It finalizes all major milestone features including the multi-provider AI backend, High-Resolution renders, and the highly robust Dynamic Split-Screen / Camera-Tracking engines.
 
 ---
 

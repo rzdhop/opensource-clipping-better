@@ -1,6 +1,6 @@
 # 📺 YouTube Tracker
 
-OpenSource Clipping includes a lightweight, local **YouTube Playlist Snapshot Tracker**. It helps you track which YouTube videos you've already used for clipping, ensuring you don't process duplicate content across different playlists or manual picks.
+rzdhop's clips includes a lightweight, local **YouTube Playlist Snapshot Tracker**. It helps you track which YouTube videos you've already used for clipping, ensuring you don't process duplicate content across different playlists or manual picks.
 
 > **Snapshot Behavior:** This is a local tracker, not a live background sync. Data is only fetched from YouTube when you explicitly add a playlist or click the "Pull Again" button. All data is securely stored locally in a SQLite database.
 

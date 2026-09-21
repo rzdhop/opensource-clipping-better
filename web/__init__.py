@@ -1,1 +1,1 @@
-# web — OpenSource Clipping Web GUI
+# web — rzdhop's clips Web GUI
