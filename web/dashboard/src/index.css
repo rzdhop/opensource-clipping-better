@@ -161,31 +161,55 @@ html, body {
   text-align: center;
 }
 
+/*
+ * min-width: 0 is load-bearing. .main-content is a flex item of .app-layout,
+ * and a flex item's default min-width: auto resolves to its min-content width,
+ * which overrides flex-shrink entirely. Without it the column cannot shrink
+ * below its widest unwrappable descendant: at a 375px viewport a job page
+ * rendered .main-content at 427px and every card was clipped on the right.
+ * It is not scoped to the mobile media query on purpose -- the same thing
+ * happens in the 769-1100px range, where the sidebar is still on screen.
+ */
 .main-content {
   flex: 1;
+  min-width: 0;
   margin-left: 260px;
   padding: 28px 32px;
   min-height: 100vh;
 }
 
 /* --- Page Header --- */
+/* Wraps so the title and the action group stack instead of forcing the whole
+ * column wide. On a job page the action group alone is ~222px, which does not
+ * fit beside the title in 343px of content box. */
 .page-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
   margin-bottom: 28px;
 }
 
+/*
+ * These carry raw job input -- a source URL or an uploaded filename, which is
+ * one unbreakable token. "anywhere" rather than "break-word" on purpose: only
+ * "anywhere" shrinks the element's min-content width, and min-content is what
+ * propagates back up the flex tree and widens the whole column. break-word
+ * wraps the visible text but leaves min-content at the full token width.
+ */
 .page-header h2 {
   font-size: 22px;
   font-weight: 700;
   letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
 }
 
 .page-header p {
   font-size: 13px;
   color: var(--text-secondary);
   margin-top: 4px;
+  overflow-wrap: anywhere;
 }
 
 /* --- Cards --- */
@@ -442,11 +466,15 @@ html, body {
   transition: width var(--transition-slow);
 }
 
+/* Six or seven step labels, each with an unshrinkable dot, sum to more than a
+ * phone's width. row-gap only applies once they actually wrap. */
 .progress-steps {
   display: flex;
   justify-content: space-between;
+  flex-wrap: wrap;
   margin-top: 12px;
   gap: 4px;
+  row-gap: 10px;
 }
 
 .progress-step {
@@ -520,6 +548,8 @@ html, body {
   font-size: 14px;
   font-weight: 600;
   margin-bottom: 4px;
+  /* A long filename here blew the card's 1fr grid track out to 552px. */
+  overflow-wrap: anywhere;
 }
 
 .job-meta {
@@ -670,6 +700,177 @@ html, body {
   border-radius: 3px;
 }
 
+/* --- Live Activity --------------------------------------------------------
+   The panel that answers "what is it actually doing?" while a job runs. The
+   percentage alone cannot: one AI call holds at 36% for as long as the
+   provider's retry ladder runs, and one clip renders for minutes.
+   -------------------------------------------------------------------------- */
+
+.activity-card {
+  margin-bottom: 16px;
+}
+
+.activity-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.activity-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.activity-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.activity-pulse.running {
+  background: var(--success);
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.5);
+  animation: pulse-dot 1.5s infinite;
+}
+
+.activity-clocks {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.activity-dim {
+  color: var(--text-muted);
+  margin-left: 4px;
+}
+
+.activity-headline {
+  font-size: 13px;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.activity-detail {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--accent-hover);
+  margin: 6px 0 0;
+  word-break: break-word;
+}
+
+.activity-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.activity-chips:empty {
+  display: none;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  /* The chip is white-space: nowrap, so without this it reports its full
+   * natural width as a minimum and pushes the page wide. At 320px the
+   * provider chip measured 285px against a 288px content box. */
+  max-width: 100%;
+  padding: 4px 9px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  background: var(--bg-input);
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.chip-accent {
+  border-color: var(--border-accent);
+  background: var(--accent-dim);
+  color: var(--accent-hover);
+}
+
+.chip-warn {
+  border-color: rgba(245, 158, 11, 0.3);
+  background: var(--warning-dim);
+  color: var(--warning);
+}
+
+.chip-sub {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-secondary);
+  /* 34ch is the intent; 100% is the guard. A model id like
+   * deepseek-ai/deepseek-v4-flash-0731 is shorter than 34ch on a wide screen
+   * and wider than the whole chip on a narrow one, where it now ellipsises
+   * instead of overflowing. The full id stays in the span's title. */
+  max-width: min(34ch, 100%);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.activity-subbar {
+  margin-top: 12px;
+}
+
+.activity-quiet {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--info-dim);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.activity-console-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 16px 0 8px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.activity-console {
+  max-height: 260px;
+}
+
+.activity-line {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.activity-time {
+  color: var(--text-muted);
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.activity-message {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* The pipeline's own severity, so a retry or a dropped-transcript warning is
+   findable in a wall of output rather than buried in it. */
+.activity-step .activity-message { color: var(--text-primary); font-weight: 600; }
+.activity-warn .activity-message { color: var(--warning); }
+.activity-error .activity-message { color: var(--error); }
+
 /* --- Responsive --- */
 @media (max-width: 768px) {
   .sidebar {
@@ -684,6 +885,12 @@ html, body {
   }
   .settings-grid {
     grid-template-columns: 1fr;
+  }
+  /* Once the steps wrap, space-between strands the last row's two items at
+   * opposite edges. Left-aligned reads as a continuation of the row above. */
+  .progress-steps {
+    justify-content: flex-start;
+    column-gap: 14px;
   }
 }
 
@@ -711,10 +918,20 @@ html, body {
 }
 
 /* --- Config Form Grid --- */
+/*
+ * The New Job settings grid. This class existed but nothing referenced it --
+ * the grid was written as an inline style on the element instead, where no
+ * media query can reach it. The values here are the ones that markup used.
+ * minmax(min(300px, 100%), 1fr) rather than minmax(300px, 1fr): a bare 300px
+ * track floor stays 300px wide even when its container is narrower, so the
+ * column overflowed below a ~316px viewport. min() caps the floor at the
+ * container.
+ */
 .config-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
 }
 
 .config-section {

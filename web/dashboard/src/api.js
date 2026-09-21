@@ -136,8 +136,13 @@ export async function fetchHealth() {
   return res.json()
 }
 
-export function createSSEConnection(jobId, onMessage) {
+// `onStatus` reports 'live' | 'closed'. Without it the UI cannot tell a job
+// that is quiet from a stream that died, which are the two cases a user staring
+// at an unmoving progress bar most needs told apart.
+export function createSSEConnection(jobId, onMessage, onStatus) {
   const eventSource = new EventSource(`${API_BASE}/jobs/${jobId}/status`)
+
+  eventSource.onopen = () => { if (onStatus) onStatus('live') }
 
   eventSource.onmessage = (event) => {
     try {
@@ -150,6 +155,7 @@ export function createSSEConnection(jobId, onMessage) {
 
   eventSource.onerror = () => {
     eventSource.close()
+    if (onStatus) onStatus('closed')
   }
 
   return eventSource

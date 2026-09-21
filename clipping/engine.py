@@ -30,6 +30,42 @@ from .transcript import (  # noqa: F401
 # STAGE 2: WHISPER TRANSCRIPTION & JSON3 FALLBACK
 # ==============================================================================
 
+# Measured on this project's own CPU path: a 1211s video took ~93 minutes on
+# cpu/int8 with large-v3 at beam_size=5, i.e. ~4.6x realtime. It is a rough
+# guide, not a promise -- it scales with the host's cores -- but the order of
+# magnitude is the part that matters to someone deciding whether to wait.
+CPU_WHISPER_REALTIME_FACTOR = 4.6
+
+# Below this there is nothing worth warning about, and a notice on every short
+# clip would just be noise.
+CPU_WHISPER_WARN_THRESHOLD_SECONDS = 10 * 60
+
+
+def estimate_cpu_transcription_seconds(audio_seconds: float) -> float:
+    """Rough wall-clock estimate for transcribing *audio_seconds* on CPU."""
+    return audio_seconds * CPU_WHISPER_REALTIME_FACTOR
+
+
+def _warn_if_cpu_transcription_will_be_slow(audio_seconds: float, device: str) -> str | None:
+    """Return the warning for a slow CPU run, or None. Pure, so it is testable.
+
+    This exists because a real job spent 94 minutes here before anyone could
+    tell it was going to. The engine already skips Whisper entirely when a
+    transcript is supplied, which is the actual remedy -- so the warning names
+    it.
+    """
+    if device != "cpu":
+        return None
+    estimate = estimate_cpu_transcription_seconds(audio_seconds)
+    if estimate < CPU_WHISPER_WARN_THRESHOLD_SECONDS:
+        return None
+    return (
+        f"      \u26a0\ufe0f No GPU: transcribing {audio_seconds / 60:.0f} minutes of audio on "
+        f"CPU takes roughly {estimate / 60:.0f} minutes. Supplying a transcript "
+        f"(.vtt) with the video skips this step entirely."
+    )
+
+
 def load_whisper_model(
     model_size: str = "large-v3",
     device: str = "auto",
@@ -104,8 +140,16 @@ def transcribe_video(
     # Faster-whisper produces no output until the first segment, so each phase is
     # announced -- otherwise a first CPU run (model download + full audio decode)
     # looks like a hang.
+    # Resolved once here, not twice. resolve_whisper_runtime prints a warning
+    # when it has to fall back from CUDA, and it is idempotent, so passing the
+    # resolved pair down means load_whisper_model re-resolves to the same answer
+    # silently instead of repeating the warning into the activity feed.
+    from clipping.device import resolve_whisper_runtime
+
+    resolved_device, resolved_compute = resolve_whisper_runtime(device, compute_type)
+
     if model is None:
-        model = load_whisper_model(model_size, device, compute_type)
+        model = load_whisper_model(model_size, resolved_device, resolved_compute)
 
     print("      ⏳ Decoding audio & extracting features (no output yet)...", flush=True)
     segments, info = model.transcribe(video_path, beam_size=5, word_timestamps=True)
@@ -118,6 +162,13 @@ def transcribe_video(
     from tqdm import tqdm
 
     total_dur = round(info.duration, 2)
+
+    # The duration is only knowable once transcribe() has decoded the audio, so
+    # this is the earliest the estimate can be made -- still before the long part.
+    _slow_notice = _warn_if_cpu_transcription_will_be_slow(total_dur, resolved_device)
+    if _slow_notice:
+        print(_slow_notice, flush=True)
+
     progress = tqdm(
         total=total_dur,
         unit="s",
@@ -199,6 +250,82 @@ def _build_account_classification_prompt() -> str:
 # and the only remedy for a bad sample is another sample.
 NVIDIA_MAX_ATTEMPTS = 3
 NVIDIA_BACKOFF_SECONDS = (5, 15)
+
+# The NIM gateway cuts a request off at ~300s: a probe against the live endpoint
+# returned 504 after 302.1s for the payload a real 20-minute job sends (1211s
+# transcript, 16384 max_tokens, 7 clips). Give the server slightly longer than
+# that so we receive its 504 -- which says something -- rather than racing it to
+# a local timeout, which says nothing.
+NVIDIA_REQUEST_TIMEOUT_SECONDS = 330
+
+# An overall deadline for the whole ladder, because bounding each request is not
+# the same as bounding the wait. The check before each attempt is *predictive* --
+# "could this attempt overrun the budget?" rather than "has it already?" -- since
+# a third attempt starting at 610s under a 900s budget would still end at ~940s.
+# 900s leaves room for two full-length attempts (2 x 330s) and refuses the third,
+# so the observed failure mode costs ~10 minutes instead of 45.
+NVIDIA_TOTAL_BUDGET_SECONDS = 900
+
+# Never degrade below this many clips -- one clip is still a usable result.
+NVIDIA_MIN_CLIPS = 1
+
+
+def _nvidia_request_too_large(exc: Exception) -> bool:
+    """Whether *exc* says the request asked for more than the provider can do.
+
+    Measured against the live endpoint: generation runs at ~12-13 tokens/s and a
+    clip costs ~1200 tokens (23 required fields), so the gateway's ~300s window
+    fits about three clips. A 7-clip request needs ~660s and cannot finish. It
+    fails in exactly two ways, and a probe reproduced both: the gateway gives up
+    (504), or the model returns an empty array instead of a partial one.
+
+    Neither is a sampling failure, so another identical sample is worthless --
+    which is precisely what the ladder used to do, three times, for 45 minutes.
+    """
+    if getattr(exc, "status_code", None) == 504:
+        return True
+    if type(exc).__name__ == "APITimeoutError":
+        # Our own timeout sits just above the gateway's, so this means the same
+        # thing: the request was too slow to finish.
+        return True
+    return isinstance(exc, ValueError) and "empty clip array" in str(exc)
+
+
+# What one request can actually produce, measured against the live endpoint:
+# generation runs at ~12-13 tokens/s, a clip costs ~1200 tokens (23 required
+# fields), and the gateway gives up at ~300s -- so ~3800 tokens, about 3 clips.
+# A 3-clip request came back in 291.8s, which is real but only ~3% of headroom.
+NVIDIA_CLIPS_WITHIN_BUDGET = 3
+
+
+def _suggested_clip_count(current: int) -> int:
+    """The largest clip count worth suggesting after *current* failed.
+
+    Capped at measured capacity rather than simply halved: halving a 30-clip
+    request suggests 15, which is still five times what the provider can do, and
+    an unusable suggestion is worse than none. Always strictly fewer than what
+    just failed, because suggesting the same number again is not a suggestion.
+    """
+    return max(NVIDIA_MIN_CLIPS, min(current - 1, NVIDIA_CLIPS_WITHIN_BUDGET))
+
+
+def _too_large_proposal(clips_wanted: int) -> str:
+    """The suggestion to show when the request could not have completed.
+
+    Deliberately a *proposal*, not an action. Silently returning three clips to
+    someone who asked for seven trades one surprise for another; naming the
+    number and letting them decide does not. Returns "" when there is nothing
+    smaller left to suggest.
+    """
+    if clips_wanted <= NVIDIA_MIN_CLIPS:
+        return ""
+    suggested = _suggested_clip_count(clips_wanted)
+    return (
+        f"   \U0001f4a1 {clips_wanted} clips is more than this model can generate "
+        f"before the gateway gives up (~300s, measured at ~12-13 tokens/s and "
+        f"~1200 tokens per clip). Try {suggested}: re-run with "
+        f"--clips {suggested}, or set Clips to {suggested} and use Clone & Rerun."
+    )
 
 # Classified by exception class NAME so that `openai` is never imported at module
 # scope. An SDK rename would make an unknown error non-retryable, i.e. it fails
@@ -374,7 +501,20 @@ def _make_openai_client(base_url: str, api_key: str):
     """
     from openai import OpenAI
 
-    return OpenAI(base_url=base_url, api_key=api_key)
+    return OpenAI(
+        base_url=base_url,
+        api_key=api_key,
+        # max_retries=0 is the important one. The SDK defaults to 2 and retries
+        # anything >= 500, so every attempt in the loop below was silently three
+        # http requests: a job that reported "attempt 3/3" had really made nine,
+        # and three deterministic 504s at ~300s each became 45 minutes of
+        # waiting instead of 15. The ladder below is the only retry policy this
+        # module has, and it must be the only one in force.
+        max_retries=0,
+        # The SDK's own default is 600s, twice the gateway's limit, so a stalled
+        # request would sit for ten minutes before anyone heard about it.
+        timeout=NVIDIA_REQUEST_TIMEOUT_SECONDS,
+    )
 
 
 def _make_nvidia_client(cfg):
@@ -864,7 +1004,7 @@ def _analyze_openai_compatible(
     provider never receives a parameter it does not implement.
     """
     prompt = get_analysis_prompt(transkrip_lengkap, cfg.jumlah_clip, cfg.durasi_hook, cfg=cfg)
-    
+
     # The strict output schema, sent via response_format below.
     clips_schema = {
         "type": "array",
@@ -1018,6 +1158,15 @@ def _analyze_openai_compatible(
     # schema in play, a malformed response is a *sampling* failure, and the
     # only meaningful remedy is another sample.
     failures: list[str] = []
+    saw_too_large = False
+    started_at = time.monotonic()
+
+    def _budget_exhausted() -> bool:
+        """True when another attempt could outlast the budget."""
+        return (
+            time.monotonic() - started_at + NVIDIA_REQUEST_TIMEOUT_SECONDS
+            > NVIDIA_TOTAL_BUDGET_SECONDS
+        )
 
     # Structured output is requested through the OpenAI-standard
     # `response_format`, not NVIDIA's `nvext.guided_json`. The latter is what
@@ -1073,6 +1222,13 @@ def _analyze_openai_compatible(
             failures.append(f"attempt {attempt}: {type(exc).__name__}: {exc}")
             print(f"   ⚠️ {label} attempt {attempt} failed | {type(exc).__name__}: {exc}")
 
+            # Remember the signature rather than acting on it. The ladder still
+            # gets its retry, because a single 504 can be a transient gateway
+            # blip rather than a capacity limit -- but if the run ends up
+            # failing, the error proposes the smaller request.
+            if _nvidia_request_too_large(exc):
+                saw_too_large = True
+
             # A model that does not accept response_format says so with a 400
             # naming it. That is not a sampling failure, so retrying identically
             # is pointless -- drop the parameter and let the prompt carry the
@@ -1089,8 +1245,32 @@ def _analyze_openai_compatible(
 
             if not _nvidia_is_retryable(exc) or attempt == NVIDIA_MAX_ATTEMPTS:
                 detail = "\n  ".join(failures)
+                proposal = _too_large_proposal(cfg.jumlah_clip) if saw_too_large else ""
+                if proposal:
+                    print(proposal, flush=True)
                 raise RuntimeError(
                     f"NVIDIA analysis failed after {attempt} attempt(s):\n  {detail}"
+                    + (f"\n{proposal.strip()}" if proposal else "")
+                ) from exc
+
+            # Stop before an attempt that cannot finish inside the budget. The
+            # alternative is what the 2h22m job did: keep paying full price for
+            # a failure that is reproducing identically every time.
+            if _budget_exhausted():
+                spent = int(time.monotonic() - started_at)
+                detail = "\n  ".join(failures)
+                print(
+                    f"   ⏱️ Giving up after {spent}s: another attempt would "
+                    f"exceed the {NVIDIA_TOTAL_BUDGET_SECONDS}s budget.",
+                    flush=True,
+                )
+                proposal = _too_large_proposal(cfg.jumlah_clip) if saw_too_large else ""
+                if proposal:
+                    print(proposal, flush=True)
+                raise RuntimeError(
+                    f"NVIDIA analysis gave up after {attempt} attempt(s) and "
+                    f"{spent}s (budget {NVIDIA_TOTAL_BUDGET_SECONDS}s):\n  {detail}"
+                    + (f"\n{proposal.strip()}" if proposal else "")
                 ) from exc
 
             time.sleep(NVIDIA_BACKOFF_SECONDS[attempt - 1])

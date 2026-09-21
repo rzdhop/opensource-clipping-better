@@ -191,6 +191,35 @@ The **Clipping Studio** is a browser-based dashboard hosted for free on **GitHub
 
 4. **Create a job** — Go to **New Job**, enter a YouTube URL, configure your clip settings, and hit **Start Clipping**. Monitor progress in real-time from the Dashboard.
 
+### Watching a job run
+
+A clipping job spends most of its life inside two or three blocking calls, and
+the percentage does not move while they run. A job holding at **36%** is waiting
+on the AI provider — one request that may walk a full retry ladder before it
+answers — and a job at 60–95% is encoding one clip at a time.
+
+The job page therefore shows a **Live activity** panel next to the progress bar:
+
+| What it shows | Why |
+|---|---|
+| The provider and the exact model being asked | `NVIDIA · deepseek-ai/deepseek-v4-flash-0731`, so you know which key is being spent and which model to blame |
+| The retry position | `attempt 2 of 3` — the difference between waiting and killing the job |
+| Time on the current step, and total | Time *on the step* is what tells you something is stuck |
+| Which clip of how many is rendering | The render phase is one blocking call per clip |
+| The pipeline's own output, live | Everything the CLI prints — transcript warnings, device fallbacks, model downloads, per-clip render stages — timestamped and colour-coded by severity |
+
+After 45 quiet seconds the panel says so explicitly, rather than leaving an
+unmoving bar to be interpreted as a crash.
+
+The same feed is on the API: `GET /api/jobs/{id}` returns it as `events`, and
+`GET /api/jobs/{id}/status` streams it over SSE with a heartbeat.
+
+> **Note:** ffmpeg's own output is not in the feed. It is a subprocess and writes
+> to the real file descriptors, so it stays in the server log
+> (`docker compose logs backend`). What the feed carries is the pipeline's
+> Python-level narration, which is the part that names steps, providers and
+> models.
+
 > **Note:** The tunnel URL changes each time the notebook restarts. The Studio saves your last URL in `localStorage` for convenience, but you'll need to update it after each new session.
 
 ---

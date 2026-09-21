@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { fetchJobs, fetchHealth } from '../api'
+import { elapsedSince, formatDuration, useSecondsTicker } from '../time'
 
 const STATUS_LABELS = {
   queued: 'Queued',
@@ -22,6 +23,34 @@ function formatDate(dateStr) {
   })
 }
 
+const RUNNING = ['queued', 'downloading', 'transcribing', 'analyzing', 'rendering']
+
+/**
+ * The list view's answer to "is anything wrong with that one?".
+ *
+ * Percentage plus time-on-step: a job three minutes into the AI call reads very
+ * differently from one that has been there for forty, and the list is where a
+ * user looks first.
+ */
+function RunningSummary({ job }) {
+  const progress = job.progress
+  if (!progress) return null
+  const inStep = formatDuration(elapsedSince(progress.step_started_at))
+  return (
+    <>
+      <span style={{ color: 'var(--accent-hover)' }}>
+        {Math.round(progress.percent || 0)}% · {progress.message}
+      </span>
+      {inStep && <span title="Time on the current step">⏱ {inStep}</span>}
+      {progress.attempt > 1 && (
+        <span style={{ color: 'var(--warning)' }}>
+          retry {progress.attempt}/{progress.max_attempts}
+        </span>
+      )}
+    </>
+  )
+}
+
 function Dashboard() {
   const [jobs, setJobs] = useState([])
   const [health, setHealth] = useState(null)
@@ -41,6 +70,8 @@ function Dashboard() {
       setLoading(false)
     }
   }
+
+  useSecondsTicker(jobs.some(job => RUNNING.includes(job.status)))
 
   useEffect(() => {
     loadData()
@@ -65,7 +96,7 @@ function Dashboard() {
       </div>
 
       {/* Stats Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '24px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(180px, 100%), 1fr))', gap: '12px', marginBottom: '24px' }}>
         <div className="card">
           <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.05em' }}>Total Jobs</div>
           <div style={{ fontSize: '28px', fontWeight: 800, marginTop: '4px', background: 'linear-gradient(135deg, var(--accent), #c4b5fd)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>{jobs.length}</div>
@@ -116,9 +147,7 @@ function Dashboard() {
                 <div className="job-meta">
                   <span>{formatDate(job.created_at)}</span>
                   {job.clips?.length > 0 && <span>🎞️ {job.clips.length} clips</span>}
-                  {job.progress?.message && !['completed', 'failed'].includes(job.status) && (
-                    <span style={{ color: 'var(--accent-hover)' }}>{job.progress.message}</span>
-                  )}
+                  {RUNNING.includes(job.status) && <RunningSummary job={job} />}
                   {job.error && <span style={{ color: 'var(--error)' }}>⚠ Error</span>}
                 </div>
               </div>

@@ -468,6 +468,70 @@ _JSON3_LIKE = {".json3", ".json"}
 SUPPORTED_EXTENSIONS = sorted(_VTT_LIKE | _JSON3_LIKE)
 
 
+SAVED_TRANSCRIPT_NAME = "transcript.vtt"
+
+
+def _format_vtt_timestamp(seconds: float) -> str:
+    """``12.345`` -> ``00:00:12.345``."""
+    seconds = max(0.0, float(seconds))
+    hours, rest = divmod(seconds, 3600)
+    minutes, secs = divmod(rest, 60)
+    return f"{int(hours):02d}:{int(minutes):02d}:{secs:06.3f}"
+
+
+def render_vtt(data_segmen: list[dict]) -> str:
+    """Serialize *data_segmen* back to WebVTT with word-level timings.
+
+    The inverse of :func:`parse_vtt_subs`, and the only writer in this module --
+    everything else here reads. It exists so a Whisper transcript survives the
+    run that produced it: on a CPU machine that is 90+ minutes of work that any
+    later failure would otherwise destroy.
+
+    Word *starts* round-trip exactly. Word *ends* do not: the reader derives each
+    non-final word's end from the next word's start, so an end that does not
+    touch the following start is lost. That is harmless here, because
+    ``studio/subtitles.buat_file_ass`` recomputes those ends the same way when it
+    builds the karaoke timings -- the renderer never sees the originals either.
+
+    Segment boundaries are likewise not preserved: the reader flattens every
+    word and re-chunks by ``max_words_per_subtitle``, while Whisper also breaks a
+    chunk at the end of each of its own segments. Subtitle lines can therefore
+    regroup on the way back in. No word, order or start time is lost.
+
+    Timings are written unmodified because ``data_segmen`` is source-absolute.
+    """
+    lines = ["WEBVTT", ""]
+    for seg in data_segmen:
+        words = seg.get("words") or []
+        if not words:
+            continue
+        payload = " ".join(
+            f"<{_format_vtt_timestamp(w['start'])}>{w['word']}" for w in words
+        )
+        lines.append(
+            f"{_format_vtt_timestamp(seg['start'])} --> "
+            f"{_format_vtt_timestamp(seg['end'])}"
+        )
+        lines.append(payload)
+        lines.append("")
+    return "\n".join(lines)
+
+
+def write_vtt(data_segmen: list[dict], path: str) -> None:
+    """Write *data_segmen* to *path* as WebVTT, atomically.
+
+    Atomic because the reader raises on a malformed transcript rather than
+    falling back, and nothing in the web API can delete a file from an output
+    directory -- so a half-written file from a killed process would hard-fail
+    every later re-run with no way out from the UI.
+    """
+    text = render_vtt(data_segmen)
+    tmp = f"{path}.tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    os.replace(tmp, path)
+
+
 def load_transcript(
     path: str,
     max_words_per_subtitle: int = 5,

@@ -9,6 +9,7 @@ import json
 import os
 
 from . import diarization as diarization_mod
+from . import transcript as transcript_mod
 from . import engine, metadata, hook_manager
 
 # studio pulls in cv2/mediapipe/ultralytics at module scope. Importing it here
@@ -73,6 +74,31 @@ def _warn_on_transcript_video_mismatch(cfg, data_segmen) -> None:
         )
 
 
+def _save_whisper_transcript(cfg, data_segmen: list[dict]) -> None:
+    """Persist a freshly-transcribed ``data_segmen`` next to the job's output.
+
+    Only ever called when Whisper actually ran, so a supplied transcript is
+    never rewritten from itself. On a CPU machine this is 90+ minutes of work
+    that every later failure used to destroy: nothing wrote the transcript out,
+    not even on success, so re-running a job that failed at AI analysis meant
+    transcribing the whole video again.
+
+    Best-effort by design. A disk error here must not fail a run whose expensive
+    work has already succeeded -- the point is to protect the transcript, not to
+    add a new way to lose it.
+    """
+    outputs_dir = getattr(cfg, "outputs_dir", None)
+    if not outputs_dir:
+        return
+    path = os.path.join(outputs_dir, transcript_mod.SAVED_TRANSCRIPT_NAME)
+    try:
+        transcript_mod.write_vtt(data_segmen, path)
+        print(f"   💾 Transcript saved to {os.path.basename(path)} — a re-run of "
+              f"this job will skip Whisper.")
+    except OSError as exc:
+        print(f"   ⚠️ Could not save the transcript ({exc}). The run continues.")
+
+
 def resolve_transcript(cfg) -> tuple[str, list[dict]]:
     """Return ``(transkrip_lengkap, data_segmen)`` for *cfg*'s source video.
 
@@ -97,6 +123,12 @@ def resolve_transcript(cfg) -> tuple[str, list[dict]]:
             transcript_path,
             max_words_per_subtitle=cfg.max_kata_per_subtitle,
             offset=getattr(cfg, "transcript_offset", 0.0),
+            # The reader drops a cue whose text repeats the previous cue's,
+            # which is right for scraped captions (rolling repetition) and wrong
+            # for one we wrote ourselves: real speech repeats fillers, and
+            # "you know / you know" would come back as a single "you know".
+            # The caller that auto-detects a saved transcript turns this off.
+            dedupe=getattr(cfg, "transcript_dedupe", True),
         )
         total_kata = sum(len(seg["words"]) for seg in data_segmen)
         print(
@@ -121,6 +153,9 @@ def resolve_transcript(cfg) -> tuple[str, list[dict]]:
         raise RuntimeError(
             "Transcript is empty — there is nothing to analyze or render."
         )
+
+    if not transcript_path:
+        _save_whisper_transcript(cfg, data_segmen)
 
     return transkrip_lengkap, data_segmen
 

@@ -22,6 +22,20 @@
 - (none open)
 
 ## Confirmed
+- **A-012** — The phone-width overflow is fixable in CSS alone; no JSX change is
+  needed. *Confirmed by measurement. The exploration flagged several inline
+  `style={{ display: 'flex' }}` rows that no stylesheet can reach — chiefly the
+  job header's action group at `JobDetail.jsx:255` — as probable blockers. They
+  are not: once `.page-header` wraps, that group measures 222px and fits inside
+  the 343px content box unchanged. Every route measured `scrollWidth ==
+  clientWidth` at 375, 414 and 820px with the diff confined to `index.css`.*
+- **A-011** — The pipeline's Python-level `print` output is enough to tell a user
+  what is happening. *Confirmed against a live job on the running containers: the
+  feed carried the transcript warning (34% of words dropped for backwards
+  timestamps), the segment/word summary, the provider and model line, and the
+  NVIDIA retry ladder including `attempt 1 failed | ValueError: NVIDIA returned
+  an empty clip array`. Known gap: ffmpeg is a subprocess writing to the real
+  file descriptors, so its output is not captured — documented in the README.*
 - **A-007 — RESOLVED 2026-09-18, against the live API.**
   `deepseek-ai/deepseek-v4-flash-0731` exists and authenticates, but it
   **rejected** the `nvext.guided_json` the code was sending:
@@ -51,9 +65,13 @@
 - **A-002** — `openai` is an undeclared dependency: imported at
   `clipping/engine.py:901`, present in neither `requirements.txt` nor
   `pyproject.toml`. *Confirmed by grep over both manifests.*
-- **A-003** — Only `studio/effects.py:86` and `studio/transitions.py:156` actually
-  call yt-dlp inside `clipping/studio/`; the other 9 module-scope imports are dead.
-  *Confirmed by grep for `YoutubeDL(`.*
+- **A-003 — CONFIRMED, and RESOLVED 2026-09-18 (`a269a8f`).** Only
+  `studio/effects.py:86` and `studio/transitions.py:156` actually call yt-dlp
+  inside `clipping/studio/`. *The call-site set was right; the count was not —
+  there were **10** dead imports across 12 files carrying one, not 9. Re-verified
+  by an AST pass rather than a grep: in each of the ten, `YoutubeDL` occurred
+  exactly once, as the import itself. The ten are deleted; afterwards no module
+  in `clipping/` uses the name unimported.*
 - **A-004** — `-v` and `-t` are free as short flags; only `-u`, `-n`, `-r` are
   taken. *Confirmed by grep over `clipping/config.py`.*
 - **A-005** — The render layer is unaffected by this refactor. *Confirmed: a real
@@ -70,5 +88,9 @@
 - (none)
 
 ## Notes
-A-007 is closed. The remaining unverified areas are the CUDA branch of the
-device resolver (this host is CPU-only) and diarization / split-screen (RC-8).
+A-007 is closed. The container uid fix is verified against a live daemon
+(2026-09-18). The CUDA branch of the device resolver is verified by injection —
+`resolve_whisper_runtime` takes `cuda_available`, and three tests drive the
+CUDA-true path — so only `whisper_cuda_available()` against a real CUDA-enabled
+CTranslate2 build remains, which needs a GPU host and nothing less. Diarization /
+split-screen (RC-8) is still unexercised.

@@ -196,6 +196,43 @@ class JobProgressEvent(BaseModel):
     percent: float = 0.0
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
+    # --- what is actually happening inside this step ----------------------
+    # `message` names the step; these say what it is doing right now, which is
+    # the difference between "Analyzing with AI..." for forty minutes and
+    # "NVIDIA, attempt 2 of 3".
+    #
+    # `detail` is the last line the pipeline printed. Keeping it generic rather
+    # than a fixed vocabulary means every step reports something useful without
+    # web/ having to know what clipping/ prints.
+    detail: Optional[str] = None
+    provider: Optional[str] = None      # "nvidia" | "gemini"
+    model: Optional[str] = None         # the exact model id being asked
+    attempt: Optional[int] = None       # retry ladder position, when retrying
+    max_attempts: Optional[int] = None
+    clip_index: Optional[int] = None    # render loop: clip N...
+    clip_total: Optional[int] = None    # ...of M
+    # When the CURRENT step began. The UI shows time-in-step, which is what
+    # tells a user whether something is stuck; time-since-creation does not.
+    step_started_at: Optional[datetime] = None
+
+
+# ---------------------------------------------------------------------------
+# Job Activity Event
+# ---------------------------------------------------------------------------
+
+class JobEvent(BaseModel):
+    """One line of output the pipeline printed while this job was running.
+
+    Captured by :mod:`web.api.activity`, which tees stdout/stderr on the worker
+    thread. ``seq`` is a per-job counter rather than a list index because the
+    feed is a ring buffer and indices would shift as it drops from the front.
+    """
+    seq: int = 0
+    ts: Optional[datetime] = None
+    level: str = "info"
+    source: str = "stdout"
+    message: str
+
 
 # ---------------------------------------------------------------------------
 # Clip Detail
@@ -237,6 +274,9 @@ class JobResponse(BaseModel):
     clips: list[ClipDetail] = Field(default_factory=list)
     error: Optional[str] = None
     log: list[str] = Field(default_factory=list)
+    # The pipeline's own console output. `log` keeps the coarse worker messages
+    # it always had; this is the detailed feed the dashboard tails live.
+    events: list[JobEvent] = Field(default_factory=list)
 
 
 class JobListResponse(BaseModel):

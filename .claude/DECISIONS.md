@@ -181,8 +181,254 @@ false".
 the client said otherwise" logic must use the same mechanism -- the payload
 dict cannot express the distinction.
 
+## DEC-014 — Read the pipeline's progress from its stdout, not from a callback
+**Context.** The dashboard could only say "Analyzing with AI..." at 36%, for as
+long as the provider took — up to a ten-attempt Gemini ladder with 60s-to-505s
+backoff plus a fallback model. The pipeline already prints everything the user
+needs (provider, model, each retry attempt and its reason, the Whisper device,
+every render sub-stage, the model downloads that look like a hang), but
+`run_pipeline(cfg)` and `studio.proses_klip(...)` expose no progress hook, so
+none of it could reach a caller.
+**Decision.** Tee `sys.stdout`/`sys.stderr` in `web/api/activity.py` and
+attribute each line to the job whose worker thread produced it, rather than
+threading an `on_progress` callback through `runner.py`, `engine.py` and
+`studio/core.py`.
+**Consequence.** `clipping/` is untouched, so the CLI pipeline's signatures and
+the render layer the regression contract protects are unchanged, and the feature
+covers every print site at once — including ones nobody enumerated. The tee
+always writes the real stream first and records inside a `try`, so it cannot
+break a print, and records only for threads inside `activity.capture(...)`, so
+uvicorn's logging is unaffected. The cost is the coupling's shape: severity is
+inferred from the pipeline's emoji, and `web/api/signals.py` — the one place
+that matches on wording — reads the retry counters. Reword those prints and the
+counter stops appearing while the line is still shown verbatim. The real limit
+is that ffmpeg is a subprocess writing to the real file descriptors, so its
+output is not in the feed; that is documented in the README.
 
-## DEC-016 — One generic OpenAI-compatible provider, not a provider per vendor
+## DEC-015 — The activity feed is capped and its persistence throttled
+**Context.** `store._persist()` re-serializes every job in the store, under the
+lock, on every write. That was affordable when only the 13 coarse worker
+messages triggered it. The pipeline's own output arrives orders of magnitude
+faster.
+**Decision.** The feed is a 500-entry ring buffer with per-job sequence numbers;
+event appends call `_persist(force=False)`, which writes at most once per
+second. Every status and progress change still writes through immediately. The
+store lock became an `RLock`.
+**Consequence.** Persistence cost is bounded by wall-clock rather than by how
+chatty the pipeline is, and no client-visible transition is delayed — the next
+unthrottled write flushes whatever was skipped, within a crash window
+best-effort persistence already had. Sequence numbers rather than list indices
+because the ring buffer drops from the front and would shift any index a client
+was holding. The `RLock` removes a whole class of deadlock: the tee turns any
+`print` into a store write, so a plain `Lock` would hang the worker the moment
+anything printed while the lock was held.
+
+## DEC-016 — Responsive layout fixes go in the base declarations, not the mobile media query
+**Context.** The dashboard scrolled sideways at 375px. The obvious home for the
+fix was the existing `@media (max-width: 768px)` block, which is where the only
+other responsive rules in the stylesheet live. Measuring first showed that would
+have been wrong: at 820px — sidebar on screen, media query not applied — a job
+page carrying a real `source_url` gives `scrollWidth` 959 against `clientWidth`
+805. The bug is not a phone bug; it is a "content is wider than its column" bug,
+and the column is narrowest *relative to its content* in the 769–1100px range,
+where the sidebar still takes 260px.
+**Decision.** `min-width: 0`, `flex-wrap: wrap` and `overflow-wrap: anywhere`
+are base declarations on `.main-content`, `.page-header`, `.progress-steps`,
+`.page-header h2/p` and `.job-info h3`. Only the cosmetic
+`justify-content: flex-start` for already-wrapped steps is mobile-scoped, because
+that one genuinely is about the wrapped state and nothing else.
+**Consequence.** The stylesheet has a single breakpoint and no tablet range, so
+anything scoped to `max-width: 768px` silently leaves 769–1100px broken. Rules
+that express "this element must be allowed to shrink" belong unscoped; only
+rules that express "at this size, arrange differently" belong in the query. The
+cost is that `.page-header` and `.progress-steps` can now wrap at *any* width,
+including desktop — which is the correct fallback (wrapping beats clipping), and
+was verified not to trigger at 1280px.
+
+## DEC-017 — `overflow-wrap: anywhere`, never `break-word`, for job-supplied strings
+**Context.** The dashboard renders raw job input — `source_url`,
+`upload_filename`, `job.id`, model ids — as unbreakable single tokens. After
+`min-width: 0` let the content column shrink, those tokens still widened it:
+`scrollWidth` 432 on a job page with a YouTube URL, and 552px for a job card
+whose title was a long filename.
+**Decision.** Use `overflow-wrap: anywhere` on the elements that render raw job
+input.
+**Consequence.** The two values are not interchangeable here. `break-word` wraps
+the visible text but **does not reduce the element's min-content width**, and
+min-content is precisely the quantity that propagates back up through
+`min-width: auto` on every flex and grid item above it — so `break-word` would
+have looked fixed in a screenshot while `scrollWidth` stayed wrong. Note that
+`.activity-message` still uses `word-break: break-word` (the legacy alias) and
+so still contributes a full-token min-content; it is contained today only
+because `.log-viewer` is its own scroll container. If that container ever loses
+`overflow`, this is where the overflow will come back.
+
+---
+
+## Index note — duplicate IDs DEC-014 and DEC-015 (recorded 2026-09-18)
+Two IDs are used twice in this file, from two different sessions:
+
+| ID | Entry | Subject |
+|---|---|---|
+| DEC-014 | first | Whisper device detection asks CTranslate2, not torch |
+| DEC-014 | second | Read the pipeline's progress from its stdout, not from a callback |
+| DEC-015 | first | Optional-flag defaults must test `model_fields_set` |
+| DEC-015 | second | The activity feed is capped and its persistence throttled |
+
+Not renumbered: this file is append-only and IDs are never reused or changed,
+so rewriting them would invalidate every reference already made to them
+elsewhere. Cite these four by **subject as well as ID**. The next free ID after
+this note is **DEC-018**.
+
+## DEC-018 — Finish the abandoned revert in `run_upload.py`, do not restore the feature
+**Context.** `run_upload.py` could not be imported: it referenced
+`youtube_uploader.safety`, deleted long ago. Investigating showed the module was
+added in `5bf93d5` and removed deliberately in `ec3010d`
+(`revert: remove safety checklist and manual approval from youtube_uploader`),
+which also stripped `safety_config` and `skip_approval` from
+`upload_manifest_to_youtube` — but never updated the CLI. So the file carried
+**two** breakages, and the intuitive fix (restore `safety.py`) would only have
+turned the `ImportError` into a `TypeError`.
+**Decision.** Finish the revert: delete the import, the `--safety-config` and
+`--no-approval` flags, the approval warning, and the two dead kwargs. Do not
+reinstate the guardrails. Keep `youtube_uploader/Safety.md` and
+`upload_safety.json`.
+**Consequence.** `run_upload.py` now matches `run_fb_upload.py` — written
+*after* the revert with no safety surface — and both READMEs, which document no
+safety flags. Nothing that functions was removed: the enforcement died in
+`ec3010d`, only references to it survived. The open **product** question is
+untouched and deliberately so: the guardrails (daily caps, minimum interval,
+manual approval) were originally written to fight YouTube bans, and were removed
+for automation, not because the risk went away. If they are ever wanted back,
+restore `git show 5bf93d5:youtube_uploader/safety.py` — **not** Safety.md's
+snippet, whose defaults (3/day, 2/run, 2h, queue 15) contradict the shipped
+`upload_safety.json` (2/day, 1/run, 24h, queue 7) and which pulls in an
+undeclared `pytz` and writes the config file back to disk.
+
+## DEC-019 — The SDK's own retry policy is disabled; the ladder in `engine.py` is the only one
+**Context.** Job `756c7ee8a2c3` reported three NVIDIA attempts and had made
+nine. `_make_nvidia_client` passed neither `max_retries` nor `timeout`, and the
+`openai` SDK (2.24.0) defaults to `max_retries=2` with `_should_retry` returning
+True for any status >= 500 — so every attempt in the visible ladder was silently
+1 + 2 HTTP requests. Three deterministic 504s at ~302s each cost 45 minutes
+instead of 15, and the log misreported what had happened.
+**Decision.** `max_retries=0` and an explicit
+`timeout=NVIDIA_REQUEST_TIMEOUT_SECONDS` (330s) on the client.
+**Consequence.** Two retry policies stacked multiplicatively, not additively,
+which is why the arithmetic was so far off. Any future client construction in
+this project must set `max_retries` explicitly — the SDK's default is not a safe
+one when the caller has its own ladder, and the failure is invisible because the
+SDK's retries produce no output. 330s is deliberately *above* the measured ~300s
+gateway limit so the server's 504 is received rather than raced to a local
+timeout: a 504 says the gateway gave up, a client timeout says nothing.
+`tests/test_nvidia_retry.py::test_client_disables_the_sdks_own_retries` pins it.
+
+## DEC-020 — The analysis has an overall time budget, checked predictively
+**Context.** Bounding each request is not the same as bounding the wait. With a
+330s per-request timeout the three-attempt ladder still runs to ~17 minutes, and
+against a provider failing deterministically every minute of that re-proves the
+same result.
+**Decision.** `NVIDIA_TOTAL_BUDGET_SECONDS = 900` caps the whole ladder. The
+check before each attempt asks whether the attempt *could* outlast the budget
+(`elapsed + REQUEST_TIMEOUT > BUDGET`), not whether the budget is already spent.
+**Consequence.** A retrospective check would be nearly useless here: a third
+attempt starting at 610s has not exceeded a 900s budget but ends at ~940s. The
+budget is deliberately >= two full-length requests, so a slow-but-healthy call is
+never cut off — cutting one off would be a regression dressed as a fix. For the
+observed failure the ladder now stops after 2 attempts and ~604s. The reason is
+printed, so it reaches the activity feed instead of the job simply ending
+sooner with no explanation.
+
+## DEC-021 — An oversized request proposes a smaller one; it does not silently shrink it
+**Context.** The 504s were not transient. Probing the live endpoint measured
+generation at **~12–13 tokens/s** and **~1200 tokens per clip** (23 required
+fields), so the gateway's **~300s** window fits about **three** clips. The
+shipped default asks for **seven**, which needs ~660s and can never complete.
+All three attempts were re-sending an arithmetically impossible request. The
+probe also eliminated the two obvious alternative causes: `max_tokens` (4096 and
+16384 behave identically) and the strict `response_format` schema (removing it
+still 504s at 302.1s).
+**Decision.** When a run fails and any attempt failed with a "too much work"
+signature — a **504**, an **`APITimeoutError`**, or a schema-conformant **empty
+clip array** — the error carries a **proposal** naming a concrete smaller clip
+count and how to apply it (`--clips N`, or Clips + Clone & Rerun). The request
+is **never** silently shrunk, and an ordinary malformed sample proposes nothing.
+**Consequence.** An earlier version of this change degraded automatically —
+7 → 3 on the next attempt — and was rejected in review: silently returning three
+clips to someone who asked for seven trades one surprise for another, and the
+user cannot tell whether they got what they asked for. Proposing keeps the
+decision with the person who set the number.
+
+Three details are load-bearing:
+- **The proposal fires at the end of the ladder, not on the first 504.** A single
+  504 can be a gateway blip rather than a capacity limit, so the retry is still
+  spent; only a run that actually fails proposes. Tested, both ways.
+- **The suggestion is capped at measured capacity, not halved.** Half of a
+  30-clip request is 15 — still five times what the provider can do, and an
+  unusable suggestion is worse than none. `_suggested_clip_count` is
+  `min(current - 1, NVIDIA_CLIPS_WITHIN_BUDGET)`, so it is always strictly
+  fewer than what failed and never above what was measured to work.
+- **It is printed as well as raised.** `web/api` tees stdout into the activity
+  feed, so a proposal that only lived in the exception would reach a different
+  surface from the one the user is watching.
+
+**This still treats the symptom.** The underlying mismatch is that `clips`
+defaults to **7** and the API permits up to **30** (`web/api/models.py:108`,
+`Field(7, ge=1, le=30)`), while this provider delivers ~3; 30 would need ~3000s
+against a 300s ceiling. Lowering the default and the bound was offered and
+deliberately **not** taken — it silently gives every user fewer clips, which is
+a product decision. If the provider stays this slow, the default is the thing to
+revisit.
+
+## DEC-022 — A Whisper transcript is persisted, and a re-run detects it without a new flag
+**Context.** The transcript existed only in memory. Any failure at or after AI
+analysis destroyed it, and so did success — a completed job's directory holds
+`gemini_response.json`, the video, clips, thumbnails and the manifest, and no
+transcript. On the measured CPU job that was 94 minutes thrown away, and it made
+the "re-run with fewer clips" proposal of DEC-021 cost ~94 minutes to act on.
+**Decision.** `resolve_transcript` writes `transcript.vtt` into `cfg.outputs_dir`
+when Whisper actually ran, and `build_config_from_payload` falls back to that
+file when no transcript was uploaded. **No new request field and no flag.**
+**Consequence.** `resolve_transcript` already treats a non-null
+`transcript_path` as "skip Whisper", so detection alone is enough — and adding a
+flag would have landed back in DEC-015 territory, where `model_dump()` always
+contains declared fields and "default this on for a reuse" logic must test
+`model_fields_set`. That is the bug that broke Clone & Rerun once already, so
+the design deliberately avoids being able to repeat it. Because `outputs_dir` is
+a pure function of `job_id` and `reuse_job_id` reuses the id, Clone & Rerun
+lands in the same directory with no dashboard change.
+
+Four constraints the round-trip imposed, each a silent-corruption risk if missed:
+- **`dedupe` must be off for a file we wrote.** `parse_vtt_subs` drops a cue
+  whose text repeats the previous cue's — correct for scraped captions with
+  rolling repetition, wrong for speech: `you know / you know` came back as one
+  `you know`. Plumbed as `cfg.transcript_dedupe`, defaulting True.
+- **`transcript_offset` must not be reapplied.** It is a manual sync correction
+  for a *supplied* file. A saved one was generated from this very video, so an
+  old offset would desync every subtitle.
+- **The write is atomic** (temp + `os.replace`). The reader raises on a
+  malformed transcript and no endpoint can delete a file from an output
+  directory, so a half-written file would hard-fail every later re-run with no
+  recovery from the UI.
+- **Saving is best-effort.** A disk error must not fail a run whose expensive
+  work has already succeeded.
+
+Two accepted, tested losses: non-final word *ends* snap to the next word's start
+(harmless — `studio/subtitles.buat_file_ass` recomputes them identically, so the
+renderer never sees the originals), and segments are **re-chunked** by
+`max_words_per_subtitle` rather than preserved, because the reader flattens words
+while Whisper also breaks at its own segment ends. No word, order or start time
+is lost. Note the CLI's `outputs_dir` is shared rather than per-job, so
+consecutive CLI runs overwrite the file; only the web path is per-job.
+
+
+> **Renumbered on merge.** DEC-023 to DEC-026 below were written as DEC-016 to
+> DEC-019 on a feature branch, before that branch was merged with work which had
+> already published its own DEC-016 to DEC-022 on `main`. Theirs were live and
+> referenced; these were not, so these moved. A commit message from that branch
+> may still cite the old number: DEC-016→023, 017→024, 018→025, 019→026.
+
+## DEC-023 — One generic OpenAI-compatible provider, not a provider per vendor
 **Context.** The human was previously pointed at Groq, xAI (Grok) and Mistral as
 free analysis providers and found none of them usable, and the Settings page had
 nowhere to put such a key in any case. Checking the providers on 2026-09-21:
@@ -210,7 +456,7 @@ form growing per vendor. Three sub-decisions:
   A half-configured endpoint fails as surely as a missing key and should fail as
   early — before ingestion and transcription have run.
 
-## DEC-017 — Settings persist to `.local/settings.json`, and an empty value clears
+## DEC-024 — Settings persist to `.local/settings.json`, and an empty value clears
 **Context.** Everything entered on the Settings page lived in a module-level dict
 in `worker.py`, so a restart discarded every API key with no warning.
 **Decision.** Persist an allow-listed subset to `.local/settings.json`
@@ -230,7 +476,7 @@ alternative:
   shadow a working `.env` key permanently, with no way to undo it from the UI.
   The bug was latent before persistence; storing values would have made it stick.
 
-## DEC-018 — The NIM default leaves the DeepSeek family for NVIDIA's own model
+## DEC-025 — The NIM default leaves the DeepSeek family for NVIDIA's own model
 **Context.** `deepseek-ai/deepseek-v4-flash-0731` reached end of life at
 2026-09-21T08:00:00Z and returns 410, so every default job failed. This is the
 third death in this slot (DEC-004 `deepseek-v4-pro`, DEC-007 this one), and the
@@ -251,7 +497,7 @@ rendered at 720x1280 from a local mp4 + vtt. Note the retirements are not
 predictable — the test pinning this string is what turns the next one into a
 test failure instead of a production 410.
 
-## DEC-019 — Salvage the first well-formed JSON value when a direct parse fails
+## DEC-026 — Salvage the first well-formed JSON value when a direct parse fails
 **Context.** The first live run through the new `openai_compat` provider failed
 all three attempts with `JSONDecodeError`. The model had returned a valid
 `json_schema` array preceded by a bare `[` on its own line — a fragment of its

@@ -1,5 +1,18 @@
 # CHECKPOINT
 
+> **Two streams of work were merged on 2026-09-21.** Both are complete. One made
+> the analysis provider pluggable and reworked the job-creation UI; the other
+> fixed the NVIDIA retry behaviour, capped the time budget and persisted the
+> Whisper transcript. They touched the same file, `clipping/engine.py`, and the
+> merge kept both: the retry ladder, the SDK-retry fix and the time budget now
+> apply to **every** provider, because they live in the shared core that the
+> NVIDIA and custom-endpoint wrappers both call.
+>
+> **Tier-1 on the merged tree: 419 passed, 0 failed.** `compileall` clean.
+> Decisions DEC-023 to DEC-026 were renumbered from DEC-016 to DEC-019 during
+> this merge; see the note in DECISIONS.md.
+
+
 ## Last task — provider settings, job guidance, render options (COMPLETE, VERIFIED)
 - **Task:** Add a generic OpenAI-compatible analysis provider, persist the Settings
   page values, add provider guidance + warnings to New Job, expose the render
@@ -20,13 +33,303 @@
 | `a0f7769` | S5 Settings page custom-endpoint card |
 | `a8505a7` | S6+S7 New Job banner, warnings, quality preset, Advanced, dead toggle removed |
 | `43a6f1a` | Fix: the new settings test aborted CI collection |
-| `a154579` | S8 env samples, compose passthrough, README, DEC-016/017, A-009 |
+| `a154579` | S8 env samples, compose passthrough, README, DEC-023/024, A-009 |
 
 **S6 and S7 were merged** into one commit: the warnings S6 adds depend on controls
 S7 introduces (split-screen and its trigger), so two commits on the same file
 could not have been reverted independently — the only reason to split them.
 
 ### Verified against a running stack (not just unit tests)
+
+## In progress
+- **Task:** Job `756c7ee8a2c3` burned 2h22m and produced nothing. Fix the NVIDIA
+  retry behaviour, cap the time budget, and warn before a slow CPU Whisper run.
+- **Phase:** IMPLEMENT — 4 stages done: `8877645` SDK retries, `92e5ff8` time
+  budget, `f8146e7` Whisper warning, `46d341c` propose-a-smaller-request.
+  **Stage 5 done:** `c68eb3d` persist the transcript and let a re-run use it.
+- **Tier-1 final:** pytest **369 passed, 0 failed** locally; `compileall` clean.
+- **Tier-1 under CI conditions (RC-12):** **346 passed, 18 skipped, 0 failed**,
+  matching CI's own counts. This host has no `ensurepip`, so the pytest-only
+  venv RC-12 asks for cannot be built here; simulate it instead with a
+  `sys.meta_path` finder that raises `ModuleNotFoundError` for every non-stdlib
+  import except pytest and the project, run with
+  `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`. Both details matter: a bare `ImportError`
+  is re-raised by `pytest.importorskip` instead of skipping, and without
+  disabling autoload the locally-installed pytest plugins load and fail.
+  **Run this before pushing any new test** — a green local run does not mean a
+  green CI, which is how `tqdm` got through.
+- **Destination:** fast-forward `main` and push once stage 5 lands (human asked
+  to hold until then).
+- **Tier-1 now:** pytest **352 passed, 0 failed**; `compileall` clean.
+- **Checkpoint commit:** `d03fd41` — clean tree, branch
+  `Feature/magical-greider-2955e5`, identical to `origin/main`. Roll back here.
+- **Tier-1 baseline at `d03fd41`:** pytest **327 passed, 0 failed**;
+  `compileall` clean; `npm run build` green.
+- **Scope approved by the human:** (1) stop the hidden SDK retries, (2) probe the
+  live endpoint, (3) cap the total time budget, (4) warn before a slow CPU
+  Whisper run. Explicitly out: changing the Whisper model default.
+
+### The 45 minutes were 9 requests, not 3 — measured, not inferred
+`_make_nvidia_client` (`clipping/engine.py:317`) builds `OpenAI(...)` with
+**neither `timeout` nor `max_retries`**. The installed SDK (2.24.0) defaults to
+`DEFAULT_MAX_RETRIES = 2` and a 600s read timeout, and
+`BaseClient._should_retry` returns `True` for any status >= 500 — so **504 is
+retried twice inside the SDK, invisibly**. Each `attempt N/3` line in the log is
+1 + 2 = **3 HTTP requests**; the ladder is 9 requests, reported as 3.
+
+Proof from the job's own timestamps, before any probe was run:
+- Gaps *between* attempts are **5s** and **15s** — exactly
+  `NVIDIA_BACKOFF_SECONDS = (5, 15)`. So all ~15 minutes elapsed *inside* one
+  `create()` call.
+- A single 900s request is impossible: it would have exceeded the SDK's 600s
+  read timeout and raised `APITimeoutError`, not `InternalServerError: 504`.
+
+### Live probe results (2026-09-18, real endpoint, `max_retries=0`)
+Each row is ONE http request. Model `deepseek-ai/deepseek-v4-flash-0731`.
+
+| Variant | Elapsed | Outcome |
+|---|---|---|
+| 60s transcript, 1024 tok, 1 clip | **144.1s** | OK — but `completion_tokens=2`, an empty clip array |
+| 1211s transcript, 16384 tok, 7 clips (what the job sent) | **302.1s** | **`InternalServerError: 504`** |
+
+| 1211s, 4096 tok, 7 clips | 124.0s | OK — but `completion_tokens=2`, empty array again |
+| 1211s, 16384 tok, **3 clips** | **291.8s** | **OK — 3911 tokens, 3 real clips** |
+| 1211s, 16384 tok, 7 clips, **no schema** | 302.1s | **504** |
+| 1211s, 4096 tok, **3 clips** | **278.8s** | **OK — 3371 tokens, 3 real clips** |
+
+So the gateway cuts a request off at **~300s**, and 3 × 302s ≈ the 15:09 / 15:08
+/ 15:07 seen per attempt. The failure is generation time, not input size — the
+1211s transcript is only ~27 KB.
+
+### What the probe ruled out, and what it implicates
+Two plausible causes are **eliminated**: `max_tokens` is not the driver (4096 vs
+16384 changes nothing about success), and neither is the strict `response_format`
+schema — dropping it entirely still 504s at 302.1s, so this is not
+constrained-decoding overhead.
+
+**Clip count is the driver.** The arithmetic closes:
+- Generation rate measured at **~12–13 tokens/s** (3911 tok / 291.8s; 3371 tok /
+  278.8s).
+- Cost per clip **~1200 tokens** (23 required fields each).
+- A 300s gateway window therefore allows **~3800 tokens ≈ 3 clips**.
+- 7 clips needs ~8400 tokens ≈ **~660s**, i.e. more than twice the limit. It can
+  never complete, which is why all three attempts failed identically.
+
+**The shipped default is `clips = 7`** (`web/api/models.py:108`,
+`Field(7, ge=1, le=30)`). So the default request is ~2.3x what this provider can
+deliver, and the documented maximum of 30 is ~10x unreachable — it would need
+roughly 3000s against a 300s limit. Even 3 clips lands at 291.8s against ~302s,
+about 3% of headroom.
+
+Unresolved and possibly separate: every 7-clip request that did *not* 504
+returned an **empty array** with `completion_tokens=2` — the same
+`ValueError: NVIDIA returned an empty clip array` the artifacts record from an
+earlier job. 3-clip requests never did this.
+
+### Verification of this round
+| # | Claim | Evidence |
+|---|---|---|
+| V-1 | Each visible attempt was 3 http requests | SDK source (`DEFAULT_MAX_RETRIES=2`, `_should_retry` true for >=500) + the job's own 5s/15s inter-attempt gaps + the impossibility of a 900s request under a 600s read timeout |
+| V-2 | The gateway cuts off at ~300s | Live probe: the job's exact payload returned 504 at **302.1s** in a single request |
+| V-3 | `max_tokens` is not the cause | 4096 and 16384 behave identically (124.0s empty array vs 302.1s 504) |
+| V-4 | The strict schema is not the cause | Dropping `response_format` entirely still 504s at **302.1s** |
+| V-5 | Clip count is the cause | 3 clips → **291.8s, 3911 tokens, 3 real clips**; 7 clips → 504. ~12–13 tok/s × ~1200 tok/clip ⇒ ~3 clips per 300s window |
+| V-6 | The live 504 will trigger the proposal | The probe read `status_code` off the real exception and printed `InternalServerError(504)`, exactly what `_nvidia_request_too_large` keys on |
+| V-7 | Unit behaviour | 352 tests; every new test checked against the pre-fix code — `KeyError: 'max_retries'`, the unbudgeted loop running all 3 attempts, the 3 proposal tests, and the duplicate CUDA warning reporting "appeared 2 times" |
+
+### Live end-to-end against the real API (2026-09-18)
+Ran the real `analyze_with_nvidia` against the live endpoint with `clips=7`,
+on the *auto-degrade* build that preceded `46d341c`:
+
+```
+🔁 attempt 1/3 -> ⚠️ InternalServerError: 504
+✂️ 7 clips is more than this model can generate — asking for 3
+🔁 attempt 2/3 (3 clips) -> RESULT: 3 clips in 581.0s, ranks [1, 2, 3]
+```
+
+That is the evidence behind the number the proposal hands the user: **3 clips
+really does succeed on this endpoint immediately after a 7-clip 504**, and the
+581.0s total matches the probe (302s + 279s).
+
+### The transcript is discarded — found while checking the proposal's cost
+`resolve_transcript(cfg)` (`web/api/worker.py:221`) returns the transcript in
+memory and `analyze_with_ai` (`:244`) consumes it. **Nothing ever writes it to
+disk** — verified on a *successful* job too: `outputs/275d7caf2436/` holds
+`gemini_response.json`, the source mp4, clips, thumbnails and
+`render_manifest.json`, and no transcript. The failed job's directory is empty.
+
+Consequence, and why it matters here: the proposal added in `46d341c` tells the
+user to re-run with fewer clips, and on a CPU job doing so **re-runs the
+94-minute transcription**. Measured cost of the two designs:
+
+| | Time | Outcome |
+|---|---|---|
+| Auto-degrade (rejected in review) | 581s | 3 clips delivered |
+| Propose (chosen) + re-run on CPU | ~604s + **~94 min** | 3 clips, after a full re-transcribe |
+
+It is also a standalone bug: a 94-minute artifact is destroyed by any failure at
+or after analysis, in a project whose premise is local-first and which already
+accepts `--transcript file.vtt`. Stage 5 fixes it.
+
+### Regression contract for this task
+| # | Must keep working | Proven by |
+|---|---|---|
+| N-1 | The retry ladder still retries genuine transient failures | `tests/test_nvidia_retry.py` (37 tests) stays green |
+| N-2 | Fatal errors (bad key, 4xx) still fail fast, not after 3 attempts | same suite |
+| N-3 | `response_format` 400-fallback to prompt-only still works | same suite |
+| N-4 | The activity feed still shows each attempt and its reason | it reads stdout; print sites unchanged |
+| N-5 | Gemini path untouched | `REQUEST_TIMEOUT_MS` at `:1120` is Gemini's and is not in this diff |
+
+## Previous task (closed)
+- **Task:** Close the four remaining follow-ups, then merge to `main` and push.
+  **COMPLETE** — stages `eb1feca`, `d4d5c78`, `a269a8f`, `f296eb3`.
+  Scope approved by the human: (1) the remaining layout items, (2) the `gdown`
+  packaging bug, (3) `run_upload.py`'s broken `youtube_uploader.safety` import,
+  (4) the dead yt-dlp imports in `clipping/studio/`.
+- **Phase:** closed out. Pushed: `origin/main` moved `105cddc` → `d03fd41`,
+  and the main checkout was fast-forwarded to match.
+
+## Previous task (closed)
+- **Task:** The dashboard scrolled sideways at phone width. **COMPLETE.**
+- **Phase:** closed out.
+- **Checkpoint commit:** `105cddc` was the baseline. Stages: `ac622fb` the
+  content column, `cbc389b` unbreakable tokens. Artifacts: `36aa45f` (before),
+  and this commit.
+- **Tier-1:** `python -m pytest -q` = **327 passed, 0 failed** before and after
+  (needs `PYTHONPYCACHEPREFIX` locally — see the root `__pycache__` note below).
+  `npm run build` green; the stylesheet went 13.19 kB -> 13.38 kB.
+- **Tier-2:** no E2E suite exists in this project, so Tier 2 is browser
+  measurement — done, see below.
+- **Tier-3:** no test added. There is no frontend test infrastructure at all
+  (no vitest, no playwright, no `test` script in `web/dashboard/package.json`);
+  a real guard needs a headless browser asserting `scrollWidth == clientWidth`
+  per route, which is a new dependency and harness and so its own task. Listed
+  under follow-ups.
+- **Open questions:** none.
+
+### Root cause, measured (do not re-derive)
+`.main-content` is a flex item of `.app-layout` (`display:flex`) with `flex: 1`
+and **no authored `min-width`**, so it kept the flex default `min-width: auto`,
+which resolves to its **min-content width** and overrides `flex-shrink: 1`
+entirely. Measured in a 375px viewport: `main` = 427.234px, its `min-content` =
+427px, and `min-width: 0` brings it to exactly 375px.
+
+All three suspects in the original brief were absent — `grep` finds **zero**
+`min-width` and **zero** `calc()` in the whole 897-line stylesheet, and the
+`@media (max-width: 768px)` block *does* correctly override `margin-left` and
+`padding`. The minimum was implicit, which is why it was not greppable.
+
+**It was never a phone-only bug.** At 820px — sidebar on screen, media query not
+applied — a job page with a real `source_url` gave `scrollWidth` 959 against
+`clientWidth` 805. See DEC-016 for why the rules are base declarations.
+
+### Contract for the layout fix (do not undo)
+- `.main-content { min-width: 0 }` is load-bearing, not defensive. Remove it and
+  the column goes back to refusing to shrink below its widest child.
+- The wrap and `overflow-wrap` rules are **base declarations on purpose**
+  (DEC-016). Moving them into `@media (max-width: 768px)` re-breaks 769–1100px
+  while looking correct on every phone.
+- `overflow-wrap: anywhere`, **not** `break-word` (DEC-017). Only `anywhere`
+  reduces min-content width, and min-content is what travels back up the tree.
+  A `break-word` swap looks identical in a screenshot and leaves `scrollWidth`
+  wrong.
+- `.log-viewer` and every `.activity-*` rule are **outside this diff**. The feed
+  is contained because `.log-viewer` is its own scroll container; that is what
+  keeps `.activity-message`'s `word-break: break-word` from mattering.
+
+### Verification of the layout fix (2026-09-18)
+Measured against a Vite dev server running **this worktree** on `:5174` against
+the live backend on `:8000`. The `:5173` server serves the main checkout and
+would not have shown the edit.
+
+| # | Contract item | Result |
+|---|---|---|
+| R-1 | No horizontal scroll at 375px | **PASS** — `scrollWidth == clientWidth == 375` on `/`, `/new`, `/settings` and three job pages; zero elements extend past the viewport |
+| R-2 | Same at 414px and 820px | **PASS** — 414/414 and 820/820 (805 where a scrollbar is present) |
+| R-3 | Desktop unchanged | **PASS** — at 1280px the sidebar is still 260px, `main` 1020px, and all six step dots sit on one row |
+| R-4 | Live activity panel intact | **PASS** — headline, `🤖 NVIDIA` + `deepseek-ai/deepseek-v4-flash-0731` chip, both clocks (`34m 41s on this step · 35m 55s total`), console header, 90 feed lines across three severity classes. `.chip-sub` measures 205px against its 204.697px `max-width` |
+| R-5 | Feed follows the tail only when not scrolled up | **PASS** — console scrolled to top stayed at `scrollTop 0` across a poll cycle. `.log-viewer` is not in the diff |
+| R-6 | Job cards keep their fields | **PASS** — cards 343px wide, still showing `36% · Analyzing with AI...` |
+| R-7 | Python suite unaffected | **PASS** — 327 passed, 0 failed |
+
+Two **stressed** cases, both real overflows found by injecting realistic content
+rather than by reading code, both fixed and re-measured at 375px:
+
+| Case | Before | After |
+|---|---|---|
+| Job page with a real YouTube `source_url` | `scrollWidth` 432 | 375 |
+| Job card with a long uploaded filename | `scrollWidth` 568, card 552px | 375 |
+
+### Verification of the follow-up round (2026-09-18)
+| Stage | Result |
+|---|---|
+| `eb1feca` layout remainder | `scrollWidth == clientWidth` on all five routes at **320**, 375 and 1280px. `.config-grid` renders the same three 303px columns at 1280px as the inline style did |
+| `d4d5c78` gdown | Declaration only; `pytest` 327 passed |
+| `a269a8f` dead imports | AST pass: `YoutubeDL` occurred exactly once in each of the ten (the import). Diff is 10 files / 10 deletions / 0 insertions. `compileall` clean, 327 tests green. **RC-7 not re-verified by a live render** — no cv2, no mediapipe, no docker access on this host |
+| `f296eb3` run_upload | With only the absent google-auth chain stubbed: `import run_upload` OK, `--help` builds, every kwarg it passes is accepted by `upload_manifest_to_youtube` |
+
+### Status of the previous task
+Live progress / debug feed — **COMPLETE**, stages `58c07a5`, `e83c364`,
+`19fd3d7`, `06fb8bc`, `6c325df`, `96d22ec`, docs `105cddc`. Its contract is
+below and still binding.
+
+### The feature, in one line
+Everything the pipeline prints now reaches the job that printed it, and the job
+page says which provider and model is being asked, which retry attempt it is on,
+which clip of how many is rendering, and how long it has been on this step.
+
+### Contract for the activity feed (do not undo)
+- `clipping/` is **untouched**. Progress is read from the pipeline's stdout, not
+  from a callback (DEC-014). Do not thread `on_progress` through `runner.py` /
+  `engine.py` / `studio/core.py` without revisiting that decision.
+- The tee writes the real stream **first** and records inside a `try`. Recording
+  must never be able to break a `print`.
+- `store._lock` is an **RLock** on purpose: the tee turns any `print` into a
+  store write, so a plain `Lock` deadlocks the worker if anything prints while
+  the lock is held (DEC-015).
+- `web/api/signals.py` is the **only** place that matches on the pipeline's
+  wording. Keep it that way; everything else is generic.
+- Event appends use `_persist(force=False)`. Anything a client waits on
+  (status, progress, completion) must keep forcing.
+- ffmpeg output is **not** in the feed and cannot be — it is a subprocess on the
+  real file descriptors. Documented in the README; do not claim otherwise.
+- **Progress-bar redraws must not enter the feed.** They go to `progress.detail`
+  only. Without this, two 12-second clips fill the 500-entry buffer (90% bars)
+  and evict everything worth reading. A bar's identity is the label *before* the
+  percentage — a digit-blind normalization folds Rank 2's bar into Rank 1's —
+  and the percent-sign requirement is what keeps the retry counters out of the
+  coalescing entirely.
+
+### Docker / device verification (2026-09-18, live daemon)
+| Item | Status |
+|---|---|
+| `d845413` container uid | **VERIFIED.** `osc-backend` runs `uid=1001 gid=1001`; `/app/uploads` and `/app/outputs` owned `1001:1001`; in-container write probe OK; `HOME=/tmp`; `/tmp/Ultralytics` 0777. The host `.env` correctly sets `DOCKER_UID/GID=1001` (this host's uid is 1001, not 1000) |
+| CUDA branch of the device resolver | **As verified as a CPU-only host allows.** `resolve_whisper_runtime` takes an injectable `cuda_available`; `test_auto_with_cuda_picks_cuda_and_float16`, `test_explicit_cuda_is_respected_when_available` and `test_detection_uses_ctranslate2_when_it_reports_a_device` drive the CUDA-true path. Only `whisper_cuda_available()` against a real CUDA-enabled CTranslate2 build is left, and only a GPU host closes it |
+| `9a9adc5` Vite timeout | **VERIFIED at runtime.** After restarting the frontend so the new config was actually loaded: a 20MB upload rate-limited to 50KB/s through the dev proxy returned `HTTP 200 in 390.56s`. That is 90s past Node's default 300s `requestTimeout`, which is the timeout that used to kill the request with nothing in the backend log. The earlier 300MB test never reached the window because loopback was too fast |
+
+### Tier-2 — verified in a browser against the running containers
+A real job (`video.mp4` + `subtitles.vtt`, 2 clips) run end to end on the live
+stack. The panel rendered:
+- the provider/model chip `NVIDIA · deepseek-ai/deepseek-v4-flash-0731`
+- `attempt 2 of 3`, amber once past the first attempt
+- time-on-step and total, both ticking
+- the quiet notice after 45s of silence
+- the feed, severity-coloured, carrying things that were previously invisible:
+  `⚠️ 718 of 2095 words (34%) in subtitles.vtt had backwards timestamps and were
+  dropped` and `⚠️ NVIDIA attempt 1 failed | ValueError: NVIDIA returned an
+  empty clip array.`
+- the job list showing `36% · Asking nvidia... ⏱ 6m 26s`
+
+### Known state of the running stack
+- Job `d4a133c4e9cd` is stuck in `analyzing` forever: its worker thread died when
+  the containers were recreated at 08:26. It is a dead record, not a running job;
+  delete it when convenient. It predates this work.
+- The repo-root `__pycache__/` is owned by root (from a docker run predating the
+  uid fix), so a local `compileall` needs `PYTHONPYCACHEPREFIX`. CI is unaffected.
+- ~~The dashboard scrolls sideways at 375px~~ — **FIXED** 2026-09-18
+  (`ac622fb`, `cbc389b`). See the layout-fix contract above.
+
+### Verified against real services (previous task, 2026-09-17/18)
 | What | Evidence |
 |---|---|
 | S1 fix is live | `GET /api/settings` returns `default_whisper_device: "auto"`, `default_ai_provider: "nvidia"` |
@@ -43,20 +346,28 @@ could not have been reverted independently — the only reason to split them.
 
 ### Verified against the LIVE free NVIDIA endpoint (the user authorised it)
 
+### Still unverified
+- **RC-8 diarization / split-screen.** Needs `pyannote.audio` + `torch` + an
+  accepted HuggingFace model agreement. Unchanged.
+- **`whisper_cuda_available()` against a real CUDA-enabled CTranslate2 build.**
+  Needs a GPU host; the branch logic around it is covered by injection.
+- Everything else previously carried here — the container uid fix, the Vite
+  timeout fix, the CUDA branch — is resolved above.
+
 Running it for real found two bugs that no test could have caught.
 
 | What | Result |
 |---|---|
-| **Default model was dead** | `deepseek-v4-flash-0731` hit EOL at 2026-09-21T08:00:00Z — **the same day**. Every default job failed with 410. Replaced with `nvidia/nemotron-3-super-120b-a12b` (DEC-018) |
+| **Default model was dead** | `deepseek-v4-flash-0731` hit EOL at 2026-09-21T08:00:00Z — **the same day**. Every default job failed with 410. Replaced with `nvidia/nemotron-3-super-120b-a12b` (DEC-025) |
 | Retry classification, live | The 410 was correctly called fatal and **not** retried: one call, not three |
 | NVIDIA path after the S3 refactor | Full CLI run: 55 segments, AI picked 15.2–32.8s and 61.0–86.7s with titles and BGM moods, **2 real clips rendered at 720x1280 h264**, first attempt |
-| **Custom endpoint, first live run** | Failed all 3 attempts on `JSONDecodeError` — a reasoning model leaked a bare `[` before its own valid array. Fixed by salvaging the first balanced JSON value (DEC-019) |
+| **Custom endpoint, first live run** | Failed all 3 attempts on `JSONDecodeError` — a reasoning model leaked a bare `[` before its own valid array. Fixed by salvaging the first balanced JSON value (DEC-026) |
 | Custom endpoint after the fix | Same run succeeds on **attempt 1** and renders at 720x1280 |
 | Fast preset, end to end | `--render-height 720` produced genuine 720x1280 output |
 
 ### Not verified
 - ~~No live call through `openai_compat`~~ — **done**, and it found a real bug
-  (DEC-019). Both providers now verified end to end against a live endpoint.
+  (DEC-026). Both providers now verified end to end against a live endpoint.
   Still untested: a *non-NVIDIA* host (OpenRouter, Groq, Ollama). The protocol is
   the same, but each provider's quirks are its own.
 - RC-8 (diarization / split-screen render) remains unexercised, as before. S7
@@ -161,12 +472,50 @@ vs 244 without** — the LLM would otherwise have seen every sentence ~3x.
   (`91b7712`, `832300c`); guarded by `tests/test_web_job_fields.py`.
 
 ## Known pre-existing breakage (not from this task)
-- `run_upload.py:17` imports `youtube_uploader.safety`, which does not exist.
-  Excluded from the `compileall` CI job for that reason.
+- ~~`run_upload.py:17` imports `youtube_uploader.safety`~~ — **FIXED**
+  (`f296eb3`). **Two corrections to what this entry used to say:** it was *not*
+  excluded from the `compileall` CI job — `.github/workflows/ci.yml:29` has
+  always included `run_upload.py`, and `compileall` byte-compiles without
+  executing imports, so it structurally cannot catch a missing module. And the
+  file had **two** breakages, not one: the dead import plus two keyword
+  arguments (`safety_config`, `skip_approval`) that `upload_manifest_to_youtube`
+  no longer accepts, so restoring `safety.py` alone would only have turned the
+  `ImportError` into a `TypeError`. See DEC-018.
 - `gdown` is declared in `pyproject.toml` only, so `--hook-source <drive-url>`
   fails in every documented install path.
 
 ## Follow-ups deliberately not done
+- **No frontend test infrastructure.** A `scrollWidth == clientWidth` guard per
+  route needs a headless browser (playwright/vitest + a harness), which is a
+  dependency decision of its own. Until then the layout fix has Tier-2 evidence
+  only.
+- **`web/dashboard` ships no lockfile.** Only `node_modules/` is gitignored, so
+  `npm install` produces an untracked `package-lock.json` that nothing pins.
+  That conflicts with the "pin and verify" rule; adding one is a dependency task.
+- ~~`.config-grid` missing from the media query~~ and ~~inline
+  `minmax(300px, 1fr)` at `NewJob.jsx:384`~~ — **both FIXED** (`eb1feca`), and
+  both were mis-described. `.config-grid` was *dead CSS* that no JSX referenced,
+  not a rule missing a breakpoint; the grid now uses it. The NewJob grid does
+  not overflow at 375px or 320px — it breaks below ~316px — and the real
+  overflow at 320px was the provider chip, which nothing had listed.
+- **CI cannot catch an orphaned import.** `.github/workflows/ci.yml:28` claims
+  the `compileall` step "catches orphaned references in modules the test suite
+  does not import". It cannot — `compileall` byte-compiles without executing
+  imports, which is why `run_upload.py` stayed broken. A real guard is one line:
+  `python -c "import run_upload"`. Not added here because CI's installed deps
+  were not verified against it.
+- **The two dependency manifests diverge in both directions.**
+  `requirements.txt` carries 9 packages `pyproject.toml` lacks (`numpy<2.0.0`,
+  `pyannote.audio`, `torch`, `torchaudio`, `fastapi`, `uvicorn`,
+  `python-multipart`, `pydantic`, `edge-tts`). Only the `gdown` case was fixed;
+  reconciling them is a dependency task.
+- **Product question, not a bug: do YouTube uploads want guardrails again?**
+  `upload_safety.json` is tracked but orphaned, and `Safety.md` exists to
+  re-enable the feature. See DEC-018 — restore from `5bf93d5`, never from
+  Safety.md.
 - `hook_manager.py` (`--hook-source`) is now the only network fetch left in the
   CLI pipeline, which is inconsistent with local-first.
-- 9 dead `from yt_dlp import YoutubeDL` imports remain in `clipping/studio/`.
+- ~~9 dead `from yt_dlp import YoutubeDL` imports remain in `clipping/studio/`~~
+  — **FIXED** (`a269a8f`). The count was wrong: there were **10**, across 12
+  files carrying the import. `studio/effects.py` and `studio/transitions.py`
+  keep theirs (real call sites at `:86` and `:156`, per DEC-001).

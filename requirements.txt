@@ -1,5 +1,6 @@
 yt-dlp
 faster-whisper
+tqdm
 google-genai
 openai
 numpy<2.0.0
@@ -7,6 +8,7 @@ mediapipe
 opencv-python
 Pillow
 requests
+gdown
 python-dotenv
 google-api-python-client
 google-auth
