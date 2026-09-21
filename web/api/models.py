@@ -267,7 +267,7 @@ class SettingsResponse(BaseModel):
     default_ratio: str = "9:16"
     default_font_style: str = "HORMOZI"
     default_whisper_model: str = "large-v3"
-    default_whisper_device: str = "cuda"
+    default_whisper_device: str = "auto"
     default_ai_provider: str = "nvidia"
     gpu_available: bool = False
 

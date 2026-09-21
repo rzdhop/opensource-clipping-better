@@ -10,6 +10,9 @@ import subprocess
 
 from fastapi import APIRouter
 
+# Imported rather than repeated so the API cannot drift from the pipeline.
+from clipping.config import AI_PROVIDER, WHISPER_DEVICE
+
 from ..models import SettingsRequest, SettingsResponse, SystemHealthResponse
 from .. import store as job_store
 from .. import worker
@@ -63,8 +66,13 @@ async def get_settings() -> SettingsResponse:
         default_ratio=env.get("DEFAULT_RATIO", "9:16"),
         default_font_style=env.get("DEFAULT_FONT_STYLE", "HORMOZI"),
         default_whisper_model=env.get("DEFAULT_WHISPER_MODEL", "large-v3"),
-        default_whisper_device=env.get("DEFAULT_WHISPER_DEVICE", "cuda"),
-        default_ai_provider=env.get("DEFAULT_AI_PROVIDER", "gemini"),
+        # These two fall back to the REAL pipeline defaults. They used to say
+        # "cuda"/"gemini", which was wrong on both counts: the device default
+        # became "auto" with the resolver (DEC-014) and the provider default
+        # became "nvidia" (DEC-002). A fresh install reported settings it does
+        # not actually use.
+        default_whisper_device=env.get("DEFAULT_WHISPER_DEVICE", WHISPER_DEVICE),
+        default_ai_provider=env.get("DEFAULT_AI_PROVIDER", AI_PROVIDER),
         gpu_available=_check_gpu(),
     )
 
