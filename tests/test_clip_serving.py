@@ -366,3 +366,78 @@ def test_an_expired_signature_triggers_a_refresh_rather_than_a_silent_stall():
     source = job_detail_source()
     assert "onError=" in source
     assert "recoverExpiredMedia" in source
+
+
+# ------------------------------------------- the SPA fallback that was not one
+#
+# Found while verifying this task in a real browser: opening /job/<id> directly
+# answered {"detail":"Not Found"}. StaticFiles(html=True) does NOT fall back to
+# index.html despite how it reads -- on a miss it looks for a 404.html and, not
+# finding one, RAISES 404. So every client-side route (/new, /settings,
+# /job/<id>) died on refresh, deep-link or a shared link. Clicking through from
+# the home page worked, because that never leaves the SPA, which is why it
+# survived: it is invisible unless you reload.
+
+def spa_client(dist, monkeypatch):
+    from fastapi.testclient import TestClient
+    import web.api.app as appmod
+
+    app = appmod.app
+    saved = list(app.router.routes)
+    # Reproduce the production branch: no "no dashboard built" fallback route,
+    # and the real _SPAStaticFiles mounted last.
+    app.router.routes = [
+        r for r in saved
+        if not (getattr(r, "path", None) == "/" and r.__class__.__name__ == "APIRoute")
+    ]
+    app.mount("/", appmod._SPAStaticFiles(directory=str(dist), html=True), name="ui-test")
+    monkeypatch.setattr(app.router, "routes", app.router.routes, raising=False)
+
+    client = TestClient(app)
+    yield client
+    app.router.routes = saved
+
+
+@pytest.fixture
+def spa(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    pytest.importorskip("httpx")
+    dist = tmp_path / "dist"
+    (dist / "assets").mkdir(parents=True)
+    (dist / "index.html").write_text("<!doctype html><div id=root></div>", encoding="utf-8")
+    (dist / "assets" / "index-abc.js").write_text("console.log(1)", encoding="utf-8")
+    yield from spa_client(dist, monkeypatch)
+
+
+@pytest.mark.parametrize("path", ["/", "/new", "/settings", "/job/2773bd83c7b6"])
+def test_every_client_side_route_serves_the_app(spa, path):
+    response = spa.get(path)
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert "id=root" in response.text
+
+
+def test_a_real_asset_is_still_served_as_itself(spa):
+    response = spa.get("/assets/index-abc.js")
+    assert response.status_code == 200
+    assert "console.log" in response.text
+
+
+@pytest.mark.parametrize("path", [
+    "/assets/index-gone.js",
+    "/favicon.ico",
+    "/manifest.webmanifest",
+    "/icon.svg",
+])
+def test_a_missing_file_is_still_404(spa, path):
+    """Falling back here would answer a missing bundle or icon with HTML, turning
+    a cache problem into a blank page with nothing in the console."""
+    assert spa.get(path).status_code == 404
+
+
+def test_the_api_is_untouched_by_the_fallback(spa):
+    """The mount is last, so /api/* must still reach its routes rather than
+    being answered with index.html."""
+    assert spa.get("/api/health").status_code == 200
+    assert spa.get("/api/jobs").status_code == 401
+    assert spa.get("/api/nope").status_code == 404

@@ -145,10 +145,49 @@ _DIST = os.path.abspath(
 # volume docker-compose creates as a mount point on the host -- and mounting
 # StaticFiles over an empty directory answers 404 for every page, including the
 # fallback below that would have explained the problem.
+class _SPAStaticFiles(StaticFiles):
+    """StaticFiles that really does fall back to index.html.
+
+    ``html=True`` does NOT do this, despite how it reads. On a miss it looks for
+    a ``404.html`` and, finding none, raises 404 -- so every client-side route
+    (`/job/<id>`, `/new`, `/settings`) answered `{"detail":"Not Found"}` the
+    moment it was refreshed, deep-linked or opened from a shared link. Clicking
+    through from the home page worked, because that never leaves the SPA, which
+    is why this survived: it is invisible unless you reload.
+
+    Only paths that could plausibly BE a client-side route fall back. A miss
+    under /assets/ or with a file extension still 404s -- answering a missing
+    bundle or a missing favicon with HTML turns a cache problem into a blank page
+    with no error in the console. And /api/ still 404s as JSON, so an unknown
+    endpoint does not hand an API client a page of HTML to parse.
+    """
+
+    # Prefixes that are never a client-side route, whatever the router says.
+    NEVER_SPA = ("api/", "assets/", "docs", "openapi.json")
+
+    @classmethod
+    def _is_spa_route(cls, path):
+        if path.startswith(cls.NEVER_SPA):
+            return False
+        # "job/abc123" yes; "index-abc.js", "favicon.ico", "manifest.webmanifest" no.
+        return "." not in path.rsplit("/", 1)[-1]
+
+    async def get_response(self, path, scope):
+        from starlette.exceptions import HTTPException as StarletteHTTPException
+
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            # StaticFiles RAISES on a miss rather than returning a 404 response,
+            # so checking response.status_code here catches nothing -- the first
+            # version of this class did exactly that and changed nothing.
+            if exc.status_code != 404 or not self._is_spa_route(path):
+                raise
+            return await super().get_response("index.html", scope)
+
+
 if os.path.isfile(os.path.join(_DIST, "index.html")):
-    # html=True makes unknown paths fall back to index.html, which is what a
-    # single-page app's client-side routes need to survive a refresh.
-    app.mount("/", StaticFiles(directory=_DIST, html=True), name="ui")
+    app.mount("/", _SPAStaticFiles(directory=_DIST, html=True), name="ui")
 else:
     @app.get("/")
     async def _no_dashboard():
