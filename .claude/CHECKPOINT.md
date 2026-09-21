@@ -2,20 +2,21 @@
 
 ## In progress
 - **Task:** The clips rendered but the app could not show them; then land
-  everything on `main`. **COMPLETE through Stage 9.** Remaining: Stage 10
-  (docs/artifacts — this file) and the fast-forward of `main`.
+  everything on `main`. **COMPLETE — all stages committed and verified in a
+  real browser.**
   Plan: `/home/ubuntu/.claude/plans/i-want-the-code-breezy-starlight.md`
-- **Phase:** DOCUMENT. **Next action:** commit the artifacts, then
-  `git checkout main && git merge --ff-only feature/rzdhop-clips-rearchitecture
-  && git push origin main`.
+- **Phase:** DONE, pending the human's acknowledgement on Tier 2 (below).
 - **Open questions:** none.
 - **Branch:** `feature/rzdhop-clips-rearchitecture`.
 - **Checkpoint commit:** `233b860` (pre-task). Tier-1 there: **1008 passed**.
-- **Tier-1 now:** pytest **1176 passed, 0 failed**. +168: 46 came from
-  `origin/main` in the merge, 122 are new here.
-- **Tier-2 (E2E browser suite):** NOT run — the human has not been asked yet,
-  and this host cannot build the dashboard in place (see the blocker below).
-  **The task is not closed until they acknowledge that deferral.**
+- **Tier-1 now:** pytest **1186 passed, 0 failed**. +178: 46 came from
+  `origin/main` in the merge, 132 are new here.
+- **Tier-2:** this project has **no E2E browser suite** — no playwright, no
+  cypress, no `e2e/` — so there is nothing to run. Done instead: the real app
+  was started with the dashboard built in a scratch dir, and job
+  `2773bd83c7b6` was opened and driven in a browser (results below).
+  **The human still owes an explicit acknowledgement that no E2E suite exists
+  and that the browser check stands in its place.**
 
 ### What was wrong, in one paragraph
 `c53949b` put `Depends(require_token)` on the whole files router and the token
@@ -39,8 +40,21 @@ per-file URLs (DEC-048).
 | 7 | `2fb25b1` | dashboard: poster, `.srt` button, expiry recovery |
 | 8 | `a383fa4` | the subtitle font was DejaVuSans on every clip (DEC-049) |
 | 9 | `9bfa0ff` | stop fetching the private glitch video |
+| 10 | `65d0e52` | docs, DEC-048/049, CHECKPOINT reordered |
+| 10b | `5207985` | SPA deep links 404'd — found in the browser, not by a test |
 
-### Verified end to end, against the human's real job `2773bd83c7b6`
+### Verified in a real browser, against the human's real job `2773bd83c7b6`
+All 7 cards render with their thumbnail as the `poster`. All 7 videos fetched
+**206 Partial Content carrying no credential**; `readyState` 4, 1080x1920,
+27.3 s. A seek to 0:20 succeeded and stayed at `readyState` 4, so Range seeking
+works. The Download link is
+`/api/outputs/…/highlight_rank_1_ready.mp4?exp=…&sig=…&download=1` with
+`download="highlight_rank_1_ready.mp4"`, answering **200 `video/mp4`,
+`Content-Disposition: attachment`** — an `.mp4`, not the `.json` that started
+this. The `.srt` button is present and signed. Every client-side route serves
+the app, missing assets still 404, `/api/jobs` still 401.
+
+### And at the HTTP level
 All 7 clips: `.mp4` + `.jpg` + `.srt` fetched over HTTP with **no headers at
 all**, 206 on a Range request, `?download=1` giving `attachment` with the right
 filename, two consecutive reads returning byte-identical URLs, the token
