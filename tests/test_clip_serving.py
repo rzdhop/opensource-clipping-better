@@ -317,3 +317,52 @@ def test_a_job_list_signs_clips_too(client, job_with_clips, monkeypatch):
     for job in response.json()["jobs"]:
         for clip in job.get("clips", []):
             assert "sig=" in clip["download_url"]
+
+
+# ------------------------------------------- what the dashboard actually renders
+#
+# Read from source, in the style of test_the_token_never_travels_in_a_query_string.
+# These three are all silent failures: a missing poster just looks like a black
+# box, and "?download=1" appended to a URL that already has a query string
+# produces a 401 that looks like a signing bug.
+
+import pathlib
+
+JOB_DETAIL = (
+    pathlib.Path(__file__).resolve().parents[1]
+    / "web" / "dashboard" / "src" / "pages" / "JobDetail.jsx"
+)
+
+
+def job_detail_source():
+    return JOB_DETAIL.read_text(encoding="utf-8")
+
+
+def test_the_clip_card_uses_the_thumbnail_as_a_poster():
+    """Otherwise the grid is black rectangles until each clip is played, which is
+    what it looked like before thumbnail_url was populated at all."""
+    assert "poster={clip.thumbnail_url" in job_detail_source()
+
+
+def test_the_clip_card_offers_the_subtitle_file():
+    assert "clip.srt_url" in job_detail_source()
+
+
+def test_the_download_flag_is_appended_with_an_ampersand_not_a_question_mark():
+    """The media URL already carries ?exp=&sig=. A second '?' makes `sig` part of
+    the previous parameter's value, the signature never verifies, and the symptom
+    is a 401 indistinguishable from a signing bug."""
+    source = job_detail_source()
+    assert "'?'}download=1" in source or "&download=1" in source
+    # The naive form must not appear.
+    assert "+ '?download=1'" not in source
+    assert "}?download=1" not in source
+
+
+def test_an_expired_signature_triggers_a_refresh_rather_than_a_silent_stall():
+    """A tab left open past the TTL keeps playing from its buffer and then stalls
+    on the next range request. Stalling silently is the symptom this whole change
+    exists to remove."""
+    source = job_detail_source()
+    assert "onError=" in source
+    assert "recoverExpiredMedia" in source

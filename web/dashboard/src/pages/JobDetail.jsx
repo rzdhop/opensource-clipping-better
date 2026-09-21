@@ -185,6 +185,26 @@ function JobDetail() {
     })
   }
 
+  // The media URLs carry ?exp=&sig= (web/api/auth.py), so appending a flag needs
+  // & and not ? -- getting that wrong produces a 401 that looks like a signing bug.
+  const asDownload = (url) => (url ? `${url}${url.includes('?') ? '&' : '?'}download=1` : url)
+
+  // An expiring URL can go stale in a tab left open overnight. The bytes already
+  // buffered keep playing and the NEXT range request 401s, so the player just
+  // stalls -- which is the exact symptom this whole change exists to remove. One
+  // re-fetch mints a fresh signature. Guarded so a genuinely broken file cannot
+  // become a reload loop.
+  const [recovered, setRecovered] = useState(false)
+  const recoverExpiredMedia = async () => {
+    if (recovered) return
+    setRecovered(true)
+    try {
+      setJob(await fetchJob(jobId))
+    } catch (err) {
+      console.error('Could not refresh the clip URLs:', err)
+    }
+  }
+
   useEffect(() => {
     let sse = null
 
@@ -309,7 +329,14 @@ function JobDetail() {
           <div className="clip-grid">
             {job.clips.map((clip, i) => (
               <div key={i} className="clip-card">
-                <video className="clip-video" controls preload="metadata" src={clip.download_url} />
+                <video
+                  className="clip-video"
+                  controls
+                  preload="metadata"
+                  poster={clip.thumbnail_url || undefined}
+                  src={clip.download_url}
+                  onError={recoverExpiredMedia}
+                />
                 <div className="clip-body">
                   <div className="clip-title">{clip.title || clip.title_en || `Clip ${clip.rank}`}</div>
                   <div className="clip-stats">
@@ -318,7 +345,20 @@ function JobDetail() {
                     <span>Rank #{clip.rank}</span>
                   </div>
                   <div className="clip-actions">
-                    <a href={clip.download_url} download className="btn btn-secondary btn-sm">⬇️ Download</a>
+                    {/* download={clip.filename} so the saved name is right even in a
+                        browser that ignores Content-Disposition on a same-origin link. */}
+                    <a
+                      href={asDownload(clip.download_url)}
+                      download={clip.filename || undefined}
+                      className="btn btn-secondary btn-sm"
+                    >⬇️ Download</a>
+                    {clip.srt_url && (
+                      <a
+                        href={asDownload(clip.srt_url)}
+                        download={clip.srt_url.split('/').pop().split('?')[0]}
+                        className="btn btn-secondary btn-sm"
+                      >💬 .srt</a>
+                    )}
                   </div>
                 </div>
               </div>
