@@ -1,6 +1,15 @@
 # ASSUMPTIONS
 
 ## Unconfirmed
+- **A-010** — NIM model ids in this project have a shelf life measured in weeks:
+  three defaults have now died in about six weeks. The current pin,
+  `nvidia/nemotron-3-super-120b-a12b`, is assumed durable because it is NVIDIA's
+  own current-generation model on their own endpoint, but that is a bet, not a
+  guarantee. `tests/test_config_cli.py` pins the string so the next retirement
+  surfaces as a test failure rather than a production 410. Also note: a model
+  listed by `/v1/models` may still answer 404 for a given account, so the
+  catalogue alone is not proof of availability.
+
 - **A-009** — Groq and Mistral do not reliably offer a usable free API key,
   despite their own documentation describing free tiers on 2026-09-21. This rests
   on the human's own attempt, not on a page we can cite, and it is the reason

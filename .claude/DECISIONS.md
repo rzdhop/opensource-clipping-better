@@ -229,3 +229,42 @@ alternative:
   `env.get(NAME, os.environ.get(NAME, ""))`, so a persisted empty string would
   shadow a working `.env` key permanently, with no way to undo it from the UI.
   The bug was latent before persistence; storing values would have made it stick.
+
+## DEC-018 — The NIM default leaves the DeepSeek family for NVIDIA's own model
+**Context.** `deepseek-ai/deepseek-v4-flash-0731` reached end of life at
+2026-09-21T08:00:00Z and returns 410, so every default job failed. This is the
+third death in this slot (DEC-004 `deepseek-v4-pro`, DEC-007 this one), and the
+DeepSeek chat family is now absent from the platform entirely — only
+`deepseek-coder-6.7b-instruct` remains, which is a code model.
+Four candidates were probed through the real production path:
+`nvidia/llama-3.1-nemotron-70b-instruct` and `mistralai/mistral-large-2-instruct`
+are listed in `/v1/models` but answer **404 for this account** — being listed is
+not the same as being available. `openai/gpt-oss-20b` worked but took 587s for a
+single clip. `nvidia/nemotron-3-super-120b-a12b` returned a complete
+schema-valid result in 62s.
+**Decision.** Default to `nvidia/nemotron-3-super-120b-a12b`.
+**Consequence.** The pinned default is NVIDIA's own current generation on
+NVIDIA's own endpoint, which is the least likely thing to be retired from under
+us. `metadata.py`'s so-called DeepSeek fixup is generic alias handling, so
+leaving the family costs nothing. **Verified live**, end to end: two real clips
+rendered at 720x1280 from a local mp4 + vtt. Note the retirements are not
+predictable — the test pinning this string is what turns the next one into a
+test failure instead of a production 410.
+
+## DEC-019 — Salvage the first well-formed JSON value when a direct parse fails
+**Context.** The first live run through the new `openai_compat` provider failed
+all three attempts with `JSONDecodeError`. The model had returned a valid
+`json_schema` array preceded by a bare `[` on its own line — a fragment of its
+reasoning scratchpad in the content. `finish_reason` was `stop`; nothing was
+truncated. NVIDIA's own path never hits this because it sends
+`extra_body={"chat_template_kwargs": {"thinking": False}}`, which suppresses the
+reasoning pass. An arbitrary OpenAI-compatible endpoint has no equivalent
+switch, and sending that NIM-only field to one would risk a 400.
+**Decision.** Keep the direct `json.loads` as the fast path. On failure only,
+scan for the first balanced JSON array or object, tracking string state and
+escapes so a bracket inside a title cannot truncate the span.
+**Consequence.** Reasoning models are usable through the generic provider
+without a vendor-specific flag. Salvaged content still passes through every
+existing shape check, so this cannot smuggle a malformed clip through, and
+unsalvageable content still raises retryably. Verified live: the same run that
+failed three times now succeeds on the first attempt and renders.

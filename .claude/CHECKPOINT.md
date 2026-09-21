@@ -7,7 +7,7 @@
 - **Phase:** closed out. All 8 planned stages committed (S6 and S7 merged — see below).
 - **Open questions:** none.
 - **Baseline before the work:** `5bdd31c`, 254 tests passing.
-- **Tier-1 now:** 298 passed locally; **282 passed / 16 skipped in a clean
+- **Tier-1 now:** 304 passed locally; **282 passed / 16 skipped in a clean
   pytest-only venv**, which is what CI runs (DEC-012); compileall green;
   `main.py --help` green.
 
@@ -41,11 +41,24 @@ could not have been reverted independently — the only reason to split them.
 | **Payload round-trip** | Captured the real POST the browser sends (fetch stubbed, no live API call), fed it through `JobCreateRequest` + the adapter: **0 fields dropped**, and every Fast-preset value reached cfg (`render_output_height` 720, cq 30, crf 26, bilinear) |
 | Custom endpoint gate | With settings loaded from disk the worker gate passes; clearing the model returns `('openai_compat_model', 'OPENAI_COMPAT_MODEL')` |
 
+### Verified against the LIVE free NVIDIA endpoint (the user authorised it)
+
+Running it for real found two bugs that no test could have caught.
+
+| What | Result |
+|---|---|
+| **Default model was dead** | `deepseek-v4-flash-0731` hit EOL at 2026-09-21T08:00:00Z — **the same day**. Every default job failed with 410. Replaced with `nvidia/nemotron-3-super-120b-a12b` (DEC-018) |
+| Retry classification, live | The 410 was correctly called fatal and **not** retried: one call, not three |
+| NVIDIA path after the S3 refactor | Full CLI run: 55 segments, AI picked 15.2–32.8s and 61.0–86.7s with titles and BGM moods, **2 real clips rendered at 720x1280 h264**, first attempt |
+| **Custom endpoint, first live run** | Failed all 3 attempts on `JSONDecodeError` — a reasoning model leaked a bare `[` before its own valid array. Fixed by salvaging the first balanced JSON value (DEC-019) |
+| Custom endpoint after the fix | Same run succeeds on **attempt 1** and renders at 720x1280 |
+| Fast preset, end to end | `--render-height 720` produced genuine 720x1280 output |
+
 ### Not verified
-- **No live call was made to any provider with the new `openai_compat` path.** The
-  request is assembled and the client built, but no real custom endpoint was
-  contacted — doing so would spend the user's credits without asking. First real
-  run confirms it.
+- ~~No live call through `openai_compat`~~ — **done**, and it found a real bug
+  (DEC-019). Both providers now verified end to end against a live endpoint.
+  Still untested: a *non-NVIDIA* host (OpenRouter, Groq, Ollama). The protocol is
+  the same, but each provider's quirks are its own.
 - RC-8 (diarization / split-screen render) remains unexercised, as before. S7
   makes split-screen reachable from the dashboard for the first time, which is
   exactly why its trigger defaults to `face`.
@@ -61,6 +74,9 @@ could not have been reverted independently — the only reason to split them.
 - `wiki/2-Getting-Started.md` still calls `NVIDIA_API_KEY` optional.
 - `use_camera_switch` is still unexposed in the dashboard; it always needs
   diarization, with no `face` escape.
+- **`--clips N` is only a prompt hint.** Nothing truncates the model's list, so a
+  run with `--clips 1` rendered 3 clips when the model returned 3. Pre-existing;
+  clamping it would change output for existing users, so it was logged not fixed.
 
 ## Status of the previous task
 - **Task:** Local-first refactor — **COMPLETE and VERIFIED END-TO-END**
