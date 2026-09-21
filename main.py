@@ -59,11 +59,13 @@ def main():
     if not render_only:
         missing = missing_provider_key(cfg)
         if missing:
+            from clipping.config import PROVIDER_KEYS
+
             _, env_name = missing
-            other = "gemini" if cfg.ai_provider == "nvidia" else "nvidia"
+            others = [p for p in PROVIDER_KEYS if p != cfg.ai_provider]
             print(f"❌ ERROR: {env_name} not found (active provider: {cfg.ai_provider}).")
             print(f"   Set via: export {env_name}='your-key' or create a .env file")
-            print(f"   Or switch provider: --ai-provider {other}")
+            print(f"   Or switch provider: --ai-provider {' | '.join(others)}")
             sys.exit(1)
 
     transcript_path = getattr(cfg, "transcript_path", None)
@@ -92,7 +94,11 @@ def main():
     if cfg.use_split_screen:
         print(f"   Dynamic Split: {'ON' if cfg.use_dynamic_split else 'OFF'}")
         print(f"   Split Trigger: {cfg.split_trigger}")
-    active_model = cfg.nvidia_model if cfg.ai_provider == "nvidia" else cfg.gemini_model
+    active_model = {
+        "nvidia": getattr(cfg, "nvidia_model", ""),
+        "gemini": getattr(cfg, "gemini_model", ""),
+        "openai_compat": getattr(cfg, "openai_compat_model", ""),
+    }.get(cfg.ai_provider, "")
     print(f"   AI          : {cfg.ai_provider} ({active_model})")
     if getattr(cfg, "watermark_enabled", False):
         wm_type = "Text" if cfg.watermark_text else "Image"

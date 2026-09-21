@@ -398,9 +398,31 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--ai-provider",
-        choices=["gemini", "nvidia"],
+        choices=["gemini", "nvidia", "openai_compat"],
         default=AI_PROVIDER,
-        help="AI provider for video analysis (gemini or nvidia).",
+        help=(
+            "AI provider for video analysis. 'nvidia' and 'gemini' both have a "
+            "free tier; 'openai_compat' points at any OpenAI-compatible "
+            "endpoint you already have a key for (OpenRouter, Groq, Mistral, "
+            "xAI, a local Ollama, ...)."
+        ),
+    )
+    p.add_argument(
+        "--openai-compat-base-url",
+        default=None,
+        help=(
+            "Base URL of the OpenAI-compatible endpoint, including the version "
+            "path, e.g. https://openrouter.ai/api/v1. Defaults to "
+            "$OPENAI_COMPAT_BASE_URL. Only used with --ai-provider openai_compat."
+        ),
+    )
+    p.add_argument(
+        "--openai-compat-model",
+        default=None,
+        help=(
+            "Model id the custom endpoint expects. Defaults to "
+            "$OPENAI_COMPAT_MODEL. Only used with --ai-provider openai_compat."
+        ),
     )
     p.add_argument(
         "--nvidia-model",
@@ -724,16 +746,36 @@ def _build_parser() -> argparse.ArgumentParser:
 PROVIDER_KEYS = {
     "nvidia": ("api_key_nvidia", "NVIDIA_API_KEY"),
     "gemini": ("api_key_gemini", "GOOGLE_API_KEY"),
+    "openai_compat": ("api_key_openai_compat", "OPENAI_COMPAT_API_KEY"),
+}
+
+# Settings that are not keys but that a provider still cannot run without.
+# Same (attr, ENV_NAME) shape as PROVIDER_KEYS so the gate's return type and
+# every one of its callers stay unchanged.
+PROVIDER_REQUIRED_EXTRA = {
+    "openai_compat": (
+        ("openai_compat_base_url", "OPENAI_COMPAT_BASE_URL"),
+        ("openai_compat_model", "OPENAI_COMPAT_MODEL"),
+    ),
 }
 
 
 def missing_provider_key(cfg) -> tuple[str, str] | None:
-    """Return ``(attr, ENV_NAME)`` when the active provider has no key, else None."""
+    """Return ``(attr, ENV_NAME)`` for the first thing the active provider is
+    missing, else None.
+
+    A half-configured custom endpoint counts as missing: a base URL with no
+    model name fails just as surely as a missing key, and it should fail just
+    as early.
+    """
     provider = getattr(cfg, "ai_provider", AI_PROVIDER)
-    attr, env_name = PROVIDER_KEYS.get(provider, PROVIDER_KEYS[AI_PROVIDER])
-    if getattr(cfg, attr, ""):
-        return None
-    return attr, env_name
+    required = (PROVIDER_KEYS.get(provider, PROVIDER_KEYS[AI_PROVIDER]),)
+    required += PROVIDER_REQUIRED_EXTRA.get(provider, ())
+
+    for attr, env_name in required:
+        if not getattr(cfg, attr, ""):
+            return attr, env_name
+    return None
 
 
 def build_config(argv: list[str] | None = None) -> SimpleNamespace:
@@ -900,6 +942,15 @@ def build_config(argv: list[str] | None = None) -> SimpleNamespace:
         ai_provider=args.ai_provider,
         api_key_nvidia=os.environ.get("NVIDIA_API_KEY", ""),
         nvidia_model=args.nvidia_model,
+        # A flag wins over the environment; the environment is read here rather
+        # than at import so monkeypatched values still apply.
+        api_key_openai_compat=os.environ.get("OPENAI_COMPAT_API_KEY", ""),
+        openai_compat_base_url=(
+            args.openai_compat_base_url or os.environ.get("OPENAI_COMPAT_BASE_URL", "")
+        ),
+        openai_compat_model=(
+            args.openai_compat_model or os.environ.get("OPENAI_COMPAT_MODEL", "")
+        ),
         gemini_model=args.gemini_model,
         gemini_fallback_model=args.gemini_fallback_model,
         load_gemini_json=args.load_gemini_json,

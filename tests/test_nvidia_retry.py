@@ -406,3 +406,127 @@ def test_the_real_guided_json_rejection_is_still_fatal():
     )
 
     assert _nvidia_rejects_response_format(exc) is False
+
+
+# ------------------------------------------- the generic OpenAI-compatible path
+#
+# analyze_with_nvidia is now a thin wrapper over _analyze_openai_compatible,
+# which also serves a user-supplied endpoint (OpenRouter, Groq, Mistral, xAI, a
+# local Ollama). These tests pin the three things that must not blur together:
+# the fake-client seam, the NIM-only extra_body, and the fail-fast gate.
+
+@pytest.fixture
+def compat_cfg(cfg):
+    cfg.ai_provider = "openai_compat"
+    cfg.api_key_openai_compat = "compat-key"
+    cfg.openai_compat_base_url = "https://openrouter.ai/api/v1"
+    cfg.openai_compat_model = "meta-llama/llama-3.3-70b-instruct"
+    return cfg
+
+
+def test_make_nvidia_client_is_still_the_seam(monkeypatch, cfg):
+    """The single most dangerous regression in the extraction.
+
+    Every test in this file replaces engine._make_nvidia_client. If the wrapper
+    ever captured it as a default argument instead of looking it up at call
+    time, the patch would stop taking effect and these 'unit' tests would start
+    making real HTTP calls while still passing locally.
+    """
+    client = FakeClient([GOOD_JSON])
+    monkeypatch.setattr(engine, "_make_nvidia_client", lambda c: client)
+
+    engine.analyze_with_nvidia("[0.0 - 1.0] hi\n", cfg)
+
+    assert client.calls, "the patched factory was never used"
+
+
+def test_nvidia_still_sends_the_nim_chat_template_kwarg(run):
+    _, client = run([GOOD_JSON])
+
+    assert client.calls[0]["extra_body"] == {"chat_template_kwargs": {"thinking": False}}
+
+
+def test_openai_compat_sends_no_vendor_extra_body(monkeypatch, compat_cfg):
+    """Sending NIM's extra_body to another provider would 400 the request."""
+    client = FakeClient([GOOD_JSON])
+    monkeypatch.setattr(engine, "_make_openai_compat_client", lambda c: client)
+
+    result = engine.analyze_with_openai_compat("[0.0 - 1.0] hi\n", compat_cfg)
+
+    assert result == [GOOD_CLIP]
+    assert "extra_body" not in client.calls[0]
+    assert client.calls[0]["model"] == "meta-llama/llama-3.3-70b-instruct"
+
+
+def test_openai_compat_still_asks_for_structured_output(monkeypatch, compat_cfg):
+    client = FakeClient([GOOD_JSON])
+    monkeypatch.setattr(engine, "_make_openai_compat_client", lambda c: client)
+
+    engine.analyze_with_openai_compat("[0.0 - 1.0] hi\n", compat_cfg)
+
+    assert client.calls[0]["response_format"]["type"] == "json_schema"
+
+
+def test_openai_compat_keeps_the_response_format_fallback(monkeypatch, compat_cfg):
+    """DEC-013 applies here more than anywhere: an arbitrary endpoint is the
+    most likely one to reject json_schema."""
+    monkeypatch.setattr(engine.time, "sleep", lambda s: None)
+    rejection = _exc("BadRequestError", status=400)
+    rejection.args = ("unknown field `response_format`",)
+    client = FakeClient([rejection, GOOD_JSON])
+    monkeypatch.setattr(engine, "_make_openai_compat_client", lambda c: client)
+
+    assert engine.analyze_with_openai_compat("x", compat_cfg) == [GOOD_CLIP]
+    assert "response_format" in client.calls[0]
+    assert "response_format" not in client.calls[1]
+
+
+def test_base_url_trailing_slash_is_trimmed(compat_cfg):
+    compat_cfg.openai_compat_base_url = "https://openrouter.ai/api/v1/"
+
+    assert engine._openai_compat_base_url(compat_cfg) == "https://openrouter.ai/api/v1"
+
+
+def test_log_label_names_the_host_not_the_whole_url(compat_cfg):
+    """Some gateways carry a token in the URL path, and this string lands in
+    job logs the user may share."""
+    compat_cfg.openai_compat_base_url = "https://gw.example.com/v1/secret-token-abc"
+
+    assert engine._openai_compat_host(compat_cfg) == "gw.example.com"
+
+
+def test_dispatch_routes_to_openai_compat(monkeypatch, compat_cfg):
+    monkeypatch.setattr(
+        engine, "analyze_with_openai_compat", lambda *a, **k: [GOOD_CLIP]
+    )
+
+    assert engine.analyze_with_ai("transcript", compat_cfg) == [GOOD_CLIP]
+
+
+@pytest.mark.parametrize(
+    "attr,env_name",
+    [
+        ("api_key_openai_compat", "OPENAI_COMPAT_API_KEY"),
+        ("openai_compat_base_url", "OPENAI_COMPAT_BASE_URL"),
+        ("openai_compat_model", "OPENAI_COMPAT_MODEL"),
+    ],
+)
+def test_dispatch_fails_fast_on_a_half_configured_endpoint(
+    monkeypatch, compat_cfg, attr, env_name
+):
+    """A base URL with no model fails as surely as a missing key -- and should
+    fail just as early, before ingestion and transcription have run."""
+    setattr(compat_cfg, attr, "")
+    monkeypatch.setattr(
+        engine, "analyze_with_openai_compat", lambda *a, **k: pytest.fail("should not run")
+    )
+
+    with pytest.raises(RuntimeError, match=env_name):
+        engine.analyze_with_ai("transcript", compat_cfg)
+
+
+def test_unknown_provider_lists_all_three_choices(cfg):
+    cfg.ai_provider = "openai"  # still not a provider: the id is openai_compat
+
+    with pytest.raises(ValueError, match="openai_compat"):
+        engine.analyze_with_ai("transcript", cfg)

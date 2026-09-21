@@ -5,8 +5,8 @@
   page values, add provider guidance + warnings to New Job, and expose the
   render-quality options. Plan approved 2026-09-21.
 - **Phase:** IMPLEMENT
-- **Current stage:** S3 (generic provider in engine + CLI) — S1, S2 done
-- **Next action:** extract the NVIDIA analysis body into a shared OpenAI-compatible core, then add the `openai_compat` provider
+- **Current stage:** S4 (web API surface for the provider) — S1-S3 done
+- **Next action:** add openai_compat to the AIProvider enum, JobCreateRequest, Settings models, the adapter and the settings route
 - **Open questions:** none. The four CLARIFY questions were answered: one generic
   `openai_compat` provider (not named Groq/Mistral/xAI), persist settings to a
   git-ignored JSON file, preset + Advanced section on New Job, `docs/studio` static

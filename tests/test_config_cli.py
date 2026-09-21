@@ -211,11 +211,14 @@ def test_provider_can_be_overridden(video):
     assert cfg.ai_provider == "gemini"
 
 
-@pytest.mark.parametrize(
-    "provider,key_attr,env_name",
-    [("nvidia", "api_key_nvidia", "NVIDIA_API_KEY"),
-     ("gemini", "api_key_gemini", "GOOGLE_API_KEY")],
-)
+PROVIDER_CASES = [
+    ("nvidia", "api_key_nvidia", "NVIDIA_API_KEY"),
+    ("gemini", "api_key_gemini", "GOOGLE_API_KEY"),
+    ("openai_compat", "api_key_openai_compat", "OPENAI_COMPAT_API_KEY"),
+]
+
+
+@pytest.mark.parametrize("provider,key_attr,env_name", PROVIDER_CASES)
 def test_missing_provider_key_names_the_right_env_var(
     video, monkeypatch, provider, key_attr, env_name
 ):
@@ -226,7 +229,61 @@ def test_missing_provider_key_names_the_right_env_var(
     assert missing_provider_key(cfg) == (key_attr, env_name)
 
     setattr(cfg, key_attr, "a-key")
+    # A custom endpoint needs a base URL and a model too, so satisfy those
+    # before asserting the gate is clear.
+    if provider == "openai_compat":
+        cfg.openai_compat_base_url = "https://example.test/v1"
+        cfg.openai_compat_model = "some-model"
     assert missing_provider_key(cfg) is None
+
+
+def test_every_provider_is_covered_by_the_parametrisation():
+    """A new provider added to PROVIDER_KEYS without a case here would go
+    entirely untested -- and the gate failing open means jobs die late."""
+    from clipping.config import PROVIDER_KEYS
+
+    assert {case[0] for case in PROVIDER_CASES} == set(PROVIDER_KEYS)
+
+
+@pytest.mark.parametrize(
+    "attr,env_name",
+    [
+        ("openai_compat_base_url", "OPENAI_COMPAT_BASE_URL"),
+        ("openai_compat_model", "OPENAI_COMPAT_MODEL"),
+    ],
+)
+def test_custom_endpoint_needs_more_than_a_key(video, attr, env_name):
+    """A key alone cannot reach an endpoint whose URL or model is unset."""
+    from clipping.config import missing_provider_key
+
+    cfg = build_config(["--video", str(video), "--ai-provider", "openai_compat"])
+    cfg.api_key_openai_compat = "a-key"
+    cfg.openai_compat_base_url = "https://example.test/v1"
+    cfg.openai_compat_model = "some-model"
+    assert missing_provider_key(cfg) is None
+
+    setattr(cfg, attr, "")
+    assert missing_provider_key(cfg) == (attr, env_name)
+
+
+def test_custom_endpoint_reads_flags_and_env(video, monkeypatch):
+    monkeypatch.setenv("OPENAI_COMPAT_BASE_URL", "https://from-env.test/v1")
+    monkeypatch.setenv("OPENAI_COMPAT_MODEL", "env-model")
+    monkeypatch.setenv("OPENAI_COMPAT_API_KEY", "env-key")
+
+    cfg = build_config(["--video", str(video), "--ai-provider", "openai_compat"])
+    assert cfg.openai_compat_base_url == "https://from-env.test/v1"
+    assert cfg.openai_compat_model == "env-model"
+    assert cfg.api_key_openai_compat == "env-key"
+
+    cfg = build_config([
+        "--video", str(video),
+        "--ai-provider", "openai_compat",
+        "--openai-compat-base-url", "https://from-flag.test/v1",
+        "--openai-compat-model", "flag-model",
+    ])
+    assert cfg.openai_compat_base_url == "https://from-flag.test/v1"
+    assert cfg.openai_compat_model == "flag-model"
 
 
 def test_missing_provider_key_ignores_the_other_providers_key(video):
