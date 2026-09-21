@@ -302,3 +302,64 @@ def test_the_rejection_is_401_and_not_422(client):
 
 def test_a_401_tells_the_client_how_to_authenticate(client):
     assert client.get("/api/jobs").headers.get("www-authenticate") == "Bearer"
+
+
+# ------------------------------------------------------- output path safety
+
+def test_an_absolute_segment_cannot_escape_the_outputs_directory():
+    """os.path.join discards everything before an absolute component:
+    join("/app/outputs", "/etc", "passwd") is "/etc/passwd".
+
+    Starlette's router happens to block that today, because a path parameter
+    does not match "/". That is an accident of routing, not a defence --
+    changing the route to {filename:path}, the obvious edit the first time
+    someone wants nested outputs, would make it exploitable immediately. So the
+    check is tested directly, below the router.
+    """
+    pytest.importorskip("fastapi")
+    from fastapi import HTTPException
+
+    from web.api.routes.files import resolve_output_path
+
+    for job_id, filename in [
+        ("/etc", "passwd"),
+        ("..", "secrets"),
+        ("../..", "etc/passwd"),
+        ("job", "/etc/passwd"),
+        ("job", ".."),
+        ("", "x"),
+        (".", "x"),
+    ]:
+        with pytest.raises(HTTPException) as info:
+            resolve_output_path(job_id, filename)
+        assert info.value.status_code == 400, (job_id, filename)
+
+
+def test_an_ordinary_output_path_still_resolves():
+    pytest.importorskip("fastapi")
+    from web.api.routes.files import OUTPUTS_DIR, resolve_output_path
+
+    resolved = resolve_output_path("abc123", "highlight_rank_1_ready.mp4")
+    assert resolved.startswith(os.path.realpath(OUTPUTS_DIR) + os.sep)
+    assert resolved.endswith("highlight_rank_1_ready.mp4")
+
+
+def test_a_filename_containing_dots_is_not_rejected():
+    """The old guard was a substring test for '..', which also rejected a
+    legitimate name that happened to contain two dots."""
+    pytest.importorskip("fastapi")
+    from web.api.routes.files import resolve_output_path
+
+    assert resolve_output_path("job", "my..clip.mp4").endswith("my..clip.mp4")
+
+
+@pytest.mark.parametrize("path", [
+    "/api/outputs/..%2f..%2f..%2fetc/passwd",
+    "/api/outputs/%2fetc/passwd",
+    "/api/outputs/x/..%2f..%2f..%2f..%2fetc%2fpasswd",
+    "/api/outputs/%2e%2e/%2e%2e/etc/passwd",
+])
+def test_traversal_attempts_over_http_are_refused(client, path):
+    response = client.get(path, headers=BEARER)
+    assert response.status_code in (400, 404)
+    assert "root:" not in response.text

@@ -109,15 +109,46 @@ async def upload_video(file: UploadFile = File(...)) -> dict:
     }
 
 
+def resolve_output_path(job_id, filename=None):
+    """A path inside OUTPUTS_DIR, or raise 400. Never trusts the input.
+
+    The previous guard was ``if ".." in job_id or ".." in filename``. Two
+    problems with that, and the second is the dangerous one:
+
+    * it is a substring test, so it also rejects a legitimate name containing
+      two dots, and
+    * it does not address the actual escape, which is ``os.path.join``
+      discarding everything before an **absolute** component:
+      ``os.path.join("/app/outputs", "/etc", "passwd")`` is ``/etc/passwd``.
+
+    Starlette's router happens to prevent that today, because a path parameter
+    does not match ``/``. That is an accident of routing, not a defence:
+    changing the route to ``{filename:path}`` -- the obvious edit the first time
+    someone wants nested outputs -- would make it exploitable immediately, and
+    this API is now reachable over a network.
+
+    So the path is resolved and checked for containment, which holds whatever
+    the router does. Symlinks are resolved too, since an output directory is a
+    bind mount the user controls.
+    """
+    parts = [job_id] if filename is None else [job_id, filename]
+    for part in parts:
+        if not part or part in (".", "..") or os.path.isabs(part):
+            raise HTTPException(status_code=400, detail="Invalid path")
+
+    base = os.path.realpath(OUTPUTS_DIR)
+    target = os.path.realpath(os.path.join(base, *parts))
+
+    if target != base and not target.startswith(base + os.sep):
+        raise HTTPException(status_code=400, detail="Invalid path")
+    return target
+
+
 @router.get("/api/outputs/{job_id}/{filename}")
 async def serve_output(job_id: str, filename: str):
     """Serve a rendered clip or other output file."""
-    # Prevent path traversal
-    if ".." in job_id or ".." in filename:
-        raise HTTPException(status_code=400, detail="Invalid path")
-
-    file_path = os.path.join(OUTPUTS_DIR, job_id, filename)
-    if not os.path.exists(file_path):
+    file_path = resolve_output_path(job_id, filename)
+    if not os.path.isfile(file_path):
         raise HTTPException(status_code=404, detail="File not found")
 
     # Determine media type
@@ -146,11 +177,8 @@ async def serve_output(job_id: str, filename: str):
 @router.get("/api/outputs/{job_id}")
 async def list_outputs(job_id: str) -> dict:
     """List all output files for a job."""
-    if ".." in job_id:
-        raise HTTPException(status_code=400, detail="Invalid path")
-
-    job_dir = os.path.join(OUTPUTS_DIR, job_id)
-    if not os.path.exists(job_dir):
+    job_dir = resolve_output_path(job_id)
+    if not os.path.isdir(job_dir):
         raise HTTPException(status_code=404, detail="Job output directory not found")
 
     files = []
