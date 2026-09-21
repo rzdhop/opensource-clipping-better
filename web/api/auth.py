@@ -17,9 +17,12 @@ pure functions stay testable in the pytest-only CI environment.
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 import os
 import secrets
+import time
+from urllib.parse import quote
 
 try:
     # Imported at module scope, but guarded, for one specific reason: the
@@ -145,6 +148,125 @@ def announce(token=None, *, host_hint=None):
     print(f"   Stored in {TOKEN_PATH} (0600). Set API_TOKEN to pin it.")
     if host_hint:
         print(f"   From any device on your tailnet: {host_hint}")
+
+
+# ---------------------------------------------------------------------------
+# Signed media URLs
+#
+# A <video src> and an <a href download> are requests the BROWSER makes, not
+# fetch() calls, so they cannot carry a header -- and every /api/outputs/ route
+# is header-gated. The result was the bug this exists to fix: the player showed
+# nothing, the download button saved the 401's JSON body (the browser rewrote the
+# extension to match its application/json type), and a pasted URL said the file
+# was not available. The clips were fine; the request for them was unauthorized.
+#
+# The rule in token_from_request -- the credential never travels in a URL -- is
+# NOT relaxed here. A signature is not the credential: it is an HMAC over one
+# (job_id, filename, exp) triple, keyed by a value DERIVED from the token, so it
+# authorizes exactly one file, expires, and cannot be reversed into the token or
+# replayed on another path. A leaked media URL reads one mp4 for a few hours; a
+# leaked token is the whole API, POST /api/shutdown included.
+# ---------------------------------------------------------------------------
+
+# Domain separation: the signing key is not the token, so a captured signature
+# gives an attacker nothing to grind against the real credential.
+MEDIA_KEY_CONTEXT = b"rzc-media-url-v1"
+
+DEFAULT_MEDIA_URL_TTL = 12 * 3600
+# Below this, a URL could expire while the page that minted it is still loading.
+MIN_MEDIA_URL_TTL = 300
+
+
+def media_url_ttl(env=None):
+    """Lifetime of a minted media URL in seconds. ``MEDIA_URL_TTL`` overrides."""
+    env = os.environ if env is None else env
+    try:
+        ttl = int(str(env.get("MEDIA_URL_TTL", "")).strip())
+    except (TypeError, ValueError):
+        return DEFAULT_MEDIA_URL_TTL
+    return ttl if ttl >= MIN_MEDIA_URL_TTL else DEFAULT_MEDIA_URL_TTL
+
+
+def _media_key(token=None):
+    """The signing key: HMAC of the API token under a fixed context string."""
+    secret = str(token if token is not None else current_token()).encode("utf-8")
+    return hmac.new(secret, MEDIA_KEY_CONTEXT, hashlib.sha256).digest()
+
+
+def _media_payload(job_id, filename, exp):
+    """The exact bytes that get signed.
+
+    Length-prefixed so no delimiter choice can make two different triples
+    produce the same signed string -- without it, ("a|b", "c") and ("a", "b|c")
+    would collide.
+
+    Signed from the DECODED job_id and filename, never from request.url.path.
+    A minted URL has to percent-encode the filename and the path does not, and
+    the two spellings are not guaranteed to round-trip for a name containing a
+    space or a non-ASCII character. Signing the decoded values makes that whole
+    class of "401 on exactly those clips" impossible. Current names are ASCII
+    (highlight_rank_N_ready.mp4) but they come from the render layer, not from a
+    sanitiser.
+    """
+    return (
+        f"{len(job_id)}:{job_id}|{len(filename)}:{filename}|{int(exp)}"
+    ).encode("utf-8")
+
+
+def sign_media(job_id, filename, exp, *, token=None):
+    """The hex signature for one (job_id, filename, exp) triple."""
+    return hmac.new(
+        _media_key(token), _media_payload(job_id, filename, exp), hashlib.sha256
+    ).hexdigest()
+
+
+def media_expiry(now=None, ttl=None):
+    """An expiry timestamp, QUANTISED into buckets of ttl/2.
+
+    The quantisation is the non-obvious part, and it is not cosmetic. With
+    ``exp = now + ttl`` every response would mint a different URL for the same
+    file, and handing a <video> a new `src` TEARS DOWN AND RESTARTS playback and
+    throws away the browser's cached bytes. The dashboard re-fetches the job
+    whenever the page re-renders, so that would happen constantly.
+
+    Bucketing makes the minted URL byte-identical for every response inside the
+    window, so a re-fetch is a no-op for the player and the cache keeps working
+    across navigations. It also makes the tests deterministic without freezing
+    the clock. Effective lifetime is ttl/2 to ttl.
+    """
+    ttl = media_url_ttl() if ttl is None else int(ttl)
+    now = time.time() if now is None else float(now)
+    bucket = max(1, ttl // 2)
+    return int((int(now // bucket) + 2) * bucket)
+
+
+def media_url(job_id, filename, *, token=None, now=None, ttl=None):
+    """A signed, expiring URL for one output file, fetchable with no headers."""
+    exp = media_expiry(now=now, ttl=ttl)
+    sig = sign_media(job_id, filename, exp, token=token)
+    path = f"/api/outputs/{quote(str(job_id), safe='')}/{quote(str(filename), safe='')}"
+    return f"{path}?exp={exp}&sig={sig}"
+
+
+def media_signature_is_valid(job_id, filename, exp, sig, *, token=None, now=None):
+    """Whether *sig* attests this exact file and has not expired.
+
+    Never raises, and never allows on error: a malformed ``exp`` is a rejection,
+    not an exception that some caller might catch into a default of True.
+    """
+    if not job_id or not filename or not sig:
+        return False
+    try:
+        exp_int = int(str(exp).strip())
+    except (TypeError, ValueError):
+        return False
+
+    now = time.time() if now is None else float(now)
+    if exp_int <= now:
+        return False
+
+    expected = sign_media(job_id, filename, exp_int, token=token)
+    return hmac.compare_digest(str(sig), expected)
 
 
 async def require_token(request: "Request"):
