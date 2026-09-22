@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from clipping.providers import errors, llm, pacing
+from clipping.providers import errors, llm, pacing, registry
 from clipping.providers.registry import Link, parse_chain
 
 
@@ -482,3 +482,225 @@ def test_a_reply_with_no_choices_is_a_retryable_value_error(no_pacing):
     )
     with pytest.raises(ValueError):
         client.complete_json(system="s", user="u", schema=SCHEMA)
+
+
+# ------------------------------------------- the budget check is predictive
+
+class Clock:
+    """A fake monotonic clock a scripted request can push forward."""
+
+    def __init__(self, start=0.0):
+        self.now = float(start)
+
+    def __call__(self):
+        return self.now
+
+    def advance(self, seconds):
+        self.now += float(seconds)
+
+
+def slow_factory(clock, seconds, outcome):
+    """A client whose every request costs *seconds* of clock and then *outcome*."""
+
+    class SlowCompletions:
+        def __init__(self, owner):
+            self._owner = owner
+
+        def create(self, **kwargs):
+            self._owner.calls.append(kwargs)
+            clock.advance(seconds)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content=outcome))],
+                usage=SimpleNamespace(total_tokens=100),
+            )
+
+    class Slow:
+        def __init__(self):
+            self.calls = []
+            self.chat = SimpleNamespace(completions=SlowCompletions(self))
+
+    made = []
+
+    def factory(link, **kwargs):
+        client = Slow()
+        made.append(client)
+        return client
+
+    return factory, made
+
+
+def test_an_attempt_that_cannot_finish_inside_the_budget_is_not_started(no_pacing):
+    """The recorded job, as a unit test.
+
+    NVIDIA's request timeout is 330s and the analysis budget is 900s. Three
+    attempts at ~302s each ran to ~925s and overran the budget, because the only
+    guard weighed the 4s/12s backoff instead of the request. The third attempt
+    must not start: 608 + 12 + 330 = 950 > 900.
+    """
+    clock = Clock()
+    factory, made = slow_factory(clock, 302, exc("InternalServerError", 504))
+    logs = []
+
+    with pytest.raises(Exception):
+        llm.run_chain(
+            parse_chain("nvidia/deepseek-ai/deepseek-v4.1-flash"),
+            system="s", user="u", schema=SCHEMA,
+            keys={"nvidia": "k"},
+            on_log=logs.append,
+            client_factory=factory,
+            sleep_fn=clock.advance,
+            deadline=900.0,
+            time_fn=clock,
+        )
+
+    assert len(made[0].calls) == 2, "a third 330s attempt cannot fit in 900s"
+    assert clock.now < 900.0, "the ladder must not overrun the budget it is given"
+    assert "budget" in "\n".join(logs)
+
+
+def test_the_attempt_counter_never_reports_a_refused_attempt(no_pacing):
+    """web/api/signals.py turns `attempt N/M` into a retry the dashboard shows.
+
+    An attempt that was refused for want of time was never made, so printing it
+    would report a retry that never happened -- the exact class of misreporting
+    DEC-019 was written about.
+    """
+    clock = Clock()
+    factory, _ = slow_factory(clock, 302, exc("InternalServerError", 504))
+    logs = []
+
+    with pytest.raises(Exception):
+        llm.run_chain(
+            parse_chain("nvidia/m"),
+            system="s", user="u", schema=SCHEMA,
+            keys={"nvidia": "k"},
+            on_log=logs.append,
+            client_factory=factory,
+            sleep_fn=clock.advance,
+            deadline=900.0,
+            time_fn=clock,
+        )
+
+    joined = "\n".join(logs)
+    assert "attempt 1/3" in joined
+    assert "attempt 2/3" in joined
+    assert "attempt 3/3" not in joined
+
+
+def test_a_link_that_cannot_fit_is_skipped_but_a_faster_one_is_still_tried(no_pacing):
+    """Per link, not a blanket abort.
+
+    With 200s left, NVIDIA's 330s request cannot fit but Groq's 120s one can.
+    Aborting the whole chain there would throw away a provider that was ready to
+    answer.
+    """
+    clock = Clock(start=700.0)
+    logs = []
+    answered = {}
+
+    def factory(link, **kwargs):
+        answered["link"] = link
+        return FakeClient([GOOD])
+
+    value, link = llm.run_chain(
+        parse_chain("nvidia/slow,groq/fast"),
+        system="s", user="u", schema=SCHEMA,
+        keys={"nvidia": "k", "groq": "k"},
+        on_log=logs.append,
+        client_factory=factory,
+        sleep_fn=lambda s: None,
+        deadline=900.0,
+        time_fn=clock,
+    )
+
+    assert link.provider == "groq"
+    assert answered["link"].provider == "groq", "the slow link was never contacted"
+    assert "Skipping nvidia/slow" in "\n".join(logs)
+
+
+def test_the_budget_check_uses_the_clients_own_timeout(no_pacing):
+    """The invariant whose absence made the old check decoration.
+
+    If the number the budget reasons about and the number the socket waits for
+    can drift apart, the check proves nothing.
+    """
+    for name in registry.PROVIDER_NAMES:
+        if name == "custom":
+            continue  # needs LLM_CUSTOM_BASE_URL; covered in its own test
+        link = Link(name, "m")
+        client = llm.LlmClient(
+            link, api_key="k", client_factory=lambda *a, **kw: FakeClient([]),
+            limiter=no_pacing, on_log=lambda *a: None,
+        )
+        assert client.timeout == registry.effective_timeout(link), name
+
+
+def test_a_fast_provider_still_gets_all_three_attempts(no_pacing):
+    """The budget is a ceiling, not a shortcut.
+
+    DEC-020 sized it to be at least two full-length requests precisely so a
+    slow-but-healthy call is never cut off; cutting one off would be a
+    regression dressed as a fix.
+    """
+    clock = Clock()
+    factory, made = slow_factory(clock, 2, exc("InternalServerError", 503))
+
+    with pytest.raises(Exception):
+        llm.run_chain(
+            parse_chain("groq/fast"),
+            system="s", user="u", schema=SCHEMA,
+            keys={"groq": "k"},
+            on_log=lambda *a: None,
+            client_factory=factory,
+            sleep_fn=clock.advance,
+            deadline=900.0,
+            time_fn=clock,
+        )
+
+    assert len(made[0].calls) == 3
+
+
+def test_no_deadline_means_no_budget_check(no_pacing):
+    """A caller that passes no deadline keeps the old, unbounded behaviour."""
+    clock = Clock()
+    factory, made = slow_factory(clock, 5000, exc("InternalServerError", 503))
+
+    with pytest.raises(Exception):
+        llm.run_chain(
+            parse_chain("nvidia/m"),
+            system="s", user="u", schema=SCHEMA,
+            keys={"nvidia": "k"},
+            on_log=lambda *a: None,
+            client_factory=factory,
+            sleep_fn=clock.advance,
+            time_fn=clock,
+        )
+
+    assert len(made[0].calls) == 3
+
+
+def test_the_real_provider_error_survives_a_budget_stop(no_pacing):
+    """Stopping early must not replace the diagnosis with a stopwatch reading.
+
+    A 504 says the gateway gave up; "out of budget" says only that we stopped
+    asking. The caller needs the first one.
+    """
+    clock = Clock()
+    factory, _ = slow_factory(clock, 302, exc("InternalServerError", 504))
+
+    with pytest.raises(errors.ProviderError) as info:
+        llm.run_chain(
+            parse_chain("nvidia/m"),
+            system="s", user="u", schema=SCHEMA,
+            keys={"nvidia": "k"},
+            on_log=lambda *a: None,
+            client_factory=factory,
+            sleep_fn=clock.advance,
+            deadline=900.0,
+            time_fn=clock,
+        )
+
+    reasons = " ".join(reason for _, reason in info.value.failures)
+    assert "InternalServerError" in reasons

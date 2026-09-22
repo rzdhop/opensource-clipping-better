@@ -25,7 +25,7 @@ from __future__ import annotations
 import time
 
 from . import errors, jsonx, pacing
-from .registry import describe, env_key_for, provider_for
+from .registry import describe, effective_timeout, env_key_for, provider_for
 
 # Negotiation ladder, best first.
 JSON_SCHEMA = "json_schema"
@@ -119,7 +119,10 @@ class LlmClient:
         self.link = link
         self.provider = provider_for(link)
         self.api_key = api_key
-        self.timeout = timeout or self.provider.default_timeout
+        # Via the registry helper, never off self.provider directly: the
+        # budget check in run_chain/_run_link reads the same function, and
+        # the two disagreeing is precisely the bug this replaced.
+        self.timeout = effective_timeout(link, timeout)
         self._factory = client_factory or build_client
         self._client = None
         self.limiter = limiter if limiter is not None else pacing.limiter_for(self.provider)
@@ -278,11 +281,21 @@ def run_chain(
             failures.append((label, reason))
             continue
 
-        if deadline is not None and time_fn() >= deadline:
-            reason = "time budget exhausted before this provider was tried"
-            on_log(f"   ⏭ Skipping {label}: {reason}.")
-            failures.append((label, reason))
-            continue
+        # DEC-020's check, predictive rather than retrospective: not "is the
+        # budget already spent" but "could one request to THIS link outlast it".
+        # Per link, not a blanket abort, because a 330s NVIDIA link can be out of
+        # room while a 120s Groq link still fits comfortably.
+        if deadline is not None:
+            need = effective_timeout(link)
+            left = deadline - time_fn()
+            if need > left:
+                reason = (
+                    f"a {need:.0f}s request does not fit the {max(0.0, left):.0f}s "
+                    f"left in the time budget"
+                )
+                on_log(f"   ⏭ Skipping {label}: {reason}.")
+                failures.append((label, reason))
+                continue
 
         try:
             value = _run_link(
@@ -344,6 +357,25 @@ def _run_link(
     last_exc = None
 
     while attempt < MAX_ATTEMPTS:
+        # Before the attempt is announced, not after: web/api/signals.py turns
+        # every `attempt N/M` line into a retry the dashboard shows, so counting
+        # an attempt that was never made would report a retry that never
+        # happened. This is DEC-020's predictive check at the rung that actually
+        # spends the time -- the old guard below only ever weighed a 4-12s
+        # backoff against the deadline while the request itself ran for up to
+        # 330s, which is how a ladder overran a 900s budget by 25 seconds.
+        if deadline is not None and time_fn() + client.timeout > deadline:
+            left = max(0.0, deadline - time_fn())
+            note = (
+                f"{label}: stopping after {attempt}/{MAX_ATTEMPTS} attempt(s); "
+                f"another {client.timeout:.0f}s request would outlast the "
+                f"{left:.0f}s left in the time budget"
+            )
+            on_log(f"   ⏱ {note}.")
+            if last_exc is not None:
+                raise last_exc
+            raise errors.ProviderError(note)
+
         attempt += 1
         # The wording matters: web/api/signals.py matches `attempt N/M` to drive
         # the dashboard's retry counter (DEC-014, the stdout-progress entry).
@@ -389,8 +421,19 @@ def _run_link(
                 raise
 
             backoff = BACKOFF_SECONDS[min(attempt - 1, len(BACKOFF_SECONDS) - 1)]
-            if deadline is not None and time_fn() + backoff >= deadline:
-                on_log(f"   ⏱ {label}: no time left in the budget for another attempt.")
+            # Weigh the sleep AND the request it leads to, so a 12s backoff is
+            # never slept only for the loop-top check to refuse afterwards. With
+            # that check in place this is an optimisation, not a second policy.
+            if (
+                deadline is not None
+                and time_fn() + backoff + client.timeout > deadline
+            ):
+                left = max(0.0, deadline - time_fn())
+                on_log(
+                    f"   ⏱ {label}: {left:.0f}s left in the time budget, not "
+                    f"enough for a {backoff}s backoff and another "
+                    f"{client.timeout:.0f}s request."
+                )
                 raise
             sleep_fn(backoff)
 

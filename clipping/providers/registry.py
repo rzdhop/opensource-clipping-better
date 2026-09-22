@@ -183,6 +183,25 @@ def env_key_for(link) -> str:
     return PROVIDERS[link.provider].env_key
 
 
+def effective_timeout(link, override=None) -> float:
+    """How long ONE request to *link* may take, in seconds.
+
+    The single source of the number that both the socket and the time-budget
+    check use. They have to be the same value or the check is decoration: the
+    budget guard in ``llm.py`` used to compare against a 4-12s backoff while the
+    socket waited 330s, so a third attempt could start at 614s against a 900s
+    deadline and end at 925s.
+
+    *override* of 0 or None means "the provider's own default" (``--llm-timeout``
+    spells it that way).
+    """
+    try:
+        value = float(override or 0)
+    except (TypeError, ValueError):
+        value = 0.0
+    return value if value > 0 else float(provider_for(link).default_timeout)
+
+
 def describe(link) -> str:
     """``"groq/openai/gpt-oss-120b"`` — what gets printed in the activity feed."""
     return f"{link.provider}/{link.model}"
