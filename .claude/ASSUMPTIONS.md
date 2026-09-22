@@ -13,16 +13,20 @@
   the default build because every feature must survive; a slim build is opt-in
   via a build arg. UNCONFIRMED.
 - **A-010** — NIM model ids in this project have a shelf life measured in weeks:
-  three defaults have now died in about six weeks. The current pin, after this merge, is
-  `google/gemma-4-31b-it` — this branch's value, chosen by live benchmark and
-  proven by the human's 7-clip run on 2026-09-21. `origin/main` had moved the
-  same slot to `nvidia/nemotron-3-super-120b-a12b` (DEC-044); that is the
-  documented fallback if gemma is retired, and it is a bet either way. `tests/test_config_cli.py` pins the string so the next retirement
-  surfaces as a test failure rather than a production 410. Also note: a model
-  listed by `/v1/models` may still answer 404 for a given account, so the
-  catalogue alone is not proof of availability.
+  **four** defaults have now died in about six weeks. The current pin is
+  `deepseek-ai/deepseek-v4.1-flash`, chosen by live benchmark on 2026-09-21
+  against the real Pass-A workload (1.3–2.9s, schema-valid) and defined once, in
+  `registry.NVIDIA_DEFAULT_MODEL` (DEC-052). Re-pick with
+  `tools/bench_llm.py --nim-shortlist`. Two traps are now proven rather than
+  suspected: a model listed by `/v1/models` may answer 404 for a given account,
+  and the fast candidates are reasoning models that return `content=null` or
+  unparseable prose unless thinking is switched off. UNCONFIRMED (the shelf-life
+  estimate; the measurements are facts).
 
-- **A-009** — Groq and Mistral do not reliably offer a usable free API key,
+- **A-009** — *(being revisited 2026-09-22: the human states they have or can
+  obtain a Groq key, and Settings now has a field for it — DEC-057. Confirm
+  on the next real run, then move this to Confirmed or Invalidated.)*
+  Groq and Mistral do not reliably offer a usable free API key,
   despite their own documentation describing free tiers on 2026-09-21. This rests
   on the human's own attempt, not on a page we can cite, and it is the reason
   neither is recommended anywhere in the UI. It does not affect correctness:
@@ -95,6 +99,14 @@
   correctly clamped to the clip start.*
 
 ## Invalidated
+- **A-010's test claim** (2026-09-22) — "`tests/test_config_cli.py` pins the
+  string so the next retirement surfaces as a test failure rather than a
+  production 410." It cannot, and did not. `google/gemma-4-31b-it` was never
+  retired: it stayed in `/v1/models`, accepted requests, returned no 410 and no
+  error — it simply answered nothing, for 120s, on an 8-token request. Every
+  test on that string passed throughout. Replaced by DEC-056's liveness probe,
+  which is the only thing that can catch this: a real request.
+
 - (none)
 
 ## Notes

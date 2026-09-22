@@ -1075,3 +1075,275 @@ intended. The reported clips came out 22–41 s, consistent with it.
   contract and the dashboard drift apart silently, and only
   `tests/test_dashboard_payload_contract.py` catches the reverse direction (a
   key the page sends that the model does not declare).
+
+## DEC-052 — The NIM default is defined once, in the registry
+*(The model this entry originally named, `deepseek-ai/deepseek-v4.1-flash`,
+was overturned within the hour by DEC-058. The one-definition half stands;
+read the model choice below as the mistake DEC-058 is about.)*
+**Context.** A job run with video only failed after 47 minutes of CPU Whisper.
+Probing NVIDIA NIM with the account's own key showed why: `google/gemma-4-31b-it`
+— the shipped default, benchmarked at 6.0s / 31.3 tok/s on 2026-09-21 (DEC-024)
+— **returns nothing in 120s for an 8-token "reply ok" request**. It hangs on
+*any* request, so every attempt rode the 330s socket timeout into the gateway's
+504. The model id also had **four** definitions (`registry.py`,
+`config.NVIDIA_MODEL`, `web/api/models.py`, `web/api/config_adapter.py`) with
+nothing making them agree.
+**Decision.** `registry.NVIDIA_DEFAULT_MODEL = "deepseek-ai/deepseek-v4.1-flash"`,
+the single definition the other three reference, with an agreement test that also
+asserts the negative half.
+**Consequence.**
+- **Measured, against the real Pass-A workload** (45 beats, strict
+  `CANDIDATES_SCHEMA`, `max_tokens=700`), one request each:
+
+  | model | result |
+  |---|---|
+  | `deepseek-ai/deepseek-v4.1-flash` | **1.3–2.9s, schema-valid, 296–331 tokens** |
+  | `z-ai/glm-5.3-flash` | 12.6s, schema-valid — **only** with thinking off |
+  | `nvidia/nemotron-3.5-lightning-30b-a3b` | 83s, reasoning prose, unparseable |
+  | `z-ai/glm-5.3` | timed out at 90s |
+  | `google/gemma-4-31b-it` | **hangs**, nothing in 120s |
+  | `openai/gpt-oss-20b` | **hangs**, nothing in 45s |
+
+- **DEC-021's diagnosis is falsified for the current state.** It read the 504s as
+  "the request asks for too much work" and built a proposal machinery around a
+  smaller clip count. An 8-token request hangs too. The proposal stays — it is
+  still right when a request genuinely is too large — but a 504 from this
+  provider must no longer be read as evidence about request size.
+- **Listed is not callable.** `google/gemma-3-12b-it`,
+  `nvidia/nemotron-nano-3-30b-a3b` and `moonshotai/kimi-k2.6` are all in
+  `GET /v1/models` and all answer `404 Function <uuid>: Not found for account
+  <id>`. Reading the catalogue proves nothing; only a real request does. The
+  READMEs said "list current ones at /v1/models" and now say otherwise.
+- **The two fastest candidates are reasoning models and are unusable with
+  thinking on** — deepseek returns `content=null`, GLM spends all 700 tokens on
+  the preamble and truncates the JSON mid-object. `llm._extra_body` already
+  switches it off for models whose name contains `deepseek`, which is the only
+  reason this default works, and a test pins that the shipped default is covered
+  by that predicate. **A future default that is also a reasoning model but is not
+  called "deepseek" would silently lose the switch.**
+- **Amends DEC-024's correction.** DEC-024 said a pinned string cannot detect a
+  retirement and that what survives one is the chain. Both still hold, and this
+  job sharpened them: gemma was *not* retired, *not* 410 Gone, and still in the
+  catalogue — it simply stopped answering, which no test on a string and no
+  reading of a model list can ever catch. Only a real request can, which is what
+  DEC-056 is for. And the corollary DEC-024 did not state: **a chain with one key
+  is a chain of one.**
+
+## DEC-053 — The chain runner's budget check is predictive, against the client's own timeout
+**Context.** DEC-020 chose a predictive check — *could this attempt outlast the
+budget* (`elapsed + REQUEST_TIMEOUT > BUDGET`) rather than *is the budget already
+spent*. It was implemented in the legacy monolith (`engine.py:1164-1168`) and
+**never carried into the chain runner**. `llm.py`'s only in-ladder guard weighed
+the 4s/12s **backoff sleep** against the deadline while the request itself ran
+for up to 330s, so a third attempt started at 614s against a 900s deadline and
+ended at ~925s — 25 seconds past a budget whose entire purpose was to stop that.
+**Decision.** `registry.effective_timeout(link, override)` is the single source
+of the per-request timeout; `LlmClient` reads it too. `run_chain` refuses a link
+whose request cannot fit, and `_run_link` refuses an attempt, **before** the
+`attempt N/M` line is printed.
+**Consequence.**
+- **The check and the socket cannot drift apart.** That they could is what made
+  the old guard decoration rather than policy, and a test asserts the equality
+  for every provider in the registry.
+- **The refusal is per link, not a blanket abort.** With 200s left, a 330s NVIDIA
+  request is refused while a 120s Groq one is still tried. Aborting the chain
+  there threw away a provider that was ready to answer.
+- **A refused attempt is never announced.** `web/api/signals.py` turns every
+  `attempt N/M` line into a retry the dashboard shows, so counting an attempt
+  that was never made would report a retry that never happened — the same class
+  of misreporting DEC-019 was written about.
+- **The provider's own error still propagates.** A 504 says the gateway gave up;
+  "out of budget" says only that we stopped asking, and the caller needs the
+  first. Stopping early must not replace the diagnosis with a stopwatch reading.
+- **It is deliberately pessimistic.** The check uses the *timeout*, not the
+  observed latency, so a provider that normally answers in 2s is refused when
+  fewer than 330s remain. DEC-020 chose that conservative form on purpose; the
+  reason is printed with its arithmetic rather than left to be inferred.
+
+## DEC-054 — The time budget is hierarchical: run → pass → window
+**Context.** DEC-027 states the property the three-pass split was supposed to
+buy: *"A failure is local. A failed window loses one window's candidates."* It
+was not true. `analyze()` computed **one** absolute deadline for the whole run
+and handed it unchanged to every request, and `_pass_a` had no per-window
+allocation at all. When window 1's provider hung for three attempts it spent all
+900s, and windows 2–6 were skipped without ever being contacted.
+**Decision.** Pass A allocates per window, recomputed at the top of each
+iteration: `share = remaining / windows_left`, `window_deadline = min(pool,
+now + max(share, floor))`. `PASS_A_BUDGET_SHARE = 0.7` holds time back for the
+later passes. `run_chain`'s signature is unchanged.
+**Consequence.**
+- **Unused time returns to the pool by construction.** Because `remaining` and
+  `windows_left` are recomputed each iteration, a window answering in two
+  seconds simply leaves a larger `remaining` behind it. A ledger of banked
+  seconds was the alternative: more state, same result, one more thing that can
+  go stale.
+- **The floor is load-bearing and is one full request against the slowest
+  *keyed* link.** Without it, 900s over six windows is 150s each — below NVIDIA's
+  330s timeout — so DEC-053's check would refuse **every** window and the run
+  would issue no requests at all. That trades a starvation bug for a never-tries
+  bug, and DEC-020 already forbade it: *"a slow-but-healthy call is never cut off
+  — cutting one off would be a regression dressed as a fix."* Keyless links are
+  excluded, since a provider that is never contacted costs no time and counting
+  its timeout would shrink every window's allowance for nothing.
+- **Pass A does not get the whole pool.** A pass A that consumes everything
+  leaves the re-rank falling back to the scan's own scores and every clip
+  rendering with a basic title — a silent quality loss of exactly the kind
+  DEC-021 was written about. This is the change's one heuristic; its rollback is
+  `PASS_A_BUDGET_SHARE = 1.0`.
+- **Measured on the recorded failure, through the real chain runner:** 1 HTTP
+  request instead of 3, 302s instead of 925s. With a healthy provider all five
+  windows scan in 78s of the 900s budget — unchanged.
+- **Amends DEC-027.** Locality has to hold for the shared *time budget*, not only
+  for exception handling. Catching a window's exception is worthless if that
+  window has already spent everyone else's time.
+- **Known imprecision, stated rather than papered over:** `pacing.Limiter.acquire`
+  sleeps inside a window's share without the deadline knowing. Because the floor
+  is a *request* timeout and the skip is predictive, that sleep eats borrowed
+  time rather than a guaranteed minimum and can never cause an overrun.
+
+## DEC-055 — A provider failure and an empty transcript are different errors
+**Context.** When every scan window failed, the run died with *"No clippable
+moment was found anywhere in this transcript. That can mean the video is all
+housekeeping, or that the transcript does not match the video."* Nothing had been
+analysed. `_pass_a` caught each window's exception, logged it, and **discarded
+the reason**, returning an empty list that meant both "every window answered and
+found nothing" and "no window ever answered".
+**Decision.** `_pass_a` returns a `ScanStats(total, answered, failed, skipped,
+last_error)` alongside the candidates, and `analyze()` branches on whether
+anything was actually read.
+**Consequence.**
+- **`answered == 0` gets its own message**, naming the provider error and the
+  counts, with no sentence about the transcript at all. The old text is kept for
+  the case it was actually written about, with a note appended when some windows
+  were lost.
+- **`_report_shortfall` gets the same treatment.** Its docstring already argued
+  DEC-021's *"a supply limit is not a provider limit"*; it simply had no way to
+  tell which one it was looking at, and so blamed the transcript for both.
+- **It landed before DEC-054 deliberately.** The per-window split *creates*
+  skipped windows; shipping it first would have reproduced this bug in a new
+  disguise.
+
+## DEC-056 — The chain is asked whether it answers, before anything expensive runs
+**Context.** `missing_provider_key` refuses a chain where *no* link has a key —
+correctly, since a partly-configured chain should degrade rather than fail
+(DEC-023). It cannot refuse the case that happened: one link had a key, the gate
+passed, Whisper ran for 47 minutes on CPU, and only then did the analysis
+discover that the one keyed provider answered nothing at all. **A key proves a
+provider was configured, not that it is alive.**
+**Decision.** `llm.probe_chain` asks each keyed link, in order, an 8-token
+question with a 45s timeout, stopping at the first that replies. The job fails
+before ingestion only when **nothing** answers. `--no-preflight` opts out, and a
+render-only rerun skips it as it already skips the key gate.
+**Consequence.**
+- **Measured against the real endpoints:** the dead model is caught in **21s**
+  instead of 62 minutes; the live one answers and the job proceeds.
+- **45s is measured, not chosen by taste.** Five probes of the shipped default
+  ran 1.3 / 1.6 / 2.2 / 2.7 / 11.4s — a healthy free tier is usually instant and
+  occasionally slow to wake — while the dead model does not answer in 120s, so
+  the gap is not close. The cost of being wrong is asymmetric: too short fails a
+  job whose provider was merely cold; too long still catches a dead provider
+  sixty times faster than the failure it replaces.
+- **It proves liveness, deliberately not suitability.** `z-ai/glm-5.3-flash`
+  answered this same ping in 0.67s and still failed the real Pass-A request,
+  spending its whole token budget on a reasoning preamble. Suitability is what
+  `tools/bench_llm.py` is for, and the limit is written in the docstring so the
+  check is not mistaken for more than it is.
+- **A failing link is reported, never removed.** DEC-003 and DEC-023 make the
+  chain a list the user wrote down; a runtime edit to it is the silent fallback
+  both forbid.
+- **No schema, no negotiation.** Involving the structured-output ladder would let
+  a provider's `json_schema` support decide a liveness question, and would cost
+  several requests where one is the point.
+- **Only the chain path is gated.** The legacy single-provider paths are an
+  escape hatch, not somewhere to add a new gate.
+
+## DEC-057 — Every secret the backend accepts has a field on the Settings page
+**Context.** Groq is the **first and fastest** link in the default chain.
+`web/api` has accepted `groq_api_key` since the chain landed, `settings_store`
+persists `GROQ_API_KEY`, and `SettingsResponse` reports `groq_api_key_set` —
+there was simply no box to type it into, and the same for OpenRouter and
+Mistral. That is why the failed job had a single point of failure: of three
+links, exactly one had a key, and that one was the slowest and, on the day, dead.
+**Decision.** Add the three fields, Groq first because that is its position in
+the chain; and add the guard that ends the pattern.
+**Consequence.**
+- **This is the fourth instance of one shape** — a field the backend declares
+  with no control in the deployed UI — after the AI provider select that could
+  not reach `chain`, `platform` (DEC-051) and `nvidia_model`. DEC-051 called for
+  a sweep; this is it, made permanent as a test.
+- **The guard checks both halves.** A secret that `SettingsRequest` declares and
+  `settings_store` persists must have an input that **sends** it *and* a badge
+  that reads its `_set` flag, because a control that cannot tell the user whether
+  a key is already saved is barely a control. The reverse direction is guarded
+  too: a key the page sends that the model does not declare is dropped in
+  `model_dump()` and does nothing.
+- **It reads the page as text.** Importing `web/api` needs pydantic, which CI
+  does not install; an `importorskip` on a drift guard means it never runs in the
+  one place that checks every push (DEC-012, and the DEC-050 precedent).
+- **`.env` carried the same class of trap.** It declared `NVIDIA_API_KEY` twice —
+  empty at line 15, real at line 29 — and both dotenv and docker-compose resolve
+  that to the **last** one. Someone fixing the "empty" key at the top would have
+  changed nothing, and a parser that took the first would have blanked it
+  silently. It now declares every key exactly once.
+
+
+## DEC-058 — A NIM model is picked on whether it finds clips, not on whether it replies
+**Context.** DEC-052 replaced a model that answered nothing with
+`deepseek-ai/deepseek-v4.1-flash`, chosen on two measurements: latency (1.3–2.9s)
+and schema-validity. Running the **actual failed job** showed it answers
+`{"candidates": []}` in **seven tokens** on every real transcript — including
+`outputs/c135b9d76f99`, which had already yielded seven clips — at every
+structured-output level (`json_schema`, `json_object`, prompt-only), with
+thinking on or off, at max_tokens 700, 3000 and 6000. The synthetic probe that
+had validated it used fabricated repetitive beats, which it happily labelled.
+**Decision.** The default is `nvidia/nemotron-3.5-lightning-30b-a3b`.
+`tools/bench_llm.py --nim-shortlist` measures **candidates returned**, not only
+latency and validity.
+**Consequence.**
+- **Fast, schema-valid and useless is still useless.** Every guard this project
+  had — the strict schema, the negotiation ladder, the retry classification, the
+  new liveness probe — passed a model that could not do the work. Each of them
+  answers "did a well-formed reply arrive", and none answers "was it any good".
+  Only the real workload does.
+- **This is the exact limitation DEC-056 documents, arriving one commit later.**
+  The probe's docstring says it proves liveness and deliberately not suitability.
+  That warning was written and then not heeded in the very next decision. A
+  documented limitation is not a mitigation.
+- **The replacement had already been rejected, by a missing flag rather than by
+  its own behaviour.** `nvidia/nemotron-3.5-lightning-30b-a3b` was benchmarked as
+  "73.0s → prose, not JSON" (DEC-024) and again as "83s, reasoning prose,
+  unparseable" (DEC-052). `llm._extra_body` turned thinking off for models whose
+  name contained `deepseek` **and nothing else**. With the flag it answers the
+  same request in ~20s with usable candidates. `_NIM_REASONING_FAMILIES` now
+  lists the three families measured to need it — deepseek returns
+  `content=null`, nemotron-3.5-lightning returns prose, glm truncates the JSON
+  mid-object — and a test asserts each is covered. **Check that list before
+  judging any new NIM candidate; two benchmark rounds disqualified a working
+  model over a one-word predicate.**
+- **NIM access is far narrower than the catalogue suggests.** Of 18 models
+  probed for this decision, ten answered `404 Function <uuid>: Not found for
+  account`, four hung or timed out, one returned malformed JSON, and one
+  returned nothing useful. One worked.
+- **Verified end to end**, against the job that started this: 5 clips in 590s
+  from the transcript whose run previously died after 63 minutes claiming the
+  video was "all housekeeping".
+
+## DEC-059 — A granted time slice must survive the clock moving before it is measured
+**Context.** DEC-054's floor exists so a window is never handed less than one
+full request's worth of time, because a window that cannot fit a request is
+refused and the run makes none. Granting **exactly** `floor` did precisely that:
+`run_chain` reads the clock again — after the beats are rendered, the prompt is
+built and the chain's keyless links are walked — so `left` is a few microseconds
+under `floor` and `need > left` is true. On the real job every window but the
+last was skipped with *"a 330s request does not fit the 330s left in the time
+budget"*.
+**Decision.** `GRANT_MARGIN_SECONDS = 1.0`; a window is granted, and required to
+have, `floor + margin`.
+**Consequence.**
+- **The never-tries bug was reintroduced by rounding**, inside the very
+  mechanism written to prevent it, and no unit test caught it because the fake
+  runners trusted the allowance they were handed instead of reading the clock
+  themselves. The regression test now mimics `run_chain` faithfully: it re-reads
+  the clock and refuses on its own arithmetic.
+- **It was found by running the real job, not by the suite.** Both defects in
+  this round were. A green suite and a live run answer different questions.

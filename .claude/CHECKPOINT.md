@@ -1,6 +1,96 @@
 # CHECKPOINT
 
-## In progress
+## Last task — COMPLETE
+- **Task:** A job run with video only failed after 47 minutes of CPU Whisper:
+  the analysis collapsed and blamed the transcript. **All six stages committed
+  and verified against the real job.**
+- **Checkpoint commit before the work:** `4703679`. **Head:** `d844177`.
+- **Tier-1:** CI env **1110 passed, 101 skipped, 0 failed** (baseline was
+  1069/101). Local **1236 passed**.
+- **Tier-2:** no E2E browser suite exists in this project. Verified instead by
+  re-running the real failed job against the live provider (below).
+- **Tier-3:** ~30 new tests across `test_provider_registry.py`,
+  `test_llm_negotiation.py`, `test_analysis_windows.py`, `test_preflight.py`
+  (new) and `test_dashboard_payload_contract.py`. Every one that guards a
+  behaviour change was verified to FAIL against the pre-change code.
+- **Not pushed.** `git push origin main` when you are ready — remember the
+  memory note: `github_osc_better` AND `-F /dev/null`.
+- **Plan:** `/home/ubuntu/.claude/plans/i-wanted-to-test-effervescent-hearth.md`
+- **Decisions written:** DEC-052 … DEC-059.
+
+### The result
+The job that died after 63 minutes claiming the video was "all housekeeping"
+now produces **5 clips in 590s** from the same transcript (Whisper not re-run).
+
+### What was wrong — four things, not one
+1. **The shipped NIM model answered nothing.** `google/gemma-4-31b-it` returns
+   no reply in 120s to an 8-token request. Not 410, not an error, still in
+   `/v1/models` — it simply hangs. DEC-021's reading of those 504s ("the request
+   asks for too much work") is falsified.
+2. **The budget check weighed the backoff, not the request.** DEC-020's
+   predictive rule lived only in the legacy `engine.py`; `llm.py` compared a
+   4/12s sleep against the deadline while the request ran up to 330s.
+3. **One window could spend the whole run's budget**, so windows 2-6 were
+   skipped untried — breaking DEC-027's "a failure is local".
+4. **The error blamed the content.** `_pass_a` discarded each window's failure
+   reason, so "every window answered and found nothing" and "no window ever
+   answered" produced the same message.
+
+### The two defects the test suite could not have found
+Both surfaced only by running the real job, and both are worth remembering:
+
+- **A model can be fast, schema-valid and useless.** `deepseek-v4.1-flash`
+  shipped for one commit and answers `{"candidates": []}` in seven tokens on
+  every real transcript, including one that had already yielded seven clips.
+  Every guard in the project passes it. Only the real workload catches it
+  (DEC-058). The default is now `nvidia/nemotron-3.5-lightning-30b-a3b`, which
+  two earlier benchmark rounds had rejected as "reasoning prose" — that was a
+  **missing flag**, not the model: `_extra_body` turned thinking off for
+  "deepseek" and nothing else. **Check `_NIM_REASONING_FAMILIES` before judging
+  any new NIM candidate.**
+- **A window granted exactly one request's worth was refused**, because the
+  clock moves between granting the deadline and measuring it. The never-tries
+  bug, reintroduced by rounding inside the mechanism written to prevent it. The
+  fake runners in the tests trusted the allowance instead of re-reading the
+  clock, so nothing caught it (DEC-059).
+
+### Where it still hurts, and the one thing left to do
+**Set a Groq key.** NVIDIA is the last link and the slowest: ~90s per request,
+so the 590s run lost window 5 to a truncated reply it had no budget to retry,
+skipped window 6, and gave clip 5 a basic title. All reported honestly, but it
+is running at the edge of the 900s budget. Groq is the chain's **first** link
+and the fastest free tier, and Settings now has a field for it (it did not
+before — that gap is why this job had a single point of failure). With it the
+analysis finishes in seconds and none of the budget machinery binds.
+
+### Deploy
+The dashboard changed, so the container needs a rebuild:
+`docker compose rm -sfv backend && docker compose up -d --build backend`
+(the `-v` matters; `down -v` would delete the Caddy certificates). Docker needs
+sudo on this box. Then re-run the failed job with **Clone & Rerun**, which
+reuses the job id so `config_adapter` adopts the existing `transcript.vtt` and
+skips Whisper entirely.
+
+### Still true
+- `sudo chown -R "$(id -u):$(id -g)" data` on any older clone.
+- CI installs pytest and nothing else. Reproduce it exactly:
+  `pip install --target /tmp/cilibs pytest` then
+  `PYTHONNOUSERSITE=1 PYTHONPATH=/tmp/cilibs python3 -m pytest -q`.
+  `PYTHONNOUSERSITE=1` is the load-bearing half.
+- `.env` is gitignored; it now declares each key exactly once. Backup of the
+  old one: `.env.backup-20260922-080505`.
+
+### Follow-ups, deliberately not done
+- `cfg.llm_timeout` is declared, parsed, documented and tested — and reaches
+  nothing. Same shape as DEC-051's clip length.
+- `analysis_budget_seconds` is read by `analyzer.py` and settable from nowhere.
+  It is the binding constraint on a slow provider.
+- `MAX_TOKENS_CANDIDATES = 700` truncated one real reply mid-object.
+- `.claude/ASSUMPTIONS.md` has **two** entries numbered A-010 (pre-existing).
+
+---
+
+## Previous task (complete, committed)
 - **Task:** Two defects the human found while using the deployed app: a
   "blackscreen like bug" a second into every clip, and no way to make clips
   longer. **Both fixed and committed**; the container is rebuilding.
