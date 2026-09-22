@@ -627,3 +627,55 @@ def test_a_granted_window_is_actually_attempted_by_the_chain():
         "a window granted one request's worth must survive the clock moving "
         "between the grant and the check"
     )
+
+
+# ------------------------------------------- the moment keeps its description
+
+def _pass_b_call(calls):
+    """The re-rank request out of a scripted run's recorded calls."""
+    return next(c for c in calls if c["schema_name"] == "ranked")
+
+
+def _clip_meta_calls(calls):
+    return [c for c in calls if c["schema_name"] == "clip_meta"]
+
+
+def test_the_rerank_lines_name_the_kind_and_gist():
+    """Pass B ranks candidates against each other. Until the snapped-id lookup
+    was fixed it saw ``clip`` and an empty gist for every candidate whose
+    boundary ``snap`` had moved -- which is most of them, because growing
+    toward the preset target moves nearly every boundary."""
+    runner = scripted(
+        candidates((0, 3, 90), (15, 18, 85), (30, 33, 70)),
+        candidates((45, 48, 60)),
+        {"ranked": [{"id": 0, "score": 95}, {"id": 1, "score": 80},
+                    {"id": 2, "score": 70}]},
+        META, META, META,
+    )
+    analyzer.analyze(
+        segmen(), Cfg(), chain=[("groq", "m")], keys={"groq": "k"},
+        on_log=lambda _line: None, run_chain=runner,
+    )
+
+    rerank = _pass_b_call(runner.calls)["user"]
+    assert "a thing happens" in rerank
+    assert "story" in rerank
+
+
+def test_pass_c_is_told_what_kind_of_moment_it_is():
+    """``clip_meta_prompt`` has always accepted kind/gist; nothing passed them."""
+    runner = scripted(
+        candidates((0, 3, 90)),
+        candidates((45, 48, 85)),
+        {"ranked": [{"id": 0, "score": 95}, {"id": 1, "score": 80}]},
+        META, META,
+    )
+    analyzer.analyze(
+        segmen(), Cfg(), chain=[("groq", "m")], keys={"groq": "k"},
+        on_log=lambda _line: None, run_chain=runner,
+    )
+
+    metas = _clip_meta_calls(runner.calls)
+    assert metas, "no metadata request was made"
+    assert all("picked as a story" in c["user"] for c in metas)
+    assert all("a thing happens" in c["user"] for c in metas)

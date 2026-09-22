@@ -182,7 +182,7 @@ def analyze(
             f"{preset.name} duration window ({preset.min:.0f}-{preset.max:.0f}s)."
         )
 
-    chosen = _pass_b(spans, candidates, want, ask, on_log, time_fn, run_deadline)
+    chosen = _pass_b(spans, want, ask, on_log, time_fn, run_deadline)
     clips = _pass_c(
         chosen, all_beats, words, cfg, preset, language, ask, on_log, time_fn,
         run_deadline, floor,
@@ -284,19 +284,23 @@ def _pass_a(all_beats, preset, want, ask, on_log, time_fn, deadline, floor):
     return candidates, ScanStats(len(ranges), answered, failed, skipped, last_error)
 
 
-def _pass_b(spans, candidates, want, ask, on_log, time_fn, deadline):
-    """Rank every surviving candidate against the whole video's field."""
+def _pass_b(spans, want, ask, on_log, time_fn, deadline):
+    """Rank every surviving candidate against the whole video's field.
+
+    The description comes off the span itself. It used to be looked up in a
+    dict keyed on the candidate's original beat ids, which missed whenever
+    ``snap`` had moved a boundary — so the model ranking the video's best
+    moments was reading ``clip`` and an empty gist for nearly all of them.
+    """
     if len(spans) <= want:
         on_log(f"   [2/3] {len(spans)} candidate(s) survived snapping; taking all.")
         return sorted(spans, key=lambda s: -s.score)[:want]
 
-    by_gist = {(c["b0"], c["b1"]): c for c in candidates}
     lines = []
     for index, span in enumerate(spans):
-        meta = by_gist.get((span.b0, span.b1), {})
         lines.append(
             f"#{index} [{span.end - span.start:.0f}s] score={span.score} "
-            f"{meta.get('kind', 'clip')} {meta.get('gist', '')}".rstrip()
+            f"{span.kind or 'clip'} {span.gist}".rstrip()
         )
 
     on_log(f"   [2/3] Ranking {len(spans)} candidates for {want} slot(s)...")
@@ -359,7 +363,13 @@ def _pass_c(spans, all_beats, words, cfg, preset, language, ask, on_log, time_fn
                 meta = ask(
                     prompts.SYSTEM,
                     prompts.clip_meta_prompt(
-                        beats_text, language=language, want_broll=want_broll
+                        beats_text,
+                        language=language,
+                        # Carried from the scan that found this moment. The
+                        # prompt has always accepted them; nothing sent them.
+                        kind=span.kind,
+                        gist=span.gist,
+                        want_broll=want_broll,
                     ),
                     schema.CLIP_META_SCHEMA,
                     "clip_meta",
@@ -500,8 +510,11 @@ def _clamp_score(value):
 
 def _snap_candidates(candidates, all_beats, preset, on_log):
     rejected = []
+    # The candidate dicts go in whole, so each span comes back carrying the
+    # gist and kind the scan gave it. Rebuilding bare triples here is what used
+    # to strand that description on the far side of the snapper.
     spans = snap.snap_all(
-        [(c["b0"], c["b1"], c["score"]) for c in candidates],
+        candidates,
         all_beats,
         preset,
         on_reject=lambda b0, b1, reason: rejected.append((b0, b1, reason)),

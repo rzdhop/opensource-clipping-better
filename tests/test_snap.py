@@ -236,3 +236,47 @@ def test_snapped_spans_never_overlap_after_dedupe():
     for a, b in zip(spans, spans[1:]):
         assert S.overlap_ratio(a, b) <= 0.15
         assert a.start <= b.start
+
+
+# -------------------------------------------------- the candidate's own words
+
+def test_span_is_still_constructible_positionally():
+    """Five positional fields, as three existing call sites build them.
+
+    ``gist``/``kind`` are appended with defaults precisely so those sites --
+    and any caller in the wild -- keep working unchanged.
+    """
+    span = S.Span(0.0, 40.0, 0, 8, 88)
+    assert span.score == 88
+    assert span.gist == ""
+    assert span.kind == ""
+
+
+def test_snap_all_carries_the_gist_through_a_moved_boundary():
+    """The bug this fixes: ``snap`` rewrites b0/b1 while growing toward the
+    target, so a lookup keyed on the candidate's ORIGINAL ids misses and the
+    re-rank sees an anonymous duration instead of the moment it named."""
+    all_beats = beats()
+    candidate = {"b0": 0, "b1": 1, "score": 88, "gist": "loses the account",
+                 "kind": "story"}
+
+    spans = S.snap_all([candidate], all_beats, TIKTOK)
+
+    assert len(spans) == 1
+    # Growing really did move the boundary -- otherwise this test proves nothing.
+    assert (spans[0].b0, spans[0].b1) != (candidate["b0"], candidate["b1"])
+    assert spans[0].gist == "loses the account"
+    assert spans[0].kind == "story"
+
+
+def test_snap_all_still_accepts_a_bare_triple():
+    """The old shape stays valid; gist and kind simply come back empty."""
+    spans = S.snap_all([(0, 2, 77)], beats(), TIKTOK)
+    assert spans[0].score == 77
+    assert spans[0].gist == ""
+
+
+def test_rescoring_a_span_keeps_its_gist():
+    """``_pass_b`` rewrites the score with ``_replace``; the words must survive."""
+    span = S.Span(0.0, 40.0, 0, 8, 50, "loses the account", "story")
+    assert span._replace(score=95).gist == "loses the account"

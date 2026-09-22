@@ -16,7 +16,16 @@ from __future__ import annotations
 
 from collections import namedtuple
 
-Span = namedtuple("Span", "start end b0 b1 score")
+# ``gist`` and ``kind`` are the candidate's own description, carried through
+# untouched. Nothing in this module reads them -- snapping is a timing decision
+# and stays one (DEC-028) -- but they have to travel WITH the span, because
+# ``snap`` rewrites b0/b1 while growing and trimming. A caller that tried to
+# look the description back up by the ids it sent in missed on every candidate
+# whose boundary moved, which is nearly all of them.
+#
+# Appended last, with defaults, so the five-positional-field construction in
+# tests and callers keeps working.
+Span = namedtuple("Span", "start end b0 b1 score gist kind", defaults=("", ""))
 
 # ``span`` is None when the candidate could not be made to fit; ``reason`` then
 # says why, so the pipeline can print it instead of silently dropping a moment.
@@ -29,7 +38,8 @@ DEFAULT_TAIL = 0.35
 MAX_TAIL = 0.85
 
 
-def snap(b0, b1, beats, preset, *, lead_in=DEFAULT_LEAD_IN, tail=DEFAULT_TAIL, score=0):
+def snap(b0, b1, beats, preset, *, lead_in=DEFAULT_LEAD_IN, tail=DEFAULT_TAIL,
+         score=0, gist="", kind=""):
     """Turn a beat range into a :class:`Span`, or explain why it cannot be one.
 
     Growing prefers **forward**: a candidate that is too short usually stops
@@ -39,6 +49,8 @@ def snap(b0, b1, beats, preset, *, lead_in=DEFAULT_LEAD_IN, tail=DEFAULT_TAIL, s
     Trimming removes beats from the **start**, never the end. The payoff of a
     short-form clip is its last line; trimming from the end to fit a duration
     window produces a clip that stops before the reason it was chosen.
+
+    *gist* and *kind* are passed straight into the result and never consulted.
     """
     by_id = {beat["i"]: beat for beat in beats}
     if b0 not in by_id or b1 not in by_id:
@@ -84,7 +96,7 @@ def snap(b0, b1, beats, preset, *, lead_in=DEFAULT_LEAD_IN, tail=DEFAULT_TAIL, s
             f"({preset.max:.0f}s) and it cannot be trimmed on a sentence boundary",
         )
 
-    return SnapResult(Span(padded_start, padded_end, b0, b1, score), "")
+    return SnapResult(Span(padded_start, padded_end, b0, b1, score, gist, kind), "")
 
 
 def pad(b0, b1, beats, *, lead_in=DEFAULT_LEAD_IN, tail=DEFAULT_TAIL):
@@ -147,13 +159,30 @@ def dedupe(spans, *, max_overlap_ratio=0.15):
 def snap_all(candidates, beats, preset, *, on_reject=None, **kwargs):
     """Snap every candidate, dropping the ones that cannot fit.
 
-    *candidates* are ``(b0, b1, score)`` triples. Rejections are reported to
-    *on_reject* rather than swallowed: a moment the model liked and the snapper
-    refused is exactly the kind of thing that should be visible in the log.
+    A *candidate* is either a ``(b0, b1, score)`` triple or a mapping carrying
+    ``b0``/``b1``/``score`` plus the model's own ``gist`` and ``kind``. Both
+    shapes are accepted because the triple is what every caller sent before the
+    description travelled with the span, and it remains a perfectly good way to
+    ask for a snap when there is no description to carry.
+
+    Rejections are reported to *on_reject* rather than swallowed: a moment the
+    model liked and the snapper refused is exactly the kind of thing that
+    should be visible in the log.
     """
     spans = []
-    for b0, b1, score in candidates:
-        result = snap(b0, b1, beats, preset, score=score, **kwargs)
+    for candidate in candidates:
+        if isinstance(candidate, dict):
+            b0, b1 = candidate["b0"], candidate["b1"]
+            extra = {
+                "score": candidate.get("score", 0),
+                "gist": candidate.get("gist", ""),
+                "kind": candidate.get("kind", ""),
+            }
+        else:
+            b0, b1, score = candidate
+            extra = {"score": score}
+
+        result = snap(b0, b1, beats, preset, **extra, **kwargs)
         if result.span is None:
             if on_reject is not None:
                 on_reject(b0, b1, result.reason)
