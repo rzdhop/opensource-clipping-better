@@ -215,38 +215,46 @@ def describe(link) -> str:
 # The fourth NIM default this project has had, because NVIDIA retires and
 # un-provisions models faster than anyone tracks them: deepseek-v4-pro died
 # 2026-08-07; deepseek-v4-flash-0731 died between 2026-09-19 and 2026-09-21;
-# google/gemma-4-31b-it was benchmarked at 6.0s on 2026-09-21 and by 2026-09-21
-# evening answered NOTHING AT ALL.
+# google/gemma-4-31b-it was benchmarked at 6.0s on 2026-09-21 and by that
+# evening answered NOTHING AT ALL -- not 410, not an error, no reply in 120s to
+# an 8-token request.
 #
-# Picked by measurement against the real Pass-A workload (45 beats, strict
-# CANDIDATES_SCHEMA, max_tokens=700), one request each, 2026-09-21:
+# **Picked on whether it finds clips, not on whether it replies.** That
+# distinction is the whole lesson of this round. Measured 2026-09-22 against the
+# REAL Pass-A request (45 beats of two real transcripts, strict
+# CANDIDATES_SCHEMA, max_tokens=700), asking how many candidates came back:
 #
-#   deepseek-ai/deepseek-v4.1-flash  1.3-2.9s  schema-valid  296-331 tokens  <-
-#   z-ai/glm-5.3-flash              12.6s      schema-valid
-#   nvidia/nemotron-3.5-lightning   83.0s   -> reasoning prose, unparseable
-#   z-ai/glm-5.3                      >90s  -> timed out
-#   google/gemma-4-31b-it            >120s  -> HANGS on an 8-token request
-#   openai/gpt-oss-20b                >45s  -> HANGS on an 8-token request
+#   nvidia/nemotron-3.5-lightning-30b-a3b  20-90s  2 candidates per window  <-
+#   deepseek-ai/deepseek-v4.1-flash         8-31s  ZERO, every window, both
+#                                                  transcripts, at every
+#                                                  structured-output level
+#   z-ai/glm-5.3-flash, z-ai/glm-5.3               timed out at 240s
+#   nvidia/nemotron-3-super-120b-a12b        6s    malformed JSON
+#   google/gemma-4-31b-it, openai/gpt-oss-20b     hang
+#   ...and 10 more listed models: 404 for this account
 #
-# Two facts from that round are worth more than the numbers:
+# deepseek was briefly the default on the strength of being fast and
+# schema-valid. It answers `{"candidates": []}` in seven tokens on every real
+# transcript, including one that had previously yielded seven clips. **Fast,
+# valid and useless is still useless**, and only a benchmark that counts
+# candidates catches it -- which is why tools/bench_llm.py now measures that and
+# why the preflight probe (DEC-056) is documented as liveness, not suitability.
 #
-# **Listed is not callable.** google/gemma-3-12b-it, nvidia/nemotron-nano-3-30b-a3b
-# and moonshotai/kimi-k2.6 are all in GET /v1/models and all answer
+# nemotron-3.5-lightning was rejected in an earlier round as "reasoning prose,
+# unparseable". That was a missing flag, not the model: _extra_body now turns
+# thinking off for it, and it answers the same request with usable candidates.
+#
+# **Listed is not callable.** Ten models in GET /v1/models answer
 # 404 "Function <uuid>: Not found for account <id>". Reading the catalogue proves
-# nothing; only a real request does. Re-pick with tools/bench_llm.py.
-#
-# **The two fastest candidates are reasoning models**, and both are unusable with
-# thinking ON -- deepseek returns content=null, GLM spends all 700 tokens on the
-# preamble and truncates the JSON mid-object. llm._extra_body turns thinking off
-# for this link, which is the only reason the default below works;
-# test_the_shipped_nim_default_is_covered_by_the_thinking_switch pins that.
+# nothing; only a real request does. Re-pick with
+# `tools/bench_llm.py --nim-shortlist`.
 #
 # NOTE: a test pinning this STRING cannot detect a retirement (DEC-007 believed
 # otherwise, DEC-024 corrected it). What survives one is the chain: a dead link
 # fails and the next provider answers -- PROVIDED it has a key. The job that
 # prompted this had keys for exactly one of three links, so there was nothing to
 # fall through to. A chain with one key is a chain of one.
-NVIDIA_DEFAULT_MODEL = "deepseek-ai/deepseek-v4.1-flash"
+NVIDIA_DEFAULT_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b"
 
 # The shipped default. Groq first because it is by far the fastest free tier;
 # Gemini second because its daily request budget is the largest; NVIDIA last

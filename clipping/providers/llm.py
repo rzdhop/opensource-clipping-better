@@ -77,15 +77,36 @@ def _next_level(level):
     return LEVELS[idx + 1] if idx + 1 < len(LEVELS) else None
 
 
+# NIM model families that emit a reasoning preamble unless it is switched off.
+# Each was measured failing WITH thinking on, in a different way, which is why
+# this is a list rather than a special case:
+#
+#   deepseek-*   returns ``content=null`` -- the reply is all reasoning, and
+#                LlmClient._content_of raises on it
+#   nemotron-3.5-lightning  returns prose instead of JSON, and on a 700-token
+#                budget never reaches the JSON at all
+#   glm-*        spends the whole token budget on the preamble and truncates the
+#                JSON mid-object
+#
+# This predicate used to name deepseek and nothing else, and that was not a
+# cosmetic gap: nemotron-3.5-lightning was rejected as "reasoning prose,
+# unparseable" in one benchmark and, with thinking off, answers the same request
+# in ~20s with usable candidates. A model was disqualified by a missing flag.
+_NIM_REASONING_FAMILIES = ("deepseek", "nemotron-3.5-lightning", "glm-")
+
+
 def _extra_body(link):
     """Provider/model-specific body additions.
 
-    DeepSeek on NIM emits a long reasoning preamble unless thinking is switched
-    off, and on a provider measured at ~12-13 tokens/s that preamble is the
-    difference between answering and hitting the gateway's ~300s cut-off.
+    Several NIM models emit a long reasoning preamble unless thinking is
+    switched off, and on a provider measured at ~12-13 tokens/s that preamble is
+    the difference between answering and hitting the gateway's ~300s cut-off --
+    or, worse, between usable JSON and none.
     """
-    if link.provider == "nvidia" and "deepseek" in link.model.lower():
-        return {"chat_template_kwargs": {"thinking": False}}
+    if link.provider == "nvidia":
+        model = link.model.lower()
+        if any(family in model for family in _NIM_REASONING_FAMILIES):
+            return {"chat_template_kwargs": {"thinking": False}}
     return None
 
 

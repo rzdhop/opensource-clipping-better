@@ -207,6 +207,32 @@ def test_the_shipped_nim_default_is_covered_by_the_thinking_switch():
     assert extra == {"chat_template_kwargs": {"thinking": False}}
 
 
+def test_every_nim_reasoning_family_gets_the_thinking_switch():
+    """The gap that disqualified a model.
+
+    ``_extra_body``'s predicate once named "deepseek" and nothing else.
+    nemotron-3.5-lightning was benchmarked as "reasoning prose, unparseable" and
+    rejected on that basis; with thinking off it answers the same request in
+    ~20s with usable candidates. It was disqualified by a missing flag, not by
+    its own behaviour, and it is the shipped default now.
+
+    Each family here was measured failing a different way with thinking ON:
+    deepseek returns ``content=null``, nemotron-3.5-lightning returns prose, and
+    glm spends the whole token budget on the preamble and truncates the JSON.
+    """
+    from clipping.providers import llm
+
+    off = {"chat_template_kwargs": {"thinking": False}}
+    for family in llm._NIM_REASONING_FAMILIES:
+        assert llm._extra_body(Link("nvidia", f"vendor/{family}-something")) == off, family
+
+    # Only on NIM: the flag is a NIM chat-template argument, and sending it to
+    # another provider is a request body that provider never asked for.
+    assert llm._extra_body(Link("groq", "deepseek-r1")) is None
+    # And not to a model that does not need it.
+    assert llm._extra_body(Link("nvidia", "meta/llama-3.3-70b")) is None
+
+
 def test_a_pinned_model_string_cannot_detect_a_retirement():
     """Documentation, deliberately not an assertion about the string itself.
 
@@ -217,3 +243,14 @@ def test_a_pinned_model_string_cannot_detect_a_retirement():
     is what the preflight ping and tools/bench_llm.py are for.
     """
     assert registry.NVIDIA_DEFAULT_MODEL != "google/gemma-4-31b-it"
+
+
+def test_the_default_is_not_the_one_that_answered_with_nothing():
+    """Liveness is not suitability, pinned as a string.
+
+    deepseek-v4.1-flash was shipped for one commit on the strength of being
+    fast and schema-valid. It answers ``{"candidates": []}`` in seven tokens
+    on every real transcript, including one that had already yielded seven
+    clips. Fast, valid and useless is still useless.
+    """
+    assert registry.NVIDIA_DEFAULT_MODEL != "deepseek-ai/deepseek-v4.1-flash"

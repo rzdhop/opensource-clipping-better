@@ -57,6 +57,17 @@ PASS_A_BUDGET_SHARE = 0.7
 # because a floor that is too small refuses every window and makes zero requests.
 FALLBACK_REQUEST_FLOOR_SECONDS = 330.0
 
+# The clock moves between this module granting a window its deadline and
+# run_chain checking that a request still fits inside it -- rendering the beats,
+# building the prompt, walking the chain's keyless links. Granting exactly one
+# request's worth therefore grants slightly less than one request's worth by the
+# time it is measured, and the window is refused for an epsilon.
+#
+# Found by running the real failed job: every window but the last was skipped
+# with "a 330s request does not fit the 330s left in the time budget" -- the
+# never-tries bug the floor exists to prevent, reintroduced by rounding.
+GRANT_MARGIN_SECONDS = 1.0
+
 
 class AnalysisError(RuntimeError):
     """Analysis produced no usable clips."""
@@ -219,10 +230,11 @@ def _pass_a(all_beats, preset, want, ask, on_log, time_fn, deadline, floor):
     failed = 0
     skipped = 0
     last_error = None
+    needed = floor + GRANT_MARGIN_SECONDS
     for index, (lo, hi) in enumerate(ranges, start=1):
         now = time_fn()
         remaining = deadline - now
-        if remaining < floor:
+        if remaining < needed:
             skipped += 1
             last_error = last_error or (
                 f"{max(0.0, remaining):.0f}s left, {floor:.0f}s needed per request"
@@ -236,7 +248,9 @@ def _pass_a(all_beats, preset, want, ask, on_log, time_fn, deadline, floor):
 
         windows_left = len(ranges) - index + 1
         share = remaining / windows_left
-        window_deadline = min(deadline, now + max(share, floor))
+        # `needed`, not `floor`: a window granted exactly one request's worth is
+        # granted slightly less than that by the time run_chain measures it.
+        window_deadline = min(deadline, now + max(share, needed))
 
         beats_text = beats_mod.render_beats(all_beats, lo, hi)
         try:

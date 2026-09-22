@@ -39,38 +39,43 @@ from clipping.providers.registry import (  # noqa: E402
 )
 
 # The NIM models worth re-measuring when the default dies again, so the next
-# re-pick starts from measured ground rather than from the catalogue. Measured
-# 2026-09-21 against the real Pass-A workload:
+# re-pick starts from measured ground rather than from the catalogue.
 #
-#   deepseek-ai/deepseek-v4.1-flash   1.3-2.9s  schema-valid   <- current default
-#   z-ai/glm-5.3-flash               12.6s      schema-valid, but ONLY with
-#                                               thinking off; llm._extra_body
-#                                               does not cover it (see below)
-#   nvidia/nemotron-3.5-lightning-30b-a3b  83s  reasoning prose, unparseable
-#   z-ai/glm-5.3                          >90s  timed out
-#   google/gemma-4-31b-it                >120s  HANGS on an 8-token request
-#   openai/gpt-oss-20b                    >45s  HANGS on an 8-token request
+# **Measure whether it FINDS CLIPS, not whether it replies.** Measured
+# 2026-09-22 against the real Pass-A request on two real transcripts:
 #
-# Two traps this list exists to remember:
+#   nvidia/nemotron-3.5-lightning-30b-a3b  20-90s  2 candidates/window  <- default
+#   deepseek-ai/deepseek-v4.1-flash         8-31s  ZERO candidates, every window,
+#                                                  both transcripts, at every
+#                                                  structured-output level
+#   z-ai/glm-5.3-flash, z-ai/glm-5.3               timed out at 240s
+#   nvidia/nemotron-3-super-120b-a12b        6s    malformed JSON
+#   google/gemma-4-31b-it, openai/gpt-oss-20b     hang on an 8-token request
 #
-# 1. GET /v1/models lists more than an account can call. google/gemma-3-12b-it,
-#    nvidia/nemotron-nano-3-30b-a3b and moonshotai/kimi-k2.6 are all listed and
-#    all answer 404 "Function <uuid>: Not found for account <id>". They are kept
-#    in the list below on purpose: a 404 here is a result, and re-discovering it
-#    by hand costs an hour.
-# 2. The fast candidates are reasoning models and are unusable with thinking ON
-#    -- deepseek returns content=null, GLM burns the whole token budget on the
-#    preamble and truncates the JSON. ``llm._extra_body`` switches it off for
-#    models whose name contains "deepseek" and nothing else, so a GLM row here
-#    measures GLM *with* thinking unless that predicate is widened first.
+# Three traps this list exists to remember:
+#
+# 1. **Fast, schema-valid and useless is still useless.** deepseek-v4.1-flash was
+#    briefly shipped as the default on latency and schema-validity alone. It
+#    answers `{"candidates": []}` in seven tokens on every real transcript,
+#    including one that had previously yielded seven clips. Only a benchmark that
+#    counts candidates catches that, which is what --nim-shortlist does below.
+# 2. **GET /v1/models lists far more than an account can call.** Ten of the
+#    models below answer 404 "Function <uuid>: Not found for account <id>". They
+#    are kept here on purpose: a 404 is a result, and rediscovering it costs an
+#    hour.
+# 3. **The good candidates are reasoning models and are unusable with thinking
+#    ON.** ``llm._NIM_REASONING_FAMILIES`` turns it off for the families measured
+#    to need it. nemotron-3.5-lightning was once rejected as "reasoning prose,
+#    unparseable" purely because it was missing from that list -- a model
+#    disqualified by a flag. Check that list before judging a new candidate.
 NIM_SHORTLIST = (
+    "nvidia/nvidia/nemotron-3.5-lightning-30b-a3b",
     "nvidia/deepseek-ai/deepseek-v4.1-flash",
     "nvidia/z-ai/glm-5.3-flash",
-    "nvidia/nvidia/nemotron-3.5-lightning-30b-a3b",
+    "nvidia/nvidia/nemotron-3-super-120b-a12b",
     "nvidia/openai/gpt-oss-20b",
     "nvidia/google/gemma-4-31b-it",
-    "nvidia/google/gemma-3-12b-it",
-    "nvidia/moonshotai/kimi-k2.6",
+    "nvidia/moonshotai/kimi-k3",
 )
 
 # A transcript-shaped prompt of roughly the size Pass A actually sends, so the

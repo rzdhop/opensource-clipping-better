@@ -593,3 +593,37 @@ def test_pass_c_refuses_metadata_predictively():
     assert any("basic title" in line for line in logs)
     for clip in clips:
         assert clip["title_inggris"]
+
+
+def test_a_granted_window_is_actually_attempted_by_the_chain():
+    """The epsilon that reintroduced the never-tries bug, found on a real job.
+
+    ``run_chain`` measures the remaining time slightly *after* this module grants
+    it, so a window handed exactly one request's worth is handed slightly less
+    than that by the time it is checked, and is refused. Every window but the
+    last was skipped with "a 330s request does not fit the 330s left in the time
+    budget" -- the exact failure the floor exists to prevent.
+
+    The runner here mimics ``run_chain`` faithfully: it reads the clock itself
+    rather than trusting the allowance it was handed.
+    """
+    clock = Clock()
+    attempts = []
+
+    def runner(chain, **kwargs):
+        clock.now += 0.001                       # rendering, prompt building
+        if 330.0 > kwargs["deadline"] - clock.now:
+            raise RuntimeError("a 330s request does not fit the time budget")
+        attempts.append(kwargs["deadline"])
+        clock.now += 15.0
+        return candidates((0, 2, 60)), chain[0]
+
+    analyzer.analyze(
+        segmen(200), Cfg(), chain=[Link("nvidia", "m")], keys={"nvidia": "k"},
+        on_log=lambda *a: None, time_fn=clock, run_chain=runner,
+    )
+
+    assert len(attempts) >= 5, (
+        "a window granted one request's worth must survive the clock moving "
+        "between the grant and the check"
+    )
