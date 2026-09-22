@@ -1347,3 +1347,125 @@ have, `floor + margin`.
   the clock and refuses on its own arithmetic.
 - **It was found by running the real job, not by the suite.** Both defects in
   this round were. A green suite and a live run answer different questions.
+
+## DEC-060 — The candidate's description travels with the span
+**Context.** `snap()` rewrites `b0`/`b1` while growing a candidate toward
+`preset.target` and while trimming one back under `preset.max`. Growing fires on
+nearly every candidate. `_pass_b` looked each candidate's `gist` and `kind` up in
+`{(c["b0"], c["b1"]): c}` — keyed on the ids it had sent *in* — so the lookup
+missed whenever a boundary had moved, and the whole-video re-rank was reading
+`#3 [34s] score=88 clip` with an empty gist for most of the field. Live since
+the three-pass split shipped (DEC-027); invisible because no test asserted
+prompt content.
+**Decision.** `Span` carries `gist` and `kind`, appended last with defaults so
+the five-positional-field construction in three call sites keeps working.
+`snap_all` accepts candidate dicts as well as bare triples. `snap` passes both
+through and reads neither.
+**Consequence.**
+- **The timing-only charter (DEC-028) is intact.** Snapping still decides
+  nothing but boundaries; the two new fields are an opaque payload.
+- **Pass C is fed the same two values**, which `clip_meta_prompt` had accepted
+  since it was written and nothing had ever passed.
+- **A key derived from mutable state is the bug**, not the missing passthrough.
+  Anything that must survive `snap` travels with the span from now on.
+
+## DEC-061 — The re-rank sees the hook line, and variety is enforced in Python
+**Context.** Pass B chose which moments ship from a duration, a score and a
+twelve-word gist written by a different request. The words the clip *opens on* —
+what actually decides whether a stranger keeps watching — were never shown to
+it. Separately, "prefer variety" was an instruction, and models agree with it
+and still return five versions of the strongest point.
+**Decision.** Each candidate line carries the first fifteen words of its `b0`
+beat, truncated not summarised. `RANKED_SCHEMA` gains a required one-word
+`topic`, and `_enforce_variety` demotes a pick repeating an earlier pick's
+topic.
+**Consequence.**
+- **Demotion, not deletion.** A repeat loses its slot only to something
+  different, and is backfilled when there is nothing different to promote. That
+  is what keeps DEC-021 true: a video genuinely about one subject still yields
+  the count that was asked for, and the log says so.
+- **A blank topic is an unknown, not a match.** Treating two blanks as the same
+  subject would silently cost a clip every time a weaker model omitted the field.
+- **`topic` is not editorial output.** Nothing renders it; it exists so a rule
+  can be enforced rather than requested. `MAX_TOKENS_RANKED` 400 → 600.
+
+## DEC-062 — Prompts put the data first, and the scan is told what the video is
+**Context.** Thirty lines of instructions arrived before any transcript, so every
+rule was a rule about nothing until the model reached the bottom. The 1-100 score
+had no scale, so each window scored from its own private sense of the range and
+pass B then compared those numbers across windows as if they agreed. And every
+window judged "would this stand alone to someone who has not seen the rest"
+without knowing what the rest *was*.
+**Decision.** Beats before rules, in both pass A and pass B. Numbered rules
+rather than prose. A four-band `SCORING` rubric ending "below 50, do not return
+it at all". One good and one bad worked example, marked invented. A
+`video_context` preface: length, language, and an optional `--topic`.
+**Consequence.**
+- **Nothing here costs a request.** Length and language are already in hand and
+  the topic is typed by the uploader. An auto-summarised topic was rejected: one
+  more request and one more failure point per run for a line a human can type.
+- **An unset topic prints no heading**, so the prompt never carries a label with
+  nothing under it.
+- **`PROMPT_VERSION` now exists** and is bumped whenever wording changes, so
+  anything caching a reply can tell the question changed.
+
+## DEC-063 — The pass that read the clip names its hook lines; C runs warmer
+**Context.** `hook_v2_items` chose its cards with a heuristic — the shortest
+beats with the most words, a proxy for density rather than for the line worth
+putting on screen — immediately after a request in which a model had read the
+whole clip and could simply be asked. Separately, every pass ran at
+`run_chain`'s analytic 0.2, including the only pass that writes anything a
+person reads.
+**Decision.** `hook_beat` (one id) becomes `hook_beats` (1-3, strongest first).
+The first drives the teaser window; all of them feed `hook_v2_items`, whose
+heuristic remains the fallback. `ANALYTIC_TEMPERATURE = 0.2` for A and B,
+`WRITING_TEMPERATURE = 0.5` for C.
+**Consequence.**
+- **Amends DEC-030.** `hook_v2` moves from purely derived to model-informed
+  with a deterministic fallback; ids, never timestamps, so DEC-028 holds.
+- **The render contract is untouched.** `studio/core.py` reads only
+  `start_time`/`end_time` per item, and cards are sorted chronologically
+  whatever the source, because a sequence jumping backwards reads as a mistake.
+- **The temperatures are named for what they are for**, not spelled as bare
+  numbers at the call sites.
+
+## DEC-064 — Every prompt lives in `prompts.py`, in English
+**Context.** `voiceover.get_commentary_prompt` was written *in* Indonesian, with
+its style and length tables duplicated in English behind `if language == "en"`.
+That is the shape the analysis prompts were rewritten out of: instructions in
+the output language pull the answer toward that language whatever the video, and
+two parallel tables drift. It also sat in a module importing `google.genai` and
+`edge_tts`, so it could not be imported in the pytest-only CI environment
+(DEC-012) and had no coverage at all.
+**Decision.** `prompts.commentary_prompt` — English instructions, one style
+table, one length table, output language as a parameter.
+`voiceover.generate_commentary_script` imports it at function level.
+**Consequence.**
+- **The dependency is one-way.** `prompts.py` stays stdlib-only, which is
+  precisely what made twelve tests possible where there had been none.
+- **The guard that the old copy is gone reads `voiceover.py` as text.** An
+  `importorskip` guard never runs in the one environment that checks every push.
+- **`--voiceover-lang` still offers only `id` and `en`.** The prompt is now more
+  capable than the flag; widening it is a separate change.
+
+## DEC-065 — A cut may not open on the back half of a sentence, where that is knowable
+**Context.** The most recognisable sign of an auto-generated clip is one that
+starts mid-thought, and `snap()` *creates* that as often as it inherits it: it
+grows backwards into the previous beat when a candidate is short.
+**Decision.** `beats.starts_mid_sentence` requires **both** signals — the beat
+opens lower case, and the previous beat did not end in sentence punctuation —
+and is applied to the snapped `b0`, after `snap_all` and before `dedupe`.
+**Consequence.**
+- **Either signal alone is wrong.** A sentence can legitimately open lower case
+  (`iPhone sales fell by a third.`), and a clean stop before it is the stronger
+  evidence.
+- **Two valves, both load-bearing.** `has_punctuation` gates the guard off below
+  20% of beats ending in punctuation, because auto-captions carry none and every
+  candidate would look like a fragment; and if the guard would remove *every*
+  span it removes none and prints the override. A heuristic may not quietly
+  conclude a video has nothing in it (DEC-021).
+- **An uncased script answers neither signal.** `"这"` and `"ه"` are neither
+  upper nor lower, so CJK and Arabic return False rather than having every
+  candidate rejected. No fixture in this suite had either shape before.
+- **The summary line gained a step rather than absorbing one.** Counting these
+  rejections under "that fit" would report duration failures that never happened.

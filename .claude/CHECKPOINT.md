@@ -1,6 +1,97 @@
 # CHECKPOINT
 
-## Last task — COMPLETE
+## In progress — analysis upgrade, twelve stages
+- **Task:** Upgrade the three-pass analysis: prompts, pass logic, pipeline.
+  Plan: `/home/ubuntu/.claude/plans/okay-plan-the-implementation-luminous-tome.md`
+- **Phase:** PAUSED after Stage 6 of 12, at the human's request, to deploy and
+  test the six landed stages on the real app. All six quality stages are done;
+  the six remaining are speed and cleanup.
+- **Current stage:** none in progress. **Resume at S7** (per-window pass-A
+  cache) — see the plan for its full spec.
+- **Next action:** the human is deploying and testing. When they report back,
+  either act on what they found or start S7.
+- **Pushed:** `e8778f5` is on `origin/main`. This push also carried the nine
+  commits from the previous task, which had never been pushed.
+- **Tier-1 at the push:** CI env **1164 passed, 101 skipped, 0 failed**
+  (baseline before this task: 1110/101).
+- **Tier-2: NOT DONE, and the human is doing it.** No E2E browser suite exists.
+  No live analysis run has happened against a real provider, so stages 2, 3 and
+  4 — which change what the model is *asked* — are shape-verified only. The
+  suite cannot prove an answer got better. **This is the honest gap in this
+  work.** Suggested check when deploying: run one job with
+  `--dry-run-analysis` against `outputs/410b46109668/transcript.vtt` (Whisper
+  is skipped; `config_adapter` adopts the saved transcript) and compare the
+  clip list, per-window candidate counts and wall time with the 590s / 5-clip
+  baseline recorded below.
+- **What to look at first on a real run**, since these are the behaviour
+  changes with no live evidence yet:
+  1. Are titles less flat? (S4 raised pass C to temperature 0.5.)
+  2. Do the five clips cover different subjects? (S2's topic demotion.)
+  3. Does any clip still open mid-sentence? (S6 — and if a whole video's
+     candidates get dropped, the log says so explicitly rather than failing.)
+  4. `⚠️` and `↷` lines in the activity feed are the analysis explaining
+     itself; they are not errors.
+- **Landed:** S1 `597f06d` (1116), S2 `6e6c096` (1123), S3 `08e0c5e` (1132),
+  S4 `2f93f02` (1139), S5 `60193e5` (1151), S6 `e8778f5` (**1164**).
+- **Deploy:** the dashboard changed in S3 (a new "What is this video about?"
+  field), so the container needs a rebuild:
+  `docker compose rm -sfv backend && docker compose up -d --build backend`
+  (the `-v` matters; `down -v` would delete the Caddy certificates). Docker
+  needs sudo on this box.
+- **Build note:** `npm run build` in `web/dashboard` fails with EACCES —
+  `dist/` is owned by root from the container build. `node_modules` is now
+  installed locally (gitignored); build with
+  `npx vite build --outDir <scratch> --emptyOutDir` to verify JSX.
+- **Open questions:** none. Three scope calls were made in chat and are
+  recorded in the plan: cover everything ranked, concurrency last, legacy
+  single-request path deleted with `openai_compat` kept as a chain alias.
+
+### Stage ledger
+| S | Stage | State |
+|---|---|---|
+| 1 | gist/kind survive snapping; reach pass C | **done** `597f06d` |
+| 2 | Pass B sees hook lines; topic + Python variety | **done** `6e6c096` |
+| 3 | Pass A prompt rewrite + `--topic` | **done** `08e0c5e` |
+| 4 | `hook_beats` + temperature 0.5 for pass C | **done** `2f93f02` |
+| 5 | Voice-over prompt into `prompts.py`, English | **done** `60193e5` |
+| 6 | Mid-sentence-start guard on b0 | **done** `e8778f5` |
+| 7 | Per-window pass-A cache | **next** |
+| 8 | Preflight does real work when it can | not started |
+| 9 | Delete the legacy monolith; `openai_compat` alias | not started |
+| 10 | Karaoke highlight colour into config | not started |
+| 11 | Persist the analysis trace | not started |
+| 12 | Concurrent pass-A windows (riskiest) | not started |
+
+### Regression contract for this task
+Each item names what proves it. Nothing here may break.
+- **RC-A1** Three-pass analysis still produces renderable clips —
+  `test_analysis_windows.py::test_a_full_run_produces_renderable_clips`.
+- **RC-A2** A failed window loses one window, not the run (DEC-027/054) —
+  `::test_a_failed_window_does_not_fail_the_run`, `::test_every_window_is_scanned`.
+- **RC-A3** The requested clip count is never silently reduced (DEC-021) —
+  `::test_a_failed_ranking_falls_back_to_the_scan_scores`, plus the new
+  variety-backfill and never-empty-valve tests in S2/S6.
+- **RC-A4** A model-invented beat id never becomes a cut (DEC-028) —
+  `::test_a_beat_id_outside_the_window_is_discarded`, `::test_a_malformed_candidate_is_skipped`.
+- **RC-A5** Provider failure and empty transcript stay distinguishable
+  (DEC-055) — the `ScanStats` tests in `test_analysis_windows.py`.
+- **RC-A6** The per-window time budget holds (DEC-053/054/059) — the three
+  `Clock`/`greedy` tests; S12 must pin them to `analysis_workers=1`.
+- **RC-A7** The render layer's clip-dict contract is unchanged (DEC-029, RC-7) —
+  `test_slim_schema_adapter.py`, `test_manifest_fields.py`.
+- **RC-A8** Transcription and transcript parsing survive the S9 deletion —
+  `test_cpu_transcription_warning.py`, `test_json3_parser.py`,
+  `test_transcript_dispatch.py`, `test_transcript_persistence.py`.
+- **RC-A9** Karaoke word alignment unchanged at the default colour (RC-4/RC-7,
+  **UNVERIFIED** — no automated cover; S10 requires a byte-identical `.ass` diff).
+
+### Unstaged at checkpoint time
+- `.claude/settings.local.json.tmp.3012965.9704ffe2b8fd` — a stray editor temp
+  file, unrelated to this task. Left alone, not staged.
+
+---
+
+## Previous task — COMPLETE
 - **Task:** A job run with video only failed after 47 minutes of CPU Whisper:
   the analysis collapsed and blamed the transcript. **All six stages committed
   and verified against the real job.**
