@@ -23,6 +23,7 @@ Imports nothing heavier than the standard library plus the provider layer.
 
 from __future__ import annotations
 
+import json
 import os
 import string
 import time
@@ -79,6 +80,12 @@ ANALYTIC_TEMPERATURE = 0.2
 # captions, a one-line hook. At 0.2 it returns competent, flat, largely
 # interchangeable phrasing.
 WRITING_TEMPERATURE = 0.5
+
+# Where the run records what it decided. Every rejection already carried a
+# reason and every window a status; both went to the log and were lost, and
+# the log truncates the rejection list on purpose. This keeps all of it.
+TRACE_FILENAME = "analysis_trace.json"
+TRACE_VERSION = 1
 
 
 class AnalysisError(RuntimeError):
@@ -175,53 +182,90 @@ def analyze(
     )
 
     cache = _build_cache(cfg, chain, preset)
+    trace = {
+        "version": TRACE_VERSION,
+        "prompt_version": prompts.PROMPT_VERSION,
+        "chain": ",".join(_describe_link(link) for link in chain or ()),
+        "preset": preset.name,
+        "language": language,
+        "want": want,
+        "windows": [],
+        "rejections": [],
+        "selected": [],
+        "stats": {},
+    }
 
-    candidates, stats = _pass_a(
-        all_beats, preset, want, ask, on_log, time_fn, pass_a_deadline, floor,
-        context=context, cache=cache,
-    )
-    if cache is not None:
-        cache.save()
-    if stats.answered == 0:
-        # Not a verdict on the video: nothing was ever read. Saying otherwise
-        # sends the user to re-cut a transcript that was never the problem.
-        raise AnalysisError(
-            f"The video was never analysed: all {stats.total} scan window(s) "
-            f"failed before the model answered "
-            f"({stats.failed} provider error(s), "
-            f"{stats.skipped} skipped for want of time). "
-            f"Last error | {stats.last_error}"
+    try:
+        candidates, stats = _pass_a(
+            all_beats, preset, want, ask, on_log, time_fn, pass_a_deadline, floor,
+            context=context, cache=cache, trace=trace,
         )
-    if not candidates:
-        message = (
-            "No clippable moment was found anywhere in this transcript. "
-            "That can mean the video is all housekeeping, or that the "
-            "transcript does not match the video."
-        )
-        if _lost(stats):
-            message += (
-                f" Note that {_lost(stats)} of {stats.total} window(s) never "
-                f"returned, so part of the video was never considered."
+        trace["stats"] = stats._asdict()
+        if cache is not None:
+            cache.save()
+        if stats.answered == 0:
+            # Not a verdict on the video: nothing was ever read. Saying otherwise
+            # sends the user to re-cut a transcript that was never the problem.
+            raise AnalysisError(
+                f"The video was never analysed: all {stats.total} scan window(s) "
+                f"failed before the model answered "
+                f"({stats.failed} provider error(s), "
+                f"{stats.skipped} skipped for want of time). "
+                f"Last error | {stats.last_error}"
             )
-        raise AnalysisError(message)
+        if not candidates:
+            message = (
+                "No clippable moment was found anywhere in this transcript. "
+                "That can mean the video is all housekeeping, or that the "
+                "transcript does not match the video."
+            )
+            if _lost(stats):
+                message += (
+                    f" Note that {_lost(stats)} of {stats.total} window(s) never "
+                    f"returned, so part of the video was never considered."
+                )
+            raise AnalysisError(message)
 
-    spans = _snap_candidates(candidates, all_beats, preset, on_log)
-    if not spans:
-        raise AnalysisError(
-            f"{len(candidates)} moment(s) were found but none fit the "
-            f"{preset.name} duration window ({preset.min:.0f}-{preset.max:.0f}s)."
+        spans = _snap_candidates(candidates, all_beats, preset, on_log, trace=trace)
+        if not spans:
+            raise AnalysisError(
+                f"{len(candidates)} moment(s) were found but none fit the "
+                f"{preset.name} duration window ({preset.min:.0f}-{preset.max:.0f}s)."
+            )
+
+        chosen = _pass_b(
+            spans, want, ask, on_log, time_fn, run_deadline, all_beats=all_beats
+        )
+        clips = _pass_c(
+            chosen, all_beats, words, cfg, preset, language, ask, on_log, time_fn,
+            run_deadline, floor,
         )
 
-    chosen = _pass_b(
-        spans, want, ask, on_log, time_fn, run_deadline, all_beats=all_beats
-    )
-    clips = _pass_c(
-        chosen, all_beats, words, cfg, preset, language, ask, on_log, time_fn,
-        run_deadline, floor,
-    )
+        if not clips:
+            raise AnalysisError("Every clip failed to produce metadata.")
 
-    if not clips:
-        raise AnalysisError("Every clip failed to produce metadata.")
+        trace["selected"] = [
+            {
+                "rank": clip["rank"],
+                "start": clip["start_time"],
+                "end": clip["end_time"],
+                "score": clip.get("viral_score", 0),
+                "gist": span.gist,
+                "kind": span.kind,
+                "b0": span.b0,
+                "b1": span.b1,
+            }
+            for clip, span in zip(clips, sorted(chosen, key=lambda s: -s.score))
+        ]
+        _write_trace(cfg, trace, on_log)
+
+    except AnalysisError:
+        # The trace is most useful precisely when the analysis failed:
+        # it holds which windows answered, what they found, and every
+        # candidate the snapper refused with its reason.
+        trace["error"] = True
+        _write_trace(cfg, trace, on_log)
+        raise
 
     _report_shortfall(want, len(clips), stats, on_log)
     elapsed = time_fn() - started
@@ -232,7 +276,7 @@ def analyze(
 # --------------------------------------------------------------------- passes
 
 def _pass_a(all_beats, preset, want, ask, on_log, time_fn, deadline, floor,
-           context=None, cache=None):
+           context=None, cache=None, trace=None):
     """Scan each window for candidate moments, each inside its own time share.
 
     DEC-027 states the invariant this restores: *a failure is local -- a failed
@@ -276,6 +320,7 @@ def _pass_a(all_beats, preset, want, ask, on_log, time_fn, deadline, floor,
             if remembered is not None:
                 answered += 1
                 candidates.extend(remembered)
+                _note_window(trace, index, lo, hi, "cached", remembered)
                 on_log(
                     f"   ⚡ Window {index}/{len(ranges)} ({lo}-{hi}): "
                     f"{len(remembered)} candidate(s) from cache."
@@ -288,6 +333,10 @@ def _pass_a(all_beats, preset, want, ask, on_log, time_fn, deadline, floor,
             skipped += 1
             last_error = last_error or (
                 f"{max(0.0, remaining):.0f}s left, {floor:.0f}s needed per request"
+            )
+            _note_window(
+                trace, index, lo, hi, "skipped", (),
+                error=f"{max(0.0, remaining):.0f}s left, {floor:.0f}s needed",
             )
             on_log(
                 f"   ⏱ Window {index}/{len(ranges)} ({lo}-{hi}) skipped: "
@@ -328,6 +377,7 @@ def _pass_a(all_beats, preset, want, ask, on_log, time_fn, deadline, floor,
             # problem to fix.
             failed += 1
             last_error = f"{type(exc).__name__}: {exc}"
+            _note_window(trace, index, lo, hi, "failed", (), error=last_error)
             on_log(f"   ⚠️ Window {index}/{len(ranges)} ({lo}-{hi}) failed | {exc}")
             continue
 
@@ -336,6 +386,7 @@ def _pass_a(all_beats, preset, want, ask, on_log, time_fn, deadline, floor,
         candidates.extend(found)
         if cache is not None:
             cache.put(beats_text, found)
+        _note_window(trace, index, lo, hi, "answered", found)
         on_log(f"   [1/3] Window {index}/{len(ranges)}: {len(found)} candidate(s).")
 
     return candidates, ScanStats(len(ranges), answered, failed, skipped, last_error)
@@ -526,6 +577,40 @@ def _pass_c(spans, all_beats, words, cfg, preset, language, ask, on_log, time_fn
 
 
 # ------------------------------------------------------------------- helpers
+
+def _note_window(trace, index, lo, hi, status, found, error=None):
+    """Record one window's outcome. A no-op when nothing is collecting."""
+    if trace is None:
+        return
+    trace["windows"].append({
+        "index": index,
+        "lo": lo,
+        "hi": hi,
+        "status": status,
+        "error": error,
+        "candidates": [dict(c) for c in found or ()],
+    })
+
+
+def _write_trace(cfg, trace, on_log):
+    """Write the trace beside the job's other output. Best-effort, always.
+
+    A record of what happened is not allowed to change what happened: a run
+    that produced clips must not fail because a directory was unwritable.
+    """
+    outputs_dir = str(getattr(cfg, "outputs_dir", "") or "")
+    if not outputs_dir:
+        return
+    path = os.path.join(outputs_dir, TRACE_FILENAME)
+    try:
+        os.makedirs(outputs_dir, exist_ok=True)
+        temporary = f"{path}.tmp"
+        with open(temporary, "w", encoding="utf-8") as handle:
+            json.dump(trace, handle, ensure_ascii=False, indent=2)
+        os.replace(temporary, path)
+    except (OSError, ValueError, TypeError) as exc:  # noqa: BLE001
+        on_log(f"   ℹ️ Could not write the analysis trace | {exc}")
+
 
 def _describe_link(link):
     """``"groq/model"`` for a Link or a plain ``(provider, model)`` tuple."""
@@ -743,7 +828,7 @@ def _drop_mid_sentence_starts(spans, all_beats, on_log):
     return kept
 
 
-def _snap_candidates(candidates, all_beats, preset, on_log):
+def _snap_candidates(candidates, all_beats, preset, on_log, trace=None):
     rejected = []
     # The candidate dicts go in whole, so each span comes back carrying the
     # gist and kind the scan gave it. Rebuilding bare triples here is what used
@@ -754,6 +839,12 @@ def _snap_candidates(candidates, all_beats, preset, on_log):
         preset,
         on_reject=lambda b0, b1, reason: rejected.append((b0, b1, reason)),
     )
+    if trace is not None:
+        # All of them. The log prints five and a count, which is right for a
+        # console and wrong for the record.
+        trace["rejections"].extend(
+            {"b0": b0, "b1": b1, "reason": reason} for b0, b1, reason in rejected
+        )
     for b0, b1, reason in rejected[:5]:
         on_log(f"   ↷ Dropped beats {b0}-{b1}: {reason}")
     if len(rejected) > 5:
