@@ -635,6 +635,51 @@ def _clamp_score(value):
         return 50
 
 
+def _drop_mid_sentence_starts(spans, all_beats, on_log):
+    """Drop clips that would open on the back half of a sentence.
+
+    Checked on the SNAPPED b0, not the model's: ``snap`` grows backwards when a
+    candidate is short, so it can create this defect as easily as inherit it.
+
+    Two safety valves, both load-bearing:
+
+    * The guard does not run at all on a transcript without enough punctuation
+      to support it. Auto-captions have none, beats there are cut on pauses,
+      and every single candidate would look like a fragment.
+    * If it would remove *everything*, nothing is removed. A cosmetic defect is
+      worth fixing; it is not worth returning no clips over, and DEC-021 does
+      not allow a heuristic to quietly decide a video has nothing in it.
+    """
+    if not spans or not beats_mod.has_punctuation(all_beats):
+        return spans
+
+    kept, dropped = [], []
+    for span in spans:
+        if beats_mod.starts_mid_sentence(all_beats, span.b0):
+            dropped.append(span)
+        else:
+            kept.append(span)
+
+    if not dropped:
+        return spans
+
+    if not kept:
+        on_log(
+            "   ↷ Every candidate opens mid-sentence; keeping them rather than "
+            "returning nothing."
+        )
+        return spans
+
+    for span in dropped[:5]:
+        on_log(
+            f"   ↷ Dropped beats {span.b0}-{span.b1}: the cut would open "
+            f"mid-sentence."
+        )
+    if len(dropped) > 5:
+        on_log(f"   ↷ ...and {len(dropped) - 5} more that opened mid-sentence.")
+    return kept
+
+
 def _snap_candidates(candidates, all_beats, preset, on_log):
     rejected = []
     # The candidate dicts go in whole, so each span comes back carrying the
@@ -651,11 +696,16 @@ def _snap_candidates(candidates, all_beats, preset, on_log):
     if len(rejected) > 5:
         on_log(f"   ↷ ...and {len(rejected) - 5} more that did not fit.")
 
+    fitted = len(spans)
+    spans = _drop_mid_sentence_starts(spans, all_beats, on_log)
     deduped = snap.dedupe(spans)
-    on_log(
-        f"   ✂️ {len(candidates)} candidate(s) → {len(spans)} that fit → "
-        f"{len(deduped)} after removing overlaps."
-    )
+
+    # Each number names the step that produced it. Folding the sentence guard
+    # into "that fit" would report duration rejections that never happened.
+    line = f"   ✂️ {len(candidates)} candidate(s) → {fitted} that fit"
+    if len(spans) != fitted:
+        line += f" → {len(spans)} that open on a sentence"
+    on_log(f"{line} → {len(deduped)} after removing overlaps.")
     return deduped
 
 

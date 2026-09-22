@@ -237,3 +237,98 @@ def test_real_scraped_transcript_produces_usable_beats():
     assert len(recovered) == 14
     for beat in beats:
         assert beat["end"] > beat["start"]
+
+
+# ------------------------------------------------- where a sentence begins
+
+def _beat(i, text):
+    return {"i": i, "start": i * 3.0, "end": i * 3.0 + 2.5, "text": text,
+            "n_words": len(text.split()), "w0": i * 5, "w1": i * 5 + 4}
+
+
+PUNCTUATED = [
+    _beat(0, "This is a finished thought."),
+    _beat(1, "A new sentence starts here."),
+    # Trails off: no sentence-final punctuation.
+    _beat(2, "and this one trails off"),
+    # Opens lower case, and what came before it did not finish.
+    _beat(3, "into the next part of it"),
+]
+
+
+def test_a_beat_starting_lowercase_after_an_unfinished_beat_is_mid_sentence():
+    assert B.starts_mid_sentence(PUNCTUATED, 3) is True
+
+
+def test_a_capitalised_opening_is_not_mid_sentence():
+    assert B.starts_mid_sentence(PUNCTUATED, 1) is False
+
+
+def test_both_signals_are_required():
+    """Beat 2 opens lower case but the beat before it ended cleanly, so the
+    sentence really does start there. One signal alone is not enough."""
+    assert B.starts_mid_sentence(PUNCTUATED, 2) is False
+
+
+def test_a_lowercase_opening_after_a_full_stop_is_not_mid_sentence():
+    """Trademarks and brand names open sentences in lower case. The previous
+    beat ending cleanly is the stronger signal."""
+    beats = [
+        _beat(0, "Then the numbers came in."),
+        _beat(1, "iPhone sales fell by a third."),
+    ]
+    assert B.starts_mid_sentence(beats, 1) is False
+
+
+def test_the_first_beat_is_never_mid_sentence():
+    """There is nothing before it to be in the middle of."""
+    assert B.starts_mid_sentence([_beat(0, "carrying on from nothing")], 0) is False
+
+
+def test_an_unknown_beat_id_is_not_mid_sentence():
+    assert B.starts_mid_sentence(PUNCTUATED, 9000) is False
+
+
+# ------------------------------------- scripts and transcripts it must not judge
+
+CJK = [
+    _beat(0, "这是一个完整的句子。"),
+    _beat(1, "然后他说了一些别的话。"),
+]
+
+ARABIC = [
+    _beat(0, "هذه جملة كاملة."),
+    _beat(1, "ثم قال شيئا آخر."),
+]
+
+
+def test_a_script_without_case_is_never_called_mid_sentence():
+    """CJK and Arabic have no upper and lower case, so "starts lowercase"
+    means nothing there and would reject every candidate."""
+    for beats in (CJK, ARABIC):
+        for beat in beats:
+            assert B.starts_mid_sentence(beats, beat["i"]) is False
+
+
+AUTO_CAPTIONS = [
+    _beat(i, "so then we went over to the other side of the room")
+    for i in range(10)
+]
+
+
+def test_an_unpunctuated_transcript_disables_the_guard():
+    """YouTube auto-captions carry no punctuation at all, so beats are cut on
+    pauses and EVERY beat looks mid-sentence. The guard must not run."""
+    assert B.has_punctuation(AUTO_CAPTIONS) is False
+    assert B.has_punctuation(PUNCTUATED) is True
+
+
+def test_has_punctuation_is_false_for_no_beats():
+    assert B.has_punctuation([]) is False
+
+
+def test_a_mostly_punctuated_transcript_keeps_the_guard_on():
+    """One run-on beat among many finished ones is exactly what the guard is
+    for; it must not switch itself off for that."""
+    beats = PUNCTUATED + [_beat(4, "and then this trails off")]
+    assert B.has_punctuation(beats) is True

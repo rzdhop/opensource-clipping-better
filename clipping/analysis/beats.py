@@ -53,6 +53,63 @@ def ends_sentence(word_text):
     return bool(stripped) and stripped[-1] in SENTENCE_END
 
 
+# Below this share of beats ending in punctuation, a transcript is treated as
+# unpunctuated and no inference is drawn from where sentences appear to begin.
+# YouTube auto-captions carry none at all, so beats there are cut purely on
+# pauses and every one of them looks like a fragment.
+PUNCTUATION_THRESHOLD = 0.2
+
+
+def has_punctuation(beats, *, threshold=PUNCTUATION_THRESHOLD):
+    """Whether *beats* carry enough punctuation to reason about sentences.
+
+    The guard this gates is worth having only where the evidence exists. On a
+    transcript with no punctuation it would reject every candidate in the
+    video — trading a cosmetic defect for an empty result.
+    """
+    if not beats:
+        return False
+    ended = sum(1 for beat in beats if ends_sentence(beat.get("text", "")))
+    return ended / len(beats) >= threshold
+
+
+def starts_mid_sentence(beats, b0):
+    """Whether beat *b0* clearly opens in the middle of a sentence.
+
+    Two signals, and both have to be safe on their own:
+
+    * The first character is lower case — but only when the script HAS case.
+      ``"这"`` and ``"ه"`` are neither upper nor lower, and treating them as
+      lower would reject every candidate in every CJK and Arabic transcript.
+    * The previous beat did not end in sentence punctuation. Checked second,
+      because a sentence genuinely can open in lower case (``iPhone``), and a
+      clean stop before it is the stronger evidence.
+
+    Deliberately conservative: it answers False whenever it does not know.
+    """
+    by_id = {beat["i"]: beat for beat in beats}
+    beat = by_id.get(b0)
+    if beat is None:
+        return False
+
+    text = str(beat.get("text", "")).lstrip()
+    if not text:
+        return False
+
+    previous = by_id.get(b0 - 1)
+    if previous is None:
+        # Nothing before it to be in the middle of.
+        return False
+    if ends_sentence(previous.get("text", "")):
+        return False
+
+    first = text[0]
+    # An uncased script cannot answer this question either way.
+    if first.lower() == first.upper():
+        return False
+    return first.islower()
+
+
 def build_beats(
     data_segmen,
     *,

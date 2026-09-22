@@ -930,3 +930,93 @@ def test_a_clip_with_no_hook_beats_still_gets_a_teaser():
     clips, _ = run(answers)
     for clip in clips:
         assert clip["hook_end_time"] > clip["hook_start_time"]
+
+
+# ----------------------------------------------- cuts that open mid-sentence
+
+def _runon_segmen(n_sentences=60):
+    """A transcript where every other sentence runs on into the next.
+
+    Punctuated enough for the guard to be active, so the beats that trail off
+    are genuinely the minority case it exists to catch.
+    """
+    out = []
+    t = 0.0
+    for i in range(n_sentences):
+        # Beats where i % 3 == 1 trail off unfinished, and the one after each
+        # of them opens in lower case -- a sentence split across two beats.
+        # So beats where i % 3 == 2 are the ones that open mid-sentence.
+        if i % 3 == 1:
+            text = f"sentence number {i} says something interesting"
+        elif i % 3 == 2:
+            text = f"and number {i} continues the thought."
+        else:
+            text = f"Sentence number {i} says something here."
+        chunk = []
+        for j, w in enumerate(text.split()):
+            chunk.append({"word": w, "start": t + j * 0.4,
+                          "end": t + (j + 1) * 0.4 - 0.01})
+        out.append({"start": chunk[0]["start"], "end": chunk[-1]["end"],
+                    "words": chunk})
+        t = chunk[-1]["end"] + 0.8
+    return out
+
+
+def test_a_mid_sentence_start_is_dropped_and_logged():
+    """The most recognisable sign of an auto-generated cut is a clip that
+    opens on the back half of a sentence."""
+    answers = [
+        # b0=2 and b0=20 both open mid-sentence; b0=21 does not.
+        candidates((2, 5, 95), (20, 23, 90)),
+        candidates((45, 48, 85)),
+        {"ranked": [{"id": 0, "score": 95, "topic": "a"},
+                    {"id": 1, "score": 80, "topic": "b"}]},
+        META, META, META,
+    ]
+    clips, logs = run(answers, segments=_runon_segmen())
+    assert any("mid-sentence" in line for line in logs)
+    # Dropped, not merely reported.
+    assert all(c["start_time"] > 0 for c in clips)
+
+
+def test_the_guard_never_empties_the_result():
+    """A heuristic that can return nothing is worse than the defect it fixes.
+    If every candidate would be dropped, all of them are kept and the override
+    is printed."""
+    segments = _runon_segmen()
+    # Every candidate deliberately opens mid-sentence (i % 3 == 2).
+    answers = [
+        candidates((2, 5, 95), (17, 20, 90)),
+        candidates((47, 50, 85)),
+        {"ranked": [{"id": 0, "score": 95, "topic": "a"},
+                    {"id": 1, "score": 80, "topic": "b"}]},
+        META, META, META,
+    ]
+    clips, logs = run(answers, segments=segments)
+    assert clips, "the guard emptied the result"
+
+
+def test_an_unpunctuated_transcript_keeps_every_candidate():
+    """Auto-captions have no punctuation, so every beat looks mid-sentence and
+    the guard must switch itself off rather than reject the whole video."""
+    out = []
+    t = 0.0
+    for i in range(60):
+        chunk = []
+        for j, w in enumerate(f"so then number {i} went over there".split()):
+            chunk.append({"word": w, "start": t + j * 0.4,
+                          "end": t + (j + 1) * 0.4 - 0.01})
+        out.append({"start": chunk[0]["start"], "end": chunk[-1]["end"],
+                    "words": chunk})
+        t = chunk[-1]["end"] + 0.8
+
+    answers = [
+        candidates((2, 5, 95)),
+        candidates((45, 48, 85)),
+        {"ranked": [{"id": 0, "score": 95, "topic": "a"},
+                    {"id": 1, "score": 80, "topic": "b"}]},
+        META, META,
+    ]
+    clips, logs = run(answers, segments=out)
+    assert len(clips) == 2
+    assert not any("mid-sentence" in line for line in logs)
