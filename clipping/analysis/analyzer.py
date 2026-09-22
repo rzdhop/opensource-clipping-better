@@ -24,6 +24,7 @@ Imports nothing heavier than the standard library plus the provider layer.
 from __future__ import annotations
 
 import time
+from collections import namedtuple
 
 from . import beats as beats_mod
 from . import derive, prompts, schema, snap
@@ -47,6 +48,13 @@ DEFAULT_TOTAL_BUDGET_SECONDS = 900
 
 class AnalysisError(RuntimeError):
     """Analysis produced no usable clips."""
+
+
+# What pass A actually managed, as opposed to what it returned. Without this the
+# analyzer could not tell "every window answered and found nothing" from "no
+# window ever answered", and told a user whose provider was dead that their video
+# was "all housekeeping".
+ScanStats = namedtuple("ScanStats", "total answered failed last_error")
 
 
 def analyze(
@@ -101,13 +109,26 @@ def analyze(
             time_fn=time_fn,
         )[0]
 
-    candidates = _pass_a(all_beats, preset, want, ask, on_log)
-    if not candidates:
+    candidates, stats = _pass_a(all_beats, preset, want, ask, on_log)
+    if stats.answered == 0:
+        # Not a verdict on the video: nothing was ever read. Saying otherwise
+        # sends the user to re-cut a transcript that was never the problem.
         raise AnalysisError(
+            f"The video was never analysed: all {stats.total} scan window(s) "
+            f"failed before the model answered. Last error | {stats.last_error}"
+        )
+    if not candidates:
+        message = (
             "No clippable moment was found anywhere in this transcript. "
             "That can mean the video is all housekeeping, or that the "
             "transcript does not match the video."
         )
+        if stats.failed:
+            message += (
+                f" Note that {stats.failed} of {stats.total} window(s) failed, "
+                f"so part of the video was never considered."
+            )
+        raise AnalysisError(message)
 
     spans = _snap_candidates(candidates, all_beats, preset, on_log)
     if not spans:
@@ -124,7 +145,7 @@ def analyze(
     if not clips:
         raise AnalysisError("Every clip failed to produce metadata.")
 
-    _report_shortfall(want, len(clips), on_log)
+    _report_shortfall(want, len(clips), stats, on_log)
     elapsed = time_fn() - started
     on_log(f"   ✅ Analysis complete: {len(clips)} clip(s) in {elapsed:.0f}s.")
     return clips
@@ -138,6 +159,9 @@ def _pass_a(all_beats, preset, want, ask, on_log):
     on_log(f"   [1/3] Scanning {len(ranges)} window(s) for candidate moments...")
 
     candidates = []
+    answered = 0
+    failed = 0
+    last_error = None
     for index, (lo, hi) in enumerate(ranges, start=1):
         beats_text = beats_mod.render_beats(all_beats, lo, hi)
         try:
@@ -153,14 +177,21 @@ def _pass_a(all_beats, preset, want, ask, on_log):
                 schema.MAX_TOKENS_CANDIDATES,
             )
         except Exception as exc:  # noqa: BLE001 - one window, not the run
+            # Logged as before, but the reason is kept rather than discarded:
+            # it is the difference between a failure of the provider and a
+            # verdict on the transcript, and only one of those is the user's
+            # problem to fix.
+            failed += 1
+            last_error = f"{type(exc).__name__}: {exc}"
             on_log(f"   ⚠️ Window {index}/{len(ranges)} ({lo}-{hi}) failed | {exc}")
             continue
 
+        answered += 1
         found = _clean_candidates(answer, lo, hi)
         candidates.extend(found)
         on_log(f"   [1/3] Window {index}/{len(ranges)}: {len(found)} candidate(s).")
 
-    return candidates
+    return candidates, ScanStats(len(ranges), answered, failed, last_error)
 
 
 def _pass_b(spans, candidates, want, ask, on_log, time_fn, deadline):
@@ -383,7 +414,7 @@ def _resolve_language(cfg, data_segmen, on_log):
     return code
 
 
-def _report_shortfall(want, got, on_log):
+def _report_shortfall(want, got, stats, on_log):
     """Say so when fewer clips were delivered than asked for.
 
     DEC-021 forbids silently changing the requested clip count. This is the
@@ -391,9 +422,21 @@ def _report_shortfall(want, got, on_log):
     clippable moments, deliver what exists and say plainly that you did. A
     supply limit is not a provider limit, and hiding it would be the same
     failure DEC-021 was written about.
+
+    The amendment: this could not previously tell which of the two it was
+    looking at, and so blamed the transcript for both. A window that never
+    answered is not evidence about the video.
     """
-    if got < want:
-        on_log(
-            f"   ℹ️ Asked for {want} clip(s); this transcript yielded {got}. "
-            f"The rest of it did not contain a moment that stands on its own."
+    if got >= want:
+        return
+
+    line = f"   ℹ️ Asked for {want} clip(s); this transcript yielded {got}. "
+    if stats.failed:
+        line += (
+            f"{stats.failed} of {stats.total} scan window(s) never returned, so "
+            f"part of the video was not considered — this is not a verdict on "
+            f"the transcript."
         )
+    else:
+        line += "The rest of it did not contain a moment that stands on its own."
+    on_log(line)

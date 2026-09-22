@@ -223,6 +223,55 @@ def test_no_candidates_anywhere_is_an_explained_failure():
     assert "clippable" in str(info.value)
 
 
+def test_when_every_window_fails_the_error_names_the_provider_not_the_transcript():
+    """The recorded job: every window failed, and the user was told the video
+    was "all housekeeping".
+
+    The negative assertions are the point. A message that merely mentions the
+    provider while still offering the transcript as an explanation sends the
+    user to re-cut something that was never the problem.
+    """
+    boom = RuntimeError("Every provider in the chain failed (3 tried)")
+    with pytest.raises(AnalysisError) as info:
+        run([boom, boom, boom, boom, boom, boom])
+
+    message = str(info.value)
+    assert "never analysed" in message
+    assert "Every provider in the chain failed" in message
+    assert "housekeeping" not in message
+    assert "does not match the video" not in message
+
+
+def test_a_partial_scan_failure_is_named_alongside_the_empty_result():
+    """Some windows answered, none found anything, others never ran.
+
+    The transcript explanation is still offered -- windows did answer -- but it
+    is no longer the whole story.
+    """
+    with pytest.raises(AnalysisError) as info:
+        run([{"candidates": []}, RuntimeError("504"), {"candidates": []}])
+
+    message = str(info.value)
+    assert "clippable" in message
+    assert "never considered" in message
+
+
+def test_a_partially_scanned_transcript_says_so_in_the_shortfall():
+    """A shortfall after a failed window is not evidence about the video."""
+    answers = [
+        candidates((0, 3, 90)),
+        RuntimeError("InternalServerError: 504"),
+        META,
+    ]
+    clips, logs = run(answers)
+    joined = "\n".join(logs)
+
+    assert len(clips) == 1
+    assert "Asked for 3" in joined and "yielded 1" in joined
+    assert "not a verdict on the transcript" in joined
+    assert "did not contain a moment that stands on its own" not in joined
+
+
 def test_an_empty_transcript_is_refused_before_any_request():
     runner = scripted()
     with pytest.raises(AnalysisError):
