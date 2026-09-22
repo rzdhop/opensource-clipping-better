@@ -539,6 +539,17 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
+        "--no-analysis-cache",
+        action="store_true",
+        help=(
+            "Re-scan every transcript window even if this job already has an "
+            "answer for it. The cache is keyed on the window's text plus the "
+            "prompt version, the chain and the clip-length preset, so a stale "
+            "entry cannot be served; use this to pay for a second opinion from "
+            "the same model anyway."
+        ),
+    )
+    p.add_argument(
         "--no-preflight",
         action="store_true",
         help=(
@@ -1156,6 +1167,7 @@ def build_config(argv: list[str] | None = None) -> SimpleNamespace:
         ai_provider=args.ai_provider,
         platform=args.platform,
         topic=args.topic,
+        analysis_cache=not args.no_analysis_cache,
         output_language=args.output_language,
         dry_run_analysis=args.dry_run_analysis,
         api_key_nvidia=os.environ.get("NVIDIA_API_KEY", ""),

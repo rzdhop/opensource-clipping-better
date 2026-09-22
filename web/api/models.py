@@ -202,6 +202,8 @@ class JobCreateRequest(BaseModel):
     # One line of context handed to every scan window, e.g. "home espresso gear
     # review". Optional, and free: nothing is asked of a model to obtain it.
     topic: str = ""
+    # Reuse this job's own scan answers on a rerun. Off re-asks the model.
+    analysis_cache: bool = True
     # "auto" follows the transcript's own language.
     output_language: str = "auto"
     # Run the analysis, save it, and stop before any ffmpeg work.

@@ -411,3 +411,13 @@ def test_topic_defaults_to_empty_and_is_passed_through(tmp_path):
     assert build_config(
         ["--video", str(video), "--topic", "home espresso gear"]
     ).topic == "home espresso gear"
+
+
+def test_the_analysis_cache_is_on_by_default_and_can_be_switched_off(tmp_path):
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"x")
+
+    assert build_config(["--video", str(video)]).analysis_cache is True
+    assert build_config(
+        ["--video", str(video), "--no-analysis-cache"]
+    ).analysis_cache is False

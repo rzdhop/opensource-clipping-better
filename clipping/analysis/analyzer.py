@@ -23,11 +23,13 @@ Imports nothing heavier than the standard library plus the provider layer.
 
 from __future__ import annotations
 
+import os
 import string
 import time
 from collections import namedtuple
 
 from . import beats as beats_mod
+from . import cache as cache_mod
 from . import derive, prompts, schema, snap
 from . import presets as presets_mod
 from .adapter import assert_renderable, to_legacy_clip
@@ -172,10 +174,14 @@ def analyze(
         topic=str(getattr(cfg, "topic", "") or "").strip(),
     )
 
+    cache = _build_cache(cfg, chain, preset)
+
     candidates, stats = _pass_a(
         all_beats, preset, want, ask, on_log, time_fn, pass_a_deadline, floor,
-        context=context,
+        context=context, cache=cache,
     )
+    if cache is not None:
+        cache.save()
     if stats.answered == 0:
         # Not a verdict on the video: nothing was ever read. Saying otherwise
         # sends the user to re-cut a transcript that was never the problem.
@@ -226,7 +232,7 @@ def analyze(
 # --------------------------------------------------------------------- passes
 
 def _pass_a(all_beats, preset, want, ask, on_log, time_fn, deadline, floor,
-           context=None):
+           context=None, cache=None):
     """Scan each window for candidate moments, each inside its own time share.
 
     DEC-027 states the invariant this restores: *a failure is local -- a failed
@@ -259,6 +265,23 @@ def _pass_a(all_beats, preset, want, ask, on_log, time_fn, deadline, floor,
     last_error = None
     needed = floor + GRANT_MARGIN_SECONDS
     for index, (lo, hi) in enumerate(ranges, start=1):
+        beats_text = beats_mod.render_beats(all_beats, lo, hi)
+
+        # Checked before the budget, deliberately: a hit costs no request and
+        # no time, so refusing one for want of time would refuse something
+        # free. It counts as `answered` because the window WAS read -- just not
+        # today -- and DEC-055 reads `answered == 0` as "nothing was ever read".
+        if cache is not None:
+            remembered = cache.get(beats_text)
+            if remembered is not None:
+                answered += 1
+                candidates.extend(remembered)
+                on_log(
+                    f"   ⚡ Window {index}/{len(ranges)} ({lo}-{hi}): "
+                    f"{len(remembered)} candidate(s) from cache."
+                )
+                continue
+
         now = time_fn()
         remaining = deadline - now
         if remaining < needed:
@@ -279,7 +302,6 @@ def _pass_a(all_beats, preset, want, ask, on_log, time_fn, deadline, floor,
         # granted slightly less than that by the time run_chain measures it.
         window_deadline = min(deadline, now + max(share, needed))
 
-        beats_text = beats_mod.render_beats(all_beats, lo, hi)
         try:
             answer = ask(
                 prompts.SYSTEM,
@@ -312,6 +334,8 @@ def _pass_a(all_beats, preset, want, ask, on_log, time_fn, deadline, floor,
         answered += 1
         found = _clean_candidates(answer, lo, hi)
         candidates.extend(found)
+        if cache is not None:
+            cache.put(beats_text, found)
         on_log(f"   [1/3] Window {index}/{len(ranges)}: {len(found)} candidate(s).")
 
     return candidates, ScanStats(len(ranges), answered, failed, skipped, last_error)
@@ -502,6 +526,45 @@ def _pass_c(spans, all_beats, words, cfg, preset, language, ask, on_log, time_fn
 
 
 # ------------------------------------------------------------------- helpers
+
+def _describe_link(link):
+    """``"groq/model"`` for a Link or a plain ``(provider, model)`` tuple."""
+    provider = getattr(link, "provider", None)
+    model = getattr(link, "model", None)
+    if provider is None and isinstance(link, (tuple, list)) and len(link) >= 2:
+        provider, model = link[0], link[1]
+    return f"{provider}/{model}"
+
+
+def _cache_salt(chain, preset):
+    """Everything besides the window's own text that could change the answer.
+
+    Read at call time rather than captured at import, so a reworded prompt
+    invalidates the store on the very next run.
+    """
+    return "|".join((
+        ",".join(_describe_link(link) for link in chain or ()),
+        preset.name,
+        str(MAX_CANDIDATES_PER_WINDOW),
+        prompts.PROMPT_VERSION,
+    ))
+
+
+def _build_cache(cfg, chain, preset):
+    """The scan cache for this job, or ``None`` when there is nowhere to put it."""
+    if not getattr(cfg, "analysis_cache", True):
+        return None
+    outputs_dir = str(getattr(cfg, "outputs_dir", "") or "")
+    if not outputs_dir:
+        return None
+    try:
+        return cache_mod.WindowCache(
+            os.path.join(outputs_dir, cache_mod.CACHE_FILENAME),
+            salt=_cache_salt(chain, preset),
+        )
+    except Exception:  # noqa: BLE001 - a cache is an optimisation, never a gate
+        return None
+
 
 def _request_floor(chain, keys):
     """The longest single request any *usable* link in *chain* could make.
