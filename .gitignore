@@ -63,3 +63,6 @@ data/*
 
 # The dashboard is built into the image, not committed.
 web/dashboard/dist/
+
+# Backups of the local .env, made before rewriting it. Secrets: never commit.
+.env.backup-*
