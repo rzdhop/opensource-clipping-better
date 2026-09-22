@@ -67,6 +67,9 @@ function Settings() {
   const [pexelsKey, setPexelsKey] = useState('')
   const [hfToken, setHfToken] = useState('')
   const [nvidiaKey, setNvidiaKey] = useState('')
+  const [groqKey, setGroqKey] = useState('')
+  const [openrouterKey, setOpenrouterKey] = useState('')
+  const [mistralKey, setMistralKey] = useState('')
   const [compatKey, setCompatKey] = useState('')
 
   // The endpoint URL and model are not secrets, so they are prefilled.
@@ -94,6 +97,9 @@ function Settings() {
       if (pexelsKey) payload.pexels_api_key = pexelsKey
       if (hfToken) payload.hf_token = hfToken
       if (nvidiaKey) payload.nvidia_api_key = nvidiaKey
+      if (groqKey) payload.groq_api_key = groqKey
+      if (openrouterKey) payload.openrouter_api_key = openrouterKey
+      if (mistralKey) payload.mistral_api_key = mistralKey
       if (compatKey) payload.openai_compat_api_key = compatKey
 
       // Sent whenever they differ from what the server holds, including when
@@ -120,6 +126,9 @@ function Settings() {
       setPexelsKey('')
       setHfToken('')
       setNvidiaKey('')
+      setGroqKey('')
+      setOpenrouterKey('')
+      setMistralKey('')
       setCompatKey('')
       setMsg('✅ Saved on the server. These now survive a restart.')
     } catch (err) {
@@ -152,9 +161,30 @@ function Settings() {
 
             <div className="form-group">
               <label className="form-label">
+                Groq API Key
+                <span style={{ color: 'var(--text-tertiary)', marginLeft: '6px', fontWeight: 400 }}>
+                  — first link in the chain
+                </span>
+                <SetBadge on={settings?.groq_api_key_set} />
+              </label>
+              <PasswordInput
+                value={groqKey}
+                onChange={setGroqKey}
+                placeholder="Paste your Groq API key"
+                isSet={settings?.groq_api_key_set}
+              />
+              <p className="form-hint">
+                Free, and by far the fastest tier — analysis finishes in seconds
+                rather than minutes.{' '}
+                <a href="https://console.groq.com/keys" target="_blank" rel="noopener" style={{ color: 'var(--accent)' }}>Get a key →</a>
+              </p>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">
                 NVIDIA API Key
                 <span style={{ color: 'var(--text-tertiary)', marginLeft: '6px', fontWeight: 400 }}>
-                  — default provider
+                  — last link, the floor
                 </span>
                 <SetBadge on={settings?.nvidia_api_key_set} />
               </label>
@@ -200,6 +230,45 @@ function Settings() {
               />
               <p className="form-hint">
                 Without it, B-roll is skipped silently and the clips still render.
+              </p>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">
+                OpenRouter API Key
+                <span style={{ color: 'var(--text-tertiary)', marginLeft: '6px', fontWeight: 400 }}>
+                  — optional chain link
+                </span>
+                <SetBadge on={settings?.openrouter_api_key_set} />
+              </label>
+              <PasswordInput
+                value={openrouterKey}
+                onChange={setOpenrouterKey}
+                placeholder="Only needed if your chain names openrouter/..."
+                isSet={settings?.openrouter_api_key_set}
+              />
+              <p className="form-hint">
+                Not in the default chain. Add it with LLM_CHAIN or --llm-chain.
+              </p>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">
+                Mistral API Key
+                <span style={{ color: 'var(--text-tertiary)', marginLeft: '6px', fontWeight: 400 }}>
+                  — optional chain link
+                </span>
+                <SetBadge on={settings?.mistral_api_key_set} />
+              </label>
+              <PasswordInput
+                value={mistralKey}
+                onChange={setMistralKey}
+                placeholder="Only needed if your chain names mistral/..."
+                isSet={settings?.mistral_api_key_set}
+              />
+              <p className="form-hint">
+                Also used by the hosted transcription chain
+                (mistral/voxtral-mini-latest).
               </p>
             </div>
 

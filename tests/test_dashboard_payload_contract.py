@@ -119,3 +119,71 @@ def test_the_purged_youtube_subs_toggle_is_gone(dead):
     ]
 
     assert offenders == [], f"{dead} still referenced in {offenders}"
+
+
+# ------------------------------------------------- the Settings page's half
+
+SETTINGS_PAGE = PROJECT_ROOT / "web/dashboard/src/pages/Settings.jsx"
+SETTINGS_STORE = PROJECT_ROOT / "web/api/settings_store.py"
+
+# Read as text, never imported: importing web/api needs pydantic, which CI does
+# not install, and an importorskip on a drift guard means it never runs in the
+# one place that checks every push (DEC-012).
+
+
+def _declared_settings_fields():
+    """The `<name>_api_key` / `hf_token` fields SettingsRequest declares."""
+    text = MODELS.read_text(encoding="utf-8")
+    body = text[text.index("class SettingsRequest"):]
+    body = body[: body.index("\nclass ")] if "\nclass " in body else body
+    return set(re.findall(r"^\s{4}(\w+):\s", body, flags=re.M))
+
+
+def _persisted_secret_env_names():
+    text = SETTINGS_STORE.read_text(encoding="utf-8")
+    block = text[text.index("SECRET_KEYS = frozenset({"):]
+    block = block[: block.index("})")]
+    return set(re.findall(r'"(\w+)"', block))
+
+
+def test_every_secret_the_backend_accepts_has_a_field_on_the_settings_page():
+    """The fourth instance of one pattern, and the guard that ends it.
+
+    A field the backend declares with no control in the deployed UI has now
+    bitten this project four times: the AI provider select that could not reach
+    `chain`, `platform` (DEC-051), `nvidia_model`, and the four chain provider
+    keys. The last one is why a real job had a single point of failure — Groq is
+    the first and fastest link in the default chain, the backend has accepted
+    `groq_api_key` since the chain landed, and there was no box to type it into.
+
+    Scoped to secrets that are BOTH declared by SettingsRequest and persisted,
+    which is exactly the set a user can be expected to enter here.
+    """
+    page = SETTINGS_PAGE.read_text(encoding="utf-8")
+    declared = _declared_settings_fields()
+    persisted = _persisted_secret_env_names()
+
+    missing = []
+    for field in sorted(declared):
+        if field.upper() not in persisted:
+            continue
+        # The page must both send it and report whether it is already set,
+        # or the control is there and tells the user nothing.
+        if f"payload.{field} =" not in page:
+            missing.append(f"{field} (no input sends it)")
+        elif f"{field}_set" not in page:
+            missing.append(f"{field} (no SetBadge reads {field}_set)")
+
+    assert not missing, (
+        "The backend accepts these but the Settings page cannot set them:\n  "
+        + "\n  ".join(missing)
+    )
+
+
+def test_the_settings_page_only_sends_fields_the_backend_declares():
+    """The reverse direction: a key the model does not declare is dropped."""
+    page = SETTINGS_PAGE.read_text(encoding="utf-8")
+    declared = _declared_settings_fields()
+    sent = set(re.findall(r"payload\.(\w+)\s*=", page))
+    unknown = sorted(sent - declared)
+    assert not unknown, f"Settings.jsx sends fields SettingsRequest does not declare: {unknown}"
