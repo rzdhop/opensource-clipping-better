@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 # Render defaults are sourced from the CLI config so the API and the CLI cannot
 # drift apart: config_adapter falls back to these same constants.
 from clipping.config import (
+    KARAOKE_HIGHLIGHT_COLOR,
     NVIDIA_MODEL,
     VIDEO_PRESET,
     VIDEO_QUALITY_CQ,
@@ -139,6 +140,10 @@ class JobCreateRequest(BaseModel):
     use_hook_glitch: bool = False
     use_auto_bgm: bool = True
     use_karaoke_effect: bool = True
+    # The word being spoken, in ASS BGR: &HBBGGRR&. Default is yellow.
+    karaoke_color: str = Field(
+        KARAOKE_HIGHLIGHT_COLOR, pattern=r"^&H[0-9A-Fa-f]{6}&$"
+    )
     use_split_screen: bool = False
     use_camera_switch: bool = False
     no_subs: bool = False

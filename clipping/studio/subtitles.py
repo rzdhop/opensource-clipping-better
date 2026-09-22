@@ -21,6 +21,11 @@ from mediapipe.tasks import python as mp_python
 from mediapipe.tasks.python import vision as mp_vision
 from PIL import Image, ImageDraw, ImageFont
 
+# The defaults for the two karaoke colours, so this file holds no colour
+# literal of its own. config imports nothing from studio, so the edge is
+# one-way and safe.
+from clipping.config import KARAOKE_BASE_COLOR, KARAOKE_HIGHLIGHT_COLOR
+
 def _load_studio_internal_module(file_name: str, module_alias: str):
     module_path = os.path.join(os.path.dirname(__file__), file_name)
     spec = importlib.util.spec_from_file_location(module_alias, module_path)
@@ -115,6 +120,14 @@ def buat_file_ass(
         cfg.scale_kata_khusus_916 if _is_vertical_ratio(rasio) else cfg.scale_kata_khusus_169
     )
     warna_khusus = cfg.warna_kata_khusus
+    # getattr, not attribute access: a cfg namespace built before these were
+    # settings must still render rather than raise on a missing key.
+    #
+    # Two different knobs. warna_khusus styles the AI-chosen emphasis words
+    # when karaoke is OFF; these two are the word being spoken and what it
+    # reverts to, when karaoke is ON.
+    warna_karaoke = getattr(cfg, "karaoke_color", KARAOKE_HIGHLIGHT_COLOR)
+    warna_karaoke_base = getattr(cfg, "karaoke_base_color", KARAOKE_BASE_COLOR)
 
     def get_scale_value(level):
         if level == 3:
@@ -184,7 +197,8 @@ def buat_file_ass(
                             if pakai_karaoke:
                                 if j == i:
                                     text_parts.append(
-                                        f"{{\\c&H00FFFF&}}{x['word']}{{\\c&HFFFFFF&}}"
+                                        f"{{\\c{warna_karaoke}}}{x['word']}"
+                                        f"{{\\c{warna_karaoke_base}}}"
                                     )
                                 else:
                                     text_parts.append(x["word"])
@@ -347,7 +361,7 @@ def buat_file_ass(
                         w_anim = "none"
                         target_scale = 100
                         f_tag = build_font_tag(font_utama_dict)
-                        c_tag = "\\c&HFFFFFF&"
+                        c_tag = f"\\c{warna_karaoke_base}"
 
                     t_start = w_appear_ms
                     t_pop = w_appear_ms + 80
@@ -355,8 +369,12 @@ def buat_file_ass(
 
                     if pakai_karaoke:
                         pos_tag = f"\\pos({int(word_x)},{int(line_y)})"
-                        c_tag = "\\c&HFFFFFF&"
-                        anim_tag = f"\\fscx{target_scale}\\fscy{target_scale}\\t({t_start},{t_start},\\c&H00FFFF&)\\t({w_end_ms},{w_end_ms},\\c&HFFFFFF&)"
+                        c_tag = f"\\c{warna_karaoke_base}"
+                        anim_tag = (
+                            f"\\fscx{target_scale}\\fscy{target_scale}"
+                            f"\\t({t_start},{t_start},\\c{warna_karaoke})"
+                            f"\\t({w_end_ms},{w_end_ms},\\c{warna_karaoke_base})"
+                        )
                     else:
                         if w_anim == "stagger_up":
                             y_start = int(line_y + 30)

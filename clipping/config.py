@@ -6,6 +6,7 @@ Holds all default values and builds the config from CLI args.
 
 import argparse
 import os
+import re
 from types import SimpleNamespace
 
 # Valid device / compute-type values live beside the resolver that
@@ -132,8 +133,21 @@ ASS_MARGIN_169 = 70
 ASS_FONT_169 = 80
 SCALE_KATA_KHUSUS_169 = ASS_FONT_169 + 120
 
-# Highlighted Word Color  (ASS format: BGR -> &H[Blue][Green][Red]&)
+# ASS inline colours are BGR, not RGB: &H[Blue][Green][Red]&.
+#
+# These two are DIFFERENT KNOBS and get confused constantly:
+#
+#   WARNA_KATA_KHUSUS      the AI-chosen emphasis words, when karaoke is OFF
+#   KARAOKE_HIGHLIGHT_COLOR the word currently being spoken, when karaoke is ON
+#
+# The second was hardcoded in two branches of subtitles.py, which is how the
+# one visual choice people actually ask about became the one they could not
+# change. The default is exactly the yellow it replaced.
 WARNA_KATA_KHUSUS = "&HFFFFFF&"
+KARAOKE_HIGHLIGHT_COLOR = "&H00FFFF&"
+# What the highlight reverts to: the base subtitle colour. Not a setting --
+# changing it would mean every word rendering in the highlight's off-state.
+KARAOKE_BASE_COLOR = "&HFFFFFF&"
 
 # 4. EXTERNAL ASSET SETTINGS
 NAMA_FONT_THUMBNAIL = "Montserrat-Black.ttf"
@@ -217,6 +231,26 @@ STT_CHAIN = os.environ.get("STT_CHAIN", "").strip()
 # ==============================================================================
 # CLI PARSER
 # ==============================================================================
+
+
+_ASS_COLOUR_RE = re.compile(r"^&H[0-9A-Fa-f]{6}&$")
+
+
+def _ass_colour(value: str) -> str:
+    """Validate an ASS inline colour, e.g. ``&H00FFFF&``.
+
+    Validated rather than trusted because libass ignores an override it cannot
+    parse and carries on: a typo here would produce subtitles with no highlight
+    at all, no error, and nothing in the log to explain it.
+    """
+    text = str(value).strip()
+    if not _ASS_COLOUR_RE.match(text):
+        raise argparse.ArgumentTypeError(
+            f"{value!r} is not an ASS colour. Write &HBBGGRR& -- six hex "
+            f"digits between ampersands, in BLUE-GREEN-RED order, "
+            f"e.g. &H00FFFF& for yellow."
+        )
+    return text
 
 
 def _parse_speakers(val: str) -> str | int:
@@ -538,6 +572,17 @@ def _build_parser() -> argparse.ArgumentParser:
             "never called. Defaults to $LLM_CHAIN, then to the shipped "
             f"default in clipping/providers/registry.py, currently "
             f"'{DEFAULT_LLM_CHAIN}'."
+        ),
+    )
+    p.add_argument(
+        "--karaoke-color",
+        default=KARAOKE_HIGHLIGHT_COLOR,
+        type=_ass_colour,
+        help=(
+            "Colour of the word being spoken, in ASS format &HBBGGRR& -- BGR, "
+            f"not RGB. Default {KARAOKE_HIGHLIGHT_COLOR} (yellow); "
+            "'&H0000FF&' is red and '&H00FF00&' is green. Only applies with "
+            "karaoke subtitles on."
         ),
     )
     p.add_argument(
@@ -1299,6 +1344,8 @@ def build_config(argv: list[str] | None = None) -> SimpleNamespace:
         ass_font_169=ASS_FONT_169,
         scale_kata_khusus_169=SCALE_KATA_KHUSUS_169,
         warna_kata_khusus=WARNA_KATA_KHUSUS,
+        karaoke_color=args.karaoke_color,
+        karaoke_base_color=KARAOKE_BASE_COLOR,
         # Asset URLs
         url_font_thumbnail=URL_FONT_THUMBNAIL,
         url_glitch_video=URL_GLITCH_VIDEO,

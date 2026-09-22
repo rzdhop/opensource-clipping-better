@@ -40,6 +40,8 @@ from clipping.config import (
     VIDEO_QUALITY_CRF,
     VIDEO_SCALE_ALGO,
     WARNA_KATA_KHUSUS,
+    KARAOKE_BASE_COLOR,
+    KARAOKE_HIGHLIGHT_COLOR,
 )
 
 def build_config_from_payload(
@@ -213,6 +215,8 @@ def build_config_from_payload(
         ass_font_169=ASS_FONT_169,
         scale_kata_khusus_169=SCALE_KATA_KHUSUS_169,
         warna_kata_khusus=WARNA_KATA_KHUSUS,
+        karaoke_color=payload.get("karaoke_color", KARAOKE_HIGHLIGHT_COLOR),
+        karaoke_base_color=KARAOKE_BASE_COLOR,
         # Asset URLs
         url_font_thumbnail=URL_FONT_THUMBNAIL,
         url_glitch_video=URL_GLITCH_VIDEO,
