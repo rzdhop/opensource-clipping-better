@@ -1469,3 +1469,164 @@ and is applied to the snapped `b0`, after `snap_all` and before `dedupe`.
   candidate rejected. No fixture in this suite had either shape before.
 - **The summary line gained a step rather than absorbing one.** Counting these
   rejections under "that fit" would report duration failures that never happened.
+
+## DEC-066 — Pass A remembers each window, keyed on everything that could change the answer
+**Context.** Pass A is where the time goes: one request per ~45-beat window,
+~90s each against the last link in the shipped chain. Every rerun re-paid for
+all of it — and reruns are the common operation (Clone & Rerun, a changed
+render flag, a different clip count). Only the finished clip list was
+cacheable, whole-or-nothing, behind `--load-gemini-json`.
+**Decision.** `clipping/analysis/cache.py` stores each window's cleaned
+candidates under `sha256(window text + salt)`, where the salt carries
+`PROMPT_VERSION`, the chain spec, the preset and `MAX_CANDIDATES_PER_WINDOW`.
+**Consequence.**
+- **A stale entry is not something that can be served.** It is a different
+  key, so a reworded prompt or a swapped model invalidates the store without
+  anyone remembering to clear it. That is why `PROMPT_VERSION` exists.
+- **The lookup precedes the budget check.** A hit costs no request and no
+  time; refusing one for want of time would refuse something free. It counts
+  as `answered`, because the window *was* read, just not today (DEC-055).
+- **Bounded and oldest-first.** The CLI writes every run into one shared
+  `outputs/`, unlike the per-job web path, so without a cap the file grows for
+  the life of the install.
+- **Never a gate.** A cache that cannot be read is a cold cache; one that
+  cannot be written is a run no slower than it would have been. The save is
+  atomic, and its own cleanup cannot raise — `os.unlink` rejects a path with an
+  embedded NUL before touching the filesystem, so catching only `OSError` let
+  the error handler throw out of a function whose contract is that it cannot.
+
+## DEC-067 — Preflight does real work when there is real work to ask about
+**Context.** DEC-056 chose an 8-token ping and said in its own docstring that
+liveness is not suitability. The gap is measured, not theoretical: `glm-5.3-flash`
+answered that ping in 0.67s and then spent its whole token budget on a reasoning
+preamble, and `deepseek-v4.1-flash` answered every real transcript with
+`{"candidates": []}` in seven tokens. Both passed preflight.
+**Decision.** When a transcript is already on disk — `--transcript`, or
+DEC-022's saved `transcript.vtt` — the probe sends window 1's actual pass-A
+request, and the answer seeds the DEC-066 cache.
+**Consequence.**
+- **The Whisper path is untouched.** There is no transcript yet when preflight
+  runs, which is the entire reason it runs there; the ping stays, and so does
+  the 47-minutes-of-CPU-Whisper guarantee.
+- **A failed work probe falls back to the ping before the link is called
+  dead.** A provider too slow for a 90s budget but alive on a ping is alive,
+  and DEC-020 forbids cutting off a slow-but-healthy call.
+- **Zero candidates is LIVE.** One window's empty answer is an opinion about
+  45 beats, not evidence about the endpoint.
+- **Amends DEC-056 on the negotiation ladder.** That decision kept the ladder
+  out so a provider's `json_schema` support could not decide a liveness
+  question. It no longer can: the ladder's bottom rung is prompt-only, so only
+  a link that answers at *no* rung has failed.
+- **A failing link is still reported, never removed** (DEC-003, DEC-023).
+
+## DEC-068 — The single-request analysis path is deleted; `openai_compat` is re-expressed
+**Context.** `engine.get_analysis_prompt` asked one model for 22 required
+fields per clip. At ~1200 output tokens each against a measured 12-13 tokens/s
+and a ~300s gateway it could not finish, and it exceeded Groq's
+tokens-per-minute limit outright; every job that ever ran it failed. It had been
+unreachable behind `--ai-provider nvidia|gemini` since the chain landed, and its
+330-line Indonesian prompt was the first thing anyone found when they went
+looking for "the prompt".
+**Decision.** Delete it — `engine.py` 1588 lines to 253 — along with
+`tests/test_nvidia_retry.py`. Keep transcription, the CPU-Whisper warning and
+the transcript re-exports. `--ai-provider openai_compat` becomes
+`apply_openai_compat_alias`, which rewrites the setting into a one-link
+`custom/<model>` chain at config time.
+**Consequence.**
+- **Amends DEC-046.** That decision kept two custom-endpoint paths so
+  collapsing them could not silently change an existing `OPENAI_COMPAT_*`
+  setup. The path it protected is gone; the *surface* it protected is not —
+  three env vars, three Settings fields (DEC-057) and the fail-fast gate all
+  still work.
+- **Not the runtime chain-editing DEC-003/023 forbid.** The rewrite happens at
+  config time, over values the user wrote down, and prints what it built.
+- **One helper, both callers.** The CLI and `config_adapter` call the same
+  function, because this file has form for drifting from its API — and did
+  again here: the alias was wired into `build_config` alone and a web test
+  caught it.
+- **`nvidia` and `gemini` stay in `PROVIDER_KEYS`.** They are ordinary chain
+  links and the shipped default names both; only their `--ai-provider` meaning
+  went. argparse now *rejects* the removed values, so an old command line fails
+  loudly rather than quietly running something else.
+
+## DEC-069 — The karaoke highlight colour is a setting; the colour it reverts to is not
+**Context.** `&H00FFFF&` was hardcoded in two branches of `subtitles.py`, each
+with its own copy of the highlight/reset pair. It was the one visual choice
+people ask about and the one they could not change.
+**Decision.** `KARAOKE_HIGHLIGHT_COLOR`, `--karaoke-color` and a
+`karaoke_color` job field, validated in both places.
+**Consequence.**
+- **`KARAOKE_BASE_COLOR` is named but not exposed.** Changing it would render
+  every word in the highlight's off-state.
+- **It is a different knob from `warna_kata_khusus`**, which styles the
+  AI-chosen emphasis words when karaoke is *off*. They now sit together with a
+  comment saying which is which; I confused them myself earlier in this work.
+- **Validated because libass fails silently.** An override it cannot parse is
+  ignored, so an unvalidated typo would give subtitles with no highlight, no
+  error, and nothing in the log.
+- **Verified by render, not only by the text scan.** `studio/` has no automated
+  coverage and cannot be imported in CI (DEC-012), so the evidence is a `.ass`
+  built from the same transcript against this tree and the previous commit:
+  byte-identical, md5 `e1cce3845a1d7495d4ae2972ae998bbc`. With
+  `--karaoke-color &H0000FF&` the same render swaps all 56 occurrences, so the
+  setting is not inert either.
+- **The scan matches `&H00FFFF&` with its trailing ampersand.** `subtitles.py`
+  also holds `&H00FFFFFF`, the eight-digit base colour in the `[V4+ Styles]`
+  line; a looser pattern would have demanded a change that breaks every
+  subtitle.
+
+## DEC-070 — What the analysis decided is kept, including when it failed
+**Context.** Every window had a status and every snap rejection had a reason.
+Both went to the console and were lost, and the console truncates the rejection
+list on purpose — five and a count.
+**Decision.** `outputs/<job>/analysis_trace.json`: per-window status, error and
+candidates; every rejection; what was selected with its gist, kind and beat
+range; and the run's `ScanStats`. Versioned, best-effort, atomic.
+**Consequence.**
+- **Written on the failure paths too**, which was not the original plan and is
+  the better half of the change. A run that raises "none fit the duration
+  window" or "the video was never analysed" is exactly the run someone comes
+  looking for reasons about, and it used to leave nothing behind at all.
+- **A record of what happened may not change what happened.** An unwritable
+  directory logs a line; the clips are returned regardless.
+- No route and no UI. This is the data a "why this clip, and why not that one"
+  view would need.
+
+## DEC-071 — Scan windows run in batches, and the share is computed per batch
+**Context.** Pass A is ~70% of analysis wall time and its windows are
+independent, but they ran strictly one after another.
+**Decision.** Up to `--analysis-workers` windows in flight, **default 1**,
+capped 3. Per batch, `remaining` and `windows_left` are computed **once** and
+every member is handed the same deadline — the allowance it would have had as
+the first window of a sequential iteration.
+**Consequence.**
+- **The default is 1 because the measurement said so.** Same transcript, same
+  NVIDIA key, cache off: `workers=1` used 330s of pass A's budget for four
+  windows, `workers=2` used **346s** for the same four. Two overlapping
+  requests should have taken ~180s. They did not overlap at all — NVIDIA's
+  free tier serialises requests on one key, so a batch cost the sum of its
+  members and the run was 16s *worse* for the scheduling. Shipping 2 as the
+  default would have been shipping an unmeasured change, which is the mistake
+  DEC-058 is about.
+- **The flag still earns its place.** The shipped chain's *first* link is Groq
+  — fast, 30 requests/minute published — and that is where this should pay.
+  There is no Groq key on this box, so it is untested and therefore opt-in.
+- **A batch cannot overspend the pool**, because N ≤ windows_left. With
+  `workers = 1` the arithmetic is exactly DEC-054's, no threads are created,
+  and logs stream live — so the rollback is a real rollback, asserted by a test
+  that compares the schedules.
+- **Order is decided on the main thread.** ScanStats is counted there,
+  candidates are merged by window index, and each worker's log lines are
+  buffered and replayed in order — so pass B's numbering, the DEC-070 trace and
+  the activity feed do not depend on which provider answered first.
+- **`_NEGOTIATED` is now locked.** The race was never corruption — a dict write
+  is atomic in CPython — it was two threads meeting the same unknown model and
+  both paying to walk the ladder.
+- **DEC-054's stated imprecision gets worse by a factor of N.** `Limiter.acquire`
+  sleeps inside a window's share without the deadline knowing. That is why the
+  cap is 3 and the default is 2: the ceiling here is the provider's rate limit,
+  not this machine.
+- **The three DEC-054 proofs are pinned to one worker rather than rewritten.**
+  They are the evidence for that decision; new batch tests sit beside them.
+  `scripted()` replays answers by call order, which is a race under threads, so
+  the concurrency tests use a runner that answers from what it is asked.

@@ -1,47 +1,75 @@
-# CHECKPOINT
+- **Phase:** COMPLETE. All twelve stages are committed. DOCUMENT done;
+  awaiting the human's Tier-2 verdict on the deployed app.
+- **Checkpoint commit before the work:** `6dbc431`. **Head:** see the ledger.
+- **Tier-1:** CI env **1170 passed, 101 skipped, 0 failed** (baseline 1110/101).
+  Every behaviour-guarding test was verified to FAIL against its pre-change
+  code. Concurrency suites: 20/20 clean reruns.
+- **Tier-2:** no E2E browser suite exists. Verified instead by live runs
+  against the real NVIDIA endpoint (below) and by a byte-identical `.ass`
+  render for S10. **The human is testing S1–S6 on the deployed app and has not
+  reported back.**
+- **Next action:** deploy and test S7–S12, or act on what the human reports.
 
-## In progress — analysis upgrade, twelve stages
-- **Task:** Upgrade the three-pass analysis: prompts, pass logic, pipeline.
-  Plan: `/home/ubuntu/.claude/plans/okay-plan-the-implementation-luminous-tome.md`
-- **Phase:** PAUSED after Stage 6 of 12, at the human's request, to deploy and
-  test the six landed stages on the real app. All six quality stages are done;
-  the six remaining are speed and cleanup.
-- **Current stage:** none in progress. **Resume at S7** (per-window pass-A
-  cache) — see the plan for its full spec.
-- **Next action:** the human is deploying and testing. When they report back,
-  either act on what they found or start S7.
-- **Pushed:** `e8778f5` is on `origin/main`. This push also carried the nine
-  commits from the previous task, which had never been pushed.
-- **Tier-1 at the push:** CI env **1164 passed, 101 skipped, 0 failed**
-  (baseline before this task: 1110/101).
-- **Tier-2: NOT DONE, and the human is doing it.** No E2E browser suite exists.
-  No live analysis run has happened against a real provider, so stages 2, 3 and
-  4 — which change what the model is *asked* — are shape-verified only. The
-  suite cannot prove an answer got better. **This is the honest gap in this
-  work.** Suggested check when deploying: run one job with
-  `--dry-run-analysis` against `outputs/410b46109668/transcript.vtt` (Whisper
-  is skipped; `config_adapter` adopts the saved transcript) and compare the
-  clip list, per-window candidate counts and wall time with the 590s / 5-clip
-  baseline recorded below.
-- **What to look at first on a real run**, since these are the behaviour
-  changes with no live evidence yet:
-  1. Are titles less flat? (S4 raised pass C to temperature 0.5.)
-  2. Do the five clips cover different subjects? (S2's topic demotion.)
-  3. Does any clip still open mid-sentence? (S6 — and if a whole video's
-     candidates get dropped, the log says so explicitly rather than failing.)
-  4. `⚠️` and `↷` lines in the activity feed are the analysis explaining
-     itself; they are not errors.
-- **Landed:** S1 `597f06d` (1116), S2 `6e6c096` (1123), S3 `08e0c5e` (1132),
-  S4 `2f93f02` (1139), S5 `60193e5` (1151), S6 `e8778f5` (**1164**).
-- **Deploy:** the dashboard changed in S3 (a new "What is this video about?"
-  field), so the container needs a rebuild:
-  `docker compose rm -sfv backend && docker compose up -d --build backend`
-  (the `-v` matters; `down -v` would delete the Caddy certificates). Docker
-  needs sudo on this box.
-- **Build note:** `npm run build` in `web/dashboard` fails with EACCES —
-  `dist/` is owned by root from the container build. `node_modules` is now
-  installed locally (gitignored); build with
-  `npx vite build --outDir <scratch> --emptyOutDir` to verify JSX.
+### The live measurement that changed a decision
+S12's plan said default to 2 workers. The measurement said otherwise — same
+transcript, same NVIDIA key, cache off:
+
+| | pass A | for | per window |
+|---|---|---|---|
+| `workers=1` | 330s | 4 windows | 82s |
+| `workers=2` | 346s | 4 windows | 86s |
+
+Two overlapping requests should have finished those four in ~180s. **They did
+not overlap at all**: NVIDIA's free tier serialises requests on one key, so a
+batch cost the sum of its members and the run was 16s *worse*. The default
+shipped as **1**. The flag remains because the chain's first link is Groq
+(fast, published 30 rpm) and that is where it should pay — **untested, because
+there is still no Groq key on this box.**
+
+### Still the one thing that would help most
+**Set a Groq key.** Both live runs above used NVIDIA alone, at ~85s per
+request, and both lost windows 5 and 6 to the budget:
+`⏱ Window 5/6 skipped: 300s left ... one request to this chain can take 330s`.
+Groq is the chain's first link and Settings has had a field for it since
+DEC-057. With it the analysis finishes in seconds, none of the budget
+machinery binds, and `--analysis-workers 2` finally gets a fair test.
+
+### Stage ledger
+| S | Stage | Commit |
+|---|---|---|
+| 1 | gist/kind survive snapping; reach pass C | `597f06d` |
+| 2 | Pass B sees hook lines; topic + variety | `6e6c096` |
+| 3 | Pass A prompt rewrite + `--topic` | `08e0c5e` |
+| 4 | `hook_beats` + temperature 0.5 for pass C | `2f93f02` |
+| 5 | Voice-over prompt into `prompts.py` | `60193e5` |
+| 6 | Mid-sentence-start guard | `e8778f5` |
+| — | *(pushed to origin as `5a6f687`)* | |
+| 7 | Per-window pass-A cache | `7195582` |
+| 8 | Preflight does real work | `11276f6` |
+| 9 | Delete the legacy monolith | `7d01041` |
+| 10 | Karaoke colour into config | `02cddc0` |
+| 11 | Analysis trace | `604aba8` |
+| 12 | Batched scan windows (default 1) | `06b88b8` |
+
+### Notes a fresh session will want
+- `pyproject` sets `addopts = "-q"`; passing `-q` again makes it `-qq` and the
+  summary line vanishes. Run pytest with no `-q` of your own.
+- The render stack is **not** in `~/.local` — cv2/mediapipe/PIL are at
+  `/tmp/claude-1001/scratch/renderdeps`, usable via `PYTHONPATH`.
+- `clipping/studio.py` **shadows** the `clipping/studio/` package, so
+  `from clipping.studio import subtitles` fails; import `clipping.studio`.
+- `npm run build` in `web/dashboard` fails with EACCES — `dist/` is owned by
+  root from the container build. `node_modules` is installed locally
+  (gitignored); build with `npx vite build --outDir <scratch> --emptyOutDir`.
+- `viral_score` prefers `meta["score"]` over `span.score` (`adapter.py:92`), so
+  a test asserting which candidate pass B picked needs a metadata fixture with
+  no score.
+
+### Deploy
+The dashboard changed in S3, S10 and S12, so the container needs a rebuild:
+`docker compose rm -sfv backend && docker compose up -d --build backend`
+(the `-v` matters; `down -v` would delete the Caddy certificates). Docker
+needs sudo on this box.
 - **Open questions:** none. Three scope calls were made in chat and are
   recorded in the plan: cover everything ranked, concurrency last, legacy
   single-request path deleted with `openai_compat` kept as a chain alias.
@@ -55,12 +83,12 @@
 | 4 | `hook_beats` + temperature 0.5 for pass C | **done** `2f93f02` |
 | 5 | Voice-over prompt into `prompts.py`, English | **done** `60193e5` |
 | 6 | Mid-sentence-start guard on b0 | **done** `e8778f5` |
-| 7 | Per-window pass-A cache | **next** |
-| 8 | Preflight does real work when it can | not started |
-| 9 | Delete the legacy monolith; `openai_compat` alias | not started |
-| 10 | Karaoke highlight colour into config | not started |
-| 11 | Persist the analysis trace | not started |
-| 12 | Concurrent pass-A windows (riskiest) | not started |
+| 7 | Per-window pass-A cache | **done** `7195582` |
+| 8 | Preflight does real work when it can | **done** `11276f6` |
+| 9 | Delete the legacy monolith; `openai_compat` alias | **done** `7d01041` |
+| 10 | Karaoke highlight colour into config | **done** `02cddc0` |
+| 11 | Persist the analysis trace | **done** `604aba8` |
+| 12 | Concurrent pass-A windows (riskiest) | **done** `06b88b8` |
 
 ### Regression contract for this task
 Each item names what proves it. Nothing here may break.
