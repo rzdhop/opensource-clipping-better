@@ -421,14 +421,6 @@ function NewJob() {
         and this job will stop at the analysis step. Add one under
         <strong> Settings</strong> — NVIDIA and Gemini are both free.</>
     }
-    if (aiProvider === 'nvidia' && !settings.nvidia_api_key_set) {
-      return <>No NVIDIA API key yet, so this job will stop at the analysis step.
-        Add one under <strong>Settings</strong> — it is free at build.nvidia.com.</>
-    }
-    if (aiProvider === 'gemini' && !settings.google_api_key_set) {
-      return <>No Google API key yet, so this job will stop at the analysis step.
-        Add one under <strong>Settings</strong> — it is free at aistudio.google.com/apikey.</>
-    }
     if (aiProvider === 'openai_compat' && missingEndpointParts.length) {
       return <>The custom endpoint is missing its {missingEndpointParts.join(', ')}.
         Fill it in under <strong>Settings</strong>, or pick NVIDIA or Gemini instead.</>
@@ -707,8 +699,6 @@ function NewJob() {
               <label className="form-label">AI Provider</label>
               <select className="form-select" value={aiProvider} onChange={(e) => setAiProvider(e.target.value)}>
                 <option value="chain">Provider chain (recommended)</option>
-                <option value="nvidia">NVIDIA NIM only (legacy single request)</option>
-                <option value="gemini">Google Gemini only (legacy single request)</option>
                 <option value="openai_compat">Custom endpoint (OpenAI-compatible)</option>
               </select>
               {providerWarning && <Notice kind="warn">⚠️ {providerWarning}</Notice>}

@@ -214,13 +214,15 @@ def test_no_preflight_skips_the_check_entirely():
     assert preflight(Off(), {"groq": (20.0, dead), "nvidia": (20.0, dead)}) is None
 
 
-def test_the_legacy_single_provider_paths_are_not_gated():
-    """The escape hatch is not somewhere to add a new gate."""
-    class Legacy(Cfg):
-        ai_provider = "nvidia"
+def test_a_non_chain_provider_is_not_gated():
+    """Only the chain path is checked. Nothing else reaches the analyzer, but
+    the guard stays: a provider value this function does not own is left alone
+    rather than probed on a chain it never asked for."""
+    class Other(Cfg):
+        ai_provider = "openai_compat"
 
     dead = TimeoutError("timed out")
-    assert preflight(Legacy(), {"groq": (20.0, dead), "nvidia": (20.0, dead)}) is None
+    assert preflight(Other(), {"groq": (20.0, dead), "nvidia": (20.0, dead)}) is None
 
 
 def test_a_chain_with_no_keys_at_all_is_left_to_the_key_gate():

@@ -61,13 +61,13 @@ class FaceDetector(str, enum.Enum):
 
 
 class AIProvider(str, enum.Enum):
-    # The three-pass analyzer over LLM_CHAIN. The default.
+    # The three-pass analyzer over LLM_CHAIN. The default, and now the only
+    # way a transcript is analysed: the single-request path the other two
+    # members named is deleted.
     CHAIN = "chain"
-    # Single-request legacy path, kept as an escape hatch.
-    NVIDIA = "nvidia"
-    GEMINI = "gemini"
-    # Any endpoint that speaks the OpenAI chat API: OpenRouter, Groq, Mistral,
-    # xAI, a self-hosted vLLM, a local Ollama. Mirrors --ai-provider choices.
+    # The same analyzer against one endpoint that speaks the OpenAI chat API:
+    # OpenRouter, Groq, Mistral, a self-hosted vLLM, a local Ollama.
+    # config.apply_openai_compat_alias turns it into a one-link chain.
     OPENAI_COMPAT = "openai_compat"
 
 

@@ -14,6 +14,7 @@ from types import SimpleNamespace
 # Import defaults from existing config module
 from clipping.transcript import SAVED_TRANSCRIPT_NAME
 from clipping.config import (
+    apply_openai_compat_alias,
     ASS_ALIGN_169,
     ASS_ALIGN_916,
     ASS_FONT_169,
@@ -298,4 +299,8 @@ def build_config_from_payload(
 
     )
 
-    return cfg
+    # The same rewrite the CLI does, from the same helper: a job that asked for
+    # a custom endpoint gets a one-link chain over it. Doing this in both places
+    # from one function is what stops the API and the CLI drifting apart, which
+    # this file has form for.
+    return apply_openai_compat_alias(cfg)

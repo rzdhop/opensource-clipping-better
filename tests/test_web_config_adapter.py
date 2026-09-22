@@ -131,11 +131,23 @@ def test_ai_provider_defaults_to_the_chain(upload_file, job_id):
     assert cfg.ai_provider == "chain"
 
 
-def test_the_legacy_provider_is_still_reachable(upload_file, job_id):
+def test_a_custom_endpoint_payload_becomes_a_one_link_chain(upload_file, job_id):
+    """The Settings page's three OPENAI_COMPAT_* fields keep working; what
+    changed is the road they take, not what they mean."""
     cfg = build_config_from_payload(
-        {"upload_filename": upload_file(".mp4"), "ai_provider": "nvidia"}, job_id
+        {
+            "upload_filename": upload_file(".mp4"),
+            "ai_provider": "openai_compat",
+            "openai_compat_model": "some-model",
+        },
+        job_id,
+        env_overrides={
+            "OPENAI_COMPAT_BASE_URL": "https://example.test/v1",
+            "OPENAI_COMPAT_API_KEY": "k",
+        },
     )
-    assert cfg.ai_provider == "nvidia"
+    assert cfg.ai_provider == "chain"
+    assert cfg.llm_chain == "custom/some-model"
 
 
 def test_chain_settings_reach_the_pipeline(upload_file, job_id):

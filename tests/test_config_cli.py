@@ -201,15 +201,22 @@ def test_derive_audio_path_defaults_beside_source(tmp_path):
 # ------------------------------------------------------------- AI provider
 
 def test_default_provider_is_the_chain(video):
-    """The default analysis path is the three-pass analyzer over LLM_CHAIN.
+    """The three-pass analyzer over LLM_CHAIN is now the only analysis path.
 
-    The single-provider modes stay reachable: they are the escape hatch while
-    the new path proves itself, and the rollback if it does not.
+    The single-provider escape hatch it used to share the flag with is
+    deleted: one request for 22 fields per clip never finished, and every job
+    that ran it failed.
     """
     cfg = build_config(["--video", str(video)])
     assert cfg.ai_provider == "chain"
-    assert build_config(["--video", str(video), "--ai-provider", "nvidia"]).ai_provider == "nvidia"
-    assert build_config(["--video", str(video), "--ai-provider", "gemini"]).ai_provider == "gemini"
+
+
+@pytest.mark.parametrize("gone", ["nvidia", "gemini"])
+def test_the_legacy_providers_are_refused_rather_than_silently_ignored(video, gone):
+    """argparse rejects them, so an old command line fails loudly instead of
+    running something different from what it asked for."""
+    with pytest.raises(SystemExit):
+        build_config(["--video", str(video), "--ai-provider", gone])
 
 
 def test_the_legacy_nvidia_model_default(video):
@@ -282,10 +289,10 @@ def test_every_registry_provider_has_a_key_mapping():
     """A provider reachable in a chain but absent from PROVIDER_KEYS would be
     permanently skipped for 'no API key' however the key was set.
 
-    Containment, not equality. PROVIDER_KEYS also has to cover the legacy
-    single-request providers, and one of those -- ``openai_compat`` -- is not a
-    chain link and so is deliberately absent from the registry (DEC-046). The
-    direction that matters is unchanged: every chain provider needs a mapping.
+    Containment, not equality. ``openai_compat`` is not a chain link -- it is
+    rewritten into one over the ``custom`` provider before anything reads it --
+    so it is deliberately absent from the registry while keeping a key mapping.
+    The direction that matters is unchanged: every chain provider needs one.
     """
     from clipping.providers.registry import PROVIDERS
 
@@ -296,13 +303,13 @@ def test_every_registry_provider_has_a_key_mapping():
 
 
 def test_provider_can_be_overridden(video):
-    cfg = build_config(["--video", str(video), "--ai-provider", "gemini"])
-    assert cfg.ai_provider == "gemini"
+    """Without a base URL and model the alias cannot fire, so the setting is
+    left alone for missing_provider_key to report properly."""
+    cfg = build_config(["--video", str(video), "--ai-provider", "openai_compat"])
+    assert cfg.ai_provider == "openai_compat"
 
 
 PROVIDER_CASES = [
-    ("nvidia", "api_key_nvidia", "NVIDIA_API_KEY"),
-    ("gemini", "api_key_gemini", "GOOGLE_API_KEY"),
     ("openai_compat", "api_key_openai_compat", "OPENAI_COMPAT_API_KEY"),
 ]
 
@@ -310,7 +317,12 @@ PROVIDER_CASES = [
 # reachable only as links in a chain -- so they are gated by the chain branch of
 # missing_provider_key and exercised by
 # test_chain_provider_keys_are_read_from_the_environment instead.
-CHAIN_ONLY_PROVIDERS = {"groq", "openrouter", "mistral", "custom"}
+# nvidia and gemini joined this set when the legacy single-request path was
+# deleted. Their KEYS are still needed -- they are ordinary chain links, and the
+# shipped default chain names both -- but they are no longer --ai-provider
+# values, so the gate reaches them through its chain branch like any other link.
+CHAIN_ONLY_PROVIDERS = {"groq", "openrouter", "mistral", "custom",
+                        "nvidia", "gemini"}
 
 
 @pytest.mark.parametrize("provider,key_attr,env_name", PROVIDER_CASES)
@@ -396,7 +408,7 @@ def test_missing_provider_key_ignores_the_other_providers_key(video):
     every NVIDIA run the moment NVIDIA became the default."""
     from clipping.config import missing_provider_key
 
-    cfg = build_config(["--video", str(video), "--ai-provider", "nvidia"])
+    cfg = build_config(["--video", str(video)])
     cfg.api_key_nvidia = "nv-key"
     cfg.api_key_gemini = ""
 

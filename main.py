@@ -104,20 +104,18 @@ def main():
     if cfg.use_split_screen:
         print(f"   Dynamic Split: {'ON' if cfg.use_dynamic_split else 'OFF'}")
         print(f"   Split Trigger: {cfg.split_trigger}")
-    if cfg.ai_provider in ("chain", "auto"):
-        # The banner used to print cfg.gemini_model for anything that was not
-        # nvidia, which for a chain run named a model the job never calls.
-        from clipping.providers.registry import chain_from_env, describe, parse_chain
+    # Every analysis path is a chain now, including --ai-provider openai_compat,
+    # which build_config rewrites into a one-link one. So the banner names the
+    # links it will actually call rather than a model nobody asked for.
+    from clipping.providers.registry import chain_from_env, describe, parse_chain
 
-        try:
-            links = parse_chain(cfg.llm_chain) if cfg.llm_chain else chain_from_env()
-            active_model = " → ".join(describe(link) for link in links)
-        except Exception:  # noqa: BLE001 - a bad chain is reported when it runs
-            active_model = cfg.llm_chain or "(invalid chain)"
-        print(f"   Platform    : {cfg.platform}")
-        print(f"   Language    : {cfg.output_language}")
-    else:
-        active_model = cfg.nvidia_model if cfg.ai_provider == "nvidia" else cfg.gemini_model
+    try:
+        links = parse_chain(cfg.llm_chain) if cfg.llm_chain else chain_from_env()
+        active_model = " → ".join(describe(link) for link in links)
+    except Exception:  # noqa: BLE001 - a bad chain is reported when it runs
+        active_model = cfg.llm_chain or "(invalid chain)"
+    print(f"   Platform    : {cfg.platform}")
+    print(f"   Language    : {cfg.output_language}")
     print(f"   AI          : {cfg.ai_provider} ({active_model})")
     if getattr(cfg, "watermark_enabled", False):
         wm_type = "Text" if cfg.watermark_text else "Image"

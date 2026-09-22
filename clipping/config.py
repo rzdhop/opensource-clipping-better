@@ -174,14 +174,15 @@ from clipping.analysis.presets import DEFAULT_PRESET, PRESET_NAMES
 from clipping.providers.registry import DEFAULT_LLM_CHAIN, NVIDIA_DEFAULT_MODEL
 
 # AI Provider
-# NVIDIA NIM is the default provider: open-weights models, free tier, and an
-# OpenAI-compatible endpoint. Gemini stays available via --ai-provider gemini.
-# "chain" walks LLM_CHAIN with the three-pass analyzer (clipping/analysis/).
-# "nvidia" / "gemini" are the single-provider legacy path: one request asking
-# for 22 fields per clip. That request is what never worked -- at ~1200 output
-# tokens per clip and a measured 12-13 tokens/s it cannot finish for more than
-# about three clips -- and it is kept only as an escape hatch while the new
-# path proves itself.
+# "chain" walks LLM_CHAIN with the three-pass analyzer (clipping/analysis/) and
+# is the only way the transcript is analysed now. "openai_compat" is the same
+# analyzer pointed at one custom endpoint; apply_openai_compat_alias rewrites it
+# into a one-link chain at config time.
+#
+# The single-provider legacy path that used to live here -- one request asking
+# for 22 fields per clip -- is deleted. At ~1200 output tokens per clip against
+# a measured 12-13 tokens/s it could not finish for more than about three clips,
+# and every job that ever ran it failed.
 AI_PROVIDER = "chain"
 # ONE definition, in the stdlib-only registry, together with the measurements
 # that picked it and the two traps that cost the most time (a listed model is not
@@ -461,14 +462,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--ai-provider",
-        choices=["chain", "gemini", "nvidia", "openai_compat"],
+        choices=["chain", "openai_compat"],
         default=AI_PROVIDER,
         help=(
             "How to analyse the transcript. 'chain' (default) runs the "
-            "three-pass analyzer over --llm-chain. 'nvidia', 'gemini' and "
-            "'openai_compat' are the single-request legacy path, kept as an "
-            "escape hatch; 'openai_compat' points it at any OpenAI-compatible "
-            "endpoint you already have a key for."
+            "three-pass analyzer over --llm-chain. 'openai_compat' runs the "
+            "same analyzer against a single custom endpoint, built from "
+            "--openai-compat-base-url and --openai-compat-model. Use 'chain' "
+            "with an explicit --llm-chain to mix that endpoint with others."
         ),
     )
     p.add_argument(
@@ -477,7 +478,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             "Base URL of the OpenAI-compatible endpoint, including the version "
             "path, e.g. https://openrouter.ai/api/v1. Defaults to "
-            "$OPENAI_COMPAT_BASE_URL. Only used with --ai-provider openai_compat."
+            "$OPENAI_COMPAT_BASE_URL. Used with --ai-provider openai_compat, "
+            "which becomes a one-link chain over this endpoint."
         ),
     )
     p.add_argument(
@@ -1111,6 +1113,45 @@ def _probe_language(cfg):
     return explicit if explicit and explicit != "auto" else None
 
 
+def apply_openai_compat_alias(cfg, *, on_log=None):
+    """Turn ``--ai-provider openai_compat`` into a one-link ``custom/`` chain.
+
+    DEC-046 kept a second custom-endpoint path so that collapsing the two could
+    not silently change the meaning of an existing ``OPENAI_COMPAT_*`` setup.
+    The path it protected — one request for 22 fields — is gone, but the
+    reasoning still holds for the *surface*: three environment variables, three
+    Settings fields and a fail-fast gate that all still work.
+
+    So the setting is preserved and re-expressed. This runs at config time over
+    values the user wrote down, and prints what it built; it is not the runtime
+    chain-editing DEC-003 and DEC-023 forbid.
+
+    The environment write is forced by ``registry.provider_for``, which resolves
+    ``custom``'s base URL from ``LLM_CUSTOM_BASE_URL``. ``setdefault`` means an
+    explicit setting always wins: someone who set the chain's own variable
+    meant it.
+    """
+    if getattr(cfg, "ai_provider", "") != "openai_compat":
+        return cfg
+
+    model = str(getattr(cfg, "openai_compat_model", "") or "").strip()
+    base_url = str(getattr(cfg, "openai_compat_base_url", "") or "").strip()
+    if not model or not base_url:
+        # missing_provider_key reports this properly, and fails fast. Leaving
+        # the provider as it is keeps that message rather than replacing it
+        # with a confusing one about an empty chain.
+        return cfg
+
+    if base_url:
+        os.environ.setdefault("LLM_CUSTOM_BASE_URL", base_url)
+    cfg.llm_chain = f"custom/{model}"
+    cfg.api_key_custom = getattr(cfg, "api_key_openai_compat", "") or ""
+    cfg.ai_provider = "chain"
+    if on_log is not None:
+        on_log(f"   ↪ --ai-provider openai_compat → chain: custom/{model}")
+    return cfg
+
+
 def build_config(argv: list[str] | None = None) -> SimpleNamespace:
     """Parse CLI args and merge with defaults into a config namespace."""
     parser = _build_parser()
@@ -1358,4 +1399,4 @@ def build_config(argv: list[str] | None = None) -> SimpleNamespace:
         watermark_scale=args.watermark_scale,
     )
 
-    return cfg
+    return apply_openai_compat_alias(cfg, on_log=print)
