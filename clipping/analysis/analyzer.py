@@ -45,6 +45,18 @@ CANDIDATE_MULTIPLIER = 3
 # provider that is slow on every one of them.
 DEFAULT_TOTAL_BUDGET_SECONDS = 900
 
+# How much of that budget pass A may spend. The rest is held back for the
+# re-rank and the per-clip metadata, because a pass A that consumes everything
+# leaves B falling back to the scan's own scores and every clip rendering with a
+# basic title -- a silent quality loss of exactly the kind DEC-021 was written
+# about. Clamped upward below so A always gets room for at least one request.
+PASS_A_BUDGET_SHARE = 0.7
+
+# Used when the chain's own timeouts cannot be read (a caller passing plain
+# tuples, an unknown provider): assume the slowest link this project ships,
+# because a floor that is too small refuses every window and makes zero requests.
+FALLBACK_REQUEST_FLOOR_SECONDS = 330.0
+
 
 class AnalysisError(RuntimeError):
     """Analysis produced no usable clips."""
@@ -54,7 +66,12 @@ class AnalysisError(RuntimeError):
 # analyzer could not tell "every window answered and found nothing" from "no
 # window ever answered", and told a user whose provider was dead that their video
 # was "all housekeeping".
-ScanStats = namedtuple("ScanStats", "total answered failed last_error")
+ScanStats = namedtuple("ScanStats", "total answered failed skipped last_error")
+
+
+def _lost(stats):
+    """Windows that contributed nothing because they never ran."""
+    return stats.failed + stats.skipped
 
 
 def analyze(
@@ -75,9 +92,10 @@ def analyze(
     from ..providers import llm as llm_mod
 
     runner = run_chain or llm_mod.run_chain
+    floor = _request_floor(chain, keys)
     started = time_fn()
     budget = float(getattr(cfg, "analysis_budget_seconds", 0) or DEFAULT_TOTAL_BUDGET_SECONDS)
-    deadline = started + budget
+    run_deadline = started + budget
 
     want = int(getattr(cfg, "jumlah_clip", 7) or 7)
     preset = presets_mod.get(getattr(cfg, "platform", presets_mod.DEFAULT_PRESET))
@@ -95,7 +113,10 @@ def analyze(
         f"metadata in {language_name(language)}."
     )
 
-    def ask(system, user, json_schema, name, max_tokens):
+    def ask(system, user, json_schema, name, max_tokens, deadline=None):
+        # run_chain's signature is unchanged: it still takes one absolute
+        # deadline and neither knows nor cares that a window hands it a smaller
+        # one than the run's own.
         return runner(
             chain,
             system=system,
@@ -105,17 +126,30 @@ def analyze(
             max_tokens=max_tokens,
             keys=keys,
             on_log=on_log,
-            deadline=deadline,
+            deadline=run_deadline if deadline is None else deadline,
             time_fn=time_fn,
         )[0]
 
-    candidates, stats = _pass_a(all_beats, preset, want, ask, on_log)
+    # Pass A gets a share of the pool, never all of it -- but always at least one
+    # full request, or the predictive check would refuse every window and the run
+    # would make no requests at all.
+    pass_a_deadline = max(
+        min(run_deadline, started + budget * PASS_A_BUDGET_SHARE),
+        min(run_deadline, started + floor),
+    )
+
+    candidates, stats = _pass_a(
+        all_beats, preset, want, ask, on_log, time_fn, pass_a_deadline, floor
+    )
     if stats.answered == 0:
         # Not a verdict on the video: nothing was ever read. Saying otherwise
         # sends the user to re-cut a transcript that was never the problem.
         raise AnalysisError(
             f"The video was never analysed: all {stats.total} scan window(s) "
-            f"failed before the model answered. Last error | {stats.last_error}"
+            f"failed before the model answered "
+            f"({stats.failed} provider error(s), "
+            f"{stats.skipped} skipped for want of time). "
+            f"Last error | {stats.last_error}"
         )
     if not candidates:
         message = (
@@ -123,10 +157,10 @@ def analyze(
             "That can mean the video is all housekeeping, or that the "
             "transcript does not match the video."
         )
-        if stats.failed:
+        if _lost(stats):
             message += (
-                f" Note that {stats.failed} of {stats.total} window(s) failed, "
-                f"so part of the video was never considered."
+                f" Note that {_lost(stats)} of {stats.total} window(s) never "
+                f"returned, so part of the video was never considered."
             )
         raise AnalysisError(message)
 
@@ -137,9 +171,10 @@ def analyze(
             f"{preset.name} duration window ({preset.min:.0f}-{preset.max:.0f}s)."
         )
 
-    chosen = _pass_b(spans, candidates, want, ask, on_log, time_fn, deadline)
+    chosen = _pass_b(spans, candidates, want, ask, on_log, time_fn, run_deadline)
     clips = _pass_c(
-        chosen, all_beats, words, cfg, preset, language, ask, on_log, time_fn, deadline
+        chosen, all_beats, words, cfg, preset, language, ask, on_log, time_fn,
+        run_deadline, floor,
     )
 
     if not clips:
@@ -153,16 +188,56 @@ def analyze(
 
 # --------------------------------------------------------------------- passes
 
-def _pass_a(all_beats, preset, want, ask, on_log):
-    """Scan each window for candidate moments."""
+def _pass_a(all_beats, preset, want, ask, on_log, time_fn, deadline, floor):
+    """Scan each window for candidate moments, each inside its own time share.
+
+    DEC-027 states the invariant this restores: *a failure is local -- a failed
+    window loses one window's candidates*. It was not true. Every window shared
+    one absolute deadline, so a window whose provider hung for three attempts
+    spent the whole run's budget and the remaining five were skipped without
+    ever being tried. Catching a window's exception is worthless if that window
+    already spent everyone else's time.
+
+    The share is recomputed at the top of every iteration, which is what makes
+    unused time return to the pool with no accumulator and nothing that can go
+    stale: a window that answers in two seconds simply leaves a larger
+    ``remaining`` for the windows after it.
+
+    The ``floor`` is one full request against the slowest usable link. Without
+    it a 900s pool over six windows gives 150s each, which is below NVIDIA's
+    330s request timeout -- the predictive check would refuse every window and
+    the run would issue no requests at all, trading a starvation bug for a
+    never-tries bug. An early window may therefore borrow from the pool for one
+    honest attempt, and a later window that no longer fits is skipped with its
+    arithmetic printed.
+    """
     ranges = beats_mod.windows(all_beats, size=WINDOW_BEATS, overlap=WINDOW_OVERLAP)
     on_log(f"   [1/3] Scanning {len(ranges)} window(s) for candidate moments...")
 
     candidates = []
     answered = 0
     failed = 0
+    skipped = 0
     last_error = None
     for index, (lo, hi) in enumerate(ranges, start=1):
+        now = time_fn()
+        remaining = deadline - now
+        if remaining < floor:
+            skipped += 1
+            last_error = last_error or (
+                f"{max(0.0, remaining):.0f}s left, {floor:.0f}s needed per request"
+            )
+            on_log(
+                f"   ⏱ Window {index}/{len(ranges)} ({lo}-{hi}) skipped: "
+                f"{max(0.0, remaining):.0f}s left in the scan budget, and one "
+                f"request to this chain can take {floor:.0f}s."
+            )
+            continue
+
+        windows_left = len(ranges) - index + 1
+        share = remaining / windows_left
+        window_deadline = min(deadline, now + max(share, floor))
+
         beats_text = beats_mod.render_beats(all_beats, lo, hi)
         try:
             answer = ask(
@@ -175,6 +250,7 @@ def _pass_a(all_beats, preset, want, ask, on_log):
                 schema.CANDIDATES_SCHEMA,
                 "candidates",
                 schema.MAX_TOKENS_CANDIDATES,
+                window_deadline,
             )
         except Exception as exc:  # noqa: BLE001 - one window, not the run
             # Logged as before, but the reason is kept rather than discarded:
@@ -191,7 +267,7 @@ def _pass_a(all_beats, preset, want, ask, on_log):
         candidates.extend(found)
         on_log(f"   [1/3] Window {index}/{len(ranges)}: {len(found)} candidate(s).")
 
-    return candidates, ScanStats(len(ranges), answered, failed, last_error)
+    return candidates, ScanStats(len(ranges), answered, failed, skipped, last_error)
 
 
 def _pass_b(spans, candidates, want, ask, on_log, time_fn, deadline):
@@ -242,7 +318,8 @@ def _pass_b(spans, candidates, want, ask, on_log, time_fn, deadline):
     return ordered
 
 
-def _pass_c(spans, all_beats, words, cfg, preset, language, ask, on_log, time_fn, deadline):
+def _pass_c(spans, all_beats, words, cfg, preset, language, ask, on_log, time_fn,
+            deadline, floor):
     """Describe each selected clip, then build its legacy dict."""
     on_log(f"   [3/3] Writing metadata for {len(spans)} clip(s)...")
     want_broll = bool(getattr(cfg, "use_broll", True)) and bool(
@@ -256,8 +333,13 @@ def _pass_c(spans, all_beats, words, cfg, preset, language, ask, on_log, time_fn
         beats_text = beats_mod.render_beats(all_beats, span.b0, span.b1)
 
         meta = {}
-        if time_fn() >= deadline:
-            on_log(f"   ⏱ Clip {rank}: no time left in the budget for metadata.")
+        # Predictive, like every other check now: refuse a request that
+        # cannot finish rather than start one and overrun.
+        if time_fn() + floor > deadline:
+            on_log(
+                f"   ⏱ Clip {rank}: no room left in the budget for a "
+                f"{floor:.0f}s metadata request; it will render with a basic title."
+            )
         else:
             try:
                 meta = ask(
@@ -290,6 +372,35 @@ def _pass_c(spans, all_beats, words, cfg, preset, language, ask, on_log, time_fn
 
 
 # ------------------------------------------------------------------- helpers
+
+def _request_floor(chain, keys):
+    """The longest single request any *usable* link in *chain* could make.
+
+    Keyless links are excluded: they are never contacted, so their timeout is
+    not a cost anyone pays, and counting a 330s link the run cannot use would
+    shrink every window's allowance for nothing.
+
+    Deliberately tolerant. Callers in tests pass plain ``(provider, model)``
+    tuples rather than ``Link``s, and an unknown provider must not take the run
+    down; both fall back to the slowest timeout this project ships, because a
+    floor that is too small is the worse failure -- it refuses every window and
+    issues no requests at all.
+    """
+    from ..providers import registry
+
+    timeouts = []
+    for link in chain or ():
+        provider = getattr(link, "provider", None)
+        if provider is None and isinstance(link, (tuple, list)) and link:
+            provider = link[0]
+        if keys and provider and not keys.get(provider):
+            continue
+        try:
+            timeouts.append(float(registry.effective_timeout(link)))
+        except Exception:  # noqa: BLE001 - an unreadable link is not fatal here
+            timeouts.append(FALLBACK_REQUEST_FLOOR_SECONDS)
+    return max(timeouts) if timeouts else FALLBACK_REQUEST_FLOOR_SECONDS
+
 
 def _derive_all(meta, span, clip_beats, clip_words, cfg, want_broll):
     hook_start, hook_end = derive.hook_window(
@@ -431,9 +542,9 @@ def _report_shortfall(want, got, stats, on_log):
         return
 
     line = f"   ℹ️ Asked for {want} clip(s); this transcript yielded {got}. "
-    if stats.failed:
+    if _lost(stats):
         line += (
-            f"{stats.failed} of {stats.total} scan window(s) never returned, so "
+            f"{_lost(stats)} of {stats.total} scan window(s) never returned, so "
             f"part of the video was not considered — this is not a verdict on "
             f"the transcript."
         )

@@ -8,6 +8,7 @@ import pytest
 
 from clipping.analysis import analyzer, presets
 from clipping.analysis.analyzer import AnalysisError
+from clipping.providers.registry import Link
 
 
 class Cfg:
@@ -378,3 +379,217 @@ def test_every_request_carries_a_schema_and_the_deadline():
         assert call["schema"] is not None
         assert call["schema_name"]
         assert call["deadline"] is not None
+
+
+# ------------------------------------------------ the per-window time share
+
+class Clock:
+    """A fake monotonic clock a scripted request can push forward."""
+
+    def __init__(self, start=0.0):
+        self.now = float(start)
+
+    def __call__(self):
+        return self.now
+
+
+# Groq's 120s request timeout, so five windows fit inside the pass-A pool.
+# NVIDIA's 330s would not, and "six windows cannot each have a 330s request
+# inside a 900s budget" is arithmetic, not a bug.
+GROQ_CHAIN = [Link("groq", "m")]
+GROQ_KEYS = {"groq": "k"}
+
+
+def greedy(clock, floor=120.0, answers=()):
+    """A run_chain stand-in that behaves like the real one under a deadline.
+
+    Two properties are copied from ``llm.run_chain``, and both are load-bearing
+    for these tests. It **refuses** an allowance too small for one request --
+    that is Stage 2's predictive check, and without it a fake runner happily
+    "succeeds" on a window that the real chain would never have contacted, which
+    hides the exact bug under test. And it **spends its whole allowance**, the
+    worst honest case for a window that does get to run.
+    """
+    queue = list(answers)
+    seen = []
+
+    def _run(chain, **kwargs):
+        deadline = kwargs["deadline"]
+        allowance = deadline - clock.now
+        if allowance < floor:
+            raise RuntimeError(
+                f"Every provider in the chain failed: a {floor:.0f}s request "
+                f"does not fit the {max(0.0, allowance):.0f}s left in the budget"
+            )
+        seen.append({"deadline": deadline, "at": clock.now, "allowance": allowance})
+        clock.now = deadline
+        if not queue:
+            raise RuntimeError("InternalServerError: Error code: 504")
+        item = queue.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item, chain[0]
+
+    _run.seen = seen
+    return _run
+
+
+def analyze_with(runner, clock, cfg=None, segments=None):
+    logs = []
+    return analyzer.analyze(
+        segments or segmen(200),
+        cfg or Cfg(),
+        chain=GROQ_CHAIN,
+        keys=GROQ_KEYS,
+        on_log=logs.append,
+        time_fn=clock,
+        run_chain=runner,
+    ), logs
+
+
+def test_one_slow_window_cannot_starve_the_others():
+    """The recorded failure, inverted.
+
+    Window 1's ladder spent ~925s of a 900s budget against a provider that
+    answered nothing, and windows 2-6 were skipped without ever being tried.
+    DEC-027 says a failed window loses one window's candidates; it lost the run.
+
+    The invariant is that the later windows are *attempted*, not that they
+    succeed -- here every one of them fails too.
+    """
+    clock = Clock()
+    runner = greedy(clock)
+
+    with pytest.raises(AnalysisError):
+        analyze_with(runner, clock)
+
+    assert len(runner.seen) == 5, (
+        "every window must be given a workable share; a greedy first window "
+        "must not consume the other four windows' time"
+    )
+
+
+def test_no_window_is_handed_the_whole_runs_budget():
+    """Each window's allowance is a share, not the pool."""
+    clock = Clock()
+    runner = greedy(clock)
+
+    with pytest.raises(AnalysisError):
+        analyze_with(runner, clock)
+
+    budget = Cfg.analysis_budget_seconds
+    assert runner.seen[0]["allowance"] < budget
+
+
+def test_unused_time_returns_to_the_pool():
+    """A fast window leaves more for the windows after it, with no accumulator.
+
+    The share is recomputed from ``remaining / windows_left`` at the top of each
+    iteration, so this falls out of the arithmetic rather than being tracked.
+    """
+    clock = Clock()
+    seen = []
+
+    def runner(chain, **kwargs):
+        seen.append(kwargs["deadline"] - clock.now)
+        clock.now += 1.0            # answers almost instantly
+        return candidates((0, 2, 60)), chain[0]
+
+    logs = []
+    analyzer.analyze(
+        segmen(200), Cfg(), chain=GROQ_CHAIN, keys=GROQ_KEYS,
+        on_log=logs.append, time_fn=clock, run_chain=runner,
+    )
+    scan_allowances = seen[:3]
+    assert scan_allowances[1] > scan_allowances[0]
+
+
+def test_a_window_always_gets_room_for_one_full_request():
+    """The floor, and the regression it prevents.
+
+    A strict ``remaining / windows_left`` share gives 900s over six windows as
+    150s each -- below a 330s request timeout -- so the predictive check would
+    refuse every window and the run would issue no requests at all. That trades
+    a starvation bug for a never-tries bug.
+    """
+    clock = Clock()
+    runner = greedy(clock, floor=330.0)
+
+    with pytest.raises(AnalysisError):
+        analyzer.analyze(
+            segmen(200), Cfg(), chain=[Link("nvidia", "m")], keys={"nvidia": "k"},
+            on_log=lambda *a: None, time_fn=clock, run_chain=runner,
+        )
+
+    assert runner.seen, "at least one window must actually be tried"
+    assert runner.seen[0]["allowance"] >= 330.0
+
+
+def test_a_window_with_no_room_left_is_skipped_and_says_why():
+    clock = Clock()
+    runner = greedy(clock, floor=330.0)
+    logs = []
+
+    with pytest.raises(AnalysisError) as info:
+        analyzer.analyze(
+            segmen(200), Cfg(), chain=[Link("nvidia", "m")], keys={"nvidia": "k"},
+            on_log=logs.append, time_fn=clock, run_chain=runner,
+        )
+
+    joined = "\n".join(logs)
+    assert "skipped" in joined and "budget" in joined
+    assert "skipped for want of time" in str(info.value)
+    assert "housekeeping" not in str(info.value)
+
+
+def test_a_keyless_link_does_not_shrink_every_windows_allowance():
+    """A link that is never contacted costs no time, so it sets no floor.
+
+    Counting NVIDIA's 330s here would shrink the allowance of every window in a
+    run that cannot use NVIDIA at all.
+    """
+    assert analyzer._request_floor(
+        [Link("nvidia", "m"), Link("groq", "m")], {"groq": "k"}
+    ) == 120.0
+
+
+def test_an_unreadable_chain_falls_back_to_the_slowest_timeout():
+    """Tuples and unknown providers must not take a run down, and must not
+    produce a floor so small that nothing is ever tried."""
+    assert analyzer._request_floor([("groq", "m")], {"groq": "k"}) == 330.0
+    assert analyzer._request_floor([], {}) == 330.0
+
+
+def test_pass_c_refuses_metadata_predictively():
+    """DEC-027 locality: a clip with no time left for metadata still renders.
+
+    Pass A cannot starve pass C -- PASS_A_BUDGET_SHARE holds time back for it --
+    so the way to run C dry is for C's own earlier requests to be slow, which is
+    what this scripts. The first clip gets its title; the rest are refused
+    *before* a request is made, and render with a basic one.
+    """
+    clock = Clock()
+    calls = []
+
+    def runner(chain, **kwargs):
+        calls.append(kwargs["schema_name"])
+        if kwargs["schema_name"] == "candidates":
+            clock.now = kwargs["deadline"]          # spend the window's share
+            window = len([c for c in calls if c == "candidates"])
+            if window == 1:
+                return candidates((0, 3, 90), (20, 23, 85)), chain[0]
+            return candidates((45, 48, 80)), chain[0]
+        clock.now += 200.0                          # a slow metadata request
+        return META, chain[0]
+
+    logs = []
+    clips = analyzer.analyze(
+        segmen(), Cfg(), chain=GROQ_CHAIN, keys=GROQ_KEYS,
+        on_log=logs.append, time_fn=clock, run_chain=runner,
+    )
+
+    assert len(clips) == 3, "every selected clip still renders"
+    assert calls.count("clip_meta") == 1, "the rest were refused before the request"
+    assert any("basic title" in line for line in logs)
+    for clip in clips:
+        assert clip["title_inggris"]
