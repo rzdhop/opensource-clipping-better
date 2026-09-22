@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 # Render defaults are sourced from the CLI config so the API and the CLI cannot
 # drift apart: config_adapter falls back to these same constants.
 from clipping.config import (
+    NVIDIA_MODEL,
     VIDEO_PRESET,
     VIDEO_QUALITY_CQ,
     VIDEO_QUALITY_CRF,
@@ -204,7 +205,10 @@ class JobCreateRequest(BaseModel):
     dry_run_analysis: bool = False
     gemini_model: str = "gemini-3-flash-preview"
     gemini_fallback_model: str = "gemini-2.5-flash"
-    nvidia_model: str = "google/gemma-4-31b-it"
+    # One definition, in clipping/providers/registry.py. Never a literal here:
+    # the four copies of this string were how the dashboard and the CLI came to
+    # disagree about which model a job with no explicit setting would call.
+    nvidia_model: str = NVIDIA_MODEL
     # Per-job override for the custom endpoint's model. Empty means "use the
     # one saved in Settings". The base URL and key are credentials and live
     # only in Settings, never in a job payload.

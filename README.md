@@ -208,7 +208,7 @@ The job page therefore shows a **Live activity** panel next to the progress bar:
 
 | What it shows | Why |
 |---|---|
-| The provider and the exact model being asked | `NVIDIA · google/gemma-4-31b-it`, so you know which key is being spent and which model to blame |
+| The provider and the exact model being asked | `NVIDIA · deepseek-ai/deepseek-v4.1-flash`, so you know which key is being spent and which model to blame |
 | The retry position | `attempt 2 of 3` — the difference between waiting and killing the job |
 | Time on the current step, and total | Time *on the step* is what tells you something is stuck |
 | Which clip of how many is rendering | The render phase is one blocking call per clip |
@@ -332,7 +332,7 @@ python main.py --video talk.mp4 --transcript talk.vtt --hook-source "DRIVE_URL_O
 python main.py --video talk.mp4 --transcript talk.vtt --render-height source --video-sharpen
 
 # Use NVIDIA NIM (DeepSeek-V3) instead of Gemini
-python main.py --video talk.mp4 --transcript talk.vtt --ai-provider nvidia --nvidia-model "google/gemma-4-31b-it"
+python main.py --video talk.mp4 --transcript talk.vtt --ai-provider nvidia --nvidia-model "deepseek-ai/deepseek-v4.1-flash"
 
 # Square output for Instagram Feed (1:1)
 python main.py --video talk.mp4 --transcript talk.vtt --ratio "1:1" --clips 5
@@ -366,7 +366,7 @@ python main.py --help
 | `--clips`, `-n` | `7` | Number of highlight clips to generate |
 | `--ratio`, `-r` | `9:16` | Output aspect ratio (`9:16`, `16:9`, `1:1`, `3:4`, `4:5`) |
 | `--ai-provider` | `gemini` | AI provider for analysis (`gemini` or `nvidia`). |
-| `--nvidia-model` | `google/gemma-4-31b-it` | Model for NVIDIA NIM. Models are retired periodically; list current ones at `https://integrate.api.nvidia.com/v1/models`. |
+| `--nvidia-model` | `deepseek-ai/deepseek-v4.1-flash` | Model for NVIDIA NIM. Models are retired *and un-provisioned* constantly. `https://integrate.api.nvidia.com/v1/models` lists more than your account can call — several listed ids answer `404 Function ...: Not found for account`, and others accept the request and then hang. Pick with `tools/bench_llm.py`, not by reading the list. |
 | `--render-height` | `1080` | Target render output height (`1080`, `1440`, `2160`, `source`) |
 | `--video-bitrate` | `auto` | Target video bitrate (e.g. 8M, 12M, auto). 'auto' scales based on resolution. |
 | `--video-sharpen` | — | Apply a subtle sharpening filter for clearer output. |

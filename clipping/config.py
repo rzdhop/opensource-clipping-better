@@ -171,6 +171,7 @@ VIDEO_SCALE_ALGO = "lanczos"
 RENDER_OUTPUT_HEIGHT = 1080
 
 from clipping.analysis.presets import DEFAULT_PRESET, PRESET_NAMES
+from clipping.providers.registry import DEFAULT_LLM_CHAIN, NVIDIA_DEFAULT_MODEL
 
 # AI Provider
 # NVIDIA NIM is the default provider: open-weights models, free tier, and an
@@ -182,24 +183,12 @@ from clipping.analysis.presets import DEFAULT_PRESET, PRESET_NAMES
 # about three clips -- and it is kept only as an escape hatch while the new
 # path proves itself.
 AI_PROVIDER = "chain"
-# The third NIM default this project has had, because NVIDIA retires models
-# faster than anyone tracks them: deepseek-v4-pro died 2026-08-07, and
-# deepseek-v4-flash-0731 died between 2026-09-19 (when it still answered a real
-# job) and 2026-09-21 (410 Gone). The whole DeepSeek v4 family is gone from the
-# catalogue; only deepseek-coder-6.7b remains, which is a coding model.
-#
-# Picked by measurement, not by reading a card. Against the real Pass-A workload
-# (~1700 tokens in, 500 out) on 2026-09-21, one http request each:
-#   google/gemma-4-31b-it          6.0s best / 31.3 tok/s  3/3 schema-valid
-#   openai/gpt-oss-20b            25.3s best / 12.4 tok/s  3/3 schema-valid
-#   nvidia/nemotron-3.5-lightning 73.0s -> prose, not JSON
-#   nvidia/nemotron-3-super-120b   4.5s -> malformed JSON
-# Re-run tools/bench_llm.py when this one dies too.
-#
-# NOTE: a test pinning this STRING cannot detect a retirement (DEC-007 believed
-# otherwise). What actually survives one is LLM_CHAIN: a dead link fails fast
-# with 410, is classified fatal, and the next provider answers.
-NVIDIA_MODEL = "google/gemma-4-31b-it"
+# ONE definition, in the stdlib-only registry, together with the measurements
+# that picked it and the two traps that cost the most time (a listed model is not
+# necessarily callable; the fast candidates are reasoning models that must have
+# thinking turned off). Do not paste a model id back in here -- an agreement test
+# fails if any of the four former copies grows a literal again.
+NVIDIA_MODEL = NVIDIA_DEFAULT_MODEL
 GEMINI_MODEL = "gemini-3-flash-preview"
 GEMINI_FALLBACK_MODEL = "gemini-2.5-flash"
 
@@ -532,11 +521,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--llm-chain",
         default=LLM_CHAIN,
         help=(
-            "Ordered provider chain for AI analysis, e.g. "
-            "'groq/openai/gpt-oss-120b,nvidia/google/gemma-4-31b-it'. "
-            "Each link is tried in order and every hop is printed; a provider "
-            "not named here is never called. Defaults to $LLM_CHAIN, then to the "
-            "shipped default in clipping/providers/registry.py."
+            "Ordered provider chain for AI analysis. Each link is tried in "
+            "order and every hop is printed; a provider not named here is "
+            "never called. Defaults to $LLM_CHAIN, then to the shipped "
+            f"default in clipping/providers/registry.py, currently "
+            f"'{DEFAULT_LLM_CHAIN}'."
         ),
     )
     p.add_argument(

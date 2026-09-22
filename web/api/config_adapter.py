@@ -27,6 +27,7 @@ from clipping.config import (
     DAFTAR_FONT,
     GEMINI_FALLBACK_MODEL,
     NAMA_FONT_THUMBNAIL,
+    NVIDIA_MODEL,
     RENDER_OUTPUT_HEIGHT,
     SCALE_KATA_KHUSUS_169,
     SCALE_KATA_KHUSUS_916,
@@ -247,7 +248,7 @@ def build_config_from_payload(
         ),
         api_key_mistral=env.get("MISTRAL_API_KEY", os.environ.get("MISTRAL_API_KEY", "")),
         api_key_custom=env.get("LLM_CUSTOM_API_KEY", os.environ.get("LLM_CUSTOM_API_KEY", "")),
-        nvidia_model=payload.get("nvidia_model", "google/gemma-4-31b-it"),
+        nvidia_model=payload.get("nvidia_model", NVIDIA_MODEL),
         # Custom OpenAI-compatible endpoint (the legacy single-request path).
         # The URL and key are credentials, so they come only from settings/env;
         # the model may be overridden per job, falling back to the saved one.

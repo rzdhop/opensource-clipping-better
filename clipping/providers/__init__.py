@@ -9,6 +9,7 @@ scope, so the package stays importable in the pytest-only CI environment.
 from .errors import ProviderError
 from .registry import (
     DEFAULT_LLM_CHAIN,
+    NVIDIA_DEFAULT_MODEL,
     PROVIDERS,
     ChainError,
     Link,
@@ -24,6 +25,7 @@ __all__ = [
     "ChainError",
     "DEFAULT_LLM_CHAIN",
     "Link",
+    "NVIDIA_DEFAULT_MODEL",
     "PROVIDERS",
     "ProviderError",
     "chain_from_env",

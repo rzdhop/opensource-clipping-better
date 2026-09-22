@@ -188,14 +188,58 @@ def describe(link) -> str:
     return f"{link.provider}/{link.model}"
 
 
+# The NIM model, in ONE place. Four copies of this string used to exist -- here,
+# clipping/config.NVIDIA_MODEL, web/api/models.py and web/api/config_adapter.py
+# -- and nothing made them agree. They all point here now, and
+# test_one_definition_of_the_nim_default asserts none of them grew a literal back.
+#
+# The fourth NIM default this project has had, because NVIDIA retires and
+# un-provisions models faster than anyone tracks them: deepseek-v4-pro died
+# 2026-08-07; deepseek-v4-flash-0731 died between 2026-09-19 and 2026-09-21;
+# google/gemma-4-31b-it was benchmarked at 6.0s on 2026-09-21 and by 2026-09-21
+# evening answered NOTHING AT ALL.
+#
+# Picked by measurement against the real Pass-A workload (45 beats, strict
+# CANDIDATES_SCHEMA, max_tokens=700), one request each, 2026-09-21:
+#
+#   deepseek-ai/deepseek-v4.1-flash  1.3-2.9s  schema-valid  296-331 tokens  <-
+#   z-ai/glm-5.3-flash              12.6s      schema-valid
+#   nvidia/nemotron-3.5-lightning   83.0s   -> reasoning prose, unparseable
+#   z-ai/glm-5.3                      >90s  -> timed out
+#   google/gemma-4-31b-it            >120s  -> HANGS on an 8-token request
+#   openai/gpt-oss-20b                >45s  -> HANGS on an 8-token request
+#
+# Two facts from that round are worth more than the numbers:
+#
+# **Listed is not callable.** google/gemma-3-12b-it, nvidia/nemotron-nano-3-30b-a3b
+# and moonshotai/kimi-k2.6 are all in GET /v1/models and all answer
+# 404 "Function <uuid>: Not found for account <id>". Reading the catalogue proves
+# nothing; only a real request does. Re-pick with tools/bench_llm.py.
+#
+# **The two fastest candidates are reasoning models**, and both are unusable with
+# thinking ON -- deepseek returns content=null, GLM spends all 700 tokens on the
+# preamble and truncates the JSON mid-object. llm._extra_body turns thinking off
+# for this link, which is the only reason the default below works;
+# test_the_shipped_nim_default_is_covered_by_the_thinking_switch pins that.
+#
+# NOTE: a test pinning this STRING cannot detect a retirement (DEC-007 believed
+# otherwise, DEC-024 corrected it). What survives one is the chain: a dead link
+# fails and the next provider answers -- PROVIDED it has a key. The job that
+# prompted this had keys for exactly one of three links, so there was nothing to
+# fall through to. A chain with one key is a chain of one.
+NVIDIA_DEFAULT_MODEL = "deepseek-ai/deepseek-v4.1-flash"
+
 # The shipped default. Groq first because it is by far the fastest free tier;
 # Gemini second because its daily request budget is the largest; NVIDIA last
 # because it has no published daily cap, so it is the floor that still answers
 # when the other two are exhausted. Re-pick the NVIDIA model with tools/bench_llm.py.
+#
+# parse_spec splits on the FIRST slash only, which is what lets the NIM link
+# carry a model id that itself contains one.
 DEFAULT_LLM_CHAIN = (
     "groq/openai/gpt-oss-120b,"
     "gemini/gemini-2.5-flash-lite,"
-    "nvidia/google/gemma-4-31b-it"
+    f"nvidia/{NVIDIA_DEFAULT_MODEL}"
 )
 
 

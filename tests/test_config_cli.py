@@ -10,6 +10,7 @@ import pytest
 
 from clipping import config as config_module
 from clipping.config import build_config
+from clipping.providers import registry
 
 
 @pytest.fixture
@@ -226,7 +227,7 @@ def test_the_legacy_nvidia_model_default(video):
     # What actually survives a retirement is LLM_CHAIN: a dead link fails fast,
     # is classified fatal rather than retried, and the next provider answers.
     # See test_llm_negotiation.py::test_the_chain_advances_only_after_a_link_is_exhausted.
-    assert cfg.nvidia_model == "google/gemma-4-31b-it"
+    assert cfg.nvidia_model == registry.NVIDIA_DEFAULT_MODEL
 
 
 def test_llm_chain_defaults_to_the_env_then_to_empty(video, monkeypatch):

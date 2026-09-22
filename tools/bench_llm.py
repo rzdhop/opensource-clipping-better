@@ -13,6 +13,7 @@ provider's, not a hidden retry ladder's.
     python tools/bench_llm.py
     python tools/bench_llm.py --chain "groq/openai/gpt-oss-120b,groq/llama-3.3-70b-versatile"
     python tools/bench_llm.py --samples 5 --json results.json
+    python tools/bench_llm.py --nim-shortlist      # re-pick the NIM default
 
 Reads keys from the environment (and from .env, via clipping.config). Prints no
 key material. Read-only: it writes nothing unless --json is given.
@@ -35,6 +36,41 @@ from clipping.providers.registry import (  # noqa: E402
     describe,
     env_key_for,
     parse_chain,
+)
+
+# The NIM models worth re-measuring when the default dies again, so the next
+# re-pick starts from measured ground rather than from the catalogue. Measured
+# 2026-09-21 against the real Pass-A workload:
+#
+#   deepseek-ai/deepseek-v4.1-flash   1.3-2.9s  schema-valid   <- current default
+#   z-ai/glm-5.3-flash               12.6s      schema-valid, but ONLY with
+#                                               thinking off; llm._extra_body
+#                                               does not cover it (see below)
+#   nvidia/nemotron-3.5-lightning-30b-a3b  83s  reasoning prose, unparseable
+#   z-ai/glm-5.3                          >90s  timed out
+#   google/gemma-4-31b-it                >120s  HANGS on an 8-token request
+#   openai/gpt-oss-20b                    >45s  HANGS on an 8-token request
+#
+# Two traps this list exists to remember:
+#
+# 1. GET /v1/models lists more than an account can call. google/gemma-3-12b-it,
+#    nvidia/nemotron-nano-3-30b-a3b and moonshotai/kimi-k2.6 are all listed and
+#    all answer 404 "Function <uuid>: Not found for account <id>". They are kept
+#    in the list below on purpose: a 404 here is a result, and re-discovering it
+#    by hand costs an hour.
+# 2. The fast candidates are reasoning models and are unusable with thinking ON
+#    -- deepseek returns content=null, GLM burns the whole token budget on the
+#    preamble and truncates the JSON. ``llm._extra_body`` switches it off for
+#    models whose name contains "deepseek" and nothing else, so a GLM row here
+#    measures GLM *with* thinking unless that predicate is widened first.
+NIM_SHORTLIST = (
+    "nvidia/deepseek-ai/deepseek-v4.1-flash",
+    "nvidia/z-ai/glm-5.3-flash",
+    "nvidia/nvidia/nemotron-3.5-lightning-30b-a3b",
+    "nvidia/openai/gpt-oss-20b",
+    "nvidia/google/gemma-4-31b-it",
+    "nvidia/google/gemma-3-12b-it",
+    "nvidia/moonshotai/kimi-k2.6",
 )
 
 # A transcript-shaped prompt of roughly the size Pass A actually sends, so the
@@ -183,6 +219,11 @@ def main(argv=None):
         default=os.environ.get("LLM_CHAIN", "").strip() or DEFAULT_LLM_CHAIN,
         help="Comma-separated <provider>/<model> links to benchmark.",
     )
+    parser.add_argument(
+        "--nim-shortlist",
+        action="store_true",
+        help="Benchmark NIM_SHORTLIST instead of --chain, to re-pick the NIM default.",
+    )
     parser.add_argument("--samples", type=int, default=3,
                         help="Requests per link (default 3).")
     parser.add_argument("--max-tokens", type=int, default=400,
@@ -193,7 +234,7 @@ def main(argv=None):
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args(argv)
 
-    chain = parse_chain(args.chain)
+    chain = parse_chain(NIM_SHORTLIST if args.nim_shortlist else args.chain)
     keys = _keys()
 
     print(f"Prompt: ~{pacing.estimate_tokens(SYSTEM, USER)} tokens in, "
