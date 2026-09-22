@@ -233,3 +233,43 @@ def test_keywords_dedupe_case_insensitively():
 
 def test_keywords_are_capped_at_eight():
     assert len(derive.keywords([f"k{i}" for i in range(20)])) == 8
+
+
+# ------------------------------------------------- the model names the hooks
+
+def _hv2_beats():
+    return [
+        {"i": i, "start": i * 3.0, "end": i * 3.0 + 2.0,
+         "text": f"beat {i} has several words in it", "n_words": 7,
+         "w0": i * 7, "w1": i * 7 + 6}
+        for i in range(8)
+    ]
+
+
+def test_hook_v2_items_use_the_beats_the_model_named():
+    """The heuristic picks the shortest, wordiest beats -- a proxy for density,
+    not for the line anyone would put on screen. The model read the clip."""
+    items = derive.hook_v2_items(_hv2_beats(), want=3, hook_beats=[5, 2])
+
+    assert [i["start_time"] for i in items] == [6.0, 15.0]  # chronological
+    assert all({"start_time", "end_time", "text"} <= set(i) for i in items)
+
+
+def test_hook_v2_falls_back_to_the_heuristic_when_the_model_named_nothing():
+    beats = _hv2_beats()
+    baseline = derive.hook_v2_items(beats, want=3)
+
+    assert derive.hook_v2_items(beats, want=3, hook_beats=None) == baseline
+    assert derive.hook_v2_items(beats, want=3, hook_beats=[]) == baseline
+
+
+def test_a_hook_beat_outside_the_clip_is_ignored_not_fatal():
+    beats = _hv2_beats()
+    items = derive.hook_v2_items(beats, want=3, hook_beats=[9000])
+
+    assert items == derive.hook_v2_items(beats, want=3)
+
+
+def test_named_hook_beats_are_capped_at_want():
+    items = derive.hook_v2_items(_hv2_beats(), want=2, hook_beats=[0, 3, 6])
+    assert len(items) == 2

@@ -72,7 +72,7 @@ META = {
     "score": 80, "title_native": "A title", "title_en": "A title",
     "hashtags": ["#a", "#b", "#c"], "desc_hook": "Hook.", "desc_context": "Context.",
     "keywords": ["a", "b", "c", "d", "e"], "caption_native": "cap",
-    "caption_en": "cap", "reason": "because", "hook_beat": 0,
+    "caption_en": "cap", "reason": "because", "hook_beats": [0],
     "emphasis": ["sentence"], "broll_queries": [], "mood": "chill",
     "drop_beats": [],
 }
@@ -871,3 +871,62 @@ def test_the_scan_prompt_shows_a_good_and_a_bad_example():
     prompt = _scan_prompt()
     assert "GOOD" in prompt and "BAD" in prompt
     assert "do not look for them above" in prompt
+
+
+# ------------------------------------------------------ warmth, where it helps
+
+def test_only_the_metadata_pass_is_warmer():
+    """Pass A and B are judgement calls and stay analytic. Pass C is the only
+    pass that writes anything a human reads."""
+    runner = scripted(
+        candidates((0, 3, 90)),
+        candidates((45, 48, 85)),
+        {"ranked": [{"id": 0, "score": 95, "topic": "a"},
+                    {"id": 1, "score": 80, "topic": "b"}]},
+        META, META,
+    )
+    analyzer.analyze(
+        segmen(), Cfg(), chain=[("groq", "m")], keys={"groq": "k"},
+        on_log=lambda _line: None, run_chain=runner,
+    )
+
+    for call in runner.calls:
+        temperature = call.get("temperature", 0.2)
+        if call["schema_name"] == "clip_meta":
+            assert temperature == 0.5, "the writing pass should be warmer"
+        else:
+            assert temperature == 0.2, f"{call['schema_name']} should stay analytic"
+
+
+def test_the_first_hook_beat_drives_the_teaser_window():
+    meta = dict(META, hook_beats=[2])
+
+    answers = [
+        candidates((0, 6, 90)),
+        candidates((45, 48, 85)),
+        {"ranked": [{"id": 0, "score": 95, "topic": "a"},
+                    {"id": 1, "score": 80, "topic": "b"}]},
+        meta, meta,
+    ]
+    clips, _ = run(answers)
+
+    for clip in clips:
+        assert clip["hook_start_time"] >= clip["start_time"]
+        assert clip["hook_end_time"] > clip["hook_start_time"]
+        assert clip["hook_end_time"] <= clip["end_time"]
+
+
+def test_a_clip_with_no_hook_beats_still_gets_a_teaser():
+    """An older model, or a failed metadata request, must not cost the hook."""
+    meta = dict(META)
+    meta.pop("hook_beats", None)
+    answers = [
+        candidates((0, 6, 90)),
+        candidates((45, 48, 85)),
+        {"ranked": [{"id": 0, "score": 95, "topic": "a"},
+                    {"id": 1, "score": 80, "topic": "b"}]},
+        meta, meta,
+    ]
+    clips, _ = run(answers)
+    for clip in clips:
+        assert clip["hook_end_time"] > clip["hook_start_time"]

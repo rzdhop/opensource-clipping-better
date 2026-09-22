@@ -88,7 +88,9 @@ CLIP_META_SCHEMA = _obj(
         "caption_native": {"type": "string"},
         "caption_en": {"type": "string"},
         "reason": {"type": "string"},
-        "hook_beat": {"type": "integer"},
+        # 1-3 ids, strongest first. The first drives the teaser window; all
+        # of them feed the multi-hook intro, which used to guess.
+        "hook_beats": {"type": "array", "items": {"type": "integer"}},
         "emphasis": {"type": "array", "items": {"type": "string"}},
         "broll_queries": {"type": "array", "items": {"type": "string"}},
         "mood": {"type": "string", "enum": list(MOODS)},

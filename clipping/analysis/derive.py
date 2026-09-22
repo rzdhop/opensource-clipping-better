@@ -107,18 +107,31 @@ def hook_window(hook_beat, clip_beats, *, clip_start, clip_end, hook_duration):
     return start, end
 
 
-def hook_v2_items(clip_beats, *, want=3, max_seconds=2.5):
-    """Micro-hook intro cards: the shortest beats with the most going on.
+def hook_v2_items(clip_beats, *, want=3, max_seconds=2.5, hook_beats=None):
+    """Micro-hook intro cards.
+
+    *hook_beats* is what the metadata pass named, strongest first — it read the
+    clip, so it knows which lines carry it. The heuristic below is the
+    fallback: shortest beats with the most going on, which is a proxy for
+    density rather than for the line anyone would put on screen.
 
     Only built when ``--hook-v2`` is on. When it is off the key is omitted
     entirely, so ``studio/core.py``'s own auto-chunking fallback applies.
     """
-    usable = [b for b in clip_beats if b["end"] - b["start"] <= max_seconds]
-    if len(usable) < 2:
-        usable = sorted(clip_beats, key=lambda b: b["end"] - b["start"])[:want]
+    by_id = {beat["i"]: beat for beat in clip_beats}
+    named = [by_id[i] for i in (hook_beats or []) if i in by_id]
 
-    chosen = sorted(usable, key=lambda b: -b["n_words"])[:want]
-    chosen.sort(key=lambda b: b["start"])
+    if named:
+        chosen = named[:want]
+    else:
+        usable = [b for b in clip_beats if b["end"] - b["start"] <= max_seconds]
+        if len(usable) < 2:
+            usable = sorted(clip_beats, key=lambda b: b["end"] - b["start"])[:want]
+        chosen = sorted(usable, key=lambda b: -b["n_words"])[:want]
+
+    # Chronological whatever the source: these render as a sequence of cards,
+    # and a sequence that jumps backwards through the clip reads as a mistake.
+    chosen = sorted(chosen, key=lambda b: b["start"])
 
     items = []
     for beat in chosen:

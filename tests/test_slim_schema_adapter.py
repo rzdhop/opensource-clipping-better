@@ -151,7 +151,7 @@ META = {
     "caption_native": "Ils ne savaient pas.",
     "caption_en": "They had no idea.",
     "reason": "A complete setup and payoff in under a minute.",
-    "hook_beat": 1,
+    "hook_beats": [1],
     "emphasis": ["islands", "twelve", "people"],
     "broll_queries": ["tropical island aerial"],
     "mood": "suspense",

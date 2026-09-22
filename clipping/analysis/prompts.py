@@ -211,8 +211,11 @@ Give:
 - keywords: 5-8 English search terms.
 - caption_native / caption_en: a one-line social caption. It may use the hook.
 - reason: one sentence, in English, on why this works as a short clip.
-- hook_beat: the id of the beat carrying the single strongest line. It must be
-  one of the ids below, and it should normally be the first.
+- hook_beats: 1 to 3 beat ids, STRONGEST FIRST, carrying the lines that would
+  make someone stop scrolling. The first one is what the teaser opens on, so it
+  should normally be the clip's first beat. Add a second and a third only if
+  they genuinely land on their own when read with no other context; two strong
+  lines beat three, and one strong line beats two. Every id must appear below.
 - emphasis: 3-6 single words that should be visually emphasised in the
   subtitles. Copy them EXACTLY as they appear in the beats below, including
   their spelling and accents. Choose words that carry meaning: numbers, names,

@@ -69,6 +69,15 @@ FALLBACK_REQUEST_FLOOR_SECONDS = 330.0
 # never-tries bug the floor exists to prevent, reintroduced by rounding.
 GRANT_MARGIN_SECONDS = 1.0
 
+# Passes A and B are judgement calls over material that is already written:
+# which moment is strongest, which five are most different. Sampling wider
+# there buys nothing and costs consistency between windows.
+ANALYTIC_TEMPERATURE = 0.2
+# Pass C is the only pass that WRITES something a person reads -- titles,
+# captions, a one-line hook. At 0.2 it returns competent, flat, largely
+# interchangeable phrasing.
+WRITING_TEMPERATURE = 0.5
+
 
 class AnalysisError(RuntimeError):
     """Analysis produced no usable clips."""
@@ -130,7 +139,8 @@ def analyze(
         f"metadata in {language_name(language)}."
     )
 
-    def ask(system, user, json_schema, name, max_tokens, deadline=None):
+    def ask(system, user, json_schema, name, max_tokens, deadline=None,
+            temperature=ANALYTIC_TEMPERATURE):
         # run_chain's signature is unchanged: it still takes one absolute
         # deadline and neither knows nor cares that a window hands it a smaller
         # one than the run's own.
@@ -141,6 +151,7 @@ def analyze(
             schema=json_schema,
             schema_name=name,
             max_tokens=max_tokens,
+            temperature=temperature,
             keys=keys,
             on_log=on_log,
             deadline=run_deadline if deadline is None else deadline,
@@ -468,6 +479,7 @@ def _pass_c(spans, all_beats, words, cfg, preset, language, ask, on_log, time_fn
                     schema.CLIP_META_SCHEMA,
                     "clip_meta",
                     schema.MAX_TOKENS_CLIP_META,
+                    temperature=WRITING_TEMPERATURE,
                 ) or {}
             except Exception as exc:  # noqa: BLE001 - one clip, not the run
                 on_log(
@@ -520,9 +532,26 @@ def _request_floor(chain, keys):
     return max(timeouts) if timeouts else FALLBACK_REQUEST_FLOOR_SECONDS
 
 
+def _hook_beats_of(meta, span):
+    """The beat ids the metadata pass named, strongest first.
+
+    Tolerant on purpose: a missing key, a null, a string id or a stray float
+    all mean "the model did not usefully answer this", and the caller falls
+    back to the clip's own opening. None of that is worth failing a clip over.
+    """
+    heads = []
+    for raw in (meta or {}).get("hook_beats") or ():
+        try:
+            heads.append(int(raw))
+        except (TypeError, ValueError):
+            continue
+    return heads
+
+
 def _derive_all(meta, span, clip_beats, clip_words, cfg, want_broll):
+    hook_beats = _hook_beats_of(meta, span)
     hook_start, hook_end = derive.hook_window(
-        meta.get("hook_beat", span.b0),
+        hook_beats[0] if hook_beats else span.b0,
         clip_beats,
         clip_start=span.start,
         clip_end=span.end,
@@ -555,7 +584,11 @@ def _derive_all(meta, span, clip_beats, clip_words, cfg, want_broll):
 
     if getattr(cfg, "hook_v2", False):
         items = derive.hook_v2_items(
-            clip_beats, want=int(getattr(cfg, "hook_v2_items", 3) or 3)
+            clip_beats,
+            want=int(getattr(cfg, "hook_v2_items", 3) or 3),
+            # The pass that read the clip names these; the heuristic inside is
+            # only the fallback for when it did not.
+            hook_beats=hook_beats,
         )
         if items:
             derived["hook_v2"] = {
