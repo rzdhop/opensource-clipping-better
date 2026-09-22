@@ -227,3 +227,69 @@ Give:
 
 BEATS:
 {beats_text}"""
+
+
+# ------------------------------------------------------------- voice-over
+
+# What the narrator is doing. These four are ``--voiceover-style``'s choices;
+# test_commentary_prompt.py asserts the two lists have not drifted apart.
+COMMENTARY_STYLES = {
+    "analysis": "Give a sharp analysis or an insightful opinion on why this "
+                "moment matters. Say the thing the speaker did not.",
+    "reaction": "React the way someone watching this for the first time would "
+                "— surprised, impressed, sceptical. Keep it natural, not "
+                "performed.",
+    "lesson": "Draw out one takeaway the viewer can actually use. One, not "
+              "three, and not a summary wearing a lesson's clothes.",
+    "summary": "Give brief, gripping context for what is happening in this "
+               "moment, for someone who just landed on it.",
+}
+
+# Spoken durations, not word counts: the script goes to text-to-speech, and
+# seconds are what has to fit over the clip.
+COMMENTARY_LENGTHS = {
+    "short": "1-2 sentences, about 5-15 seconds when read aloud",
+    "normal": "3-5 sentences, about 20-40 seconds when read aloud",
+    "long": "5-7 sentences, about 40-60 seconds when read aloud",
+}
+
+
+def commentary_prompt(snippet, *, style="analysis", language="id",
+                      length="short"):
+    """The voice-over script prompt. English instructions, any output language.
+
+    This was the last prompt in the project written *in* its output language,
+    and it lived next to the Gemini client rather than with the others. Both
+    facts mattered: instructions in Indonesian pull the answer toward
+    Indonesian whatever the video, and a prompt inside a module that imports
+    ``google.genai`` cannot be tested in the stdlib-only CI environment.
+    """
+    native = language_name(language)
+    chosen = COMMENTARY_STYLES.get(style, COMMENTARY_STYLES["analysis"])
+    duration = COMMENTARY_LENGTHS.get(length, COMMENTARY_LENGTHS["normal"])
+
+    return f"""You are the narrator of a short-form video (Shorts / TikTok / Reels).
+Write the voice-over script that will be read over the clip below.
+
+Write the script in {native}, in the register a {native}-speaking narrator of
+this kind of video would actually use: spoken, direct, a little informal, never
+stiff. Do not write it in English and do not translate word for word.
+
+{chosen}
+Length: {duration}.
+
+RULES
+1. Do not restate the transcript. Add something the clip does not already say:
+   an opinion, a consequence, the context that makes it land.
+2. No greeting, no sign-off. No "hey guys", no "don't forget to subscribe".
+   The first sentence is already the content.
+3. Say nothing you cannot support from the transcript below. Do not invent
+   numbers, names or events.
+4. Output the words to be spoken and nothing else: no headings, no quotation
+   marks around the whole thing, no stage directions, no explanation.
+
+CLIP TRANSCRIPT:
+\"\"\"
+{snippet}
+\"\"\"
+"""
