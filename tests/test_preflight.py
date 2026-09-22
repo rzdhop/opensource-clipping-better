@@ -72,7 +72,7 @@ def test_the_first_link_that_answers_ends_the_probe():
     clock = Clock()
     factory = responder(clock, {"groq": (0.4, REPLY), "nvidia": (0.0, REPLY)})
 
-    live, results = llm.probe_chain(
+    live, results, _value = llm.probe_chain(
         parse_chain("groq/a,nvidia/b"), {"groq": "k", "nvidia": "k"},
         on_log=lambda *a: None, client_factory=factory, time_fn=clock,
     )
@@ -88,7 +88,7 @@ def test_a_dead_first_link_does_not_stop_the_probe():
     dead = TimeoutError("timed out")
     factory = responder(clock, {"groq": (20.0, dead), "nvidia": (1.0, REPLY)})
 
-    live, _ = llm.probe_chain(
+    live, _results, _value = llm.probe_chain(
         parse_chain("groq/a,nvidia/b"), {"groq": "k", "nvidia": "k"},
         on_log=lambda *a: None, client_factory=factory, time_fn=clock,
     )
@@ -101,7 +101,7 @@ def test_a_chain_where_nothing_answers_reports_every_link():
     dead = TimeoutError("timed out")
     factory = responder(clock, {"groq": (20.0, dead), "nvidia": (20.0, dead)})
 
-    live, results = llm.probe_chain(
+    live, results, _value = llm.probe_chain(
         parse_chain("groq/a,nvidia/b"), {"groq": "k", "nvidia": "k"},
         on_log=lambda *a: None, client_factory=factory, time_fn=clock,
     )
@@ -117,14 +117,15 @@ def test_a_keyless_link_is_reported_but_never_contacted():
     clock = Clock()
     factory = responder(clock, {"nvidia": (0.5, REPLY)})
 
-    live, results = llm.probe_chain(
+    live, results, _value = llm.probe_chain(
         parse_chain("groq/a,nvidia/b"), {"nvidia": "k"},
         on_log=lambda *a: None, client_factory=factory, time_fn=clock,
     )
 
     assert live == Link("nvidia", "b")
     assert [provider for provider, _ in factory.seen] == ["nvidia"]
-    assert results[0] == ("groq/a", "no API key", None)
+    # The fourth field records which probe ran; a keyless link runs neither.
+    assert results[0] == ("groq/a", "no API key", None, "skipped")
 
 
 def test_the_probe_is_small_and_unstructured():
@@ -240,3 +241,199 @@ def test_a_failing_link_is_never_removed_from_the_chain():
     before = cfg.llm_chain
     preflight(cfg, {"groq": (20.0, TimeoutError("x")), "nvidia": (0.2, REPLY)})
     assert cfg.llm_chain == before
+
+
+# ---------------------------------------- a probe that proves it can do the work
+
+CANDIDATES_REPLY = SimpleNamespace(
+    choices=[SimpleNamespace(message=SimpleNamespace(
+        content='{"candidates": [{"b0": 0, "b1": 3, "score": 80, '
+                '"gist": "a thing happens", "kind": "story"}]}'
+    ))],
+    usage=SimpleNamespace(total_tokens=120),
+)
+
+EMPTY_REPLY = SimpleNamespace(
+    choices=[SimpleNamespace(message=SimpleNamespace(content='{"candidates": []}'))],
+    usage=SimpleNamespace(total_tokens=9),
+)
+
+
+def _vtt(path, n_sentences=60):
+    """A transcript on disk, so the probe has something real to ask about."""
+    lines = ["WEBVTT", ""]
+    t = 0.0
+    for i in range(n_sentences):
+        start, end = t, t + 2.5
+        lines += [
+            f"{_ts(start)} --> {_ts(end)}",
+            f"Sentence number {i} says something interesting here.",
+            "",
+        ]
+        t = end + 0.3
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return str(path)
+
+
+def _ts(seconds):
+    m, s = divmod(float(seconds), 60)
+    h, m = divmod(int(m), 60)
+    return f"{h:02d}:{m:02d}:{s:06.3f}"
+
+
+class WorkCfg(Cfg):
+    """A chain job that already has its transcript, so no Whisper is pending."""
+
+    platform = "tiktok"
+    topic = ""
+    output_language = "en"
+    analysis_cache = True
+
+
+def test_a_real_probe_is_used_when_a_transcript_is_already_on_hand(tmp_path):
+    cfg = WorkCfg()
+    cfg.transcript_path = _vtt(tmp_path / "t.vtt")
+    cfg.outputs_dir = str(tmp_path)
+
+    clock = Clock()
+    factory = responder(clock, {"groq": (2.0, CANDIDATES_REPLY)})
+    from clipping.config import preflight_chain
+
+    assert preflight_chain(
+        cfg, on_log=lambda *a: None, client_factory=factory, time_fn=clock
+    ) is None
+
+    _provider, kwargs = factory.seen[0]
+    assert kwargs["max_tokens"] > llm.PROBE_MAX_TOKENS
+    assert "BEATS:" in kwargs["messages"][-1]["content"]
+
+
+def test_without_a_transcript_the_cheap_ping_is_still_used(tmp_path):
+    """The 47-minutes-of-Whisper guarantee is what preflight is FOR. On that
+    path there is no transcript yet, so there is nothing real to ask."""
+    cfg = WorkCfg()
+    cfg.transcript_path = None
+    cfg.outputs_dir = str(tmp_path)
+
+    clock = Clock()
+    factory = responder(clock, {"groq": (0.3, REPLY)})
+    from clipping.config import preflight_chain
+
+    assert preflight_chain(
+        cfg, on_log=lambda *a: None, client_factory=factory, time_fn=clock
+    ) is None
+
+    _provider, kwargs = factory.seen[0]
+    assert kwargs["max_tokens"] == llm.PROBE_MAX_TOKENS
+
+
+def test_a_probe_returning_no_candidates_is_still_live(tmp_path):
+    """Zero candidates from one window is an opinion about 45 beats, not
+    evidence the provider is dead."""
+    cfg = WorkCfg()
+    cfg.transcript_path = _vtt(tmp_path / "t.vtt")
+    cfg.outputs_dir = str(tmp_path)
+
+    clock = Clock()
+    from clipping.config import preflight_chain
+
+    assert preflight_chain(
+        cfg, on_log=lambda *a: None,
+        client_factory=responder(clock, {"groq": (1.0, EMPTY_REPLY)}),
+        time_fn=clock,
+    ) is None
+
+
+def test_a_failed_work_probe_falls_back_to_the_ping(tmp_path):
+    """DEC-020: a slow-but-healthy provider is never cut off. A link that
+    cannot do the work in 90s but answers a ping is alive, and the chain is a
+    list the user wrote down -- reporting it dead would be wrong."""
+    cfg = WorkCfg()
+    cfg.transcript_path = _vtt(tmp_path / "t.vtt")
+    cfg.outputs_dir = str(tmp_path)
+
+    clock = Clock()
+    calls = {"n": 0}
+
+    class Completions:
+        def __init__(self, provider):
+            self.provider = provider
+
+        def create(self, **kwargs):
+            calls["n"] += 1
+            if kwargs["max_tokens"] > llm.PROBE_MAX_TOKENS:
+                clock.now += 90.0
+                raise TimeoutError("the work probe timed out")
+            clock.now += 0.4
+            return REPLY
+
+    def factory(link, **kwargs):
+        return SimpleNamespace(
+            chat=SimpleNamespace(completions=Completions(link.provider))
+        )
+
+    from clipping.config import preflight_chain
+
+    assert preflight_chain(
+        cfg, on_log=lambda *a: None, client_factory=factory, time_fn=clock
+    ) is None
+    assert calls["n"] >= 2, "the ping was never tried after the work probe failed"
+
+
+def test_a_dead_link_is_still_reported_not_removed(tmp_path):
+    """DEC-003/023: the chain is a list the user wrote down."""
+    cfg = WorkCfg()
+    cfg.transcript_path = _vtt(tmp_path / "t.vtt")
+    cfg.outputs_dir = str(tmp_path)
+
+    dead = TimeoutError("timed out")
+    clock = Clock()
+    from clipping.config import preflight_chain
+
+    message = preflight_chain(
+        cfg, on_log=lambda *a: None,
+        client_factory=responder(clock, {"groq": (20.0, dead),
+                                         "nvidia": (20.0, dead)}),
+        time_fn=clock,
+    )
+    assert message is not None
+    assert parse_chain(cfg.llm_chain) == [Link("groq", "a"), Link("nvidia", "b")]
+
+
+def test_a_successful_work_probe_seeds_the_scan_cache(tmp_path):
+    """The whole reason to do real work here: the answer is kept, so pass A
+    hits it instead of asking the same question again minutes later."""
+    from clipping.analysis import cache as cache_mod
+    from clipping.config import preflight_chain
+
+    cfg = WorkCfg()
+    cfg.transcript_path = _vtt(tmp_path / "t.vtt")
+    cfg.outputs_dir = str(tmp_path)
+
+    clock = Clock()
+    preflight_chain(
+        cfg, on_log=lambda *a: None,
+        client_factory=responder(clock, {"groq": (2.0, CANDIDATES_REPLY)}),
+        time_fn=clock,
+    )
+
+    stored = (tmp_path / cache_mod.CACHE_FILENAME)
+    assert stored.is_file(), "the probe's answer was thrown away"
+
+
+def test_the_work_probe_is_bounded(tmp_path):
+    """It runs before transcription, so it must not become the delay it exists
+    to prevent -- even against a link whose own timeout is 330s."""
+    cfg = WorkCfg()
+    cfg.llm_chain = "nvidia/b"
+    cfg.transcript_path = _vtt(tmp_path / "t.vtt")
+    cfg.outputs_dir = str(tmp_path)
+
+    clock = Clock()
+    factory = responder(clock, {"nvidia": (1.0, CANDIDATES_REPLY)})
+    from clipping.config import preflight_chain
+
+    preflight_chain(
+        cfg, on_log=lambda *a: None, client_factory=factory, time_fn=clock
+    )
+    assert llm.PROBE_WORK_TIMEOUT_SECONDS <= 120

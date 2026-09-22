@@ -479,29 +479,42 @@ PROBE_TIMEOUT_SECONDS = 45.0
 PROBE_MAX_TOKENS = 8
 PROBE_PROMPT = "Reply with the single word: ok"
 
+# The cap on a *work* probe. It runs before transcription, so it must not become
+# the delay it exists to prevent: NVIDIA's own per-request timeout is 330s, and
+# spending that here to save 47 minutes later is a bad trade when a 90s answer
+# proves the same thing.
+PROBE_WORK_TIMEOUT_SECONDS = 90.0
+
 
 def probe_chain(chain, keys, *, timeout=PROBE_TIMEOUT_SECONDS, on_log=print,
-                client_factory=None, time_fn=time.monotonic):
-    """Ask the chain's keyed links, in order, whether they answer at all.
+                client_factory=None, time_fn=time.monotonic, work=None):
+    """Ask the chain's keyed links, in order, whether they answer.
 
-    Returns ``(live_link, results)``; *live_link* is ``None`` when nothing
-    answered. Stops at the first link that replies, so the cost of a healthy run
-    is one trivial request.
+    Returns ``(live_link, results, value)``; *live_link* is ``None`` when
+    nothing answered, and *value* is the parsed reply to a *work* probe when one
+    succeeded. Stops at the first link that replies, so the cost of a healthy
+    run is one request.
 
-    **What this proves and what it does not.** It proves the endpoint is
-    reachable and generating. It does NOT prove the link can do the work: a
-    model measured here answered this ping in 0.67s and still failed the real
-    pass-A request, spending its whole token budget on a reasoning preamble. It
-    is a liveness check, deliberately not a suitability one -- suitability is
-    what ``tools/bench_llm.py`` is for.
+    **The cheap ping proves liveness, not suitability**, and that gap is real: a
+    model measured here answered it in 0.67s and still failed the real pass-A
+    request, spending its whole token budget on a reasoning preamble. Another
+    answered in seven tokens with ``{"candidates": []}`` on every transcript it
+    was ever shown.
 
-    It exists because the alternative is worse by two orders of magnitude. The
-    job that prompted it transcribed for 47 minutes on CPU and only then
-    discovered that its one keyed provider answered nothing at all.
+    So when the caller can supply *work* — a real request, which it can only do
+    once a transcript exists — the probe asks that instead, and the answer is
+    handed back rather than discarded. What is then proven is that this link
+    does the actual job.
 
-    A plain completion, with no schema and no negotiation: the point is whether
-    anything comes back, and involving the structured-output ladder would make a
-    provider's json_schema support decide a liveness question.
+    **Three things stay true whichever probe runs**, and each is load-bearing:
+
+    * A work probe that fails falls back to the ping before the link is called
+      dead. A provider too slow for a 90s budget but alive on a ping is alive,
+      and DEC-020 forbids cutting off a slow-but-healthy call.
+    * An empty but well-formed answer is LIVE. Zero candidates in one window is
+      an opinion about 45 beats, not evidence about the endpoint.
+    * A failing link is reported, never removed (DEC-003, DEC-023). The chain is
+      a list the user wrote down.
     """
     keys = keys or {}
     results = []
@@ -509,42 +522,101 @@ def probe_chain(chain, keys, *, timeout=PROBE_TIMEOUT_SECONDS, on_log=print,
     for link in chain:
         label = describe(link)
         if not keys.get(link.provider):
-            results.append((label, "no API key", None))
+            results.append((label, "no API key", None, "skipped"))
             continue
 
-        client = LlmClient(
-            link, api_key=keys[link.provider], timeout=timeout,
-            client_factory=client_factory, on_log=on_log,
-        )
-        started = time_fn()
-        try:
-            client.client.chat.completions.create(
-                model=link.model,
-                messages=[{"role": "user", "content": PROBE_PROMPT}],
-                max_tokens=PROBE_MAX_TOKENS,
-                temperature=0,
+        if work is not None:
+            value, elapsed, reason = _work_probe(
+                link, keys[link.provider], work,
+                on_log=on_log, client_factory=client_factory, time_fn=time_fn,
             )
-        except Exception as exc:  # noqa: BLE001 - every failure is just "not this one"
-            elapsed = time_fn() - started
-            reason = f"{type(exc).__name__}: {exc}"
-            results.append((label, reason, elapsed))
+            if reason is None:
+                results.append((label, "ok", elapsed, "work"))
+                on_log(
+                    f"   ✅ {label} answered a real analysis request in "
+                    f"{elapsed:.1f}s."
+                )
+                return link, results, value
+            on_log(
+                f"   … {label} did not complete a real request in "
+                f"{elapsed:.0f}s; trying a plain liveness ping | {reason}"
+            )
+
+        elapsed, reason = _ping_probe(
+            link, keys[link.provider], timeout,
+            on_log=on_log, client_factory=client_factory, time_fn=time_fn,
+        )
+        if reason is not None:
+            results.append((label, reason, elapsed, "ping"))
             on_log(f"   ✖ {label} did not answer after {elapsed:.0f}s | {reason}")
             continue
 
-        elapsed = time_fn() - started
-        results.append((label, "ok", elapsed))
+        results.append((label, "ok", elapsed, "ping"))
         on_log(f"   ✅ {label} answered in {elapsed:.1f}s.")
-        return link, results
+        return link, results, None
 
-    return None, results
+    return None, results, None
+
+
+def _ping_probe(link, api_key, timeout, *, on_log, client_factory, time_fn):
+    """``(elapsed, reason)``; *reason* is ``None`` when the link answered.
+
+    A plain completion, with no schema and no negotiation: the question is
+    whether anything comes back, and involving the structured-output ladder
+    would let a provider's json_schema support decide a liveness question.
+    """
+    client = LlmClient(
+        link, api_key=api_key, timeout=timeout,
+        client_factory=client_factory, on_log=on_log,
+    )
+    started = time_fn()
+    try:
+        client.client.chat.completions.create(
+            model=link.model,
+            messages=[{"role": "user", "content": PROBE_PROMPT}],
+            max_tokens=PROBE_MAX_TOKENS,
+            temperature=0,
+        )
+    except Exception as exc:  # noqa: BLE001 - every failure is just "not this one"
+        return time_fn() - started, f"{type(exc).__name__}: {exc}"
+    return time_fn() - started, None
+
+
+def _work_probe(link, api_key, work, *, on_log, client_factory, time_fn):
+    """``(value, elapsed, reason)`` for one real request against *link*.
+
+    Unlike the ping this goes through ``complete_json``, so the negotiation
+    ladder applies — which is the point. A provider whose ``json_schema`` is
+    refused drops to ``json_object`` and then to prompt-only, and only a link
+    that answers at no rung at all has failed.
+    """
+    client = LlmClient(
+        link, api_key=api_key,
+        timeout=min(PROBE_WORK_TIMEOUT_SECONDS, effective_timeout(link)),
+        client_factory=client_factory, on_log=on_log,
+    )
+    started = time_fn()
+    try:
+        value = client.complete_json(
+            system=work["system"],
+            user=work["user"],
+            schema=work.get("schema"),
+            schema_name=work.get("schema_name", "result"),
+            max_tokens=work.get("max_tokens", 700),
+            temperature=work.get("temperature", 0.2),
+        )
+    except Exception as exc:  # noqa: BLE001 - falls back to the ping
+        return None, time_fn() - started, f"{type(exc).__name__}: {exc}"
+    return value, time_fn() - started, None
 
 
 def preflight_message(results):
     """The one-line-per-link explanation for a chain where nothing answered."""
     lines = []
-    for label, reason, elapsed in results:
+    for label, reason, elapsed, kind in results:
         when = f" after {elapsed:.0f}s" if elapsed is not None else ""
-        lines.append(f"  {label}: {reason}{when}")
+        how = " (real analysis request)" if kind == "work" else ""
+        lines.append(f"  {label}: {reason}{when}{how}")
     return (
         "No provider in the chain answered a liveness check, so the analysis "
         "cannot run. Nothing was transcribed, because that would have been "

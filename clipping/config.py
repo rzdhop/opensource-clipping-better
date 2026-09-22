@@ -996,11 +996,119 @@ def preflight_chain(cfg, on_log=print, **probe_kwargs) -> str | None:
     if not any(link.provider in keys for link in chain):
         return None  # missing_provider_key owns this case and says it better
 
-    on_log("   🔎 Checking the provider chain answers before transcribing...")
-    live, results = llm_mod.probe_chain(chain, keys, on_log=on_log, **probe_kwargs)
-    if live is not None:
-        return None
-    return llm_mod.preflight_message(results)
+    work, seed = _preflight_work(cfg, chain)
+    if work is None:
+        on_log("   🔎 Checking the provider chain answers before transcribing...")
+    else:
+        on_log("   🔎 Asking the provider chain a real analysis request...")
+
+    live, results, value = llm_mod.probe_chain(
+        chain, keys, on_log=on_log, work=work, **probe_kwargs
+    )
+    if live is None:
+        return llm_mod.preflight_message(results)
+
+    # The answer was paid for; keeping it means pass A hits it instead of
+    # asking the same question again a few minutes later.
+    if seed is not None and value is not None:
+        seed(value, on_log)
+    return None
+
+
+def _preflight_work(cfg, chain):
+    """``(work, seed)`` for a real probe, or ``(None, None)`` for the ping.
+
+    A real request needs a transcript, and on the Whisper path there is not one
+    yet — which is the whole point of running before transcription. So this
+    returns work only when the transcript is already on disk: the user supplied
+    one, or DEC-022's saved ``transcript.vtt`` is sitting in the job's own
+    output directory from an earlier run.
+
+    Every failure here falls back to the ping. A preflight check is not allowed
+    to fail a job that would otherwise have run.
+    """
+    path = str(getattr(cfg, "transcript_path", "") or "")
+    outputs_dir = str(getattr(cfg, "outputs_dir", "") or "")
+    if not path and outputs_dir:
+        from clipping.transcript import SAVED_TRANSCRIPT_NAME
+
+        saved = os.path.join(outputs_dir, SAVED_TRANSCRIPT_NAME)
+        if os.path.isfile(saved):
+            path = saved
+    if not path or not os.path.isfile(path):
+        return None, None
+
+    try:
+        from clipping.analysis import analyzer, beats as beats_mod
+        from clipping.analysis import cache as cache_mod
+        from clipping.analysis import presets as presets_mod
+        from clipping.analysis import prompts, schema
+        from clipping.transcript import load_transcript
+
+        _text, data_segmen = load_transcript(
+            path,
+            max_words_per_subtitle=int(getattr(cfg, "max_kata_per_subtitle", 5) or 5),
+            offset=float(getattr(cfg, "transcript_offset", 0.0) or 0.0),
+            dedupe=bool(getattr(cfg, "transcript_dedupe", True)),
+        )
+        all_beats = beats_mod.build_beats(data_segmen)
+        if not all_beats:
+            return None, None
+
+        ranges = beats_mod.windows(
+            all_beats,
+            size=analyzer.WINDOW_BEATS,
+            overlap=analyzer.WINDOW_OVERLAP,
+        )
+        if not ranges:
+            return None, None
+
+        lo, hi = ranges[0]
+        beats_text = beats_mod.render_beats(all_beats, lo, hi)
+        preset = presets_mod.get(getattr(cfg, "platform", presets_mod.DEFAULT_PRESET))
+        work = {
+            "system": prompts.SYSTEM,
+            "user": prompts.candidates_prompt(
+                beats_text,
+                max_candidates=analyzer.MAX_CANDIDATES_PER_WINDOW,
+                preset=preset,
+                language=_probe_language(cfg),
+                total_seconds=all_beats[-1]["end"],
+                topic=str(getattr(cfg, "topic", "") or "").strip(),
+            ),
+            "schema": schema.CANDIDATES_SCHEMA,
+            "schema_name": "candidates",
+            "max_tokens": schema.MAX_TOKENS_CANDIDATES,
+        }
+    except Exception:  # noqa: BLE001 - the ping is always available
+        return None, None
+
+    def seed(value, on_log):
+        try:
+            store = analyzer._build_cache(cfg, chain, preset)
+            if store is None:
+                return
+            found = analyzer._clean_candidates(value, lo, hi)
+            store.put(beats_text, found)
+            if store.save():
+                on_log(
+                    f"   💾 Kept the probe's {len(found)} candidate(s); the scan "
+                    f"will not ask for window 1 again."
+                )
+        except Exception:  # noqa: BLE001 - a cache is never a gate
+            pass
+
+    return work, seed
+
+
+def _probe_language(cfg):
+    """The output language, when it was set explicitly. Never detected here.
+
+    Detection needs the transcript read and scored, and the probe's prompt only
+    uses this for one line of context. ``None`` simply omits that line.
+    """
+    explicit = str(getattr(cfg, "output_language", "") or "").strip().lower()
+    return explicit if explicit and explicit != "auto" else None
 
 
 def build_config(argv: list[str] | None = None) -> SimpleNamespace:
