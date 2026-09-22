@@ -450,6 +450,16 @@ def _build_parser() -> argparse.ArgumentParser:
         help="YOLO face model version/size (8n, 8s, 8m, 8n_v2, 9c). Only active if --face-detector yolo",
     )
     p.add_argument(
+        "--topic",
+        default="",
+        help=(
+            "One line of context about the video, e.g. 'home espresso gear "
+            "review'. Given to every scan window so it knows what it is "
+            "looking at when judging whether a moment stands on its own. "
+            "Optional; nothing is asked of a model to obtain it."
+        ),
+    )
+    p.add_argument(
         "--ai-provider",
         choices=["chain", "gemini", "nvidia", "openai_compat"],
         default=AI_PROVIDER,
@@ -1145,6 +1155,7 @@ def build_config(argv: list[str] | None = None) -> SimpleNamespace:
         # AI
         ai_provider=args.ai_provider,
         platform=args.platform,
+        topic=args.topic,
         output_language=args.output_language,
         dry_run_analysis=args.dry_run_analysis,
         api_key_nvidia=os.environ.get("NVIDIA_API_KEY", ""),

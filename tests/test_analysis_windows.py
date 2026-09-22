@@ -807,3 +807,67 @@ def test_a_ranking_without_topics_at_all_still_works():
     ]
     clips, _ = run(answers, cfg=cfg)
     assert len(clips) == 2
+
+
+# ------------------------------------------------ what the scan prompt can see
+
+def _pass_a_call(calls):
+    return next(c for c in calls if c["schema_name"] == "candidates")
+
+
+def _scan_prompt(cfg=None, segments=None):
+    runner = scripted(
+        candidates((0, 3, 90)),
+        candidates((45, 48, 85)),
+        {"ranked": [{"id": 0, "score": 95, "topic": "a"},
+                    {"id": 1, "score": 80, "topic": "b"}]},
+        META, META,
+    )
+    analyzer.analyze(
+        segments or segmen(), cfg or Cfg(), chain=[("groq", "m")],
+        keys={"groq": "k"}, on_log=lambda _line: None, run_chain=runner,
+    )
+    return _pass_a_call(runner.calls)["user"]
+
+
+def test_the_scan_prompt_puts_the_beats_before_the_rules():
+    """Instructions read against material already seen beat instructions read
+    against nothing."""
+    prompt = _scan_prompt()
+    assert prompt.index("BEATS:") < prompt.index("RULES")
+
+
+def test_the_scan_prompt_states_the_video_context():
+    """Every window judged "standalone clarity" without knowing what the video
+    was, how long it ran, or what language it was in."""
+    cfg = Cfg()
+    cfg.output_language = "fr"
+    prompt = _scan_prompt(cfg=cfg)
+    assert "French" in prompt
+    assert "minutes long" in prompt
+
+
+def test_a_topic_reaches_the_scan_prompt():
+    cfg = Cfg()
+    cfg.topic = "home espresso gear"
+    assert "home espresso gear" in _scan_prompt(cfg=cfg)
+
+
+def test_no_topic_leaves_no_dangling_label():
+    """An empty --topic must not print a header with nothing under it."""
+    prompt = _scan_prompt()
+    assert "home espresso" not in prompt
+    assert "WHAT IT IS ABOUT" not in prompt
+
+
+def test_the_scan_prompt_calibrates_the_score():
+    """A score given with no scale is a number the re-rank cannot trust."""
+    prompt = _scan_prompt()
+    assert "SCORING" in prompt
+    assert "90-100" in prompt
+
+
+def test_the_scan_prompt_shows_a_good_and_a_bad_example():
+    prompt = _scan_prompt()
+    assert "GOOD" in prompt and "BAD" in prompt
+    assert "do not look for them above" in prompt

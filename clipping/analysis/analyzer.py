@@ -80,6 +80,11 @@ class AnalysisError(RuntimeError):
 # was "all housekeeping".
 ScanStats = namedtuple("ScanStats", "total answered failed skipped last_error")
 
+# What every scan window is told about the video it is a part of. All three
+# are free: two are already known to Python and the third is typed by the
+# uploader, so none of this costs a request.
+VideoContext = namedtuple("VideoContext", "language total_seconds topic")
+
 
 def _lost(stats):
     """Windows that contributed nothing because they never ran."""
@@ -150,8 +155,15 @@ def analyze(
         min(run_deadline, started + floor),
     )
 
+    context = VideoContext(
+        language=language,
+        total_seconds=all_beats[-1]["end"],
+        topic=str(getattr(cfg, "topic", "") or "").strip(),
+    )
+
     candidates, stats = _pass_a(
-        all_beats, preset, want, ask, on_log, time_fn, pass_a_deadline, floor
+        all_beats, preset, want, ask, on_log, time_fn, pass_a_deadline, floor,
+        context=context,
     )
     if stats.answered == 0:
         # Not a verdict on the video: nothing was ever read. Saying otherwise
@@ -202,7 +214,8 @@ def analyze(
 
 # --------------------------------------------------------------------- passes
 
-def _pass_a(all_beats, preset, want, ask, on_log, time_fn, deadline, floor):
+def _pass_a(all_beats, preset, want, ask, on_log, time_fn, deadline, floor,
+           context=None):
     """Scan each window for candidate moments, each inside its own time share.
 
     DEC-027 states the invariant this restores: *a failure is local -- a failed
@@ -263,6 +276,12 @@ def _pass_a(all_beats, preset, want, ask, on_log, time_fn, deadline, floor):
                     beats_text,
                     max_candidates=MAX_CANDIDATES_PER_WINDOW,
                     preset=preset,
+                    # The same one-line preface on every window: a window that
+                    # does not know what the video is cannot judge whether a
+                    # moment stands alone outside it.
+                    language=context.language if context else None,
+                    total_seconds=context.total_seconds if context else None,
+                    topic=context.topic if context else None,
                 ),
                 schema.CANDIDATES_SCHEMA,
                 "candidates",

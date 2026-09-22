@@ -324,3 +324,15 @@ def test_dedupe_is_disabled_only_for_a_saved_transcript(upload_file, job_outputs
     name = upload_file("given.vtt", SAVED_VTT)
     cfg = build_config_from_payload({"transcript_filename": name}, "job456")
     assert cfg.transcript_dedupe is True
+
+
+def test_topic_round_trips(job_id):
+    cfg = build_config_from_payload(
+        {"upload_filename": "video.mp4", "topic": "home espresso gear"}, job_id
+    )
+    assert cfg.topic == "home espresso gear"
+
+
+def test_topic_defaults_to_empty(job_id):
+    cfg = build_config_from_payload({"upload_filename": "video.mp4"}, job_id)
+    assert cfg.topic == ""

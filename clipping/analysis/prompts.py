@@ -23,7 +23,7 @@ from .langdetect import language_name
 # Bumped whenever the wording of any prompt below changes in a way that could
 # change an answer. Anything caching a reply keys on it, so a reworded prompt
 # invalidates what the old one produced instead of serving it back.
-PROMPT_VERSION = "a2"
+PROMPT_VERSION = "a3"
 
 SYSTEM = (
     "You are a short-form video editor who has published thousands of clips on "
@@ -35,51 +35,104 @@ SYSTEM = (
 
 # --------------------------------------------------------------- pass A
 
-def candidates_prompt(beats_text, *, max_candidates=6, preset=None):
-    """Ask for the strongest self-contained moments in one window of beats."""
+def video_context(*, language=None, total_seconds=None, topic=None):
+    """The one-line preface telling a window what it is part of.
+
+    Each window used to judge "standalone clarity" knowing nothing about the
+    video: not its length, not its language, not its subject. Everything here
+    is either already known to Python or typed by the uploader — no request is
+    made to find any of it out.
+
+    Returns "" when nothing is known, so an unset ``--topic`` cannot leave a
+    heading with nothing under it.
+    """
+    bits = []
+    if total_seconds:
+        bits.append(f"{float(total_seconds) / 60:.0f} minutes long")
+    if language:
+        bits.append(f"spoken in {language_name(language)}")
+
+    out = f"VIDEO: {', '.join(bits)}.\n" if bits else ""
+    if topic:
+        out += f"WHAT IT IS ABOUT, per the uploader: {topic}\n"
+    return out
+
+
+def candidates_prompt(beats_text, *, max_candidates=6, preset=None,
+                      language=None, total_seconds=None, topic=None):
+    """Ask for the strongest self-contained moments in one window of beats.
+
+    The beats come before the instructions. Rules read against material the
+    model has already seen are rules about something; the same rules read first
+    are rules about nothing, and small models drop them.
+    """
     window = (
         f"Each clip will be cut to roughly {preset.min:.0f}-{preset.max:.0f} "
         f"seconds, so prefer moments that are naturally about "
-        f"{preset.target:.0f} seconds long.\n"
+        f"{preset.target:.0f} seconds long."
         if preset is not None
-        else ""
+        else "Prefer moments that are naturally under a minute and a half."
     )
-    return f"""Below is part of a video transcript, split into numbered beats. Each line is:
+    context = video_context(
+        language=language, total_seconds=total_seconds, topic=topic
+    )
+
+    return f"""{context}Below is one part of its transcript, split into numbered beats. Each line is:
 
 #<id> [<start>-<end>] <what is said>
 
-Find the moments that would work as standalone short-form clips.
-
-A moment worth clipping has all four of these:
-- A HOOK. Something in its first sentence makes a stranger stop scrolling: a
-  claim, a number, a question, a confession, conflict, or an unexpected turn.
-- TENSION. It sets something up that the viewer wants resolved.
-- A PAYOFF. It resolves inside the clip. A moment that pays off later, or never,
-  is not a clip.
-- STANDALONE CLARITY. It makes sense to someone who has not seen the rest of the
-  video. If it depends on an earlier explanation, an unnamed "he", or a visual
-  you cannot hear, it is not a clip.
-
-Reject, however interesting they sound: introductions, sponsor reads, housekeeping,
-lists that never finish, and anything whose point arrives after the beats shown.
-
-{window}Score each moment 1-100 on how likely a stranger is to watch it to the end and
-send it to someone. Be harsh: most of a transcript is not clippable. Returning
-two strong moments is better than six weak ones, and returning none is a valid
-answer for a window that is all housekeeping.
-
-Choose at most {max_candidates} moments. For each, give:
-- b0: the beat id where it should start, which must be where the hook is spoken
-- b1: the beat id where it should end, which must be where it pays off
-- score: 1-100
-- gist: at most 12 words, in English, saying what happens
-- kind: one of story, insight, conflict, howto, punchline
-
-Use only beat ids that appear below. Do not invent timestamps; the ids are all
-you need to give.
-
 BEATS:
-{beats_text}"""
+{beats_text}
+
+TASK
+Find the moments in the beats above that would work as standalone short-form
+clips. Use only beat ids that appear above. Do not invent timestamps; the ids
+are all you need to give.
+
+RULES
+1. A moment must HOOK. Something in its first sentence makes a stranger stop
+   scrolling: a claim, a number, a question, a confession, conflict, or an
+   unexpected turn.
+2. It must build TENSION — set something up that the viewer wants resolved.
+3. It must PAY OFF inside itself. A moment that pays off later, or never, is
+   not a clip.
+4. It must STAND ALONE. It makes sense to someone who has not seen the rest of
+   the video. If it depends on an earlier explanation, an unnamed "he", or a
+   visual you cannot hear, it is not a clip.
+5. b0 must be the beat where the hook is spoken, and it must be the start of a
+   sentence, not the middle of one.
+6. Reject, however interesting they sound: introductions, sponsor reads,
+   housekeeping, lists that never finish, and anything whose point arrives
+   after the beats shown.
+7. {window}
+8. Returning two strong moments is better than six weak ones. Returning none is
+   a valid answer for a window that is all housekeeping. Most of a transcript
+   is not clippable.
+
+WORKED EXAMPLES (invented for calibration — do not look for them above)
+GOOD  b0 opens "I lost forty thousand dollars in one afternoon." and b1 ends
+      "...and the bank said it was my own fault."
+      score 88, kind story, gist "loses $40,000 and is blamed for it"
+      Why: the first line is a number and a confession, and the thing it opens
+      is closed before the clip ends.
+BAD   b0 opens "So that's the second thing I wanted to mention." and b1 ends
+      "...which we'll get into properly next week."
+      Why: it opens mid-list, it points at something the viewer has not heard,
+      and its payoff is outside the clip. Score it below 50, or omit it.
+
+SCORING
+90-100    a stranger watches to the end and sends it to someone
+70-89     a stranger watches to the end
+50-69     watchable, but nothing makes it travel
+below 50  do not return it at all
+
+OUTPUT
+Choose at most {max_candidates} moments. For each give:
+- b0: the beat id where it starts, where the hook is spoken
+- b1: the beat id where it ends, where it pays off
+- score: 1-100, on the scale above
+- gist: at most 12 words, in English, saying what happens
+- kind: one of story, insight, conflict, howto, punchline"""
 
 
 # --------------------------------------------------------------- pass B

@@ -237,6 +237,7 @@ def build_config_from_payload(
         stt_chain=payload.get("stt_chain", "") or "",
         detected_language="",
         platform=payload.get("platform", "auto"),
+        topic=payload.get("topic", ""),
         output_language=payload.get("output_language", "auto"),
         dry_run_analysis=payload.get("dry_run_analysis", False),
         api_key_nvidia=env.get("NVIDIA_API_KEY", os.environ.get("NVIDIA_API_KEY", "")),

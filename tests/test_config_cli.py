@@ -401,3 +401,13 @@ def test_missing_provider_key_ignores_the_other_providers_key(video):
     cfg.api_key_gemini = ""
 
     assert missing_provider_key(cfg) is None
+
+
+def test_topic_defaults_to_empty_and_is_passed_through(tmp_path):
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"x")
+
+    assert build_config(["--video", str(video)]).topic == ""
+    assert build_config(
+        ["--video", str(video), "--topic", "home espresso gear"]
+    ).topic == "home espresso gear"

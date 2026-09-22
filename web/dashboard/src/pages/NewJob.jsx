@@ -176,6 +176,9 @@ function NewJob() {
   // landed and it drives clipping/analysis/snap.py, but the page never sent
   // it -- so every job created here was 'auto' (20-75s) whatever you wanted.
   const [platform, setPlatform] = useState('auto')
+  // One line of context handed to every scan window. Optional, and free --
+  // no request is made to work it out.
+  const [topic, setTopic] = useState('')
   const [ratio, setRatio] = useState('9:16')
   const [fontStyle, setFontStyle] = useState('HORMOZI')
   const [whisperModel, setWhisperModel] = useState('large-v3')
@@ -240,6 +243,7 @@ function NewJob() {
       if (config.clips !== undefined) setClips(config.clips)
       if (config.ratio !== undefined) setRatio(config.ratio)
       if (config.platform !== undefined) setPlatform(config.platform)
+      if (config.topic !== undefined) setTopic(config.topic)
       if (config.render_height !== undefined) setRenderHeight(config.render_height)
       if (config.words_per_sub !== undefined) setWordsPerSub(config.words_per_sub)
       if (config.hook_duration !== undefined) setHookDuration(config.hook_duration)
@@ -344,6 +348,7 @@ function NewJob() {
         clips,
         ratio,
         platform,
+        topic,
         render_height: renderHeight,
         words_per_sub: Number(wordsPerSub),
         hook_duration: Number(hookDuration),
@@ -655,6 +660,23 @@ function NewJob() {
                 The window each clip is snapped into. A moment shorter than the
                 minimum is grown into neighbouring sentences, or dropped if it
                 cannot reach it.
+              </p>
+            </div>
+            <div className="form-group">
+              <label className="form-label">What is this video about? (optional)</label>
+              <input
+                className="form-input"
+                type="text"
+                maxLength={120}
+                placeholder="e.g. home espresso gear review"
+                value={topic}
+                onChange={(e) => setTopic(e.target.value)}
+              />
+              <p className="form-hint">
+                One line, handed to the analysis so it knows what it is reading.
+                It judges each moment on whether it stands on its own to someone
+                who has not seen the rest, and that is easier when it knows the
+                subject. Costs nothing and asks no model.
               </p>
             </div>
             <div className="form-group">
