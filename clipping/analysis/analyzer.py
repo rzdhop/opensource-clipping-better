@@ -23,6 +23,7 @@ Imports nothing heavier than the standard library plus the provider layer.
 
 from __future__ import annotations
 
+import string
 import time
 from collections import namedtuple
 
@@ -182,7 +183,9 @@ def analyze(
             f"{preset.name} duration window ({preset.min:.0f}-{preset.max:.0f}s)."
         )
 
-    chosen = _pass_b(spans, want, ask, on_log, time_fn, run_deadline)
+    chosen = _pass_b(
+        spans, want, ask, on_log, time_fn, run_deadline, all_beats=all_beats
+    )
     clips = _pass_c(
         chosen, all_beats, words, cfg, preset, language, ask, on_log, time_fn,
         run_deadline, floor,
@@ -284,7 +287,66 @@ def _pass_a(all_beats, preset, want, ask, on_log, time_fn, deadline, floor):
     return candidates, ScanStats(len(ranges), answered, failed, skipped, last_error)
 
 
-def _pass_b(spans, want, ask, on_log, time_fn, deadline):
+HOOK_LINE_WORDS = 15
+
+
+def _hook_line(beat):
+    """The opening words of *beat*, truncated for the re-rank's candidate list.
+
+    Truncated rather than summarised: the point is to show the model the words
+    a viewer actually hears first, and a summary of a hook is not a hook.
+    """
+    words = str((beat or {}).get("text", "")).split()
+    line = " ".join(words[:HOOK_LINE_WORDS])
+    return f"{line}…" if len(words) > HOOK_LINE_WORDS else line
+
+
+def _normalize_topic(value):
+    return str(value or "").strip().strip(string.punctuation).lower()
+
+
+def _enforce_variety(entries, want, on_log):
+    """Demote picks that repeat an earlier pick's topic, then backfill.
+
+    The prompt asks for variety; models agree and then return five versions of
+    the strongest point anyway. This makes it mechanical.
+
+    Demotion, not deletion, is what keeps DEC-021 true: a video genuinely about
+    one subject still yields the number of clips that was asked for. A repeat
+    only loses its slot to something different — never to nothing.
+    """
+    seen = set()
+    picked = []
+    demoted = []
+
+    for entry in entries:
+        topic = _normalize_topic(entry.get("topic"))
+        # A blank topic is an unknown, not a match. Two unknowns are not the
+        # same subject, and treating them as one would silently drop a clip
+        # every time a model omitted the field.
+        if topic and topic in seen:
+            demoted.append(entry)
+            continue
+        if topic:
+            seen.add(topic)
+        picked.append(entry)
+
+    if len(picked) < want and demoted:
+        backfilled = demoted[: want - len(picked)]
+        on_log(
+            f"   ↷ {len(backfilled)} pick(s) repeated a topic and were demoted, "
+            f"not dropped — there was nothing else to promote."
+        )
+        picked.extend(backfilled)
+    elif demoted:
+        on_log(
+            f"   ↷ {len(demoted)} pick(s) repeated a topic already covered and "
+            f"were demoted in favour of a different subject."
+        )
+    return picked
+
+
+def _pass_b(spans, want, ask, on_log, time_fn, deadline, all_beats=None):
     """Rank every surviving candidate against the whole video's field.
 
     The description comes off the span itself. It used to be looked up in a
@@ -296,12 +358,17 @@ def _pass_b(spans, want, ask, on_log, time_fn, deadline):
         on_log(f"   [2/3] {len(spans)} candidate(s) survived snapping; taking all.")
         return sorted(spans, key=lambda s: -s.score)[:want]
 
+    by_id = {beat["i"]: beat for beat in all_beats or ()}
     lines = []
     for index, span in enumerate(spans):
-        lines.append(
+        line = (
             f"#{index} [{span.end - span.start:.0f}s] score={span.score} "
-            f"{span.kind or 'clip'} {span.gist}".rstrip()
+            f"{span.kind or 'clip'} | {span.gist}"
         )
+        hook = _hook_line(by_id.get(span.b0))
+        if hook:
+            line += f' | hook: "{hook}"'
+        lines.append(line)
 
     on_log(f"   [2/3] Ranking {len(spans)} candidates for {want} slot(s)...")
     try:
@@ -316,7 +383,10 @@ def _pass_b(spans, want, ask, on_log, time_fn, deadline):
         on_log(f"   ⚠️ Ranking failed, falling back to the scan's own scores | {exc}")
         return sorted(spans, key=lambda s: -s.score)[:want]
 
-    ordered = []
+    # Every usable entry is collected before anything is cut, because the
+    # variety rule below can only demote a repeat if it has something further
+    # down the ranking to promote in its place.
+    valid = []
     seen = set()
     for entry in (answer or {}).get("ranked", []):
         try:
@@ -326,9 +396,14 @@ def _pass_b(spans, want, ask, on_log, time_fn, deadline):
         if index in seen or not 0 <= index < len(spans):
             continue
         seen.add(index)
-        ordered.append(spans[index]._replace(score=int(entry.get("score", 0) or 0)))
-        if len(ordered) >= want:
-            break
+        # ``_span`` carries the position in *spans* through the variety pass,
+        # which reorders the entries and must not lose what each one points at.
+        valid.append(dict(entry, _span=index))
+
+    ordered = [
+        spans[entry["_span"]]._replace(score=int(entry.get("score", 0) or 0))
+        for entry in _enforce_variety(valid, want, on_log)[:want]
+    ]
 
     if not ordered:
         on_log("   ⚠️ Ranking named no usable candidate; using the scan's scores.")

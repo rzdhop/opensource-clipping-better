@@ -56,6 +56,10 @@ CANDIDATES_SCHEMA = _obj(
 
 # ----------------------------------------------------------------- pass B
 
+# ``topic`` is not editorial output -- nothing renders it. It exists so the
+# "prefer variety" instruction can be enforced in Python instead of trusted:
+# two picks that name the same subject are the repetition the rule is about,
+# and a model that is told to avoid repetition still reliably produces it.
 RANKED_SCHEMA = _obj(
     {
         "ranked": {
@@ -64,6 +68,7 @@ RANKED_SCHEMA = _obj(
                 {
                     "id": {"type": "integer"},
                     "score": {"type": "integer", "minimum": 1, "maximum": 100},
+                    "topic": {"type": "string"},
                 }
             ),
         }
@@ -95,5 +100,7 @@ CLIP_META_SCHEMA = _obj(
 # a candidate costs ~45 tokens and a window yields at most 6, a ranking entry
 # costs ~12, and a metadata object measured ~280.
 MAX_TOKENS_CANDIDATES = 700
-MAX_TOKENS_RANKED = 400
+# Raised from 400 when ``topic`` was added: one lowercase word costs ~4 tokens
+# and the re-rank can see every surviving candidate in the video.
+MAX_TOKENS_RANKED = 600
 MAX_TOKENS_CLIP_META = 900

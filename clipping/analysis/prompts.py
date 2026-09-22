@@ -20,6 +20,11 @@ from __future__ import annotations
 
 from .langdetect import language_name
 
+# Bumped whenever the wording of any prompt below changes in a way that could
+# change an answer. Anything caching a reply keys on it, so a reworded prompt
+# invalidates what the old one produced instead of serving it back.
+PROMPT_VERSION = "a2"
+
 SYSTEM = (
     "You are a short-form video editor who has published thousands of clips on "
     "TikTok, Reels and Shorts. You judge a moment by whether a stranger "
@@ -80,27 +85,38 @@ BEATS:
 # --------------------------------------------------------------- pass B
 
 def rerank_prompt(lines, *, want):
-    """Rank every surviving candidate from the whole video against each other."""
+    """Rank every surviving candidate from the whole video against each other.
+
+    The candidates come first here, as in the scan prompt: the instructions are
+    about material the model has already read by the time it reaches them.
+    """
     return f"""These are the candidate moments found across an entire video. Each line is:
 
-#<id> [<duration>s] score=<the score it was given> <kind> <gist>
+#<id> [<duration>s] score=<the score it was given> <kind> | <gist> | hook: "<the words the clip opens on>"
+
+CANDIDATES:
+{lines}
 
 Pick the {want} best and rank them, best first.
 
-Judge them against each other, not in isolation. In particular:
-- Prefer variety. Five versions of the same point is worse than five different
-  points, even if that one point is the strongest thing in the video.
-- Prefer a moment that stands completely alone over one that is slightly
-  stronger but needs context.
-- A high score given in isolation is a hint, not an instruction. You are seeing
-  the whole video for the first time; the earlier scores were not.
+Judge them against each other, not in isolation:
+1. The hook line decides almost everything. A stranger sees three seconds before
+   deciding. A weaker moment that opens on a number, a claim or a confession
+   beats a stronger one that opens on "so anyway, the other thing is".
+2. Prefer a moment that stands completely alone over one that is slightly
+   stronger but needs context.
+3. A high score given in isolation is a hint, not an instruction. You are seeing
+   the whole video for the first time; the earlier scores were not.
 
-Return at most {want} entries: the candidate id, and a final score 1-100
-reflecting its rank among all of these. If fewer than {want} are genuinely worth
-publishing, return fewer. Do not invent ids.
+For each pick give:
+- id: the candidate id, exactly as written above
+- score: 1-100, reflecting its rank among all of these
+- topic: ONE lowercase word for what it is about ("pricing", "burnout",
+  "latency"). Two clips about the same thing must get the same word. This is
+  how repetition is detected, so be literal: name the subject, not the emotion.
 
-CANDIDATES:
-{lines}"""
+Return at most {want} entries. If fewer than {want} are genuinely worth
+publishing, return fewer. Do not invent ids."""
 
 
 # --------------------------------------------------------------- pass C

@@ -679,3 +679,131 @@ def test_pass_c_is_told_what_kind_of_moment_it_is():
     assert metas, "no metadata request was made"
     assert all("picked as a story" in c["user"] for c in metas)
     assert all("a thing happens" in c["user"] for c in metas)
+
+
+# ``viral_score`` prefers the metadata pass's own score (adapter.py:92), so the
+# shared META would mask which candidate pass B actually picked. This fixture
+# omits it, leaving the span's score -- the one the ranking wrote -- visible.
+META_NO_SCORE = {k: v for k, v in META.items() if k != "score"}
+
+# --------------------------------------------------- what the re-rank can see
+
+def test_pass_b_is_shown_each_candidates_opening_line():
+    """The hook line is what decides whether a stranger keeps watching, and it
+    was the one thing the ranking pass could not see."""
+    runner = scripted(
+        candidates((0, 3, 90), (15, 18, 85), (30, 33, 70)),
+        candidates((45, 48, 60)),
+        {"ranked": [{"id": 0, "score": 95, "topic": "alpha"},
+                    {"id": 1, "score": 80, "topic": "beta"},
+                    {"id": 2, "score": 70, "topic": "gamma"}]},
+        META, META, META,
+    )
+    analyzer.analyze(
+        segmen(), Cfg(), chain=[("groq", "m")], keys={"groq": "k"},
+        on_log=lambda _line: None, run_chain=runner,
+    )
+
+    rerank = _pass_b_call(runner.calls)["user"]
+    assert "hook:" in rerank
+    # segmen() writes "sentence number N says something interesting here."
+    assert "sentence number" in rerank
+
+
+def test_a_long_hook_line_is_truncated():
+    long_words = " ".join(f"word{i}" for i in range(60))
+    segments = [
+        {"start": 0.0, "end": 1.0,
+         "words": [{"word": w, "start": i * 0.3, "end": i * 0.3 + 0.25}
+                   for i, w in enumerate(long_words.split())]}
+    ]
+    line = analyzer._hook_line({"text": long_words})
+    assert line.endswith("…")
+    assert len(line.split()) <= 16  # 15 words plus the ellipsis marker
+
+
+# ------------------------------------------------------- variety, in Python
+
+def test_a_repeated_topic_is_demoted_below_a_fresh_one():
+    """Five versions of one point is worse than five different points, and the
+    instruction alone does not reliably produce that."""
+    cfg = Cfg()
+    cfg.jumlah_clip = 2
+    answers = [
+        candidates((0, 3, 95), (15, 18, 90), (30, 33, 60)),
+        candidates((45, 48, 55)),
+        {"ranked": [{"id": 0, "score": 95, "topic": "pricing"},
+                    {"id": 1, "score": 90, "topic": "pricing"},
+                    {"id": 2, "score": 60, "topic": "burnout"}]},
+        META_NO_SCORE, META_NO_SCORE,
+    ]
+    clips, logs = run(answers, cfg=cfg)
+
+    # The second pricing clip loses its slot to the one about something else.
+    assert len(clips) == 2
+    assert [c["viral_score"] for c in clips] == [95, 60]
+    assert any("demoted" in line for line in logs)
+
+
+def test_a_topic_is_matched_case_and_punctuation_insensitively():
+    cfg = Cfg()
+    cfg.jumlah_clip = 2
+    answers = [
+        candidates((0, 3, 95), (15, 18, 90), (30, 33, 60)),
+        candidates((45, 48, 55)),
+        {"ranked": [{"id": 0, "score": 95, "topic": "Pricing."},
+                    {"id": 1, "score": 90, "topic": "  pricing  "},
+                    {"id": 2, "score": 60, "topic": "burnout"}]},
+        META_NO_SCORE, META_NO_SCORE,
+    ]
+    clips, _ = run(answers, cfg=cfg)
+    assert [c["viral_score"] for c in clips] == [95, 60]
+
+
+def test_variety_never_returns_fewer_clips_than_asked_for():
+    """DEC-021: a supply limit is not a silent clip-count change. A video
+    genuinely about one subject still yields what was asked for."""
+    cfg = Cfg()
+    cfg.jumlah_clip = 3
+    answers = [
+        candidates((0, 3, 95), (15, 18, 90), (30, 33, 85)),
+        candidates((45, 48, 80)),
+        {"ranked": [{"id": 0, "score": 95, "topic": "pricing"},
+                    {"id": 1, "score": 90, "topic": "pricing"},
+                    {"id": 2, "score": 85, "topic": "pricing"}]},
+        META, META, META,
+    ]
+    clips, logs = run(answers, cfg=cfg)
+    assert len(clips) == 3
+    assert any("demoted" in line for line in logs)
+
+
+def test_a_missing_topic_is_not_treated_as_a_duplicate():
+    """Two blanks are not the same subject; they are two unknowns."""
+    cfg = Cfg()
+    cfg.jumlah_clip = 2
+    answers = [
+        candidates((0, 3, 95), (15, 18, 90), (30, 33, 60)),
+        candidates((45, 48, 55)),
+        {"ranked": [{"id": 0, "score": 95, "topic": ""},
+                    {"id": 1, "score": 90, "topic": ""},
+                    {"id": 2, "score": 60, "topic": "burnout"}]},
+        META_NO_SCORE, META_NO_SCORE,
+    ]
+    clips, _ = run(answers, cfg=cfg)
+    assert len(clips) == 2
+    assert [c["viral_score"] for c in clips] == [95, 90]
+
+
+def test_a_ranking_without_topics_at_all_still_works():
+    """An older or weaker model that omits the field must not break the run."""
+    cfg = Cfg()
+    cfg.jumlah_clip = 2
+    answers = [
+        candidates((0, 3, 95), (15, 18, 90), (30, 33, 60)),
+        candidates((45, 48, 55)),
+        {"ranked": [{"id": 0, "score": 95}, {"id": 1, "score": 90}]},
+        META, META,
+    ]
+    clips, _ = run(answers, cfg=cfg)
+    assert len(clips) == 2
