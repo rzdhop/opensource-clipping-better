@@ -245,6 +245,7 @@ def build_config_from_payload(
         topic=payload.get("topic", ""),
         # Per-job outputs directory, so the store is this job's own.
         analysis_cache=payload.get("analysis_cache", True),
+        analysis_workers=payload.get("analysis_workers", 1),
         output_language=payload.get("output_language", "auto"),
         dry_run_analysis=payload.get("dry_run_analysis", False),
         api_key_nvidia=env.get("NVIDIA_API_KEY", os.environ.get("NVIDIA_API_KEY", "")),

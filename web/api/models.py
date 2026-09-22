@@ -209,6 +209,10 @@ class JobCreateRequest(BaseModel):
     topic: str = ""
     # Reuse this job's own scan answers on a rerun. Off re-asks the model.
     analysis_cache: bool = True
+    # Transcript windows scanned at once. Default 1, because the provider this
+    # ships with serialises concurrent requests on one key and measured SLOWER
+    # at 2 -- see clipping/analysis/analyzer.DEFAULT_ANALYSIS_WORKERS.
+    analysis_workers: int = Field(1, ge=1, le=3)
     # "auto" follows the transcript's own language.
     output_language: str = "auto"
     # Run the analysis, save it, and stop before any ffmpeg work.

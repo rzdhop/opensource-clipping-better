@@ -141,6 +141,23 @@ function UploadProgress({ progress, startedAt }) {
   )
 }
 
+// ASS inline colours are &HBBGGRR& -- BGR, and the reverse of the #RRGGBB an
+// <input type="color"> speaks. Converting in both directions here keeps that
+// detail out of the form itself.
+function assToHex(ass) {
+  const m = /^&H([0-9A-Fa-f]{2})([0-9A-Fa-f]{2})([0-9A-Fa-f]{2})&$/.exec(ass || '')
+  if (!m) return '#00ffff'
+  const [, bb, gg, rr] = m
+  return `#${rr}${gg}${bb}`.toLowerCase()
+}
+
+function hexToAss(hex) {
+  const m = /^#([0-9A-Fa-f]{2})([0-9A-Fa-f]{2})([0-9A-Fa-f]{2})$/.exec(hex || '')
+  if (!m) return '&H00FFFF&'
+  const [, rr, gg, bb] = m
+  return `&H${bb}${gg}${rr}&`.toUpperCase()
+}
+
 function NewJob() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -218,6 +235,8 @@ function NewJob() {
   const [useHookGlitch, setUseHookGlitch] = useState(false)
   const [useBgm, setUseBgm] = useState(true)
   const [useKaraoke, setUseKaraoke] = useState(true)
+  // ASS colour, BGR: &HBBGGRR&. The input below is an RGB picker.
+  const [karaokeColor, setKaraokeColor] = useState('&H00FFFF&')
   const [noSubs, setNoSubs] = useState(false)
   const [hookV2, setHookV2] = useState(false)
   const [silenceTrim, setSilenceTrim] = useState(false)
@@ -263,6 +282,7 @@ function NewJob() {
       if (config.use_hook_glitch !== undefined) setUseHookGlitch(config.use_hook_glitch)
       if (config.use_auto_bgm !== undefined) setUseBgm(config.use_auto_bgm)
       if (config.use_karaoke_effect !== undefined) setUseKaraoke(config.use_karaoke_effect)
+      if (config.karaoke_color !== undefined) setKaraokeColor(config.karaoke_color)
       if (config.hook_v2 !== undefined) setHookV2(config.hook_v2)
       if (config.silence_trim !== undefined) setSilenceTrim(config.silence_trim)
       if (config.no_subs !== undefined) setNoSubs(config.no_subs)
@@ -368,6 +388,7 @@ function NewJob() {
         use_hook_glitch: useHookGlitch,
         use_auto_bgm: useBgm,
         use_karaoke_effect: useKaraoke,
+        karaoke_color: karaokeColor,
         no_subs: noSubs,
         hook_v2: hookV2,
         silence_trim: silenceTrim,
@@ -770,6 +791,21 @@ function NewJob() {
             <ToggleRow label="Hook Glitch" desc="Glitch transition intro" checked={useHookGlitch} onChange={setUseHookGlitch} />
             <ToggleRow label="Background Music" desc="Auto BGM matching" checked={useBgm} onChange={setUseBgm} />
             <ToggleRow label="Karaoke Effect" desc="Word-by-word highlight" checked={useKaraoke} onChange={setUseKaraoke} />
+            {useKaraoke && (
+              <div className="form-group">
+                <label className="form-label">Highlight Colour</label>
+                <input
+                  className="form-input"
+                  type="color"
+                  value={assToHex(karaokeColor)}
+                  onChange={(e) => setKaraokeColor(hexToAss(e.target.value))}
+                />
+                <p className="form-hint">
+                  The colour of the word currently being spoken. Default is
+                  yellow.
+                </p>
+              </div>
+            )}
             <ToggleRow label="Hook V2" desc="Multi-hook intro clips" checked={hookV2} onChange={setHookV2} />
             <ToggleRow label="Silence Trim" desc="Remove dead air" checked={silenceTrim} onChange={setSilenceTrim} />
             <ToggleRow label="No Subtitles" desc="Render without text" checked={noSubs} onChange={setNoSubs} />

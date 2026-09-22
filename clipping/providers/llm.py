@@ -22,6 +22,7 @@ importable in the pytest-only CI environment (DEC-012).
 
 from __future__ import annotations
 
+import threading
 import time
 
 from . import errors, jsonx, pacing
@@ -44,24 +45,34 @@ MAX_RATE_LIMIT_WAITS = 2
 MAX_RATE_LIMIT_SLEEP = 90.0
 
 # Remembered per (provider, model) for the life of the process.
+#
+# Guarded, now that scan windows run concurrently. A dict write is atomic in
+# CPython, so the race was never corruption -- it was two threads meeting the
+# same unknown model at once, both walking the ladder from the top and both
+# paying the 400 that walking it costs. The lock makes the second wait for the
+# first's answer.
 _NEGOTIATED = {}
+_NEGOTIATED_LOCK = threading.Lock()
 
 
 def reset_negotiation():
     """Forget every negotiated level. For tests."""
-    _NEGOTIATED.clear()
+    with _NEGOTIATED_LOCK:
+        _NEGOTIATED.clear()
 
 
 def negotiated_level(link):
     """The structured-output level last known to work for *link*, or None."""
-    return _NEGOTIATED.get((link.provider, link.model))
+    with _NEGOTIATED_LOCK:
+        return _NEGOTIATED.get((link.provider, link.model))
 
 
 def _initial_level(link, provider, schema):
     """Where to start the ladder for *link*."""
     if schema is None:
         return PROMPT_ONLY
-    remembered = _NEGOTIATED.get((link.provider, link.model))
+    with _NEGOTIATED_LOCK:
+        remembered = _NEGOTIATED.get((link.provider, link.model))
     if remembered is not None:
         return remembered
     supported = provider.structured or ()
@@ -248,7 +259,8 @@ class LlmClient:
             # Only remember a level that produced parseable JSON. A provider
             # that accepts json_schema and then ignores it is worse than one
             # that refuses it, and this is where that is caught.
-            _NEGOTIATED[(self.link.provider, self.link.model)] = level
+            with _NEGOTIATED_LOCK:
+                _NEGOTIATED[(self.link.provider, self.link.model)] = level
             return value
 
     @staticmethod

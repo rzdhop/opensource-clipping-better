@@ -586,6 +586,20 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
+        "--analysis-workers",
+        type=int,
+        choices=[1, 2, 3],
+        default=None,
+        help=(
+            "How many transcript windows to scan at once. Default 1. Windows "
+            "are independent, so a batch CAN cost its slowest member rather "
+            "than their sum -- but only if the provider actually runs them at "
+            "once. NVIDIA's free tier does not, and measured slower at 2; Groq "
+            "is the link where this should pay, and is untested. Capped at 3: "
+            "the limit is the provider's rate limit, not this machine."
+        ),
+    )
+    p.add_argument(
         "--no-analysis-cache",
         action="store_true",
         help=(
@@ -1364,6 +1378,7 @@ def build_config(argv: list[str] | None = None) -> SimpleNamespace:
         platform=args.platform,
         topic=args.topic,
         analysis_cache=not args.no_analysis_cache,
+        analysis_workers=args.analysis_workers,
         output_language=args.output_language,
         dry_run_analysis=args.dry_run_analysis,
         api_key_nvidia=os.environ.get("NVIDIA_API_KEY", ""),

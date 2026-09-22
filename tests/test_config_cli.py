@@ -433,3 +433,29 @@ def test_the_analysis_cache_is_on_by_default_and_can_be_switched_off(tmp_path):
     assert build_config(
         ["--video", str(video), "--no-analysis-cache"]
     ).analysis_cache is False
+
+
+def test_analysis_workers_defaults_to_the_module_default(tmp_path):
+    from clipping.analysis.analyzer import (
+        DEFAULT_ANALYSIS_WORKERS, MAX_ANALYSIS_WORKERS, _analysis_workers,
+    )
+
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"x")
+
+    cfg = build_config(["--video", str(video)])
+    assert _analysis_workers(cfg) == DEFAULT_ANALYSIS_WORKERS
+
+    chosen = build_config(["--video", str(video), "--analysis-workers", "3"])
+    assert _analysis_workers(chosen) == 3
+    assert 3 <= MAX_ANALYSIS_WORKERS
+
+    sequential = build_config(["--video", str(video), "--analysis-workers", "1"])
+    assert _analysis_workers(sequential) == 1
+
+
+def test_a_worker_count_outside_the_range_is_refused(tmp_path):
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"x")
+    with pytest.raises(SystemExit):
+        build_config(["--video", str(video), "--analysis-workers", "8"])

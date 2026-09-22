@@ -28,6 +28,7 @@ import os
 import string
 import time
 from collections import namedtuple
+from concurrent.futures import ThreadPoolExecutor
 
 from . import beats as beats_mod
 from . import cache as cache_mod
@@ -86,6 +87,34 @@ WRITING_TEMPERATURE = 0.5
 # the log truncates the rejection list on purpose. This keeps all of it.
 TRACE_FILENAME = "analysis_trace.json"
 TRACE_VERSION = 1
+
+# Scan windows are independent, so they CAN be in flight together. Whether
+# that buys anything depends entirely on the provider, and on the one this
+# project ships as its last link it buys nothing at all.
+#
+# Measured 2026-09-22, same transcript, same NVIDIA key, cache off:
+#
+#   workers=1   pass A used 330s for 4 windows   (82s per window)
+#   workers=2   pass A used 346s for 4 windows   (86s per window)
+#
+# Two genuinely overlapping requests should have finished those four windows
+# in about 180s. They did not overlap: NVIDIA's free tier serialises requests
+# on one key, so a batch cost the sum of its members rather than the slowest,
+# and the run was 16s WORSE for the scheduling.
+#
+# So the default is one. That is not a compromise -- it is the sequential
+# schedule this module was built around, arithmetic unchanged, no threads
+# created at all. The flag exists because the shipped chain's FIRST link is
+# Groq, which is fast and has a published 30 requests/minute, and is the
+# provider where this should pay. Nobody has measured that yet (no key on
+# this box), so it is opt-in until someone does.
+#
+# Capped at three: the ceiling is the provider's rate limit, not this machine,
+# and pacing.Limiter's sleep happens INSIDE a window's share without the
+# deadline knowing (DEC-054's stated imprecision), which gets likelier with
+# every extra request in flight.
+DEFAULT_ANALYSIS_WORKERS = 1
+MAX_ANALYSIS_WORKERS = 3
 
 
 class AnalysisError(RuntimeError):
@@ -149,7 +178,7 @@ def analyze(
     )
 
     def ask(system, user, json_schema, name, max_tokens, deadline=None,
-            temperature=ANALYTIC_TEMPERATURE):
+            temperature=ANALYTIC_TEMPERATURE, log=None):
         # run_chain's signature is unchanged: it still takes one absolute
         # deadline and neither knows nor cares that a window hands it a smaller
         # one than the run's own.
@@ -162,7 +191,10 @@ def analyze(
             max_tokens=max_tokens,
             temperature=temperature,
             keys=keys,
-            on_log=on_log,
+            # A batch member writes into its own buffer so the chain's own
+            # lines ("Skipping x", "attempt 2/3") cannot interleave between
+            # windows. Flushed in window order once the batch is done.
+            on_log=log or on_log,
             deadline=run_deadline if deadline is None else deadline,
             time_fn=time_fn,
         )[0]
@@ -199,6 +231,7 @@ def analyze(
         candidates, stats = _pass_a(
             all_beats, preset, want, ask, on_log, time_fn, pass_a_deadline, floor,
             context=context, cache=cache, trace=trace,
+            workers=_analysis_workers(cfg),
         )
         trace["stats"] = stats._asdict()
         if cache is not None:
@@ -275,21 +308,85 @@ def analyze(
 
 # --------------------------------------------------------------------- passes
 
+def _analysis_workers(cfg):
+    """How many scan windows may be in flight. Clamped, never trusted."""
+    try:
+        value = int(getattr(cfg, "analysis_workers", DEFAULT_ANALYSIS_WORKERS)
+                    or DEFAULT_ANALYSIS_WORKERS)
+    except (TypeError, ValueError):
+        value = DEFAULT_ANALYSIS_WORKERS
+    return max(1, min(value, MAX_ANALYSIS_WORKERS))
+
+
+def _scan_one(item, *, window_deadline, ask, preset, context, buffered):
+    """One window's request. Returns ``(answer, error, lines)``; never raises.
+
+    *buffered* keeps the chain's own log lines in a list instead of emitting
+    them, so a batch's output can be replayed in window order afterwards. With
+    a single worker nothing is buffered and the lines stream live, exactly as
+    they did before this ran concurrently.
+    """
+    _index, lo, hi, beats_text = item
+    lines = []
+    try:
+        answer = ask(
+            prompts.SYSTEM,
+            prompts.candidates_prompt(
+                beats_text,
+                max_candidates=MAX_CANDIDATES_PER_WINDOW,
+                preset=preset,
+                language=context.language if context else None,
+                total_seconds=context.total_seconds if context else None,
+                topic=context.topic if context else None,
+            ),
+            schema.CANDIDATES_SCHEMA,
+            "candidates",
+            schema.MAX_TOKENS_CANDIDATES,
+            window_deadline,
+            log=lines.append if buffered else None,
+        )
+    except Exception as exc:  # noqa: BLE001 - one window, not the run
+        return None, f"{type(exc).__name__}: {exc}", lines
+    return answer, None, lines
+
+
+def _run_batch(batch, *, window_deadline, ask, preset, context, workers):
+    """Run *batch* together, returning one result per member, in order.
+
+    A single member runs inline. Creating a pool to run one function once
+    would make the one-worker path structurally different from the schedule
+    every budget test in this suite was written against, for no gain.
+    """
+    buffered = workers > 1 and len(batch) > 1
+    run = lambda item: _scan_one(  # noqa: E731 - a name would not help here
+        item, window_deadline=window_deadline, ask=ask,
+        preset=preset, context=context, buffered=buffered,
+    )
+    if not buffered:
+        return [run(item) for item in batch]
+    with ThreadPoolExecutor(max_workers=len(batch)) as pool:
+        return list(pool.map(run, batch))
+
+
 def _pass_a(all_beats, preset, want, ask, on_log, time_fn, deadline, floor,
-           context=None, cache=None, trace=None):
+           context=None, cache=None, trace=None, workers=1):
     """Scan each window for candidate moments, each inside its own time share.
 
     DEC-027 states the invariant this restores: *a failure is local -- a failed
-    window loses one window's candidates*. It was not true. Every window shared
-    one absolute deadline, so a window whose provider hung for three attempts
-    spent the whole run's budget and the remaining five were skipped without
-    ever being tried. Catching a window's exception is worthless if that window
-    already spent everyone else's time.
+    window loses one window's candidates*. Every window used to share one
+    absolute deadline, so a window whose provider hung for three attempts spent
+    the whole run's budget and the rest were skipped without ever being tried.
 
-    The share is recomputed at the top of every iteration, which is what makes
-    unused time return to the pool with no accumulator and nothing that can go
-    stale: a window that answers in two seconds simply leaves a larger
-    ``remaining`` for the windows after it.
+    **The share is per batch, and computed once for it.** With N windows in
+    flight each is handed `remaining / windows_left`, the same allowance it
+    would have had as the first window of a sequential iteration. Since
+    N <= windows_left the batch can never grant more than the pool holds, and
+    with one worker the arithmetic is exactly what it was. What changes is
+    wall time: a batch costs its slowest member, not their sum.
+
+    Unused time still returns to the pool with no accumulator and nothing that
+    can go stale, because `remaining` and the count are recomputed at the top
+    of every batch.
 
     The ``floor`` is one full request against the slowest usable link. Without
     it a 900s pool over six windows gives 150s each, which is below NVIDIA's
@@ -308,86 +405,79 @@ def _pass_a(all_beats, preset, want, ask, on_log, time_fn, deadline, floor,
     skipped = 0
     last_error = None
     needed = floor + GRANT_MARGIN_SECONDS
+
+    # The cache is read here, on this thread, before anything is scheduled: a
+    # hit costs no request and no time, so it neither needs a worker nor
+    # counts against anyone's share. It is `answered` because the window WAS
+    # read, just not today (DEC-055).
+    pending = []
     for index, (lo, hi) in enumerate(ranges, start=1):
         beats_text = beats_mod.render_beats(all_beats, lo, hi)
+        remembered = cache.get(beats_text) if cache is not None else None
+        if remembered is None:
+            pending.append((index, lo, hi, beats_text))
+            continue
+        answered += 1
+        candidates.extend(remembered)
+        _note_window(trace, index, lo, hi, "cached", remembered)
+        on_log(
+            f"   ⚡ Window {index}/{len(ranges)} ({lo}-{hi}): "
+            f"{len(remembered)} candidate(s) from cache."
+        )
 
-        # Checked before the budget, deliberately: a hit costs no request and
-        # no time, so refusing one for want of time would refuse something
-        # free. It counts as `answered` because the window WAS read -- just not
-        # today -- and DEC-055 reads `answered == 0` as "nothing was ever read".
-        if cache is not None:
-            remembered = cache.get(beats_text)
-            if remembered is not None:
-                answered += 1
-                candidates.extend(remembered)
-                _note_window(trace, index, lo, hi, "cached", remembered)
-                on_log(
-                    f"   ⚡ Window {index}/{len(ranges)} ({lo}-{hi}): "
-                    f"{len(remembered)} candidate(s) from cache."
-                )
-                continue
-
+    position = 0
+    while position < len(pending):
         now = time_fn()
         remaining = deadline - now
+        windows_left = len(pending) - position
+
         if remaining < needed:
-            skipped += 1
-            last_error = last_error or (
-                f"{max(0.0, remaining):.0f}s left, {floor:.0f}s needed per request"
-            )
-            _note_window(
-                trace, index, lo, hi, "skipped", (),
-                error=f"{max(0.0, remaining):.0f}s left, {floor:.0f}s needed",
-            )
-            on_log(
-                f"   ⏱ Window {index}/{len(ranges)} ({lo}-{hi}) skipped: "
-                f"{max(0.0, remaining):.0f}s left in the scan budget, and one "
-                f"request to this chain can take {floor:.0f}s."
-            )
-            continue
+            for index, lo, hi, _text in pending[position:]:
+                skipped += 1
+                last_error = last_error or (
+                    f"{max(0.0, remaining):.0f}s left, {floor:.0f}s needed per request"
+                )
+                _note_window(
+                    trace, index, lo, hi, "skipped", (),
+                    error=f"{max(0.0, remaining):.0f}s left, {floor:.0f}s needed",
+                )
+                on_log(
+                    f"   ⏱ Window {index}/{len(ranges)} ({lo}-{hi}) skipped: "
+                    f"{max(0.0, remaining):.0f}s left in the scan budget, and one "
+                    f"request to this chain can take {floor:.0f}s."
+                )
+            break
 
-        windows_left = len(ranges) - index + 1
         share = remaining / windows_left
-        # `needed`, not `floor`: a window granted exactly one request's worth is
-        # granted slightly less than that by the time run_chain measures it.
         window_deadline = min(deadline, now + max(share, needed))
+        batch = pending[position:position + workers]
 
-        try:
-            answer = ask(
-                prompts.SYSTEM,
-                prompts.candidates_prompt(
-                    beats_text,
-                    max_candidates=MAX_CANDIDATES_PER_WINDOW,
-                    preset=preset,
-                    # The same one-line preface on every window: a window that
-                    # does not know what the video is cannot judge whether a
-                    # moment stands alone outside it.
-                    language=context.language if context else None,
-                    total_seconds=context.total_seconds if context else None,
-                    topic=context.topic if context else None,
-                ),
-                schema.CANDIDATES_SCHEMA,
-                "candidates",
-                schema.MAX_TOKENS_CANDIDATES,
-                window_deadline,
-            )
-        except Exception as exc:  # noqa: BLE001 - one window, not the run
-            # Logged as before, but the reason is kept rather than discarded:
-            # it is the difference between a failure of the provider and a
-            # verdict on the transcript, and only one of those is the user's
-            # problem to fix.
-            failed += 1
-            last_error = f"{type(exc).__name__}: {exc}"
-            _note_window(trace, index, lo, hi, "failed", (), error=last_error)
-            on_log(f"   ⚠️ Window {index}/{len(ranges)} ({lo}-{hi}) failed | {exc}")
-            continue
+        outcomes = _run_batch(
+            batch, window_deadline=window_deadline, ask=ask,
+            preset=preset, context=context, workers=workers,
+        )
 
-        answered += 1
-        found = _clean_candidates(answer, lo, hi)
-        candidates.extend(found)
-        if cache is not None:
-            cache.put(beats_text, found)
-        _note_window(trace, index, lo, hi, "answered", found)
-        on_log(f"   [1/3] Window {index}/{len(ranges)}: {len(found)} candidate(s).")
+        # Merged in window order whatever order they finished in, so the
+        # candidate list -- and therefore pass B's numbering and the trace --
+        # does not depend on which provider answered first.
+        for (index, lo, hi, beats_text), (answer, error, lines) in zip(batch, outcomes):
+            for line in lines:
+                on_log(line)
+            if error is not None:
+                failed += 1
+                last_error = error
+                _note_window(trace, index, lo, hi, "failed", (), error=error)
+                on_log(f"   ⚠️ Window {index}/{len(ranges)} ({lo}-{hi}) failed | {error}")
+                continue
+            answered += 1
+            found = _clean_candidates(answer, lo, hi)
+            candidates.extend(found)
+            if cache is not None:
+                cache.put(beats_text, found)
+            _note_window(trace, index, lo, hi, "answered", found)
+            on_log(f"   [1/3] Window {index}/{len(ranges)}: {len(found)} candidate(s).")
+
+        position += len(batch)
 
     return candidates, ScanStats(len(ranges), answered, failed, skipped, last_error)
 

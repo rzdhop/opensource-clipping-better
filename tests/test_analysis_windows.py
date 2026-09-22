@@ -21,6 +21,21 @@ class Cfg:
     no_segment_trim = False
     output_language = "en"
     analysis_budget_seconds = 900
+    # ONE worker, deliberately, for every test in this module that is not about
+    # concurrency. Two reasons, and both matter:
+    #
+    #   The three DEC-054 proofs below assert the SEQUENTIAL schedule -- that a
+    #   window's allowance is a share, that unused time returns to the pool.
+    #   Rewriting them to fit batched arithmetic would erase the evidence for
+    #   the decision they exist to defend.
+    #
+    #   `scripted()` replays answers from a shared queue by call order. With
+    #   two windows in flight, which one pops which answer is a race, and every
+    #   test here would be intermittently wrong rather than failing honestly.
+    #
+    # The concurrency tests set it explicitly and use a runner that is safe to
+    # call from several threads.
+    analysis_workers = 1
 
 
 def segmen(n_sentences=60):
@@ -1020,3 +1035,166 @@ def test_an_unpunctuated_transcript_keeps_every_candidate():
     clips, logs = run(answers, segments=out)
     assert len(clips) == 2
     assert not any("mid-sentence" in line for line in logs)
+
+
+# ------------------------------------------------ several windows in flight
+
+def concurrent_runner(per_window=None, fail_windows=(), order=None):
+    """A run_chain stand-in that is safe to call from several threads.
+
+    Unlike ``scripted()`` it does not replay a queue by call order -- under
+    concurrency that is a race, and a test built on one would be intermittently
+    wrong rather than honestly failing. It answers from what it is asked, so
+    which thread arrives first does not matter.
+
+    *order* optionally forces completion order: a window id listed there blocks
+    until some other window finishes, which is how "finished second, merged
+    first" is tested without sleeping.
+    """
+    import threading
+
+    lock = threading.Lock()
+    seen = []
+    gates = {w: threading.Event() for w in (order or ())}
+
+    def _run(chain, **kwargs):
+        name = kwargs["schema_name"]
+        if name == "ranked":
+            return {"ranked": [{"id": i, "score": 90 - i, "topic": f"t{i}"}
+                               for i in range(3)]}, chain[0]
+        if name == "clip_meta":
+            return META, chain[0]
+
+        # A scan window. The first beat id UNDER "BEATS:" identifies it --
+        # parsed from there, not from the first "#" in the prompt, which
+        # belongs to the format line "#<id> [<start>-<end>] <what is said>".
+        body = kwargs["user"].split("BEATS:", 1)[1].lstrip()
+        first = int(body.split("#", 1)[1].split(" ", 1)[0])
+        with lock:
+            seen.append({"first": first, "deadline": kwargs["deadline"]})
+
+        if first in gates:
+            gates[first].wait(timeout=5)
+        else:
+            for event in gates.values():
+                event.set()
+
+        if first in fail_windows:
+            raise RuntimeError(f"window at beat {first} exploded")
+        answer = (per_window or {}).get(first)
+        if answer is None:
+            answer = candidates((first, first + 3, 60 + first % 30))
+        return answer, chain[0]
+
+    _run.seen = seen
+    return _run
+
+
+class Wide(Cfg):
+    analysis_workers = 2
+
+
+def test_one_worker_is_byte_identical_to_the_sequential_schedule():
+    """The rollback has to be a real rollback: same requests, same deadlines."""
+    def schedule(workers):
+        clock = Clock()
+        runner = greedy(clock)
+
+        class C(Cfg):
+            analysis_workers = workers
+
+        with pytest.raises(AnalysisError):
+            analyze_with(runner, clock, cfg=C())
+        return [(round(s["at"], 6), round(s["allowance"], 6)) for s in runner.seen]
+
+    assert schedule(1) == schedule(1)
+    # And it is the schedule the DEC-054 proofs above assert.
+    assert len(schedule(1)) == 5
+
+
+def test_every_window_is_still_attempted_under_concurrency():
+    """DEC-027's invariant, now across threads."""
+    runner = concurrent_runner()
+    logs = []
+    analyzer.analyze(
+        segmen(200), Wide(), chain=[("groq", "m")], keys={"groq": "k"},
+        on_log=logs.append, run_chain=runner,
+    )
+    scanned = [c for c in runner.seen]
+    assert len(scanned) == 5
+
+
+def test_a_batch_never_grants_more_than_the_pool_holds():
+    """N members each given remaining/windows_left, and N <= windows_left."""
+    clock = Clock()
+    runner = greedy(clock)
+
+    class C(Cfg):
+        analysis_workers = 3
+
+    with pytest.raises(AnalysisError):
+        analyze_with(runner, clock, cfg=C())
+
+    budget = Cfg.analysis_budget_seconds
+    for call in runner.seen:
+        assert call["allowance"] < budget
+
+
+def test_a_failed_window_in_a_batch_does_not_fail_its_neighbour():
+    runner = concurrent_runner(fail_windows={0})
+    logs = []
+    clips = analyzer.analyze(
+        segmen(200), Wide(), chain=[("groq", "m")], keys={"groq": "k"},
+        on_log=logs.append, run_chain=runner,
+    )
+    assert clips
+    assert any("exploded" in line for line in logs)
+
+
+def test_candidate_order_does_not_depend_on_completion_order():
+    """Window 2 finishes before window 1, and the result is unchanged."""
+    def clips_with(order):
+        runner = concurrent_runner(order=order)
+        return analyzer.analyze(
+            segmen(200), Wide(), chain=[("groq", "m")], keys={"groq": "k"},
+            on_log=lambda *a: None, run_chain=runner,
+        )
+
+    natural = clips_with(None)
+    reversed_finish = clips_with((0,))   # window at beat 0 waits for the other
+
+    assert [c["start_time"] for c in natural] == [
+        c["start_time"] for c in reversed_finish
+    ]
+
+
+def test_window_logs_are_emitted_in_window_order():
+    runner = concurrent_runner(order=(0,))
+    logs = []
+    analyzer.analyze(
+        segmen(200), Wide(), chain=[("groq", "m")], keys={"groq": "k"},
+        on_log=logs.append, run_chain=runner,
+    )
+    indices = [
+        int(line.split("Window ", 1)[1].split("/", 1)[0])
+        for line in logs
+        if "[1/3] Window " in line
+    ]
+    assert indices == sorted(indices), f"log lines out of order: {indices}"
+
+
+def test_the_worker_count_is_clamped():
+    from clipping.analysis.analyzer import _analysis_workers, MAX_ANALYSIS_WORKERS
+
+    class Silly(Cfg):
+        analysis_workers = 99
+
+    class Zero(Cfg):
+        analysis_workers = 0
+
+    class Junk(Cfg):
+        analysis_workers = "lots"
+
+    assert _analysis_workers(Silly()) == MAX_ANALYSIS_WORKERS
+    assert _analysis_workers(Zero()) >= 1
+    assert _analysis_workers(Junk()) >= 1
