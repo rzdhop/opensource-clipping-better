@@ -529,6 +529,16 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
+        "--no-preflight",
+        action="store_true",
+        help=(
+            "Skip the liveness check that asks the provider chain an 8-token "
+            "question before transcribing. The check exists because a dead "
+            "provider used to be discovered only after 47 minutes of CPU "
+            "Whisper; skip it if a provider is merely slow to wake."
+        ),
+    )
+    p.add_argument(
         "--stt-chain",
         default=STT_CHAIN,
         help=(
@@ -929,6 +939,49 @@ def missing_provider_key(cfg) -> tuple[str, str] | None:
     return None
 
 
+def preflight_chain(cfg, on_log=print, **probe_kwargs) -> str | None:
+    """Ask the chain whether anything answers, before the expensive work starts.
+
+    Returns ``None`` when at least one link replied (or when the check does not
+    apply), and an explanatory message when nothing did.
+
+    ``missing_provider_key`` above already refuses a chain where *no* link has a
+    key. It cannot refuse the case that actually happened: one link had a key,
+    the gate passed, 47 minutes of CPU Whisper ran, and only then did the
+    analysis discover that the one keyed provider answered nothing at all. A
+    key proves a provider was configured, not that it is alive.
+
+    Only the chain path is checked. The legacy single-provider paths have their
+    own behaviour and are an escape hatch, not somewhere to add a new gate.
+
+    A link that fails the probe is **not** removed from the chain -- DEC-003 and
+    DEC-023 forbid editing a list the user wrote down. It is only reported.
+    """
+    if not getattr(cfg, "preflight", True):
+        return None
+    if getattr(cfg, "ai_provider", AI_PROVIDER) not in ("chain", "auto"):
+        return None
+
+    from clipping.providers import llm as llm_mod
+    from clipping.providers.registry import chain_from_env, parse_chain
+
+    spec = getattr(cfg, "llm_chain", "") or ""
+    try:
+        chain = parse_chain(spec) if spec else chain_from_env()
+    except Exception:  # noqa: BLE001 - a bad chain is reported when it runs
+        return None
+
+    keys = provider_keys(cfg)
+    if not any(link.provider in keys for link in chain):
+        return None  # missing_provider_key owns this case and says it better
+
+    on_log("   🔎 Checking the provider chain answers before transcribing...")
+    live, results = llm_mod.probe_chain(chain, keys, on_log=on_log, **probe_kwargs)
+    if live is not None:
+        return None
+    return llm_mod.preflight_message(results)
+
+
 def build_config(argv: list[str] | None = None) -> SimpleNamespace:
     """Parse CLI args and merge with defaults into a config namespace."""
     parser = _build_parser()
@@ -1104,6 +1157,7 @@ def build_config(argv: list[str] | None = None) -> SimpleNamespace:
         api_key_custom=os.environ.get("LLM_CUSTOM_API_KEY", ""),
         llm_chain=args.llm_chain,
         llm_timeout=args.llm_timeout,
+        preflight=not args.no_preflight,
         stt_chain=args.stt_chain,
         # Filled in by a hosted transcription provider that reports what it
         # heard; beats guessing the language from stopwords afterwards.

@@ -440,3 +440,92 @@ def _run_link(
     if last_exc is not None:
         raise last_exc
     raise errors.ProviderError(f"{label} produced no result and no error.")
+
+
+# ---------------------------------------------------------------- preflight
+
+# Chosen against measurement, and deliberately generous. Five probes of the
+# shipped NIM default on 2026-09-21 ran 1.3 / 1.6 / 2.2 / 2.7 / 11.4s -- a
+# healthy free tier is usually instant and occasionally slow to wake, and the
+# cost of being wrong is asymmetric: a probe that is too short fails a job whose
+# provider was merely cold, while one that is too long still catches a dead
+# provider sixty times faster than the failure this replaces (47 minutes of CPU
+# Whisper, then fifteen more spent proving the provider was dead).
+#
+# 45s is roughly four times the slowest healthy probe observed, and the dead
+# model it was written for does not answer in 120s, so the gap is not close.
+PROBE_TIMEOUT_SECONDS = 45.0
+PROBE_MAX_TOKENS = 8
+PROBE_PROMPT = "Reply with the single word: ok"
+
+
+def probe_chain(chain, keys, *, timeout=PROBE_TIMEOUT_SECONDS, on_log=print,
+                client_factory=None, time_fn=time.monotonic):
+    """Ask the chain's keyed links, in order, whether they answer at all.
+
+    Returns ``(live_link, results)``; *live_link* is ``None`` when nothing
+    answered. Stops at the first link that replies, so the cost of a healthy run
+    is one trivial request.
+
+    **What this proves and what it does not.** It proves the endpoint is
+    reachable and generating. It does NOT prove the link can do the work: a
+    model measured here answered this ping in 0.67s and still failed the real
+    pass-A request, spending its whole token budget on a reasoning preamble. It
+    is a liveness check, deliberately not a suitability one -- suitability is
+    what ``tools/bench_llm.py`` is for.
+
+    It exists because the alternative is worse by two orders of magnitude. The
+    job that prompted it transcribed for 47 minutes on CPU and only then
+    discovered that its one keyed provider answered nothing at all.
+
+    A plain completion, with no schema and no negotiation: the point is whether
+    anything comes back, and involving the structured-output ladder would make a
+    provider's json_schema support decide a liveness question.
+    """
+    keys = keys or {}
+    results = []
+
+    for link in chain:
+        label = describe(link)
+        if not keys.get(link.provider):
+            results.append((label, "no API key", None))
+            continue
+
+        client = LlmClient(
+            link, api_key=keys[link.provider], timeout=timeout,
+            client_factory=client_factory, on_log=on_log,
+        )
+        started = time_fn()
+        try:
+            client.client.chat.completions.create(
+                model=link.model,
+                messages=[{"role": "user", "content": PROBE_PROMPT}],
+                max_tokens=PROBE_MAX_TOKENS,
+                temperature=0,
+            )
+        except Exception as exc:  # noqa: BLE001 - every failure is just "not this one"
+            elapsed = time_fn() - started
+            reason = f"{type(exc).__name__}: {exc}"
+            results.append((label, reason, elapsed))
+            on_log(f"   ✖ {label} did not answer after {elapsed:.0f}s | {reason}")
+            continue
+
+        elapsed = time_fn() - started
+        results.append((label, "ok", elapsed))
+        on_log(f"   ✅ {label} answered in {elapsed:.1f}s.")
+        return link, results
+
+    return None, results
+
+
+def preflight_message(results):
+    """The one-line-per-link explanation for a chain where nothing answered."""
+    lines = []
+    for label, reason, elapsed in results:
+        when = f" after {elapsed:.0f}s" if elapsed is not None else ""
+        lines.append(f"  {label}: {reason}{when}")
+    return (
+        "No provider in the chain answered a liveness check, so the analysis "
+        "cannot run. Nothing was transcribed, because that would have been "
+        "wasted.\n" + "\n".join(lines)
+    )

@@ -68,6 +68,16 @@ def main():
             print(f"   Or switch provider: --ai-provider {' | '.join(others)}")
             sys.exit(1)
 
+        # Having a key is not the same as answering. Ask the chain an 8-token
+        # question now rather than discover a dead provider after transcribing.
+        from clipping.config import preflight_chain
+
+        dead = preflight_chain(cfg)
+        if dead:
+            print(f"❌ ERROR: {dead}")
+            print("   Re-run with --no-preflight to try anyway.")
+            sys.exit(1)
+
     transcript_path = getattr(cfg, "transcript_path", None)
 
     print("=" * 70)

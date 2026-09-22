@@ -257,6 +257,19 @@ def _execute_pipeline(job_id: str, payload: dict) -> None:
             )
             return
 
+        # A key proves a provider was configured, not that it is alive. The job
+        # this check was written for had one keyed link, passed the gate above,
+        # transcribed for 47 minutes on CPU, and only then found that the
+        # provider answered nothing at all. One 8-token question costs a second.
+        if not render_only:
+            from clipping.config import preflight_chain
+
+            dead = preflight_chain(cfg, on_log=lambda line: progress(
+                "analyze", 2, line.strip(), 8.0))
+            if dead:
+                store.set_error(job_id, dead)
+                return
+
         # --- Step 1: Download ---
         store.set_status(job_id, JobStatus.DOWNLOADING)
         progress("download", 1, "Preparing source video...", 5.0)
