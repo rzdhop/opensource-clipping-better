@@ -51,6 +51,8 @@ PERSISTED_KEYS = frozenset({
     "DEFAULT_WHISPER_MODEL",
     "DEFAULT_WHISPER_DEVICE",
     "DEFAULT_AI_PROVIDER",
+    # Not a secret: a switch. Stored as "1" or not at all (DEC-043, DEC-073).
+    "ALLOW_SLOW_CHAIN",
 })
 
 # Values that are secrets. Listed explicitly rather than pattern-matched on

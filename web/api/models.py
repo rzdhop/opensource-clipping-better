@@ -358,6 +358,9 @@ class SettingsRequest(BaseModel):
     default_whisper_model: Optional[str] = None
     default_whisper_device: Optional[WhisperDevice] = None
     default_ai_provider: Optional[AIProvider] = None
+    # Let a chain job run when only the slow floor (NVIDIA) has a key. False
+    # CLEARS the stored switch rather than storing "0" (DEC-043).
+    allow_slow_chain: Optional[bool] = None
 
 
 class SettingsResponse(BaseModel):
@@ -374,6 +377,7 @@ class SettingsResponse(BaseModel):
     # them and New Job has to say which of the three is still missing.
     openai_compat_base_url: str = ""
     openai_compat_model: str = ""
+    allow_slow_chain: bool = False
     default_clips: int = 7
     default_ratio: str = "9:16"
     default_font_style: str = "HORMOZI"

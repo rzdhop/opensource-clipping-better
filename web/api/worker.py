@@ -257,6 +257,18 @@ def _execute_pipeline(job_id: str, payload: dict) -> None:
             )
             return
 
+        # A key on the slow floor alone cannot carry the analysis (DEC-073).
+        # POST /api/jobs refuses this before a job exists; this is the backstop
+        # for a job that reached the queue another way, or before the setting
+        # changed.
+        if not render_only:
+            from clipping.config import WEB_SLOW_CHAIN_HINT, chain_not_ready
+
+            slow = chain_not_ready(cfg, hint=WEB_SLOW_CHAIN_HINT)
+            if slow:
+                store.set_error(job_id, slow)
+                return
+
         # A key proves a provider was configured, not that it is alive. The job
         # this check was written for had one keyed link, passed the gate above,
         # transcribed for 47 minutes on CPU, and only then found that the

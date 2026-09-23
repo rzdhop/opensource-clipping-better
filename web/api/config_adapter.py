@@ -44,6 +44,15 @@ from clipping.config import (
     KARAOKE_HIGHLIGHT_COLOR,
 )
 
+
+def env_flag(env, name) -> bool:
+    """A boolean setting: the Settings page's value, else the process env.
+
+    Same spelling as DISABLE_AUTH (``auth.py``): only 1/true/yes are on.
+    """
+    value = env.get(name, os.environ.get(name, ""))
+    return str(value or "").strip().lower() in {"1", "true", "yes"}
+
 def build_config_from_payload(
     payload: dict,
     job_id: str,
@@ -240,6 +249,9 @@ def build_config_from_payload(
             or env.get("LLM_CHAIN", os.environ.get("LLM_CHAIN", ""))
         ),
         stt_chain=payload.get("stt_chain", "") or "",
+        # Run on the slow floor alone when no primary link has a key. A Settings
+        # toggle, not a per-job field (DEC-073); chain_not_ready reads it.
+        allow_slow_chain=env_flag(env, "ALLOW_SLOW_CHAIN"),
         detected_language="",
         platform=payload.get("platform", "auto"),
         topic=payload.get("topic", ""),

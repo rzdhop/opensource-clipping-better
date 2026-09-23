@@ -17,6 +17,7 @@ from clipping.config import AI_PROVIDER, WHISPER_DEVICE
 from ..models import SettingsRequest, SettingsResponse, SystemHealthResponse
 from .. import store as job_store
 from .. import worker
+from ..config_adapter import env_flag
 
 router = APIRouter(tags=["settings"], dependencies=[Depends(require_token)])
 
@@ -83,6 +84,7 @@ async def get_settings() -> SettingsResponse:
         openai_compat_api_key_set=bool(compat_key),
         openai_compat_base_url=compat_url,
         openai_compat_model=compat_model,
+        allow_slow_chain=env_flag(env, "ALLOW_SLOW_CHAIN"),
         default_clips=int(env.get("DEFAULT_CLIPS", "7")),
         default_ratio=env.get("DEFAULT_RATIO", "9:16"),
         default_font_style=env.get("DEFAULT_FONT_STYLE", "HORMOZI"),
@@ -125,6 +127,11 @@ async def update_settings(req: SettingsRequest) -> SettingsResponse:
         env_updates["OPENAI_COMPAT_BASE_URL"] = req.openai_compat_base_url
     if req.openai_compat_model is not None:
         env_updates["OPENAI_COMPAT_MODEL"] = req.openai_compat_model
+    if req.allow_slow_chain is not None:
+        # "" removes the override (DEC-043). Storing "0" would read as off but
+        # shadow an ALLOW_SLOW_CHAIN=1 in .env forever, with no way back from
+        # the UI.
+        env_updates["ALLOW_SLOW_CHAIN"] = "1" if req.allow_slow_chain else ""
     if req.default_clips is not None:
         env_updates["DEFAULT_CLIPS"] = str(req.default_clips)
     if req.default_ratio is not None:
