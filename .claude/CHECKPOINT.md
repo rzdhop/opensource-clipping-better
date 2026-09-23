@@ -1,3 +1,49 @@
+## CURRENT TASK — chain readiness gate + per-provider probe timeout (IN PROGRESS)
+- **Phase:** IMPLEMENT. **Current stage:** 1 of 8. **Plan:**
+  `~/.claude/plans/still-not-working-groovy-puffin.md` (approved in chat).
+- **Checkpoint commit:** `e991ff8` (clean tree).
+- **Tier-1 baseline:** `python -m pytest -p no:warnings` -> **1299 passed, 0 failed**
+  (this box has fastapi installed, so nothing skips).
+- **Next action:** Stage 1 -- `probe_timeout` / `primary` / `signup_url` on the
+  registry `Provider`.
+- **Open questions:** none. Decided in chat: block with override; "primary"
+  is a registry flag (groq/gemini/openrouter/mistral/custom primary, nvidia
+  the floor); scoped R2 gate (only when the chain NAMES a primary); override is
+  a Settings toggle on the web + `--allow-slow-chain` on the CLI; probe timeout
+  per provider (nvidia 120, custom 60, rest 45); no new providers this task.
+
+### Why (measured 2026-09-23)
+The failing job had ONLY `NVIDIA_API_KEY`. With that key the NIM ping
+succeeded (`ok`) in 48.9 / 57.0 / 49.7s -- all queue wait -- so the 45s probe
+cap reported a live provider as dead. Groq/Gemini keys were never set.
+
+### Regression contract for this task
+| ID | Must keep working | Proven by |
+|---|---|---|
+| RC-B1 | A chain with a keyed primary link runs, no new gate in the way | `test_preflight.py::test_a_live_chain_returns_no_complaint`, new readiness tests |
+| RC-B2 | A failing link is reported, never removed (DEC-003/023) | `test_preflight.py` report-not-remove tests |
+| RC-B3 | A slow-but-healthy call is never cut off (DEC-020) | `::test_a_failed_work_probe_falls_back_to_the_ping` + new nvidia-50s-is-live |
+| RC-B4 | `effective_timeout` unchanged in value and role | `test_provider_registry.py`, `test_llm_negotiation.py` |
+| RC-B5 | The NIM model id exists in one place | `test_provider_registry.py::test_no_former_copy_grew_a_model_literal_back` |
+| RC-B6 | Every Settings field the page sends is declared by the backend | `test_dashboard_payload_contract.py` |
+| RC-B7 | A render-only rerun needs no key, no probe, no gate | `test_web_reuse_bypass.py` + new API test |
+| RC-B8 | Suite importable with pytest alone (DEC-012) | CI env / importorskip |
+
+### Stage ledger
+| S | Stage | State |
+|---|---|---|
+| 1 | registry: probe_timeout, primary, signup_url | pending |
+| 2 | probes resolve their cap per link | pending |
+| 3 | chain_readiness + CLI gate | pending |
+| 4 | web plumbing: preflight + allow_slow_chain | pending |
+| 5 | refusal at POST /api/jobs | pending |
+| 6 | POST /api/settings/test-chain | pending |
+| 7 | dashboard | pending |
+| 8 | docs + DECISIONS | pending |
+
+---
+
+## Previous task — analysis round S1-S12 (COMPLETE)
 - **Phase:** COMPLETE. All twelve stages are committed. DOCUMENT done;
   awaiting the human's Tier-2 verdict on the deployed app.
 - **Checkpoint commit before the work:** `6dbc431`. **Head:** see the ledger.
