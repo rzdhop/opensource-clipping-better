@@ -32,7 +32,7 @@
     ctranslate2 is installed here, so the transcript path's import of it
     becomes visible. The Ubuntu env does not have the package, so this
     **may be a real bug hidden there** (logged as a follow-up).
-- **Phase:** IMPLEMENT. Group 1 merged and pushed (`7d374b2`). Next stage: the Group 2 framemd5 render parity check (07d1a7b vs head, two scratch worktrees).
+- **Phase:** IMPLEMENT. Group 1 merged and pushed (`7d374b2`). Group 2 (S8-S12) done and render-parity verified; next: merge feature/render-fixes, then S13 on feature/job-lifecycle.
 - **Open questions:** none. Two scope calls were made in chat: loudnorm is
   an opt-in flag, default off; cancel uses checkpoints plus a kill of the
   job's ffmpeg children.
