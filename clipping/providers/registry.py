@@ -23,9 +23,20 @@ from __future__ import annotations
 import os
 from collections import namedtuple
 
+# How long a liveness probe may wait for a provider that declares nothing
+# faster or slower. See ``probe_timeout`` below and DEC-072.
+DEFAULT_PROBE_TIMEOUT = 45.0
+
+# ``probe_timeout`` is how long the preflight ping may wait for this provider;
+# ``primary`` says whether it can carry the analysis on its own (False = the
+# chain's slow floor, which a job may not run on alone without an explicit
+# override, DEC-073); ``signup_url`` is where to get its free key. All three
+# are trailing and defaulted so a Provider built without them still works.
 Provider = namedtuple(
     "Provider",
-    "name base_url env_key rpm tpm structured default_timeout notes",
+    "name base_url env_key rpm tpm structured default_timeout notes "
+    "probe_timeout primary signup_url",
+    defaults=(DEFAULT_PROBE_TIMEOUT, True, ""),
 )
 
 # ``structured`` lists the response_format levels the provider is known to
@@ -45,6 +56,7 @@ PROVIDERS = {
         structured=("json_schema", "json_object"),
         default_timeout=120,
         notes="Fastest free tier. TPM is the binding limit: keep requests small.",
+        signup_url="https://console.groq.com/keys",
     ),
     "gemini": Provider(
         name="gemini",
@@ -55,6 +67,7 @@ PROVIDERS = {
         structured=("json_schema", "json_object"),
         default_timeout=180,
         notes="OpenAI-compatible endpoint. Flash-Lite has the most daily requests.",
+        signup_url="https://aistudio.google.com/apikey",
     ),
     "nvidia": Provider(
         name="nvidia",
@@ -68,8 +81,16 @@ PROVIDERS = {
             "No published daily cap, but slow: measured at ~12-13 tokens/s with "
             "the gateway cutting a request off at ~300s. The 330s timeout is "
             "deliberately above that so the server's 504 is received rather "
-            "than raced to a local timeout (DEC-019)."
+            "than raced to a local timeout (DEC-019). The free tier also "
+            "QUEUES: a 2-token ping with a working key answered 'ok' in "
+            "48.9 / 57.0 / 49.7s on 2026-09-23, almost all of it time to first "
+            "byte, so the probe gets 120s (DEC-072)."
         ),
+        probe_timeout=120.0,
+        # The floor, not a primary: at ~12 tokens/s behind a ~50s queue a scan
+        # that takes seconds elsewhere takes tens of minutes here (DEC-073).
+        primary=False,
+        signup_url="https://build.nvidia.com/",
     ),
     "openrouter": Provider(
         name="openrouter",
@@ -80,6 +101,7 @@ PROVIDERS = {
         structured=("json_schema", "json_object"),
         default_timeout=180,
         notes=":free models are capped at 50 requests/day without credits.",
+        signup_url="https://openrouter.ai/keys",
     ),
     "mistral": Provider(
         name="mistral",
@@ -90,6 +112,7 @@ PROVIDERS = {
         structured=("json_object",),
         default_timeout=180,
         notes="Free 'Experiment' tier; exact limits live in the admin console.",
+        signup_url="https://console.mistral.ai/",
     ),
     "custom": Provider(
         name="custom",
@@ -100,6 +123,9 @@ PROVIDERS = {
         structured=(),
         default_timeout=180,
         notes="Any other OpenAI-compatible endpoint, incl. a local one.",
+        # No measurement to appeal to, and a local model on CPU is routinely
+        # slower to first token than a hosted free tier.
+        probe_timeout=60.0,
     ),
 }
 
@@ -200,6 +226,40 @@ def effective_timeout(link, override=None) -> float:
     except (TypeError, ValueError):
         value = 0.0
     return value if value > 0 else float(provider_for(link).default_timeout)
+
+
+def probe_timeout(link, override=None) -> float:
+    """How long a liveness PING to *link* may wait, in seconds.
+
+    Per provider for the same reason ``effective_timeout`` is: one number for
+    every provider was measured against one provider. 45s came from probes of a
+    NIM model that ran 1.3-11.4s (DEC-056); two days later the NIM free tier
+    took ~50s to say "ok" with a working key, and the probe declared a live
+    provider dead (DEC-072). *override* of 0 or None means "the provider's own".
+    """
+    try:
+        value = float(override or 0)
+    except (TypeError, ValueError):
+        value = 0.0
+    if value > 0:
+        return value
+    return float(PROVIDERS[link.provider].probe_timeout or DEFAULT_PROBE_TIMEOUT)
+
+
+def work_probe_timeout(link) -> float:
+    """The cap on a preflight WORK probe (a real pass-A request) to *link*.
+
+    Twice the ping allowance, never more than one real request may take. The
+    2x reproduces the previous fixed 90s = 2 x 45s exactly for every provider
+    with the default ping, so only a provider that declared a slower probe gets
+    a longer work probe.
+    """
+    return min(effective_timeout(link), 2.0 * probe_timeout(link))
+
+
+def is_primary(link) -> bool:
+    """Whether *link*'s provider can carry the analysis on its own (DEC-073)."""
+    return bool(PROVIDERS[link.provider].primary)
 
 
 def describe(link) -> str:

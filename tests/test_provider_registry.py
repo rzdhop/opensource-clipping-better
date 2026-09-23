@@ -254,3 +254,85 @@ def test_the_default_is_not_the_one_that_answered_with_nothing():
     clips. Fast, valid and useless is still useless.
     """
     assert registry.NVIDIA_DEFAULT_MODEL != "deepseek-ai/deepseek-v4.1-flash"
+
+
+# ---------------------------------------------- probe timeouts (DEC-072)
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+
+
+def _link(name):
+    return Link(name, "some/model")
+
+
+def test_every_provider_declares_a_positive_probe_timeout():
+    for name, provider in registry.PROVIDERS.items():
+        assert provider.probe_timeout > 0, name
+
+
+def test_the_nim_probe_waits_past_its_measured_queue():
+    """A working key answered a 2-token ping in 48.9 / 57.0 / 49.7s on
+    2026-09-23 -- the queue, not the model. A 45s probe called that dead."""
+    assert registry.probe_timeout(_link("nvidia")) >= 2 * 57.0
+    assert registry.probe_timeout(_link("groq")) == registry.DEFAULT_PROBE_TIMEOUT
+
+
+@pytest.mark.parametrize("name", list(registry.PROVIDERS))
+def test_a_probe_can_never_inherit_a_request_timeout(name, monkeypatch):
+    """The probe exists to be cheaper than a request. If it could wait as long
+    as one, preflight would be the delay it was written to prevent."""
+    # custom resolves its base URL at build time and cannot exist without one.
+    monkeypatch.setenv("LLM_CUSTOM_BASE_URL", "http://localhost:11434/v1")
+    link = _link(name)
+    assert registry.probe_timeout(link) < registry.effective_timeout(link)
+    assert registry.work_probe_timeout(link) <= registry.effective_timeout(link)
+
+
+def test_the_work_probe_keeps_its_old_cap_where_the_ping_did_not_change(monkeypatch):
+    """90s was 2 x 45s; only a provider that declared a slower ping moves."""
+    monkeypatch.setenv("LLM_CUSTOM_BASE_URL", "http://localhost:11434/v1")
+    for name, provider in registry.PROVIDERS.items():
+        if provider.probe_timeout == registry.DEFAULT_PROBE_TIMEOUT:
+            assert registry.work_probe_timeout(_link(name)) == 90.0, name
+    assert registry.work_probe_timeout(_link("nvidia")) == 240.0
+
+
+def test_an_explicit_probe_override_wins():
+    assert registry.probe_timeout(_link("nvidia"), override=5) == 5.0
+    assert registry.probe_timeout(_link("nvidia"), override=0) == 120.0
+
+
+def test_an_old_style_provider_record_still_builds():
+    """The new fields are trailing and defaulted."""
+    p = registry.Provider("x", "u", "K", 1, None, (), 60, "n")
+    assert p.probe_timeout == registry.DEFAULT_PROBE_TIMEOUT
+    assert p.primary is True
+    assert p.signup_url == ""
+
+
+# ------------------------------------------- primary vs floor (DEC-073)
+
+def test_nim_is_the_floor_and_something_else_is_primary():
+    assert registry.PROVIDERS["nvidia"].primary is False
+    assert not registry.is_primary(_link("nvidia"))
+    primaries = [n for n, p in registry.PROVIDERS.items() if p.primary]
+    # The default chain's first two links must be primaries, or the gate that
+    # refuses an NVIDIA-only job would have nothing to send the user to.
+    for link in registry.parse_chain(registry.DEFAULT_LLM_CHAIN)[:2]:
+        assert link.provider in primaries
+
+
+def test_every_hosted_provider_names_where_to_get_its_free_key():
+    for name, provider in registry.PROVIDERS.items():
+        if name == "custom":
+            continue  # the user's own endpoint; there is nothing to sign up for
+        assert provider.signup_url.startswith("https://"), name
+
+
+def test_every_signup_url_is_the_one_env_example_documents():
+    """One source for the URL. .env.example is the human-facing list, and it is
+    this test's oracle rather than a fourth copy that can drift."""
+    text = (ROOT / ".env.example").read_text(encoding="utf-8")
+    for name, provider in registry.PROVIDERS.items():
+        if provider.signup_url:
+            assert provider.signup_url in text, name
