@@ -182,6 +182,15 @@ async def create_job(req: JobCreateRequest) -> JobResponse:
 
     reuse_job_id = payload.pop("reuse_job_id", None)
 
+    # A rerun reuses the job's id and output directory. Two workers on one
+    # directory would overwrite each other's files, and the old one's late
+    # writes would land on the new record.
+    if reuse_job_id and worker.is_active(reuse_job_id):
+        raise HTTPException(
+            status_code=409,
+            detail="That job is still running. Cancel it, or wait for it to finish, then rerun it.",
+        )
+
     # Reusing a job means rerunning it against the AI output it already has, so
     # default to loading that instead of paying for the analysis again.
     #
@@ -283,6 +292,28 @@ async def get_job(job_id: str) -> JobResponse:
     return _job_to_response(job)
 
 
+@router.post("/{job_id}/cancel", status_code=202)
+async def cancel_job(job_id: str) -> JobResponse:
+    """Stop a queued or running job.
+
+    It is marked cancelled at once, starts no further step, and its ffmpeg is
+    killed now. A provider request or transcription chunk already in flight
+    finishes or times out first (clipping/cancel.py). Its output directory is
+    kept, so a saved transcript is still there for a rerun (DEC-022).
+    """
+    outcome = store.request_cancel(job_id)
+    if outcome == "missing":
+        raise HTTPException(status_code=404, detail="Job not found")
+    if outcome == "terminal":
+        status = store.get_job(job_id).get("status")
+        raise HTTPException(
+            status_code=409,
+            detail=f"This job is already '{getattr(status, 'value', status)}'.",
+        )
+    worker.cancel(job_id)
+    return _job_to_response(store.get_job(job_id))
+
+
 @router.delete("/{job_id}")
 async def delete_job(job_id: str) -> dict:
     """Cancel/delete a job."""
@@ -290,16 +321,10 @@ async def delete_job(job_id: str) -> dict:
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    # If running, mark as cancelled first
-    running_states = {
-        JobStatus.QUEUED.value,
-        JobStatus.DOWNLOADING.value,
-        JobStatus.TRANSCRIBING.value,
-        JobStatus.ANALYZING.value,
-        JobStatus.RENDERING.value,
-    }
-    if job.get("status") in running_states:
-        store.set_status(job_id, JobStatus.CANCELLED)
+    # Stop it first. Marking it cancelled was all this used to do: the worker
+    # thread carried on, spending quota and CPU on a job nobody could see.
+    if store.request_cancel(job_id) == "cancelled":
+        worker.cancel(job_id)
 
     store.delete_job(job_id)
     return {"message": "Job deleted", "id": job_id}
