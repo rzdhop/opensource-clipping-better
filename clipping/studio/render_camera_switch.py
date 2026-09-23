@@ -33,6 +33,9 @@ FIREFOX_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:148.0) Gecko/20100101
 
 _helpers = _load_studio_internal_module("helpers.py", "clipping_studio_helpers")
 _ffmpeg_utils = _load_studio_internal_module("ffmpeg_utils.py", "clipping_studio_ffmpeg_utils")
+# Loaded once here, not inside the frame loop: the loader re-executes the file
+# on every call, which also emptied the watermark's renderer cache every frame.
+_wm_mod = _load_studio_internal_module("watermark.py", "clipping_studio_watermark")
 format_seconds = _helpers.format_seconds
 escape_ffmpeg_filter_value = _helpers.escape_ffmpeg_filter_value
 detect_video_encoder = _ffmpeg_utils.detect_video_encoder
@@ -718,7 +721,6 @@ def buat_video_camera_switch(
 
             # --- WATERMARK OVERLAY ---
             if getattr(cfg, "watermark_enabled", False):
-                _wm_mod = _load_studio_internal_module("watermark.py", "clipping_studio_watermark")
                 out_frame = _wm_mod.apply_watermark(out_frame, cfg)
 
             tracking_log.append((t, cx))
