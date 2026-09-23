@@ -45,17 +45,24 @@ uv sync
 
 ```bash
 # Copy the template
-cp .env.sample .env
+cp .env.example .env
 ```
 
-Then edit the `.env` file and add your API keys:
+Then edit the `.env` file. The analysis runs on a chain of free providers, and
+it needs **at least one of Groq or Gemini** -- a job whose only key is NVIDIA's
+is refused before it starts, because NVIDIA's free tier is too slow to carry
+one on its own. All three are free with no card:
 
 ```env
-GOOGLE_API_KEY=your-gemini-api-key-here
-PEXELS_API_KEY=your-pexels-api-key-here      # Optional
-HF_TOKEN=your-huggingface-token-here          # Optional (for podcast modes)
-NVIDIA_API_KEY=your-nvidia-api-key-here       # Optional (for NVIDIA NIM provider)
+GROQ_API_KEY=your-groq-key-here              # https://console.groq.com/keys
+GOOGLE_API_KEY=your-gemini-key-here          # https://aistudio.google.com/apikey
+NVIDIA_API_KEY=your-nvidia-key-here          # Optional backup: https://build.nvidia.com/
+PEXELS_API_KEY=your-pexels-key-here          # Optional (B-roll)
+HF_TOKEN=your-huggingface-token-here         # Optional (podcast modes)
 ```
+
+`.env.example` documents every other setting (the chain order, the API token,
+server-side downloads).
 
 ### 4. Run Your First Clip
 

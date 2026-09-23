@@ -46,7 +46,7 @@ cd rzdhop-clips
 pip install -r requirements.txt
 
 # 3. Set up API keys
-cp .env.sample .env
+cp .env.example .env
 # Edit .env with your keys
 
 # 4. Run a test

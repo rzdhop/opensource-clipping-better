@@ -500,7 +500,7 @@ rzdhop-clips/
 ├── run_upload.py            # CLI auto-uploader YouTube
 ├── run_fb_upload.py         # CLI auto-uploader Facebook Pages Reels
 ├── pyproject.toml           # Dependensi & metadata proyek
-├── .env.sample              # Template API key
+├── .env.example             # Template environment (API key, chain, serving)
 ├── .gitignore
 ├── README.md                # Dokumentasi (English)
 ├── README_ID.md             # Dokumentasi (Indonesia)
