@@ -32,7 +32,7 @@
     ctranslate2 is installed here, so the transcript path's import of it
     becomes visible. The Ubuntu env does not have the package, so this
     **may be a real bug hidden there** (logged as a follow-up).
-- **Phase:** IMPLEMENT. Group 1 merged and pushed (`7d374b2`). Next stage: S12 (D5, hook-v2 temp cleanup) on feature/render-fixes; then the Group 2 framemd5 render parity check (07d1a7b vs head, two scratch worktrees).
+- **Phase:** IMPLEMENT. Group 1 merged and pushed (`7d374b2`). Next stage: the Group 2 framemd5 render parity check (07d1a7b vs head, two scratch worktrees).
 - **Open questions:** none. Two scope calls were made in chat: loudnorm is
   an opt-in flag, default off; cancel uses checkpoints plus a kill of the
   job's ffmpeg children.
@@ -52,7 +52,7 @@
 | 9 | D6 hook fetch timeout/cap | feature/render-fixes | **done** |
 | 10 | D4 memoise encoder probes | feature/render-fixes | **done** |
 | 11 | D1 watermark load hoisted + settings-keyed cache | feature/render-fixes | **done** |
-| 12 | D5 hook-v2 temp cleanup | feature/render-fixes | pending |
+| 12 | D5 hook-v2 temp cleanup | feature/render-fixes | **done** |
 | 13 | B5 LLM_CHAIN note (no code) | feature/job-lifecycle | pending |
 | 14 | B1a cancel token + checkpoints | feature/job-lifecycle | pending |
 | 15 | B1b web cancel + child kill (**high risk**) | feature/job-lifecycle | pending |

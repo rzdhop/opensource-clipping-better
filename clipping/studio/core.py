@@ -258,6 +258,12 @@ def proses_klip(
 
     std_p = get_ts_encode_args(video_encoder, fps=30)
 
+    # Intermediates named per hook-v2 item and per trimmed segment. The happy
+    # path deletes them as it goes; the finally deletes what an ffmpeg failure
+    # part-way through left behind. They are relative paths on purpose: the
+    # concat: protocol below cannot take a Windows drive letter (DEC-008).
+    step_temps = []
+
     try:
         # HOOK
         hook_v2_data = clip.get("hook_v2", {})
@@ -291,6 +297,7 @@ def proses_klip(
                 item_end = float(item["end_time"])
                 item_silent = f"h_v2_silent_{rank}_{i}.mp4"
                 item_ts = f"h_v2_ts_{rank}_{i}.ts"
+                step_temps += [item_silent, item_ts]
 
                 # Render visual (face-tracked crop)
                 buat_video_hybrid(
@@ -325,6 +332,7 @@ def proses_klip(
                 # Transition between items AND after the last item (before main clip)
                 trans_mp4 = f"h_v2_trans_{rank}_{i}.mp4"
                 trans_ts = f"h_v2_trans_{rank}_{i}.ts"
+                step_temps += [trans_mp4, trans_ts]
                 trans_type = hook_v2_data.get("transition", {}).get("type", "white_flash") if hook_v2_data else "white_flash"
                 if "glitch" in trans_type:
                     v2_helpers.create_glitch_transition(
@@ -480,6 +488,7 @@ def proses_klip(
                 s_silent = f"m_seg_silent_{rank}_{idx}.mp4"
                 s_ass = f"m_seg_ass_{rank}_{idx}.ass"
                 s_ts = f"m_seg_ts_{rank}_{idx}.ts"
+                step_temps += [s_silent, s_ass, s_ts]
 
                 # Render visual per segment
                 if use_split:
@@ -576,6 +585,7 @@ def proses_klip(
             if aktif_bgm and file_bgm:
                 print("   🎵 Applying BGM to segmented clip...")
                 m_ts_bgm = f"m_bgm_{rank}.ts"
+                step_temps.append(m_ts_bgm)
                 seg_total_dur = sum(float(s["end_time"]) - float(s["start_time"]) for s in keep_segments)
                 bgm_mode = getattr(cfg, "bgm_mode", "ducking")
                 filter_complex_seg = build_bgm_filter(
@@ -1114,7 +1124,7 @@ def proses_klip(
         return manifest_item
 
     finally:
-        files_to_remove = [h_ts, m_ts, a_hook, a_main, h_silent, m_silent]
+        files_to_remove = [h_ts, m_ts, a_hook, a_main, h_silent, m_silent] + step_temps
         if dev_dual:
             files_to_remove.extend([h_ts_dev, m_ts_dev, m_silent.replace(".ts", "_dev.ts")])
             
