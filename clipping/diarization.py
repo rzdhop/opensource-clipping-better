@@ -50,6 +50,7 @@ def extract_audio(video_path: str, audio_output_path: str) -> str:
 
     cmd = [
         "ffmpeg",
+        "-hide_banner",  # stderr is reported on failure; keep it to the reason
         "-y",
         "-i",
         video_path,
@@ -63,12 +64,20 @@ def extract_audio(video_path: str, audio_output_path: str) -> str:
         audio_output_path,
     ]
 
-    subprocess.run(
+    result = subprocess.run(
         cmd,
-        check=True,
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
     )
+    if result.returncode != 0:
+        # The callers print this when they fall back to a normal render, so it
+        # has to carry ffmpeg's reason -- and only its tail, not every progress
+        # line before it.
+        tail = result.stderr.decode("utf-8", "replace").strip().splitlines()[-20:]
+        raise RuntimeError(
+            f"ffmpeg could not extract audio from {video_path} "
+            f"(exit {result.returncode}):\n" + "\n".join(tail)
+        )
 
     return audio_output_path
 
