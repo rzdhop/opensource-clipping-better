@@ -3,6 +3,15 @@ FFmpeg and encoder utilities for Studio rendering pipeline.
 """
 
 import subprocess
+import time
+
+# Every render path calls detect_video_encoder once per clip. The encoder list
+# is a property of the ffmpeg binary, so it is read once per process; a runtime
+# probe's answer is kept this long, so a long-lived server still notices a GPU
+# that appeared or went away.
+_PROBE_TTL_SECONDS = 600
+_encoder_listing = None
+_runtime_probes = {}  # tuple(encoder_args) -> (checked_at, ok, stderr_tail)
 
 def format_seconds(seconds):
     """
@@ -31,13 +40,16 @@ def _ffmpeg_has_encoder(name: str) -> bool:
     Returns:
         True if encoder exists in local FFmpeg build.
     """
-    result = subprocess.run(
-        ["ffmpeg", "-hide_banner", "-encoders"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    return name in result.stdout
+    global _encoder_listing
+    if _encoder_listing is None:
+        result = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-encoders"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        _encoder_listing = result.stdout
+    return name in _encoder_listing
 
 
 def _test_encoder_runtime(encoder_args):
@@ -65,10 +77,17 @@ def _test_encoder_runtime(encoder_args):
         + encoder_args
         + ["-pix_fmt", "yuv420p", "-an", "-f", "null", "-"]
     )
+    key = tuple(encoder_args)
+    cached = _runtime_probes.get(key)
+    if cached is not None and time.monotonic() - cached[0] < _PROBE_TTL_SECONDS:
+        return cached[1], cached[2]
+
     result = subprocess.run(
         cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
     )
-    return result.returncode == 0, result.stderr[-1000:]
+    ok, tail = result.returncode == 0, result.stderr[-1000:]
+    _runtime_probes[key] = (time.monotonic(), ok, tail)
+    return ok, tail
 
 
 def _get_auto_bitrate(height: int) -> str:
