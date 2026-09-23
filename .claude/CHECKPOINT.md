@@ -32,7 +32,7 @@
     ctranslate2 is installed here, so the transcript path's import of it
     becomes visible. The Ubuntu env does not have the package, so this
     **may be a real bug hidden there** (logged as a follow-up).
-- **Phase:** IMPLEMENT. Groups 1-2 merged and pushed (`b6202c9`); Group 3 merged and pushed (`c627ad7`). S19 merged (`2632033`). S20 committed; next: real render with and without --loudnorm, then S21 close-out.
+- **Phase:** IMPLEMENT. Groups 1-2 merged and pushed (`b6202c9`); Group 3 merged and pushed (`c627ad7`). S19 merged (`2632033`). S20 verified on a real render; next: S21 close-out (docs, DEC-075..085, artifacts), then merge + push.
 - **Open questions:** none. Two scope calls were made in chat: loudnorm is
   an opt-in flag, default off; cancel uses checkpoints plus a kill of the
   job's ffmpeg children.
@@ -60,7 +60,7 @@
 | 17 | B4 queue cap | feature/job-lifecycle | **done** |
 | 18 | B3 dashboard Cancel/Delete | feature/job-lifecycle | **done** |
 | 19 | D2 studio real package (**RISKIEST**) | feature/studio-package | **done**, frame parity verified |
-| 20 | D3 opt-in loudnorm | feature/loudnorm | **done** (render check pending) |
+| 20 | D3 opt-in loudnorm | feature/loudnorm | **done**, real render verified |
 | 21 | docs + DEC-075..085 + close-out | — | pending |
 
 ### Regression contract for this task
