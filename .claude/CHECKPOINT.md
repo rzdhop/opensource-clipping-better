@@ -1,16 +1,26 @@
-## CURRENT TASK — chain readiness gate + per-provider probe timeout (IN PROGRESS)
-- **Phase:** IMPLEMENT. **Current stage:** 1 of 8. **Plan:**
-  `~/.claude/plans/still-not-working-groovy-puffin.md` (approved in chat).
-- **Checkpoint commit:** `e991ff8` (clean tree).
-- **Tier-1 baseline:** `python -m pytest -p no:warnings` -> **1299 passed, 0 failed**
-  (this box has fastapi installed, so nothing skips).
-- **Next action:** Stage 1 -- `probe_timeout` / `primary` / `signup_url` on the
-  registry `Provider`.
-- **Open questions:** none. Decided in chat: block with override; "primary"
-  is a registry flag (groq/gemini/openrouter/mistral/custom primary, nvidia
-  the floor); scoped R2 gate (only when the chain NAMES a primary); override is
-  a Settings toggle on the web + `--allow-slow-chain` on the CLI; probe timeout
-  per provider (nvidia 120, custom 60, rest 45); no new providers this task.
+## CURRENT TASK — chain readiness gate + per-provider probe timeout (COMPLETE, awaiting Tier-2 ack + deploy)
+- **Phase:** DOCUMENT done. All 8 stages committed; head `9050839`.
+- **Plan:** `~/.claude/plans/still-not-working-groovy-puffin.md` (approved in chat).
+- **Checkpoint commit before the work:** `e991ff8` (+ `dafcf0b`, the checkpoint note).
+- **Tier-1:** baseline 1299 passed -> now **1361 passed, 0 failed**
+  (`python -m pytest -p no:warnings`). Every behaviour test was verified to
+  FAIL against its pre-change code; guards that pass both ways are named in the log.
+- **Tier-2:** no E2E browser suite exists in this repo. Verified instead:
+  live CLI refusal (0.08s), live probe of the real NVIDIA key (39.1s / 57.4s --
+  both alive now, the latter dead under the old 45s), live test-chain route, and
+  a manual browser pass of New Job + Settings on a throwaway app serving the
+  fresh build. **Awaiting the human's acknowledgement, and a container rebuild**
+  (dashboard + backend changed): `docker compose rm -sfv backend && docker compose up -d --build backend` (sudo).
+- **Dependency audit:** pip-audit is not installed on this box; this task changed
+  no dependency file (requirements.txt, pyproject.toml, package*.json untouched).
+- **Next action:** the human sets a free GOOGLE_API_KEY (and/or GROQ_API_KEY,
+  see A-009), rebuilds, and reruns the job.
+- **Open questions:** none.
+- **Follow-ups, deliberately not done:** `LLM_CHAIN` is not in
+  `settings_store.PERSISTED_KEYS` (a runtime-set chain vanishes on restart);
+  adding new free providers needs a benchmark per model; the web path still has
+  no `--no-preflight` equivalent; `tests/test_clip_length.py` leaves an empty
+  `outputs/jobid` behind (pre-existing).
 
 ### Why (measured 2026-09-23)
 The failing job had ONLY `NVIDIA_API_KEY`. With that key the NIM ping
@@ -32,14 +42,14 @@ cap reported a live provider as dead. Groq/Gemini keys were never set.
 ### Stage ledger
 | S | Stage | State |
 |---|---|---|
-| 1 | registry: probe_timeout, primary, signup_url | pending |
-| 2 | probes resolve their cap per link | pending |
-| 3 | chain_readiness + CLI gate | pending |
-| 4 | web plumbing: preflight + allow_slow_chain | pending |
-| 5 | refusal at POST /api/jobs | pending |
-| 6 | POST /api/settings/test-chain | pending |
-| 7 | dashboard | pending |
-| 8 | docs + DECISIONS | pending |
+| 1 | registry: probe_timeout, primary, signup_url | **done** `e8fa95c` |
+| 2 | probes resolve their cap per link | **done** `f66328e` |
+| 3 | chain_readiness + CLI gate | **done** `d9c5f55` |
+| 4 | web plumbing: allow_slow_chain | **done** `fbf41c4` |
+| 5 | refusal at POST /api/jobs | **done** `7a28316` |
+| 6 | POST /api/settings/test-chain | **done** `e6e73dc` |
+| 7 | dashboard | **done** `abd0125` |
+| 8 | docs + DECISIONS | **done** `9050839` |
 
 ---
 
