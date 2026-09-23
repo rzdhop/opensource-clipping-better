@@ -378,6 +378,10 @@ class SettingsResponse(BaseModel):
     openai_compat_base_url: str = ""
     openai_compat_model: str = ""
     allow_slow_chain: bool = False
+    # Why a chain job would be refused right now, or "" when it would start.
+    # The server's own verdict (chain_readiness), so the dashboard never keeps a
+    # second copy of the rule that could disagree with POST /api/jobs.
+    chain_blocked_reason: str = ""
     default_clips: int = 7
     default_ratio: str = "9:16"
     default_font_style: str = "HORMOZI"

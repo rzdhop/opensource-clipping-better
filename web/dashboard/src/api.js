@@ -210,6 +210,23 @@ export async function updateSettings(payload) {
   return res.json()
 }
 
+/**
+ * Ping every link of the provider chain and report each one. Can take a couple
+ * of minutes: NVIDIA's free tier queues, and its probe is allowed 120s.
+ */
+export async function testChain(payload = {}) {
+  const res = await request('/settings/test-chain', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail || 'The chain test failed')
+  }
+  return res.json()
+}
+
 export async function fetchHealth() {
   // Public: no token needed, so the login screen can show system status.
   const res = await fetch(`${API_BASE}/health`)

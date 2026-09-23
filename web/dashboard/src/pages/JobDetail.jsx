@@ -316,7 +316,9 @@ function JobDetail() {
       {job.error && (
         <div className="card" style={{ marginBottom: '16px', borderColor: 'rgba(239,68,68,0.2)' }}>
           <h3 style={{ color: 'var(--error)', fontSize: '14px', marginBottom: '8px' }}>❌ Error</h3>
-          <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{job.error}</p>
+          {/* pre-wrap: the preflight and chain-readiness errors are one line
+              per link, and a <p> collapsed them into one run-on sentence. */}
+          <p style={{ fontSize: '13px', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>{job.error}</p>
         </div>
       )}
 

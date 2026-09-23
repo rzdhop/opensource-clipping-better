@@ -303,3 +303,24 @@ def test_the_probe_runs_off_the_event_loop_and_off_the_job_pool():
     body = text[text.index("async def run_chain_test("):]
     assert "asyncio.to_thread(_probe_every_link" in body
     assert "_executor" not in body
+
+
+# ------------------------------------------- the dashboard's view (Stage 7)
+
+def test_settings_report_the_same_verdict_the_job_route_would(
+        client, created, settings_env):
+    """The page shows this instead of re-deriving the rule in JavaScript."""
+    settings_env.set_settings_env({"NVIDIA_API_KEY": "k"}, persist=False)
+    reason = client.get("/api/settings").json()["chain_blocked_reason"]
+    refusal = client.post("/api/jobs", json={"upload_filename": "v.mp4"}).json()["detail"]
+    assert reason and reason == refusal
+
+    settings_env.set_settings_env({"GROQ_API_KEY": "g"}, persist=False)
+    assert client.get("/api/settings").json()["chain_blocked_reason"] == ""
+
+
+def test_a_saved_chain_that_names_no_primary_is_not_reported_blocked(
+        client, settings_env, monkeypatch):
+    monkeypatch.setenv("LLM_CHAIN", "nvidia/some-model")
+    settings_env.set_settings_env({"NVIDIA_API_KEY": "k"}, persist=False)
+    assert client.get("/api/settings").json()["chain_blocked_reason"] == ""

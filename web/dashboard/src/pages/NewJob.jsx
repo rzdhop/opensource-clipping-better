@@ -76,8 +76,8 @@ function matchPreset({ renderHeight, videoCq, videoCrf, videoScaleAlgo }) {
 
 /** A one-line notice under the control it concerns. */
 function Notice({ kind = 'info', children }) {
-  const color = kind === 'warn' ? 'var(--warning)' : 'var(--info)'
-  const bg = kind === 'warn' ? 'var(--warning-dim)' : 'var(--info-dim)'
+  const color = { warn: 'var(--warning)', error: 'var(--error)' }[kind] || 'var(--info)'
+  const bg = { warn: 'var(--warning-dim)', error: 'var(--error-dim)' }[kind] || 'var(--info-dim)'
   return (
     <div style={{
       background: bg,
@@ -435,12 +435,20 @@ function NewJob() {
     )
   )
 
+  // The server's own verdict (chain_readiness), not a copy of the rule: a
+  // chain job whose only keyed link is the slow floor is refused by
+  // POST /api/jobs, and saying so before the click is the whole point.
+  const chainBlocked = Boolean(
+    settings && !renderOnly && aiProvider === 'chain' && settings.chain_blocked_reason
+  )
+
   const providerWarning = (() => {
     if (!settings || renderOnly) return null
     if (aiProvider === 'chain' && !anyChainKeySet) {
       return <>No provider key at all, so every link in the chain will be skipped
         and this job will stop at the analysis step. Add one under
-        <strong> Settings</strong> — NVIDIA and Gemini are both free.</>
+        <strong> Settings</strong> — Groq and Gemini are both free, and both
+        are far faster than NVIDIA.</>
     }
     if (aiProvider === 'openai_compat' && missingEndpointParts.length) {
       return <>The custom endpoint is missing its {missingEndpointParts.join(', ')}.
@@ -465,12 +473,14 @@ function NewJob() {
       <div className="card" style={{ marginBottom: '16px', background: 'var(--info-dim)' }}>
         <div style={{ fontSize: '13px', lineHeight: 1.6 }}>
           <strong>Set an AI key before you start.</strong> Picking the moments needs
-          one, and both recommended options are free with no credit card:{' '}
-          <a href="https://build.nvidia.com/" target="_blank" rel="noopener" style={{ color: 'var(--accent-hover)' }}>NVIDIA NIM</a>
-          {' '}(the default) or{' '}
+          one, and the two the chain tries first are free with no credit card:{' '}
+          <a href="https://console.groq.com/keys" target="_blank" rel="noopener" style={{ color: 'var(--accent-hover)' }}>Groq</a>
+          {' '}(fastest) or{' '}
           <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" style={{ color: 'var(--accent-hover)' }}>Google Gemini</a>.
-          Already have a key from OpenRouter, Groq, Mistral, xAI or a local Ollama?
-          Choose <strong>Custom endpoint</strong> below and set it up in Settings.
+          NVIDIA NIM is the chain's slow last resort: it can back them up, but
+          cannot carry a job on its own. Already have a key from xAI or a local
+          Ollama? Choose <strong>Custom endpoint</strong> below and set it up in
+          Settings.
           <br />
           <span style={{ color: 'var(--text-secondary)' }}>
             Fastest run: upload a transcript alongside the video to skip
@@ -722,7 +732,30 @@ function NewJob() {
                 <option value="chain">Provider chain (recommended)</option>
                 <option value="openai_compat">Custom endpoint (OpenAI-compatible)</option>
               </select>
-              {providerWarning && <Notice kind="warn">⚠️ {providerWarning}</Notice>}
+              {chainBlocked ? (
+                <Notice kind="error">
+                  <div>
+                    ⛔ Only the slow floor of the chain has a key, so this job
+                    cannot start. Add a free Groq or Gemini key under
+                    <strong> Settings</strong>, or turn on “Run on the slow
+                    chain anyway” there.
+                  </div>
+                  <div style={{ marginTop: '6px' }}>
+                    <a href="https://console.groq.com/keys" target="_blank" rel="noopener" style={{ color: 'var(--accent)' }}>Groq key →</a>
+                    {'  ·  '}
+                    <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" style={{ color: 'var(--accent)' }}>Gemini key →</a>
+                  </div>
+                  {/* The server's own words: which links, which env vars. Laid
+                      out for a terminal, so it is kept out of the narrow column
+                      until asked for. */}
+                  <details style={{ marginTop: '6px' }}>
+                    <summary style={{ cursor: 'pointer' }}>Why?</summary>
+                    <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', marginTop: '4px' }}>
+                      {settings.chain_blocked_reason}
+                    </div>
+                  </details>
+                </Notice>
+              ) : providerWarning && <Notice kind="warn">⚠️ {providerWarning}</Notice>}
             </div>
 
             {aiProvider === 'openai_compat' && (
@@ -942,13 +975,19 @@ function NewJob() {
 
         {/* Error */}
         {error && (
-          <div style={{ background: 'var(--error-dim)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 'var(--radius-md)', padding: '12px 16px', marginBottom: '16px', color: 'var(--error)', fontSize: '13px' }}>
+          <div style={{ background: 'var(--error-dim)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 'var(--radius-md)', padding: '12px 16px', marginBottom: '16px', color: 'var(--error)', fontSize: '13px', whiteSpace: 'pre-wrap' }}>
             ⚠️ {error}
           </div>
         )}
 
         {/* Submit */}
-        <button type="submit" className="btn btn-primary" disabled={submitting} style={{ fontSize: '14px', padding: '12px 28px' }}>
+        <button
+          type="submit"
+          className="btn btn-primary"
+          disabled={submitting || chainBlocked}
+          title={chainBlocked ? 'Add a Groq or Gemini key in Settings first' : undefined}
+          style={{ fontSize: '14px', padding: '12px 28px' }}
+        >
           {submitting ? <><span className="spinner"></span> Processing...</> : '🚀 Start Clipping'}
         </button>
       </form>

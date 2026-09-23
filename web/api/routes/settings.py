@@ -57,6 +57,19 @@ def _check_ffmpeg() -> bool:
         return False
 
 
+def _chain_blocked_reason(env) -> str:
+    """What POST /api/jobs would refuse a chain job with right now, or ""."""
+    from clipping.config import WEB_SLOW_CHAIN_HINT, chain_readiness
+
+    readiness = chain_readiness(
+        env.get("LLM_CHAIN", os.environ.get("LLM_CHAIN", "")),
+        resolve_provider_keys(env),
+        allow_slow=env_flag(env, "ALLOW_SLOW_CHAIN"),
+        hint=WEB_SLOW_CHAIN_HINT,
+    )
+    return "" if readiness.ready else readiness.message
+
+
 @router.get("/api/settings")
 async def get_settings() -> SettingsResponse:
     """Get current settings (API keys are masked)."""
@@ -94,6 +107,7 @@ async def get_settings() -> SettingsResponse:
         openai_compat_base_url=compat_url,
         openai_compat_model=compat_model,
         allow_slow_chain=env_flag(env, "ALLOW_SLOW_CHAIN"),
+        chain_blocked_reason=_chain_blocked_reason(env),
         default_clips=int(env.get("DEFAULT_CLIPS", "7")),
         default_ratio=env.get("DEFAULT_RATIO", "9:16"),
         default_font_style=env.get("DEFAULT_FONT_STYLE", "HORMOZI"),

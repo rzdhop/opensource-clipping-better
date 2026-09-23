@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { fetchSettings, updateSettings } from '../api'
+import { fetchSettings, testChain, updateSettings } from '../api'
 
 const PasswordInput = ({ value, onChange, placeholder, isSet }) => {
   const [show, setShow] = useState(false)
@@ -43,7 +43,7 @@ const SetBadge = ({ on }) => on
 /**
  * Base URLs for services that speak the OpenAI chat API.
  *
- * Conveniences, not endorsements: the project recommends NVIDIA NIM and Gemini
+ * Conveniences, not endorsements: the project recommends Groq and Gemini
  * because both still hand out a free key with no card. This list is for people
  * who already have a key somewhere else.
  */
@@ -76,12 +76,45 @@ function Settings() {
   const [compatUrl, setCompatUrl] = useState('')
   const [compatModel, setCompatModel] = useState('')
 
+  // Run a job even when only the slow floor (NVIDIA) has a key. Prefilled.
+  const [allowSlowChain, setAllowSlowChain] = useState(false)
+
+  // The chain test. It can take a couple of minutes, so it counts seconds
+  // while it runs: a bare spinner reads as "hung" long before NVIDIA answers.
+  const [testing, setTesting] = useState(false)
+  const [testStarted, setTestStarted] = useState(0)
+  const [testElapsed, setTestElapsed] = useState(0)
+  const [testResult, setTestResult] = useState(null)
+  const [testError, setTestError] = useState('')
+
+  useEffect(() => {
+    if (!testing) return undefined
+    const id = setInterval(() => setTestElapsed(Math.round((Date.now() - testStarted) / 1000)), 1000)
+    return () => clearInterval(id)
+  }, [testing, testStarted])
+
+  const handleTestChain = async () => {
+    setTesting(true)
+    setTestStarted(Date.now())
+    setTestElapsed(0)
+    setTestResult(null)
+    setTestError('')
+    try {
+      setTestResult(await testChain())
+    } catch (err) {
+      setTestError(err.message)
+    } finally {
+      setTesting(false)
+    }
+  }
+
   useEffect(() => {
     fetchSettings()
       .then(data => {
         setSettings(data)
         setCompatUrl(data.openai_compat_base_url || '')
         setCompatModel(data.openai_compat_model || '')
+        setAllowSlowChain(Boolean(data.allow_slow_chain))
         setLoading(false)
       })
       .catch(() => setLoading(false))
@@ -111,6 +144,10 @@ function Settings() {
       if (compatModel !== (settings?.openai_compat_model || '')) {
         payload.openai_compat_model = compatModel.trim()
       }
+      // Same rule: turning it OFF must be sent too, or it could never be undone.
+      if (allowSlowChain !== Boolean(settings?.allow_slow_chain)) {
+        payload.allow_slow_chain = allowSlowChain
+      }
 
       if (Object.keys(payload).length === 0) {
         setMsg('No changes to save')
@@ -122,6 +159,7 @@ function Settings() {
       setSettings(updated)
       setCompatUrl(updated.openai_compat_base_url || '')
       setCompatModel(updated.openai_compat_model || '')
+      setAllowSlowChain(Boolean(updated.allow_slow_chain))
       setGoogleKey('')
       setPexelsKey('')
       setHfToken('')
@@ -195,9 +233,28 @@ function Settings() {
                 isSet={settings?.nvidia_api_key_set}
               />
               <p className="form-hint">
-                Free, no credit card.{' '}
+                Free, no credit card, but slow: ~12 tokens/s behind a queue that
+                can hold a request for a minute. On its own it cannot carry the
+                analysis, so a job with only this key is refused unless the
+                switch below is on.{' '}
                 <a href="https://build.nvidia.com/" target="_blank" rel="noopener" style={{ color: 'var(--accent)' }}>Get a key →</a>
               </p>
+              <label style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', marginTop: '8px', fontSize: '13px', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={allowSlowChain}
+                  onChange={(e) => setAllowSlowChain(e.target.checked)}
+                  style={{ marginTop: '2px' }}
+                />
+                <span>
+                  Run on the slow chain anyway
+                  <span className="form-hint" style={{ display: 'block', marginTop: '2px' }}>
+                    Lets a job start when NVIDIA is the only keyed link. Expect
+                    the analysis to take tens of minutes, and windows to be
+                    skipped when the time budget runs out.
+                  </span>
+                </span>
+              </label>
             </div>
 
             <div className="form-group">
@@ -290,12 +347,39 @@ function Settings() {
             </div>
           </div>
 
+          {/* Chain test */}
+          <div className="settings-section">
+            <h3>🩺 Provider chain</h3>
+            <p className="form-hint" style={{ marginTop: '-6px', marginBottom: '14px' }}>
+              Asks every link of the chain for one word, with the keys saved on
+              the server — save new keys first. A job needs at least one fast
+              link (Groq, Gemini, OpenRouter or Mistral) to have a key.
+            </p>
+            <button type="button" className="btn btn-secondary" onClick={handleTestChain} disabled={testing}>
+              {testing
+                ? <><span className="spinner"></span> Testing… {testElapsed}s</>
+                : 'Test provider chain'}
+            </button>
+            {testing && testElapsed >= 20 && (
+              <p className="form-hint" style={{ marginTop: '8px' }}>
+                Still waiting. NVIDIA's free tier queues requests and is allowed
+                up to 120s to answer.
+              </p>
+            )}
+            {testError && (
+              <p style={{ marginTop: '10px', fontSize: '13px', color: 'var(--error)', whiteSpace: 'pre-wrap' }}>
+                {testError}
+              </p>
+            )}
+            {testResult && <ChainTestResult result={testResult} />}
+          </div>
+
           {/* Custom OpenAI-compatible endpoint */}
           <div className="settings-section">
             <h3>🔌 Custom endpoint (optional)</h3>
             <p className="form-hint" style={{ marginTop: '-6px', marginBottom: '14px' }}>
               Point the analysis step at anything that speaks the OpenAI chat API.
-              Only worth setting if you already have a key elsewhere — NVIDIA and
+              Only worth setting if you already have a key elsewhere — Groq and
               Gemini above are both free.
             </p>
 
@@ -416,6 +500,57 @@ function Settings() {
           {saving ? <><span className="spinner"></span> Saving...</> : '💾 Save Settings'}
         </button>
       </form>
+    </div>
+  )
+}
+
+const STATUS_GLYPH = { ok: '✅', no_key: '⏭', failed: '✖' }
+
+/** One row per link, then the verdict: would a job on this chain start? */
+function ChainTestResult({ result }) {
+  return (
+    <div style={{ marginTop: '12px', fontSize: '13px' }}>
+      {result.results.map((row) => (
+        <div
+          key={row.label}
+          title={`Probe timeout: ${row.probe_timeout_seconds}s`}
+          style={{ padding: '6px 0', borderBottom: '1px solid var(--border-color)' }}
+        >
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'baseline', flexWrap: 'wrap' }}>
+            <span>{STATUS_GLYPH[row.status] || '·'}</span>
+            <code style={{ wordBreak: 'break-all' }}>{row.label}</code>
+            {row.latency_seconds != null && (
+              <span style={{ color: 'var(--text-tertiary)' }}>{row.latency_seconds.toFixed(1)}s</span>
+            )}
+            {!row.primary && (
+              <span style={{ color: 'var(--text-tertiary)' }}>floor</span>
+            )}
+          </div>
+          {row.status === 'no_key' && (
+            <div className="form-hint" style={{ marginLeft: '24px' }}>
+              No {row.env_key}.{' '}
+              {row.signup_url && (
+                <a href={row.signup_url} target="_blank" rel="noopener" style={{ color: 'var(--accent)' }}>Get a free key →</a>
+              )}
+            </div>
+          )}
+          {row.status === 'failed' && (
+            <div className="form-hint" style={{ marginLeft: '24px', color: 'var(--error)', wordBreak: 'break-word' }}>
+              {row.reason}
+            </div>
+          )}
+        </div>
+      ))}
+      <div style={{
+        marginTop: '10px',
+        color: result.ready ? 'var(--success)' : 'var(--error)',
+        whiteSpace: 'pre-wrap',
+        lineHeight: 1.45,
+      }}>
+        {result.ready
+          ? `✅ Jobs can start. ${result.live_link} answered first (${result.elapsed_seconds.toFixed(0)}s for the whole test).`
+          : result.message}
+      </div>
     </div>
   )
 }
