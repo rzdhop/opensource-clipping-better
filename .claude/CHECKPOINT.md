@@ -32,7 +32,7 @@
     ctranslate2 is installed here, so the transcript path's import of it
     becomes visible. The Ubuntu env does not have the package, so this
     **may be a real bug hidden there** (logged as a follow-up).
-- **Phase:** IMPLEMENT. Groups 1-2 merged and pushed (`b6202c9`); Group 3 merged and pushed (`c627ad7`). S19 committed; next: framemd5 parity vs c627ad7 (4 variants), revert if any differs, then S20.
+- **Phase:** IMPLEMENT. Groups 1-2 merged and pushed (`b6202c9`); Group 3 merged and pushed (`c627ad7`). S19 merged after frame parity; next: S20 (D3, opt-in loudnorm) on feature/loudnorm.
 - **Open questions:** none. Two scope calls were made in chat: loudnorm is
   an opt-in flag, default off; cancel uses checkpoints plus a kill of the
   job's ffmpeg children.
@@ -59,7 +59,7 @@
 | 16 | B2 delete removes files (**high risk**) | feature/job-lifecycle | **done** |
 | 17 | B4 queue cap | feature/job-lifecycle | **done** |
 | 18 | B3 dashboard Cancel/Delete | feature/job-lifecycle | **done** |
-| 19 | D2 studio real package (**RISKIEST**) | feature/studio-package | **done** (parity pending) |
+| 19 | D2 studio real package (**RISKIEST**) | feature/studio-package | **done**, frame parity verified |
 | 20 | D3 opt-in loudnorm | feature/loudnorm | pending |
 | 21 | docs + DEC-075..085 + close-out | — | pending |
 
