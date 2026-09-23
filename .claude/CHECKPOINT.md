@@ -32,7 +32,7 @@
     ctranslate2 is installed here, so the transcript path's import of it
     becomes visible. The Ubuntu env does not have the package, so this
     **may be a real bug hidden there** (logged as a follow-up).
-- **Phase:** IMPLEMENT. Group 1 merged and pushed (`7d374b2`). Group 2 merged and pushed (`b6202c9`). Next stage: Group 3 live Tier-2 (real backend: cancel mid-render, delete, 429, browser pass), then merge feature/job-lifecycle.
+- **Phase:** IMPLEMENT. Groups 1-2 merged and pushed (`b6202c9`); Group 3 (S13-S18) done and live-verified; next: merge feature/job-lifecycle, then S19 (D2, RISKIEST) on feature/studio-package.
 - **Open questions:** none. Two scope calls were made in chat: loudnorm is
   an opt-in flag, default off; cancel uses checkpoints plus a kill of the
   job's ffmpeg children.
