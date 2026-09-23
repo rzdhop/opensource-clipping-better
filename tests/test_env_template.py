@@ -15,9 +15,10 @@ import re
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 TEMPLATE = ROOT / ".env.example"
 
-# Everything a user reads when setting the project up.
+# Everything a user reads when setting the project up. Not CHANGELOG.md: it is
+# history, and recording that the file was removed is not pointing anyone at it.
 SHIPPED_DOCS = [
-    *ROOT.glob("*.md"),
+    *(path for path in ROOT.glob("*.md") if path.name != "CHANGELOG.md"),
     *(ROOT / "wiki").glob("*.md"),
     *(ROOT / "docs").rglob("*.md"),
     *(ROOT / "docs").rglob("*.html"),
