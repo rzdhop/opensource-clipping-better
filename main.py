@@ -59,13 +59,24 @@ def main():
     if not render_only:
         missing = missing_provider_key(cfg)
         if missing:
-            from clipping.config import PROVIDER_KEYS
-
             _, env_name = missing
-            others = [p for p in PROVIDER_KEYS if p != cfg.ai_provider]
+            # The parser's own choices, not PROVIDER_KEYS: that dict lists chain
+            # LINKS, and suggesting them as --ai-provider values sent the user
+            # to six flags argparse rejects.
+            others = [p for p in ("chain", "openai_compat") if p != cfg.ai_provider]
             print(f"❌ ERROR: {env_name} not found (active provider: {cfg.ai_provider}).")
             print(f"   Set via: export {env_name}='your-key' or create a .env file")
             print(f"   Or switch provider: --ai-provider {' | '.join(others)}")
+            sys.exit(1)
+
+        # A key on the slow floor alone is not a chain that can carry the
+        # analysis. After the key gate, so "no key at all" gets its own message;
+        # before the probe, so it costs nothing (DEC-073).
+        from clipping.config import chain_not_ready
+
+        slow = chain_not_ready(cfg)
+        if slow:
+            print(f"❌ ERROR: {slow}")
             sys.exit(1)
 
         # Having a key is not the same as answering. Ask the chain an 8-token

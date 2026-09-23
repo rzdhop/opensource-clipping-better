@@ -5,6 +5,7 @@ Holds all default values and builds the config from CLI args.
 """
 
 import argparse
+from collections import namedtuple
 import os
 import re
 from types import SimpleNamespace
@@ -218,6 +219,12 @@ GEMINI_FALLBACK_MODEL = "gemini-2.5-flash"
 # SDK installed. Re-pick the models with tools/bench_llm.py.
 LLM_CHAIN = os.environ.get("LLM_CHAIN", "").strip()
 LLM_TIMEOUT = 0  # 0 = use each provider's own default
+
+# Run a chain job even when the only keyed links are the slow floor (NVIDIA).
+# Off by default: see chain_readiness below and DEC-073.
+ALLOW_SLOW_CHAIN = (
+    os.environ.get("ALLOW_SLOW_CHAIN", "").strip().lower() in {"1", "true", "yes"}
+)
 
 # Hosted transcription, same "<provider>/<model>" spelling. Empty uses the
 # default in clipping/providers/stt.py; "none" disables transcription entirely
@@ -621,6 +628,17 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
+        "--allow-slow-chain",
+        action="store_true",
+        help=(
+            "Run even though no primary link in the chain has a key, so the "
+            "whole analysis would run on the slow floor (NVIDIA NIM). Refused "
+            "by default because at ~12 tokens/s behind a ~50s queue a scan "
+            "that takes seconds on Groq takes tens of minutes and may not "
+            "finish. Also settable as ALLOW_SLOW_CHAIN=1."
+        ),
+    )
+    p.add_argument(
         "--stt-chain",
         default=STT_CHAIN,
         help=(
@@ -1021,6 +1039,128 @@ def missing_provider_key(cfg) -> tuple[str, str] | None:
     return None
 
 
+ChainReadiness = namedtuple("ChainReadiness", "ready message missing keyed_slow")
+# missing:    [(link, ENV_NAME, signup_url), ...] -- named primary links with no key
+# keyed_slow: [link, ...] -- the non-primary links that DO have a key
+
+READY = ChainReadiness(True, "", [], [])
+
+CLI_SLOW_CHAIN_HINT = "or run anyway with --allow-slow-chain."
+WEB_SLOW_CHAIN_HINT = (
+    'or turn on "Run on the slow chain anyway" in Settings.'
+)
+
+
+def chain_readiness(chain, keys, *, ai_provider="chain", allow_slow=False,
+                    hint=CLI_SLOW_CHAIN_HINT) -> ChainReadiness:
+    """Whether a chain job may START, from loose values.
+
+    Pure -- no cfg, no filesystem, no network -- because the job-creation route
+    must answer before a job exists, and building a config creates the job's
+    output directory.
+
+    Refuses exactly one case: the chain names at least one *primary* provider
+    (registry ``Provider.primary``), none of the named primaries has a key, and
+    a non-primary link does. That is the job that failed on 2026-09-23 -- a
+    three-link default chain with only ``NVIDIA_API_KEY`` set, which is a chain
+    of one running on the floor.
+
+    Deliberately NOT refused, each for a reason:
+
+    * a non-chain provider -- the escape hatch, as in ``preflight_chain``;
+    * ``allow_slow`` -- the user said so;
+    * an unparseable chain -- it is reported when it runs;
+    * no key at all -- ``missing_provider_key`` owns that case and says it
+      better; the handoff is pinned by a test that checks both;
+    * a chain that names no primary (``LLM_CHAIN=nvidia/...``) -- the user wrote
+      that list down and DEC-023 forbids second-guessing it.
+
+    The chain itself is never edited, reordered or trimmed (DEC-003, DEC-023).
+    This refuses to start; it does not change what would run.
+    """
+    if ai_provider not in ("chain", "auto") or allow_slow:
+        return READY
+
+    from clipping.providers.registry import (
+        PROVIDERS,
+        chain_from_env,
+        describe,
+        is_primary,
+        parse_chain,
+    )
+
+    try:
+        links = parse_chain(chain) if chain else chain_from_env()
+    except Exception:  # noqa: BLE001 - a bad chain is reported when it runs
+        return READY
+
+    keys = keys or {}
+    if not any(keys.get(link.provider) for link in links):
+        return READY
+
+    primaries = [link for link in links if is_primary(link)]
+    if not primaries:
+        return READY
+    if any(keys.get(link.provider) for link in primaries):
+        return READY
+
+    keyed_slow = [link for link in links if keys.get(link.provider)]
+    missing = [
+        (link, PROVIDERS[link.provider].env_key, PROVIDERS[link.provider].signup_url)
+        for link in primaries
+    ]
+    return ChainReadiness(
+        False, _slow_chain_message(keyed_slow, missing, hint, describe),
+        missing, keyed_slow,
+    )
+
+
+def _slow_chain_message(keyed_slow, missing, hint, describe) -> str:
+    """The refusal, built from the registry so it carries no model literal."""
+    running = ", ".join(describe(link) for link in keyed_slow)
+    alone = "alone" if len(keyed_slow) == 1 else "and nothing faster"
+
+    n = len(missing)
+    free = all(url for _, _, url in missing)
+    if n == 1:
+        head = "One link in your chain has no key" + (", and it is free" if free else "")
+        ask = "Set it"
+    else:
+        amount = "Two" if n == 2 else str(n)
+        both = "both" if n == 2 else "all"
+        head = f"{amount} links in your chain have no key" + (
+            f", and {both} are free" if free else "")
+        ask = "Set any one of them"
+
+    labels = [describe(link) for link, _, _ in missing]
+    width_label = max(len(label) for label in labels)
+    width_env = max(len(env) for _, env, _ in missing)
+    rows = "\n".join(
+        f"  {label.ljust(width_label)}  {env.ljust(width_env)}  "
+        f"{url or '(your own endpoint)'}"
+        for label, (_, env, url) in zip(labels, missing)
+    )
+    return (
+        f"This job would run on {running} {alone}, and that is the chain's "
+        "floor, not a primary. Measured: ~12 tokens/s behind a ~50s queue, so a "
+        "scan that takes seconds on a primary link takes tens of minutes here "
+        "and may not finish inside the time budget at all.\n\n"
+        f"{head}:\n{rows}\n\n{ask}, {hint}"
+    )
+
+
+def chain_not_ready(cfg, hint=CLI_SLOW_CHAIN_HINT) -> str | None:
+    """``chain_readiness`` for a built config: the refusal message, or None."""
+    readiness = chain_readiness(
+        getattr(cfg, "llm_chain", "") or "",
+        provider_keys(cfg),
+        ai_provider=getattr(cfg, "ai_provider", AI_PROVIDER),
+        allow_slow=bool(getattr(cfg, "allow_slow_chain", False)),
+        hint=hint,
+    )
+    return None if readiness.ready else readiness.message
+
+
 def preflight_chain(cfg, on_log=print, **probe_kwargs) -> str | None:
     """Ask the chain whether anything answers, before the expensive work starts.
 
@@ -1392,6 +1532,7 @@ def build_config(argv: list[str] | None = None) -> SimpleNamespace:
         llm_chain=args.llm_chain,
         llm_timeout=args.llm_timeout,
         preflight=not args.no_preflight,
+        allow_slow_chain=args.allow_slow_chain or ALLOW_SLOW_CHAIN,
         stt_chain=args.stt_chain,
         # Filled in by a hosted transcription provider that reports what it
         # heard; beats guessing the language from stopwords afterwards.
