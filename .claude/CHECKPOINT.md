@@ -32,7 +32,7 @@
     ctranslate2 is installed here, so the transcript path's import of it
     becomes visible. The Ubuntu env does not have the package, so this
     **may be a real bug hidden there** (logged as a follow-up).
-- **Phase:** IMPLEMENT. Group 1 merged and pushed (`7d374b2`). Group 2 (S8-S12) done and render-parity verified; next: merge feature/render-fixes, then S13 on feature/job-lifecycle.
+- **Phase:** IMPLEMENT. Group 1 merged and pushed (`7d374b2`). Group 2 merged and pushed (`b6202c9`). Next stage: S14 (B1a, cancel token + checkpoints) on feature/job-lifecycle.
 - **Open questions:** none. Two scope calls were made in chat: loudnorm is
   an opt-in flag, default off; cancel uses checkpoints plus a kill of the
   job's ffmpeg children.
@@ -53,7 +53,7 @@
 | 10 | D4 memoise encoder probes | feature/render-fixes | **done** |
 | 11 | D1 watermark load hoisted + settings-keyed cache | feature/render-fixes | **done** |
 | 12 | D5 hook-v2 temp cleanup | feature/render-fixes | **done** |
-| 13 | B5 LLM_CHAIN note (no code) | feature/job-lifecycle | pending |
+| 13 | B5 LLM_CHAIN note (no code) | feature/job-lifecycle | **done** |
 | 14 | B1a cancel token + checkpoints | feature/job-lifecycle | pending |
 | 15 | B1b web cancel + child kill (**high risk**) | feature/job-lifecycle | pending |
 | 16 | B2 delete removes files (**high risk**) | feature/job-lifecycle | pending |
@@ -94,9 +94,14 @@
 - **Next action:** the human sets a free GOOGLE_API_KEY (and/or GROQ_API_KEY,
   see A-009), rebuilds, and reruns the job.
 - **Open questions:** none.
-- **Follow-ups, deliberately not done:** `LLM_CHAIN` is not in
-  `settings_store.PERSISTED_KEYS` (a runtime-set chain vanishes on restart);
-  adding new free providers needs a benchmark per model; the web path still has
+- **Follow-ups, deliberately not done:** ~~`LLM_CHAIN` is not in
+  `settings_store.PERSISTED_KEYS` (a runtime-set chain vanishes on restart)~~
+  -- **not a bug** (checked 2026-09-23, DEC-085): nothing sets `LLM_CHAIN` at
+  runtime. `SettingsRequest` has no chain field, the settings route only
+  *reads* it (`routes/settings.py:65,227`), and a job carries its own
+  `llm_chain` (`models.py:202`). It comes from `.env`/compose, which survive a
+  restart; persisting it would do nothing. A Settings field for the chain would
+  be a feature, not this fix. Adding new free providers needs a benchmark per model; the web path still has
   no `--no-preflight` equivalent; `tests/test_clip_length.py` leaves an empty
   `outputs/jobid` behind (pre-existing).
 
