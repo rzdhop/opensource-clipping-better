@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from clipping.providers import llm, pacing
+from clipping.providers import llm, pacing, registry
 from clipping.providers.registry import Link, parse_chain
 
 
@@ -150,24 +150,105 @@ def test_the_probe_is_small_and_unstructured():
 
 
 def test_the_probe_timeout_is_far_below_the_request_timeout():
-    """Measured, not chosen by taste.
+    """A probe must never be able to wait as long as a real request.
 
-    Healthy probes of the shipped default ran 1.3-11.4s; the dead model does not
-    answer in 120s. The bound below keeps the probe well clear of the 330s
-    request timeout it would otherwise inherit -- waiting that long would defeat
-    the purpose -- while leaving room for a cold free tier.
+    It used to also assert ONE number for every provider (45s, DEC-056). That
+    half was the bug: on 2026-09-23 the NIM free tier took ~50s to answer this
+    exact ping with a working key, and an nvidia link built with 45s called a
+    live provider dead. The invariant worth keeping is the ceiling (DEC-072).
     """
-    assert 30 <= llm.PROBE_TIMEOUT_SECONDS <= 60
     captured = {}
 
     def factory(link, **kwargs):
-        captured.update(kwargs)
+        captured[link.provider] = kwargs["timeout"]
         return SimpleNamespace(chat=SimpleNamespace(
             completions=SimpleNamespace(create=lambda **k: REPLY)))
 
-    llm.probe_chain(parse_chain("nvidia/a"), {"nvidia": "k"},
-                    on_log=lambda *a: None, client_factory=factory)
-    assert captured["timeout"] == llm.PROBE_TIMEOUT_SECONDS
+    for spec, key in (("groq/a", "groq"), ("nvidia/a", "nvidia")):
+        llm.probe_chain(parse_chain(spec), {key: "k"},
+                        on_log=lambda *a: None, client_factory=factory)
+        link = parse_chain(spec)[0]
+        assert captured[key] == registry.probe_timeout(link)
+        assert captured[key] < registry.effective_timeout(link)
+
+    assert captured["groq"] == llm.PROBE_TIMEOUT_SECONDS
+    assert captured["nvidia"] > captured["groq"]
+
+
+def timed_responder(clock, behaviour):
+    """Like ``responder``, but the client HONOURS the timeout it was built with.
+
+    ``responder`` advances the clock by the scripted seconds whatever timeout
+    the client carries, so no test built on it can tell 45s from 120s. Here a
+    scripted duration longer than the client's timeout raises a timeout after
+    exactly that timeout -- which is what the SDK does on the wire.
+    """
+    built = {}
+
+    def factory(link, **kwargs):
+        timeout = kwargs["timeout"]
+        built[link.provider] = timeout
+
+        def create(**_):
+            seconds, outcome = behaviour[link.provider]
+            if seconds > timeout:
+                clock.now += timeout
+                raise TimeoutError("Request timed out.")
+            clock.now += seconds
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
+
+        return SimpleNamespace(chat=SimpleNamespace(
+            completions=SimpleNamespace(create=create)))
+
+    factory.built = built
+    return factory
+
+
+def test_a_queued_but_healthy_nim_link_is_live():
+    """The reported job, as a unit test: only NVIDIA keyed, NVIDIA answering
+    "ok" after 50s of queue. It used to be reported dead after 45s."""
+    clock = Clock()
+    factory = timed_responder(clock, {"nvidia": (50.0, REPLY)})
+
+    live, results, _ = llm.probe_chain(
+        parse_chain("groq/a,gemini/b,nvidia/c"), {"nvidia": "k"},
+        on_log=lambda *a: None, client_factory=factory, time_fn=clock,
+    )
+
+    assert live is not None and live.provider == "nvidia"
+    assert results[-1][1] == "ok"
+
+
+def test_a_fast_tier_still_gets_the_short_probe():
+    """Per provider, not a global bump to 120s: a hosted fast tier that takes
+    50s to answer an 8-token question is still called dead at 45s."""
+    clock = Clock()
+    factory = timed_responder(clock, {"groq": (50.0, REPLY)})
+
+    live, results, _ = llm.probe_chain(
+        parse_chain("groq/a"), {"groq": "k"},
+        on_log=lambda *a: None, client_factory=factory, time_fn=clock,
+    )
+
+    assert live is None
+    assert "TimeoutError" in results[0][1]
+    assert results[0][2] == pytest.approx(registry.DEFAULT_PROBE_TIMEOUT)
+
+
+def test_an_explicit_timeout_still_overrides_every_link():
+    """The seam the other tests in this file rely on."""
+    clock = Clock()
+    factory = timed_responder(clock, {"nvidia": (50.0, REPLY)})
+
+    live, _, _ = llm.probe_chain(
+        parse_chain("nvidia/c"), {"nvidia": "k"}, timeout=10,
+        on_log=lambda *a: None, client_factory=factory, time_fn=clock,
+    )
+
+    assert live is None
+    assert factory.built["nvidia"] == 10
 
 
 # ------------------------------------------------------- config.preflight_chain
@@ -435,7 +516,22 @@ def test_the_work_probe_is_bounded(tmp_path):
     factory = responder(clock, {"nvidia": (1.0, CANDIDATES_REPLY)})
     from clipping.config import preflight_chain
 
+    captured = {}
+
+    def capturing(link, **kwargs):
+        captured[link.provider] = kwargs["timeout"]
+        return factory(link, **kwargs)
+
     preflight_chain(
-        cfg, on_log=lambda *a: None, client_factory=factory, time_fn=clock
+        cfg, on_log=lambda *a: None, client_factory=capturing, time_fn=clock
     )
-    assert llm.PROBE_WORK_TIMEOUT_SECONDS <= 120
+    link = parse_chain("nvidia/b")[0]
+    # Twice the ping allowance, and never the 330s a real request may take.
+    assert captured["nvidia"] == registry.work_probe_timeout(link)
+    assert captured["nvidia"] < registry.effective_timeout(link)
+
+
+def test_the_work_probe_cap_is_unchanged_for_the_fast_tiers(tmp_path):
+    """90s = 2 x 45s before DEC-072, and still, for every default-probe tier."""
+    for name in ("groq", "gemini", "openrouter", "mistral"):
+        assert registry.work_probe_timeout(Link(name, "m")) == 90.0

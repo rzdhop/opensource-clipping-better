@@ -26,7 +26,15 @@ import threading
 import time
 
 from . import errors, jsonx, pacing
-from .registry import describe, effective_timeout, env_key_for, provider_for
+from .registry import (
+    DEFAULT_PROBE_TIMEOUT,
+    describe,
+    effective_timeout,
+    env_key_for,
+    probe_timeout,
+    provider_for,
+    work_probe_timeout,
+)
 
 # Negotiation ladder, best first.
 JSON_SCHEMA = "json_schema"
@@ -477,28 +485,30 @@ def _run_link(
 
 # ---------------------------------------------------------------- preflight
 
-# Chosen against measurement, and deliberately generous. Five probes of the
-# shipped NIM default on 2026-09-21 ran 1.3 / 1.6 / 2.2 / 2.7 / 11.4s -- a
-# healthy free tier is usually instant and occasionally slow to wake, and the
-# cost of being wrong is asymmetric: a probe that is too short fails a job whose
-# provider was merely cold, while one that is too long still catches a dead
-# provider sixty times faster than the failure this replaces (47 minutes of CPU
-# Whisper, then fifteen more spent proving the provider was dead).
+# How long a probe may wait is now a per-provider fact in the registry
+# (``probe_timeout`` / ``work_probe_timeout``), not one number here. The history
+# is why, and it is the context DEC-072 needs:
 #
-# 45s is roughly four times the slowest healthy probe observed, and the dead
-# model it was written for does not answer in 120s, so the gap is not close.
-PROBE_TIMEOUT_SECONDS = 45.0
+# DEC-056 chose 45s against measurement: five probes of the then-default NIM
+# model ran 1.3 / 1.6 / 2.2 / 2.7 / 11.4s, the dead model it was written for did
+# not answer in 120s, and 45s sat roughly four times above the slowest healthy
+# probe. The cost of being wrong is asymmetric -- too short fails a job whose
+# provider was merely slow; too long still catches a dead one far faster than
+# the 47 minutes of CPU Whisper this replaced.
+#
+# Two days later that measurement was stale. With a WORKING key the NIM free
+# tier answered the same 2-token ping with "ok" in 48.9 / 57.0 / 49.7s, nearly
+# all of it time to first byte: a queue, not a slow model. 45s declared a live
+# provider dead and failed the job. The fast hosted tiers keep 45s; the NIM
+# floor gets 120s; and one number for every provider was the actual mistake.
+#
+# This name survives as the fallback for a provider that declares nothing.
+PROBE_TIMEOUT_SECONDS = DEFAULT_PROBE_TIMEOUT
 PROBE_MAX_TOKENS = 8
 PROBE_PROMPT = "Reply with the single word: ok"
 
-# The cap on a *work* probe. It runs before transcription, so it must not become
-# the delay it exists to prevent: NVIDIA's own per-request timeout is 330s, and
-# spending that here to save 47 minutes later is a bad trade when a 90s answer
-# proves the same thing.
-PROBE_WORK_TIMEOUT_SECONDS = 90.0
 
-
-def probe_chain(chain, keys, *, timeout=PROBE_TIMEOUT_SECONDS, on_log=print,
+def probe_chain(chain, keys, *, timeout=None, on_log=print,
                 client_factory=None, time_fn=time.monotonic, work=None):
     """Ask the chain's keyed links, in order, whether they answer.
 
@@ -506,6 +516,9 @@ def probe_chain(chain, keys, *, timeout=PROBE_TIMEOUT_SECONDS, on_log=print,
     nothing answered, and *value* is the parsed reply to a *work* probe when one
     succeeded. Stops at the first link that replies, so the cost of a healthy
     run is one request.
+
+    *timeout* of None gives each link its own ping allowance from the registry
+    (``probe_timeout``); a number overrides it for every link.
 
     **The cheap ping proves liveness, not suitability**, and that gap is real: a
     model measured here answered it in 0.67s and still failed the real pass-A
@@ -521,7 +534,7 @@ def probe_chain(chain, keys, *, timeout=PROBE_TIMEOUT_SECONDS, on_log=print,
     **Three things stay true whichever probe runs**, and each is load-bearing:
 
     * A work probe that fails falls back to the ping before the link is called
-      dead. A provider too slow for a 90s budget but alive on a ping is alive,
+      dead. A provider too slow for its work budget but alive on a ping is alive,
       and DEC-020 forbids cutting off a slow-but-healthy call.
     * An empty but well-formed answer is LIVE. Zero candidates in one window is
       an opinion about 45 beats, not evidence about the endpoint.
@@ -555,7 +568,7 @@ def probe_chain(chain, keys, *, timeout=PROBE_TIMEOUT_SECONDS, on_log=print,
             )
 
         elapsed, reason = _ping_probe(
-            link, keys[link.provider], timeout,
+            link, keys[link.provider], probe_timeout(link, timeout),
             on_log=on_log, client_factory=client_factory, time_fn=time_fn,
         )
         if reason is not None:
@@ -604,7 +617,10 @@ def _work_probe(link, api_key, work, *, on_log, client_factory, time_fn):
     """
     client = LlmClient(
         link, api_key=api_key,
-        timeout=min(PROBE_WORK_TIMEOUT_SECONDS, effective_timeout(link)),
+        # Twice the ping's allowance, never more than a real request may take
+        # (registry.work_probe_timeout). It runs before transcription, so it
+        # must not become the delay it exists to prevent.
+        timeout=work_probe_timeout(link),
         client_factory=client_factory, on_log=on_log,
     )
     started = time_fn()
