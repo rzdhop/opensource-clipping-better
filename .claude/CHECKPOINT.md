@@ -1,67 +1,97 @@
-## CURRENT TASK — onboarding, job lifecycle, render-layer fixes (IN PROGRESS)
+## CURRENT TASK — onboarding, job lifecycle, render-layer fixes (COMPLETE; awaiting the human's Ubuntu deploy check)
 - **Origin:** a fork-vs-upstream analysis (2026-09-23). Upstream has had no
-  commits since `3c72b75`, so nothing needs porting. The findings were ranked
-  and the human chose three areas: onboarding (A1-A7), job lifecycle (B1-B5)
-  and the render layer (D1-D7). Everything else stays on the roadmap.
+  commits since `3c72b75`, so nothing needs porting. The human chose three
+  areas: onboarding (A1-A7), job lifecycle (B1-B5), render layer (D1-D7).
+  Everything else is on the roadmap (VISION.md, "Where it stands").
 - **Plan:** `C:\Users\ridap\.claude\plans\on-this-sessions-we-snoopy-flurry.md`
-  (approved in chat). It holds the full findings table, the roadmap and the
-  21-stage ledger.
-- **Host:** Windows 11 (Python 3.11.15, ffmpeg 8.1.1, node 26). cv2,
-  mediapipe and fastapi are installed, so real renders can run here.
-  Docker and the deploy stay on the human's Ubuntu VPS.
-- **Checkpoint commit:** `8fa873d`, a clean tree. Local `main` was
-  fast-forwarded from `d5c502a`, which was 68 commits behind. Roll back here.
-- **Tier-1 baseline at `8fa873d` (this host):**
-  - Local suite: `python -m pytest` = **1353 passed, 8 failed**.
-  - CI-equivalent run, in a clean venv with pytest only
-    (`python -m venv <scratch>/civenv`, `pip install pytest`, then
-    `PYTHONNOUSERSITE=1 <venv>/python -m pytest`) = **1202 passed, 125
-    skipped, 6 failed**.
-  - `compileall` is clean. `npx vite build --outDir <scratch>` is green.
-- **The 8 baseline failures are pre-existing and specific to Windows.** None
-  is touched by this task. The rule for every stage is **no new failures;
-  these 8 stay put**.
-  - 5 permission tests (`test_auth_token`, `test_settings_store` x3,
-    `test_clip_srt_export`): POSIX `chmod 0600` and unwritable-directory
-    semantics do not exist on Windows.
-  - `test_chain_readiness::test_the_cli_gates_after_the_key_gate_and_before_the_probe`:
-    the test reads a source file with the default cp1252 codec.
-  - `test_clip_serving::test_the_api_is_untouched_by_the_fallback`: the SPA
-    fallback answers 200 for `/api/nope` on Windows.
-  - `test_transcript_dispatch::test_bypass_does_not_import_ctranslate2`:
-    ctranslate2 is installed here, so the transcript path's import of it
-    becomes visible. The Ubuntu env does not have the package, so this
-    **may be a real bug hidden there** (logged as a follow-up).
-- **Phase:** IMPLEMENT. Groups 1-2 merged and pushed (`b6202c9`); Group 3 merged and pushed (`c627ad7`). S19 merged (`2632033`). S20 verified on a real render; next: S21 close-out (docs, DEC-075..085, artifacts), then merge + push.
-- **Open questions:** none. Two scope calls were made in chat: loudnorm is
-  an opt-in flag, default off; cancel uses checkpoints plus a kill of the
-  job's ffmpeg children.
+  (approved in chat): findings table, roadmap, 21-stage ledger.
+- **Host:** Windows 11 (Python 3.11.15, ffmpeg 8.1.1, node 26), with cv2,
+  mediapipe and fastapi, so real renders and a live backend ran here. Docker
+  and the deploy are on the human's Ubuntu VPS.
+- **Checkpoint commit before the work:** `8fa873d`. **Head:** see the ledger;
+  everything is on `origin/main`.
+- **Tier-1:** baseline at `8fa873d` 1353 passed / 8 failed locally, 1202 / 125
+  skipped / 6 failed in the clean pytest-only venv. **Now 1553 passed / 8 failed
+  locally, 1371 passed / 157 skipped / 6 failed in the venv** -- the same 8
+  (6) pre-existing Windows-only failures, never a new one. `compileall` clean,
+  `vite build` green. +200 tests, each behaviour test verified to fail against
+  its parent commit.
+- **The 8 Windows-only failures** (pre-existing, untouched): 5 POSIX
+  chmod/unwritable-dir tests (`test_auth_token`, `test_settings_store` x3,
+  `test_clip_srt_export`); `test_chain_readiness::test_the_cli_gates_after_the_key_gate_and_before_the_probe`
+  (reads a file with cp1252); `test_clip_serving::test_the_api_is_untouched_by_the_fallback`
+  (SPA fallback answers 200 for `/api/nope` on Windows);
+  `test_transcript_dispatch::test_bypass_does_not_import_ctranslate2`
+  (ctranslate2 is installed here -- may be a real leak CI cannot see, A-024).
+- **Tier-2 -- verified here:** framemd5 render parity for every render change
+  (hybrid+watermark, split-screen face trigger, hook-v2, edge-glow: identical);
+  watermark render 27.3s -> 23.1s; a live backend: cancel mid-render (ffmpeg
+  dead in 0.2s, slot free in 0.3s, status cancelled), cancel while queued, 429
+  at the queue cap, delete with a shared upload kept then removed, 404s after;
+  a browser pass of Cancel/Delete at 375/820px; `--loudnorm` on a real render
+  (-21.8 -> -14.0 LUFS, frames identical, default output byte-identical).
+- **Tier-2 -- NOT done, needs the human:** no E2E suite exists. On the Ubuntu
+  box: `docker compose rm -sfv backend && docker compose up -d --build backend`
+  (sudo), then one real dashboard job, one Cancel mid-render and one Delete
+  (A-022). Notebooks on Colab/Kaggle (A-023). Camera-switch render (A-025,
+  needs pyannote + HF token). **The task is not done until the human
+  acknowledges these deferrals.**
+- **Dependency audit:** no dependency was added or raised (A3 only copied
+  existing specifiers into pyproject); pip-audit is not installed and is
+  roadmap item F2.
+- **Open questions:** none.
 
 ### Stage ledger
-| S | Item | Branch | State |
-|---|---|---|---|
-| 0 | sync + baseline | — | **done** |
-| 1 | A6 health version | feature/onboarding | **done** |
-| 2 | A2 retire .env.sample | feature/onboarding | **done** |
-| 3 | A3 pyproject mirrors requirements | feature/onboarding | **done** |
-| 4 | A4 README/wiki links | feature/onboarding | **done** |
-| 5 | A5 retire docs/studio | feature/onboarding | **done** |
-| 6 | A1 notebooks | feature/onboarding | **done** |
-| 7 | A7 source_manager docstring | feature/onboarding | **done** |
-| 8 | D7 diarization stderr | feature/render-fixes | **done** |
-| 9 | D6 hook fetch timeout/cap | feature/render-fixes | **done** |
-| 10 | D4 memoise encoder probes | feature/render-fixes | **done** |
-| 11 | D1 watermark load hoisted + settings-keyed cache | feature/render-fixes | **done** |
-| 12 | D5 hook-v2 temp cleanup | feature/render-fixes | **done** |
-| 13 | B5 LLM_CHAIN note (no code) | feature/job-lifecycle | **done** |
-| 14 | B1a cancel token + checkpoints | feature/job-lifecycle | **done** |
-| 15 | B1b web cancel + child kill (**high risk**) | feature/job-lifecycle | **done** |
-| 16 | B2 delete removes files (**high risk**) | feature/job-lifecycle | **done** |
-| 17 | B4 queue cap | feature/job-lifecycle | **done** |
-| 18 | B3 dashboard Cancel/Delete | feature/job-lifecycle | **done** |
-| 19 | D2 studio real package (**RISKIEST**) | feature/studio-package | **done**, frame parity verified |
-| 20 | D3 opt-in loudnorm | feature/loudnorm | **done**, real render verified |
-| 21 | docs + DEC-075..085 + close-out | — | pending |
+| S | Item | Commit |
+|---|---|---|
+| 0 | sync + baseline | `719ca59` |
+| 1 | A6 health version | `d5bc04b` |
+| 2 | A2 retire .env.sample | `50934a2` |
+| 3 | A3 pyproject mirrors requirements | `7fbf57b` |
+| 4 | A4 README/wiki links (+ branding-guard fix `213006e`, DEC-086) | `8c1408a` |
+| 5 | A5 retire docs/studio | `06e2d10` |
+| 6 | A1 notebooks (+ README Colab recipe) | `12f43e9` |
+| 7 | A7 source_manager docstring | `7d374b2` |
+| 8 | D7 diarization stderr | `c586320` |
+| 9 | D6 hook download (stale file, fallback, timeout/cap/deadline) | `07d1a7b` |
+| 10 | D4 memoise encoder probes | `99cbcdb` |
+| 11 | D1 watermark loaded once + settings-keyed cache | `ae82632` |
+| 12 | D5 render temp cleanup | `786a0ab` |
+| — | Group 2 render parity | `b6202c9` |
+| 13 | B5 LLM_CHAIN note (no code) | `b05a895` |
+| 14 | B1a cancel token + checkpoints | `214f242` |
+| 15 | B1b web cancel + child kill | `92421a6` |
+| 16 | B2 delete removes files | `5c04051` |
+| 17 | B4 queue cap | `7d96402` |
+| 18 | B3 dashboard Cancel/Delete | `1e89708` |
+| — | Group 3 live verification | `c627ad7` |
+| 19 | D2 studio real package (riskiest) | `2549c96`, parity `2632033` |
+| 20 | D3 opt-in loudnorm | `577c98e`, render `b7e611a` |
+| 21 | docs, DEC-075..086, A-021..025, VISION, close-out | this commit |
+
+### Follow-ups, deliberately not done
+- **Security:** `reuse_job_id`, `upload_filename` and `transcript_filename` are
+  not validated at the API (cleanup.py refuses anything but a plain name, so
+  delete is safe; the pipeline's own use of them is not audited).
+- Upload names are not unique: a second `talk.mp4` overwrites the first job's
+  source. Store uploads under a unique name.
+- Per-item render temp files are relative to the working directory, so two
+  concurrent jobs (`MAX_CONCURRENT_JOBS` > 1) would collide in `/app`.
+- An age/size retention sweep for `outputs/` (delete is manual today).
+- The web worker duplicates `run_pipeline`'s stage sequence.
+- Only send Google Drive URLs through gdown (it is tried first for every URL).
+- A PEP 562 lazy `clipping/studio/__init__` so stdlib studio modules can be
+  imported in CI without the render stack.
+- Diarization and the server-side yt-dlp download cannot be cancelled.
+- A cancel's feed shows the render layer's own `❌ ERROR ... Broken pipe` line
+  from the killed ffmpeg before "Cancelled." -- cosmetic.
+- `fail_stale_jobs` fails `needs_upload` jobs at restart.
+- `docs/index.html` privacy/terms links point at upstream's Pages domain.
+- The Tier-1 helper's Windows CI simulation (clean venv) should replace the
+  `PYTHONNOUSERSITE` recipe below for Windows hosts.
+- Roadmap (VISION.md): CI coverage of the web layer, render-layer tests,
+  download-all + per-clip re-edit, multi-platform ingest, upload guardrails,
+  dependency pass, app-level security headers.
 
 ### Regression contract for this task
 | ID | Must keep working | Proven by |

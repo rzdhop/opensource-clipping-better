@@ -1744,3 +1744,152 @@ the key gate and seeds the scan cache. `probe_chain` gains
 - The worst case holds a request for about 210s. The Vite dev proxy already
   disables its timeouts for uploads. If a reverse proxy cuts it off, the
   upgrade path is SSE through `probe_chain`'s existing `on_log` seam.
+
+## DEC-075 — A job is cancelled cooperatively, and its child processes are killed
+**Context.** DELETE flipped a job's status while its worker thread carried on,
+spending free-tier quota and CPU. A thread cannot be stopped from outside, and a
+clip spends minutes inside one ffmpeg call. The stdout tee must never raise
+(DEC-014, second entry), and `clipping/` takes no web callbacks.
+**Decision.** `clipping/cancel.py` gives the pipeline a token (`cfg.cancel_token`)
+checked before each step that spends: chain link, attempt (before it is
+announced, DEC-053), schema re-ask, backoff and rate-limit sleeps, probe, STT
+chunk, Whisper segment, and, in the worker, each stage and clip. `Cancelled`
+derives from BaseException so the pipeline's `except Exception` blocks cannot
+record it as a provider failure and retry. `web/api/children.py` installs a
+process-wide `Popen` subclass that attributes each child to the job whose thread
+spawned it (the tee's pattern), refuses a spawn on a cancelled token before exec,
+and re-checks after registration to close the race with `kill`.
+**Consequence.** After Cancel no new request, chunk or subprocess starts, and
+ffmpeg dies at once (measured 0.2s live). What is already in flight finishes or
+times out: an LLM request (120s Groq, 180s Gemini and others, 330s NVIDIA, up to
+3 at once with analysis workers), an STT chunk (300s), a Whisper decode window.
+pyannote diarization and the server-side yt-dlp download are not cancellable. A
+run without a token -- the CLI -- makes exactly the calls it made before
+(`kwargs_for` passes no keyword). Rejected: checkpoints alone (the rendering clip
+runs on for minutes of ARM CPU); tracking children at ~12 render call sites (a
+large diff in an untested layer); a subprocess per job (breaks the tee, the
+in-memory store and per-process pacing); raising from the tee (DEC-014).
+
+## DEC-076 — CANCELLED is terminal; a cancelled job's late writes are dropped
+**Context.** A cancelled worker unwinds: a killed ffmpeg surfaces as an error,
+and a completion can race the cancel.
+**Decision.** `store.request_cancel` decides under the RLock and refuses a job
+already completed, failed or cancelled (the route answers 409). Once CANCELLED,
+`update_job` drops `status`/`error`/`clips` and `update_progress`/
+`refine_progress` are dropped; events and other fields (`delete_requested`) still
+apply. The worker treats `Cancelled`, and any exception raised after its token
+was set, as a cancellation.
+**Consequence.** A job ends COMPLETED or CANCELLED, never FAILED because it was
+cancelled. A rerun (`reuse_job_id`) of a job that is still running gets 409, so
+two workers never share `outputs/{id}`.
+
+## DEC-077 — Delete removes a job's files, under narrow rules
+**Context.** Deleted jobs left `outputs/{id}/` and their uploads forever. Uploads
+keep their original file name, so two jobs can share -- or overwrite -- one
+file, and `reuse_job_id` / upload names are client-controlled.
+**Decision.** `web/api/cleanup.py`: a path is only ever a single plain name
+directly inside its root (no separator, `.`/`..`, drive, absolute path, symlink,
+or the root itself; a directory in outputs/, a file in uploads/). An upload is
+removed only if no other job references the name and its mtime is not newer
+than when this job took it (`created_at`, or `source_attached_at` now recorded by
+POST /source); with no usable timestamp it is kept. A running job is flagged
+`delete_requested`, cancelled, answered 202, and removed by its worker's
+event-loop cleanup; startup finishes deletes a crash interrupted. Cancel alone
+keeps the files (DEC-022). No age/size retention sweep (a follow-up).
+**Consequence.** A leaked file is recoverable; a wrongly deleted one is not, so
+every doubt resolves to keeping it. Verified live: a shared upload survived the
+first job's delete and went with the second's. A revert cannot restore deleted
+files.
+
+## DEC-078 — The queue is capped by MAX_QUEUED_JOBS, answered with 429
+**Context.** Every job was accepted and queued with no ceiling.
+**Decision.** `MAX_QUEUED_JOBS` (default 20, 0 = no limit, malformed = default),
+read per request, checked on POST /api/jobs and POST /{id}/source -- the latter
+before the upload is stored.
+**Consequence.** 429, not 503: "come back later" is the truth, and a 5xx reads as
+a broken server to proxy health logic. The dashboard already renders `detail`.
+
+## DEC-079 — `clipping/studio` is a real package
+**Context.** `clipping/studio.py` shadowed the `clipping/studio/` directory, so
+its 12 modules loaded their siblings by path: 54 loads, a dozen private copies
+of helpers, nothing in sys.modules, no shared module state (DEC-081's bug was one
+consequence).
+**Decision.** `studio.py` became `studio/__init__.py` with the same 32 public
+names and `FIREFOX_UA`; an AST codemod turned every by-path load into
+`from . import x [as NAME]`. Callers still import it lazily (DEC-031).
+**Consequence.** Module state is shared: one face detector (IMAGE mode,
+stateless), one encoder-probe memo, one watermark cache. A studio module can no
+longer be executed by path outside its package; a test that needs one imports
+`clipping.studio.<x>` under the `render_stack_stubbed` fixture. Verified
+frame-identical on four render variants. The package `__init__` is eager, so
+importing any submodule pulls in cv2 (a PEP 562 lazy `__init__` is a follow-up).
+
+## DEC-080 — Encoder probes are memoised, not passed down
+**Context.** Every render path probed the hardware encoders per clip (up to 7
+ffmpeg processes), though the runner probes once. The render paths probe at the
+default 1080 while the runner probes at the real height, which changes the
+bitrate, so passing the runner's result down would change output.
+**Decision.** The encoder listing is read once per process; runtime probe
+answers are cached per exact argument tuple for 600s, both outcomes.
+**Consequence.** Same encoder, same arguments; 1.4s saved per clip here. The TTL
+bounds a stale answer if a GPU appears, vanishes or runs out of NVENC sessions.
+
+## DEC-081 — The watermark renderer is cached by its settings, not by id(cfg)
+**Context.** Loading `watermark.py` inside the frame loop re-created its
+`_renderer_cache` every frame. Loading it once makes the cache live for the
+process, and its `id(cfg)` key then becomes unsafe: ids are reused after an
+object is freed.
+**Decision.** Key by the nine settings the renderer reads plus the image file's
+mtime and size; cap at 32 entries.
+**Consequence.** ~4s saved on a 14s watermarked clip (27.3s -> 23.1s against a
+23.3s no-watermark control), frame-identical output, and a replaced logo file is
+picked up.
+
+## DEC-082 — Loudness levelling is opt-in and runs as the last write
+**Context.** Nothing levelled the audio. The human chose opt-in, the stance of
+DEC-050 (glitch) and DEC-051 (clip length).
+**Decision.** `--loudnorm` / "Level loudness", default off in five places: a
+two-pass EBU R128 loudnorm (I=-14, TP=-1.5, LRA=11) over each finished clip,
+after the concat and edge glow, and over story mode's assembled files; video
+copied, audio AAC at the source rate; best-effort.
+**Consequence.** Default output is byte-identical (verified). With the flag a
+-21.8 LUFS clip measured -14.0 LUFS, video frames unchanged. It adds one AAC
+generation and a few seconds per clip, which is why it is not the default.
+
+## DEC-083 — One env template; pyproject mirrors requirements
+**Context.** `.env.sample` called NVIDIA required and the default, which the
+chain gate (DEC-073) refuses; `pyproject.toml` lacked nine packages while the
+README offered `uv sync`.
+**Decision.** Delete `.env.sample` (its four Facebook-uploader keys moved to
+`.env.example`, the two with code defaults commented out -- `NAME=` would
+override a default with ""). Copy the nine specifiers into pyproject verbatim; a
+stdlib test compares the two manifests.
+**Consequence.** Docker still builds from `requirements.txt`; nothing was
+upgraded. Splitting heavy dependencies into extras remains its own task.
+
+## DEC-084 — The static Studio is retired; the API-served dashboard is the Studio
+**Context.** `docs/studio/*.html` posted fields the backend deleted and sent no
+API token, so every request it made was refused. The human chose to retire it.
+**Decision.** Delete it; the README describes the dashboard the API serves
+(DEC-038) and `docs/index.html` links to that section.
+**Consequence.** The GitHub Pages `/studio/` path now 404s (Pages settings live
+outside the repo). One UI to maintain.
+
+## DEC-085 — LLM_CHAIN is not persisted, because nothing sets it at runtime
+**Context.** A follow-up said a runtime-set chain vanishes on restart.
+**Decision.** No code. `SettingsRequest` has no chain field, the settings route
+only reads `LLM_CHAIN`, and a job carries its own `llm_chain`; the value comes
+from `.env`/compose, which survive a restart.
+**Consequence.** A Settings field for the chain would be a feature, not a fix.
+
+## DEC-086 — The repository slug is an address, not the old product name
+**Context.** The branding guard (`tests/test_branding.py`) forbade the substring
+`opensource-clipping` outside upstream attribution, so it rejected this fork's
+own GitHub URL, `rzdhop/opensource-clipping-better`. The rename that introduced
+it had turned upstream's `your-username/opensource-clipping` placeholder into a
+`your-username/rzdhop-clips` repository that does not exist.
+**Decision.** One allow-list entry for the slug `opensource-clipping-better`,
+the test's own mechanism; docs link and clone the real repository.
+**Consequence.** A doc that says `opensource-clipping` alone still fails the
+guard (mutation-checked). If the repository is renamed, GitHub redirects the old
+URL and this entry can go.

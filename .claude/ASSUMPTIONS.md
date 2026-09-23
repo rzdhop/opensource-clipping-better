@@ -1,6 +1,24 @@
 # ASSUMPTIONS
 
 ## Unconfirmed
+- **A-021** — GitHub's `ubuntu-latest` runner has ffmpeg, so
+  `tests/test_loudnorm.py::test_a_quiet_clip_comes_out_at_minus_14_lufs` runs in
+  CI rather than skipping. UNCONFIRMED (it skips cleanly if not).
+- **A-022** — On the Ubuntu container, `Popen.kill` (SIGKILL) ends a job's ffmpeg
+  and frees the worker slot as fast as it did on Windows (0.2s / 0.3s measured).
+  UNCONFIRMED on the VPS: verified on Windows only.
+- **A-023** — The three notebooks run end to end on Colab and Kaggle, including
+  the Kaggle dashboard build when npm exists. UNCONFIRMED: verified
+  structurally only (every code cell compiles after IPython's transformer,
+  exact JSON round-trip, every `main.py` flag declared).
+- **A-024** — `tests/test_transcript_dispatch.py::test_bypass_does_not_import_ctranslate2`
+  fails on Windows only because ctranslate2 is installed here. It may be a real
+  import leak on the transcript path that CI cannot see (its env lacks
+  ctranslate2). UNCONFIRMED -- worth a look.
+- **A-025** — Camera-switch rendering still works after the render-layer changes
+  (DEC-079/080/081, the temp cleanup). UNCONFIRMED: it needs pyannote and an HF
+  token. Hybrid, split-screen (face trigger), hook-v2 and edge-glow were verified
+  frame-identical; camera-switch shares their imports but was never rendered.
 - **A-013** — Output language defaults to the transcript's language (reported by
   the hosted STT, else stopword detection); `output_language` overrides it.
   English titles/keywords/hashtags are still produced alongside. UNCONFIRMED.

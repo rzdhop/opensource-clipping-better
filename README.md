@@ -236,6 +236,20 @@ The same feed is on the API: `GET /api/jobs/{id}` returns it as `events`, and
 > Python-level narration, which is the part that names steps, providers and
 > models.
 
+### Stopping and deleting a job
+
+**Cancel** (on the job page while it runs, or `POST /api/jobs/{id}/cancel`)
+stops it for real: its ffmpeg is killed at once and no further step, provider
+request or transcription chunk starts. A provider request already in flight
+finishes or times out first -- up to a few minutes on NVIDIA's free tier. A
+cancelled job keeps its files, so Clone & Rerun still finds its transcript.
+
+**Delete** removes the job, its output directory and the uploads no other job
+uses. A running job is cancelled first and removed once it stops.
+
+At most `MAX_QUEUED_JOBS` jobs (default 20) wait for a worker; past that, a new
+job is refused with `429` until one starts.
+
 ---
 
 ## 🚀 Local Quick Start
