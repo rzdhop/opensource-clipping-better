@@ -88,7 +88,8 @@ Path(".env").write_text(env_text, encoding="utf-8")
 **Cell 3: Eksekusi (Contoh termasuk fallback Kaggle untuk float32)**
 ```python
 # Siapkan file input dulu (cell sebelumnya), misalnya dengan yt-dlp:
-#   !yt-dlp -f "bv*[vcodec!*=av01]+ba/b" --write-auto-subs --sub-format vtt \
+#   !yt-dlp -f "bv*[vcodec!*=av01]+ba/b" --merge-output-format mp4 \
+#          --write-auto-subs --sub-format vtt \
 #          --convert-subs vtt -o "talk.%(ext)s" "<URL>"
 VIDEO_FILE = "talk.mp4"
 TRANSCRIPT_FILE = "talk.en.vtt"   # kosongkan ("") untuk transkripsi dengan Whisper

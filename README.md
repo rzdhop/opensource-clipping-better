@@ -138,19 +138,25 @@ import os
 from pathlib import Path
 from google.colab import userdata
 
-# Store your keys in Colab Secrets first!
-# NVIDIA_API_KEY is the default provider; GOOGLE_API_KEY is only needed for
-# --ai-provider gemini or --voiceover.
-NVIDIA_API_KEY = userdata.get("NVIDIA_API_KEY")
+# Store your keys in Colab Secrets first! The analysis needs GROQ_API_KEY
+# and/or GOOGLE_API_KEY (both free); NVIDIA_API_KEY is an optional backup and
+# cannot start a job on its own.
+def secret(name):
+    try:
+        return userdata.get(name) or ""
+    except Exception:  # the secret is not set, or notebook access is off
+        return ""
 
-env_text = f"NVIDIA_API_KEY={NVIDIA_API_KEY}\n"
+env_text = "".join(f"{name}={secret(name)}\n"
+                   for name in ("GROQ_API_KEY", "GOOGLE_API_KEY", "NVIDIA_API_KEY"))
 Path(".env").write_text(env_text, encoding="utf-8")
 ```
 
 **Cell 3: Execute (Example including Kaggle fallback for float32)**
 ```python
 # Acquire the inputs first (previous cell), e.g. with yt-dlp:
-#   !yt-dlp -f "bv*[vcodec!*=av01]+ba/b" --write-auto-subs --sub-format vtt \
+#   !yt-dlp -f "bv*[vcodec!*=av01]+ba/b" --merge-output-format mp4 \
+#          --write-auto-subs --sub-format vtt \
 #          --convert-subs vtt -o "talk.%(ext)s" "<URL>"
 VIDEO_FILE = "talk.mp4"
 TRANSCRIPT_FILE = "talk.en.vtt"   # set to "" to transcribe with Whisper instead
@@ -253,7 +259,8 @@ cp .env.example .env
 # Edit .env and add a GROQ_API_KEY and/or GOOGLE_API_KEY (both free)
 
 # 4. Acquire the inputs with your own tools. For example, with yt-dlp:
-yt-dlp -f "bv*[vcodec!*=av01]+ba/b" --write-auto-subs --sub-format vtt \
+yt-dlp -f "bv*[vcodec!*=av01]+ba/b" --merge-output-format mp4 \
+       --write-auto-subs --sub-format vtt \
        --convert-subs vtt -o "talk.%(ext)s" "https://youtube.com/watch?v=VIDEO_ID"
 # -> talk.mp4 and talk.en.vtt
 
