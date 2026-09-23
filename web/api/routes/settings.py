@@ -15,6 +15,7 @@ from fastapi import Depends, APIRouter, HTTPException
 from ..auth import require_token
 
 # Imported rather than repeated so the API cannot drift from the pipeline.
+from clipping import __version__
 from clipping.config import AI_PROVIDER, WHISPER_DEVICE
 from ..models import (
     ChainLinkResult,
@@ -178,7 +179,7 @@ async def health_check() -> SystemHealthResponse:
     """System health check."""
     return SystemHealthResponse(
         status="ok",
-        version="1.12.0",
+        version=__version__,
         gpu_available=_check_gpu(),
         ffmpeg_available=_check_ffmpeg(),
         jobs_running=job_store.get_running_count(),
