@@ -32,7 +32,7 @@
     ctranslate2 is installed here, so the transcript path's import of it
     becomes visible. The Ubuntu env does not have the package, so this
     **may be a real bug hidden there** (logged as a follow-up).
-- **Phase:** IMPLEMENT. Next stage: S7 (A7, source_manager docstring).
+- **Phase:** IMPLEMENT. Next stage: merge feature/onboarding (fetch + integrate origin/main first), then S8 on feature/render-fixes.
 - **Open questions:** none. Two scope calls were made in chat: loudnorm is
   an opt-in flag, default off; cancel uses checkpoints plus a kill of the
   job's ffmpeg children.
@@ -47,7 +47,7 @@
 | 4 | A4 README/wiki links | feature/onboarding | **done** |
 | 5 | A5 retire docs/studio | feature/onboarding | **done** |
 | 6 | A1 notebooks | feature/onboarding | **done** |
-| 7 | A7 source_manager docstring | feature/onboarding | pending |
+| 7 | A7 source_manager docstring | feature/onboarding | **done** |
 | 8 | D7 diarization stderr | feature/render-fixes | pending |
 | 9 | D6 hook fetch timeout/cap | feature/render-fixes | pending |
 | 10 | D4 memoise encoder probes | feature/render-fixes | pending |

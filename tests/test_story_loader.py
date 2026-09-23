@@ -148,3 +148,20 @@ def test_shipped_sources_use_the_local_schema(path):
         assert src["platform"] == "local", src["id"]
         assert "local_path" in src, src["id"]
         assert "url" not in src, src["id"]
+
+
+def test_the_source_manager_does_not_claim_to_download():
+    """Its docstring still promised downloads from YouTube, TikTok, Instagram
+    and Google Drive after the fetch code was deleted; the loader it sits beside
+    already says sources are local files only."""
+    import ast
+    import pathlib
+
+    path = pathlib.Path(__file__).resolve().parents[1] / "clipping" / "story" / "source_manager.py"
+    source = path.read_text(encoding="utf-8")
+    doc = ast.get_docstring(ast.parse(source)) or ""
+    for platform in ("YouTube", "TikTok", "Instagram", "Google Drive"):
+        assert platform not in doc, platform
+    assert "yt_dlp" not in doc
+    assert "local" in doc.lower()
+    assert "SINGLE SOURCE DOWNLOAD" not in source

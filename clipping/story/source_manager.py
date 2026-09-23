@@ -1,12 +1,14 @@
 """
-clipping.story.source_manager — Multi-Source Download & Cache Manager
+clipping.story.source_manager — Local Source Cache Manager
 
-Handles downloading videos from multiple platforms (YouTube, TikTok,
-Instagram, Google Drive) and caching them locally for reuse across
-the Story Clip pipeline.
+Copies each story source's local video file into the story cache, so the
+assembler can address every source by a uniform ``<cache>/<id>.mp4`` path.
+Sources are local files only -- nothing is downloaded, matching
+``clipping.story.loader``. Acquire media with your own tools and point each
+source's ``local_path`` at it.
 
 Note: Engine functions are imported lazily to avoid pulling in heavy
-dependencies (faster_whisper, yt_dlp) at module level.
+dependencies (faster_whisper) at module level.
 """
 
 import os
@@ -25,7 +27,7 @@ def get_cache_dir(outputs_dir: str) -> str:
 
 
 # ==============================================================================
-# SINGLE SOURCE DOWNLOAD
+# SINGLE SOURCE INGEST
 # ==============================================================================
 
 def _ingest_single_source(source: dict, cache_dir: str) -> str:
