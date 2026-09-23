@@ -167,3 +167,4 @@ with httpx.stream("GET", f"{base}/api/jobs/{job_id}/status",
 | `404` | No such job or file. |
 | `409` | Attaching a source to a job that is not waiting for one, or a chain test already running. |
 | `413` | Upload over 2 GB. |
+| `429` | The queue is full: `MAX_QUEUED_JOBS` jobs (default 20; `0` = no limit) are already waiting for a worker. Retry once one has started. |

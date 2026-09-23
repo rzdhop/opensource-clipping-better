@@ -133,6 +133,33 @@ def _job_to_response(job: dict) -> JobResponse:
     )
 
 
+# How many jobs may wait for a worker at once; MAX_QUEUED_JOBS, 0 for no limit.
+DEFAULT_MAX_QUEUED_JOBS = 20
+
+
+def _queue_refusal() -> str | None:
+    """Why a job cannot join the queue right now, or None.
+
+    Read per request, like the other runtime settings. Each waiting job holds
+    a record the store re-serializes on every write and an output directory,
+    so a client retrying in a loop could otherwise stack them without end.
+    """
+    raw = os.environ.get("MAX_QUEUED_JOBS", "").strip()
+    try:
+        limit = int(raw) if raw else DEFAULT_MAX_QUEUED_JOBS
+    except ValueError:
+        limit = DEFAULT_MAX_QUEUED_JOBS
+    if limit <= 0:
+        return None
+    waiting = store.get_queued_count()
+    if waiting < limit:
+        return None
+    return (
+        f"The queue is full: {waiting} job(s) are already waiting "
+        f"(MAX_QUEUED_JOBS={limit}). Try again once one has started, or cancel one."
+    )
+
+
 def _slow_chain_refusal(payload) -> str | None:
     """The chain-readiness refusal for a job about to be created, or None.
 
@@ -204,6 +231,12 @@ async def create_job(req: JobCreateRequest) -> JobResponse:
     if reuse_job_id and "load_gemini_json" not in req.model_fields_set:
         payload["load_gemini_json"] = True
 
+    # 429, not 503: "come back later" is the truth, and a 5xx reads as the
+    # server being broken to a proxy's health logic.
+    full = _queue_refusal()
+    if full:
+        raise HTTPException(status_code=429, detail=full)
+
     # Refuse, before a job exists, a chain that would run on the slow floor
     # alone (DEC-073). The worker checks again, but by then the job is on the
     # list, and the old failure took 93s of preflight to arrive. A render-only
@@ -257,6 +290,11 @@ async def attach_source(
                 f"Only a job waiting for its source can have one attached."
             ),
         )
+
+    # Before the upload is stored: a refused request must not leave a file.
+    full = _queue_refusal()
+    if full:
+        raise HTTPException(status_code=429, detail=full)
 
     video_name = await save_upload(file)
     subtitle_name = await save_upload(subtitle) if subtitle is not None else None
