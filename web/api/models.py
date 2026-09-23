@@ -139,6 +139,8 @@ class JobCreateRequest(BaseModel):
     # opt-in, not an opt-out. See clipping/config.USE_HOOK_GLITCH.
     use_hook_glitch: bool = False
     use_auto_bgm: bool = True
+    # Off by default, like the glitch: see clipping/config.LOUDNORM.
+    loudnorm: bool = False
     use_karaoke_effect: bool = True
     # The word being spoken, in ASS BGR: &HBBGGRR&. Default is yellow.
     karaoke_color: str = Field(

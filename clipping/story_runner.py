@@ -234,6 +234,14 @@ def run_story_pipeline(cfg) -> list[dict]:
             ratio=ratio,
         )
 
+        # LOUDNESS (opt-in): each assembled file, as the main renderer does.
+        if getattr(cfg, "loudnorm", False):
+            from clipping import loudness
+
+            for path in (hook_path, highlight_path):
+                if path and os.path.exists(path):
+                    loudness.normalize_file(path)
+
         entry = {
             "clip_id": cid,
             "title": title,

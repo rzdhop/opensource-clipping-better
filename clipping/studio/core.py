@@ -79,6 +79,7 @@ build_ffmpeg_progress_cmd = _ffmpeg_utils.build_ffmpeg_progress_cmd
 run_ffmpeg_with_progress = _ffmpeg_utils.run_ffmpeg_with_progress
 from . import v2_helpers
 from . import edge_glow as edge_glow_mod
+from clipping import loudness
 generate_edge_glow_video = edge_glow_mod.generate_edge_glow_video
 
 def proses_klip(
@@ -1087,6 +1088,13 @@ def proses_klip(
                 finally:
                     if os.path.exists(glow_full_path):
                         os.remove(glow_full_path)
+
+        # LOUDNESS (opt-in): the last write to the file, after the concat and the
+        # edge glow. The hook, voice-over and main clip were mixed separately.
+        if getattr(cfg, "loudnorm", False):
+            for final_path, _, _, _ in concat_runs:
+                if os.path.exists(final_path):
+                    loudness.normalize_file(final_path)
 
         judul_thumbnail = judul_en or judul or f"Highlight {rank}"
         buat_thumbnail(out_vid, out_thm, judul_thumbnail, cfg)

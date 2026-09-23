@@ -234,6 +234,8 @@ function NewJob() {
   // one-second full-frame effect on every clip, which is an opt-in.
   const [useHookGlitch, setUseHookGlitch] = useState(false)
   const [useBgm, setUseBgm] = useState(true)
+  // Off by default (clipping/config.LOUDNORM): it re-encodes every clip's audio.
+  const [loudnorm, setLoudnorm] = useState(false)
   const [useKaraoke, setUseKaraoke] = useState(true)
   // ASS colour, BGR: &HBBGGRR&. The input below is an RGB picker.
   const [karaokeColor, setKaraokeColor] = useState('&H00FFFF&')
@@ -281,6 +283,7 @@ function NewJob() {
       if (config.use_broll !== undefined) setUseBroll(config.use_broll)
       if (config.use_hook_glitch !== undefined) setUseHookGlitch(config.use_hook_glitch)
       if (config.use_auto_bgm !== undefined) setUseBgm(config.use_auto_bgm)
+      if (config.loudnorm !== undefined) setLoudnorm(config.loudnorm)
       if (config.use_karaoke_effect !== undefined) setUseKaraoke(config.use_karaoke_effect)
       if (config.karaoke_color !== undefined) setKaraokeColor(config.karaoke_color)
       if (config.hook_v2 !== undefined) setHookV2(config.hook_v2)
@@ -387,6 +390,7 @@ function NewJob() {
         use_broll: useBroll,
         use_hook_glitch: useHookGlitch,
         use_auto_bgm: useBgm,
+        loudnorm: loudnorm,
         use_karaoke_effect: useKaraoke,
         karaoke_color: karaokeColor,
         no_subs: noSubs,
@@ -823,6 +827,7 @@ function NewJob() {
             )}
             <ToggleRow label="Hook Glitch" desc="Glitch transition intro" checked={useHookGlitch} onChange={setUseHookGlitch} />
             <ToggleRow label="Background Music" desc="Auto BGM matching" checked={useBgm} onChange={setUseBgm} />
+            <ToggleRow label="Level loudness" desc="Every clip at -14 LUFS" checked={loudnorm} onChange={setLoudnorm} />
             <ToggleRow label="Karaoke Effect" desc="Word-by-word highlight" checked={useKaraoke} onChange={setUseKaraoke} />
             {useKaraoke && (
               <div className="form-group">
