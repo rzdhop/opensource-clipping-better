@@ -32,7 +32,7 @@
     ctranslate2 is installed here, so the transcript path's import of it
     becomes visible. The Ubuntu env does not have the package, so this
     **may be a real bug hidden there** (logged as a follow-up).
-- **Phase:** IMPLEMENT. Next stage: S5 (A5, retire docs/studio).
+- **Phase:** IMPLEMENT. Next stage: S6 (A1, notebooks).
 - **Open questions:** none. Two scope calls were made in chat: loudnorm is
   an opt-in flag, default off; cancel uses checkpoints plus a kill of the
   job's ffmpeg children.
@@ -45,7 +45,7 @@
 | 2 | A2 retire .env.sample | feature/onboarding | **done** |
 | 3 | A3 pyproject mirrors requirements | feature/onboarding | **done** |
 | 4 | A4 README/wiki links | feature/onboarding | **done** |
-| 5 | A5 retire docs/studio | feature/onboarding | pending |
+| 5 | A5 retire docs/studio | feature/onboarding | **done** |
 | 6 | A1 notebooks | feature/onboarding | pending |
 | 7 | A7 source_manager docstring | feature/onboarding | pending |
 | 8 | D7 diarization stderr | feature/render-fixes | pending |

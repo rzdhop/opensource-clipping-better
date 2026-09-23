@@ -177,35 +177,29 @@ WHISPER_COMPUTE_TYPE = "float32"
 
 ---
 
-## 🎬 Web Studio (GitHub Pages + Remote GPU)
+## 🎬 Web Studio
 
-The **Clipping Studio** is a browser-based dashboard hosted for free on **GitHub Pages** that connects to a Kaggle/Colab notebook as its backend — giving you a full GUI to control the AI clipping pipeline without any local setup.
+The Studio is the dashboard in `web/dashboard`, and the API serves it: one
+process, one port, one URL. There is no separate frontend to host.
 
-**🔗 Open Studio:** [naufalrizqullah.github.io/rzdhop-clips/studio/](https://naufalrizqullah.github.io/rzdhop-clips/studio/)
-
-### How It Works
-
-```
-┌─────────────────────┐     HTTPS (ngrok)     ┌──────────────────────────┐
-│   GitHub Pages      │ ◄──────────────────►   │   Kaggle / Colab         │
-│   (Static Frontend) │                        │   (FastAPI + GPU)        │
-│                     │   POST /api/jobs       │                          │
-│   studio/index.html │ ────────────────────►  │   web/api/app.py         │
-│   studio/new-job    │   GET  /api/jobs/:id   │   clipping pipeline      │
-│   studio/settings   │ ◄────────────────────  │   Whisper + Gemini       │
-└─────────────────────┘                        └──────────────────────────┘
-        FREE                                           FREE (GPU)
+```bash
+docker compose up -d                 # builds the dashboard into the image
 ```
 
-### Quick Start
+Or without Docker:
 
-1. **Start the backend** — Open `notebooks/Kaggle_Studio_Server.ipynb` in Kaggle (or Colab), add your API keys to Secrets, and run all cells. Copy the **Public URL** from the output.
+```bash
+(cd web/dashboard && npm ci && npm run build)   # once, and after each pull
+uvicorn web.api.app:app --host 127.0.0.1 --port 8000
+```
 
-2. **Open the Studio** — Visit [the Studio page](https://naufalrizqullah.github.io/rzdhop-clips/studio/) in your browser.
+Open **http://localhost:8000/** and sign in with the API token. It is printed
+in the log on first start (`🔑 API token: …`) and kept in `data/api_token`;
+set `API_TOKEN` in `.env` to pin it. The backend binds loopback on purpose —
+to reach it from your phone, follow [docs/deploy-tailscale.md](docs/deploy-tailscale.md).
 
-3. **Connect** — Click the **Connect** button in the sidebar, paste the tunnel URL, and click **Test & Connect**.
-
-4. **Create a job** — Go to **New Job**, enter a YouTube URL, configure your clip settings, and hit **Start Clipping**. Monitor progress in real-time from the Dashboard.
+From the dashboard you upload a video (and optionally its transcript) or paste
+a URL, pick the clip settings, and watch the job run.
 
 ### Watching a job run
 
@@ -235,8 +229,6 @@ The same feed is on the API: `GET /api/jobs/{id}` returns it as `events`, and
 > (`docker compose logs backend`). What the feed carries is the pipeline's
 > Python-level narration, which is the part that names steps, providers and
 > models.
-
-> **Note:** The tunnel URL changes each time the notebook restarts. The Studio saves your last URL in `localStorage` for convenience, but you'll need to update it after each new session.
 
 ---
 

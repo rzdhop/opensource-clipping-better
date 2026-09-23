@@ -115,37 +115,30 @@ WHISPER_COMPUTE_TYPE = "float32"
 
 ---
 
-## 🎬 Web Studio (GitHub Pages + Remote GPU)
+## 🎬 Web Studio
 
-**Clipping Studio** adalah dashboard berbasis browser yang di-hosting gratis di **GitHub Pages** dan terhubung ke notebook Kaggle/Colab sebagai backend — memberikan GUI lengkap untuk mengontrol pipeline AI clipping tanpa setup lokal.
+Studio adalah dashboard di `web/dashboard`, dan API yang menyajikannya: satu
+proses, satu port, satu URL. Tidak ada frontend terpisah yang perlu di-hosting.
 
-**🔗 Buka Studio:** [naufalrizqullah.github.io/rzdhop-clips/studio/](https://naufalrizqullah.github.io/rzdhop-clips/studio/)
-
-### Cara Kerja
-
-```
-┌─────────────────────┐     HTTPS (ngrok)     ┌──────────────────────────┐
-│   GitHub Pages      │ ◄──────────────────►   │   Kaggle / Colab         │
-│   (Frontend Statis) │                        │   (FastAPI + GPU)        │
-│                     │   POST /api/jobs       │                          │
-│   studio/index.html │ ────────────────────►  │   web/api/app.py         │
-│   studio/new-job    │   GET  /api/jobs/:id   │   pipeline clipping      │
-│   studio/settings   │ ◄────────────────────  │   Whisper + Gemini       │
-└─────────────────────┘                        └──────────────────────────┘
-        GRATIS                                         GRATIS (GPU)
+```bash
+docker compose up -d                 # dashboard ikut di-build ke dalam image
 ```
 
-### Cara Pakai
+Atau tanpa Docker:
 
-1. **Jalankan backend** — Buka `notebooks/Kaggle_Studio_Server.ipynb` di Kaggle (atau Colab), tambahkan API key ke Secrets, lalu run semua cell. Salin **Public URL** dari output.
+```bash
+(cd web/dashboard && npm ci && npm run build)   # sekali, dan setiap habis pull
+uvicorn web.api.app:app --host 127.0.0.1 --port 8000
+```
 
-2. **Buka Studio** — Kunjungi [halaman Studio](https://naufalrizqullah.github.io/rzdhop-clips/studio/) di browser.
+Buka **http://localhost:8000/** lalu masuk dengan API token. Token dicetak di
+log saat pertama kali start (`🔑 API token: …`) dan disimpan di
+`data/api_token`; isi `API_TOKEN` di `.env` agar tetap. Backend sengaja hanya
+mendengarkan di loopback — untuk mengaksesnya dari HP, ikuti
+[docs/deploy-tailscale.md](docs/deploy-tailscale.md).
 
-3. **Connect** — Klik tombol **Connect** di sidebar, paste URL tunnel, lalu klik **Test & Connect**.
-
-4. **Buat job** — Masuk ke **New Job**, masukkan URL YouTube, atur konfigurasi clip, dan klik **Start Clipping**. Pantau progress secara real-time dari Dashboard.
-
-> **Catatan:** URL tunnel berubah setiap kali notebook di-restart. Studio menyimpan URL terakhir di `localStorage` untuk kemudahan, namun perlu diupdate setelah setiap sesi baru.
+Dari dashboard Anda meng-upload video (dan transkripnya, opsional) atau
+menempelkan URL, memilih pengaturan clip, dan memantau job berjalan.
 
 ---
 
