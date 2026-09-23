@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
-import { useParams, Link } from 'react-router-dom'
-import { fetchJob, deleteJob, createSSEConnection } from '../api'
+import { useParams, Link, useNavigate } from 'react-router-dom'
+import { fetchJob, cancelJob, deleteJob, createSSEConnection } from '../api'
 import { parseTime, formatDuration, formatClock, useSecondsTicker } from '../time'
 
 const STEPS = [
@@ -169,10 +169,47 @@ function LiveActivity({ job, events, streamState }) {
 
 function JobDetail() {
   const { jobId } = useParams()
+  const navigate = useNavigate()
   const [job, setJob] = useState(null)
   const [events, setEvents] = useState([])
   const [streamState, setStreamState] = useState('connecting')
   const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [actionError, setActionError] = useState('')
+
+  // Both ask first: one stops work the job has already paid for in quota and
+  // CPU, the other removes rendered clips and the upload for good.
+  const onCancel = async () => {
+    if (!window.confirm(
+      'Cancel this job?\n\nIt stops at its next step. A provider request already '
+      + 'in flight can take a few minutes to return. Its files are kept.'
+    )) return
+    setBusy(true)
+    setActionError('')
+    try {
+      setJob(await cancelJob(jobId))
+    } catch (err) {
+      setActionError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const onDelete = async () => {
+    if (!window.confirm(
+      'Delete this job and its files?\n\nIts rendered clips and its upload are '
+      + 'removed from the server. This cannot be undone.'
+    )) return
+    setBusy(true)
+    setActionError('')
+    try {
+      await deleteJob(jobId)
+      navigate('/')
+    } catch (err) {
+      setActionError(err.message)
+      setBusy(false)
+    }
+  }
 
   // Merged by sequence number, never replaced: the REST poll and the SSE stream
   // both deliver events and routinely overlap.
@@ -272,12 +309,21 @@ function JobDetail() {
           <h2>Job #{job.id}</h2>
           <p>{job.upload_filename || job.source_url || job.url || 'Unknown source'}</p>
         </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
           <span className={`badge badge-${job.status}`}>{job.status}</span>
           <Link to="/new" state={{ reuseJob: job }} className="btn btn-secondary btn-sm">🔁 Clone & Rerun</Link>
+          {running
+            ? <button type="button" className="btn btn-danger btn-sm" onClick={onCancel} disabled={busy}>⏹ Cancel</button>
+            : <button type="button" className="btn btn-danger btn-sm" onClick={onDelete} disabled={busy}>🗑 Delete</button>}
           <Link to="/" className="btn btn-ghost btn-sm">← Back</Link>
         </div>
       </div>
+
+      {actionError && (
+        <div className="card" role="alert" style={{ marginBottom: '16px', borderColor: 'rgba(239,68,68,0.2)' }}>
+          <p style={{ fontSize: '13px', color: 'var(--error)', whiteSpace: 'pre-wrap' }}>{actionError}</p>
+        </div>
+      )}
 
       {/* Progress */}
       {running && (

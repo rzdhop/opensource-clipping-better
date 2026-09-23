@@ -103,9 +103,29 @@ export async function createJob(payload) {
   return res.json()
 }
 
+/** The API's own explanation of a refusal (409, 429, ...), else *fallback*. */
+async function detailOf(res, fallback) {
+  try {
+    const body = await res.json()
+    if (body && body.detail) return String(body.detail)
+  } catch {}
+  return fallback
+}
+
+/**
+ * Stop a queued or running job. It stops at its next step; a provider request
+ * already in flight can take a few minutes to return. Its files are kept.
+ */
+export async function cancelJob(jobId) {
+  const res = await request(`/jobs/${jobId}/cancel`, { method: 'POST' })
+  if (!res.ok) throw new Error(await detailOf(res, 'Failed to cancel the job'))
+  return res.json()
+}
+
+/** Delete a job and its files (a running one is cancelled first). */
 export async function deleteJob(jobId) {
   const res = await request(`/jobs/${jobId}`, { method: 'DELETE' })
-  if (!res.ok) throw new Error('Failed to delete job')
+  if (!res.ok) throw new Error(await detailOf(res, 'Failed to delete job'))
   return res.json()
 }
 
