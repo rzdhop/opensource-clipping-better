@@ -133,6 +133,28 @@ def _job_to_response(job: dict) -> JobResponse:
     )
 
 
+def _slow_chain_refusal(payload) -> str | None:
+    """The chain-readiness refusal for a job about to be created, or None.
+
+    Resolved from the same places the job's config will be -- the per-job chain,
+    then Settings, then the process env -- without building that config.
+    """
+    from clipping.config import WEB_SLOW_CHAIN_HINT, chain_readiness
+    from ..config_adapter import env_flag, resolve_provider_keys
+
+    env = worker.get_settings_env()
+    chain = payload.get("llm_chain") or env.get(
+        "LLM_CHAIN", os.environ.get("LLM_CHAIN", ""))
+    readiness = chain_readiness(
+        chain,
+        resolve_provider_keys(env),
+        ai_provider=payload.get("ai_provider") or "chain",
+        allow_slow=env_flag(env, "ALLOW_SLOW_CHAIN"),
+        hint=WEB_SLOW_CHAIN_HINT,
+    )
+    return None if readiness.ready else readiness.message
+
+
 @router.post("", status_code=201)
 async def create_job(req: JobCreateRequest) -> JobResponse:
     """Create a new clipping job and submit it to the background queue."""
@@ -173,6 +195,16 @@ async def create_job(req: JobCreateRequest) -> JobResponse:
     if reuse_job_id and "load_gemini_json" not in req.model_fields_set:
         payload["load_gemini_json"] = True
 
+    # Refuse, before a job exists, a chain that would run on the slow floor
+    # alone (DEC-073). The worker checks again, but by then the job is on the
+    # list, and the old failure took 93s of preflight to arrive. A render-only
+    # rerun calls no provider, so it is exempt here as it is everywhere else --
+    # the same definition the dashboard uses.
+    render_only = bool(reuse_job_id and payload.get("load_gemini_json"))
+    if not render_only:
+        slow = _slow_chain_refusal(payload)
+        if slow:
+            raise HTTPException(status_code=400, detail=slow)
 
     job_id = store.create_job(
         transcript_filename=req.transcript_filename,

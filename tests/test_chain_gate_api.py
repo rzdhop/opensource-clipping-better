@@ -110,3 +110,96 @@ def test_the_job_config_carries_the_switch(settings_env, tmp_path, monkeypatch):
     cfg = config_adapter.build_config_from_payload(
         {"upload_filename": "v.mp4"}, "job2", env_overrides={"ALLOW_SLOW_CHAIN": "1"})
     assert cfg.allow_slow_chain is True
+
+
+# ------------------------------------------------ POST /api/jobs (Stage 5)
+
+def test_the_route_refuses_before_the_job_exists():
+    """The refusal must precede store.create_job, or a refused job is still
+    written to the list (and, via the config builder, to disk)."""
+    text = (API / "routes" / "jobs.py").read_text(encoding="utf-8")
+    body = text[text.index("async def create_job("):text.index("async def attach_source(")]
+    assert body.index("_slow_chain_refusal(payload)") < body.index("store.create_job(")
+
+
+@pytest.fixture
+def created(client, monkeypatch):
+    """Record what reaches the store and the queue, instead of doing it."""
+    from web.api import store, worker
+
+    calls = {"create": [], "submit": []}
+
+    def create_job(**kwargs):
+        calls["create"].append(kwargs)
+        return "job1"
+
+    async def submit_job(job_id, payload):
+        calls["submit"].append((job_id, payload))
+
+    monkeypatch.setattr(store, "create_job", create_job)
+    monkeypatch.setattr(store, "get_job", lambda job_id: {"id": job_id})
+    monkeypatch.setattr(worker, "submit_job", submit_job)
+    return calls
+
+
+def test_only_the_floor_keyed_is_refused_with_both_signup_urls(
+        client, created, settings_env):
+    from clipping.providers import registry
+
+    settings_env.set_settings_env({"NVIDIA_API_KEY": "k"}, persist=False)
+    r = client.post("/api/jobs", json={"upload_filename": "v.mp4"})
+
+    assert r.status_code == 400
+    detail = r.json()["detail"]
+    for name in ("groq", "gemini"):
+        assert registry.PROVIDERS[name].signup_url in detail
+        assert registry.PROVIDERS[name].env_key in detail
+    assert "Settings" in detail
+    assert created["create"] == [] and created["submit"] == []
+
+
+def test_a_primary_key_lets_the_job_through(client, created, settings_env):
+    settings_env.set_settings_env(
+        {"NVIDIA_API_KEY": "k", "GROQ_API_KEY": "g"}, persist=False)
+    r = client.post("/api/jobs", json={"upload_filename": "v.mp4"})
+
+    assert r.status_code == 201
+    assert len(created["submit"]) == 1
+
+
+def test_a_key_in_the_process_env_counts_too(client, created, settings_env, monkeypatch):
+    """.env keys never pass through the Settings page, and still count."""
+    monkeypatch.setenv("NVIDIA_API_KEY", "k")
+    monkeypatch.setenv("GOOGLE_API_KEY", "g")
+    assert client.post("/api/jobs", json={"upload_filename": "v.mp4"}).status_code == 201
+
+
+def test_the_settings_switch_lets_it_run(client, created, settings_env):
+    settings_env.set_settings_env(
+        {"NVIDIA_API_KEY": "k", "ALLOW_SLOW_CHAIN": "1"}, persist=False)
+    assert client.post("/api/jobs", json={"upload_filename": "v.mp4"}).status_code == 201
+
+
+def test_a_per_job_chain_that_names_no_primary_is_the_users_to_run(
+        client, created, settings_env):
+    settings_env.set_settings_env({"NVIDIA_API_KEY": "k"}, persist=False)
+    r = client.post("/api/jobs", json={"upload_filename": "v.mp4",
+                                       "llm_chain": "nvidia/some-model"})
+    assert r.status_code == 201
+
+
+def test_a_render_only_rerun_needs_no_key_and_meets_no_gate(
+        client, created, settings_env):
+    """It calls no provider (RC-B7). reuse_job_id alone defaults
+    load_gemini_json on, which is what makes it render-only."""
+    settings_env.set_settings_env({"NVIDIA_API_KEY": "k"}, persist=False)
+    r = client.post("/api/jobs", json={"reuse_job_id": "abc123"})
+    assert r.status_code == 201
+
+
+def test_a_rerun_that_asks_for_a_fresh_analysis_is_gated(
+        client, created, settings_env):
+    settings_env.set_settings_env({"NVIDIA_API_KEY": "k"}, persist=False)
+    r = client.post("/api/jobs", json={"reuse_job_id": "abc123",
+                                       "load_gemini_json": False})
+    assert r.status_code == 400

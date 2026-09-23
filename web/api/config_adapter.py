@@ -45,6 +45,24 @@ from clipping.config import (
 )
 
 
+def resolve_provider_keys(env=None) -> dict:
+    """``{provider: key}`` for every chain provider with a key, no config built.
+
+    Same precedence as the builder below -- the Settings env, then the process
+    env -- for a caller that must decide before a job exists. Building a config
+    creates the job's output directory, which a refused job must not leave.
+    """
+    from clipping.config import PROVIDER_KEYS
+
+    env = env or {}
+    keys = {}
+    for name, (_attr, env_name) in PROVIDER_KEYS.items():
+        value = env.get(env_name, os.environ.get(env_name, ""))
+        if value:
+            keys[name] = value
+    return keys
+
+
 def env_flag(env, name) -> bool:
     """A boolean setting: the Settings page's value, else the process env.
 
