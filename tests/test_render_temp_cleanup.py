@@ -8,12 +8,12 @@ by cleanup code that runs after the last ffmpeg call succeeds, so any ffmpeg
 failure in between left them in the working directory (the web backend's is
 /app) for good.
 
-core.py is loaded by path with the render stack mocked, so this runs in the
+core is imported through the package with the render stack mocked, so this runs in the
 pytest-only CI environment.
 """
 
 import ast
-import importlib.util
+import importlib
 import pathlib
 import subprocess
 import types
@@ -25,10 +25,9 @@ STUDIO = pathlib.Path(__file__).resolve().parents[1] / "clipping" / "studio"
 
 @pytest.fixture
 def core(render_stack_stubbed, monkeypatch):
-    spec = importlib.util.spec_from_file_location("core_under_test", STUDIO / "core.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    # Imported through the package: since clipping/studio/ became a real
+    # package, core.py uses relative imports and cannot run outside it.
+    return importlib.import_module("clipping.studio.core")
 
 
 def _touch(path):

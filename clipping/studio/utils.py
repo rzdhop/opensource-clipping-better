@@ -1,5 +1,4 @@
 import html
-import importlib.util
 import json
 import math
 import os
@@ -23,33 +22,8 @@ from PIL import Image, ImageDraw, ImageFont
 
 FIREFOX_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:148.0) Gecko/20100101 Firefox/148.0"
 
-def _load_studio_internal_module(file_name: str, module_alias: str):
-    """
-    Load an internal studio module dynamically by file path.
-
-    Args:
-        file_name (str): The filename of the module to load.
-        module_alias (str): The alias to assign to the loaded module.
-
-    Returns:
-        module: The dynamically loaded Python module.
-
-    Side Effects:
-        Loads and executes the module code.
-
-    Raises:
-        ImportError: If the module specification cannot be found or loaded.
-    """
-    module_path = os.path.join(os.path.dirname(__file__), file_name)
-    spec = importlib.util.spec_from_file_location(module_alias, module_path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"Gagal memuat modul internal: {module_path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-_helpers = _load_studio_internal_module("helpers.py", "clipping_studio_helpers")
-_ffmpeg_utils = _load_studio_internal_module("ffmpeg_utils.py", "clipping_studio_ffmpeg_utils")
+from . import helpers as _helpers
+from . import ffmpeg_utils as _ffmpeg_utils
 format_seconds = _helpers.format_seconds
 escape_ffmpeg_filter_value = _helpers.escape_ffmpeg_filter_value
 detect_video_encoder = _ffmpeg_utils.detect_video_encoder

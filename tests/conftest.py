@@ -28,11 +28,35 @@ _RENDER_STACK = (
 import pytest  # noqa: E402  (kept below the path bootstrap above)
 
 
+def _studio_modules():
+    return [n for n in sys.modules if n == "clipping.studio" or n.startswith("clipping.studio.")]
+
+
 @pytest.fixture
 def render_stack_stubbed(monkeypatch):
-    """Mock modules for the render layer's heavy imports; restored afterwards."""
+    """Mock modules for the render layer's heavy imports; restored afterwards.
+
+    clipping.studio is imported fresh against the mocks and discarded after, in
+    both directions: a real one imported earlier is not reused (it would hold
+    the real cv2), and a mocked one does not outlive the test (it would hand
+    MagicMocks to whatever imports clipping.studio next).
+    """
     from unittest import mock
+
+    import clipping
 
     for name in _RENDER_STACK:
         monkeypatch.setitem(sys.modules, name, mock.MagicMock(name=name))
+    saved = {name: sys.modules.pop(name) for name in _studio_modules()}
+    had_attr = hasattr(clipping, "studio")
+    old_attr = getattr(clipping, "studio", None)
+    if had_attr:
+        delattr(clipping, "studio")
     yield
+    for name in _studio_modules():
+        del sys.modules[name]
+    sys.modules.update(saved)
+    if had_attr:
+        clipping.studio = old_attr
+    elif hasattr(clipping, "studio"):
+        delattr(clipping, "studio")

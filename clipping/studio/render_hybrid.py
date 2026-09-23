@@ -1,5 +1,4 @@
 import html
-import importlib.util
 import json
 import math
 import os
@@ -21,21 +20,14 @@ from mediapipe.tasks import python as mp_python
 from mediapipe.tasks.python import vision as mp_vision
 from PIL import Image, ImageDraw, ImageFont
 
-def _load_studio_internal_module(file_name: str, module_alias: str):
-    module_path = os.path.join(os.path.dirname(__file__), file_name)
-    spec = importlib.util.spec_from_file_location(module_alias, module_path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
 FIREFOX_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:148.0) Gecko/20100101 Firefox/148.0"
 
 
-_helpers = _load_studio_internal_module("helpers.py", "clipping_studio_helpers")
-_ffmpeg_utils = _load_studio_internal_module("ffmpeg_utils.py", "clipping_studio_ffmpeg_utils")
-# Loaded once here, not inside the frame loop: the loader re-executes the file
-# on every call, which also emptied the watermark's renderer cache every frame.
-_wm_mod = _load_studio_internal_module("watermark.py", "clipping_studio_watermark")
+from . import helpers as _helpers
+from . import ffmpeg_utils as _ffmpeg_utils
+# At module level, never inside the frame loop: its renderer cache has to live
+# as long as the module does (tests/test_watermark_cache.py).
+from . import watermark as _wm_mod
 format_seconds = _helpers.format_seconds
 escape_ffmpeg_filter_value = _helpers.escape_ffmpeg_filter_value
 detect_video_encoder = _ffmpeg_utils.detect_video_encoder
@@ -45,16 +37,16 @@ open_ffmpeg_video_writer = _ffmpeg_utils.open_ffmpeg_video_writer
 build_ffmpeg_progress_cmd = _ffmpeg_utils.build_ffmpeg_progress_cmd
 run_ffmpeg_with_progress = _ffmpeg_utils.run_ffmpeg_with_progress
 
-utils = _load_studio_internal_module("utils.py", "clipping_studio_utils")
+from . import utils
 _get_cv2_interpolation = utils._get_cv2_interpolation
 _resize_frame = utils._resize_frame
 _get_render_dims = utils._get_render_dims
 _is_vertical_ratio = utils._is_vertical_ratio
 RATIO_MAP = utils.RATIO_MAP
 
-broll = _load_studio_internal_module("broll.py", "clipping_studio_broll")
+from . import broll
 crop_center_broll = broll.crop_center_broll
-face_detection = _load_studio_internal_module("face_detection.py", "clipping_studio_face_detection")
+from . import face_detection
 get_face_detector = face_detection.get_face_detector
 
 def buat_video_hybrid(

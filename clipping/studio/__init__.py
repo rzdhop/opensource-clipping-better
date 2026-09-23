@@ -1,41 +1,21 @@
 """
 clipping.studio — Video Rendering Engine
 
-Thin compatibility entry point for the Studio pipeline.
-Public API is re-exported from internal modules under clipping/studio/.
-"""
+The package's public API, re-exported from its modules.
 
-import importlib.util
-import os
+This used to be clipping/studio.py, sitting beside this directory and
+shadowing it: `import clipping.studio.core` failed with "not a package", so
+every module here loaded its siblings by file path instead -- a dozen private
+copies of each, none shared. The names below are unchanged.
+"""
 
 FIREFOX_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:148.0) Gecko/20100101 Firefox/148.0"
 )
 
-
-def _load_studio_internal_module(file_name: str, module_alias: str):
-    """
-    Load an internal `clipping/studio/*.py` module by file path.
-
-    Args:
-        file_name: Python filename inside `clipping/studio`.
-        module_alias: Unique import alias used by importlib.
-
-    Returns:
-        Loaded Python module object.
-    """
-    module_path = os.path.join(os.path.dirname(__file__), "studio", file_name)
-    spec = importlib.util.spec_from_file_location(module_alias, module_path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"Failed to load internal module: {module_path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-_helpers = _load_studio_internal_module("helpers.py", "clipping_studio_helpers")
-_ffmpeg_utils = _load_studio_internal_module("ffmpeg_utils.py", "clipping_studio_ffmpeg_utils")
-_core = _load_studio_internal_module("core.py", "clipping_studio_core")
+from . import helpers as _helpers  # noqa: E402  (FIREFOX_UA is defined first, as before)
+from . import ffmpeg_utils as _ffmpeg_utils  # noqa: E402
+from . import core as _core  # noqa: E402
 
 format_seconds = _helpers.format_seconds
 escape_ffmpeg_filter_value = _helpers.escape_ffmpeg_filter_value
