@@ -1,4 +1,82 @@
-## CURRENT TASK — chain readiness gate + per-provider probe timeout (COMPLETE, awaiting Tier-2 ack + deploy)
+## CURRENT TASK — onboarding, job lifecycle, render-layer fixes (IN PROGRESS)
+- **Origin:** a fork-vs-upstream analysis (2026-09-23). Upstream has had no
+  commits since `3c72b75`, so nothing needs porting. The findings were ranked
+  and the human chose three areas: onboarding (A1-A7), job lifecycle (B1-B5)
+  and the render layer (D1-D7). Everything else stays on the roadmap.
+- **Plan:** `C:\Users\ridap\.claude\plans\on-this-sessions-we-snoopy-flurry.md`
+  (approved in chat). It holds the full findings table, the roadmap and the
+  21-stage ledger.
+- **Host:** Windows 11 (Python 3.11.15, ffmpeg 8.1.1, node 26). cv2,
+  mediapipe and fastapi are installed, so real renders can run here.
+  Docker and the deploy stay on the human's Ubuntu VPS.
+- **Checkpoint commit:** `8fa873d`, a clean tree. Local `main` was
+  fast-forwarded from `d5c502a`, which was 68 commits behind. Roll back here.
+- **Tier-1 baseline at `8fa873d` (this host):**
+  - Local suite: `python -m pytest` = **1353 passed, 8 failed**.
+  - CI-equivalent run, in a clean venv with pytest only
+    (`python -m venv <scratch>/civenv`, `pip install pytest`, then
+    `PYTHONNOUSERSITE=1 <venv>/python -m pytest`) = **1202 passed, 125
+    skipped, 6 failed**.
+  - `compileall` is clean. `npx vite build --outDir <scratch>` is green.
+- **The 8 baseline failures are pre-existing and specific to Windows.** None
+  is touched by this task. The rule for every stage is **no new failures;
+  these 8 stay put**.
+  - 5 permission tests (`test_auth_token`, `test_settings_store` x3,
+    `test_clip_srt_export`): POSIX `chmod 0600` and unwritable-directory
+    semantics do not exist on Windows.
+  - `test_chain_readiness::test_the_cli_gates_after_the_key_gate_and_before_the_probe`:
+    the test reads a source file with the default cp1252 codec.
+  - `test_clip_serving::test_the_api_is_untouched_by_the_fallback`: the SPA
+    fallback answers 200 for `/api/nope` on Windows.
+  - `test_transcript_dispatch::test_bypass_does_not_import_ctranslate2`:
+    ctranslate2 is installed here, so the transcript path's import of it
+    becomes visible. The Ubuntu env does not have the package, so this
+    **may be a real bug hidden there** (logged as a follow-up).
+- **Phase:** IMPLEMENT. Next stage: S1 (A6, the `/api/health` version).
+- **Open questions:** none. Two scope calls were made in chat: loudnorm is
+  an opt-in flag, default off; cancel uses checkpoints plus a kill of the
+  job's ffmpeg children.
+
+### Stage ledger
+| S | Item | Branch | State |
+|---|---|---|---|
+| 0 | sync + baseline | — | **done** |
+| 1 | A6 health version | feature/onboarding | pending |
+| 2 | A2 retire .env.sample | feature/onboarding | pending |
+| 3 | A3 pyproject mirrors requirements | feature/onboarding | pending |
+| 4 | A4 README/wiki links | feature/onboarding | pending |
+| 5 | A5 retire docs/studio | feature/onboarding | pending |
+| 6 | A1 notebooks | feature/onboarding | pending |
+| 7 | A7 source_manager docstring | feature/onboarding | pending |
+| 8 | D7 diarization stderr | feature/render-fixes | pending |
+| 9 | D6 hook fetch timeout/cap | feature/render-fixes | pending |
+| 10 | D4 memoise encoder probes | feature/render-fixes | pending |
+| 11 | D1 watermark load hoisted + settings-keyed cache | feature/render-fixes | pending |
+| 12 | D5 hook-v2 temp cleanup | feature/render-fixes | pending |
+| 13 | B5 LLM_CHAIN note (no code) | feature/job-lifecycle | pending |
+| 14 | B1a cancel token + checkpoints | feature/job-lifecycle | pending |
+| 15 | B1b web cancel + child kill (**high risk**) | feature/job-lifecycle | pending |
+| 16 | B2 delete removes files (**high risk**) | feature/job-lifecycle | pending |
+| 17 | B4 queue cap | feature/job-lifecycle | pending |
+| 18 | B3 dashboard Cancel/Delete | feature/job-lifecycle | pending |
+| 19 | D2 studio real package (**RISKIEST**) | feature/studio-package | pending |
+| 20 | D3 opt-in loudnorm | feature/loudnorm | pending |
+| 21 | docs + DEC-075..085 + close-out | — | pending |
+
+### Regression contract for this task
+| ID | Must keep working | Proven by |
+|---|---|---|
+| RC-7 | The render layer produces the same frames | framemd5 identical before and after S10/S11/S19 on hybrid+watermark, split-screen (face trigger), hook-v2, edge-glow (local render) |
+| RC-8 | Split-screen renders | the same local render; camera-switch is **UNVERIFIED** (needs pyannote) |
+| RC-10 | The web API runs a job end to end | existing `test_job_stream.py`, `test_clip_serving.py` + a manual pass |
+| RC-12 | The suite imports with pytest alone (DEC-012) | the clean-venv run above |
+| RC-A* / RC-B* | Chain behaviour, budgets, readiness gate (previous task) | `test_nvidia_retry.py`, `test_preflight.py`, `test_chain_readiness.py`, `test_provider_registry.py` |
+| RC-B7 | A render-only rerun needs no key | `test_web_reuse_bypass.py` |
+| RC-L1 | Clone & Rerun reuses the saved transcript (DEC-022) | `test_transcript_persistence.py` |
+
+---
+
+## PREVIOUS TASK — chain readiness gate + per-provider probe timeout (COMPLETE, awaiting Tier-2 ack + deploy)
 - **Phase:** DOCUMENT done. All 8 stages committed; head `9050839`.
 - **Plan:** `~/.claude/plans/still-not-working-groovy-puffin.md` (approved in chat).
 - **Checkpoint commit before the work:** `e991ff8` (+ `dafcf0b`, the checkpoint note).
