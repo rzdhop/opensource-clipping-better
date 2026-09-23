@@ -1,6 +1,6 @@
 <br />
 <div align="center">
-  <a href="https://github.com/NaufalRizqullah/opensource-clipping">
+  <a href="https://github.com/rzdhop/opensource-clipping-better">
     <img src="assets/images/rzdhop-clips-logo-editable.svg" alt="Logo" width="350">
   </a>
 
@@ -13,9 +13,9 @@
     <br />
     <a href="README.md">🇬🇧 Read in English</a>
     &middot;
-    <a href="https://github.com/NaufalRizqullah/opensource-clipping/issues/new">Laporkan Bug</a>
+    <a href="https://github.com/rzdhop/opensource-clipping-better/issues/new">Laporkan Bug</a>
     &middot;
-    <a href="https://github.com/NaufalRizqullah/opensource-clipping/issues/new">Minta Fitur Baru</a>
+    <a href="https://github.com/rzdhop/opensource-clipping-better/issues/new">Minta Fitur Baru</a>
   </p>
 </div>
 
@@ -68,7 +68,7 @@ Buka notebook Google Colab baru, pastikan Runtime memakai **T4 GPU**, lalu jalan
 **Cell 1: Setup & Clone**
 ```python
 !rm -rf ./* ./.*
-!git clone https://github.com/your-username/rzdhop-clips.git .
+!git clone https://github.com/rzdhop/opensource-clipping-better.git .
 !pip install -r requirements.txt
 ```
 
@@ -153,7 +153,7 @@ WHISPER_COMPUTE_TYPE = "float32"
 
 ```bash
 # 1. Clone repo
-git clone https://github.com/your-username/rzdhop-clips.git
+git clone https://github.com/rzdhop/opensource-clipping-better.git rzdhop-clips
 cd rzdhop-clips
 
 # 2. Install dependensi (pilih salah satu)

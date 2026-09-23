@@ -62,6 +62,6 @@ Video URL → Download → Whisper Transcription → Gemini AI Analysis → Meta
 
 ## 🔗 Quick Links
 
-- [GitHub Repository](https://github.com/NaufalRizqullah/opensource-clipping)
-- [Changelog](https://github.com/NaufalRizqullah/opensource-clipping/blob/main/CHANGELOG.md)
-- [Story Clip Documentation](https://github.com/NaufalRizqullah/opensource-clipping/blob/main/docs/STORY_CLIP.md)
+- [GitHub Repository](https://github.com/rzdhop/opensource-clipping-better)
+- [Changelog](https://github.com/rzdhop/opensource-clipping-better/blob/main/CHANGELOG.md)
+- [Story Clip Documentation](https://github.com/rzdhop/opensource-clipping-better/blob/main/docs/STORY_CLIP.md)

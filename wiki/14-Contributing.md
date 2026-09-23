@@ -7,7 +7,7 @@ We welcome contributions from everyone! Whether it's fixing a bug, adding a feat
 ## Ways to Contribute
 
 ### 🐛 Report Bugs
-Found a bug? [Open an issue](https://github.com/NaufalRizqullah/opensource-clipping/issues/new) with:
+Found a bug? [Open an issue](https://github.com/rzdhop/opensource-clipping-better/issues/new) with:
 - Steps to reproduce
 - Expected vs actual behavior
 - Your environment (OS, Python version, GPU)
@@ -39,7 +39,7 @@ Have an idea? Open an issue with the `enhancement` label describing:
 
 ```bash
 # 1. Fork and clone
-git clone https://github.com/YOUR-USERNAME/rzdhop-clips.git
+git clone https://github.com/YOUR-USERNAME/opensource-clipping-better.git rzdhop-clips
 cd rzdhop-clips
 
 # 2. Install dependencies

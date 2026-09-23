@@ -1,6 +1,6 @@
 <br />
 <div align="center">
-  <a href="https://github.com/NaufalRizqullah/opensource-clipping">
+  <a href="https://github.com/rzdhop/opensource-clipping-better">
     <img src="assets/images/rzdhop-clips-logo-editable.svg" alt="Logo" width="350">
   </a>
 
@@ -13,9 +13,9 @@
     <br />
     <a href="README_ID.md">🇮🇩 Baca dalam Bahasa Indonesia</a>
     &middot;
-    <a href="https://github.com/NaufalRizqullah/opensource-clipping/issues/new">Report Bug</a>
+    <a href="https://github.com/rzdhop/opensource-clipping-better/issues/new">Report Bug</a>
     &middot;
-    <a href="https://github.com/NaufalRizqullah/opensource-clipping/issues/new">Request Feature</a>
+    <a href="https://github.com/rzdhop/opensource-clipping-better/issues/new">Request Feature</a>
   </p>
 </div>
 
@@ -128,7 +128,7 @@ Open a new Google Colab notebook, set the Runtime to **T4 GPU**, and create the 
 **Cell 1: Setup & Clone**
 ```python
 !rm -rf ./* ./.*
-!git clone https://github.com/your-username/rzdhop-clips.git .
+!git clone https://github.com/rzdhop/opensource-clipping-better.git .
 !pip install -r requirements.txt
 ```
 
@@ -249,7 +249,7 @@ The same feed is on the API: `GET /api/jobs/{id}` returns it as `events`, and
 
 ```bash
 # 1. Clone the repo
-git clone https://github.com/your-username/rzdhop-clips.git
+git clone https://github.com/rzdhop/opensource-clipping-better.git rzdhop-clips
 cd rzdhop-clips
 
 # 2. Install dependencies (pick one)
