@@ -153,9 +153,14 @@ def analyze(
     *data_segmen* is the transcript contract; *cfg* supplies the clip count,
     platform preset, hook duration and feature flags.
     """
+    from .. import cancel as cancel_mod
     from ..providers import llm as llm_mod
 
     runner = run_chain or llm_mod.run_chain
+    # Checked before every request below and handed to the chain, which checks
+    # again before each attempt. No keyword at all for a run without a token.
+    cancel = cancel_mod.token_of(cfg)
+    cancel_kwargs = cancel_mod.kwargs_for(cancel)
     floor = _request_floor(chain, keys)
     started = time_fn()
     budget = float(getattr(cfg, "analysis_budget_seconds", 0) or DEFAULT_TOTAL_BUDGET_SECONDS)
@@ -182,6 +187,7 @@ def analyze(
         # run_chain's signature is unchanged: it still takes one absolute
         # deadline and neither knows nor cares that a window hands it a smaller
         # one than the run's own.
+        cancel.check()
         return runner(
             chain,
             system=system,
@@ -197,6 +203,7 @@ def analyze(
             on_log=log or on_log,
             deadline=run_deadline if deadline is None else deadline,
             time_fn=time_fn,
+            **cancel_kwargs,
         )[0]
 
     # Pass A gets a share of the pool, never all of it -- but always at least one

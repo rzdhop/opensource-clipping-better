@@ -1203,8 +1203,11 @@ def preflight_chain(cfg, on_log=print, **probe_kwargs) -> str | None:
     else:
         on_log("   🔎 Asking the provider chain a real analysis request...")
 
+    from clipping import cancel as cancel_mod
+
     live, results, value = llm_mod.probe_chain(
-        chain, keys, on_log=on_log, work=work, **probe_kwargs
+        chain, keys, on_log=on_log, work=work,
+        **cancel_mod.kwargs_for(cancel_mod.token_of(cfg)), **probe_kwargs
     )
     if live is None:
         return llm_mod.preflight_message(results)

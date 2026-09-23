@@ -32,7 +32,7 @@
     ctranslate2 is installed here, so the transcript path's import of it
     becomes visible. The Ubuntu env does not have the package, so this
     **may be a real bug hidden there** (logged as a follow-up).
-- **Phase:** IMPLEMENT. Group 1 merged and pushed (`7d374b2`). Group 2 merged and pushed (`b6202c9`). Next stage: S14 (B1a, cancel token + checkpoints) on feature/job-lifecycle.
+- **Phase:** IMPLEMENT. Group 1 merged and pushed (`7d374b2`). Group 2 merged and pushed (`b6202c9`). Next stage: S15 (B1b, web cancel wiring + ffmpeg child kill -- HIGH RISK) on feature/job-lifecycle.
 - **Open questions:** none. Two scope calls were made in chat: loudnorm is
   an opt-in flag, default off; cancel uses checkpoints plus a kill of the
   job's ffmpeg children.
@@ -54,7 +54,7 @@
 | 11 | D1 watermark load hoisted + settings-keyed cache | feature/render-fixes | **done** |
 | 12 | D5 hook-v2 temp cleanup | feature/render-fixes | **done** |
 | 13 | B5 LLM_CHAIN note (no code) | feature/job-lifecycle | **done** |
-| 14 | B1a cancel token + checkpoints | feature/job-lifecycle | pending |
+| 14 | B1a cancel token + checkpoints | feature/job-lifecycle | **done** |
 | 15 | B1b web cancel + child kill (**high risk**) | feature/job-lifecycle | pending |
 | 16 | B2 delete removes files (**high risk**) | feature/job-lifecycle | pending |
 | 17 | B4 queue cap | feature/job-lifecycle | pending |
