@@ -34,6 +34,22 @@
   claim about their pricing. Recheck before ever promoting either to a
   recommended provider. xAI is a separate and firmer case: its own pricing page
   confirms the free API tier ended in May 2025.
+  *(2026-09-23: DEC-073's refusal names Groq AND Gemini, both of which the default
+  chain lists, so a user who cannot get a Groq key still has Gemini. Gemini is the
+  one to recommend if A-009 holds.)*
+
+- **A-019** — NVIDIA's 120s probe timeout (DEC-072) is enough headroom for its
+  free-tier queue. It rests on five pings over one day with one key (48.9,
+  57.0, 49.7, 39.1, 57.4s). The queue is load-dependent, so a busier day could
+  exceed it. Recheck with Settings → Test provider chain if NVIDIA starts
+  failing preflight again. UNCONFIRMED.
+
+- **A-020** — OpenRouter and Mistral are marked `primary` (fast enough to
+  carry the analysis alone) based on their published free tiers. Neither has
+  been benchmarked against the real pass-A request, unlike the NIM models in
+  `registry.py`. `primary` is a speed claim, not a price claim, so A-009 does
+  not decide it. Benchmark with `tools/bench_llm.py` before relying on either
+  alone. UNCONFIRMED.
 
 ## Confirmed
 - **A-012** — The phone-width overflow is fixable in CSS alone; no JSX change is

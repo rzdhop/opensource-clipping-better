@@ -11,7 +11,8 @@ This guide walks you through setting up rzdhop's clips on your local machine.
 | **Python** | 3.10 or higher |
 | **FFmpeg** | Must be installed and available in PATH |
 | **GPU (CUDA)** | Recommended for Whisper transcription (CPU fallback available) |
-| **Google Gemini API Key** | **Required** — [Get one here](https://aistudio.google.com/apikey) |
+| **Groq or Gemini API Key** | **At least one is required.** Both are free with no card: [Groq](https://console.groq.com/keys) (fastest, first in the chain) or [Gemini](https://aistudio.google.com/apikey) |
+| **NVIDIA NIM API Key** | Optional backup — [Get one here](https://build.nvidia.com/). Too slow to carry a job alone, so a job with only this key is refused unless you pass `--allow-slow-chain` |
 | **Pexels API Key** | Optional, for B-roll footage — [Get one here](https://www.pexels.com/api/) |
 | **HuggingFace Token** | Optional, for split-screen / camera-switch — [Get one here](https://huggingface.co/settings/tokens) |
 

@@ -6,6 +6,39 @@ Common issues, their solutions, and frequently asked questions.
 
 ## Common Errors
 
+### 🔴 `This job would run on nvidia/... alone, and that is the chain's floor, not a primary`
+
+**Cause:** The only provider key you have set is NVIDIA's. NVIDIA NIM is the
+chain's slow last resort: it runs at about 12 tokens/s behind a queue that can
+hold a request for a minute. On its own, the analysis would take tens of minutes
+and might not finish, so the job is refused before anything runs.
+
+**Fix:** Add a free key for one of the fast links. The message lists the ones
+your chain names, with their signup pages:
+```
+GROQ_API_KEY=...      # https://console.groq.com/keys
+GOOGLE_API_KEY=...    # https://aistudio.google.com/apikey
+```
+To run on NVIDIA alone anyway, use `--allow-slow-chain`, set
+`ALLOW_SLOW_CHAIN=1`, or turn on **Settings → Run on the slow chain anyway** in
+the dashboard. **Settings → Test provider chain** shows each link's state
+without starting a job.
+
+---
+
+### 🔴 `No provider in the chain answered a liveness check`
+
+**Cause:** Every link that has a key failed a short "reply with ok" probe.
+Nothing has been transcribed yet. Each provider has its own probe timeout (45s
+for the fast tiers, 120s for NVIDIA, whose free tier queues). The reason given
+for each link tells you what happened: `no API key`, a timeout, a 401 for a bad
+key, or a 404 for a model your account cannot call.
+
+**Fix:** Run **Settings → Test provider chain**, or re-check the keys it lists.
+If a provider is only slow to wake, `--no-preflight` skips the check.
+
+---
+
 ### 🔴 `GOOGLE_API_KEY` not set
 
 **Error:** Gemini AI analysis fails with authentication error.

@@ -65,7 +65,8 @@ python tools/rzclips-fetch.py --url "https://..." --server $BASE --token $API_TO
 | `DELETE` | `/api/jobs/{id}` | Cancel if running, then delete. |
 | `GET` | `/api/outputs/{id}` | List a job's output files. Header-only; a media signature never opens it. |
 | `GET` | `/api/outputs/{id}/{file}` | Serve one, including `.srt`. Served `inline` so a `<video>` or `poster` can use it; add `?download=1` for `Content-Disposition: attachment`. Accepts a header **or** an `?exp=&sig=` pair. Range requests are supported, so seeking works. |
-| `GET`/`PUT` | `/api/settings` | API keys (write-only) and defaults. |
+| `GET`/`PUT` | `/api/settings` | API keys (write-only), defaults, `allow_slow_chain`, and `chain_blocked_reason` (why a chain job would be refused right now, or `""`). |
+| `POST` | `/api/settings/test-chain` | Ping every link of the chain and report each one. Can take a couple of minutes. |
 
 ## Creating a job
 
@@ -90,6 +91,37 @@ The settings worth knowing:
 | `dry_run_analysis` | `false` | Analyse, save the result, stop before rendering. |
 | `ratio` | `9:16` | Also `16:9`, `1:1`, `3:4`, `4:5`. |
 | `use_broll`, `hook_v2`, `use_split_screen`, … | | Every CLI flag has a field; see `/docs`. |
+
+### A chain that can only run on its floor is refused
+
+If the chain names a fast link (Groq, Gemini, OpenRouter, Mistral) but none of
+them has a key, and only NVIDIA does, `POST /api/jobs` answers **400** before the
+job exists. The `detail` names each keyless link, its env var and its free
+signup page. NVIDIA's free tier runs at about 12 tokens/s behind a queue, so it
+cannot carry the analysis on its own.
+
+To run anyway, `PUT /api/settings` with `{"allow_slow_chain": true}`. Sending
+`false` clears the override. A chain that names no fast link at all, such as
+`llm_chain: "nvidia/..."`, is taken as written and is not refused. Render-only
+reruns (`reuse_job_id` with the cached analysis) call no provider and are never
+refused.
+
+### Testing the chain
+
+```bash
+curl -H "$AUTH" -H "Content-Type: application/json" -d '{}' \
+     $BASE/api/settings/test-chain
+```
+
+Every link is pinged, not only up to the first that answers. Each result has a
+`status` of `ok`, `no_key` or `failed`, with `latency_seconds`, `reason`,
+`probe_timeout_seconds` (45s for the fast tiers, 120s for NVIDIA), `primary`,
+`env_key` and `signup_url`. `ready` is true only when something answered **and**
+a job on this chain may start; otherwise `message` gives the reason. Send
+`{"llm_chain": "..."}` to test a different chain. The request never carries a
+base URL: `custom/...` uses `LLM_CUSTOM_BASE_URL` from the server's environment.
+A second test while one is running gets `409`, and a test that outlives its
+budget gets `504`.
 
 ### `source_url` is best-effort
 
@@ -130,8 +162,8 @@ with httpx.stream("GET", f"{base}/api/jobs/{job_id}/status",
 
 | Code | Meaning |
 |---|---|
-| `400` | The payload is missing a source, or a field is out of range. |
+| `400` | The payload is missing a source, a field is out of range, or the chain would run on its slow floor alone (see above). |
 | `401` | Missing or wrong token. |
 | `404` | No such job or file. |
-| `409` | Attaching a source to a job that is not waiting for one. |
+| `409` | Attaching a source to a job that is not waiting for one, or a chain test already running. |
 | `413` | Upload over 2 GB. |

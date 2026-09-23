@@ -55,7 +55,8 @@
 - **Python** 3.10+
 - **FFmpeg** terinstall dan tersedia di PATH
 - **GPU CUDA** disarankan (untuk Whisper; bisa fallback ke CPU)
-- **Google Gemini API Key** ([dapatkan di sini](https://aistudio.google.com/apikey))
+- **API key Groq atau Gemini** — minimal satu **wajib** ada, keduanya gratis tanpa kartu kredit: [Groq](https://console.groq.com/keys) (tercepat, link pertama di chain) atau [Gemini](https://aistudio.google.com/apikey) (link kedua, juga dipakai `--voiceover`)
+- **NVIDIA NIM API Key** (opsional, [dapatkan di sini](https://build.nvidia.com/)) — hanya cadangan yang lambat (~12 token/detik di belakang antrean). Job yang hanya punya key NVIDIA **ditolak sebelum berjalan**; pakai `--allow-slow-chain`, `ALLOW_SLOW_CHAIN=1`, atau toggle di Settings bila tetap ingin menjalankannya. **Settings → Test provider chain** memeriksa setiap link tanpa menjalankan job.
 - **Pexels API Key** (opsional, untuk B-roll — [dapatkan di sini](https://www.pexels.com/api/))
 - **HuggingFace Token** (opsional, untuk split-screen / camera-switch — [dapatkan di sini](https://huggingface.co/settings/tokens), perlu accept [Pyannote model agreement](https://huggingface.co/pyannote/speaker-diarization-3.1))
 
@@ -160,8 +161,8 @@ pip install -r requirements.txt          # pip / Colab
 # uv sync                               # atau pakai uv (baca pyproject.toml)
 
 # 3. Setup API key
-cp .env.sample .env
-# Edit file .env dan masukkan GOOGLE_API_KEY kamu
+cp .env.example .env
+# Edit file .env dan masukkan GROQ_API_KEY dan/atau GOOGLE_API_KEY (keduanya gratis)
 
 # 4. Jalankan (arahkan ke file lokal Anda)
 python main.py --video talk.mp4 --transcript talk.vtt
@@ -215,8 +216,9 @@ python main.py --video talk.mp4 --transcript talk.vtt --hook-source "URL_DRIVE_A
 # Rendering Ultra-HD 2K (Download 1440p dan render resolusi vertikal 1440p native dengan penajaman)
 python main.py --video talk.mp4 --transcript talk.vtt --render-height source --video-sharpen
 
-# Menggunakan NVIDIA NIM (DeepSeek-V3) sebagai pengganti Gemini
-python main.py --video talk.mp4 --transcript talk.vtt --ai-provider nvidia --nvidia-model "nvidia/nemotron-3.5-lightning-30b-a3b"
+# Hanya punya key NVIDIA NIM? Job ditolak kecuali Anda mengizinkan chain lambat
+# (analisis bisa memakan puluhan menit)
+python main.py --video talk.mp4 --transcript talk.vtt --allow-slow-chain
 
 # Output kotak untuk Instagram Feed (1:1)
 python main.py --video talk.mp4 --transcript talk.vtt --ratio "1:1" --clips 5

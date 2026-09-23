@@ -1630,3 +1630,117 @@ the first window of a sequential iteration.
   They are the evidence for that decision; new batch tests sit beside them.
   `scripted()` replays answers by call order, which is a race under threads, so
   the concurrency tests use a runner that answers from what it is asked.
+
+## DEC-072 — The liveness probe's timeout is per provider; NVIDIA's is 120s
+**Context.** DEC-056 set one 45s probe cap for every provider, from five probes
+of a *different* NIM model that ran 1.3–11.4s. Measured 2026-09-23 against the
+shipped NIM default, with a working key: `GET /v1/models` answered 200 in
+0.07s and listed the model, and the probe's own 2-token "reply with ok" request
+answered **ok** in **48.9 / 57.0 / 49.7s**, then 39.1s and 57.4s on later
+runs. Nearly all of that was time to first byte, meaning queue wait. So the
+45s cap sat below the provider's *healthy* latency and failed a job whose only
+keyed link was alive. `PROBE_WORK_TIMEOUT_SECONDS = 90` could not be met
+either, at ~12 tokens/s plus a ~50s queue.
+**Decision.** `Provider.probe_timeout` in the registry: nvidia 120, custom 60,
+every hosted fast tier 45 (the default). It is resolved by
+`registry.probe_timeout(link)`. The work probe is capped at
+`work_probe_timeout(link) = min(effective_timeout(link), 2 × probe_timeout(link))`.
+That is exactly the old 90s for every provider but NVIDIA, which gets 240s.
+`probe_chain(timeout=None)` resolves each link's allowance; an explicit number
+still overrides every link.
+**Consequence.**
+- **The margin is thinner than DEC-056's, on purpose.** 45s over 11.4s was 4×;
+  120s over 57.0s is 2.1×, from n=5 on one day. Being too short is the total
+  failure this fixes; being too long costs 120s.
+- **A dead NIM model now costs 120s, not 45s,** and "no reply in 120s" is
+  exactly how `registry.py` describes the dead-model case. This is bounded:
+  primary links are probed first at 45s each, and DEC-073 means NVIDIA is
+  rarely the only keyed link.
+- **The 0.07s catalogue check was rejected on evidence.** Ten NIM models appear
+  in `GET /v1/models` and answer `404 Function … Not found for account` on a
+  real call. A catalogue probe would pass every one of them.
+- **This supersedes only the 45s half of DEC-056.** Liveness is still not
+  suitability, the probe still sends no schema, a failing link is still
+  reported and never removed, and the check still runs only on the chain path.
+- The test that asserted one global timeout on an nvidia link *was* the bug.
+  It now asserts the invariant it was protecting: a probe never waits as long
+  as a request. A new client fake honours its timeout, because the old one did
+  not, so no test could tell 45 from 120.
+
+## DEC-073 — A chain whose named primary links are keyless is refused before it starts, with an explicit override
+**Context.** DEC-023 says a partly configured chain degrades instead of
+failing. What "degraded" means here is now measured. With only
+`NVIDIA_API_KEY` set, the default three-link chain is a chain of one at ~12
+tokens/s behind a queue. DEC-071 measured pass A at 330s for four windows,
+with windows 5–6 skipped by the time budget. That is not a slower job; it is a
+job that cannot finish. The user found out 93s into preflight.
+**Decision.** `clipping.config.chain_readiness(chain, keys, …)` is a pure
+function with no cfg, filesystem or network. It refuses exactly one case: the
+chain **names** a `primary` provider, **none** of the named primaries has a
+key, and a non-primary link does. `primary` is a registry field: groq, gemini,
+openrouter, mistral and custom are primary, and nvidia is not. Three places
+enforce it:
+the CLI (after the key gate, before the probe), `POST /api/jobs` (before
+`store.create_job`), and the worker (as a backstop). The override is
+`--allow-slow-chain`, `ALLOW_SLOW_CHAIN=1`, or the Settings toggle, all of
+which become `cfg.allow_slow_chain`.
+**Consequence.**
+- **DEC-023 is amended for one named case, not overturned.** The chain is never
+  reordered, edited or trimmed. The job is refused at the start instead; what
+  would run is unchanged.
+- **The rule is scoped to links the user already listed.** `LLM_CHAIN=nvidia/…`
+  names no primary. The user wrote that list, so it runs.
+- **"Primary" is a registry flag, not a brand list in `config.py`.** The
+  registry already tracks per-provider facts and their churn. Since June 2026
+  Cerebras, GitHub Models, Together and SambaNova all dropped or gated their
+  free tiers. A hardcoded `("groq", "gemini")` would have been one more copy
+  to forget. OpenRouter and Mistral count as primary on their published free
+  tiers. They have **not** been benchmarked against the real pass-A request
+  (see ASSUMPTIONS).
+- **It is pure because the creation route must answer before a job exists.**
+  `build_config_from_payload` creates the job's output directory, and a
+  refused job must not leave one.
+- **"No key at all" is deliberately left to `missing_provider_key`,** which
+  gives the better message. A test checks both functions on the same cfg, so
+  the handoff cannot open a gap where a keyless job passes both gates.
+- **Render-only reruns are exempt** everywhere, as with the key gate and the
+  probe.
+- **The message carries the free signup URLs,** read from the registry
+  (`Provider.signup_url`). A test asserts each one appears verbatim in
+  `.env.example`, which serves as its oracle rather than as another copy.
+- **The dashboard shows the server's verdict**
+  (`GET /api/settings → chain_blocked_reason`) instead of re-deriving the rule
+  in JavaScript. A JavaScript copy would have blocked a saved
+  `LLM_CHAIN=nvidia/…` that the server allows.
+- `ALLOW_SLOW_CHAIN` is persisted but is not a secret. Turning it off stores
+  `""` and never `"0"`: a stored "0" would read as off but shadow a `.env`
+  value forever (DEC-043).
+
+## DEC-074 — `POST /api/settings/test-chain` pings every link, off the event loop
+**Context.** The only way to learn a link was dead was to start a job and wait.
+**Decision.** A route reuses `llm.probe_chain`, the preflight's own primitive.
+It does not use `preflight_chain`, which honours `--no-preflight`, defers to
+the key gate and seeds the scan cache. `probe_chain` gains
+`stop_at_first=True`; the diagnostic passes `False`.
+**Consequence.**
+- **A diagnostic that stops at the first live link is not a diagnostic.**
+  Reporting "Groq ✅" says nothing about the NVIDIA link. `stop_at_first` is
+  ignored for a work probe, whose answer is used and must not be paid for twice.
+- **`asyncio.to_thread`, not `worker._executor`.** That pool is sized to
+  `MAX_CONCURRENT_JOBS` (default 1), so reusing it would let a click stall a
+  queued job.
+- **`wait_for` cancels the await, not the thread.** On timeout the probe runs
+  to completion and its result is discarded. Each SDK client has its own
+  timeout, so the thread always ends. The budget is
+  `sum(probe_timeout(link)) + 10`, capped at 300s, so it derives from DEC-072
+  and cannot drift from it.
+- **A lock refuses a concurrent test (409)** rather than spending the free-tier
+  quota twice.
+- **The request has no base URL field** (pinned by a test).
+  `custom/<model>` resolves `LLM_CUSTOM_BASE_URL` from the environment, so the
+  route cannot be aimed at an arbitrary host.
+- **`ready` = something answered AND a job may start.** A live NVIDIA link
+  alone reports `ready: false`, with the DEC-073 message.
+- The worst case holds a request for about 210s. The Vite dev proxy already
+  disables its timeouts for uploads. If a reverse proxy cuts it off, the
+  upgrade path is SSE through `probe_chain`'s existing `on_log` seam.

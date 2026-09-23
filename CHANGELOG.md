@@ -10,6 +10,48 @@ All notable changes to the **rzdhop's clips** project will be documented in this
 
 ## [Unreleased]
 
+### A job that could never have run, found out 93 seconds in
+
+A job failed preflight with `No provider in the chain answered a liveness
+check`. It had two causes. Only `NVIDIA_API_KEY` was set, so the three-link
+default chain was really a chain of one, running on its slowest link. And that
+link was alive: with the same key, NVIDIA answered the probe's own "reply with
+ok" request in 48.9, 57.0 and 49.7s, all of it queue wait, against a 45s
+probe timeout.
+
+#### Fixed
+
+- **A queued but healthy provider is no longer called dead.** Each provider in
+  the registry now declares its own probe timeout: 120s for NVIDIA, whose free
+  tier queues, 60s for a custom endpoint, and 45s for the fast hosted tiers. The
+  work probe is capped at twice that, which is the same 90s as before for
+  every provider except NVIDIA.
+- Job errors in the dashboard keep their line breaks. The preflight message is
+  one line per link and used to run together into one sentence.
+- The key-gate error suggested six `--ai-provider` values the parser rejects.
+
+#### Added
+
+- **A chain job that could only run on the slow floor is refused before it
+  starts**, on the CLI, at `POST /api/jobs`, and in the worker. The message
+  names each fast link without a key, its env var and its free signup page.
+  "Fast" is a `primary` flag on each provider in the registry (Groq, Gemini,
+  OpenRouter, Mistral and custom). A chain that names no primary link, such as
+  `LLM_CHAIN=nvidia/...`, is taken as written.
+  To override: `--allow-slow-chain`, `ALLOW_SLOW_CHAIN=1`, or the Settings
+  toggle.
+- **`POST /api/settings/test-chain` and a "Test provider chain" button** ping
+  every link and report each one, with its latency and a free-key link where
+  a key is missing.
+- New Job shows the refusal before you click Start, and disables Start.
+  `GET /api/settings` returns the server's own verdict as
+  `chain_blocked_reason`.
+
+#### Changed
+
+- Docs stop presenting NVIDIA as the default provider. It is the chain's last
+  resort; at least one Groq or Gemini key is required.
+
 ### A 2h22m job that produced nothing
 
 One real job spent 94 minutes transcribing a 20-minute video on CPU, then 45

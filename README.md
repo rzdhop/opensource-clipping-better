@@ -60,14 +60,24 @@ The web API, the dashboard and the phone setup are in
 
 ### Which keys you need
 
-None of them are paid. Set whichever you have; the chain skips the rest.
+None of them are paid. **You need at least one fast link, meaning Groq or
+Gemini** (or OpenRouter/Mistral if your chain names them). The chain skips any
+link without a key.
+
+NVIDIA is the chain's floor, not a substitute. It runs at about 12 tokens/s
+behind a queue that can hold a request for a minute, so a scan that takes
+seconds on Groq takes tens of minutes on NVIDIA and may not finish. A job whose
+only key is NVIDIA's is refused before anything runs, with the signup links.
+To run it anyway, pass `--allow-slow-chain`, set `ALLOW_SLOW_CHAIN=1`, or use
+the Settings toggle. **Settings → Test provider chain** checks every link
+without starting a job.
 
 | Key | For |
 |---|---|
-| `GROQ_API_KEY` | Fastest LLM, and free Whisper transcription. Start here. |
-| `GOOGLE_API_KEY` | Gemini. Largest free daily request budget. |
-| `NVIDIA_API_KEY` | NVIDIA NIM. Slow, but no published daily cap. |
-| `OPENROUTER_API_KEY`, `MISTRAL_API_KEY` | Further fallbacks. |
+| `GROQ_API_KEY` | Fastest LLM, and free Whisper transcription. Start here. [Get one](https://console.groq.com/keys) |
+| `GOOGLE_API_KEY` | Gemini. Largest free daily request budget. [Get one](https://aistudio.google.com/apikey) |
+| `NVIDIA_API_KEY` | NVIDIA NIM. Slow, but no published daily cap. A backup, not a primary. [Get one](https://build.nvidia.com/) |
+| `OPENROUTER_API_KEY`, `MISTRAL_API_KEY` | Further fallbacks. Each counts as a fast link when your chain names it. |
 | `PEXELS_API_KEY` | B-roll. Optional. |
 | `HF_TOKEN` | Speaker diarization for split-screen. Optional. |
 
@@ -77,7 +87,7 @@ None of them are paid. Set whichever you have; the chain skips the rest.
 |---|---|
 | **Local-First Ingestion** | Takes a local `.mp4` and an optional `.vtt`/`.srt`/`.json3`. Downloads nothing, so no anti-bot challenge or IP ban can break it |
 | **AI Transcriber** | Word-level transcription using **Faster-Whisper** (large-v3), or skipped entirely when you supply a transcript |
-| **AI Content Curator** | **NVIDIA NIM** (default) or **Google Gemini** analyzes context, picks the most viral moments, and generates metadata |
+| **AI Content Curator** | An ordered chain of free providers (**Groq** first, then **Gemini**, then **NVIDIA NIM** as a backup) analyzes context, picks the most viral moments, and generates metadata |
 | **Smart Auto-Framing** | Face-tracking via **[MediaPipe BlazeFace (Full-Range)](https://ai.google.dev/edge/mediapipe/solutions/vision/face_detector)** with Smooth Pan, Deadzone & anti-jitter algorithms |
 | **Cinematic Teaser Hook** | 3-second hook with dark overlay, cinematic bars, and **TV Glitch** transition |
 | **Karaoke Subtitles** | Word-by-word highlighted `.ASS` subtitles (Alex Hormozi / Veed style) |
@@ -104,8 +114,8 @@ None of them are paid. Set whichever you have; the chain skips the rest.
 - **Python** 3.10+
 - **FFmpeg** installed and available in PATH
 - **CUDA GPU** recommended, but only if you let Whisper transcribe. Supply `--transcript` and no GPU is needed at all.
-- **NVIDIA NIM API Key** — the default AI provider, free with no credit card ([get one here](https://build.nvidia.com/))
-- **Google Gemini API Key** (optional — only for `--ai-provider gemini` and `--voiceover`), also free with no credit card ([get one here](https://aistudio.google.com/apikey))
+- **A Groq or Gemini API key.** At least one is required, and both are free with no credit card: [Groq](https://console.groq.com/keys) (fastest, the chain's first link) and [Gemini](https://aistudio.google.com/apikey) (the second link, also used by `--voiceover`)
+- **NVIDIA NIM API Key** (optional). It is the chain's slow last resort and cannot carry a job on its own. Free with no credit card ([get one here](https://build.nvidia.com/))
 - **Any other OpenAI-compatible endpoint** (optional) — set `OPENAI_COMPAT_BASE_URL`, `OPENAI_COMPAT_API_KEY` and `OPENAI_COMPAT_MODEL`, then run with `--ai-provider openai_compat`. Works with OpenRouter, Groq, Mistral, xAI, a self-hosted vLLM or a local Ollama.
 - **Pexels API Key** (optional, for B-roll — [get one here](https://www.pexels.com/api/))
 - **HuggingFace Token** (optional, for split-screen / camera-switch — [get one here](https://huggingface.co/settings/tokens), requires accepting [Pyannote model agreement](https://huggingface.co/pyannote/speaker-diarization-3.1))
@@ -247,8 +257,8 @@ pip install -r requirements.txt          # pip / Colab
 # uv sync                               # or use uv (reads pyproject.toml)
 
 # 3. Set up API keys
-cp .env.sample .env
-# Edit .env and add your NVIDIA_API_KEY (the default AI provider)
+cp .env.example .env
+# Edit .env and add a GROQ_API_KEY and/or GOOGLE_API_KEY (both free)
 
 # 4. Acquire the inputs with your own tools. For example, with yt-dlp:
 yt-dlp -f "bv*[vcodec!*=av01]+ba/b" --write-auto-subs --sub-format vtt \
