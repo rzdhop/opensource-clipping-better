@@ -509,7 +509,8 @@ PROBE_PROMPT = "Reply with the single word: ok"
 
 
 def probe_chain(chain, keys, *, timeout=None, on_log=print,
-                client_factory=None, time_fn=time.monotonic, work=None):
+                client_factory=None, time_fn=time.monotonic, work=None,
+                stop_at_first=True):
     """Ask the chain's keyed links, in order, whether they answer.
 
     Returns ``(live_link, results, value)``; *live_link* is ``None`` when
@@ -519,6 +520,11 @@ def probe_chain(chain, keys, *, timeout=None, on_log=print,
 
     *timeout* of None gives each link its own ping allowance from the registry
     (``probe_timeout``); a number overrides it for every link.
+
+    *stop_at_first=False* pings EVERY keyed link and returns the first live one
+    at the end -- for a diagnostic, where "Groq answered" says nothing about
+    the NVIDIA link that actually broke. Ignored for a *work* probe, whose
+    answer is used and must not be paid for twice.
 
     **The cheap ping proves liveness, not suitability**, and that gap is real: a
     model measured here answered it in 0.67s and still failed the real pass-A
@@ -543,6 +549,7 @@ def probe_chain(chain, keys, *, timeout=None, on_log=print,
     """
     keys = keys or {}
     results = []
+    first_live = None
 
     for link in chain:
         label = describe(link)
@@ -578,9 +585,11 @@ def probe_chain(chain, keys, *, timeout=None, on_log=print,
 
         results.append((label, "ok", elapsed, "ping"))
         on_log(f"   ✅ {label} answered in {elapsed:.1f}s.")
-        return link, results, None
+        if stop_at_first or work is not None:
+            return link, results, None
+        first_live = first_live or link
 
-    return None, results, None
+    return first_live, results, None
 
 
 def _ping_probe(link, api_key, timeout, *, on_log, client_factory, time_fn):

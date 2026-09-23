@@ -390,6 +390,42 @@ class SettingsResponse(BaseModel):
     gpu_available: bool = False
 
 
+class ChainTestRequest(BaseModel):
+    """Which chain to test. Empty tests the configured one.
+
+    There is deliberately no base URL here: ``custom/<model>`` resolves
+    LLM_CUSTOM_BASE_URL from the environment, so this route cannot be pointed
+    at an arbitrary host.
+    """
+    llm_chain: str = ""
+
+
+class ChainLinkResult(BaseModel):
+    """One link's answer to the liveness ping."""
+    label: str
+    provider: str
+    model: str
+    status: Literal["ok", "no_key", "failed"]
+    latency_seconds: Optional[float] = None
+    reason: Optional[str] = None
+    probe_timeout_seconds: float
+    primary: bool
+    env_key: str
+    signup_url: str = ""
+
+
+class ChainTestResponse(BaseModel):
+    """Every link in the chain, pinged -- not just up to the first that answers."""
+    chain: str
+    # Something answered AND a job on this chain would be allowed to start.
+    ready: bool
+    live_link: Optional[str] = None
+    results: list[ChainLinkResult]
+    elapsed_seconds: float
+    # Why it is not ready, when it is not: the same text a job would fail with.
+    message: str = ""
+
+
 class SystemHealthResponse(BaseModel):
     """System health check."""
     status: str = "ok"

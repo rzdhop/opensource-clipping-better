@@ -535,3 +535,50 @@ def test_the_work_probe_cap_is_unchanged_for_the_fast_tiers(tmp_path):
     """90s = 2 x 45s before DEC-072, and still, for every default-probe tier."""
     for name in ("groq", "gemini", "openrouter", "mistral"):
         assert registry.work_probe_timeout(Link(name, "m")) == 90.0
+
+
+# ------------------------------------------------ every link, for a diagnostic
+
+def test_by_default_the_probe_still_stops_at_the_first_live_link():
+    clock = Clock()
+    factory = responder(clock, {"groq": (1.0, REPLY), "nvidia": (1.0, REPLY)})
+
+    live, results, _ = llm.probe_chain(
+        parse_chain("groq/a,nvidia/b"), {"groq": "k", "nvidia": "k"},
+        on_log=lambda *a: None, client_factory=factory, time_fn=clock,
+    )
+
+    assert live.provider == "groq"
+    assert [p for p, _ in factory.seen] == ["groq"]
+    assert len(results) == 1
+
+
+def test_a_diagnostic_pings_every_link_and_reports_the_first_live_one():
+    """"Groq answered" says nothing about the NVIDIA link that broke."""
+    clock = Clock()
+    factory = responder(clock, {
+        "groq": (1.0, REPLY),
+        "nvidia": (2.0, TimeoutError("Request timed out.")),
+    })
+
+    live, results, _ = llm.probe_chain(
+        parse_chain("groq/a,gemini/b,nvidia/c"), {"groq": "k", "nvidia": "k"},
+        on_log=lambda *a: None, client_factory=factory, time_fn=clock,
+        stop_at_first=False,
+    )
+
+    assert live.provider == "groq"
+    assert [r[1] for r in results] == ["ok", "no API key", results[2][1]]
+    assert "TimeoutError" in results[2][1]
+    assert [p for p, _ in factory.seen] == ["groq", "nvidia"]
+
+
+def test_a_diagnostic_where_nothing_answers_is_still_none():
+    clock = Clock()
+    factory = responder(clock, {"groq": (1.0, TimeoutError("x"))})
+    live, results, _ = llm.probe_chain(
+        parse_chain("groq/a"), {"groq": "k"},
+        on_log=lambda *a: None, client_factory=factory, time_fn=clock,
+        stop_at_first=False,
+    )
+    assert live is None and len(results) == 1

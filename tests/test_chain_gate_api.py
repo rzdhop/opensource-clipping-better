@@ -203,3 +203,103 @@ def test_a_rerun_that_asks_for_a_fresh_analysis_is_gated(
     r = client.post("/api/jobs", json={"reuse_job_id": "abc123",
                                        "load_gemini_json": False})
     assert r.status_code == 400
+
+
+# ------------------------------------ POST /api/settings/test-chain (Stage 6)
+
+class _Reply:
+    choices = [type("C", (), {"message": type("M", (), {"content": "ok"})()})()]
+    usage = None
+
+
+@pytest.fixture
+def fake_providers(monkeypatch):
+    """Replace the SDK client: each provider answers or raises, instantly."""
+    from types import SimpleNamespace
+
+    from clipping.providers import llm
+
+    behaviour = {}
+    contacted = []
+
+    def build_client(link, api_key=None, timeout=None):
+        def create(**_):
+            contacted.append(link.provider)
+            outcome = behaviour.get(link.provider, _Reply())
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
+        return SimpleNamespace(chat=SimpleNamespace(
+            completions=SimpleNamespace(create=create)))
+
+    monkeypatch.setattr(llm, "build_client", build_client)
+    return SimpleNamespace(behaviour=behaviour, contacted=contacted)
+
+
+def test_every_link_is_reported_not_just_the_first(client, settings_env, fake_providers):
+    fake_providers.behaviour["nvidia"] = TimeoutError("Request timed out.")
+    settings_env.set_settings_env({"GROQ_API_KEY": "g", "NVIDIA_API_KEY": "n"},
+                                  persist=False)
+
+    body = client.post("/api/settings/test-chain", json={}).json()
+
+    assert [r["provider"] for r in body["results"]] == ["groq", "gemini", "nvidia"]
+    assert [r["status"] for r in body["results"]] == ["ok", "no_key", "failed"]
+    assert body["results"][1]["env_key"] == "GOOGLE_API_KEY"
+    assert body["results"][1]["signup_url"].startswith("https://")
+    assert "TimeoutError" in body["results"][2]["reason"]
+    assert body["results"][2]["probe_timeout_seconds"] == 120.0
+    assert body["live_link"].startswith("groq/")
+    assert body["ready"] is True
+    assert fake_providers.contacted == ["groq", "nvidia"]
+
+
+def test_a_live_floor_alone_is_not_ready_and_says_why(
+        client, settings_env, fake_providers):
+    """NVIDIA answering is a live chain, but not one a job may start on."""
+    settings_env.set_settings_env({"NVIDIA_API_KEY": "n"}, persist=False)
+
+    body = client.post("/api/settings/test-chain", json={}).json()
+
+    assert body["live_link"].startswith("nvidia/")
+    assert body["ready"] is False
+    assert "GROQ_API_KEY" in body["message"]
+
+
+def test_nothing_answering_explains_every_link(client, settings_env, fake_providers):
+    fake_providers.behaviour["groq"] = TimeoutError("x")
+    settings_env.set_settings_env({"GROQ_API_KEY": "g"}, persist=False)
+
+    body = client.post("/api/settings/test-chain", json={}).json()
+
+    assert body["ready"] is False and body["live_link"] is None
+    assert "No provider in the chain answered" in body["message"]
+
+
+def test_a_requested_chain_is_the_one_tested(client, settings_env, fake_providers):
+    settings_env.set_settings_env({"MISTRAL_API_KEY": "m"}, persist=False)
+    body = client.post("/api/settings/test-chain",
+                       json={"llm_chain": "mistral/some-model"}).json()
+    assert body["chain"] == "mistral/some-model"
+    assert fake_providers.contacted == ["mistral"]
+
+
+def test_a_malformed_chain_is_a_400_not_a_crash(client, settings_env, fake_providers):
+    r = client.post("/api/settings/test-chain", json={"llm_chain": "nosuch/x"})
+    assert r.status_code == 400
+    assert fake_providers.contacted == []
+
+
+def test_the_request_cannot_carry_a_base_url():
+    """custom/<model> must resolve its host from the environment only."""
+    pytest.importorskip("pydantic")
+    from web.api.models import ChainTestRequest
+
+    assert set(ChainTestRequest.model_fields) == {"llm_chain"}
+
+
+def test_the_probe_runs_off_the_event_loop_and_off_the_job_pool():
+    text = (API / "routes" / "settings.py").read_text(encoding="utf-8")
+    body = text[text.index("async def run_chain_test("):]
+    assert "asyncio.to_thread(_probe_every_link" in body
+    assert "_executor" not in body

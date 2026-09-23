@@ -4,20 +4,29 @@ web.api.routes.settings — Settings management endpoints.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import shutil
 import subprocess
+import time
 
-from fastapi import Depends, APIRouter
+from fastapi import Depends, APIRouter, HTTPException
 
 from ..auth import require_token
 
 # Imported rather than repeated so the API cannot drift from the pipeline.
 from clipping.config import AI_PROVIDER, WHISPER_DEVICE
-from ..models import SettingsRequest, SettingsResponse, SystemHealthResponse
+from ..models import (
+    ChainLinkResult,
+    ChainTestRequest,
+    ChainTestResponse,
+    SettingsRequest,
+    SettingsResponse,
+    SystemHealthResponse,
+)
 from .. import store as job_store
 from .. import worker
-from ..config_adapter import env_flag
+from ..config_adapter import env_flag, resolve_provider_keys
 
 router = APIRouter(tags=["settings"], dependencies=[Depends(require_token)])
 
@@ -160,4 +169,115 @@ async def health_check() -> SystemHealthResponse:
         ffmpeg_available=_check_ffmpeg(),
         jobs_running=job_store.get_running_count(),
         jobs_queued=job_store.get_queued_count(),
+    )
+
+
+# One chain test at a time per process: a double click must not spend two
+# rounds of free-tier quota, and a second request is refused rather than queued
+# behind a probe that can take minutes.
+_CHAIN_TEST_LOCK = asyncio.Lock()
+
+# The route never holds a connection longer than this, whatever the chain.
+_CHAIN_TEST_CEILING_SECONDS = 300.0
+
+
+def _probe_every_link(links, keys):
+    """The blocking half: ping every keyed link, not just up to the first."""
+    from clipping.providers import llm
+
+    return llm.probe_chain(
+        links, keys, work=None, stop_at_first=False, on_log=lambda *_: None
+    )
+
+
+@router.post("/api/settings/test-chain")
+async def run_chain_test(req: ChainTestRequest) -> ChainTestResponse:
+    """Ping every link of a chain and report each one (DEC-074).
+
+    The only way to learn a link was dead used to be starting a job and
+    waiting. This reuses ``llm.probe_chain`` -- the preflight's own primitive --
+    but not ``preflight_chain``, which honours ``--no-preflight``, defers to the
+    key gate and seeds the scan cache; none of that belongs in a diagnostic.
+
+    The probe is synchronous and can take minutes (NVIDIA's ping allowance is
+    120s), so it runs in the default thread pool -- NOT the worker's executor,
+    which is sized to MAX_CONCURRENT_JOBS and would let a click stall a queued
+    job. ``wait_for`` cancels the await, not the thread: on timeout the probe
+    finishes in the background and its result is dropped. Each SDK client
+    carries its own timeout, so that thread always ends.
+    """
+    from clipping.config import WEB_SLOW_CHAIN_HINT, chain_readiness
+    from clipping.providers import llm, registry
+
+    env = worker.get_settings_env()
+    spec = (req.llm_chain or env.get("LLM_CHAIN", os.environ.get("LLM_CHAIN", ""))).strip()
+    try:
+        links = registry.parse_chain(spec) if spec else registry.chain_from_env()
+    except registry.ChainError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    keys = resolve_provider_keys(env)
+    if _CHAIN_TEST_LOCK.locked():
+        raise HTTPException(
+            status_code=409, detail="A chain test is already running.")
+
+    budget = sum(
+        registry.probe_timeout(link) for link in links if keys.get(link.provider)
+    ) + 10.0
+    started = time.monotonic()
+    async with _CHAIN_TEST_LOCK:
+        try:
+            live, results, _ = await asyncio.wait_for(
+                asyncio.to_thread(_probe_every_link, links, keys),
+                timeout=min(budget, _CHAIN_TEST_CEILING_SECONDS),
+            )
+        except asyncio.TimeoutError:
+            raise HTTPException(
+                status_code=504,
+                detail=(
+                    f"The chain test gave up after {time.monotonic() - started:.0f}s. "
+                    "At least one link is holding requests far past its probe "
+                    "timeout."
+                ),
+            )
+        except registry.ChainError as exc:
+            # e.g. custom/<model> with no LLM_CUSTOM_BASE_URL
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    rows = []
+    for link, (label, reason, elapsed, kind) in zip(links, results):
+        provider = registry.PROVIDERS[link.provider]
+        status = "no_key" if kind == "skipped" else ("ok" if reason == "ok" else "failed")
+        rows.append(ChainLinkResult(
+            label=label,
+            provider=link.provider,
+            model=link.model,
+            status=status,
+            latency_seconds=None if elapsed is None else round(elapsed, 2),
+            reason=None if status == "ok" else reason,
+            probe_timeout_seconds=registry.probe_timeout(link),
+            primary=provider.primary,
+            env_key=provider.env_key,
+            signup_url=provider.signup_url,
+        ))
+
+    readiness = chain_readiness(
+        links, keys,
+        allow_slow=env_flag(env, "ALLOW_SLOW_CHAIN"),
+        hint=WEB_SLOW_CHAIN_HINT,
+    )
+    if live is None:
+        message = llm.preflight_message(results)
+    elif not readiness.ready:
+        message = readiness.message
+    else:
+        message = ""
+
+    return ChainTestResponse(
+        chain=",".join(registry.describe(link) for link in links),
+        ready=live is not None and readiness.ready,
+        live_link=None if live is None else registry.describe(live),
+        results=rows,
+        elapsed_seconds=round(time.monotonic() - started, 2),
+        message=message,
     )
