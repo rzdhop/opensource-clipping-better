@@ -18,6 +18,7 @@ from clipping.cancel import Cancelled, CancelToken
 
 from .config_adapter import build_config_from_payload
 from . import children
+from . import cleanup
 from . import settings_store
 from .models import ClipDetail, JobStatus
 from . import activity
@@ -75,6 +76,40 @@ _executor = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_JOBS)
 # and the task running it. The task is held on purpose -- asyncio keeps only a
 # weak reference to a task, and an unreferenced one can be collected mid-run.
 _active: dict[str, tuple[CancelToken, Optional[asyncio.Task]]] = {}
+
+
+# Where a job's files live; the same paths the pipeline and routes/files.py use.
+OUTPUTS_ROOT = os.path.join(store.PROJECT_ROOT, "outputs")
+UPLOADS_ROOT = os.path.join(store.PROJECT_ROOT, "uploads")
+
+
+def remove_job(job_id: str) -> dict:
+    """Delete *job_id*'s files (see cleanup.py) and then its record."""
+    job = store.get_job(job_id)
+    if job is None:
+        return {"removed": [], "kept": []}
+    others = [j for j in store.list_jobs() if j.get("id") != job_id]
+    report = cleanup.remove_job_files(
+        job, outputs_root=OUTPUTS_ROOT, uploads_root=UPLOADS_ROOT, other_jobs=others,
+    )
+    store.delete_job(job_id)
+    return report
+
+
+def finish_deferred_delete(job_id: str) -> bool:
+    """Carry out a delete that was asked for while the job was running."""
+    job = store.get_job(job_id)
+    if job is None or not job.get("delete_requested") or is_active(job_id):
+        return False
+    report = remove_job(job_id)
+    print(f"   🗑 Deleted job {job_id}: removed {len(report['removed'])} item(s).")
+    return True
+
+
+def finish_deferred_deletes() -> int:
+    """At startup: deletes a crash interrupted. Returns how many were finished."""
+    pending = [j.get("id") for j in store.list_jobs() if j.get("delete_requested")]
+    return sum(1 for job_id in pending if finish_deferred_delete(job_id))
 
 
 def is_active(job_id: str) -> bool:
@@ -636,6 +671,12 @@ async def submit_job(job_id: str, payload: dict) -> None:
         finally:
             if _active.get(job_id, (None,))[0] is token:
                 _active.pop(job_id, None)
+            # DELETE on a running job cancels it and leaves the files to us.
+            # This runs on the event loop, like the route, and neither awaits
+            # between its check and its action: either the route saw this job
+            # active and set the flag first, or it found it gone and deleted it
+            # itself.
+            finish_deferred_delete(job_id)
 
     _active[job_id] = (token, None)
     _active[job_id] = (token, asyncio.create_task(_run()))

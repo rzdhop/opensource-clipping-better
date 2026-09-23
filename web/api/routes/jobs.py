@@ -9,7 +9,7 @@ import json
 import os
 from datetime import datetime, timezone
 
-from fastapi import Depends, APIRouter, File, HTTPException, UploadFile
+from fastapi import Depends, APIRouter, File, HTTPException, Response, UploadFile
 from fastapi.responses import StreamingResponse
 
 from ..auth import media_url, require_token
@@ -266,8 +266,11 @@ async def attach_source(
     if subtitle_name:
         config["transcript_filename"] = subtitle_name
 
+    # source_attached_at: when this job took its upload, which is what lets a
+    # later delete tell this file from a newer upload that reused the name.
     store.update_job(job_id, config=config, upload_filename=video_name,
-                     error=None, status=JobStatus.QUEUED)
+                     error=None, status=JobStatus.QUEUED,
+                     source_attached_at=datetime.now(timezone.utc))
     await worker.submit_job(job_id, config)
 
     return _job_to_response(store.get_job(job_id))
@@ -315,19 +318,28 @@ async def cancel_job(job_id: str) -> JobResponse:
 
 
 @router.delete("/{job_id}")
-async def delete_job(job_id: str) -> dict:
-    """Cancel/delete a job."""
+async def delete_job(job_id: str, response: Response) -> dict:
+    """Delete a job, its output directory and the uploads only it uses.
+
+    A running job is cancelled first; its worker removes it once it stops, and
+    this answers 202. Nothing here awaits, so the worker's own cleanup -- also
+    on the event loop -- either sees the flag set below or has already gone.
+    """
     job = store.get_job(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    # Stop it first. Marking it cancelled was all this used to do: the worker
-    # thread carried on, spending quota and CPU on a job nobody could see.
-    if store.request_cancel(job_id) == "cancelled":
-        worker.cancel(job_id)
+    store.update_job(job_id, delete_requested=True)
+    store.request_cancel(job_id)  # no-op for a job that already finished
+    if worker.cancel(job_id):
+        response.status_code = 202
+        return {
+            "message": "Cancelling. The job and its files are removed once it stops.",
+            "id": job_id,
+        }
 
-    store.delete_job(job_id)
-    return {"message": "Job deleted", "id": job_id}
+    report = worker.remove_job(job_id)
+    return {"message": "Job deleted", "id": job_id, **report}
 
 
 @router.get("/{job_id}/status")
