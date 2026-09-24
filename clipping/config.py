@@ -1243,7 +1243,7 @@ def _preflight_work(cfg, chain):
         from clipping.analysis import analyzer, beats as beats_mod
         from clipping.analysis import cache as cache_mod
         from clipping.analysis import presets as presets_mod
-        from clipping.analysis import prompts, schema
+        from clipping.analysis import diagnostic
         from clipping.transcript import load_transcript
 
         _text, data_segmen = load_transcript(
@@ -1267,20 +1267,16 @@ def _preflight_work(cfg, chain):
         lo, hi = ranges[0]
         beats_text = beats_mod.render_beats(all_beats, lo, hi)
         preset = presets_mod.get(getattr(cfg, "platform", presets_mod.DEFAULT_PRESET))
-        work = {
-            "system": prompts.SYSTEM,
-            "user": prompts.candidates_prompt(
-                beats_text,
-                max_candidates=analyzer.MAX_CANDIDATES_PER_WINDOW,
-                preset=preset,
-                language=_probe_language(cfg),
-                total_seconds=all_beats[-1]["end"],
-                topic=str(getattr(cfg, "topic", "") or "").strip(),
-            ),
-            "schema": schema.CANDIDATES_SCHEMA,
-            "schema_name": "candidates",
-            "max_tokens": schema.MAX_TOKENS_CANDIDATES,
-        }
+        # One builder for every pass-A request that is not the scan itself, so
+        # the preflight, the bench and the settings test cannot drift apart.
+        work = diagnostic.pass_a_work(
+            beats_text,
+            preset=preset,
+            language=_probe_language(cfg),
+            total_seconds=all_beats[-1]["end"],
+            topic=str(getattr(cfg, "topic", "") or "").strip(),
+            max_candidates=analyzer.MAX_CANDIDATES_PER_WINDOW,
+        )
     except Exception:  # noqa: BLE001 - the ping is always available
         return None, None
 
