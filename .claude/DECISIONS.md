@@ -1873,3 +1873,21 @@ and the bench) on a 14-beat test transcript with exactly one clip in it
   is what jobs on the same key reuse. Same facts about the same key.
 - `probe_chain` and the preflight are unchanged (RC-C9: `tests/test_preflight.py`
   passes unedited).
+
+## DEC-079 — The chain test waits as long as a job would
+**Context.** DEC-078 gave each link the preflight's work-probe cap (90s on the
+fast tiers). The same day, the job's own five windows sent straight to
+`gemini-3.5-flash-lite` took 100.8 / 46.2 / 1.1 / 4.6 / 1.9s. Output was 76-195
+tokens with no reasoning tokens, so this is free-tier queueing, not thinking,
+and turning thinking off would not help. The job itself saw the same spread
+(1-2s and 44-55s requests) and finished its analysis in 298s.
+**Decision.** `registry.diagnostic_timeout(link) = min(effective_timeout(link),
+280)`: the job request's own timeout (groq 120, gemini/openrouter/mistral 180),
+capped so NVIDIA (330) fits the 300s route ceiling with its 10s slack.
+**Consequence.**
+- **A timeout in the test now means what it means in a job.** Under DEC-078's
+  cap, the test would have reported Gemini dead on a day a job used it.
+- The default chain's worst case is 290s; a healthy chain answers in seconds.
+- **The preflight is unchanged** (DEC-072, RC-C3). A 100s Gemini answer fails
+  the preflight's 90s work probe, falls back to the ping, and the job starts
+  (DEC-067); it only loses the cache seed.
