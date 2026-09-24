@@ -1,4 +1,56 @@
-## CURRENT TASK — chain readiness gate + per-provider probe timeout (COMPLETE, awaiting Tier-2 ack + deploy)
+## CURRENT TASK — every key tested with the real request; a chain that survives a retired model (IN PROGRESS)
+- **Phase:** IMPLEMENT. **Current stage:** Stage 1 (shared pass-A request + bench).
+- **Plan:** `~/.claude/plans/zany-bouncing-brook.md` (approved in chat 2026-09-24).
+- **Checkpoint commit before the work:** `8fa873d` (clean tree).
+- **Tier-1 baseline:** 1361 passed, 0 failed (`python -m pytest -p no:warnings`, 14s).
+- **Next action:** write `clipping/analysis/diagnostic.py` + `tests/test_diagnostic_work.py`,
+  rewrite `tools/bench_llm.py` to send the real request, then run the live bench.
+- **Open questions:** none. Decided in chat: cheap PAID OpenRouter model chosen by bench;
+  Mistral joins the default chain last before NVIDIA; live benchmarks + a real job
+  through the deployed API are authorised.
+- **Security note:** an exploration agent printed `data/settings.json` once in its own
+  transcript (GOOGLE_API_KEY + OPENROUTER_API_KEY). Disclosed to the human; rotation is
+  their call. Never print key values.
+
+### Why (measured 2026-09-24)
+Test provider chain: groq skipped (no key); `gemini/gemini-2.5-flash-lite` 404 "no longer
+available to new users, use gemini-3.5-flash-lite"; nvidia ok in 81.6s; summary said
+"Jobs can start" -- false: a job would hop to NVIDIA alone. OpenRouter key set but
+OpenRouter is not a link in the default chain, so it is never used or tested.
+`gemini-3.5-flash-lite` answers via the OpenAI-compat endpoint in 0.53s.
+
+### Regression contract for this task
+| ID | Must keep working | Proven by |
+|---|---|---|
+| RC-C1 | A keyless or unlisted provider is never contacted (DEC-023) | `test_llm_negotiation.py::test_a_provider_not_in_the_chain_is_never_contacted` |
+| RC-C2 | A failing link is reported, never removed | `test_preflight.py` report-not-remove tests, `test_every_link_failing_raises_with_all_the_reasons` |
+| RC-C3 | Slow-but-healthy never cut off; probe caps below request timeout | `test_preflight.py::test_the_work_probe_is_bounded`, budget tests |
+| RC-C4 | `effective_timeout` value and role unchanged | `test_provider_registry.py`, `test_the_budget_check_uses_the_clients_own_timeout` |
+| RC-C5 | NIM model id defined once | `test_no_former_copy_grew_a_model_literal_back` |
+| RC-C6 | Settings page <-> backend field contract | `test_dashboard_payload_contract.py` |
+| RC-C7 | Render-only rerun needs no key, probe or gate | `test_a_render_only_rerun_needs_no_key_and_meets_no_gate` |
+| RC-C8 | `providers/` never imports `analysis/`; suite runs with pytest alone | CI-env run |
+| RC-C9 | `probe_chain` contract: 4-tuples, byte-identical log lines | `tests/test_preflight.py` passes UNEDITED |
+| RC-C10 | `POST /api/jobs` refusal stays pure and key-based (DEC-073) | `test_settings_report_the_same_verdict_the_job_route_would` |
+| RC-C11 | Three-pass analysis still yields renderable clips | `test_a_full_run_produces_renderable_clips` |
+
+### Stage ledger
+| S | Stage | State |
+|---|---|---|
+| 0 | checkpoint + baseline | **done** (`8fa873d`, 1361 passed) |
+| 1 | shared real pass-A request + bench that sends it | in progress |
+| 2 | Gemini default -> gemini-3.5-flash-lite, defined once | todo |
+| 3 | OpenRouter + Mistral join the default chain | todo |
+| 4 | deploy + the user's real job | todo |
+| 5 | same-provider model swap on "model unavailable" (RISKIEST) | todo |
+| 6 | diagnostic sends real work to every keyed link | todo |
+| 7 | dashboard | todo |
+| 8 | docs + decisions | todo |
+| 9 | redeploy, diagnostic, second real job | todo |
+
+---
+
+## Previous task — chain readiness gate + per-provider probe timeout (COMPLETE, deployed 2026-09-24 09:22)
 - **Phase:** DOCUMENT done. All 8 stages committed; head `9050839`.
 - **Plan:** `~/.claude/plans/still-not-working-groovy-puffin.md` (approved in chat).
 - **Checkpoint commit before the work:** `e991ff8` (+ `dafcf0b`, the checkpoint note).
