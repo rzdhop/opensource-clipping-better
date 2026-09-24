@@ -2040,3 +2040,24 @@ capped so NVIDIA (330) fits the 300s route ceiling with its 10s slack.
 - **The preflight is unchanged** (DEC-072, RC-C3). A 100s Gemini answer fails
   the preflight's 90s work probe, falls back to the ping, and the job starts
   (DEC-067); it only loses the cache seed.
+
+## DEC-092 — One machine may run without the API token, through a gitignored compose override
+**Context.** On 2026-09-24 the human asked, in chat, to remove the API token
+needed to open the app. The escape hatch `DISABLE_AUTH=1` exists but is kept out
+of both committed compose files by a test ("for a developer's terminal, never
+for a running deployment"), and the dashboard showed its sign-in form whenever
+localStorage held no token, even against a server that needed none.
+**Decision.** The human's instruction wins for THIS machine, and the shipped
+default does not change. `docker-compose.override.yml` (loaded by compose
+automatically, gitignored, guarded by a test) sets `DISABLE_AUTH=1`. The
+dashboard now asks the server before deciding the user is signed out.
+**Consequence.**
+- The committed compose files still carry no `DISABLE_AUTH`, and that test is
+  unchanged. A fresh clone is authenticated.
+- **Safe only while the port is private.** `docker-compose.yml` binds
+  127.0.0.1:8000, and on 2026-09-24 neither `tailscale serve` nor the Caddy
+  profile ran. Exposing the app without deleting the override exposes every
+  route, including job creation (which spends the OpenRouter credit) and
+  shutdown. The override file says so in its header.
+- With auth on, the dashboard makes one extra request (a 401) before showing
+  the sign-in form. Nothing else changes.

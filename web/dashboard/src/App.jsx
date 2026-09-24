@@ -10,10 +10,11 @@ import { checkToken, clearToken, getToken } from './api'
 function App() {
   const location = useLocation()
 
-  // 'checking' until the stored token has been verified against the API. A
-  // stored token can be stale -- the server regenerates it if data/api_token
-  // is lost -- so its mere presence is not proof of anything.
-  const [auth, setAuth] = useState(() => (getToken() ? 'checking' : 'out'))
+  // 'checking' until the server has answered. A stored token can be stale --
+  // the server regenerates it if data/api_token is lost -- so its presence is
+  // not proof of anything; and a server started with DISABLE_AUTH needs no
+  // token at all, so its absence is not proof either (DEC-092). Ask first.
+  const [auth, setAuth] = useState('checking')
 
   useEffect(() => {
     if (auth !== 'checking') return
@@ -21,7 +22,7 @@ function App() {
     checkToken(getToken())
       .then((ok) => {
         if (cancelled) return
-        if (!ok) clearToken()
+        if (!ok && getToken()) clearToken()
         setAuth(ok ? 'in' : 'out')
       })
       .catch(() => { if (!cancelled) setAuth('out') })

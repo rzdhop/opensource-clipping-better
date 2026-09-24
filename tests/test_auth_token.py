@@ -169,6 +169,23 @@ def test_the_escape_hatch_is_not_in_the_compose_files():
         assert "DISABLE_AUTH" not in text, name
 
 
+def test_the_dashboard_asks_the_server_before_asking_for_a_token():
+    """A backend started with DISABLE_AUTH answers without a token (DEC-092).
+    The page used to decide "signed out" from an empty localStorage alone and
+    showed the sign-in form anyway; it must ask the server first."""
+    text = (PROJECT_ROOT / "web" / "dashboard" / "src" / "App.jsx").read_text(
+        encoding="utf-8")
+    assert "getToken() ? 'checking' : 'out'" not in text
+    assert "useState('checking')" in text
+
+
+def test_the_local_override_that_disables_auth_is_never_committed():
+    """docker-compose.override.yml is where one machine may turn auth off; a
+    committed copy would turn it off for every clone."""
+    ignored = (PROJECT_ROOT / ".gitignore").read_text(encoding="utf-8").split()
+    assert "docker-compose.override.yml" in ignored
+
+
 # --------------------------------------------------------------- the wiring
 
 def _routers_with_dependencies():
