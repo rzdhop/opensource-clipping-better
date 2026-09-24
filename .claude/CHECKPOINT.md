@@ -3,13 +3,15 @@
 - **Plan:** `~/.claude/plans/zany-bouncing-brook.md` (approved in chat 2026-09-24).
 - **Checkpoint commit before the work:** `8fa873d` (clean tree).
 - **Tier-1 baseline:** 1361 passed, 0 failed (`python -m pytest -p no:warnings`, 14s).
-- **Next action:** job `b37b36a9b34e` is RENDERING (analysis done: 7 clips in 298s, all
-  5 windows on gemini-3.5-flash-lite, zero NVIDIA attempts). When it completes, Stage 9:
-  rebuild (`sudo -n docker compose rm -sfv backend && sudo -n docker compose up -d --build
-  backend`; .claude/ is now dockerignored), run the NEW chain test, force one model swap
-  with a request chain naming gemini-2.5-flash-lite, check Tailscale survives the wait,
-  then a second real job. Stages 6-8 are merged on main (`2e7756f`, `62531e0`, `29715db`).
-- **Tier-1 on main:** 1443 passed; CI env 1291 passed / 124 skipped; compileall clean.
+- **Next action:** job `b37b36a9b34e` is RENDERING (~11 min/clip; 7 clips). Its
+  analysis passed (7 clips in 298s, all on gemini, zero NVIDIA). When it completes:
+  redeploy (`sudo -n docker compose rm -sfv backend && sudo -n docker compose up -d
+  --build backend`; .claude/ is dockerignored now), then smoke-test the deployed
+  dashboard bundle and the new test-chain route. Stages 6-7 are ALREADY verified live on
+  a throwaway instance of main (see the action log), including a forced model swap and
+  a dry-run analysis on the final code (7 clips in 95s).
+- **Do NOT restart the container before the render finishes** -- it kills the job.
+- **Tier-1 on main:** 1444 passed; CI env 1292 passed / 124 skipped; compileall clean.
 - **Audit:** pip-audit over the deployed container's 170 packages: no known vulns;
   npm audit (dashboard lockfile): 0. No dependency file changed in this task.
 - **Measured defaults (Stage 1 bench):** gemini-3.5-flash-lite 3/3 found, ~1s;
