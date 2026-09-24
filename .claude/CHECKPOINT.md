@@ -1,14 +1,17 @@
 ## CURRENT TASK — every key tested with the real request; a chain that survives a retired model (IN PROGRESS)
-- **Phase:** IMPLEMENT. **Current stage:** Stage 4 (deploy + the user's real job).
+- **Phase:** TEST. **Current stage:** Stage 4 render, then Stage 9.
 - **Plan:** `~/.claude/plans/zany-bouncing-brook.md` (approved in chat 2026-09-24).
 - **Checkpoint commit before the work:** `8fa873d` (clean tree).
 - **Tier-1 baseline:** 1361 passed, 0 failed (`python -m pytest -p no:warnings`, 14s).
-- **Next action:** real job `b37b36a9b34e` is RUNNING on the rebuilt container (payload
-  of fd19ae81a6a0: video.mp4 + French auto-generated .vtt, 7 clips, auto, topic). Do NOT
-  edit clipping/ or web/ source until its analysis is done (bind mount: the container
-  runs the on-disk Python). Stages 6, 7 and docs are committed on branch
-  `stage6-diagnostic` in the scratchpad worktree (`32fc3a9`, `73fcdce`, `22e6e40`):
-  merge --ff-only into main after the analysis, then rebuild for Stage 9.
+- **Next action:** job `b37b36a9b34e` is RENDERING (analysis done: 7 clips in 298s, all
+  5 windows on gemini-3.5-flash-lite, zero NVIDIA attempts). When it completes, Stage 9:
+  rebuild (`sudo -n docker compose rm -sfv backend && sudo -n docker compose up -d --build
+  backend`; .claude/ is now dockerignored), run the NEW chain test, force one model swap
+  with a request chain naming gemini-2.5-flash-lite, check Tailscale survives the wait,
+  then a second real job. Stages 6-8 are merged on main (`2e7756f`, `62531e0`, `29715db`).
+- **Tier-1 on main:** 1443 passed; CI env 1291 passed / 124 skipped; compileall clean.
+- **Audit:** pip-audit over the deployed container's 170 packages: no known vulns;
+  npm audit (dashboard lockfile): 0. No dependency file changed in this task.
 - **Measured defaults (Stage 1 bench):** gemini-3.5-flash-lite 3/3 found, ~1s;
   openrouter mistral-small-3.2-24b 3/3, 5-13s real windows; NVIDIA floor 2/2 but 93-193s.
 - **Open questions:** none. Decided in chat: cheap PAID OpenRouter model chosen by bench;
@@ -49,9 +52,9 @@ OpenRouter is not a link in the default chain, so it is never used or tested.
 | 3 | OpenRouter + Mistral join the default chain | **done** `02670f0` |
 | 4 | deploy + the user's real job | in progress: job `b37b36a9b34e` |
 | 5 | same-provider model swap on "model unavailable" (RISKIEST) | **done** `7738224` (committed before the job; bind mount) |
-| 6 | diagnostic sends real work to every keyed link | done on branch `32fc3a9` |
-| 7 | dashboard | done on branch `73fcdce` |
-| 8 | docs + decisions | docs on branch `22e6e40`; DEC-075..078 written |
+| 6 | diagnostic sends real work to every keyed link | **done** `2e7756f` |
+| 7 | dashboard | **done** `62531e0` |
+| 8 | docs + decisions | **done** `29715db` + DEC-075..078 |
 | 9 | redeploy, diagnostic, second real job | todo |
 
 ---
