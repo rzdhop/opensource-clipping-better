@@ -70,8 +70,9 @@ behind a queue that can hold a request for a minute, so a scan that takes
 seconds on Groq takes tens of minutes on NVIDIA and may not finish. A job whose
 only key is NVIDIA's is refused before anything runs, with the signup links.
 To run it anyway, pass `--allow-slow-chain`, set `ALLOW_SLOW_CHAIN=1`, or use
-the Settings toggle. **Settings → Test provider chain** checks every link
-without starting a job.
+the Settings toggle. **Settings → Test provider chain** sends every keyed link
+one small real analysis request and says what each found, without starting a
+job.
 
 | Key | For |
 |---|---|

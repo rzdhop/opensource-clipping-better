@@ -55,8 +55,8 @@
 - **Python** 3.10+
 - **FFmpeg** terinstall dan tersedia di PATH
 - **GPU CUDA** disarankan (untuk Whisper; bisa fallback ke CPU)
-- **API key Groq atau Gemini** — minimal satu **wajib** ada, keduanya gratis tanpa kartu kredit: [Groq](https://console.groq.com/keys) (tercepat, link pertama di chain) atau [Gemini](https://aistudio.google.com/apikey) (link kedua, juga dipakai `--voiceover`)
-- **NVIDIA NIM API Key** (opsional, [dapatkan di sini](https://build.nvidia.com/)) — hanya cadangan yang lambat (~12 token/detik di belakang antrean). Job yang hanya punya key NVIDIA **ditolak sebelum berjalan**; pakai `--allow-slow-chain`, `ALLOW_SLOW_CHAIN=1`, atau toggle di Settings bila tetap ingin menjalankannya. **Settings → Test provider chain** memeriksa setiap link tanpa menjalankan job.
+- **API key Groq, Gemini, OpenRouter atau Mistral** — minimal satu **wajib** ada: [Groq](https://console.groq.com/keys) (tercepat, link pertama di chain), [Gemini](https://aistudio.google.com/apikey) (link kedua, juga dipakai `--voiceover`), [OpenRouter](https://openrouter.ai/keys) (berbayar, kurang dari satu sen per job, dipakai setelah Groq dan Gemini) atau [Mistral](https://console.mistral.ai/). Semua gratis kecuali OpenRouter.
+- **NVIDIA NIM API Key** (opsional, [dapatkan di sini](https://build.nvidia.com/)) — hanya cadangan yang lambat (~12 token/detik di belakang antrean). Job yang hanya punya key NVIDIA **ditolak sebelum berjalan**; pakai `--allow-slow-chain`, `ALLOW_SLOW_CHAIN=1`, atau toggle di Settings bila tetap ingin menjalankannya. **Settings → Test provider chain** mengirim satu permintaan analisis kecil yang nyata ke setiap link yang punya key, dan melaporkan apa yang ditemukan, tanpa menjalankan job.
 - **Pexels API Key** (opsional, untuk B-roll — [dapatkan di sini](https://www.pexels.com/api/))
 - **HuggingFace Token** (opsional, untuk split-screen / camera-switch — [dapatkan di sini](https://huggingface.co/settings/tokens), perlu accept [Pyannote model agreement](https://huggingface.co/pyannote/speaker-diarization-3.1))
 

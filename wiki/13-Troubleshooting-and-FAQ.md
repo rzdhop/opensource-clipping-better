@@ -21,8 +21,8 @@ GOOGLE_API_KEY=...    # https://aistudio.google.com/apikey
 ```
 To run on NVIDIA alone anyway, use `--allow-slow-chain`, set
 `ALLOW_SLOW_CHAIN=1`, or turn on **Settings → Run on the slow chain anyway** in
-the dashboard. **Settings → Test provider chain** shows each link's state
-without starting a job.
+the dashboard. **Settings → Test provider chain** sends each keyed link a
+small real analysis request and shows what it found, without starting a job.
 
 ---
 
@@ -36,6 +36,11 @@ key, or a 404 for a model your account cannot call.
 
 **Fix:** Run **Settings → Test provider chain**, or re-check the keys it lists.
 If a provider is only slow to wake, `--no-preflight` skips the check.
+
+A `404` saying a model "is no longer available" means the provider retired it,
+often for new accounts first. Gemini and OpenRouter then try their own
+fallback model on the same key and print a `↪` line (DEC-077); for the others,
+set `LLM_CHAIN` to a current model or update the project.
 
 ---
 

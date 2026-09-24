@@ -66,7 +66,7 @@ python tools/rzclips-fetch.py --url "https://..." --server $BASE --token $API_TO
 | `GET` | `/api/outputs/{id}` | List a job's output files. Header-only; a media signature never opens it. |
 | `GET` | `/api/outputs/{id}/{file}` | Serve one, including `.srt`. Served `inline` so a `<video>` or `poster` can use it; add `?download=1` for `Content-Disposition: attachment`. Accepts a header **or** an `?exp=&sig=` pair. Range requests are supported, so seeking works. |
 | `GET`/`PUT` | `/api/settings` | API keys (write-only), defaults, `allow_slow_chain`, and `chain_blocked_reason` (why a chain job would be refused right now, or `""`). |
-| `POST` | `/api/settings/test-chain` | Ping every link of the chain and report each one. Can take a couple of minutes. |
+| `POST` | `/api/settings/test-chain` | Send every keyed link a small real analysis request and report each one. Can take a few minutes. |
 
 ## Creating a job
 
@@ -113,15 +113,30 @@ curl -H "$AUTH" -H "Content-Type: application/json" -d '{}' \
      $BASE/api/settings/test-chain
 ```
 
-Every link is pinged, not only up to the first that answers. Each result has a
-`status` of `ok`, `no_key` or `failed`, with `latency_seconds`, `reason`,
-`probe_timeout_seconds` (45s for the fast tiers, 120s for NVIDIA), `primary`,
-`env_key` and `signup_url`. `ready` is true only when something answered **and**
-a job on this chain may start; otherwise `message` gives the reason. Send
-`{"llm_chain": "..."}` to test a different chain. The request never carries a
-base URL: `custom/...` uses `LLM_CUSTOM_BASE_URL` from the server's environment.
-A second test while one is running gets `409`, and a test that outlives its
-budget gets `504`.
+Every keyed link is sent the analysis's own first request on a short test
+transcript with one clip in it, not only up to the first that answers.
+Providers are asked at the same time; links on one provider one after another.
+Each result has a `status`:
+
+| status | meaning |
+|---|---|
+| `ok` | Completed the real request. `candidates` and `found_moment` say what it found. |
+| `alive` | Failed the real request (`reason`) but answered a plain ping: the key works, the model cannot do the job. |
+| `failed` | Neither. `reason` says why. |
+| `no_key` | Skipped; `env_key` and `signup_url` say what to set. |
+| `unused` | A key is set for a provider this chain does not name. Never contacted; `note` names the link to add. |
+
+Rows also carry `latency_seconds`, `work_timeout_seconds` (90s for the fast
+tiers, 240s for NVIDIA), `level` (the structured-output mode that worked),
+`used_model` (differs from `model` when a retired model was swapped for the
+provider's fallback) and a `note`. `verdict` is `ready` (a fast link completed
+it), `floor_only` (only NVIDIA did), `blocked` (a job would be refused, see
+above) or `dead` (nothing did); `ready` is `verdict == "ready"` and `message`
+explains the others. The whole test waits for the slowest provider, about
+250s at most for the default chain. Send `{"llm_chain": "..."}` to test a
+different chain. The request never carries a base URL: `custom/...` uses
+`LLM_CUSTOM_BASE_URL` from the server's environment. A second test while one is
+running gets `409`, and a test that outlives its budget gets `504`.
 
 ### `source_url` is best-effort
 
