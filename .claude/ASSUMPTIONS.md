@@ -59,8 +59,9 @@
   returned `content=null` on OpenRouter at small budgets (2026-09-24), a
   reasoning-model trait worth checking first. UNCONFIRMED.
 - **A-023** — The Tailscale serve proxy in front of the app does not cut a
-  request shorter than the chain test's 250s worst case. UNCONFIRMED until
-  measured through the tailnet.
+  request shorter than the chain test's 290s worst case (DEC-079). On
+  2026-09-24 `tailscale serve status` said "No serve config", so nothing
+  proxies the app on this box today. UNCONFIRMED for a setup that uses it.
 - **A-024** — "No longer available to new users" 404s are per account and
   permanent, so remembering the working model per key for the life of the
   server is safe. Nothing is blacklisted, so a wrong guess costs one fast 404.

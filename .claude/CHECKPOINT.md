@@ -1,27 +1,27 @@
-## CURRENT TASK — every key tested with the real request; a chain that survives a retired model (IN PROGRESS)
-- **Phase:** TEST. **Current stage:** Stage 4 render, then Stage 9.
+## CURRENT TASK — every key tested with the real request; a chain that survives a retired model (COMPLETE, awaiting Tier-2 ack)
+- **Phase:** DOCUMENT done. All stages committed on main; deployed 2026-09-24 13:12 UTC.
 - **Plan:** `~/.claude/plans/zany-bouncing-brook.md` (approved in chat 2026-09-24).
 - **Checkpoint commit before the work:** `8fa873d` (clean tree).
-- **Tier-1 baseline:** 1361 passed, 0 failed (`python -m pytest -p no:warnings`, 14s).
-- **Next action:** job `b37b36a9b34e` is RENDERING (~11 min/clip; 7 clips). Its
-  analysis passed (7 clips in 298s, all on gemini, zero NVIDIA). When it completes:
-  redeploy (`sudo -n docker compose rm -sfv backend && sudo -n docker compose up -d
-  --build backend`; .claude/ is dockerignored now), then smoke-test the deployed
-  dashboard bundle and the new test-chain route. Stages 6-7 are ALREADY verified live on
-  a throwaway instance of main (see the action log), including a forced model swap and
-  a dry-run analysis on the final code (7 clips in 95s).
-- **Do NOT restart the container before the render finishes** -- it kills the job.
-- **Tier-1 on main:** 1444 passed; CI env 1292 passed / 124 skipped; compileall clean.
-- **Audit:** pip-audit over the deployed container's 170 packages: no known vulns;
-  npm audit (dashboard lockfile): 0. No dependency file changed in this task.
-- **Measured defaults (Stage 1 bench):** gemini-3.5-flash-lite 3/3 found, ~1s;
-  openrouter mistral-small-3.2-24b 3/3, 5-13s real windows; NVIDIA floor 2/2 but 93-193s.
-- **Open questions:** none. Decided in chat: cheap PAID OpenRouter model chosen by bench;
-  Mistral joins the default chain last before NVIDIA; live benchmarks + a real job
-  through the deployed API are authorised.
+- **Tier-1:** baseline 1361 -> **1444 passed**; CI env **1292 passed / 124 skipped**;
+  compileall clean. Every behaviour test verified to FAIL before its change; guards named.
+- **Tier-2:** no browser E2E suite exists in this repo. Substitutes, all live:
+  the human's real job `b37b36a9b34e` COMPLETED with 7 rendered clips (1080x1920,
+  21-50s, French titles; analysis 298s, all on gemini-3.5-flash-lite, zero NVIDIA);
+  the new chain test in a real browser; a forced retired-model swap; a dry-run analysis
+  on the final code (7 clips in 95s); the deployed chain test after redeploy (verdict
+  ready, 117s: gemini 4.1s, openrouter 7.3s, nvidia 117s, all found the test clip).
+  **Awaiting the human's acknowledgement of this substitute.**
+- **Audit:** pip-audit (deployed container, 170 packages): none; npm audit: 0.
+- **Not pushed.** main is ahead of origin. Push per memory note [[github-push-key]].
+- **Open questions:** none.
 - **Security note:** an exploration agent printed `data/settings.json` once in its own
-  transcript (GOOGLE_API_KEY + OPENROUTER_API_KEY). Disclosed to the human; rotation is
-  their call. Never print key values.
+  local transcript (GOOGLE_API_KEY + OPENROUTER_API_KEY). Told the human; rotation is
+  their call.
+- **Follow-ups, deliberately not done:** LLM_CHAIN not in settings_store.PERSISTED_KEYS;
+  the web worker ignores `dry_run_analysis` (chip spawned); dead GEMINI_MODEL /
+  GEMINI_FALLBACK_MODEL config surface (config.py:208-209); Groq and Mistral defaults
+  unmeasured (A-021, A-022); Gemini free-tier latency swings 1s-100s (DEC-079);
+  `tests/test_clip_length.py` leaves an empty outputs/jobid (pre-existing).
 
 ### Why (measured 2026-09-24)
 Test provider chain: groq skipped (no key); `gemini/gemini-2.5-flash-lite` 404 "no longer
@@ -52,12 +52,12 @@ OpenRouter is not a link in the default chain, so it is never used or tested.
 | 1 | shared real pass-A request + bench that sends it | **done** `ea87486` |
 | 2 | Gemini default -> gemini-3.5-flash-lite, defined once | **done** `57be632` |
 | 3 | OpenRouter + Mistral join the default chain | **done** `02670f0` |
-| 4 | deploy + the user's real job | in progress: job `b37b36a9b34e` |
+| 4 | deploy + the user's real job | **done** job `b37b36a9b34e`: 7 clips |
 | 5 | same-provider model swap on "model unavailable" (RISKIEST) | **done** `7738224` (committed before the job; bind mount) |
 | 6 | diagnostic sends real work to every keyed link | **done** `2e7756f` |
 | 7 | dashboard | **done** `62531e0` |
 | 8 | docs + decisions | **done** `29715db` + DEC-075..078 |
-| 9 | redeploy, diagnostic, second real job | todo |
+| 9 | redeploy, diagnostic, second real job | **done** (second job = dry-run analysis on the final code; deployed chain test ready) |
 
 ---
 

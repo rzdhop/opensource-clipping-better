@@ -22,7 +22,8 @@ have:
 
 The engine is therefore being decoupled into a **local-first** tool: external
 tools acquire the `.mp4` and `.vtt`; the engine ingests local paths, skips
-Whisper entirely when a transcript is supplied, uses NVIDIA NIM for semantic
-analysis, and renders through the existing FFmpeg/OpenCV layer unchanged.
+Whisper entirely when a transcript is supplied, uses an ordered chain of hosted
+LLM providers for semantic analysis (Gemini, OpenRouter, ... with NVIDIA NIM as
+the floor), and renders through the existing FFmpeg/OpenCV layer unchanged.
 
 The render layer (Layer 4) is explicitly **not** part of this change.
