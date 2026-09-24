@@ -25,12 +25,15 @@ from __future__ import annotations
 import hashlib
 import threading
 import time
+from collections import namedtuple
+from concurrent.futures import ThreadPoolExecutor
 
 from . import errors, jsonx, pacing
 from .registry import (
     DEFAULT_PROBE_TIMEOUT,
     PROVIDERS,
     describe,
+    diagnostic_timeout,
     effective_timeout,
     env_key_for,
     probe_timeout,
@@ -710,27 +713,65 @@ def _through_models(link, api_key, once, *, on_log, time_fn):
     *once(candidate)* returns ``(value, exc)``. A model the provider says is not
     available is followed by the next of its models, with the same printed line
     as a job; any other failure is the answer. Returns ``(value, elapsed,
-    reason)`` with *elapsed* covering every model tried, so a swap is never
-    hidden inside a fast-looking number.
+    reason, used, exc)``: *elapsed* covers every model tried, so a swap is never
+    hidden inside a fast-looking number, and *used* is the link last asked.
     """
     tried = []
     started = time_fn()
-    for candidate in _models_to_try(link, api_key):
-        if candidate.model != link.model:
-            on_log(_swap_line(link, candidate, tried))
-        value, exc = once(candidate)
+    used, exc = link, None
+    for used in _models_to_try(link, api_key):
+        if used.model != link.model:
+            on_log(_swap_line(link, used, tried))
+        value, exc = once(used)
         if exc is None:
-            if candidate.model != link.model:
-                _remember_swap(link, api_key, candidate.model)
-            return value, time_fn() - started, None
+            if used.model != link.model:
+                _remember_swap(link, api_key, used.model)
+            return value, time_fn() - started, None, used, None
         reason = f"{type(exc).__name__}: {exc}"
         if not errors.is_model_unavailable(exc) or not _fallback_models(link):
-            prefix = f"{_history(tried)}; {candidate.model}: " if tried else ""
-            return None, time_fn() - started, prefix + reason
-        tried.append((candidate.model, reason))
+            prefix = f"{_history(tried)}; {used.model}: " if tried else ""
+            return None, time_fn() - started, prefix + reason, used, exc
+        tried.append((used.model, reason))
     return None, time_fn() - started, (
         f"no model on this {link.provider} key is available: {_history(tried)}"
+    ), used, exc
+
+
+def _ping_once(candidate, api_key, timeout, *, on_log, client_factory):
+    """One plain completion to *candidate*: ``(None, exc)``, exc None on success."""
+    client = LlmClient(
+        candidate, api_key=api_key, timeout=timeout,
+        client_factory=client_factory, on_log=on_log,
     )
+    try:
+        client.client.chat.completions.create(
+            model=candidate.model,
+            messages=[{"role": "user", "content": PROBE_PROMPT}],
+            max_tokens=PROBE_MAX_TOKENS,
+            temperature=0,
+        )
+    except Exception as exc:  # noqa: BLE001 - every failure is just "not this one"
+        return None, exc
+    return None, None
+
+
+def _work_once(candidate, api_key, work, timeout, *, on_log, client_factory):
+    """One real request to *candidate* through ``complete_json``: ``(value, exc)``."""
+    client = LlmClient(
+        candidate, api_key=api_key, timeout=timeout,
+        client_factory=client_factory, on_log=on_log,
+    )
+    try:
+        return client.complete_json(
+            system=work["system"],
+            user=work["user"],
+            schema=work.get("schema"),
+            schema_name=work.get("schema_name", "result"),
+            max_tokens=work.get("max_tokens", 700),
+            temperature=work.get("temperature", 0.2),
+        ), None
+    except Exception as exc:  # noqa: BLE001 - the caller decides what it means
+        return None, exc
 
 
 def _ping_probe(link, api_key, timeout, *, on_log, client_factory, time_fn):
@@ -741,22 +782,10 @@ def _ping_probe(link, api_key, timeout, *, on_log, client_factory, time_fn):
     would let a provider's json_schema support decide a liveness question.
     """
     def once(candidate):
-        client = LlmClient(
-            candidate, api_key=api_key, timeout=timeout,
-            client_factory=client_factory, on_log=on_log,
-        )
-        try:
-            client.client.chat.completions.create(
-                model=candidate.model,
-                messages=[{"role": "user", "content": PROBE_PROMPT}],
-                max_tokens=PROBE_MAX_TOKENS,
-                temperature=0,
-            )
-        except Exception as exc:  # noqa: BLE001 - every failure is just "not this one"
-            return None, exc
-        return None, None
+        return _ping_once(candidate, api_key, timeout,
+                          on_log=on_log, client_factory=client_factory)
 
-    _value, elapsed, reason = _through_models(
+    _value, elapsed, reason, _used, _exc = _through_models(
         link, api_key, once, on_log=on_log, time_fn=time_fn
     )
     return elapsed, reason
@@ -771,33 +800,135 @@ def _work_probe(link, api_key, work, *, on_log, client_factory, time_fn):
     that answers at no rung at all has failed.
     """
     def once(candidate):
-        client = LlmClient(
-            candidate, api_key=api_key,
-            # Twice the ping's allowance, never more than a real request may
-            # take (registry.work_probe_timeout). It runs before transcription,
-            # so it must not become the delay it exists to prevent.
-            timeout=work_probe_timeout(candidate),
-            client_factory=client_factory, on_log=on_log,
-        )
-        try:
-            return client.complete_json(
-                system=work["system"],
-                user=work["user"],
-                schema=work.get("schema"),
-                schema_name=work.get("schema_name", "result"),
-                max_tokens=work.get("max_tokens", 700),
-                temperature=work.get("temperature", 0.2),
-            ), None
-        except Exception as exc:  # noqa: BLE001 - falls back to the ping
-            return None, exc
+        # Twice the ping's allowance, never more than a real request may take
+        # (registry.work_probe_timeout). It runs before transcription, so it
+        # must not become the delay it exists to prevent.
+        return _work_once(candidate, api_key, work, work_probe_timeout(candidate),
+                          on_log=on_log, client_factory=client_factory)
 
-    return _through_models(link, api_key, once, on_log=on_log, time_fn=time_fn)
+    value, elapsed, reason, _used, _exc = _through_models(
+        link, api_key, once, on_log=on_log, time_fn=time_fn
+    )
+    return value, elapsed, reason
+
+
+# ------------------------------------------------------------- diagnostic
+
+# One link's answer to the diagnostic. The first four fields are the
+# preflight's own ``(label, reason, elapsed, kind)``, so ``preflight_message``
+# explains a diagnostic's results unchanged.
+#
+#   kind        "skipped" (no key), "work" (the real request's answer stands),
+#               "ping" (the real request failed; this is the ping after it)
+#   reason      "ok", or why the last question asked failed
+#   value       the parsed answer to the real request, when it succeeded
+#   used_model  the model that was asked last -- differs from the link's own
+#               when a retired model was swapped (DEC-077)
+#   level       the structured-output rung that produced the answer
+#   work_error  why the real request failed, when it did
+#   judgement   ``judge(value)`` when a judge was given and the request succeeded
+LinkProbe = namedtuple(
+    "LinkProbe",
+    "label reason elapsed kind value used_model level work_error judgement",
+)
+
+# Below this, a ping after a failed request could not tell anything apart.
+DIAGNOSTIC_MIN_PING_SECONDS = 5.0
+
+
+def diagnose_chain(chain, keys, work, *, judge=None, parallel=True, on_log=print,
+                   client_factory=None, time_fn=time.monotonic):
+    """Ask EVERY keyed link *work* -- the real request a job sends -- and report each.
+
+    The Settings page's "Test provider chain" (DEC-078). ``probe_chain`` stays
+    the preflight's primitive; this is the diagnostic, and differs from it on
+    purpose:
+
+    * **It never stops early.** "Gemini answered" says nothing about the
+      OpenRouter link behind it.
+    * **Every link gets the real request**, not a ping. On 2026-09-24 a ping
+      reported a chain "ready" whose only working link was the NVIDIA floor.
+    * **A ping follows only a request that failed with time to spare**, to tell
+      "reachable but cannot do the job" from "dead". A request that used its
+      whole allowance is reported as it is; there is no time left to ask.
+    * **Providers run at once; links on one provider one after another**, since
+      NVIDIA serialises requests per key and every rate limit is per provider.
+      The wait is the slowest provider's sum (``registry.diagnostic_budget``).
+
+    *work* and *judge* are handed in so this layer never imports the analysis
+    one. Returns a ``LinkProbe`` per link, in chain order.
+    """
+    keys = keys or {}
+    out = [None] * len(chain)
+    groups = {}
+    for index, link in enumerate(chain):
+        if keys.get(link.provider):
+            groups.setdefault(link.provider, []).append(index)
+        else:
+            out[index] = LinkProbe(describe(link), "no API key", None, "skipped",
+                                   None, None, None, None, None)
+
+    def run_group(indexes):
+        for index in indexes:
+            link = chain[index]
+            out[index] = _diagnose_link(
+                link, keys[link.provider], work, judge=judge, on_log=on_log,
+                client_factory=client_factory, time_fn=time_fn,
+            )
+
+    if parallel and len(groups) > 1:
+        with ThreadPoolExecutor(max_workers=len(groups)) as pool:
+            for _ in pool.map(run_group, groups.values()):
+                pass
+    else:
+        for indexes in groups.values():
+            run_group(indexes)
+    return out
+
+
+def _timed_out(exc):
+    name = type(exc).__name__
+    return (
+        isinstance(exc, TimeoutError)
+        or name in ("APITimeoutError", "ReadTimeout", "TimeoutException")
+        or "timed out" in str(exc).lower()
+    )
+
+
+def _diagnose_link(link, api_key, work, *, judge, on_log, client_factory, time_fn):
+    label = describe(link)
+    allowance = diagnostic_timeout(link)
+    started = time_fn()
+
+    def once(candidate):
+        return _work_once(candidate, api_key, work, allowance,
+                          on_log=on_log, client_factory=client_factory)
+
+    value, elapsed, reason, used, exc = _through_models(
+        link, api_key, once, on_log=on_log, time_fn=time_fn
+    )
+    if reason is None:
+        verdict = judge(value) if judge is not None else None
+        return LinkProbe(label, "ok", elapsed, "work", value, used.model,
+                         negotiated_level(used), None, verdict)
+
+    left = allowance - (time_fn() - started)
+    if (exc is not None and _timed_out(exc)) or left < DIAGNOSTIC_MIN_PING_SECONDS:
+        return LinkProbe(label, reason, elapsed, "work", None, used.model,
+                         None, reason, None)
+
+    _none, ping_exc = _ping_once(used, api_key, min(probe_timeout(link), left),
+                                 on_log=on_log, client_factory=client_factory)
+    total = time_fn() - started
+    ping_reason = "ok" if ping_exc is None else f"{type(ping_exc).__name__}: {ping_exc}"
+    return LinkProbe(label, ping_reason, total, "ping", None, used.model,
+                     None, reason, None)
 
 
 def preflight_message(results):
     """The one-line-per-link explanation for a chain where nothing answered."""
     lines = []
-    for label, reason, elapsed, kind in results:
+    for label, reason, elapsed, kind in (r[:4] for r in results):
         when = f" after {elapsed:.0f}s" if elapsed is not None else ""
         how = " (real analysis request)" if kind == "work" else ""
         lines.append(f"  {label}: {reason}{when}{how}")

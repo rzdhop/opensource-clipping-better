@@ -273,6 +273,35 @@ def work_probe_timeout(link) -> float:
     return min(effective_timeout(link), 2.0 * probe_timeout(link))
 
 
+# Settings -> Test provider chain (DEC-078). Each keyed link is asked the real
+# pass-A request on a small fixture, and may take as long as the preflight's
+# own work probe: a real request is what is being measured, and NVIDIA's floor
+# took 93-193s for it on 2026-09-24. Providers run at once and links on one
+# provider one after another, so the route waits for the slowest provider's
+# SUM, plus this much for the HTTP round trip and the response.
+DIAGNOSTIC_SLACK_SECONDS = 10.0
+
+
+def diagnostic_timeout(link) -> float:
+    """How long the diagnostic may spend on *link*: its work probe's cap.
+
+    A ping after a failed request runs only inside what is left of this, so the
+    allowance is the link's whole cost.
+    """
+    return work_probe_timeout(link)
+
+
+def diagnostic_budget(links, keys) -> float:
+    """The longest the diagnostic can take for *links*, given *keys*."""
+    per_provider = {}
+    for link in links:
+        if (keys or {}).get(link.provider):
+            per_provider[link.provider] = (
+                per_provider.get(link.provider, 0.0) + diagnostic_timeout(link)
+            )
+    return max(per_provider.values(), default=0.0) + DIAGNOSTIC_SLACK_SECONDS
+
+
 def is_primary(link) -> bool:
     """Whether *link*'s provider can carry the analysis on its own (DEC-073)."""
     return bool(PROVIDERS[link.provider].primary)
@@ -402,3 +431,19 @@ DEFAULT_LLM_CHAIN = (
 def chain_from_env(default: str = DEFAULT_LLM_CHAIN) -> list:
     """The chain named by ``LLM_CHAIN``, or the shipped default."""
     return parse_chain(os.environ.get("LLM_CHAIN", "").strip() or default)
+
+
+def default_model(provider):
+    """The model the shipped chain uses on *provider*, or None."""
+    return {
+        "groq": GROQ_DEFAULT_MODEL,
+        "gemini": GEMINI_DEFAULT_MODEL,
+        "openrouter": OPENROUTER_DEFAULT_MODEL,
+        "mistral": MISTRAL_DEFAULT_MODEL,
+        "nvidia": NVIDIA_DEFAULT_MODEL,
+    }.get(provider)
+
+
+def suggested_link(provider):
+    """What to add to LLM_CHAIN to put *provider*'s key to work."""
+    return f"{provider}/{default_model(provider) or '<model>'}"

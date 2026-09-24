@@ -196,28 +196,31 @@ _CHAIN_TEST_CEILING_SECONDS = 300.0
 
 
 def _probe_every_link(links, keys):
-    """The blocking half: ping every keyed link, not just up to the first."""
+    """The blocking half: ask every keyed link the real request (DEC-078)."""
+    from clipping.analysis import diagnostic
     from clipping.providers import llm
 
-    return llm.probe_chain(
-        links, keys, work=None, stop_at_first=False, on_log=lambda *_: None
+    return llm.diagnose_chain(
+        links, keys, diagnostic.diagnostic_work(),
+        judge=diagnostic.judge, on_log=lambda *_: None,
     )
 
 
 @router.post("/api/settings/test-chain")
 async def run_chain_test(req: ChainTestRequest) -> ChainTestResponse:
-    """Ping every link of a chain and report each one (DEC-074).
+    """Ask every keyed link of a chain the real analysis request (DEC-078).
 
     The only way to learn a link was dead used to be starting a job and
-    waiting. This reuses ``llm.probe_chain`` -- the preflight's own primitive --
-    but not ``preflight_chain``, which honours ``--no-preflight``, defers to the
-    key gate and seeds the scan cache; none of that belongs in a diagnostic.
+    waiting; then this route sent a one-word ping, which on 2026-09-24 called a
+    chain ready whose only working link was the NVIDIA floor. It now sends each
+    keyed link the scan's own request on a 14-beat test transcript with one
+    clip in it, and says what each found. The job gate itself is unchanged and
+    stays key-based (DEC-073); ``verdict`` is this route's own finding.
 
-    The probe is synchronous and can take minutes (NVIDIA's ping allowance is
-    120s), so it runs in the default thread pool -- NOT the worker's executor,
-    which is sized to MAX_CONCURRENT_JOBS and would let a click stall a queued
-    job. ``wait_for`` cancels the await, not the thread: on timeout the probe
-    finishes in the background and its result is dropped. Each SDK client
+    It runs in the default thread pool -- NOT the worker's executor, which is
+    sized to MAX_CONCURRENT_JOBS and would let a click stall a queued job.
+    ``wait_for`` cancels the await, not the thread: on timeout the requests
+    finish in the background and their results are dropped. Each SDK client
     carries its own timeout, so that thread always ends.
     """
     from clipping.config import WEB_SLOW_CHAIN_HINT, chain_readiness
@@ -235,13 +238,11 @@ async def run_chain_test(req: ChainTestRequest) -> ChainTestResponse:
         raise HTTPException(
             status_code=409, detail="A chain test is already running.")
 
-    budget = sum(
-        registry.probe_timeout(link) for link in links if keys.get(link.provider)
-    ) + 10.0
+    budget = registry.diagnostic_budget(links, keys)
     started = time.monotonic()
     async with _CHAIN_TEST_LOCK:
         try:
-            live, results, _ = await asyncio.wait_for(
+            results = await asyncio.wait_for(
                 asyncio.to_thread(_probe_every_link, links, keys),
                 timeout=min(budget, _CHAIN_TEST_CEILING_SECONDS),
             )
@@ -250,48 +251,170 @@ async def run_chain_test(req: ChainTestRequest) -> ChainTestResponse:
                 status_code=504,
                 detail=(
                     f"The chain test gave up after {time.monotonic() - started:.0f}s. "
-                    "At least one link is holding requests far past its probe "
-                    "timeout."
+                    "At least one provider is holding requests far past its "
+                    "allowance."
                 ),
             )
         except registry.ChainError as exc:
             # e.g. custom/<model> with no LLM_CUSTOM_BASE_URL
             raise HTTPException(status_code=400, detail=str(exc))
 
-    rows = []
-    for link, (label, reason, elapsed, kind) in zip(links, results):
-        provider = registry.PROVIDERS[link.provider]
-        status = "no_key" if kind == "skipped" else ("ok" if reason == "ok" else "failed")
-        rows.append(ChainLinkResult(
-            label=label,
-            provider=link.provider,
-            model=link.model,
-            status=status,
-            latency_seconds=None if elapsed is None else round(elapsed, 2),
-            reason=None if status == "ok" else reason,
-            probe_timeout_seconds=registry.probe_timeout(link),
-            primary=provider.primary,
-            env_key=provider.env_key,
-            signup_url=provider.signup_url,
-        ))
+    busy = job_store.get_running_count() > 0
+    rows = [
+        _link_row(registry, link, probe, busy)
+        for link, probe in zip(links, results)
+    ]
 
+    # Keys that are set for a provider the chain does not name. Never
+    # contacted (DEC-023): the row says how to put the key to work instead.
+    named = {link.provider for link in links}
+    for name in registry.PROVIDERS:
+        if keys.get(name) and name not in named:
+            provider = registry.PROVIDERS[name]
+            suggestion = registry.suggested_link(name)
+            rows.append(ChainLinkResult(
+                label=suggestion,
+                provider=name,
+                model=registry.default_model(name) or "",
+                status="unused",
+                probe_timeout_seconds=provider.probe_timeout,
+                primary=provider.primary,
+                env_key=provider.env_key,
+                signup_url=provider.signup_url,
+                note=(
+                    f"{provider.env_key} is set, but this chain does not name "
+                    f"{name}, so nothing uses it. Add {suggestion} to LLM_CHAIN "
+                    f"to use it."
+                ),
+            ))
+
+    allow_slow = env_flag(env, "ALLOW_SLOW_CHAIN")
     readiness = chain_readiness(
-        links, keys,
-        allow_slow=env_flag(env, "ALLOW_SLOW_CHAIN"),
-        hint=WEB_SLOW_CHAIN_HINT,
+        links, keys, allow_slow=allow_slow, hint=WEB_SLOW_CHAIN_HINT,
     )
-    if live is None:
-        message = llm.preflight_message(results)
+    completed = [
+        (link, probe) for link, probe in zip(links, results)
+        if probe.kind == "work" and probe.reason == "ok"
+    ]
+    live_link = (
+        f"{completed[0][0].provider}/{completed[0][1].used_model}"
+        if completed else None
+    )
+
+    if not any(keys.get(link.provider) for link in links):
+        verdict = "dead"
+        wanted = [
+            registry.PROVIDERS[link.provider] for link in links
+            if registry.is_primary(link)
+        ] or [registry.PROVIDERS[link.provider] for link in links]
+        message = (
+            "No link in this chain has an API key, so a job cannot run. Set "
+            "one of: "
+            + ", ".join(f"{p.env_key} ({p.signup_url or 'your own endpoint'})"
+                        for p in dict.fromkeys(wanted))
+            + "."
+        )
     elif not readiness.ready:
+        verdict = "blocked"
         message = readiness.message
-    else:
+    elif not completed:
+        verdict = "dead"
+        alive = [probe.label for probe in results if probe.kind == "ping"
+                 and probe.reason == "ok"]
+        if alive:
+            message = (
+                "No link completed the real analysis request, so a job's "
+                "analysis would fail. " + ", ".join(alive) + " answered a plain "
+                "ping, so the key works but the model could not do the job; "
+                "each row says why."
+            )
+        else:
+            message = llm.preflight_message(results)
+    elif (
+        allow_slow
+        or any(registry.is_primary(link) for link, _ in completed)
+        or not any(registry.is_primary(link) for link in links)
+    ):
+        verdict = "ready"
         message = ""
+    else:
+        verdict = "floor_only"
+        failed = [
+            registry.describe(link) for link, probe in zip(links, results)
+            if registry.is_primary(link) and keys.get(link.provider)
+            and not (probe.kind == "work" and probe.reason == "ok")
+        ]
+        floor = ", ".join(registry.describe(link) for link, _ in completed)
+        message = (
+            f"Only the chain's floor completed the real analysis request. "
+            f"{', '.join(failed)} did not (see its row), so a job would run on "
+            f"{floor} alone: about 12 tokens/s behind a queue, and it may not "
+            f"finish inside the time budget. Fix that link or set another key."
+        )
 
     return ChainTestResponse(
         chain=",".join(registry.describe(link) for link in links),
-        ready=live is not None and readiness.ready,
-        live_link=None if live is None else registry.describe(live),
+        verdict=verdict,
+        ready=verdict == "ready",
+        live_link=live_link,
         results=rows,
         elapsed_seconds=round(time.monotonic() - started, 2),
         message=message,
+    )
+
+
+def _link_row(registry, link, probe, busy):
+    """One chain link's ``ChainLinkResult`` from its ``llm.LinkProbe``."""
+    provider = registry.PROVIDERS[link.provider]
+    judgement = probe.judgement
+    if probe.kind == "skipped":
+        status = "no_key"
+    elif probe.reason == "ok":
+        status = "ok" if probe.kind == "work" else "alive"
+    else:
+        status = "failed"
+
+    notes = []
+    if probe.used_model and probe.used_model != link.model:
+        notes.append(
+            f"{link.model} is not available on this key; {probe.used_model} "
+            f"answered instead, and jobs will use it too."
+        )
+    if status == "ok" and judgement is not None and judgement.note:
+        notes.append(judgement.note)
+    if status == "alive":
+        notes.append(
+            "The key works, but the model could not complete the real "
+            "analysis request."
+        )
+    if busy and link.provider == "nvidia" and status != "no_key":
+        notes.append(
+            "A job is running. NVIDIA answers one request at a time per key, "
+            "so this one may have waited behind it."
+        )
+
+    if status == "ok":
+        reason = None
+    elif status == "alive":
+        reason = probe.work_error
+    else:
+        reason = probe.reason
+    return ChainLinkResult(
+        label=probe.label,
+        provider=link.provider,
+        model=link.model,
+        status=status,
+        latency_seconds=None if probe.elapsed is None else round(probe.elapsed, 2),
+        reason=reason,
+        probe_timeout_seconds=registry.probe_timeout(link),
+        work_timeout_seconds=registry.diagnostic_timeout(link),
+        primary=provider.primary,
+        env_key=provider.env_key,
+        signup_url=provider.signup_url,
+        kind=None if probe.kind == "skipped" else probe.kind,
+        candidates=None if judgement is None else judgement.candidates,
+        found_moment=None if judgement is None else judgement.found_moment,
+        level=probe.level,
+        used_model=probe.used_model,
+        note=" ".join(notes),
     )

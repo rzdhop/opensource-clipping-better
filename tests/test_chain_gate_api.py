@@ -207,9 +207,34 @@ def test_a_rerun_that_asks_for_a_fresh_analysis_is_gated(
 
 # ------------------------------------ POST /api/settings/test-chain (Stage 6)
 
+# The route now sends the real pass-A request (DEC-078), so the fake answers it
+# the way a good model does: the fixture's one clip, beats 4-9. A ping ignores
+# the content.
+_FOUND = (
+    '{"candidates": [{"b0": 4, "b1": 9, "score": 85, '
+    '"gist": "ships on a Friday", "kind": "story"}]}'
+)
+
+
 class _Reply:
-    choices = [type("C", (), {"message": type("M", (), {"content": "ok"})()})()]
+    choices = [type("C", (), {"message": type("M", (), {"content": _FOUND})()})()]
     usage = None
+
+
+def _gone():
+    err = type("NotFoundError", (Exception,), {})(
+        "Error code: 404 - This model is no longer available to new users.")
+    err.status_code = 404
+    return err
+
+
+def registry_default(provider):
+    from clipping.providers import registry
+
+    return {
+        "openrouter": registry.OPENROUTER_DEFAULT_MODEL,
+        "gemini": registry.GEMINI_DEFAULT_MODEL,
+    }[provider]
 
 
 @pytest.fixture
@@ -253,7 +278,73 @@ def test_every_link_is_reported_not_just_the_first(client, settings_env, fake_pr
     assert body["results"][-1]["probe_timeout_seconds"] == 120.0
     assert body["live_link"].startswith("groq/")
     assert body["ready"] is True
-    assert fake_providers.contacted == ["groq", "nvidia"]
+    # Providers are asked at the same time now, so order is asserted on the
+    # results above, and here only who was asked.
+    assert sorted(fake_providers.contacted) == ["groq", "nvidia"]
+
+
+def test_a_primary_that_fails_the_work_is_not_ready_even_when_the_floor_answers(
+        client, settings_env, fake_providers):
+    """The report the human got on 2026-09-24: Gemini 404, NVIDIA answered,
+    and the summary said "Jobs can start". A job would have run on the floor
+    alone. The key gate cannot see this; only the real request can."""
+    fake_providers.behaviour["gemini"] = _gone()
+    settings_env.set_settings_env({"GOOGLE_API_KEY": "g", "NVIDIA_API_KEY": "n"},
+                                  persist=False)
+
+    body = client.post("/api/settings/test-chain", json={}).json()
+
+    assert body["verdict"] == "floor_only"
+    assert body["ready"] is False
+    assert body["live_link"].startswith("nvidia/")
+    gemini = next(r for r in body["results"] if r["provider"] == "gemini")
+    assert gemini["status"] == "failed"
+    assert "gemini" in body["message"]
+
+
+def test_every_row_says_what_the_real_request_found(
+        client, settings_env, fake_providers):
+    settings_env.set_settings_env({"GOOGLE_API_KEY": "g"}, persist=False)
+    body = client.post("/api/settings/test-chain", json={}).json()
+
+    gemini = next(r for r in body["results"] if r["provider"] == "gemini")
+    assert gemini["status"] == "ok"
+    assert gemini["kind"] == "work"
+    assert gemini["candidates"] == 1
+    assert gemini["found_moment"] is True
+    assert gemini["used_model"] == gemini["model"]
+    assert body["verdict"] == "ready" and body["ready"] is True
+
+
+def test_a_key_outside_the_chain_is_reported_unused_and_never_contacted(
+        client, settings_env, fake_providers):
+    """DEC-023: a provider the chain does not name is never contacted -- not
+    even by a diagnostic. The row says how to put the key to work instead."""
+    settings_env.set_settings_env(
+        {"GOOGLE_API_KEY": "g", "OPENROUTER_API_KEY": "o"}, persist=False)
+
+    body = client.post("/api/settings/test-chain",
+                       json={"llm_chain": "gemini/some-model"}).json()
+
+    assert fake_providers.contacted == ["gemini"]
+    unused = [r for r in body["results"] if r["status"] == "unused"]
+    assert [r["provider"] for r in unused] == ["openrouter"]
+    assert f"openrouter/{registry_default('openrouter')}" in unused[0]["note"]
+
+
+def test_a_chain_with_no_key_at_all_says_so(client, settings_env, fake_providers):
+    settings_env.set_settings_env({}, persist=False)
+    body = client.post("/api/settings/test-chain", json={}).json()
+    assert body["verdict"] == "dead" and body["ready"] is False
+    assert fake_providers.contacted == []
+    assert "GOOGLE_API_KEY" in body["message"]
+
+
+def test_the_route_budget_is_the_registrys():
+    text = (API / "routes" / "settings.py").read_text(encoding="utf-8")
+    body = text[text.index("async def run_chain_test("):]
+    assert "registry.diagnostic_budget(" in body
+    assert "probe_timeout(link) for link in links" not in body
 
 
 def test_a_live_floor_alone_is_not_ready_and_says_why(

@@ -405,28 +405,51 @@ class ChainTestRequest(BaseModel):
 
 
 class ChainLinkResult(BaseModel):
-    """One link's answer to the liveness ping."""
+    """One link's answer to the real analysis request (DEC-078).
+
+    ``status``: ``ok`` completed the real request; ``alive`` failed it but
+    answered a ping (reachable, cannot do the job); ``failed`` neither;
+    ``no_key`` skipped; ``unused`` a key that is set for a provider the chain
+    does not name -- never contacted (DEC-023).
+    """
     label: str
     provider: str
     model: str
-    status: Literal["ok", "no_key", "failed"]
+    status: Literal["ok", "alive", "failed", "no_key", "unused"]
     latency_seconds: Optional[float] = None
     reason: Optional[str] = None
     probe_timeout_seconds: float
+    # How long the real request was allowed (registry.diagnostic_timeout).
+    work_timeout_seconds: Optional[float] = None
     primary: bool
     env_key: str
     signup_url: str = ""
+    # Which question the row's status answers.
+    kind: Optional[Literal["work", "ping"]] = None
+    # What the real request found in the test transcript.
+    candidates: Optional[int] = None
+    found_moment: Optional[bool] = None
+    # The structured-output rung that worked, and the model that answered --
+    # not the link's own when a retired model was swapped (DEC-077).
+    level: Optional[str] = None
+    used_model: Optional[str] = None
+    # One sentence for a person, or "".
+    note: str = ""
 
 
 class ChainTestResponse(BaseModel):
-    """Every link in the chain, pinged -- not just up to the first that answers."""
+    """Every keyed link, asked the real request -- not just up to the first."""
     chain: str
-    # Something answered AND a job on this chain would be allowed to start.
+    # ready: a primary link completed the real request and a job may start.
+    # floor_only: only the slow floor did. blocked: the key gate would refuse
+    # the job (DEC-073). dead: nothing completed it.
+    verdict: Literal["ready", "floor_only", "blocked", "dead"] = "dead"
+    # verdict == "ready".
     ready: bool
     live_link: Optional[str] = None
     results: list[ChainLinkResult]
     elapsed_seconds: float
-    # Why it is not ready, when it is not: the same text a job would fail with.
+    # Why it is not ready, when it is not.
     message: str = ""
 
 
