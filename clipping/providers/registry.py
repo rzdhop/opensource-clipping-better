@@ -7,7 +7,7 @@ structured-output schema.
 
 A *chain* is an ordered, explicitly configured list of links:
 
-    LLM_CHAIN=groq/openai/gpt-oss-120b,gemini/gemini-2.5-flash-lite,nvidia/...
+    LLM_CHAIN=groq/openai/gpt-oss-120b,gemini/gemini-3.5-flash-lite,nvidia/...
 
 This is not the silent cross-provider fallback DEC-003 forbade. That one caught
 a bare Exception and billed a user on Gemini when they had chosen NVIDIA, with
@@ -316,6 +316,31 @@ def describe(link) -> str:
 # fall through to. A chain with one key is a chain of one.
 NVIDIA_DEFAULT_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b"
 
+# Gemini's default, in one place for the same reason as the NIM one.
+#
+# gemini-2.5-flash-lite was the default until 2026-09-24, when Google closed it
+# to new accounts: `404 This model models/gemini-2.5-flash-lite is no longer
+# available to new users`. It kept working for old keys, so nothing on an
+# existing setup noticed -- every NEW user's Gemini link failed, the chain fell
+# through to NVIDIA, and the job crawled or died there.
+#
+# Measured 2026-09-24 with tools/bench_llm.py on the real pass-A request:
+#
+#   gemini-3.5-flash-lite      test transcript 3/3 found the clip, 0.9-4.4s;
+#                              3 real windows x2: 1.1-2.0s, 1-3 candidates  <-
+#   gemini-flash-lite-latest   same quality, 1.0-1.7s -- but an ALIAS: its model
+#                              changes under us without a benchmark
+#   gemini-3.5-flash           503 "high demand" on all three samples
+#
+# No truncation, json_schema accepted, no thinking switch needed (72-200 output
+# tokens against a 700 cap).
+GEMINI_DEFAULT_MODEL = "gemini-3.5-flash-lite"
+
+# Groq's default. NOT benchmarked on this project: no Groq key has been
+# available to measure it with. It is kept because it is Groq's own flagship
+# open model and the chain reports it the moment it fails.
+GROQ_DEFAULT_MODEL = "openai/gpt-oss-120b"
+
 # The shipped default. Groq first because it is by far the fastest free tier;
 # Gemini second because its daily request budget is the largest; NVIDIA last
 # because it has no published daily cap, so it is the floor that still answers
@@ -324,8 +349,8 @@ NVIDIA_DEFAULT_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b"
 # parse_spec splits on the FIRST slash only, which is what lets the NIM link
 # carry a model id that itself contains one.
 DEFAULT_LLM_CHAIN = (
-    "groq/openai/gpt-oss-120b,"
-    "gemini/gemini-2.5-flash-lite,"
+    f"groq/{GROQ_DEFAULT_MODEL},"
+    f"gemini/{GEMINI_DEFAULT_MODEL},"
     f"nvidia/{NVIDIA_DEFAULT_MODEL}"
 )
 

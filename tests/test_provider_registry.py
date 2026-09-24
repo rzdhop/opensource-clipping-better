@@ -147,8 +147,11 @@ _FORMER_COPIES = (
 
 # Every NIM model id this project has ever shipped or benchmarked. A new literal
 # in any of the files above will almost certainly match one of these families.
+# ``flash-lite`` joined 2026-09-24, when the Gemini default was retired for
+# new accounts; ``gemini-`` alone would also hit config.py's voice-over pins,
+# which are a different feature on purpose.
 _MODEL_LITERAL = re.compile(
-    r'["\'][^"\']*(deepseek|gemma|nemotron|gpt-oss|glm-|kimi)[^"\']*["\']'
+    r'["\'][^"\']*(deepseek|gemma|nemotron|gpt-oss|glm-|kimi|flash-lite)[^"\']*["\']'
 )
 
 
@@ -157,6 +160,64 @@ def test_the_nim_default_is_defined_once_and_the_chain_is_built_from_it():
     assert f"nvidia/{registry.NVIDIA_DEFAULT_MODEL}" in registry.DEFAULT_LLM_CHAIN
     link = registry.parse_chain(registry.DEFAULT_LLM_CHAIN)[-1]
     assert link == Link("nvidia", registry.NVIDIA_DEFAULT_MODEL)
+
+
+def test_the_gemini_default_is_defined_once_and_the_chain_is_built_from_it():
+    """The same rule as the NIM default, for the same reason.
+
+    Gemini's default was an inline literal inside ``DEFAULT_LLM_CHAIN`` until
+    2026-09-24, when Google closed ``gemini-2.5-flash-lite`` to new accounts
+    and every new user's Gemini link answered 404.
+    """
+    by_provider = {
+        link.provider: link.model
+        for link in registry.parse_chain(registry.DEFAULT_LLM_CHAIN)
+    }
+    assert by_provider["gemini"] == registry.GEMINI_DEFAULT_MODEL
+    assert by_provider["groq"] == registry.GROQ_DEFAULT_MODEL
+    assert by_provider["nvidia"] == registry.NVIDIA_DEFAULT_MODEL
+
+
+def test_the_default_chain_is_assembled_from_the_constants_not_retyped():
+    source = (PROJECT_ROOT / "clipping" / "providers" / "registry.py").read_text(
+        encoding="utf-8"
+    )
+    start = source.index("DEFAULT_LLM_CHAIN = (")
+    block = source[start : source.index(")", start)]
+    literal = re.compile(r'"[a-z]+/[^"{]+"')
+    assert not literal.search(block), (
+        "DEFAULT_LLM_CHAIN must be built from the *_DEFAULT_MODEL constants:\n"
+        + block
+    )
+
+
+# Models measured dead or useless for a NEW account. Each says when and how,
+# so the next person to reach for one of them knows why not.
+_MEASURED_RETIRED = {
+    ("gemini", "gemini-2.5-flash-lite"):
+        "404 'no longer available to new users', 2026-09-24",
+    ("nvidia", "google/gemma-4-31b-it"):
+        "no reply in 120s to an 8-token request, 2026-09-21",
+    ("nvidia", "deepseek-ai/deepseek-v4-flash-0731"):
+        "stopped answering between 2026-09-19 and 2026-09-21",
+    ("nvidia", "deepseek-ai/deepseek-v4-pro"):
+        "stopped answering 2026-08-07",
+    ("nvidia", "deepseek-ai/deepseek-v4.1-flash"):
+        "{'candidates': []} on every real transcript, 2026-09-22 (DEC-058)",
+}
+
+
+def test_no_default_link_names_a_model_measured_retired():
+    for link in registry.parse_chain(registry.DEFAULT_LLM_CHAIN):
+        why = _MEASURED_RETIRED.get((link.provider, link.model))
+        assert why is None, f"{registry.describe(link)} is measured dead: {why}"
+
+
+def test_env_example_documents_the_shipped_default_chain():
+    """.env.example tells a user what an empty LLM_CHAIN means. It is the
+    human-facing copy, so this test keeps it honest rather than trusting it."""
+    text = (PROJECT_ROOT / ".env.example").read_text(encoding="utf-8")
+    assert registry.DEFAULT_LLM_CHAIN in text
 
 
 def test_no_former_copy_grew_a_model_literal_back():
