@@ -364,8 +364,9 @@ function Settings() {
             </button>
             {testing && testElapsed >= 20 && (
               <p className="form-hint" style={{ marginTop: '8px' }}>
-                Still waiting. NVIDIA's free tier queues requests and is allowed
-                up to 240s for the real request.
+                Still waiting. Each link may take as long as a job would wait
+                for it (up to 180s on the fast tiers, 280s on NVIDIA, whose
+                free tier queues). Most answer in seconds.
               </p>
             )}
             {testError && (

@@ -268,12 +268,22 @@ def test_the_providers_layer_does_not_import_the_analysis_layer():
 
 # ------------------------------------------------------------------ budget
 
-def test_the_diagnostic_allowance_is_the_work_probes():
+def test_the_diagnostic_waits_as_long_as_a_job_request_would():
+    """A timeout here must mean what it means in a job. The first design used
+    the preflight's 90s work cap, and on 2026-09-24 Gemini's free tier took
+    100.8s to answer a real window that a job, allowed 180s, got back fine."""
     for name in registry.PROVIDERS:
-        link = Link(name, "m")
         if name == "custom":
             continue
-        assert registry.diagnostic_timeout(link) == registry.work_probe_timeout(link)
+        link = Link(name, "m")
+        assert registry.diagnostic_timeout(link) == min(
+            registry.effective_timeout(link), registry.DIAGNOSTIC_LINK_CAP_SECONDS)
+
+
+def test_the_diagnostic_outwaits_the_slowest_healthy_answers_measured():
+    """Measured 2026-09-24 on real requests that then succeeded."""
+    assert registry.diagnostic_timeout(Link("gemini", "m")) > 100.8
+    assert registry.diagnostic_timeout(Link("nvidia", "m")) > 193.0
 
 
 def test_the_budget_covers_the_slowest_provider_and_fits_the_ceiling():

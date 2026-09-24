@@ -273,22 +273,29 @@ def work_probe_timeout(link) -> float:
     return min(effective_timeout(link), 2.0 * probe_timeout(link))
 
 
-# Settings -> Test provider chain (DEC-078). Each keyed link is asked the real
-# pass-A request on a small fixture, and may take as long as the preflight's
-# own work probe: a real request is what is being measured, and NVIDIA's floor
-# took 93-193s for it on 2026-09-24. Providers run at once and links on one
-# provider one after another, so the route waits for the slowest provider's
-# SUM, plus this much for the HTTP round trip and the response.
+# Settings -> Test provider chain (DEC-078, DEC-079). Each keyed link is asked
+# the real pass-A request on a small fixture, and may take as long as a JOB's
+# own request to it would -- so a timeout here means what it means in a job.
+# Measured 2026-09-24 on requests that then succeeded: Gemini's free tier took
+# 1.1s to 100.8s for the same kind of window (queueing, not thinking: 76-195
+# output tokens and no reasoning tokens), NVIDIA's floor 93-193s. The
+# preflight's 90s work cap would have called that Gemini dead.
+#
+# Providers run at once and links on one provider one after another, so the
+# route waits for the slowest provider's SUM, plus DIAGNOSTIC_SLACK_SECONDS for
+# the round trip. The per-link cap keeps the default chain inside the route's
+# 300s ceiling: NVIDIA's 330s request timeout becomes 280s here.
 DIAGNOSTIC_SLACK_SECONDS = 10.0
+DIAGNOSTIC_LINK_CAP_SECONDS = 280.0
 
 
 def diagnostic_timeout(link) -> float:
-    """How long the diagnostic may spend on *link*: its work probe's cap.
+    """How long the diagnostic may spend on *link*: a job request's timeout, capped.
 
     A ping after a failed request runs only inside what is left of this, so the
     allowance is the link's whole cost.
     """
-    return work_probe_timeout(link)
+    return min(effective_timeout(link), DIAGNOSTIC_LINK_CAP_SECONDS)
 
 
 def diagnostic_budget(links, keys) -> float:

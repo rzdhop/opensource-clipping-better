@@ -126,14 +126,14 @@ Each result has a `status`:
 | `no_key` | Skipped; `env_key` and `signup_url` say what to set. |
 | `unused` | A key is set for a provider this chain does not name. Never contacted; `note` names the link to add. |
 
-Rows also carry `latency_seconds`, `work_timeout_seconds` (90s for the fast
-tiers, 240s for NVIDIA), `level` (the structured-output mode that worked),
+Rows also carry `latency_seconds`, `work_timeout_seconds` (as long as a job
+would wait for that provider: 120-180s for the fast tiers, 280s for NVIDIA), `level` (the structured-output mode that worked),
 `used_model` (differs from `model` when a retired model was swapped for the
 provider's fallback) and a `note`. `verdict` is `ready` (a fast link completed
 it), `floor_only` (only NVIDIA did), `blocked` (a job would be refused, see
 above) or `dead` (nothing did); `ready` is `verdict == "ready"` and `message`
-explains the others. The whole test waits for the slowest provider, about
-250s at most for the default chain. Send `{"llm_chain": "..."}` to test a
+explains the others. The whole test waits for the slowest provider, 290s at
+most for the default chain; a healthy one answers in seconds. Send `{"llm_chain": "..."}` to test a
 different chain. The request never carries a base URL: `custom/...` uses
 `LLM_CUSTOM_BASE_URL` from the server's environment. A second test while one is
 running gets `409`, and a test that outlives its budget gets `504`.
