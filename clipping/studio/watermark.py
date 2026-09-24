@@ -435,8 +435,26 @@ def create_watermark_renderer(cfg):
     return None
 
 
-# Module-level cached renderer instance per cfg identity
+# Renderers, keyed by everything a renderer is built from. Not by id(cfg): this
+# module is loaded once per process, and an id is reused once its object is
+# freed, so a later job's cfg could be handed an earlier job's watermark.
 _renderer_cache = {}
+_RENDERER_CACHE_LIMIT = 32
+_RENDERER_SETTINGS = (
+    "watermark_text", "watermark_image", "watermark_opacity",
+    "watermark_position", "watermark_padding", "watermark_font_size",
+    "watermark_scale", "base_dir", "font_dir",
+)
+
+
+def _renderer_key(cfg):
+    key = tuple(getattr(cfg, name, None) for name in _RENDERER_SETTINGS)
+    image = getattr(cfg, "watermark_image", None)
+    if image and os.path.isfile(image):
+        # A file replaced under the same name must not keep its old pixels.
+        stat = os.stat(image)
+        key += (stat.st_mtime_ns, stat.st_size)
+    return key
 
 
 def apply_watermark(frame, cfg):
@@ -454,12 +472,13 @@ def apply_watermark(frame, cfg):
     if not getattr(cfg, "watermark_enabled", False):
         return frame
 
-    # Cache renderer per cfg object identity
-    cfg_id = id(cfg)
-    if cfg_id not in _renderer_cache:
-        _renderer_cache[cfg_id] = create_watermark_renderer(cfg)
+    key = _renderer_key(cfg)
+    if key not in _renderer_cache:
+        if len(_renderer_cache) >= _RENDERER_CACHE_LIMIT:
+            _renderer_cache.clear()
+        _renderer_cache[key] = create_watermark_renderer(cfg)
 
-    renderer = _renderer_cache[cfg_id]
+    renderer = _renderer_cache[key]
     if renderer is None:
         return frame
 

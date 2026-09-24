@@ -82,7 +82,7 @@ def negotiated_level(link):
 
 # ------------------------------------------------------------ model swaps
 #
-# DEC-077. When a provider answers "this MODEL is not available" -- Google's
+# DEC-089. When a provider answers "this MODEL is not available" -- Google's
 # 404 "no longer available to new users" on 2026-09-24 is the case that
 # prompted it -- the key and the provider are fine and only the model is not.
 # A provider that names ``fallback_models`` in the registry then gets its next
@@ -290,16 +290,22 @@ class LlmClient:
         schema_name="result",
         max_tokens=1024,
         temperature=0.2,
+        cancel=None,
     ):
         """One request, returning parsed JSON. Raises on failure.
 
         Walks the negotiation ladder internally: a provider that rejects the
         schema is immediately re-asked without it, which is a different thing
         from a retry and so does not consume one.
+
+        *cancel* (a ``clipping.cancel.CancelToken``) is checked before every
+        request, the schema re-ask included.
         """
         level = _initial_level(self.link, self.provider, schema)
 
         while True:
+            if cancel is not None:
+                cancel.check()
             body = self._body(
                 system=system,
                 user=user,
@@ -312,6 +318,8 @@ class LlmClient:
 
             est = pacing.estimate_tokens(system, user) + max_tokens
             self.limiter.acquire(est)
+            if cancel is not None:
+                cancel.check()  # the limiter may just have slept
 
             try:
                 response = self.client.chat.completions.create(**body)
@@ -370,6 +378,7 @@ def run_chain(
     sleep_fn=time.sleep,
     deadline=None,
     time_fn=time.monotonic,
+    cancel=None,
 ):
     """Try each link in order; return ``(value, link)`` from the first that works.
 
@@ -381,11 +390,19 @@ def run_chain(
     *keys* maps provider name -> API key; a link with no key is skipped with a
     printed line rather than raising, so a partially-configured chain degrades
     to the providers that are actually set up.
+
+    *cancel* stops the chain before its next link, attempt or backoff. It is
+    raised, never recorded as a link failure: ``Cancelled`` is not an
+    ``Exception``, so the per-link handler below cannot catch it.
     """
     keys = keys or {}
     failures = []
+    if cancel is not None:
+        sleep_fn = cancel.sleeper(sleep_fn)
 
     for link in chain:
+        if cancel is not None:
+            cancel.check()
         label = describe(link)
         key = keys.get(link.provider) or ""
         if not key:
@@ -425,6 +442,7 @@ def run_chain(
                 sleep_fn=sleep_fn,
                 deadline=deadline,
                 time_fn=time_fn,
+                cancel=cancel,
             )
         except Exception as exc:  # noqa: BLE001 - recorded, then the next link
             reason = f"{type(exc).__name__}: {exc}"
@@ -433,7 +451,7 @@ def run_chain(
             continue
 
         # The link that answered: the configured one, or the same provider's
-        # fallback model when the configured one was not available (DEC-077).
+        # fallback model when the configured one was not available (DEC-089).
         return value, answered
 
     detail = "\n".join(f"  {label}: {reason}" for label, reason in failures)
@@ -449,7 +467,7 @@ def _run_link(link, *, api_key, on_log, **ladder):
     For a provider with no ``fallback_models`` this is exactly ``_run_model``:
     one model, its retry ladder, its deadline checks. Otherwise a model the
     provider says is not available is followed by the next of its models, on
-    the same key, with a printed line (DEC-077) -- and ONLY that error does so.
+    the same key, with a printed line (DEC-089) -- and ONLY that error does so.
 
     A swap costs no extra attempts: a dead model fails on its first, and the
     next model gets the link's ladder under the same deadline checks. Any other
@@ -499,6 +517,7 @@ def _run_model(
     sleep_fn,
     deadline,
     time_fn,
+    cancel=None,
 ):
     """Run one model's retry ladder. Raises if it is exhausted or fails fatally."""
     client = LlmClient(
@@ -513,6 +532,10 @@ def _run_model(
     last_exc = None
 
     while attempt < MAX_ATTEMPTS:
+        # A cancel is checked before anything is announced, for the same reason
+        # as the budget check below: an announced attempt reads as a retry.
+        if cancel is not None:
+            cancel.check()
         # Before the attempt is announced, not after: web/api/signals.py turns
         # every `attempt N/M` line into a retry the dashboard shows, so counting
         # an attempt that was never made would report a retry that never
@@ -547,6 +570,7 @@ def _run_model(
                 # Cool off each retry: the first sample failed, so a less
                 # adventurous one is more likely to parse.
                 temperature=max(0.0, temperature - 0.1 * (attempt - 1)),
+                cancel=cancel,
             )
         except Exception as exc:  # noqa: BLE001 - classified immediately below
             last_exc = exc
@@ -625,7 +649,7 @@ PROBE_PROMPT = "Reply with the single word: ok"
 
 def probe_chain(chain, keys, *, timeout=None, on_log=print,
                 client_factory=None, time_fn=time.monotonic, work=None,
-                stop_at_first=True):
+                stop_at_first=True, cancel=None):
     """Ask the chain's keyed links, in order, whether they answer.
 
     Returns ``(live_link, results, value)``; *live_link* is ``None`` when
@@ -667,6 +691,8 @@ def probe_chain(chain, keys, *, timeout=None, on_log=print,
     first_live = None
 
     for link in chain:
+        if cancel is not None:
+            cancel.check()
         label = describe(link)
         if not keys.get(link.provider):
             results.append((label, "no API key", None, "skipped"))
@@ -708,7 +734,7 @@ def probe_chain(chain, keys, *, timeout=None, on_log=print,
 
 
 def _through_models(link, api_key, once, *, on_log, time_fn):
-    """Run a probe across the models this key may use for *link* (DEC-077).
+    """Run a probe across the models this key may use for *link* (DEC-089).
 
     *once(candidate)* returns ``(value, exc)``. A model the provider says is not
     available is followed by the next of its models, with the same printed line
@@ -823,7 +849,7 @@ def _work_probe(link, api_key, work, *, on_log, client_factory, time_fn):
 #   reason      "ok", or why the last question asked failed
 #   value       the parsed answer to the real request, when it succeeded
 #   used_model  the model that was asked last -- differs from the link's own
-#               when a retired model was swapped (DEC-077)
+#               when a retired model was swapped (DEC-089)
 #   level       the structured-output rung that produced the answer
 #   work_error  why the real request failed, when it did
 #   judgement   ``judge(value)`` when a judge was given and the request succeeded
@@ -840,7 +866,7 @@ def diagnose_chain(chain, keys, work, *, judge=None, parallel=True, on_log=print
                    client_factory=None, time_fn=time.monotonic):
     """Ask EVERY keyed link *work* -- the real request a job sends -- and report each.
 
-    The Settings page's "Test provider chain" (DEC-078). ``probe_chain`` stays
+    The Settings page's "Test provider chain" (DEC-090). ``probe_chain`` stays
     the preflight's primitive; this is the diagnostic, and differs from it on
     purpose:
 

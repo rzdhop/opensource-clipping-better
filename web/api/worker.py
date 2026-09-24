@@ -14,7 +14,11 @@ import traceback
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
+from clipping.cancel import Cancelled, CancelToken
+
 from .config_adapter import build_config_from_payload
+from . import children
+from . import cleanup
 from . import settings_store
 from .models import ClipDetail, JobStatus
 from . import activity
@@ -68,6 +72,67 @@ MAX_CONCURRENT_JOBS = int(os.environ.get("MAX_CONCURRENT_JOBS", "1"))
 _semaphore = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
 _executor = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_JOBS)
 
+# Jobs that have a worker, queued or running: the token their pipeline checks,
+# and the task running it. The task is held on purpose -- asyncio keeps only a
+# weak reference to a task, and an unreferenced one can be collected mid-run.
+_active: dict[str, tuple[CancelToken, Optional[asyncio.Task]]] = {}
+
+
+# Where a job's files live; the same paths the pipeline and routes/files.py use.
+OUTPUTS_ROOT = os.path.join(store.PROJECT_ROOT, "outputs")
+UPLOADS_ROOT = os.path.join(store.PROJECT_ROOT, "uploads")
+
+
+def remove_job(job_id: str) -> dict:
+    """Delete *job_id*'s files (see cleanup.py) and then its record."""
+    job = store.get_job(job_id)
+    if job is None:
+        return {"removed": [], "kept": []}
+    others = [j for j in store.list_jobs() if j.get("id") != job_id]
+    report = cleanup.remove_job_files(
+        job, outputs_root=OUTPUTS_ROOT, uploads_root=UPLOADS_ROOT, other_jobs=others,
+    )
+    store.delete_job(job_id)
+    return report
+
+
+def finish_deferred_delete(job_id: str) -> bool:
+    """Carry out a delete that was asked for while the job was running."""
+    job = store.get_job(job_id)
+    if job is None or not job.get("delete_requested") or is_active(job_id):
+        return False
+    report = remove_job(job_id)
+    print(f"   🗑 Deleted job {job_id}: removed {len(report['removed'])} item(s).")
+    return True
+
+
+def finish_deferred_deletes() -> int:
+    """At startup: deletes a crash interrupted. Returns how many were finished."""
+    pending = [j.get("id") for j in store.list_jobs() if j.get("delete_requested")]
+    return sum(1 for job_id in pending if finish_deferred_delete(job_id))
+
+
+def is_active(job_id: str) -> bool:
+    """Whether *job_id* has a worker queued or running."""
+    return job_id in _active
+
+
+def cancel(job_id: str) -> bool:
+    """Stop *job_id*'s worker: no new step starts, and its ffmpeg dies now.
+
+    What is already in flight -- one provider request, one transcription
+    chunk -- finishes or times out; see clipping/cancel.py. Returns False when
+    the job has no worker (it finished, or was never started).
+    """
+    entry = _active.get(job_id)
+    if entry is None:
+        return False
+    token, _task = entry
+    token.cancel()
+    children.kill(job_id)
+    return True
+
+
 # Settings overrides (API keys etc.): in memory for the running process, mirrored
 # to data/settings.json so a restart does not lose them. They used to live only
 # here, which meant a `docker compose restart` silently emptied them and the next
@@ -115,10 +180,29 @@ def load_settings_env() -> int:
     return len(stored)
 
 
-def _run_pipeline_sync(job_id: str, payload: dict) -> None:
-    """Run the pipeline, attributing everything it prints to this job."""
-    with activity.capture(job_id):
-        _execute_pipeline(job_id, payload)
+def _run_pipeline_sync(job_id: str, payload: dict, token: CancelToken | None = None) -> None:
+    """Run the pipeline, attributing everything it prints -- and every process
+    it starts -- to this job."""
+    token = token or CancelToken()
+    with activity.capture(job_id), children.attributed(job_id, token):
+        try:
+            _execute_pipeline(job_id, payload, token)
+        finally:
+            children.forget(job_id)
+
+
+def _finish_cancelled(job_id: str) -> None:
+    """Record that the job stopped because it was asked to.
+
+    request_cancel is a no-op when the route already marked it; it matters only
+    for a token set some other way. The status and error are the store's to keep:
+    once CANCELLED, the worker's own writes are dropped.
+    """
+    store.request_cancel(job_id)
+    store.append_event(
+        job_id, "Cancelled. The job stopped at its next checkpoint.",
+        "warning", "worker",
+    )
 
 
 TOTAL_STEPS = 7
@@ -198,7 +282,7 @@ def _cookies_path():
     return candidate if os.path.isfile(candidate) else None
 
 
-def _execute_pipeline(job_id: str, payload: dict) -> None:
+def _execute_pipeline(job_id: str, payload: dict, token: CancelToken | None = None) -> None:
     """
     Run the clipping pipeline synchronously (called from thread pool).
 
@@ -223,11 +307,18 @@ def _execute_pipeline(job_id: str, payload: dict) -> None:
             **extra,
         )
 
+    token = token or CancelToken()
+
     try:
+        # Cancelled while it waited for a worker slot: it never starts.
+        token.check()
+
         # Build config from API payload
         cfg = build_config_from_payload(
             payload, job_id, env_overrides=_settings_env
         )
+        # The pipeline checks this before each step that spends (clipping/cancel.py).
+        cfg.cancel_token = token
 
         ai["provider"] = str(getattr(cfg, "ai_provider", "") or "") or None
         ai["model"] = (
@@ -283,6 +374,7 @@ def _execute_pipeline(job_id: str, payload: dict) -> None:
                 return
 
         # --- Step 1: Download ---
+        token.check()
         store.set_status(job_id, JobStatus.DOWNLOADING)
         progress("download", 1, "Preparing source video...", 5.0)
 
@@ -331,6 +423,7 @@ def _execute_pipeline(job_id: str, payload: dict) -> None:
         progress("download", 1, message, 14.0)
 
         # --- Step 2: Transcript ---
+        token.check()
         store.set_status(job_id, JobStatus.TRANSCRIBING)
         headline, detail = _transcript_plan(cfg)
         progress("transcribe", 2, headline, 15.0, detail=detail)
@@ -341,6 +434,7 @@ def _execute_pipeline(job_id: str, payload: dict) -> None:
         progress("transcribe", 2, "Transcription complete.", 35.0)
 
         # --- Step 3: AI Analysis ---
+        token.check()
         store.set_status(job_id, JobStatus.ANALYZING)
         progress(
             "analyze",
@@ -377,6 +471,7 @@ def _execute_pipeline(job_id: str, payload: dict) -> None:
         progress("metadata", 4, "Metadata normalized.", 55.0)
 
         # --- Step 5: Diarization (optional) ---
+        token.check()
         diarization_data = None
         from clipping import studio, diarization as diarization_mod
 
@@ -419,6 +514,7 @@ def _execute_pipeline(job_id: str, payload: dict) -> None:
                 diarization_data = None
 
         # --- Step 6: Render Preparation ---
+        token.check()
         store.set_status(job_id, JobStatus.RENDERING)
         progress("render", 6, "Preparing rendering...", 60.0)
 
@@ -453,6 +549,9 @@ def _execute_pipeline(job_id: str, payload: dict) -> None:
             custom_hook_path = hook_manager.download_custom_hook(cfg)
 
         for idx, klip in enumerate(sorted(hasil_json, key=lambda x: x["rank"])):
+            # A clip killed mid-encode comes back as a failed manifest entry;
+            # this is where the job then stops instead of starting the next one.
+            token.check()
             clip_num = idx + 1
             progress(
                 "render",
@@ -478,6 +577,8 @@ def _execute_pipeline(job_id: str, payload: dict) -> None:
             )
             if hasil_render:
                 render_manifest.append(hasil_render)
+
+        token.check()
 
         # A .srt beside each clip, before the manifest is written so srt_path
         # lands in it. Best-effort: the clips are already rendered.
@@ -530,7 +631,15 @@ def _execute_pipeline(job_id: str, payload: dict) -> None:
         store.set_clips(job_id, clips)
         progress("done", 7, f"Done! {len(clips)} clips rendered successfully.", 100.0)
 
+    except Cancelled:
+        _finish_cancelled(job_id)
+
     except Exception as exc:
+        if token.cancelled:
+            # What a killed ffmpeg or an interrupted request looks like to the
+            # code that ran it. The job was cancelled; it did not fail.
+            _finish_cancelled(job_id)
+            return
         tb = traceback.format_exc()
         error_msg = f"{type(exc).__name__}: {exc}"
         store.set_error(job_id, error_msg)
@@ -545,11 +654,29 @@ async def submit_job(job_id: str, payload: dict) -> None:
     Uses a semaphore to limit concurrency and runs the pipeline
     in a thread pool to avoid blocking the async event loop.
     """
-    async def _run():
-        async with _semaphore:
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
-                _executor, _run_pipeline_sync, job_id, payload
-            )
+    children.install()
+    token = CancelToken()
 
-    asyncio.create_task(_run())
+    async def _run():
+        try:
+            async with _semaphore:
+                if token.cancelled:
+                    # Cancelled while queued. The store says so already, and
+                    # there is nothing to stop.
+                    return
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(
+                    _executor, _run_pipeline_sync, job_id, payload, token
+                )
+        finally:
+            if _active.get(job_id, (None,))[0] is token:
+                _active.pop(job_id, None)
+            # DELETE on a running job cancels it and leaves the files to us.
+            # This runs on the event loop, like the route, and neither awaits
+            # between its check and its action: either the route saw this job
+            # active and set the flag first, or it found it gone and deleted it
+            # itself.
+            finish_deferred_delete(job_id)
+
+    _active[job_id] = (token, None)
+    _active[job_id] = (token, asyncio.create_task(_run()))

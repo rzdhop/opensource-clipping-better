@@ -214,6 +214,7 @@ def build_config_from_payload(
         use_broll=payload.get("use_broll", True),
         use_hook_glitch=payload.get("use_hook_glitch", False),
         use_auto_bgm=payload.get("use_auto_bgm", True),
+        loudnorm=payload.get("loudnorm", False),
         use_karaoke_effect=payload.get("use_karaoke_effect", True),
         use_split_screen=payload.get("use_split_screen", False),
         use_dynamic_split=payload.get("use_dynamic_split", False),

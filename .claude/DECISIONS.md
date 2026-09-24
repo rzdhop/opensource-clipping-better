@@ -1745,7 +1745,156 @@ the key gate and seeds the scan cache. `probe_chain` gains
   disables its timeouts for uploads. If a reverse proxy cuts it off, the
   upgrade path is SSE through `probe_chain`'s existing `on_log` seam.
 
-## DEC-075 — Gemini's default is gemini-3.5-flash-lite, and every default model is one constant
+## DEC-075 — A job is cancelled cooperatively, and its child processes are killed
+**Context.** DELETE flipped a job's status while its worker thread carried on,
+spending free-tier quota and CPU. A thread cannot be stopped from outside, and a
+clip spends minutes inside one ffmpeg call. The stdout tee must never raise
+(DEC-014, second entry), and `clipping/` takes no web callbacks.
+**Decision.** `clipping/cancel.py` gives the pipeline a token (`cfg.cancel_token`)
+checked before each step that spends: chain link, attempt (before it is
+announced, DEC-053), schema re-ask, backoff and rate-limit sleeps, probe, STT
+chunk, Whisper segment, and, in the worker, each stage and clip. `Cancelled`
+derives from BaseException so the pipeline's `except Exception` blocks cannot
+record it as a provider failure and retry. `web/api/children.py` installs a
+process-wide `Popen` subclass that attributes each child to the job whose thread
+spawned it (the tee's pattern), refuses a spawn on a cancelled token before exec,
+and re-checks after registration to close the race with `kill`.
+**Consequence.** After Cancel no new request, chunk or subprocess starts, and
+ffmpeg dies at once (measured 0.2s live). What is already in flight finishes or
+times out: an LLM request (120s Groq, 180s Gemini and others, 330s NVIDIA, up to
+3 at once with analysis workers), an STT chunk (300s), a Whisper decode window.
+pyannote diarization and the server-side yt-dlp download are not cancellable. A
+run without a token -- the CLI -- makes exactly the calls it made before
+(`kwargs_for` passes no keyword). Rejected: checkpoints alone (the rendering clip
+runs on for minutes of ARM CPU); tracking children at ~12 render call sites (a
+large diff in an untested layer); a subprocess per job (breaks the tee, the
+in-memory store and per-process pacing); raising from the tee (DEC-014).
+
+## DEC-076 — CANCELLED is terminal; a cancelled job's late writes are dropped
+**Context.** A cancelled worker unwinds: a killed ffmpeg surfaces as an error,
+and a completion can race the cancel.
+**Decision.** `store.request_cancel` decides under the RLock and refuses a job
+already completed, failed or cancelled (the route answers 409). Once CANCELLED,
+`update_job` drops `status`/`error`/`clips` and `update_progress`/
+`refine_progress` are dropped; events and other fields (`delete_requested`) still
+apply. The worker treats `Cancelled`, and any exception raised after its token
+was set, as a cancellation.
+**Consequence.** A job ends COMPLETED or CANCELLED, never FAILED because it was
+cancelled. A rerun (`reuse_job_id`) of a job that is still running gets 409, so
+two workers never share `outputs/{id}`.
+
+## DEC-077 — Delete removes a job's files, under narrow rules
+**Context.** Deleted jobs left `outputs/{id}/` and their uploads forever. Uploads
+keep their original file name, so two jobs can share -- or overwrite -- one
+file, and `reuse_job_id` / upload names are client-controlled.
+**Decision.** `web/api/cleanup.py`: a path is only ever a single plain name
+directly inside its root (no separator, `.`/`..`, drive, absolute path, symlink,
+or the root itself; a directory in outputs/, a file in uploads/). An upload is
+removed only if no other job references the name and its mtime is not newer
+than when this job took it (`created_at`, or `source_attached_at` now recorded by
+POST /source); with no usable timestamp it is kept. A running job is flagged
+`delete_requested`, cancelled, answered 202, and removed by its worker's
+event-loop cleanup; startup finishes deletes a crash interrupted. Cancel alone
+keeps the files (DEC-022). No age/size retention sweep (a follow-up).
+**Consequence.** A leaked file is recoverable; a wrongly deleted one is not, so
+every doubt resolves to keeping it. Verified live: a shared upload survived the
+first job's delete and went with the second's. A revert cannot restore deleted
+files.
+
+## DEC-078 — The queue is capped by MAX_QUEUED_JOBS, answered with 429
+**Context.** Every job was accepted and queued with no ceiling.
+**Decision.** `MAX_QUEUED_JOBS` (default 20, 0 = no limit, malformed = default),
+read per request, checked on POST /api/jobs and POST /{id}/source -- the latter
+before the upload is stored.
+**Consequence.** 429, not 503: "come back later" is the truth, and a 5xx reads as
+a broken server to proxy health logic. The dashboard already renders `detail`.
+
+## DEC-079 — `clipping/studio` is a real package
+**Context.** `clipping/studio.py` shadowed the `clipping/studio/` directory, so
+its 12 modules loaded their siblings by path: 54 loads, a dozen private copies
+of helpers, nothing in sys.modules, no shared module state (DEC-081's bug was one
+consequence).
+**Decision.** `studio.py` became `studio/__init__.py` with the same 32 public
+names and `FIREFOX_UA`; an AST codemod turned every by-path load into
+`from . import x [as NAME]`. Callers still import it lazily (DEC-031).
+**Consequence.** Module state is shared: one face detector (IMAGE mode,
+stateless), one encoder-probe memo, one watermark cache. A studio module can no
+longer be executed by path outside its package; a test that needs one imports
+`clipping.studio.<x>` under the `render_stack_stubbed` fixture. Verified
+frame-identical on four render variants. The package `__init__` is eager, so
+importing any submodule pulls in cv2 (a PEP 562 lazy `__init__` is a follow-up).
+
+## DEC-080 — Encoder probes are memoised, not passed down
+**Context.** Every render path probed the hardware encoders per clip (up to 7
+ffmpeg processes), though the runner probes once. The render paths probe at the
+default 1080 while the runner probes at the real height, which changes the
+bitrate, so passing the runner's result down would change output.
+**Decision.** The encoder listing is read once per process; runtime probe
+answers are cached per exact argument tuple for 600s, both outcomes.
+**Consequence.** Same encoder, same arguments; 1.4s saved per clip here. The TTL
+bounds a stale answer if a GPU appears, vanishes or runs out of NVENC sessions.
+
+## DEC-081 — The watermark renderer is cached by its settings, not by id(cfg)
+**Context.** Loading `watermark.py` inside the frame loop re-created its
+`_renderer_cache` every frame. Loading it once makes the cache live for the
+process, and its `id(cfg)` key then becomes unsafe: ids are reused after an
+object is freed.
+**Decision.** Key by the nine settings the renderer reads plus the image file's
+mtime and size; cap at 32 entries.
+**Consequence.** ~4s saved on a 14s watermarked clip (27.3s -> 23.1s against a
+23.3s no-watermark control), frame-identical output, and a replaced logo file is
+picked up.
+
+## DEC-082 — Loudness levelling is opt-in and runs as the last write
+**Context.** Nothing levelled the audio. The human chose opt-in, the stance of
+DEC-050 (glitch) and DEC-051 (clip length).
+**Decision.** `--loudnorm` / "Level loudness", default off in five places: a
+two-pass EBU R128 loudnorm (I=-14, TP=-1.5, LRA=11) over each finished clip,
+after the concat and edge glow, and over story mode's assembled files; video
+copied, audio AAC at the source rate; best-effort.
+**Consequence.** Default output is byte-identical (verified). With the flag a
+-21.8 LUFS clip measured -14.0 LUFS, video frames unchanged. It adds one AAC
+generation and a few seconds per clip, which is why it is not the default.
+
+## DEC-083 — One env template; pyproject mirrors requirements
+**Context.** `.env.sample` called NVIDIA required and the default, which the
+chain gate (DEC-073) refuses; `pyproject.toml` lacked nine packages while the
+README offered `uv sync`.
+**Decision.** Delete `.env.sample` (its four Facebook-uploader keys moved to
+`.env.example`, the two with code defaults commented out -- `NAME=` would
+override a default with ""). Copy the nine specifiers into pyproject verbatim; a
+stdlib test compares the two manifests.
+**Consequence.** Docker still builds from `requirements.txt`; nothing was
+upgraded. Splitting heavy dependencies into extras remains its own task.
+
+## DEC-084 — The static Studio is retired; the API-served dashboard is the Studio
+**Context.** `docs/studio/*.html` posted fields the backend deleted and sent no
+API token, so every request it made was refused. The human chose to retire it.
+**Decision.** Delete it; the README describes the dashboard the API serves
+(DEC-038) and `docs/index.html` links to that section.
+**Consequence.** The GitHub Pages `/studio/` path now 404s (Pages settings live
+outside the repo). One UI to maintain.
+
+## DEC-085 — LLM_CHAIN is not persisted, because nothing sets it at runtime
+**Context.** A follow-up said a runtime-set chain vanishes on restart.
+**Decision.** No code. `SettingsRequest` has no chain field, the settings route
+only reads `LLM_CHAIN`, and a job carries its own `llm_chain`; the value comes
+from `.env`/compose, which survive a restart.
+**Consequence.** A Settings field for the chain would be a feature, not a fix.
+
+## DEC-086 — The repository slug is an address, not the old product name
+**Context.** The branding guard (`tests/test_branding.py`) forbade the substring
+`opensource-clipping` outside upstream attribution, so it rejected this fork's
+own GitHub URL, `rzdhop/opensource-clipping-better`. The rename that introduced
+it had turned upstream's `your-username/opensource-clipping` placeholder into a
+`your-username/rzdhop-clips` repository that does not exist.
+**Decision.** One allow-list entry for the slug `opensource-clipping-better`,
+the test's own mechanism; docs link and clone the real repository.
+**Consequence.** A doc that says `opensource-clipping` alone still fails the
+guard (mutation-checked). If the repository is renamed, GitHub redirects the old
+URL and this entry can go.
+
+## DEC-087 — Gemini's default is gemini-3.5-flash-lite, and every default model is one constant
 **Context.** On 2026-09-24 the human added a new Google key and pressed Test
 provider chain. `gemini/gemini-2.5-flash-lite` answered `404 This model
 models/gemini-2.5-flash-lite is no longer available to new users`. Old keys
@@ -1755,7 +1904,7 @@ NIM model.
 **Decision.** `GEMINI_DEFAULT_MODEL = "gemini-3.5-flash-lite"` and
 `GROQ_DEFAULT_MODEL`, beside `NVIDIA_DEFAULT_MODEL`; `DEFAULT_LLM_CHAIN` is built
 only from the constants. Chosen by `tools/bench_llm.py` on the real pass-A
-request (see DEC-078's fixture), 2026-09-24:
+request (see DEC-090's fixture), 2026-09-24:
 
 | model | test transcript (found the clip) | real windows (3 x 2) |
 |---|---|---|
@@ -1766,7 +1915,7 @@ request (see DEC-078's fixture), 2026-09-24:
 **Consequence.**
 - **The alias is not the default** although it measured as well: its model
   changes under us without a benchmark (DEC-058). It is the *fallback*
-  (DEC-077), which is exactly what a moving alias is good for.
+  (DEC-089), which is exactly what a moving alias is good for.
 - Tests: each default model equals its constant; the chain block holds no
   retyped literal; no default link is in a table of models measured dead for a
   new account (each entry says when and how); `.env.example` carries the
@@ -1774,7 +1923,7 @@ request (see DEC-078's fixture), 2026-09-24:
 - **Groq's default is still unmeasured on this project** (no key). It is named,
   not vouched for.
 
-## DEC-076 — OpenRouter and Mistral join the default chain; a paid link is never called free
+## DEC-088 — OpenRouter and Mistral join the default chain; a paid link is never called free
 **Context.** The human's funded OpenRouter key was never used or tested:
 OpenRouter was a registered, `primary` provider but not a link in the default
 chain, and a provider absent from the chain is never contacted (DEC-023). The
@@ -1790,7 +1939,7 @@ dashboard's own hint already promised OpenRouter/Mistral coverage.
 - **After both free tiers**, so credits are spent only when they failed.
 - **Mistral: `mistral-small-latest`, unmeasured** (no key here). Decided by the
   human in chat; the planning review argued for leaving it out under DEC-058.
-  An unkeyed link is skipped at no cost, and the new diagnostic (DEC-078)
+  An unkeyed link is skipped at no cost, and the new diagnostic (DEC-090)
   measures it the moment a key is set. Recorded in ASSUMPTIONS.
 - `Provider.free_tier` (trailing, default True; OpenRouter False). The DEC-073
   refusal tags a billed row "(paid)" and counts the free ones instead of
@@ -1801,8 +1950,8 @@ dashboard's own hint already promised OpenRouter/Mistral coverage.
 - A key with no OpenRouter credits answers 402, which is FATAL for that link
   and moves on, printed.
 
-## DEC-077 — A retired model is swapped for the same provider's next model, on the same key
-**Context.** DEC-075's failure had nothing wrong with the key or the provider,
+## DEC-089 — A retired model is swapped for the same provider's next model, on the same key
+**Context.** DEC-087's failure had nothing wrong with the key or the provider,
 only the model. `classify` calls a 404 FATAL, so the whole link was abandoned
 and the job fell to the NVIDIA floor. Models on free tiers now retire every few
 weeks (A-010), for new accounts first.
@@ -1832,7 +1981,7 @@ ladder (`_run_model`), and the probes share the path.
   Mistral and custom list none and behave exactly as before, pinned by a guard.
 - `classify` is unchanged, so every existing FATAL pin still holds.
 
-## DEC-078 — The chain test sends every keyed link the real request, and reports a verdict
+## DEC-090 — The chain test sends every keyed link the real request, and reports a verdict
 **Context.** On 2026-09-24 `POST /api/settings/test-chain` pinged each link
 with "reply with ok" and reported **"✅ Jobs can start"** for a chain whose
 Gemini link answered 404 and whose only working link was the NVIDIA floor.
@@ -1874,8 +2023,8 @@ and the bench) on a 14-beat test transcript with exactly one clip in it
 - `probe_chain` and the preflight are unchanged (RC-C9: `tests/test_preflight.py`
   passes unedited).
 
-## DEC-079 — The chain test waits as long as a job would
-**Context.** DEC-078 gave each link the preflight's work-probe cap (90s on the
+## DEC-091 — The chain test waits as long as a job would
+**Context.** DEC-090 gave each link the preflight's work-probe cap (90s on the
 fast tiers). The same day, the job's own five windows sent straight to
 `gemini-3.5-flash-lite` took 100.8 / 46.2 / 1.1 / 4.6 / 1.9s. Output was 76-195
 tokens with no reasoning tokens, so this is free-tier queueing, not thinking,
@@ -1885,7 +2034,7 @@ and turning thinking off would not help. The job itself saw the same spread
 280)`: the job request's own timeout (groq 120, gemini/openrouter/mistral 180),
 capped so NVIDIA (330) fits the 300s route ceiling with its 10s slack.
 **Consequence.**
-- **A timeout in the test now means what it means in a job.** Under DEC-078's
+- **A timeout in the test now means what it means in a job.** Under DEC-090's
   cap, the test would have reported Gemini dead on a day a job used it.
 - The default chain's worst case is 290s; a healthy chain answers in seconds.
 - **The preflight is unchanged** (DEC-072, RC-C3). A 100s Gemini answer fails

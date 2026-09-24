@@ -10,6 +10,55 @@ All notable changes to the **rzdhop's clips** project will be documented in this
 
 ## [Unreleased]
 
+### Onboarding, stopping jobs, and the render layer
+
+A comparison with the upstream project found the fork well ahead on analysis
+and the Studio, but behind on onboarding -- the Colab and Kaggle notebooks
+cloned the upstream repository -- and never touched two areas it inherited:
+cancelling or deleting a job did not stop it or free its files, and the render
+layer re-executed its watermark module on every frame.
+
+#### Fixed
+
+- **The notebooks run this fork.** All three cloned upstream and asked only for
+  a Gemini key. They now clone this repository, collect Groq, Gemini and NVIDIA
+  keys without crashing on an unset secret, and Quick Start passes local files
+  (not a URL) to `--video`, keeps the URL you typed, and passes its Whisper
+  settings. The yt-dlp recipes force `talk.mp4`, which the run expects.
+- **A fresh install no longer refuses its first job.** `.env.sample` said NVIDIA
+  was required and the default, a setup the chain gate refuses; it is gone and
+  `.env.example` is the one template.
+- `pyproject.toml` declares the nine packages it lacked (the web server,
+  diarization, voice-over, `numpy<2`), so `uv sync` produces a working install.
+- The README and wiki send bug reports and clones to this fork; `/api/health`
+  reports the real version.
+- **Cancel stops a job.** It used to flip the status while the worker carried on
+  spending quota and CPU. See "Stopping and deleting a job" in the README.
+- **Delete frees the disk.** A deleted job's outputs and upload used to stay
+  forever.
+- The watermark module was re-executed on every frame of every clip, rebuilding
+  its renderer each time: ~4s on a 14s clip here. It loads once now.
+- A failed hook download no longer reuses the previous run's clip, and a plain
+  `.mp4` hook URL works; the download has a timeout, a size cap and a deadline.
+- A failed render no longer strands its intermediate files in the working
+  directory; a failed audio extraction says why.
+
+#### Added
+
+- `--loudnorm` / "Level loudness": levels each finished clip to -14 LUFS
+  (two-pass EBU R128). Off by default.
+- `POST /api/jobs/{id}/cancel`; Cancel and Delete on the job page;
+  `MAX_QUEUED_JOBS` (default 20, `429` past it).
+
+#### Changed
+
+- `clipping/studio/` is a real package (`clipping/studio.py` became its
+  `__init__.py`); its modules import each other instead of loading copies by
+  file path. Output is frame-identical.
+- The hardware encoder is probed once per process rather than before every clip.
+- The static GitHub Pages Studio (`docs/studio/`) is retired; the dashboard the
+  API serves is the Studio.
+
 ### A job that could never have run, found out 93 seconds in
 
 A job failed preflight with `No provider in the chain answered a liveness

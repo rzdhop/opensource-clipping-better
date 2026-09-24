@@ -12,15 +12,18 @@
   ready, 117s: gemini 4.1s, openrouter 7.3s, nvidia 117s, all found the test clip).
   **Awaiting the human's acknowledgement of this substitute.**
 - **Audit:** pip-audit (deployed container, 170 packages): none; npm audit: 0.
-- **Not pushed.** main is ahead of origin. Push per memory note [[github-push-key]].
+- **Merge:** origin/main had 28 commits from the Windows session (onboarding, job
+  lifecycle, render fixes; its checkpoint is the next section). Merged, not rebased or
+  forced. Both sides wrote DEC-075..079 and A-021..024: theirs were published, so this
+  task's became **DEC-087..091** and **A-026..029**, everywhere they are cited. Push and
+  redeploy status: see the action log.
 - **Open questions:** none.
 - **Security note:** an exploration agent printed `data/settings.json` once in its own
   local transcript (GOOGLE_API_KEY + OPENROUTER_API_KEY). Told the human; rotation is
   their call.
-- **Follow-ups, deliberately not done:** LLM_CHAIN not in settings_store.PERSISTED_KEYS;
-  the web worker ignores `dry_run_analysis` (chip spawned); dead GEMINI_MODEL /
+- **Follow-ups, deliberately not done:** the web worker ignores `dry_run_analysis` (chip spawned); dead GEMINI_MODEL /
   GEMINI_FALLBACK_MODEL config surface (config.py:208-209); Groq and Mistral defaults
-  unmeasured (A-021, A-022); Gemini free-tier latency swings 1s-100s (DEC-079);
+  unmeasured (A-026, A-027); Gemini free-tier latency swings 1s-100s (DEC-091);
   `tests/test_clip_length.py` leaves an empty outputs/jobid (pre-existing).
 
 ### Why (measured 2026-09-24)
@@ -56,8 +59,116 @@ OpenRouter is not a link in the default chain, so it is never used or tested.
 | 5 | same-provider model swap on "model unavailable" (RISKIEST) | **done** `7738224` (committed before the job; bind mount) |
 | 6 | diagnostic sends real work to every keyed link | **done** `2e7756f` |
 | 7 | dashboard | **done** `62531e0` |
-| 8 | docs + decisions | **done** `29715db` + DEC-075..078 |
+| 8 | docs + decisions | **done** `29715db` + DEC-087..091 |
 | 9 | redeploy, diagnostic, second real job | **done** (second job = dry-run analysis on the final code; deployed chain test ready) |
+
+---
+
+## Previous task (Windows session) — onboarding, job lifecycle, render-layer fixes (COMPLETE; deployed on Ubuntu with the merge above)
+- **Origin:** a fork-vs-upstream analysis (2026-09-23). Upstream has had no
+  commits since `3c72b75`, so nothing needs porting. The human chose three
+  areas: onboarding (A1-A7), job lifecycle (B1-B5), render layer (D1-D7).
+  Everything else is on the roadmap (VISION.md, "Where it stands").
+- **Plan:** `C:\Users\ridap\.claude\plans\on-this-sessions-we-snoopy-flurry.md`
+  (approved in chat): findings table, roadmap, 21-stage ledger.
+- **Host:** Windows 11 (Python 3.11.15, ffmpeg 8.1.1, node 26), with cv2,
+  mediapipe and fastapi, so real renders and a live backend ran here. Docker
+  and the deploy are on the human's Ubuntu VPS.
+- **Checkpoint commit before the work:** `8fa873d`. **Head:** see the ledger;
+  everything is on `origin/main`.
+- **Tier-1:** baseline at `8fa873d` 1353 passed / 8 failed locally, 1202 / 125
+  skipped / 6 failed in the clean pytest-only venv. **Now 1553 passed / 8 failed
+  locally, 1371 passed / 157 skipped / 6 failed in the venv** -- the same 8
+  (6) pre-existing Windows-only failures, never a new one. `compileall` clean,
+  `vite build` green. +200 tests, each behaviour test verified to fail against
+  its parent commit.
+- **The 8 Windows-only failures** (pre-existing, untouched): 5 POSIX
+  chmod/unwritable-dir tests (`test_auth_token`, `test_settings_store` x3,
+  `test_clip_srt_export`); `test_chain_readiness::test_the_cli_gates_after_the_key_gate_and_before_the_probe`
+  (reads a file with cp1252); `test_clip_serving::test_the_api_is_untouched_by_the_fallback`
+  (SPA fallback answers 200 for `/api/nope` on Windows);
+  `test_transcript_dispatch::test_bypass_does_not_import_ctranslate2`
+  (ctranslate2 is installed here -- may be a real leak CI cannot see, A-024).
+- **Tier-2 -- verified here:** framemd5 render parity for every render change
+  (hybrid+watermark, split-screen face trigger, hook-v2, edge-glow: identical);
+  watermark render 27.3s -> 23.1s; a live backend: cancel mid-render (ffmpeg
+  dead in 0.2s, slot free in 0.3s, status cancelled), cancel while queued, 429
+  at the queue cap, delete with a shared upload kept then removed, 404s after;
+  a browser pass of Cancel/Delete at 375/820px; `--loudnorm` on a real render
+  (-21.8 -> -14.0 LUFS, frames identical, default output byte-identical).
+- **Tier-2 -- NOT done, needs the human:** no E2E suite exists. On the Ubuntu
+  box: `docker compose rm -sfv backend && docker compose up -d --build backend`
+  (sudo), then one real dashboard job, one Cancel mid-render and one Delete
+  (A-022). Notebooks on Colab/Kaggle (A-023). Camera-switch render (A-025,
+  needs pyannote + HF token). **The task is not done until the human
+  acknowledges these deferrals.**
+- **Dependency audit:** no dependency was added or raised (A3 only copied
+  existing specifiers into pyproject); pip-audit is not installed and is
+  roadmap item F2.
+- **Open questions:** none.
+
+### Stage ledger
+| S | Item | Commit |
+|---|---|---|
+| 0 | sync + baseline | `719ca59` |
+| 1 | A6 health version | `d5bc04b` |
+| 2 | A2 retire .env.sample | `50934a2` |
+| 3 | A3 pyproject mirrors requirements | `7fbf57b` |
+| 4 | A4 README/wiki links (+ branding-guard fix `213006e`, DEC-086) | `8c1408a` |
+| 5 | A5 retire docs/studio | `06e2d10` |
+| 6 | A1 notebooks (+ README Colab recipe) | `12f43e9` |
+| 7 | A7 source_manager docstring | `7d374b2` |
+| 8 | D7 diarization stderr | `c586320` |
+| 9 | D6 hook download (stale file, fallback, timeout/cap/deadline) | `07d1a7b` |
+| 10 | D4 memoise encoder probes | `99cbcdb` |
+| 11 | D1 watermark loaded once + settings-keyed cache | `ae82632` |
+| 12 | D5 render temp cleanup | `786a0ab` |
+| — | Group 2 render parity | `b6202c9` |
+| 13 | B5 LLM_CHAIN note (no code) | `b05a895` |
+| 14 | B1a cancel token + checkpoints | `214f242` |
+| 15 | B1b web cancel + child kill | `92421a6` |
+| 16 | B2 delete removes files | `5c04051` |
+| 17 | B4 queue cap | `7d96402` |
+| 18 | B3 dashboard Cancel/Delete | `1e89708` |
+| — | Group 3 live verification | `c627ad7` |
+| 19 | D2 studio real package (riskiest) | `2549c96`, parity `2632033` |
+| 20 | D3 opt-in loudnorm | `577c98e`, render `b7e611a` |
+| 21 | docs, DEC-075..086, A-021..025, VISION, close-out | this commit |
+
+### Follow-ups, deliberately not done
+- **Security:** `reuse_job_id`, `upload_filename` and `transcript_filename` are
+  not validated at the API (cleanup.py refuses anything but a plain name, so
+  delete is safe; the pipeline's own use of them is not audited).
+- Upload names are not unique: a second `talk.mp4` overwrites the first job's
+  source. Store uploads under a unique name.
+- Per-item render temp files are relative to the working directory, so two
+  concurrent jobs (`MAX_CONCURRENT_JOBS` > 1) would collide in `/app`.
+- An age/size retention sweep for `outputs/` (delete is manual today).
+- The web worker duplicates `run_pipeline`'s stage sequence.
+- Only send Google Drive URLs through gdown (it is tried first for every URL).
+- A PEP 562 lazy `clipping/studio/__init__` so stdlib studio modules can be
+  imported in CI without the render stack.
+- Diarization and the server-side yt-dlp download cannot be cancelled.
+- A cancel's feed shows the render layer's own `❌ ERROR ... Broken pipe` line
+  from the killed ffmpeg before "Cancelled." -- cosmetic.
+- `fail_stale_jobs` fails `needs_upload` jobs at restart.
+- `docs/index.html` privacy/terms links point at upstream's Pages domain.
+- The Tier-1 helper's Windows CI simulation (clean venv) should replace the
+  `PYTHONNOUSERSITE` recipe below for Windows hosts.
+- Roadmap (VISION.md): CI coverage of the web layer, render-layer tests,
+  download-all + per-clip re-edit, multi-platform ingest, upload guardrails,
+  dependency pass, app-level security headers.
+
+### Regression contract for this task
+| ID | Must keep working | Proven by |
+|---|---|---|
+| RC-7 | The render layer produces the same frames | framemd5 identical before and after S10/S11/S19 on hybrid+watermark, split-screen (face trigger), hook-v2, edge-glow (local render) |
+| RC-8 | Split-screen renders | the same local render; camera-switch is **UNVERIFIED** (needs pyannote) |
+| RC-10 | The web API runs a job end to end | existing `test_job_stream.py`, `test_clip_serving.py` + a manual pass |
+| RC-12 | The suite imports with pytest alone (DEC-012) | the clean-venv run above |
+| RC-A* / RC-B* | Chain behaviour, budgets, readiness gate (previous task) | `test_nvidia_retry.py`, `test_preflight.py`, `test_chain_readiness.py`, `test_provider_registry.py` |
+| RC-B7 | A render-only rerun needs no key | `test_web_reuse_bypass.py` |
+| RC-L1 | Clone & Rerun reuses the saved transcript (DEC-022) | `test_transcript_persistence.py` |
 
 ---
 
@@ -79,9 +190,14 @@ OpenRouter is not a link in the default chain, so it is never used or tested.
 - **Next action:** the human sets a free GOOGLE_API_KEY (and/or GROQ_API_KEY,
   see A-009), rebuilds, and reruns the job.
 - **Open questions:** none.
-- **Follow-ups, deliberately not done:** `LLM_CHAIN` is not in
-  `settings_store.PERSISTED_KEYS` (a runtime-set chain vanishes on restart);
-  adding new free providers needs a benchmark per model; the web path still has
+- **Follow-ups, deliberately not done:** ~~`LLM_CHAIN` is not in
+  `settings_store.PERSISTED_KEYS` (a runtime-set chain vanishes on restart)~~
+  -- **not a bug** (checked 2026-09-23, DEC-085): nothing sets `LLM_CHAIN` at
+  runtime. `SettingsRequest` has no chain field, the settings route only
+  *reads* it (`routes/settings.py:65,227`), and a job carries its own
+  `llm_chain` (`models.py:202`). It comes from `.env`/compose, which survive a
+  restart; persisting it would do nothing. A Settings field for the chain would
+  be a feature, not this fix. Adding new free providers needs a benchmark per model; the web path still has
   no `--no-preflight` equivalent; `tests/test_clip_length.py` leaves an empty
   `outputs/jobid` behind (pre-existing).
 

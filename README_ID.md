@@ -1,6 +1,6 @@
 <br />
 <div align="center">
-  <a href="https://github.com/NaufalRizqullah/opensource-clipping">
+  <a href="https://github.com/rzdhop/opensource-clipping-better">
     <img src="assets/images/rzdhop-clips-logo-editable.svg" alt="Logo" width="350">
   </a>
 
@@ -13,9 +13,9 @@
     <br />
     <a href="README.md">🇬🇧 Read in English</a>
     &middot;
-    <a href="https://github.com/NaufalRizqullah/opensource-clipping/issues/new">Laporkan Bug</a>
+    <a href="https://github.com/rzdhop/opensource-clipping-better/issues/new">Laporkan Bug</a>
     &middot;
-    <a href="https://github.com/NaufalRizqullah/opensource-clipping/issues/new">Minta Fitur Baru</a>
+    <a href="https://github.com/rzdhop/opensource-clipping-better/issues/new">Minta Fitur Baru</a>
   </p>
 </div>
 
@@ -68,7 +68,7 @@ Buka notebook Google Colab baru, pastikan Runtime memakai **T4 GPU**, lalu jalan
 **Cell 1: Setup & Clone**
 ```python
 !rm -rf ./* ./.*
-!git clone https://github.com/your-username/rzdhop-clips.git .
+!git clone https://github.com/rzdhop/opensource-clipping-better.git .
 !pip install -r requirements.txt
 ```
 
@@ -88,7 +88,8 @@ Path(".env").write_text(env_text, encoding="utf-8")
 **Cell 3: Eksekusi (Contoh termasuk fallback Kaggle untuk float32)**
 ```python
 # Siapkan file input dulu (cell sebelumnya), misalnya dengan yt-dlp:
-#   !yt-dlp -f "bv*[vcodec!*=av01]+ba/b" --write-auto-subs --sub-format vtt \
+#   !yt-dlp -f "bv*[vcodec!*=av01]+ba/b" --merge-output-format mp4 \
+#          --write-auto-subs --sub-format vtt \
 #          --convert-subs vtt -o "talk.%(ext)s" "<URL>"
 VIDEO_FILE = "talk.mp4"
 TRANSCRIPT_FILE = "talk.en.vtt"   # kosongkan ("") untuk transkripsi dengan Whisper
@@ -115,37 +116,30 @@ WHISPER_COMPUTE_TYPE = "float32"
 
 ---
 
-## 🎬 Web Studio (GitHub Pages + Remote GPU)
+## 🎬 Web Studio
 
-**Clipping Studio** adalah dashboard berbasis browser yang di-hosting gratis di **GitHub Pages** dan terhubung ke notebook Kaggle/Colab sebagai backend — memberikan GUI lengkap untuk mengontrol pipeline AI clipping tanpa setup lokal.
+Studio adalah dashboard di `web/dashboard`, dan API yang menyajikannya: satu
+proses, satu port, satu URL. Tidak ada frontend terpisah yang perlu di-hosting.
 
-**🔗 Buka Studio:** [naufalrizqullah.github.io/rzdhop-clips/studio/](https://naufalrizqullah.github.io/rzdhop-clips/studio/)
-
-### Cara Kerja
-
-```
-┌─────────────────────┐     HTTPS (ngrok)     ┌──────────────────────────┐
-│   GitHub Pages      │ ◄──────────────────►   │   Kaggle / Colab         │
-│   (Frontend Statis) │                        │   (FastAPI + GPU)        │
-│                     │   POST /api/jobs       │                          │
-│   studio/index.html │ ────────────────────►  │   web/api/app.py         │
-│   studio/new-job    │   GET  /api/jobs/:id   │   pipeline clipping      │
-│   studio/settings   │ ◄────────────────────  │   Whisper + Gemini       │
-└─────────────────────┘                        └──────────────────────────┘
-        GRATIS                                         GRATIS (GPU)
+```bash
+docker compose up -d                 # dashboard ikut di-build ke dalam image
 ```
 
-### Cara Pakai
+Atau tanpa Docker:
 
-1. **Jalankan backend** — Buka `notebooks/Kaggle_Studio_Server.ipynb` di Kaggle (atau Colab), tambahkan API key ke Secrets, lalu run semua cell. Salin **Public URL** dari output.
+```bash
+(cd web/dashboard && npm ci && npm run build)   # sekali, dan setiap habis pull
+uvicorn web.api.app:app --host 127.0.0.1 --port 8000
+```
 
-2. **Buka Studio** — Kunjungi [halaman Studio](https://naufalrizqullah.github.io/rzdhop-clips/studio/) di browser.
+Buka **http://localhost:8000/** lalu masuk dengan API token. Token dicetak di
+log saat pertama kali start (`🔑 API token: …`) dan disimpan di
+`data/api_token`; isi `API_TOKEN` di `.env` agar tetap. Backend sengaja hanya
+mendengarkan di loopback — untuk mengaksesnya dari HP, ikuti
+[docs/deploy-tailscale.md](docs/deploy-tailscale.md).
 
-3. **Connect** — Klik tombol **Connect** di sidebar, paste URL tunnel, lalu klik **Test & Connect**.
-
-4. **Buat job** — Masuk ke **New Job**, masukkan URL YouTube, atur konfigurasi clip, dan klik **Start Clipping**. Pantau progress secara real-time dari Dashboard.
-
-> **Catatan:** URL tunnel berubah setiap kali notebook di-restart. Studio menyimpan URL terakhir di `localStorage` untuk kemudahan, namun perlu diupdate setelah setiap sesi baru.
+Dari dashboard Anda meng-upload video (dan transkripnya, opsional) atau
+menempelkan URL, memilih pengaturan clip, dan memantau job berjalan.
 
 ---
 
@@ -153,7 +147,7 @@ WHISPER_COMPUTE_TYPE = "float32"
 
 ```bash
 # 1. Clone repo
-git clone https://github.com/your-username/rzdhop-clips.git
+git clone https://github.com/rzdhop/opensource-clipping-better.git rzdhop-clips
 cd rzdhop-clips
 
 # 2. Install dependensi (pilih salah satu)
@@ -500,7 +494,7 @@ rzdhop-clips/
 ├── run_upload.py            # CLI auto-uploader YouTube
 ├── run_fb_upload.py         # CLI auto-uploader Facebook Pages Reels
 ├── pyproject.toml           # Dependensi & metadata proyek
-├── .env.sample              # Template API key
+├── .env.example             # Template environment (API key, chain, serving)
 ├── .gitignore
 ├── README.md                # Dokumentasi (English)
 ├── README_ID.md             # Dokumentasi (Indonesia)

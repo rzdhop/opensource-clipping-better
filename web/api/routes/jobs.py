@@ -9,7 +9,7 @@ import json
 import os
 from datetime import datetime, timezone
 
-from fastapi import Depends, APIRouter, File, HTTPException, UploadFile
+from fastapi import Depends, APIRouter, File, HTTPException, Response, UploadFile
 from fastapi.responses import StreamingResponse
 
 from ..auth import media_url, require_token
@@ -133,6 +133,33 @@ def _job_to_response(job: dict) -> JobResponse:
     )
 
 
+# How many jobs may wait for a worker at once; MAX_QUEUED_JOBS, 0 for no limit.
+DEFAULT_MAX_QUEUED_JOBS = 20
+
+
+def _queue_refusal() -> str | None:
+    """Why a job cannot join the queue right now, or None.
+
+    Read per request, like the other runtime settings. Each waiting job holds
+    a record the store re-serializes on every write and an output directory,
+    so a client retrying in a loop could otherwise stack them without end.
+    """
+    raw = os.environ.get("MAX_QUEUED_JOBS", "").strip()
+    try:
+        limit = int(raw) if raw else DEFAULT_MAX_QUEUED_JOBS
+    except ValueError:
+        limit = DEFAULT_MAX_QUEUED_JOBS
+    if limit <= 0:
+        return None
+    waiting = store.get_queued_count()
+    if waiting < limit:
+        return None
+    return (
+        f"The queue is full: {waiting} job(s) are already waiting "
+        f"(MAX_QUEUED_JOBS={limit}). Try again once one has started, or cancel one."
+    )
+
+
 def _slow_chain_refusal(payload) -> str | None:
     """The chain-readiness refusal for a job about to be created, or None.
 
@@ -182,6 +209,15 @@ async def create_job(req: JobCreateRequest) -> JobResponse:
 
     reuse_job_id = payload.pop("reuse_job_id", None)
 
+    # A rerun reuses the job's id and output directory. Two workers on one
+    # directory would overwrite each other's files, and the old one's late
+    # writes would land on the new record.
+    if reuse_job_id and worker.is_active(reuse_job_id):
+        raise HTTPException(
+            status_code=409,
+            detail="That job is still running. Cancel it, or wait for it to finish, then rerun it.",
+        )
+
     # Reusing a job means rerunning it against the AI output it already has, so
     # default to loading that instead of paying for the analysis again.
     #
@@ -194,6 +230,12 @@ async def create_job(req: JobCreateRequest) -> JobResponse:
     # explicit `false` still wins.
     if reuse_job_id and "load_gemini_json" not in req.model_fields_set:
         payload["load_gemini_json"] = True
+
+    # 429, not 503: "come back later" is the truth, and a 5xx reads as the
+    # server being broken to a proxy's health logic.
+    full = _queue_refusal()
+    if full:
+        raise HTTPException(status_code=429, detail=full)
 
     # Refuse, before a job exists, a chain that would run on the slow floor
     # alone (DEC-073). The worker checks again, but by then the job is on the
@@ -249,6 +291,11 @@ async def attach_source(
             ),
         )
 
+    # Before the upload is stored: a refused request must not leave a file.
+    full = _queue_refusal()
+    if full:
+        raise HTTPException(status_code=429, detail=full)
+
     video_name = await save_upload(file)
     subtitle_name = await save_upload(subtitle) if subtitle is not None else None
 
@@ -257,8 +304,11 @@ async def attach_source(
     if subtitle_name:
         config["transcript_filename"] = subtitle_name
 
+    # source_attached_at: when this job took its upload, which is what lets a
+    # later delete tell this file from a newer upload that reused the name.
     store.update_job(job_id, config=config, upload_filename=video_name,
-                     error=None, status=JobStatus.QUEUED)
+                     error=None, status=JobStatus.QUEUED,
+                     source_attached_at=datetime.now(timezone.utc))
     await worker.submit_job(job_id, config)
 
     return _job_to_response(store.get_job(job_id))
@@ -283,26 +333,51 @@ async def get_job(job_id: str) -> JobResponse:
     return _job_to_response(job)
 
 
+@router.post("/{job_id}/cancel", status_code=202)
+async def cancel_job(job_id: str) -> JobResponse:
+    """Stop a queued or running job.
+
+    It is marked cancelled at once, starts no further step, and its ffmpeg is
+    killed now. A provider request or transcription chunk already in flight
+    finishes or times out first (clipping/cancel.py). Its output directory is
+    kept, so a saved transcript is still there for a rerun (DEC-022).
+    """
+    outcome = store.request_cancel(job_id)
+    if outcome == "missing":
+        raise HTTPException(status_code=404, detail="Job not found")
+    if outcome == "terminal":
+        status = store.get_job(job_id).get("status")
+        raise HTTPException(
+            status_code=409,
+            detail=f"This job is already '{getattr(status, 'value', status)}'.",
+        )
+    worker.cancel(job_id)
+    return _job_to_response(store.get_job(job_id))
+
+
 @router.delete("/{job_id}")
-async def delete_job(job_id: str) -> dict:
-    """Cancel/delete a job."""
+async def delete_job(job_id: str, response: Response) -> dict:
+    """Delete a job, its output directory and the uploads only it uses.
+
+    A running job is cancelled first; its worker removes it once it stops, and
+    this answers 202. Nothing here awaits, so the worker's own cleanup -- also
+    on the event loop -- either sees the flag set below or has already gone.
+    """
     job = store.get_job(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    # If running, mark as cancelled first
-    running_states = {
-        JobStatus.QUEUED.value,
-        JobStatus.DOWNLOADING.value,
-        JobStatus.TRANSCRIBING.value,
-        JobStatus.ANALYZING.value,
-        JobStatus.RENDERING.value,
-    }
-    if job.get("status") in running_states:
-        store.set_status(job_id, JobStatus.CANCELLED)
+    store.update_job(job_id, delete_requested=True)
+    store.request_cancel(job_id)  # no-op for a job that already finished
+    if worker.cancel(job_id):
+        response.status_code = 202
+        return {
+            "message": "Cancelling. The job and its files are removed once it stops.",
+            "id": job_id,
+        }
 
-    store.delete_job(job_id)
-    return {"message": "Job deleted", "id": job_id}
+    report = worker.remove_job(job_id)
+    return {"message": "Job deleted", "id": job_id, **report}
 
 
 @router.get("/{job_id}/status")

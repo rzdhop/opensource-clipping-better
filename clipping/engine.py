@@ -119,6 +119,7 @@ def transcribe_video(
     device: str = "auto",
     compute_type: str = "auto",
     model=None,
+    cancel=None,
 ) -> tuple[str, list[dict]]:
     """
     Transcribe *video_path* using Faster-Whisper.
@@ -134,6 +135,9 @@ def transcribe_video(
     -----
     Pass *model* to reuse an already-loaded WhisperModel across several files;
     otherwise one is built from *model_size*/*device*/*compute_type*.
+
+    *cancel* stops it between segments. Loading the model and decoding the
+    first window cannot be interrupted.
     """
     print("[2/3] Starting transcription with Faster-Whisper (Word-Level)...")
 
@@ -177,6 +181,8 @@ def transcribe_video(
     )
 
     for segment in segments:
+        if cancel is not None:
+            cancel.check()
         # Clamp so floating-point drift past the duration doesn't overshoot.
         progress.update(min(segment.end, total_dur) - progress.n)
         transkrip_lengkap += f"[{segment.start:.1f} - {segment.end:.1f}] {segment.text}\n"

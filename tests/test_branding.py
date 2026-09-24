@@ -30,6 +30,12 @@ ALLOWED = {
     # This is a fork. Rewriting the upstream project's name in its attribution
     # would misrepresent where the code came from.
     "upstream attribution": ("NaufalRizqullah", "github.com/NaufalRizqullah"),
+    # The GitHub repository is still named opensource-clipping-better. Its URL
+    # is an address, not the product name: a clone or issue link that avoided
+    # it would point at a repository that does not exist, which is what the
+    # `your-username/rzdhop-clips` placeholder did. If the repository is ever
+    # renamed, GitHub redirects the old URL, and this entry can go.
+    "the fork's repository slug": ("opensource-clipping-better",),
 }
 
 

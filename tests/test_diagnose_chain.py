@@ -1,4 +1,4 @@
-"""Settings -> Test provider chain asks every keyed link the real question (DEC-078).
+"""Settings -> Test provider chain asks every keyed link the real question (DEC-090).
 
 The diagnostic used to send "reply with ok". On 2026-09-24 it reported a chain
 as ready whose only working link was the NVIDIA floor, because a ping cannot

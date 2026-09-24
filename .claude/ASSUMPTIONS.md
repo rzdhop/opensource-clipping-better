@@ -1,6 +1,24 @@
 # ASSUMPTIONS
 
 ## Unconfirmed
+- **A-021** — GitHub's `ubuntu-latest` runner has ffmpeg, so
+  `tests/test_loudnorm.py::test_a_quiet_clip_comes_out_at_minus_14_lufs` runs in
+  CI rather than skipping. UNCONFIRMED (it skips cleanly if not).
+- **A-022** — On the Ubuntu container, `Popen.kill` (SIGKILL) ends a job's ffmpeg
+  and frees the worker slot as fast as it did on Windows (0.2s / 0.3s measured).
+  UNCONFIRMED on the VPS: verified on Windows only.
+- **A-023** — The three notebooks run end to end on Colab and Kaggle, including
+  the Kaggle dashboard build when npm exists. UNCONFIRMED: verified
+  structurally only (every code cell compiles after IPython's transformer,
+  exact JSON round-trip, every `main.py` flag declared).
+- **A-024** — `tests/test_transcript_dispatch.py::test_bypass_does_not_import_ctranslate2`
+  fails on Windows only because ctranslate2 is installed here. It may be a real
+  import leak on the transcript path that CI cannot see (its env lacks
+  ctranslate2). UNCONFIRMED -- worth a look.
+- **A-025** — Camera-switch rendering still works after the render-layer changes
+  (DEC-079/080/081, the temp cleanup). UNCONFIRMED: it needs pyannote and an HF
+  token. Hybrid, split-screen (face trigger), hook-v2 and edge-glow were verified
+  frame-identical; camera-switch shares their imports but was never rendered.
 - **A-013** — Output language defaults to the transcript's language (reported by
   the hosted STT, else stopword detection); `output_language` overrides it.
   English titles/keywords/hashtags are still produced alongside. UNCONFIRMED.
@@ -48,21 +66,21 @@
   carry the analysis alone) based on their published free tiers. **OpenRouter
   half CONFIRMED 2026-09-24** by `tools/bench_llm.py` on the real pass-A request
   (mistral-small-3.2-24b: 2.5-2.7s on the fixture, 5-13s on real windows). The
-  Mistral half is A-021. `primary` is a speed claim, not a price claim.
+  Mistral half is A-026. `primary` is a speed claim, not a price claim.
 
-- **A-021** — `mistral/mistral-small-latest` can carry the analysis. It joined
-  the default chain on the human's decision (DEC-076) with no key on this
+- **A-026** — `mistral/mistral-small-latest` can carry the analysis. It joined
+  the default chain on the human's decision (DEC-088) with no key on this
   project to measure it. The chain test measures it the moment a key is set.
   UNCONFIRMED.
-- **A-022** — Groq's `openai/gpt-oss-120b` can carry the analysis. Named as
+- **A-027** — Groq's `openai/gpt-oss-120b` can carry the analysis. Named as
   `GROQ_DEFAULT_MODEL` but never benchmarked here (no key). Note: gpt-oss models
   returned `content=null` on OpenRouter at small budgets (2026-09-24), a
   reasoning-model trait worth checking first. UNCONFIRMED.
-- **A-023** — The Tailscale serve proxy in front of the app does not cut a
-  request shorter than the chain test's 290s worst case (DEC-079). On
+- **A-028** — The Tailscale serve proxy in front of the app does not cut a
+  request shorter than the chain test's 290s worst case (DEC-091). On
   2026-09-24 `tailscale serve status` said "No serve config", so nothing
   proxies the app on this box today. UNCONFIRMED for a setup that uses it.
-- **A-024** — "No longer available to new users" 404s are per account and
+- **A-029** — "No longer available to new users" 404s are per account and
   permanent, so remembering the working model per key for the life of the
   server is safe. Nothing is blacklisted, so a wrong guess costs one fast 404.
   UNCONFIRMED.

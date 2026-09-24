@@ -207,7 +207,7 @@ def test_a_rerun_that_asks_for_a_fresh_analysis_is_gated(
 
 # ------------------------------------ POST /api/settings/test-chain (Stage 6)
 
-# The route now sends the real pass-A request (DEC-078), so the fake answers it
+# The route now sends the real pass-A request (DEC-090), so the fake answers it
 # the way a good model does: the fixture's one clip, beats 4-9. A ping ignores
 # the content.
 _FOUND = (

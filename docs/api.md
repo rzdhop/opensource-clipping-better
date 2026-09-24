@@ -62,7 +62,8 @@ python tools/rzclips-fetch.py --url "https://..." --server $BASE --token $API_TO
 | `GET` | `/api/jobs/{id}` | One job, with its clips when finished. |
 | `GET` | `/api/jobs/{id}/status` | Server-Sent Events: progress and log lines. |
 | `POST` | `/api/jobs/{id}/source` | Attach a video to a job in `needs_upload`. |
-| `DELETE` | `/api/jobs/{id}` | Cancel if running, then delete. |
+| `POST` | `/api/jobs/{id}/cancel` | Stop a queued or running job. `202` with the job, now `cancelled`; `409` if it already finished. Its ffmpeg is killed at once; a provider request already in flight finishes or times out first. Files are kept. |
+| `DELETE` | `/api/jobs/{id}` | Delete the job, its `outputs/{id}/` and the uploads no other job uses. `200` with `removed`/`kept` lists; `202` for a running job, which is cancelled first and removed once it stops. |
 | `GET` | `/api/outputs/{id}` | List a job's output files. Header-only; a media signature never opens it. |
 | `GET` | `/api/outputs/{id}/{file}` | Serve one, including `.srt`. Served `inline` so a `<video>` or `poster` can use it; add `?download=1` for `Content-Disposition: attachment`. Accepts a header **or** an `?exp=&sig=` pair. Range requests are supported, so seeking works. |
 | `GET`/`PUT` | `/api/settings` | API keys (write-only), defaults, `allow_slow_chain`, and `chain_blocked_reason` (why a chain job would be refused right now, or `""`). |
@@ -159,6 +160,10 @@ curl -H "$AUTH" -F "file=@talk.mp4" -F "subtitle=@talk.vtt" \
 A job interrupted by a server restart is marked `failed` at startup rather than
 sitting in a running state forever.
 
+`cancelled` is final: a cancelled job does not turn `failed` when its interrupted
+work unwinds, and a job that completes before the cancel lands stays `completed`
+(the cancel gets `409`).
+
 ## Watching a job
 
 `GET /api/jobs/{id}/status` is Server-Sent Events. `EventSource` cannot send
@@ -180,5 +185,6 @@ with httpx.stream("GET", f"{base}/api/jobs/{job_id}/status",
 | `400` | The payload is missing a source, a field is out of range, or the chain would run on its slow floor alone (see above). |
 | `401` | Missing or wrong token. |
 | `404` | No such job or file. |
-| `409` | Attaching a source to a job that is not waiting for one, or a chain test already running. |
+| `409` | Attaching a source to a job that is not waiting for one, a chain test already running, cancelling a job that already finished, or rerunning (`reuse_job_id`) a job that is still running. |
 | `413` | Upload over 2 GB. |
+| `429` | The queue is full: `MAX_QUEUED_JOBS` jobs (default 20; `0` = no limit) are already waiting for a worker. Retry once one has started. |

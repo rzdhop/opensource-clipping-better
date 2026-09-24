@@ -125,9 +125,11 @@ def _transcribe(cfg) -> tuple[str, list[dict]]:
     ``--stt-chain none`` (and the older ``--no-whisper``) never reach here:
     ``resolve_transcript`` raises first.
     """
+    from clipping import cancel as cancel_mod
     from clipping.config import provider_keys
     from clipping.providers import stt as stt_mod
 
+    cancel_kwargs = cancel_mod.kwargs_for(cancel_mod.token_of(cfg))
     spec = getattr(cfg, "stt_chain", "") or stt_mod.DEFAULT_STT_CHAIN
     chain = stt_mod.parse_stt_chain(spec)
     hosted = [link for link in chain if link.provider != "local"]
@@ -142,6 +144,7 @@ def _transcribe(cfg) -> tuple[str, list[dict]]:
                 keys=keys,
                 max_words_per_subtitle=cfg.max_kata_per_subtitle,
                 language=_requested_language(cfg),
+                **cancel_kwargs,
             )
         except Exception as exc:  # noqa: BLE001 - fall through to local Whisper
             print(f"   ⚠️ Hosted transcription failed | {exc}")
@@ -166,6 +169,7 @@ def _transcribe(cfg) -> tuple[str, list[dict]]:
         model_size=cfg.whisper_model,
         device=cfg.whisper_device,
         compute_type=cfg.whisper_compute_type,
+        **cancel_kwargs,
     )
 
 

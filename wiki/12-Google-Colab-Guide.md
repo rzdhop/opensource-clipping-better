@@ -12,7 +12,7 @@ Open a new [Google Colab](https://colab.research.google.com/) notebook and set t
 
 ```python
 !rm -rf ./* ./.*
-!git clone https://github.com/NaufalRizqullah/opensource-clipping.git .
+!git clone https://github.com/rzdhop/opensource-clipping-better.git .
 !pip install -r requirements.txt
 ```
 

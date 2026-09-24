@@ -39,7 +39,7 @@ If a provider is only slow to wake, `--no-preflight` skips the check.
 
 A `404` saying a model "is no longer available" means the provider retired it,
 often for new accounts first. Gemini and OpenRouter then try their own
-fallback model on the same key and print a `↪` line (DEC-077); for the others,
+fallback model on the same key and print a `↪` line (DEC-089); for the others,
 set `LLM_CHAIN` to a current model or update the project.
 
 ---

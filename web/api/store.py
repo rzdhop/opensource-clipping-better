@@ -43,6 +43,27 @@ MAX_EVENTS = 500
 _PERSIST_MIN_INTERVAL = 1.0
 _last_persist = 0.0
 
+# A job in one of these states is finished; nothing may move it on.
+_TERMINAL = frozenset({
+    JobStatus.COMPLETED.value, JobStatus.FAILED.value, JobStatus.CANCELLED.value,
+})
+
+# What only the worker writes as a job runs. Once a job is CANCELLED these are
+# dropped: its worker may still be finishing a request or unwinding a killed
+# ffmpeg, and a late set_error or set_clips must not turn CANCELLED into FAILED
+# or COMPLETED. The worker's lines still reach the feed (append_event).
+_WORKER_FIELDS = frozenset({"status", "error", "clips"})
+
+
+def _status_value(job: dict):
+    status = job.get("status")
+    return getattr(status, "value", status)
+
+
+def _is_cancelled(job: dict) -> bool:
+    return _status_value(job) == JobStatus.CANCELLED.value
+
+
 # Resolve absolute path to the project root (2 levels up from web/api)
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 PERSIST_PATH = os.path.join(PROJECT_ROOT, "outputs", "jobs.json")
@@ -215,6 +236,10 @@ def update_job(job_id: str, **kwargs) -> None:
         job = _jobs.get(job_id)
         if job is None:
             return
+        if _is_cancelled(job):
+            kwargs = {k: v for k, v in kwargs.items() if k not in _WORKER_FIELDS}
+            if not kwargs:
+                return
         job.update(kwargs)
         job["updated_at"] = _now()
         _persist()
@@ -270,7 +295,7 @@ def update_progress(
     """Advance a job to a new step."""
     with _lock:
         job = _jobs.get(job_id)
-        if job is None:
+        if job is None or _is_cancelled(job):
             return
 
         # Time-in-step, not time-since-start: a step that has not changed keeps
@@ -320,7 +345,7 @@ def refine_progress(
     """
     with _lock:
         job = _jobs.get(job_id)
-        if job is None:
+        if job is None or _is_cancelled(job):
             return
         current = _as_progress(job.get("progress"))
         if current is None:
@@ -395,6 +420,28 @@ def set_error(job_id: str, error: str) -> None:
 def set_clips(job_id: str, clips: list[ClipDetail]) -> None:
     """Store rendered clip details."""
     update_job(job_id, clips=clips, status=JobStatus.COMPLETED.value)
+
+
+def request_cancel(job_id: str) -> str:
+    """Mark *job_id* cancelled, unless it has already finished.
+
+    Returns ``"cancelled"``, ``"terminal"`` (it completed, failed or was
+    cancelled first) or ``"missing"``. Decided under the store lock, so a job
+    ends either COMPLETED -- the worker's set_clips got there first and the
+    cancel is refused -- or CANCELLED, never both.
+    """
+    with _lock:
+        job = _jobs.get(job_id)
+        if job is None:
+            return "missing"
+        if _status_value(job) in _TERMINAL:
+            return "terminal"
+        job["status"] = JobStatus.CANCELLED.value
+        job["error"] = None
+        job["updated_at"] = _now()
+        _append_event_locked(job, "Cancel requested.", "warning", "worker")
+        _persist()
+        return "cancelled"
 
 
 def delete_job(job_id: str) -> bool:

@@ -54,6 +54,12 @@ async def lifespan(app: FastAPI):
             f"{settings_store.SETTINGS_PATH}"
         )
 
+    # A job deleted while it was running is removed by its worker when it
+    # stops. If the process died first, the request is still on the record.
+    deleted = worker.finish_deferred_deletes()
+    if deleted:
+        print(f"   🗑 Finished {deleted} deletion(s) interrupted by the restart.")
+
     yield
     print("👋 Backend shutting down...")
 

@@ -1,6 +1,6 @@
 <br />
 <div align="center">
-  <a href="https://github.com/NaufalRizqullah/opensource-clipping">
+  <a href="https://github.com/rzdhop/opensource-clipping-better">
     <img src="assets/images/rzdhop-clips-logo-editable.svg" alt="Logo" width="350">
   </a>
 
@@ -13,9 +13,9 @@
     <br />
     <a href="README_ID.md">🇮🇩 Baca dalam Bahasa Indonesia</a>
     &middot;
-    <a href="https://github.com/NaufalRizqullah/opensource-clipping/issues/new">Report Bug</a>
+    <a href="https://github.com/rzdhop/opensource-clipping-better/issues/new">Report Bug</a>
     &middot;
-    <a href="https://github.com/NaufalRizqullah/opensource-clipping/issues/new">Request Feature</a>
+    <a href="https://github.com/rzdhop/opensource-clipping-better/issues/new">Request Feature</a>
   </p>
 </div>
 
@@ -131,7 +131,7 @@ Open a new Google Colab notebook, set the Runtime to **T4 GPU**, and create the 
 **Cell 1: Setup & Clone**
 ```python
 !rm -rf ./* ./.*
-!git clone https://github.com/your-username/rzdhop-clips.git .
+!git clone https://github.com/rzdhop/opensource-clipping-better.git .
 !pip install -r requirements.txt
 ```
 
@@ -141,19 +141,25 @@ import os
 from pathlib import Path
 from google.colab import userdata
 
-# Store your keys in Colab Secrets first!
-# NVIDIA_API_KEY is the default provider; GOOGLE_API_KEY is only needed for
-# --ai-provider gemini or --voiceover.
-NVIDIA_API_KEY = userdata.get("NVIDIA_API_KEY")
+# Store your keys in Colab Secrets first! The analysis needs GROQ_API_KEY
+# and/or GOOGLE_API_KEY (both free); NVIDIA_API_KEY is an optional backup and
+# cannot start a job on its own.
+def secret(name):
+    try:
+        return userdata.get(name) or ""
+    except Exception:  # the secret is not set, or notebook access is off
+        return ""
 
-env_text = f"NVIDIA_API_KEY={NVIDIA_API_KEY}\n"
+env_text = "".join(f"{name}={secret(name)}\n"
+                   for name in ("GROQ_API_KEY", "GOOGLE_API_KEY", "NVIDIA_API_KEY"))
 Path(".env").write_text(env_text, encoding="utf-8")
 ```
 
 **Cell 3: Execute (Example including Kaggle fallback for float32)**
 ```python
 # Acquire the inputs first (previous cell), e.g. with yt-dlp:
-#   !yt-dlp -f "bv*[vcodec!*=av01]+ba/b" --write-auto-subs --sub-format vtt \
+#   !yt-dlp -f "bv*[vcodec!*=av01]+ba/b" --merge-output-format mp4 \
+#          --write-auto-subs --sub-format vtt \
 #          --convert-subs vtt -o "talk.%(ext)s" "<URL>"
 VIDEO_FILE = "talk.mp4"
 TRANSCRIPT_FILE = "talk.en.vtt"   # set to "" to transcribe with Whisper instead
@@ -180,35 +186,29 @@ WHISPER_COMPUTE_TYPE = "float32"
 
 ---
 
-## 🎬 Web Studio (GitHub Pages + Remote GPU)
+## 🎬 Web Studio
 
-The **Clipping Studio** is a browser-based dashboard hosted for free on **GitHub Pages** that connects to a Kaggle/Colab notebook as its backend — giving you a full GUI to control the AI clipping pipeline without any local setup.
+The Studio is the dashboard in `web/dashboard`, and the API serves it: one
+process, one port, one URL. There is no separate frontend to host.
 
-**🔗 Open Studio:** [naufalrizqullah.github.io/rzdhop-clips/studio/](https://naufalrizqullah.github.io/rzdhop-clips/studio/)
-
-### How It Works
-
-```
-┌─────────────────────┐     HTTPS (ngrok)     ┌──────────────────────────┐
-│   GitHub Pages      │ ◄──────────────────►   │   Kaggle / Colab         │
-│   (Static Frontend) │                        │   (FastAPI + GPU)        │
-│                     │   POST /api/jobs       │                          │
-│   studio/index.html │ ────────────────────►  │   web/api/app.py         │
-│   studio/new-job    │   GET  /api/jobs/:id   │   clipping pipeline      │
-│   studio/settings   │ ◄────────────────────  │   Whisper + Gemini       │
-└─────────────────────┘                        └──────────────────────────┘
-        FREE                                           FREE (GPU)
+```bash
+docker compose up -d                 # builds the dashboard into the image
 ```
 
-### Quick Start
+Or without Docker:
 
-1. **Start the backend** — Open `notebooks/Kaggle_Studio_Server.ipynb` in Kaggle (or Colab), add your API keys to Secrets, and run all cells. Copy the **Public URL** from the output.
+```bash
+(cd web/dashboard && npm ci && npm run build)   # once, and after each pull
+uvicorn web.api.app:app --host 127.0.0.1 --port 8000
+```
 
-2. **Open the Studio** — Visit [the Studio page](https://naufalrizqullah.github.io/rzdhop-clips/studio/) in your browser.
+Open **http://localhost:8000/** and sign in with the API token. It is printed
+in the log on first start (`🔑 API token: …`) and kept in `data/api_token`;
+set `API_TOKEN` in `.env` to pin it. The backend binds loopback on purpose —
+to reach it from your phone, follow [docs/deploy-tailscale.md](docs/deploy-tailscale.md).
 
-3. **Connect** — Click the **Connect** button in the sidebar, paste the tunnel URL, and click **Test & Connect**.
-
-4. **Create a job** — Go to **New Job**, enter a YouTube URL, configure your clip settings, and hit **Start Clipping**. Monitor progress in real-time from the Dashboard.
+From the dashboard you upload a video (and optionally its transcript) or paste
+a URL, pick the clip settings, and watch the job run.
 
 ### Watching a job run
 
@@ -239,7 +239,19 @@ The same feed is on the API: `GET /api/jobs/{id}` returns it as `events`, and
 > Python-level narration, which is the part that names steps, providers and
 > models.
 
-> **Note:** The tunnel URL changes each time the notebook restarts. The Studio saves your last URL in `localStorage` for convenience, but you'll need to update it after each new session.
+### Stopping and deleting a job
+
+**Cancel** (on the job page while it runs, or `POST /api/jobs/{id}/cancel`)
+stops it for real: its ffmpeg is killed at once and no further step, provider
+request or transcription chunk starts. A provider request already in flight
+finishes or times out first -- up to a few minutes on NVIDIA's free tier. A
+cancelled job keeps its files, so Clone & Rerun still finds its transcript.
+
+**Delete** removes the job, its output directory and the uploads no other job
+uses. A running job is cancelled first and removed once it stops.
+
+At most `MAX_QUEUED_JOBS` jobs (default 20) wait for a worker; past that, a new
+job is refused with `429` until one starts.
 
 ---
 
@@ -252,7 +264,7 @@ The same feed is on the API: `GET /api/jobs/{id}` returns it as `events`, and
 
 ```bash
 # 1. Clone the repo
-git clone https://github.com/your-username/rzdhop-clips.git
+git clone https://github.com/rzdhop/opensource-clipping-better.git rzdhop-clips
 cd rzdhop-clips
 
 # 2. Install dependencies (pick one)
@@ -264,7 +276,8 @@ cp .env.example .env
 # Edit .env and add a GROQ_API_KEY and/or GOOGLE_API_KEY (both free)
 
 # 4. Acquire the inputs with your own tools. For example, with yt-dlp:
-yt-dlp -f "bv*[vcodec!*=av01]+ba/b" --write-auto-subs --sub-format vtt \
+yt-dlp -f "bv*[vcodec!*=av01]+ba/b" --merge-output-format mp4 \
+       --write-auto-subs --sub-format vtt \
        --convert-subs vtt -o "talk.%(ext)s" "https://youtube.com/watch?v=VIDEO_ID"
 # -> talk.mp4 and talk.en.vtt
 
@@ -697,7 +710,7 @@ rzdhop-clips/
 ├── run_upload.py            # YouTube auto-uploader CLI
 ├── run_fb_upload.py         # Facebook Pages Reels uploader CLI
 ├── pyproject.toml           # Dependencies & metadata
-├── .env.sample              # API key template
+├── .env.example             # Environment template (API keys, chain, serving)
 ├── .gitignore
 ├── README.md                # English docs
 ├── README_ID.md             # Indonesian docs

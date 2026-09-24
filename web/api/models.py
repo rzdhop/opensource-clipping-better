@@ -139,6 +139,8 @@ class JobCreateRequest(BaseModel):
     # opt-in, not an opt-out. See clipping/config.USE_HOOK_GLITCH.
     use_hook_glitch: bool = False
     use_auto_bgm: bool = True
+    # Off by default, like the glitch: see clipping/config.LOUDNORM.
+    loudnorm: bool = False
     use_karaoke_effect: bool = True
     # The word being spoken, in ASS BGR: &HBBGGRR&. Default is yellow.
     karaoke_color: str = Field(
@@ -405,7 +407,7 @@ class ChainTestRequest(BaseModel):
 
 
 class ChainLinkResult(BaseModel):
-    """One link's answer to the real analysis request (DEC-078).
+    """One link's answer to the real analysis request (DEC-090).
 
     ``status``: ``ok`` completed the real request; ``alive`` failed it but
     answered a ping (reachable, cannot do the job); ``failed`` neither;
@@ -430,7 +432,7 @@ class ChainLinkResult(BaseModel):
     candidates: Optional[int] = None
     found_moment: Optional[bool] = None
     # The structured-output rung that worked, and the model that answered --
-    # not the link's own when a retired model was swapped (DEC-077).
+    # not the link's own when a retired model was swapped (DEC-089).
     level: Optional[str] = None
     used_model: Optional[str] = None
     # One sentence for a person, or "".

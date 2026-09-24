@@ -1,4 +1,4 @@
-"""A retired model costs one printed hop on the same key, not the link (DEC-077).
+"""A retired model costs one printed hop on the same key, not the link (DEC-089).
 
 On 2026-09-24 Google closed ``gemini-2.5-flash-lite`` to new accounts. The key
 was fine, the provider was fine, and the whole Gemini link failed anyway, so a

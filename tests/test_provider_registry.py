@@ -73,7 +73,7 @@ def test_duplicate_links_are_kept():
 
 def test_default_chain_is_parseable_and_ordered_fast_then_plentiful_then_floor():
     """Free and fast first, paid after the free tiers, the NIM floor last
-    (DEC-076). OpenRouter sits after Gemini so a funded key is only spent
+    (DEC-088). OpenRouter sits after Gemini so a funded key is only spent
     when a free tier did not answer."""
     chain = registry.parse_chain(registry.DEFAULT_LLM_CHAIN)
     assert [link.provider for link in chain] == [

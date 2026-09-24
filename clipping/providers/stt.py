@@ -60,11 +60,13 @@ def transcribe(
     language=None,
     on_log=print,
     post=None,
+    cancel=None,
 ):
     """``(transkrip_lengkap, data_segmen, language)`` for *video_path*.
 
     Each link is tried in order; a link with no key is skipped with a printed
-    reason, exactly as the LLM chain does.
+    reason, exactly as the LLM chain does. *cancel* stops it before the next
+    link or chunk; a chunk already uploading finishes or times out.
     """
     audio_path = None
     chunk_paths = []
@@ -80,6 +82,8 @@ def transcribe(
 
         failures = []
         for link in chain:
+            if cancel is not None:
+                cancel.check()
             label = f"{link.provider}/{link.model}"
             key = keys.get(link.provider) or ""
             if not key:
@@ -92,7 +96,7 @@ def transcribe(
                 return _transcribe_with(
                     link, key, audio_path, bounds, chunk_paths,
                     max_words_per_subtitle=max_words_per_subtitle,
-                    language=language, on_log=on_log, post=post,
+                    language=language, on_log=on_log, post=post, cancel=cancel,
                 )
             except Exception as exc:  # noqa: BLE001 - recorded, then the next link
                 reason = f"{type(exc).__name__}: {exc}"
@@ -110,7 +114,7 @@ def transcribe(
 
 def _transcribe_with(
     link, key, audio_path, bounds, chunk_paths, *,
-    max_words_per_subtitle, language, on_log, post,
+    max_words_per_subtitle, language, on_log, post, cancel=None,
 ):
     sender = post or _post_multipart
     provider = PROVIDERS[link.provider]
@@ -120,6 +124,8 @@ def _transcribe_with(
     reported = language
 
     for index, (start, end) in enumerate(bounds, start=1):
+        if cancel is not None:
+            cancel.check()
         if len(bounds) == 1:
             chunk_path = audio_path
         else:

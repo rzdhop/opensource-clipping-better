@@ -32,9 +32,9 @@ DEFAULT_PROBE_TIMEOUT = 45.0
 # chain's slow floor, which a job may not run on alone without an explicit
 # override, DEC-073); ``signup_url`` is where to get its key; ``free_tier``
 # says whether the DEFAULT model on it costs nothing, so a message never calls
-# a billed link free (DEC-076); ``fallback_models`` are the models tried, in
+# a billed link free (DEC-088); ``fallback_models`` are the models tried, in
 # order, on the SAME key when the configured one answers "this model is not
-# available" -- and only then (DEC-077). All five are trailing and defaulted
+# available" -- and only then (DEC-089). All five are trailing and defaulted
 # so a Provider built without them still works.
 Provider = namedtuple(
     "Provider",
@@ -75,7 +75,7 @@ PROVIDERS = {
         # Measured 2026-09-24 against the real pass-A request: found the test
         # transcript's clip 3/3 and answered real windows in 1.0-1.3s. An alias
         # that Google moves forward, which is what a fallback for a retired
-        # model wants -- and why it is NOT the default (DEC-075).
+        # model wants -- and why it is NOT the default (DEC-087).
         fallback_models=("gemini-flash-lite-latest",),
     ),
     "nvidia": Provider(
@@ -273,7 +273,7 @@ def work_probe_timeout(link) -> float:
     return min(effective_timeout(link), 2.0 * probe_timeout(link))
 
 
-# Settings -> Test provider chain (DEC-078, DEC-079). Each keyed link is asked
+# Settings -> Test provider chain (DEC-090, DEC-091). Each keyed link is asked
 # the real pass-A request on a small fixture, and may take as long as a JOB's
 # own request to it would -- so a timeout here means what it means in a job.
 # Measured 2026-09-24 on requests that then succeeded: Gemini's free tier took

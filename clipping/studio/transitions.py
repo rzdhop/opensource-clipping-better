@@ -8,7 +8,6 @@ These assets have a ~5 second branding intro that must be skipped.
 The usable transition content starts at the configured skip offset.
 """
 
-import importlib.util
 import os
 import random
 import subprocess
@@ -16,19 +15,9 @@ import subprocess
 from yt_dlp import YoutubeDL
 
 
-def _load_studio_internal_module(file_name: str, module_alias: str):
-    module_path = os.path.join(os.path.dirname(__file__), file_name)
-    spec = importlib.util.spec_from_file_location(module_alias, module_path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-_ffmpeg_utils = _load_studio_internal_module(
-    "ffmpeg_utils.py", "clipping_studio_ffmpeg_utils"
-)
+from . import ffmpeg_utils as _ffmpeg_utils
 get_ts_encode_args = _ffmpeg_utils.get_ts_encode_args
-utils = _load_studio_internal_module("utils.py", "clipping_studio_utils")
+from . import utils
 _get_render_dims = utils._get_render_dims
 _is_vertical_ratio = utils._is_vertical_ratio
 RATIO_MAP = utils.RATIO_MAP

@@ -511,7 +511,7 @@ function Settings() {
 const STATUS_GLYPH = { ok: '✅', alive: '⚠️', failed: '✖', no_key: '⏭', unused: '·' }
 
 // The verdict's colour and headline. The rule itself is the server's (DEC-073,
-// DEC-078); this only says it.
+// DEC-090); this only says it.
 const VERDICT_STYLE = {
   ready: { color: 'var(--success)' },
   floor_only: { color: 'var(--warning)' },

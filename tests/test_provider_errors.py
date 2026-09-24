@@ -174,7 +174,7 @@ def test_a_non_integer_status_is_ignored():
     assert errors.status_code(err) is None
 
 
-# ---------------------------------------------------- model unavailable (DEC-077)
+# ---------------------------------------------------- model unavailable (DEC-089)
 
 @pytest.mark.parametrize("name,status,message,expected", [
     # The ones a same-provider model swap is for.

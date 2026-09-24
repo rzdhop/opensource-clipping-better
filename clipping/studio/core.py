@@ -1,13 +1,11 @@
 """
-Core Studio pipeline implementation extracted from clipping/studio.py.
+Core Studio pipeline implementation.
 
-This module acts as an orchestrator, importing from modularized subcomponents
-to maintain original behavior while allowing clipping/studio.py to remain
-a thin orchestration and compatibility entry point.
+This module acts as an orchestrator, importing from modularized subcomponents;
+the package's __init__ re-exports its public names as ``clipping.studio``.
 """
 
 import html
-import importlib.util
 import json
 import math
 import os
@@ -29,54 +27,47 @@ from mediapipe.tasks import python as mp_python
 from mediapipe.tasks.python import vision as mp_vision
 from PIL import Image, ImageDraw, ImageFont
 
-def _load_studio_internal_module(file_name: str, module_alias: str):
-    module_path = os.path.join(os.path.dirname(__file__), file_name)
-    spec = importlib.util.spec_from_file_location(module_alias, module_path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-# Import modules to re-export for studio.py
-utils = _load_studio_internal_module("utils.py", "clipping_studio_utils")
+# Sibling modules, re-exported through the package __init__
+from . import utils
 _get_cv2_interpolation = utils._get_cv2_interpolation
 _resize_frame = utils._resize_frame
 _get_render_dims = utils._get_render_dims
 _is_vertical_ratio = utils._is_vertical_ratio
-face_detection = _load_studio_internal_module("face_detection.py", "clipping_studio_face_detection")
+from . import face_detection
 get_face_detector = face_detection.get_face_detector
 estimate_speaker_count_from_video = face_detection.estimate_speaker_count_from_video
-typography = _load_studio_internal_module("typography.py", "clipping_studio_typography")
+from . import typography
 download_google_font = typography.download_google_font
 register_fonts_for_libass = typography.register_fonts_for_libass
 siapkan_font_tipografi = typography.siapkan_font_tipografi
-audio_bgm = _load_studio_internal_module("audio_bgm.py", "clipping_studio_audio_bgm")
+from . import audio_bgm
 get_local_bgm_file = audio_bgm.get_local_bgm_file
 build_bgm_filter = audio_bgm.build_bgm_filter
-broll = _load_studio_internal_module("broll.py", "clipping_studio_broll")
+from . import broll
 download_pexels_broll = broll.download_pexels_broll
 crop_center_broll = broll.crop_center_broll
-subtitles = _load_studio_internal_module("subtitles.py", "clipping_studio_subtitles")
+from . import subtitles
 buat_file_ass = subtitles.buat_file_ass
-effects = _load_studio_internal_module("effects.py", "clipping_studio_effects")
+from . import effects
 siapkan_glitch_video = effects.siapkan_glitch_video
-transitions = _load_studio_internal_module("transitions.py", "clipping_studio_transitions")
+from . import transitions
 download_transition_raw = transitions.download_transition_raw
 download_all_transitions = transitions.download_all_transitions
 get_random_transition = transitions.get_random_transition
 prepare_transition_clip = transitions.prepare_transition_clip
 TMP_TRANSITION_POOL = transitions.TMP_TRANSITION_POOL
-thumbnail = _load_studio_internal_module("thumbnail.py", "clipping_studio_thumbnail")
+from . import thumbnail
 buat_thumbnail = thumbnail.buat_thumbnail
-render_hybrid = _load_studio_internal_module("render_hybrid.py", "clipping_studio_render_hybrid")
+from . import render_hybrid
 buat_video_hybrid = render_hybrid.buat_video_hybrid
-render_split_screen = _load_studio_internal_module("render_split_screen.py", "clipping_studio_render_split_screen")
+from . import render_split_screen
 buat_video_split_screen = render_split_screen.buat_video_split_screen
-render_camera_switch = _load_studio_internal_module("render_camera_switch.py", "clipping_studio_render_camera_switch")
+from . import render_camera_switch
 buat_video_camera_switch = render_camera_switch.buat_video_camera_switch
 
 # Helpers and ffmpeg_utils
-_helpers = _load_studio_internal_module("helpers.py", "clipping_studio_helpers")
-_ffmpeg_utils = _load_studio_internal_module("ffmpeg_utils.py", "clipping_studio_ffmpeg_utils")
+from . import helpers as _helpers
+from . import ffmpeg_utils as _ffmpeg_utils
 
 format_seconds = _helpers.format_seconds
 escape_ffmpeg_filter_value = _helpers.escape_ffmpeg_filter_value
@@ -86,8 +77,9 @@ get_mp4_encode_args = _ffmpeg_utils.get_mp4_encode_args
 open_ffmpeg_video_writer = _ffmpeg_utils.open_ffmpeg_video_writer
 build_ffmpeg_progress_cmd = _ffmpeg_utils.build_ffmpeg_progress_cmd
 run_ffmpeg_with_progress = _ffmpeg_utils.run_ffmpeg_with_progress
-v2_helpers = _load_studio_internal_module("v2_helpers.py", "clipping_studio_v2_helpers")
-edge_glow_mod = _load_studio_internal_module("edge_glow.py", "clipping_studio_edge_glow")
+from . import v2_helpers
+from . import edge_glow as edge_glow_mod
+from clipping import loudness
 generate_edge_glow_video = edge_glow_mod.generate_edge_glow_video
 
 def proses_klip(
@@ -258,6 +250,12 @@ def proses_klip(
 
     std_p = get_ts_encode_args(video_encoder, fps=30)
 
+    # Intermediates named per hook-v2 item and per trimmed segment. The happy
+    # path deletes them as it goes; the finally deletes what an ffmpeg failure
+    # part-way through left behind. They are relative paths on purpose: the
+    # concat: protocol below cannot take a Windows drive letter (DEC-008).
+    step_temps = []
+
     try:
         # HOOK
         hook_v2_data = clip.get("hook_v2", {})
@@ -291,6 +289,7 @@ def proses_klip(
                 item_end = float(item["end_time"])
                 item_silent = f"h_v2_silent_{rank}_{i}.mp4"
                 item_ts = f"h_v2_ts_{rank}_{i}.ts"
+                step_temps += [item_silent, item_ts]
 
                 # Render visual (face-tracked crop)
                 buat_video_hybrid(
@@ -325,6 +324,7 @@ def proses_klip(
                 # Transition between items AND after the last item (before main clip)
                 trans_mp4 = f"h_v2_trans_{rank}_{i}.mp4"
                 trans_ts = f"h_v2_trans_{rank}_{i}.ts"
+                step_temps += [trans_mp4, trans_ts]
                 trans_type = hook_v2_data.get("transition", {}).get("type", "white_flash") if hook_v2_data else "white_flash"
                 if "glitch" in trans_type:
                     v2_helpers.create_glitch_transition(
@@ -480,6 +480,7 @@ def proses_klip(
                 s_silent = f"m_seg_silent_{rank}_{idx}.mp4"
                 s_ass = f"m_seg_ass_{rank}_{idx}.ass"
                 s_ts = f"m_seg_ts_{rank}_{idx}.ts"
+                step_temps += [s_silent, s_ass, s_ts]
 
                 # Render visual per segment
                 if use_split:
@@ -576,6 +577,7 @@ def proses_klip(
             if aktif_bgm and file_bgm:
                 print("   🎵 Applying BGM to segmented clip...")
                 m_ts_bgm = f"m_bgm_{rank}.ts"
+                step_temps.append(m_ts_bgm)
                 seg_total_dur = sum(float(s["end_time"]) - float(s["start_time"]) for s in keep_segments)
                 bgm_mode = getattr(cfg, "bgm_mode", "ducking")
                 filter_complex_seg = build_bgm_filter(
@@ -1087,6 +1089,13 @@ def proses_klip(
                     if os.path.exists(glow_full_path):
                         os.remove(glow_full_path)
 
+        # LOUDNESS (opt-in): the last write to the file, after the concat and the
+        # edge glow. The hook, voice-over and main clip were mixed separately.
+        if getattr(cfg, "loudnorm", False):
+            for final_path, _, _, _ in concat_runs:
+                if os.path.exists(final_path):
+                    loudness.normalize_file(final_path)
+
         judul_thumbnail = judul_en or judul or f"Highlight {rank}"
         buat_thumbnail(out_vid, out_thm, judul_thumbnail, cfg)
 
@@ -1114,7 +1123,7 @@ def proses_klip(
         return manifest_item
 
     finally:
-        files_to_remove = [h_ts, m_ts, a_hook, a_main, h_silent, m_silent]
+        files_to_remove = [h_ts, m_ts, a_hook, a_main, h_silent, m_silent] + step_temps
         if dev_dual:
             files_to_remove.extend([h_ts_dev, m_ts_dev, m_silent.replace(".ts", "_dev.ts")])
             

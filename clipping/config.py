@@ -41,6 +41,10 @@ USE_BROLL = True
 # asked not to -- an opt-out that most runs did not want. Enable per job in the
 # dashboard, or with --hook-glitch.
 USE_HOOK_GLITCH = False
+# Off by default, for the same reason: levelling every clip to -14 LUFS changes
+# the output of every existing script and re-encodes its audio. --loudnorm, or
+# the dashboard's "Level loudness" toggle. See clipping/loudness.py.
+LOUDNORM = False
 USE_SPLIT_SCREEN = False
 USE_CAMERA_SWITCH = False
 DIARIZATION_NUM_SPEAKERS = "auto"
@@ -352,6 +356,9 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Enable the glitch transition between hook and body")
     p.add_argument("--no-hook", action="store_true", help="Disable hook glitch teaser")
     p.add_argument("--no-bgm", action="store_true", help="Disable background music")
+    p.add_argument("--loudnorm", action="store_true", default=LOUDNORM,
+                   help="Level each finished clip to -14 LUFS (EBU R128, two-pass). "
+                        "Video is copied; audio is re-encoded.")
     p.add_argument(
         "--bgm-mode",
         choices=["ducking", "background"],
@@ -1216,8 +1223,11 @@ def preflight_chain(cfg, on_log=print, **probe_kwargs) -> str | None:
     else:
         on_log("   🔎 Asking the provider chain a real analysis request...")
 
+    from clipping import cancel as cancel_mod
+
     live, results, value = llm_mod.probe_chain(
-        chain, keys, on_log=on_log, work=work, **probe_kwargs
+        chain, keys, on_log=on_log, work=work,
+        **cancel_mod.kwargs_for(cancel_mod.token_of(cfg)), **probe_kwargs
     )
     if live is None:
         return llm_mod.preflight_message(results)
@@ -1479,6 +1489,7 @@ def build_config(argv: list[str] | None = None) -> SimpleNamespace:
         use_broll=not args.no_broll,
         use_hook_glitch=(args.hook_glitch and not args.no_hook),
         use_auto_bgm=not args.no_bgm,
+        loudnorm=args.loudnorm,
         use_karaoke_effect=not args.no_karaoke,
         use_split_screen=args.split_screen,
         use_dynamic_split=args.dynamic_split,

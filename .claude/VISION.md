@@ -1,4 +1,4 @@
-# VISION — OpenSource Clipping
+# VISION — rzdhop's clips (a fork of OpenSource Clipping)
 
 ## Purpose
 Convert long-form video (podcasts, talks, streams) into vertical short-form
@@ -22,8 +22,20 @@ have:
 
 The engine is therefore being decoupled into a **local-first** tool: external
 tools acquire the `.mp4` and `.vtt`; the engine ingests local paths, skips
-Whisper entirely when a transcript is supplied, uses an ordered chain of hosted
-LLM providers for semantic analysis (Gemini, OpenRouter, ... with NVIDIA NIM as
-the floor), and renders through the existing FFmpeg/OpenCV layer unchanged.
+Whisper entirely when a transcript is supplied, analyses with a chain of hosted
+LLM providers (Groq, Gemini, OpenRouter, Mistral, with NVIDIA as the floor), and
+renders through the FFmpeg/OpenCV layer.
 
-The render layer (Layer 4) is explicitly **not** part of this change.
+## Where it stands (2026-09-23)
+A comparison with the upstream project found the fork well ahead on analysis
+and the Studio, behind on onboarding, and never having touched two inherited
+areas. Those were then fixed: the notebooks and docs run and describe this
+fork; a job can be cancelled and deleted for real; the render layer is a real
+package with its per-frame and per-clip waste removed, and loudness levelling
+is available. The render layer is no longer off-limits, but every change to it
+must prove frame parity on a real render.
+
+Next, in order: CI coverage of the web layer; tests for the render layer's pure
+logic; download-all and per-clip re-edit in the dashboard; multi-platform
+ingest through the PC helper; a decision on upload guardrails; a dependency
+pass (extras, lockfile, audit).

@@ -15,6 +15,7 @@ from fastapi import Depends, APIRouter, HTTPException
 from ..auth import require_token
 
 # Imported rather than repeated so the API cannot drift from the pipeline.
+from clipping import __version__
 from clipping.config import AI_PROVIDER, WHISPER_DEVICE
 from ..models import (
     ChainLinkResult,
@@ -178,7 +179,7 @@ async def health_check() -> SystemHealthResponse:
     """System health check."""
     return SystemHealthResponse(
         status="ok",
-        version="1.12.0",
+        version=__version__,
         gpu_available=_check_gpu(),
         ffmpeg_available=_check_ffmpeg(),
         jobs_running=job_store.get_running_count(),
@@ -196,7 +197,7 @@ _CHAIN_TEST_CEILING_SECONDS = 300.0
 
 
 def _probe_every_link(links, keys):
-    """The blocking half: ask every keyed link the real request (DEC-078)."""
+    """The blocking half: ask every keyed link the real request (DEC-090)."""
     from clipping.analysis import diagnostic
     from clipping.providers import llm
 
@@ -208,7 +209,7 @@ def _probe_every_link(links, keys):
 
 @router.post("/api/settings/test-chain")
 async def run_chain_test(req: ChainTestRequest) -> ChainTestResponse:
-    """Ask every keyed link of a chain the real analysis request (DEC-078).
+    """Ask every keyed link of a chain the real analysis request (DEC-090).
 
     The only way to learn a link was dead used to be starting a job and
     waiting; then this route sent a one-word ping, which on 2026-09-24 called a

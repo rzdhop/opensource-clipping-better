@@ -187,7 +187,7 @@ def is_model_unavailable(exc: Exception) -> bool:
     """Whether *exc* says this MODEL cannot be used on this key, and nothing else.
 
     The one failure where another model on the same provider and the same key
-    is the right next step (DEC-077). Everything else keeps its meaning: a bad
+    is the right next step (DEC-089). Everything else keeps its meaning: a bad
     key, a rate limit, a refused schema or a malformed request is not fixed by
     changing the model, and swapping on those would hide the real error.
 
