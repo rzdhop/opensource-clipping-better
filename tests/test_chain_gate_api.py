@@ -417,3 +417,47 @@ def test_a_saved_chain_that_names_no_primary_is_not_reported_blocked(
     monkeypatch.setenv("LLM_CHAIN", "nvidia/some-model")
     settings_env.set_settings_env({"NVIDIA_API_KEY": "k"}, persist=False)
     assert client.get("/api/settings").json()["chain_blocked_reason"] == ""
+
+
+def _literal_values(source, class_name, field):
+    import re
+
+    block = source[source.index(f"class {class_name}("):]
+    block = block[: block.index("\nclass ", 1)] if "\nclass " in block[1:] else block
+    match = re.search(rf"{field}: Literal\[([^\]]+)\]", block)
+    assert match, f"{class_name}.{field} is not a Literal"
+    return set(re.findall(r'"([a-z_]+)"', match.group(1)))
+
+
+def _js_object_keys(source, const):
+    """The top-level keys of ``const NAME = { ... }``, skipping nested objects."""
+    import re
+
+    start = source.index(f"const {const} = {{") + len(f"const {const} = {{")
+    depth, top = 0, []
+    for char in source[start:]:
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            if depth == 0:
+                break
+            depth -= 1
+        elif depth == 0:
+            top.append(char)
+    return set(re.findall(r"(\w+):", "".join(top)))
+
+
+def test_every_status_and_verdict_the_backend_sends_is_drawn_by_the_page():
+    """Read as text: CI has no pydantic and no node (DEC-012). A status the page
+    has no glyph for renders as a bare dot, and a verdict it has no colour for
+    renders as an error -- both silent."""
+    models = (API / "models.py").read_text(encoding="utf-8")
+    page = (API.parent / "dashboard" / "src" / "pages" / "Settings.jsx").read_text(
+        encoding="utf-8")
+
+    statuses = _literal_values(models, "ChainLinkResult", "status")
+    verdicts = _literal_values(models, "ChainTestResponse", "verdict")
+
+    assert statuses == {"ok", "alive", "failed", "no_key", "unused"}
+    assert statuses <= _js_object_keys(page, "STATUS_GLYPH")
+    assert verdicts <= _js_object_keys(page, "VERDICT_STYLE")

@@ -351,9 +351,11 @@ function Settings() {
           <div className="settings-section">
             <h3>🩺 Provider chain</h3>
             <p className="form-hint" style={{ marginTop: '-6px', marginBottom: '14px' }}>
-              Asks every link of the chain for one word, with the keys saved on
-              the server — save new keys first. A job needs at least one fast
-              link (Groq, Gemini, OpenRouter or Mistral) to have a key.
+              Sends every keyed link one small real analysis request (a short
+              test transcript with one clip in it), all providers at once,
+              using the keys saved on the server — save new keys first. A job
+              needs at least one fast link (Groq, Gemini, OpenRouter or
+              Mistral) that completes it.
             </p>
             <button type="button" className="btn btn-secondary" onClick={handleTestChain} disabled={testing}>
               {testing
@@ -363,7 +365,7 @@ function Settings() {
             {testing && testElapsed >= 20 && (
               <p className="form-hint" style={{ marginTop: '8px' }}>
                 Still waiting. NVIDIA's free tier queues requests and is allowed
-                up to 120s to answer.
+                up to 240s for the real request.
               </p>
             )}
             {testError && (
@@ -504,52 +506,97 @@ function Settings() {
   )
 }
 
-const STATUS_GLYPH = { ok: '✅', no_key: '⏭', failed: '✖' }
+// One per ChainLinkResult.status in web/api/models.py (a test keeps them in step).
+const STATUS_GLYPH = { ok: '✅', alive: '⚠️', failed: '✖', no_key: '⏭', unused: '·' }
 
-/** One row per link, then the verdict: would a job on this chain start? */
+// The verdict's colour and headline. The rule itself is the server's (DEC-073,
+// DEC-078); this only says it.
+const VERDICT_STYLE = {
+  ready: { color: 'var(--success)' },
+  floor_only: { color: 'var(--warning)' },
+  blocked: { color: 'var(--error)' },
+  dead: { color: 'var(--error)' },
+}
+
+function rowFinding(row) {
+  if (row.status !== 'ok' || row.candidates == null) return null
+  if (row.found_moment) return `found the test clip (${row.candidates} moment${row.candidates === 1 ? '' : 's'})`
+  return `${row.candidates} moment${row.candidates === 1 ? '' : 's'}, not the test clip`
+}
+
+/** One row per link, then the verdict: would a job on this chain work? */
 function ChainTestResult({ result }) {
+  const verdict = result.verdict || (result.ready ? 'ready' : 'dead')
   return (
     <div style={{ marginTop: '12px', fontSize: '13px' }}>
-      {result.results.map((row) => (
-        <div
-          key={row.label}
-          title={`Probe timeout: ${row.probe_timeout_seconds}s`}
-          style={{ padding: '6px 0', borderBottom: '1px solid var(--border-color)' }}
-        >
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'baseline', flexWrap: 'wrap' }}>
-            <span>{STATUS_GLYPH[row.status] || '·'}</span>
-            <code style={{ wordBreak: 'break-all' }}>{row.label}</code>
-            {row.latency_seconds != null && (
-              <span style={{ color: 'var(--text-tertiary)' }}>{row.latency_seconds.toFixed(1)}s</span>
-            )}
-            {!row.primary && (
-              <span style={{ color: 'var(--text-tertiary)' }}>floor</span>
-            )}
-          </div>
-          {row.status === 'no_key' && (
-            <div className="form-hint" style={{ marginLeft: '24px' }}>
-              No {row.env_key}.{' '}
-              {row.signup_url && (
-                <a href={row.signup_url} target="_blank" rel="noopener" style={{ color: 'var(--accent)' }}>Get a free key →</a>
+      {result.results.map((row, index) => {
+        const finding = rowFinding(row)
+        const swapped = row.used_model && row.used_model !== row.model
+        return (
+          <div
+            key={index}
+            title={row.work_timeout_seconds
+              ? `Allowed ${row.work_timeout_seconds}s for the real request`
+              : `Probe timeout: ${row.probe_timeout_seconds}s`}
+            style={{ padding: '6px 0', borderBottom: '1px solid var(--border-color)' }}
+          >
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'baseline', flexWrap: 'wrap' }}>
+              <span>{STATUS_GLYPH[row.status] || '·'}</span>
+              <code style={{ wordBreak: 'break-all' }}>{row.label}</code>
+              {row.latency_seconds != null && (
+                <span style={{ color: 'var(--text-tertiary)' }}>{row.latency_seconds.toFixed(1)}s</span>
+              )}
+              {!row.primary && (
+                <span style={{ color: 'var(--text-tertiary)' }}>floor</span>
+              )}
+              {row.status === 'unused' && (
+                <span style={{ color: 'var(--text-tertiary)' }}>not in chain</span>
               )}
             </div>
-          )}
-          {row.status === 'failed' && (
-            <div className="form-hint" style={{ marginLeft: '24px', color: 'var(--error)', wordBreak: 'break-word' }}>
-              {row.reason}
-            </div>
-          )}
-        </div>
-      ))}
+            {swapped && (
+              <div className="form-hint" style={{ marginLeft: '24px' }}>
+                ↪ answered as <code>{row.used_model}</code>
+              </div>
+            )}
+            {finding && (
+              <div className="form-hint" style={{ marginLeft: '24px' }}>
+                {finding}{row.level ? ` · ${row.level}` : ''}
+              </div>
+            )}
+            {row.status === 'no_key' && (
+              <div className="form-hint" style={{ marginLeft: '24px' }}>
+                No {row.env_key}.{' '}
+                {row.signup_url && (
+                  <a href={row.signup_url} target="_blank" rel="noopener" style={{ color: 'var(--accent)' }}>Get a key →</a>
+                )}
+              </div>
+            )}
+            {(row.status === 'failed' || row.status === 'alive') && row.reason && (
+              <div className="form-hint" style={{
+                marginLeft: '24px',
+                color: row.status === 'failed' ? 'var(--error)' : 'var(--warning)',
+                wordBreak: 'break-word',
+              }}>
+                {row.reason}
+              </div>
+            )}
+            {row.note && (
+              <div className="form-hint" style={{ marginLeft: '24px', wordBreak: 'break-word' }}>
+                {row.note}
+              </div>
+            )}
+          </div>
+        )
+      })}
       <div style={{
         marginTop: '10px',
-        color: result.ready ? 'var(--success)' : 'var(--error)',
+        ...(VERDICT_STYLE[verdict] || VERDICT_STYLE.dead),
         whiteSpace: 'pre-wrap',
         lineHeight: 1.45,
       }}>
-        {result.ready
-          ? `✅ Jobs can start. ${result.live_link} answered first (${result.elapsed_seconds.toFixed(0)}s for the whole test).`
-          : result.message}
+        {verdict === 'ready'
+          ? `✅ Jobs can start. ${result.live_link} completed the real analysis request first (${result.elapsed_seconds.toFixed(0)}s for the whole test).`
+          : `${verdict === 'floor_only' ? '⚠️' : '✖'} ${result.message}`}
       </div>
     </div>
   )
