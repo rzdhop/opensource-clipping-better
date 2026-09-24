@@ -25,3 +25,9 @@ node_modules/
 dist/
 web/dashboard/node_modules/
 web/dashboard/dist/
+
+# Session artifacts and git worktrees (6.6 GB here on 2026-09-24). The app never
+# reads them; `COPY . .` and the `chown -R` after it copied every byte twice,
+# which turned a rebuild into most of an hour. docker-compose bind-mounts the
+# project anyway, so nothing inside the running container changes.
+.claude/
