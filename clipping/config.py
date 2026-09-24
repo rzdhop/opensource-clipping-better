@@ -1120,16 +1120,28 @@ def _slow_chain_message(keyed_slow, missing, hint, describe) -> str:
     running = ", ".join(describe(link) for link in keyed_slow)
     alone = "alone" if len(keyed_slow) == 1 else "and nothing faster"
 
+    from clipping.providers.registry import PROVIDERS
+
     n = len(missing)
-    free = all(url for _, _, url in missing)
+    # "Free" only for a hosted link whose default model costs nothing
+    # (Provider.free_tier). OpenRouter's default is billed, and a message that
+    # promised otherwise would send someone to add a card they did not expect.
+    is_free = [bool(url) and PROVIDERS[link.provider].free_tier
+               for link, _, url in missing]
+    free, some_free = all(is_free), sum(is_free)
     if n == 1:
         head = "One link in your chain has no key" + (", and it is free" if free else "")
         ask = "Set it"
     else:
         amount = "Two" if n == 2 else str(n)
         both = "both" if n == 2 else "all"
-        head = f"{amount} links in your chain have no key" + (
-            f", and {both} are free" if free else "")
+        if free:
+            head = f"{amount} links in your chain have no key, and {both} are free"
+        elif some_free:
+            head = (f"{amount} links in your chain have no key; {some_free} of "
+                    f"them {'is' if some_free == 1 else 'are'} free")
+        else:
+            head = f"{amount} links in your chain have no key"
         ask = "Set any one of them"
 
     labels = [describe(link) for link, _, _ in missing]
@@ -1138,7 +1150,8 @@ def _slow_chain_message(keyed_slow, missing, hint, describe) -> str:
     rows = "\n".join(
         f"  {label.ljust(width_label)}  {env.ljust(width_env)}  "
         f"{url or '(your own endpoint)'}"
-        for label, (_, env, url) in zip(labels, missing)
+        f"{'  (paid)' if url and not free_link else ''}"
+        for label, (_, env, url), free_link in zip(labels, missing, is_free)
     )
     return (
         f"This job would run on {running} {alone}, and that is the chain's "

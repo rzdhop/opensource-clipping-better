@@ -72,8 +72,19 @@ def test_duplicate_links_are_kept():
 
 
 def test_default_chain_is_parseable_and_ordered_fast_then_plentiful_then_floor():
+    """Free and fast first, paid after the free tiers, the NIM floor last
+    (DEC-076). OpenRouter sits after Gemini so a funded key is only spent
+    when a free tier did not answer."""
     chain = registry.parse_chain(registry.DEFAULT_LLM_CHAIN)
-    assert [link.provider for link in chain] == ["groq", "gemini", "nvidia"]
+    assert [link.provider for link in chain] == [
+        "groq", "gemini", "openrouter", "mistral", "nvidia",
+    ]
+
+
+def test_every_default_link_before_the_floor_is_primary():
+    chain = registry.parse_chain(registry.DEFAULT_LLM_CHAIN)
+    assert not registry.is_primary(chain[-1])
+    assert all(registry.is_primary(link) for link in chain[:-1])
 
 
 def test_chain_from_env(monkeypatch):
@@ -175,6 +186,8 @@ def test_the_gemini_default_is_defined_once_and_the_chain_is_built_from_it():
     }
     assert by_provider["gemini"] == registry.GEMINI_DEFAULT_MODEL
     assert by_provider["groq"] == registry.GROQ_DEFAULT_MODEL
+    assert by_provider["openrouter"] == registry.OPENROUTER_DEFAULT_MODEL
+    assert by_provider["mistral"] == registry.MISTRAL_DEFAULT_MODEL
     assert by_provider["nvidia"] == registry.NVIDIA_DEFAULT_MODEL
 
 
@@ -369,6 +382,7 @@ def test_an_old_style_provider_record_still_builds():
     assert p.probe_timeout == registry.DEFAULT_PROBE_TIMEOUT
     assert p.primary is True
     assert p.signup_url == ""
+    assert p.free_tier is True
 
 
 # ------------------------------------------- primary vs floor (DEC-073)
@@ -397,3 +411,10 @@ def test_every_signup_url_is_the_one_env_example_documents():
     for name, provider in registry.PROVIDERS.items():
         if provider.signup_url:
             assert provider.signup_url in text, name
+
+
+def test_only_openrouter_is_marked_paid():
+    """The default OpenRouter model is billed per token. A message that calls
+    it free would send someone to add a card they did not expect to need."""
+    paid = sorted(n for n, p in registry.PROVIDERS.items() if not p.free_tier)
+    assert paid == ["openrouter"]

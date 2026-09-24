@@ -32,7 +32,11 @@ def test_the_reported_job_is_refused():
 
     assert r.ready is False
     assert [link.provider for link in r.keyed_slow] == ["nvidia"]
-    assert [link.provider for link, _, _ in r.missing] == ["groq", "gemini"]
+    primaries = [
+        link.provider for link in registry.parse_chain(DEFAULT)
+        if registry.is_primary(link)
+    ]
+    assert [link.provider for link, _, _ in r.missing] == primaries
 
 
 def test_the_refusal_says_what_to_set_and_where_to_get_it():
@@ -45,6 +49,25 @@ def test_the_refusal_says_what_to_set_and_where_to_get_it():
         assert provider.env_key in message
         assert provider.signup_url in message
     assert "--allow-slow-chain" in message
+
+
+def test_the_refusal_calls_free_only_what_is_free():
+    """OpenRouter's default is paid. The refusal may still point at it, but
+    must not promise that every missing key costs nothing."""
+    message = chain_readiness(DEFAULT, {"nvidia": "k"}).message
+
+    assert "all are free" not in message
+    rows = {line.split()[0]: line for line in message.splitlines()
+            if line.startswith("  ")}
+    openrouter = next(v for k, v in rows.items() if k.startswith("openrouter/"))
+    assert "paid" in openrouter
+    gemini = next(v for k, v in rows.items() if k.startswith("gemini/"))
+    assert "paid" not in gemini
+
+
+def test_an_all_free_refusal_still_says_so():
+    message = chain_readiness("groq/a,gemini/b,nvidia/c", {"nvidia": "k"}).message
+    assert "both are free" in message
 
 
 def test_the_refusal_names_the_links_from_the_registry_not_a_literal():
@@ -64,7 +87,7 @@ def test_each_surface_gets_its_own_way_out():
 
 # --------------------------------------------------------- what still starts
 
-@pytest.mark.parametrize("keyed", ["groq", "gemini"])
+@pytest.mark.parametrize("keyed", ["groq", "gemini", "openrouter", "mistral"])
 def test_one_primary_key_is_enough(keyed):
     assert chain_readiness(DEFAULT, {keyed: "k", "nvidia": "k"}).ready
     assert chain_readiness(DEFAULT, {keyed: "k"}).ready

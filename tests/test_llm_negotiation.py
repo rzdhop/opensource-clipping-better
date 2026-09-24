@@ -378,6 +378,29 @@ def test_a_provider_not_in_the_chain_is_never_contacted(no_pacing):
     assert contacted == ["nvidia"]
 
 
+def test_an_openrouter_key_alone_carries_the_default_chain(no_pacing):
+    """A funded OpenRouter key used to sit unused: OpenRouter was a registered
+    primary provider but not a link in the default chain (2026-09-24)."""
+    from clipping.providers.registry import DEFAULT_LLM_CHAIN
+
+    contacted = []
+
+    def factory(link, **kwargs):
+        contacted.append(link.provider)
+        return FakeClient([GOOD])
+
+    _value, link = llm.run_chain(
+        parse_chain(DEFAULT_LLM_CHAIN),
+        system="s", user="u", schema=SCHEMA,
+        keys={"openrouter": "k"},
+        on_log=lambda *a: None,
+        client_factory=factory,
+        sleep_fn=lambda s: None,
+    )
+    assert link.provider == "openrouter"
+    assert contacted == ["openrouter"]
+
+
 def test_a_link_with_no_key_is_skipped_not_fatal(no_pacing):
     """A partially-configured chain degrades to the providers actually set up."""
     contacted = []

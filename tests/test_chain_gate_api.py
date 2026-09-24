@@ -243,12 +243,14 @@ def test_every_link_is_reported_not_just_the_first(client, settings_env, fake_pr
 
     body = client.post("/api/settings/test-chain", json={}).json()
 
-    assert [r["provider"] for r in body["results"]] == ["groq", "gemini", "nvidia"]
-    assert [r["status"] for r in body["results"]] == ["ok", "no_key", "failed"]
+    assert [r["provider"] for r in body["results"]] == [
+        "groq", "gemini", "openrouter", "mistral", "nvidia"]
+    assert [r["status"] for r in body["results"]] == [
+        "ok", "no_key", "no_key", "no_key", "failed"]
     assert body["results"][1]["env_key"] == "GOOGLE_API_KEY"
     assert body["results"][1]["signup_url"].startswith("https://")
-    assert "TimeoutError" in body["results"][2]["reason"]
-    assert body["results"][2]["probe_timeout_seconds"] == 120.0
+    assert "TimeoutError" in body["results"][-1]["reason"]
+    assert body["results"][-1]["probe_timeout_seconds"] == 120.0
     assert body["live_link"].startswith("groq/")
     assert body["ready"] is True
     assert fake_providers.contacted == ["groq", "nvidia"]

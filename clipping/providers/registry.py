@@ -30,13 +30,15 @@ DEFAULT_PROBE_TIMEOUT = 45.0
 # ``probe_timeout`` is how long the preflight ping may wait for this provider;
 # ``primary`` says whether it can carry the analysis on its own (False = the
 # chain's slow floor, which a job may not run on alone without an explicit
-# override, DEC-073); ``signup_url`` is where to get its free key. All three
-# are trailing and defaulted so a Provider built without them still works.
+# override, DEC-073); ``signup_url`` is where to get its key; ``free_tier``
+# says whether the DEFAULT model on it costs nothing, so a message never calls
+# a billed link free (DEC-076). All four are trailing and defaulted so a
+# Provider built without them still works.
 Provider = namedtuple(
     "Provider",
     "name base_url env_key rpm tpm structured default_timeout notes "
-    "probe_timeout primary signup_url",
-    defaults=(DEFAULT_PROBE_TIMEOUT, True, ""),
+    "probe_timeout primary signup_url free_tier",
+    defaults=(DEFAULT_PROBE_TIMEOUT, True, "", True),
 )
 
 # ``structured`` lists the response_format levels the provider is known to
@@ -102,6 +104,9 @@ PROVIDERS = {
         default_timeout=180,
         notes=":free models are capped at 50 requests/day without credits.",
         signup_url="https://openrouter.ai/keys",
+        # The default model is billed (~$0.10 per million tokens in). The
+        # ``:free`` ones measured on 2026-09-24 could not do the job.
+        free_tier=False,
     ),
     "mistral": Provider(
         name="mistral",
@@ -341,16 +346,44 @@ GEMINI_DEFAULT_MODEL = "gemini-3.5-flash-lite"
 # open model and the chain reports it the moment it fails.
 GROQ_DEFAULT_MODEL = "openai/gpt-oss-120b"
 
+# OpenRouter's default: PAID, on purpose, and placed after Gemini in the chain so
+# a funded key is only spent when a free tier did not answer.
+#
+# Measured 2026-09-24 with tools/bench_llm.py on the real pass-A request:
+#
+#   mistralai/mistral-small-3.2-24b-instruct  test transcript 3/3, 2.5-2.7s;
+#       real windows 5.1-13.5s, 2-6 candidates, $0.094/$0.25 per M tokens  <-
+#   meta-llama/llama-3.3-70b-instruct          test transcript 3/3, 2.1-2.9s;
+#       real windows 2.3-30.0s and ALWAYS the maximum of 6 candidates -- it
+#       ignores "two strong moments beat six weak ones". $0.10/$0.32.
+#   nvidia/nemotron-3.5-lightning:free         malformed JSON after 79-100s
+#   openai/gpt-oss-20b                          no content (reasoning ate it)
+#
+# A whole job is ~20k tokens: well under a cent. Not a Gemini or NIM model, so
+# a retirement at either of those cannot take this link down with it.
+OPENROUTER_DEFAULT_MODEL = "mistralai/mistral-small-3.2-24b-instruct"
+
+# Mistral's default: its own rolling alias, which Mistral moves forward when it
+# retires the model behind it. NOT benchmarked: no Mistral key on this project
+# (ASSUMPTIONS). The link is skipped with a line saying so until one is set, and
+# Settings -> Test provider chain measures it the moment one is.
+MISTRAL_DEFAULT_MODEL = "mistral-small-latest"
+
 # The shipped default. Groq first because it is by far the fastest free tier;
-# Gemini second because its daily request budget is the largest; NVIDIA last
-# because it has no published daily cap, so it is the floor that still answers
-# when the other two are exhausted. Re-pick the NVIDIA model with tools/bench_llm.py.
+# Gemini second because its daily request budget is the largest; OpenRouter
+# third because it is paid, so it is only spent when both free tiers failed;
+# Mistral fourth, free but unmeasured; NVIDIA last because it has no published
+# daily cap, so it is the floor that still answers when the others are
+# exhausted. A link with no key is skipped at no cost, so listing five costs a
+# user with one key nothing. Re-pick any model with tools/bench_llm.py.
 #
 # parse_spec splits on the FIRST slash only, which is what lets the NIM link
 # carry a model id that itself contains one.
 DEFAULT_LLM_CHAIN = (
     f"groq/{GROQ_DEFAULT_MODEL},"
     f"gemini/{GEMINI_DEFAULT_MODEL},"
+    f"openrouter/{OPENROUTER_DEFAULT_MODEL},"
+    f"mistral/{MISTRAL_DEFAULT_MODEL},"
     f"nvidia/{NVIDIA_DEFAULT_MODEL}"
 )
 
