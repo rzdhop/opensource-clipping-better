@@ -3,9 +3,12 @@
 - **Plan:** `~/.claude/plans/zany-bouncing-brook.md` (approved in chat 2026-09-24).
 - **Checkpoint commit before the work:** `8fa873d` (clean tree).
 - **Tier-1 baseline:** 1361 passed, 0 failed (`python -m pytest -p no:warnings`, 14s).
-- **Next action:** rebuild the container (`sudo -n docker compose rm -sfv backend &&
-  sudo -n docker compose up -d --build backend`), then POST /api/jobs with the payload of
-  job fd19ae81a6a0 (video.mp4 + the French auto-generated .vtt, 7 clips, auto, topic set).
+- **Next action:** real job `b37b36a9b34e` is RUNNING on the rebuilt container (payload
+  of fd19ae81a6a0: video.mp4 + French auto-generated .vtt, 7 clips, auto, topic). Do NOT
+  edit clipping/ or web/ source until its analysis is done (bind mount: the container
+  runs the on-disk Python). Stages 6, 7 and docs are committed on branch
+  `stage6-diagnostic` in the scratchpad worktree (`32fc3a9`, `73fcdce`, `22e6e40`):
+  merge --ff-only into main after the analysis, then rebuild for Stage 9.
 - **Measured defaults (Stage 1 bench):** gemini-3.5-flash-lite 3/3 found, ~1s;
   openrouter mistral-small-3.2-24b 3/3, 5-13s real windows; NVIDIA floor 2/2 but 93-193s.
 - **Open questions:** none. Decided in chat: cheap PAID OpenRouter model chosen by bench;
@@ -44,11 +47,11 @@ OpenRouter is not a link in the default chain, so it is never used or tested.
 | 1 | shared real pass-A request + bench that sends it | **done** `ea87486` |
 | 2 | Gemini default -> gemini-3.5-flash-lite, defined once | **done** `57be632` |
 | 3 | OpenRouter + Mistral join the default chain | **done** `02670f0` |
-| 4 | deploy + the user's real job | in progress |
-| 5 | same-provider model swap on "model unavailable" (RISKIEST) | todo |
-| 6 | diagnostic sends real work to every keyed link | todo |
-| 7 | dashboard | todo |
-| 8 | docs + decisions | todo |
+| 4 | deploy + the user's real job | in progress: job `b37b36a9b34e` |
+| 5 | same-provider model swap on "model unavailable" (RISKIEST) | **done** `7738224` (committed before the job; bind mount) |
+| 6 | diagnostic sends real work to every keyed link | done on branch `32fc3a9` |
+| 7 | dashboard | done on branch `73fcdce` |
+| 8 | docs + decisions | docs on branch `22e6e40`; DEC-075..078 written |
 | 9 | redeploy, diagnostic, second real job | todo |
 
 ---

@@ -1744,3 +1744,132 @@ the key gate and seeds the scan cache. `probe_chain` gains
 - The worst case holds a request for about 210s. The Vite dev proxy already
   disables its timeouts for uploads. If a reverse proxy cuts it off, the
   upgrade path is SSE through `probe_chain`'s existing `on_log` seam.
+
+## DEC-075 — Gemini's default is gemini-3.5-flash-lite, and every default model is one constant
+**Context.** On 2026-09-24 the human added a new Google key and pressed Test
+provider chain. `gemini/gemini-2.5-flash-lite` answered `404 This model
+models/gemini-2.5-flash-lite is no longer available to new users`. Old keys
+kept working, so no existing setup noticed. The string was an inline literal
+inside `DEFAULT_LLM_CHAIN`, with none of the one-place guarding DEC-052 gave the
+NIM model.
+**Decision.** `GEMINI_DEFAULT_MODEL = "gemini-3.5-flash-lite"` and
+`GROQ_DEFAULT_MODEL`, beside `NVIDIA_DEFAULT_MODEL`; `DEFAULT_LLM_CHAIN` is built
+only from the constants. Chosen by `tools/bench_llm.py` on the real pass-A
+request (see DEC-078's fixture), 2026-09-24:
+
+| model | test transcript (found the clip) | real windows (3 x 2) |
+|---|---|---|
+| gemini-3.5-flash-lite | 3/3, 0.9-4.4s | 1.1-2.0s, 1-3 candidates |
+| gemini-flash-lite-latest | 3/3, 1.0-1.7s | 1.0-1.3s, 1-3 candidates |
+| gemini-3.5-flash | 503 "high demand" x3 | - |
+
+**Consequence.**
+- **The alias is not the default** although it measured as well: its model
+  changes under us without a benchmark (DEC-058). It is the *fallback*
+  (DEC-077), which is exactly what a moving alias is good for.
+- Tests: each default model equals its constant; the chain block holds no
+  retyped literal; no default link is in a table of models measured dead for a
+  new account (each entry says when and how); `.env.example` carries the
+  shipped chain verbatim. The model-literal guard regex gains `flash-lite`.
+- **Groq's default is still unmeasured on this project** (no key). It is named,
+  not vouched for.
+
+## DEC-076 — OpenRouter and Mistral join the default chain; a paid link is never called free
+**Context.** The human's funded OpenRouter key was never used or tested:
+OpenRouter was a registered, `primary` provider but not a link in the default
+chain, and a provider absent from the chain is never contacted (DEC-023). The
+dashboard's own hint already promised OpenRouter/Mistral coverage.
+**Decision.** Default chain `groq -> gemini -> openrouter -> mistral -> nvidia`.
+- **OpenRouter: `mistralai/mistral-small-3.2-24b-instruct`, paid.** Test
+  transcript 3/3 at 2.5-2.7s; real windows 5.1-13.5s with 2-6 candidates;
+  $0.094/$0.25 per M tokens, well under a cent per job. `llama-3.3-70b-instruct`
+  also found the clip 3/3 but took 2.3-30.0s on real windows and returned the
+  maximum of six candidates every time, ignoring "two strong moments beat six
+  weak ones". The `:free` nemotron returned malformed JSON after 79-100s and
+  `gpt-oss-20b` returned no content.
+- **After both free tiers**, so credits are spent only when they failed.
+- **Mistral: `mistral-small-latest`, unmeasured** (no key here). Decided by the
+  human in chat; the planning review argued for leaving it out under DEC-058.
+  An unkeyed link is skipped at no cost, and the new diagnostic (DEC-078)
+  measures it the moment a key is set. Recorded in ASSUMPTIONS.
+- `Provider.free_tier` (trailing, default True; OpenRouter False). The DEC-073
+  refusal tags a billed row "(paid)" and counts the free ones instead of
+  claiming "all are free".
+**Consequence.**
+- The DEC-073 refusal now lists four missing primaries for an NVIDIA-only
+  setup; the order pins in three test files were updated as this decision.
+- A key with no OpenRouter credits answers 402, which is FATAL for that link
+  and moves on, printed.
+
+## DEC-077 — A retired model is swapped for the same provider's next model, on the same key
+**Context.** DEC-075's failure had nothing wrong with the key or the provider,
+only the model. `classify` calls a 404 FATAL, so the whole link was abandoned
+and the job fell to the NVIDIA floor. Models on free tiers now retire every few
+weeks (A-010), for new accounts first.
+**Decision.** `errors.is_model_unavailable(exc)` asks a narrower question after
+`classify`: 404/410, or a 400/422 naming the model with a gone-marker
+("no longer available", "decommissioned", "invalid model", ...). Never for
+401/403/429, a refused schema, or OpenRouter's "parameters"/"data policy" 404s.
+A provider that names `fallback_models` answers that error, and only that, by
+running its next model on the same key; `llm._run_link` wraps the unchanged
+ladder (`_run_model`), and the probes share the path.
+**Consequence.**
+- **DEC-023 is amended for one named case, not overturned.** Before this, the
+  same 404 already moved the job to a *different* provider. A same-provider
+  swap stays closer to the list the user wrote: the provider and key they
+  chose, a model the registry names, and a printed `↪` line every time.
+- **No extra attempts, no new budget rule.** A dead model fails on its first
+  attempt; the next gets the link's ladder under the same predictive deadline
+  check (DEC-053/059). Tested: `[404] + [503]*5` makes `1 + MAX_ATTEMPTS` calls.
+- **Remembered per key, never blacklisted.** Availability is per account, so
+  the working model is remembered per `(provider, model, sha256(key)[:12])`.
+  Nothing is marked dead: a transient 404 cannot exclude a model for the life
+  of the server. The key itself is never stored.
+- **Fallbacks are benchmarked models only** (DEC-058): Gemini
+  `gemini-flash-lite-latest`, OpenRouter `llama-3.3-70b-instruct` (same price
+  tier as the default; the plan's "never dearer" rule was relaxed for the only
+  other model that found clips, and is stated here instead). NVIDIA, Groq,
+  Mistral and custom list none and behave exactly as before, pinned by a guard.
+- `classify` is unchanged, so every existing FATAL pin still holds.
+
+## DEC-078 — The chain test sends every keyed link the real request, and reports a verdict
+**Context.** On 2026-09-24 `POST /api/settings/test-chain` pinged each link
+with "reply with ok" and reported **"✅ Jobs can start"** for a chain whose
+Gemini link answered 404 and whose only working link was the NVIDIA floor.
+DEC-056 already said a ping proves liveness and not suitability; DEC-058 is
+what ignoring that cost. The route's `ready` also came from `chain_readiness`,
+which is key-based by design (DEC-073), so a keyed-but-dead primary read ready.
+**Decision.** The route runs `llm.diagnose_chain`: every keyed link is sent the
+scan's own pass-A request (`diagnostic.pass_a_work`, shared with the preflight
+and the bench) on a 14-beat test transcript with exactly one clip in it
+(beats 4-9), and `diagnostic.judge` says whether the answer found it.
+- **Providers at once, links on one provider one after another** (NVIDIA
+  serialises per key; rate limits are per provider). The route waits
+  `registry.diagnostic_budget` = the slowest provider's sum of
+  `diagnostic_timeout` (= the work probe's cap: 90s fast tiers, 240s NVIDIA)
+  + 10s. Default chain: 250s, under the unchanged 300s ceiling.
+- **A ping follows only a request that failed with time to spare**, turning
+  "failed" into `alive` (key works, model cannot do the job). A timed-out
+  request is reported as it is: there is no time left to ask, and the budget is
+  the sum of allowances.
+- `verdict`: `ready` (a primary completed it, or allow-slow, or the chain names
+  no primary), `floor_only` (only the floor did: the reported case), `blocked`
+  (the key gate would refuse the job), `dead` (nothing did). `ready` =
+  `verdict == "ready"`.
+- A key for a provider the chain does not name gets an `unused` row with the
+  link to add. It is **never contacted** (DEC-023).
+**Consequence.**
+- **Amends DEC-074's `ready`, not DEC-073.** `POST /api/jobs` stays pure and
+  key-based: it must answer before a job exists and cannot spend a network
+  round trip. The page shows both: `chain_blocked_reason` before Start, the
+  verdict after a test.
+- **NVIDIA's measured time drove the allowance.** The plan said 120s; the
+  floor took 93s and ~193s for the fixture request on 2026-09-24, so the work
+  probe's 240s is used. Two NVIDIA links in one custom chain exceed the
+  ceiling and get the existing 504.
+- **A test now costs real tokens**: about 1.1k in and 100-300 out per keyed
+  link, well under a cent on OpenRouter and free elsewhere.
+- It warms the process's memory: a model swap or negotiated level found here
+  is what jobs on the same key reuse. Same facts about the same key.
+- `probe_chain` and the preflight are unchanged (RC-C9: `tests/test_preflight.py`
+  passes unedited).

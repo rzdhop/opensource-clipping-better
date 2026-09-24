@@ -45,11 +45,26 @@
   failing preflight again. UNCONFIRMED.
 
 - **A-020** — OpenRouter and Mistral are marked `primary` (fast enough to
-  carry the analysis alone) based on their published free tiers. Neither has
-  been benchmarked against the real pass-A request, unlike the NIM models in
-  `registry.py`. `primary` is a speed claim, not a price claim, so A-009 does
-  not decide it. Benchmark with `tools/bench_llm.py` before relying on either
-  alone. UNCONFIRMED.
+  carry the analysis alone) based on their published free tiers. **OpenRouter
+  half CONFIRMED 2026-09-24** by `tools/bench_llm.py` on the real pass-A request
+  (mistral-small-3.2-24b: 2.5-2.7s on the fixture, 5-13s on real windows). The
+  Mistral half is A-021. `primary` is a speed claim, not a price claim.
+
+- **A-021** — `mistral/mistral-small-latest` can carry the analysis. It joined
+  the default chain on the human's decision (DEC-076) with no key on this
+  project to measure it. The chain test measures it the moment a key is set.
+  UNCONFIRMED.
+- **A-022** — Groq's `openai/gpt-oss-120b` can carry the analysis. Named as
+  `GROQ_DEFAULT_MODEL` but never benchmarked here (no key). Note: gpt-oss models
+  returned `content=null` on OpenRouter at small budgets (2026-09-24), a
+  reasoning-model trait worth checking first. UNCONFIRMED.
+- **A-023** — The Tailscale serve proxy in front of the app does not cut a
+  request shorter than the chain test's 250s worst case. UNCONFIRMED until
+  measured through the tailnet.
+- **A-024** — "No longer available to new users" 404s are per account and
+  permanent, so remembering the working model per key for the life of the
+  server is safe. Nothing is blacklisted, so a wrong guess costs one fast 404.
+  UNCONFIRMED.
 
 ## Confirmed
 - **A-012** — The phone-width overflow is fixable in CSS alone; no JSX change is
