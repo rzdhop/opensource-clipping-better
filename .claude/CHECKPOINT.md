@@ -1,10 +1,13 @@
 ## CURRENT TASK — every key tested with the real request; a chain that survives a retired model (IN PROGRESS)
-- **Phase:** IMPLEMENT. **Current stage:** Stage 1 (shared pass-A request + bench).
+- **Phase:** IMPLEMENT. **Current stage:** Stage 4 (deploy + the user's real job).
 - **Plan:** `~/.claude/plans/zany-bouncing-brook.md` (approved in chat 2026-09-24).
 - **Checkpoint commit before the work:** `8fa873d` (clean tree).
 - **Tier-1 baseline:** 1361 passed, 0 failed (`python -m pytest -p no:warnings`, 14s).
-- **Next action:** write `clipping/analysis/diagnostic.py` + `tests/test_diagnostic_work.py`,
-  rewrite `tools/bench_llm.py` to send the real request, then run the live bench.
+- **Next action:** rebuild the container (`sudo -n docker compose rm -sfv backend &&
+  sudo -n docker compose up -d --build backend`), then POST /api/jobs with the payload of
+  job fd19ae81a6a0 (video.mp4 + the French auto-generated .vtt, 7 clips, auto, topic set).
+- **Measured defaults (Stage 1 bench):** gemini-3.5-flash-lite 3/3 found, ~1s;
+  openrouter mistral-small-3.2-24b 3/3, 5-13s real windows; NVIDIA floor 2/2 but 93-193s.
 - **Open questions:** none. Decided in chat: cheap PAID OpenRouter model chosen by bench;
   Mistral joins the default chain last before NVIDIA; live benchmarks + a real job
   through the deployed API are authorised.
@@ -38,10 +41,10 @@ OpenRouter is not a link in the default chain, so it is never used or tested.
 | S | Stage | State |
 |---|---|---|
 | 0 | checkpoint + baseline | **done** (`8fa873d`, 1361 passed) |
-| 1 | shared real pass-A request + bench that sends it | in progress |
-| 2 | Gemini default -> gemini-3.5-flash-lite, defined once | todo |
-| 3 | OpenRouter + Mistral join the default chain | todo |
-| 4 | deploy + the user's real job | todo |
+| 1 | shared real pass-A request + bench that sends it | **done** `ea87486` |
+| 2 | Gemini default -> gemini-3.5-flash-lite, defined once | **done** `57be632` |
+| 3 | OpenRouter + Mistral join the default chain | **done** `02670f0` |
+| 4 | deploy + the user's real job | in progress |
 | 5 | same-provider model swap on "model unavailable" (RISKIEST) | todo |
 | 6 | diagnostic sends real work to every keyed link | todo |
 | 7 | dashboard | todo |
