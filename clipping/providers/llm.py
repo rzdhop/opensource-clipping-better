@@ -22,12 +22,14 @@ importable in the pytest-only CI environment (DEC-012).
 
 from __future__ import annotations
 
+import hashlib
 import threading
 import time
 
 from . import errors, jsonx, pacing
 from .registry import (
     DEFAULT_PROBE_TIMEOUT,
+    PROVIDERS,
     describe,
     effective_timeout,
     env_key_for,
@@ -73,6 +75,73 @@ def negotiated_level(link):
     """The structured-output level last known to work for *link*, or None."""
     with _NEGOTIATED_LOCK:
         return _NEGOTIATED.get((link.provider, link.model))
+
+
+# ------------------------------------------------------------ model swaps
+#
+# DEC-077. When a provider answers "this MODEL is not available" -- Google's
+# 404 "no longer available to new users" on 2026-09-24 is the case that
+# prompted it -- the key and the provider are fine and only the model is not.
+# A provider that names ``fallback_models`` in the registry then gets its next
+# model tried on the same key, printed, before the link is given up.
+#
+# Remembered per (provider, configured model, KEY), because availability is a
+# fact about an account: the same model answered an old key and 404'd a new
+# one. The key is stored as a short hash, never as itself. Only the model that
+# WORKED is remembered; nothing is blacklisted, so a model that comes back is
+# simply found working again the next time the remembered one fails.
+_MODEL_SWAPS = {}
+_MODEL_SWAPS_LOCK = threading.Lock()
+
+
+def reset_model_fallbacks():
+    """Forget every remembered model swap. For tests."""
+    with _MODEL_SWAPS_LOCK:
+        _MODEL_SWAPS.clear()
+
+
+def _key_id(api_key):
+    return hashlib.sha256(str(api_key or "").encode("utf-8")).hexdigest()[:12]
+
+
+def _fallback_models(link):
+    provider = PROVIDERS.get(link.provider)
+    return tuple(getattr(provider, "fallback_models", ()) or ())
+
+
+def _models_to_try(link, api_key):
+    """Links to try for *link*, in order: the swap that last worked on this key,
+    then the configured model, then the provider's fallbacks. Never another
+    provider. Just ``[link]`` for a provider that names no fallbacks."""
+    fallbacks = _fallback_models(link)
+    if not fallbacks:
+        return [link]
+    order = [link.model] + [m for m in fallbacks if m != link.model]
+    with _MODEL_SWAPS_LOCK:
+        remembered = _MODEL_SWAPS.get((link.provider, link.model, _key_id(api_key)))
+    if remembered in order:
+        order = [remembered] + [m for m in order if m != remembered]
+    return [link._replace(model=model) for model in order]
+
+
+def _remember_swap(link, api_key, model):
+    with _MODEL_SWAPS_LOCK:
+        _MODEL_SWAPS[(link.provider, link.model, _key_id(api_key))] = model
+
+
+def _swap_line(link, candidate, tried):
+    if tried:
+        why = f"{tried[-1][0]} is not available on this key"
+    else:
+        why = f"{link.model} was not available on this key earlier in this run"
+    return (
+        f"   ↪ {describe(link)}: {why}; using {candidate.model} on the same "
+        f"{link.provider} key."
+    )
+
+
+def _history(tried):
+    return "; ".join(f"{model}: {reason}" for model, reason in tried)
 
 
 def _initial_level(link, provider, schema):
@@ -339,7 +408,7 @@ def run_chain(
                 continue
 
         try:
-            value = _run_link(
+            value, answered = _run_link(
                 link,
                 system=system,
                 user=user,
@@ -360,7 +429,9 @@ def run_chain(
             on_log(f"   ⚠️ {label} failed | {reason}")
             continue
 
-        return value, link
+        # The link that answered: the configured one, or the same provider's
+        # fallback model when the configured one was not available (DEC-077).
+        return value, answered
 
     detail = "\n".join(f"  {label}: {reason}" for label, reason in failures)
     raise errors.ProviderError(
@@ -369,7 +440,48 @@ def run_chain(
     )
 
 
-def _run_link(
+def _run_link(link, *, api_key, on_log, **ladder):
+    """Run one link, returning ``(value, link_that_answered)``. Raises if it fails.
+
+    For a provider with no ``fallback_models`` this is exactly ``_run_model``:
+    one model, its retry ladder, its deadline checks. Otherwise a model the
+    provider says is not available is followed by the next of its models, on
+    the same key, with a printed line (DEC-077) -- and ONLY that error does so.
+
+    A swap costs no extra attempts: a dead model fails on its first, and the
+    next model gets the link's ladder under the same deadline checks. Any other
+    failure ends the link as before, with the swap history in the reason.
+    """
+    candidates = _models_to_try(link, api_key)
+    if len(candidates) == 1:
+        return _run_model(link, api_key=api_key, on_log=on_log, **ladder), link
+
+    tried = []
+    for index, candidate in enumerate(candidates):
+        if candidate.model != link.model:
+            on_log(_swap_line(link, candidate, tried))
+        try:
+            value = _run_model(candidate, api_key=api_key, on_log=on_log, **ladder)
+        except Exception as exc:  # noqa: BLE001 - classified immediately below
+            reason = f"{type(exc).__name__}: {exc}"
+            if not errors.is_model_unavailable(exc):
+                if not tried:
+                    raise
+                raise errors.ProviderError(
+                    f"{_history(tried)}; {candidate.model}: {reason}"
+                ) from exc
+            tried.append((candidate.model, reason))
+            continue
+        if candidate.model != link.model:
+            _remember_swap(link, api_key, candidate.model)
+        return value, candidate
+
+    raise errors.ProviderError(
+        f"no model on this {link.provider} key is available: {_history(tried)}"
+    )
+
+
+def _run_model(
     link,
     *,
     system,
@@ -385,7 +497,7 @@ def _run_link(
     deadline,
     time_fn,
 ):
-    """Run one link's retry ladder. Raises if it is exhausted or fails fatally."""
+    """Run one model's retry ladder. Raises if it is exhausted or fails fatally."""
     client = LlmClient(
         link,
         api_key=api_key,
@@ -592,6 +704,35 @@ def probe_chain(chain, keys, *, timeout=None, on_log=print,
     return first_live, results, None
 
 
+def _through_models(link, api_key, once, *, on_log, time_fn):
+    """Run a probe across the models this key may use for *link* (DEC-077).
+
+    *once(candidate)* returns ``(value, exc)``. A model the provider says is not
+    available is followed by the next of its models, with the same printed line
+    as a job; any other failure is the answer. Returns ``(value, elapsed,
+    reason)`` with *elapsed* covering every model tried, so a swap is never
+    hidden inside a fast-looking number.
+    """
+    tried = []
+    started = time_fn()
+    for candidate in _models_to_try(link, api_key):
+        if candidate.model != link.model:
+            on_log(_swap_line(link, candidate, tried))
+        value, exc = once(candidate)
+        if exc is None:
+            if candidate.model != link.model:
+                _remember_swap(link, api_key, candidate.model)
+            return value, time_fn() - started, None
+        reason = f"{type(exc).__name__}: {exc}"
+        if not errors.is_model_unavailable(exc) or not _fallback_models(link):
+            prefix = f"{_history(tried)}; {candidate.model}: " if tried else ""
+            return None, time_fn() - started, prefix + reason
+        tried.append((candidate.model, reason))
+    return None, time_fn() - started, (
+        f"no model on this {link.provider} key is available: {_history(tried)}"
+    )
+
+
 def _ping_probe(link, api_key, timeout, *, on_log, client_factory, time_fn):
     """``(elapsed, reason)``; *reason* is ``None`` when the link answered.
 
@@ -599,21 +740,26 @@ def _ping_probe(link, api_key, timeout, *, on_log, client_factory, time_fn):
     whether anything comes back, and involving the structured-output ladder
     would let a provider's json_schema support decide a liveness question.
     """
-    client = LlmClient(
-        link, api_key=api_key, timeout=timeout,
-        client_factory=client_factory, on_log=on_log,
-    )
-    started = time_fn()
-    try:
-        client.client.chat.completions.create(
-            model=link.model,
-            messages=[{"role": "user", "content": PROBE_PROMPT}],
-            max_tokens=PROBE_MAX_TOKENS,
-            temperature=0,
+    def once(candidate):
+        client = LlmClient(
+            candidate, api_key=api_key, timeout=timeout,
+            client_factory=client_factory, on_log=on_log,
         )
-    except Exception as exc:  # noqa: BLE001 - every failure is just "not this one"
-        return time_fn() - started, f"{type(exc).__name__}: {exc}"
-    return time_fn() - started, None
+        try:
+            client.client.chat.completions.create(
+                model=candidate.model,
+                messages=[{"role": "user", "content": PROBE_PROMPT}],
+                max_tokens=PROBE_MAX_TOKENS,
+                temperature=0,
+            )
+        except Exception as exc:  # noqa: BLE001 - every failure is just "not this one"
+            return None, exc
+        return None, None
+
+    _value, elapsed, reason = _through_models(
+        link, api_key, once, on_log=on_log, time_fn=time_fn
+    )
+    return elapsed, reason
 
 
 def _work_probe(link, api_key, work, *, on_log, client_factory, time_fn):
@@ -624,27 +770,28 @@ def _work_probe(link, api_key, work, *, on_log, client_factory, time_fn):
     refused drops to ``json_object`` and then to prompt-only, and only a link
     that answers at no rung at all has failed.
     """
-    client = LlmClient(
-        link, api_key=api_key,
-        # Twice the ping's allowance, never more than a real request may take
-        # (registry.work_probe_timeout). It runs before transcription, so it
-        # must not become the delay it exists to prevent.
-        timeout=work_probe_timeout(link),
-        client_factory=client_factory, on_log=on_log,
-    )
-    started = time_fn()
-    try:
-        value = client.complete_json(
-            system=work["system"],
-            user=work["user"],
-            schema=work.get("schema"),
-            schema_name=work.get("schema_name", "result"),
-            max_tokens=work.get("max_tokens", 700),
-            temperature=work.get("temperature", 0.2),
+    def once(candidate):
+        client = LlmClient(
+            candidate, api_key=api_key,
+            # Twice the ping's allowance, never more than a real request may
+            # take (registry.work_probe_timeout). It runs before transcription,
+            # so it must not become the delay it exists to prevent.
+            timeout=work_probe_timeout(candidate),
+            client_factory=client_factory, on_log=on_log,
         )
-    except Exception as exc:  # noqa: BLE001 - falls back to the ping
-        return None, time_fn() - started, f"{type(exc).__name__}: {exc}"
-    return value, time_fn() - started, None
+        try:
+            return client.complete_json(
+                system=work["system"],
+                user=work["user"],
+                schema=work.get("schema"),
+                schema_name=work.get("schema_name", "result"),
+                max_tokens=work.get("max_tokens", 700),
+                temperature=work.get("temperature", 0.2),
+            ), None
+        except Exception as exc:  # noqa: BLE001 - falls back to the ping
+            return None, exc
+
+    return _through_models(link, api_key, once, on_log=on_log, time_fn=time_fn)
 
 
 def preflight_message(results):

@@ -172,3 +172,43 @@ def test_a_non_integer_status_is_ignored():
     err = Exception("x")
     err.code = "insufficient_quota"
     assert errors.status_code(err) is None
+
+
+# ---------------------------------------------------- model unavailable (DEC-077)
+
+@pytest.mark.parametrize("name,status,message,expected", [
+    # The ones a same-provider model swap is for.
+    ("NotFoundError", 404,
+     "Error code: 404 - This model models/gemini-2.5-flash-lite is no longer "
+     "available to new users.", True),
+    ("NotFoundError", 404, "The model `gpt-9` does not exist", True),
+    ("APIStatusError", 410, "model has reached end of life", True),
+    ("BadRequestError", 400,
+     "The model `llama3-70b-8192` has been decommissioned and is no longer "
+     "supported.", True),
+    ("BadRequestError", 400, "Invalid model: mistral-tiny-2023", True),
+    ("BadRequestError", 400, "foo/bar is not a valid model ID", True),
+    # Look-alikes that a model swap would only hide.
+    ("NotFoundError", 404,
+     "No endpoints found that can handle the requested parameters.", False),
+    ("NotFoundError", 404, "No endpoints found matching your data policy", False),
+    ("AuthenticationError", 401, "Incorrect API key provided", False),
+    ("PermissionDeniedError", 403, "model not found in this project", False),
+    ("RateLimitError", 429, "Rate limit reached for model x", False),
+    ("InternalServerError", 503, "This model is currently experiencing high demand",
+     False),
+    ("BadRequestError", 400, "temperature must be between 0 and 2", False),
+    ("BadRequestError", 400, "response_format json_schema is not supported by this "
+     "model", False),
+    ("APITimeoutError", None, "Request timed out.", False),
+])
+def test_is_model_unavailable(name, status, message, expected):
+    assert errors.is_model_unavailable(exc(name, status, message)) is expected
+
+
+def test_a_model_unavailable_error_is_still_fatal_to_classify():
+    """The swap is a narrower question asked after classify, not a new class:
+    everything that reads classify keeps its meaning."""
+    err = exc("NotFoundError", 404, "model is no longer available to new users")
+    assert errors.classify(err) == errors.FATAL
+    assert errors.is_model_unavailable(err)

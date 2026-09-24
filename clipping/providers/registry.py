@@ -32,13 +32,15 @@ DEFAULT_PROBE_TIMEOUT = 45.0
 # chain's slow floor, which a job may not run on alone without an explicit
 # override, DEC-073); ``signup_url`` is where to get its key; ``free_tier``
 # says whether the DEFAULT model on it costs nothing, so a message never calls
-# a billed link free (DEC-076). All four are trailing and defaulted so a
-# Provider built without them still works.
+# a billed link free (DEC-076); ``fallback_models`` are the models tried, in
+# order, on the SAME key when the configured one answers "this model is not
+# available" -- and only then (DEC-077). All five are trailing and defaulted
+# so a Provider built without them still works.
 Provider = namedtuple(
     "Provider",
     "name base_url env_key rpm tpm structured default_timeout notes "
-    "probe_timeout primary signup_url free_tier",
-    defaults=(DEFAULT_PROBE_TIMEOUT, True, "", True),
+    "probe_timeout primary signup_url free_tier fallback_models",
+    defaults=(DEFAULT_PROBE_TIMEOUT, True, "", True, ()),
 )
 
 # ``structured`` lists the response_format levels the provider is known to
@@ -70,6 +72,11 @@ PROVIDERS = {
         default_timeout=180,
         notes="OpenAI-compatible endpoint. Flash-Lite has the most daily requests.",
         signup_url="https://aistudio.google.com/apikey",
+        # Measured 2026-09-24 against the real pass-A request: found the test
+        # transcript's clip 3/3 and answered real windows in 1.0-1.3s. An alias
+        # that Google moves forward, which is what a fallback for a retired
+        # model wants -- and why it is NOT the default (DEC-075).
+        fallback_models=("gemini-flash-lite-latest",),
     ),
     "nvidia": Provider(
         name="nvidia",
@@ -107,6 +114,10 @@ PROVIDERS = {
         # The default model is billed (~$0.10 per million tokens in). The
         # ``:free`` ones measured on 2026-09-24 could not do the job.
         free_tier=False,
+        # The only other OpenRouter model that found the clip 3/3 (2026-09-24).
+        # Same price tier as the default ($0.10/$0.32 vs $0.094/$0.25 per M),
+        # less selective, slower on real windows -- a fallback, not a default.
+        fallback_models=("meta-llama/llama-3.3-70b-instruct",),
     ),
     "mistral": Provider(
         name="mistral",

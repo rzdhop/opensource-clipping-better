@@ -159,6 +159,62 @@ def rejects_structured_output(exc: Exception) -> bool:
     )
 
 
+# Phrases providers use when the MODEL is the problem, not the request or the
+# key. Observed: Google 404 "is no longer available to new users" (2026-09-24);
+# Groq 400 "has been decommissioned"; Mistral 400 "Invalid model"; OpenRouter
+# 400 "is not a valid model ID"; OpenAI-style 404 "model_not_found" / "does not
+# exist".
+_MODEL_GONE_MARKERS = (
+    "no longer available",
+    "not found",
+    "does not exist",
+    "decommissioned",
+    "end of life",
+    "model_not_found",
+    "invalid model",
+    "not a valid model",
+    "no such model",
+    "unknown model",
+)
+
+# A 404 that names one of these is about the REQUEST: OpenRouter answers 404
+# "No endpoints found that can handle the requested parameters" and "...matching
+# your data policy". Another model would not fix either.
+_REQUEST_NOT_MODEL = ("parameter", "data policy")
+
+
+def is_model_unavailable(exc: Exception) -> bool:
+    """Whether *exc* says this MODEL cannot be used on this key, and nothing else.
+
+    The one failure where another model on the same provider and the same key
+    is the right next step (DEC-077). Everything else keeps its meaning: a bad
+    key, a rate limit, a refused schema or a malformed request is not fixed by
+    changing the model, and swapping on those would hide the real error.
+
+    Matched on status, class name and message, like everything in this module.
+    ``classify`` still calls these FATAL; this is a narrower question asked
+    after it, never instead of it.
+    """
+    if rejects_structured_output(exc):
+        return False
+    status = status_code(exc)
+    name = type(exc).__name__
+    if status in (401, 403, 429) or name in (
+        "AuthenticationError", "PermissionDeniedError", "RateLimitError",
+    ):
+        return False
+
+    message = str(exc).lower()
+    if any(marker in message for marker in _REQUEST_NOT_MODEL):
+        return False
+
+    if status in (404, 410) or name == "NotFoundError":
+        return True
+    if status in (400, 422) or name in ("BadRequestError", "UnprocessableEntityError"):
+        return "model" in message and any(m in message for m in _MODEL_GONE_MARKERS)
+    return False
+
+
 def classify(exc: Exception) -> str:
     """Return one of RETRY / FATAL / RATE_LIMITED / STRUCTURED_UNSUPPORTED.
 
