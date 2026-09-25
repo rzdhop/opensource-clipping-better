@@ -24,6 +24,8 @@ import importlib.util
 import json
 import os
 import re
+import shutil
+import subprocess
 import wave
 
 from . import generation, pricing
@@ -90,6 +92,20 @@ def _unknown_model(link, table):
     raise HttpStatusError(404, describe(link), f"model {link.model} not found in this adapter's table ({', '.join(table)})")
 
 
+def audio_duration(path: str):
+    """Seconds of audio in *path* by ffprobe, or ``None`` when ffprobe is missing or fails."""
+    if not shutil.which("ffprobe"):
+        return None
+    try:
+        out = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", path],
+            capture_output=True, text=True, timeout=30, check=False,
+        ).stdout.strip()
+        return round(float(out), 3) if out else None
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+
+
 class _Adapter:
     provider = ""
 
@@ -119,7 +135,7 @@ class EdgeTtsAdapter(_Adapter):
             return False, f"edge-tts is not installed: {EDGE_INSTALL}"
         return True, "edge-tts installed (free, unofficial; one voice per request)"
 
-    def generate(self, link, request, *, credentials, on_log, transport=None, synthesize=None, **_):
+    def generate(self, link, request, *, credentials, on_log, transport=None, synthesize=None, probe_duration=None, **_):
         if synthesize is None:
             if not _installed("edge_tts"):
                 raise ProviderError(f"{describe(link)}: edge-tts is not installed: {EDGE_INSTALL}")
@@ -135,11 +151,16 @@ class EdgeTtsAdapter(_Adapter):
         for segment in segments:
             for word in segment.get("words") or []:
                 words.append({"word": word["word"], "start": round(float(word["start"]), 3), "end": round(float(word["end"]), 3)})
-        duration = round(max((w["end"] for w in words), default=0.0), 3)
-        timing_path = _write_timing(out_dir, name, duration_s=duration, words=words,
-                                    source=SOURCE_WORDS if words else SOURCE_DURATION, provider="edge", voice=voice)
+        if words:
+            duration, source = round(max(w["end"] for w in words), 3), SOURCE_WORDS
+        else:
+            # No word cues: the audio's own length, measured, never a silent 0.0.
+            duration, source = (probe_duration or audio_duration)(audio_path), SOURCE_DURATION
+            on_log(f"   ⚠️ edge/{voice}: no word timestamps came back; timing is the audio duration only")
+        timing_path = _write_timing(out_dir, name, duration_s=duration, words=words, source=source,
+                                    provider="edge", voice=voice)
         return GenResult(provider="edge", model=voice, paths=(audio_path, timing_path),
-                         meta={"duration_s": duration, "words": len(words), "source": SOURCE_WORDS if words else SOURCE_DURATION})
+                         meta={"duration_s": duration, "words": len(words), "source": source})
 
 
 # ------------------------------------------------------------------- gemini

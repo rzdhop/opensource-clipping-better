@@ -77,12 +77,29 @@ AVAILABLE_VOICES = {
 # TTS SYNTHESIS (EDGE-TTS)
 # ==============================================================================
 
+def _word_boundary_kwargs() -> dict:
+    """``{"boundary": "WordBoundary"}`` when this edge-tts takes the argument.
+
+    edge-tts 7.2 changed the default to SentenceBoundary, after which the
+    stream below saw no WordBoundary chunk at all and every voice-over lost
+    its word timings (found on 2026-09-25 by the AI Story TTS chain test).
+    Older versions have no such argument and always sent word boundaries.
+    """
+    import inspect
+
+    try:
+        parameters = inspect.signature(edge_tts.Communicate.__init__).parameters
+    except (TypeError, ValueError):
+        return {}
+    return {"boundary": "WordBoundary"} if "boundary" in parameters else {}
+
+
 async def _synthesize_async(text: str, voice: str, output_audio_path: str, output_subs_path: str = None):
     """Async core for TTS generation."""
     if edge_tts is None:
         raise ImportError("edge-tts is not installed. Run: pip install edge-tts")
 
-    communicate = edge_tts.Communicate(text, voice)
+    communicate = edge_tts.Communicate(text, voice, **_word_boundary_kwargs())
     submaker = edge_tts.SubMaker()
 
     with open(output_audio_path, "wb") as file:

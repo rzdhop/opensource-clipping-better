@@ -146,6 +146,19 @@ def test_new_keys_and_local_urls_round_trip_and_clear(client, settings_env, tmp_
     assert cleared["fal_key_set"] is False and cleared["local_comfyui_url"] == "http://127.0.0.1:8188"
 
 
+def test_a_paid_link_is_never_summarised_as_allowed_while_paid_is_off(client):
+    """Found live: gemini/flash's token estimate rounded to $0.000 and the row said "allowed"."""
+    client.put("/api/settings", json={"google_api_key": "gk"})
+    rows = {r["label"]: r for r in client.get("/api/settings").json()["generation_chains"]["vision"]["links"]}
+    flash = rows["gemini/flash"]
+    assert flash["keyed"] is True and flash["paid"] is True and flash["allowed"] is False
+    assert "allow_paid is off" in flash["reason"] and flash["est_usd"] > 0
+    assert rows["gemini/flash-lite"]["allowed"] is True and rows["gemini/flash-lite"]["paid"] is False
+    client.put("/api/settings", json={"allow_paid": True})
+    rows = {r["label"]: r for r in client.get("/api/settings").json()["generation_chains"]["vision"]["links"]}
+    assert rows["gemini/flash"]["allowed"] is True
+
+
 def test_the_new_secrets_are_persisted_and_redacted():
     from web.api import settings_store
 

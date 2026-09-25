@@ -523,26 +523,50 @@ def _link_summary(kind, link, merged, budget_obj) -> dict:
     provider = gen.provider_for(link)
     missing = gen.missing_keys(link, merged)
     paid = gen.is_paid(link)
+    adapter = gen.adapter_for(kind, link.provider)
     est = 0.0
     if paid:
         try:
-            est = pricing.estimate(link, 1, width=1080, height=1920).est_usd
-        except pricing.PriceUnknown:
+            # The adapter's own estimate of the test request (tokens, size), so
+            # the number here is the one the runner will check.
+            estimate = adapter.estimate(link, _summary_request(kind)) if adapter else None
+            if estimate is None:
+                estimate = pricing.estimate(link, 1, width=1080, height=1920)
+            est = float(getattr(estimate, "est_usd", estimate) or 0.0)
+        except (pricing.PriceUnknown, ValueError):
             est = 0.0
     allowed = not missing
     reason = None
     if allowed and paid:
-        try:
-            budget_mod.check(est, link, budget=budget_obj, day_spent=budget_mod.day_spent())
-        except budget_mod.BudgetRefused as exc:
-            allowed, reason = False, str(exc)
+        day_spent = budget_mod.day_spent()
+        if not budget_obj.allow_paid:
+            # The runner's first gate (DEC-097), whatever the amount.
+            allowed = False
+            reason = (f"refused: est ${est:.3f} on {gen.describe(link)}; allow_paid is off "
+                      f"(today ${day_spent:.2f} of ${budget_obj.daily_cap_usd:.2f})")
+        else:
+            try:
+                budget_mod.check(est, link, budget=budget_obj, day_spent=day_spent)
+            except budget_mod.BudgetRefused as exc:
+                allowed, reason = False, str(exc)
     return {
         "label": gen.describe(link), "provider": link.provider, "model": link.model,
         "paid": paid, "keyed": not missing, "missing_keys": missing,
-        "adapter": gen.adapter_for(kind, link.provider) is not None,
+        "adapter": adapter is not None,
         "allowed": allowed, "est_usd": est, "reason": reason,
         "env_keys": list(provider.env_keys), "signup_url": provider.signup_url,
     }
+
+
+def _summary_request(kind):
+    """A request shaped like the chain test's, for estimates only (no files are read)."""
+    from clipping.providers.generation import GenRequest
+
+    if kind == "tts":
+        return GenRequest(kind=kind, text=_TEST_TEXT["fr"])
+    if kind == "vision":
+        return GenRequest(kind=kind, prompt=_TEST_VISION_PROMPT, images=("reference.png",))
+    return GenRequest(kind=kind, prompt=_TEST_IMAGE_PROMPT, width=1080, height=1920)
 
 
 def _generation_fields(env) -> dict:

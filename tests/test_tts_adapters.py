@@ -75,6 +75,72 @@ def test_edge_without_the_package_says_how_to_install_it(tmp_path, monkeypatch):
     assert "pip install edge-tts" in str(excinfo.value)
 
 
+def test_edge_without_word_cues_measures_the_audio_instead_of_saying_zero(tmp_path):
+    def synth_no_cues(text, voice, audio_path, subs_path=None):
+        pathlib.Path(audio_path).write_bytes(b"ID3fake-mp3")
+        return []
+
+    log = []
+    request = GenRequest(kind="tts", text="Bonjour", out_dir=str(tmp_path), extra={"name": "l2"})
+    result = tts.EDGE.generate(Link("edge", "fr-FR-HenriNeural"), request, credentials={}, on_log=log.append,
+                               synthesize=synth_no_cues, probe_duration=lambda path: 2.5)
+    timing = json.loads(pathlib.Path(result.paths[1]).read_text(encoding="utf-8"))
+    assert timing["source"] == "audio_duration_only" and timing["duration_s"] == 2.5 and timing["words"] == []
+    assert any("no word timestamps" in line for line in log)
+    assert tts.audio_duration(str(tmp_path / "missing.mp3")) is None, "an unreadable file measures as unknown, not 0"
+
+
+def test_the_voiceover_core_asks_edge_tts_for_word_boundaries(monkeypatch):
+    """edge-tts 7.2 defaults to sentence boundaries, which left every voice-over
+    without word timings (found live on 2026-09-25)."""
+    import asyncio
+    import datetime
+
+    from clipping import voiceover
+
+    seen = {}
+
+    class Cue:
+        def __init__(self, word, start, end):
+            self.content, self.start, self.end = word, datetime.timedelta(seconds=start), datetime.timedelta(seconds=end)
+
+    class SubMaker:
+        def __init__(self):
+            self.cues = []
+
+        def feed(self, chunk):
+            self.cues.append(Cue(chunk["text"], chunk["offset"] / 1e7, (chunk["offset"] + chunk["duration"]) / 1e7))
+
+        def get_srt(self):
+            return "1\n00:00:00,000 --> 00:00:00,400\nBonjour\n"
+
+    class Communicate:
+        def __init__(self, text, voice, *, boundary="SentenceBoundary"):
+            seen["boundary"] = boundary
+
+        async def stream(self):
+            yield {"type": "audio", "data": b"ID3"}
+            yield {"type": "WordBoundary", "offset": 0, "duration": 4_000_000, "text": "Bonjour"}
+
+    fake = type("EdgeTts", (), {"Communicate": Communicate, "SubMaker": SubMaker})
+    monkeypatch.setattr(voiceover, "edge_tts", fake)
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        segments = asyncio.run(voiceover._synthesize_async("Bonjour", "fr-FR-HenriNeural", f"{d}/a.mp3", f"{d}/a.srt"))
+    assert seen["boundary"] == "WordBoundary"
+    assert segments and segments[0]["words"][0]["word"] == "Bonjour"
+
+    class OldCommunicate:
+        def __init__(self, text, voice):
+            seen["old"] = True
+
+        async def stream(self):
+            yield {"type": "audio", "data": b"ID3"}
+
+    monkeypatch.setattr(voiceover, "edge_tts", type("EdgeTts", (), {"Communicate": OldCommunicate, "SubMaker": SubMaker}))
+    assert voiceover._word_boundary_kwargs() == {}, "an edge-tts without the argument gets none"
+
+
 def test_edge_uses_the_voiceover_core_not_a_copy():
     src = (ROOT / "clipping" / "providers" / "tts.py").read_text(encoding="utf-8")
     assert "voiceover._synthesize_async" in src or "from clipping.voiceover import _synthesize_async" in src
