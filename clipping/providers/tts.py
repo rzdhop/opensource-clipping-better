@@ -98,7 +98,7 @@ class _Adapter:
             return None
         return pricing.estimate(link, len(_text(request)))
 
-    def probe(self, link, *, credentials):
+    def probe(self, link, *, credentials, **_):
         return True, "key set; not probed (a request is the probe)"
 
 
@@ -114,7 +114,7 @@ def _edge_synthesize(text, voice, audio_path, subs_path=None):
 class EdgeTtsAdapter(_Adapter):
     provider = "edge"
 
-    def probe(self, link, *, credentials):
+    def probe(self, link, *, credentials, **_):
         if not _installed("edge_tts"):
             return False, f"edge-tts is not installed: {EDGE_INSTALL}"
         return True, "edge-tts installed (free, unofficial; one voice per request)"
@@ -253,7 +253,7 @@ _LOCAL_SYNTH = {"piper": _synthesize_piper, "kokoro": _synthesize_kokoro, "chatt
 class LocalTtsAdapter(_Adapter):
     provider = "local"
 
-    def probe(self, link, *, credentials):
+    def probe(self, link, *, credentials, **_):
         package = LOCAL_ENGINES.get(link.model) or _unknown_model(link, LOCAL_ENGINES)
         if not _installed(package):
             return False, f"{link.model} is not installed ({package} package): {LOCAL_TTS_EXTRA}"

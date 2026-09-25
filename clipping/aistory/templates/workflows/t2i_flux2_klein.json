@@ -1,0 +1,136 @@
+{
+  "$schema": "comfy_workflow_v1",
+  "name": "t2i_flux2_klein",
+  "task": "t2i",
+  "min_profile": "low",
+  "description": "Text to image with FLUX.2 [klein] 4B (Apache-2.0). Authored from ComfyUI's default API-format graph for this model, with the literal inputs replaced by placeholders (spec 8.7). Validated at run time against /object_info: a missing node or model file is refused with its name, never worked around.",
+  "placeholders": [
+    "prompt",
+    "negative",
+    "seed",
+    "width",
+    "height"
+  ],
+  "requires": [
+    {
+      "node": "10",
+      "field": "unet_name",
+      "file": "flux2-klein-4b.safetensors",
+      "dir": "models/diffusion_models"
+    },
+    {
+      "node": "11",
+      "field": "clip_name",
+      "file": "qwen_3_4b.safetensors",
+      "dir": "models/text_encoders"
+    },
+    {
+      "node": "12",
+      "field": "vae_name",
+      "file": "flux2-vae.safetensors",
+      "dir": "models/vae"
+    }
+  ],
+  "output_node": "9",
+  "graph": {
+    "10": {
+      "class_type": "UNETLoader",
+      "inputs": {
+        "unet_name": "flux2-klein-4b.safetensors",
+        "weight_dtype": "default"
+      }
+    },
+    "11": {
+      "class_type": "CLIPLoader",
+      "inputs": {
+        "clip_name": "qwen_3_4b.safetensors",
+        "type": "flux2",
+        "device": "default"
+      }
+    },
+    "12": {
+      "class_type": "VAELoader",
+      "inputs": {
+        "vae_name": "flux2-vae.safetensors"
+      }
+    },
+    "6": {
+      "class_type": "CLIPTextEncode",
+      "inputs": {
+        "text": "{{prompt}}",
+        "clip": [
+          "11",
+          0
+        ]
+      }
+    },
+    "7": {
+      "class_type": "CLIPTextEncode",
+      "inputs": {
+        "text": "{{negative}}",
+        "clip": [
+          "11",
+          0
+        ]
+      }
+    },
+    "5": {
+      "class_type": "EmptySD3LatentImage",
+      "inputs": {
+        "width": "{{width}}",
+        "height": "{{height}}",
+        "batch_size": 1
+      }
+    },
+    "3": {
+      "class_type": "KSampler",
+      "inputs": {
+        "seed": "{{seed}}",
+        "steps": 4,
+        "cfg": 1.0,
+        "sampler_name": "euler",
+        "scheduler": "simple",
+        "denoise": 1.0,
+        "model": [
+          "10",
+          0
+        ],
+        "positive": [
+          "6",
+          0
+        ],
+        "negative": [
+          "7",
+          0
+        ],
+        "latent_image": [
+          "5",
+          0
+        ]
+      }
+    },
+    "8": {
+      "class_type": "VAEDecode",
+      "inputs": {
+        "samples": [
+          "3",
+          0
+        ],
+        "vae": [
+          "12",
+          0
+        ]
+      }
+    },
+    "9": {
+      "class_type": "SaveImage",
+      "inputs": {
+        "filename_prefix": "rzdhop_ai/t2i",
+        "images": [
+          "8",
+          0
+        ]
+      }
+    }
+  }
+}

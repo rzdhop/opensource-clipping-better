@@ -1,0 +1,163 @@
+{
+  "$schema": "comfy_workflow_v1",
+  "name": "edit_qwen_image",
+  "task": "edit",
+  "min_profile": "high",
+  "description": "Image edit with Qwen-Image-Edit-2509 (Apache-2.0) as a GGUF through the ComfyUI-GGUF custom node; one reference image. Authored from ComfyUI's default API-format graph for this model, with the literal inputs replaced by placeholders (spec 8.7). Validated at run time against /object_info: a missing node or model file is refused with its name, never worked around.",
+  "placeholders": [
+    "prompt",
+    "negative",
+    "seed",
+    "width",
+    "height",
+    "ref_paths"
+  ],
+  "requires": [
+    {
+      "node": "10",
+      "field": "unet_name",
+      "file": "qwen_image_edit_2509_q4.gguf",
+      "dir": "models/unet"
+    },
+    {
+      "node": "11",
+      "field": "clip_name",
+      "file": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+      "dir": "models/text_encoders"
+    },
+    {
+      "node": "12",
+      "field": "vae_name",
+      "file": "qwen_image_vae.safetensors",
+      "dir": "models/vae"
+    }
+  ],
+  "ref_slots": 1,
+  "ref_nodes": [
+    "20"
+  ],
+  "output_node": "9",
+  "graph": {
+    "10": {
+      "class_type": "UnetLoaderGGUF",
+      "inputs": {
+        "unet_name": "qwen_image_edit_2509_q4.gguf"
+      }
+    },
+    "11": {
+      "class_type": "CLIPLoader",
+      "inputs": {
+        "clip_name": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+        "type": "qwen_image",
+        "device": "default"
+      }
+    },
+    "12": {
+      "class_type": "VAELoader",
+      "inputs": {
+        "vae_name": "qwen_image_vae.safetensors"
+      }
+    },
+    "20": {
+      "class_type": "LoadImage",
+      "inputs": {
+        "image": "",
+        "upload": "image"
+      }
+    },
+    "6": {
+      "class_type": "TextEncodeQwenImageEdit",
+      "inputs": {
+        "prompt": "{{prompt}}",
+        "clip": [
+          "11",
+          0
+        ],
+        "vae": [
+          "12",
+          0
+        ],
+        "image": [
+          "20",
+          0
+        ]
+      }
+    },
+    "7": {
+      "class_type": "TextEncodeQwenImageEdit",
+      "inputs": {
+        "prompt": "{{negative}}",
+        "clip": [
+          "11",
+          0
+        ],
+        "vae": [
+          "12",
+          0
+        ],
+        "image": [
+          "20",
+          0
+        ]
+      }
+    },
+    "5": {
+      "class_type": "EmptySD3LatentImage",
+      "inputs": {
+        "width": "{{width}}",
+        "height": "{{height}}",
+        "batch_size": 1
+      }
+    },
+    "3": {
+      "class_type": "KSampler",
+      "inputs": {
+        "seed": "{{seed}}",
+        "steps": 8,
+        "cfg": 1.0,
+        "sampler_name": "euler",
+        "scheduler": "simple",
+        "denoise": 1.0,
+        "model": [
+          "10",
+          0
+        ],
+        "positive": [
+          "6",
+          0
+        ],
+        "negative": [
+          "7",
+          0
+        ],
+        "latent_image": [
+          "5",
+          0
+        ]
+      }
+    },
+    "8": {
+      "class_type": "VAEDecode",
+      "inputs": {
+        "samples": [
+          "3",
+          0
+        ],
+        "vae": [
+          "12",
+          0
+        ]
+      }
+    },
+    "9": {
+      "class_type": "SaveImage",
+      "inputs": {
+        "filename_prefix": "rzdhop_ai/edit_qwen",
+        "images": [
+          "8",
+          0
+        ]
+      }
+    }
+  }
+}

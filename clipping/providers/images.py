@@ -105,7 +105,7 @@ class _Adapter:
             return None
         return pricing.estimate(link, 1, width=request.width, height=request.height)
 
-    def probe(self, link, *, credentials):
+    def probe(self, link, *, credentials, **_):
         # Hosted image providers are not probed: the real request is the probe,
         # and a paid one would cost money.
         return True, "key set; not probed (a request is the probe)"

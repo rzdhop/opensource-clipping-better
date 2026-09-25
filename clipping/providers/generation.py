@@ -323,8 +323,10 @@ class NoRunnableLink(errors.ProviderError):
 
 # ``(kind, provider) -> adapter``. An adapter is any object with
 #   estimate(link, request) -> estimate or None
-#   probe(link, *, credentials) -> (ok: bool, note: str)
-#   generate(link, request, *, credentials, on_log, transport=None) -> GenResult
+#   probe(link, *, credentials, **kw) -> (ok: bool, note: str)
+#   generate(link, request, *, credentials, on_log, transport=None, **kw) -> GenResult
+# ``kw`` carries ``transport`` when one is injected (tests) and, for a local
+# link, ``env`` (where LOCAL_COMFYUI_URL / LOCAL_OLLAMA_URL come from).
 # Exceptions raised by ``generate`` carry ``.status_code`` when they come from
 # HTTP, so ``errors.classify`` and ``errors.is_model_unavailable`` apply.
 _ADAPTERS = {}
@@ -404,7 +406,10 @@ def run_generation_chain(
         credentials = credentials_for(link, env)
 
         if is_local:
-            ok, note = adapter.probe(link, credentials=credentials)
+            probe_kwargs = {"credentials": credentials, "env": env}
+            if transport is not None:
+                probe_kwargs["transport"] = transport
+            ok, note = adapter.probe(link, **probe_kwargs)
             if not ok:
                 skip(label, note or "not reachable")
                 continue
@@ -416,7 +421,7 @@ def run_generation_chain(
             kind, candidates, request, adapter=adapter, credentials=credentials,
             allow_paid=allow_paid, budget_check=budget_check, limiter=limiter,
             transport=transport, on_log=on_log, sleep_fn=sleep_fn, time_fn=time_fn,
-            failures=failures,
+            failures=failures, extra_kwargs={"env": env} if is_local else {},
         )
         if answered is not None:
             return answered
@@ -434,7 +439,8 @@ def _parse_fallback(spec):
 
 
 def _run_candidates(kind, candidates, request, *, adapter, credentials, allow_paid,
-                    budget_check, limiter, transport, on_log, sleep_fn, time_fn, failures):
+                    budget_check, limiter, transport, on_log, sleep_fn, time_fn, failures,
+                    extra_kwargs=None):
     """Run *candidates[0]*, swapping to the next one only on "model not available"."""
     for index, link in enumerate(candidates):
         label = describe(link)
@@ -464,7 +470,7 @@ def _run_candidates(kind, candidates, request, *, adapter, credentials, allow_pa
 
         outcome = _attempt(link, request, adapter=adapter, credentials=credentials,
                            transport=transport, on_log=on_log, sleep_fn=sleep_fn,
-                           time_fn=time_fn, failures=failures)
+                           time_fn=time_fn, failures=failures, extra_kwargs=extra_kwargs or {})
         if outcome is _SWAP:
             nxt = candidates[index + 1] if index + 1 < len(candidates) else None
             if nxt is None:
@@ -483,14 +489,15 @@ def _run_candidates(kind, candidates, request, *, adapter, credentials, allow_pa
 _SWAP = object()
 
 
-def _attempt(link, request, *, adapter, credentials, transport, on_log, sleep_fn, time_fn, failures):
+def _attempt(link, request, *, adapter, credentials, transport, on_log, sleep_fn, time_fn, failures,
+             extra_kwargs=None):
     label = describe(link)
     for attempt in range(1, MAX_ATTEMPTS + 1):
         on_log(f"   🔁 {label}: attempt {attempt}/{MAX_ATTEMPTS}")
         started = time_fn()
         try:
             result = adapter.generate(link, request, credentials=credentials, on_log=on_log,
-                                      transport=transport)
+                                      transport=transport, **(extra_kwargs or {}))
         except Exception as exc:  # noqa: BLE001 - classified below
             reason = f"{type(exc).__name__}: {exc}"
             if errors.is_model_unavailable(exc):

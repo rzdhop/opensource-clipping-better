@@ -39,7 +39,7 @@ class _CompatVision:
         tokens = len(request.prompt or "") // 4 + TOKENS_PER_IMAGE * len(request.images or ())
         return pricing.estimate(link, tokens)
 
-    def probe(self, link, *, credentials):
+    def probe(self, link, *, credentials, **_):
         return True, "key set; not probed (a request is the probe)"
 
     def generate(self, link, request, *, credentials, on_log, transport=None, client_factory=None, **_):

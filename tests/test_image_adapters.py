@@ -14,7 +14,7 @@ import pytest
 from clipping.providers import errors, generation, images
 from clipping.providers.generation import GenRequest, NoRunnableLink, parse_generation_chain, run_generation_chain
 from clipping.providers.registry import Link
-from clipping.providers.transport import Response
+from clipping.providers.transport import APIConnectionError, Response
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
@@ -31,7 +31,10 @@ class FakeTransport:
     def __call__(self, method, url, *, headers=None, body=None, timeout=60):
         self.calls.append({"method": method, "url": url, "headers": dict(headers or {}),
                            "body": body, "timeout": timeout})
-        status, payload = self.answers.pop(0)
+        answer = self.answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        status, payload = answer
         if isinstance(payload, (dict, list)):
             payload = json.dumps(payload).encode()
         return Response(status, {}, payload)
@@ -186,7 +189,8 @@ def test_a_retired_gemini_image_model_is_swapped_inside_gemini_by_the_runner(tmp
 
 def run_edit(chain, transport, tmp_path, *, allow_paid, env=None, budget_check=lambda e, l: None):
     log = []
-    env = env if env is not None else {"GOOGLE_API_KEY": "gk", "FAL_KEY": "fk", "OPENAI_API_KEY": "ok"}
+    env = env if env is not None else {"GOOGLE_API_KEY": "gk", "FAL_KEY": "fk", "OPENAI_API_KEY": "ok",
+                                       "LOCAL_COMFYUI_URL": "http://127.0.0.1:8188"}
     out = run_generation_chain("image_edit", parse_generation_chain("image_edit", chain),
                                request("image_edit", out_dir=str(tmp_path)), env=env, allow_paid=allow_paid,
                                on_log=log.append, budget_check=budget_check, transport=transport,
@@ -319,20 +323,22 @@ def test_openai_generates_and_edits_through_the_sdk_with_retries_off(tmp_path, r
 
 # ----------------------------------------------------------- through the runner
 
-def test_with_allow_paid_off_no_transport_is_ever_touched(tmp_path):
-    transport = FakeTransport([])
+def test_with_allow_paid_off_no_paid_transport_is_ever_touched(tmp_path):
+    """The only request is the local ComfyUI reachability probe (stage 9 gave
+    local/comfyui its adapter); every paid link is refused before any call."""
+    transport = FakeTransport([APIConnectionError("connection refused")])
     with pytest.raises(NoRunnableLink) as excinfo:
         run_edit(generation.DEFAULT_CHAINS["image_edit"], transport, tmp_path, allow_paid=False)
-    assert transport.calls == []
+    assert [c["url"] for c in transport.calls] == ["http://127.0.0.1:8188/system_stats"]
     reasons = dict(excinfo.value.failures)
     assert "allow_paid is off" in reasons["gemini/nano-banana-2-lite"]
     assert "allow_paid is off" in reasons["fal/seedream-4-edit"]
-    assert "no adapter yet" in reasons["local/comfyui"]
+    assert "unreachable at http://127.0.0.1:8188" in reasons["local/comfyui"]
 
 
 def test_with_allow_paid_on_the_first_runnable_paid_link_answers(tmp_path, ref):
-    transport = FakeTransport([(200, gemini_answer())])
+    transport = FakeTransport([APIConnectionError("connection refused"), (200, gemini_answer())])
     (result, answered), log = run_edit("local/comfyui,gemini/nano-banana-2-lite,fal/seedream-4-edit", transport, tmp_path, allow_paid=True)
     assert answered == Link("gemini", "nano-banana-2-lite")
     assert result.paid is True and result.est_cost == 0.0336
-    assert len(transport.calls) == 1
+    assert [c["url"].split("/")[2] for c in transport.calls] == ["127.0.0.1:8188", "generativelanguage.googleapis.com"]

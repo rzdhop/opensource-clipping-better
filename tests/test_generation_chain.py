@@ -104,11 +104,11 @@ class FakeAdapter:
     def estimate(self, link, request):
         return self.est
 
-    def probe(self, link, *, credentials):
+    def probe(self, link, *, credentials, **_):
         self.probes.append(link)
         return self.reachable, "ok" if self.reachable else f"unreachable at {local_url('comfyui', env={}, container=False)}"
 
-    def generate(self, link, request, *, credentials, on_log, transport=None):
+    def generate(self, link, request, *, credentials, on_log, transport=None, **_):
         self.calls.append((link, dict(credentials)))
         if link.model in self.unavailable:
             exc = RuntimeError(f"model {link.model} is not found")
