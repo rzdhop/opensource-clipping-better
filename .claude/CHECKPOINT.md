@@ -1,3 +1,55 @@
+## CURRENT TASK — AI Story phase 0: the foundation (IN PROGRESS — stage 0 done)
+- **Phase:** IMPLEMENT. LOAD / EXPLORE / CLARIFY / PLAN done 2026-09-25; plan approved in chat 2026-09-25 12:41 UTC.
+- **Plan:** `~/.claude/plans/pasted-content-id-a0ee-the-spec-resilient-tulip.md` (v2, spec values filled; v1 `ai-story-phase-0-foundation.md` is marked superseded). 15 stages (0–14), riskiest = **stage 2** (two-mode shell). Value sheets in plan §3; Tier-2 script in plan §5.
+- **Spec:** `.claude/plans/ai-story/00-MASTER-SPEC.md` v1.1, `09-APPENDIX-research-2026-09-25.md`, `10-REFERENCE-ANALYSIS-2026-09-25.md`, brief `01-phase-0-rename-shell-providers.md`.
+- **Checkpoint commit:** `429c9e7` (clean tree, known good; one commit ahead of `origin/main`, unpushed). This header commit sits directly on top of it.
+- **Tier-1 baseline (2026-09-25 12:46 UTC, at `429c9e7`):** local `python -m pytest -p no:warnings` **1646 passed / 1 skipped** (12.7 s); CI env (`PYTHONNOUSERSITE=1`, pytest-only libs) **1464 passed / 155 skipped**; `python -m compileall -q clipping web tests main.py` clean; `vite build` green (built to a scratch outDir, `dist/` untouched).
+- **Current stage / next action:** stage 0 done → **stage 1** (rename to rzdhop AI: `test_branding.py` gains `NEW_NAME = "rzdhop AI"` required in `index.html` and `README.md`, shown failing first).
+- **Open questions:** none. Answered 2026-09-25: spec on disk (§8.5.1 profiles, §8.7 model ids, workflows authored from ComfyUI defaults); paid key = **fal.ai** → Tier-2 exercises `fal/seedream-4-edit`; defaults accepted (DEC-093 onward, env/payload-only chains + Test button, logo from `public/icon.svg`, pyproject `rzdhop-ai` with `rzclips`/`clipping` unchanged, stdlib transports, nothing pushed without a go); budget caps **1.00 / 3.00 / 10.00**, profile `free`, `one_dollar` once `allow_paid` is on.
+- **Design choices taken (challengeable until stage 1, recorded in stage 14):** Gemini image/TTS via REST (the declared `google-genai` is absent on the Tier-1 host); a chain test spends at most one paid call, per link, on an explicit click with the estimate shown; paid spend per day in `data/spend.json`, free counters in `data/usage.json`; workflow templates flat under `clipping/aistory/templates/workflows/` with `min_profile`; per-task route selector deferred to phase 1 (`route=` parameter reserved); budget CLI flags declared now for the five-place test.
+- **Decisions to write (stage 14):** DEC-093…DEC-104, A-030…A-037 (plan §6) + the spec §14 day-one assumptions that concern phase 0.
+- **Security notes:** new secrets (`FAL_KEY`, `OPENAI_API_KEY`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `POLLINATIONS_API_KEY`) go through `PERSISTED_KEYS`/`SECRET_KEYS` (0600 file, empty clears); no paid call without `budget.check`; `allow_paid` off by default; the DEC-092 no-token override stays local.
+- **Follow-ups, deliberately not done:** `pyproject.toml` has no `[build-system]`/package-data (dependency pass); per-task route selector (phase 1); Freesound toggle (phase 4); `httpx` is transitive only.
+
+### Regression contract (phase 0)
+| ID | Must keep working | Proven by |
+|---|---|---|
+| RC-P1 | Existing clip flow: create, stream, serve, clone & rerun, cancel, delete — under `/clips/*` after stage 2 | `tests/test_job_stream.py`, `test_clip_serving.py` (SPA rows move to `/clips`), `test_web_reuse_bypass.py`, `test_auth_token.py` media tests + one real job in Tier-2 |
+| RC-P2 | Existing Settings: keys persist, empty clears, chain test verdicts | `test_settings_store.py`, `test_chain_gate_api.py`, `test_dashboard_payload_contract.py` |
+| RC-P3 | Auth: every router token-gated, `/api/health` open, media signatures | `tests/test_auth_token.py` (AST guard, MC-6, MC-7) |
+| RC-P4 | Legacy story-clip assembly: flag parses, loader works, `main.py` branches | `tests/test_story_loader.py`, new label test (stage 3), `main.py --help`; end-to-end **UNVERIFIED** (sample sources carry no media) |
+| RC-P5 | LLM chain semantics: parser, probes, readiness, swap | `tests/test_preflight.py` **unedited**, `test_llm_negotiation.py`, `test_provider_registry.py`, `test_chain_readiness.py`, `test_model_fallback.py` |
+| RC-P6 | Branding guard: slug allowed, old name forbidden, CLI entry points | `tests/test_branding.py` |
+| RC-P7 | Dashboard mount last; token never in a URL; SPA fallback | `test_auth_token.py::test_the_dashboard_mount_is_the_last_route_registered`, `::test_the_token_never_travels_in_a_query_string`, `test_clip_serving.py` SPA rows |
+| RC-P8 | Suite runs with pytest alone (DEC-012) | CI-env run after every stage |
+| RC-P9 | Render layer untouched | `git diff --stat 429c9e7 -- clipping/studio` empty at close-out |
+| RC-P10 | No paid call by default; free counters count free calls only; no chain test spends more than one paid call | `test_budget.py`, `test_limits.py`, `test_generation_chain_api.py` (stages 5, 6, 11), Tier-2 step 4 |
+| RC-P11 | DEC-092 override still opens this machine without a token | `test_auth_token.py` (both DEC-092 tests), Tier-2 step 1 |
+
+### Stage ledger
+| S | Stage | State |
+|---|---|---|
+| 0 | checkpoint + baseline | **done** (`429c9e7` + this header commit) |
+| 1 | rename to rzdhop AI | pending |
+| 2 | two-mode shell (RISKIEST) | pending |
+| 3 | relabel legacy story-clip "Story Clip (assembly)" | pending |
+| 4 | generation chain core (`providers/generation.py`) | pending |
+| 5 | pricing + free-tier limits | pending |
+| 6 | budget + cost ledger (caps 1.00 / 3.00 / 10.00) | pending |
+| 7 | image adapters | pending |
+| 8 | TTS + vision adapters | pending |
+| 9 | local ComfyUI / Ollama clients + 3 workflow templates | pending |
+| 10 | hardware profiler + `GET /api/hardware` | pending |
+| 11 | settings API (keys, budget fields, test-generation-chain) | pending |
+| 12 | settings UI (four tabs) | pending |
+| 13 | deploy + Tier-2 (plan §5, human ack) | pending |
+| 14 | docs + decisions (DEC-093…, A-030…) | pending |
+
+### Deploy
+`sudo docker compose rm -sfv backend && docker compose up -d --build backend` — only when no job runs (the container executes the bind-mounted on-disk Python; the dashboard needs the rebuild). Never `down -v` (Caddy certs). `.claude/` is dockerignored.
+
+---
+
 ## CURRENT TASK — every key tested with the real request; a chain that survives a retired model (COMPLETE, awaiting Tier-2 ack)
 - **Phase:** DOCUMENT done. All stages committed on main; deployed 2026-09-24 13:12 UTC.
 - **Plan:** `~/.claude/plans/zany-bouncing-brook.md` (approved in chat 2026-09-24).
