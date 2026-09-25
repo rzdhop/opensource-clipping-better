@@ -154,8 +154,12 @@ class ChainError(ValueError):
     """The chain string is malformed or names a provider that does not exist."""
 
 
-def parse_spec(spec: str) -> Link:
+def parse_spec(spec: str, providers=None) -> Link:
     """``"groq/openai/gpt-oss-120b"`` -> ``Link("groq", "openai/gpt-oss-120b")``.
+
+    *providers* is the table the provider name is checked against; it defaults
+    to the LLM table. The generation chains pass their own (``generation.py``),
+    so the two tables never mix (DEC-096).
 
     Split on the FIRST slash only. This is not a detail: Groq and OpenRouter
     model ids contain slashes (``openai/gpt-oss-120b``,
@@ -176,10 +180,11 @@ def parse_spec(spec: str) -> Link:
     provider = provider.strip().lower()
     model = model.strip()
 
-    if provider not in PROVIDERS:
+    table = PROVIDERS if providers is None else providers
+    if provider not in table:
         raise ChainError(
             f"Unknown provider {provider!r} in {text!r}. "
-            f"Known: {', '.join(PROVIDER_NAMES)}."
+            f"Known: {', '.join(table)}."
         )
     if not model:
         raise ChainError(f"{text!r} names a provider but no model.")
@@ -187,7 +192,7 @@ def parse_spec(spec: str) -> Link:
     return Link(provider, model)
 
 
-def parse_chain(chain) -> list:
+def parse_chain(chain, providers=None) -> list:
     """Parse ``"a/b,c/d"`` (or a list of specs) into ``[Link, ...]``.
 
     Order is preserved and duplicates are kept: asking for the same model twice
@@ -200,7 +205,7 @@ def parse_chain(chain) -> list:
     else:
         parts = list(chain)
 
-    links = [parse_spec(p) if not isinstance(p, Link) else p for p in parts]
+    links = [parse_spec(p, providers) if not isinstance(p, Link) else p for p in parts]
     if not links:
         raise ChainError("Empty chain: nothing to call.")
     return links
