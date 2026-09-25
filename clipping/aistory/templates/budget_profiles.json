@@ -1,0 +1,28 @@
+{
+  "$schema": "budget_profiles_v1",
+  "profiles": {
+    "free": {
+      "cap_usd": 0.0,
+      "images": "free_or_local",
+      "tts": "free_or_local",
+      "animate": "none",
+      "consistency": "local_editor_or_prompt_only_opt_in"
+    },
+    "one_dollar": {
+      "cap_usd": 1.0,
+      "images": "cheapest_editor_with_refs",
+      "tts": "free_or_local",
+      "animate": "key_shots_within_cap",
+      "animate_priority": ["hook", "cliffhanger", "peak", "turn", "longest_dialogue"],
+      "video_link_policy": "cheapest_available"
+    },
+    "quality": {
+      "cap_usd": null,
+      "images": "best_editor_with_refs",
+      "tts": "free_or_local",
+      "animate": "all_shots",
+      "video_link_policy": "first_in_chain",
+      "tier3_native_audio": "opt_in"
+    }
+  }
+}

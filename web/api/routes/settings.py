@@ -71,6 +71,23 @@ def _chain_blocked_reason(env) -> str:
     return "" if readiness.ready else readiness.message
 
 
+def _budget_fields(env) -> dict:
+    """The budget the settings describe, read the way the pipeline reads it (DEC-097)."""
+    from clipping.providers import budget as budget_mod
+
+    merged = {name: env.get(name, os.environ.get(name, "")) for name in budget_mod.ENV_NAMES}
+    resolved = budget_mod.budget_from_env(merged)
+    return {
+        "allow_paid": resolved.allow_paid,
+        "per_episode_cap_usd": resolved.per_episode_cap_usd,
+        "daily_cap_usd": resolved.daily_cap_usd,
+        "per_story_cap_usd": resolved.per_story_cap_usd,
+        "budget_profile": str(merged.get("BUDGET_PROFILE") or "").strip().lower(),
+        "effective_budget_profile": resolved.profile,
+        "spend_today_usd": budget_mod.day_spent(),
+    }
+
+
 @router.get("/api/settings")
 async def get_settings() -> SettingsResponse:
     """Get current settings (API keys are masked)."""
@@ -108,6 +125,7 @@ async def get_settings() -> SettingsResponse:
         openai_compat_base_url=compat_url,
         openai_compat_model=compat_model,
         allow_slow_chain=env_flag(env, "ALLOW_SLOW_CHAIN"),
+        **_budget_fields(env),
         chain_blocked_reason=_chain_blocked_reason(env),
         default_clips=int(env.get("DEFAULT_CLIPS", "7")),
         default_ratio=env.get("DEFAULT_RATIO", "9:16"),
@@ -156,6 +174,25 @@ async def update_settings(req: SettingsRequest) -> SettingsResponse:
         # shadow an ALLOW_SLOW_CHAIN=1 in .env forever, with no way back from
         # the UI.
         env_updates["ALLOW_SLOW_CHAIN"] = "1" if req.allow_slow_chain else ""
+    # Budget (AI Story, DEC-097): same clearing rule for the switch; the caps
+    # are stored as amounts; the profile is validated before it is stored.
+    if req.allow_paid is not None:
+        env_updates["ALLOW_PAID"] = "1" if req.allow_paid else ""
+    for name, value in (("PER_EPISODE_CAP_USD", req.per_episode_cap_usd),
+                        ("DAILY_CAP_USD", req.daily_cap_usd),
+                        ("PER_STORY_CAP_USD", req.per_story_cap_usd)):
+        if value is not None:
+            if value <= 0:
+                raise HTTPException(status_code=400, detail=f"{name} must be a positive amount in USD")
+            env_updates[name] = f"{value:.2f}"
+    if req.budget_profile is not None:
+        from clipping.providers.budget import resolve_profile
+
+        try:
+            resolve_profile(req.budget_profile, True)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        env_updates["BUDGET_PROFILE"] = req.budget_profile.strip().lower()
     if req.default_clips is not None:
         env_updates["DEFAULT_CLIPS"] = str(req.default_clips)
     if req.default_ratio is not None:

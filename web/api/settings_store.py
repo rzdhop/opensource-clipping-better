@@ -53,6 +53,13 @@ PERSISTED_KEYS = frozenset({
     "DEFAULT_AI_PROVIDER",
     # Not a secret: a switch. Stored as "1" or not at all (DEC-043, DEC-073).
     "ALLOW_SLOW_CHAIN",
+    # Budget (AI Story, DEC-097): a switch stored like ALLOW_SLOW_CHAIN, three
+    # amounts in USD, and the profile name.
+    "ALLOW_PAID",
+    "PER_EPISODE_CAP_USD",
+    "DAILY_CAP_USD",
+    "PER_STORY_CAP_USD",
+    "BUDGET_PROFILE",
 })
 
 # Values that are secrets. Listed explicitly rather than pattern-matched on

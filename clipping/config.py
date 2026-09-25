@@ -191,6 +191,14 @@ RENDER_OUTPUT_HEIGHT = 1080
 
 from clipping.analysis.presets import DEFAULT_PRESET, PRESET_NAMES
 from clipping.providers.registry import DEFAULT_LLM_CHAIN, NVIDIA_DEFAULT_MODEL
+from clipping.providers.budget import (
+    ALLOW_PAID as _BUDGET_ALLOW_PAID_DEFAULT,
+    BUDGET_PROFILE as _BUDGET_PROFILE_DEFAULT,
+    DAILY_CAP_USD as _DAILY_CAP_USD_DEFAULT,
+    PER_EPISODE_CAP_USD as _PER_EPISODE_CAP_USD_DEFAULT,
+    PER_STORY_CAP_USD as _PER_STORY_CAP_USD_DEFAULT,
+    budget_from_env as _budget_from_env,
+)
 
 # AI Provider
 # "chain" walks LLM_CHAIN with the three-pass analyzer (clipping/analysis/) and
@@ -229,6 +237,16 @@ LLM_TIMEOUT = 0  # 0 = use each provider's own default
 ALLOW_SLOW_CHAIN = (
     os.environ.get("ALLOW_SLOW_CHAIN", "").strip().lower() in {"1", "true", "yes"}
 )
+
+# Paid generation (AI Story) is opt-in and capped (DEC-097). The defaults are
+# defined once in clipping/providers/budget.py; these read the environment the
+# same way ALLOW_SLOW_CHAIN does. A garbage amount raises, it is not ignored.
+_BUDGET = _budget_from_env()
+ALLOW_PAID = _BUDGET.allow_paid if _BUDGET.allow_paid else _BUDGET_ALLOW_PAID_DEFAULT
+PER_EPISODE_CAP_USD = _BUDGET.per_episode_cap_usd
+DAILY_CAP_USD = _BUDGET.daily_cap_usd
+PER_STORY_CAP_USD = _BUDGET.per_story_cap_usd
+BUDGET_PROFILE = os.environ.get("BUDGET_PROFILE", _BUDGET_PROFILE_DEFAULT).strip().lower()
 
 # Hosted transcription, same "<provider>/<model>" spelling. Empty uses the
 # default in clipping/providers/stt.py; "none" disables transcription entirely
@@ -827,6 +845,39 @@ def _build_parser() -> argparse.ArgumentParser:
     # --- Story Clip (assembly): the multi-source recipe of the CLI, not the
     # dashboard's AI Story mode (DEC-095) ---
     story_group = p.add_argument_group("Story Clip (assembly)")
+    # --- Budget (AI Story): five-place defaults, see clipping/providers/budget.py ---
+    budget_group = p.add_argument_group("Budget (AI Story)")
+    budget_group.add_argument(
+        "--allow-paid",
+        action="store_true",
+        default=False,
+        help="Let AI Story call paid providers, within the caps. Off by default. Also settable as ALLOW_PAID=1.",
+    )
+    budget_group.add_argument(
+        "--per-episode-cap-usd",
+        type=float,
+        default=PER_EPISODE_CAP_USD,
+        help="Most a single episode may spend on paid providers, in USD.",
+    )
+    budget_group.add_argument(
+        "--daily-cap-usd",
+        type=float,
+        default=DAILY_CAP_USD,
+        help="Most all stories together may spend per UTC day, in USD.",
+    )
+    budget_group.add_argument(
+        "--per-story-cap-usd",
+        type=float,
+        default=PER_STORY_CAP_USD,
+        help="Most one story may spend over its life, in USD.",
+    )
+    budget_group.add_argument(
+        "--budget-profile",
+        choices=("free", "one_dollar", "quality"),
+        default=None,
+        help="Where paid money goes. Default: free until --allow-paid, one_dollar from then on.",
+    )
+
     story_group.add_argument(
         "--story-mode",
         action="store_true",
@@ -1554,6 +1605,12 @@ def build_config(argv: list[str] | None = None) -> SimpleNamespace:
         llm_timeout=args.llm_timeout,
         preflight=not args.no_preflight,
         allow_slow_chain=args.allow_slow_chain or ALLOW_SLOW_CHAIN,
+        # Budget (AI Story), five-place defaults (DEC-097)
+        allow_paid=args.allow_paid or ALLOW_PAID,
+        per_episode_cap_usd=args.per_episode_cap_usd,
+        daily_cap_usd=args.daily_cap_usd,
+        per_story_cap_usd=args.per_story_cap_usd,
+        budget_profile=args.budget_profile or BUDGET_PROFILE,
         stt_chain=args.stt_chain,
         # Filled in by a hosted transcription provider that reports what it
         # heard; beats guessing the language from stopwords afterwards.

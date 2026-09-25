@@ -9,6 +9,8 @@ so the existing pipeline code works unchanged.
 from __future__ import annotations
 
 import os
+
+from clipping.providers.budget import DAILY_CAP_USD, PER_EPISODE_CAP_USD, PER_STORY_CAP_USD
 from types import SimpleNamespace
 
 # Import defaults from existing config module
@@ -61,6 +63,21 @@ def resolve_provider_keys(env=None) -> dict:
         if value:
             keys[name] = value
     return keys
+
+
+def env_float(env, name, default) -> float:
+    """An amount setting: the Settings page's value, else the process env, else *default*.
+
+    A value that is not a number raises with the variable's name (no silent
+    fallback, DEC-097).
+    """
+    value = str(env.get(name, os.environ.get(name, "")) or "").strip()
+    if not value:
+        return float(default)
+    try:
+        return float(value)
+    except ValueError:
+        raise ValueError(f"{name} must be an amount in USD, not {value!r}") from None
 
 
 def env_flag(env, name) -> bool:
@@ -271,6 +288,12 @@ def build_config_from_payload(
         # Run on the slow floor alone when no primary link has a key. A Settings
         # toggle, not a per-job field (DEC-073); chain_not_ready reads it.
         allow_slow_chain=env_flag(env, "ALLOW_SLOW_CHAIN"),
+        # Budget (AI Story), five-place defaults (DEC-097)
+        allow_paid=env_flag(env, "ALLOW_PAID"),
+        per_episode_cap_usd=env_float(env, "PER_EPISODE_CAP_USD", PER_EPISODE_CAP_USD),
+        daily_cap_usd=env_float(env, "DAILY_CAP_USD", DAILY_CAP_USD),
+        per_story_cap_usd=env_float(env, "PER_STORY_CAP_USD", PER_STORY_CAP_USD),
+        budget_profile=str(env.get("BUDGET_PROFILE", os.environ.get("BUDGET_PROFILE", "")) or "").strip().lower(),
         detected_language="",
         platform=payload.get("platform", "auto"),
         topic=payload.get("topic", ""),

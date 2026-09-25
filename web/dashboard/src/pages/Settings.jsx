@@ -78,6 +78,12 @@ function Settings() {
 
   // Run a job even when only the slow floor (NVIDIA) has a key. Prefilled.
   const [allowSlowChain, setAllowSlowChain] = useState(false)
+  // Budget (AI Story, DEC-097)
+  const [allowPaid, setAllowPaid] = useState(false)
+  const [perEpisodeCap, setPerEpisodeCap] = useState('')
+  const [dailyCap, setDailyCap] = useState('')
+  const [perStoryCap, setPerStoryCap] = useState('')
+  const [budgetProfile, setBudgetProfile] = useState('')
 
   // The chain test. It can take a couple of minutes, so it counts seconds
   // while it runs: a bare spinner reads as "hung" long before NVIDIA answers.
@@ -115,6 +121,11 @@ function Settings() {
         setCompatUrl(data.openai_compat_base_url || '')
         setCompatModel(data.openai_compat_model || '')
         setAllowSlowChain(Boolean(data.allow_slow_chain))
+        setAllowPaid(Boolean(data.allow_paid))
+        setPerEpisodeCap(String(data.per_episode_cap_usd ?? ''))
+        setDailyCap(String(data.daily_cap_usd ?? ''))
+        setPerStoryCap(String(data.per_story_cap_usd ?? ''))
+        setBudgetProfile(data.budget_profile || '')
         setLoading(false)
       })
       .catch(() => setLoading(false))
@@ -148,6 +159,23 @@ function Settings() {
       if (allowSlowChain !== Boolean(settings?.allow_slow_chain)) {
         payload.allow_slow_chain = allowSlowChain
       }
+      // Budget (DEC-097): the switch follows the same rule; an amount is sent
+      // when it changed and is a positive number; the profile when it changed.
+      if (allowPaid !== Boolean(settings?.allow_paid)) {
+        payload.allow_paid = allowPaid
+      }
+      if (perEpisodeCap !== String(settings?.per_episode_cap_usd ?? '') && Number(perEpisodeCap) > 0) {
+        payload.per_episode_cap_usd = Number(perEpisodeCap)
+      }
+      if (dailyCap !== String(settings?.daily_cap_usd ?? '') && Number(dailyCap) > 0) {
+        payload.daily_cap_usd = Number(dailyCap)
+      }
+      if (perStoryCap !== String(settings?.per_story_cap_usd ?? '') && Number(perStoryCap) > 0) {
+        payload.per_story_cap_usd = Number(perStoryCap)
+      }
+      if (budgetProfile !== (settings?.budget_profile || '')) {
+        payload.budget_profile = budgetProfile
+      }
 
       if (Object.keys(payload).length === 0) {
         setMsg('No changes to save')
@@ -160,6 +188,11 @@ function Settings() {
       setCompatUrl(updated.openai_compat_base_url || '')
       setCompatModel(updated.openai_compat_model || '')
       setAllowSlowChain(Boolean(updated.allow_slow_chain))
+      setAllowPaid(Boolean(updated.allow_paid))
+      setPerEpisodeCap(String(updated.per_episode_cap_usd ?? ''))
+      setDailyCap(String(updated.daily_cap_usd ?? ''))
+      setPerStoryCap(String(updated.per_story_cap_usd ?? ''))
+      setBudgetProfile(updated.budget_profile || '')
       setGoogleKey('')
       setPexelsKey('')
       setHfToken('')
@@ -458,6 +491,53 @@ function Settings() {
           </div>
 
           {/* System info */}
+          {/* Budget (AI Story, DEC-097) */}
+          <div className="settings-section">
+            <h3>💰 Budget</h3>
+            <p className="form-hint" style={{ marginTop: '-6px', marginBottom: '14px' }}>
+              Paid generation providers are never called unless allowed here, and
+              never past these caps. Every estimate is shown before it is spent.
+            </p>
+            <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={allowPaid}
+                onChange={e => setAllowPaid(e.target.checked)}
+              />
+              Allow paid providers (within the caps)
+            </label>
+            <div className="settings-grid" style={{ marginTop: '12px' }}>
+              <div className="form-group">
+                <label className="form-label">Per episode cap (USD)</label>
+                <input className="form-input" type="number" min="0.01" step="0.01" inputMode="decimal"
+                  value={perEpisodeCap} onChange={e => setPerEpisodeCap(e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Daily cap (USD)</label>
+                <input className="form-input" type="number" min="0.01" step="0.01" inputMode="decimal"
+                  value={dailyCap} onChange={e => setDailyCap(e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Per story cap (USD)</label>
+                <input className="form-input" type="number" min="0.01" step="0.01" inputMode="decimal"
+                  value={perStoryCap} onChange={e => setPerStoryCap(e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Budget profile</label>
+                <select className="form-input" value={budgetProfile} onChange={e => setBudgetProfile(e.target.value)}>
+                  <option value="">auto — free until paid is allowed, then one_dollar</option>
+                  <option value="free">free — $0.00: free chains or local, stills + motion</option>
+                  <option value="one_dollar">one_dollar — ≤ $1 per episode: reference images + key shots animated</option>
+                  <option value="quality">quality — your cap: animate every shot</option>
+                </select>
+                <p className="form-hint">
+                  In force now: <strong>{settings?.effective_budget_profile || 'free'}</strong>
+                  {' · '}spent today ${Number(settings?.spend_today_usd || 0).toFixed(2)} of ${Number(settings?.daily_cap_usd || 0).toFixed(2)}
+                </p>
+              </div>
+            </div>
+          </div>
+
           <div className="settings-section">
             <h3>💻 System Info</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '13px' }}>

@@ -363,6 +363,14 @@ class SettingsRequest(BaseModel):
     # Let a chain job run when only the slow floor (NVIDIA) has a key. False
     # CLEARS the stored switch rather than storing "0" (DEC-043).
     allow_slow_chain: Optional[bool] = None
+    # Budget (AI Story, DEC-097): the switch clears like allow_slow_chain; the
+    # caps are amounts in USD; the profile is free | one_dollar | quality, or
+    # "" to follow the switch.
+    allow_paid: Optional[bool] = None
+    per_episode_cap_usd: Optional[float] = None
+    daily_cap_usd: Optional[float] = None
+    per_story_cap_usd: Optional[float] = None
+    budget_profile: Optional[str] = None
 
 
 class SettingsResponse(BaseModel):
@@ -380,6 +388,14 @@ class SettingsResponse(BaseModel):
     openai_compat_base_url: str = ""
     openai_compat_model: str = ""
     allow_slow_chain: bool = False
+    # Budget (AI Story): five-place defaults, clipping/providers/budget.py
+    allow_paid: bool = False
+    per_episode_cap_usd: float = 1.0
+    daily_cap_usd: float = 3.0
+    per_story_cap_usd: float = 10.0
+    budget_profile: str = ""
+    effective_budget_profile: str = "free"
+    spend_today_usd: float = 0.0
     # Why a chain job would be refused right now, or "" when it would start.
     # The server's own verdict (chain_readiness), so the dashboard never keeps a
     # second copy of the rule that could disagree with POST /api/jobs.
