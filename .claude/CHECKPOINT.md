@@ -1,16 +1,17 @@
-## CURRENT TASK — AI Story phase 0: the foundation (IN PROGRESS — stage 1 done)
+## CURRENT TASK — AI Story phase 0: the foundation (IN PROGRESS — stage 2 done)
 - **Phase:** IMPLEMENT. LOAD / EXPLORE / CLARIFY / PLAN done 2026-09-25; plan approved in chat 2026-09-25 12:41 UTC.
 - **Plan:** `~/.claude/plans/pasted-content-id-a0ee-the-spec-resilient-tulip.md` (v2, spec values filled; v1 `ai-story-phase-0-foundation.md` is marked superseded). 15 stages (0–14), riskiest = **stage 2** (two-mode shell). Value sheets in plan §3; Tier-2 script in plan §5.
 - **Spec:** `.claude/plans/ai-story/00-MASTER-SPEC.md` v1.1, `09-APPENDIX-research-2026-09-25.md`, `10-REFERENCE-ANALYSIS-2026-09-25.md`, brief `01-phase-0-rename-shell-providers.md`.
 - **Checkpoint commit:** `429c9e7` (clean tree, known good; one commit ahead of `origin/main`, unpushed). This header commit sits directly on top of it.
 - **Tier-1 baseline (2026-09-25 12:46 UTC, at `429c9e7`):** local `python -m pytest -p no:warnings` **1646 passed / 1 skipped** (12.7 s); CI env (`PYTHONNOUSERSITE=1`, pytest-only libs) **1464 passed / 155 skipped**; `python -m compileall -q clipping web tests main.py` clean; `vite build` green (built to a scratch outDir, `dist/` untouched).
-- **Current stage / next action:** stage 1 done → **stage 2** (two-mode shell, RISKIEST: `/clips/*` + `/story` + redirects + mode switch; new `tests/test_two_mode_routes.py` shown failing first; layouts measured at 375/820/1280).
-- **Tier-1 after stage 1 (12:54 UTC):** local **1648 passed / 1 skipped**; CI env **1466 passed / 155 skipped**; compileall clean; vite build green (title `rzdhop AI`).
+- **Current stage / next action:** stage 2 done → **stage 3** (relabel legacy `--story-mode` as "Story Clip (assembly)": argparse group title, help, error text, README/README_ID, `docs/STORY_CLIP*.md`, wiki, `config_adapter.py:330`, `engine.py:76,81`; group-title test shown failing first).
+- **Tier-1 after stage 2 (13:02 UTC):** local **1659 passed / 1 skipped**; CI env **1472 passed / 160 skipped**; compileall clean; vite build green. Layouts measured in the built-in browser on a throwaway server (scratch worktree, `DISABLE_AUTH=1`, 127.0.0.1:8010): `scrollWidth == clientWidth` on `/clips`, `/clips/new`, `/clips/job/<id>`, `/settings`, `/story` at **375, 820 and 1280 px**; `/` opens the remembered mode, `/new` and `/job/<id>` redirect, an unknown path opens the last mode.
+- **Decision taken in stage 2 (differs from the plan's wording):** Settings stays at the shared `/settings` (both modes link to it, spec §1.4 says it is shared) instead of moving under `/clips`; the mobile top bar also carries a ⚙️ Settings link, since the sidebar is hidden under 768 px and the Tier-2 phone script needs Settings.
 - **Open questions:** none. Answered 2026-09-25: spec on disk (§8.5.1 profiles, §8.7 model ids, workflows authored from ComfyUI defaults); paid key = **fal.ai** → Tier-2 exercises `fal/seedream-4-edit`; defaults accepted (DEC-093 onward, env/payload-only chains + Test button, logo from `public/icon.svg`, pyproject `rzdhop-ai` with `rzclips`/`clipping` unchanged, stdlib transports, nothing pushed without a go); budget caps **1.00 / 3.00 / 10.00**, profile `free`, `one_dollar` once `allow_paid` is on.
 - **Design choices taken (challengeable until stage 1, recorded in stage 14):** Gemini image/TTS via REST (the declared `google-genai` is absent on the Tier-1 host); a chain test spends at most one paid call, per link, on an explicit click with the estimate shown; paid spend per day in `data/spend.json`, free counters in `data/usage.json`; workflow templates flat under `clipping/aistory/templates/workflows/` with `min_profile`; per-task route selector deferred to phase 1 (`route=` parameter reserved); budget CLI flags declared now for the five-place test.
 - **Decisions to write (stage 14):** DEC-093…DEC-104, A-030…A-037 (plan §6) + the spec §14 day-one assumptions that concern phase 0.
 - **Security notes:** new secrets (`FAL_KEY`, `OPENAI_API_KEY`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `POLLINATIONS_API_KEY`) go through `PERSISTED_KEYS`/`SECRET_KEYS` (0600 file, empty clears); no paid call without `budget.check`; `allow_paid` off by default; the DEC-092 no-token override stays local.
-- **Follow-ups, deliberately not done:** `pyproject.toml` has no `[build-system]`/package-data (dependency pass); per-task route selector (phase 1); Freesound toggle (phase 4); `httpx` is transitive only.
+- **Follow-ups, deliberately not done:** `pyproject.toml` has no `[build-system]`/package-data (dependency pass); per-task route selector (phase 1); Freesound toggle (phase 4); `httpx` is transitive only; **pre-existing test-order interaction** (found in stage 2, present at `d960525`): running `tests/test_clip_serving.py` before `tests/test_auth_token.py` fails `test_traversal_attempts_over_http_are_refused[/api/outputs/%2e%2e/%2e%2e/etc/passwd]` — the SPA fixture's route swap leaks into the auth client; the alphabetical full-suite order passes, so CI never sees it.
 
 ### Regression contract (phase 0)
 | ID | Must keep working | Proven by |
@@ -31,8 +32,8 @@
 | S | Stage | State |
 |---|---|---|
 | 0 | checkpoint + baseline | **done** (`429c9e7` + this header commit) |
-| 1 | rename to rzdhop AI | **done** (this commit; hash recorded at stage 2) |
-| 2 | two-mode shell (RISKIEST) | pending |
+| 1 | rename to rzdhop AI | **done** `d960525` |
+| 2 | two-mode shell (RISKIEST) | **done** (this commit; hash recorded at stage 3) |
 | 3 | relabel legacy story-clip "Story Clip (assembly)" | pending |
 | 4 | generation chain core (`providers/generation.py`) | pending |
 | 5 | pricing + free-tier limits | pending |

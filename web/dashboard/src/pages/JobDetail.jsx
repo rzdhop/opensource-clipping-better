@@ -204,7 +204,7 @@ function JobDetail() {
     setActionError('')
     try {
       await deleteJob(jobId)
-      navigate('/')
+      navigate('/clips')
     } catch (err) {
       setActionError(err.message)
       setBusy(false)
@@ -311,11 +311,11 @@ function JobDetail() {
         </div>
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
           <span className={`badge badge-${job.status}`}>{job.status}</span>
-          <Link to="/new" state={{ reuseJob: job }} className="btn btn-secondary btn-sm">🔁 Clone & Rerun</Link>
+          <Link to="/clips/new" state={{ reuseJob: job }} className="btn btn-secondary btn-sm">🔁 Clone & Rerun</Link>
           {running
             ? <button type="button" className="btn btn-danger btn-sm" onClick={onCancel} disabled={busy}>⏹ Cancel</button>
             : <button type="button" className="btn btn-danger btn-sm" onClick={onDelete} disabled={busy}>🗑 Delete</button>}
-          <Link to="/" className="btn btn-ghost btn-sm">← Back</Link>
+          <Link to="/clips" className="btn btn-ghost btn-sm">← Back</Link>
         </div>
       </div>
 

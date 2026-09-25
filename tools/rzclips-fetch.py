@@ -283,7 +283,7 @@ def main(argv=None):
         )
         job_id = job.get("id") or job.get("job_id") or ""
         log("")
-        log(f"✅ Job started: {server}/job/{job_id}")
+        log(f"✅ Job started: {server}/clips/job/{job_id}")
         return EXIT_OK
     finally:
         if args.keep:

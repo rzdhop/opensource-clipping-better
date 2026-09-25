@@ -414,7 +414,12 @@ def spa(tmp_path, monkeypatch):
     yield from spa_client(dist, monkeypatch)
 
 
-@pytest.mark.parametrize("path", ["/", "/new", "/settings", "/job/2773bd83c7b6"])
+@pytest.mark.parametrize("path", [
+    "/", "/clips", "/clips/new", "/clips/job/2773bd83c7b6", "/settings", "/story",
+    "/story/anything",
+    # The paths the product shipped with: the dashboard redirects them (DEC-094).
+    "/new", "/job/2773bd83c7b6",
+])
 def test_every_client_side_route_serves_the_app(spa, path):
     response = spa.get(path)
     assert response.status_code == 200

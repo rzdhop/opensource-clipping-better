@@ -409,7 +409,7 @@ function NewJob() {
       }
 
       const job = await createJob(payload)
-      navigate(`/job/${job.id}`)
+      navigate(`/clips/job/${job.id}`)
     } catch (err) {
       setError(err.message)
     } finally {

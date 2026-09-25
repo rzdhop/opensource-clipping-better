@@ -1,11 +1,25 @@
 import { useEffect, useState } from 'react'
-import { Routes, Route, NavLink, useLocation } from 'react-router-dom'
+import { Routes, Route, NavLink, Navigate, useLocation, useParams } from 'react-router-dom'
 import Dashboard from './pages/Dashboard'
 import NewJob from './pages/NewJob'
 import JobDetail from './pages/JobDetail'
 import Login from './pages/Login'
 import Settings from './pages/Settings'
+import StoryHome from './pages/StoryHome'
+import ModeSwitch, { modeFromPath, readMode, rememberMode } from './components/ModeSwitch'
 import { checkToken, clearToken, getToken } from './api'
+
+// `/` and any unknown path open the last mode used (DEC-094).
+function ModeRedirect() {
+  return <Navigate to={readMode() === 'story' ? '/story' : '/clips'} replace />
+}
+
+// The path the product shipped with: bookmarks and the PC helper's printed
+// link still say /job/<id>.
+function LegacyJobRedirect() {
+  const { jobId } = useParams()
+  return <Navigate to={`/clips/job/${jobId}`} replace />
+}
 
 function App() {
   const location = useLocation()
@@ -29,6 +43,13 @@ function App() {
     return () => { cancelled = true }
   }, [auth])
 
+  // The URL decides the mode; storage only remembers it for next time.
+  const mode = modeFromPath(location.pathname) || readMode()
+  useEffect(() => {
+    const current = modeFromPath(location.pathname)
+    if (current) rememberMode(current)
+  }, [location.pathname])
+
   const signOut = () => {
     clearToken()
     setAuth('out')
@@ -48,16 +69,26 @@ function App() {
         <div className="sidebar-brand">
           <h1>🎬 rzdhop AI</h1>
           <p>clips &amp; AI stories, on free APIs</p>
+          <ModeSwitch />
         </div>
         <nav className="sidebar-nav">
-          <NavLink to="/" end className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-            <span className="icon">📊</span>
-            Dashboard
-          </NavLink>
-          <NavLink to="/new" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-            <span className="icon">➕</span>
-            New Job
-          </NavLink>
+          {mode === 'story' ? (
+            <NavLink to="/story" end className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+              <span className="icon">📖</span>
+              Stories
+            </NavLink>
+          ) : (
+            <>
+              <NavLink to="/clips" end className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+                <span className="icon">📊</span>
+                Dashboard
+              </NavLink>
+              <NavLink to="/clips/new" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+                <span className="icon">➕</span>
+                New Job
+              </NavLink>
+            </>
+          )}
           <NavLink to="/settings" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
             <span className="icon">⚙️</span>
             Settings
@@ -76,11 +107,24 @@ function App() {
 
       {/* Main Content */}
       <main className="main-content">
+        {/* The sidebar is hidden under 768 px; the mode switch and Settings stay reachable here. */}
+        <div className="mobile-topbar">
+          <span className="topbar-brand">🎬 rzdhop AI</span>
+          <ModeSwitch compact />
+          <NavLink to="/settings" className="topbar-link" aria-label="Settings">⚙️</NavLink>
+        </div>
         <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/new" element={<NewJob />} />
-          <Route path="/job/:jobId" element={<JobDetail />} />
+          <Route path="/" element={<ModeRedirect />} />
+          <Route path="/clips" element={<Dashboard />} />
+          <Route path="/clips/new" element={<NewJob />} />
+          <Route path="/clips/job/:jobId" element={<JobDetail />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/story" element={<StoryHome />} />
+          <Route path="/story/*" element={<StoryHome />} />
+          {/* The paths the product shipped with keep working through a redirect. */}
+          <Route path="/new" element={<Navigate to="/clips/new" replace />} />
+          <Route path="/job/:jobId" element={<LegacyJobRedirect />} />
+          <Route path="*" element={<ModeRedirect />} />
         </Routes>
       </main>
     </div>

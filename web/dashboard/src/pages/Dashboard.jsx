@@ -90,7 +90,7 @@ function Dashboard() {
           <h2>Dashboard</h2>
           <p>Overview of all clipping jobs</p>
         </div>
-        <Link to="/new" className="btn btn-primary">
+        <Link to="/clips/new" className="btn btn-primary">
           ➕ New Job
         </Link>
       </div>
@@ -133,12 +133,12 @@ function Dashboard() {
           <div className="icon">🎬</div>
           <h3>No jobs yet</h3>
           <p>Create your first job to start automatic AI video clipping.</p>
-          <Link to="/new" className="btn btn-primary">➕ Create First Job</Link>
+          <Link to="/clips/new" className="btn btn-primary">➕ Create First Job</Link>
         </div>
       ) : (
         <div className="job-grid">
           {jobs.map(job => (
-            <Link to={`/job/${job.id}`} key={job.id} className="job-card">
+            <Link to={`/clips/job/${job.id}`} key={job.id} className="job-card">
               <div className="job-info">
                 <h3>
                   {job.upload_filename || job.source_url || job.url || 'Upload'}

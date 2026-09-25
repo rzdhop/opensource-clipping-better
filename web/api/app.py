@@ -156,7 +156,7 @@ class _SPAStaticFiles(StaticFiles):
 
     ``html=True`` does NOT do this, despite how it reads. On a miss it looks for
     a ``404.html`` and, finding none, raises 404 -- so every client-side route
-    (`/job/<id>`, `/new`, `/settings`) answered `{"detail":"Not Found"}` the
+    (`/clips/job/<id>`, `/clips/new`, `/settings`, and the older `/job/<id>`) answered `{"detail":"Not Found"}` the
     moment it was refreshed, deep-linked or opened from a shared link. Clicking
     through from the home page worked, because that never leaves the SPA, which
     is why this survived: it is invisible unless you reload.
