@@ -19,7 +19,7 @@
 
 **Advanced**
 
-* [[Story Clip Mode|Story-Clip-Mode]]
+* [[Story Clip (assembly)|Story-Clip-Mode]]
 * [[YouTube Auto-Upload|YouTube-Auto-Upload]]
 * [[Facebook Reels Uploader|Facebook-Reels-Uploader]]
 * [[YouTube Tracker|YouTube-Tracker]]

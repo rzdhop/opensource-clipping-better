@@ -1,4 +1,6 @@
-# 🎬 Story Clip Mode
+# 🎬 Story Clip (assembly)
+
+> The CLI's multi-source assembly recipe — not the dashboard's **AI Story** mode.
 
 Story Clip is a multi-source narrative assembly pipeline designed for campaigns (e.g., brand briefs) where you need to take specific scenes from various video sources and combine them into a cohesive story.
 
@@ -6,7 +8,7 @@ Story Clip is a multi-source narrative assembly pipeline designed for campaigns 
 
 ## Overview
 
-Unlike the standard auto-clipping mode (which uses AI to find highlights), Story Clip mode lets you **manually define** exactly which scenes to use, from which videos, and in what order.
+Unlike the standard auto-clipping mode (which uses AI to find highlights), Story Clip (assembly) lets you **manually define** exactly which scenes to use, from which videos, and in what order.
 
 ### Key Advantages
 

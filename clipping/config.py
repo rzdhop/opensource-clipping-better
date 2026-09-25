@@ -824,13 +824,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Instruct AI to aggressively trim silence/dead air from clips.",
     )
 
-    # --- Story Clip Mode ---
-    story_group = p.add_argument_group("Story Clip Mode")
+    # --- Story Clip (assembly): the multi-source recipe of the CLI, not the
+    # dashboard's AI Story mode (DEC-095) ---
+    story_group = p.add_argument_group("Story Clip (assembly)")
     story_group.add_argument(
         "--story-mode",
         action="store_true",
         default=False,
-        help="Enable Story Clip mode: assemble clips from multiple video sources using a JSON recipe.",
+        help="Enable Story Clip (assembly): assemble clips from multiple video sources using a JSON recipe. Not the dashboard's AI Story mode.",
     )
     story_group.add_argument(
         "--story-recipe",
@@ -1592,7 +1593,7 @@ def build_config(argv: list[str] | None = None) -> SimpleNamespace:
         dev_mode_with_output_merge=args.dev_mode_with_output_merge,
         track_lines=args.track_lines,
         static_crop=args.static_crop,
-        # Story Clip Mode
+        # Story Clip (assembly)
         story_mode=args.story_mode,
         story_recipe_path=os.path.abspath(args.story_recipe) if args.story_recipe else None,
         sources_json_path=os.path.abspath(args.sources_json) if args.sources_json else None,

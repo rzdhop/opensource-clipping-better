@@ -327,7 +327,7 @@ def build_config_from_payload(
         dev_mode_with_output_merge=False,
         track_lines=False,
         static_crop=payload.get("static_crop", False),
-        # Story Clip Mode (not supported via web yet)
+        # Story Clip (assembly): not supported via web
         story_mode=False,
         story_recipe_path=None,
         sources_json_path=None,

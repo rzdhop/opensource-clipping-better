@@ -1,6 +1,8 @@
-# Story Clip Mode (--story-mode)
+# Story Clip (assembly) (--story-mode)
 
 [Bahasa Indonesia](./STORY_CLIP_ID.md)
+
+> This is the CLI's multi-source assembly recipe. It is not the dashboard's **AI Story** mode, which writes and renders serialized AI episodes.
 
 The **Story Clip** feature is a multi-source narrative assembly pipeline specifically designed for campaigns (such as Shopee brand briefs, etc.). This feature allows you to take specific scenes from various video sources (YouTube, TikTok, Instagram, Local, Google Drive) and combine them into a complete story automatically based on time specifications.
 

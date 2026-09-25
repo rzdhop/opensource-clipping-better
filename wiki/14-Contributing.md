@@ -67,7 +67,7 @@ rzdhop-ai/
 │   ├── diarization.py       # Pyannote speaker diarization
 │   ├── metadata.py          # QA metadata normalization
 │   ├── runner.py            # Pipeline orchestrator
-│   ├── story/               # Story mode modules
+│   ├── story/               # Story Clip (assembly) modules
 │   └── studio/              # Video render engine modules
 ├── web/                     # Web API and React Dashboard
 ├── youtube_tracker/         # YouTube Tracker Web App

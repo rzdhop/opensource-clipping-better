@@ -73,12 +73,12 @@ def load_whisper_model(
 ):
     """Build a Faster-Whisper model.
 
-    Split out so callers that transcribe several files (story mode) can build the
+    Split out so callers that transcribe several files (Story Clip assembly) can build the
     model once. large-v3 costs ~30s and several GB to load, and it was previously
     rebuilt on every transcribe_video call.
 
     Device and compute type are resolved here rather than at each call site: the
-    CLI, story mode and the web worker all funnel through this function, and
+    CLI, Story Clip assembly and the web worker all funnel through this function, and
     resolving in one place is what stops the three of them drifting apart.
     """
     try:

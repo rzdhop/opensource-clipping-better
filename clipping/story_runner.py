@@ -148,7 +148,7 @@ def run_story_pipeline(cfg) -> list[dict]:
     """
 
     print("=" * 70)
-    print("🎬 Story Clip — Multi-Source Narrative Assembly")
+    print("🎬 Story Clip (assembly) — multi-source narrative recipe")
     print("=" * 70)
 
     # ------------------------------------------------------------------
@@ -271,7 +271,7 @@ def run_story_pipeline(cfg) -> list[dict]:
         json.dump(transcripts_summary, f, ensure_ascii=False, indent=2)
 
     print(f"\n{'='*70}")
-    print(f"✅ Story Clip done! {len(manifest)} clip(s) rendered.")
+    print(f"✅ Story Clip (assembly) done! {len(manifest)} clip(s) rendered.")
     print(f"💾 Manifest: {manifest_path}")
     print(f"📝 Transcripts: {transcripts_index_path}")
     print(f"📁 Output: {story_output_dir}")

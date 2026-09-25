@@ -108,8 +108,8 @@ job.
 | **Podcast Camera Switch** | Auto active-speaker detection with scene-aware switching — full 9:16 crop focuses on whoever is talking; blurred pillarbox only when speakers in the same scene talk simultaneously (9:16) |
 | **AI Voice-Over** | Converts auto-clips into original commentary/reaction videos using **Gemini** (script generation) and **edge-tts** (free text-to-speech), complete with audio ducking, text override, and ambient edge glow |
 
-> 🎬 **NEW: Story Clip Mode (`--story-mode`)**  
-> Need to assemble a narrative from multiple specific video sources (like a brand campaign)? We've just introduced the Multi-Source Story Clip Mode!  
+> 🎬 **Story Clip (assembly)** (`--story-mode`)  
+> Need to assemble a narrative from multiple specific video sources (like a brand campaign)? The multi-source Story Clip (assembly) recipe does that from the CLI. It is not the dashboard's **AI Story** mode, which writes and renders serialized AI episodes.  
 > 👉 **[Read the full Story Clip Documentation](docs/STORY_CLIP.md)**
 
 ## 📋 Prerequisites
@@ -307,7 +307,7 @@ works just as well as a link.
 | `--source`, `--tiktok` | Not applicable — the platform no longer matters once the file is local. |
 | `--source-height N` | Your downloader's format selector, e.g. `yt-dlp -f "bv*[height<=1440]+ba"`. |
 | `--use-dlp-subs` | `--transcript FILE.vtt` (also accepts `.srt` and `.json3`). |
-| `--skip-download` (story mode) | Not applicable — every `sources.json` entry is `platform: "local"` with a `local_path`. |
+| `--skip-download` (Story Clip assembly) | Not applicable — every `sources.json` entry is `platform: "local"` with a `local_path`. |
 
 ### Examples
 
@@ -720,7 +720,7 @@ rzdhop-ai/
 │   ├── diarization.py       # Pyannote speaker diarization
 │   ├── metadata.py          # QA metadata normalization
 │   ├── runner.py            # Pipeline orchestrator
-│   ├── story/               # Story mode modules
+│   ├── story/               # Story Clip (assembly) modules
 │   └── studio/              # Video render engine modules
 ├── facebook_uploader/       # Facebook Pages Reels upload & scheduling
 ├── web/                     # Web API and React Dashboard

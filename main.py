@@ -22,12 +22,12 @@ def main():
 
     from clipping import __version__ as version
 
-    # ── Story Clip Mode ──────────────────────────────────────────────
+    # ── Story Clip (assembly) ──────────────────────────────────────────────
     if getattr(cfg, "story_mode", False):
         from clipping.story_runner import run_story_pipeline
 
         print("=" * 70)
-        print(f"🎬 rzdhop AI v{version} — Story Clip Mode")
+        print(f"🎬 rzdhop AI v{version} — Story Clip (assembly)")
         print("=" * 70)
         print(f"   Recipe      : {cfg.story_recipe_path}")
         print(f"   Sources     : {cfg.sources_json_path}")

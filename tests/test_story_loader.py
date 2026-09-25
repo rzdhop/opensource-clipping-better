@@ -165,3 +165,35 @@ def test_the_source_manager_does_not_claim_to_download():
     assert "yt_dlp" not in doc
     assert "local" in doc.lower()
     assert "SINGLE SOURCE DOWNLOAD" not in source
+
+
+# ------------------------------------------------------------------ the label
+
+def test_the_legacy_mode_is_labelled_story_clip_assembly():
+    """DEC-095: the multi-source assembly behind `--story-mode` is called
+    "Story Clip (assembly)" wherever a user sees it, so it is never confused
+    with the dashboard's AI Story mode. The flag and its behaviour do not change."""
+    from clipping import config
+
+    parser = config._build_parser()
+    titles = [group.title for group in parser._action_groups]
+    assert "Story Clip (assembly)" in titles
+    assert "Story Clip Mode" not in titles
+    flag = next(a for a in parser._actions if "--story-mode" in a.option_strings)
+    assert flag.default is False
+    assert "assembly" in flag.help
+
+
+def test_no_user_facing_file_still_says_story_clip_mode():
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parents[1]
+    offenders = []
+    for rel in ("main.py", "clipping/config.py", "clipping/story_runner.py",
+                "README.md", "README_ID.md", "docs/STORY_CLIP.md", "docs/STORY_CLIP_ID.md",
+                "wiki/1-Home.md", "wiki/3-CLI-Reference.md", "wiki/10-Story-Clip-Mode.md",
+                "wiki/14-Contributing.md", "wiki/_Sidebar.md"):
+        for line_no, line in enumerate((root / rel).read_text(encoding="utf-8").splitlines(), 1):
+            if "Story Clip Mode" in line or "Mode Story Clip" in line or "Story mode modules" in line:
+                offenders.append(f"{rel}:{line_no}: {line.strip()[:70]}")
+    assert offenders == [], "\n".join(offenders)

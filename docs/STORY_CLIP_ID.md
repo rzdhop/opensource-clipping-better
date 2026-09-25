@@ -1,6 +1,8 @@
-# Story Clip Mode (--story-mode)
+# Story Clip (assembly) (--story-mode)
 
 [English](./STORY_CLIP.md)
+
+> Ini adalah resep perakitan multi-sumber di CLI, bukan mode **AI Story** di dashboard, yang menulis dan merender episode AI berseri.
 
 Fitur **Story Clip** adalah pipeline *multi-source narrative assembly* yang dirancang khusus untuk mengerjakan *campaign* (seperti *brand brief* Shopee, dll). Fitur ini memungkinkan Anda untuk mengambil potongan adegan (scene) spesifik dari berbagai sumber video (YouTube, TikTok, Instagram, Local, Google Drive) dan menggabungkannya menjadi sebuah cerita yang utuh secara otomatis berdasarkan spesifikasi waktu.
 

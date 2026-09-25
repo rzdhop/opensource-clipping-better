@@ -1,10 +1,11 @@
-## CURRENT TASK — AI Story phase 0: the foundation (IN PROGRESS — stage 2 done)
+## CURRENT TASK — AI Story phase 0: the foundation (IN PROGRESS — stage 3 done)
 - **Phase:** IMPLEMENT. LOAD / EXPLORE / CLARIFY / PLAN done 2026-09-25; plan approved in chat 2026-09-25 12:41 UTC.
 - **Plan:** `~/.claude/plans/pasted-content-id-a0ee-the-spec-resilient-tulip.md` (v2, spec values filled; v1 `ai-story-phase-0-foundation.md` is marked superseded). 15 stages (0–14), riskiest = **stage 2** (two-mode shell). Value sheets in plan §3; Tier-2 script in plan §5.
 - **Spec:** `.claude/plans/ai-story/00-MASTER-SPEC.md` v1.1, `09-APPENDIX-research-2026-09-25.md`, `10-REFERENCE-ANALYSIS-2026-09-25.md`, brief `01-phase-0-rename-shell-providers.md`.
 - **Checkpoint commit:** `429c9e7` (clean tree, known good; one commit ahead of `origin/main`, unpushed). This header commit sits directly on top of it.
 - **Tier-1 baseline (2026-09-25 12:46 UTC, at `429c9e7`):** local `python -m pytest -p no:warnings` **1646 passed / 1 skipped** (12.7 s); CI env (`PYTHONNOUSERSITE=1`, pytest-only libs) **1464 passed / 155 skipped**; `python -m compileall -q clipping web tests main.py` clean; `vite build` green (built to a scratch outDir, `dist/` untouched).
-- **Current stage / next action:** stage 2 done → **stage 3** (relabel legacy `--story-mode` as "Story Clip (assembly)": argparse group title, help, error text, README/README_ID, `docs/STORY_CLIP*.md`, wiki, `config_adapter.py:330`, `engine.py:76,81`; group-title test shown failing first).
+- **Current stage / next action:** stage 3 done → **stage 4** (generation chain core: `clipping/providers/generation.py` with `ChainKind`, per-kind `GenProvider` tables, the five chain envs + §3.1 defaults, Docker-aware `LOCAL_*_URL`, `GenRequest`/`GenResult`, `Adapter` protocol, `run_generation_chain` mirroring `llm.run_chain`; `registry.parse_spec/parse_chain` gain `providers=`; `tests/test_preflight.py` stays unedited).
+- **Tier-1 after stage 3 (13:12 UTC):** local **1661 passed / 1 skipped**; CI env **1474 passed / 160 skipped**; compileall clean.
 - **Tier-1 after stage 2 (13:02 UTC):** local **1659 passed / 1 skipped**; CI env **1472 passed / 160 skipped**; compileall clean; vite build green. Layouts measured in the built-in browser on a throwaway server (scratch worktree, `DISABLE_AUTH=1`, 127.0.0.1:8010): `scrollWidth == clientWidth` on `/clips`, `/clips/new`, `/clips/job/<id>`, `/settings`, `/story` at **375, 820 and 1280 px**; `/` opens the remembered mode, `/new` and `/job/<id>` redirect, an unknown path opens the last mode.
 - **Decision taken in stage 2 (differs from the plan's wording):** Settings stays at the shared `/settings` (both modes link to it, spec §1.4 says it is shared) instead of moving under `/clips`; the mobile top bar also carries a ⚙️ Settings link, since the sidebar is hidden under 768 px and the Tier-2 phone script needs Settings.
 - **Open questions:** none. Answered 2026-09-25: spec on disk (§8.5.1 profiles, §8.7 model ids, workflows authored from ComfyUI defaults); paid key = **fal.ai** → Tier-2 exercises `fal/seedream-4-edit`; defaults accepted (DEC-093 onward, env/payload-only chains + Test button, logo from `public/icon.svg`, pyproject `rzdhop-ai` with `rzclips`/`clipping` unchanged, stdlib transports, nothing pushed without a go); budget caps **1.00 / 3.00 / 10.00**, profile `free`, `one_dollar` once `allow_paid` is on.
@@ -33,8 +34,8 @@
 |---|---|---|
 | 0 | checkpoint + baseline | **done** (`429c9e7` + this header commit) |
 | 1 | rename to rzdhop AI | **done** `d960525` |
-| 2 | two-mode shell (RISKIEST) | **done** (this commit; hash recorded at stage 3) |
-| 3 | relabel legacy story-clip "Story Clip (assembly)" | pending |
+| 2 | two-mode shell (RISKIEST) | **done** `3336932` |
+| 3 | relabel legacy story-clip "Story Clip (assembly)" | **done** (this commit; hash recorded at stage 4) |
 | 4 | generation chain core (`providers/generation.py`) | pending |
 | 5 | pricing + free-tier limits | pending |
 | 6 | budget + cost ledger (caps 1.00 / 3.00 / 10.00) | pending |

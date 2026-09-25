@@ -19,7 +19,7 @@ Welcome to the **rzdhop AI** wiki! This is the central hub for all documentation
 | 7 | **[Subtitles & Typography](Subtitles-and-Typography)** | Karaoke subtitles, font styles, kinetic text |
 | 8 | **[BGM & Audio](BGM-and-Audio)** | Background music, ducking, and audio settings |
 | 9 | **[Video Quality & Rendering](Video-Quality-and-Rendering)** | Resolution, bitrate, sharpening, encoder tuning |
-| 10 | **[Story Clip Mode](Story-Clip-Mode)** | Multi-source narrative assembly for campaigns |
+| 10 | **[Story Clip (assembly)](Story-Clip-Mode)** | Multi-source narrative assembly for campaigns |
 | 11 | **[YouTube Auto-Upload](YouTube-Auto-Upload)** | Automated uploading with scheduling support |
 | 12 | **[Google Colab Guide](Google-Colab-Guide)** | Running the pipeline on Google Colab (free GPU) |
 | 13 | **[Troubleshooting & FAQ](Troubleshooting-and-FAQ)** | Common errors, fixes, and frequently asked questions |
