@@ -1,8 +1,8 @@
-# 🎬 rzdhop's clips — Wiki
+# 🎬 rzdhop AI — Wiki
 
-Welcome to the **rzdhop's clips** wiki! This is the central hub for all documentation related to the project.
+Welcome to the **rzdhop AI** wiki! This is the central hub for all documentation related to the project.
 
-**rzdhop's clips** is an open-source AI-powered content factory that transforms long-form videos into cinematic short-form highlights with hook teasers, karaoke subtitles, and auto-thumbnails.
+**rzdhop AI** is an open-source AI-powered content factory that transforms long-form videos into cinematic short-form highlights with hook teasers, karaoke subtitles, and auto-thumbnails.
 
 ---
 

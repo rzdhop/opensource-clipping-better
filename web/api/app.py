@@ -1,7 +1,7 @@
 """
 web.api.app — FastAPI Application Entry Point
 
-rzdhop's clips — Web API
+rzdhop AI — Web API
 
 Run with:
     uvicorn web.api.app:app --host 0.0.0.0 --port 8000 --reload
@@ -25,7 +25,7 @@ from .routes import jobs, files, settings
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application startup/shutdown lifecycle."""
-    print(f"🚀 rzdhop's clips v{__version__} — backend starting...")
+    print(f"🚀 rzdhop AI v{__version__} — backend starting...")
 
     # A job whose worker thread died with the previous process is stuck in a
     # non-terminal status forever: nothing re-queues it and nothing fails it, so
@@ -65,8 +65,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="rzdhop's clips",
-    description="Turn long videos into vertical short-form clips.",
+    title="rzdhop AI",
+    description="Clips from long videos, and serialized AI Story episodes.",
     version=__version__,
     lifespan=lifespan,
 )
@@ -105,7 +105,7 @@ app.include_router(settings.router)
 @app.get("/api")
 async def api_root():
     return {
-        "name": "rzdhop's clips",
+        "name": "rzdhop AI",
         "version": __version__,
         "docs": "/docs",
         "health": "/api/health",
@@ -198,7 +198,7 @@ else:
     @app.get("/")
     async def _no_dashboard():
         return {
-            "name": "rzdhop's clips",
+            "name": "rzdhop AI",
             "dashboard": "not built",
             "hint": "run `npm ci && npm run build` in web/dashboard",
             "docs": "/docs",

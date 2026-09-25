@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to the **rzdhop's clips** project will be documented in this file.
+All notable changes to the **rzdhop AI** project will be documented in this file.
 
 **The Standard Structure (SemVer)**
 - **Major (X.y.z)**: Incremented for incompatible API changes (breaking changes).

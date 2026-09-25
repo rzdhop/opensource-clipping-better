@@ -1,7 +1,7 @@
 {
-  "name": "rzdhop's clips",
-  "short_name": "clips",
-  "description": "Turn long videos into vertical short-form clips.",
+  "name": "rzdhop AI",
+  "short_name": "rzdhop AI",
+  "description": "Clips from long videos, and serialized AI Story episodes.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

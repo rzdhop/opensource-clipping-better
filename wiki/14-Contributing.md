@@ -39,8 +39,8 @@ Have an idea? Open an issue with the `enhancement` label describing:
 
 ```bash
 # 1. Fork and clone
-git clone https://github.com/YOUR-USERNAME/opensource-clipping-better.git rzdhop-clips
-cd rzdhop-clips
+git clone https://github.com/YOUR-USERNAME/opensource-clipping-better.git rzdhop-ai
+cd rzdhop-ai
 
 # 2. Install dependencies
 pip install -r requirements.txt
@@ -58,7 +58,7 @@ python main.py --video test.mp4 --transcript test.vtt --clips 1 --no-bgm --no-br
 ## Project Structure
 
 ```text
-rzdhop-clips/
+rzdhop-ai/
 ├── main.py                  # CLI entry point
 ├── run_upload.py            # YouTube auto-uploader CLI
 ├── clipping/

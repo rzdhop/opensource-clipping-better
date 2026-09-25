@@ -1,10 +1,10 @@
 <br />
 <div align="center">
   <a href="https://github.com/rzdhop/opensource-clipping-better">
-    <img src="assets/images/rzdhop-clips-logo-editable.svg" alt="Logo" width="350">
+    <img src="assets/images/rzdhop-ai-logo.svg" alt="Logo" width="350">
   </a>
 
-  <h3 align="center">rzdhop's clips</h3>
+  <h3 align="center">rzdhop AI</h3>
 
   <p align="center">
     <strong>Ultimate AI Auto-Clipper & Teaser Generator</strong><br>
@@ -264,8 +264,8 @@ job is refused with `429` until one starts.
 
 ```bash
 # 1. Clone the repo
-git clone https://github.com/rzdhop/opensource-clipping-better.git rzdhop-clips
-cd rzdhop-clips
+git clone https://github.com/rzdhop/opensource-clipping-better.git rzdhop-ai
+cd rzdhop-ai
 
 # 2. Install dependencies (pick one)
 pip install -r requirements.txt          # pip / Colab
@@ -460,7 +460,7 @@ python main.py --help
 
 ## 📐 Aspect Ratios
 
-rzdhop's clips supports **5 output aspect ratios**. All vertical/square ratios include **face-tracking** by default to keep the subject centered.
+The Clips mode supports **5 output aspect ratios**. All vertical/square ratios include **face-tracking** by default to keep the subject centered.
 
 | Ratio | Output | Face Tracking | Best For |
 |---|---|---|---|
@@ -705,7 +705,7 @@ GEMINI_MODEL = "gemini-2.0-flash"
 ## 📂 Project Structure
 
 ```text
-rzdhop-clips/
+rzdhop-ai/
 ├── main.py                  # CLI entry point
 ├── run_upload.py            # YouTube auto-uploader CLI
 ├── run_fb_upload.py         # Facebook Pages Reels uploader CLI

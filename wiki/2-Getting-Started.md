@@ -1,6 +1,6 @@
 # 🚀 Getting Started
 
-This guide walks you through setting up rzdhop's clips on your local machine.
+This guide walks you through setting up rzdhop AI on your local machine.
 
 ---
 
@@ -25,8 +25,8 @@ This guide walks you through setting up rzdhop's clips on your local machine.
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/rzdhop/opensource-clipping-better.git rzdhop-clips
-cd rzdhop-clips
+git clone https://github.com/rzdhop/opensource-clipping-better.git rzdhop-ai
+cd rzdhop-ai
 ```
 
 ### 2. Install Dependencies

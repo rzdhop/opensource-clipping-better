@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="176" height="36" viewBox="0 0 176 36" role="img" aria-label="rzdhop AI logo">
+  <!-- Derived from rzdhop-clips-logo-editable.svg: same mark, same gradient, the AI spark
+       added, and the wordmark as editable text. The Clips mode keeps the old wordmark. -->
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@700&amp;display=swap');
+    .logo-text {
+      font-family: 'Outfit', 'Inter', 'Segoe UI', sans-serif;
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }
+  </style>
+  <defs>
+    <linearGradient id="textGradient" x1="44" y1="0" x2="176" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4f46e5"/>
+      <stop offset="1" stop-color="#6366f1"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="36" height="36" rx="12" fill="#4f46e5"/>
+  <g transform="translate(8 8) scale(0.8333333333)" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="6" cy="6" r="3"/>
+    <path d="M8.12 8.12 12 12"/>
+    <path d="M20 4 8.12 15.88"/>
+    <circle cx="6" cy="18" r="3"/>
+    <path d="M14.8 14.8 20 20"/>
+  </g>
+  <path d="M28.5 4.5 l1.4 3.6 3.6 1.4 -3.6 1.4 -1.4 3.6 -1.4 -3.6 -3.6 -1.4 3.6 -1.4 z" fill="#ffd400"/>
+
+  <text class="logo-text" x="44" y="25" fill="url(#textGradient)">rzdhop AI</text>
+</svg>

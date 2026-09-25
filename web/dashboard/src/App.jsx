@@ -46,8 +46,8 @@ function App() {
       {/* Sidebar */}
       <aside className="sidebar">
         <div className="sidebar-brand">
-          <h1>🎬 rzdhop's clips</h1>
-          <p>free-API clip generator</p>
+          <h1>🎬 rzdhop AI</h1>
+          <p>clips &amp; AI stories, on free APIs</p>
         </div>
         <nav className="sidebar-nav">
           <NavLink to="/" end className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
@@ -69,7 +69,7 @@ function App() {
             Sign out
           </button>
           <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-            rzdhop's clips
+            rzdhop AI
           </div>
         </div>
       </aside>

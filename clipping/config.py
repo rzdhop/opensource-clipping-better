@@ -275,7 +275,7 @@ def _parse_speakers(val: str) -> str | int:
 
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        description="🎬 rzdhop's clips — AI Auto-Clipper & Teaser Generator",
+        description="🎬 rzdhop AI — AI Auto-Clipper & Teaser Generator",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 

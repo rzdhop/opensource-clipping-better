@@ -1,4 +1,4 @@
-**🎬 rzdhop's clips**
+**🎬 rzdhop AI**
 
 * [[Home|Home]]
 * [[Getting Started|Getting-Started]]

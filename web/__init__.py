@@ -1,1 +1,1 @@
-# web — rzdhop's clips Web GUI
+# web — rzdhop AI Web GUI

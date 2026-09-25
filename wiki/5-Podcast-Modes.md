@@ -1,6 +1,6 @@
 # 🎙️ Podcast Modes
 
-rzdhop's clips provides two intelligent rendering modes specifically designed for podcast-style videos with multiple speakers. Both modes support **3+ speakers across multiple scenes**.
+rzdhop AI provides two intelligent rendering modes specifically designed for podcast-style videos with multiple speakers. Both modes support **3+ speakers across multiple scenes**.
 
 ---
 

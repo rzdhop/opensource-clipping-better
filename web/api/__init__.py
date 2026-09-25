@@ -1,1 +1,1 @@
-# web.api — rzdhop's clips Web API
+# web.api — rzdhop AI Web API

@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="184" height="28" viewBox="0 0 184 28" role="img" aria-label="Opensource Clipping">
+<svg xmlns="http://www.w3.org/2000/svg" width="184" height="28" viewBox="0 0 184 28" role="img" aria-label="rzdhop's clips">
 
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@700&amp;display=swap');
@@ -16,5 +16,5 @@
       <stop offset="1" stop-color="#6366f1"/>
     </linearGradient>
   </defs>
-  <text class="logo-text" x="0" y="21" fill="url(#textGradient)">Opensource Clipping</text>
+  <text class="logo-text" x="0" y="21" fill="url(#textGradient)">rzdhop's clips</text>
 </svg>

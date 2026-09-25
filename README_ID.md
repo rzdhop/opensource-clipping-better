@@ -1,10 +1,10 @@
 <br />
 <div align="center">
   <a href="https://github.com/rzdhop/opensource-clipping-better">
-    <img src="assets/images/rzdhop-clips-logo-editable.svg" alt="Logo" width="350">
+    <img src="assets/images/rzdhop-ai-logo.svg" alt="Logo" width="350">
   </a>
 
-  <h3 align="center">rzdhop's clips</h3>
+  <h3 align="center">rzdhop AI</h3>
 
   <p align="center">
     <strong>Ultimate AI Auto-Clipper & Teaser Generator</strong><br>
@@ -147,8 +147,8 @@ menempelkan URL, memilih pengaturan clip, dan memantau job berjalan.
 
 ```bash
 # 1. Clone repo
-git clone https://github.com/rzdhop/opensource-clipping-better.git rzdhop-clips
-cd rzdhop-clips
+git clone https://github.com/rzdhop/opensource-clipping-better.git rzdhop-ai
+cd rzdhop-ai
 
 # 2. Install dependensi (pilih salah satu)
 pip install -r requirements.txt          # pip / Colab
@@ -312,7 +312,7 @@ python main.py --help
 
 ## 📐 Rasio Aspek
 
-rzdhop's clips mendukung **5 rasio aspek output**. Semua rasio vertikal/kotak menyertakan **face-tracking** secara default untuk menjaga subjek tetap di tengah frame.
+Mode Clips mendukung **5 rasio aspek output**. Semua rasio vertikal/kotak menyertakan **face-tracking** secara default untuk menjaga subjek tetap di tengah frame.
 
 | Rasio | Resolusi Output | Face Tracking | Cocok Untuk |
 |---|---|---|---|
@@ -489,7 +489,7 @@ Contoh:
 ## 📂 Struktur Proyek
 
 ```text
-rzdhop-clips/
+rzdhop-ai/
 ├── main.py                  # Entry point CLI
 ├── run_upload.py            # CLI auto-uploader YouTube
 ├── run_fb_upload.py         # CLI auto-uploader Facebook Pages Reels

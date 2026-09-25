@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-rzdhop's clips — AI Auto-Clipper & Teaser Generator
+rzdhop AI — AI Auto-Clipper & Teaser Generator
 
 Local-first: this tool downloads nothing. Acquire the video and (optionally) its
 transcript with your own tools, then point it at the files.
@@ -27,7 +27,7 @@ def main():
         from clipping.story_runner import run_story_pipeline
 
         print("=" * 70)
-        print(f"🎬 rzdhop's clips v{version} — Story Clip Mode")
+        print(f"🎬 rzdhop AI v{version} — Story Clip Mode")
         print("=" * 70)
         print(f"   Recipe      : {cfg.story_recipe_path}")
         print(f"   Sources     : {cfg.sources_json_path}")
@@ -92,7 +92,7 @@ def main():
     transcript_path = getattr(cfg, "transcript_path", None)
 
     print("=" * 70)
-    print(f"🎬 rzdhop's clips v{version}")
+    print(f"🎬 rzdhop AI v{version}")
     print("=" * 70)
     print(f"   Video       : {os.path.basename(cfg.file_video_asli)}")
     # State the transcript source explicitly. The Whisper fallback is the slow

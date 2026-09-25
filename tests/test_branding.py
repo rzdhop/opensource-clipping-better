@@ -1,4 +1,7 @@
-"""The product is called rzdhop's clips, and some names must never change.
+"""The product is called rzdhop AI, and some names must never change.
+
+It was "rzdhop's clips" until 2026-09-25 (DEC-093): the app now has two modes,
+Clips and AI Story, so the product name is the umbrella and "Clips" is a mode.
 
 The second half matters more than the first. Several names look like branding
 and are not: they are written into existing job directories on disk, or read by
@@ -14,7 +17,7 @@ import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
-NEW_NAME = "rzdhop's clips"
+NEW_NAME = "rzdhop AI"
 
 # Directories that are not ours to rename, or not shipped.
 SKIP_DIRS = {
@@ -23,7 +26,10 @@ SKIP_DIRS = {
 }
 
 OLD_NAMES = ("OpenSource Clipping", "Opensource Clipping", "OSC Studio",
-             "opensource-clipping")
+             "opensource-clipping",
+             # The name before the two-mode product (DEC-093). The Clips mode
+             # keeps its old wordmark under assets/, which is not scanned.
+             "rzdhop's clips")
 
 # Where the OLD name is still correct.
 ALLOWED = {
@@ -56,17 +62,34 @@ def test_the_backend_announces_the_new_name():
 
 
 def test_the_dashboard_shows_the_new_name():
-    for name in ("index.html", "src/App.jsx"):
+    for name in ("index.html", "src/App.jsx", "public/manifest.webmanifest"):
         text = (ROOT / "web" / "dashboard" / name).read_text(encoding="utf-8")
-        assert "rzdhop" in text, name
+        assert NEW_NAME in text, name
+
+
+def test_the_readmes_carry_the_new_name():
+    for name in ("README.md", "README_ID.md"):
+        text = (ROOT / name).read_text(encoding="utf-8")
+        assert NEW_NAME in text, name
+
+
+def test_the_logo_assets_name_the_product():
+    """The dashboard icon and the README wordmark are derived from the old
+    ones (DEC-093); the old wordmark stays for the Clips mode."""
+    icon = (ROOT / "web" / "dashboard" / "public" / "icon.svg").read_text(encoding="utf-8")
+    assert f'aria-label="{NEW_NAME}"' in icon
+    logo = ROOT / "assets" / "images" / "rzdhop-ai-logo.svg"
+    assert logo.is_file()
+    assert NEW_NAME in logo.read_text(encoding="utf-8")
+    assert (ROOT / "assets" / "images" / "rzdhop-clips-logo.svg").is_file()
 
 
 def test_the_packages_are_renamed():
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
-    assert 'name = "rzdhop-clips"' in pyproject
+    assert 'name = "rzdhop-ai"' in pyproject
 
     package = json.loads((ROOT / "web" / "dashboard" / "package.json").read_text())
-    assert package["name"] == "rzdhop-clips-dashboard"
+    assert package["name"] == "rzdhop-ai-dashboard"
 
 
 def test_the_containers_are_renamed():

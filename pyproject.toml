@@ -1,7 +1,7 @@
 [project]
-name = "rzdhop-clips"
+name = "rzdhop-ai"
 version = "3.0.0"
-description = "Turn long videos into vertical short-form clips, using free hosted AI endpoints"
+description = "Clips from long videos and serialized AI Story episodes, on free hosted AI endpoints"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

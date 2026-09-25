@@ -17,7 +17,7 @@ from youtube_uploader import upload_manifest_to_youtube
 
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        description="🚀 rzdhop's clips — YouTube Auto-Uploader",
+        description="🚀 rzdhop AI — YouTube Auto-Uploader",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 

@@ -1,10 +1,11 @@
-## CURRENT TASK — AI Story phase 0: the foundation (IN PROGRESS — stage 0 done)
+## CURRENT TASK — AI Story phase 0: the foundation (IN PROGRESS — stage 1 done)
 - **Phase:** IMPLEMENT. LOAD / EXPLORE / CLARIFY / PLAN done 2026-09-25; plan approved in chat 2026-09-25 12:41 UTC.
 - **Plan:** `~/.claude/plans/pasted-content-id-a0ee-the-spec-resilient-tulip.md` (v2, spec values filled; v1 `ai-story-phase-0-foundation.md` is marked superseded). 15 stages (0–14), riskiest = **stage 2** (two-mode shell). Value sheets in plan §3; Tier-2 script in plan §5.
 - **Spec:** `.claude/plans/ai-story/00-MASTER-SPEC.md` v1.1, `09-APPENDIX-research-2026-09-25.md`, `10-REFERENCE-ANALYSIS-2026-09-25.md`, brief `01-phase-0-rename-shell-providers.md`.
 - **Checkpoint commit:** `429c9e7` (clean tree, known good; one commit ahead of `origin/main`, unpushed). This header commit sits directly on top of it.
 - **Tier-1 baseline (2026-09-25 12:46 UTC, at `429c9e7`):** local `python -m pytest -p no:warnings` **1646 passed / 1 skipped** (12.7 s); CI env (`PYTHONNOUSERSITE=1`, pytest-only libs) **1464 passed / 155 skipped**; `python -m compileall -q clipping web tests main.py` clean; `vite build` green (built to a scratch outDir, `dist/` untouched).
-- **Current stage / next action:** stage 0 done → **stage 1** (rename to rzdhop AI: `test_branding.py` gains `NEW_NAME = "rzdhop AI"` required in `index.html` and `README.md`, shown failing first).
+- **Current stage / next action:** stage 1 done → **stage 2** (two-mode shell, RISKIEST: `/clips/*` + `/story` + redirects + mode switch; new `tests/test_two_mode_routes.py` shown failing first; layouts measured at 375/820/1280).
+- **Tier-1 after stage 1 (12:54 UTC):** local **1648 passed / 1 skipped**; CI env **1466 passed / 155 skipped**; compileall clean; vite build green (title `rzdhop AI`).
 - **Open questions:** none. Answered 2026-09-25: spec on disk (§8.5.1 profiles, §8.7 model ids, workflows authored from ComfyUI defaults); paid key = **fal.ai** → Tier-2 exercises `fal/seedream-4-edit`; defaults accepted (DEC-093 onward, env/payload-only chains + Test button, logo from `public/icon.svg`, pyproject `rzdhop-ai` with `rzclips`/`clipping` unchanged, stdlib transports, nothing pushed without a go); budget caps **1.00 / 3.00 / 10.00**, profile `free`, `one_dollar` once `allow_paid` is on.
 - **Design choices taken (challengeable until stage 1, recorded in stage 14):** Gemini image/TTS via REST (the declared `google-genai` is absent on the Tier-1 host); a chain test spends at most one paid call, per link, on an explicit click with the estimate shown; paid spend per day in `data/spend.json`, free counters in `data/usage.json`; workflow templates flat under `clipping/aistory/templates/workflows/` with `min_profile`; per-task route selector deferred to phase 1 (`route=` parameter reserved); budget CLI flags declared now for the five-place test.
 - **Decisions to write (stage 14):** DEC-093…DEC-104, A-030…A-037 (plan §6) + the spec §14 day-one assumptions that concern phase 0.
@@ -30,7 +31,7 @@
 | S | Stage | State |
 |---|---|---|
 | 0 | checkpoint + baseline | **done** (`429c9e7` + this header commit) |
-| 1 | rename to rzdhop AI | pending |
+| 1 | rename to rzdhop AI | **done** (this commit; hash recorded at stage 2) |
 | 2 | two-mode shell (RISKIEST) | pending |
 | 3 | relabel legacy story-clip "Story Clip (assembly)" | pending |
 | 4 | generation chain core (`providers/generation.py`) | pending |

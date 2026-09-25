@@ -1,6 +1,6 @@
 # 🎵 BGM & Audio
 
-rzdhop's clips includes an automatic background music (BGM) system with two professional mixing modes.
+rzdhop AI includes an automatic background music (BGM) system with two professional mixing modes.
 
 ---
 

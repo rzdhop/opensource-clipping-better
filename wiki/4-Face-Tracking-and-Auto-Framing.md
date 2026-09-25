@@ -1,6 +1,6 @@
 # 🎯 Face Tracking & Auto-Framing
 
-rzdhop's clips uses AI-powered face detection to automatically keep the subject centered in the frame when cropping from 16:9 to vertical (9:16, 1:1, 3:4, 4:5) formats.
+rzdhop AI uses AI-powered face detection to automatically keep the subject centered in the frame when cropping from 16:9 to vertical (9:16, 1:1, 3:4, 4:5) formats.
 
 ---
 

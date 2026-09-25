@@ -1,6 +1,6 @@
 # 📝 Subtitles & Typography
 
-rzdhop's clips generates word-by-word karaoke-style subtitles using the `.ASS` subtitle format, with support for kinetic typography and multiple font presets.
+rzdhop AI generates word-by-word karaoke-style subtitles using the `.ASS` subtitle format, with support for kinetic typography and multiple font presets.
 
 ---
 
