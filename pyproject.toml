@@ -42,6 +42,13 @@ clipping = "main:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+# Local text-to-speech engines for the AI Story mode (spec 8.3): opt-in, probed
+# at run time, never imported at startup. Versions read from PyPI on 2026-09-25.
+local-tts = [
+    "piper-tts>=1.8.0,<2",
+    "kokoro>=0.9.4,<1",
+    "chatterbox-tts>=0.1.7,<1",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

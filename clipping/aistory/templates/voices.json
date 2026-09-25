@@ -1,0 +1,51 @@
+{
+  "$schema": "voices_v1",
+  "note": "Curated voices per provider (spec 11). Edge short names are edge-tts voice ids; Gemini names are prebuilt voices of the speech endpoint; Piper ids are the rhasspy/piper-voices model names; Kokoro has one French voice.",
+  "providers": {
+    "edge": [
+      {"voice_id": "fr-FR-HenriNeural", "lang": "fr-FR", "gender": "m", "age": "adult", "style_tags": ["warm", "confident"]},
+      {"voice_id": "fr-FR-DeniseNeural", "lang": "fr-FR", "gender": "f", "age": "adult", "style_tags": ["clear", "friendly"]},
+      {"voice_id": "fr-FR-EloiseNeural", "lang": "fr-FR", "gender": "f", "age": "young", "style_tags": ["bright", "youthful"]},
+      {"voice_id": "fr-FR-RemyMultilingualNeural", "lang": "fr-FR", "gender": "m", "age": "adult", "style_tags": ["smooth", "multilingual"]},
+      {"voice_id": "fr-FR-VivienneMultilingualNeural", "lang": "fr-FR", "gender": "f", "age": "adult", "style_tags": ["elegant", "multilingual"]},
+      {"voice_id": "fr-CA-AntoineNeural", "lang": "fr-CA", "gender": "m", "age": "adult", "style_tags": ["casual"]},
+      {"voice_id": "fr-CA-SylvieNeural", "lang": "fr-CA", "gender": "f", "age": "adult", "style_tags": ["gentle"]},
+      {"voice_id": "fr-CA-ThierryNeural", "lang": "fr-CA", "gender": "m", "age": "senior", "style_tags": ["deep", "authoritative"]},
+      {"voice_id": "en-US-GuyNeural", "lang": "en-US", "gender": "m", "age": "adult", "style_tags": ["newscast", "confident"]},
+      {"voice_id": "en-US-JennyNeural", "lang": "en-US", "gender": "f", "age": "adult", "style_tags": ["friendly", "assistant"]},
+      {"voice_id": "en-US-AriaNeural", "lang": "en-US", "gender": "f", "age": "adult", "style_tags": ["expressive", "chat"]},
+      {"voice_id": "en-US-DavisNeural", "lang": "en-US", "gender": "m", "age": "adult", "style_tags": ["calm", "narrator"]},
+      {"voice_id": "en-US-AnaNeural", "lang": "en-US", "gender": "f", "age": "child", "style_tags": ["cute", "child"]},
+      {"voice_id": "en-US-ChristopherNeural", "lang": "en-US", "gender": "m", "age": "adult", "style_tags": ["reliable", "narrator"]},
+      {"voice_id": "en-US-MichelleNeural", "lang": "en-US", "gender": "f", "age": "adult", "style_tags": ["pleasant"]},
+      {"voice_id": "en-GB-RyanNeural", "lang": "en-GB", "gender": "m", "age": "adult", "style_tags": ["british", "polished"]},
+      {"voice_id": "en-GB-SoniaNeural", "lang": "en-GB", "gender": "f", "age": "adult", "style_tags": ["british", "warm"]}
+    ],
+    "gemini": [
+      {"voice_id": "Kore", "lang": "multi", "gender": "f", "age": "adult", "style_tags": ["firm"]},
+      {"voice_id": "Puck", "lang": "multi", "gender": "m", "age": "adult", "style_tags": ["upbeat"]},
+      {"voice_id": "Charon", "lang": "multi", "gender": "m", "age": "adult", "style_tags": ["informative"]},
+      {"voice_id": "Fenrir", "lang": "multi", "gender": "m", "age": "adult", "style_tags": ["excitable"]},
+      {"voice_id": "Aoede", "lang": "multi", "gender": "f", "age": "adult", "style_tags": ["breezy"]},
+      {"voice_id": "Leda", "lang": "multi", "gender": "f", "age": "young", "style_tags": ["youthful"]},
+      {"voice_id": "Orus", "lang": "multi", "gender": "m", "age": "adult", "style_tags": ["firm"]},
+      {"voice_id": "Zephyr", "lang": "multi", "gender": "f", "age": "adult", "style_tags": ["bright"]}
+    ],
+    "piper": [
+      {"voice_id": "fr_FR-tom-medium", "lang": "fr-FR", "gender": "m", "age": "adult", "style_tags": ["neutral"]},
+      {"voice_id": "fr_FR-siwis-medium", "lang": "fr-FR", "gender": "f", "age": "adult", "style_tags": ["clear"]},
+      {"voice_id": "fr_FR-upmc-medium", "lang": "fr-FR", "gender": "m", "age": "adult", "style_tags": ["studio"]},
+      {"voice_id": "fr_FR-gilles-low", "lang": "fr-FR", "gender": "m", "age": "adult", "style_tags": ["deep"]},
+      {"voice_id": "en_US-lessac-medium", "lang": "en-US", "gender": "f", "age": "adult", "style_tags": ["neutral"]},
+      {"voice_id": "en_US-ryan-high", "lang": "en-US", "gender": "m", "age": "adult", "style_tags": ["clear"]}
+    ],
+    "kokoro": [
+      {"voice_id": "ff_siwis", "lang": "fr-FR", "gender": "f", "age": "adult", "style_tags": ["clear"]},
+      {"voice_id": "af_heart", "lang": "en-US", "gender": "f", "age": "adult", "style_tags": ["warm"]},
+      {"voice_id": "am_adam", "lang": "en-US", "gender": "m", "age": "adult", "style_tags": ["neutral"]}
+    ],
+    "chatterbox": [
+      {"voice_id": "zero-shot", "lang": "multi", "gender": "any", "age": "any", "style_tags": ["clone from a reference sample", "23 languages incl. fr"]}
+    ]
+  }
+}
