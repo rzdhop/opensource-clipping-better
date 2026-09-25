@@ -1,0 +1,2 @@
+{"system": {"os": "posix", "comfyui_version": "0.3.9", "python_version": "3.12.3", "embedded_python": false},
+ "devices": [{"name": "cuda:0 NVIDIA GeForce RTX 4090 : cudaMallocAsync", "type": "cuda", "index": 0, "vram_total": 25757220864, "vram_free": 23000000000, "torch_vram_total": 0, "torch_vram_free": 0}]}

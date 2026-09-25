@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from clipping import __version__
 
 from .auth import announce, require_token
-from .routes import jobs, files, settings
+from .routes import jobs, files, settings, hardware
 
 
 @asynccontextmanager
@@ -100,6 +100,7 @@ if _ALLOWED:
 app.include_router(jobs.router)
 app.include_router(files.router)
 app.include_router(settings.router)
+app.include_router(hardware.router)
 
 
 @app.get("/api")
