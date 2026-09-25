@@ -60,6 +60,14 @@ PERSISTED_KEYS = frozenset({
     "DAILY_CAP_USD",
     "PER_STORY_CAP_USD",
     "BUDGET_PROFILE",
+    # Generation providers (AI Story, spec 8.6): keys, and the two local URLs.
+    "FAL_KEY",
+    "OPENAI_API_KEY",
+    "CLOUDFLARE_API_TOKEN",
+    "CLOUDFLARE_ACCOUNT_ID",
+    "POLLINATIONS_API_KEY",
+    "LOCAL_COMFYUI_URL",
+    "LOCAL_OLLAMA_URL",
 })
 
 # Values that are secrets. Listed explicitly rather than pattern-matched on
@@ -74,6 +82,13 @@ SECRET_KEYS = frozenset({
     "OPENAI_COMPAT_API_KEY",
     "PEXELS_API_KEY",
     "HF_TOKEN",
+    # Generation providers. The Cloudflare account id is not a credential on
+    # its own, but it is half of one and names the account: redacted too.
+    "FAL_KEY",
+    "OPENAI_API_KEY",
+    "CLOUDFLARE_API_TOKEN",
+    "CLOUDFLARE_ACCOUNT_ID",
+    "POLLINATIONS_API_KEY",
 })
 
 

@@ -247,6 +247,29 @@ export async function testChain(payload = {}) {
   return res.json()
 }
 
+/**
+ * Run a generation chain's free and local links and report the paid ones;
+ * `link` names one link to run (the only way a paid link is called, once).
+ */
+export async function testGenerationChain(payload) {
+  const res = await request('/settings/test-generation-chain', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail || 'The generation chain test failed')
+  }
+  return res.json()
+}
+
+export async function fetchHardware(refresh = false) {
+  const res = await request(refresh ? '/hardware?refresh=1' : '/hardware')
+  if (!res.ok) throw new Error('Failed to fetch the hardware profile')
+  return res.json()
+}
+
 export async function fetchHealth() {
   // Public: no token needed, so the login screen can show system status.
   const res = await fetch(`${API_BASE}/health`)

@@ -30,6 +30,10 @@ services:
       # Settings entered in the dashboard (API keys) live here. Without this
       # mount they are lost on every `docker compose up --build`.
       - ./data:/app/data
+    # A ComfyUI or Ollama running on the Docker host is reached over
+    # host.docker.internal (the default LOCAL_*_URL inside a container).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - PEXELS_API_KEY=${PEXELS_API_KEY:-}
@@ -58,6 +62,26 @@ services:
       # LLM_CUSTOM_BASE_URL set" no matter what the host .env said.
       - LLM_CUSTOM_BASE_URL=${LLM_CUSTOM_BASE_URL:-}
       - LLM_CUSTOM_API_KEY=${LLM_CUSTOM_API_KEY:-}
+      # Generation providers, chains, local servers and the budget of the AI
+      # Story mode (spec 8.1 / 8.5 / 8.6). All optional; Settings can set the
+      # keys, the URLs and the budget at run time.
+      - FAL_KEY=${FAL_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - CLOUDFLARE_API_TOKEN=${CLOUDFLARE_API_TOKEN:-}
+      - CLOUDFLARE_ACCOUNT_ID=${CLOUDFLARE_ACCOUNT_ID:-}
+      - POLLINATIONS_API_KEY=${POLLINATIONS_API_KEY:-}
+      - IMAGE_CHAIN=${IMAGE_CHAIN:-}
+      - IMAGE_EDIT_CHAIN=${IMAGE_EDIT_CHAIN:-}
+      - VIDEO_CHAIN=${VIDEO_CHAIN:-}
+      - TTS_CHAIN=${TTS_CHAIN:-}
+      - VISION_CHAIN=${VISION_CHAIN:-}
+      - LOCAL_COMFYUI_URL=${LOCAL_COMFYUI_URL:-}
+      - LOCAL_OLLAMA_URL=${LOCAL_OLLAMA_URL:-}
+      - ALLOW_PAID=${ALLOW_PAID:-}
+      - PER_EPISODE_CAP_USD=${PER_EPISODE_CAP_USD:-}
+      - DAILY_CAP_USD=${DAILY_CAP_USD:-}
+      - PER_STORY_CAP_USD=${PER_STORY_CAP_USD:-}
+      - BUDGET_PROFILE=${BUDGET_PROFILE:-}
       # Server-side downloading. On by default and best-effort: sites refuse
       # datacenter IPs often, and a refusal parks the job in `needs_upload`
       # rather than failing it. Set to 0 to stop trying entirely.

@@ -71,6 +71,12 @@ function Settings() {
   const [openrouterKey, setOpenrouterKey] = useState('')
   const [mistralKey, setMistralKey] = useState('')
   const [compatKey, setCompatKey] = useState('')
+  // Generation providers (AI Story, spec 8.6)
+  const [falKey, setFalKey] = useState('')
+  const [openaiKey, setOpenaiKey] = useState('')
+  const [cloudflareToken, setCloudflareToken] = useState('')
+  const [cloudflareAccountId, setCloudflareAccountId] = useState('')
+  const [pollinationsKey, setPollinationsKey] = useState('')
 
   // The endpoint URL and model are not secrets, so they are prefilled.
   const [compatUrl, setCompatUrl] = useState('')
@@ -145,6 +151,11 @@ function Settings() {
       if (openrouterKey) payload.openrouter_api_key = openrouterKey
       if (mistralKey) payload.mistral_api_key = mistralKey
       if (compatKey) payload.openai_compat_api_key = compatKey
+      if (falKey) payload.fal_key = falKey
+      if (openaiKey) payload.openai_api_key = openaiKey
+      if (cloudflareToken) payload.cloudflare_api_token = cloudflareToken
+      if (cloudflareAccountId) payload.cloudflare_account_id = cloudflareAccountId
+      if (pollinationsKey) payload.pollinations_api_key = pollinationsKey
 
       // Sent whenever they differ from what the server holds, including when
       // cleared: an empty value removes the override and falls back to .env,
@@ -201,6 +212,11 @@ function Settings() {
       setOpenrouterKey('')
       setMistralKey('')
       setCompatKey('')
+      setFalKey('')
+      setOpenaiKey('')
+      setCloudflareToken('')
+      setCloudflareAccountId('')
+      setPollinationsKey('')
       setMsg('✅ Saved on the server. These now survive a restart.')
     } catch (err) {
       setMsg('❌ Failed to save: ' + err.message)
@@ -377,6 +393,55 @@ function Settings() {
                 Only for speaker diarization. Split-screen can key off face
                 detection instead, which needs no token.
               </p>
+            </div>
+          </div>
+
+          {/* Generation providers (AI Story, spec 8.6) */}
+          <div className="settings-section">
+            <h3>🎨 Generation providers</h3>
+            <p className="form-hint" style={{ marginTop: '-6px', marginBottom: '14px' }}>
+              Image, video and voice providers of the AI Story mode. Gemini reuses
+              the Google key above; OpenRouter its own. Paid links never run until
+              the Budget below allows them.
+            </p>
+            <div className="form-group">
+              <label className="form-label">
+                fal.ai key
+                <span style={{ color: 'var(--text-tertiary)', marginLeft: '6px', fontWeight: 400 }}>— paid: images and video</span>
+                <SetBadge on={settings?.fal_key_set} />
+              </label>
+              <PasswordInput value={falKey} onChange={setFalKey} placeholder="Paste your fal.ai key" isSet={settings?.fal_key_set} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">
+                OpenAI API key
+                <span style={{ color: 'var(--text-tertiary)', marginLeft: '6px', fontWeight: 400 }}>— paid: gpt-image-2</span>
+                <SetBadge on={settings?.openai_api_key_set} />
+              </label>
+              <PasswordInput value={openaiKey} onChange={setOpenaiKey} placeholder="Paste your OpenAI API key" isSet={settings?.openai_api_key_set} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">
+                Cloudflare Workers AI token
+                <span style={{ color: 'var(--text-tertiary)', marginLeft: '6px', fontWeight: 400 }}>— free allowance, ~170 images a day</span>
+                <SetBadge on={settings?.cloudflare_api_token_set} />
+              </label>
+              <PasswordInput value={cloudflareToken} onChange={setCloudflareToken} placeholder="Paste your Cloudflare API token" isSet={settings?.cloudflare_api_token_set} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">
+                Cloudflare account id
+                <SetBadge on={settings?.cloudflare_account_id_set} />
+              </label>
+              <PasswordInput value={cloudflareAccountId} onChange={setCloudflareAccountId} placeholder="The account id the token belongs to" isSet={settings?.cloudflare_account_id_set} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">
+                Pollinations key
+                <span style={{ color: 'var(--text-tertiary)', marginLeft: '6px', fontWeight: 400 }}>— optional, keyless works slowly</span>
+                <SetBadge on={settings?.pollinations_api_key_set} />
+              </label>
+              <PasswordInput value={pollinationsKey} onChange={setPollinationsKey} placeholder="Paste your Pollinations key (optional)" isSet={settings?.pollinations_api_key_set} />
             </div>
           </div>
 

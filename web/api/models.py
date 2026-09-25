@@ -371,6 +371,14 @@ class SettingsRequest(BaseModel):
     daily_cap_usd: Optional[float] = None
     per_story_cap_usd: Optional[float] = None
     budget_profile: Optional[str] = None
+    # Generation providers (spec 8.6). Empty clears, like every key (DEC-043).
+    fal_key: Optional[str] = None
+    openai_api_key: Optional[str] = None
+    cloudflare_api_token: Optional[str] = None
+    cloudflare_account_id: Optional[str] = None
+    pollinations_api_key: Optional[str] = None
+    local_comfyui_url: Optional[str] = None
+    local_ollama_url: Optional[str] = None
 
 
 class SettingsResponse(BaseModel):
@@ -396,6 +404,17 @@ class SettingsResponse(BaseModel):
     budget_profile: str = ""
     effective_budget_profile: str = "free"
     spend_today_usd: float = 0.0
+    # Generation providers (spec 8.6): keys as booleans, the effective local
+    # URLs, every chain's links as the runner sees them, today's free usage.
+    fal_key_set: bool = False
+    openai_api_key_set: bool = False
+    cloudflare_api_token_set: bool = False
+    cloudflare_account_id_set: bool = False
+    pollinations_api_key_set: bool = False
+    local_comfyui_url: str = ""
+    local_ollama_url: str = ""
+    generation_chains: dict = {}
+    usage_today: dict = {}
     # Why a chain job would be refused right now, or "" when it would start.
     # The server's own verdict (chain_readiness), so the dashboard never keeps a
     # second copy of the rule that could disagree with POST /api/jobs.
@@ -453,6 +472,52 @@ class ChainLinkResult(BaseModel):
     used_model: Optional[str] = None
     # One sentence for a person, or "".
     note: str = ""
+
+
+class GenerationChainTestRequest(BaseModel):
+    """Which generation chain to test (DEC-103).
+
+    ``kind`` is image | image_edit | video | tts | vision. ``chain`` overrides
+    the configured chain; ``link`` names ONE link to run -- the only way a paid
+    link is ever called by this route, and then at most once.
+    """
+    kind: str
+    link: str = ""
+    chain: str = ""
+
+
+class GenerationLinkResult(BaseModel):
+    """One link of a generation chain, as the chain runner would treat it."""
+    label: str
+    provider: str
+    model: str
+    status: Literal["ok", "failed", "no_key", "no_adapter", "unreachable", "refused", "skipped"]
+    paid: bool = False
+    est_usd: float = 0.0
+    # Whether the budget would let this link run right now (free links: yes).
+    allowed: bool = False
+    reason: Optional[str] = None
+    note: Optional[str] = None
+    latency_seconds: Optional[float] = None
+    # A signed URL under /api/outputs/_chain_test/ for the sample it produced.
+    artifact_url: Optional[str] = None
+    artifact_kind: Optional[str] = None
+    env_keys: list[str] = []
+    missing_keys: list[str] = []
+    signup_url: str = ""
+
+
+class GenerationChainTestResponse(BaseModel):
+    kind: str
+    chain: str
+    # ready: a free or local link answered (or the named paid link did).
+    # paid_only: nothing free answered but a paid link is keyed and allowed.
+    # no_adapter: every link waits for a later phase. blocked: nothing can run.
+    verdict: Literal["ready", "paid_only", "blocked", "no_adapter"] = "blocked"
+    results: list[GenerationLinkResult]
+    elapsed_seconds: float
+    message: str = ""
+    tested_link: Optional[str] = None
 
 
 class ChainTestResponse(BaseModel):

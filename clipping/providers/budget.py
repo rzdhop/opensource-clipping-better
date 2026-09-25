@@ -246,6 +246,13 @@ def default_spend() -> DailySpend:
         return _DEFAULT_SPEND
 
 
+def reset() -> None:
+    """Drop the cached default spend store. For tests."""
+    global _DEFAULT_SPEND
+    with _DEFAULT_SPEND_LOCK:
+        _DEFAULT_SPEND = None
+
+
 def day_spent(*, spend=None) -> float:
     return (spend or default_spend()).today_total()
 

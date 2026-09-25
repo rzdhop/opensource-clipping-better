@@ -21,12 +21,17 @@ from ..models import (
     ChainLinkResult,
     ChainTestRequest,
     ChainTestResponse,
+    GenerationChainTestRequest,
+    GenerationChainTestResponse,
+    GenerationLinkResult,
     SettingsRequest,
     SettingsResponse,
     SystemHealthResponse,
 )
+from .. import settings_store
 from .. import store as job_store
 from .. import worker
+from . import files as files_route
 from ..config_adapter import env_flag, resolve_provider_keys
 
 router = APIRouter(tags=["settings"], dependencies=[Depends(require_token)])
@@ -126,6 +131,7 @@ async def get_settings() -> SettingsResponse:
         openai_compat_model=compat_model,
         allow_slow_chain=env_flag(env, "ALLOW_SLOW_CHAIN"),
         **_budget_fields(env),
+        **_generation_fields(env),
         chain_blocked_reason=_chain_blocked_reason(env),
         default_clips=int(env.get("DEFAULT_CLIPS", "7")),
         default_ratio=env.get("DEFAULT_RATIO", "9:16"),
@@ -193,6 +199,15 @@ async def update_settings(req: SettingsRequest) -> SettingsResponse:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from None
         env_updates["BUDGET_PROFILE"] = req.budget_profile.strip().lower()
+    # Generation providers (spec 8.6): keys clear on "" like every key; the
+    # local URLs are stored as typed and normalised when read.
+    for name, value in (("FAL_KEY", req.fal_key), ("OPENAI_API_KEY", req.openai_api_key),
+                        ("CLOUDFLARE_API_TOKEN", req.cloudflare_api_token),
+                        ("CLOUDFLARE_ACCOUNT_ID", req.cloudflare_account_id),
+                        ("POLLINATIONS_API_KEY", req.pollinations_api_key),
+                        ("LOCAL_COMFYUI_URL", req.local_comfyui_url), ("LOCAL_OLLAMA_URL", req.local_ollama_url)):
+        if value is not None:
+            env_updates[name] = value.strip()
     if req.default_clips is not None:
         env_updates["DEFAULT_CLIPS"] = str(req.default_clips)
     if req.default_ratio is not None:
@@ -455,4 +470,325 @@ def _link_row(registry, link, probe, busy):
         level=probe.level,
         used_model=probe.used_model,
         note=" ".join(notes),
+    )
+
+
+# =============================================================================
+# Generation chains (spec 8.6, DEC-103)
+# =============================================================================
+
+# The transport every generation call of this module goes through; tests
+# inject a fake here so nothing leaves the process.
+_TRANSPORT = None
+
+# Samples live under outputs/<CHAIN_TEST_DIRNAME>/ so the existing signed
+# outputs route serves them to a phone's <img>/<audio> with no header; the id
+# is reserved and never a job. Paid samples are booked in this ledger.
+CHAIN_TEST_DIRNAME = "_chain_test"
+CHAIN_TEST_LEDGER = os.path.join(settings_store.DATA_DIR, "chain_test_ledger.json")
+
+_TEST_IMAGE_PROMPT = ("A single ripe kiwi fruit with a small friendly cartoon face, sitting on a warm wooden table, "
+                      "soft studio light, vertical composition, no text")
+_TEST_EDIT_PROMPT = "Keep this exact fruit character and its face; add a small white linen shirt with an open collar"
+_TEST_TEXT = {"fr": "Bonjour, ceci est un test de voix pour rzdhop AI.", "en": "Hello, this is a voice test for rzdhop AI."}
+_TEST_VISION_PROMPT = "Describe this image in one sentence: subject, colours, lighting."
+
+
+def _merged_env(env) -> dict:
+    """The saved Settings on top of the process environment, as every reader sees them."""
+    merged = dict(os.environ)
+    for name, value in (env or {}).items():
+        if value:
+            merged[name] = value
+        else:
+            merged.pop(name, None)
+    return merged
+
+
+def _api_model_id(kind, link) -> str:
+    """The provider's own model id behind a chain link (for the ledger)."""
+    from clipping.providers import images, tts, vision
+
+    tables = {
+        "cloudflare": images.CLOUDFLARE_MODELS, "fal": images.FAL_APPS,
+        "gemini": {**images.GEMINI_MODELS, **tts.GEMINI_TTS_MODELS, **vision.GEMINI_VISION_MODELS},
+        "openai": {name: pair[0] for name, pair in images.OPENAI_MODELS.items()},
+    }
+    return tables.get(link.provider, {}).get(link.model, link.model)
+
+
+def _link_summary(kind, link, merged, budget_obj) -> dict:
+    from clipping.providers import budget as budget_mod, generation as gen, pricing
+
+    provider = gen.provider_for(link)
+    missing = gen.missing_keys(link, merged)
+    paid = gen.is_paid(link)
+    est = 0.0
+    if paid:
+        try:
+            est = pricing.estimate(link, 1, width=1080, height=1920).est_usd
+        except pricing.PriceUnknown:
+            est = 0.0
+    allowed = not missing
+    reason = None
+    if allowed and paid:
+        try:
+            budget_mod.check(est, link, budget=budget_obj, day_spent=budget_mod.day_spent())
+        except budget_mod.BudgetRefused as exc:
+            allowed, reason = False, str(exc)
+    return {
+        "label": gen.describe(link), "provider": link.provider, "model": link.model,
+        "paid": paid, "keyed": not missing, "missing_keys": missing,
+        "adapter": gen.adapter_for(kind, link.provider) is not None,
+        "allowed": allowed, "est_usd": est, "reason": reason,
+        "env_keys": list(provider.env_keys), "signup_url": provider.signup_url,
+    }
+
+
+def _generation_fields(env) -> dict:
+    from clipping.providers import adapters, budget as budget_mod, generation as gen, limits
+
+    adapters.load_all()
+    merged = _merged_env(env)
+    budget_obj = budget_mod.budget_from_env({name: merged.get(name, "") for name in budget_mod.ENV_NAMES})
+    chains = {}
+    for kind in gen.KINDS:
+        raw = (merged.get(gen.ENV_NAMES[kind]) or "").strip()
+        entry = {"env": gen.ENV_NAMES[kind], "source": "env" if raw else "default", "chain": raw or gen.DEFAULT_CHAINS[kind],
+                 "links": [], "error": None}
+        try:
+            links = gen.parse_generation_chain(kind, raw or gen.DEFAULT_CHAINS[kind])
+        except gen.ChainError as exc:
+            entry["error"] = str(exc)
+            links = []
+        entry["links"] = [_link_summary(kind, link, merged, budget_obj) for link in links]
+        chains[kind] = entry
+    return {
+        "fal_key_set": bool(merged.get("FAL_KEY")),
+        "openai_api_key_set": bool(merged.get("OPENAI_API_KEY")),
+        "cloudflare_api_token_set": bool(merged.get("CLOUDFLARE_API_TOKEN")),
+        "cloudflare_account_id_set": bool(merged.get("CLOUDFLARE_ACCOUNT_ID")),
+        "pollinations_api_key_set": bool(merged.get("POLLINATIONS_API_KEY")),
+        "local_comfyui_url": gen.local_url("comfyui", merged),
+        "local_ollama_url": gen.local_url("ollama", merged),
+        "generation_chains": chains,
+        "usage_today": limits.budget_left_today(),
+    }
+
+
+def _write_reference_png(path: str, size: int = 256) -> str:
+    """A bundled reference image, written with the standard library: a green disc on a warm gradient."""
+    import struct
+    import zlib
+
+    if os.path.isfile(path):
+        return path
+    rows = []
+    for y in range(size):
+        row = bytearray([0])
+        for x in range(size):
+            dx, dy = x - size // 2, y - size // 2
+            if dx * dx + dy * dy < (size * 0.31) ** 2:
+                row += bytes((92, 168, 58))
+            else:
+                row += bytes((240, max(0, 200 - y // 3), 120))
+        rows.append(bytes(row))
+    raw = b"".join(rows)
+
+    def chunk(tag, data):
+        return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+
+    png = (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0))
+           + chunk(b"IDAT", zlib.compress(raw, 9)) + chunk(b"IEND", b""))
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as fh:
+        fh.write(png)
+    return path
+
+
+def _test_request(kind, link, out_dir):
+    from clipping.providers.generation import GenRequest
+
+    name = f"{kind}_{link.provider}_{link.model}".replace("/", "_").replace(":", "_")
+    if kind == "image_edit":
+        return GenRequest(kind=kind, prompt=_TEST_EDIT_PROMPT, negative="text, watermark, blurry", width=1080, height=1920,
+                          seed=20260925, references=(_write_reference_png(os.path.join(out_dir, "reference.png")),),
+                          out_dir=out_dir, extra={"name": name})
+    if kind == "tts":
+        lang = "fr" if link.model.lower().startswith("fr") or link.provider != "edge" else "en"
+        voice = link.model if link.provider == "edge" else ""
+        return GenRequest(kind=kind, text=_TEST_TEXT[lang], voice=voice, out_dir=out_dir, extra={"name": name})
+    if kind == "vision":
+        return GenRequest(kind=kind, prompt=_TEST_VISION_PROMPT,
+                          images=(_write_reference_png(os.path.join(out_dir, "reference.png")),), out_dir=out_dir, extra={"name": name})
+    return GenRequest(kind=kind, prompt=_TEST_IMAGE_PROMPT, negative="text, watermark, blurry", width=1080, height=1920,
+                      seed=20260925, out_dir=out_dir, extra={"name": name})
+
+
+def _status_from_reason(reason: str) -> str:
+    text = (reason or "").lower()
+    if "no api key" in text:
+        return "no_key"
+    if "no adapter yet" in text:
+        return "no_adapter"
+    if "unreachable" in text or "not installed" in text or "not pulled" in text or "not reachable" in text:
+        return "unreachable"
+    if "allow_paid is off" in text or text.startswith("refused"):
+        return "refused"
+    return "failed"
+
+
+def _artifact_kind(kind, path) -> str:
+    ext = os.path.splitext(path)[1].lower()
+    if ext in (".mp3", ".wav", ".ogg"):
+        return "audio"
+    if ext in (".png", ".jpg", ".jpeg", ".webp"):
+        return "image"
+    return "file"
+
+
+def _test_generation_links(kind, links, tested, env):
+    """The blocking half: run the free and local links, report the paid ones, run the named one."""
+    from clipping.aistory.ledger import CostLedger
+    from clipping.providers import adapters, budget as budget_mod, generation as gen, limits
+    from ..auth import media_url
+
+    adapters.load_all()
+    merged = _merged_env(env)
+    budget_obj = budget_mod.budget_from_env({name: merged.get(name, "") for name in budget_mod.ENV_NAMES})
+    out_dir = os.path.join(files_route.OUTPUTS_DIR, CHAIN_TEST_DIRNAME)
+    os.makedirs(out_dir, exist_ok=True)
+
+    class _Limiter:
+        def acquire(self, provider):
+            return limits.acquire(provider)
+
+    def check(est, link):
+        budget_mod.check(est, link, budget=budget_obj, day_spent=budget_mod.day_spent())
+
+    rows = []
+    for link in links:
+        summary = _link_summary(kind, link, merged, budget_obj)
+        row = GenerationLinkResult(
+            label=summary["label"], provider=link.provider, model=link.model, status="skipped",
+            paid=summary["paid"], est_usd=summary["est_usd"], allowed=summary["allowed"],
+            env_keys=summary["env_keys"], missing_keys=summary["missing_keys"], signup_url=summary["signup_url"],
+        )
+        if not summary["adapter"]:
+            row.status, row.reason = "no_adapter", f"no adapter yet for {link.provider} {kind} (phase 6)"
+            rows.append(row)
+            continue
+        if summary["missing_keys"]:
+            row.status = "no_key"
+            row.reason = f"no API key ({' and '.join(summary['missing_keys'])} not set)"
+            rows.append(row)
+            continue
+        if summary["paid"] and tested is None:
+            if summary["allowed"]:
+                row.status = "skipped"
+                row.note = f"paid, est ${summary['est_usd']:.3f}; allowed — press Test on this link to spend it once"
+            else:
+                row.status, row.reason = "refused", summary["reason"]
+            rows.append(row)
+            continue
+        if summary["paid"] and not summary["allowed"]:
+            row.status, row.reason = "refused", summary["reason"]
+            rows.append(row)
+            continue
+
+        request = _test_request(kind, link, out_dir)
+        log = []
+        started = time.monotonic()
+        try:
+            result, answered = gen.run_generation_chain(
+                kind, [link], request, env=merged, allow_paid=budget_obj.allow_paid, on_log=log.append,
+                budget_check=check, limiter=_Limiter(), transport=_TRANSPORT,
+            )
+        except gen.NoRunnableLink as exc:
+            reason = exc.failures[-1][1] if exc.failures else str(exc)
+            row.status, row.reason = _status_from_reason(reason), reason
+            row.latency_seconds = round(time.monotonic() - started, 2)
+            rows.append(row)
+            continue
+        except Exception as exc:  # noqa: BLE001 - a bug in an adapter is reported, never a 500
+            row.status, row.reason = "failed", f"{type(exc).__name__}: {exc}"
+            rows.append(row)
+            continue
+        row.status = "ok"
+        row.latency_seconds = round(time.monotonic() - started, 2)
+        row.model = answered.model
+        if result.paths:
+            filename = os.path.basename(result.paths[0])
+            row.artifact_url = media_url(CHAIN_TEST_DIRNAME, filename)
+            row.artifact_kind = _artifact_kind(kind, filename)
+        text = (result.meta or {}).get("text")
+        if text:
+            row.note = str(text)[:300]
+        if result.paid and result.est_cost > 0:
+            CostLedger(CHAIN_TEST_LEDGER).append(
+                step="chain_test", provider=answered.provider, model=_api_model_id(kind, answered),
+                unit="image" if kind.startswith("image") else "second" if kind == "video" else "char", qty=1,
+                est_usd=result.est_cost, paid=True,
+            )
+            budget_mod.record(result.est_cost)
+            row.est_usd = result.est_cost
+        rows.append(row)
+
+    statuses = [r.status for r in rows]
+    if rows and all(s == "no_adapter" for s in statuses):
+        verdict, message = "no_adapter", f"No {kind} adapter exists yet: they arrive in phase 6."
+    elif any(r.status == "ok" for r in rows):
+        verdict = "ready"
+        answered = [r.label for r in rows if r.status == "ok"]
+        message = f"{', '.join(answered)} answered."
+    elif any(r.status == "skipped" and r.paid and r.allowed for r in rows):
+        verdict, message = "paid_only", "No free or local link answered; a paid link is keyed and allowed — test it from its row."
+    else:
+        verdict, message = "blocked", "No link of this chain can run right now; see each row."
+    return rows, verdict, message
+
+
+@router.post("/api/settings/test-generation-chain")
+async def run_generation_chain_test(req: GenerationChainTestRequest) -> GenerationChainTestResponse:
+    """Run a generation chain's free and local links; report the paid ones (DEC-103).
+
+    A paid link is called only when ``link`` names it, at most once, after the
+    budget verdict, and the call is booked. Shares the LLM chain test's lock
+    and ceiling: one chain test at a time per process.
+    """
+    from clipping.providers import generation as gen
+    from clipping.providers.registry import ChainError
+
+    if req.kind not in gen.KINDS:
+        raise HTTPException(status_code=400, detail=f"Unknown chain kind {req.kind!r}. Known: {', '.join(gen.KINDS)}.")
+    env = worker.get_settings_env()
+    merged = _merged_env(env)
+    try:
+        links = (gen.parse_generation_chain(req.kind, req.chain) if req.chain.strip()
+                 else gen.chain_from_env(req.kind, merged))
+        tested = None
+        if req.link.strip():
+            tested = gen.parse_generation_chain(req.kind, req.link)[0]
+            links = [tested]
+    except ChainError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    if _CHAIN_TEST_LOCK.locked():
+        raise HTTPException(status_code=409, detail="A chain test is already running.")
+    started = time.monotonic()
+    async with _CHAIN_TEST_LOCK:
+        try:
+            rows, verdict, message = await asyncio.wait_for(
+                asyncio.to_thread(_test_generation_links, req.kind, links, tested, env),
+                timeout=_CHAIN_TEST_CEILING_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            raise HTTPException(
+                status_code=504,
+                detail=f"The {req.kind} chain test gave up after {time.monotonic() - started:.0f}s.",
+            )
+    return GenerationChainTestResponse(
+        kind=req.kind, chain=",".join(gen.describe(link) for link in links), verdict=verdict, results=rows,
+        elapsed_seconds=round(time.monotonic() - started, 2), message=message,
+        tested_link=gen.describe(tested) if tested else None,
     )
