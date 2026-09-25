@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { fetchSettings, testChain, updateSettings } from '../api'
+import { fetchHardware, fetchSettings, testChain, testGenerationChain, updateSettings } from '../api'
 
 const PasswordInput = ({ value, onChange, placeholder, isSet }) => {
   const [show, setShow] = useState(false)
@@ -55,11 +55,44 @@ const ENDPOINT_PRESETS = [
   { label: 'Ollama (local)', url: 'http://localhost:11434/v1' },
 ]
 
+// The four tabs of spec 8.6. The last one opened is remembered per browser.
+const SETTINGS_TABS = [
+  { id: 'providers', icon: '🔑', label: 'Providers' },
+  { id: 'generation', icon: '🎨', label: 'Generation' },
+  { id: 'hardware', icon: '💻', label: 'Local hardware' },
+  { id: 'budget', icon: '💰', label: 'Budget' },
+]
+const TAB_KEY = 'rzc_settings_tab'
+
+function readTab() {
+  try {
+    const stored = localStorage.getItem(TAB_KEY)
+    return SETTINGS_TABS.some(t => t.id === stored) ? stored : 'providers'
+  } catch {
+    return 'providers'
+  }
+}
+
 function Settings() {
   const [settings, setSettings] = useState(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
+  const [tab, setTab] = useState(readTab)
+  const switchTab = (id) => {
+    setTab(id)
+    try { localStorage.setItem(TAB_KEY, id) } catch { /* private mode: the tab still switches */ }
+  }
+  // Generation chain tests (DEC-103): one at a time, the last result kept per kind.
+  const [genTesting, setGenTesting] = useState(null)
+  const [genResults, setGenResults] = useState({})
+  const [genError, setGenError] = useState('')
+  // Local hardware (GET /api/hardware), probed when its tab opens.
+  const [hardware, setHardware] = useState(null)
+  const [hwLoading, setHwLoading] = useState(false)
+  const [hwError, setHwError] = useState('')
+  const [localComfyuiUrl, setLocalComfyuiUrl] = useState('')
+  const [localOllamaUrl, setLocalOllamaUrl] = useState('')
 
   // API keys are write-only: the backend reports whether each is set, never its
   // value, so these stay empty unless a new one is being entered.
@@ -120,6 +153,37 @@ function Settings() {
     }
   }
 
+  const handleTestGeneration = async (kind, link) => {
+    setGenTesting(link ? `${kind}:${link}` : kind)
+    setGenError('')
+    try {
+      const result = await testGenerationChain({ kind, link: link || '' })
+      setGenResults(prev => ({ ...prev, [kind]: result }))
+      // A paid test changes today's spend and the rows' "allowed": refresh.
+      if (link) setSettings(await fetchSettings())
+    } catch (err) {
+      setGenError(err.message)
+    } finally {
+      setGenTesting(null)
+    }
+  }
+
+  const loadHardware = async (refresh = false) => {
+    setHwLoading(true)
+    setHwError('')
+    try {
+      setHardware(await fetchHardware(refresh))
+    } catch (err) {
+      setHwError(err.message)
+    } finally {
+      setHwLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (tab === 'hardware' && !hardware && !hwLoading) loadHardware()
+  }, [tab]) // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     fetchSettings()
       .then(data => {
@@ -132,6 +196,8 @@ function Settings() {
         setDailyCap(String(data.daily_cap_usd ?? ''))
         setPerStoryCap(String(data.per_story_cap_usd ?? ''))
         setBudgetProfile(data.budget_profile || '')
+        setLocalComfyuiUrl(data.local_comfyui_url || '')
+        setLocalOllamaUrl(data.local_ollama_url || '')
         setLoading(false)
       })
       .catch(() => setLoading(false))
@@ -187,6 +253,13 @@ function Settings() {
       if (budgetProfile !== (settings?.budget_profile || '')) {
         payload.budget_profile = budgetProfile
       }
+      // Local servers (spec 8.1): sent when changed; "" clears back to the default.
+      if (localComfyuiUrl.trim() !== (settings?.local_comfyui_url || '')) {
+        payload.local_comfyui_url = localComfyuiUrl.trim()
+      }
+      if (localOllamaUrl.trim() !== (settings?.local_ollama_url || '')) {
+        payload.local_ollama_url = localOllamaUrl.trim()
+      }
 
       if (Object.keys(payload).length === 0) {
         setMsg('No changes to save')
@@ -204,6 +277,8 @@ function Settings() {
       setDailyCap(String(updated.daily_cap_usd ?? ''))
       setPerStoryCap(String(updated.per_story_cap_usd ?? ''))
       setBudgetProfile(updated.budget_profile || '')
+      setLocalComfyuiUrl(updated.local_comfyui_url || '')
+      setLocalOllamaUrl(updated.local_ollama_url || '')
       setGoogleKey('')
       setPexelsKey('')
       setHfToken('')
@@ -241,7 +316,23 @@ function Settings() {
       </div>
 
       <form onSubmit={handleSave}>
-        <div className="settings-grid">
+        <div className="settings-tabs" role="tablist">
+          {SETTINGS_TABS.map(t => (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              aria-selected={tab === t.id}
+              className={`settings-tab${tab === t.id ? ' active' : ''}`}
+              onClick={() => switchTab(t.id)}
+            >
+              {t.icon} {t.label}
+            </button>
+          ))}
+        </div>
+
+        {tab === 'providers' && (
+          <div className="settings-grid">
           {/* API keys */}
           <div className="settings-section">
             <h3>🔑 API Keys</h3>
@@ -395,56 +486,6 @@ function Settings() {
               </p>
             </div>
           </div>
-
-          {/* Generation providers (AI Story, spec 8.6) */}
-          <div className="settings-section">
-            <h3>🎨 Generation providers</h3>
-            <p className="form-hint" style={{ marginTop: '-6px', marginBottom: '14px' }}>
-              Image, video and voice providers of the AI Story mode. Gemini reuses
-              the Google key above; OpenRouter its own. Paid links never run until
-              the Budget below allows them.
-            </p>
-            <div className="form-group">
-              <label className="form-label">
-                fal.ai key
-                <span style={{ color: 'var(--text-tertiary)', marginLeft: '6px', fontWeight: 400 }}>— paid: images and video</span>
-                <SetBadge on={settings?.fal_key_set} />
-              </label>
-              <PasswordInput value={falKey} onChange={setFalKey} placeholder="Paste your fal.ai key" isSet={settings?.fal_key_set} />
-            </div>
-            <div className="form-group">
-              <label className="form-label">
-                OpenAI API key
-                <span style={{ color: 'var(--text-tertiary)', marginLeft: '6px', fontWeight: 400 }}>— paid: gpt-image-2</span>
-                <SetBadge on={settings?.openai_api_key_set} />
-              </label>
-              <PasswordInput value={openaiKey} onChange={setOpenaiKey} placeholder="Paste your OpenAI API key" isSet={settings?.openai_api_key_set} />
-            </div>
-            <div className="form-group">
-              <label className="form-label">
-                Cloudflare Workers AI token
-                <span style={{ color: 'var(--text-tertiary)', marginLeft: '6px', fontWeight: 400 }}>— free allowance, ~170 images a day</span>
-                <SetBadge on={settings?.cloudflare_api_token_set} />
-              </label>
-              <PasswordInput value={cloudflareToken} onChange={setCloudflareToken} placeholder="Paste your Cloudflare API token" isSet={settings?.cloudflare_api_token_set} />
-            </div>
-            <div className="form-group">
-              <label className="form-label">
-                Cloudflare account id
-                <SetBadge on={settings?.cloudflare_account_id_set} />
-              </label>
-              <PasswordInput value={cloudflareAccountId} onChange={setCloudflareAccountId} placeholder="The account id the token belongs to" isSet={settings?.cloudflare_account_id_set} />
-            </div>
-            <div className="form-group">
-              <label className="form-label">
-                Pollinations key
-                <span style={{ color: 'var(--text-tertiary)', marginLeft: '6px', fontWeight: 400 }}>— optional, keyless works slowly</span>
-                <SetBadge on={settings?.pollinations_api_key_set} />
-              </label>
-              <PasswordInput value={pollinationsKey} onChange={setPollinationsKey} placeholder="Paste your Pollinations key (optional)" isSet={settings?.pollinations_api_key_set} />
-            </div>
-          </div>
-
           {/* Chain test */}
           <div className="settings-section">
             <h3>🩺 Provider chain</h3>
@@ -474,7 +515,6 @@ function Settings() {
             )}
             {testResult && <ChainTestResult result={testResult} />}
           </div>
-
           {/* Custom OpenAI-compatible endpoint */}
           <div className="settings-section">
             <h3>🔌 Custom endpoint (optional)</h3>
@@ -554,8 +594,132 @@ function Settings() {
                 : '⚪ Needs a base URL, a key and a model before it can be used.'}
             </div>
           </div>
+          </div>
+        )}
 
-          {/* System info */}
+        {tab === 'generation' && (
+          <div className="settings-grid">
+          {/* Generation providers (AI Story, spec 8.6) */}
+          <div className="settings-section">
+            <h3>🎨 Generation providers</h3>
+            <p className="form-hint" style={{ marginTop: '-6px', marginBottom: '14px' }}>
+              Image, video and voice providers of the AI Story mode. Gemini reuses
+              the Google key above; OpenRouter its own. Paid links never run until
+              the Budget below allows them.
+            </p>
+            <div className="form-group">
+              <label className="form-label">
+                fal.ai key
+                <span style={{ color: 'var(--text-tertiary)', marginLeft: '6px', fontWeight: 400 }}>— paid: images and video</span>
+                <SetBadge on={settings?.fal_key_set} />
+              </label>
+              <PasswordInput value={falKey} onChange={setFalKey} placeholder="Paste your fal.ai key" isSet={settings?.fal_key_set} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">
+                OpenAI API key
+                <span style={{ color: 'var(--text-tertiary)', marginLeft: '6px', fontWeight: 400 }}>— paid: gpt-image-2</span>
+                <SetBadge on={settings?.openai_api_key_set} />
+              </label>
+              <PasswordInput value={openaiKey} onChange={setOpenaiKey} placeholder="Paste your OpenAI API key" isSet={settings?.openai_api_key_set} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">
+                Cloudflare Workers AI token
+                <span style={{ color: 'var(--text-tertiary)', marginLeft: '6px', fontWeight: 400 }}>— free allowance, ~170 images a day</span>
+                <SetBadge on={settings?.cloudflare_api_token_set} />
+              </label>
+              <PasswordInput value={cloudflareToken} onChange={setCloudflareToken} placeholder="Paste your Cloudflare API token" isSet={settings?.cloudflare_api_token_set} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">
+                Cloudflare account id
+                <SetBadge on={settings?.cloudflare_account_id_set} />
+              </label>
+              <PasswordInput value={cloudflareAccountId} onChange={setCloudflareAccountId} placeholder="The account id the token belongs to" isSet={settings?.cloudflare_account_id_set} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">
+                Pollinations key
+                <span style={{ color: 'var(--text-tertiary)', marginLeft: '6px', fontWeight: 400 }}>— optional, keyless works slowly</span>
+                <SetBadge on={settings?.pollinations_api_key_set} />
+              </label>
+              <PasswordInput value={pollinationsKey} onChange={setPollinationsKey} placeholder="Paste your Pollinations key (optional)" isSet={settings?.pollinations_api_key_set} />
+            </div>
+          </div>
+          <ChainLinksPanel
+            chains={settings?.generation_chains}
+            usage={settings?.usage_today}
+            results={genResults}
+            testing={genTesting}
+            error={genError}
+            onTest={handleTestGeneration}
+          />
+          </div>
+        )}
+
+        {tab === 'hardware' && (
+          <div className="settings-grid">
+          <HardwarePanel hardware={hardware} loading={hwLoading} error={hwError} onRefresh={loadHardware} />
+
+          <div className="settings-section">
+            <h3>🔗 Local servers</h3>
+            <p className="form-hint" style={{ marginTop: '-6px', marginBottom: '14px' }}>
+              Where ComfyUI and Ollama answer. Inside Docker the default is
+              host.docker.internal (the host's services); on a host it is
+              127.0.0.1. Empty = the default.
+            </p>
+            <div className="form-group">
+              <label className="form-label">ComfyUI URL</label>
+              <input className="form-input" type="url" value={localComfyuiUrl}
+                onChange={e => setLocalComfyuiUrl(e.target.value)} placeholder="http://127.0.0.1:8188" />
+              {hardware?.comfyui?.note && <p className="form-hint" style={{ wordBreak: 'break-word' }}>{hardware.comfyui.note}</p>}
+            </div>
+            <div className="form-group">
+              <label className="form-label">Ollama URL</label>
+              <input className="form-input" type="url" value={localOllamaUrl}
+                onChange={e => setLocalOllamaUrl(e.target.value)} placeholder="http://127.0.0.1:11434" />
+              {hardware?.ollama?.note && <p className="form-hint" style={{ wordBreak: 'break-word' }}>{hardware.ollama.note}</p>}
+            </div>
+          </div>
+          <div className="settings-section">
+            <h3>💻 System Info</h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '13px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: 'var(--text-secondary)' }}>GPU</span>
+                <span style={{ color: settings?.gpu_available ? 'var(--success)' : 'var(--text-tertiary)' }}>
+                  {settings?.gpu_available ? '✅ Available' : '⚪ Not available'}
+                </span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: 'var(--text-secondary)' }}>Default Whisper</span>
+                <span>{settings?.default_whisper_model}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: 'var(--text-secondary)' }}>Whisper device</span>
+                <span>{settings?.default_whisper_device}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: 'var(--text-secondary)' }}>Default AI</span>
+                <span>{settings?.default_ai_provider}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: 'var(--text-secondary)' }}>Custom endpoint</span>
+                <span style={{ color: endpointReady ? 'var(--success)' : 'var(--text-tertiary)' }}>
+                  {endpointReady ? '✅ Configured' : '⚪ Not configured'}
+                </span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: 'var(--text-secondary)' }}>Default Ratio</span>
+                <span>{settings?.default_ratio}</span>
+              </div>
+            </div>
+          </div>
+          </div>
+        )}
+
+        {tab === 'budget' && (
+          <div className="settings-grid">
           {/* Budget (AI Story, DEC-097) */}
           <div className="settings-section">
             <h3>💰 Budget</h3>
@@ -602,41 +766,8 @@ function Settings() {
               </div>
             </div>
           </div>
-
-          <div className="settings-section">
-            <h3>💻 System Info</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '13px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--text-secondary)' }}>GPU</span>
-                <span style={{ color: settings?.gpu_available ? 'var(--success)' : 'var(--text-tertiary)' }}>
-                  {settings?.gpu_available ? '✅ Available' : '⚪ Not available'}
-                </span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--text-secondary)' }}>Default Whisper</span>
-                <span>{settings?.default_whisper_model}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--text-secondary)' }}>Whisper device</span>
-                <span>{settings?.default_whisper_device}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--text-secondary)' }}>Default AI</span>
-                <span>{settings?.default_ai_provider}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--text-secondary)' }}>Custom endpoint</span>
-                <span style={{ color: endpointReady ? 'var(--success)' : 'var(--text-tertiary)' }}>
-                  {endpointReady ? '✅ Configured' : '⚪ Not configured'}
-                </span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--text-secondary)' }}>Default Ratio</span>
-                <span>{settings?.default_ratio}</span>
-              </div>
-            </div>
           </div>
-        </div>
+        )}
 
         {msg && (
           <div style={{ marginTop: '16px', fontSize: '13px', color: msg.startsWith('✅') ? 'var(--success)' : 'var(--error)' }}>
@@ -744,6 +875,208 @@ function ChainTestResult({ result }) {
           ? `✅ Jobs can start. ${result.live_link} completed the real analysis request first (${result.elapsed_seconds.toFixed(0)}s for the whole test).`
           : `${verdict === 'floor_only' ? '⚠️' : '✖'} ${result.message}`}
       </div>
+    </div>
+  )
+}
+
+// One per GenerationLinkResult.status in web/api/models.py (tests/test_settings_tabs.py keeps them in step).
+const GEN_STATUS_GLYPH = { ok: '✅', failed: '✖', no_key: '⏭', no_adapter: '·', unreachable: '🔌', refused: '🔒', skipped: '💸' }
+
+// One per GenerationChainTestResponse.verdict.
+const GEN_VERDICT_STYLE = {
+  ready: { color: 'var(--success)' },
+  paid_only: { color: 'var(--warning)' },
+  blocked: { color: 'var(--error)' },
+  no_adapter: { color: 'var(--text-tertiary)' },
+}
+
+const KIND_LABELS = {
+  image: 'Images (text → image)',
+  image_edit: 'Image edit (with references)',
+  video: 'Video (image → video)',
+  tts: 'Voices (TTS)',
+  vision: 'Vision (describe frames)',
+}
+
+function linkGlyph(row) {
+  if (!row.adapter) return '·'
+  if (!row.keyed) return '⏭'
+  if (row.paid) return row.allowed ? '💸' : '🔒'
+  return '✅'
+}
+
+/** The rows of one generation chain test, then its verdict. */
+function GenerationChainResult({ result }) {
+  return (
+    <div style={{ marginTop: '12px', fontSize: '13px' }}>
+      {result.results.map((row, index) => (
+        <div key={index} style={{ padding: '6px 0', borderBottom: '1px solid var(--border-color)' }}>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'baseline', flexWrap: 'wrap' }}>
+            <span>{GEN_STATUS_GLYPH[row.status] || '·'}</span>
+            <code style={{ wordBreak: 'break-all' }}>{row.label}</code>
+            {row.latency_seconds != null && (
+              <span style={{ color: 'var(--text-tertiary)' }}>{row.latency_seconds.toFixed(1)}s</span>
+            )}
+            {row.paid && (
+              <span style={{ color: 'var(--text-tertiary)' }}>paid · ${Number(row.est_usd).toFixed(3)}</span>
+            )}
+          </div>
+          {row.reason && (
+            <div className="form-hint" style={{
+              marginLeft: '24px',
+              color: row.status === 'failed' || row.status === 'refused' ? 'var(--error)' : 'var(--text-tertiary)',
+              wordBreak: 'break-word',
+            }}>
+              {row.reason}
+            </div>
+          )}
+          {row.note && (
+            <div className="form-hint" style={{ marginLeft: '24px', wordBreak: 'break-word' }}>{row.note}</div>
+          )}
+          {row.artifact_url && row.artifact_kind === 'image' && (
+            <img
+              src={row.artifact_url}
+              alt={`sample from ${row.label}`}
+              style={{ display: 'block', marginLeft: '24px', marginTop: '6px', maxWidth: '160px', borderRadius: '8px', border: '1px solid var(--border-color)' }}
+            />
+          )}
+          {row.artifact_url && row.artifact_kind === 'audio' && (
+            <audio controls src={row.artifact_url} style={{ display: 'block', marginLeft: '24px', marginTop: '6px', maxWidth: 'calc(100% - 24px)' }} />
+          )}
+        </div>
+      ))}
+      <div style={{
+        marginTop: '10px',
+        ...(GEN_VERDICT_STYLE[result.verdict] || GEN_VERDICT_STYLE.blocked),
+        whiteSpace: 'pre-wrap',
+        lineHeight: 1.45,
+      }}>
+        {result.verdict === 'ready'
+          ? `✅ ${result.message} (${result.elapsed_seconds.toFixed(0)}s)`
+          : `${result.verdict === 'paid_only' ? '💸' : result.verdict === 'no_adapter' ? '·' : '✖'} ${result.message}`}
+      </div>
+    </div>
+  )
+}
+
+/** One card per generation chain: its links as the runner sees them, a chain test, a test per paid link. */
+function ChainLinksPanel({ chains, usage, results, testing, error, onTest }) {
+  const entries = Object.entries(chains || {})
+  const usageRows = Object.entries(usage || {}).filter(([name]) => name !== 'day')
+  return (
+    <>
+      {entries.map(([kind, chain]) => (
+        <div className="settings-section" key={kind}>
+          <h3>
+            {KIND_LABELS[kind] || kind}
+            <code style={{ fontSize: '11px', fontWeight: 400, color: 'var(--text-tertiary)' }}>{chain.env}</code>
+          </h3>
+          <p className="form-hint" style={{ marginTop: '-6px', marginBottom: '10px', wordBreak: 'break-all' }}>
+            {chain.source === 'env' ? 'From the environment' : 'Shipped default'} · <code>{chain.chain}</code>
+          </p>
+          {chain.error && <p style={{ color: 'var(--error)', fontSize: '13px' }}>{chain.error}</p>}
+          <div style={{ fontSize: '13px' }}>
+            {(chain.links || []).map(row => (
+              <div key={row.label} style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', padding: '6px 0', borderBottom: '1px solid var(--border-color)' }}>
+                <span>{linkGlyph(row)}</span>
+                <code style={{ wordBreak: 'break-all' }}>{row.label}</code>
+                <span className="link-chip">{row.paid ? `paid · est $${Number(row.est_usd).toFixed(3)}` : 'free'}</span>
+                {!row.adapter && <span className="link-chip">no adapter yet (phase 6)</span>}
+                {row.adapter && !row.keyed && (
+                  <span className="link-chip">
+                    no key: {row.missing_keys.join(', ')}
+                    {row.signup_url && <> · <a href={row.signup_url} target="_blank" rel="noopener" style={{ color: 'var(--accent)' }}>get one →</a></>}
+                  </span>
+                )}
+                {row.paid && row.keyed && row.adapter && (row.allowed
+                  ? (
+                    <button type="button" className="btn btn-secondary btn-sm" disabled={testing !== null} onClick={() => onTest(kind, row.label)}>
+                      {testing === `${kind}:${row.label}` ? <><span className="spinner"></span> Testing…</> : `Test (est $${Number(row.est_usd).toFixed(3)})`}
+                    </button>
+                  )
+                  : <span className="link-chip link-chip-warn">{row.reason}</span>)}
+              </div>
+            ))}
+          </div>
+          <div style={{ marginTop: '10px', display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <button type="button" className="btn btn-secondary" disabled={testing !== null} onClick={() => onTest(kind)}>
+              {testing === kind ? <><span className="spinner"></span> Testing…</> : 'Test chain'}
+            </button>
+            <span className="form-hint" style={{ margin: 0 }}>
+              Runs the free and local links; a paid link is only reported here — test it from its row, once.
+            </span>
+          </div>
+          {error && testing === null && <p style={{ marginTop: '8px', fontSize: '13px', color: 'var(--error)', whiteSpace: 'pre-wrap' }}>{error}</p>}
+          {results[kind] && <GenerationChainResult result={results[kind]} />}
+        </div>
+      ))}
+      <div className="settings-section">
+        <h3>📊 Free allowance today</h3>
+        <p className="form-hint" style={{ marginTop: '-6px', marginBottom: '10px' }}>
+          Calls made today on each free tier, against its published daily limit (UTC day{usage?.day ? ` ${usage.day}` : ''}).
+        </p>
+        <div style={{ fontSize: '13px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+          {usageRows.map(([name, row]) => (
+            <div key={name} style={{ display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
+              <span style={{ color: 'var(--text-secondary)' }}>{name}</span>
+              <span>{row.calls} / {row.rpd} <span style={{ color: 'var(--text-tertiary)' }}>({row.left} left)</span></span>
+            </div>
+          ))}
+          {usageRows.length === 0 && <span className="form-hint">No daily limit to show.</span>}
+        </div>
+      </div>
+    </>
+  )
+}
+
+const Row = ({ label, value }) => (
+  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
+    <span style={{ color: 'var(--text-secondary)' }}>{label}</span>
+    <span style={{ textAlign: 'right', wordBreak: 'break-word' }}>{value}</span>
+  </div>
+)
+
+/** What this machine can generate locally (GET /api/hardware, spec 8.2). */
+function HardwarePanel({ hardware, loading, error, onRefresh }) {
+  const rows = hardware?.recommendations || []
+  return (
+    <div className="settings-section">
+      <h3>🖥️ Local hardware</h3>
+      {loading && <p className="form-hint"><span className="spinner"></span> Probing this machine…</p>}
+      {error && <p style={{ color: 'var(--error)', fontSize: '13px' }}>{error}</p>}
+      {hardware && (
+        <>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '13px' }}>
+            <Row label="Profile" value={<strong>{hardware.profile}</strong>} />
+            <Row label="GPU" value={hardware.gpu_name ? `${hardware.gpu_name}${hardware.vram_gb != null ? ` · ${hardware.vram_gb} GB` : ''}` : 'none found'} />
+            <Row label="Backend" value={hardware.backend} />
+            <Row label="RAM" value={hardware.ram_gb != null ? `${hardware.ram_gb} GB` : '?'} />
+            <Row label="Free disk" value={hardware.disk_free_gb != null ? `${hardware.disk_free_gb} GB` : '?'} />
+            <Row label="Container" value={hardware.in_container ? 'yes (Docker)' : 'no'} />
+            <Row label="ComfyUI" value={hardware.comfyui?.note} />
+            <Row label="Ollama" value={hardware.ollama?.reachable
+              ? `${hardware.ollama.note}${hardware.ollama.models?.length ? ` — ${hardware.ollama.models.join(', ')}` : ''}`
+              : hardware.ollama?.note} />
+          </div>
+          {hardware.errors?.length > 0 && (
+            <p className="form-hint" style={{ color: 'var(--warning)', wordBreak: 'break-word' }}>
+              Probe errors: {hardware.errors.join(' · ')}
+            </p>
+          )}
+          <h4 style={{ margin: '14px 0 6px', fontSize: '13px' }}>Recommended locally</h4>
+          <div style={{ fontSize: '13px' }}>
+            {rows.map((r, index) => (
+              <div key={index} style={{ padding: '6px 0', borderBottom: '1px solid var(--border-color)' }}>
+                <div><strong>{r.task}</strong> · {r.model}{r.workflow && <span className="link-chip" style={{ marginLeft: '6px' }}>workflow {r.workflow}</span>}</div>
+                <div className="form-hint" style={{ wordBreak: 'break-word' }}>{r.install_hint}</div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+      <button type="button" className="btn btn-secondary btn-sm" style={{ marginTop: '10px' }} disabled={loading} onClick={() => onRefresh(true)}>
+        Probe again
+      </button>
     </div>
   )
 }

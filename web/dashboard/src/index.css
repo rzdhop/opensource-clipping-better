@@ -651,13 +651,21 @@ html, body {
 }
 
 /* --- Settings Form --- */
+/*
+ * minmax(0, ...) and min-width: 0 are load-bearing, for the same reason as
+ * .main-content above: a grid track's default minimum is the widest item's
+ * min-content, so one unbreakable token inside any card (a chain string, a
+ * link that may not wrap) widened every card past a phone's viewport.
+ */
 .settings-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
   gap: 20px;
 }
 
 .settings-section {
+  min-width: 0;
+  overflow-wrap: anywhere;
   background: var(--bg-card);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
@@ -671,6 +679,55 @@ html, body {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+/* --- Settings tabs (spec 8.6) --- */
+.settings-tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.settings-tab {
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.settings-tab:hover {
+  color: var(--text-primary);
+}
+
+.settings-tab.active {
+  background: var(--accent-dim);
+  color: var(--accent-hover);
+  border-color: var(--border-accent);
+}
+
+/* Small inline facts next to a chain link (paid / free / no key / no adapter).
+ * Not `.chip`: that class is the job-id chip below, a nowrap flex box. */
+.link-chip {
+  display: inline;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 1.8;
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.link-chip-warn {
+  color: var(--warning);
 }
 
 /* --- Log Viewer --- */
@@ -950,7 +1007,7 @@ html, body {
     grid-template-columns: 1fr;
   }
   .settings-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
   /* Once the steps wrap, space-between strands the last row's two items at
    * opposite edges. Left-aligned reads as a continuation of the row above. */
