@@ -41,8 +41,8 @@ Phase 0's RC-P1…RC-P11 (history table below) stay in force, plus:
 | 4 | story-step jobs (RISKIEST) | **done** (local 2324 / CI 2056 + 238 skipped) |
 | 5 | story prompts + context pack | **done** (local 2401 / CI 2133 + 238 skipped) |
 | 6 | LLM step runners | **done** (local 2450 / CI 2182 + 238 skipped) |
-| 7 | stories API | next |
-| 8 | style preview strip | — |
+| 7 | stories API | **done** (local 2627 / CI 2184 + 413 skipped) |
+| 8 | style preview strip | next |
 | 9 | CLI | — |
 | 10 | dashboard shared pieces | — |
 | 11 | StoriesList + NewStoryWizard | — |

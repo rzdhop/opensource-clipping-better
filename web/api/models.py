@@ -563,3 +563,83 @@ class SystemHealthResponse(BaseModel):
     ffmpeg_available: bool
     jobs_running: int
     jobs_queued: int
+
+
+# ---------------------------------------------------------------------------
+# AI Story (phase 1: spec 2.1, 9.2) -- routes/stories.py
+#
+# Request bodies only; the story routes answer plain JSON dicts, documented on
+# each route. "Sent or not" is model_fields_set, never a None check: a PATCH
+# that sends `"logline": null` clears the logline, one that leaves it out
+# leaves it alone.
+# ---------------------------------------------------------------------------
+
+class GenerationProfileModel(BaseModel):
+    """A story's generation profile (spec 2.1, 8, 8.1, 8.5).
+
+    The defaults are the story defaults of ``clipping/aistory/defaults.py``;
+    tests/test_stories_api.py asserts they agree, and the story-default
+    agreement test reads the four lines below as text.
+    """
+    tier: int = 1
+    route: Literal["auto","local","api"] = "auto"
+    consistency_mode: Literal["references","prompt_only"] = "references"
+    budget_profile: Literal["free","one_dollar","quality"] = "free"
+
+
+class StoryCreateRequest(BaseModel):
+    """POST /api/stories. There is deliberately no default language: a French
+    user who forgot the field must not get an English season (defaults.py)."""
+    language: Literal["fr", "en"]
+    seed_text: Optional[str] = Field(None, max_length=2000)
+    style_template_id: Optional[str] = None
+    generation_profile: Optional[GenerationProfileModel] = None
+
+
+class StoryPatchRequest(BaseModel):
+    """PATCH /api/stories/{id}. Only the fields sent are applied.
+
+    Values are checked by the story schema when the story is saved (400 with
+    its errors), not here, so the rules live in one place. A bible field sent
+    clears the bible approval; ``title``, ``seed_text``, ``narrator`` and
+    ``generation_profile`` do not. ``narrator`` and ``generation_profile``
+    may be partial: they are merged onto the story's current values, and the
+    profile is checked against ``clipping.aistory.defaults`` (400, not 422,
+    which is why it is a plain object here).
+    """
+    title: Optional[str] = Field(None, max_length=120)
+    seed_text: Optional[str] = Field(None, max_length=2000)
+    logline: Optional[str] = None
+    premise: Optional[str] = None
+    tone: Optional[str] = None
+    genre_tags: Optional[list[str]] = None
+    world: Optional[dict] = None
+    themes_and_values: Optional[list[str]] = None
+    audience: Optional[dict] = None
+    why_come_back: Optional[list[str]] = None
+    narrator: Optional[dict] = None
+    generation_profile: Optional[dict] = None
+
+
+class ConceptChooseRequest(BaseModel):
+    """POST /api/stories/{id}/concepts/choose: exactly one of the two.
+
+    ``concept_id`` is a library id or a generated card's ``gen_NN``;
+    ``concept`` is a card the user wrote (or edited), in the shape of a
+    generated card.
+    """
+    concept_id: Optional[str] = None
+    concept: Optional[dict] = None
+
+
+class StoryStepRequest(BaseModel):
+    """POST /api/stories/{id}/steps/{step} (spec 9.1: ``{ep?, params?}``)."""
+    ep: Optional[int] = None
+    params: Optional[dict] = None
+
+
+class StoryRegenerateRequest(BaseModel):
+    """POST /api/stories/{id}/regenerate: one target of the spec 9.2 grammar,
+    and an optional note for the model ("make it darker")."""
+    target: str
+    note: Optional[str] = Field(None, max_length=300)

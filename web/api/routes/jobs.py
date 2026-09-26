@@ -169,26 +169,40 @@ def _queue_refusal() -> str | None:
     )
 
 
+def _chain_readiness_refusal(chain, env, *, ai_provider="chain") -> str | None:
+    """The DEC-073 refusal for *chain* under the Settings values *env*, or None.
+
+    One rule for every job that calls the LLM chain: a clip job
+    (``_slow_chain_refusal``) and an AI Story step (``routes/stories.py``).
+    *chain* is anything ``chain_readiness`` takes -- a spec string, "" for
+    "the process env, else the default", or a list of links. The keys, the
+    ALLOW_SLOW_CHAIN switch and the hint are resolved here, the same way for
+    both.
+    """
+    from clipping.config import WEB_SLOW_CHAIN_HINT, chain_readiness
+    from ..config_adapter import env_flag, resolve_provider_keys
+
+    readiness = chain_readiness(
+        chain,
+        resolve_provider_keys(env),
+        ai_provider=ai_provider,
+        allow_slow=env_flag(env, "ALLOW_SLOW_CHAIN"),
+        hint=WEB_SLOW_CHAIN_HINT,
+    )
+    return None if readiness.ready else readiness.message
+
+
 def _slow_chain_refusal(payload) -> str | None:
     """The chain-readiness refusal for a job about to be created, or None.
 
     Resolved from the same places the job's config will be -- the per-job chain,
     then Settings, then the process env -- without building that config.
     """
-    from clipping.config import WEB_SLOW_CHAIN_HINT, chain_readiness
-    from ..config_adapter import env_flag, resolve_provider_keys
-
     env = worker.get_settings_env()
     chain = payload.get("llm_chain") or env.get(
         "LLM_CHAIN", os.environ.get("LLM_CHAIN", ""))
-    readiness = chain_readiness(
-        chain,
-        resolve_provider_keys(env),
-        ai_provider=payload.get("ai_provider") or "chain",
-        allow_slow=env_flag(env, "ALLOW_SLOW_CHAIN"),
-        hint=WEB_SLOW_CHAIN_HINT,
-    )
-    return None if readiness.ready else readiness.message
+    return _chain_readiness_refusal(
+        chain, env, ai_provider=payload.get("ai_provider") or "chain")
 
 
 @router.post("", status_code=201)

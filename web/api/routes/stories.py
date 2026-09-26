@@ -1,0 +1,986 @@
+"""
+web.api.routes.stories — AI Story, steps 1-4 (spec 3, 9.1, 9.2; phase-1 plan 2).
+
+A story is a folder under ``outputs/stories/<story_id>/`` kept by
+``clipping.aistory.store.StoryStore``; this module is the HTTP face of it.
+
+- Steps that call an LLM (``concepts``, ``bible``, ``regenerate``) are jobs of
+  kind ``story_step`` on the ordinary job store and worker: they meet the same
+  key gate (DEC-073) and queue cap (429) as a clip job before the job exists,
+  and end in ``awaiting_approval``. One step at a time per story: a second one
+  while the first is queued or running is a 409, because both would write the
+  same documents.
+- Steps with no external call run inside the request (the human's answer 2):
+  listing the library, choosing a concept, building and locking the style.
+- Approval lives on the story (``approvals``; ``status`` is derived from it by
+  the store). Approving a document also completes the step jobs that were
+  waiting on it; a newer job for the same document supersedes an older one.
+
+Every ``{story_id}`` is checked against the store's id rule before anything
+else, so a malformed id is a 404 and never reaches a path; an unknown one is a
+404; a story whose files do not validate is a 500 with one short sentence and
+no traceback.
+
+The style preview strip (``style_preview``, ``/files/{name}``) is stage 8.
+"""
+
+from __future__ import annotations
+
+import copy
+import os
+import re
+from datetime import datetime, timezone
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Response
+
+from clipping.aistory import defaults, schemas, stylelock, templates
+from clipping.aistory import store as story_store
+from clipping.aistory.ledger import CostLedger
+from clipping.aistory.steps import bible as bible_step
+from clipping.aistory.steps import concepts as concepts_step
+from clipping.aistory.steps import llm_call
+from clipping.aistory.steps import regenerate as regenerate_step
+from clipping.providers import registry
+
+from .. import store, worker
+from ..auth import require_token
+from ..models import (
+    ConceptChooseRequest,
+    JobResponse,
+    JobStatus,
+    StoryCreateRequest,
+    StoryPatchRequest,
+    StoryRegenerateRequest,
+    StoryStepRequest,
+)
+from . import jobs as jobs_routes
+
+router = APIRouter(prefix="/api/stories", tags=["stories"], dependencies=[Depends(require_token)])
+
+
+# ------------------------------------------------------------------ grammar
+
+# Spec 9.1. What phase 1 runs, what stage 8 adds, and what comes later.
+LLM_STEPS = ("concepts", "bible")
+PREVIEW_STEP = "style_preview"
+LATER_STEPS = (
+    "cast", "places", "season", "script", "storyboard", "assets", "render",
+    "metadata", "memory", "feedback", "propose-next", "rerender", "fast-track",
+    "import",
+)
+
+# Spec 9.2, approve grammar: "season" bare, the others "<kind>:<id>".
+LATER_APPROVALS_BARE = ("season",)
+LATER_APPROVALS = ("character", "place", "prop", "script", "storyboard", "assets")
+
+# Spec 9.2, regenerate grammar: every "<kind>:..." target of a later phase.
+LATER_TARGETS = (
+    "character", "place", "prop", "season", "scene", "hook", "cliffhanger",
+    "teaser", "shot", "line", "metadata",
+)
+
+# What approving the bible requires (spec 2.1, 3 step 3).
+BIBLE_FIELDS = (
+    "logline", "premise", "tone", "genre_tags", "world", "themes_and_values",
+    "audience", "why_come_back",
+)
+WHY_COME_BACK_LINES = 3
+
+# The keys ``params`` of the inline style step may carry.
+STYLE_PARAMS = ("template_id", "overrides", "consistency_mode")
+
+# A generated card's fields the server sets; a custom concept need not send
+# them, and any it sends are replaced.
+_CARD_BOOKKEEPING = ("concept_id", "source", "prompt_version", "created_at", "language")
+
+# The story_concepts card rules (schemas.STORY_CONCEPT_CARD_SCHEMA) for what a
+# user writes: the same fields, the same shapes, none of the bookkeeping.
+_CUSTOM_CONCEPT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        key: value for key, value in schemas.STORY_CONCEPT_CARD_SCHEMA["properties"].items()
+        if key not in _CARD_BOOKKEEPING
+    },
+    "required": [
+        key for key in schemas.STORY_CONCEPT_CARD_SCHEMA["required"]
+        if key not in _CARD_BOOKKEEPING
+    ],
+    "additionalProperties": False,
+}
+
+_TITLE_MAX = 120
+
+STYLE_LOCK_DOC = "style_lock.json"
+CONCEPTS_DOC = concepts_step.CONCEPTS_FILENAME
+COST_LEDGER = "cost_ledger.json"
+
+_IN_FLIGHT = (JobStatus.QUEUED.value, JobStatus.RUNNING.value)
+
+
+# ------------------------------------------------------------------ helpers
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _stories():
+    """Per request, so the outputs root is read when the request is served."""
+    return story_store.StoryStore(worker.OUTPUTS_ROOT)
+
+
+def _status_of(job: dict) -> str:
+    status = job.get("status")
+    return getattr(status, "value", status)
+
+
+def _not_found() -> HTTPException:
+    return HTTPException(status_code=404, detail="Story not found")
+
+
+def _unreadable(story_id: str, name: str, errors) -> HTTPException:
+    """A story document on disk that does not validate: one sentence, the first
+    error, no traceback. Never repaired here."""
+    first = str(errors[0]) if errors else "it does not validate"
+    if len(first) > 200:
+        first = first[:197] + "..."
+    return HTTPException(
+        status_code=500,
+        detail=f"Story {story_id} cannot be read: {name} is invalid ({first}).",
+    )
+
+
+def _check_id(story_id) -> None:
+    if not story_store.is_story_id(story_id):
+        raise _not_found()
+
+
+def _load(stories, story_id) -> dict:
+    """The story, or 404 (malformed or unknown id), or 500 (corrupt)."""
+    _check_id(story_id)
+    try:
+        return stories.get(story_id)
+    except KeyError:
+        raise _not_found() from None
+    except schemas.SchemaError as exc:
+        raise _unreadable(story_id, exc.name, exc.errors) from None
+
+
+def _update(stories, story_id, mutate, *, now) -> dict:
+    """``StoryStore.update``: 404 for a story gone meanwhile, 400 when the
+    changed document is refused by the schema (a bad value in the request),
+    500 when the one on disk is."""
+    try:
+        return stories.update(story_id, mutate, now=now)
+    except KeyError:
+        raise _not_found() from None
+    except schemas.SchemaError as exc:
+        if exc.name == story_store.STORY_SCHEMA:
+            raise HTTPException(
+                status_code=400,
+                detail={"message": "The story would not be valid with these values.",
+                        "errors": list(exc.errors)},
+            ) from None
+        raise _unreadable(story_id, exc.name, exc.errors) from None
+
+
+def _read_doc(stories, story_id, name, validator):
+    """One of the story's documents, validated, or None if it does not exist."""
+    label = f"{story_store.STORIES_DIRNAME}/{story_id}/{name}"
+    try:
+        doc = stories.read_doc(story_id, name)
+    except KeyError:
+        raise _not_found() from None
+    except schemas.SchemaError as exc:
+        raise _unreadable(story_id, exc.name, exc.errors) from None
+    if doc is None:
+        return None
+    errors = validator(doc)
+    if errors:
+        raise _unreadable(story_id, label, errors)
+    return doc
+
+
+def _style_lock(stories, story_id):
+    return _read_doc(stories, story_id, STYLE_LOCK_DOC, schemas.style_lock_errors)
+
+
+def _generated_cards(stories, story_id) -> list:
+    doc = _read_doc(stories, story_id, CONCEPTS_DOC, schemas.story_concepts_errors)
+    return list(doc["concepts"]) if doc is not None else []
+
+
+def _write_doc(stories, story_id, name, doc, *, now, validator) -> dict:
+    try:
+        return stories.write_doc(story_id, name, doc, now=now, validator=validator)
+    except KeyError:
+        raise _not_found() from None
+
+
+def _cost_total(stories, story_id) -> float:
+    """The story ledger's total (spec 2.11), 0.0 while it has none. A symlink
+    in its place is not followed."""
+    try:
+        path = os.path.join(stories.story_dir(story_id), COST_LEDGER)
+    except KeyError:
+        raise _not_found() from None
+    if os.path.islink(path) or not os.path.isfile(path):
+        return 0.0
+    try:
+        return float(CostLedger(path).totals()["est_usd"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise _unreadable(story_id, f"{story_store.STORIES_DIRNAME}/{story_id}/{COST_LEDGER}",
+                          [f"{type(exc).__name__}: {exc}"]) from None
+
+
+# ------------------------------------------------------------- step jobs
+
+def _job_doc(step, params):
+    """The story document a step job writes, and so the one whose approval
+    completes it: ``bible`` or ``concepts``; None for anything else."""
+    if step in LLM_STEPS:
+        return step
+    if step == "regenerate":
+        target = (params or {}).get("target")
+        if target == regenerate_step.CONCEPTS_TARGET:
+            return "concepts"
+        if isinstance(target, str) and target.startswith(regenerate_step.BIBLE_PREFIX):
+            return "bible"
+    return None
+
+
+def _in_flight(story_id, *, doc=None) -> list:
+    """The story's step jobs that are queued or running, oldest first.
+
+    A job cancelled while it ran counts until its worker has stopped: it may
+    still be finishing a request whose reply it writes (DEC-075).
+    """
+    found = []
+    for job in store.list_step_jobs(story_id):
+        status = _status_of(job)
+        busy = status in _IN_FLIGHT or (
+            status == JobStatus.CANCELLED.value and worker.is_active(job.get("id")))
+        if busy and (doc is None or _job_doc(job.get("step"), job.get("params")) == doc):
+            found.append(job)
+    return found
+
+
+def _busy_detail(job, what_to_do) -> str:
+    return (
+        f"Story step '{job.get('step')}' (job {job.get('id')}) is {_status_of(job)}: "
+        f"{what_to_do}"
+    )
+
+
+def _complete_awaiting(story_id, doc) -> list:
+    """Approve every step job of *story_id* awaiting approval for *doc*."""
+    done = []
+    for job in store.list_step_jobs(story_id, statuses=[JobStatus.AWAITING_APPROVAL]):
+        if _job_doc(job.get("step"), job.get("params")) == doc:
+            if store.approve_step_job(job["id"]) == "ok":
+                done.append(job["id"])
+    return done
+
+
+def _no_key_message(links) -> str:
+    """No link of the chain has a key: which ones to set, primaries first
+    (the floor alone would be refused next), billed ones marked as such
+    (DEC-088)."""
+    wanted = [registry.PROVIDERS[link.provider] for link in links if registry.is_primary(link)]
+    wanted = wanted or [registry.PROVIDERS[link.provider] for link in links]
+    names = ", ".join(
+        f"{p.env_key} ({p.signup_url or 'your own endpoint'})"
+        + ("" if p.free_tier else " (paid)")
+        for p in dict.fromkeys(wanted)
+    )
+    return (
+        "No link in the LLM chain has an API key, so this step cannot call a "
+        f"model. Set one of: {names}, in Settings."
+    )
+
+
+def _llm_gate(env):
+    """``(links, keys, refusal)`` for a story step under the Settings values
+    *env*: the chain and keys the step will run with (``llm_call``, the same
+    resolution the worker hands it), and why it may not start, or None.
+
+    Refused: a chain that cannot be parsed (the step would fail on its first
+    call), a chain in which no link has a key, and the DEC-073 slow-floor
+    case -- the rule ``POST /api/jobs`` applies, from the same function.
+    """
+    try:
+        links = llm_call.resolve_chain(env)
+    except registry.ChainError as exc:
+        return [], {}, f"LLM_CHAIN cannot be used: {exc}"
+    keys = llm_call.resolve_keys(env)
+    if not any(keys.get(link.provider) for link in links):
+        return links, keys, _no_key_message(links)
+    return links, keys, jobs_routes._chain_readiness_refusal(links, env)
+
+
+async def _create_step_job(story_id, step, params, *, ep=None) -> JobResponse:
+    """Queue one LLM step of *story_id*; 201 with the job.
+
+    Refused before any job exists, in this order: 409 while a step of this
+    story is queued or running; 400 from the key gate (the status
+    ``POST /api/jobs`` uses for the same refusal); 429 when the queue is full.
+    A job that awaits approval for the same document is superseded by this one.
+    """
+    busy = _in_flight(story_id)
+    if busy:
+        raise HTTPException(
+            status_code=409,
+            detail=_busy_detail(busy[0], "wait for it to finish, or cancel it first."),
+        )
+
+    _links, _keys, refusal = _llm_gate(worker.get_settings_env())
+    if refusal:
+        raise HTTPException(status_code=400, detail=refusal)
+
+    full = jobs_routes._queue_refusal()
+    if full:
+        raise HTTPException(status_code=429, detail=full)
+
+    try:
+        job_id = store.create_job(
+            kind=store.KIND_STORY_STEP, story_id=story_id, step=step, ep=ep, params=params,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+
+    doc = _job_doc(step, params)
+    if doc is not None:
+        for old in store.list_step_jobs(story_id, statuses=[JobStatus.AWAITING_APPROVAL]):
+            if old["id"] != job_id and _job_doc(old.get("step"), old.get("params")) == doc:
+                store.supersede_step_job(old["id"], job_id)
+
+    await worker.submit_job(job_id, {})
+    return jobs_routes._job_to_response(store.get_job(job_id))
+
+
+def _require_concept(story) -> None:
+    if not story.get("concept"):
+        raise HTTPException(status_code=409, detail="Choose a concept first.")
+
+
+# -------------------------------------------------------------- stories
+
+@router.get("")
+async def list_stories() -> dict:
+    """``{"stories": [index entries]}``, most recently updated first. Each
+    entry: ``story_id, title, language, style_template_id, status,
+    created_at, updated_at``."""
+    return {"stories": _stories().list()}
+
+
+@router.post("", status_code=201)
+async def create_story(req: StoryCreateRequest) -> dict:
+    """Create a draft story; 201 with the whole ``story.json``.
+
+    ``language`` is required (422 without it). An unknown
+    ``style_template_id`` is a 400 naming the shipped ones.
+    """
+    profile = req.generation_profile.model_dump() if req.generation_profile is not None else None
+    try:
+        return _stories().create(
+            language=req.language,
+            seed_text=req.seed_text,
+            style_template_id=req.style_template_id,
+            generation_profile=profile,
+            now=_now(),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+
+
+@router.get("/{story_id}")
+async def get_story(story_id: str) -> dict:
+    """Everything the story page shows::
+
+        {"story": story.json, "style_lock": style_lock.json | null,
+         "concepts_generated": <cards in concepts.json>,
+         "jobs": [the story's step jobs as GET /api/jobs/{id} answers them,
+                  minus events/log/clips/config/progress, oldest first],
+         "cost_total_usd": <cost_ledger.json total, 0.0 without one>,
+         "route": <generation_profile.route>}
+    """
+    stories = _stories()
+    story = _load(stories, story_id)
+    lock = _style_lock(stories, story_id)
+    cards = _generated_cards(stories, story_id)
+    # A step's feed can hold hundreds of events and has its own stream
+    # (GET /api/jobs/{id}/status); this page is polled from a phone.
+    step_jobs = [
+        jobs_routes._job_to_response(job).model_dump(
+            mode="json", exclude={"events", "log", "clips", "config", "progress"})
+        for job in store.list_step_jobs(story_id)
+    ]
+    return {
+        "story": story,
+        "style_lock": lock,
+        "concepts_generated": len(cards),
+        "jobs": step_jobs,
+        "cost_total_usd": _cost_total(stories, story_id),
+        "route": story["generation_profile"]["route"],
+    }
+
+
+@router.patch("/{story_id}")
+async def patch_story(story_id: str, req: StoryPatchRequest) -> dict:
+    """Edit the fields sent (``model_fields_set``); answers the story.
+
+    A bible field sent clears ``approvals.bible`` (a changed bible is an
+    unapproved one); ``title``, ``seed_text``, ``narrator`` and
+    ``generation_profile`` leave the approvals alone. ``narrator`` and
+    ``generation_profile`` are merged onto the current values, the profile
+    checked against ``clipping.aistory.defaults``. 409 while a step of the
+    story is queued or running (its writes would race this one); 400 with
+    ``{"message", "errors"}`` when the story would not validate.
+    """
+    stories = _stories()
+    story = _load(stories, story_id)
+    sent = set(req.model_fields_set)
+    if not sent:
+        return story
+
+    busy = _in_flight(story_id)
+    if busy:
+        raise HTTPException(
+            status_code=409,
+            detail=_busy_detail(busy[0], "edit the story once it is done, or cancel it first."),
+        )
+
+    values = {name: copy.deepcopy(getattr(req, name)) for name in sent}
+
+    if "generation_profile" in sent:
+        partial = values["generation_profile"]
+        if partial is None:
+            raise HTTPException(status_code=400, detail="generation_profile must be an object, not null.")
+        try:
+            # The store's own check, on the current profile with the sent keys over it.
+            values["generation_profile"] = story_store._merge_generation_profile(
+                {**story["generation_profile"], **partial})
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+
+    clears_bible = bool(sent & set(BIBLE_FIELDS))
+
+    def mutate(doc):
+        for name, value in values.items():
+            if name == "narrator" and isinstance(value, dict):
+                doc["narrator"] = {**doc["narrator"], **value}
+            else:
+                doc[name] = value
+        if clears_bible:
+            doc["approvals"]["bible"] = None
+
+    return _update(stories, story_id, mutate, now=_now())
+
+
+@router.delete("/{story_id}")
+async def delete_story(story_id: str) -> dict:
+    """Delete the story: its folder, its index entry and its step jobs.
+
+    409 while one of its steps is queued or running (cancel it first);
+    nothing is removed then. The step jobs own no files, so they are simply
+    dropped from the job store, before the folder goes. Answers
+    ``{"message", "id", "removed", "kept", "jobs_removed"}``; ``removed`` and
+    ``kept`` are the store's report (a symlink in the folder's place is kept,
+    never followed).
+    """
+    _check_id(story_id)
+    stories = _stories()
+    # What StoryStore.delete deletes: a folder, or an index entry whose folder
+    # is gone. A corrupt story is deletable; that is how one gets rid of it.
+    has_folder = os.path.lexists(os.path.join(stories.root, story_id))
+    if not has_folder and not any(e["story_id"] == story_id for e in stories.list()):
+        raise _not_found()
+
+    busy = _in_flight(story_id)
+    if busy:
+        raise HTTPException(
+            status_code=409,
+            detail=_busy_detail(busy[0], "cancel it first, then delete the story."),
+        )
+
+    jobs_removed = sum(1 for job in store.list_step_jobs(story_id) if store.delete_job(job["id"]))
+    try:
+        report = stories.delete(story_id)
+    except KeyError:
+        raise _not_found() from None
+    return {"message": "Story deleted", "id": story_id, **report, "jobs_removed": jobs_removed}
+
+
+# ------------------------------------------------------------- concepts
+
+@router.get("/{story_id}/concepts")
+async def list_concepts(story_id: str, language: Optional[str] = None,
+                        style: Optional[str] = None) -> dict:
+    """``{"library": [cards], "generated": [cards]}``.
+
+    Library cards are the shipped concepts localized to ``language`` (default:
+    the story's), each with its ``concept_id``, keeping only those whose
+    default or alternative style is ``style`` when one is given. Generated
+    cards are the story's ``concepts.json``, as written. 400 for a language or
+    style that does not exist.
+    """
+    stories = _stories()
+    story = _load(stories, story_id)
+
+    lang = language or story["language"]
+    if lang not in schemas.LANGUAGES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"language must be one of {', '.join(schemas.LANGUAGES)}, not {lang!r}.",
+        )
+    if style and style not in templates.list_style_ids():
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown style {style!r} (shipped: {', '.join(templates.list_style_ids())}).",
+        )
+
+    library = []
+    for concept in templates.load_concepts():
+        fit = concept["style_fit"]
+        if style and style != fit["default"] and style not in fit["alternatives"]:
+            continue
+        card = templates.localize_concept(concept, lang)
+        card["concept_id"] = concept["concept_id"]
+        library.append(card)
+
+    return {"library": library, "generated": _generated_cards(stories, story_id)}
+
+
+@router.post("/{story_id}/concepts/generate", status_code=201)
+async def generate_concepts(story_id: str) -> JobResponse:
+    """"Generate 10 more": a ``concepts`` step job (as ``POST /steps/concepts``)."""
+    _load(_stories(), story_id)
+    return await _create_step_job(story_id, "concepts", {})
+
+
+@router.post("/{story_id}/concepts/choose")
+async def choose_concept(story_id: str, req: ConceptChooseRequest) -> dict:
+    """Choose the story's concept; answers the story.
+
+    Exactly one of ``concept_id`` (a library id, or a generated card's
+    ``gen_NN``) and ``concept`` (a card written by the user, checked with the
+    generated-card rules) -- 400 otherwise; 404 for an id that is neither.
+
+    Writes a snapshot of the concept in the story's language, ``concept_id``
+    (the library id, or ``"custom"``: the snapshot of a generated card keeps
+    its ``gen_NN``), the concept's title, and ``approvals.concept``; a
+    different concept than before clears the bible approval. The concepts
+    jobs awaiting approval are completed: this choice is their approval.
+
+    409 while the bible is being written (it is written from the concept).
+    """
+    stories = _stories()
+    story = _load(stories, story_id)
+
+    by_id = req.concept_id is not None
+    by_payload = req.concept is not None
+    if by_id == by_payload:
+        raise HTTPException(
+            status_code=400,
+            detail="Send exactly one of 'concept_id' (a library or generated concept) and 'concept' (your own).",
+        )
+
+    busy = _in_flight(story_id, doc="bible")
+    if busy:
+        raise HTTPException(
+            status_code=409,
+            detail=_busy_detail(busy[0], "the bible is written from the current concept; "
+                                         "choose once that step is done, or cancel it first."),
+        )
+
+    if by_id:
+        concept_id = req.concept_id
+        if re.fullmatch(schemas.GENERATED_CONCEPT_ID_PATTERN, concept_id):
+            card = next((c for c in _generated_cards(stories, story_id)
+                         if c["concept_id"] == concept_id), None)
+            if card is None:
+                raise HTTPException(status_code=404, detail=f"This story has no generated concept {concept_id!r}.")
+            snapshot = copy.deepcopy(card)
+            story_concept_id = "custom"
+        else:
+            library = {c["concept_id"]: c for c in templates.load_concepts()}
+            if concept_id not in library:
+                raise HTTPException(status_code=404, detail=f"Unknown concept {concept_id!r}.")
+            snapshot = templates.localize_concept(library[concept_id], story["language"])
+            snapshot["concept_id"] = concept_id
+            story_concept_id = concept_id
+    else:
+        content = {k: v for k, v in req.concept.items() if k not in _CARD_BOOKKEEPING}
+        errors = schemas.validate(content, _CUSTOM_CONCEPT_SCHEMA)
+        if errors:
+            raise HTTPException(
+                status_code=400,
+                detail={"message": "This concept is not a valid concept card.", "errors": errors},
+            )
+        snapshot = {"concept_id": "custom", "source": "custom", "language": story["language"],
+                    **copy.deepcopy(content)}
+        story_concept_id = "custom"
+
+    title = str(snapshot.get("title") or "")[:_TITLE_MAX]
+    now = _now()
+
+    def mutate(doc):
+        if doc.get("concept") != snapshot or doc.get("concept_id") != story_concept_id:
+            doc["approvals"]["bible"] = None
+        doc["concept_id"] = story_concept_id
+        doc["concept"] = snapshot
+        doc["title"] = title
+        doc["approvals"]["concept"] = now
+
+    story = _update(stories, story_id, mutate, now=now)
+    _complete_awaiting(story_id, "concepts")
+    return story
+
+
+# ---------------------------------------------------------------- steps
+
+@router.post("/{story_id}/steps/{step}", status_code=201)
+async def run_step(story_id: str, step: str, response: Response,
+                   req: Optional[StoryStepRequest] = None):
+    """Run one step of spec 9.1 (body ``{ep?, params?}``).
+
+    ``concepts``, ``bible``: 201 with the queued job (``bible`` needs a chosen
+    concept: 409). ``style``: runs here, 200 with ``{"story", "style_lock"}``
+    (see ``_style_step``). ``style_preview``: 400, not available yet. Any other
+    step of 9.1: 400, a later phase. Anything else: 404.
+    """
+    stories = _stories()
+    story = _load(stories, story_id)
+    params = dict(req.params) if req is not None and req.params is not None else {}
+    ep = req.ep if req is not None else None
+
+    if step == "concepts":
+        return await _create_step_job(story_id, step, params, ep=ep)
+    if step == "bible":
+        _require_concept(story)
+        return await _create_step_job(story_id, step, params, ep=ep)
+    if step == "style":
+        response.status_code = 200
+        return _style_step(stories, story, params)
+    if step == PREVIEW_STEP:
+        raise HTTPException(status_code=400, detail=f"'{PREVIEW_STEP}' is not available yet.")
+    if step in LATER_STEPS:
+        raise HTTPException(status_code=400, detail=f"'{step}' arrives in a later phase.")
+    raise HTTPException(status_code=404, detail=f"Unknown step {step!r}.")
+
+
+def _concept_style(concept):
+    """The style a chosen concept suggests: a library card's
+    ``style_fit.default``, a generated card's ``style_fit``."""
+    fit = (concept or {}).get("style_fit")
+    if isinstance(fit, dict):
+        fit = fit.get("default")
+    return fit if isinstance(fit, str) and fit else None
+
+
+def _style_step(stories, story, params) -> dict:
+    """Build or edit the story's draft ``style_lock.json`` (spec 3 step 4).
+
+    ``params = {template_id?, overrides?, consistency_mode?}``. The template
+    defaults to the story's ``style_template_id``, else the chosen concept's
+    style. A draft on the same template and version takes the new overrides
+    on top of its own (``stylelock.apply_overrides``); anything else is built
+    fresh. 409 before the bible is approved or once the style is locked; 400
+    for an unknown template, a bad parameter, or refused overrides (with
+    ``{"message", "errors"}``). The style approval is cleared.
+    """
+    story_id = story["story_id"]
+    if not story["approvals"].get("bible"):
+        raise HTTPException(status_code=409, detail="Approve the bible first.")
+
+    unknown = sorted(set(params) - set(STYLE_PARAMS))
+    if unknown:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown style parameter(s) {', '.join(unknown)} (known: {', '.join(STYLE_PARAMS)}).",
+        )
+
+    shipped = templates.list_style_ids()
+    template_id = (params.get("template_id") or story.get("style_template_id")
+                   or _concept_style(story.get("concept")))
+    if not template_id:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Name a style in params.template_id (shipped: {', '.join(shipped)}).",
+        )
+    try:
+        template = templates.load_style(template_id)
+    except KeyError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown style template {template_id!r} (shipped: {', '.join(shipped)}).",
+        ) from None
+
+    overrides = params.get("overrides") or {}
+    if not isinstance(overrides, dict):
+        raise HTTPException(status_code=400, detail="params.overrides must be an object of dotted paths.")
+
+    consistency = params.get("consistency_mode")
+    if consistency is not None and consistency not in defaults.CONSISTENCY_MODES:
+        raise HTTPException(
+            status_code=400,
+            detail=(f"consistency_mode must be one of "
+                    f"{', '.join(defaults.CONSISTENCY_MODES)}, not {consistency!r}."),
+        )
+
+    current = _style_lock(stories, story_id)
+    if current is not None and current.get("locked_at"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"The style is locked (since {current['locked_at']}); it cannot change.",
+        )
+
+    now = _now()
+    try:
+        if (current is not None and current.get("template_id") == template_id
+                and current.get("template_version") == template["version"]):
+            lock = stylelock.apply_overrides(current, overrides, now=now)
+        else:
+            lock = stylelock.build_style_lock(template, overrides, now=now)
+    except stylelock.StyleLockError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"message": f"The style was refused: {exc.name}.", "errors": list(exc.errors)},
+        ) from None
+
+    written = _write_doc(stories, story_id, STYLE_LOCK_DOC, lock, now=now,
+                         validator=schemas.style_lock_errors)
+
+    def mutate(doc):
+        doc["style_template_id"] = template_id
+        if consistency is not None:
+            doc["generation_profile"]["consistency_mode"] = consistency
+        doc["approvals"]["style"] = None
+
+    return {"story": _update(stories, story_id, mutate, now=now), "style_lock": written}
+
+
+# -------------------------------------------------------------- approve
+
+def _is_empty(value) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return not value.strip()
+    if isinstance(value, dict):
+        return all(_is_empty(v) for v in value.values())
+    if isinstance(value, list):
+        return all(_is_empty(v) for v in value)
+    return False
+
+
+def _missing_bible_fields(story) -> list:
+    missing = []
+    for field in BIBLE_FIELDS:
+        value = story.get(field)
+        if field == "why_come_back":
+            lines = [v for v in value or [] if isinstance(v, str) and v.strip()]
+            if len(lines) != WHY_COME_BACK_LINES:
+                missing.append(f"why_come_back (needs {WHY_COME_BACK_LINES} lines, has {len(lines)})")
+        elif _is_empty(value):
+            missing.append(field)
+    return missing
+
+
+def _is_later_approval(doc) -> bool:
+    if doc in LATER_APPROVALS_BARE:
+        return True
+    kind, sep, rest = doc.partition(":")
+    return bool(sep) and bool(rest) and kind in LATER_APPROVALS
+
+
+@router.post("/{story_id}/approve/{doc}")
+async def approve(story_id: str, doc: str) -> dict:
+    """Approve one document of the story; answers the story.
+
+    ``bible``: 409 while a bible step is queued or running, without a chosen
+    concept, or listing every bible field still missing or empty (and
+    ``why_come_back`` needs its three lines); then ``approvals.bible`` is set
+    and the bible/regenerate jobs awaiting approval are completed.
+    ``style``: 409 without a ``style_lock.json`` or when it is already locked;
+    then the lock is frozen (``locked_at``) and ``approvals.style`` set. The
+    later documents of the 9.2 grammar: 400. Anything else: 404.
+    """
+    stories = _stories()
+    story = _load(stories, story_id)
+
+    if doc == "bible":
+        busy = _in_flight(story_id, doc="bible")
+        if busy:
+            raise HTTPException(
+                status_code=409,
+                detail=_busy_detail(busy[0], "approve the bible once that step is done."),
+            )
+        _require_concept(story)
+        missing = _missing_bible_fields(story)
+        if missing:
+            raise HTTPException(
+                status_code=409,
+                detail=f"The bible is not complete; missing or empty: {', '.join(missing)}.",
+            )
+        now = _now()
+
+        def approve_bible(d):
+            d["approvals"]["bible"] = now
+
+        story = _update(stories, story_id, approve_bible, now=now)
+        _complete_awaiting(story_id, "bible")
+        return story
+
+    if doc == "style":
+        current = _style_lock(stories, story_id)
+        if current is None:
+            raise HTTPException(status_code=409, detail="There is no style to approve yet: run the style step first.")
+        now = _now()
+        try:
+            locked = stylelock.lock_style(current, now=now)
+        except stylelock.StyleLockError:
+            raise HTTPException(
+                status_code=409,
+                detail=f"The style is already locked (since {current.get('locked_at')}).",
+            ) from None
+        _write_doc(stories, story_id, STYLE_LOCK_DOC, locked, now=now,
+                   validator=schemas.style_lock_errors)
+
+        def approve_style(d):
+            d["approvals"]["style"] = now
+
+        return _update(stories, story_id, approve_style, now=now)
+
+    if _is_later_approval(doc):
+        raise HTTPException(status_code=400, detail=f"Approving '{doc}' arrives in a later phase.")
+    raise HTTPException(status_code=404, detail=f"Nothing to approve under {doc!r}.")
+
+
+# ----------------------------------------------------------- regenerate
+
+def _is_later_target(target) -> bool:
+    kind, sep, rest = target.partition(":")
+    return bool(sep) and bool(rest) and kind in LATER_TARGETS
+
+
+@router.post("/{story_id}/regenerate", status_code=201)
+async def regenerate(story_id: str, req: StoryRegenerateRequest) -> JobResponse:
+    """Regenerate one piece, with an optional note; 201 with the job.
+
+    ``concepts`` (ten more) and ``bible:<field>`` (``field`` one of
+    ``prompts.REGENERATE_TARGETS``; needs a chosen concept, 409) are step jobs
+    ``regenerate`` with ``params {target, note}``. A later phase's target of
+    the 9.2 grammar: 400. Anything else: 400 naming the valid targets.
+    """
+    stories = _stories()
+    story = _load(stories, story_id)
+    target = req.target
+
+    if target not in regenerate_step.VALID_TARGETS:
+        if _is_later_target(target):
+            raise HTTPException(status_code=400, detail=f"Regenerating '{target}' arrives in a later phase.")
+        raise HTTPException(
+            status_code=400,
+            detail=(f"Cannot regenerate {target!r}: the valid targets are "
+                    f"{', '.join(regenerate_step.VALID_TARGETS)}."),
+        )
+    if target.startswith(regenerate_step.BIBLE_PREFIX):
+        _require_concept(story)
+
+    return await _create_step_job(story_id, "regenerate", {"target": target, "note": req.note})
+
+
+# ------------------------------------------------------------- estimate
+
+def _llm_calls(step, target):
+    if step == "concepts":
+        return concepts_step.BATCHES
+    if step == "bible":
+        return len(bible_step.PARTS)
+    # regenerate: "concepts" is the concepts step itself; a bible field, one prompt.
+    if target == regenerate_step.CONCEPTS_TARGET:
+        return concepts_step.BATCHES
+    return 1
+
+
+def _estimate_message(rows, calls, refusal) -> str:
+    if refusal:
+        return refusal
+    keyed = [row for row in rows if row["keyed"]]
+    first = keyed[0]
+    calls_text = f"{calls} LLM call{'s' if calls != 1 else ''}"
+    note = "There is no LLM price table, so est_usd stays 0.0."
+    if not first["free"]:
+        return f"{calls_text} on {first['link']}, which is billed. {note}"
+    paid_later = [row["link"] for row in keyed[1:] if not row["free"]]
+    text = f"{calls_text} on {first['link']} (free tier)."
+    if paid_later:
+        text += (f" If the free links before it fail, {', '.join(paid_later)} "
+                 f"(billed) may be reached. {note}")
+    return text
+
+
+@router.get("/{story_id}/estimate/{step}")
+async def estimate(story_id: str, step: str, target: Optional[str] = None) -> dict:
+    """What a step would cost and where it would run::
+
+        {"step", "est_usd": 0.0, "units": {"llm_calls": n},
+         "route_class": "free" | "paid" | "blocked" | "local",
+         "link": <first keyed link> | null,
+         "links": [{"link", "keyed", "free"}, ...],
+         "ready": <the key gate passes>, "message": str}
+
+    ``concepts`` (5 calls), ``bible`` (3), ``regenerate`` (1; 5 with
+    ``?target=concepts``) resolve the chain and keys as the step will; the
+    first keyed link decides the class (``free`` when its provider's default
+    model is free, DEC-088). No keyed link is ``blocked`` with the key gate's
+    message. ``style`` runs here: 0 calls, ``local``. ``style_preview``: 400
+    (not available yet); a later step: 400; anything else: 404.
+    """
+    _load(_stories(), story_id)
+
+    if step == "style":
+        return {
+            "step": step, "est_usd": 0.0, "units": {"llm_calls": 0},
+            "route_class": "local", "link": None, "links": [], "ready": True,
+            "message": "The style lock is built on this server from the template; nothing is called.",
+        }
+    if step == PREVIEW_STEP:
+        raise HTTPException(status_code=400, detail=f"'{PREVIEW_STEP}' is not available yet.")
+    if step in LATER_STEPS:
+        raise HTTPException(status_code=400, detail=f"'{step}' arrives in a later phase.")
+    if step not in LLM_STEPS and step != "regenerate":
+        raise HTTPException(status_code=404, detail=f"Unknown step {step!r}.")
+    if step == "regenerate" and target is not None and target not in regenerate_step.VALID_TARGETS:
+        raise HTTPException(
+            status_code=400,
+            detail=(f"Cannot regenerate {target!r}: the valid targets are "
+                    f"{', '.join(regenerate_step.VALID_TARGETS)}."),
+        )
+
+    calls = _llm_calls(step, target)
+    links, keys, refusal = _llm_gate(worker.get_settings_env())
+    rows = [
+        {
+            "link": registry.describe(link),
+            "keyed": bool(keys.get(link.provider)),
+            "free": bool(registry.PROVIDERS[link.provider].free_tier),
+        }
+        for link in links
+    ]
+    first = next((row for row in rows if row["keyed"]), None)
+    if first is None:
+        route_class = "blocked"
+    else:
+        route_class = "free" if first["free"] else "paid"
+    return {
+        "step": step,
+        "est_usd": 0.0,
+        "units": {"llm_calls": calls},
+        "route_class": route_class,
+        "link": first["link"] if first else None,
+        "links": rows,
+        "ready": refusal is None,
+        "message": _estimate_message(rows, calls, refusal),
+    }
