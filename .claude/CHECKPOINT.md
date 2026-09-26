@@ -1,26 +1,62 @@
-## IN PROGRESS — AI Story **phase 1** (story workspace, concepts, bible, style lock)
-- **Started:** 2026-09-26 by the human ("Start phase One"). Task class: FULL.
-- **Current phase:** 6 TEST — **Tier-2 FAILED at step 2, fix attempt 1 of 2 in progress** on `feat/ai-story-phase-1` (worktree). Stages 0–11 merged ff to `main` (`d3d05f4`, + artifacts `289e4e9`), deployed, **not pushed**. The human said "if it's good, push merge, we'll start phase 2" without doing the phone walk; I ran the script myself in the built-in browser at 375 px and it failed (see step h). Next: finish the fix (C1 1/call × 10 at cap 650; bible caps 350/400/300; story steps skip paid LLM links unless allow_paid), Tier-1, ff main, restart backend (Python only), re-run the Tier-2 script, then stage 13 docs + decisions, then push (the human asked for it). Plan **approved in chat** ("Go", 2026-09-26).
-  CLARIFY closed: C1 = 2 cards × 5 calls; steps with no external call run
-  inline (no job); route choice per story only (Settings selector → phase 2);
-  Tier-2 phone walk by the human on their own phone.
-- **Plan:** `~/.claude/plans/ai-story-phase-1-workspace.md` (stages 0–13,
-  riskiest = stage 4, story-step jobs in the shared store/worker).
-- **Where the work happens:** worktree `.claude/worktrees/ai-story-phase-1`,
-  branch `feat/ai-story-phase-1` (created from the checkpoint commit). `main`
-  and the deployed container stay at the checkpoint until stage 12. **A fresh
-  session reads the branch's copy of this file** — it is the current one.
-- **Checkpoint:** known-good `25abdd1` (clean, = `origin/main`); this header is
-  committed on top of it as the stage-0 commit.
-- **Tier-1 baseline (2026-09-26, at `25abdd1`):** local **1883 passed / 1
-  skipped**; CI env **1683 passed / 173 skipped**; `compileall clipping web
-  tests main.py` clean; `vite build` green (scratch outDir).
-- **Stage ledger:** see "Stage ledger (phase 1)" below.
-- **Prompt:** `.claude/plans/ai-story/02-phase-1-workspace-concepts-bible-style.md`;
-  spec `00-MASTER-SPEC.md` §2, §2.1–2.2, §3 steps 1–4, §4.1–4.2 (C1, B1–B3),
-  §5, §6.3, §7, §9.1–9.3, §10, §13, §14.
-- **Next free ids:** DEC-107, A-040.
-- **Open questions:** none.
+## CURRENT STATE — AI Story **phase 1 is DONE**. Next session starts **phase 2**.
+
+Finished 2026-09-26 ~17:40 UTC. Stages 0–13 done; Tier-2 passed live after one fix
+round (DEC-116). The human asked to push and start phase 2.
+
+- **Branch:** `main`, fast-forwarded from `feat/ai-story-phase-1` (worktree
+  `.claude/worktrees/ai-story-phase-1`, can be removed once pushed). **Push:** see
+  the action log (the human asked for it; the repo's own key, memory
+  `github-push-key`).
+- **Deployed:** container rebuilt from the phase-1 head (dashboard bundle
+  `index-BpzgkBO5.js`); 0 jobs at every restart.
+- **Tier-1 at close:** local **2846 passed / 1 skipped**; CI env **2368 passed /
+  448 skipped**; `compileall clipping web tests main.py` clean; `vite build` green.
+  Baseline was 1883 / 1683. Run the suite **without** a built
+  `web/dashboard/dist/` on disk (see Operating notes).
+- **Plan:** `~/.claude/plans/ai-story-phase-1-workspace.md` (approved "Go").
+  Spec `.claude/plans/ai-story/00-MASTER-SPEC.md` v1.1 — phase 2 prompt is
+  `03-phase-2-cast-places-season.md`.
+- **Decisions:** DEC-107…DEC-116. **Assumptions:** A-040…A-049 (A-004 invalidated).
+  **Next free ids:** DEC-117, A-050.
+- **Docs:** `docs/AI_STORY.md` (new: steps 1–4 guide), README "Two modes",
+  VISION rewritten for the two-mode product (phase 0 had left all three undone).
+- **Open questions:** none. The human did not walk the wizard on their phone; the
+  substitute run is DEC-116.
+
+### Where phase 2 starts
+Read the spec, `03-phase-2-cast-places-season.md`, DEC-107…116 and the follow-ups
+below. Carried in deliberately: the Settings per-task route selector (DEC-112);
+signed story media for audio/video (DEC-113, phase 4); LLM spend is not estimated
+or booked when `allow_paid` is on (DEC-115); concept diversity (below).
+
+### Follow-ups, deliberately not done
+- **Concept diversity:** with no seed text and no style, all ten generated
+  concepts came back `cinematic_real` with similar mystery themes. Rotate the
+  requested style per C1 call when none is chosen.
+- `jobs.json` is written non-atomically (`web/api/store.py:113`, DEC-110);
+  `needs_upload` is still failed at restart (pinned by a test so a fix changes it
+  on purpose).
+- Tests from a worktree inherit the main checkout's `.env` (A-049): add a conftest
+  that clears provider keys.
+- `ledger.py` writes `cost_ledger.json` 0600 (mkstemp): unreadable from the host
+  when the container writes it.
+- A French native review of the concept library (A-045); measure French
+  tokenisation (A-046).
+- CLI has no `choose`/`regenerate` subcommands (the bible's partial-failure
+  message names a regenerate target the CLI cannot run).
+- From phase 0, still open: the deferred paid Tier-2 step; dependency pass
+  (setuptools ≥ 83, pip-audit finding); `$0.000` sub-cent refusal text.
+
+### Operating notes that bite
+- **A built `web/dashboard/dist/` on disk breaks ~15 auth/clip-serving tests**
+  (the app mounts the SPA at import; fixtures assume no mount). CI has none; build
+  to a scratch `--outDir`, or move `dist/` aside before running the suite.
+- A throwaway backend for UI checks: `.claude/launch.json` config
+  `phase1-throwaway` (excluded from git in `info/exclude`) runs the worktree on
+  127.0.0.1:8010 with every provider key blanked and IMAGE_CHAIN local-only.
+- Container / deploy / push notes of phase 0 (below) still apply: a Python fix
+  needs `sudo -n docker compose restart backend`, a dashboard change
+  `rm -sfv backend && up -d --build backend`, both only at 0 jobs.
 
 ### Tier-2 (phase 1) — live, on the deployed container
 Deployed: `git merge --ff-only feat/ai-story-phase-1` → `main` `d3d05f4` (not pushed);
@@ -35,8 +71,9 @@ startup restored 4 saved settings. Before: `data/usage.json` sha256 `babfee13…
 | e | `usage.json` byte-identical after the LLM calls; no `spend.json`, no `chain_test_ledger.json` | **PASS** |
 | f | RC-P1: `/clips/job/b37b36a9b34e` at 375 px no overflow, 7 videos, `highlight_rank_1_ready.mp4` loads (duration 44.9 s, range 206 video/mp4); playback not observable (the browser pane was hidden) → on the phone checklist | **PASS (serving)** |
 | g | 375/820/1280, pre-deploy on a keyless throwaway backend: no overflow on /story, /story/new, three wizard states, /clips, /settings; create/choose/approve/save/lock work; 5 UX findings fixed and re-checked | **PASS** |
-| h | FR story → Generate 10 more → pick `tentafruit_island` → write bible → regenerate one field with a note → approve → `fruit_drama`, change one accent, save → preview → approve & lock. Not walked by the human ("if it's good, push"); run by me in the built-in browser at 375 px | **FAILED at Generate 10 more**: every C1 reply truncated at the 500-token cap (2 French cards need ~1,000), 3 Gemini attempts, then 1 attempt on the **paid** OpenRouter link (~$0.0001, untracked) before I cancelled job `8650b2350c2b`. Story `b1104ec66b05` (FR, draft) kept for the re-run |
-Known before the walk: keyless Pollinations allows about one image per IP per hour, so the preview may honestly show 1/3. OpenRouter (paid default model) is keyed and third in the chain: a Gemini failure falls through to it, as for clip jobs (DEC-088).
+| h | FR story → Generate 10 more → pick `tentafruit_island` → write bible → regenerate one field with a note → approve → `fruit_drama`, change one accent, save → preview → approve & lock. Not walked by the human ("if it's good, push"); run by me in the built-in browser at 375 px | **FAILED at Generate 10 more**: every C1 reply truncated at the 500-token cap (2 French cards need ~1,000), 3 Gemini attempts, then 1 attempt on the **paid** OpenRouter link (~$0.0001, untracked) before I cancelled job `8650b2350c2b`. Story `b1104ec66b05` kept for the re-run |
+| h′ | Same script after the fixes (DEC-107, DEC-115, two dashboard fixes), story `b1104ec66b05`, 375 px | **PASS**: 10 concepts in 24 s (C1 ≈290–335 of 700 each, the paid link skipped and printed every call); `tentafruit_island`; bible B1/B2/B3 ≈151/266/122 of 400/520/300; regenerate tone ("plus sombre" → "Sombre, cynique, …") and premise ("plus court"), only the target field changed, page refreshed itself; approve; `fruit_drama` with accent `#ffd400` (overrides = only that); preview 3/3 on Pollinations $0.00 (3 s, 44 s, 46 s; repeat 0.2 s from cache); approve & lock → `style_approved`, controls disabled, no overflow. story/style_lock/concepts/style_preview JSON validate; ledger 6 free entries; 15 LLM lines, 0 over cap; no `spend.json` |
+Fix round (attempt 1 of 2, succeeded): C1 one concept per call + French-sized caps + story steps skip paid LLM links (`da7ce01`); the stream hook reacts to a terminal progress frame (`6f0f068`); the wizard polls its story while a step is in flight (`bd16eec`). Each deployed at 0 jobs.
 
 ### Regression contract (phase 1)
 Phase 0's RC-P1…RC-P11 (history table below) stay in force, plus:
@@ -50,7 +87,7 @@ Phase 0's RC-P1…RC-P11 (history table below) stay in force, plus:
 ### Stage ledger (phase 1)
 | S | Stage | State |
 |---|---|---|
-| 0 | checkpoint + baseline + worktree | **done** (this commit) |
+| 0 | checkpoint + baseline + worktree | **done** `c6bb6c1` |
 | 1 | templates as data (7 styles, 10 concepts, schemas) | **done** (stage-1 commit; local 1968 / CI 1768 + 173 skipped) |
 | 2 | prompting.py + style lock builder | **done** (local 2043 / CI 1843 + 173 skipped) |
 | 3 | story store (+ reserved `outputs/stories` guard, see action log) | **done** (local 2268 / CI 2052 + 189 skipped) |
@@ -62,12 +99,15 @@ Phase 0's RC-P1…RC-P11 (history table below) stay in force, plus:
 | 9 | CLI (+ shared `workflow.py` so API and CLI apply one set of rules) | **done** (local 2778 / CI 2313 + 435 skipped) |
 | 10 | dashboard shared pieces | **done** (local 2792 / CI 2327 + 435 skipped; build green) |
 | 11 | StoriesList + NewStoryWizard (+ `GET /api/stories/styles`) | **done** (local 2807 / CI 2339 + 438 skipped; build green; 375/820/1280 checked) |
-| 12 | merge, deploy, Tier-2 | **in progress**: deployed; Tier-2 step h FAILED; fix attempt 1 running |
-| 13 | docs + decisions | — |
+| 12 | merge, deploy, Tier-2 | **done**: step h failed, fixed in one round (3 commits), h′ passed |
+| 13 | docs + decisions | **done** (DEC-107…116, A-040…049, docs/AI_STORY.md, README, VISION) |
 
 ---
 
-## CURRENT STATE — AI Story **phase 0 is DONE**. Next session starts **phase 1**.
+## History below this line
+Phase 1's record is above; phase 0's closing state and every earlier task follow.
+
+## Previous: AI Story **phase 0** (DONE 2026-09-26)
 
 Finished 2026-09-26 10:45 UTC. Every Tier-2 step has run except the one paid
 call, which the human **deferred** (no budget right now, "we'll do it later").
@@ -184,7 +224,7 @@ re-submitting, and spend booked at submit. Written into
 
 ---
 
-## History below this line
+### Earlier tasks below this line
 Everything that follows is the stage-by-stage record of phase 0 and of the tasks
 before it. Read it for the contracts each stage established — they are the
 detail this header deliberately does not repeat.

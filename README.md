@@ -23,6 +23,11 @@
 
 ⚠️ **Low Maintenance Mode**: This project is currently in low maintenance mode as the author is focusing on other priorities.
 
+## Two modes
+
+- **Clips** (`/clips`) — the long-form video → vertical highlight clips pipeline this README is mostly about: karaoke subtitles, B-roll, BGM, hooks, auto-metadata.
+- **AI Story** (`/story`) — a gated, step-by-step studio that turns a concept into a persistent story workspace (world, cast, a locked visual style, a season arc) and produces serialized ~60-second AI episodes with consistent characters. Steps 1–4 (new story, concepts, bible, style) are available today; the rest ships in later phases. See [docs/AI_STORY.md](docs/AI_STORY.md).
+
 ## 🔱 About this fork
 
 This is [**rzdhop**](https://github.com/rzdhop)'s fork of

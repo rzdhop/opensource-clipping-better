@@ -131,7 +131,48 @@
   finish phase 0, then merge and push. The fix-first reading was not objected
   to. UNCONFIRMED for the fix-first part only.
 
+- **A-041** — (spec §14) The free tiers' daily request limits (Gemini Flash-Lite
+  ~1,000, Groq 1k, OpenRouter free 50/1,000) are enough for one episode's ≈ 25 LLM
+  calls. Phase 1 evidence only: steps 1–4 took 15 calls on Gemini's free tier on
+  2026-09-26 with no refusal. UNCONFIRMED for a whole episode.
+- **A-042** — (spec §14) Prompt-only consistency (locked prompt block + seed reuse)
+  is acceptable as an explicit, labelled degraded mode when no reference-capable
+  editor is available. Phase 1 only records the choice. UNCONFIRMED.
+- **A-043** — (spec §14) `MAX_CONCURRENT_JOBS=1` is acceptable for story steps: a
+  step can wait behind a clip render, and the wizard says "queued — waiting for the
+  worker". UNCONFIRMED.
+- **A-044** — The CLI and a running server do not coordinate writes to the same
+  story across processes (the RLock is per process; writes are atomic; the index is
+  rebuildable, DEC-110). Acceptable for a single-user tool. UNCONFIRMED.
+- **A-045** — The concept library's fields the spec does not give (`main_line`,
+  `episode_seed`, `content_flags`, `signature_hint`, archetypes where fewer than
+  three characters are named) and **all French text** were authored in phase 1;
+  so were `emotion_to_mood` for six styles (fruit_drama's is the spec's). No native
+  French review yet. UNCONFIRMED.
+- **A-046** — French tokenises at about 1.3 × chars/4 on Gemini. **Not measured**;
+  the story caps (DEC-107) are sized with it, and live French replies fit with room
+  (C1 ≈ 290–335 of 700). A `countTokens` run would settle it. UNCONFIRMED.
+- **A-047** — The `≈N tokens out` figure is chars/4 of the returned JSON, not the
+  provider's usage (`run_chain` returns none and `llm.py` stays untouched); the real
+  cap is the `max_tokens` sent. UNCONFIRMED by design.
+- **A-048** — Keyless Pollinations gives about one fresh image per IP per hour and
+  serves repeated prompts from cache. Seen live 2026-09-26: three fresh preview
+  images in 3 s, 44 s and 46 s; the same prompts again in 0.2 s each. UNCONFIRMED.
+- **A-049** — Tests run from a worktree under `.claude/worktrees/` load the main
+  checkout's real `.env` into `os.environ` (`clipping.config` searches upward).
+  Phase-1 tests clear the keys they depend on and make no network call; a guard
+  (a conftest clearing provider keys) is a follow-up. Recorded as a hazard.
+
 ## Confirmed
+- **A-040** — (spec §14, measured 2026-09-25 on the author's two reference videos)
+  Shot mean 3.2–4.1 s, reaction cuts ≥ 0.8 s, lines of 3–8 words, 1–2 places per
+  episode, a continuous music bed, single-word pop captions in the fruit-drama
+  genre, no narrator. *Confirmed by the analysis file
+  `.claude/plans/ai-story/10-REFERENCE-ANALYSIS-2026-09-25.md`.* Two videos is a
+  small sample; the phase-7 analyser re-measures every import. **Invalidated by the
+  same measurement:** "a hook text overlay in the first 1.5 s" (the hook is a
+  diegetic insert or a shocking image) and "cut-to-black is the only cliffhanger"
+  (a hard stop mid-beat is common).
 - **A-012** — The phone-width overflow is fixable in CSS alone; no JSX change is
   needed. *Confirmed by measurement. The exploration flagged several inline
   `style={{ display: 'flex' }}` rows that no stylesheet can reach — chiefly the
@@ -182,8 +223,6 @@
   by an AST pass rather than a grep: in each of the ten, `YoutubeDL` occurred
   exactly once, as the import itself. The ten are deleted; afterwards no module
   in `clipping/` uses the name unimported.*
-- **A-004** — `-v` and `-t` are free as short flags; only `-u`, `-n`, `-r` are
-  taken. *Confirmed by grep over `clipping/config.py`.*
 - **A-005** — The render layer is unaffected by this refactor. *Confirmed: a real
   1080x1920 h264+aac clip plus thumbnail rendered end-to-end from a local mp4 +
   vtt, after fixing a pre-existing Windows path-escaping bug that blocked all
@@ -195,6 +234,9 @@
   correctly clamped to the clip start.*
 
 ## Invalidated
+- **A-004** — INVALIDATED 2026-09-26: `-v` (`--video`) and `-t` (`--transcript`)
+  are taken now, as are `-n` and `-r`; only `-u` is free. Replaced by the grep in
+  the phase-1 exploration (`clipping/config.py:303,308,325,334`).
 - **A-010's test claim** (2026-09-22) — "`tests/test_config_cli.py` pins the
   string so the next retirement surfaces as a test failure rather than a
   production 410." It cannot, and did not. `google/gemma-4-31b-it` was never

@@ -2248,3 +2248,140 @@ idempotency key we rely on); retrying only the poll inside the adapter (still
 needs a rule for a lost submit, and it doesn't cover the other paid adapters).
 Test: `tests/test_generation_chain.py::test_a_paid_link_is_never_retried_so_one_click_cannot_bill_twice`
 (timeout, connection, 5xx, 429). Commit `32f8346`.
+
+## DEC-107 — Story writing is one small artifact per request; a concept is one call
+**Context.** Spec §4.1 extends DEC-027 to story writing: one request, one artifact,
+≤ ~400 output tokens, so the free and slow providers stay usable and every piece
+can be regenerated alone. The spec disagreed with itself on C1 (2 or 5 concepts per
+call); the human chose 2 per call × 5. The live Tier-2 run (2026-09-26) then showed
+two French concept cards overrunning the 500-token cap on every call.
+**Decision.** C1 writes **one** concept per call; "Generate 10 more" is ten calls.
+Caps are sized so the largest French reply a prompt allows fits (a test builds it at
+every stated word limit, × 1.3 for French, and checks it against the cap): C1 700,
+B1 400, B2 520, B3 300. The bible is B1 → B2 → B3, each writing its own fields; a
+field is regenerated with an optional note by rerunning only its prompt and applying
+only its keys. A reply that fails validation is asked for once more with the same
+cap, then reported; a request is never shrunk and a reply never trimmed. A failure is
+local: the concepts and bible parts that answered are kept and the failure names what
+to regenerate. Every accepted call prints its link and `≈N tokens out (cap …)`.
+**Consequence.** Ten small calls for ten concepts (≈ 25 s on Gemini's free tier),
+each failure losing one concept. The caps are ceilings, not targets: live French
+replies measured ≈ 290–335 (C1), 151/266/122 (B1/B2/B3). The 1.3 factor is not
+measured (A-046). The human's decisions: 2026-09-26 in chat.
+
+## DEC-108 — A story step ends awaiting approval: finished for the worker, not for the user
+**Context.** Spec §9.1: a story step is a job on the existing worker and slot; it must
+free the slot when done but wait for the user, and survive a restart.
+**Decision.** Two job statuses: `running` (a step at work; failed at restart like any
+interrupted job) and `awaiting_approval`. `awaiting_approval` joins the store's
+terminal set (a cancel answers 409), the SSE close set and the dashboard's finished
+set; `fail_stale_jobs` leaves it untouched (a third bucket). Approving a document
+flips its awaiting jobs to the existing `completed` with `approved_at`; a newer job
+for the same document supersedes the older one (`completed` + `superseded_by`).
+There is no `done` status. A job has a `kind` (`clip` by default; a record without
+one reads as a clip); a rerun cannot reuse a step job's id.
+**Consequence.** Verified live: a restart with a bible job awaiting left it awaiting
+and approvable. Every hard-coded status set had to learn the new states — the
+dashboard's stream hook and the wizard both missed a step finishing until two fixes
+(the hook reacts to a terminal progress frame; the wizard polls its story while a
+step is in flight).
+
+## DEC-109 — A step with no external call runs in the request; approval lives on the document
+**Context.** One worker slot is shared with clip jobs, so a pure step (choosing a
+concept, building or locking a style) would wait behind a 50-minute clip render.
+**Decision.** (Human, 2026-09-26.) Only steps that call an LLM or an image API are
+jobs. Concept choice, the style draft and the lock run inside the request. Approval
+state is `story.approvals {concept, bible, style}`; `status` is derived from the
+contiguous prefix of approvals on every save and never set directly. Editing an
+approved bible field clears `approvals.bible`; the style approval is kept (the lock
+reads no bible text). One step job per story at a time (409).
+**Consequence.** Locking a style never queues. An approval cannot be left stale by an
+edit, and status cannot drift from what was approved.
+
+## DEC-110 — `stories.json` is written atomically and can be rebuilt from the folders
+**Context.** The spec asked for "the same atomic-write discipline as jobs.json"; the
+job store writes `jobs.json` with a plain `open(..., "w")` — no temp file, no rename.
+**Decision.** Story documents and the index are written through a temp file in the
+same directory, `fsync` and `os.replace`, mode 0644 so the host can read what the
+container writes. The index is a cache: missing, torn or of the wrong schema, it is
+rebuilt from the story folders and the rebuild is printed; an invalid folder is
+skipped and reported, never deleted. One RLock per resolved root, shared by every
+instance in the process. `jobs.json`'s non-atomic write is recorded, not fixed here.
+**Consequence.** A crash mid-write cannot hide stories. The CLI and the server do not
+coordinate across processes (A-044).
+
+## DEC-111 — No job may own `outputs/stories`; deleting a story removes only its folder
+**Context.** Found while placing stories under `outputs/`: `POST /api/jobs` takes
+`reuse_job_id` from the client and makes it the job id, and deleting a job removes
+`outputs/<id>/`. A job named `stories` would render into, and on delete wipe, every
+story; phase 0's `_chain_test` had the same exposure.
+**Decision.** `cleanup.RESERVED_OUTPUT_NAMES = {stories, _chain_test, stories.json,
+jobs.json}` (compared case-folded, trailing dots and spaces ignored): refused as a
+`reuse_job_id` (400) before anything is created, never removed by a job delete, and
+`outputs/stories` is not listed by the outputs route. A story delete answers 409
+while one of its steps is queued or running; otherwise it removes the story's step
+jobs, its index entry and its folder — only as a real directory directly inside
+`outputs/stories`, a symlink is kept and never followed. 12-hex validation of
+`reuse_job_id` was rejected (tests use ids like `job123`).
+**Consequence.** The only client-controlled path to a destructive delete of story data
+is closed; phase 0's chain-test samples are protected by the same rule.
+
+## DEC-112 — The generation route is chosen per story in phase 1
+**Context.** Phase 0 deferred the per-task route selector (`auto|local|api`) to
+phase 1; in phase 1 only the three-image style preview generates images.
+**Decision.** (Human, 2026-09-26.) `story.generation_profile.route` is editable and
+applied to the preview. The Settings per-task selector moves to phase 2, where cast
+and place images need it.
+**Consequence.** No Settings change in phase 1; phase 2 owns the selector and its
+precedence over the story's route.
+
+## DEC-113 — Story media is token-gated and loaded as blobs in phase 1
+**Context.** Signed media URLs (DEC-048) require routes whose parameters are named
+`job_id` and `filename` under `/api/outputs/`. Phase 1 serves three preview images.
+**Decision.** `GET /api/stories/{id}/files/{name}` serves `preview_[1-9].(png|jpg|jpeg|webp)`
+from the story's `styles/preview/`, behind the router's token, `Cache-Control:
+no-store`; the dashboard fetches it with the header and shows an object URL. The
+signed-URL code is not touched.
+**Consequence.** No auth change for three PNGs. Audio and video (phase 4) need range
+requests from `<audio>`/`<video>`, so that phase designs signed story media once.
+
+## DEC-114 — `--ai-story` has its own parser, and a story's language has no default
+**Context.** The clip CLI's defaults are pinned by the five-place tests; spec §9.3
+wants story commands with the API's defaults. A silent default language would be the
+silent fallback §0 forbids.
+**Decision.** `main.py --ai-story new|step|list` is dispatched before the clip parser
+to `clipping/aistory/cli.py`; the clip `--help` gains one pointer line and no
+argument. The story rules the API and the CLI share live in
+`clipping/aistory/workflow.py` (the route keeps only what needs the job store).
+Language is required in the request model, the CLI and the wizard; the four
+generation-profile defaults (tier 1, route auto, consistency references, budget
+profile free) agree across `defaults.py`, the request model, the CLI and the React
+form (`tests/test_story_defaults.py`). The CLI reads keys from the environment, not
+from the dashboard's Settings.
+**Consequence.** One set of rules, two front ends; a story is always in a language
+someone chose.
+
+## DEC-115 — A story step never calls a paid LLM link unless `allow_paid` is on
+**Context.** Live Tier-2 (2026-09-26): truncated C1 replies exhausted Gemini and the
+LLM chain fell through to the paid OpenRouter link (DEC-088), about $0.0001 and not
+tracked by the budget. AI Story's rule is free by default, paid only by opt-in (§8.5).
+**Decision.** (Human, 2026-09-26.) For story steps, a link whose provider is not free
+tier (an OpenRouter `:free` model counts as free) is skipped while `allow_paid` is
+off, with a printed `⏭ Skipping <link>: paid link, allow_paid is off (AI Story spends
+only on opt-in).` before the chain runs. A chain whose only keyed links are paid is
+refused up front (API 400, CLI exit 1) naming `allow_paid` and the free keys to set;
+the estimate marks skipped links. Clip jobs are unchanged.
+**Consequence.** Verified live: fifteen story LLM calls, the paid link skipped and
+printed each time, no spend. With `allow_paid` on, LLM spend is still not estimated or
+booked in phase 1 (the budget governs generation spend) — a follow-up.
+
+## DEC-116 — Tier-2 of phase 1 was run by me, at the human's word
+**Context.** The approved plan had the human walk the wizard on their phone. The
+human answered "if it's good, push merge, we'll start phase 2" without walking it.
+**Decision.** The script ran in the built-in browser at 375 px against the live
+container on the free chain. It failed at "Generate 10 more" (DEC-107's cap) and then
+exposed two dashboard defects (DEC-108's consequence); all three were fixed and the
+full script passed: FR story, ten concepts, `tentafruit_island`, bible, two
+regenerate-with-note, approve, `fruit_drama` with one accent, preview 3/3 free, lock.
+**Consequence.** The push rests on that substitute, as the human asked. A walk on the
+human's own phone is still welcome and was not done.
