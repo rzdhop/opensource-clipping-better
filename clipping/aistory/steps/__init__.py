@@ -10,10 +10,12 @@ the story's folder under ``ctx.outputs_dir``. Returning means "ready for the
 user's approval"; raising means the step failed.
 
 Phase 1 registers ``concepts``, ``bible`` and ``regenerate`` (stage 6) and
-``style_preview`` (stage 8). Each is registered by module name and imported
-on its first run, never here: importing this package must not pull in the
-prompt catalogue, the LLM chain or the generation chains, so the worker's
-dispatch and a test that only needs the registry stay as light as they were.
+``style_preview`` (stage 8); phase 2 adds ``cast``, ``places_proposal``,
+``places`` and ``season`` (and the entity targets of ``regenerate``). Each is
+registered by module name and imported on its first run, never here:
+importing this package must not pull in the prompt catalogue, the LLM chain
+or the generation chains, so the worker's dispatch and a test that only needs
+the registry stay as light as they were.
 
 A runner that fails in a way the user can act on raises :class:`StepFailed`
 with a sentence saying what to do; the worker records it as
@@ -94,6 +96,10 @@ RUNNERS: dict[str, Callable[[StepContext], object]] = {
     "bible": _deferred("bible"),
     "regenerate": _deferred("regenerate"),
     "style_preview": _deferred("style_preview"),
+    "cast": _deferred("cast"),
+    "places_proposal": _deferred("places_proposal"),
+    "places": _deferred("places"),
+    "season": _deferred("season"),
 }
 
 

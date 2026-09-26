@@ -47,10 +47,14 @@ and a line says when it used fewer references than it was sent.
 Prompts come from ``prompting.py`` and never carry a name (spec 2.3):
 characters are drawn from their descriptor and signature items. A
 regenerate-with-note appends ``Author's note: <note>.`` after the locked
-blocks, never in place of them; a character's name in the note is replaced
-by "the character". Each image replaces its own slot's file and reference
-only (a file of another extension in the same slot goes too); the entity is
-re-read right before it is written, so an upload appended meanwhile is kept.
+blocks, never in place of them; the name of any entity of the story in the
+note is replaced by a neutral word ("the character", "the place", "the
+object"). A regenerate also passes a fresh ``seed``, so a provider that
+honours seeds does not answer the same picture; the seed is recorded, and a
+portrait's becomes the character's ``ref_seed``. Each image replaces its own
+slot's file and reference only (a file of another extension in the same slot
+goes too); the entity is re-read right before it is written, so an upload
+appended meanwhile is kept.
 
 Stdlib only (DEC-012).
 """
@@ -173,6 +177,14 @@ def _seed_of(ref):
     return ref["seed"] if ref is not None and ref.get("seed") is not None else None
 
 
+def _check_seed(seed) -> None:
+    """A seed override is a whole number >= 0 (``bool`` is not one), or None."""
+    if seed is None:
+        return
+    if isinstance(seed, bool) or not isinstance(seed, int) or seed < 0:
+        raise RefImageError(f"A seed must be a whole number >= 0, not {seed!r}.")
+
+
 def _existing(stories, story_id, kind, eid, ref):
     """The real path of *ref*'s file, or None when there is no ref or no such
     regular file (``StoryStore.media_path`` rules)."""
@@ -184,16 +196,41 @@ def _existing(stories, story_id, kind, eid, ref):
         return None
 
 
+# What an entity's name becomes in a note (no name enters an image prompt).
+NEUTRAL_WORDS = {CHARACTERS: "the character", PLACES: "the place", PROPS: "the object"}
+
+
 def _without_names(text, names) -> str:
-    for name in sorted({str(n).strip() for n in names if n and str(n).strip()}, key=len, reverse=True):
-        text = re.sub(rf"(?<!\w){re.escape(name)}(?!\w)", "the character", text, flags=re.IGNORECASE)
+    """*text* with every name of *names* replaced, longest first, as a whole
+    word and whatever its case. *names* is ``{name: neutral word}``, or an
+    iterable of character names ("the character")."""
+    if not isinstance(names, dict):
+        names = {name: NEUTRAL_WORDS[CHARACTERS] for name in names}
+    words = {}
+    for name, word in names.items():
+        key = str(name).strip() if name else ""
+        if key:
+            words.setdefault(key, word)
+    for name in sorted(words, key=len, reverse=True):
+        text = re.sub(rf"(?<!\w){re.escape(name)}(?!\w)", words[name], text, flags=re.IGNORECASE)
     return text
+
+
+def _entity_names(stories, story_id) -> dict:
+    """``{name: neutral word}`` for every character, place and prop of the
+    story; a character's word wins when a place or prop has the same name."""
+    names = {}
+    for kind in (CHARACTERS, PLACES, PROPS):
+        for doc in stories.list_entities(story_id, kind):
+            names.setdefault(doc["name"], NEUTRAL_WORDS[kind])
+    return names
 
 
 def _with_note(prompt, note, *, stories, story_id) -> str:
     """*prompt*, then ``Author's note: <note>.`` -- after the locked blocks,
-    never instead of them. A character's name in the note becomes "the
-    character" (no name enters an image prompt, spec 2.3)."""
+    never instead of them. The name of any character, place or prop of the
+    story in the note becomes a neutral word (no name enters an image
+    prompt, spec 2.3)."""
     if note is None:
         return prompt
     if not isinstance(note, str):
@@ -203,8 +240,7 @@ def _with_note(prompt, note, *, stories, story_id) -> str:
         return prompt
     if len(text) > NOTE_MAX_CHARS:
         raise RefImageError(f"A note is at most {NOTE_MAX_CHARS} characters ({len(text)} given).")
-    names = [doc["name"] for doc in stories.list_entities(story_id, CHARACTERS)]
-    text = _without_names(text, names)
+    text = _without_names(text, _entity_names(stories, story_id))
     if text[-1] not in ".!?":
         text += "."
     return f"{prompt} Author's note: {text}"
@@ -398,8 +434,8 @@ def _done(on_log, plan, ref, label, est, paid) -> dict:
 
 # ----------------------------------------------------------------- characters
 
-def character_image(stories, story_id, char_id, which, *, env, on_log, cancel, note=None, adapters=None,
-                    transport=None, sleep_fn=time.sleep, time_fn=time.monotonic) -> dict:
+def character_image(stories, story_id, char_id, which, *, env, on_log, cancel, note=None, seed=None,
+                    adapters=None, transport=None, sleep_fn=time.sleep, time_fn=time.monotonic) -> dict:
     """Make one of a character's three reference images; returns its image
     ref ``{name, consistency, source, seed, created_at}``.
 
@@ -408,8 +444,11 @@ def character_image(stories, story_id, char_id, which, *, env, on_log, cancel, n
     ``prompt_block`` are set from it), ``turnaround`` or ``expressions``
     (made from the portrait: see :func:`_derived`; ``NeedsEditor`` when no
     editor can run). *env* is the Settings values (merged over the process
-    environment here); *note* is appended to the prompt. *adapters*,
-    *transport*, *sleep_fn* and *time_fn* are handed to the chain (tests).
+    environment here); *note* is appended to the prompt; *seed*, when given,
+    is the request's seed instead of the one the image would reuse (a
+    regenerate's fresh seed) and is recorded -- a portrait's also becomes
+    ``ref_seed``. *adapters*, *transport*, *sleep_fn* and *time_fn* are
+    handed to the chain (tests).
 
     KeyError for an unknown story or character; ``RefImageError`` before
     anything is spent when the character is not written yet, a sheet has no
@@ -419,6 +458,7 @@ def character_image(stories, story_id, char_id, which, *, env, on_log, cancel, n
     """
     if which not in CHARACTER_IMAGES:
         raise RefImageError(f"{which!r} is not a character image ({', '.join(CHARACTER_IMAGES)}).")
+    _check_seed(seed)
     _check(cancel)
     story = stories.get(story_id)
     character = stories.read_entity(story_id, CHARACTERS, char_id)
@@ -434,8 +474,9 @@ def character_image(stories, story_id, char_id, which, *, env, on_log, cancel, n
     step = f"character_image:{char_id}:{which}"
     size = CHARACTER_SIZES[which]
 
+    override = seed
     if which == "portrait":
-        seed = character["ref_seed"]
+        seed = override if override is not None else character["ref_seed"]
         if seed is None:
             seed = image_seed(story_id, CHARACTERS, char_id)
         plan = _Plan(subject, gen.IMAGE, prompt, size, seed, (), BASE, which, step,
@@ -445,7 +486,7 @@ def character_image(stories, story_id, char_id, which, *, env, on_log, cancel, n
         portrait_path = _existing(stories, story_id, CHARACTERS, char_id, portrait)
         if portrait_path is None:
             raise RefImageError(f"{name}: make the portrait first -- the {which} is made from it.")
-        seed = _seed_of(portrait)
+        seed = override if override is not None else _seed_of(portrait)
         if seed is None:
             seed = character["ref_seed"] if character["ref_seed"] is not None \
                 else image_seed(story_id, CHARACTERS, char_id)
@@ -486,8 +527,8 @@ def character_image(stories, story_id, char_id, which, *, env, on_log, cancel, n
 
 # --------------------------------------------------------------------- places
 
-def place_image(stories, story_id, place_id, variant, *, env, on_log, cancel, note=None, adapters=None,
-                transport=None, sleep_fn=time.sleep, time_fn=time.monotonic) -> dict:
+def place_image(stories, story_id, place_id, variant, *, env, on_log, cancel, note=None, seed=None,
+                adapters=None, transport=None, sleep_fn=time.sleep, time_fn=time.monotonic) -> dict:
     """Make one time variant of a place; returns its image ref, now
     ``time_variants[variant]``.
 
@@ -495,12 +536,14 @@ def place_image(stories, story_id, place_id, variant, *, env, on_log, cancel, no
     place's ``prompt_block`` is set when its layout notes are written). Any
     other variant name (``schemas.TIME_VARIANT_PATTERN``) is made from the
     plate, its single reference image (:func:`_derived`; ``NeedsEditor`` when
-    no editor can run) with the plate's seed. The rules and errors of
+    no editor can run) with the plate's seed. *seed* overrides the seed as
+    in :func:`character_image`; the rules and errors of
     :func:`character_image` otherwise.
     """
     if not isinstance(variant, str) or _VARIANT_NAME.fullmatch(variant) is None:
         raise RefImageError(f"{variant!r} is not a time variant name (lowercase letters, digits and _, "
                             "starting with a letter: night, golden_hour...).")
+    _check_seed(seed)
     _check(cancel)
     story = stories.get(story_id)
     place = stories.read_entity(story_id, PLACES, place_id)
@@ -514,9 +557,10 @@ def place_image(stories, story_id, place_id, variant, *, env, on_log, cancel, no
     step = f"place_image:{place_id}:{variant}"
     stem = f"variant_{variant}"
     plate = place["time_variants"].get(MASTER_PLATE)
+    override = seed
 
     if variant == MASTER_PLATE:
-        seed = _seed_of(plate)
+        seed = override if override is not None else _seed_of(plate)
         if seed is None:
             seed = image_seed(story_id, PLACES, place_id)
         plan = _Plan(subject, gen.IMAGE, prompt, PLATE_SIZE, seed, (), BASE, stem, step,
@@ -526,7 +570,7 @@ def place_image(stories, story_id, place_id, variant, *, env, on_log, cancel, no
         if plate_path is None:
             raise RefImageError(f"{name}: make the master plate ({MASTER_PLATE}) first -- every other "
                                 "variant is made from it.")
-        seed = _seed_of(plate)
+        seed = override if override is not None else _seed_of(plate)
         if seed is None:
             seed = image_seed(story_id, PLACES, place_id)
         plan = _derived(story, subject=subject, prompt=prompt, size=VARIANT_SIZE, seed=seed,
@@ -548,11 +592,13 @@ def place_image(stories, story_id, place_id, variant, *, env, on_log, cancel, no
 
 # ---------------------------------------------------------------------- props
 
-def prop_image(stories, story_id, prop_id, *, env, on_log, cancel, note=None, adapters=None,
+def prop_image(stories, story_id, prop_id, *, env, on_log, cancel, note=None, seed=None, adapters=None,
                transport=None, sleep_fn=time.sleep, time_fn=time.monotonic) -> dict:
     """Make a prop's image (IMAGE_CHAIN, text to image, ``base``, saved as
-    ``image.<ext>``; its ``prompt_block`` is set); returns its image ref. The
-    rules and errors of :func:`character_image` otherwise."""
+    ``image.<ext>``; its ``prompt_block`` is set); returns its image ref.
+    *seed* overrides the seed as in :func:`character_image`; the rules and
+    errors of :func:`character_image` otherwise."""
+    _check_seed(seed)
     _check(cancel)
     story = stories.get(story_id)
     prop = stories.read_entity(story_id, PROPS, prop_id)
@@ -563,7 +609,8 @@ def prop_image(stories, story_id, prop_id, *, env, on_log, cancel, note=None, ad
     lock = imaging.read_lock(stories, story_id, error=RefImageError)
     prompt = _with_note(prompting.prop_image_prompt(lock, descriptor=prop["descriptor"]), note,
                         stories=stories, story_id=story_id)
-    seed = _seed_of(prop["image"])
+    if seed is None:
+        seed = _seed_of(prop["image"])
     if seed is None:
         seed = image_seed(story_id, PROPS, prop_id)
     plan = _Plan(subject, gen.IMAGE, prompt, PROP_SIZE, seed, (), BASE, "image", f"prop_image:{prop_id}",

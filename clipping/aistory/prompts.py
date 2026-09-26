@@ -331,11 +331,16 @@ _K1_ASK = (
 
 
 def _character_sketch_block(character) -> str:
-    return (
-        f"Character to write: {character['name']} ({character['role']}, {character['archetype']})\n"
-        f"One line: {character['one_line']}\n"
-        f"Signature hint: {character['signature_hint']}"
-    )
+    """The character's own sketch lines. A generated concept's sketch and a
+    custom character have no archetype and no signature hint: the part of
+    the line they would fill is left out, never rendered as "None"."""
+    archetype = character.get("archetype")
+    label = f"{character['role']}, {archetype}" if archetype else character["role"]
+    lines = [f"Character to write: {character['name']} ({label})", f"One line: {character['one_line']}"]
+    hint = character.get("signature_hint")
+    if hint:
+        lines.append(f"Signature hint: {hint}")
+    return "\n".join(lines)
 
 
 def _upload_notes_block(upload_notes) -> str:

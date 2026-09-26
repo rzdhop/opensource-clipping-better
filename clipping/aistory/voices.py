@@ -244,7 +244,7 @@ def _preference(character) -> dict:
     return character.get("voice_hints") or character.get("voice") or {}
 
 
-def propose(characters, language, *, env) -> dict:
+def propose(characters, language, *, env, taken=(), on_log=print) -> dict:
     """One distinct voice per lead/support character; ``{char_id: Voice|None}``.
 
     *characters* is ordered leads -> support -> recurring -> guest, then
@@ -256,6 +256,11 @@ def propose(characters, language, *, env) -> dict:
     voice is left (also printed) -- and doing so never removes that voice
     from what a later character could still get fresh. Deterministic: the
     catalogue, the scoring and the character order are all deterministic.
+
+    *taken* is ``{(provider, voice_id)}`` already pinned by characters left
+    out of *characters* (the cast step proposes only for the unpinned ones):
+    those voices are never proposed fresh. *on_log* prints the two lines
+    (``print`` by default; a step hands its own log).
     """
     pool = catalogue(language, env=env)
     ordered = sorted(
@@ -263,7 +268,7 @@ def propose(characters, language, *, env) -> dict:
         key=lambda c: (_ROLE_ORDER.get(c.get("role"), len(_ROLE_ORDER)), c.get("created_at") or "",
                        c.get("char_id") or ""),
     )
-    taken = set()
+    taken = {tuple(key) for key in (taken or ())}
     result = {}
     for character in ordered:
         char_id = character["char_id"]
@@ -276,9 +281,9 @@ def propose(characters, language, *, env) -> dict:
             taken.add(_voice_key(choice))
         elif role not in schemas.CAST_APPROVAL_ROLES and pool:
             choice = _best_of(prefer, pool)
-            print(f"🔁 {name}: no unused voice is left; reusing {choice.provider}/{choice.voice_id}.")
+            on_log(f"🔁 {name}: no unused voice is left; reusing {choice.provider}/{choice.voice_id}.")
         if choice is None:
-            print(f"🔇 pick a voice for {name}: no catalogue voice is available for this language/chain.")
+            on_log(f"🔇 pick a voice for {name}: no catalogue voice is available for this language/chain.")
         result[char_id] = choice
     return result
 
