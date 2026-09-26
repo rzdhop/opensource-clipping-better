@@ -639,3 +639,238 @@ def story_bible_errors(doc) -> list:
     corrects it.
     """
     return validate(doc, STORY_BIBLE_SCHEMA)
+
+
+# ------------------------------------------------------- LLM output schemas (spec 4.1, 4.2)
+#
+# These describe what a *model* returns for the C1/B1/B2/B3 prompts of
+# ``prompts.py`` -- a different shape from the document schemas above, which
+# describe what is stored on disk. They follow the same strict-mode subset as
+# ``clipping.analysis.schema``: only type/properties/required/
+# additionalProperties/items/enum/description, because some providers reject
+# minLength/pattern/minItems/etc. in ``strict`` json_schema mode. Lengths and
+# counts are enforced by the prompt text and by the ``*_errors`` post-
+# validators below, never by the schema itself.
+
+_CAST_SKETCH_ROLES = ("lead", "support", "recurring", "guest")
+
+
+def _llm_obj(properties, required=None) -> dict:
+    """Object schema for a strict-mode LLM call: every property required
+    unless *required* says otherwise, ``additionalProperties`` always False.
+
+    Mirrors ``clipping.analysis.schema._obj``; kept local rather than
+    imported so this module stays free of a dependency on ``clipping.analysis``.
+    """
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": list(required if required is not None else properties),
+        "additionalProperties": False,
+    }
+
+
+def c1_schema(style_ids) -> dict:
+    """The C1 ("2 concepts") output schema (spec 4.2, row C1).
+
+    ``style_fit`` is constrained to *style_ids* (the shipped style templates),
+    passed in by the caller so this module needs no import of ``templates``.
+    """
+    cast_member = _llm_obj({
+        "name": {"type": "string", "description": "the character's name"},
+        "role": {"type": "string", "enum": list(_CAST_SKETCH_ROLES)},
+        "one_line": {"type": "string", "description": "one sentence describing this character"},
+    })
+    concept = _llm_obj({
+        "title": {"type": "string", "description": "at most 8 words"},
+        "logline": {"type": "string", "description": "one sentence, at most 30 words"},
+        "world": {"type": "string", "description": "the setting and premise, at most 60 words"},
+        "cast_sketch": {
+            "type": "array",
+            "description": "3 to 5 characters",
+            "items": cast_member,
+        },
+        "hook_formula": {"type": "string", "description": "what makes someone stop scrolling on episode 1"},
+        "value": {"type": "string", "description": "the real substance this story carries"},
+        "retention_mechanics": {"type": "string", "description": "why someone comes back for episode 2"},
+        "style_fit": {"type": "string", "enum": list(style_ids)},
+    })
+    return _llm_obj({
+        "concepts": {"type": "array", "description": "exactly 2 concepts", "items": concept},
+    })
+
+
+B1_SCHEMA = _llm_obj({
+    "logline": {"type": "string", "description": "one sentence, at most 30 words"},
+    "premise": {"type": "string", "description": "2-6 sentences, at most 120 words"},
+    "tone": {"type": "string", "description": "at most 15 words"},
+    "genre_tags": {
+        "type": "array",
+        "description": "2-5 tags, each at most 3 words",
+        "items": {"type": "string"},
+    },
+})
+
+B2_SCHEMA = _llm_obj({
+    "setting_summary": {"type": "string", "description": "at most 80 words"},
+    "rules": {"type": "array", "description": "4-6 rules, each at most 25 words", "items": {"type": "string"}},
+    "time_period": {"type": "string", "description": "at most 6 words"},
+    "recurring_motifs": {"type": "array", "description": "exactly 3 motifs", "items": {"type": "string"}},
+})
+
+B3_SCHEMA = _llm_obj({
+    "themes_and_values": {
+        "type": "array",
+        "description": "2-4 themes, each at most 12 words",
+        "items": {"type": "string"},
+    },
+    "audience": _llm_obj({
+        "age": {"type": "string", "enum": ["all", "10+", "13+", "16+"]},
+        "platforms": {
+            "type": "array",
+            "description": "1-3 platforms, no duplicates",
+            "items": {"type": "string", "enum": ["tiktok", "shorts", "reels"]},
+        },
+    }),
+    "why_come_back": {
+        "type": "array",
+        "description": "exactly 3 lines, each at most 20 words",
+        "items": {"type": "string"},
+    },
+})
+
+_SENTENCE_END = re.compile(r"[.!?]+")
+
+
+def _words(text) -> int:
+    return len(text.split())
+
+
+def _sentences(text) -> int:
+    return len(_SENTENCE_END.findall(text))
+
+
+def _check_text(errors, path, value, *, max_words=None) -> None:
+    if not (isinstance(value, str) and value.strip()):
+        errors.append(f"{path}: must be a non-empty string")
+        return
+    if max_words is not None and _words(value) > max_words:
+        errors.append(f"{path}: {_words(value)} words, expected at most {max_words}")
+
+
+def c1_errors(doc, style_ids) -> list:
+    """Post-validation for a C1 response, beyond what ``c1_schema`` can express."""
+    schema = c1_schema(style_ids)
+    errors = validate(doc, schema)
+    if errors:
+        return errors
+
+    errors = []
+    concepts = doc["concepts"]
+    if len(concepts) != 2:
+        errors.append(f"$.concepts: {len(concepts)} concept(s), expected exactly 2")
+
+    allowed_styles = set(style_ids)
+    for i, concept in enumerate(concepts):
+        path = f"$.concepts[{i}]"
+        _check_text(errors, f"{path}.title", concept["title"], max_words=8)
+        _check_text(errors, f"{path}.logline", concept["logline"], max_words=30)
+        _check_text(errors, f"{path}.world", concept["world"], max_words=60)
+        _check_text(errors, f"{path}.hook_formula", concept["hook_formula"])
+        _check_text(errors, f"{path}.value", concept["value"])
+        _check_text(errors, f"{path}.retention_mechanics", concept["retention_mechanics"])
+
+        cast = concept["cast_sketch"]
+        if not (3 <= len(cast) <= 5):
+            errors.append(f"{path}.cast_sketch: {len(cast)} member(s), expected 3-5")
+        for j, member in enumerate(cast):
+            member_path = f"{path}.cast_sketch[{j}]"
+            _check_text(errors, f"{member_path}.name", member["name"])
+            _check_text(errors, f"{member_path}.one_line", member["one_line"], max_words=25)
+
+        style_fit = concept["style_fit"]
+        if style_fit not in allowed_styles:
+            errors.append(f"{path}.style_fit: {style_fit!r} is not a shipped style id")
+
+    return errors
+
+
+def b1_errors(doc) -> list:
+    """Post-validation for a B1 response, beyond what ``B1_SCHEMA`` can express."""
+    errors = validate(doc, B1_SCHEMA)
+    if errors:
+        return errors
+
+    errors = []
+    _check_text(errors, "$.logline", doc["logline"], max_words=30)
+
+    premise = doc["premise"]
+    _check_text(errors, "$.premise", premise, max_words=120)
+    if isinstance(premise, str) and premise.strip():
+        count = _sentences(premise)
+        if not (2 <= count <= 6):
+            errors.append(f"$.premise: {count} sentence(s), expected 2-6")
+
+    _check_text(errors, "$.tone", doc["tone"], max_words=15)
+
+    tags = doc["genre_tags"]
+    if not (2 <= len(tags) <= 5):
+        errors.append(f"$.genre_tags: {len(tags)} tag(s), expected 2-5")
+    for i, tag in enumerate(tags):
+        _check_text(errors, f"$.genre_tags[{i}]", tag, max_words=3)
+
+    return errors
+
+
+def b2_errors(doc) -> list:
+    """Post-validation for a B2 response, beyond what ``B2_SCHEMA`` can express."""
+    errors = validate(doc, B2_SCHEMA)
+    if errors:
+        return errors
+
+    errors = []
+    _check_text(errors, "$.setting_summary", doc["setting_summary"], max_words=80)
+
+    rules = doc["rules"]
+    if not (4 <= len(rules) <= 6):
+        errors.append(f"$.rules: {len(rules)} rule(s), expected 4-6")
+    for i, rule in enumerate(rules):
+        _check_text(errors, f"$.rules[{i}]", rule, max_words=25)
+
+    _check_text(errors, "$.time_period", doc["time_period"], max_words=6)
+
+    motifs = doc["recurring_motifs"]
+    if len(motifs) != 3:
+        errors.append(f"$.recurring_motifs: {len(motifs)} motif(s), expected exactly 3")
+    for i, motif in enumerate(motifs):
+        _check_text(errors, f"$.recurring_motifs[{i}]", motif)
+
+    return errors
+
+
+def b3_errors(doc) -> list:
+    """Post-validation for a B3 response, beyond what ``B3_SCHEMA`` can express."""
+    errors = validate(doc, B3_SCHEMA)
+    if errors:
+        return errors
+
+    errors = []
+    themes = doc["themes_and_values"]
+    if not (2 <= len(themes) <= 4):
+        errors.append(f"$.themes_and_values: {len(themes)} theme(s), expected 2-4")
+    for i, theme in enumerate(themes):
+        _check_text(errors, f"$.themes_and_values[{i}]", theme, max_words=12)
+
+    platforms = doc["audience"]["platforms"]
+    if not (1 <= len(platforms) <= 3):
+        errors.append(f"$.audience.platforms: {len(platforms)} platform(s), expected 1-3")
+    if len(platforms) != len(set(platforms)):
+        errors.append("$.audience.platforms: duplicate platforms are not allowed")
+
+    lines = doc["why_come_back"]
+    if len(lines) != 3:
+        errors.append(f"$.why_come_back: {len(lines)} line(s), expected exactly 3")
+    for i, line in enumerate(lines):
+        _check_text(errors, f"$.why_come_back[{i}]", line, max_words=20)
+
+    return errors

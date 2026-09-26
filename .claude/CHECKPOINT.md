@@ -39,8 +39,8 @@ Phase 0's RC-P1…RC-P11 (history table below) stay in force, plus:
 | 2 | prompting.py + style lock builder | **done** (local 2043 / CI 1843 + 173 skipped) |
 | 3 | story store (+ reserved `outputs/stories` guard, see action log) | **done** (local 2268 / CI 2052 + 189 skipped) |
 | 4 | story-step jobs (RISKIEST) | **done** (local 2324 / CI 2056 + 238 skipped) |
-| 5 | story prompts + context pack | next |
-| 6 | LLM step runners | — |
+| 5 | story prompts + context pack | **done** (local 2401 / CI 2133 + 238 skipped) |
+| 6 | LLM step runners | next |
 | 7 | stories API | — |
 | 8 | style preview strip | — |
 | 9 | CLI | — |
