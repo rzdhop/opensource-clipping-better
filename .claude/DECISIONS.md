@@ -2061,3 +2061,159 @@ dashboard now asks the server before deciding the user is signed out.
   shutdown. The override file says so in its header.
 - With auth on, the dashboard makes one extra request (a 401) before showing
   the sign-in form. Nothing else changes.
+
+<!-- ===================== AI Story phase 0 (stage 14) ===================== -->
+
+## DEC-093 — The product is "rzdhop AI"; the Python package and the CLI names do not move
+**Context.** Phase 0 turns a clip tool into a two-mode product (Clips + Story).
+The name had to follow, but `clipping` is imported by every module, `rzclips` is
+on people's PATH, and `clipping` is still a console script for older installs.
+**Decision.** Rename the *product* only: served title, logo, docs. The Python
+package stays `clipping`; `rzclips` and `clipping` keep working. The distribution
+is `rzdhop-ai`.
+**Consequence.** A rename that touches no import graph is a rename that cannot
+break a render. The cost is a permanent mismatch between the product name and the
+package name — acceptable, and cheaper than a migration nobody asked for.
+
+## DEC-094 — Two modes behind one shell, with the last mode remembered
+**Context.** Clips and Story are different jobs with different pages, but one
+deployment, one auth surface and one Settings page.
+**Decision.** `/clips/*` and `/story/*` under a shared shell; the last mode is
+kept in `localStorage`; every old path (`/new`, `/job/<id>`, `/settings`)
+redirects rather than 404s; an unknown path opens the remembered mode.
+**Consequence.** Bookmarks and the links inside already-rendered job pages keep
+working — RC-P1 exists to prove exactly that. Settings deliberately stays at the
+shared `/settings` rather than moving under `/clips` (spec §1.4: it is shared),
+and the mobile top bar carries its own ⚙️ link because the sidebar is hidden
+under 768 px and the Tier-2 phone script needs to reach it.
+
+## DEC-095 — The legacy story-clip assembly keeps its flag and gains a label
+**Context.** `--story-mode` predates AI Story and does something entirely
+different: it assembles a clip from a recipe. Two things called "story" in one
+product is a support question waiting to happen.
+**Decision.** The flag is unchanged; it is labelled "Story Clip (assembly)"
+wherever it appears.
+**Consequence.** No existing script breaks. The end-to-end path stays
+**UNVERIFIED** (RC-P4) because the sample sources carry no media — the flag
+parses and the loader works, which is all the tests can honestly claim.
+
+## DEC-096 — Generation chains reuse the LLM chain's grammar, parser and hop rules
+**Context.** Five new kinds (image, image_edit, video, tts, vision) each need a
+provider chain with fallbacks. `LLM_CHAIN` already had a grammar, a
+split-on-the-first-slash parser (model ids contain slashes) and skip/swap rules
+proven in production.
+**Decision.** One grammar, one parser, one runner. `registry.parse_spec/parse_chain`
+gained a `providers=` argument (defaulting to the LLM table, so existing
+behaviour is byte-identical) and each kind brings its own provider table.
+**Consequence.** A user who has configured `LLM_CHAIN` already knows how to
+configure `IMAGE_CHAIN`. The gate order is one thing to learn, not six: route →
+adapter → keys → local probe → paid/budget (💸) or limiter (⏳) → attempt.
+
+## DEC-097 — No paid call happens without `budget.check`, and paid is off by default
+**Context.** Phase 0 adds providers that charge per image, per second of video
+and per token. A bug in a retry loop is a bill.
+**Decision.** `ALLOW_PAID` defaults False. Gating lives in the **runner**, never
+in an adapter (an adapter that policed its own budget would be one forgotten
+`if` away from spending). Caps 1.00 / 3.00 / 10.00 USD per episode / day / story.
+Profile `free` → `one_dollar` when paid is switched on. A refusal always carries
+the numbers.
+**Consequence.** Every adapter can be written as a dumb transport, and the audit
+surface is a single function. The refusal text currently prints sub-cent
+estimates as `$0.000` (gemini/flash vision) — cosmetic, recorded as a follow-up.
+
+## DEC-098 — Free counters and paid spend are two different files
+**Context.** Free tiers are rate-limited per day; paid usage is money. Mixing
+them makes both unreadable.
+**Decision.** `data/usage.json` counts **free** calls only and resets at the UTC
+day boundary. `data/spend.json` holds paid spend per day. Both atomic.
+**Consequence.** The Tier-2 script can assert `usage.json` is *byte-identical*
+across a paid click — a one-line proof that a paid call did not silently consume
+a free allowance. It also means the file is a moving target: re-snapshot it
+immediately before the click, never reuse yesterday's hash.
+
+## DEC-099 — The pricing table is dated, and every paid default link must have a price
+**Context.** An estimate is what the budget gate refuses on. A missing price
+means either a crash or an unpriced call.
+**Decision.** `pricing.PRICES` with `PRICES_AS_OF`; `price_for(link)` raises
+`PriceUnknown` rather than guessing; a test asserts every paid link in the
+default chains resolves.
+**Consequence.** Prices drift and the table says when it was read (A-037). The
+failure mode on a stale table is a wrong estimate, not a wrong charge — the
+provider still bills what it bills; the cap is the real protection.
+
+## DEC-100 — Local clients are stdlib HTTP, and optional engines are probed, never imported at startup
+**Context.** ComfyUI and Ollama are optional local daemons; piper/kokoro/
+chatterbox are heavy optional TTS packages. Importing any of them at startup
+would make the web app refuse to boot on a machine that does not have them.
+**Decision.** Stdlib `urllib` transports (including a hand-written RFC 6455
+websocket reader for ComfyUI progress); optional engines imported *inside* the
+synthesize call, behind an `_installed()` probe that reports an install hint.
+`LOCAL_*_URL` defaults are Docker-aware (`host.docker.internal` in a container).
+**Consequence.** No new runtime dependency for a feature most users will not
+enable, and the failure is a readable "unreachable, try `pip install …`" row
+rather than an ImportError at boot.
+
+## DEC-101 — The hardware profile comes from stdlib probes, and `container_no_gpu` is its own answer
+**Context.** Recommendations ("can this machine run Flux locally?") need to know
+the GPU, and this deployment runs in Docker without device passthrough.
+**Decision.** `hardware.probe()` shells out to `nvidia-smi` / `system_profiler` /
+`rocm-smi` / `wmic` and reads `/proc/meminfo`, with every parser fixture-tested;
+ComfyUI's `/system_stats` is authoritative when reachable. `classify()` returns
+`container_no_gpu` distinctly from `cpu_only`.
+**Consequence.** The distinction is the whole point: `cpu_only` means buy a GPU,
+`container_no_gpu` means *you have one, the container cannot see it* — and the
+recommendation carries the `host.docker.internal` hint instead of useless advice.
+Probe errors are recorded rather than hidden ("pynvml: NVML Shared Library Not
+Found" is shown, not swallowed).
+
+## DEC-102 — VIDEO_CHAIN parses and tests with no adapter behind it
+**Context.** Video generation is phase 6. Leaving the kind out entirely would
+mean re-opening the parser, the settings model and the UI later.
+**Decision.** `video` is a first-class kind: it parses, it appears in Settings,
+and a chain test renders `no_adapter` rows.
+**Consequence.** Phase 6 registers adapters and nothing else changes. The cost
+is five rows in the UI that do nothing yet — which is honest, and better than a
+kind that silently does not exist.
+
+## DEC-103 — A chain test spends at most one paid call, per link, on an explicit click
+**Context.** "Test chain" must be safe to press. Walking a chain that ends in a
+paid link would charge for curiosity.
+**Decision.** A chain test runs the free and local links; a paid link is
+*reported*, not called. Calling one requires naming it (`link=`), an explicit
+click on a button that shows the estimate, `allow_paid` on, and a passing
+`budget.check`. It is booked in `data/chain_test_ledger.json` and recorded in
+spend. Serialized by `_CHAIN_TEST_LOCK` under a wall-clock ceiling.
+**Consequence.** The button is safe by construction, and the one paid path is
+auditable to a single ledger line. DEVIATION from the plan text: no separate
+`chain-test-file` route — samples go under a reserved `_chain_test` id served by
+the existing signed outputs route, which keeps the auth surface smaller.
+
+## DEC-104 — The Gemini generation adapters call REST, and no SDK is added
+**Context.** `google-genai` is declared in `pyproject.toml` but absent on the
+Tier-1 host, so an adapter importing it could not be tested where the tests run.
+**Decision.** `generateContent` over the stdlib transport, for both image
+(`responseModalities: [IMAGE]`) and TTS (`[AUDIO]`, PCM → WAV).
+**Consequence.** The adapters are testable with an injected transport and add no
+dependency. The cost is hand-maintained request shapes — which is why the live
+model ids were confirmed against the real endpoint (`gemini-3.8-flash-lite-tts`)
+rather than trusted from a doc page.
+
+## DEC-105 — The no-token override now spans the tailnet, which supersedes DEC-092's condition
+**Context.** DEC-092 allowed this one machine to run without the API token
+through a gitignored compose override, justified by the port being private
+(127.0.0.1 only). On 2026-09-26 the human asked in chat for the app to be
+reachable from the tailnet with no token ("No token nothing only expose to
+tailscale adr") — the phone steps in the Tier-2 script had never reached the
+server, because nothing outside the VM could connect.
+**Decision.** `sudo tailscale serve --bg --tcp 8000 tcp://127.0.0.1:8000`
+(persistent, tailnet-scoped). `DISABLE_AUTH=1` stays.
+**Consequence.** This **supersedes DEC-092's "safe only while the port is
+private" condition**, and that is the point of writing it down: every device on
+the tailnet (2 peers today) now reaches every route — jobs, settings, outputs,
+`POST /api/shutdown` — with no credential. The blast radius is exactly the
+tailnet ACL, so the tailnet ACL is now the only thing protecting this
+deployment. Verified: `100.112.96.111:8000` and the MagicDNS name answer 200;
+the public interface `10.0.0.113` does not. The gitignored override's header was
+rewritten to say so. Undo with `sudo tailscale serve --tcp=8000 off`. A first
+attempt with `--http 80` answered only by hostname (404 on the bare IP) and was
+turned off. **Revisit before this machine ever leaves a trusted tailnet.**

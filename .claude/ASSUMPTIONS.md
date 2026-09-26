@@ -79,11 +79,48 @@
 - **A-028** — The Tailscale serve proxy in front of the app does not cut a
   request shorter than the chain test's 290s worst case (DEC-091). On
   2026-09-24 `tailscale serve status` said "No serve config", so nothing
-  proxies the app on this box today. UNCONFIRMED for a setup that uses it.
+  proxied the app on this box. **Superseded 2026-09-26 (DEC-105):** the app is
+  now served on the tailnet at `:8000` with `DISABLE_AUTH=1`, so this
+  assumption no longer describes the deployment.
 - **A-029** — "No longer available to new users" 404s are per account and
   permanent, so remembering the working model per key for the life of the
   server is safe. Nothing is blacklisted, so a wrong guess costs one fast 404.
   UNCONFIRMED.
+
+- **A-030** — The logo source is `web/dashboard/public/icon.svg`; everything else
+  (favicon, the shell's mark) is derived from it rather than kept as a second
+  copy. UNCONFIRMED for any export size not yet needed.
+- **A-031** — Generation chains stay env/payload-only: there is no per-chain UI
+  editor, and the Test button is the only write path from the page. Revisit if
+  users start hand-editing `.env` to reorder links. UNCONFIRMED.
+- **A-032** — The OpenRouter free vision model is **unmeasured**. Live evidence
+  on 2026-09-25: `openrouter/qwen/qwen3.8-27b:free` answered 429 "temporarily
+  rate-limited upstream" during the stage-13 chain test. It is in the chain as a
+  free fallback, not as something known to answer. UNCONFIRMED until a bench run.
+- **A-033** — `extra_hosts: host.docker.internal:host-gateway` works on this
+  Docker (29.1), which is what lets a container reach a ComfyUI or Ollama on the
+  host. Verified only on this engine version. UNCONFIRMED elsewhere.
+- **A-034** — The API model ids behind the friendly link names are as spec §8.7
+  lists them. **Live-checked only for the keyed ones**: fal, Gemini TTS
+  (`gemini-3.8-flash-lite-tts` confirmed against the real endpoint), pollinations.
+  The rest are read from documentation. An unknown id raises a 404 so the runner
+  swaps rather than stalling — that is the safety net, not a verification.
+  UNCONFIRMED.
+- **A-035** — The ComfyUI workflow templates and the stdlib `/ws` reader are
+  verified **against a fake server only**. No real ComfyUI has run them: the
+  probe on this host reports unreachable. First contact with a real daemon is
+  the test. UNCONFIRMED.
+- **A-036** — Pollinations' keyless rate limit is unpublished; the configured
+  value is a guess that has not been driven to refusal. UNCONFIRMED.
+- **A-037** — The appendix prices hold until re-read. `pricing.PRICES_AS_OF`
+  carries the date; a stale table yields a wrong *estimate*, never a wrong
+  charge — the caps are the real protection (DEC-099). UNCONFIRMED by design:
+  this one is expected to rot.
+- **A-038** — Spec §14 day-one assumptions that concern phase 0, restated so
+  phase 0 does not inherit them silently: Gemini image models have **no free
+  tier**; Cloudflare allows roughly **170 images/day** on the free plan; Edge TTS
+  is usable **without a key**. Only the last is exercised here (edge answered in
+  1.6 s during the stage-13 test). UNCONFIRMED.
 
 ## Confirmed
 - **A-012** — The phone-width overflow is fixable in CSS alone; no JSX change is
