@@ -188,3 +188,12 @@ def test_the_feed_tells_its_caller_when_a_step_finishes_without_a_completed_fram
     progress_branch = source.split("event.type === 'progress'", 1)[1].split("event.type === 'events'", 1)[0]
     assert "TERMINAL.includes(event.status)" in progress_branch
     assert "applyJob(" in progress_branch
+
+
+def test_the_wizard_polls_the_story_while_a_step_runs():
+    # Found live: a refresh landed between the preview step's last write and
+    # its job's flip to awaiting_approval; the feed had stopped, so the page
+    # kept showing "Generating…" for a finished preview.
+    wizard = (DASHBOARD_SRC / "pages" / "story" / "NewStoryWizard.jsx").read_text(encoding="utf-8")
+    assert "setInterval(refresh, STORY_POLL_MS)" in wizard
+    assert "IN_FLIGHT.includes(j.status)" in wizard.split("setInterval(refresh", 1)[0]

@@ -19,6 +19,7 @@ const STEPS = [
 ]
 
 const IN_FLIGHT = ['queued', 'running']
+const STORY_POLL_MS = 4000
 
 function statusOf(key, story) {
   if (key === 'concepts') return story.approvals.concept ? 'done' : 'active'
@@ -316,6 +317,20 @@ function ExistingStory({ storyId }) {
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data])
+
+  // While the story has a step job queued or running, poll the story itself.
+  // The step feeds can miss the moment a job finishes -- a refresh can land
+  // between the step's last write and the job's flip to awaiting_approval,
+  // and the feed has stopped by then -- which left a finished preview shown
+  // as "Generating…" (Tier-2, 2026-09-26). This makes the page converge.
+  const inFlightId = data
+    ? ((data.jobs || []).find((j) => IN_FLIGHT.includes(j.status)) || {}).id || null
+    : null
+  useEffect(() => {
+    if (!inFlightId) return
+    const timer = setInterval(refresh, STORY_POLL_MS)
+    return () => clearInterval(timer)
+  }, [inFlightId, refresh])
 
   const afterAction = () => {
     setManualStep(null)
