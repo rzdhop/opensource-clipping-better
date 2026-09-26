@@ -1,0 +1,98 @@
+{
+  "$schema": "style_template_v1",
+  "template_id": "cartoon_flat",
+  "version": 1,
+  "name": {
+    "en": "2D Cartoon / Flat",
+    "fr": "Cartoon 2D"
+  },
+  "rendering": "bold 2D cartoon, thick uniform outlines, flat colour fills, minimal shading, exaggerated expressions and poses, clean vector look",
+  "camera": "simple staging: medium shots, straight-on or slight angle, occasional extreme close-up for comedy beats, no depth of field",
+  "lighting": "flat, no cast shadows except a soft ground shadow",
+  "character_design_rules": "Simple geometric bodies, one silhouette and one colour per character, dot or oval eyes, signature items drawn as bold shapes. Line weight identical everywhere.",
+  "environment_rules": "minimal backgrounds with 2–3 props, flat horizon, patterned textures allowed",
+  "negative_prompt": "3D, photorealistic, gradients, painterly, sketchy lines, anime",
+  "sheet_background": "cream",
+  "quality_tail": "clean vector, high resolution",
+  "palette": {
+    "primary": [
+      "#FF6B6B",
+      "#4ECDC4",
+      "#FFE66D"
+    ],
+    "accents": [
+      "#1A535C",
+      "#FFFFFF"
+    ],
+    "forbidden": [],
+    "palette_line": "flat saturated primaries, cream paper background"
+  },
+  "motion_rules": {
+    "tier1": {
+      "default_motion": "hold",
+      "by_function": {
+        "wide_establishing": "pan_lr"
+      },
+      "zoom": {
+        "dialogue": [
+          1.0,
+          1.05
+        ],
+        "peak": [
+          1.0,
+          1.05
+        ],
+        "max": 1.05
+      },
+      "pan_pct": 4,
+      "fps": 30,
+      "easing": "ease_in_out",
+      "modifiers": [],
+      "overlays": [],
+      "summary": "pan_lr and hold preferred, push_in ≤ 1.05, 30 fps"
+    },
+    "tier2_prompt_suffix": "snappy 2D animation, limited frames feel, bouncy motion"
+  },
+  "typography": {
+    "font_family": "Luckiest Guy",
+    "font_fallback": "Comic Neue Bold",
+    "subtitle_mode": "word_pop",
+    "subtitle_style": "dark navy on cream pill background, highlight #FF6B6B",
+    "highlight_colour": "#FF6B6B",
+    "overlay_style": "",
+    "ai_label": true
+  },
+  "episode_defaults": {
+    "hook_style": "text_overlay",
+    "cliffhanger_style": "cut_to_black",
+    "shots_per_scene": [
+      2,
+      4
+    ],
+    "max_places": 2,
+    "episode_template_id": "serial_60s_v1"
+  },
+  "audio": {
+    "bgm_moods": [
+      "quirky_ukulele",
+      "sitcom_bounce",
+      "cartoon_chase"
+    ],
+    "emotion_to_mood": {
+      "happy": "sitcom_bounce",
+      "scheming": "quirky_ukulele",
+      "angry": "cartoon_chase",
+      "shocked": "cartoon_chase",
+      "default": "sitcom_bounce"
+    },
+    "sfx_pack": "cartoon",
+    "sfx_cues": [
+      "boing",
+      "honk",
+      "slide_whistle",
+      "pop",
+      "record_scratch"
+    ],
+    "voice_direction": "bright, comedic timing, exaggerated"
+  }
+}

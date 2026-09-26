@@ -1,0 +1,119 @@
+{
+  "$schema": "concept_v1",
+  "concept_id": "detective_dawn",
+  "version": 1,
+  "title": {
+    "fr": "La Détective qui oublie",
+    "en": "The Detective Who Forgets"
+  },
+  "logline": {
+    "fr": "Une détective qui oublie tout à l'aube doit résoudre la même enquête chaque jour, sans savoir en qui elle peut avoir confiance.",
+    "en": "A detective who forgets everything at dawn must solve the same case every day, unsure who she can trust."
+  },
+  "world": {
+    "fr": "Rin se réveille chaque matin sans aucun souvenir de la veille, sinon les notes qu'elle a laissées sur son bureau. Elle doit reconstruire l'enquête en cours avant que l'affaire ne lui échappe à nouveau.",
+    "en": "Rin wakes each morning with no memory of the day before, only the notes she left herself. She must rebuild the ongoing case before it slips away from her again."
+  },
+  "cast_sketch": [
+    {
+      "name": {
+        "fr": "Rin",
+        "en": "Rin"
+      },
+      "role": "lead",
+      "archetype": {
+        "fr": "détective amnésique",
+        "en": "amnesiac detective"
+      },
+      "one_line": {
+        "fr": "Chaque aube, Rin perd la mémoire et doit reconstituer seule l'enquête à partir de ses propres notes.",
+        "en": "Every dawn Rin loses her memory and must piece the case back together from her own notes alone."
+      },
+      "signature_hint": {
+        "fr": "un médaillon contenant la photo de la veille",
+        "en": "a locket holding yesterday's photo"
+      }
+    },
+    {
+      "name": {
+        "fr": "Kaito",
+        "en": "Kaito"
+      },
+      "role": "support",
+      "archetype": {
+        "fr": "partenaire ambigu",
+        "en": "ambiguous partner"
+      },
+      "one_line": {
+        "fr": "Kaito aide Rin chaque jour, mais ses explications ne concordent jamais tout à fait avec les faits.",
+        "en": "Kaito helps Rin every day, but his explanations never quite match the facts."
+      },
+      "signature_hint": {
+        "fr": "un briquet qu'il actionne sans cesse",
+        "en": "a lighter he clicks compulsively"
+      }
+    },
+    {
+      "name": {
+        "fr": "L'Archiviste",
+        "en": "The Archivist"
+      },
+      "role": "recurring",
+      "archetype": {
+        "fr": "gardien énigmatique des archives",
+        "en": "cryptic archive keeper"
+      },
+      "one_line": {
+        "fr": "L'Archiviste conserve tous les dossiers de la ville et ne les partage qu'au prix d'un service en retour.",
+        "en": "The Archivist keeps every file in the city and only shares them for a favor in return."
+      },
+      "signature_hint": {
+        "fr": "un trousseau de cent clés identiques",
+        "en": "a ring of a hundred identical keys"
+      }
+    }
+  ],
+  "main_line": {
+    "fr": "Au fil de la saison, Rin découvre que sa propre amnésie n'est pas un accident, mais le résultat d'un complot qui implique ses plus proches alliés.",
+    "en": "Across the season, Rin discovers her amnesia is no accident, but the result of a conspiracy involving her closest allies."
+  },
+  "hook_formula": {
+    "fr": "Chaque épisode s'ouvre sur l'image choc du réveil de Rin face à un indice qu'elle ne comprend pas encore.",
+    "en": "Each episode opens on the shocking image of Rin waking up to a clue she doesn't yet understand."
+  },
+  "retention_mechanics": {
+    "fr": "Un tableau d'indices récurrent ; le public en sait toujours plus que l'héroïne.",
+    "en": "A recurring clue board; the audience always knows more than the hero."
+  },
+  "value": {
+    "fr": "La mémoire, l'identité, et savoir en qui placer sa confiance.",
+    "en": "Memory, identity, and who to trust."
+  },
+  "style_fit": {
+    "default": "anime",
+    "alternatives": []
+  },
+  "episode_seed": [
+    {
+      "fr": "Rin se réveille sans souvenirs, entourée de notes qu'elle ne reconnaît pas avoir écrites.",
+      "en": "Rin wakes with no memories, surrounded by notes she doesn't recognize writing."
+    },
+    {
+      "fr": "Kaito lui résume l'enquête, mais omet un détail crucial.",
+      "en": "Kaito briefs her on the case, but leaves out one crucial detail."
+    },
+    {
+      "fr": "L'Archiviste accepte de l'aider en échange d'un service qu'il refuse de préciser.",
+      "en": "The Archivist agrees to help in exchange for a favor he won't specify."
+    },
+    {
+      "fr": "Rin retrouve une note de sa propre main qu'elle ne se souvient pas d'avoir écrite hier.",
+      "en": "Rin finds a note in her own handwriting that she doesn't remember writing yesterday."
+    }
+  ],
+  "content_flags": {
+    "violence": "mild",
+    "romance": "mild",
+    "age": "13+"
+  }
+}

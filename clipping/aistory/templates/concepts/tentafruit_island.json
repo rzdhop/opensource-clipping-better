@@ -1,0 +1,157 @@
+{
+  "$schema": "concept_v1",
+  "concept_id": "tentafruit_island",
+  "version": 1,
+  "title": {
+    "fr": "L'Île Tentafruit",
+    "en": "Tentafruit Island"
+  },
+  "logline": {
+    "fr": "Sur une île de téléréalité, des fruits forment des couples et complotent pour survivre au vote hebdomadaire.",
+    "en": "On a reality-show island, fruits pair up and scheme to survive the weekly elimination vote."
+  },
+  "world": {
+    "fr": "Chaque semaine, les concurrents forment des couples pour ne pas être éliminés, et un téléphone en noix de coco annonce les votes du public. Sous les paillettes, tout le monde ment à tout le monde pour rester à l'antenne.",
+    "en": "Every week, contestants pair up to avoid elimination, and a coconut phone announces the public's votes. Behind the glitter, everyone lies to everyone to stay on screen."
+  },
+  "cast_sketch": [
+    {
+      "name": {
+        "fr": "Kiwilo",
+        "en": "Kiwilo"
+      },
+      "role": "lead",
+      "archetype": {
+        "fr": "manipulateur charmeur",
+        "en": "charming schemer"
+      },
+      "one_line": {
+        "fr": "Kiwilo séduit tout le monde pour survivre au vote, mais personne ne sait ce qu'il veut vraiment.",
+        "en": "Kiwilo charms everyone to survive the vote, but nobody knows what he actually wants."
+      },
+      "signature_hint": {
+        "fr": "une fine chaîne en or",
+        "en": "a thin gold chain"
+      }
+    },
+    {
+      "name": {
+        "fr": "Mangella",
+        "en": "Mangella"
+      },
+      "role": "lead",
+      "archetype": {
+        "fr": "meneuse orgueilleuse",
+        "en": "proud front-runner"
+      },
+      "one_line": {
+        "fr": "Mangella veut gagner à sa façon, quitte à sacrifier ses alliances les plus proches.",
+        "en": "Mangella wants to win on her own terms, even if it costs her closest alliances."
+      },
+      "signature_hint": {
+        "fr": "une pince à cheveux strass en forme de couronne",
+        "en": "a rhinestone tiara hair clip"
+      }
+    },
+    {
+      "name": {
+        "fr": "Broccolia",
+        "en": "Broccolia"
+      },
+      "role": "recurring",
+      "archetype": {
+        "fr": "matriarche présentatrice",
+        "en": "matriarch host"
+      },
+      "one_line": {
+        "fr": "Broccolia anime le jeu et connaît tous les secrets, mais ne les révèle qu'à son avantage.",
+        "en": "Broccolia hosts the game and knows every secret, but only reveals them when it serves her."
+      },
+      "signature_hint": {
+        "fr": "un micro-serre-tête incrusté de strass",
+        "en": "a rhinestone-studded headset microphone"
+      }
+    },
+    {
+      "name": {
+        "fr": "Pepperino",
+        "en": "Pepperino"
+      },
+      "role": "support",
+      "archetype": {
+        "fr": "séducteur écervelé",
+        "en": "reckless playboy"
+      },
+      "one_line": {
+        "fr": "Pepperino collectionne les cœurs sans jamais penser aux conséquences de ses choix.",
+        "en": "Pepperino collects hearts without ever thinking through the consequences of his choices."
+      },
+      "signature_hint": {
+        "fr": "des lunettes de soleil en forme de cœur",
+        "en": "heart-shaped sunglasses"
+      }
+    },
+    {
+      "name": {
+        "fr": "Avocardo",
+        "en": "Avocardo"
+      },
+      "role": "support",
+      "archetype": {
+        "fr": "héritier gâté",
+        "en": "entitled heir"
+      },
+      "one_line": {
+        "fr": "Avocardo croit que sa fortune familiale lui garantit la victoire, quoi qu'il arrive.",
+        "en": "Avocardo believes his family fortune guarantees his win, no matter what."
+      },
+      "signature_hint": {
+        "fr": "une chevalière frappée du blason familial",
+        "en": "a signet ring stamped with the family crest"
+      }
+    }
+  ],
+  "main_line": {
+    "fr": "Au fil de la saison, alliances et trahisons se succèdent jusqu'au vote final qui ne laissera qu'un seul couple debout.",
+    "en": "Across the season, alliances and betrayals pile up until the final vote leaves only one couple standing."
+  },
+  "hook_formula": {
+    "fr": "Chaque épisode s'ouvre sur un objet qui annonce l'enjeu de la semaine — un bulletin de vote, un message sur le téléphone en noix de coco — en moins de deux secondes.",
+    "en": "Each episode opens on an object that states the week's stakes — a ballot, a text on the coconut phone — in under two seconds."
+  },
+  "retention_mechanics": {
+    "fr": "Éliminations, alliances et trahisons ; un vote hebdomadaire dont tout le monde débat en commentaires.",
+    "en": "Eliminations, alliances and betrayals; a weekly audience vote everyone argues about in the comments."
+  },
+  "value": {
+    "fr": "La loyauté face à l'ambition, et ce que les gens sont prêts à faire pour être aimés.",
+    "en": "Loyalty versus ambition, and what people will do to be liked."
+  },
+  "style_fit": {
+    "default": "fruit_drama",
+    "alternatives": []
+  },
+  "episode_seed": [
+    {
+      "fr": "Les concurrents débarquent sur l'île et doivent former un couple avant la tombée de la nuit.",
+      "en": "The contestants land on the island and must pair up before nightfall."
+    },
+    {
+      "fr": "Kiwilo choisit Mangella par calcul, pas par amour, et Pepperino s'en aperçoit.",
+      "en": "Kiwilo picks Mangella out of calculation, not love, and Pepperino notices."
+    },
+    {
+      "fr": "Le téléphone en noix de coco sonne : le premier vote vient de s'ouvrir.",
+      "en": "The coconut phone rings: the first vote has just opened."
+    },
+    {
+      "fr": "Broccolia révèle une règle cachée qui change tout pour le finale.",
+      "en": "Broccolia reveals a hidden rule that changes everything for the finale."
+    }
+  ],
+  "content_flags": {
+    "violence": "none",
+    "romance": "mild",
+    "age": "13+"
+  }
+}

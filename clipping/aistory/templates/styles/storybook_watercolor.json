@@ -1,0 +1,98 @@
+{
+  "$schema": "style_template_v1",
+  "template_id": "storybook_watercolor",
+  "version": 1,
+  "name": {
+    "en": "Storybook Watercolor",
+    "fr": "Aquarelle de conte"
+  },
+  "rendering": "children's picture-book watercolour illustration, soft wet edges, visible paper grain, gentle ink linework, hand-painted textures",
+  "camera": "picture-book compositions: wide storytelling frames, characters small in big worlds, occasional tender close-ups",
+  "lighting": "soft diffuse daylight, candle or lantern glow at night, no hard shadows",
+  "character_design_rules": "Gentle rounded characters with one identifying colour and one signature item (a red scarf, a tiny lantern). Same ink line, same paint texture across images.",
+  "environment_rules": "cottages, forests, seasides, attics; whimsical but grounded, hand-drawn details",
+  "negative_prompt": "3D, photorealistic, digital gradients, neon, hard edges, anime",
+  "sheet_background": "white watercolour paper",
+  "quality_tail": "hand-painted, high resolution scan",
+  "palette": {
+    "primary": [
+      "#A7C7E7",
+      "#F4A6A6",
+      "#C9E4CA"
+    ],
+    "accents": [
+      "#6B4F3A"
+    ],
+    "forbidden": [],
+    "palette_line": "muted pastels, warm sepia ink, lots of white paper"
+  },
+  "motion_rules": {
+    "tier1": {
+      "default_motion": "pan_lr",
+      "by_function": {},
+      "zoom": {
+        "dialogue": [
+          1.0,
+          1.06
+        ],
+        "peak": [
+          1.0,
+          1.06
+        ],
+        "max": 1.06
+      },
+      "pan_pct": 5,
+      "fps": 30,
+      "easing": "ease_in_out",
+      "modifiers": [],
+      "overlays": [
+        "paper_texture"
+      ],
+      "summary": "pan_lr slow ±5 %, push_in ≤ 1.06, add paper_texture overlay option"
+    },
+    "tier2_prompt_suffix": "very gentle motion, drifting particles, painterly, no morphing"
+  },
+  "typography": {
+    "font_family": "Patrick Hand",
+    "font_fallback": "Caveat Bold",
+    "subtitle_mode": "two_line",
+    "subtitle_style": "sepia on translucent paper band, highlight #F4A6A6",
+    "highlight_colour": "#F4A6A6",
+    "overlay_style": "",
+    "ai_label": true
+  },
+  "episode_defaults": {
+    "hook_style": "text_overlay",
+    "cliffhanger_style": "cut_to_black",
+    "shots_per_scene": [
+      2,
+      4
+    ],
+    "max_places": 2,
+    "episode_template_id": "serial_60s_v1"
+  },
+  "audio": {
+    "bgm_moods": [
+      "lullaby_piano",
+      "music_box",
+      "gentle_strings"
+    ],
+    "emotion_to_mood": {
+      "tender": "lullaby_piano",
+      "happy": "music_box",
+      "sad": "gentle_strings",
+      "neutral": "gentle_strings",
+      "default": "lullaby_piano"
+    },
+    "sfx_pack": "gentle",
+    "sfx_cues": [
+      "page_turn",
+      "wind_soft",
+      "birds",
+      "twinkle",
+      "footsteps_grass"
+    ],
+    "voice_direction": "warm storyteller, unhurried, kind"
+  },
+  "notes": "The spec's episode_defaults aside for hook_style: text_overlay says \"(the 'rule of the day')\" -- the on-screen text for this template's hook states the day's rule, not arbitrary text."
+}

@@ -1,0 +1,119 @@
+{
+  "$schema": "concept_v1",
+  "concept_id": "last_bus_3am",
+  "version": 1,
+  "title": {
+    "fr": "Le Dernier Bus à 3h du matin",
+    "en": "Last Bus at 3 AM"
+  },
+  "logline": {
+    "fr": "Un chauffeur de nuit ramasse des passagers qui, très vite, se révèlent ne plus vraiment appartenir au monde des vivants.",
+    "en": "A night-bus driver picks up passengers who, it quickly turns out, don't quite belong among the living."
+  },
+  "world": {
+    "fr": "Sous la pluie d'une ville qui ne dort jamais vraiment, un bus roule après minuit pour des passagers que personne d'autre ne voit monter. Chaque trajet ramène Sam un peu plus près d'un deuil qu'il fuit depuis des années.",
+    "en": "In a rain-soaked city that never quite sleeps, a bus runs past midnight for passengers no one else sees board. Every route pulls Sam a little closer to a grief he's been outrunning for years."
+  },
+  "cast_sketch": [
+    {
+      "name": {
+        "fr": "Chauffeur Sam",
+        "en": "Driver Sam"
+      },
+      "role": "lead",
+      "archetype": {
+        "fr": "chauffeur hanté par son passé",
+        "en": "driver haunted by his past"
+      },
+      "one_line": {
+        "fr": "Sam conduit le dernier bus de la nuit pour fuir un deuil qu'il refuse encore d'affronter.",
+        "en": "Sam drives the last bus of the night to outrun a grief he still won't face."
+      },
+      "signature_hint": {
+        "fr": "une photo décolorée épinglée au pare-soleil",
+        "en": "a faded photograph clipped to the visor"
+      }
+    },
+    {
+      "name": {
+        "fr": "La Régulatrice",
+        "en": "The Dispatcher"
+      },
+      "role": "recurring",
+      "archetype": {
+        "fr": "voix invisible et énigmatique",
+        "en": "invisible, cryptic voice"
+      },
+      "one_line": {
+        "fr": "La Régulatrice guide Sam par radio, mais elle semble en savoir bien plus qu'une simple collègue.",
+        "en": "The Dispatcher guides Sam over the radio, but she seems to know far more than a coworker should."
+      },
+      "signature_hint": {
+        "fr": "un talkie-walkie grésillant",
+        "en": "a crackling handheld radio"
+      }
+    },
+    {
+      "name": {
+        "fr": "Le Passager",
+        "en": "The Passenger"
+      },
+      "role": "guest",
+      "archetype": {
+        "fr": "inconnu au secret bouleversant",
+        "en": "stranger with a haunting secret"
+      },
+      "one_line": {
+        "fr": "Chaque passager monte avec une histoire inachevée qu'il doit régler avant le terminus.",
+        "en": "Each passenger boards with an unfinished story they must settle before the last stop."
+      },
+      "signature_hint": {
+        "fr": "un ticket froissé d'un lieu qui n'existe plus",
+        "en": "a creased ticket from a place that no longer exists"
+      }
+    }
+  ],
+  "main_line": {
+    "fr": "Chaque passager résout un mystère personnel, tandis que les indices s'accumulent sur le propre secret que Sam transporte depuis le premier soir.",
+    "en": "Each passenger resolves a personal mystery, while the clues pile up about the very secret Sam has been carrying since night one."
+  },
+  "hook_formula": {
+    "fr": "Chaque épisode s'ouvre sur un objet que le nouveau passager laisse sur le siège — un ticket, une alliance, une lettre — qui pose aussitôt la question de la nuit.",
+    "en": "Each episode opens on an object the new passenger leaves on the seat — a ticket, a wedding ring, a letter — that immediately sets up the night's question."
+  },
+  "retention_mechanics": {
+    "fr": "Une anthologie dans la série : chaque passager est un mini-mystère, tandis que le secret du chauffeur grandit.",
+    "en": "An anthology within the serial: each passenger is a mini-mystery, while the driver's own secret keeps growing."
+  },
+  "value": {
+    "fr": "Le deuil, la culpabilité, et apprendre à lâcher prise.",
+    "en": "Grief, guilt, and letting go."
+  },
+  "style_fit": {
+    "default": "cinematic_real",
+    "alternatives": []
+  },
+  "episode_seed": [
+    {
+      "fr": "Sam prend son service et croise une passagère qui ne se souvient pas être montée.",
+      "en": "Sam starts his shift and picks up a passenger who can't remember getting on."
+    },
+    {
+      "fr": "La Régulatrice donne à Sam un itinéraire qui n'existe sur aucune carte.",
+      "en": "The Dispatcher gives Sam a route that appears on no map."
+    },
+    {
+      "fr": "La passagère laisse un ticket froissé portant une date d'il y a dix ans.",
+      "en": "The passenger leaves behind a creased ticket dated ten years ago."
+    },
+    {
+      "fr": "Sam refuse de s'arrêter au dernier arrêt, terrifié par ce qui l'y attend.",
+      "en": "Sam refuses to stop at the final stop, terrified of what waits there."
+    }
+  ],
+  "content_flags": {
+    "violence": "mild",
+    "romance": "none",
+    "age": "13+"
+  }
+}

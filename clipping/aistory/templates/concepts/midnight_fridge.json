@@ -1,0 +1,140 @@
+{
+  "$schema": "concept_v1",
+  "concept_id": "midnight_fridge",
+  "version": 1,
+  "title": {
+    "fr": "Le Frigo de Minuit",
+    "en": "Midnight Fridge"
+  },
+  "logline": {
+    "fr": "Chaque nuit, un objet disparaît du frigo, et l'Inspecteur Cornichon doit démasquer le coupable avant l'aube.",
+    "en": "Every night something vanishes from the fridge, and Detective Pickle must unmask the culprit before dawn."
+  },
+  "world": {
+    "fr": "À l'intérieur d'un frigo familial, les aliments vivent en société bien rangée. Mais chaque nuit, quelque chose disparaît, et la confiance entre voisins de rayon s'effrite un peu plus.",
+    "en": "Inside a family fridge, the food items live an orderly little society. But every night something goes missing, and trust between shelf-neighbors erodes a little more."
+  },
+  "cast_sketch": [
+    {
+      "name": {
+        "fr": "Inspecteur Cornichon",
+        "en": "Detective Pickle"
+      },
+      "role": "lead",
+      "archetype": {
+        "fr": "détective pointilleux",
+        "en": "meticulous detective"
+      },
+      "one_line": {
+        "fr": "L'Inspecteur Cornichon enquête chaque nuit sur ce qui disparaît du frigo, sans jamais se tromper de coupable... ou presque.",
+        "en": "Detective Pickle investigates what vanishes from the fridge every night, and he's almost never wrong about the culprit."
+      },
+      "signature_hint": {
+        "fr": "une loupe en forme de tranche de cornichon",
+        "en": "a magnifying glass shaped like a pickle slice"
+      }
+    },
+    {
+      "name": {
+        "fr": "Madame Brie",
+        "en": "Madame Brie"
+      },
+      "role": "support",
+      "archetype": {
+        "fr": "aristocrate méfiante",
+        "en": "wary aristocrat"
+      },
+      "one_line": {
+        "fr": "Madame Brie observe tout le monde de haut, certaine que la vérité finit toujours par suinter.",
+        "en": "Madame Brie looks down on everyone, certain the truth always seeps out eventually."
+      },
+      "signature_hint": {
+        "fr": "un napperon en dentelle qu'elle emporte partout",
+        "en": "a lace doily she never leaves behind"
+      }
+    },
+    {
+      "name": {
+        "fr": "Les Yaourts jumeaux",
+        "en": "The twin Yogurts"
+      },
+      "role": "recurring",
+      "archetype": {
+        "fr": "duo insaisissable",
+        "en": "elusive duo"
+      },
+      "one_line": {
+        "fr": "Les Yaourts jumeaux savent toujours plus qu'ils ne disent, et jamais la même chose à la fois.",
+        "en": "The twin Yogurts always know more than they say, and never say it the same way twice."
+      },
+      "signature_hint": {
+        "fr": "des couvercles assortis ornés de fruits rouges",
+        "en": "matching berry-topped lids"
+      }
+    },
+    {
+      "name": {
+        "fr": "Œuf",
+        "en": "Egg"
+      },
+      "role": "support",
+      "archetype": {
+        "fr": "parano culpabilisé",
+        "en": "guilt-ridden paranoiac"
+      },
+      "one_line": {
+        "fr": "Œuf est certain qu'on va bientôt l'accuser, alors il accuse tout le monde en premier.",
+        "en": "Egg is certain he's about to be blamed, so he blames everyone else first."
+      },
+      "signature_hint": {
+        "fr": "une coquille fêlée rafistolée au ruban adhésif",
+        "en": "a cracked shell patched with tape"
+      }
+    }
+  ],
+  "main_line": {
+    "fr": "Une série de disparitions nocturnes révèle peu à peu un vol bien plus grand que prévu, orchestré par quelqu'un que personne ne soupçonnait.",
+    "en": "A string of nightly disappearances slowly uncovers a much bigger theft, orchestrated by someone nobody suspected."
+  },
+  "hook_formula": {
+    "fr": "Chaque épisode s'ouvre sur l'image choc d'un rayon vide, sans un mot.",
+    "en": "Each episode opens on the shocking sight of an empty shelf, without a word."
+  },
+  "retention_mechanics": {
+    "fr": "Une enquête à énigme avec un suspect par épisode ; le public devine avec l'inspecteur.",
+    "en": "A whodunit with a suspect per episode; the audience guesses along with the detective."
+  },
+  "value": {
+    "fr": "La confiance, la mise à l'écart injuste, et la preuve plutôt que la rumeur.",
+    "en": "Trust, scapegoating, and evidence over rumor."
+  },
+  "style_fit": {
+    "default": "family_3d",
+    "alternatives": [
+      "fruit_drama"
+    ]
+  },
+  "episode_seed": [
+    {
+      "fr": "Le pot de confiture préféré de tous disparaît sans laisser de trace.",
+      "en": "Everyone's favorite jam jar disappears without a trace."
+    },
+    {
+      "fr": "L'Inspecteur Cornichon interroge Madame Brie, qui refuse de coopérer.",
+      "en": "Detective Pickle questions Madame Brie, who refuses to cooperate."
+    },
+    {
+      "fr": "Les Yaourts jumeaux se contredisent sur ce qu'ils ont vu cette nuit-là.",
+      "en": "The twin Yogurts contradict each other about what they saw that night."
+    },
+    {
+      "fr": "Œuf accuse un voisin innocent pour détourner les soupçons.",
+      "en": "Egg accuses an innocent neighbor to deflect suspicion."
+    }
+  ],
+  "content_flags": {
+    "violence": "none",
+    "romance": "none",
+    "age": "10+"
+  }
+}

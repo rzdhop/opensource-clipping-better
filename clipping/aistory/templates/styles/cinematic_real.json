@@ -1,0 +1,99 @@
+{
+  "$schema": "style_template_v1",
+  "template_id": "cinematic_real",
+  "version": 1,
+  "name": {
+    "en": "Realistic Cinematic",
+    "fr": "Cinéma réaliste"
+  },
+  "rendering": "live-action cinematic still, 35mm film grain, anamorphic lens characteristics, natural skin texture, realistic materials, shot on a digital cinema camera",
+  "camera": "thriller coverage: long lens compressions, handheld micro-shake for unease, static wides for dread, over-the-shoulder for dialogue, 50–85mm looks",
+  "lighting": "motivated practical light, low-key, strong contrast, sodium street lamps or cold fluorescents, silhouettes",
+  "character_design_rules": "Characters are fictional adults with one memorable physical trait and 2–3 signature wardrobe items; never resembling a specific real person. Keep age, build, hairstyle and wardrobe identical.",
+  "environment_rules": "real, lived-in locations: night buses, diners, offices, parking garages; weathered surfaces, reflections, rain",
+  "negative_prompt": "cartoon, anime, 3D render, illustration, oversaturated, smooth plastic skin, celebrity likeness",
+  "sheet_background": "dark charcoal",
+  "quality_tail": "photorealistic, cinematic, 8k",
+  "palette": {
+    "primary": [
+      "#0B1C2C",
+      "#D98E04",
+      "#5C6B73"
+    ],
+    "accents": [
+      "#F2F2F2"
+    ],
+    "forbidden": [],
+    "palette_line": "teal-and-orange grade with lifted blacks; noir variant desaturated with one warm practical"
+  },
+  "motion_rules": {
+    "tier1": {
+      "default_motion": "push_in",
+      "by_function": {
+        "wide_establishing": "pan_lr"
+      },
+      "zoom": {
+        "dialogue": [
+          1.0,
+          1.06
+        ],
+        "peak": [
+          1.0,
+          1.06
+        ],
+        "max": 1.06
+      },
+      "pan_pct": 3,
+      "fps": 30,
+      "easing": "ease_in_out",
+      "modifiers": [
+        "handheld"
+      ],
+      "overlays": [],
+      "summary": "push_in 1.00→1.06 (slow), pan_lr ±3 %, add handheld micro-jitter option (±2 px sinusoidal) on tension scenes"
+    },
+    "tier2_prompt_suffix": "photoreal, natural human motion, subtle handheld camera, film grain, no morphing"
+  },
+  "typography": {
+    "font_family": "Bebas Neue",
+    "font_fallback": "Oswald",
+    "subtitle_mode": "two_line",
+    "subtitle_style": "white with 2 px black outline, highlight #D98E04",
+    "highlight_colour": "#D98E04",
+    "overlay_style": "small caps, letter-spaced",
+    "ai_label": true
+  },
+  "episode_defaults": {
+    "hook_style": "insert_prop",
+    "cliffhanger_style": "hard_stop",
+    "shots_per_scene": [
+      2,
+      4
+    ],
+    "max_places": 2,
+    "episode_template_id": "serial_60s_v1"
+  },
+  "audio": {
+    "bgm_moods": [
+      "dark_ambient",
+      "pulse_thriller",
+      "noir_jazz"
+    ],
+    "emotion_to_mood": {
+      "fear": "dark_ambient",
+      "tension": "pulse_thriller",
+      "neutral": "noir_jazz",
+      "shocked": "pulse_thriller",
+      "default": "dark_ambient"
+    },
+    "sfx_pack": "real",
+    "sfx_cues": [
+      "room_tone",
+      "footsteps_concrete",
+      "car_pass",
+      "phone_buzz",
+      "breath"
+    ],
+    "voice_direction": "grounded, low, restrained, realistic pacing"
+  }
+}

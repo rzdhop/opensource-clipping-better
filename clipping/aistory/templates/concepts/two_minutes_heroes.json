@@ -1,0 +1,119 @@
+{
+  "$schema": "concept_v1",
+  "concept_id": "two_minutes_heroes",
+  "version": 1,
+  "title": {
+    "fr": "Deux Minutes pour Sauver le Monde",
+    "en": "Two Minutes to Save the World"
+  },
+  "logline": {
+    "fr": "Deux super-héros maladroits ont deux minutes chaque jour pour empêcher une catastrophe absurde.",
+    "en": "Two bumbling superheroes have two minutes each day to stop an absurd disaster."
+  },
+  "world": {
+    "fr": "Chaque jour, une nouvelle catastrophe menace la ville, et Capitaine Évidence et Mademoiselle Suranalyse n'ont que deux minutes pour la résoudre. Leur chat régulateur, Mittens, garde son calme de moins en moins bien à chaque épisode.",
+    "en": "Every day a new disaster threatens the city, and Captain Obvious and Miss Overthink have only two minutes to fix it. Their cat dispatcher, Mittens, keeps his cool a little less each episode."
+  },
+  "cast_sketch": [
+    {
+      "name": {
+        "fr": "Capitaine Évidence",
+        "en": "Captain Obvious"
+      },
+      "role": "lead",
+      "archetype": {
+        "fr": "héros qui énonce l'évident",
+        "en": "hero who states the obvious"
+      },
+      "one_line": {
+        "fr": "Capitaine Évidence sauve la situation en énonçant des vérités que personne n'avait pensé à dire à voix haute.",
+        "en": "Captain Obvious saves the day by stating truths nobody thought to say out loud."
+      },
+      "signature_hint": {
+        "fr": "une loupe démesurément grande",
+        "en": "a comically oversized magnifying glass"
+      }
+    },
+    {
+      "name": {
+        "fr": "Mademoiselle Suranalyse",
+        "en": "Miss Overthink"
+      },
+      "role": "lead",
+      "archetype": {
+        "fr": "stratège paralysée par le doute",
+        "en": "strategist paralyzed by doubt"
+      },
+      "one_line": {
+        "fr": "Mademoiselle Suranalyse a un plan pour tout, sauf pour agir avant que le temps ne soit écoulé.",
+        "en": "Miss Overthink has a plan for everything except acting before the clock runs out."
+      },
+      "signature_hint": {
+        "fr": "une ceinture bourrée de fiches mémo",
+        "en": "a utility belt bulging with note cards"
+      }
+    },
+    {
+      "name": {
+        "fr": "Mittens",
+        "en": "Mittens"
+      },
+      "role": "recurring",
+      "archetype": {
+        "fr": "chat régulateur épuisé",
+        "en": "exhausted cat dispatcher"
+      },
+      "one_line": {
+        "fr": "Mittens coordonne les deux héros par radio, à bout de patience après chaque catastrophe évitée de justesse.",
+        "en": "Mittens coordinates the two heroes by radio, out of patience after every narrowly avoided disaster."
+      },
+      "signature_hint": {
+        "fr": "un mini-casque de régulateur",
+        "en": "a tiny headset dispatcher radio"
+      }
+    }
+  ],
+  "main_line": {
+    "fr": "La saison enchaîne les catastrophes du quotidien jusqu'à un désastre si énorme que les deux héros devront enfin apprendre à vraiment travailler ensemble.",
+    "en": "The season chains everyday disasters until one is so enormous the two heroes finally have to learn to actually work together."
+  },
+  "hook_formula": {
+    "fr": "Chaque épisode s'ouvre sur un texte à l'écran de six mots maximum annonçant la catastrophe du jour.",
+    "en": "Each episode opens on an on-screen text of six words or fewer announcing the day's disaster."
+  },
+  "retention_mechanics": {
+    "fr": "Escalade façon sitcom, gags récurrents, et le cliffhanger « comment ont-ils survécu ? ».",
+    "en": "Sitcom-style escalation, running gags, and 'how did they survive that' cliffhangers."
+  },
+  "value": {
+    "fr": "Le travail d'équipe, l'humilité, et accepter l'échec.",
+    "en": "Teamwork, humility, and embracing failure."
+  },
+  "style_fit": {
+    "default": "cartoon_flat",
+    "alternatives": []
+  },
+  "episode_seed": [
+    {
+      "fr": "Une catastrophe absurde éclate en ville, et Mittens réveille les deux héros en urgence.",
+      "en": "An absurd disaster breaks out in the city, and Mittens wakes the two heroes in a panic."
+    },
+    {
+      "fr": "Capitaine Évidence énonce une évidence qui, pour une fois, sauve un temps précieux.",
+      "en": "Captain Obvious states the obvious, and for once it saves precious time."
+    },
+    {
+      "fr": "Mademoiselle Suranalyse propose sept plans alors qu'il ne reste que trente secondes.",
+      "en": "Miss Overthink proposes seven plans with only thirty seconds left."
+    },
+    {
+      "fr": "Les deux héros s'en sortent de justesse, au grand soulagement épuisé de Mittens.",
+      "en": "The two heroes barely pull through, to Mittens' exhausted relief."
+    }
+  ],
+  "content_flags": {
+    "violence": "mild",
+    "romance": "none",
+    "age": "all"
+  }
+}

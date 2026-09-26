@@ -1,0 +1,98 @@
+{
+  "$schema": "style_template_v1",
+  "template_id": "claymation",
+  "version": 1,
+  "name": {
+    "en": "Claymation / Stop-motion",
+    "fr": "Pâte à modeler"
+  },
+  "rendering": "stop-motion claymation, plasticine characters with visible fingerprints and tool marks, miniature handmade sets, felt and cardboard textures, shallow macro depth of field, slight frame-to-frame imperfection",
+  "camera": "macro lens look, low camera height at character scale, static tripod shots, occasional slow slider move",
+  "lighting": "small warm practical lights, soft boxes, visible set edges allowed",
+  "character_design_rules": "Chunky simplified bodies, bead or button eyes, one signature accessory sculpted in clay. Same clay colour and finish in every shot.",
+  "environment_rules": "handmade miniature sets: cardboard buildings, felt grass, painted backdrops, tiny props",
+  "negative_prompt": "smooth CGI, photorealistic humans, 2D, anime, perfect symmetry",
+  "sheet_background": "neutral grey card",
+  "quality_tail": "macro photography, handmade detail",
+  "palette": {
+    "primary": [
+      "#E76F51",
+      "#2A9D8F",
+      "#E9C46A"
+    ],
+    "accents": [
+      "#264653",
+      "#F4F1DE"
+    ],
+    "forbidden": [],
+    "palette_line": "earthy saturated clay colours, warm tungsten set lighting"
+  },
+  "motion_rules": {
+    "tier1": {
+      "default_motion": "hold",
+      "by_function": {},
+      "zoom": {
+        "dialogue": [
+          1.0,
+          1.05
+        ],
+        "peak": [
+          1.0,
+          1.05
+        ],
+        "max": 1.05
+      },
+      "pan_pct": 4,
+      "fps": 30,
+      "easing": "ease_in_out",
+      "modifiers": [
+        "jitter_stopmotion"
+      ],
+      "overlays": [],
+      "summary": "hold with jitter_stopmotion option (12 fps step, ±1 px) and push_in ≤ 1.05"
+    },
+    "tier2_prompt_suffix": "stop-motion, 12 frames per second feel, handmade animation, no smooth CGI motion"
+  },
+  "typography": {
+    "font_family": "Chewy",
+    "font_fallback": "Sniglet",
+    "subtitle_mode": "two_line",
+    "subtitle_style": "cream on dark teal band, highlight #E9C46A",
+    "highlight_colour": "#E9C46A",
+    "overlay_style": "",
+    "ai_label": true
+  },
+  "episode_defaults": {
+    "hook_style": "shocking_image",
+    "cliffhanger_style": "hard_stop",
+    "shots_per_scene": [
+      2,
+      4
+    ],
+    "max_places": 2,
+    "episode_template_id": "serial_60s_v1"
+  },
+  "audio": {
+    "bgm_moods": [
+      "quirky_marimba",
+      "toy_orchestra",
+      "suspense_pizzicato"
+    ],
+    "emotion_to_mood": {
+      "scheming": "quirky_marimba",
+      "happy": "toy_orchestra",
+      "tension": "suspense_pizzicato",
+      "shocked": "suspense_pizzicato",
+      "default": "quirky_marimba"
+    },
+    "sfx_pack": "foley",
+    "sfx_cues": [
+      "clay_squish",
+      "wood_knock",
+      "paper_rustle",
+      "tiny_bell",
+      "footsteps_felt"
+    ],
+    "voice_direction": "quirky, earnest, slightly deadpan"
+  }
+}

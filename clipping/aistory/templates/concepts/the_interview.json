@@ -1,0 +1,119 @@
+{
+  "$schema": "concept_v1",
+  "concept_id": "the_interview",
+  "version": 1,
+  "title": {
+    "fr": "L'Entretien",
+    "en": "The Interview"
+  },
+  "logline": {
+    "fr": "Une entreprise mystérieuse pose à chaque candidat une question morale impossible, et personne ne voit jamais le recruteur.",
+    "en": "A mysterious company asks every candidate one impossible moral question, and no one ever sees the interviewer."
+  },
+  "world": {
+    "fr": "Dans une salle d'attente aseptisée, un nouveau candidat se présente chaque épisode à un entretien pas comme les autres. Le recruteur ne se montre jamais, mais sa question finit toujours par révéler qui est vraiment la personne en face.",
+    "en": "In a sterile waiting room, a new candidate shows up each episode for an interview unlike any other. The interviewer never appears, but his question always ends up revealing who the person across the desk truly is."
+  },
+  "cast_sketch": [
+    {
+      "name": {
+        "fr": "Le Recruteur",
+        "en": "The Interviewer"
+      },
+      "role": "lead",
+      "archetype": {
+        "fr": "voix invisible et implacable",
+        "en": "invisible, relentless voice"
+      },
+      "one_line": {
+        "fr": "Le Recruteur ne se montre jamais, mais pose à chaque candidat une question morale à laquelle personne n'est prêt.",
+        "en": "The Interviewer never shows himself, but asks every candidate one moral question nobody is ready for."
+      },
+      "signature_hint": {
+        "fr": "une simple chemise noire qui ne quitte jamais le bureau",
+        "en": "a single black folder that never leaves the desk"
+      }
+    },
+    {
+      "name": {
+        "fr": "La Réceptionniste",
+        "en": "The Receptionist"
+      },
+      "role": "recurring",
+      "archetype": {
+        "fr": "réceptionniste trop bien informée",
+        "en": "receptionist who knows too much"
+      },
+      "one_line": {
+        "fr": "La Réceptionniste accueille chaque candidat avec un sourire, et semble toujours savoir comment l'entretien va se terminer.",
+        "en": "The Receptionist greets every candidate with a smile, and always seems to know how the interview will end."
+      },
+      "signature_hint": {
+        "fr": "un registre de rendez-vous entièrement rempli à la main",
+        "en": "an appointment book filled entirely by hand"
+      }
+    },
+    {
+      "name": {
+        "fr": "Le Candidat",
+        "en": "The Candidate"
+      },
+      "role": "guest",
+      "archetype": {
+        "fr": "inconnu face à un choix impossible",
+        "en": "stranger facing an impossible choice"
+      },
+      "one_line": {
+        "fr": "Chaque candidat arrive convaincu de vouloir ce poste, avant de découvrir ce qu'il devra vraiment sacrifier pour l'obtenir.",
+        "en": "Each candidate arrives certain they want the job, before discovering what they'll really have to give up for it."
+      },
+      "signature_hint": {
+        "fr": "un dossier de candidature serré un peu trop fort contre soi",
+        "en": "a resume folder clutched a little too tightly"
+      }
+    }
+  ],
+  "main_line": {
+    "fr": "Au fil des entretiens, un motif se dessine : l'entreprise ne recrute peut-être pas du tout pour les raisons qu'elle prétend.",
+    "en": "Across the interviews, a pattern emerges: the company may not be hiring for the reasons it claims at all."
+  },
+  "hook_formula": {
+    "fr": "Chaque épisode s'ouvre sur le dossier du candidat posé sur le bureau, avec une seule ligne visible qui annonce la question du jour.",
+    "en": "Each episode opens on the candidate's file placed on the desk, with a single visible line announcing the day's question."
+  },
+  "retention_mechanics": {
+    "fr": "Le public répond en commentaire à la question morale, tandis que le but de l'entreprise devient le mystère de la saison.",
+    "en": "The audience answers the moral question in the comments, while the company's purpose becomes the season's mystery."
+  },
+  "value": {
+    "fr": "L'éthique, et les dilemmes du type « qu'auriez-vous fait ».",
+    "en": "Ethics, and 'what would you do' dilemmas."
+  },
+  "style_fit": {
+    "default": "cinematic_real",
+    "alternatives": []
+  },
+  "episode_seed": [
+    {
+      "fr": "Un nouveau candidat s'installe dans la salle d'attente, seul avec son dossier.",
+      "en": "A new candidate settles into the waiting room, alone with their file."
+    },
+    {
+      "fr": "La Réceptionniste pose une question anodine qui semble déjà tester le candidat.",
+      "en": "The Receptionist asks a casual question that already seems to be testing the candidate."
+    },
+    {
+      "fr": "Le Recruteur pose sa question morale d'une voix calme depuis l'interphone.",
+      "en": "The Interviewer asks his moral question in a calm voice over the intercom."
+    },
+    {
+      "fr": "Le candidat répond, et la Réceptionniste esquisse un sourire qui en dit long.",
+      "en": "The candidate answers, and the Receptionist gives a knowing smile."
+    }
+  ],
+  "content_flags": {
+    "violence": "none",
+    "romance": "none",
+    "age": "16+"
+  }
+}

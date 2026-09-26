@@ -1,0 +1,106 @@
+{
+  "$schema": "style_template_v1",
+  "template_id": "fruit_drama",
+  "version": 1,
+  "name": {
+    "en": "Fruit Drama",
+    "fr": "Drame fruité"
+  },
+  "rendering": "photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin, visible pores and fuzz, glossy highlights, high-end CGI commercial quality, Octane-style render",
+  "camera": "telenovela coverage: medium two-shots for dialogue, tight close-ups for reactions, slow push-in on reveals, 50mm look, shallow depth of field",
+  "lighting": "warm key light with a soft cool fill, golden-hour or practical interior lamps, dramatic rim light on reveals",
+  "character_design_rules": "The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Keep exact fruit species, ripeness, colour and outfit identical in every image.",
+  "environment_rules": "real-world sets — manor gates, gravel courtyards, derelict interiors with chandeliers, beach camps, villa kitchens, restaurants — photographed like a reality-TV show or a live-action comedy, props at human scale; exteriors in golden hour, interiors cold blue-grey with warm candle or lamp practicals",
+  "negative_prompt": "cartoon, 2D, flat shading, anime, fruit with stick limbs, fruit bowl, food photography, human head",
+  "sheet_background": "light grey",
+  "quality_tail": "ultra detailed, 8k, sharp focus",
+  "palette": {
+    "primary": [
+      "#F2C14E",
+      "#E4572E",
+      "#3A7D44"
+    ],
+    "accents": [
+      "#FFFFFF",
+      "#1E1E24"
+    ],
+    "forbidden": [
+      "neon green",
+      "hot pink backgrounds"
+    ],
+    "palette_line": "saturated natural fruit colours against warm neutral sets"
+  },
+  "motion_rules": {
+    "tier1": {
+      "default_motion": "push_in",
+      "by_function": {
+        "hook": "push_in",
+        "peak": "push_in",
+        "cliffhanger": "push_in",
+        "wide_establishing": "pan_lr"
+      },
+      "zoom": {
+        "dialogue": [
+          1.0,
+          1.1
+        ],
+        "peak": [
+          1.0,
+          1.18
+        ],
+        "max": 1.2
+      },
+      "pan_pct": 4,
+      "fps": 30,
+      "easing": "ease_in_out",
+      "modifiers": [],
+      "overlays": [],
+      "summary": "default push_in 1.00→1.10 over the shot for dialogue, push_in 1.00→1.18 on peak/cliffhanger shots, pan_lr ±4 % on establishing shots, 30 fps, ease-in-out"
+    },
+    "tier2_prompt_suffix": "subtle natural head and shoulder movement, realistic blinking, breathing, cloth sway, camera slowly pushes in, no morphing, no extra characters entering"
+  },
+  "typography": {
+    "font_family": "Montserrat ExtraBold",
+    "font_fallback": "Inter Black",
+    "subtitle_mode": "word_pop",
+    "subtitle_style": "white fill, black 3 px outline, yellow #FFD400 karaoke highlight, 62 px at 1080 wide, bottom 18 %",
+    "highlight_colour": "#FFD400",
+    "overlay_style": "uppercase, 84 px, drop shadow, centered upper third, ≤ 6 words",
+    "ai_label": true
+  },
+  "episode_defaults": {
+    "hook_style": "insert_prop",
+    "cliffhanger_style": "hard_stop",
+    "shots_per_scene": [
+      2,
+      4
+    ],
+    "max_places": 2,
+    "episode_template_id": "serial_60s_v1"
+  },
+  "audio": {
+    "bgm_moods": [
+      "telenovela_tension",
+      "tropical_drama",
+      "suspense_sting"
+    ],
+    "emotion_to_mood": {
+      "tension": "telenovela_tension",
+      "tender": "tropical_drama",
+      "shocked": "suspense_sting",
+      "default": "telenovela_tension"
+    },
+    "sfx_pack": "soap",
+    "sfx_cues": [
+      "gasp_crowd",
+      "dramatic_sting",
+      "slap",
+      "phone_ring",
+      "waves_soft",
+      "door_slam",
+      "heartbeat"
+    ],
+    "voice_direction": "over-acted telenovela delivery, exaggerated emotion, crisp diction, quick pace"
+  },
+  "notes": "The spec attaches this aside to hook_style: insert_prop -- \"a sign, a contract, a phone screen that states the premise in ≤ 5 words\" -- describing what the diegetic prop should communicate; it is guidance for writing hook content, not prompt text itself."
+}

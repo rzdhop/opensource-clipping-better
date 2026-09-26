@@ -1,0 +1,138 @@
+{
+  "$schema": "concept_v1",
+  "concept_id": "clay_town_confessions",
+  "version": 1,
+  "title": {
+    "fr": "Les Confessions de Clay Town",
+    "en": "Clay Town Confessions"
+  },
+  "logline": {
+    "fr": "Dans une ville miniature en argile, les habitants confient leurs secrets à une boîte aux lettres qui pourrait bien les répéter.",
+    "en": "In a miniature clay town, residents confide their secrets to a mailbox that might just be repeating them."
+  },
+  "world": {
+    "fr": "Clay Town est une bourgade miniature où chacun dépose ses confessions dans une boîte aux lettres réputée discrète. Mais les secrets commencent à circuler, et un pigeon louche rôde toujours un peu trop près.",
+    "en": "Clay Town is a miniature village where everyone drops their confessions into a mailbox known for discretion. But secrets are starting to leak, and a shifty pigeon always seems to be lurking a little too close."
+  },
+  "cast_sketch": [
+    {
+      "name": {
+        "fr": "Maire Pâton",
+        "en": "Mayor Dough"
+      },
+      "role": "lead",
+      "archetype": {
+        "fr": "maire imposant et cachottier",
+        "en": "imposing, secretive mayor"
+      },
+      "one_line": {
+        "fr": "Maire Pâton dirige Clay Town d'une main ferme, mais cache un secret plus gros que tous les autres réunis.",
+        "en": "Mayor Dough runs Clay Town with a firm hand, but hides a secret bigger than everyone else's combined."
+      },
+      "signature_hint": {
+        "fr": "une écharpe de maire toujours saupoudrée de farine",
+        "en": "a mayoral sash permanently dusted with flour"
+      }
+    },
+    {
+      "name": {
+        "fr": "Boulangère Pim",
+        "en": "Baker Pim"
+      },
+      "role": "support",
+      "archetype": {
+        "fr": "boulangère sincère et bavarde",
+        "en": "warm, talkative baker"
+      },
+      "one_line": {
+        "fr": "Boulangère Pim confie tout à la boîte aux lettres, sans jamais imaginer que ses mots puissent en ressortir.",
+        "en": "Baker Pim tells the mailbox everything, never imagining her words might come back out."
+      },
+      "signature_hint": {
+        "fr": "un rouleau à pâtisserie qu'elle brandit comme un sceptre",
+        "en": "a rolling pin she carries like a scepter"
+      }
+    },
+    {
+      "name": {
+        "fr": "La Boîte aux lettres",
+        "en": "The Mailbox"
+      },
+      "role": "recurring",
+      "archetype": {
+        "fr": "confident municipal indiscret",
+        "en": "indiscreet town confidant"
+      },
+      "one_line": {
+        "fr": "La Boîte aux lettres recueille toutes les confessions de la ville, et on ne sait plus si elle les garde vraiment secrètes.",
+        "en": "The Mailbox collects every confession in town, and no one is sure anymore if it truly keeps them secret."
+      },
+      "signature_hint": {
+        "fr": "un petit drapeau rouillé qui grince en se levant",
+        "en": "a rusty flag that squeaks when it flips up"
+      }
+    },
+    {
+      "name": {
+        "fr": "Le Pigeon",
+        "en": "The Pigeon"
+      },
+      "role": "support",
+      "archetype": {
+        "fr": "pigeon louche et observateur",
+        "en": "shifty, watchful pigeon"
+      },
+      "one_line": {
+        "fr": "Le Pigeon observe chaque confession depuis son perchoir, et semble travailler pour quelqu'un d'autre.",
+        "en": "The Pigeon watches every confession from its perch, and seems to be working for someone else."
+      },
+      "signature_hint": {
+        "fr": "une minuscule longue-vue glissée sous une aile",
+        "en": "a tiny spyglass tucked under one wing"
+      }
+    }
+  ],
+  "main_line": {
+    "fr": "Saison après saison, les confessions de chacun s'entremêlent jusqu'à révéler qui, en réalité, vide la boîte aux lettres chaque nuit.",
+    "en": "Across the season, everyone's confessions intertwine until it's revealed who is really emptying the mailbox every night."
+  },
+  "hook_formula": {
+    "fr": "Chaque épisode s'ouvre sur l'image choc d'une confession déjà sortie de la boîte, éparpillée en pleine rue.",
+    "en": "Each episode opens on the shocking image of a confession already out of the mailbox, scattered in the street."
+  },
+  "retention_mechanics": {
+    "fr": "Des secrets interconnectés ; chaque confession change le cours de l'épisode suivant.",
+    "en": "Interconnected secrets; each confession changes the next episode."
+  },
+  "value": {
+    "fr": "L'intimité, l'honnêteté, et la bienveillance des petites villes.",
+    "en": "Privacy, honesty, and small-town kindness."
+  },
+  "style_fit": {
+    "default": "claymation",
+    "alternatives": []
+  },
+  "episode_seed": [
+    {
+      "fr": "Boulangère Pim glisse une confession dans la boîte, certaine qu'elle restera secrète.",
+      "en": "Baker Pim slips a confession into the mailbox, sure it will stay secret."
+    },
+    {
+      "fr": "Le Pigeon est aperçu en train de fouiller autour de la boîte aux lettres.",
+      "en": "The Pigeon is spotted poking around the mailbox."
+    },
+    {
+      "fr": "Une rumeur tirée de la confession de Pim commence à circuler en ville.",
+      "en": "A rumor drawn from Pim's confession starts spreading through town."
+    },
+    {
+      "fr": "Maire Pâton convoque une réunion d'urgence pour calmer la ville.",
+      "en": "Mayor Dough calls an emergency town meeting to calm things down."
+    }
+  ],
+  "content_flags": {
+    "violence": "none",
+    "romance": "mild",
+    "age": "10+"
+  }
+}
