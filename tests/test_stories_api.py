@@ -33,6 +33,7 @@ from clipping.providers.registry import Link
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 MODELS = ROOT / "web" / "api" / "models.py"
 APP = ROOT / "web" / "api" / "app.py"
+APP_ROUTES = ROOT / "web" / "api" / "routes" / "stories.py"
 
 # Test values only: submit_job is replaced and every step run here is answered
 # by FakeRunner, so the key never leaves the process.
@@ -1080,3 +1081,50 @@ def test_the_story_page_lists_its_jobs_without_their_feeds(api):
     assert [j["id"] for j in listed] == [job["id"]]
     assert {"events", "log", "clips", "config", "progress"}.isdisjoint(listed[0])
     assert {"id", "step", "status", "created_at", "updated_at", "error", "params"} <= set(listed[0])
+
+
+# ================================================== GET /api/stories/styles
+
+def test_get_styles_lists_the_seven_shipped_templates(api):
+    response = api.client.get("/api/stories/styles")
+    assert response.status_code == 200
+    body = response.json()
+    ids = [s["template_id"] for s in body["styles"]]
+
+    assert ids == sorted(templates.list_style_ids())
+    assert len(ids) == 7
+    for style in body["styles"]:
+        assert set(style) == {"template_id", "version", "name", "palette", "typography", "episode_defaults"}
+        assert set(style["name"]) == {"fr", "en"}
+        assert isinstance(style["version"], int)
+        assert set(style["palette"]) == {"primary", "accents", "forbidden", "palette_line"}
+        assert set(style["typography"]) == {
+            "font_family", "font_fallback", "subtitle_mode", "highlight_colour"}
+        assert set(style["episode_defaults"]) == {"hook_style", "cliffhanger_style"}
+
+
+def test_get_styles_matches_the_loaded_templates(api):
+    body = api.client.get("/api/stories/styles").json()
+    by_id = {s["template_id"]: s for s in body["styles"]}
+
+    for template_id in templates.list_style_ids():
+        template = templates.load_style(template_id)
+        entry = by_id[template_id]
+        assert entry["version"] == template["version"]
+        assert entry["name"] == template["name"]
+        assert entry["palette"] == template["palette"]
+        assert entry["typography"]["font_family"] == template["typography"]["font_family"]
+        assert entry["episode_defaults"]["hook_style"] == template["episode_defaults"]["hook_style"]
+
+
+def test_the_styles_route_does_not_shadow_an_unknown_story_id(api):
+    # /api/stories/styles is declared before /{story_id}; an unrelated
+    # 12-hex id must still 404 rather than ever being confused with it.
+    response = api.client.get(f"/api/stories/{UNKNOWN_ID}")
+    assert response.status_code == 404
+
+
+def test_the_styles_route_is_declared_before_the_story_id_route():
+    text = APP_ROUTES.read_text(encoding="utf-8")
+    assert '@router.get("/styles")' in text
+    assert text.index('@router.get("/styles")') < text.index('@router.get("/{story_id}")')

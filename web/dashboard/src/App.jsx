@@ -5,7 +5,8 @@ import NewJob from './pages/NewJob'
 import JobDetail from './pages/JobDetail'
 import Login from './pages/Login'
 import Settings from './pages/Settings'
-import StoryHome from './pages/StoryHome'
+import StoriesList from './pages/story/StoriesList'
+import NewStoryWizard from './pages/story/NewStoryWizard'
 import ModeSwitch, { modeFromPath, readMode, rememberMode } from './components/ModeSwitch'
 import { checkToken, clearToken, getToken } from './api'
 
@@ -119,8 +120,10 @@ function App() {
           <Route path="/clips/new" element={<NewJob />} />
           <Route path="/clips/job/:jobId" element={<JobDetail />} />
           <Route path="/settings" element={<Settings />} />
-          <Route path="/story" element={<StoryHome />} />
-          <Route path="/story/*" element={<StoryHome />} />
+          <Route path="/story" element={<StoriesList />} />
+          <Route path="/story/new" element={<NewStoryWizard />} />
+          <Route path="/story/:storyId" element={<NewStoryWizard />} />
+          <Route path="/story/*" element={<Navigate to="/story" replace />} />
           {/* The paths the product shipped with keep working through a redirect. */}
           <Route path="/new" element={<Navigate to="/clips/new" replace />} />
           <Route path="/job/:jobId" element={<LegacyJobRedirect />} />

@@ -192,6 +192,17 @@ export function useJobFeed(jobId, { onJob } = {}) {
   }
 
   useEffect(() => {
+    // No job to watch yet -- the story wizard (stage 11) calls this hook on
+    // every render with `myJob ? myJob.id : null`, since a hook cannot be
+    // called conditionally. Skip the request rather than asking the API for
+    // `/jobs/null` and logging a spurious failure every time nothing is running.
+    if (!jobId) {
+      setJob(null)
+      setEvents([])
+      setStreamState('closed')
+      return
+    }
+
     let sse = null
     let cancelled = false
 

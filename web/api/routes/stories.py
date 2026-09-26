@@ -317,6 +317,38 @@ async def create_story(req: StoryCreateRequest) -> dict:
         raise HTTPException(status_code=400, detail=str(exc)) from None
 
 
+@router.get("/styles")
+async def list_styles() -> dict:
+    """The seven shipped style templates (spec 5), for the style step's
+    picker: ``{"styles": [{template_id, version, name, palette, typography,
+    episode_defaults}, ...]}``, one entry per ``templates.list_style_ids()``.
+
+    Declared *before* ``GET /{story_id}`` so ``/api/stories/styles`` is
+    matched here and never read as a malformed story id (Starlette matches
+    routes in declaration order, not by specificity).
+    """
+    styles = []
+    for template_id in templates.list_style_ids():
+        template = templates.load_style(template_id)
+        styles.append({
+            "template_id": template["template_id"],
+            "version": template["version"],
+            "name": template["name"],
+            "palette": template["palette"],
+            "typography": {
+                "font_family": template["typography"]["font_family"],
+                "font_fallback": template["typography"]["font_fallback"],
+                "subtitle_mode": template["typography"]["subtitle_mode"],
+                "highlight_colour": template["typography"]["highlight_colour"],
+            },
+            "episode_defaults": {
+                "hook_style": template["episode_defaults"]["hook_style"],
+                "cliffhanger_style": template["episode_defaults"]["cliffhanger_style"],
+            },
+        })
+    return {"styles": styles}
+
+
 @router.get("/{story_id}")
 async def get_story(story_id: str) -> dict:
     """Everything the story page shows::

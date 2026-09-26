@@ -406,6 +406,41 @@ export async function fetchStories() {
   return res.json()
 }
 
+// Several places on a story page (the picker, the concept filter chips, each
+// concept card's style fit, the wizard header, the StoriesList badge) all
+// want the same seven shipped templates, which never change while the server
+// is running -- so the fetch is cached at module scope for the life of the
+// page instead of being repeated once per component. A failed fetch clears
+// the cache so a later call can retry.
+let stylesCache = null
+
+/** The seven shipped style templates, for the style step's picker. */
+export async function fetchStyles() {
+  if (!stylesCache) {
+    stylesCache = (async () => {
+      const res = await request('/stories/styles')
+      if (!res.ok) throw await apiError(res, 'Failed to fetch styles')
+      return res.json()
+    })().catch((err) => {
+      stylesCache = null
+      throw err
+    })
+  }
+  return stylesCache
+}
+
+/**
+ * A style template's display name -- English, falling back to the id itself
+ * when the templates have not loaded yet or the id is unknown. Every place
+ * that shows a story's style to a user should go through this rather than
+ * printing the raw `style_template_id`.
+ */
+export function styleNameOf(styles, templateId) {
+  if (!templateId) return null
+  const style = (styles || []).find((s) => s.template_id === templateId)
+  return (style && style.name && (style.name.en || style.name.fr)) || templateId
+}
+
 /** Create a draft story; the story's own `POST /api/stories`. */
 export async function createStory(payload) {
   const res = await request('/stories', {

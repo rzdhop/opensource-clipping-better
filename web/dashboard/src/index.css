@@ -445,6 +445,8 @@ html, body {
 .badge-completed { background: var(--success-dim); color: var(--success); }
 .badge-failed { background: var(--error-dim); color: var(--error); }
 .badge-cancelled { background: rgba(107, 114, 128, 0.15); color: var(--text-tertiary); }
+.badge-running { background: var(--info-dim); color: var(--info); }
+.badge-awaiting_approval { background: var(--warning-dim); color: var(--warning); }
 
 /* --- Progress Bar --- */
 .progress-container {
@@ -1179,4 +1181,547 @@ html, body {
   font: inherit;
   text-align: left;
   cursor: pointer;
+}
+
+/* ============================================================
+   AI Story — StoriesList + NewStoryWizard (phase 1, stage 11)
+   Additive only: prefixed `story-` / `stepper-`. Card grids are 1 column
+   <=600px, 2 columns <=1100px, 3 above; every control keeps a >=40px tap
+   target so the wizard works from a phone.
+   ============================================================ */
+
+.story-error {
+  color: var(--error);
+  font-size: 12.5px;
+  line-height: 1.5;
+  margin: 6px 0;
+  overflow-wrap: anywhere;
+}
+
+.story-loading {
+  display: flex;
+  justify-content: center;
+  padding: 24px 0;
+}
+
+.story-section-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 18px 0 10px;
+}
+
+/* --- Story grids: cards, concepts, style picker, previews --------------- */
+.story-grid,
+.story-concept-grid,
+.story-style-grid,
+.story-preview-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+}
+
+@media (min-width: 601px) {
+  .story-grid,
+  .story-concept-grid,
+  .story-style-grid,
+  .story-preview-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1101px) {
+  .story-grid,
+  .story-concept-grid,
+  .story-style-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.story-card {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.story-card-link {
+  color: inherit;
+  text-decoration: none;
+  display: block;
+}
+
+.story-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.story-card-header h3 {
+  font-size: 15px;
+  font-weight: 700;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.story-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.story-card-updated {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.story-card-actions {
+  margin-top: 4px;
+}
+
+/* --- Concept cards -------------------------------------------------------- */
+.story-concept-card {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.story-concept-card h4 {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.story-concept-logline {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.story-concept-world {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.story-concept-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.story-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.story-filter-chips .chip {
+  cursor: pointer;
+  min-height: 28px;
+}
+
+/* --- Vertical stepper ------------------------------------------------------ */
+.stepper {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.stepper-step {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  background: var(--bg-card);
+  overflow: hidden;
+}
+
+.stepper-step-active {
+  border-color: var(--border-accent);
+}
+
+.stepper-step-disabled {
+  opacity: 0.6;
+}
+
+.stepper-step-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 12px 16px;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.stepper-step-header:disabled {
+  cursor: default;
+  color: var(--text-tertiary);
+}
+
+.stepper-step-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--bg-input);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.stepper-step-done .stepper-step-index {
+  background: var(--success-dim);
+  color: var(--success);
+}
+
+.stepper-step-active .stepper-step-index {
+  background: var(--accent-dim);
+  color: var(--accent-hover);
+}
+
+.stepper-step-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.stepper-step-reason,
+.stepper-step-edit {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  white-space: normal;
+  text-align: right;
+}
+
+.stepper-step-edit {
+  color: var(--accent-hover);
+}
+
+.stepper-summary {
+  padding: 0 16px 14px 50px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.stepper-step-body {
+  padding: 0 16px 16px;
+  border-top: 1px solid var(--border-color);
+}
+
+.story-step-body {
+  padding-top: 14px;
+  min-width: 0;
+}
+
+.story-step-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 12px 0;
+}
+
+/* --- Bible field cards ------------------------------------------------- */
+.story-bible-card {
+  margin-bottom: 14px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.story-field {
+  margin-bottom: 12px;
+}
+
+.story-field-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-bottom: 4px;
+}
+
+.story-field-value {
+  font-size: 13px;
+  color: var(--text-primary);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.story-field-list {
+  margin: 4px 0 8px 18px;
+  font-size: 13px;
+  color: var(--text-primary);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.story-field-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.story-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  margin-right: 12px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  text-transform: capitalize;
+}
+
+.toggle-row-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 0;
+}
+
+.story-regenerate {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-color);
+}
+
+.story-regenerate-note {
+  flex: 1;
+  min-width: 160px;
+}
+
+/* --- Style step: template picker, palette, previews --------------------- */
+.story-style-pick {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+  min-width: 0;
+}
+
+.story-style-pick.active {
+  border-color: var(--border-accent);
+  background: var(--accent-dim);
+}
+
+.story-style-pick-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.story-swatch-row {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.story-swatch {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.story-swatch-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+}
+
+.story-swatch-edit input[type="color"] {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: none;
+  cursor: pointer;
+}
+
+.story-swatch-hex {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.story-segmented {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.story-profile summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  padding: 8px 0;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+}
+
+.story-profile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
+  gap: 14px;
+  margin-top: 10px;
+}
+
+.story-preview-strip {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-color);
+}
+
+.story-preview-thumb {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.story-preview-thumb img,
+.story-preview-placeholder {
+  width: 100%;
+  aspect-ratio: 9/16;
+  object-fit: cover;
+  background: var(--bg-input);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+}
+
+.story-preview-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.story-preview-label {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+/* --- Story-step job list at the bottom of the wizard --------------------- */
+.story-job-list-card {
+  margin-top: 4px;
+}
+
+.story-job-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.story-job-row {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.story-job-row-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 8px 12px;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.story-job-row-step {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.story-job-row-time {
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+@media (max-width: 600px) {
+  .story-concept-footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .stepper-summary {
+    padding-left: 16px;
+  }
+}
+
+/* ------------------------------------------------------------------------
+   Phone-review follow-up (spec 10): per-step/per-card error slots, compact
+   concept cards with a details toggle, and scrolling the newly active step
+   into view. Still additive to the section above.
+   ------------------------------------------------------------------------ */
+
+/* The stepper header can land under the sticky mobile top bar (~56px tall)
+ * when scrolled into view with `block: 'start'`; this keeps it clear. */
+.stepper-step {
+  scroll-margin-top: 64px;
+}
+
+/* A per-step or per-card error slot (finding 1). Same look as `.story-error`;
+ * the distinct class only exists so a step's own action-row error can be
+ * told apart from a nested field's, and so it is easy to find in review. */
+.story-step-error {
+  margin-top: 2px;
+}
+
+.story-concept-value {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.story-concept-details {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 0;
+  padding: 10px 0 0;
+  border-top: 1px solid var(--border-color);
 }

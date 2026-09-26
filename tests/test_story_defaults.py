@@ -75,6 +75,32 @@ def test_the_story_defaults_agree_in_all_three_places():
         assert action.default == default and tuple(action.choices) == choices, dest
 
 
+def test_the_react_new_story_form_agrees_too():
+    """The fourth place (phase 1, stage 11): NewStoryWizard.jsx's
+    ``DEFAULT_GENERATION_PROFILE`` literal, and its language control's
+    initial state (no default)."""
+    wizard = ROOT / "web" / "dashboard" / "src" / "pages" / "story" / "NewStoryWizard.jsx"
+    src = wizard.read_text(encoding="utf-8")
+
+    match = re.search(r"const DEFAULT_GENERATION_PROFILE = \{([^}]*)\}", src)
+    assert match, "DEFAULT_GENERATION_PROFILE literal not found in NewStoryWizard.jsx"
+    body = match.group(1)
+
+    tier = re.search(r"tier:\s*(\d+)", body)
+    assert tier and int(tier.group(1)) == defaults.DEFAULT_TIER
+    for field, _dest, default, _choices in PROFILE[1:]:
+        line = re.search(rf"{field}:\s*'([a-z_]+)'", body)
+        assert line, field
+        assert line.group(1) == default, field
+
+    # The language control starts at null (or an equally empty falsy value),
+    # never a picked language -- the same "no silent default" rule as the
+    # API and the CLI.
+    lang_state = re.search(r"const \[language, setLanguage\] = useState\((.*?)\)", src)
+    assert lang_state, "language useState(...) not found in NewStoryWizard.jsx"
+    assert lang_state.group(1).strip() in ("null", "''", '""'), lang_state.group(1)
+
+
 def test_the_language_has_no_default_in_any_place():
     # 1. no default-language constant at all
     assert [name for name in vars(defaults) if "LANG" in name.upper()] == []
