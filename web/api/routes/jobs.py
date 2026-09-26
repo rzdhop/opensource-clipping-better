@@ -22,6 +22,7 @@ from ..models import (
     JobStatus,
     ClipDetail,
 )
+from .. import cleanup
 from .. import store
 from .. import worker
 
@@ -208,6 +209,19 @@ async def create_job(req: JobCreateRequest) -> JobResponse:
             payload[key] = value.value
 
     reuse_job_id = payload.pop("reuse_job_id", None)
+
+    # The id names the job's output directory, and some outputs/ entries are
+    # no job's (cleanup.RESERVED_OUTPUT_NAMES): a job called "stories" would
+    # render into every AI Story workspace, and deleting it would remove them.
+    # Refused before anything is created or queued.
+    if reuse_job_id and cleanup.is_reserved(reuse_job_id):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"'{reuse_job_id}' cannot be a job id: outputs/ reserves that name "
+                f"({', '.join(sorted(cleanup.RESERVED_OUTPUT_NAMES))}) for data no job owns."
+            ),
+        )
 
     # A rerun reuses the job's id and output directory. Two workers on one
     # directory would overwrite each other's files, and the old one's late

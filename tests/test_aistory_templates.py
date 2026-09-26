@@ -419,3 +419,13 @@ def test_localize_concept_rejects_an_unsupported_language():
     concept = _concepts_by_id()["tentafruit_island"]
     with pytest.raises(ValueError):
         templates.localize_concept(concept, "de")
+
+
+def test_a_dollar_anchor_does_not_accept_a_trailing_newline():
+    # JSON Schema patterns are ECMA-262, where "$" is the very end of the
+    # string; Python's "$" also matches just before a trailing newline, so
+    # "fruit_drama\n" would pass as a template id.
+    schema = {"type": "string", "pattern": r"^[a-z][a-z0-9_]*$"}
+    assert schemas.validate("fruit_drama", schema) == []
+    assert schemas.validate("fruit_drama\n", schema) != []
+    assert schemas.validate("price $", {"type": "string", "pattern": r"\$"}) == []

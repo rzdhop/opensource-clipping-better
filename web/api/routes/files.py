@@ -10,6 +10,7 @@ import shutil
 from fastapi import Depends, APIRouter, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse
 
+from .. import cleanup
 from ..auth import require_token
 
 router = APIRouter(tags=["files"], dependencies=[Depends(require_token)])
@@ -135,6 +136,12 @@ def resolve_output_path(job_id, filename=None):
     for part in parts:
         if not part or part in (".", "..") or os.path.isabs(part):
             raise HTTPException(status_code=400, detail="Invalid path")
+
+    # outputs/stories/ holds every AI Story workspace: listing it here would
+    # enumerate the story ids. Story media gets its own route. (_chain_test/,
+    # the other reserved name, stays served: its samples are signed URLs.)
+    if cleanup.is_reserved(job_id, (cleanup.STORIES_DIRNAME,)):
+        raise HTTPException(status_code=400, detail="Invalid path")
 
     base = os.path.realpath(OUTPUTS_DIR)
     target = os.path.realpath(os.path.join(base, *parts))

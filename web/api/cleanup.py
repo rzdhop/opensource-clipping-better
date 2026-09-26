@@ -16,6 +16,11 @@ record cannot reach anything else:
   job's file: that one belongs to someone else, possibly a job not created yet.
   Without a usable timestamp the upload is kept -- a leaked file is recoverable,
   a deleted one is not.
+- Some names under outputs/ belong to no job (``RESERVED_OUTPUT_NAMES``):
+  ``stories/`` holds every AI Story workspace and ``_chain_test/`` the Settings
+  chain-test samples. A job named after one -- ``reuse_job_id`` again -- would
+  otherwise remove all of it when deleted, so those directories are never
+  removed here, and ``POST /api/jobs`` refuses such an id up front.
 
 Stdlib only, so the rules are tested in the pytest-only CI environment.
 """
@@ -29,6 +34,27 @@ from datetime import datetime
 # File-system timestamps are coarse (2s on FAT) and an upload finishes a moment
 # before the job that uses it is created.
 _MTIME_SLACK_SECONDS = 2.0
+
+# outputs/ entries that are not a job's. The story store's own name for the
+# first is clipping/aistory/store.py STORIES_DIRNAME; the second is
+# routes/settings.py CHAIN_TEST_DIRNAME. Tests keep the three in agreement.
+STORIES_DIRNAME = "stories"
+# The two index files are reserved too: a job directory named after one would
+# stop the file from being written.
+RESERVED_OUTPUT_NAMES = frozenset({STORIES_DIRNAME, "_chain_test", "stories.json", "jobs.json"})
+
+
+def is_reserved(name, reserved=RESERVED_OUTPUT_NAMES) -> bool:
+    """Whether *name* would land on one of the *reserved* outputs/ entries.
+
+    Compared case-folded and without trailing dots or spaces: a
+    case-insensitive filesystem (macOS, Windows) opens ``Stories`` as
+    ``stories``, and Windows drops a trailing ``.`` or space from a name.
+    """
+    if not isinstance(name, str):
+        return False
+    folded = name.rstrip(". ").casefold()
+    return any(folded == entry.casefold() for entry in reserved)
 
 
 def contained(root: str, name, *, want_dir: bool):
@@ -88,7 +114,11 @@ def remove_job_files(job: dict, *, outputs_root: str, uploads_root: str, other_j
     report = {"removed": [], "kept": []}
 
     job_id = job.get("id")
-    out_dir = contained(outputs_root, job_id, want_dir=True)
+    out_dir = None
+    if is_reserved(job_id):
+        report["kept"].append(f"outputs/{job_id}/ (reserved, never removed)")
+    else:
+        out_dir = contained(outputs_root, job_id, want_dir=True)
     if out_dir is not None:
         try:
             shutil.rmtree(out_dir)

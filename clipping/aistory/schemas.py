@@ -1,5 +1,5 @@
 """A stdlib-only JSON-Schema subset validator, plus the closed lists and the
-two document schemas of AI Story phase 1 (spec 5, 6.3, 7, 11, 2.2).
+document schemas of AI Story phase 1 (spec 5, 6.3, 7, 11, 2.1, 2.2).
 
 DEC-012: this module is imported by a pytest suite that must run in CI with
 pytest alone, so no third-party schema library (``jsonschema``, ``pydantic``)
@@ -12,6 +12,8 @@ keywords (``description``, ``title``, ...) are harmless.
 from __future__ import annotations
 
 import re
+
+from . import defaults
 
 # --------------------------------------------------------------- validator
 
@@ -32,6 +34,18 @@ def _is_type(value, name) -> bool:
     return isinstance(value, _TYPE_NAMES[name])
 
 
+def _search(pattern, text):
+    """``re.search`` with JSON Schema's meaning of a final ``$``.
+
+    Schema patterns are ECMA-262, where ``$`` is the very end of the string.
+    Python's ``$`` also matches just before a trailing newline, which would let
+    ``"fruit_drama\n"`` pass as an id and then be used to build a path.
+    """
+    if pattern.endswith("$") and not pattern.endswith("\\$"):
+        pattern = pattern[:-1] + r"\Z"
+    return re.search(pattern, text)
+
+
 def validate(doc, schema, path="$") -> list:
     """Return human-readable error strings; never raises. Empty means valid."""
     errors: list = []
@@ -50,7 +64,7 @@ def validate(doc, schema, path="$") -> list:
         errors.append(f"{path}: {doc!r} is not one of {schema['enum']!r}")
 
     if isinstance(doc, str):
-        if "pattern" in schema and re.search(schema["pattern"], doc) is None:
+        if "pattern" in schema and _search(schema["pattern"], doc) is None:
             errors.append(f"{path}: {doc!r} does not match {schema['pattern']}")
         if "minLength" in schema and len(doc) < schema["minLength"]:
             errors.append(f"{path}: length {len(doc)} < minLength {schema['minLength']}")
@@ -493,3 +507,135 @@ def concept_errors(concept, style_ids) -> list:
             errors.append(f"$.style_fit.alternatives: {alt!r} is not a shipped style id")
 
     return errors
+
+
+# ------------------------------------------------------------ story_bible_v1 (spec 2.1)
+
+STORY_ID_PATTERN = r"^[0-9a-f]{12}$"
+# A library concept id, a user-written one, or one derived from an import (spec 12).
+CONCEPT_REF_PATTERN = r"^([a-z][a-z0-9_]*|custom|import:[0-9a-f]{12})$"
+
+
+def _nullable_string(max_length) -> dict:
+    return {"type": ["string", "null"], "maxLength": max_length}
+
+
+def _string_array(max_items=None, item_max_length=None) -> dict:
+    item = {"type": "string"}
+    if item_max_length is not None:
+        item["maxLength"] = item_max_length
+    schema = {"type": "array", "items": item}
+    if max_items is not None:
+        schema["maxItems"] = max_items
+    return schema
+
+
+_WORLD_SCHEMA = {
+    "type": ["object", "null"],
+    "properties": {
+        "setting_summary": {"type": "string", "maxLength": 800},
+        "rules": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 8},
+        "time_period": {"type": "string", "maxLength": 80},
+        "recurring_motifs": _string_array(max_items=6),
+    },
+    "required": ["setting_summary", "rules", "time_period", "recurring_motifs"],
+    "additionalProperties": False,
+}
+
+_AUDIENCE_SCHEMA = {
+    "type": ["object", "null"],
+    "properties": {
+        "age": {"type": "string", "maxLength": 10},
+        "platforms": {"type": "array", "items": {"type": "string", "enum": ["tiktok", "shorts", "reels"]}},
+    },
+    "required": ["age", "platforms"],
+    "additionalProperties": False,
+}
+
+_GENERATION_PROFILE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        # "integer" as well as the enum: ``True in [1, 2, 3]`` is true in Python.
+        "tier": {"type": "integer", "enum": list(defaults.TIERS)},
+        "route": {"type": "string", "enum": list(defaults.ROUTES)},
+        "consistency_mode": {"type": "string", "enum": list(defaults.CONSISTENCY_MODES)},
+        "budget_profile": {"type": "string", "enum": list(defaults.BUDGET_PROFILES)},
+    },
+    "required": ["tier", "route", "consistency_mode", "budget_profile"],
+    "additionalProperties": False,
+}
+
+_NARRATOR_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "enabled": {"type": "boolean"},
+        "voice": {"type": ["object", "null"]},
+    },
+    "required": ["enabled", "voice"],
+    "additionalProperties": False,
+}
+
+# An approval is the timestamp it was given at; null until then.
+_APPROVAL = {"type": ["string", "null"], "minLength": 1}
+
+_APPROVALS_SCHEMA = {
+    "type": "object",
+    "properties": {"concept": _APPROVAL, "bible": _APPROVAL, "style": _APPROVAL},
+    "required": ["concept", "bible", "style"],
+    "additionalProperties": False,
+}
+
+# Field order is the order a human reads story.json in (the store never sorts keys).
+STORY_BIBLE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "$schema": {"type": "string", "const": "story_bible_v1"},
+        "story_id": {"type": "string", "pattern": STORY_ID_PATTERN},
+        "title": {"type": "string", "maxLength": 120},
+        "language": {"type": "string", "enum": list(LANGUAGES)},
+        "seed_text": _nullable_string(2000),
+        "concept_id": {"type": ["string", "null"], "pattern": CONCEPT_REF_PATTERN},
+        # A localized snapshot of the chosen concept; loose on purpose, since a
+        # custom or imported concept need not have the library's shape.
+        "concept": {"type": ["object", "null"]},
+        "logline": _nullable_string(400),
+        "premise": _nullable_string(1500),
+        "tone": _nullable_string(200),
+        "genre_tags": _string_array(max_items=8, item_max_length=40),
+        "world": _WORLD_SCHEMA,
+        "themes_and_values": _string_array(max_items=6),
+        "audience": _AUDIENCE_SCHEMA,
+        "why_come_back": _string_array(max_items=3),
+        # Filled by the cast / places steps (phase 2); empty in phase 1.
+        "cast_ids": _string_array(),
+        "place_ids": _string_array(),
+        "prop_ids": _string_array(),
+        "style_template_id": {"type": ["string", "null"], "pattern": _ID_PATTERN},
+        "episode_template_id": {"type": "string", "const": defaults.EPISODE_TEMPLATE_ID},
+        "generation_profile": _GENERATION_PROFILE_SCHEMA,
+        "narrator": _NARRATOR_SCHEMA,
+        "approvals": _APPROVALS_SCHEMA,
+        "status": {"type": "string", "enum": list(defaults.STATUSES)},
+        "created_at": _NON_EMPTY_STRING,
+        "updated_at": _NON_EMPTY_STRING,
+    },
+    "required": [
+        "$schema", "story_id", "title", "language", "seed_text", "concept_id", "concept",
+        "logline", "premise", "tone", "genre_tags", "world", "themes_and_values",
+        "audience", "why_come_back", "cast_ids", "place_ids", "prop_ids",
+        "style_template_id", "episode_template_id", "generation_profile", "narrator",
+        "approvals", "status", "created_at", "updated_at",
+    ],
+    "additionalProperties": False,
+}
+
+
+def story_bible_errors(doc) -> list:
+    """``validate()`` against ``STORY_BIBLE_SCHEMA``; empty means valid.
+
+    Whether ``status`` agrees with ``approvals`` is not checked here: the
+    store derives it on every save (``store.derive_status``), so a document
+    on disk can only disagree if a human edited it by hand, and the next save
+    corrects it.
+    """
+    return validate(doc, STORY_BIBLE_SCHEMA)
