@@ -103,13 +103,53 @@ export async function createJob(payload) {
   return res.json()
 }
 
-/** The API's own explanation of a refusal (409, 429, ...), else *fallback*. */
-async function detailOf(res, fallback) {
+/**
+ * A response's `detail` as `{message, errors}`. `detail` is either a plain
+ * string (most routes) or `{message, errors}` (the AI Story validation
+ * routes, e.g. a story that would not pass its schema) -- `errors` is null
+ * for the former.
+ */
+async function parseDetail(res, fallback) {
   try {
     const body = await res.json()
-    if (body && body.detail) return String(body.detail)
+    const detail = body && body.detail
+    if (detail && typeof detail === 'object' && !Array.isArray(detail)) {
+      return {
+        message: detail.message != null ? String(detail.message) : fallback,
+        errors: Array.isArray(detail.errors) ? detail.errors.map(String) : null,
+      }
+    }
+    if (detail != null) return { message: String(detail), errors: null }
   } catch {}
-  return fallback
+  return { message: fallback, errors: null }
+}
+
+/** The API's own explanation of a refusal (409, 429, ...), else *fallback*.
+ * A structured `{message, errors}` detail collapses to its message string
+ * here, so every existing caller keeps getting the same string it always
+ * has. */
+async function detailOf(res, fallback) {
+  return (await parseDetail(res, fallback)).message
+}
+
+/**
+ * Thrown by the AI Story functions below: `message` (always a string, ready
+ * to display), an optional `errors` list (the story schema's per-field
+ * complaints, when the refusal had any), and the response's `status`.
+ */
+export class ApiError extends Error {
+  constructor(message, { errors = null, status = null } = {}) {
+    super(message)
+    this.name = 'ApiError'
+    this.errors = errors
+    this.status = status
+  }
+}
+
+/** Build the `ApiError` for a failed response, from the same parsing `detailOf` uses. */
+async function apiError(res, fallback) {
+  const { message, errors } = await parseDetail(res, fallback)
+  return new ApiError(message, { errors, status: res.status })
 }
 
 /**
@@ -351,4 +391,140 @@ export function createSSEConnection(jobId, onMessage, onStatus) {
   })()
 
   return { close }
+}
+
+// ---------------------------------------------------------------------------
+// AI Story (web/api/routes/stories.py). Every call below goes through
+// `request()`, so it carries the bearer header and never a token in the URL,
+// same as every other function in this file.
+// ---------------------------------------------------------------------------
+
+/** `{"stories": [index entries]}`, most recently updated first. */
+export async function fetchStories() {
+  const res = await request('/stories')
+  if (!res.ok) throw await apiError(res, 'Failed to fetch stories')
+  return res.json()
+}
+
+/** Create a draft story; the story's own `POST /api/stories`. */
+export async function createStory(payload) {
+  const res = await request('/stories', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) throw await apiError(res, 'Failed to create the story')
+  return res.json()
+}
+
+/** Everything the story page shows: `{story, style_lock, style_preview, concepts_generated, jobs, cost_total_usd, route}`. */
+export async function fetchStory(storyId) {
+  const res = await request(`/stories/${storyId}`)
+  if (!res.ok) throw await apiError(res, 'Story not found')
+  return res.json()
+}
+
+/** Edit only the fields sent; answers the story. */
+export async function patchStory(storyId, payload) {
+  const res = await request(`/stories/${storyId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) throw await apiError(res, 'Failed to update the story')
+  return res.json()
+}
+
+/** Delete the story and its step jobs; 409 while one of its steps is in flight. */
+export async function deleteStory(storyId) {
+  const res = await request(`/stories/${storyId}`, { method: 'DELETE' })
+  if (!res.ok) throw await apiError(res, 'Failed to delete the story')
+  return res.json()
+}
+
+/** `{"library": [cards], "generated": [cards]}`; `language`/`style` default to the story's own. */
+export async function fetchConcepts(storyId, { language, style } = {}) {
+  const params = new URLSearchParams()
+  if (language) params.set('language', language)
+  if (style) params.set('style', style)
+  const qs = params.toString()
+  const res = await request(`/stories/${storyId}/concepts${qs ? `?${qs}` : ''}`)
+  if (!res.ok) throw await apiError(res, 'Failed to fetch concepts')
+  return res.json()
+}
+
+/** "Generate 10 more": queues a `concepts` step job; 201 with the job. */
+export async function generateConcepts(storyId) {
+  const res = await request(`/stories/${storyId}/concepts/generate`, { method: 'POST' })
+  if (!res.ok) throw await apiError(res, 'Failed to queue concept generation')
+  return res.json()
+}
+
+/** Choose the story's concept (`{concept_id}` or `{concept}`); answers the story. */
+export async function chooseConcept(storyId, payload) {
+  const res = await request(`/stories/${storyId}/concepts/choose`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) throw await apiError(res, 'Failed to choose the concept')
+  return res.json()
+}
+
+/**
+ * Run one step of spec 9.1 (`body` is `{ep?, params?}`). `concepts` and
+ * `bible` answer 201 with the queued job; `style` runs inline and answers
+ * `{story, style_lock}`; `style_preview` answers 201 with the queued job.
+ */
+export async function runStoryStep(storyId, step, body = {}) {
+  const res = await request(`/stories/${storyId}/steps/${step}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) throw await apiError(res, `Failed to run step '${step}'`)
+  return res.json()
+}
+
+/** Approve one document (`bible` or `style`) of the story; answers the story. */
+export async function approveStoryDoc(storyId, doc) {
+  const res = await request(`/stories/${storyId}/approve/${doc}`, { method: 'POST' })
+  if (!res.ok) throw await apiError(res, `Failed to approve '${doc}'`)
+  return res.json()
+}
+
+/** Regenerate one piece (`{target, note?}`, spec 9.2 grammar); 201 with the queued job. */
+export async function regenerateStory(storyId, payload) {
+  const res = await request(`/stories/${storyId}/regenerate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) throw await apiError(res, 'Failed to queue regeneration')
+  return res.json()
+}
+
+/**
+ * What one step would cost and where it would run: `{est_usd, units,
+ * route_class, link, ready, message}`. `target` only matters for
+ * `regenerate` (its own estimate differs by what is being regenerated).
+ */
+export async function fetchStoryEstimate(storyId, step, { target } = {}) {
+  const qs = target ? `?target=${encodeURIComponent(target)}` : ''
+  const res = await request(`/stories/${storyId}/estimate/${step}${qs}`)
+  if (!res.ok) throw await apiError(res, 'Failed to fetch the estimate')
+  return res.json()
+}
+
+/**
+ * One style-preview image, as a blob URL. The route is token-gated like
+ * every other story route (DEC-113: no signed URL), so it is fetched with
+ * the auth header rather than used directly as an <img src> -- the caller is
+ * responsible for revoking the URL (`URL.revokeObjectURL`) once done with it.
+ */
+export async function fetchStoryFileUrl(storyId, name) {
+  const res = await request(`/stories/${storyId}/files/${encodeURIComponent(name)}`)
+  if (!res.ok) throw await apiError(res, 'Failed to load the preview image')
+  const blob = await res.blob()
+  return URL.createObjectURL(blob)
 }

@@ -1,7 +1,7 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { fetchJob, cancelJob, deleteJob, createSSEConnection } from '../api'
-import { parseTime, formatDuration, formatClock, useSecondsTicker } from '../time'
+import { ActivityConsole, LiveActivity, TERMINAL, mergeEvents as mergeEventsPure } from '../components/ActivityFeed'
 
 const STEPS = [
   { key: 'download', label: 'Source' },
@@ -25,146 +25,6 @@ function stepsFor(job) {
   const ran = job.progress?.step === 'diarization'
   if (diarizes || ran) return STEPS
   return STEPS.filter(step => step.key !== 'diarization')
-}
-
-const TERMINAL = ['completed', 'failed', 'cancelled']
-
-/**
- * The console. Follows the tail unless the user has scrolled up to read
- * something -- yanking them back to the bottom mid-sentence is the fastest way
- * to make a live log useless.
- */
-function ActivityConsole({ events }) {
-  const boxRef = useRef(null)
-  const followRef = useRef(true)
-
-  const onScroll = () => {
-    const box = boxRef.current
-    if (!box) return
-    const distanceFromBottom = box.scrollHeight - box.scrollTop - box.clientHeight
-    followRef.current = distanceFromBottom < 40
-  }
-
-  useEffect(() => {
-    const box = boxRef.current
-    if (box && followRef.current) box.scrollTop = box.scrollHeight
-  }, [events])
-
-  return (
-    <div className="log-viewer activity-console" ref={boxRef} onScroll={onScroll}>
-      {events.map(event => (
-        <div key={event.seq} className={`activity-line activity-${event.level}`}>
-          <span className="activity-time">{formatClock(event.ts)}</span>
-          <span className="activity-message">{event.message}</span>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-/**
- * What is happening right now, and how long it has been happening.
- *
- * The percentage alone cannot distinguish a job that is working from one that
- * died: a single AI call holds at 36% for as long as the provider's retry
- * ladder runs, and one clip can render for minutes.
- */
-function LiveActivity({ job, events, streamState }) {
-  const progress = job.progress || {}
-  const running = !TERMINAL.includes(job.status)
-  useSecondsTicker(running)
-
-  const now = Date.now()
-  const stepStarted = parseTime(progress.step_started_at)
-  const created = parseTime(job.created_at)
-  const inStep = stepStarted ? formatDuration(now - stepStarted.getTime()) : null
-  const inJob = created ? formatDuration(now - created.getTime()) : null
-
-  const lastEvent = events.length ? events[events.length - 1] : null
-  const sinceSignal = lastEvent && parseTime(lastEvent.ts)
-    ? now - parseTime(lastEvent.ts).getTime()
-    : null
-  // Long enough that it is not just a slow tick, short enough to reassure
-  // before the user reaches for the kill switch.
-  const quiet = running && sinceSignal != null && sinceSignal > 45000
-
-  const clipPercent = progress.clip_total
-    ? Math.round((progress.clip_index / progress.clip_total) * 100)
-    : null
-
-  return (
-    <div className="card activity-card">
-      <div className="activity-header">
-        <span className="activity-title">
-          <span className={`activity-pulse ${running ? 'running' : 'idle'}`}></span>
-          Live activity
-        </span>
-        <span className="activity-clocks">
-          {inStep && <span title="Time on the current step">{inStep} on this step</span>}
-          {inJob && <span className="activity-dim">· {inJob} total</span>}
-        </span>
-      </div>
-
-      <p className="activity-headline">{progress.message || 'Waiting to start...'}</p>
-      {progress.detail && progress.detail !== progress.message && (
-        <p className="activity-detail">{progress.detail}</p>
-      )}
-
-      <div className="activity-chips">
-        {progress.provider && (
-          <span className="chip chip-accent" title="The AI provider and model being asked">
-            🤖 {progress.provider.toUpperCase()}
-            {progress.model && <span className="chip-sub" title={progress.model}>{progress.model}</span>}
-          </span>
-        )}
-        {progress.attempt && progress.max_attempts && (
-          <span className={`chip ${progress.attempt > 1 ? 'chip-warn' : ''}`}>
-            attempt {progress.attempt} of {progress.max_attempts}
-          </span>
-        )}
-        {progress.clip_total && (
-          <span className="chip">clip {progress.clip_index} of {progress.clip_total}</span>
-        )}
-        {streamState === 'closed' && running && (
-          <span className="chip chip-warn" title="Falling back to polling every 3 seconds">
-            live stream dropped
-          </span>
-        )}
-      </div>
-
-      {clipPercent != null && (
-        <div className="progress-bar-bg activity-subbar">
-          <div className="progress-bar-fill" style={{ width: `${clipPercent}%` }}></div>
-        </div>
-      )}
-
-      {quiet && (
-        <p className="activity-quiet">
-          Nothing printed for {formatDuration(sinceSignal)}. This step is a single
-          long call — an AI request on its retry ladder, a model download, or one
-          clip encoding. It is still running.
-        </p>
-      )}
-
-      {events.length > 0 && (
-        <>
-          <div className="activity-console-header">
-            <span>Pipeline output ({events.length} lines)</span>
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm"
-              onClick={() => navigator.clipboard?.writeText(
-                events.map(e => `${formatClock(e.ts)}  ${e.message}`).join('\n')
-              )}
-            >
-              Copy
-            </button>
-          </div>
-          <ActivityConsole events={events} />
-        </>
-      )}
-    </div>
-  )
 }
 
 function JobDetail() {
@@ -212,14 +72,11 @@ function JobDetail() {
   }
 
   // Merged by sequence number, never replaced: the REST poll and the SSE stream
-  // both deliver events and routinely overlap.
+  // both deliver events and routinely overlap. The merge rule itself lives in
+  // components/ActivityFeed so it is shared with useJobFeed.
   const mergeEvents = (incoming) => {
     if (!incoming || incoming.length === 0) return
-    setEvents(previous => {
-      const bySeq = new Map(previous.map(e => [e.seq, e]))
-      incoming.forEach(e => bySeq.set(e.seq, e))
-      return [...bySeq.values()].sort((a, b) => a.seq - b.seq)
-    })
+    setEvents(previous => mergeEventsPure(previous, incoming))
   }
 
   // The media URLs carry ?exp=&sig= (web/api/auth.py), so appending a flag needs

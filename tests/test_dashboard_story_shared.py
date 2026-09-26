@@ -1,0 +1,179 @@
+"""Dashboard shared pieces for AI Story phase-1 stage 10 (plan stage 10).
+
+Guards the contract of ``components/ActivityFeed.jsx`` (the activity feed
+JobDetail used to hold alone, now shared with the story wizard of stage 11),
+the AI Story functions added to ``api.js``, and ``Dashboard.jsx``'s handling
+of the two new job statuses (``running``, ``awaiting_approval``) and of
+story-step jobs, which must never render as a clip card.
+
+Pure text/AST checks, no npm: a JS test runner would be a new dependency and
+would not run in CI, which installs pytest and nothing else (DEC-012) --
+the same reasoning and the same pattern as
+``tests/test_dashboard_payload_contract.py`` and ``tests/test_auth_token.py``.
+"""
+
+import ast
+import pathlib
+import re
+
+PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[1]
+DASHBOARD_SRC = PROJECT_ROOT / "web" / "dashboard" / "src"
+ACTIVITY_FEED = DASHBOARD_SRC / "components" / "ActivityFeed.jsx"
+JOB_DETAIL = DASHBOARD_SRC / "pages" / "JobDetail.jsx"
+DASHBOARD = DASHBOARD_SRC / "pages" / "Dashboard.jsx"
+API_JS = DASHBOARD_SRC / "api.js"
+MODELS = PROJECT_ROOT / "web" / "api" / "models.py"
+
+# The story functions api.js gained in this stage (contract item 3).
+STORY_FUNCTIONS = [
+    "fetchStories", "createStory", "fetchStory", "patchStory", "deleteStory",
+    "fetchConcepts", "generateConcepts", "chooseConcept", "runStoryStep",
+    "approveStoryDoc", "regenerateStory", "fetchStoryEstimate", "fetchStoryFileUrl",
+]
+
+
+def _job_status_values() -> set[str]:
+    """``JobStatus``'s string values, parsed without importing pydantic."""
+    tree = ast.parse(MODELS.read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef) and node.name == "JobStatus":
+            values = set()
+            for stmt in node.body:
+                if isinstance(stmt, ast.Assign) and isinstance(stmt.value, ast.Constant):
+                    values.add(stmt.value.value)
+            return values
+    raise AssertionError("JobStatus not found in web/api/models.py")
+
+
+def _function_body(src: str, name: str) -> str:
+    """The source of one ``export async function <name>(...) { ... }``, found
+    by brace counting from the opening ``{`` (these bodies nest no deeper than
+    a template literal's ``${...}``, which is itself brace-balanced)."""
+    match = re.search(rf"export async function {name}\([^)]*\)\s*\{{", src)
+    assert match, f"{name} not found in api.js"
+    start = match.end()
+    depth = 1
+    i = start
+    while depth > 0:
+        if src[i] == "{":
+            depth += 1
+        elif src[i] == "}":
+            depth -= 1
+        i += 1
+    return src[start:i]
+
+
+# --------------------------------------------------------------- non-vacuity
+
+def test_the_readers_see_something():
+    """A broken regex would make every assertion below pass for free."""
+    assert len(_job_status_values()) >= 8
+    assert len(STORY_FUNCTIONS) == 13
+
+
+# --------------------------------------------------------- components/ActivityFeed.jsx
+
+def test_activity_feed_exports_the_three_names():
+    src = ACTIVITY_FEED.read_text(encoding="utf-8")
+    assert re.search(r"export function ActivityConsole\(", src)
+    assert re.search(r"export function LiveActivity\(", src)
+    assert re.search(r"export function mergeEvents\(", src)
+
+
+def test_terminal_is_shared_and_gains_awaiting_approval():
+    src = ACTIVITY_FEED.read_text(encoding="utf-8")
+    match = re.search(r"export const TERMINAL = \[(.*?)\]", src)
+    assert match, "TERMINAL not exported from ActivityFeed.jsx"
+    values = set(re.findall(r"'([a-z_]+)'", match.group(1)))
+    assert values == {"completed", "failed", "cancelled", "awaiting_approval"}
+
+
+def test_job_detail_imports_the_shared_pieces():
+    src = JOB_DETAIL.read_text(encoding="utf-8")
+    match = re.search(r"import \{([^}]*)\} from '\.\./components/ActivityFeed'", src)
+    assert match, "JobDetail.jsx does not import from ../components/ActivityFeed"
+    imported = match.group(1)
+    for name in ("ActivityConsole", "LiveActivity", "mergeEvents"):
+        assert name in imported, f"JobDetail does not import {name}"
+    # And it must no longer define TERMINAL itself -- one definition, shared.
+    assert not re.search(r"^const TERMINAL = \[", src, re.MULTILINE)
+
+
+def test_no_second_copy_of_activity_console_under_src():
+    """Only ActivityFeed.jsx may define it; JobDetail used to hold its own,
+    and a second copy would drift from the shared one silently."""
+    hits = sorted(
+        path.resolve() for path in DASHBOARD_SRC.rglob("*.jsx")
+        if re.search(r"function ActivityConsole\(", path.read_text(encoding="utf-8"))
+    )
+    assert hits == [ACTIVITY_FEED.resolve()]
+
+
+# ------------------------------------------------------------- pages/Dashboard.jsx
+
+def test_status_labels_covers_every_job_status():
+    src = DASHBOARD.read_text(encoding="utf-8")
+    match = re.search(r"const STATUS_LABELS = \{(.*?)\n\}", src, re.DOTALL)
+    assert match, "STATUS_LABELS not found in Dashboard.jsx"
+    labelled = set(re.findall(r"^\s*([a-z_]+):", match.group(1), re.MULTILINE))
+    missing = _job_status_values() - labelled
+    assert not missing, f"STATUS_LABELS is missing: {sorted(missing)}"
+
+
+def test_status_labels_gains_the_two_new_statuses():
+    src = DASHBOARD.read_text(encoding="utf-8")
+    assert "running: 'Running'" in src
+    assert "awaiting_approval: 'Awaiting approval'" in src
+
+
+def test_dashboard_filters_story_step_jobs_out_of_the_clip_grid():
+    src = DASHBOARD.read_text(encoding="utf-8")
+    assert re.search(r"job\.kind\s*!==\s*['\"]story_step['\"]", src), (
+        "Dashboard.jsx does not filter kind === 'story_step' out of the clip jobs"
+    )
+
+
+def test_dashboard_links_a_story_step_job_to_its_story():
+    src = DASHBOARD.read_text(encoding="utf-8")
+    assert re.search(r"to=\{`/story/\$\{[^}]*\}`\}", src), (
+        "Dashboard.jsx does not link a story-step job's line to /story/<story_id>"
+    )
+
+
+# -------------------------------------------------------------------- api.js
+
+def test_every_story_function_is_defined():
+    src = API_JS.read_text(encoding="utf-8")
+    for name in STORY_FUNCTIONS:
+        _function_body(src, name)  # raises if not found
+
+
+def test_every_story_function_calls_request_and_never_a_raw_fetch():
+    src = API_JS.read_text(encoding="utf-8")
+    for name in STORY_FUNCTIONS:
+        body = _function_body(src, name)
+        assert "request(" in body, f"{name} does not call request()"
+        assert "fetch(" not in body, f"{name} calls fetch() directly"
+        assert "EventSource" not in body, f"{name} uses EventSource"
+
+
+def test_no_story_function_builds_a_url_with_a_token():
+    src = API_JS.read_text(encoding="utf-8")
+    for name in STORY_FUNCTIONS:
+        body = _function_body(src, name)
+        assert "token" not in body.lower(), f"{name} references a token directly"
+
+
+def test_api_error_carries_message_errors_and_status():
+    src = API_JS.read_text(encoding="utf-8")
+    assert re.search(r"class ApiError extends Error", src)
+    assert "this.errors" in src
+    assert "this.status" in src
+
+
+def test_existing_string_detail_callers_are_unchanged():
+    """cancelJob/deleteJob must keep throwing new Error(<string>): the
+    extension to detailOf must not change what a string detail collapses to."""
+    src = API_JS.read_text(encoding="utf-8")
+    assert "throw new Error(await detailOf(res, 'Failed to cancel the job'))" in src
+    assert "throw new Error(await detailOf(res, 'Failed to delete job'))" in src

@@ -44,8 +44,8 @@ Phase 0's RC-P1…RC-P11 (history table below) stay in force, plus:
 | 7 | stories API | **done** (local 2627 / CI 2184 + 413 skipped) |
 | 8 | style preview strip | **done** (local 2677 / CI 2213 + 434 skipped) |
 | 9 | CLI (+ shared `workflow.py` so API and CLI apply one set of rules) | **done** (local 2778 / CI 2313 + 435 skipped) |
-| 10 | dashboard shared pieces | next |
-| 11 | StoriesList + NewStoryWizard | — |
+| 10 | dashboard shared pieces | **done** (local 2792 / CI 2327 + 435 skipped; build green) |
+| 11 | StoriesList + NewStoryWizard (+ `GET /api/stories/styles`) | next |
 | 12 | merge, deploy, Tier-2 (human on phone) | — |
 | 13 | docs + decisions | — |
 
