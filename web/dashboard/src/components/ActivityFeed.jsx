@@ -224,6 +224,16 @@ export function useJobFeed(jobId, { onJob } = {}) {
                 })
               } else if (event.type === 'progress') {
                 setJob(prev => prev ? { ...prev, status: event.status, progress: event.progress, error: event.error } : prev)
+                // A step ends in awaiting_approval, failed or cancelled with
+                // no 'completed' frame, and the poll below stops once the
+                // status is terminal: fetch the finished job here so the
+                // caller's onJob hears about it.
+                if (TERMINAL.includes(event.status)) {
+                  fetchJob(jobId).then(fresh => {
+                    applyJob(fresh)
+                    mergeIncoming(fresh.events)
+                  }).catch(() => {})
+                }
               } else if (event.type === 'events') {
                 mergeIncoming(event.events)
               }

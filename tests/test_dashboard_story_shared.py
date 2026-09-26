@@ -177,3 +177,14 @@ def test_existing_string_detail_callers_are_unchanged():
     src = API_JS.read_text(encoding="utf-8")
     assert "throw new Error(await detailOf(res, 'Failed to cancel the job'))" in src
     assert "throw new Error(await detailOf(res, 'Failed to delete job'))" in src
+
+
+def test_the_feed_tells_its_caller_when_a_step_finishes_without_a_completed_frame():
+    # Found live: a step ends in awaiting_approval, the stream's last frame is
+    # a 'progress' event, and the poll stops at a terminal status -- so onJob
+    # never fired and the wizard kept a finished job as running (its Approve
+    # button stayed disabled until a reload).
+    source = ACTIVITY_FEED.read_text(encoding="utf-8")
+    progress_branch = source.split("event.type === 'progress'", 1)[1].split("event.type === 'events'", 1)[0]
+    assert "TERMINAL.includes(event.status)" in progress_branch
+    assert "applyJob(" in progress_branch
