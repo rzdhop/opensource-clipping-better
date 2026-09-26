@@ -29,6 +29,14 @@ _NOTE_WORD_LIMIT = 60
 _BIBLE_WORD_LIMIT = 120
 _AVOID_TITLE_LIMIT = 20
 
+# Phase 2 (spec 4.1): the existing cast / places, rendered as short lines for
+# continuity and visual distinctness (K1's relationships and "don't repeat
+# this look", P0/R1's owners, S1/S2's characters). Capped the same way
+# ``avoid`` is: a cut is never silent, it is named in ``Pack.trimmed``.
+_CAST_MAX_MEMBERS = 12
+_PLACES_MAX_ITEMS = 8
+_ENTITY_DESCRIPTOR_WORDS = 12
+
 
 def trim_words(text, limit):
     """Cut *text* to at most *limit* words, appending "…" when it was cut.
@@ -106,6 +114,52 @@ def bible_summary(story) -> str:
     return text
 
 
+def entity_lines(entities) -> str:
+    """Render already-written cast/place entries as short lines (spec 4.1):
+    name, role (when present), one-line (when present), a short (<=
+    ``_ENTITY_DESCRIPTOR_WORDS``-word) clip of the descriptor once one is
+    written (so a new entry reads as visually distinct), and signature
+    items when present (P0 sources props from these). Each entity is a
+    plain dict; only the keys it actually carries are rendered, so the same
+    renderer serves K1's full cast entries and P0's name-plus-signature-only
+    ones alike.
+    """
+    lines = []
+    for entity in entities:
+        line = f"- {entity['name']}"
+        role = entity.get("role")
+        if role:
+            line += f" ({role})"
+        one_line = entity.get("one_line")
+        if one_line:
+            line += f": {one_line}"
+        descriptor = entity.get("descriptor")
+        if descriptor:
+            short, _ = trim_words(descriptor, _ENTITY_DESCRIPTOR_WORDS)
+            line += f" — looks: {short}"
+        signature_items = entity.get("signature_items")
+        if signature_items:
+            line += f" — signature: {', '.join(signature_items)}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def cast_block(cast):
+    """``(text, was_cut)`` for the existing cast, capped at
+    ``_CAST_MAX_MEMBERS`` members."""
+    members = list(cast)
+    cut = len(members) > _CAST_MAX_MEMBERS
+    return entity_lines(members[:_CAST_MAX_MEMBERS]), cut
+
+
+def places_block(places):
+    """``(text, was_cut)`` for the existing places, capped at
+    ``_PLACES_MAX_ITEMS`` entries."""
+    items = list(places)
+    cut = len(items) > _PLACES_MAX_ITEMS
+    return entity_lines(items[:_PLACES_MAX_ITEMS]), cut
+
+
 def _world_text(story) -> str:
     world = story.get("world")
     if not world:
@@ -140,6 +194,13 @@ class Pack:
     seed: str | None = None
     note: str | None = None
     avoid: str | None = None
+    # Phase 2 (spec 4.1): the style lock's character design rule (from
+    # ``template``, alongside ``style`` -- K1 needs the rule itself, not
+    # just the one-line style summary, so the look fits the chosen style).
+    character_design_rules: str | None = None
+    # Phase 2: existing cast / places, short lines (K1/P0/R1/S1/S2).
+    cast: str | None = None
+    places: str | None = None
     trimmed: list = field(default_factory=list)
 
 
@@ -152,6 +213,8 @@ def build_pack(
     seed_text=None,
     note=None,
     avoid_titles=None,
+    cast=None,
+    places=None,
 ) -> Pack:
     """Assemble a ``Pack`` for one prompt call. Nothing here is a silent
     fallback: every section that had to be cut to fit is named in
@@ -160,6 +223,7 @@ def build_pack(
 
     style = style_line(template) if template else None
     concept_text = concept_block(concept) if concept else None
+    character_design_rules = template["character_design_rules"] if template else None
 
     bible_text = None
     world_text = None
@@ -191,6 +255,18 @@ def build_pack(
             trimmed.append("avoid")
         avoid = ", ".join(titles)
 
+    cast_text = None
+    if cast:
+        cast_text, cut = cast_block(cast)
+        if cut:
+            trimmed.append("cast")
+
+    places_text = None
+    if places:
+        places_text, cut = places_block(places)
+        if cut:
+            trimmed.append("places")
+
     return Pack(
         language_name=LANGUAGE_NAMES.get(language, language),
         style=style,
@@ -200,6 +276,9 @@ def build_pack(
         seed=seed,
         note=note_text,
         avoid=avoid,
+        character_design_rules=character_design_rules,
+        cast=cast_text,
+        places=places_text,
         trimmed=trimmed,
     )
 

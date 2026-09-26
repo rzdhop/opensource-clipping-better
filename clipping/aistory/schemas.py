@@ -1509,3 +1509,424 @@ def places_proposal_errors(doc) -> list:
             _check_text(errors, f"$.{key}[{i}].name", item["name"])
             _check_text(errors, f"$.{key}[{i}].one_line", item["one_line"])
     return errors
+
+
+# ============================================================ LLM output schemas (spec 4.2) -- phase 2
+#
+# What a *model* returns for the K1/P0/P1/R1/S1/S2/U1 prompts of
+# ``prompts.py`` (a phase-2 counterpart to the C1/B1/B2/B3 schemas above):
+# the same strict-mode subset, the same "lengths and counts are the prompt
+# text's and the post-validator's job, never the schema's" rule. Word/count
+# caps reuse the ``character_v1``/``place_v1``/``prop_v1``/``season_arc_v1``
+# constants above wherever the phase-1 document and the phase-2 prompt share
+# the same limit (spec 4.2), so the two never drift apart silently.
+
+VOICE_GENDERS = ("female", "male", "neutral")
+VOICE_AGES = ("child", "young", "adult", "elder")
+# A closed list (spec 4.2, row K1): kept short and orthogonal so a TTS
+# provider's own voice catalogue can be matched against it later.
+VOICE_STYLE_TAGS = (
+    "warm", "bright", "deep", "raspy", "soft", "fast", "slow", "smug",
+    "nervous", "authoritative", "playful", "calm",
+)
+
+K1_TRAITS_RANGE = (2, 5)
+K1_TRAIT_MAX_WORDS = 4
+K1_WANTS_FEARS_SPEECH_MAX_WORDS = 25
+K1_VOICE_DIRECTION_MAX_WORDS = 20
+K1_STYLE_TAGS_RANGE = (1, 3)
+K1_RELATIONSHIPS_MAX = 5
+K1_RELATION_MAX_WORDS = 15
+
+
+def k1_schema(cast_names) -> dict:
+    """The K1 output schema (spec 4.2, row K1): one character's descriptor,
+    signature items, personality, voice and relationships.
+
+    ``cast_names`` constrains ``relationships[].with`` to the existing cast
+    (passed in by the caller so this module needs no store import); an
+    empty list leaves it free text, since an empty cast can only ever
+    produce an empty ``relationships`` array anyway.
+    """
+    with_schema = {"type": "string", "enum": list(cast_names)} if cast_names else {"type": "string"}
+    personality = _llm_obj({
+        "traits": {
+            "type": "array",
+            "description": "2-5 traits, each at most 4 words",
+            "items": {"type": "string"},
+        },
+        "wants": {"type": "string", "description": "story language, at most 25 words"},
+        "fears": {"type": "string", "description": "story language, at most 25 words"},
+        "speech_style": {"type": "string", "description": "story language, at most 25 words"},
+    })
+    voice = _llm_obj({
+        "gender": {"type": "string", "enum": list(VOICE_GENDERS)},
+        "age": {"type": "string", "enum": list(VOICE_AGES)},
+        "style_tags": {
+            "type": "array",
+            "description": "1-3 tags from the closed list",
+            "items": {"type": "string", "enum": list(VOICE_STYLE_TAGS)},
+        },
+        "direction": {"type": "string", "description": "English, at most 20 words, for a voice actor"},
+        "sample_line": {"type": "string", "description": "story language, at most 12 words, in character, no name"},
+    })
+    relationship = _llm_obj({
+        "with": with_schema,
+        "relation": {"type": "string", "description": "story language, at most 15 words"},
+    })
+    return _llm_obj({
+        "descriptor": {
+            "type": "string",
+            "description": "English, at most 45 words, appearance only, never the character's name",
+        },
+        "signature_items": {
+            "type": "array",
+            "description": "English, 2-3 items, each at most 8 words",
+            "items": {"type": "string"},
+        },
+        "personality": personality,
+        "voice": voice,
+        "relationships": {
+            "type": "array",
+            "description": "0-5 relationships to the existing cast",
+            "items": relationship,
+        },
+    })
+
+
+def k1_errors(doc, name) -> list:
+    """Post-validation for a K1 response, beyond what ``k1_schema`` can
+    express: descriptor/signature/personality/voice/relationship word and
+    count caps, and the name-leak check -- *name* (the character's own)
+    must never appear in the descriptor, a signature item or the sample
+    line (spec 2.3: prompts reference appearance, never the name).
+    """
+    errors = validate(doc, k1_schema(()))
+    if errors:
+        return errors
+
+    errors = []
+    descriptor = doc["descriptor"]
+    _check_text(errors, "$.descriptor", descriptor, max_words=DESCRIPTOR_MAX_WORDS)
+
+    items = doc["signature_items"]
+    lo, hi = SIGNATURE_ITEMS_WRITTEN
+    if not (lo <= len(items) <= hi):
+        errors.append(f"$.signature_items: {len(items)} item(s), expected {lo}-{hi}")
+    for i, item in enumerate(items):
+        _check_text(errors, f"$.signature_items[{i}]", item, max_words=8)
+
+    personality = doc["personality"]
+    traits = personality["traits"]
+    lo, hi = K1_TRAITS_RANGE
+    if not (lo <= len(traits) <= hi):
+        errors.append(f"$.personality.traits: {len(traits)} trait(s), expected {lo}-{hi}")
+    for i, trait in enumerate(traits):
+        _check_text(errors, f"$.personality.traits[{i}]", trait, max_words=K1_TRAIT_MAX_WORDS)
+    _check_text(errors, "$.personality.wants", personality["wants"], max_words=K1_WANTS_FEARS_SPEECH_MAX_WORDS)
+    _check_text(errors, "$.personality.fears", personality["fears"], max_words=K1_WANTS_FEARS_SPEECH_MAX_WORDS)
+    _check_text(
+        errors, "$.personality.speech_style", personality["speech_style"],
+        max_words=K1_WANTS_FEARS_SPEECH_MAX_WORDS,
+    )
+
+    voice = doc["voice"]
+    style_tags = voice["style_tags"]
+    lo, hi = K1_STYLE_TAGS_RANGE
+    if not (lo <= len(style_tags) <= hi):
+        errors.append(f"$.voice.style_tags: {len(style_tags)} tag(s), expected {lo}-{hi}")
+    _check_text(errors, "$.voice.direction", voice["direction"], max_words=K1_VOICE_DIRECTION_MAX_WORDS)
+    sample_line = voice["sample_line"]
+    _check_text(errors, "$.voice.sample_line", sample_line, max_words=SAMPLE_LINE_MAX_WORDS)
+
+    relationships = doc["relationships"]
+    if len(relationships) > K1_RELATIONSHIPS_MAX:
+        errors.append(f"$.relationships: {len(relationships)} relationship(s), expected at most {K1_RELATIONSHIPS_MAX}")
+    for i, relationship in enumerate(relationships):
+        _check_text(errors, f"$.relationships[{i}].relation", relationship["relation"], max_words=K1_RELATION_MAX_WORDS)
+
+    name = (name or "").strip().lower()
+    if name:
+        haystacks = [("$.descriptor", descriptor)] + [
+            (f"$.signature_items[{i}]", item) for i, item in enumerate(items)
+        ]
+        if isinstance(sample_line, str):
+            haystacks.append(("$.voice.sample_line", sample_line))
+        for path, text in haystacks:
+            if isinstance(text, str) and name in text.lower():
+                errors.append(f"{path}: must not mention the character's own name")
+
+    return errors
+
+
+# ------------------------------------------------------------- P0 (places_proposal, spec plan 1.2)
+
+P0_PLACES_RANGE = (2, 3)
+P0_PROPS_MAX = 3
+P0_NAME_MAX_WORDS = 5
+P0_ONE_LINE_MAX_WORDS = 20
+
+
+def p0_schema(cast_names) -> dict:
+    """The P0 output schema: propose 2-3 places and 0-3 props sourced from
+    the bible's recurring motifs and the cast's signature items.
+
+    ``cast_names`` constrains a prop's ``owner`` to the existing cast (or
+    null); passed in so this module needs no store import.
+    """
+    owner_schema = (
+        {"type": ["string", "null"], "enum": list(cast_names) + [None]}
+        if cast_names else {"type": ["string", "null"]}
+    )
+    place = _llm_obj({
+        "name": {"type": "string", "description": "story language, at most 5 words"},
+        "one_line": {"type": "string", "description": "story language, at most 20 words"},
+    })
+    prop = _llm_obj({
+        "name": {"type": "string", "description": "story language, at most 5 words"},
+        "one_line": {"type": "string", "description": "story language, at most 20 words"},
+        "owner": owner_schema,
+    })
+    return _llm_obj({
+        "places": {"type": "array", "description": "2-3 places", "items": place},
+        "props": {
+            "type": "array",
+            "description": "0-3 props, from the cast's signature items or the bible's recurring motifs",
+            "items": prop,
+        },
+    })
+
+
+def p0_errors(doc) -> list:
+    """Post-validation for a P0 response, beyond what ``p0_schema`` can express."""
+    errors = validate(doc, p0_schema(()))
+    if errors:
+        return errors
+
+    errors = []
+    places = doc["places"]
+    lo, hi = P0_PLACES_RANGE
+    if not (lo <= len(places) <= hi):
+        errors.append(f"$.places: {len(places)} place(s), expected {lo}-{hi}")
+    for i, place in enumerate(places):
+        _check_text(errors, f"$.places[{i}].name", place["name"], max_words=P0_NAME_MAX_WORDS)
+        _check_text(errors, f"$.places[{i}].one_line", place["one_line"], max_words=P0_ONE_LINE_MAX_WORDS)
+
+    props = doc["props"]
+    if len(props) > P0_PROPS_MAX:
+        errors.append(f"$.props: {len(props)} prop(s), expected at most {P0_PROPS_MAX}")
+    for i, prop in enumerate(props):
+        _check_text(errors, f"$.props[{i}].name", prop["name"], max_words=P0_NAME_MAX_WORDS)
+        _check_text(errors, f"$.props[{i}].one_line", prop["one_line"], max_words=P0_ONE_LINE_MAX_WORDS)
+
+    return errors
+
+
+# ------------------------------------------------------------------------- P1 (place_v1)
+
+# The closed list a P1 reply may pick time variants from (spec 4.2, row P1);
+# a subset of the free-form ``TIME_VARIANT_PATTERN`` a place's document may
+# carry once images exist for other variants too.
+TIME_VARIANT_CHOICES = ("day", "night", "dusk", "rain", "dawn")
+
+
+def p1_schema() -> dict:
+    """The P1 output schema (spec 4.2, row P1): one place's descriptor,
+    layout notes and time variants."""
+    return _llm_obj({
+        "descriptor": {
+            "type": "string",
+            "description": "English, at most 45 words, the place alone, no people, no characters",
+        },
+        "layout_notes": {
+            "type": "string",
+            "description": "English, at most 60 words: what is left, right, back and foreground, for continuity",
+        },
+        "time_variants": {
+            "type": "array",
+            "description": "1-3 variants from day, night, dusk, rain, dawn, always including day",
+            "items": {"type": "string", "enum": list(TIME_VARIANT_CHOICES)},
+        },
+    })
+
+
+def p1_errors(doc) -> list:
+    """Post-validation for a P1 response, beyond what ``p1_schema`` can express."""
+    errors = validate(doc, p1_schema())
+    if errors:
+        return errors
+
+    errors = []
+    _check_text(errors, "$.descriptor", doc["descriptor"], max_words=DESCRIPTOR_MAX_WORDS)
+    _check_text(errors, "$.layout_notes", doc["layout_notes"], max_words=LAYOUT_NOTES_MAX_WORDS)
+
+    variants = doc["time_variants"]
+    if not (1 <= len(variants) <= 3):
+        errors.append(f"$.time_variants: {len(variants)} variant(s), expected 1-3")
+    if MASTER_PLATE_VARIANT not in variants:
+        errors.append(f"$.time_variants: missing {MASTER_PLATE_VARIANT!r} (always included)")
+    if len(variants) != len(set(variants)):
+        errors.append("$.time_variants: duplicate variants are not allowed")
+
+    return errors
+
+
+# ------------------------------------------------------------------------- R1 (prop_v1)
+
+def r1_schema(cast_names) -> dict:
+    """The R1 output schema (spec 4.2, row R1): one prop's descriptor and
+    owner. ``cast_names`` constrains ``owner`` the same way as P0's."""
+    owner_schema = (
+        {"type": ["string", "null"], "enum": list(cast_names) + [None]}
+        if cast_names else {"type": ["string", "null"]}
+    )
+    return _llm_obj({
+        "descriptor": {"type": "string", "description": "English, at most 30 words, the object alone"},
+        "owner": owner_schema,
+    })
+
+
+def r1_errors(doc) -> list:
+    """Post-validation for an R1 response, beyond what ``r1_schema`` can express."""
+    errors = validate(doc, r1_schema(()))
+    if errors:
+        return errors
+
+    errors = []
+    _check_text(errors, "$.descriptor", doc["descriptor"], max_words=PROP_DESCRIPTOR_MAX_WORDS)
+    return errors
+
+
+# ------------------------------------------------------------------------- S1 (season_arc_v1 skeleton)
+
+S1_SUMMARY_MAX_WORDS = 25
+
+
+def s1_schema(episodes) -> dict:
+    """The S1 output schema (spec 4.2, row S1): exactly *episodes* arc
+    entries, function + one-line summary each. *episodes* is baked into
+    the schema's description (an exact count the prompt text also states),
+    not left to the post-validator alone.
+    """
+    entry = _llm_obj({
+        "ep": {"type": "integer", "description": "the episode number, 1-based"},
+        "function": {"type": "string", "enum": list(ARC_FUNCTIONS)},
+        "summary": {"type": "string", "description": "story language, at most 25 words"},
+    })
+    return _llm_obj({
+        "arc": {"type": "array", "description": f"exactly {episodes} entries, one per episode", "items": entry},
+    })
+
+
+def s1_errors(doc, episodes) -> list:
+    """Post-validation for an S1 response, beyond what ``s1_schema`` can
+    express: exactly *episodes* entries, numbered 1..episodes in order,
+    episode 1 is ``setup``, the last is ``climax_and_reset``, and one entry
+    is ``midpoint_twist`` (spec 2.6)."""
+    errors = validate(doc, s1_schema(episodes))
+    if errors:
+        return errors
+
+    errors = []
+    arc = doc["arc"]
+    if len(arc) != episodes:
+        errors.append(f"$.arc: {len(arc)} entries, expected exactly {episodes}")
+    eps = [entry["ep"] for entry in arc]
+    if eps != list(range(1, episodes + 1)):
+        errors.append(f"$.arc: episodes {eps} must be exactly 1..{episodes} in order")
+    for i, entry in enumerate(arc):
+        _check_text(errors, f"$.arc[{i}].summary", entry["summary"], max_words=S1_SUMMARY_MAX_WORDS)
+
+    if arc:
+        if arc[0]["function"] != "setup":
+            errors.append("$.arc[0].function: episode 1 must be 'setup'")
+        if arc[-1]["function"] != "climax_and_reset":
+            errors.append(f"$.arc[{len(arc) - 1}].function: the last episode must be 'climax_and_reset'")
+        if "midpoint_twist" not in [entry["function"] for entry in arc]:
+            errors.append("$.arc: no episode has function 'midpoint_twist'")
+
+    return errors
+
+
+# ------------------------------------------------------------------------- S2 (expand one arc entry)
+
+def s2_schema(cast_names) -> dict:
+    """The S2 output schema (spec 4.2, row S2): expand one arc entry.
+    ``cast_names`` constrains ``characters`` to the existing cast."""
+    character_schema = {"type": "string", "enum": list(cast_names)} if cast_names else {"type": "string"}
+    return _llm_obj({
+        "summary": {"type": "string", "description": "story language, at most 60 words"},
+        "open_hooks_in": {
+            "type": "array",
+            "description": "0-3 hooks, each at most 15 words",
+            "items": {"type": "string"},
+        },
+        "open_hooks_out": {
+            "type": "array",
+            "description": "1-3 hooks, each at most 15 words",
+            "items": {"type": "string"},
+        },
+        "characters": {
+            "type": "array",
+            "description": "1-5 of the existing cast",
+            "items": character_schema,
+        },
+    })
+
+
+def s2_errors(doc) -> list:
+    """Post-validation for an S2 response, beyond what ``s2_schema`` can express."""
+    errors = validate(doc, s2_schema(()))
+    if errors:
+        return errors
+
+    errors = []
+    _check_text(errors, "$.summary", doc["summary"], max_words=ARC_SUMMARY_MAX_WORDS)
+
+    hooks_in = doc["open_hooks_in"]
+    if len(hooks_in) > 3:
+        errors.append(f"$.open_hooks_in: {len(hooks_in)} hook(s), expected at most 3")
+    for i, hook in enumerate(hooks_in):
+        _check_text(errors, f"$.open_hooks_in[{i}]", hook, max_words=15)
+
+    hooks_out = doc["open_hooks_out"]
+    if not (1 <= len(hooks_out) <= 3):
+        errors.append(f"$.open_hooks_out: {len(hooks_out)} hook(s), expected 1-3")
+    for i, hook in enumerate(hooks_out):
+        _check_text(errors, f"$.open_hooks_out[{i}]", hook, max_words=15)
+
+    characters = doc["characters"]
+    if not (1 <= len(characters) <= 5):
+        errors.append(f"$.characters: {len(characters)} character(s), expected 1-5")
+
+    return errors
+
+
+# ------------------------------------------------------------------------- U1 (vision: design reference)
+
+U1_MAX_WORDS = 40
+
+
+def u1_schema() -> dict:
+    """The U1 output schema (spec 4.2, row U1): describe an uploaded design
+    reference as appearance notes for K1 to fold into a character."""
+    return _llm_obj({
+        "appearance_notes": {
+            "type": "string",
+            "description": (
+                "English, at most 40 words: body shape, colours, clothing, "
+                "accessories, distinctive marks"
+            ),
+        },
+    })
+
+
+def u1_errors(doc) -> list:
+    """Post-validation for a U1 response, beyond what ``u1_schema`` can express."""
+    errors = validate(doc, u1_schema())
+    if errors:
+        return errors
+
+    errors = []
+    _check_text(errors, "$.appearance_notes", doc["appearance_notes"], max_words=U1_MAX_WORDS)
+    return errors

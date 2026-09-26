@@ -30,6 +30,8 @@ BUILDER_FUNCTIONS = [
     prompting.expressions_prompt,
     prompting.master_plate_prompt,
     prompting.character_prompt_block,
+    prompting.place_prompt_block,
+    prompting.prop_prompt_block,
 ]
 
 BUILDERS_WITH_SIGNATURE_ITEMS = [
@@ -391,3 +393,86 @@ def test_character_prompt_block_is_pure_and_deterministic():
         "image."
     )
     assert result1 == result2 == expected
+
+
+# ----------------------------------------------------------- place_prompt_block
+
+PLACE_DESCRIPTOR = (
+    "a sprawling open-air market square with cracked terracotta tiles and "
+    "faded striped awnings"
+)
+LAYOUT_NOTES = (
+    "the fruit stalls line the left side, the stage sits at the back, the "
+    "fountain anchors the foreground"
+)
+
+
+def test_place_prompt_block_fruit_drama_golden():
+    result = prompting.place_prompt_block(
+        FRUIT_DRAMA, descriptor=PLACE_DESCRIPTOR, layout_notes=LAYOUT_NOTES
+    )
+    expected = (
+        "a sprawling open-air market square with cracked terracotta tiles and "
+        "faded striped awnings. the fruit stalls line the left side, the "
+        "stage sits at the back, the fountain anchors the foreground. "
+        "real-world sets — manor gates, gravel courtyards, derelict interiors "
+        "with chandeliers, beach camps, villa kitchens, restaurants — "
+        "photographed like a reality-TV show or a live-action comedy, props "
+        "at human scale; exteriors in golden hour, interiors cold blue-grey "
+        "with warm candle or lamp practicals"
+    )
+    assert result == expected
+
+
+def test_place_prompt_block_strips_trailing_periods_before_joining():
+    with_periods = prompting.place_prompt_block(
+        FRUIT_DRAMA, descriptor=PLACE_DESCRIPTOR + ".", layout_notes=LAYOUT_NOTES + "."
+    )
+    without_periods = prompting.place_prompt_block(
+        FRUIT_DRAMA, descriptor=PLACE_DESCRIPTOR, layout_notes=LAYOUT_NOTES
+    )
+    assert with_periods == without_periods
+    assert ".." not in with_periods
+
+
+def test_place_prompt_block_is_pure_and_deterministic():
+    result1 = prompting.place_prompt_block(FRUIT_DRAMA, descriptor=PLACE_DESCRIPTOR, layout_notes=LAYOUT_NOTES)
+    result2 = prompting.place_prompt_block(FRUIT_DRAMA, descriptor=PLACE_DESCRIPTOR, layout_notes=LAYOUT_NOTES)
+    assert result1 == result2
+
+
+# ------------------------------------------------------------ prop_prompt_block
+
+PROP_DESCRIPTOR = "a small tarnished brass telephone shaped like a hollowed coconut shell"
+
+
+def test_prop_prompt_block_fruit_drama_golden():
+    result = prompting.prop_prompt_block(FRUIT_DRAMA, descriptor=PROP_DESCRIPTOR)
+    expected = (
+        "a small tarnished brass telephone shaped like a hollowed coconut "
+        "shell. photorealistic 3D render of anthropomorphic fruits and "
+        "vegetables with expressive human-like faces (eyes, brows, mouths) "
+        "on realistic fruit heads, human-proportioned bodies in real fabric "
+        "outfits, subsurface scattering on fruit skin, visible pores and "
+        "fuzz, glossy highlights, high-end CGI commercial quality, "
+        "Octane-style render"
+    )
+    assert result == expected
+
+
+def test_prop_prompt_block_strips_trailing_period_before_joining():
+    with_period = prompting.prop_prompt_block(FRUIT_DRAMA, descriptor=PROP_DESCRIPTOR + ".")
+    without_period = prompting.prop_prompt_block(FRUIT_DRAMA, descriptor=PROP_DESCRIPTOR)
+    assert with_period == without_period
+    assert ".." not in with_period
+
+
+def test_prop_prompt_block_is_pure_and_deterministic():
+    result1 = prompting.prop_prompt_block(FRUIT_DRAMA, descriptor=PROP_DESCRIPTOR)
+    result2 = prompting.prop_prompt_block(FRUIT_DRAMA, descriptor=PROP_DESCRIPTOR)
+    assert result1 == result2
+
+
+def test_place_and_prop_prompt_block_have_no_name_parameter():
+    assert "name" not in inspect.signature(prompting.place_prompt_block).parameters
+    assert "name" not in inspect.signature(prompting.prop_prompt_block).parameters

@@ -264,7 +264,10 @@ def test_generate_ten_makes_ten_c1_calls_of_one_valid_card_each(story_store):
         assert f"(call {k} of 10)" in call["user"]
         assert "Invent exactly 1 original concept " in call["user"]
         assert "Visual style: Fruit Drama" in call["user"]
-        assert call["system"].endswith("Write all user-facing text in French.")
+        assert "Write all user-facing text in French." in call["system"]
+        assert call["system"].endswith(
+            "Fields marked (English) are for image and voice models: write them in English."
+        )
 
     doc = story_store.read_doc(story_id, "concepts.json")
     assert schemas.story_concepts_errors(doc) == []

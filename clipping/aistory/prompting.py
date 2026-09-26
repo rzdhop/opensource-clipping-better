@@ -219,3 +219,21 @@ def character_prompt_block(style_lock: dict, *, descriptor: str, signature_items
     items = _join_items(signature_items)
     text = f"{descriptor}, wearing {items}. {style_lock['character_design_rules']}"
     return _collapse_ws(text)
+
+
+def place_prompt_block(style_lock: dict, *, descriptor: str, layout_notes: str) -> str:
+    """Spec 2.4: auto-assembled from descriptor + layout_notes +
+    style_lock.environment_rules. Pure and deterministic, no names.
+    """
+    place = _strip_trailing_period(descriptor)
+    layout = _strip_trailing_period(layout_notes)
+    text = f"{place}. {layout}. {style_lock['environment_rules']}"
+    return _collapse_ws(text)
+
+
+def prop_prompt_block(style_lock: dict, *, descriptor: str) -> str:
+    """Spec 2.5: auto-assembled from descriptor + style_lock.rendering.
+    Pure and deterministic, no names.
+    """
+    text = f"{_strip_trailing_period(descriptor)}. {style_lock['rendering']}"
+    return _collapse_ws(text)
