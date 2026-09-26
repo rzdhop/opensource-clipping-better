@@ -126,7 +126,8 @@ def _valid_bible(**changes):
         "style_template_id": None, "episode_template_id": "serial_60s_v1",
         "generation_profile": defaults.default_generation_profile(),
         "narrator": {"enabled": False, "voice": None},
-        "approvals": {"concept": None, "bible": None, "style": None},
+        "approvals": {"concept": None, "bible": None, "style": None,
+                      "cast": None, "places": None, "season": None},
         "status": "draft", "created_at": NOW, "updated_at": NOW,
     }
     doc.update(changes)
@@ -144,7 +145,8 @@ def test_a_complete_bible_validates():
         genre_tags=["soap"], world=_WORLD, themes_and_values=["loyalty"],
         audience={"age": "13+", "platforms": ["tiktok", "shorts", "reels"]},
         why_come_back=["a", "b", "c"], style_template_id="fruit_drama",
-        approvals={"concept": NOW, "bible": NOW, "style": None}, status="bible_approved",
+        approvals={"concept": NOW, "bible": NOW, "style": None, "cast": None, "places": None, "season": None},
+        status="bible_approved",
     )
     assert schemas.story_bible_errors(doc) == []
 
@@ -169,7 +171,7 @@ def test_every_fixed_object_of_the_bible_is_closed():
     {"generation_profile": {**defaults.default_generation_profile(), "route": "cloud"}},
     {"generation_profile": {"tier": 1}},
     {"narrator": {"enabled": "no", "voice": None}},
-    {"approvals": {"concept": "", "bible": None, "style": None}},
+    {"approvals": {"concept": "", "bible": None, "style": None, "cast": None, "places": None, "season": None}},
     {"approvals": {"concept": None, "bible": None}},
     {"title": "x" * 121},
     {"seed_text": "x" * 2001},
@@ -242,7 +244,8 @@ def test_a_new_story_has_every_field_as_a_draft(stories):
     assert schemas.story_bible_errors(doc) == []
     assert store.STORY_ID_PATTERN.fullmatch(doc["story_id"])
     assert doc["language"] == "en"
-    assert doc["approvals"] == {"concept": None, "bible": None, "style": None}
+    assert doc["approvals"] == {"concept": None, "bible": None, "style": None,
+                                "cast": None, "places": None, "season": None}
     assert doc["status"] == "draft"
     assert doc["created_at"] == doc["updated_at"] == NOW
     assert doc["generation_profile"] == defaults.default_generation_profile()

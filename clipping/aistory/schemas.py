@@ -1,5 +1,5 @@
 """A stdlib-only JSON-Schema subset validator, plus the closed lists and the
-document schemas of AI Story phase 1 (spec 5, 6.3, 7, 11, 2.1, 2.2).
+document schemas of AI Story phases 1 and 2 (spec 5, 6.3, 7, 11, 2.1-2.6).
 
 DEC-012: this module is imported by a pytest suite that must run in CI with
 pytest alone, so no third-party schema library (``jsonschema``, ``pydantic``)
@@ -12,6 +12,7 @@ keywords (``description``, ``title``, ...) are harmless.
 from __future__ import annotations
 
 import re
+import unicodedata
 
 from . import defaults
 
@@ -515,6 +516,13 @@ STORY_ID_PATTERN = r"^[0-9a-f]{12}$"
 # A library concept id, a user-written one, or one derived from an import (spec 12).
 CONCEPT_REF_PATTERN = r"^([a-z][a-z0-9_]*|custom|import:[0-9a-f]{12})$"
 
+# Entity ids (spec 2): "<type>_<slug>", the slug an ASCII rendering of the name
+# (``slugify``). Each one is also a folder name under the story, so it is
+# checked against its pattern before any path is built from it (store.py).
+CHAR_ID_PATTERN = r"^char_[a-z0-9_]{1,40}$"
+PLACE_ID_PATTERN = r"^place_[a-z0-9_]{1,40}$"
+PROP_ID_PATTERN = r"^prop_[a-z0-9_]{1,40}$"
+
 
 def _nullable_string(max_length) -> dict:
     return {"type": ["string", "null"], "maxLength": max_length}
@@ -578,12 +586,25 @@ _NARRATOR_SCHEMA = {
 # An approval is the timestamp it was given at; null until then.
 _APPROVAL = {"type": ["string", "null"], "minLength": 1}
 
+# In the order the story moves through them (store._APPROVAL_STEPS). The last
+# three arrived with phase 2; a phase-1 story.json without them is upgraded in
+# memory when it is read (store.PHASE2_APPROVALS) and saved with them.
 _APPROVALS_SCHEMA = {
     "type": "object",
-    "properties": {"concept": _APPROVAL, "bible": _APPROVAL, "style": _APPROVAL},
-    "required": ["concept", "bible", "style"],
+    "properties": {
+        "concept": _APPROVAL, "bible": _APPROVAL, "style": _APPROVAL,
+        # Folded from the entities (store.recompute_group_approvals): every
+        # lead/support character approved; every place and prop approved.
+        "cast": _APPROVAL, "places": _APPROVAL,
+        "season": _APPROVAL,
+    },
+    "required": ["concept", "bible", "style", "cast", "places", "season"],
     "additionalProperties": False,
 }
+
+
+def _id_array(pattern) -> dict:
+    return {"type": "array", "items": {"type": "string", "pattern": pattern}}
 
 # Field order is the order a human reads story.json in (the store never sorts keys).
 STORY_BIBLE_SCHEMA = {
@@ -606,10 +627,10 @@ STORY_BIBLE_SCHEMA = {
         "themes_and_values": _string_array(max_items=6),
         "audience": _AUDIENCE_SCHEMA,
         "why_come_back": _string_array(max_items=3),
-        # Filled by the cast / places steps (phase 2); empty in phase 1.
-        "cast_ids": _string_array(),
-        "place_ids": _string_array(),
-        "prop_ids": _string_array(),
+        # Filled by the cast / places steps (phase 2; store.write_entity).
+        "cast_ids": _id_array(CHAR_ID_PATTERN),
+        "place_ids": _id_array(PLACE_ID_PATTERN),
+        "prop_ids": _id_array(PROP_ID_PATTERN),
         "style_template_id": {"type": ["string", "null"], "pattern": _ID_PATTERN},
         "episode_template_id": {"type": "string", "const": defaults.EPISODE_TEMPLATE_ID},
         "generation_profile": _GENERATION_PROFILE_SCHEMA,
@@ -1034,4 +1055,457 @@ def style_preview_errors(doc) -> list:
             if n in seen:
                 errors.append(f"$.{key}[{i}].n: sample {n} is listed twice")
             seen.add(n)
+    return errors
+
+
+# ================================================================ phase 2 documents
+#
+# Spec 2.3-2.6 and the phase-2 plan's "Documents": what the cast, places and
+# season steps keep on disk. Every fixed object is closed; each ``*_errors``
+# function adds the rules the subset cannot express (word caps, an image named
+# and labelled for its slot, the keys of an open object, the arc's episodes).
+
+def _document(properties) -> dict:
+    """A closed object: every property required, no other key allowed."""
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": list(properties),
+        "additionalProperties": False,
+    }
+
+
+def _or_null(schema) -> dict:
+    types = schema["type"] if isinstance(schema["type"], list) else [schema["type"]]
+    return {**schema, "type": types + ["null"]}
+
+
+def _text(max_length) -> dict:
+    return {"type": "string", "minLength": 1, "maxLength": max_length}
+
+
+# A timestamp once it happened, null until then (an entity's approved_at).
+_TIMESTAMP_OR_NULL = {"type": ["string", "null"], "minLength": 1}
+
+# ---------------------------------------------------------------------- entity ids
+
+# store.ENTITY_KINDS -> the prefix of their ids (CHAR/PLACE/PROP_ID_PATTERN).
+ENTITY_ID_PREFIXES = {"characters": "char_", "places": "place_", "props": "prop_"}
+
+SLUG_MAX = 40
+SLUG_FALLBACK = "item"
+
+# Letters NFKD leaves whole, which the ASCII pass would otherwise drop
+# ("Sœur" would become "sur").
+_SLUG_LETTERS = str.maketrans({
+    "ß": "ss", "æ": "ae", "Æ": "ae", "œ": "oe", "Œ": "oe", "ø": "o", "Ø": "o",
+    "đ": "d", "Đ": "d", "ł": "l", "Ł": "l", "þ": "th", "Þ": "th", "ð": "d", "Ð": "d",
+})
+_SLUG_SEPARATORS = re.compile(r"[^a-z0-9]+")
+
+
+def slugify(name) -> str:
+    """The ASCII slug of *name*: NFKD with the accents dropped, lowercase,
+    every run of anything but ``[a-z0-9]`` one ``_``, trimmed, at most
+    ``SLUG_MAX`` characters -- and never empty (``"item"``).
+
+    ``"Mamie Figue"`` -> ``"mamie_figue"``, ``"Éléonore"`` -> ``"eleonore"``.
+    """
+    if not isinstance(name, str):
+        raise ValueError(f"a name must be a string, not {type(name).__name__}")
+    text = unicodedata.normalize("NFKD", name).translate(_SLUG_LETTERS)
+    text = text.encode("ascii", "ignore").decode("ascii").lower()
+    slug = _SLUG_SEPARATORS.sub("_", text).strip("_")
+    return slug[:SLUG_MAX].rstrip("_") or SLUG_FALLBACK
+
+
+def entity_id(kind, name, taken=()) -> str:
+    """A new id for an entity of *kind* (``characters``/``places``/``props``)
+    named *name*: its prefix + ``slugify(name)``, then ``_2``, ``_3``... until
+    it is not in *taken*. The slug is shortened to make room for the suffix,
+    so the id always matches its kind's pattern."""
+    prefix = ENTITY_ID_PREFIXES.get(kind) if isinstance(kind, str) else None
+    if prefix is None:
+        raise ValueError(f"unknown entity kind {kind!r} (known: {', '.join(ENTITY_ID_PREFIXES)})")
+    taken = set(taken)
+    slug = slugify(name)
+    candidate = prefix + slug
+    n = 1
+    while candidate in taken:
+        n += 1
+        suffix = f"_{n}"
+        candidate = prefix + slug[: SLUG_MAX - len(suffix)].rstrip("_") + suffix
+    return candidate
+
+
+# ---------------------------------------------------------------------- media names
+
+# The only names an entity's files have on disk, and the only ones the entity
+# media route will serve (store.MEDIA_NAME_PATTERNS). Checked before any path
+# is built from them.
+TIME_VARIANT_PATTERN = r"^[a-z][a-z0-9_]{0,19}$"
+# The master plate of a place IS its "day" variant (spec 2.4): one source of
+# truth, no separate master_plate field.
+MASTER_PLATE_VARIANT = "day"
+
+# Any reference image, whatever its entity (the name field of an image ref)...
+REF_IMAGE_NAME_PATTERN = (
+    r"^(portrait|turnaround|expressions|variant_[a-z][a-z0-9_]{0,19}|image|extra_[0-9]{2})"
+    r"\.(png|jpg|jpeg|webp)$"
+)
+# ... and the ones each kind may keep in its refs/ folder.
+CHARACTER_REF_NAME_PATTERN = r"^(portrait|turnaround|expressions|extra_[0-9]{2})\.(png|jpg|jpeg|webp)$"
+PLACE_REF_NAME_PATTERN = r"^variant_[a-z][a-z0-9_]{0,19}\.(png|jpg|jpeg|webp)$"
+PROP_REF_NAME_PATTERN = r"^image\.(png|jpg|jpeg|webp)$"
+EXTRA_REF_NAME_PATTERN = r"^extra_[0-9]{2}\.(png|jpg|jpeg|webp)$"
+# A user's design reference, re-encoded and named by a uuid (refs/uploads/).
+UPLOAD_NAME_PATTERN = r"^[0-9a-f]{32}\.png$"
+# A character's voice sample, at the root of its folder.
+VOICE_SAMPLE_NAME_PATTERN = r"^voice_sample\.(mp3|wav)$"
+
+# How each generated image was made (spec 8.1): "base" = without references by
+# design (a portrait, a master plate, a prop image); "references" = edited with
+# reference images; "prompt_only" = the degraded mode the user chose, where
+# the prompt block and seed alone carry the look.
+CONSISTENCY = ("base", "references", "prompt_only")
+_BASE_ONLY = ("base",)
+_DERIVED = ("references", "prompt_only")
+
+_IMAGE_REF_SCHEMA = _document({
+    "name": {"type": "string", "pattern": REF_IMAGE_NAME_PATTERN},
+    "consistency": {"type": "string", "enum": list(CONSISTENCY)},
+    # The chain link that made it ("pollinations/flux", "local/comfyui"...).
+    "source": _text(120),
+    "seed": {"type": ["integer", "null"], "minimum": 0},
+    "created_at": _NON_EMPTY_STRING,
+})
+_IMAGE_REF_OR_NULL = _or_null(_IMAGE_REF_SCHEMA)
+
+
+def _slot_errors(errors, path, ref, *, stem, allowed) -> None:
+    """An image in its slot is named after the slot and labelled as the slot
+    is made (a portrait is never "references"; a turnaround never "base")."""
+    if ref is None:
+        return
+    if not ref["name"].startswith(stem + "."):
+        errors.append(f"{path}.name: {ref['name']!r} is not a {stem} image")
+    if ref["consistency"] not in allowed:
+        errors.append(f"{path}.consistency: {ref['consistency']!r} must be one of {list(allowed)} here")
+
+
+def _unique_names(errors, path, entries) -> None:
+    seen = set()
+    for i, entry in enumerate(entries):
+        if entry["name"] in seen:
+            errors.append(f"{path}[{i}].name: {entry['name']!r} is listed twice")
+        seen.add(entry["name"])
+
+
+# ------------------------------------------------------------ character_v1 (spec 2.3)
+
+CHARACTER_SCHEMA_NAME = "character_v1"
+CHARACTER_ROLES = _CAST_SKETCH_ROLES
+# The roles the cast approval waits for; recurring and guest are optional.
+CAST_APPROVAL_ROLES = ("lead", "support")
+CHARACTER_SOURCES = ("sketch", "custom")
+
+DESCRIPTOR_MAX_WORDS = 45
+SIGNATURE_ITEMS_WRITTEN = (2, 3)
+SAMPLE_LINE_MAX_WORDS = 12
+RELATIONSHIP_MAX_LENGTH = 120
+MAX_UPLOADS = 4
+
+VOICE_RATE_PATTERN = r"^[+-][0-9]{1,3}%$"
+VOICE_PITCH_PATTERN = r"^[+-][0-9]{1,3}Hz$"
+
+_VOICE_SCHEMA = _or_null(_document({
+    "provider": {"type": "string", "pattern": r"^[a-z][a-z0-9_]{0,39}$"},
+    "voice_id": _text(120),
+    "rate": {"type": ["string", "null"], "pattern": VOICE_RATE_PATTERN},
+    "pitch": {"type": ["string", "null"], "pattern": VOICE_PITCH_PATTERN},
+    "direction": {"type": "string", "maxLength": 200},
+    # Written by K1 in the story's language, in character (<= 12 words).
+    "sample_line": _text(120),
+}))
+
+_UPLOAD_SCHEMA = _document({
+    "name": {"type": "string", "pattern": UPLOAD_NAME_PATTERN},
+    # What the vision chain saw in it (U1), folded into the descriptor.
+    "description": {"type": ["string", "null"], "maxLength": 400},
+    "uploaded_at": _NON_EMPTY_STRING,
+})
+
+CHARACTER_SCHEMA = _document({
+    "$schema": {"type": "string", "const": CHARACTER_SCHEMA_NAME},
+    "char_id": {"type": "string", "pattern": CHAR_ID_PATTERN},
+    "name": _text(60),
+    "role": {"type": "string", "enum": list(CHARACTER_ROLES)},
+    "archetype": {"type": "string", "maxLength": 60},
+    "one_line": _text(200),
+    # null until K1 writes the character (<= 45 words, checked by character_errors).
+    "descriptor": {"type": ["string", "null"], "minLength": 1},
+    "signature_items": {"type": "array", "items": _text(60), "maxItems": 3},
+    "personality": _document({
+        "traits": {"type": "array", "items": _text(40), "maxItems": 5},
+        "wants": _nullable_string(200),
+        "fears": _nullable_string(200),
+        "speech_style": _nullable_string(200),
+    }),
+    # Another character's id -> what they are to this one (checked by character_errors).
+    "relationships": {"type": "object"},
+    "voice": _VOICE_SCHEMA,
+    "refs": _document({
+        "portrait": _IMAGE_REF_OR_NULL,
+        "turnaround": _IMAGE_REF_OR_NULL,
+        "expressions": _IMAGE_REF_OR_NULL,
+        "extra": {"type": "array", "items": _IMAGE_REF_SCHEMA},
+        "uploads": {"type": "array", "items": _UPLOAD_SCHEMA, "maxItems": MAX_UPLOADS},
+    }),
+    # The portrait's seed, reused when the provider honours seeds.
+    "ref_seed": {"type": ["integer", "null"], "minimum": 0},
+    "prompt_block": {"type": ["string", "null"]},
+    "state": _document({
+        "alive": {"type": "boolean"},
+        "location": {"type": ["string", "null"], "pattern": PLACE_ID_PATTERN},
+        "arc_notes": {"type": "array", "items": _NON_EMPTY_STRING},
+    }),
+    # Picked from the concept's cast sketch, or written by the user.
+    "source": {"type": "string", "enum": list(CHARACTER_SOURCES)},
+    "approved_at": _TIMESTAMP_OR_NULL,
+    "created_at": _NON_EMPTY_STRING,
+    "updated_at": _NON_EMPTY_STRING,
+})
+
+
+def character_errors(doc) -> list:
+    """``validate()`` against ``CHARACTER_SCHEMA``, plus: the descriptor's word
+    cap and 2-3 signature items once it is written, relationship keys are
+    other characters' ids, the sample line's word cap, each image named and
+    labelled for its slot, and no file listed twice."""
+    errors = validate(doc, CHARACTER_SCHEMA)
+    if errors:
+        return errors
+
+    errors = []
+    _check_text(errors, "$.name", doc["name"])
+    _check_text(errors, "$.one_line", doc["one_line"])
+    if doc["descriptor"] is not None:
+        _check_text(errors, "$.descriptor", doc["descriptor"], max_words=DESCRIPTOR_MAX_WORDS)
+        lo, hi = SIGNATURE_ITEMS_WRITTEN
+        count = len(doc["signature_items"])
+        if not lo <= count <= hi:
+            errors.append(f"$.signature_items: {count} item(s), expected {lo}-{hi} once the descriptor is written")
+
+    for key, value in doc["relationships"].items():
+        if not (isinstance(key, str) and _search(CHAR_ID_PATTERN, key)):
+            errors.append(f"$.relationships: {key!r} is not a character id")
+        elif key == doc["char_id"]:
+            errors.append(f"$.relationships: {key!r} is the character itself")
+        if not (isinstance(value, str) and value.strip()) or len(value) > RELATIONSHIP_MAX_LENGTH:
+            errors.append(f"$.relationships.{key}: expected a non-empty string of at most "
+                          f"{RELATIONSHIP_MAX_LENGTH} characters")
+
+    if doc["voice"] is not None:
+        _check_text(errors, "$.voice.sample_line", doc["voice"]["sample_line"], max_words=SAMPLE_LINE_MAX_WORDS)
+
+    refs = doc["refs"]
+    _slot_errors(errors, "$.refs.portrait", refs["portrait"], stem="portrait", allowed=_BASE_ONLY)
+    _slot_errors(errors, "$.refs.turnaround", refs["turnaround"], stem="turnaround", allowed=_DERIVED)
+    _slot_errors(errors, "$.refs.expressions", refs["expressions"], stem="expressions", allowed=_DERIVED)
+    for i, extra in enumerate(refs["extra"]):
+        if _search(EXTRA_REF_NAME_PATTERN, extra["name"]) is None:
+            errors.append(f"$.refs.extra[{i}].name: {extra['name']!r} is not an extra image")
+    _unique_names(errors, "$.refs.extra", refs["extra"])
+    _unique_names(errors, "$.refs.uploads", refs["uploads"])
+    return errors
+
+
+# ---------------------------------------------------------------- place_v1 (spec 2.4)
+
+PLACE_SCHEMA_NAME = "place_v1"
+LAYOUT_NOTES_MAX_WORDS = 60
+
+PLACE_SCHEMA = _document({
+    "$schema": {"type": "string", "const": PLACE_SCHEMA_NAME},
+    "place_id": {"type": "string", "pattern": PLACE_ID_PATTERN},
+    "name": _text(60),
+    "one_line": _text(200),
+    "descriptor": {"type": ["string", "null"], "minLength": 1},
+    # What is left/right/back, for continuity (<= 60 words).
+    "layout_notes": {"type": ["string", "null"], "minLength": 1},
+    # Variant name -> its image ref, or null until made. "day" is always there
+    # and its image is the master plate (checked by place_errors).
+    "time_variants": {"type": "object"},
+    "prompt_block": {"type": ["string", "null"]},
+    "approved_at": _TIMESTAMP_OR_NULL,
+    "created_at": _NON_EMPTY_STRING,
+    "updated_at": _NON_EMPTY_STRING,
+})
+
+
+def place_errors(doc) -> list:
+    """``validate()`` against ``PLACE_SCHEMA``, plus the word caps and the
+    time variants: named ``TIME_VARIANT_PATTERN``, "day" among them, each an
+    image ref (or null) named ``variant_<name>.*``; the day plate is a base
+    image, every other variant is made from it."""
+    errors = validate(doc, PLACE_SCHEMA)
+    if errors:
+        return errors
+
+    errors = []
+    _check_text(errors, "$.name", doc["name"])
+    _check_text(errors, "$.one_line", doc["one_line"])
+    if doc["descriptor"] is not None:
+        _check_text(errors, "$.descriptor", doc["descriptor"], max_words=DESCRIPTOR_MAX_WORDS)
+    if doc["layout_notes"] is not None:
+        _check_text(errors, "$.layout_notes", doc["layout_notes"], max_words=LAYOUT_NOTES_MAX_WORDS)
+
+    variants = doc["time_variants"]
+    if MASTER_PLATE_VARIANT not in variants:
+        errors.append(f"$.time_variants: missing {MASTER_PLATE_VARIANT!r} (the master plate)")
+    for key, ref in variants.items():
+        if not (isinstance(key, str) and _search(TIME_VARIANT_PATTERN, key)):
+            errors.append(f"$.time_variants: {key!r} is not a variant name ({TIME_VARIANT_PATTERN})")
+            continue
+        path = f"$.time_variants.{key}"
+        found = validate(ref, _IMAGE_REF_OR_NULL, path)
+        if found:
+            errors.extend(found)
+            continue
+        allowed = _BASE_ONLY if key == MASTER_PLATE_VARIANT else _DERIVED
+        _slot_errors(errors, path, ref, stem=f"variant_{key}", allowed=allowed)
+    return errors
+
+
+# ----------------------------------------------------------------- prop_v1 (spec 2.5)
+
+PROP_SCHEMA_NAME = "prop_v1"
+PROP_DESCRIPTOR_MAX_WORDS = 30
+
+PROP_SCHEMA = _document({
+    "$schema": {"type": "string", "const": PROP_SCHEMA_NAME},
+    "prop_id": {"type": "string", "pattern": PROP_ID_PATTERN},
+    "name": _text(60),
+    "one_line": _text(200),
+    "descriptor": {"type": ["string", "null"], "minLength": 1},
+    "owner_char_id": {"type": ["string", "null"], "pattern": CHAR_ID_PATTERN},
+    "image": _IMAGE_REF_OR_NULL,
+    "prompt_block": {"type": ["string", "null"]},
+    "approved_at": _TIMESTAMP_OR_NULL,
+    "created_at": _NON_EMPTY_STRING,
+    "updated_at": _NON_EMPTY_STRING,
+})
+
+
+def prop_errors(doc) -> list:
+    """``validate()`` against ``PROP_SCHEMA``, plus the descriptor's word cap
+    and the image named ``image.*`` and labelled "base"."""
+    errors = validate(doc, PROP_SCHEMA)
+    if errors:
+        return errors
+
+    errors = []
+    _check_text(errors, "$.name", doc["name"])
+    _check_text(errors, "$.one_line", doc["one_line"])
+    if doc["descriptor"] is not None:
+        _check_text(errors, "$.descriptor", doc["descriptor"], max_words=PROP_DESCRIPTOR_MAX_WORDS)
+    _slot_errors(errors, "$.image", doc["image"], stem="image", allowed=_BASE_ONLY)
+    return errors
+
+
+# ----------------------------------------------------------- season_arc_v1 (spec 2.6)
+
+SEASON_ARC_SCHEMA_NAME = "season_arc_v1"
+ARC_FUNCTIONS = ("setup", "escalation", "complication", "midpoint_twist", "crisis", "climax_and_reset")
+EPISODES_PLANNED_MIN = 3
+EPISODES_PLANNED_MAX = 12
+ARC_SUMMARY_MAX_WORDS = 60
+HOOK_MAX_LENGTH = 120
+
+_HOOKS = {"type": "array", "items": _text(HOOK_MAX_LENGTH)}
+
+_ARC_ENTRY_SCHEMA = _document({
+    "ep": {"type": "integer", "minimum": 1},
+    "function": {"type": "string", "enum": list(ARC_FUNCTIONS)},
+    "summary": _NON_EMPTY_STRING,
+    "open_hooks_in": _HOOKS,
+    "open_hooks_out": _HOOKS,
+    "characters": _id_array(CHAR_ID_PATTERN),
+})
+
+SEASON_ARC_SCHEMA = _document({
+    "$schema": {"type": "string", "const": SEASON_ARC_SCHEMA_NAME},
+    "episodes_planned": {"type": "integer", "minimum": EPISODES_PLANNED_MIN, "maximum": EPISODES_PLANNED_MAX},
+    "arc": {"type": "array", "items": _ARC_ENTRY_SCHEMA, "maxItems": EPISODES_PLANNED_MAX},
+    # Updated after every approved episode (phase 3+); empty until then.
+    "series_memory": _document({
+        "recaps": {"type": "object"},
+        "open_hooks": {"type": "array", "items": {"type": "string"}},
+        "relationship_state": {"type": "object"},
+        "introduced": {"type": "object"},
+    }),
+    "audience_feedback": {"type": "array", "items": {"type": "object"}},
+    "approved_at": _TIMESTAMP_OR_NULL,
+    "updated_at": _NON_EMPTY_STRING,
+})
+
+
+def season_arc_errors(doc) -> list:
+    """``validate()`` against ``SEASON_ARC_SCHEMA``, plus: each summary's word
+    cap; the arc is empty (before S1) or exactly episodes 1..episodes_planned
+    in order; an empty arc is never approved."""
+    errors = validate(doc, SEASON_ARC_SCHEMA)
+    if errors:
+        return errors
+
+    errors = []
+    arc = doc["arc"]
+    for i, entry in enumerate(arc):
+        _check_text(errors, f"$.arc[{i}].summary", entry["summary"], max_words=ARC_SUMMARY_MAX_WORDS)
+    planned = doc["episodes_planned"]
+    episodes = [entry["ep"] for entry in arc]
+    if arc and episodes != list(range(1, planned + 1)):
+        errors.append(f"$.arc: episodes {episodes} must be exactly 1..{planned} in order")
+    if doc["approved_at"] is not None and not arc:
+        errors.append("$.approved_at: an empty arc cannot be approved")
+    return errors
+
+
+# ------------------------------------------------------ places_proposal_v1 (plan 1.2)
+
+# P0's editable list: the places and props the places step will write.
+PLACES_PROPOSAL_SCHEMA_NAME = "places_proposal_v1"
+PROPOSAL_MAX_ITEMS = 6
+
+PLACES_PROPOSAL_SCHEMA = _document({
+    "$schema": {"type": "string", "const": PLACES_PROPOSAL_SCHEMA_NAME},
+    "places": {
+        "type": "array",
+        "items": _document({"name": _text(60), "one_line": _text(200)}),
+        "maxItems": PROPOSAL_MAX_ITEMS,
+    },
+    "props": {
+        "type": "array",
+        "items": _document({
+            "name": _text(60),
+            "one_line": _text(200),
+            "owner": {"type": ["string", "null"], "pattern": CHAR_ID_PATTERN},
+        }),
+        "maxItems": PROPOSAL_MAX_ITEMS,
+    },
+    "updated_at": _NON_EMPTY_STRING,
+})
+
+
+def places_proposal_errors(doc) -> list:
+    """``validate()`` against ``PLACES_PROPOSAL_SCHEMA``, plus no blank name."""
+    errors = validate(doc, PLACES_PROPOSAL_SCHEMA)
+    if errors:
+        return errors
+
+    errors = []
+    for key in ("places", "props"):
+        for i, item in enumerate(doc[key]):
+            _check_text(errors, f"$.{key}[{i}].name", item["name"])
+            _check_text(errors, f"$.{key}[{i}].one_line", item["one_line"])
     return errors

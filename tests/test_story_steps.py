@@ -539,7 +539,8 @@ def test_rewriting_an_approved_bible_clears_its_approval_and_leaves_style(story_
     m.bible.run(ctx, runner=FakeRunner(B1_REPLY, B2_REPLY, B3_REPLY))
 
     story = story_store.get(story_id)
-    assert story["approvals"] == {"concept": NOW, "bible": None, "style": NOW}
+    assert story["approvals"] == {"concept": NOW, "bible": None, "style": NOW,
+                                  "cast": None, "places": None, "season": None}
     assert story["status"] == "concept_chosen"
 
 

@@ -29,8 +29,9 @@ BUDGET_PROFILES = ("free", "one_dollar", "quality")
 
 EPISODE_TEMPLATE_ID = "serial_60s_v1"
 
-# In order. Phase 1 derives the first four from ``approvals``; the last three
-# arrive with the cast, places and season steps.
+# In order, each derived from a contiguous prefix of ``approvals``
+# (store.derive_status): concept, bible, style, then -- phase 2 -- cast,
+# places and season (the last one makes the story ``ready``).
 STATUSES = (
     "draft",
     "concept_chosen",

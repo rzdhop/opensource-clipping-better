@@ -1,4 +1,5 @@
-"""The on-disk story workspace and its index (spec 2, 2.1; phase-1 plan 2).
+"""The on-disk story workspace and its index (spec 2, 2.1-2.6; phase-1 plan 2,
+phase-2 plan 2).
 
 Layout, under the same ``outputs/`` directory the job store uses::
 
@@ -9,6 +10,19 @@ Layout, under the same ``outputs/`` directory the job store uses::
         concepts.json               # generated concept cards
         style_preview.json          # the style preview strip (style_preview_v1)
         styles/preview/preview_<n>.<ext>   # its images
+        season.json                 # SeasonArc (season_arc_v1)
+        places_proposal.json        # the proposed places and props (places_proposal_v1)
+        characters/<char_id>/
+            character.json          # Character (character_v1)
+            refs/portrait.png, turnaround.png, expressions.png, extra_<NN>.png
+            refs/uploads/<32 hex>.png      # the user's design references
+            voice_sample.mp3
+        places/<place_id>/
+            place.json              # Place (place_v1)
+            refs/variant_<name>.png # variant_day.png is the master plate
+        props/<prop_id>/
+            prop.json               # Prop (prop_v1)
+            refs/image.png
         cost_ledger.json            # what each call cost (ledger.CostLedger)
         activity.log                # one line per thing a step printed
 
@@ -20,12 +34,22 @@ Rules this module keeps:
   inside ``outputs/stories/`` -- never a symlink, never through one -- which
   is the same rule ``web/api/cleanup.py::contained`` applies to job folders
   (re-implemented here: ``clipping/`` does not import ``web/``).
+- Below the story folder the same holds one level at a time: an entity kind,
+  an entity id (``schemas.CHAR_ID_PATTERN``...) and a media name
+  (``MEDIA_NAME_PATTERNS``) are each checked before they are joined onto a
+  path, and every level must be a real directory directly inside the one
+  above it. A symlink is kept and never followed.
 - Every JSON write is atomic: a temp file in the same directory, then
   ``os.replace``; a failure leaves the previous file byte-identical and no
   temp file behind. (``outputs/jobs.json`` is written in place; this does not
   copy that.)
 - ``status`` is derived from ``approvals`` on every save and never taken from
   the caller, so an edit that clears an approval cannot leave a stale status.
+  ``approvals.cast`` and ``approvals.places`` are folded from the entities'
+  own ``approved_at`` whenever an entity is written or deleted
+  (``recompute_group_approvals``), so they cannot go stale either.
+- A phase-1 ``story.json`` (``approvals`` without ``cast``/``places``/
+  ``season``) is read as if those were null and saved with them.
 - The index is a cache of the folders. Missing, torn or foreign, it is rebuilt
   from them and the rebuild is printed; a folder that does not hold a valid
   story is skipped and printed, never deleted.
@@ -49,6 +73,7 @@ import tempfile
 import threading
 import uuid
 from datetime import datetime, timezone
+from typing import Callable, NamedTuple
 
 from . import defaults, schemas, templates
 
@@ -61,14 +86,63 @@ STORY_SCHEMA = "story_bible_v1"
 STORY_FILENAME = "story.json"
 ACTIVITY_LOG = "activity.log"
 
+SEASON_DOC = "season.json"
+PLACES_PROPOSAL_DOC = "places_proposal.json"
+
 # The JSON documents of a story that read_doc/write_doc may name. Nothing else:
 # a name is never joined onto a path unless it is one of these.
-DOC_NAMES = (STORY_FILENAME, "style_lock.json", "concepts.json", "style_preview.json")
+DOC_NAMES = (
+    STORY_FILENAME, "style_lock.json", "concepts.json", "style_preview.json",
+    SEASON_DOC, PLACES_PROPOSAL_DOC,
+)
+
+# The documents the store validates itself, on every read and every write
+# (on top of any validator a caller passes to write_doc).
+DOC_VALIDATORS = {
+    SEASON_DOC: schemas.season_arc_errors,
+    PLACES_PROPOSAL_DOC: schemas.places_proposal_errors,
+}
 
 # The preview strip's folder, one level at a time, and the files in it.
 PREVIEW_DIRS = ("styles", "preview")
 PREVIEW_PREFIX = "preview_"
 PREVIEW_IMAGE_NAME = re.compile(schemas.PREVIEW_IMAGE_NAME_PATTERN)
+
+
+class EntityKind(NamedTuple):
+    """One kind of entity folder: ``<story>/<kind>/<id>/<filename>``."""
+
+    pattern: "re.Pattern"       # the id, checked (fullmatch) before any path is built
+    filename: str               # the document in the entity's folder
+    validator: Callable         # schemas.<kind>_errors
+    id_field: str               # the document's own id key
+    story_list: str             # the story.json list that names the entity
+
+
+ENTITY_KINDS = {
+    "characters": EntityKind(re.compile(schemas.CHAR_ID_PATTERN), "character.json",
+                             schemas.character_errors, "char_id", "cast_ids"),
+    "places": EntityKind(re.compile(schemas.PLACE_ID_PATTERN), "place.json",
+                         schemas.place_errors, "place_id", "place_ids"),
+    "props": EntityKind(re.compile(schemas.PROP_ID_PATTERN), "prop.json",
+                        schemas.prop_errors, "prop_id", "prop_ids"),
+}
+
+# The files an entity keeps besides its document, by where they live, and the
+# only names each place may hold (the entity media route serves these and
+# nothing else). The patterns of one kind never overlap, so a name alone says
+# where its file is.
+MEDIA_NAME_PATTERNS = {
+    "characters": {
+        "refs": re.compile(schemas.CHARACTER_REF_NAME_PATTERN),
+        "uploads": re.compile(schemas.UPLOAD_NAME_PATTERN),
+        "voice": re.compile(schemas.VOICE_SAMPLE_NAME_PATTERN),
+    },
+    "places": {"refs": re.compile(schemas.PLACE_REF_NAME_PATTERN)},
+    "props": {"refs": re.compile(schemas.PROP_REF_NAME_PATTERN)},
+}
+# Each place's folder below the entity's own, one level at a time.
+MEDIA_DIRS = {"refs": ("refs",), "uploads": ("refs", "uploads"), "voice": ()}
 
 INDEX_FIELDS = ("story_id", "title", "language", "style_template_id", "status", "created_at", "updated_at")
 
@@ -80,7 +154,14 @@ _APPROVAL_STEPS = (
     ("concept", "concept_chosen"),
     ("bible", "bible_approved"),
     ("style", "style_approved"),
+    ("cast", "cast_approved"),
+    ("places", "places_approved"),
+    ("season", "ready"),
 )
+
+# The approvals phase 2 added. A story.json written by phase 1 has none of
+# them; it is read as if they were null and saved with them.
+PHASE2_APPROVALS = ("cast", "places", "season")
 
 _PROFILE_CHOICES = {
     "tier": defaults.TIERS,
@@ -133,9 +214,11 @@ def is_story_id(value) -> bool:
 def derive_status(approvals) -> str:
     """The story status that *approvals* amount to.
 
-    ``draft -> concept_chosen -> bible_approved -> style_approved``. Only a
-    contiguous prefix counts: a style approval without a bible approval is not
-    an approval (the bible it was given against no longer stands).
+    ``draft -> concept_chosen -> bible_approved -> style_approved ->
+    cast_approved -> places_approved -> ready``. Only a contiguous prefix
+    counts: a style approval without a bible approval is not an approval (the
+    bible it was given against no longer stands), and an approved season on
+    top of a cast that is no longer approved is not ``ready``.
     """
     status = defaults.STATUSES[0]
     if not isinstance(approvals, dict):
@@ -200,6 +283,83 @@ def _atomic_write_json(path: str, data) -> None:
         except OSError:
             pass
         raise
+
+
+def _atomic_copy(src: str, dest: str) -> None:
+    """Copy *src* to *dest* so a reader sees the old file or the new one: the
+    pattern of ``_atomic_write_json`` for bytes (temp file in *dest*'s own
+    directory, fsync, 0644, ``os.replace``; the temp file never outlives a
+    failure)."""
+    handle, tmp = tempfile.mkstemp(dir=os.path.dirname(dest), prefix=".story-", suffix=".tmp")
+    try:
+        with os.fdopen(handle, "wb") as out, open(src, "rb") as source:
+            shutil.copyfileobj(source, out)
+            out.flush()
+            os.fsync(out.fileno())
+        os.chmod(tmp, _FILE_MODE)
+        os.replace(tmp, dest)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _descend(parent: str, parts, *, create: bool, label: str) -> str:
+    """The real path of ``parent/parts[0]/parts[1]/...``, each level a real
+    directory directly inside the one above it (``_contained``). *create*
+    makes a missing level with ``os.mkdir``, one at a time, and checks it like
+    any other. KeyError(*label*) for a missing level (without *create*) or a
+    level that is anything but a real directory."""
+    for part in parts:
+        if create and not os.path.lexists(os.path.join(parent, part)):
+            try:
+                os.mkdir(os.path.join(parent, part))
+            except FileExistsError:
+                pass
+        real = _contained(parent, part, want_dir=True)
+        if real is None:
+            raise KeyError(label)
+        parent = real
+    return parent
+
+
+def _upgrade_phase1(doc) -> None:
+    """In memory, before validation: a phase-1 story.json -- ``approvals``
+    holding none of ``PHASE2_APPROVALS`` -- gains them as null. Anything else
+    is left exactly as it is, for the validator to judge."""
+    approvals = doc.get("approvals") if isinstance(doc, dict) else None
+    if isinstance(approvals, dict) and not any(key in approvals for key in PHASE2_APPROVALS):
+        for key in PHASE2_APPROVALS:
+            approvals[key] = None
+
+
+def _entity_kind(kind, eid) -> EntityKind:
+    """The kind's rules, once *kind* is one of ``ENTITY_KINDS`` and *eid* a
+    well-formed id of that kind; KeyError otherwise. Touches nothing."""
+    spec = ENTITY_KINDS.get(kind) if isinstance(kind, str) else None
+    if spec is None:
+        raise KeyError(kind)
+    if not isinstance(eid, str) or spec.pattern.fullmatch(eid) is None:
+        raise KeyError(eid)
+    return spec
+
+
+def _media_location(kind, name) -> str:
+    """Where a file named *name* lives in an entity of *kind* (a key of
+    ``MEDIA_DIRS``); KeyError for any name the kind may not hold."""
+    patterns = MEDIA_NAME_PATTERNS.get(kind) if isinstance(kind, str) else None
+    if patterns is not None and isinstance(name, str):
+        for location, pattern in patterns.items():
+            if pattern.fullmatch(name):
+                return location
+    raise KeyError(name)
+
+
+def _still_or_now(value, now):
+    """An approval that still holds keeps its timestamp; a new one is *now*."""
+    return value if isinstance(value, str) and value else now
 
 
 def _merge_generation_profile(partial) -> dict:
@@ -288,18 +448,8 @@ class StoryStore:
         a level that is anything but a real directory.
         """
         with self._lock:
-            parent = self.story_dir(story_id)
-            for part in PREVIEW_DIRS:
-                if create and not os.path.lexists(os.path.join(parent, part)):
-                    try:
-                        os.mkdir(os.path.join(parent, part))
-                    except FileExistsError:
-                        pass
-                real = _contained(parent, part, want_dir=True)
-                if real is None:
-                    raise KeyError(f"{STORIES_DIRNAME}/{story_id}/{'/'.join(PREVIEW_DIRS)}")
-                parent = real
-            return parent
+            return _descend(self.story_dir(story_id), PREVIEW_DIRS, create=create,
+                            label=f"{STORIES_DIRNAME}/{story_id}/{'/'.join(PREVIEW_DIRS)}")
 
     def preview_file(self, story_id, name) -> str:
         """The real path of one preview image, to serve it.
@@ -365,6 +515,7 @@ class StoryStore:
             raise KeyError(story_id) from None
         except ValueError as exc:
             raise schemas.SchemaError(name, [f"not valid JSON: {exc}"]) from None
+        _upgrade_phase1(doc)
         errors = schemas.story_bible_errors(doc)
         if not errors and doc["story_id"] != story_id:
             errors = [f"$.story_id: {doc['story_id']!r} does not match its folder {story_id!r}"]
@@ -394,7 +545,7 @@ class StoryStore:
                 f"(shipped: {', '.join(templates.list_style_ids())})")
         profile = _merge_generation_profile(generation_profile)
 
-        approvals = {"concept": None, "bible": None, "style": None}
+        approvals = {key: None for key, _ in _APPROVAL_STEPS}
         doc = {
             "$schema": STORY_SCHEMA,
             "story_id": None,
@@ -490,7 +641,9 @@ class StoryStore:
     # ----------------------------------------------------- other documents
 
     def read_doc(self, story_id, name):
-        """One of the story's JSON documents, or None if it does not exist yet."""
+        """One of the story's JSON documents, or None if it does not exist yet.
+        A document of ``DOC_VALIDATORS`` that does not validate raises
+        ``SchemaError`` (never repaired)."""
         self._check_doc_name(name)
         self._check_id(story_id)
         if name == STORY_FILENAME:
@@ -509,12 +662,18 @@ class StoryStore:
                 raise schemas.SchemaError(label, [f"not valid JSON: {exc}"]) from None
         if not isinstance(doc, dict):
             raise schemas.SchemaError(label, ["$: expected a JSON object"])
+        own = DOC_VALIDATORS.get(name)
+        if own is not None:
+            errors = own(doc)
+            if errors:
+                raise schemas.SchemaError(label, errors)
         return doc
 
     def write_doc(self, story_id, name, doc, *, now, validator=None) -> dict:
         """Write one of the story's documents (not story.json: use ``update``).
 
-        ``updated_at`` becomes *now*; *validator*, when given, returns a list of
+        ``updated_at`` becomes *now*; the document's own validator
+        (``DOC_VALIDATORS``) and *validator*, when given, each return a list of
         errors and a non-empty one refuses the write. The story's own
         ``updated_at`` (story.json and the index) moves to *now* as well.
         """
@@ -526,10 +685,11 @@ class StoryStore:
             raise ValueError(f"{name} must be an object with a '$schema' string")
         new = copy.deepcopy(doc)
         new["updated_at"] = now
-        if validator is not None:
-            errors = validator(new)
-            if errors:
-                raise schemas.SchemaError(name, errors)
+        for check in (DOC_VALIDATORS.get(name), validator):
+            if check is not None:
+                errors = check(new)
+                if errors:
+                    raise schemas.SchemaError(name, errors)
         with self._lock:
             directory = self.story_dir(story_id)
             story = self._read_story(story_id)  # a document belongs to a valid story
@@ -556,6 +716,298 @@ class StoryStore:
                     fh.write(text + "\n")
         except Exception:
             pass
+
+    # ----------------------------------------------------------- entities
+
+    def _entity_label(self, story_id, kind, eid) -> str:
+        return f"{self._label(story_id)}{kind}/{eid}/"
+
+    def entity_dir(self, story_id, kind, eid, *, create=False) -> str:
+        """The real path of ``<story>/<kind>/<eid>/``.
+
+        The story id, the kind (``ENTITY_KINDS``) and the entity id (its kind's
+        pattern) are checked before any path is built; each level must be a
+        real directory directly inside the one above it (``_descend``).
+        *create* makes the missing levels. KeyError otherwise.
+        """
+        self._check_id(story_id)
+        _entity_kind(kind, eid)
+        with self._lock:
+            return _descend(self.story_dir(story_id), (kind, eid), create=create,
+                            label=self._entity_label(story_id, kind, eid))
+
+    def _media_dir(self, story_id, kind, eid, location, *, create) -> str:
+        self._check_id(story_id)
+        _entity_kind(kind, eid)
+        if location not in MEDIA_NAME_PATTERNS[kind]:
+            raise KeyError(f"{kind} keep no {location}")
+        with self._lock:
+            # The entity itself must exist: only the folders below it are made.
+            entity = self.entity_dir(story_id, kind, eid)
+            label = self._entity_label(story_id, kind, eid) + "".join(f"{p}/" for p in MEDIA_DIRS[location])
+            return _descend(entity, MEDIA_DIRS[location], create=create, label=label)
+
+    def refs_dir(self, story_id, kind, eid, *, create=False) -> str:
+        """The real path of the entity's ``refs/`` (``entity_dir`` rules; the
+        entity folder must already exist, *create* makes ``refs/`` only)."""
+        return self._media_dir(story_id, kind, eid, "refs", create=create)
+
+    def uploads_dir(self, story_id, kind, eid, *, create=False) -> str:
+        """The real path of the entity's ``refs/uploads/`` (characters only)."""
+        return self._media_dir(story_id, kind, eid, "uploads", create=create)
+
+    def _load_entity(self, directory, story_id, kind, eid, spec) -> dict:
+        """The validated document in *directory*. KeyError if there is none;
+        SchemaError for a symlink, unreadable or invalid JSON, a document that
+        does not validate, or one whose id is not its folder's."""
+        label = f"{self._entity_label(story_id, kind, eid)}{spec.filename}"
+        path = os.path.join(directory, spec.filename)
+        if os.path.islink(path):
+            raise schemas.SchemaError(label, [f"{spec.filename} is a symlink; it is never followed"])
+        try:
+            with open(path, encoding="utf-8") as fh:
+                doc = json.load(fh)
+        except FileNotFoundError:
+            raise KeyError(eid) from None
+        except ValueError as exc:
+            raise schemas.SchemaError(label, [f"not valid JSON: {exc}"]) from None
+        except OSError as exc:
+            raise schemas.SchemaError(label, [f"unreadable ({type(exc).__name__}: {exc})"]) from None
+        errors = spec.validator(doc)
+        if not errors and doc[spec.id_field] != eid:
+            errors = [f"$.{spec.id_field}: {doc[spec.id_field]!r} does not match its folder {eid!r}"]
+        if errors:
+            raise schemas.SchemaError(label, errors)
+        return doc
+
+    def read_entity(self, story_id, kind, eid) -> dict:
+        """One entity's validated document. KeyError for a malformed id, an
+        unknown story or entity, or a missing document; ``SchemaError`` for one
+        that does not validate (never repaired)."""
+        self._check_id(story_id)
+        spec = _entity_kind(kind, eid)
+        with self._lock:
+            return self._load_entity(self.entity_dir(story_id, kind, eid), story_id, kind, eid, spec)
+
+    def _list_entities_locked(self, story_id, kind):
+        """``(documents sorted by created_at, log lines)``. A folder named like
+        an id whose document is missing or invalid is skipped and reported,
+        never deleted; other names are ignored."""
+        spec = ENTITY_KINDS[kind]
+        parent = self.story_dir(story_id)
+        if not os.path.lexists(os.path.join(parent, kind)):
+            return [], []
+        kind_dir = _contained(parent, kind, want_dir=True)
+        if kind_dir is None:
+            return [], [f"Skipped {self._label(story_id)}{kind}/: not a real directory, never followed"]
+        docs, messages = [], []
+        for name in sorted(os.listdir(kind_dir)):
+            if spec.pattern.fullmatch(name) is None:
+                continue
+            label = self._entity_label(story_id, kind, name)
+            directory = _contained(kind_dir, name, want_dir=True)
+            if directory is None:
+                messages.append(f"Skipped {label}: not a real directory inside {kind}/")
+                continue
+            try:
+                docs.append(self._load_entity(directory, story_id, kind, name, spec))
+            except KeyError:
+                messages.append(f"Skipped {label}: no {spec.filename}")
+            except schemas.SchemaError as exc:
+                detail = "; ".join(exc.errors)
+                if len(detail) > 300:
+                    detail = detail[:297] + "..."
+                messages.append(f"Skipped {label}: {spec.filename} is invalid ({detail})")
+        docs.sort(key=lambda doc: (doc["created_at"], doc[spec.id_field]))
+        return docs, messages
+
+    def list_entities(self, story_id, kind) -> list:
+        """Every valid entity of *kind*, oldest first (``created_at``). A folder
+        whose document does not validate is skipped and printed (``on_log``),
+        never deleted. KeyError for a malformed id, an unknown story or kind."""
+        self._check_id(story_id)
+        if not isinstance(kind, str) or kind not in ENTITY_KINDS:
+            raise KeyError(kind)
+        with self._lock:
+            docs, messages = self._list_entities_locked(story_id, kind)
+        self._log(messages)
+        return docs
+
+    def _fold_group_approvals(self, story_id, story, *, now) -> list:
+        """Set ``approvals.cast`` and ``approvals.places`` on *story* (in place)
+        from the entities on disk; ``season`` is left alone. Returns the log
+        lines of any entity skipped while reading them.
+
+        ``cast``: at least one lead or support character, and every one of
+        them approved (guests and recurring characters never block, and never
+        approve a cast on their own). ``places``: at least one place, and every
+        place and every prop approved. A folder that could not be read blocks
+        its group: it may be exactly the lead or place nobody approved. A group
+        that still qualifies keeps its timestamp; one that newly does gets
+        *now*; one that no longer does is cleared.
+        """
+        listed, unreadable, messages = {}, {}, []
+        for kind in ENTITY_KINDS:
+            listed[kind], found = self._list_entities_locked(story_id, kind)
+            unreadable[kind] = bool(found)
+            messages.extend(found)
+        core = [doc for doc in listed["characters"] if doc["role"] in schemas.CAST_APPROVAL_ROLES]
+        cast = bool(core) and not unreadable["characters"] and all(doc["approved_at"] for doc in core)
+        places = (bool(listed["places"]) and not (unreadable["places"] or unreadable["props"])
+                  and all(doc["approved_at"] for doc in listed["places"] + listed["props"]))
+        approvals = story["approvals"]
+        approvals["cast"] = _still_or_now(approvals.get("cast"), now) if cast else None
+        approvals["places"] = _still_or_now(approvals.get("places"), now) if places else None
+        return messages
+
+    def recompute_group_approvals(self, story_id, *, now) -> dict:
+        """Re-fold ``approvals.cast``/``approvals.places`` from the entities
+        (``_fold_group_approvals``) through ``update``, so ``status`` is
+        re-derived; returns the saved story. ``write_entity`` and
+        ``delete_entity`` already do this in their own save."""
+        messages = []
+
+        def fold(doc):
+            messages.extend(self._fold_group_approvals(story_id, doc, now=now))
+
+        saved = self.update(story_id, fold, now=now)
+        self._log(messages)
+        return saved
+
+    def _save_story_after_entity(self, story, *, now) -> list:
+        """Fold the group approvals, re-derive status, bump and save the story
+        (under the lock). Returns the log lines."""
+        messages = self._fold_group_approvals(story["story_id"], story, now=now)
+        story["status"] = derive_status(story["approvals"])
+        story["updated_at"] = now
+        return messages + self._save_story(story, now=now)
+
+    def write_entity(self, story_id, kind, doc, *, now, validator=None) -> dict:
+        """Write one entity's document; returns what was written.
+
+        The id is the document's own (``char_id``/``place_id``/``prop_id``),
+        checked against its kind's pattern before any path is built;
+        ``updated_at`` becomes *now*; the kind's validator and *validator*
+        (when given) must both pass, or nothing is written. The write is
+        atomic. The story -- which must itself be valid -- gains the id in
+        ``cast_ids``/``place_ids``/``prop_ids`` if missing, its group
+        approvals are re-folded and its ``updated_at`` becomes *now*.
+        """
+        self._check_id(story_id)
+        spec = ENTITY_KINDS.get(kind) if isinstance(kind, str) else None
+        if spec is None:
+            raise KeyError(kind)
+        if not isinstance(doc, dict):
+            raise ValueError(f"a {kind} document must be an object, not {type(doc).__name__}")
+        eid = doc.get(spec.id_field)
+        if not isinstance(eid, str) or spec.pattern.fullmatch(eid) is None:
+            raise schemas.SchemaError(spec.filename, [f"$.{spec.id_field}: {eid!r} is not a {kind} id"])
+        new = copy.deepcopy(doc)
+        new["updated_at"] = now
+        for check in (spec.validator, validator):
+            if check is not None:
+                errors = check(new)
+                if errors:
+                    raise schemas.SchemaError(f"{kind}/{eid}/{spec.filename}", errors)
+        with self._lock:
+            story = self._read_story(story_id)  # an entity belongs to a valid story
+            directory = self.entity_dir(story_id, kind, eid, create=True)
+            _atomic_write_json(os.path.join(directory, spec.filename), new)
+            if eid not in story[spec.story_list]:
+                story[spec.story_list].append(eid)
+            messages = self._save_story_after_entity(story, now=now)
+        self._log(messages)
+        return copy.deepcopy(new)
+
+    def delete_entity(self, story_id, kind, eid, *, now=None) -> dict:
+        """Remove one entity's folder and its id from the story.
+
+        Returns ``{"removed": [...], "kept": [...]}`` like ``delete``. The
+        folder is removed only as a real directory directly inside the story's
+        real ``<kind>/``; a symlink (or anything else) in its place is kept and
+        reported, never followed. The id leaves ``cast_ids``/``place_ids``/
+        ``prop_ids`` and the group approvals are re-folded, so deleting the
+        last place (say) clears ``approvals.places``. KeyError for a malformed
+        id, an unknown story, or an entity with neither a folder nor a place
+        in the story's list.
+        """
+        self._check_id(story_id)
+        spec = _entity_kind(kind, eid)
+        now = now or _utc_now()
+        report = {"removed": [], "kept": []}
+        label = self._entity_label(story_id, kind, eid)
+        with self._lock:
+            story = self._read_story(story_id)
+            parent = self.story_dir(story_id)
+            kind_path = os.path.join(parent, kind)
+            kind_dir = _contained(parent, kind, want_dir=True)
+            if kind_dir is None and os.path.lexists(kind_path):
+                report["kept"].append(f"{self._label(story_id)}{kind}/ (not a real directory, never followed)")
+            path = os.path.join(kind_dir, eid) if kind_dir is not None else None
+            has_folder = path is not None and os.path.lexists(path)
+            listed = eid in story[spec.story_list]
+            if not (has_folder or listed or report["kept"]):
+                raise KeyError(eid)
+
+            real = _contained(kind_dir, eid, want_dir=True) if kind_dir is not None else None
+            if real is not None:
+                try:
+                    shutil.rmtree(real)
+                    report["removed"].append(label)
+                except OSError as exc:
+                    report["kept"].append(f"{label} ({exc})")
+            elif has_folder:
+                why = "a symlink, never followed" if os.path.islink(path) else "not a directory"
+                report["kept"].append(f"{label} ({why})")
+
+            story[spec.story_list] = [item for item in story[spec.story_list] if item != eid]
+            messages = self._save_story_after_entity(story, now=now)
+        self._log(messages)
+        return report
+
+    # -------------------------------------------------------------- media
+
+    def write_media(self, story_id, kind, eid, name, src_path) -> str:
+        """Copy *src_path* into the entity as *name*; returns the real path.
+
+        *name* must be one the kind may hold (``MEDIA_NAME_PATTERNS``), which
+        also says its folder (``refs/``, ``refs/uploads/`` or the entity's own
+        for a voice sample); it is checked before any path is built. The
+        entity folder must exist; the folders below it are made. The copy is
+        atomic (``_atomic_copy``): a failure leaves the previous file
+        byte-identical and no temp file. A symlink or a directory in the
+        file's place is refused, never followed or replaced.
+        """
+        self._check_id(story_id)
+        _entity_kind(kind, eid)
+        location = _media_location(kind, name)
+        with self._lock:
+            folder = self._media_dir(story_id, kind, eid, location, create=True)
+            dest = os.path.join(folder, name)
+            if os.path.islink(dest) or (os.path.lexists(dest) and not os.path.isfile(dest)):
+                label = self._entity_label(story_id, kind, eid) + "".join(
+                    f"{part}/" for part in MEDIA_DIRS[location]) + name
+                raise ValueError(f"{label} is not a regular file; it is never followed or replaced")
+            _atomic_copy(str(src_path), dest)
+        return dest
+
+    def media_path(self, story_id, kind, eid, name) -> str:
+        """The real path of one entity file, to serve it.
+
+        KeyError for anything but an existing regular file named as the kind
+        may hold (``MEDIA_NAME_PATTERNS``), directly inside its real folder, and
+        not a symlink -- the ``preview_file`` rules. The name is checked
+        before any path is built from it.
+        """
+        location = _media_location(kind, name)
+        self._check_id(story_id)
+        _entity_kind(kind, eid)
+        with self._lock:
+            real = _contained(self._media_dir(story_id, kind, eid, location, create=False),
+                              name, want_dir=False)
+        if real is None:
+            raise KeyError(name)
+        return real
 
     # -------------------------------------------------------------- index
 
