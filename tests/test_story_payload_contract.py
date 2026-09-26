@@ -34,7 +34,8 @@ import ast
 import pathlib
 import re
 
-from clipping.aistory import prompts, workflow
+from clipping.aistory import prompts, refimages, workflow
+from clipping.aistory.steps import regenerate as regenerate_step
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[1]
 MODELS = PROJECT_ROOT / "web" / "api" / "models.py"
@@ -43,6 +44,7 @@ NEW_STORY_WIZARD = STORY_SRC / "NewStoryWizard.jsx"
 STYLE_STEP = STORY_SRC / "steps" / "StyleStep.jsx"
 BIBLE_STEP = STORY_SRC / "steps" / "BibleStep.jsx"
 CONCEPTS_STEP = STORY_SRC / "steps" / "ConceptsStep.jsx"
+CAST_STEP = STORY_SRC / "steps" / "CastStep.jsx"
 
 
 def _class_fields(name: str) -> set[str]:
@@ -188,3 +190,98 @@ def test_every_step_renders_its_own_error_slot():
     for path in (CONCEPTS_STEP, BIBLE_STEP, STYLE_STEP):
         src = path.read_text(encoding="utf-8")
         assert "story-step-error" in src, f"{path.name} has no story-step-error slot"
+
+
+# ============================================================ CastStep.jsx (phase 2)
+#
+# The cast step (stage 9) gained its own request literals: NoCastYet's
+# `castParams` (POST /steps/cast), every CharacterCard `patchCharacter(...)`
+# call site, the regenerate targets it builds, and the voice payload it
+# sends when a user picks a voice. Same reasoning as the phase-1 guards
+# above: a Pydantic/closed-list model is default-strict or a fixed shape, so
+# a key or a shape it does not know silently does nothing.
+
+def _cast_params() -> set[str]:
+    src = CAST_STEP.read_text(encoding="utf-8")
+    match = re.search(r"const castParams = \{([^}]*)\}", src)
+    assert match, "castParams object literal not found in CastStep.jsx"
+    return set(re.findall(r"([a-z0-9_]+)\s*(?::[^,]*)?(?:,|$)", match.group(1)))
+
+
+def test_cast_params_matches_workflow_cast_params_exactly():
+    sent = _cast_params()
+    assert sent == set(workflow.CAST_PARAMS), (sent, workflow.CAST_PARAMS)
+
+
+def _patch_character_call_sites() -> list[str]:
+    """The literal top-level key of every `patchCharacter(storyId,
+    character.char_id, { ... })` call site in CastStep.jsx."""
+    src = CAST_STEP.read_text(encoding="utf-8")
+    keys = []
+    for match in re.finditer(
+            r"patchCharacter\(\s*storyId,\s*character\.char_id,\s*\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*[:,}]", src):
+        keys.append(match.group(1))
+    return keys
+
+
+def test_the_readers_see_patch_character_call_sites():
+    assert len(_patch_character_call_sites()) >= 5
+
+
+def test_every_patch_character_call_site_sends_a_declared_field():
+    declared = _class_fields("CharacterPatchRequest")
+    sent = set(_patch_character_call_sites())
+    undeclared = sent - declared
+    assert undeclared == set(), (
+        "these patchCharacter(...) call sites send a key CharacterPatchRequest does not "
+        f"declare, so pydantic drops it and the edit does nothing: {sorted(undeclared)}"
+    )
+
+
+def test_patch_character_fields_match_the_workflows_editable_character_fields():
+    # CharacterPatchRequest and workflow.CHARACTER_PATCH_FIELDS must agree
+    # (the model is what the route reads; the workflow is what patch_entity
+    # actually applies), so the call-site guard above is checking against the
+    # same list the backend enforces.
+    assert _class_fields("CharacterPatchRequest") == set(workflow.CHARACTER_PATCH_FIELDS)
+
+
+def _cast_regenerate_target_templates() -> set[str]:
+    """Every `character:${...}:...` template literal used as a regenerate
+    target in CastStep.jsx (a bare `character:${...}` is an *approve* doc,
+    not a target, so it is excluded), interpolations normalized to `<x>` so
+    a dynamic id or slot name can be compared against the fixed shapes."""
+    src = CAST_STEP.read_text(encoding="utf-8")
+    literals = re.findall(r"`(character:\$\{[^`]*?:[a-z]+(?::\$\{[^`]*?\})?)`", src)
+    assert literals, "no `character:${...}:...` regenerate target found in CastStep.jsx"
+    return {re.sub(r"\$\{[^}]*\}", "<x>", literal) for literal in literals}
+
+
+def test_cast_step_regenerate_targets_match_the_entity_target_shapes():
+    templates = _cast_regenerate_target_templates()
+    assert templates == {"character:<x>:text", "character:<x>:image:<x>", "character:<x>:voice"}
+    assert "character:<char_id>:text" in regenerate_step.ENTITY_TARGETS
+    assert "character:<char_id>:voice" in regenerate_step.ENTITY_TARGETS
+    assert any(shape.startswith("character:<char_id>:image:") for shape in regenerate_step.ENTITY_TARGETS)
+
+
+def test_cast_step_image_slots_match_the_character_image_names():
+    src = CAST_STEP.read_text(encoding="utf-8")
+    match = re.search(r"const IMAGE_SLOTS = \[(.*?)\]", src)
+    assert match, "IMAGE_SLOTS not found in CastStep.jsx"
+    slots = set(re.findall(r"'([a-z]+)'", match.group(1)))
+    assert slots == set(refimages.CHARACTER_IMAGES)
+
+
+def test_cast_step_voice_payload_keys_match_the_voice_shape():
+    src = CAST_STEP.read_text(encoding="utf-8")
+    match = re.search(
+        r"target:\s*`character:\$\{character\.char_id\}:voice`,\s*voice:\s*\{([^}]*)\}", src)
+    assert match, "no regenerateStory(...) call site picking a voice found in CastStep.jsx"
+    keys = set(re.findall(r"([a-z_]+):", match.group(1)))
+    assert keys == {"provider", "voice_id"}
+
+
+def test_cast_step_renders_its_own_error_slot():
+    src = CAST_STEP.read_text(encoding="utf-8")
+    assert "story-step-error" in src, "CastStep.jsx has no story-step-error slot"

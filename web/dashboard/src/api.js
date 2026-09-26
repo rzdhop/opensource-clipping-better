@@ -542,13 +542,122 @@ export async function regenerateStory(storyId, payload) {
 /**
  * What one step would cost and where it would run: `{est_usd, units,
  * route_class, link, ready, message}`. `target` only matters for
- * `regenerate` (its own estimate differs by what is being regenerated).
+ * `regenerate` (its own estimate differs by what is being regenerated);
+ * `selected` only for `cast` (the ticked cast-sketch names, repeated as
+ * `?selected=`).
  */
-export async function fetchStoryEstimate(storyId, step, { target } = {}) {
-  const qs = target ? `?target=${encodeURIComponent(target)}` : ''
-  const res = await request(`/stories/${storyId}/estimate/${step}${qs}`)
+export async function fetchStoryEstimate(storyId, step, { target, selected } = {}) {
+  const params = new URLSearchParams()
+  if (target) params.set('target', target)
+  if (selected) selected.forEach((name) => params.append('selected', name))
+  const qs = params.toString()
+  const res = await request(`/stories/${storyId}/estimate/${step}${qs ? `?${qs}` : ''}`)
   if (!res.ok) throw await apiError(res, 'Failed to fetch the estimate')
   return res.json()
+}
+
+/**
+ * The voice picker's data for one character: `{pinned, alternates, taken}`
+ * (`GET /stories/{id}/characters/{cid}/voices`, phase 2).
+ */
+export async function fetchCharacterVoices(storyId, charId) {
+  const res = await request(`/stories/${storyId}/characters/${charId}/voices`)
+  if (!res.ok) throw await apiError(res, 'Failed to fetch the voice picker')
+  return res.json()
+}
+
+/** Edit a character inline; only the fields sent are applied. Answers what was written. */
+export async function patchCharacter(storyId, charId, payload) {
+  const res = await request(`/stories/${storyId}/characters/${charId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) throw await apiError(res, 'Failed to update the character')
+  return res.json()
+}
+
+/** Delete a character (its folder, its id from the story); 409 while a step is in flight. */
+export async function deleteCharacter(storyId, charId) {
+  const res = await request(`/stories/${storyId}/characters/${charId}`, { method: 'DELETE' })
+  if (!res.ok) throw await apiError(res, 'Failed to delete the character')
+  return res.json()
+}
+
+/** Remove one design reference from a character's uploads. */
+export async function deleteCharacterUpload(storyId, charId, name) {
+  const res = await request(`/stories/${storyId}/characters/${charId}/uploads/${encodeURIComponent(name)}`,
+    { method: 'DELETE' })
+  if (!res.ok) throw await apiError(res, 'Failed to remove the reference')
+  return res.json()
+}
+
+/**
+ * One entity media file (a reference image, a design reference, a voice
+ * sample), as a blob URL -- same reasoning as `fetchStoryFileUrl`: the route
+ * is token-gated, so it is fetched with the auth header rather than used
+ * directly as a `src`. The caller is responsible for revoking the URL.
+ */
+export async function fetchStoryMediaUrl(storyId, kind, eid, name) {
+  const res = await request(`/stories/${storyId}/media/${kind}/${eid}/${encodeURIComponent(name)}`)
+  if (!res.ok) throw await apiError(res, 'Failed to load the file')
+  const blob = await res.blob()
+  return URL.createObjectURL(blob)
+}
+
+/**
+ * Add a design reference to a character (multipart, field `file`), reporting
+ * upload progress. XHR rather than fetch, same reasoning and the same shape
+ * as `uploadVideo` -- fetch cannot report upload progress -- with the bearer
+ * header attached by hand since this bypasses `request()`. Rejects with the
+ * API's own `detail.message` (a 415 for a file that is not a PNG, JPEG,
+ * WebP or GIF image, a 413 for one over the size cap, ...).
+ */
+export function uploadCharacterReference(storyId, charId, file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const formData = new FormData()
+    formData.append('file', file)
+
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', `${API_BASE}/stories/${storyId}/characters/${charId}/uploads`)
+    const token = getToken()
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+
+    xhr.upload.addEventListener('progress', (event) => {
+      if (!onProgress) return
+      const total = event.lengthComputable ? event.total : 0
+      onProgress({ loaded: event.loaded, total, percent: total ? (event.loaded / total) * 100 : null, done: false })
+    })
+
+    xhr.addEventListener('load', () => {
+      let body = {}
+      try {
+        body = JSON.parse(xhr.responseText)
+      } catch {
+        body = {}
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        if (onProgress) onProgress({ loaded: file.size, total: file.size, percent: 100, done: true })
+        resolve(body)
+        return
+      }
+      const detail = body && body.detail
+      const message = detail && typeof detail === 'object' ? detail.message : detail
+      reject(new ApiError(message || `Upload failed (HTTP ${xhr.status})`, {
+        errors: detail && typeof detail === 'object' && Array.isArray(detail.errors)
+          ? detail.errors.map(String) : null,
+        status: xhr.status,
+      }))
+    })
+
+    xhr.addEventListener('error', () => reject(new Error(
+      'Upload failed: the connection dropped before the server replied.'
+    )))
+    xhr.addEventListener('timeout', () => reject(new Error('Upload failed: timed out')))
+    xhr.addEventListener('abort', () => reject(new Error('Upload cancelled')))
+
+    xhr.send(formData)
+  })
 }
 
 /**

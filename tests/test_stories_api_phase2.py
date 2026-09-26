@@ -1354,6 +1354,36 @@ def test_the_voice_fields_edit_the_pinned_voice_and_brief_and_drop_the_stale_sam
     assert response.status_code == 409 and "has no pinned voice yet" in response.json()["detail"]
 
 
+def test_the_voice_picker_lists_the_pinned_voice_alternates_and_what_others_took(api):
+    story_id = _cast_via_api(api)
+    kiwilo = api.store.read_entity(story_id, "characters", "char_kiwilo")
+    mangella = api.store.read_entity(story_id, "characters", "char_mangella")
+    figuette = api.store.read_entity(story_id, "characters", "char_figuette")
+    # Three characters, eight fr voices in the catalogue: each got its own.
+    assert kiwilo["voice"] and mangella["voice"] and figuette["voice"]
+
+    response = api.client.get(_url(story_id, "/characters/char_kiwilo/voices"))
+    assert response.status_code == 200, response.text
+    body = response.json()
+
+    assert body["pinned"] == {"provider": kiwilo["voice"]["provider"], "voice_id": kiwilo["voice"]["voice_id"]}
+    assert 0 < len(body["alternates"]) <= 6
+    keys = [(a["provider"], a["voice_id"]) for a in body["alternates"]]
+    assert len(keys) == len(set(keys))  # nothing offered twice
+    assert (body["pinned"]["provider"], body["pinned"]["voice_id"]) not in keys
+    for entry in body["alternates"]:
+        assert set(entry) == {"provider", "voice_id", "lang", "gender", "age", "style_tags", "link"}
+        assert entry["lang"].lower().startswith("fr")
+
+    others = {(mangella["voice"]["provider"], mangella["voice"]["voice_id"]),
+              (figuette["voice"]["provider"], figuette["voice"]["voice_id"])}
+    assert set(body["taken"]) == {f"{p}/{v}" for p, v in others}
+    assert f"{kiwilo['voice']['provider']}/{kiwilo['voice']['voice_id']}" not in body["taken"]
+    assert not (others & set(keys))  # a voice another lead/support already has is never offered
+
+    assert api.client.get(_url(story_id, "/characters/char_nobody/voices")).status_code == 404
+
+
 def test_deleting_an_entity_refolds_the_group_approval(api):
     story_id = _cast_via_api(api)
     for cid in ("char_kiwilo", "char_mangella"):
@@ -1540,6 +1570,7 @@ NEW_ROUTES = [
     ("DELETE", f"/characters/char_kiwilo/uploads/{'0' * 32}.png", None),
     ("GET", "/media/characters/char_kiwilo/portrait.png", None),
     ("GET", "/estimate/cast", None),
+    ("GET", "/characters/char_kiwilo/voices", None),
 ]
 
 

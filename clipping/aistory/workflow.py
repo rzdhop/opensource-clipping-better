@@ -1192,6 +1192,40 @@ def _pinned_by_others(stories, story_id, char_id) -> dict:
     return taken
 
 
+def _voice_json(voice) -> dict:
+    return {
+        "provider": voice.provider, "voice_id": voice.voice_id, "lang": voice.lang,
+        "gender": voice.gender, "age": voice.age, "style_tags": list(voice.style_tags),
+        "link": registry.describe(voice.link),
+    }
+
+
+def character_voices(stories, story, char_id, *, env) -> dict:
+    """The voice picker's data for one character (a phase-2 route, spec 8.1,
+    11): ``{"pinned": {provider, voice_id} | None, "alternates": [{provider,
+    voice_id, lang, gender, age, style_tags, link}], "taken": ["provider/
+    voice_id", ...]}``.
+
+    ``alternates`` is up to :data:`voices.ALTERNATES_LIMIT` other catalogue
+    voices (:func:`voices.alternates`: no network call), best first, never
+    one already pinned by another lead/support and never the character's own
+    current pin (offering it back among "other voices" would be redundant).
+    ``taken`` is those other leads'/supports' pinned voices, for display.
+    ``not_found`` for an unknown character.
+    """
+    story_id = story["story_id"]
+    doc = read_entity(stories, story_id, CHARACTERS, char_id)
+    taken = set(_pinned_by_others(stories, story_id, char_id))
+    pinned = {"provider": doc["voice"]["provider"], "voice_id": doc["voice"]["voice_id"]} if doc["voice"] else None
+    exclude_own = {(pinned["provider"], pinned["voice_id"])} if pinned else set()
+    pool = voices.alternates(doc, story["language"], env=env, taken=taken | exclude_own)
+    return {
+        "pinned": pinned,
+        "alternates": [_voice_json(voice) for voice in pool],
+        "taken": sorted(f"{provider}/{voice_id}" for provider, voice_id in taken),
+    }
+
+
 VOICE_KEYS = ("provider", "voice_id", "rate", "pitch")
 
 

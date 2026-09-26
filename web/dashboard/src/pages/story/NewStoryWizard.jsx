@@ -5,6 +5,7 @@ import { LiveActivity, useJobFeed } from '../../components/ActivityFeed'
 import ConceptsStep from './steps/ConceptsStep'
 import BibleStep from './steps/BibleStep'
 import StyleStep from './steps/StyleStep'
+import CastStep from './steps/CastStep'
 
 // The story defaults (spec 8, 8.1, 8.5): a story that does not name every
 // one of these gets exactly these values. tests/test_story_defaults.py reads
@@ -16,6 +17,7 @@ const STEPS = [
   { key: 'concepts', number: 2, label: 'Concepts' },
   { key: 'bible', number: 3, label: 'Bible' },
   { key: 'style', number: 4, label: 'Style' },
+  { key: 'cast', number: 5, label: 'Cast' },
 ]
 
 const IN_FLIGHT = ['queued', 'running']
@@ -31,12 +33,17 @@ function statusOf(key, story) {
     if (story.approvals.style) return 'done'
     return story.approvals.bible ? 'active' : 'disabled'
   }
+  if (key === 'cast') {
+    if (story.approvals.cast) return 'done'
+    return story.approvals.style ? 'active' : 'disabled'
+  }
   return 'disabled'
 }
 
 function disabledReason(key) {
   if (key === 'bible') return 'Choose a concept first.'
   if (key === 'style') return 'Approve the bible first.'
+  if (key === 'cast') return 'Approve the style first.'
   return ''
 }
 
@@ -48,6 +55,10 @@ function summaryFor(key, story, data) {
     if (!lock) return 'No style yet.'
     const name = lock.template_name && (lock.template_name.en || lock.template_name.fr)
     return `${name || lock.template_id} — locked`
+  }
+  if (key === 'cast') {
+    const count = (data.characters || []).length
+    return count ? `${count} character${count === 1 ? '' : 's'} in the cast.` : 'No cast yet.'
   }
   return ''
 }
@@ -312,7 +323,7 @@ function ExistingStory({ storyId }) {
     scrollPending.current = false
     if (!data) return
     const activeStep = STEPS.find((s) => statusOf(s.key, data.story) === 'active')
-    const key = manualStep || (activeStep ? activeStep.key : 'style')
+    const key = manualStep || (activeStep ? activeStep.key : 'cast')
     const el = stepRefs.current[key]
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -354,8 +365,8 @@ function ExistingStory({ storyId }) {
   const { story } = data
   const inFlightJob = data.jobs.find((j) => IN_FLIGHT.includes(j.status)) || null
   const defaultExpanded = STEPS.find((s) => statusOf(s.key, story) === 'active')
-  const expanded = manualStep || (defaultExpanded ? defaultExpanded.key : 'style')
-  const allDone = Boolean(story.approvals.style)
+  const expanded = manualStep || (defaultExpanded ? defaultExpanded.key : 'cast')
+  const allDone = Boolean(story.approvals.cast)
 
   return (
     <div className="fade-in">
@@ -417,6 +428,9 @@ function ExistingStory({ storyId }) {
                   {step.key === 'style' && (
                     <StyleStep data={data} storyId={storyId} inFlightJob={inFlightJob} onChange={afterAction} onAdvance={afterAdvance} />
                   )}
+                  {step.key === 'cast' && (
+                    <CastStep data={data} storyId={storyId} inFlightJob={inFlightJob} onChange={afterAction} onAdvance={afterAdvance} />
+                  )}
                 </div>
               )}
             </div>
@@ -428,8 +442,8 @@ function ExistingStory({ storyId }) {
         <div className="card" style={{ marginBottom: '16px' }}>
           <h3 className="card-title">What exists so far</h3>
           <p>
-            The bible and the style are locked for <strong>{story.title}</strong>. The
-            cast step (characters, places and props) arrives in phase 2.
+            The bible and the style are locked, and the cast is approved, for <strong>{story.title}</strong>.
+            Places &amp; props and the season arrive next.
           </p>
         </div>
       )}

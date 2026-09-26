@@ -1725,3 +1725,205 @@ html, body {
   padding: 10px 0 0;
   border-top: 1px solid var(--border-color);
 }
+
+/* ------------------------------------------------------------------------
+   Cast step (phase 2, stage 9): the cast-sketch checklist, the character
+   cards (a 3-up image strip, text fields, voice, uploads), the "needs an
+   editor" banner and the "Continue cast" action. Additive to everything
+   above; the 768 px sidebar breakpoint above is untouched.
+   ------------------------------------------------------------------------ */
+
+.story-cast-sketch-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0 16px;
+  padding: 0;
+  list-style: none;
+}
+
+.story-cast-sketch-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.story-cast-add-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.story-cast-add-row .form-input,
+.story-cast-add-row .form-select {
+  flex: 1;
+  min-width: 120px;
+}
+
+.story-cast-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  margin-top: 12px;
+}
+
+@media (min-width: 901px) {
+  .story-cast-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.story-cast-card {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.story-cast-card-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.story-cast-card-header h4 {
+  font-size: 15px;
+  font-weight: 700;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The three reference images: portrait (9:16), turnaround (16:9),
+ * expressions (3:2) -- object-fit: contain in a box shaped like the slot, so
+ * a design reference of any real resolution never crops or distorts. One
+ * per row at <= 600 px so a 375 px viewport never squeezes all three. */
+.story-cast-images {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+@media (max-width: 600px) {
+  .story-cast-images {
+    grid-template-columns: 1fr;
+  }
+}
+
+.story-cast-image-slot {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.story-cast-image-box {
+  width: 100%;
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.story-cast-image-portrait .story-cast-image-box {
+  aspect-ratio: 9 / 16;
+}
+
+.story-cast-image-turnaround .story-cast-image-box {
+  aspect-ratio: 16 / 9;
+}
+
+.story-cast-image-expressions .story-cast-image-box {
+  aspect-ratio: 3 / 2;
+}
+
+.story-cast-image-box img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.story-cast-image-empty {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  text-align: center;
+  padding: 8px;
+}
+
+.story-cast-image-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.story-cast-image-label {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  text-transform: capitalize;
+}
+
+.story-cast-voice,
+.story-cast-uploads {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-color);
+}
+
+.story-cast-voice-current {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 6px 0;
+}
+
+.story-cast-voice-current audio {
+  height: 32px;
+  max-width: 100%;
+}
+
+.story-cast-voice-alternates li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-height: 40px;
+}
+
+.story-cast-voice-tags {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.story-cast-uploads ul.story-field-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 40px;
+}
+
+.story-cast-uploads input[type="file"] {
+  min-height: 40px;
+}
+
+.story-cast-editor-banner {
+  border-color: rgba(245, 158, 11, 0.4);
+  margin-bottom: 16px;
+}
+
+@media (max-width: 600px) {
+  .story-cast-add-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

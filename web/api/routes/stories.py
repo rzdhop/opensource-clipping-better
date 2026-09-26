@@ -1229,6 +1229,26 @@ async def delete_prop(story_id: str, prop_id: str) -> dict:
     return _delete_entity(story_id, PROPS, prop_id)
 
 
+@router.get("/{story_id}/characters/{char_id}/voices")
+async def character_voices(story_id: str, char_id: str) -> dict:
+    """The voice picker's data for one character (``workflow.character_voices``,
+    spec 8.1, 11): its pinned voice, up to six alternates of the story's
+    language ``TTS_CHAIN`` can reach right now, and the voices already pinned
+    by the story's other leads/supports::
+
+        {"pinned": {provider, voice_id} | null,
+         "alternates": [{provider, voice_id, lang, gender, age, style_tags, link}],
+         "taken": ["provider/voice_id", ...]}
+
+    Calls nothing (``voices.alternates``: no network call). 404 for an
+    unknown story or character.
+    """
+    stories = _stories()
+    story = _load(stories, story_id)
+    with _answering():
+        return workflow.character_voices(stories, story, char_id, env=worker.get_settings_env())
+
+
 # ---------------------------------------------------- design references
 
 def _upload_refused(status, message, reasons=()) -> HTTPException:

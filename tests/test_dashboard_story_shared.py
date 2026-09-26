@@ -29,6 +29,12 @@ STORY_FUNCTIONS = [
     "fetchStories", "createStory", "fetchStory", "patchStory", "deleteStory",
     "fetchConcepts", "generateConcepts", "chooseConcept", "runStoryStep",
     "approveStoryDoc", "regenerateStory", "fetchStoryEstimate", "fetchStoryFileUrl",
+    # Phase 2, stage 9 (CastEditor): the voice picker, inline character edits
+    # and deletes, and the entity media route. `uploadCharacterReference` is
+    # deliberately NOT here -- like `uploadVideo`, it is XHR-based (for
+    # upload progress), not a `request()` caller.
+    "fetchCharacterVoices", "patchCharacter", "deleteCharacter", "deleteCharacterUpload",
+    "fetchStoryMediaUrl",
 ]
 
 
@@ -68,7 +74,7 @@ def _function_body(src: str, name: str) -> str:
 def test_the_readers_see_something():
     """A broken regex would make every assertion below pass for free."""
     assert len(_job_status_values()) >= 8
-    assert len(STORY_FUNCTIONS) == 13
+    assert len(STORY_FUNCTIONS) == 18
 
 
 # --------------------------------------------------------- components/ActivityFeed.jsx
@@ -197,3 +203,41 @@ def test_the_wizard_polls_the_story_while_a_step_runs():
     wizard = (DASHBOARD_SRC / "pages" / "story" / "NewStoryWizard.jsx").read_text(encoding="utf-8")
     assert "setInterval(refresh, STORY_POLL_MS)" in wizard
     assert "IN_FLIGHT.includes(j.status)" in wizard.split("setInterval(refresh", 1)[0]
+
+
+# ============================================================ CastStep.jsx (phase 2)
+
+CAST_STEP = DASHBOARD_SRC / "pages" / "story" / "steps" / "CastStep.jsx"
+
+
+def test_upload_character_reference_sends_the_bearer_header_and_never_a_token_in_the_url():
+    """`uploadCharacterReference` is XHR-based like `uploadVideo` (for upload
+    progress), so it cannot go through `request()` -- but it still must carry
+    the bearer header by hand, and the token must never land in the URL."""
+    src = API_JS.read_text(encoding="utf-8")
+    match = re.search(r"export function uploadCharacterReference\([^)]*\)\s*\{", src)
+    assert match, "uploadCharacterReference not found in api.js"
+    start = match.end()
+    depth = 1
+    i = start
+    while depth > 0:
+        if src[i] == "{":
+            depth += 1
+        elif src[i] == "}":
+            depth -= 1
+        i += 1
+    body = src[start:i]
+
+    assert "setRequestHeader('Authorization'" in body or 'setRequestHeader("Authorization"' in body
+    assert "Bearer" in body
+    open_call = re.search(r"xhr\.open\(\s*'POST',\s*`([^`]*)`", body)
+    assert open_call, "uploadCharacterReference does not call xhr.open('POST', `...`)"
+    assert "token" not in open_call.group(1).lower()
+
+
+def test_the_prompt_only_switch_is_behind_a_confirm_call():
+    src = CAST_STEP.read_text(encoding="utf-8")
+    match = re.search(r"const switchToPromptOnly = async \(\) => \{([\s\S]*?)\n  \}", src)
+    assert match, "switchToPromptOnly not found in CastStep.jsx"
+    assert "window.confirm(" in match.group(1)
+    assert "consistency_mode: 'prompt_only'" in match.group(1)
