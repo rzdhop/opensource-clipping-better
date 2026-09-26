@@ -1,3 +1,48 @@
+## IN PROGRESS — AI Story **phase 2** (cast, places & props, season arc)
+- **Started:** 2026-09-26 ("we'll start phase 2"); plan **approved in chat** ("Go"). Task class: FULL.
+- **Current phase:** 5 IMPLEMENT. CLARIFY closed: cast picked from the sketch + custom; places/props
+  proposed (P0) then edited; uploads described by vision into K1; Tier-2 walked by me at 375 px, the
+  human plays the voice samples on the phone.
+- **Plan:** `~/.claude/plans/ai-story-phase-2-cast-places-season.md` (stages 0–12, riskiest = stage 5,
+  reference images across routes).
+- **Where the work happens:** worktree `.claude/worktrees/ai-story-phase-2`, branch `feat/ai-story-phase-2`
+  (from the checkpoint commit). `main` and the container move only at stage 11. **A fresh session reads the
+  branch's copy of this file.**
+- **Checkpoint:** known-good `aac823b` (= `origin/main`); this header is the stage-0 commit on top.
+- **Tier-1 baseline (2026-09-26, at `aac823b`):** local **2846 passed / 1 skipped**; CI env **2368 passed /
+  448 skipped**; compileall clean; `vite build` green (scratch outDir).
+- **Prompt:** `.claude/plans/ai-story/03-phase-2-cast-places-season.md`; spec §2.3–2.6, §3 steps 5–7, §4.2,
+  §5, §8.1, §8.5, §9.2, §10, §11.
+- **Known going in:** no IMAGE_EDIT_CHAIN link can run for free here → sheets stop and ask for prompt-only.
+- **Next free ids:** DEC-117, A-050. **Open questions:** none.
+
+### Regression contract (phase 2)
+RC-P1…P11 and RC-S1…S4 stay, plus:
+| ID | Must keep working | Proven by |
+|---|---|---|
+| RC-T1 | Steps 1–4 unchanged | `test_stories_api.py`, `test_story_steps.py`, `test_style_preview.py` unedited except moving grammar tuples |
+| RC-T2 | Clip voiceover output unchanged by the rate/pitch kwargs | existing voiceover/TTS tests unedited + a call-shape guard |
+| RC-T3 | No paid generation without `allow_paid` + budget check | `test_generation_chain*.py`, `test_budget.py` unedited + stage-5 tests |
+
+### Stage ledger (phase 2)
+| S | Stage | State |
+|---|---|---|
+| 0 | checkpoint + baseline + worktree | **done** (this commit) |
+| 1 | entity documents + status | next |
+| 2 | prompts K1/P0/P1/R1/S1/S2/U1 | — |
+| 3 | voices | — |
+| 4 | upload handling + vision describe | — |
+| 5 | reference images across routes (RISKIEST) | — |
+| 6 | step runners | — |
+| 7 | API | — |
+| 8 | CLI | — |
+| 9 | dashboard: CastEditor | — |
+| 10 | dashboard: PlacesProps + SeasonBoard + wiring | — |
+| 11 | merge, deploy, Tier-2 | — |
+| 12 | docs + decisions | — |
+
+---
+
 ## CURRENT STATE — AI Story **phase 1 is DONE**. Next session starts **phase 2**.
 
 Finished 2026-09-26 ~17:40 UTC. Stages 0–13 done; Tier-2 passed live after one fix
