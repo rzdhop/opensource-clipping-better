@@ -62,6 +62,7 @@ def _character(**changes):
         "personality": {"traits": [], "wants": None, "fears": None, "speech_style": None},
         "relationships": {},
         "voice": None,
+        "voice_hints": None,
         "refs": {"portrait": None, "turnaround": None, "expressions": None, "extra": [], "uploads": []},
         "ref_seed": None,
         "prompt_block": None,

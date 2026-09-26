@@ -94,12 +94,25 @@ def _word_boundary_kwargs() -> dict:
     return {"boundary": "WordBoundary"} if "boundary" in parameters else {}
 
 
-async def _synthesize_async(text: str, voice: str, output_audio_path: str, output_subs_path: str = None):
-    """Async core for TTS generation."""
+async def _synthesize_async(text: str, voice: str, output_audio_path: str, output_subs_path: str = None,
+                             *, rate: str = None, pitch: str = None):
+    """Async core for TTS generation.
+
+    *rate*/*pitch* are edge-tts's own prosody strings (e.g. ``"+10%"``,
+    ``"-5Hz"``), added to the ``edge_tts.Communicate`` call only when given
+    (AI Story phase 2, spec 8.1/11). Neither existing caller passes them, so a
+    clip's voice-over is byte-for-byte unchanged (RC-T2): with both at their
+    default of ``None`` this builds the exact same keyword set as before.
+    """
     if edge_tts is None:
         raise ImportError("edge-tts is not installed. Run: pip install edge-tts")
 
-    communicate = edge_tts.Communicate(text, voice, **_word_boundary_kwargs())
+    kwargs = _word_boundary_kwargs()
+    if rate is not None:
+        kwargs["rate"] = rate
+    if pitch is not None:
+        kwargs["pitch"] = pitch
+    communicate = edge_tts.Communicate(text, voice, **kwargs)
     submaker = edge_tts.SubMaker()
 
     with open(output_audio_path, "wb") as file:

@@ -1228,6 +1228,17 @@ _VOICE_SCHEMA = _or_null(_document({
     "sample_line": _text(120),
 }))
 
+# K1's voice brief, kept so a voice can be proposed (or re-proposed) at any
+# time, including before one is pinned: the pinned ``voice`` block copies
+# ``direction`` and ``sample_line`` from here.
+_VOICE_HINTS_SCHEMA = _or_null(_document({
+    "gender": {"type": "string", "enum": ["female", "male", "neutral"]},
+    "age": {"type": "string", "enum": ["child", "young", "adult", "elder"]},
+    "style_tags": {"type": "array", "items": {"type": "string", "maxLength": 20}, "maxItems": 3},
+    "direction": {"type": "string", "maxLength": 200},
+    "sample_line": _text(120),
+}))
+
 _UPLOAD_SCHEMA = _document({
     "name": {"type": "string", "pattern": UPLOAD_NAME_PATTERN},
     # What the vision chain saw in it (U1), folded into the descriptor.
@@ -1254,6 +1265,7 @@ CHARACTER_SCHEMA = _document({
     # Another character's id -> what they are to this one (checked by character_errors).
     "relationships": {"type": "object"},
     "voice": _VOICE_SCHEMA,
+    "voice_hints": _VOICE_HINTS_SCHEMA,
     "refs": _document({
         "portrait": _IMAGE_REF_OR_NULL,
         "turnaround": _IMAGE_REF_OR_NULL,

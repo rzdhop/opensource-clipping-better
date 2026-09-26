@@ -47,6 +47,13 @@ TIMING_SCHEMA = "line_timing_v1"
 SOURCE_WORDS = "tts_word_timestamps"
 SOURCE_DURATION = "audio_duration_only"
 
+# The character_v1 patterns (clipping.aistory.schemas.VOICE_RATE_PATTERN /
+# VOICE_PITCH_PATTERN), duplicated here rather than imported: this is a
+# provider module and must not import clipping.aistory (the dependency runs
+# the other way -- aistory builds on providers, DEC-012-style layering).
+RATE_PATTERN = re.compile(r"^[+-][0-9]{1,3}%$")
+PITCH_PATTERN = re.compile(r"^[+-][0-9]{1,3}Hz$")
+
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 VOICES_PATH = os.path.join(_ROOT, "clipping", "aistory", "templates", "voices.json")
 
@@ -92,6 +99,29 @@ def _unknown_model(link, table):
     raise HttpStatusError(404, describe(link), f"model {link.model} not found in this adapter's table ({', '.join(table)})")
 
 
+def _rate_pitch(request) -> tuple:
+    """``(rate, pitch)`` from ``request.extra``, each ``None`` or a string
+    matching the character_v1 pattern. ``ValueError`` for a value that does
+    not match -- a bad rate/pitch is never silently dropped (spec 8.1/11)."""
+    extra = request.extra or {}
+    rate = extra.get("rate")
+    if rate is not None and not RATE_PATTERN.match(str(rate)):
+        raise ValueError(f"rate {rate!r} does not match {RATE_PATTERN.pattern} (e.g. '+10%', '-5%')")
+    pitch = extra.get("pitch")
+    if pitch is not None and not PITCH_PATTERN.match(str(pitch)):
+        raise ValueError(f"pitch {pitch!r} does not match {PITCH_PATTERN.pattern} (e.g. '+5Hz', '-10Hz')")
+    return rate, pitch
+
+
+def _warn_unsupported_rate_pitch(request, link, on_log) -> None:
+    """Gemini and the local engines cannot apply rate/pitch (spec 8.1): print
+    once that the preference was recorded, not applied -- never a silent
+    change of what the character asked for."""
+    extra = request.extra or {}
+    if extra.get("rate") is not None or extra.get("pitch") is not None:
+        on_log(f"   ⚠️ rate/pitch are not supported by {describe(link)}; recorded, not applied.")
+
+
 def audio_duration(path: str):
     """Seconds of audio in *path* by ffprobe, or ``None`` when ffprobe is missing or fails."""
     if not shutil.which("ffprobe"):
@@ -120,11 +150,11 @@ class _Adapter:
 
 # --------------------------------------------------------------------- edge
 
-def _edge_synthesize(text, voice, audio_path, subs_path=None):
+def _edge_synthesize(text, voice, audio_path, subs_path=None, *, rate=None, pitch=None):
     """The voiceover core, run to completion. Returns its word-level segments."""
     from clipping import voiceover  # imports edge_tts at ITS module scope, guarded
 
-    return asyncio.run(voiceover._synthesize_async(text, voice, audio_path, subs_path))
+    return asyncio.run(voiceover._synthesize_async(text, voice, audio_path, subs_path, rate=rate, pitch=pitch))
 
 
 class EdgeTtsAdapter(_Adapter):
@@ -136,17 +166,26 @@ class EdgeTtsAdapter(_Adapter):
         return True, "edge-tts installed (free, unofficial; one voice per request)"
 
     def generate(self, link, request, *, credentials, on_log, transport=None, synthesize=None, probe_duration=None, **_):
+        text = _text(request)
+        rate, pitch = _rate_pitch(request)
         if synthesize is None:
             if not _installed("edge_tts"):
                 raise ProviderError(f"{describe(link)}: edge-tts is not installed: {EDGE_INSTALL}")
             synthesize = _edge_synthesize
-        text = _text(request)
         voice = link.model or request.voice
         out_dir = _out_dir(request)
         name = _name(request, link)
         audio_path = os.path.join(out_dir, f"{name}.mp3")
         subs_path = os.path.join(out_dir, f"{name}.srt")
-        segments = synthesize(text, voice, audio_path, subs_path) or []
+        # rate/pitch only when given, so a plain call (no story preference) is
+        # byte-for-byte the request a fake synthesize() saw before this stage
+        # (RC-T2): existing test doubles taking only 4 positional args still work.
+        prosody = {}
+        if rate is not None:
+            prosody["rate"] = rate
+        if pitch is not None:
+            prosody["pitch"] = pitch
+        segments = synthesize(text, voice, audio_path, subs_path, **prosody) or []
         words = []
         for segment in segments:
             for word in segment.get("words") or []:
@@ -178,6 +217,7 @@ class GeminiTtsAdapter(_Adapter):
         model = GEMINI_TTS_MODELS.get(link.model) or _unknown_model(link, GEMINI_TTS_MODELS)
         text = _text(request)
         voice = request.voice or GEMINI_DEFAULT_VOICE
+        _warn_unsupported_rate_pitch(request, link, on_log)
         body = {
             "contents": [{"parts": [{"text": text}]}],
             "generationConfig": {
@@ -285,6 +325,7 @@ class LocalTtsAdapter(_Adapter):
         if not _installed(package):
             raise ProviderError(f"{describe(link)}: {link.model} is not installed ({package} package): {LOCAL_TTS_EXTRA}")
         text = _text(request)
+        _warn_unsupported_rate_pitch(request, link, on_log)
         out_dir = _out_dir(request)
         name = _name(request, link)
         audio_path = os.path.join(out_dir, f"{name}.wav")

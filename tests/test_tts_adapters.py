@@ -235,3 +235,89 @@ def test_the_voice_catalogue_covers_the_default_chain_in_both_languages():
     assert len(tts.voices_for("edge", "fr")) >= 4
     assert len(tts.voices_for("edge", "en")) >= 4
     assert tts.voices_for("kokoro", "fr") == [v for v in voices["providers"]["kokoro"] if v["lang"].startswith("fr")]
+
+
+# ------------------------------------------------- rate/pitch (AI Story phase 2, stage 3, Contract A)
+
+def test_edge_forwards_rate_and_pitch_to_the_injected_synthesize(tmp_path):
+    seen = {}
+
+    def synth(text, voice, audio_path, subs_path=None, **kwargs):
+        pathlib.Path(audio_path).write_bytes(b"ID3fake-mp3")
+        seen["kwargs"] = kwargs
+        return []
+
+    request = GenRequest(kind="tts", text="Bonjour", out_dir=str(tmp_path), extra={"rate": "+10%", "pitch": "-5Hz"})
+    tts.EDGE.generate(Link("edge", "fr-FR-HenriNeural"), request, credentials={}, on_log=lambda *a: None,
+                      synthesize=synth)
+    assert seen["kwargs"] == {"rate": "+10%", "pitch": "-5Hz"}
+
+
+def test_edge_calls_the_injected_synthesize_with_no_extra_kwargs_when_neither_is_given(tmp_path):
+    """An old-style stand-in taking only the four original arguments (like
+    ``fake_synth`` above) must keep working: RC-T2, exercised on the
+    already-existing test double rather than a new one."""
+    request = GenRequest(kind="tts", text="Bonjour", out_dir=str(tmp_path), extra={"name": "line_02"})
+    result = tts.EDGE.generate(Link("edge", "fr-FR-HenriNeural"), request, credentials={}, on_log=lambda *a: None,
+                               synthesize=fake_synth)
+    assert result.paths[0].endswith("line_02.mp3")
+
+
+@pytest.mark.parametrize("field,value", [("rate", "loud"), ("pitch", "high"), ("rate", "10%"), ("pitch", "5Hz")])
+def test_edge_refuses_a_malformed_rate_or_pitch(field, value, tmp_path):
+    request = GenRequest(kind="tts", text="Bonjour", out_dir=str(tmp_path), extra={field: value})
+    with pytest.raises(ValueError, match=field):
+        tts.EDGE.generate(Link("edge", "fr-FR-HenriNeural"), request, credentials={}, on_log=lambda *a: None,
+                          synthesize=fake_synth)
+
+
+@pytest.mark.parametrize("value", ["+10%", "-99%", "+0%"])
+def test_edge_accepts_a_well_formed_rate(value, tmp_path):
+    def synth(text, voice, audio_path, subs_path=None, **kwargs):
+        pathlib.Path(audio_path).write_bytes(b"ID3fake-mp3")
+        return []
+
+    request = GenRequest(kind="tts", text="Bonjour", out_dir=str(tmp_path), extra={"rate": value})
+    tts.EDGE.generate(Link("edge", "fr-FR-HenriNeural"), request, credentials={}, on_log=lambda *a: None,
+                      synthesize=synth)
+
+
+def test_gemini_prints_once_that_rate_pitch_are_not_supported(tmp_path):
+    image = {"inlineData": {"mimeType": "audio/L16;rate=24000", "data": base64.b64encode(b"ab").decode()}}
+    transport = FakeTransport([(200, {"candidates": [{"content": {"parts": [image]}}]})])
+    log = []
+    request = GenRequest(kind="tts", text="x", voice="Kore", out_dir=str(tmp_path), extra={"rate": "+10%"})
+    tts.GEMINI_TTS.generate(Link("gemini", "flash-lite-tts"), request, credentials={"GOOGLE_API_KEY": "gk"},
+                            on_log=log.append, transport=transport)
+    warnings = [line for line in log if "not supported" in line]
+    assert len(warnings) == 1
+    assert "gemini/flash-lite-tts" in warnings[0] and "recorded, not applied" in warnings[0]
+
+
+def test_gemini_prints_no_warning_when_neither_rate_nor_pitch_is_given(tmp_path):
+    image = {"inlineData": {"mimeType": "audio/L16;rate=24000", "data": base64.b64encode(b"ab").decode()}}
+    transport = FakeTransport([(200, {"candidates": [{"content": {"parts": [image]}}]})])
+    log = []
+    request = GenRequest(kind="tts", text="x", voice="Kore", out_dir=str(tmp_path))
+    tts.GEMINI_TTS.generate(Link("gemini", "flash-lite-tts"), request, credentials={"GOOGLE_API_KEY": "gk"},
+                            on_log=log.append, transport=transport)
+    assert not any("not supported" in line for line in log)
+
+
+def test_local_prints_once_that_rate_pitch_are_not_supported(tmp_path, monkeypatch):
+    monkeypatch.setattr(tts, "_installed", lambda name: True)
+
+    def fake_piper(text, voice, out_path, request, on_log):
+        with wave.open(out_path, "wb") as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(24000)
+            wav.writeframes(b"\x00\x00")
+
+    monkeypatch.setitem(tts._LOCAL_SYNTH, "piper", fake_piper)
+    log = []
+    request = GenRequest(kind="tts", text="x", out_dir=str(tmp_path), extra={"pitch": "-5Hz"})
+    tts.LOCAL_TTS.generate(Link("local", "piper"), request, credentials={}, on_log=log.append)
+    warnings = [line for line in log if "not supported" in line]
+    assert len(warnings) == 1
+    assert "local/piper" in warnings[0]

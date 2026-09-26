@@ -30,8 +30,8 @@ RC-P1…P11 and RC-S1…S4 stay, plus:
 | 0 | checkpoint + baseline + worktree | **done** (this commit) |
 | 1 | entity documents + status | **done** (local 3242 / CI 2764 + 448 skipped) |
 | 2 | prompts K1/P0/P1/R1/S1/S2/U1 | **done** (local 3362 / CI 2884 + 448 skipped) |
-| 3 | voices | next |
-| 4 | upload handling + vision describe | — |
+| 3 | voices | **done** (local 3399 / CI 2921 + 448 skipped) |
+| 4 | upload handling + vision describe | next |
 | 5 | reference images across routes (RISKIEST) | — |
 | 6 | step runners | — |
 | 7 | API | — |
