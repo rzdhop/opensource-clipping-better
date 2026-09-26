@@ -316,38 +316,70 @@ def no_key_message(links, *, where="in Settings") -> str:
     (the floor alone would be refused next), billed ones marked as such
     (DEC-088). *where* says where keys are set: the dashboard's Settings, or
     the environment for the CLI."""
-    wanted = [registry.PROVIDERS[link.provider] for link in links if registry.is_primary(link)]
-    wanted = wanted or [registry.PROVIDERS[link.provider] for link in links]
-    names = ", ".join(
-        f"{p.env_key} ({p.signup_url or 'your own endpoint'})"
-        + ("" if p.free_tier else " (paid)")
-        for p in dict.fromkeys(wanted)
-    )
     return (
         "No link in the LLM chain has an API key, so this step cannot call a "
-        f"model. Set one of: {names}, {where}."
+        f"model. Set one of: {llm_call.key_choices(links)}, {where}."
     )
+
+
+def llm_route(settings_env, *, readiness, where="in Settings"):
+    """``(links, keys, skipped, refusal)`` for an LLM step under
+    *settings_env*: the chain as configured and the keys (``llm_call``'s
+    resolution: the values given, then the process env), the links the step
+    will leave out (``llm_call.story_chain``: a paid link while ``allow_paid``
+    is off, as ``(link, reason)``), and why it may not start, or None.
+
+    Refused, in this order: a chain that cannot be parsed (the step would
+    fail on its first call); a chain in which no link has a key
+    (``no_key_message``); budget settings that cannot be read; a chain whose
+    only keyed links are paid while ``allow_paid`` is off
+    (``llm_call.paid_off_message``); whatever ``readiness(links, keys)``
+    refuses -- the DEC-073 slow-floor rule, which each caller resolves its
+    own way (the API from Settings, the CLI from its flag and the
+    environment), asked of the chain as configured first, so a story step and
+    a clip job give the same refusal for the same values -- and then, when a
+    paid link is left out, the same rule asked of the links the step will
+    really use: with its paid primary skipped, a chain can be down to its
+    slow floor.
+    """
+    try:
+        links = llm_call.resolve_chain(settings_env)
+    except registry.ChainError as exc:
+        return [], {}, [], f"LLM_CHAIN cannot be used: {exc}"
+    keys = llm_call.resolve_keys(settings_env)
+    try:
+        usable, skipped = llm_call.story_chain(settings_env)
+    except ValueError as exc:
+        budget_refusal = f"The budget settings cannot be used: {exc}"
+        usable, skipped = list(links), []
+    else:
+        budget_refusal = None
+
+    if not any(keys.get(link.provider) for link in links):
+        return links, keys, skipped, no_key_message(links, where=where)
+    if budget_refusal:
+        return links, keys, skipped, budget_refusal
+    if not any(keys.get(link.provider) for link in usable):
+        keyed_paid = [link for link, _reason in skipped if keys.get(link.provider)]
+        return links, keys, skipped, llm_call.paid_off_message(keyed_paid, usable, where=where)
+
+    refusal = readiness(links, keys)
+    if refusal is None and skipped:
+        refusal = readiness(usable, keys)
+        if refusal:
+            labels = ", ".join(dict.fromkeys(registry.describe(link) for link, _reason in skipped))
+            refusal = f"{refusal} (Not used by AI Story: {labels}, {llm_call.PAID_SKIP_REASON}.)"
+    return links, keys, skipped, refusal
 
 
 def llm_gate(settings_env, *, readiness, where="in Settings"):
     """``(links, keys, refusal)`` for an LLM step under *settings_env*: the
     chain and keys the step will run with (``llm_call``'s resolution: the
-    values given, then the process env), and why it may not start, or None.
-
-    Refused: a chain that cannot be parsed (the step would fail on its first
-    call), a chain in which no link has a key (``no_key_message``), and
-    whatever ``readiness(links, keys)`` refuses -- the DEC-073 slow-floor
-    rule, which each caller resolves its own way (the API from Settings, the
-    CLI from its flag and the environment).
+    values given, then the process env), and why it may not start, or None --
+    :func:`llm_route` without the skipped links.
     """
-    try:
-        links = llm_call.resolve_chain(settings_env)
-    except registry.ChainError as exc:
-        return [], {}, f"LLM_CHAIN cannot be used: {exc}"
-    keys = llm_call.resolve_keys(settings_env)
-    if not any(keys.get(link.provider) for link in links):
-        return links, keys, no_key_message(links, where=where)
-    return links, keys, readiness(links, keys)
+    links, keys, _skipped, refusal = llm_route(settings_env, readiness=readiness, where=where)
+    return links, keys, refusal
 
 
 # ---------------------------------------------------------------- concept

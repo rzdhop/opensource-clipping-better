@@ -1,15 +1,17 @@
 """Step ``concepts``: "Generate 10 more" (spec 3 step 2, 4.2 row C1).
 
-Five C1 calls, two concepts each, appended as cards to the story's
-``concepts.json``. One request, one artifact (DEC-027): a batch that fails is
-printed and the next still runs; the cards of every accepted batch are on
-disk as soon as that batch is (a crash or a cancel keeps them). Returning,
-even with some batches failed, means the user has cards to choose from; no
-card at all is a failure naming every batch's reason.
+Ten C1 calls (``prompts.C1_CALLS``), one concept each
+(``prompts.C1_CONCEPTS_PER_CALL``), appended as cards to the story's
+``concepts.json``. One card per call because two French cards did not fit the
+C1 cap: every reply was cut off mid-JSON (2026-09-26). One request, one
+artifact (DEC-027): a call that fails is printed and the next still runs; the
+card of every accepted call is on disk as soon as that call is (a crash or a
+cancel keeps it). Returning, even with some calls failed, means the user has
+cards to choose from; no card at all is a failure naming every call's reason.
 
 Every title the story already has -- the library's, in the story's language,
 and every card so far -- is sent as "do not repeat", newest cards first, and
-each accepted batch adds its own before the next call. The context pack caps
+each accepted call adds its own before the next one. The context pack caps
 that list (``context._AVOID_TITLE_LIMIT``) and says so; the library titles
 come first so they are never the ones cut.
 """
@@ -23,8 +25,8 @@ from .. import context, prompts, schemas, templates
 from . import llm_call
 from .llm_call import StepFailed
 
-BATCHES = 5
-CONCEPTS_PER_BATCH = 2
+CALLS = prompts.C1_CALLS
+CONCEPTS_PER_CALL = prompts.C1_CONCEPTS_PER_CALL
 CONCEPTS_FILENAME = "concepts.json"
 
 _GENERATED_ID = re.compile(schemas.GENERATED_CONCEPT_ID_PATTERN)
@@ -68,7 +70,7 @@ def _existing_cards(store, story_id) -> list:
         return []
     errors = schemas.story_concepts_errors(doc)
     if errors:
-        # Refused before anything is spent: the batches could never be written.
+        # Refused before anything is spent: the cards could never be written.
         shown = "; ".join(errors[:3])
         raise StepFailed(
             f"{CONCEPTS_FILENAME} is not a valid {schemas.STORY_CONCEPTS_SCHEMA_NAME} "
@@ -82,7 +84,7 @@ def _library_titles(language) -> list:
 
 
 def run(ctx, *, note=None, runner=None, time_fn=time.monotonic) -> dict:
-    """Generate up to ``BATCHES * CONCEPTS_PER_BATCH`` cards for the story.
+    """Generate up to ``CALLS * CONCEPTS_PER_CALL`` cards for the story.
 
     *note* is a regenerate's author's note (``regenerate`` target
     ``concepts``); *runner*/*time_fn* are handed to ``llm_call.call_json``.
@@ -109,10 +111,10 @@ def run(ctx, *, note=None, runner=None, time_fn=time.monotonic) -> dict:
         return schemas.c1_errors(reply, style_ids)
 
     new_ids = []
-    failed = []  # (batch, reason)
+    failed = []  # (call, reason)
     announced = set()
 
-    for batch in range(1, BATCHES + 1):
+    for call in range(1, CALLS + 1):
         ctx.cancel.check()
         pack = context.build_pack(
             language=language,
@@ -121,7 +123,7 @@ def run(ctx, *, note=None, runner=None, time_fn=time.monotonic) -> dict:
             avoid_titles=library_titles + generated_titles[::-1],
         )
         llm_call.announce_trimmed(ctx, pack, announced)
-        system, user, schema = prompts.build_c1(pack, style_ids=style_ids, batch=batch, of=BATCHES)
+        system, user, schema = prompts.build_c1(pack, style_ids=style_ids, batch=call, of=CALLS)
 
         try:
             reply = llm_call.call_json(
@@ -129,12 +131,12 @@ def run(ctx, *, note=None, runner=None, time_fn=time.monotonic) -> dict:
                 validator=validator, runner=runner, time_fn=time_fn,
             )
         except StepFailed as exc:
-            failed.append((batch, exc.reason))
-            ctx.on_log(f"✖ C1 batch {batch}/{BATCHES} failed: {exc.reason}")
+            failed.append((call, exc.reason))
+            ctx.on_log(f"✖ C1 call {call}/{CALLS} failed: {exc.reason}")
             continue
 
         now = llm_call.utc_now()
-        batch_cards = []
+        call_cards = []
         for concept in reply["concepts"]:
             card = {
                 "concept_id": _concept_id(number),
@@ -144,40 +146,40 @@ def run(ctx, *, note=None, runner=None, time_fn=time.monotonic) -> dict:
                 "language": language,
             }
             card.update({field: concept[field] for field in _CARD_FIELDS})
-            batch_cards.append(card)
+            call_cards.append(card)
             number += 1
 
-        # Written per batch, so what was paid for survives whatever comes next.
+        # Written per call, so what was paid for survives whatever comes next.
         store.write_doc(
             ctx.story_id,
             CONCEPTS_FILENAME,
             {
                 "$schema": schemas.STORY_CONCEPTS_SCHEMA_NAME,
-                "concepts": cards + batch_cards,
+                "concepts": cards + call_cards,
                 "updated_at": now,
             },
             now=now,
             validator=schemas.story_concepts_errors,
         )
-        cards.extend(batch_cards)
-        generated_titles.extend(card["title"] for card in batch_cards)
-        new_ids.extend(card["concept_id"] for card in batch_cards)
-        titles = " · ".join(card["title"] for card in batch_cards)
-        ctx.on_log(f"💡 C1 batch {batch}/{BATCHES}: {titles}")
+        cards.extend(call_cards)
+        generated_titles.extend(card["title"] for card in call_cards)
+        new_ids.extend(card["concept_id"] for card in call_cards)
+        titles = " · ".join(card["title"] for card in call_cards)
+        ctx.on_log(f"💡 C1 call {call}/{CALLS}: {titles}")
 
-    wanted = BATCHES * CONCEPTS_PER_BATCH
+    wanted = CALLS * CONCEPTS_PER_CALL
     if not new_ids:
-        detail = "; ".join(f"batch {batch}/{BATCHES}: {reason}" for batch, reason in failed)
-        raise StepFailed(f"No concept was generated: every C1 batch failed ({detail}).")
+        detail = "; ".join(f"call {call}/{CALLS}: {reason}" for call, reason in failed)
+        raise StepFailed(f"No concept was generated: every C1 call failed ({detail}).")
 
     if failed:
-        numbers = ", ".join(str(batch) for batch, _ in failed)
-        ctx.on_log(f"Generated {len(new_ids)} of {wanted} concepts (batches failed: {numbers})")
+        numbers = ", ".join(str(call) for call, _ in failed)
+        ctx.on_log(f"Generated {len(new_ids)} of {wanted} concepts (calls failed: {numbers})")
     else:
         ctx.on_log(f"Generated {len(new_ids)} of {wanted} concepts.")
 
     return {
         "generated": len(new_ids),
         "concept_ids": new_ids,
-        "failed_batches": [batch for batch, _ in failed],
+        "failed_calls": [call for call, _ in failed],
     }

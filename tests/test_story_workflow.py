@@ -345,6 +345,44 @@ def test_the_llm_gate_resolves_the_chain_and_keys_then_asks_readiness(wf, monkey
     assert wf.llm_gate({"LLM_CHAIN": "nope/x"}, readiness=readiness)[2].startswith("LLM_CHAIN cannot be used:")
 
 
+def test_the_llm_route_leaves_paid_links_out_while_allow_paid_is_off(wf, monkeypatch):
+    from clipping.config import PROVIDER_KEYS  # before the delenv: it reads .env
+
+    for _name, (_attr, env_name) in PROVIDER_KEYS.items():
+        monkeypatch.delenv(env_name, raising=False)
+    for name in ("LLM_CHAIN", "ALLOW_PAID"):
+        monkeypatch.delenv(name, raising=False)
+    gemini, openrouter = Link("gemini", "gemini-test"), Link("openrouter", "test-model")
+    reason = "paid link: allow_paid is off (AI Story spends only on opt-in)"
+    both = {"LLM_CHAIN": "gemini/gemini-test,openrouter/test-model",
+            "GOOGLE_API_KEY": "test-gemini-key", "OPENROUTER_API_KEY": "test-openrouter-key"}
+    asked = []
+
+    def readiness(links, keys):
+        asked.append(list(links))
+        return None
+
+    # Asked of the chain as configured (a clip job's answer), then of the links used.
+    assert wf.llm_route(both, readiness=readiness) == (
+        [gemini, openrouter], {"gemini": "test-gemini-key", "openrouter": "test-openrouter-key"},
+        [(openrouter, reason)], None)
+    assert asked == [[gemini, openrouter], [gemini]]
+
+    asked.clear()
+    assert wf.llm_route(dict(both, ALLOW_PAID="1"), readiness=readiness)[2:] == ([], None)
+    assert asked == [[gemini, openrouter]]
+
+    asked.clear()
+    paid_only = {"LLM_CHAIN": "gemini/gemini-test,openrouter/test-model", "OPENROUTER_API_KEY": "k"}
+    links, keys, refusal = wf.llm_gate(paid_only, readiness=readiness, where="in the environment")
+    assert refusal.startswith("The only keyed link of the LLM chain is paid (openrouter/test-model)")
+    assert "allow_paid" in refusal and "GOOGLE_API_KEY" in refusal and ", in the environment;" in refusal
+    assert asked == []
+
+    refusal = wf.llm_gate(dict(both, DAILY_CAP_USD="lots"), readiness=readiness)[2]
+    assert refusal.startswith("The budget settings cannot be used: DAILY_CAP_USD")
+
+
 # ----------------------------------------------------------------- boundary
 
 def test_the_workflow_never_imports_web():

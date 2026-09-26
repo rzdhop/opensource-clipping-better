@@ -60,6 +60,7 @@ def _hermetic(monkeypatch):
     for _name, (_attr, env_name) in PROVIDER_KEYS.items():
         monkeypatch.delenv(env_name, raising=False)
     monkeypatch.delenv("LLM_CHAIN", raising=False)
+    monkeypatch.delenv("ALLOW_PAID", raising=False)  # it decides which links a step calls
     pacing.reset_limiters()
     llm.reset_negotiation()
     llm.reset_model_fallbacks()
@@ -153,12 +154,12 @@ def _c1_concept(title, style_fit="fruit_drama"):
     }
 
 
-def c1_reply(batch, offset=0):
-    first = offset + 2 * batch - 1
-    return {"concepts": [_c1_concept(f"Titre {first}"), _c1_concept(f"Titre {first + 1}", "anime")]}
+def c1_reply(call, offset=0):
+    """Call *call*'s one concept: "Titre <offset + call>", every other one anime."""
+    return {"concepts": [_c1_concept(f"Titre {offset + call}", "anime" if call % 2 == 0 else "fruit_drama")]}
 
 
-INVALID_C1 = {"concepts": [_c1_concept("Seul")]}
+INVALID_C1 = {"concepts": [_c1_concept("Un"), _c1_concept("Deux")]}
 
 B1_REPLY = {
     "logline": "Des fruits en couple survivent au vote hebdomadaire d'une île de téléréalité.",
@@ -243,24 +244,25 @@ def _no_sleep(seconds):
 
 # ================================================================ concepts
 
-def test_generate_ten_makes_five_c1_calls_and_ten_valid_cards(story_store):
+def test_generate_ten_makes_ten_c1_calls_of_one_valid_card_each(story_store):
     m = _new()
     story_id = _story(story_store)
     ctx, log = _ctx(story_store, story_id)
-    runner = FakeRunner(*(c1_reply(k) for k in range(1, 6)))
+    runner = FakeRunner(*(c1_reply(k) for k in range(1, 11)))
 
     summary = m.concepts.run(ctx, runner=runner)
 
-    assert len(runner.calls) == 5
+    assert len(runner.calls) == 10
     for k, call in enumerate(runner.calls, 1):
         assert call["temperature"] == 0.9
-        assert call["max_tokens"] == 500
+        assert call["max_tokens"] == 700
         assert call["schema_name"] == "story_concepts"
         assert call["chain"] == [LINK]
         assert call["keys"] == {"gemini": "test-gemini-key"}
         assert call["cancel"] is ctx.cancel
         assert call["on_log"] is ctx.on_log
-        assert f"(batch {k} of 5)" in call["user"]
+        assert f"(call {k} of 10)" in call["user"]
+        assert "Invent exactly 1 original concept " in call["user"]
         assert "Visual style: Fruit Drama" in call["user"]
         assert call["system"].endswith("Write all user-facing text in French.")
 
@@ -274,14 +276,14 @@ def test_generate_ten_makes_five_c1_calls_and_ten_valid_cards(story_store):
     assert card["prompt_version"] == prompts.PROMPT_VERSION
     assert card["language"] == "fr"
     assert card["style_fit"] == "anime"
-    assert card["cast_sketch"] == c1_reply(1)["concepts"][1]["cast_sketch"]
+    assert card["cast_sketch"] == c1_reply(2)["concepts"][0]["cast_sketch"]
     # A generated card renders exactly like a library concept in a prompt.
     assert "Title: Titre 2" in context.concept_block(card)
 
-    assert summary == {"generated": 10, "concept_ids": ids, "failed_batches": []}
-    assert "💡 C1 batch 1/5: Titre 1 · Titre 2" in log
-    assert "💡 C1 batch 5/5: Titre 9 · Titre 10" in log
-    assert sum(line.startswith("✍️ C1 via gemini/gemini-test ≈") for line in log) == 5
+    assert summary == {"generated": 10, "concept_ids": ids, "failed_calls": []}
+    assert "💡 C1 call 1/10: Titre 1" in log
+    assert "💡 C1 call 10/10: Titre 10" in log
+    assert sum(line.startswith("✍️ C1 via gemini/gemini-test ≈") for line in log) == 10
     assert log[-1] == "Generated 10 of 10 concepts."
     assert not any(line.startswith("✂️") for line in log)
 
@@ -289,16 +291,16 @@ def test_generate_ten_makes_five_c1_calls_and_ten_valid_cards(story_store):
 def test_a_second_run_continues_the_numbering_and_trims_the_avoid_list_once(story_store):
     m = _new()
     story_id = _story(story_store)
-    m.concepts.run(_ctx(story_store, story_id)[0], runner=FakeRunner(*(c1_reply(k) for k in range(1, 6))))
+    m.concepts.run(_ctx(story_store, story_id)[0], runner=FakeRunner(*(c1_reply(k) for k in range(1, 11))))
     ctx, log = _ctx(story_store, story_id)
 
-    summary = m.concepts.run(ctx, runner=FakeRunner(*(c1_reply(k, offset=10) for k in range(1, 6))))
+    summary = m.concepts.run(ctx, runner=FakeRunner(*(c1_reply(k, offset=10) for k in range(1, 11))))
 
     doc = story_store.read_doc(story_id, "concepts.json")
     assert schemas.story_concepts_errors(doc) == []
     assert [card["concept_id"] for card in doc["concepts"]] == [f"gen_{n:02d}" for n in range(1, 21)]
     assert summary["concept_ids"] == [f"gen_{n:02d}" for n in range(11, 21)]
-    # 10 library + 12 titles on call 2: over the pack's 20, said once, not per batch.
+    # 10 library + 11 titles on call 2: over the pack's 20, said once, not per call.
     trimmed = [line for line in log if line.startswith("✂️")]
     assert trimmed == ["✂️ The list of titles to avoid was trimmed for the prompt (the context pack is budgeted)."]
 
@@ -313,7 +315,7 @@ def test_numbering_goes_to_three_digits_past_99(story_store):
                           now=NOW)
     ctx, _ = _ctx(story_store, story_id)
 
-    summary = m.concepts.run(ctx, runner=FakeRunner(*(c1_reply(k) for k in range(1, 6))))
+    summary = m.concepts.run(ctx, runner=FakeRunner(*(c1_reply(k) for k in range(1, 11))))
 
     assert summary["concept_ids"] == [f"gen_{n}" for n in range(100, 110)]
     assert schemas.story_concepts_errors(story_store.read_doc(story_id, "concepts.json")) == []
@@ -323,13 +325,14 @@ def test_each_call_avoids_the_library_titles_and_every_earlier_title(story_store
     m = _new()
     story_id = _story(story_store)
     ctx, _ = _ctx(story_store, story_id)
-    runner = FakeRunner(*(c1_reply(k) for k in range(1, 6)))
+    runner = FakeRunner(*(c1_reply(k) for k in range(1, 11)))
 
     m.concepts.run(ctx, runner=runner)
 
+    assert len(runner.calls) == 10
     for k, call in enumerate(runner.calls, 1):
         avoid = _avoid_titles(call["user"])
-        earlier = [f"Titre {n}" for n in range(1, 2 * (k - 1) + 1)]
+        earlier = [f"Titre {n}" for n in range(1, k)]
         assert set(avoid) == set(LIBRARY_TITLES_FR) | set(earlier), f"call {k}"
         # The library first, so it is never what the pack's cap cuts.
         assert avoid[: len(LIBRARY_TITLES_FR)] == LIBRARY_TITLES_FR
@@ -339,7 +342,7 @@ def test_a_story_without_a_style_sends_no_style_line_and_its_seed(story_store):
     m = _new()
     story_id = _story(story_store, style=None, seed="Des fruits complotent sur une île.")
     ctx, _ = _ctx(story_store, story_id)
-    runner = FakeRunner(*(c1_reply(k) for k in range(1, 6)))
+    runner = FakeRunner(*(c1_reply(k) for k in range(1, 11)))
 
     m.concepts.run(ctx, runner=runner)
 
@@ -348,51 +351,51 @@ def test_a_story_without_a_style_sends_no_style_line_and_its_seed(story_store):
         assert "Seed idea from the user: Des fruits complotent sur une île." in call["user"]
 
 
-def test_a_batch_rejected_twice_is_reported_and_the_others_are_kept(story_store):
+def test_a_call_rejected_twice_is_reported_and_the_others_are_kept(story_store):
     m = _new()
     story_id = _story(story_store)
     ctx, log = _ctx(story_store, story_id)
-    runner = FakeRunner(c1_reply(1), INVALID_C1, INVALID_C1, c1_reply(3), c1_reply(4), c1_reply(5))
+    runner = FakeRunner(c1_reply(1), INVALID_C1, INVALID_C1, *(c1_reply(k) for k in range(3, 11)))
 
     summary = m.concepts.run(ctx, runner=runner)
 
-    assert len(runner.calls) == 6
-    assert runner.calls[1]["max_tokens"] == runner.calls[2]["max_tokens"] == 500
+    assert len(runner.calls) == 11
+    assert runner.calls[1]["max_tokens"] == runner.calls[2]["max_tokens"] == 700
     doc = story_store.read_doc(story_id, "concepts.json")
-    assert [card["concept_id"] for card in doc["concepts"]] == [f"gen_{n:02d}" for n in range(1, 9)]
-    assert [card["title"] for card in doc["concepts"]] == [f"Titre {n}" for n in (1, 2, 5, 6, 7, 8, 9, 10)]
-    assert summary["failed_batches"] == [2]
-    assert summary["generated"] == 8
-    assert "⚠️ C1 reply rejected ($.concepts: 1 concept(s), expected exactly 2); asking once more with the same cap" in log
-    assert any(line.startswith("✖ C1 batch 2/5 failed: the reply failed validation twice: $.concepts: 1 concept(s)")
+    assert [card["concept_id"] for card in doc["concepts"]] == [f"gen_{n:02d}" for n in range(1, 10)]
+    assert [card["title"] for card in doc["concepts"]] == [f"Titre {n}" for n in (1, 3, 4, 5, 6, 7, 8, 9, 10)]
+    assert summary["failed_calls"] == [2]
+    assert summary["generated"] == 9
+    assert "⚠️ C1 reply rejected ($.concepts: 2 concept(s), expected exactly 1); asking once more with the same cap" in log
+    assert any(line.startswith("✖ C1 call 2/10 failed: the reply failed validation twice: $.concepts: 2 concept(s)")
                for line in log)
-    assert log[-1] == "Generated 8 of 10 concepts (batches failed: 2)"
+    assert log[-1] == "Generated 9 of 10 concepts (calls failed: 2)"
 
 
-def test_every_batch_failing_is_a_step_failure_naming_each_reason(story_store):
+def test_every_call_failing_is_a_step_failure_naming_each_reason(story_store):
     m = _new()
     story_id = _story(story_store)
     ctx, log = _ctx(story_store, story_id)
     runner = FakeRunner(*(
         ProviderError("Every provider in the chain failed (1 tried)",
                       failures=[("gemini/gemini-test", f"RuntimeError: outage {k}")])
-        for k in range(1, 6)
+        for k in range(1, 11)
     ))
 
     with pytest.raises(steps.StepFailed) as caught:
         m.concepts.run(ctx, runner=runner)
 
     message = str(caught.value)
-    assert message.startswith("No concept was generated: every C1 batch failed (")
-    for k in range(1, 6):
-        assert (f"batch {k}/5: every provider in the chain failed (1 tried): "
+    assert message.startswith("No concept was generated: every C1 call failed (")
+    for k in range(1, 11):
+        assert (f"call {k}/10: every provider in the chain failed (1 tried): "
                 f"gemini/gemini-test: RuntimeError: outage {k}") in message
-    assert len(runner.calls) == 5  # a failed chain is not asked again
-    assert sum(line.startswith("✖ C1 batch") for line in log) == 5
+    assert len(runner.calls) == 10  # a failed chain is not asked again
+    assert sum(line.startswith("✖ C1 call") for line in log) == 10
     assert story_store.read_doc(story_id, "concepts.json") is None
 
 
-def test_a_cancel_during_batch_2_keeps_two_batches_and_makes_no_third_call(story_store):
+def test_a_cancel_during_call_2_keeps_two_cards_and_makes_no_third_call(story_store):
     m = _new()
     story_id = _story(story_store)
     token = CancelToken()
@@ -409,10 +412,10 @@ def test_a_cancel_during_batch_2_keeps_two_batches_and_makes_no_third_call(story
 
     assert len(runner.calls) == 2
     doc = story_store.read_doc(story_id, "concepts.json")
-    assert [card["concept_id"] for card in doc["concepts"]] == ["gen_01", "gen_02", "gen_03", "gen_04"]
+    assert [card["concept_id"] for card in doc["concepts"]] == ["gen_01", "gen_02"]
 
 
-def test_concepts_json_is_written_after_each_batch(story_store):
+def test_concepts_json_is_written_after_each_call(story_store):
     m = _new()
     story_id = _story(story_store)
     ctx, _ = _ctx(story_store, story_id)
@@ -434,11 +437,11 @@ def test_concepts_json_is_written_after_each_batch(story_store):
         m.concepts.run(ctx, runner=runner)
 
     assert seen[0] is None
-    assert len(seen[1]["concepts"]) == 2
-    assert len(seen[2]["concepts"]) == 4
+    assert len(seen[1]["concepts"]) == 1
+    assert len(seen[2]["concepts"]) == 2
     doc = story_store.read_doc(story_id, "concepts.json")
     assert schemas.story_concepts_errors(doc) == []
-    assert len(doc["concepts"]) == 4
+    assert len(doc["concepts"]) == 2
 
 
 def test_concepts_for_a_story_that_does_not_exist(story_store):
@@ -500,7 +503,7 @@ def test_bible_runs_b1_b2_b3_in_order_and_writes_after_each(story_store):
     summary = m.bible.run(ctx, runner=runner)
 
     assert [call["schema_name"] for call in runner.calls] == ["bible_core", "bible_world", "bible_values"]
-    assert [call["max_tokens"] for call in runner.calls] == [250, 250, 200]
+    assert [call["max_tokens"] for call in runner.calls] == [400, 520, 300]
     assert [call["temperature"] for call in runner.calls] == [0.5, 0.5, 0.5]
 
     assert before_each[0]["logline"] is None
@@ -523,7 +526,7 @@ def test_bible_runs_b1_b2_b3_in_order_and_writes_after_each(story_store):
     written = [line for line in log if line.startswith("✍️")]
     assert [line.split(" ≈")[0] for line in written] == [
         "✍️ B1 via gemini/gemini-test", "✍️ B2 via gemini/gemini-test", "✍️ B3 via gemini/gemini-test"]
-    assert [line.rsplit(" (", 1)[1] for line in written] == ["cap 250)", "cap 250)", "cap 200)"]
+    assert [line.rsplit(" (", 1)[1] for line in written] == ["cap 400)", "cap 520)", "cap 300)"]
 
 
 def test_rewriting_an_approved_bible_clears_its_approval_and_leaves_style(story_store):
@@ -622,7 +625,7 @@ def test_the_real_chain_never_contacts_a_keyless_link_and_its_json_reaches_the_s
     assert [provider for provider, _ in factory.seen] == ["gemini", "gemini", "gemini"]
     body = factory.seen[0][1]
     assert body["model"] == "gemini-test"
-    assert body["max_tokens"] == 250 and body["temperature"] == 0.5
+    assert body["max_tokens"] == 400 and body["temperature"] == 0.5
     assert body["response_format"]["json_schema"]["name"] == "bible_core"
 
     skip = "   ⏭ Skipping groq/groq-test: no API key (GROQ_API_KEY is not set)."
@@ -661,7 +664,7 @@ def test_regenerate_tone_with_a_note_changes_only_tone_and_genre_tags(story_stor
     assert after["genre_tags"] == rewritten["genre_tags"]
 
     call, = runner.calls
-    assert call["schema_name"] == "bible_core" and call["max_tokens"] == 250
+    assert call["schema_name"] == "bible_core" and call["max_tokens"] == 400
     assert "Rewrite only `tone`, following the author's note: plus sombre" in call["user"]
     assert f"- tone: {B1_REPLY['tone']}" in call["user"]
     assert result == {"target": "bible:tone", "fields": ["tone", "genre_tags"]}
@@ -699,10 +702,10 @@ def test_regenerate_world_replaces_all_four_keys_and_clears_the_approval(story_s
 def test_regenerate_concepts_appends_ten_with_the_note_and_needs_no_concept(story_store):
     m = _new()
     story_id = _story(story_store, chosen=False, seed="Des fruits complotent sur une île.")
-    m.concepts.run(_ctx(story_store, story_id)[0], runner=FakeRunner(*(c1_reply(k) for k in range(1, 6))))
+    m.concepts.run(_ctx(story_store, story_id)[0], runner=FakeRunner(*(c1_reply(k) for k in range(1, 11))))
     ctx, log = _ctx(story_store, story_id, step="regenerate",
                     params={"target": "concepts", "note": "plus sombre"})
-    runner = FakeRunner(*(c1_reply(k, offset=10) for k in range(1, 6)))
+    runner = FakeRunner(*(c1_reply(k, offset=10) for k in range(1, 11)))
 
     result = m.regenerate.run(ctx, runner=runner)
 
@@ -770,7 +773,7 @@ def test_a_reply_rejected_once_is_asked_for_again_with_the_same_cap(tmp_path):
     value = m.llm_call.call_json(ctx, "B1", *_b1_prompt(), validator=schemas.b1_errors, runner=runner)
 
     assert value == B1_REPLY
-    assert [call["max_tokens"] for call in runner.calls] == [250, 250]
+    assert [call["max_tokens"] for call in runner.calls] == [400, 400]
     assert [call["temperature"] for call in runner.calls] == [0.5, 0.5]
     errors = schemas.b1_errors(INVALID_B1)
     assert len(errors) == 3
@@ -787,7 +790,7 @@ def test_the_accepted_line_names_the_link_the_estimate_and_the_cap(tmp_path):
     m.llm_call.call_json(ctx, "B1", *_b1_prompt(), validator=schemas.b1_errors, runner=runner)
 
     tokens = pacing.estimate_tokens(json.dumps(B1_REPLY, ensure_ascii=False))
-    assert log == [f"✍️ B1 via gemini/gemini-flash-lite-latest ≈{tokens} tokens out (cap 250)"]
+    assert log == [f"✍️ B1 via gemini/gemini-flash-lite-latest ≈{tokens} tokens out (cap 400)"]
 
 
 def test_a_reply_rejected_twice_is_a_step_failure(tmp_path):
@@ -801,7 +804,7 @@ def test_a_reply_rejected_twice_is_a_step_failure(tmp_path):
     errors = schemas.b1_errors(INVALID_B1)
     assert str(caught.value) == f"B1: the reply failed validation twice: {'; '.join(errors)}"
     assert caught.value.reason == f"the reply failed validation twice: {'; '.join(errors)}"
-    assert [call["max_tokens"] for call in runner.calls] == [250, 250]
+    assert [call["max_tokens"] for call in runner.calls] == [400, 400]
     assert not any(line.startswith("✍️") for line in log)
 
 
@@ -915,6 +918,177 @@ def test_a_provider_with_no_key_is_left_out(monkeypatch):
     assert m.llm_call.resolve_keys(None) == {"gemini": "process-gemini"}
 
 
+# ============================================ paid links need allow_paid (DEC-097)
+
+PAID_REASON = "paid link: allow_paid is off (AI Story spends only on opt-in)"
+PAID_SKIP_LINE = ("   ⏭ Skipping openrouter/test-model: paid link, allow_paid is off "
+                  "(AI Story spends only on opt-in).")
+# Test values only: every client below is fake.
+PAID_SETTINGS = {"LLM_CHAIN": "gemini/gemini-test,openrouter/test-model",
+                 "GOOGLE_API_KEY": "test-gemini-key", "OPENROUTER_API_KEY": "test-openrouter-key"}
+
+
+@pytest.mark.parametrize("spec,allow_paid,usable", [
+    ("groq/openai/gpt-oss-120b", "", True),
+    ("gemini/gemini-test", "", True),
+    ("mistral/mistral-small-latest", "", True),
+    ("nvidia/nvidia/nemotron-test", "", True),
+    ("custom/local-model", "", True),
+    ("openrouter/mistralai/mistral-small-3.2-24b-instruct", "", False),
+    ("openrouter/qwen/qwen3.8-27b:free", "", True),
+    ("openrouter/qwen/qwen3.8-27b:free-ish", "", False),
+    ("openrouter/mistralai/mistral-small-3.2-24b-instruct", "1", True),
+    ("openrouter/qwen/qwen3.8-27b:free", "1", True),
+    ("gemini/gemini-test", "1", True),
+])
+def test_story_chain_skips_a_paid_link_only_while_allow_paid_is_off(spec, allow_paid, usable):
+    m = _new()
+    link = registry.parse_spec(spec)
+
+    result = m.llm_call.story_chain({"LLM_CHAIN": spec, "ALLOW_PAID": allow_paid})
+
+    assert result == (([link], []) if usable else ([], [(link, PAID_REASON)]))
+    assert m.llm_call.PAID_SKIP_REASON == PAID_REASON
+
+
+def test_story_chain_keeps_the_order_and_reads_allow_paid_like_the_preview_does(monkeypatch):
+    m = _new()
+    default = registry.parse_chain(registry.DEFAULT_LLM_CHAIN)
+    paid = [link for link in default if link.provider == "openrouter"]
+
+    assert m.llm_call.story_chain({}) == ([link for link in default if link not in paid],
+                                          [(link, PAID_REASON) for link in paid])
+    # The process env counts when Settings do not name it; a Settings value
+    # replaces it, an empty one turns it off (gating.merged_env).
+    monkeypatch.setenv("ALLOW_PAID", "1")
+    assert m.llm_call.story_chain({}) == (default, [])
+    assert m.llm_call.story_chain({"ALLOW_PAID": ""})[1] == [(link, PAID_REASON) for link in paid]
+    with pytest.raises(ValueError, match="DAILY_CAP_USD"):
+        m.llm_call.story_chain({"DAILY_CAP_USD": "lots"})
+
+
+def _gemini_down_openrouter_up(contents):
+    """A ``client_factory`` for the real ``run_chain``: every gemini request
+    raises, openrouter answers *contents* in order. Records each client built."""
+    queue = list(contents)
+    constructed = []
+    seen = []
+
+    class Completions:
+        def __init__(self, provider):
+            self.provider = provider
+
+        def create(self, **kwargs):
+            seen.append(self.provider)
+            if self.provider == "gemini":
+                raise RuntimeError("gemini outage")
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content=queue.pop(0)))],
+                usage=SimpleNamespace(total_tokens=120),
+            )
+
+    def factory(link, **kwargs):
+        constructed.append(link.provider)
+        return SimpleNamespace(chat=SimpleNamespace(completions=Completions(link.provider)))
+
+    factory.constructed = constructed
+    factory.seen = seen
+    return factory
+
+
+def test_with_allow_paid_off_the_paid_link_is_never_built_and_the_failure_names_it(story_store):
+    """The live failure of 2026-09-26, replayed: gemini fails every call and
+    the chain would fall through to the paid OpenRouter link."""
+    m = _new()
+    story_id = _story(story_store)
+    ctx, log = _ctx(story_store, story_id, settings_env=dict(PAID_SETTINGS, ALLOW_PAID=""))
+    factory = _gemini_down_openrouter_up([json.dumps(c1_reply(k), ensure_ascii=False) for k in range(1, 11)])
+    runner = functools.partial(llm.run_chain, client_factory=factory, sleep_fn=_no_sleep)
+
+    with pytest.raises(steps.StepFailed) as caught:
+        m.concepts.run(ctx, runner=runner)
+
+    assert factory.constructed == ["gemini"] * 10
+    assert factory.seen == ["gemini"] * 10
+    assert log.count(PAID_SKIP_LINE) == 10
+    assert log.index(PAID_SKIP_LINE) < log.index("   🔁 gemini/gemini-test attempt 1/3...")
+    message = str(caught.value)
+    assert message.startswith("No concept was generated: every C1 call failed (call 1/10: ")
+    assert message.count(f"openrouter/test-model not tried: {PAID_REASON}") == 10
+    assert story_store.read_doc(story_id, "concepts.json") is None
+
+
+def test_with_allow_paid_on_the_paid_link_is_called(story_store):
+    m = _new()
+    story_id = _story(story_store)
+    ctx, log = _ctx(story_store, story_id, settings_env=dict(PAID_SETTINGS, ALLOW_PAID="1"))
+    factory = _gemini_down_openrouter_up([json.dumps(c1_reply(k), ensure_ascii=False) for k in range(1, 11)])
+    runner = functools.partial(llm.run_chain, client_factory=factory, sleep_fn=_no_sleep)
+
+    summary = m.concepts.run(ctx, runner=runner)
+
+    assert summary["generated"] == 10
+    assert factory.constructed.count("openrouter") == 10
+    assert sum(line.startswith("✍️ C1 via openrouter/test-model ≈") for line in log) == 10
+    assert not any("allow_paid is off" in line for line in log)
+
+
+def test_the_chain_handed_to_run_chain_leaves_the_paid_link_out(tmp_path):
+    m = _new()
+    ctx, log = _bare_ctx(tmp_path, settings_env=dict(PAID_SETTINGS))
+    runner = FakeRunner(INVALID_B1, B1_REPLY)
+
+    m.llm_call.call_json(ctx, "B1", *_b1_prompt(), validator=schemas.b1_errors, runner=runner)
+
+    assert [call["chain"] for call in runner.calls] == [[LINK], [LINK]]
+    assert runner.calls[0]["keys"] == {"gemini": "test-gemini-key", "openrouter": "test-openrouter-key"}
+    # Printed before each chain run, as the chain prints its own hops.
+    assert log.count(PAID_SKIP_LINE) == 2 and log[0] == PAID_SKIP_LINE
+
+
+def test_a_chain_whose_only_keyed_link_is_paid_sends_nothing_and_says_what_to_set(tmp_path):
+    m = _new()
+    settings = {"LLM_CHAIN": "gemini/gemini-test,openrouter/test-model", "OPENROUTER_API_KEY": "test-openrouter-key"}
+    ctx, log = _bare_ctx(tmp_path, settings_env=settings)
+    runner = FakeRunner(B1_REPLY)
+
+    with pytest.raises(steps.StepFailed) as caught:
+        m.llm_call.call_json(ctx, "B1", *_b1_prompt(), validator=schemas.b1_errors, runner=runner)
+
+    assert runner.calls == []
+    assert log == [PAID_SKIP_LINE]
+    assert str(caught.value) == (
+        "B1: The only keyed link of the LLM chain is paid (openrouter/test-model), and allow_paid is "
+        "off: AI Story spends only on opt-in. Set the key of a free link, one of: "
+        "GOOGLE_API_KEY (https://aistudio.google.com/apikey); or turn allow_paid on to use it."
+    )
+
+
+def test_a_chain_with_no_free_link_names_one_to_add(tmp_path):
+    m = _new()
+    settings = {"LLM_CHAIN": "openrouter/test-model", "OPENROUTER_API_KEY": "test-openrouter-key"}
+    ctx, _ = _bare_ctx(tmp_path, settings_env=settings)
+    runner = FakeRunner(B1_REPLY)
+
+    with pytest.raises(steps.StepFailed) as caught:
+        m.llm_call.call_json(ctx, "B1", *_b1_prompt(), validator=schemas.b1_errors, runner=runner)
+
+    assert runner.calls == []
+    assert caught.value.reason.endswith(
+        "LLM_CHAIN has no free link: add one, e.g. gemini/gemini-3.5-flash-lite with GOOGLE_API_KEY; "
+        "or turn allow_paid on to use it.")
+
+
+def test_budget_settings_that_cannot_be_read_send_nothing(tmp_path):
+    m = _new()
+    ctx, _ = _bare_ctx(tmp_path, settings_env=dict(SETTINGS, PER_STORY_CAP_USD="ten"))
+    runner = FakeRunner(B1_REPLY)
+
+    with pytest.raises(steps.StepFailed, match="B1: The budget settings cannot be used: PER_STORY_CAP_USD"):
+        m.llm_call.call_json(ctx, "B1", *_b1_prompt(), validator=schemas.b1_errors, runner=runner)
+    assert runner.calls == []
+
+
 # ================================================================ registry
 
 def test_the_phase_1_steps_are_registered():
@@ -962,15 +1136,15 @@ def test_the_registry_runs_concepts_through_the_real_chain_by_default(story_stor
     call is made -- here the real one, with a fake client behind it."""
     story_id = _story(story_store)
     ctx, log = _ctx(story_store, story_id)
-    factory = responder([json.dumps(c1_reply(k), ensure_ascii=False) for k in range(1, 6)])
+    factory = responder([json.dumps(c1_reply(k), ensure_ascii=False) for k in range(1, 11)])
     monkeypatch.setattr(llm, "run_chain", functools.partial(llm.run_chain, client_factory=factory,
                                                             sleep_fn=_no_sleep))
 
     summary = steps.run("concepts", ctx)
 
     assert summary["generated"] == 10
-    assert factory.constructed == ["gemini"] * 5
-    assert [body["max_tokens"] for _, body in factory.seen] == [500] * 5
-    assert log.count("   🔁 gemini/gemini-test attempt 1/3...") == 5
+    assert factory.constructed == ["gemini"] * 10
+    assert [body["max_tokens"] for _, body in factory.seen] == [700] * 10
+    assert log.count("   🔁 gemini/gemini-test attempt 1/3...") == 10
     doc = story_store.read_doc(story_id, "concepts.json")
     assert [card["title"] for card in doc["concepts"]] == [f"Titre {n}" for n in range(1, 11)]

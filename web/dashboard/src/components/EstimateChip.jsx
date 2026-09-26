@@ -7,7 +7,7 @@ function formatUsd(value) {
   return amount === 0 ? '0.00' : amount.toFixed(3)
 }
 
-/** "5 LLM calls" / "1 LLM call" / "3 images" / "1 image", from the estimate's `units`. */
+/** "10 LLM calls" / "1 LLM call" / "3 images" / "1 image", from the estimate's `units`. */
 export function unitsLabel(units) {
   if (!units) return ''
   if (units.llm_calls != null) {
@@ -23,7 +23,7 @@ export function unitsLabel(units) {
 }
 
 /**
- * One compact chip: "est. $0.00 · 5 LLM calls". Warn styled when the step is
+ * One compact chip: "est. $0.00 · 10 LLM calls". Warn styled when the step is
  * not ready to run (the key gate refuses it, `estimate.ready === false`);
  * `estimate.message` explains why, as the chip's title. A neutral
  * "estimating…" placeholder covers the gap before the estimate arrives.

@@ -100,7 +100,7 @@ def api(monkeypatch, tmp_path):
 
     for _name, (_attr, env_name) in PROVIDER_KEYS.items():
         monkeypatch.delenv(env_name, raising=False)
-    for name in ("LLM_CHAIN", "ALLOW_SLOW_CHAIN", "MAX_QUEUED_JOBS"):
+    for name in ("LLM_CHAIN", "ALLOW_SLOW_CHAIN", "MAX_QUEUED_JOBS", "ALLOW_PAID"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("WEB_SETTINGS_FILE", str(tmp_path / "settings.json"))
     monkeypatch.setattr(worker, "_settings_env", dict(LLM_SETTINGS))
@@ -242,12 +242,12 @@ def _c1_concept(title, style_fit="fruit_drama"):
     }
 
 
-def _c1_reply(batch):
-    first = 2 * batch - 1
-    return {"concepts": [_c1_concept(f"Titre {first}"), _c1_concept(f"Titre {first + 1}", "anime")]}
+def _c1_reply(call):
+    """Call *call*'s one concept: "Titre <call>", every other one anime."""
+    return {"concepts": [_c1_concept(f"Titre {call}", "anime" if call % 2 == 0 else "fruit_drama")]}
 
 
-C1_REPLIES = [_c1_reply(k) for k in range(1, 6)]
+C1_REPLIES = [_c1_reply(k) for k in range(1, 11)]
 
 
 # ============================================================ the whole path
@@ -1010,7 +1010,7 @@ def test_the_estimate_of_each_phase_one_step(api):
     url = f"/api/stories/{story_id}/estimate"
     link = {"link": "gemini/gemini-test", "keyed": True, "free": True}
 
-    for step, calls in (("concepts", 5), ("bible", 3), ("regenerate", 1)):
+    for step, calls in (("concepts", 10), ("bible", 3), ("regenerate", 1)):
         body = api.client.get(f"{url}/{step}").json()
         assert body == {
             "step": step, "est_usd": 0.0, "units": {"llm_calls": calls}, "route_class": "free",
@@ -1018,7 +1018,7 @@ def test_the_estimate_of_each_phase_one_step(api):
         }
         assert "gemini/gemini-test" in body["message"]
 
-    assert api.client.get(f"{url}/regenerate", params={"target": "concepts"}).json()["units"] == {"llm_calls": 5}
+    assert api.client.get(f"{url}/regenerate", params={"target": "concepts"}).json()["units"] == {"llm_calls": 10}
     assert api.client.get(f"{url}/regenerate", params={"target": "bible:tone"}).json()["units"] == {"llm_calls": 1}
     assert api.client.get(f"{url}/regenerate", params={"target": "shot:1:sh01"}).status_code == 400
 
@@ -1047,8 +1047,9 @@ def test_the_first_keyed_link_decides_free_or_paid(api):
     story_id = _create(api)["story_id"]
     url = f"/api/stories/{story_id}/estimate/concepts"
 
+    # A paid link is used only with allow_paid on (the paid-off case: below).
     _settings(api, {"LLM_CHAIN": "gemini/gemini-test,openrouter/test-model",
-                    "OPENROUTER_API_KEY": "test-openrouter-key"})
+                    "OPENROUTER_API_KEY": "test-openrouter-key", "ALLOW_PAID": "1"})
     body = api.client.get(url).json()
     assert (body["route_class"], body["link"], body["ready"]) == ("paid", "openrouter/test-model", True)
     assert body["links"][0] == {"link": "gemini/gemini-test", "keyed": False, "free": True}
@@ -1068,6 +1069,100 @@ def test_an_estimate_on_the_slow_floor_is_not_ready(api):
 
     assert body["route_class"] == "free" and body["link"].startswith("nvidia/")
     assert body["ready"] is False and "GROQ_API_KEY" in body["message"]
+
+
+# ============================================ paid links need allow_paid (DEC-097)
+
+PAID_REASON = "paid link: allow_paid is off (AI Story spends only on opt-in)"
+# Test values only: nothing is called.
+OPENROUTER_ONLY = {"LLM_CHAIN": "gemini/gemini-test,openrouter/test-model",
+                   "OPENROUTER_API_KEY": "test-openrouter-key"}
+
+
+@pytest.mark.parametrize("path,body", [
+    ("concepts/generate", None),
+    ("steps/concepts", {}),
+    ("steps/bible", {}),
+    ("regenerate", {"target": "bible:tone"}),
+    ("regenerate", {"target": "concepts"}),
+])
+def test_a_chain_keyed_only_on_a_paid_link_is_refused_while_allow_paid_is_off(api, path, body):
+    story_id = _chosen(api)
+    _settings(api, dict(OPENROUTER_ONLY, ALLOW_PAID=""))
+
+    response = api.client.post(f"/api/stories/{story_id}/{path}", json=body)
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == (
+        "The only keyed link of the LLM chain is paid (openrouter/test-model), and allow_paid is "
+        "off: AI Story spends only on opt-in. Set the key of a free link, one of: "
+        "GOOGLE_API_KEY (https://aistudio.google.com/apikey), in Settings; or turn allow_paid on to use it."
+    )
+    assert api.jobs.list_jobs() == [] and api.submitted == []
+
+
+def test_the_same_chain_runs_once_allow_paid_is_on(api):
+    story_id = _chosen(api)
+    _settings(api, dict(OPENROUTER_ONLY, ALLOW_PAID="1"))
+
+    assert api.client.post(f"/api/stories/{story_id}/concepts/generate").status_code == 201
+
+
+def test_an_openrouter_free_model_is_a_free_link(api):
+    story_id = _create(api)["story_id"]
+    _settings(api, {"LLM_CHAIN": "openrouter/qwen/qwen3.8-27b:free", "OPENROUTER_API_KEY": "test-openrouter-key"})
+
+    body = api.client.get(f"/api/stories/{story_id}/estimate/concepts").json()
+
+    assert (body["route_class"], body["link"], body["ready"]) == ("free", "openrouter/qwen/qwen3.8-27b:free", True)
+    assert body["links"] == [{"link": "openrouter/qwen/qwen3.8-27b:free", "keyed": True, "free": True}]
+    assert api.client.post(f"/api/stories/{story_id}/concepts/generate").status_code == 201
+
+
+def test_the_estimate_marks_the_skipped_paid_link_and_is_blocked_without_a_free_one(api):
+    story_id = _create(api)["story_id"]
+    _settings(api, OPENROUTER_ONLY)
+
+    body = api.client.get(f"/api/stories/{story_id}/estimate/concepts").json()
+
+    assert (body["route_class"], body["link"], body["ready"]) == ("blocked", None, False)
+    assert body["links"] == [
+        {"link": "gemini/gemini-test", "keyed": False, "free": True},
+        {"link": "openrouter/test-model", "keyed": True, "free": False, "skipped": PAID_REASON},
+    ]
+    assert body["message"] == api.client.post(f"/api/stories/{story_id}/concepts/generate").json()["detail"]
+
+
+def test_the_estimate_runs_on_the_free_link_and_says_the_paid_one_is_not_used(api):
+    story_id = _create(api)["story_id"]
+    _settings(api, dict(OPENROUTER_ONLY, GOOGLE_API_KEY="test-gemini-key"))
+
+    body = api.client.get(f"/api/stories/{story_id}/estimate/concepts").json()
+
+    assert (body["route_class"], body["link"], body["ready"]) == ("free", "gemini/gemini-test", True)
+    assert body["links"][1] == {"link": "openrouter/test-model", "keyed": True, "free": False,
+                                "skipped": PAID_REASON}
+    assert body["message"] == (
+        f"10 LLM calls on gemini/gemini-test (free tier). Not used: openrouter/test-model (billed) -- {PAID_REASON}.")
+
+
+def test_a_skipped_paid_primary_can_leave_a_story_step_on_the_slow_floor(api):
+    """The same Settings let a clip job start (its paid primary is keyed); a
+    story step would run on the floor alone, so it meets the DEC-073 rule on
+    the links it really uses."""
+    story_id = _create(api)["story_id"]
+    _settings(api, {"OPENROUTER_API_KEY": "test-openrouter-key", "NVIDIA_API_KEY": "test-nvidia-key"})
+
+    response = api.client.post(f"/api/stories/{story_id}/concepts/generate")
+
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert "GROQ_API_KEY" in detail and "OPENROUTER_API_KEY" not in detail
+    assert detail.endswith(f"(Not used by AI Story: openrouter/mistralai/mistral-small-3.2-24b-instruct, {PAID_REASON}.)")
+    assert api.jobs.list_jobs() == [] and api.submitted == []
+    # A clip job on the same Settings is not affected: it starts.
+    clip = api.client.post("/api/jobs", json={"upload_filename": "talk.mp4"})
+    assert clip.status_code == 201, clip.text
 
 
 def test_the_story_page_lists_its_jobs_without_their_feeds(api):

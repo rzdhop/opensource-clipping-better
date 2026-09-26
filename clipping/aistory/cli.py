@@ -19,8 +19,10 @@ Keys and ``LLM_CHAIN`` come from the process environment, and from the
 ``.env`` file ``clipping.config`` loads for the clip CLI -- never from the
 dashboard's Settings: this module does not import ``web/`` (fastapi need not
 be installed). Before an LLM step the API's key gate applies: no keyed link
-in the chain, or the DEC-073 slow floor alone (unless ``--allow-slow-chain``
-or ``ALLOW_SLOW_CHAIN=1``), is refused before anything is called.
+in the chain, only paid keyed links while ``ALLOW_PAID`` is off (a story step
+never calls a paid LLM link without it), or the DEC-073 slow floor alone
+(unless ``--allow-slow-chain`` or ``ALLOW_SLOW_CHAIN=1``), is refused before
+anything is called.
 
 Exit codes: 0 done; 1 refused or failed (the reason on stderr); 2 a usage
 error (argparse's, or an option given to a step it does not apply to); 130
@@ -226,7 +228,9 @@ def parse_overrides(items) -> dict:
 
 def _llm_refusal(allow_slow_chain) -> str | None:
     """The API's key gate for an LLM step, from the process environment: no
-    keyed link (naming the keys to set), or the DEC-073 slow floor alone."""
+    keyed link (naming the keys to set), only paid keyed links while
+    ``ALLOW_PAID`` is off (naming them and the free keys to set), or the
+    DEC-073 slow floor alone."""
     from clipping import config
 
     allow_slow = allow_slow_chain or _env_flag("ALLOW_SLOW_CHAIN")

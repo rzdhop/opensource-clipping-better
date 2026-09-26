@@ -1,6 +1,6 @@
 ## IN PROGRESS — AI Story **phase 1** (story workspace, concepts, bible, style lock)
 - **Started:** 2026-09-26 by the human ("Start phase One"). Task class: FULL.
-- **Current phase:** 6 TEST — Tier-2 in progress (stages 0–11 done, merged ff to `main` at `d3d05f4`, deployed 16:2x UTC). **Waiting for the human's phone walk** (script below). Plan **approved in chat** ("Go", 2026-09-26).
+- **Current phase:** 6 TEST — **Tier-2 FAILED at step 2, fix attempt 1 of 2 in progress** on `feat/ai-story-phase-1` (worktree). Stages 0–11 merged ff to `main` (`d3d05f4`, + artifacts `289e4e9`), deployed, **not pushed**. The human said "if it's good, push merge, we'll start phase 2" without doing the phone walk; I ran the script myself in the built-in browser at 375 px and it failed (see step h). Next: finish the fix (C1 1/call × 10 at cap 650; bible caps 350/400/300; story steps skip paid LLM links unless allow_paid), Tier-1, ff main, restart backend (Python only), re-run the Tier-2 script, then stage 13 docs + decisions, then push (the human asked for it). Plan **approved in chat** ("Go", 2026-09-26).
   CLARIFY closed: C1 = 2 cards × 5 calls; steps with no external call run
   inline (no job); route choice per story only (Settings selector → phase 2);
   Tier-2 phone walk by the human on their own phone.
@@ -35,7 +35,7 @@ startup restored 4 saved settings. Before: `data/usage.json` sha256 `babfee13…
 | e | `usage.json` byte-identical after the LLM calls; no `spend.json`, no `chain_test_ledger.json` | **PASS** |
 | f | RC-P1: `/clips/job/b37b36a9b34e` at 375 px no overflow, 7 videos, `highlight_rank_1_ready.mp4` loads (duration 44.9 s, range 206 video/mp4); playback not observable (the browser pane was hidden) → on the phone checklist | **PASS (serving)** |
 | g | 375/820/1280, pre-deploy on a keyless throwaway backend: no overflow on /story, /story/new, three wizard states, /clips, /settings; create/choose/approve/save/lock work; 5 UX findings fixed and re-checked | **PASS** |
-| h | **Human, on the phone**: FR story → Generate 10 more → pick `tentafruit_island` → write bible → regenerate one field with a note → approve → `fruit_drama`, change one accent, save → (optional) preview → approve & lock; play one clip of `b37b36a9b34e` | **PENDING** |
+| h | FR story → Generate 10 more → pick `tentafruit_island` → write bible → regenerate one field with a note → approve → `fruit_drama`, change one accent, save → preview → approve & lock. Not walked by the human ("if it's good, push"); run by me in the built-in browser at 375 px | **FAILED at Generate 10 more**: every C1 reply truncated at the 500-token cap (2 French cards need ~1,000), 3 Gemini attempts, then 1 attempt on the **paid** OpenRouter link (~$0.0001, untracked) before I cancelled job `8650b2350c2b`. Story `b1104ec66b05` (FR, draft) kept for the re-run |
 Known before the walk: keyless Pollinations allows about one image per IP per hour, so the preview may honestly show 1/3. OpenRouter (paid default model) is keyed and third in the chain: a Gemini failure falls through to it, as for clip jobs (DEC-088).
 
 ### Regression contract (phase 1)
@@ -62,7 +62,7 @@ Phase 0's RC-P1…RC-P11 (history table below) stay in force, plus:
 | 9 | CLI (+ shared `workflow.py` so API and CLI apply one set of rules) | **done** (local 2778 / CI 2313 + 435 skipped) |
 | 10 | dashboard shared pieces | **done** (local 2792 / CI 2327 + 435 skipped; build green) |
 | 11 | StoriesList + NewStoryWizard (+ `GET /api/stories/styles`) | **done** (local 2807 / CI 2339 + 438 skipped; build green; 375/820/1280 checked) |
-| 12 | merge, deploy, Tier-2 (human on phone) | **in progress**: merged + deployed; my backend checks pass; phone walk pending |
+| 12 | merge, deploy, Tier-2 | **in progress**: deployed; Tier-2 step h FAILED; fix attempt 1 running |
 | 13 | docs + decisions | — |
 
 ---

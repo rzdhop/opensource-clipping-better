@@ -12,11 +12,14 @@ golden builder is expected to fail its golden test.
 from __future__ import annotations
 
 import inspect
+import json
+import re
 
 import pytest
 
 from clipping.analysis import analyzer
 from clipping.aistory import context, prompts, schemas, templates
+from clipping.providers.pacing import estimate_tokens
 
 STYLE_IDS = templates.list_style_ids()
 FRUIT_DRAMA = templates.load_style("fruit_drama")
@@ -44,7 +47,7 @@ def test_build_c1_golden_fr_fruit_drama():
         ),
         avoid_titles=["L'Île Tentafruit", "Le Verger de l'Héritage"],
     )
-    system, user, schema = prompts.build_c1(pack, style_ids=STYLE_IDS, batch=2, of=5)
+    system, user, schema = prompts.build_c1(pack, style_ids=STYLE_IDS, batch=3, of=10)
 
     expected_system = (
         "You are the head writer of a serialized vertical-video fiction "
@@ -64,9 +67,9 @@ def test_build_c1_golden_fr_fruit_drama():
         "sur une ile de téléréalité et complote sans cesse.\n\n"
         "Do not repeat or closely imitate these existing titles: L'Île "
         "Tentafruit, Le Verger de l'Héritage\n\n"
-        "Invent exactly 2 original concepts for a new serialized "
-        "vertical-video fiction series (batch 2 of 5).\n\n"
-        "For each concept give:\n"
+        "Invent exactly 1 original concept for a new serialized "
+        "vertical-video fiction series (call 3 of 10).\n\n"
+        "Give:\n"
         "- title: at most 8 words\n"
         "- logline: one sentence, at most 30 words\n"
         "- world: the setting and premise, at most 60 words\n"
@@ -80,8 +83,7 @@ def test_build_c1_golden_fr_fruit_drama():
         "- style_fit: the visual style that best fits this concept, one "
         "of anime, cartoon_flat, cinematic_real, claymation, family_3d, "
         "fruit_drama, storybook_watercolor\n\n"
-        "The two concepts must differ from each other in world, cast and "
-        "tone. Never use real people, brands, studio names or copyrighted "
+        "Never use real people, brands, studio names or copyrighted "
         "characters."
     )
 
@@ -253,17 +255,22 @@ def test_c1_instructions_are_english_only_when_the_pack_carries_no_data():
     pack = context.build_pack(language="fr")
     _, user, _ = prompts.build_c1(pack, style_ids=STYLE_IDS, batch=1, of=1)
     assert user.isascii()
-    assert "Invent exactly 2 original concepts" in user
+    assert "Invent exactly 1 original concept " in user
 
 
 # --------------------------------------------------------- caps and versions
 
 def test_prompt_version():
-    assert prompts.PROMPT_VERSION == "s1"
+    assert prompts.PROMPT_VERSION == "s2"
 
 
 def test_max_tokens():
-    assert prompts.MAX_TOKENS == {"C1": 500, "B1": 250, "B2": 250, "B3": 200}
+    assert prompts.MAX_TOKENS == {"C1": 700, "B1": 400, "B2": 520, "B3": 300}
+
+
+def test_generate_ten_is_ten_calls_of_one_concept():
+    assert (prompts.C1_CALLS, prompts.C1_CONCEPTS_PER_CALL, schemas.C1_CONCEPTS_PER_CALL) == (10, 1, 1)
+    assert schemas.c1_schema(STYLE_IDS)["properties"]["concepts"]["description"] == "exactly 1 concept(s)"
 
 
 def test_temperatures_are_the_analyzers_own_objects():
@@ -616,7 +623,7 @@ def _good_c1_doc():
             "retention_mechanics": "A weekly vote.",
             "style_fit": style_fit,
         }
-    return {"concepts": [one_concept("Title One", "fruit_drama"), one_concept("Title Two", "anime")]}
+    return {"concepts": [one_concept("Title One", "fruit_drama")]}
 
 
 def test_c1_errors_good_fixture_passes():
@@ -627,6 +634,7 @@ def test_c1_errors_good_fixture_passes():
     "mutate, mentions",
     [
         (lambda d: d["concepts"].pop(), "concepts"),
+        (lambda d: d["concepts"].append(dict(d["concepts"][0], title="Title Two")), "concepts"),
         (lambda d: d["concepts"][0].__setitem__("title", " ".join(f"w{i}" for i in range(9))), "title"),
         (lambda d: d["concepts"][0].__setitem__("logline", " ".join(f"w{i}" for i in range(31))), "logline"),
         (lambda d: d["concepts"][0].__setitem__("world", " ".join(f"w{i}" for i in range(61))), "world"),
@@ -754,3 +762,197 @@ def test_post_validators_report_missing_key_via_schema_validate():
     del doc["tone"]
     errors = schemas.b1_errors(doc)
     assert any("tone" in e and "required" in e for e in errors)
+
+
+# ============================================================ truncation guard
+#
+# 2026-09-26, live: every C1 reply to "Generate 10 more" on a French story was
+# cut off mid-JSON at the 500-token cap (two full French cards need ~900-1,100
+# output tokens), and the chain fell through to a paid link. The fakes of the
+# step tests answered complete JSON, so nothing caught it. This does: for each
+# prompt, the largest reply the prompt allows -- realistic French prose with
+# every field that has a stated word limit exactly AT that limit, and the
+# largest count of every list -- must fit the prompt's cap.
+
+# French tokenises at ~1.3x the chars/4 estimate (pacing.estimate_tokens) on
+# Gemini: it runs ~1.3x longer than the same English, and chars/4 is an English
+# rule of thumb. The reply is measured the way call_json's ✍️ line measures it.
+FRENCH_TOKEN_FACTOR = 1.3
+
+# One French card. The fields with a stated limit sit exactly at it; the ones
+# the prompt gives no limit (hook_formula, value, retention_mechanics, names)
+# are sized like the shipped library's French cards (hooks run 12-32 words,
+# values 5-17, retention lines 11-21).
+_FR_CONCEPT = {
+    "title": "La Nuit Où le Verger Perdit la Mémoire",
+    "logline": (
+        "Quand une pomme amnésique se réveille dans le verger rival, elle doit découvrir qui "
+        "l'a trahie avant la grande récolte, sans savoir quels fruits mentent ni pourquoi tous "
+        "la craignent."
+    ),
+    "world": (
+        "Deux vergers ennemis se partagent une vallée où les fruits parlent, votent et se marient, "
+        "mais oublient tout à chaque récolte. Seuls les noyaux gardent la mémoire, cachés sous les "
+        "racines du vieux cerisier. Quiconque en avale un retrouve ses souvenirs et découvre aussi "
+        "ceux des autres, ce qui rend chaque secret dangereux, chaque alliance fragile et chaque "
+        "récolte terrifiante."
+    ),
+    "cast_sketch": [
+        {"name": "Reinette", "role": "lead", "one_line": (
+            "Pomme amnésique et têtue, elle se réveille couverte d'une sève inconnue et refuse de "
+            "croire quiconque tant qu'elle n'a pas retrouvé son propre noyau enfoui.")},
+        {"name": "Griotte", "role": "lead", "one_line": (
+            "Cerise du verger rival, charmeuse et pressée, elle prétend être la meilleure amie de "
+            "Reinette mais cache le noyau qui prouverait le contraire depuis longtemps.")},
+        {"name": "Le Vieux Cerisier", "role": "recurring", "one_line": (
+            "Arbre millénaire qui garde les noyaux sous ses racines, il parle en énigmes et "
+            "n'aide jamais deux fois le même fruit pendant une seule saison.")},
+        {"name": "Poiron", "role": "support", "one_line": (
+            "Poire maladroite et sincère, il suit Reinette partout, note tout dans un carnet et se "
+            "souvient de détails que tout le monde voudrait enfin oublier.")},
+        {"name": "Madame Coing", "role": "guest", "one_line": (
+            "Juge redoutée de la récolte, elle décide quels fruits restent sur l'arbre et semble "
+            "savoir exactement ce que Reinette a fait pendant la saison dernière.")},
+    ],
+    "hook_formula": (
+        "Chaque épisode s'ouvre sur un noyau avalé en gros plan, puis un souvenir volé qui "
+        "contredit tout ce qu'on croyait."
+    ),
+    "value": "Ce qu'on devient quand on oublie qui on a blessé.",
+    "retention_mechanics": "Chaque noyau révèle un secret, et le public parie sur le prochain traître.",
+    "style_fit": "fruit_drama",
+}
+
+_FR_B1 = {
+    "logline": _FR_CONCEPT["logline"],
+    "premise": (
+        "Reinette se réveille un matin sous le vieux cerisier du verger rival, couverte d'une sève "
+        "qui n'est pas la sienne et incapable de se rappeler la veille. Tout le monde semble la "
+        "connaître, mais personne ne raconte la même chose sur ce qu'elle a fait cette nuit-là. "
+        "Griotte se présente comme sa meilleure amie et l'aide à chercher son noyau, la seule "
+        "mémoire que la récolte n'efface jamais. Chaque noyau avalé rend un souvenir, mais aussi un "
+        "secret qui appartient à quelqu'un d'autre. Plus Reinette se souvient, plus elle comprend "
+        "que la trahison qu'elle cherche est peut-être la sienne. La récolte arrive dans sept jours, "
+        "Madame Coing a déjà choisi son coupable, et personne ne compte la laisser parler avant."
+    ),
+    "tone": ("mélodramatique et rapide, plein de trahisons, de faux souvenirs et d'un humour noir "
+             "parfaitement assumé"),
+    "genre_tags": ["mystère très sombre", "comédie noire fruitée", "soap de verger",
+                   "thriller de l'amnésie", "drame de récolte"],
+}
+
+_FR_B2 = {
+    "setting_summary": (
+        "Une vallée partagée entre deux vergers ennemis, séparés par une rivière de sirop que "
+        "personne ne traverse sans y laisser quelque chose de précieux. Les fruits y vivent comme "
+        "des familles, votent, se marient et se jalousent, mais la grande récolte efface leurs "
+        "souvenirs à chaque saison. Sous les racines du vieux cerisier, des milliers de noyaux "
+        "gardent ce que la vallée a oublié, et ceux qui les avalent découvrent des vérités que "
+        "personne ne voulait revoir en plein jour."
+    ),
+    "rules": [
+        ("Les fruits oublient tout à chaque récolte, sauf ce qui reste enfermé dans leur propre "
+         "noyau, caché sous les racines du vieux cerisier millénaire, loin."),
+        ("Avaler le noyau d'un autre fruit donne tous ses souvenirs, mais laisse sur la peau une "
+         "tache de sève que tout le monde peut voir."),
+        ("Personne ne traverse la rivière de sirop sans perdre un souvenir, choisi au hasard par "
+         "le courant qui passe sous le vieux pont ce jour-là."),
+        ("Madame Coing décide seule quels fruits restent sur l'arbre, et sa décision ne peut "
+         "jamais être contestée en public, même par les deux vergers réunis."),
+        ("Un fruit tombé de l'arbre avant la récolte perd son nom et devient un étranger pour tout "
+         "le verger jusqu'au retour du printemps, sans exception."),
+        ("Le vieux cerisier répond à une seule question par fruit et par saison, toujours sous la "
+         "forme d'une énigme très obscure et souvent très cruelle."),
+    ],
+    "time_period": "une saison de récolte, sept jours",
+    "recurring_motifs": ["le noyau avalé en gros plan", "la tache de sève qui trahit",
+                         "la cloche de la récolte"],
+}
+
+_FR_B3 = {
+    "themes_and_values": [
+        "ce qu'on devient vraiment quand on oublie qui on a blessé hier",
+        "la loyauté mise à l'épreuve par des souvenirs volés à nos proches",
+        "le pardon a-t-il encore un sens sans la mémoire de la faute",
+        "la vérité qu'on cherche est parfois celle qu'on fuyait depuis toujours, hélas",
+    ],
+    "audience": {"age": "13+", "platforms": ["tiktok", "shorts", "reels"]},
+    "why_come_back": [
+        ("Chaque épisode révèle un souvenir volé qui retourne une alliance que le public croyait "
+         "solide et sincère depuis des semaines."),
+        ("La récolte approche et tout le public parie en commentaires sur le fruit qui a vraiment "
+         "trahi Reinette cette nuit-là."),
+        ("Le vieux cerisier ne répond qu'une fois par saison, et sa prochaine énigme peut tout "
+         "changer d'un coup pour Reinette."),
+    ],
+}
+
+
+def _words(text):
+    return len(text.split())
+
+
+def _c1_concepts_asked_for():
+    """How many concepts one C1 call asks for, read from the prompt as sent --
+    the reply to measure is the reply to *that* prompt."""
+    _, user, _ = prompts.build_c1(context.build_pack(language="fr"), style_ids=STYLE_IDS, batch=1, of=1)
+    return int(re.search(r"Invent exactly (\d+) original concept", user).group(1))
+
+
+def _largest_french_reply(prompt_id):
+    if prompt_id == "C1":
+        return {"concepts": [_FR_CONCEPT] * _c1_concepts_asked_for()}
+    return {"B1": _FR_B1, "B2": _FR_B2, "B3": _FR_B3}[prompt_id]
+
+
+def test_the_largest_french_replies_are_valid_and_at_every_limit_their_prompt_states():
+    """The fixtures cannot shrink unnoticed: each is accepted by its
+    post-validator, and each limited field sits exactly at the limit the
+    prompt text states."""
+    pack = context.build_pack(language="fr", concept=TENTAFRUIT_FR)
+    _, c1_user, _ = prompts.build_c1(context.build_pack(language="fr"), style_ids=STYLE_IDS, batch=1, of=1)
+    for line in ("- title: at most 8 words", "- logline: one sentence, at most 30 words",
+                 "- world: the setting and premise, at most 60 words", "3 to 5 characters",
+                 "one-line description, at most 25 words"):
+        assert line in c1_user, line
+    assert schemas.c1_errors({"concepts": [_FR_CONCEPT]}, STYLE_IDS) == []
+    assert [_words(_FR_CONCEPT[f]) for f in ("title", "logline", "world")] == [8, 30, 60]
+    assert [_words(m["one_line"]) for m in _FR_CONCEPT["cast_sketch"]] == [25] * 5
+
+    _, b1_user, _ = prompts.build_b1(pack)
+    for line in ("at most 30 words", "2 to 6 sentences, at most 120 words", "tone: at most 15 words",
+                 "2 to 5 tags, each at most 3 words"):
+        assert line in b1_user, line
+    assert schemas.b1_errors(_FR_B1) == []
+    assert (_words(_FR_B1["logline"]), _words(_FR_B1["premise"]), _words(_FR_B1["tone"])) == (30, 120, 15)
+    assert [_words(tag) for tag in _FR_B1["genre_tags"]] == [3] * 5
+
+    _, b2_user, _ = prompts.build_b2(pack)
+    for line in ("setting_summary: at most 80 words", "4 to 6 rules, each at most 25 words",
+                 "time_period: at most 6 words", "exactly 3 motifs"):
+        assert line in b2_user, line
+    assert schemas.b2_errors(_FR_B2) == []
+    assert _words(_FR_B2["setting_summary"]) == 80
+    assert [_words(rule) for rule in _FR_B2["rules"]] == [25] * 6
+    assert (_words(_FR_B2["time_period"]), len(_FR_B2["recurring_motifs"])) == (6, 3)
+
+    _, b3_user, _ = prompts.build_b3(pack)
+    for line in ("2 to 4 themes, each at most 12 words", "1 to 3 platforms",
+                 "exactly 3 lines, each at most 20 words"):
+        assert line in b3_user, line
+    assert schemas.b3_errors(_FR_B3) == []
+    assert [_words(theme) for theme in _FR_B3["themes_and_values"]] == [12] * 4
+    assert [_words(line) for line in _FR_B3["why_come_back"]] == [20] * 3
+    assert len(_FR_B3["audience"]["platforms"]) == 3
+
+
+@pytest.mark.parametrize("prompt_id", ["C1", "B1", "B2", "B3"])
+def test_the_largest_french_reply_fits_its_cap(prompt_id):
+    reply = _largest_french_reply(prompt_id)
+    estimate = estimate_tokens(json.dumps(reply, ensure_ascii=False))
+    needed = estimate * FRENCH_TOKEN_FACTOR
+    cap = prompts.MAX_TOKENS[prompt_id]
+    assert needed <= cap, (
+        f"{prompt_id}: the largest French reply needs ~{needed:.0f} tokens "
+        f"({estimate} by chars/4 x {FRENCH_TOKEN_FACTOR}), over its {cap}-token cap"
+    )

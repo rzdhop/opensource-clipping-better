@@ -654,6 +654,13 @@ def story_bible_errors(doc) -> list:
 
 _CAST_SKETCH_ROLES = ("lead", "support", "recurring", "guest")
 
+# How many concepts one C1 reply carries. One: two French cards need ~900-1,100
+# output tokens and were cut off mid-JSON at the old 500 cap (2026-09-26); one
+# card per call halves what a single reply must fit in ``prompts.MAX_TOKENS``.
+# Defined here, not in ``prompts``, because ``prompts`` imports this module;
+# ``prompts.C1_CONCEPTS_PER_CALL`` is this value.
+C1_CONCEPTS_PER_CALL = 1
+
 
 def _llm_obj(properties, required=None) -> dict:
     """Object schema for a strict-mode LLM call: every property required
@@ -671,7 +678,8 @@ def _llm_obj(properties, required=None) -> dict:
 
 
 def c1_schema(style_ids) -> dict:
-    """The C1 ("2 concepts") output schema (spec 4.2, row C1).
+    """The C1 output schema (spec 4.2, row C1): ``{"concepts": [...]}`` with
+    ``C1_CONCEPTS_PER_CALL`` concept(s) -- the envelope a card is made from.
 
     ``style_fit`` is constrained to *style_ids* (the shipped style templates),
     passed in by the caller so this module needs no import of ``templates``.
@@ -696,7 +704,11 @@ def c1_schema(style_ids) -> dict:
         "style_fit": {"type": "string", "enum": list(style_ids)},
     })
     return _llm_obj({
-        "concepts": {"type": "array", "description": "exactly 2 concepts", "items": concept},
+        "concepts": {
+            "type": "array",
+            "description": f"exactly {C1_CONCEPTS_PER_CALL} concept(s)",
+            "items": concept,
+        },
     })
 
 
@@ -767,8 +779,8 @@ def c1_errors(doc, style_ids) -> list:
 
     errors = []
     concepts = doc["concepts"]
-    if len(concepts) != 2:
-        errors.append(f"$.concepts: {len(concepts)} concept(s), expected exactly 2")
+    if len(concepts) != C1_CONCEPTS_PER_CALL:
+        errors.append(f"$.concepts: {len(concepts)} concept(s), expected exactly {C1_CONCEPTS_PER_CALL}")
 
     allowed_styles = set(style_ids)
     for i, concept in enumerate(concepts):

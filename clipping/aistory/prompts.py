@@ -25,14 +25,26 @@ from . import schemas
 
 # Bumped whenever the wording of a prompt below changes in a way that could
 # change an answer -- same convention as clipping.analysis.prompts.PROMPT_VERSION.
-PROMPT_VERSION = "s1"
+# s2: C1 asks for one concept per call instead of two.
+PROMPT_VERSION = "s2"
 
 # Concepts are the one place the model is asked to be genuinely inventive;
 # everything else in the bible is writing *from* a chosen concept, which
 # wants less randomness so re-rolls stay recognisably the same story.
 IDEATION_TEMPERATURE = 0.9
 
-MAX_TOKENS = {"C1": 500, "B1": 250, "B2": 250, "B3": 200}
+# "Generate 10 more" is C1_CALLS calls of C1_CONCEPTS_PER_CALL concept each.
+# One card per call: on 2026-09-26 every two-card French reply was cut off
+# mid-JSON at the old 500 cap (two full French cards need ~900-1,100 output
+# tokens), and the chain then fell through to a paid link.
+C1_CONCEPTS_PER_CALL = schemas.C1_CONCEPTS_PER_CALL
+C1_CALLS = 10
+
+# Output caps. French runs ~1.3x longer than English: the live English bible
+# used B1 ~133/250, B2 ~223/250, B3 ~111/200, too tight for French at the old
+# caps. The truncation guard of tests/test_story_prompts.py measures each cap
+# against the largest French reply its prompt allows.
+MAX_TOKENS = {"C1": 700, "B1": 400, "B2": 520, "B3": 300}
 TEMPERATURE = {
     "C1": IDEATION_TEMPERATURE,
     "B1": WRITING_TEMPERATURE,
@@ -132,16 +144,20 @@ def _data_block(pack, sections) -> str:
 # ------------------------------------------------------------------- C1
 
 def build_c1(pack, *, style_ids, batch, of):
-    """2 original concepts (spec 4.2, row C1)."""
+    """One original concept (spec 4.2, row C1): call *batch* of *of*.
+
+    The concepts of one "Generate 10 more" differ because each call is sent
+    every title written so far as "do not repeat" (the pack's ``avoid``).
+    """
     style_ids = list(style_ids)
     data_block = _data_block(pack, ("style", "seed", "avoid"))
     styles_list = ", ".join(style_ids)
 
     user = (
         f"{data_block}"
-        "Invent exactly 2 original concepts for a new serialized "
-        f"vertical-video fiction series (batch {batch} of {of}).\n\n"
-        "For each concept give:\n"
+        "Invent exactly 1 original concept for a new serialized "
+        f"vertical-video fiction series (call {batch} of {of}).\n\n"
+        "Give:\n"
         "- title: at most 8 words\n"
         "- logline: one sentence, at most 30 words\n"
         "- world: the setting and premise, at most 60 words\n"
@@ -154,8 +170,7 @@ def build_c1(pack, *, style_ids, batch, of):
         "- retention_mechanics: why someone comes back for episode 2\n"
         f"- style_fit: the visual style that best fits this concept, one of "
         f"{styles_list}\n\n"
-        "The two concepts must differ from each other in world, cast and "
-        "tone. Never use real people, brands, studio names or copyrighted "
+        "Never use real people, brands, studio names or copyrighted "
         "characters."
     )
     return _system(pack), user, schemas.c1_schema(style_ids)

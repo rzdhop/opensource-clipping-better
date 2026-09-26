@@ -89,8 +89,8 @@ def _c1_concept(title, style_fit="fruit_drama"):
 
 
 C1_REPLIES = [
-    {"concepts": [_c1_concept(f"Titre {2 * k - 1}"), _c1_concept(f"Titre {2 * k}", "anime")]}
-    for k in range(1, 6)
+    {"concepts": [_c1_concept(f"Titre {k}", "anime" if k % 2 == 0 else "fruit_drama")]}
+    for k in range(1, 11)
 ]
 
 
@@ -122,7 +122,7 @@ def cli(monkeypatch, tmp_path, capsys):
 
     for _name, (_attr, env_name) in PROVIDER_KEYS.items():
         monkeypatch.delenv(env_name, raising=False)
-    for name in ("LLM_CHAIN", "ALLOW_SLOW_CHAIN"):
+    for name in ("LLM_CHAIN", "ALLOW_SLOW_CHAIN", "ALLOW_PAID"):
         monkeypatch.delenv(name, raising=False)
     outputs = tmp_path / "outputs"
 
@@ -362,6 +362,30 @@ def test_the_slow_chain_switch_in_the_environment_counts_too(cli):
     assert len(runner.calls) == 3
 
 
+def test_a_chain_keyed_only_on_a_paid_link_is_refused_unless_allow_paid_is_set(cli):
+    story_id = _new(cli)
+    cli.monkeypatch.setenv("LLM_CHAIN", "gemini/gemini-test,openrouter/test-model")
+    cli.monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
+    runner = _fake_llm(cli, *BIBLE_REPLIES)
+
+    for step in ("bible", "concepts"):
+        assert cli.run("step", story_id, step) == 1
+        err = cli.capsys.readouterr().err
+        assert err.strip() == (
+            "The only keyed link of the LLM chain is paid (openrouter/test-model), and allow_paid is "
+            "off: AI Story spends only on opt-in. Set the key of a free link, one of: "
+            "GOOGLE_API_KEY (https://aistudio.google.com/apikey), in the environment or in .env; "
+            "or turn allow_paid on to use it."
+        )
+    assert runner.calls == []
+    assert cli.story(story_id)["logline"] is None
+
+    cli.monkeypatch.setenv("ALLOW_PAID", "1")
+    assert cli.run("step", story_id, "bible") == 0
+    assert len(runner.calls) == 3
+    assert runner.calls[0]["chain"] == [Link("gemini", "gemini-test"), Link("openrouter", "test-model")]
+
+
 # ---------------------------------------------------------------- concepts
 
 def test_concepts_run_here_and_a_note_reaches_the_prompt(cli):
@@ -374,7 +398,7 @@ def test_concepts_run_here_and_a_note_reaches_the_prompt(cli):
     doc = json.loads((cli.outputs / "stories" / story_id / "concepts.json").read_text(encoding="utf-8"))
     assert schemas.story_concepts_errors(doc) == []
     assert len(doc["concepts"]) == 10
-    assert len(runner.calls) == 5
+    assert len(runner.calls) == 10
     assert all("plus sombre" in call["user"] for call in runner.calls)
     assert "Generated 10 of 10 concepts." in cli.capsys.readouterr().out
     # Generating concepts approves nothing: a concept is approved by choosing it.

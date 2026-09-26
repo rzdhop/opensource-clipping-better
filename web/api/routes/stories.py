@@ -7,9 +7,11 @@ A story is a folder under ``outputs/stories/<story_id>/`` kept by
 - Steps that call an LLM (``concepts``, ``bible``, ``regenerate``) are jobs of
   kind ``story_step`` on the ordinary job store and worker: they meet the same
   key gate (DEC-073) and queue cap (429) as a clip job before the job exists,
-  and end in ``awaiting_approval``. One step at a time per story: a second one
-  while the first is queued or running is a 409, because both would write the
-  same documents.
+  and end in ``awaiting_approval``. Unlike a clip job they never call a paid
+  LLM link while ``allow_paid`` is off, so a chain whose only keyed links are
+  paid is refused at the same gate (400). One step at a time per story: a
+  second one while the first is queued or running is a 409, because both
+  would write the same documents.
 - Steps with no external call run inside the request (the human's answer 2):
   listing the library, choosing a concept, building and locking the style.
 - Approval lives on the story (``approvals``; ``status`` is derived from it by
@@ -52,6 +54,7 @@ from clipping.aistory import schemas, templates, workflow
 from clipping.aistory import store as story_store
 from clipping.aistory.steps import bible as bible_step
 from clipping.aistory.steps import concepts as concepts_step
+from clipping.aistory.steps import llm_call
 from clipping.aistory.steps import regenerate as regenerate_step
 from clipping.aistory.steps import style_preview as preview_step
 from clipping.providers import registry
@@ -212,18 +215,26 @@ def _complete_awaiting(story_id, doc) -> list:
     return done
 
 
-def _llm_gate(env):
-    """``(links, keys, refusal)`` for a story step under the Settings values
-    *env*: the chain and keys the step will run with (``llm_call``, the same
-    resolution the worker hands it), and why it may not start, or None.
+def _llm_route(env):
+    """``(links, keys, skipped, refusal)`` for a story step under the Settings
+    values *env*: the chain and keys the step will run with (``llm_call``, the
+    same resolution the worker hands it), the paid links it will leave out
+    while ``allow_paid`` is off, and why it may not start, or None.
 
-    Refused (``workflow.llm_gate``): a chain that cannot be parsed (the step
-    would fail on its first call), a chain in which no link has a key, and the
-    DEC-073 slow-floor case -- the rule ``POST /api/jobs`` applies, from the
-    same function.
+    Refused (``workflow.llm_route``): a chain that cannot be parsed (the step
+    would fail on its first call), a chain in which no link has a key, budget
+    settings that cannot be read, a chain whose only keyed links are paid
+    while ``allow_paid`` is off, and the DEC-073 slow-floor case -- the rule
+    ``POST /api/jobs`` applies, from the same function.
     """
-    return workflow.llm_gate(
+    return workflow.llm_route(
         env, readiness=lambda links, _keys: jobs_routes._chain_readiness_refusal(links, env))
+
+
+def _llm_gate(env):
+    """``(links, keys, refusal)``: :func:`_llm_route` without the skipped links."""
+    links, keys, _skipped, refusal = _llm_route(env)
+    return links, keys, refusal
 
 
 async def _create_step_job(story_id, step, params, *, ep=None, gate=None) -> JobResponse:
@@ -676,29 +687,32 @@ async def regenerate(story_id: str, req: StoryRegenerateRequest) -> JobResponse:
 
 def _llm_calls(step, target):
     if step == "concepts":
-        return concepts_step.BATCHES
+        return concepts_step.CALLS
     if step == "bible":
         return len(bible_step.PARTS)
     # regenerate: "concepts" is the concepts step itself; a bible field, one prompt.
     if target == regenerate_step.CONCEPTS_TARGET:
-        return concepts_step.BATCHES
+        return concepts_step.CALLS
     return 1
 
 
 def _estimate_message(rows, calls, refusal) -> str:
     if refusal:
         return refusal
-    keyed = [row for row in rows if row["keyed"]]
-    first = keyed[0]
+    usable = [row for row in rows if row["keyed"] and "skipped" not in row]
+    first = usable[0]
     calls_text = f"{calls} LLM call{'s' if calls != 1 else ''}"
     note = "There is no LLM price table, so est_usd stays 0.0."
     if not first["free"]:
         return f"{calls_text} on {first['link']}, which is billed. {note}"
-    paid_later = [row["link"] for row in keyed[1:] if not row["free"]]
+    paid_later = [row["link"] for row in usable[1:] if not row["free"]]
     text = f"{calls_text} on {first['link']} (free tier)."
     if paid_later:
         text += (f" If the free links before it fail, {', '.join(paid_later)} "
                  f"(billed) may be reached. {note}")
+    skipped = list(dict.fromkeys(row["link"] for row in rows if row["keyed"] and "skipped" in row))
+    if skipped:
+        text += f" Not used: {', '.join(skipped)} (billed) -- {llm_call.PAID_SKIP_REASON}."
     return text
 
 
@@ -708,14 +722,17 @@ async def estimate(story_id: str, step: str, target: Optional[str] = None) -> di
 
         {"step", "est_usd": 0.0, "units": {"llm_calls": n},
          "route_class": "free" | "paid" | "blocked" | "local",
-         "link": <first keyed link> | null,
-         "links": [{"link", "keyed", "free"}, ...],
+         "link": <first usable keyed link> | null,
+         "links": [{"link", "keyed", "free"[, "skipped": <reason>]}, ...],
          "ready": <the key gate passes>, "message": str}
 
-    ``concepts`` (5 calls), ``bible`` (3), ``regenerate`` (1; 5 with
-    ``?target=concepts``) resolve the chain and keys as the step will; the
-    first keyed link decides the class (``free`` when its provider's default
-    model is free, DEC-088). No keyed link is ``blocked`` with the key gate's
+    ``concepts`` (10 calls, one concept each), ``bible`` (3), ``regenerate``
+    (1; 10 with ``?target=concepts``) resolve the chain and keys as the step
+    will. A paid link the step leaves out while ``allow_paid`` is off carries
+    ``"skipped"`` with the reason (``llm_call.story_chain``); the first keyed
+    link that is not skipped decides the class (``free`` when the link is
+    free -- its provider's default model is, DEC-088, or it is an OpenRouter
+    ``:free`` model). No such link is ``blocked`` with the key gate's
     message. ``style`` runs here: 0 calls, ``local``. ``style_preview``:
     ``units {"images": 3}``, the story's route applied, each link's gates as
     the step will meet them and nothing called (``style_preview.estimate``;
@@ -741,16 +758,19 @@ async def estimate(story_id: str, step: str, target: Optional[str] = None) -> di
             raise workflow.invalid_target(target)
 
     calls = _llm_calls(step, target)
-    links, keys, refusal = _llm_gate(worker.get_settings_env())
-    rows = [
-        {
+    links, keys, skipped, refusal = _llm_route(worker.get_settings_env())
+    reasons = {link: reason for link, reason in skipped}
+    rows = []
+    for link in links:
+        row = {
             "link": registry.describe(link),
             "keyed": bool(keys.get(link.provider)),
-            "free": bool(registry.PROVIDERS[link.provider].free_tier),
+            "free": llm_call.is_free_link(link),
         }
-        for link in links
-    ]
-    first = next((row for row in rows if row["keyed"]), None)
+        if link in reasons:
+            row["skipped"] = reasons[link]
+        rows.append(row)
+    first = next((row for row in rows if row["keyed"] and "skipped" not in row), None)
     if first is None:
         route_class = "blocked"
     else:
