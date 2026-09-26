@@ -2217,3 +2217,34 @@ the public interface `10.0.0.113` does not. The gitignored override's header was
 rewritten to say so. Undo with `sudo tailscale serve --tcp=8000 off`. A first
 attempt with `--http 80` answered only by hostname (404 on the bare IP) and was
 turned off. **Revisit before this machine ever leaves a trusted tailnet.**
+
+## DEC-106 — A paid link gets exactly one attempt; the runner never retries it
+**Context.** Found on 2026-09-26 while mapping the paid path, before the first
+paid call phase 0 ever made. `generation._attempt` retried a RETRY or
+RATE_LIMITED failure by calling `adapter.generate()` again. `FalAdapter.generate`
+submits the job to fal's queue first and only then polls and downloads, and fal
+bills a job once the submit is accepted. So a timeout, dropped connection, 5xx
+or 429 on a *poll* or on the image download re-submitted a second job. That job
+was billed and never recorded: the ledger and `spend.json` carry the one
+estimate `_run_candidates` stamps on the result. That broke DEC-103 (at most one
+paid call per click) and DEC-097 (no paid call without `budget.check`), since
+the second submit passed no check.
+**Decision.** `_attempt(paid=True)` runs one attempt. A retryable failure on a
+paid link ends that link, and its reason says "paid link: not retried, a second
+request could be billed again". Free and local links keep `MAX_ATTEMPTS = 2`.
+Moving on to the *next* link of a chain is unchanged: that is a new call with its
+own estimate and its own `budget.check`.
+**Consequence.** One click submits at most one paid job, whatever the network
+does. The cost is that a transient hiccup on a paid link fails the link rather
+than recovering. For a chain test that is the right trade. For phase 4's real
+asset generation it means a flaky paid provider falls through to the next link
+sooner. **Still open, deliberately not done here:** a paid attempt that fails
+*after* the provider accepted it may still be billed, and nothing records it,
+so the ledger can under-report by the estimate of a failed paid attempt. A
+charge-on-attempt rule changes DEC-098's accounting. It belongs to phase 4,
+when paid generation runs for real, and it's recorded as a follow-up in
+CHECKPOINT. Rejected: making fal's submit idempotent (its queue API offers no
+idempotency key we rely on); retrying only the poll inside the adapter (still
+needs a rule for a lost submit, and it doesn't cover the other paid adapters).
+Test: `tests/test_generation_chain.py::test_a_paid_link_is_never_retried_so_one_click_cannot_bill_twice`
+(timeout, connection, 5xx, 429). Commit `32f8346`.

@@ -1,65 +1,84 @@
-## CURRENT STATE — AI Story **phase 0 is CLOSED**. Next session starts **phase 1**.
+## CURRENT STATE — AI Story **phase 0 is DONE**. Next session starts **phase 1**.
 
-Closed 2026-09-26 on the human's instruction, with the paid Tier-2 step
-deliberately **not run** (see "What phase 0 never proved"). Stages 0–14 done.
+Finished 2026-09-26 10:45 UTC. Every Tier-2 step has run except the one paid
+call, which the human **deferred** (no budget right now, "we'll do it later").
+Stages 0–14 done, plus the finish-up stage (`32f8346`: DEC-106).
 
-- **Tier-1 at close (2026-09-26, re-run today, not carried forward):** local
-  **1879 passed / 1 skipped** (29.5 s); CI env (`PYTHONNOUSERSITE=1`,
-  pytest-only) **1679 passed / 173 skipped** (15.6 s); `compileall clipping web
-  tests main.py` clean; `vite build` green to a scratch outDir (`dist/`
-  untouched); `npm audit --omit=dev` **0**. Identical to the stage-13 figures.
-- **Branch:** `main`, pushed to `origin/main` at close — the commits that had
-  only ever lived on this VM are now on GitHub. 16 commits. Verify with `git status -sb`: if it still says "ahead", the push did not land.
+- **Tier-1 at close (on main at `32f8346`, run today):** local **1883 passed /
+  1 skipped**; CI env (`PYTHONNOUSERSITE=1`, pytest-only) **1683 passed / 173
+  skipped**; `compileall clipping web tests main.py` clean. +4 on the phase-0
+  close baseline (1879 / 1679), all four from the DEC-106 test, which runs in
+  CI too. No dashboard change, so no vite build this round.
+- **Deployed:** backend restarted 10:25 UTC at 0 jobs. The container runs
+  `32f8346`'s Python (checked: `_attempt` has the `paid` parameter). The
+  dashboard bundle is unchanged since the stage-13 rebuild.
+- **Branch:** `main`, pushed to `origin/main`. Verify with `git status -sb`.
 - **Plan:** `~/.claude/plans/pasted-content-id-a0ee-the-spec-resilient-tulip.md`
   (v2; v1 `ai-story-phase-0-foundation.md` is superseded).
 - **Spec:** `.claude/plans/ai-story/00-MASTER-SPEC.md` v1.1, plus
   `09-APPENDIX-research-2026-09-25.md` and `10-REFERENCE-ANALYSIS-2026-09-25.md`.
-- **Decisions written in stage 14:** DEC-093…DEC-104 (plan §6) and **DEC-105**
-  (the tailnet exposure, which supersedes DEC-092's "safe only while the port is
-  private" condition). Assumptions A-030…A-038; A-028 marked superseded.
+- **Decisions:** DEC-093…DEC-105 (stage 14) and **DEC-106** (a paid link gets
+  exactly one attempt). Assumptions A-030…A-039.
 
-### ⚠️ What phase 0 never proved — read this before trusting the paid path
-Five Tier-2 steps were scripted, deployed for, and **never run**. They need the
-human's fal.ai key and their phone. The paid/budget path is therefore proven by
-unit tests and by *refusals* only — **no paid call has ever been made by this
-code**. Run these whenever; nothing else in phase 1 depends on them.
+### Tier-2 results (2026-09-26)
+| # | Step | Result |
+|---|---|---|
+| 1 | Paste `FAL_KEY`, survives reload | **PASS**, done by the human 00:31 UTC; `fal_key_set: true` on every later GET, `data/settings.json` 0600 |
+| 2 | `allow_paid` off → IMAGE_EDIT_CHAIN refusals, no network call | **PASS** twice (before and after the DEC-106 restart): verdict `blocked`, comfyui unreachable, refusals at $0.034 / $0.030 / $0.040 / $0.067 with "today $0.00 of $3.00", elapsed ≤ 0.01 s, `usage.json` hash unchanged, no ledger, no spend file |
+| 3 | **One paid fal call** | **DEFERRED by the human.** Not run. See below |
+| 4 | Edge TTS sample playable on the phone | **PASS by substitute:** the built-in browser at 375 px with an Android user agent, TTS chain test → `edge/fr-FR-HenriNeural` ✅ 1.2 s, the 3.8 s MP3 **played** (`currentTime` advanced). The human's own phone listen (00:33 UTC fetch) was never confirmed |
+| 5 | Clone & Rerun of `b37b36a9b34e` completes; layout at 375 | **PASS:** started by the human 09:29 UTC, COMPLETED 10:23:36 UTC, 7 clips of 40–51 s, 1080×1920, clip 1 plays. `/clips/job/b37b36a9b34e` measured at 375 / 820 / 1280: `scrollWidth == clientWidth`, no overflowing element. The phone check itself was not confirmed. **Script correction:** the rerun keeps its id **by design** (DEC-022), and "`<new id>`" was wrong |
 
-1. Paste `FAL_KEY` in Settings → Generation; the badge appears and survives a reload.
-2. With `allow_paid` **off**, "Test chain" on IMAGE_EDIT_CHAIN → refusal rows
-   carrying the numbers, fal rows `no_key`, and **no network call**.
-3. Turn `allow_paid` on (Budget tab → profile `one_dollar`). **Snapshot
-   `data/usage.json` immediately before** (`sha256sum`; it resets at the UTC day
-   boundary, so an older hash is worthless). Press **Test (est $0.030)** on
-   `fal/seedream-4-edit` **once**.
-   Expect: one 9:16 image in the row; one entry in `data/chain_test_ledger.json`;
-   $0.03 in `data/spend.json`; `data/usage.json` **byte-identical** (`cmp`) —
-   that is the proof a paid call consumed no free allowance (DEC-098).
-4. Play the Edge TTS sample on the phone.
-5. Clone & Rerun of job `b37b36a9b34e` completes under `/clips/job/<new id>`;
-   the phone confirms the layout at 375 px.
+Also run: `allow_paid` is **off** and the effective profile is `free`.
+`data/usage.json` counted today's free TTS calls (edge 2, gemini 2,
+pollinations 1). No `spend.json` and no `chain_test_ledger.json` exist, so
+**no paid call has ever been made by this code.**
+
+### ⚠️ The deferred paid step — run it when there is budget
+The paid path is proven by unit tests and by refusals only. Nothing in phase 1
+depends on it. It costs est. **$0.03**. It needs an explicit yes in chat,
+because it spends money.
+1. Settings → Budget: turn `allow_paid` on (the effective profile becomes
+   `one_dollar`). **Snapshot `data/usage.json` immediately before**
+   (`sha256sum`). It resets at the UTC day boundary, so an older hash is worthless.
+2. Press **Test (est $0.030)** on `fal/seedream-4-edit` **once**, or
+   `POST /api/settings/test-generation-chain`
+   `{"kind":"image_edit","chain":"","link":"fal/seedream-4-edit"}`.
+3. Expect: one 9:16 image in the row; one entry in
+   `data/chain_test_ledger.json` (`provider fal, model
+   fal-ai/bytedance/seedream/v4/edit, unit image, qty 1, est_usd 0.03, paid
+   true`); $0.03 today in `data/spend.json`; `data/usage.json`
+   **byte-identical** (`cmp`). That last one is the proof that a paid call
+   consumed no free allowance (DEC-098).
+4. Turn `allow_paid` back **off**: DEC-105 lets every tailnet device reach
+   Settings with no token.
+Since DEC-106, a failure on that link is **not retried**. It says "paid link:
+not retried". Check the fal dashboard before pressing again, because a failed
+attempt may still have been billed.
 
 Reachable from the tailnet at `http://main-network-interface.tail01346d.ts.net:8000`
-or `http://100.112.96.111:8000`, **with no token** (DEC-105).
+or `http://100.112.96.111:8000`, **with no token** (DEC-105). Settings is at
+`/settings` (`/clips/settings` lands on the dashboard).
 
 ### Where phase 1 starts
-Read the spec and the plan first — neither is summarised here on purpose.
+Read the spec and the plan first. Neither is summarised here on purpose.
 Carried in deliberately from phase 0:
-- **Per-task route selector** — deferred to phase 1; the `route=` parameter is
+- **Per-task route selector:** deferred to phase 1. The `route=` parameter is
   already reserved in `run_generation_chain`, and the gate order honours it.
-- **VIDEO_CHAIN has no adapter** (DEC-102) until phase 6; it parses and tests.
-- Phase 0's regression contract (RC-P1…RC-P9, table below) still applies.
+- **VIDEO_CHAIN has no adapter** (DEC-102) until phase 6. It parses and tests.
+- Phase 0's regression contract (RC-P1…RC-P11, table below) still applies.
+  RC-P10 is now also proven by
+  `test_generation_chain.py::test_a_paid_link_is_never_retried_so_one_click_cannot_bill_twice`.
 
 ### Close-out checks
-Re-run today: `git diff --stat 429c9e7 -- clipping/studio` **empty** (RC-P9: the
-render layer was not touched); `npm audit --omit=dev` **0**; the four Tier-1
-checks above.
+Re-run today: `git diff --stat 429c9e7 -- clipping/studio` **empty** (RC-P9);
+`npm audit --omit=dev` **0**; the Tier-1 checks above.
 
-Carried forward from the stage-13 run (not re-run today, it needs the container):
-- `pip-audit` 2.10.1 in the container: **1 finding**, setuptools 79.0.1
-  PYSEC-2026-3447 / CVE-2026-59890 (fix 83.0.0) — MANIFEST.in excludes bypassed
-  by NFD filenames on macOS APFS/HFS+ when building an sdist. Not reachable here
-  (Linux container, no sdist build; setuptools comes from the `/opt/venv` base
-  and is not pinned by this project) → dependency pass, not phase 0.
+Carried forward from the stage-13 run (`pip-audit` is no longer installed in
+the container, and this round changed no dependency):
+- `pip-audit` 2.10.1: **1 finding**, setuptools 79.0.1 PYSEC-2026-3447 /
+  CVE-2026-59890 (fix 83.0.0). It's an sdist-build bug on macOS filesystems, so
+  it isn't reachable here. It goes to the dependency pass, not phase 0.
 
 ### Operating notes that bite
 - **The container runs the bind-mounted source.** A Python fix needs
@@ -70,7 +89,8 @@ Carried forward from the stage-13 run (not re-run today, it needs the container)
 - **CI is `pip install pytest` and nothing else** (DEC-012), where ~173 tests
   skip. A green local run proves less than it looks. Reproduce it:
   `pip install --target /tmp/cilibs pytest` then
-  `PYTHONNOUSERSITE=1 PYTHONPATH=/tmp/cilibs python3 -m pytest -q`.
+  `PYTHONNOUSERSITE=1 PYTHONPATH=/tmp/cilibs python3 -m pytest`. Don't add `-q`:
+  `addopts` already has one, and a second hides the pass/fail summary line.
   For a *drift guard*, read the source as text rather than `importorskip` — an
   importorskip means the guard never runs in the one place that checks every push.
 - **Pushing needs the repo's own key** (`github_osc_better` **and** `-F /dev/null`;
@@ -86,7 +106,11 @@ Carried forward from the stage-13 run (not re-run today, it needs the container)
 `pyproject.toml` has no `[build-system]`/package-data; setuptools ≥ 83 in the
 image; the budget refusal text prints sub-cent estimates as `$0.000` (cosmetic);
 per-task route selector (phase 1); Freesound toggle (phase 4); `httpx` is
-transitive only.
+transitive only. **Charge-on-attempt accounting** (DEC-106): a paid attempt that
+fails after the provider accepted it may still be billed and is not recorded.
+Decide this in phase 4, before paid generation runs for real. Two pushed commits
+(`68e9890`, `fc308db`) carry a Co-Authored-By trailer against the global rule.
+They were left alone, because a rewrite of pushed history needs the human.
 
 ---
 
@@ -126,8 +150,9 @@ detail this header deliberately does not repeat.
 | 10 | hardware profiler + `GET /api/hardware` | **done** `545af1b` |
 | 11 | settings API (keys, budget fields, test-generation-chain) | **done** `c5a7995` |
 | 12 | settings UI (four tabs) | **done** `533647c` |
-| 13 | deploy + Tier-2 (plan §5, human ack) | **in progress** — deployed 14:45 UTC; live fixes committed (this commit; hash recorded at stage 14); Tier-2 steps 2, 4, 5-playback, 8, 9 + the ack wait for the human |
-| 14 | docs + decisions (DEC-093…, A-030…) | pending |
+| 13 | deploy + Tier-2 (plan §5, human ack) | **done** `c8d5574` (live fixes); Tier-2 finished 2026-09-26 except the paid step, deferred by the human |
+| 14 | docs + decisions (DEC-093…, A-030…) | **done** `68e9890` |
+| 15 | finish-up: a paid link gets one attempt (DEC-106) + the remaining Tier-2 | **done** `32f8346` + the close-out docs commit |
 
 ### Deploy
 `sudo docker compose rm -sfv backend && docker compose up -d --build backend` — only when no job runs (the container executes the bind-mounted on-disk Python; the dashboard needs the rebuild). Never `down -v` (Caddy certs). `.claude/` is dockerignored.

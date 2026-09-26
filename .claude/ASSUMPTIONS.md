@@ -121,6 +121,15 @@
   tier**; Cloudflare allows roughly **170 images/day** on the free plan; Edge TTS
   is usable **without a key**. Only the last is exercised here (edge answered in
   1.6 s during the stage-13 test). UNCONFIRMED.
+- **A-039** — (2026-09-26) The human answered the "finish phase 0" options
+  (fix the double-bill first / run the paid test and switch `allow_paid` back off /
+  confirm the phone steps) by rejecting the dialog and then saying "go on". Taken
+  as approval of the **recommended** options: fix first (DEC-106), and
+  `allow_paid` back off after the test. **Not** taken as a yes to spend: the
+  est. $0.03 fal call waits for an explicit yes in chat. Partly answered at
+  10:00 UTC: no spend now, the paid test is deferred by the human (no budget);
+  finish phase 0, then merge and push. The fix-first reading was not objected
+  to. UNCONFIRMED for the fix-first part only.
 
 ## Confirmed
 - **A-012** — The phone-width overflow is fixable in CSS alone; no JSX change is
