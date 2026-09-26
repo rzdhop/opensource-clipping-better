@@ -1,0 +1,147 @@
+"""Step ``bible``: B1 -> B2 -> B3 into ``story.json`` (spec 3 step 3, 4.2).
+
+Three small calls, each writing only its own fields the moment its reply is
+accepted, each built from the story as it then stands -- B2 sees what B1
+wrote, B3 sees B1 and B2. A failure is local (DEC-027): a part that fails is
+printed and the next part still runs with whatever exists, the fields
+already written stay, and the step ends failed naming each missing part and
+the ``regenerate bible:<field>`` target that finishes it.
+
+Writing any bible field clears ``approvals.bible`` -- a changed bible is an
+unapproved bible -- and leaves ``approvals.style`` alone (the derived status
+already stops counting it). The table here is shared with ``regenerate``.
+"""
+
+from __future__ import annotations
+
+import copy
+import time
+
+from .. import context, prompts, schemas
+from . import llm_call
+from .llm_call import StepFailed
+
+PARTS = ("B1", "B2", "B3")
+
+BUILDERS = {"B1": prompts.build_b1, "B2": prompts.build_b2, "B3": prompts.build_b3}
+VALIDATORS = {"B1": schemas.b1_errors, "B2": schemas.b2_errors, "B3": schemas.b3_errors}
+
+# The keys each part's reply carries, i.e. what it may write.
+FIELDS = {
+    "B1": ("logline", "premise", "tone", "genre_tags"),
+    # Nested under story["world"].
+    "B2": ("setting_summary", "rules", "time_period", "recurring_motifs"),
+    "B3": ("themes_and_values", "audience", "why_come_back"),
+}
+
+WORLD_PART = "B2"
+
+
+def regenerate_targets(part) -> list:
+    """The ``bible:<field>`` targets that re-run *part*, in grammar order."""
+    return [field for field, (owner, _keys) in prompts.REGENERATE_TARGETS.items() if owner == part]
+
+
+def _quoted_list(names) -> str:
+    quoted = [f"'{name}'" for name in names]
+    if len(quoted) <= 1:
+        return "".join(quoted)
+    return ", ".join(quoted[:-1]) + " and " + quoted[-1]
+
+
+def pack_for(story, *, note=None):
+    """The context pack for a bible prompt: the chosen concept plus the bible
+    and world written so far. ``StepFailed`` when the concept snapshot lacks
+    what the prompt renders (a hand-edited or custom concept)."""
+    try:
+        return context.build_pack(
+            language=story["language"],
+            story=story,
+            concept=story["concept"],
+            note=note,
+        )
+    except (KeyError, TypeError) as exc:
+        raise StepFailed(f"The chosen concept cannot be read ({type(exc).__name__}: {exc}); choose it again.") from None
+
+
+def current_fields(story, part) -> dict:
+    """What *part* last wrote, for a regenerate's "current values" block.
+    Empty values are left out: "None" would read as a value to keep."""
+    source = (story.get("world") or {}) if part == WORLD_PART else story
+    current = {}
+    for key in FIELDS[part]:
+        value = source.get(key)
+        if value not in (None, "", [], {}):
+            current[key] = copy.deepcopy(value)
+    return current
+
+
+def apply(story, part, reply, keys=None) -> None:
+    """Write *keys* (default: all of *part*'s fields) of *reply* into *story*,
+    and clear the bible approval. Mutates *story*."""
+    keys = FIELDS[part] if keys is None else tuple(keys)
+    if part == WORLD_PART:
+        world = dict(story.get("world") or {})
+        for key in keys:
+            world[key] = copy.deepcopy(reply[key])
+        story["world"] = world
+    else:
+        for key in keys:
+            story[key] = copy.deepcopy(reply[key])
+    story["approvals"]["bible"] = None
+
+
+def validator_for(story, part, keys=None):
+    """*part*'s post-validator, then: would the story still be a valid
+    ``story_bible_v1`` with the reply applied? A reply that passes the first
+    and would be refused by the store (a 45-character tag, say) is a
+    rejected reply -- asked for again -- not a crash after it was paid for."""
+    def validate(reply):
+        errors = VALIDATORS[part](reply)
+        if errors:
+            return errors
+        trial = copy.deepcopy(story)
+        apply(trial, part, reply, keys)
+        return schemas.story_bible_errors(trial)
+
+    return validate
+
+
+def run(ctx, *, runner=None, time_fn=time.monotonic) -> dict:
+    store, story = llm_call.open_story(ctx)
+    llm_call.require_concept(story)
+
+    written = []
+    failed = []  # (part, reason)
+    announced = set()
+
+    for part in PARTS:
+        ctx.cancel.check()
+        # The story as it now stands: what the previous part wrote, and any
+        # edit the user made meanwhile.
+        story = store.get(ctx.story_id)
+        pack = pack_for(story)
+        llm_call.announce_trimmed(ctx, pack, announced)
+        system, user, schema = BUILDERS[part](pack)
+
+        try:
+            reply = llm_call.call_json(
+                ctx, part, system, user, schema,
+                validator=validator_for(story, part), runner=runner, time_fn=time_fn,
+            )
+        except StepFailed as exc:
+            failed.append((part, exc.reason))
+            ctx.on_log(f"✖ {part} failed: {exc.reason}")
+            continue
+
+        store.update(ctx.story_id, lambda doc, p=part, r=reply: apply(doc, p, r), now=llm_call.utc_now())
+        written.append(part)
+
+    if failed:
+        parts = "; ".join(f"{part} failed ({reason})" for part, reason in failed)
+        targets = [target for part, _ in failed for target in regenerate_targets(part)]
+        raise StepFailed(
+            f"Bible incomplete: {parts}. Regenerate {_quoted_list(targets)} to finish it."
+        )
+
+    return {"written": written}

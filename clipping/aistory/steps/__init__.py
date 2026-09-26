@@ -9,14 +9,22 @@ worker's stdout tee files every line against the job; it checks
 the story's folder under ``ctx.outputs_dir``. Returning means "ready for the
 user's approval"; raising means the step failed.
 
-The registry ships empty. Runners register here as they arrive (phase 1,
-stage 6: concepts, bible, regenerate, style_preview).
+Phase 1 registers ``concepts``, ``bible`` and ``regenerate`` (stage 6;
+``style_preview`` follows in stage 8). Each is registered by module name and
+imported on its first run, never here: importing this package must not pull
+in the prompt catalogue or the LLM chain, so the worker's dispatch and a
+test that only needs the registry stay as light as they were.
+
+A runner that fails in a way the user can act on raises :class:`StepFailed`
+with a sentence saying what to do; the worker records it as
+``StepFailed: <sentence>``.
 
 Stdlib only: importable in the pytest-only CI environment (DEC-012).
 """
 
 from __future__ import annotations
 
+import importlib
 from dataclasses import dataclass
 from typing import Callable, Optional
 
@@ -54,7 +62,38 @@ class UnknownStep(KeyError):
         return f"unknown story step {self.step!r} (known: {known})"
 
 
-RUNNERS: dict[str, Callable[[StepContext], object]] = {}
+class StepFailed(RuntimeError):
+    """A step could not produce what it was asked for; the message says why
+    and, where there is one, what to do next.
+
+    ``reason`` is the same explanation without the prompt id prefix, for a
+    runner that folds several failures into one sentence of its own.
+    """
+
+    def __init__(self, message, *, reason=None):
+        super().__init__(message)
+        self.reason = message if reason is None else reason
+
+
+def _deferred(module_name: str) -> Callable[[StepContext], object]:
+    """A runner that imports ``steps.<module_name>`` on first use and calls
+    its ``run(ctx)``. Import errors surface when the step runs, as a failed
+    job naming them, not when the worker starts."""
+
+    def runner(ctx: StepContext):
+        module = importlib.import_module(f"{__name__}.{module_name}")
+        return module.run(ctx)
+
+    runner.__name__ = runner.__qualname__ = f"run_{module_name}"
+    runner.__doc__ = f"{__name__}.{module_name}.run, imported on first use."
+    return runner
+
+
+RUNNERS: dict[str, Callable[[StepContext], object]] = {
+    "concepts": _deferred("concepts"),
+    "bible": _deferred("bible"),
+    "regenerate": _deferred("regenerate"),
+}
 
 
 def run(step: str, ctx: StepContext):

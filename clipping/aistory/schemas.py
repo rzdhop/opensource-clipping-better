@@ -874,3 +874,81 @@ def b3_errors(doc) -> list:
         _check_text(errors, f"$.why_come_back[{i}]", line, max_words=20)
 
     return errors
+
+
+# ------------------------------------------------------ story_concepts_v1 (spec 3, step 2)
+#
+# ``concepts.json``: the cards "Generate 10 more" appended to a story, one per
+# accepted C1 concept. A card is the C1 concept as the model wrote it (already
+# in the story's language, so not bilingual like a library concept) plus where
+# it came from. Its ``cast_sketch`` members have the ``name``/``role``/
+# ``one_line`` shape ``context.concept_block`` renders, so a chosen card feeds
+# the bible prompts exactly as a localized library concept does.
+
+STORY_CONCEPTS_SCHEMA_NAME = "story_concepts_v1"
+
+# gen_01 ... gen_99, then gen_100 ...: two digits at least, never gen_00.
+GENERATED_CONCEPT_ID_PATTERN = r"^gen_(0[1-9]|[1-9][0-9]+)$"
+
+_GENERATED_CAST_MEMBER_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "name": _NON_EMPTY_STRING,
+        "role": {"type": "string", "enum": list(_CAST_SKETCH_ROLES)},
+        "one_line": _NON_EMPTY_STRING,
+    },
+    "required": ["name", "role", "one_line"],
+    "additionalProperties": False,
+}
+
+STORY_CONCEPT_CARD_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "concept_id": {"type": "string", "pattern": GENERATED_CONCEPT_ID_PATTERN},
+        "source": {"type": "string", "const": "generated"},
+        "prompt_version": _NON_EMPTY_STRING,
+        "created_at": _NON_EMPTY_STRING,
+        "language": {"type": "string", "enum": list(LANGUAGES)},
+        "title": _NON_EMPTY_STRING,
+        "logline": _NON_EMPTY_STRING,
+        "world": _NON_EMPTY_STRING,
+        "cast_sketch": {"type": "array", "items": _GENERATED_CAST_MEMBER_SCHEMA, "minItems": 3, "maxItems": 5},
+        "hook_formula": _NON_EMPTY_STRING,
+        "value": _NON_EMPTY_STRING,
+        "retention_mechanics": _NON_EMPTY_STRING,
+        # A shipped style id when it was written; only the shape is checked
+        # here, so retiring a style later cannot invalidate an old file.
+        "style_fit": {"type": "string", "pattern": _ID_PATTERN},
+    },
+    "required": [
+        "concept_id", "source", "prompt_version", "created_at", "language", "title",
+        "logline", "world", "cast_sketch", "hook_formula", "value",
+        "retention_mechanics", "style_fit",
+    ],
+    "additionalProperties": False,
+}
+
+STORY_CONCEPTS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "$schema": {"type": "string", "const": STORY_CONCEPTS_SCHEMA_NAME},
+        "concepts": {"type": "array", "items": STORY_CONCEPT_CARD_SCHEMA},
+        "updated_at": _NON_EMPTY_STRING,
+    },
+    "required": ["$schema", "concepts", "updated_at"],
+    "additionalProperties": False,
+}
+
+
+def story_concepts_errors(doc) -> list:
+    """``validate()`` against ``STORY_CONCEPTS_SCHEMA``, plus unique card ids."""
+    errors = validate(doc, STORY_CONCEPTS_SCHEMA)
+    if errors:
+        return errors
+    seen = set()
+    for i, card in enumerate(doc["concepts"]):
+        concept_id = card["concept_id"]
+        if concept_id in seen:
+            errors.append(f"$.concepts[{i}].concept_id: {concept_id!r} is used twice")
+        seen.add(concept_id)
+    return errors
