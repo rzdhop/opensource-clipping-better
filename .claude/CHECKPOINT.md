@@ -1,3 +1,56 @@
+## IN PROGRESS — AI Story **phase 1** (story workspace, concepts, bible, style lock)
+- **Started:** 2026-09-26 by the human ("Start phase One"). Task class: FULL.
+- **Current phase:** 5 IMPLEMENT. Plan **approved in chat** ("Go", 2026-09-26).
+  CLARIFY closed: C1 = 2 cards × 5 calls; steps with no external call run
+  inline (no job); route choice per story only (Settings selector → phase 2);
+  Tier-2 phone walk by the human on their own phone.
+- **Plan:** `~/.claude/plans/ai-story-phase-1-workspace.md` (stages 0–13,
+  riskiest = stage 4, story-step jobs in the shared store/worker).
+- **Where the work happens:** worktree `.claude/worktrees/ai-story-phase-1`,
+  branch `feat/ai-story-phase-1` (created from the checkpoint commit). `main`
+  and the deployed container stay at the checkpoint until stage 12. **A fresh
+  session reads the branch's copy of this file** — it is the current one.
+- **Checkpoint:** known-good `25abdd1` (clean, = `origin/main`); this header is
+  committed on top of it as the stage-0 commit.
+- **Tier-1 baseline (2026-09-26, at `25abdd1`):** local **1883 passed / 1
+  skipped**; CI env **1683 passed / 173 skipped**; `compileall clipping web
+  tests main.py` clean; `vite build` green (scratch outDir).
+- **Stage ledger:** see "Stage ledger (phase 1)" below.
+- **Prompt:** `.claude/plans/ai-story/02-phase-1-workspace-concepts-bible-style.md`;
+  spec `00-MASTER-SPEC.md` §2, §2.1–2.2, §3 steps 1–4, §4.1–4.2 (C1, B1–B3),
+  §5, §6.3, §7, §9.1–9.3, §10, §13, §14.
+- **Next free ids:** DEC-107, A-040.
+- **Open questions:** none.
+
+### Regression contract (phase 1)
+Phase 0's RC-P1…RC-P11 (history table below) stay in force, plus:
+| ID | Must keep working | Proven by |
+|---|---|---|
+| RC-S1 | A running clip job is still failed at restart; `needs_upload` unchanged | `tests/test_stale_jobs.py` existing cases unedited |
+| RC-S2 | A clip job's record, response and SSE unchanged apart from `kind: "clip"` | `test_job_stream.py`, `test_web_reuse_bypass.py`, `test_dashboard_payload_contract.py` unedited |
+| RC-S3 | Story-step jobs obey the clip queue cap and key gate | `test_queue_cap.py` unedited + story cases in `test_stories_api.py` |
+| RC-S4 | `llm.py` and its log wording untouched | `git diff 25abdd1 -- clipping/providers/llm.py` empty; `test_preflight.py` unedited |
+
+### Stage ledger (phase 1)
+| S | Stage | State |
+|---|---|---|
+| 0 | checkpoint + baseline + worktree | **done** (this commit) |
+| 1 | templates as data (7 styles, 10 concepts, schemas) | next |
+| 2 | prompting.py + style lock builder | — |
+| 3 | story store | — |
+| 4 | story-step jobs (RISKIEST) | — |
+| 5 | story prompts + context pack | — |
+| 6 | LLM step runners | — |
+| 7 | stories API | — |
+| 8 | style preview strip | — |
+| 9 | CLI | — |
+| 10 | dashboard shared pieces | — |
+| 11 | StoriesList + NewStoryWizard | — |
+| 12 | merge, deploy, Tier-2 (human on phone) | — |
+| 13 | docs + decisions | — |
+
+---
+
 ## CURRENT STATE — AI Story **phase 0 is DONE**. Next session starts **phase 1**.
 
 Finished 2026-09-26 10:45 UTC. Every Tier-2 step has run except the one paid
