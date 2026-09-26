@@ -37,8 +37,8 @@ RC-P1…P11 and RC-S1…S4 stay, plus:
 | 7 | API | **done** (local 3639 / CI 3081 + 528 skipped) |
 | 8 | CLI (+ clean dangling ids on entity delete) | **done** (local 3686 / CI 3128 + 528 skipped) |
 | 9 | dashboard: CastEditor | **done** (local 3701 / CI 3138 + 533 skipped; build green; browser check with stage 10) |
-| 10 | dashboard: PlacesProps + SeasonBoard + wiring | next |
-| 11 | merge, deploy, Tier-2 | — |
+| 10 | dashboard: PlacesProps + SeasonBoard + wiring | **done** (local 3725 / CI 3162 + 533 skipped; build green; 375/820/1280 checked, 2 findings fixed) |
+| 11 | merge, deploy, Tier-2 | next |
 | 12 | docs + decisions | — |
 
 ---

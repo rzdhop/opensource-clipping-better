@@ -34,7 +34,7 @@ import ast
 import pathlib
 import re
 
-from clipping.aistory import prompts, refimages, workflow
+from clipping.aistory import prompts, refimages, schemas, workflow
 from clipping.aistory.steps import regenerate as regenerate_step
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -45,6 +45,8 @@ STYLE_STEP = STORY_SRC / "steps" / "StyleStep.jsx"
 BIBLE_STEP = STORY_SRC / "steps" / "BibleStep.jsx"
 CONCEPTS_STEP = STORY_SRC / "steps" / "ConceptsStep.jsx"
 CAST_STEP = STORY_SRC / "steps" / "CastStep.jsx"
+PLACES_STEP = STORY_SRC / "steps" / "PlacesStep.jsx"
+SEASON_STEP = STORY_SRC / "steps" / "SeasonStep.jsx"
 
 
 def _class_fields(name: str) -> set[str]:
@@ -285,3 +287,161 @@ def test_cast_step_voice_payload_keys_match_the_voice_shape():
 def test_cast_step_renders_its_own_error_slot():
     src = CAST_STEP.read_text(encoding="utf-8")
     assert "story-step-error" in src, "CastStep.jsx has no story-step-error slot"
+
+
+# ================================================ PlacesStep.jsx / SeasonStep.jsx (phase 2, stage 10)
+#
+# Stage 10 gained places, props and the season arc: PlacesStep.jsx's
+# `placesParams` (POST /steps/places), every `patchPlace`/`patchProp` call
+# site, the regenerate targets it builds and its TIME_VARIANT_CHOICES list;
+# SeasonStep.jsx's `seasonParams` (POST /steps/season) and its own regenerate
+# targets. Same reasoning as the cast step's guards above.
+
+def _places_params() -> set[str]:
+    src = PLACES_STEP.read_text(encoding="utf-8")
+    match = re.search(r"const placesParams = \{([^}]*)\}", src)
+    assert match, "placesParams object literal not found in PlacesStep.jsx"
+    return set(re.findall(r"([a-z0-9_]+)\s*(?::[^,]*)?(?:,|$)", match.group(1)))
+
+
+def test_places_params_matches_workflow_places_params_exactly():
+    sent = _places_params()
+    assert sent == set(workflow.PLACES_PARAMS), (sent, workflow.PLACES_PARAMS)
+
+
+def _season_params() -> set[str]:
+    src = SEASON_STEP.read_text(encoding="utf-8")
+    match = re.search(r"const seasonParams = \{([^}]*)\}", src)
+    assert match, "seasonParams object literal not found in SeasonStep.jsx"
+    return set(re.findall(r"([a-z0-9_]+)\s*(?::[^,]*)?(?:,|$)", match.group(1)))
+
+
+def test_season_params_matches_workflow_season_params_exactly():
+    sent = _season_params()
+    assert sent == set(workflow.SEASON_PARAMS), (sent, workflow.SEASON_PARAMS)
+
+
+def _patch_place_call_sites() -> list[str]:
+    """The literal top-level key of every `patchPlace(storyId, place.place_id,
+    { ... })` call site in PlacesStep.jsx."""
+    src = PLACES_STEP.read_text(encoding="utf-8")
+    keys = []
+    for match in re.finditer(
+            r"patchPlace\(\s*storyId,\s*place\.place_id,\s*\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*[:,}]", src):
+        keys.append(match.group(1))
+    return keys
+
+
+def test_the_readers_see_patch_place_call_sites():
+    assert len(_patch_place_call_sites()) >= 2
+
+
+def test_every_patch_place_call_site_sends_a_declared_field():
+    declared = _class_fields("PlacePatchRequest")
+    sent = set(_patch_place_call_sites())
+    undeclared = sent - declared
+    assert undeclared == set(), (
+        "these patchPlace(...) call sites send a key PlacePatchRequest does not "
+        f"declare, so pydantic drops it and the edit does nothing: {sorted(undeclared)}"
+    )
+
+
+def test_patch_place_fields_match_the_workflows_editable_place_fields():
+    assert _class_fields("PlacePatchRequest") == set(workflow.PLACE_PATCH_FIELDS)
+
+
+def _patch_prop_call_sites() -> list[str]:
+    """The literal top-level key of every `patchProp(storyId, prop.prop_id,
+    { ... })` call site in PlacesStep.jsx."""
+    src = PLACES_STEP.read_text(encoding="utf-8")
+    keys = []
+    for match in re.finditer(
+            r"patchProp\(\s*storyId,\s*prop\.prop_id,\s*\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*[:,}]", src):
+        keys.append(match.group(1))
+    return keys
+
+
+def test_the_readers_see_patch_prop_call_sites():
+    assert len(_patch_prop_call_sites()) >= 2
+
+
+def test_every_patch_prop_call_site_sends_a_declared_field():
+    declared = _class_fields("PropPatchRequest")
+    sent = set(_patch_prop_call_sites())
+    undeclared = sent - declared
+    assert undeclared == set(), (
+        "these patchProp(...) call sites send a key PropPatchRequest does not "
+        f"declare, so pydantic drops it and the edit does nothing: {sorted(undeclared)}"
+    )
+
+
+def test_patch_prop_fields_match_the_workflows_editable_prop_fields():
+    assert _class_fields("PropPatchRequest") == set(workflow.PROP_PATCH_FIELDS)
+
+
+def _places_time_variant_choices() -> set[str]:
+    src = PLACES_STEP.read_text(encoding="utf-8")
+    match = re.search(r"const TIME_VARIANT_CHOICES = \[(.*?)\]", src)
+    assert match, "TIME_VARIANT_CHOICES not found in PlacesStep.jsx"
+    return set(re.findall(r"'([a-z]+)'", match.group(1)))
+
+
+def test_places_step_time_variant_choices_match_the_schema():
+    assert _places_time_variant_choices() == set(schemas.TIME_VARIANT_CHOICES)
+
+
+def _place_regenerate_target_templates() -> set[str]:
+    """Every `place:${...}:...` template literal used as a regenerate target
+    in PlacesStep.jsx, interpolations normalized to `<x>`."""
+    src = PLACES_STEP.read_text(encoding="utf-8")
+    literals = re.findall(r"`(place:\$\{[^`]*?:[a-z]+(?::\$\{[^`]*?\})?)`", src)
+    assert literals, "no `place:${...}:...` regenerate target found in PlacesStep.jsx"
+    return {re.sub(r"\$\{[^}]*\}", "<x>", literal) for literal in literals}
+
+
+def test_places_step_regenerate_targets_match_the_entity_target_shapes():
+    templates = _place_regenerate_target_templates()
+    assert templates == {"place:<x>:text", "place:<x>:image:<x>"}
+    assert "place:<place_id>:text" in regenerate_step.ENTITY_TARGETS
+    assert any(shape.startswith("place:<place_id>:image:") for shape in regenerate_step.ENTITY_TARGETS)
+
+
+def _prop_regenerate_target_templates() -> set[str]:
+    """Every `prop:${...}:...` template literal used as a regenerate target in
+    PlacesStep.jsx, interpolations normalized to `<x>`."""
+    src = PLACES_STEP.read_text(encoding="utf-8")
+    literals = re.findall(r"`(prop:\$\{[^`]*?:[a-z]+)`", src)
+    assert literals, "no `prop:${...}:...` regenerate target found in PlacesStep.jsx"
+    return {re.sub(r"\$\{[^}]*\}", "<x>", literal) for literal in literals}
+
+
+def test_places_step_prop_regenerate_targets_match_the_entity_target_shapes():
+    templates = _prop_regenerate_target_templates()
+    assert templates == {"prop:<x>:text", "prop:<x>:image"}
+    assert "prop:<prop_id>:text" in regenerate_step.ENTITY_TARGETS
+    assert "prop:<prop_id>:image" in regenerate_step.ENTITY_TARGETS
+
+
+def test_places_step_renders_its_own_error_slot():
+    src = PLACES_STEP.read_text(encoding="utf-8")
+    assert "story-step-error" in src, "PlacesStep.jsx has no story-step-error slot"
+
+
+def _season_regenerate_target_templates() -> set[str]:
+    """Every `season:${...}` template literal used as a regenerate target in
+    SeasonStep.jsx, interpolations normalized to `<x>`."""
+    src = SEASON_STEP.read_text(encoding="utf-8")
+    literals = re.findall(r"`(season:\$\{[^`]*?\})`", src)
+    assert literals, "no `season:${...}` regenerate target found in SeasonStep.jsx"
+    return {re.sub(r"\$\{[^}]*\}", "<x>", literal) for literal in literals}
+
+
+def test_season_step_regenerate_targets_match_the_entity_target_shapes():
+    templates = _season_regenerate_target_templates()
+    assert templates == {"season:<x>"}
+    assert "season:<ep>" in regenerate_step.ENTITY_TARGETS
+
+
+def test_season_step_renders_its_own_error_slot():
+    src = SEASON_STEP.read_text(encoding="utf-8")
+    assert "story-step-error" in src, "SeasonStep.jsx has no story-step-error slot"

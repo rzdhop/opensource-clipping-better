@@ -42,6 +42,7 @@ from clipping.aistory.store import StoryStore
 from clipping.cancel import CancelToken
 from clipping.providers.generation import GenResult
 from clipping.providers.registry import Link
+from clipping.providers.transport import APIConnectionError, Response
 
 ROOT = Path(__file__).resolve().parents[1]
 MODELS = ROOT / "web" / "api" / "models.py"
@@ -235,6 +236,27 @@ class FakeVision:
         self.requests.append(copy.copy(request))
         return GenResult(provider=link.provider, model=link.model, paths=(),
                          meta={"text": json.dumps({"appearance_notes": self.notes})})
+
+
+class ComfyStatus:
+    """ComfyUI's status route as the local adapter's transport: *up* answers
+    ``GET /system_stats``, down refuses the connection. Records every URL and
+    timeout; any other request fails the test."""
+
+    def __init__(self, *, up):
+        self.up = up
+        self.urls = []
+        self.timeouts = []
+
+    def __call__(self, method, url, *, headers=None, body=None, timeout=None):
+        self.urls.append(url)
+        self.timeouts.append(timeout)
+        if method != "GET" or not url.endswith("/system_stats"):
+            raise AssertionError(f"not a status probe: {method} {url}")
+        if not self.up:
+            raise APIConnectionError(f"{method} {url}: [Errno 111] Connection refused")
+        stats = {"system": {"comfyui_version": "0.3.9"}, "devices": [{"name": "cuda:0 test"}]}
+        return Response(200, {}, json.dumps(stats).encode())
 
 
 class Fakes(SimpleNamespace):
@@ -453,6 +475,45 @@ def test_what_a_character_place_and_prop_lack_and_the_progress_they_add_up_to(tm
                                                                  "sample"]
     # No portrait yet: the character does not wait for an editor, it waits for its portrait.
     assert progress["characters"]["char_kiwilo"]["needs_editor"] is False
+
+
+def test_progress_with_probe_local_asks_the_local_editor_and_waits_for_one_when_it_is_down(tmp_path, monkeypatch):
+    """The story page's question (``probe_local=True``, found in the browser
+    review): ComfyUI is the only editor and it does not answer, so a
+    character with its portrait waits for an editor -- with the probe's
+    reason -- before Continue is pressed. Without it nothing is asked."""
+    from clipping.aistory import workflow
+    from clipping.providers import local_comfyui
+
+    store = StoryStore(tmp_path / "outputs", on_log=lambda line: None)
+    story_id = _story(store)
+    _new_character(store, story_id, "char_kiwilo", "Kiwilo")
+    src = tmp_path / "portrait.png"
+    src.write_bytes(PNG)
+    store.write_media(story_id, "characters", "char_kiwilo", "portrait.png", str(src))
+    doc = store.read_entity(story_id, "characters", "char_kiwilo")
+    doc["refs"]["portrait"] = {"name": "portrait.png", "consistency": "base", "source": "pollinations/flux",
+                               "seed": 7, "created_at": NOW}
+    store.write_entity(story_id, "characters", doc, now=NOW)
+    down = ComfyStatus(up=False)
+    monkeypatch.setattr(local_comfyui, "urllib_transport", down)
+    env = dict(EDITOR, LOCAL_COMFYUI_URL="http://comfy.test:8188")
+
+    calm = workflow.progress(store, store.get(story_id), env=env)
+    assert calm["edit_readiness"]["ready"] is True
+    assert calm["characters"]["char_kiwilo"]["needs_editor"] is False
+    assert down.urls == []
+
+    asked = workflow.progress(store, store.get(story_id), env=env, probe_local=True)
+    assert asked["characters"]["char_kiwilo"]["needs_editor"] is True
+    readiness = asked["edit_readiness"]
+    assert (readiness["ready"], readiness["route_class"], readiness["units"]) == (False, "blocked", {"images": 2})
+    assert readiness["links"][0]["reason"] == (
+        "unreachable at http://comfy.test:8188 (GET http://comfy.test:8188/system_stats: [Errno 111] "
+        "Connection refused)")
+    # One short status request: GET /system_stats, 2 s at most.
+    assert down.urls == ["http://comfy.test:8188/system_stats"]
+    assert down.timeouts == [local_comfyui.STATUS_PROBE_TIMEOUT_SECONDS] and down.timeouts[0] <= 2.0
 
 
 # =================================================== describe before K1 (CI)
@@ -1225,16 +1286,57 @@ def test_a_picked_voice_is_one_of_the_languages_and_no_other_leads(api):
 
 # ================================================= the story page, approvals
 
-def test_the_story_page_asks_no_local_editor_whether_it_is_there(api):
-    story_id = _cast_via_api(api, settings=NO_EDITOR)
-    _settings(api, dict(EDITOR, LOCAL_COMFYUI_URL="http://comfy.test:8188"))
+def test_the_story_page_asks_the_local_editor_whether_it_is_there_once_a_minute(api):
+    """Found in the browser review: with ComfyUI down the page said the
+    editor was ready ("probed when it runs"), the banner with the
+    prompt-only switch never showed, and the user learnt it from the job log
+    after Continue. The page and the cast estimate now ask -- one short
+    status probe per server a minute, while the page is polled."""
+    from clipping.providers import local_comfyui
 
-    page = _page(api, story_id)  # the real local adapter: a probe would reach no_network
+    story_id = _cast_via_api(api, settings=NO_EDITOR)  # portraits made, every sheet missing
+    _settings(api, dict(EDITOR, LOCAL_COMFYUI_URL="http://comfy.test:8188"))
+    clock = [1000.0]
+    api.monkeypatch.setattr(local_comfyui, "_now", lambda: clock[0])
+    down = ComfyStatus(up=False)
+    api.monkeypatch.setattr(local_comfyui, "urllib_transport", down)
+
+    page = _page(api, story_id)
 
     readiness = page["progress"]["edit_readiness"]
-    assert readiness["ready"] is True and readiness["route_class"] == "local"
-    assert readiness["links"][0]["reason"] == "probed when it runs"
-    assert all(not item["needs_editor"] for item in page["progress"]["characters"].values())
+    assert (readiness["ready"], readiness["route_class"], readiness["link"]) == (False, "blocked", None)
+    [row] = readiness["links"]
+    assert (row["link"], row["status"]) == ("local/comfyui", "skipped")
+    assert row["reason"] == ("unreachable at http://comfy.test:8188 (GET http://comfy.test:8188/system_stats: "
+                             "[Errno 111] Connection refused)")
+    assert readiness["message"] == (
+        f"No link of IMAGE_EDIT_CHAIN can make a reference image on route auto: local/comfyui: {row['reason']}.")
+    assert page["progress"]["characters"] == {cid: {"missing": ["turnaround", "expressions"], "needs_editor": True}
+                                              for cid in IDS}
+
+    # The next polls, the cast estimate (ContinueCast) and a new story's
+    # (NoCastYet reads its `edit`) give the same verdict without asking again.
+    clock[0] += 4.0
+    assert _page(api, story_id)["progress"]["edit_readiness"] == readiness
+    cast = _estimate(api, story_id, "cast")
+    assert cast["edit"]["ready"] is False and cast["edit"]["links"] == [row]
+    assert "need an editor or prompt-only consistency" in cast["message"]
+    fresh = _story(api.store)
+    sketch = _estimate(api, fresh, "cast", selected=["Kiwilo"])
+    assert sketch["edit"]["ready"] is False and sketch["edit"]["links"] == [row]
+    assert down.urls == ["http://comfy.test:8188/system_stats"]
+    assert down.timeouts[0] <= 2.0
+
+    # ComfyUI comes up: the first poll after the minute sees it.
+    up = ComfyStatus(up=True)
+    api.monkeypatch.setattr(local_comfyui, "urllib_transport", up)
+    clock[0] += 57.0
+    readiness = _page(api, story_id)["progress"]["edit_readiness"]
+    assert (readiness["ready"], readiness["route_class"], readiness["link"]) == (True, "local", "local/comfyui")
+    assert all(not item["needs_editor"] for item in _page(api, story_id)["progress"]["characters"].values())
+    assert up.urls == ["http://comfy.test:8188/system_stats"]
+    # Nothing was generated or spent by asking.
+    assert api.fakes.editor.requests == [] and api.fakes.editor.probes == []
 
 
 def test_approvals_refuse_unknown_entities_and_a_season_that_is_not_complete(api):

@@ -32,9 +32,14 @@ that needs an editor is first checked with :func:`edit_readiness`, which
 calls nothing. When no link of IMAGE_EDIT_CHAIN can run for the story's route
 and budget -- or the only ones that could are local servers and none answers
 its probe -- :class:`NeedsEditor` is raised before any generation request:
-nothing is spent, no file or document changes. The mode is never switched
-here. Only the user sets the story's ``consistency_mode`` to ``prompt_only``;
-every image then made from text alone is labelled so, and printed with 🟡.
+nothing is spent, no file or document changes. The story page and the cast
+and places estimates ask the same question ahead of time, so the user sees
+it before pressing Continue: ``edit_readiness(..., probe_local=True)`` asks a
+local editor that would run whether it is there (a short status probe,
+remembered per server for a minute); the pre-check here probes afresh. The
+mode is never switched here. Only the user sets the story's
+``consistency_mode`` to ``prompt_only``; every image then made from text
+alone is labelled so, and printed with 🟡.
 
 **Reference images per link.** At most :data:`MAX_REFERENCES` are sent: the
 portrait first, then the oldest design references (a place variant sends its
@@ -281,10 +286,10 @@ def _remove_other_extensions(stories, story_id, kind, eid, stem, keep) -> None:
 # ------------------------------------------------------------------ readiness
 
 def edit_readiness(story, *, env, qty=1, stories=None, story_spent=None, adapters=None,
-                   size=TURNAROUND_SIZE) -> dict:
+                   size=TURNAROUND_SIZE, probe_local=False, transport=None) -> dict:
     """Whether IMAGE_EDIT_CHAIN can make *qty* reference images for *story*
-    right now, calling nothing -- the same shape as the style preview's
-    estimate::
+    right now, calling nothing unless *probe_local* -- the same shape as the
+    style preview's estimate::
 
         {"step": "image_edit", "est_usd", "units": {"images": qty},
          "route_class": "local" | "free" | "paid" | "blocked",
@@ -298,6 +303,15 @@ def edit_readiness(story, *, env, qty=1, stories=None, story_spent=None, adapter
     ledger when *stories* is given); a free link needs its daily allowance.
     ``ready`` false is spec 8.1's "stop and ask" signal: the image needs an
     editor, or the user's switch to prompt-only consistency.
+
+    *probe_local* (the story page, the cast and places estimates): when a
+    local link would be the one to run *qty* >= 1 images, it is asked whether
+    it is there (:func:`_ask_locals_first`: its adapter's short status probe,
+    remembered per server for a minute; never a generation). One that does
+    not answer is ``skipped`` with the probe's reason and the next runnable
+    link decides -- blocked when none is left. *transport* is handed to that
+    probe (tests). The runner's own pre-check (:func:`_make`) leaves it off
+    and probes afresh.
     """
     if story_spent is None:
         story_spent = 0.0
@@ -305,10 +319,57 @@ def edit_readiness(story, *, env, qty=1, stories=None, story_spent=None, adapter
             ledger = imaging.open_ledger(stories, story["story_id"], error=RefImageError,
                                          doing="making an image")
             story_spent = ledger.totals()["est_usd"]
+    route = story["generation_profile"]["route"]
     request = gen.GenRequest(kind=gen.IMAGE_EDIT, width=size[0], height=size[1])
-    return imaging.estimate(gen.IMAGE_EDIT, env, route=story["generation_profile"]["route"], request=request,
-                            qty=qty, story_spent=story_spent, adapters=adapters, step=READINESS_STEP,
-                            what=_EDIT_WHAT, when=_EDIT_WHEN)
+    readiness = imaging.estimate(gen.IMAGE_EDIT, env, route=route, request=request, qty=qty,
+                                 story_spent=story_spent, adapters=adapters, step=READINESS_STEP,
+                                 what=_EDIT_WHAT, when=_EDIT_WHEN)
+    if probe_local and qty > 0 and readiness["ready"]:
+        readiness = _ask_locals_first(readiness, env, route=route, adapters=adapters, transport=transport)
+    return readiness
+
+
+def _ask_status(adapter, link, merged, transport):
+    """A local adapter's answer to "are you there": its cached status probe
+    (``probe_cached``) when it has one, else its ``probe``; ``(ok, note)``."""
+    probe = getattr(adapter, "probe_cached", None) or adapter.probe
+    kwargs = {"credentials": gen.credentials_for(link, merged), "env": merged}
+    if transport is not None:
+        kwargs["transport"] = transport
+    try:
+        return probe(link, **kwargs)
+    except Exception as exc:  # noqa: BLE001 - a probe that breaks is a server that is not there
+        return False, f"{type(exc).__name__}: {exc}"
+
+
+def _ask_locals_first(readiness, env, *, route, adapters, transport) -> dict:
+    """``edit_readiness(probe_local=True)``: while the link that would run
+    first is a local server, ask it whether it is there (:func:`_ask_status`).
+    One that does not answer is ``skipped`` with the probe's reason, as the
+    runner would skip it, and the verdict is read again from the rows
+    (``imaging.verdict``): the next runnable link's, or blocked when none is
+    left. The first local link that answers -- or a first runnable link that
+    is not local -- leaves *readiness* as it was."""
+    merged = gating.merged_env(env)
+    links = {gen.describe(link): link for link in gen.chain_from_env(gen.IMAGE_EDIT, merged)}
+    rows = copy.deepcopy(readiness["links"])
+    skipped = False
+    for row in rows:
+        if row["status"] != "runnable":
+            continue
+        link = links.get(row["link"])
+        adapter = gen.adapter_for(gen.IMAGE_EDIT, link.provider, adapters) if link is not None else None
+        if link is None or link.provider != "local" or adapter is None:
+            break
+        ok, note = _ask_status(adapter, link, merged, transport)
+        if ok:
+            break
+        row.update(status="skipped", reason=note or "not reachable")
+        skipped = True
+    if not skipped:
+        return readiness
+    return imaging.verdict(gen.IMAGE_EDIT, rows, route=route, qty=readiness["units"]["images"],
+                           step=READINESS_STEP, what=_EDIT_WHAT, when=_EDIT_WHEN)
 
 
 def _probe_locals(readiness, chain, merged, *, route, adapters, transport) -> dict:

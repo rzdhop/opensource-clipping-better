@@ -71,3 +71,15 @@ def _forget_model_swaps():
     llm.reset_model_fallbacks()
     yield
     llm.reset_model_fallbacks()
+
+
+@pytest.fixture(autouse=True)
+def _forget_comfyui_status():
+    """The story page's ComfyUI status probe is remembered per server for a
+    minute, for the life of the process. Tests share one process, so none
+    may inherit another's answer."""
+    from clipping.providers import local_comfyui
+
+    local_comfyui.reset_status_cache()
+    yield
+    local_comfyui.reset_status_cache()

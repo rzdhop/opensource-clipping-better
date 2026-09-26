@@ -843,19 +843,23 @@ def image_verdict(stories, story, qty, *, env) -> dict:
     )
 
 
-def edit_readiness(stories, story, *, env, qty):
-    """``refimages.edit_readiness`` for *qty* reference images, calling
-    nothing (a local link stays "probed when it runs"), with the story's
-    ledger total against the per-story cap (``stories=``). A ledger that
-    cannot be read makes it blocked, with that reason."""
+def edit_readiness(stories, story, *, env, qty, probe_local=False):
+    """``refimages.edit_readiness`` for *qty* reference images, with the
+    story's ledger total against the per-story cap (``stories=``). It calls
+    nothing -- a local link stays "probed when it runs" (the gates) -- unless
+    *probe_local* (the story page, the cast and places estimates): a local
+    editor that would run is then asked whether it is there, a short status
+    probe remembered per server for a minute. A ledger that cannot be read
+    makes it blocked, with that reason."""
     try:
-        return refimages.edit_readiness(story, env=env, qty=qty, stories=stories)
+        return refimages.edit_readiness(story, env=env, qty=qty, stories=stories, probe_local=probe_local)
     except refimages.RefImageError as exc:
         return imaging.blocked(refimages.READINESS_STEP, qty, [], str(exc))
 
 
-def progress(stories, story, *, env) -> dict:
-    """What each entity of the story still lacks, derived, calling nothing::
+def progress(stories, story, *, env, probe_local=False) -> dict:
+    """What each entity of the story still lacks, derived, calling nothing
+    (but a local editor's status probe, with *probe_local*)::
 
         {"characters": {char_id: {"missing": [...], "needs_editor": bool}},
          "places": {place_id: {"missing": [...]}},
@@ -865,9 +869,10 @@ def progress(stories, story, *, env) -> dict:
 
     ``missing`` is :func:`character_missing` / :func:`place_missing` /
     :func:`prop_missing`. ``edit_readiness`` is given once any sheet or time
-    variant is missing (for that many images); ``needs_editor`` is true for a
-    character in ``references`` mode that has its portrait, lacks a sheet,
-    and whose sheets no editor can make now -- spec 8.1's "stop and ask".
+    variant is missing (for that many images; :func:`edit_readiness`, with
+    *probe_local*); ``needs_editor`` is true for a character in
+    ``references`` mode that has its portrait, lacks a sheet, and whose
+    sheets no editor can make now -- spec 8.1's "stop and ask".
     ``pick_voice``: the characters whose text is written but who have no
     pinned voice (no catalogue voice was left for them).
     """
@@ -880,7 +885,8 @@ def progress(stories, story, *, env) -> dict:
     sheets = sum(1 for missing in char_missing.values() for sheet in SHEETS if sheet in missing)
     variants = sum(1 for doc in places for name, ref in doc["time_variants"].items()
                    if name != MASTER_PLATE and not _has(stories, story_id, PLACES, doc["place_id"], ref))
-    readiness = edit_readiness(stories, story, env=env, qty=sheets + variants) if sheets + variants else None
+    readiness = (edit_readiness(stories, story, env=env, qty=sheets + variants, probe_local=probe_local)
+                 if sheets + variants else None)
     blocked = readiness is not None and not readiness["ready"]
     references = story["generation_profile"]["consistency_mode"] == refimages.REFERENCES
 

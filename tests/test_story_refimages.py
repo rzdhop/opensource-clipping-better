@@ -29,7 +29,9 @@ import copy
 import hashlib
 import json
 import os
+import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -39,6 +41,7 @@ from clipping.aistory.store import StoryStore
 from clipping.cancel import Cancelled, CancelToken
 from clipping.providers.generation import GenResult
 from clipping.providers.transport import APIConnectionError, Response
+from clipping.providers.transport import urllib_transport as REAL_URLLIB_TRANSPORT
 
 ROOT = Path(__file__).resolve().parents[1]
 NOW = "2026-09-26T10:00:00+00:00"
@@ -1188,3 +1191,245 @@ def test_edit_readiness_reads_the_story_ledger_for_the_story_cap(store):
         "refused: est $0.030 on fal/seedream-4-edit would bring this story to $0.12 of its $0.10 cap")
     assert (two["est_usd"], two["units"]) == (0.06, {"images": 2})
     assert two["message"] == "2 images on fal/seedream-4-edit, paid: est $0.060."
+
+
+# ================================================ the story page's probe
+
+# The story page and the cast and places estimates ask a local editor whether
+# it is there (``probe_local=True``): a short status probe (``GET
+# /system_stats``, never a generation), remembered per server for a minute.
+# The runner's own pre-check (above) keeps probing fresh, with its own
+# timeout. A probe reaches only the fake transports below or an in-process
+# server on 127.0.0.1 -- never another host.
+
+STATS_FIXTURE = ROOT / "tests" / "fixtures" / "hardware" / "comfy_system_stats.json"
+
+
+def _loopback_only(base):
+    """The real urllib transport, for *base* (an in-process server) only; any
+    other URL fails the test. (The adapters' own ``urllib_transport`` is the
+    fixture's no-network stand-in.)"""
+
+    def transport(method, url, **kwargs):
+        if not url.startswith(base + "/"):
+            raise AssertionError(f"a real request was attempted: {method} {url}")
+        return REAL_URLLIB_TRANSPORT(method, url, **kwargs)
+
+    return transport
+
+
+@pytest.fixture
+def comfy_server():
+    """ComfyUI's status route, in process on 127.0.0.1: ``GET /system_stats``
+    answers the hardware fixture; every request path is recorded in
+    ``hits``; anything else is a 404."""
+    import http.server
+    import threading
+
+    stats = STATS_FIXTURE.read_bytes()
+    hits = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802 - http.server's name
+            hits.append(self.path)
+            status, body = (200, stats) if self.path == "/system_stats" else (404, b"{}")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield SimpleNamespace(url=f"http://127.0.0.1:{server.server_address[1]}", hits=hits)
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.fixture
+def silent_server():
+    """A server on 127.0.0.1 that accepts the connection (the kernel's
+    backlog) and never answers."""
+    import socket
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind(("127.0.0.1", 0))
+    sock.listen(8)
+    try:
+        yield f"http://127.0.0.1:{sock.getsockname()[1]}"
+    finally:
+        sock.close()
+
+
+def test_probe_local_reports_an_unreachable_comfyui_skipped_and_the_editor_not_ready(store):
+    """No other editor can run (Gemini is keyed but paid is off, fal has no
+    key): the page learns it before Continue, with the probe's reason."""
+    m = _new()
+    story = store.get(_story(store))
+    transport = FakeTransport(("comfy.test", APIConnectionError("GET http://comfy.test:8188/system_stats: "
+                                                                "[Errno 111] Connection refused")))
+
+    body = m.edit_readiness(story, env={**GEMINI, **COMFY}, qty=2, probe_local=True, transport=transport)
+
+    assert (body["ready"], body["route_class"], body["link"], body["est_usd"]) == (False, "blocked", None, 0.0)
+    assert body["units"] == {"images": 2}
+    local = body["links"][0]
+    assert (local["link"], local["status"]) == ("local/comfyui", "skipped")
+    assert local["reason"] == ("unreachable at http://comfy.test:8188 (GET http://comfy.test:8188/system_stats: "
+                               "[Errno 111] Connection refused)")
+    assert body["message"].startswith(
+        "No link of IMAGE_EDIT_CHAIN can make a reference image on route auto: local/comfyui: unreachable at "
+        "http://comfy.test:8188 (")
+    assert "gemini/nano-banana-2-lite: refused: est $0.067 on gemini/nano-banana-2-lite; allow_paid is off" \
+        in body["message"]
+    # One status request, and only that.
+    assert transport.urls() == ["http://comfy.test:8188/system_stats"]
+    assert [call["method"] for call in transport.calls] == ["GET"]
+    # Without probe_local nothing is asked: the local link is "probed when it runs".
+    fresh = FakeTransport()
+    assert m.edit_readiness(story, env={**GEMINI, **COMFY}, qty=2, transport=fresh)["ready"] is True
+    assert fresh.calls == []
+
+
+def test_probe_local_falls_through_an_unreachable_comfyui_to_the_link_that_would_run(store):
+    """A local editor that is down is skipped as the runner would skip it: a
+    paid editor allowed after it is the one the estimate prices."""
+    m = _new()
+    story = store.get(_story(store))
+    transport = FakeTransport(("comfy.test", APIConnectionError("connection refused")))
+    env = {"IMAGE_EDIT_CHAIN": "local/comfyui,fal/seedream-4-edit", **FAL, **PAID_ON, **COMFY}
+
+    body = m.edit_readiness(story, env=env, qty=2, probe_local=True, transport=transport)
+
+    assert (body["ready"], body["route_class"], body["link"]) == (True, "paid", "fal/seedream-4-edit")
+    assert body["est_usd"] == round(2 * SEEDREAM_PRICE, 6)
+    assert body["message"] == "2 images on fal/seedream-4-edit, paid: est $0.060."
+    assert [(row["link"], row["status"]) for row in body["links"]] == [
+        ("local/comfyui", "skipped"), ("fal/seedream-4-edit", "runnable")]
+    assert body["links"][0]["reason"].startswith("unreachable at http://comfy.test:8188")
+
+
+def test_probe_local_asks_nothing_when_a_non_local_link_would_run_first_or_nothing_is_counted(store):
+    m = _new()
+    story = store.get(_story(store))
+    transport = FakeTransport()
+    env = {"IMAGE_EDIT_CHAIN": "fal/seedream-4-edit,local/comfyui", **FAL, **PAID_ON, **COMFY}
+
+    first = m.edit_readiness(story, env=env, probe_local=True, transport=transport)
+    none = m.edit_readiness(story, env={**LOCAL_EDIT, **COMFY}, qty=0, probe_local=True, transport=transport)
+
+    assert (first["ready"], first["link"]) == (True, "fal/seedream-4-edit")
+    assert (none["ready"], none["link"]) == (True, "local/comfyui")
+    assert transport.calls == []
+
+
+def test_probe_local_asks_a_reachable_comfyui_once_and_the_editor_is_ready(store, comfy_server):
+    m = _new()
+    story = store.get(_story(store))
+    env = {**LOCAL_EDIT, "LOCAL_COMFYUI_URL": comfy_server.url}
+
+    body = m.edit_readiness(story, env=env, qty=2, probe_local=True, transport=_loopback_only(comfy_server.url))
+
+    assert (body["ready"], body["route_class"], body["link"], body["est_usd"]) == (
+        True, "local", "local/comfyui", 0.0)
+    assert body["links"][0]["status"] == "runnable"
+    assert comfy_server.hits == ["/system_stats"]
+
+
+def test_the_probe_is_remembered_per_server_for_a_minute(store, comfy_server, monkeypatch):
+    """The story page is polled every 4 s while a step runs: one probe a
+    minute per ComfyUI, whatever it answered."""
+    from clipping.providers import local_comfyui
+
+    m = _new()
+    clock = [1000.0]
+    monkeypatch.setattr(local_comfyui, "_now", lambda: clock[0])
+    story = store.get(_story(store))
+    env = {**LOCAL_EDIT, "LOCAL_COMFYUI_URL": comfy_server.url}
+    transport = _loopback_only(comfy_server.url)
+
+    first = m.edit_readiness(story, env=env, probe_local=True, transport=transport)
+    clock[0] += 59.0
+    again = m.edit_readiness(story, env=env, probe_local=True, transport=transport)
+
+    assert first == again and first["ready"] is True
+    assert comfy_server.hits == ["/system_stats"]
+
+    # Another server is another entry; an unreachable answer is remembered too.
+    down = FakeTransport(("comfy.test", APIConnectionError("connection refused")))
+    for _ in range(3):
+        blocked = m.edit_readiness(story, env={**LOCAL_EDIT, **COMFY}, probe_local=True, transport=down)
+        assert blocked["ready"] is False
+    assert down.urls() == ["http://comfy.test:8188/system_stats"]
+
+    # A minute on, the next poll asks again.
+    clock[0] += 1.5
+    m.edit_readiness(story, env=env, probe_local=True, transport=transport)
+    assert comfy_server.hits == ["/system_stats", "/system_stats"]
+
+
+def test_the_runners_precheck_never_reads_the_pages_remembered_probe(store, tmp_path):
+    """The page remembered "reachable"; the server has gone since. Making a
+    sheet probes afresh and stops and asks -- nothing generated or spent."""
+    m = _new()
+    story_id = _story(store)
+    _plant_portrait(store, story_id)
+    env = {**LOCAL_EDIT, **COMFY}
+    up = FakeTransport(("comfy.test", (200, json.loads(STATS_FIXTURE.read_text()))))
+    assert m.edit_readiness(store.get(story_id), env=env, probe_local=True, transport=up)["ready"] is True
+
+    down = FakeTransport(("comfy.test", APIConnectionError("connection refused")))
+    error, _log = _refused(m.character_image, store, story_id, CHAR, "turnaround", env=env, transport=down,
+                           error=m.NeedsEditor)
+
+    assert error.reasons == ["local/comfyui: unreachable at http://comfy.test:8188 (connection refused)"]
+    assert down.urls() == ["http://comfy.test:8188/system_stats"]
+    assert _ledger(store, story_id) == [] and not _spend(tmp_path).exists()
+
+
+def test_a_status_probe_never_outlasts_its_timeout_on_a_server_that_never_answers(store, silent_server):
+    from clipping.providers import local_comfyui
+
+    m = _new()
+    assert 0 < local_comfyui.STATUS_PROBE_TIMEOUT_SECONDS <= 2.0
+    story = store.get(_story(store))
+    env = {**LOCAL_EDIT, "LOCAL_COMFYUI_URL": silent_server}
+
+    started = time.monotonic()
+    body = m.edit_readiness(story, env=env, probe_local=True, transport=_loopback_only(silent_server))
+    elapsed = time.monotonic() - started
+
+    assert elapsed < local_comfyui.STATUS_PROBE_TIMEOUT_SECONDS + 0.5
+    assert body["ready"] is False
+    assert body["links"][0]["reason"].startswith(f"unreachable at {silent_server} (")
+
+
+def test_a_status_probe_is_cut_at_its_timeout_even_when_the_request_itself_hangs(monkeypatch):
+    """A name lookup is not covered by a socket timeout: the probe's own
+    deadline is."""
+    import threading
+
+    from clipping.providers import local_comfyui
+
+    monkeypatch.setattr(local_comfyui, "STATUS_PROBE_TIMEOUT_SECONDS", 0.2)
+    release = threading.Event()
+
+    def hangs(method, url, **_kwargs):
+        release.wait(10)
+        raise APIConnectionError("released")
+
+    try:
+        started = time.monotonic()
+        ok, note = local_comfyui.probe_status("http://comfy.test:8188", transport=hangs)
+        elapsed = time.monotonic() - started
+    finally:
+        release.set()
+
+    assert elapsed < 0.2 + 0.5
+    assert (ok, note) == (False, "unreachable at http://comfy.test:8188 (no answer within 0.2s)")

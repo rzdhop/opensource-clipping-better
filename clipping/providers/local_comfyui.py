@@ -28,6 +28,7 @@ import random
 import re
 import socket
 import struct
+import threading
 import time
 import urllib.parse
 import uuid
@@ -277,17 +278,17 @@ class ComfyUIClient:
     def _get(self, path: str, *, timeout=None) -> dict:
         return request_json(self._transport, "GET", f"{self.base_url}{path}", headers={}, timeout=timeout or self.timeout)
 
-    def system_stats(self) -> dict:
-        return self._get("/system_stats", timeout=15)
+    def system_stats(self, *, timeout=15) -> dict:
+        return self._get("/system_stats", timeout=timeout)
 
     def object_info(self) -> dict:
         if self._object_info is None:
             self._object_info = self._get("/object_info", timeout=60)
         return self._object_info
 
-    def reachable(self):
+    def reachable(self, *, timeout=15):
         try:
-            stats = self.system_stats()
+            stats = self.system_stats(timeout=timeout)
         except (APIConnectionError, APITimeoutError) as exc:
             return False, f"unreachable at {self.base_url} ({exc})"
         version = (stats.get("system") or {}).get("comfyui_version", "?")
@@ -410,6 +411,65 @@ class ComfyUIClient:
                          use_ws=True, ws_factory=ws_factory)
 
 
+# ------------------------------------------------------------ status probe
+
+# The story page's "is ComfyUI there?" (spec 8.1's stop and ask, shown before a
+# step runs, not after): ``GET /system_stats`` -- a status request, never a
+# generation -- with a short deadline, and its answer remembered per base URL
+# for a minute, since the page is polled every few seconds while a step runs.
+# The generation path never reads this: the runner's pre-check and
+# ``generate`` ask the server afresh.
+STATUS_PROBE_TIMEOUT_SECONDS = 2.0
+STATUS_CACHE_SECONDS = 60.0
+_now = time.monotonic           # the cache's clock (tests replace it)
+_status_cache = {}              # base URL -> (checked at, ok, note)
+_status_lock = threading.Lock()
+
+
+def reset_status_cache() -> None:
+    """Forget every remembered status (tests: one process runs them all)."""
+    with _status_lock:
+        _status_cache.clear()
+
+
+def _status_within(base_url, *, transport, timeout):
+    """``ComfyUIClient.reachable`` held to *timeout* seconds in all: the
+    request runs in a daemon thread that is given that long, so a name lookup
+    that hangs -- which no socket timeout covers -- cannot hold the caller
+    longer. A thread still waiting is abandoned; its answer is dropped."""
+    answer = []
+
+    def ask():
+        try:
+            answer.append(ComfyUIClient(base_url, transport=transport).reachable(timeout=timeout))
+        except Exception as exc:  # noqa: BLE001 - a status that breaks is a server that is not there
+            answer.append((False, f"unreachable at {base_url} ({type(exc).__name__}: {exc})"))
+
+    worker = threading.Thread(target=ask, name="comfyui-status", daemon=True)
+    worker.start()
+    worker.join(timeout)
+    if not answer:
+        return False, f"unreachable at {base_url} (no answer within {timeout:g}s)"
+    return answer[0]
+
+
+def probe_status(base_url, *, transport=None):
+    """``(ok, note)``: whether ComfyUI at *base_url* answers ``GET
+    /system_stats`` within :data:`STATUS_PROBE_TIMEOUT_SECONDS` -- never
+    longer. The answer, either way, is remembered for
+    :data:`STATUS_CACHE_SECONDS` per base URL; a remembered one is returned
+    without a request."""
+    key = base_url.rstrip("/")
+    with _status_lock:
+        hit = _status_cache.get(key)
+        if hit is not None and _now() - hit[0] < STATUS_CACHE_SECONDS:
+            return hit[1], hit[2]
+    ok, note = _status_within(key, transport=transport, timeout=STATUS_PROBE_TIMEOUT_SECONDS)
+    with _status_lock:
+        _status_cache[key] = (_now(), ok, note)
+    return ok, note
+
+
 # ----------------------------------------------------------------- adapter
 
 DEFAULT_TEMPLATES = {IMAGE: "t2i_flux2_klein", IMAGE_EDIT: "edit_flux2_klein_multiref"}
@@ -423,6 +483,11 @@ class ComfyUIImageAdapter:
 
     def probe(self, link, *, credentials, transport=None, env=None):
         return ComfyUIClient(generation.local_url("comfyui", env), transport=transport).reachable()
+
+    def probe_cached(self, link, *, credentials=None, transport=None, env=None):
+        """The story page's probe (:func:`probe_status`): short, and
+        remembered per server for a minute. The runner uses :meth:`probe`."""
+        return probe_status(generation.local_url("comfyui", env), transport=transport)
 
     def generate(self, link, request, *, credentials, on_log, transport=None, env=None,
                  sleep_fn=time.sleep, time_fn=time.monotonic, ws_factory=None, **_):

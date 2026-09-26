@@ -35,6 +35,9 @@ STORY_FUNCTIONS = [
     # upload progress), not a `request()` caller.
     "fetchCharacterVoices", "patchCharacter", "deleteCharacter", "deleteCharacterUpload",
     "fetchStoryMediaUrl",
+    # Phase 2, stage 10 (PlacesStep/SeasonStep): inline place/prop edits and
+    # deletes.
+    "patchPlace", "patchProp", "deletePlace", "deleteProp",
 ]
 
 
@@ -74,7 +77,7 @@ def _function_body(src: str, name: str) -> str:
 def test_the_readers_see_something():
     """A broken regex would make every assertion below pass for free."""
     assert len(_job_status_values()) >= 8
-    assert len(STORY_FUNCTIONS) == 18
+    assert len(STORY_FUNCTIONS) == 22
 
 
 # --------------------------------------------------------- components/ActivityFeed.jsx
@@ -241,3 +244,27 @@ def test_the_prompt_only_switch_is_behind_a_confirm_call():
     assert match, "switchToPromptOnly not found in CastStep.jsx"
     assert "window.confirm(" in match.group(1)
     assert "consistency_mode: 'prompt_only'" in match.group(1)
+
+
+# ======================================================= EstimateChip.jsx (phase 2)
+
+ESTIMATE_CHIP = DASHBOARD_SRC / "components" / "EstimateChip.jsx"
+
+
+def test_the_estimate_chip_renders_every_unit_of_a_generation_estimate():
+    """Found in the browser review: the cast and places estimates carry
+    ``{llm_calls, images, edit_images, tts_chars}`` and the chip showed only
+    the LLM calls. Every non-zero unit is rendered ("5 LLM · 5 images · 10
+    edits · voice ~180 chars"); the phase-1 single-unit renderings stay as
+    they were."""
+    src = ESTIMATE_CHIP.read_text(encoding="utf-8")
+    generation = src.split("function generationUnitsLabel(", 1)[1].split("\n}\n", 1)[0]
+    for unit in ("units.llm_calls", "units.images", "units.edit_images", "units.tts_chars"):
+        assert unit in generation, unit
+    assert "'edit'" in generation and "voice ~" in generation and "' · '" in generation
+    # A generation estimate is told apart by its units, before the phase-1 branches.
+    label = src.split("export function unitsLabel(", 1)[1].split("\n}\n", 1)[0]
+    assert label.index("generationUnitsLabel(units)") < label.index("units.llm_calls != null")
+    # The phase-1 renderings, byte for byte (concepts, bible, style, style_preview, season).
+    assert "return `${n} LLM call${n === 1 ? '' : 's'}`" in label
+    assert "return `${n} image${n === 1 ? '' : 's'}`" in label

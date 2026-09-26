@@ -1927,3 +1927,257 @@ html, body {
     align-items: stretch;
   }
 }
+
+/* ------------------------------------------------------------------------
+   Places & props step (phase 2, stage 10): the proposal editor, the place
+   cards (a day plate plus its time variants), the prop cards and the
+   "needs an editor" banner. Additive to everything above; the 768 px
+   sidebar breakpoint is untouched.
+   ------------------------------------------------------------------------ */
+
+.story-places-proposal-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 8px 0 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.story-places-proposal-item {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.story-places-proposal-item .form-input {
+  flex: 1;
+  min-width: 120px;
+}
+
+.story-places-proposal-item .form-select {
+  min-width: 120px;
+}
+
+.story-places-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  margin-top: 12px;
+  margin-bottom: 16px;
+}
+
+@media (min-width: 901px) {
+  .story-places-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.story-places-card,
+.story-places-prop-card {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.story-places-card-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.story-places-card-header h4 {
+  font-size: 15px;
+  font-weight: 700;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The day plate and every other time variant, all 9:16 like a character
+ * portrait -- object-fit: contain so a generated plate never crops. One per
+ * row at <= 600 px, same as the cast's image strip. */
+.story-places-images {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+@media (max-width: 600px) {
+  .story-places-images {
+    grid-template-columns: 1fr;
+  }
+}
+
+.story-places-image-slot {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.story-places-image-box {
+  width: 100%;
+  aspect-ratio: 9 / 16;
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.story-places-image-box img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.story-places-image-empty {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  text-align: center;
+  padding: 8px;
+}
+
+.story-places-image-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.story-places-image-label {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  text-transform: capitalize;
+}
+
+.story-places-add-variant {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.story-places-add-variant .form-select {
+  flex: 1;
+  min-width: 140px;
+}
+
+/* A prop's image is square, unlike a place's 9:16 plate; capped so a square
+ * card does not tower over the descriptor and owner fields below it. */
+.story-places-prop-image-box {
+  aspect-ratio: 1 / 1;
+  max-width: 220px;
+}
+
+.story-places-prop-image {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.story-places-editor-banner {
+  border-color: rgba(245, 158, 11, 0.4);
+  margin-bottom: 16px;
+}
+
+@media (max-width: 600px) {
+  .story-places-proposal-item {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+/* ------------------------------------------------------------------------
+   Season step (phase 2, stage 10): the episode selector, the arc as a
+   vertical timeline (phone-first: readable and tappable at 375 px), the
+   series-memory placeholder and the approve/re-plan actions.
+   ------------------------------------------------------------------------ */
+
+.story-season-episodes-input {
+  max-width: 100px;
+}
+
+.story-season-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 12px 0;
+  padding-left: 16px;
+  border-left: 2px solid var(--border-color);
+}
+
+.story-season-entry {
+  position: relative;
+  padding: 10px 0 10px 16px;
+  border-bottom: 1px solid var(--border-color);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.story-season-entry::before {
+  content: '';
+  position: absolute;
+  left: -21px;
+  top: 16px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.story-season-entry-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.story-season-entry-number {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.story-season-entry-characters {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin: 6px 0 0;
+}
+
+.story-season-memory {
+  margin: 16px 0;
+}
+
+.story-season-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.story-season-replan {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+@media (max-width: 600px) {
+  .story-season-timeline {
+    padding-left: 12px;
+  }
+  .story-season-entry {
+    padding-left: 12px;
+  }
+  .story-season-entry::before {
+    left: -17px;
+  }
+}

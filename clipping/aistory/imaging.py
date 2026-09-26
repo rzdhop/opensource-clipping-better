@@ -9,7 +9,9 @@ say the same words:
   requests of one size, that calls nothing: the story's route, the adapter,
   the keys; a local link is "probed when it runs"; a paid link needs
   ``allow_paid`` and the caps' verdict (with the story's total so far); a
-  free link needs its daily allowance;
+  free link needs its daily allowance (:func:`verdict` reads the answer off
+  those rows, again when a caller learnt more -- a local server that does not
+  answer);
 - :func:`read_lock`, :func:`resolve`, :func:`open_ledger` -- what must hold
   before anything is spent (a valid style lock, a chain and a budget that
   parse, a ledger that can be read);
@@ -225,6 +227,15 @@ def estimate(kind, settings_env, *, route, request, qty=1, story_spent=0.0, adap
 
     rows = [estimate_row(kind, link, merged, budget_obj, request, qty=qty, route=route,
                          story_spent=story_spent, adapters=adapters) for link in chain]
+    return verdict(kind, rows, route=route, qty=qty, step=step, what=what, when=when)
+
+
+def verdict(kind, rows, *, route, qty, step, what, when) -> dict:
+    """:func:`estimate`'s answer from its rows (:func:`estimate_row`): the
+    first runnable link decides the class, the price and the message; none
+    is ``blocked``. A caller that learns more than the estimate knew -- a
+    local server that does not answer its probe -- marks that row
+    ``skipped`` and asks again."""
     first = next((row for row in rows if row["status"] == "runnable"), None)
     if first is None:
         return blocked(step, qty, rows, no_link_message(kind, rows, what=what, route=route))

@@ -395,7 +395,7 @@ def _generation_message(units, images, edit, refusals) -> str:
     return " ".join(parts) or "Nothing is missing: nothing would be called."
 
 
-def _generation_estimate(stories, story, step, units, *, env) -> dict:
+def _generation_estimate(stories, story, step, units, *, env, probe_local=False) -> dict:
     """What a step that makes images would cost and where it would run::
 
         {"step", "est_usd", "units": {"llm_calls", "images", "edit_images", "tts_chars"},
@@ -407,10 +407,12 @@ def _generation_estimate(stories, story, step, units, *, env) -> dict:
     (0.0 on a free or local link) + the edits times the editor's, when it
     can run (spec 8.1: without one the step stops and asks before any edit).
     Not ``ready``: the LLM chain is refused (when a call is counted), or no
-    image link can run (when an image is counted). Nothing is called.
+    image link can run (when an image is counted). Nothing is called, but a
+    local editor's status probe with *probe_local* (the cast and places
+    estimates: ``workflow.edit_readiness``).
     """
     images = _image_verdict(stories, story, units["images"], env=env)
-    edit = workflow.edit_readiness(stories, story, env=env, qty=units["edit_images"])
+    edit = workflow.edit_readiness(stories, story, env=env, qty=units["edit_images"], probe_local=probe_local)
     refusals = []
     if units["llm_calls"]:
         _links, _keys, refusal = _llm_gate(env)
@@ -537,13 +539,16 @@ async def get_story(story_id: str) -> dict:
                       "pick_voice": [char_id, ...],
                       "edit_readiness": <the editor's verdict> | null}}
 
-    ``progress`` is derived (``workflow.progress``) and calls nothing: a
-    character's ``missing`` is among ``text, portrait, turnaround,
-    expressions, voice, sample``, a place's among ``text, day``, a prop's
-    among ``text, image``; ``needs_editor`` is spec 8.1's "stop and ask"
-    (``references`` mode, the portrait there, a sheet missing, no editor
-    able to run -- a local one counts as "probed when it runs");
-    ``edit_readiness`` is given while any sheet or time variant is missing.
+    ``progress`` is derived (``workflow.progress``) and calls nothing but a
+    local editor's status probe: a character's ``missing`` is among ``text,
+    portrait, turnaround, expressions, voice, sample``, a place's among
+    ``text, day``, a prop's among ``text, image``; ``needs_editor`` is spec
+    8.1's "stop and ask" (``references`` mode, the portrait there, a sheet
+    missing, no editor able to run); ``edit_readiness`` is given while any
+    sheet or time variant is missing. A local editor that would run is asked
+    whether it is there (``probe_local``: ``GET /system_stats``, 2 s at
+    most, remembered per server for a minute -- this page is polled while a
+    step runs), so an unreachable ComfyUI shows here, before Continue.
     """
     stories = _stories()
     story = _load(stories, story_id)
@@ -555,7 +560,9 @@ async def get_story(story_id: str) -> dict:
         props = workflow.list_entities(stories, story_id, PROPS)
         season = workflow.season(stories, story_id)
         proposal = workflow.places_proposal(stories, story_id)
-        progress = workflow.progress(stories, story, env=worker.get_settings_env())
+        # Off the event loop: the status probe may wait up to its timeout.
+        progress = await run_in_threadpool(workflow.progress, stories, story, env=worker.get_settings_env(),
+                                           probe_local=True)
     # A step's feed can hold hundreds of events and has its own stream
     # (GET /api/jobs/{id}/status); this page is polled from a phone.
     step_jobs = [
@@ -1044,9 +1051,11 @@ async def estimate(story_id: str, step: str, target: Optional[str] = None,
     character counts fully), ``est_usd`` = images x the first runnable image
     link's price + edits x the editor's, ``route_class`` and ``links`` of
     ``IMAGE_CHAIN``, ``edit`` the editor's verdict (with the story's ledger
-    total against the cap). A phase-2 ``?target=`` of ``regenerate``: a text
-    or an arc entry as the LLM steps (1 call); an image or a voice as
-    ``_generation_estimate``. A later step: 400; anything else: 404.
+    total against the cap; a local editor that would run the counted edits
+    is asked whether it is there, as on the story page). A phase-2
+    ``?target=`` of ``regenerate``: a text or an arc entry as the LLM steps
+    (1 call); an image or a voice as ``_generation_estimate``. A later step:
+    400; anything else: 404.
     """
     stories = _stories()
     story = _load(stories, story_id)
@@ -1065,14 +1074,16 @@ async def estimate(story_id: str, step: str, target: Optional[str] = None,
             names = list(selected or [])
             workflow.check_sketch_names(story, names)
             units = workflow.cast_units(stories, story, selected=names)
-        return _generation_estimate(stories, story, step, units, env=env)
+        return await run_in_threadpool(_generation_estimate, stories, story, step, units, env=env,
+                                       probe_local=True)
     if step == "places":
         with _answering():
             units = workflow.places_units(stories, story)
             listed = (workflow.places_proposal(stories, story_id) is not None
                       or workflow.list_entities(stories, story_id, PLACES)
                       or workflow.list_entities(stories, story_id, PROPS))
-        body = _generation_estimate(stories, story, step, units, env=env)
+        body = await run_in_threadpool(_generation_estimate, stories, story, step, units, env=env,
+                                       probe_local=True)
         if not listed:
             body.update(ready=False, message="Propose or list the places first.")
         return body

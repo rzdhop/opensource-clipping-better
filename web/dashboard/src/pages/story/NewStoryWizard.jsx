@@ -6,6 +6,8 @@ import ConceptsStep from './steps/ConceptsStep'
 import BibleStep from './steps/BibleStep'
 import StyleStep from './steps/StyleStep'
 import CastStep from './steps/CastStep'
+import PlacesStep from './steps/PlacesStep'
+import SeasonStep from './steps/SeasonStep'
 
 // The story defaults (spec 8, 8.1, 8.5): a story that does not name every
 // one of these gets exactly these values. tests/test_story_defaults.py reads
@@ -18,6 +20,8 @@ const STEPS = [
   { key: 'bible', number: 3, label: 'Bible' },
   { key: 'style', number: 4, label: 'Style' },
   { key: 'cast', number: 5, label: 'Cast' },
+  { key: 'places', number: 6, label: 'Places & props' },
+  { key: 'season', number: 7, label: 'Season' },
 ]
 
 const IN_FLIGHT = ['queued', 'running']
@@ -37,6 +41,14 @@ function statusOf(key, story) {
     if (story.approvals.cast) return 'done'
     return story.approvals.style ? 'active' : 'disabled'
   }
+  if (key === 'places') {
+    if (story.approvals.places) return 'done'
+    return story.approvals.cast ? 'active' : 'disabled'
+  }
+  if (key === 'season') {
+    if (story.approvals.season) return 'done'
+    return story.approvals.places ? 'active' : 'disabled'
+  }
   return 'disabled'
 }
 
@@ -44,6 +56,8 @@ function disabledReason(key) {
   if (key === 'bible') return 'Choose a concept first.'
   if (key === 'style') return 'Approve the bible first.'
   if (key === 'cast') return 'Approve the style first.'
+  if (key === 'places') return 'Approve the cast first.'
+  if (key === 'season') return 'Approve every place and prop first.'
   return ''
 }
 
@@ -59,6 +73,16 @@ function summaryFor(key, story, data) {
   if (key === 'cast') {
     const count = (data.characters || []).length
     return count ? `${count} character${count === 1 ? '' : 's'} in the cast.` : 'No cast yet.'
+  }
+  if (key === 'places') {
+    const placeCount = (data.places || []).length
+    const propCount = (data.props || []).length
+    if (!placeCount && !propCount) return 'No places yet.'
+    return `${placeCount} place${placeCount === 1 ? '' : 's'}, ${propCount} prop${propCount === 1 ? '' : 's'}.`
+  }
+  if (key === 'season') {
+    const season = data.season
+    return season && season.episodes_planned ? `${season.episodes_planned} episodes planned.` : 'No season yet.'
   }
   return ''
 }
@@ -366,7 +390,7 @@ function ExistingStory({ storyId }) {
   const inFlightJob = data.jobs.find((j) => IN_FLIGHT.includes(j.status)) || null
   const defaultExpanded = STEPS.find((s) => statusOf(s.key, story) === 'active')
   const expanded = manualStep || (defaultExpanded ? defaultExpanded.key : 'cast')
-  const allDone = Boolean(story.approvals.cast)
+  const allDone = Boolean(story.approvals.season)
 
   return (
     <div className="fade-in">
@@ -431,6 +455,12 @@ function ExistingStory({ storyId }) {
                   {step.key === 'cast' && (
                     <CastStep data={data} storyId={storyId} inFlightJob={inFlightJob} onChange={afterAction} onAdvance={afterAdvance} />
                   )}
+                  {step.key === 'places' && (
+                    <PlacesStep data={data} storyId={storyId} inFlightJob={inFlightJob} onChange={afterAction} onAdvance={afterAdvance} />
+                  )}
+                  {step.key === 'season' && (
+                    <SeasonStep data={data} storyId={storyId} inFlightJob={inFlightJob} onChange={afterAction} onAdvance={afterAdvance} />
+                  )}
                 </div>
               )}
             </div>
@@ -440,10 +470,9 @@ function ExistingStory({ storyId }) {
 
       {allDone && (
         <div className="card" style={{ marginBottom: '16px' }}>
-          <h3 className="card-title">What exists so far</h3>
+          <h3 className="card-title">Ready</h3>
           <p>
-            The bible and the style are locked, and the cast is approved, for <strong>{story.title}</strong>.
-            Places &amp; props and the season arrive next.
+            The story is ready: bible, style, cast, places and a planned season. Episodes arrive in phase 3.
           </p>
         </div>
       )}

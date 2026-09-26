@@ -544,12 +544,14 @@ export async function regenerateStory(storyId, payload) {
  * route_class, link, ready, message}`. `target` only matters for
  * `regenerate` (its own estimate differs by what is being regenerated);
  * `selected` only for `cast` (the ticked cast-sketch names, repeated as
- * `?selected=`).
+ * `?selected=`); `episodes` only for `season` (3 to 12, default 8 -- the
+ * estimate is `1 + episodes` LLM calls).
  */
-export async function fetchStoryEstimate(storyId, step, { target, selected } = {}) {
+export async function fetchStoryEstimate(storyId, step, { target, selected, episodes } = {}) {
   const params = new URLSearchParams()
   if (target) params.set('target', target)
   if (selected) selected.forEach((name) => params.append('selected', name))
+  if (episodes != null) params.set('episodes', episodes)
   const qs = params.toString()
   const res = await request(`/stories/${storyId}/estimate/${step}${qs ? `?${qs}` : ''}`)
   if (!res.ok) throw await apiError(res, 'Failed to fetch the estimate')
@@ -581,6 +583,42 @@ export async function patchCharacter(storyId, charId, payload) {
 export async function deleteCharacter(storyId, charId) {
   const res = await request(`/stories/${storyId}/characters/${charId}`, { method: 'DELETE' })
   if (!res.ok) throw await apiError(res, 'Failed to delete the character')
+  return res.json()
+}
+
+/** Edit a place inline; only the fields sent are applied. Answers what was written. */
+export async function patchPlace(storyId, placeId, payload) {
+  const res = await request(`/stories/${storyId}/places/${placeId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) throw await apiError(res, 'Failed to update the place')
+  return res.json()
+}
+
+/** Edit a prop inline; only the fields sent are applied. Answers what was written. */
+export async function patchProp(storyId, propId, payload) {
+  const res = await request(`/stories/${storyId}/props/${propId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) throw await apiError(res, 'Failed to update the prop')
+  return res.json()
+}
+
+/** Delete a place (its folder, its id from the story); 409 while a step is in flight. */
+export async function deletePlace(storyId, placeId) {
+  const res = await request(`/stories/${storyId}/places/${placeId}`, { method: 'DELETE' })
+  if (!res.ok) throw await apiError(res, 'Failed to delete the place')
+  return res.json()
+}
+
+/** Delete a prop (its folder, its id from the story); 409 while a step is in flight. */
+export async function deleteProp(storyId, propId) {
+  const res = await request(`/stories/${storyId}/props/${propId}`, { method: 'DELETE' })
+  if (!res.ok) throw await apiError(res, 'Failed to delete the prop')
   return res.json()
 }
 
