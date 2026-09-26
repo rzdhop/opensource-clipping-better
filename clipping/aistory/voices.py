@@ -211,10 +211,19 @@ def _score(prefer: dict, voice: Voice, index: int) -> tuple:
     prefer = prefer or {}
     pref_gender = _GENDER_TO_CATALOGUE.get(prefer.get("gender"))
     gender = 1 if pref_gender and (voice.gender == pref_gender or voice.gender == "any") else 0
-    pref_age = prefer.get("age")
-    age = 1 if pref_age and voice.age == pref_age else 0
+    # Age is a distance, not a match: with no elder voice left, an adult one
+    # (one step away) beats a young one (two). Found live when a matriarch
+    # got a youthful voice because catalogue order broke an all-zero tie.
+    pref_rank = _AGE_RANK.get(_AGE_ALIAS.get(prefer.get("age"), prefer.get("age")))
+    voice_rank = _AGE_RANK.get(_AGE_ALIAS.get(voice.age, voice.age))
+    age = -abs(pref_rank - voice_rank) if pref_rank is not None and voice_rank is not None else -len(_AGE_RANK)
     style = len(set(prefer.get("style_tags") or ()) & set(voice.style_tags))
     return (gender, age, style, -index)
+
+
+# K1's ages and the catalogue's, on one scale (the catalogue says "senior").
+_AGE_RANK = {"child": 0, "young": 1, "adult": 2, "elder": 3}
+_AGE_ALIAS = {"senior": "elder", "teen": "young", "kid": "child"}
 
 
 def _best_of(prefer: dict, pool: list):

@@ -526,3 +526,28 @@ def test_a_written_characters_voice_hints_drive_the_proposal_and_the_pin():
     pinned = voices.pin(character, chosen)
     assert pinned["direction"] == "proud, clipped"
     assert pinned["sample_line"] == "Je gagnerai, avec ou sans vous."
+
+
+def test_an_elder_brief_prefers_an_adult_voice_over_a_young_one():
+    # Found live (Tier-2, 2026-09-26): Broccolia, a female elder, got the
+    # "young" fr-FR-EloiseNeural because no female voice was elder and the
+    # age score was all-or-nothing -- catalogue order then picked the young
+    # one. Age is a distance: adult is one step from elder, young two.
+    elder = {"char_id": "char_b", "name": "B", "role": "recurring", "created_at": "2026-09-26T00:00:00+00:00",
+             "voice_hints": {"gender": "female", "age": "elder", "style_tags": [], "direction": "", "sample_line": "x"}}
+    env = {"TTS_CHAIN": "edge/fr-FR-DeniseNeural"}
+    pool = voices.catalogue("fr", env=env)
+    ranked = voices.alternates(elder, "fr", env=env, taken=())
+    ages = {v.voice_id: v.age for v in pool}
+    assert ages.get("fr-FR-EloiseNeural") == "young"
+    assert ranked[0].gender in ("f", "female")
+    assert ranked[0].age != "young"
+    assert [v.voice_id for v in ranked].index("fr-FR-EloiseNeural") > 0
+
+
+def test_the_catalogue_senior_counts_as_elder():
+    senior_male = {"char_id": "char_s", "name": "S", "role": "lead", "created_at": "2026-09-26T00:00:00+00:00",
+                   "voice_hints": {"gender": "male", "age": "elder", "style_tags": [], "direction": "", "sample_line": "x"}}
+    env = {"TTS_CHAIN": "edge/fr-FR-HenriNeural"}
+    ranked = voices.alternates(senior_male, "fr", env=env, taken=())
+    assert ranked[0].voice_id == "fr-CA-ThierryNeural"
