@@ -640,6 +640,60 @@ class StoryStepRequest(BaseModel):
 
 class StoryRegenerateRequest(BaseModel):
     """POST /api/stories/{id}/regenerate: one target of the spec 9.2 grammar,
-    and an optional note for the model ("make it darker")."""
+    and an optional note for the model ("make it darker").
+
+    ``voice`` (phase 2) is the voice a user picked for the target
+    ``character:<id>:voice``: ``{provider, voice_id, rate?, pitch?}``, checked
+    by ``clipping.aistory.workflow.check_voice_choice`` (400/409, not 422,
+    which is why it is a plain object here). Refused with any other target.
+    """
     target: str
     note: Optional[str] = Field(None, max_length=300)
+    voice: Optional[dict] = None
+
+
+# Phase 2 (spec 2.3-2.5, 9.2): inline edits of a character, a place, a prop.
+# Only the fields sent are applied (model_fields_set). Values are checked by
+# the entity's own rules when it is saved (400 with their errors), not here,
+# so the rules live in one place (clipping.aistory.workflow.patch_entity).
+# Every edit clears that entity's approval.
+
+class CharacterPatchRequest(BaseModel):
+    """PATCH /api/stories/{id}/characters/{char_id}.
+
+    ``voice_direction`` and ``sample_line`` edit the pinned voice and the
+    voice brief; ``rate`` and ``pitch`` the pinned voice (``"+10%"``,
+    ``"-5Hz"``). ``personality`` is merged onto the current one. A change to
+    the descriptor or the signature items recomputes the prompt block; a
+    change to the sample line, rate or pitch removes the voice sample.
+    """
+    name: Optional[str] = None
+    role: Optional[str] = None
+    archetype: Optional[str] = None
+    one_line: Optional[str] = None
+    descriptor: Optional[str] = None
+    signature_items: Optional[list[str]] = None
+    personality: Optional[dict] = None
+    voice_direction: Optional[str] = None
+    sample_line: Optional[str] = None
+    rate: Optional[str] = None
+    pitch: Optional[str] = None
+
+
+class PlacePatchRequest(BaseModel):
+    """PATCH /api/stories/{id}/places/{place_id}. A change to the descriptor
+    or the layout notes recomputes the prompt block."""
+    name: Optional[str] = None
+    one_line: Optional[str] = None
+    descriptor: Optional[str] = None
+    layout_notes: Optional[str] = None
+
+
+class PropPatchRequest(BaseModel):
+    """PATCH /api/stories/{id}/props/{prop_id}. ``owner_char_id`` is one of
+    the story's characters, or null. A change to the descriptor recomputes
+    the prompt block."""
+    name: Optional[str] = None
+    one_line: Optional[str] = None
+    descriptor: Optional[str] = None
+    owner_char_id: Optional[str] = None

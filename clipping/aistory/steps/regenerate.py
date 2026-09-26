@@ -15,8 +15,10 @@ Phase 1:
 
 Phase 2 (the entity targets; each touches its own item only):
 
-- ``character:<id>:text`` -- K1 again with the note; the images and the
-  pinned voice stay, the voice brief is rewritten.
+- ``character:<id>:text`` -- K1 again with the note (``cast.write_text``:
+  each design reference not yet described is described first, a failure
+  printed and K1 run without it); the images and the pinned voice stay, the
+  voice brief is rewritten.
 - ``character:<id>:image:portrait`` -- a fresh seed and the note; then the
   turnaround and the expressions sheet **that already existed** are made
   again from the new portrait (they were drawn from the old one). A sheet
@@ -56,8 +58,8 @@ from .llm_call import StepFailed
 BIBLE_PREFIX = "bible:"
 CONCEPTS_TARGET = "concepts"
 
-# Phase 1's fixed targets: the web layer's grammar checks a target against
-# these exactly (``workflow.check_regenerate_target``).
+# Phase 1's fixed targets, matched exactly; phase 2's are shapes
+# (``parse_target``). ``workflow.check_regenerate_target`` accepts both.
 VALID_TARGETS = tuple(f"{BIBLE_PREFIX}{field}" for field in prompts.REGENERATE_TARGETS) + (CONCEPTS_TARGET,)
 
 # Phase 2's target shapes (spec 9.2), as a refusal names them.
@@ -127,6 +129,17 @@ def parse_target(target):
     return None
 
 
+def is_extra_target(target) -> bool:
+    """Whether *target* is ``character:<char_id>:image:extra:<n>`` -- a shape
+    of the 9.2 grammar whose images arrive in a later phase."""
+    if not isinstance(target, str):
+        return False
+    parts = target.split(":")
+    return (len(parts) >= 4 and parts[0] == "character" and parts[2] == "image"
+            and store_mod.ENTITY_KINDS[CHARACTERS].pattern.fullmatch(parts[1]) is not None
+            and _EXTRA.fullmatch(":".join(parts[3:])) is not None)
+
+
 def run(ctx, *, runner=None, time_fn=time.monotonic, sleep_fn=time.sleep, adapters=None, transport=None) -> dict:
     params = ctx.params or {}
     target = params.get("target")
@@ -142,12 +155,8 @@ def run(ctx, *, runner=None, time_fn=time.monotonic, sleep_fn=time.sleep, adapte
 
     parsed = parse_target(target)
     if parsed is None:
-        if isinstance(target, str):
-            parts = target.split(":")
-            if (len(parts) >= 4 and parts[0] == "character" and parts[2] == "image"
-                    and store_mod.ENTITY_KINDS[CHARACTERS].pattern.fullmatch(parts[1])
-                    and _EXTRA.fullmatch(":".join(parts[3:]))):
-                raise StepFailed(f"Cannot regenerate {target!r}: extra images arrive in a later phase.")
+        if is_extra_target(target):
+            raise StepFailed(f"Cannot regenerate {target!r}: extra images arrive in a later phase.")
         raise _invalid(target)
 
     tools = entities.Tools(runner=runner, time_fn=time_fn, sleep_fn=sleep_fn, adapters=adapters,

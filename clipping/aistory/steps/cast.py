@@ -13,7 +13,9 @@ Then the step **fills what is missing**, for every character of the story
 
 1. the text (``descriptor`` is null): K1, shown the characters already
    written and the descriptions of the character's design references
-   (``uploads.upload_notes``); it writes the descriptor, signature items,
+   (``uploads.upload_notes``) -- a reference not yet described is described
+   first, through VISION_CHAIN; one that cannot be is printed and K1 runs
+   without it (``entities.describe_uploads``); it writes the descriptor, signature items,
    personality, relationships (K1's names mapped to ids -- an unknown name is
    dropped and printed), the voice brief (``voice_hints``) and the
    ``prompt_block``;
@@ -259,7 +261,13 @@ def write_text(ctx, store, char_id, *, tools, note=None, regenerate=False, annou
     ``StepFailed`` (the chain failed, the reply was refused twice, or there is
     no style lock). With *regenerate*, K1 is shown the current values and the
     *note*; the images and the pinned voice stay, the voice brief is rewritten.
+
+    First, each design reference with no description yet is described
+    (``entities.describe_uploads``); one that cannot be is printed and left
+    out of this K1.
     """
+    entities.describe_uploads(ctx, store, char_id, tools=tools)
+    ctx.cancel.check()
     story = store.get(ctx.story_id)
     lock = entities.read_lock(store, ctx.story_id)
     character = store.read_entity(ctx.story_id, CHARACTERS, char_id)

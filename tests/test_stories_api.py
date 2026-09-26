@@ -657,7 +657,7 @@ def test_a_bad_or_unknown_id_is_a_404_everywhere(api, bad_id, method, suffix, bo
 
 # ============================================================ grammar edges
 
-LATER_STEPS = ["cast", "places", "season", "script", "storyboard", "assets", "render", "metadata",
+LATER_STEPS = ["script", "storyboard", "assets", "render", "metadata",
                "memory", "feedback", "propose-next", "rerender", "fast-track", "import"]
 
 
@@ -670,8 +670,7 @@ def test_a_later_phase_step_is_a_400(api, step):
     assert api.jobs.list_jobs() == []
 
 
-@pytest.mark.parametrize("doc", ["character:char_kiwilo", "place:place_beach", "prop:prop_phone", "season",
-                                 "script:1", "storyboard:1", "assets:1"])
+@pytest.mark.parametrize("doc", ["script:1", "storyboard:1", "assets:1"])
 def test_a_later_phase_approval_is_a_400(api, doc):
     story_id = _with_bible(api)
     response = api.client.post(f"/api/stories/{story_id}/approve/{doc}")
@@ -680,8 +679,7 @@ def test_a_later_phase_approval_is_a_400(api, doc):
 
 
 @pytest.mark.parametrize("target", [
-    "character:char_kiwilo:text", "character:char_kiwilo:image:portrait", "place:place_beach:text",
-    "prop:prop_phone:image", "season:1", "scene:1:s02", "hook:1", "cliffhanger:1", "teaser:1",
+    "scene:1:s02", "hook:1", "cliffhanger:1", "teaser:1",
     "shot:1:sh03", "shot:1:sh03:video", "line:1:l04", "metadata:1:tiktok",
 ])
 def test_a_later_phase_regenerate_target_is_a_400(api, target):
@@ -1028,7 +1026,7 @@ def test_the_estimate_of_each_phase_one_step(api):
 
     # Stage 8: the preview has its own estimate (tests/test_style_preview.py).
     assert api.client.get(f"{url}/style_preview").json()["units"] == {"images": 3}
-    assert api.client.get(f"{url}/cast").status_code == 400
+    assert api.client.get(f"{url}/script").status_code == 400
     assert api.client.get(f"{url}/nope").status_code == 404
 
 

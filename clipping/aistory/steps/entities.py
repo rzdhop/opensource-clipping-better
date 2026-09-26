@@ -165,6 +165,38 @@ def clear_approval(stories, story_id, kind, eid, *, now) -> bool:
     return True
 
 
+def describe_uploads(ctx, stories, char_id, *, tools) -> list:
+    """Describe every design reference of the character that has no
+    description yet (``uploads.describe_upload``: U1 through VISION_CHAIN,
+    every gate, booked), so K1 reads them all (``uploads.upload_notes``).
+
+    Run right before K1, wherever K1 runs (the cast fill, and
+    ``character:<id>:text``). A reference that cannot be described is a
+    local failure: printed with its reason -- the job's feed and the story's
+    activity log are its record -- and K1 proceeds without that note; the
+    next K1 tries it again. Returns ``[(name, reason)]`` of those.
+    ``Cancelled`` between two descriptions.
+    """
+    character = stories.read_entity(ctx.story_id, CHARACTERS, char_id)
+    failed = []
+    for entry in character["refs"]["uploads"]:
+        if entry["description"] is not None:
+            continue
+        ctx.cancel.check()
+        try:
+            uploads_mod.describe_upload(stories, ctx.story_id, char_id, entry["name"], env=ctx.settings_env,
+                                        on_log=ctx.on_log, cancel=ctx.cancel, adapters=tools.adapters,
+                                        transport=tools.transport)
+        except uploads_mod.UploadError as exc:
+            reason = str(exc)
+            if exc.reasons:
+                reason += f" ({'; '.join(exc.reasons[:3])})"
+            ctx.on_log(f"⚠️ {character['name']}: design reference {entry['name']} was not described -- {reason} "
+                       "K1 writes the character without it.")
+            failed.append((entry["name"], reason))
+    return failed
+
+
 def exists(stories, story_id, kind, eid) -> bool:
     """Whether the entity is still there (the user may delete one while a
     step runs); a document that does not validate still counts as there."""
