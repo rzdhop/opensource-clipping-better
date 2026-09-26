@@ -470,7 +470,8 @@ def _run_candidates(kind, candidates, request, *, adapter, credentials, allow_pa
 
         outcome = _attempt(link, request, adapter=adapter, credentials=credentials,
                            transport=transport, on_log=on_log, sleep_fn=sleep_fn,
-                           time_fn=time_fn, failures=failures, extra_kwargs=extra_kwargs or {})
+                           time_fn=time_fn, failures=failures, extra_kwargs=extra_kwargs or {},
+                           paid=paid)
         if outcome is _SWAP:
             nxt = candidates[index + 1] if index + 1 < len(candidates) else None
             if nxt is None:
@@ -490,10 +491,14 @@ _SWAP = object()
 
 
 def _attempt(link, request, *, adapter, credentials, transport, on_log, sleep_fn, time_fn, failures,
-             extra_kwargs=None):
+             extra_kwargs=None, paid=False):
     label = describe(link)
-    for attempt in range(1, MAX_ATTEMPTS + 1):
-        on_log(f"   🔁 {label}: attempt {attempt}/{MAX_ATTEMPTS}")
+    # A paid request is billed once the provider accepts it (fal: at submit, before
+    # the polls), so a retry after a failed poll bills a second job the ledger
+    # never records. One attempt per paid link (DEC-106).
+    max_attempts = 1 if paid else MAX_ATTEMPTS
+    for attempt in range(1, max_attempts + 1):
+        on_log(f"   🔁 {label}: attempt {attempt}/{max_attempts}")
         started = time_fn()
         try:
             result = adapter.generate(link, request, credentials=credentials, on_log=on_log,
@@ -504,12 +509,15 @@ def _attempt(link, request, *, adapter, credentials, transport, on_log, sleep_fn
                 failures.append((label, reason))
                 return _SWAP
             verdict = errors.classify(exc)
-            if verdict in (errors.RETRY, errors.RATE_LIMITED) and attempt < MAX_ATTEMPTS:
+            retryable = verdict in (errors.RETRY, errors.RATE_LIMITED)
+            if retryable and attempt < max_attempts:
                 wait = errors.retry_after_seconds(exc) or RETRY_BACKOFF_SECONDS
                 on_log(f"   ⚠️ {label} failed | {reason} → retrying in {wait:.0f}s")
                 sleep_fn(wait)
                 continue
-            glyph = "⚠️" if verdict in (errors.RETRY, errors.RATE_LIMITED) else "✖"
+            if retryable and paid:
+                reason += " (paid link: not retried, a second request could be billed again)"
+            glyph = "⚠️" if retryable else "✖"
             on_log(f"   {glyph} {label} {'failed' if glyph == '⚠️' else 'fatal'} | {reason}")
             failures.append((label, reason))
             return None

@@ -7,7 +7,7 @@ or an SDK.
 
 import pytest
 
-from clipping.providers import errors, generation, registry
+from clipping.providers import errors, generation, registry, transport
 from clipping.providers.generation import (
     DEFAULT_CHAINS, ENV_NAMES, KINDS, GenRequest, GenResult, NoRunnableLink,
     chain_from_env, is_paid, local_url, parse_generation_chain, run_generation_chain,
@@ -278,6 +278,23 @@ def test_a_transient_failure_is_retried_once_on_the_same_link():
     (result, link), log = run("image", "pollinations/flux", {("image", "pollinations"): pol})
     assert len(pol.calls) == 2 and link.provider == "pollinations"
     assert any("⚠️" in line for line in log)
+
+
+@pytest.mark.parametrize("failure", [
+    transport.APITimeoutError("GET https://queue.fal.run/x/requests/r1/status timed out after 60s"),
+    transport.APIConnectionError("GET https://v3.fal.media/files/out.png: connection reset"),
+    transport.HttpStatusError(503, "https://queue.fal.run/x/requests/r1/status"),
+    transport.HttpStatusError(429, "https://queue.fal.run/x/requests/r1/status"),
+], ids=["timeout", "connection", "5xx", "429"])
+def test_a_paid_link_is_never_retried_so_one_click_cannot_bill_twice(failure):
+    """DEC-103/106: fal bills once the submit is accepted, then polls and downloads.
+    Retrying a failed poll would submit, and bill, a second job the ledger never sees."""
+    fal = FakeAdapter(est=0.03, fail=[failure])
+    with pytest.raises(NoRunnableLink) as excinfo:
+        run("image_edit", "fal/seedream-4-edit", {("image_edit", "fal"): fal},
+            allow_paid=True, budget_check=lambda e, l: None)
+    assert len(fal.calls) == 1
+    assert "not retried" in str(excinfo.value)
 
 
 def test_every_failure_reason_reaches_the_final_error():
