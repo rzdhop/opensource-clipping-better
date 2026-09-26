@@ -286,14 +286,16 @@ STYLE_TEMPLATE_SCHEMA = {
 }
 
 
-def style_template_errors(tpl) -> list:
-    """``validate()`` plus the checks the subset schema cannot express."""
-    errors = validate(tpl, STYLE_TEMPLATE_SCHEMA)
-    if errors:
-        return errors
+def _style_prose_extra_errors(doc) -> list:
+    """The style-document checks the subset schema cannot express.
 
+    Shared by ``style_template_errors`` and ``style_lock_errors``: a
+    ``style_lock_v1`` document carries ``motion_rules``, ``audio`` and
+    ``episode_defaults`` in exactly the same shape as a ``style_template_v1``
+    document (spec 2.2), so the same cross-field checks apply to both.
+    """
     errors = []
-    tier1 = tpl["motion_rules"]["tier1"]
+    tier1 = doc["motion_rules"]["tier1"]
     valid_functions = set(SCENE_FUNCTIONS) | {"wide_establishing"}
     for key, value in tier1["by_function"].items():
         if key not in valid_functions:
@@ -313,7 +315,7 @@ def style_template_errors(tpl) -> list:
                 f"1.0 <= min <= max <= zoom.max ({zoom_max})"
             )
 
-    audio = tpl["audio"]
+    audio = doc["audio"]
     bgm_moods = set(audio["bgm_moods"])
     emotion_to_mood = audio["emotion_to_mood"]
     if "default" not in emotion_to_mood:
@@ -332,11 +334,80 @@ def style_template_errors(tpl) -> list:
     elif list(audio["sfx_cues"]) != list(expected_cues):
         errors.append(f"$.audio.sfx_cues: {audio['sfx_cues']} must equal SFX_PACKS[{sfx_pack!r}] {list(expected_cues)}")
 
-    lo, hi = tpl["episode_defaults"]["shots_per_scene"]
+    lo, hi = doc["episode_defaults"]["shots_per_scene"]
     if lo > hi:
         errors.append(f"$.episode_defaults.shots_per_scene: [{lo}, {hi}] min must be <= max")
 
     return errors
+
+
+def style_template_errors(tpl) -> list:
+    """``validate()`` plus the checks the subset schema cannot express."""
+    errors = validate(tpl, STYLE_TEMPLATE_SCHEMA)
+    if errors:
+        return errors
+    return _style_prose_extra_errors(tpl)
+
+
+# --------------------------------------------------------------- style_lock_v1 (spec 2.2)
+
+STYLE_LOCK_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "$schema": {"type": "string", "const": "style_lock_v1"},
+        "template_id": {"type": "string", "pattern": _ID_PATTERN},
+        "template_version": {"type": "integer", "minimum": 1},
+        "template_name": bilingual(),
+        "rendering": _NON_EMPTY_STRING,
+        "camera": _NON_EMPTY_STRING,
+        "lighting": _NON_EMPTY_STRING,
+        "character_design_rules": _NON_EMPTY_STRING,
+        "environment_rules": _NON_EMPTY_STRING,
+        "negative_prompt": _NON_EMPTY_STRING,
+        "sheet_background": _NON_EMPTY_STRING,
+        "quality_tail": _NON_EMPTY_STRING,
+        "palette": _PALETTE_SCHEMA,
+        "motion_rules": {
+            "type": "object",
+            "properties": {
+                "tier1": _MOTION_TIER1_SCHEMA,
+                "tier2_prompt_suffix": _NON_EMPTY_STRING,
+            },
+            "required": ["tier1", "tier2_prompt_suffix"],
+            "additionalProperties": False,
+        },
+        "typography": _TYPOGRAPHY_SCHEMA,
+        "episode_defaults": _EPISODE_DEFAULTS_SCHEMA,
+        "audio": _AUDIO_SCHEMA,
+        # Dotted override path -> value, as actually applied (stylelock.OVERRIDABLE).
+        "overrides": {"type": "object"},
+        # None until stylelock.lock_style() freezes the document.
+        "locked_at": {"type": ["string", "null"]},
+        "updated_at": _NON_EMPTY_STRING,
+    },
+    "required": [
+        "$schema", "template_id", "template_version", "template_name", "rendering",
+        "camera", "lighting", "character_design_rules", "environment_rules",
+        "negative_prompt", "sheet_background", "quality_tail", "palette",
+        "motion_rules", "typography", "episode_defaults", "audio",
+        "overrides", "locked_at", "updated_at",
+    ],
+    "additionalProperties": False,
+}
+
+
+def style_lock_errors(lock) -> list:
+    """``validate()`` plus the same extra checks as ``style_template_errors``.
+
+    A ``style_lock_v1`` document shares its ``motion_rules``/``audio``/
+    ``episode_defaults`` shape with ``style_template_v1``, so the same
+    cross-field checks (closed-list membership, zoom bounds, sfx pack
+    consistency, ...) apply unchanged.
+    """
+    errors = validate(lock, STYLE_LOCK_SCHEMA)
+    if errors:
+        return errors
+    return _style_prose_extra_errors(lock)
 
 
 # ------------------------------------------------------------- concept_v1 (spec 7)

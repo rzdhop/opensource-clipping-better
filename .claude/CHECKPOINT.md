@@ -36,8 +36,8 @@ Phase 0's RC-P1…RC-P11 (history table below) stay in force, plus:
 |---|---|---|
 | 0 | checkpoint + baseline + worktree | **done** (this commit) |
 | 1 | templates as data (7 styles, 10 concepts, schemas) | **done** (stage-1 commit; local 1968 / CI 1768 + 173 skipped) |
-| 2 | prompting.py + style lock builder | next |
-| 3 | story store | — |
+| 2 | prompting.py + style lock builder | **done** (local 2043 / CI 1843 + 173 skipped) |
+| 3 | story store (+ reserved `outputs/stories` guard, see action log) | next |
 | 4 | story-step jobs (RISKIEST) | — |
 | 5 | story prompts + context pack | — |
 | 6 | LLM step runners | — |
