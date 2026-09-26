@@ -701,7 +701,7 @@ def test_an_unknown_regenerate_target_is_a_400_naming_the_valid_ones(api, target
         assert valid in detail
 
 
-def test_unknown_steps_and_documents_are_404s_and_the_preview_is_not_yet_there(api):
+def test_unknown_steps_and_documents_are_404s_and_the_preview_needs_a_style(api):
     story_id = _with_bible(api)
     c = api.client
     assert c.post(f"/api/stories/{story_id}/steps/nope", json={}).status_code == 404
@@ -710,8 +710,9 @@ def test_unknown_steps_and_documents_are_404s_and_the_preview_is_not_yet_there(a
     assert c.post(f"/api/stories/{story_id}/approve/nope").status_code == 404
     assert c.post(f"/api/stories/{story_id}/approve/concept").status_code == 404
 
+    # Stage 8: the preview exists, and needs the style lock this story lacks.
     response = c.post(f"/api/stories/{story_id}/steps/style_preview", json={})
-    assert response.status_code == 400 and "not available yet" in response.json()["detail"]
+    assert response.status_code == 409 and response.json()["detail"] == "Build the style first."
     assert api.jobs.list_jobs() == []
 
 
@@ -1024,7 +1025,8 @@ def test_the_estimate_of_each_phase_one_step(api):
     assert (style["units"], style["route_class"], style["est_usd"], style["ready"], style["link"]) == (
         {"llm_calls": 0}, "local", 0.0, True, None)
 
-    assert api.client.get(f"{url}/style_preview").status_code == 400
+    # Stage 8: the preview has its own estimate (tests/test_style_preview.py).
+    assert api.client.get(f"{url}/style_preview").json()["units"] == {"images": 3}
     assert api.client.get(f"{url}/cast").status_code == 400
     assert api.client.get(f"{url}/nope").status_code == 404
 

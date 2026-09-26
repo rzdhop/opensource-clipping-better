@@ -952,3 +952,74 @@ def story_concepts_errors(doc) -> list:
             errors.append(f"$.concepts[{i}].concept_id: {concept_id!r} is used twice")
         seen.add(concept_id)
     return errors
+
+
+# ------------------------------------------------------- style_preview_v1 (spec 3 step 4)
+
+# The preview strip of the style step (phase-1 plan 2): which lock it shows,
+# the images kept in styles/preview/, and the samples no link could make.
+
+STYLE_PREVIEW_SCHEMA_NAME = "style_preview_v1"
+
+# The only names a preview image has on disk, and the only ones
+# GET /api/stories/{id}/files/{name} serves.
+PREVIEW_IMAGE_NAME_PATTERN = r"^preview_[1-9]\.(png|jpg|jpeg|webp)$"
+
+_PREVIEW_IMAGE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "name": {"type": "string", "pattern": PREVIEW_IMAGE_NAME_PATTERN},
+        "n": {"type": "integer", "minimum": 1, "maximum": 9},
+        "link": _NON_EMPTY_STRING,
+        "seed": {"type": "integer", "minimum": 0},
+        "paid": {"type": "boolean"},
+        "est_usd": {"type": "number", "minimum": 0},
+        "prompt": _NON_EMPTY_STRING,
+    },
+    "required": ["name", "n", "link", "seed", "paid", "est_usd", "prompt"],
+    "additionalProperties": False,
+}
+
+_PREVIEW_FAILURE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "n": {"type": "integer", "minimum": 1, "maximum": 9},
+        "reasons": {"type": "array", "items": _NON_EMPTY_STRING, "minItems": 1},
+    },
+    "required": ["n", "reasons"],
+    "additionalProperties": False,
+}
+
+STYLE_PREVIEW_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "$schema": {"type": "string", "const": STYLE_PREVIEW_SCHEMA_NAME},
+        "template_id": {"type": "string", "pattern": _ID_PATTERN},
+        "template_version": {"type": "integer", "minimum": 1},
+        # The lock's overrides when the preview was made (stylelock.OVERRIDABLE paths).
+        "overrides": {"type": "object"},
+        "images": {"type": "array", "items": _PREVIEW_IMAGE_SCHEMA, "maxItems": 9},
+        "failed": {"type": "array", "items": _PREVIEW_FAILURE_SCHEMA, "maxItems": 9},
+        "updated_at": _NON_EMPTY_STRING,
+    },
+    "required": ["$schema", "template_id", "template_version", "overrides", "images", "failed", "updated_at"],
+    "additionalProperties": False,
+}
+
+
+def style_preview_errors(doc) -> list:
+    """``validate()`` against ``STYLE_PREVIEW_SCHEMA``, plus: an image's name is
+    its own number, and no sample is listed twice."""
+    errors = validate(doc, STYLE_PREVIEW_SCHEMA)
+    if errors:
+        return errors
+    seen = set()
+    for key in ("images", "failed"):
+        for i, entry in enumerate(doc[key]):
+            n = entry["n"]
+            if key == "images" and not entry["name"].startswith(f"preview_{n}."):
+                errors.append(f"$.images[{i}].name: {entry['name']!r} is not sample {n}'s name")
+            if n in seen:
+                errors.append(f"$.{key}[{i}].n: sample {n} is listed twice")
+            seen.add(n)
+    return errors

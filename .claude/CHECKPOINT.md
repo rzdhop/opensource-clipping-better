@@ -42,8 +42,8 @@ Phase 0's RC-P1…RC-P11 (history table below) stay in force, plus:
 | 5 | story prompts + context pack | **done** (local 2401 / CI 2133 + 238 skipped) |
 | 6 | LLM step runners | **done** (local 2450 / CI 2182 + 238 skipped) |
 | 7 | stories API | **done** (local 2627 / CI 2184 + 413 skipped) |
-| 8 | style preview strip | next |
-| 9 | CLI | — |
+| 8 | style preview strip | **done** (local 2677 / CI 2213 + 434 skipped) |
+| 9 | CLI (+ shared `workflow.py` so API and CLI apply one set of rules) | next |
 | 10 | dashboard shared pieces | — |
 | 11 | StoriesList + NewStoryWizard | — |
 | 12 | merge, deploy, Tier-2 (human on phone) | — |

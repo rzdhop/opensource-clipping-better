@@ -9,11 +9,11 @@ worker's stdout tee files every line against the job; it checks
 the story's folder under ``ctx.outputs_dir``. Returning means "ready for the
 user's approval"; raising means the step failed.
 
-Phase 1 registers ``concepts``, ``bible`` and ``regenerate`` (stage 6;
-``style_preview`` follows in stage 8). Each is registered by module name and
-imported on its first run, never here: importing this package must not pull
-in the prompt catalogue or the LLM chain, so the worker's dispatch and a
-test that only needs the registry stay as light as they were.
+Phase 1 registers ``concepts``, ``bible`` and ``regenerate`` (stage 6) and
+``style_preview`` (stage 8). Each is registered by module name and imported
+on its first run, never here: importing this package must not pull in the
+prompt catalogue, the LLM chain or the generation chains, so the worker's
+dispatch and a test that only needs the registry stay as light as they were.
 
 A runner that fails in a way the user can act on raises :class:`StepFailed`
 with a sentence saying what to do; the worker records it as
@@ -93,6 +93,7 @@ RUNNERS: dict[str, Callable[[StepContext], object]] = {
     "concepts": _deferred("concepts"),
     "bible": _deferred("bible"),
     "regenerate": _deferred("regenerate"),
+    "style_preview": _deferred("style_preview"),
 }
 
 

@@ -7,6 +7,9 @@ Layout, under the same ``outputs/`` directory the job store uses::
         story.json                  # StoryBible (story_bible_v1)
         style_lock.json             # StyleLock (style_lock_v1)
         concepts.json               # generated concept cards
+        style_preview.json          # the style preview strip (style_preview_v1)
+        styles/preview/preview_<n>.<ext>   # its images
+        cost_ledger.json            # what each call cost (ledger.CostLedger)
         activity.log                # one line per thing a step printed
 
 Rules this module keeps:
@@ -60,7 +63,12 @@ ACTIVITY_LOG = "activity.log"
 
 # The JSON documents of a story that read_doc/write_doc may name. Nothing else:
 # a name is never joined onto a path unless it is one of these.
-DOC_NAMES = (STORY_FILENAME, "style_lock.json", "concepts.json")
+DOC_NAMES = (STORY_FILENAME, "style_lock.json", "concepts.json", "style_preview.json")
+
+# The preview strip's folder, one level at a time, and the files in it.
+PREVIEW_DIRS = ("styles", "preview")
+PREVIEW_PREFIX = "preview_"
+PREVIEW_IMAGE_NAME = re.compile(schemas.PREVIEW_IMAGE_NAME_PATTERN)
 
 INDEX_FIELDS = ("story_id", "title", "language", "style_template_id", "status", "created_at", "updated_at")
 
@@ -266,6 +274,69 @@ class StoryStore:
 
     def _label(self, story_id) -> str:
         return f"outputs/{STORIES_DIRNAME}/{story_id}/"
+
+    # ----------------------------------------------------------- previews
+
+    def preview_dir(self, story_id, *, create=False) -> str:
+        """The real path of the story's ``styles/preview/`` folder.
+
+        Each level must be a real directory directly inside the one above it
+        -- never a symlink, never reached through one (``_contained``, the
+        rule of the story folder itself). *create* makes a missing level with
+        ``os.mkdir``, one level at a time, and checks it like any other.
+        KeyError for an unknown story, a missing level (without *create*), or
+        a level that is anything but a real directory.
+        """
+        with self._lock:
+            parent = self.story_dir(story_id)
+            for part in PREVIEW_DIRS:
+                if create and not os.path.lexists(os.path.join(parent, part)):
+                    try:
+                        os.mkdir(os.path.join(parent, part))
+                    except FileExistsError:
+                        pass
+                real = _contained(parent, part, want_dir=True)
+                if real is None:
+                    raise KeyError(f"{STORIES_DIRNAME}/{story_id}/{'/'.join(PREVIEW_DIRS)}")
+                parent = real
+            return parent
+
+    def preview_file(self, story_id, name) -> str:
+        """The real path of one preview image, to serve it.
+
+        KeyError for anything but an existing regular file named like a
+        preview image (``schemas.PREVIEW_IMAGE_NAME_PATTERN``), directly inside
+        the story's real ``styles/preview/`` folder, and not a symlink. The
+        name is checked before any path is built from it.
+        """
+        if not isinstance(name, str) or PREVIEW_IMAGE_NAME.fullmatch(name) is None:
+            raise KeyError(name)
+        self._check_id(story_id)
+        with self._lock:
+            real = _contained(self.preview_dir(story_id), name, want_dir=False)
+        if real is None:
+            raise KeyError(name)
+        return real
+
+    def clear_previews(self, story_id) -> int:
+        """Remove the previous preview's files; returns how many went.
+
+        Every ``preview_*`` entry directly inside the story's ``styles/preview/``
+        that is a file or a symlink -- a symlink is unlinked, its target is
+        never touched -- and nothing else: not a directory, not a file of
+        another name, nothing outside that folder.
+        """
+        with self._lock:
+            folder = self.preview_dir(story_id)
+            removed = 0
+            with os.scandir(folder) as entries:
+                for entry in entries:
+                    if not entry.name.startswith(PREVIEW_PREFIX):
+                        continue
+                    if entry.is_symlink() or entry.is_file(follow_symlinks=False):
+                        os.unlink(entry.path)
+                        removed += 1
+            return removed
 
     # ------------------------------------------------------------ logging
 

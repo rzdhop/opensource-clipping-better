@@ -496,66 +496,23 @@ _TEST_VISION_PROMPT = "Describe this image in one sentence: subject, colours, li
 
 def _merged_env(env) -> dict:
     """The saved Settings on top of the process environment, as every reader sees them."""
-    merged = dict(os.environ)
-    for name, value in (env or {}).items():
-        if value:
-            merged[name] = value
-        else:
-            merged.pop(name, None)
-    return merged
+    from clipping.providers import gating
+
+    return gating.merged_env(env)
 
 
 def _api_model_id(kind, link) -> str:
     """The provider's own model id behind a chain link (for the ledger)."""
-    from clipping.providers import images, tts, vision
+    from clipping.providers import gating
 
-    tables = {
-        "cloudflare": images.CLOUDFLARE_MODELS, "fal": images.FAL_APPS,
-        "gemini": {**images.GEMINI_MODELS, **tts.GEMINI_TTS_MODELS, **vision.GEMINI_VISION_MODELS},
-        "openai": {name: pair[0] for name, pair in images.OPENAI_MODELS.items()},
-    }
-    return tables.get(link.provider, {}).get(link.model, link.model)
+    return gating.api_model_id(kind, link)
 
 
 def _link_summary(kind, link, merged, budget_obj) -> dict:
-    from clipping.providers import budget as budget_mod, generation as gen, pricing
+    """The gates' verdict on *link* for the chain test's request (``gating.link_summary``)."""
+    from clipping.providers import gating
 
-    provider = gen.provider_for(link)
-    missing = gen.missing_keys(link, merged)
-    paid = gen.is_paid(link)
-    adapter = gen.adapter_for(kind, link.provider)
-    est = 0.0
-    if paid:
-        try:
-            # The adapter's own estimate of the test request (tokens, size), so
-            # the number here is the one the runner will check.
-            estimate = adapter.estimate(link, _summary_request(kind)) if adapter else None
-            if estimate is None:
-                estimate = pricing.estimate(link, 1, width=1080, height=1920)
-            est = float(getattr(estimate, "est_usd", estimate) or 0.0)
-        except (pricing.PriceUnknown, ValueError):
-            est = 0.0
-    allowed = not missing
-    reason = None
-    if allowed and paid:
-        day_spent = budget_mod.day_spent()
-        if not budget_obj.allow_paid:
-            # The runner's first gate (DEC-097), whatever the amount.
-            allowed = False
-            reason = (f"refused: est ${est:.3f} on {gen.describe(link)}; allow_paid is off "
-                      f"(today ${day_spent:.2f} of ${budget_obj.daily_cap_usd:.2f})")
-        else:
-            try:
-                budget_mod.check(est, link, budget=budget_obj, day_spent=day_spent)
-            except budget_mod.BudgetRefused as exc:
-                allowed, reason = False, str(exc)
-    return {
-        "label": gen.describe(link), "provider": link.provider, "model": link.model,
-        "paid": paid, "keyed": not missing, "missing_keys": missing,
-        "adapter": adapter is not None,
-        "allowed": allowed, "est_usd": est, "reason": reason,
-        "env_keys": list(provider.env_keys), "signup_url": provider.signup_url,
-    }
+    return gating.link_summary(kind, link, merged, budget_obj, _summary_request(kind))
 
 
 def _summary_request(kind):
@@ -674,21 +631,16 @@ def _artifact_kind(kind, path) -> str:
 def _test_generation_links(kind, links, tested, env):
     """The blocking half: run the free and local links, report the paid ones, run the named one."""
     from clipping.aistory.ledger import CostLedger
-    from clipping.providers import adapters, budget as budget_mod, generation as gen, limits
+    from clipping.providers import adapters, budget as budget_mod, gating, generation as gen
     from ..auth import media_url
 
     adapters.load_all()
     merged = _merged_env(env)
-    budget_obj = budget_mod.budget_from_env({name: merged.get(name, "") for name in budget_mod.ENV_NAMES})
+    budget_obj = gating.budget_of(merged)
     out_dir = os.path.join(files_route.OUTPUTS_DIR, CHAIN_TEST_DIRNAME)
     os.makedirs(out_dir, exist_ok=True)
 
-    class _Limiter:
-        def acquire(self, provider):
-            return limits.acquire(provider)
-
-    def check(est, link):
-        budget_mod.check(est, link, budget=budget_obj, day_spent=budget_mod.day_spent())
+    check = gating.budget_check(budget_obj)
 
     rows = []
     for link in links:
@@ -726,7 +678,7 @@ def _test_generation_links(kind, links, tested, env):
         try:
             result, answered = gen.run_generation_chain(
                 kind, [link], request, env=merged, allow_paid=budget_obj.allow_paid, on_log=log.append,
-                budget_check=check, limiter=_Limiter(), transport=_TRANSPORT,
+                budget_check=check, limiter=gating.FreeTierLimiter(), transport=_TRANSPORT,
             )
         except gen.NoRunnableLink as exc:
             reason = exc.failures[-1][1] if exc.failures else str(exc)

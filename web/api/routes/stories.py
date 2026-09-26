@@ -15,13 +15,17 @@ A story is a folder under ``outputs/stories/<story_id>/`` kept by
 - Approval lives on the story (``approvals``; ``status`` is derived from it by
   the store). Approving a document also completes the step jobs that were
   waiting on it; a newer job for the same document supersedes an older one.
+- The style preview strip (``style_preview``) is a step job too, of the style:
+  it calls an image chain, not an LLM, so it meets no key gate; it is refused
+  instead when no link of ``IMAGE_CHAIN`` can run for the story's route (the
+  estimate's verdict), and approving the style completes it. Its images are
+  served by ``GET /{id}/files/{name}`` behind the token (DEC-113: the
+  dashboard fetches them with its header, as blobs).
 
 Every ``{story_id}`` is checked against the store's id rule before anything
 else, so a malformed id is a 404 and never reaches a path; an unknown one is a
 404; a story whose files do not validate is a 500 with one short sentence and
 no traceback.
-
-The style preview strip (``style_preview``, ``/files/{name}``) is stage 8.
 """
 
 from __future__ import annotations
@@ -33,6 +37,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi.responses import FileResponse
 
 from clipping.aistory import defaults, schemas, stylelock, templates
 from clipping.aistory import store as story_store
@@ -41,6 +46,7 @@ from clipping.aistory.steps import bible as bible_step
 from clipping.aistory.steps import concepts as concepts_step
 from clipping.aistory.steps import llm_call
 from clipping.aistory.steps import regenerate as regenerate_step
+from clipping.aistory.steps import style_preview as preview_step
 from clipping.providers import registry
 
 from .. import store, worker
@@ -116,6 +122,9 @@ CONCEPTS_DOC = concepts_step.CONCEPTS_FILENAME
 COST_LEDGER = "cost_ledger.json"
 
 _IN_FLIGHT = (JobStatus.QUEUED.value, JobStatus.RUNNING.value)
+
+# What GET /{id}/files/{name} answers a preview image with.
+_PREVIEW_MEDIA_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
 
 
 # ------------------------------------------------------------------ helpers
@@ -237,9 +246,12 @@ def _cost_total(stories, story_id) -> float:
 
 def _job_doc(step, params):
     """The story document a step job writes, and so the one whose approval
-    completes it: ``bible`` or ``concepts``; None for anything else."""
+    completes it: ``bible``, ``concepts`` or ``style`` (the preview strip);
+    None for anything else."""
     if step in LLM_STEPS:
         return step
+    if step == PREVIEW_STEP:
+        return "style"
     if step == "regenerate":
         target = (params or {}).get("target")
         if target == regenerate_step.CONCEPTS_TARGET:
@@ -318,13 +330,15 @@ def _llm_gate(env):
     return links, keys, jobs_routes._chain_readiness_refusal(links, env)
 
 
-async def _create_step_job(story_id, step, params, *, ep=None) -> JobResponse:
-    """Queue one LLM step of *story_id*; 201 with the job.
+async def _create_step_job(story_id, step, params, *, ep=None, gate=None) -> JobResponse:
+    """Queue one step of *story_id*; 201 with the job.
 
     Refused before any job exists, in this order: 409 while a step of this
-    story is queued or running; 400 from the key gate (the status
-    ``POST /api/jobs`` uses for the same refusal); 429 when the queue is full.
-    A job that awaits approval for the same document is superseded by this one.
+    story is queued or running; the step's gate -- for an LLM step (no
+    *gate*) the key gate, 400 (the status ``POST /api/jobs`` uses for the
+    same refusal); *gate()* raises its own refusal otherwise -- then 429 when
+    the queue is full. A job that awaits approval for the same document is
+    superseded by this one.
     """
     busy = _in_flight(story_id)
     if busy:
@@ -333,9 +347,12 @@ async def _create_step_job(story_id, step, params, *, ep=None) -> JobResponse:
             detail=_busy_detail(busy[0], "wait for it to finish, or cancel it first."),
         )
 
-    _links, _keys, refusal = _llm_gate(worker.get_settings_env())
-    if refusal:
-        raise HTTPException(status_code=400, detail=refusal)
+    if gate is not None:
+        gate()
+    else:
+        _links, _keys, refusal = _llm_gate(worker.get_settings_env())
+        if refusal:
+            raise HTTPException(status_code=400, detail=refusal)
 
     full = jobs_routes._queue_refusal()
     if full:
@@ -361,6 +378,17 @@ async def _create_step_job(story_id, step, params, *, ep=None) -> JobResponse:
 def _require_concept(story) -> None:
     if not story.get("concept"):
         raise HTTPException(status_code=409, detail="Choose a concept first.")
+
+
+def _preview_estimate(stories, story) -> dict:
+    """The preview strip's estimate for *story* under the live Settings: its
+    route, and what its ledger already holds against the per-story cap."""
+    story_id = story["story_id"]
+    return preview_step.estimate(
+        worker.get_settings_env(),
+        route=story["generation_profile"]["route"],
+        story_spent=_cost_total(stories, story_id),
+    )
 
 
 # -------------------------------------------------------------- stories
@@ -398,6 +426,7 @@ async def get_story(story_id: str) -> dict:
     """Everything the story page shows::
 
         {"story": story.json, "style_lock": style_lock.json | null,
+         "style_preview": style_preview.json | null,
          "concepts_generated": <cards in concepts.json>,
          "jobs": [the story's step jobs as GET /api/jobs/{id} answers them,
                   minus events/log/clips/config/progress, oldest first],
@@ -418,6 +447,7 @@ async def get_story(story_id: str) -> dict:
     return {
         "story": story,
         "style_lock": lock,
+        "style_preview": _read_doc(stories, story_id, preview_step.DOC_NAME, schemas.style_preview_errors),
         "concepts_generated": len(cards),
         "jobs": step_jobs,
         "cost_total_usd": _cost_total(stories, story_id),
@@ -646,8 +676,13 @@ async def run_step(story_id: str, step: str, response: Response,
 
     ``concepts``, ``bible``: 201 with the queued job (``bible`` needs a chosen
     concept: 409). ``style``: runs here, 200 with ``{"story", "style_lock"}``
-    (see ``_style_step``). ``style_preview``: 400, not available yet. Any other
-    step of 9.1: 400, a later phase. Anything else: 404.
+    (see ``_style_step``). ``style_preview``: 201 with the queued job; 409
+    without a ``style_lock.json`` ("Build the style first."), 400 with
+    parameters (it takes none), 409 while a step of the story is in flight,
+    409 when no image link can run for the story's route (the estimate's
+    message, naming every link's reason), 429 when the queue is full -- no key
+    gate: it calls no LLM. Any other step of 9.1: 400, a later phase.
+    Anything else: 404.
     """
     stories = _stories()
     story = _load(stories, story_id)
@@ -663,7 +698,17 @@ async def run_step(story_id: str, step: str, response: Response,
         response.status_code = 200
         return _style_step(stories, story, params)
     if step == PREVIEW_STEP:
-        raise HTTPException(status_code=400, detail=f"'{PREVIEW_STEP}' is not available yet.")
+        if _style_lock(stories, story_id) is None:
+            raise HTTPException(status_code=409, detail="Build the style first.")
+        if params:
+            raise HTTPException(status_code=400, detail=f"'{PREVIEW_STEP}' takes no parameters.")
+
+        def preview_gate():
+            verdict = _preview_estimate(stories, story)
+            if not verdict["ready"]:
+                raise HTTPException(status_code=409, detail=verdict["message"])
+
+        return await _create_step_job(story_id, step, {}, ep=ep, gate=preview_gate)
     if step in LATER_STEPS:
         raise HTTPException(status_code=400, detail=f"'{step}' arrives in a later phase.")
     raise HTTPException(status_code=404, detail=f"Unknown step {step!r}.")
@@ -685,13 +730,20 @@ def _style_step(stories, story, params) -> dict:
     defaults to the story's ``style_template_id``, else the chosen concept's
     style. A draft on the same template and version takes the new overrides
     on top of its own (``stylelock.apply_overrides``); anything else is built
-    fresh. 409 before the bible is approved or once the style is locked; 400
-    for an unknown template, a bad parameter, or refused overrides (with
-    ``{"message", "errors"}``). The style approval is cleared.
+    fresh. 409 before the bible is approved, while its preview is being made,
+    or once the style is locked; 400 for an unknown template, a bad parameter,
+    or refused overrides (with ``{"message", "errors"}``). The style approval
+    is cleared.
     """
     story_id = story["story_id"]
     if not story["approvals"].get("bible"):
         raise HTTPException(status_code=409, detail="Approve the bible first.")
+    busy = _in_flight(story_id, doc="style")
+    if busy:
+        raise HTTPException(
+            status_code=409,
+            detail=_busy_detail(busy[0], "change the style once its preview is done, or cancel it first."),
+        )
 
     unknown = sorted(set(params) - set(STYLE_PARAMS))
     if unknown:
@@ -802,9 +854,11 @@ async def approve(story_id: str, doc: str) -> dict:
     concept, or listing every bible field still missing or empty (and
     ``why_come_back`` needs its three lines); then ``approvals.bible`` is set
     and the bible/regenerate jobs awaiting approval are completed.
-    ``style``: 409 without a ``style_lock.json`` or when it is already locked;
-    then the lock is frozen (``locked_at``) and ``approvals.style`` set. The
-    later documents of the 9.2 grammar: 400. Anything else: 404.
+    ``style``: 409 while its preview is queued or running, without a
+    ``style_lock.json``, or when it is already locked; then the lock is frozen
+    (``locked_at``), ``approvals.style`` set, and the preview jobs awaiting
+    approval are completed. The later documents of the 9.2 grammar: 400.
+    Anything else: 404.
     """
     stories = _stories()
     story = _load(stories, story_id)
@@ -833,6 +887,12 @@ async def approve(story_id: str, doc: str) -> dict:
         return story
 
     if doc == "style":
+        busy = _in_flight(story_id, doc="style")
+        if busy:
+            raise HTTPException(
+                status_code=409,
+                detail=_busy_detail(busy[0], "approve the style once its preview is done, or cancel it first."),
+            )
         current = _style_lock(stories, story_id)
         if current is None:
             raise HTTPException(status_code=409, detail="There is no style to approve yet: run the style step first.")
@@ -850,7 +910,9 @@ async def approve(story_id: str, doc: str) -> dict:
         def approve_style(d):
             d["approvals"]["style"] = now
 
-        return _update(stories, story_id, approve_style, now=now)
+        story = _update(stories, story_id, approve_style, now=now)
+        _complete_awaiting(story_id, "style")
+        return story
 
     if _is_later_approval(doc):
         raise HTTPException(status_code=400, detail=f"Approving '{doc}' arrives in a later phase.")
@@ -935,10 +997,14 @@ async def estimate(story_id: str, step: str, target: Optional[str] = None) -> di
     ``?target=concepts``) resolve the chain and keys as the step will; the
     first keyed link decides the class (``free`` when its provider's default
     model is free, DEC-088). No keyed link is ``blocked`` with the key gate's
-    message. ``style`` runs here: 0 calls, ``local``. ``style_preview``: 400
-    (not available yet); a later step: 400; anything else: 404.
+    message. ``style`` runs here: 0 calls, ``local``. ``style_preview``:
+    ``units {"images": 3}``, the story's route applied, each link's gates as
+    the step will meet them and nothing called (``style_preview.estimate``;
+    its links are ``{"link", "status", "reason", "paid", "est_usd"}``). A
+    later step: 400; anything else: 404.
     """
-    _load(_stories(), story_id)
+    stories = _stories()
+    story = _load(stories, story_id)
 
     if step == "style":
         return {
@@ -947,7 +1013,7 @@ async def estimate(story_id: str, step: str, target: Optional[str] = None) -> di
             "message": "The style lock is built on this server from the template; nothing is called.",
         }
     if step == PREVIEW_STEP:
-        raise HTTPException(status_code=400, detail=f"'{PREVIEW_STEP}' is not available yet.")
+        return _preview_estimate(stories, story)
     if step in LATER_STEPS:
         raise HTTPException(status_code=400, detail=f"'{step}' arrives in a later phase.")
     if step not in LLM_STEPS and step != "regenerate":
@@ -984,3 +1050,30 @@ async def estimate(story_id: str, step: str, target: Optional[str] = None) -> di
         "ready": refusal is None,
         "message": _estimate_message(rows, calls, refusal),
     }
+
+
+# ---------------------------------------------------------------- files
+
+@router.get("/{story_id}/files/{name}")
+async def story_file(story_id: str, name: str):
+    """One image of the style preview strip.
+
+    Only ``preview_<1-9>.<png|jpg|jpeg|webp>``, only as a regular file directly
+    inside the story's real ``styles/preview/`` folder -- no symlink at any
+    level, the name checked before a path is built (``StoryStore.preview_file``).
+    Anything else, another story's image included, is a 404. Behind the token
+    like every story route: no signed URL (DEC-113), the dashboard fetches it
+    with its header. ``no-store``: a new preview reuses the names.
+    """
+    _check_id(story_id)
+    try:
+        path = _stories().preview_file(story_id, name)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="File not found") from None
+    return FileResponse(
+        path,
+        media_type=_PREVIEW_MEDIA_TYPES[os.path.splitext(name)[1]],
+        filename=name,
+        content_disposition_type="inline",
+        headers={"Cache-Control": "no-store"},
+    )
