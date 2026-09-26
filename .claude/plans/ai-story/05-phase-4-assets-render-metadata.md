@@ -38,6 +38,24 @@ Workflow steps 10–12 (spec section 3) and the CLI fast-track.
    - Estimates before the step (images × price + TTS chars × price per route); caps
      enforced; story-level ledger appended per call with `ep`; the asset grid shows route
      and consistency label.
+   - **Never lose a paid generation. The human's direction, 2026-09-26: design it here.**
+     Phase 0 found a retry could re-submit, and so re-bill, a paid fal job. DEC-106 fixed
+     it by giving a paid link one attempt. That leaves a failure after the submit
+     *lost*: fal may have billed it, and nothing recorded or kept the image. Planned
+     shape, to confirm in this phase's plan:
+     (a) a **generation cache** keyed by `sha256(kind, provider, model, prompt,
+     sha256 of each reference, seed, size, voice params)` under the story. A retry or
+     rerun of the same job with the same inputs reuses the stored output and never
+     buys it twice (distinct from the render cache below).
+     (b) **journal the provider's request id at submit** (fal `request_id` + its
+     status/response URLs) *before* polling. A retry for the same key resumes
+     polling/fetching that request instead of submitting a new one. Resuming is free,
+     so it may retry where DEC-106 forbids a re-submit.
+     (c) **book the spend at submit** (the journal entry is the proof of a billed
+     request), so a paid attempt that fails afterwards is still in `cost_ledger.json`
+     and `spend.json`.
+     Tests: same key → no second adapter call; a poll failure then retry → one submit,
+     then a resume; a failure after submit → the spend is recorded.
 2. **Renderer** `clipping/aistory/render/` (spec 6.5), pure FFmpeg command lines built in
    Python (`filtergraph.py` with golden tests):
    - per-shot clip: 4× upscale → eased `zoompan` per `motion.type` (all closed-list

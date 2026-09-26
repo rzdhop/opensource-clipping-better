@@ -106,11 +106,12 @@ the container, and this round changed no dependency):
 `pyproject.toml` has no `[build-system]`/package-data; setuptools ≥ 83 in the
 image; the budget refusal text prints sub-cent estimates as `$0.000` (cosmetic);
 per-task route selector (phase 1); Freesound toggle (phase 4); `httpx` is
-transitive only. **Charge-on-attempt accounting** (DEC-106): a paid attempt that
-fails after the provider accepted it may still be billed and is not recorded.
-Decide this in phase 4, before paid generation runs for real. Two pushed commits
-(`68e9890`, `fc308db`) carry a Co-Authored-By trailer against the global rule.
-They were left alone, because a rewrite of pushed history needs the human.
+transitive only. **A paid generation must never be lost** (DEC-106's open gap: a
+paid attempt that fails after the provider accepted it may be billed, unrecorded
+and lost). The human's direction for **phase 4**: a generation cache keyed by the
+inputs, the provider request id journaled at submit so a retry resumes instead of
+re-submitting, and spend booked at submit. Written into
+`.claude/plans/ai-story/05-phase-4-assets-render-metadata.md` §1 (Asset generation).
 
 ---
 
