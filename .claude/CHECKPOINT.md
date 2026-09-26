@@ -32,8 +32,8 @@ RC-P1…P11 and RC-S1…S4 stay, plus:
 | 2 | prompts K1/P0/P1/R1/S1/S2/U1 | **done** (local 3362 / CI 2884 + 448 skipped) |
 | 3 | voices | **done** (local 3399 / CI 2921 + 448 skipped) |
 | 4 | upload handling + vision describe | **done** (local 3456 / CI 2978 + 448 skipped) |
-| 5 | reference images across routes (RISKIEST) | next |
-| 6 | step runners | — |
+| 5 | reference images across routes (RISKIEST) | **done** (local 3525 / CI 3047 + 448 skipped) |
+| 6 | step runners | next |
 | 7 | API | — |
 | 8 | CLI | — |
 | 9 | dashboard: CastEditor | — |

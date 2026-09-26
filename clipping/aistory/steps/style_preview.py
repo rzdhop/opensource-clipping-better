@@ -32,6 +32,10 @@ and only those, only inside ``styles/preview/`` (``StoryStore.clear_previews``).
 ``estimate`` answers the same question without calling anything, for
 ``GET /api/stories/{id}/estimate/style_preview`` and the job's gate.
 
+The wiring this step shares with the reference images of phase 2 (the
+estimate, the one-image run, the booking, the copy) lives in ``imaging.py``,
+lifted from here unchanged in behaviour.
+
 Stdlib only (DEC-012).
 """
 
@@ -39,18 +43,14 @@ from __future__ import annotations
 
 import copy
 import hashlib
-import json
-import os
-import shutil
 import tempfile
 import time
 
 from clipping.providers import adapters as adapters_mod
-from clipping.providers import budget as budget_mod
-from clipping.providers import gating, limits
+from clipping.providers import gating
 from clipping.providers import generation as gen
-from clipping.providers.registry import ChainError
 
+from .. import imaging
 from .. import ledger as ledger_mod
 from .. import prompting, schemas
 from . import llm_call
@@ -58,14 +58,14 @@ from .llm_call import StepFailed
 
 STEP = "style_preview"
 DOC_NAME = "style_preview.json"
-LOCK_NAME = "style_lock.json"
-LEDGER_NAME = "cost_ledger.json"
+LOCK_NAME = imaging.LOCK_NAME
+LEDGER_NAME = imaging.LEDGER_NAME
 KIND = gen.IMAGE
 
 # "Tiny" and vertical (9:16): enough to judge a palette and a light, cheap
 # where a price scales with the size.
 WIDTH, HEIGHT = 576, 1024
-KEPT_EXTENSIONS = ("png", "jpg", "jpeg", "webp")
+KEPT_EXTENSIONS = imaging.KEPT_EXTENSIONS
 
 # One entry per sample: the ``prompting`` builder and its arguments. Constants
 # only -- nothing from the story reaches a preview prompt.
@@ -87,10 +87,6 @@ PREVIEW_SAMPLES = (
     }),
 )
 SAMPLES = len(PREVIEW_SAMPLES)
-
-# The runner's own refusal of a paid link while paid is off; the step adds the
-# numbers the runner does not have.
-_PAID_OFF = "paid link; allow_paid is off"
 
 
 # ---------------------------------------------------------------- prompts
@@ -116,63 +112,6 @@ def _request(prompt="", *, negative="", seed=None, out_dir="", n=None) -> gen.Ge
 
 # --------------------------------------------------------------- estimate
 
-def _allowance_spent(provider):
-    """``limits.acquire``'s refusal for *provider*, read without counting a call."""
-    limit = limits.limits_from_env().get(provider)
-    if limit is None or limit.rpd is None:
-        return None
-    calls = limits.default_usage().calls(provider)
-    if calls >= limit.rpd:
-        return f"daily allowance spent ({calls}/{limit.rpd} today, resets at 00:00 UTC)"
-    return None
-
-
-def _missing_keys_reason(missing) -> str:
-    # The runner's wording, so the estimate and the feed say the same thing.
-    return f"no API key ({' and '.join(missing)} {'is' if len(missing) == 1 else 'are'} not set)"
-
-
-def _estimate_row(link, merged, budget_obj, request, *, route, story_spent, adapters) -> dict:
-    """One link, through the runner's gates in the runner's order (route,
-    adapter, keys, then local / paid / free), calling nothing."""
-    summary = gating.link_summary(KIND, link, merged, budget_obj, request, qty=SAMPLES,
-                                  story_spent=story_spent, adapters=adapters)
-    local = link.provider == "local"
-    paid = summary["paid"]
-    row = {"link": summary["label"], "status": "skipped", "reason": None, "paid": paid,
-           "est_usd": summary["est_usd"] if paid else 0.0}
-    if route == "local" and not local:
-        row["reason"] = "route is local"
-    elif route == "api" and local:
-        row["reason"] = "route is api"
-    elif not summary["adapter"]:
-        row["reason"] = f"no adapter yet for {link.provider} {KIND}"
-    elif summary["missing_keys"]:
-        row["reason"] = _missing_keys_reason(summary["missing_keys"])
-    elif local:
-        # Probing is a request; an estimate sends none. The step probes.
-        row.update(status="runnable", reason="probed when it runs")
-    elif paid:
-        if summary["allowed"]:
-            row.update(status="runnable", reason="paid, allowed")
-        else:
-            row["reason"] = summary["reason"]
-    else:
-        spent = _allowance_spent(link.provider)
-        if spent:
-            row["reason"] = spent
-        else:
-            row.update(status="runnable", reason="free")
-    return row
-
-
-def _blocked(rows, why) -> dict:
-    return {
-        "step": STEP, "est_usd": 0.0, "units": {"images": SAMPLES}, "route_class": "blocked",
-        "link": None, "links": rows, "ready": False, "message": why,
-    }
-
-
 def estimate(settings_env, *, route, story_spent=0.0, adapters=None) -> dict:
     """What the preview would cost and where it would run; nothing is called::
 
@@ -190,135 +129,27 @@ def estimate(settings_env, *, route, story_spent=0.0, adapters=None) -> dict:
     allowance. ``est_usd`` is three times the first runnable link's
     per-image estimate -- 0.0 when it is free or local -- and each row's
     ``est_usd`` is the same for that link. ``blocked``: no link can run;
-    ``message`` then names every link's reason.
+    ``message`` then names every link's reason (``imaging.estimate``).
     """
-    if adapters is None:
-        adapters_mod.load_all()
-    merged = gating.merged_env(settings_env)
-    try:
-        chain = gen.chain_from_env(KIND, merged)
-    except ChainError as exc:
-        return _blocked([], f"IMAGE_CHAIN cannot be used: {exc}")
-    try:
-        budget_obj = gating.budget_of(merged)
-    except ValueError as exc:
-        return _blocked([], f"The budget settings cannot be used: {exc}")
-
-    request = _request()
-    rows = [_estimate_row(link, merged, budget_obj, request, route=route, story_spent=story_spent,
-                          adapters=adapters) for link in chain]
-    first = next((row for row in rows if row["status"] == "runnable"), None)
-    if first is None:
-        detail = "; ".join(f"{row['link']}: {row['reason']}" for row in rows) or "the chain is empty"
-        return _blocked(rows, f"No link of {gen.ENV_NAMES[KIND]} can make the preview on route {route}: {detail}.")
-
-    label = first["link"]
-    if first["paid"]:
-        route_class = "paid"
-        message = f"{SAMPLES} images on {label}, paid: est ${first['est_usd']:.3f}."
-    elif label.startswith("local/"):
-        route_class = "local"
-        message = (f"{SAMPLES} images on {label}, on your own hardware: $0.00. "
-                   "Its server is probed when the preview runs.")
-    else:
-        route_class = "free"
-        message = f"{SAMPLES} images on {label} (free): $0.00."
-    later_paid = [row for row in rows[rows.index(first) + 1:] if row["status"] == "runnable" and row["paid"]]
-    if not first["paid"] and later_paid:
-        most = max(row["est_usd"] for row in later_paid)
-        message += (f" If it fails, {', '.join(row['link'] for row in later_paid)} (paid, est up to "
-                    f"${most:.3f}) may be reached.")
-    return {
-        "step": STEP, "est_usd": first["est_usd"], "units": {"images": SAMPLES},
-        "route_class": route_class, "link": label, "links": rows, "ready": True, "message": message,
-    }
+    return imaging.estimate(KIND, settings_env, route=route, request=_request(), qty=SAMPLES,
+                            story_spent=story_spent, adapters=adapters, step=STEP,
+                            what="the preview", when="the preview runs")
 
 
 # ------------------------------------------------------------------ helpers
 
-def _read_lock(store, story_id) -> dict:
-    try:
-        lock = store.read_doc(story_id, LOCK_NAME)
-    except schemas.SchemaError as exc:
-        first = exc.errors[0] if exc.errors else str(exc)
-        raise StepFailed(f"{LOCK_NAME} cannot be read ({first}); build the style again.") from None
-    if lock is None:
-        raise StepFailed("Build the style first.")
-    errors = schemas.style_lock_errors(lock)
-    if errors:
-        raise StepFailed(f"{LOCK_NAME} is not a valid style lock ({'; '.join(errors[:3])}); "
-                         "build the style again.")
-    return lock
-
-
 def _open_ledger(store, story_id) -> ledger_mod.CostLedger:
     """The story's ledger, checked before anything is spent: its total feeds
     the per-story cap, and ``CostLedger`` would start a torn file afresh on
-    the first append -- losing what the story already spent."""
-    path = os.path.join(store.story_dir(story_id), LEDGER_NAME)
-    if os.path.islink(path):
-        raise StepFailed(f"{LEDGER_NAME} is a symlink, which is never followed, so this story's "
-                         "spending cannot be checked; replace it with the file itself.")
-    if os.path.lexists(path):
-        try:
-            with open(path, encoding="utf-8") as fh:
-                data = json.load(fh)
-            if (not isinstance(data, dict) or data.get("$schema") != ledger_mod.SCHEMA
-                    or not isinstance(data.get("entries"), list)):
-                raise ValueError(f"not a {ledger_mod.SCHEMA} document")
-            sum(float(entry["est_usd"]) for entry in data["entries"])
-        except (OSError, ValueError, KeyError, TypeError) as exc:
-            raise StepFailed(f"{LEDGER_NAME} cannot be read ({type(exc).__name__}: {exc}), so this "
-                             "story's spending cannot be checked; fix it before making a preview.") from None
-    return ledger_mod.CostLedger(path)
+    the first append -- losing what the story already spent
+    (``imaging.open_ledger``)."""
+    return imaging.open_ledger(store, story_id, error=StepFailed, doing="making a preview")
 
 
 def _save(store, story_id, doc) -> None:
     now = llm_call.utc_now()
     doc["updated_at"] = now
     store.write_doc(story_id, DOC_NAME, doc, now=now, validator=schemas.style_preview_errors)
-
-
-def _book(ledger, result, answered) -> float:
-    """Book one answered call; returns what it cost."""
-    paid = bool(result.paid)
-    est = float(result.est_cost) if paid else 0.0
-    ledger.append(step=STEP, provider=answered.provider, model=gating.api_model_id(KIND, answered),
-                  unit="image", qty=1, est_usd=est, paid=paid)
-    # Today's spend, as the Settings chain test books a paid call. The runner
-    # books nothing itself: this is the one booking of this call.
-    if result.paid and result.est_cost > 0:
-        budget_mod.record(result.est_cost)
-    return round(est, 4)
-
-
-def _keep(result, folder, n):
-    """Copy the produced image into *folder* as ``preview_<n>.<ext>``;
-    ``(name, None)``, or ``(None, why)`` when it is not an image we keep."""
-    paths = [str(p) for p in (result.paths or ()) if p]
-    if not paths:
-        return None, "the answer carried no file"
-    produced = paths[0]
-    ext = os.path.splitext(produced)[1].lstrip(".").lower()
-    if ext not in KEPT_EXTENSIONS:
-        kept = f"{', '.join(KEPT_EXTENSIONS[:-1])} and {KEPT_EXTENSIONS[-1]}"
-        return None, f"the answer is a .{ext or '?'} file; only {kept} are kept"
-    if os.path.islink(produced) or not os.path.isfile(produced):
-        return None, "the answer's file is missing, or a symlink (never followed)"
-    name = f"preview_{n}.{ext}"
-    handle, tmp = tempfile.mkstemp(dir=folder, prefix=f".{name}-", suffix=".tmp")
-    try:
-        with os.fdopen(handle, "wb") as out, open(produced, "rb") as src:
-            shutil.copyfileobj(src, out)
-        os.chmod(tmp, 0o644)
-        os.replace(tmp, os.path.join(folder, name))
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
-    return name, None
 
 
 # ---------------------------------------------------------------------- run
@@ -334,18 +165,10 @@ def run(ctx, *, transport=None, adapters=None, sleep_fn=time.sleep, time_fn=time
     image was made, naming every reason; ``Cancelled`` between samples.
     """
     store, story = llm_call.open_story(ctx)
-    lock = _read_lock(store, ctx.story_id)
+    lock = imaging.read_lock(store, ctx.story_id, error=StepFailed)
     route = story["generation_profile"]["route"]
 
-    merged = gating.merged_env(ctx.settings_env)
-    try:
-        chain = gen.chain_from_env(KIND, merged)
-    except ChainError as exc:
-        raise StepFailed(f"{gen.ENV_NAMES[KIND]} cannot be used: {exc}") from None
-    try:
-        budget_obj = gating.budget_of(merged)
-    except ValueError as exc:
-        raise StepFailed(f"The budget settings cannot be used: {exc}") from None
+    merged, chain, budget_obj = imaging.resolve(KIND, ctx.settings_env, error=StepFailed)
     if adapters is None:
         adapters_mod.load_all()
 
@@ -376,17 +199,6 @@ def run(ctx, *, transport=None, adapters=None, sleep_fn=time.sleep, time_fn=time
 
     check = gating.budget_check(budget_obj, story_spent=lambda: ledger.totals()["est_usd"])
     limiter = gating.FreeTierLimiter()
-    by_label = {gen.describe(link): link for link in chain}
-
-    def explain(label, reason, request):
-        """A chain reason, verbatim; a paid link refused while paid is off also
-        gets the numbers, which the runner does not have."""
-        link = by_label.get(label)
-        if reason == _PAID_OFF and link is not None:
-            est = gating.link_summary(KIND, link, merged, budget_obj, request, adapters=adapters)["est_usd"]
-            return (f"{label}: {reason} (est ${est:.3f} per image; today ${budget_mod.day_spent():.2f} "
-                    f"of the ${budget_obj.daily_cap_usd:.2f} daily cap)")
-        return f"{label}: {reason}"
 
     def failed(n, reasons):
         doc["failed"].append({"n": n, "reasons": reasons})
@@ -402,23 +214,22 @@ def run(ctx, *, transport=None, adapters=None, sleep_fn=time.sleep, time_fn=time
         with tempfile.TemporaryDirectory(prefix="style-preview-") as incoming:
             request = _request(prompt, negative=negative, seed=seed, out_dir=incoming, n=n)
             try:
-                result, answered = gen.run_generation_chain(
-                    KIND, chain, request, env=merged, allow_paid=budget_obj.allow_paid, route=route,
-                    on_log=ctx.on_log, budget_check=check, limiter=limiter, adapters=adapters,
-                    transport=transport, sleep_fn=sleep_fn, time_fn=time_fn, cancel=ctx.cancel,
+                result, answered = imaging.run_one(
+                    KIND, chain, request, merged=merged, budget_obj=budget_obj, route=route,
+                    budget_check=check, limiter=limiter, on_log=ctx.on_log, cancel=ctx.cancel,
+                    adapters=adapters, transport=transport, sleep_fn=sleep_fn, time_fn=time_fn,
                 )
-            except gen.NoRunnableLink as exc:
-                reasons = [explain(label, reason, request) for label, reason in exc.failures]
-                failed(n, reasons or [str(exc)])
+            except imaging.NoImage as exc:
+                failed(n, exc.reasons)
                 continue
             except Exception as exc:  # noqa: BLE001 - an adapter's bug fails its sample, not the strip
                 failed(n, [f"{type(exc).__name__}: {exc}"])
                 continue
 
             # Answered: booked first, whatever becomes of the file.
-            est = _book(ledger, result, answered)
+            est = imaging.book(ledger, result, answered, kind=KIND, step=STEP)
             label = gen.describe(answered)
-            name, problem = _keep(result, folder, n)
+            name, problem = imaging.keep(result, folder, f"preview_{n}")
             if name is None:
                 failed(n, [f"{label}: {problem}"])
                 continue

@@ -476,3 +476,81 @@ def test_prop_prompt_block_is_pure_and_deterministic():
 def test_place_and_prop_prompt_block_have_no_name_parameter():
     assert "name" not in inspect.signature(prompting.place_prompt_block).parameters
     assert "name" not in inspect.signature(prompting.prop_prompt_block).parameters
+
+
+# ----------------------------------------------- prop image and time variants (phase 2, stage 5)
+
+def test_prop_image_prompt_fruit_drama_golden():
+    result = prompting.prop_image_prompt(FRUIT_DRAMA, descriptor=PROP_DESCRIPTOR)
+    expected = (
+        "Product shot of a small tarnished brass telephone shaped like a hollowed "
+        "coconut shell, alone, centered, plain light grey background. "
+        "photorealistic 3D render of anthropomorphic fruits and vegetables with "
+        "expressive human-like faces (eyes, brows, mouths) on realistic fruit "
+        "heads, human-proportioned bodies in real fabric outfits, subsurface "
+        "scattering on fruit skin, visible pores and fuzz, glossy highlights, "
+        "high-end CGI commercial quality, Octane-style render. No people, no "
+        "hands, no text. ultra detailed, 8k, sharp focus"
+    )
+    assert result == expected
+    assert prompting.prop_image_prompt(FRUIT_DRAMA, descriptor=PROP_DESCRIPTOR + ".") == expected
+
+
+def test_variant_prompt_fruit_drama_golden():
+    result = prompting.variant_prompt(
+        FRUIT_DRAMA,
+        place_descriptor="the manor's gravel courtyard with wrought iron gates",
+        variant="golden_hour",
+    )
+    expected = (
+        "Establishing wide shot of the manor's gravel courtyard with wrought "
+        "iron gates, golden hour, no people, no characters. "
+        "real-world sets — manor gates, gravel courtyards, derelict interiors "
+        "with chandeliers, beach camps, villa kitchens, restaurants — "
+        "photographed like a reality-TV show or a live-action comedy, props at "
+        "human scale; exteriors in golden hour, interiors cold blue-grey with "
+        "warm candle or lamp practicals photorealistic 3D render of "
+        "anthropomorphic fruits and vegetables with expressive human-like faces "
+        "(eyes, brows, mouths) on realistic fruit heads, human-proportioned "
+        "bodies in real fabric outfits, subsurface scattering on fruit skin, "
+        "visible pores and fuzz, glossy highlights, high-end CGI commercial "
+        "quality, Octane-style render. Palette: saturated natural fruit colours "
+        "against warm neutral sets. Camera: wide, eye level, 24mm equivalent. "
+        "Lighting: warm key light with a soft cool fill, golden-hour or "
+        "practical interior lamps, dramatic rim light on reveals. Vertical "
+        "9:16, horizon in the upper third, foreground detail in the lower "
+        "third. ultra detailed, 8k, sharp focus"
+    )
+    assert result == expected
+
+
+def test_variant_prompt_is_the_master_plate_prompt_with_the_variant_as_time():
+    for variant, time_variant in (("day", "day"), ("night", "night"), ("heavy_rain", "heavy rain")):
+        assert prompting.variant_prompt(FRUIT_DRAMA, place_descriptor=PLACE_DESCRIPTOR, variant=variant) == (
+            prompting.master_plate_prompt(FRUIT_DRAMA, place_descriptor=PLACE_DESCRIPTOR,
+                                          time_variant=time_variant))
+
+
+@pytest.mark.parametrize("variant", ["Night", "", "night time", "../day", "a" * 21, None, 3])
+def test_variant_prompt_refuses_a_name_that_is_not_a_variant(variant):
+    with pytest.raises(ValueError):
+        prompting.variant_prompt(FRUIT_DRAMA, place_descriptor=PLACE_DESCRIPTOR, variant=variant)
+
+
+@pytest.mark.parametrize("style_id", templates.list_style_ids())
+def test_prop_and_variant_prompts_hygiene_for_every_template(style_id):
+    style_lock = templates.load_style(style_id)
+    outputs = [
+        prompting.prop_image_prompt(style_lock, descriptor=PROP_DESCRIPTOR),
+        prompting.variant_prompt(style_lock, place_descriptor=PLACE_DESCRIPTOR, variant="golden_hour"),
+    ]
+    for output in outputs:
+        assert ".." not in output
+        assert "  " not in output
+        assert not output.endswith(" ")
+        assert style_lock["quality_tail"].strip() in output
+
+
+def test_prop_and_variant_prompts_have_no_name_parameter():
+    assert "name" not in inspect.signature(prompting.prop_image_prompt).parameters
+    assert "name" not in inspect.signature(prompting.variant_prompt).parameters

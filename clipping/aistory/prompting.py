@@ -212,6 +212,30 @@ def master_plate_prompt(style_lock: dict, *, place_descriptor: str, time_variant
     return _collapse_ws(text)
 
 
+def variant_prompt(style_lock: dict, *, place_descriptor: str, variant: str) -> str:
+    """The master-plate prompt (spec 5) of one time variant of a place: the
+    variant name is its time and weather (``night``, ``golden_hour`` ->
+    "golden hour"). ``variant_prompt(..., variant="day")`` is the master plate
+    itself. ValueError for a name that is not a variant name
+    (``schemas.TIME_VARIANT_PATTERN``).
+    """
+    if not isinstance(variant, str) or re.fullmatch(schemas.TIME_VARIANT_PATTERN, variant) is None:
+        raise ValueError(f"not a time variant name: {variant!r}")
+    return master_plate_prompt(style_lock, place_descriptor=place_descriptor,
+                               time_variant=variant.replace("_", " "))
+
+
+def prop_image_prompt(style_lock: dict, *, descriptor: str) -> str:
+    """A prop's reference image (spec 2.5): the object alone on the sheet
+    background, in the style's rendering, with nobody holding it."""
+    text = (
+        f"Product shot of {_strip_trailing_period(descriptor)}, alone, centered, plain "
+        f"{style_lock['sheet_background']} background. {_strip_trailing_period(style_lock['rendering'])}. "
+        f"No people, no hands, no text. {style_lock['quality_tail']}"
+    )
+    return _collapse_ws(text)
+
+
 def character_prompt_block(style_lock: dict, *, descriptor: str, signature_items) -> str:
     """Spec 2.3: auto-assembled from descriptor + signature_items +
     style_lock.character_design_rules. Pure and deterministic.
