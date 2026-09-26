@@ -26,25 +26,32 @@ Every ``{story_id}`` is checked against the store's id rule before anything
 else, so a malformed id is a 404 and never reaches a path; an unknown one is a
 404; a story whose files do not validate is a 500 with one short sentence and
 no traceback.
+
+The story rules themselves -- choosing a concept, building the style draft,
+what approving the bible or the style requires, which fields an edit may set
+and which clear an approval, the phase grammar -- are
+``clipping.aistory.workflow``, shared with the CLI (``main.py --ai-story``).
+This module maps its errors onto status codes (``_answering``) and keeps what
+needs the job store: one step at a time per story, the key gate and the queue
+cap before a job exists, and the jobs an approval completes or a newer job
+supersedes. Each route checks those where it always has, so the status codes,
+details and their order are the ones the API has always given.
 """
 
 from __future__ import annotations
 
-import copy
 import os
-import re
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import FileResponse
 
-from clipping.aistory import defaults, schemas, stylelock, templates
+from clipping.aistory import schemas, templates, workflow
 from clipping.aistory import store as story_store
-from clipping.aistory.ledger import CostLedger
 from clipping.aistory.steps import bible as bible_step
 from clipping.aistory.steps import concepts as concepts_step
-from clipping.aistory.steps import llm_call
 from clipping.aistory.steps import regenerate as regenerate_step
 from clipping.aistory.steps import style_preview as preview_step
 from clipping.providers import registry
@@ -67,59 +74,10 @@ router = APIRouter(prefix="/api/stories", tags=["stories"], dependencies=[Depend
 
 # ------------------------------------------------------------------ grammar
 
-# Spec 9.1. What phase 1 runs, what stage 8 adds, and what comes later.
-LLM_STEPS = ("concepts", "bible")
-PREVIEW_STEP = "style_preview"
-LATER_STEPS = (
-    "cast", "places", "season", "script", "storyboard", "assets", "render",
-    "metadata", "memory", "feedback", "propose-next", "rerender", "fast-track",
-    "import",
-)
-
-# Spec 9.2, approve grammar: "season" bare, the others "<kind>:<id>".
-LATER_APPROVALS_BARE = ("season",)
-LATER_APPROVALS = ("character", "place", "prop", "script", "storyboard", "assets")
-
-# Spec 9.2, regenerate grammar: every "<kind>:..." target of a later phase.
-LATER_TARGETS = (
-    "character", "place", "prop", "season", "scene", "hook", "cliffhanger",
-    "teaser", "shot", "line", "metadata",
-)
-
-# What approving the bible requires (spec 2.1, 3 step 3).
-BIBLE_FIELDS = (
-    "logline", "premise", "tone", "genre_tags", "world", "themes_and_values",
-    "audience", "why_come_back",
-)
-WHY_COME_BACK_LINES = 3
-
-# The keys ``params`` of the inline style step may carry.
-STYLE_PARAMS = ("template_id", "overrides", "consistency_mode")
-
-# A generated card's fields the server sets; a custom concept need not send
-# them, and any it sends are replaced.
-_CARD_BOOKKEEPING = ("concept_id", "source", "prompt_version", "created_at", "language")
-
-# The story_concepts card rules (schemas.STORY_CONCEPT_CARD_SCHEMA) for what a
-# user writes: the same fields, the same shapes, none of the bookkeeping.
-_CUSTOM_CONCEPT_SCHEMA = {
-    "type": "object",
-    "properties": {
-        key: value for key, value in schemas.STORY_CONCEPT_CARD_SCHEMA["properties"].items()
-        if key not in _CARD_BOOKKEEPING
-    },
-    "required": [
-        key for key in schemas.STORY_CONCEPT_CARD_SCHEMA["required"]
-        if key not in _CARD_BOOKKEEPING
-    ],
-    "additionalProperties": False,
-}
-
-_TITLE_MAX = 120
-
-STYLE_LOCK_DOC = "style_lock.json"
-CONCEPTS_DOC = concepts_step.CONCEPTS_FILENAME
-COST_LEDGER = "cost_ledger.json"
+# Spec 9.1 and 9.2 live in clipping.aistory.workflow with the rules; these two
+# name the steps that are jobs here.
+LLM_STEPS = workflow.LLM_STEPS
+PREVIEW_STEP = workflow.PREVIEW_STEP
 
 _IN_FLIGHT = (JobStatus.QUEUED.value, JobStatus.RUNNING.value)
 
@@ -143,103 +101,63 @@ def _status_of(job: dict) -> str:
     return getattr(status, "value", status)
 
 
+# What each workflow refusal answers.
+_STATUS = {
+    workflow.NOT_FOUND: 404,
+    workflow.CONFLICT: 409,
+    workflow.INVALID: 400,
+    workflow.LATER_PHASE: 400,
+}
+
+
+@contextmanager
+def _answering():
+    """A workflow refusal as the HTTP error it has always been: its code's
+    status (``_STATUS``) and its detail, as given; an unreadable story
+    document is a 500 with one sentence and no traceback."""
+    try:
+        yield
+    except workflow.WorkflowError as exc:
+        raise HTTPException(status_code=_STATUS[exc.code], detail=exc.detail) from None
+    except workflow.StoryUnreadable as exc:
+        raise HTTPException(status_code=500, detail=exc.detail) from None
+
+
 def _not_found() -> HTTPException:
     return HTTPException(status_code=404, detail="Story not found")
 
 
-def _unreadable(story_id: str, name: str, errors) -> HTTPException:
-    """A story document on disk that does not validate: one sentence, the first
-    error, no traceback. Never repaired here."""
-    first = str(errors[0]) if errors else "it does not validate"
-    if len(first) > 200:
-        first = first[:197] + "..."
-    return HTTPException(
-        status_code=500,
-        detail=f"Story {story_id} cannot be read: {name} is invalid ({first}).",
-    )
-
-
 def _check_id(story_id) -> None:
-    if not story_store.is_story_id(story_id):
-        raise _not_found()
+    with _answering():
+        workflow.check_id(story_id)
 
 
 def _load(stories, story_id) -> dict:
     """The story, or 404 (malformed or unknown id), or 500 (corrupt)."""
-    _check_id(story_id)
-    try:
-        return stories.get(story_id)
-    except KeyError:
-        raise _not_found() from None
-    except schemas.SchemaError as exc:
-        raise _unreadable(story_id, exc.name, exc.errors) from None
-
-
-def _update(stories, story_id, mutate, *, now) -> dict:
-    """``StoryStore.update``: 404 for a story gone meanwhile, 400 when the
-    changed document is refused by the schema (a bad value in the request),
-    500 when the one on disk is."""
-    try:
-        return stories.update(story_id, mutate, now=now)
-    except KeyError:
-        raise _not_found() from None
-    except schemas.SchemaError as exc:
-        if exc.name == story_store.STORY_SCHEMA:
-            raise HTTPException(
-                status_code=400,
-                detail={"message": "The story would not be valid with these values.",
-                        "errors": list(exc.errors)},
-            ) from None
-        raise _unreadable(story_id, exc.name, exc.errors) from None
+    with _answering():
+        return workflow.load(stories, story_id)
 
 
 def _read_doc(stories, story_id, name, validator):
     """One of the story's documents, validated, or None if it does not exist."""
-    label = f"{story_store.STORIES_DIRNAME}/{story_id}/{name}"
-    try:
-        doc = stories.read_doc(story_id, name)
-    except KeyError:
-        raise _not_found() from None
-    except schemas.SchemaError as exc:
-        raise _unreadable(story_id, exc.name, exc.errors) from None
-    if doc is None:
-        return None
-    errors = validator(doc)
-    if errors:
-        raise _unreadable(story_id, label, errors)
-    return doc
+    with _answering():
+        return workflow.read_doc(stories, story_id, name, validator)
 
 
 def _style_lock(stories, story_id):
-    return _read_doc(stories, story_id, STYLE_LOCK_DOC, schemas.style_lock_errors)
+    with _answering():
+        return workflow.style_lock(stories, story_id)
 
 
 def _generated_cards(stories, story_id) -> list:
-    doc = _read_doc(stories, story_id, CONCEPTS_DOC, schemas.story_concepts_errors)
-    return list(doc["concepts"]) if doc is not None else []
-
-
-def _write_doc(stories, story_id, name, doc, *, now, validator) -> dict:
-    try:
-        return stories.write_doc(story_id, name, doc, now=now, validator=validator)
-    except KeyError:
-        raise _not_found() from None
+    with _answering():
+        return workflow.generated_cards(stories, story_id)
 
 
 def _cost_total(stories, story_id) -> float:
-    """The story ledger's total (spec 2.11), 0.0 while it has none. A symlink
-    in its place is not followed."""
-    try:
-        path = os.path.join(stories.story_dir(story_id), COST_LEDGER)
-    except KeyError:
-        raise _not_found() from None
-    if os.path.islink(path) or not os.path.isfile(path):
-        return 0.0
-    try:
-        return float(CostLedger(path).totals()["est_usd"])
-    except (KeyError, TypeError, ValueError) as exc:
-        raise _unreadable(story_id, f"{story_store.STORIES_DIRNAME}/{story_id}/{COST_LEDGER}",
-                          [f"{type(exc).__name__}: {exc}"]) from None
+    """The story ledger's total (spec 2.11), 0.0 while it has none."""
+    with _answering():
+        return workflow.cost_total(stories, story_id)
 
 
 # ------------------------------------------------------------- step jobs
@@ -294,40 +212,18 @@ def _complete_awaiting(story_id, doc) -> list:
     return done
 
 
-def _no_key_message(links) -> str:
-    """No link of the chain has a key: which ones to set, primaries first
-    (the floor alone would be refused next), billed ones marked as such
-    (DEC-088)."""
-    wanted = [registry.PROVIDERS[link.provider] for link in links if registry.is_primary(link)]
-    wanted = wanted or [registry.PROVIDERS[link.provider] for link in links]
-    names = ", ".join(
-        f"{p.env_key} ({p.signup_url or 'your own endpoint'})"
-        + ("" if p.free_tier else " (paid)")
-        for p in dict.fromkeys(wanted)
-    )
-    return (
-        "No link in the LLM chain has an API key, so this step cannot call a "
-        f"model. Set one of: {names}, in Settings."
-    )
-
-
 def _llm_gate(env):
     """``(links, keys, refusal)`` for a story step under the Settings values
     *env*: the chain and keys the step will run with (``llm_call``, the same
     resolution the worker hands it), and why it may not start, or None.
 
-    Refused: a chain that cannot be parsed (the step would fail on its first
-    call), a chain in which no link has a key, and the DEC-073 slow-floor
-    case -- the rule ``POST /api/jobs`` applies, from the same function.
+    Refused (``workflow.llm_gate``): a chain that cannot be parsed (the step
+    would fail on its first call), a chain in which no link has a key, and the
+    DEC-073 slow-floor case -- the rule ``POST /api/jobs`` applies, from the
+    same function.
     """
-    try:
-        links = llm_call.resolve_chain(env)
-    except registry.ChainError as exc:
-        return [], {}, f"LLM_CHAIN cannot be used: {exc}"
-    keys = llm_call.resolve_keys(env)
-    if not any(keys.get(link.provider) for link in links):
-        return links, keys, _no_key_message(links)
-    return links, keys, jobs_routes._chain_readiness_refusal(links, env)
+    return workflow.llm_gate(
+        env, readiness=lambda links, _keys: jobs_routes._chain_readiness_refusal(links, env))
 
 
 async def _create_step_job(story_id, step, params, *, ep=None, gate=None) -> JobResponse:
@@ -376,8 +272,8 @@ async def _create_step_job(story_id, step, params, *, ep=None, gate=None) -> Job
 
 
 def _require_concept(story) -> None:
-    if not story.get("concept"):
-        raise HTTPException(status_code=409, detail="Choose a concept first.")
+    with _answering():
+        workflow.require_concept(story)
 
 
 def _preview_estimate(stories, story) -> dict:
@@ -463,9 +359,10 @@ async def patch_story(story_id: str, req: StoryPatchRequest) -> dict:
     unapproved one); ``title``, ``seed_text``, ``narrator`` and
     ``generation_profile`` leave the approvals alone. ``narrator`` and
     ``generation_profile`` are merged onto the current values, the profile
-    checked against ``clipping.aistory.defaults``. 409 while a step of the
-    story is queued or running (its writes would race this one); 400 with
-    ``{"message", "errors"}`` when the story would not validate.
+    checked against ``clipping.aistory.defaults`` (``workflow.patch_story``).
+    409 while a step of the story is queued or running (its writes would race
+    this one); 400 with ``{"message", "errors"}`` when the story would not
+    validate.
     """
     stories = _stories()
     story = _load(stories, story_id)
@@ -480,31 +377,9 @@ async def patch_story(story_id: str, req: StoryPatchRequest) -> dict:
             detail=_busy_detail(busy[0], "edit the story once it is done, or cancel it first."),
         )
 
-    values = {name: copy.deepcopy(getattr(req, name)) for name in sent}
-
-    if "generation_profile" in sent:
-        partial = values["generation_profile"]
-        if partial is None:
-            raise HTTPException(status_code=400, detail="generation_profile must be an object, not null.")
-        try:
-            # The store's own check, on the current profile with the sent keys over it.
-            values["generation_profile"] = story_store._merge_generation_profile(
-                {**story["generation_profile"], **partial})
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from None
-
-    clears_bible = bool(sent & set(BIBLE_FIELDS))
-
-    def mutate(doc):
-        for name, value in values.items():
-            if name == "narrator" and isinstance(value, dict):
-                doc["narrator"] = {**doc["narrator"], **value}
-            else:
-                doc[name] = value
-        if clears_bible:
-            doc["approvals"]["bible"] = None
-
-    return _update(stories, story_id, mutate, now=_now())
+    with _answering():
+        return workflow.patch_story(
+            stories, story_id, {name: getattr(req, name) for name in sent}, now=_now())
 
 
 @router.delete("/{story_id}")
@@ -605,15 +480,10 @@ async def choose_concept(story_id: str, req: ConceptChooseRequest) -> dict:
     409 while the bible is being written (it is written from the concept).
     """
     stories = _stories()
-    story = _load(stories, story_id)
+    _load(stories, story_id)
 
-    by_id = req.concept_id is not None
-    by_payload = req.concept is not None
-    if by_id == by_payload:
-        raise HTTPException(
-            status_code=400,
-            detail="Send exactly one of 'concept_id' (a library or generated concept) and 'concept' (your own).",
-        )
+    with _answering():
+        workflow.check_concept_choice(req.concept_id, req.concept)
 
     busy = _in_flight(story_id, doc="bible")
     if busy:
@@ -623,46 +493,9 @@ async def choose_concept(story_id: str, req: ConceptChooseRequest) -> dict:
                                          "choose once that step is done, or cancel it first."),
         )
 
-    if by_id:
-        concept_id = req.concept_id
-        if re.fullmatch(schemas.GENERATED_CONCEPT_ID_PATTERN, concept_id):
-            card = next((c for c in _generated_cards(stories, story_id)
-                         if c["concept_id"] == concept_id), None)
-            if card is None:
-                raise HTTPException(status_code=404, detail=f"This story has no generated concept {concept_id!r}.")
-            snapshot = copy.deepcopy(card)
-            story_concept_id = "custom"
-        else:
-            library = {c["concept_id"]: c for c in templates.load_concepts()}
-            if concept_id not in library:
-                raise HTTPException(status_code=404, detail=f"Unknown concept {concept_id!r}.")
-            snapshot = templates.localize_concept(library[concept_id], story["language"])
-            snapshot["concept_id"] = concept_id
-            story_concept_id = concept_id
-    else:
-        content = {k: v for k, v in req.concept.items() if k not in _CARD_BOOKKEEPING}
-        errors = schemas.validate(content, _CUSTOM_CONCEPT_SCHEMA)
-        if errors:
-            raise HTTPException(
-                status_code=400,
-                detail={"message": "This concept is not a valid concept card.", "errors": errors},
-            )
-        snapshot = {"concept_id": "custom", "source": "custom", "language": story["language"],
-                    **copy.deepcopy(content)}
-        story_concept_id = "custom"
-
-    title = str(snapshot.get("title") or "")[:_TITLE_MAX]
-    now = _now()
-
-    def mutate(doc):
-        if doc.get("concept") != snapshot or doc.get("concept_id") != story_concept_id:
-            doc["approvals"]["bible"] = None
-        doc["concept_id"] = story_concept_id
-        doc["concept"] = snapshot
-        doc["title"] = title
-        doc["approvals"]["concept"] = now
-
-    story = _update(stories, story_id, mutate, now=now)
+    with _answering():
+        story = workflow.choose_concept(
+            stories, story_id, concept_id=req.concept_id, concept=req.concept, now=_now())
     _complete_awaiting(story_id, "concepts")
     return story
 
@@ -698,8 +531,8 @@ async def run_step(story_id: str, step: str, response: Response,
         response.status_code = 200
         return _style_step(stories, story, params)
     if step == PREVIEW_STEP:
-        if _style_lock(stories, story_id) is None:
-            raise HTTPException(status_code=409, detail="Build the style first.")
+        with _answering():
+            workflow.require_style_draft(stories, story_id)
         if params:
             raise HTTPException(status_code=400, detail=f"'{PREVIEW_STEP}' takes no parameters.")
 
@@ -709,142 +542,33 @@ async def run_step(story_id: str, step: str, response: Response,
                 raise HTTPException(status_code=409, detail=verdict["message"])
 
         return await _create_step_job(story_id, step, {}, ep=ep, gate=preview_gate)
-    if step in LATER_STEPS:
-        raise HTTPException(status_code=400, detail=f"'{step}' arrives in a later phase.")
-    raise HTTPException(status_code=404, detail=f"Unknown step {step!r}.")
-
-
-def _concept_style(concept):
-    """The style a chosen concept suggests: a library card's
-    ``style_fit.default``, a generated card's ``style_fit``."""
-    fit = (concept or {}).get("style_fit")
-    if isinstance(fit, dict):
-        fit = fit.get("default")
-    return fit if isinstance(fit, str) and fit else None
+    with _answering():
+        workflow.refuse_step(step)
 
 
 def _style_step(stories, story, params) -> dict:
-    """Build or edit the story's draft ``style_lock.json`` (spec 3 step 4).
+    """The story's draft ``style_lock.json`` (spec 3 step 4), built or edited
+    by ``workflow.build_style``, which says what ``params`` may hold and what
+    it refuses.
 
-    ``params = {template_id?, overrides?, consistency_mode?}``. The template
-    defaults to the story's ``style_template_id``, else the chosen concept's
-    style. A draft on the same template and version takes the new overrides
-    on top of its own (``stylelock.apply_overrides``); anything else is built
-    fresh. 409 before the bible is approved, while its preview is being made,
-    or once the style is locked; 400 for an unknown template, a bad parameter,
-    or refused overrides (with ``{"message", "errors"}``). The style approval
-    is cleared.
+    Here, in the order the route has always answered: 409 before the bible is
+    approved, then 409 while the style's preview is queued or running (it is
+    made from the draft this would change), then the workflow's answer.
     """
     story_id = story["story_id"]
-    if not story["approvals"].get("bible"):
-        raise HTTPException(status_code=409, detail="Approve the bible first.")
+    with _answering():
+        workflow.require_bible_approved(story)
     busy = _in_flight(story_id, doc="style")
     if busy:
         raise HTTPException(
             status_code=409,
             detail=_busy_detail(busy[0], "change the style once its preview is done, or cancel it first."),
         )
-
-    unknown = sorted(set(params) - set(STYLE_PARAMS))
-    if unknown:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unknown style parameter(s) {', '.join(unknown)} (known: {', '.join(STYLE_PARAMS)}).",
-        )
-
-    shipped = templates.list_style_ids()
-    template_id = (params.get("template_id") or story.get("style_template_id")
-                   or _concept_style(story.get("concept")))
-    if not template_id:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Name a style in params.template_id (shipped: {', '.join(shipped)}).",
-        )
-    try:
-        template = templates.load_style(template_id)
-    except KeyError:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unknown style template {template_id!r} (shipped: {', '.join(shipped)}).",
-        ) from None
-
-    overrides = params.get("overrides") or {}
-    if not isinstance(overrides, dict):
-        raise HTTPException(status_code=400, detail="params.overrides must be an object of dotted paths.")
-
-    consistency = params.get("consistency_mode")
-    if consistency is not None and consistency not in defaults.CONSISTENCY_MODES:
-        raise HTTPException(
-            status_code=400,
-            detail=(f"consistency_mode must be one of "
-                    f"{', '.join(defaults.CONSISTENCY_MODES)}, not {consistency!r}."),
-        )
-
-    current = _style_lock(stories, story_id)
-    if current is not None and current.get("locked_at"):
-        raise HTTPException(
-            status_code=409,
-            detail=f"The style is locked (since {current['locked_at']}); it cannot change.",
-        )
-
-    now = _now()
-    try:
-        if (current is not None and current.get("template_id") == template_id
-                and current.get("template_version") == template["version"]):
-            lock = stylelock.apply_overrides(current, overrides, now=now)
-        else:
-            lock = stylelock.build_style_lock(template, overrides, now=now)
-    except stylelock.StyleLockError as exc:
-        raise HTTPException(
-            status_code=400,
-            detail={"message": f"The style was refused: {exc.name}.", "errors": list(exc.errors)},
-        ) from None
-
-    written = _write_doc(stories, story_id, STYLE_LOCK_DOC, lock, now=now,
-                         validator=schemas.style_lock_errors)
-
-    def mutate(doc):
-        doc["style_template_id"] = template_id
-        if consistency is not None:
-            doc["generation_profile"]["consistency_mode"] = consistency
-        doc["approvals"]["style"] = None
-
-    return {"story": _update(stories, story_id, mutate, now=now), "style_lock": written}
+    with _answering():
+        return workflow.build_style(stories, story_id, params, now=_now())
 
 
 # -------------------------------------------------------------- approve
-
-def _is_empty(value) -> bool:
-    if value is None:
-        return True
-    if isinstance(value, str):
-        return not value.strip()
-    if isinstance(value, dict):
-        return all(_is_empty(v) for v in value.values())
-    if isinstance(value, list):
-        return all(_is_empty(v) for v in value)
-    return False
-
-
-def _missing_bible_fields(story) -> list:
-    missing = []
-    for field in BIBLE_FIELDS:
-        value = story.get(field)
-        if field == "why_come_back":
-            lines = [v for v in value or [] if isinstance(v, str) and v.strip()]
-            if len(lines) != WHY_COME_BACK_LINES:
-                missing.append(f"why_come_back (needs {WHY_COME_BACK_LINES} lines, has {len(lines)})")
-        elif _is_empty(value):
-            missing.append(field)
-    return missing
-
-
-def _is_later_approval(doc) -> bool:
-    if doc in LATER_APPROVALS_BARE:
-        return True
-    kind, sep, rest = doc.partition(":")
-    return bool(sep) and bool(rest) and kind in LATER_APPROVALS
-
 
 @router.post("/{story_id}/approve/{doc}")
 async def approve(story_id: str, doc: str) -> dict:
@@ -858,10 +582,12 @@ async def approve(story_id: str, doc: str) -> dict:
     ``style_lock.json``, or when it is already locked; then the lock is frozen
     (``locked_at``), ``approvals.style`` set, and the preview jobs awaiting
     approval are completed. The later documents of the 9.2 grammar: 400.
-    Anything else: 404.
+    Anything else: 404. What each approval requires is
+    ``workflow.approve_bible`` / ``approve_style``; the step jobs are checked
+    here first.
     """
     stories = _stories()
-    story = _load(stories, story_id)
+    _load(stories, story_id)
 
     if doc == "bible":
         busy = _in_flight(story_id, doc="bible")
@@ -870,19 +596,8 @@ async def approve(story_id: str, doc: str) -> dict:
                 status_code=409,
                 detail=_busy_detail(busy[0], "approve the bible once that step is done."),
             )
-        _require_concept(story)
-        missing = _missing_bible_fields(story)
-        if missing:
-            raise HTTPException(
-                status_code=409,
-                detail=f"The bible is not complete; missing or empty: {', '.join(missing)}.",
-            )
-        now = _now()
-
-        def approve_bible(d):
-            d["approvals"]["bible"] = now
-
-        story = _update(stories, story_id, approve_bible, now=now)
+        with _answering():
+            story = workflow.approve_bible(stories, story_id, now=_now())
         _complete_awaiting(story_id, "bible")
         return story
 
@@ -893,38 +608,16 @@ async def approve(story_id: str, doc: str) -> dict:
                 status_code=409,
                 detail=_busy_detail(busy[0], "approve the style once its preview is done, or cancel it first."),
             )
-        current = _style_lock(stories, story_id)
-        if current is None:
-            raise HTTPException(status_code=409, detail="There is no style to approve yet: run the style step first.")
-        now = _now()
-        try:
-            locked = stylelock.lock_style(current, now=now)
-        except stylelock.StyleLockError:
-            raise HTTPException(
-                status_code=409,
-                detail=f"The style is already locked (since {current.get('locked_at')}).",
-            ) from None
-        _write_doc(stories, story_id, STYLE_LOCK_DOC, locked, now=now,
-                   validator=schemas.style_lock_errors)
-
-        def approve_style(d):
-            d["approvals"]["style"] = now
-
-        story = _update(stories, story_id, approve_style, now=now)
+        with _answering():
+            story = workflow.approve_style(stories, story_id, now=_now())
         _complete_awaiting(story_id, "style")
         return story
 
-    if _is_later_approval(doc):
-        raise HTTPException(status_code=400, detail=f"Approving '{doc}' arrives in a later phase.")
-    raise HTTPException(status_code=404, detail=f"Nothing to approve under {doc!r}.")
+    with _answering():
+        workflow.refuse_approval(doc)
 
 
 # ----------------------------------------------------------- regenerate
-
-def _is_later_target(target) -> bool:
-    kind, sep, rest = target.partition(":")
-    return bool(sep) and bool(rest) and kind in LATER_TARGETS
-
 
 @router.post("/{story_id}/regenerate", status_code=201)
 async def regenerate(story_id: str, req: StoryRegenerateRequest) -> JobResponse:
@@ -939,14 +632,8 @@ async def regenerate(story_id: str, req: StoryRegenerateRequest) -> JobResponse:
     story = _load(stories, story_id)
     target = req.target
 
-    if target not in regenerate_step.VALID_TARGETS:
-        if _is_later_target(target):
-            raise HTTPException(status_code=400, detail=f"Regenerating '{target}' arrives in a later phase.")
-        raise HTTPException(
-            status_code=400,
-            detail=(f"Cannot regenerate {target!r}: the valid targets are "
-                    f"{', '.join(regenerate_step.VALID_TARGETS)}."),
-        )
+    with _answering():
+        workflow.check_regenerate_target(target)
     if target.startswith(regenerate_step.BIBLE_PREFIX):
         _require_concept(story)
 
@@ -1014,16 +701,12 @@ async def estimate(story_id: str, step: str, target: Optional[str] = None) -> di
         }
     if step == PREVIEW_STEP:
         return _preview_estimate(stories, story)
-    if step in LATER_STEPS:
-        raise HTTPException(status_code=400, detail=f"'{step}' arrives in a later phase.")
     if step not in LLM_STEPS and step != "regenerate":
-        raise HTTPException(status_code=404, detail=f"Unknown step {step!r}.")
+        with _answering():
+            workflow.refuse_step(step)
     if step == "regenerate" and target is not None and target not in regenerate_step.VALID_TARGETS:
-        raise HTTPException(
-            status_code=400,
-            detail=(f"Cannot regenerate {target!r}: the valid targets are "
-                    f"{', '.join(regenerate_step.VALID_TARGETS)}."),
-        )
+        with _answering():
+            raise workflow.invalid_target(target)
 
     calls = _llm_calls(step, target)
     links, keys, refusal = _llm_gate(worker.get_settings_env())

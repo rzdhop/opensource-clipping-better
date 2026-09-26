@@ -291,9 +291,15 @@ def _parse_speakers(val: str) -> str | int:
         raise argparse.ArgumentTypeError(f"'{val}' is not a valid integer or 'auto'")
 
 
+# The clip parser's one line about AI Story, which has a parser of its own
+# (clipping/aistory/cli.py, dispatched by main.py before this one; DEC-114).
+AI_STORY_POINTER = "AI Story has its own commands: python main.py --ai-story --help"
+
+
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description="🎬 rzdhop AI — AI Auto-Clipper & Teaser Generator",
+        epilog=AI_STORY_POINTER,
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
