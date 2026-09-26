@@ -131,6 +131,14 @@ def _job_to_response(job: dict) -> JobResponse:
         error=job.get("error"),
         log=job.get("log", []),
         events=[JobEvent(**e) for e in job.get("events", []) if isinstance(e, dict)],
+        # A record written before kinds existed is a clip job.
+        kind=job.get("kind", store.KIND_CLIP),
+        story_id=job.get("story_id"),
+        ep=job.get("ep"),
+        step=job.get("step"),
+        params=job.get("params"),
+        approved_at=job.get("approved_at"),
+        superseded_by=job.get("superseded_by"),
     )
 
 
@@ -226,6 +234,15 @@ async def create_job(req: JobCreateRequest) -> JobResponse:
     # A rerun reuses the job's id and output directory. Two workers on one
     # directory would overwrite each other's files, and the old one's late
     # writes would land on the new record.
+    # A rerun replaces the record it names, so rerunning a story step as a
+    # clip job would erase the step. Steps are regenerated from their story.
+    reused = store.get_job(reuse_job_id) if reuse_job_id else None
+    if reused is not None and reused.get("kind", store.KIND_CLIP) != store.KIND_CLIP:
+        raise HTTPException(
+            status_code=409,
+            detail="That job is an AI Story step. Regenerate it from its story instead.",
+        )
+
     if reuse_job_id and worker.is_active(reuse_job_id):
         raise HTTPException(
             status_code=409,
@@ -417,10 +434,13 @@ async def job_status_sse(job_id: str):
         # from a dead one -- to the user and to any proxy in between.
         ticks_since_output = 0
         HEARTBEAT_TICKS = 15
+        # A story step awaiting approval is over as far as this stream goes:
+        # nothing more happens until the user acts, and that is not streamed.
         terminal_states = {
             JobStatus.COMPLETED.value,
             JobStatus.FAILED.value,
             JobStatus.CANCELLED.value,
+            JobStatus.AWAITING_APPROVAL.value,
         }
 
         def feed_frame():

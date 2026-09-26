@@ -36,6 +36,14 @@ class JobStatus(str, enum.Enum):
     TRANSCRIBING = "transcribing"
     ANALYZING = "analyzing"
     RENDERING = "rendering"
+    # A story step (kind "story_step") at work. Interrupted by a restart like
+    # any of the processing states above, and failed for it.
+    RUNNING = "running"
+    # A story step finished and waits for the user. Finished for the worker --
+    # the slot is freed, the stream closes, a cancel is refused -- but not for
+    # the user, and it survives a restart. Approving it, or superseding it with
+    # a regenerated step, moves it on to COMPLETED; nothing else does.
+    AWAITING_APPROVAL = "awaiting_approval"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
@@ -329,6 +337,17 @@ class JobResponse(BaseModel):
     # The pipeline's own console output. `log` keeps the coarse worker messages
     # it always had; this is the detailed feed the dashboard tails live.
     events: list[JobEvent] = Field(default_factory=list)
+    # "clip", or "story_step" for an AI Story step. A record written before
+    # kinds existed has none and is a clip job. The fields below belong to a
+    # story step and are null on a clip job.
+    kind: str = "clip"
+    story_id: Optional[str] = None
+    ep: Optional[int] = None
+    step: Optional[str] = None
+    params: Optional[dict] = None
+    approved_at: Optional[datetime] = None
+    # The id of the regenerated step job that replaced this one.
+    superseded_by: Optional[str] = None
 
 
 class JobListResponse(BaseModel):

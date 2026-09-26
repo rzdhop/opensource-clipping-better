@@ -164,6 +164,13 @@ sitting in a running state forever.
 work unwinds, and a job that completes before the cancel lands stays `completed`
 (the cancel gets `409`).
 
+An AI Story step is a job too, with `"kind": "story_step"` (a clip job says
+`"kind": "clip"`) and its `story_id`, `ep`, `step` and `params`. It goes
+`queued` → `running` → `awaiting_approval`, or `failed` / `cancelled`.
+`awaiting_approval` frees the worker and ends the status stream, and a cancel
+gets `409`; it survives a restart, where a `running` step is marked `failed`.
+Approving the step, or regenerating it, moves it on to `completed`.
+
 ## Watching a job
 
 `GET /api/jobs/{id}/status` is Server-Sent Events. `EventSource` cannot send

@@ -43,10 +43,20 @@ MAX_EVENTS = 500
 _PERSIST_MIN_INTERVAL = 1.0
 _last_persist = 0.0
 
-# A job in one of these states is finished; nothing may move it on.
+# A job in one of these states is finished; nothing may move it on -- and so
+# nothing may cancel it. AWAITING_APPROVAL is finished for the worker; only
+# approve_step_job / supersede_step_job move it on, to COMPLETED.
 _TERMINAL = frozenset({
     JobStatus.COMPLETED.value, JobStatus.FAILED.value, JobStatus.CANCELLED.value,
+    JobStatus.AWAITING_APPROVAL.value,
 })
+
+# What a job is. Every record carries one; a record written before kinds
+# existed has none and is read as a clip job (``job.get("kind", KIND_CLIP)``),
+# never rewritten to say so.
+KIND_CLIP = "clip"
+KIND_STORY_STEP = "story_step"
+JOB_KINDS = (KIND_CLIP, KIND_STORY_STEP)
 
 # What only the worker writes as a job runs. Once a job is CANCELLED these are
 # dropped: its worker may still be finishing a request or unwinding a killed
@@ -117,13 +127,21 @@ def _persist(force: bool = True) -> None:
 
 
 def fail_stale_jobs(reason="Interrupted by a server restart.") -> list[str]:
-    """Mark every non-terminal job failed. Called once at startup.
+    """Mark every interrupted job failed. Called once at startup.
 
     A job whose worker thread died with the process stays in `analyzing`
     forever: nothing re-queues it and nothing marks it failed, so the dashboard
     shows a job that is running and will never finish, and the health endpoint
     counts it as occupying a worker slot. `outputs/jobs.json` currently holds
     one such record from 2026-09-18.
+
+    Three buckets. Finished jobs (completed, failed, cancelled) are left alone.
+    A story step in `awaiting_approval` is left alone too: it is neither
+    finished nor interrupted -- no worker holds it, and the story waits on the
+    user's approval, which a restart must not throw away. Everything else was
+    interrupted and is failed, a story step in `running` included. So is
+    `needs_upload`, as it always was; that is a known mishandling with its own
+    follow-up.
 
     Returns the ids it changed, so the caller can say how many.
     """
@@ -134,6 +152,7 @@ def fail_stale_jobs(reason="Interrupted by a server restart.") -> list[str]:
         JobStatus.FAILED,
         JobStatus.CANCELLED,
     }
+    waiting_for_the_user = {JobStatus.AWAITING_APPROVAL}
     changed: list[str] = []
     with _lock:
         for job_id, job in _jobs.items():
@@ -142,6 +161,8 @@ def fail_stale_jobs(reason="Interrupted by a server restart.") -> list[str]:
                 continue
             value = getattr(status, "value", status)
             if value in {getattr(t, "value", t) for t in terminal}:
+                continue
+            if value in {getattr(t, "value", t) for t in waiting_for_the_user}:
                 continue
             if isinstance(job, dict):
                 job["status"] = getattr(JobStatus.FAILED, "value", "failed")
@@ -183,14 +204,54 @@ _load()
 # CRUD
 # ---------------------------------------------------------------------------
 
+def _story_step_fields(story_id, ep, step, params) -> dict:
+    """The fields a story-step record carries, checked. ValueError otherwise."""
+    # Lazily: a clip job never imports the AI Story package.
+    from clipping.aistory.store import is_story_id
+
+    if not is_story_id(story_id):
+        raise ValueError(f"a story_step job needs a well-formed story_id, not {story_id!r}")
+    if not isinstance(step, str) or not step.strip():
+        raise ValueError(f"a story_step job needs a step name, not {step!r}")
+    # bool is an int in Python; an episode number is not a flag.
+    if ep is not None and (not isinstance(ep, int) or isinstance(ep, bool)):
+        raise ValueError(f"ep must be an episode number or null, not {ep!r}")
+    if params is not None and not isinstance(params, dict):
+        raise ValueError(f"params must be an object, not {type(params).__name__}")
+    return {"story_id": story_id, "ep": ep, "step": step, "params": dict(params or {})}
+
+
 def create_job(
     upload_filename: Optional[str] = None,
     transcript_filename: Optional[str] = None,
     source_url: Optional[str] = None,
     config: dict | None = None,
     job_id: str | None = None,
+    kind: str = KIND_CLIP,
+    story_id: str | None = None,
+    ep: int | None = None,
+    step: str | None = None,
+    params: dict | None = None,
 ) -> str:
-    """Create a new job and return its ID."""
+    """Create a new job and return its ID.
+
+    Every record carries its ``kind``. A clip job carries nothing else new; a
+    ``story_step`` job also carries ``story_id``, ``ep``, ``step`` and
+    ``params``. ValueError, and nothing created, for an unknown kind, a story
+    step without a well-formed story id or a step name, or story fields on a
+    clip job.
+    """
+    if kind not in JOB_KINDS:
+        raise ValueError(f"unknown job kind {kind!r} (known: {', '.join(JOB_KINDS)})")
+    if kind == KIND_STORY_STEP:
+        extra = _story_step_fields(story_id, ep, step, params)
+    else:
+        given = [name for name, value in (
+            ("story_id", story_id), ("ep", ep), ("step", step), ("params", params),
+        ) if value is not None]
+        if given:
+            raise ValueError(f"{', '.join(given)} belong to a {KIND_STORY_STEP} job, not a {kind} job")
+        extra = {}
     job_id = job_id or uuid.uuid4().hex[:12]
     now = _now()
     with _lock:
@@ -209,6 +270,8 @@ def create_job(
             "log": [],
             "events": [],
             "event_seq": 0,
+            "kind": kind,
+            **extra,
         }
         _persist()
     return job_id
@@ -425,10 +488,11 @@ def set_clips(job_id: str, clips: list[ClipDetail]) -> None:
 def request_cancel(job_id: str) -> str:
     """Mark *job_id* cancelled, unless it has already finished.
 
-    Returns ``"cancelled"``, ``"terminal"`` (it completed, failed or was
-    cancelled first) or ``"missing"``. Decided under the store lock, so a job
-    ends either COMPLETED -- the worker's set_clips got there first and the
-    cancel is refused -- or CANCELLED, never both.
+    Returns ``"cancelled"``, ``"terminal"`` (it completed, failed, was
+    cancelled first, or is a story step awaiting approval) or ``"missing"``.
+    Decided under the store lock, so a job ends either COMPLETED -- the
+    worker's set_clips got there first and the cancel is refused -- or
+    CANCELLED, never both.
     """
     with _lock:
         job = _jobs.get(job_id)
@@ -444,6 +508,73 @@ def request_cancel(job_id: str) -> str:
         return "cancelled"
 
 
+def _complete_awaiting_step(job_id: str, stamp: dict) -> str:
+    """Move a story step out of AWAITING_APPROVAL, to COMPLETED, with *stamp*.
+
+    Not a worker write, so DEC-076's rule for a cancelled job does not come
+    into it: a cancelled job is not awaiting, and is refused like any other.
+    """
+    with _lock:
+        job = _jobs.get(job_id)
+        if job is None:
+            return "missing"
+        if _status_value(job) != JobStatus.AWAITING_APPROVAL.value:
+            return "not_awaiting"
+        job.update(stamp)
+        job["status"] = JobStatus.COMPLETED.value
+        job["updated_at"] = _now()
+        _persist()
+        return "ok"
+
+
+def approve_step_job(job_id: str) -> str:
+    """The user approved a story step's result.
+
+    ``"ok"`` (now COMPLETED, ``approved_at`` stamped), ``"missing"``, or
+    ``"not_awaiting"`` for a job in any other status -- including one already
+    approved. With :func:`supersede_step_job`, the only way out of
+    AWAITING_APPROVAL.
+    """
+    return _complete_awaiting_step(job_id, {"approved_at": _now().isoformat()})
+
+
+def supersede_step_job(job_id: str, by_job_id: str) -> str:
+    """A regenerated step (*by_job_id*) replaces this one's result.
+
+    Same outcomes as :func:`approve_step_job`; ``superseded_by`` is stamped
+    instead of ``approved_at``.
+    """
+    return _complete_awaiting_step(job_id, {"superseded_by": by_job_id})
+
+
+def list_step_jobs(story_id: str, *, step: str | None = None, statuses=None) -> list[dict]:
+    """The story-step jobs of *story_id*, oldest first.
+
+    ``step`` narrows to one step; ``statuses`` (JobStatus members or their
+    values) to those statuses. Shallow copies: change a job through the
+    functions above, not through what this returns.
+    """
+    wanted = None if statuses is None else {getattr(s, "value", s) for s in statuses}
+    oldest = datetime.min.replace(tzinfo=timezone.utc)
+
+    def created(job):
+        value = job.get("created_at")
+        if not isinstance(value, datetime):
+            return oldest
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+    with _lock:
+        found = [
+            dict(job) for job in _jobs.values()
+            if job.get("kind", KIND_CLIP) == KIND_STORY_STEP
+            and job.get("story_id") == story_id
+            and (step is None or job.get("step") == step)
+            and (wanted is None or _status_value(job) in wanted)
+        ]
+    found.sort(key=lambda j: (created(j), j.get("id") or ""))
+    return found
+
+
 def delete_job(job_id: str) -> bool:
     """Delete a job. Returns True if found."""
     with _lock:
@@ -457,7 +588,8 @@ def delete_job(job_id: str) -> bool:
 def get_running_count() -> int:
     """Count jobs currently in processing states."""
     processing = {JobStatus.DOWNLOADING.value, JobStatus.TRANSCRIBING.value,
-                  JobStatus.ANALYZING.value, JobStatus.RENDERING.value}
+                  JobStatus.ANALYZING.value, JobStatus.RENDERING.value,
+                  JobStatus.RUNNING.value}
     with _lock:
         return sum(1 for j in _jobs.values() if j.get("status") in processing)
 

@@ -182,11 +182,19 @@ def load_settings_env() -> int:
 
 def _run_pipeline_sync(job_id: str, payload: dict, token: CancelToken | None = None) -> None:
     """Run the pipeline, attributing everything it prints -- and every process
-    it starts -- to this job."""
+    it starts -- to this job.
+
+    A story-step job runs its step instead; anything else -- a record written
+    before kinds existed included -- is a clip job.
+    """
     token = token or CancelToken()
+    job = store.get_job(job_id) or {}
     with activity.capture(job_id), children.attributed(job_id, token):
         try:
-            _execute_pipeline(job_id, payload, token)
+            if job.get("kind", store.KIND_CLIP) == store.KIND_STORY_STEP:
+                _execute_story_step(job_id, job, token)
+            else:
+                _execute_pipeline(job_id, payload, token)
         finally:
             children.forget(job_id)
 
@@ -203,6 +211,97 @@ def _finish_cancelled(job_id: str) -> None:
         job_id, "Cancelled. The job stopped at its next checkpoint.",
         "warning", "worker",
     )
+
+
+def _execute_story_step(job_id: str, job: dict, token: CancelToken) -> None:
+    """Run one AI Story step (a job of kind ``story_step``; spec 9.1).
+
+    Ends in AWAITING_APPROVAL -- finished for this worker, so the slot is freed
+    as soon as this returns, but not for the user -- or failed, or cancelled.
+    What the step prints reaches the job's feed through the stdout tee, as the
+    clip pipeline's output does, and is mirrored into the story's activity.log
+    once the step is over.
+    """
+    step = job.get("step")
+    story_id = job.get("story_id")
+    last = store.last_event(job_id)
+    first_seq = last.get("seq", 0) if last else 0
+
+    try:
+        # Imported here, so a clip job's imports stay exactly what they were.
+        from clipping.aistory import steps
+
+        # Cancelled while it waited for a worker slot: it never starts.
+        token.check()
+        store.set_status(job_id, JobStatus.RUNNING)
+        store.append_event(job_id, f"Story step '{step}' started.", "step", "worker")
+
+        ctx = steps.StepContext(
+            job_id=job_id,
+            story_id=story_id,
+            step=step,
+            ep=job.get("ep"),
+            params=dict(job.get("params") or {}),
+            cancel=token,
+            settings_env=dict(_settings_env),
+            outputs_dir=OUTPUTS_ROOT,
+            # Through the tee, like everything the clip pipeline prints.
+            on_log=print,
+        )
+        steps.run(step, ctx)
+
+        # A result that lands after a cancel is not offered for approval.
+        token.check()
+        store.set_status(job_id, JobStatus.AWAITING_APPROVAL)
+        # The cancel can also land between that check and the write, which the
+        # store then drops (DEC-076). Once awaiting, a cancel is refused.
+        current = store.get_job(job_id) or {}
+        if current.get("status") == JobStatus.CANCELLED.value:
+            raise Cancelled("The job was cancelled.")
+        store.append_event(
+            job_id, f"Story step '{step}' is ready: awaiting your approval.",
+            "step", "worker",
+        )
+
+    except Cancelled:
+        _finish_cancelled(job_id)
+
+    except Exception as exc:
+        if token.cancelled:
+            # An interrupted request looks like a failure to the code that
+            # made it. The job was cancelled; it did not fail.
+            _finish_cancelled(job_id)
+            return
+        tb = traceback.format_exc()
+        error_msg = f"{type(exc).__name__}: {exc}"
+        store.set_error(job_id, error_msg)
+        store.append_event(
+            job_id, f"Story step '{step}' failed: {error_msg}", "error", "worker",
+        )
+        print(f"[Worker] Job {job_id} failed:\n{tb}", file=sys.stderr)
+
+    finally:
+        _mirror_to_story_log(job_id, story_id, step, first_seq)
+
+
+def _mirror_to_story_log(job_id: str, story_id, step, after_seq: int) -> None:
+    """Copy this run's feed lines into the story's activity.log.
+
+    Best effort, like the job store's own persistence: a story whose folder is
+    gone, or a log that cannot be written, never fails the step. What the ring
+    buffer (store.MAX_EVENTS) already dropped is not copied.
+    """
+    try:
+        from clipping.aistory.store import StoryStore
+
+        stories = StoryStore(OUTPUTS_ROOT)
+        for event in store.get_events_since(job_id, after_seq):
+            stories.append_activity(
+                story_id,
+                f"{event.get('ts', '')} [{job_id} {step}] {event.get('message', '')}",
+            )
+    except Exception:
+        pass
 
 
 TOTAL_STEPS = 7
