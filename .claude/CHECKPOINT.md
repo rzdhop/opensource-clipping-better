@@ -1,6 +1,6 @@
 ## IN PROGRESS — AI Story **phase 1** (story workspace, concepts, bible, style lock)
 - **Started:** 2026-09-26 by the human ("Start phase One"). Task class: FULL.
-- **Current phase:** 5 IMPLEMENT. Plan **approved in chat** ("Go", 2026-09-26).
+- **Current phase:** 6 TEST — Tier-2 in progress (stages 0–11 done, merged ff to `main` at `d3d05f4`, deployed 16:2x UTC). **Waiting for the human's phone walk** (script below). Plan **approved in chat** ("Go", 2026-09-26).
   CLARIFY closed: C1 = 2 cards × 5 calls; steps with no external call run
   inline (no job); route choice per story only (Settings selector → phase 2);
   Tier-2 phone walk by the human on their own phone.
@@ -21,6 +21,22 @@
   §5, §6.3, §7, §9.1–9.3, §10, §13, §14.
 - **Next free ids:** DEC-107, A-040.
 - **Open questions:** none.
+
+### Tier-2 (phase 1) — live, on the deployed container
+Deployed: `git merge --ff-only feat/ai-story-phase-1` → `main` `d3d05f4` (not pushed);
+`sudo -n docker compose rm -sfv backend && sudo -n docker compose up -d --build backend` at 0 jobs;
+startup restored 4 saved settings. Before: `data/usage.json` sha256 `babfee13…f743`, no `spend.json`.
+| # | Step | Result |
+|---|---|---|
+| a | New dashboard bundle served; `/api/stories`, `/api/stories/styles` (7), `/story` 200 | **PASS** |
+| b | Live bible job on the free chain: 3 calls on `gemini/gemini-3.5-flash-lite`, every call printed its hop and `≈N tokens out (cap …)` (133/250, 223/250, 111/200), `awaiting_approval` in ~15 s | **PASS** |
+| c | `docker compose restart backend` with that job awaiting → still `awaiting_approval`; approve → `bible_approved`, job `completed` | **PASS** (acceptance) |
+| d | `story.json` validates (`story_bible_errors == []`); delete of a throwaway story removed only its folder + index entry; check story then deleted (1 step job removed) | **PASS** |
+| e | `usage.json` byte-identical after the LLM calls; no `spend.json`, no `chain_test_ledger.json` | **PASS** |
+| f | RC-P1: `/clips/job/b37b36a9b34e` at 375 px no overflow, 7 videos, `highlight_rank_1_ready.mp4` loads (duration 44.9 s, range 206 video/mp4); playback not observable (the browser pane was hidden) → on the phone checklist | **PASS (serving)** |
+| g | 375/820/1280, pre-deploy on a keyless throwaway backend: no overflow on /story, /story/new, three wizard states, /clips, /settings; create/choose/approve/save/lock work; 5 UX findings fixed and re-checked | **PASS** |
+| h | **Human, on the phone**: FR story → Generate 10 more → pick `tentafruit_island` → write bible → regenerate one field with a note → approve → `fruit_drama`, change one accent, save → (optional) preview → approve & lock; play one clip of `b37b36a9b34e` | **PENDING** |
+Known before the walk: keyless Pollinations allows about one image per IP per hour, so the preview may honestly show 1/3. OpenRouter (paid default model) is keyed and third in the chain: a Gemini failure falls through to it, as for clip jobs (DEC-088).
 
 ### Regression contract (phase 1)
 Phase 0's RC-P1…RC-P11 (history table below) stay in force, plus:
@@ -46,7 +62,7 @@ Phase 0's RC-P1…RC-P11 (history table below) stay in force, plus:
 | 9 | CLI (+ shared `workflow.py` so API and CLI apply one set of rules) | **done** (local 2778 / CI 2313 + 435 skipped) |
 | 10 | dashboard shared pieces | **done** (local 2792 / CI 2327 + 435 skipped; build green) |
 | 11 | StoriesList + NewStoryWizard (+ `GET /api/stories/styles`) | **done** (local 2807 / CI 2339 + 438 skipped; build green; 375/820/1280 checked) |
-| 12 | merge, deploy, Tier-2 (human on phone) | next |
+| 12 | merge, deploy, Tier-2 (human on phone) | **in progress**: merged + deployed; my backend checks pass; phone walk pending |
 | 13 | docs + decisions | — |
 
 ---
