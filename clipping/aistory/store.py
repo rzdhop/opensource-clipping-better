@@ -48,6 +48,11 @@ Rules this module keeps:
   ``approvals.cast`` and ``approvals.places`` are folded from the entities'
   own ``approved_at`` whenever an entity is written or deleted
   (``recompute_group_approvals``), so they cannot go stale either.
+- Deleting an entity leaves no id pointing at it: a deleted character leaves
+  the other characters' ``relationships``, its props' ``owner_char_id``, the
+  season arc and the places proposal; a deleted place leaves the characters'
+  ``state.location``. The documents touched keep their approvals (bookkeeping,
+  not content).
 - A phase-1 ``story.json`` (``approvals`` without ``cast``/``places``/
   ``season``) is read as if those were null and saved with them.
 - The index is a cache of the folders. Missing, torn or foreign, it is rebuilt
@@ -920,16 +925,24 @@ class StoryStore:
         return copy.deepcopy(new)
 
     def delete_entity(self, story_id, kind, eid, *, now=None) -> dict:
-        """Remove one entity's folder and its id from the story.
+        """Remove one entity's folder, its id from the story, and every
+        reference to it from the story's other documents.
 
         Returns ``{"removed": [...], "kept": [...]}`` like ``delete``. The
         folder is removed only as a real directory directly inside the story's
         real ``<kind>/``; a symlink (or anything else) in its place is kept and
         reported, never followed. The id leaves ``cast_ids``/``place_ids``/
-        ``prop_ids`` and the group approvals are re-folded, so deleting the
-        last place (say) clears ``approvals.places``. KeyError for a malformed
-        id, an unknown story, or an entity with neither a folder nor a place
-        in the story's list.
+        ``prop_ids``, the documents that name it are cleaned
+        (:meth:`_drop_references_locked`, one line printed per document), and
+        the group approvals are re-folded in the one save of the story, so
+        deleting the last place (say) clears ``approvals.places``. KeyError
+        for a malformed id, an unknown story, or an entity with neither a
+        folder nor a place in the story's list.
+
+        A character document is rewritten here under the story's lock only;
+        a caller that may race an upload holds ``uploads._ENTRIES_LOCK``
+        around this call (``workflow.delete_entity`` does), the order every
+        character writer takes the two locks in.
         """
         self._check_id(story_id)
         spec = _entity_kind(kind, eid)
@@ -961,9 +974,121 @@ class StoryStore:
                 report["kept"].append(f"{label} ({why})")
 
             story[spec.story_list] = [item for item in story[spec.story_list] if item != eid]
-            messages = self._save_story_after_entity(story, now=now)
+            messages = self._drop_references_locked(story_id, kind, eid, now=now)
+            messages += self._save_story_after_entity(story, now=now)
         self._log(messages)
         return report
+
+    def _drop_references_locked(self, story_id, kind, eid, *, now) -> list:
+        """Remove every reference to the deleted entity *eid* of *kind* from
+        the story's other documents (under the lock); returns the log lines.
+
+        A character: its id leaves every other character's ``relationships``;
+        a prop it owned has no owner (``owner_char_id`` null); it leaves
+        ``season.json`` (each arc entry's ``characters``, each list of
+        ``series_memory.introduced``) and ``places_proposal.json`` (a proposed
+        prop's ``owner`` becomes null). A place: a character located there
+        (``state.location``) is located nowhere. Nothing refers to a prop.
+
+        This is bookkeeping, not content: a touched document **keeps its
+        approval** (``approved_at``, the season's too) -- what was approved
+        is unchanged, only a pointer to something that no longer exists is
+        gone -- and its ``updated_at`` becomes *now*. Each touched document is
+        validated and written atomically, one line printed for it ("Cleaned
+        <path>: ..."); one that would not validate is left as it is and
+        reported. A document that cannot be read (invalid, a symlink) is never
+        repaired or overwritten: it is reported ("Kept <path> as it is: ...")
+        and left. A document that does not name *eid* is not written.
+        """
+        messages = []
+
+        def entities(of_kind, edit):
+            spec = ENTITY_KINDS[of_kind]
+            # A folder that cannot be read is reported by the fold that follows.
+            docs, _skipped = self._list_entities_locked(story_id, of_kind)
+            for doc in docs:
+                what = edit(doc)
+                if what:
+                    oid = doc[spec.id_field]
+                    folder = self.entity_dir(story_id, of_kind, oid)
+                    label = f"{self._entity_label(story_id, of_kind, oid)}{spec.filename}"
+                    write(os.path.join(folder, spec.filename), label, doc, spec.validator, what)
+
+        def document(name, edit):
+            label = f"{self._label(story_id)}{name}"
+            try:
+                doc = self.read_doc(story_id, name)
+            except schemas.SchemaError as exc:
+                first = str(exc.errors[0]) if exc.errors else "it does not validate"
+                messages.append(f"Kept {label} as it is: it cannot be read ({first}), so it may still name {eid}")
+                return
+            if doc is None:
+                return
+            what = edit(doc)
+            if what:
+                write(os.path.join(self.story_dir(story_id), name), label, doc, DOC_VALIDATORS[name], what)
+
+        def write(path, label, doc, validator, what):
+            doc["updated_at"] = now
+            errors = validator(doc)
+            if errors:
+                messages.append(f"Kept {label} as it is: without {eid} it would not validate ({errors[0]})")
+                return
+            _atomic_write_json(path, doc)
+            messages.append(f"Cleaned {label}: {what}")
+
+        if kind == "characters":
+            def relationships(doc):
+                if eid in doc["relationships"]:
+                    del doc["relationships"][eid]
+                    return f"relationship with {eid} removed"
+                return None
+
+            def owner(doc):
+                if doc["owner_char_id"] == eid:
+                    doc["owner_char_id"] = None
+                    return f"owner {eid} cleared"
+                return None
+
+            def season(doc):
+                episodes = []
+                for entry in doc["arc"]:
+                    if eid in entry["characters"]:
+                        entry["characters"] = [cid for cid in entry["characters"] if cid != eid]
+                        episodes.append(str(entry["ep"]))
+                introduced = []
+                for key, value in (doc["series_memory"].get("introduced") or {}).items():
+                    if isinstance(value, list) and eid in value:
+                        doc["series_memory"]["introduced"][key] = [cid for cid in value if cid != eid]
+                        introduced.append(key)
+                where = []
+                if episodes:
+                    where.append(f"episode(s) {', '.join(episodes)}")
+                if introduced:
+                    where.append(f"series_memory.introduced {', '.join(introduced)}")
+                return f"{eid} removed from {' and '.join(where)}" if where else None
+
+            def proposal(doc):
+                props = [prop for prop in doc["props"] if prop.get("owner") == eid]
+                for prop in props:
+                    prop["owner"] = None
+                if not props:
+                    return None
+                return f"owner {eid} cleared on {', '.join(repr(prop['name']) for prop in props)}"
+
+            entities("characters", relationships)
+            entities("props", owner)
+            document(SEASON_DOC, season)
+            document(PLACES_PROPOSAL_DOC, proposal)
+        elif kind == "places":
+            def location(doc):
+                if doc["state"]["location"] == eid:
+                    doc["state"]["location"] = None
+                    return f"location {eid} cleared"
+                return None
+
+            entities("characters", location)
+        return messages
 
     # -------------------------------------------------------------- media
 

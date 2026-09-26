@@ -1567,3 +1567,179 @@ def test_an_unreadable_document_blocks_its_group_approval(stories, outputs, stor
 
     assert story["approvals"][group] is None
     assert (folder).exists()
+
+
+# ------------------------------------------- store: references on delete
+
+def _json(path):
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _entity_file(outputs, story_id, kind, eid):
+    filename = {"characters": "character.json", "places": "place.json", "props": "prop.json"}[kind]
+    return _story_dir(outputs, story_id) / kind / eid / filename
+
+
+def _bytes_of(outputs, story_id, paths):
+    return {path: (_story_dir(outputs, story_id) / path).read_bytes() for path in paths}
+
+
+@pytest.fixture
+def referenced(stories, story_id):
+    """A cast of three pointing at each other, two props, a written and
+    approved season arc and a places proposal -- most of it approved -- all
+    naming ``char_kiwilo``; ``char_figuette`` is named by Mangella's
+    relationships and the arc's ``introduced`` alone. The place and both
+    props are approved."""
+    _approve_first_three(stories, story_id)
+    stories.write_entity(story_id, "characters", _written_character(
+        relationships={"char_mangella": "secret ex"}), now=NOW)
+    stories.write_entity(story_id, "characters", _written_character(
+        char_id="char_mangella", name="Mangella", relationships={"char_kiwilo": "son ex secret",
+                                                                 "char_figuette": "sa rivale"},
+        state={"alive": True, "location": "place_vote_hut", "arc_notes": []}), now=NOW)
+    stories.write_entity(story_id, "characters", _character(
+        char_id="char_figuette", name="Figuette", role="support",
+        relationships={"char_kiwilo": "his confidante"}), now=NOW)
+    stories.write_entity(story_id, "places", _written_place(), now=NOW)
+    stories.write_entity(story_id, "props", _written_prop(), now=NOW)  # owned by char_kiwilo, approved
+    stories.write_entity(story_id, "props", _written_prop(prop_id="prop_tiki_torch", name="Tiki torch",
+                                                          owner_char_id="char_mangella"), now=NOW)
+    arc = _arc(range(1, 4))
+    arc[1]["characters"] = ["char_mangella", "char_kiwilo"]
+    arc[2]["characters"] = ["char_mangella"]
+    memory = {"recaps": {}, "open_hooks": [], "relationship_state": {},
+              "introduced": {"ep01": ["char_kiwilo", "char_mangella"], "ep02": ["char_figuette"]}}
+    stories.write_doc(story_id, "season.json", _season(episodes_planned=3, arc=arc, series_memory=memory,
+                                                       approved_at=LATER), now=NOW)
+    stories.write_doc(story_id, "places_proposal.json", _proposal(), now=NOW)  # owner char_kiwilo, then None
+    return story_id
+
+
+def test_deleting_a_character_removes_every_reference_to_it(stories, outputs, referenced, logs):
+    untouched = ("places/place_beach_camp/place.json", "props/prop_tiki_torch/prop.json")
+    before = _bytes_of(outputs, referenced, untouched)
+    del logs[:]
+
+    report = stories.delete_entity(referenced, "characters", "char_kiwilo", now=LATEST)
+
+    assert report == {"removed": [f"outputs/stories/{referenced}/characters/char_kiwilo/"], "kept": []}
+    mangella = stories.read_entity(referenced, "characters", "char_mangella")
+    assert mangella["relationships"] == {"char_figuette": "sa rivale"}
+    assert stories.read_entity(referenced, "characters", "char_figuette")["relationships"] == {}
+    phone = stories.read_entity(referenced, "props", "prop_coconut_phone")
+    assert phone["owner_char_id"] is None
+    season = stories.read_doc(referenced, "season.json")
+    assert [entry["characters"] for entry in season["arc"]] == [[], ["char_mangella"], ["char_mangella"]]
+    assert season["series_memory"]["introduced"] == {"ep01": ["char_mangella"], "ep02": ["char_figuette"]}
+    proposal = stories.read_doc(referenced, "places_proposal.json")
+    assert [prop["owner"] for prop in proposal["props"]] == [None, None]
+
+    # Bookkeeping, not content: every approval stands, only updated_at moves.
+    assert (mangella["approved_at"], phone["approved_at"], season["approved_at"]) == (LATER, LATER, LATER)
+    assert (mangella["updated_at"], phone["updated_at"], season["updated_at"], proposal["updated_at"]) == (
+        LATEST, LATEST, LATEST, LATEST)
+    written = _written_character(char_id="char_mangella", name="Mangella", relationships={
+        "char_figuette": "sa rivale"}, state={"alive": True, "location": "place_vote_hut", "arc_notes": []},
+        updated_at=LATEST)
+    assert mangella == written, "nothing but the dangling id changed"
+    assert phone == _written_prop(owner_char_id=None, updated_at=LATEST)
+
+    # Nothing that did not name it was written.
+    assert _bytes_of(outputs, referenced, untouched) == before
+    assert _temp_files(outputs) == []
+
+    # One line per document written, naming it.
+    cleaned = [line for line in logs if line.startswith("Cleaned ")]
+    prefix = f"outputs/stories/{referenced}/"
+    assert [line.split(":")[0] for line in cleaned] == [
+        f"Cleaned {prefix}characters/char_figuette/character.json",
+        f"Cleaned {prefix}characters/char_mangella/character.json",
+        f"Cleaned {prefix}props/prop_coconut_phone/prop.json",
+        f"Cleaned {prefix}season.json",
+        f"Cleaned {prefix}places_proposal.json",
+    ]
+    assert all("char_kiwilo" in line for line in cleaned)
+
+
+def test_deleting_a_character_keeps_the_approvals_it_touches_so_the_cast_can_approve(stories, referenced):
+    # Kiwilo and Mangella (the two leads) are approved; Figuette (a support)
+    # is not, and Mangella names her. Deleting Figuette edits Mangella -- and
+    # Mangella's approval stands, so the cast is approved.
+    assert stories.get(referenced)["approvals"]["cast"] is None
+
+    stories.delete_entity(referenced, "characters", "char_figuette", now=LATEST)
+
+    mangella = stories.read_entity(referenced, "characters", "char_mangella")
+    assert mangella["relationships"] == {"char_kiwilo": "son ex secret"}
+    assert mangella["approved_at"] == LATER
+    kiwilo = stories.read_entity(referenced, "characters", "char_kiwilo")
+    assert kiwilo["relationships"] == {"char_mangella": "secret ex"}
+    season = stories.read_doc(referenced, "season.json")
+    assert season["series_memory"]["introduced"] == {"ep01": ["char_kiwilo", "char_mangella"], "ep02": []}
+    assert season["approved_at"] == LATER
+    story = stories.get(referenced)
+    assert story["approvals"]["cast"] == LATEST
+    assert story["status"] == "places_approved"  # the place and both props were approved all along
+
+
+def test_deleting_a_place_clears_the_characters_located_there(stories, outputs, referenced, logs):
+    untouched = ("characters/char_mangella/character.json", "characters/char_figuette/character.json",
+                 "props/prop_coconut_phone/prop.json", "season.json", "places_proposal.json")
+    before = _bytes_of(outputs, referenced, untouched)
+    kiwilo_before = stories.read_entity(referenced, "characters", "char_kiwilo")
+    assert kiwilo_before["state"]["location"] == "place_beach_camp"
+    del logs[:]
+
+    stories.delete_entity(referenced, "places", "place_beach_camp", now=LATEST)
+
+    kiwilo = stories.read_entity(referenced, "characters", "char_kiwilo")
+    assert kiwilo["state"] == dict(kiwilo_before["state"], location=None)
+    assert kiwilo == dict(kiwilo_before, state=kiwilo["state"], updated_at=LATEST)
+    assert kiwilo["approved_at"] == LATER
+    assert _bytes_of(outputs, referenced, untouched) == before  # Mangella is at another place
+    assert [line.split(":")[0] for line in logs if line.startswith("Cleaned ")] == [
+        f"Cleaned outputs/stories/{referenced}/characters/char_kiwilo/character.json"]
+
+
+def test_deleting_what_nothing_names_writes_no_other_document(stories, outputs, referenced, logs):
+    everything = ("characters/char_kiwilo/character.json", "characters/char_mangella/character.json",
+                  "characters/char_figuette/character.json", "places/place_beach_camp/place.json",
+                  "props/prop_coconut_phone/prop.json", "season.json", "places_proposal.json")
+    before = _bytes_of(outputs, referenced, everything)
+    del logs[:]
+
+    stories.delete_entity(referenced, "props", "prop_tiki_torch", now=LATEST)
+
+    assert _bytes_of(outputs, referenced, everything) == before
+    assert not [line for line in logs if line.startswith("Cleaned ")]
+
+
+@pytest.mark.parametrize("name", ["season.json", "places_proposal.json"])
+def test_an_unreadable_document_is_reported_and_never_rewritten_by_a_delete(stories, outputs, referenced, logs,
+                                                                         name):
+    path = _story_dir(outputs, referenced) / name
+    text = json.dumps({"$schema": name.replace(".json", "_v1"), "note": "char_kiwilo", "updated_at": NOW})
+    path.write_text(text, encoding="utf-8")
+    del logs[:]
+
+    report = stories.delete_entity(referenced, "characters", "char_kiwilo", now=LATEST)
+
+    assert report["removed"] == [f"outputs/stories/{referenced}/characters/char_kiwilo/"]
+    assert path.read_text(encoding="utf-8") == text
+    assert stories.read_entity(referenced, "characters", "char_mangella")["relationships"] == {
+        "char_figuette": "sa rivale"}
+    assert stories.get(referenced)["cast_ids"] == ["char_mangella", "char_figuette"]
+    kept = [line for line in logs if line.startswith("Kept ")]
+    assert len(kept) == 1 and f"outputs/stories/{referenced}/{name}" in kept[0]
+    assert "char_kiwilo" in kept[0]
+
+
+def test_the_workflow_delete_cleans_references_too(stories, outputs, referenced):
+    from clipping.aistory import workflow
+
+    report = workflow.delete_entity(stories, referenced, "characters", "char_kiwilo", now=LATEST)
+
+    assert report["removed"] == [f"outputs/stories/{referenced}/characters/char_kiwilo/"]
+    assert stories.read_entity(referenced, "props", "prop_coconut_phone")["owner_char_id"] is None
+    assert "char_kiwilo" not in stories.read_entity(referenced, "characters", "char_mangella")["relationships"]

@@ -30,10 +30,12 @@ import copy
 import os
 import re
 
+from clipping.providers import generation as gen
 from clipping.providers import registry
 
 from . import defaults, imaging, prompting, refimages, schemas, stylelock, templates, voices
 from . import store as story_store
+from . import uploads as uploads_mod
 from .ledger import CostLedger
 from .steps import concepts as concepts_step
 from .steps import entities as entities_step
@@ -826,6 +828,21 @@ def prop_missing(stories, story_id, doc) -> list:
 MISSING = {CHARACTERS: character_missing, PLACES: place_missing, PROPS: prop_missing}
 
 
+def image_verdict(stories, story, qty, *, env) -> dict:
+    """``IMAGE_CHAIN``'s verdict on *qty* reference images for *story*
+    (``imaging.estimate``: the story's route, keys, ``allow_paid`` and the
+    caps with the story's ledger total, the free allowance; a local link is
+    "probed when it runs"). Nothing is called. The API's gate and estimate
+    and the CLI's gate ask this same question."""
+    width, height = refimages.PORTRAIT_SIZE
+    return imaging.estimate(
+        gen.IMAGE, env, route=story["generation_profile"]["route"],
+        request=gen.GenRequest(kind=gen.IMAGE, width=width, height=height), qty=qty,
+        story_spent=cost_total(stories, story["story_id"]), step="image",
+        what="a reference image", when="the step runs",
+    )
+
+
 def edit_readiness(stories, story, *, env, qty):
     """``refimages.edit_readiness`` for *qty* reference images, calling
     nothing (a local link stays "probed when it runs"), with the story's
@@ -935,6 +952,11 @@ def _sketch(story) -> list:
     concept = story.get("concept") or {}
     sketch = concept.get("cast_sketch") if isinstance(concept, dict) else None
     return [entry for entry in (sketch or []) if isinstance(entry, dict) and isinstance(entry.get("name"), str)]
+
+
+def sketch_names(story) -> list:
+    """The names of the chosen concept's cast sketch, in its order."""
+    return [entry["name"] for entry in _sketch(story)]
 
 
 def check_sketch_names(story, selected) -> None:
@@ -1441,11 +1463,19 @@ def patch_entity(stories, story_id, kind, eid, fields, *, now) -> dict:
 
 def delete_entity(stories, story_id, kind, eid, *, now) -> dict:
     """Remove one character, place or prop (``StoryStore.delete_entity``:
-    its folder, its id from the story; the group approvals re-fold); returns
-    the store's ``{"removed", "kept"}``. ``not_found`` for an unknown one."""
+    its folder, its id from the story and from every document that names it
+    -- relationships, prop owners, the season arc, the places proposal, a
+    character's location -- those keeping their approvals; the group
+    approvals re-fold); returns the store's ``{"removed", "kept"}``.
+    ``not_found`` for an unknown one.
+
+    Under the uploads' lock, taken before the story's as every character
+    writer takes them: the cleanup rewrites characters, and an upload
+    appended meanwhile must neither be lost nor bring a removed id back."""
     load(stories, story_id)
     try:
-        return stories.delete_entity(story_id, kind, eid, now=now)
+        with uploads_mod._ENTRIES_LOCK:
+            return stories.delete_entity(story_id, kind, eid, now=now)
     except KeyError:
         raise WorkflowError(NOT_FOUND, f"This story has no {ENTITY_WORDS[kind]} {eid!r}.") from None
     except schemas.SchemaError as exc:

@@ -29,7 +29,8 @@ A story is a folder under ``outputs/stories/<story_id>/`` kept by
   ``season`` are step jobs too, with their parameters and preconditions
   checked before a job exists, the key gate, and -- for the cast and the
   places, when they would make an image -- ``IMAGE_CHAIN``'s verdict
-  (``imaging.estimate``, nothing called; 409 naming every link's reason).
+  (``workflow.image_verdict``, the CLI's gate too: nothing called; 409 naming
+  every link's reason).
   Characters, places and props are approved one by one; the store folds
   those into ``approvals.cast`` / ``approvals.places``, and a group approval
   that is set completes the cast / places jobs awaiting it. The per-item
@@ -70,7 +71,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
 from starlette.concurrency import run_in_threadpool
 
-from clipping.aistory import imaging, refimages, schemas, templates, workflow
+from clipping.aistory import schemas, templates, workflow
 from clipping.aistory import store as story_store
 from clipping.aistory import uploads as uploads_mod
 from clipping.aistory.steps import bible as bible_step
@@ -79,7 +80,6 @@ from clipping.aistory.steps import entities as entities_step
 from clipping.aistory.steps import llm_call
 from clipping.aistory.steps import regenerate as regenerate_step
 from clipping.aistory.steps import style_preview as preview_step
-from clipping.providers import generation as gen
 from clipping.providers import registry
 
 from .. import store, worker
@@ -365,16 +365,10 @@ def _refuse_busy(story_id, what_to_do, *, docs=None) -> None:
 
 def _image_verdict(stories, story, qty, *, env) -> dict:
     """``IMAGE_CHAIN``'s verdict on *qty* reference images for *story*
-    (``imaging.estimate``: the story's route, keys, ``allow_paid`` and the
-    caps with the story's ledger total, the free allowance; a local link is
-    "probed when it runs"). Nothing is called."""
-    width, height = refimages.PORTRAIT_SIZE
-    return imaging.estimate(
-        gen.IMAGE, env, route=story["generation_profile"]["route"],
-        request=gen.GenRequest(kind=gen.IMAGE, width=width, height=height), qty=qty,
-        story_spent=_cost_total(stories, story["story_id"]), step="image",
-        what="a reference image", when="the step runs",
-    )
+    (``workflow.image_verdict``, the CLI's gate too). Nothing is called; a
+    ledger that cannot be read is a 500 with one sentence."""
+    with _answering():
+        return workflow.image_verdict(stories, story, qty, env=env)
 
 
 def _plural(count, word) -> str:

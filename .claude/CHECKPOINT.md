@@ -35,8 +35,8 @@ RC-P1…P11 and RC-S1…S4 stay, plus:
 | 5 | reference images across routes (RISKIEST) | **done** (local 3525 / CI 3047 + 448 skipped) |
 | 6 | step runners | **done** (local 3556 / CI 3078 + 448 skipped) |
 | 7 | API | **done** (local 3639 / CI 3081 + 528 skipped) |
-| 8 | CLI (+ clean dangling ids on entity delete) | next |
-| 9 | dashboard: CastEditor | — |
+| 8 | CLI (+ clean dangling ids on entity delete) | **done** (local 3686 / CI 3128 + 528 skipped) |
+| 9 | dashboard: CastEditor | next |
 | 10 | dashboard: PlacesProps + SeasonBoard + wiring | — |
 | 11 | merge, deploy, Tier-2 | — |
 | 12 | docs + decisions | — |
