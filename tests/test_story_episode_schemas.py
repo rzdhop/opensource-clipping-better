@@ -439,6 +439,14 @@ def _sb_transition_duplicated(doc):
     doc["transitions"].append({"after": "sh01", "type": "dissolve", "duration_s": 0.4})
 
 
+def _sb_transition_non_cut_within_scene(doc):
+    # merge sh01/sh02 into the same scene (still contiguous), then make the
+    # transition between them non-cut: spec 6.3 only allows a cut inside a scene.
+    doc["shots"][1]["scene_id"] = doc["shots"][0]["scene_id"]
+    doc["transitions"][0]["type"] = "dissolve"
+    doc["transitions"][0]["duration_s"] = 0.4
+
+
 def _sb_shot_too_short(doc):
     doc["shots"][0]["duration_s"] = 0.1
 
@@ -456,6 +464,7 @@ STORYBOARD_BREAKS = {
     "transition names unknown shot": (_sb_transition_unknown_shot, "is not an existing shot"),
     "transition on the last shot": (_sb_transition_on_last_shot, "cannot have a transition"),
     "transition duplicated for a shot": (_sb_transition_duplicated, "already has a transition"),
+    "non-cut transition inside a scene": (_sb_transition_non_cut_within_scene, "only cut inside a scene"),
     "shot below the minimum length": (_sb_shot_too_short, "the minimum shot length"),
     "motion type mismatch": (_sb_motion_mismatch, "does not match camera_motion"),
 }

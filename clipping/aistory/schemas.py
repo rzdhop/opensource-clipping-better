@@ -2033,8 +2033,9 @@ def storyboard_errors(doc, *, min_shot_s=0.8) -> list:
     """``validate()`` against ``STORYBOARD_SCHEMA``, plus the cross-field
     checks the subset schema cannot express (spec 2.8, 6.4): shot id/order
     sequencing, scene references and contiguity, line references, transition
-    references, the per-shot minimum length once timed, and the motion type
-    matching the shot's own camera motion."""
+    references, a non-cut transition sitting only on a scene boundary (spec
+    6.3: ``cut`` inside a scene), the per-shot minimum length once timed, and
+    the motion type matching the shot's own camera motion."""
     errors = validate(doc, STORYBOARD_SCHEMA)
     if errors:
         return errors
@@ -2094,6 +2095,7 @@ def storyboard_errors(doc, *, min_shot_s=0.8) -> list:
             last_line_number = n
 
     last_shot_id = shot_ids[-1] if shot_ids else None
+    id_to_index = {shot_id: i for i, shot_id in enumerate(shot_ids)}
     seen_after = set()
     for i, transition in enumerate(doc["transitions"]):
         after = transition["after"]
@@ -2101,6 +2103,13 @@ def storyboard_errors(doc, *, min_shot_s=0.8) -> list:
             errors.append(f"$.transitions[{i}].after: {after!r} is not an existing shot")
         elif after == last_shot_id:
             errors.append(f"$.transitions[{i}].after: {after!r} is the last shot; it cannot have a transition")
+        elif transition["type"] != "cut":
+            idx = id_to_index[after]
+            if shots[idx]["scene_id"] == shots[idx + 1]["scene_id"]:
+                errors.append(
+                    f"$.transitions[{i}].type: {transition['type']!r} is not 'cut', but shot {after!r} and "
+                    f"the next shot are in the same scene (spec 6.3: only cut inside a scene)"
+                )
         if after in seen_after:
             errors.append(f"$.transitions[{i}].after: {after!r} already has a transition")
         seen_after.add(after)
