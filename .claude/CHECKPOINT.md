@@ -1,3 +1,25 @@
+## IN PROGRESS — Live activity clocks freeze on finished jobs (2026-09-27)
+- **Task:** FULL. `/clips/job/b37b36a9b34e` (completed) read "33h 56m on this step · 34h 50m total" ~34 h after
+  it finished: `LiveActivity` (`web/dashboard/src/components/ActivityFeed.jsx`) measured both clocks to the
+  reader's `Date.now()`. Shared by the Clips job page and every AI Story LiveActivity caller.
+- **Where:** worktree `.claude/worktrees/magical-greider-2955e5`, branch `Feature/frosty-spence-4ddbf5` (local,
+  not pushed). Disjoint from the phase-3 fix round on `feat/ai-story-phase-3` (it does not touch `time.js`,
+  `ActivityFeed.jsx` or the new test).
+- **Checkpoint:** known-good `ede5116` (= `main`), tree clean. **Tier-1 baseline at `ede5116`:** local **4430
+  passed / 1 skipped**; pytest-only venv (uv, scratch) **3820 passed / 580 skipped**; compileall clean; vite
+  build green (scratch outDir). The worktree's stale `web/dashboard/dist/` (Sep 18, git-ignored) is moved aside
+  to the session scratchpad for the suite; restore it or leave it gone (nothing uses it).
+- **Plan (approved in chat, 2026-09-27):** `~/.claude/plans/live-activity-frozen-clocks.md`. Human's answers: the
+  total stops at the earlier of `updated_at` and the last feed line; "on this step" hidden on finished jobs;
+  Tier-2 = Vite from this worktree proxied read-only to the live backend :8000 at 375 px (no restart, no action
+  clicks). Ids: **DEC-150, A-070** (the phase-3 session holds DEC-126+ / A-055+).
+- **Current phase:** 5 IMPLEMENT. Stage 0 (this checkpoint) done → **next: stage 1** (`jobClocks` in `time.js`,
+  `LiveActivity` uses it, `tests/test_dashboard_activity_clocks.py` fail-first), then stage 2 (Tier-2), stage 3
+  (docs). No merge to `main`, no deploy, no push without the human's word.
+- **Regression contract (this task):** RC-L1 running jobs keep both ticking clocks (new test's running case;
+  was only walked, Tier-2 row R-4); `tests/test_dashboard_story_shared.py` ActivityFeed guards unedited.
+- **Open questions:** none.
+
 ## STAGE 13 IN PROGRESS (resumed 2026-09-27 19:47 UTC)
 - **Human's answer (chat, 2026-09-27):** "I re-approve in the UI" — I re-approve Kiwilo and Mangella as they are
   (current voices) at the start of the walk. Mangella's voice is `gemini/flash-lite-tts` (Kore): free tier, $0,
