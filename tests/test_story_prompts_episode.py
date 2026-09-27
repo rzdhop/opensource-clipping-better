@@ -198,6 +198,7 @@ def test_build_e1_golden_fr():
         "- emotion: one of neutral, happy, angry, shocked, sad, scheming, tension, tender, fear, triumph\n"
         "- target_duration_s: a hint inside its own slot's range -- recap 2-3s, hook 1.5-3.5s, body "
         "(setup/rising/peak/turn) 4-8s each, cliffhanger 2-5s\n\n"
+        "Aim for the upper half of each range so the scenes sum near 60 s.\n\n"
         "Across the body scenes: open with setup, escalate with rising, include at least one peak, and "
         "land a turn right before the cliffhanger; one of them may be a quiet scene with no dialogue.\n\n"
         "The hook scene: insert_prop: a close shot of a diegetic object, sign or screen that states the "
@@ -411,10 +412,11 @@ def test_build_e2_golden_key_lines_fr():
     assert "Place: La Piscine -- un bassin turquoise au centre" in user
     assert "Props present:\n- prop_phone — Le Téléphone" in user
     assert "speaker (one of char_kiwilo, char_mangella)" in user
+    assert "use 2-3 lines when two or more characters are present" in user
     assert "at most 22 words; reference lines run 3-8 words" in user
     assert "delivery (English, at most 12 words; the story's voice performance is over-acted telenovela delivery)" in user
     assert "cue (one of gasp_crowd, dramatic_sting, phone_ring)" in user
-    assert "Keep the scene's total dialogue within 20 words." in user
+    assert "Write 14-20 words of dialogue in total (not fewer than 14)." in user
     assert schema == prompts.e2_schema(["char_kiwilo", "char_mangella"], SFX_CUES)
 
 
@@ -504,6 +506,33 @@ def test_e2_errors_narrator_only_allowed_when_enabled():
     errors = prompts.validate_e2(reply, scene=BODY_SCENE, narrator_enabled=False, sfx_cues=SFX_CUES)
     assert errors
     assert any("speaker" in e or "not one of" in e for e in errors)
+
+
+# ------------------------------------------------------ E2 word range/floor (F3)
+
+@pytest.mark.parametrize("budget, lo", [(20, 14), (10, 7), (9, 6), (3, 3)])
+def test_e2_word_range_lo_is_about_seventy_percent_never_below_three(budget, lo):
+    assert prompts._e2_word_range(budget) == (lo, budget)
+
+
+def test_e2_errors_word_floor_rejects_a_short_reply_and_accepts_a_normal_one():
+    """validate_e2's word-count floor (spec 4.2, F3) is well below the ask's
+    own range (:func:`prompts._e2_word_range`): a reply of only 1 word fails
+    it, but the good fixture's 7 words clear a 10-word budget's floor
+    (``ceil(10 / 2) == 5``)."""
+    short_reply = {
+        "lines": [{"speaker": "char_kiwilo", "text": "Non", "emotion": "angry", "delivery": "flat"}],
+        "sfx_cues": [], "on_screen_text": None,
+    }
+    errors = prompts.validate_e2(short_reply, scene=BODY_SCENE, narrator_enabled=False, sfx_cues=SFX_CUES,
+                                 word_budget=10)
+    assert errors and all(e.startswith(prompts.E2_WORD_FLOOR_PREFIX) for e in errors)
+
+    # No word_budget given at all: a caller with none to give sees no floor check.
+    assert prompts.validate_e2(short_reply, scene=BODY_SCENE, narrator_enabled=False, sfx_cues=SFX_CUES) == []
+
+    assert prompts.validate_e2(_good_e2_reply(), scene=BODY_SCENE, narrator_enabled=False, sfx_cues=SFX_CUES,
+                               word_budget=10) == []
 
 
 # ==================================================================== E3

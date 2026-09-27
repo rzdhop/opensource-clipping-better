@@ -213,8 +213,42 @@ def skeleton(ec, *, now) -> dict:
     }
 
 
-def apply_e1(ec, script, reply) -> None:
-    """E1's beat sheet into *script* (in place): one stub per scene."""
+def _normalize_episode_targets(ec, scenes) -> tuple:
+    """Raise every scene's own clamped ``target_duration_s`` toward its
+    slot's high end, proportionally to the room each one has, until their
+    sum reaches the episode template's ``target_s`` or every scene is
+    already at its high end (spec 6.2 follow-up, F3).
+
+    E1's own per-scene clamp (the caller, just above) never raises a target,
+    only keeps it inside its slot: a model that picks a hint near every
+    slot's low end leaves the whole episode short of the template's own
+    target, and so short of the window's low end, well before any single
+    scene's own range is broken -- this is the deterministic fix-up, no
+    call, cannot fail. Never lowers a target, never exceeds a scene's own
+    slot high end (the style lock's own clamp included,
+    :func:`timing.slot_range`, reused as-is). Returns ``(before, after)`` --
+    equal when nothing changed.
+    """
+    target_s = ec.template["target_s"]
+    before = sum(scene["target_duration_s"] for scene in scenes)
+    if before >= target_s:
+        return before, before
+    highs = [timing.slot_range(scene, ec.template, ec.style_lock)[1] for scene in scenes]
+    rooms = [high - scene["target_duration_s"] for high, scene in zip(highs, scenes)]
+    total_room = sum(rooms)
+    if total_room <= 0:
+        return before, before
+    scale = min(1.0, (target_s - before) / total_room)
+    for scene, room in zip(scenes, rooms):
+        if room > 0:
+            scene["target_duration_s"] = round(scene["target_duration_s"] + room * scale, 3)
+    after = sum(scene["target_duration_s"] for scene in scenes)
+    return before, after
+
+
+def apply_e1(ec, script, reply) -> tuple:
+    """E1's beat sheet into *script* (in place): one stub per scene. Returns
+    :func:`_normalize_episode_targets`'s own ``(before, after)``."""
     scenes, number = [], 1
     for stub in reply["scenes"]:
         if stub["function"] == "recap":
@@ -232,8 +266,10 @@ def apply_e1(ec, script, reply) -> None:
         lo, hi = timing.slot_range(scene, ec.template, ec.style_lock)
         scene["target_duration_s"] = round(min(max(float(stub["target_duration_s"]), lo), hi), 3)
         scenes.append(scene)
+    before, after = _normalize_episode_targets(ec, scenes)
     script["title"] = reply["title"].strip()
     script["scenes"] = scenes
+    return before, after
 
 
 def write_beat_sheet(ctx, ec, script, *, tools, announced) -> None:
@@ -262,7 +298,9 @@ def write_beat_sheet(ctx, ec, script, *, tools, announced) -> None:
 
     reply = llm_call.call_json(ctx, "E1", system, user, schema, validator=validate, runner=tools.runner,
                                time_fn=tools.time_fn)
-    apply_e1(ec, script, reply)
+    before, after = apply_e1(ec, script, reply)
+    if after > before + 1e-9:
+        ctx.on_log(f"⏱ scene targets raised from {before:.1f} s to {after:.1f} s")
 
 
 # -------------------------------------------------------------------- E2
@@ -307,18 +345,33 @@ def write_body_scene(ctx, ec, script, sid, *, tools, announced, note=None) -> bo
     place = _entity(ec, "places", scene["place_id"], sid)
     props = [{"prop_id": pid, "name": _entity(ec, "props", pid, sid)["name"]} for pid in scene["props"]]
     pack = _pack(ec, ctx, announced, note=note)
+    budget = _word_budget(ec, scene)
     system, user, schema = prompts.build_e2(
         pack, scene=scene, scene_number=script["scenes"].index(scene) + 1, outline=script["scenes"],
-        previous=_previous_line(ec, script, scene), word_budget=_word_budget(ec, scene), cast=cast,
+        previous=_previous_line(ec, script, scene), word_budget=budget, cast=cast,
         place={"place_id": place["place_id"], "name": place["name"], "layout_notes": place["layout_notes"] or ""},
         props=props, sfx_cues=ec.sfx_cues, narrator_enabled=ec.narrator,
         voice_direction=ec.style_lock["audio"]["voice_direction"], note=pack.note,
     )
 
+    # A reply under half the word budget is retryable (validate_e2); if the
+    # retry is *still* only that short, the existing "fail after two
+    # attempts" path would leave this whole scene a stub over a borderline
+    # word count. Instead, the second attempt's floor error alone (nothing
+    # else wrong with the reply) is accepted with a log line (spec 4.2, F3;
+    # the human's own choice) -- a real problem (a bad speaker, an over-cap
+    # line) still fails the scene exactly as before.
+    attempt = {"n": 0}
+
     def validate(reply):
-        errors = prompts.validate_e2(reply, scene=scene, narrator_enabled=ec.narrator, sfx_cues=ec.sfx_cues)
-        if errors:
+        attempt["n"] += 1
+        errors = prompts.validate_e2(reply, scene=scene, narrator_enabled=ec.narrator, sfx_cues=ec.sfx_cues,
+                                     word_budget=budget)
+        floor_only = bool(errors) and all(e.startswith(prompts.E2_WORD_FLOOR_PREFIX) for e in errors)
+        if errors and not (floor_only and attempt["n"] >= 2):
             return errors
+        if floor_only and attempt["n"] >= 2:
+            ctx.on_log(f"⚠️ Scene {sid}: accepting a shorter reply after a retry ({errors[0]}).")
         trial = copy.deepcopy(script)
         apply_e2(ec, scene_of(trial, sid), reply)
         return episode_common.trial_errors(ec, trial)

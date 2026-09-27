@@ -683,6 +683,7 @@ _E1_ASK_TEMPLATE = (
     "- summary: at most 15 words\n"
     "- emotion: one of {emotions}\n"
     "- target_duration_s: a hint inside its own slot's range -- {slot_ranges}\n\n"
+    "Aim for the upper half of each range so the scenes sum near {target_s} s.\n\n"
     "Across the body scenes: open with setup, escalate with rising, include at least one peak, and land a "
     "turn right before the cliffhanger; one of them may be a quiet scene with no dialogue.\n\n"
     "The hook scene: {hook_style_line}.\n\n"
@@ -805,6 +806,7 @@ def build_e1(pack, *, ep, arc_entry, template, episode_defaults, cast, places, p
         max_places=episode_defaults["max_places"],
         emotions=", ".join(schemas.EMOTIONS),
         slot_ranges=_slot_ranges_line(template),
+        target_s=template["target_s"],
         hook_style_line=_HOOK_STYLE_LINES[episode_defaults["hook_style"]],
         cliffhanger_style_line=_CLIFFHANGER_STYLE_LINES[episode_defaults["cliffhanger_style"]],
     )
@@ -922,14 +924,33 @@ def validate_e1(reply, *, ep, template, episode_defaults, cast_ids, places, prop
 _E2_ASK_TEMPLATE = (
     "Write this scene's dialogue.\n\n"
     "Give:\n"
-    "- lines: 1 to 4 lines, each with speaker (one of {speakers}), text (story language, at most 22 words; "
-    "reference lines run 3-8 words), emotion (one of {emotions}), delivery (English, at most 12 words; the "
-    "story's voice performance is {voice_direction})\n"
+    "- lines: 1 to 4 lines (use 2-3 lines when two or more characters are present), each with speaker "
+    "(one of {speakers}), text (story language, at most 22 words; reference lines run 3-8 words), emotion "
+    "(one of {emotions}), delivery (English, at most 12 words; the story's voice performance is "
+    "{voice_direction})\n"
     "- sfx_cues: 0 or more, each with at ('start' or a line number 1-n) and cue (one of {sfx_cues})\n"
     "- on_screen_text: null unless the scene truly needs one (at most 6 words, story language)\n\n"
-    "Keep the scene's total dialogue within {word_budget} words.\n\n"
+    "Write {word_budget_lo}-{word_budget_hi} words of dialogue in total (not fewer than {word_budget_lo}).\n\n"
     "Never use real people, brands, studio names or copyrighted characters."
 )
+
+# The ask's own lower bound (spec 4.2, F3): ~0.7 of the scene's word budget,
+# never below 3 -- the budget itself (``timing.word_budget``) never goes
+# below 3 either, so the range is never inverted. The validator below is
+# more lenient than this (half the budget, not 0.7 of it): the ask states
+# the range it actually wants, the post-validator only the floor a reply
+# must clear to be usable at all, leaving room for the existing retry-once
+# path to ask again without every near-miss being rejected outright.
+def _e2_word_range(word_budget: int) -> tuple:
+    return max(3, round(0.7 * word_budget)), word_budget
+
+
+# The prefix every "too few words" validator error starts with (never any
+# other ``validate_e2`` message): the script step's own retry policy
+# (``steps.script.write_body_scene``) reads it to tell this one error apart
+# from a genuinely broken reply, so a second attempt that is merely a bit
+# short can be accepted instead of failing the whole scene (spec 4.2, F3).
+E2_WORD_FLOOR_PREFIX = "$.lines: too few words"
 
 
 def _line_schema(speakers) -> dict:
@@ -1004,17 +1025,18 @@ def build_e2(pack, *, scene, scene_number, outline, previous, word_budget, cast,
 
     speakers = [c["char_id"] for c in cast] + (["narrator"] if narrator_enabled else [])
     sfx_cue_names = list(sfx_cues)
+    lo, hi = _e2_word_range(word_budget)
     user += _E2_ASK_TEMPLATE.format(
         speakers=", ".join(speakers),
         emotions=", ".join(schemas.EMOTIONS),
         sfx_cues=", ".join(sfx_cue_names) if sfx_cue_names else "none available for this story",
-        word_budget=word_budget,
+        word_budget_lo=lo, word_budget_hi=hi,
         voice_direction=voice_direction,
     )
     return _system(pack), user, e2_schema(speakers, sfx_cue_names)
 
 
-def validate_e2(reply, *, scene, narrator_enabled, sfx_cues) -> list:
+def validate_e2(reply, *, scene, narrator_enabled, sfx_cues, word_budget=None) -> list:
     """Post-validation for an E2 reply (spec 2.7, 4.2): line count and caps,
     a speaker that is one of the scene's own characters (or ``"narrator"``
     when enabled), sfx cue references against a valid line number, and the
@@ -1024,7 +1046,14 @@ def validate_e2(reply, *, scene, narrator_enabled, sfx_cues) -> list:
     -- a soft target ``build_e2``'s own prompt states; this function does
     not re-derive it (that needs the episode template and style lock it is
     never given) and instead relies on the 22-word per-line cap it does
-    check below.
+    check below. When *word_budget* is given (the caller's own
+    ``timing.word_budget``), a reply whose total dialogue falls under half
+    of it is one error more (:data:`E2_WORD_FLOOR_PREFIX`, spec 4.2, F3): a
+    floor well below the ask's own range (:func:`_e2_word_range`), leaving
+    slack so the existing retry-once path (``steps.script``) has room to
+    fix a merely-short reply instead of every near-miss being rejected.
+    *word_budget* stays ``None`` (no floor check) for a caller that has none
+    to give.
     """
     speakers = list(scene["characters"]) + (["narrator"] if narrator_enabled else [])
     sfx_cue_names = list(sfx_cues)
@@ -1049,6 +1078,15 @@ def validate_e2(reply, *, scene, narrator_enabled, sfx_cues) -> list:
             errors.append(f"$.sfx_cues[{i}].at: {at!r} is not 'start' or a line number 1-{n}")
 
     _nullable_text_errors(errors, "$.on_screen_text", reply["on_screen_text"], 6)
+
+    if word_budget is not None:
+        total_words = sum(_word_count(line["text"]) for line in lines)
+        floor = (word_budget + 1) // 2  # ceil(word_budget / 2), stdlib-only
+        if total_words < floor:
+            errors.append(
+                f"{E2_WORD_FLOOR_PREFIX}: {total_words} in total, expected at least {floor} "
+                f"(half of the {word_budget}-word budget)"
+            )
     return errors
 
 

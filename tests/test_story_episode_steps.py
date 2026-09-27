@@ -369,6 +369,26 @@ def e2_wrong_speaker(call):
     return reply
 
 
+def e2_short_reply(call):
+    """A reply with a single one-word line: under half of any word budget
+    the fixture's scenes ever get (spec 4.2, F3's floor)."""
+    speakers = _speakers(call)
+    return {
+        "lines": [{"speaker": speakers[0], "text": "Non.", "emotion": "tension", "delivery": "flat"}],
+        "sfx_cues": [], "on_screen_text": None,
+    }
+
+
+def e2_short_wrong_speaker(call):
+    """A reply that is both under the word floor *and* has a speaker the
+    scene does not allow -- a real problem, never forgiven by the floor's
+    own leniency."""
+    reply = e2_short_reply(call)
+    others = [cid for cid in NAMES if cid not in _speakers(call)]
+    reply["lines"][0]["speaker"] = others[0]
+    return reply
+
+
 HOOK_PART = {"lines": [{"speaker": KIWILO, "text": "Ce soir, quelqu'un quitte l'île.", "emotion": "shocked",
                         "delivery": "breathless"}],
              "on_screen_text": "Vote surprise ce soir"}
@@ -501,7 +521,12 @@ def test_a_full_script_is_one_e1_one_e2_per_body_scene_one_e3_and_one_e4(store):
     s02 = _scene(script, "s02")
     assert [line["line_id"] for line in s02["lines"]] == ["l08", "l09"]
     assert s02["sfx_cues"] == [{"at": "start", "cue": "dramatic_sting"}, {"at": "l09", "cue": "gasp_crowd"}]
-    assert s02["target_duration_s"] == 6.0 and s02["rev"] == 1
+    # F3: E1_REPLY's own targets sum to 52.5 s, under serial_60s_v1's target_s
+    # (60): script.apply_e1's normalisation raises every scene toward its
+    # slot's high end proportionally to its own room, so s02 (setup, 6.0 of
+    # its 4-8s range, 2.0 s of room out of 20.0 s total room, scale 7.5/20 =
+    # 0.375) lands at 6.0 + 2.0 * 0.375 = 6.75.
+    assert s02["target_duration_s"] == 6.75 and s02["rev"] == 1
     assert script["title"] == E1_REPLY["title"]
     assert script["hook"] == {"on_screen_text": "Vote surprise ce soir"}
     assert _scene(script, "s01")["lines"][0]["line_id"] == "l04"
@@ -525,7 +550,7 @@ def test_a_full_script_is_one_e1_one_e2_per_body_scene_one_e3_and_one_e4(store):
     second = llm.of("E2")[1]["user"]
     assert "Episode outline:" in second and "Previous scene: Kiwilo propose" in second
     assert "Its last line -- Mangella: Tu n'as pas le choix, chérie." in second
-    assert "Keep the scene's total dialogue within" in second
+    assert "words of dialogue in total (not fewer than" in second
     # RC-E2: the story itself is never touched.
     assert _story_bytes(store, story_id) == before
 
@@ -710,6 +735,47 @@ def test_an_e2_speaker_outside_the_scene_is_asked_again_once_then_fails_locally(
     assert _scene(script, "s06")["state"] == "written"
 
 
+def test_an_e2_reply_under_the_word_floor_is_retried_then_accepted_with_a_log_line(store):
+    """spec 4.2, F3: a reply under half the word budget is retryable, but a
+    retry that is *still* only that short must not fail the whole scene (or
+    the step) -- the second reply is accepted, with a log line saying so."""
+    m = _new()
+    story_id = _ready_story(store)
+    # s02 (the first body scene) gets two short replies in a row, then the
+    # remaining 7 body scenes (len(BODY) - 1) get one good reply each.
+    queue = [e2_short_reply, e2_short_reply] + [e2_reply] * (len(BODY) - 1)
+    llm = _script_llm(E2=queue)
+
+    summary, log = _run(m.script, store, story_id, llm=llm)
+
+    # s02 alone makes two E2 calls (the retry); every other scene, one.
+    assert llm.prompts() == ["E1"] + ["E2"] * (len(BODY) + 1) + ["E3", "E4"]
+    assert any(line.startswith("⚠️ E2 reply rejected") for line in log)
+    assert any("Scene s02" in line and "accepting a shorter reply after a retry" in line for line in log)
+    script = _script(store, story_id)
+    assert _scene(script, "s02")["state"] == "written"
+    assert _scene(script, "s02")["lines"][0]["text"] == "Non."
+    # The step did not fail overall: E4 still ran over a complete script.
+    assert summary["ep"] == 1 and summary["scenes"] == len(ALL_SCENES)
+
+
+def test_an_e2_reply_short_and_otherwise_broken_is_never_forgiven(store):
+    """The word floor's leniency only ever forgives the floor error alone: a
+    reply that is both short *and* has a disallowed speaker still fails the
+    scene after its retry, exactly as a non-short broken reply would."""
+    m = _new()
+    story_id = _ready_story(store)
+    queue = [e2_short_wrong_speaker, e2_short_wrong_speaker] + [e2_reply] * (len(BODY) - 1)
+    llm = _script_llm(E2=queue)
+
+    message, log = _failed(m.script, store, story_id, llm=llm)
+
+    assert "scene:1:s02" in message and "failed validation twice" in message
+    assert not any("accepting a shorter reply after a retry" in line for line in log)
+    script = _script(store, story_id)
+    assert _scene(script, "s02")["state"] == "stub"
+
+
 def test_a_body_scene_nobody_can_speak_in_is_written_silent_without_a_call(store):
     m = _new()
     story_id = _ready_story(store)
@@ -723,6 +789,64 @@ def test_a_body_scene_nobody_can_speak_in_is_written_silent_without_a_call(store
     s05 = _scene(_script(store, story_id), "s05")
     assert s05["state"] == "written" and s05["lines"] == [] and s05["source"] == "E2"
     assert any("s05" in line and "no one can speak" in line for line in log)
+
+
+# ---------------------------------------------- F3: episode target normalisation
+
+def test_normalize_episode_targets_raises_low_targets_toward_the_template_target(store):
+    """Live episode 1's own numbers (2026-09-27 free-tier bench): 8 body
+    scenes plus a hook and a cliffhanger, E1's own per-scene clamp already
+    applied, summing to 52.5 s -- under serial_60s_v1's own target_s (60).
+    Every scene rises toward its own slot's high end, proportionally to the
+    room each one has, until the sum reaches 60."""
+    m = _new()
+    ec = SimpleNamespace(template=templates.load_episode_template("serial_60s_v1"), style_lock=None)
+    scenes = [
+        {"function": "hook", "target_duration_s": 2.5}, {"function": "setup", "target_duration_s": 6.0},
+        {"function": "rising", "target_duration_s": 6.0}, {"function": "peak", "target_duration_s": 7.0},
+        {"function": "turn", "target_duration_s": 5.0}, {"function": "rising", "target_duration_s": 6.0},
+        {"function": "turn", "target_duration_s": 5.0}, {"function": "setup", "target_duration_s": 5.0},
+        {"function": "peak", "target_duration_s": 7.0}, {"function": "cliffhanger", "target_duration_s": 3.0},
+    ]
+
+    before, after = m.script._normalize_episode_targets(ec, scenes)
+
+    assert before == 52.5 and after == 60.0
+    assert [scene["target_duration_s"] for scene in scenes] == [
+        2.875, 6.75, 6.75, 7.375, 6.125, 6.75, 6.125, 6.125, 7.375, 3.75]
+
+
+def test_normalize_episode_targets_leaves_an_already_high_episode_untouched(store):
+    m = _new()
+    ec = SimpleNamespace(template=templates.load_episode_template("serial_60s_v1"), style_lock=None)
+    scenes = [{"function": "hook", "target_duration_s": 3.5}] + \
+             [{"function": "setup", "target_duration_s": 8.0} for _ in range(8)] + \
+             [{"function": "cliffhanger", "target_duration_s": 5.0}]
+    originals = [dict(scene) for scene in scenes]
+
+    before, after = m.script._normalize_episode_targets(ec, scenes)
+
+    assert before == after == sum(scene["target_duration_s"] for scene in originals)
+    assert scenes == originals  # already at/above target_s (60) and every scene at its own high end
+
+
+def test_normalize_episode_targets_never_raises_a_scene_past_its_own_high_end(store):
+    """Not enough room anywhere to reach target_s (60): every scene with
+    room lands exactly at its own slot's high end (never past it, spec
+    'or every scene is at its high end') and a scene already there (the
+    hook, no room) is left exactly as it is."""
+    m = _new()
+    ec = SimpleNamespace(template=templates.load_episode_template("serial_60s_v1"), style_lock=None)
+    scenes = [
+        {"function": "hook", "target_duration_s": 3.5},  # 1.5-3.5s: already at the high end, no room
+        {"function": "setup", "target_duration_s": 5.0},  # 4-8s: 3.0 s of room
+        {"function": "cliffhanger", "target_duration_s": 2.0},  # 2-5s: 3.0 s of room
+    ]
+
+    before, after = m.script._normalize_episode_targets(ec, scenes)
+
+    assert before == 10.5 and after == 16.5  # short of target_s, and that's fine -- every scene is maxed
+    assert [scene["target_duration_s"] for scene in scenes] == [3.5, 8.0, 5.0]
 
 
 def test_episode_2_waits_for_the_recap_of_episode_1(store):
