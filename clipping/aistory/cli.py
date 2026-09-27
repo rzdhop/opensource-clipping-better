@@ -1,4 +1,4 @@
-"""``python main.py --ai-story ...`` -- AI Story steps 1-7 from a terminal (spec 9.3).
+"""``python main.py --ai-story ...`` -- AI Story steps 1-9 from a terminal (spec 9.3).
 
 ``main.py`` hands everything after ``--ai-story`` to :func:`main` before the
 clip parser sees it (DEC-114): this is a parser of its own, and the clip CLI's
@@ -8,6 +8,7 @@ options and defaults are untouched. Three commands::
                            [--tier N] [--route R] [--consistency-mode M] [--budget-profile P]
     main.py --ai-story step <story_id> concepts|bible|style|style_preview [options]
     main.py --ai-story step <story_id> cast|places_proposal|places|season [options]
+    main.py --ai-story step <story_id> script|storyboard --ep N [options]
     main.py --ai-story list
 
 The story rules are ``clipping.aistory.workflow``'s, the ones the API applies,
@@ -49,6 +50,23 @@ or place and prop (``places``) that has everything, naming the others and
 what they lack; the season once its arc is complete. A proposal is not
 approved: its places are chosen with the ``places`` step.
 
+Phase 3 (steps 8-9): ``script`` and ``storyboard`` write one episode
+(``--ep N``, required for these two steps; the season decides which numbers
+exist). Preconditions, parameters and approvals are ``workflow``'s alone
+(DEC-114): the story ``ready``, the episode one the season plans, and -- from
+episode 2 on -- the previous episode's recap (phase 5's memory step, not yet
+built, so today only episode 1 can be written). ``script`` takes
+``--measure-voices`` (after writing, every line is spoken through its
+character's pinned voice and the audio kept); ``storyboard`` needs a complete
+script and takes ``--fast`` (every scene's shots planned deterministically,
+in this process, with no LLM call and so no key gate -- otherwise the step
+runs through the worker's registry like any other LLM step). A short summary
+of the episode follows the run: scenes written, the timing line, the
+consistency report's state, and -- a storyboard -- its shots over its
+scenes. ``--auto-approve`` applies the workflow's own approval rule and never
+"approves anyway": a script needs a passing, current consistency check; a
+storyboard needs an approved script with shots for every scene, none stale.
+
 Limitation: the CLI and a running server do not coordinate step runs on the
 same story. The server's one-step-per-story rule lives in its job store
 (``web/api/store.py``), which the CLI does not read, so running a step here
@@ -75,6 +93,8 @@ from . import defaults, refimages, schemas, templates, workflow
 from . import store as story_store
 from .steps import StepFailed
 from .steps import entities as entities_step
+from .steps import episode_common
+from .steps import script as script_step
 
 PROG = "main.py --ai-story"
 
@@ -89,11 +109,11 @@ EXIT_FAILED = 1
 EXIT_USAGE = 2
 EXIT_INTERRUPTED = 130
 
-# Every step `step` runs, phase 1 then phase 2.
-STEPS = workflow.PHASE1_STEPS + workflow.PHASE2_STEPS
+# Every step `step` runs, phase 1 then phase 2 then phase 3.
+STEPS = workflow.PHASE1_STEPS + workflow.PHASE2_STEPS + workflow.PHASE3_STEPS
 
 # The steps --auto-approve approves, and what to do for the others.
-AUTO_APPROVABLE = ("bible", "style", "cast", "places", "season")
+AUTO_APPROVABLE = ("bible", "style", "cast", "places", "season") + workflow.PHASE3_STEPS
 _NOT_AUTO_APPROVABLE = {
     "concepts": (
         "a concept is approved by choosing it: in the dashboard's concept step, or, for a "
@@ -110,8 +130,10 @@ _NOT_AUTO_APPROVABLE = {
     ),
 }
 
-# The steps that call the LLM chain, and so meet the key gate.
-_KEYED_STEPS = workflow.LLM_STEPS + workflow.PHASE2_STEPS
+# The steps that call the LLM chain, and so meet the key gate (the storyboard
+# with --fast calls nothing, but the option applies to the step, not the flag
+# combination: the gate itself is skipped for --fast in _phase3_step).
+_KEYED_STEPS = workflow.LLM_STEPS + workflow.PHASE2_STEPS + workflow.PHASE3_STEPS
 
 # The options of `step` that only some steps take: (dest, flag, steps).
 _STEP_ONLY = (
@@ -125,6 +147,9 @@ _STEP_ONLY = (
     ("place", "--place", ("places",)),
     ("prop", "--prop", ("places",)),
     ("episodes", "--episodes", ("season",)),
+    ("ep", "--ep", workflow.PHASE3_STEPS),
+    ("fast", "--fast", ("storyboard",)),
+    ("measure_voices", "--measure-voices", ("script",)),
     ("allow_slow_chain", "--allow-slow-chain", _KEYED_STEPS),
 )
 
@@ -145,8 +170,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=PROG,
         description=(
-            "AI Story, steps 1-7: create a story, write its concepts and bible, build\n"
-            "and lock its style, then make its cast, places and props, and season arc.\n"
+            "AI Story, steps 1-9: create a story, write its concepts and bible, build\n"
+            "and lock its style, then make its cast, places and props, and season arc,\n"
+            "then write and storyboard its episodes.\n"
             "Keys, LLM_CHAIN and the image and voice chains come from the environment\n"
             "(or .env), not from the dashboard's Settings."
         ),
@@ -159,6 +185,8 @@ def build_parser() -> argparse.ArgumentParser:
             f"  {PROG} step STORY_ID places_proposal\n"
             f"  {PROG} step STORY_ID places --auto-approve\n"
             f"  {PROG} step STORY_ID season --episodes 8 --auto-approve\n"
+            f"  {PROG} step STORY_ID script --ep 1 --auto-approve\n"
+            f"  {PROG} step STORY_ID storyboard --ep 1 --fast\n"
             f"  {PROG} list"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -204,7 +232,8 @@ def build_parser() -> argparse.ArgumentParser:
             "Run one step in this process. concepts and bible call the LLM chain; style "
             "builds the draft style lock here; style_preview calls the image chain; cast, "
             "places_proposal, places and season call the LLM chain, and the cast and the "
-            "places the image and voice chains too."
+            "places the image and voice chains too; script and storyboard write one "
+            "episode (--ep) and call the LLM chain too, unless storyboard is run --fast."
         ),
     )
     step.add_argument("story_id", help="the story's id (see 'list')")
@@ -239,9 +268,20 @@ def build_parser() -> argparse.ArgumentParser:
                       help=("cast, places: switch the story to prompt-only consistency before the run "
                             "(sheets and time variants drawn from text, not edited from a reference "
                             "image, and labelled prompt_only)"))
+    step.add_argument("--ep", type=int, default=None, metavar="N",
+                      help=("script, storyboard: the episode number to run it on (required for these two "
+                            "steps; the season plans which numbers exist)"))
+    step.add_argument("--fast", action="store_true",
+                      help=("storyboard only: plan every scene's shots deterministically, in this "
+                            "process, with no LLM call and so no key gate"))
+    step.add_argument("--measure-voices", action="store_true",
+                      help=("script only: after writing, measure every line with its speaker's pinned "
+                            "voice and keep the audio"))
     step.add_argument("--auto-approve", action="store_true",
                       help=("bible, style, season: approve the result once the step is done; cast, "
-                            "places: approve every character, place and prop that has everything"))
+                            "places: approve every character, place and prop that has everything; "
+                            "script, storyboard: approve it once the workflow's own rule passes (never "
+                            "'approve anyway')"))
     step.add_argument("--allow-slow-chain", action="store_true",
                       help=("the steps that call the LLM chain: run on the chain's slow floor alone; "
                             "also settable as ALLOW_SLOW_CHAIN=1"))
@@ -346,10 +386,12 @@ def _llm_refusal(allow_slow_chain) -> str | None:
     return refusal
 
 
-def _run_step(stories, story_id, step, params):
+def _run_step(stories, story_id, step, params, ep=None):
     """Run *step* through the worker's registry, in this process, with a real
-    cancel token: Ctrl-C cancels it. Returns ``EXIT_INTERRUPTED`` when it was
-    interrupted, else None; ``StepFailed`` propagates."""
+    cancel token: Ctrl-C cancels it. *ep* is the episode number for a phase-3
+    step (``StepContext.ep``), None for every other step. Returns
+    ``EXIT_INTERRUPTED`` when it was interrupted, else None; ``StepFailed``
+    propagates."""
     from clipping.cancel import Cancelled, CancelToken
 
     from . import steps
@@ -359,7 +401,7 @@ def _run_step(stories, story_id, step, params):
         job_id=CLI_JOB_ID,
         story_id=story_id,
         step=step,
-        ep=None,
+        ep=ep,
         params=params,
         cancel=token,
         # Keys and chains from the process environment (llm_call's fallback).
@@ -399,12 +441,25 @@ def _cmd_new(args, stories) -> int:
     return EXIT_OK
 
 
+def _episode_summary_line(entry) -> str:
+    """One episode of ``workflow.episode_summaries``'s list, e.g. ``"ep1
+    script approved, storyboard complete, 62.4 s"``."""
+    parts = [f"script {entry['script_state']}", f"storyboard {entry['storyboard_state']}"]
+    if entry["total_s"] is not None:
+        parts.append(f"{entry['total_s']:.1f} s")
+    return f"ep{entry['ep']} " + ", ".join(parts)
+
+
 def _cmd_list(args, stories) -> int:
     entries = stories.list()
     if not entries:
         _err(f"No stories in {stories.root}.")
     for entry in entries:
-        print(_line(entry))
+        line = _line(entry)
+        episodes = workflow.episode_summaries(stories, entry)
+        if episodes:
+            line += "; " + "; ".join(_episode_summary_line(item) for item in episodes)
+        print(line)
     return EXIT_OK
 
 
@@ -417,6 +472,8 @@ def _cmd_step(args, stories) -> int:
     for dest, flag, applies in _STEP_ONLY:
         if _given(getattr(args, dest)) and step not in applies:
             return _usage_error("step", f"{flag} applies to {_quoted(applies)} only, not to '{step}'.")
+    if step in workflow.PHASE3_STEPS and args.ep is None:
+        return _usage_error("step", f"--ep is required for '{step}': which episode to run it on.")
     try:
         overrides = parse_overrides(args.override)
         items = {flag: parse_items(flag, getattr(args, flag[2:])) for flag in _ITEM_SHAPES}
@@ -428,6 +485,9 @@ def _cmd_step(args, stories) -> int:
 
     if step in workflow.PHASE2_STEPS:
         return _phase2_step(args, stories, story, items)
+
+    if step in workflow.PHASE3_STEPS:
+        return _phase3_step(args, stories, story)
 
     if step == "style":
         params = {}
@@ -643,6 +703,82 @@ def _phase2_step(args, stories, story, items) -> int:
         else:
             workflow.approve_season(stories, story_id, now=_now())
             print("✅ Season approved.")
+    print(_line(workflow.load(stories, story_id)))
+    return EXIT_OK
+
+
+# ------------------------------------------------------------------ phase 3
+
+def _print_episode_summary(stories, story, ep, step) -> None:
+    """After ``script`` or ``storyboard``: a short summary of what is on
+    disk now (``workflow.episode_view``, the same read the API's episode
+    page uses) -- scenes written, the timing line (seconds, estimated or
+    measured, where it sits in the template's window, its flags) and the
+    consistency report's state; for a storyboard, its shots over its
+    scenes. Printed whatever the run's outcome, so it also covers a rerun
+    that wrote nothing new."""
+    view = workflow.episode_view(stories, story, ep)
+    script, board, state = view["script"], view["storyboard"], view["state"]
+    if script and script["scenes"]:
+        count = len(script["scenes"])
+        print(f"📄 Episode {ep}: {count} scene{'' if count == 1 else 's'} written, report {state['report']}.")
+        print(episode_common.timing_line(script))
+    if step == "storyboard" and board and board["shots"]:
+        print(f"🎞 Episode {ep}: {len(board['shots'])} shots over {len(board['scenes'])} scenes.")
+
+
+def _phase3_step(args, stories, story) -> int:
+    """``script`` or ``storyboard`` of episode ``args.ep``: exactly the
+    rules ``workflow`` applies for the API (DEC-114, one set of rules, two
+    front ends).
+
+    In the workflow's order: the episode's preconditions
+    (``workflow.episode_context`` -- the story ready, the episode one the
+    season plans, and from episode 2 on the previous episode's recap,
+    naming phase 5's memory step), then the step's own parameters
+    (``workflow.script_request``/``storyboard_request``), then -- a
+    storyboard, fast or not -- a complete script
+    (``workflow.require_complete_script``). ``--fast`` builds the storyboard
+    here, in this process, with no LLM call and so no key gate
+    (``workflow.build_fast_storyboard``); otherwise the key gate applies as
+    it does for any other LLM step and the step runs through the worker's
+    registry, carrying *ep*. A short summary of the episode follows
+    (:func:`_print_episode_summary`), then ``--auto-approve`` -- the
+    workflow's own approval rule, never 'approve anyway': a refusal (a
+    consistency report with issues for a script, an unfinished or outdated
+    storyboard) is a ``WorkflowError`` left to propagate, exactly as the
+    CLI already answers a refused bible or season approval."""
+    step, story_id, ep = args.step, story["story_id"], args.ep
+    ec = workflow.episode_context(stories, story, ep, step=step)
+    if step == "script":
+        params = {script_step.MEASURE_PARAM: True} if args.measure_voices else {}
+        workflow.script_request(params)
+        fast = False
+    else:
+        params = {"fast": True} if args.fast else {}
+        fast = workflow.storyboard_request(params)
+        workflow.require_complete_script(ec)
+
+    if fast:
+        workflow.build_fast_storyboard(stories, story, ep, now=_now(), on_log=print)
+    else:
+        refusal = _llm_refusal(args.allow_slow_chain)
+        if refusal:
+            _err(refusal)
+            return EXIT_FAILED
+        interrupted = _run_step(stories, story_id, step, params, ep=ep)
+        if interrupted:
+            return interrupted
+
+    _print_episode_summary(stories, story, ep, step)
+
+    if args.auto_approve:
+        if step == "script":
+            workflow.approve_script(stories, story_id, ep, now=_now())
+            print("✅ Script approved.")
+        else:
+            workflow.approve_storyboard(stories, story_id, ep, now=_now())
+            print("✅ Storyboard approved.")
     print(_line(workflow.load(stories, story_id)))
     return EXIT_OK
 

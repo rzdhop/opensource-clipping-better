@@ -923,11 +923,14 @@ def test_the_help_lists_every_step_of_phases_1_and_2(cli):
         assert option in out
 
 
-def test_main_py_ai_story_step_help_lists_the_phase_2_steps(tmp_path):
+def test_main_py_ai_story_step_help_lists_every_step(tmp_path):
+    # DEC-009: choices= mirrors the closed list of steps, so this braced set
+    # grows with each phase (phase 3, stage 9, adds script and storyboard).
     result = _main_py("--ai-story", "step", "--help", tmp_path=tmp_path)
 
     assert result.returncode == 0, result.stderr
-    assert "{concepts,bible,style,style_preview,cast,places_proposal,places,season}" in result.stdout
+    assert ("{concepts,bible,style,style_preview,cast,places_proposal,places,season,script,storyboard}"
+           in result.stdout)
 
 
 # ------------------------------------------------------------------ cast
