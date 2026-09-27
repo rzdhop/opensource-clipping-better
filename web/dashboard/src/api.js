@@ -521,9 +521,19 @@ export async function runStoryStep(storyId, step, body = {}) {
   return res.json()
 }
 
-/** Approve one document (`bible` or `style`) of the story; answers the story. */
-export async function approveStoryDoc(storyId, doc) {
-  const res = await request(`/stories/${storyId}/approve/${doc}`, { method: 'POST' })
+/**
+ * Approve one document of the story (`bible`, `style`, `character:<id>`,
+ * `place:<id>`, `prop:<id>`, `season`, or -- phase 3 -- `script:<ep>` /
+ * `storyboard:<ep>`); answers the story (an episode document: the episode
+ * page). `body` is only sent for `script:<ep>` (`{approve_anyway}`, to
+ * approve over a consistency report with issues); every other caller keeps
+ * posting with no body, exactly as before.
+ */
+export async function approveStoryDoc(storyId, doc, body) {
+  const res = await request(`/stories/${storyId}/approve/${doc}`, {
+    method: 'POST',
+    ...(body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}),
+  })
   if (!res.ok) throw await apiError(res, `Failed to approve '${doc}'`)
   return res.json()
 }
@@ -549,7 +559,7 @@ export async function regenerateStory(storyId, payload) {
  * (the names on screen in the proposal editor, repeated as `?place=`/
  * `?prop=`; omitted, the estimate falls back to the saved proposal).
  */
-export async function fetchStoryEstimate(storyId, step, { target, selected, episodes, places, props } = {}) {
+export async function fetchStoryEstimate(storyId, step, { target, selected, episodes, places, props, ep, measure } = {}) {
   const params = new URLSearchParams()
   if (target) params.set('target', target)
   if (selected) selected.forEach((name) => params.append('selected', name))
@@ -562,6 +572,11 @@ export async function fetchStoryEstimate(storyId, step, { target, selected, epis
   // side; the proposal editor always starts from at least the saved names).
   if (places) places.forEach((name) => params.append('place', name))
   if (props) props.forEach((name) => params.append('prop', name))
+  // `ep` (phase 3, `script`/`storyboard`): the episode number. `measure`:
+  // also report the `measure` block (real-voice measurement's own cost) --
+  // only meaningful with `step === 'script'`.
+  if (ep != null) params.set('ep', ep)
+  if (measure) params.set('measure', '1')
   const qs = params.toString()
   const res = await request(`/stories/${storyId}/estimate/${step}${qs ? `?${qs}` : ''}`)
   if (!res.ok) throw await apiError(res, 'Failed to fetch the estimate')
@@ -717,6 +732,62 @@ export function uploadCharacterReference(storyId, charId, file, onProgress) {
 export async function fetchStoryFileUrl(storyId, name) {
   const res = await request(`/stories/${storyId}/files/${encodeURIComponent(name)}`)
   if (!res.ok) throw await apiError(res, 'Failed to load the preview image')
+  const blob = await res.blob()
+  return URL.createObjectURL(blob)
+}
+
+// ------------------------------------------------------ episodes (phase 3)
+
+/**
+ * One episode's page: `{ep, script, storyboard, template, state, jobs}`
+ * (`GET /stories/{id}/episodes/{ep}`).
+ */
+export async function fetchEpisode(storyId, ep) {
+  const res = await request(`/stories/${storyId}/episodes/${ep}`)
+  if (!res.ok) throw await apiError(res, 'Failed to fetch the episode')
+  return res.json()
+}
+
+/**
+ * Edit an episode's script inline (`ScriptPatchRequest`: `lines`, `scenes`,
+ * `hook_on_screen_text`, `cliffhanger_reveal`, `next_episode_teaser`; only
+ * the fields sent are applied). Answers the episode page.
+ */
+export async function patchEpisodeScript(storyId, ep, payload) {
+  const res = await request(`/stories/${storyId}/episodes/${ep}/script`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) throw await apiError(res, 'Failed to update the script')
+  return res.json()
+}
+
+/**
+ * Edit an episode's storyboard inline (`StoryboardPatchRequest`: `shots`,
+ * `transitions`, `refresh_prompts`; only the fields sent are applied). Used
+ * from stage 11's storyboard pane. Answers the episode page.
+ */
+export async function patchEpisodeStoryboard(storyId, ep, payload) {
+  const res = await request(`/stories/${storyId}/episodes/${ep}/storyboard`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) throw await apiError(res, 'Failed to update the storyboard')
+  return res.json()
+}
+
+/**
+ * One line's measured take (`line_NN.mp3`/`.wav`, `name` from that line's
+ * `timing.audio`), as a blob URL -- same reasoning as `fetchStoryMediaUrl`:
+ * the route is token-gated, so it is fetched with the auth header rather
+ * than used directly as an <audio src>. The caller is responsible for
+ * revoking the URL.
+ */
+export async function fetchEpisodeVoiceUrl(storyId, ep, name) {
+  const res = await request(`/stories/${storyId}/episodes/${ep}/voice/${encodeURIComponent(name)}`)
+  if (!res.ok) throw await apiError(res, 'Failed to load the voice line')
   const blob = await res.blob()
   return URL.createObjectURL(blob)
 }

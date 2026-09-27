@@ -38,6 +38,10 @@ STORY_FUNCTIONS = [
     # Phase 2, stage 10 (PlacesStep/SeasonStep): inline place/prop edits and
     # deletes.
     "patchPlace", "patchProp", "deletePlace", "deleteProp",
+    # Phase 3, stage 10 (EpisodeStudio/ScriptPane): the episode page, inline
+    # script/storyboard edits (the storyboard one used from stage 11), and a
+    # line's measured voice take.
+    "fetchEpisode", "patchEpisodeScript", "patchEpisodeStoryboard", "fetchEpisodeVoiceUrl",
 ]
 
 
@@ -77,7 +81,7 @@ def _function_body(src: str, name: str) -> str:
 def test_the_readers_see_something():
     """A broken regex would make every assertion below pass for free."""
     assert len(_job_status_values()) >= 8
-    assert len(STORY_FUNCTIONS) == 22
+    assert len(STORY_FUNCTIONS) == 26
 
 
 # --------------------------------------------------------- components/ActivityFeed.jsx

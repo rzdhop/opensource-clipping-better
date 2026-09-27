@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { createStory, fetchStory, fetchStyles, styleNameOf } from '../../api'
 import { LiveActivity, useJobFeed } from '../../components/ActivityFeed'
 import ConceptsStep from './steps/ConceptsStep'
@@ -469,11 +469,25 @@ function ExistingStory({ storyId }) {
       </div>
 
       {allDone && (
-        <div className="card" style={{ marginBottom: '16px' }}>
+        <div className="card story-ready-card" style={{ marginBottom: '16px' }}>
           <h3 className="card-title">Ready</h3>
-          <p>
-            The story is ready: bible, style, cast, places and a planned season. Episodes arrive in phase 3.
-          </p>
+          <p>The story is ready: bible, style, cast, places and a planned season.</p>
+          <Link to={`/story/${storyId}/episodes/1`} className="story-ready-open-episode">
+            Open episode 1 →
+          </Link>
+          {data.episodes.length > 0 && (
+            <ul className="story-field-list story-ready-episodes">
+              {data.episodes.map((entry) => (
+                <li key={entry.ep}>
+                  <Link to={`/story/${storyId}/episodes/${entry.ep}`}>
+                    Episode {entry.ep}
+                  </Link>
+                  {': '}{entry.script_state}
+                  {entry.total_s != null ? ` · ${entry.total_s.toFixed(1)} s` : ''}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
 

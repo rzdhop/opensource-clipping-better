@@ -2181,3 +2181,266 @@ html, body {
     left: -17px;
   }
 }
+
+/* --- Ready card: the link into phase 3 --------------------------------- */
+
+.story-ready-open-episode {
+  display: inline-block;
+  margin: 4px 0 10px;
+  color: var(--accent-hover);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.story-ready-open-episode:hover {
+  text-decoration: underline;
+}
+
+.story-ready-episodes a {
+  color: inherit;
+  text-decoration: underline;
+}
+
+/* ============================================================
+   Tabs (phase 3, stage 10): a small WAI-ARIA tabs widget, used by
+   EpisodeStudio below 1100 px. Additive, prefixed `tabs-`.
+   ============================================================ */
+
+.tabs-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  border-bottom: 1px solid var(--border-color);
+  margin-bottom: 14px;
+}
+
+.tabs-tab {
+  appearance: none;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-weight: 600;
+  font-size: 13px;
+  padding: 10px 12px;
+  min-height: 40px;
+  cursor: pointer;
+}
+
+.tabs-tab:hover {
+  color: var(--text-primary);
+}
+
+.tabs-tab.active {
+  color: var(--accent-hover);
+  border-bottom-color: var(--accent);
+}
+
+.tabs-panel {
+  min-width: 0;
+}
+
+/* ============================================================
+   EpisodeStudio (phase 3, stage 10): three panes >=1100 px, Tabs below.
+   Additive, prefixed `episode-studio-` / `story-script-` / `duration-bar-`.
+   ============================================================ */
+
+.episode-studio-header h2 {
+  margin: 2px 0 4px;
+}
+
+.episode-studio-back {
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: 13px;
+}
+
+.episode-studio-back:hover {
+  color: var(--text-primary);
+}
+
+.episode-studio-panes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.episode-studio-pane {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.episode-studio-tabs {
+  min-width: 0;
+}
+
+.episode-script-header .form-group {
+  margin-bottom: 10px;
+}
+
+/* --- Duration bar -------------------------------------------------------- */
+
+.duration-bar {
+  min-width: 0;
+}
+
+.duration-bar-track {
+  position: relative;
+  height: 22px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  overflow: hidden;
+}
+
+.duration-bar-window {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--accent-dim);
+}
+
+.duration-bar-scenes {
+  position: absolute;
+  inset: 0;
+  display: flex;
+}
+
+.duration-bar-segment {
+  height: 100%;
+  min-width: 2px;
+  border-right: 1px solid var(--bg-primary);
+  background: var(--text-tertiary);
+}
+
+.duration-bar-segment-ok {
+  background: var(--success);
+}
+
+.duration-bar-segment-tightened {
+  background: var(--warning);
+}
+
+.duration-bar-segment-over,
+.duration-bar-segment-under {
+  background: var(--error);
+}
+
+.duration-bar-mark {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--text-primary);
+}
+
+.duration-bar-mark-tighten {
+  background: var(--warning);
+}
+
+.duration-bar-total {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.duration-bar-flags {
+  margin-top: 6px;
+}
+
+/* --- Scene / line cards ---------------------------------------------------- */
+
+.story-script-scenes {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 14px 0;
+}
+
+.story-script-scene {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.story-script-scene-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.story-script-scene-id {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.story-script-scene-characters {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin: 0 0 8px;
+}
+
+.story-script-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 10px 0;
+}
+
+.story-script-line {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+}
+
+.story-script-line-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.story-script-line-speaker,
+.story-script-line-emotion {
+  min-height: 36px;
+  width: auto;
+  flex: 1 1 auto;
+  min-width: 110px;
+}
+
+.story-script-line audio {
+  width: 100%;
+  margin-top: 6px;
+}
+
+.story-script-sfx {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.story-script-framing,
+.story-script-measure,
+.story-script-approve,
+.story-script-consistency {
+  margin: 14px 0;
+}
+
+@media (max-width: 600px) {
+  .story-script-line-speaker,
+  .story-script-line-emotion {
+    min-width: 0;
+    flex-basis: 100%;
+  }
+}
