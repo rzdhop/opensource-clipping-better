@@ -2469,3 +2469,18 @@ a new portrait remakes the sheets derived from it.
 two places with a night variant, a prop, an 8-episode arc → `ready`, $0.00, no paid call. The voice listening is
 the human's.
 **Consequence.** One defect (voice age) and four polish issues were found and fixed during the walk.
+
+## DEC-150 — A finished job's Live activity total stops where the job stopped; no step clock
+**Context.** `/clips/job/b37b36a9b34e` (completed, 54 min) read "33h 56m on this step · 34h 50m total" ~34 h
+later: `LiveActivity` measured both clocks to the reader's `Date.now()`; only the 1 s ticker stopped. The job has
+no `finished_at`; `updated_at` moves again when a story step is approved or superseded (hours later).
+**Decision.** `jobClocks(job, events, running, now)` in `web/dashboard/src/time.js`: running jobs unchanged; a
+finished job (TERMINAL, `awaiting_approval` included) shows no "on this step" and a total from `created_at` to the
+earlier of `updated_at` and the last feed line's `ts` (either may be missing; neither → no total). Chosen by the
+human over `updated_at` alone and a backend `finished_at` stamp (model/store/persistence change, restart to ship).
+Id DEC-150 leaves DEC-126+ to the phase-3 session. Tested by running `time.js` with the system Node from pytest,
+skipped without Node or `node_modules` (DEC-012 holds: CI still needs pytest only), plus a text guard.
+**Consequence.** Every LiveActivity caller (Clips job page, story step panels, EpisodeStudio, the wizard's step-job
+history) shows a fixed duration once a job ends. A finishing path that ever goes silent before its end would
+understate the total by that silence (A-070).
+
