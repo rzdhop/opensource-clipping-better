@@ -1,3 +1,13 @@
+## STAGE 13 IN PROGRESS (resumed 2026-09-27 19:47 UTC)
+- **Human's answer (chat, 2026-09-27):** "I re-approve in the UI" — I re-approve Kiwilo and Mangella as they are
+  (current voices) at the start of the walk. Mangella's voice is `gemini/flash-lite-tts` (Kore): free tier, $0,
+  counted against Gemini's daily limit, so step 8's measurement uses Edge for Kiwilo/Broccolia and free Gemini
+  for Mangella.
+- **Before (19:47 UTC):** health 0 running / 0 queued; `data/usage.json` sha256 `64d2be3a…8a90` (edge 1, gemini 1
+  calls, day 2026-09-27); no `data/spend.json`.
+- If this session dies mid-walk: check `git log -1 main` — if it equals the branch head, the merge is done; check
+  the container's `/api/health` version and jobs before anything else.
+
 ## RESUME HERE (session paused by the human, 2026-09-27)
 - **Where:** worktree `.claude/worktrees/ai-story-phase-3`, branch `feat/ai-story-phase-3` (local only, NOT pushed),
   head = the stage-12b commit. `main` is still at `153e83f` (the stage-0 checkpoint); the container still runs
