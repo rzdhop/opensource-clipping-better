@@ -32,6 +32,15 @@
   F10 LOW skipped paid link only in the chip tooltip. F11 LOW estimate top = 12 (body high 9) vs 11 exact.
   F4 WITHDRAWN: s08 silent scene is spec §body "one dread/quiet scene without dialogue allowed".
   Pre-existing, not phase 3: clip job page "Live activity 33h 56m on this step" on a completed job.
+- **Human's answers (chat, 2026-09-27 ~20:25 UTC):** fix round = majors + UI (F3, F7, F1, F5, F6, F8, F9, F11; F2 and
+  F10 → follow-ups); F1 = a French elision line in the episode prompts + deterministic repair after each reply (no
+  extra call, never fails a step; `t il` left alone); live ep 1 stays as it is — the fixes are verified on a COPY
+  of the story via the CLI.
+- **Fix round (in progress):** three agents in isolated worktrees, disjoint files, each commits on its own branch;
+  I cherry-pick onto `feat/ai-story-phase-3`, run Tier-1 (both envs + build), ff `main` at 0 jobs, rebuild, re-walk
+  the affected steps. A = F7 (Opus: shots.py/timing.py/steps/storyboard.py/episode_common.py); B = F3 + F1 (Sonnet:
+  prompts.py, steps/script.py, steps/episode_regenerate.py); C = F5/F6/F8/F9 UI + F11 (Sonnet: ScriptPane.jsx,
+  index.css, NewStoryWizard.jsx, workflow.script_units).
 
 ## RESUME HERE (session paused by the human, 2026-09-27)
 - **Where:** worktree `.claude/worktrees/ai-story-phase-3`, branch `feat/ai-story-phase-3` (local only, NOT pushed),
