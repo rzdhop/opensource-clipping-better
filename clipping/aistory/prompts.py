@@ -655,6 +655,71 @@ def _personality_block(cast) -> str:
     return "\n".join(lines)
 
 
+# ------------------------------------------------------- F1: French elisions
+
+# The one sentence every episode ask (E1/E2/E3, never E4 -- it writes no new
+# prose) carries when the story's language is French: a free-tier reply has
+# been seen writing an elision as two words with the apostrophe simply
+# dropped ("l alliance", "d Etat", "m échappent"), so the ask spells out the
+# form wanted instead of assuming it.
+_FR_ELISION_SENTENCE = "Write French elisions with their apostrophe (l'eau, d'État, qu'il), never a space."
+
+
+def _french_block(pack) -> str:
+    """*_FR_ELISION_SENTENCE* plus the blank line that follows it in an ask
+    built by string concatenation (E1/E2); blank for anything else.
+    ``context.LANGUAGE_NAMES`` has exactly ``fr``/``en`` (schemas.LANGUAGES),
+    so comparing the display name is exact, never a guess."""
+    return f"{_FR_ELISION_SENTENCE}\n\n" if pack.language_name == "French" else ""
+
+
+# The elidable words this repairs (spec 4.2, F1): le/la, de, je, ce, ne, me,
+# se (one letter once their own vowel is dropped) and que (only its "e"
+# drops, not the "u"). Matched case-insensitively and standalone -- neither
+# lookaround uses ``\w`` loosely: "des" and "quand" never match, only a
+# whole word spelled exactly "d" or "qu" -- followed by whitespace and a
+# word starting with a vowel or "h" (accented vowels included). "y", "a" and
+# "à" are never treated as a vowel-starting word to elide *into* (the
+# human's own choice: "il y a" is a different word, not a dropped
+# apostrophe, and is not worth the false positives).
+_FR_ELIDABLE_RE = re.compile(r"(?<!\w)(qu|[ldjcnms])(?!\w)([ \t]+)(\S+)", re.IGNORECASE)
+_FR_VOWEL_OR_H = set("aeiouAEIOUhH" "àâäæçéèêëîïôöœùûü" "ÀÂÄÆÇÉÈÊËÎÏÔÖŒÙÛÜ")
+_FR_NEVER_ELIDED = {"y", "a", "à"}
+
+
+def _fr_lead_word(token: str) -> str:
+    """The leading run of letters of *token* (stops at the first digit,
+    punctuation mark or apostrophe): what the elision check itself reads,
+    a trailing comma or period never part of the question."""
+    match = re.match(r"[^\W\d_]+", token)
+    return match.group(0) if match else ""
+
+
+def _fr_elision_sub(match) -> str:
+    prefix, word = match.group(1), match.group(3)
+    lead = _fr_lead_word(word)
+    if not lead or lead.lower() in _FR_NEVER_ELIDED or lead[0] not in _FR_VOWEL_OR_H:
+        return match.group(0)
+    return f"{prefix}'{word}"
+
+
+def repair_fr_elisions(text: str) -> str:
+    """Deterministic repair of a French reply's dropped elision apostrophe
+    (spec 4.2, F1): ``"l alliance"`` -> ``"l'alliance"``, ``"d Etat"`` ->
+    ``"d'Etat"``, ``"m échappent"`` -> ``"m'échappent"``. No call, cannot
+    fail (pure text -> text), and never touches *text* that already carries
+    an apostrophe anywhere, straight or curly -- a reply with one correct
+    elision and one dropped one is left exactly as it is, the safer of the
+    two ways for this to be wrong.
+
+    Applied by the script step (never here) to every model-written field
+    that ends up in ``script.json`` when the story's language is ``"fr"``.
+    """
+    if "'" in text or "’" in text:
+        return text
+    return _FR_ELIDABLE_RE.sub(_fr_elision_sub, text)
+
+
 # ------------------------------------------------------------------------- E1
 
 _HOOK_STYLE_LINES = {
@@ -688,6 +753,7 @@ _E1_ASK_TEMPLATE = (
     "turn right before the cliffhanger; one of them may be a quiet scene with no dialogue.\n\n"
     "The hook scene: {hook_style_line}.\n\n"
     "The cliffhanger scene: {cliffhanger_style_line}; it should leave one of this episode's own hooks open.\n\n"
+    "{french_line}"
     "Never use real people, brands, studio names or copyrighted characters."
 )
 
@@ -809,6 +875,7 @@ def build_e1(pack, *, ep, arc_entry, template, episode_defaults, cast, places, p
         target_s=template["target_s"],
         hook_style_line=_HOOK_STYLE_LINES[episode_defaults["hook_style"]],
         cliffhanger_style_line=_CLIFFHANGER_STYLE_LINES[episode_defaults["cliffhanger_style"]],
+        french_line=_french_block(pack),
     )
 
     cast_ids = [c["char_id"] for c in cast]
@@ -931,6 +998,7 @@ _E2_ASK_TEMPLATE = (
     "- sfx_cues: 0 or more, each with at ('start' or a line number 1-n) and cue (one of {sfx_cues})\n"
     "- on_screen_text: null unless the scene truly needs one (at most 6 words, story language)\n\n"
     "Write {word_budget_lo}-{word_budget_hi} words of dialogue in total (not fewer than {word_budget_lo}).\n\n"
+    "{french_line}"
     "Never use real people, brands, studio names or copyrighted characters."
 )
 
@@ -1032,6 +1100,7 @@ def build_e2(pack, *, scene, scene_number, outline, previous, word_budget, cast,
         sfx_cues=", ".join(sfx_cue_names) if sfx_cue_names else "none available for this story",
         word_budget_lo=lo, word_budget_hi=hi,
         voice_direction=voice_direction,
+        french_line=_french_block(pack),
     )
     return _system(pack), user, e2_schema(speakers, sfx_cue_names)
 
@@ -1201,11 +1270,14 @@ def _e3_teaser_block(next_arc_entry) -> str:
     return _arc_entry_block(next_arc_entry, label="Next episode's arc entry")
 
 
-def _e3_ask(keys, speakers) -> str:
+def _e3_ask(keys, speakers, *, french_line="") -> str:
     lines = ["Write " + ", ".join(keys) + ".", "", "Give:"]
     for key in keys:
         lines.append(_E3_KEY_ASKS[key].format(speakers=", ".join(speakers), emotions=", ".join(schemas.EMOTIONS)))
     lines.append("")
+    if french_line:
+        lines.append(french_line)
+        lines.append("")
     lines.append("Never use real people, brands, studio names or copyrighted characters.")
     return "\n".join(lines)
 
@@ -1265,7 +1337,7 @@ def build_e3(pack, *, ep, part=None, note=None, hook_scene, cliffhanger_scene, r
     if note:
         user += f"Follow the author's note: {note}\n\n"
 
-    user += _e3_ask(keys, speakers)
+    user += _e3_ask(keys, speakers, french_line=_FR_ELISION_SENTENCE if pack.language_name == "French" else "")
     return _system(pack), user, e3_schema(part, ep, speakers)
 
 

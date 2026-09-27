@@ -888,6 +888,50 @@ def test_episode_2_with_the_recap_asks_for_a_recap_scene(store):
     assert llm.of("E3")[0]["schema"]["required"] == ["recap", "hook", "cliffhanger", "teaser"]
 
 
+def test_the_script_step_repairs_dropped_french_elisions_in_every_field(store):
+    """spec 4.2, F1: every model-written free text that ends up in
+    ``script.json`` is repaired the same way for a French story -- the
+    title, a scene's summary, a line's text, a scene's on-screen text, the
+    hook's on-screen text, the cliffhanger's reveal, the recap's on-screen
+    text and the next-episode teaser (episode 2, so the recap applies)."""
+    m = _new()
+    story_id = _ready_story(store, recaps={"ep01": "Un resume."})
+    e1 = copy.deepcopy(E1_REPLY)
+    e1["title"] = "L histoire d une île"
+    e1["scenes"].insert(0, _stub("recap", PARLOIR, "day", [KIWILO], [], "Ce qui s est passe au parloir.",
+                                 "tension", 2.5))
+    e1["scenes"][2]["summary"] = "Kiwilo parle d une alliance secrete."  # s02, the first body scene
+
+    def e2_with_elision(call):
+        reply = e2_reply(call)
+        reply["lines"][0]["text"] = "C est l alliance qu il voulait."
+        reply["on_screen_text"] = "l alliance"
+        return reply
+
+    e3 = {
+        "recap": {"lines": [{"speaker": KIWILO, "text": "Hier soir.", "emotion": "tension", "delivery": "hushed"}],
+                  "on_screen_text": "l alliance"},
+        "hook": dict(HOOK_PART, on_screen_text="l alliance"),
+        "cliffhanger": {"reveal": "C est l alliance d Etat.",
+                        "lines": [{"speaker": MANGELLA, "text": "C'est toi.", "emotion": "shocked",
+                                   "delivery": "cold"}]},
+        "teaser": "Demain, l alliance eclate.",
+    }
+    llm = _script_llm(E1=[e1], E2=[e2_with_elision] + [e2_reply] * (len(BODY) - 1), E3=[e3], E4=[E4_PASSED])
+
+    _run(m.script, store, story_id, llm=llm, ep=2)
+
+    script = _script(store, story_id, 2)
+    assert script["title"] == "L'histoire d'une île"
+    assert _scene(script, "s02")["summary"] == "Kiwilo parle d'une alliance secrete."
+    assert _scene(script, "s02")["lines"][0]["text"] == "C'est l'alliance qu'il voulait."
+    assert _scene(script, "s02")["on_screen_text"] == "l'alliance"
+    assert _scene(script, "s00")["on_screen_text"] == "l'alliance"  # the recap scene
+    assert script["hook"]["on_screen_text"] == "l'alliance"
+    assert script["cliffhanger"]["reveal"] == "C'est l'alliance d'Etat."
+    assert script["next_episode_teaser"] == "Demain, l'alliance eclate."
+
+
 @pytest.mark.parametrize("ep", [0, 9, None])
 def test_an_episode_outside_the_season_is_refused(store, ep):
     m = _new()

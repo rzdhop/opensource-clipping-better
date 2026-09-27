@@ -205,6 +205,7 @@ def test_build_e1_golden_fr():
         "premise.\n\n"
         "The cliffhanger scene: hard_stop: end mid-confrontation, no resolution, no line that wraps it "
         "up; it should leave one of this episode's own hooks open.\n\n"
+        "Write French elisions with their apostrophe (l'eau, d'État, qu'il), never a space.\n\n"
         "Never use real people, brands, studio names or copyrighted characters."
     )
     assert user == expected_user
@@ -417,6 +418,7 @@ def test_build_e2_golden_key_lines_fr():
     assert "delivery (English, at most 12 words; the story's voice performance is over-acted telenovela delivery)" in user
     assert "cue (one of gasp_crowd, dramatic_sting, phone_ring)" in user
     assert "Write 14-20 words of dialogue in total (not fewer than 14)." in user
+    assert "Write French elisions with their apostrophe (l'eau, d'État, qu'il), never a space." in user
     assert schema == prompts.e2_schema(["char_kiwilo", "char_mangella"], SFX_CUES)
 
 
@@ -555,6 +557,7 @@ def test_build_e3_full_golden_key_lines_ep1():
     assert "Next episode's arc entry (escalation): La trahison éclate au grand jour." in user
     assert "Write hook, cliffhanger, teaser." in user
     assert "recap" not in user.lower().split("write ")[0].split("\n\n")[0]  # no stray recap mention up top
+    assert "Write French elisions with their apostrophe (l'eau, d'État, qu'il), never a space." in user
     assert "Write all user-facing text in French." in system
 
 
@@ -719,6 +722,52 @@ def test_e3_errors_recap_part_good_and_bad():
         recap_scene=RECAP_SCENE, narrator_enabled=False, episode_defaults=EPISODE_DEFAULTS,
     )
     assert any("recap.lines" in e for e in errors)
+
+
+# ============================================================ F1: FR elisions
+
+@pytest.mark.parametrize("language, name", [("fr", "French"), ("en", "English")])
+def test_e1_e2_e3_only_carry_the_french_elision_line_for_french(language, name):
+    pack = _pack(language)
+    _, e1_user, _ = prompts.build_e1(
+        pack, ep=1, arc_entry=ARC_ENTRY, template=TEMPLATE, episode_defaults=EPISODE_DEFAULTS,
+        cast=CAST_E1, places=PLACES_E1, props=PROPS_E1, memory=MEMORY_NONE, slots=SLOTS_EP1,
+    )
+    _, e2_user, _ = prompts.build_e2(
+        pack, scene=BODY_SCENE, scene_number=1, outline=OUTLINE, previous=None, word_budget=20,
+        cast=CAST_E2, place=PLACE_E2, props=PROPS_E2, sfx_cues=SFX_CUES,
+        narrator_enabled=False, voice_direction="over-acted",
+    )
+    _, e3_user, _ = prompts.build_e3(
+        pack, ep=1, hook_scene=HOOK_SCENE, cliffhanger_scene=CLIFF_SCENE, recap_scene=None,
+        outline=OUTLINE, first_body_line=None, last_body_line=None, arc_entry=ARC_ENTRY,
+        next_arc_entry=NEXT_ARC_ENTRY, memory=MEMORY_NONE, episode_defaults=EPISODE_DEFAULTS,
+        word_budgets={}, cast=CAST_E2, narrator_enabled=False,
+    )
+    present = language == "fr"
+    for user in (e1_user, e2_user, e3_user):
+        assert (prompts._FR_ELISION_SENTENCE in user) is present
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("L alliance", "L'alliance"),
+        ("l amour", "l'amour"),
+        ("d Etat", "d'Etat"),
+        ("m échappent", "m'échappent"),
+        # Negatives: never touched.
+        ("t il", "t il"),
+        ("va t il", "va t il"),
+        ("il y a", "il y a"),
+        ("à la", "à la"),
+        ("l'eau", "l'eau"),
+        ("l’eau", "l’eau"),
+        ("Hello world, this is fine.", "Hello world, this is fine."),
+    ],
+)
+def test_repair_fr_elisions_table(text, expected):
+    assert prompts.repair_fr_elisions(text) == expected
 
 
 # ==================================================================== E4

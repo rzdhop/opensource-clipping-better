@@ -178,8 +178,66 @@ def _speakers(ec, scene) -> list:
     return list(scene["characters"]) + (["narrator"] if ec.narrator else [])
 
 
+def _fr_text(ec, text: str) -> str:
+    """*text*, stripped, with a dropped French elision apostrophe repaired
+    when the story's language is French (spec 4.2, F1) -- applied again (a
+    no-op: :func:`prompts.repair_fr_elisions` never touches text that
+    already carries an apostrophe) wherever a reply reaches ``script.json``,
+    on top of the early repair the ``_repair_e*_reply`` functions below do
+    before a reply's validator ever runs. ``delivery`` never goes through
+    this (it is always English, spec 4.2)."""
+    text = text.strip()
+    if ec.language == "fr":
+        text = prompts.repair_fr_elisions(text)
+    return text
+
+
+def _repair_e1_reply(ec, reply) -> None:
+    """Repair a dropped French elision apostrophe in an E1 reply's own free
+    text, in place, before its validator runs (spec 4.2, F1): a merged
+    elision changes a word count (``"l alliance"`` is 2 "words", "l'alliance"
+    is 1), so the repair has to happen before ``validate_e1`` counts them,
+    not only when the reply is later applied to the script."""
+    if ec.language != "fr":
+        return
+    reply["title"] = prompts.repair_fr_elisions(reply["title"])
+    for scene in reply["scenes"]:
+        scene["summary"] = prompts.repair_fr_elisions(scene["summary"])
+
+
+def _repair_e2_reply(ec, reply) -> None:
+    """Same as :func:`_repair_e1_reply`, for an E2 reply: every line's text
+    (what the word-budget floor below counts) and the on-screen text."""
+    if ec.language != "fr":
+        return
+    for line in reply["lines"]:
+        line["text"] = prompts.repair_fr_elisions(line["text"])
+    if reply["on_screen_text"]:
+        reply["on_screen_text"] = prompts.repair_fr_elisions(reply["on_screen_text"])
+
+
+def _repair_e3_reply(ec, reply) -> None:
+    """Same as :func:`_repair_e1_reply`, for an E3 reply: whichever of
+    hook/cliffhanger/recap/teaser it carries (:func:`e3_parts`)."""
+    if ec.language != "fr":
+        return
+    for key in ("hook", "cliffhanger", "recap"):
+        part = reply.get(key)
+        if part is None:
+            continue
+        for line in part.get("lines", []):
+            line["text"] = prompts.repair_fr_elisions(line["text"])
+        if key == "cliffhanger":
+            if part.get("reveal"):
+                part["reveal"] = prompts.repair_fr_elisions(part["reveal"])
+        elif part.get("on_screen_text"):
+            part["on_screen_text"] = prompts.repair_fr_elisions(part["on_screen_text"])
+    if reply.get("teaser"):
+        reply["teaser"] = prompts.repair_fr_elisions(reply["teaser"])
+
+
 def _line(ec, sid, k, line) -> dict:
-    text = line["text"].strip()
+    text = _fr_text(ec, line["text"])
     return {
         "line_id": schemas.line_id_for(sid, k), "speaker": line["speaker"], "text": text,
         "emotion": line["emotion"], "delivery": line["delivery"].strip(),
@@ -259,7 +317,7 @@ def apply_e1(ec, script, reply) -> tuple:
         scene = {
             "scene_id": sid, "function": stub["function"], "place_id": stub["place_id"],
             "time_variant": stub["time_variant"], "characters": list(dict.fromkeys(stub["characters"])),
-            "props": list(dict.fromkeys(stub["props"])), "summary": stub["summary"].strip(),
+            "props": list(dict.fromkeys(stub["props"])), "summary": _fr_text(ec, stub["summary"]),
             "emotion": stub["emotion"], "target_duration_s": 0.0, "lines": [], "sfx_cues": [],
             "on_screen_text": None, "state": "stub", "source": "E1", "rev": 1,
         }
@@ -267,7 +325,7 @@ def apply_e1(ec, script, reply) -> tuple:
         scene["target_duration_s"] = round(min(max(float(stub["target_duration_s"]), lo), hi), 3)
         scenes.append(scene)
     before, after = _normalize_episode_targets(ec, scenes)
-    script["title"] = reply["title"].strip()
+    script["title"] = _fr_text(ec, reply["title"])
     script["scenes"] = scenes
     return before, after
 
@@ -287,6 +345,7 @@ def write_beat_sheet(ctx, ec, script, *, tools, announced) -> None:
     llm_call.announce_trimmed(ctx, pack, announced)
 
     def validate(reply):
+        _repair_e1_reply(ec, reply)
         errors = prompts.validate_e1(reply, ep=ec.ep, template=ec.template, episode_defaults=ec.episode_defaults,
                                      cast_ids=list(ec.entities["characters"]), places=ec.places,
                                      prop_ids=ec.prop_ids)
@@ -312,7 +371,7 @@ def apply_e2(ec, scene, reply) -> None:
         {"at": "start" if cue["at"] == "start" else schemas.line_id_for(sid, int(cue["at"]) - 1), "cue": cue["cue"]}
         for cue in reply["sfx_cues"]
     ]
-    scene["on_screen_text"] = reply["on_screen_text"].strip() if reply["on_screen_text"] else None
+    scene["on_screen_text"] = _fr_text(ec, reply["on_screen_text"]) if reply["on_screen_text"] else None
     scene["state"] = "written"
     scene["source"] = "E2"
 
@@ -365,6 +424,7 @@ def write_body_scene(ctx, ec, script, sid, *, tools, announced, note=None) -> bo
 
     def validate(reply):
         attempt["n"] += 1
+        _repair_e2_reply(ec, reply)
         errors = prompts.validate_e2(reply, scene=scene, narrator_enabled=ec.narrator, sfx_cues=ec.sfx_cues,
                                      word_budget=budget)
         floor_only = bool(errors) and all(e.startswith(prompts.E2_WORD_FLOOR_PREFIX) for e in errors)
@@ -399,18 +459,18 @@ def apply_e3(ec, script, reply) -> list:
         _keep_cues(scene)
         if part == "recap":
             text = reply[part]["on_screen_text"]
-            scene["on_screen_text"] = text.strip() if text else None
+            scene["on_screen_text"] = _fr_text(ec, text) if text else None
         elif part == "hook":
             text = reply[part]["on_screen_text"]
-            script["hook"]["on_screen_text"] = text.strip() if text else None
+            script["hook"]["on_screen_text"] = _fr_text(ec, text) if text else None
         else:
-            script["cliffhanger"]["reveal"] = reply[part]["reveal"].strip()
+            script["cliffhanger"]["reveal"] = _fr_text(ec, reply[part]["reveal"])
             script["cliffhanger"]["scene_id"] = script["scenes"][-1]["scene_id"]
         scene["state"] = "written"
         scene["source"] = "E3"
         touched.append(sid)
     if "teaser" in reply:
-        script["next_episode_teaser"] = reply["teaser"].strip()
+        script["next_episode_teaser"] = _fr_text(ec, reply["teaser"])
     return touched
 
 
@@ -446,6 +506,7 @@ def write_framing(ctx, ec, script, part, *, tools, announced, note=None) -> list
     llm_call.announce_trimmed(ctx, pack, announced)
 
     def validate(reply):
+        _repair_e3_reply(ec, reply)
         errors = prompts.validate_e3(reply, ep=ec.ep, part=part, hook_scene=hook, cliffhanger_scene=cliff,
                                      recap_scene=recap, narrator_enabled=ec.narrator,
                                      episode_defaults=ec.episode_defaults)
