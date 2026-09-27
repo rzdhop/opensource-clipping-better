@@ -744,40 +744,30 @@ def _collect_resolved_from(resolved_from, subject_tags, scene, entities) -> None
         resolved_from[scene["place_id"]] = place_doc["updated_at"]
 
 
-def _effective_tail_floor(sid, scenes_in_order, template, script, transitions_by_after, shots_by_scene) -> float:
-    floor = template["pauses_s"]["tail_floor"]
-    scene_shots = shots_by_scene.get(sid) or []
-    if scene_shots:
-        exit_transition = transitions_by_after.get(scene_shots[-1]["shot_id"])
-        if exit_transition is not None:
-            floor = max(floor, exit_transition["duration_s"])
-    if scenes_in_order and sid == scenes_in_order[-1]["scene_id"] and script["cliffhanger"]["cut_to_black"]:
-        floor = max(floor, template["transitions_s"]["fadeblack"])
-    return floor
-
-
-def _time_shots(shots, transitions, scenes_in_order, script, *, template, language, style_lock, skip=()) -> list:
+def _time_shots(shots, transitions, script, *, template, language, style_lock, skip=()) -> list:
     """Every shot's ``duration_s``, in place, the one way a storyboard is
-    timed: its scene's :func:`timing.scene_timing` -- the tail never below
-    the transition leaving the scene (:func:`_effective_tail_floor`) -- split
-    across the scene's shots by :func:`timing.allocate_shots`.
-    *scenes_in_order* are the scenes the shots cover, in the script's order
-    (the last one decides the end card's floor); a scene in *skip* keeps its
-    shots' durations. Returns the notes (a scene whose shots sit at the floor
-    length)."""
+    timed: each scene's EPISODE-LEVEL timing -- :func:`timing.episode_pass`
+    over the whole *script* beside these very shots and transitions, the
+    same call the script's stored ``timing`` comes from
+    (``episode_common.retime``), window pass and shot floor included --
+    split across the scene's shots by :func:`timing.allocate_shots`. So a
+    scene's shots always sum to ``script.timing.scenes[sid].duration_s``.
+    A scene in *skip* keeps its shots' durations. Returns the notes (a scene
+    whose shots sit at the floor length -- never expected: the shot floor
+    already grew every scene to what its shots need)."""
     notes = []
-    transitions_by_after = {t["after"]: t for t in transitions}
+    _timing, scene_timings = timing.episode_pass(
+        script, template, language, style_lock=style_lock, storyboard={"shots": shots, "transitions": transitions})
     shots_by_scene: dict = {}
     for shot in shots:
         shots_by_scene.setdefault(shot["scene_id"], []).append(shot)
 
-    for scene in scenes_in_order:
+    for scene in script["scenes"]:
         sid = scene["scene_id"]
-        if sid in skip:
+        if sid in skip or sid not in shots_by_scene:
             continue
-        floor = _effective_tail_floor(sid, scenes_in_order, template, script, transitions_by_after, shots_by_scene)
-        scene_t = timing.scene_timing(scene, template, language, style_lock=style_lock, tail_floor=floor)
-        scene_shots = shots_by_scene.get(sid, [])
+        scene_t = scene_timings[sid]
+        scene_shots = shots_by_scene[sid]
         scene_plans_for_alloc = [{"lines": shot["lines"]} for shot in scene_shots]
         durations, extra_hold = timing.allocate_shots(scene, scene_t, scene_plans_for_alloc, template)
         for shot, duration in zip(scene_shots, durations):
@@ -796,10 +786,12 @@ def retime_storyboard(storyboard, script, *, template, language, style_lock) -> 
     script's ``timing``). A scene planned from another revision of its
     scene, or marked stale, keeps its durations until it is planned again:
     its shots may name lines it no longer has. Returns whether any duration
-    changed."""
+    changed. The other scenes follow the episode-level timing the script is
+    stored with (:func:`_time_shots`): a change in one scene can move
+    another one's durations through the episode's window pass."""
     scenes_in_order = [scene for scene in script["scenes"] if scene["scene_id"] in storyboard["scenes"]]
     line_ids = {scene["scene_id"]: {line["line_id"] for line in scene["lines"]} for scene in scenes_in_order}
-    skip = set()
+    skip = {scene["scene_id"] for scene in script["scenes"] if scene["scene_id"] not in storyboard["scenes"]}
     for scene in scenes_in_order:
         entry = storyboard["scenes"][scene["scene_id"]]
         if entry.get("stale") or entry.get("script_rev") != scene["rev"]:
@@ -808,10 +800,24 @@ def retime_storyboard(storyboard, script, *, template, language, style_lock) -> 
         known = line_ids.get(shot["scene_id"])
         if known is not None and any(line_id not in known for line_id in shot["lines"]):
             skip.add(shot["scene_id"])
+    if _non_cut_inside_a_scene(storyboard):
+        # Transitions that break spec 6.3: the episode cannot be timed
+        # (timing._boundary_from_storyboard refuses them). Left as it is:
+        # the storyboard's own validation (schemas.storyboard_errors)
+        # refuses it too, and a PATCH that made it is refused whole.
+        return False
     before = [shot["duration_s"] for shot in storyboard["shots"]]
-    _time_shots(storyboard["shots"], storyboard["transitions"], scenes_in_order, script, template=template,
+    _time_shots(storyboard["shots"], storyboard["transitions"], script, template=template,
                 language=language, style_lock=style_lock, skip=skip)
     return [shot["duration_s"] for shot in storyboard["shots"]] != before
+
+
+def _non_cut_inside_a_scene(storyboard) -> bool:
+    """Whether a transition other than ``cut`` joins two shots of the same
+    scene (spec 6.3; ``schemas.storyboard_errors`` names it)."""
+    shots = storyboard["shots"]
+    same_scene = {prev["shot_id"]: prev["scene_id"] == nxt["scene_id"] for prev, nxt in zip(shots, shots[1:])}
+    return any(t["type"] != "cut" and same_scene.get(t["after"]) for t in storyboard["transitions"])
 
 
 def build_storyboard(script, plans, sources, *, entities, style_lock, template, language, consistency_mode,
@@ -820,8 +826,9 @@ def build_storyboard(script, plans, sources, *, entities, style_lock, template, 
     "t1"|"fast"}``) resolved into a complete ``storyboard_v1`` document:
     scenes in the script's own order (only the ones *plans* covers), the
     cross-scene :func:`rule_pass`, ``sh01..`` ids, every shot resolved
-    (:func:`resolve_shot`), durations from :func:`timing.scene_timing` +
-    :func:`timing.allocate_shots`, and transitions from
+    (:func:`resolve_shot`), durations from the episode-level
+    :func:`timing.episode_pass` + :func:`timing.allocate_shots`
+    (:func:`_time_shots`), and transitions from
     :func:`timing.plan_transitions`. Raises ``ValueError`` (never writes a
     document that fails its own validation -- a bug, not a user error) when
     the result does not pass ``schemas.storyboard_errors`` and
@@ -858,7 +865,7 @@ def build_storyboard(script, plans, sources, *, entities, style_lock, template, 
             })
 
     transitions = timing.plan_transitions(shots, scenes_by_id, template)
-    notes.extend(_time_shots(shots, transitions, scenes_in_order, script, template=template, language=language,
+    notes.extend(_time_shots(shots, transitions, script, template=template, language=language,
                              style_lock=style_lock))
 
     doc = {

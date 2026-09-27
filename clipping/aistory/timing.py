@@ -177,7 +177,7 @@ def episode_slots(template: dict, ep: int) -> list:
 # ------------------------------------------------------------ scene timing
 
 def scene_timing(scene: dict, template: dict, language: str, *, style_lock: dict = None,
-                  tail_floor: float = None) -> dict:
+                  tail_floor: float = None, min_duration_s: float = None) -> dict:
     """One scene's duration, tail, hold and per-line start offsets.
 
     A scene with no lines (a quiet beat, a text-only recap or hook) just
@@ -196,8 +196,16 @@ def scene_timing(scene: dict, template: dict, language: str, *, style_lock: dict
       enough, state is ``"tightened"``; if the tail is already at the floor
       and the scene is still over, state is ``"over"`` and the duration is
       the tightened raw length -- audio is never sped up, lines never cut.
+
+    *min_duration_s* is the length the scene's storyboard shots need
+    (``len(shots) * min_shot_s``, :func:`_shot_floors`): both ends of the
+    slot are raised to it, so a scene is never shorter than its shots -- the
+    shortfall is held like any other (``hold_s``) and a tail is never
+    shortened below it. ``line_starts`` never move: a hold is at the end.
     """
     lo, hi = slot_range(scene, template, style_lock=style_lock)
+    if min_duration_s is not None:
+        lo, hi = max(lo, min_duration_s), max(hi, min_duration_s)
     lines = scene["lines"]
     pauses = template["pauses_s"]
     floor = pauses["tail_floor"]
@@ -389,6 +397,34 @@ def _boundary_from_storyboard(scenes: list, storyboard: dict) -> list:
     return boundary
 
 
+def covers(storyboard: dict, script: dict) -> bool:
+    """Whether *storyboard* has shots for every scene of *script*, in the
+    script's order -- the only storyboard whose transitions time the whole
+    episode (:func:`_boundary_from_storyboard` refuses any other)."""
+    if not storyboard or not script["scenes"]:
+        return False
+    sequence = []
+    for shot in storyboard["shots"]:
+        if not sequence or sequence[-1] != shot["scene_id"]:
+            sequence.append(shot["scene_id"])
+    return sequence == [scene["scene_id"] for scene in script["scenes"]]
+
+
+def _shot_floors(storyboard: dict, template: dict) -> dict:
+    """``{scene_id: seconds}``: how long each scene with shots in
+    *storyboard* must last for every one of its shots to get the template's
+    ``min_shot_s`` (``len(shots) * min_shot_s``). Every scene the storyboard
+    has shots for counts, stale or not, whether or not the storyboard covers
+    the script: the shots are what gets rendered."""
+    if not storyboard:
+        return {}
+    counts: dict = {}
+    for shot in storyboard["shots"]:
+        counts[shot["scene_id"]] = counts.get(shot["scene_id"], 0) + 1
+    min_shot = template["min_shot_s"]
+    return {sid: round(n * min_shot, 3) for sid, n in counts.items()}
+
+
 def _boundary_transitions(scenes: list, template: dict, storyboard: dict = None) -> list:
     """``[(kind, duration_s), ...]``, one per scene-to-scene boundary, in
     scene order. Read from *storyboard* (``storyboard_v1``) when given, via
@@ -412,9 +448,10 @@ def allocate_shots(scene: dict, scene_t: dict, shots: list, template: dict) -> t
 
     1. If even the minimum shot length does not fit every shot
        (``len(shots) * min_shot_s > duration``), every shot gets exactly
-       ``min_shot_s`` and the shortfall is reported as ``extra_hold_s`` (a
-       caller holds the last frame, or the episode-level window pass should
-       already have grown the scene before this is reached).
+       ``min_shot_s`` and the shortfall is reported as ``extra_hold_s``.
+       A storyboard's own scenes never reach this: they are timed by
+       :func:`episode_pass`, whose shot floor already grew every scene to
+       what its shots need.
     2. If no shot is anchored (every ``lines`` list is empty), the duration
        is split evenly, the last shot absorbing the rounding remainder.
     3. Otherwise an anchored shot (non-empty ``lines``) owns the span from
@@ -547,32 +584,89 @@ def episode_timing(script: dict, template: dict, language: str, *, style_lock: d
     fadeblack duration that joins it (they overlap), only when
     ``cliffhanger.cut_to_black`` is true; ``hard_stop`` adds nothing.
 
+    Shot floor: with a storyboard given, each scene is never shorter than
+    its shots need (``len(shots) * min_shot_s``, :func:`_shot_floors`), the
+    shortfall held at its end (see :func:`scene_timing`'s
+    ``min_duration_s``) before the window pass below.
+
     Window handling (spec 6.4, the human's window/tighten answer of
     2026-09-27): above ``tighten_above_s``, tails are shortened toward
-    their floors, longest tail first, only as much as needed. If that
+    their floors, longest tail first, only as much as needed (never taking
+    a scene below its shot floor). If that
     brings the total to ``tighten_above_s`` or below, or leaves it inside
     the window, the state is ``"tightened"``; if the window's high end is
     still exceeded, the state is ``"over"`` and the longest lines in the
     episode are flagged for trimming, longest first, until half the sum of
     the flagged lines' durations covers the excess. Below the window's low
-    end, holds are extended (up to ``hold_extension_max_s`` each, never
+    end, holds are extended (up to ``hold_extension_max_s`` each, counting
+    what a scene's shot floor already held beyond its own length; never
     past a scene's own slot maximum) -- first on the cliffhanger scene,
     then on the first scene at each place in the order the places appear;
     if that is not enough the state is ``"under"``. Independently of the
     episode's own state, any scene whose *own* timing came out ``"over"``
     (it did not fit even after its own tail was shrunk to the floor) adds
     a ``scene_over`` flag and a ``trim_line`` flag on its own longest line.
+
+    The storyboard, when given, must cover every scene of the script
+    (:func:`covers`); :func:`episode_pass` is the same computation for any
+    storyboard, and also returns each scene's line starts.
     """
+    boundary = _boundary_transitions(script["scenes"], template, storyboard)
+    result, _scene_timings = _episode_pass(script, template, language, style_lock=style_lock, boundary=boundary,
+                                           shot_floors=_shot_floors(storyboard, template))
+    return result
+
+
+def episode_pass(script: dict, template: dict, language: str, *, style_lock: dict = None,
+                 storyboard: dict = None) -> tuple:
+    """``(timing, scenes)``: the one timing a script and its storyboard
+    share -- the script's stored ``timing`` is the first, and a storyboard's
+    shots are cut to the second (``shots.build_storyboard``,
+    ``shots.retime_storyboard``), so the two cannot disagree.
+
+    *storyboard* may be any storyboard (or None): its transitions time the
+    scene boundaries only when it covers every scene of *script*
+    (:func:`covers`) -- any other is left out of the boundaries and they are
+    predicted (spec 6.3) -- while every scene it has shots for gets their
+    shot floor (:func:`_shot_floors`). For a covering storyboard or None,
+    ``timing`` is exactly :func:`episode_timing`'s.
+
+    ``scenes`` is ``{scene_id: scene_t}`` after the window pass: the same
+    ``duration_s``/``tail_s``/``hold_s``/``state`` as ``timing["scenes"]``,
+    plus ``speech_s`` and ``line_starts`` (:func:`scene_timing`'s; the
+    window pass only moves a tail or a hold, both after the last line, so a
+    line never moves) -- what :func:`allocate_shots` splits.
+    """
+    boundary_board = storyboard if covers(storyboard, script) else None
+    boundary = _boundary_transitions(script["scenes"], template, boundary_board)
+    return _episode_pass(script, template, language, style_lock=style_lock, boundary=boundary,
+                         shot_floors=_shot_floors(storyboard, template))
+
+
+def _episode_pass(script: dict, template: dict, language: str, *, style_lock: dict, boundary: list,
+                  shot_floors: dict) -> tuple:
+    """:func:`episode_timing`'s computation, given the scene *boundary*
+    transitions and the *shot_floors*; ``(timing, scene_timings)``."""
     scenes = script["scenes"]
-    boundary = _boundary_transitions(scenes, template, storyboard)
 
     scene_timings = {}
     slot_hi_by_scene = {}
+    # How much a scene's shot floor lengthened it beyond its own timing: it
+    # counts toward the hold extension below, so no scene is held more than
+    # hold_extension_max_s beyond its own length by the window pass.
+    floor_hold = {}
     for i, scene in enumerate(scenes):
+        sid = scene["scene_id"]
         floor = _effective_tail_floor(i, scenes, boundary, template, script)
-        scene_t = scene_timing(scene, template, language, style_lock=style_lock, tail_floor=floor)
-        scene_timings[scene["scene_id"]] = scene_t
-        slot_hi_by_scene[scene["scene_id"]] = slot_range(scene, template, style_lock=style_lock)[1]
+        shot_floor = shot_floors.get(sid)
+        scene_t = scene_timing(scene, template, language, style_lock=style_lock, tail_floor=floor,
+                               min_duration_s=shot_floor)
+        floor_hold[sid] = 0.0
+        if shot_floor is not None:
+            natural = scene_timing(scene, template, language, style_lock=style_lock, tail_floor=floor)
+            floor_hold[sid] = max(0.0, scene_t["duration_s"] - natural["duration_s"])
+        scene_timings[sid] = scene_t
+        slot_hi_by_scene[sid] = slot_range(scene, template, style_lock=style_lock)[1]
 
     end_card_addition = 0.0
     if script["cliffhanger"]["cut_to_black"]:
@@ -599,6 +693,8 @@ def episode_timing(script: dict, template: dict, language: str, *, style_lock: d
             floor = _effective_tail_floor(i, scenes, boundary, template, script)
             scene_t = scene_timings[sid]
             room = max(0.0, scene_t["tail_s"] - floor)
+            if sid in shot_floors:
+                room = max(0.0, min(room, scene_t["duration_s"] - shot_floors[sid]))
             shrink = min(need, room)
             if shrink <= 0:
                 continue
@@ -647,7 +743,8 @@ def episode_timing(script: dict, template: dict, language: str, *, style_lock: d
             scene_t = scene_timings[sid]
             hi = slot_hi_by_scene[sid]
             room = max(0.0, hi - scene_t["duration_s"])
-            extend = min(need, template["hold_extension_max_s"], room)
+            cap = max(0.0, template["hold_extension_max_s"] - floor_hold[sid])
+            extend = min(need, cap, room)
             if extend <= 0:
                 continue
             scene_timings[sid] = {
@@ -698,7 +795,7 @@ def episode_timing(script: dict, template: dict, language: str, *, style_lock: d
             else:
                 measured_lines += 1
 
-    return {
+    result = {
         "total_s": round(total, 3),
         "window_s": [window_lo, window_hi],
         "target_s": template["target_s"],
@@ -716,6 +813,7 @@ def episode_timing(script: dict, template: dict, language: str, *, style_lock: d
         "estimated_lines": estimated_lines,
         "measured_lines": measured_lines,
     }
+    return result, scene_timings
 
 
 def line_offsets(script: dict, timing: dict, template: dict, *, storyboard: dict = None) -> dict:

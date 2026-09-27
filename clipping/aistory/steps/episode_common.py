@@ -334,29 +334,27 @@ def write_storyboard(ec, storyboard, script, *, now) -> dict:
 def covers(storyboard, script) -> bool:
     """Whether *storyboard* has shots for every scene of *script*, in the
     script's order -- the only storyboard whose transitions time the whole
-    episode (``timing.episode_timing`` refuses any other)."""
-    if not storyboard or not script["scenes"]:
-        return False
-    sequence = []
-    for shot in storyboard["shots"]:
-        if not sequence or sequence[-1] != shot["scene_id"]:
-            sequence.append(shot["scene_id"])
-    return sequence == [scene["scene_id"] for scene in script["scenes"]]
+    episode (``timing.covers``: ``timing.episode_timing`` refuses any
+    other)."""
+    return timing.covers(storyboard, script)
 
 
 def retime(script, ec, storyboard=None) -> dict:
     """Set ``script["timing"]`` from its text (or its measured lines) and
     returns *script*. A storyboard that covers every scene
     (:func:`covers`) gives the scene boundaries their real transitions; any
-    other is left out and the boundaries are predicted by the same grammar
-    (spec 6.3) until it does. Derived: the revision and the approvals never
-    move. A script with no scene yet has no timing."""
+    other is left out of them and the boundaries are predicted by the same
+    grammar (spec 6.3) until it does. Every scene with shots is never
+    shorter than they need. The one computation (``timing.episode_pass``)
+    the storyboard's shot durations are cut to as well
+    (``shots.build_storyboard``, ``shots.retime_storyboard``), so the two
+    agree. Derived: the revision and the approvals never move. A script with
+    no scene yet has no timing."""
     if not script["scenes"]:
         script["timing"] = None
         return script
-    board = storyboard if covers(storyboard, script) else None
-    script["timing"] = timing.episode_timing(script, ec.template, ec.language, style_lock=ec.style_lock,
-                                             storyboard=board)
+    script["timing"], _scenes = timing.episode_pass(script, ec.template, ec.language, style_lock=ec.style_lock,
+                                                    storyboard=storyboard)
     return script
 
 

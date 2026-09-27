@@ -976,9 +976,11 @@ def test_build_storyboard_durations_sum_to_scene_durations_or_report_extra_hold(
     for shot in doc["shots"]:
         by_scene.setdefault(shot["scene_id"], []).append(shot)
 
+    # F7: a scene's duration is the EPISODE-LEVEL one (after the window pass),
+    # the one the script is stored with -- not the scene's own scene_timing.
+    episode = timing.episode_timing(SCRIPT, TEMPLATE, EN, style_lock=FRUIT_DRAMA, storyboard=doc)
     for sid, scene_shots in by_scene.items():
-        scene = next(s for s in SCRIPT["scenes"] if s["scene_id"] == sid)
-        scene_t = timing.scene_timing(scene, TEMPLATE, EN, style_lock=FRUIT_DRAMA)
+        scene_t = episode["scenes"][sid]
         total = sum(shot["duration_s"] for shot in scene_shots)
         has_note = any(f"scene {sid}:" in n and "extra_hold_s" in n for n in notes)
         assert total == pytest.approx(scene_t["duration_s"], abs=0.01) or has_note
