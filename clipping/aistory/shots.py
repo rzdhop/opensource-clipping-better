@@ -868,3 +868,29 @@ def refresh_prompts(storyboard, script, *, entities, style_lock, consistency_mod
     new_doc["shots"] = new_shots
     new_doc["resolved_from"] = resolved_from
     return new_doc
+
+
+def plans_from_storyboard(storyboard, script) -> dict:
+    """``{scene_id: [plan, ...]}``: the plans a storyboard was built from,
+    read back from its shots (the reverse of :func:`build_storyboard`'s
+    resolution) so a step can rebuild the storyboard with some scenes
+    re-planned and every other scene kept as it is. Each shot's line ids
+    become the 1-based numbers of its scene's lines as they are now; a line
+    id the scene no longer has is left out (its scene is stale, and the
+    caller knows it), and a shot of a scene the script no longer has is
+    dropped. The framings and motions are the rule pass's own (running the
+    rule pass on them again changes nothing that did not change around
+    them)."""
+    scenes_by_id = {scene["scene_id"]: scene for scene in script["scenes"]}
+    plans: dict = {}
+    for shot in storyboard["shots"]:
+        scene = scenes_by_id.get(shot["scene_id"])
+        if scene is None:
+            continue
+        numbers = {line["line_id"]: n for n, line in enumerate(scene["lines"], start=1)}
+        plans.setdefault(scene["scene_id"], []).append(_plan(
+            framing=shot["framing"], camera_motion=shot["camera_motion"], modifiers=list(shot["modifiers"]),
+            action=shot["action"], subjects=list(shot["subject_tags"]),
+            lines=[numbers[line_id] for line_id in shot["lines"] if line_id in numbers],
+        ))
+    return plans

@@ -11,7 +11,8 @@ user's approval"; raising means the step failed.
 
 Phase 1 registers ``concepts``, ``bible`` and ``regenerate`` (stage 6) and
 ``style_preview`` (stage 8); phase 2 adds ``cast``, ``places_proposal``,
-``places`` and ``season`` (and the entity targets of ``regenerate``). Each is
+``places`` and ``season`` (and the entity targets of ``regenerate``); phase 3
+adds ``script`` and ``storyboard`` (and the episode targets). Each is
 registered by module name and imported on its first run, never here:
 importing this package must not pull in the prompt catalogue, the LLM chain
 or the generation chains, so the worker's dispatch and a test that only needs
@@ -100,6 +101,8 @@ RUNNERS: dict[str, Callable[[StepContext], object]] = {
     "places_proposal": _deferred("places_proposal"),
     "places": _deferred("places"),
     "season": _deferred("season"),
+    "script": _deferred("script"),
+    "storyboard": _deferred("storyboard"),
 }
 
 

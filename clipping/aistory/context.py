@@ -15,6 +15,7 @@ Stdlib only (DEC-012); the one cross-package import is
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from clipping.providers.pacing import estimate_tokens
@@ -309,6 +310,24 @@ def check_budget(system, user, *, budget=PACK_TOKEN_BUDGET) -> int:
 
 _MEMORY_WORD_LIMIT = 150
 _MEMORY_NONE_YET = "none yet"
+# series_memory.relationship_state (spec 2.6): a flat object, one entry per
+# pair of characters, keyed "<char_a>|<char_b>", valued with a short text.
+_RELATIONSHIP_KEY = re.compile(r"^(char_[a-z0-9_]{1,40})\|(char_[a-z0-9_]{1,40})$")
+
+
+def relationship_pairs(relationship_state) -> list:
+    """``[(char_a, char_b, text), ...]`` of a spec-2.6 ``relationship_state``
+    (``{"char_kiwilo|char_mangella": "publicly enemies, secretly allies"}``),
+    in its own order. An entry of any other shape -- a key that is not two
+    character ids joined by ``|``, or a value that is not a non-empty
+    string -- is not a relationship and is left out."""
+    pairs = []
+    for key, text in (relationship_state or {}).items():
+        match = _RELATIONSHIP_KEY.fullmatch(key) if isinstance(key, str) else None
+        if match is None or not (isinstance(text, str) and text.strip()):
+            continue
+        pairs.append((match.group(1), match.group(2), text.strip()))
+    return pairs
 
 
 def memory_section(season, ep):
@@ -328,21 +347,17 @@ def memory_section(season, ep):
         return _MEMORY_NONE_YET, False
 
     memory = (season or {}).get("series_memory") or {}
-    recap = (memory.get("recaps") or {}).get(str(ep - 1))
+    # Keyed "ep01", "ep02", ... (spec 2.6; the memory step writes them).
+    recap = (memory.get("recaps") or {}).get(f"ep{ep - 1:02d}")
     open_hooks = memory.get("open_hooks") or []
-    relationship_state = memory.get("relationship_state") or {}
+    pairs = relationship_pairs(memory.get("relationship_state"))
 
     lines = ["Series memory:"]
     lines.append(f"- Previous recap: {recap}" if recap else "- Previous recap: none recorded")
     if open_hooks:
         lines.append("- Open hooks: " + "; ".join(open_hooks))
-    if relationship_state:
-        pairs = []
-        for char_id, others in relationship_state.items():
-            for other_id, text in others.items():
-                pairs.append(f"{char_id}/{other_id}: {text}")
-        if pairs:
-            lines.append("- Relationships: " + "; ".join(pairs))
+    if pairs:
+        lines.append("- Relationships: " + "; ".join(f"{a}/{b}: {text}" for a, b, text in pairs))
 
     return trim_words("\n".join(lines), _MEMORY_WORD_LIMIT)
 

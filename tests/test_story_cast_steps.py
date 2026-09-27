@@ -1091,9 +1091,12 @@ def test_regenerate_refuses_unknown_ids_shapes_and_extra_images(store):
         "Cannot regenerate 'season:4': there is no season arc yet; write the season first.")
     assert _refused(store, story_id, fakes, {"target": "character:char_kiwilo:image:extra:1"}, llm=llm) == (
         "Cannot regenerate 'character:char_kiwilo:image:extra:1': extra images arrive in a later phase.")
+    # Phase 3 (stage 6) runs the episode targets: this story is not ready, so it is refused as such.
+    assert _refused(store, story_id, fakes, {"target": "scene:1:s02"}, llm=llm) == (
+        "Cannot regenerate 'scene:1:s02': The story is not ready yet: approve the cast, the places and the "
+        "season first.")
     for target in ("character:char_kiwilo:image:selfie", "place:place_le_camp_de_plage:image:golden_hour",
-                   "prop:prop_le_coco_telephone:voice", "character:Kiwilo:text", "season:0", "season:x",
-                   "scene:1:s02"):
+                   "prop:prop_le_coco_telephone:voice", "character:Kiwilo:text", "season:0", "season:x"):
         message = _refused(store, story_id, fakes, {"target": target}, llm=llm)
         assert message.startswith(f"Cannot regenerate {target!r}: the valid targets are bible:logline, ")
         for shape in ("character:<char_id>:text", "character:<char_id>:image:portrait|turnaround|expressions",

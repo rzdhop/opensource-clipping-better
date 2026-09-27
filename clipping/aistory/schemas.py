@@ -1684,6 +1684,29 @@ SCENE_TIME_VARIANT_PATTERN = TIME_VARIANT_PATTERN
 
 BODY_FUNCTIONS = ("setup", "rising", "peak", "turn")
 
+# Line ids are fixed blocks per scene: scene sNN owns l(4*NN) .. l(4*NN+3),
+# one per line a scene may hold (``maxItems`` 4). A regenerated scene keeps
+# its own block, so a line id never moves to another scene and the audio
+# measured for one line (``assets/voice/line_NN.*``) can never be taken for
+# another's. s00 -> l00-l03, s01 -> l04-l07, ..., s12 -> l48-l51.
+LINES_PER_SCENE_BLOCK = 4
+_LAST_BLOCK_SCENE = 24  # l96-l99: the last block two digits can hold
+
+
+def line_id_for(scene_id, k) -> str:
+    """The id of line *k* (0-based) of scene *scene_id*: ``l{4 * NN + k:02d}``.
+    ``ValueError`` for a malformed scene id, a *k* outside 0..3, or a scene
+    past s24 (whose block no longer fits two digits)."""
+    if not (isinstance(scene_id, str) and len(scene_id) == 3 and scene_id[0] == "s"
+            and scene_id[1:].isascii() and scene_id[1:].isdigit()):
+        raise ValueError(f"not a scene id: {scene_id!r}")
+    number = int(scene_id[1:])
+    if type(k) is not int or not 0 <= k < LINES_PER_SCENE_BLOCK:
+        raise ValueError(f"a scene holds lines 0..{LINES_PER_SCENE_BLOCK - 1}, not {k!r}")
+    if number > _LAST_BLOCK_SCENE:
+        raise ValueError(f"scene {scene_id!r} has no two-digit line block")
+    return f"l{LINES_PER_SCENE_BLOCK * number + k:02d}"
+
 _EPISODE_SCRIPT_LINE_TIMING_SCHEMA = _document({
     "source": {"type": "string", "enum": ["estimated", "tts_word_timestamps", "audio_duration_only"]},
     "duration_s": {"type": "number", "minimum": 0},
@@ -1850,21 +1873,23 @@ def episode_script_errors(doc) -> list:
             if functions[i] not in BODY_FUNCTIONS:
                 errors.append(f"$.scenes[{i}].function: {functions[i]!r} is not a body function {BODY_FUNCTIONS}")
 
-    line_number = None
     for scene in scenes:
         chars = set(scene["characters"])
         line_ids = {line["line_id"] for line in scene["lines"]}
-        for line in scene["lines"]:
+        for k, line in enumerate(scene["lines"]):
             line_id = line["line_id"]
-            if line_id == "l00" and scene["function"] != "recap":
-                errors.append(f"$.scenes[{scene['scene_id']}].lines: 'l00' is only allowed in a recap scene")
-            n = int(line_id[1:])
-            if line_number is None:
-                if n not in (0, 1):
-                    errors.append(f"$.scenes: the first line id is {line_id!r}, expected 'l00' or 'l01'")
-            elif n <= line_number:
-                errors.append(f"$.scenes: line id {line_id!r} does not strictly increase after 'l{line_number:02d}'")
-            line_number = n
+            # Each scene's lines use its own block, in order (line_id_for):
+            # unique and increasing in reading order follow from it.
+            try:
+                expected = line_id_for(scene["scene_id"], k)
+            except ValueError as exc:
+                errors.append(f"$.scenes[{scene['scene_id']}].lines[{k}].line_id: {exc}")
+            else:
+                if line_id != expected:
+                    errors.append(
+                        f"$.scenes[{scene['scene_id']}].lines[{k}].line_id: {line_id!r}, expected {expected!r} "
+                        f"(line {k + 1} of scene {scene['scene_id']}'s block)"
+                    )
 
             speaker = line["speaker"]
             if speaker != "narrator" and speaker not in chars:

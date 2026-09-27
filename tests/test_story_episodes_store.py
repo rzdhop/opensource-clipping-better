@@ -77,7 +77,7 @@ def _script(ep=1, **changes):
         "$schema": "episode_script_v1", "ep": ep, "title": "Test Episode", "language": "fr",
         "template_id": "serial_60s_v1",
         "hook": {"on_screen_text": None},
-        "scenes": [_scene("s01", "hook", "l01"), _scene("s02", "cliffhanger", "l02")],
+        "scenes": [_scene("s01", "hook", "l04"), _scene("s02", "cliffhanger", "l08")],
         "cliffhanger": {"scene_id": "s02", "reveal": None, "cut_to_black": True},
         "next_episode_teaser": None, "timing": None, "consistency_report": None,
         "approved_anyway": None, "approved_at": None, "rev": 1,
@@ -105,7 +105,7 @@ def _storyboard(ep=1, **changes):
     """A minimal valid storyboard_v1: one shot per scene of ``_script()``."""
     doc = {
         "$schema": "storyboard_v1", "ep": ep,
-        "shots": [_shot(1, "s01", "l01"), _shot(2, "s02", "l02")],
+        "shots": [_shot(1, "s01", "l04"), _shot(2, "s02", "l08")],
         "transitions": [{"after": "sh01", "type": "cut", "duration_s": 0.0}],
         "scenes": {sid: {"source": "t1", "script_rev": 1, "stale": False} for sid in ("s01", "s02")},
         "resolved_from": {}, "approved_at": None, "rev": 1,

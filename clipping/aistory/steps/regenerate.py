@@ -76,6 +76,18 @@ ENTITY_TARGETS = (
 )
 TARGET_SHAPES = VALID_TARGETS + ENTITY_TARGETS
 
+# Phase 3's episode targets (``episode_regenerate.parse_episode_target``).
+# The runner takes them now; they join ``ENTITY_TARGETS`` -- the shapes the
+# web layer accepts through ``parse_target`` -- once workflow and the routes
+# check them (stage 8); until then the web layer still answers later_phase.
+EPISODE_TARGETS = (
+    "scene:<ep>:<scene_id>",
+    "hook:<ep>",
+    "cliffhanger:<ep>",
+    "teaser:<ep>",
+    "shot:<ep>:<shot_id>:plan",
+)
+
 _KINDS = {"character": CHARACTERS, "place": PLACES, "prop": PROPS}
 _EP = re.compile(r"^[1-9][0-9]{0,2}$")
 _EXTRA = re.compile(r"^extra:[0-9]+$")
@@ -91,7 +103,8 @@ def _note(params):
 
 
 def _invalid(target) -> StepFailed:
-    return StepFailed(f"Cannot regenerate {target!r}: the valid targets are {', '.join(TARGET_SHAPES)}.")
+    shapes = TARGET_SHAPES + EPISODE_TARGETS
+    return StepFailed(f"Cannot regenerate {target!r}: the valid targets are {', '.join(shapes)}.")
 
 
 def parse_target(target):
@@ -155,6 +168,13 @@ def run(ctx, *, runner=None, time_fn=time.monotonic, sleep_fn=time.sleep, adapte
 
     parsed = parse_target(target)
     if parsed is None:
+        # Imported here: the episode targets pull in the timing engine and
+        # shot resolution, which the phase-1/2 targets never need.
+        from . import episode_regenerate
+
+        episode = episode_regenerate.parse_episode_target(target)
+        if episode is not None:
+            return episode_regenerate.run(ctx, target, episode, _note(params), runner=runner, time_fn=time_fn)
         if is_extra_target(target):
             raise StepFailed(f"Cannot regenerate {target!r}: extra images arrive in a later phase.")
         raise _invalid(target)

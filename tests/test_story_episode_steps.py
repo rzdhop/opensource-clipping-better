@@ -1,0 +1,1171 @@
+"""The phase-3 step runners: ``script``, ``storyboard`` and the episode targets
+of ``regenerate`` (AI Story phase 3, stage 6; spec 3 steps 8-9, 4.2 rows
+E1-E4/T1/T1r, 9.2).
+
+Every step writes into a real ``StoryStore`` under ``tmp_path``, seeded with a
+``ready`` story shaped like the live one (``b1104ec66b05``): French, three
+characters (two leads and a recurring host), two places with a day and a
+night plate, one prop, an eight-episode season arc and a locked fruit_drama
+style. The LLM is a stand-in for ``llm.run_chain`` answering per prompt id
+from a queue (an entry is a reply, an exception, or ``f(call)`` building a
+reply from the request -- the speakers and tags a schema allows), recording
+every call; two tests drive the real ``run_chain`` through a fake client
+factory to prove which links are built. Offline and hermetic: no key, chain
+or cap of the machine reaches a test, no request leaves the process, and the
+repository's ``data/`` files and ``outputs/stories`` are fingerprinted before
+and after every test.
+
+Stdlib + pytest (the CI environment, DEC-012). The step modules are imported
+inside the tests, so on the parent commit each test fails on its own instead
+of the file failing to collect.
+"""
+
+from __future__ import annotations
+
+import copy
+import functools
+import hashlib
+import json
+import os
+import re
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from clipping.aistory import prompts, schemas, steps, stylelock, templates, timing
+from clipping.aistory.store import StoryStore
+from clipping.cancel import CancelToken, Cancelled
+from clipping.providers.errors import ProviderError
+from clipping.providers.registry import Link
+
+ROOT = Path(__file__).resolve().parents[1]
+NOW = "2026-09-27T10:00:00+00:00"
+LINK = Link("gemini", "gemini-test")
+
+CHAIN_VARS = ("LLM_CHAIN", "ALLOW_PAID", "PER_EPISODE_CAP_USD", "DAILY_CAP_USD", "PER_STORY_CAP_USD",
+              "BUDGET_PROFILE", "ALLOW_SLOW_CHAIN", "MAX_QUEUED_JOBS")
+REAL_FILES = tuple(ROOT / "data" / name for name in ("usage.json", "spend.json", "chain_test_ledger.json"))
+REAL_STORIES = (ROOT / "outputs" / "stories", ROOT / "outputs" / "stories.json")
+
+# Test values only: every request goes to a fake.
+SETTINGS = {"LLM_CHAIN": "gemini/gemini-test", "GOOGLE_API_KEY": "test-gemini-key"}
+
+KIWILO, MANGELLA, BROCCOLIA = "char_kiwilo", "char_mangella", "char_broccolia"
+PARLOIR, PISCINE = "place_le_parloir_des_secrets", "place_la_piscine_de_la_trahison"
+PHONE = "prop_telephone_en_noix_de_coco"
+NAMES = {KIWILO: "Kiwilo", MANGELLA: "Mangella", BROCCOLIA: "Broccolia"}
+BODY = ["s02", "s03", "s04", "s05", "s06", "s07"]
+ALL_SCENES = ["s01"] + BODY + ["s08"]
+
+
+def _fingerprint(path: Path):
+    if path.is_symlink() or path.exists():
+        if path.is_file():
+            return hashlib.sha256(path.read_bytes()).hexdigest()
+        return "present"
+    return None
+
+
+@pytest.fixture(autouse=True)
+def hermetic(monkeypatch, tmp_path):
+    """No key, chain, cap or limit of the machine reaches a test; no request
+    leaves the process; nothing is written outside ``tmp_path``."""
+    from clipping.config import PROVIDER_KEYS  # before the delenv: it reads .env (A-049)
+    from clipping.providers import budget, limits, llm, pacing, transport
+
+    for _name, (_attr, env_name) in PROVIDER_KEYS.items():
+        monkeypatch.delenv(env_name, raising=False)
+    for name in CHAIN_VARS:
+        monkeypatch.delenv(name, raising=False)
+    for name in list(os.environ):
+        if name.startswith("LIMIT_"):
+            monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("USAGE_PATH", str(tmp_path / "data" / "usage.json"))
+    monkeypatch.setenv("SPEND_PATH", str(tmp_path / "data" / "spend.json"))
+    limits.reset()
+    budget.reset()
+    pacing.reset_limiters()
+    llm.reset_negotiation()
+    llm.reset_model_fallbacks()
+
+    def no_network(method, url, **_kwargs):
+        raise AssertionError(f"a real request was attempted: {method} {url}")
+
+    monkeypatch.setattr(transport, "urllib_transport", no_network)
+
+    before = {path: _fingerprint(path) for path in REAL_FILES + REAL_STORIES}
+    yield
+    limits.reset()
+    budget.reset()
+    pacing.reset_limiters()
+    llm.reset_negotiation()
+    llm.reset_model_fallbacks()
+    assert {path: _fingerprint(path) for path in REAL_FILES + REAL_STORIES} == before
+
+
+@pytest.fixture
+def store(tmp_path):
+    return StoryStore(tmp_path / "outputs", on_log=lambda line: None)
+
+
+def _new():
+    """The stage-6 modules (absent on the parent commit)."""
+    from clipping.aistory.steps import episode_common, episode_regenerate, regenerate, script, storyboard
+
+    return SimpleNamespace(common=episode_common, regen=episode_regenerate, regenerate=regenerate,
+                           script=script, storyboard=storyboard)
+
+
+# ------------------------------------------------------------ the story
+
+def _image(name, consistency="base", seed=7):
+    return {"name": name, "consistency": consistency, "source": "pollinations/flux", "seed": seed,
+            "created_at": NOW}
+
+
+def _character(char_id, role, descriptor, items, *, wants, fears, speech, voice_id):
+    return {
+        "$schema": "character_v1", "char_id": char_id, "name": NAMES[char_id], "role": role,
+        "archetype": "manipulateur charmeur", "one_line": f"{NAMES[char_id]} joue pour gagner.",
+        "descriptor": descriptor, "signature_items": items,
+        "personality": {"traits": ["Manipulateur", "Charmeur"], "wants": wants, "fears": fears,
+                        "speech_style": speech},
+        "relationships": {},
+        "voice": {"provider": "edge", "voice_id": voice_id, "rate": "+0%", "pitch": "+0Hz",
+                  "direction": "over-acted telenovela delivery", "sample_line": "Moi, mentir ? Jamais."},
+        "voice_hints": None,
+        "refs": {"portrait": _image("portrait.jpg"), "turnaround": None, "expressions": None, "extra": [],
+                 "uploads": []},
+        "ref_seed": 7, "prompt_block": f"{descriptor}.",
+        "state": {"alive": True, "location": None, "arc_notes": []},
+        "source": "sketch", "approved_at": NOW, "created_at": NOW, "updated_at": NOW,
+    }
+
+
+CHARACTERS = [
+    _character(KIWILO, "lead",
+               "A fuzzy, dark brown ripe kiwi fruit serving as a human-scale head, set on a human body "
+               "wearing a sharp tailored charcoal suit.",
+               ["A thin gold chain around the neck", "A sharp tailored charcoal suit"],
+               wants="Garder le pouvoir sur l'île.", fears="Être démasqué.", speech="Des phrases courtes et mielleuses.",
+               voice_id="fr-FR-HenriNeural"),
+    _character(MANGELLA, "lead",
+               "A smooth, deep red ripe mango serving as a human-scale head, set atop an elegant human body "
+               "wearing a tailored emerald green pantsuit.",
+               ["sparkling rhinestone crown hair clip", "gold statement necklace"],
+               wants="Écraser toute concurrence.", fears="Perdre le contrôle.", speech="Un ton glacial, condescendant.",
+               voice_id="fr-FR-DeniseNeural"),
+    _character(BROCCOLIA, "recurring",
+               "A dense, dark green cluster of tight broccoli florets serving as a human-scale head, set on a "
+               "human body wearing an elegant emerald velvet evening gown.",
+               ["Rhombus crystal rhinestone headband microphone", "Tailored emerald velvet evening gown"],
+               wants="Contrôler chaque élimination.", fears="Voir ses secrets révélés.", speech="Solennelle, théâtrale.",
+               voice_id="fr-FR-VivienneMultilingualNeural"),
+]
+
+
+def _place(place_id, name, descriptor, layout):
+    return {
+        "$schema": "place_v1", "place_id": place_id, "name": name, "one_line": f"{name}, sur l'île.",
+        "descriptor": descriptor, "layout_notes": layout,
+        "time_variants": {"day": _image("variant_day.jpg"), "night": _image("variant_night.jpg", "prompt_only")},
+        "prompt_block": f"{descriptor}.", "approved_at": NOW, "created_at": NOW, "updated_at": NOW,
+    }
+
+
+PLACES = [
+    _place(PARLOIR, "Le Parloir des Secrets",
+           "A dimly lit tropical wooden confession booth with a carved bamboo chair",
+           "A rustic wooden stool sits center. A hidden-camera slit is cut into the right wall."),
+    _place(PISCINE, "La Piscine de la Trahison",
+           "A luxurious turquoise swimming pool surrounded by white wooden loungers",
+           "Crystal-clear water fills the foreground. A tiki bar stands to the right."),
+]
+
+PROP = {
+    "$schema": "prop_v1", "prop_id": PHONE, "name": "Téléphone en noix de coco",
+    "one_line": "L'appareil qui annonce les éliminations.",
+    "descriptor": "A polished half coconut shell shaped like a vintage telephone with glowing flower buttons",
+    "owner_char_id": None, "image": _image("image.jpg"), "prompt_block": "A polished half coconut shell.",
+    "approved_at": NOW, "created_at": NOW, "updated_at": NOW,
+}
+
+ARC_FUNCTIONS = ["setup", "escalation", "complication", "midpoint_twist", "crisis", "climax_and_reset",
+                 "crisis", "climax_and_reset"]
+
+
+def _season(recaps=None, relationships=None):
+    return {
+        "$schema": "season_arc_v1", "episodes_planned": 8,
+        "arc": [{"ep": ep, "function": ARC_FUNCTIONS[ep - 1],
+                 "summary": f"Épisode {ep} : les alliances de l'île tremblent encore.",
+                 "open_hooks_in": [] if ep == 1 else ["Qui a volé le téléphone ?"],
+                 "open_hooks_out": ["Kiwilo va-t-il trahir Mangella ?"], "characters": [KIWILO, MANGELLA]}
+                for ep in range(1, 9)],
+        "series_memory": {"recaps": dict(recaps or {}), "open_hooks": [],
+                          "relationship_state": dict(relationships or {}), "introduced": {}},
+        "audience_feedback": [], "approved_at": NOW, "updated_at": NOW,
+    }
+
+
+def _lock():
+    draft = stylelock.build_style_lock(templates.load_style("fruit_drama"), {}, now=NOW)
+    return stylelock.lock_style(draft, now=NOW)
+
+
+def _ready_story(store, *, recaps=None, relationships=None):
+    """A French Tentafruit story whose derived status is ``ready``."""
+    story_id = store.create(language="fr", seed_text=None, style_template_id="fruit_drama", now=NOW)["story_id"]
+    concept = templates.localize_concept(
+        next(c for c in templates.load_concepts() if c["concept_id"] == "tentafruit_island"), "fr")
+
+    def setup(doc):
+        doc["concept_id"] = "tentafruit_island"
+        doc["concept"] = concept
+        doc["title"] = concept["title"]
+        doc["logline"] = concept["logline"]
+        doc["premise"] = "Chaque semaine, un couple est éliminé. Le téléphone en noix de coco annonce le vote."
+        doc["tone"] = "Sombre, cynique, satirique"
+        doc["generation_profile"]["consistency_mode"] = "prompt_only"
+        for key in ("concept", "bible", "style"):
+            doc["approvals"][key] = NOW
+
+    store.update(story_id, setup, now=NOW)
+    store.write_doc(story_id, "style_lock.json", _lock(), now=NOW, validator=schemas.style_lock_errors)
+    for doc in CHARACTERS:
+        store.write_entity(story_id, "characters", copy.deepcopy(doc), now=NOW)
+    for doc in PLACES:
+        store.write_entity(story_id, "places", copy.deepcopy(doc), now=NOW)
+    store.write_entity(story_id, "props", copy.deepcopy(PROP), now=NOW)
+    store.write_doc(story_id, "season.json", _season(recaps, relationships), now=NOW)
+    store.update(story_id, lambda doc: doc["approvals"].update(season=NOW), now=NOW)
+    assert store.get(story_id)["status"] == "ready"
+    return story_id
+
+
+def _story_bytes(store, story_id):
+    return (Path(store.story_dir(story_id)) / "story.json").read_bytes()
+
+
+# ------------------------------------------------------------ the fakes
+
+class Log(list):
+    def __call__(self, line):
+        self.append(str(line))
+
+
+class Clock:
+    """A monotonic clock a fake call advances."""
+
+    def __init__(self, now=0.0):
+        self.now = now
+
+    def __call__(self):
+        return self.now
+
+
+class FakeLLM:
+    """Stands in for ``llm.run_chain``: answers each prompt id from its own
+    queue (or, with ``default``, a builder for every call of that id),
+    records every call as a dict of its kwargs plus ``prompt``. An entry is a
+    reply, an exception to raise, or ``f(call)`` returning either. *clock*
+    and *advance*: each call moves the clock on."""
+
+    def __init__(self, *, clock=None, advance=0.0, default=None, **queues):
+        self.queues = {prompt: list(replies) for prompt, replies in queues.items()}
+        self.default = dict(default or {})
+        self.calls = []
+        self.clock = clock
+        self.advance = advance
+        self._ids = {name: prompt for prompt, name in prompts.SCHEMA_NAMES.items()}
+
+    def __call__(self, chain, **kwargs):
+        prompt = self._ids[kwargs["schema_name"]]
+        call = dict(kwargs, chain=list(chain), prompt=prompt)
+        self.calls.append(call)
+        if self.clock is not None:
+            self.clock.now += self.advance
+        queue = self.queues.get(prompt) or []
+        if queue:
+            reply = queue.pop(0)
+        elif prompt in self.default:
+            reply = self.default[prompt]
+        else:
+            raise AssertionError(f"no {prompt} reply queued (call {len(self.calls)})")
+        if callable(reply) and not isinstance(reply, BaseException):
+            reply = reply(call)
+        if isinstance(reply, BaseException):
+            raise reply
+        return copy.deepcopy(reply), LINK
+
+    def prompts(self):
+        return [call["prompt"] for call in self.calls]
+
+    def of(self, prompt):
+        return [call for call in self.calls if call["prompt"] == prompt]
+
+
+def _stub(function, place, variant, characters, props, summary, emotion, target):
+    return {"function": function, "place_id": place, "time_variant": variant, "characters": characters,
+            "props": props, "summary": summary, "emotion": emotion, "target_duration_s": target}
+
+
+E1_REPLY = {
+    "title": "Le coco sonne deux fois",
+    "scenes": [
+        _stub("hook", PARLOIR, "day", [KIWILO, MANGELLA], [PHONE], "Le téléphone en noix de coco sonne au parloir.",
+              "shocked", 2.5),
+        _stub("setup", PARLOIR, "day", [KIWILO, MANGELLA], [], "Kiwilo propose à Mangella une alliance secrète.",
+              "scheming", 6.0),
+        _stub("rising", PISCINE, "day", [MANGELLA, BROCCOLIA], [], "Broccolia interroge Mangella au bord de l'eau.",
+              "tension", 6.0),
+        _stub("peak", PISCINE, "day", [KIWILO, MANGELLA, BROCCOLIA], [PHONE],
+              "Le téléphone annonce un vote surprise.", "shocked", 7.0),
+        _stub("turn", PARLOIR, "night", [KIWILO], [], "Kiwilo avoue son plan à la caméra cachée.", "scheming", 5.0),
+        _stub("rising", PISCINE, "night", [MANGELLA, KIWILO], [], "Mangella découvre le mensonge de Kiwilo.",
+              "angry", 6.0),
+        _stub("turn", PISCINE, "night", [BROCCOLIA, MANGELLA], [], "Broccolia offre un marché à Mangella.",
+              "tension", 5.0),
+        _stub("cliffhanger", PARLOIR, "night", [KIWILO, MANGELLA, BROCCOLIA], [PHONE],
+              "Le téléphone désigne Kiwilo.", "shocked", 3.0),
+    ],
+}
+
+
+def _speakers(call):
+    return call["schema"]["properties"]["lines"]["items"]["properties"]["speaker"]["enum"]
+
+
+def e2_reply(call, *, text="Tu crois vraiment que je vais te suivre ?"):
+    speakers = _speakers(call)
+    return {
+        "lines": [
+            {"speaker": speakers[0], "text": text, "emotion": "tension", "delivery": "low and sharp"},
+            {"speaker": speakers[-1], "text": "Tu n'as pas le choix, chérie.", "emotion": "scheming",
+             "delivery": "smug whisper"},
+        ],
+        "sfx_cues": [{"at": "start", "cue": "dramatic_sting"}, {"at": "2", "cue": "gasp_crowd"}],
+        "on_screen_text": None,
+    }
+
+
+def e2_wrong_speaker(call):
+    """A reply whose speaker is not one the scene allows."""
+    reply = e2_reply(call)
+    others = [cid for cid in NAMES if cid not in _speakers(call)]
+    reply["lines"][0]["speaker"] = others[0]
+    return reply
+
+
+HOOK_PART = {"lines": [{"speaker": KIWILO, "text": "Ce soir, quelqu'un quitte l'île.", "emotion": "shocked",
+                        "delivery": "breathless"}],
+             "on_screen_text": "Vote surprise ce soir"}
+CLIFF_PART = {"reveal": "Le téléphone affiche le nom de Kiwilo.",
+              "lines": [{"speaker": MANGELLA, "text": "C'est toi, Kiwilo.", "emotion": "shocked", "delivery": "cold"}]}
+TEASER = "Demain, Kiwilo joue sa dernière carte."
+E3_FULL = {"hook": HOOK_PART, "cliffhanger": CLIFF_PART, "teaser": TEASER}
+E4_PASSED = {"passed": True, "issues": []}
+E4_ISSUES = {"passed": False, "issues": [
+    {"scene_id": "s03", "kind": "character", "fix": "Broccolia parle trop gentiment ici."},
+    {"scene_id": None, "kind": "continuity", "fix": "Le vote surprise n'est jamais expliqué."},
+]}
+
+
+def _script_llm(**overrides):
+    queues = {"E1": [E1_REPLY], "E2": [e2_reply] * len(BODY), "E3": [E3_FULL], "E4": [E4_ISSUES]}
+    queues.update(overrides)
+    return FakeLLM(**queues)
+
+
+def _numbered_lines(user):
+    block = user.split("Numbered lines:\n", 1)[1].split("\n\n", 1)[0]
+    return len(re.findall(r"^\d+\. ", block, flags=re.M))
+
+
+def t1_reply(call):
+    tags = call["schema"]["properties"]["shots"]["items"]["properties"]["subjects"]["items"]["enum"]
+    place = next(tag for tag in tags if tag.startswith("#"))
+    chars = [tag for tag in tags if tag.startswith("@")]
+    who = chars or [place]
+    n = _numbered_lines(call["user"])
+    return {"shots": [
+        {"framing": "wide_establishing", "camera_motion": "pan_lr", "modifiers": [],
+         "action": f"Wide view of {place}.", "subjects": [place], "lines": []},
+        {"framing": "medium_two_shot" if len(chars) > 1 else "medium_single", "camera_motion": "push_in",
+         "modifiers": [], "action": " and ".join(who) + " face each other.", "subjects": who,
+         "lines": list(range(1, n + 1))},
+    ]}
+
+
+def t1r_reply(call):
+    """The replaced shot's own framing and lines, a new action."""
+    tags = call["schema"]["properties"]["shot"]["properties"]["subjects"]["items"]["enum"]
+    who = next((tag for tag in tags if tag.startswith("@")), None) or next(tag for tag in tags if tag.startswith("#"))
+    replaced = re.search(r"- shot \d+ <- replace this one: ([a-z_]+) / ([a-z_]+), lines (.*)$", call["user"], re.M)
+    lines = [] if replaced.group(3) == "none" else json.loads(replaced.group(3))
+    return {"shot": {"framing": replaced.group(1), "camera_motion": replaced.group(2), "modifiers": [],
+                     "action": f"{who} leans in, whispering a secret.", "subjects": [who], "lines": lines}}
+
+
+def _ctx(store, story_id, *, step="script", ep=1, params=None, settings=None):
+    log = Log()
+    ctx = steps.StepContext(
+        job_id="job000000001", story_id=story_id, step=step, ep=ep, params=params or {},
+        cancel=CancelToken(), settings_env=dict(SETTINGS if settings is None else settings),
+        outputs_dir=store.outputs_dir, on_log=log,
+    )
+    return ctx, log
+
+
+def _run(module, store, story_id, *, llm, step="script", ep=1, params=None, settings=None, clock=None):
+    ctx, log = _ctx(store, story_id, step=step, ep=ep, params=params, settings=settings)
+    clock = clock or Clock(100.0)
+    return module.run(ctx, runner=llm, time_fn=clock), log
+
+
+def _failed(module, store, story_id, *, llm, step="script", ep=1, params=None, settings=None, clock=None):
+    ctx, log = _ctx(store, story_id, step=step, ep=ep, params=params, settings=settings)
+    clock = clock or Clock(100.0)
+    with pytest.raises(steps.StepFailed) as caught:
+        module.run(ctx, runner=llm, time_fn=clock)
+    return str(caught.value), log
+
+
+def _regenerate(store, story_id, target, *, llm, note=None):
+    m = _new()
+    return _run(m.regenerate, store, story_id, llm=llm, step="regenerate", ep=None,
+                params={"target": target, "note": note})
+
+
+def _script(store, story_id, ep=1):
+    return store.read_episode_doc(story_id, ep, "script.json")
+
+
+def _storyboard(store, story_id, ep=1):
+    return store.read_episode_doc(story_id, ep, "storyboard.json")
+
+
+def _context_errors(store, story_id, script):
+    lock = store.read_doc(story_id, "style_lock.json")
+    places = {doc["place_id"]: list(doc["time_variants"]) for doc in PLACES}
+    return schemas.episode_script_context_errors(
+        script, cast_ids=list(NAMES), places=places, prop_ids=[PHONE], sfx_cues=lock["audio"]["sfx_cues"],
+        narrator_enabled=False, max_places=lock["episode_defaults"]["max_places"])
+
+
+def _written_script(store):
+    """A ready story with its episode 1 fully written (E4 found two issues)."""
+    m = _new()
+    story_id = _ready_story(store)
+    _run(m.script, store, story_id, llm=_script_llm())
+    return story_id
+
+
+def _scene(script, sid):
+    return next(scene for scene in script["scenes"] if scene["scene_id"] == sid)
+
+
+# ================================================================== script
+
+def test_a_full_script_is_one_e1_one_e2_per_body_scene_one_e3_and_one_e4(store):
+    m = _new()
+    story_id = _ready_story(store)
+    before = _story_bytes(store, story_id)
+    llm = _script_llm()
+
+    summary, log = _run(m.script, store, story_id, llm=llm)
+
+    assert llm.prompts() == ["E1"] + ["E2"] * len(BODY) + ["E3", "E4"]
+    script = _script(store, story_id)
+    assert schemas.episode_script_errors(script) == []
+    assert _context_errors(store, story_id, script) == []
+    assert [scene["scene_id"] for scene in script["scenes"]] == ALL_SCENES
+    assert all(scene["state"] == "written" for scene in script["scenes"])
+    assert [scene["source"] for scene in script["scenes"]] == ["E3"] + ["E2"] * len(BODY) + ["E3"]
+    for scene in script["scenes"]:
+        assert [line["line_id"] for line in scene["lines"]] == [
+            schemas.line_id_for(scene["scene_id"], k) for k in range(len(scene["lines"]))]
+        assert all(line["timing"]["source"] == "estimated" for line in scene["lines"])
+    s02 = _scene(script, "s02")
+    assert [line["line_id"] for line in s02["lines"]] == ["l08", "l09"]
+    assert s02["sfx_cues"] == [{"at": "start", "cue": "dramatic_sting"}, {"at": "l09", "cue": "gasp_crowd"}]
+    assert s02["target_duration_s"] == 6.0 and s02["rev"] == 1
+    assert script["title"] == E1_REPLY["title"]
+    assert script["hook"] == {"on_screen_text": "Vote surprise ce soir"}
+    assert _scene(script, "s01")["lines"][0]["line_id"] == "l04"
+    assert script["cliffhanger"] == {"scene_id": "s08", "reveal": CLIFF_PART["reveal"], "cut_to_black": False}
+    assert [line["line_id"] for line in _scene(script, "s08")["lines"]] == ["l32"]
+    assert script["next_episode_teaser"] == TEASER
+    report = script["consistency_report"]
+    assert report["passed"] is False and report["checked_rev"] == script["rev"] and report["stale"] is False
+    assert report["issues"] == E4_ISSUES["issues"]
+    assert script["timing"] == timing.episode_timing(script, templates.load_episode_template("serial_60s_v1"),
+                                                     "fr", style_lock=store.read_doc(story_id, "style_lock.json"))
+    assert script["approved_at"] is None and script["created_at"] and script["rev"] == 1
+    assert summary["ep"] == 1 and summary["scenes"] == len(ALL_SCENES)
+    # The house style's progress lines.
+    assert "🎬 Episode 1: beat sheet (E1)" in log
+    assert "📝 Scene 2 of 8 (s02, setup)" in log
+    assert any(line.startswith("⏱ ") and "estimated" in line for line in log)
+    assert "🔍 Consistency: 2 issues" in log
+    assert sum(line.startswith("✍️ E2 via gemini/gemini-test") for line in log) == len(BODY)
+    # E2 was given its word budget, the outline and the previous scene's last line.
+    second = llm.of("E2")[1]["user"]
+    assert "Episode outline:" in second and "Previous scene: Kiwilo propose" in second
+    assert "Its last line -- Mangella: Tu n'as pas le choix, chérie." in second
+    assert "Keep the scene's total dialogue within" in second
+    # RC-E2: the story itself is never touched.
+    assert _story_bytes(store, story_id) == before
+
+
+def test_the_script_is_written_after_every_accepted_call(store):
+    m = _new()
+    story_id = _ready_story(store)
+    seen = []
+
+    def spy(prompt, reply):
+        def answer(call):
+            seen.append((prompt, _script(store, story_id)))
+            return reply(call) if callable(reply) else reply
+        return answer
+
+    llm = FakeLLM(E1=[spy("E1", E1_REPLY)], E2=[spy("E2", e2_reply) for _ in BODY], E3=[spy("E3", E3_FULL)],
+                  E4=[spy("E4", E4_PASSED)])
+    _run(m.script, store, story_id, llm=llm)
+
+    assert seen[0] == ("E1", None)
+    # Before each E2, every body scene before it is already on disk.
+    for index, (prompt, doc) in enumerate(seen[1:1 + len(BODY)]):
+        assert prompt == "E2"
+        written = [s["scene_id"] for s in doc["scenes"] if s["state"] == "written"]
+        assert written == BODY[:index]
+    assert seen[-2][0] == "E3"
+    assert [s["scene_id"] for s in seen[-2][1]["scenes"] if s["state"] == "written"] == BODY
+    assert seen[-1][1]["next_episode_teaser"] == TEASER and seen[-1][1]["consistency_report"] is None
+
+
+def test_a_failed_e2_keeps_every_other_scene_and_a_rerun_writes_only_that_scene(store):
+    m = _new()
+    story_id = _ready_story(store)
+    before = _story_bytes(store, story_id)
+    queue = [e2_reply, e2_reply, ProviderError("every provider failed", [("gemini/gemini-test", "HTTP 503")]),
+             e2_reply, e2_reply, e2_reply]
+    llm = _script_llm(E2=queue)
+
+    message, log = _failed(m.script, store, story_id, llm=llm)
+
+    assert llm.prompts() == ["E1"] + ["E2"] * len(BODY) + ["E3"]
+    assert "scene:1:s04" in message and "HTTP 503" in message
+    assert "✖ Scene s04 failed" in "\n".join(log)
+    script = _script(store, story_id)
+    assert schemas.episode_script_errors(script) == []
+    assert _scene(script, "s04")["state"] == "stub" and _scene(script, "s04")["lines"] == []
+    assert all(_scene(script, sid)["state"] == "written" for sid in ALL_SCENES if sid != "s04")
+    assert script["consistency_report"] is None  # E4 checks a complete script only
+
+    again = _script_llm(E1=[], E3=[], E4=[E4_PASSED])
+    _run(m.script, store, story_id, llm=again)
+
+    assert again.prompts() == ["E2", "E4"]
+    assert "Scene (peak, emotion: shocked): Le téléphone annonce un vote surprise." in again.of("E2")[0]["user"]
+    script = _script(store, story_id)
+    assert all(scene["state"] == "written" for scene in script["scenes"])
+    assert script["consistency_report"]["passed"] is True
+    assert _story_bytes(store, story_id) == before
+
+
+def test_a_complete_rerun_makes_no_call(store):
+    m = _new()
+    story_id = _written_script(store)
+    first = _script(store, story_id)
+    llm = FakeLLM()
+
+    _run(m.script, store, story_id, llm=llm)
+
+    assert llm.calls == []
+    second = _script(store, story_id)
+    assert {k: v for k, v in second.items() if k != "updated_at"} == {
+        k: v for k, v in first.items() if k != "updated_at"}
+
+
+def test_a_stale_report_is_checked_again_and_nothing_else_is_asked(store):
+    m = _new()
+    story_id = _written_script(store)
+    script = _script(store, story_id)
+    script["consistency_report"]["stale"] = True
+    store.write_episode_doc(story_id, 1, "script.json", script, now=NOW)
+    llm = FakeLLM(E4=[E4_PASSED])
+
+    _run(m.script, store, story_id, llm=llm)
+
+    assert llm.prompts() == ["E4"]
+    report = _script(store, story_id)["consistency_report"]
+    assert report == {"passed": True, "issues": [], "checked_rev": 1, "checked_at": report["checked_at"],
+                      "stale": False}
+
+
+def test_a_report_of_an_older_revision_is_checked_again(store):
+    m = _new()
+    story_id = _written_script(store)
+    script = _script(store, story_id)
+    script["rev"] = 2
+    store.write_episode_doc(story_id, 1, "script.json", script, now=NOW)
+    llm = FakeLLM(E4=[E4_PASSED])
+
+    _run(m.script, store, story_id, llm=llm)
+
+    assert llm.prompts() == ["E4"]
+    assert _script(store, story_id)["consistency_report"]["checked_rev"] == 2
+
+
+def test_the_step_budget_refuses_a_call_that_could_not_finish_and_a_rerun_completes(store):
+    m = _new()
+    story_id = _ready_story(store)
+    clock = Clock(0.0)
+    llm = _script_llm(E3=[], E4=[])
+    llm.clock, llm.advance = clock, 300.0
+
+    message, log = _failed(m.script, store, story_id, llm=llm, clock=clock)
+
+    # Calls start at 0, 300, ..., 1500 (1500 + 300 = 1800 fits); the 7th would
+    # start at 1800 and could not finish inside 1800 s: it is never started.
+    assert llm.prompts() == ["E1"] + ["E2"] * 5
+    assert "30-minute" in message and "run the step again to continue" in message
+    assert "s07" in message and "consistency check" in message
+    script = _script(store, story_id)
+    assert schemas.episode_script_errors(script) == []
+    assert [s["scene_id"] for s in script["scenes"] if s["state"] == "written"] == BODY[:5]
+
+    clock2 = Clock(0.0)
+    again = FakeLLM(E2=[e2_reply], E3=[E3_FULL], E4=[E4_PASSED], clock=clock2, advance=300.0)
+    _run(m.script, store, story_id, llm=again, clock=clock2)
+
+    assert again.prompts() == ["E2", "E3", "E4"]
+    assert all(scene["state"] == "written" for scene in _script(store, story_id)["scenes"])
+
+
+def test_the_budget_counts_from_the_start_of_the_step(store):
+    m = _new()
+    Budget = m.common.Budget
+    clock = Clock(50.0)
+    budget = Budget(clock)
+    clock.now = 50.0 + m.common.EPISODE_STEP_BUDGET_SECONDS - 300
+    budget.before_call(lambda: "the consistency check")  # exactly fits
+    clock.now += 0.001
+    with pytest.raises(steps.StepFailed) as caught:
+        budget.before_call(lambda: "the consistency check")
+    assert "Left: the consistency check." in str(caught.value)
+
+
+def test_a_cancel_between_calls_leaves_a_valid_partial_script(store):
+    m = _new()
+    story_id = _ready_story(store)
+    ctx, log = _ctx(store, story_id)
+
+    def cancel_after(call):
+        ctx.cancel.cancel()
+        return e2_reply(call)
+
+    llm = FakeLLM(E1=[E1_REPLY], E2=[e2_reply, cancel_after])
+    with pytest.raises(Cancelled):
+        m.script.run(ctx, runner=llm, time_fn=Clock(100.0))
+
+    assert llm.prompts() == ["E1", "E2", "E2"]
+    script = _script(store, story_id)
+    assert schemas.episode_script_errors(script) == []
+    assert [s["scene_id"] for s in script["scenes"] if s["state"] == "written"] == ["s02", "s03"]
+
+
+def test_an_e2_speaker_outside_the_scene_is_asked_again_once_then_fails_locally(store):
+    m = _new()
+    story_id = _ready_story(store)
+    # s05 has Kiwilo alone; both replies make Mangella speak.
+    queue = [e2_reply, e2_reply, e2_reply, e2_wrong_speaker, e2_wrong_speaker, e2_reply, e2_reply]
+    llm = _script_llm(E2=queue)
+
+    message, log = _failed(m.script, store, story_id, llm=llm)
+
+    assert llm.prompts() == ["E1"] + ["E2"] * 7 + ["E3"]
+    assert _speakers(llm.of("E2")[3]) == [KIWILO]
+    assert any(line.startswith("⚠️ E2 reply rejected") for line in log)
+    assert "scene:1:s05" in message and "failed validation twice" in message
+    script = _script(store, story_id)
+    assert _scene(script, "s05")["state"] == "stub"
+    assert _scene(script, "s06")["state"] == "written"
+
+
+def test_a_body_scene_nobody_can_speak_in_is_written_silent_without_a_call(store):
+    m = _new()
+    story_id = _ready_story(store)
+    e1 = copy.deepcopy(E1_REPLY)
+    e1["scenes"][4]["characters"] = []  # s05: nobody there, and no narrator
+    llm = _script_llm(E1=[e1], E2=[e2_reply] * (len(BODY) - 1))
+
+    _, log = _run(m.script, store, story_id, llm=llm)
+
+    assert llm.prompts() == ["E1"] + ["E2"] * (len(BODY) - 1) + ["E3", "E4"]
+    s05 = _scene(_script(store, story_id), "s05")
+    assert s05["state"] == "written" and s05["lines"] == [] and s05["source"] == "E2"
+    assert any("s05" in line and "no one can speak" in line for line in log)
+
+
+def test_episode_2_waits_for_the_recap_of_episode_1(store):
+    m = _new()
+    story_id = _ready_story(store)
+    llm = FakeLLM()
+
+    message, _ = _failed(m.script, store, story_id, llm=llm, ep=2)
+
+    assert "recap" in message and "phase 5" in message and "memory" in message
+    assert llm.calls == []
+    assert store.list_episodes(story_id) == []
+
+
+def test_episode_2_with_the_recap_asks_for_a_recap_scene(store):
+    m = _new()
+    # series_memory in its spec-2.6 shape: recaps by "epNN", relationships by "<char_a>|<char_b>".
+    story_id = _ready_story(store, recaps={"ep01": "Kiwilo et Mangella se sont alliés en secret."},
+                            relationships={f"{KIWILO}|{MANGELLA}": "publiquement ennemis, secrètement alliés"})
+    e1 = copy.deepcopy(E1_REPLY)
+    e1["scenes"].insert(0, _stub("recap", PARLOIR, "day", [KIWILO], [], "Ce qui s'est passé au parloir.",
+                                 "tension", 2.5))
+    e3 = dict(E3_FULL, recap={"lines": [{"speaker": KIWILO, "text": "Hier, tout a basculé.", "emotion": "tension",
+                                          "delivery": "hushed"}], "on_screen_text": None})
+    llm = _script_llm(E1=[e1], E3=[e3], E4=[E4_PASSED])
+
+    _run(m.script, store, story_id, llm=llm, ep=2)
+
+    script = _script(store, story_id, 2)
+    assert [s["scene_id"] for s in script["scenes"]][:2] == ["s00", "s01"]
+    assert [line["line_id"] for line in _scene(script, "s00")["lines"]] == ["l00"]
+    assert "in this order: recap, hook, setup/rising/peak/turn" in llm.of("E1")[0]["user"]
+    # The recap of episode 1 is read by its spec key, "ep01".
+    assert "Previous recap: Kiwilo et Mangella se sont alliés en secret." in llm.of("E1")[0]["user"]
+    assert "Episode 1 recap: Kiwilo et Mangella se sont alliés en secret." in llm.of("E4")[0]["user"]
+    relationship = f"Relationships: {KIWILO}/{MANGELLA}: publiquement ennemis, secrètement alliés"
+    assert all(relationship in llm.of(prompt)[0]["user"] for prompt in ("E1", "E3", "E4"))
+    assert llm.of("E3")[0]["schema"]["required"] == ["recap", "hook", "cliffhanger", "teaser"]
+
+
+@pytest.mark.parametrize("ep", [0, 9, None])
+def test_an_episode_outside_the_season_is_refused(store, ep):
+    m = _new()
+    story_id = _ready_story(store)
+    llm = FakeLLM()
+
+    message, _ = _failed(m.script, store, story_id, llm=llm, ep=ep)
+
+    assert "1 to 8" in message
+    assert llm.calls == []
+
+
+def test_a_story_that_is_not_ready_is_refused(store):
+    m = _new()
+    story_id = _ready_story(store)
+    store.update(story_id, lambda doc: doc["approvals"].update(season=None), now=NOW)
+    llm = FakeLLM()
+
+    message, _ = _failed(m.script, store, story_id, llm=llm)
+
+    assert "ready" in message and "season" in message.lower()
+    assert llm.calls == []
+
+
+def test_a_paid_link_is_never_called_and_a_keyless_one_never_built(store):
+    """DEC-115's mirror on the script step: groq has no key, openrouter is
+    paid while allow_paid is off; only gemini is ever built."""
+    from clipping.providers import llm as llm_mod
+
+    m = _new()
+    story_id = _ready_story(store)
+    settings = {"LLM_CHAIN": "groq/groq-test,gemini/gemini-test,openrouter/test-model",
+                "GOOGLE_API_KEY": "test-gemini-key", "OPENROUTER_API_KEY": "test-openrouter-key"}
+    replies = {"E1": lambda call: E1_REPLY, "E2": e2_reply, "E3": lambda call: E3_FULL,
+               "E4": lambda call: E4_PASSED}
+    names = {name: prompt for prompt, name in prompts.SCHEMA_NAMES.items()}
+    constructed = []
+
+    class Completions:
+        def __init__(self, provider):
+            self.provider = provider
+
+        def create(self, **kwargs):
+            spec = kwargs["response_format"]["json_schema"]
+            call = {"schema": spec["schema"], "user": kwargs["messages"][-1]["content"]}
+            content = json.dumps(replies[names[spec["name"]]](call), ensure_ascii=False)
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
+                                   usage=SimpleNamespace(total_tokens=120))
+
+    def factory(link, **kwargs):
+        constructed.append(link.provider)
+        return SimpleNamespace(chat=SimpleNamespace(completions=Completions(link.provider)))
+
+    def no_sleep(seconds):
+        raise AssertionError(f"the chain tried to sleep {seconds}s")
+
+    runner = functools.partial(llm_mod.run_chain, client_factory=factory, sleep_fn=no_sleep)
+    ctx, log = _ctx(store, story_id, settings=settings)
+    m.script.run(ctx, runner=runner)
+
+    assert constructed == ["gemini"] * (len(BODY) + 3)
+    assert log.count("   ⏭ Skipping openrouter/test-model: paid link, allow_paid is off "
+                     "(AI Story spends only on opt-in).") == len(BODY) + 3
+    assert _script(store, story_id)["consistency_report"]["passed"] is True
+
+
+def test_a_chain_whose_only_keyed_link_is_paid_sends_nothing(store):
+    from clipping.providers import llm as llm_mod
+
+    m = _new()
+    story_id = _ready_story(store)
+    constructed = []
+
+    def factory(link, **kwargs):
+        constructed.append(link.provider)
+        raise AssertionError("no client may be built")
+
+    settings = {"LLM_CHAIN": "gemini/gemini-test,openrouter/test-model", "OPENROUTER_API_KEY": "test-openrouter-key"}
+    runner = functools.partial(llm_mod.run_chain, client_factory=factory)
+    message, _ = _failed(m.script, store, story_id, llm=runner, settings=settings)
+
+    assert constructed == []
+    assert "allow_paid is off" in message and "GOOGLE_API_KEY" in message
+    assert store.list_episodes(story_id) == []
+
+
+# ============================================================== storyboard
+
+def test_the_storyboard_needs_a_complete_script(store):
+    m = _new()
+    story_id = _ready_story(store)
+    llm = _script_llm(E2=[e2_reply, e2_reply, ProviderError("down"), e2_reply, e2_reply, e2_reply])
+    _failed(m.script, store, story_id, llm=llm)
+
+    message, _ = _failed(m.storyboard, store, story_id, llm=FakeLLM(), step="storyboard")
+    assert "scene s04 not written yet" in message and "run the script step again" in message
+    with pytest.raises(steps.StepFailed):
+        m.storyboard.build_fast(store, story_id, 1, now=NOW, on_log=Log())
+
+
+def test_the_fast_storyboard_makes_no_call_and_validates(store):
+    m = _new()
+    story_id = _written_script(store)
+    before = _story_bytes(store, story_id)
+    log = Log()
+
+    board = m.storyboard.build_fast(store, story_id, 1, now=NOW, on_log=log)
+
+    assert board == _storyboard(store, story_id)
+    script = _script(store, story_id)
+    lock = store.read_doc(story_id, "style_lock.json")
+    template = templates.load_episode_template("serial_60s_v1")
+    assert schemas.storyboard_errors(board, min_shot_s=template["min_shot_s"]) == []
+    assert schemas.storyboard_context_errors(board, script,
+                                             shots_per_scene=lock["episode_defaults"]["shots_per_scene"]) == []
+    assert sorted(board["scenes"]) == ALL_SCENES
+    assert {entry["source"] for entry in board["scenes"].values()} == {"fast"}
+    # The script is re-timed with the storyboard's own transitions; its revision does not move.
+    assert script["timing"] == timing.episode_timing(script, template, "fr", style_lock=lock, storyboard=board)
+    assert script["rev"] == 1
+    assert any(line.startswith("🎞 Storyboard:") for line in log)
+    for shot in board["shots"]:
+        for name in list(NAMES.values()) + [p["name"] for p in PLACES]:
+            assert name not in shot["image_prompt"]
+    assert _story_bytes(store, story_id) == before
+
+
+def test_a_storyboard_never_touches_the_scripts_approval_or_revision(store):
+    m = _new()
+    story_id = _written_script(store)
+    script = _script(store, story_id)
+    script["approved_at"] = NOW
+    store.write_episode_doc(story_id, 1, "script.json", script, now=NOW)
+
+    m.storyboard.build_fast(store, story_id, 1, now=NOW, on_log=Log())
+    _run(m.storyboard, store, story_id, llm=FakeLLM(default={"T1": t1_reply}), step="storyboard")
+    _regenerate(store, story_id, "shot:1:sh02:plan", llm=FakeLLM(T1r=[t1r_reply]))
+
+    after = _script(store, story_id)
+    assert after["approved_at"] == NOW and after["rev"] == 1
+    assert after["scenes"] == script["scenes"] and after["consistency_report"] == script["consistency_report"]
+
+
+def test_the_t1_storyboard_is_one_call_per_scene(store):
+    m = _new()
+    story_id = _written_script(store)
+    before = _story_bytes(store, story_id)
+    llm = FakeLLM(default={"T1": t1_reply})
+
+    summary, log = _run(m.storyboard, store, story_id, llm=llm, step="storyboard")
+
+    assert llm.prompts() == ["T1"] * len(ALL_SCENES)
+    board = _storyboard(store, story_id)
+    assert {entry["source"] for entry in board["scenes"].values()} == {"t1"}
+    assert sorted(board["scenes"]) == ALL_SCENES
+    assert all(not entry["stale"] for entry in board["scenes"].values())
+    # T1 for a scene is shown the two shots planned before it.
+    assert "Previous shots:" not in llm.calls[0]["user"]
+    assert "Previous shots:\n- wide_establishing / pan_lr\n- medium_two_shot / push_in" in llm.calls[1]["user"]
+    assert summary["planned"] == ALL_SCENES
+    assert _story_bytes(store, story_id) == before
+
+
+def test_a_t1_run_replans_only_what_is_fast_and_a_complete_rerun_makes_no_call(store):
+    m = _new()
+    story_id = _written_script(store)
+    m.storyboard.build_fast(store, story_id, 1, now=NOW, on_log=Log())
+    llm = FakeLLM(default={"T1": t1_reply})
+    _run(m.storyboard, store, story_id, llm=llm, step="storyboard")
+    assert len(llm.calls) == len(ALL_SCENES)
+
+    again = FakeLLM()
+    _run(m.storyboard, store, story_id, llm=again, step="storyboard")
+    assert again.calls == []
+
+
+def test_a_failed_t1_keeps_the_other_scenes_and_names_the_scene(store):
+    m = _new()
+    story_id = _written_script(store)
+    queue = [t1_reply, t1_reply, ProviderError("down", [("gemini/gemini-test", "HTTP 500")])] + [t1_reply] * 5
+    llm = FakeLLM(T1=queue)
+
+    message, _ = _failed(m.storyboard, store, story_id, llm=llm, step="storyboard")
+
+    assert "s03" in message and "run the storyboard step again" in message
+    board = _storyboard(store, story_id)
+    assert sorted(board["scenes"]) == [sid for sid in ALL_SCENES if sid != "s03"]
+    again = FakeLLM(T1=[t1_reply])
+    _run(m.storyboard, store, story_id, llm=again, step="storyboard")
+    assert again.prompts() == ["T1"] and "Broccolia interroge" in again.calls[0]["user"]
+    assert sorted(_storyboard(store, story_id)["scenes"]) == ALL_SCENES
+
+
+# ============================================================== regenerate
+
+def test_regenerating_a_body_scene_touches_only_it_and_stales_its_storyboard_scene(store):
+    m = _new()
+    story_id = _written_script(store)
+    _run(m.storyboard, store, story_id, llm=FakeLLM(default={"T1": t1_reply}), step="storyboard")
+    # Both documents approved.
+    script = _script(store, story_id)
+    script["approved_at"] = NOW
+    store.write_episode_doc(story_id, 1, "script.json", script, now=NOW)
+    board = _storyboard(store, story_id)
+    board["approved_at"] = NOW
+    store.write_episode_doc(story_id, 1, "storyboard.json", board, now=NOW)
+    before_script, before_board = _script(store, story_id), _storyboard(store, story_id)
+    story_before = _story_bytes(store, story_id)
+
+    llm = FakeLLM(E2=[functools.partial(e2_reply, text="Je sais tout, Mangella.")])
+    _, log = _regenerate(store, story_id, "scene:1:s03", llm=llm, note="Plus de menace.")
+
+    assert llm.prompts() == ["E2"]
+    assert "Follow the author's note: Plus de menace." in llm.calls[0]["user"]
+    script = _script(store, story_id)
+    s03 = _scene(script, "s03")
+    assert s03["lines"][0]["text"] == "Je sais tout, Mangella."
+    assert [line["line_id"] for line in s03["lines"]] == ["l12", "l13"]
+    assert s03["rev"] == 2 and script["rev"] == 2
+    assert script["approved_at"] is None and script["approved_anyway"] is None
+    assert script["consistency_report"]["stale"] is True
+    for sid in ALL_SCENES:
+        if sid != "s03":
+            assert _scene(script, sid) == _scene(before_script, sid)
+    for key in ("title", "hook", "cliffhanger", "next_episode_teaser"):
+        assert script[key] == before_script[key]
+    board = _storyboard(store, story_id)
+    assert board["approved_at"] is None
+    assert board["scenes"]["s03"]["stale"] is True
+    assert all(not board["scenes"][sid]["stale"] for sid in ALL_SCENES if sid != "s03")
+    assert board["shots"] == before_board["shots"]
+    assert _story_bytes(store, story_id) == story_before
+    assert any(line.startswith("🔁 Regenerated scene:1:s03") for line in log)
+
+    # A T1 run plans that scene alone again.
+    t1 = FakeLLM(T1=[t1_reply])
+    _run(m.storyboard, store, story_id, llm=t1, step="storyboard")
+    assert t1.prompts() == ["T1"] and "Broccolia interroge" in t1.calls[0]["user"]
+    board = _storyboard(store, story_id)
+    assert board["scenes"]["s03"] == {"source": "t1", "script_rev": 2, "stale": False}
+
+
+def test_a_failed_regenerate_changes_nothing(store):
+    m = _new()
+    story_id = _written_script(store)
+    m.storyboard.build_fast(store, story_id, 1, now=NOW, on_log=Log())
+    folder = Path(store.episode_dir(story_id, 1))
+    before = {name: (folder / name).read_bytes() for name in ("script.json", "storyboard.json")}
+    llm = FakeLLM(E2=[ProviderError("down", [("gemini/gemini-test", "HTTP 503")])])
+
+    message, _ = _failed(m.regenerate, store, story_id, llm=llm, step="regenerate", ep=None,
+                         params={"target": "scene:1:s03", "note": "Plus de menace."})
+
+    assert message.startswith("Cannot regenerate 'scene:1:s03': E2: every provider in the chain failed")
+    assert {name: (folder / name).read_bytes() for name in before} == before
+
+
+def test_an_episode_keeps_the_template_it_was_written_against(store):
+    m = _new()
+    story_id = _written_script(store)
+    store.update(story_id, lambda doc: doc.update(episode_template_id="serial_90s_v1"), now=NOW)
+    llm = FakeLLM()
+
+    _run(m.script, store, story_id, llm=llm)
+
+    assert llm.calls == []
+    assert _script(store, story_id)["template_id"] == "serial_60s_v1"
+    assert _script(store, story_id)["timing"]["window_s"] == [55, 80]
+
+
+def test_regenerating_a_framing_scene_runs_its_partial_e3(store):
+    m = _new()
+    story_id = _written_script(store)
+    before = _script(store, story_id)
+    new_cliff = dict(CLIFF_PART, reveal="Le téléphone affiche le nom de Mangella.")
+    llm = FakeLLM(E3=[{"cliffhanger": new_cliff}])
+
+    _regenerate(store, story_id, "scene:1:s08", llm=llm)
+
+    assert llm.prompts() == ["E3"]
+    assert llm.calls[0]["schema"]["required"] == ["cliffhanger"]
+    script = _script(store, story_id)
+    assert script["cliffhanger"]["reveal"] == new_cliff["reveal"]
+    assert _scene(script, "s08")["rev"] == 2
+    assert script["hook"] == before["hook"] and script["next_episode_teaser"] == before["next_episode_teaser"]
+
+
+def test_regenerating_the_hook_changes_only_the_hook(store):
+    m = _new()
+    story_id = _written_script(store)
+    before = _script(store, story_id)
+    new_hook = {"lines": [{"speaker": MANGELLA, "text": "Personne ne dort ce soir.", "emotion": "tension",
+                           "delivery": "icy"}], "on_screen_text": "Nuit blanche au parloir"}
+    llm = FakeLLM(E3=[{"hook": new_hook}])
+
+    _regenerate(store, story_id, "hook:1", llm=llm, note="Plus froid.")
+
+    assert llm.prompts() == ["E3"] and "Follow the author's note: Plus froid." in llm.calls[0]["user"]
+    script = _script(store, story_id)
+    assert script["hook"] == {"on_screen_text": "Nuit blanche au parloir"}
+    hook = _scene(script, "s01")
+    assert [(line["line_id"], line["text"]) for line in hook["lines"]] == [("l04", "Personne ne dort ce soir.")]
+    assert hook["source"] == "E3" and hook["rev"] == 2
+    changed = {"hook", "scenes", "rev", "timing", "consistency_report", "updated_at"}
+    for key in before:
+        if key not in changed:
+            assert script[key] == before[key], key
+    assert [s for s in script["scenes"] if s["scene_id"] != "s01"] == [
+        s for s in before["scenes"] if s["scene_id"] != "s01"]
+    assert script["consistency_report"]["stale"] is True
+
+
+def test_regenerating_the_teaser_changes_only_the_teaser(store):
+    m = _new()
+    story_id = _written_script(store)
+    before = _script(store, story_id)
+    llm = FakeLLM(E3=[{"teaser": "Demain, le téléphone se tait pour toujours."}])
+
+    _regenerate(store, story_id, "teaser:1", llm=llm)
+
+    script = _script(store, story_id)
+    assert script["next_episode_teaser"] == "Demain, le téléphone se tait pour toujours."
+    assert script["scenes"] == before["scenes"] and script["hook"] == before["hook"]
+    assert script["rev"] == 2
+
+
+def test_replanning_one_shot_is_one_t1r_call_and_changes_only_that_shot(store):
+    m = _new()
+    story_id = _written_script(store)
+    m.storyboard.build_fast(store, story_id, 1, now=NOW, on_log=Log())
+    before = _storyboard(store, story_id)
+    script_before = _script(store, story_id)
+    llm = FakeLLM(T1r=[t1r_reply])
+
+    _regenerate(store, story_id, "shot:1:sh05:plan", llm=llm, note="Plus intime.")
+
+    assert llm.prompts() == ["T1r"] and "Follow the author's note: Plus intime." in llm.calls[0]["user"]
+    board = _storyboard(store, story_id)
+    assert len(board["shots"]) == len(before["shots"])
+    for old, new in zip(before["shots"], board["shots"]):
+        keys = ("shot_id", "scene_id", "framing", "action", "lines", "subject_tags")
+        if old["shot_id"] == "sh05":
+            assert new["action"].endswith("leans in, whispering a secret.")
+            assert new["lines"] == old["lines"]
+        else:
+            assert {k: new[k] for k in keys} == {k: old[k] for k in keys}
+    assert board["rev"] == before["rev"] + 1
+    script = _script(store, story_id)
+    assert script["rev"] == script_before["rev"] and script["scenes"] == script_before["scenes"]
+
+
+@pytest.mark.parametrize("target,named", [
+    ("scene:1:s42", "s42"), ("shot:1:sh99:plan", "sh99"), ("scene:3:s02", "episode 3"),
+])
+def test_an_unknown_scene_shot_or_episode_is_refused_by_name(store, target, named):
+    m = _new()
+    story_id = _written_script(store)
+    m.storyboard.build_fast(store, story_id, 1, now=NOW, on_log=Log())
+    llm = FakeLLM()
+
+    message, _ = _failed(m.regenerate, store, story_id, llm=llm, step="regenerate", ep=None,
+                         params={"target": target})
+
+    assert message.startswith(f"Cannot regenerate {target!r}: ") and named in message
+    assert llm.calls == []
+
+
+@pytest.mark.parametrize("target,parsed", [
+    ("scene:1:s03", ("scene", 1, "s03")), ("hook:2", ("hook", 2)), ("cliffhanger:12", ("cliffhanger", 12)),
+    ("teaser:1", ("teaser", 1)), ("shot:1:sh05:plan", ("shot", 1, "sh05")),
+    ("scene:0:s03", None), ("scene:1:s3", None), ("shot:1:sh05", None), ("shot:1:sh05:video", None),
+    ("hook:x", None), ("line:1:l04", None), (None, None),
+])
+def test_the_episode_target_grammar(target, parsed):
+    m = _new()
+    assert m.regen.parse_episode_target(target) == parsed
+
+
+def test_the_phase_2_parser_still_leaves_episode_targets_to_a_later_stage():
+    """The web layer reads ``parse_target``; the episode targets reach it in stage 8."""
+    m = _new()
+    for target in ("scene:1:s03", "hook:1", "shot:1:sh05:plan"):
+        assert m.regenerate.parse_target(target) is None
+
+
+# ============================================================ helpers + registry
+
+def test_mark_changed_bumps_revisions_clears_approvals_and_stales_moved_scenes(store):
+    m = _new()
+    story_id = _written_script(store)
+    m.storyboard.build_fast(store, story_id, 1, now=NOW, on_log=Log())
+    script, board = _script(store, story_id), _storyboard(store, story_id)
+    script["approved_at"] = board["approved_at"] = NOW
+    script["approved_anyway"] = NOW
+
+    m.common.mark_changed(script, board, scene_ids=["s02"], now=NOW)
+
+    assert script["rev"] == 2 and _scene(script, "s02")["rev"] == 2 and _scene(script, "s03")["rev"] == 1
+    assert script["approved_at"] is None and script["approved_anyway"] is None
+    assert script["consistency_report"]["stale"] is True
+    assert board["approved_at"] is None
+    assert [sid for sid, entry in board["scenes"].items() if entry["stale"]] == ["s02"]
+
+
+def test_retime_is_derived_and_never_moves_the_revision(store):
+    m = _new()
+    story_id = _written_script(store)
+    script = _script(store, story_id)
+    script["approved_at"] = NOW
+    script["timing"] = None
+    ctx, _ = _ctx(store, story_id)
+    ec = m.common.load_episode_context(ctx)
+
+    m.common.retime(script, ec)
+
+    assert script["timing"]["total_s"] > 0 and script["rev"] == 1 and script["approved_at"] == NOW
+
+
+def test_the_episode_steps_are_registered():
+    for name in ("script", "storyboard"):
+        assert name in steps.RUNNERS and callable(steps.RUNNERS[name])

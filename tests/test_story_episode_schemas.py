@@ -169,12 +169,13 @@ def _script(**changes):
     body_functions = ["setup", "rising", "peak", "turn", "setup", "rising"]
     scenes = [_scene(
         "s01", "hook", characters=["char_kiwilo", "char_mangella"],
-        lines=[_line("l01", "char_kiwilo")],
-        sfx_cues=[{"at": "start", "cue": "waves_soft"}, {"at": "l01", "cue": "gasp_crowd"}],
+        lines=[_line("l04", "char_kiwilo")],
+        sfx_cues=[{"at": "start", "cue": "waves_soft"}, {"at": "l04", "cue": "gasp_crowd"}],
     )]
     for i, fn in enumerate(body_functions, start=2):
-        scenes.append(_scene(f"s0{i}", fn, characters=["char_mangella"], lines=[_line(f"l0{i}", "char_mangella")]))
-    scenes.append(_scene("s08", "cliffhanger", characters=["char_kiwilo"], lines=[_line("l08", "char_kiwilo")]))
+        scenes.append(_scene(f"s0{i}", fn, characters=["char_mangella"],
+                             lines=[_line(schemas.line_id_for(f"s0{i}", 0), "char_mangella")]))
+    scenes.append(_scene("s08", "cliffhanger", characters=["char_kiwilo"], lines=[_line("l32", "char_kiwilo")]))
 
     doc = {
         "$schema": "episode_script_v1", "ep": 1, "title": "Test Episode", "language": "en",
@@ -202,6 +203,15 @@ def test_a_complete_minimal_script_validates():
     assert schemas.episode_script_errors(_script()) == []
 
 
+def test_line_ids_are_fixed_blocks_of_four_per_scene():
+    assert [schemas.line_id_for("s00", k) for k in range(4)] == ["l00", "l01", "l02", "l03"]
+    assert [schemas.line_id_for("s01", k) for k in range(4)] == ["l04", "l05", "l06", "l07"]
+    assert schemas.line_id_for("s12", 3) == "l51"
+    for scene_id, k in (("s01", 4), ("s01", -1), ("s25", 0), ("x01", 0), ("s1", 0), ("s01", True)):
+        with pytest.raises(ValueError):
+            schemas.line_id_for(scene_id, k)
+
+
 def _swap_scene_ids(doc):
     doc["scenes"][0]["scene_id"], doc["scenes"][1]["scene_id"] = doc["scenes"][1]["scene_id"], doc["scenes"][0]["scene_id"]
 
@@ -222,6 +232,11 @@ def _cliffhanger_not_last(doc):
 
 def _duplicate_line_id(doc):
     doc["scenes"][1]["lines"][0]["line_id"] = doc["scenes"][0]["lines"][0]["line_id"]
+
+
+def _lines_out_of_block_order(doc):
+    first = doc["scenes"][1]["lines"][0]
+    doc["scenes"][1]["lines"] = [dict(first, line_id="l09"), dict(first, line_id="l08")]
 
 
 def _speaker_not_in_scene(doc):
@@ -269,7 +284,8 @@ SCRIPT_BREAKS = {
     "s00 not a recap scene": (_s00_not_recap, "must have function 'recap'"),
     "recap scene not s00": (_recap_function_wrong_id, "scene_id must be 's00'"),
     "cliffhanger not last": (_cliffhanger_not_last, "must have exactly one 'cliffhanger', last"),
-    "duplicate line id": (_duplicate_line_id, "does not strictly increase after 'l01'"),
+    "line id of another scene's block": (_duplicate_line_id, "'l04', expected 'l08'"),
+    "line ids out of block order": (_lines_out_of_block_order, "'l09', expected 'l08'"),
     "speaker not in scene": (_speaker_not_in_scene, "is not in the scene's characters"),
     "sfx at unknown line": (_sfx_at_unknown_line, "is not 'start' or a line id"),
     "cliffhanger scene_id wrong": (_cliffhanger_scene_id_wrong, "is not the last scene's id"),
@@ -385,7 +401,8 @@ SCENE_CHARACTERS = {
 
 def _storyboard(**changes):
     """One shot per scene, matching ``_script()``'s 8 scenes and 8 lines."""
-    shots = [_shot(i, sid, f"l{i:02d}", SCENE_CHARACTERS[sid]) for i, sid in enumerate(SCENE_IDS, start=1)]
+    shots = [_shot(i, sid, schemas.line_id_for(sid, 0), SCENE_CHARACTERS[sid])
+             for i, sid in enumerate(SCENE_IDS, start=1)]
     doc = {
         "$schema": "storyboard_v1", "ep": 1,
         "shots": shots,
@@ -425,7 +442,7 @@ def _sb_shots_not_contiguous(doc):
 
 
 def _sb_line_reused(doc):
-    doc["shots"][1]["lines"] = ["l01"]
+    doc["shots"][1]["lines"] = ["l04"]
 
 
 def _sb_transition_unknown_shot(doc):

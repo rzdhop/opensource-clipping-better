@@ -160,43 +160,43 @@ def _build_script():
     """ep 1: hook, 6 body scenes (with lines, one quiet), cliffhanger."""
     s01 = _scene(
         "s01", "hook", place_id=PLACE_PARLOIR, characters=[CHAR_KIWILO, CHAR_MANGELLA], props=[PROP_PHONE],
-        lines=[_line("l01", CHAR_KIWILO, "A shocking secret is about to come out.", emotion="shocked")],
+        lines=[_line("l04", CHAR_KIWILO, "A shocking secret is about to come out.", emotion="shocked")],
         emotion="shocked", target_duration_s=2.5,
     )
     s02 = _scene(
         "s02", "setup", place_id=PLACE_PARLOIR, characters=[CHAR_MANGELLA],
-        lines=[_line("l02", CHAR_MANGELLA, "I have been waiting for this all week.")],
+        lines=[_line("l08", CHAR_MANGELLA, "I have been waiting for this all week.")],
         target_duration_s=5.0,
     )
     s03 = _scene(
         "s03", "rising", place_id=PLACE_PISCINE, characters=[CHAR_KIWILO, CHAR_BROCCOLIA],
         lines=[
-            _line("l03", CHAR_KIWILO, "You always take the biggest lounger."),
-            _line("l04", CHAR_KIWILO, "It is getting a little old."),
-            _line("l05", CHAR_BROCCOLIA, "Maybe stop counting my loungers.", emotion="angry"),
+            _line("l12", CHAR_KIWILO, "You always take the biggest lounger."),
+            _line("l13", CHAR_KIWILO, "It is getting a little old."),
+            _line("l14", CHAR_BROCCOLIA, "Maybe stop counting my loungers.", emotion="angry"),
         ],
         target_duration_s=6.0,
     )
     s04 = _scene(
         "s04", "peak", place_id=PLACE_PISCINE, characters=[CHAR_KIWILO, CHAR_MANGELLA, CHAR_BROCCOLIA],
-        lines=[_line("l06", CHAR_MANGELLA, "The phone is ringing again!", emotion="shocked")],
+        lines=[_line("l16", CHAR_MANGELLA, "The phone is ringing again!", emotion="shocked")],
         emotion="shocked", target_duration_s=6.0,
     )
     s05 = _scene(
         "s05", "turn", place_id=PLACE_PARLOIR, characters=[CHAR_BROCCOLIA],
-        lines=[_line("l07", CHAR_BROCCOLIA, "Something is not right here.", emotion="tension")],
+        lines=[_line("l20", CHAR_BROCCOLIA, "Something is not right here.", emotion="tension")],
         emotion="tension", target_duration_s=5.0,
     )
     s06 = _scene("s06", "setup", place_id=PLACE_PARLOIR, characters=[], lines=[], target_duration_s=4.0)
     s07 = _scene(
         "s07", "rising", place_id=PLACE_PARLOIR, characters=[CHAR_KIWILO],
-        lines=[_line("l08", CHAR_KIWILO, "One more secret and I am done.")],
+        lines=[_line("l28", CHAR_KIWILO, "One more secret and I am done.")],
         target_duration_s=5.0,
     )
     s08 = _scene(
         "s08", "cliffhanger", place_id=PLACE_PARLOIR, time_variant="night",
         characters=[CHAR_KIWILO, CHAR_MANGELLA, CHAR_BROCCOLIA],
-        lines=[_line("l09", CHAR_KIWILO, "Nobody is leaving this island.", emotion="shocked")],
+        lines=[_line("l32", CHAR_KIWILO, "Nobody is leaving this island.", emotion="shocked")],
         emotion="shocked", target_duration_s=3.0,
     )
     scenes = [s01, s02, s03, s04, s05, s06, s07, s08]

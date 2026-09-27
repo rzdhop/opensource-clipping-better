@@ -1,7 +1,7 @@
 ## IN PROGRESS — AI Story **phase 3** (episode writer: script, storyboard, timing)
 - **Started:** 2026-09-27 by the human ("Phase 2 seems to have been worked on, check an go with phase 3").
   Task class: FULL. Phase 2 checked: closed and pushed (`4280333` == `origin/main`).
-- **Current phase:** 5 IMPLEMENT — stages 0–5 done; next is stage 6 (step runners, RISKIEST). Plan **approved in chat**
+- **Current phase:** 5 IMPLEMENT — stages 0–6 done; next is stage 7 (opt-in voice measurement). Plan **approved in chat**
   ("Go", 2026-09-27).
 - **Plan:** `~/.claude/plans/ai-story-phase-3-episode-writer.md` (stages 0–14, riskiest = stage 6, the
   script/storyboard step runners). **Read it first**: it holds the design, the stage table and the Tier-2 script.
@@ -19,6 +19,10 @@
 - **Brief:** `.claude/plans/ai-story/04-phase-3-episode-writer.md`; spec §2.7–2.8, §3 steps 8–9, §4.1–4.3
   (E1–E4, T1), §5 (shot skeleton), §6.2–6.4, §9.2, §10 (EpisodeStudio).
 - **Next free ids:** DEC-126, A-055. **Open questions:** none.
+- **Live story is NOT `ready` right now (found 2026-09-27, stage 6):** at 10:59 UTC someone regenerated
+  `character:char_mangella:voice` (now a gemini/flash-lite-tts voice); DEC-123 cleared her `approved_at`, so
+  `approvals.cast` is null and the derived status is `style_approved`. The episode steps refuse until she is
+  re-approved. **Ask the human before Tier-2** whether to re-approve her (their data, their choice).
 - **Context map (EXPLORE, 2026-09-27; detail in the plan §0):** the grammar is pre-registered
   (`workflow.LATER_STEPS/APPROVALS/TARGETS` hold `script, storyboard, scene, hook, cliffhanger, teaser, shot`);
   `ep` is plumbed but unused; episode docs, episode approvals (on the docs — the story's `approvals` is a closed
@@ -35,7 +39,7 @@
 | 3 | episode documents in the store | **done** (local 4001 / CI 3436 + 535 skipped) |
 | 4 | prompts E1–E4, T1, T1r + context | **done** (local 4119 / CI 3554 + 535 skipped) |
 | 5 | shot resolution + fast storyboard + rule pass | **done** (local 4205 / CI 3640 + 535 skipped) |
-| 6 | step runners (RISKIEST) | — |
+| 6 | step runners (RISKIEST) | **done** (local 4280 / CI 3715 + 535 skipped) |
 | 7 | opt-in voice measurement | — |
 | 8 | workflow + API | — |
 | 9 | CLI | — |

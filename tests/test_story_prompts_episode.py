@@ -80,9 +80,9 @@ ARC_ENTRY = {
 MEMORY_NONE = {"series_memory": {"recaps": {}, "open_hooks": [], "relationship_state": {}, "introduced": {}}}
 MEMORY_EP2 = {
     "series_memory": {
-        "recaps": {"1": "Kiwilo et Mangella se sont alliés contre Broccolia."},
+        "recaps": {"ep01": "Kiwilo et Mangella se sont alliés contre Broccolia."},
         "open_hooks": ["Le téléphone va-t-il sonner ce soir ?"],
-        "relationship_state": {"char_kiwilo": {"char_mangella": "alliance fragile"}},
+        "relationship_state": {"char_kiwilo|char_mangella": "alliance fragile"},
         "introduced": {},
     }
 }
@@ -658,8 +658,8 @@ def test_script_digest_shape():
 def test_build_e4_key_lines():
     pack = _pack("fr")
     digest = prompts.script_digest(SCRIPT_E4, ENTITIES_E4)
-    memory = {"series_memory": {"recaps": {"1": "Un premier recap."}, "open_hooks": ["Un hook ouvert."],
-                                 "relationship_state": {"char_kiwilo": {"char_mangella": "rivaux"}}, "introduced": {}}}
+    memory = {"series_memory": {"recaps": {"ep01": "Un premier recap."}, "open_hooks": ["Un hook ouvert."],
+                                 "relationship_state": {"char_kiwilo|char_mangella": "rivaux"}, "introduced": {}}}
     system, user, schema = prompts.build_e4(pack, script_digest=digest, cast=CAST_E4, places=PLACES_E4, memory=memory)
     assert "Write all user-facing text" not in system  # E4 has its own system template, not the head-writer one
     assert "continuity editor" in system
@@ -1148,12 +1148,12 @@ def _e4_worst_case_digest_and_memory():
 
     memory = {
         "series_memory": {
-            "recaps": {"1": _fr_words(40), "2": _fr_words(40)},
+            "recaps": {"ep01": _fr_words(40), "ep02": _fr_words(40)},
             "open_hooks": [_fr_words(15) for _ in range(4)],
             "relationship_state": {
-                "char_0": {"char_1": _fr_words(15), "char_2": _fr_words(15), "char_3": _fr_words(15)},
-                "char_1": {"char_2": _fr_words(15), "char_3": _fr_words(15)},
-                "char_2": {"char_3": _fr_words(15)},
+                "char_0|char_1": _fr_words(15), "char_0|char_2": _fr_words(15), "char_0|char_3": _fr_words(15),
+                "char_1|char_2": _fr_words(15), "char_1|char_3": _fr_words(15),
+                "char_2|char_3": _fr_words(15),
             },
         }
     }
@@ -1169,8 +1169,9 @@ def test_e4_worst_case_fixture_fits_its_input_budget():
     assert prompts.INPUT_BUDGET["E4"] <= 4000
 
 
-def test_input_budget_only_names_e4():
-    assert list(prompts.INPUT_BUDGET) == ["E4"]
+def test_input_budget_names_every_episode_prompt():
+    # Stage 6 sized E1/E2/E3/T1/T1r on live-sized data (tests/test_story_episode_prompt_budgets.py).
+    assert list(prompts.INPUT_BUDGET) == ["E1", "E2", "E3", "E4", "T1", "T1r"]
 
 
 @pytest.mark.parametrize(
@@ -1243,7 +1244,7 @@ def test_llm_call_passes_the_per_prompt_budget_for_e4():
     assert len(calls) == 1  # accepted first try, no retry
 
 
-def test_llm_call_still_refuses_an_e1_prompt_over_the_default_budget():
+def test_llm_call_still_refuses_an_e1_prompt_over_its_budget():
     from clipping.aistory import steps
     from clipping.aistory.steps import llm_call
     from clipping.cancel import CancelToken
@@ -1258,7 +1259,7 @@ def test_llm_call_still_refuses_an_e1_prompt_over_the_default_budget():
     def runner(chain, **kwargs):
         raise AssertionError("must not be called: the budget check happens before any chain call")
 
-    with pytest.raises(ValueError, match=r"over the 1200-token budget"):
+    with pytest.raises(ValueError, match=rf"over the {prompts.INPUT_BUDGET['E1']}-token budget"):
         llm_call.call_json(ctx, "E1", "system", long_user, {}, validator=prompts.validate_e1, runner=runner)
 
 

@@ -108,7 +108,19 @@ SCHEMA_NAMES = {
 # _E4_MEMORY_MAX_*'s own caps -- which measures ~3,755 tokens
 # (test_story_prompts_episode.py); 3,900 leaves it a margin while staying
 # under the 4,000-token ceiling the spec sets.
-INPUT_BUDGET = {"E4": 3900}
+#
+# Stage 6 measured every episode prompt on live-sized data (a scratch copy of
+# the live story b1104ec66b05: its cast, places and prop text, with a
+# 12-scene French episode 2 at the limits -- 22-word lines, 4 lines per body
+# scene, 15-word summaries, a 60-word note, the arc entry and memory at their
+# caps; tests/test_story_episode_prompt_budgets.py rebuilds it with filler of
+# the same lengths). Worst cases, chars/4: E1 1,102, E2 1,440 (with a note),
+# E3 2,050 (in full; its partials 1,249-1,400), E4 3,523, T1 1,100, T1r
+# 1,218 -- E1..T1r at or past 85 % of the 1,200-token pack budget, so each
+# gets its own: the worst case + 15 %, rounded up to ten. E4's 3,900 still
+# holds (+11 %) and stays under the spec's 4,000 ceiling. Nothing is trimmed
+# to fit: a prompt over its budget still raises.
+INPUT_BUDGET = {"E1": 1270, "E2": 1660, "E3": 2360, "E4": 3900, "T1": 1270, "T1r": 1410}
 
 # The ``bible:<field>`` grammar of spec 9.2: which prompt a regenerate note
 # re-runs, and which of that prompt's fields it targets. "tone" also carries
@@ -921,7 +933,7 @@ def e2_schema(speakers, sfx_cue_names) -> dict:
 
 
 def build_e2(pack, *, scene, scene_number, outline, previous, word_budget, cast, place, props, sfx_cues,
-             narrator_enabled, voice_direction):
+             narrator_enabled, voice_direction, note=None):
     """One body scene's dialogue (spec 2.7, 4.2, row E2): 1-4 lines within
     *word_budget* words total (``timing.word_budget``, computed by the
     caller so this module stays free of a ``timing`` import), optional sfx
@@ -938,7 +950,10 @@ def build_e2(pack, *, scene, scene_number, outline, previous, word_budget, cast,
     ``{"place_id", "name", "layout_notes"}``. *sfx_cues* is the story's own
     cue names (``style_lock.audio.sfx_cues``). *previous* is ``None`` for
     the episode's first body scene, else ``{"summary", "speaker_name",
-    "text"}`` for the immediately preceding scene's last line.
+    "text"}`` for the immediately preceding scene's last line. *note* is the
+    author's note of a ``scene:<ep>:<sid>`` regenerate, shown the way
+    :func:`build_e3` and :func:`build_t1r` show theirs (none: the prompt is
+    byte-identical to one built without it).
     """
     names = {c["char_id"]: c["name"] for c in cast}
     user = context.outline_section(outline, names) + "\n\n"
@@ -955,6 +970,9 @@ def build_e2(pack, *, scene, scene_number, outline, previous, word_budget, cast,
     user += f"Place: {place['name']} -- {place['layout_notes']}\n\n"
     if props:
         user += "Props present:\n" + _id_name_block(props, "prop_id") + "\n\n"
+
+    if note:
+        user += f"Follow the author's note: {note}\n\n"
 
     speakers = [c["char_id"] for c in cast] + (["narrator"] if narrator_enabled else [])
     sfx_cue_names = list(sfx_cues)
@@ -1306,6 +1324,7 @@ def _e4_cast_block(cast) -> str:
 _E4_MEMORY_MAX_RECAPS = 2
 _E4_MEMORY_MAX_HOOKS = 4
 _E4_MEMORY_MAX_RELATIONSHIPS = 6
+_RECAP_KEY = re.compile(r"^ep[0-9]{2}$")
 
 
 def _e4_memory_block(memory) -> str:
@@ -1318,21 +1337,23 @@ def _e4_memory_block(memory) -> str:
     series_memory = (memory or {}).get("series_memory") or {}
     recaps = series_memory.get("recaps") or {}
     open_hooks = series_memory.get("open_hooks") or []
-    relationship_state = series_memory.get("relationship_state") or {}
+    pairs = context.relationship_pairs(series_memory.get("relationship_state"))
 
-    if not (recaps or open_hooks or relationship_state):
+    if not (recaps or open_hooks or pairs):
         return "Series memory: none recorded yet."
 
     lines = ["Series memory:"]
-    recent_eps = sorted(recaps, key=int, reverse=True)[:_E4_MEMORY_MAX_RECAPS]
-    for ep_key in sorted(recent_eps, key=int):
-        lines.append(f"- Episode {ep_key} recap: {recaps[ep_key]}")
+    # Keyed "ep01", "ep02", ... (spec 2.6); a key of any other shape is not
+    # an episode's recap and is left out.
+    numbered = {int(key[2:]): key for key in recaps if _RECAP_KEY.fullmatch(str(key))}
+    recent_eps = sorted(numbered, reverse=True)[:_E4_MEMORY_MAX_RECAPS]
+    for ep in sorted(recent_eps):
+        lines.append(f"- Episode {ep} recap: {recaps[numbered[ep]]}")
     if open_hooks:
         lines.append("- Open hooks: " + "; ".join(open_hooks[:_E4_MEMORY_MAX_HOOKS]))
-    if relationship_state:
-        pairs = [f"{a}/{b}: {t}" for a, others in relationship_state.items() for b, t in others.items()]
-        if pairs:
-            lines.append("- Relationships: " + "; ".join(pairs[:_E4_MEMORY_MAX_RELATIONSHIPS]))
+    if pairs:
+        lines.append("- Relationships: " + "; ".join(
+            f"{a}/{b}: {text}" for a, b, text in pairs[:_E4_MEMORY_MAX_RELATIONSHIPS]))
     return "\n".join(lines)
 
 
