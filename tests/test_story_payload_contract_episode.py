@@ -51,6 +51,7 @@ EPISODE_SRC = PROJECT_ROOT / "web" / "dashboard" / "src" / "pages" / "story" / "
 SCRIPT_PANE = EPISODE_SRC / "ScriptPane.jsx"
 DURATION_BAR = EPISODE_SRC / "DurationBar.jsx"
 STORYBOARD_PANE = EPISODE_SRC / "StoryboardPane.jsx"
+INDEX_CSS = PROJECT_ROOT / "web" / "dashboard" / "src" / "index.css"
 
 
 def _class_fields(name: str) -> set[str]:
@@ -223,6 +224,71 @@ def test_episode_templates_ids_equal_the_defaults_exactly():
 def test_script_pane_renders_its_own_error_slot():
     src = SCRIPT_PANE.read_text(encoding="utf-8")
     assert "story-step-error" in src, "ScriptPane.jsx has no story-step-error slot"
+
+
+# ------------------------------------------------------ consistency link colour (F5)
+
+def test_consistency_issue_links_use_the_app_link_token():
+    # The default browser link blue (rgb(0, 0, 238)) is unreadable on the
+    # dark card; ScriptPane must not invent a new colour literal, so the
+    # link is only ever styled through index.css, keyed off the same
+    # --accent-hover token every other story link uses
+    # (.story-ready-open-episode).
+    src = SCRIPT_PANE.read_text(encoding="utf-8")
+    assert '<a href={`#scene-${issue.scene_id}`}>' in src
+    css = INDEX_CSS.read_text(encoding="utf-8")
+    assert ".story-script-consistency a" in css
+    rule = css.split(".story-script-consistency a", 1)[1].split("}", 1)[0]
+    assert "var(--accent-hover)" in rule
+    assert re.search(r"#[0-9a-fA-F]{3,6}", rule) is None, "a new colour literal was added instead of a token"
+
+
+# ------------------------------------------------------- completeness (F6)
+
+def test_approve_completeness_is_keyed_on_script_state_not_missing():
+    # state.missing also lists "consistency_check" once the script is fully
+    # written but the report is stale or missing (workflow.script_missing),
+    # so `state.missing.length === 0` read a stale report as "not complete
+    # yet" instead of "Check the consistency first."
+    src = SCRIPT_PANE.read_text(encoding="utf-8")
+    approve_body = src.split("function ApproveScript", 1)[1]
+    assert "const complete = state.script === 'complete' || state.script === 'approved'" in approve_body
+    assert "state.missing.length === 0" not in approve_body
+
+
+def test_measure_voices_stays_disabled_while_only_the_check_is_missing():
+    # script.measure_estimate (GET /estimate/script?measure=1) never counts
+    # the consistency check (E4) the runner would make first for a stale
+    # report (steps/script.py _Run.run always runs beat_sheet/body/framing/
+    # consistency before measure()) -- its chip never shows that call, so
+    # the UI must not enable Measure from a completeness check that ignores
+    # the report. Measure is only enabled once the script is complete AND
+    # the report is not stale/missing.
+    src = SCRIPT_PANE.read_text(encoding="utf-8")
+    measure_body = src.split("function MeasureVoices", 1)[1].split("function ApproveScript", 1)[0]
+    assert "const ready = scriptComplete && !checkNeeded" in measure_body
+    assert "disabled={!ready || busy || running}" in measure_body
+    assert "Check the consistency first." in measure_body
+    assert "Finish the script first." in measure_body
+    assert "complete={episode.state.missing.length === 0}" not in src
+    assert "scriptComplete={episode.state.script === 'complete' || episode.state.script === 'approved'}" in src
+    assert "checkNeeded={episode.state.report === 'stale' || episode.state.report === 'none'}" in src
+
+
+# --------------------------------------------------------- estimate refusal (F8)
+
+def test_a_failed_estimate_shows_in_the_step_error_slot_and_disables_write():
+    # Found live: /estimate/script?ep=2 409s (its recap has not arrived
+    # yet), but the header's `.catch(() => setEstimate(null))` swallowed the
+    # refusal -- the chip was stuck at "estimating..." forever and Write
+    # stayed enabled, so the refusal only surfaced after an actual click.
+    src = SCRIPT_PANE.read_text(encoding="utf-8")
+    header_body = src.split("function ScriptHeader", 1)[1].split("function ConsistencyPanel", 1)[0]
+    assert ".catch(() => setEstimate(null))" not in header_body
+    assert "setEstimateError(err.message)" in header_body
+    assert "disabled={busy || running || Boolean(estimateError)}" in header_body
+    assert "{!estimateError && <EstimateChip estimate={estimate} />}" in header_body
+    assert "message={estimateError || error}" in header_body
 
 
 # ------------------------------------------------------------------------ Tabs

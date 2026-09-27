@@ -41,11 +41,22 @@ function ScriptHeader({ storyId, ep, episode, storyDoc, episodes, busy, onChange
   const [running, setRunning] = useState(false)
   const [error, setError] = useState('')
   const [errors, setErrors] = useState(null)
+  // The estimate's own refusal (e.g. episode >= 2 written from a recap that
+  // has not arrived yet, 409): kept apart from the click's `error` above so
+  // it survives independently of a run, and so Write can be disabled while
+  // it stands without a failed *click* also locking the button forever.
+  const [estimateError, setEstimateError] = useState('')
+  const [estimateErrors, setEstimateErrors] = useState(null)
   const [templateError, setTemplateError] = useState('')
   const [templateSaving, setTemplateSaving] = useState(false)
 
   useEffect(() => {
-    fetchStoryEstimate(storyId, 'script', { ep }).then(setEstimate).catch(() => setEstimate(null))
+    setEstimate(null)
+    setEstimateError('')
+    setEstimateErrors(null)
+    fetchStoryEstimate(storyId, 'script', { ep })
+      .then((data) => { setEstimate(data); setEstimateError(''); setEstimateErrors(null) })
+      .catch((err) => { setEstimate(null); setEstimateError(err.message); setEstimateErrors(err.errors || null) })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storyId, ep, state.missing.join('|'), state.report])
 
@@ -111,14 +122,23 @@ function ScriptHeader({ storyId, ep, episode, storyDoc, episodes, busy, onChange
 
       {needsWrite && (
         <div className="story-step-actions">
-          <button type="button" className="btn btn-primary" onClick={handleRun} disabled={busy || running}>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={handleRun}
+            disabled={busy || running || Boolean(estimateError)}
+          >
             {running ? <><span className="spinner"></span> {actionLabel}…</> : actionLabel}
           </button>
-          <EstimateChip estimate={estimate} />
+          {!estimateError && <EstimateChip estimate={estimate} />}
           {estimate && <RouteChip routeClass={estimate.route_class} link={estimate.link} />}
         </div>
       )}
-      <StepError message={error} errors={errors} className="story-step-error" />
+      <StepError
+        message={estimateError || error}
+        errors={estimateError ? estimateErrors : errors}
+        className="story-step-error"
+      />
     </div>
   )
 }
@@ -371,16 +391,28 @@ function FramingFields({ storyId, ep, script, busy, onChange }) {
 
 // -------------------------------------------------------------------- real voices
 
-function MeasureVoices({ storyId, ep, complete, busy, onChange }) {
+function MeasureVoices({ storyId, ep, scriptComplete, checkNeeded, busy, onChange }) {
   const [estimate, setEstimate] = useState(null)
   const [running, setRunning] = useState(false)
   const [error, setError] = useState('')
   const [errors, setErrors] = useState(null)
 
+  // Measuring is a script-step call (params.measure_voices): the runner
+  // writes whatever the step is still missing -- including a stale or
+  // missing consistency check (E4) -- before it measures a single line
+  // (steps/script.py _Run.run: beat_sheet/body/framing/consistency always
+  // run first). GET /estimate/script?measure=1 (script.measure_estimate)
+  // counts only the voices/lines it would synthesise, never that E4 call,
+  // so the chip a stale-report episode would show never mentions it. The
+  // UI must never start a call its chip didn't show, so Measure stays
+  // disabled while only the check is missing -- same as Approve above --
+  // rather than silently spending the hidden E4 call.
+  const ready = scriptComplete && !checkNeeded
+
   useEffect(() => {
-    if (!complete) { setEstimate(null); return }
+    if (!ready) { setEstimate(null); return }
     fetchStoryEstimate(storyId, 'script', { ep, measure: true }).then(setEstimate).catch(() => setEstimate(null))
-  }, [storyId, ep, complete])
+  }, [storyId, ep, ready])
 
   const handleMeasure = async () => {
     setRunning(true)
@@ -408,7 +440,7 @@ function MeasureVoices({ storyId, ep, complete, busy, onChange }) {
           type="button"
           className="btn btn-secondary"
           onClick={handleMeasure}
-          disabled={!complete || busy || running}
+          disabled={!ready || busy || running}
         >
           {running ? <><span className="spinner"></span> Measuring…</> : 'Measure with real voices'}
         </button>
@@ -418,7 +450,8 @@ function MeasureVoices({ storyId, ep, complete, busy, onChange }) {
           </span>
         )}
       </div>
-      {!complete && <p className="form-hint">Finish the script first.</p>}
+      {!scriptComplete && <p className="form-hint">Finish the script first.</p>}
+      {scriptComplete && checkNeeded && <p className="form-hint">Check the consistency first.</p>}
       <StepError message={error} errors={errors} className="story-step-error" />
     </div>
   )
@@ -434,7 +467,13 @@ function ApproveScript({ storyId, ep, episode, busy, onChange }) {
 
   const state = episode.state
   const script = episode.script
-  const complete = state.missing.length === 0
+  // state.missing also lists "consistency_check" once the script is fully
+  // written but the report is stale or missing (workflow.script_missing),
+  // which made this read "not complete yet" for what is really a stale
+  // report. Completeness is the server's own script_state
+  // (workflow.script_state / script.is_complete): every scene written and
+  // every framing part there, independent of the consistency check.
+  const complete = state.script === 'complete' || state.script === 'approved'
   const approved = Boolean(script && script.approved_at)
 
   const blockReason = () => {
@@ -550,7 +589,8 @@ export default function ScriptPane({ episode, storyDoc, characters, places, epis
           <MeasureVoices
             storyId={storyId}
             ep={ep}
-            complete={episode.state.missing.length === 0}
+            scriptComplete={episode.state.script === 'complete' || episode.state.script === 'approved'}
+            checkNeeded={episode.state.report === 'stale' || episode.state.report === 'none'}
             busy={busy}
             onChange={onChange}
           />

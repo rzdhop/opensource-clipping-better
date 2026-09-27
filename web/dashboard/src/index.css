@@ -2437,6 +2437,15 @@ html, body {
   margin: 14px 0;
 }
 
+/* The consistency panel's issue list links to a scene anchor
+   (`#scene-s01`): the browser default link blue is unreadable on the dark
+   card, so it takes the same --accent-hover token every other story link
+   uses (.story-ready-open-episode above), which holds >= 4.5:1 against
+   --bg-card (measured ~6.6:1). */
+.story-script-consistency a {
+  color: var(--accent-hover);
+}
+
 @media (max-width: 600px) {
   .story-script-line-speaker,
   .story-script-line-emotion {

@@ -390,7 +390,12 @@ function ExistingStory({ storyId }) {
   const inFlightJob = data.jobs.find((j) => IN_FLIGHT.includes(j.status)) || null
   const defaultExpanded = STEPS.find((s) => statusOf(s.key, story) === 'active')
   const expanded = manualStep || (defaultExpanded ? defaultExpanded.key : 'cast')
-  const allDone = Boolean(story.approvals.season)
+  // Keyed on the server's own derived status (store.derive_status), not
+  // approvals.season alone: a voice regeneration can clear a character's
+  // approval, which clears approvals.cast and drops the status back to
+  // style_approved even though approvals.season was never touched -- the
+  // card must not keep claiming the story is ready once that happens.
+  const allDone = story.status === 'ready'
 
   return (
     <div className="fade-in">

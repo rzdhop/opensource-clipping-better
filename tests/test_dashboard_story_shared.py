@@ -212,6 +212,32 @@ def test_the_wizard_polls_the_story_while_a_step_runs():
     assert "IN_FLIGHT.includes(j.status)" in wizard.split("setInterval(refresh", 1)[0]
 
 
+def test_the_ready_card_is_keyed_on_the_derived_status_not_the_season_approval():
+    # Found live: a voice regeneration clears a character's approval, which
+    # clears approvals.cast and drops the story back to style_approved --
+    # approvals.season is untouched by that, so `Boolean(story.approvals.
+    # season)` kept the "ready" card (and its "Open episode 1" link) up
+    # after the story was no longer ready. store.derive_status is the
+    # server's own contiguous-prefix status, so it already reflects the
+    # drop; the card must key off `story.status` instead.
+    wizard = (DASHBOARD_SRC / "pages" / "story" / "NewStoryWizard.jsx").read_text(encoding="utf-8")
+    assert "const allDone = story.status === 'ready'" in wizard
+    assert "Boolean(story.approvals.season)" not in wizard
+
+
+def test_the_story_payload_carries_a_status_field():
+    # The wizard's ready card reads story.status directly off GET
+    # /stories/{id}'s "story" object (the raw story.json), so the schema
+    # must actually carry it, and "ready" must be one of its values.
+    from clipping.aistory import defaults, schemas
+
+    story_schema = schemas.STORY_BIBLE_SCHEMA
+    assert "status" in story_schema["properties"]
+    assert "status" in story_schema["required"]
+    assert set(story_schema["properties"]["status"]["enum"]) == set(defaults.STATUSES)
+    assert "ready" in defaults.STATUSES
+
+
 # ============================================================ CastStep.jsx (phase 2)
 
 CAST_STEP = DASHBOARD_SRC / "pages" / "story" / "steps" / "CastStep.jsx"
