@@ -413,11 +413,12 @@ def test_build_e2_golden_key_lines_fr():
     assert "Place: La Piscine -- un bassin turquoise au centre" in user
     assert "Props present:\n- prop_phone — Le Téléphone" in user
     assert "speaker (one of char_kiwilo, char_mangella)" in user
-    assert "use 2-3 lines when two or more characters are present" in user
+    assert "1 to 4 short spoken lines" in user
+    assert "2-3 lines" not in user  # F3 round 2: dropped, it was pushing E2 to overshoot
     assert "at most 22 words; reference lines run 3-8 words" in user
     assert "delivery (English, at most 12 words; the story's voice performance is over-acted telenovela delivery)" in user
     assert "cue (one of gasp_crowd, dramatic_sting, phone_ring)" in user
-    assert "Write 14-20 words of dialogue in total (not fewer than 14)." in user
+    assert "Write 14-20 words of dialogue in total: not fewer than 14, not more than 20." in user
     assert "Write French elisions with their apostrophe (l'eau, d'État, qu'il), never a space." in user
     assert schema == prompts.e2_schema(["char_kiwilo", "char_mangella"], SFX_CUES)
 
@@ -535,6 +536,44 @@ def test_e2_errors_word_floor_rejects_a_short_reply_and_accepts_a_normal_one():
 
     assert prompts.validate_e2(_good_e2_reply(), scene=BODY_SCENE, narrator_enabled=False, sfx_cues=SFX_CUES,
                                word_budget=10) == []
+
+
+def _e2_reply_with_word_count(total):
+    """A schema-legal E2 reply (<=4 lines, <=22 words each) totalling
+    exactly *total* words, alternating BODY_SCENE's two characters."""
+    speakers = ["char_kiwilo", "char_mangella"]
+    counts, remaining = [], total
+    while remaining > 0:
+        take = min(22, remaining)
+        counts.append(take)
+        remaining -= take
+    return {
+        "lines": [
+            {"speaker": speakers[i % 2], "text": " ".join(f"w{i}_{j}" for j in range(n)),
+             "emotion": "tension", "delivery": "flat"}
+            for i, n in enumerate(counts)
+        ],
+        "sfx_cues": [], "on_screen_text": None,
+    }
+
+
+@pytest.mark.parametrize("total, ok", [(30, True), (31, False)])
+def test_e2_errors_word_ceiling_rejects_1_5x_plus_one_and_accepts_1_5x(total, ok):
+    """F3 round 2: the free tier was seen overshooting the ask's own range
+    by 1.5-2.8x. budget=20 -> ceiling = floor(1.5 * 20) = 30: a reply of
+    exactly that many words is fine, one more is rejected."""
+    reply = _e2_reply_with_word_count(total)
+    errors = prompts.validate_e2(reply, scene=BODY_SCENE, narrator_enabled=False, sfx_cues=SFX_CUES,
+                                 word_budget=20)
+    if ok:
+        assert errors == []
+    else:
+        assert errors and all(e.startswith(prompts.E2_WORD_CEILING_PREFIX) for e in errors)
+
+
+def test_e2_errors_word_ceiling_skipped_without_a_budget():
+    reply = _e2_reply_with_word_count(88)  # 4 lines at the 22-word cap: legal, but far over any real budget
+    assert prompts.validate_e2(reply, scene=BODY_SCENE, narrator_enabled=False, sfx_cues=SFX_CUES) == []
 
 
 # ==================================================================== E3

@@ -389,6 +389,23 @@ def e2_short_wrong_speaker(call):
     return reply
 
 
+def e2_long_reply(call):
+    """Two lines at the 22-word cap (44 words total): well over 1.5x any
+    word budget a fixture scene ever gets (spec 4.2, F3 round 2)."""
+    speakers = _speakers(call)
+
+    def words(i):
+        return " ".join(f"w{i}_{j}" for j in range(22))
+
+    return {
+        "lines": [
+            {"speaker": speakers[0], "text": words(0), "emotion": "tension", "delivery": "fast"},
+            {"speaker": speakers[-1], "text": words(1), "emotion": "tension", "delivery": "fast"},
+        ],
+        "sfx_cues": [], "on_screen_text": None,
+    }
+
+
 HOOK_PART = {"lines": [{"speaker": KIWILO, "text": "Ce soir, quelqu'un quitte l'île.", "emotion": "shocked",
                         "delivery": "breathless"}],
              "on_screen_text": "Vote surprise ce soir"}
@@ -550,7 +567,7 @@ def test_a_full_script_is_one_e1_one_e2_per_body_scene_one_e3_and_one_e4(store):
     second = llm.of("E2")[1]["user"]
     assert "Episode outline:" in second and "Previous scene: Kiwilo propose" in second
     assert "Its last line -- Mangella: Tu n'as pas le choix, chérie." in second
-    assert "words of dialogue in total (not fewer than" in second
+    assert "words of dialogue in total: not fewer than" in second
     # RC-E2: the story itself is never touched.
     assert _story_bytes(store, story_id) == before
 
@@ -751,7 +768,7 @@ def test_an_e2_reply_under_the_word_floor_is_retried_then_accepted_with_a_log_li
     # s02 alone makes two E2 calls (the retry); every other scene, one.
     assert llm.prompts() == ["E1"] + ["E2"] * (len(BODY) + 1) + ["E3", "E4"]
     assert any(line.startswith("⚠️ E2 reply rejected") for line in log)
-    assert any("Scene s02" in line and "accepting a shorter reply after a retry" in line for line in log)
+    assert any("Scene s02" in line and "accepting a reply after a retry" in line for line in log)
     script = _script(store, story_id)
     assert _scene(script, "s02")["state"] == "written"
     assert _scene(script, "s02")["lines"][0]["text"] == "Non."
@@ -771,9 +788,29 @@ def test_an_e2_reply_short_and_otherwise_broken_is_never_forgiven(store):
     message, log = _failed(m.script, store, story_id, llm=llm)
 
     assert "scene:1:s02" in message and "failed validation twice" in message
-    assert not any("accepting a shorter reply after a retry" in line for line in log)
+    assert not any("accepting a reply after a retry" in line for line in log)
     script = _script(store, story_id)
     assert _scene(script, "s02")["state"] == "stub"
+
+
+def test_an_e2_reply_over_the_word_ceiling_is_retried_then_accepted_with_a_log_line(store):
+    """F3 round 2: the same leniency, for the opposite miss -- a reply well
+    over 1.5x the word budget is retryable, and a retry that is still over
+    is accepted with a log line rather than failing the scene."""
+    m = _new()
+    story_id = _ready_story(store)
+    queue = [e2_long_reply, e2_long_reply] + [e2_reply] * (len(BODY) - 1)
+    llm = _script_llm(E2=queue)
+
+    summary, log = _run(m.script, store, story_id, llm=llm)
+
+    assert llm.prompts() == ["E1"] + ["E2"] * (len(BODY) + 1) + ["E3", "E4"]
+    assert any(line.startswith("⚠️ E2 reply rejected") for line in log)
+    assert any("Scene s02" in line and "accepting a reply after a retry" in line for line in log)
+    script = _script(store, story_id)
+    assert _scene(script, "s02")["state"] == "written"
+    assert len(_scene(script, "s02")["lines"][0]["text"].split()) == 22
+    assert summary["ep"] == 1 and summary["scenes"] == len(ALL_SCENES)
 
 
 def test_a_body_scene_nobody_can_speak_in_is_written_silent_without_a_call(store):

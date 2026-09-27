@@ -413,12 +413,14 @@ def write_body_scene(ctx, ec, script, sid, *, tools, announced, note=None) -> bo
         voice_direction=ec.style_lock["audio"]["voice_direction"], note=pack.note,
     )
 
-    # A reply under half the word budget is retryable (validate_e2); if the
-    # retry is *still* only that short, the existing "fail after two
-    # attempts" path would leave this whole scene a stub over a borderline
-    # word count. Instead, the second attempt's floor error alone (nothing
-    # else wrong with the reply) is accepted with a log line (spec 4.2, F3;
-    # the human's own choice) -- a real problem (a bad speaker, an over-cap
+    # A reply under half the word budget, or over 1.5x it, is retryable
+    # (validate_e2; never both at once -- the floor sits below the ceiling
+    # for every budget, so they never stack). If the retry is *still* only
+    # off on its word count, the existing "fail after two attempts" path
+    # would leave this whole scene a stub over a borderline word count.
+    # Instead, the second attempt's word-count error alone (nothing else
+    # wrong with the reply) is accepted with a log line (spec 4.2, F3; the
+    # human's own choice) -- a real problem (a bad speaker, an over-cap
     # line) still fails the scene exactly as before.
     attempt = {"n": 0}
 
@@ -427,11 +429,14 @@ def write_body_scene(ctx, ec, script, sid, *, tools, announced, note=None) -> bo
         _repair_e2_reply(ec, reply)
         errors = prompts.validate_e2(reply, scene=scene, narrator_enabled=ec.narrator, sfx_cues=ec.sfx_cues,
                                      word_budget=budget)
-        floor_only = bool(errors) and all(e.startswith(prompts.E2_WORD_FLOOR_PREFIX) for e in errors)
-        if errors and not (floor_only and attempt["n"] >= 2):
+        word_count_only = bool(errors) and all(
+            e.startswith(prompts.E2_WORD_FLOOR_PREFIX) or e.startswith(prompts.E2_WORD_CEILING_PREFIX)
+            for e in errors
+        )
+        if errors and not (word_count_only and attempt["n"] >= 2):
             return errors
-        if floor_only and attempt["n"] >= 2:
-            ctx.on_log(f"⚠️ Scene {sid}: accepting a shorter reply after a retry ({errors[0]}).")
+        if word_count_only and attempt["n"] >= 2:
+            ctx.on_log(f"⚠️ Scene {sid}: accepting a reply after a retry despite its word count ({errors[0]}).")
         trial = copy.deepcopy(script)
         apply_e2(ec, scene_of(trial, sid), reply)
         return episode_common.trial_errors(ec, trial)

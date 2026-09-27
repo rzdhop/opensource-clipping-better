@@ -991,13 +991,13 @@ def validate_e1(reply, *, ep, template, episode_defaults, cast_ids, places, prop
 _E2_ASK_TEMPLATE = (
     "Write this scene's dialogue.\n\n"
     "Give:\n"
-    "- lines: 1 to 4 lines (use 2-3 lines when two or more characters are present), each with speaker "
-    "(one of {speakers}), text (story language, at most 22 words; reference lines run 3-8 words), emotion "
-    "(one of {emotions}), delivery (English, at most 12 words; the story's voice performance is "
-    "{voice_direction})\n"
+    "- lines: 1 to 4 short spoken lines, each with speaker (one of {speakers}), text (story language, at "
+    "most 22 words; reference lines run 3-8 words), emotion (one of {emotions}), delivery (English, at "
+    "most 12 words; the story's voice performance is {voice_direction})\n"
     "- sfx_cues: 0 or more, each with at ('start' or a line number 1-n) and cue (one of {sfx_cues})\n"
     "- on_screen_text: null unless the scene truly needs one (at most 6 words, story language)\n\n"
-    "Write {word_budget_lo}-{word_budget_hi} words of dialogue in total (not fewer than {word_budget_lo}).\n\n"
+    "Write {word_budget_lo}-{word_budget_hi} words of dialogue in total: not fewer than {word_budget_lo}, "
+    "not more than {word_budget_hi}.\n\n"
     "{french_line}"
     "Never use real people, brands, studio names or copyrighted characters."
 )
@@ -1005,20 +1005,24 @@ _E2_ASK_TEMPLATE = (
 # The ask's own lower bound (spec 4.2, F3): ~0.7 of the scene's word budget,
 # never below 3 -- the budget itself (``timing.word_budget``) never goes
 # below 3 either, so the range is never inverted. The validator below is
-# more lenient than this (half the budget, not 0.7 of it): the ask states
-# the range it actually wants, the post-validator only the floor a reply
-# must clear to be usable at all, leaving room for the existing retry-once
-# path to ask again without every near-miss being rejected outright.
+# more lenient on both ends than this ask (a wider floor-to-ceiling band,
+# not the ask's own lo-hi): the ask states the range it actually wants, the
+# post-validator only the two limits a reply must clear to be usable at
+# all, leaving room for the existing retry-once path to ask again without
+# every near-miss being rejected outright.
 def _e2_word_range(word_budget: int) -> tuple:
     return max(3, round(0.7 * word_budget)), word_budget
 
 
-# The prefix every "too few words" validator error starts with (never any
+# The prefixes the two word-count validator errors start with (never any
 # other ``validate_e2`` message): the script step's own retry policy
-# (``steps.script.write_body_scene``) reads it to tell this one error apart
-# from a genuinely broken reply, so a second attempt that is merely a bit
-# short can be accepted instead of failing the whole scene (spec 4.2, F3).
+# (``steps.script.write_body_scene``) reads them to tell either apart from a
+# genuinely broken reply, so a second attempt that is merely off on its
+# word count can be accepted instead of failing the whole scene (spec 4.2,
+# F3). A reply is never both at once (the floor sits below the ceiling for
+# every budget), so the two never stack.
 E2_WORD_FLOOR_PREFIX = "$.lines: too few words"
+E2_WORD_CEILING_PREFIX = "$.lines: too many words"
 
 
 def _line_schema(speakers) -> dict:
@@ -1117,12 +1121,14 @@ def validate_e2(reply, *, scene, narrator_enabled, sfx_cues, word_budget=None) -
     never given) and instead relies on the 22-word per-line cap it does
     check below. When *word_budget* is given (the caller's own
     ``timing.word_budget``), a reply whose total dialogue falls under half
-    of it is one error more (:data:`E2_WORD_FLOOR_PREFIX`, spec 4.2, F3): a
-    floor well below the ask's own range (:func:`_e2_word_range`), leaving
-    slack so the existing retry-once path (``steps.script``) has room to
-    fix a merely-short reply instead of every near-miss being rejected.
-    *word_budget* stays ``None`` (no floor check) for a caller that has none
-    to give.
+    of it is one error more (:data:`E2_WORD_FLOOR_PREFIX`), and one over
+    1.5x it (floored) is another (:data:`E2_WORD_CEILING_PREFIX`, spec 4.2,
+    F3 round 2 -- the free tier was seen overshooting the ask's own range by
+    1.5-2.8x): both sit outside the ask's own range (:func:`_e2_word_range`),
+    leaving slack so the existing retry-once path (``steps.script``) has
+    room to fix a merely-off reply instead of every near-miss being
+    rejected. *word_budget* stays ``None`` (neither check) for a caller that
+    has none to give.
     """
     speakers = list(scene["characters"]) + (["narrator"] if narrator_enabled else [])
     sfx_cue_names = list(sfx_cues)
@@ -1151,10 +1157,16 @@ def validate_e2(reply, *, scene, narrator_enabled, sfx_cues, word_budget=None) -
     if word_budget is not None:
         total_words = sum(_word_count(line["text"]) for line in lines)
         floor = (word_budget + 1) // 2  # ceil(word_budget / 2), stdlib-only
+        ceiling = (3 * word_budget) // 2  # floor(word_budget * 1.5), stdlib-only
         if total_words < floor:
             errors.append(
                 f"{E2_WORD_FLOOR_PREFIX}: {total_words} in total, expected at least {floor} "
                 f"(half of the {word_budget}-word budget)"
+            )
+        if total_words > ceiling:
+            errors.append(
+                f"{E2_WORD_CEILING_PREFIX}: {total_words} in total, expected at most {ceiling} "
+                f"(1.5x the {word_budget}-word budget)"
             )
     return errors
 
