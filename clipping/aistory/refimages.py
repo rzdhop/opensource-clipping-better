@@ -80,6 +80,7 @@ from clipping.providers import gating
 from clipping.providers import generation as gen
 
 from . import imaging, prompting, schemas
+from . import names as names_mod
 from . import uploads as uploads_mod
 
 CHARACTERS, PLACES, PROPS = "characters", "places", "props"
@@ -208,17 +209,11 @@ NEUTRAL_WORDS = {CHARACTERS: "the character", PLACES: "the place", PROPS: "the o
 def _without_names(text, names) -> str:
     """*text* with every name of *names* replaced, longest first, as a whole
     word and whatever its case. *names* is ``{name: neutral word}``, or an
-    iterable of character names ("the character")."""
-    if not isinstance(names, dict):
-        names = {name: NEUTRAL_WORDS[CHARACTERS] for name in names}
-    words = {}
-    for name, word in names.items():
-        key = str(name).strip() if name else ""
-        if key:
-            words.setdefault(key, word)
-    for name in sorted(words, key=len, reverse=True):
-        text = re.sub(rf"(?<!\w){re.escape(name)}(?!\w)", words[name], text, flags=re.IGNORECASE)
-    return text
+    iterable of character names ("the character").
+
+    Delegates to the shared :func:`names.without_names` (lifted out for
+    ``shots.py``, phase 3 stage 5); behaviour is unchanged (RC-E5)."""
+    return names_mod.without_names(text, names, default_word=NEUTRAL_WORDS[CHARACTERS])
 
 
 def _entity_names(stories, story_id) -> dict:
