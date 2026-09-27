@@ -393,6 +393,7 @@ def _storyboard(**changes):
         "scenes": {sid: {"source": "t1", "script_rev": 1, "stale": False} for sid in SCENE_IDS},
         "resolved_from": {},
         "approved_at": None, "rev": 1,
+        "created_at": NOW, "updated_at": NOW,
     }
     doc.update(changes)
     return doc

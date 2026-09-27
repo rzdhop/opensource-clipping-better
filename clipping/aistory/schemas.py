@@ -2026,6 +2026,8 @@ STORYBOARD_SCHEMA = _document({
     "resolved_from": {"type": "object"},
     "approved_at": {"type": ["string", "null"]},
     "rev": {"type": "integer", "minimum": 1},
+    "created_at": _NON_EMPTY_STRING,
+    "updated_at": _NON_EMPTY_STRING,
 })
 
 

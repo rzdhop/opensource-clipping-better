@@ -1,5 +1,5 @@
-"""The on-disk story workspace and its index (spec 2, 2.1-2.6; phase-1 plan 2,
-phase-2 plan 2).
+"""The on-disk story workspace and its index (spec 2, 2.1-2.8; phase-1 plan 2,
+phase-2 plan 2, phase-3 plan 3).
 
 Layout, under the same ``outputs/`` directory the job store uses::
 
@@ -23,6 +23,10 @@ Layout, under the same ``outputs/`` directory the job store uses::
         props/<prop_id>/
             prop.json               # Prop (prop_v1)
             refs/image.png
+        episodes/ep<NN>/            # NN = 01..99
+            script.json             # EpisodeScript (episode_script_v1)
+            storyboard.json         # Storyboard (storyboard_v1)
+            assets/voice/line_<NN>.mp3|.wav|.json  # the opt-in voice measurement
         cost_ledger.json            # what each call cost (ledger.CostLedger)
         activity.log                # one line per thing a step printed
 
@@ -39,6 +43,10 @@ Rules this module keeps:
   (``MEDIA_NAME_PATTERNS``) are each checked before they are joined onto a
   path, and every level must be a real directory directly inside the one
   above it. A symlink is kept and never followed.
+- An episode number is a real ``int`` in 1..99 (``check_episode``: not a bool,
+  not ``"1"``, not ``1.0``), checked before ``ep<NN>`` is built; an episode
+  document or asset name is checked the same way, and the ``episodes/`` levels
+  follow the rule above.
 - Every JSON write is atomic: a temp file in the same directory, then
   ``os.replace``; a failure leaves the previous file byte-identical and no
   temp file behind. (``outputs/jobs.json`` is written in place; this does not
@@ -48,6 +56,9 @@ Rules this module keeps:
   ``approvals.cast`` and ``approvals.places`` are folded from the entities'
   own ``approved_at`` whenever an entity is written or deleted
   (``recompute_group_approvals``), so they cannot go stale either.
+- Episode documents never read or write story.json: writing, reading or
+  listing an episode changes neither the story's approvals, its status nor
+  its index entry. Deleting the story removes its episodes with its folder.
 - Deleting an entity leaves no id pointing at it: a deleted character leaves
   the other characters' ``relationships``, its props' ``owner_char_id``, the
   season arc and the places proposal; a deleted place leaves the characters'
@@ -149,6 +160,35 @@ MEDIA_NAME_PATTERNS = {
 # Each place's folder below the entity's own, one level at a time.
 MEDIA_DIRS = {"refs": ("refs",), "uploads": ("refs", "uploads"), "voice": ()}
 
+# An episode's folder is <story>/episodes/ep<NN>/, NN two digits: the "ep"
+# bounds of episode_script_v1 and storyboard_v1.
+EPISODES_DIRNAME = "episodes"
+EPISODE_MIN = 1
+EPISODE_MAX = 99
+# [0-9], not \d: int() also reads other scripts' digits ("ep٠٥" would be 5).
+EPISODE_DIR_NAME = re.compile(r"^ep[0-9]{2}$")
+
+# The documents of an episode that read_episode_doc/write_episode_doc may
+# name, and the checks the store runs on every read and every write: the
+# self-contained ones only. The checks against the story (cast, places, the
+# script a storyboard follows) need the story, so the caller runs them.
+EPISODE_SCRIPT_DOC = "script.json"
+EPISODE_STORYBOARD_DOC = "storyboard.json"
+EPISODE_DOC_NAMES = (EPISODE_SCRIPT_DOC, EPISODE_STORYBOARD_DOC)
+EPISODE_DOC_VALIDATORS = {
+    EPISODE_SCRIPT_DOC: schemas.episode_script_errors,
+    EPISODE_STORYBOARD_DOC: schemas.storyboard_errors,
+}
+# The episode documents that carry created_at/updated_at: every one of them
+# (spec 2: every JSON document carries an updated_at).
+EPISODE_DOCS_WITH_TIMESTAMPS = (EPISODE_SCRIPT_DOC, EPISODE_STORYBOARD_DOC)
+
+# The files an episode keeps in assets/<kind>/, and the only names each kind
+# may hold. Phase 4 adds shots, sfx and bgm.
+EPISODE_ASSETS_DIRNAME = "assets"
+EPISODE_ASSET_KINDS = ("voice",)
+EPISODE_ASSET_NAME_PATTERNS = {"voice": re.compile(r"^line_[0-9]{2}\.(mp3|wav|json)$")}
+
 INDEX_FIELDS = ("story_id", "title", "language", "style_template_id", "status", "created_at", "updated_at")
 
 # story.json keys a caller may never change once the story exists.
@@ -214,6 +254,16 @@ def is_story_id(value) -> bool:
     """Whether *value* is a well-formed story id. ``fullmatch``, not ``match``:
     ``$`` also matches before a trailing newline."""
     return isinstance(value, str) and STORY_ID_PATTERN.fullmatch(value) is not None
+
+
+def check_episode(ep) -> int:
+    """*ep* itself once it is an episode number: an ``int`` in
+    ``EPISODE_MIN..EPISODE_MAX``. ``type() is int``, not ``isinstance``: True
+    is an int equal to 1. ``"1"`` and ``1.0`` are refused too. KeyError
+    otherwise, like a malformed story id, and before any path is built."""
+    if type(ep) is not int or not EPISODE_MIN <= ep <= EPISODE_MAX:
+        raise KeyError(ep)
+    return ep
 
 
 def derive_status(approvals) -> str:
@@ -362,6 +412,28 @@ def _media_location(kind, name) -> str:
     raise KeyError(name)
 
 
+def _episode_folder(ep) -> str:
+    """``ep<NN>`` for an episode number already checked by ``check_episode``."""
+    return f"ep{ep:02d}"
+
+
+def _episode_number(name):
+    """The episode a folder named *name* holds, or None for any other name."""
+    if not isinstance(name, str) or EPISODE_DIR_NAME.fullmatch(name) is None:
+        return None
+    ep = int(name[2:])
+    return ep if EPISODE_MIN <= ep <= EPISODE_MAX else None
+
+
+def _episode_doc_errors(name, doc, ep) -> list:
+    """The episode document's own checks (``EPISODE_DOC_VALIDATORS``), then
+    its ``ep`` against the folder it is read from or written to."""
+    errors = EPISODE_DOC_VALIDATORS[name](doc)
+    if not errors and doc["ep"] != ep:
+        errors = [f"$.ep: {doc['ep']!r} does not match its folder {_episode_folder(ep)!r}"]
+    return errors
+
+
 def _still_or_now(value, now):
     """An approval that still holds keeps its timestamp; a new one is *now*."""
     return value if isinstance(value, str) and value else now
@@ -427,6 +499,12 @@ class StoryStore:
     def _check_doc_name(name) -> None:
         if not isinstance(name, str) or name not in DOC_NAMES:
             raise ValueError(f"not a story document: {name!r} (allowed: {', '.join(DOC_NAMES)})")
+
+    @staticmethod
+    def _check_episode_doc_name(name) -> None:
+        if not isinstance(name, str) or name not in EPISODE_DOC_NAMES:
+            raise ValueError(
+                f"not an episode document: {name!r} (allowed: {', '.join(EPISODE_DOC_NAMES)})")
 
     def story_dir(self, story_id) -> str:
         """The real path of the story's folder; KeyError if the id is malformed
@@ -1133,6 +1211,172 @@ class StoryStore:
         if real is None:
             raise KeyError(name)
         return real
+
+    # ----------------------------------------------------------- episodes
+    #
+    # Nothing in this section reads or writes story.json or the index: an
+    # episode document changes neither the story's approvals, its status nor
+    # its index entry. Only the story's folder has to exist.
+
+    def _episode_label(self, story_id, ep) -> str:
+        return f"{self._label(story_id)}{EPISODES_DIRNAME}/{_episode_folder(ep)}/"
+
+    def episode_dir(self, story_id, ep, *, create=False) -> str:
+        """The real path of ``<story>/episodes/ep<NN>/``.
+
+        The story id and the episode number (``check_episode``) are checked
+        before any path is built; each level must be a real directory directly
+        inside the one above it (``_descend``, the ``preview_dir`` rule).
+        *create* makes the missing levels, one at a time. KeyError for an
+        unknown story, a missing level (without *create*), or a level that is
+        anything but a real directory.
+        """
+        self._check_id(story_id)
+        ep = check_episode(ep)
+        with self._lock:
+            return _descend(self.story_dir(story_id), (EPISODES_DIRNAME, _episode_folder(ep)),
+                            create=create, label=self._episode_label(story_id, ep))
+
+    def _existing_episode_dir(self, story_id, ep):
+        """``episode_dir`` without *create*, but None when a level does not
+        exist yet (under the lock). A level that exists as anything but a real
+        directory still raises KeyError: absent is not the same as refused."""
+        parent = self.story_dir(story_id)
+        for part in (EPISODES_DIRNAME, _episode_folder(ep)):
+            if not os.path.lexists(os.path.join(parent, part)):
+                return None
+            parent = _descend(parent, (part,), create=False, label=self._episode_label(story_id, ep))
+        return parent
+
+    def read_episode_doc(self, story_id, ep, name):
+        """One episode document (``EPISODE_DOC_NAMES``), or None if it does not
+        exist yet.
+
+        The name, the episode number and the story id are checked before any
+        path is built. SchemaError for a document that is a symlink (never
+        followed), unreadable, not valid JSON, fails its own checks
+        (``EPISODE_DOC_VALIDATORS``) or names another episode -- never
+        repaired. KeyError for an unknown story, or an ``episodes/`` or
+        ``ep<NN>/`` that is there but is not a real directory.
+        """
+        self._check_episode_doc_name(name)
+        ep = check_episode(ep)
+        self._check_id(story_id)
+        label = f"{self._episode_label(story_id, ep)}{name}"
+        with self._lock:
+            directory = self._existing_episode_dir(story_id, ep)
+            if directory is None:
+                return None
+            path = os.path.join(directory, name)
+            if os.path.islink(path):
+                raise schemas.SchemaError(label, [f"{name} is a symlink; it is never followed"])
+            try:
+                with open(path, encoding="utf-8") as fh:
+                    doc = json.load(fh)
+            except FileNotFoundError:
+                return None
+            except ValueError as exc:
+                raise schemas.SchemaError(label, [f"not valid JSON: {exc}"]) from None
+            except OSError as exc:
+                raise schemas.SchemaError(label, [f"unreadable ({type(exc).__name__}: {exc})"]) from None
+        errors = _episode_doc_errors(name, doc, ep)
+        if errors:
+            raise schemas.SchemaError(label, errors)
+        return doc
+
+    def write_episode_doc(self, story_id, ep, name, doc, *, now, validator=None) -> dict:
+        """Write one episode document; returns what was written.
+
+        The name (``EPISODE_DOC_NAMES``), the episode number and the story id
+        are checked before any path is built. A document that carries
+        timestamps (``EPISODE_DOCS_WITH_TIMESTAMPS``) has its ``updated_at``
+        become *now* and keeps the ``created_at`` it is given, as
+        ``write_doc`` does. Its own checks (``EPISODE_DOC_VALIDATORS``), its
+        ``ep`` against *ep*, and *validator* when given (the checks against
+        the story, which the caller runs) must all pass, or nothing is written
+        and no folder is made. The folders are made one level at a time
+        (``episode_dir``); the write is atomic; a symlink or anything but a
+        regular file in the document's place is refused, never followed or
+        replaced. story.json is neither read nor written.
+        """
+        self._check_episode_doc_name(name)
+        ep = check_episode(ep)
+        self._check_id(story_id)
+        if not isinstance(doc, dict):
+            raise ValueError(f"{name} must be an object, not {type(doc).__name__}")
+        label = f"{self._episode_label(story_id, ep)}{name}"
+        new = copy.deepcopy(doc)
+        if name in EPISODE_DOCS_WITH_TIMESTAMPS:
+            new["updated_at"] = now
+        errors = _episode_doc_errors(name, new, ep)
+        if not errors and validator is not None:
+            errors = validator(new)
+        if errors:
+            raise schemas.SchemaError(label, errors)
+        with self._lock:
+            dest = os.path.join(self.episode_dir(story_id, ep, create=True), name)
+            if os.path.islink(dest) or (os.path.lexists(dest) and not os.path.isfile(dest)):
+                raise ValueError(f"{label} is not a regular file; it is never followed or replaced")
+            _atomic_write_json(dest, new)
+        return copy.deepcopy(new)
+
+    def list_episodes(self, story_id) -> list:
+        """The story's episode numbers, in order: every ``ep<NN>`` (01..99)
+        that is a real directory directly inside a real ``episodes/``, whatever
+        it holds. Any other name is ignored; a symlink or a file named like an
+        episode (or in place of ``episodes/``) is skipped and printed
+        (``on_log``) -- never followed, never deleted. KeyError for a malformed
+        id or an unknown story.
+        """
+        self._check_id(story_id)
+        numbers, messages = [], []
+        with self._lock:
+            parent = self.story_dir(story_id)
+            if os.path.lexists(os.path.join(parent, EPISODES_DIRNAME)):
+                folder = _contained(parent, EPISODES_DIRNAME, want_dir=True)
+                if folder is None:
+                    messages.append(f"Skipped {self._label(story_id)}{EPISODES_DIRNAME}/: "
+                                    "not a real directory, never followed")
+                else:
+                    for name in sorted(os.listdir(folder)):
+                        ep = _episode_number(name)
+                        if ep is None:
+                            continue
+                        if _contained(folder, name, want_dir=True) is None:
+                            messages.append(f"Skipped {self._episode_label(story_id, ep)}: "
+                                            f"not a real directory inside {EPISODES_DIRNAME}/")
+                            continue
+                        numbers.append(ep)
+        self._log(messages)
+        return sorted(numbers)
+
+    def episode_asset_path(self, story_id, ep, kind, filename, *, create=False) -> str:
+        """The path of ``<story>/episodes/ep<NN>/assets/<kind>/<filename>``, to
+        write the file or to serve it.
+
+        *kind* (``EPISODE_ASSET_KINDS``), *filename* (its kind's
+        ``EPISODE_ASSET_NAME_PATTERNS``), the episode number and the story id
+        are checked before any path is built. Every folder must be a real
+        directory directly inside the one above it (``_descend``); *create*
+        makes the missing ones. The file need not exist, but whatever is in
+        its place must be a regular file. KeyError for all of these -- a
+        symlink at any level, the file's own included, is refused and never
+        followed.
+        """
+        if not isinstance(kind, str) or kind not in EPISODE_ASSET_KINDS:
+            raise KeyError(kind)
+        if not isinstance(filename, str) or EPISODE_ASSET_NAME_PATTERNS[kind].fullmatch(filename) is None:
+            raise KeyError(filename)
+        ep = check_episode(ep)
+        self._check_id(story_id)
+        label = f"{self._episode_label(story_id, ep)}{EPISODE_ASSETS_DIRNAME}/{kind}/"
+        with self._lock:
+            folder = _descend(self.episode_dir(story_id, ep, create=create),
+                              (EPISODE_ASSETS_DIRNAME, kind), create=create, label=label)
+            path = os.path.join(folder, filename)
+            if os.path.islink(path) or (os.path.lexists(path) and not os.path.isfile(path)):
+                raise KeyError(f"{label}{filename}")
+        return path
 
     # -------------------------------------------------------------- index
 
