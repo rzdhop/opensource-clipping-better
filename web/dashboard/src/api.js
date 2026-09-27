@@ -545,13 +545,23 @@ export async function regenerateStory(storyId, payload) {
  * `regenerate` (its own estimate differs by what is being regenerated);
  * `selected` only for `cast` (the ticked cast-sketch names, repeated as
  * `?selected=`); `episodes` only for `season` (3 to 12, default 8 -- the
- * estimate is `1 + episodes` LLM calls).
+ * estimate is `1 + episodes` LLM calls); `places`/`props` only for `places`
+ * (the names on screen in the proposal editor, repeated as `?place=`/
+ * `?prop=`; omitted, the estimate falls back to the saved proposal).
  */
-export async function fetchStoryEstimate(storyId, step, { target, selected, episodes } = {}) {
+export async function fetchStoryEstimate(storyId, step, { target, selected, episodes, places, props } = {}) {
   const params = new URLSearchParams()
   if (target) params.set('target', target)
   if (selected) selected.forEach((name) => params.append('selected', name))
   if (episodes != null) params.set('episodes', episodes)
+  // `places`/`props`: the list the "places" step would receive (the current
+  // proposal editor's, not the saved places_proposal.json). Omitted leaves
+  // the estimate on its default (the saved proposal); given, each name is
+  // sent as its own repeated `place=`/`prop=` (an empty array sends none,
+  // which -- like omitting it -- reads as "use the saved proposal" server
+  // side; the proposal editor always starts from at least the saved names).
+  if (places) places.forEach((name) => params.append('place', name))
+  if (props) props.forEach((name) => params.append('prop', name))
   const qs = params.toString()
   const res = await request(`/stories/${storyId}/estimate/${step}${qs ? `?${qs}` : ''}`)
   if (!res.ok) throw await apiError(res, 'Failed to fetch the estimate')

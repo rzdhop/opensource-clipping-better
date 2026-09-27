@@ -175,19 +175,25 @@ export function EditableList({ label, value, onSave, exactLines, disabled, hint 
   )
 }
 
-/** A note input plus a "Regenerate" button, with its estimate chip. */
-export function RegenerateControl({ onRegenerate, disabled, estimateChip }) {
+/**
+ * A note input plus a "Regenerate" button, with its estimate chip. With
+ * `empty` (an image slot that has nothing yet: `null`, "Not made yet.")
+ * there is nothing to iterate on, so the control reads "Make <label>"
+ * instead and skips the note input; the target and the estimate chip stay
+ * the same either way, so a first make and a later regenerate cost the same.
+ */
+export function RegenerateControl({ onRegenerate, disabled, estimateChip, empty, label }) {
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [errors, setErrors] = useState(null)
 
-  const run = async () => {
+  const run = async (withNote) => {
     setBusy(true)
     setError('')
     setErrors(null)
     try {
-      await onRegenerate(note.trim() || null)
+      await onRegenerate(withNote)
       setNote('')
     } catch (err) {
       setError(err.message)
@@ -195,6 +201,23 @@ export function RegenerateControl({ onRegenerate, disabled, estimateChip }) {
     } finally {
       setBusy(false)
     }
+  }
+
+  if (empty) {
+    return (
+      <div className="story-regenerate">
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          onClick={() => run(null)}
+          disabled={disabled || busy}
+        >
+          {busy ? 'Making…' : `Make ${label}`}
+        </button>
+        {estimateChip}
+        <StepError message={error} errors={errors} />
+      </div>
+    )
   }
 
   return (
@@ -207,7 +230,7 @@ export function RegenerateControl({ onRegenerate, disabled, estimateChip }) {
         onChange={(e) => setNote(e.target.value)}
         disabled={disabled || busy}
       />
-      <button type="button" className="btn btn-secondary btn-sm" onClick={run} disabled={disabled || busy}>
+      <button type="button" className="btn btn-secondary btn-sm" onClick={() => run(note.trim() || null)} disabled={disabled || busy}>
         {busy ? 'Regenerating…' : '↻ Regenerate'}
       </button>
       {estimateChip}

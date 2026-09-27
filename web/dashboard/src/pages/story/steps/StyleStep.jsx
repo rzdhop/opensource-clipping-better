@@ -99,6 +99,8 @@ function ColorListEditor({ label, colors, onChange, disabled, min = 1, max = 6 }
                 type="button"
                 className="btn btn-ghost btn-sm"
                 onClick={() => onChange(list.filter((_, idx) => idx !== i))}
+                aria-label={`Remove ${label} color ${hex}`}
+                title={`Remove ${label} color ${hex}`}
               >
                 ✕
               </button>

@@ -16,6 +16,22 @@
 - **Known going in:** no IMAGE_EDIT_CHAIN link can run for free here → sheets stop and ask for prompt-only.
 - **Next free ids:** DEC-117, A-050. **Open questions:** none.
 
+### Tier-2 (phase 2) — live, walked by me at 375 px (2026-09-26 23:30–23:46 UTC)
+Deployed: ff `feat/ai-story-phase-2` → `main` (`c855446`, then `72d3140` for the voice fix), container rebuilt/restarted at 0 jobs.
+Story `b1104ec66b05` (FR, Tentafruit, fruit_drama locked from phase 1; its phase-1 story.json upgraded in memory).
+| # | Step | Result |
+|---|---|---|
+| a | Cast estimate before anything runs: 3 LLM · 3 images · 6 edits · voice ~360 chars, $0.00; edit chain not ready with every reason, incl. **paid editors refused with their numbers** (est $0.202 gemini/nano-banana-2-lite, $0.180 fal/seedream-4-edit; allow_paid off) | **PASS** |
+| b | Cast of 3 ticked from the sketch (Kiwilo, Mangella, Broccolia): K1 ×3 on Gemini free (≈294–317 of 750), portraits on Pollinations ($0.000, base), sheets **stopped before any call** ("needs an editor"), 3 distinct FR Edge voices pinned, samples made; 🟡 line | **PASS** |
+| c | FINDING: Broccolia (female, elder) got fr-FR-EloiseNeural (young) — age scored all-or-nothing, catalogue order broke the tie → fixed (`72d3140`, age distance); re-picked in the UI: top alternate fr-FR-VivienneMultilingualNeural (adult) → voice regenerate + sample | **FIXED + PASS** |
+| d | Upload for Mangella (a style-preview JPEG via the API — the browser cannot pick files): stored as a uuid PNG with no metadata; `character:char_mangella:text` → U1 on gemini/flash-lite (free, 2.6 s) described it, K1 ran with the notes (followed the colours; a conflicting human-looking reference is bent to the fruit style — A-entry) | **PASS** |
+| e | Banner offered the prompt-only switch (confirm) → mode prompt_only → Continue cast: 6 sheets via t2i with each portrait's seed, labelled prompt-only, nothing redone | **PASS** |
+| f | Approve characters (UI) → `cast_approved`; places proposal (P0 ≈192/420) edited in the UI to 2 places + 1 prop → places job (P1 ≈128/121 of 260, R1 ≈42/100, 3 free images base); night variant for Le Parloir (prompt-only, the plate's seed); approve → `places_approved` | **PASS** |
+| g | Season: 8 episodes (S1 ≈297/950, S2 ×8 ≈109–176/350), arc coherent (setup, midpoint twist ep 4, climax ep 8, uses the new places) → approve → **`ready`**, final card | **PASS** |
+| h | Files: each character folder = character.json + portrait/turnaround/expressions + voice_sample.mp3, all validate; ledger 24 rows, 0 paid, $0.00 (9 character images, 4 samples, 3 place images, 1 prop, 1 upload description, 6 phase-1 previews); 32 LLM lines, 0 over cap, the paid link skipped and printed every time; no spend.json | **PASS** |
+| i | 375 px: no overflow on the story at every step; three voice samples **played on the human's phone and distinct** | **PENDING (human)** |
+Polish findings (fix running): prompt-only sheets estimated as "edits"; the places estimate ignores the edited list; empty variant slots say "Regenerate" instead of "Make"; icon-only ✕ buttons without aria-label.
+
 ### Regression contract (phase 2)
 RC-P1…P11 and RC-S1…S4 stay, plus:
 | ID | Must keep working | Proven by |
@@ -38,7 +54,7 @@ RC-P1…P11 and RC-S1…S4 stay, plus:
 | 8 | CLI (+ clean dangling ids on entity delete) | **done** (local 3686 / CI 3128 + 528 skipped) |
 | 9 | dashboard: CastEditor | **done** (local 3701 / CI 3138 + 533 skipped; build green; browser check with stage 10) |
 | 10 | dashboard: PlacesProps + SeasonBoard + wiring | **done** (local 3725 / CI 3162 + 533 skipped; build green; 375/820/1280 checked, 2 findings fixed) |
-| 11 | merge, deploy, Tier-2 | next |
+| 11 | merge, deploy, Tier-2 | **in progress**: deployed; walk passed; human voice check pending; polish fixes running |
 | 12 | docs + decisions | — |
 
 ---

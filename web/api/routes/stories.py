@@ -1022,7 +1022,8 @@ def _estimate_message(rows, calls, refusal) -> str:
 
 @router.get("/{story_id}/estimate/{step}")
 async def estimate(story_id: str, step: str, target: Optional[str] = None,
-                   selected: Optional[list[str]] = Query(None), episodes: Optional[int] = None) -> dict:
+                   selected: Optional[list[str]] = Query(None), episodes: Optional[int] = None,
+                   place: Optional[list[str]] = Query(None), prop: Optional[list[str]] = Query(None)) -> dict:
     """What a step would cost and where it would run::
 
         {"step", "est_usd": 0.0, "units": {"llm_calls": n},
@@ -1045,17 +1046,19 @@ async def estimate(story_id: str, step: str, target: Optional[str] = None,
 
     Phase 2: ``places_proposal`` (1 call) and ``season`` (1 + N calls,
     ``?episodes=N``, 3 to 12, default 8) answer like the LLM steps above.
-    ``cast`` (``?selected=<sketch name>``, repeated) and ``places`` (the
-    saved proposal) answer ``_generation_estimate``: ``units {llm_calls,
-    images, edit_images, tts_chars}`` counting only what is missing (a new
-    character counts fully), ``est_usd`` = images x the first runnable image
-    link's price + edits x the editor's, ``route_class`` and ``links`` of
-    ``IMAGE_CHAIN``, ``edit`` the editor's verdict (with the story's ledger
-    total against the cap; a local editor that would run the counted edits
-    is asked whether it is there, as on the story page). A phase-2
-    ``?target=`` of ``regenerate``: a text or an arc entry as the LLM steps
-    (1 call); an image or a voice as ``_generation_estimate``. A later step:
-    400; anything else: 404.
+    ``cast`` (``?selected=<sketch name>``, repeated) and ``places`` (
+    ``?place=<name>``/``?prop=<name>``, each repeated -- the list the places
+    step would receive; neither given falls back to the saved proposal, as
+    the step itself does) answer ``_generation_estimate``: ``units
+    {llm_calls, images, edit_images, tts_chars}`` counting only what is
+    missing (a new character counts fully), ``est_usd`` = images x the first
+    runnable image link's price + edits x the editor's, ``route_class`` and
+    ``links`` of ``IMAGE_CHAIN``, ``edit`` the editor's verdict (with the
+    story's ledger total against the cap; a local editor that would run the
+    counted edits is asked whether it is there, as on the story page). A
+    phase-2 ``?target=`` of ``regenerate``: a text or an arc entry as the LLM
+    steps (1 call); an image or a voice as ``_generation_estimate``. A later
+    step: 400; anything else: 404.
     """
     stories = _stories()
     story = _load(stories, story_id)
@@ -1078,7 +1081,11 @@ async def estimate(story_id: str, step: str, target: Optional[str] = None,
                                        probe_local=True)
     if step == "places":
         with _answering():
-            units = workflow.places_units(stories, story)
+            params = None
+            if place is not None or prop is not None:
+                params = {"places": [{"name": name} for name in place or []],
+                          "props": [{"name": name} for name in prop or []]}
+            units = workflow.places_units(stories, story, params)
             listed = (workflow.places_proposal(stories, story_id) is not None
                       or workflow.list_entities(stories, story_id, PLACES)
                       or workflow.list_entities(stories, story_id, PROPS))

@@ -47,6 +47,7 @@ CONCEPTS_STEP = STORY_SRC / "steps" / "ConceptsStep.jsx"
 CAST_STEP = STORY_SRC / "steps" / "CastStep.jsx"
 PLACES_STEP = STORY_SRC / "steps" / "PlacesStep.jsx"
 SEASON_STEP = STORY_SRC / "steps" / "SeasonStep.jsx"
+FIELDS = STORY_SRC / "fields.jsx"
 
 
 def _class_fields(name: str) -> set[str]:
@@ -445,3 +446,112 @@ def test_season_step_regenerate_targets_match_the_entity_target_shapes():
 def test_season_step_renders_its_own_error_slot():
     src = SEASON_STEP.read_text(encoding="utf-8")
     assert "story-step-error" in src, "SeasonStep.jsx has no story-step-error slot"
+
+
+# =============================================== polish findings (Tier-2 walk)
+#
+# Four small fixes from the live phase-2 walk (CHECKPOINT.md's Tier-2 entry):
+# the places estimate must reflect the list the user is editing, not only the
+# saved proposal; an empty image slot must offer "Make <x>", not "Regenerate";
+# and every icon-only button in the story pages needs an accessible name.
+
+def test_the_places_estimate_call_sends_the_list_on_screen():
+    """ProposalEditor's estimate chip (above "Create places & props") must be
+    fetched with the names on screen (`placeNames`/`propNames`), not with no
+    arguments at all -- the bug was that it always showed the saved
+    places_proposal.json's estimate, even after the user trimmed the list."""
+    src = PLACES_STEP.read_text(encoding="utf-8")
+    match = re.search(
+        r"fetchStoryEstimate\(\s*storyId,\s*'places',\s*\{\s*places:\s*placeNames,\s*props:\s*propNames\s*\}\s*\)",
+        src)
+    assert match, "ProposalEditor must call fetchStoryEstimate(storyId, 'places', { places: placeNames, props: propNames })"
+
+
+def test_fetch_story_estimate_forwards_places_and_props_as_repeated_query_params():
+    api_js = (PROJECT_ROOT / "web" / "dashboard" / "src" / "api.js").read_text(encoding="utf-8")
+    match = re.search(r"export async function fetchStoryEstimate\(storyId, step, \{([^}]*)\}", api_js)
+    assert match, "fetchStoryEstimate signature not found in api.js"
+    destructured = {name.strip() for name in match.group(1).split(",") if name.strip()}
+    assert {"places", "props"} <= destructured, destructured
+    assert "params.append('place'" in api_js and "params.append('prop'" in api_js
+
+
+def _regenerate_control_call_sites(src: str) -> list[str]:
+    """Every `<RegenerateControl ... />` opening tag in *src*, as one string
+    each (attributes may span several lines, and one of them --
+    `estimateChip={<EstimateChip .../>}` -- self-closes too, so a naive
+    "first `/>`" search stops inside it; this tracks brace depth instead, and
+    closes the tag only at depth 0)."""
+    sites = []
+    for start in (m.start() for m in re.finditer(r"<RegenerateControl\b", src)):
+        depth = 0
+        i = start
+        while i < len(src):
+            ch = src[i]
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+            elif ch == "/" and depth == 0 and src[i:i + 2] == "/>":
+                sites.append(src[start:i + 2])
+                break
+            elif ch == ">" and depth == 0:
+                sites.append(src[start:i + 1])
+                break
+            i += 1
+    return sites
+
+
+def test_regenerate_control_supports_an_empty_make_mode():
+    """fields.jsx's shared control must read "Make <label>" (no note input)
+    for an empty slot, and keep "Regenerate" (with a note) once an image
+    exists -- the bug was offering "Regenerate" for a slot that was never
+    made yet."""
+    src = FIELDS.read_text(encoding="utf-8")
+    assert re.search(r"export function RegenerateControl\(\{[^}]*\bempty\b[^}]*\blabel\b[^}]*\}\)", src), (
+        "RegenerateControl must take `empty` and `label` props")
+    assert "`Make ${label}`" in src
+    assert "↻ Regenerate" in src
+
+
+def test_cast_steps_missing_image_slot_uses_make_not_regenerate():
+    src = CAST_STEP.read_text(encoding="utf-8")
+    [call] = [c for c in _regenerate_control_call_sites(src) if "SLOT_LABELS[slot]" in c]
+    assert "empty={!ref}" in call and "label={SLOT_LABELS[slot]}" in call
+
+
+def test_places_steps_missing_variant_and_prop_image_use_make_not_regenerate():
+    src = PLACES_STEP.read_text(encoding="utf-8")
+    calls = _regenerate_control_call_sites(src)
+    [variant_call] = [c for c in calls if "label={variantKey}" in c]
+    assert "empty={!imageRef}" in variant_call
+    [prop_call] = [c for c in calls if 'label="image"' in c]
+    assert "empty={!prop.image}" in prop_call
+
+
+def _icon_only_button_blocks(src: str) -> list[str]:
+    """Every `<button ...>...</button>` block in *src* whose rendered text,
+    right before the closing tag, is a single non-alphanumeric glyph (the
+    icon-only "✕" remove buttons; a labelled button like "+ Add" or
+    "Delete place" is left out)."""
+    blocks = []
+    for match in re.finditer(r"<button\b.*?</button>", src, re.S):
+        block = match.group(0)
+        tail = re.search(r">\s*([^\n<{]*?)\s*</button>\Z", block)
+        visible = tail.group(1).strip() if tail else ""
+        if visible and len(visible) <= 2 and not any(ch.isalnum() for ch in visible):
+            blocks.append(block)
+    return blocks
+
+
+def test_icon_only_buttons_in_the_story_pages_have_an_accessible_name():
+    found = 0
+    for path in (CAST_STEP, PLACES_STEP, STYLE_STEP):
+        src = path.read_text(encoding="utf-8")
+        blocks = _icon_only_button_blocks(src)
+        for block in blocks:
+            assert "aria-label" in block, f"{path.name}: icon-only button has no aria-label: {block!r}"
+        found += len(blocks)
+    # Known icon-only buttons: CastStep's removeCustom, PlacesStep's
+    # removePlace and removeProp, StyleStep's palette-color remove.
+    assert found == 4, found

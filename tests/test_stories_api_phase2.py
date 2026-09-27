@@ -516,6 +516,60 @@ def test_progress_with_probe_local_asks_the_local_editor_and_waits_for_one_when_
     assert down.timeouts == [local_comfyui.STATUS_PROBE_TIMEOUT_SECONDS] and down.timeouts[0] <= 2.0
 
 
+def test_cast_units_prices_missing_sheets_as_images_only_in_prompt_only_mode(tmp_path):
+    """Workflow-level regression lock for the Tier-2 walk finding
+    "prompt-only sheets estimated as edits" (``clipping.aistory.workflow
+    .cast_units``): a character with its portrait but no sheets prices the
+    missing turnaround/expressions as ``edit_images`` in references mode,
+    and as ``images`` (never ``edit_images``) once the story is switched to
+    prompt-only -- the same story, re-read after the switch."""
+    from clipping.aistory import workflow
+
+    store = StoryStore(tmp_path / "outputs", on_log=lambda line: None)
+    story_id = _story(store)  # references mode, style_approved
+    _new_character(store, story_id, "char_kiwilo", "Kiwilo")
+    src = tmp_path / "portrait.png"
+    src.write_bytes(PNG)
+    store.write_media(story_id, "characters", "char_kiwilo", "portrait.png", str(src))
+    doc = store.read_entity(story_id, "characters", "char_kiwilo")
+    doc["refs"]["portrait"] = {"name": "portrait.png", "consistency": "base", "source": "pollinations/flux",
+                               "seed": 7, "created_at": NOW}
+    store.write_entity(story_id, "characters", doc, now=NOW)
+
+    references_units = workflow.cast_units(store, store.get(story_id))
+    assert references_units["edit_images"] == 2 and references_units["images"] == 0
+
+    workflow.patch_story(store, story_id, {"generation_profile": {"consistency_mode": "prompt_only"}}, now=NOW)
+    prompt_only_units = workflow.cast_units(store, store.get(story_id))
+    assert prompt_only_units["edit_images"] == 0 and prompt_only_units["images"] == 2
+
+
+def test_target_units_prices_a_missing_place_time_variant_as_images_only_in_prompt_only_mode(tmp_path):
+    """Same lock, place side (``workflow.target_units``): a place's time
+    variant that is not made yet (made on demand, spec 2.4) prices as
+    ``edit_images`` in references mode and as ``images`` once the story is
+    prompt-only, matching ``clipping.aistory.steps.places``' own note that
+    the master plate is always text-to-image but a variant is drawn from it
+    ("edited") unless the story is prompt-only."""
+    from clipping.aistory import workflow
+    from clipping.aistory.steps import places as places_step
+    from clipping.aistory.steps import regenerate as regenerate_step
+
+    store = StoryStore(tmp_path / "outputs", on_log=lambda line: None)
+    story_id = _story(store)  # references mode
+    place = places_step.new_place("place_beach", "Le camp de plage", "Un feu, des huttes.", now=NOW)
+    store.write_entity(story_id, "places", place, now=NOW)
+    parsed = regenerate_step.parse_target("place:place_beach:image:night")
+    assert parsed == ("place", "place_beach", "image", "night")
+
+    references_units = workflow.target_units(store, store.get(story_id), parsed)
+    assert references_units == {"llm_calls": 0, "images": 0, "edit_images": 1, "tts_chars": 0}
+
+    workflow.patch_story(store, story_id, {"generation_profile": {"consistency_mode": "prompt_only"}}, now=NOW)
+    prompt_only_units = workflow.target_units(store, store.get(story_id), parsed)
+    assert prompt_only_units == {"llm_calls": 0, "images": 1, "edit_images": 0, "tts_chars": 0}
+
+
 # =================================================== describe before K1 (CI)
 
 def _cast_step(store, story_id, *, params, llm, fakes, settings=NO_EDITOR):
@@ -1596,6 +1650,20 @@ def test_the_cast_estimate_counts_only_what_is_missing(api):
     assert body["units"] == {"llm_calls": 1, "images": 1, "edit_images": 8, "tts_chars": 120}
 
 
+def test_the_cast_estimate_counts_existing_missing_sheets_as_images_once_switched_to_prompt_only(api):
+    """Regression lock for the Tier-2 walk finding "prompt-only sheets
+    estimated as edits": a cast already stalled on missing sheets in
+    references mode, then switched to prompt-only, must have its *existing*
+    missing sheets re-priced as images too (workflow.cast_units already
+    re-reads generation_profile.consistency_mode on every call; the walk's
+    actual bug was the dashboard's cast estimate chip not refetching after
+    the switch -- see CastStep.jsx's ContinueCast/ImageSlot fixes)."""
+    story_id = _cast_via_api(api, settings=NO_EDITOR)  # portraits, voices, samples; no sheet (references)
+    api.client.patch(_url(story_id), json={"generation_profile": {"consistency_mode": "prompt_only"}})
+    body = _estimate(api, story_id, "cast")
+    assert body["units"] == {"llm_calls": 0, "images": 6, "edit_images": 0, "tts_chars": 0}
+
+
 def test_a_paid_editor_is_refused_with_its_numbers_while_allow_paid_is_off_and_priced_once_on(api):
     story_id = _story(api.store)
     _settings(api, PAID_EDITOR)
@@ -1653,6 +1721,41 @@ def test_the_places_season_and_proposal_estimates(api):
     assert api.client.get(regen, params={"target": "character:char_nobody:text"}).status_code == 404
     assert api.client.get(regen, params={"target": "character:char_kiwilo:image:extra:1"}).status_code == 400
     assert api.client.get(_url(story_id, "/estimate/script")).status_code == 400
+
+
+def test_the_places_estimate_counts_the_list_the_user_is_editing_not_only_the_saved_proposal(api):
+    """The places board lets the user drop items from the proposal before
+    creating them (ProposalEditor); the estimate chip above the "Create
+    places & props" button must reflect what is on screen, not the saved
+    places_proposal.json the user may have already trimmed."""
+    story_id = _cast_via_api(api)
+    proposal = {"$schema": "places_proposal_v1", "places": P0_REPLY["places"],
+                "props": [{"name": "Le coco-téléphone", "one_line": "Il sonne.", "owner": None}], "updated_at": NOW}
+    api.store.write_doc(story_id, "places_proposal.json", proposal, now=NOW)
+
+    # The saved proposal alone (no ?place=/?prop=): 2 places + 1 prop, as before.
+    saved = _estimate(api, story_id, "places")
+    assert saved["units"] == {"llm_calls": 3, "images": 3, "edit_images": 0, "tts_chars": 0}
+
+    # The user removed one place and the only prop on screen: the estimate
+    # must count only what is left, not the saved proposal's three items.
+    response = api.client.get(_url(story_id, "/estimate/places"),
+                              params={"place": ["Le camp de plage"]})
+    assert response.status_code == 200, response.text
+    trimmed = response.json()
+    assert trimmed["units"] == {"llm_calls": 1, "images": 1, "edit_images": 0, "tts_chars": 0}
+
+    # The user added a place the proposal never had, and no props at all.
+    response = api.client.get(_url(story_id, "/estimate/places"),
+                              params={"place": ["Le camp de plage", "La grotte secrète"]})
+    added = response.json()
+    assert added["units"] == {"llm_calls": 2, "images": 2, "edit_images": 0, "tts_chars": 0}
+
+    # ?prop= alone: no places at all, one prop.
+    response = api.client.get(_url(story_id, "/estimate/places"),
+                              params={"prop": ["Le coco-téléphone"]})
+    props_only = response.json()
+    assert props_only["units"] == {"llm_calls": 1, "images": 1, "edit_images": 0, "tts_chars": 0}
 
 
 # ================================================================= the token

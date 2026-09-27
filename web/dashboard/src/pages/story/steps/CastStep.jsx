@@ -133,7 +133,15 @@ function NoCastYet({ storyId, story, onChange }) {
           {custom.map((entry, i) => (
             <li key={i}>
               {entry.name} ({entry.role}) — {entry.one_line}
-              <button type="button" className="btn btn-ghost btn-sm" onClick={() => removeCustom(i)}>✕</button>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => removeCustom(i)}
+                aria-label={`Remove ${entry.name}`}
+                title={`Remove ${entry.name}`}
+              >
+                ✕
+              </button>
             </li>
           ))}
         </ul>
@@ -165,7 +173,7 @@ function emptySlotReason(info, slot) {
   return 'Not made yet.'
 }
 
-function ImageSlot({ storyId, character, slot, info, disabled, onChange }) {
+function ImageSlot({ storyId, character, slot, info, disabled, onChange, consistencyMode }) {
   const ref = character.refs[slot]
   const [url, setUrl] = useState(null)
   const urlRef = useRef(null)
@@ -193,9 +201,12 @@ function ImageSlot({ storyId, character, slot, info, disabled, onChange }) {
   }, [storyId, character.char_id, ref && ref.name])
 
   useEffect(() => {
+    // consistencyMode is not part of the target, but it flips this slot's
+    // units between images and edit_images (workflow.target_units): refetch
+    // when the story switches mode, or this chip would show a stale count.
     fetchStoryEstimate(storyId, 'regenerate', { target }).then(setEstimate).catch(() => setEstimate(null))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [storyId, target])
+  }, [storyId, target, consistencyMode])
 
   const regenerate = async (note) => {
     await regenerateStory(storyId, { target, note })
@@ -217,6 +228,8 @@ function ImageSlot({ storyId, character, slot, info, disabled, onChange }) {
         disabled={disabled}
         onRegenerate={regenerate}
         estimateChip={<EstimateChip estimate={estimate} />}
+        empty={!ref}
+        label={SLOT_LABELS[slot]}
       />
     </div>
   )
@@ -402,7 +415,7 @@ function UploadsSection({ storyId, character, disabled, onChange }) {
 
 // -------------------------------------------------------------- one character
 
-function CharacterCard({ storyId, character, info, pickVoiceIds, disabled, onChange }) {
+function CharacterCard({ storyId, character, info, pickVoiceIds, disabled, onChange, consistencyMode }) {
   const [approveError, setApproveError] = useState('')
   const [approveErrors, setApproveErrors] = useState(null)
   const [approving, setApproving] = useState(false)
@@ -490,6 +503,7 @@ function CharacterCard({ storyId, character, info, pickVoiceIds, disabled, onCha
             info={info}
             disabled={cardBusy}
             onChange={onChange}
+            consistencyMode={consistencyMode}
           />
         ))}
       </div>
@@ -624,15 +638,19 @@ function NeedsEditorBanner({ storyId, editReadiness, disabled, onChange }) {
 
 // ------------------------------------------------------------------- continue
 
-function ContinueCast({ storyId, disabled, onChange }) {
+function ContinueCast({ storyId, disabled, onChange, consistencyMode }) {
   const [estimate, setEstimate] = useState(null)
   const [running, setRunning] = useState(false)
   const [error, setError] = useState('')
   const [errors, setErrors] = useState(null)
 
   useEffect(() => {
+    // consistencyMode is not a request parameter, but it flips missing
+    // sheets between images and edit_images (workflow.cast_units): refetch
+    // when the story switches mode, or this chip would show a stale count
+    // (spec 10 finding: "prompt-only sheets estimated as edits").
     fetchStoryEstimate(storyId, 'cast').then(setEstimate).catch(() => setEstimate(null))
-  }, [storyId])
+  }, [storyId, consistencyMode])
 
   const handleContinue = async () => {
     setRunning(true)
@@ -665,6 +683,7 @@ function ContinueCast({ storyId, disabled, onChange }) {
 
 export default function CastStep({ data, storyId, inFlightJob, onChange }) {
   const { story, characters, progress } = data
+  const consistencyMode = story.generation_profile.consistency_mode
 
   const myJob = inFlightJob && (
     inFlightJob.step === 'cast'
@@ -726,11 +745,14 @@ export default function CastStep({ data, storyId, inFlightJob, onChange }) {
             pickVoiceIds={pickVoiceIds}
             disabled={busy}
             onChange={onChange}
+            consistencyMode={consistencyMode}
           />
         ))}
       </div>
 
-      {anyMissing && <ContinueCast storyId={storyId} disabled={busy} onChange={onChange} />}
+      {anyMissing && (
+        <ContinueCast storyId={storyId} disabled={busy} onChange={onChange} consistencyMode={consistencyMode} />
+      )}
     </div>
   )
 }

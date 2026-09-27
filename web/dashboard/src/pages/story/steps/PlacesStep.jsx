@@ -84,10 +84,23 @@ function ProposalEditor({ storyId, proposal, characters, onChange }) {
   const [error, setError] = useState('')
   const [errors, setErrors] = useState(null)
 
+  // The names on screen right now, not the saved proposal: the user may have
+  // dropped or added places/props since it was proposed, and the estimate
+  // chip above "Create places & props" must reflect that (spec 10 finding:
+  // "the places estimate ignores the edited list").
+  const placeNames = placeDrafts.map((p) => p.name.trim()).filter(Boolean)
+  const propNames = propDrafts.map((p) => p.name.trim()).filter(Boolean)
+  const placeKey = placeNames.join('|')
+  const propKey = propNames.join('|')
+
   useEffect(() => {
-    fetchStoryEstimate(storyId, 'places').then(setEstimate).catch(() => setEstimate(null))
+    const timer = setTimeout(() => {
+      fetchStoryEstimate(storyId, 'places', { places: placeNames, props: propNames })
+        .then(setEstimate).catch(() => setEstimate(null))
+    }, 300)
+    return () => clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [storyId, placeDrafts.length, propDrafts.length])
+  }, [storyId, placeKey, propKey])
 
   const updatePlace = (i, field, value) => {
     setPlaceDrafts((prev) => prev.map((p, idx) => (idx === i ? { ...p, [field]: value } : p)))
@@ -160,6 +173,8 @@ function ProposalEditor({ storyId, proposal, characters, onChange }) {
               className="btn btn-ghost btn-sm"
               onClick={() => removePlace(i)}
               disabled={placeDrafts.length <= 1}
+              aria-label={`Remove ${place.name.trim() || `place ${i + 1}`}`}
+              title={`Remove ${place.name.trim() || `place ${i + 1}`}`}
             >
               ✕
             </button>
@@ -191,7 +206,15 @@ function ProposalEditor({ storyId, proposal, characters, onChange }) {
               <option value="">none</option>
               {characters.map((c) => <option key={c.char_id} value={c.char_id}>{c.name}</option>)}
             </select>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => removeProp(i)}>✕</button>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => removeProp(i)}
+              aria-label={`Remove ${prop.name.trim() || `prop ${i + 1}`}`}
+              title={`Remove ${prop.name.trim() || `prop ${i + 1}`}`}
+            >
+              ✕
+            </button>
           </li>
         ))}
       </ul>
@@ -219,7 +242,7 @@ function emptyVariantReason(variantKey, dayReady, textMissing) {
   return 'Not made yet.'
 }
 
-function VariantSlot({ storyId, place, variantKey, imageRef, dayReady, textMissing, disabled, onChange }) {
+function VariantSlot({ storyId, place, variantKey, imageRef, dayReady, textMissing, disabled, onChange, consistencyMode }) {
   const [url, setUrl] = useState(null)
   const urlRef = useRef(null)
   const target = `place:${place.place_id}:image:${variantKey}`
@@ -246,9 +269,12 @@ function VariantSlot({ storyId, place, variantKey, imageRef, dayReady, textMissi
   }, [storyId, place.place_id, imageRef && imageRef.name])
 
   useEffect(() => {
+    // consistencyMode is not part of the target, but it flips this slot's
+    // units between images and edit_images (workflow.target_units): refetch
+    // when the story switches mode, or this chip would show a stale count.
     fetchStoryEstimate(storyId, 'regenerate', { target }).then(setEstimate).catch(() => setEstimate(null))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [storyId, target])
+  }, [storyId, target, consistencyMode])
 
   const regenerate = async (note) => {
     await regenerateStory(storyId, { target, note })
@@ -272,6 +298,8 @@ function VariantSlot({ storyId, place, variantKey, imageRef, dayReady, textMissi
         disabled={slotDisabled}
         onRegenerate={regenerate}
         estimateChip={<EstimateChip estimate={estimate} />}
+        empty={!imageRef}
+        label={variantKey}
       />
     </div>
   )
@@ -279,7 +307,7 @@ function VariantSlot({ storyId, place, variantKey, imageRef, dayReady, textMissi
 
 // -------------------------------------------------------------- one place
 
-function PlaceCard({ storyId, place, missing, disabled, onChange }) {
+function PlaceCard({ storyId, place, missing, disabled, onChange, consistencyMode }) {
   const [approveError, setApproveError] = useState('')
   const [approveErrors, setApproveErrors] = useState(null)
   const [approving, setApproving] = useState(false)
@@ -371,6 +399,7 @@ function PlaceCard({ storyId, place, missing, disabled, onChange }) {
           textMissing={textMissing}
           disabled={cardBusy}
           onChange={onChange}
+          consistencyMode={consistencyMode}
         />
         {variantKeys.filter((key) => key !== 'day').map((key) => (
           <VariantSlot
@@ -381,6 +410,7 @@ function PlaceCard({ storyId, place, missing, disabled, onChange }) {
             imageRef={place.time_variants[key]}
             dayReady={dayReady}
             textMissing={textMissing}
+            consistencyMode={consistencyMode}
             disabled={cardBusy}
             onChange={onChange}
           />
@@ -487,7 +517,13 @@ function PropImage({ storyId, prop, disabled, onChange }) {
       <div className="story-places-image-meta">
         <ConsistencyChip consistency={prop.image && prop.image.consistency} />
       </div>
-      <RegenerateControl disabled={disabled} onRegenerate={regenerate} estimateChip={<EstimateChip estimate={estimate} />} />
+      <RegenerateControl
+        disabled={disabled}
+        onRegenerate={regenerate}
+        estimateChip={<EstimateChip estimate={estimate} />}
+        empty={!prop.image}
+        label="image"
+      />
     </div>
   )
 }
@@ -650,15 +686,19 @@ function NeedsEditorBanner({ storyId, editReadiness, disabled, onChange }) {
 
 // ------------------------------------------------------------------- continue
 
-function ContinuePlaces({ storyId, disabled, onChange }) {
+function ContinuePlaces({ storyId, disabled, onChange, consistencyMode }) {
   const [estimate, setEstimate] = useState(null)
   const [running, setRunning] = useState(false)
   const [error, setError] = useState('')
   const [errors, setErrors] = useState(null)
 
   useEffect(() => {
+    // consistencyMode is not a request parameter, but it can flip missing
+    // items between images and edit_images: refetch when the story switches
+    // mode, or this chip would show a stale count (spec 10 finding:
+    // "prompt-only sheets estimated as edits").
     fetchStoryEstimate(storyId, 'places').then(setEstimate).catch(() => setEstimate(null))
-  }, [storyId])
+  }, [storyId, consistencyMode])
 
   const handleContinue = async () => {
     setRunning(true)
@@ -726,7 +766,8 @@ export default function PlacesStep({ data, storyId, inFlightJob, onChange }) {
   const placeProgress = progress.places || {}
   const propProgress = progress.props || {}
   const readiness = progress.edit_readiness
-  const referencesMode = story.generation_profile.consistency_mode === 'references'
+  const consistencyMode = story.generation_profile.consistency_mode
+  const referencesMode = consistencyMode === 'references'
   const needsEditor = referencesMode && Boolean(readiness) && readiness.ready === false
   const anyMissing = Object.values(placeProgress).some((info) => (info.missing || []).length > 0)
     || Object.values(propProgress).some((info) => (info.missing || []).length > 0)
@@ -755,6 +796,7 @@ export default function PlacesStep({ data, storyId, inFlightJob, onChange }) {
                 missing={(placeProgress[place.place_id] || {}).missing || []}
                 disabled={busy}
                 onChange={onChange}
+                consistencyMode={consistencyMode}
               />
             ))}
           </div>
@@ -779,7 +821,9 @@ export default function PlacesStep({ data, storyId, inFlightJob, onChange }) {
         </>
       )}
 
-      {anyMissing && <ContinuePlaces storyId={storyId} disabled={busy} onChange={onChange} />}
+      {anyMissing && (
+        <ContinuePlaces storyId={storyId} disabled={busy} onChange={onChange} consistencyMode={consistencyMode} />
+      )}
     </div>
   )
 }
