@@ -26,7 +26,7 @@
 ## Two modes
 
 - **Clips** (`/clips`) — the long-form video → vertical highlight clips pipeline this README is mostly about: karaoke subtitles, B-roll, BGM, hooks, auto-metadata.
-- **AI Story** (`/story`) — a gated, step-by-step studio that turns a concept into a persistent story workspace (world, cast, a locked visual style, a season arc) and produces serialized ~60-second AI episodes with consistent characters. Steps 1–4 (new story, concepts, bible, style) are available today; the rest ships in later phases. See [docs/AI_STORY.md](docs/AI_STORY.md).
+- **AI Story** (`/story`) — a gated, step-by-step studio that turns a concept into a persistent story workspace (world, cast, a locked visual style, a season arc) and produces serialized ~60-second AI episodes with consistent characters. Steps 1–7 (new story, concepts, bible, style, cast, places & props, season arc) are available today; episodes and rendering ship in later phases. See [docs/AI_STORY.md](docs/AI_STORY.md).
 
 ## 🔱 About this fork
 

@@ -16,9 +16,9 @@ and capped at **$1 per episode** by default (Settings → Budget). Nothing
 paid ever runs unless you turn it on.
 
 This document covers what exists today. AI Story is being built in phases;
-this is the phase-1 foundation plus steps 1–4 of the 13-step workflow. It is
-extended as each later phase lands — see "Where it stands" below for what is
-not here yet.
+this is the phase-1 and phase-2 foundation, steps 1–7 of the 13-step
+workflow. It is extended as each later phase lands — see "Where it stands"
+below for what is not here yet.
 
 ## Where it stands
 
@@ -28,9 +28,9 @@ not here yet.
 | 2 | Concepts | ten concept cards to choose from, or generate ten more | available |
 | 3 | Bible | logline, premise, tone, world, themes, audience | available |
 | 4 | Style | a locked style (palette, typography, consistency mode) + a preview strip | available |
-| 5 | Cast | characters: reference sheets, voices | phase 2 |
-| 6 | Places & props | locations and recurring objects | phase 2 |
-| 7 | Season arc | the season's episode-by-episode arc | phase 2 |
+| 5 | Cast | characters: reference sheets, voices | available |
+| 6 | Places & props | locations and recurring objects | available |
+| 7 | Season arc | the season's episode-by-episode arc | available |
 | 8 | Episode script | scenes and dialogue for one episode | phase 3 |
 | 9 | Storyboard | shots, framing, camera moves for the script | phase 3 |
 | 10 | Assets | the images, voice lines, SFX/BGM for the storyboard | phase 4 |
@@ -39,9 +39,11 @@ not here yet.
 | 13 | Next episode | recap, audience-feedback digest, new characters/twists | phase 5 |
 
 In other words: today you can create a story, pick or invent a concept,
-write and edit its bible, and build and lock its visual style, with a live
-preview of what that style looks like. You cannot yet generate characters,
-write an episode, or render anything — that is phases 2 through 5.
+write and edit its bible, build and lock its visual style, cast its
+characters with reference sheets and voices, populate its places and props,
+and plan its season arc — a story reaches **ready** once the cast, the
+places and props, and the season are each approved. You cannot yet write an
+episode script or render anything — episodes start at phase 3.
 
 ## Walkthrough (dashboard)
 
@@ -124,7 +126,8 @@ Pick a **style template** (the same seven), then tweak:
   images so characters/places stay visually consistent) or `prompt_only`, an
   explicitly labelled degraded mode where only the text prompt holds them
   together, and they may drift. It's a property of the style lock, set here,
-  though it only starts to matter from phase 2 on (no references exist yet).
+  though it only starts to matter from Cast on (no references exist before
+  a character has a portrait).
 
 **Save draft** writes the draft without generating anything — it runs
 inline, not as a job. The **preview strip** is the part that spends:
@@ -142,6 +145,140 @@ that it cannot change; the palette, fonts, motion rules and everything else
 become the fixed reference every later image/voice prompt in the story is
 built from.
 
+### 5. Cast
+
+Unlocked once the style is approved. A cast has at most **8** characters in
+all (Edge, the free default voice provider, speaks 8 French voices — the
+limiting resource).
+
+**No cast yet** offers two sources: the chosen concept's **cast sketch**
+(name, role, one-line; pre-checked) and **your own** — a name, a role
+(`lead` / `support` / `recurring` / `guest`) and a one-line, added with
+"+ Add". **Create cast** queues the step for whatever is checked or added;
+the estimate chip in front of it counts only what does not exist yet (e.g.
+`est. $0.00 · 3 LLM calls · 3 images · 6 edits · ~360 voice chars`) — a
+character already in the story is not recounted.
+
+The step then fills in, for **every** character of the story (leads,
+supports, recurring, guests), in this order: the text (K1 writes a
+**descriptor**, 2–3 **signature items**, a **personality** — traits, wants,
+fears, speech style —, **relationships** with the rest of the cast, and a
+voice brief), then the **portrait**, then the **turnaround** and
+**expressions sheet**. Once every character's text is there, one **voice**
+per character left with none, then a ~3-second **voice sample** of each.
+Every field the model writes for image or voice prompts is in **English**;
+what you type yourself (name, one-line) stays in the story's language.
+Everything a run makes is saved as it is made, so a run that fails partway
+keeps whatever it already finished — see "Troubleshooting" below.
+
+**Consistency.** The portrait is drawn from text alone. The turnaround and
+the expressions sheet are, by default, **edited from the portrait** (plus
+any of your own uploads) through a reference-capable editor — local
+ComfyUI, or a paid editor once `allow_paid` is on — and carry the chip
+**consistency: references**. When no editor can run, the step **stops
+before any call and asks**: a banner at the top of Cast names why and offers
+**"Switch this story to prompt-only consistency"** (a confirm dialog warns
+that shots may then drift slightly); nothing switches automatically, only
+you do, from here. Every image made this way afterwards is labelled
+**consistency: prompt-only** on the image itself. **"Continue cast"** fills
+in whatever is still missing (a stalled sheet, a voice nobody picked, …);
+with nothing missing it calls nothing.
+
+Each character's card shows its **portrait / turnaround / expressions**
+slots (each with its own **Regenerate** — a fresh seed and an optional note,
+its own estimate chip; an empty slot says why: "Write the character first.",
+"Make the portrait first.", "Needs an editor, or prompt-only consistency.",
+or "Not made yet."), its editable **descriptor**, **signature items**,
+**personality** (traits / wants / fears / speech style), **voice direction**
+and **sample line** (each saved inline, no job needed), and a
+whole-character **Regenerate** (K1 again, with a note — the images and the
+pinned voice are untouched).
+
+**Voice** shows the pinned voice (`provider/voice_id`) with a player for its
+sample, or "Pick a voice: no catalogue voice was left for this character."
+when none could be found. **"Other voices"** lists up to 6 alternates
+(gender, age, style tags), best first, never one already pinned by another
+lead or support: **no two leads or supports share a voice, and a pinned
+voice never falls back to another** if it later becomes unreachable; picking
+an alternate repins the voice and makes it a fresh sample.
+
+**Design references**: up to **4** images per character, PNG/JPEG/WebP or
+GIF, 10 MiB and 40 megapixels each — re-encoded on upload to a clean PNG
+with no metadata at all (no EXIF, no original file name). Each is described
+once, through the vision chain, the next time the character's text is
+written or regenerated; until then it shows "not described yet — it will be
+described before the text is written". The description folds into what K1
+writes — a conflicting reference (say, a real photo) is bent toward the
+story's own style, never copied. **Design references for stylised
+characters. Imitating real people is not supported.**
+
+**Approve** one character at a time; each needs its text, portrait,
+turnaround, expressions sheet, a pinned voice and its sample. **The cast is
+approved when every lead and support is** — a recurring or guest character
+never blocks the cast, and never approves it on its own.
+
+### 6. Places & props
+
+Unlocked once the style is approved and the cast has at least one character.
+**Propose places & props** queues one small call (P0) that reads the bible,
+the world and the cast — each character's name and signature items, where
+props usually come from — and proposes 2–3 places and a few props; nothing
+is created yet, only listed. Making the places and props themselves needs
+at least one character with its text written.
+
+The proposal is **editable** before anything is made: each place is a name
+and a one-line description (up to 6 places and 6 props, "+ Add place" /
+"+ Add prop", ✕ to drop one); each prop also picks an **owner** (one of the
+story's characters, or none). The estimate chip above **"Create places &
+props"** follows the list on screen, not the saved proposal — add or drop an
+entry and it recounts. Creating writes only what is not already in the
+story by name.
+
+The step then fills in, for every place and every prop: its text (P1 for a
+place — descriptor, layout notes, and the time variants it proposes; R1 for
+a prop — descriptor and an owner, kept as you set it unless you left it
+blank), then its first image: a place's **master plate** (`day`, always
+made — the fixed reference every other time of day is drawn from) and a
+prop's single **image**. **"Continue places & props"** fills in whatever is
+still missing.
+
+Each place's card shows the **day** plate and any time variants you've
+added (**"Make night"**, or `dusk`, `rain`, `dawn`, from a dropdown once the
+day plate exists), its editable descriptor and layout notes, and a
+whole-text Regenerate. A time variant is edited from the day plate the same
+way a character's sheets are edited from the portrait (`references` mode,
+the same "stop and ask" and prompt-only switch when no editor can run); the
+day plate itself and a prop's image are always text-to-image, never an
+edit. Each prop's card shows its image, an editable **owner** dropdown and
+**descriptor**, and a whole-text Regenerate.
+
+**Approve** each place and prop individually; **places are approved when
+every place and every prop is**.
+
+### 7. Season arc
+
+Unlocked once the cast is approved. Pick an episode count, **3 to 12**
+(default **8**), and press **"Plan the season"**. The step first writes a
+skeleton (S1: every episode's function — setup, escalation, complication,
+midpoint twist, crisis, climax & reset — and a short summary), saved before
+anything else runs, then expands each entry in turn (S2): its summary in
+full (at most 60 words), the hooks it resolves and the ones it leaves open,
+and which characters appear in it. Each entry is saved as it is written, so
+a run that fails partway keeps every entry already expanded; an entry whose
+S2 failed keeps its S1 outline (see "Troubleshooting").
+
+The timeline shows one card per episode: its number, its function badge,
+its summary, any hooks in/out, the characters in it, and a **Regenerate**
+(S2 again for that entry alone, with an optional note). A **"Series
+memory"** panel is present but stays empty until phase 5, when episodes
+start being approved. **Re-plan** replaces the whole arc from scratch (a
+confirm dialog warns this is a full replacement, at the same episode
+count).
+
+**Approve season** needs the places and props already approved and every
+planned episode to carry a summary; approving makes the story **ready** —
+the state phase 3's episode script picks up from.
+
 ### Estimate and route chips
 
 Every action that might call a model shows two chips before you press it.
@@ -152,6 +289,14 @@ greyed/warn chip means the step isn't ready, and its tooltip says why.
 `free`, 💸 `paid` (only reachable with `allow_paid` on), ⛔ `blocked`
 (nothing in the chain can run it) — plus the specific link, e.g.
 `gemini/gemini-3.5-flash-lite`.
+
+Cast and places count in four units — **LLM calls**, **images** (text to
+image), **edits** (an image made from a reference, or its text-only
+`prompt_only` stand-in), **voice chars** (the sample line each pinned voice
+would speak) — shown together, e.g. `est. $0.00 · 3 LLM calls · 3 images ·
+6 edits · ~360 voice chars`; only what does not exist yet is counted, so
+re-running a step that has nothing left to do reads `est. $0.00` and calls
+nothing.
 
 ### "Awaiting approval"
 
@@ -165,12 +310,18 @@ awaiting job also survives a backend restart untouched, just sitting there
 waiting for you. Starting the same kind of step again before approving the
 first supersedes it rather than leaving it dangling.
 
+Cast, places and season work the same way, one level down: approving a
+single character, place or prop completes any regenerate job of that one
+entity that was awaiting approval, and once every character (for the cast)
+or every place and prop (for places) is approved, the cast/places job itself
+completes too. The season's job completes when the season is approved.
+
 Only one step of a given story runs at a time: a second one while the first
 is queued or running is refused (409), telling you to wait or cancel.
 
 ## From the CLI
 
-`python main.py --ai-story` covers the same four steps for scripting or
+`python main.py --ai-story` covers all seven steps for scripting or
 testing, without a browser. Three subcommands: `new`, `step`, `list`.
 
 ```
@@ -180,8 +331,38 @@ python main.py --ai-story step STORY_ID bible --auto-approve
 python main.py --ai-story step STORY_ID style --template fruit_drama \
     --override palette.accents='["#FFD400"]' --auto-approve
 python main.py --ai-story step STORY_ID style_preview
+python main.py --ai-story step STORY_ID cast --characters Kiwilo \
+    --custom 'Figuette|support|A shy fig.' --auto-approve
+python main.py --ai-story step STORY_ID places_proposal
+python main.py --ai-story step STORY_ID places --auto-approve
+python main.py --ai-story step STORY_ID places \
+    --place 'Le Marché|A bustling fruit market.' \
+    --prop 'Panier doré|A golden basket.|Kiwilo'
+python main.py --ai-story step STORY_ID cast --prompt-only --auto-approve
+python main.py --ai-story step STORY_ID season --episodes 8 --auto-approve
 python main.py --ai-story list
 ```
+
+`cast` takes `--characters NAME` (repeatable: a name from the concept's cast
+sketch) and `--custom 'Name|role|one line'` (repeatable; `role` one of
+`lead`, `support`, `recurring`, `guest`). Neither is required: with no
+`--characters` and no character in the story yet, the whole cast sketch is
+created; once the story has a cast, leaving `--characters` out creates none
+(only `--custom` and "continue what's missing" apply). `places` takes
+`--place 'Name|one line'` and `--prop 'Name|one line|Owner'` (both
+repeatable; a prop's owner is a character's name or id, or left out); with
+neither given it uses the saved proposal. `--prompt-only` (`cast`, `places`)
+is the explicit switch to prompt-only consistency, set on the story and
+printed before the step runs — nothing else ever sets it. `--episodes N`
+(`season`) is 3 to 12, 8 by default. After a `cast` run, whatever each
+character still lacks is printed, with a hint to re-run with `--prompt-only`
+when a sheet is waiting on an editor.
+
+`--auto-approve` means something different per step: for `bible`, `style`
+and `season` it approves the one document the step just wrote; for `cast`
+and `places` it approves every character, or every place and prop, that
+already has everything, naming anything left short of that instead of
+failing the command.
 
 `new` creates a draft story and, with `--concept`, chooses a library concept
 in the same call. `--lang` is required — there is no default, on the CLI
@@ -192,18 +373,21 @@ test keeps the CLI, the API's request model and the dashboard's form from
 drifting apart).
 
 `step` runs one step in this same process, printing the same lines the
-dashboard's activity feed shows. `--auto-approve` applies to `bible` and
-`style` only (a concept is approved by choosing it, and a preview is
-approved together with the style it belongs to — the CLI's usage error says
-so if you try it elsewhere). `--allow-slow-chain` (or `ALLOW_SLOW_CHAIN=1`)
-lets an LLM step run on a chain whose only reachable link is the slow floor
+dashboard's activity feed shows. `--auto-approve` applies to `bible`,
+`style`, `cast`, `places` and `season` (a concept is approved by choosing
+it, and a preview is approved together with the style it belongs to — the
+CLI's usage error says so if you try it on either). `--allow-slow-chain`
+(or `ALLOW_SLOW_CHAIN=1`) lets an LLM step run on a chain whose only
+reachable link is the slow floor
 (mirrors the clip CLI's own flag). `list` prints one line per story: id,
 status, language, title. Run `python main.py --ai-story --help` (or
 `... new --help`, `... step --help`) for the full option list.
 
-Keys and `LLM_CHAIN` come from the **environment or `.env`**, the same file
-the clip CLI reads — never from the dashboard's Settings. A story created or
-stepped from the CLI shows up in the dashboard immediately (same
+Keys and `LLM_CHAIN` — and, for `cast` and `places`, `IMAGE_CHAIN`,
+`IMAGE_EDIT_CHAIN`, `TTS_CHAIN` and `VISION_CHAIN` — come from the
+**environment or `.env`**, the same file the clip CLI reads — never from the
+dashboard's Settings. A story created or stepped from the CLI shows up in
+the dashboard immediately (same
 `outputs/stories/` folder, same index), but the CLI and a running server
 don't coordinate: running a step from both at once on the same story lets
 both write its files, last write wins. Fine for solo use; don't script the
@@ -223,9 +407,9 @@ this way is still printed (`⏭ Skipping openrouter/...: paid link, allow_paid
 is off`), never silently dropped, and if the chain's *only* keyed link is
 paid, the step refuses up front and names which free key to add instead.
 
-**Image calls** (the style preview, later phases' character/place sheets
-and shots) go through their own chains, `IMAGE_CHAIN` and
-`IMAGE_EDIT_CHAIN`. The shipped default `IMAGE_CHAIN` is:
+**Image calls** — the style preview, a character's portrait, a place's day
+plate, a prop's image — go through `IMAGE_CHAIN` (text to image). The
+shipped default is:
 
 ```
 cloudflare/flux-1-schnell, pollinations/flux, local/comfyui,
@@ -233,7 +417,39 @@ fal/flux-schnell*, openai/gpt-image-2-low*        (* = paid)
 ```
 
 On a deployment with no paid keys set, this reaches Pollinations — free,
-keyless — so the style preview strip costs $0.00 by default.
+keyless, but limited to roughly one fresh image per IP per hour (about
+45 seconds when it has to make one; a repeated prompt/seed can come back
+from its own cache sooner) — so the style preview strip, a character's
+portrait and a place's or prop's first image all cost $0.00 by default.
+
+**Reference edits** — a character's turnaround and expressions sheet, and a
+place's time variant other than `day` — go through `IMAGE_EDIT_CHAIN`
+instead, in `references` consistency mode. The shipped default is:
+
+```
+local/comfyui, gemini/nano-banana-2-lite*, fal/seedream-4-edit*,
+fal/flux-kontext-pro*, gemini/nano-banana-2*        (* = paid)
+```
+
+With no local ComfyUI and no paid keys set, **no link of this chain can
+run for free** — every image that needs an edit stops and asks (see the
+Cast and Places & props sections above, and "Troubleshooting" below) unless
+you switch the story to `prompt_only` consistency, which routes the same
+images back through `IMAGE_CHAIN` (free, but degraded: the character or
+place may drift slightly across shots) instead.
+
+**Voice calls** run on `TTS_CHAIN`: **Edge** (free, keyless, many
+languages, the shipped default's first link), Gemini's TTS model (needs
+`GOOGLE_API_KEY`, still free), or a local engine (`piper` / `kokoro` /
+`chatterbox`, once its package is installed). A voice sample is a single,
+fixed-link chain built from the character's *pinned* voice alone — it never
+falls through to another provider or another voice; a failure names other
+voices to try instead of the one that failed.
+
+**Design-reference descriptions** (a character's uploaded image, described
+once through vision) run on `VISION_CHAIN`: Gemini's `flash-lite` model by
+default (needs `GOOGLE_API_KEY`, free), then an OpenRouter free vision
+model, a local Ollama vision model, or Gemini's larger `flash` model.
 
 **Settings → Budget**:
 
@@ -279,10 +495,13 @@ LOCAL_OLLAMA_URL=http://host.docker.internal:11434
 
 Settings → **Local hardware** detects your GPU (or its absence) and
 recommends what to install for your tier — that tab is the source of truth,
-not this document. Phase 1 itself doesn't need any of this: the free hosted
-chain is enough for concepts, the bible and the style preview. It starts to
-matter once character and place references (phase 2) push more image
-generation through the pipeline.
+not this document. Steps 1–4 don't need any of this: the free hosted chain
+is enough for concepts, the bible and the style preview. It matters most
+from Cast on: `IMAGE_EDIT_CHAIN` has **no free hosted link** at all, so a
+character's turnaround and expressions sheet, and a place's non-`day` time
+variants, need either a local ComfyUI reachable at `LOCAL_COMFYUI_URL` or a
+paid editor (`allow_paid` on) — without either, those steps stop and ask,
+and the story can still be finished with `prompt_only` consistency instead.
 
 ## Where your story lives on disk
 
@@ -295,14 +514,35 @@ outputs/
     style_lock.json                  # the draft or locked style
     style_preview.json               # the preview strip's record (images, failures)
     styles/preview/preview_<n>.png   # the preview strip's actual images
+    places_proposal.json             # the proposed places and props (before they're made)
+    season.json                      # the season arc: episodes_planned, arc[], series memory
+    characters/<char_id>/
+      character.json                 # descriptor, signature items, personality, voice, ...
+      refs/portrait.png, turnaround.png, expressions.png
+      refs/uploads/<32 hex>.png      # your own design references
+      voice_sample.mp3               # (or .wav)
+    places/<place_id>/
+      place.json                     # descriptor, layout notes, time variants
+      refs/variant_day.png           # the master plate; variant_night.png, etc. on demand
+    props/<prop_id>/
+      prop.json                      # descriptor, owner, image
+      refs/image.png
     cost_ledger.json                 # every call this story has made, with its cost
     activity.log                     # everything a step has printed, one line each
 ```
 
-Everything here is plain JSON and PNG, so a story folder can be copied,
-backed up or inspected by hand. The index (`stories.json`) is a cache of
-these folders — missing or corrupted, it's rebuilt from them automatically,
-and it says so in the log when it does.
+Everything here is plain JSON and PNG (or MP3/WAV for a voice sample), so a
+story folder can be copied, backed up or inspected by hand. The index
+(`stories.json`) is a cache of these folders — missing or corrupted, it's
+rebuilt from them automatically, and it says so in the log when it does.
+
+**Deleting a character, place or prop** removes its folder and its id from
+the story — from any other character's relationships, a prop's owner, the
+season arc's per-episode cast, the places proposal and a character's
+current location, all of which keep the approvals they already had. The
+group approval (`approvals.cast` / `approvals.places`) re-folds afterwards,
+so deleting the last unapproved lead can turn an incomplete cast into an
+approved one.
 
 **Deleting a story** removes exactly its folder, its index entry, and its
 step jobs (they own no files of their own); it refuses (409) while a step
@@ -344,3 +584,40 @@ is exactly the one that needs re-running, not the whole bible. "Generate 10
 more" concepts works the same way per call: if 2 of the 10 calls fail, you
 get the 8 that succeeded plus the failure reasons in the activity feed, and
 can retry for more.
+
+Cast, places and season follow the same rule, per character/place/prop or
+per episode: whatever succeeded is saved, the job ends failed naming each
+part that didn't (`Cast incomplete: Broccolia voice sample failed (...).
+Run the cast step again to fill what is missing, or regenerate
+'character:char_broccolia:voice'.` / `Places incomplete: ... regenerate
+'place:place_leparloir:image:night'.` / `Season arc incomplete: episode 4
+failed (...). Each keeps its outline; regenerate 'season:4' to finish it.`),
+and "Continue cast" / "Continue places & props" re-runs exactly what's
+still missing — a character stalled on a sheet that needs an editor is left
+for the next run (see below), not retried forever.
+
+**"Needs an editor: ..."** — a character's turnaround/expressions sheet, or
+a place's non-`day` time variant, is made by editing an existing image
+(the portrait, or the day plate), and no link of `IMAGE_EDIT_CHAIN` can run
+right now (no reachable local ComfyUI, no paid editor allowed, or the
+budget caps are already spent). Nothing was generated or charged. Three
+ways out: **start ComfyUI** (Settings → Local hardware) and re-run the
+step; **allow a paid editor** (Settings → Budget → `allow_paid`, still
+bounded by the caps); or **switch this story to prompt-only consistency**
+(the banner's own button, or `--prompt-only` on the CLI) — the same images
+are then made from text alone and labelled `consistency: prompt-only`.
+
+**"Pick a voice"** — a character's text is written, but no catalogue voice
+was left unused for it (every voice `TTS_CHAIN` can reach for the story's
+language is already pinned by another lead or support). Open "Other
+voices" on the character's card and choose one manually — a recurring or
+guest character may reuse a voice already given to someone else, but a
+lead or support never will.
+
+**An upload refused** — over 10 MiB, over 40 megapixels, not decodable as
+an image, or not PNG/JPEG/WebP/GIF: the message says which and nothing is
+stored. A character already at 4 design references refuses a fifth until
+one is removed. A design reference that could not be described (the vision
+chain failed twice) keeps the upload — it is simply not folded into the
+character's text yet; regenerating the character's text (K1) tries
+describing it again first.

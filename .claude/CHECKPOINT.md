@@ -1,20 +1,30 @@
-## IN PROGRESS — AI Story **phase 2** (cast, places & props, season arc)
-- **Started:** 2026-09-26 ("we'll start phase 2"); plan **approved in chat** ("Go"). Task class: FULL.
-- **Current phase:** 5 IMPLEMENT. CLARIFY closed: cast picked from the sketch + custom; places/props
-  proposed (P0) then edited; uploads described by vision into K1; Tier-2 walked by me at 375 px, the
-  human plays the voice samples on the phone.
-- **Plan:** `~/.claude/plans/ai-story-phase-2-cast-places-season.md` (stages 0–12, riskiest = stage 5,
-  reference images across routes).
-- **Where the work happens:** worktree `.claude/worktrees/ai-story-phase-2`, branch `feat/ai-story-phase-2`
-  (from the checkpoint commit). `main` and the container move only at stage 11. **A fresh session reads the
-  branch's copy of this file.**
-- **Checkpoint:** known-good `aac823b` (= `origin/main`); this header is the stage-0 commit on top.
-- **Tier-1 baseline (2026-09-26, at `aac823b`):** local **2846 passed / 1 skipped**; CI env **2368 passed /
-  448 skipped**; compileall clean; `vite build` green (scratch outDir).
-- **Prompt:** `.claude/plans/ai-story/03-phase-2-cast-places-season.md`; spec §2.3–2.6, §3 steps 5–7, §4.2,
-  §5, §8.1, §8.5, §9.2, §10, §11.
-- **Known going in:** no IMAGE_EDIT_CHAIN link can run for free here → sheets stop and ask for prompt-only.
-- **Next free ids:** DEC-117, A-050. **Open questions:** none.
+## CURRENT STATE — AI Story **phase 2 is DONE** (pending the human's voice listening). Next: **phase 3**.
+- **Stages 0–12 done** on `feat/ai-story-phase-2`, ff-merged to `main` (last code commit `d20fa28`), deployed
+  (container rebuilt at 0 jobs). **Not pushed** — push after the human's voice check.
+- **Tier-1 at close:** local **3737 passed / 1 skipped**; CI env **3172 passed / 535 skipped**; compileall clean;
+  vite build green. Baseline was 2846 / 2368. Never run the suite with a built `web/dashboard/dist/` on disk.
+- **Tier-2:** walked live by me at 375 px (table below): PASS after one fix (voice age) and a polish round; the
+  one open item is the human playing the three voice samples on the phone (DEC-125).
+- **Plan:** `~/.claude/plans/ai-story-phase-2-cast-places-season.md`. Prompt: `03-phase-2-cast-places-season.md`.
+- **Decisions:** DEC-117…DEC-125. **Assumptions:** A-050…A-054. **Next free ids:** DEC-126, A-055.
+- **Docs:** `docs/AI_STORY.md` steps 5–7; VISION updated.
+- **Open task chip:** "Check the token before clip uploads spool" (pre-existing clip upload issue, found in stage 7).
+
+### Where phase 3 starts
+Read the spec, `04-phase-3-episode-writer.md`, DEC-117…125 and the follow-ups. The live story `b1104ec66b05`
+(FR, Tentafruit) is `ready` with a cast of 3 (prompt-only sheets), 2 places, 1 prop and an 8-episode arc — a
+natural fixture for the episode writer.
+
+### Follow-ups, deliberately not done
+- Settings per-task route selector (DEC-112 — carried again; no phase-2 need surfaced).
+- Clip upload routes spool before the token check (task chip).
+- `generation.in_container()` reads the file twice, so its containerd check never matches.
+- The CLI's progress output does not probe local editors (the API does).
+- A day-plate regenerate does not remake the variants derived from it (portraits do).
+- `prompts._cast_section/_places_section` cut > 12 characters / > 8 places without naming it in `pack.trimmed`.
+- `series_memory.relationship_state` keys are not cleaned on delete (nothing writes them before phase 3).
+- From phase 1: concept diversity; `jobs.json` atomic write; tests inherit a real `.env` (conftest now resets the
+  ComfyUI cache only); ledger file mode 0600.
 
 ### Tier-2 (phase 2) — live, walked by me at 375 px (2026-09-26 23:30–23:46 UTC)
 Deployed: ff `feat/ai-story-phase-2` → `main` (`c855446`, then `72d3140` for the voice fix), container rebuilt/restarted at 0 jobs.
@@ -30,7 +40,7 @@ Story `b1104ec66b05` (FR, Tentafruit, fruit_drama locked from phase 1; its phase
 | g | Season: 8 episodes (S1 ≈297/950, S2 ×8 ≈109–176/350), arc coherent (setup, midpoint twist ep 4, climax ep 8, uses the new places) → approve → **`ready`**, final card | **PASS** |
 | h | Files: each character folder = character.json + portrait/turnaround/expressions + voice_sample.mp3, all validate; ledger 24 rows, 0 paid, $0.00 (9 character images, 4 samples, 3 place images, 1 prop, 1 upload description, 6 phase-1 previews); 32 LLM lines, 0 over cap, the paid link skipped and printed every time; no spend.json | **PASS** |
 | i | 375 px: no overflow on the story at every step; three voice samples **played on the human's phone and distinct** | **PENDING (human)** |
-Polish findings (fix running): prompt-only sheets estimated as "edits"; the places estimate ignores the edited list; empty variant slots say "Regenerate" instead of "Make"; icon-only ✕ buttons without aria-label.
+Polish findings (fixed in `d20fa28`, live-checked: empty slots say Make): prompt-only sheets estimated as "edits"; the places estimate ignores the edited list; empty variant slots say "Regenerate" instead of "Make"; icon-only ✕ buttons without aria-label.
 
 ### Regression contract (phase 2)
 RC-P1…P11 and RC-S1…S4 stay, plus:
@@ -43,7 +53,7 @@ RC-P1…P11 and RC-S1…S4 stay, plus:
 ### Stage ledger (phase 2)
 | S | Stage | State |
 |---|---|---|
-| 0 | checkpoint + baseline + worktree | **done** (this commit) |
+| 0 | checkpoint + baseline + worktree | **done** `5d20a8a` |
 | 1 | entity documents + status | **done** (local 3242 / CI 2764 + 448 skipped) |
 | 2 | prompts K1/P0/P1/R1/S1/S2/U1 | **done** (local 3362 / CI 2884 + 448 skipped) |
 | 3 | voices | **done** (local 3399 / CI 2921 + 448 skipped) |
@@ -54,8 +64,8 @@ RC-P1…P11 and RC-S1…S4 stay, plus:
 | 8 | CLI (+ clean dangling ids on entity delete) | **done** (local 3686 / CI 3128 + 528 skipped) |
 | 9 | dashboard: CastEditor | **done** (local 3701 / CI 3138 + 533 skipped; build green; browser check with stage 10) |
 | 10 | dashboard: PlacesProps + SeasonBoard + wiring | **done** (local 3725 / CI 3162 + 533 skipped; build green; 375/820/1280 checked, 2 findings fixed) |
-| 11 | merge, deploy, Tier-2 | **in progress**: deployed; walk passed; human voice check pending; polish fixes running |
-| 12 | docs + decisions | — |
+| 11 | merge, deploy, Tier-2 | **done** (walk passed; voice age fixed `72d3140`; polish `d20fa28`; human voice check pending) |
+| 12 | docs + decisions | **done** (DEC-117…125, A-050…054, docs/AI_STORY.md, VISION) |
 
 ---
 

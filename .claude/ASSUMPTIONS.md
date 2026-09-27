@@ -163,6 +163,17 @@
   Phase-1 tests clear the keys they depend on and make no network call; a guard
   (a conftest clearing provider keys) is a follow-up. Recorded as a hazard.
 
+- **A-050** — Gemini's image editors do not honour seeds (`seed_honoured: False` in the adapter); a
+  prompt-only or edited sheet on Gemini would not reproduce. Not exercised live (paid). UNCONFIRMED.
+- **A-051** — Keyless Pollinations answers a fresh image in ~2–46 s (live 2026-09-26: 2.5 s, 44 s, 45 s, 11 s…;
+  repeated prompts from cache in 0.2 s). A cast of 3 + places costs ~10 minutes of waiting. UNCONFIRMED over time.
+- **A-052** — The free vision chain (Gemini flash-lite) is available for upload descriptions (live: 2.6 s, $0).
+  UNCONFIRMED against quota over a day.
+- **A-053** — Eight French Edge voices (5 fr-FR, 3 fr-CA) cap a cast's distinct voices at 8 (MAX_CAST = 8).
+  Their gender/age/style tags in `voices.json` are authored (e.g. Eloise "young"). UNCONFIRMED.
+- **A-054** — K1 follows a design reference's colours and accessories but bends a reference that conflicts
+  with the style (a human-looking girl for a fruit_drama character) toward the style. Seen once. UNCONFIRMED.
+
 ## Confirmed
 - **A-040** — (spec §14, measured 2026-09-25 on the author's two reference videos)
   Shot mean 3.2–4.1 s, reaction cuts ≥ 0.8 s, lines of 3–8 words, 1–2 places per

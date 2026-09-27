@@ -2385,3 +2385,87 @@ full script passed: FR story, ten concepts, `tentafruit_island`, bible, two
 regenerate-with-note, approve, `fruit_drama` with one accent, preview 3/3 free, lock.
 **Consequence.** The push rests on that substitute, as the human asked. A walk on the
 human's own phone is still welcome and was not done.
+
+## DEC-117 — Prompt-only consistency is a labelled mode the user chooses; the step stops and asks first
+**Context.** Spec §8.1: when no reference-capable editor can run, the sheets step "stops and asks"; prompt-only
+(text-to-image with the locked prompt block and the portrait's seed) is an explicit per-story choice, never
+automatic. This deployment has no free editor: ComfyUI is unreachable, the hosted editors are paid.
+**Decision.** Turnaround, expressions and place variants in `references` mode first run a no-call readiness
+check of IMAGE_EDIT_CHAIN (keys, route, allow_paid, caps, free allowance; local editors probed with
+`GET /system_stats`, ≤ 2 s, cached 60 s for the story page). Not ready → `NeedsEditor`: zero generation calls,
+nothing booked, nothing written; the story page shows why (every link's reason, paid editors with their
+estimate) and offers "Switch this story to prompt-only consistency" behind a confirmation. In `prompt_only`
+the images go through IMAGE_CHAIN with the portrait's (or plate's) seed and are labelled `prompt_only` in their
+JSON and in the UI; portraits, master plates and prop images are `base`, edited ones `references`.
+**Consequence.** Verified live: the cast stopped before any call, the switch showed with the reasons, six
+prompt-only sheets were made from each portrait's seed and labelled. The first version counted an unreachable
+local editor as ready, so the choice never appeared — the probe fixed that dead end.
+
+## DEC-118 — No face-identity adapters; uploads are design references for stylised characters
+**Context.** Spec §1.2: no real-person likeness; the cast is often fruit.
+**Decision.** No InstantID/PuLID/InfiniteYou. A character upload is a design reference, stated on the page
+("Design references for stylised characters. Imitating real people is not supported."); U1 describes only
+clothing and colours for a photo of a real person.
+**Consequence.** A reference steers K1's text (DEC-121) and, with a real editor, the edits — never an identity.
+
+## DEC-119 — The cast is picked from the concept's sketch, plus your own characters
+**Context.** A concept sketches 3–5 characters; the human wanted to choose (2026-09-26).
+**Decision.** The cast step creates the ticked sketch characters (all by default in the UI) and custom ones
+(name, role, one line), ≤ 8 in total (the number of distinct French Edge voices). The step fills what is missing
+for every character and can be re-run; the CLI creates the whole sketch only when the story has no character
+yet, so a re-run never resurrects a deleted one.
+**Consequence.** A cast of 3 from a 5-character sketch, as in the Tier-2 walk.
+
+## DEC-120 — Places and props are proposed, then edited, then described one by one
+**Context.** The spec has P1/R1 per item but no step deciding which places and props exist; the human chose a
+proposal the user edits (2026-09-26).
+**Decision.** P0 (one small call) proposes 2–3 places from the bible and props from its motifs and the cast's
+signature objects → `places_proposal.json`; the page edits it (1–6 places, 0–6 props, owners) and the places step
+runs P1/R1 per item, a master plate per place and an image per prop; time variants are made on demand.
+**Consequence.** Live: P0 proposed 2 places + 3 props, edited to 2 + 1 on the page.
+
+## DEC-121 — An upload is validated, re-encoded and uuid-named before anything reads it, and described for K1
+**Context.** User images are untrusted; the clip upload path trusts extensions and reuses names (the recorded
+"second talk.mp4 overwrites the first" follow-up). The human chose a vision description folded into K1 (2026-09-26).
+**Decision.** The route takes the raw request so the token is checked before any body is read, and streams the
+multipart under a cap; `accept_upload` refuses a 5th upload before reading, > 10 MiB, > 40 MP (two independent
+bomb guards), and anything but PNG/JPEG/WEBP/GIF decoders; re-encodes to a metadata-free PNG (≤ 1536 px long side)
+named `<uuid4hex>.png`. Before any K1 run, undescribed uploads are described by U1 on VISION_CHAIN (free Gemini
+here), and K1 receives the notes.
+**Consequence.** Live: a JPEG became a clean PNG; U1 described it in 2.6 s for $0. K1 follows a reference's colours
+but bends a human-looking one toward the style (A-054). The pre-existing clip upload routes still spool before the
+token check — its own task.
+
+## DEC-122 — A pinned voice is a one-link chain; voice briefs are kept; age is a distance
+**Context.** Spec §8.1/§11: a character's voice is pinned and must never fall back silently; leads never share.
+**Decision.** Voices are proposed from `voices.json` in TTS_CHAIN order for the story language (leads → support →
+recurring → guest; leads and supports never share; guests reuse only when exhausted); the sample is synthesised
+through a chain of the pinned voice alone — a failure offers alternates and tries nothing else. K1's brief is kept
+as `voice_hints` so a voice can be re-proposed later. Age is scored by distance (child < young < adult < elder;
+catalogue "senior" = elder). Edge rate/pitch are optional keyword arguments; clip voiceovers are unchanged.
+**Consequence.** Live, before the age fix, an elder matriarch got a young voice; after it, the top alternate was
+an adult one.
+
+## DEC-123 — Approval is per entity; groups fold; any rewrite clears the approval of what it rewrote
+**Context.** Spec §3 approves characters, places and props one by one and the season as a whole.
+**Decision.** `approvals` gains `cast`, `places`, `season`; `cast` holds when ≥ 1 lead/support exists and every
+lead and support is approved (recurring/guests never block); `places` when ≥ 1 place exists and every place and
+prop is approved; a folder that cannot be read blocks its group. Approving an entity needs its parts (a
+character: text, three sheets, a pinned voice, a sample). Every regenerate, PATCH or step write clears that
+entity's approval (and `season:<ep>` the season's); groups re-fold, so the status can fall back. Deleting an entity
+removes its id from every document that pointed at it. Phase-1 story files gain the three keys on read.
+**Consequence.** The status chain runs `style_approved → cast_approved → places_approved → ready`, verified live.
+
+## DEC-124 — Steps fill what is missing; regenerations use a fresh seed
+**Context.** A "needs an editor" stop leaves a cast half made; re-running must not redo or re-pay what exists.
+**Decision.** `cast` and `places` fill only what is missing (text, images, voices, samples); a complete re-run
+makes zero calls. A regenerate uses a fresh seed (so a seed-honouring provider does not return the same picture);
+a new portrait remakes the sheets derived from it.
+**Consequence.** Live: after the prompt-only switch, Continue cast made exactly the six missing sheets.
+
+## DEC-125 — Phase 2's Tier-2 was walked by me; the human listens to the voices
+**Context.** The human chose (2026-09-26) that I walk the script at 375 px and they only judge the voices.
+**Decision.** Walked live on the Tentafruit story: cast of 3 with an upload, stop-and-ask, prompt-only, voices,
+two places with a night variant, a prop, an 8-episode arc → `ready`, $0.00, no paid call. The voice listening is
+the human's.
+**Consequence.** One defect (voice age) and four polish issues were found and fixed during the walk.
