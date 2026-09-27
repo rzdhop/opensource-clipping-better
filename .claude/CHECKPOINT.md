@@ -48,6 +48,16 @@
   redirected): 71.2 s and 68.4 s inside the window, 0 dropped elisions — but E2 overshoots its range (1.5–2.8×)
   → 10–12 scene_over/trim_line flags per script. **Human: "One more round"** — E2 two-sided range, drop the
   "2–3 lines" nudge, ceiling at 1.5× hi retried once then accepted; agent B on it; then 2 live samples, merge.
+- **Round 2 done + deployed (21:55 UTC):** E2 two-sided range + ceiling (`74dee48`); live samples on the copy 63.2 s
+  / 4 flags and 55.0 s / 0 flags; F7 on the copy fast + T1 diff 0.000 everywhere. Tier-1 at `d466f83`: local **4477
+  passed / 1 skipped**, CI env **3892 passed / 555 skipped**, compileall clean, scratch build green, RC-E3 diff
+  empty. `main` ff'd to `d466f83` at 0 jobs, backend rebuilt (`rm -sfv` + `up -d --build`), health OK.
+  Re-walk at 375 px: ep 2 refusal shown up front, Write disabled (F8); `.story-script-consistency a` served with
+  --accent-hover #a78bfa (F5); Ready card on a ready story; ep 1 Script/Storyboard/Preview no overflow, state
+  approved/approved; clips page 7/7 videos 200 (RC-P1); `usage.json` unchanged by the copies; no `spend.json`.
+  Live ep 1 kept as the human chose: still the pre-fix 39.7 s script; its stored storyboard durations predate F7
+  (s01/s04/s10 1.0 s short) until the episode is next re-timed/re-planned or rewritten.
+  **Waiting on: the human's Tier-2 acknowledgement → then stage 14.**
 - **Seen on live, not mine:** a `style_preview` job ran on b1104ec66b05 at 20:42:52 from the dashboard (host
   bridge IP; `style` POST 409 then `style_preview` 201): 3 preview images replaced, job awaiting approval, story
   still `ready`, style approval untouched. Left as is; tell the human.
