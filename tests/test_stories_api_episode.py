@@ -523,8 +523,13 @@ def test_the_script_estimate_counts_only_what_is_missing(api):
     body = _estimate(api, story_id, "script", ep=1)
 
     assert body["step"] == "script" and body["ep"] == 1 and body["est_usd"] == 0.0
+    # llm_calls/llm_calls_range are the route's own conservative upper bound
+    # (_episode_estimate: high = llm_calls_range[1]), unaffected by stage
+    # 12b's exact E1/E2 count; calls_breakdown mirrors workflow.script_units
+    # exactly, so its E2 follows the episode's own 8 body slots (not the
+    # template's body range's upper end, 9).
     assert body["llm_calls"] == 12 and body["llm_calls_range"] == [8, 12]
-    assert body["calls_breakdown"] == {"E1": 1, "E2": 9, "E3": 1, "E4": 1}
+    assert body["calls_breakdown"] == {"E1": 1, "E2": 8, "E3": 1, "E4": 1}
     assert body["link"] == "gemini/gemini-test" and body["skipped_paid"] == [] and body["ready"] is True
     assert body["measure"] is None and "8–12 LLM calls" in body["message"]
     assert _estimate(api, story_id, "script", ep=1, measure=1)["measure"]["lines"] == 0

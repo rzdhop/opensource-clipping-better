@@ -597,7 +597,12 @@ def test_the_script_units_count_only_what_is_missing(wf, store):
     def units():
         return wf.script_units(wf.episode_context(store, story, 1, step="script"))
 
-    assert units() == {"E1": 1, "E2": 9, "E3": 1, "E4": 1, "E2_range": [5, 9], "llm_calls": 12,
+    # Stage 12b: E1 asks for exactly the episode's own body-slot count
+    # (timing.episode_slots), not the template's body range's upper end --
+    # episode 1 of serial_60s_v1 is 8 body scenes (default_body_count,
+    # clamped), so E2/llm_calls follow that exact count while E2_range/
+    # llm_calls_range keep the template's [5, 9] / [8, 12] range.
+    assert units() == {"E1": 1, "E2": 8, "E3": 1, "E4": 1, "E2_range": [5, 9], "llm_calls": 11,
                        "llm_calls_range": [8, 12]}
 
     queue = [e2_reply, e2_reply, DOWN, e2_reply, e2_reply, e2_reply, e2_reply, e2_reply]

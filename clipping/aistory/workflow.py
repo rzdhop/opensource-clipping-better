@@ -2451,18 +2451,23 @@ def script_units(ec) -> dict:
         {"E1", "E2", "E3", "E4", "E2_range": [lo, hi] | None,
          "llm_calls", "llm_calls_range": [lo, hi]}
 
-    No beat sheet yet: E1, then the template's body range of E2 (``E2`` and
-    ``llm_calls`` are its upper end), a full E3 and E4. Otherwise E2 per body
-    scene still a stub that someone can speak in, one E3 for every framing
-    part missing (or one per part when only some are), and E4 when anything
-    is written or the report is missing, stale or of an older revision."""
+    No beat sheet yet: E1, then E2 once per body scene E1 would actually ask
+    for (``timing.episode_slots``: an exact, positional count since stage
+    12b, not the template's body range), a full E3 and E4 (``E2``/
+    ``llm_calls`` follow that exact count; ``E2_range``/``llm_calls_range``
+    keep the template's body range, since a regenerate or a future template
+    change could still land anywhere in it). Otherwise E2 per body scene
+    still a stub that someone can speak in, one E3 for every framing part
+    missing (or one per part when only some are), and E4 when anything is
+    written or the report is missing, stale or of an older revision."""
     try:
         script = episode_common.read_episode(ec, SCRIPT_DOC)
     except StepFailed as exc:
         raise WorkflowError(CONFLICT, str(exc)) from None
     if not script or not script["scenes"]:
         low, high = ec.template["slots"]["body"]["count"]
-        return {"E1": 1, "E2": high, "E3": 1, "E4": 1, "E2_range": [low, high], "llm_calls": 3 + high,
+        exact = sum(1 for slot in timing.episode_slots(ec.template, ec.ep) if slot == "body")
+        return {"E1": 1, "E2": exact, "E3": 1, "E4": 1, "E2_range": [low, high], "llm_calls": 3 + exact,
                 "llm_calls_range": [3 + low, 3 + high]}
     stubs = [scene for scene in script_step.body_scenes(script) if scene["state"] == "stub"]
     e2 = sum(1 for scene in stubs if script_step.can_speak(ec, scene))
