@@ -214,16 +214,19 @@ class Budget:
     def elapsed(self) -> float:
         return self.clock() - self.started
 
-    def before_call(self, left: Callable[[], str]) -> None:
+    def before_call(self, left: Callable[[], str], *, per_call: Optional[float] = None) -> None:
         """``StepFailed`` when a call started now could overrun the budget;
-        *left* describes the work not done yet (called only then)."""
+        *left* describes the work not done yet (called only then). *per_call*
+        is how long this call may take when it is not an LLM call (one
+        synthesis of the voice measurement: ``script.STORY_TTS_CALL_SECONDS``)."""
+        per_call = self.per_call if per_call is None else per_call
         elapsed = self.elapsed()
-        if elapsed + self.per_call <= self.limit:
+        if elapsed + per_call <= self.limit:
             return
         minutes = int(self.limit // 60)
         raise StepFailed(
             f"The step's {minutes}-minute budget is nearly spent ({elapsed / 60:.1f} min used, and one more call "
-            f"may take up to {self.per_call / 60:g} min); everything written so far is kept, run the step again "
+            f"may take up to {per_call / 60:g} min); everything written so far is kept, run the step again "
             f"to continue. Left: {left()}."
         )
 

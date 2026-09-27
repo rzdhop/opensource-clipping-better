@@ -12,7 +12,11 @@ one scoring rule:
 * :func:`synthesize_sample` -- a ~3s sample of the pinned voice, through a
   single-link chain built from that voice alone (spec 8.1: never another
   provider, never another voice -- a failure is reported with alternatives,
-  not silently routed around).
+  not silently routed around);
+* :func:`synthesize_line` -- one script line spoken the same way (DEC-122),
+  for the script step's opt-in voice measurement (spec 6.4 source (a)): the
+  audio and its ``line_timing_v1`` sidecar are kept where the caller says,
+  and the call is booked once, the moment the provider answered.
 
 **Where a character's voice preference lives.** ``schemas.CHARACTER_SCHEMA``'s
 ``voice`` field is a *closed* schema (``provider, voice_id, rate, pitch,
@@ -40,8 +44,8 @@ the same way at proposal time and at synthesis time, so a pin survives
 round-tripping through ``character.json`` with only ``provider``/``voice_id``.
 
 Stdlib only (DEC-012): the provider modules this reaches (``generation``,
-``gating``, ``tts``, ``budget``) are stdlib at import, per their own doc
-comments.
+``gating``, ``tts``, ``budget``, ``pricing``, ``limits``) are stdlib at
+import, per their own doc comments.
 """
 
 from __future__ import annotations
@@ -50,21 +54,28 @@ import importlib.util
 import json
 import os
 import re
+import shutil
 import tempfile
 
 from clipping.providers import adapters as adapters_mod
 from clipping.providers import budget as budget_mod
-from clipping.providers import generation, gating, tts
+from clipping.providers import generation, gating, limits, pricing, tts
 from clipping.providers.registry import ChainError, Link, describe
 
 from . import ledger as ledger_mod
 from . import schemas
 
 STEP = "voice_sample"
+MEASURE_STEP = "voice_measure"
 LEDGER_NAME = "cost_ledger.json"
 VOICE_SAMPLE_STEM = "voice_sample"
 KEPT_EXTENSIONS = ("mp3", "wav")
 ALTERNATES_LIMIT = 6
+
+# What a line's ``timing.source`` says once it was measured (spec 6.4): the
+# engine's own word timestamps, or the length of the audio it wrote.
+MEASURED_SOURCES = (tts.SOURCE_WORDS, tts.SOURCE_DURATION)
+_FILE_MODE = 0o644
 
 _RATE_RE = re.compile(schemas.VOICE_RATE_PATTERN)
 _PITCH_RE = re.compile(schemas.VOICE_PITCH_PATTERN)
@@ -358,11 +369,11 @@ def _open_ledger(stories, story_id) -> ledger_mod.CostLedger:
     return ledger_mod.CostLedger(path)
 
 
-def _book(ledger, result, answered, *, qty) -> float:
+def _book(ledger, result, answered, *, qty, step=STEP, ep=None) -> float:
     paid = bool(result.paid)
     est = float(result.est_cost) if paid else 0.0
-    ledger.append(step=STEP, provider=answered.provider, model=gating.api_model_id(generation.TTS, answered),
-                  unit="char", qty=qty, est_usd=est, paid=paid)
+    ledger.append(step=step, provider=answered.provider, model=gating.api_model_id(generation.TTS, answered),
+                  unit="char", qty=qty, est_usd=est, paid=paid, ep=ep)
     if result.paid and result.est_cost > 0:
         budget_mod.record(result.est_cost)
     return round(est, 4)
@@ -491,3 +502,311 @@ def synthesize_sample(stories, story_id, char_id, *, env, on_log, cancel, adapte
     if duration is not None:
         payload["duration_s"] = duration
     return payload
+
+
+# ----------------------------------------------------------------- lines
+
+def voice_label(voice):
+    """``"<provider>/<voice_id>"`` of a pinned voice block -- what a measured
+    line's ``timing.voice`` records -- or None when *voice* pins nothing."""
+    voice = voice or {}
+    provider, voice_id = voice.get("provider"), voice.get("voice_id")
+    if not provider or not voice_id:
+        return None
+    return f"{provider}/{voice_id}"
+
+
+def _spoken_by(voice, link) -> str:
+    """How a failure names the voice: its label, and the chain link behind it
+    when that says something else (``gemini/Kore (gemini/flash-lite-tts)``)."""
+    label = voice_label(voice)
+    return label if label == describe(link) else f"{label} ({describe(link)})"
+
+
+class LineGates:
+    """What every :func:`synthesize_line` of one run shares, opened once
+    before the first: the Settings over the process environment, the budget
+    they describe, the story's ledger (checked readable first: its totals
+    feed the caps, and a torn file would be started afresh by the first
+    booking), the free-tier limiter, and :meth:`check` -- the budget verdict
+    the runner asks before a paid call, with the story's and (with *ep*) the
+    episode's spending so far read at each check, so a line booked a moment
+    ago counts against the next one.
+
+    ``VoiceError`` when the budget settings or the ledger cannot be used:
+    nothing can be spent safely, so nothing is tried.
+    """
+
+    def __init__(self, stories, story_id, *, env, ep=None):
+        self.merged = gating.merged_env(env)
+        try:
+            self.budget = gating.budget_of(self.merged)
+        except ValueError as exc:
+            raise VoiceError(f"The budget settings cannot be used: {exc}") from None
+        self.ledger = _open_ledger(stories, story_id)
+        self.ep = ep
+        self.limiter = gating.FreeTierLimiter()
+
+    def spent(self, ep=None) -> float:
+        return float(self.ledger.totals(ep)["est_usd"])
+
+    def check(self, estimate, link) -> None:
+        ep_spent = self.spent(self.ep) if self.ep is not None else 0.0
+        budget_mod.check(estimate, link, budget=self.budget, day_spent=budget_mod.day_spent(),
+                         ep_spent=ep_spent, story_spent=self.spent())
+
+
+def _atomic_copy(src, dest) -> None:
+    """Copy *src* to *dest* so a reader sees the old file or the new one (a
+    temp file in *dest*'s own directory, fsync, 0644, ``os.replace``; the
+    temp file never outlives a failure). ``store._atomic_copy``'s pattern,
+    duplicated: a private helper of another module."""
+    handle, tmp = tempfile.mkstemp(dir=os.path.dirname(dest), prefix=".voice-", suffix=".tmp")
+    try:
+        with os.fdopen(handle, "wb") as out, open(src, "rb") as source:
+            shutil.copyfileobj(source, out)
+            out.flush()
+            os.fsync(out.fileno())
+        os.chmod(tmp, _FILE_MODE)
+        os.replace(tmp, dest)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _line_outputs(result, spoken):
+    """``(audio path, its extension, the sidecar's path, the sidecar)`` of
+    an answer; ``VoiceError`` naming what is missing or unusable -- a line
+    with no measured duration is never given one (spec 6.4: no silent
+    fallback, never an estimate labelled measured)."""
+    audio = sidecar = None
+    for path in result.paths:
+        ext = os.path.splitext(str(path))[1].lstrip(".").lower()
+        if ext in KEPT_EXTENSIONS and audio is None:
+            audio = (str(path), ext)
+        elif ext == "json" and sidecar is None:
+            sidecar = str(path)
+    if audio is None:
+        raise VoiceError(f"{spoken} answered without an audio file.")
+    if sidecar is None:
+        raise VoiceError(f"{spoken} answered without its {tts.TIMING_SCHEMA} timing file.")
+    try:
+        with open(sidecar, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError) as exc:
+        raise VoiceError(f"{spoken}: its timing file cannot be read ({type(exc).__name__}: {exc}).") from None
+    if not isinstance(data, dict) or data.get("$schema") != tts.TIMING_SCHEMA:
+        raise VoiceError(f"{spoken}: its timing file is not a {tts.TIMING_SCHEMA} document.")
+    if data.get("source") not in MEASURED_SOURCES:
+        raise VoiceError(f"{spoken}: its timing file names no known source ({data.get('source')!r}).")
+    duration = data.get("duration_s")
+    if isinstance(duration, bool) or not isinstance(duration, (int, float)) or not duration > 0:
+        raise VoiceError(f"{spoken} answered, but no duration could be measured ({duration!r}: no word "
+                         "timestamps and no audio length -- is ffprobe installed?).")
+    return audio[0], audio[1], sidecar, data
+
+
+def synthesize_line(gates, *, voice, text, dest_for, on_log, cancel, step=MEASURE_STEP, adapters=None,
+                    transport=None) -> dict:
+    """*text* spoken by the pinned *voice* (a character's ``voice`` block,
+    or the narrator's) through a single-link chain built from that voice
+    ALONE (DEC-122: never another provider, never another voice, never
+    silently), under *gates* (:class:`LineGates`): ``allow_paid`` and the
+    budget verdict before a paid link, the free-tier limiter before a free
+    one -- the runner's own gates, in its order; a paid link gets one
+    attempt (DEC-106).
+
+    Booked once, the moment the provider answered (``_book``: *step*, the
+    gates' episode, unit ``"char"``, qty ``len(text)``, the link's price) --
+    ``run_generation_chain`` books nothing -- and only then: a refusal or a
+    failure costs nothing and books nothing. An answer this cannot use (no
+    audio, no sidecar, no duration) is still booked: the call was made.
+
+    The audio is kept at ``dest_for(ext)`` (``"mp3"`` or ``"wav"``, as the
+    engine wrote it) and its ``line_timing_v1`` sidecar at
+    ``dest_for("json")``, each copied atomically. Returns ``{"ext",
+    "duration_s", "source", "voice": "<provider>/<voice_id>", "link",
+    "paid", "est_usd"}``.
+
+    ``VoiceError`` for a voice that pins nothing or a provider no chain link
+    speaks for, a chain that could not run its one link (the refusal of a
+    paid link while ``allow_paid`` is off carries the estimate and the
+    day's spending), or an answer that cannot be kept. ``Cancelled`` passes
+    through.
+    """
+    label = voice_label(voice)
+    if label is None:
+        raise VoiceError("no voice is pinned.")
+    link = _chain_link(voice["provider"], voice["voice_id"])
+    spoken = _spoken_by(voice, link)
+    request = generation.GenRequest(
+        kind=generation.TTS, text=text, voice=voice["voice_id"],
+        extra={"rate": voice.get("rate"), "pitch": voice.get("pitch")},
+    )
+    if adapters is None:
+        adapters_mod.load_all()
+
+    with tempfile.TemporaryDirectory(prefix="voice-line-") as scratch:
+        request.out_dir = scratch
+        try:
+            result, answered = generation.run_generation_chain(
+                generation.TTS, [link], request, env=gates.merged, allow_paid=gates.budget.allow_paid,
+                on_log=on_log, budget_check=gates.check, limiter=gates.limiter, adapters=adapters,
+                transport=transport, cancel=cancel,
+            )
+        except generation.NoRunnableLink as exc:
+            reason = exc.failures[0][1] if exc.failures else str(exc)
+            if generation.is_paid(link) and not gates.budget.allow_paid:
+                # The runner's first gate says only "allow_paid is off"; the
+                # same verdict with its numbers, computed without a call.
+                summary = gating.link_summary(generation.TTS, link, gates.merged, gates.budget, request,
+                                              story_spent=gates.spent(), adapters=adapters)
+                reason = summary["reason"] or reason
+            raise VoiceError(f"{spoken} could not speak it ({reason}).") from exc
+        except pricing.PriceUnknown as exc:
+            raise VoiceError(f"{spoken} is a paid link with no price: {exc}") from None
+
+        est = _book(gates.ledger, result, answered, qty=len(text), step=step, ep=gates.ep)
+        audio, ext, sidecar, data = _line_outputs(result, spoken)
+        try:
+            _atomic_copy(audio, dest_for(ext))
+            _atomic_copy(sidecar, dest_for("json"))
+        except (KeyError, OSError, ValueError) as exc:
+            raise VoiceError(f"{spoken} answered, but the audio could not be kept "
+                             f"({type(exc).__name__}: {exc}).") from None
+
+    return {"ext": ext, "duration_s": round(float(data["duration_s"]), 3), "source": data["source"],
+            "voice": label, "link": answered, "paid": bool(result.paid), "est_usd": est}
+
+
+def _paid_off_reason(est, link, budget_obj) -> str:
+    """``gating.link_summary``'s refusal while ``allow_paid`` is off, for an
+    amount summed over several lines (the runner's first gate, DEC-097)."""
+    return (f"refused: est ${est:.3f} on {describe(link)}; allow_paid is off "
+            f"(today ${budget_mod.day_spent():.2f} of ${budget_obj.daily_cap_usd:.2f})")
+
+
+def estimate_lines(stories, story_id, items, *, env, ep=None, adapters=None) -> dict:
+    """What :func:`synthesize_line` would cost and whether the runner's gates
+    would let each voice through, for *items* (``[(voice, text,
+    speaker_name)]``), calling nothing -- no provider, no probe, no counter::
+
+        {"voices": [{"voice", "link", "speakers", "lines", "chars", "paid", "est_usd", "allowed", "reason"}],
+         "est_usd": x, "paid_links": [{"link", "allowed", "reason"}], "allow_paid": bool,
+         "free_tier": {provider: {"rpm", "rpd", "calls", "left", "needed"}}, "ready": bool}
+
+    One row per pinned voice, in the order the lines name them. A paid
+    link's price is the adapter's own estimate of each line (the number the
+    runner checks and ``_book`` records), summed; its verdict is
+    ``allow_paid`` then the caps, against the story's and the episode's
+    spending so far. A free link is checked against its provider's daily
+    allowance (``free_tier``: what is left today and how many lines would
+    use it); a local engine is probed when it runs, never here.
+    """
+    if adapters is None:
+        adapters_mod.load_all()
+    merged = gating.merged_env(env)
+    try:
+        budget_obj = gating.budget_of(merged)
+        budget_error = None
+    except ValueError as exc:
+        budget_obj, budget_error = None, f"The budget settings cannot be used: {exc}"
+
+    ledger = ledger_mod.CostLedger(os.path.join(stories.story_dir(story_id), LEDGER_NAME))
+    story_spent = float(ledger.totals()["est_usd"])
+    ep_spent = float(ledger.totals(ep)["est_usd"]) if ep is not None else 0.0
+
+    rows, links = {}, {}
+    for voice, text, speaker in items:
+        label = voice_label(voice)
+        row = rows.get(label)
+        if row is None:
+            row = rows[label] = {"voice": label, "link": None, "speakers": [], "lines": 0, "chars": 0,
+                                 "paid": False, "est_usd": 0.0, "allowed": True, "reason": None}
+            try:
+                links[label] = _chain_link(voice["provider"], voice["voice_id"])
+            except VoiceError as exc:
+                links[label] = None
+                row.update(allowed=False, reason=str(exc))
+            else:
+                row["link"] = describe(links[label])
+                row["paid"] = generation.is_paid(links[label])
+        if speaker not in row["speakers"]:
+            row["speakers"].append(speaker)
+        row["lines"] += 1
+        row["chars"] += len(text)
+        link = links[label]
+        if link is not None and row["paid"]:
+            adapter = generation.adapter_for(generation.TTS, link.provider, adapters)
+            request = generation.GenRequest(kind=generation.TTS, text=text, voice=voice["voice_id"])
+            try:
+                estimate = adapter.estimate(link, request) if adapter is not None else None
+                if estimate is None:
+                    estimate = pricing.estimate(link, len(text))
+                row["est_usd"] = round(row["est_usd"] + float(getattr(estimate, "est_usd", estimate) or 0.0), 4)
+            except pricing.PriceUnknown as exc:
+                row.update(allowed=False, reason=str(exc))
+
+    table = limits.limits_from_env()
+    usage = limits.default_usage()
+    free_tier = {}
+    pending = 0.0  # paid voices before this one, as the runner would book them in turn
+    for label, row in rows.items():
+        link = links[label]
+        if link is None or not row["allowed"]:
+            continue
+        adapter = generation.adapter_for(generation.TTS, link.provider, adapters)
+        missing = generation.missing_keys(link, merged)
+        if adapter is None:
+            row.update(allowed=False, reason=f"no adapter yet for {link.provider} {generation.TTS}")
+        elif missing:
+            row.update(allowed=False, reason=f"no API key ({' and '.join(missing)} "
+                                              f"{'is' if len(missing) == 1 else 'are'} not set)")
+        elif row["paid"]:
+            if budget_obj is None:
+                row.update(allowed=False, reason=budget_error)
+            elif not budget_obj.allow_paid:
+                row.update(allowed=False, reason=_paid_off_reason(row["est_usd"], link, budget_obj))
+            else:
+                try:
+                    budget_mod.check(row["est_usd"], link, budget=budget_obj,
+                                     day_spent=budget_mod.day_spent() + pending, ep_spent=ep_spent + pending,
+                                     story_spent=story_spent + pending)
+                except budget_mod.BudgetRefused as exc:
+                    row.update(allowed=False, reason=str(exc))
+                else:
+                    pending += row["est_usd"]
+        elif link.provider in table:
+            limit = table[link.provider]
+            entry = free_tier.get(link.provider)
+            if entry is None:
+                calls = usage.calls(link.provider)
+                entry = free_tier[link.provider] = {
+                    "rpm": limit.rpm, "rpd": limit.rpd, "calls": calls,
+                    "left": None if limit.rpd is None else max(0, limit.rpd - calls), "needed": 0,
+                }
+            entry["needed"] += row["lines"]
+
+    for label, row in rows.items():
+        link = links[label]
+        entry = free_tier.get(link.provider) if link is not None and not row["paid"] else None
+        if row["allowed"] and entry is not None and entry["left"] is not None and entry["needed"] > entry["left"]:
+            row.update(allowed=False, reason=f"daily allowance: {entry['left']} of {entry['rpd']} {link.provider} "
+                                             f"calls left today, {entry['needed']} needed (resets at 00:00 UTC)")
+
+    paid_links = {}
+    for row in rows.values():
+        if not row["paid"]:
+            continue
+        entry = paid_links.setdefault(row["link"], {"link": row["link"], "allowed": True, "reason": None})
+        if not row["allowed"] and entry["allowed"]:
+            entry.update(allowed=False, reason=row["reason"])
+    voices_rows = list(rows.values())
+    return {
+        "voices": voices_rows, "est_usd": round(sum(row["est_usd"] for row in voices_rows), 4),
+        "paid_links": list(paid_links.values()), "allow_paid": bool(budget_obj and budget_obj.allow_paid),
+        "free_tier": free_tier, "ready": all(row["allowed"] for row in voices_rows),
+    }

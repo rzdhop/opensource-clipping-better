@@ -756,6 +756,64 @@ def _effective_tail_floor(sid, scenes_in_order, template, script, transitions_by
     return floor
 
 
+def _time_shots(shots, transitions, scenes_in_order, script, *, template, language, style_lock, skip=()) -> list:
+    """Every shot's ``duration_s``, in place, the one way a storyboard is
+    timed: its scene's :func:`timing.scene_timing` -- the tail never below
+    the transition leaving the scene (:func:`_effective_tail_floor`) -- split
+    across the scene's shots by :func:`timing.allocate_shots`.
+    *scenes_in_order* are the scenes the shots cover, in the script's order
+    (the last one decides the end card's floor); a scene in *skip* keeps its
+    shots' durations. Returns the notes (a scene whose shots sit at the floor
+    length)."""
+    notes = []
+    transitions_by_after = {t["after"]: t for t in transitions}
+    shots_by_scene: dict = {}
+    for shot in shots:
+        shots_by_scene.setdefault(shot["scene_id"], []).append(shot)
+
+    for scene in scenes_in_order:
+        sid = scene["scene_id"]
+        if sid in skip:
+            continue
+        floor = _effective_tail_floor(sid, scenes_in_order, template, script, transitions_by_after, shots_by_scene)
+        scene_t = timing.scene_timing(scene, template, language, style_lock=style_lock, tail_floor=floor)
+        scene_shots = shots_by_scene.get(sid, [])
+        scene_plans_for_alloc = [{"lines": shot["lines"]} for shot in scene_shots]
+        durations, extra_hold = timing.allocate_shots(scene, scene_t, scene_plans_for_alloc, template)
+        for shot, duration in zip(scene_shots, durations):
+            shot["duration_s"] = duration
+        if extra_hold > 0:
+            notes.append(f"build_storyboard: scene {sid}: extra_hold_s={extra_hold} (shots at the floor length)")
+    return notes
+
+
+def retime_storyboard(storyboard, script, *, template, language, style_lock) -> bool:
+    """*storyboard*'s shot durations recomputed in place from *script*'s
+    lines as they are now (measured, or estimated), exactly as
+    :func:`build_storyboard` times the same plans -- and nothing else moves:
+    the plans, prompts, ids, transitions, the scenes' entries, the revision
+    and the approval stay as they are (a duration is derived, like the
+    script's ``timing``). A scene planned from another revision of its
+    scene, or marked stale, keeps its durations until it is planned again:
+    its shots may name lines it no longer has. Returns whether any duration
+    changed."""
+    scenes_in_order = [scene for scene in script["scenes"] if scene["scene_id"] in storyboard["scenes"]]
+    line_ids = {scene["scene_id"]: {line["line_id"] for line in scene["lines"]} for scene in scenes_in_order}
+    skip = set()
+    for scene in scenes_in_order:
+        entry = storyboard["scenes"][scene["scene_id"]]
+        if entry.get("stale") or entry.get("script_rev") != scene["rev"]:
+            skip.add(scene["scene_id"])
+    for shot in storyboard["shots"]:
+        known = line_ids.get(shot["scene_id"])
+        if known is not None and any(line_id not in known for line_id in shot["lines"]):
+            skip.add(shot["scene_id"])
+    before = [shot["duration_s"] for shot in storyboard["shots"]]
+    _time_shots(storyboard["shots"], storyboard["transitions"], scenes_in_order, script, template=template,
+                language=language, style_lock=style_lock, skip=skip)
+    return [shot["duration_s"] for shot in storyboard["shots"]] != before
+
+
 def build_storyboard(script, plans, sources, *, entities, style_lock, template, language, consistency_mode,
                      now, previous=None) -> tuple:
     """*plans* (``{scene_id: [plan, ...]}``) and *sources* (``{scene_id:
@@ -800,22 +858,8 @@ def build_storyboard(script, plans, sources, *, entities, style_lock, template, 
             })
 
     transitions = timing.plan_transitions(shots, scenes_by_id, template)
-    transitions_by_after = {t["after"]: t for t in transitions}
-    shots_by_scene: dict = {}
-    for shot in shots:
-        shots_by_scene.setdefault(shot["scene_id"], []).append(shot)
-
-    for scene in scenes_in_order:
-        sid = scene["scene_id"]
-        floor = _effective_tail_floor(sid, scenes_in_order, template, script, transitions_by_after, shots_by_scene)
-        scene_t = timing.scene_timing(scene, template, language, style_lock=style_lock, tail_floor=floor)
-        scene_shots = shots_by_scene.get(sid, [])
-        scene_plans_for_alloc = [{"lines": shot["lines"]} for shot in scene_shots]
-        durations, extra_hold = timing.allocate_shots(scene, scene_t, scene_plans_for_alloc, template)
-        for shot, duration in zip(scene_shots, durations):
-            shot["duration_s"] = duration
-        if extra_hold > 0:
-            notes.append(f"build_storyboard: scene {sid}: extra_hold_s={extra_hold} (shots at the floor length)")
+    notes.extend(_time_shots(shots, transitions, scenes_in_order, script, template=template, language=language,
+                             style_lock=style_lock))
 
     doc = {
         "$schema": schemas.STORYBOARD_SCHEMA_NAME,
