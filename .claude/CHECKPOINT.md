@@ -7,6 +7,31 @@
   calls, day 2026-09-27); no `data/spend.json`.
 - If this session dies mid-walk: check `git log -1 main` — if it equals the branch head, the merge is done; check
   the container's `/api/health` version and jobs before anything else.
+- **Done 19:48–20:20 UTC:** `main` ff-merged to `ede5116`; backend rebuilt (`rm -sfv` + `up -d --build`), health OK.
+  Kiwilo + Mangella re-approved in the UI (20:07:49 / 20:07:54) → story `ready`.
+- **Tier-2 walk (localhost:8000, 375 px) — all 11 steps mechanically PASS:** script job 20:08:54→20:09:15 (E1, E2×7,
+  E3, E4; 16.5 s of calls); two inline edits → rev 3, report stale → Check again = 1 E4; regenerate s03 with a note →
+  only s03 changed (1 E2); recheck passed → script approved; Fast storyboard 0 calls, 24 shots, rule pass logged;
+  Plan with T1 = 10 calls (61 s; one 47 s Gemini latency, no retry), 20 shots, 2 per scene → approved; measure: 15
+  lines (Edge ×10, Gemini TTS ×5, one 429 retried OK) in 24 s → 39.7 s measured; docs validate (script, storyboard,
+  context); **23 LLM calls, all gemini free, 0 retries, 0 over cap, paid link skipped every time**; `usage.json`
+  edge 1→11, gemini 1→6 (TTS only — LLM calls are not counted there, pre-existing), no `spend.json`; ep 2 refused
+  naming phase 5; restart kept the awaiting job + approvals; 375/820/1280 no overflow on Script/Storyboard/Preview;
+  `/clips/job/b37b36a9b34e` serves 7 clips. Live ep 1 now has script + storyboard + measured audio, both approved.
+- **Findings (awaiting the human's call on the fix round):**
+  F3 MAJOR episode 38.6 s est / 39.7 s measured, under 55–80: E1 picks low targets (Σ 49.5 s) and E2's word budget
+  is a ceiling only (`prompts.py:930`) → fix: E2 asks lo–hi words + validate_e2 floor; E1 aims for the upper half.
+  F7 MAJOR storyboard `_time_shots` (`shots.py:~760`) times scenes with `timing.scene_timing`, ignoring the
+  episode-level window pass (`timing.py:~630` hold extension / tightening) → s01/s04/s10 shots 1.0 s short of the
+  script's scene durations. F1 MEDIUM model drops French elision apostrophes (E1 mostly, E2 sometimes) — raw
+  output, no code strips them. F2 LOW model garbles an accent now and then (trAne/tr¤ne) — raw output, no fix.
+  F5 LOW consistency-panel scene links default blue rgb(0,0,238). F6 LOW stale report → "The script is not
+  complete yet." (`ScriptPane.jsx:437`, `missing` includes consistency_check); Measure disabled likewise. F8 LOW
+  ep ≥ 2: estimate refusal swallowed ("estimating…" forever, Write enabled). F9 LOW (phase-2 origin) Ready card
+  keys on `approvals.season` (`NewStoryWizard.jsx:393`), shows "ready" + Open episode 1 with cast unapproved.
+  F10 LOW skipped paid link only in the chip tooltip. F11 LOW estimate top = 12 (body high 9) vs 11 exact.
+  F4 WITHDRAWN: s08 silent scene is spec §body "one dread/quiet scene without dialogue allowed".
+  Pre-existing, not phase 3: clip job page "Live activity 33h 56m on this step" on a completed job.
 
 ## RESUME HERE (session paused by the human, 2026-09-27)
 - **Where:** worktree `.claude/worktrees/ai-story-phase-3`, branch `feat/ai-story-phase-3` (local only, NOT pushed),
