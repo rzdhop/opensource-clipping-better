@@ -1,5 +1,5 @@
-"""Loaders for the AI Story data templates: style templates (spec 5) and the
-curated concept library (spec 7).
+"""Loaders for the AI Story data templates: style templates (spec 5), the
+curated concept library (spec 7) and the episode templates (spec 6.2).
 
 Templates are data, not code, and are located relative to this file (no
 package-data mechanism exists in this repo). Every loader validates against
@@ -60,6 +60,39 @@ def load_style(template_id: str) -> dict:
     if template_id not in list_style_ids():
         raise KeyError(template_id)
     return copy.deepcopy(_load_style_cached(template_id))
+
+
+def list_episode_template_ids() -> list:
+    """Sorted ids of the shipped episode templates (file stems in episodes/)."""
+    episodes_dir = TEMPLATES_DIR / "episodes"
+    if not episodes_dir.is_dir():
+        return []
+    return sorted(p.stem for p in episodes_dir.glob("*.json"))
+
+
+@functools.lru_cache(maxsize=None)
+def _load_episode_template_cached(template_id: str) -> dict:
+    path = TEMPLATES_DIR / "episodes" / f"{template_id}.json"
+    with open(path, encoding="utf-8") as fh:
+        data = json.load(fh)
+    errors = schemas.episode_template_errors(data)
+    if errors:
+        raise schemas.SchemaError(template_id, errors)
+    return data
+
+
+def load_episode_template(template_id: str) -> dict:
+    """Load and validate one episode template by id.
+
+    Same rule as ``load_style``: the id is checked against the same pattern
+    *before* any path is built from it, so a value like ``"../x"`` is
+    rejected without ever touching the filesystem.
+    """
+    if not isinstance(template_id, str) or not _ID_PATTERN.match(template_id):
+        raise KeyError(template_id)
+    if template_id not in list_episode_template_ids():
+        raise KeyError(template_id)
+    return copy.deepcopy(_load_episode_template_cached(template_id))
 
 
 @functools.lru_cache(maxsize=1)

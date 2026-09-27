@@ -1,0 +1,25 @@
+{
+  "$schema": "episode_template_v1",
+  "template_id": "serial_60s_v1",
+  "version": 1,
+  "label": {"fr": "Épisode de 60 secondes", "en": "60-second episode"},
+  "window_s": [55, 80],
+  "target_s": 60,
+  "tighten_above_s": 75,
+  "scenes": [8, 12],
+  "shots": [16, 30],
+  "min_shot_s": 0.8,
+  "recap_from_episode": 2,
+  "slots": {
+    "recap":       {"functions": ["recap"], "count": [1, 1], "duration_s": [2.0, 3.0]},
+    "hook":        {"functions": ["hook"], "count": [1, 1], "duration_s": [1.5, 3.5]},
+    "body":        {"functions": ["setup", "rising", "peak", "turn"], "count": [5, 9], "duration_s": [4.0, 8.0]},
+    "cliffhanger": {"functions": ["cliffhanger"], "count": [1, 1], "duration_s": [2.0, 5.0]}
+  },
+  "pauses_s": {"before_first_line": 0.35, "between_lines": 0.25, "tail": 0.6, "tail_peak": 1.2, "tail_floor": 0.3},
+  "tail_peak_functions": ["peak", "cliffhanger"],
+  "hold_extension_max_s": 1.0,
+  "end_card_s": 1.0,
+  "transitions_s": {"cut": 0.0, "dissolve": 0.4, "fadeblack": 0.4, "fadewhite": 0.3, "wipeleft": 0.3, "wiperight": 0.3, "slideup": 0.3},
+  "notes": "Measured on the reference videos (10-REFERENCE-ANALYSIS, 2026-09-25): shot mean 3.2 s, lines of 3-8 words, one episode ran 77 s. The window was widened to 55-80 s with tightening above 75 s by the human on 2026-09-27 (phase-3 CLARIFY answer 2); the recap slot applies from episode 2 onward."
+}

@@ -1,7 +1,7 @@
 ## IN PROGRESS — AI Story **phase 3** (episode writer: script, storyboard, timing)
 - **Started:** 2026-09-27 by the human ("Phase 2 seems to have been worked on, check an go with phase 3").
   Task class: FULL. Phase 2 checked: closed and pushed (`4280333` == `origin/main`).
-- **Current phase:** 5 IMPLEMENT — stage 0 done (this commit); next is stage 1. Plan **approved in chat**
+- **Current phase:** 5 IMPLEMENT — stages 0–1 done; next is stage 2 (timing engine). Plan **approved in chat**
   ("Go", 2026-09-27).
 - **Plan:** `~/.claude/plans/ai-story-phase-3-episode-writer.md` (stages 0–14, riskiest = stage 6, the
   script/storyboard step runners). **Read it first**: it holds the design, the stage table and the Tier-2 script.
@@ -30,7 +30,7 @@
 | S | Stage | State |
 |---|---|---|
 | 0 | checkpoint + baseline + worktree | **done** (this commit) |
-| 1 | episode templates + script/storyboard schemas | — |
+| 1 | episode templates + script/storyboard schemas | **done** (local 3800 / CI 3235 + 535 skipped) |
 | 2 | timing engine | — |
 | 3 | episode documents in the store | — |
 | 4 | prompts E1–E4, T1, T1r + context | — |

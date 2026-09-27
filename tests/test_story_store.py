@@ -184,7 +184,7 @@ def test_every_fixed_object_of_the_bible_is_closed():
     {"why_come_back": ["w"] * 4},
     {"language": "de"},
     {"status": "published"},
-    {"episode_template_id": "serial_90s_v1"},
+    {"episode_template_id": "serial_45s_v1"},
     {"story_id": "ABCDEF123456"},
     {"concept_id": "Bad-Id"},
     {"concept_id": "import:xyz"},

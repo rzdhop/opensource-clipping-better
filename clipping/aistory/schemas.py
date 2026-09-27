@@ -632,7 +632,7 @@ STORY_BIBLE_SCHEMA = {
         "place_ids": _id_array(PLACE_ID_PATTERN),
         "prop_ids": _id_array(PROP_ID_PATTERN),
         "style_template_id": {"type": ["string", "null"], "pattern": _ID_PATTERN},
-        "episode_template_id": {"type": "string", "const": defaults.EPISODE_TEMPLATE_ID},
+        "episode_template_id": {"type": "string", "enum": list(defaults.EPISODE_TEMPLATE_IDS)},
         "generation_profile": _GENERATION_PROFILE_SCHEMA,
         "narrator": _NARRATOR_SCHEMA,
         "approvals": _APPROVALS_SCHEMA,
@@ -1520,6 +1520,641 @@ def places_proposal_errors(doc) -> list:
         for i, item in enumerate(doc[key]):
             _check_text(errors, f"$.{key}[{i}].name", item["name"])
             _check_text(errors, f"$.{key}[{i}].one_line", item["one_line"])
+    return errors
+
+
+# ============================================================ phase 3 documents (spec 2.7, 2.8, 6.2-6.4)
+#
+# What the phase-3 episode writer keeps on disk, plus the shipped episode
+# templates it is written against (spec 6.2). Same rules as the phase-1/2
+# documents above: every fixed object is closed; a ``*_errors`` function adds
+# the checks the subset schema cannot express. Timing (6.4), prompts, shot
+# resolution and the store wiring are later stages; this module only fixes
+# the shapes they will build on.
+
+# ------------------------------------------------------- episode_template_v1 (spec 6.2)
+
+EPISODE_TEMPLATE_SCHEMA_NAME = "episode_template_v1"
+EPISODE_TEMPLATE_SLOTS = ("recap", "hook", "body", "cliffhanger")
+
+_RANGE_S = {"type": "array", "items": {"type": "number", "minimum": 0}, "minItems": 2, "maxItems": 2}
+_RANGE_INT = {"type": "array", "items": {"type": "integer", "minimum": 0}, "minItems": 2, "maxItems": 2}
+
+_EPISODE_TEMPLATE_SLOT_SCHEMA = _document({
+    "functions": {"type": "array", "items": {"type": "string", "enum": list(SCENE_FUNCTIONS)}, "minItems": 1},
+    "count": _RANGE_INT,
+    "duration_s": _RANGE_S,
+})
+
+EPISODE_TEMPLATE_SCHEMA = _document({
+    "$schema": {"type": "string", "const": EPISODE_TEMPLATE_SCHEMA_NAME},
+    "template_id": {"type": "string", "pattern": _ID_PATTERN},
+    "version": {"type": "integer", "minimum": 1},
+    "label": bilingual(),
+    "window_s": _RANGE_S,
+    "target_s": {"type": "number", "minimum": 0},
+    "tighten_above_s": {"type": "number", "minimum": 0},
+    "scenes": _RANGE_INT,
+    "shots": _RANGE_INT,
+    "min_shot_s": {"type": "number", "minimum": 0},
+    "recap_from_episode": {"type": "integer", "minimum": 1},
+    "slots": _document({slot: _EPISODE_TEMPLATE_SLOT_SCHEMA for slot in EPISODE_TEMPLATE_SLOTS}),
+    "pauses_s": _document({
+        "before_first_line": {"type": "number", "minimum": 0},
+        "between_lines": {"type": "number", "minimum": 0},
+        "tail": {"type": "number", "minimum": 0},
+        "tail_peak": {"type": "number", "minimum": 0},
+        "tail_floor": {"type": "number", "minimum": 0},
+    }),
+    # checked against SCENE_FUNCTIONS in episode_template_errors.
+    "tail_peak_functions": {"type": "array", "items": {"type": "string"}},
+    "hold_extension_max_s": {"type": "number", "minimum": 0},
+    "end_card_s": {"type": "number", "minimum": 0},
+    # keys checked against TRANSITIONS exactly in episode_template_errors.
+    "transitions_s": {"type": "object"},
+    "notes": {"type": "string"},
+})
+
+
+def _range_pair_errors(errors, path, pair) -> None:
+    """A [lo, hi] pair: 0 <= lo <= hi."""
+    lo, hi = pair
+    if not (0 <= lo <= hi):
+        errors.append(f"{path}: [{lo}, {hi}] must satisfy 0 <= lo <= hi")
+
+
+def _scene_count_feasible(scenes_range, *slot_counts) -> bool:
+    """Whether some combination of counts within *slot_counts* (each a
+    [lo, hi] pair) can land the total scene count inside *scenes_range*."""
+    scenes_lo, scenes_hi = scenes_range
+    lo = sum(count[0] for count in slot_counts)
+    hi = sum(count[1] for count in slot_counts)
+    return lo <= scenes_hi and hi >= scenes_lo
+
+
+def episode_template_errors(doc) -> list:
+    """``validate()`` against ``EPISODE_TEMPLATE_SCHEMA``, plus the cross-field
+    checks the subset schema cannot express (spec 6.2, 6.4): the window/
+    target/tighten ordering, every [lo, hi] pair, the four slots' functions
+    covering ``SCENE_FUNCTIONS`` exactly once each, ``transitions_s``' keys
+    equalling ``TRANSITIONS`` exactly, the pause ordering, and that a valid
+    body count exists both with and without the recap scene."""
+    errors = validate(doc, EPISODE_TEMPLATE_SCHEMA)
+    if errors:
+        return errors
+
+    errors = []
+    _range_pair_errors(errors, "$.window_s", doc["window_s"])
+    _range_pair_errors(errors, "$.scenes", doc["scenes"])
+    _range_pair_errors(errors, "$.shots", doc["shots"])
+
+    window_lo, window_hi = doc["window_s"]
+    target, tighten = doc["target_s"], doc["tighten_above_s"]
+    if not (window_lo < target < tighten < window_hi):
+        errors.append(
+            f"$: window_s lo ({window_lo}) < target_s ({target}) < tighten_above_s ({tighten}) "
+            f"< window_s hi ({window_hi}) does not hold"
+        )
+
+    slots = doc["slots"]
+    all_functions = []
+    for slot_name in EPISODE_TEMPLATE_SLOTS:
+        slot = slots[slot_name]
+        _range_pair_errors(errors, f"$.slots.{slot_name}.count", slot["count"])
+        _range_pair_errors(errors, f"$.slots.{slot_name}.duration_s", slot["duration_s"])
+        all_functions.extend(slot["functions"])
+
+    seen = set()
+    for fn in all_functions:
+        if fn in seen:
+            errors.append(f"$.slots: function {fn!r} is claimed by more than one slot")
+        seen.add(fn)
+    if set(all_functions) != set(SCENE_FUNCTIONS):
+        errors.append(
+            f"$.slots: functions {sorted(set(all_functions))} must equal SCENE_FUNCTIONS "
+            f"{sorted(SCENE_FUNCTIONS)} exactly"
+        )
+
+    transitions = doc["transitions_s"]
+    if set(transitions) != set(TRANSITIONS):
+        errors.append(
+            f"$.transitions_s: keys {sorted(transitions)} must equal TRANSITIONS {sorted(TRANSITIONS)} exactly"
+        )
+    for key, value in transitions.items():
+        if not (isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0):
+            errors.append(f"$.transitions_s.{key}: {value!r} must be a number >= 0")
+
+    for fn in doc["tail_peak_functions"]:
+        if fn not in SCENE_FUNCTIONS:
+            errors.append(f"$.tail_peak_functions: {fn!r} is not a scene function")
+
+    pauses = doc["pauses_s"]
+    tail_floor, tail, tail_peak = pauses["tail_floor"], pauses["tail"], pauses["tail_peak"]
+    if not (tail_floor <= tail <= tail_peak):
+        errors.append(
+            f"$.pauses_s: tail_floor ({tail_floor}) <= tail ({tail}) <= tail_peak ({tail_peak}) does not hold"
+        )
+
+    if not _scene_count_feasible(doc["scenes"], slots["hook"]["count"], slots["body"]["count"], slots["cliffhanger"]["count"]):
+        errors.append("$.scenes: no body count in slots.body.count fits scenes for an episode without a recap (episode 1)")
+    if not _scene_count_feasible(
+        doc["scenes"], slots["recap"]["count"], slots["hook"]["count"], slots["body"]["count"], slots["cliffhanger"]["count"]
+    ):
+        errors.append(
+            f"$.scenes: no body count in slots.body.count fits scenes for an episode with the recap scene "
+            f"(episode >= {doc['recap_from_episode']})"
+        )
+
+    return errors
+
+
+# ----------------------------------------------------------- episode_script_v1 (spec 2.7)
+
+EPISODE_SCRIPT_SCHEMA_NAME = "episode_script_v1"
+
+SCENE_ID_PATTERN = r"^s[0-9]{2}$"
+LINE_ID_PATTERN = r"^l[0-9]{2}$"
+SHOT_ID_PATTERN = r"^sh[0-9]{2}$"
+SPEAKER_PATTERN = r"^(char_[a-z0-9_]{1,40}|narrator)$"
+SFX_AT_PATTERN = r"^(start|l[0-9]{2})$"
+TEXT_HASH_PATTERN = r"^[0-9a-f]{16}$"
+# A scene's time variant names one of its place's variants, so it has the
+# place document's own bound (episode_script_context_errors checks it exists).
+SCENE_TIME_VARIANT_PATTERN = TIME_VARIANT_PATTERN
+
+BODY_FUNCTIONS = ("setup", "rising", "peak", "turn")
+
+_EPISODE_SCRIPT_LINE_TIMING_SCHEMA = _document({
+    "source": {"type": "string", "enum": ["estimated", "tts_word_timestamps", "audio_duration_only"]},
+    "duration_s": {"type": "number", "minimum": 0},
+    "text_hash": {"type": "string", "pattern": TEXT_HASH_PATTERN},
+    "voice": {"type": ["string", "null"]},
+    "audio": {"type": ["string", "null"]},
+})
+
+_EPISODE_SCRIPT_LINE_SCHEMA = _document({
+    "line_id": {"type": "string", "pattern": LINE_ID_PATTERN},
+    "speaker": {"type": "string", "pattern": SPEAKER_PATTERN},
+    "text": _text(400),
+    "emotion": {"type": "string", "enum": list(EMOTIONS)},
+    "delivery": {"type": "string", "maxLength": 120},
+    "timing": _EPISODE_SCRIPT_LINE_TIMING_SCHEMA,
+})
+
+_EPISODE_SCRIPT_SFX_CUE_SCHEMA = _document({
+    "at": {"type": "string", "pattern": SFX_AT_PATTERN},
+    "cue": {"type": "string", "pattern": _ID_PATTERN},
+})
+
+_EPISODE_SCRIPT_SCENE_SCHEMA = _document({
+    "scene_id": {"type": "string", "pattern": SCENE_ID_PATTERN},
+    "function": {"type": "string", "enum": list(SCENE_FUNCTIONS)},
+    "place_id": {"type": "string", "pattern": PLACE_ID_PATTERN},
+    "time_variant": {"type": "string", "pattern": SCENE_TIME_VARIANT_PATTERN},
+    "characters": {"type": "array", "items": {"type": "string", "pattern": CHAR_ID_PATTERN}, "maxItems": 6},
+    "props": {"type": "array", "items": {"type": "string", "pattern": PROP_ID_PATTERN}, "maxItems": 4},
+    "summary": {"type": "string", "maxLength": 200},
+    "emotion": {"type": "string", "enum": list(EMOTIONS)},
+    "target_duration_s": {"type": "number", "minimum": 0.5, "maximum": 20},
+    "lines": {"type": "array", "items": _EPISODE_SCRIPT_LINE_SCHEMA, "maxItems": 4},
+    "sfx_cues": {"type": "array", "items": _EPISODE_SCRIPT_SFX_CUE_SCHEMA, "maxItems": 6},
+    "on_screen_text": {"type": ["string", "null"]},
+    "state": {"type": "string", "enum": ["stub", "written"]},
+    "source": {"type": "string", "enum": ["E1", "E2", "E3", "edit"]},
+    "rev": {"type": "integer", "minimum": 1},
+})
+
+_EPISODE_SCRIPT_HOOK_SCHEMA = _document({"on_screen_text": {"type": ["string", "null"]}})
+
+_EPISODE_SCRIPT_CLIFFHANGER_SCHEMA = _document({
+    "scene_id": {"type": ["string", "null"]},
+    "reveal": {"type": ["string", "null"], "maxLength": 300},
+    "cut_to_black": {"type": "boolean"},
+})
+
+_EPISODE_SCRIPT_TIMING_SCENE_SCHEMA = _document({
+    "duration_s": {"type": "number"},
+    "tail_s": {"type": "number"},
+    "hold_s": {"type": "number"},
+    "state": {"type": "string", "enum": ["ok", "tightened", "over", "under"]},
+})
+
+_EPISODE_SCRIPT_TIMING_FLAG_SCHEMA = _document({
+    "kind": {"type": "string", "enum": ["trim_line", "scene_over", "episode_over", "episode_under"]},
+    "scene_id": {"type": ["string", "null"]},
+    "line_id": {"type": ["string", "null"]},
+    "seconds": {"type": "number"},
+    "message": {"type": "string"},
+})
+
+_EPISODE_SCRIPT_TIMING_SCHEMA = _or_null(_document({
+    "total_s": {"type": "number"},
+    "window_s": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2},
+    "target_s": {"type": "number"},
+    "state": {"type": "string", "enum": ["ok", "tightened", "over", "under"]},
+    # keyed by scene id -> _EPISODE_SCRIPT_TIMING_SCENE_SCHEMA, checked in episode_script_errors.
+    "scenes": {"type": "object"},
+    "flags": {"type": "array", "items": _EPISODE_SCRIPT_TIMING_FLAG_SCHEMA},
+    "estimated_lines": {"type": "integer"},
+    "measured_lines": {"type": "integer"},
+}))
+
+_EPISODE_SCRIPT_ISSUE_SCHEMA = _document({
+    "scene_id": {"type": ["string", "null"]},
+    "kind": {"type": "string", "enum": ["continuity", "character", "place", "series_memory", "other"]},
+    "fix": {"type": "string", "maxLength": 300},
+})
+
+_EPISODE_SCRIPT_CONSISTENCY_REPORT_SCHEMA = _or_null(_document({
+    "passed": {"type": "boolean"},
+    "issues": {"type": "array", "items": _EPISODE_SCRIPT_ISSUE_SCHEMA, "maxItems": 20},
+    "checked_rev": {"type": "integer"},
+    "checked_at": {"type": "string"},
+    "stale": {"type": "boolean"},
+}))
+
+EPISODE_SCRIPT_SCHEMA = _document({
+    "$schema": {"type": "string", "const": EPISODE_SCRIPT_SCHEMA_NAME},
+    "ep": {"type": "integer", "minimum": 1, "maximum": 99},
+    "title": {"type": ["string", "null"], "maxLength": 80},
+    "language": {"type": "string", "enum": list(LANGUAGES)},
+    "template_id": {"type": "string", "enum": list(defaults.EPISODE_TEMPLATE_IDS)},
+    "hook": _EPISODE_SCRIPT_HOOK_SCHEMA,
+    "scenes": {"type": "array", "items": _EPISODE_SCRIPT_SCENE_SCHEMA, "maxItems": 12},
+    "cliffhanger": _EPISODE_SCRIPT_CLIFFHANGER_SCHEMA,
+    "next_episode_teaser": {"type": ["string", "null"]},
+    "timing": _EPISODE_SCRIPT_TIMING_SCHEMA,
+    "consistency_report": _EPISODE_SCRIPT_CONSISTENCY_REPORT_SCHEMA,
+    "approved_anyway": {"type": ["string", "null"]},
+    "approved_at": {"type": ["string", "null"]},
+    "rev": {"type": "integer", "minimum": 1},
+    "created_at": _NON_EMPTY_STRING,
+    "updated_at": _NON_EMPTY_STRING,
+})
+
+
+def _word_cap_errors(errors, path, value, max_words) -> None:
+    """Enforce a maximum word count on *value* when it is a string; a null
+    value (an unwritten optional field) is not an error here."""
+    if isinstance(value, str) and _words(value) > max_words:
+        errors.append(f"{path}: {_words(value)} words, expected at most {max_words}")
+
+
+def episode_script_errors(doc) -> list:
+    """``validate()`` against ``EPISODE_SCRIPT_SCHEMA``, plus the cross-field
+    checks the subset schema cannot express (spec 2.7): scene/line id
+    sequencing, the function order, speaker/sfx/cliffhanger references within
+    the episode, word caps, stub scenes carrying no lines, and the timing
+    block's scenes keyed only by real scene ids."""
+    errors = validate(doc, EPISODE_SCRIPT_SCHEMA)
+    if errors:
+        return errors
+
+    errors = []
+    scenes = doc["scenes"]
+    scene_ids = [scene["scene_id"] for scene in scenes]
+
+    for i in range(1, len(scene_ids)):
+        if scene_ids[i] <= scene_ids[i - 1]:
+            errors.append(
+                f"$.scenes[{i}].scene_id: {scene_ids[i]!r} does not strictly increase after {scene_ids[i - 1]!r}"
+            )
+
+    for scene in scenes:
+        sid, fn = scene["scene_id"], scene["function"]
+        if sid == "s00" and fn != "recap":
+            errors.append(f"$.scenes[{sid}]: scene_id 's00' must have function 'recap', not {fn!r}")
+        if fn == "recap" and sid != "s00":
+            errors.append(f"$.scenes[{sid}]: a recap scene's scene_id must be 's00', not {sid!r}")
+
+    if scenes:
+        functions = [scene["function"] for scene in scenes]
+        recap_positions = [i for i, fn in enumerate(functions) if fn == "recap"]
+        if recap_positions not in ([], [0]):
+            errors.append(f"$.scenes: function order {functions} has 'recap' somewhere other than first")
+
+        hook_index = 1 if recap_positions == [0] else 0
+        hook_positions = [i for i, fn in enumerate(functions) if fn == "hook"]
+        if hook_positions != [hook_index]:
+            errors.append(
+                f"$.scenes: function order {functions} must have exactly one 'hook' right after an optional recap"
+            )
+
+        cliff_positions = [i for i, fn in enumerate(functions) if fn == "cliffhanger"]
+        if cliff_positions != [len(functions) - 1]:
+            errors.append(f"$.scenes: function order {functions} must have exactly one 'cliffhanger', last")
+
+        body_start = hook_index + 1 if hook_positions == [hook_index] else hook_index
+        body_end = len(functions) - 1 if cliff_positions == [len(functions) - 1] else len(functions)
+        for i in range(body_start, body_end):
+            if functions[i] not in BODY_FUNCTIONS:
+                errors.append(f"$.scenes[{i}].function: {functions[i]!r} is not a body function {BODY_FUNCTIONS}")
+
+    line_number = None
+    for scene in scenes:
+        chars = set(scene["characters"])
+        line_ids = {line["line_id"] for line in scene["lines"]}
+        for line in scene["lines"]:
+            line_id = line["line_id"]
+            if line_id == "l00" and scene["function"] != "recap":
+                errors.append(f"$.scenes[{scene['scene_id']}].lines: 'l00' is only allowed in a recap scene")
+            n = int(line_id[1:])
+            if line_number is None:
+                if n not in (0, 1):
+                    errors.append(f"$.scenes: the first line id is {line_id!r}, expected 'l00' or 'l01'")
+            elif n <= line_number:
+                errors.append(f"$.scenes: line id {line_id!r} does not strictly increase after 'l{line_number:02d}'")
+            line_number = n
+
+            speaker = line["speaker"]
+            if speaker != "narrator" and speaker not in chars:
+                errors.append(
+                    f"$.scenes[{scene['scene_id']}].lines[{line_id}]: speaker {speaker!r} is not in the "
+                    f"scene's characters"
+                )
+
+            if line["timing"]["duration_s"] <= 0:
+                errors.append(f"$.scenes[{scene['scene_id']}].lines[{line_id}].timing.duration_s: must be > 0")
+
+            _word_cap_errors(errors, f"$.scenes[{scene['scene_id']}].lines[{line_id}].text", line["text"], 22)
+
+        for cue in scene["sfx_cues"]:
+            at = cue["at"]
+            if at != "start" and at not in line_ids:
+                errors.append(
+                    f"$.scenes[{scene['scene_id']}].sfx_cues: 'at' {at!r} is not 'start' or a line id of this scene"
+                )
+
+        if scene["state"] == "stub" and scene["lines"]:
+            errors.append(f"$.scenes[{scene['scene_id']}]: a stub scene must have no lines")
+
+        _word_cap_errors(errors, f"$.scenes[{scene['scene_id']}].summary", scene["summary"], 15)
+        _word_cap_errors(errors, f"$.scenes[{scene['scene_id']}].on_screen_text", scene["on_screen_text"], 6)
+
+    cliff_scene_id = doc["cliffhanger"]["scene_id"]
+    if cliff_scene_id is not None:
+        last_id = scene_ids[-1] if scene_ids else None
+        if cliff_scene_id != last_id:
+            errors.append(f"$.cliffhanger.scene_id: {cliff_scene_id!r} is not the last scene's id ({last_id!r})")
+
+    _word_cap_errors(errors, "$.hook.on_screen_text", doc["hook"]["on_screen_text"], 6)
+    _word_cap_errors(errors, "$.next_episode_teaser", doc["next_episode_teaser"], 15)
+
+    timing = doc["timing"]
+    if timing is not None:
+        scene_id_set = set(scene_ids)
+        for key, entry in timing["scenes"].items():
+            if key not in scene_id_set:
+                errors.append(f"$.timing.scenes: {key!r} is not one of the episode's scene ids")
+            else:
+                errors.extend(validate(entry, _EPISODE_SCRIPT_TIMING_SCENE_SCHEMA, f"$.timing.scenes.{key}"))
+
+    return errors
+
+
+def episode_script_context_errors(doc, *, cast_ids, places, prop_ids, sfx_cues, narrator_enabled, max_places) -> list:
+    """Cross-checks against the story (pure, no schema validation): the
+    entity ids, place time variants, sfx cue names and the narrator opt-in an
+    ``episode_script_v1`` document may reference, and the story's cap on
+    distinct places per episode. ``places`` is a dict place_id -> iterable of
+    that place's existing time-variant names."""
+    errors = []
+    cast_ids = set(cast_ids)
+    prop_ids = set(prop_ids)
+    sfx_cues = set(sfx_cues)
+    used_places = set()
+
+    for scene in doc["scenes"]:
+        sid = scene["scene_id"]
+        for char_id in scene["characters"]:
+            if char_id not in cast_ids:
+                errors.append(f"$.scenes[{sid}].characters: {char_id!r} is not in the story's cast")
+
+        place_id = scene["place_id"]
+        used_places.add(place_id)
+        if place_id not in places:
+            errors.append(f"$.scenes[{sid}].place_id: {place_id!r} is not one of the story's places")
+        elif scene["time_variant"] not in set(places[place_id]):
+            errors.append(f"$.scenes[{sid}].time_variant: {scene['time_variant']!r} is not a variant of {place_id!r}")
+
+        for prop_id in scene["props"]:
+            if prop_id not in prop_ids:
+                errors.append(f"$.scenes[{sid}].props: {prop_id!r} is not in the story's props")
+
+        for cue in scene["sfx_cues"]:
+            if cue["cue"] not in sfx_cues:
+                errors.append(f"$.scenes[{sid}].sfx_cues: {cue['cue']!r} is not one of the story's sfx cues")
+
+        for line in scene["lines"]:
+            if line["speaker"] == "narrator" and not narrator_enabled:
+                errors.append(f"$.scenes[{sid}].lines[{line['line_id']}]: 'narrator' is not enabled for this story")
+
+    if len(used_places) > max_places:
+        errors.append(f"$.scenes: {len(used_places)} distinct place(s) used, more than max_places ({max_places})")
+
+    return errors
+
+
+# --------------------------------------------------------------- storyboard_v1 (spec 2.8)
+
+STORYBOARD_SCHEMA_NAME = "storyboard_v1"
+
+# @char_x / #place_y:variant / %prop_z -- reuses the entity id patterns' body.
+SUBJECT_TAG_PATTERN = r"^(@char_[a-z0-9_]+|#place_[a-z0-9_]+:[a-z][a-z0-9_]*|%prop_[a-z0-9_]+)$"
+# A relative path: no leading "/", no ".." path segment, no backslash.
+REFERENCE_IMAGE_PATH_PATTERN = r"^(?!/)(?!.*\\)(?!\.\.(?:/|$))(?!.*/\.\.(?:/|$)).+$"
+
+_STORYBOARD_MOTION_SCHEMA = _document({
+    "type": {"type": "string", "enum": list(CAMERA_MOTIONS)},
+    "zoom_from": {"type": "number", "minimum": 0.5, "maximum": 2},
+    "zoom_to": {"type": "number", "minimum": 0.5, "maximum": 2},
+    "pan": {"type": "string", "enum": ["none", "lr", "rl", "ud", "du"]},
+})
+
+_STORYBOARD_ASSETS_SCHEMA = _document({
+    "image": {"type": ["string", "null"]},
+    "video": {"type": ["string", "null"]},
+    "seed": {"type": ["integer", "null"]},
+    "provider": {"type": ["string", "null"]},
+    "approved": {"type": "boolean"},
+})
+
+_STORYBOARD_SHOT_SCHEMA = _document({
+    "shot_id": {"type": "string", "pattern": SHOT_ID_PATTERN},
+    "scene_id": {"type": "string", "pattern": SCENE_ID_PATTERN},
+    "order": {"type": "integer", "minimum": 1},
+    "framing": {"type": "string", "enum": list(FRAMINGS)},
+    "camera_motion": {"type": "string", "enum": list(CAMERA_MOTIONS)},
+    "modifiers": {"type": "array", "items": {"type": "string", "enum": list(MODIFIERS)}},
+    "subject_tags": {"type": "array", "items": {"type": "string", "pattern": SUBJECT_TAG_PATTERN}, "maxItems": 8},
+    "action": _text(400),
+    "lines": {"type": "array", "items": {"type": "string", "pattern": LINE_ID_PATTERN}},
+    "image_prompt": {"type": "string"},
+    "negative_prompt": {"type": "string"},
+    "prompt_override": {"type": ["string", "null"]},
+    "reference_images": {
+        "type": "array", "items": {"type": "string", "pattern": REFERENCE_IMAGE_PATH_PATTERN}, "maxItems": 8,
+    },
+    "consistency": {"type": "string", "enum": list(_DERIVED)},
+    "duration_s": {"type": "number", "minimum": 0},
+    "keep_still": {"type": "boolean"},
+    "motion": _STORYBOARD_MOTION_SCHEMA,
+    "video_prompt": {"type": ["string", "null"]},
+    "assets": _STORYBOARD_ASSETS_SCHEMA,
+})
+
+_STORYBOARD_TRANSITION_SCHEMA = _document({
+    "after": {"type": "string", "pattern": SHOT_ID_PATTERN},
+    "type": {"type": "string", "enum": list(TRANSITIONS)},
+    "duration_s": {"type": "number", "minimum": 0, "maximum": 1},
+})
+
+_STORYBOARD_SCENE_ENTRY_SCHEMA = _document({
+    "source": {"type": "string", "enum": ["t1", "fast"]},
+    "script_rev": {"type": "integer", "minimum": 1},
+    "stale": {"type": "boolean"},
+})
+
+STORYBOARD_SCHEMA = _document({
+    "$schema": {"type": "string", "const": STORYBOARD_SCHEMA_NAME},
+    "ep": {"type": "integer", "minimum": 1, "maximum": 99},
+    "shots": {"type": "array", "items": _STORYBOARD_SHOT_SCHEMA, "maxItems": 60},
+    "transitions": {"type": "array", "items": _STORYBOARD_TRANSITION_SCHEMA},
+    # keyed by scene id -> _STORYBOARD_SCENE_ENTRY_SCHEMA, checked in storyboard_errors.
+    "scenes": {"type": "object"},
+    # entity id -> ISO timestamp, when each resolved entity was last read.
+    "resolved_from": {"type": "object"},
+    "approved_at": {"type": ["string", "null"]},
+    "rev": {"type": "integer", "minimum": 1},
+})
+
+
+def storyboard_errors(doc, *, min_shot_s=0.8) -> list:
+    """``validate()`` against ``STORYBOARD_SCHEMA``, plus the cross-field
+    checks the subset schema cannot express (spec 2.8, 6.4): shot id/order
+    sequencing, scene references and contiguity, line references, transition
+    references, the per-shot minimum length once timed, and the motion type
+    matching the shot's own camera motion."""
+    errors = validate(doc, STORYBOARD_SCHEMA)
+    if errors:
+        return errors
+
+    errors = []
+    shots = doc["shots"]
+    scenes = doc["scenes"]
+
+    for key, entry in scenes.items():
+        if not (isinstance(key, str) and _search(SCENE_ID_PATTERN, key)):
+            errors.append(f"$.scenes: {key!r} is not a scene id")
+            continue
+        errors.extend(validate(entry, _STORYBOARD_SCENE_ENTRY_SCHEMA, f"$.scenes.{key}"))
+
+    shot_ids = [shot["shot_id"] for shot in shots]
+    for i, shot_id in enumerate(shot_ids):
+        expected = f"sh{i + 1:02d}"
+        if shot_id != expected:
+            errors.append(f"$.shots[{i}].shot_id: {shot_id!r}, expected {expected!r}")
+
+    for i, shot in enumerate(shots):
+        if shot["order"] != i + 1:
+            errors.append(f"$.shots[{i}].order: {shot['order']}, expected {i + 1}")
+        if shot["scene_id"] not in scenes:
+            errors.append(f"$.shots[{i}].scene_id: {shot['scene_id']!r} is not a key of scenes")
+        if shot["motion"]["type"] != shot["camera_motion"]:
+            errors.append(
+                f"$.shots[{i}].motion.type: {shot['motion']['type']!r} does not match "
+                f"camera_motion {shot['camera_motion']!r}"
+            )
+        duration = shot["duration_s"]
+        if duration != 0 and duration < min_shot_s:
+            errors.append(f"$.shots[{i}].duration_s: {duration} < the minimum shot length {min_shot_s}")
+
+    seen_scenes = []
+    for shot in shots:
+        sid = shot["scene_id"]
+        if not seen_scenes or seen_scenes[-1] != sid:
+            if sid in seen_scenes:
+                errors.append(f"$.shots: scene {sid!r}'s shots are not contiguous")
+            seen_scenes.append(sid)
+
+    line_to_shot = {}
+    last_line_number = None
+    for shot in shots:
+        for line_id in shot["lines"]:
+            if line_id in line_to_shot:
+                errors.append(
+                    f"$.shots: line {line_id!r} appears in more than one shot "
+                    f"({line_to_shot[line_id]!r} and {shot['shot_id']!r})"
+                )
+            else:
+                line_to_shot[line_id] = shot["shot_id"]
+            n = int(line_id[1:])
+            if last_line_number is not None and n <= last_line_number:
+                errors.append(f"$.shots: line {line_id!r} does not increase after 'l{last_line_number:02d}'")
+            last_line_number = n
+
+    last_shot_id = shot_ids[-1] if shot_ids else None
+    seen_after = set()
+    for i, transition in enumerate(doc["transitions"]):
+        after = transition["after"]
+        if after not in shot_ids:
+            errors.append(f"$.transitions[{i}].after: {after!r} is not an existing shot")
+        elif after == last_shot_id:
+            errors.append(f"$.transitions[{i}].after: {after!r} is the last shot; it cannot have a transition")
+        if after in seen_after:
+            errors.append(f"$.transitions[{i}].after: {after!r} already has a transition")
+        seen_after.add(after)
+
+    return errors
+
+
+def storyboard_context_errors(doc, script, *, shots_per_scene) -> list:
+    """Cross-checks against the episode script (pure, no schema validation):
+    every storyboard scene exists in the script, each scene's shot count is
+    within *shots_per_scene* (a [lo, hi] pair), every shot's line ids belong
+    to its scene, and every subject tag names only that scene's own
+    characters, place (with its time variant) and props."""
+    errors = []
+    script_scenes = {scene["scene_id"]: scene for scene in script["scenes"]}
+    lo, hi = shots_per_scene
+
+    for scene_id in doc["scenes"]:
+        if scene_id not in script_scenes:
+            errors.append(f"$.scenes.{scene_id}: not a scene of the script")
+
+    shots_by_scene: dict = {}
+    for shot in doc["shots"]:
+        shots_by_scene.setdefault(shot["scene_id"], []).append(shot)
+
+    for scene_id, scene_shots in shots_by_scene.items():
+        if scene_id not in script_scenes:
+            continue
+        count = len(scene_shots)
+        if not (lo <= count <= hi):
+            errors.append(f"$.shots: scene {scene_id!r} has {count} shot(s), expected {lo}-{hi}")
+
+    for shot in doc["shots"]:
+        scene = script_scenes.get(shot["scene_id"])
+        if scene is None:
+            continue
+
+        scene_line_ids = {line["line_id"] for line in scene["lines"]}
+        for line_id in shot["lines"]:
+            if line_id not in scene_line_ids:
+                errors.append(
+                    f"$.shots[{shot['shot_id']}].lines: {line_id!r} does not belong to scene {shot['scene_id']!r}"
+                )
+
+        allowed_tags = {f"@{char_id}" for char_id in scene["characters"]}
+        allowed_tags.add(f"#{scene['place_id']}:{scene['time_variant']}")
+        allowed_tags |= {f"%{prop_id}" for prop_id in scene["props"]}
+        for tag in shot["subject_tags"]:
+            if tag not in allowed_tags:
+                errors.append(
+                    f"$.shots[{shot['shot_id']}].subject_tags: {tag!r} is not in the scene's "
+                    f"characters, place or props"
+                )
+
     return errors
 
 

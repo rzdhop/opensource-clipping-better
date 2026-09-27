@@ -28,6 +28,9 @@ BUDGET_PROFILES = ("free", "one_dollar", "quality")
 # ------------------------------------------------------------- story (spec 2.1, 6.2)
 
 EPISODE_TEMPLATE_ID = "serial_60s_v1"
+# The episode templates shipped in templates/episodes/ (spec 6.2), in the
+# order story_bible_v1.episode_template_id's enum lists them.
+EPISODE_TEMPLATE_IDS = ("serial_60s_v1", "serial_90s_v1")
 
 # In order, each derived from a contiguous prefix of ``approvals``
 # (store.derive_status): concept, bible, style, then -- phase 2 -- cast,
