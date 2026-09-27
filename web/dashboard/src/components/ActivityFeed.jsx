@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { fetchJob, createSSEConnection } from '../api'
-import { parseTime, formatDuration, formatClock, useSecondsTicker } from '../time'
+import { parseTime, formatDuration, formatClock, useSecondsTicker, jobClocks } from '../time'
 
 /**
  * Statuses a job (clip or story-step) never leaves. A story step also stops
@@ -70,10 +70,7 @@ export function LiveActivity({ job, events, streamState }) {
   useSecondsTicker(running)
 
   const now = Date.now()
-  const stepStarted = parseTime(progress.step_started_at)
-  const created = parseTime(job.created_at)
-  const inStep = stepStarted ? formatDuration(now - stepStarted.getTime()) : null
-  const inJob = created ? formatDuration(now - created.getTime()) : null
+  const { inStep, inJob } = jobClocks(job, events, running, now)
 
   const lastEvent = events.length ? events[events.length - 1] : null
   const sinceSignal = lastEvent && parseTime(lastEvent.ts)
@@ -96,7 +93,7 @@ export function LiveActivity({ job, events, streamState }) {
         </span>
         <span className="activity-clocks">
           {inStep && <span title="Time on the current step">{inStep} on this step</span>}
-          {inJob && <span className="activity-dim">· {inJob} total</span>}
+          {inJob && <span className="activity-dim">{inStep ? '· ' : ''}{inJob} total</span>}
         </span>
       </div>
 
