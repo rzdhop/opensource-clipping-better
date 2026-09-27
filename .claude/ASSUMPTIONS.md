@@ -201,11 +201,13 @@
   garbles a diacritic in its raw reply (seen live: "trâne" came back "tr¤ne"). `prompts.repair_fr_elisions` fixes
   the first deterministically after every reply (DEC-144); the second has no code path treating it at all (F2).
   Seen on the live walk and again on the fix round's copy. UNCONFIRMED how often either happens over more text.
-- **A-062** — The NVIDIA free link cannot reliably serve a story call: its registry default timeout is 330 s,
-  above `STORY_CALL_BUDGET_SECONDS` (300 s), so a slow reply is cut by the story budget before NVIDIA's own client
-  would even give up; the bench also saw plain `InternalServerError` on E1 and T1 independent of timing. Not
-  chased this phase — recorded as a hazard rather than a fix. UNCONFIRMED whether a shorter registry timeout or a
-  longer story budget would resolve it.
+- **A-062** — The NVIDIA free link never serves a story call: its registry default timeout is 330 s, above
+  `STORY_CALL_BUDGET_SECONDS` (300 s), and the predictive deadline check (`providers/llm.py`, DEC-020) refuses to
+  start a request whose timeout would outlast the budget — so the link is skipped before any request, even with
+  `--allow-slow-chain` (seen 2026-09-27 on a keyless-Gemini CLI run: every link failed before a model was
+  contacted). The bench (which calls a link alone, outside the story budget) also saw plain
+  `InternalServerError` on E1 and T1. Not chased this phase — a hazard, not a fix. UNCONFIRMED whether a shorter
+  NVIDIA timeout or a longer story budget is the right cure.
 - **A-063** — Gemini's free TTS answered 429 once in 5 lines during the stage-13 measurement walk; the existing
   retry in the TTS path succeeded on the second attempt. UNCONFIRMED whether that rate holds over more lines or
   more days.
