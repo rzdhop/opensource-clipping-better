@@ -55,8 +55,11 @@ KIWILO, MANGELLA, BROCCOLIA = "char_kiwilo", "char_mangella", "char_broccolia"
 PARLOIR, PISCINE = "place_le_parloir_des_secrets", "place_la_piscine_de_la_trahison"
 PHONE = "prop_telephone_en_noix_de_coco"
 NAMES = {KIWILO: "Kiwilo", MANGELLA: "Mangella", BROCCOLIA: "Broccolia"}
-BODY = ["s02", "s03", "s04", "s05", "s06", "s07"]
-ALL_SCENES = ["s01"] + BODY + ["s08"]
+# Stage 12b: serial_60s_v1's default_body_count is 8 (both episode 1 and
+# episode 2 -- timing.episode_slots), so E1_REPLY below carries 8 body
+# scenes, s02..s09; the cliffhanger is s10.
+BODY = ["s02", "s03", "s04", "s05", "s06", "s07", "s08", "s09"]
+ALL_SCENES = ["s01"] + BODY + ["s10"]
 
 
 def _fingerprint(path: Path):
@@ -327,6 +330,14 @@ E1_REPLY = {
               "angry", 6.0),
         _stub("turn", PISCINE, "night", [BROCCOLIA, MANGELLA], [], "Broccolia offre un marché à Mangella.",
               "tension", 5.0),
+        # s08, s09 (stage 12b: default_body_count 8, up from the old 6):
+        # Kiwilo alone, like s05, so the measure-test suite's per-character
+        # line counts for Mangella and Broccolia are untouched by the extra
+        # scenes -- only Kiwilo's and the totals grow.
+        _stub("setup", PISCINE, "day", [KIWILO], [], "Kiwilo tente de reprendre le contrôle du vote.",
+              "tension", 5.0),
+        _stub("peak", PARLOIR, "night", [KIWILO], [PHONE], "Kiwilo hésite, la main sur le téléphone.",
+              "scheming", 7.0),
         _stub("cliffhanger", PARLOIR, "night", [KIWILO, MANGELLA, BROCCOLIA], [PHONE],
               "Le téléphone désigne Kiwilo.", "shocked", 3.0),
     ],
@@ -494,8 +505,8 @@ def test_a_full_script_is_one_e1_one_e2_per_body_scene_one_e3_and_one_e4(store):
     assert script["title"] == E1_REPLY["title"]
     assert script["hook"] == {"on_screen_text": "Vote surprise ce soir"}
     assert _scene(script, "s01")["lines"][0]["line_id"] == "l04"
-    assert script["cliffhanger"] == {"scene_id": "s08", "reveal": CLIFF_PART["reveal"], "cut_to_black": False}
-    assert [line["line_id"] for line in _scene(script, "s08")["lines"]] == ["l32"]
+    assert script["cliffhanger"] == {"scene_id": "s10", "reveal": CLIFF_PART["reveal"], "cut_to_black": False}
+    assert [line["line_id"] for line in _scene(script, "s10")["lines"]] == ["l40"]
     assert script["next_episode_teaser"] == TEASER
     report = script["consistency_report"]
     assert report["passed"] is False and report["checked_rev"] == script["rev"] and report["stale"] is False
@@ -506,7 +517,7 @@ def test_a_full_script_is_one_e1_one_e2_per_body_scene_one_e3_and_one_e4(store):
     assert summary["ep"] == 1 and summary["scenes"] == len(ALL_SCENES)
     # The house style's progress lines.
     assert "🎬 Episode 1: beat sheet (E1)" in log
-    assert "📝 Scene 2 of 8 (s02, setup)" in log
+    assert "📝 Scene 2 of 10 (s02, setup)" in log
     assert any(line.startswith("⏱ ") and "estimated" in line for line in log)
     assert "🔍 Consistency: 2 issues" in log
     assert sum(line.startswith("✍️ E2 via gemini/gemini-test") for line in log) == len(BODY)
@@ -550,7 +561,7 @@ def test_a_failed_e2_keeps_every_other_scene_and_a_rerun_writes_only_that_scene(
     story_id = _ready_story(store)
     before = _story_bytes(store, story_id)
     queue = [e2_reply, e2_reply, ProviderError("every provider failed", [("gemini/gemini-test", "HTTP 503")]),
-             e2_reply, e2_reply, e2_reply]
+             e2_reply, e2_reply, e2_reply, e2_reply, e2_reply]
     llm = _script_llm(E2=queue)
 
     message, log = _failed(m.script, store, story_id, llm=llm)
@@ -638,10 +649,12 @@ def test_the_step_budget_refuses_a_call_that_could_not_finish_and_a_rerun_comple
     assert [s["scene_id"] for s in script["scenes"] if s["state"] == "written"] == BODY[:5]
 
     clock2 = Clock(0.0)
-    again = FakeLLM(E2=[e2_reply], E3=[E3_FULL], E4=[E4_PASSED], clock=clock2, advance=300.0)
+    # 3 scenes are still stubs (BODY[5:] = s07, s08, s09 -- 8 body scenes
+    # total, stage 12b), not just s07: one E2 reply per remaining scene.
+    again = FakeLLM(E2=[e2_reply, e2_reply, e2_reply], E3=[E3_FULL], E4=[E4_PASSED], clock=clock2, advance=300.0)
     _run(m.script, store, story_id, llm=again, clock=clock2)
 
-    assert again.prompts() == ["E2", "E3", "E4"]
+    assert again.prompts() == ["E2", "E2", "E2", "E3", "E4"]
     assert all(scene["state"] == "written" for scene in _script(store, story_id)["scenes"])
 
 
@@ -680,13 +693,15 @@ def test_a_cancel_between_calls_leaves_a_valid_partial_script(store):
 def test_an_e2_speaker_outside_the_scene_is_asked_again_once_then_fails_locally(store):
     m = _new()
     story_id = _ready_story(store)
-    # s05 has Kiwilo alone; both replies make Mangella speak.
-    queue = [e2_reply, e2_reply, e2_reply, e2_wrong_speaker, e2_wrong_speaker, e2_reply, e2_reply]
+    # s05 has Kiwilo alone; both replies make Mangella speak. s02-s04 succeed,
+    # s05 fails twice (left a stub), s06-s09 (stage 12b: 8 body scenes) succeed.
+    queue = [e2_reply, e2_reply, e2_reply, e2_wrong_speaker, e2_wrong_speaker,
+             e2_reply, e2_reply, e2_reply, e2_reply]
     llm = _script_llm(E2=queue)
 
     message, log = _failed(m.script, store, story_id, llm=llm)
 
-    assert llm.prompts() == ["E1"] + ["E2"] * 7 + ["E3"]
+    assert llm.prompts() == ["E1"] + ["E2"] * 9 + ["E3"]
     assert _speakers(llm.of("E2")[3]) == [KIWILO]
     assert any(line.startswith("⚠️ E2 reply rejected") for line in log)
     assert "scene:1:s05" in message and "failed validation twice" in message
@@ -739,7 +754,8 @@ def test_episode_2_with_the_recap_asks_for_a_recap_scene(store):
     script = _script(store, story_id, 2)
     assert [s["scene_id"] for s in script["scenes"]][:2] == ["s00", "s01"]
     assert [line["line_id"] for line in _scene(script, "s00")["lines"]] == ["l00"]
-    assert "in this order: recap, hook, setup/rising/peak/turn" in llm.of("E1")[0]["user"]
+    assert "- scenes: exactly 11 entries, one for each of these, in order:\n" in llm.of("E1")[0]["user"]
+    assert "Scene 1 — recap\nScene 2 — hook\nScene 3 — body:" in llm.of("E1")[0]["user"]
     # The recap of episode 1 is read by its spec key, "ep01".
     assert "Previous recap: Kiwilo et Mangella se sont alliés en secret." in llm.of("E1")[0]["user"]
     assert "Episode 1 recap: Kiwilo et Mangella se sont alliés en secret." in llm.of("E4")[0]["user"]
@@ -839,7 +855,8 @@ def test_a_chain_whose_only_keyed_link_is_paid_sends_nothing(store):
 def test_the_storyboard_needs_a_complete_script(store):
     m = _new()
     story_id = _ready_story(store)
-    llm = _script_llm(E2=[e2_reply, e2_reply, ProviderError("down"), e2_reply, e2_reply, e2_reply])
+    llm = _script_llm(E2=[e2_reply, e2_reply, ProviderError("down"), e2_reply, e2_reply, e2_reply,
+                          e2_reply, e2_reply])
     _failed(m.script, store, story_id, llm=llm)
 
     message, _ = _failed(m.storyboard, store, story_id, llm=FakeLLM(), step="storyboard")
@@ -927,7 +944,7 @@ def test_a_t1_run_replans_only_what_is_fast_and_a_complete_rerun_makes_no_call(s
 def test_a_failed_t1_keeps_the_other_scenes_and_names_the_scene(store):
     m = _new()
     story_id = _written_script(store)
-    queue = [t1_reply, t1_reply, ProviderError("down", [("gemini/gemini-test", "HTTP 500")])] + [t1_reply] * 5
+    queue = [t1_reply, t1_reply, ProviderError("down", [("gemini/gemini-test", "HTTP 500")])] + [t1_reply] * 7
     llm = FakeLLM(T1=queue)
 
     message, _ = _failed(m.storyboard, store, story_id, llm=llm, step="storyboard")
@@ -1025,13 +1042,13 @@ def test_regenerating_a_framing_scene_runs_its_partial_e3(store):
     new_cliff = dict(CLIFF_PART, reveal="Le téléphone affiche le nom de Mangella.")
     llm = FakeLLM(E3=[{"cliffhanger": new_cliff}])
 
-    _regenerate(store, story_id, "scene:1:s08", llm=llm)
+    _regenerate(store, story_id, "scene:1:s10", llm=llm)
 
     assert llm.prompts() == ["E3"]
     assert llm.calls[0]["schema"]["required"] == ["cliffhanger"]
     script = _script(store, story_id)
     assert script["cliffhanger"]["reveal"] == new_cliff["reveal"]
-    assert _scene(script, "s08")["rev"] == 2
+    assert _scene(script, "s10")["rev"] == 2
     assert script["hook"] == before["hook"] and script["next_episode_teaser"] == before["next_episode_teaser"]
 
 

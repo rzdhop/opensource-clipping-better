@@ -106,6 +106,14 @@ def _template_scene_count_infeasible_with_recap(doc):
     doc["slots"]["recap"]["count"] = [10, 10]
 
 
+def _template_default_body_count_outside_slot(doc):
+    doc["default_body_count"] = 99
+
+
+def _template_default_body_count_below_slot(doc):
+    doc["default_body_count"] = 1  # schema-valid (>= 1) but below slots.body.count's own lo
+
+
 TEMPLATE_BREAKS = {
     "target/tighten order": (_template_window_order_broken, "does not hold"),
     "reversed range pair": (_template_range_pair_broken, "must satisfy 0 <= lo <= hi"),
@@ -116,6 +124,10 @@ TEMPLATE_BREAKS = {
     "pause order broken": (_template_pause_order_broken, "does not hold"),
     "scene count infeasible without recap": (_template_scene_count_infeasible_without_recap, "without a recap"),
     "scene count infeasible with recap": (_template_scene_count_infeasible_with_recap, "with the recap scene"),
+    "default_body_count above slots.body.count": (_template_default_body_count_outside_slot,
+                                                   "outside slots.body.count"),
+    "default_body_count below slots.body.count": (_template_default_body_count_below_slot,
+                                                   "outside slots.body.count"),
 }
 
 
@@ -125,6 +137,26 @@ def test_a_broken_episode_template_is_refused(label):
     doc = _mutate(templates.load_episode_template("serial_60s_v1"), mutate)
     errors = schemas.episode_template_errors(doc)
     assert any(keyword in e for e in errors), errors
+
+
+# ------------------------------------------------- 1b. default_body_count (stage 12b)
+
+@pytest.mark.parametrize("template_id,expected", [("serial_60s_v1", 8), ("serial_90s_v1", 10)])
+def test_default_body_count_shipped_values(template_id, expected):
+    tpl = templates.load_episode_template(template_id)
+    assert tpl["default_body_count"] == expected
+
+
+@pytest.mark.parametrize("template_id,ep1,ep2", [
+    ("serial_60s_v1", 10, 11),  # hook+8 body+cliffhanger; +recap from ep2
+    ("serial_90s_v1", 12, 12),  # hook+10 body+cliffhanger; ep2's body clamps down to 9
+])
+def test_default_body_count_clamped_slot_list_length_matches_timing_episode_slots(template_id, ep1, ep2):
+    from clipping.aistory import timing
+
+    tpl = templates.load_episode_template(template_id)
+    assert len(timing.episode_slots(tpl, 1)) == ep1
+    assert len(timing.episode_slots(tpl, tpl["recap_from_episode"])) == ep2
 
 
 def test_story_bible_episode_template_id_stays_an_enum_of_shipped_ids():

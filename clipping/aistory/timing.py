@@ -141,6 +141,39 @@ def tail_for(function: str, template: dict) -> float:
     return pauses["tail"]
 
 
+# --------------------------------------------------------------- E1 slots
+
+def episode_slots(template: dict, ep: int) -> list:
+    """The ordered slot kinds episode *ep*'s beat sheet (E1) must fill
+    exactly (spec 6.2, 4.2 row E1): ``"recap"`` (only from the template's own
+    ``recap_from_episode`` on), then ``"hook"``, then ``"body"`` repeated *N*
+    times, then ``"cliffhanger"``.
+
+    *N* is the template's ``default_body_count`` clamped into the overlap of
+    ``slots.body.count`` and whatever the episode's own ``scenes`` range
+    leaves once the fixed slots (hook, cliffhanger, and the recap when it
+    applies) are paid for -- the same bound ``schemas.episode_template_errors``
+    checks the template against (kept local, not shared, the way
+    ``prompts._e1_slot_bounds`` used to and ``prompts._slot_duration_range``
+    still does, so this module needs no dependency the other way).
+
+    Stage 12b: the live bench found E1 0/3 on both free links when asked for
+    a *range* ("8 to 12 scenes") -- a model settled for fewer every time.
+    An exact, positional ask (``prompts.build_e1``) and an exact, positional
+    check (``prompts.validate_e1``) both key off this list.
+
+    Pure and deterministic, like the rest of this module.
+    """
+    has_recap = ep >= template["recap_from_episode"]
+    fixed = 2 + (1 if has_recap else 0)
+    body_lo, body_hi = template["slots"]["body"]["count"]
+    scenes_lo, scenes_hi = template["scenes"]
+    lo = max(body_lo, scenes_lo - fixed)
+    hi = min(body_hi, scenes_hi - fixed)
+    n = min(max(template["default_body_count"], lo), hi)
+    return (["recap"] if has_recap else []) + ["hook"] + ["body"] * n + ["cliffhanger"]
+
+
 # ------------------------------------------------------------ scene timing
 
 def scene_timing(scene: dict, template: dict, language: str, *, style_lock: dict = None,

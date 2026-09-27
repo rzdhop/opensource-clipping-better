@@ -256,7 +256,7 @@ def test_the_storyboard_waits_for_a_complete_script(api):
     story_id = _ready_story(api.store)
     assert "has no script yet" in _post_step(api, story_id, "storyboard", ep=1).json()["detail"]
     job = _post_step(api, story_id, "script", ep=1).json()
-    queue = [e2_reply, e2_reply, DOWN, e2_reply, e2_reply, e2_reply]
+    queue = [e2_reply, e2_reply, DOWN, e2_reply, e2_reply, e2_reply, e2_reply, e2_reply]
     assert _run(api, job["id"], _script_llm(E2=queue))["status"] == "failed"
     before = len(api.jobs.list_jobs())
 

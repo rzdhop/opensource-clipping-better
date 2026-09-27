@@ -274,7 +274,7 @@ def test_every_line_is_measured_through_its_pinned_voice_alone(store, chains):
 
     script = eps._script(store, story_id)
     lines = _lines(script)
-    assert len(lines) == 14
+    assert len(lines) == 18
     # Exactly one link per line: the speaker's pinned voice, nothing else.
     assert [(kind, chain) for kind, chain, _text in chains] == [
         ("tts", [Link("edge", VOICE_IDS[line["speaker"]])]) for line in lines]
@@ -293,10 +293,10 @@ def test_every_line_is_measured_through_its_pinned_voice_alone(store, chains):
         assert sidecar["$schema"] == "line_timing_v1" and sidecar["source"] == "tts_word_timestamps"
         assert sidecar["duration_s"] == edge_seconds(line["text"])
     assert schemas.episode_script_errors(script) == []
-    assert script["timing"]["measured_lines"] == 14 and script["timing"]["estimated_lines"] == 0
+    assert script["timing"]["measured_lines"] == 18 and script["timing"]["estimated_lines"] == 0
     assert script["timing"] == timing.episode_timing(script, _template(), "fr", style_lock=_lock(store, story_id))
-    assert summary["measured"] == 14
-    assert "🎙 Measuring 14 lines with the pinned voices" in log
+    assert summary["measured"] == 18
+    assert "🎙 Measuring 18 lines with the pinned voices" in log
     first = lines[0]
     assert f"🔊 {first['line_id']} Kiwilo: {edge_seconds(first['text']):.2f} s (edge/fr-FR-HenriNeural, word timings)" \
         in log
@@ -385,13 +385,13 @@ def test_a_failing_voice_fails_only_its_lines_and_no_other_provider_is_tried(sto
                if line["speaker"] != BROCCOLIA)
     # Every line was tried once, in reading order; hers went to her voice
     # alone, and nothing else was contacted.
-    assert len(chains) == 14
+    assert len(chains) == 18
     assert [chain for (_kind, chain, _text), line in zip(chains, _lines(script)) if line["speaker"] == BROCCOLIA] \
         == [[Link("edge", VOICE_IDS[BROCCOLIA])]] * 3
     assert gemini.calls == 0 and local.calls == 0
     # A failed synthesis is not booked.
-    assert len(_ledger(store, story_id)) == 14 - 3
-    assert script["timing"]["measured_lines"] == 11 and script["timing"]["estimated_lines"] == 3
+    assert len(_ledger(store, story_id)) == 18 - 3
+    assert script["timing"]["measured_lines"] == 15 and script["timing"]["estimated_lines"] == 3
     assert schemas.episode_script_errors(script) == []
 
 
@@ -408,7 +408,7 @@ def test_a_line_the_engine_answered_but_could_not_time_fails_and_is_still_booked
     assert all(line["timing"]["source"] == "estimated" for line in _of(script, BROCCOLIA))
     assert "l13" in message and "duration" in message and "pick another voice for Broccolia" in message
     # The provider answered, so each call is on the ledger, once.
-    assert len(_ledger(store, story_id)) == 14 and len(edge.calls) == 14
+    assert len(_ledger(store, story_id)) == 18 and len(edge.calls) == 18
 
 
 def test_a_paid_pinned_voice_is_refused_while_allow_paid_is_off_and_nothing_is_sent(store, monkeypatch):
@@ -654,7 +654,7 @@ def test_a_cancel_between_lines_keeps_what_was_measured(store):
     assert len(edge.calls) == 3
     script = eps._script(store, story_id)
     assert schemas.episode_script_errors(script) == []
-    assert [line["timing"]["source"] for line in _lines(script)] == ["tts_word_timestamps"] * 3 + ["estimated"] * 11
+    assert [line["timing"]["source"] for line in _lines(script)] == ["tts_word_timestamps"] * 3 + ["estimated"] * 15
     assert len(_ledger(store, story_id)) == 3
 
 
@@ -675,7 +675,7 @@ def test_the_step_budget_refuses_a_synthesis_that_could_not_finish(store):
     script = eps._script(store, story_id)
     lines = _lines(script)
     assert "Left: the voice measurement of lines " in message and lines[3]["line_id"] in message
-    assert [line["timing"]["source"] for line in lines] == ["tts_word_timestamps"] * 3 + ["estimated"] * 11
+    assert [line["timing"]["source"] for line in lines] == ["tts_word_timestamps"] * 3 + ["estimated"] * 15
 
     again = Edge()
     _measure(store, story_id, adapters=_adapters(again), clock=eps.Clock(0.0))
@@ -699,7 +699,7 @@ def test_a_narrator_line_without_a_voice_fails_by_name(store):
     assert "l04" in message and "narrator" in message and "pick a voice for the narrator" in message
     script = eps._script(store, story_id)
     assert script["scenes"][0]["lines"][0]["timing"]["source"] == "estimated"
-    assert len(edge.calls) == 13
+    assert len(edge.calls) == 17
     assert all(line["timing"]["source"] == "tts_word_timestamps" for line in _lines(script)[1:])
 
     store.update(story_id, lambda doc: doc["narrator"].update(
@@ -726,7 +726,7 @@ def test_measure_estimate_counts_lines_characters_and_allowances_without_calling
     estimate = m.script.measure_estimate(ec, script, env=eps.SETTINGS)
 
     assert _ledger(store, story_id) == [] and not Path(os.environ["USAGE_PATH"]).exists()
-    assert estimate["lines"] == 14 and estimate["chars"] == sum(len(line["text"]) for line in lines)
+    assert estimate["lines"] == 18 and estimate["chars"] == sum(len(line["text"]) for line in lines)
     assert [row["voice"] for row in estimate["voices"]] == [
         "edge/fr-FR-HenriNeural", "gemini/Kore", "edge/fr-FR-VivienneMultilingualNeural"]
     for row, char_id in zip(estimate["voices"], (KIWILO, MANGELLA, BROCCOLIA)):
@@ -737,7 +737,10 @@ def test_measure_estimate_counts_lines_characters_and_allowances_without_calling
     assert estimate["voices"][1]["link"] == GEMINI_LINK
     assert estimate["est_usd"] == 0.0 and estimate["paid_links"] == [] and estimate["allow_paid"] is False
     assert estimate["free_tier"] == {
-        "edge": {"rpm": 30, "rpd": None, "calls": 0, "left": None, "needed": 9},
+        # Stage 12b: 8 body scenes, 2 new ones Kiwilo-only -- edge (Kiwilo +
+        # Broccolia) needs 4 more than before (9 -> 13); gemini (Mangella
+        # alone) is unchanged.
+        "edge": {"rpm": 30, "rpd": None, "calls": 0, "left": None, "needed": 13},
         "gemini": {"rpm": 15, "rpd": 250, "calls": 0, "left": 250, "needed": 5},
     }
     assert estimate["unvoiced"] == [] and estimate["ready"] is True
@@ -798,4 +801,4 @@ def test_measure_estimate_names_a_line_nobody_can_voice(store):
     estimate = m.script.measure_estimate(ec, eps._script(store, story_id), env=eps.SETTINGS)
 
     assert estimate["unvoiced"] == [{"line_id": "l04", "speaker": "narrator", "reason": "the narrator has no voice yet"}]
-    assert estimate["lines"] == 13 and estimate["est_usd"] == 0.0 and estimate["ready"] is False
+    assert estimate["lines"] == 17 and estimate["est_usd"] == 0.0 and estimate["ready"] is False

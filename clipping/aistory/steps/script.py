@@ -239,13 +239,14 @@ def apply_e1(ec, script, reply) -> None:
 def write_beat_sheet(ctx, ec, script, *, tools, announced) -> None:
     """E1 into *script* (in place; the caller writes it)."""
     pack = _pack(ec, ctx, announced)
+    slots = timing.episode_slots(ec.template, ec.ep)
     system, user, schema = prompts.build_e1(
         pack, ep=ec.ep, arc_entry=ec.arc_entry, template=ec.template, episode_defaults=ec.episode_defaults,
         cast=[{"char_id": doc["char_id"], "name": doc["name"]} for doc in ec.cast],
         places=[{"place_id": pid, "name": ec.entities["places"][pid]["name"], "time_variants": variants}
                 for pid, variants in ec.places.items()],
         props=[{"prop_id": pid, "name": ec.entities["props"][pid]["name"]} for pid in ec.prop_ids],
-        memory=ec.season,
+        memory=ec.season, slots=slots,
     )
     llm_call.announce_trimmed(ctx, pack, announced)
 

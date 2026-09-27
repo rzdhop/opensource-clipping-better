@@ -24,11 +24,15 @@ from __future__ import annotations
 
 import pytest
 
-from clipping.aistory import context, prompts, templates
+from clipping.aistory import context, prompts, templates, timing
 from clipping.cancel import CancelToken
 
 STYLE = templates.load_style("fruit_drama")  # the live story's lock carries these same texts
 TEMPLATE = templates.load_episode_template("serial_60s_v1")
+# Stage 12b: E1's own worst case is the 90-s template from episode 2 on (12
+# scenes: 1 recap + 1 hook + 9 body + 1 cliffhanger -- see _e1() below), not
+# necessarily this file's own TEMPLATE (used by every other prompt's fixture).
+TEMPLATE_90 = templates.load_episode_template("serial_90s_v1")
 DEFAULTS = STYLE["episode_defaults"]
 
 # The live story's text lengths, (words, characters).
@@ -148,10 +152,11 @@ def _fits(prompt_id, system, user):
 
 def _e1():
     return prompts.build_e1(
-        _pack(), ep=2, arc_entry=ARC2, template=TEMPLATE, episode_defaults=DEFAULTS,
+        _pack(), ep=2, arc_entry=ARC2, template=TEMPLATE_90, episode_defaults=DEFAULTS,
         cast=[{"char_id": c["char_id"], "name": c["name"]} for c in CAST],
         places=[{k: p[k] for k in ("place_id", "name", "time_variants")} for p in PLACES],
-        props=[{"prop_id": PROP["prop_id"], "name": PROP["name"]}], memory=MEMORY)
+        props=[{"prop_id": PROP["prop_id"], "name": PROP["name"]}], memory=MEMORY,
+        slots=timing.episode_slots(TEMPLATE_90, 2))
 
 
 def _e2():
@@ -313,7 +318,8 @@ def test_e1_and_e3_for_episode_2_read_the_spec_shape():
         _pack(), ep=2, arc_entry=ARC2, template=TEMPLATE, episode_defaults=DEFAULTS,
         cast=[{"char_id": c["char_id"], "name": c["name"]} for c in CAST],
         places=[{k: p[k] for k in ("place_id", "name", "time_variants")} for p in PLACES],
-        props=[{"prop_id": PROP["prop_id"], "name": PROP["name"]}], memory=SPEC_MEMORY)
+        props=[{"prop_id": PROP["prop_id"], "name": PROP["name"]}], memory=SPEC_MEMORY,
+        slots=timing.episode_slots(TEMPLATE, 2))
     assert "- Relationships: char_kiwilo/char_mangella: publiquement ennemis" in user
     _s, user, _ = prompts.build_e3(
         _pack(), ep=2, part="recap", note=None, hook_scene=SCENES[1], cliffhanger_scene=SCENES[-1],

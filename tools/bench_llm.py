@@ -219,7 +219,7 @@ def _keys(settings_file=None):
 # calls an LLM or writes to the story.
 
 
-def _e1_request(ec, context_mod, prompts_mod):
+def _e1_request(ec, context_mod, prompts_mod, timing_mod):
     pack = context_mod.build_pack(language=ec.language, story=ec.story, note=None)
     cast = [{"char_id": doc["char_id"], "name": doc["name"]} for doc in ec.cast]
     places = [
@@ -227,9 +227,10 @@ def _e1_request(ec, context_mod, prompts_mod):
         for pid, variants in ec.places.items()
     ]
     props = [{"prop_id": pid, "name": ec.entities["props"][pid]["name"]} for pid in ec.prop_ids]
+    slots = timing_mod.episode_slots(ec.template, ec.ep)
     system, user, schema = prompts_mod.build_e1(
         pack, ep=ec.ep, arc_entry=ec.arc_entry, template=ec.template, episode_defaults=ec.episode_defaults,
-        cast=cast, places=places, props=props, memory=ec.season,
+        cast=cast, places=places, props=props, memory=ec.season, slots=slots,
     )
     cast_ids = list(ec.entities["characters"])
     prop_ids = list(ec.prop_ids)
@@ -304,6 +305,7 @@ def build_episode_prompt_requests(story_dir, *, ep=1):
     from clipping.aistory import context as context_mod
     from clipping.aistory import prompts as prompts_mod
     from clipping.aistory import shots as shots_mod
+    from clipping.aistory import timing as timing_mod
     from clipping.aistory.steps import episode_common
     from clipping.aistory.steps import script as script_step
     from clipping.aistory.steps import storyboard as storyboard_step
@@ -328,7 +330,7 @@ def build_episode_prompt_requests(story_dir, *, ep=1):
     plans = shots_mod.plans_from_storyboard(storyboard, script) if storyboard is not None else {}
 
     return [
-        _e1_request(ec, context_mod, prompts_mod),
+        _e1_request(ec, context_mod, prompts_mod, timing_mod),
         _e2_request(ec, script, scene, context_mod, prompts_mod, script_step),
         _t1_request(ec, script, scene, plans, context_mod, prompts_mod, storyboard_step),
     ]

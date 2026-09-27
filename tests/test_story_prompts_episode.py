@@ -27,13 +27,20 @@ from pathlib import Path
 
 import pytest
 
-from clipping.aistory import context, prompts, schemas, templates
+from clipping.aistory import context, prompts, schemas, templates, timing
 from clipping.providers.pacing import estimate_tokens
 
 FRUIT_DRAMA = templates.load_style("fruit_drama")
 TEMPLATE = templates.load_episode_template("serial_60s_v1")
+TEMPLATE_90 = templates.load_episode_template("serial_90s_v1")
 EPISODE_DEFAULTS = FRUIT_DRAMA["episode_defaults"]  # hook_style=insert_prop, cliffhanger_style=hard_stop
 CAMERA_PARAGRAPH = FRUIT_DRAMA["camera"]
+
+# Stage 12b: E1 now asks for an exact, positional scene list
+# (timing.episode_slots), not a range -- these are TEMPLATE's (serial_60s_v1)
+# own slot lists for episode 1 (no recap) and episode 2 (recap_from_episode).
+SLOTS_EP1 = timing.episode_slots(TEMPLATE, 1)
+SLOTS_EP2 = timing.episode_slots(TEMPLATE, 2)
 
 STORY = {
     "logline": "Sur une île de téléréalité, des fruits forment des couples et complotent.",
@@ -138,7 +145,9 @@ def _e1_reply(**overrides):
         base.update(kw)
         return base
 
-    scenes = [scene("hook")] + [scene(f) for f in ["setup", "rising", "peak", "turn", "setup", "rising"]] + [scene("cliffhanger")]
+    # Matches SLOTS_EP1 exactly: hook, 8 body scenes, cliffhanger (stage 12b).
+    body = ["setup", "rising", "peak", "turn", "setup", "rising", "peak", "turn"]
+    scenes = [scene("hook")] + [scene(f) for f in body] + [scene("cliffhanger")]
     doc = {"title": "Le Debut", "scenes": scenes}
     doc.update(overrides)
     return doc
@@ -150,7 +159,7 @@ def test_build_e1_golden_fr():
     pack = _pack("fr")
     system, user, schema = prompts.build_e1(
         pack, ep=1, arc_entry=ARC_ENTRY, template=TEMPLATE, episode_defaults=EPISODE_DEFAULTS,
-        cast=CAST_E1, places=PLACES_E1, props=PROPS_E1, memory=MEMORY_NONE,
+        cast=CAST_E1, places=PLACES_E1, props=PROPS_E1, memory=MEMORY_NONE, slots=SLOTS_EP1,
     )
     expected_user = (
         "This episode's arc entry (setup): Les concurrents arrivent sur l'île.\n"
@@ -168,7 +177,17 @@ def test_build_e1_golden_fr():
         "Write the beat sheet for episode 1.\n\n"
         "Give:\n"
         "- title: the episode's own title, at most 8 words\n"
-        "- scenes: 8 to 12 entries, in this order: hook, setup/rising/peak/turn (escalating), cliffhanger\n\n"
+        "- scenes: exactly 10 entries, one for each of these, in order:\n"
+        "Scene 1 — hook\n"
+        "Scene 2 — body: choose setup, rising, peak or turn\n"
+        "Scene 3 — body: choose setup, rising, peak or turn\n"
+        "Scene 4 — body: choose setup, rising, peak or turn\n"
+        "Scene 5 — body: choose setup, rising, peak or turn\n"
+        "Scene 6 — body: choose setup, rising, peak or turn\n"
+        "Scene 7 — body: choose setup, rising, peak or turn\n"
+        "Scene 8 — body: choose setup, rising, peak or turn\n"
+        "Scene 9 — body: choose setup, rising, peak or turn\n"
+        "Scene 10 — cliffhanger\n\n"
         "Each scene:\n"
         "- function: one of recap, hook, setup, rising, peak, turn, cliffhanger\n"
         "- place_id: one of the existing places, at most 2 distinct places across the whole episode\n"
@@ -179,8 +198,8 @@ def test_build_e1_golden_fr():
         "- emotion: one of neutral, happy, angry, shocked, sad, scheming, tension, tender, fear, triumph\n"
         "- target_duration_s: a hint inside its own slot's range -- recap 2-3s, hook 1.5-3.5s, body "
         "(setup/rising/peak/turn) 4-8s each, cliffhanger 2-5s\n\n"
-        "Body scenes (6 to 9 of them, function setup/rising/peak/turn): each one raises the stakes or "
-        "reveals new information; one of them may be a quiet scene with no dialogue.\n\n"
+        "Across the body scenes: open with setup, escalate with rising, include at least one peak, and "
+        "land a turn right before the cliffhanger; one of them may be a quiet scene with no dialogue.\n\n"
         "The hook scene: insert_prop: a close shot of a diegetic object, sign or screen that states the "
         "premise.\n\n"
         "The cliffhanger scene: hard_stop: end mid-confrontation, no resolution, no line that wraps it "
@@ -196,25 +215,26 @@ def test_build_e1_ep2_shows_the_previous_recap_and_recap_slot():
     pack = _pack("fr")
     _, user, _ = prompts.build_e1(
         pack, ep=2, arc_entry=dict(ARC_ENTRY, ep=2), template=TEMPLATE, episode_defaults=EPISODE_DEFAULTS,
-        cast=CAST_E1, places=PLACES_E1, props=PROPS_E1, memory=MEMORY_EP2,
+        cast=CAST_E1, places=PLACES_E1, props=PROPS_E1, memory=MEMORY_EP2, slots=SLOTS_EP2,
     )
     assert "Series memory:" in user
     assert "Previous recap: Kiwilo et Mangella se sont alliés contre Broccolia." in user
     assert "Open hooks: Le téléphone va-t-il sonner ce soir ?" in user
     assert "Relationships: char_kiwilo/char_mangella: alliance fragile" in user
-    assert "in this order: recap, hook, setup/rising/peak/turn (escalating), cliffhanger" in user
+    assert "- scenes: exactly 11 entries, one for each of these, in order:\n" in user
+    assert "Scene 1 — recap\nScene 2 — hook\nScene 3 — body: choose setup, rising, peak or turn" in user
     assert "none yet" not in user
 
 
-def test_build_e1_ep1_never_mentions_recap_in_the_order():
+def test_build_e1_ep1_never_mentions_recap_in_the_scene_list():
     pack = _pack("fr")
     _, user, _ = prompts.build_e1(
         pack, ep=1, arc_entry=ARC_ENTRY, template=TEMPLATE, episode_defaults=EPISODE_DEFAULTS,
-        cast=CAST_E1, places=PLACES_E1, props=PROPS_E1, memory=MEMORY_NONE,
+        cast=CAST_E1, places=PLACES_E1, props=PROPS_E1, memory=MEMORY_NONE, slots=SLOTS_EP1,
     )
-    assert "in this order: hook, setup/rising/peak/turn (escalating), cliffhanger" in user
-    order_line = next(line for line in user.splitlines() if line.startswith("- scenes:"))
-    assert "recap" not in order_line
+    assert "Scene 1 — hook\n" in user
+    scene_list_block = user.split("in order:\n", 1)[1].split("\n\n", 1)[0]
+    assert "recap" not in scene_list_block
 
 
 @pytest.mark.parametrize("language, name", [("fr", "French"), ("en", "English")])
@@ -222,7 +242,7 @@ def test_e1_language_line(language, name):
     pack = _pack(language)
     system, _, _ = prompts.build_e1(
         pack, ep=1, arc_entry=ARC_ENTRY, template=TEMPLATE, episode_defaults=EPISODE_DEFAULTS,
-        cast=CAST_E1, places=PLACES_E1, props=PROPS_E1, memory=MEMORY_NONE,
+        cast=CAST_E1, places=PLACES_E1, props=PROPS_E1, memory=MEMORY_NONE, slots=SLOTS_EP1,
     )
     assert f"Write all user-facing text in {name}." in system
 
@@ -237,7 +257,7 @@ def test_e1_hook_style_line_for_each_style_value(hook_style, line):
     _, user, _ = prompts.build_e1(
         pack, ep=1, arc_entry=ARC_ENTRY, template=TEMPLATE,
         episode_defaults=dict(EPISODE_DEFAULTS, hook_style=hook_style),
-        cast=CAST_E1, places=PLACES_E1, props=PROPS_E1, memory=MEMORY_NONE,
+        cast=CAST_E1, places=PLACES_E1, props=PROPS_E1, memory=MEMORY_NONE, slots=SLOTS_EP1,
     )
     assert line in user
 
@@ -251,9 +271,29 @@ def test_e1_cliffhanger_style_line_for_each_style_value(cliffhanger_style, line)
     _, user, _ = prompts.build_e1(
         pack, ep=1, arc_entry=ARC_ENTRY, template=TEMPLATE,
         episode_defaults=dict(EPISODE_DEFAULTS, cliffhanger_style=cliffhanger_style),
-        cast=CAST_E1, places=PLACES_E1, props=PROPS_E1, memory=MEMORY_NONE,
+        cast=CAST_E1, places=PLACES_E1, props=PROPS_E1, memory=MEMORY_NONE, slots=SLOTS_EP1,
     )
     assert line in user
+
+
+def _e1_reply_legal_shorter():
+    """hook + 6 body + cliffhanger (8 scenes total): the coordinator's own
+    example of a reply shorter than the ask's exact 10 but still legal for
+    episode 1 -- 6 is the effective body minimum once scenes' own lo (8) and
+    the fixed hook/cliffhanger are accounted for (_e1_slot_bounds), and 8
+    total sits exactly at scenes' own lo."""
+    def scene(function, **kw):
+        base = {
+            "function": function, "place_id": "place_pool", "time_variant": "day",
+            "characters": ["char_kiwilo"], "props": [], "summary": "Ca bouge vite sur l'île.",
+            "emotion": "tension", "target_duration_s": {"hook": 2.5, "cliffhanger": 3.0}.get(function, 5.0),
+        }
+        base.update(kw)
+        return base
+
+    body = ["setup", "rising", "peak", "turn", "setup", "rising"]
+    scenes = [scene("hook")] + [scene(f) for f in body] + [scene("cliffhanger")]
+    return {"title": "Le Debut", "scenes": scenes}
 
 
 def test_e1_errors_good_fixture_passes():
@@ -265,14 +305,37 @@ def test_e1_errors_good_fixture_passes():
     assert errors == []
 
 
+def test_e1_errors_a_legal_shorter_reply_passes():
+    """Stage 12b follow-up: the ask aims for exactly 10, but a legal
+    shorter reply (here 8, matching the coordinator's own hook + 6 body +
+    cliffhanger example) is accepted, not rejected for falling short of it."""
+    reply = _e1_reply_legal_shorter()
+    errors = prompts.validate_e1(
+        reply, ep=1, template=TEMPLATE, episode_defaults=EPISODE_DEFAULTS,
+        cast_ids=CAST_IDS, places=PLACES_DICT, prop_ids=["prop_phone"],
+    )
+    assert errors == []
+
+
+def test_e1_errors_one_body_short_of_the_minimum_fails_with_the_range_message():
+    reply = _e1_reply_legal_shorter()
+    reply["scenes"].pop(1)  # 5 body scenes: one short of the effective minimum (6)
+    errors = prompts.validate_e1(
+        reply, ep=1, template=TEMPLATE, episode_defaults=EPISODE_DEFAULTS,
+        cast_ids=CAST_IDS, places=PLACES_DICT, prop_ids=["prop_phone"],
+    )
+    assert any("body scene(s), expected 6-9" in e for e in errors)
+
+
 @pytest.mark.parametrize(
     "mutate, mentions",
     [
         (lambda d: d.__setitem__("title", " ".join(f"w{i}" for i in range(9))), "title"),
-        (lambda d: d["scenes"].__setitem__(0, dict(d["scenes"][0], function="setup")), "start with"),
+        (lambda d: d["scenes"].__setitem__(0, dict(d["scenes"][0], function="setup")), "must start with"),
         (lambda d: d["scenes"][-1].__setitem__("function", "turn"), "cliffhanger"),
         (lambda d: d["scenes"].insert(1, dict(d["scenes"][1], function="hook")), "one 'hook'"),
-        (lambda d: [d["scenes"].pop() for _ in range(5)], "body scene"),
+        (lambda d: d["scenes"][1].__setitem__("function", "hook"), "is not a body function"),
+        (lambda d: [d["scenes"].pop() for _ in range(6)], "body scene"),
         (lambda d: d["scenes"][1].__setitem__("time_variant", "dusk"), "time_variant"),
         (lambda d: d["scenes"][1].__setitem__("summary", " ".join(f"w{i}" for i in range(16))), "summary"),
         (lambda d: d["scenes"][1].__setitem__("target_duration_s", 99.0), "target_duration_s"),
@@ -784,7 +847,7 @@ def test_t1_camera_paragraph_present_only_in_t1_and_t1r():
     other_calls = [
         prompts.build_e1(_pack("fr"), ep=1, arc_entry=ARC_ENTRY, template=TEMPLATE,
                           episode_defaults=EPISODE_DEFAULTS, cast=CAST_E1, places=PLACES_E1, props=PROPS_E1,
-                          memory=MEMORY_NONE),
+                          memory=MEMORY_NONE, slots=SLOTS_EP1),
         prompts.build_e2(_pack("fr"), scene=BODY_SCENE, scene_number=1, outline=OUTLINE, previous=None,
                           word_budget=20, cast=CAST_E2, place=PLACE_E2, props=PROPS_E2, sfx_cues=SFX_CUES,
                           narrator_enabled=False, voice_direction="over-acted"),
@@ -977,6 +1040,13 @@ def _fr_words(n):
 
 
 def _largest_e1_reply():
+    # Stage 12b: E1's own worst case is no longer "up to scenes_hi (12),
+    # body count flexible within its own range" -- it is now whichever
+    # template/episode combination's *exact* slot list (timing.episode_slots)
+    # is longest. That is the 90-s template from episode 2 on: 1 recap + 1
+    # hook + 9 body (default_body_count 10, clamped down to slots.body.count's
+    # own hi of 9 once recap/hook/cliffhanger are paid for) + 1 cliffhanger =
+    # 12 scenes, still the template's own scenes-hi.
     def scene(function, dur):
         return {
             "function": function, "place_id": "place_pool", "time_variant": "day",
@@ -1042,7 +1112,7 @@ def _largest_t1r_reply():
     "prompt_id, reply, errors_of",
     [
         ("E1", _largest_e1_reply(), lambda r: prompts.validate_e1(
-            r, ep=2, template=TEMPLATE, episode_defaults=EPISODE_DEFAULTS, cast_ids=CAST_IDS,
+            r, ep=2, template=TEMPLATE_90, episode_defaults=EPISODE_DEFAULTS, cast_ids=CAST_IDS,
             places=PLACES_DICT, prop_ids=["prop_phone"])),
         ("E2", _largest_e2_reply(), lambda r: prompts.validate_e2(
             r, scene=BODY_SCENE, narrator_enabled=False, sfx_cues=SFX_CUES)),
@@ -1178,7 +1248,8 @@ def test_input_budget_names_every_episode_prompt():
     "builder, kwargs",
     [
         (prompts.build_e1, dict(ep=1, arc_entry=ARC_ENTRY, template=TEMPLATE, episode_defaults=EPISODE_DEFAULTS,
-                                 cast=CAST_E1, places=PLACES_E1, props=PROPS_E1, memory=MEMORY_NONE)),
+                                 cast=CAST_E1, places=PLACES_E1, props=PROPS_E1, memory=MEMORY_NONE,
+                                 slots=SLOTS_EP1)),
         (prompts.build_e2, dict(scene=BODY_SCENE, scene_number=1, outline=OUTLINE, previous=None, word_budget=20,
                                  cast=CAST_E2, place=PLACE_E2, props=PROPS_E2, sfx_cues=SFX_CUES,
                                  narrator_enabled=False, voice_direction="over-acted")),

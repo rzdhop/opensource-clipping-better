@@ -235,6 +235,36 @@ def test_tail_for_other_functions_get_the_plain_tail():
     assert timing.tail_for("hook", TEMPLATE) == 0.6
 
 
+# ======================================================== 4b. episode_slots (stage 12b)
+
+TEMPLATE_90 = templates.load_episode_template("serial_90s_v1")
+
+
+def test_episode_slots_60s_ep1_no_recap_8_body():
+    assert timing.episode_slots(TEMPLATE, 1) == ["hook"] + ["body"] * 8 + ["cliffhanger"]
+
+
+def test_episode_slots_60s_ep2_recap_first_8_body():
+    assert timing.episode_slots(TEMPLATE, 2) == ["recap", "hook"] + ["body"] * 8 + ["cliffhanger"]
+
+
+def test_episode_slots_90s_ep1_no_recap_10_body():
+    assert timing.episode_slots(TEMPLATE_90, 1) == ["hook"] + ["body"] * 10 + ["cliffhanger"]
+
+
+def test_episode_slots_90s_ep2_recap_first_body_clamped_down_to_9():
+    # default_body_count is 10, but scenes tops out at 12 and the recap
+    # episode already spends 3 scenes on recap+hook+cliffhanger.
+    assert timing.episode_slots(TEMPLATE_90, 2) == ["recap", "hook"] + ["body"] * 9 + ["cliffhanger"]
+
+
+def test_episode_slots_is_pure_and_returns_a_fresh_list():
+    a = timing.episode_slots(TEMPLATE, 1)
+    a.append("intruder")
+    b = timing.episode_slots(TEMPLATE, 1)
+    assert b == ["hook"] + ["body"] * 8 + ["cliffhanger"]
+
+
 # ======================================================== 5. scene_timing
 
 def test_scene_timing_no_lines_clamps_target_into_the_slot():

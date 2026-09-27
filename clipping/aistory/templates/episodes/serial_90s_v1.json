@@ -10,6 +10,7 @@
   "shots": [20, 40],
   "min_shot_s": 0.8,
   "recap_from_episode": 2,
+  "default_body_count": 10,
   "slots": {
     "recap":       {"functions": ["recap"], "count": [1, 1], "duration_s": [2.0, 3.0]},
     "hook":        {"functions": ["hook"], "count": [1, 1], "duration_s": [1.5, 3.5]},

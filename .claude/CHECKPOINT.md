@@ -1,7 +1,34 @@
+## RESUME HERE (session paused by the human, 2026-09-27)
+- **Where:** worktree `.claude/worktrees/ai-story-phase-3`, branch `feat/ai-story-phase-3` (local only, NOT pushed),
+  head = the stage-12b commit. `main` is still at `153e83f` (the stage-0 checkpoint); the container still runs
+  `main`'s code (phase 2). Tree clean; no agent, no preview server running.
+- **Tier-1 at the branch head:** local 4430 passed / 1 skipped; CI env 3845 passed / 555 skipped; compileall clean;
+  vite build green (scratch outDir only — never build into `web/dashboard/dist`).
+- **Next: stage 13** (plan §3 row 13 and the Tier-2 script in plan §4):
+  1. **Ask the human first:** the live story `b1104ec66b05` is NOT `ready` — the live app regenerated Mangella's
+     voice (10:59 UTC, now gemini/flash-lite-tts) and Kiwilo's (13:37 UTC, now edge/fr-CA-AntoineNeural), which
+     cleared both leads' approvals (DEC-123). Episode steps refuse until both are re-approved. Options: the human
+     re-approves them (e.g. after listening), or I re-approve them in the UI at the start of the walk.
+  2. `GET /api/health` → 0 jobs; `sha256sum data/usage.json`; then `git merge --ff-only feat/ai-story-phase-3` on
+     `main`, `sudo -n docker compose rm -sfv backend && sudo -n docker compose up -d --build backend` (dashboard
+     changed). Never `down -v`.
+  3. Walk the plan §4 Tier-2 script at 375 px in the built-in browser on the tailnet URL; count LLM calls vs
+     ≈ 1 + N + 1 + 1 + N (N = 8 body scenes for 60-s ep 1 → 10 scenes); fix findings (max two fix rounds per
+     finding); the human acknowledges.
+- **Then stage 14:** `docs/AI_STORY.md` steps 8–9, VISION "Where it stands", DEC-126…136 as planned (§6) plus
+  what the stages decided (block line ids; per-prompt input budgets measured on live-sized data; E1 asks an exact
+  count, validator accepts the legal range; `shot` stays in LATER_TARGETS except `:plan`; camera motion fixed by the
+  style is refused, not overridden), A-055…A-060 (+ the bench numbers: E1 Gemini 3/3 @ 3.8 s, NVIDIA 1/3; E2 3/3
+  both; T1 Gemini 3/3, NVIDIA 0/3 with 5xx/timeout; the 300 s story call budget < NVIDIA's 330 s registry default),
+  CHECKPOINT close-out, action log. Push only on the human's word (memory `github-push-key`).
+- **Follow-ups collected so far:** rate/pitch change does not trigger re-measurement; `workflow.py` calls
+  `prompts._t1_shot_errors`/`_TAG_PATTERN` (private); fast_plan over-clamp fallback and both-protected framing
+  repeat (noted); all earlier-phase follow-ups below still stand.
+
 ## IN PROGRESS — AI Story **phase 3** (episode writer: script, storyboard, timing)
 - **Started:** 2026-09-27 by the human ("Phase 2 seems to have been worked on, check an go with phase 3").
   Task class: FULL. Phase 2 checked: closed and pushed (`4280333` == `origin/main`).
-- **Current phase:** 5 IMPLEMENT — stages 0–12 done; next is stage 12b (E1 exact scene count), then 13 (merge, deploy, Tier-2). Plan **approved in chat**
+- **Current phase:** 5 IMPLEMENT — stages 0–12b done and committed on `feat/ai-story-phase-3`; next is stage 13 (merge, deploy, Tier-2), then 14 (docs + decisions). Plan **approved in chat**
   ("Go", 2026-09-27).
 - **Plan:** `~/.claude/plans/ai-story-phase-3-episode-writer.md` (stages 0–14, riskiest = stage 6, the
   script/storyboard step runners). **Read it first**: it holds the design, the stage table and the Tier-2 script.
@@ -51,7 +78,7 @@
 | 10 | dashboard: Tabs + EpisodeStudio script pane | **done** (local 4393 / CI 3808 + 555 skipped; build green; browser check in stage 11) |
 | 11 | dashboard: storyboard pane + preview placeholder | **done** (local 4407 / CI 3822 + 555 skipped; build green; 375/820/1280 reviewed on the phase3 throwaway) |
 | 12 | E-prompt bench (free links only) | **done** (local 4416 / CI 3831 + 555 skipped); live bench found E1 0/3 on both free links → stage 12b |
-| 12b | E1 fills an exact numbered scene list (fix found by the bench) | — |
+| 12b | E1 asks for an exact numbered scene list; validator accepts the legal range | **done** (local 4430 / CI 3845 + 555 skipped); live E1 Gemini 3/3, NVIDIA 1/3 |
 | 13 | merge, deploy, Tier-2 (me at 375 px, human acks) | — |
 | 14 | docs + decisions | — |
 

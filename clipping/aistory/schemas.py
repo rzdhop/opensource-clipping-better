@@ -1558,6 +1558,7 @@ EPISODE_TEMPLATE_SCHEMA = _document({
     "shots": _RANGE_INT,
     "min_shot_s": {"type": "number", "minimum": 0},
     "recap_from_episode": {"type": "integer", "minimum": 1},
+    "default_body_count": {"type": "integer", "minimum": 1},
     "slots": _document({slot: _EPISODE_TEMPLATE_SLOT_SCHEMA for slot in EPISODE_TEMPLATE_SLOTS}),
     "pauses_s": _document({
         "before_first_line": {"type": "number", "minimum": 0},
@@ -1597,8 +1598,12 @@ def episode_template_errors(doc) -> list:
     checks the subset schema cannot express (spec 6.2, 6.4): the window/
     target/tighten ordering, every [lo, hi] pair, the four slots' functions
     covering ``SCENE_FUNCTIONS`` exactly once each, ``transitions_s``' keys
-    equalling ``TRANSITIONS`` exactly, the pause ordering, and that a valid
-    body count exists both with and without the recap scene."""
+    equalling ``TRANSITIONS`` exactly, the pause ordering, that a valid body
+    count exists both with and without the recap scene, and (stage 12b)
+    that ``default_body_count`` -- E1's exact-count ask -- sits inside
+    ``slots.body.count`` and its clamped total (:func:`timing.episode_slots`'
+    own clamp, reimplemented locally) lands inside ``scenes`` for both
+    cases."""
     errors = validate(doc, EPISODE_TEMPLATE_SCHEMA)
     if errors:
         return errors
@@ -1664,6 +1669,36 @@ def episode_template_errors(doc) -> list:
             f"$.scenes: no body count in slots.body.count fits scenes for an episode with the recap scene "
             f"(episode >= {doc['recap_from_episode']})"
         )
+
+    # Stage 12b: default_body_count is E1's exact-count ask (timing.episode_slots).
+    # It must itself sit inside slots.body.count, and -- clamped the same way
+    # episode_slots clamps it -- the resulting scene total must still land
+    # inside scenes, both without a recap (episode 1) and with one (episode
+    # >= recap_from_episode). Given the two feasibility checks above already
+    # passed, this can only fail on default_body_count itself being out of
+    # range; it stays a belt-and-suspenders check (same idiom as the
+    # SCENE_FUNCTIONS/TRANSITIONS-key equality checks above) rather than a
+    # shared implementation, so this module keeps no dependency on timing.py.
+    body_lo, body_hi = slots["body"]["count"]
+    default_body_count = doc["default_body_count"]
+    if not (body_lo <= default_body_count <= body_hi):
+        errors.append(
+            f"$.default_body_count: {default_body_count} is outside slots.body.count [{body_lo}, {body_hi}]"
+        )
+    scenes_lo, scenes_hi = doc["scenes"]
+    for ep_label, has_recap in (("episode 1", False), (f"episode >= {doc['recap_from_episode']}", True)):
+        fixed = 2 + (1 if has_recap else 0)
+        lo = max(body_lo, scenes_lo - fixed)
+        hi = min(body_hi, scenes_hi - fixed)
+        if lo > hi:
+            continue  # already reported by the feasibility checks above
+        n = min(max(default_body_count, lo), hi)
+        total = fixed + n
+        if not (scenes_lo <= total <= scenes_hi):
+            errors.append(
+                f"$.default_body_count: the clamped slot list for {ep_label} has {total} scene(s), "
+                f"outside scenes [{scenes_lo}, {scenes_hi}]"
+            )
 
     return errors
 

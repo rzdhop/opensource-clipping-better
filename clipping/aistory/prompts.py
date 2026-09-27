@@ -672,7 +672,8 @@ _E1_ASK_TEMPLATE = (
     "Write the beat sheet for episode {ep}.\n\n"
     "Give:\n"
     "- title: the episode's own title, at most 8 words\n"
-    "- scenes: {scenes_lo} to {scenes_hi} entries, in this order: {order}\n\n"
+    "- scenes: exactly {n} entries, one for each of these, in order:\n"
+    "{scene_list}\n\n"
     "Each scene:\n"
     "- function: one of {functions}\n"
     "- place_id: one of the existing places, at most {max_places} distinct places across the whole episode\n"
@@ -682,27 +683,26 @@ _E1_ASK_TEMPLATE = (
     "- summary: at most 15 words\n"
     "- emotion: one of {emotions}\n"
     "- target_duration_s: a hint inside its own slot's range -- {slot_ranges}\n\n"
-    "Body scenes ({body_lo} to {body_hi} of them, function setup/rising/peak/turn): each one raises the "
-    "stakes or reveals new information; one of them may be a quiet scene with no dialogue.\n\n"
+    "Across the body scenes: open with setup, escalate with rising, include at least one peak, and land a "
+    "turn right before the cliffhanger; one of them may be a quiet scene with no dialogue.\n\n"
     "The hook scene: {hook_style_line}.\n\n"
     "The cliffhanger scene: {cliffhanger_style_line}; it should leave one of this episode's own hooks open.\n\n"
     "Never use real people, brands, studio names or copyrighted characters."
 )
 
 
-def _e1_slot_bounds(template, has_recap):
-    """``(scenes_lo, scenes_hi, body_lo, body_hi)``: the episode template's
-    own total scene count, and the body slot's count narrowed to whatever
-    the fixed slots (hook 1, cliffhanger 1, recap 0 or 1) leave inside it
-    (spec 6.2) -- the overlap of the body slot's own range and "everything
-    the episode total allows once the fixed slots are paid for".
-    """
-    scenes_lo, scenes_hi = template["scenes"]
-    body_lo, body_hi = template["slots"]["body"]["count"]
-    fixed = 2 + (1 if has_recap else 0)
-    lo = max(body_lo, scenes_lo - fixed)
-    hi = min(body_hi, scenes_hi - fixed)
-    return scenes_lo, scenes_hi, lo, hi
+def _e1_scene_list(slots) -> str:
+    """The numbered "Scene N -- kind" list E1's ask spells out, one line per
+    entry of *slots* (:func:`timing.episode_slots`): an exact, positional
+    list rather than the range ("8 to 12 scenes") the live bench found a
+    model would settle short of every time (stage 12b)."""
+    lines = []
+    for i, slot in enumerate(slots, start=1):
+        if slot == "body":
+            lines.append(f"Scene {i} — body: choose setup, rising, peak or turn")
+        else:
+            lines.append(f"Scene {i} — {slot}")
+    return "\n".join(lines)
 
 
 def _slot_duration_range(function, template):
@@ -767,11 +767,18 @@ def e1_schema(cast_ids, place_ids, prop_ids) -> dict:
     })
 
 
-def build_e1(pack, *, ep, arc_entry, template, episode_defaults, cast, places, props, memory):
+def build_e1(pack, *, ep, arc_entry, template, episode_defaults, cast, places, props, memory, slots):
     """The episode's beat sheet (spec 2.7, 4.2, row E1): every scene stub
     (function, place, time variant, cast, props, a one-line summary, an
     emotion and a duration hint), in the order the episode template wants,
     expanding the arc entry the season already committed to.
+
+    *slots* is the exact, ordered list of slot kinds the reply must fill
+    (:func:`timing.episode_slots`, computed by the caller from *template*
+    and *ep* -- this module stays free of a ``timing`` import): the ask
+    spells it out as a numbered list and pins the count (stage 12b -- a
+    range ask, "8 to 12 scenes", left the live bench at E1 0/3 on both free
+    links, a model settling short every time).
 
     *cast*/*places*/*props* are the story's full rosters: each item at
     least ``{"char_id"/"place_id"/"prop_id", "name"}`` (*places* also
@@ -779,10 +786,6 @@ def build_e1(pack, *, ep, arc_entry, template, episode_defaults, cast, places, p
     *memory* is the season document (``season.json``); episode 1 needs none
     of it (:func:`context.memory_section`).
     """
-    has_recap = ep >= template["recap_from_episode"]
-    scenes_lo, scenes_hi, body_lo, body_hi = _e1_slot_bounds(template, has_recap)
-    order = ("recap, hook, " if has_recap else "hook, ") + "setup/rising/peak/turn (escalating), cliffhanger"
-
     memory_text, was_cut = context.memory_section(memory, ep)
     if was_cut:
         pack.trimmed.append("memory")
@@ -797,12 +800,11 @@ def build_e1(pack, *, ep, arc_entry, template, episode_defaults, cast, places, p
         user += "Existing props:\n" + _id_name_block(props, "prop_id") + "\n\n"
 
     user += _E1_ASK_TEMPLATE.format(
-        ep=ep, scenes_lo=scenes_lo, scenes_hi=scenes_hi, order=order,
+        ep=ep, n=len(slots), scene_list=_e1_scene_list(slots),
         functions=", ".join(schemas.SCENE_FUNCTIONS),
         max_places=episode_defaults["max_places"],
         emotions=", ".join(schemas.EMOTIONS),
         slot_ranges=_slot_ranges_line(template),
-        body_lo=body_lo, body_hi=body_hi,
         hook_style_line=_HOOK_STYLE_LINES[episode_defaults["hook_style"]],
         cliffhanger_style_line=_CLIFFHANGER_STYLE_LINES[episode_defaults["cliffhanger_style"]],
     )
@@ -813,6 +815,21 @@ def build_e1(pack, *, ep, arc_entry, template, episode_defaults, cast, places, p
     return _system(pack), user, e1_schema(cast_ids, place_ids, prop_ids)
 
 
+def _e1_slot_bounds(template, has_recap):
+    """``(scenes_lo, scenes_hi, body_lo, body_hi)``: the episode template's
+    own total scene count, and the body slot's count narrowed to whatever
+    the fixed slots (hook 1, cliffhanger 1, recap 0 or 1) leave inside it
+    (spec 6.2) -- the overlap of the body slot's own range and "everything
+    the episode total allows once the fixed slots are paid for".
+    """
+    scenes_lo, scenes_hi = template["scenes"]
+    body_lo, body_hi = template["slots"]["body"]["count"]
+    fixed = 2 + (1 if has_recap else 0)
+    lo = max(body_lo, scenes_lo - fixed)
+    hi = min(body_hi, scenes_hi - fixed)
+    return scenes_lo, scenes_hi, lo, hi
+
+
 def validate_e1(reply, *, ep, template, episode_defaults, cast_ids, places, prop_ids) -> list:
     """Post-validation for an E1 reply, beyond what its schema can express
     (spec 2.7, 6.2): scene/body counts, the function order (an optional
@@ -820,6 +837,17 @@ def validate_e1(reply, *, ep, template, episode_defaults, cast_ids, places, prop
     last, everything between them a body function), place/variant/
     character/prop references, the places-per-episode cap, word caps, and
     each scene's duration hint against its own slot's range.
+
+    Stage 12b follow-up: ``build_e1``'s ask still requests an exact count
+    (``len(timing.episode_slots(template, ep))``, aiming at the template's
+    own default), but this validator accepts any LEGAL count instead of
+    demanding that exact one -- a range/aggregate check, restored from
+    before the stage-12b-first-cut's exact positional one. The live re-bench
+    (stage 12b) found free-tier models settle for fewer scenes than asked
+    even against an explicit numbered list (NVIDIA nemotron-3.5-lightning:
+    8-9 of 10 asked, all legal), and a shorter-but-legal reply should not be
+    rejected outright -- rejecting it would just repeat the 0/3 the exact
+    check produced live, without the model ever being able to comply.
 
     *places* maps place_id -> its own iterable of time-variant names (the
     same shape ``schemas.episode_script_context_errors`` already uses).

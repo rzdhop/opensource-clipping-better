@@ -98,7 +98,8 @@ def _partial(store):
     """A ready story whose episode 1 has its beat sheet and every body scene but
     s04; the framing parts and the check never ran."""
     story_id = _ready_story(store)
-    queue = [e2_reply, e2_reply, DOWN, e2_reply, e2_reply, e2_reply]
+    # 8 body scenes (stage 12b): s02, s03 succeed, s04 fails, s05-s09 succeed.
+    queue = [e2_reply, e2_reply, DOWN, e2_reply, e2_reply, e2_reply, e2_reply, e2_reply]
     _failed(_new().script, store, story_id, llm=_script_llm(E2=queue, E3=[DOWN], E4=[]))
     return story_id
 
@@ -212,7 +213,7 @@ def test_a_script_is_approved_only_complete_and_freshly_checked(wf, store):
     assert _refused(wf, "conflict", wf.approve_script, store, story_id, 1, now=LATER) == (
         "Episode 1 has no script yet: write it first (the script step).")
 
-    queue = [e2_reply, e2_reply, DOWN, e2_reply, e2_reply, e2_reply]
+    queue = [e2_reply, e2_reply, DOWN, e2_reply, e2_reply, e2_reply, e2_reply, e2_reply]
     _failed(m.script, store, story_id, llm=_script_llm(E2=queue, E4=[]))
     detail = _refused(wf, "conflict", wf.approve_script, store, story_id, 1, now=LATER)
     assert "not complete" in detail and "s04" in detail
@@ -275,11 +276,11 @@ def test_a_storyboard_is_approved_on_an_approved_script_with_every_scene_current
     ec = m.common.load_context(store, story_id, 1)
     script, board = _script(store, story_id), _storyboard(store, story_id)
     plans = shots.plans_from_storyboard(board, script)
-    plans.pop("s08")
+    plans.pop("s10")  # the cliffhanger (stage 12b: s10, not s08 -- 8 body scenes)
     partial, _notes = m.storyboard.build(ec, script, plans, {sid: "fast" for sid in plans}, board, stale=set(),
                                          now=NOW)
     store.write_episode_doc(story_id, 1, "storyboard.json", partial, now=NOW)
-    assert "no shots for scene s08" in _refused(wf, "conflict", wf.approve_storyboard, store, story_id, 1, now=LATER)
+    assert "no shots for scene s10" in _refused(wf, "conflict", wf.approve_storyboard, store, story_id, 1, now=LATER)
 
     # A scene marked stale, then one planned from another revision of its scene.
     for mutate in (lambda doc: doc["scenes"]["s03"].update(stale=True),
@@ -363,7 +364,7 @@ def test_the_other_script_edits_and_the_revisions_they_move(wf, store):
     assert script["next_episode_teaser"] == "Demain, tout bascule."
     assert script["rev"] == 2
     assert {scene["scene_id"]: scene["rev"] for scene in script["scenes"]} == {
-        sid: 2 if sid in ("s01", "s03", "s08") else 1 for sid in ALL_SCENES}
+        sid: 2 if sid in ("s01", "s03", "s10") else 1 for sid in ALL_SCENES}
     assert script["consistency_report"]["stale"] is True
 
     # The teaser alone moves the script's revision, no scene's.
@@ -599,7 +600,7 @@ def test_the_script_units_count_only_what_is_missing(wf, store):
     assert units() == {"E1": 1, "E2": 9, "E3": 1, "E4": 1, "E2_range": [5, 9], "llm_calls": 12,
                        "llm_calls_range": [8, 12]}
 
-    queue = [e2_reply, e2_reply, DOWN, e2_reply, e2_reply, e2_reply]
+    queue = [e2_reply, e2_reply, DOWN, e2_reply, e2_reply, e2_reply, e2_reply, e2_reply]
     _failed(m.script, store, story_id, llm=_script_llm(E2=queue, E3=[DOWN], E4=[]))
     assert units() == {"E1": 0, "E2": 1, "E3": 1, "E4": 1, "E2_range": None, "llm_calls": 3,
                        "llm_calls_range": [3, 3]}
