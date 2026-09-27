@@ -1,7 +1,7 @@
 ## IN PROGRESS — AI Story **phase 3** (episode writer: script, storyboard, timing)
 - **Started:** 2026-09-27 by the human ("Phase 2 seems to have been worked on, check an go with phase 3").
   Task class: FULL. Phase 2 checked: closed and pushed (`4280333` == `origin/main`).
-- **Current phase:** 5 IMPLEMENT — stages 0–11 done; next is stage 12 (E-prompt bench, free links only). Plan **approved in chat**
+- **Current phase:** 5 IMPLEMENT — stages 0–12 done; next is stage 12b (E1 exact scene count), then 13 (merge, deploy, Tier-2). Plan **approved in chat**
   ("Go", 2026-09-27).
 - **Plan:** `~/.claude/plans/ai-story-phase-3-episode-writer.md` (stages 0–14, riskiest = stage 6, the
   script/storyboard step runners). **Read it first**: it holds the design, the stage table and the Tier-2 script.
@@ -50,7 +50,8 @@
 | 9 | CLI | **done** (local 4375 / CI 3790 + 555 skipped) |
 | 10 | dashboard: Tabs + EpisodeStudio script pane | **done** (local 4393 / CI 3808 + 555 skipped; build green; browser check in stage 11) |
 | 11 | dashboard: storyboard pane + preview placeholder | **done** (local 4407 / CI 3822 + 555 skipped; build green; 375/820/1280 reviewed on the phase3 throwaway) |
-| 12 | E-prompt bench (free links only) | — |
+| 12 | E-prompt bench (free links only) | **done** (local 4416 / CI 3831 + 555 skipped); live bench found E1 0/3 on both free links → stage 12b |
+| 12b | E1 fills an exact numbered scene list (fix found by the bench) | — |
 | 13 | merge, deploy, Tier-2 (me at 375 px, human acks) | — |
 | 14 | docs + decisions | — |
 
