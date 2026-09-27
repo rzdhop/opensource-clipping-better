@@ -1,136 +1,36 @@
-## STAGE 13 IN PROGRESS (resumed 2026-09-27 19:47 UTC)
-- **Human's answer (chat, 2026-09-27):** "I re-approve in the UI" — I re-approve Kiwilo and Mangella as they are
-  (current voices) at the start of the walk. Mangella's voice is `gemini/flash-lite-tts` (Kore): free tier, $0,
-  counted against Gemini's daily limit, so step 8's measurement uses Edge for Kiwilo/Broccolia and free Gemini
-  for Mangella.
-- **Before (19:47 UTC):** health 0 running / 0 queued; `data/usage.json` sha256 `64d2be3a…8a90` (edge 1, gemini 1
-  calls, day 2026-09-27); no `data/spend.json`.
-- If this session dies mid-walk: check `git log -1 main` — if it equals the branch head, the merge is done; check
-  the container's `/api/health` version and jobs before anything else.
-- **Done 19:48–20:20 UTC:** `main` ff-merged to `ede5116`; backend rebuilt (`rm -sfv` + `up -d --build`), health OK.
-  Kiwilo + Mangella re-approved in the UI (20:07:49 / 20:07:54) → story `ready`.
-- **Tier-2 walk (localhost:8000, 375 px) — all 11 steps mechanically PASS:** script job 20:08:54→20:09:15 (E1, E2×7,
-  E3, E4; 16.5 s of calls); two inline edits → rev 3, report stale → Check again = 1 E4; regenerate s03 with a note →
-  only s03 changed (1 E2); recheck passed → script approved; Fast storyboard 0 calls, 24 shots, rule pass logged;
-  Plan with T1 = 10 calls (61 s; one 47 s Gemini latency, no retry), 20 shots, 2 per scene → approved; measure: 15
-  lines (Edge ×10, Gemini TTS ×5, one 429 retried OK) in 24 s → 39.7 s measured; docs validate (script, storyboard,
-  context); **23 LLM calls, all gemini free, 0 retries, 0 over cap, paid link skipped every time**; `usage.json`
-  edge 1→11, gemini 1→6 (TTS only — LLM calls are not counted there, pre-existing), no `spend.json`; ep 2 refused
-  naming phase 5; restart kept the awaiting job + approvals; 375/820/1280 no overflow on Script/Storyboard/Preview;
-  `/clips/job/b37b36a9b34e` serves 7 clips. Live ep 1 now has script + storyboard + measured audio, both approved.
-- **Findings (awaiting the human's call on the fix round):**
-  F3 MAJOR episode 38.6 s est / 39.7 s measured, under 55–80: E1 picks low targets (Σ 49.5 s) and E2's word budget
-  is a ceiling only (`prompts.py:930`) → fix: E2 asks lo–hi words + validate_e2 floor; E1 aims for the upper half.
-  F7 MAJOR storyboard `_time_shots` (`shots.py:~760`) times scenes with `timing.scene_timing`, ignoring the
-  episode-level window pass (`timing.py:~630` hold extension / tightening) → s01/s04/s10 shots 1.0 s short of the
-  script's scene durations. F1 MEDIUM model drops French elision apostrophes (E1 mostly, E2 sometimes) — raw
-  output, no code strips them. F2 LOW model garbles an accent now and then (trAne/tr¤ne) — raw output, no fix.
-  F5 LOW consistency-panel scene links default blue rgb(0,0,238). F6 LOW stale report → "The script is not
-  complete yet." (`ScriptPane.jsx:437`, `missing` includes consistency_check); Measure disabled likewise. F8 LOW
-  ep ≥ 2: estimate refusal swallowed ("estimating…" forever, Write enabled). F9 LOW (phase-2 origin) Ready card
-  keys on `approvals.season` (`NewStoryWizard.jsx:393`), shows "ready" + Open episode 1 with cast unapproved.
-  F10 LOW skipped paid link only in the chip tooltip. F11 LOW estimate top = 12 (body high 9) vs 11 exact.
-  F4 WITHDRAWN: s08 silent scene is spec §body "one dread/quiet scene without dialogue allowed".
-  Pre-existing, not phase 3: clip job page "Live activity 33h 56m on this step" on a completed job.
-- **Human's answers (chat, 2026-09-27 ~20:25 UTC):** fix round = majors + UI (F3, F7, F1, F5, F6, F8, F9, F11; F2 and
-  F10 → follow-ups); F1 = a French elision line in the episode prompts + deterministic repair after each reply (no
-  extra call, never fails a step; `t il` left alone); live ep 1 stays as it is — the fixes are verified on a COPY
-  of the story via the CLI.
-- **Fix round (in progress):** three agents in isolated worktrees, disjoint files, each commits on its own branch;
-  I cherry-pick onto `feat/ai-story-phase-3`, run Tier-1 (both envs + build), ff `main` at 0 jobs, rebuild, re-walk
-  the affected steps. A = F7 (Opus: shots.py/timing.py/steps/storyboard.py/episode_common.py); B = F3 + F1 (Sonnet:
-  prompts.py, steps/script.py, steps/episode_regenerate.py); C = F5/F6/F8/F9 UI + F11 (Sonnet: ScriptPane.jsx,
-  index.css, NewStoryWizard.jsx, workflow.script_units).
-- **Fix round status (21:30 UTC):** A (F7), B (F3 + F1) and C (UI + F11) merged by cherry-pick + my route fix
-  (`6d44338`, chip shows 11, range 8–12). Tier-1 on the merged branch: both envs exit 0 (counts lost to `-qq` —
-  pyproject addopts already has `-q`; never pass `-q` again), compileall clean, scratch build green. Live check on
-  a COPY (scratchpad `verify/`, `run_cli.py` sets only GOOGLE_API_KEY from `data/settings.json`, usage/spend
-  redirected): 71.2 s and 68.4 s inside the window, 0 dropped elisions — but E2 overshoots its range (1.5–2.8×)
-  → 10–12 scene_over/trim_line flags per script. **Human: "One more round"** — E2 two-sided range, drop the
-  "2–3 lines" nudge, ceiling at 1.5× hi retried once then accepted; agent B on it; then 2 live samples, merge.
-- **Round 2 done + deployed (21:55 UTC):** E2 two-sided range + ceiling (`74dee48`); live samples on the copy 63.2 s
-  / 4 flags and 55.0 s / 0 flags; F7 on the copy fast + T1 diff 0.000 everywhere. Tier-1 at `d466f83`: local **4477
-  passed / 1 skipped**, CI env **3892 passed / 555 skipped**, compileall clean, scratch build green, RC-E3 diff
-  empty. `main` ff'd to `d466f83` at 0 jobs, backend rebuilt (`rm -sfv` + `up -d --build`), health OK.
-  Re-walk at 375 px: ep 2 refusal shown up front, Write disabled (F8); `.story-script-consistency a` served with
-  --accent-hover #a78bfa (F5); Ready card on a ready story; ep 1 Script/Storyboard/Preview no overflow, state
-  approved/approved; clips page 7/7 videos 200 (RC-P1); `usage.json` unchanged by the copies; no `spend.json`.
-  Live ep 1 kept as the human chose: still the pre-fix 39.7 s script; its stored storyboard durations predate F7
-  (s01/s04/s10 1.0 s short) until the episode is next re-timed/re-planned or rewritten.
-  **Tier-2 ACKNOWLEDGED by the human (chat, 2026-09-27 ~22:00 UTC: "Acknowledged, go to 14"); live ep 1 stays as
-  it is.** Stage 13 closed. Stage 14 (docs + decisions) in progress on `feat/ai-story-phase-3`.
-- **Seen on live, not mine:** a `style_preview` job ran on b1104ec66b05 at 20:42:52 from the dashboard (host
-  bridge IP; `style` POST 409 then `style_preview` 201): 3 preview images replaced, job awaiting approval, story
-  still `ready`, style approval untouched. Left as is; tell the human.
+## CURRENT STATE — AI Story **phase 3 is DONE**. Next: **phase 4**.
 
-## RESUME HERE (session paused by the human, 2026-09-27)
-- **Where:** worktree `.claude/worktrees/ai-story-phase-3`, branch `feat/ai-story-phase-3` (local only, NOT pushed),
-  head = the stage-12b commit. `main` is still at `153e83f` (the stage-0 checkpoint); the container still runs
-  `main`'s code (phase 2). Tree clean; no agent, no preview server running.
-- **Tier-1 at the branch head:** local 4430 passed / 1 skipped; CI env 3845 passed / 555 skipped; compileall clean;
-  vite build green (scratch outDir only — never build into `web/dashboard/dist`).
-- **Next: stage 13** (plan §3 row 13 and the Tier-2 script in plan §4):
-  1. **Ask the human first:** the live story `b1104ec66b05` is NOT `ready` — the live app regenerated Mangella's
-     voice (10:59 UTC, now gemini/flash-lite-tts) and Kiwilo's (13:37 UTC, now edge/fr-CA-AntoineNeural), which
-     cleared both leads' approvals (DEC-123). Episode steps refuse until both are re-approved. Options: the human
-     re-approves them (e.g. after listening), or I re-approve them in the UI at the start of the walk.
-  2. `GET /api/health` → 0 jobs; `sha256sum data/usage.json`; then `git merge --ff-only feat/ai-story-phase-3` on
-     `main`, `sudo -n docker compose rm -sfv backend && sudo -n docker compose up -d --build backend` (dashboard
-     changed). Never `down -v`.
-  3. Walk the plan §4 Tier-2 script at 375 px in the built-in browser on the tailnet URL; count LLM calls vs
-     ≈ 1 + N + 1 + 1 + N (N = 8 body scenes for 60-s ep 1 → 10 scenes); fix findings (max two fix rounds per
-     finding); the human acknowledges.
-- **Then stage 14:** `docs/AI_STORY.md` steps 8–9, VISION "Where it stands", DEC-126…136 as planned (§6) plus
-  what the stages decided (block line ids; per-prompt input budgets measured on live-sized data; E1 asks an exact
-  count, validator accepts the legal range; `shot` stays in LATER_TARGETS except `:plan`; camera motion fixed by the
-  style is refused, not overridden), A-055…A-060 (+ the bench numbers: E1 Gemini 3/3 @ 3.8 s, NVIDIA 1/3; E2 3/3
-  both; T1 Gemini 3/3, NVIDIA 0/3 with 5xx/timeout; the 300 s story call budget < NVIDIA's 330 s registry default),
-  CHECKPOINT close-out, action log. Push only on the human's word (memory `github-push-key`).
-- **Follow-ups collected so far:** rate/pitch change does not trigger re-measurement; `workflow.py` calls
-  `prompts._t1_shot_errors`/`_TAG_PATTERN` (private); fast_plan over-clamp fallback and both-protected framing
-  repeat (noted); all earlier-phase follow-ups below still stand.
+- **Stages 0–14 done** on `feat/ai-story-phase-3`, ff-merged to `main` (`d466f83`, the fix round's second deploy)
+  at 0 jobs, backend rebuilt, health OK. **NOT pushed** — push only on the human's word (memory `github-push-key`).
+- **Tier-1 at close:** local **4477 passed / 1 skipped**; CI env **3892 passed / 555 skipped**; compileall clean;
+  vite build green (scratch outDir). Baseline at stage 0 was 3737 / 1 (CI 3172 / 535).
+- **Tier-2:** walked live by me at 375 px on `localhost:8000` (plan §4, 11 steps, all PASS): 23 LLM calls (E1 1,
+  E2 8, E3 1, E4 3, T1 10), all Gemini free, 0 retries, 0 over cap, the paid link skipped every time; 15 lines
+  measured (Edge 10, Gemini TTS 5, one 429 retried); ep 2 refused naming phase 5; no overflow at 375/820/1280;
+  clips still serve (RC-P1). Findings F1–F13 recorded below; F3 (episode length) and F7 (storyboard timing
+  ignoring the episode-level window pass) were MAJOR and took two fix rounds (F3) plus one (F7), each re-walked
+  and redeployed. **Acknowledged by the human** ("Acknowledged, go to 14", 2026-09-27 ~22:00 UTC).
+- **Plan:** `~/.claude/plans/ai-story-phase-3-episode-writer.md` (now headed "Status: done 2026-09-27").
+- **Decisions:** DEC-126…DEC-148. **Assumptions:** A-055…A-064 (+ an update line on A-041). **Next free ids:**
+  DEC-149, A-065.
+- **Docs:** `docs/AI_STORY.md` gains steps 8–9 (episode script, storyboard) and extends the CLI and
+  where-it-lives-on-disk sections; `VISION.md` "Where it stands" updated.
 
-## IN PROGRESS — AI Story **phase 3** (episode writer: script, storyboard, timing)
-- **Started:** 2026-09-27 by the human ("Phase 2 seems to have been worked on, check an go with phase 3").
-  Task class: FULL. Phase 2 checked: closed and pushed (`4280333` == `origin/main`).
-- **Current phase:** 5 IMPLEMENT — stages 0–12b done and committed on `feat/ai-story-phase-3`; next is stage 13 (merge, deploy, Tier-2), then 14 (docs + decisions). Plan **approved in chat**
-  ("Go", 2026-09-27).
-- **Plan:** `~/.claude/plans/ai-story-phase-3-episode-writer.md` (stages 0–14, riskiest = stage 6, the
-  script/storyboard step runners). **Read it first**: it holds the design, the stage table and the Tier-2 script.
-- **CLARIFY closed (human, 2026-09-27):** (1) episode 1 now, episode N ≥ 2 waits for ep N−1's recap in series
-  memory; (2) window 55–80, target 60, tighten above 75; (3) one script job E1→E2×N→E3→E4; (4) Tier-2 walked by
-  me at 375 px, the human acknowledges.
-- **Checkpoint:** known-good `4280333` (clean, = `origin/main`); this header is committed on top of it as the
-  stage-0 commit.
-- **Tier-1 baseline (2026-09-27, at `4280333`):** local **3737 passed / 1 skipped**; CI env **3172 passed / 535
-  skipped**; `compileall clipping web tests main.py tools` clean; `vite build` green (scratch outDir). The
-  `web/dashboard/dist/` on disk is the compose anonymous-volume mount point (empty, root-owned): leave it.
-- **Where the work happens:** worktree `.claude/worktrees/ai-story-phase-3`, branch `feat/ai-story-phase-3`
-  (from the stage-0 commit; `node_modules` symlinked, excluded in `info/exclude`). `main` and the container stay
-  at the checkpoint until stage 13. **A fresh session reads the branch's copy of this file** — it is the current one.
-- **Brief:** `.claude/plans/ai-story/04-phase-3-episode-writer.md`; spec §2.7–2.8, §3 steps 8–9, §4.1–4.3
-  (E1–E4, T1), §5 (shot skeleton), §6.2–6.4, §9.2, §10 (EpisodeStudio).
-- **Next free ids:** DEC-126, A-055. **Open questions:** none.
-- **Live story is NOT `ready` right now (found 2026-09-27, stage 6):** at 10:59 UTC someone regenerated
-  `character:char_mangella:voice` (now a gemini/flash-lite-tts voice); DEC-123 cleared her `approved_at`, so
-  `approvals.cast` is null and the derived status is `style_approved`. The episode steps refuse until she is
-  re-approved. **Ask the human before Tier-2** whether to re-approve her (their data, their choice).
-  Update 13:37 UTC: the live container also regenerated `character:char_kiwilo:voice` (now edge/fr-CA-AntoineNeural),
-  so Kiwilo's approval is cleared too — both leads need re-approval. Someone is tuning voices on the live app.
-- **Throwaway review servers:** `.claude/launch.json` (git-excluded) `phase3-throwaway` (:8012, keys blanked, runs
-  this worktree) + `phase3-dashboard` (Vite :5174 → 8012). Seeded copies in the worktree's `outputs/`:
-  `7733d759c562` (episode 1 written + boarded) and `d0ed782692c3` (no episode).
-- **Context map (EXPLORE, 2026-09-27; detail in the plan §0):** the grammar is pre-registered
-  (`workflow.LATER_STEPS/APPROVALS/TARGETS` hold `script, storyboard, scene, hook, cliffhanger, teaser, shot`);
-  `ep` is plumbed but unused; episode docs, episode approvals (on the docs — the story's `approvals` is a closed
-  6-key schema), `episode_script_v1`/`storyboard_v1`, E1–E4/T1, `timing.py`, the shot-tag resolver,
-  `templates/episodes/`, EpisodeStudio + tabs and CLI `--ep/--fast` are all missing. Only a per-call 300 s budget
-  exists. Measured: French Edge speech 0.070 s/char on the three voice samples.
+### Live data (as left, 2026-09-27)
+- Story `b1104ec66b05` is `ready`; Kiwilo and Mangella were re-approved in the UI at 20:07:49 / 20:07:54 (their
+  voices had been regenerated live before stage 13 began, which had cleared DEC-123's approval on each).
+- Live episode 1 carries the **pre-fix** 39.7 s script and a storyboard whose **stored shot durations predate the
+  F7 timing fix** (s01/s04/s10 1.0 s short of the script's own scene durations) — both left **approved**, as the
+  human chose; re-timing, re-planning or rewriting the episode picks up every fix at once.
+- A `style_preview` job ran on the live story at 20:42:52 UTC from the dashboard (not by me or an agent): 3
+  preview images replaced, **awaiting the human's approval**; story status and style approval untouched.
+- The fix round's verification copy of the story lives only in the session's scratchpad (`verify/`) — never part
+  of the repo or `outputs/`.
 
 ### Stage ledger (phase 3)
 | S | Stage | State |
 |---|---|---|
-| 0 | checkpoint + baseline + worktree | **done** (this commit) |
+| 0 | checkpoint + baseline + worktree | **done** (`153e83f` on `main`) |
 | 1 | episode templates + script/storyboard schemas | **done** (local 3800 / CI 3235 + 535 skipped) |
 | 2 | timing engine | **done** (local 3871 / CI 3306 + 535 skipped) |
 | 3 | episode documents in the store | **done** (local 4001 / CI 3436 + 535 skipped) |
@@ -144,8 +44,8 @@
 | 11 | dashboard: storyboard pane + preview placeholder | **done** (local 4407 / CI 3822 + 555 skipped; build green; 375/820/1280 reviewed on the phase3 throwaway) |
 | 12 | E-prompt bench (free links only) | **done** (local 4416 / CI 3831 + 555 skipped); live bench found E1 0/3 on both free links → stage 12b |
 | 12b | E1 asks for an exact numbered scene list; validator accepts the legal range | **done** (local 4430 / CI 3845 + 555 skipped); live E1 Gemini 3/3, NVIDIA 1/3 |
-| 13 | merge, deploy, Tier-2 (me at 375 px, human acks) | — |
-| 14 | docs + decisions | — |
+| 13 | merge, deploy, Tier-2 (me at 375 px, human acks) | **done** (2 fix rounds: F3 ×2 (length), F1 (elisions), F7 (storyboard timing), F5/F6/F8/F9/F11 (UI + estimate); redeployed `d466f83`) |
+| 14 | docs + decisions | **done** (DEC-126…148, A-055…064, `docs/AI_STORY.md`, `VISION.md`, this close-out) |
 
 ### Regression contract (phase 3)
 RC-P1…P11, RC-S1…S4 and RC-T1…T3 (tables below) stay in force, plus:
@@ -157,22 +57,38 @@ RC-P1…P11, RC-S1…S4 and RC-T1…T3 (tables below) stay in force, plus:
 | RC-E4 | No paid LLM call from an episode step without `allow_paid` | stage-6 tests + the DEC-115 tests unedited |
 | RC-E5 | Reference images keep stripping names exactly as before | `test_story_refimages*.py` unedited after the helper lift |
 
-## RESUME HERE (saved 2026-09-27)
-- **Repo:** `main` == `origin/main` (this commit), tree clean. Phases 0, 1 and 2 of AI Story are merged and pushed.
-- **Deployed:** the container runs `main`'s code (last code commit `d20fa28`; later commits are docs only), health OK,
-  0 jobs. Reach it on the tailnet at `http://main-network-interface.tail01346d.ts.net:8000` (no token, DEC-105).
-- **Live data:** story `b1104ec66b05` "L'Île Tentafruit" (FR, fruit_drama, prompt-only consistency) is `ready`:
-  cast Kiwilo / Mangella / Broccolia (voices Henri / Denise / Vivienne), places Le Parloir des Secrets (+ night) and
-  La Piscine de la Trahison, prop Téléphone en noix de coco, an 8-episode arc. Use it as phase 3's fixture.
-- **Open, deferred by the human:** (1) play the three voice samples on the phone ("we'll fix it later");
-  (2) phase 0's one paid Tier-2 call (est. $0.03, needs budget and an explicit yes).
-- **Open task chip:** "Check the token before clip uploads spool" (clip upload routes spool before the token check).
-- **Worktrees:** `.claude/worktrees/ai-story-phase-1` and `ai-story-phase-2` are merged into `main` and can be
-  removed; `eager-chaplygin-e0a0a3` (unmerged) and `magical-greider-2955e5` predate this work — not reviewed, leave
-  them. `.claude/launch.json` (git-excluded) holds the keyless throwaway backends `phase1-throwaway` (:8010) and
-  `phase2-throwaway` (:8011).
-- **Next:** phase 3 (episode writer) — prompt `.claude/plans/ai-story/04-phase-3-episode-writer.md`; start at
-  LOAD under `~/.claude/CLAUDE.md`. Next free ids DEC-126, A-055.
+### Follow-ups, deliberately not done
+- F2 the free model occasionally garbles a French diacritic (`trâne` → `tr¤ne`) in raw output — no code path touches it.
+- F10 the skipped-paid-link note lives only in the estimate chip's tooltip, not the button row itself.
+- F12 E3 sometimes echoes a neighbouring scene's line into the hook or the cliffhanger.
+- F13 T1 sometimes answers a short scene with a single shot (expected 2–4 per DEC-133); "Plan remaining with T1"
+  finishes it on a later call when the first is rejected or fails.
+- `workflow.patch_script` and a scene regenerate re-time the script but not the storyboard: a line edit that
+  shifts the episode-level window pass leaves other scenes' shots off until the next re-plan (the edited scene
+  itself is stale, so the board can't be approved meanwhile).
+- `timing.line_offsets` refuses a partial storyboard (its boundary rule is strict) — phase 4 must place lines
+  using `episode_pass`'s own boundary rule instead.
+- `prompts.repair_fr_elisions` skips a text that already holds any apostrophe, even one unrelated to an elision.
+- A voice's rate or pitch change does not trigger re-measurement (`timing.voice` records only provider/voice_id).
+- `workflow.py` calls the private `prompts._t1_shot_errors` / `_TAG_PATTERN` to keep an edited shot's tag rules
+  identical to T1's own.
+- The fast storyboard's over-clamp fallback (drops a trailing wordless shot) and a both-protected repeated
+  framing (logged with a note, not fixed) — `shots.py`'s `fast_plan` / `rule_pass`.
+- The Clips "Live activity" timer keeps running on an already-completed job (pre-existing, not phase 3; a
+  separate task was offered and not taken up).
+- `pyproject.toml`'s `addopts` already carries `-q` — never pass `-q` again, it hides the pass/fail count line.
+- Carried from earlier phases: the Settings per-task route selector (DEC-112); the clip-upload token-before-spool
+  fix; `generation.in_container()` reading its file twice; the CLI's progress output not probing local editors; a
+  day-plate regenerate not remaking its derived variants; `prompts._cast_section`/`_places_section` trimming
+  without naming it in `pack.trimmed`; `series_memory.relationship_state` keys not cleaned on delete; `jobs.json`
+  atomic write; tests inheriting a real `.env`; `cost_ledger.json` file mode 0600; concept diversity.
+
+### Where phase 4 starts
+Read the spec's phase-4 brief and DEC-126…148 first (episode timing, approvals, tags/handles, the measurement
+and step-budget rules all carry forward unchanged). Phase 4 renders episode 1: the Tier-1 assets pipeline and
+renderer, the metadata pack (MVP), and the generation cache that never loses a paid generation (DEC-106's
+follow-up, carried since phase 0). The Preview tab's placeholder ("Rendering arrives in phase 4.") is exactly
+what phase 4 replaces.
 
 ---
 

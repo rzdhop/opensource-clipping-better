@@ -47,14 +47,23 @@ budget and every free call counted against its daily limit.
   proposed then edited, master plates and time variants; an 8-episode season arc; per-entity approvals up to
   `ready`. Without a reference-capable editor the sheets stop and ask, and prompt-only consistency is the
   user's labelled choice (DEC-117). Walked live on the free route for $0.00 (DEC-125).
+- **AI Story phase 3** (steps 8–9) is **done**: episode 1's script (E1–E4: a beat sheet, one call per body
+  scene, hook/cliffhanger/teaser, a consistency check) and storyboard (deterministic fast shots or T1, 2–4 per
+  scene), timed in Python from a word-budgeted model reply, plus opt-in real-voice measurement kept as phase 4's
+  line audio. Episode approvals live on the episode documents, never on the story (DEC-129); episode N ≥ 2 waits
+  for phase 5's memory step (DEC-130). Live Tier-2 walked by me at 375 px, one round of majors fixed (episode
+  length, storyboard timing against the episode-level window pass), **acknowledged by the human 2026-09-27**;
+  merged to `main` and deployed, **not yet pushed**.
 
 ## Next, in order
-1. **Phase 3** — episode writer: script (E1–E4), storyboard (T1), timing.
-2. **Phase 4** — assets, Tier-1 renderer, metadata pack (**MVP**), with the
+1. **Phase 4** — assets, Tier-1 renderer, metadata pack (**MVP**), with the
    generation cache that never loses a paid generation (DEC-106 follow-up).
-3. **Phase 5** — series memory, audience steering, per-scene re-edit, remaining styles.
-4. **Phase 6** — Tier 2/3 video, local ComfyUI workflows, paid estimates end to end.
-5. **Phase 7** — reference-video import.
+2. **Phase 5** — series memory, audience steering, per-scene re-edit, remaining styles.
+3. **Phase 6** — Tier 2/3 video, local ComfyUI workflows, paid estimates end to end.
+4. **Phase 7** — reference-video import.
 Carried alongside: the Settings per-task route selector (DEC-112); the clip-upload token-before-spool fix; the deferred paid Tier-2 step of phase 0; a dependency pass
 (extras, lockfile, audit, setuptools ≥ 83); `jobs.json` atomic write and
-`needs_upload` at restart; tests isolated from a real `.env`.
+`needs_upload` at restart; tests isolated from a real `.env`; phase 3's own
+follow-ups (a garbled French accent with no code fix, storyboard/script
+re-timing after an edit, T1 occasionally under-shooting a scene's shot
+count — see `.claude/CHECKPOINT.md`).

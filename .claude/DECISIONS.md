@@ -2469,3 +2469,227 @@ a new portrait remakes the sheets derived from it.
 two places with a night variant, a prop, an 8-episode arc → `ready`, $0.00, no paid call. The voice listening is
 the human's.
 **Consequence.** One defect (voice age) and four polish issues were found and fixed during the walk.
+
+## DEC-126 — Timing is computed in Python, never by the model
+**Context.** Spec §4.1 forbids the model from writing a duration, timestamp or path; nothing before phase 3
+checked that this rule actually held.
+**Decision.** `clipping/aistory/timing.py` is pure and stdlib-only: a line's duration comes from measured audio
+when it exists and from the template's per-language rate otherwise. Every LLM prompt for the script and the
+storyboard receives a word or shot-count budget, never a duration to state.
+**Consequence.** A prompt's schema has no duration field to omit by accident; every timing bug is a Python bug,
+testable with no model call at all.
+
+## DEC-127 — The deterministic estimate is chars × the language's rate; French measured at 0.070 s/char
+**Context.** A line needs a duration before any audio exists, and again after it, until it is next spoken by its
+actual pinned voice.
+**Decision.** `estimate_line` = `len(text) × RATE_PER_CHAR[language]`; French is measured (0.070 s/char on three
+Edge samples, phase-3 stage 0; corroborated live at +0.6 % against 15 real lines in stage 13, A-055), English is
+authored and unmeasured (A-056). The timing source (`estimated` / `tts_word_timestamps` / `audio_duration_only`)
+is stored per line, so a later measurement or a text edit knows what it can still trust.
+**Consequence.** A script can always be timed, with or without real audio; the duration bar labels which kind it
+is showing.
+
+## DEC-128 — `serial_60s_v1` (55–80, target 60, tighten above 75) and `serial_90s_v1` (75–100, target 85) both ship
+**Context.** Spec §6.2/§2.7 disagreed with the brief on the window (55–80 vs 55–75); the human's answer 2
+(2026-09-27) settled it.
+**Decision.** Both templates ship as data (`templates/episodes/serial_60s_v1.json`, `serial_90s_v1.json`),
+validated (`episode_template_v1`); `story_bible_v1.episode_template_id` is an enum of the shipped ids, not a free
+string. The template is chosen per story and, once any episode has a script, fixed for the whole story.
+**Consequence.** Every episode of a story shares one pacing target; switching template mid-season is not offered.
+
+## DEC-129 — Episode approvals live on the episode documents, never on the story
+**Context.** The story's `approvals` is a closed six-key schema and `status` a contiguous prefix (`store.py`); an
+episode is edited far more often than a season is re-planned.
+**Decision.** `script.json` and `storyboard.json` each carry their own `approved_at` (the script also
+`approved_anyway`). A script approves with a complete document and a consistency report that is fresh (checked
+against the current revision) and passed, or a recorded approve-anyway; a storyboard approves with an approved
+script, every scene planned and current against it, and no outdated prompts. Any edit or regenerate that changes
+a script clears both approvals and stales the report; a storyboard edit clears only its own.
+**Consequence.** Editing episode 1 never touches `story.status`, which stays `ready` throughout (RC-E2); each
+episode approves independently of every other.
+
+## DEC-130 — Phase 3 writes episode 1 only; episode N ≥ 2 waits for episode N−1's recap in series memory
+**Context.** Spec's series-memory step (phase 5) is what would give E3 something true to recap; without it a
+"recap" scene would be invented.
+**Decision.** `episode_context` refuses ep ≥ 2 (script, storyboard and their estimates) until
+`series_memory.recaps["ep{N-1:02d}"]` exists, naming "approve episode N−1 and run the memory step (it arrives in
+phase 5) first."
+**Consequence.** Only episode 1 can be produced this phase; the E3 recap prompt itself is built and
+golden-tested now, ready for phase 5 to call.
+
+## DEC-131 — A script is one resumable job (E1 → E2×N → E3 → E4), saved after every call, under a predictive
+30-minute step budget
+**Context.** The season precedent (one job, no time cap) suits eight independent calls; a script is up to ~14
+calls with the free tier's 1–100 s latency swings (DEC-091), and it holds the app's one worker slot.
+**Decision.** `EPISODE_STEP_BUDGET_SECONDS = 1800`, checked predictively before every call (a call starts only if
+it can still finish inside the budget from the elapsed time so far); reaching it ends the job failed, naming
+what is left, and "Continue writing" resumes exactly there. Every scene stays independently regenerable
+afterwards.
+**Consequence.** A slow free-tier run degrades to "finish it in a second click" rather than blocking the render
+queue indefinitely.
+
+## DEC-132 — Shots name entities by tags; a per-character handle replaces the tag in the English action; no
+entity's real name ever reaches an image prompt
+**Context.** "She"/"him" would be ambiguous with more than one character in a shot; the prompt still has to read
+as natural English.
+**Decision.** T1 and the fast path both write `@char_x` / `#place_y:variant` / `%prop_z` tags inside the action;
+`shots.py` resolves them to a handle (the descriptor's own leading noun phrase, disambiguated with a signature
+item on collision) for reading, and strips every name before the image prompt is built (the same logic
+`refimages` already used, lifted to `names.py`). The reference list is always resolved regardless of consistency
+mode; whether phase 4 sends it is a later decision.
+**Consequence.** An edited action keeps the same tag grammar, checked by the same rules T1's own reply is
+checked against; a name typed into a manual edit is refused, not silently sent to an image model.
+
+## DEC-133 — The fast storyboard is deterministic and inline; the same rule pass runs on both paths; T1 writes
+2–4 shots per scene
+**Context.** Spec §4.2 said "1–2 shots"; the brief and spec §2.8 said 2–4; the human's answer (chat, 2026-09-27)
+took the brief.
+**Decision.** `build_fast` derives shots from a scene's own lines, characters and function with no external call
+(DEC-109); `rule_pass` (no back-to-back repeated framing, a reaction close-up roughly every three scenes, a
+push-in on peaks) runs identically whether the shots came from the fast path or from T1. "Fast (no calls)" and
+"Plan shots" sit in the same button row; "Plan remaining with T1" re-plans only the scenes still missing, stale,
+or built fast.
+**Consequence.** A storyboard is never left half-conforming to the visual rules just because one scene was
+planned differently from its neighbours.
+
+## DEC-134 — E4 (the consistency check) has its own input ceiling
+**Context.** Every other episode prompt fits the story's ordinary 1,200-token pack; E4 compares the whole script
+against the bible, cast, places and series memory at once.
+**Decision.** `E4_INPUT_BUDGET` is sized on a 12-scene French worst-case fixture (measured ~1,009 of a first-cut
+1,200 budget, then rebudgeted to 3,900 once every episode prompt was remeasured on live-sized data, DEC-138)
+rather than reusing `context.check_budget`'s general cap.
+**Consequence.** A long episode's consistency check still runs in one call; every other prompt stays inside the
+shared 1,200-token pack.
+
+## DEC-135 — Real-voice measurement is opt-in, uses only the pinned voice, and its audio is kept as phase 4's
+line audio
+**Context.** Measuring every line by default would spend TTS quota (and, on a paid voice, money) before the
+script is even settled; a wrong voice must never be tried as a silent fallback (DEC-023).
+**Decision.** `params.measure_voices` on the script step measures only a line whose timing is still estimated, or
+whose text or pinned voice changed, or whose audio is missing, through that character's pinned one-link chain
+alone; a failing voice fails only its own lines, naming the character, and nothing else is tried. The audio and
+its sidecar are written under `episodes/epNN/assets/voice/` and read again by phase 4's renderer.
+**Consequence.** A script can be approved and re-approved on estimated timing alone, at $0, with measurement
+added only when the human asks for it.
+
+## DEC-136 — Phase 3's Tier-2 was walked by me at 375 px on the live server; the human acknowledges it
+**Context.** The human's answer 4 (2026-09-27), the same arrangement as phases 1 and 2.
+**Decision.** I ran the plan §4 script against the live story after the merge and the rebuild, recorded every
+finding in `CHECKPOINT.md`, fixed the majors and the UI issues the human chose (two rounds for the length fix),
+and re-walked the affected steps after each fix.
+**Consequence.** Live episode 1 stands as it was left after the human's "Acknowledged, go to 14" (2026-09-27):
+the pre-fix script and a storyboard whose stored shot durations predate the F7 timing fix, both approved, until
+the episode is next re-timed, re-planned or rewritten.
+
+## DEC-137 — A script's line ids are fixed blocks of four per scene, never resequenced
+**Context.** Regenerating one scene must not be able to make another scene's line ids drift, because measured
+audio is filed under a line's id (`episode_asset_path`) — a drifted id would silently attach the wrong audio to
+the wrong text.
+**Decision.** `schemas.line_id_for` gives every scene a stable four-id block (`l00`–`l51`) regardless of how many
+lines it actually uses; `episode_script_errors` checks the assignment.
+**Consequence.** A scene can be regenerated with a different line count without disturbing any other scene's
+measured audio.
+
+## DEC-138 — Every episode prompt's cap is measured on live-sized data, at worst case + 15 %
+**Context.** The spec's starting caps (E1 600, E2 300, E3 350, E4 350, T1 250) are what DEC-107's method starts
+from, not what it ends at; E3 alone measured ~1,009 of its first 1,200-token budget on an 8-scene copy of the
+live story.
+**Decision.** Every episode prompt (E1, E2, E3, E4, T1, T1r) was remeasured on a 12-scene French worst-case
+fixture and its cap set to that measurement plus 15 %: E1 1,270 input / 1,450 output, E2 1,660 / 600, E3 2,360 /
+720, E4 3,900 / 800 (kept from 3,523), T1 1,270 / 580, T1r 1,410 / 150.
+**Consequence.** A worst-case French episode has headroom under every cap without the model's replies being able
+to grow unbounded.
+
+## DEC-139 — E1 asks for an exact, numbered scene list; `validate_e1` accepts any count legal for the episode
+**Context.** The stage-12 bench found both free links under-generating against a stated range ("8–12 scenes"): a
+model given a range does not reliably hit it.
+**Decision.** `timing.episode_slots` computes the exact legal scene count for the episode (60 s ep 1: hook + 8
+body + cliffhanger = 10; 90 s ep 1: 12; ep ≥ 2 adds the recap slot); `build_e1` asks for exactly that many,
+numbered; `validate_e1` still accepts any count the spec's range and slot positions allow, so a reply that
+legally differs is not refused over a formality.
+**Consequence.** Live re-bench after the change: Gemini went from 0/3 to 3/3 on E1; NVIDIA 1/3 (still short —
+recorded as a hazard, not chased this phase).
+
+## DEC-140 — `shot` stays in `workflow.LATER_TARGETS`, except its own `:plan` target
+**Context.** Spec §9.2 keeps `shot:<ep>:<shid>` (a single shot's future asset target) and
+`shot:<ep>:<shid>:video` for phases 4 and 6; only re-planning a shot's framing exists yet.
+**Decision.** `regenerate.parse_target` folds `shot:<ep>:<shid>:plan` into the real grammar now; every other
+`shot:` form still answers `later_phase`, unchanged.
+**Consequence.** Phase 4/6 add their own shot targets without this phase's grammar having claimed the whole
+namespace.
+
+## DEC-141 — A camera motion the style's rules fix for a scene's function is refused on edit, not overridden
+**Context.** `motion_rules.tier1` already picks a motion by function/framing (push-in on peaks, and so on) for
+both T1 and the fast path; a manual PATCH could otherwise contradict a rule the style itself states as fixed.
+**Decision.** Editing a shot's `camera_motion` where the style's rules pin one for that function returns 400,
+naming the fixed value, rather than accepting the edit and quietly drifting from the style.
+**Consequence.** A style's camera language stays consistent across every shot of that function, even under
+manual editing.
+
+## DEC-142 — `timing.episode_pass` is the single timing source for script and storyboard; a scene with shots is
+never shorter than its shot count's floor
+**Context.** Tier-2 found `shots.py`'s own scene-level timing ignoring the episode-level window pass (the hold
+extension when an episode runs under, the tightening when it runs over): s01/s04/s10's shots came out 1.0 s
+short of the script's own scene durations (F7, major).
+**Decision.** `episode_pass(script, storyboard=...)` becomes the one function both script and storyboard timing
+read; a scene whose shot count needs more than `n × min_shot_s` gets the shortfall as a held tail, counted
+inside the existing 1.0 s hold-extension cap; a tightened episode never tightens a scene below that floor.
+**Consequence.** Script timing can now depend on the storyboard's own shot count — a scene planned with more
+shots may hold slightly longer than it would on script alone; verified on the copy at 0.000 s difference between
+script and shot durations on every scene, fast and T1 alike.
+
+## DEC-143 — E1 aims for the upper half of each slot; E2 asks a two-sided word range with one retry, then accepts
+**Context.** Episode 1 first came out at 38.6 s, under the 55–80 s window: E1 was picking low targets inside its
+slots, and E2's word budget was a ceiling only, so scenes ran short with nothing pushing them up.
+**Decision.** E1's ask targets the upper half of each range; `script._normalize_episode_targets` then raises
+every scene's target toward its slot's high end until the episode sums to the template's target (never
+lowering, never exceeding a slot). E2 asks for "not fewer than lo, not more than hi" words (lo ≈ 0.7 × the
+budget); a reply outside `[⌈budget/2⌉, ⌊1.5×budget⌋]` is retried once, then accepted regardless, logged — a word
+count never fails a scene.
+**Consequence.** Two rounds were needed: round 1 fixed the length but let E2 overshoot 1.5–2.8×; round 2's
+ceiling and softer ask brought live samples to 55.0–71.2 s with 0–4 flags, all inside or at the edge of the window.
+
+## DEC-144 — French elisions are repaired deterministically after every model reply, never by retrying the call
+**Context.** The free model drops an elision's apostrophe often enough to be visible in a live walk (F1); a
+retry costs a call and is not guaranteed to fix it either.
+**Decision.** `prompts.repair_fr_elisions` applies a fixed rule (l/d/j/c/n/m/s/qu + space + a vowel or h → the
+elided form) to every model-written field of E1–E3 before validation; a text that already holds an apostrophe is
+left alone, and "t il" is never touched. Phase-1/2 prompts and the shared system template are untouched.
+**Consequence.** Zero dropped elisions across every later live sample; a separate, unrelated diacritic garbling
+(F2, "trâne" → "tr¤ne") has no equivalent fix and is carried forward as a follow-up.
+
+## DEC-145 — The script's estimate chip shows the number of calls E1's own exact ask will make; its message's
+range is the worst case
+**Context.** The chip first showed the range's top end (12, for a body-high-9 episode) against an exact ask of
+11 — technically honest but needlessly alarming next to a button that would make exactly 11 calls.
+**Decision.** The chip's `llm_calls` is `workflow.script_units`'s exact count for the episode's own slots; the
+estimate message still names the low–high range so the tooltip explains why the number could differ for a
+different-length episode, and lists any paid link skipped rather than reached.
+**Consequence.** Matches DEC-139's exact-ask design: what the chip promises is what "Write" actually spends.
+
+## DEC-146 — The Ready card's "story is ready" state follows the server's own derived status
+**Context.** A voice regeneration on an already-`ready` story clears that character's cast approval (DEC-123)
+and so the derived status, without ever touching `approvals.season` directly; the card had been keyed on
+`approvals.season` and kept claiming "ready" after that (F9).
+**Decision.** The dashboard reads `story.status === "ready"` (`store.derive_status`'s own answer) for the Ready
+card and the Open-episode link, instead of inspecting `approvals.season` on its own.
+**Consequence.** The card falls back honestly the moment any group approval it depends on clears, exactly
+mirroring what the episode steps themselves would refuse.
+
+## DEC-147 — "Measure with real voices" stays disabled whenever only the consistency check is missing or stale
+**Context.** The runner fills whatever a script is missing before it does anything else, including a stale E4 —
+so pressing Measure on a script whose only gap is the check would trigger a consistency call the Measure
+button's own estimate never showed (found during the fix round).
+**Decision.** The button (and its estimate fetch) stays disabled while `episode.state.report` is `"stale"` or
+`"none"`, with the hint "Check the consistency first.", exactly like Approve above it.
+**Consequence.** Every call a user's click can trigger is one the click's own chip already named — never a
+hidden extra one.
+
+## DEC-148 — The fix round's changes were verified on a copy of the live story, not on the story itself
+**Context.** The human's choice (2026-09-27): don't risk the one real fixture mid-fix, and the free-tier evidence
+needed was already about Gemini alone.
+**Decision.** Every round's live check ran on a scratchpad copy (`run_cli.py`, `GOOGLE_API_KEY` only,
+`usage.json`/`spend.json` redirected so the real files never moved) rather than on `b1104ec66b05` itself.
+**Consequence.** Live episode 1 still carries the pre-fix 39.7 s script and a storyboard whose stored shot
+durations predate the F7 fix, both left approved as the human chose; re-timing, re-planning or rewriting it will
+pick up every fix at once.

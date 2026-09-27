@@ -135,6 +135,11 @@
   ~1,000, Groq 1k, OpenRouter free 50/1,000) are enough for one episode's ≈ 25 LLM
   calls. Phase 1 evidence only: steps 1–4 took 15 calls on Gemini's free tier on
   2026-09-26 with no refusal. UNCONFIRMED for a whole episode.
+  **Update (phase 3, stage 13):** the exact shape is E1 + E2 × speakable body scenes + E3 + E4, plus T1 × scenes
+  (≈ 20–21 calls for a 60-second first episode), plus any rechecks or regenerations on top. The live Tier-2 walk
+  made 23 calls end to end (the full write, one recheck, one scene regenerate, T1 planning), all on Gemini's free
+  tier, no refusal — comfortably under the ~1,000/day limit. Still UNCONFIRMED over a full day's use across
+  several episodes.
 - **A-042** — (spec §14) Prompt-only consistency (locked prompt block + seed reuse)
   is acceptable as an explicit, labelled degraded mode when no reference-capable
   editor is available. Phase 1 only records the choice. UNCONFIRMED.
@@ -174,7 +179,51 @@
 - **A-054** — K1 follows a design reference's colours and accessories but bends a reference that conflicts
   with the style (a human-looking girl for a fruit_drama character) toward the style. Seen once. UNCONFIRMED.
 
+- **A-056** — English speech runs at 0.065 s/char. Authored, never measured — no episode has been written in
+  English; every phase-3 fixture and live walk is French. UNCONFIRMED.
+- **A-057** — An E-prompt's JSON validity holds up across the free providers. Bench (stage 12, seeded copy, 3
+  reps): `gemini/gemini-3.5-flash-lite` E1 0/3 @ 19 s ("expected 8–12", 7 scenes), E2 3/3 @ 8.3 s, T1 3/3 @ 1.5 s;
+  `nvidia/nemotron-3.5-lightning` E1 0/3 (6 scenes + `InternalServerError`), E2 3/3 @ 6.4 s, T1 0/3
+  (`InternalServerError`, one 300 s timeout). After stage 12b's exact-count fix, E1 re-bench: Gemini 3/3 @ 3.8 s,
+  NVIDIA 1/3 (a duplicated cliffhanger, a truncated reply). The live Tier-2 walk: 23/23 LLM calls first-attempt OK
+  on Gemini. The fix round's re-check on a copy: T1 had 3/10 first replies rejected (a shot short of the range, or
+  a tag not among the scene's subjects), one scene (s04) failed twice before "Plan remaining" finished it on a
+  later call. Reading across all of this: Gemini's free tier is reliable enough to carry a whole episode; NVIDIA's
+  free tier is not usable for story calls at all (see A-062). UNCONFIRMED as a general free-provider claim — it
+  holds for the one free provider actually used.
+- **A-058** — Descriptor handles (the leading noun phrase used in place of a character/place/prop's tag) read
+  well to an image model. Nothing generates an image from a handle yet — that is phase 4's job — so this stays
+  exactly as unverified as the plan recorded it. UNCONFIRMED.
+- **A-059** — `serial_90s_v1`'s numbers (window 75–100, target 85, tighten above 95, body 5–10 × 6–10) are
+  authored, mirroring `serial_60s_v1`'s shape. No 90-second episode was written this phase — every Tier-2 walk
+  used the 60-second template. UNCONFIRMED.
+- **A-061** — The free Gemini flash-lite LLM sometimes drops a French elision's apostrophe and occasionally
+  garbles a diacritic in its raw reply (seen live: "trâne" came back "tr¤ne"). `prompts.repair_fr_elisions` fixes
+  the first deterministically after every reply (DEC-144); the second has no code path treating it at all (F2).
+  Seen on the live walk and again on the fix round's copy. UNCONFIRMED how often either happens over more text.
+- **A-062** — The NVIDIA free link cannot reliably serve a story call: its registry default timeout is 330 s,
+  above `STORY_CALL_BUDGET_SECONDS` (300 s), so a slow reply is cut by the story budget before NVIDIA's own client
+  would even give up; the bench also saw plain `InternalServerError` on E1 and T1 independent of timing. Not
+  chased this phase — recorded as a hazard rather than a fix. UNCONFIRMED whether a shorter registry timeout or a
+  longer story budget would resolve it.
+- **A-063** — Gemini's free TTS answered 429 once in 5 lines during the stage-13 measurement walk; the existing
+  retry in the TTS path succeeded on the second attempt. UNCONFIRMED whether that rate holds over more lines or
+  more days.
+
 ## Confirmed
+- **A-055** — French speech runs at 0.070 s/char. *Confirmed*: three Edge samples at stage 0 (172 chars in 12.03 s
+  average across three voices), corroborated live in stage 13's measurement walk — 15 real lines measured
+  39.704 s of audio against 39.48 s the estimate had predicted, a +0.6 % error.
+- **A-060** — `EPISODE_STEP_BUDGET_SECONDS = 1800` (30 minutes) covers a whole script, and a fast-tier T1 storyboard
+  call, on Gemini's free tier. *Confirmed by the live walk*: the script job ran 20:08:54→20:09:15 (about 21 s of
+  calls); T1 storyboard jobs measured 61–66 s wall time across the walk and the fix-round copy checks, with the
+  single slowest T1 call at 47 s — every one comfortably inside both the 300 s per-call budget and the 1,800 s
+  step budget.
+- **A-064** — `data/usage.json` counts only media/TTS calls, never LLM calls — pre-existing behaviour, not
+  introduced by phase 3. *Confirmed by design*: `clipping/aistory/steps/llm_call.py` records no usage counter,
+  and only the image/TTS adapters touch the free-tier counters. This makes the phase-3 Tier-2 script's "usage.json
+  moved only by free counters" check trivially true for the LLM side; recorded in the stage-13 action log as a
+  surprise finding, not a bug.
 - **A-040** — (spec §14, measured 2026-09-25 on the author's two reference videos)
   Shot mean 3.2–4.1 s, reaction cuts ≥ 0.8 s, lines of 3–8 words, 1–2 places per
   episode, a continuous music bed, single-word pop captions in the fruit-drama
