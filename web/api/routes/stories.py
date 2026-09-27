@@ -1210,9 +1210,10 @@ async def estimate(story_id: str, step: str, target: Optional[str] = None,
 
     Phase 3 (``?ep=``, the step's own refusals first: see ``_episode_step``):
     ``script`` answers the LLM steps' estimate of what is missing
-    (``workflow.script_units``) with ``llm_calls`` (the upper end),
-    ``llm_calls_range``, ``calls_breakdown {E1, E2, E3, E4}`` (E2 from the
-    beat sheet once written, else the template's body range: its upper end),
+    (``workflow.script_units``) with ``llm_calls`` (the calls E1's exact ask
+    makes; the message names the range), ``llm_calls_range`` (the worst case
+    a legal beat sheet can reach), ``calls_breakdown {E1, E2, E3, E4}`` (E2
+    from the beat sheet once written, else the episode's own body slots),
     ``skipped_paid [{link, reason}]`` and ``measure`` -- with ``?measure=1``,
     what measuring the lines with the pinned voices would do
     (``script.measure_estimate``), else null. ``est_usd`` stays 0.0: LLM
@@ -1291,8 +1292,8 @@ def _episode_estimate(stories, story, step, ep, *, measure, env) -> dict:
     if step == "script":
         low, high = units["llm_calls_range"]
         label = None if low == high else f"{low}–{high}"
-        body = _llm_estimate(step, high, env=env, label=label)
-        body.update(llm_calls=high, llm_calls_range=[low, high],
+        body = _llm_estimate(step, units["llm_calls"], env=env, label=label)
+        body.update(llm_calls=units["llm_calls"], llm_calls_range=[low, high],
                     calls_breakdown={name: units[name] for name in ("E1", "E2", "E3", "E4")}, measure=block)
     else:
         body = _llm_estimate(step, units["t1_calls"], env=env)
