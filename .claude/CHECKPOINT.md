@@ -1,10 +1,10 @@
-## CURRENT STATE — AI Story **phase 2 is DONE** (pending the human's voice listening). Next: **phase 3**.
+## CURRENT STATE — AI Story **phase 2 is DONE** and pushed. Next: **phase 3**.
 - **Stages 0–12 done** on `feat/ai-story-phase-2`, ff-merged to `main` (last code commit `d20fa28`), deployed
-  (container rebuilt at 0 jobs). **Not pushed** — push after the human's voice check.
+  (container rebuilt at 0 jobs). **Pushed** 2026-09-27 at the human's word ("Push it we'll fix it later").
 - **Tier-1 at close:** local **3737 passed / 1 skipped**; CI env **3172 passed / 535 skipped**; compileall clean;
   vite build green. Baseline was 2846 / 2368. Never run the suite with a built `web/dashboard/dist/` on disk.
 - **Tier-2:** walked live by me at 375 px (table below): PASS after one fix (voice age) and a polish round; the
-  one open item is the human playing the three voice samples on the phone (DEC-125).
+  voice listening on the phone is **deferred by the human** ("we'll fix it later") — still open.
 - **Plan:** `~/.claude/plans/ai-story-phase-2-cast-places-season.md`. Prompt: `03-phase-2-cast-places-season.md`.
 - **Decisions:** DEC-117…DEC-125. **Assumptions:** A-050…A-054. **Next free ids:** DEC-126, A-055.
 - **Docs:** `docs/AI_STORY.md` steps 5–7; VISION updated.
