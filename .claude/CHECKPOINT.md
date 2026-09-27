@@ -1,3 +1,60 @@
+## IN PROGRESS — AI Story **phase 3** (episode writer: script, storyboard, timing)
+- **Started:** 2026-09-27 by the human ("Phase 2 seems to have been worked on, check an go with phase 3").
+  Task class: FULL. Phase 2 checked: closed and pushed (`4280333` == `origin/main`).
+- **Current phase:** 5 IMPLEMENT — stage 0 done (this commit); next is stage 1. Plan **approved in chat**
+  ("Go", 2026-09-27).
+- **Plan:** `~/.claude/plans/ai-story-phase-3-episode-writer.md` (stages 0–14, riskiest = stage 6, the
+  script/storyboard step runners). **Read it first**: it holds the design, the stage table and the Tier-2 script.
+- **CLARIFY closed (human, 2026-09-27):** (1) episode 1 now, episode N ≥ 2 waits for ep N−1's recap in series
+  memory; (2) window 55–80, target 60, tighten above 75; (3) one script job E1→E2×N→E3→E4; (4) Tier-2 walked by
+  me at 375 px, the human acknowledges.
+- **Checkpoint:** known-good `4280333` (clean, = `origin/main`); this header is committed on top of it as the
+  stage-0 commit.
+- **Tier-1 baseline (2026-09-27, at `4280333`):** local **3737 passed / 1 skipped**; CI env **3172 passed / 535
+  skipped**; `compileall clipping web tests main.py tools` clean; `vite build` green (scratch outDir). The
+  `web/dashboard/dist/` on disk is the compose anonymous-volume mount point (empty, root-owned): leave it.
+- **Where the work happens:** worktree `.claude/worktrees/ai-story-phase-3`, branch `feat/ai-story-phase-3`
+  (from the stage-0 commit; `node_modules` symlinked, excluded in `info/exclude`). `main` and the container stay
+  at the checkpoint until stage 13. **A fresh session reads the branch's copy of this file** — it is the current one.
+- **Brief:** `.claude/plans/ai-story/04-phase-3-episode-writer.md`; spec §2.7–2.8, §3 steps 8–9, §4.1–4.3
+  (E1–E4, T1), §5 (shot skeleton), §6.2–6.4, §9.2, §10 (EpisodeStudio).
+- **Next free ids:** DEC-126, A-055. **Open questions:** none.
+- **Context map (EXPLORE, 2026-09-27; detail in the plan §0):** the grammar is pre-registered
+  (`workflow.LATER_STEPS/APPROVALS/TARGETS` hold `script, storyboard, scene, hook, cliffhanger, teaser, shot`);
+  `ep` is plumbed but unused; episode docs, episode approvals (on the docs — the story's `approvals` is a closed
+  6-key schema), `episode_script_v1`/`storyboard_v1`, E1–E4/T1, `timing.py`, the shot-tag resolver,
+  `templates/episodes/`, EpisodeStudio + tabs and CLI `--ep/--fast` are all missing. Only a per-call 300 s budget
+  exists. Measured: French Edge speech 0.070 s/char on the three voice samples.
+
+### Stage ledger (phase 3)
+| S | Stage | State |
+|---|---|---|
+| 0 | checkpoint + baseline + worktree | **done** (this commit) |
+| 1 | episode templates + script/storyboard schemas | — |
+| 2 | timing engine | — |
+| 3 | episode documents in the store | — |
+| 4 | prompts E1–E4, T1, T1r + context | — |
+| 5 | shot resolution + fast storyboard + rule pass | — |
+| 6 | step runners (RISKIEST) | — |
+| 7 | opt-in voice measurement | — |
+| 8 | workflow + API | — |
+| 9 | CLI | — |
+| 10 | dashboard: Tabs + EpisodeStudio script pane | — |
+| 11 | dashboard: storyboard pane + preview placeholder | — |
+| 12 | E-prompt bench (free links only) | — |
+| 13 | merge, deploy, Tier-2 (me at 375 px, human acks) | — |
+| 14 | docs + decisions | — |
+
+### Regression contract (phase 3)
+RC-P1…P11, RC-S1…S4 and RC-T1…T3 (tables below) stay in force, plus:
+| ID | Must keep working | Proven by |
+|---|---|---|
+| RC-E1 | Steps 1–7 unchanged | `test_stories_api.py`, `test_story_steps.py`, phase-2 step/API tests unedited, except tests asserting `script`/`storyboard`/`scene…` answer `later_phase` (changes on purpose; each edit named in the action log) |
+| RC-E2 | Episodes never change the story's `approvals` or `status` | new tests (stages 3, 8) + phase-2 status tests unedited |
+| RC-E3 | Render layer and the legacy assembler untouched | `git diff --stat 4280333 -- clipping/studio clipping/story` empty |
+| RC-E4 | No paid LLM call from an episode step without `allow_paid` | stage-6 tests + the DEC-115 tests unedited |
+| RC-E5 | Reference images keep stripping names exactly as before | `test_story_refimages*.py` unedited after the helper lift |
+
 ## RESUME HERE (saved 2026-09-27)
 - **Repo:** `main` == `origin/main` (this commit), tree clean. Phases 0, 1 and 2 of AI Story are merged and pushed.
 - **Deployed:** the container runs `main`'s code (last code commit `d20fa28`; later commits are docs only), health OK,
