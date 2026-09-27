@@ -41,6 +41,16 @@
   the affected steps. A = F7 (Opus: shots.py/timing.py/steps/storyboard.py/episode_common.py); B = F3 + F1 (Sonnet:
   prompts.py, steps/script.py, steps/episode_regenerate.py); C = F5/F6/F8/F9 UI + F11 (Sonnet: ScriptPane.jsx,
   index.css, NewStoryWizard.jsx, workflow.script_units).
+- **Fix round status (21:30 UTC):** A (F7), B (F3 + F1) and C (UI + F11) merged by cherry-pick + my route fix
+  (`6d44338`, chip shows 11, range 8–12). Tier-1 on the merged branch: both envs exit 0 (counts lost to `-qq` —
+  pyproject addopts already has `-q`; never pass `-q` again), compileall clean, scratch build green. Live check on
+  a COPY (scratchpad `verify/`, `run_cli.py` sets only GOOGLE_API_KEY from `data/settings.json`, usage/spend
+  redirected): 71.2 s and 68.4 s inside the window, 0 dropped elisions — but E2 overshoots its range (1.5–2.8×)
+  → 10–12 scene_over/trim_line flags per script. **Human: "One more round"** — E2 two-sided range, drop the
+  "2–3 lines" nudge, ceiling at 1.5× hi retried once then accepted; agent B on it; then 2 live samples, merge.
+- **Seen on live, not mine:** a `style_preview` job ran on b1104ec66b05 at 20:42:52 from the dashboard (host
+  bridge IP; `style` POST 409 then `style_preview` 201): 3 preview images replaced, job awaiting approval, story
+  still `ready`, style approval untouched. Left as is; tell the human.
 
 ## RESUME HERE (session paused by the human, 2026-09-27)
 - **Where:** worktree `.claude/worktrees/ai-story-phase-3`, branch `feat/ai-story-phase-3` (local only, NOT pushed),
