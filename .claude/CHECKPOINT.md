@@ -1,3 +1,22 @@
+## RESUME HERE (saved 2026-09-27)
+- **Repo:** `main` == `origin/main` (this commit), tree clean. Phases 0, 1 and 2 of AI Story are merged and pushed.
+- **Deployed:** the container runs `main`'s code (last code commit `d20fa28`; later commits are docs only), health OK,
+  0 jobs. Reach it on the tailnet at `http://main-network-interface.tail01346d.ts.net:8000` (no token, DEC-105).
+- **Live data:** story `b1104ec66b05` "L'Île Tentafruit" (FR, fruit_drama, prompt-only consistency) is `ready`:
+  cast Kiwilo / Mangella / Broccolia (voices Henri / Denise / Vivienne), places Le Parloir des Secrets (+ night) and
+  La Piscine de la Trahison, prop Téléphone en noix de coco, an 8-episode arc. Use it as phase 3's fixture.
+- **Open, deferred by the human:** (1) play the three voice samples on the phone ("we'll fix it later");
+  (2) phase 0's one paid Tier-2 call (est. $0.03, needs budget and an explicit yes).
+- **Open task chip:** "Check the token before clip uploads spool" (clip upload routes spool before the token check).
+- **Worktrees:** `.claude/worktrees/ai-story-phase-1` and `ai-story-phase-2` are merged into `main` and can be
+  removed; `eager-chaplygin-e0a0a3` (unmerged) and `magical-greider-2955e5` predate this work — not reviewed, leave
+  them. `.claude/launch.json` (git-excluded) holds the keyless throwaway backends `phase1-throwaway` (:8010) and
+  `phase2-throwaway` (:8011).
+- **Next:** phase 3 (episode writer) — prompt `.claude/plans/ai-story/04-phase-3-episode-writer.md`; start at
+  LOAD under `~/.claude/CLAUDE.md`. Next free ids DEC-126, A-055.
+
+---
+
 ## CURRENT STATE — AI Story **phase 2 is DONE** and pushed. Next: **phase 3**.
 - **Stages 0–12 done** on `feat/ai-story-phase-2`, ff-merged to `main` (last code commit `d20fa28`), deployed
   (container rebuilt at 0 jobs). **Pushed** 2026-09-27 at the human's word ("Push it we'll fix it later").
