@@ -57,7 +57,8 @@
   approved/approved; clips page 7/7 videos 200 (RC-P1); `usage.json` unchanged by the copies; no `spend.json`.
   Live ep 1 kept as the human chose: still the pre-fix 39.7 s script; its stored storyboard durations predate F7
   (s01/s04/s10 1.0 s short) until the episode is next re-timed/re-planned or rewritten.
-  **Waiting on: the human's Tier-2 acknowledgement → then stage 14.**
+  **Tier-2 ACKNOWLEDGED by the human (chat, 2026-09-27 ~22:00 UTC: "Acknowledged, go to 14"); live ep 1 stays as
+  it is.** Stage 13 closed. Stage 14 (docs + decisions) in progress on `feat/ai-story-phase-3`.
 - **Seen on live, not mine:** a `style_preview` job ran on b1104ec66b05 at 20:42:52 from the dashboard (host
   bridge IP; `style` POST 409 then `style_preview` 201): 3 preview images replaced, job awaiting approval, story
   still `ready`, style approval untouched. Left as is; tell the human.
