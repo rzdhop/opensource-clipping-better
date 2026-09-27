@@ -25,10 +25,9 @@ An unknown episode, scene or shot is refused naming it, before any call.
 
 from __future__ import annotations
 
-import re
 import time
 
-from .. import prompts, schemas
+from .. import prompts
 from .. import store as store_mod
 from . import entities, episode_common, llm_call
 from . import script as script_step
@@ -36,31 +35,9 @@ from . import storyboard as storyboard_step
 from .episode_common import SCRIPT_DOC, STORYBOARD_DOC
 from .llm_call import StepFailed
 
-FRAMING_TARGETS = ("hook", "cliffhanger", "teaser")
-
-_EP = re.compile(r"^[1-9][0-9]?$")
-_SCENE = re.compile(schemas.SCENE_ID_PATTERN)
-_SHOT = re.compile(schemas.SHOT_ID_PATTERN)
-
-
-def parse_episode_target(target):
-    """``("scene", ep, scene_id)``, ``("hook"|"cliffhanger"|"teaser", ep)`` or
-    ``("shot", ep, shot_id)`` for an episode target, None for anything else.
-    The shape only (the episode 1..99, the id patterns), never the story."""
-    if not isinstance(target, str):
-        return None
-    parts = target.split(":")
-    if len(parts) < 2 or not _EP.fullmatch(parts[1]):
-        return None
-    ep = int(parts[1])
-    kind = parts[0]
-    if kind in FRAMING_TARGETS and len(parts) == 2:
-        return (kind, ep)
-    if kind == "scene" and len(parts) == 3 and _SCENE.fullmatch(parts[2]):
-        return ("scene", ep, parts[2])
-    if kind == "shot" and len(parts) == 4 and _SHOT.fullmatch(parts[2]) and parts[3] == "plan":
-        return ("shot", ep, parts[2])
-    return None
+# The grammar is ``regenerate``'s, shared with the web layer and the CLI
+# (``regenerate.parse_target`` reads these targets with every other one).
+from .regenerate import FRAMING_TARGETS, parse_episode_target  # noqa: F401 -- re-exported
 
 
 def _noted(note) -> str:

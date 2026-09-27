@@ -285,12 +285,12 @@ def test_approving_the_style_locks_it_once(wf, stories):
 def test_the_phase_one_steps_and_the_later_ones(wf):
     assert wf.PHASE1_STEPS == ("concepts", "bible", "style", "style_preview")
     assert not set(wf.PHASE1_STEPS) & set(wf.LATER_STEPS)
-    assert _refused(wf, "later_phase", wf.refuse_step, "script") == "'script' arrives in a later phase."
+    assert _refused(wf, "later_phase", wf.refuse_step, "assets") == "'assets' arrives in a later phase."
     assert _refused(wf, "not_found", wf.refuse_step, "nope") == "Unknown step 'nope'."
 
 
 @pytest.mark.parametrize("doc,code", [
-    ("script:1", "later_phase"),
+    ("assets:1", "later_phase"),
     ("character:", "not_found"), ("concept", "not_found"), ("nope", "not_found"),
 ])
 def test_the_approval_grammar(wf, doc, code):

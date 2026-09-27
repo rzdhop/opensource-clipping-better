@@ -1,4 +1,4 @@
-"""The story rules of steps 1-4, shared by the API and the CLI (spec 3, 9.1-9.3).
+"""The story rules of steps 1-9, shared by the API and the CLI (spec 3, 9.1-9.3).
 
 ``web/api/routes/stories.py`` (the HTTP face) and ``clipping/aistory/cli.py``
 (``python main.py --ai-story``) both call these functions, so a story is
@@ -33,19 +33,23 @@ import re
 from clipping.providers import generation as gen
 from clipping.providers import registry
 
-from . import defaults, imaging, prompting, refimages, schemas, stylelock, templates, voices
+from . import defaults, imaging, prompting, prompts, refimages, schemas, shots, stylelock, templates, timing, voices
 from . import store as story_store
 from . import uploads as uploads_mod
 from .ledger import CostLedger
 from .steps import concepts as concepts_step
 from .steps import entities as entities_step
-from .steps import llm_call
+from .steps import episode_common, llm_call
 from .steps import regenerate as regenerate_step
+from .steps import script as script_step
 from .steps import season as season_step
+from .steps import storyboard as storyboard_step
+from .steps.llm_call import StepFailed
 
 # ------------------------------------------------------------------ grammar
 
-# Spec 9.1. What phase 1 runs, what phase 2 runs, what comes later.
+# Spec 9.1. What phase 1 runs, what phase 2 runs, what phase 3 runs, what
+# comes later.
 LLM_STEPS = ("concepts", "bible")
 INLINE_STEPS = ("style",)
 PREVIEW_STEP = "style_preview"
@@ -54,22 +58,27 @@ PHASE1_STEPS = LLM_STEPS + INLINE_STEPS + (PREVIEW_STEP,)
 # and the places, the image and voice chains). ``places_proposal`` is the
 # small P0 step that proposes the list the ``places`` step makes.
 PHASE2_STEPS = ("cast", "places_proposal", "places", "season")
+# Steps 8-9 (phase 3): one episode's script (a job: E1, E2 per scene, E3, E4)
+# and its storyboard (a T1 job, or the fast plan, run inline: DEC-109).
+PHASE3_STEPS = ("script", "storyboard")
 LATER_STEPS = (
-    "script", "storyboard", "assets", "render", "metadata", "memory", "feedback",
+    "assets", "render", "metadata", "memory", "feedback",
     "propose-next", "rerender", "fast-track", "import",
 )
 
 # Spec 9.2, approve grammar: "season" bare, the others "<kind>:<id>". Phase 2
-# approves ``character:<id>``, ``place:<id>``, ``prop:<id>`` and ``season``.
+# approves ``character:<id>``, ``place:<id>``, ``prop:<id>`` and ``season``;
+# phase 3 ``script:<ep>`` and ``storyboard:<ep>``.
 LATER_APPROVALS_BARE = ()
-LATER_APPROVALS = ("script", "storyboard", "assets")
+LATER_APPROVALS = ("assets",)
 
 # Spec 9.2, regenerate grammar: every "<kind>:..." target of a later phase.
-# Phase 2's targets are ``regenerate.parse_target``'s; its
-# ``character:<id>:image:extra:<n>`` is still a later phase's.
-LATER_TARGETS = (
-    "scene", "hook", "cliffhanger", "teaser", "shot", "line", "metadata",
-)
+# Phase 2's and phase 3's targets are ``regenerate.parse_target``'s; its
+# ``character:<id>:image:extra:<n>`` is still a later phase's, and so are
+# ``shot:<ep>:<shid>`` (the shot's image, phase 4) and
+# ``shot:<ep>:<shid>:video`` (phase 6): ``shot:<ep>:<shid>:plan`` is read
+# before this list is.
+LATER_TARGETS = ("shot", "line", "metadata")
 
 # What approving the bible requires (spec 2.1, 3 step 3).
 BIBLE_FIELDS = (
@@ -80,7 +89,8 @@ WHY_COME_BACK_LINES = 3
 
 # The story fields an edit may set (the API's StoryPatchRequest). Everything
 # else is the rules' to write: approvals, status, the concept, the style.
-PATCH_FIELDS = ("title", "seed_text") + BIBLE_FIELDS + ("narrator", "generation_profile")
+# ``episode_template_id`` (phase 3) only while no episode has a script.
+PATCH_FIELDS = ("title", "seed_text") + BIBLE_FIELDS + ("narrator", "generation_profile", "episode_template_id")
 
 # The keys ``params`` of the inline style step may carry.
 STYLE_PARAMS = ("template_id", "overrides", "consistency_mode")
@@ -280,7 +290,7 @@ def refuse_approval(doc):
 
 def invalid_target(target) -> WorkflowError:
     """A malformed target, naming every shape a target may have (phase 1's
-    fixed ones and phase 2's entity shapes)."""
+    fixed ones, phase 2's entity shapes and phase 3's episode shapes)."""
     return WorkflowError(
         INVALID,
         (f"Cannot regenerate {target!r}: the valid targets are "
@@ -289,12 +299,13 @@ def invalid_target(target) -> WorkflowError:
 
 
 def check_regenerate_target(target) -> None:
-    """A target this phase regenerates passes -- phase 1's fixed ones and
-    phase 2's entity targets (``regenerate.parse_target``: the shape only; the
-    entity itself is checked by :func:`check_entity_target`). A later phase's
-    target of the 9.2 grammar -- ``character:<id>:image:extra:<n>`` among
-    them -- is ``later_phase``; anything else is ``invalid``, naming the
-    valid shapes."""
+    """A target this phase regenerates passes -- phase 1's fixed ones, phase
+    2's entity targets and phase 3's episode targets
+    (``regenerate.parse_target``: the shape only; the entity or the episode
+    itself is checked by :func:`check_entity_target`). A later phase's target
+    of the 9.2 grammar -- ``character:<id>:image:extra:<n>`` and
+    ``shot:<ep>:<shid>`` among them -- is ``later_phase``; anything else is
+    ``invalid``, naming the valid shapes."""
     if target in regenerate_step.VALID_TARGETS:
         return
     if regenerate_step.parse_target(target) is not None:
@@ -635,11 +646,15 @@ def patch_story(stories, story_id, fields, *, now) -> dict:
 
     Nothing sent, nothing written. A field outside ``PATCH_FIELDS`` is
     ``invalid``. A bible field clears ``approvals.bible`` (a changed bible is
-    an unapproved one); ``title``, ``seed_text``, ``narrator`` and
-    ``generation_profile`` leave the approvals alone. ``narrator`` and
-    ``generation_profile`` are merged onto the current values, the profile
-    checked against ``clipping.aistory.defaults`` (``invalid``). A story the
-    schema would refuse is ``invalid`` with ``{"message", "errors"}``.
+    an unapproved one); ``title``, ``seed_text``, ``narrator``,
+    ``generation_profile`` and ``episode_template_id`` leave the approvals
+    alone. ``narrator`` and ``generation_profile`` are merged onto the current
+    values, the profile checked against ``clipping.aistory.defaults``
+    (``invalid``). ``episode_template_id`` is one of
+    ``defaults.EPISODE_TEMPLATE_IDS`` (``invalid``) and changes only while no
+    episode has a script (``conflict``: :func:`check_episode_template`). A
+    story the schema would refuse is ``invalid`` with ``{"message",
+    "errors"}``.
     """
     story = load(stories, story_id)
     if not fields:
@@ -664,6 +679,9 @@ def patch_story(stories, story_id, fields, *, now) -> dict:
                 {**story["generation_profile"], **partial})
         except ValueError as exc:
             raise WorkflowError(INVALID, str(exc)) from None
+
+    if "episode_template_id" in values:
+        check_episode_template(stories, story, values["episode_template_id"])
 
     clears_bible = bool(set(values) & set(BIBLE_FIELDS))
 
@@ -1151,13 +1169,13 @@ def places_units(stories, story, params=None) -> dict:
 
 
 def target_units(stories, story, parsed) -> dict:
-    """What one phase-2 regenerate target (``regenerate.parse_target``'s
-    tuple) would make: text and ``season:<ep>`` one LLM call; a portrait one
-    image, and again each sheet it already has (they are drawn from it); a
-    sheet or a time variant one edit (``references``) or one image
-    (``prompt_only``); a day plate or a prop image one image; a voice the
-    characters of its sample line."""
-    if parsed[0] == "season" or parsed[2] == "text":
+    """What one regenerate target (``regenerate.parse_target``'s tuple) would
+    make: text, ``season:<ep>`` and an episode target (E2, E3 or T1r) one LLM
+    call; a portrait one image, and again each sheet it already has (they are
+    drawn from it); a sheet or a time variant one edit (``references``) or one
+    image (``prompt_only``); a day plate or a prop image one image; a voice
+    the characters of its sample line."""
+    if parsed[0] in regenerate_step.EPISODE_KINDS or parsed[0] == "season" or parsed[2] == "text":
         return _units(llm_calls=1)
     kind = ENTITY_KINDS_BY_WORD[parsed[0]]
     doc = read_entity(stories, story["story_id"], kind, parsed[1])
@@ -1178,7 +1196,7 @@ def target_needs_editor(story, parsed) -> bool:
     """Whether the target *is* an edit: a sheet or a time variant in
     ``references`` mode (a portrait's sheets that cannot be redrawn are
     recorded, not failed, so a portrait never needs one)."""
-    if parsed[0] == "season" or parsed[2] != "image":
+    if parsed[0] in regenerate_step.EPISODE_KINDS or parsed[0] == "season" or parsed[2] != "image":
         return False
     if story["generation_profile"]["consistency_mode"] == refimages.PROMPT_ONLY:
         return False
@@ -1269,18 +1287,22 @@ def check_voice_choice(stories, story, char_id, voice, *, env) -> dict:
 
 
 def check_entity_target(stories, story, parsed, *, voice=None, env=None):
-    """A phase-2 regenerate target (``regenerate.parse_target``'s tuple)
-    checked against the story before a job exists; returns the voice to pin
-    (``check_voice_choice``) or None.
+    """A phase-2 or phase-3 regenerate target (``regenerate.parse_target``'s
+    tuple) checked against the story before a job exists; returns the voice
+    to pin (``check_voice_choice``) or None.
 
     ``not_found``: no such character, place or prop, or no such arc entry.
     ``conflict``: no season arc yet; an image or voice of an entity not
     written yet; a sheet without its portrait, a time variant without its
-    day plate. ``invalid``: a voice sent with any other target."""
+    day plate. ``invalid``: a voice sent with any other target. An episode
+    target is :func:`check_episode_target`'s."""
     story_id = story["story_id"]
     is_voice = parsed[0] == "character" and parsed[2] == "voice"
     if voice is not None and not is_voice:
         raise WorkflowError(INVALID, "A voice is picked only with the target character:<char_id>:voice.")
+    if parsed[0] in regenerate_step.EPISODE_KINDS:
+        check_episode_target(stories, story, parsed)
+        return None
     if parsed[0] == "season":
         arc = (season(stories, story_id) or {}).get("arc") or []
         if not arc:
@@ -1520,3 +1542,968 @@ def delete_entity(stories, story_id, kind, eid, *, now) -> dict:
         raise WorkflowError(NOT_FOUND, f"This story has no {ENTITY_WORDS[kind]} {eid!r}.") from None
     except schemas.SchemaError as exc:
         raise StoryUnreadable(story_id, exc.name, exc.errors) from None
+
+
+# ================================================================== phase 3
+#
+# Steps 8-9 (spec 3, 2.7-2.8, 9.1-9.2; phase-3 plan 2): one episode's script
+# and storyboard, ``episodes/ep<NN>/script.json`` and ``storyboard.json``.
+# Their approvals live on those documents: approving, editing or regenerating
+# an episode never changes the story's approvals or status (RC-E2, DEC-129).
+# What an episode step needs before it may start is
+# ``episode_common.check_episode_preconditions`` -- the runners' own check,
+# typed -- answered here with a code each. The edits reuse the runners'
+# rules: a script is validated as a step validates what it writes, a line
+# is timed as E2 times it, a revision moves as a regenerate moves it
+# (``episode_common.mark_changed``), a shot is resolved as the storyboard
+# resolves it (``shots``).
+
+SCRIPT_DOC = story_store.EPISODE_SCRIPT_DOC
+STORYBOARD_DOC = story_store.EPISODE_STORYBOARD_DOC
+
+# The keys ``params`` of the episode steps may carry (closed lists).
+SCRIPT_PARAMS = (script_step.MEASURE_PARAM,)
+STORYBOARD_PARAMS = ("fast",)
+
+# The document of each episode regenerate target: the one its job writes,
+# and so the one whose approval completes it.
+EPISODE_TARGET_DOCS = {"scene": "script", "hook": "script", "cliffhanger": "script", "teaser": "script",
+                       "shot": "storyboard"}
+
+# What an edit may set (the API's ScriptPatchRequest / StoryboardPatchRequest
+# and their items). An item names what it edits by its id (``line_id``,
+# ``scene_id``, ``shot_id``, ``after``); everything else in the documents is
+# the steps' to write.
+SCRIPT_PATCH_FIELDS = ("lines", "scenes", "hook_on_screen_text", "cliffhanger_reveal", "next_episode_teaser")
+SCRIPT_LINE_PATCH_FIELDS = ("text", "speaker", "emotion", "delivery")
+SCRIPT_SCENE_PATCH_FIELDS = ("summary", "on_screen_text")
+STORYBOARD_PATCH_FIELDS = ("shots", "transitions", "refresh_prompts")
+STORYBOARD_SHOT_PATCH_FIELDS = ("framing", "camera_motion", "modifiers", "action", "keep_still", "prompt_override")
+STORYBOARD_TRANSITION_PATCH_FIELDS = ("type",)
+
+# An episode number in a URL: 1..99, written as the store writes its folders
+# would not (no sign, no leading zero, no other script's digits).
+_EPISODE_NUMBER = re.compile(r"^[1-9][0-9]?$")
+
+# How each of episode_common's refusals is answered.
+_EPISODE_REFUSALS = {
+    episode_common.NOT_READY: CONFLICT,
+    episode_common.OUTSIDE_SEASON: INVALID,
+    episode_common.NO_ARC_ENTRY: CONFLICT,
+    episode_common.NO_RECAP: CONFLICT,
+}
+
+_TAG_KINDS = {"char": CHARACTERS, "place": PLACES, "prop": PROPS}
+
+
+def _plural_s(items) -> str:
+    return "" if len(items) == 1 else "s"
+
+
+def _and(items) -> str:
+    items = list(items)
+    if len(items) <= 1:
+        return "".join(items)
+    return ", ".join(items[:-1]) + " and " + items[-1]
+
+
+# ------------------------------------------------------------ the episode
+
+def episode_number(value) -> int:
+    """*value* -- an ``int``, or the text of a URL's path -- as an episode
+    number of the store (1..99); ``invalid`` otherwise, before any path is
+    built from it. ``True`` is not an episode, nor is ``"01"``."""
+    if type(value) is int:
+        number = value
+    elif isinstance(value, str) and _EPISODE_NUMBER.fullmatch(value):
+        number = int(value)
+    else:
+        number = None
+    if number is None or not story_store.EPISODE_MIN <= number <= story_store.EPISODE_MAX:
+        raise WorkflowError(INVALID, (f"{value!r} is not an episode number "
+                                      f"({story_store.EPISODE_MIN} to {story_store.EPISODE_MAX})."))
+    return number
+
+
+def episode_bounds(stories, story, value) -> int:
+    """:func:`episode_number`, and one the season plans once the story has a
+    season (``invalid`` otherwise, in episode_common's words): what reading,
+    editing or approving an episode's documents asks of the number."""
+    ep = episode_number(value)
+    arc = season(stories, story["story_id"])
+    if arc is not None and ep > arc["episodes_planned"]:
+        raise WorkflowError(INVALID, f"The season plans episodes 1 to {arc['episodes_planned']}; there is no "
+                                     f"episode {ep}.")
+    return ep
+
+
+def _episode_refused(call, *args, **kwargs):
+    try:
+        return call(*args, **kwargs)
+    except episode_common.EpisodeRefused as exc:
+        raise WorkflowError(_EPISODE_REFUSALS[exc.kind], str(exc)) from None
+
+
+def _context(stories, story_id, ep) -> episode_common.EpisodeContext:
+    """``episode_common.load_context``; what it cannot read (a style that is
+    not locked, a season or a script that does not validate, an episode
+    folder that is not a real one) is a ``conflict`` with its sentence."""
+    try:
+        return episode_common.load_context(stories, story_id, ep)
+    except StepFailed as exc:
+        raise WorkflowError(CONFLICT, str(exc)) from None
+
+
+def episode_context(stories, story, ep, *, step, require_recap=True) -> episode_common.EpisodeContext:
+    """The :class:`episode_common.EpisodeContext` of an episode step's (or
+    an episode target's) episode *ep*, once the step may run on it -- the
+    runners' own preconditions, in their order:
+
+    ``conflict`` for a story that is not ``ready`` (naming what to approve);
+    ``invalid`` without an episode number, or for one the season does not
+    plan; ``conflict`` for an arc with no entry for it, or -- from episode 2
+    on, unless *require_recap* is off (a regenerate) -- without the recap of
+    the episode before it in the season's memory (naming phase 5's memory
+    step)."""
+    _episode_refused(episode_common.check_story_ready, story)
+    if type(ep) is not int:
+        arc = season(stories, story["story_id"]) or {}
+        raise WorkflowError(INVALID, (f"'{step}' works on one episode: send its number as ep (the season plans "
+                                      f"1 to {arc.get('episodes_planned', 0)})."))
+    ec = _context(stories, story["story_id"], ep)
+    _episode_refused(episode_common.check_episode_preconditions, None, ec, require_recap=require_recap)
+    return ec
+
+
+def _flag(params, key) -> bool:
+    value = params.get(key)
+    if value is not None and type(value) is not bool:
+        raise WorkflowError(INVALID, f"params.{key} is true or false, not {value!r}.")
+    return bool(value)
+
+
+def script_request(params) -> bool:
+    """A script step's *params* (``{measure_voices?}``, a closed list;
+    ``invalid`` otherwise): whether to measure the lines with real voices."""
+    _unknown_keys(params, SCRIPT_PARAMS, "script")
+    return _flag(params, script_step.MEASURE_PARAM)
+
+
+def storyboard_request(params) -> bool:
+    """A storyboard step's *params* (``{fast?}``, a closed list; ``invalid``
+    otherwise): whether to plan the shots the fast way (inline, no call)."""
+    _unknown_keys(params, STORYBOARD_PARAMS, "storyboard")
+    return _flag(params, "fast")
+
+
+def require_complete_script(ec) -> dict:
+    """The episode's script, complete (every scene written, every framing
+    part there); ``conflict`` naming what is missing
+    (``storyboard.require_complete_script``, the step's own check)."""
+    try:
+        return storyboard_step.require_complete_script(ec)
+    except StepFailed as exc:
+        raise WorkflowError(CONFLICT, str(exc)) from None
+
+
+def read_episode(stories, story_id, ep, name):
+    """One of an episode's documents (``SCRIPT_DOC``, ``STORYBOARD_DOC``) as
+    the store validates it, or None; ``StoryUnreadable`` for one that does
+    not validate or an episode folder that is not a real directory."""
+    try:
+        return stories.read_episode_doc(story_id, ep, name)
+    except schemas.SchemaError as exc:
+        raise StoryUnreadable(story_id, exc.name, exc.errors) from None
+    except KeyError:
+        label = (f"{story_store.STORIES_DIRNAME}/{story_id}/{story_store.EPISODES_DIRNAME}/ep{ep:02d}/"
+                 f"{name}")
+        raise StoryUnreadable(story_id, label, ["its folder is not a real directory; it is never followed"]) from None
+
+
+def _no_script(ep) -> WorkflowError:
+    return WorkflowError(CONFLICT, f"Episode {ep} has no script yet: write it first (the script step).")
+
+
+def _no_storyboard(ep) -> WorkflowError:
+    return WorkflowError(CONFLICT, f"Episode {ep} has no storyboard yet: plan its shots first (the storyboard step).")
+
+
+def _write(write, what, *args, now, code=INVALID):
+    """``episode_common.write_script``/``write_storyboard``: a document the
+    rules refuse is *code* with ``{"message", "errors"}``; one the store may
+    not write (a symlink in its place) a ``conflict``."""
+    try:
+        return write(*args, now=now)
+    except schemas.SchemaError as exc:
+        raise WorkflowError(code, {"message": f"The {what} would not be valid with these values.",
+                                   "errors": list(exc.errors)}) from None
+    except (KeyError, ValueError) as exc:
+        raise WorkflowError(CONFLICT, f"The {what} cannot be written: {exc}.") from None
+
+
+def _entities(stories, story_id) -> dict:
+    """``{"characters": {id: doc}, "places": {...}, "props": {...}}``."""
+    return {kind: {doc[story_store.ENTITY_KINDS[kind].id_field]: doc for doc in list_entities(stories, story_id, kind)}
+            for kind in (CHARACTERS, PLACES, PROPS)}
+
+
+# ---------------------------------------------------------------- the story
+
+def episodes_with_script(stories, story_id) -> list:
+    """The episodes that have a ``script.json`` (one that cannot be read
+    counts: it is there)."""
+    found = []
+    try:
+        numbers = stories.list_episodes(story_id)
+    except KeyError:
+        raise not_found() from None
+    for ep in numbers:
+        try:
+            doc = stories.read_episode_doc(story_id, ep, SCRIPT_DOC)
+        except (KeyError, schemas.SchemaError):
+            found.append(ep)
+            continue
+        if doc is not None:
+            found.append(ep)
+    return found
+
+
+def check_episode_template(stories, story, template_id) -> None:
+    """The story's episode length may become *template_id*: one of the
+    shipped templates (``invalid``), and -- unless it is the one the story
+    has -- only while no episode has a script (``conflict``): an episode
+    keeps the template it was written against."""
+    shipped = defaults.EPISODE_TEMPLATE_IDS
+    if template_id not in shipped:
+        raise WorkflowError(INVALID, f"episode_template_id must be one of {', '.join(shipped)}, not {template_id!r}.")
+    if template_id == story.get("episode_template_id"):
+        return
+    written = episodes_with_script(stories, story["story_id"])
+    if written:
+        raise WorkflowError(CONFLICT, (f"The episode length cannot change once an episode is written: episode "
+                                       f"{written[0]} has a script, and each episode keeps the template it was "
+                                       "written against."))
+
+
+# ------------------------------------------------------------------- state
+
+def script_missing(script, ep) -> list:
+    """What the script step would still write, in its order:
+    ``["beat_sheet"]`` without scenes; else each body scene still a stub, each
+    framing part not written (``recap``, ``hook``, ``cliffhanger``,
+    ``teaser``), and ``consistency_check`` when the report is missing, stale
+    or of an older revision."""
+    if not script or not script["scenes"]:
+        return ["beat_sheet"]
+    missing = [scene["scene_id"] for scene in script_step.body_scenes(script) if scene["state"] == "stub"]
+    missing += script_step.missing_parts(script, ep)
+    if script_step.needs_check(script):
+        missing.append("consistency_check")
+    return missing
+
+
+def script_state(script, ep) -> str:
+    """``none`` | ``writing`` | ``complete`` | ``approved``."""
+    if not script or not script["scenes"]:
+        return "none"
+    if script["approved_at"]:
+        return "approved"
+    return "complete" if script_step.is_complete(script, ep) else "writing"
+
+
+def storyboard_state(storyboard, script) -> str:
+    """``none`` | ``partial`` (a scene without shots, or planned from an
+    older version of its scene) | ``complete`` | ``approved``."""
+    if not storyboard or not storyboard["shots"]:
+        return "none"
+    if storyboard["approved_at"]:
+        return "approved"
+    if script and episode_common.covers(storyboard, script) and not storyboard_step.stale_scenes(storyboard, script):
+        return "complete"
+    return "partial"
+
+
+def report_state(script) -> str:
+    """``none`` | ``stale`` (stale, or of an older revision) | ``passed`` |
+    ``issues``."""
+    report = (script or {}).get("consistency_report")
+    if report is None:
+        return "none"
+    if script_step.needs_check(script):
+        return "stale"
+    return "passed" if report["passed"] else "issues"
+
+
+def outdated_entities(storyboard, entities) -> list:
+    """The entities the storyboard's prompts were resolved from that changed
+    since (their ``updated_at`` moved: their names) or are gone (their ids),
+    in ``resolved_from``'s order."""
+    current = {}
+    for docs in entities.values():
+        current.update(docs)
+    outdated = []
+    for eid, stamp in storyboard["resolved_from"].items():
+        doc = current.get(eid)
+        if doc is None:
+            outdated.append(eid)
+        elif doc.get("updated_at") != stamp:
+            outdated.append(doc["name"])
+    return outdated
+
+
+def _template_view(story, script) -> dict:
+    template_id = script["template_id"] if script else story["episode_template_id"]
+    try:
+        template = templates.load_episode_template(template_id)
+    except (KeyError, OSError, schemas.SchemaError) as exc:
+        raise StoryUnreadable(story["story_id"], f"templates/episodes/{template_id}.json", [str(exc)]) from None
+    return {"id": template["template_id"], "window_s": list(template["window_s"]), "target_s": template["target_s"],
+            "tighten_above_s": template["tighten_above_s"]}
+
+
+def episode_view(stories, story, ep) -> dict:
+    """What the episode page shows (the web layer adds the episode's jobs)::
+
+        {"ep", "script": script.json | null, "storyboard": storyboard.json | null,
+         "template": {"id", "window_s", "target_s", "tighten_above_s"},
+         "state": {"script": none|writing|complete|approved,
+                   "storyboard": none|partial|complete|approved,
+                   "report": none|passed|issues|stale,
+                   "stale_scenes": [scene_id, ...], "prompts_outdated": bool,
+                   "missing": [what the script step would still write]}}
+
+    ``template`` is the one the script was written against, else the
+    story's choice. Calls nothing; ``StoryUnreadable`` for a document that
+    does not validate."""
+    story_id = story["story_id"]
+    script = read_episode(stories, story_id, ep, SCRIPT_DOC)
+    board = read_episode(stories, story_id, ep, STORYBOARD_DOC)
+    outdated = outdated_entities(board, _entities(stories, story_id)) if board else []
+    return {
+        "ep": ep, "script": script, "storyboard": board, "template": _template_view(story, script),
+        "state": {
+            "script": script_state(script, ep),
+            "storyboard": storyboard_state(board, script),
+            "report": report_state(script),
+            "stale_scenes": sorted(storyboard_step.stale_scenes(board, script)) if board and script else [],
+            "prompts_outdated": bool(outdated),
+            "missing": script_missing(script, ep),
+        },
+    }
+
+
+def episode_summaries(stories, story) -> list:
+    """One entry per episode folder of the story (the story page)::
+
+        [{"ep", "title", "script_state", "storyboard_state", "total_s", "timing_state"}]
+
+    An episode whose documents cannot be read is listed with both states
+    ``unreadable`` (its own page says why) rather than failing the story's."""
+    story_id = story["story_id"]
+    try:
+        numbers = stories.list_episodes(story_id)
+    except KeyError:
+        raise not_found() from None
+    summaries = []
+    for ep in numbers:
+        try:
+            script = read_episode(stories, story_id, ep, SCRIPT_DOC)
+            board = read_episode(stories, story_id, ep, STORYBOARD_DOC)
+        except StoryUnreadable:
+            summaries.append({"ep": ep, "title": None, "script_state": "unreadable",
+                              "storyboard_state": "unreadable", "total_s": None, "timing_state": None})
+            continue
+        result = (script or {}).get("timing") or {}
+        summaries.append({
+            "ep": ep, "title": (script or {}).get("title"), "script_state": script_state(script, ep),
+            "storyboard_state": storyboard_state(board, script), "total_s": result.get("total_s"),
+            "timing_state": result.get("state"),
+        })
+    return summaries
+
+
+# ------------------------------------------------------------------ targets
+
+def check_episode_target(stories, story, parsed) -> None:
+    """An episode regenerate target (``regenerate.parse_target``'s tuple)
+    checked against the story before a job exists, as the runner checks it
+    (``episode_regenerate.run``): the episode's preconditions without the
+    recap (:func:`episode_context`); then ``conflict`` without a script (or,
+    for a shot, without a storyboard, or when the shot's scene was rewritten
+    since it was planned); ``not_found`` for a scene, a framing scene or a
+    shot the episode does not have."""
+    kind, ep = parsed[0], parsed[1]
+    episode_context(stories, story, ep, step="regenerate", require_recap=False)
+    story_id = story["story_id"]
+    script = read_episode(stories, story_id, ep, SCRIPT_DOC)
+    if script is None or not script["scenes"]:
+        raise _no_script(ep)
+    if kind == "scene":
+        if script_step.scene_of(script, parsed[2]) is None:
+            ids = ", ".join(scene["scene_id"] for scene in script["scenes"])
+            raise WorkflowError(NOT_FOUND, f"Episode {ep} has no scene {parsed[2]!r} (its scenes: {ids}).")
+    elif kind in ("hook", "cliffhanger"):
+        if script_step.framing_scene(script, kind) is None:
+            raise WorkflowError(NOT_FOUND, f"Episode {ep} has no {kind} scene.")
+    elif kind == "shot":
+        board = read_episode(stories, story_id, ep, STORYBOARD_DOC)
+        if board is None or not board["shots"]:
+            raise _no_storyboard(ep)
+        shot = next((s for s in board["shots"] if s["shot_id"] == parsed[2]), None)
+        if shot is None:
+            raise WorkflowError(NOT_FOUND, (f"Episode {ep}'s storyboard has no shot {parsed[2]!r} (it has sh01 to "
+                                            f"sh{len(board['shots']):02d})."))
+        if shot["scene_id"] in storyboard_step.stale_scenes(board, script):
+            raise WorkflowError(CONFLICT, (f"Scene {shot['scene_id']} was rewritten since its shots were planned: "
+                                           "plan it again first (the storyboard step)."))
+
+
+# ---------------------------------------------------------------- approvals
+
+def approve_script(stories, story_id, ep, *, approve_anyway=False, now) -> dict:
+    """Approve episode *ep*'s script; returns it as written.
+
+    ``conflict`` without a script; listing what is not written yet (every
+    scene, the framing parts); without a consistency report, or with one that
+    is stale or of an older revision (check it again: the script step); and,
+    when the report found issues, listing them -- unless *approve_anyway*.
+    ``approved_at`` becomes *now*; ``approved_anyway`` too when the approval
+    went over issues. Nothing else moves: not the revision, not the report,
+    not the story (RC-E2)."""
+    story = load(stories, story_id)
+    ep = episode_bounds(stories, story, ep)
+    script = read_episode(stories, story_id, ep, SCRIPT_DOC)
+    if script is None or not script["scenes"]:
+        raise _no_script(ep)
+    missing = [scene["scene_id"] for scene in script_step.body_scenes(script) if scene["state"] == "stub"]
+    missing += [f"the {part}" for part in script_step.missing_parts(script, ep)]
+    if missing:
+        raise WorkflowError(CONFLICT, (f"Episode {ep}'s script is not complete ({_and(missing)} not written yet): "
+                                       "run the script step again to finish it."))
+    report = script["consistency_report"]
+    if report is None:
+        raise WorkflowError(CONFLICT, (f"Episode {ep}'s script has not been checked yet: run the script step "
+                                       "again (it checks the script's consistency)."))
+    if script_step.needs_check(script):
+        raise WorkflowError(CONFLICT, (f"Episode {ep}'s consistency check is out of date (the script changed "
+                                       "since it ran): check it again (run the script step)."))
+    over_issues = not report["passed"]
+    if over_issues and not approve_anyway:
+        issues = "; ".join(f"{issue['scene_id'] or 'the episode'} ({issue['kind']}): {issue['fix']}"
+                           for issue in report["issues"])
+        count = len(report["issues"])
+        raise WorkflowError(CONFLICT, (f"Episode {ep}'s consistency check found {count} issue"
+                                       f"{'' if count == 1 else 's'}{': ' + issues if issues else ''}. Fix them and "
+                                       "check again, or approve anyway."))
+    ec = _context(stories, story_id, ep)
+    script["approved_at"] = now
+    script["approved_anyway"] = now if over_issues else None
+    return _write(episode_common.write_script, "script", ec, script, now=now, code=CONFLICT)
+
+
+def approve_storyboard(stories, story_id, ep, *, now) -> dict:
+    """Approve episode *ep*'s storyboard; returns it as written.
+
+    ``conflict`` without a storyboard; before its script is approved; while a
+    scene of the script has no shots, or has shots planned from an older
+    version of it (``scenes[sid].script_rev``, or marked stale); and while
+    an entity its prompts were resolved from has changed since (refresh
+    them). ``approved_at`` becomes *now*; nothing else moves."""
+    story = load(stories, story_id)
+    ep = episode_bounds(stories, story, ep)
+    board = read_episode(stories, story_id, ep, STORYBOARD_DOC)
+    if board is None or not board["shots"]:
+        raise _no_storyboard(ep)
+    script = read_episode(stories, story_id, ep, SCRIPT_DOC)
+    if not script or not script["approved_at"]:
+        raise WorkflowError(CONFLICT, f"Approve episode {ep}'s script first: its storyboard is approved on top of it.")
+    planned = {shot["scene_id"] for shot in board["shots"]}
+    unplanned = [scene["scene_id"] for scene in script["scenes"] if scene["scene_id"] not in planned]
+    if unplanned:
+        raise WorkflowError(CONFLICT, (f"Episode {ep}'s storyboard has no shots for scene{_plural_s(unplanned)} "
+                                       f"{_and(unplanned)}: plan {'it' if len(unplanned) == 1 else 'them'} "
+                                       "(the storyboard step)."))
+    if not episode_common.covers(board, script):
+        raise WorkflowError(CONFLICT, (f"Episode {ep}'s storyboard does not follow its script's scenes: plan its "
+                                       "shots again (the storyboard step)."))
+    stale = sorted(storyboard_step.stale_scenes(board, script))
+    if stale:
+        raise WorkflowError(CONFLICT, (f"Episode {ep}'s storyboard has scene{_plural_s(stale)} {_and(stale)} "
+                                       "planned from an older version of the script: plan "
+                                       f"{'it' if len(stale) == 1 else 'them'} again (the storyboard step)."))
+    ec = _context(stories, story_id, ep)
+    outdated = outdated_entities(board, ec.entities)
+    if outdated:
+        raise WorkflowError(CONFLICT, (f"Episode {ep}'s prompts are outdated: refresh them ({_and(outdated)} "
+                                       f"changed since they were resolved)."))
+    board["approved_at"] = now
+    return _write(episode_common.write_storyboard, "storyboard", ec, board, script, now=now, code=CONFLICT)
+
+
+# -------------------------------------------------------------------- edits
+
+def _items(errors, fields, key, id_key, editable):
+    """``[(path, item)]`` of the well-formed items of ``fields[key]`` (a list
+    of objects naming what they edit by *id_key*, each key one of
+    *editable*); the others become errors."""
+    value = fields.get(key)
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        errors.append(f"{key}: expected a list")
+        return []
+    found = []
+    for i, item in enumerate(value):
+        path = f"{key}[{i}]"
+        if not isinstance(item, dict):
+            errors.append(f"{path}: expected an object {{{id_key}, {', '.join(editable)}}}")
+            continue
+        extra = sorted(set(item) - {id_key} - set(editable))
+        if extra:
+            errors.append(f"{path}: unknown key(s) {', '.join(extra)} (editable: {', '.join(editable)})")
+            continue
+        found.append((path, item))
+    return found
+
+
+def _required_text(errors, path, value):
+    """*value* without its surrounding spaces, or None (and an error) when it
+    is not a non-empty text."""
+    if not isinstance(value, str) or not value.strip():
+        errors.append(f"{path}: expected a non-empty text")
+        return None
+    return value.strip()
+
+
+def _optional_text(value):
+    """A text without its surrounding spaces, an empty one as null; any
+    other value as sent (the schema names it)."""
+    if isinstance(value, str):
+        return value.strip() or None
+    return value
+
+
+def _unknown_fields(fields, editable, what) -> None:
+    unknown = sorted(set(fields) - set(editable))
+    if unknown:
+        raise WorkflowError(INVALID, (f"These {what} fields cannot be edited: {', '.join(unknown)} "
+                                      f"(editable: {', '.join(editable)})."))
+
+
+def _edit_script(ec, script, fields, errors) -> list:
+    """*fields* into *script* (in place); returns the scene ids whose content
+    changed, in the script's order."""
+    ep = ec.ep
+    touched = set()
+    lines = {line["line_id"]: (scene, line) for scene in script["scenes"] for line in scene["lines"]}
+    for path, item in _items(errors, fields, "lines", "line_id", SCRIPT_LINE_PATCH_FIELDS):
+        found = lines.get(item.get("line_id"))
+        if found is None:
+            errors.append(f"{path}.line_id: {item.get('line_id')!r} is not a line of episode {ep}")
+            continue
+        scene, line = found
+        before = dict(line)
+        for key in SCRIPT_LINE_PATCH_FIELDS:
+            if key not in item:
+                continue
+            value = item[key]
+            if key == "text":
+                value = _required_text(errors, f"{path}.text", value)
+                if value is None:
+                    continue
+            elif key == "delivery" and isinstance(value, str):
+                value = value.strip()
+            line[key] = value
+        # Other words, or another voice: the measured take no longer times
+        # the line (its file stays on disk until it is measured again).
+        if isinstance(line["text"], str) and (line["text"] != before["text"] or line["speaker"] != before["speaker"]):
+            line["timing"] = timing.estimated_timing(line["text"], ec.language)
+        if line != before:
+            touched.add(scene["scene_id"])
+
+    scenes = {scene["scene_id"]: scene for scene in script["scenes"]}
+    for path, item in _items(errors, fields, "scenes", "scene_id", SCRIPT_SCENE_PATCH_FIELDS):
+        scene = scenes.get(item.get("scene_id"))
+        if scene is None:
+            errors.append(f"{path}.scene_id: {item.get('scene_id')!r} is not a scene of episode {ep}")
+            continue
+        before = dict(scene)
+        if "summary" in item:
+            value = _required_text(errors, f"{path}.summary", item["summary"])
+            if value is not None:
+                scene["summary"] = value
+        if "on_screen_text" in item:
+            scene["on_screen_text"] = _optional_text(item["on_screen_text"])
+        if scene != before:
+            touched.add(scene["scene_id"])
+
+    hook = script_step.framing_scene(script, "hook")
+    cliff = script_step.framing_scene(script, "cliffhanger")
+    if "hook_on_screen_text" in fields:
+        value = _optional_text(fields["hook_on_screen_text"])
+        if value != script["hook"]["on_screen_text"]:
+            script["hook"]["on_screen_text"] = value
+            if hook is not None:
+                touched.add(hook["scene_id"])
+    if "cliffhanger_reveal" in fields:
+        value = _required_text(errors, "cliffhanger_reveal", fields["cliffhanger_reveal"])
+        if value is not None and value != script["cliffhanger"]["reveal"]:
+            script["cliffhanger"]["reveal"] = value
+            if cliff is not None:
+                script["cliffhanger"]["scene_id"] = cliff["scene_id"]
+                touched.add(cliff["scene_id"])
+    if "next_episode_teaser" in fields:
+        value = _required_text(errors, "next_episode_teaser", fields["next_episode_teaser"])
+        if value is not None:
+            script["next_episode_teaser"] = value
+    return [scene["scene_id"] for scene in script["scenes"] if scene["scene_id"] in touched]
+
+
+def patch_script(stories, story_id, ep, fields, *, now) -> dict:
+    """Edit episode *ep*'s script (``fields``: ``SCRIPT_PATCH_FIELDS``);
+    returns it as written.
+
+    ``lines`` ``[{line_id, text?, speaker?, emotion?, delivery?}]``,
+    ``scenes`` ``[{scene_id, summary?, on_screen_text?}]``,
+    ``hook_on_screen_text`` (null clears it), ``cliffhanger_reveal`` and
+    ``next_episode_teaser`` (texts). Checked as the steps check what they
+    write -- the script's schema and rules (a speaker of the scene or the
+    narrator, at most 22 words a line, ...) and the story's -- and refused
+    whole (``invalid`` with every error; nothing written). A line with other
+    words or another speaker gets a fresh estimated timing (its measured take
+    stays on disk). A change moves the revisions and clears both approvals,
+    stales the consistency report and the storyboard's scenes planned from
+    the scenes it changed (``episode_common.mark_changed``); the script is
+    re-timed; the storyboard is written before the script. Nothing sent, or
+    nothing changed: nothing written. ``conflict`` without a script."""
+    story = load(stories, story_id)
+    ep = episode_bounds(stories, story, ep)
+    _unknown_fields(fields, SCRIPT_PATCH_FIELDS, "script")
+    script = read_episode(stories, story_id, ep, SCRIPT_DOC)
+    if script is None or not script["scenes"]:
+        raise _no_script(ep)
+    if not fields:
+        return script
+    ec = _context(stories, story_id, ep)
+    trial = copy.deepcopy(script)
+    errors = []
+    touched = _edit_script(ec, trial, fields, errors)
+    message = "The script would not be valid with these values."
+    if errors:
+        raise _invalid_values(message, errors)
+    if trial == script:
+        return script
+    for scene in trial["scenes"]:
+        if scene["scene_id"] in touched:
+            scene["source"] = "edit"
+    errors = episode_common.trial_errors(ec, trial)
+    if errors:
+        raise _invalid_values(message, errors)
+
+    board = read_episode(stories, story_id, ep, STORYBOARD_DOC)
+    episode_common.mark_changed(trial, board, scene_ids=touched, now=now)
+    episode_common.retime(trial, ec, board)
+    # The storyboard first: a failure between the two writes can only leave
+    # an approval cleared too early (episode_regenerate's order).
+    if board is not None:
+        _write(episode_common.write_storyboard, "storyboard", ec, board, trial, now=now)
+    return _write(episode_common.write_script, "script", ec, trial, now=now)
+
+
+def _scene_tags(scene) -> list:
+    return ([f"@{cid}" for cid in scene["characters"]] + [f"#{scene['place_id']}:{scene['time_variant']}"]
+            + [f"%{pid}" for pid in scene["props"]])
+
+
+def _stamp_resolved(resolved_from, shot, scene, entities) -> None:
+    """Add what *shot* was just resolved from to ``resolved_from`` -- never
+    over an older stamp: the other shots were resolved from that one, and
+    the prompts stay outdated until they are all refreshed."""
+    for tag in shot["subject_tags"]:
+        kind, eid, _variant = shots.parse_tag(tag)
+        doc = entities[_TAG_KINDS[kind]].get(eid)
+        if doc is not None:
+            resolved_from.setdefault(eid, doc["updated_at"])
+    place = entities[PLACES].get(scene["place_id"])
+    if place is not None:
+        resolved_from.setdefault(scene["place_id"], place["updated_at"])
+
+
+def _edit_action(ec, path, shot, scene, value, errors) -> None:
+    """A shot's new action: T1's rules (at most 30 words, every tag it uses
+    among the shot's subjects, no character named), every tag one of the
+    scene's (one the shot did not show yet joins its subjects), and no place
+    or prop named either."""
+    action = _required_text(errors, f"{path}.action", value)
+    if action is None:
+        return
+    allowed = _scene_tags(scene)
+    used = list(dict.fromkeys(prompts._TAG_PATTERN.findall(action)))
+    foreign = [tag for tag in used if tag not in allowed]
+    for tag in foreign:
+        errors.append(f"{path}.action: tag {tag!r} is not one of scene {scene['scene_id']}'s tags "
+                      f"({', '.join(allowed)})")
+    subjects = list(shot["subject_tags"]) + [tag for tag in used if tag in allowed and tag not in shot["subject_tags"]]
+    names = {cid: doc["name"] for cid, doc in ec.entities[CHARACTERS].items()}
+    before = len(errors)
+    prompts._t1_shot_errors(errors, path, {"action": action, "subjects": subjects + foreign,
+                                           "framing": shot["framing"]}, names=names, previous_framing=None)
+    lowered = action.lower()
+    for kind, word in ((PLACES, "place"), (PROPS, "prop")):
+        for doc in ec.entities[kind].values():
+            if re.search(rf"\b{re.escape(doc['name'].lower())}\b", lowered):
+                errors.append(f"{path}.action: names the {word} {doc['name']!r} instead of using a tag")
+    if not foreign and len(errors) == before:
+        shot["action"] = action
+        shot["subject_tags"] = subjects
+
+
+def _edit_storyboard(ec, script, board, fields, errors) -> tuple:
+    """*fields* into *board* (in place): the shots and transitions edited.
+    Returns ``(to_resolve, retime)``: ``{shot_id: (path, camera motion sent
+    or None)}`` of the shots to resolve again, and whether a transition
+    changed."""
+    ep, lock = ec.ep, ec.style_lock
+    scenes = {scene["scene_id"]: scene for scene in script["scenes"]}
+    by_id = {shot["shot_id"]: shot for shot in board["shots"]}
+    allowed_modifiers = list(lock["motion_rules"]["tier1"].get("modifiers") or [])
+    to_resolve = {}
+    for path, item in _items(errors, fields, "shots", "shot_id", STORYBOARD_SHOT_PATCH_FIELDS):
+        shot = by_id.get(item.get("shot_id"))
+        if shot is None:
+            errors.append(f"{path}.shot_id: {item.get('shot_id')!r} is not a shot of episode {ep}")
+            continue
+        scene = scenes.get(shot["scene_id"])
+        if scene is None:
+            errors.append(f"{path}.shot_id: {shot['shot_id']!r} belongs to scene {shot['scene_id']}, which the "
+                          "script no longer has: plan the shots again (the storyboard step)")
+            continue
+        before = (shot["framing"], shot["action"], list(shot["subject_tags"]))
+        if "framing" in item:
+            if item["framing"] not in schemas.FRAMINGS:
+                errors.append(f"{path}.framing: {item['framing']!r} is not one of {', '.join(schemas.FRAMINGS)}")
+            else:
+                shot["framing"] = item["framing"]
+        if "camera_motion" in item:
+            if item["camera_motion"] not in schemas.CAMERA_MOTIONS:
+                errors.append(f"{path}.camera_motion: {item['camera_motion']!r} is not one of "
+                              f"{', '.join(schemas.CAMERA_MOTIONS)}")
+            else:
+                to_resolve[shot["shot_id"]] = (path, item["camera_motion"])
+        if "modifiers" in item:
+            value = item["modifiers"]
+            if not isinstance(value, list) or not all(isinstance(m, str) for m in value):
+                errors.append(f"{path}.modifiers: expected a list of modifiers")
+            else:
+                refused = [m for m in value if m not in allowed_modifiers]
+                for modifier in refused:
+                    errors.append(f"{path}.modifiers: {modifier!r} is not a modifier the style allows "
+                                  f"({', '.join(allowed_modifiers) or 'none'})")
+                if not refused:
+                    shot["modifiers"] = list(dict.fromkeys(value))
+        if "action" in item:
+            _edit_action(ec, path, shot, scene, item["action"], errors)
+        if "keep_still" in item:
+            if type(item["keep_still"]) is not bool:
+                errors.append(f"{path}.keep_still: expected true or false")
+            else:
+                shot["keep_still"] = item["keep_still"]
+        if "prompt_override" in item:
+            value = item["prompt_override"]
+            if value is not None and not isinstance(value, str):
+                errors.append(f"{path}.prompt_override: expected a text or null")
+            else:
+                shot["prompt_override"] = _optional_text(value)
+        if (shot["framing"], shot["action"], shot["subject_tags"]) != before:
+            to_resolve.setdefault(shot["shot_id"], (path, None))
+
+    retime = False
+    transitions = {transition["after"]: transition for transition in board["transitions"]}
+    for path, item in _items(errors, fields, "transitions", "after", STORYBOARD_TRANSITION_PATCH_FIELDS):
+        transition = transitions.get(item.get("after"))
+        if transition is None:
+            errors.append(f"{path}.after: {item.get('after')!r} has no transition (one follows every shot but the "
+                          "last)")
+            continue
+        if "type" not in item:
+            continue
+        kind = item["type"]
+        duration = ec.template["transitions_s"].get(kind) if kind in schemas.TRANSITIONS else None
+        if duration is None:
+            errors.append(f"{path}.type: {kind!r} is not one of {', '.join(schemas.TRANSITIONS)}")
+        elif kind != transition["type"]:
+            transition["type"] = kind
+            transition["duration_s"] = duration
+            retime = True
+    return to_resolve, retime
+
+
+def _resolve_again(ec, script, board, to_resolve, errors) -> None:
+    """Each shot of *to_resolve* moved and resolved again, as the storyboard
+    resolves it (``shots.motion_for``, ``shots.resolve_shot``). A camera
+    motion sent that the style overrides for the shot's framing or scene is
+    an error rather than silently replaced."""
+    lock = ec.style_lock
+    by_function = lock["motion_rules"]["tier1"]["by_function"]
+    scenes = {scene["scene_id"]: scene for scene in script["scenes"]}
+    by_id = {shot["shot_id"]: shot for shot in board["shots"]}
+    for shot_id, (path, wanted) in to_resolve.items():
+        shot = by_id[shot_id]
+        scene = scenes[shot["scene_id"]]
+        motion = shots.motion_for(shot["framing"], wanted or shot["camera_motion"], scene["function"], lock)
+        if wanted is not None and motion["type"] != wanted:
+            what = (f"a {shot['framing']} shot" if shot["framing"] in by_function
+                    else f"a {scene['function']} scene")
+            errors.append(f"{path}.camera_motion: the style moves {what} with {motion['type']}, not {wanted!r}")
+            continue
+        try:
+            resolved = shots.resolve_shot({"framing": shot["framing"], "action": shot["action"],
+                                           "subjects": shot["subject_tags"]}, scene=scene, entities=ec.entities,
+                                          style_lock=lock, consistency_mode=ec.consistency_mode)
+        except (KeyError, ValueError) as exc:
+            raise WorkflowError(CONFLICT, (f"Shot {shot_id} names something the story no longer has ({exc}): plan "
+                                           f"scene {scene['scene_id']} again (the storyboard step).")) from None
+        shot["camera_motion"] = motion["type"]
+        shot["motion"] = motion
+        shot.update(image_prompt=resolved["image_prompt"], negative_prompt=resolved["negative_prompt"],
+                    reference_images=resolved["reference_images"], consistency=resolved["consistency"])
+        _stamp_resolved(board["resolved_from"], shot, scene, ec.entities)
+
+
+def patch_storyboard(stories, story_id, ep, fields, *, now) -> dict:
+    """Edit episode *ep*'s storyboard (``fields``: ``STORYBOARD_PATCH_FIELDS``);
+    returns it as written.
+
+    ``shots`` ``[{shot_id, framing?, camera_motion?, modifiers?, action?,
+    keep_still?, prompt_override?}]`` -- a shot whose framing, motion or
+    action changed is moved and resolved again (its action tagged as T1 tags
+    one: the scene's tags only, no name); ``transitions`` ``[{after, type}]``
+    -- the template's duration for it, a non-cut type only between two
+    scenes, and the shots re-timed around it; ``refresh_prompts: true`` --
+    every shot's prompt resolved again from the entities as they are now
+    (``shots.refresh_prompts``). Refused whole (``invalid`` with every error;
+    nothing written). A change clears the storyboard's approval and moves its
+    revision; the script is re-timed with it (its revision and approval
+    never move). Nothing sent, or nothing changed: nothing written.
+    ``conflict`` without a storyboard."""
+    story = load(stories, story_id)
+    ep = episode_bounds(stories, story, ep)
+    _unknown_fields(fields, STORYBOARD_PATCH_FIELDS, "storyboard")
+    board = read_episode(stories, story_id, ep, STORYBOARD_DOC)
+    if board is None or not board["shots"]:
+        raise _no_storyboard(ep)
+    if not fields:
+        return board
+    script = read_episode(stories, story_id, ep, SCRIPT_DOC)
+    if script is None or not script["scenes"]:
+        raise _no_script(ep)
+    ec = _context(stories, story_id, ep)
+    trial = copy.deepcopy(board)
+    errors = []
+    refresh = fields.get("refresh_prompts")
+    if refresh is not None and type(refresh) is not bool:
+        errors.append("refresh_prompts: expected true or false")
+    to_resolve, retime = _edit_storyboard(ec, script, trial, fields, errors)
+    message = "The storyboard would not be valid with these values."
+    if not errors:
+        _resolve_again(ec, script, trial, to_resolve, errors)
+    if errors:
+        raise _invalid_values(message, errors)
+    if retime:
+        shots.retime_storyboard(trial, script, template=ec.template, language=ec.language, style_lock=ec.style_lock)
+    if refresh:
+        trial = shots.refresh_prompts(trial, script, entities=ec.entities, style_lock=ec.style_lock,
+                                      consistency_mode=ec.consistency_mode)
+    if trial == board:
+        return board
+    trial["approved_at"] = None
+    trial["rev"] = board["rev"] + 1
+    errors = episode_common.storyboard_errors(ec, trial, script)
+    if errors:
+        raise _invalid_values(message, errors)
+    written = _write(episode_common.write_storyboard, "storyboard", ec, trial, script, now=now)
+    episode_common.retime(script, ec, written)
+    _write(episode_common.write_script, "script", ec, script, now=now)
+    return written
+
+
+def build_fast_storyboard(stories, story, ep, *, now, on_log) -> dict:
+    """The fast storyboard of episode *ep* (``storyboard.build_fast``: no
+    call, DEC-109), written with the script re-timed; returns it. The
+    storyboard step's preconditions (:func:`episode_context`) and a complete
+    script (``conflict`` naming what is missing) first."""
+    ec = episode_context(stories, story, ep, step="storyboard")
+    require_complete_script(ec)
+    try:
+        return storyboard_step.build_fast(stories, story["story_id"], ep, now=now, on_log=on_log)
+    except StepFailed as exc:
+        raise WorkflowError(CONFLICT, str(exc)) from None
+    except ValueError as exc:
+        raise WorkflowError(CONFLICT, f"The fast storyboard could not be built: {exc}") from None
+
+
+# -------------------------------------------------------------------- units
+
+def script_units(ec) -> dict:
+    """The LLM calls a script step would make now, counting only what is
+    missing (the runner's own order)::
+
+        {"E1", "E2", "E3", "E4", "E2_range": [lo, hi] | None,
+         "llm_calls", "llm_calls_range": [lo, hi]}
+
+    No beat sheet yet: E1, then the template's body range of E2 (``E2`` and
+    ``llm_calls`` are its upper end), a full E3 and E4. Otherwise E2 per body
+    scene still a stub that someone can speak in, one E3 for every framing
+    part missing (or one per part when only some are), and E4 when anything
+    is written or the report is missing, stale or of an older revision."""
+    try:
+        script = episode_common.read_episode(ec, SCRIPT_DOC)
+    except StepFailed as exc:
+        raise WorkflowError(CONFLICT, str(exc)) from None
+    if not script or not script["scenes"]:
+        low, high = ec.template["slots"]["body"]["count"]
+        return {"E1": 1, "E2": high, "E3": 1, "E4": 1, "E2_range": [low, high], "llm_calls": 3 + high,
+                "llm_calls_range": [3 + low, 3 + high]}
+    stubs = [scene for scene in script_step.body_scenes(script) if scene["state"] == "stub"]
+    e2 = sum(1 for scene in stubs if script_step.can_speak(ec, scene))
+    missing = script_step.missing_parts(script, ec.ep)
+    e3 = 0 if not missing else (1 if missing == script_step.e3_parts(ec.ep) else len(missing))
+    e4 = 1 if stubs or missing or script_step.needs_check(script) else 0
+    calls = e2 + e3 + e4
+    return {"E1": 0, "E2": e2, "E3": e3, "E4": e4, "E2_range": None, "llm_calls": calls,
+            "llm_calls_range": [calls, calls]}
+
+
+def storyboard_units(ec) -> dict:
+    """The T1 calls a storyboard step would make now: ``{"t1_calls",
+    "scenes": [scene_id, ...], "refusal": sentence | None}`` -- one per scene
+    with no plan, a stale plan or a fast one
+    (``storyboard.scenes_to_plan``). While the script is not complete the
+    step would be refused (``refusal``) and every scene it has is counted."""
+    try:
+        script = storyboard_step.require_complete_script(ec)
+    except StepFailed as exc:
+        try:
+            existing = episode_common.read_episode(ec, SCRIPT_DOC)
+        except StepFailed:
+            existing = None
+        scenes = [scene["scene_id"] for scene in (existing or {}).get("scenes") or []]
+        return {"t1_calls": len(scenes), "scenes": scenes, "refusal": str(exc)}
+    try:
+        board = episode_common.read_episode(ec, STORYBOARD_DOC)
+    except StepFailed as exc:
+        raise WorkflowError(CONFLICT, str(exc)) from None
+    plans, sources, stale = storyboard_step.current_plans(board, script)
+    todo = [scene["scene_id"] for scene in storyboard_step.scenes_to_plan(script, plans, sources, stale)]
+    return {"t1_calls": len(todo), "scenes": todo, "refusal": None}
+
+
+def measure_estimate(ec, *, env) -> dict:
+    """What measuring the episode's lines with real voices would do now
+    (``script.measure_estimate``: calling nothing); before a script, nothing
+    to measure yet."""
+    try:
+        script = episode_common.read_episode(ec, SCRIPT_DOC)
+    except StepFailed as exc:
+        raise WorkflowError(CONFLICT, str(exc)) from None
+    return script_step.measure_estimate(ec, script or {"scenes": []}, env=env)

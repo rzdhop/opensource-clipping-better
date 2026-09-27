@@ -1,7 +1,7 @@
 ## IN PROGRESS — AI Story **phase 3** (episode writer: script, storyboard, timing)
 - **Started:** 2026-09-27 by the human ("Phase 2 seems to have been worked on, check an go with phase 3").
   Task class: FULL. Phase 2 checked: closed and pushed (`4280333` == `origin/main`).
-- **Current phase:** 5 IMPLEMENT — stages 0–7 done; next is stage 8 (workflow + API). Plan **approved in chat**
+- **Current phase:** 5 IMPLEMENT — stages 0–8 done; next is stage 9 (CLI). Plan **approved in chat**
   ("Go", 2026-09-27).
 - **Plan:** `~/.claude/plans/ai-story-phase-3-episode-writer.md` (stages 0–14, riskiest = stage 6, the
   script/storyboard step runners). **Read it first**: it holds the design, the stage table and the Tier-2 script.
@@ -41,7 +41,7 @@
 | 5 | shot resolution + fast storyboard + rule pass | **done** (local 4205 / CI 3640 + 535 skipped) |
 | 6 | step runners (RISKIEST) | **done** (local 4280 / CI 3715 + 535 skipped) |
 | 7 | opt-in voice measurement | **done** (local 4302 / CI 3737 + 535 skipped) |
-| 8 | workflow + API | — |
+| 8 | workflow + API | **done** (local 4359 / CI 3774 + 555 skipped) |
 | 9 | CLI | — |
 | 10 | dashboard: Tabs + EpisodeStudio script pane | — |
 | 11 | dashboard: storyboard pane + preview placeholder | — |

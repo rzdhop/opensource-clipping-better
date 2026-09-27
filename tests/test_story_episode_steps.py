@@ -1126,11 +1126,11 @@ def test_the_episode_target_grammar(target, parsed):
     assert m.regen.parse_episode_target(target) == parsed
 
 
-def test_the_phase_2_parser_still_leaves_episode_targets_to_a_later_stage():
-    """The web layer reads ``parse_target``; the episode targets reach it in stage 8."""
+def test_the_web_layers_parser_reads_the_episode_targets_since_stage_8():
+    """The web layer reads ``parse_target``; the episode targets reached it in stage 8."""
     m = _new()
     for target in ("scene:1:s03", "hook:1", "shot:1:sh05:plan"):
-        assert m.regenerate.parse_target(target) is None
+        assert m.regenerate.parse_target(target) == m.regen.parse_episode_target(target) is not None
 
 
 # ============================================================ helpers + registry

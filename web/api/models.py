@@ -601,11 +601,14 @@ class StoryPatchRequest(BaseModel):
 
     Values are checked by the story schema when the story is saved (400 with
     its errors), not here, so the rules live in one place. A bible field sent
-    clears the bible approval; ``title``, ``seed_text``, ``narrator`` and
-    ``generation_profile`` do not. ``narrator`` and ``generation_profile``
-    may be partial: they are merged onto the story's current values, and the
-    profile is checked against ``clipping.aistory.defaults`` (400, not 422,
-    which is why it is a plain object here).
+    clears the bible approval; ``title``, ``seed_text``, ``narrator``,
+    ``generation_profile`` and ``episode_template_id`` do not. ``narrator``
+    and ``generation_profile`` may be partial: they are merged onto the
+    story's current values, and the profile is checked against
+    ``clipping.aistory.defaults`` (400, not 422, which is why it is a plain
+    object here). ``episode_template_id`` (phase 3) is one of the shipped
+    episode templates (400), and changes only while no episode has a script
+    (409).
     """
     title: Optional[str] = Field(None, max_length=120)
     seed_text: Optional[str] = Field(None, max_length=2000)
@@ -619,6 +622,7 @@ class StoryPatchRequest(BaseModel):
     why_come_back: Optional[list[str]] = None
     narrator: Optional[dict] = None
     generation_profile: Optional[dict] = None
+    episode_template_id: Optional[str] = None
 
 
 class ConceptChooseRequest(BaseModel):
@@ -697,3 +701,77 @@ class PropPatchRequest(BaseModel):
     one_line: Optional[str] = None
     descriptor: Optional[str] = None
     owner_char_id: Optional[str] = None
+
+
+# Phase 3 (spec 2.7, 2.8, 9.2): one episode's documents. Only what is sent is
+# applied (model_fields_set, the list items' too); an item names what it
+# edits by its id. The field lists are the workflow's closed lists
+# (SCRIPT_PATCH_FIELDS & co., compared in tests/test_stories_api_episode.py);
+# values -- the closed lists of emotions, framings, camera motions, modifiers
+# and transitions among them -- are checked by the episode rules when the
+# document is saved (400 with every error), not here, so the rules live in
+# one place (clipping.aistory.workflow.patch_script / patch_storyboard).
+
+class ScriptLinePatch(BaseModel):
+    """One line of ``PATCH /episodes/{ep}/script``'s ``lines``: a speaker of
+    its scene (or the narrator, when the story has one), at most 22 words."""
+    line_id: str
+    text: Optional[str] = None
+    speaker: Optional[str] = None
+    emotion: Optional[str] = None
+    delivery: Optional[str] = None
+
+
+class ScriptScenePatch(BaseModel):
+    """One scene of ``PATCH /episodes/{ep}/script``'s ``scenes``."""
+    scene_id: str
+    summary: Optional[str] = None
+    on_screen_text: Optional[str] = None
+
+
+class ScriptPatchRequest(BaseModel):
+    """PATCH /api/stories/{id}/episodes/{ep}/script. A change re-times the
+    script, clears the script's and the storyboard's approvals, and stales
+    the consistency report and the storyboard's scenes it changed."""
+    lines: Optional[list[ScriptLinePatch]] = None
+    scenes: Optional[list[ScriptScenePatch]] = None
+    hook_on_screen_text: Optional[str] = None
+    cliffhanger_reveal: Optional[str] = None
+    next_episode_teaser: Optional[str] = None
+
+
+class StoryboardShotPatch(BaseModel):
+    """One shot of ``PATCH /episodes/{ep}/storyboard``'s ``shots``: its action
+    names people, the place and props by their tags only (``@char_x``,
+    ``#place_y:variant``, ``%prop_z``)."""
+    shot_id: str
+    framing: Optional[str] = None
+    camera_motion: Optional[str] = None
+    modifiers: Optional[list[str]] = None
+    action: Optional[str] = None
+    keep_still: Optional[bool] = None
+    prompt_override: Optional[str] = None
+
+
+class StoryboardTransitionPatch(BaseModel):
+    """One transition of ``PATCH /episodes/{ep}/storyboard``'s
+    ``transitions``, named by the shot it follows (``after``)."""
+    after: str
+    type: Optional[str] = None
+
+
+class StoryboardPatchRequest(BaseModel):
+    """PATCH /api/stories/{id}/episodes/{ep}/storyboard. A shot whose framing,
+    motion or action changed is resolved again; ``refresh_prompts: true``
+    resolves every prompt from the entities as they are now. A change clears
+    the storyboard's approval."""
+    shots: Optional[list[StoryboardShotPatch]] = None
+    transitions: Optional[list[StoryboardTransitionPatch]] = None
+    refresh_prompts: Optional[bool] = None
+
+
+class StoryApproveRequest(BaseModel):
+    """POST /api/stories/{id}/approve/{doc}'s optional body. ``approve_anyway``
+    (``script:<ep>`` only) approves a script whose consistency check found
+    issues; the approval records it."""
+    approve_anyway: Optional[bool] = None

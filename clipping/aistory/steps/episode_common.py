@@ -12,7 +12,9 @@ common live here, once:
   characters, places (with their existing variant names) and props;
 - :func:`check_episode_preconditions` -- the story is ``ready``; the episode
   is one the season plans; an episode after the first needs the recap of the
-  one before it in ``series_memory`` (written by phase 5's memory step);
+  one before it in ``series_memory`` (written by phase 5's memory step). Its
+  refusals are :class:`EpisodeRefused`, typed so ``workflow`` (the API and
+  the CLI) answers each with its own code from this one implementation;
 - :class:`Budget` -- a step's own time budget, checked **predictively**: a
   call starts only when it could still finish inside the budget, else the
   step ends failed naming what is left (DEC-053/054's rule, applied to a
@@ -56,6 +58,24 @@ SCRIPT_DOC = store_mod.EPISODE_SCRIPT_DOC
 STORYBOARD_DOC = store_mod.EPISODE_STORYBOARD_DOC
 _NOT_A_FOLDER = ("Episode {ep}'s folder (episodes/ep{ep:02d}/) is not a real directory; it is never followed: "
                  "move it away first.")
+
+
+# Why an episode request is refused (:class:`EpisodeRefused`), for a caller
+# that answers each its own way -- the web layer: 409 or 400.
+NOT_READY = "not_ready"
+OUTSIDE_SEASON = "outside_season"
+NO_ARC_ENTRY = "no_arc_entry"
+NO_RECAP = "no_recap"
+
+
+class EpisodeRefused(StepFailed):
+    """:func:`check_episode_preconditions` refuses the episode; ``kind`` says
+    why (``NOT_READY``, ``OUTSIDE_SEASON``, ``NO_ARC_ENTRY``, ``NO_RECAP``).
+    A runner treats it as any other ``StepFailed``."""
+
+    def __init__(self, kind, message):
+        super().__init__(message)
+        self.kind = kind
 
 
 def recap_key(ep) -> str:
@@ -166,29 +186,41 @@ def load_episode_context(ctx) -> EpisodeContext:
     return load_context(stores, ctx.story_id, ctx.ep)
 
 
+def check_story_ready(story) -> None:
+    """:class:`EpisodeRefused` (``NOT_READY``) unless *story*'s derived status
+    is ``ready``: episodes are written for an approved cast, places and
+    season. The first check of :func:`check_episode_preconditions`, callable
+    before an :class:`EpisodeContext` exists (a story that is not ready may
+    not have what one reads)."""
+    try:
+        entities.require_status(story, REQUIRED_STATUS,
+                                "The story is not ready yet: approve the cast, the places and the season first.")
+    except StepFailed as exc:
+        raise EpisodeRefused(NOT_READY, str(exc)) from None
+
+
 def check_episode_preconditions(ctx, ec, *, require_recap=True) -> None:
-    """``StepFailed`` with what to do, before anything is sent, unless the
-    story is ``ready`` (its derived status), *ec*'s episode is one of
-    ``1..season.episodes_planned``, and -- from episode 2 on -- the season's
-    memory holds the recap of the episode before it (``recaps["ep01"]`` for
-    episode 2; phase 5's memory step writes it once an episode is approved).
-    A regenerate works on a script that already exists, so it passes
-    ``require_recap=False``. *ctx* is not read (the web layer and the fast
-    storyboard call this without one)."""
-    entities.require_status(ec.story, REQUIRED_STATUS,
-                            "The story is not ready yet: approve the cast, the places and the season first.")
+    """:class:`EpisodeRefused` (a ``StepFailed``) with what to do, before
+    anything is sent, unless the story is ``ready`` (its derived status),
+    *ec*'s episode is one of ``1..season.episodes_planned``, and -- from
+    episode 2 on -- the season's memory holds the recap of the episode before
+    it (``recaps["ep01"]`` for episode 2; phase 5's memory step writes it once
+    an episode is approved). A regenerate works on a script that already
+    exists, so it passes ``require_recap=False``. *ctx* is not read (the web
+    layer and the fast storyboard call this without one)."""
+    check_story_ready(ec.story)
     planned = ec.season["episodes_planned"] if ec.season else 0
     ep = ec.ep
     if type(ep) is not int or not 1 <= ep <= planned:
-        raise StepFailed(f"The season plans episodes 1 to {planned}; there is no episode {ep!r}.")
+        raise EpisodeRefused(OUTSIDE_SEASON, f"The season plans episodes 1 to {planned}; there is no episode {ep!r}.")
     if ec.arc_entry is None:
-        raise StepFailed(f"The season arc has no entry for episode {ep}; write the season again.")
+        raise EpisodeRefused(NO_ARC_ENTRY, f"The season arc has no entry for episode {ep}; write the season again.")
     if ep >= 2 and require_recap:
-        recaps =(ec.season.get("series_memory") or {}).get("recaps") or {}
+        recaps = (ec.season.get("series_memory") or {}).get("recaps") or {}
         if not recaps.get(recap_key(ep - 1)):
-            raise StepFailed(f"Episode {ep} is written from the recap of episode {ep - 1}, and the season's "
-                             f"memory has none yet: approve episode {ep - 1} and run the memory step (it "
-                             "arrives in phase 5) first.")
+            raise EpisodeRefused(NO_RECAP, (
+                f"Episode {ep} is written from the recap of episode {ep - 1}, and the season's memory has none "
+                f"yet: approve episode {ep - 1} and run the memory step (it arrives in phase 5) first."))
 
 
 # ------------------------------------------------------------------- budget

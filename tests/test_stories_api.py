@@ -657,8 +657,11 @@ def test_a_bad_or_unknown_id_is_a_404_everywhere(api, bad_id, method, suffix, bo
 
 # ============================================================ grammar edges
 
-LATER_STEPS = ["script", "storyboard", "assets", "render", "metadata",
+LATER_STEPS = ["assets", "render", "metadata",
                "memory", "feedback", "propose-next", "rerender", "fast-track", "import"]
+# Phase 3 (stage 8) runs these; on a story that is not ready they wait for it.
+EPISODE_STEPS = ["script", "storyboard"]
+NOT_READY = "The story is not ready yet: approve the cast, the places and the season first."
 
 
 @pytest.mark.parametrize("step", LATER_STEPS)
@@ -670,7 +673,16 @@ def test_a_later_phase_step_is_a_400(api, step):
     assert api.jobs.list_jobs() == []
 
 
-@pytest.mark.parametrize("doc", ["script:1", "storyboard:1", "assets:1"])
+@pytest.mark.parametrize("step", EPISODE_STEPS)
+def test_an_episode_step_waits_for_a_ready_story(api, step):
+    story_id = _with_bible(api)
+    response = api.client.post(f"/api/stories/{story_id}/steps/{step}", json={})
+    assert response.status_code == 409
+    assert response.json()["detail"] == NOT_READY
+    assert api.jobs.list_jobs() == []
+
+
+@pytest.mark.parametrize("doc", ["assets:1"])
 def test_a_later_phase_approval_is_a_400(api, doc):
     story_id = _with_bible(api)
     response = api.client.post(f"/api/stories/{story_id}/approve/{doc}")
@@ -678,8 +690,16 @@ def test_a_later_phase_approval_is_a_400(api, doc):
     assert "later phase" in response.json()["detail"]
 
 
+@pytest.mark.parametrize("doc,needle", [("script:1", "Episode 1 has no script yet"),
+                                        ("storyboard:1", "Episode 1 has no storyboard yet")])
+def test_an_episode_approval_needs_its_document(api, doc, needle):
+    story_id = _with_bible(api)
+    response = api.client.post(f"/api/stories/{story_id}/approve/{doc}")
+    assert response.status_code == 409
+    assert needle in response.json()["detail"]
+
+
 @pytest.mark.parametrize("target", [
-    "scene:1:s02", "hook:1", "cliffhanger:1", "teaser:1",
     "shot:1:sh03", "shot:1:sh03:video", "line:1:l04", "metadata:1:tiktok",
 ])
 def test_a_later_phase_regenerate_target_is_a_400(api, target):
@@ -687,6 +707,15 @@ def test_a_later_phase_regenerate_target_is_a_400(api, target):
     response = api.client.post(f"/api/stories/{story_id}/regenerate", json={"target": target})
     assert response.status_code == 400
     assert "later phase" in response.json()["detail"]
+    assert api.jobs.list_jobs() == []
+
+
+@pytest.mark.parametrize("target", ["scene:1:s02", "hook:1", "cliffhanger:1", "teaser:1"])
+def test_an_episode_regenerate_target_waits_for_a_ready_story(api, target):
+    story_id = _with_bible(api)
+    response = api.client.post(f"/api/stories/{story_id}/regenerate", json={"target": target})
+    assert response.status_code == 409
+    assert response.json()["detail"] == NOT_READY
     assert api.jobs.list_jobs() == []
 
 
@@ -1026,7 +1055,8 @@ def test_the_estimate_of_each_phase_one_step(api):
 
     # Stage 8: the preview has its own estimate (tests/test_style_preview.py).
     assert api.client.get(f"{url}/style_preview").json()["units"] == {"images": 3}
-    assert api.client.get(f"{url}/script").status_code == 400
+    assert api.client.get(f"{url}/assets").status_code == 400
+    assert api.client.get(f"{url}/script", params={"ep": 1}).status_code == 409  # phase 3: waits for a ready story
     assert api.client.get(f"{url}/nope").status_code == 404
 
 

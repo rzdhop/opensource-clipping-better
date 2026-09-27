@@ -37,6 +37,11 @@ Phase 2 (the entity targets; each touches its own item only):
   ``prop:<id>:image`` -- a fresh seed and the note.
 - ``season:<ep>`` -- S2 again for that arc entry.
 
+Phase 3 (the episode targets, ``episode_regenerate``): ``scene:<ep>:<sid>``,
+``hook:<ep>``, ``cliffhanger:<ep>``, ``teaser:<ep>`` and
+``shot:<ep>:<shid>:plan``. :func:`parse_target` reads them with the others:
+one grammar for the web layer, the CLI and this runner.
+
 Every entity regenerate clears that entity's ``approved_at`` -- an approval
 never outlives what it approved; ``approvals.cast``/``places`` re-fold as the
 entity is written -- and ``season:<ep>`` clears ``approvals.season``. An
@@ -62,7 +67,20 @@ CONCEPTS_TARGET = "concepts"
 # (``parse_target``). ``workflow.check_regenerate_target`` accepts both.
 VALID_TARGETS = tuple(f"{BIBLE_PREFIX}{field}" for field in prompts.REGENERATE_TARGETS) + (CONCEPTS_TARGET,)
 
-# Phase 2's target shapes (spec 9.2), as a refusal names them.
+# Phase 3's episode targets (spec 9.2; ``episode_regenerate`` runs them).
+# ``EPISODE_KINDS`` are the first words of their tuples (:func:`parse_target`).
+EPISODE_TARGETS = (
+    "scene:<ep>:<scene_id>",
+    "hook:<ep>",
+    "cliffhanger:<ep>",
+    "teaser:<ep>",
+    "shot:<ep>:<shot_id>:plan",
+)
+FRAMING_TARGETS = ("hook", "cliffhanger", "teaser")
+EPISODE_KINDS = ("scene",) + FRAMING_TARGETS + ("shot",)
+
+# The entity and episode target shapes (spec 9.2) -- every shape
+# :func:`parse_target` reads -- as a refusal names them.
 PLACE_VARIANTS = tuple(dict.fromkeys((schemas.MASTER_PLATE_VARIANT,) + schemas.TIME_VARIANT_CHOICES))
 ENTITY_TARGETS = (
     "character:<char_id>:text",
@@ -73,23 +91,15 @@ ENTITY_TARGETS = (
     "prop:<prop_id>:text",
     "prop:<prop_id>:image",
     "season:<ep>",
-)
+) + EPISODE_TARGETS
 TARGET_SHAPES = VALID_TARGETS + ENTITY_TARGETS
-
-# Phase 3's episode targets (``episode_regenerate.parse_episode_target``).
-# The runner takes them now; they join ``ENTITY_TARGETS`` -- the shapes the
-# web layer accepts through ``parse_target`` -- once workflow and the routes
-# check them (stage 8); until then the web layer still answers later_phase.
-EPISODE_TARGETS = (
-    "scene:<ep>:<scene_id>",
-    "hook:<ep>",
-    "cliffhanger:<ep>",
-    "teaser:<ep>",
-    "shot:<ep>:<shot_id>:plan",
-)
 
 _KINDS = {"character": CHARACTERS, "place": PLACES, "prop": PROPS}
 _EP = re.compile(r"^[1-9][0-9]{0,2}$")
+# An episode's number in a target: the store's 1..99 (``store.EPISODE_MAX``).
+_EPISODE = re.compile(r"^[1-9][0-9]?$")
+_SCENE = re.compile(schemas.SCENE_ID_PATTERN)
+_SHOT = re.compile(schemas.SHOT_ID_PATTERN)
 _EXTRA = re.compile(r"^extra:[0-9]+$")
 
 
@@ -103,18 +113,42 @@ def _note(params):
 
 
 def _invalid(target) -> StepFailed:
-    shapes = TARGET_SHAPES + EPISODE_TARGETS
-    return StepFailed(f"Cannot regenerate {target!r}: the valid targets are {', '.join(shapes)}.")
+    return StepFailed(f"Cannot regenerate {target!r}: the valid targets are {', '.join(TARGET_SHAPES)}.")
+
+
+def parse_episode_target(target):
+    """``("scene", ep, scene_id)``, ``("hook"|"cliffhanger"|"teaser", ep)`` or
+    ``("shot", ep, shot_id)`` for an episode target, None for anything else.
+    The shape only (the episode 1..99, the id patterns), never the story."""
+    if not isinstance(target, str):
+        return None
+    parts = target.split(":")
+    if len(parts) < 2 or not _EPISODE.fullmatch(parts[1]):
+        return None
+    ep = int(parts[1])
+    kind = parts[0]
+    if kind in FRAMING_TARGETS and len(parts) == 2:
+        return (kind, ep)
+    if kind == "scene" and len(parts) == 3 and _SCENE.fullmatch(parts[2]):
+        return ("scene", ep, parts[2])
+    if kind == "shot" and len(parts) == 4 and _SHOT.fullmatch(parts[2]) and parts[3] == "plan":
+        return ("shot", ep, parts[2])
+    return None
 
 
 def parse_target(target):
-    """The phase-2 target *target* as a tuple -- ``("character", id, "text")``,
-    ``("character", id, "image", which)``, ``("character", id, "voice")``,
-    ``("place", id, "text" | "image", [variant])``, ``("prop", id, "text" |
-    "image")``, ``("season", ep)`` -- or None when it is not one. Checks the
-    shape only (the id's pattern, the image names), never the story."""
+    """The entity or episode target *target* as a tuple --
+    ``("character", id, "text")``, ``("character", id, "image", which)``,
+    ``("character", id, "voice")``, ``("place", id, "text" | "image",
+    [variant])``, ``("prop", id, "text" | "image")``, ``("season", ep)``, or
+    an episode target's (:func:`parse_episode_target`; its first word is one
+    of ``EPISODE_KINDS``) -- or None when it is not one. Checks the shape only
+    (the id's pattern, the image names), never the story."""
     if not isinstance(target, str):
         return None
+    episode = parse_episode_target(target)
+    if episode is not None:
+        return episode
     parts = target.split(":")
     if parts[0] == "season":
         if len(parts) == 2 and _EP.fullmatch(parts[1]):
@@ -168,16 +202,15 @@ def run(ctx, *, runner=None, time_fn=time.monotonic, sleep_fn=time.sleep, adapte
 
     parsed = parse_target(target)
     if parsed is None:
+        if is_extra_target(target):
+            raise StepFailed(f"Cannot regenerate {target!r}: extra images arrive in a later phase.")
+        raise _invalid(target)
+    if parsed[0] in EPISODE_KINDS:
         # Imported here: the episode targets pull in the timing engine and
         # shot resolution, which the phase-1/2 targets never need.
         from . import episode_regenerate
 
-        episode = episode_regenerate.parse_episode_target(target)
-        if episode is not None:
-            return episode_regenerate.run(ctx, target, episode, _note(params), runner=runner, time_fn=time_fn)
-        if is_extra_target(target):
-            raise StepFailed(f"Cannot regenerate {target!r}: extra images arrive in a later phase.")
-        raise _invalid(target)
+        return episode_regenerate.run(ctx, target, parsed, _note(params), runner=runner, time_fn=time_fn)
 
     tools = entities.Tools(runner=runner, time_fn=time_fn, sleep_fn=sleep_fn, adapters=adapters,
                            transport=transport)

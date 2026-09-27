@@ -79,6 +79,14 @@ def current_plans(storyboard, script) -> tuple:
     return plans, sources, stale_scenes(storyboard, script) & set(plans)
 
 
+def scenes_to_plan(script, plans, sources, stale) -> list:
+    """The scenes of *script* T1 plans (``current_plans``' three): each with no
+    plan, a stale plan or a fast one, in the script's order. The step plans
+    them; the estimate counts them."""
+    return [scene for scene in script["scenes"]
+            if scene["scene_id"] not in plans or scene["scene_id"] in stale or sources.get(scene["scene_id"]) == FAST]
+
+
 def build(ec, script, plans, sources, previous, *, stale, now) -> tuple:
     """``shots.build_storyboard`` over every scene that has a plan; a scene
     in *stale* (planned from an older revision, not planned again) keeps its
@@ -222,8 +230,7 @@ def run(ctx, *, runner=None, time_fn=time.monotonic) -> dict:
 
     board = episode_common.read_episode(ec, STORYBOARD_DOC)
     plans, sources, stale = current_plans(board, script)
-    todo = [scene for scene in script["scenes"]
-            if scene["scene_id"] not in plans or scene["scene_id"] in stale or sources.get(scene["scene_id"]) == FAST]
+    todo = scenes_to_plan(script, plans, sources, stale)
     total = len(script["scenes"])
     planned, failed, notes = [], [], []
 
