@@ -2444,3 +2444,164 @@ html, body {
     flex-basis: 100%;
   }
 }
+
+/* ============================================================
+   StoryboardPane (phase 3, stage 11): the shot grid, prompts, references and
+   transitions. Additive, prefixed `story-storyboard-` / `story-shot-`.
+   ============================================================ */
+
+.episode-storyboard-header .form-hint {
+  margin-top: 6px;
+}
+
+.story-storyboard-banners {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.story-storyboard-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.story-storyboard-scenes {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin: 14px 0;
+}
+
+.story-storyboard-scene {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.story-storyboard-scene-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.story-storyboard-shots {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.story-storyboard-shot {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.story-storyboard-shot-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.story-shot-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.story-shot-control {
+  flex: 1 1 140px;
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.story-shot-modifiers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.story-shot-subjects {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.story-shot-prompt {
+  margin: 10px 0;
+}
+
+.story-shot-prompt summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  padding: 8px 0;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+}
+
+.story-shot-refs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0;
+}
+
+.story-shot-ref-thumb {
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+
+.story-shot-ref-path {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  overflow-wrap: anywhere;
+}
+
+.story-storyboard-transition {
+  margin: 4px 0;
+}
+
+.story-storyboard-transition-cut {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  text-align: center;
+  margin: 2px 0;
+}
+
+.story-storyboard-transition-select {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.story-storyboard-transition-select .form-select {
+  width: auto;
+  min-width: 140px;
+}
+
+.story-storyboard-approve {
+  margin: 14px 0;
+}
+
+@media (max-width: 600px) {
+  .story-shot-control {
+    flex-basis: 100%;
+  }
+}

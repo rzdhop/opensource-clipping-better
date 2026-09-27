@@ -125,7 +125,18 @@ export default function EpisodeStudio() {
         onChange={refresh}
       />
     ),
-    storyboard: <StoryboardPane data={episode} />,
+    storyboard: (
+      <StoryboardPane
+        episode={episode}
+        characters={story.characters}
+        places={story.places}
+        props={story.props}
+        storyId={storyId}
+        ep={epNumber}
+        inFlightJob={inFlightJob}
+        onChange={refresh}
+      />
+    ),
     preview: <PreviewPane />,
   }
 

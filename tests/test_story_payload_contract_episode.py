@@ -263,3 +263,145 @@ def test_duration_bar_file_exists():
 
 def test_episode_studio_page_exists():
     assert EPISODE_STUDIO.exists(), "EpisodeStudio.jsx is missing"
+
+
+# --------------------------------------------------- stage 11: StoryboardPane.jsx
+
+def test_the_readers_see_storyboard_things():
+    """A broken regex would make every assertion below pass for free."""
+    assert len(_class_fields("StoryboardPatchRequest")) >= 3
+    assert len(_class_fields("StoryboardShotPatch")) >= 5
+    assert len(_class_fields("StoryboardTransitionPatch")) >= 1
+    assert len(workflow.STORYBOARD_PARAMS) == 1
+    assert len(schemas.FRAMINGS) >= 5
+    assert len(schemas.CAMERA_MOTIONS) >= 5
+    assert len(schemas.MODIFIERS) >= 1
+    assert len(schemas.TRANSITIONS) >= 5
+
+
+def test_fast_and_plan_params_together_equal_workflow_storyboard_params():
+    src = STORYBOARD_PANE.read_text(encoding="utf-8")
+    fast_params = _object_literal_keys(src, "fastParams")
+    plan_params = _object_literal_keys(src, "planParams")
+    declared = set(workflow.STORYBOARD_PARAMS)
+    assert fast_params <= declared, (fast_params, declared)
+    assert plan_params <= declared, (plan_params, declared)
+    assert fast_params | plan_params == declared, (fast_params | plan_params, declared)
+
+
+def test_fast_params_sends_fast_true():
+    src = STORYBOARD_PANE.read_text(encoding="utf-8")
+    assert "const fastParams = { fast: true }" in src
+
+
+def test_plan_params_sends_nothing():
+    src = STORYBOARD_PANE.read_text(encoding="utf-8")
+    assert "const planParams = {}" in src
+
+
+# ------------------------------------------------ patchEpisodeStoryboard call sites
+
+def _patch_episode_storyboard_call_sites() -> list[str]:
+    """The literal top-level key of every `patchEpisodeStoryboard(storyId, ep,
+    { ... })` call site in the episode pages."""
+    keys = []
+    for path in EPISODE_SRC.rglob("*.jsx"):
+        src = path.read_text(encoding="utf-8")
+        for match in re.finditer(
+            r"patchEpisodeStoryboard\(\s*storyId,\s*ep,\s*\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*[:,}]", src):
+            keys.append(match.group(1))
+    return keys
+
+
+def test_the_readers_see_patch_episode_storyboard_call_sites():
+    assert len(_patch_episode_storyboard_call_sites()) >= 6
+
+
+def test_every_patch_episode_storyboard_call_site_sends_a_declared_field():
+    declared = _class_fields("StoryboardPatchRequest")
+    sent = set(_patch_episode_storyboard_call_sites())
+    undeclared = sent - declared
+    assert undeclared == set(), (
+        "these patchEpisodeStoryboard(...) call sites send a key StoryboardPatchRequest does not "
+        f"declare, so pydantic drops it and the edit does nothing: {sorted(undeclared)}"
+    )
+
+
+def test_every_shots_item_sent_is_a_declared_storyboard_shot_patch_field():
+    declared = _class_fields("StoryboardShotPatch")
+    found = set()
+    for path in EPISODE_SRC.rglob("*.jsx"):
+        found |= _nested_item_keys(path.read_text(encoding="utf-8"), "shots")
+    assert found, "no `shots: [{ ... }]` item found in the episode pages"
+    undeclared = found - declared
+    assert undeclared == set(), (found, declared)
+    assert "shot_id" in found
+
+
+def test_every_transitions_item_sent_is_a_declared_storyboard_transition_patch_field():
+    declared = _class_fields("StoryboardTransitionPatch")
+    found = set()
+    for path in EPISODE_SRC.rglob("*.jsx"):
+        found |= _nested_item_keys(path.read_text(encoding="utf-8"), "transitions")
+    assert found, "no `transitions: [{ ... }]` item found in the episode pages"
+    undeclared = found - declared
+    assert undeclared == set(), (found, declared)
+    assert "after" in found
+
+
+# ------------------------------------------------------------------- closed lists
+
+def _js_list_literal(src: str, const_name: str) -> set[str]:
+    match = re.search(rf"const {const_name} = \[(.*?)\]\n", src, re.DOTALL)
+    assert match, f"{const_name} not found"
+    return set(re.findall(r"'([a-z_]+)'", match.group(1)))
+
+
+def test_framings_constant_equals_the_schema_exactly():
+    src = STORYBOARD_PANE.read_text(encoding="utf-8")
+    found = _js_list_literal(src, "FRAMINGS")
+    assert found == set(schemas.FRAMINGS), (found, schemas.FRAMINGS)
+
+
+def test_camera_motions_constant_equals_the_schema_exactly():
+    src = STORYBOARD_PANE.read_text(encoding="utf-8")
+    found = _js_list_literal(src, "CAMERA_MOTIONS")
+    assert found == set(schemas.CAMERA_MOTIONS), (found, schemas.CAMERA_MOTIONS)
+
+
+def test_modifiers_constant_equals_the_schema_exactly():
+    src = STORYBOARD_PANE.read_text(encoding="utf-8")
+    found = _js_list_literal(src, "MODIFIERS")
+    assert found == set(schemas.MODIFIERS), (found, schemas.MODIFIERS)
+
+
+def test_transitions_constant_equals_the_schema_exactly():
+    src = STORYBOARD_PANE.read_text(encoding="utf-8")
+    found = _js_list_literal(src, "TRANSITIONS")
+    assert found == set(schemas.TRANSITIONS), (found, schemas.TRANSITIONS)
+
+
+# ------------------------------------------------------- shot:<ep>:<shot_id>:plan
+
+def _shot_plan_regenerate_targets() -> set[str]:
+    seg = r"\$\{[^`}]*\}"
+    pattern = rf"`(shot:{seg}:{seg}:plan)`"
+    literals: list[str] = []
+    for path in EPISODE_SRC.rglob("*.jsx"):
+        literals += re.findall(pattern, path.read_text(encoding="utf-8"))
+    assert literals, "no shot:<ep>:<shot_id>:plan regenerate target found in the episode pages"
+    return {re.sub(r"\$\{[^}]*\}", "<x>", literal) for literal in literals}
+
+
+def test_shot_plan_regenerate_target_matches_the_grammar_shape():
+    templates = _shot_plan_regenerate_targets()
+    assert templates == {"shot:<x>:<x>:plan"}
+    normalized_shapes = {re.sub(r"<[a-z_]+>", "<x>", shape) for shape in regenerate_step.EPISODE_TARGETS}
+    assert templates <= normalized_shapes
+
+
+# --------------------------------------------------------------- error slot
+
+def test_storyboard_pane_renders_its_own_error_slot():
+    src = STORYBOARD_PANE.read_text(encoding="utf-8")
+    assert "story-step-error" in src, "StoryboardPane.jsx has no story-step-error slot"

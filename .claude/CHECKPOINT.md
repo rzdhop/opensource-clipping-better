@@ -1,7 +1,7 @@
 ## IN PROGRESS — AI Story **phase 3** (episode writer: script, storyboard, timing)
 - **Started:** 2026-09-27 by the human ("Phase 2 seems to have been worked on, check an go with phase 3").
   Task class: FULL. Phase 2 checked: closed and pushed (`4280333` == `origin/main`).
-- **Current phase:** 5 IMPLEMENT — stages 0–10 done; next is stage 11 (storyboard pane + preview placeholder + browser check). Plan **approved in chat**
+- **Current phase:** 5 IMPLEMENT — stages 0–11 done; next is stage 12 (E-prompt bench, free links only). Plan **approved in chat**
   ("Go", 2026-09-27).
 - **Plan:** `~/.claude/plans/ai-story-phase-3-episode-writer.md` (stages 0–14, riskiest = stage 6, the
   script/storyboard step runners). **Read it first**: it holds the design, the stage table and the Tier-2 script.
@@ -23,6 +23,11 @@
   `character:char_mangella:voice` (now a gemini/flash-lite-tts voice); DEC-123 cleared her `approved_at`, so
   `approvals.cast` is null and the derived status is `style_approved`. The episode steps refuse until she is
   re-approved. **Ask the human before Tier-2** whether to re-approve her (their data, their choice).
+  Update 13:37 UTC: the live container also regenerated `character:char_kiwilo:voice` (now edge/fr-CA-AntoineNeural),
+  so Kiwilo's approval is cleared too — both leads need re-approval. Someone is tuning voices on the live app.
+- **Throwaway review servers:** `.claude/launch.json` (git-excluded) `phase3-throwaway` (:8012, keys blanked, runs
+  this worktree) + `phase3-dashboard` (Vite :5174 → 8012). Seeded copies in the worktree's `outputs/`:
+  `7733d759c562` (episode 1 written + boarded) and `d0ed782692c3` (no episode).
 - **Context map (EXPLORE, 2026-09-27; detail in the plan §0):** the grammar is pre-registered
   (`workflow.LATER_STEPS/APPROVALS/TARGETS` hold `script, storyboard, scene, hook, cliffhanger, teaser, shot`);
   `ep` is plumbed but unused; episode docs, episode approvals (on the docs — the story's `approvals` is a closed
@@ -44,7 +49,7 @@
 | 8 | workflow + API | **done** (local 4359 / CI 3774 + 555 skipped) |
 | 9 | CLI | **done** (local 4375 / CI 3790 + 555 skipped) |
 | 10 | dashboard: Tabs + EpisodeStudio script pane | **done** (local 4393 / CI 3808 + 555 skipped; build green; browser check in stage 11) |
-| 11 | dashboard: storyboard pane + preview placeholder | — |
+| 11 | dashboard: storyboard pane + preview placeholder | **done** (local 4407 / CI 3822 + 555 skipped; build green; 375/820/1280 reviewed on the phase3 throwaway) |
 | 12 | E-prompt bench (free links only) | — |
 | 13 | merge, deploy, Tier-2 (me at 375 px, human acks) | — |
 | 14 | docs + decisions | — |
