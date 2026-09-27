@@ -257,7 +257,7 @@ def call_json(
     ``ChainError`` for a chain that cannot be parsed, or ``ValueError`` for
     a prompt over the pack budget -- a builder bug, never trimmed here.
     """
-    context.check_budget(system, user)
+    context.check_budget(system, user, budget=prompts.INPUT_BUDGET.get(prompt_id, context.PACK_TOKEN_BUDGET))
 
     if runner is None:
         from clipping.providers import llm as llm_mod

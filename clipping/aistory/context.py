@@ -283,13 +283,85 @@ def build_pack(
     )
 
 
-def check_budget(system, user) -> int:
+def check_budget(system, user, *, budget=PACK_TOKEN_BUDGET) -> int:
     """The estimated input-token count for one call; raises ``ValueError``
-    naming the count when it is over ``PACK_TOKEN_BUDGET`` -- a bug in a
-    builder or an oversized pack, never something to trim silently here."""
+    naming the count when it is over *budget* (``PACK_TOKEN_BUDGET`` unless
+    the caller names a wider one, e.g. E4's ``prompts.INPUT_BUDGET``) -- a bug
+    in a builder or an oversized pack, never something to trim silently here.
+    """
     tokens = estimate_tokens(system, user)
-    if tokens > PACK_TOKEN_BUDGET:
+    if tokens > budget:
         raise ValueError(
-            f"prompt is {tokens} estimated tokens, over the {PACK_TOKEN_BUDGET}-token budget"
+            f"prompt is {tokens} estimated tokens, over the {budget}-token budget"
         )
     return tokens
+
+
+# ============================================================ phase 3 (spec 4.2)
+#
+# The two sections E1-E4/T1/T1r need beyond what ``build_pack`` already
+# renders (spec 2.6, 4.1): the season's cross-episode memory, and a compact
+# reading of the episode's own scene list. Neither goes through ``Pack`` --
+# each phase-3 builder takes its raw source (``season.json``, the episode's
+# scene list) as its own keyword argument and calls these directly, the same
+# way ``prompts._cast_section``/``_places_section`` call ``cast_block``/
+# ``places_block`` above rather than routing through a ``Pack`` field.
+
+_MEMORY_WORD_LIMIT = 150
+_MEMORY_NONE_YET = "none yet"
+
+
+def memory_section(season, ep):
+    """``(text, was_cut)`` for E1/E3's series-memory block (spec 2.6, 4.2).
+
+    Episode 1 opens a season with no history: the literal text
+    ``"none yet"``, never cut. From episode 2 on, the previous episode's
+    recap, the season's still-open hooks and its current relationship state
+    come from *season*'s ``series_memory`` (spec 2.6: ``recaps``,
+    ``open_hooks``, ``relationship_state``, filled in by the S3 step once an
+    episode is approved) -- a season with none yet recorded (a fresh story,
+    or ep 2 written before ep 1 was ever approved) says so per field rather
+    than omitting it silently. Cut to ``_MEMORY_WORD_LIMIT`` words like every
+    other pack section, the cut named exactly as ``cast``/``places`` are.
+    """
+    if ep < 2:
+        return _MEMORY_NONE_YET, False
+
+    memory = (season or {}).get("series_memory") or {}
+    recap = (memory.get("recaps") or {}).get(str(ep - 1))
+    open_hooks = memory.get("open_hooks") or []
+    relationship_state = memory.get("relationship_state") or {}
+
+    lines = ["Series memory:"]
+    lines.append(f"- Previous recap: {recap}" if recap else "- Previous recap: none recorded")
+    if open_hooks:
+        lines.append("- Open hooks: " + "; ".join(open_hooks))
+    if relationship_state:
+        pairs = []
+        for char_id, others in relationship_state.items():
+            for other_id, text in others.items():
+                pairs.append(f"{char_id}/{other_id}: {text}")
+        if pairs:
+            lines.append("- Relationships: " + "; ".join(pairs))
+
+    return trim_words("\n".join(lines), _MEMORY_WORD_LIMIT)
+
+
+def outline_section(scenes, names) -> str:
+    """A compact "function: summary" line per scene of the episode being
+    written (spec 4.2 E2/E3): what the rest of the episode already does, so
+    a scene written on its own (one small artifact per request, DEC-107)
+    still reads as part of one story.
+
+    *names* maps a character id to its name; a scene's ``characters`` (ids)
+    are shown by name when the id is in *names*, by the raw id otherwise --
+    a builder only ever has the names of the characters its own call
+    involves, not the whole story's cast, so a character from a scene
+    outside that set is shown by id rather than guessed at.
+    """
+    lines = ["Episode outline:"]
+    for scene in scenes:
+        who = ", ".join(names.get(cid, cid) for cid in scene.get("characters", []))
+        suffix = f" — {who}" if who else ""
+        lines.append(f"- {scene['scene_id']} ({scene['function']}): {scene['summary']}{suffix}")
+    return "\n".join(lines)

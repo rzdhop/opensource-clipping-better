@@ -1,7 +1,7 @@
 ## IN PROGRESS — AI Story **phase 3** (episode writer: script, storyboard, timing)
 - **Started:** 2026-09-27 by the human ("Phase 2 seems to have been worked on, check an go with phase 3").
   Task class: FULL. Phase 2 checked: closed and pushed (`4280333` == `origin/main`).
-- **Current phase:** 5 IMPLEMENT — stages 0–3 done; next is stage 4 (prompts E1–E4, T1, T1r + context). Plan **approved in chat**
+- **Current phase:** 5 IMPLEMENT — stages 0–4 done; next is stage 5 (shot resolution + fast storyboard + rule pass). Plan **approved in chat**
   ("Go", 2026-09-27).
 - **Plan:** `~/.claude/plans/ai-story-phase-3-episode-writer.md` (stages 0–14, riskiest = stage 6, the
   script/storyboard step runners). **Read it first**: it holds the design, the stage table and the Tier-2 script.
@@ -33,7 +33,7 @@
 | 1 | episode templates + script/storyboard schemas | **done** (local 3800 / CI 3235 + 535 skipped) |
 | 2 | timing engine | **done** (local 3871 / CI 3306 + 535 skipped) |
 | 3 | episode documents in the store | **done** (local 4001 / CI 3436 + 535 skipped) |
-| 4 | prompts E1–E4, T1, T1r + context | — |
+| 4 | prompts E1–E4, T1, T1r + context | **done** (local 4119 / CI 3554 + 535 skipped) |
 | 5 | shot resolution + fast storyboard + rule pass | — |
 | 6 | step runners (RISKIEST) | — |
 | 7 | opt-in voice measurement | — |
