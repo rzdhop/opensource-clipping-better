@@ -3,7 +3,10 @@
 - **Current phase:** 4 CHECKPOINT → 5 IMPLEMENT. **Plan approved** by the human ("Yes go go", 2026-09-28), read as
   also answering Q5 = yes: `feat/ai-story-phase-4` is pushed once at stage 7 so CI records the x86_64 framemd5 key.
   Plan: `~/.claude/plans/ai-story-phase-4-assets-render.md` (stages 0–17, riskiest = stage 6, sequence + audio graph).
-- **Current stage:** 7 committed; **branch push for CI's x86_64 golden key** in progress, then stage 8 (assets step, Opus). Stage 0 done: checkpoint commit **`86e7f4d`** on `main`
+- **Current stage:** 8 (assets step, Opus). Branch pushed once (Q5) at `4f48515`; CI: compile ✓, test ✗ only as designed
+  (unknown x86_64 golden key, read from the public check-run annotation and recorded). The rest of CI's test log needs
+  a sign-in, so **CI's full green is confirmed only at the next push** (Node 20 deprecation notice on checkout@v4 /
+  setup-python@v5 — follow-up). Stage 0 done: checkpoint commit **`86e7f4d`** on `main`
   (parent `1367d75`); worktree `.claude/worktrees/ai-story-phase-4` on `feat/ai-story-phase-4` (node_modules
   symlinked, excluded); **this worktree's `.claude/` files are the live artifacts until the merge**. Stages 1–7 done.
 - **Stage 1 notes for stage 8 (first real caller of the cache):** catch `gencache.JournalError` (not a
@@ -14,9 +17,7 @@
 - **Tier-1 baseline (86e7f4d):** local **4486 passed / 1 skipped** (210 s); CI env (`/tmp/cilibs`) **3901 passed /
   555 skipped** (155 s); compileall clean (`PYTHONPYCACHEPREFIX` in scratch); vite build green to a scratch outDir.
   ffmpeg: host `6.1.1-3ubuntu5`, container `7.1.5-0+deb13u1`. Health: 0 jobs.
-- **Next action:** push `feat/ai-story-phase-4` (repo key, memory `github-push-key`); read the CI golden annotation
-  (`::error title=AI-Story golden render::…`) from the public check-runs API; record the x86_64 key with
-  `tools/render_golden.py`'s format in `tests/fixtures/aistory_golden/framemd5.json`; commit. Then stage 8.
+- **Next action:** review + commit stage 8 when its agent reports; then stage 9 (render + metadata steps).
 - **Stage 7 notes for stages 8/9/10/16:** `runner.render(plan_args={…, story:{story_id, title, language}, inputs:{shots,
   lines, sfx, bgm, overlay, font, word_timings}}, render_dir=episode_render_dir(…, create=True),
   manifest_path=<ep>/render_manifest.json, final_path=episode_file_path(…, "episode_final.mp4", create=True),
@@ -118,7 +119,7 @@
 | 4 | timeline + motion + shot builders [Sonnet] | **done** (local 4899/1, CI 4314/555; 83 new tests; 13/13 real ffmpeg sanity renders) |
 | 5 | ASS text + fonts [Sonnet] | **done** (local 4983/1, CI 4398/555; 84 new tests; libass proofs checked by eye) |
 | 6 | sequence + audio graph (**RISKIEST**) [Opus] | **done** (local 5069/1, CI 4484/555; 86 new tests; real renders of both endings frame- and sample-exact) |
-| 7 | runner, manifest, cache, loudness, golden render, CI (+ one push of the branch) [Opus] | **done** (local 5136/1, CI 4551/555; 67 new tests; golden keys host 6.1.1 + container 7.1.5; x86_64 key pending the branch's CI run) |
+| 7 | runner, manifest, cache, loudness, golden render, CI (+ one push of the branch) [Opus] | **done** (local 5136/1, CI 4551/555; 67 new tests; golden keys host 6.1.1 aarch64, container 7.1.5 aarch64, CI 6.1.1 x86_64 from the pushed run's annotation) |
 | 8 | assets step [Opus] | in progress |
 | 9 | render + metadata steps [Opus] | — |
 | 10 | fast track + completed terminal [Opus] | — |
