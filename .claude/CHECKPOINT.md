@@ -3,10 +3,13 @@
 - **Current phase:** 4 CHECKPOINT → 5 IMPLEMENT. **Plan approved** by the human ("Yes go go", 2026-09-28), read as
   also answering Q5 = yes: `feat/ai-story-phase-4` is pushed once at stage 7 so CI records the x86_64 framemd5 key.
   Plan: `~/.claude/plans/ai-story-phase-4-assets-render.md` (stages 0–17, riskiest = stage 6, sequence + audio graph).
-- **Current stage:** 0 (checkpoint + baseline + worktree). Checkpoint commit = the commit carrying this header on
-  `main` (parent `1367d75`).
-- **Next action:** create worktree `.claude/worktrees/ai-story-phase-4` on `feat/ai-story-phase-4` (node_modules
-  symlinked), Tier-1 baseline both envs + scratch vite build, record host + container `ffmpeg -version`; then stage 1.
+- **Current stage:** 1 (generation cache + journal, Opus). Stage 0 done: checkpoint commit **`86e7f4d`** on `main`
+  (parent `1367d75`); worktree `.claude/worktrees/ai-story-phase-4` on `feat/ai-story-phase-4` (node_modules
+  symlinked, excluded); **this worktree's `.claude/` files are the live artifacts until the merge**.
+- **Tier-1 baseline (86e7f4d):** local **4486 passed / 1 skipped** (210 s); CI env (`/tmp/cilibs`) **3901 passed /
+  555 skipped** (155 s); compileall clean (`PYTHONPYCACHEPREFIX` in scratch); vite build green to a scratch outDir.
+  ffmpeg: host `6.1.1-3ubuntu5`, container `7.1.5-0+deb13u1`. Health: 0 jobs.
+- **Next action:** stage 1 per the plan's §2 "Generation durability" and §3 row 1.
 - **LOAD done:** five artifacts, `05-phase-4-assets-render-metadata.md`, master spec §0, §2.7–2.11, §3, §4,
   §5.1–5.2, §6, §8, §9, §10, §11, §13 read.
 - **EXPLORE map (closed):** render-infra map back (host ffmpeg 6.1.1 arm64 has zoompan/xfade/acrossfade/
@@ -54,8 +57,8 @@
 ### Stage ledger (phase 4)
 | S | Stage | State |
 |---|---|---|
-| 0 | checkpoint + baseline + worktree | in progress |
-| 1 | generation cache + journal [Opus] | — |
+| 0 | checkpoint + baseline + worktree | **done** (`86e7f4d` on `main`; local 4486/1, CI 3901/555) |
+| 1 | generation cache + journal [Opus] | in progress |
 | 2 | audio + font assets [Sonnet] | — |
 | 3 | documents + store [Opus] | — |
 | 4 | timeline + motion + shot builders [Sonnet] | — |
