@@ -1,7 +1,7 @@
 ## CURRENT STATE — AI Story **phase 3 is DONE**. Next: **phase 4**.
 
-- **Stages 0–14 done** on `feat/ai-story-phase-3`, ff-merged to `main` (`d466f83`, the fix round's second deploy)
-  at 0 jobs, backend rebuilt, health OK. **Pushed 2026-09-28** on the human's word ("Push and merge"), together
+- **Stages 0–14 done** on `feat/ai-story-phase-3`, ff-merged to `main`. `main` == `origin/main` == `fb5bbf7`
+  (2026-09-28: phase 3 + the live-clocks merge); the container was rebuilt at that head at 0 jobs, health OK. **Pushed 2026-09-28** on the human's word ("Push and merge"), together
   with the live-clocks fix merged beside it (section below); push key per memory `github-push-key`.
 - **Tier-1 at close:** local **4477 passed / 1 skipped**; CI env **3892 passed / 555 skipped**; compileall clean;
   vite build green (scratch outDir). Baseline at stage 0 was 3737 / 1 (CI 3172 / 535). After the live-clocks
