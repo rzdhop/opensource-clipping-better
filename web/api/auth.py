@@ -319,6 +319,121 @@ def signed_media_request_is_valid(request):
         return False
 
 
+# ---------------------------------------------------------------------------
+# Signed story media (DEC-163)
+#
+# An AI Story episode's final video and cover meet the same two browser-made
+# requests as a clip (<video src>, <a href download>), but under /api/stories/,
+# whose routes have no job_id or filename. Rather than bend the clip rule above
+# to fit, story media gets its own signature, and nothing above this block
+# changes:
+#
+# * its own key context, so a clip signature never verifies here and a story
+#   signature never verifies there;
+# * its own length-prefixed payload ("episode-media", story_id, ep, name, exp);
+# * a closed list of two file names;
+# * a request that must be exactly GET STORY_MEDIA_ROUTE, rebuilt from its own
+#   path parameters -- the shots and voice blobs carry the same three
+#   parameters, and the path equality is what keeps a signature off them.
+#
+# The expiry is media_expiry's, bucketed, so the episode page's 4 s poll hands
+# the player the same URL byte for byte.
+# ---------------------------------------------------------------------------
+
+STORY_MEDIA_KEY_CONTEXT = b"rzc-story-media-v1"
+
+# The only files a story signature can ever open. Everything else of an
+# episode -- its subtitles, ledger view, documents, render folder, the shot
+# images and line takes (DEC-113) -- stays header-only.
+STORY_MEDIA_NAMES = frozenset({"episode_final.mp4", "cover.jpg"})
+
+STORY_MEDIA_ROUTE = "/api/stories/{story_id}/episodes/{ep}/media/{name}"
+
+
+def _story_media_key(token=None):
+    """The story signing key: HMAC of the API token under its own context."""
+    secret = str(token if token is not None else current_token()).encode("utf-8")
+    return hmac.new(secret, STORY_MEDIA_KEY_CONTEXT, hashlib.sha256).digest()
+
+
+def _story_media_payload(story_id, ep, name, exp):
+    """The exact bytes that get signed, every field length-prefixed.
+
+    Signed from the decoded values with ``ep`` as text, so the page's ``1``
+    and the route's ``"1"`` are one signature, and ``"01"`` is another.
+    """
+    fields = ("episode-media", str(story_id), str(ep), str(name), str(int(exp)))
+    return "|".join(f"{len(field)}:{field}" for field in fields).encode("utf-8")
+
+
+def sign_story_media(story_id, ep, name, exp, *, token=None):
+    """The hex signature for one episode file."""
+    return hmac.new(
+        _story_media_key(token), _story_media_payload(story_id, ep, name, exp), hashlib.sha256
+    ).hexdigest()
+
+
+def story_media_path(story_id, ep, name):
+    """STORY_MEDIA_ROUTE for these values, each percent-encoded."""
+    return STORY_MEDIA_ROUTE.format(
+        story_id=quote(str(story_id), safe=""), ep=quote(str(ep), safe=""), name=quote(str(name), safe="")
+    )
+
+
+def story_media_url(story_id, ep, name, *, token=None, now=None, ttl=None):
+    """A signed, expiring URL for one episode file, fetchable with no headers."""
+    exp = media_expiry(now=now, ttl=ttl)
+    sig = sign_story_media(story_id, ep, name, exp, token=token)
+    return f"{story_media_path(story_id, ep, name)}?exp={exp}&sig={sig}"
+
+
+def story_media_signature_is_valid(story_id, ep, name, exp, sig, *, token=None, now=None):
+    """Whether *sig* attests this exact episode file and has not expired.
+
+    Never raises, and never allows on error. The name is checked against
+    STORY_MEDIA_NAMES here, so even a signature the server's own key made over
+    another name opens nothing.
+    """
+    try:
+        if not story_id or not ep or not sig or name not in STORY_MEDIA_NAMES:
+            return False
+        exp_int = int(str(exp).strip())
+        if exp_int <= (time.time() if now is None else float(now)):
+            return False
+        expected = sign_story_media(story_id, ep, name, exp_int, token=token)
+        # Bytes, not str: compare_digest raises on a non-ASCII str.
+        return hmac.compare_digest(str(sig).encode("utf-8"), expected.encode("ascii"))
+    except Exception:  # noqa: BLE001 - fail closed, whatever went wrong
+        return False
+
+
+def signed_story_media_request_is_valid(request):
+    """Whether *request* carries a signature that attests this exact episode file.
+
+    All required: a GET (the clip route answers HEAD with 405, so HEAD is not
+    one); the route parameters ``story_id``, ``ep`` and ``name``; the request
+    path equal to STORY_MEDIA_ROUTE rebuilt from them; ``name`` in
+    STORY_MEDIA_NAMES; a valid HMAC with ``exp`` in the future. Never raises.
+
+    The allow-list is checked here and again in story_media_signature_is_valid,
+    deliberately redundant (as the clip check's ``filename`` is): a mutation
+    test confirms removing either one alone keeps every other file closed.
+    """
+    try:
+        if request.method != "GET":
+            return False
+        params = request.path_params or {}
+        story_id, ep, name = params.get("story_id"), params.get("ep"), params.get("name")
+        if not story_id or not ep or not name or name not in STORY_MEDIA_NAMES:
+            return False
+        if request.url.path != story_media_path(story_id, ep, name):
+            return False
+        query = request.query_params
+        return story_media_signature_is_valid(story_id, ep, name, query.get("exp"), query.get("sig"))
+    except Exception:  # noqa: BLE001 - fail closed, whatever went wrong
+        return False
+
+
 async def require_token(request: "Request"):
     """FastAPI dependency: 401 unless a valid token or media signature is given.
 
@@ -337,6 +452,10 @@ async def require_token(request: "Request"):
     # A browser cannot send a header for a <video src> or an <a href download>,
     # so one signed, expiring, single-file capability is accepted in its place.
     if signed_media_request_is_valid(request):
+        return
+
+    # The same, for an AI Story episode's video and cover (DEC-163).
+    if signed_story_media_request_is_valid(request):
         return
 
     raise HTTPException(

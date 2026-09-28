@@ -3,12 +3,12 @@
 - **Current phase:** 4 CHECKPOINT → 5 IMPLEMENT. **Plan approved** by the human ("Yes go go", 2026-09-28), read as
   also answering Q5 = yes: `feat/ai-story-phase-4` is pushed once at stage 7 so CI records the x86_64 framemd5 key.
   Plan: `~/.claude/plans/ai-story-phase-4-assets-render.md` (stages 0–17, riskiest = stage 6, sequence + audio graph).
-- **Current stage:** 12 (signed story media, Opus — auth). Branch pushed once (Q5) at `4f48515`; CI: compile ✓, test ✗ only as designed
+- **Current stage:** 13 (CLI, Sonnet). Branch pushed once (Q5) at `4f48515`; CI: compile ✓, test ✗ only as designed
   (unknown x86_64 golden key, read from the public check-run annotation and recorded). The rest of CI's test log needs
   a sign-in, so **CI's full green is confirmed only at the next push** (Node 20 deprecation notice on checkout@v4 /
   setup-python@v5 — follow-up). Stage 0 done: checkpoint commit **`86e7f4d`** on `main`
   (parent `1367d75`); worktree `.claude/worktrees/ai-story-phase-4` on `feat/ai-story-phase-4` (node_modules
-  symlinked, excluded); **this worktree's `.claude/` files are the live artifacts until the merge**. Stages 1–11 done.
+  symlinked, excluded); **this worktree's `.claude/` files are the live artifacts until the merge**. Stages 1–12 done.
 - **Stage 1 notes for stage 8 (first real caller of the cache):** catch `gencache.JournalError` (not a
   `NoRunnableLink`) and fail naming the request id; book only when `result.meta` has no `"booked"` (a keyless
   request still books the old way); `book(entry)` sees kind/link/paid/estimate/note/state/request, so step/ep/qty
@@ -17,7 +17,13 @@
 - **Tier-1 baseline (86e7f4d):** local **4486 passed / 1 skipped** (210 s); CI env (`/tmp/cilibs`) **3901 passed /
   555 skipped** (155 s); compileall clean (`PYTHONPYCACHEPREFIX` in scratch); vite build green to a scratch outDir.
   ffmpeg: host `6.1.1-3ubuntu5`, container `7.1.5-0+deb13u1`. Health: 0 jobs.
-- **Next action:** stage 12 per the plan's §2 "Signed story media" and §3 row 12.
+- **Next action:** stage 13 per the plan's §2 "CLI" and §3 row 13.
+- **Stage 12 notes for stages 14/15:** `GET /episodes/{ep}` → `render.media.video_url` / `render.media.cover_url`
+  (null until the file exists); `<video src={video_url}>` keyed by `render.output.sha256` (URL byte-identical across
+  polls within a bucket); `<img src={cover_url}>`; download `href={video_url + '&download=1'}`; on a media
+  `onError` re-fetch the episode page (as `recoverExpiredMedia` does for clips). Route `GET /api/stories/{story_id}/
+  episodes/{ep}/media/{name}` (name ∈ episode_final.mp4, cover.jpg), `Cache-Control: no-cache`, ranges 206;
+  tokenless machines still mint signed URLs (as clip `media_url` does; `require_token` returns early).
 - **Stage 11 notes for stages 12–15:** episode page adds `assets{doc, consistency, fingerprint none|current|stale,
   approved_at, shots[{shot_id, scene_id, state, image_name, route, consistency, provider, model, seed, note,
   est_usd, generated_at, locked, approved, pending, target}], lines[{line_id, scene_id, speaker, voiced, voice,
@@ -171,8 +177,8 @@
 | 9 | render + metadata steps [Opus] | **done** (local 5286/1, CI 4701/555; 103 new tests; e2e 67.3 s FR episode rendered + metadata pack) |
 | 10 | fast track + completed terminal [Opus] | **done** (local 5366/1, CI 4766/570; 80 new tests, 15 worker cases skip in CI like every pydantic-backed worker test) |
 | 11 | workflow + API [Opus] | **done** (local 5426/1, CI 4787/609; 67 new tests; later-phase pins moved in 6 pre-existing test files) |
-| 12 | signed story media [Opus] | in progress |
-| 13 | CLI [Sonnet] | — |
+| 12 | signed story media [Opus] | **done** (local 5535/1, CI 4828/677; 109 new tests; auth.py +119 lines, none removed) |
+| 13 | CLI [Sonnet] | in progress |
 | 14 | dashboard: storyboard assets + fast track [Sonnet] | — |
 | 15 | dashboard: Preview [Sonnet] | — |
 | 16 | merge, deploy, Tier-2 (me; human watches on the phone) | — |

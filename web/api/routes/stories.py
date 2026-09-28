@@ -74,7 +74,11 @@ A story is a folder under ``outputs/stories/<story_id>/`` kept by
   /{id}/episodes/{ep}/assets``); its image is served by ``GET
   /{id}/episodes/{ep}/shots/{name}`` behind the token (DEC-113). The episode
   page gains the assets, the render, the metadata pack and the episode's
-  ledger (``workflow.episode_outputs``).
+  ledger (``workflow.episode_outputs``). The final video and the cover are
+  served by ``GET /{id}/episodes/{ep}/media/{name}``, behind the token too,
+  which also opens -- for that one file -- with the signed URL the episode
+  page mints for it (DEC-163: a ``<video src>`` and an ``<a download>`` cannot
+  send the header).
 
 Every ``{story_id}`` is checked against the store's id rule before anything
 else, so a malformed id is a 404 and never reaches a path; an unknown one is a
@@ -118,7 +122,7 @@ from clipping.aistory.steps import style_preview as preview_step
 from clipping.providers import registry
 
 from .. import store, worker
-from ..auth import require_token
+from ..auth import require_token, story_media_url
 from ..models import (
     AssetsPatchRequest,
     AssetsStepParams,
@@ -169,6 +173,12 @@ _EPISODE_IN_PATH = re.compile(r"^[1-9][0-9]?$")
 # Phase 4: what GET /{id}/episodes/{ep}/shots/{name} serves -- a shot's image,
 # named by its shot (the store's own pattern).
 _SHOT_NAME = re.compile(schemas.SHOT_IMAGE_NAME_PATTERN)
+# Phase 4: what GET /{id}/episodes/{ep}/media/{name} serves -- the episode's
+# final video and its cover, exactly the files a story media signature may
+# open (auth.STORY_MEDIA_NAMES, DEC-163) -- and the field each fills in the
+# episode page's render.media.
+_EPISODE_MEDIA_TYPES = {"episode_final.mp4": "video/mp4", "cover.jpg": "image/jpeg"}
+_EPISODE_MEDIA_FIELDS = (("video_url", "episode_final.mp4"), ("cover_url", "cover.jpg"))
 
 # Phase 4: the params each new step's job carries (only what was sent).
 _STEP_PARAMS = {"assets": AssetsStepParams, "render": RenderStepParams, "fast-track": FastTrackStepParams}
@@ -1062,9 +1072,22 @@ def _episode_jobs(story_id, ep) -> list:
 
 def _episode_media(story_id, ep, render) -> dict:
     """The episode's video and cover as the dashboard plays and shows them:
-    ``{"video_url", "cover_url"}``. None until stage 12 signs story media
-    (DEC-163: a URL minted here, per request, never stored)."""
-    return {"video_url": None, "cover_url": None}
+    ``{"video_url", "cover_url"}``, each the signed URL of ``GET
+    /{id}/episodes/{ep}/media/{name}`` for that one file
+    (``auth.story_media_url``, DEC-163), or None while the file is not there
+    as a regular file (``StoryStore.episode_file_path``: a symlink is never
+    offered, as it is never served). Minted here, per request, never stored;
+    the expiry is bucketed, so the dashboard's poll gets the same URL byte for
+    byte and the player never restarts."""
+    stories = _stories()
+    media = {}
+    for field, name in _EPISODE_MEDIA_FIELDS:
+        try:
+            present = os.path.isfile(stories.episode_file_path(story_id, ep, name))
+        except KeyError:
+            present = False
+        media[field] = story_media_url(story_id, ep, name) if present else None
+    return media
 
 
 def _episode_page(stories, story, ep) -> dict:
@@ -1615,8 +1638,9 @@ async def get_episode(story_id: str, ep: str) -> dict:
 
     (``workflow.episode_view``; phase 4's ``assets``, ``render``,
     ``metadata`` and ``ledger`` are ``workflow.episode_outputs``', which says
-    what each holds; ``media`` is filled by stage 12, None until then). 404
-    for an unknown story; 400 for an episode number the season does not plan
+    what each holds; ``media`` a signed URL per file that exists:
+    ``_episode_media``). 404 for an unknown story; 400 for an episode number
+    the season does not plan
     (``1`` to ``episodes_planned``; 1 to 99 before a season); 200 with nulls
     before anything is written; 500 with one sentence for a document that
     does not validate. Calls nothing; what it hashes (images, audio, the
@@ -1726,6 +1750,43 @@ async def episode_voice(story_id: str, ep: str, name: str):
         filename=name,
         content_disposition_type="inline",
         headers={"Cache-Control": "no-store"},
+    )
+
+
+@router.get("/{story_id}/episodes/{ep}/media/{name}")
+async def episode_media(story_id: str, ep: str, name: str, download: bool = False):
+    """The episode's final video or its cover: ``episode_final.mp4`` or
+    ``cover.jpg``, nothing else.
+
+    The episode number and the name are checked before a path is built, and
+    the file is served only as a regular file directly in the episode's real
+    folder -- no symlink at any level (``StoryStore.episode_file_path``).
+    Anything else, another story's file included, is a 404. Behind the token
+    like every story route; ``require_token`` also lets through, for this one
+    file, the signed URL the episode page mints (DEC-163), since a ``<video
+    src>`` and an ``<a download>`` cannot send the header.
+
+    Range requests answer 206 (``FileResponse``); ``no-cache`` keeps the
+    browser's copy but revalidates it by its ETag, because a render again
+    reuses the name. Inline by default; ``?download=1`` makes it an
+    attachment -- not part of the signature, it grants nothing (the clip
+    route's rule, ``files.serve_output``).
+    """
+    _check_id(story_id)
+    if _EPISODE_IN_PATH.fullmatch(ep) is None or name not in _EPISODE_MEDIA_TYPES:
+        raise HTTPException(status_code=404, detail="File not found")
+    try:
+        path = _stories().episode_file_path(story_id, int(ep), name)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="File not found") from None
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(
+        path,
+        media_type=_EPISODE_MEDIA_TYPES[name],
+        filename=name,
+        content_disposition_type="attachment" if download else "inline",
+        headers={"Cache-Control": "no-cache"},
     )
 
 
