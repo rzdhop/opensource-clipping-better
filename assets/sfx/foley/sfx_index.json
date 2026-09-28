@@ -1,0 +1,41 @@
+{
+  "$schema": "sfx_index_v1",
+  "pack": "foley",
+  "cues": {
+    "clay_squish": {
+      "file": "foley/clay_squish.wav",
+      "duration_s": 0.4,
+      "sha256": "58e5ec193d9c6434434b4079376d269fb154101d0094a0754a89fa1a4d127ff9",
+      "licence": "self-made",
+      "source": "tools/make_sfx.py v1"
+    },
+    "footsteps_felt": {
+      "file": "foley/footsteps_felt.wav",
+      "duration_s": 0.65,
+      "sha256": "a2f8fd56639c4f616f616a865760b4472af49cadd9141be33fc430edb8211381",
+      "licence": "self-made",
+      "source": "tools/make_sfx.py v1"
+    },
+    "paper_rustle": {
+      "file": "foley/paper_rustle.wav",
+      "duration_s": 0.8,
+      "sha256": "ab149681fa6bbef55cb0e9630f41aea3673700045a47c92e13b4f90ae46279f1",
+      "licence": "self-made",
+      "source": "tools/make_sfx.py v1"
+    },
+    "tiny_bell": {
+      "file": "foley/tiny_bell.wav",
+      "duration_s": 0.6,
+      "sha256": "a42150f0bdf8ff04d080af0e0972a23686bfbff8b2436a2c95f9a40ff685698a",
+      "licence": "self-made",
+      "source": "tools/make_sfx.py v1"
+    },
+    "wood_knock": {
+      "file": "foley/wood_knock.wav",
+      "duration_s": 0.46,
+      "sha256": "c63b8f9fef494c5c7216fae466849ff68b1303356c37a629c54ebb53653c6804",
+      "licence": "self-made",
+      "source": "tools/make_sfx.py v1"
+    }
+  }
+}

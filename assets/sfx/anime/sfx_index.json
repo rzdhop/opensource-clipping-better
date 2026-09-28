@@ -1,0 +1,41 @@
+{
+  "$schema": "sfx_index_v1",
+  "pack": "anime",
+  "cues": {
+    "chime": {
+      "file": "anime/chime.wav",
+      "duration_s": 1.2,
+      "sha256": "b4091b9518172ba785f8ab151ff58e2b900680e7ff60a6400e2545e29ce367db",
+      "licence": "self-made",
+      "source": "tools/make_sfx.py v1"
+    },
+    "heartbeat": {
+      "file": "anime/heartbeat.wav",
+      "duration_s": 0.93,
+      "sha256": "822912de1f1185896b4920f4667fa46f25c2843c7735508aa54422f5d63bd5fd",
+      "licence": "self-made",
+      "source": "tools/make_sfx.py v1"
+    },
+    "impact_hit": {
+      "file": "anime/impact_hit.wav",
+      "duration_s": 0.4,
+      "sha256": "a45e5055807281a973f42227b0fe57f3fcdae30d1686565e8f6764e49bbcbc49",
+      "licence": "self-made",
+      "source": "tools/make_sfx.py v1"
+    },
+    "rain_loop": {
+      "file": "anime/rain_loop.wav",
+      "duration_s": 2.5,
+      "sha256": "56d14fb01ab8076b6abca5afb83bf92e5ac2e7dd77e312bf6fe9412a7af33c47",
+      "licence": "self-made",
+      "source": "tools/make_sfx.py v1"
+    },
+    "whoosh_sharp": {
+      "file": "anime/whoosh_sharp.wav",
+      "duration_s": 0.45,
+      "sha256": "119230d480933b124b254edb40facf8e6af63d652df7a223954c722f87e21495",
+      "licence": "self-made",
+      "source": "tools/make_sfx.py v1"
+    }
+  }
+}

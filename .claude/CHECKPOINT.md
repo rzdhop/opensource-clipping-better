@@ -3,9 +3,9 @@
 - **Current phase:** 4 CHECKPOINT → 5 IMPLEMENT. **Plan approved** by the human ("Yes go go", 2026-09-28), read as
   also answering Q5 = yes: `feat/ai-story-phase-4` is pushed once at stage 7 so CI records the x86_64 framemd5 key.
   Plan: `~/.claude/plans/ai-story-phase-4-assets-render.md` (stages 0–17, riskiest = stage 6, sequence + audio graph).
-- **Current stage:** 2 (audio + font assets, Sonnet). Stage 0 done: checkpoint commit **`86e7f4d`** on `main`
+- **Current stage:** 3 (documents + store, Opus). Stage 0 done: checkpoint commit **`86e7f4d`** on `main`
   (parent `1367d75`); worktree `.claude/worktrees/ai-story-phase-4` on `feat/ai-story-phase-4` (node_modules
-  symlinked, excluded); **this worktree's `.claude/` files are the live artifacts until the merge**. Stage 1 done.
+  symlinked, excluded); **this worktree's `.claude/` files are the live artifacts until the merge**. Stages 1–2 done.
 - **Stage 1 notes for stage 8 (first real caller of the cache):** catch `gencache.JournalError` (not a
   `NoRunnableLink`) and fail naming the request id; book only when `result.meta` has no `"booked"` (a keyless
   request still books the old way); `book(entry)` sees kind/link/paid/estimate/note/state/request, so step/ep/qty
@@ -14,7 +14,10 @@
 - **Tier-1 baseline (86e7f4d):** local **4486 passed / 1 skipped** (210 s); CI env (`/tmp/cilibs`) **3901 passed /
   555 skipped** (155 s); compileall clean (`PYTHONPYCACHEPREFIX` in scratch); vite build green to a scratch outDir.
   ffmpeg: host `6.1.1-3ubuntu5`, container `7.1.5-0+deb13u1`. Health: 0 jobs.
-- **Next action:** stage 2 per the plan's §2 "Audio and font assets" and §3 row 2.
+- **Next action:** stage 3 per the plan's §2 "Documents" and §3 row 3.
+- **Stage 2 notes for stages 4/6:** SFX WAVs are 22.05 kHz mono 16-bit (upsample to 48 kHz stereo in the mix);
+  `assets/overlays/paper_texture.png` 256×256 8-bit grey, no alpha; `audio_assets.resolve_sfx/pick_track` return
+  `abs_path`, `sha256`, `licence` for the manifest; a shared cue lives in its alphabetically-first pack.
 - **LOAD done:** five artifacts, `05-phase-4-assets-render-metadata.md`, master spec §0, §2.7–2.11, §3, §4,
   §5.1–5.2, §6, §8, §9, §10, §11, §13 read.
 - **EXPLORE map (closed):** render-infra map back (host ffmpeg 6.1.1 arm64 has zoompan/xfade/acrossfade/
@@ -64,8 +67,8 @@
 |---|---|---|
 | 0 | checkpoint + baseline + worktree | **done** (`86e7f4d` on `main`; local 4486/1, CI 3901/555) |
 | 1 | generation cache + journal [Opus] | **done** (local 4562/1, CI 3977/555; 76 new tests) |
-| 2 | audio + font assets [Sonnet] | in progress |
-| 3 | documents + store [Opus] | — |
+| 2 | audio + font assets [Sonnet] | **done** (local 4584/1, CI 3999/555; 22 new tests; +1.9 MB binaries) |
+| 3 | documents + store [Opus] | in progress |
 | 4 | timeline + motion + shot builders [Sonnet] | — |
 | 5 | ASS text + fonts [Sonnet] | — |
 | 6 | sequence + audio graph (**RISKIEST**) [Opus] | — |

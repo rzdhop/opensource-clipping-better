@@ -1,0 +1,41 @@
+{
+  "$schema": "sfx_index_v1",
+  "pack": "gentle",
+  "cues": {
+    "birds": {
+      "file": "gentle/birds.wav",
+      "duration_s": 0.641,
+      "sha256": "dde633ee1a54df71996311ebee621dd69ece01c55ec1fec487bdd296f74542e4",
+      "licence": "self-made",
+      "source": "tools/make_sfx.py v1"
+    },
+    "footsteps_grass": {
+      "file": "gentle/footsteps_grass.wav",
+      "duration_s": 0.63,
+      "sha256": "2b8fe082ac3cc8f827f383457eb76904998e4273e350c967ff6a5a1b23ee299a",
+      "licence": "self-made",
+      "source": "tools/make_sfx.py v1"
+    },
+    "page_turn": {
+      "file": "gentle/page_turn.wav",
+      "duration_s": 0.4,
+      "sha256": "4bc70233ba6b5973bafdd2dfd388410263849d48c4e06799392958fb5ebb3bf8",
+      "licence": "self-made",
+      "source": "tools/make_sfx.py v1"
+    },
+    "twinkle": {
+      "file": "cartoon_soft/twinkle.wav",
+      "duration_s": 0.64,
+      "sha256": "b9764717291523a587a79a1be60779018fe05d5b379183319147e0a7e14462fd",
+      "licence": "self-made",
+      "source": "tools/make_sfx.py v1"
+    },
+    "wind_soft": {
+      "file": "gentle/wind_soft.wav",
+      "duration_s": 2.5,
+      "sha256": "17624bf5fa33f0065752559cbaf988085f035f8139f4be9ac9219cbbf2e57782",
+      "licence": "self-made",
+      "source": "tools/make_sfx.py v1"
+    }
+  }
+}

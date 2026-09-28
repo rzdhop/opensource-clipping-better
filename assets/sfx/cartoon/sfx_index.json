@@ -1,0 +1,41 @@
+{
+  "$schema": "sfx_index_v1",
+  "pack": "cartoon",
+  "cues": {
+    "boing": {
+      "file": "cartoon/boing.wav",
+      "duration_s": 0.5,
+      "sha256": "d4e738a3f2f032bcf88f18d83552542c4ef0de7bb0f14c23884412274db68982",
+      "licence": "self-made",
+      "source": "tools/make_sfx.py v1"
+    },
+    "honk": {
+      "file": "cartoon/honk.wav",
+      "duration_s": 0.3,
+      "sha256": "70d2e2475a198924a8b61f7b9ead47274b936142b39ac5c3f08cfc4e39529d7c",
+      "licence": "self-made",
+      "source": "tools/make_sfx.py v1"
+    },
+    "pop": {
+      "file": "cartoon/pop.wav",
+      "duration_s": 0.12,
+      "sha256": "6ce5324249d16966eb8cae01af05e3c2d09e047a92c31165db445ecbd3805753",
+      "licence": "self-made",
+      "source": "tools/make_sfx.py v1"
+    },
+    "record_scratch": {
+      "file": "cartoon/record_scratch.wav",
+      "duration_s": 0.5,
+      "sha256": "aa00ae36736771c343aa9acfc12a73d075fa6bf0d330390fe508a7944e81e1f5",
+      "licence": "self-made",
+      "source": "tools/make_sfx.py v1"
+    },
+    "slide_whistle": {
+      "file": "cartoon/slide_whistle.wav",
+      "duration_s": 0.8,
+      "sha256": "002be1d91aa88710fe9aa4c0a69be1ad46f9c0ae0488ec8caf753b7021f78746",
+      "licence": "self-made",
+      "source": "tools/make_sfx.py v1"
+    }
+  }
+}

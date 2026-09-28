@@ -1,0 +1,55 @@
+{
+  "$schema": "sfx_index_v1",
+  "pack": "soap",
+  "cues": {
+    "door_slam": {
+      "file": "soap/door_slam.wav",
+      "duration_s": 0.45,
+      "sha256": "d06cbaa13f87129fa1a8ba35fad6aaa5df94a7890e16bfcd4f6b7abba89171ad",
+      "licence": "self-made",
+      "source": "tools/make_sfx.py v1"
+    },
+    "dramatic_sting": {
+      "file": "soap/dramatic_sting.wav",
+      "duration_s": 1.5,
+      "sha256": "7e9122c6247b4f90bf7e33dfbe128e0494472cde7fdae80c246c84fc900be4e7",
+      "licence": "self-made",
+      "source": "tools/make_sfx.py v1"
+    },
+    "gasp_crowd": {
+      "file": "soap/gasp_crowd.wav",
+      "duration_s": 0.5,
+      "sha256": "77b9403c298b7bdb4ca9f1258499950273cf6fecfdd5fe81a572c0549134f407",
+      "licence": "self-made",
+      "source": "tools/make_sfx.py v1"
+    },
+    "heartbeat": {
+      "file": "anime/heartbeat.wav",
+      "duration_s": 0.93,
+      "sha256": "822912de1f1185896b4920f4667fa46f25c2843c7735508aa54422f5d63bd5fd",
+      "licence": "self-made",
+      "source": "tools/make_sfx.py v1"
+    },
+    "phone_ring": {
+      "file": "soap/phone_ring.wav",
+      "duration_s": 0.95,
+      "sha256": "1f166b74c50d208bcade3cd7c18bb691374055b1d7222e5fbb385db6bd1b0713",
+      "licence": "self-made",
+      "source": "tools/make_sfx.py v1"
+    },
+    "slap": {
+      "file": "soap/slap.wav",
+      "duration_s": 0.15,
+      "sha256": "ed3288813f98fe3a1eb1a8481acca3eaf6ac6144fbe58cc4534a6cab61a840b1",
+      "licence": "self-made",
+      "source": "tools/make_sfx.py v1"
+    },
+    "waves_soft": {
+      "file": "soap/waves_soft.wav",
+      "duration_s": 2.5,
+      "sha256": "2db6d14dec1e65f3c4e242b8bb1b4924bbaf19b0f45ac24fdddcadab2ee9238f",
+      "licence": "self-made",
+      "source": "tools/make_sfx.py v1"
+    }
+  }
+}

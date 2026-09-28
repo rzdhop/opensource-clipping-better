@@ -1,0 +1,41 @@
+{
+  "$schema": "sfx_index_v1",
+  "pack": "real",
+  "cues": {
+    "breath": {
+      "file": "real/breath.wav",
+      "duration_s": 1.5,
+      "sha256": "60fee2129b90bf299d72a29e5ccb1c306b93133e44c2d859bcb75c75c724e146",
+      "licence": "self-made",
+      "source": "tools/make_sfx.py v1"
+    },
+    "car_pass": {
+      "file": "real/car_pass.wav",
+      "duration_s": 2.0,
+      "sha256": "19347f958ab8c2c08914c6aedeb5b021f4821a7f242d481a9ddf20549f8c8d69",
+      "licence": "self-made",
+      "source": "tools/make_sfx.py v1"
+    },
+    "footsteps_concrete": {
+      "file": "real/footsteps_concrete.wav",
+      "duration_s": 0.59,
+      "sha256": "0e69ea8dd48cf40cc1943817af3230a6155f34d33ad1a2901f79f8a3ae2e59fd",
+      "licence": "self-made",
+      "source": "tools/make_sfx.py v1"
+    },
+    "phone_buzz": {
+      "file": "real/phone_buzz.wav",
+      "duration_s": 1.0,
+      "sha256": "4f3da535439c6436d5c33b9746acb339f9b8196dd55471950e9fd02103c6ef73",
+      "licence": "self-made",
+      "source": "tools/make_sfx.py v1"
+    },
+    "room_tone": {
+      "file": "real/room_tone.wav",
+      "duration_s": 2.5,
+      "sha256": "700ff1ed9bb1170d6fcf78e185699ae62565bf0bca74fa1170fb8100fb4e4efb",
+      "licence": "self-made",
+      "source": "tools/make_sfx.py v1"
+    }
+  }
+}

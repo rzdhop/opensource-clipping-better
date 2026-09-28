@@ -1,0 +1,187 @@
+{
+  "$schema": "bgm_index_v1",
+  "tracks": [
+    {
+      "file": "chill/alex-morgan-background-music-545525.mp3",
+      "moods": [
+        "warm_family",
+        "quirky_marimba"
+      ],
+      "duration_s": 159.744,
+      "bpm": null,
+      "licence": "shipped with Clips, source unrecorded",
+      "source": "assets/bgm (Clips mode)"
+    },
+    {
+      "file": "chill/alex-morgan-peaceful-cafe-jazz-relaxing-coffee-shop-541031.mp3",
+      "moods": [
+        "noir_jazz",
+        "quirky_ukulele"
+      ],
+      "duration_s": 132.672,
+      "bpm": null,
+      "licence": "shipped with Clips, source unrecorded",
+      "source": "assets/bgm (Clips mode)"
+    },
+    {
+      "file": "epic/alex-morgan-rock-rock-music-545492.mp3",
+      "moods": [
+        "battle_synth"
+      ],
+      "duration_s": 32.184,
+      "bpm": null,
+      "licence": "shipped with Clips, source unrecorded",
+      "source": "assets/bgm (Clips mode)"
+    },
+    {
+      "file": "epic/jonasblakewood-adventure-trailer-528060.mp3",
+      "moods": [
+        "whimsical_adventure",
+        "cartoon_chase"
+      ],
+      "duration_s": 135.027,
+      "bpm": null,
+      "licence": "shipped with Clips, source unrecorded",
+      "source": "assets/bgm (Clips mode)"
+    },
+    {
+      "file": "epic/trailer-score-room-epic-cinematic-thriller-538890.mp3",
+      "moods": [
+        "telenovela_tension"
+      ],
+      "duration_s": 159.72,
+      "bpm": null,
+      "licence": "shipped with Clips, source unrecorded",
+      "source": "assets/bgm (Clips mode)"
+    },
+    {
+      "file": "sad/soulprodmusic-room-beautiful-melancholy-calm-piano-improvisation-126608.mp3",
+      "moods": [
+        "emotional_piano",
+        "lullaby_piano"
+      ],
+      "duration_s": 180.036,
+      "bpm": null,
+      "licence": "shipped with Clips, source unrecorded",
+      "source": "assets/bgm (Clips mode)"
+    },
+    {
+      "file": "sad/tomomi_kato-silhouette-2026ver-486531.mp3",
+      "moods": [
+        "gentle_strings"
+      ],
+      "duration_s": 139.624,
+      "bpm": null,
+      "licence": "shipped with Clips, source unrecorded",
+      "source": "assets/bgm (Clips mode)"
+    },
+    {
+      "file": "sad/vifotofreesounds-1800s-ambient-mood-486673.mp3",
+      "moods": [
+        "dark_ambient"
+      ],
+      "duration_s": 209.58,
+      "bpm": null,
+      "licence": "shipped with Clips, source unrecorded",
+      "source": "assets/bgm (Clips mode)"
+    },
+    {
+      "file": "suspense/the_mountain-cinematic-mood-129193.mp3",
+      "moods": [
+        "anime_tension"
+      ],
+      "duration_s": 183.04,
+      "bpm": null,
+      "licence": "shipped with Clips, source unrecorded",
+      "source": "assets/bgm (Clips mode)"
+    },
+    {
+      "file": "suspense/the_mountain-epic-mood-129192.mp3",
+      "moods": [
+        "pulse_thriller",
+        "suspense_sting"
+      ],
+      "duration_s": 125.753,
+      "bpm": null,
+      "licence": "shipped with Clips, source unrecorded",
+      "source": "assets/bgm (Clips mode)"
+    },
+    {
+      "file": "suspense/virtualvisualviews-dueling-music-box-horror-373912.mp3",
+      "moods": [
+        "suspense_pizzicato",
+        "music_box"
+      ],
+      "duration_s": 297.091,
+      "bpm": null,
+      "licence": "shipped with Clips, source unrecorded",
+      "source": "assets/bgm (Clips mode)"
+    },
+    {
+      "file": "upbeat/alex-morgan-gentle-baby-sleep-lullaby-dream-548647.mp3",
+      "moods": [
+        "lullaby_piano",
+        "warm_family"
+      ],
+      "duration_s": 196.752,
+      "bpm": null,
+      "licence": "shipped with Clips, source unrecorded",
+      "source": "assets/bgm (Clips mode)"
+    },
+    {
+      "file": "upbeat/alex-morgan-hanuman-devotional-song-548645.mp3",
+      "moods": [
+        "sitcom_bounce",
+        "light_mischief"
+      ],
+      "duration_s": 186.864,
+      "bpm": null,
+      "licence": "shipped with Clips, source unrecorded",
+      "source": "assets/bgm (Clips mode)"
+    },
+    {
+      "file": "upbeat/alex-morgan-nature-ambient-548640.mp3",
+      "moods": [
+        "tropical_drama",
+        "toy_orchestra"
+      ],
+      "duration_s": 177.72,
+      "bpm": null,
+      "licence": "shipped with Clips, source unrecorded",
+      "source": "assets/bgm (Clips mode)"
+    },
+    {
+      "file": "upbeat/tolsetmusic-talking-about-love-romantic-piano-background-music-542958.mp3",
+      "moods": [
+        "warm_family"
+      ],
+      "duration_s": 128.731,
+      "bpm": null,
+      "licence": "shipped with Clips, source unrecorded",
+      "source": "assets/bgm (Clips mode)"
+    }
+  ],
+  "notes": {
+    "anime_tension": "suspense/the_mountain-cinematic-mood: tense cinematic pad fits an anime confrontation beat.",
+    "emotional_piano": "sad/soulprodmusic-...-calm-piano-improvisation: solo piano is the direct instrumental match.",
+    "battle_synth": "epic/alex-morgan-rock-rock-music: the only driving, distorted, high-energy track in the set.",
+    "quirky_ukulele": "chill/alex-morgan-...-cafe-jazz: light acoustic-leaning jazz is the closest thing to a quirky, unhurried ukulele vibe on hand.",
+    "sitcom_bounce": "upbeat/alex-morgan-hanuman-devotional-song: the most rhythmic, energetic track in the upbeat folder; an approximation, no true sitcom-bounce cue exists yet.",
+    "cartoon_chase": "epic/jonasblakewood-adventure-trailer: propulsive trailer energy reads as chase music.",
+    "dark_ambient": "sad/vifotofreesounds-1800s-ambient-mood: moody, sparse ambience despite living in the 'sad' folder.",
+    "pulse_thriller": "suspense/the_mountain-epic-mood: a driving, pulsing cinematic cue.",
+    "noir_jazz": "chill/alex-morgan-...-cafe-jazz: literally a cafe jazz track -- the direct fit for noir jazz.",
+    "quirky_marimba": "chill/alex-morgan-background-music: neutral, light instrumental background stands in for a plucky marimba cue.",
+    "toy_orchestra": "upbeat/alex-morgan-nature-ambient: light, airy instrumentation closest to a playful toy-orchestra feel.",
+    "suspense_pizzicato": "suspense/virtualvisualviews-dueling-music-box-horror: a literal music box (plucked, pizzicato-like) with a horror edge.",
+    "whimsical_adventure": "epic/jonasblakewood-adventure-trailer: named 'adventure' -- the direct match.",
+    "warm_family": "chill/alex-morgan-background-music, upbeat/alex-morgan-gentle-baby-sleep-lullaby-dream and upbeat/tolsetmusic-...-romantic-piano: three warm, gentle, family-safe instrumentals give this common default mood a real pool to pick from.",
+    "light_mischief": "upbeat/alex-morgan-hanuman-devotional-song: rhythmic and lively enough to read as playful mischief; an approximation.",
+    "telenovela_tension": "epic/trailer-score-room-epic-cinematic-thriller: big, dramatic cinematic swells read as soap-opera tension.",
+    "tropical_drama": "upbeat/alex-morgan-nature-ambient: nature-flavoured ambience is the closest available 'tropical' cue.",
+    "suspense_sting": "suspense/the_mountain-epic-mood: shares the pulse_thriller track; a short dramatic cinematic cue doubles as a sting bed.",
+    "lullaby_piano": "sad/soulprodmusic-...-calm-piano-improvisation and upbeat/alex-morgan-gentle-baby-sleep-lullaby-dream: the second is literally titled 'lullaby dream'.",
+    "music_box": "suspense/virtualvisualviews-dueling-music-box-horror: literally a music box recording.",
+    "gentle_strings": "sad/tomomi_kato-silhouette: the gentlest, most string/ambient-leaning of the remaining sad tracks."
+  }
+}

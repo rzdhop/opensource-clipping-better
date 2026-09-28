@@ -1,0 +1,41 @@
+{
+  "$schema": "sfx_index_v1",
+  "pack": "cartoon_soft",
+  "cues": {
+    "boing": {
+      "file": "cartoon/boing.wav",
+      "duration_s": 0.5,
+      "sha256": "d4e738a3f2f032bcf88f18d83552542c4ef0de7bb0f14c23884412274db68982",
+      "licence": "self-made",
+      "source": "tools/make_sfx.py v1"
+    },
+    "footsteps_tiny": {
+      "file": "cartoon_soft/footsteps_tiny.wav",
+      "duration_s": 0.53,
+      "sha256": "dc331bb129d13c87448bd369283a295956ebecdc2bfcb34332f7ad9bc41a39c5",
+      "licence": "self-made",
+      "source": "tools/make_sfx.py v1"
+    },
+    "pop": {
+      "file": "cartoon/pop.wav",
+      "duration_s": 0.12,
+      "sha256": "6ce5324249d16966eb8cae01af05e3c2d09e047a92c31165db445ecbd3805753",
+      "licence": "self-made",
+      "source": "tools/make_sfx.py v1"
+    },
+    "twinkle": {
+      "file": "cartoon_soft/twinkle.wav",
+      "duration_s": 0.64,
+      "sha256": "b9764717291523a587a79a1be60779018fe05d5b379183319147e0a7e14462fd",
+      "licence": "self-made",
+      "source": "tools/make_sfx.py v1"
+    },
+    "whoosh_soft": {
+      "file": "cartoon_soft/whoosh_soft.wav",
+      "duration_s": 0.6,
+      "sha256": "53c92fe821eb97c5c737f5bc8d3490c5187e3680301013a21fc40267f34d859b",
+      "licence": "self-made",
+      "source": "tools/make_sfx.py v1"
+    }
+  }
+}

@@ -19,6 +19,9 @@ outputs/
 # Models and fonts are downloaded into the working directory at run time
 # (cfg.base_dir is os.getcwd()), so they land in the repo root.
 *.ttf
+# The AI-Story renderer's own font copy is committed on purpose (DEC-159):
+# it must exist in a fresh worktree and in CI, not only via the bind mount.
+!assets/fonts/*.ttf
 face_yolov*.pt
 # *.mp3
 custom_fonts/
