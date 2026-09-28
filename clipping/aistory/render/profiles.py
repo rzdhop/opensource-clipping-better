@@ -42,7 +42,7 @@ Stdlib only (DEC-012).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Optional
 
 WIDTH = 1080
@@ -73,6 +73,11 @@ class RenderProfile:
     audio_bitrate: Optional[str] = None  # "192k", FINAL only
     audio_rate: Optional[int] = None    # 48000, FINAL only
     movflags: Optional[str] = None      # "+faststart", FINAL only
+    # A hardware encoder's own argv (``-c:v h264_nvenc ...``) in place of
+    # libx264's codec/preset/crf: set only by the render step's opt-in
+    # ``encoder="auto"`` on the final pass (:func:`with_encoder`); None
+    # everywhere else, so every shipped profile's argv is unchanged.
+    encoder_args: Optional[tuple] = None
 
     def video_encode_args(self) -> list:
         """``-c:v ...`` argv fragment, common to every builder in this
@@ -82,8 +87,13 @@ class RenderProfile:
         (spec 13): ``-flags:v``/``-flags:a`` (encoder flags, per-stream
         output options) and ``-map_metadata -1``, both of which ffmpeg
         associates with the *output* file they precede, never with an
-        input. :func:`global_bitexact_args` is the other, input-side half."""
-        args = ["-c:v", "libx264", "-preset", self.preset, "-crf", str(self.crf), "-pix_fmt", self.pix_fmt]
+        input. :func:`global_bitexact_args` is the other, input-side half.
+        With :attr:`encoder_args` set, those replace the codec, preset and
+        crf; the pixel format and the rest follow as before."""
+        if self.encoder_args is not None:
+            args = list(self.encoder_args) + ["-pix_fmt", self.pix_fmt]
+        else:
+            args = ["-c:v", "libx264", "-preset", self.preset, "-crf", str(self.crf), "-pix_fmt", self.pix_fmt]
         if self.fps_mode is not None:
             args += ["-fps_mode", self.fps_mode]
         if self.threads is not None:
@@ -112,6 +122,18 @@ FINAL = RenderProfile(
 )
 
 GOLDEN = RenderProfile(name="golden", preset="ultrafast", crf=30, threads=1, bitexact=True, upscale=1)
+
+# The hardware encoders ``encoder="auto"`` may put on the final pass
+# (``clipping.studio.ffmpeg_utils.detect_video_encoder``'s names). VAAPI is
+# not one of them: its argv carries its own ``-vf format=nv12,hwupload``,
+# which ffmpeg refuses beside the final pass's ``-filter_complex``.
+HARDWARE_ENCODERS = ("h264_nvenc", "h264_amf")
+
+
+def with_encoder(profile: RenderProfile, encoder_args) -> RenderProfile:
+    """*profile* encoding with a detected hardware encoder's own argv
+    (a copy; *profile* itself is frozen and unchanged)."""
+    return replace(profile, encoder_args=tuple(str(token) for token in encoder_args))
 
 
 # ------------------------------------------------------------ audio mix (DEC-157)

@@ -224,7 +224,7 @@ def test_the_asset_kinds_gain_shots_and_keep_voice():
 
 def test_the_closed_file_and_folder_lists():
     assert store.EPISODE_FILE_NAMES == ("episode_final.mp4", "subtitles.ass", "cover.jpg", "cost_ledger.json")
-    assert store.EPISODE_RENDER_SUBDIRS == ("in", "fonts", "cache", "stems")
+    assert store.EPISODE_RENDER_SUBDIRS == ("in", "fonts", "cache", "stems", "logs")
     assert store.GEN_CACHE_DIRS == ("cache", "gen")
 
 

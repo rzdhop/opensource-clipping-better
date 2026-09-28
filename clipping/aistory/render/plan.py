@@ -193,7 +193,7 @@ def loudness_apply_argv(stage: dict, measured: dict) -> list:
 
 def build_render_plan(*, script: dict, storyboard: dict, assets: dict, style_lock: dict, template: dict,
                       story: dict, ep: int, inputs: dict, ffmpeg: dict, profile: str = "final",
-                      subtitles=None, encoder: str = "libx264") -> dict:
+                      subtitles=None, encoder: str = "libx264", video_encoder=None) -> dict:
     """The plan of one render (module docstring).
 
     - *story*: ``{"story_id", "title", "language"}`` (the end card's title).
@@ -207,8 +207,14 @@ def build_render_plan(*, script: dict, storyboard: dict, assets: dict, style_loc
       sidecars' words).
     - *ffmpeg*: ``runner.preflight``'s ``{"version", "machine"}``.
     - *subtitles*: ``None``/``"style"`` (the style lock's mode) or one of
-      ``schemas.SUBTITLE_MODES``. *encoder*: ``"libx264"`` (``"auto"`` is
-      the render step's, not wired here yet).
+      ``schemas.SUBTITLE_MODES``. *encoder*: ``"libx264"``, or ``"auto"``
+      with *video_encoder* -- the ``{"name", "args"}`` the render step
+      detected (``clipping.studio.ffmpeg_utils.detect_video_encoder``,
+      opt-in): a hardware encoder of ``profiles.HARDWARE_ENCODERS`` encodes
+      the final pass with its own argv, anything else (libx264 itself)
+      keeps the profile's libx264. Shots and the end card always stay on
+      libx264, so their cache keys never depend on the machine's GPU; a
+      golden render never takes ``"auto"`` (parity is libx264's).
 
     Returns ``{ep, profile, params, ffmpeg, font, timeline, expected,
     length_window_s, inputs, files, stages, warnings, approx_line_ids}``.
@@ -217,7 +223,7 @@ def build_render_plan(*, script: dict, storyboard: dict, assets: dict, style_loc
     try:
         return _build(script=script, storyboard=storyboard, assets=assets, style_lock=style_lock,
                       template=template, story=story, ep=ep, inputs=inputs, ffmpeg=ffmpeg, profile=profile,
-                      subtitles=subtitles, encoder=encoder)
+                      subtitles=subtitles, encoder=encoder, video_encoder=video_encoder)
     except PlanError:
         raise
     except (ValueError, KeyError) as exc:
@@ -227,14 +233,33 @@ def build_render_plan(*, script: dict, storyboard: dict, assets: dict, style_loc
         raise PlanError(f"{label}: {exc}") from exc
 
 
+def _final_encoder(encoder, video_encoder, profile):
+    """The hardware encoder's argv the final pass takes, or None (libx264)."""
+    if encoder == "libx264":
+        return None
+    if video_encoder is None:
+        raise PlanError(f"encoder {encoder!r} is not available in this renderer yet without the encoder the "
+                        "render step detected (video_encoder); use 'libx264'")
+    if profile == "golden":
+        raise PlanError("a golden render is libx264 only (its framemd5 parity); encoder 'auto' is refused")
+    name = video_encoder.get("name") if isinstance(video_encoder, dict) else None
+    args = video_encoder.get("args") if isinstance(video_encoder, dict) else None
+    if name not in profiles.HARDWARE_ENCODERS:
+        return None
+    if not isinstance(args, (list, tuple)) or not args or not all(isinstance(a, str) and a for a in args):
+        raise PlanError(f"the detected encoder {name!r} has no usable argv")
+    if "-vf" in args or "-filter_complex" in args:
+        raise PlanError(f"the detected encoder {name!r} carries its own filter, which the final pass cannot take")
+    return list(args)
+
+
 def _build(*, script, storyboard, assets, style_lock, template, story, ep, inputs, ffmpeg, profile, subtitles,
-           encoder) -> dict:
+           encoder, video_encoder) -> dict:
     if profile not in _STAGE_PROFILES:
         raise PlanError(f"unknown render profile {profile!r}, expected one of {list(_STAGE_PROFILES)}")
     if encoder not in schemas.RENDER_ENCODERS:
         raise PlanError(f"unknown encoder {encoder!r}, expected one of {list(schemas.RENDER_ENCODERS)}")
-    if encoder != "libx264":
-        raise PlanError(f"encoder {encoder!r} is not available in this renderer yet; use 'libx264'")
+    hardware_args = _final_encoder(encoder, video_encoder, profile)
     if not isinstance(ffmpeg, dict) or not ffmpeg.get("version") or not ffmpeg.get("machine"):
         raise PlanError("the ffmpeg version and machine are required (runner.preflight)")
     typography_doc = style_lock["typography"]
@@ -250,6 +275,8 @@ def _build(*, script, storyboard, assets, style_lock, template, story, ep, input
         raise PlanError("no font record: every render burns text (fonts.resolve_font)")
 
     shot_profile, card_profile, final_profile = _STAGE_PROFILES[profile]
+    if hardware_args is not None:
+        final_profile = profiles.with_encoder(final_profile, hardware_args)
     version = ffmpeg["version"]
     overlays = list(style_lock["motion_rules"]["tier1"].get("overlays") or [])
 

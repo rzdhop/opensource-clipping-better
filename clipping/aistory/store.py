@@ -32,7 +32,7 @@ Layout, under the same ``outputs/`` directory the job store uses::
             episode_final.mp4, subtitles.ass, cover.jpg, cost_ledger.json  # EPISODE_FILE_NAMES
             assets/voice/line_<NN>.mp3|.wav|.json  # the opt-in voice measurement
             assets/shots/shot_<NN>.png|.jpg|.jpeg|.webp  # each shot's image
-            render/                 # the renderer's working folder: in/, fonts/, cache/, stems/
+            render/                 # the renderer's working folder: in/, fonts/, cache/, stems/, logs/
         cache/gen/                  # the generation cache and journal (providers/gencache.py)
         cost_ledger.json            # what each call cost (ledger.CostLedger)
         activity.log                # one line per thing a step printed
@@ -222,9 +222,10 @@ EPISODE_FILE_NAMES = ("episode_final.mp4", "subtitles.ass", "cover.jpg", "cost_l
 
 # The renderer's working folder, episodes/ep<NN>/render/, and the only
 # folders below it the store hands out: staged inputs (named by their
-# content hash), fonts, the per-shot cache, the mix's stems.
+# content hash), fonts, the per-shot cache, the mix's stems, and each
+# command's stdout/stderr (the runner's logs/, phase 4 stage 9).
 EPISODE_RENDER_DIRNAME = "render"
-EPISODE_RENDER_SUBDIRS = ("in", "fonts", "cache", "stems")
+EPISODE_RENDER_SUBDIRS = ("in", "fonts", "cache", "stems", "logs")
 
 # The story's generation cache and submit journal, <story>/cache/gen/, one
 # level at a time (clipping/providers/gencache.py takes it as its root).
@@ -1436,6 +1437,31 @@ class StoryStore:
         """
         if not isinstance(name, str) or name not in EPISODE_FILE_NAMES:
             raise KeyError(name)
+        ep = check_episode(ep)
+        self._check_id(story_id)
+        with self._lock:
+            path = os.path.join(self.episode_dir(story_id, ep, create=create), name)
+            if os.path.islink(path) or (os.path.lexists(path) and not os.path.isfile(path)):
+                raise KeyError(f"{self._episode_label(story_id, ep)}{name}")
+        return path
+
+    def episode_doc_path(self, story_id, ep, name, *, create=False) -> str:
+        """The path of the episode document *name* (``EPISODE_DOC_NAMES``),
+        for the one writer that is not this store: the render runner keeps
+        ``render_manifest.json`` itself, rewriting it at every change of a
+        stage's state (``render/manifest.py``, validated and atomic on every
+        write). Everything else reads and writes documents through
+        ``read_episode_doc``/``write_episode_doc``.
+
+        The ``episode_file_path`` rules: the name, the episode number and the
+        story id are checked before any path is built; every folder a real
+        directory (``_descend``), *create* makes the missing ones; the file
+        need not exist, but whatever is in its place must be a regular file.
+        ValueError for a name that is not an episode document; KeyError for
+        the rest -- a symlink at any level, the document's own included, is
+        refused and never followed.
+        """
+        self._check_episode_doc_name(name)
         ep = check_episode(ep)
         self._check_id(story_id)
         with self._lock:

@@ -13,7 +13,8 @@ Phase 1 registers ``concepts``, ``bible`` and ``regenerate`` (stage 6) and
 ``style_preview`` (stage 8); phase 2 adds ``cast``, ``places_proposal``,
 ``places`` and ``season`` (and the entity targets of ``regenerate``); phase 3
 adds ``script`` and ``storyboard`` (and the episode targets); phase 4 adds
-``assets`` (and the image and voice targets of ``regenerate``). Each is
+``assets`` (and the image and voice targets of ``regenerate``), ``render``
+and ``metadata`` (and the metadata target of ``regenerate``). Each is
 registered by module name and imported on its first run, never here:
 importing this package must not pull in the prompt catalogue, the LLM chain
 or the generation chains, so the worker's dispatch and a test that only needs
@@ -105,6 +106,8 @@ RUNNERS: dict[str, Callable[[StepContext], object]] = {
     "script": _deferred("script"),
     "storyboard": _deferred("storyboard"),
     "assets": _deferred("assets"),
+    "render": _deferred("render"),
+    "metadata": _deferred("metadata"),
 }
 
 

@@ -16,6 +16,11 @@
   alone, a new take so the generation cache misses on purpose. Neither
   clears an approval. (The grammar that reads these two targets is
   ``regenerate.parse_target``'s, extended at stage 11.)
+- phase 4 (``metadata.regenerate_platform``): kind ``metadata``
+  (``metadata:<ep>:<platform>``, the tuple ``("metadata", ep, platform)``)
+  -- that platform's M1 again with the note; the other platforms, the cover
+  and every approval stay (its job ends completed, DEC-161; the grammar is
+  stage 11's too).
 
 Each applies only its own keys and reuses its scene's line block
 (``schemas.line_id_for``). A script rewrite goes through
@@ -53,6 +58,9 @@ from .regenerate import FRAMING_TARGETS, parse_episode_target  # noqa: F401 -- r
 SHOT_IMAGE_KIND = "shot_image"
 LINE_KIND = "line"
 ASSET_KINDS = (SHOT_IMAGE_KIND, LINE_KIND)
+# ``metadata:<ep>:<platform>`` is ``("metadata", ep, platform)``; ``metadata``
+# runs it.
+METADATA_KIND = "metadata"
 
 
 def _noted(note) -> str:
@@ -91,6 +99,12 @@ def run(ctx, target, parsed, note, *, runner=None, time_fn=time.monotonic, sleep
         regenerate = (assets_step.regenerate_shot_image if parsed[0] == SHOT_IMAGE_KIND
                       else assets_step.regenerate_line_voice)
         return regenerate(ctx, ec, target, parsed[2], note, tools=tools, refuse=refuse)
+
+    if parsed[0] == METADATA_KIND:
+        # Imported here, like the asset kinds: the renderer's modules.
+        from . import metadata as metadata_step
+
+        return metadata_step.regenerate_platform(ctx, ec, target, parsed[2], note, tools=tools, refuse=refuse)
 
     if parsed[0] == "shot":
         return _replan_shot(ctx, ec, target, parsed[2], note, script, board, tools, refuse)

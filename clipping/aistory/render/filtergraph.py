@@ -1,7 +1,7 @@
 """Pure ffmpeg argv builders for the AI-Story renderer (spec 6.5; plan
 phase 4 stage 4, "Renderer" -> filtergraph.py's Shot / Tier >= 2 clip / End
 card bullets; stage 6, its Audio mix / Final pass bullets; DEC-156,
-DEC-157, DEC-158). The cover is stage 9's own addition to this module.
+DEC-157, DEC-158; stage 9, its Cover bullet: :func:`cover_argv`).
 
 Every builder returns ``list[str]``: a full ``ffmpeg`` argv, always
 starting ``["ffmpeg", "-hide_banner", "-nostdin", "-y"]`` and never
@@ -700,4 +700,37 @@ def audio_mix_argv(timeline, *, line_inputs, sfx_inputs, bgm_input, ending, out_
     argv += ["-map", "[mix]"] + _wav_output_args() + [out_rel]
     for kind, label in (("dialogue", "[dlg_stem]"), ("sfx", "[sfx_stem]"), ("bgm", "[bgm_stem]")):
         argv += ["-map", label] + _wav_output_args() + [stems_rel[kind]]
+    return argv
+
+
+# ================================================================ stage 9
+#
+# The cover (spec 2.10, 6.2; plan phase 4 "Metadata step (12)": "the hook
+# shot + ass=cover.ass, one frame, saved as jpg"; DEC-159: every burned text
+# is libass from ASS built in Python, no PIL in the render path).
+
+# The cover's JPEG quality (mjpeg's qscale: 2 is near the best it does).
+COVER_JPEG_QSCALE = 2
+
+
+def cover_argv(image_rel, ass_rel, fontsdir_rel, out_rel) -> list:
+    """The argv that makes ``cover.jpg`` (plan: "the hook shot +
+    ``ass=cover.ass``, one frame, saved as jpg"): the hook scene's first
+    shot image, scaled to fill ``profiles.WIDTH``x``profiles.HEIGHT`` and
+    centre-cropped (never letterboxed, never stretched), square pixels,
+    the cover text of *ass_rel* (``subtitles.cover_ass``) burned with the
+    staged font of *fontsdir_rel*, then exactly one frame written as a
+    single JPEG (``-update 1``: one file, not an image sequence). Every
+    path must be relative (the render folder is the working directory)."""
+    for value, what in ((image_rel, "image_rel"), (ass_rel, "ass_rel"), (fontsdir_rel, "fontsdir_rel"),
+                        (out_rel, "out_rel")):
+        _assert_relative(value, what=what)
+    w, h = profiles.WIDTH, profiles.HEIGHT
+    ass_value = motion_mod.escape_expr(ass_rel)
+    fontsdir_value = motion_mod.escape_expr(fontsdir_rel)
+    vf = (f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},setsar=1,"
+          f"ass={ass_value}:fontsdir={fontsdir_value}")
+    argv = list(_ARGV_PREFIX)
+    argv += ["-i", image_rel, "-vf", vf, "-frames:v", "1", "-update", "1", "-q:v", str(COVER_JPEG_QSCALE),
+             out_rel]
     return argv

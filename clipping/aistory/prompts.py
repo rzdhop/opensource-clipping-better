@@ -9,10 +9,10 @@ them is golden-string tested. Every builder is handed a ``context.Pack``
 dependency on ``store.py`` or ``templates.py``.
 
 C1/B1/B2/B3 (concepts and the story bible, phase 1), K1/P0/P1/R1/S1/S2/U1
-(cast, places, props and the season arc, phase 2) and E1/E2/E3/E4/T1/T1r
-(the episode script and its storyboard, phase 3) are here.
-M1/S3/F1/N1/V1/V2 (spec 4.2) are later phases, built the same way against
-the same ``Pack``.
+(cast, places, props and the season arc, phase 2), E1/E2/E3/E4/T1/T1r
+(the episode script and its storyboard, phase 3) and M1 (one platform's
+metadata of a rendered episode, phase 4) are here. S3/F1/N1/V1/V2 (spec
+4.2) are later phases, built the same way against the same ``Pack``.
 
 Stdlib only (DEC-012); the one import outside this package is
 ``clipping.analysis.analyzer`` for the two shared temperature constants
@@ -37,7 +37,9 @@ from . import context, prompting, schemas
 # storyboard); the catalogue grows the same way it did for s3 (RC-E1: the
 # K1...U1 builders' own output is unchanged -- see
 # tests/test_story_prompts.py's byte-identical fixture test).
-PROMPT_VERSION = "s4"
+# s5: phase 4 adds M1 (the metadata pack, one call per platform); every
+# earlier builder's output is unchanged.
+PROMPT_VERSION = "s5"
 
 # Concepts are the one place the model is asked to be genuinely inventive;
 # everything else in the bible is writing *from* a chosen concept, which
@@ -65,10 +67,17 @@ C1_CALLS = 10
 # tokens respectively, so the caps below give each a working margin without
 # padding past what the prompt can actually produce. T1r's spec cap (150)
 # already covers its own worst case (~118) and was left alone.
+#
+# M1 (phase 4, stage 9, DEC-138's method): the spec's 300, raised to the
+# largest French reply its ask allows -- Reels, every limit hit (a 60-char
+# title and title_en, 40 words of description, 5 + 5 tags of 25 characters,
+# 6 words of hook text): ~281 tokens (216 by chars/4 x 1.3) -- plus 15 %,
+# rounded up to ten (tests/test_story_prompts_metadata.py).
 MAX_TOKENS = {
     "C1": 700, "B1": 400, "B2": 520, "B3": 300,
     "K1": 750, "P0": 420, "P1": 260, "R1": 100, "S1": 950, "S2": 350, "U1": 120,
     "E1": 1450, "E2": 600, "E3": 720, "E4": 800, "T1": 580, "T1r": 150,
+    "M1": 330,
 }
 TEMPERATURE = {
     "C1": IDEATION_TEMPERATURE,
@@ -88,6 +97,7 @@ TEMPERATURE = {
     "E4": ANALYTIC_TEMPERATURE,
     "T1": WRITING_TEMPERATURE,
     "T1r": WRITING_TEMPERATURE,
+    "M1": WRITING_TEMPERATURE,
 }
 SCHEMA_NAMES = {
     "C1": "story_concepts", "B1": "bible_core", "B2": "bible_world", "B3": "bible_values",
@@ -96,6 +106,7 @@ SCHEMA_NAMES = {
     "U1": "vision_appearance",
     "E1": "episode_beat_sheet", "E2": "episode_scene_dialogue", "E3": "episode_framing_scenes",
     "E4": "episode_consistency_check", "T1": "storyboard_shots", "T1r": "storyboard_shot_replan",
+    "M1": "episode_metadata",
 }
 
 # E4's input is the whole script, not a small pack -- it needs a wider
@@ -1888,4 +1899,216 @@ def validate_t1r(reply, *, scene, shots, index, modifiers_allowed, tags_allowed,
     if index < len(shots) - 1 and shot["framing"] == shots[index + 1]["framing"]:
         errors.append(f"$.shot.framing: {shot['framing']!r} repeats the next shot's framing")
 
+    return errors
+
+
+# ============================================================================ M1
+#
+# Phase 4 (spec 2.10, 3 step 12, 4.2 row M1): the publishing text of one
+# rendered episode, one call per platform (DEC-166; DEC-107's one artifact
+# per request). The model writes only what needs words: a title, a short
+# description, hashtags and the cover's hook text (plus an English title and
+# English hashtags for a French story, spec 6.1). Python builds everything
+# else (``steps/metadata.py``): the next-episode teaser appended to the
+# description, the pinned comment ("<teaser> PART n+1 ->"), the "#" on every
+# tag, the cover image.
+
+# A-078: the per-platform limits the prompt states and ``validate_m1``
+# checks, authored as of 2026-09 and kept conservative on purpose -- each sits
+# well under what the platform itself accepts (YouTube: 100-character titles;
+# TikTok and Instagram: captions in the thousands of characters), so a reply
+# that meets them is never cut by the platform, and the teaser Python adds
+# still fits. Hashtags: YouTube shows the first three above a Short's title
+# (so exactly three); Instagram takes at most five on a post; TikTok is kept
+# to the same three to five. Every count sits inside ``metadata_pack_v1``'s
+# own 3-6 (``schemas.METADATA_HASHTAGS_RANGE``).
+M1_PLATFORM_RULES = {
+    "tiktok": {"name": "TikTok", "title_chars": 60, "description_words": 30, "hashtags": (3, 5),
+               "rule": "the title opens the caption, so put the hook first"},
+    "shorts": {"name": "YouTube Shorts", "title_chars": 70, "description_words": 40, "hashtags": (3, 3),
+               "rule": "the title is what people search and see under the video, and the three hashtags show "
+                       "above it: make them the series, its genre and its hook"},
+    "reels": {"name": "Instagram Reels", "title_chars": 60, "description_words": 40, "hashtags": (3, 5),
+              "rule": "a Reel has no title field, so the title opens the caption; Instagram takes at most 5 "
+                      "hashtags"},
+}
+# One tag, without its "#": one word (several joined in camelCase).
+M1_HASHTAG_MAX_CHARS = 25
+# The cover's text (spec 6.2: "<= 6 words shown as given"), the on-screen
+# hook's own cap.
+M1_HOOK_TEXT_MAX_WORDS = 6
+
+_M1_SYSTEM_TEMPLATE = (
+    "You write the publishing text of a serialized vertical-video fiction series for TikTok, YouTube Shorts and "
+    "Instagram Reels: titles, descriptions and hashtags that make someone stop scrolling and come back for the "
+    "next episode. Reply with JSON only, matching the schema. Never output durations, timestamps or file paths. "
+    "Never use real people, brands, studio names or copyrighted characters. Write all user-facing text in "
+    "{language_name}. Fields marked (English) are written in English."
+)
+
+_M1_ASK_TEMPLATE = (
+    "Write the {platform_name} post for episode {ep}.\n\n"
+    "Give:\n"
+    "- title: at most {title_chars} characters, no hashtags\n"
+    "- description: one to three sentences, at most {description_words} words, that make people watch without "
+    "giving away how the episode ends; do not repeat the teaser, the app adds it after your text\n"
+    "- hashtags: {hashtag_count}, each one word of at most {tag_chars} characters with no spaces (join several "
+    "words in camelCase); the \"#\" is optional\n"
+    "- hook_text: the text on the cover image, at most {hook_words} words\n"
+    "{english_asks}"
+    "\n"
+    "{platform_name} rules: {platform_rule}.\n\n"
+    "{french_line}"
+    "Never use real people, brands, studio names or copyrighted characters."
+)
+
+_M1_ENGLISH_ASKS = (
+    "- title_en (English): the title for English speakers, at most {title_chars} characters\n"
+    "- hashtags_en (English): {hashtag_count} for English speakers, same rules as hashtags\n"
+)
+
+_HASHTAG_JUNK_RE = re.compile(r"[\s#]+")
+
+
+def _m1_system(pack) -> str:
+    return _M1_SYSTEM_TEMPLATE.format(language_name=pack.language_name)
+
+
+def _m1_hashtag_count(platform) -> str:
+    lo, hi = M1_PLATFORM_RULES[platform]["hashtags"]
+    return f"exactly {lo} hashtags" if lo == hi else f"{lo} to {hi} hashtags"
+
+
+def m1_english_fields(pack) -> bool:
+    """Whether M1 also asks for ``title_en``/``hashtags_en``: a French story
+    only (spec 6.1; ``metadata_pack_v1`` requires them there and forbids
+    them elsewhere). ``context.LANGUAGE_NAMES`` has exactly fr/en, so the
+    display name is exact (``_french_block``'s rule)."""
+    return pack.language_name == "French"
+
+
+def m1_schema(platform, *, english) -> dict:
+    """The M1 output schema (spec 2.10, 4.2 row M1) for *platform*
+    (``schemas.PLATFORMS``): ``{title, description, hashtags[], hook_text}``,
+    plus ``title_en``/``hashtags_en`` when *english*. Lengths and counts are
+    the ask's and :func:`validate_m1`'s, never the schema's (strict mode)."""
+    rules = M1_PLATFORM_RULES[platform]
+    count = _m1_hashtag_count(platform)
+    tag = {"type": "string", "description": f"one word, at most {M1_HASHTAG_MAX_CHARS} characters"}
+    properties = {
+        "title": {"type": "string", "description": f"at most {rules['title_chars']} characters"},
+        "description": {"type": "string", "description": f"at most {rules['description_words']} words"},
+        "hashtags": {"type": "array", "description": count, "items": tag},
+        "hook_text": {"type": "string", "description": f"at most {M1_HOOK_TEXT_MAX_WORDS} words"},
+    }
+    if english:
+        properties["title_en"] = {"type": "string",
+                                  "description": f"(English) at most {rules['title_chars']} characters"}
+        properties["hashtags_en"] = {"type": "array", "description": f"(English) {count}", "items": dict(tag)}
+    return _llm_obj(properties)
+
+
+def build_m1(pack, *, platform, ep, story_title, episode_title, hook_text, teaser, cast_names, note=None):
+    """One platform's publishing text for a rendered episode (spec 2.10, 4.2
+    row M1; DEC-166): one call per platform of ``schemas.PLATFORMS``.
+
+    Data first (DEC-062): the series title and the bible summary (the
+    pack's ``bible``), the episode's number and title, its hook's on-screen
+    text, the next-episode teaser (which the app appends to the description
+    itself, so the model is told not to repeat it) and the names of the
+    characters in it; then the author's *note* of a
+    ``metadata:<ep>:<platform>`` regenerate, when there is one; then the
+    ask, with the platform's own limits (:data:`M1_PLATFORM_RULES`, A-078).
+    A French story's ask adds ``title_en``/``hashtags_en``
+    (:func:`m1_english_fields`) and the elision sentence.
+    """
+    if platform not in M1_PLATFORM_RULES:
+        raise ValueError(f"unknown platform {platform!r}, expected one of {list(M1_PLATFORM_RULES)}")
+    rules = M1_PLATFORM_RULES[platform]
+    english = m1_english_fields(pack)
+    count = _m1_hashtag_count(platform)
+
+    user = f"Series: {story_title}\n"
+    if pack.bible:
+        user += f"Story: {pack.bible}\n"
+    user += "\n"
+    user += f"Episode {ep}: {episode_title or 'untitled'}\n"
+    user += f"Hook on screen: {hook_text or 'none'}\n"
+    user += f"Next-episode teaser (the app adds it after your description): {teaser or 'none'}\n"
+    user += f"Characters: {', '.join(cast_names) if cast_names else 'none named'}\n\n"
+    if note:
+        user += f"Follow the author's note: {note}\n\n"
+    user += _M1_ASK_TEMPLATE.format(
+        platform_name=rules["name"], ep=ep, title_chars=rules["title_chars"],
+        description_words=rules["description_words"], hashtag_count=count, tag_chars=M1_HASHTAG_MAX_CHARS,
+        hook_words=M1_HOOK_TEXT_MAX_WORDS,
+        english_asks=_M1_ENGLISH_ASKS.format(title_chars=rules["title_chars"], hashtag_count=count) if english else "",
+        platform_rule=rules["rule"], french_line=_french_block(pack),
+    )
+    return _m1_system(pack), user, m1_schema(platform, english=english)
+
+
+def normalize_hashtags(tags) -> list:
+    """*tags* as they are pasted into a platform: each with one leading "#",
+    no whitespace and no other "#" in it (``schemas.HASHTAG_PATTERN``),
+    empty ones dropped, and a tag written twice (case aside) kept once, in
+    the reply's order."""
+    out, seen = [], set()
+    for tag in tags or ():
+        if not isinstance(tag, str):
+            continue
+        body = _HASHTAG_JUNK_RE.sub("", tag)
+        if not body or body.casefold() in seen:
+            continue
+        seen.add(body.casefold())
+        out.append(f"#{body}")
+    return out
+
+
+def _m1_title_errors(errors, path, value, max_chars) -> None:
+    if not (isinstance(value, str) and value.strip()):
+        errors.append(f"{path}: must be a non-empty string")
+        return
+    text = value.strip()
+    if "\n" in text:
+        errors.append(f"{path}: must be one line")
+    if len(text) > max_chars:
+        errors.append(f"{path}: {len(text)} characters, expected at most {max_chars}")
+
+
+def _m1_hashtag_errors(errors, path, tags, count_range) -> None:
+    lo, hi = count_range
+    for i, tag in enumerate(tags):
+        if not isinstance(tag, str):
+            errors.append(f"{path}[{i}]: must be a string")
+            continue
+        body = _HASHTAG_JUNK_RE.sub("", tag)
+        if len(body) > M1_HASHTAG_MAX_CHARS:
+            errors.append(f"{path}[{i}]: {len(body)} characters, expected at most {M1_HASHTAG_MAX_CHARS}")
+    kept = normalize_hashtags(tags)
+    if not lo <= len(kept) <= hi:
+        wanted = f"exactly {lo}" if lo == hi else f"{lo} to {hi}"
+        errors.append(f"{path}: {len(kept)} distinct hashtag(s), expected {wanted}")
+
+
+def validate_m1(reply, *, platform, english) -> list:
+    """Post-validation for an M1 reply (spec 4.3): the schema, then the
+    platform's own limits (:data:`M1_PLATFORM_RULES`): the title's
+    characters (one line), the description's words, the number of
+    *distinct* hashtags once normalised (:func:`normalize_hashtags`) and
+    each tag's length, the hook text's words -- and the same for the English
+    title and hashtags when *english*."""
+    errors = schemas.validate(reply, m1_schema(platform, english=english))
+    if errors:
+        return errors
+
+    errors = []
+    rules = M1_PLATFORM_RULES[platform]
+    _m1_title_errors(errors, "$.title", reply["title"], rules["title_chars"])
+    _text_errors(errors, "$.description", reply["description"], max_words=rules["description_words"])
+    _m1_hashtag_errors(errors, "$.hashtags", reply["hashtags"], rules["hashtags"])
+    _text_errors(errors, "$.hook_text", reply["hook_text"], max_words=M1_HOOK_TEXT_MAX_WORDS)
+    if english:
+        _m1_title_errors(errors, "$.title_en", reply["title_en"], rules["title_chars"])
+        _m1_hashtag_errors(errors, "$.hashtags_en", reply["hashtags_en"], rules["hashtags"])
     return errors

@@ -263,7 +263,7 @@ def test_c1_instructions_are_english_only_when_the_pack_carries_no_data():
 # --------------------------------------------------------- caps and versions
 
 def test_prompt_version():
-    assert prompts.PROMPT_VERSION == "s4"
+    assert prompts.PROMPT_VERSION == "s5"
 
 
 def test_max_tokens():
@@ -271,6 +271,7 @@ def test_max_tokens():
         "C1": 700, "B1": 400, "B2": 520, "B3": 300,
         "K1": 750, "P0": 420, "P1": 260, "R1": 100, "S1": 950, "S2": 350, "U1": 120,
         "E1": 1450, "E2": 600, "E3": 720, "E4": 800, "T1": 580, "T1r": 150,
+        "M1": 330,
     }
 
 
@@ -296,6 +297,7 @@ def test_schema_names():
         "U1": "vision_appearance",
         "E1": "episode_beat_sheet", "E2": "episode_scene_dialogue", "E3": "episode_framing_scenes",
         "E4": "episode_consistency_check", "T1": "storyboard_shots", "T1r": "storyboard_shot_replan",
+        "M1": "episode_metadata",
     }
 
 

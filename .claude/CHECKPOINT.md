@@ -3,12 +3,12 @@
 - **Current phase:** 4 CHECKPOINT → 5 IMPLEMENT. **Plan approved** by the human ("Yes go go", 2026-09-28), read as
   also answering Q5 = yes: `feat/ai-story-phase-4` is pushed once at stage 7 so CI records the x86_64 framemd5 key.
   Plan: `~/.claude/plans/ai-story-phase-4-assets-render.md` (stages 0–17, riskiest = stage 6, sequence + audio graph).
-- **Current stage:** 9 (render + metadata steps, Opus). Branch pushed once (Q5) at `4f48515`; CI: compile ✓, test ✗ only as designed
+- **Current stage:** 10 (fast track + completed terminal, Opus). Branch pushed once (Q5) at `4f48515`; CI: compile ✓, test ✗ only as designed
   (unknown x86_64 golden key, read from the public check-run annotation and recorded). The rest of CI's test log needs
   a sign-in, so **CI's full green is confirmed only at the next push** (Node 20 deprecation notice on checkout@v4 /
   setup-python@v5 — follow-up). Stage 0 done: checkpoint commit **`86e7f4d`** on `main`
   (parent `1367d75`); worktree `.claude/worktrees/ai-story-phase-4` on `feat/ai-story-phase-4` (node_modules
-  symlinked, excluded); **this worktree's `.claude/` files are the live artifacts until the merge**. Stages 1–8 done.
+  symlinked, excluded); **this worktree's `.claude/` files are the live artifacts until the merge**. Stages 1–9 done.
 - **Stage 1 notes for stage 8 (first real caller of the cache):** catch `gencache.JournalError` (not a
   `NoRunnableLink`) and fail naming the request id; book only when `result.meta` has no `"booked"` (a keyless
   request still books the old way); `book(entry)` sees kind/link/paid/estimate/note/state/request, so step/ep/qty
@@ -17,7 +17,18 @@
 - **Tier-1 baseline (86e7f4d):** local **4486 passed / 1 skipped** (210 s); CI env (`/tmp/cilibs`) **3901 passed /
   555 skipped** (155 s); compileall clean (`PYTHONPYCACHEPREFIX` in scratch); vite build green to a scratch outDir.
   ffmpeg: host `6.1.1-3ubuntu5`, container `7.1.5-0+deb13u1`. Health: 0 jobs.
-- **Next action:** stage 9 per the plan's §2 "Render step (11)", "Metadata step (12)" and §3 row 9.
+- **Next action:** stage 10 per the plan's §2 "Fast track", "Jobs" and §3 row 10.
+- **Stage 9 notes for stages 10/11/14/15/16:** `steps/render.run(ctx, *, profile="final", …)` (params `subtitles`
+  style|word_pop|two_line|none, `encoder` libx264|auto — `render.SUBTITLE_CHOICES/ENCODER_CHOICES`) returns `{ep,
+  state, profile, params, ran, cached, duration_s, loudness, warnings, output{file, sha256, width, height, fps},
+  subtitles_file, manifest, seconds, fingerprint}`; `render.require_renderable(ec)` / `metadata.require_render(ec)`
+  check preconditions with no process; `steps/metadata.run` (no params) + regenerate kind `metadata`
+  (`regenerate_platform`) — stage 11: `parse_episode_target` → `("metadata", ep, platform)` + `EPISODE_KINDS`;
+  both steps and the metadata regenerate must end `completed` (stage 10); `store.episode_doc_path` new; the
+  manifest carries no fingerprint → "out of date" = manifest `inputs` hashes vs current files (cache it against
+  the 4 s poll); Preview: video = `manifest.output.path` keyed on `output.sha256`, cover = `cover.jpg`, pack stale
+  unless `metadata.is_current(pack, script, sha)`; M1 cap 330 (FR Reels worst case 216 × 1.3 + 15 %); e2e TP came
+  out −0.8 dBTP on synthetic tones (A-066 to check on real voices at Tier-2).
 - **Stage 8 notes for stages 9/10/11/14:** `steps/assets.run(ctx, …)` returns `{ep, shots{total, made, cached, locked,
   states}, lines{measured, unvoiced}, aligned, sfx, bgm, failed[{what, target, reason}], complete, fingerprint}`; hard
   stops raise `StepFailed`; only param `align_words`; helpers `asset_units(...)` (estimate shape: images/voices/
@@ -131,8 +142,8 @@
 | 6 | sequence + audio graph (**RISKIEST**) [Opus] | **done** (local 5069/1, CI 4484/555; 86 new tests; real renders of both endings frame- and sample-exact) |
 | 7 | runner, manifest, cache, loudness, golden render, CI (+ one push of the branch) [Opus] | **done** (local 5136/1, CI 4551/555; 67 new tests; golden keys host 6.1.1 aarch64, container 7.1.5 aarch64, CI 6.1.1 x86_64 from the pushed run's annotation) |
 | 8 | assets step [Opus] | **done** (local 5183/1, CI 4598/555; 47 new tests; phase-3 measurement lifted, `test_story_measure.py` unedited) |
-| 9 | render + metadata steps [Opus] | in progress |
-| 10 | fast track + completed terminal [Opus] | — |
+| 9 | render + metadata steps [Opus] | **done** (local 5286/1, CI 4701/555; 103 new tests; e2e 67.3 s FR episode rendered + metadata pack) |
+| 10 | fast track + completed terminal [Opus] | in progress |
 | 11 | workflow + API [Opus] | — |
 | 12 | signed story media [Opus] | — |
 | 13 | CLI [Sonnet] | — |
@@ -148,7 +159,7 @@ RC-P1…P11, RC-S1…S4, RC-T1…T3 and RC-E1…E5 (tables below) stay in force,
 | RC-A1 | Clip renderers and the legacy assembler untouched | `tests/test_render_layer_guard.py` (stage 7, committed sha256 manifest) + `git diff --stat 1367d75 -- clipping/studio clipping/story` empty at close (carries RC-E3/RC-P9) |
 | RC-A2 | Default generation behaviour unchanged when no cache is passed | unedited: `test_story_measure.py:457`, `test_story_refimages.py:716`, `test_generation_chain_api.py:216`, `test_generation_chain.py:132/197/289`, `test_image_adapters.py:215` |
 | RC-A3 | No paid generation without `allow_paid` + budget check incl. the per-episode cap; one submit per paid request; every billed request booked | stage 1/8/10 tests; `test_budget.py`, `test_limits.py`, `test_generation_chain*.py` unedited |
-| RC-A4 | Steps 1–9 unchanged except the deliberate `later_phase` edits | `test_stories_api*.py`, `test_story_steps.py`, phase-3 step/API tests unedited except `test_story_workflow.py:288/293/302`, `test_story_workflow_episode.py:129-155`, `test_stories_api.py:660-709` (each edit named in the action log) |
+| RC-A4 | Steps 1–9 unchanged except the deliberate `later_phase` edits and the prompt-registry pins | `test_stories_api*.py`, `test_story_steps.py`, phase-3 step/API tests unedited except `test_story_workflow.py:288/293/302`, `test_story_workflow_episode.py:129-155`, `test_stories_api.py:660-709`, and `test_story_prompts.py`'s `PROMPT_VERSION`/`MAX_TOKENS`/`SCHEMA_NAMES` pins (M1 added, stage 9 — the same three lines phase 3 changed) (each edit named in the action log) |
 | RC-A5 | DEC-048 clip signatures unchanged; a story signature opens exactly one file | `test_auth_token.py` unedited + stage-12 tests |
 | RC-A6 | Phase-3 voice measurement identical after the lift | `test_story_measure.py` unedited |
 | RC-A7 | Clip loudness unchanged | `test_loudnorm.py` unedited; `loudness.TARGET` unchanged |
