@@ -33,6 +33,39 @@ export function formatClock(value) {
   return parsed ? parsed.toLocaleTimeString([], { hour12: false }) : '--:--:--'
 }
 
+/**
+ * The Live activity clocks: time on the current step and time since the job
+ * was created, as durations.
+ *
+ * While the job runs both are measured to `now`. A finished job has no current
+ * step, and its total stops where the job stopped -- measured to the reader's
+ * clock instead, a clip job that took 54 minutes read "34h 50m total" a day
+ * and a half later. Where it stopped is the earlier of `updated_at` and the
+ * last feed line: every finishing write lands both in the same instant, but
+ * approving or superseding a story step moves `updated_at` again, hours later,
+ * and a record from before the feed has no lines. Neither known means no total
+ * rather than a wrong one.
+ */
+export function jobClocks(job, events, running, now = Date.now()) {
+  const created = parseTime(job.created_at)
+  if (running) {
+    const stepStarted = parseTime((job.progress || {}).step_started_at)
+    return {
+      inStep: stepStarted ? formatDuration(now - stepStarted.getTime()) : null,
+      inJob: created ? formatDuration(now - created.getTime()) : null,
+    }
+  }
+  const lastEvent = events && events.length ? events[events.length - 1] : null
+  const stops = [parseTime(job.updated_at), parseTime(lastEvent && lastEvent.ts)]
+    .filter(Boolean)
+    .map(stop => stop.getTime())
+  const stopped = stops.length ? Math.min(...stops) : null
+  return {
+    inStep: null,
+    inJob: created && stopped != null ? formatDuration(stopped - created.getTime()) : null,
+  }
+}
+
 /** How long ago `value` was, as a duration. */
 export function elapsedSince(value) {
   const parsed = parseTime(value)

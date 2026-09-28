@@ -1,7 +1,8 @@
 ## CURRENT STATE — AI Story **phase 3 is DONE**. Next: **phase 4**.
 
 - **Stages 0–14 done** on `feat/ai-story-phase-3`, ff-merged to `main` (`d466f83`, the fix round's second deploy)
-  at 0 jobs, backend rebuilt, health OK. **NOT pushed** — push only on the human's word (memory `github-push-key`).
+  at 0 jobs, backend rebuilt, health OK. **Pushed 2026-09-28** on the human's word ("Push and merge"), together
+  with the live-clocks fix merged beside it (section below); push key per memory `github-push-key`.
 - **Tier-1 at close:** local **4477 passed / 1 skipped**; CI env **3892 passed / 555 skipped**; compileall clean;
   vite build green (scratch outDir). Baseline at stage 0 was 3737 / 1 (CI 3172 / 535).
 - **Tier-2:** walked live by me at 375 px on `localhost:8000` (plan §4, 11 steps, all PASS): 23 LLM calls (E1 1,
@@ -12,7 +13,7 @@
   and redeployed. **Acknowledged by the human** ("Acknowledged, go to 14", 2026-09-27 ~22:00 UTC).
 - **Plan:** `~/.claude/plans/ai-story-phase-3-episode-writer.md` (now headed "Status: done 2026-09-27").
 - **Decisions:** DEC-126…DEC-148. **Assumptions:** A-055…A-064 (+ an update line on A-041). **Next free ids:**
-  DEC-149, A-065.
+  DEC-151, A-065 (DEC-149 left unused; DEC-150 and A-070 belong to the live-clocks fix — never renumber).
 - **Docs:** `docs/AI_STORY.md` gains steps 8–9 (episode script, storyboard) and extends the CLI and
   where-it-lives-on-disk sections; `VISION.md` "Where it stands" updated.
 
@@ -91,6 +92,26 @@ follow-up, carried since phase 0). The Preview tab's placeholder ("Rendering arr
 what phase 4 replaces.
 
 ---
+
+## DONE — Live activity clocks freeze on finished jobs (2026-09-27; merged, deployed and pushed 2026-09-28)
+- **Where:** branch `Feature/frosty-spence-4ddbf5` (worktree `.claude/worktrees/magical-greider-2955e5`): checkpoint
+  `2282372` (on `ede5116`), fix `bc324c9`, docs `2319aa4`. **Merged** into `feat/ai-story-phase-3` and `main` with a
+  merge commit on 2026-09-28 (human: "Push and merge"; `.claude/*` conflicts resolved keeping both sides), deployed
+  with the phase-3 code (backend rebuilt at 0 jobs) and pushed with it.
+- **Fix:** `jobClocks` in `web/dashboard/src/time.js`; `LiveActivity` uses it. Finished job (TERMINAL, awaiting
+  included): no "on this step", total = `created_at` → earlier of `updated_at` and the last feed line (DEC-150,
+  A-070). Running jobs unchanged.
+- **Tier-1:** baseline local 4430/1 skipped, pytest-only venv 3820/580 → now **4439/1** and **3829/580**; compileall
+  clean; vite build green (scratch outDir). This worktree has a stale git-ignored `web/dashboard/dist/` (Sep 18):
+  move it aside before running the suite (Operating notes).
+- **Tier-2:** PASS on live data at 375 px (action log): clip `b37b36a9b34e` "54m 29s total"; approved story step
+  "2s total" (approved 9 h later); cancelled "42s"; awaiting "0s". Container untouched.
+- **Tier-3:** `tests/test_dashboard_activity_clocks.py` (8 Node-run cases, skip without Node/`node_modules`; 1 guard).
+- **Regression contract:** RC-L1 running jobs keep both ticking clocks — `test_a_running_job_keeps_both_clocks_ticking`;
+  `test_dashboard_story_shared.py` unedited and green.
+- **Follow-ups (action log):** finished story steps' headline "Waiting to start..."; "Live activity" title on
+  finished jobs; the wizard's step-job row time is the approval time for approved steps.
+- **Open questions:** none.
 
 ## CURRENT STATE — AI Story **phase 2 is DONE** and pushed. Next: **phase 3**.
 - **Stages 0–12 done** on `feat/ai-story-phase-2`, ff-merged to `main` (last code commit `d20fa28`), deployed

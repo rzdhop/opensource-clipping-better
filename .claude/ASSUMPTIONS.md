@@ -226,6 +226,11 @@
   and only the image/TTS adapters touch the free-tier counters. This makes the phase-3 Tier-2 script's "usage.json
   moved only by free counters" check trivially true for the LLM side; recorded in the stage-13 action log as a
   surprise finding, not a bug.
+- **A-070** — Every path that finishes a job writes a feed line in the instant its last worker `updated_at` write
+  lands (clip done/failed: `update_progress`; story step: "…awaiting your approval" / "…failed"; cancel: "Cancel
+  requested."), so the earlier of the two is when the job stopped (DEC-150). *Confirmed in code
+  (`web/api/worker.py`, `web/api/store.py`) and on four live records 2026-09-27 (completed clip, approved,
+  cancelled and awaiting story steps).*
 - **A-040** — (spec §14, measured 2026-09-25 on the author's two reference videos)
   Shot mean 3.2–4.1 s, reaction cuts ≥ 0.8 s, lines of 3–8 words, 1–2 places per
   episode, a continuous music bed, single-word pop captions in the fruit-drama
