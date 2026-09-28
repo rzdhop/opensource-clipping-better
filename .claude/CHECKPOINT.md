@@ -4,7 +4,8 @@
   at 0 jobs, backend rebuilt, health OK. **Pushed 2026-09-28** on the human's word ("Push and merge"), together
   with the live-clocks fix merged beside it (section below); push key per memory `github-push-key`.
 - **Tier-1 at close:** local **4477 passed / 1 skipped**; CI env **3892 passed / 555 skipped**; compileall clean;
-  vite build green (scratch outDir). Baseline at stage 0 was 3737 / 1 (CI 3172 / 535).
+  vite build green (scratch outDir). Baseline at stage 0 was 3737 / 1 (CI 3172 / 535). After the live-clocks
+  merge (2026-09-28): local **4486 passed / 1 skipped**, CI env **3901 passed / 555 skipped** (+9 clock tests).
 - **Tier-2:** walked live by me at 375 px on `localhost:8000` (plan §4, 11 steps, all PASS): 23 LLM calls (E1 1,
   E2 8, E3 1, E4 3, T1 10), all Gemini free, 0 retries, 0 over cap, the paid link skipped every time; 15 lines
   measured (Edge 10, Gemini TTS 5, one 429 retried); ep 2 refused naming phase 5; no overflow at 375/820/1280;
