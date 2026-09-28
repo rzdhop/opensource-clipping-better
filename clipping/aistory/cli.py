@@ -9,6 +9,9 @@ options and defaults are untouched. Three commands::
     main.py --ai-story step <story_id> concepts|bible|style|style_preview [options]
     main.py --ai-story step <story_id> cast|places_proposal|places|season [options]
     main.py --ai-story step <story_id> script|storyboard --ep N [options]
+    main.py --ai-story step <story_id> assets|render|metadata --ep N [options]
+    main.py --ai-story render <story_id> --ep N [options]
+    main.py --ai-story fast-track <story_id> --ep N [options]
     main.py --ai-story list
 
 The story rules are ``clipping.aistory.workflow``'s, the ones the API applies,
@@ -67,6 +70,28 @@ scenes. ``--auto-approve`` applies the workflow's own approval rule and never
 "approves anyway": a script needs a passing, current consistency check; a
 storyboard needs an approved script with shots for every scene, none stale.
 
+Phase 4 (steps 10-12 and the fast track): ``assets``, ``render`` and
+``metadata`` write one episode (``--ep``, as phase 3); ``render`` and
+``fast-track`` are also their own top-level commands, ``render`` an alias of
+``step <id> render --ep N`` and ``fast-track`` the DEC-162 job from the
+script to the metadata pack. Preconditions and parameters are ``workflow``'s
+(DEC-114): ``assets`` takes ``--align-words`` (opt-in forced-alignment word
+timings, the STT chain, instead of an even split); ``render`` takes
+``--subtitles`` and ``--encoder`` (``clipping.aistory.steps.render``'s own
+closed lists); ``metadata`` takes no parameters; ``fast-track`` takes
+``--storyboard`` (``t1`` or ``fast``). The key gate applies to ``metadata``
+and ``fast-track`` (both call the LLM chain); ``render`` calls no API, and
+``assets`` meets the image and voice chains' own gates inside the step,
+stopping before its first call when a paid part is over a cap (with the
+numbers) -- never a wasted call. ``--auto-approve`` applies to ``assets``
+alone (``AUTO_APPROVABLE``): it approves the grid (``workflow.approve_assets``)
+only once every shot is current or locked and every line voiced, refused
+with its own reason otherwise (never 'approve anyway'); ``render``,
+``metadata`` and ``fast-track`` have nothing to approve -- their job ends
+completed. A short summary follows every run (images made and cached, lines
+voiced, render duration and loudness, metadata platforms, the fast track's
+sub-steps).
+
 Limitation: the CLI and a running server do not coordinate step runs on the
 same story. The server's one-step-per-story rule lives in its job store
 (``web/api/store.py``), which the CLI does not read, so running a step here
@@ -92,8 +117,11 @@ from datetime import datetime, timezone
 from . import defaults, refimages, schemas, templates, workflow
 from . import store as story_store
 from .steps import StepFailed
+from .steps import assets as assets_step
 from .steps import entities as entities_step
 from .steps import episode_common
+from .steps import fast_track as fast_track_step
+from .steps import render as render_step
 from .steps import script as script_step
 
 PROG = "main.py --ai-story"
@@ -109,11 +137,15 @@ EXIT_FAILED = 1
 EXIT_USAGE = 2
 EXIT_INTERRUPTED = 130
 
-# Every step `step` runs, phase 1 then phase 2 then phase 3.
-STEPS = workflow.PHASE1_STEPS + workflow.PHASE2_STEPS + workflow.PHASE3_STEPS
+# Phase 4's steps the `step` command runs (spec 3 steps 10-12); `fast-track`
+# is its own top-level command, not one of `step`'s (module docstring).
+_PHASE4_JOB_STEPS = ("assets", "render", "metadata")
+
+# Every step `step` runs, phase 1 then phase 2 then phase 3 then phase 4.
+STEPS = workflow.PHASE1_STEPS + workflow.PHASE2_STEPS + workflow.PHASE3_STEPS + _PHASE4_JOB_STEPS
 
 # The steps --auto-approve approves, and what to do for the others.
-AUTO_APPROVABLE = ("bible", "style", "cast", "places", "season") + workflow.PHASE3_STEPS
+AUTO_APPROVABLE = ("bible", "style", "cast", "places", "season") + workflow.PHASE3_STEPS + ("assets",)
 _NOT_AUTO_APPROVABLE = {
     "concepts": (
         "a concept is approved by choosing it: in the dashboard's concept step, or, for a "
@@ -128,12 +160,16 @@ _NOT_AUTO_APPROVABLE = {
         f"'{PROG} step STORY_ID places' (the saved proposal, or your own --place/--prop list), "
         "with --auto-approve there."
     ),
+    "render": "the render ends completed once it is done: there is nothing to approve.",
+    "metadata": "the metadata pack ends completed once it is written: there is nothing to approve.",
 }
 
 # The steps that call the LLM chain, and so meet the key gate (the storyboard
 # with --fast calls nothing, but the option applies to the step, not the flag
-# combination: the gate itself is skipped for --fast in _phase3_step).
-_KEYED_STEPS = workflow.LLM_STEPS + workflow.PHASE2_STEPS + workflow.PHASE3_STEPS
+# combination: the gate itself is skipped for --fast in _phase3_step; `assets`
+# and `render` call no LLM, so they are not here -- `assets` meets the image
+# and voice chains' own gates instead, inside the step).
+_KEYED_STEPS = workflow.LLM_STEPS + workflow.PHASE2_STEPS + workflow.PHASE3_STEPS + ("metadata",)
 
 # The options of `step` that only some steps take: (dest, flag, steps).
 _STEP_ONLY = (
@@ -147,9 +183,12 @@ _STEP_ONLY = (
     ("place", "--place", ("places",)),
     ("prop", "--prop", ("places",)),
     ("episodes", "--episodes", ("season",)),
-    ("ep", "--ep", workflow.PHASE3_STEPS),
+    ("ep", "--ep", workflow.PHASE3_STEPS + _PHASE4_JOB_STEPS),
     ("fast", "--fast", ("storyboard",)),
     ("measure_voices", "--measure-voices", ("script",)),
+    ("align_words", "--align-words", ("assets",)),
+    ("subtitles", "--subtitles", ("render",)),
+    ("encoder", "--encoder", ("render",)),
     ("allow_slow_chain", "--allow-slow-chain", _KEYED_STEPS),
 )
 
@@ -187,6 +226,10 @@ def build_parser() -> argparse.ArgumentParser:
             f"  {PROG} step STORY_ID season --episodes 8 --auto-approve\n"
             f"  {PROG} step STORY_ID script --ep 1 --auto-approve\n"
             f"  {PROG} step STORY_ID storyboard --ep 1 --fast\n"
+            f"  {PROG} step STORY_ID assets --ep 1 --auto-approve\n"
+            f"  {PROG} step STORY_ID metadata --ep 1\n"
+            f"  {PROG} render STORY_ID --ep 1 --subtitles word_pop\n"
+            f"  {PROG} fast-track STORY_ID --ep 1 --storyboard fast\n"
             f"  {PROG} list"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -195,7 +238,7 @@ def build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--outputs-dir", default=None, help=argparse.SUPPRESS)
 
-    commands = parser.add_subparsers(dest="command", metavar="{new,step,list}", required=True)
+    commands = parser.add_subparsers(dest="command", metavar="{new,step,render,fast-track,list}", required=True)
 
     # ---- new
     new = commands.add_parser(
@@ -233,7 +276,11 @@ def build_parser() -> argparse.ArgumentParser:
             "builds the draft style lock here; style_preview calls the image chain; cast, "
             "places_proposal, places and season call the LLM chain, and the cast and the "
             "places the image and voice chains too; script and storyboard write one "
-            "episode (--ep) and call the LLM chain too, unless storyboard is run --fast."
+            "episode (--ep) and call the LLM chain too, unless storyboard is run --fast; "
+            "assets makes one episode's images, voices and sounds (--ep), meeting the image "
+            "and voice chains' own gates; render turns them into episode_final.mp4 (--ep), "
+            "calling no API; metadata writes the publishing pack (--ep, one M1 call per "
+            "platform)."
         ),
     )
     step.add_argument("story_id", help="the story's id (see 'list')")
@@ -277,14 +324,65 @@ def build_parser() -> argparse.ArgumentParser:
     step.add_argument("--measure-voices", action="store_true",
                       help=("script only: after writing, measure every line with its speaker's pinned "
                             "voice and keep the audio"))
+    step.add_argument("--align-words", action="store_true",
+                      help=("assets only: opt-in forced-alignment word timings (the STT chain) instead "
+                            "of an even split, stored per line"))
+    step.add_argument(
+        "--subtitles", choices=render_step.SUBTITLE_CHOICES, default=None, metavar="MODE",
+        help=(f"render only: the subtitle mode, one of {', '.join(render_step.SUBTITLE_CHOICES)} "
+              f"(default: {render_step.STYLE_SUBTITLES}, the style lock's own)"),
+    )
+    step.add_argument(
+        "--encoder", choices=render_step.ENCODER_CHOICES, default=None, metavar="ENC",
+        help=(f"render only: the final pass's encoder, one of {', '.join(render_step.ENCODER_CHOICES)} "
+              f"(default: {render_step.DEFAULT_ENCODER})"),
+    )
     step.add_argument("--auto-approve", action="store_true",
                       help=("bible, style, season: approve the result once the step is done; cast, "
                             "places: approve every character, place and prop that has everything; "
                             "script, storyboard: approve it once the workflow's own rule passes (never "
-                            "'approve anyway')"))
+                            "'approve anyway'); assets: approve the grid once every shot is current or "
+                            "locked and every line voiced (workflow.approve_assets, also never 'approve "
+                            "anyway')"))
     step.add_argument("--allow-slow-chain", action="store_true",
                       help=("the steps that call the LLM chain: run on the chain's slow floor alone; "
                             "also settable as ALLOW_SLOW_CHAIN=1"))
+
+    # ---- render (alias of 'step ID render --ep N')
+    render_cmd = commands.add_parser(
+        "render", parents=[common], help="render one episode (alias of 'step ID render --ep N')",
+        description="Render episode --ep to episode_final.mp4; exactly 'step ID render --ep N', spelled shorter.",
+    )
+    render_cmd.add_argument("story_id", help="the story's id (see 'list')")
+    render_cmd.add_argument("--ep", type=int, required=True, metavar="N", help="the episode number to render")
+    render_cmd.add_argument(
+        "--subtitles", choices=render_step.SUBTITLE_CHOICES, default=None, metavar="MODE",
+        help=(f"the subtitle mode, one of {', '.join(render_step.SUBTITLE_CHOICES)} "
+              f"(default: {render_step.STYLE_SUBTITLES}, the style lock's own)"),
+    )
+    render_cmd.add_argument(
+        "--encoder", choices=render_step.ENCODER_CHOICES, default=None, metavar="ENC",
+        help=(f"the final pass's encoder, one of {', '.join(render_step.ENCODER_CHOICES)} "
+              f"(default: {render_step.DEFAULT_ENCODER})"),
+    )
+
+    # ---- fast-track
+    fast_track_cmd = commands.add_parser(
+        "fast-track", parents=[common], help="one episode, script through metadata, in a single job",
+        description=(
+            "Run episode --ep from its script to its metadata pack in a single job (DEC-162): "
+            "auto-approves only what passes the workflow's own rule (never 'approve anyway'), and "
+            "stops before any paid generation call unless allow_paid is on and every cap fits."
+        ),
+    )
+    fast_track_cmd.add_argument("story_id", help="the story's id (see 'list')")
+    fast_track_cmd.add_argument("--ep", type=int, required=True, metavar="N",
+                                help="the episode number to fast-track")
+    fast_track_cmd.add_argument(
+        "--storyboard", choices=fast_track_step.STORYBOARD_CHOICES, default=None, metavar="MODE",
+        help=(f"how the shots are planned, one of {', '.join(fast_track_step.STORYBOARD_CHOICES)} "
+              f"(default: {fast_track_step.T1}, one T1 call per scene)"),
+    )
 
     # ---- list
     commands.add_parser("list", parents=[common], help="list the stories",
@@ -389,9 +487,11 @@ def _llm_refusal(allow_slow_chain) -> str | None:
 def _run_step(stories, story_id, step, params, ep=None):
     """Run *step* through the worker's registry, in this process, with a real
     cancel token: Ctrl-C cancels it. *ep* is the episode number for a phase-3
-    step (``StepContext.ep``), None for every other step. Returns
-    ``EXIT_INTERRUPTED`` when it was interrupted, else None; ``StepFailed``
-    propagates."""
+    or phase-4 step (``StepContext.ep``), None for every other step. Returns
+    ``(EXIT_INTERRUPTED, None)`` when it was interrupted, else ``(None,
+    result)`` with what the runner returned -- phase 4's summaries read it;
+    phase 1-3 read their summary from disk instead (``workflow.episode_view``)
+    and leave it unused. ``StepFailed`` propagates."""
     from clipping.cancel import Cancelled, CancelToken
 
     from . import steps
@@ -410,12 +510,12 @@ def _run_step(stories, story_id, step, params, ep=None):
         on_log=print,
     )
     try:
-        steps.run(step, ctx)
+        result = steps.run(step, ctx)
     except (KeyboardInterrupt, Cancelled):
         token.cancel()
         _err("Cancelled. What the step had already written stays.")
-        return EXIT_INTERRUPTED
-    return None
+        return EXIT_INTERRUPTED, None
+    return None, result
 
 
 # ---------------------------------------------------------------- commands
@@ -472,7 +572,7 @@ def _cmd_step(args, stories) -> int:
     for dest, flag, applies in _STEP_ONLY:
         if _given(getattr(args, dest)) and step not in applies:
             return _usage_error("step", f"{flag} applies to {_quoted(applies)} only, not to '{step}'.")
-    if step in workflow.PHASE3_STEPS and args.ep is None:
+    if step in workflow.PHASE3_STEPS + _PHASE4_JOB_STEPS and args.ep is None:
         return _usage_error("step", f"--ep is required for '{step}': which episode to run it on.")
     try:
         overrides = parse_overrides(args.override)
@@ -488,6 +588,9 @@ def _cmd_step(args, stories) -> int:
 
     if step in workflow.PHASE3_STEPS:
         return _phase3_step(args, stories, story)
+
+    if step in _PHASE4_JOB_STEPS:
+        return _phase4_step(args, stories, story)
 
     if step == "style":
         params = {}
@@ -523,7 +626,7 @@ def _cmd_step(args, stories) -> int:
             # "Ten more, with a note" is the regenerate target of the API.
             runner_step = "regenerate"
             params = {"target": "concepts", "note": args.note}
-        interrupted = _run_step(stories, story_id, runner_step, params)
+        interrupted, _result = _run_step(stories, story_id, runner_step, params)
         if interrupted:
             return interrupted
         if args.auto_approve:
@@ -544,7 +647,7 @@ def _cmd_step(args, stories) -> int:
     if not verdict["ready"]:
         _err(verdict["message"])
         return EXIT_FAILED
-    interrupted = _run_step(stories, story_id, step, {})
+    interrupted, _result = _run_step(stories, story_id, step, {})
     if interrupted:
         return interrupted
     print(_line(workflow.load(stories, story_id)))
@@ -683,7 +786,7 @@ def _phase2_step(args, stories, story, items) -> int:
 
     failure = None
     try:
-        interrupted = _run_step(stories, story_id, step, params)
+        interrupted, _result = _run_step(stories, story_id, step, params)
     except StepFailed as exc:
         if step != "cast":
             raise
@@ -766,7 +869,7 @@ def _phase3_step(args, stories, story) -> int:
         if refusal:
             _err(refusal)
             return EXIT_FAILED
-        interrupted = _run_step(stories, story_id, step, params, ep=ep)
+        interrupted, _result = _run_step(stories, story_id, step, params, ep=ep)
         if interrupted:
             return interrupted
 
@@ -783,7 +886,186 @@ def _phase3_step(args, stories, story) -> int:
     return EXIT_OK
 
 
-_COMMANDS = {"new": _cmd_new, "step": _cmd_step, "list": _cmd_list}
+# ------------------------------------------------------------------ phase 4
+
+def _and(items) -> str:
+    """``a``, ``a and b``, ``a, b and c`` (``assets._and``, duplicated for
+    the CLI's own summaries)."""
+    items = list(items)
+    if len(items) <= 1:
+        return "".join(items)
+    return ", ".join(items[:-1]) + " and " + items[-1]
+
+
+def _render_params(subtitles, encoder) -> dict:
+    """``render``'s params from the CLI's own ``--subtitles``/``--encoder``
+    flags: only what was given, so :func:`render_step.read_params` fills the
+    rest with its own defaults."""
+    params = {}
+    if subtitles is not None:
+        params[render_step.SUBTITLES_PARAM] = subtitles
+    if encoder is not None:
+        params[render_step.ENCODER_PARAM] = encoder
+    return params
+
+
+def _phase4_params(args, step) -> dict:
+    """*step*'s params from the CLI's own flags (``assets``, ``render``;
+    ``metadata`` takes none): the modules' own closed lists reach argparse as
+    ``choices=`` (DEC-009), so nothing here is re-typed."""
+    if step == "assets":
+        return {assets_step.ALIGN_PARAM: True} if args.align_words else {}
+    if step == "render":
+        return _render_params(args.subtitles, args.encoder)
+    return {}
+
+
+def _print_assets_summary(result) -> None:
+    """After ``assets``: shots made/cached/locked, lines voiced (and, opted
+    in, aligned), SFX/BGM -- ``assets.run``'s own return."""
+    shots, lines = result["shots"], result["lines"]
+    parts = [f"{shots['made']} image{'' if shots['made'] == 1 else 's'} made", f"{shots['cached']} cached"]
+    if shots["locked"]:
+        parts.append(f"{shots['locked']} locked")
+    parts.append(f"{lines['measured']} line{'' if lines['measured'] == 1 else 's'} voiced")
+    if result["aligned"]:
+        parts.append(f"{len(result['aligned'])} aligned")
+    if lines["unvoiced"]:
+        parts.append(f"{len(lines['unvoiced'])} unvoiced")
+    if result["sfx"]["missing"]:
+        parts.append(f"{result['sfx']['missing']} SFX cue{'' if result['sfx']['missing'] == 1 else 's'} missing")
+    if result["bgm"]:
+        parts.append(f"BGM {result['bgm']}")
+    state = "complete" if result["complete"] else "not complete"
+    print(f"🖼 Episode {result['ep']}'s assets ({state}): {_and(parts)}.")
+
+
+def _print_render_summary(result) -> None:
+    """After ``render``: duration, size and fps, loudness, stages run versus
+    cached, and any warning (a length or loudness outside the window is a
+    warning, never a failure) -- ``render.run``'s own return."""
+    loud, out = result["loudness"], result["output"]
+    print(f"🎬 Episode {result['ep']} rendered: {result['duration_s']:.1f} s, {out['width']}x{out['height']} at "
+          f"{out['fps']} fps, {loud['i']:.1f} LUFS (true peak {loud['tp']:.1f} dBTP); "
+          f"{len(result['ran'])} stage{'' if len(result['ran']) == 1 else 's'} run, "
+          f"{len(result['cached'])} from the cache, {result['seconds']:.1f} s total.")
+    for warning in result["warnings"]:
+        print(f"⚠️ {warning}")
+
+
+def _print_metadata_summary(result) -> None:
+    """After ``metadata``: the platforms written, which were asked versus
+    kept, and whether the cover was made again -- ``metadata.run``'s own
+    return."""
+    platforms = [name for name in schemas.PLATFORMS if name in result["platforms"]]
+    cover = " + cover" if result["cover"] else ""
+    asked = f"{len(result['asked'])} asked" if result["asked"] else "every platform kept"
+    print(f"🏷 Episode {result['ep']}'s metadata ({asked}{cover}): {_and(platforms)}.")
+
+
+def _phase4_step(args, stories, story) -> int:
+    """``assets``, ``render`` or ``metadata`` of episode ``args.ep`` (module
+    docstring; DEC-114, the same rules ``workflow`` applies for the API): the
+    episode's preconditions (``workflow.episode_context``), then -- for
+    ``metadata``, the only one of the three the ``step`` command runs that
+    calls the LLM chain (``render`` calls no API; ``assets`` meets the image
+    and voice chains' own gates inside the step, stopping before its first
+    call when a paid part is over a cap) -- the key gate, then the run
+    through the worker's registry, a summary, and -- ``assets``, the one
+    phase-4 step ``AUTO_APPROVABLE`` gains -- ``--auto-approve``
+    (``workflow.approve_assets``, refused with its own reason for a stale or
+    incomplete grid; never 'approve anyway')."""
+    step, story_id, ep = args.step, story["story_id"], args.ep
+    workflow.episode_context(stories, story, ep, step=step)
+    if step == "metadata":
+        refusal = _llm_refusal(args.allow_slow_chain)
+        if refusal:
+            _err(refusal)
+            return EXIT_FAILED
+    interrupted, result = _run_step(stories, story_id, step, _phase4_params(args, step), ep=ep)
+    if interrupted:
+        return interrupted
+    {"assets": _print_assets_summary, "render": _print_render_summary,
+     "metadata": _print_metadata_summary}[step](result)
+    if args.auto_approve:  # only 'assets' reaches here: AUTO_APPROVABLE gates the rest out
+        workflow.approve_assets(stories, story_id, ep, now=_now())
+        print("✅ Assets approved.")
+    print(_line(workflow.load(stories, story_id)))
+    return EXIT_OK
+
+
+def _run_render_step(stories, story, ep, *, subtitles, encoder) -> int:
+    """``render`` of episode *ep*, shared by ``step ID render --ep N`` and
+    the ``render`` command (its alias)."""
+    story_id = story["story_id"]
+    workflow.episode_context(stories, story, ep, step="render")
+    interrupted, result = _run_step(stories, story_id, "render", _render_params(subtitles, encoder), ep=ep)
+    if interrupted:
+        return interrupted
+    _print_render_summary(result)
+    print(_line(workflow.load(stories, story_id)))
+    return EXIT_OK
+
+
+def _cmd_render(args, stories) -> int:
+    story = workflow.load(stories, args.story_id)
+    return _run_render_step(stories, story, args.ep, subtitles=args.subtitles, encoder=args.encoder)
+
+
+def _print_fast_track_summary(result) -> None:
+    """After the fast track: each sub-step kept as it was or run, in order
+    (``fast_track.run``'s own return: ``steps[name]`` is minimal when a
+    sub-step was kept, its own summary otherwise), then the total wall
+    time and what was auto-approved."""
+    notes = []
+    for name in fast_track_step.SUB_STEPS:
+        info = result["steps"].get(name) or {}
+        label = fast_track_step.LABELS[name]
+        if info.get("kept"):
+            notes.append(f"{label} kept")
+        elif name == "storyboard":
+            notes.append(f"{label} {info.get('shots', '?')} shots ({info.get('mode', '')})")
+        elif name == "paid_check":
+            notes.append(f"{label} {info.get('verdict', '')}")
+        elif name == "assets":
+            shots = info.get("shots") or {}
+            notes.append(f"{label} {shots.get('made', 0)} made/{shots.get('cached', 0)} cached")
+        elif name == "render":
+            duration = info.get("duration_s")
+            notes.append(f"{label} {duration:.1f} s" if duration is not None else label)
+        elif name == "metadata":
+            notes.append(f"{label} {len(info.get('platforms') or {})} platforms")
+        else:
+            notes.append(f"{label} written")
+    approved = f"; auto-approved {_and(result['auto_approved'])}" if result["auto_approved"] else ""
+    print(f"⏩ Fast track of episode {result['ep']} done in {result['seconds'] / 60:.1f} min: "
+          + ", ".join(notes) + approved + ".")
+
+
+def _cmd_fast_track(args, stories) -> int:
+    """``fast-track``: one episode, script through metadata, in one job
+    (module docstring; DEC-162). Meets the LLM key gate as the API does for
+    every fast-track job (it always writes or checks the script, and may
+    reach T1 and M1 too); there is no ``--allow-slow-chain`` on this command
+    (unlike ``step``'s LLM steps), but ``ALLOW_SLOW_CHAIN=1`` still applies."""
+    story = workflow.load(stories, args.story_id)
+    story_id, ep = story["story_id"], args.ep
+    workflow.episode_context(stories, story, ep, step="fast-track")
+    refusal = _llm_refusal(False)
+    if refusal:
+        _err(refusal)
+        return EXIT_FAILED
+    params = {fast_track_step.STORYBOARD_PARAM: args.storyboard} if args.storyboard is not None else {}
+    interrupted, result = _run_step(stories, story_id, "fast-track", params, ep=ep)
+    if interrupted:
+        return interrupted
+    _print_fast_track_summary(result)
+    print(_line(workflow.load(stories, story_id)))
+    return EXIT_OK
+
+
+_COMMANDS = {"new": _cmd_new, "step": _cmd_step, "render": _cmd_render, "fast-track": _cmd_fast_track,
+             "list": _cmd_list}
 
 
 def main(argv=None) -> int:
