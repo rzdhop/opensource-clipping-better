@@ -28,7 +28,9 @@ and ``failures()``, and keeps ``voice_failed``, ``measured`` and
 and nothing when left alone (the script step): :attr:`measure_step` (the
 ledger's ``step``), :meth:`voice_cache` (the generation cache a line's
 request goes through, DEC-151) and :attr:`voice_take` (a voice regenerate's
-take, so the cache misses on purpose).
+take, so the cache misses on purpose); a fourth, :meth:`voice_refused`,
+hands it a failed line's ``VoiceError`` (its chain failures pace a voice a
+free tier held back).
 
 The story's own document is never read for writing (RC-E2).
 """
@@ -176,6 +178,12 @@ class LineMeasurement:
         script step: no cache, nothing changes, RC-A2)."""
         return None
 
+    def voice_refused(self, line, exc) -> None:
+        """*line*'s pinned voice failed with *exc* (``voices.VoiceError``;
+        its ``__cause__`` is the chain's ``NoRunnableLink`` when the chain
+        ran). Nothing here (the script step); the assets step keeps the
+        chain's failures to pace a rate-limited voice."""
+
     def voice_failures(self) -> str:
         return "; ".join(f"line {line_id} failed ({speaker_name(self.ec, speaker)}: {reason.rstrip('.')})"
                          for line_id, speaker, reason in self.voice_failed)
@@ -272,6 +280,7 @@ class LineMeasurement:
                                                 **extra)
             except voices.VoiceError as exc:
                 reason = str(exc)
+                self.voice_refused(line, exc)
             else:
                 line["timing"] = {
                     "source": spoken["source"], "duration_s": spoken["duration_s"],

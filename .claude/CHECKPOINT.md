@@ -3,17 +3,30 @@
 - **Current phase:** 4 CHECKPOINT → 5 IMPLEMENT. **Plan approved** by the human ("Yes go go", 2026-09-28), read as
   also answering Q5 = yes: `feat/ai-story-phase-4` is pushed once at stage 7 so CI records the x86_64 framemd5 key.
   Plan: `~/.claude/plans/ai-story-phase-4-assets-render.md` (stages 0–17, riskiest = stage 6, sequence + audio graph).
-- **Current stage:** 16 next (merge, deploy, Tier-2). Stages 0–15 committed on `feat/ai-story-phase-4`. Branch pushed once (Q5) at `4f48515`; CI: compile ✓, test ✗ only as designed
-  (unknown x86_64 golden key, read from the public check-run annotation and recorded). The rest of CI's test log needs
-  a sign-in, so **CI's full green is confirmed only at the next push** (Node 20 deprecation notice on checkout@v4 /
-  setup-python@v5 — follow-up). Stage 0 done: checkpoint commit **`86e7f4d`** on `main`
-  (parent `1367d75`); worktree `.claude/worktrees/ai-story-phase-4` on `feat/ai-story-phase-4` (node_modules
-  symlinked, excluded); **this worktree's `.claude/` files are the live artifacts until the merge**. Stages 1–15 done.
-- **Stage 1 notes for stage 8 (first real caller of the cache):** catch `gencache.JournalError` (not a
-  `NoRunnableLink`) and fail naming the request id; book only when `result.meta` has no `"booked"` (a keyless
-  request still books the old way); `book(entry)` sees kind/link/paid/estimate/note/state/request, so step/ep/qty
-  are closed over by the caller; pass `entry["note"]` to `ledger.append(note=)` on the ledger `LineGates` reads;
-  stage 3's `gen_cache_dir` must refuse a symlinked root (gencache does no symlink check on its root).
+- **Current stage:** 16 in progress (Tier-2). `main` ff-merged to **`bc4dfb8`** 2026-09-28 ~22:35 UTC at 0 jobs; backend
+  rebuilt (`rm -sfv` + `up -d --build`), health OK; the two awaiting FR jobs survived the restart. Live artifacts:
+  this worktree's `.claude/` (fixes during Tier-2 land on `feat/ai-story-phase-4`, then ff-merge again).
+- **Tier-2 so far:** (before) FR story tar `scratchpad/tier2/b1104ec66b05-before.tgz` sha256 0da2a73e…d015 (1.8 MB),
+  `usage.json` a11610f6…9d96, no `spend.json`; (1) golden render in the container: `7.1.5-0+deb13u1/aarch64` matches,
+  7.5 s — PASS; (2) old ep01 moved to `scratchpad/tier2/ep01-pre-phase4/` (also in the tar); (3) script job
+  `bdf8c2124a53` started 22:39:40 UTC from the dashboard at 375 px (estimate $0.00 · 11 LLM calls, gemini free).
+  The awaiting `style_preview` job d95e7a469714 is the human's to approve/reject; it did not block the script step.
+  (3 cont.) script done 22:41:06 (86 s): 10 scenes, 18 lines, 58.7 s estimated (ok); E4 flagged s10 repeating
+  Mangella's s09 line (F12) → regenerate `scene:1:s10` with a note from the UI (new line distinct) → Check again → E4
+  found 3 other issues (s01/s05 Kiwilo's tone, s03 bushes vs the pool: E4 variance) → **approved anyway** 22:44:20
+  (recorded; plan-sanctioned for the manual walk). (4) T1 storyboard 22:44:56→22:46:02: 21 shots (2/scene, s08 3),
+  approved 22:46:34. Assets estimate: 21 images pollinations/flux free (cloudflare keyless), 18 lines/708 chars free
+  (Kiwilo edge/fr-CA-AntoineNeural, Mangella gemini/Kore, …), fal/flux-schnell listed "refused: est $0.059 …
+  allow_paid is off". **Step 12 (cap refusal with allow_paid on) moved to the EN story before its fast track** (needs
+  the human's OK to flip the live setting). (6) assets job started ~22:47 from the UI.
+  (6 cont.) assets job 3a415855191c 22:47:17→22:50:58 ended awaiting with **4/21 images, 15/18 lines**: TIER-2 FINDING
+  T2-F1 — free-tier rate limits fail items instead of pacing them: pollinations answers HTTP 402 except ~1 image per
+  minute (successes at :54/:57/:54/:54 each minute; 402 treated as fatal), Gemini TTS answered 429 after ~4 calls per
+  minute (the runner's 3 s retry is too short). SFX all resolved; BGM telenovela_tension ← dominant 'scheming'
+  (assets/bgm/epic/trailer-score-room-epic-cinematic-thriller-538890.mp3); ledger $0.00 / 33 rows. Fix attempt 1
+  (Opus): paced follow-up passes for rate-limited free items inside `steps/assets.py`, providers untouched —
+  committed on the branch (local 5616/1, CI 4909/677), ff-merged, backend restarted at 0 jobs, then Continue.
+  Also seen: l04 and l08 carry identical text (E-prompt echo, F12 family) → the cache served l08 at $0 ('kept answer').
 - **Tier-1 baseline (86e7f4d):** local **4486 passed / 1 skipped** (210 s); CI env (`/tmp/cilibs`) **3901 passed /
   555 skipped** (155 s); compileall clean (`PYTHONPYCACHEPREFIX` in scratch); vite build green to a scratch outDir.
   ffmpeg: host `6.1.1-3ubuntu5`, container `7.1.5-0+deb13u1`. Health: 0 jobs.
@@ -194,7 +207,7 @@
 | 13 | CLI [Sonnet] | **done** (local 5552/1, CI 4845/677; 17 new tests) |
 | 14 | dashboard: storyboard assets + fast track [Sonnet] | **done** (local 5564/1, CI 4857/677; 12 new contract tests; build green; browser check with stage 15) |
 | 15 | dashboard: Preview [Sonnet] | **done** (local 5578/1, CI 4871/677; 14 new contract tests; browser check 375/820/1280 by me: 1 overflow + 2 polish fixed) |
-| 16 | merge, deploy, Tier-2 (me; human watches on the phone) | next |
+| 16 | merge, deploy, Tier-2 (me; human watches on the phone) | in progress |
 | 17 | docs + decisions [Sonnet] | — |
 
 ### Regression contract (phase 4)

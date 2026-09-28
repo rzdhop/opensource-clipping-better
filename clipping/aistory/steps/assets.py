@@ -57,6 +57,20 @@ cancel token is checked before every call. It fills only what is missing
    ``cost_ledger.json`` in the episode's folder after the step, whatever
    happened.
 
+**A free tier that pushes back is paced, not failed.** After the images,
+the lines and shots a free link held back (:func:`rate_limited_by`: HTTP
+429 from a free link, HTTP 402 from ``pollinations`` -- its empty pollen
+balance, refilled about one image a minute) are asked again in rounds: a
+:data:`RATE_LIMIT_PAUSE_S` pause through the cancel-aware sleep, then each
+provider's items in order until that provider pushes back again; one pause
+serves every provider held back. A provider whose round after a pause makes
+no progress is given up; a pause starts only while the step budget still
+fits it and the call after it (else the round stops, naming what is left).
+Each item keeps its request -- the same seed, the same pinned voice, the
+same cache key -- so a retry never buys twice and a kept answer is reused.
+Nothing else is asked again: no key, a paid refusal, another status, an
+item whose paid link was sent.
+
 A shot or a line that failed does not fail the step: it ends awaiting
 approval (the worker's rule), naming each failure and the regenerate target
 that finishes it (``shot:<ep>:<shot_id>``, ``line:<ep>:<line_id>``). A
@@ -73,6 +87,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import secrets
 import shutil
 import tempfile
@@ -82,7 +97,7 @@ from types import SimpleNamespace
 from clipping.providers import budget as budget_mod
 from clipping.providers import gating, gencache
 from clipping.providers import generation as gen
-from clipping.providers.registry import ChainError, describe
+from clipping.providers.registry import ChainError, Link, describe
 
 from .. import imaging, refimages, schemas, timing, voices, wordtiming
 from .. import ledger as ledger_mod
@@ -108,6 +123,11 @@ PARAMS = (ALIGN_PARAM,)
 # transcription is a few seconds of audio on a hosted STT link.
 STORY_IMAGE_CALL_SECONDS = 300
 STORY_STT_CALL_SECONDS = 60
+
+# The pause before a free link that pushed back is asked again (module
+# docstring): Pollinations refills about one image a minute, Gemini's speech
+# quota is per minute (Tier-2, 2026-09-28).
+RATE_LIMIT_PAUSE_S = 60
 
 # A shot's image is vertical 9:16, the size of the plates it is composed on.
 SHOT_SIZE = refimages.PLATE_SIZE
@@ -135,13 +155,47 @@ def _and(items) -> str:
     return ", ".join(items[:-1]) + " and " + items[-1]
 
 
+# What asking an item again came to (``_Assets.pace``), and how long its call
+# may take for the step budget's predictive check.
+_DONE, _LIMITED, _FAILED = "done", "limited", "failed"
+_CALL_SECONDS = {"line": voice_lines.STORY_TTS_CALL_SECONDS, "shot": STORY_IMAGE_CALL_SECONDS}
+
+
+def _counted(items) -> str:
+    """``3 lines and 1 shot`` for ``[(kind, id)]``."""
+    parts = []
+    for kind in ("line", "shot"):
+        count = sum(1 for item_kind, _id in items if item_kind == kind)
+        if count:
+            parts.append(f"{count} {kind}{'s' if count != 1 else ''}")
+    return _and(parts)
+
+
+def _left(items) -> str:
+    """``the voices of lines l37 and l40; the image of shot sh05`` for ``[(kind, id)]``."""
+    lines = [item_id for kind, item_id in items if kind == "line"]
+    shots = [item_id for kind, item_id in items if kind == "shot"]
+    parts = []
+    if lines:
+        many = len(lines) > 1
+        parts.append(f"the voice{'s' if many else ''} of line{'s' if many else ''} {_and(lines)}")
+    if shots:
+        many = len(shots) > 1
+        parts.append(f"the image{'s' if many else ''} of shot{'s' if many else ''} {_and(shots)}")
+    return "; ".join(parts)
+
+
 class ShotFailed(Exception):
     """One shot's image was not made; ``reason`` says why and, where there is
-    one, what to do. The step goes on with the next shot."""
+    one, what to do. The step goes on with the next shot. ``failures`` are
+    the chain's ``(label, reason)`` pairs when no link answered
+    (``NoRunnableLink.failures``, what :func:`rate_limited_by` reads), else
+    empty."""
 
-    def __init__(self, reason):
+    def __init__(self, reason, failures=()):
         super().__init__(reason)
         self.reason = reason
+        self.failures = tuple(failures)
 
 
 # ------------------------------------------------------------------ targets
@@ -280,6 +334,62 @@ def route_of(link) -> str:
     if link.provider == "local":
         return "local"
     return "paid" if gen.is_paid(link) else "free"
+
+
+# A chain failure's reason is ``"<ExceptionName>: <message>"``; an HTTP
+# answer's message starts ``HTTP <status> from <url>`` (``transport.
+# HttpStatusError``). Only that head is read: a detail further on is the
+# provider's own text.
+_FAILURE_HEAD = re.compile(r"(?P<name>[A-Za-z_][A-Za-z0-9_]*): (?:HTTP (?P<status>\d{3})\b)?")
+# Why the runner passed a paid link by before sending anything: its route,
+# no adapter, no key (``run_generation_chain``'s skips), ``allow_paid`` off,
+# a cap's refusal (``budget.check``).
+_UNSENT = ("route is ", "no adapter yet", "no API key", imaging.PAID_OFF, "refused: ")
+
+
+def _failure_link(label):
+    provider, _, model = str(label or "").partition("/")
+    return Link(provider, model) if model and provider in gen.GEN_PROVIDERS else None
+
+
+def is_rate_limit(label, reason) -> bool:
+    """Whether one link's failure (a ``(label, reason)`` pair of
+    ``NoRunnableLink.failures``) is a free tier asking to slow down: HTTP 429
+    (or an SDK ``RateLimitError``) from a free hosted link, or HTTP 402 from
+    ``pollinations`` -- its empty pollen balance, refilled over time. A 402
+    anywhere else, any other status, a paid or a local link: not one."""
+    link = _failure_link(label)
+    if link is None or link.provider == "local" or gen.is_paid(link):
+        return False
+    head = _FAILURE_HEAD.match(str(reason or ""))
+    if head is None:
+        return False
+    status = int(head.group("status")) if head.group("status") else None
+    if status == 429 or head.group("name") == "RateLimitError":
+        return True
+    return status == 402 and link.provider == "pollinations"
+
+
+def _paid_sent(label, reason) -> bool:
+    """Whether a paid link got past its gates: its request may be billed, and
+    a second one could be billed again (DEC-106)."""
+    link = _failure_link(label)
+    return link is not None and gen.is_paid(link) and not str(reason or "").startswith(_UNSENT)
+
+
+def rate_limited_by(failures):
+    """The provider whose free tier held an item back, or None (pure).
+
+    *failures* are the item's chain failures, ``(label, reason)`` pairs
+    (``NoRunnableLink.failures``: one per link tried or skipped). The first
+    link whose failure :func:`is_rate_limit` names it -- unless a paid link
+    of the same chain got past its gates, which makes the item never asked
+    again. Every other failure (no key, not reachable, a paid refusal, a
+    spent day) leaves the item to the rate-limited link."""
+    pairs = list(failures or ())
+    if any(_paid_sent(label, reason) for label, reason in pairs):
+        return None
+    return next((str(label).partition("/")[0] for label, reason in pairs if is_rate_limit(label, reason)), None)
 
 
 def assets_fingerprint(storyboard, script, assets_doc, *, image_shas, audio_shas) -> str:
@@ -749,8 +859,17 @@ class _Assets(voice_lines.LineMeasurement):
         self.gates = None
         self.made = []  # [(shot_id, cached)]
         self.aligned = []
+        # The chain failures of each shot and line that failed, by id: what
+        # the pacing reads (:func:`rate_limited_by`).
+        self.shot_failures = {}
+        self.line_failures = {}
 
     # ---------------------------------------------------------- plumbing
+
+    def voice_refused(self, line, exc) -> None:
+        """``voice_lines``' hook: the one-link chain's failures behind a
+        line's ``VoiceError`` (none when it did not come from the chain)."""
+        self.line_failures[line["line_id"]] = tuple(getattr(exc.__cause__, "failures", None) or ())
 
     def failures(self) -> str:
         return "; ".join(f"{what} failed ({reason})" for what, _target, reason in self.failed)
@@ -844,14 +963,17 @@ class _Assets(voice_lines.LineMeasurement):
 
     # ------------------------------------------------------------- the words
 
-    def align_words(self) -> None:
+    def align_words(self, only=None) -> None:
         """Opt-in forced alignment of every voiced line whose sidecar has no
-        words (``wordtiming.align``); a line that cannot be aligned keeps the
-        even split, said, never a failure."""
+        words (``wordtiming.align``) -- of the lines *only* names, when given
+        (the ones voiced after a pause); a line that cannot be aligned keeps
+        the even split, said, never a failure."""
         ec, ctx = self.ec, self.ctx
         wanted = []
         for scene in self.script["scenes"]:
             for line in scene["lines"]:
+                if only is not None and line["line_id"] not in only:
+                    continue
                 if not voice_lines.is_measured(ec, line):
                     continue
                 sidecar = read_sidecar(ec, line["line_id"])
@@ -940,7 +1062,7 @@ class _Assets(voice_lines.LineMeasurement):
                                            budget_obj=gates.budget, request=request, adapters=tools.adapters)
                            for label, reason in exc.failures]
                 raise ShotFailed(f"no link of {gen.ENV_NAMES[kind]} could make it on route {route}: "
-                                 f"{'; '.join(reasons) or exc}") from None
+                                 f"{'; '.join(reasons) or exc}", exc.failures) from None
             except Exception as exc:  # noqa: BLE001 - an adapter's bug fails this shot, named
                 raise ShotFailed(f"{type(exc).__name__}: {exc}") from None
 
@@ -1001,6 +1123,23 @@ class _Assets(voice_lines.LineMeasurement):
         self.ctx.on_log(f"🖼 {shot['shot_id']} via {label} ({how}), seed {record['seed']}, consistency: "
                         f"{record['consistency'].replace('_', '-')}")
 
+    def shot_attempt(self, shot) -> dict:
+        """One request for *shot*'s image with the seed and note it is asked
+        with now (:func:`shot_seed`: the same on every attempt of the run);
+        :meth:`make_image`'s record, or ``ShotFailed`` whose chain failures
+        are kept in :attr:`shot_failures`."""
+        ec = self.ec
+        scene = next((s for s in self.script["scenes"] if s["scene_id"] == shot["scene_id"]), None)
+        pending = shot["assets"].get("pending")
+        note = pending.get("note") if pending else shot["assets"].get("note")
+        seed = shot_seed(shot, scene, story_id=ec.story_id, ep=ec.ep, mode=ec.consistency_mode,
+                         entity_docs=ec.entities)
+        try:
+            return self.make_image(shot, seed=seed, note=note)
+        except ShotFailed as exc:
+            self.shot_failures[shot["shot_id"]] = exc.failures
+            raise
+
     def images(self) -> None:
         ec, ctx = self.ec, self.ctx
         board = self.storyboard
@@ -1015,21 +1154,128 @@ class _Assets(voice_lines.LineMeasurement):
                    + (f" ({locked} locked, kept)" if locked else ""))
         if mode == PROMPT_ONLY:
             ctx.on_log(f"🟡 Episode {ec.ep}'s shots: consistency: prompt-only (no reference image is sent)")
-        scenes = {scene["scene_id"]: scene for scene in self.script["scenes"]}
         for index, shot in enumerate(todo):
             self.before_image(todo[index:])
             shot_id = shot["shot_id"]
-            pending = shot["assets"].get("pending")
-            note = pending.get("note") if pending else shot["assets"].get("note")
-            seed = shot_seed(shot, scenes.get(shot["scene_id"]), story_id=ec.story_id, ep=ec.ep, mode=mode,
-                             entity_docs=ec.entities)
             try:
-                record = self.make_image(shot, seed=seed, note=note)
+                record = self.shot_attempt(shot)
             except ShotFailed as exc:
                 self.failed.append((f"shot {shot_id}", shot_target(ec.ep, shot_id), exc.reason))
                 ctx.on_log(f"✖ Shot {shot_id} failed: {exc.reason}")
                 continue
             self.apply_image(shot, record)
+
+    # ------------------------------------------------------------ the pacing
+
+    def held_back(self) -> list:
+        """What a free tier held back in this run (:func:`rate_limited_by`):
+        ``[(provider, "line" | "shot", id)]``, the lines in reading order,
+        then the shots in storyboard order."""
+        ec = self.ec
+        items = []
+        for line_id, _speaker, _reason in self.voice_failed:
+            provider = rate_limited_by(self.line_failures.get(line_id))
+            if provider:
+                items.append((provider, "line", line_id))
+        failed = {target for _what, target, _reason in self.failed}
+        for shot in self.storyboard["shots"]:
+            shot_id = shot["shot_id"]
+            if shot_target(ec.ep, shot_id) in failed:
+                provider = rate_limited_by(self.shot_failures.get(shot_id))
+                if provider:
+                    items.append((provider, "shot", shot_id))
+        return items
+
+    def fits(self, seconds) -> bool:
+        """Whether the step budget still has *seconds* (``Budget.before_call``'s rule)."""
+        try:
+            self.budget.before_call(lambda: "", per_call=seconds)
+        except StepFailed:
+            return False
+        return True
+
+    def retry_line(self, gates, line_id) -> str:
+        """*line_id* asked again on its pinned voice alone (``measure_line``):
+        ``done``, ``limited`` (held back again) or ``failed`` (for another
+        reason, now its failure); its place among the failures is kept."""
+        line = next(ln for scene in self.script["scenes"] for ln in scene["lines"] if ln["line_id"] == line_id)
+        index = next(i for i, entry in enumerate(self.voice_failed) if entry[0] == line_id)
+        del self.voice_failed[index]
+        self.line_failures.pop(line_id, None)
+        before = len(self.voice_failed)
+        self.measure_line(gates, line)
+        if len(self.voice_failed) == before:
+            return _DONE
+        self.voice_failed.insert(index, self.voice_failed.pop())
+        return _LIMITED if rate_limited_by(self.line_failures.get(line_id)) else _FAILED
+
+    def retry_shot(self, shot_id) -> str:
+        """*shot_id*'s image asked again with its request (:meth:`shot_attempt`):
+        ``done``, ``limited`` or ``failed``, as :meth:`retry_line`."""
+        ec, ctx = self.ec, self.ctx
+        shot = next(s for s in self.storyboard["shots"] if s["shot_id"] == shot_id)
+        target = shot_target(ec.ep, shot_id)
+        index = next(i for i, entry in enumerate(self.failed) if entry[1] == target)
+        try:
+            record = self.shot_attempt(shot)
+        except ShotFailed as exc:
+            self.failed[index] = (f"shot {shot_id}", target, exc.reason)
+            ctx.on_log(f"✖ Shot {shot_id} failed: {exc.reason}")
+            return _LIMITED if rate_limited_by(exc.failures) else _FAILED
+        del self.failed[index]
+        self.shot_failures.pop(shot_id, None)
+        self.apply_image(shot, record)
+        return _DONE
+
+    def pace(self, gates) -> list:
+        """The rounds over what a free tier held back (module docstring):
+        before each, a :data:`RATE_LIMIT_PAUSE_S` pause (cancel-aware) that
+        the budget fits together with the call after it; then each provider's
+        items in order until it holds one back again. A provider whose round
+        makes no progress is given up. Returns the lines voiced here."""
+        ctx = self.ctx
+        queues = {}
+        for provider, kind, item_id in self.held_back():
+            queues.setdefault(provider, []).append((kind, item_id))
+        sleep = ctx.cancel.sleeper(self.tools.sleep_fn)
+        voiced = []
+        while queues:
+            waiting = [item for items in queues.values() for item in items]
+            if not self.fits(RATE_LIMIT_PAUSE_S + _CALL_SECONDS[waiting[0][0]]):
+                self.stop_pacing(waiting, f"a {RATE_LIMIT_PAUSE_S} s pause and the call after it")
+                return voiced
+            ctx.on_log(f"⏳ {_and(queues)} rate-limited: waiting {RATE_LIMIT_PAUSE_S} s before retrying "
+                       f"{_counted(waiting)}")
+            sleep(RATE_LIMIT_PAUSE_S)
+            for provider in list(queues):
+                items, progress = queues[provider], False
+                while items:
+                    kind, item_id = items[0]
+                    if not self.fits(_CALL_SECONDS[kind]):
+                        self.stop_pacing([item for rest in queues.values() for item in rest], "another call")
+                        return voiced
+                    ctx.cancel.check()
+                    outcome = self.retry_line(gates, item_id) if kind == "line" else self.retry_shot(item_id)
+                    if outcome == _LIMITED:
+                        break
+                    items.pop(0)
+                    if outcome == _DONE:
+                        progress = True
+                        if kind == "line":
+                            voiced.append(item_id)
+                if items and not progress:
+                    ctx.on_log(f"⏳ {provider} is still rate-limited after a {RATE_LIMIT_PAUSE_S} s pause: "
+                               f"{_counted(items)} left as failed.")
+                if not items or not progress:
+                    del queues[provider]
+        return voiced
+
+    def stop_pacing(self, waiting, what) -> None:
+        """No pause is started that the step budget cannot fit: said, with
+        what is left (each keeps its failure and regenerate target)."""
+        budget = self.budget
+        self.ctx.on_log(f"⏳ Not waiting again: the step's {int(budget.limit // 60)}-minute budget cannot fit "
+                        f"{what} ({budget.elapsed() / 60:.1f} min used). Left: {_left(waiting)}.")
 
     # ---------------------------------------------------------- sfx, bgm, doc
 
@@ -1131,6 +1377,9 @@ class _Assets(voice_lines.LineMeasurement):
                 if align:
                     self.align_words()
                 self.images()
+                voiced = self.pace(gates)
+                if align and voiced:
+                    self.align_words(only=set(voiced))
             except gencache.JournalError as exc:
                 raise self.journal_failed(exc) from None
             doc = self.write_assets_doc()
