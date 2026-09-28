@@ -33,8 +33,9 @@ The audio-mix constants (DEC-157: the amix weights, the
 ``sidechaincompress`` ducking values, the bed fade-outs per ending, the
 48 kHz stereo mix format) live at the bottom of this module, in one block,
 so ``filtergraph.audio_mix_argv`` and its tests read one source of truth.
-DEC-157's two-pass ``loudnorm`` target (I -14, TP -1, LRA 11) is the render
-runner's own (stage 7, ``loudness.py``'s ``target=``), not the mix graph's.
+DEC-157's two-pass ``loudnorm`` target (I -14, TP -1, LRA 11) sits in the same
+block (:data:`LOUDNORM_TARGET`): the render plan hands it to ``loudness.py``'s
+``target=``, whose own default stays the clips' TP -1.5 (A-066, RC-A7).
 
 Stdlib only (DEC-012).
 """
@@ -119,8 +120,13 @@ GOLDEN = RenderProfile(name="golden", preset="ultrafast", crf=30, threads=1, bit
 
 AUDIO_RATE = 48000                 # every input is resampled to this, and every WAV is written at it
 AUDIO_CHANNEL_LAYOUT = "stereo"    # mono lines/SFX are upmixed by aformat (equal-power, swresample's default)
-AUDIO_SAMPLE_FMT = "fltp"          # the mixing format; the WAVs are written as pcm_s16le
-MIX_CODEC = "pcm_s16le"            # the mix and its stems (the final pass muxes the mix unchanged)
+AUDIO_SAMPLE_FMT = "fltp"          # the mixing format, kept to the WAVs (MIX_CODEC)
+# The mix and its stems are written as 32-bit float WAV, and the final pass
+# muxes the mix unchanged: ``amix normalize=0`` sums dialogue, bed and SFX, so
+# the sum can exceed full scale before the loudnorm pass levels it (stage 6
+# measured a -3.2 dBFS peak with real SFX). A float file keeps every sample
+# above 0 dBFS for loudnorm to bring down instead of clipping it on write.
+MIX_CODEC = "pcm_f32le"
 
 # amix weights, in the amix input order the graph uses: dialogue, BGM, SFX.
 MIX_WEIGHTS = (("dialogue", 1.0), ("bgm", 0.30), ("sfx", 0.8))
@@ -134,3 +140,13 @@ DUCK_RELEASE_MS = 300
 # The bed's fade-out at the very end of the episode, per cliffhanger ending.
 ENDINGS = ("cut_to_black", "hard_stop")
 BED_FADE_OUT_S = {"cut_to_black": 0.5, "hard_stop": 0.05}
+
+# Two-pass loudnorm of the episode (DEC-157, A-066): passed as ``target=`` to
+# ``clipping.loudness.measure_cmd``/``apply_cmd`` by ``render/plan.py``.
+# ``clipping.loudness.TARGET`` (the clips', TP -1.5) is left as it is.
+LOUDNORM_TARGET = "I=-14:TP=-1:LRA=11"
+# A finished episode outside these is a warning in the manifest, never a
+# failure (plan phase 4: "-14 +/- 1 LU"; A-066's true-peak ceiling).
+LOUDNESS_TARGET_I = -14.0
+LOUDNESS_TOLERANCE_LU = 1.0
+TRUE_PEAK_MAX_DBTP = -1.0

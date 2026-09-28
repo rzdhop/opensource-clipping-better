@@ -1,0 +1,33 @@
+{
+  "$schema": "render_layer_sha256_v1",
+  "note": "RC-A1: the clip renderers and the legacy assembler, frozen at 1367d75 (AI Story phase 4 stage 7). tests/test_render_layer_guard.py compares the tree to this; regenerate only on purpose: python3 tests/test_render_layer_guard.py --record",
+  "roots": [
+    "clipping/studio",
+    "clipping/story"
+  ],
+  "files": {
+    "clipping/story/__init__.py": "6b38ce18eb56c84fc94561ad2e7ada7923f7885a17b2d18bd6ab603de45f7a28",
+    "clipping/story/assembler.py": "90dff4e83200bc256c7a51746e6c503b64f41ab61e71f102dcf8674b1bb2117d",
+    "clipping/story/loader.py": "abbe9973c5bbd77a40bcbc1ef9b8facfcc1fe782361aecee092b03a07d7dae60",
+    "clipping/story/source_manager.py": "0d5108ea6983a43df30ff17ea58798146aeb5beff5934a81cf2ed26c642a26ba",
+    "clipping/studio/__init__.py": "72bd93dc62605ea16b4bc91050cec672b7fbeb59747f991b39a0eb4629756a54",
+    "clipping/studio/audio_bgm.py": "b7245893fcc640323d3ecfa45d383360128177a590d90b9c72f771b6c93794a4",
+    "clipping/studio/broll.py": "0836a8ef52ad74272994dbdc51b0629fef135d2d2b8c0a2d445a12d6fa6830cb",
+    "clipping/studio/core.py": "f01ec0333aedc8d30cced65539e30c0b7b9de1349f792a7bbb24754bc7f952bf",
+    "clipping/studio/edge_glow.py": "a72fc21035b5e52ecc1b3346c0ff608bb42ebbfca173e43e42eece0b83fae34f",
+    "clipping/studio/effects.py": "32e8daa7d459f01443d1de64ef03747ab7238cc8ebbf35929a01e75b95f0dc31",
+    "clipping/studio/face_detection.py": "a20b308ed5bcd54faa33dfbf5087c4669352a784a2cf78d6a3946bd0ecdf447f",
+    "clipping/studio/ffmpeg_utils.py": "230724e4674a27693f8e170a8f10a3c744ed6d9f5dc991b8e5b5a1666f61a55c",
+    "clipping/studio/helpers.py": "91e0ff43fa56e08f93fdc64468b4e7d703e1003aaa1a7a557016cb544c28e88b",
+    "clipping/studio/render_camera_switch.py": "0568a4020e782b8d388293e4f66050de95beae5060e96b827d252ed735b473f1",
+    "clipping/studio/render_hybrid.py": "ea01c6ae9c40173c64ce048f6b18ec70b15046a39dd9f49647dd43d9df3109fd",
+    "clipping/studio/render_split_screen.py": "ce025e88c2325c75e437599d45fccb66e33c37b12875b84198db649500814e44",
+    "clipping/studio/subtitles.py": "33e6b2d3e0ef6f40b28785dad9eadb49427d869cc53f829b3d7f0a5b3fc911de",
+    "clipping/studio/thumbnail.py": "b763a568d19ba65f8f15276661a219c33314dc86f6254ddf28728f027331f568",
+    "clipping/studio/transitions.py": "bae13c61489cac8fef7c491103e28caf4bef55a7e72a8e8e210a82d93fb40762",
+    "clipping/studio/typography.py": "ba24292a434f25338ee975472870023b138b59484b9020798e85a3823f0a15fb",
+    "clipping/studio/utils.py": "6475b691884347576bf657de0dedeb9e7198083900ec73ea99244cdc3b6c7168",
+    "clipping/studio/v2_helpers.py": "134111e815cc1828ddb546947c383ae2a9926856d51c45310e46aa64b193799c",
+    "clipping/studio/watermark.py": "8d10efaab6e1d4eadfb3113a688d21ffd0cde6fc5ede54482f0be60628a689e6"
+  }
+}

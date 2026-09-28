@@ -158,7 +158,7 @@ def test_audio_constants_are_dec_157s_exact_values():
     assert profiles.BED_FADE_OUT_S == {"cut_to_black": 0.5, "hard_stop": 0.05}
     assert profiles.ENDINGS == ("cut_to_black", "hard_stop")
     assert profiles.AUDIO_RATE == 48000 == profiles.FINAL.audio_rate
-    assert (profiles.AUDIO_CHANNEL_LAYOUT, profiles.MIX_CODEC) == ("stereo", "pcm_s16le")
+    assert (profiles.AUDIO_CHANNEL_LAYOUT, profiles.MIX_CODEC) == ("stereo", "pcm_f32le")
 
 
 def test_transition_names_map_to_xfade_names():
@@ -411,7 +411,7 @@ def test_final_pass_argv_golden_first_shot_dissolve_hard_stop():
         "[x1]ass=subtitles.ass:fontsdir=fonts[vout]",
         "-map", "[vout]", "-map", "3:a",
         "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p", "-fps_mode", "cfr",
-        "-r", "30", "-c:a", "pcm_s16le", "episode_pre.mkv",
+        "-r", "30", "-c:a", "pcm_f32le", "episode_pre.mkv",
     ]
 
 
@@ -433,7 +433,7 @@ def test_final_pass_argv_golden_cut_to_black_golden_profile():
         "-map", "[vout]", "-map", "4:a",
         "-c:v", "libx264", "-preset", "ultrafast", "-crf", "30", "-pix_fmt", "yuv420p", "-threads", "1",
         "-flags:v", "+bitexact", "-flags:a", "+bitexact", "-map_metadata", "-1",
-        "-r", "30", "-c:a", "pcm_s16le", "episode_pre.mkv",
+        "-r", "30", "-c:a", "pcm_f32le", "episode_pre.mkv",
     ]
 
 
@@ -471,7 +471,7 @@ def test_final_pass_muxes_the_pcm_mix_and_never_uses_shortest():
     n_inputs = argv[:mix_index].count("-i")
     assert argv[argv.index("-map") + 1] == "[vout]"
     assert argv[argv.index("-map", argv.index("-map") + 1) + 1] == f"{n_inputs - 1}:a"
-    assert argv[argv.index("-c:a") + 1] == "pcm_s16le"
+    assert argv[argv.index("-c:a") + 1] == "pcm_f32le"
     assert argv[-1] == "episode_pre.mkv"
 
 
@@ -498,7 +498,7 @@ def test_audio_mix_argv_golden_ducking_graph():
     """The whole graph, pinned: DEC-157's exact ducking values and weights,
     the silent ``total_s`` bases, the looped and re-stamped bed with its
     0.5 s ``cut_to_black`` fade, and the four WAV outputs."""
-    wav = ["-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2", "-map_metadata", "-1", "-fflags", "+bitexact",
+    wav = ["-c:a", "pcm_f32le", "-ar", "48000", "-ac", "2", "-map_metadata", "-1", "-fflags", "+bitexact",
            "-flags:a", "+bitexact"]
     norm = "aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo"
     tl = _small_cut_to_black()
@@ -637,7 +637,7 @@ def test_audio_mix_writes_the_mix_and_three_stems_as_48k_stereo_pcm():
     assert outputs == ["[mix]", "[dlg_stem]", "[sfx_stem]", "[bgm_stem]"]
     for target in ("mix.wav", *STEMS.values()):
         at = argv.index(target)
-        assert argv[at - 12:at] == ["-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2", "-map_metadata", "-1",
+        assert argv[at - 12:at] == ["-c:a", "pcm_f32le", "-ar", "48000", "-ac", "2", "-map_metadata", "-1",
                                     "-fflags", "+bitexact", "-flags:a", "+bitexact"]
 
 

@@ -29,11 +29,15 @@ TARGET = "I=-14:TP=-1.5:LRA=11"
 _MEASURED_KEYS = ("input_i", "input_tp", "input_lra", "input_thresh", "target_offset")
 
 
-def measure_cmd(path: str) -> list[str]:
-    """First pass: measure *path*'s loudness and print it as JSON."""
+def measure_cmd(path: str, *, target: str = TARGET) -> list[str]:
+    """First pass: measure *path*'s loudness and print it as JSON.
+
+    *target* is the loudnorm target; the default is the clips' own
+    :data:`TARGET`, so a clip's command is unchanged. The AI-Story renderer
+    passes its own (``render.profiles.LOUDNORM_TARGET``, A-066)."""
     return [
         "ffmpeg", "-hide_banner", "-nostats", "-i", path, "-vn",
-        "-af", f"loudnorm={TARGET}:print_format=json",
+        "-af", f"loudnorm={target}:print_format=json",
         "-f", "null", "-",
     ]
 
@@ -61,10 +65,13 @@ def parse_measurement(stderr: str) -> dict | None:
     return measured
 
 
-def apply_cmd(src: str, dst: str, measured: dict, sample_rate: int) -> list[str]:
-    """Second pass: apply the measured correction, copying the video."""
+def apply_cmd(src: str, dst: str, measured: dict, sample_rate: int, *, target: str = TARGET) -> list[str]:
+    """Second pass: apply the measured correction, copying the video.
+
+    *target* must be the one the measurement was made with (``measure_cmd``);
+    the default is the clips' :data:`TARGET`."""
     af = (
-        f"loudnorm={TARGET}"
+        f"loudnorm={target}"
         f":measured_I={measured['input_i']}"
         f":measured_TP={measured['input_tp']}"
         f":measured_LRA={measured['input_lra']}"
@@ -94,19 +101,28 @@ def probe_sample_rate(path: str, *, run=subprocess.run, default: int = 48000) ->
         return default
 
 
-def normalize_file(path: str, *, run=subprocess.run, on_log=print) -> bool:
-    """Level *path* to -14 LUFS in place. Returns False, and leaves the file as
-    rendered, if it cannot."""
+def _target_integrated(target: str) -> str:
+    """The ``I=`` value of a loudnorm *target* ("-14" for :data:`TARGET`)."""
+    for part in target.split(":"):
+        key, _, value = part.partition("=")
+        if key == "I" and value:
+            return value
+    return "?"
+
+
+def normalize_file(path: str, *, run=subprocess.run, on_log=print, target: str = TARGET) -> bool:
+    """Level *path* to *target*'s loudness (-14 LUFS by default) in place.
+    Returns False, and leaves the file as rendered, if it cannot."""
     name = os.path.basename(path)
     tmp = path + ".loudnorm.mp4"
     try:
-        first = run(measure_cmd(path), capture_output=True, text=True)
+        first = run(measure_cmd(path, target=target), capture_output=True, text=True)
         measured = parse_measurement(first.stderr) if first.returncode == 0 else None
         if measured is None:
             on_log(f"   ⚠️ [Loudness] Could not measure {name}; kept as rendered.")
             return False
 
-        second = run(apply_cmd(path, tmp, measured, probe_sample_rate(path, run=run)),
+        second = run(apply_cmd(path, tmp, measured, probe_sample_rate(path, run=run), target=target),
                      capture_output=True, text=True)
         if second.returncode != 0 or not os.path.isfile(tmp) or os.path.getsize(tmp) == 0:
             tail = (second.stderr or "").strip()[-200:]
@@ -114,7 +130,7 @@ def normalize_file(path: str, *, run=subprocess.run, on_log=print) -> bool:
             return False
 
         os.replace(tmp, path)
-        on_log(f"   🔊 [Loudness] {name}: {measured['input_i']} LUFS -> -14 LUFS")
+        on_log(f"   🔊 [Loudness] {name}: {measured['input_i']} LUFS -> {_target_integrated(target)} LUFS")
         return True
     except Exception as exc:  # noqa: BLE001 - best-effort by design
         on_log(f"   ⚠️ [Loudness] {name}: {type(exc).__name__}: {exc}; kept as rendered.")

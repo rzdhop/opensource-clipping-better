@@ -4,22 +4,28 @@ on: [push, pull_request]
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # Pinned, not -latest: the AI-Story golden render's framemd5 is keyed by
+    # ffmpeg version x machine (DEC-156), and 24.04's apt ffmpeg is 6.1.1.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      # Deliberately minimal. Every test in this suite is stdlib-only -- no
-      # torch, no mediapipe, no OpenCV, no ffmpeg, no GPU, no network. That is
-      # the payoff for keeping the heavy imports lazy in engine.py and
+      # ffmpeg is the one system package: tests/test_aistory_render_golden.py
+      # renders a real episode and never skips (DEC-156).
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+      - run: ffmpeg -version | head -1
+      # Deliberately minimal otherwise. Every Python test in this suite is
+      # stdlib-only -- no torch, no mediapipe, no OpenCV, no GPU, no network.
+      # That is the payoff for keeping the heavy imports lazy in engine.py and
       # runner.py: the transcript parser, the CLI surface, the NVIDIA retry
       # logic and the web config adapter are all testable on their own.
       - run: pip install pytest
       - run: python -m pytest -q
 
   compile:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

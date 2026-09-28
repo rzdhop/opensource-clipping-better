@@ -563,7 +563,8 @@ def _ms(seconds) -> int:
 
 
 def _wav_output_args() -> list:
-    """Per-WAV output options: 48 kHz stereo ``pcm_s16le``, no metadata
+    """Per-WAV output options: 48 kHz stereo ``profiles.MIX_CODEC`` (32-bit
+    float, so a sum above full scale is not clipped on write), no metadata
     carried over from an input (a BGM mp3's ID3 tags) and no encoder-version
     INFO chunk (``bitexact``), so the bytes depend on the audio alone."""
     return ["-c:a", profiles.MIX_CODEC, "-ar", str(profiles.AUDIO_RATE), "-ac", "2",
@@ -594,7 +595,7 @@ def audio_mix_argv(timeline, *, line_inputs, sfx_inputs, bgm_input, ending, out_
 
     Outputs: the mix to *out_rel*, and the three stems (dialogue, SFX and
     the ducked -- pre-weight -- BGM) to ``stems_rel["dialogue"|"sfx"|"bgm"]``,
-    each exactly ``total_s`` of 48 kHz stereo ``pcm_s16le`` (a stem with no
+    each exactly ``total_s`` of 48 kHz stereo float WAV (a stem with no
     input is silence, so Tier-2's ducking check always has three files).
 
     *line_inputs* maps every timeline ``line_id`` to its audio file;
