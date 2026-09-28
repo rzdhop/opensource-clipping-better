@@ -2614,3 +2614,91 @@ html, body {
     flex-basis: 100%;
   }
 }
+
+/* ============================================================
+   Assets + fast track (phase 4, stage 14): the shot image thumbnail and its
+   controls in StoryboardPane, the assets header/approve cards, the per-line
+   voice block in ScriptPane, and the header's Fast track button.
+   Additive, prefixed `story-shot-asset-` / `story-assets-` /
+   `story-script-line-asset` / `episode-studio-fast-track`.
+   ============================================================ */
+
+.story-assets-header,
+.story-assets-approve {
+  margin: 14px 0;
+}
+
+.story-assets-header .story-checkbox {
+  margin-top: 8px;
+}
+
+.story-shot-asset {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 10px 0;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+/* Thumbnail, not full-bleed: a shot card lists many of these, and a full
+   9:16 image at card width would make the grid unscannable on a phone. */
+.story-shot-asset-media {
+  width: 140px;
+  max-width: 45%;
+  aspect-ratio: 9 / 16;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  background: var(--bg-input);
+  overflow: hidden;
+}
+
+.story-shot-asset-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.story-shot-asset-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 4px;
+  font-size: 11px;
+  text-align: center;
+  color: var(--text-tertiary);
+}
+
+.story-shot-asset-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.story-script-line-asset {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.episode-studio-fast-track {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+@media (max-width: 600px) {
+  .story-shot-asset-media {
+    width: 120px;
+  }
+
+  .episode-studio-fast-track {
+    width: 100%;
+  }
+}

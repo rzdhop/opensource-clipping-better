@@ -23,6 +23,24 @@ version of this guard), extended to the episode page:
 - ``Tabs.jsx`` carries the ARIA tabs roles.
 - The new route is declared in ``App.jsx`` before its catch-alls.
 
+Phase 4, stage 14 (assets + the header's Fast track) extends the same
+guards onto the new controls, in the same two files plus ``EpisodeStudio.jsx``:
+
+- ``StoryboardPane.jsx``'s ``assetsParams`` (``POST /steps/assets``'
+  ``params``) against ``clipping.aistory.workflow.ASSETS_PARAMS``, and
+  ``EpisodeStudio.jsx``'s ``fastTrackParams`` (``POST /steps/fast-track``'s)
+  against ``clipping.aistory.workflow.FAST_TRACK_PARAMS``.
+- Every ``patchEpisodeAssets(storyId, ep, [{ ... }])`` call site's item keys
+  against ``AssetsShotPatch``.
+- The ``shot:${ep}:${shot.shot_id}`` (the image, told apart from its
+  ``:plan``) and ``line:${ep}:${line.line_id}`` regenerate targets against
+  ``clipping.aistory.steps.regenerate.EPISODE_TARGETS``.
+- ``StoryboardPane.jsx``'s ``AssetsHeader``/``ApproveAssets`` and
+  ``EpisodeStudio.jsx``'s ``FastTrackHeader`` each render a
+  ``story-step-error`` slot.
+- ``ScriptPane.jsx``'s ``LineRow`` shows the word-timing source label and
+  links the cast editor when a line has no pinned voice.
+
 Stdlib + pytest only (DEC-012): ``clipping.aistory.workflow``,
 ``clipping.aistory.schemas``, ``clipping.aistory.defaults`` and
 ``clipping.aistory.steps.regenerate`` are stdlib-only modules, imported
@@ -471,3 +489,136 @@ def test_shot_plan_regenerate_target_matches_the_grammar_shape():
 def test_storyboard_pane_renders_its_own_error_slot():
     src = STORYBOARD_PANE.read_text(encoding="utf-8")
     assert "story-step-error" in src, "StoryboardPane.jsx has no story-step-error slot"
+
+
+# ============================================================
+# Phase 4, stage 14: assets (StoryboardPane, ScriptPane) + the header's Fast
+# track (EpisodeStudio). Every test here is shown failing against the parent
+# commit (this stage's own start), where none of these controls exist yet.
+# ============================================================
+
+# ------------------------------------------------------------- non-vacuity
+
+def test_the_readers_see_phase4_things():
+    """A broken regex would make every assertion below pass for free."""
+    assert len(_class_fields("AssetsShotPatch")) >= 2
+    assert len(_class_fields("AssetsPatchRequest")) >= 1
+    assert len(workflow.ASSETS_PARAMS) == 1
+    assert len(workflow.FAST_TRACK_PARAMS) == 1
+
+
+# --------------------------------------------------- StoryboardPane.jsx: assetsParams
+
+def test_assets_params_equal_workflow_assets_params():
+    src = STORYBOARD_PANE.read_text(encoding="utf-8")
+    assets_params = _object_literal_keys(src, "assetsParams")
+    declared = set(workflow.ASSETS_PARAMS)
+    assert assets_params == declared, (assets_params, declared)
+
+
+# --------------------------------------------------- EpisodeStudio.jsx: fastTrackParams
+
+def test_fast_track_params_equal_workflow_fast_track_params():
+    src = EPISODE_STUDIO.read_text(encoding="utf-8")
+    fast_track_params = _object_literal_keys(src, "fastTrackParams")
+    declared = set(workflow.FAST_TRACK_PARAMS)
+    assert fast_track_params == declared, (fast_track_params, declared)
+
+
+# ------------------------------------------------ patchEpisodeAssets call sites
+
+def _patch_episode_assets_call_sites() -> set[str]:
+    """Every key used inside a ``patchEpisodeAssets(storyId, ep, [{ ... }])``
+    call site's shot item, across the episode pages. Unlike
+    ``patchEpisodeScript``/``patchEpisodeStoryboard`` (a payload object with
+    several optional top-level keys), ``AssetsPatchRequest`` has exactly one
+    field (``shots``), so the JS helper takes the list directly (api.js's own
+    docstring) rather than a ``{shots: [...]}`` wrapper -- there is nothing
+    else for a caller to send by mistake."""
+    keys: set[str] = set()
+    for path in EPISODE_SRC.rglob("*.jsx"):
+        src = path.read_text(encoding="utf-8")
+        for match in re.finditer(r"patchEpisodeAssets\(\s*storyId,\s*ep,\s*\[\{([^}]*)\}\]\)", src):
+            keys |= set(re.findall(r"([a-z_]+):", match.group(1)))
+    return keys
+
+
+def test_the_readers_see_patch_episode_assets_call_sites():
+    assert len(_patch_episode_assets_call_sites()) >= 1
+
+
+def test_every_patch_episode_assets_call_site_sends_a_declared_field():
+    declared = _class_fields("AssetsShotPatch")
+    sent = _patch_episode_assets_call_sites()
+    undeclared = sent - declared
+    assert undeclared == set(), (
+        "these patchEpisodeAssets(...) call sites send a key AssetsShotPatch does not "
+        f"declare, so pydantic drops it and the edit does nothing: {sorted(undeclared)}"
+    )
+    assert "shot_id" in sent
+    assert "locked" in sent
+
+
+# ------------------------------------------- shot:<ep>:<shot_id> / line:<ep>:<line_id>
+
+def _shot_image_and_line_regenerate_targets() -> set[str]:
+    """Every ``shot:${...}:${...}`` (the image -- told apart from its
+    ``:plan``, which this pattern does not match: a ``:plan`` literal has a
+    third interpolation-free segment before the closing backtick) and
+    ``line:${...}:${...}`` template literal used as a regenerate target."""
+    seg = r"\$\{[^`}]*\}"
+    pattern = rf"`((?:shot|line):{seg}:{seg})`"
+    literals: list[str] = []
+    for path in EPISODE_SRC.rglob("*.jsx"):
+        literals += re.findall(pattern, path.read_text(encoding="utf-8"))
+    assert literals, "no shot:<ep>:<shot_id> / line:<ep>:<line_id> regenerate target found in the episode pages"
+    return {re.sub(r"\$\{[^}]*\}", "<x>", literal) for literal in literals}
+
+
+def test_shot_image_and_line_regenerate_targets_match_the_grammar_shapes():
+    templates = _shot_image_and_line_regenerate_targets()
+    assert templates == {"shot:<x>:<x>", "line:<x>:<x>"}
+    normalized_shapes = {re.sub(r"<[a-z_]+>", "<x>", shape) for shape in regenerate_step.EPISODE_TARGETS}
+    assert templates <= normalized_shapes
+
+
+# --------------------------------------------------------------- error slots
+
+def test_assets_header_renders_its_own_error_slot():
+    src = STORYBOARD_PANE.read_text(encoding="utf-8")
+    body = src.split("function AssetsHeader", 1)[1].split("function ApproveAssets", 1)[0]
+    assert "story-step-error" in body
+
+
+def test_approve_assets_renders_its_own_error_slot():
+    src = STORYBOARD_PANE.read_text(encoding="utf-8")
+    body = src.split("function ApproveAssets", 1)[1].split("function StoryboardPane", 1)[0]
+    assert "story-step-error" in body
+
+
+def test_fast_track_header_renders_its_own_error_slot():
+    src = EPISODE_STUDIO.read_text(encoding="utf-8")
+    body = src.split("function FastTrackHeader", 1)[1].split("export default function EpisodeStudio", 1)[0]
+    assert "story-step-error" in body
+
+
+# --------------------------------------------------------- ScriptPane.jsx: LineRow
+
+def test_line_row_shows_the_word_timing_source_label():
+    src = SCRIPT_PANE.read_text(encoding="utf-8")
+    body = src.split("function LineRow", 1)[1].split("function SceneCard", 1)[0]
+    assert "approximate timing" in body
+    assert "wordsSource" in body
+
+
+def test_line_row_links_the_cast_editor_when_a_line_has_no_pinned_voice():
+    src = SCRIPT_PANE.read_text(encoding="utf-8")
+    body = src.split("function LineRow", 1)[1].split("function SceneCard", 1)[0]
+    assert "unvoicedReason" in body
+    assert "to={`/story/${storyId}`}" in body
+
+
+def test_line_row_offers_its_own_voice_regenerate():
+    src = SCRIPT_PANE.read_text(encoding="utf-8")
+    body = src.split("function LineRow", 1)[1].split("function SceneCard", 1)[0]
+    assert "target: `line:${ep}:${line.line_id}`" in body

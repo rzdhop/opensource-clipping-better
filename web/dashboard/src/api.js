@@ -559,7 +559,9 @@ export async function regenerateStory(storyId, payload) {
  * (the names on screen in the proposal editor, repeated as `?place=`/
  * `?prop=`; omitted, the estimate falls back to the saved proposal).
  */
-export async function fetchStoryEstimate(storyId, step, { target, selected, episodes, places, props, ep, measure } = {}) {
+export async function fetchStoryEstimate(storyId, step, {
+  target, selected, episodes, places, props, ep, measure, alignWords, storyboard,
+} = {}) {
   const params = new URLSearchParams()
   if (target) params.set('target', target)
   if (selected) selected.forEach((name) => params.append('selected', name))
@@ -577,6 +579,12 @@ export async function fetchStoryEstimate(storyId, step, { target, selected, epis
   // only meaningful with `step === 'script'`.
   if (ep != null) params.set('ep', ep)
   if (measure) params.set('measure', '1')
+  // Phase 4: `alignWords` -> `?align_words=1` (the assets step's own opt-in,
+  // `step === 'assets'`); `storyboard` -> `?storyboard=t1|fast` (the fast
+  // track's own choice of storyboard plan, `step === 'fast-track'` --
+  // distinct from the storyboard *step*'s own `fast` param above).
+  if (alignWords) params.set('align_words', '1')
+  if (storyboard) params.set('storyboard', storyboard)
   const qs = params.toString()
   const res = await request(`/stories/${storyId}/estimate/${step}${qs ? `?${qs}` : ''}`)
   if (!res.ok) throw await apiError(res, 'Failed to fetch the estimate')
@@ -790,4 +798,35 @@ export async function fetchEpisodeVoiceUrl(storyId, ep, name) {
   if (!res.ok) throw await apiError(res, 'Failed to load the voice line')
   const blob = await res.blob()
   return URL.createObjectURL(blob)
+}
+
+// ------------------------------------------------------- episodes (phase 4)
+
+/**
+ * One shot's generated image (`shot_NN.<ext>`, `name` from that shot's
+ * `assets.shots[].image_name`), as a blob URL -- same reasoning as
+ * `fetchEpisodeVoiceUrl`: the route is behind the bearer header, so it is
+ * fetched rather than used directly as an `<img src>`. The caller is
+ * responsible for revoking the URL.
+ */
+export async function fetchShotImageUrl(storyId, ep, imageName) {
+  const res = await request(`/stories/${storyId}/episodes/${ep}/shots/${encodeURIComponent(imageName)}`)
+  if (!res.ok) throw await apiError(res, 'Failed to load the shot image')
+  const blob = await res.blob()
+  return URL.createObjectURL(blob)
+}
+
+/**
+ * Edit an episode's assets inline (`AssetsPatchRequest`'s only field:
+ * `shots`, each `{shot_id, locked}` -- only an imaged shot may be locked,
+ * and locking one stales the assets approval). Answers the episode page.
+ */
+export async function patchEpisodeAssets(storyId, ep, shots) {
+  const res = await request(`/stories/${storyId}/episodes/${ep}/assets`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ shots }),
+  })
+  if (!res.ok) throw await apiError(res, 'Failed to update the assets')
+  return res.json()
 }

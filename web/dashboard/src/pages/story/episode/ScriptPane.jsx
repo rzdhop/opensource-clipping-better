@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import {
   patchStory, runStoryStep, approveStoryDoc, regenerateStory, fetchStoryEstimate,
   patchEpisodeScript, fetchEpisodeVoiceUrl,
@@ -26,6 +27,13 @@ const EMOTIONS = [
 const SCENE_FUNCTION_LABELS = {
   recap: 'Recap', hook: 'Hook', setup: 'Setup', rising: 'Rising',
   peak: 'Peak', turn: 'Turn', cliffhanger: 'Cliffhanger',
+}
+
+// A line's word timing source (phase 4, spec 6.4): clipping.aistory.
+// wordtiming.PROVIDER | ALIGNMENT, else an even split labelled "approximate"
+// (episode.assets.lines[].words_source / .approximate).
+const WORD_SOURCE_LABELS = {
+  provider: 'provider timing', alignment: 'aligned timing',
 }
 
 function fmtUsd(value) {
@@ -172,7 +180,7 @@ function ConsistencyPanel({ report, state }) {
 
 // ------------------------------------------------------------------------ lines
 
-function LineRow({ storyId, ep, line, sceneCharacters, narratorEnabled, busy, onChange }) {
+function LineRow({ storyId, ep, line, assetLine, unvoicedReason, sceneCharacters, narratorEnabled, busy, onChange }) {
   const [playUrl, setPlayUrl] = useState(null)
   const [selectError, setSelectError] = useState('')
   const [selectErrors, setSelectErrors] = useState(null)
@@ -224,6 +232,16 @@ function LineRow({ storyId, ep, line, sceneCharacters, narratorEnabled, busy, on
 
   const measured = line.timing.source !== 'estimated'
 
+  const regenerateVoice = async (note) => {
+    await regenerateStory(storyId, { target: `line:${ep}:${line.line_id}`, note })
+    onChange()
+  }
+
+  const wordsSource = assetLine ? assetLine.words_source : null
+  const wordsLabel = wordsSource
+    ? (assetLine.approximate ? 'approximate timing' : (WORD_SOURCE_LABELS[wordsSource] || wordsSource))
+    : null
+
   return (
     <div className="story-script-line" id={`line-${line.line_id}`}>
       <div className="story-script-line-row">
@@ -257,13 +275,31 @@ function LineRow({ storyId, ep, line, sceneCharacters, narratorEnabled, busy, on
       <EditableText label="Delivery" value={line.delivery} onSave={saveDelivery} disabled={busy} rows={1} />
       {playUrl && <audio controls autoPlay src={playUrl} />}
       <StepError message={selectError} errors={selectErrors} />
+      {assetLine && (
+        <div className="story-script-line-asset">
+          {wordsLabel && <span className="chip" title={wordsSource}>{wordsLabel}</span>}
+          <RegenerateControl
+            disabled={busy}
+            onRegenerate={regenerateVoice}
+            empty={!assetLine.voiced}
+            label="voice"
+          />
+          {unvoicedReason && (
+            <p className="form-hint">
+              {unvoicedReason} <Link to={`/story/${storyId}`}>Pick a voice in the cast editor</Link>.
+            </p>
+          )}
+        </div>
+      )}
     </div>
   )
 }
 
 // ------------------------------------------------------------------------ scenes
 
-function SceneCard({ storyId, ep, scene, issues, characters, places, narratorEnabled, busy, onChange }) {
+function SceneCard({
+  storyId, ep, scene, issues, characters, places, narratorEnabled, assetsByLineId, unvoicedByLineId, busy, onChange,
+}) {
   const place = places.find((p) => p.place_id === scene.place_id)
   const sceneCharacters = scene.characters
     .map((cid) => characters.find((c) => c.char_id === cid))
@@ -314,6 +350,8 @@ function SceneCard({ storyId, ep, scene, issues, characters, places, narratorEna
             storyId={storyId}
             ep={ep}
             line={line}
+            assetLine={assetsByLineId[line.line_id]}
+            unvoicedReason={unvoicedByLineId[line.line_id]}
             sceneCharacters={sceneCharacters}
             narratorEnabled={narratorEnabled}
             busy={busy}
@@ -547,6 +585,26 @@ export default function ScriptPane({ episode, storyDoc, characters, places, epis
     }
   }
 
+  const assetsByLineId = episode.assets
+    ? Object.fromEntries(episode.assets.lines.map((assetLine) => [assetLine.line_id, assetLine]))
+    : {}
+
+  // The assets estimate's `voices.unvoiced` names the lines that would fail
+  // for want of a pinned voice (steps/voice_lines.py's own reason) --
+  // episode.assets.lines carries only whether a line is voiced, not why not,
+  // so this fetches it directly (same gating as StoryboardPane.jsx's
+  // AssetsHeader: the assets estimate needs an approved, current storyboard).
+  const storyboardApproved = Boolean(episode.storyboard && episode.storyboard.approved_at)
+  const [unvoicedByLineId, setUnvoicedByLineId] = useState({})
+  useEffect(() => {
+    if (!storyboardApproved) { setUnvoicedByLineId({}); return }
+    fetchStoryEstimate(storyId, 'assets', { ep })
+      .then((data) => {
+        setUnvoicedByLineId(Object.fromEntries((data.voices.unvoiced || []).map((u) => [u.line_id, u.reason])))
+      })
+      .catch(() => setUnvoicedByLineId({}))
+  }, [storyId, ep, storyboardApproved])
+
   return (
     <div className="story-step-body">
       <ScriptHeader
@@ -578,6 +636,8 @@ export default function ScriptPane({ episode, storyDoc, characters, places, epis
                 characters={characters}
                 places={places}
                 narratorEnabled={narratorEnabled}
+                assetsByLineId={assetsByLineId}
+                unvoicedByLineId={unvoicedByLineId}
                 busy={busy}
                 onChange={onChange}
               />

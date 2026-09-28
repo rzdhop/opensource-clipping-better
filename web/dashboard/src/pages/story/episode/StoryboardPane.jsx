@@ -7,11 +7,20 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   runStoryStep, approveStoryDoc, regenerateStory, fetchStoryEstimate,
-  patchEpisodeStoryboard, fetchStoryMediaUrl,
+  patchEpisodeStoryboard, patchEpisodeAssets, fetchStoryMediaUrl, fetchShotImageUrl,
 } from '../../../api'
 import EstimateChip from '../../../components/EstimateChip'
 import RouteChip from '../../../components/RouteChip'
 import { EditableText, RegenerateControl, StepError } from '../fields'
+
+// GET /estimate/assets's est_usd/its `voices`/`images` sub-estimates and the
+// fast-track split both carry sub-cent amounts; same formatting as
+// ScriptPane.jsx's fmtUsd (duplicated so this file stays independently
+// readable -- the two panes share no component module).
+function fmtUsd(value) {
+  const amount = Number(value) || 0
+  return amount === 0 ? '0.00' : amount.toFixed(3)
+}
 
 // clipping.aistory.schemas closed lists, verbatim (tests/test_story_payload_contract_episode.py).
 const FRAMINGS = [
@@ -271,9 +280,114 @@ function ConsistencyChip({ consistency }) {
   return <span className="chip chip-warn">consistency: prompt-only</span>
 }
 
+// --------------------------------------------------------------- shot image
+
+// clipping.aistory.steps.assets.shot_state, verbatim (tests/test_story_payload_contract_episode.py).
+const SHOT_STATE_LABELS = {
+  none: 'no image', current: 'current', stale: 'stale', locked_stale: 'locked · stale', failed: 'failed',
+}
+
+function ShotStateBadge({ state }) {
+  const warn = state === 'stale' || state === 'locked_stale' || state === 'failed'
+  return (
+    <span className={`chip${warn ? ' chip-warn' : state === 'current' ? ' chip-accent' : ''}`}>
+      {SHOT_STATE_LABELS[state] || state}
+    </span>
+  )
+}
+
+/**
+ * One shot's generated image and its assets controls: the blob image (kept
+ * only while this shot's `image_name` is unchanged -- revoked on unmount and
+ * on a fresh generation), a state badge, the route it was made on, a
+ * "prompt-only" consistency label, a lock toggle (PATCH; only an imaged shot
+ * may be locked) and the image's own regenerate-with-note. `assetShot` is
+ * one entry of `episode.assets.shots` (null before the episode has a
+ * storyboard -- the caller only renders this once one exists).
+ */
+function ShotImageBlock({ storyId, ep, assetShot, busy, onChange }) {
+  const [url, setUrl] = useState(null)
+  const [loadFailed, setLoadFailed] = useState(false)
+  const [lockSaving, setLockSaving] = useState(false)
+  const [lockError, setLockError] = useState('')
+  const urlRef = useRef(null)
+
+  useEffect(() => {
+    setUrl(null)
+    setLoadFailed(false)
+    if (!assetShot.image_name) return undefined
+    let cancelled = false
+    fetchShotImageUrl(storyId, ep, assetShot.image_name).then((fresh) => {
+      if (cancelled) { URL.revokeObjectURL(fresh); return }
+      urlRef.current = fresh
+      setUrl(fresh)
+    }).catch(() => { if (!cancelled) setLoadFailed(true) })
+    return () => {
+      cancelled = true
+      if (urlRef.current) { URL.revokeObjectURL(urlRef.current); urlRef.current = null }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storyId, ep, assetShot.image_name])
+
+  const toggleLock = async () => {
+    setLockSaving(true)
+    setLockError('')
+    try {
+      await patchEpisodeAssets(storyId, ep, [{ shot_id: assetShot.shot_id, locked: !assetShot.locked }])
+      onChange()
+    } catch (err) {
+      setLockError(err.message)
+    } finally {
+      setLockSaving(false)
+    }
+  }
+
+  const regenerateImage = async (note) => {
+    await regenerateStory(storyId, { target: `shot:${ep}:${assetShot.shot_id}`, note })
+    onChange()
+  }
+
+  return (
+    <div className="story-shot-asset">
+      <div className="story-shot-asset-media">
+        {url ? (
+          <img className="story-shot-asset-image" src={url} alt="" />
+        ) : (
+          <span className="story-shot-asset-placeholder" aria-hidden="true">
+            {loadFailed ? 'Failed to load' : assetShot.image_name ? '' : 'No image yet'}
+          </span>
+        )}
+      </div>
+      <div className="story-shot-asset-meta">
+        <ShotStateBadge state={assetShot.state} />
+        {assetShot.route && <RouteChip routeClass={assetShot.route} />}
+        <ConsistencyChip consistency={assetShot.consistency} />
+        {assetShot.pending && <span className="chip" title="A regenerate is queued for this shot">pending…</span>}
+      </div>
+      <label className="story-checkbox">
+        <input
+          type="checkbox"
+          checked={assetShot.locked}
+          onChange={toggleLock}
+          disabled={busy || lockSaving || !assetShot.image_name}
+        />
+        Lock this image
+      </label>
+      <StepError message={lockError} />
+      <RegenerateControl
+        disabled={busy || Boolean(assetShot.locked)}
+        onRegenerate={regenerateImage}
+        empty={!assetShot.image_name}
+        label="image"
+      />
+      {assetShot.locked && <p className="form-hint">Unlock first to regenerate this shot's image.</p>}
+    </div>
+  )
+}
+
 // ------------------------------------------------------------------------- shot
 
-function ShotCard({ storyId, ep, shot, scene, maps, busy, onChange }) {
+function ShotCard({ storyId, ep, shot, assetShot, scene, maps, busy, onChange }) {
   const [fieldError, setFieldError] = useState('')
   const [fieldErrors, setFieldErrors] = useState(null)
   const [actionEditing, setActionEditing] = useState(false)
@@ -373,6 +487,10 @@ function ShotCard({ storyId, ep, shot, scene, maps, busy, onChange }) {
         <span className="chip">#{shot.order} · {shot.duration_s.toFixed(1)} s</span>
         <ConsistencyChip consistency={shot.consistency} />
       </div>
+
+      {assetShot && (
+        <ShotImageBlock storyId={storyId} ep={ep} assetShot={assetShot} busy={busy} onChange={onChange} />
+      )}
 
       <div className="story-shot-controls">
         <div className="form-group story-shot-control">
@@ -640,6 +758,149 @@ function ApproveStoryboard({ storyId, ep, episode, busy, onChange }) {
   )
 }
 
+// ----------------------------------------------------------------------- assets
+
+/**
+ * "Generate assets": the shot images and line voices the assets step would
+ * still make, with its estimate and route (clipping.aistory.steps.assets.
+ * asset_units, via GET /estimate/assets), and the "align words" opt-in
+ * (DEC-165: forced alignment for a line whose voice timed no words). The
+ * estimate's own shape -- `images`/`voices`/`alignment`/`est_usd` -- does not
+ * fit EstimateChip's `units`, so this renders its own compact line (same
+ * reasoning as ScriptPane.jsx's MeasureVoices).
+ */
+function AssetsHeader({ storyId, ep, episode, busy, onChange }) {
+  const storyboard = episode.storyboard
+  const storyboardApproved = Boolean(storyboard && storyboard.approved_at)
+  const hasAssets = Boolean(episode.assets && episode.assets.doc)
+  const [alignWords, setAlignWords] = useState(false)
+  const [estimate, setEstimate] = useState(null)
+  const [running, setRunning] = useState(false)
+  const [error, setError] = useState('')
+  const [errors, setErrors] = useState(null)
+
+  useEffect(() => {
+    if (!storyboardApproved) { setEstimate(null); return }
+    fetchStoryEstimate(storyId, 'assets', { ep, alignWords }).then(setEstimate).catch(() => setEstimate(null))
+  }, [storyId, ep, storyboardApproved, alignWords])
+
+  const reason = busy ? 'A step is running.' : !storyboardApproved ? 'Approve the storyboard first.' : null
+
+  const handleRun = async () => {
+    setRunning(true)
+    setError('')
+    setErrors(null)
+    try {
+      const assetsParams = { align_words: alignWords }
+      await runStoryStep(storyId, 'assets', { ep, params: assetsParams })
+      onChange()
+    } catch (err) {
+      setError(err.message)
+      setErrors(err.errors || null)
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  return (
+    <div className="card story-assets-header">
+      <h4 className="card-title">Assets</h4>
+      <div className="story-step-actions">
+        <button
+          type="button"
+          className="btn btn-primary"
+          onClick={handleRun}
+          disabled={Boolean(reason) || running}
+          title={reason || undefined}
+        >
+          {running ? <><span className="spinner"></span> Generating…</> : hasAssets ? 'Generate remaining assets' : 'Generate assets'}
+        </button>
+        {estimate && (
+          <span className="chip" title={estimate.message || ''}>
+            est. ${fmtUsd(estimate.est_usd)} · {estimate.images.count} image{estimate.images.count === 1 ? '' : 's'}
+            {' · '}{estimate.voices.lines} line{estimate.voices.lines === 1 ? '' : 's'}
+          </span>
+        )}
+        {estimate && <RouteChip routeClass={estimate.images.route_class} link={estimate.images.link} />}
+      </div>
+      <label className="story-checkbox">
+        <input
+          type="checkbox"
+          checked={alignWords}
+          onChange={(e) => setAlignWords(e.target.checked)}
+          disabled={busy || running}
+        />
+        Align words (forced alignment for lines the voice timed no words for)
+      </label>
+      {estimate && alignWords && estimate.alignment.requests > 0 && (
+        <p className="form-hint">
+          {estimate.alignment.requests} line{estimate.alignment.requests === 1 ? '' : 's'} would be aligned.
+        </p>
+      )}
+      {reason && <p className="form-hint">{reason}</p>}
+      <StepError message={error} errors={errors} className="story-step-error" />
+    </div>
+  )
+}
+
+/** The assets approve button: the fingerprint state (none | current | stale)
+ * and, on a refusal, exactly what is still missing -- the server's own
+ * sentence (`workflow.approve_assets`) names every shot or line and its
+ * regenerate target. */
+function ApproveAssets({ storyId, ep, episode, busy, onChange }) {
+  const [approving, setApproving] = useState(false)
+  const [error, setError] = useState('')
+  const [errors, setErrors] = useState(null)
+
+  const assets = episode.assets
+  if (!assets || !assets.doc) return null
+
+  const fingerprint = assets.fingerprint
+  const approved = fingerprint === 'current'
+  const reason = busy ? 'A step is running.' : null
+
+  const handleApprove = async () => {
+    setApproving(true)
+    setError('')
+    setErrors(null)
+    try {
+      await approveStoryDoc(storyId, `assets:${ep}`)
+      onChange()
+    } catch (err) {
+      setError(err.message)
+      setErrors(err.errors || null)
+    } finally {
+      setApproving(false)
+    }
+  }
+
+  return (
+    <div className="card story-assets-approve">
+      <div className="story-step-actions">
+        <button
+          type="button"
+          className="btn btn-primary"
+          onClick={handleApprove}
+          disabled={approved || Boolean(reason) || approving}
+          title={reason || undefined}
+        >
+          {approving ? 'Approving…' : approved ? 'Approved' : 'Approve assets'}
+        </button>
+        <span className={`chip${fingerprint === 'current' ? ' chip-accent' : fingerprint === 'stale' ? ' chip-warn' : ''}`}>
+          fingerprint: {fingerprint}
+        </span>
+        {reason && <span className="form-hint">{reason}</span>}
+      </div>
+      {assets.approved_at && (
+        <p className="form-hint">
+          {approved ? 'Approved' : 'Approved previously (now stale)'} {new Date(assets.approved_at).toLocaleString()}.
+        </p>
+      )}
+      <StepError message={error} errors={errors} className="story-step-error" />
+    </div>
+  )
+}
+
 // --------------------------------------------------------------------------- page
 
 export default function StoryboardPane({ episode, characters, places, props, storyId, ep, inFlightJob, onChange }) {
@@ -648,6 +909,9 @@ export default function StoryboardPane({ episode, characters, places, props, sto
   const busy = Boolean(inFlightJob)
   const maps = buildEntityMaps(characters, places, props)
   const scenesById = script ? Object.fromEntries(script.scenes.map((scene) => [scene.scene_id, scene])) : {}
+  const assetsByShotId = episode.assets
+    ? Object.fromEntries(episode.assets.shots.map((assetShot) => [assetShot.shot_id, assetShot]))
+    : {}
 
   return (
     <div className="story-step-body">
@@ -676,6 +940,7 @@ export default function StoryboardPane({ episode, characters, places, props, sto
                           storyId={storyId}
                           ep={ep}
                           shot={shot}
+                          assetShot={assetsByShotId[shot.shot_id]}
                           scene={group.scene}
                           maps={maps}
                           busy={busy}
@@ -694,6 +959,9 @@ export default function StoryboardPane({ episode, characters, places, props, sto
           </div>
 
           <ApproveStoryboard storyId={storyId} ep={ep} episode={episode} busy={busy} onChange={onChange} />
+
+          <AssetsHeader storyId={storyId} ep={ep} episode={episode} busy={busy} onChange={onChange} />
+          <ApproveAssets storyId={storyId} ep={ep} episode={episode} busy={busy} onChange={onChange} />
         </>
       )}
     </div>

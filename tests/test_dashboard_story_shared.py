@@ -42,6 +42,11 @@ STORY_FUNCTIONS = [
     # script/storyboard edits (the storyboard one used from stage 11), and a
     # line's measured voice take.
     "fetchEpisode", "patchEpisodeScript", "patchEpisodeStoryboard", "fetchEpisodeVoiceUrl",
+    # Phase 4, stage 14 (StoryboardPane assets + the header's Fast track): a
+    # shot's generated image blob and the assets PATCH (the lock toggle).
+    # Approve/regenerate/step/estimate are reused unchanged (fetchStoryEstimate
+    # above gained new phase-4-only options, not a new function).
+    "fetchShotImageUrl", "patchEpisodeAssets",
 ]
 
 
@@ -81,7 +86,7 @@ def _function_body(src: str, name: str) -> str:
 def test_the_readers_see_something():
     """A broken regex would make every assertion below pass for free."""
     assert len(_job_status_values()) >= 8
-    assert len(STORY_FUNCTIONS) == 26
+    assert len(STORY_FUNCTIONS) == 28
 
 
 # --------------------------------------------------------- components/ActivityFeed.jsx

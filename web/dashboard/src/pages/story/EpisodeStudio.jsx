@@ -1,10 +1,18 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { fetchEpisode, fetchStory } from '../../api'
+import { fetchEpisode, fetchStory, runStoryStep, fetchStoryEstimate } from '../../api'
 import { LiveActivity, useJobFeed } from '../../components/ActivityFeed'
 import Tabs from '../../components/Tabs'
+import { StepError } from './fields'
 import ScriptPane from './episode/ScriptPane'
 import StoryboardPane from './episode/StoryboardPane'
+
+// Same sub-cent formatting as ScriptPane.jsx's / StoryboardPane.jsx's fmtUsd
+// (duplicated: this file shares no component module with the panes).
+function fmtUsd(value) {
+  const amount = Number(value) || 0
+  return amount === 0 ? '0.00' : amount.toFixed(3)
+}
 
 const TABS = [
   { id: 'script', label: 'Script' },
@@ -47,6 +55,72 @@ function PreviewPane() {
         <h3 className="card-title">Preview</h3>
         <p>Rendering arrives in phase 4.</p>
       </div>
+    </div>
+  )
+}
+
+/**
+ * The header's "Fast track" button (spec 3 steps 10-12 + the fast track,
+ * stage 14): script -> storyboard -> assets -> render -> metadata as one
+ * job, stopping before any paid spending unless it is allowed and every cap
+ * fits. The confirm dialog lists the estimate's split (GET
+ * /estimate/fast-track) before the click starts anything.
+ */
+function FastTrackHeader({ storyId, ep, busy, onChange }) {
+  const [estimate, setEstimate] = useState(null)
+  const [running, setRunning] = useState(false)
+  const [error, setError] = useState('')
+  const [errors, setErrors] = useState(null)
+
+  useEffect(() => {
+    fetchStoryEstimate(storyId, 'fast-track', { ep, storyboard: 't1' }).then(setEstimate).catch(() => setEstimate(null))
+  }, [storyId, ep])
+
+  const confirmMessage = (est) => [
+    `Fast track episode ${ep} to a finished render?`,
+    `LLM calls: ${est.llm_calls.total} (script ${est.llm_calls.script}, storyboard ${est.llm_calls.storyboard}, ` +
+      `metadata ${est.llm_calls.metadata})`,
+    `Images: ${est.images.count} shot${est.images.count === 1 ? '' : 's'}, est. $${fmtUsd(est.images.est_usd)}`,
+    `Voices: ${est.tts.lines} line${est.tts.lines === 1 ? '' : 's'} / ${est.tts.chars} chars, ` +
+      `est. $${fmtUsd(est.tts.est_usd)}`,
+    `Render: about ${est.render.minutes} min`,
+    `Total: est. $${fmtUsd(est.est_usd)}`,
+    'It stops before any paid spending, unless paid generation is allowed and every cap fits.',
+  ].join('\n')
+
+  const handleRun = async () => {
+    if (!estimate || !window.confirm(confirmMessage(estimate))) return
+    setRunning(true)
+    setError('')
+    setErrors(null)
+    try {
+      const fastTrackParams = { storyboard: 't1' }
+      await runStoryStep(storyId, 'fast-track', { ep, params: fastTrackParams })
+      onChange()
+    } catch (err) {
+      setError(err.message)
+      setErrors(err.errors || null)
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  return (
+    <div className="episode-studio-fast-track">
+      <div className="story-step-actions">
+        <button
+          type="button"
+          className="btn btn-secondary"
+          onClick={handleRun}
+          disabled={busy || running || !estimate}
+        >
+          {running ? <><span className="spinner"></span> Fast tracking…</> : 'Fast track'}
+        </button>
+        {estimate && (
+          <span className="chip" title={estimate.message || ''}>est. ${fmtUsd(estimate.est_usd)} total</span>
+        )}
+      </div>
+      <StepError message={error} errors={errors} className="story-step-error" />
     </div>
   )
 }
@@ -148,6 +222,7 @@ export default function EpisodeStudio() {
           <h2>Episode {ep}</h2>
           {arcEntry && <p>{arcEntry.summary}</p>}
         </div>
+        <FastTrackHeader storyId={storyId} ep={epNumber} busy={Boolean(inFlightJob)} onChange={refresh} />
       </div>
 
       {inFlightJob && liveJob && (
