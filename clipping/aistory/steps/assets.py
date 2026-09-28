@@ -659,6 +659,33 @@ def asset_units(ec, script, storyboard, *, env, align_words=False, adapters=None
     }
 
 
+def needs_editor(units) -> bool:
+    """Whether :func:`asset_units`' plan stops at DEC-117's "stop and ask":
+    shots to make in ``references`` mode and no editor that can run."""
+    images = units["images"]
+    return bool(images["count"]) and not images["ready"] and images["kind"] == gen.IMAGE_EDIT
+
+
+def plan_refusal(ec, units):
+    """Why the step would stop before its first call on the plan *units*
+    (:func:`asset_units`), or None: the shot images cannot run (in
+    ``references`` mode, no editor: stop and ask), or a paid part is over a
+    cap -- with the numbers. The step's own check (``check_plan``), and the
+    web layer's before a job exists."""
+    images = units["images"]
+    if images["count"] and not images["ready"]:
+        if needs_editor(units):
+            reasons = [f"{row['link']}: {row['reason']}" for row in images["links"]] or [images["message"]]
+            readiness = {"message": images["message"], "links": images["links"]}
+            return str(refimages.NeedsEditor(reasons, readiness, subject=f"Every shot of episode {ec.ep}"))
+        return (f"Episode {ec.ep}'s shot images cannot be made: {images['message']} Nothing was generated or "
+                "spent.")
+    if units["over_cap"]:
+        return (f"Episode {ec.ep}'s assets would go over a cap, so nothing was generated or spent: "
+                f"{units['over_cap']}. Raise the cap, or choose free links, then run the assets step again.")
+    return None
+
+
 # ---------------------------------------------------------------- alignment
 
 class AlignError(Exception):
@@ -807,21 +834,13 @@ class _Assets(voice_lines.LineMeasurement):
     def check_plan(self, units) -> None:
         """Stop before the first call when the images cannot run (the DEC-117
         readiness in ``references`` mode: stop and ask) or a paid part is over
-        a cap -- with the numbers."""
-        ec, images = self.ec, units["images"]
-        if images["count"] and not images["ready"]:
-            if images["kind"] == gen.IMAGE_EDIT:
-                reasons = [f"{row['link']}: {row['reason']}" for row in images["links"]] or [images["message"]]
-                readiness = {"message": images["message"], "links": images["links"]}
-                error = refimages.NeedsEditor(reasons, readiness, subject=f"Every shot of episode {ec.ep}")
-                self.ctx.on_log(f"✋ {error}")
-                raise StepFailed(str(error))
-            raise StepFailed(f"Episode {ec.ep}'s shot images cannot be made: {images['message']} Nothing was "
-                             "generated or spent.")
-        if units["over_cap"]:
-            raise StepFailed(f"Episode {ec.ep}'s assets would go over a cap, so nothing was generated or spent: "
-                             f"{units['over_cap']}. Raise the cap, or choose free links, then run the assets "
-                             "step again.")
+        a cap -- with the numbers (:func:`plan_refusal`)."""
+        refusal = plan_refusal(self.ec, units)
+        if refusal is None:
+            return
+        if needs_editor(units):
+            self.ctx.on_log(f"✋ {refusal}")
+        raise StepFailed(refusal)
 
     # ------------------------------------------------------------- the words
 

@@ -1,6 +1,7 @@
 """
-web.api.routes.stories — AI Story, steps 1-9 (spec 3, 9.1, 9.2; phase-1 plan 2,
-phase-2 plan 2 "API", phase-3 plan 2 "API").
+web.api.routes.stories — AI Story, steps 1-12 and the fast track (spec 3, 9.1,
+9.2; phase-1 plan 2, phase-2 plan 2 "API", phase-3 plan 2 "API", phase-4 plan
+2 "API").
 
 A story is a folder under ``outputs/stories/<story_id>/`` kept by
 ``clipping.aistory.store.StoryStore``; this module is the HTTP face of it.
@@ -55,6 +56,26 @@ A story is a folder under ``outputs/stories/<story_id>/`` kept by
   is served by ``GET /{id}/episodes/{ep}/voice/{name}`` behind the token
   (DEC-113).
 
+- Phase 4 (steps 10-12 and the fast track): ``assets``, ``render``,
+  ``metadata`` and ``fast-track`` are step jobs of one episode, their
+  parameters and preconditions checked before a job exists (the step's own
+  sentence), with one step per story and the queue cap; the LLM steps
+  (``metadata``, ``fast-track``) meet the key gate, the assets the plan's own
+  stop (no image link, no editor in ``references`` mode, a paid part over a
+  cap), the render none (it calls nothing). The assets job awaits
+  ``assets:<ep>``; the other three end completed (DEC-161). The regenerate
+  grammar gains a shot's image ``shot:<ep>:<shid>`` and a line's voice
+  ``line:<ep>:<lid>`` (jobs of ``assets:<ep>``) and one platform's metadata
+  ``metadata:<ep>:<platform>`` (no document: it ends completed);
+  ``shot:<ep>:<shid>:video`` stays a later phase's (DEC-140). Approving
+  ``assets:<ep>`` completes the jobs awaiting it; a fast track that approved
+  documents in-process has the worker complete the older jobs awaiting them
+  (:func:`complete_approved_jobs`). A shot is locked inline (``PATCH
+  /{id}/episodes/{ep}/assets``); its image is served by ``GET
+  /{id}/episodes/{ep}/shots/{name}`` behind the token (DEC-113). The episode
+  page gains the assets, the render, the metadata pack and the episode's
+  ledger (``workflow.episode_outputs``).
+
 Every ``{story_id}`` is checked against the store's id rule before anything
 else, so a malformed id is a 404 and never reaches a path; an unknown one is a
 404; a story whose files do not validate is a 500 with one short sentence and
@@ -99,12 +120,16 @@ from clipping.providers import registry
 from .. import store, worker
 from ..auth import require_token
 from ..models import (
+    AssetsPatchRequest,
+    AssetsStepParams,
     CharacterPatchRequest,
     ConceptChooseRequest,
+    FastTrackStepParams,
     JobResponse,
     JobStatus,
     PlacePatchRequest,
     PropPatchRequest,
+    RenderStepParams,
     ScriptPatchRequest,
     StoryApproveRequest,
     StoryboardPatchRequest,
@@ -141,6 +166,12 @@ _ENTITY_MEDIA_TYPES = {**_PREVIEW_MEDIA_TYPES, ".mp3": "audio/mpeg", ".wav": "au
 # sidecar .json, which is not served) -- and the episode in its path.
 _VOICE_NAME = re.compile(r"^line_[0-9]{2}\.(mp3|wav)$")
 _EPISODE_IN_PATH = re.compile(r"^[1-9][0-9]?$")
+# Phase 4: what GET /{id}/episodes/{ep}/shots/{name} serves -- a shot's image,
+# named by its shot (the store's own pattern).
+_SHOT_NAME = re.compile(schemas.SHOT_IMAGE_NAME_PATTERN)
+
+# Phase 4: the params each new step's job carries (only what was sent).
+_STEP_PARAMS = {"assets": AssetsStepParams, "render": RenderStepParams, "fast-track": FastTrackStepParams}
 
 # A design reference arrives as multipart/form-data in this field. The whole
 # request may carry the image (``uploads.MAX_UPLOAD_BYTES``) and this much
@@ -237,8 +268,12 @@ def _job_doc(step, params, ep=None):
     episode document -- ``script:<ep>`` / ``storyboard:<ep>`` for the steps
     (*ep*, the job's), ``script:<ep>`` for ``scene``, ``hook``,
     ``cliffhanger`` and ``teaser`` targets, ``storyboard:<ep>`` for a
-    ``shot:<ep>:<shid>:plan``. None for anything else."""
-    if step in workflow.PHASE3_STEPS:
+    ``shot:<ep>:<shid>:plan``. Phase 4: ``assets:<ep>`` for the assets step
+    and for a shot's image (``shot:<ep>:<shid>``) or a line's voice
+    (``line:<ep>:<lid>``); none for the render, the metadata, the fast track
+    and a ``metadata:<ep>:<platform>`` (they end completed, DEC-161). None for
+    anything else."""
+    if step in workflow.EPISODE_APPROVALS:
         return f"{step}:{ep}" if type(ep) is int else None
     if step in LLM_STEPS:
         return step
@@ -259,6 +294,8 @@ def _job_doc(step, params, ep=None):
         parsed = regenerate_step.parse_target(target)
         if parsed is not None and parsed[0] in workflow.EPISODE_TARGET_DOCS:
             return f"{workflow.EPISODE_TARGET_DOCS[parsed[0]]}:{parsed[1]}"
+        if parsed is not None and parsed[0] in regenerate_step.EPISODE_KINDS:
+            return None
         if parsed is not None:
             return "season" if parsed[0] == "season" else f"{parsed[0]}:{parsed[1]}"
     return None
@@ -267,6 +304,20 @@ def _job_doc(step, params, ep=None):
 def _doc_of(job) -> Optional[str]:
     """:func:`_job_doc` of a job record."""
     return _job_doc(job.get("step"), job.get("params"), ep=job.get("ep"))
+
+
+def _episode_of(job) -> Optional[int]:
+    """The episode a step job works on: an episode step's ``ep``; an episode
+    regenerate target's episode (phase 3's and phase 4's). None for
+    anything else."""
+    step = job.get("step")
+    if step in workflow.EPISODE_STEPS:
+        ep = job.get("ep")
+        return ep if type(ep) is int else None
+    if step == "regenerate":
+        parsed = regenerate_step.parse_episode_target((job.get("params") or {}).get("target"))
+        return parsed[1] if parsed is not None else None
+    return None
 
 
 def _in_flight(story_id, *, doc=None) -> list:
@@ -300,6 +351,29 @@ def _complete_awaiting(story_id, doc) -> list:
             if store.approve_step_job(job["id"]) == "ok":
                 done.append(job["id"])
     return done
+
+
+def complete_approved_jobs(story_id, ep) -> list:
+    """Complete the step jobs of episode *ep* still awaiting the approval of
+    a document that is approved now (``workflow.approved_episode_docs``: the
+    script, the storyboard, the assets with a current fingerprint), as
+    approving the document completes them; returns their ids.
+
+    The fast track approves those documents in-process (DEC-162), so a job
+    left awaiting one of them -- an older script job, a shot regenerate -- is
+    settled once it ends: the worker calls this after a step that ends
+    completed (``worker._execute_story_step``). Nothing awaiting, nothing
+    read."""
+    if type(ep) is not int:
+        return []
+    docs = {f"{name}:{ep}": name for name in workflow.EPISODE_APPROVALS}
+    waiting = [job for job in store.list_step_jobs(story_id, statuses=[JobStatus.AWAITING_APPROVAL])
+               if _doc_of(job) in docs]
+    if not waiting:
+        return []
+    approved = set(workflow.approved_episode_docs(_stories(), story_id, ep))
+    return [job["id"] for job in waiting
+            if docs[_doc_of(job)] in approved and store.approve_step_job(job["id"]) == "ok"]
 
 
 def _llm_route(env):
@@ -392,6 +466,15 @@ def _refuse_busy(story_id, what_to_do, *, docs=None) -> None:
         busy = _in_flight(story_id)
     else:
         busy = [job for doc in docs for job in _in_flight(story_id, doc=doc)]
+    if busy:
+        raise HTTPException(status_code=409, detail=_busy_detail(busy[0], what_to_do))
+
+
+def _refuse_episode_busy(story_id, ep, what_to_do) -> None:
+    """409 while a step job of episode *ep* is queued or running: one of its
+    documents' jobs, and (phase 4) its render, metadata, fast track or
+    metadata regenerate, which read or write them too."""
+    busy = [job for job in _in_flight(story_id) if _episode_of(job) == ep]
     if busy:
         raise HTTPException(status_code=409, detail=_busy_detail(busy[0], what_to_do))
 
@@ -799,8 +882,10 @@ async def run_step(story_id: str, step: str, response: Response,
     ``season`` (phase 2): 201 with the queued job (see ``_phase2_step``).
     ``script``, ``storyboard`` (phase 3, one episode: ``ep``): 201 with the
     queued job, or -- the storyboard with ``params.fast`` -- 200 with the
-    episode page, built here (see ``_episode_step``). Any other step of 9.1:
-    400, a later phase. Anything else: 404.
+    episode page, built here (see ``_episode_step``). ``assets``, ``render``,
+    ``metadata``, ``fast-track`` (phase 4, one episode: ``ep``): 201 with the
+    queued job (see ``_phase4_step``). Any other step of 9.1: 400, a later
+    phase. Anything else: 404.
     """
     stories = _stories()
     story = _load(stories, story_id)
@@ -831,6 +916,8 @@ async def run_step(story_id: str, step: str, response: Response,
         return await _phase2_step(stories, story, step, params, ep)
     if step in workflow.PHASE3_STEPS:
         return await _episode_step(stories, story, step, params, ep, response)
+    if step in workflow.PHASE4_STEPS:
+        return await _phase4_step(stories, story, step, params, ep)
     with _answering():
         workflow.refuse_step(step)
 
@@ -915,22 +1002,81 @@ async def _episode_step(stories, story, step, params, ep, response):
     return _episode_page(stories, story, ep)
 
 
+def _phase4_checks(stories, story, step, params, ep, env):
+    """The checks of ``assets``, ``render``, ``metadata`` or ``fast-track``
+    of episode *ep* before a job exists (see ``_phase4_step``); returns the
+    job's params and its gate. Blocking (it hashes files), so it runs off the
+    event loop."""
+    with _answering():
+        ec = workflow.episode_context(stories, story, ep, step=step)
+        workflow.phase4_request(step, params)
+        workflow.require_step_inputs(ec, step)
+    model = _STEP_PARAMS.get(step)
+    sent = _sent(model(**params)) if model is not None else {}
+    if step == "assets":
+        def gate():  # the plan's own stop, before the first call
+            with _answering():
+                workflow.assets_gate(ec, env=env)
+    elif step == "render":
+        def gate():  # it calls nothing: no gate
+            return None
+    else:
+        gate = None  # an LLM step: the key gate
+    return sent, gate
+
+
+async def _phase4_step(stories, story, step, params, ep) -> JobResponse:
+    """``assets``, ``render``, ``metadata`` or ``fast-track`` of episode *ep*
+    (phase 4).
+
+    Refused before any job exists, in this order: the episode's
+    preconditions (``workflow.episode_context``, as the phase-3 steps: 409 for
+    a story that is not ready, 400 without ``ep`` or for one the season does
+    not plan, 409 from episode 2 on without the recap), then the parameters
+    (400, the step's closed list: ``assets`` ``{align_words?}``, ``render``
+    ``{subtitles?, encoder?}``, ``fast-track`` ``{storyboard?}``, ``metadata``
+    none), then what the step is made from (409 with the step's own sentence:
+    ``workflow.require_step_inputs``), then what every job meets
+    (``_create_step_job``: 409 while a step of the story is in flight; the
+    step's gate -- the key gate for ``metadata`` and ``fast-track`` (400), the
+    plan's own stop for ``assets`` (409: ``workflow.assets_gate``), none for
+    the render, which calls nothing; the queue cap, 429). The job carries
+    *ep* and the params sent; an assets job supersedes the one awaiting
+    ``assets:<ep>``.
+    """
+    env = worker.get_settings_env()
+    sent, gate = await run_in_threadpool(_phase4_checks, stories, story, step, params, ep, env)
+    return await _create_step_job(story["story_id"], step, sent, ep=ep, gate=gate)
+
+
 def _episode_jobs(story_id, ep) -> list:
-    """The story's step jobs queued or running for episode *ep*'s documents,
-    as ``GET /{id}`` lists jobs."""
-    docs = {f"{name}:{ep}" for name in workflow.PHASE3_STEPS}
+    """The story's step jobs queued or running on episode *ep* (its
+    documents', and its render, metadata and fast track), as ``GET /{id}``
+    lists jobs."""
     return [
         jobs_routes._job_to_response(job).model_dump(
             mode="json", exclude={"events", "log", "clips", "config", "progress"})
-        for job in _in_flight(story_id) if _doc_of(job) in docs
+        for job in _in_flight(story_id) if _episode_of(job) == ep
     ]
 
 
+def _episode_media(story_id, ep, render) -> dict:
+    """The episode's video and cover as the dashboard plays and shows them:
+    ``{"video_url", "cover_url"}``. None until stage 12 signs story media
+    (DEC-163: a URL minted here, per request, never stored)."""
+    return {"video_url": None, "cover_url": None}
+
+
 def _episode_page(stories, story, ep) -> dict:
-    """``GET /{id}/episodes/{ep}``'s answer: ``workflow.episode_view`` and the
-    episode's jobs in flight."""
+    """``GET /{id}/episodes/{ep}``'s answer: ``workflow.episode_view``,
+    ``workflow.episode_outputs`` (phase 4: the assets, the render -- with its
+    media --, the metadata pack, the ledger) and the episode's jobs in
+    flight."""
     with _answering():
         page = workflow.episode_view(stories, story, ep)
+        page.update(workflow.episode_outputs(stories, story, ep))
+    if page["render"] is not None:
+        page["render"]["media"] = _episode_media(story["story_id"], ep, page["render"])
     page["jobs"] = _episode_jobs(story["story_id"], ep)
     return page
 
@@ -998,9 +1144,21 @@ async def approve(story_id: str, doc: str, req: Optional[StoryApproveRequest] = 
     the document's ``approved_at`` is set -- never the story's approvals or
     status -- and its jobs awaiting approval are completed.
 
-    The later documents of the 9.2 grammar: 400. Anything else: 404. What
-    each approval requires is ``workflow.approve_*``; the step jobs are
-    checked here first.
+    ``assets:<ep>`` (phase 4): 400 for an episode number the season does not
+    plan; 409 while a step job of the episode is queued or running (its
+    documents', its render, metadata or fast track); then
+    ``workflow.approve_assets`` (409 until the script is approved and the
+    storyboard approved and current, and naming every shot with no current
+    image -- a locked shot keeps the one it has -- and every line with no
+    audio in its speaker's pinned voice, with the regenerate target that
+    finishes it); every shot's ``approved`` is set and ``assets.json`` gains
+    ``approved {at, fingerprint}``; the jobs awaiting ``assets:<ep>`` are
+    completed. From phase 4 on, every episode approval waits for the
+    episode's jobs, the render's and the fast track's included.
+
+    No approval of the 9.2 grammar is a later phase's any more. Anything
+    else: 404. What each approval requires is ``workflow.approve_*``; the
+    step jobs are checked here first.
     """
     stories = _stories()
     story = _load(stories, story_id)
@@ -1009,18 +1167,20 @@ async def approve(story_id: str, doc: str, req: Optional[StoryApproveRequest] = 
     anyway = bool(req is not None and req.approve_anyway)
     if anyway and word != "script":
         raise HTTPException(status_code=400, detail="approve_anyway applies to script:<ep> only.")
-    if sep and eid and word in workflow.PHASE3_STEPS:
+    if sep and eid and word in workflow.EPISODE_APPROVALS:
         with _answering():
             ep = workflow.episode_bounds(stories, story, eid)
-        docs = tuple(f"{name}:{ep}" for name in workflow.PHASE3_STEPS)
-        _refuse_busy(story_id, f"approve {word}:{ep} once it is done, or cancel it first.", docs=docs)
+        _refuse_episode_busy(story_id, ep, f"approve {word}:{ep} once it is done, or cancel it first.")
         with _answering():
             if word == "script":
                 workflow.approve_script(stories, story_id, ep, approve_anyway=anyway, now=_now())
-            else:
+            elif word == "storyboard":
                 workflow.approve_storyboard(stories, story_id, ep, now=_now())
+            else:
+                workflow.approve_assets(stories, story_id, ep, now=_now())
         _complete_awaiting(story_id, f"{word}:{ep}")
-        return _episode_page(stories, story, ep)
+        # Off the event loop: the page's phase-4 part hashes the files that moved.
+        return await run_in_threadpool(_episode_page, stories, story, ep)
 
     if sep and eid and word in workflow.ENTITY_KINDS_BY_WORD:
         kind = workflow.ENTITY_KINDS_BY_WORD[word]
@@ -1104,9 +1264,21 @@ async def regenerate(story_id: str, req: StoryRegenerateRequest) -> JobResponse:
     was planned), 404 for a scene or shot it does not have; then the key
     gate (400). ``voice`` is refused with them (400).
 
+    Phase 4's targets: a shot's image ``shot:<ep>:<shid>`` and a line's voice
+    ``line:<ep>:<lid>`` are jobs of ``assets:<ep>`` -- 404 for a shot or a line
+    the episode does not have; 409 until the script is approved and the
+    storyboard approved and current, for a locked shot ("unlock it first")
+    and for a line whose speaker has no pinned voice; then the image's gate
+    (``IMAGE_CHAIN``'s verdict, 409; the editor's in ``references`` mode,
+    409) -- the voice meets none. One platform's metadata
+    ``metadata:<ep>:<platform>`` (``tiktok``, ``shorts``, ``reels``) is a job
+    of no document (it ends completed, DEC-161): 409 without a finished
+    render or with a pack written for another render or script; then the key
+    gate (400).
+
     A later phase's target of the 9.2 grammar
-    (``character:<id>:image:extra:<n>``, ``shot:<ep>:<shid>`` among them):
-    400. Anything else: 400 naming the valid shapes.
+    (``character:<id>:image:extra:<n>``, ``shot:<ep>:<shid>:video`` among
+    them): 400. Anything else: 400 naming the valid shapes.
     """
     stories = _stories()
     story = _load(stories, story_id)
@@ -1172,7 +1344,9 @@ def _estimate_message(rows, calls, refusal, *, label=None) -> str:
 async def estimate(story_id: str, step: str, target: Optional[str] = None,
                    selected: Optional[list[str]] = Query(None), episodes: Optional[int] = None,
                    place: Optional[list[str]] = Query(None), prop: Optional[list[str]] = Query(None),
-                   ep: Optional[int] = None, measure: bool = False) -> dict:
+                   ep: Optional[int] = None, measure: bool = False, align_words: bool = False,
+                   subtitles: Optional[str] = None, encoder: Optional[str] = None,
+                   storyboard: Optional[str] = None) -> dict:
     """What a step would cost and where it would run::
 
         {"step", "est_usd": 0.0, "units": {"llm_calls": n},
@@ -1220,7 +1394,25 @@ async def estimate(story_id: str, step: str, target: Optional[str] = None,
     spend is not booked (DEC-115). ``storyboard``: ``t1_calls`` (one per
     scene with no plan, a stale one or a fast one), ``fast_calls`` 0,
     ``link``, ``skipped_paid``; not ``ready`` while the script is not
-    complete. A later step: 400; anything else: 404.
+    complete.
+
+    Phase 4 (``?ep=``, the step's own refusals first: see ``_phase4_step``;
+    what it is made from missing is the step's 409): ``assets``
+    (``?align_words=1``) answers ``workflow.assets_estimate`` --
+    ``asset_units``' ``images`` (the shots to make, priced on the story's
+    route; a local editor that would run them is asked whether it is
+    there), ``voices``, ``alignment``, ``paid_links``, ``caps``, ``est_usd``,
+    ``over_cap``, ``ready``, with ``paid`` (the fast track's verdict) and its
+    ``message``. ``render`` (``?subtitles=``, ``?encoder=``): ``units
+    {llm_calls: 0, shots}``, ``needed`` (false while the last render is the
+    one it would make), ``seconds``/``minutes`` (an authored estimate, A-069),
+    ``params``, $0 and ``local``. ``metadata``: the LLM steps' estimate of
+    one M1 call per platform still to write, with ``platforms``.
+    ``fast-track`` (``?storyboard=t1|fast``): ``fast_track.estimate``'s
+    ``llm_calls``, ``images``, ``tts``, ``render``, ``est_usd``, ``paid`` and
+    ``stops_at``, with the LLM chain's ``route_class``, ``link``, ``links``,
+    ``ready`` (the key gate passes and nothing stops it) and ``message``. A
+    later step: 400; anything else: 404.
     """
     stories = _stories()
     story = _load(stories, story_id)
@@ -1264,6 +1456,9 @@ async def estimate(story_id: str, step: str, target: Optional[str] = None,
         return _llm_estimate(step, 1, env=env)
     if step in workflow.PHASE3_STEPS:
         return _episode_estimate(stories, story, step, ep, measure=measure, env=env)
+    if step in workflow.PHASE4_STEPS:
+        options = {"align_words": align_words, "subtitles": subtitles, "encoder": encoder, "storyboard": storyboard}
+        return await run_in_threadpool(_phase4_estimate, stories, story, step, ep, env=env, **options)
     if step not in LLM_STEPS and step != "regenerate":
         with _answering():
             workflow.refuse_step(step)
@@ -1302,6 +1497,37 @@ def _episode_estimate(stories, story, step, ep, *, measure, env) -> dict:
             body.update(ready=False, message=units["refusal"])
     body.update(ep=ep, skipped_paid=[{"link": row["link"], "reason": row["skipped"]}
                                      for row in body["links"] if "skipped" in row])
+    return body
+
+
+def _phase4_estimate(stories, story, step, ep, *, env, align_words, subtitles, encoder, storyboard) -> dict:
+    """The phase-4 estimate of episode *ep* (see ``estimate``), after the
+    step's own refusals. Blocking (it hashes files; the assets' asks a local
+    editor), so it runs off the event loop."""
+    with _answering():
+        ec = workflow.episode_context(stories, story, ep, step=step)
+        if step == "assets":
+            return workflow.assets_estimate(ec, env=env, align_words=align_words, probe_local=True)
+        if step == "render":
+            params = {name: value for name, value in (("subtitles", subtitles), ("encoder", encoder))
+                      if value is not None}
+            return workflow.render_estimate(ec, params)
+        if step == "metadata":
+            units = workflow.metadata_units(ec)
+        else:
+            body = workflow.fast_track_estimate(ec, env=env, storyboard=storyboard)
+    if step == "metadata":
+        body = _llm_estimate(step, units["llm_calls"], env=env)
+        body.update(ep=ep, platforms=units["platforms"])
+    else:
+        llm = _llm_estimate(step, body["llm_calls"]["total"], env=env)
+        stops = body["stops_at"]
+        body.update(step=step, route_class=llm["route_class"], link=llm["link"], links=llm["links"],
+                    ready=llm["ready"] and stops is None,
+                    message=(llm["message"] if not llm["ready"] else stops["reason"] if stops
+                             else f"{llm['message']} {body['paid']['message']}"))
+    body["skipped_paid"] = [{"link": row["link"], "reason": row["skipped"]} for row in body["links"]
+                            if "skipped" in row]
     return body
 
 
@@ -1353,8 +1579,9 @@ def _sent(model) -> dict:
 
 def _episode_edit(story_id, ep, req, edit) -> dict:
     """An inline edit of one episode document (``workflow.patch_script`` /
-    ``patch_storyboard`` say what each field does); answers the episode
-    page. 404 for an unknown story; 400 for an episode the season does not
+    ``patch_storyboard`` / ``patch_assets`` say what each field does);
+    answers the episode page. Blocking (the page hashes the files that
+    moved), so the routes run it off the event loop. 404 for an unknown story; 400 for an episode the season does not
     plan; nothing sent: nothing written; 409 while a step of the story is
     queued or running (its writes would race this one); then the workflow's
     answer (409 without the document, 400 with ``{"message", "errors"}`` when
@@ -1382,18 +1609,26 @@ async def get_episode(story_id: str, ep: str) -> dict:
                    "report": none|passed|issues|stale,
                    "stale_scenes": [scene_id, ...], "prompts_outdated": bool,
                    "missing": [what the script step would still write]},
+         "assets": {...} | null, "render": {..., "media": {"video_url", "cover_url"}} | null,
+         "metadata": {"pack", "current"} | null, "ledger": {"entries", "totals"},
          "jobs": [the episode's step jobs queued or running]}
 
-    (``workflow.episode_view``). 404 for an unknown story; 400 for an episode
-    number the season does not plan (``1`` to ``episodes_planned``; 1 to 99
-    before a season); 200 with nulls before anything is written; 500 with one
-    sentence for a document that does not validate. Calls nothing.
+    (``workflow.episode_view``; phase 4's ``assets``, ``render``,
+    ``metadata`` and ``ledger`` are ``workflow.episode_outputs``', which says
+    what each holds; ``media`` is filled by stage 12, None until then). 404
+    for an unknown story; 400 for an episode number the season does not plan
+    (``1`` to ``episodes_planned``; 1 to 99 before a season); 200 with nulls
+    before anything is written; 500 with one sentence for a document that
+    does not validate. Calls nothing; what it hashes (images, audio, the
+    video) is remembered while none of it moves, so the dashboard's poll
+    hashes nothing again.
     """
     stories = _stories()
     story = _load(stories, story_id)
     with _answering():
         number = workflow.episode_bounds(stories, story, ep)
-    return _episode_page(stories, story, number)
+    # Off the event loop: the phase-4 part hashes files when they moved.
+    return await run_in_threadpool(_episode_page, stories, story, number)
 
 
 @router.patch("/{story_id}/episodes/{ep}/script")
@@ -1405,7 +1640,7 @@ async def patch_episode_script(story_id: str, ep: str, req: ScriptPatchRequest) 
     and ``workflow.patch_script``: an edited line gets a fresh estimated
     timing, the script is re-timed, its report goes stale, both documents
     lose their approval and the storyboard's scenes it changed go stale."""
-    return _episode_edit(story_id, ep, req, workflow.patch_script)
+    return await run_in_threadpool(_episode_edit, story_id, ep, req, workflow.patch_script)
 
 
 @router.patch("/{story_id}/episodes/{ep}/storyboard")
@@ -1418,7 +1653,49 @@ async def patch_episode_storyboard(story_id: str, ep: str, req: StoryboardPatchR
     action names nobody, tags only), a transition takes the template's
     duration and re-times the shots, the storyboard loses its approval and
     the script is re-timed with it."""
-    return _episode_edit(story_id, ep, req, workflow.patch_storyboard)
+    return await run_in_threadpool(_episode_edit, story_id, ep, req, workflow.patch_storyboard)
+
+
+@router.patch("/{story_id}/episodes/{ep}/assets")
+async def patch_episode_assets(story_id: str, ep: str, req: AssetsPatchRequest) -> dict:
+    """Lock or unlock shots inline (``AssetsPatchRequest``: ``shots
+    [{shot_id, locked?}]``); see ``_episode_edit`` and
+    ``workflow.patch_assets``: a locked shot keeps its image (the assets step
+    skips it, a regenerate of it is 409 "unlock it first"), only a shot with
+    an image may be locked, an unknown shot is a 400 naming it; the
+    storyboard's revision and approval never move, and the assets approval
+    goes stale (its fingerprint covers the locks)."""
+    return await run_in_threadpool(_episode_edit, story_id, ep, req, workflow.patch_assets)
+
+
+@router.get("/{story_id}/episodes/{ep}/shots/{name}")
+async def episode_shot(story_id: str, ep: str, name: str):
+    """One shot's image, ``shot_NN.<png|jpg|jpeg|webp>`` (the assets step's,
+    named by its shot).
+
+    The episode number and the name are checked before a path is built, and
+    the file is served only as a regular file in the episode's real
+    ``assets/shots/`` folder -- no symlink at any level
+    (``StoryStore.episode_asset_path``). Anything else, another story's image
+    included, is a 404. Behind the token like every story route (DEC-113:
+    fetched as a blob); ``no-store``: a regenerated image reuses its name.
+    """
+    _check_id(story_id)
+    if _EPISODE_IN_PATH.fullmatch(ep) is None or _SHOT_NAME.fullmatch(name) is None:
+        raise HTTPException(status_code=404, detail="File not found")
+    try:
+        path = _stories().episode_asset_path(story_id, int(ep), "shots", name)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="File not found") from None
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(
+        path,
+        media_type=_PREVIEW_MEDIA_TYPES[os.path.splitext(name)[1]],
+        filename=name,
+        content_disposition_type="inline",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @router.get("/{story_id}/episodes/{ep}/voice/{name}")

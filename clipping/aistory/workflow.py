@@ -1,4 +1,5 @@
-"""The story rules of steps 1-9, shared by the API and the CLI (spec 3, 9.1-9.3).
+"""The story rules of steps 1-12 and the fast track, shared by the API and the
+CLI (spec 3, 9.1-9.3).
 
 ``web/api/routes/stories.py`` (the HTTP face) and ``clipping/aistory/cli.py``
 (``python main.py --ai-story``) both call these functions, so a story is
@@ -29,11 +30,25 @@ from __future__ import annotations
 import copy
 import os
 import re
+import threading
 
 from clipping.providers import generation as gen
 from clipping.providers import registry
 
-from . import defaults, imaging, prompting, prompts, refimages, schemas, shots, stylelock, templates, timing, voices
+from . import (
+    defaults,
+    imaging,
+    prompting,
+    prompts,
+    refimages,
+    schemas,
+    shots,
+    stylelock,
+    templates,
+    timing,
+    voices,
+    wordtiming,
+)
 from . import store as story_store
 from . import uploads as uploads_mod
 from .ledger import CostLedger
@@ -41,7 +56,10 @@ from .steps import assets as assets_step
 from .steps import concepts as concepts_step
 from .steps import entities as entities_step
 from .steps import episode_common, llm_call
+from .steps import fast_track as fast_track_step
+from .steps import metadata as metadata_step
 from .steps import regenerate as regenerate_step
+from .steps import render as render_step
 from .steps import script as script_step
 from .steps import season as season_step
 from .steps import storyboard as storyboard_step
@@ -51,7 +69,7 @@ from .steps.llm_call import StepFailed
 # ------------------------------------------------------------------ grammar
 
 # Spec 9.1. What phase 1 runs, what phase 2 runs, what phase 3 runs, what
-# comes later.
+# phase 4 runs, what comes later.
 LLM_STEPS = ("concepts", "bible")
 INLINE_STEPS = ("style",)
 PREVIEW_STEP = "style_preview"
@@ -63,24 +81,31 @@ PHASE2_STEPS = ("cast", "places_proposal", "places", "season")
 # Steps 8-9 (phase 3): one episode's script (a job: E1, E2 per scene, E3, E4)
 # and its storyboard (a T1 job, or the fast plan, run inline: DEC-109).
 PHASE3_STEPS = ("script", "storyboard")
-LATER_STEPS = (
-    "assets", "render", "metadata", "memory", "feedback",
-    "propose-next", "rerender", "fast-track", "import",
-)
+# Steps 10-12 and the fast track (phase 4), one episode each, all jobs: the
+# assets (images, voices, sounds: awaiting approval), the render (minutes of
+# ffmpeg, calling no API: DEC-161), the metadata pack, and the fast track from
+# the script to the pack (DEC-162). The last three end completed.
+PHASE4_STEPS = ("assets", "render", "metadata", "fast-track")
+EPISODE_STEPS = PHASE3_STEPS + PHASE4_STEPS
+LATER_STEPS = ("memory", "feedback", "propose-next", "rerender", "import")
 
 # Spec 9.2, approve grammar: "season" bare, the others "<kind>:<id>". Phase 2
 # approves ``character:<id>``, ``place:<id>``, ``prop:<id>`` and ``season``;
-# phase 3 ``script:<ep>`` and ``storyboard:<ep>``.
+# phase 3 ``script:<ep>`` and ``storyboard:<ep>``; phase 4 ``assets:<ep>``.
+# No approval of the grammar is a later phase's any more.
 LATER_APPROVALS_BARE = ()
-LATER_APPROVALS = ("assets",)
+LATER_APPROVALS = ()
+# The episode documents an approval names (``<word>:<ep>``), and the step
+# jobs that write them (their job's document is ``<step>:<ep>``).
+EPISODE_APPROVALS = ("script", "storyboard", "assets")
 
 # Spec 9.2, regenerate grammar: every "<kind>:..." target of a later phase.
-# Phase 2's and phase 3's targets are ``regenerate.parse_target``'s; its
-# ``character:<id>:image:extra:<n>`` is still a later phase's, and so are
-# ``shot:<ep>:<shid>`` (the shot's image, phase 4) and
-# ``shot:<ep>:<shid>:video`` (phase 6): ``shot:<ep>:<shid>:plan`` is read
-# before this list is.
-LATER_TARGETS = ("shot", "line", "metadata")
+# Phase 2's, phase 3's and phase 4's targets are ``regenerate.parse_target``'s;
+# its ``character:<id>:image:extra:<n>`` is still a later phase's, and so is
+# every other ``shot:`` form -- ``shot:<ep>:<shid>:video`` (phase 6) among
+# them: ``shot:<ep>:<shid>:plan`` and the shot's image ``shot:<ep>:<shid>``
+# are read before this list is (DEC-140).
+LATER_TARGETS = ("shot",)
 
 # What approving the bible requires (spec 2.1, 3 step 3).
 BIBLE_FIELDS = (
@@ -302,12 +327,12 @@ def invalid_target(target) -> WorkflowError:
 
 def check_regenerate_target(target) -> None:
     """A target this phase regenerates passes -- phase 1's fixed ones, phase
-    2's entity targets and phase 3's episode targets
+    2's entity targets and the episode targets of phases 3 and 4
     (``regenerate.parse_target``: the shape only; the entity or the episode
     itself is checked by :func:`check_entity_target`). A later phase's target
     of the 9.2 grammar -- ``character:<id>:image:extra:<n>`` and
-    ``shot:<ep>:<shid>`` among them -- is ``later_phase``; anything else is
-    ``invalid``, naming the valid shapes."""
+    ``shot:<ep>:<shid>:video`` among them -- is ``later_phase``; anything else
+    is ``invalid``, naming the valid shapes."""
     if target in regenerate_step.VALID_TARGETS:
         return
     if regenerate_step.parse_target(target) is not None:
@@ -1172,18 +1197,26 @@ def places_units(stories, story, params=None) -> dict:
 
 def target_units(stories, story, parsed) -> dict:
     """What one regenerate target (``regenerate.parse_target``'s tuple) would
-    make: text, ``season:<ep>`` and an episode target (E2, E3 or T1r) one LLM
-    call; a portrait one image, and again each sheet it already has (they are
-    drawn from it); a sheet or a time variant one edit (``references``) or one
-    image (``prompt_only``); a day plate or a prop image one image; a voice
-    the characters of its sample line."""
+    make: text, ``season:<ep>`` and an episode target (E2, E3, T1r or M1) one
+    LLM call; a portrait one image, and again each sheet it already has (they
+    are drawn from it); a sheet or a time variant one edit (``references``)
+    or one image (``prompt_only``); a day plate or a prop image one image; a
+    voice the characters of its sample line. Phase 4: a shot's image one
+    image (``prompt_only``) or one edit (``references``: the shot's
+    references are sent); a line's voice the characters of its text."""
+    prompt_only = story["generation_profile"]["consistency_mode"] == refimages.PROMPT_ONLY
+    if parsed[0] == regenerate_step.SHOT_IMAGE_KIND:
+        return _units(images=1) if prompt_only else _units(edit_images=1)
+    if parsed[0] == regenerate_step.LINE_KIND:
+        script = read_episode(stories, story["story_id"], parsed[1], SCRIPT_DOC) or {"scenes": []}
+        line = next((ln for scene in script["scenes"] for ln in scene["lines"] if ln["line_id"] == parsed[2]), None)
+        return _units(tts_chars=len(line["text"]) if line else 0)
     if parsed[0] in regenerate_step.EPISODE_KINDS or parsed[0] == "season" or parsed[2] == "text":
         return _units(llm_calls=1)
     kind = ENTITY_KINDS_BY_WORD[parsed[0]]
     doc = read_entity(stories, story["story_id"], kind, parsed[1])
     if parsed[2] == "voice":
         return _units(tts_chars=_sample_chars(doc))
-    prompt_only = story["generation_profile"]["consistency_mode"] == refimages.PROMPT_ONLY
     slot = parsed[3] if len(parsed) > 3 else "image"
     if slot in ("portrait", MASTER_PLATE, "image"):
         units = _units(images=1)
@@ -1197,10 +1230,13 @@ def target_units(stories, story, parsed) -> dict:
 def target_needs_editor(story, parsed) -> bool:
     """Whether the target *is* an edit: a sheet or a time variant in
     ``references`` mode (a portrait's sheets that cannot be redrawn are
-    recorded, not failed, so a portrait never needs one)."""
-    if parsed[0] in regenerate_step.EPISODE_KINDS or parsed[0] == "season" or parsed[2] != "image":
-        return False
+    recorded, not failed, so a portrait never needs one); a shot's image in
+    ``references`` mode (phase 4: made from its references)."""
     if story["generation_profile"]["consistency_mode"] == refimages.PROMPT_ONLY:
+        return False
+    if parsed[0] == regenerate_step.SHOT_IMAGE_KIND:
+        return True
+    if parsed[0] in regenerate_step.EPISODE_KINDS or parsed[0] == "season" or parsed[2] != "image":
         return False
     slot = parsed[3] if len(parsed) > 3 else "image"
     return slot not in ("portrait", MASTER_PLATE, "image")
@@ -1563,15 +1599,31 @@ def delete_entity(stories, story_id, kind, eid, *, now) -> dict:
 SCRIPT_DOC = story_store.EPISODE_SCRIPT_DOC
 STORYBOARD_DOC = story_store.EPISODE_STORYBOARD_DOC
 ASSETS_DOC = story_store.EPISODE_ASSETS_DOC
+MANIFEST_DOC = story_store.EPISODE_RENDER_MANIFEST_DOC
+METADATA_PACK_DOC = story_store.EPISODE_METADATA_PACK_DOC
 
 # The keys ``params`` of the episode steps may carry (closed lists).
 SCRIPT_PARAMS = (script_step.MEASURE_PARAM,)
 STORYBOARD_PARAMS = ("fast",)
 
+# Phase 4's params (closed lists; the runners' own: ``assets.PARAMS``,
+# ``render.PARAMS``, ``fast_track.PARAMS``; the metadata takes none) and the
+# assets edit (the API's AssetsPatchRequest and its items).
+ASSETS_PARAMS = assets_step.PARAMS
+RENDER_PARAMS = render_step.PARAMS
+METADATA_PARAMS = ()
+FAST_TRACK_PARAMS = fast_track_step.PARAMS
+PHASE4_PARAMS = {"assets": ASSETS_PARAMS, "render": RENDER_PARAMS, "metadata": METADATA_PARAMS,
+                 "fast-track": FAST_TRACK_PARAMS}
+ASSETS_PATCH_FIELDS = ("shots",)
+ASSETS_SHOT_PATCH_FIELDS = ("locked",)
+
 # The document of each episode regenerate target: the one its job writes,
-# and so the one whose approval completes it.
+# and so the one whose approval completes it. A ``metadata:<ep>:<platform>``
+# has none: its job ends completed (DEC-161).
 EPISODE_TARGET_DOCS = {"scene": "script", "hook": "script", "cliffhanger": "script", "teaser": "script",
-                       "shot": "storyboard"}
+                       "shot": "storyboard", regenerate_step.SHOT_IMAGE_KIND: "assets",
+                       regenerate_step.LINE_KIND: "assets"}
 
 # What an edit may set (the API's ScriptPatchRequest / StoryboardPatchRequest
 # and their items). An item names what it edits by its id (``line_id``,
@@ -1707,6 +1759,64 @@ def require_complete_script(ec) -> dict:
         return storyboard_step.require_complete_script(ec)
     except StepFailed as exc:
         raise WorkflowError(CONFLICT, str(exc)) from None
+
+
+def phase4_request(step, params) -> dict:
+    """A phase-4 step's *params*, checked as its runner reads them (closed
+    lists; ``invalid`` otherwise, naming the choices): ``assets``
+    ``{align_words?}`` (true or false), ``render`` ``{subtitles?, encoder?}``
+    (``render.SUBTITLE_CHOICES``, ``render.ENCODER_CHOICES``), ``fast-track``
+    ``{storyboard?}`` (``fast_track.STORYBOARD_CHOICES``); ``metadata`` takes
+    none. Returns them as sent."""
+    known = PHASE4_PARAMS[step]
+    if not known and params:
+        raise WorkflowError(INVALID, f"'{step}' takes no parameters.")
+    _unknown_keys(params, known, step)
+    if step == "assets":
+        _flag(params, assets_step.ALIGN_PARAM)
+    try:
+        if step == "render":
+            render_step.read_params(params)
+        elif step == "fast-track":
+            fast_track_step.read_params(params)
+    except StepFailed as exc:
+        raise WorkflowError(INVALID, str(exc)) from None
+    return dict(params)
+
+
+def require_step_inputs(ec, step) -> None:
+    """What a phase-4 step is made from, checked as its runner checks it before
+    anything runs, calling nothing (``conflict`` with the runner's own
+    sentence): the assets an approved script and an approved, current
+    storyboard (``assets.require_approved``); the render the assets approved
+    with a current fingerprint, every image and voice on disk
+    (``render.require_renderable``); the metadata a finished render
+    (``metadata.require_render``). The fast track starts from what there is."""
+    check = {"assets": assets_step.require_approved, "render": render_step.require_renderable,
+             "metadata": metadata_step.require_render}.get(step)
+    if check is None:
+        return
+    try:
+        check(ec)
+    except StepFailed as exc:
+        raise WorkflowError(CONFLICT, str(exc)) from None
+
+
+def assets_gate(ec, *, env) -> None:
+    """The assets step's own stop before its first call
+    (``assets.plan_refusal``) checked before a job exists, calling nothing (a
+    local editor is not asked: the step asks it): ``conflict`` when the shot
+    images cannot run on the story's route -- in ``references`` mode, no
+    editor: DEC-117's stop and ask -- or a paid part is over a cap, with the
+    numbers."""
+    try:
+        script, board = assets_step.require_approved(ec)
+        units = assets_step.asset_units(ec, script, board, env=env)
+    except StepFailed as exc:
+        raise WorkflowError(CONFLICT, str(exc)) from None
+    refusal = assets_step.plan_refusal(ec, units)
+    if refusal is not None:
+        raise WorkflowError(CONFLICT, refusal)
 
 
 def read_episode(stories, story_id, ep, name):
@@ -1925,6 +2035,232 @@ def episode_summaries(stories, story) -> list:
     return summaries
 
 
+# ------------------------------------------------------ the page, phase 4
+
+# What the phase-4 part of the episode page derives by hashing files -- each
+# shot's image state (its prompt hash; in ``references`` mode, its reference
+# images), the assets approval's state (every image and audio file) and
+# whether the last render is still the one the step would make
+# (``render.current_render``: every input and the final file) -- is
+# remembered per (outputs root, story, episode) under a key of what it is
+# derived from: the episode documents' ``updated_at`` (the manifest's
+# included), the story's, the style lock's and every entity's, and the
+# (size, mtime) of each image, take, word sidecar, the final file and the
+# manifest. The dashboard polls the page every 4 s while a job runs: nothing
+# is hashed again until one of those moves.
+_DERIVED_CACHE: dict = {}
+_DERIVED_CACHE_MAX = 64
+_DERIVED_LOCK = threading.Lock()
+
+
+def _file_stamp(path):
+    if not path:
+        return None
+    try:
+        info = os.stat(path)
+    except OSError:
+        return None
+    return (info.st_size, info.st_mtime_ns)
+
+
+def _store_path(call, *args):
+    """A path from the store, or None where it refuses one (a symlink)."""
+    try:
+        return call(*args)
+    except (KeyError, ValueError):
+        return None
+
+
+def _derived_key(ec, script, board, doc, manifest) -> tuple:
+    story_id, ep = ec.story_id, ec.ep
+    lines = [line for scene in (script or {}).get("scenes") or [] for line in scene["lines"]]
+    files = [_file_stamp(assets_step.shot_image_path(ec, shot)) for shot in (board or {}).get("shots") or []]
+    for line in lines:
+        files.append(_file_stamp(assets_step.line_audio_path(ec, line)))
+        files.append(_file_stamp(assets_step.sidecar_path(ec, line["line_id"])))
+    files.append(_file_stamp(_store_path(ec.store.episode_file_path, story_id, ep, render_step.FINAL_FILE)))
+    files.append(_file_stamp(_store_path(ec.store.episode_doc_path, story_id, ep, MANIFEST_DOC)))
+    entities = tuple(sorted((kind, eid, entity.get("updated_at"))
+                            for kind, docs in ec.entities.items() for eid, entity in docs.items()))
+    stamps = tuple((current or {}).get("updated_at") for current in (script, board, doc, manifest))
+    lock = (ec.style_lock.get("locked_at"), ec.style_lock.get("updated_at"))
+    return (stamps, ec.story.get("updated_at"), lock, ec.consistency_mode, entities, tuple(files))
+
+
+def _derive(ec, script, board, doc, manifest) -> dict:
+    """The hashed part of :func:`episode_outputs` (see ``_DERIVED_CACHE``)."""
+    shots = {shot["shot_id"]: assets_step.shot_state(ec, shot) for shot in (board or {}).get("shots") or []}
+    lines = {}
+    for scene in (script or {}).get("scenes") or []:
+        for line in scene["lines"]:
+            voiced = voice_lines.is_measured(ec, line)
+            source, aligned_by = (wordtiming.source_of(assets_step.read_sidecar(ec, line["line_id"])) if voiced
+                                  else (None, None))
+            lines[line["line_id"]] = {"voiced": voiced, "words_source": source, "aligned_by": aligned_by}
+    out_of_date = None
+    if manifest is not None and manifest.get("output"):
+        params = manifest["params"]
+        out_of_date = not render_step.current_render(ec, {"subtitles": params["subtitles"],
+                                                          "encoder": params["encoder"]})
+    return {"shots": shots, "lines": lines, "fingerprint": assets_approval_state(ec, board, script, doc),
+            "out_of_date": out_of_date}
+
+
+def _derived(stories, ec, script, board, doc, manifest) -> dict:
+    """:func:`_derive`, remembered while its key holds."""
+    where = (os.path.realpath(stories.root), ec.story_id, ec.ep)
+    key = _derived_key(ec, script, board, doc, manifest)
+    with _DERIVED_LOCK:
+        found = _DERIVED_CACHE.get(where)
+    if found is not None and found[0] == key:
+        return found[1]
+    value = _derive(ec, script, board, doc, manifest)
+    with _DERIVED_LOCK:
+        _DERIVED_CACHE.pop(where, None)
+        _DERIVED_CACHE[where] = (key, value)
+        while len(_DERIVED_CACHE) > _DERIVED_CACHE_MAX:
+            _DERIVED_CACHE.pop(next(iter(_DERIVED_CACHE)))
+    return value
+
+
+def _assets_view(ec, script, board, doc, derived) -> dict:
+    ep = ec.ep
+    shots = []
+    for shot in (board or {}).get("shots") or []:
+        assets = shot["assets"]
+        state = derived["shots"][shot["shot_id"]]
+        on_disk = assets_step.shot_image_path(ec, shot) is not None
+        shots.append({
+            "shot_id": shot["shot_id"], "scene_id": shot["scene_id"], "state": state,
+            "image_name": assets["image"].rpartition("/")[2] if assets.get("image") and on_disk else None,
+            "route": assets.get("route"), "consistency": assets.get("consistency"),
+            "provider": assets.get("provider"), "model": assets.get("model"), "seed": assets.get("seed"),
+            "note": assets.get("note"), "est_usd": assets.get("est_usd"), "generated_at": assets.get("generated_at"),
+            "locked": bool(assets.get("locked")), "approved": bool(assets.get("approved")),
+            "pending": bool(assets.get("pending")), "target": assets_step.shot_target(ep, shot["shot_id"]),
+        })
+    lines = []
+    for scene in (script or {}).get("scenes") or []:
+        for line in scene["lines"]:
+            known = derived["lines"][line["line_id"]]
+            lines.append({
+                "line_id": line["line_id"], "scene_id": scene["scene_id"], "speaker": line["speaker"],
+                "voiced": known["voiced"], "voice": line["timing"].get("voice") if known["voiced"] else None,
+                "words_source": known["words_source"], "aligned_by": known["aligned_by"],
+                "approximate": known["words_source"] not in (wordtiming.PROVIDER, wordtiming.ALIGNMENT),
+                "target": assets_step.line_target(ep, line["line_id"]),
+            })
+    approved = (doc or {}).get("approved")
+    return {"doc": doc, "consistency": ec.consistency_mode, "fingerprint": derived["fingerprint"],
+            "approved_at": approved["at"] if approved else None, "shots": shots, "lines": lines}
+
+
+def _render_view(manifest, derived) -> dict:
+    output = manifest.get("output")
+    stages = manifest["stages"]
+    states = {stage["state"] for stage in stages}
+    if output:
+        state = "completed"
+    elif "failed" in states:
+        state = "failed"
+    elif "cancelled" in states:
+        state = "cancelled"
+    else:
+        state = "incomplete"
+    return {
+        "state": state, "profile": manifest["profile"], "params": dict(manifest["params"]),
+        "duration_s": output["duration_s"] if output else None,
+        "loudness": dict(output["loudness"]) if output else None,
+        "fps": output["fps"] if output else None,
+        "width": output["width"] if output else None, "height": output["height"] if output else None,
+        "output": {"file": render_step.FINAL_FILE, "sha256": output["sha256"]} if output else None,
+        "stages": {"total": len(stages), "ran": sum(stage["state"] == "done" for stage in stages),
+                   "cached": sum(stage["state"] == "cached" for stage in stages),
+                   "shots": sum(stage["kind"] == "shot" for stage in stages),
+                   "shots_cached": sum(stage["kind"] == "shot" and stage["state"] == "cached" for stage in stages)},
+        "seconds": manifest["timings"]["total_s"], "started_at": manifest["timings"]["started_at"],
+        "finished_at": manifest["timings"]["finished_at"], "warnings": list(manifest["warnings"]),
+        "ffmpeg": dict(manifest["ffmpeg"]), "out_of_date": derived["out_of_date"],
+    }
+
+
+def episode_ledger(stories, story_id, ep) -> dict:
+    """``{"entries": [the story ledger's rows of episode *ep*], "totals":
+    {"est_usd", "paid_usd", "entries"}}`` (``CostLedger.totals(ep)``); empty
+    while the story has no ledger. A symlink in its place is not followed."""
+    try:
+        path = os.path.join(stories.story_dir(story_id), COST_LEDGER)
+    except KeyError:
+        raise not_found() from None
+    if os.path.islink(path) or not os.path.isfile(path):
+        return {"entries": [], "totals": {"est_usd": 0.0, "paid_usd": 0.0, "entries": 0}}
+    ledger = CostLedger(path)
+    try:
+        return {"entries": [row for row in ledger.entries() if row.get("ep") == ep], "totals": ledger.totals(ep)}
+    except (KeyError, TypeError, ValueError) as exc:
+        raise StoryUnreadable(story_id, f"{story_store.STORIES_DIRNAME}/{story_id}/{COST_LEDGER}",
+                              [f"{type(exc).__name__}: {exc}"]) from None
+
+
+def episode_outputs(stories, story, ep) -> dict:
+    """The phase-4 part of the episode page (:func:`episode_view` is the
+    rest; the web layer adds the jobs and, stage 12, the media URLs)::
+
+        {"assets": {"doc": assets.json | null, "consistency": prompt_only|references,
+                    "fingerprint": none|current|stale, "approved_at": ts | null,
+                    "shots": [{shot_id, scene_id, state: none|current|stale|locked_stale|failed,
+                               image_name: "shot_NN.<ext>" | null (GET .../shots/{image_name}),
+                               route: free|local|paid|null, consistency, provider, model, seed, note,
+                               est_usd, generated_at, locked, approved, pending, target: "shot:<ep>:<shid>"}],
+                    "lines": [{line_id, scene_id, speaker, voiced, voice, words_source:
+                               provider|alignment|even_split|null, aligned_by, approximate,
+                               target: "line:<ep>:<lid>"}]} | null,
+         "render": {"state": completed|failed|cancelled|incomplete, "profile", "params": {subtitles, encoder},
+                    "duration_s", "loudness": {i, tp, lra}, "fps", "width", "height",
+                    "output": {"file": "episode_final.mp4", "sha256"} | null,
+                    "stages": {total, ran, cached, shots, shots_cached},
+                    "seconds", "started_at", "finished_at", "warnings": [...], "ffmpeg": {version, machine},
+                    "out_of_date": bool | null} | null,
+         "metadata": {"pack": metadata_pack.json, "current": bool} | null,
+         "ledger": {"entries": [...], "totals": {est_usd, paid_usd, entries}}}
+
+    ``assets`` is null before the episode has a script or a storyboard;
+    ``render`` before a manifest (``out_of_date`` null while the render has
+    no output; else whether rendering again with the same params would make
+    another file: ``render.current_render``, so an ``encoder: auto`` render
+    is always out of date); ``metadata`` before a pack (``current``:
+    ``metadata.is_current`` against the render's recorded output). Calls
+    nothing; what it hashes is remembered while nothing it reads moves
+    (``_DERIVED_CACHE``). ``StoryUnreadable`` for a document that does not
+    validate, or an episode whose context cannot be read."""
+    story_id = story["story_id"]
+    script = read_episode(stories, story_id, ep, SCRIPT_DOC)
+    board = read_episode(stories, story_id, ep, STORYBOARD_DOC)
+    doc = read_episode(stories, story_id, ep, ASSETS_DOC)
+    manifest = read_episode(stories, story_id, ep, MANIFEST_DOC)
+    pack = read_episode(stories, story_id, ep, METADATA_PACK_DOC)
+    view = {"assets": None, "render": None, "metadata": None, "ledger": episode_ledger(stories, story_id, ep)}
+    if not any(current is not None for current in (script, board, doc, manifest)):
+        if pack is not None:
+            view["metadata"] = {"pack": pack, "current": False}
+        return view
+    try:
+        ec = _context(stories, story_id, ep)
+    except WorkflowError as exc:
+        raise StoryUnreadable(story_id, f"{story_store.STORIES_DIRNAME}/{story_id}/{story_store.EPISODES_DIRNAME}/"
+                                        f"ep{ep:02d}", [exc.detail]) from None
+    derived = _derived(stories, ec, script, board, doc, manifest)
+    if script is not None or board is not None:
+        view["assets"] = _assets_view(ec, script, board, doc, derived)
+    if manifest is not None:
+        view["render"] = _render_view(manifest, derived)
+    if pack is not None:
+        output = (manifest or {}).get("output")
+        current = bool(script and output and metadata_step.is_current(pack, script, output["sha256"]))
+        view["metadata"] = {"pack": pack, "current": current}
+    return view
+
+
 # ------------------------------------------------------------------ targets
 
 def check_episode_target(stories, story, parsed) -> None:
@@ -1934,7 +2270,16 @@ def check_episode_target(stories, story, parsed) -> None:
     recap (:func:`episode_context`); then ``conflict`` without a script (or,
     for a shot, without a storyboard, or when the shot's scene was rewritten
     since it was planned); ``not_found`` for a scene, a framing scene or a
-    shot the episode does not have."""
+    shot the episode does not have.
+
+    Phase 4: a shot's image (``shot_image``) or a line's voice (``line``) --
+    ``not_found`` for a shot or a line the episode does not have; then
+    ``conflict`` unless the script is approved and the storyboard approved
+    and current (``assets.require_approved``), for a locked shot ("unlock it
+    first") and for a line whose speaker has no pinned voice. A platform's
+    metadata (``metadata``) -- ``conflict`` without a finished render
+    (``metadata.require_render``) or with a pack written for another render
+    or script (the metadata step writes every platform again)."""
     kind, ep = parsed[0], parsed[1]
     episode_context(stories, story, ep, step="regenerate", require_recap=False)
     story_id = story["story_id"]
@@ -1959,6 +2304,49 @@ def check_episode_target(stories, story, parsed) -> None:
         if shot["scene_id"] in storyboard_step.stale_scenes(board, script):
             raise WorkflowError(CONFLICT, (f"Scene {shot['scene_id']} was rewritten since its shots were planned: "
                                            "plan it again first (the storyboard step)."))
+    elif kind in (regenerate_step.SHOT_IMAGE_KIND, regenerate_step.LINE_KIND):
+        _check_asset_target(stories, story_id, ep, parsed, script)
+    elif kind == regenerate_step.METADATA_KIND:
+        ec = _context(stories, story_id, ep)
+        try:
+            script, _manifest, render_sha = metadata_step.require_render(ec)
+        except StepFailed as exc:
+            raise WorkflowError(CONFLICT, str(exc)) from None
+        pack = read_episode(stories, story_id, ep, METADATA_PACK_DOC)
+        if pack is not None and not metadata_step.is_current(pack, script, render_sha):
+            raise WorkflowError(CONFLICT, (f"Episode {ep}'s metadata pack was written for another render or script: "
+                                           "run the metadata step, which writes every platform again."))
+
+
+def _check_asset_target(stories, story_id, ep, parsed, script) -> None:
+    """:func:`check_episode_target` of ``shot:<ep>:<shid>`` (the image) and
+    ``line:<ep>:<lid>`` (the voice), in the runners' order
+    (``assets.regenerate_shot_image`` / ``regenerate_line_voice``)."""
+    kind, what = parsed[0], parsed[2]
+    shot = line = None
+    if kind == regenerate_step.SHOT_IMAGE_KIND:
+        board = read_episode(stories, story_id, ep, STORYBOARD_DOC)
+        if board is None or not board["shots"]:
+            raise _no_storyboard(ep)
+        shot = next((s for s in board["shots"] if s["shot_id"] == what), None)
+        if shot is None:
+            raise WorkflowError(NOT_FOUND, (f"Episode {ep}'s storyboard has no shot {what!r} (it has sh01 to "
+                                            f"sh{len(board['shots']):02d})."))
+    else:
+        line = next((ln for scene in script["scenes"] for ln in scene["lines"] if ln["line_id"] == what), None)
+        if line is None:
+            raise WorkflowError(NOT_FOUND, f"Episode {ep}'s script has no line {what!r}.")
+    ec = _context(stories, story_id, ep)
+    try:
+        assets_step.require_approved(ec)
+    except StepFailed as exc:
+        raise WorkflowError(CONFLICT, str(exc)) from None
+    if shot is not None and shot["assets"].get("locked"):
+        raise WorkflowError(CONFLICT, f"Shot {what} is locked: unlock it first.")
+    if line is not None and voices.voice_label(voice_lines.speaker_voice(ec, line["speaker"])) is None:
+        who = "the narrator" if line["speaker"] == "narrator" else voice_lines.speaker_name(ec, line["speaker"])
+        raise WorkflowError(CONFLICT, f"{voice_lines.no_voice_reason(ec, line['speaker'])}: pick a voice for {who} "
+                                      "first.")
 
 
 # ---------------------------------------------------------------- approvals
@@ -2103,6 +2491,37 @@ def approve_assets(stories, story_id, ep, *, now) -> dict:
                                        "errors": list(exc.errors)}) from None
     except (KeyError, ValueError) as exc:
         raise WorkflowError(CONFLICT, f"The assets cannot be written: {exc}.") from None
+
+
+def assets_approval_state(ec, board, script, doc) -> str:
+    """``none`` (no ``assets.json``, or never approved) | ``current`` (approved
+    with the fingerprint of the files as they are now) | ``stale`` (an image,
+    a voice, a sound or a lock changed since: derived, never cleared,
+    DEC-155). Hashes every image and audio file."""
+    approved = (doc or {}).get("approved")
+    if not approved:
+        return "none"
+    if not board or not script:
+        return "stale"
+    current = assets_step.current_fingerprint(ec, board, script, doc) == approved["fingerprint"]
+    return "current" if current else "stale"
+
+
+def approved_episode_docs(stories, story_id, ep) -> list:
+    """The episode documents whose approval stands now, of
+    :data:`EPISODE_APPROVALS`: the script and the storyboard (their
+    ``approved_at``), the assets (approved with a current fingerprint, not a
+    stale one). What the web layer completes the older jobs of once the fast
+    track approved them in-process (DEC-162)."""
+    script = read_episode(stories, story_id, ep, SCRIPT_DOC)
+    board = read_episode(stories, story_id, ep, STORYBOARD_DOC)
+    doc = read_episode(stories, story_id, ep, ASSETS_DOC)
+    approved = [name for name, current in (("script", script), ("storyboard", board))
+                if current and current["approved_at"]]
+    if (doc or {}).get("approved") and assets_approval_state(_context(stories, story_id, ep), board, script,
+                                                             doc) == "current":
+        approved.append("assets")
+    return approved
 
 
 # -------------------------------------------------------------------- edits
@@ -2492,6 +2911,57 @@ def patch_storyboard(stories, story_id, ep, fields, *, now) -> dict:
     return written
 
 
+def patch_assets(stories, story_id, ep, fields, *, now) -> dict:
+    """Edit episode *ep*'s assets (``fields``: ``ASSETS_PATCH_FIELDS``);
+    returns the storyboard as written.
+
+    ``shots`` ``[{shot_id, locked?}]`` -- a locked shot keeps the image it
+    has: the assets step skips it, a regenerate of it is refused ("unlock it
+    first") and the assets approval takes it as it is (plan phase 4,
+    "Documents"); only a shot with an image on disk may be locked. The lock
+    lives in the shot's ``assets`` (DEC-155): the storyboard's revision and
+    approval never move, and the fingerprint the assets were approved with
+    covers it, so a new lock makes that approval stale (derived, never
+    cleared). Refused whole (``invalid`` with every error; nothing written).
+    Nothing sent, or nothing changed: nothing written. ``conflict`` without a
+    storyboard."""
+    story = load(stories, story_id)
+    ep = episode_bounds(stories, story, ep)
+    _unknown_fields(fields, ASSETS_PATCH_FIELDS, "assets")
+    board = read_episode(stories, story_id, ep, STORYBOARD_DOC)
+    if board is None or not board["shots"]:
+        raise _no_storyboard(ep)
+    if not fields:
+        return board
+    script = read_episode(stories, story_id, ep, SCRIPT_DOC)
+    if script is None or not script["scenes"]:
+        raise _no_script(ep)
+    ec = _context(stories, story_id, ep)
+    trial = copy.deepcopy(board)
+    by_id = {shot["shot_id"]: shot for shot in trial["shots"]}
+    errors = []
+    for path, item in _items(errors, fields, "shots", "shot_id", ASSETS_SHOT_PATCH_FIELDS):
+        shot = by_id.get(item.get("shot_id"))
+        if shot is None:
+            errors.append(f"{path}.shot_id: {item.get('shot_id')!r} is not a shot of episode {ep}")
+            continue
+        if "locked" not in item:
+            continue
+        locked = item["locked"]
+        if type(locked) is not bool:
+            errors.append(f"{path}.locked: expected true or false")
+        elif locked and not shot["assets"].get("locked") and assets_step.shot_image_path(ec, shot) is None:
+            errors.append(f"{path}.locked: shot {shot['shot_id']} has no image yet: make it first (the assets "
+                          "step), then lock it")
+        elif locked != bool(shot["assets"].get("locked")):
+            shot["assets"]["locked"] = locked
+    if errors:
+        raise _invalid_values("The assets would not be valid with these values.", errors)
+    if trial == board:
+        return board
+    return _write(episode_common.write_storyboard, "storyboard", ec, trial, script, now=now)
+
+
 def build_fast_storyboard(stories, story, ep, *, now, on_log) -> dict:
     """The fast storyboard of episode *ep* (``storyboard.build_fast``: no
     call, DEC-109), written with the script re-timed; returns it. The
@@ -2577,3 +3047,83 @@ def measure_estimate(ec, *, env) -> dict:
     except StepFailed as exc:
         raise WorkflowError(CONFLICT, str(exc)) from None
     return script_step.measure_estimate(ec, script or {"scenes": []}, env=env)
+
+
+def _step_refusal(call, *args, **kwargs):
+    """*call*, its ``StepFailed`` a ``conflict`` with the step's sentence."""
+    try:
+        return call(*args, **kwargs)
+    except StepFailed as exc:
+        raise WorkflowError(CONFLICT, str(exc)) from None
+
+
+def assets_estimate(ec, *, env, align_words=False, probe_local=False) -> dict:
+    """What the assets step would do and spend now (``GET
+    /estimate/assets``): ``assets.asset_units``' shape -- ``images``,
+    ``voices``, ``alignment``, ``paid_links``, ``caps``, ``est_usd``,
+    ``over_cap``, ``ready`` -- and ``paid``, the fast track's verdict on it
+    (``fast_track.paid_verdict``: free, paid within the caps, stops before
+    paid, blocked), whose sentence is ``message``. ``conflict`` with the
+    step's own sentence while the script and a current storyboard are not
+    approved (it makes nothing then). Calls nothing but, with *probe_local*,
+    a local editor's status probe."""
+    script, board = _step_refusal(assets_step.require_approved, ec)
+    units = _step_refusal(assets_step.asset_units, ec, script, board, env=env, align_words=align_words,
+                          probe_local=probe_local)
+    verdict = fast_track_step.paid_verdict(units, ep=ec.ep)
+    return dict(units, step="assets", ep=ec.ep, paid=verdict, message=verdict["message"])
+
+
+def render_estimate(ec, params) -> dict:
+    """What the render would do now (``GET /estimate/render``)::
+
+        {"step": "render", "ep", "est_usd": 0.0, "units": {"llm_calls": 0, "shots"},
+         "route_class": "local", "params": {"subtitles", "encoder"}, "needed": bool,
+         "seconds", "minutes", "basis", "ready": true, "message"}
+
+    *params* as the step reads them (``invalid`` otherwise). ``needed`` is
+    false while the last render is the one it would make
+    (``render.current_render``: rendering again would only repeat it); the
+    time is the fast track's authored estimate (``fast_track.render_seconds``,
+    A-069). ``conflict`` with the step's own sentence while the episode
+    cannot be rendered. Calls nothing, starts no process."""
+    wanted = render_step.read_params(phase4_request("render", params))
+    _script, board, _doc = _step_refusal(render_step.require_renderable, ec)
+    current = render_step.current_render(ec, wanted)
+    shots = len(board["shots"])
+    seconds = 0.0 if current else fast_track_step.render_seconds(shots)
+    if current:
+        message = f"Episode {ec.ep}'s last render is the one this would make: rendering again repeats it."
+    else:
+        message = (f"{shots} shot{'s' if shots != 1 else ''} rendered on this server, about {seconds / 60:.1f} min "
+                   "(the shots unchanged since the last render come from its cache); nothing is called, $0.00.")
+    return {
+        "step": "render", "ep": ec.ep, "est_usd": 0.0, "units": {"llm_calls": 0, "shots": shots},
+        "route_class": "local", "params": wanted, "needed": not current, "seconds": seconds,
+        "minutes": round(seconds / 60, 1),
+        "basis": (f"estimate: {fast_track_step.RENDER_SECONDS_PER_SHOT:g} s a shot + "
+                  f"{fast_track_step.RENDER_TAIL_SECONDS:g} s (stage-0 bench; A-069 records the measured times)"),
+        "ready": True, "message": message,
+    }
+
+
+def metadata_units(ec) -> dict:
+    """``{"platforms": [the platforms the metadata step would ask M1 for],
+    "llm_calls"}``: every platform, unless a pack written for this render
+    and this script revision has some (the step fills what is missing).
+    ``conflict`` with the step's own sentence without a finished render."""
+    script, _manifest, render_sha = _step_refusal(metadata_step.require_render, ec)
+    pack = read_episode(ec.store, ec.story_id, ec.ep, METADATA_PACK_DOC)
+    written = pack["platforms"] if metadata_step.is_current(pack, script, render_sha) else {}
+    todo = [platform for platform in metadata_step.PLATFORMS if platform not in written]
+    return {"platforms": todo, "llm_calls": len(todo)}
+
+
+def fast_track_estimate(ec, *, env, storyboard=None) -> dict:
+    """``fast_track.estimate`` of episode *ec.ep* (``GET
+    /estimate/fast-track``), with ``storyboard`` (``t1`` | ``fast``) checked
+    as the step reads it (``invalid``); a document that does not validate is
+    a ``conflict``."""
+    params = {} if storyboard is None else {fast_track_step.STORYBOARD_PARAM: storyboard}
+    mode = fast_track_step.read_params(phase4_request("fast-track", params))[fast_track_step.STORYBOARD_PARAM]
+    return _step_refusal(fast_track_step.estimate, ec, env=env, storyboard=mode)

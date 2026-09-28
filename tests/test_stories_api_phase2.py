@@ -427,7 +427,7 @@ def test_the_phase_2_grammar_moved_out_of_the_later_phases():
                    "place:place_beach:text", "place:place_beach:image:night", "prop:prop_phone:text",
                    "prop:prop_phone:image", "season:12"):
         assert workflow.check_regenerate_target(target) is None, target
-    for target in ("character:char_kiwilo:image:extra:1", "shot:1:sh03"):
+    for target in ("character:char_kiwilo:image:extra:1", "shot:1:sh03:video"):
         with pytest.raises(workflow.WorkflowError) as caught:
             workflow.check_regenerate_target(target)
         assert caught.value.code == "later_phase"
@@ -1720,7 +1720,7 @@ def test_the_places_season_and_proposal_estimates(api):
     assert portrait["units"] == {"llm_calls": 0, "images": 1, "edit_images": 2, "tts_chars": 0}
     assert api.client.get(regen, params={"target": "character:char_nobody:text"}).status_code == 404
     assert api.client.get(regen, params={"target": "character:char_kiwilo:image:extra:1"}).status_code == 400
-    assert api.client.get(_url(story_id, "/estimate/assets")).status_code == 400
+    assert api.client.get(_url(story_id, "/estimate/memory")).status_code == 400
     assert api.client.get(_url(story_id, "/estimate/script"), params={"ep": 1}).status_code == 409  # phase 3: not ready
 
 

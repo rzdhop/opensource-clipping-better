@@ -775,3 +775,46 @@ class StoryApproveRequest(BaseModel):
     (``script:<ep>`` only) approves a script whose consistency check found
     issues; the approval records it."""
     approve_anyway: Optional[bool] = None
+
+
+# Phase 4 (spec 3 steps 10-12 and the fast track, 9.2). The params of the new
+# steps, carried by ``StoryStepRequest.params``: the fields are the
+# workflow's closed lists (ASSETS_PARAMS & co., compared in
+# tests/test_stories_api_phase4.py; the metadata step takes none); values are
+# checked by the step's own rules before a job exists (400 naming the
+# choices: clipping.aistory.workflow.phase4_request), and the job carries
+# only what was sent (model_fields_set), so the runner fills its defaults.
+
+class AssetsStepParams(BaseModel):
+    """``POST /steps/assets``'s params: ``align_words`` opts in to forced
+    alignment of the lines whose voice timed no words (DEC-165)."""
+    align_words: Optional[bool] = None
+
+
+class RenderStepParams(BaseModel):
+    """``POST /steps/render``'s params: ``subtitles`` (``style`` -- the style
+    lock's own --, ``word_pop``, ``two_line``, ``none``; DEC-164) and
+    ``encoder`` (``libx264``, or ``auto``: a hardware encoder for the final
+    pass, opt-in)."""
+    subtitles: Optional[str] = None
+    encoder: Optional[str] = None
+
+
+class FastTrackStepParams(BaseModel):
+    """``POST /steps/fast-track``'s params: ``storyboard`` -- ``t1`` (one T1
+    call per scene) or ``fast`` (the deterministic plan, no call)."""
+    storyboard: Optional[str] = None
+
+
+class AssetsShotPatch(BaseModel):
+    """One shot of ``PATCH /episodes/{ep}/assets``'s ``shots``: ``locked``
+    keeps the image it has (only a shot with an image may be locked)."""
+    shot_id: str
+    locked: Optional[bool] = None
+
+
+class AssetsPatchRequest(BaseModel):
+    """PATCH /api/stories/{id}/episodes/{ep}/assets. A lock never moves the
+    storyboard's revision or approval; it is part of the fingerprint the
+    assets are approved with, so a new one makes that approval stale."""
+    shots: Optional[list[AssetsShotPatch]] = None

@@ -368,7 +368,7 @@ def test_the_script_approval_rules_through_the_api(api):
     assert api.jobs.get_job(job)["status"] == "completed"
     for doc, body, status in (("storyboard:1", {"approve_anyway": True}, 400), ("bible", {"approve_anyway": True}, 400),
                               ("script:x", None, 400), ("script:9", None, 400), ("script:01", None, 400),
-                              ("storyboard:1", None, 409), ("assets:1", None, 400)):
+                              ("storyboard:1", None, 409), ("assets:1", None, 409)):
         response = _approve(api, story_id, doc, body)
         assert response.status_code == status, (doc, response.text)
     assert _story_file(api, story_id) == before
@@ -466,8 +466,8 @@ def test_each_episode_step_and_target_is_a_job_of_its_document(api):
     assert doc("script", {}, ep=1) == "script:1" and doc("storyboard", {"fast": False}, ep=3) == "storyboard:3"
     assert doc("script", {}) is None and doc("cast", {}) == "cast"
     for target, expected in (("scene:1:s03", "script:1"), ("hook:2", "script:2"), ("cliffhanger:1", "script:1"),
-                             ("teaser:1", "script:1"), ("shot:1:sh02:plan", "storyboard:1"), ("shot:1:sh02", None),
-                             ("line:1:l04", None), ("season:2", "season")):
+                             ("teaser:1", "script:1"), ("shot:1:sh02:plan", "storyboard:1"),
+                             ("shot:1:sh02", "assets:1"), ("line:1:l04", "assets:1"), ("season:2", "season")):
         assert doc("regenerate", {"target": target}) == expected, target
 
 
@@ -493,7 +493,7 @@ def test_regenerating_a_scene_or_a_shot_reaches_its_runner_as_a_job_of_its_docum
             ({"target": "hook:1", "voice": {"provider": "edge", "voice_id": "x"}}, 400, "voice"),
             ({"target": "scene:9:s03"}, 400, "there is no episode 9"),
             ({"target": "teaser:2"}, 409, "Episode 2 has no script yet"),
-            ({"target": "shot:1:sh01"}, 400, "later phase"),
+            ({"target": "shot:1:sh01:video"}, 400, "later phase"),
     ):
         response = api.client.post(_url(story_id, "/regenerate"), json=body)
         assert response.status_code == status, (body, response.text)
@@ -576,6 +576,8 @@ def test_the_episode_page_and_the_story_pages_summary(api):
         "template": {"id": "serial_60s_v1", "window_s": [55, 80], "target_s": 60, "tighten_above_s": 75},
         "state": {"script": "none", "storyboard": "none", "report": "none", "stale_scenes": [],
                   "prompts_outdated": False, "missing": ["beat_sheet"]},
+        "assets": None, "render": None, "metadata": None,
+        "ledger": {"entries": [], "totals": {"est_usd": 0.0, "paid_usd": 0.0, "entries": 0}},
         "jobs": [],
     }
     for ep, status in (("9", 400), ("0", 400), ("x", 400), ("01", 400)):

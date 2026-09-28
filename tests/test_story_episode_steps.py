@@ -1340,8 +1340,8 @@ def test_an_unknown_scene_shot_or_episode_is_refused_by_name(store, target, name
 @pytest.mark.parametrize("target,parsed", [
     ("scene:1:s03", ("scene", 1, "s03")), ("hook:2", ("hook", 2)), ("cliffhanger:12", ("cliffhanger", 12)),
     ("teaser:1", ("teaser", 1)), ("shot:1:sh05:plan", ("shot", 1, "sh05")),
-    ("scene:0:s03", None), ("scene:1:s3", None), ("shot:1:sh05", None), ("shot:1:sh05:video", None),
-    ("hook:x", None), ("line:1:l04", None), (None, None),
+    ("scene:0:s03", None), ("scene:1:s3", None), ("shot:1:sh05", ("shot_image", 1, "sh05")),
+    ("shot:1:sh05:video", None), ("hook:x", None), ("line:1:l04", ("line", 1, "l04")), (None, None),
 ])
 def test_the_episode_target_grammar(target, parsed):
     m = _new()

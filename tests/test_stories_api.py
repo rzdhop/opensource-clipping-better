@@ -657,8 +657,7 @@ def test_a_bad_or_unknown_id_is_a_404_everywhere(api, bad_id, method, suffix, bo
 
 # ============================================================ grammar edges
 
-LATER_STEPS = ["assets", "render", "metadata",
-               "memory", "feedback", "propose-next", "rerender", "fast-track", "import"]
+LATER_STEPS = ["memory", "feedback", "propose-next", "rerender", "import"]
 # Phase 3 (stage 8) runs these; on a story that is not ready they wait for it.
 EPISODE_STEPS = ["script", "storyboard"]
 NOT_READY = "The story is not ready yet: approve the cast, the places and the season first."
@@ -682,12 +681,13 @@ def test_an_episode_step_waits_for_a_ready_story(api, step):
     assert api.jobs.list_jobs() == []
 
 
+# Phase 4 approves assets:<ep>: no approval of the 9.2 grammar is a later phase's any more.
 @pytest.mark.parametrize("doc", ["assets:1"])
-def test_a_later_phase_approval_is_a_400(api, doc):
+def test_an_approval_of_phase_4_is_no_longer_a_later_phase(api, doc):
     story_id = _with_bible(api)
     response = api.client.post(f"/api/stories/{story_id}/approve/{doc}")
-    assert response.status_code == 400
-    assert "later phase" in response.json()["detail"]
+    assert response.status_code == 409
+    assert "later phase" not in response.json()["detail"]
 
 
 @pytest.mark.parametrize("doc,needle", [("script:1", "Episode 1 has no script yet"),
@@ -700,7 +700,7 @@ def test_an_episode_approval_needs_its_document(api, doc, needle):
 
 
 @pytest.mark.parametrize("target", [
-    "shot:1:sh03", "shot:1:sh03:video", "line:1:l04", "metadata:1:tiktok",
+    "shot:1:sh03:video",
 ])
 def test_a_later_phase_regenerate_target_is_a_400(api, target):
     story_id = _with_bible(api)
@@ -1047,7 +1047,7 @@ def test_the_estimate_of_each_phase_one_step(api):
 
     assert api.client.get(f"{url}/regenerate", params={"target": "concepts"}).json()["units"] == {"llm_calls": 10}
     assert api.client.get(f"{url}/regenerate", params={"target": "bible:tone"}).json()["units"] == {"llm_calls": 1}
-    assert api.client.get(f"{url}/regenerate", params={"target": "shot:1:sh01"}).status_code == 400
+    assert api.client.get(f"{url}/regenerate", params={"target": "shot:1:sh01:video"}).status_code == 400
 
     style = api.client.get(f"{url}/style").json()
     assert (style["units"], style["route_class"], style["est_usd"], style["ready"], style["link"]) == (
@@ -1055,7 +1055,7 @@ def test_the_estimate_of_each_phase_one_step(api):
 
     # Stage 8: the preview has its own estimate (tests/test_style_preview.py).
     assert api.client.get(f"{url}/style_preview").json()["units"] == {"images": 3}
-    assert api.client.get(f"{url}/assets").status_code == 400
+    assert api.client.get(f"{url}/memory").status_code == 400
     assert api.client.get(f"{url}/script", params={"ep": 1}).status_code == 409  # phase 3: waits for a ready story
     assert api.client.get(f"{url}/nope").status_code == 404
 

@@ -220,7 +220,9 @@ def _execute_story_step(job_id: str, job: dict, token: CancelToken) -> None:
     as soon as this returns, but not for the user -- or, for a step with
     nothing to approve (``steps.ends_completed``: render, metadata,
     fast-track, a metadata regenerate; DEC-161), COMPLETED; or failed, or
-    cancelled.
+    cancelled. Once a fast track has ended, the older jobs awaiting a
+    document it approved in-process are completed
+    (:func:`_complete_approved_jobs`).
     What the step prints reaches the job's feed through the stdout tee, as the
     clip pipeline's output does, and is mirrored into the story's activity.log
     once the step is over.
@@ -287,7 +289,30 @@ def _execute_story_step(job_id: str, job: dict, token: CancelToken) -> None:
         print(f"[Worker] Job {job_id} failed:\n{tb}", file=sys.stderr)
 
     finally:
+        if step in APPROVING_STEPS:
+            _complete_approved_jobs(story_id, job.get("ep"))
         _mirror_to_story_log(job_id, story_id, step, first_seq)
+
+
+# The story steps that approve episode documents in-process: the fast track
+# auto-approves the script, the storyboard and the assets it makes (DEC-162).
+APPROVING_STEPS = ("fast-track",)
+
+
+def _complete_approved_jobs(story_id, ep) -> None:
+    """Once a step of :data:`APPROVING_STEPS` has ended -- completed, or
+    stopped after approving some of them -- the older step jobs of its
+    episode still awaiting a document that is approved now are completed, as
+    approving it completes them (``routes.stories.complete_approved_jobs``).
+    Best effort, like the activity mirror: it never fails or changes the step
+    that ended."""
+    try:
+        from .routes import stories as story_routes  # the story routes import this module
+
+        story_routes.complete_approved_jobs(story_id, ep)
+    except Exception as exc:  # noqa: BLE001 - the step itself is done
+        print(f"[Worker] Story {story_id}: the jobs awaiting episode {ep}'s approved documents were not "
+              f"completed ({type(exc).__name__}: {exc}).", file=sys.stderr)
 
 
 def _mirror_to_story_log(job_id: str, story_id, step, after_seq: int) -> None:

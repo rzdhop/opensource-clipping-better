@@ -128,14 +128,13 @@ def _shots_of(board, sid):
 
 def test_the_episode_steps_approvals_and_targets_left_the_later_phases(wf):
     assert wf.PHASE3_STEPS == ("script", "storyboard")
-    assert wf.LATER_STEPS == ("assets", "render", "metadata", "memory", "feedback", "propose-next", "rerender",
-                              "fast-track", "import")
-    assert wf.LATER_APPROVALS == ("assets",)
-    # shot:<ep>:<shid> (image, phase 4) and shot:<ep>:<shid>:video (phase 6) are still to come.
-    assert wf.LATER_TARGETS == ("shot", "line", "metadata")
+    assert wf.LATER_STEPS == ("memory", "feedback", "propose-next", "rerender", "import")
+    assert wf.LATER_APPROVALS == ()
+    # shot:<ep>:<shid>:video (phase 6) is still to come; phase 4 reads the shot's image first.
+    assert wf.LATER_TARGETS == ("shot",)
     assert wf.SCRIPT_PARAMS == ("measure_voices",) and wf.STORYBOARD_PARAMS == ("fast",)
     assert not wf.is_later_approval("script:1") and not wf.is_later_approval("storyboard:1")
-    assert wf.is_later_approval("assets:1")
+    assert not wf.is_later_approval("assets:1")
     assert "episode_template_id" in wf.PATCH_FIELDS
 
 
@@ -148,7 +147,7 @@ def test_the_episode_targets_joined_the_one_regenerate_grammar(wf):
         assert wf.check_regenerate_target(target) is None, target
         assert regenerate.parse_target(target) == parsed, target
     assert set(regenerate.EPISODE_TARGETS) <= set(regenerate.ENTITY_TARGETS)
-    for target in ("shot:1:sh03", "shot:1:sh03:video", "line:1:l04", "metadata:1:tiktok"):
+    for target in ("shot:1:sh03:video",):
         assert "later phase" in _refused(wf, "later_phase", wf.check_regenerate_target, target)
     for target in ("scene:1:s3", "scene:0:s03", "hook:x", "teaser:1:x", "cliffhanger:"):
         detail = _refused(wf, "invalid", wf.check_regenerate_target, target)

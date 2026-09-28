@@ -14,13 +14,11 @@
   before the call; a locked shot is refused -- and kind ``line``
   (``line:<ep>:<line_id>``) -- that line spoken again by its pinned voice
   alone, a new take so the generation cache misses on purpose. Neither
-  clears an approval. (The grammar that reads these two targets is
-  ``regenerate.parse_target``'s, extended at stage 11.)
+  clears an approval. (``regenerate.parse_target`` reads these two targets.)
 - phase 4 (``metadata.regenerate_platform``): kind ``metadata``
   (``metadata:<ep>:<platform>``, the tuple ``("metadata", ep, platform)``)
   -- that platform's M1 again with the note; the other platforms, the cover
-  and every approval stay (its job ends completed, DEC-161; the grammar is
-  stage 11's too).
+  and every approval stay (its job ends completed, DEC-161).
 
 Each applies only its own keys and reuses its scene's line block
 (``schemas.line_id_for``). A script rewrite goes through
@@ -50,17 +48,19 @@ from .llm_call import StepFailed
 
 # The grammar is ``regenerate``'s, shared with the web layer and the CLI
 # (``regenerate.parse_target`` reads these targets with every other one).
-from .regenerate import FRAMING_TARGETS, parse_episode_target  # noqa: F401 -- re-exported
-
 # Phase 4's episode kinds (the plan's tuple kinds: ``shot:<ep>:<shot_id>`` is
 # ``("shot_image", ep, shot_id)``, ``line:<ep>:<line_id>`` is ``("line", ep,
-# line_id)``); ``assets`` runs them.
-SHOT_IMAGE_KIND = "shot_image"
-LINE_KIND = "line"
+# line_id)``: ``assets`` runs them; ``metadata:<ep>:<platform>`` is
+# ``("metadata", ep, platform)``: ``metadata`` runs it).
+from .regenerate import (  # noqa: F401 -- re-exported
+    FRAMING_TARGETS,
+    LINE_KIND,
+    METADATA_KIND,
+    SHOT_IMAGE_KIND,
+    parse_episode_target,
+)
+
 ASSET_KINDS = (SHOT_IMAGE_KIND, LINE_KIND)
-# ``metadata:<ep>:<platform>`` is ``("metadata", ep, platform)``; ``metadata``
-# runs it.
-METADATA_KIND = "metadata"
 
 
 def _noted(note) -> str:
