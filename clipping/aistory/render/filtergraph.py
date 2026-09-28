@@ -1,7 +1,7 @@
 """Pure ffmpeg argv builders for the AI-Story renderer (spec 6.5; plan
 phase 4 stage 4, "Renderer" -> filtergraph.py's Shot / Tier >= 2 clip / End
-card bullets; DEC-156). The audio mix, the final pass and the cover are
-stage 6/9's own additions to this module, not here.
+card bullets; stage 6, its Audio mix / Final pass bullets; DEC-156,
+DEC-157, DEC-158). The cover is stage 9's own addition to this module.
 
 Every builder returns ``list[str]``: a full ``ffmpeg`` argv, always
 starting ``["ffmpeg", "-hide_banner", "-nostdin", "-y"]`` and never
@@ -224,4 +224,479 @@ def end_card_argv(ass_rel, fontsdir_rel, duration_s, profile, out_rel) -> list:
     argv += ["-vf", vf]
     argv += profile.video_encode_args()
     argv += ["-r", str(profiles.FPS), "-frames:v", str(frames), "-an", out_rel]
+    return argv
+
+
+# ================================================================ stage 6
+#
+# The sequence (final pass) and the audio mix (spec 6.5 "Sequence" and
+# "Audio graph"; plan phase 4 stage 6; DEC-157, DEC-158).
+#
+# **One clock: integer frames.** Every shot clip is rendered to exactly its
+# timeline ``frames`` (``shot_argv``'s ``-frames:v``) and the end card to
+# ``round(duration_s * FPS)``, so the final pass never works in float
+# seconds. Shots joined by ``cut`` are one *segment* (``concat``); segments
+# are joined by ``xfade``. With ``F`` the frame count of the stream
+# accumulated so far and ``T`` the transition's own frame count, the join's
+# offset is ``O = F - T`` and the joined stream has ``O + frames(next
+# segment)`` frames (ffmpeg's xfade: frame ``O`` of the accumulated stream is
+# the blend's first frame, pure outgoing picture; the outgoing stream ends
+# exactly at ``O + T``; the incoming segment's frame ``T`` onwards follows
+# unchanged). Every transition lasts a whole number of frames (the template's
+# 0.4 s / 0.3 s are 12 / 9 frames; anything else is refused), so a shot's
+# first output frame is ``round(sum(raw durations before it) * FPS) -
+# sum(earlier transition frames)`` == ``round(start_s * FPS)``: within half
+# a frame of the timeline's own ``start_s``, however many joins precede it,
+# and the whole movie is exactly ``timeline["total_frames"]`` long (asserted,
+# :func:`sequence_plan`).
+#
+# **The audio is one absolute timeline** (DEC-158): every stem starts from a
+# silent base of exactly ``total_s`` and every amix runs ``duration=first``
+# with that base (or the dialogue stem built on it) first, so the mix is
+# ``total_s`` long whatever the inputs. The final pass therefore needs no
+# ``-shortest``: video == ``total_frames / FPS`` and audio == ``total_s``,
+# and ``total_frames == round(total_s * FPS)`` (``build_timeline``), so the
+# two differ by less than half a frame.
+#
+# ffmpeg behaviours this graph depends on (measured on 6.1.1, stage-6 scratch
+# proof; the golden render of stage 7 pins them on every ffmpeg it knows):
+#
+# - ``concat`` outputs a 1/1000000 time base whatever its inputs', and
+#   ``xfade`` refuses two inputs whose time bases differ, so every
+#   multi-shot segment is followed by ``settb=1/FPS``. That also turns the
+#   concat's microsecond timestamps back into exact frame numbers, so an
+#   offset of ``k/FPS`` s always lands on frame ``k`` (xfade rescales the
+#   offset to the link's time base, rounding to the nearest).
+# - ``-stream_loop -1`` on an mp3 bed produces overlapping timestamps at
+#   each loop seam; ``atrim=duration=`` on those timestamps comes out ~50 ms
+#   short, so the bed is re-stamped by sample count (``asetpts=N/SR/TB``)
+#   before it is trimmed.
+# - ``sidechaincompress`` ends when EITHER input ends, so the sidechain (the
+#   dialogue stem) must be as long as the bed: it is, being built on the
+#   ``total_s`` base.
+# - ``xfade=fadeblack`` is not black at the window's midpoint: it takes the
+#   outgoing picture to black over the first ~20 % of the window, holds
+#   black briefly, then fades the incoming picture in.
+
+
+class GraphError(ValueError):
+    """Raised by the stage-6 builders when a timeline (or the inputs handed
+    in with it) cannot be turned into a frame-exact sequence or an exact-
+    length mix: a transition that is not a whole number of frames, a
+    sequence whose frame count disagrees with ``timeline["total_frames"]``,
+    a line inside a transition window, a missing or unexpected input, an
+    ``ending`` that disagrees with the timeline's end card."""
+
+
+# spec 6.3's transition closed list (schemas.TRANSITIONS) -> ffmpeg's xfade
+# transition names. ``cut`` is not an xfade: runs of cuts are concatenated.
+XFADE_TRANSITIONS = {
+    "dissolve": "fade",
+    "fadeblack": "fadeblack",
+    "fadewhite": "fadewhite",
+    "wipeleft": "wipeleft",
+    "wiperight": "wiperight",
+    "slideup": "slideup",
+}
+
+END_CARD_ID = "end_card"
+STEM_KINDS = ("dialogue", "bgm", "sfx")
+
+_FRAME_EPS = 1e-6
+
+
+def _transition_frames(transition, *, after, fps) -> int:
+    """The transition's own length in whole frames: 0 for ``cut`` (which
+    must last 0 s), ``duration_s * fps`` for every xfade transition, which
+    must be a whole number of frames and at least one (an offset/duration
+    that is not frame-exact is what drifts a stream by a frame)."""
+    kind = transition["type"]
+    duration_s = float(transition["duration_s"])
+    if kind == "cut":
+        if abs(duration_s) > _FRAME_EPS:
+            raise GraphError(f"the cut after {after!r} lasts {duration_s}s; a cut must last 0s")
+        return 0
+    if kind not in XFADE_TRANSITIONS:
+        raise GraphError(f"unknown transition {kind!r} after {after!r}")
+    exact = duration_s * fps
+    frames = round(exact)
+    if frames < 1 or abs(exact - frames) > _FRAME_EPS:
+        raise GraphError(
+            f"the {kind} after {after!r} lasts {duration_s}s = {exact:g} frames at {fps} fps; "
+            f"a transition must last a whole number of frames (at least 1)"
+        )
+    return frames
+
+
+def _end_card_frames(end_card) -> int:
+    """The end card clip's own frame count -- the same rule as
+    :func:`end_card_argv`'s ``-frames:v``."""
+    return max(1, round(end_card["duration_s"] * profiles.FPS))
+
+
+def sequence_plan(timeline) -> dict:
+    """The final pass's frame arithmetic, pure (module section above):
+    ``{"fps", "segments", "joins", "start_frames", "total_frames"}``.
+
+    - ``segments``: ``[{"items": [shot_id, ...], "frames": n}, ...]`` --
+      each a maximal run of shots joined by ``cut`` (the end card, id
+      :data:`END_CARD_ID`, is a segment of its own under ``cut_to_black``).
+    - ``joins``: one per xfade, in order -- ``{"after", "into",
+      "outgoing_scene_id", "type", "xfade", "offset_frames",
+      "duration_frames", "offset", "duration"}`` (``offset``/``duration``
+      are the exact argv strings, seconds).
+    - ``start_frames``: ``{shot_id or END_CARD_ID: first output frame}``.
+    - ``total_frames``: the sequence's own frame count, asserted equal to
+      ``timeline["total_frames"]``.
+
+    Raises :class:`GraphError` when the timeline's transitions are not
+    frame-exact, a transition would be longer than a shot it joins, the
+    last shot's ``transition_after`` disagrees with the ending, or the
+    frame total disagrees with the timeline's.
+    """
+    fps = profiles.FPS
+    if timeline["fps"] != fps:
+        raise GraphError(f"timeline fps {timeline['fps']} != the renderer's {fps}")
+    shots = timeline["shots"]
+    if not shots:
+        raise GraphError("the timeline has no shots")
+    end_card = timeline["end_card"]
+
+    items = [(shot["shot_id"], shot["frames"], shot["scene_id"]) for shot in shots]
+    links = [shot["transition_after"] for shot in shots[:-1]]
+    last_transition = shots[-1]["transition_after"]
+    if end_card is not None:
+        if last_transition is None or last_transition["type"] != "fadeblack":
+            raise GraphError(f"cut_to_black: the last shot must fade to black into the end card, "
+                             f"got {last_transition!r}")
+        items.append((END_CARD_ID, _end_card_frames(end_card), None))
+        links.append(last_transition)
+    elif last_transition is not None:
+        raise GraphError(f"hard_stop: the last shot ends the file, but it carries {last_transition!r}")
+
+    for i, link in enumerate(links):
+        if link is None:
+            raise GraphError(f"shot {items[i][0]!r} has no transition_after but is not the last shot")
+
+    segments = [{"items": [items[0][0]], "frames": items[0][1]}]
+    joins = []
+    start_frames = {items[0][0]: 0}
+    accumulated = items[0][1]
+    for i, link in enumerate(links):
+        after_id, after_frames, after_scene = items[i]
+        into_id, into_frames, _into_scene = items[i + 1]
+        t_frames = _transition_frames(link, after=after_id, fps=fps)
+        if t_frames == 0:
+            start_frames[into_id] = accumulated
+            segments[-1]["items"].append(into_id)
+            segments[-1]["frames"] += into_frames
+            accumulated += into_frames
+            continue
+        if t_frames > after_frames or t_frames > into_frames:
+            raise GraphError(
+                f"the {link['type']} between {after_id!r} ({after_frames} frames) and {into_id!r} "
+                f"({into_frames} frames) lasts {t_frames} frames, longer than a shot it joins"
+            )
+        offset_frames = accumulated - t_frames
+        joins.append({
+            "after": after_id,
+            "into": into_id,
+            "outgoing_scene_id": after_scene,
+            "type": link["type"],
+            "xfade": XFADE_TRANSITIONS[link["type"]],
+            "offset_frames": offset_frames,
+            "duration_frames": t_frames,
+            "offset": _num(offset_frames / fps),
+            "duration": _num(t_frames / fps),
+        })
+        start_frames[into_id] = offset_frames
+        segments.append({"items": [into_id], "frames": into_frames})
+        accumulated = offset_frames + into_frames
+
+    if accumulated != timeline["total_frames"]:
+        raise GraphError(
+            f"the sequence is {accumulated} frames long but the timeline says {timeline['total_frames']} "
+            f"(total_s {timeline['total_s']}): a shot clip's frame count disagrees with the timeline"
+        )
+    return {"fps": fps, "segments": segments, "joins": joins, "start_frames": start_frames,
+            "total_frames": accumulated}
+
+
+def xfade_offsets(timeline) -> list:
+    """The xfade joins of :func:`sequence_plan`, in order: every offset and
+    duration in whole frames (``offset_frames``/``duration_frames``) and as
+    the exact argv seconds strings (``offset``/``duration``). An all-cut,
+    ``hard_stop`` timeline has none (one ``concat``)."""
+    return sequence_plan(timeline)["joins"]
+
+
+def _assert_lines_clear_of_joins(timeline, plan) -> None:
+    """The stage-4 invariant (``timeline._assert_no_line_in_a_transition_
+    window``), re-checked on the windows the graph actually renders:
+    ``[offset_frames, offset_frames + duration_frames] / fps`` for every
+    join, against the lines of the join's OUTGOING scene only (same scoping,
+    same reason). The frame-exact window can sit up to half a frame away
+    from the timeline's float window, so each side gets that much slack --
+    a line ending exactly where the timeline's window starts is not a
+    violation here either."""
+    fps = plan["fps"]
+    slack = 0.5 / fps + _FRAME_EPS
+    by_scene = {}
+    for line in timeline["lines"]:
+        by_scene.setdefault(line["scene_id"], []).append(line)
+    for join in plan["joins"]:
+        win_start = join["offset_frames"] / fps
+        win_end = (join["offset_frames"] + join["duration_frames"]) / fps
+        for line in by_scene.get(join["outgoing_scene_id"], []):
+            line_start = line["start_s"]
+            line_end = line["start_s"] + line["duration_s"]
+            if line_start < win_end - slack and line_end > win_start + slack:
+                raise GraphError(
+                    f"line {line['line_id']!r} ({line_start}-{line_end:.3f}s) falls inside the rendered "
+                    f"{join['type']} window after {join['after']!r} ({win_start:.3f}-{win_end:.3f}s)"
+                )
+
+
+def _checked_inputs(inputs, expected_ids, *, what) -> dict:
+    """*inputs* must map exactly *expected_ids* to relative paths."""
+    if not isinstance(inputs, dict):
+        raise GraphError(f"{what} must be a dict of id -> relative path")
+    missing = [i for i in expected_ids if i not in inputs]
+    extra = sorted(set(inputs) - set(expected_ids))
+    if missing or extra:
+        raise GraphError(f"{what}: missing inputs for {missing}, unexpected inputs {extra}")
+    for key in expected_ids:
+        _assert_relative(inputs[key], what=f"{what}[{key!r}]")
+    return inputs
+
+
+def _ending_of(timeline) -> str:
+    return "cut_to_black" if timeline["end_card"] is not None else "hard_stop"
+
+
+# -------------------------------------------------------------- final pass
+
+def final_pass_argv(timeline, *, shot_inputs, end_card_input, ass_rel, fontsdir_rel, mix_rel, profile,
+                    out_rel) -> list:
+    """The final pass (spec 6.5 "Sequence"; plan: "Final pass"): every
+    shot clip (and the end card under ``cut_to_black``) normalised with
+    ``settb=AVTB,fps=30,format=<pix_fmt>``; runs of ``cut`` joined by
+    ``concat`` (+ ``settb=1/30``, module section above); every other
+    transition an ``xfade`` at :func:`sequence_plan`'s frame-exact offset;
+    the end card joined by ``fadeblack`` after the last shot; then
+    ``ass=<ass_rel>:fontsdir=<fontsdir_rel>`` burns every text layer; the
+    PCM mix (:func:`audio_mix_argv`'s output) is muxed unchanged next to
+    the video encoded per *profile* into *out_rel* (``episode_pre.mkv``).
+
+    No ``-shortest``: the two lengths already agree to within half a frame
+    (module section above), and :func:`sequence_plan` raises rather than
+    let a frame-count mismatch through.
+
+    *shot_inputs* maps every timeline ``shot_id`` to its clip;
+    *end_card_input* is the end card clip, required under ``cut_to_black``
+    and refused under ``hard_stop``. Every path must be relative.
+    """
+    plan = sequence_plan(timeline)
+    _assert_lines_clear_of_joins(timeline, plan)
+
+    shot_ids = [shot["shot_id"] for shot in timeline["shots"]]
+    _checked_inputs(shot_inputs, shot_ids, what="shot_inputs")
+    if timeline["end_card"] is not None:
+        if end_card_input is None:
+            raise GraphError("cut_to_black: end_card_input is required")
+        _assert_relative(end_card_input, what="end_card_input")
+    elif end_card_input is not None:
+        raise GraphError("hard_stop: the timeline has no end card, end_card_input must be None")
+    for value, what in ((ass_rel, "ass_rel"), (fontsdir_rel, "fontsdir_rel"), (mix_rel, "mix_rel"),
+                        (out_rel, "out_rel")):
+        _assert_relative(value, what=what)
+
+    fps = plan["fps"]
+    video_inputs = [shot_inputs[shot_id] for shot_id in shot_ids]
+    item_ids = list(shot_ids)
+    if end_card_input is not None:
+        video_inputs.append(end_card_input)
+        item_ids.append(END_CARD_ID)
+    input_index = {item_id: i for i, item_id in enumerate(item_ids)}
+    mix_index = len(video_inputs)
+
+    graph = [f"[{i}:v]settb=AVTB,fps={fps},format={profile.pix_fmt}[v{i}]" for i in range(len(video_inputs))]
+
+    segment_labels = []
+    for k, segment in enumerate(plan["segments"]):
+        labels = [f"[v{input_index[item_id]}]" for item_id in segment["items"]]
+        if len(labels) == 1:
+            segment_labels.append(labels[0])
+        else:
+            graph.append(f"{''.join(labels)}concat=n={len(labels)}:v=1:a=0,settb=1/{fps}[seg{k}]")
+            segment_labels.append(f"[seg{k}]")
+
+    current = segment_labels[0]
+    for k, join in enumerate(plan["joins"]):
+        label = f"[x{k + 1}]"
+        graph.append(f"{current}{segment_labels[k + 1]}xfade=transition={join['xfade']}:"
+                     f"duration={join['duration']}:offset={join['offset']}{label}")
+        current = label
+
+    ass_value = motion_mod.escape_expr(ass_rel)
+    fontsdir_value = motion_mod.escape_expr(fontsdir_rel)
+    graph.append(f"{current}ass={ass_value}:fontsdir={fontsdir_value}[vout]")
+
+    argv = list(_ARGV_PREFIX)
+    argv += profile.global_bitexact_args()
+    for rel in video_inputs:
+        argv += ["-i", rel]
+    argv += ["-i", mix_rel]
+    argv += ["-filter_complex", ";".join(graph)]
+    argv += ["-map", "[vout]", "-map", f"{mix_index}:a"]
+    argv += profile.video_encode_args()
+    argv += ["-r", str(fps), "-c:a", profiles.MIX_CODEC, out_rel]
+    return argv
+
+
+# --------------------------------------------------------------- audio mix
+
+def _ms(seconds) -> int:
+    """A timeline instant as adelay's integer milliseconds (the timeline's
+    own seconds carry 3 decimals, so this is exact)."""
+    return int(round(float(seconds) * 1000))
+
+
+def _wav_output_args() -> list:
+    """Per-WAV output options: 48 kHz stereo ``pcm_s16le``, no metadata
+    carried over from an input (a BGM mp3's ID3 tags) and no encoder-version
+    INFO chunk (``bitexact``), so the bytes depend on the audio alone."""
+    return ["-c:a", profiles.MIX_CODEC, "-ar", str(profiles.AUDIO_RATE), "-ac", "2",
+            "-map_metadata", "-1", "-fflags", "+bitexact", "-flags:a", "+bitexact"]
+
+
+def audio_mix_argv(timeline, *, line_inputs, sfx_inputs, bgm_input, ending, out_rel, stems_rel) -> list:
+    """The episode's audio mix (spec 6.5 "Audio graph"; plan: "Audio mix";
+    DEC-157, DEC-158): one absolute timeline of exactly ``total_s``.
+
+    - Every input is resampled to 48 kHz stereo float
+      (``aresample=48000,aformat=...``).
+    - Dialogue: each line ``adelay``ed to its timeline start (integer ms,
+      ``all=1``), summed (lines never overlap -- asserted) over a silent
+      base of exactly ``total_s`` (``anullsrc`` + ``atrim``), ``amix
+      normalize=0:duration=first`` -- so the stem is exactly ``total_s``.
+    - SFX: each anchor whose cue has an input ``adelay``ed to its anchor,
+      summed the same way. An anchor whose cue is absent from *sfx_inputs*
+      is skipped: the caller resolved it (``audio_assets.resolve_sfx``) and
+      reports it (spec 11: "skipped and reported, never a crash").
+    - BGM (optional): ``-stream_loop -1``, re-stamped by sample count,
+      ``atrim=duration=total_s``, faded out over the last
+      ``BED_FADE_OUT_S[ending]``, then ducked by ``sidechaincompress`` with
+      the dialogue as the sidechain (DEC-157's exact values). No BGM: a
+      silent bed of the same length.
+    - ``amix=inputs=3:weights=<dialogue bgm sfx>:normalize=0:duration=first``
+      with the dialogue stem first.
+
+    Outputs: the mix to *out_rel*, and the three stems (dialogue, SFX and
+    the ducked -- pre-weight -- BGM) to ``stems_rel["dialogue"|"sfx"|"bgm"]``,
+    each exactly ``total_s`` of 48 kHz stereo ``pcm_s16le`` (a stem with no
+    input is silence, so Tier-2's ducking check always has three files).
+
+    *line_inputs* maps every timeline ``line_id`` to its audio file;
+    *sfx_inputs* maps cue names to files; *bgm_input* is a file or
+    ``None``; *ending* is ``"cut_to_black"``/``"hard_stop"`` and must agree
+    with the timeline's end card. Every path must be relative.
+    """
+    if ending not in profiles.ENDINGS:
+        raise GraphError(f"unknown ending {ending!r}, expected one of {profiles.ENDINGS}")
+    if ending != _ending_of(timeline):
+        raise GraphError(f"ending {ending!r} disagrees with the timeline, which is {_ending_of(timeline)!r}")
+
+    total_s = float(timeline["total_s"])
+    lines = timeline["lines"]
+    _checked_inputs(line_inputs, [line["line_id"] for line in lines], what="line_inputs")
+    if not isinstance(sfx_inputs, dict):
+        raise GraphError("sfx_inputs must be a dict of cue -> relative path")
+    anchors = [a for a in timeline["sfx_anchors"] if a["cue"] in sfx_inputs]
+    for anchor in anchors:
+        _assert_relative(sfx_inputs[anchor["cue"]], what=f"sfx_inputs[{anchor['cue']!r}]")
+    if bgm_input is not None:
+        _assert_relative(bgm_input, what="bgm_input")
+    if not isinstance(stems_rel, dict) or set(stems_rel) != set(STEM_KINDS):
+        raise GraphError(f"stems_rel must map exactly {STEM_KINDS} to relative paths")
+    for kind in STEM_KINDS:
+        _assert_relative(stems_rel[kind], what=f"stems_rel[{kind!r}]")
+    _assert_relative(out_rel, what="out_rel")
+
+    ordered = sorted(lines, key=lambda line: line["start_s"])
+    for line in ordered:
+        if line["start_s"] < 0 or line["start_s"] + line["duration_s"] > total_s + _FRAME_EPS:
+            raise GraphError(f"line {line['line_id']!r} ({line['start_s']}s + {line['duration_s']}s) "
+                             f"is outside the episode (0-{total_s}s)")
+    for prev, nxt in zip(ordered, ordered[1:]):
+        if nxt["start_s"] < prev["start_s"] + prev["duration_s"] - _FRAME_EPS:
+            raise GraphError(f"lines {prev['line_id']!r} and {nxt['line_id']!r} overlap")
+    for anchor in anchors:
+        if not 0 <= anchor["start_s"] < total_s:
+            raise GraphError(f"sfx {anchor['cue']!r} at {anchor['start_s']}s is outside the episode (0-{total_s}s)")
+
+    rate = profiles.AUDIO_RATE
+    layout = profiles.AUDIO_CHANNEL_LAYOUT
+    normalise = (f"aresample={rate},aformat=sample_fmts={profiles.AUDIO_SAMPLE_FMT}:sample_rates={rate}:"
+                 f"channel_layouts={layout}")
+    total = _num(total_s)
+    silence = f"anullsrc=r={rate}:cl={layout},atrim=duration={total}"
+
+    argv = list(_ARGV_PREFIX)
+    graph = []
+    index = 0
+
+    # dialogue
+    line_labels = []
+    for k, line in enumerate(lines):
+        argv += ["-i", line_inputs[line["line_id"]]]
+        graph.append(f"[{index}:a]{normalise},adelay=delays={_ms(line['start_s'])}:all=1[l{k}]")
+        line_labels.append(f"[l{k}]")
+        index += 1
+    dialogue_outputs = "[dlg_mix][dlg_stem][dlg_sc]" if bgm_input is not None else "[dlg_mix][dlg_stem]"
+    n_split = 3 if bgm_input is not None else 2
+    if line_labels:
+        graph.append(f"{silence}[dlg_base]")
+        graph.append(f"[dlg_base]{''.join(line_labels)}amix=inputs={len(line_labels) + 1}:normalize=0:"
+                     f"duration=first,asplit={n_split}{dialogue_outputs}")
+    else:
+        graph.append(f"{silence},asplit={n_split}{dialogue_outputs}")
+
+    # sfx
+    sfx_labels = []
+    for k, anchor in enumerate(anchors):
+        argv += ["-i", sfx_inputs[anchor["cue"]]]
+        graph.append(f"[{index}:a]{normalise},adelay=delays={_ms(anchor['start_s'])}:all=1[x{k}]")
+        sfx_labels.append(f"[x{k}]")
+        index += 1
+    if sfx_labels:
+        graph.append(f"{silence}[sfx_base]")
+        graph.append(f"[sfx_base]{''.join(sfx_labels)}amix=inputs={len(sfx_labels) + 1}:normalize=0:"
+                     f"duration=first,asplit=2[sfx_mix][sfx_stem]")
+    else:
+        graph.append(f"{silence},asplit=2[sfx_mix][sfx_stem]")
+
+    # bgm bed, ducked under the dialogue
+    if bgm_input is not None:
+        fade = profiles.BED_FADE_OUT_S[ending]
+        argv += ["-stream_loop", "-1", "-i", bgm_input]
+        graph.append(f"[{index}:a]{normalise},asetpts=N/SR/TB,atrim=duration={total},"
+                     f"afade=t=out:st={_num(total_s - fade)}:d={_num(fade)}[bed]")
+        graph.append(f"[bed][dlg_sc]sidechaincompress=threshold={_num(profiles.DUCK_THRESHOLD)}:"
+                     f"ratio={_num(profiles.DUCK_RATIO)}:attack={_num(profiles.DUCK_ATTACK_MS)}:"
+                     f"release={_num(profiles.DUCK_RELEASE_MS)},asplit=2[bgm_mix][bgm_stem]")
+        index += 1
+    else:
+        graph.append(f"{silence},asplit=2[bgm_mix][bgm_stem]")
+
+    weights = dict(profiles.MIX_WEIGHTS)
+    order = [kind for kind, _weight in profiles.MIX_WEIGHTS]
+    mix_inputs = "".join({"dialogue": "[dlg_mix]", "bgm": "[bgm_mix]", "sfx": "[sfx_mix]"}[kind] for kind in order)
+    weight_text = " ".join(_num(weights[kind]) for kind in order)
+    graph.append(f"{mix_inputs}amix=inputs=3:weights={weight_text}:normalize=0:duration=first[mix]")
+
+    argv += ["-filter_complex", ";".join(graph)]
+    argv += ["-map", "[mix]"] + _wav_output_args() + [out_rel]
+    for kind, label in (("dialogue", "[dlg_stem]"), ("sfx", "[sfx_stem]"), ("bgm", "[bgm_stem]")):
+        argv += ["-map", label] + _wav_output_args() + [stems_rel[kind]]
     return argv

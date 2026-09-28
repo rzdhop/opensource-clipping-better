@@ -29,11 +29,12 @@ fast, tiny and byte-reproducible, spec 13's framemd5 parity). Concretely:
 ``WIDTH``/``HEIGHT``/``FPS`` are the one frame geometry every profile
 renders to (spec 6.2: 1080x1920, 30 fps, 9:16 only -- v1 non-goal 1.2).
 
-Audio-mix constants (DEC-157's weights, sidechain values, bed fades) belong
-to stage 6's ``filtergraph.py`` additions, not here -- this module only
-carries the *encode* settings the plan's ``profiles.py`` bullet names
-(FINAL's own AAC/48kHz/faststart fields, since those are literally part of
-the FINAL profile itself, not the audio *mix*).
+The audio-mix constants (DEC-157: the amix weights, the
+``sidechaincompress`` ducking values, the bed fade-outs per ending, the
+48 kHz stereo mix format) live at the bottom of this module, in one block,
+so ``filtergraph.audio_mix_argv`` and its tests read one source of truth.
+DEC-157's two-pass ``loudnorm`` target (I -14, TP -1, LRA 11) is the render
+runner's own (stage 7, ``loudness.py``'s ``target=``), not the mix graph's.
 
 Stdlib only (DEC-012).
 """
@@ -110,3 +111,26 @@ FINAL = RenderProfile(
 )
 
 GOLDEN = RenderProfile(name="golden", preset="ultrafast", crf=30, threads=1, bitexact=True, upscale=1)
+
+
+# ------------------------------------------------------------ audio mix (DEC-157)
+# One place for every constant of the Tier-1 audio graph
+# (``filtergraph.audio_mix_argv``, spec 6.5's "Audio graph"; DEC-157, DEC-158).
+
+AUDIO_RATE = 48000                 # every input is resampled to this, and every WAV is written at it
+AUDIO_CHANNEL_LAYOUT = "stereo"    # mono lines/SFX are upmixed by aformat (equal-power, swresample's default)
+AUDIO_SAMPLE_FMT = "fltp"          # the mixing format; the WAVs are written as pcm_s16le
+MIX_CODEC = "pcm_s16le"            # the mix and its stems (the final pass muxes the mix unchanged)
+
+# amix weights, in the amix input order the graph uses: dialogue, BGM, SFX.
+MIX_WEIGHTS = (("dialogue", 1.0), ("bgm", 0.30), ("sfx", 0.8))
+
+# The BGM bed is ducked under the dialogue (the sidechain) with exactly these.
+DUCK_THRESHOLD = 0.03
+DUCK_RATIO = 8
+DUCK_ATTACK_MS = 20
+DUCK_RELEASE_MS = 300
+
+# The bed's fade-out at the very end of the episode, per cliffhanger ending.
+ENDINGS = ("cut_to_black", "hard_stop")
+BED_FADE_OUT_S = {"cut_to_black": 0.5, "hard_stop": 0.05}

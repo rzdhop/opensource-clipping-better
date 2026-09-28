@@ -3,9 +3,9 @@
 - **Current phase:** 4 CHECKPOINT → 5 IMPLEMENT. **Plan approved** by the human ("Yes go go", 2026-09-28), read as
   also answering Q5 = yes: `feat/ai-story-phase-4` is pushed once at stage 7 so CI records the x86_64 framemd5 key.
   Plan: `~/.claude/plans/ai-story-phase-4-assets-render.md` (stages 0–17, riskiest = stage 6, sequence + audio graph).
-- **Current stage:** 6 (sequence + audio graph — RISKIEST, Opus). Stage 0 done: checkpoint commit **`86e7f4d`** on `main`
+- **Current stage:** 7 (runner, manifest, cache, loudness, golden render, CI + one branch push, Opus). Stage 0 done: checkpoint commit **`86e7f4d`** on `main`
   (parent `1367d75`); worktree `.claude/worktrees/ai-story-phase-4` on `feat/ai-story-phase-4` (node_modules
-  symlinked, excluded); **this worktree's `.claude/` files are the live artifacts until the merge**. Stages 1–5 done.
+  symlinked, excluded); **this worktree's `.claude/` files are the live artifacts until the merge**. Stages 1–6 done.
 - **Stage 1 notes for stage 8 (first real caller of the cache):** catch `gencache.JournalError` (not a
   `NoRunnableLink`) and fail naming the request id; book only when `result.meta` has no `"booked"` (a keyless
   request still books the old way); `book(entry)` sees kind/link/paid/estimate/note/state/request, so step/ep/qty
@@ -14,7 +14,15 @@
 - **Tier-1 baseline (86e7f4d):** local **4486 passed / 1 skipped** (210 s); CI env (`/tmp/cilibs`) **3901 passed /
   555 skipped** (155 s); compileall clean (`PYTHONPYCACHEPREFIX` in scratch); vite build green to a scratch outDir.
   ffmpeg: host `6.1.1-3ubuntu5`, container `7.1.5-0+deb13u1`. Health: 0 jobs.
-- **Next action:** stage 6 per the plan's §2 "Renderer" (`filtergraph.py` audio mix + final pass) and §3 row 6.
+- **Next action:** stage 7 per the plan's §2 "Renderer" (`runner.py`, `manifest.py`, `plan.py`), "Golden render and parity" and §3 row 7.
+- **Stage 6 notes for stage 7:** `filtergraph.sequence_plan/xfade_offsets/final_pass_argv/audio_mix_argv`,
+  `GraphError`; offsets in whole frames (transitions must be whole frames; clips must have exactly the timeline's
+  `frames` or `sequence_plan` raises — report GraphError text); lengths equal by construction (silent base +
+  `amix duration=first`; no `-shortest`); DEC-157 constants live at the end of `profiles.py` (add the loudnorm
+  target there); **the mix is s16 before loudnorm and peaked −3.2 dBFS with real SFX → mix in float or check peaks
+  in L1**; GOLDEN final pass ≈ 19 s for 34 s of video → the golden fixture must stay a few seconds long; the AI
+  label also covers the end card (kept: it is the disclosure). ffmpeg quirks handled: concat → `settb=1/30`, looped
+  mp3 bed re-stamped `asetpts=N/SR/TB`, sidechain padded to full length, fadeblack's black falls at frames 2–3/12.
 - **Stage 5 notes for stages 6/7/9:** `subtitles.build_subtitles_ass(*, timeline, script, subtitle_mode, language,
   hook_style, ai_label_enabled, palette, typography, word_timings=None) -> (doc, meta)` with
   `meta["approx_line_ids"]` for even-split lines; `end_card_ass(language, next_ep, story_title, typography,
@@ -97,8 +105,8 @@
 | 3 | documents + store [Opus] | **done** (local 4816/1, CI 4231/555; 232 new tests; 2 phase-3 closed-list pins re-pinned) |
 | 4 | timeline + motion + shot builders [Sonnet] | **done** (local 4899/1, CI 4314/555; 83 new tests; 13/13 real ffmpeg sanity renders) |
 | 5 | ASS text + fonts [Sonnet] | **done** (local 4983/1, CI 4398/555; 84 new tests; libass proofs checked by eye) |
-| 6 | sequence + audio graph (**RISKIEST**) [Opus] | in progress |
-| 7 | runner, manifest, cache, loudness, golden render, CI (+ one push of the branch) [Opus] | — |
+| 6 | sequence + audio graph (**RISKIEST**) [Opus] | **done** (local 5069/1, CI 4484/555; 86 new tests; real renders of both endings frame- and sample-exact) |
+| 7 | runner, manifest, cache, loudness, golden render, CI (+ one push of the branch) [Opus] | in progress |
 | 8 | assets step [Opus] | — |
 | 9 | render + metadata steps [Opus] | — |
 | 10 | fast track + completed terminal [Opus] | — |
