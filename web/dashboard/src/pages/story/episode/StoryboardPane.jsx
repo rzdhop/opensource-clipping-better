@@ -305,7 +305,7 @@ function ShotStateBadge({ state }) {
  * one entry of `episode.assets.shots` (null before the episode has a
  * storyboard -- the caller only renders this once one exists).
  */
-function ShotImageBlock({ storyId, ep, assetShot, busy, onChange }) {
+function ShotImageBlock({ storyId, ep, assetShot, planConsistency, busy, onChange }) {
   const [url, setUrl] = useState(null)
   const [loadFailed, setLoadFailed] = useState(false)
   const [lockSaving, setLockSaving] = useState(false)
@@ -361,7 +361,9 @@ function ShotImageBlock({ storyId, ep, assetShot, busy, onChange }) {
       <div className="story-shot-asset-meta">
         <ShotStateBadge state={assetShot.state} />
         {assetShot.route && <RouteChip routeClass={assetShot.route} />}
-        <ConsistencyChip consistency={assetShot.consistency} />
+        {/* The card header already labels the planned consistency; repeat it here
+            only when the image was drawn under a different one. */}
+        {assetShot.consistency !== planConsistency && <ConsistencyChip consistency={assetShot.consistency} />}
         {assetShot.pending && <span className="chip" title="A regenerate is queued for this shot">pending…</span>}
       </div>
       <label className="story-checkbox">
@@ -489,7 +491,8 @@ function ShotCard({ storyId, ep, shot, assetShot, scene, maps, busy, onChange })
       </div>
 
       {assetShot && (
-        <ShotImageBlock storyId={storyId} ep={ep} assetShot={assetShot} busy={busy} onChange={onChange} />
+        <ShotImageBlock storyId={storyId} ep={ep} assetShot={assetShot} planConsistency={shot.consistency}
+          busy={busy} onChange={onChange} />
       )}
 
       <div className="story-shot-controls">

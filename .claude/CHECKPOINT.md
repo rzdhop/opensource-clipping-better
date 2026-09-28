@@ -3,12 +3,12 @@
 - **Current phase:** 4 CHECKPOINT → 5 IMPLEMENT. **Plan approved** by the human ("Yes go go", 2026-09-28), read as
   also answering Q5 = yes: `feat/ai-story-phase-4` is pushed once at stage 7 so CI records the x86_64 framemd5 key.
   Plan: `~/.claude/plans/ai-story-phase-4-assets-render.md` (stages 0–17, riskiest = stage 6, sequence + audio graph).
-- **Current stage:** 15 (dashboard: Preview, Sonnet; browser check by me on a keyless throwaway). Branch pushed once (Q5) at `4f48515`; CI: compile ✓, test ✗ only as designed
+- **Current stage:** 16 next (merge, deploy, Tier-2). Stages 0–15 committed on `feat/ai-story-phase-4`. Branch pushed once (Q5) at `4f48515`; CI: compile ✓, test ✗ only as designed
   (unknown x86_64 golden key, read from the public check-run annotation and recorded). The rest of CI's test log needs
   a sign-in, so **CI's full green is confirmed only at the next push** (Node 20 deprecation notice on checkout@v4 /
   setup-python@v5 — follow-up). Stage 0 done: checkpoint commit **`86e7f4d`** on `main`
   (parent `1367d75`); worktree `.claude/worktrees/ai-story-phase-4` on `feat/ai-story-phase-4` (node_modules
-  symlinked, excluded); **this worktree's `.claude/` files are the live artifacts until the merge**. Stages 1–14 done.
+  symlinked, excluded); **this worktree's `.claude/` files are the live artifacts until the merge**. Stages 1–15 done.
 - **Stage 1 notes for stage 8 (first real caller of the cache):** catch `gencache.JournalError` (not a
   `NoRunnableLink`) and fail naming the request id; book only when `result.meta` has no `"booked"` (a keyless
   request still books the old way); `book(entry)` sees kind/link/paid/estimate/note/state/request, so step/ep/qty
@@ -17,9 +17,11 @@
 - **Tier-1 baseline (86e7f4d):** local **4486 passed / 1 skipped** (210 s); CI env (`/tmp/cilibs`) **3901 passed /
   555 skipped** (155 s); compileall clean (`PYTHONPYCACHEPREFIX` in scratch); vite build green to a scratch outDir.
   ffmpeg: host `6.1.1-3ubuntu5`, container `7.1.5-0+deb13u1`. Health: 0 jobs.
-- **Next action:** stage 15 per the plan's §2 "Dashboard" → Preview pane and §3 row 15; then my browser check at
-  375/820/1280 on git-excluded launch configs `phase4-throwaway` (:8013, keyless, DISABLE_AUTH=1) + `phase4-dashboard`
-  (Vite :5175 proxied to :8013), with a seeded rendered episode in the worktree's own git-ignored `outputs/`.
+- **Next action:** stage 16 — ff-merge `feat/ai-story-phase-4` → `main` at 0 jobs, rebuild the container
+  (`sudo -n docker compose rm -sfv backend && sudo -n docker compose up -d --build backend`), run
+  `tools/render_golden.py` inside it, then the plan's §4 Tier-2 script (step 12's paid-cap refusal while shots are
+  still unmade; ask before flipping `allow_paid`). Throwaway seed story `447cacdaf1e5` lives only in the worktree's
+  git-ignored `outputs/`.
 - **Stage 14 notes:** api.js `fetchShotImageUrl`, `patchEpisodeAssets`, `fetchStoryEstimate(…, {alignWords, storyboard})`;
   StoryboardPane `ShotStateBadge`, `ShotImageBlock`, `AssetsHeader`, `ApproveAssets`; ScriptPane `LineRow` word-source
   label + voice regenerate + cast link; EpisodeStudio `FastTrackHeader` (window.confirm split dialog); layout risk:
@@ -191,8 +193,8 @@
 | 12 | signed story media [Opus] | **done** (local 5535/1, CI 4828/677; 109 new tests; auth.py +119 lines, none removed) |
 | 13 | CLI [Sonnet] | **done** (local 5552/1, CI 4845/677; 17 new tests) |
 | 14 | dashboard: storyboard assets + fast track [Sonnet] | **done** (local 5564/1, CI 4857/677; 12 new contract tests; build green; browser check with stage 15) |
-| 15 | dashboard: Preview [Sonnet] | in progress |
-| 16 | merge, deploy, Tier-2 (me; human watches on the phone) | — |
+| 15 | dashboard: Preview [Sonnet] | **done** (local 5578/1, CI 4871/677; 14 new contract tests; browser check 375/820/1280 by me: 1 overflow + 2 polish fixed) |
+| 16 | merge, deploy, Tier-2 (me; human watches on the phone) | next |
 | 17 | docs + decisions [Sonnet] | — |
 
 ### Regression contract (phase 4)

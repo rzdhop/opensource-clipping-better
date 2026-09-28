@@ -558,9 +558,11 @@ export async function regenerateStory(storyId, payload) {
  * estimate is `1 + episodes` LLM calls); `places`/`props` only for `places`
  * (the names on screen in the proposal editor, repeated as `?place=`/
  * `?prop=`; omitted, the estimate falls back to the saved proposal).
+ * `subtitles`/`encoder` only for `render` (its own params -- `step === 'render'` --
+ * priced as the render would use them; PreviewPane.jsx sends `subtitles` only).
  */
 export async function fetchStoryEstimate(storyId, step, {
-  target, selected, episodes, places, props, ep, measure, alignWords, storyboard,
+  target, selected, episodes, places, props, ep, measure, alignWords, storyboard, subtitles, encoder,
 } = {}) {
   const params = new URLSearchParams()
   if (target) params.set('target', target)
@@ -585,6 +587,13 @@ export async function fetchStoryEstimate(storyId, step, {
   // distinct from the storyboard *step*'s own `fast` param above).
   if (alignWords) params.set('align_words', '1')
   if (storyboard) params.set('storyboard', storyboard)
+  // Phase 4, stage 15: `subtitles` -> `?subtitles=style|word_pop|two_line|none`,
+  // `encoder` -> `?encoder=libx264|auto` (`step === 'render'`'s own params,
+  // priced the same way whichever changed -- render.SUBTITLE_CHOICES /
+  // ENCODER_CHOICES). PreviewPane.jsx only ever sends `subtitles`; `encoder`
+  // is carried for completeness and left unsent (the render step defaults it).
+  if (subtitles) params.set('subtitles', subtitles)
+  if (encoder) params.set('encoder', encoder)
   const qs = params.toString()
   const res = await request(`/stories/${storyId}/estimate/${step}${qs ? `?${qs}` : ''}`)
   if (!res.ok) throw await apiError(res, 'Failed to fetch the estimate')

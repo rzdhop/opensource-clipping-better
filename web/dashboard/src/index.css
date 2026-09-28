@@ -2632,6 +2632,13 @@ html, body {
   margin-top: 8px;
 }
 
+/* These two labels are sentences, not the short names .story-checkbox
+   capitalizes (stage-15 browser check: "Align Words (Forced Alignment For…"). */
+.story-assets-header .story-checkbox,
+.story-shot-asset .story-checkbox {
+  text-transform: none;
+}
+
 .story-shot-asset {
   display: flex;
   flex-direction: column;
@@ -2700,5 +2707,145 @@ html, body {
 
   .episode-studio-fast-track {
     width: 100%;
+  }
+}
+
+/* ============================================================
+   PreviewPane (phase 4, stage 15): the render header, the video player and
+   its manifest summary, the metadata cards and the cost ledger. Phone-first:
+   the video fits the width at 375px with its 9:16 aspect kept (no crop, no
+   horizontal overflow); the metadata cards stack under 700px and sit in a
+   grid above it. Additive, prefixed `story-render-` / `story-metadata-` /
+   `story-ledger-` / `story-copy`.
+   ============================================================ */
+
+.story-render-header,
+.story-render-media,
+.story-render-empty,
+.story-metadata-header,
+.story-metadata-empty,
+.story-render-cover,
+.story-ledger {
+  margin: 14px 0;
+}
+
+.story-render-subtitles {
+  max-width: 260px;
+  margin-bottom: 10px;
+}
+
+.story-render-outdated {
+  margin-bottom: 10px;
+  /* A sentence, not a label: the chip's nowrap pushed the page 97px wide at
+     375px (stage-15 browser check). */
+  white-space: normal;
+}
+
+/* Full width of its card, capped so a wide (>=1100px) three-pane layout
+   does not stretch the player past a sensible phone-mockup size; centered
+   so the cap does not leave it stuck to the left edge. */
+.story-render-video {
+  display: block;
+  width: 100%;
+  max-width: 420px;
+  aspect-ratio: 9 / 16;
+  background: #000;
+  border-radius: var(--radius-md);
+  margin: 0 auto 12px;
+  object-fit: contain;
+}
+
+.story-render-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.story-render-cover-image {
+  display: block;
+  width: 160px;
+  max-width: 45%;
+  aspect-ratio: 9 / 16;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  background: var(--bg-input);
+}
+
+.story-metadata-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+  margin: 14px 0;
+}
+
+.story-metadata-card-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.story-metadata-hashtags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.story-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Off-screen rather than display:none while shown -- select()/focus() need
+   layout to work in every browser -- and hidden the rest of the time via the
+   `hidden` attribute the component toggles. */
+.story-copy-fallback {
+  position: absolute;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.story-ledger-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.story-ledger-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.story-ledger-cell {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.story-ledger-totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+@media (max-width: 600px) {
+  .story-metadata-cards {
+    grid-template-columns: 1fr;
+  }
+
+  .story-render-subtitles {
+    max-width: none;
   }
 }

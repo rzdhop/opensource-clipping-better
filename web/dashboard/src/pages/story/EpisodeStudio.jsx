@@ -6,6 +6,7 @@ import Tabs from '../../components/Tabs'
 import { StepError } from './fields'
 import ScriptPane from './episode/ScriptPane'
 import StoryboardPane from './episode/StoryboardPane'
+import PreviewPane from './episode/PreviewPane'
 
 // Same sub-cent formatting as ScriptPane.jsx's / StoryboardPane.jsx's fmtUsd
 // (duplicated: this file shares no component module with the panes).
@@ -46,17 +47,6 @@ function useIsWide(breakpoint) {
     return () => mq.removeEventListener('change', onChange)
   }, [breakpoint])
   return wide
-}
-
-function PreviewPane() {
-  return (
-    <div className="story-step-body">
-      <div className="card">
-        <h3 className="card-title">Preview</h3>
-        <p>Rendering arrives in phase 4.</p>
-      </div>
-    </div>
-  )
 }
 
 /**
@@ -211,7 +201,16 @@ export default function EpisodeStudio() {
         onChange={refresh}
       />
     ),
-    preview: <PreviewPane />,
+    preview: (
+      <PreviewPane
+        episode={episode}
+        story={story}
+        storyId={storyId}
+        ep={epNumber}
+        inFlightJob={inFlightJob}
+        onChange={refresh}
+      />
+    ),
   }
 
   return (

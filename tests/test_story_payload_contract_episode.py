@@ -59,6 +59,7 @@ import re
 
 from clipping.aistory import defaults, schemas, workflow
 from clipping.aistory.steps import regenerate as regenerate_step
+from clipping.aistory.steps import render as render_step
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[1]
 MODELS = PROJECT_ROOT / "web" / "api" / "models.py"
@@ -69,6 +70,7 @@ EPISODE_SRC = PROJECT_ROOT / "web" / "dashboard" / "src" / "pages" / "story" / "
 SCRIPT_PANE = EPISODE_SRC / "ScriptPane.jsx"
 DURATION_BAR = EPISODE_SRC / "DurationBar.jsx"
 STORYBOARD_PANE = EPISODE_SRC / "StoryboardPane.jsx"
+PREVIEW_PANE = EPISODE_SRC / "PreviewPane.jsx"
 INDEX_CSS = PROJECT_ROOT / "web" / "dashboard" / "src" / "index.css"
 
 
@@ -622,3 +624,160 @@ def test_line_row_offers_its_own_voice_regenerate():
     src = SCRIPT_PANE.read_text(encoding="utf-8")
     body = src.split("function LineRow", 1)[1].split("function SceneCard", 1)[0]
     assert "target: `line:${ep}:${line.line_id}`" in body
+
+
+# ============================================================
+# Phase 4, stage 15: PreviewPane (render, metadata, the ledger, the cover and
+# the download link). Every test here is shown failing against the parent
+# commit (this stage's own start), where PreviewPane.jsx does not exist yet
+# and EpisodeStudio.jsx still renders the phase-3 placeholder inline.
+# ============================================================
+
+# ------------------------------------------------------------- non-vacuity
+
+def test_the_readers_see_phase4_stage15_things():
+    """A broken regex would make every assertion below pass for free."""
+    assert len(workflow.RENDER_PARAMS) == 2
+    assert len(workflow.METADATA_PARAMS) == 0
+    assert len(render_step.SUBTITLE_CHOICES) == 4
+    assert len(schemas.PLATFORMS) == 3
+
+
+def test_preview_pane_file_exists():
+    assert PREVIEW_PANE.exists(), "PreviewPane.jsx (stage 15) is missing"
+
+
+# --------------------------------------------------------- PreviewPane.jsx: renderParams
+
+def test_render_params_is_a_subset_of_the_workflow_render_params():
+    # Only `subtitles` is exposed as a control (no encoder picker, per the
+    # plan's Preview pane bullet); `encoder` is left unsent so the render
+    # step defaults it -- a subset of the closed list, not the full set (the
+    # scriptParams/measureParams pattern's union check does not apply here:
+    # there is only the one render call site, and it never sends `encoder`).
+    src = PREVIEW_PANE.read_text(encoding="utf-8")
+    render_params = _object_literal_keys(src, "renderParams")
+    declared = set(workflow.RENDER_PARAMS)
+    assert render_params <= declared, (render_params, declared)
+    assert "subtitles" in render_params
+
+
+def test_metadata_params_sends_nothing():
+    src = PREVIEW_PANE.read_text(encoding="utf-8")
+    assert "const metadataParams = {}" in src
+    assert set(workflow.METADATA_PARAMS) == set()
+
+
+# ------------------------------------------------------- closed lists (subtitles, platforms)
+
+def test_subtitle_modes_constant_equals_the_render_step_choices():
+    src = PREVIEW_PANE.read_text(encoding="utf-8")
+    match = re.search(r"const SUBTITLE_MODES = \[(.*?)\]\n", src, re.DOTALL)
+    assert match, "SUBTITLE_MODES not found in PreviewPane.jsx"
+    found = set(re.findall(r"id:\s*'([a-z_]+)'", match.group(1)))
+    assert found == set(render_step.SUBTITLE_CHOICES), (found, render_step.SUBTITLE_CHOICES)
+
+
+def test_platforms_constant_equals_the_schema_exactly():
+    src = PREVIEW_PANE.read_text(encoding="utf-8")
+    found = _js_list_literal(src, "PLATFORMS")
+    assert found == set(schemas.PLATFORMS), (found, schemas.PLATFORMS)
+
+
+# ------------------------------------------------------- metadata:<ep>:<platform>
+
+def _metadata_regenerate_targets() -> set[str]:
+    """Every ``metadata:${...}:${...}`` template literal used as a
+    regenerate target in the episode pages, interpolations normalized to
+    ``<x>`` -- same normalization as ``_shot_image_and_line_regenerate_targets``."""
+    seg = r"\$\{[^`}]*\}"
+    pattern = rf"`(metadata:{seg}:{seg})`"
+    literals: list[str] = []
+    for path in EPISODE_SRC.rglob("*.jsx"):
+        literals += re.findall(pattern, path.read_text(encoding="utf-8"))
+    assert literals, "no metadata:<ep>:<platform> regenerate target found in the episode pages"
+    return {re.sub(r"\$\{[^}]*\}", "<x>", literal) for literal in literals}
+
+
+def test_metadata_regenerate_target_matches_the_grammar_shape():
+    # regenerate_step.EPISODE_TARGETS spells the platform part as a pipe
+    # union ("metadata:<ep>:tiktok|shorts|reels"), not a placeholder, so it
+    # cannot be compared to the JS template literal by the same
+    # placeholder-normalization the shot/line test above uses. Checked
+    # instead: the one template literal is `metadata:${ep}:${platform}` --
+    # both segments interpolated -- and `platform` only ever iterates over
+    # PLATFORMS above, which is asserted equal to schemas.PLATFORMS.
+    templates = _metadata_regenerate_targets()
+    assert templates == {"metadata:<x>:<x>"}
+    grammar = next(shape for shape in regenerate_step.EPISODE_TARGETS if shape.startswith("metadata:"))
+    assert grammar == f"metadata:<ep>:{'|'.join(schemas.PLATFORMS)}"
+    src = PREVIEW_PANE.read_text(encoding="utf-8")
+    assert "target: `metadata:${ep}:${platform}`" in src
+    assert "PLATFORMS.filter((platform) =>" in src or "PLATFORMS.map((platform) =>" in src
+
+
+# --------------------------------------------------------------- error slots
+
+def test_render_header_renders_its_own_error_slot():
+    src = PREVIEW_PANE.read_text(encoding="utf-8")
+    body = src.split("function RenderHeader", 1)[1].split("function RenderMedia", 1)[0]
+    assert "story-step-error" in body
+
+
+def test_metadata_header_renders_its_own_error_slot():
+    src = PREVIEW_PANE.read_text(encoding="utf-8")
+    body = src.split("function MetadataHeader", 1)[1].split("function PlatformCard", 1)[0]
+    assert "story-step-error" in body
+
+
+# ------------------------------------------------------------------ media
+
+def test_video_uses_the_signed_media_url_directly_and_is_keyed_on_the_output_sha():
+    # render.media.video_url/cover_url are already-signed URLs (DEC-163),
+    # unlike the shot/voice blob routes (fetchShotImageUrl/fetchEpisodeVoiceUrl),
+    # which need the bearer header and so are fetched into a blob URL first.
+    src = PREVIEW_PANE.read_text(encoding="utf-8")
+    body = src.split("function RenderMedia", 1)[1].split("function MetadataHeader", 1)[0]
+    assert "src={render.media.video_url}" in body
+    assert 'key={render.output.sha256}' in body
+    assert "playsInline" in body
+    assert 'preload="metadata"' in body
+    assert "fetchStoryMediaUrl(" not in body
+    assert "fetchShotImageUrl(" not in body
+
+
+def test_download_link_appends_download_flag_to_the_signed_url():
+    src = PREVIEW_PANE.read_text(encoding="utf-8")
+    assert "href={`${render.media.video_url}&download=1`}" in src
+    assert " download>" in src or " download\n" in src
+
+
+def test_media_on_error_recovers_by_refetching_the_episode_page():
+    # Same reasoning as JobDetail.jsx's recoverExpiredMedia: an expiring
+    # signed URL can go stale in a tab left open a while, so onError re-fetches
+    # the episode page rather than leaving the player stalled.
+    src = PREVIEW_PANE.read_text(encoding="utf-8")
+    assert "onError={recoverMedia}" in src
+    assert "if (recovered) return" in src
+
+
+# ------------------------------------------------------------------- copy button
+
+def test_copy_button_uses_the_clipboard_api_with_a_manual_select_fallback():
+    src = PREVIEW_PANE.read_text(encoding="utf-8")
+    body = src.split("function CopyButton", 1)[1].split("function RenderHeader", 1)[0]
+    assert "navigator.clipboard.writeText(text)" in body
+    assert "window.isSecureContext" in body
+    assert "area.select()" in body
+
+
+# --------------------------------------------------------------- EpisodeStudio wiring
+
+def test_episode_studio_renders_preview_pane_with_its_props():
+    src = EPISODE_STUDIO.read_text(encoding="utf-8")
+    assert "import PreviewPane from './episode/PreviewPane'" in src
+    assert "function PreviewPane(" not in src, "the phase-3 inline placeholder must be removed"
+    preview_block = src.split("preview: (", 1)[1].split("\n  }", 1)[0]
+    assert "<PreviewPane" in preview_block
+    for prop in ("episode={episode}", "story={story}", "storyId={storyId}", "ep={epNumber}"):
+        assert prop in preview_block, preview_block
