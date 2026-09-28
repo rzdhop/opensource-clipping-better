@@ -184,9 +184,15 @@ def test_the_builders_validate():
 
 
 def test_the_episode_documents_and_their_validators():
-    assert store.EPISODE_DOC_NAMES == (SCRIPT, STORYBOARD)
+    # Phase 4 adds the assets, render-manifest and metadata-pack documents (DEC-155).
+    assert store.EPISODE_DOC_NAMES == (
+        SCRIPT, STORYBOARD, "assets.json", "render_manifest.json", "metadata_pack.json",
+    )
     assert store.EPISODE_DOC_VALIDATORS == {
         SCRIPT: schemas.episode_script_errors, STORYBOARD: schemas.storyboard_errors,
+        "assets.json": schemas.episode_assets_errors,
+        "render_manifest.json": schemas.render_manifest_errors,
+        "metadata_pack.json": schemas.metadata_pack_errors,
     }
     # Episode documents are never story documents: read_doc/write_doc cannot reach them.
     assert not set(store.EPISODE_DOC_NAMES) & set(store.DOC_NAMES)
@@ -207,7 +213,8 @@ def test_the_episode_bounds_are_the_schemas_own():
 
 
 def test_the_asset_kinds_are_closed():
-    assert store.EPISODE_ASSET_KINDS == ("voice",)
+    # Phase 4 adds the shot images (DEC-155).
+    assert store.EPISODE_ASSET_KINDS == ("voice", "shots")
     assert set(store.EPISODE_ASSET_NAME_PATTERNS) == set(store.EPISODE_ASSET_KINDS)
 
 

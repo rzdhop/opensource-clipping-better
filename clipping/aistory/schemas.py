@@ -11,6 +11,7 @@ keywords (``description``, ``title``, ...) are harmless.
 
 from __future__ import annotations
 
+import math
 import re
 import unicodedata
 
@@ -151,6 +152,8 @@ EMOTIONS = (
 HOOK_STYLES = ("insert_prop", "shocking_image", "text_overlay")
 CLIFFHANGER_STYLES = ("cut_to_black", "hard_stop")
 SUBTITLE_MODES = ("word_pop", "two_line", "none")
+# The short-video platforms a story targets and the metadata pack writes for.
+PLATFORMS = ("tiktok", "shorts", "reels")
 
 LANGUAGES = ("fr", "en")
 HEX_COLOUR = r"^#[0-9A-Fa-f]{6}$"
@@ -554,7 +557,7 @@ _AUDIENCE_SCHEMA = {
     "type": ["object", "null"],
     "properties": {
         "age": {"type": "string", "maxLength": 10},
-        "platforms": {"type": "array", "items": {"type": "string", "enum": ["tiktok", "shorts", "reels"]}},
+        "platforms": {"type": "array", "items": {"type": "string", "enum": list(PLATFORMS)}},
     },
     "required": ["age", "platforms"],
     "additionalProperties": False,
@@ -762,7 +765,7 @@ B3_SCHEMA = _llm_obj({
         "platforms": {
             "type": "array",
             "description": "1-3 platforms, no duplicates",
-            "items": {"type": "string", "enum": ["tiktok", "shorts", "reels"]},
+            "items": {"type": "string", "enum": list(PLATFORMS)},
         },
     }),
     "why_come_back": {
@@ -1065,11 +1068,15 @@ def style_preview_errors(doc) -> list:
 # function adds the rules the subset cannot express (word caps, an image named
 # and labelled for its slot, the keys of an open object, the arc's episodes).
 
-def _document(properties) -> dict:
-    """A closed object: every property required, no other key allowed."""
+def _document(properties, optional=None) -> dict:
+    """A closed object: every property required, no other key allowed.
+
+    *optional* properties are allowed as well, and checked when present, but
+    never required: the keys a later phase adds to an object an earlier phase
+    already wrote without them, so its documents on disk still validate."""
     return {
         "type": "object",
-        "properties": properties,
+        "properties": {**properties, **(optional or {})},
         "required": list(properties),
         "additionalProperties": False,
     }
@@ -2031,12 +2038,51 @@ _STORYBOARD_MOTION_SCHEMA = _document({
     "pan": {"type": "string", "enum": ["none", "lr", "rl", "ud", "du"]},
 })
 
+# A shot's image (phase 4, DEC-155): assets/shots/shot_NN.<ext> in the
+# episode's folder, NN the shot's own number (sh03 -> shot_03). The only names
+# store.EPISODE_ASSET_NAME_PATTERNS["shots"] holds.
+SHOT_IMAGE_DIR = "assets/shots"
+SHOT_IMAGE_NAME_PATTERN = r"^shot_(0[1-9]|[1-9][0-9])\.(png|jpg|jpeg|webp)$"
+# How an image was paid for: a free API link, a local engine, a paid link.
+IMAGE_ROUTES = ("free", "local", "paid")
+# A full sha256, hex (a prompt hash, a cache key, a file's digest).
+SHA256_PATTERN = r"^[0-9a-f]{64}$"
+# The regenerate note's own bound (web/api/models.py, StoryRegenerateRequest).
+REGENERATE_NOTE_MAX = 300
+
+_SHA256 = {"type": "string", "pattern": SHA256_PATTERN}
+_NOTE_OR_NULL = {"type": ["string", "null"], "maxLength": REGENERATE_NOTE_MAX}
+
+# A regenerate's fresh seed and note, persisted before the call so a retry
+# asks for the same image (DEC-124, DEC-154); null once it is answered.
+_STORYBOARD_PENDING_SCHEMA = _or_null(_document({
+    "seed": {"type": "integer", "minimum": 0},
+    "note": _NOTE_OR_NULL,
+    "requested_at": _NON_EMPTY_STRING,
+}))
+
+# The five keys of spec 2.8 stay required; phase 4's record of the image is
+# optional, so a phase-3 board (the five alone) validates unchanged. Closed.
 _STORYBOARD_ASSETS_SCHEMA = _document({
     "image": {"type": ["string", "null"]},
     "video": {"type": ["string", "null"]},
     "seed": {"type": ["integer", "null"]},
     "provider": {"type": ["string", "null"]},
     "approved": {"type": "boolean"},
+}, optional={
+    "model": {"type": ["string", "null"], "maxLength": 120},
+    # How the image was actually made (spec 8.1), which the grid labels.
+    "consistency": {"type": "string", "enum": list(_DERIVED)},
+    "route": {"type": "string", "enum": list(IMAGE_ROUTES)},
+    # sha256 of what the image was made from; a different one makes it stale.
+    "prompt_hash": _SHA256,
+    "locked": {"type": "boolean"},
+    "note": _NOTE_OR_NULL,
+    "generated_at": _TIMESTAMP_OR_NULL,
+    "est_usd": {"type": "number", "minimum": 0},
+    # The generation cache's key for the request (clipping/providers/gencache.py).
+    "cache_key": {"type": ["string", "null"], "pattern": SHA256_PATTERN},
+    "pending": _STORYBOARD_PENDING_SCHEMA,
 })
 
 _STORYBOARD_SHOT_SCHEMA = _document({
@@ -2096,8 +2142,9 @@ def storyboard_errors(doc, *, min_shot_s=0.8) -> list:
     checks the subset schema cannot express (spec 2.8, 6.4): shot id/order
     sequencing, scene references and contiguity, line references, transition
     references, a non-cut transition sitting only on a scene boundary (spec
-    6.3: ``cut`` inside a scene), the per-shot minimum length once timed, and
-    the motion type matching the shot's own camera motion."""
+    6.3: ``cut`` inside a scene), the per-shot minimum length once timed, the
+    motion type matching the shot's own camera motion, and a shot's image
+    being its own file (``SHOT_IMAGE_DIR``/``shot_NN.<ext>``)."""
     errors = validate(doc, STORYBOARD_SCHEMA)
     if errors:
         return errors
@@ -2131,6 +2178,15 @@ def storyboard_errors(doc, *, min_shot_s=0.8) -> list:
         duration = shot["duration_s"]
         if duration != 0 and duration < min_shot_s:
             errors.append(f"$.shots[{i}].duration_s: {duration} < the minimum shot length {min_shot_s}")
+        image = shot["assets"]["image"]
+        if image is not None:
+            folder, _, name = image.rpartition("/")
+            if (folder != SHOT_IMAGE_DIR or _search(SHOT_IMAGE_NAME_PATTERN, name) is None
+                    or not name.startswith(f"shot_{shot['shot_id'][2:]}.")):
+                errors.append(
+                    f"$.shots[{i}].assets.image: {image!r} is not {shot['shot_id']}'s image "
+                    f"({SHOT_IMAGE_DIR}/shot_NN.<png|jpg|jpeg|webp>)"
+                )
 
     seen_scenes = []
     for shot in shots:
@@ -2225,6 +2281,362 @@ def storyboard_context_errors(doc, script, *, shots_per_scene) -> list:
                     f"$.shots[{shot['shot_id']}].subject_tags: {tag!r} is not in the scene's "
                     f"characters, place or props"
                 )
+
+    return errors
+
+
+# ================================================================ phase 4 documents
+#
+# The phase-4 plan's "Documents": what the assets, render and metadata steps
+# keep in episodes/epNN/ besides the storyboard's per-shot image record. Each
+# carries ``ep`` (checked against its folder by the store) and both
+# timestamps; every fixed object is closed.
+
+# A relative path: the storyboard's reference-image rule (no leading "/", no
+# ".." segment, no backslash), bounded.
+_RELATIVE_PATH = {"type": "string", "minLength": 1, "maxLength": 300, "pattern": REFERENCE_IMAGE_PATH_PATTERN}
+_EP = {"type": "integer", "minimum": 1, "maximum": 99}
+
+
+def _finite_errors(errors, path, values) -> None:
+    """``validate()`` lets NaN and infinity through as numbers (json writes
+    and reads them); a measurement must be a real one."""
+    for key, value in values.items():
+        if isinstance(value, float) and not math.isfinite(value):
+            errors.append(f"{path}.{key}: {value!r} is not a finite number")
+
+
+# -------------------------------------------------------- episode_assets_v1 (DEC-155)
+
+EPISODE_ASSETS_SCHEMA_NAME = "episode_assets_v1"
+
+# Where a line's word timings came from, in spec 6.4's order of truth: the
+# TTS provider's own, forced alignment through the STT chain (opt-in), or an
+# even split labelled "approximate timing".
+WORD_SOURCES = ("provider", "alignment", "even_split")
+SFX_STATES = ("resolved", "missing")
+
+_EPISODE_ASSETS_LINE_SCHEMA = _document(
+    {"words_source": {"type": "string", "enum": list(WORD_SOURCES)}},
+    # The STT link that aligned the words; only with "alignment".
+    optional={"aligned_by": _text(120)},
+)
+
+_EPISODE_ASSETS_SFX_SCHEMA = _document({
+    "scene_id": {"type": "string", "pattern": SCENE_ID_PATTERN},
+    "at": {"type": "string", "pattern": SFX_AT_PATTERN},
+    "cue": {"type": "string", "pattern": _ID_PATTERN},
+    "pack": {"type": "string", "enum": list(SFX_PACKS)},
+    # The shipped file the cue resolved to; null when it is missing.
+    "file": _or_null(_RELATIVE_PATH),
+    # On the episode's timeline: the scene's start, or its line's.
+    "offset_s": {"type": "number", "minimum": 0},
+    "state": {"type": "string", "enum": list(SFX_STATES)},
+})
+
+# Null until the step resolves it. file/sha256/licence are null together
+# when no track carries the mood.
+_EPISODE_ASSETS_BGM_SCHEMA = _or_null(_document({
+    "mood": {"type": "string", "pattern": _ID_PATTERN},
+    "dominant_emotion": {"type": "string", "enum": list(EMOTIONS)},
+    # emotion -> its scenes' summed seconds, checked in episode_assets_errors.
+    "weights_s": {"type": "object"},
+    "file": _or_null(_RELATIVE_PATH),
+    "sha256": _or_null(_SHA256),
+    "licence": {"type": ["string", "null"], "minLength": 1, "maxLength": 200},
+}))
+
+# The grid approval, and the fingerprint of what it approved: once the
+# current fingerprint differs, the approval is stale (derived, never cleared).
+_EPISODE_ASSETS_APPROVED_SCHEMA = _or_null(_document({
+    "at": _NON_EMPTY_STRING,
+    "fingerprint": _SHA256,
+}))
+
+EPISODE_ASSETS_SCHEMA = _document({
+    "$schema": {"type": "string", "const": EPISODE_ASSETS_SCHEMA_NAME},
+    "ep": _EP,
+    # keyed by line id -> _EPISODE_ASSETS_LINE_SCHEMA, checked in episode_assets_errors.
+    "lines": {"type": "object"},
+    "sfx": {"type": "array", "items": _EPISODE_ASSETS_SFX_SCHEMA},
+    "bgm": _EPISODE_ASSETS_BGM_SCHEMA,
+    "approved": _EPISODE_ASSETS_APPROVED_SCHEMA,
+    "created_at": _NON_EMPTY_STRING,
+    "updated_at": _NON_EMPTY_STRING,
+})
+
+
+def episode_assets_errors(doc) -> list:
+    """``validate()`` against ``EPISODE_ASSETS_SCHEMA``, plus: ``lines`` keyed
+    by line ids, ``aligned_by`` exactly when the words were aligned, an SFX
+    cue's file there exactly when it resolved, the BGM weights keyed by
+    emotions with the dominant one the heaviest, and a track's file, sha256
+    and licence recorded together."""
+    errors = validate(doc, EPISODE_ASSETS_SCHEMA)
+    if errors:
+        return errors
+
+    errors = []
+    for key, entry in doc["lines"].items():
+        path = f"$.lines.{key}"
+        if not (isinstance(key, str) and _search(LINE_ID_PATTERN, key)):
+            errors.append(f"$.lines: {key!r} is not a line id")
+            continue
+        found = validate(entry, _EPISODE_ASSETS_LINE_SCHEMA, path)
+        if found:
+            errors.extend(found)
+            continue
+        if (entry["words_source"] == "alignment") != ("aligned_by" in entry):
+            errors.append(f"{path}.aligned_by: present exactly when words_source is 'alignment'")
+
+    for i, cue in enumerate(doc["sfx"]):
+        if (cue["state"] == "resolved") != (cue["file"] is not None):
+            errors.append(f"$.sfx[{i}].file: a 'resolved' cue has a file and a 'missing' one has none")
+
+    bgm = doc["bgm"]
+    if bgm is not None:
+        weights = bgm["weights_s"]
+        bad_weights = False
+        for emotion, seconds in weights.items():
+            if emotion not in EMOTIONS:
+                errors.append(f"$.bgm.weights_s: {emotion!r} is not an emotion")
+                bad_weights = True
+            elif not _is_type(seconds, "number") or seconds < 0:
+                errors.append(f"$.bgm.weights_s.{emotion}: {seconds!r} is not a number of seconds >= 0")
+                bad_weights = True
+        if weights and not bad_weights:
+            heaviest = max(weights.values())
+            if weights.get(bgm["dominant_emotion"]) != heaviest:
+                errors.append(
+                    f"$.bgm.dominant_emotion: {bgm['dominant_emotion']!r} does not carry the largest "
+                    f"weight ({heaviest}s)"
+                )
+        recorded = [bgm[key] is not None for key in ("file", "sha256", "licence")]
+        if any(recorded) and not all(recorded):
+            errors.append("$.bgm: file, sha256 and licence are recorded together, or all null")
+
+    return errors
+
+
+# ------------------------------------------------------- render_manifest_v1 (spec 2.9)
+
+RENDER_MANIFEST_SCHEMA_NAME = "render_manifest_v1"
+
+# A render is made with one profile (DEC-157): "final" for the episode,
+# "golden" for the parity fixture (spec 13).
+RENDER_PROFILES = ("final", "golden")
+RENDER_ENCODERS = ("libx264", "auto")
+# One per ffmpeg/ffprobe command, in the order they run: S per shot, E the
+# end card, A the audio mix, L1 the loudness measurement, F the final pass,
+# L2 the loudness correction, P the probe, M the framemd5.
+RENDER_STAGE_KINDS = (
+    "shot", "end_card", "audio_mix", "loudness_measure", "final", "loudness_apply", "probe", "framemd5",
+)
+RENDER_STAGE_STATES = ("running", "done", "failed", "cancelled", "cached")
+# Only these stages' outputs are kept in render/cache/ and reused.
+RENDER_CACHED_KINDS = ("shot", "end_card")
+RENDER_INPUT_ROLES = ("shot", "line", "sfx", "bgm", "overlay")
+RENDER_STAGE_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_:.-]{0,39}$"
+STDERR_TAIL_MAX = 4000
+
+_RENDER_INPUT_SCHEMA = _document({
+    "role": {"type": "string", "enum": list(RENDER_INPUT_ROLES)},
+    # The shot, line, cue or overlay it belongs to; null for the bed.
+    "id": {"type": ["string", "null"], "maxLength": 40, "pattern": _ID_PATTERN},
+    # Where it came from (the story's folder, or the shipped assets/)...
+    "source": _RELATIVE_PATH,
+    # ... and its copy under render/, named by its content hash.
+    "staged": _RELATIVE_PATH,
+    "sha256": _SHA256,
+})
+
+# Written before its command runs (state "running"), then settled.
+_RENDER_STAGE_SCHEMA = _document({
+    "id": {"type": "string", "pattern": RENDER_STAGE_ID_PATTERN},
+    "kind": {"type": "string", "enum": list(RENDER_STAGE_KINDS)},
+    "argv": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+    "cache_key": {"type": ["string", "null"], "pattern": SHA256_PATTERN},
+    "state": {"type": "string", "enum": list(RENDER_STAGE_STATES)},
+    "output": _or_null(_RELATIVE_PATH),
+    "output_sha256": {"type": ["string", "null"], "pattern": SHA256_PATTERN},
+    "seconds": {"type": ["number", "null"], "minimum": 0},
+    "stderr_tail": {"type": ["string", "null"], "maxLength": STDERR_TAIL_MAX},
+})
+
+_RENDER_PARAMS_SCHEMA = _document({
+    "subtitles": {"type": "string", "enum": list(SUBTITLE_MODES)},
+    "encoder": {"type": "string", "enum": list(RENDER_ENCODERS)},
+})
+
+# The framemd5 parity key is "<version>/<machine>" (DEC-156).
+_RENDER_FFMPEG_SCHEMA = _document({
+    "version": _text(120),
+    "machine": _text(40),
+})
+
+# The font the text was burned with, and why it was chosen (DEC-159); null
+# when the render burns no text at all.
+_RENDER_FONT_SCHEMA = _or_null(_document({
+    "family": _text(120),
+    "file": _RELATIVE_PATH,
+    "sha256": _SHA256,
+    "reason": _text(300),
+}))
+
+_RENDER_LOUDNESS_SCHEMA = _document({
+    "i": {"type": "number"},
+    "tp": {"type": "number"},
+    "lra": {"type": "number"},
+})
+
+# Null until the render finishes.
+_RENDER_OUTPUT_SCHEMA = _or_null(_document({
+    "path": _RELATIVE_PATH,
+    "sha256": _SHA256,
+    "duration_s": {"type": "number", "minimum": 0},
+    "width": {"type": "integer", "minimum": 1},
+    "height": {"type": "integer", "minimum": 1},
+    "fps": {"type": "string", "pattern": r"^[1-9][0-9]*/[1-9][0-9]*$"},
+    "loudness": _RENDER_LOUDNESS_SCHEMA,
+    "framemd5": _document({"file": _RELATIVE_PATH, "sha256": _SHA256}),
+}))
+
+_RENDER_TIMINGS_SCHEMA = _document({
+    "started_at": _NON_EMPTY_STRING,
+    "finished_at": _TIMESTAMP_OR_NULL,
+    "total_s": {"type": ["number", "null"], "minimum": 0},
+})
+
+RENDER_MANIFEST_SCHEMA = _document({
+    "$schema": {"type": "string", "const": RENDER_MANIFEST_SCHEMA_NAME},
+    "ep": _EP,
+    "profile": {"type": "string", "enum": list(RENDER_PROFILES)},
+    "params": _RENDER_PARAMS_SCHEMA,
+    "ffmpeg": _RENDER_FFMPEG_SCHEMA,
+    "font": _RENDER_FONT_SCHEMA,
+    "inputs": {"type": "array", "items": _RENDER_INPUT_SCHEMA},
+    "stages": {"type": "array", "items": _RENDER_STAGE_SCHEMA},
+    "output": _RENDER_OUTPUT_SCHEMA,
+    "timings": _RENDER_TIMINGS_SCHEMA,
+    # A length or a loudness outside the target: reported, not a failure.
+    "warnings": {"type": "array", "items": _text(300)},
+    "created_at": _NON_EMPTY_STRING,
+    "updated_at": _NON_EMPTY_STRING,
+})
+
+
+def render_manifest_errors(doc) -> list:
+    """``validate()`` against ``RENDER_MANIFEST_SCHEMA``, plus the rules of a
+    stage's life: ids unique; a running stage has no result yet; a done or
+    cached one names its output and its sha256; only a shot or the end card
+    is cached, and by its key. An output is recorded only once every stage
+    is done or cached, and its loudness is finite."""
+    errors = validate(doc, RENDER_MANIFEST_SCHEMA)
+    if errors:
+        return errors
+
+    errors = []
+    seen = set()
+    for i, stage in enumerate(doc["stages"]):
+        path = f"$.stages[{i}]"
+        if stage["id"] in seen:
+            errors.append(f"{path}.id: {stage['id']!r} is listed twice")
+        seen.add(stage["id"])
+        state = stage["state"]
+        if state == "running" and (stage["output_sha256"] is not None or stage["seconds"] is not None):
+            errors.append(f"{path}: a 'running' stage has no output_sha256 or seconds yet")
+        if state in ("done", "cached") and (stage["output"] is None or stage["output_sha256"] is None):
+            errors.append(f"{path}: a {state!r} stage names its output and output_sha256")
+        if state == "cached":
+            if stage["kind"] not in RENDER_CACHED_KINDS:
+                errors.append(f"{path}.state: a {stage['kind']!r} stage is never cached ({list(RENDER_CACHED_KINDS)})")
+            if stage["cache_key"] is None:
+                errors.append(f"{path}.cache_key: a 'cached' stage names the key it was found under")
+
+    output = doc["output"]
+    if output is not None:
+        unsettled = [stage["id"] for stage in doc["stages"] if stage["state"] not in ("done", "cached")]
+        if unsettled:
+            errors.append(f"$.output: recorded while stage(s) {unsettled} are not done or cached")
+        _finite_errors(errors, "$.output.loudness", output["loudness"])
+
+    return errors
+
+
+# --------------------------------------------------------- metadata_pack_v1 (spec 2.10)
+
+METADATA_PACK_SCHEMA_NAME = "metadata_pack_v1"
+
+METADATA_HASHTAGS_RANGE = (3, 6)
+# One tag, with its "#", as it is pasted into the platform.
+HASHTAG_PATTERN = r"^#[^\s#]{1,59}$"
+
+_HASHTAGS = {
+    "type": "array", "items": {"type": "string", "pattern": HASHTAG_PATTERN},
+    "minItems": METADATA_HASHTAGS_RANGE[0], "maxItems": METADATA_HASHTAGS_RANGE[1],
+}
+
+_METADATA_PLATFORM_SCHEMA = _document({
+    "title": _text(100),
+    # Ends with the script's next_episode_teaser (appended by Python).
+    "description": _text(5000),
+    "hashtags": _HASHTAGS,
+    "hook_text": _text(150),
+    # The teaser + "PART n+1 ->" / "PARTIE n+1 ->".
+    "pinned_comment": _text(500),
+    # Relative to the episode's folder.
+    "cover": _RELATIVE_PATH,
+    "written_at": _NON_EMPTY_STRING,
+}, optional={
+    # A French story's English title and tags, and only a French story's.
+    "title_en": _text(100),
+    "hashtags_en": _HASHTAGS,
+})
+
+METADATA_PACK_SCHEMA = _document({
+    "$schema": {"type": "string", "const": METADATA_PACK_SCHEMA_NAME},
+    "ep": _EP,
+    "language": {"type": "string", "enum": list(LANGUAGES)},
+    # What the pack was written from: the script's rev and the render's file.
+    "script_rev": {"type": "integer", "minimum": 1},
+    "render_sha256": _SHA256,
+    # keyed by platform -> _METADATA_PLATFORM_SCHEMA, checked in metadata_pack_errors.
+    "platforms": {"type": "object"},
+    "created_at": _NON_EMPTY_STRING,
+    "updated_at": _NON_EMPTY_STRING,
+})
+
+_EN_FIELDS = ("title_en", "hashtags_en")
+
+
+def metadata_pack_errors(doc) -> list:
+    """``validate()`` against ``METADATA_PACK_SCHEMA``, plus: ``platforms``
+    keyed by ``PLATFORMS``; the English fields on every platform of a
+    French story and on none of an English one; no tag listed twice."""
+    errors = validate(doc, METADATA_PACK_SCHEMA)
+    if errors:
+        return errors
+
+    errors = []
+    french = doc["language"] == "fr"
+    for key, entry in doc["platforms"].items():
+        path = f"$.platforms.{key}"
+        if key not in PLATFORMS:
+            errors.append(f"$.platforms: {key!r} is not one of {list(PLATFORMS)}")
+            continue
+        found = validate(entry, _METADATA_PLATFORM_SCHEMA, path)
+        if found:
+            errors.extend(found)
+            continue
+        for field in _EN_FIELDS:
+            if french and field not in entry:
+                errors.append(f"{path}.{field}: required for a French story")
+            elif not french and field in entry:
+                errors.append(f"{path}.{field}: only a French story carries English fields")
+        for field in ("hashtags", "hashtags_en"):
+            tags = entry.get(field) or []
+            for tag in sorted({tag for tag in tags if tags.count(tag) > 1}):
+                errors.append(f"{path}.{field}: {tag!r} is listed twice")
 
     return errors
 

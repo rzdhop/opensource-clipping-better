@@ -1,5 +1,5 @@
-"""The on-disk story workspace and its index (spec 2, 2.1-2.8; phase-1 plan 2,
-phase-2 plan 2, phase-3 plan 3).
+"""The on-disk story workspace and its index (spec 2, 2.1-2.11; phase-1 plan 2,
+phase-2 plan 2, phase-3 plan 3, phase-4 plan 2 "Documents").
 
 Layout, under the same ``outputs/`` directory the job store uses::
 
@@ -25,8 +25,15 @@ Layout, under the same ``outputs/`` directory the job store uses::
             refs/image.png
         episodes/ep<NN>/            # NN = 01..99
             script.json             # EpisodeScript (episode_script_v1)
-            storyboard.json         # Storyboard (storyboard_v1)
+            storyboard.json         # Storyboard (storyboard_v1), each shot's image record included
+            assets.json             # word sources, SFX, BGM, the grid approval (episode_assets_v1)
+            render_manifest.json    # RenderManifest (render_manifest_v1)
+            metadata_pack.json      # MetadataPack (metadata_pack_v1)
+            episode_final.mp4, subtitles.ass, cover.jpg, cost_ledger.json  # EPISODE_FILE_NAMES
             assets/voice/line_<NN>.mp3|.wav|.json  # the opt-in voice measurement
+            assets/shots/shot_<NN>.png|.jpg|.jpeg|.webp  # each shot's image
+            render/                 # the renderer's working folder: in/, fonts/, cache/, stems/
+        cache/gen/                  # the generation cache and journal (providers/gencache.py)
         cost_ledger.json            # what each call cost (ledger.CostLedger)
         activity.log                # one line per thing a step printed
 
@@ -45,8 +52,8 @@ Rules this module keeps:
   above it. A symlink is kept and never followed.
 - An episode number is a real ``int`` in 1..99 (``check_episode``: not a bool,
   not ``"1"``, not ``1.0``), checked before ``ep<NN>`` is built; an episode
-  document or asset name is checked the same way, and the ``episodes/`` levels
-  follow the rule above.
+  document, asset, file or render-folder name is checked the same way, and
+  the ``episodes/`` levels follow the rule above. So do ``cache/gen/``.
 - Every JSON write is atomic: a temp file in the same directory, then
   ``os.replace``; a failure leaves the previous file byte-identical and no
   temp file behind. (``outputs/jobs.json`` is written in place; this does not
@@ -58,7 +65,8 @@ Rules this module keeps:
   (``recompute_group_approvals``), so they cannot go stale either.
 - Episode documents never read or write story.json: writing, reading or
   listing an episode changes neither the story's approvals, its status nor
-  its index entry. Deleting the story removes its episodes with its folder.
+  its index entry. Deleting the story removes its episodes (their render/
+  folders included) and its cache/ with its folder.
 - Deleting an entity leaves no id pointing at it: a deleted character leaves
   the other characters' ``relationships``, its props' ``owner_char_id``, the
   season arc and the places proposal; a deleted place leaves the characters'
@@ -174,20 +182,53 @@ EPISODE_DIR_NAME = re.compile(r"^ep[0-9]{2}$")
 # script a storyboard follows) need the story, so the caller runs them.
 EPISODE_SCRIPT_DOC = "script.json"
 EPISODE_STORYBOARD_DOC = "storyboard.json"
-EPISODE_DOC_NAMES = (EPISODE_SCRIPT_DOC, EPISODE_STORYBOARD_DOC)
+EPISODE_ASSETS_DOC = "assets.json"
+EPISODE_RENDER_MANIFEST_DOC = "render_manifest.json"
+EPISODE_METADATA_PACK_DOC = "metadata_pack.json"
+EPISODE_DOC_NAMES = (
+    EPISODE_SCRIPT_DOC, EPISODE_STORYBOARD_DOC,
+    EPISODE_ASSETS_DOC, EPISODE_RENDER_MANIFEST_DOC, EPISODE_METADATA_PACK_DOC,
+)
 EPISODE_DOC_VALIDATORS = {
     EPISODE_SCRIPT_DOC: schemas.episode_script_errors,
     EPISODE_STORYBOARD_DOC: schemas.storyboard_errors,
+    EPISODE_ASSETS_DOC: schemas.episode_assets_errors,
+    EPISODE_RENDER_MANIFEST_DOC: schemas.render_manifest_errors,
+    EPISODE_METADATA_PACK_DOC: schemas.metadata_pack_errors,
 }
 # The episode documents that carry created_at/updated_at: every one of them
 # (spec 2: every JSON document carries an updated_at).
-EPISODE_DOCS_WITH_TIMESTAMPS = (EPISODE_SCRIPT_DOC, EPISODE_STORYBOARD_DOC)
+EPISODE_DOCS_WITH_TIMESTAMPS = (
+    EPISODE_SCRIPT_DOC, EPISODE_STORYBOARD_DOC,
+    EPISODE_ASSETS_DOC, EPISODE_RENDER_MANIFEST_DOC, EPISODE_METADATA_PACK_DOC,
+)
 
 # The files an episode keeps in assets/<kind>/, and the only names each kind
-# may hold. Phase 4 adds shots, sfx and bgm.
+# may hold. A shot's image is named by the shot's own number (sh03 ->
+# shot_03.<ext>). SFX and BGM are not copied: assets.json names the shipped
+# files, and the renderer stages what it uses into render/in/.
 EPISODE_ASSETS_DIRNAME = "assets"
-EPISODE_ASSET_KINDS = ("voice",)
-EPISODE_ASSET_NAME_PATTERNS = {"voice": re.compile(r"^line_[0-9]{2}\.(mp3|wav|json)$")}
+EPISODE_ASSET_KINDS = ("voice", "shots")
+EPISODE_ASSET_NAME_PATTERNS = {
+    "voice": re.compile(r"^line_[0-9]{2}\.(mp3|wav|json)$"),
+    "shots": re.compile(schemas.SHOT_IMAGE_NAME_PATTERN),
+}
+
+# The files at the top of an episode's folder besides its documents -- the
+# renderer's and the metadata step's outputs and the episode's view of the
+# cost ledger -- and nothing else: a name is checked against this list
+# before any path is built (episode_file_path).
+EPISODE_FILE_NAMES = ("episode_final.mp4", "subtitles.ass", "cover.jpg", "cost_ledger.json")
+
+# The renderer's working folder, episodes/ep<NN>/render/, and the only
+# folders below it the store hands out: staged inputs (named by their
+# content hash), fonts, the per-shot cache, the mix's stems.
+EPISODE_RENDER_DIRNAME = "render"
+EPISODE_RENDER_SUBDIRS = ("in", "fonts", "cache", "stems")
+
+# The story's generation cache and submit journal, <story>/cache/gen/, one
+# level at a time (clipping/providers/gencache.py takes it as its root).
+GEN_CACHE_DIRS = ("cache", "gen")
 
 INDEX_FIELDS = ("story_id", "title", "language", "style_template_id", "status", "created_at", "updated_at")
 
@@ -1377,6 +1418,73 @@ class StoryStore:
             if os.path.islink(path) or (os.path.lexists(path) and not os.path.isfile(path)):
                 raise KeyError(f"{label}{filename}")
         return path
+
+    def episode_file_path(self, story_id, ep, name, *, create=False) -> str:
+        """The path of ``<story>/episodes/ep<NN>/<name>``, one of the files at
+        the top of the episode's folder (``EPISODE_FILE_NAMES``: the final
+        video, its subtitles, the cover, the episode's cost-ledger view), to
+        write the file or to serve it.
+
+        *name* is checked against that list before any path is built (an
+        episode document goes through ``read_episode_doc``/
+        ``write_episode_doc``, and any other name is refused), then the
+        episode number and the story id. The ``episode_asset_path`` rules
+        follow: every folder a real directory (``_descend``), *create* makes
+        the missing ones, the file need not exist but whatever is in its place
+        must be a regular file. KeyError for all of these -- a symlink at any
+        level, the file's own included, is refused and never followed.
+        """
+        if not isinstance(name, str) or name not in EPISODE_FILE_NAMES:
+            raise KeyError(name)
+        ep = check_episode(ep)
+        self._check_id(story_id)
+        with self._lock:
+            path = os.path.join(self.episode_dir(story_id, ep, create=create), name)
+            if os.path.islink(path) or (os.path.lexists(path) and not os.path.isfile(path)):
+                raise KeyError(f"{self._episode_label(story_id, ep)}{name}")
+        return path
+
+    def episode_render_dir(self, story_id, ep, sub=None, *, create=False) -> str:
+        """The real path of ``<story>/episodes/ep<NN>/render/``, or of the
+        folder *sub* below it (``EPISODE_RENDER_SUBDIRS``).
+
+        *sub*, the episode number and the story id are checked before any
+        path is built. Every level must be a real directory directly inside
+        the one above it (``_descend``): a symlink at any level -- ``render/``
+        and *sub* included -- is refused and never followed. *create* makes
+        the missing levels, one at a time. KeyError for an unknown story, a
+        missing level (without *create*), or a level that is anything but a
+        real directory. Story delete removes it with the story's folder.
+        """
+        if sub is not None and (not isinstance(sub, str) or sub not in EPISODE_RENDER_SUBDIRS):
+            raise KeyError(sub)
+        ep = check_episode(ep)
+        self._check_id(story_id)
+        parts = (EPISODE_RENDER_DIRNAME,) if sub is None else (EPISODE_RENDER_DIRNAME, sub)
+        label = self._episode_label(story_id, ep) + "".join(f"{part}/" for part in parts)
+        with self._lock:
+            return _descend(self.episode_dir(story_id, ep, create=create), parts, create=create, label=label)
+
+    # -------------------------------------------------------- generation cache
+
+    def gen_cache_dir(self, story_id, *, create=False) -> str:
+        """The real path of the story's generation cache, ``<story>/cache/gen/``
+        -- the root ``clipping/providers/gencache.py`` is given, which checks
+        nothing about it itself.
+
+        The story id is checked before any path is built; ``cache/`` and
+        ``gen/`` must each be a real directory directly inside the one above
+        it (``_descend``): a symlink at either level is refused and never
+        followed. *create* makes the missing levels, one at a time. KeyError
+        for an unknown story, a missing level (without *create*), or a level
+        that is anything but a real directory. Like the episodes, the cache
+        never touches story.json, and story delete removes it with the story's
+        folder.
+        """
+        self._check_id(story_id)
+        label = self._label(story_id) + "".join(f"{part}/" for part in GEN_CACHE_DIRS)
+        with self._lock:
+            return _descend(self.story_dir(story_id), GEN_CACHE_DIRS, create=create, label=label)
 
     # -------------------------------------------------------------- index
 
