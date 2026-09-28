@@ -11,6 +11,10 @@ refuses a paid link without ``allow_paid`` and a budget verdict and asks the
 limiter before a free one, so an adapter here is only ever called for a link
 that may run (DEC-097). The model ids come from spec section 8.7 and are
 verified live only for the keyed providers (A-034).
+
+With a generation cache the runner also passes ``on_submit``: fal reports the
+queued request through it, and ``FalAdapter.resume`` finishes a request an
+earlier attempt submitted (DEC-151/152). Without one, nothing is passed.
 """
 
 from __future__ import annotations
@@ -22,6 +26,7 @@ import urllib.parse
 
 from . import generation, pricing
 from .errors import ProviderError
+from .gencache import RequestFailed
 from .generation import IMAGE, IMAGE_EDIT, GenResult, register_adapter
 from .registry import describe
 from .transport import (
@@ -99,6 +104,9 @@ def _ext_for(mime: str, default="png") -> str:
 
 class _Adapter:
     provider = ""
+    # Every request goes out through the injected transport, so a failure raised
+    # before its first call provably sent nothing (DEC-153).
+    speaks_through_transport = True
 
     def estimate(self, link, request):
         if not generation.is_paid(link):
@@ -229,48 +237,94 @@ class FalAdapter(_Adapter):
                     "aspect_ratio": _aspect_ratio(request.width, request.height)}
         raise ProviderError(f"{describe(link)}: not an image model of this adapter (video adapters arrive in phase 6)")
 
-    def generate(self, link, request, *, credentials, on_log, transport=None,
-                 sleep_fn=time.sleep, time_fn=time.monotonic, **_):
-        transport = transport or urllib_transport
-        app = FAL_APPS.get(link.model) or _unknown_model(link, FAL_APPS)
-        headers = {"Authorization": f"Key {credentials['FAL_KEY']}"}
-        seed = _seed(request)
-        label = describe(link)
+    def _submit(self, link, request, seed, *, app, headers, transport) -> dict:
+        """POST the job to the queue: ``{request_id, status_url, response_url}``.
+        fal bills it from here on, whatever happens next (A-071)."""
         submitted = request_json(transport, "POST", f"{FAL_QUEUE}/{app}", headers=headers,
                                  json_body=self._inputs(link, request, seed), timeout=DEFAULT_TIMEOUT)
         request_id = submitted.get("request_id")
         if not request_id:
-            raise ProviderError(f"{label}: the queue answered without a request_id: {submitted}")
-        status_url = submitted.get("status_url") or f"{FAL_QUEUE}/{app}/requests/{request_id}/status"
-        response_url = submitted.get("response_url") or f"{FAL_QUEUE}/{app}/requests/{request_id}"
+            raise ProviderError(f"{describe(link)}: the queue answered without a request_id: {submitted}")
+        return {
+            "request_id": request_id,
+            "status_url": submitted.get("status_url") or f"{FAL_QUEUE}/{app}/requests/{request_id}/status",
+            "response_url": submitted.get("response_url") or f"{FAL_QUEUE}/{app}/requests/{request_id}",
+        }
 
+    def _poll(self, link, queued, *, headers, transport, on_log, sleep_fn, time_fn) -> None:
+        """Wait, then ask, until the request is COMPLETED. :class:`RequestFailed`
+        when fal settles it otherwise; a plain error past the poll budget."""
+        label = describe(link)
+        request_id = queued["request_id"]
         deadline = time_fn() + FAL_POLL_BUDGET_SECONDS
         polls = 0
         while True:
             sleep_fn(FAL_POLL_INTERVAL_SECONDS)
-            status = request_json(transport, "GET", status_url, headers=headers, timeout=DEFAULT_TIMEOUT)
+            status = request_json(transport, "GET", queued["status_url"], headers=headers, timeout=DEFAULT_TIMEOUT)
             state = str(status.get("status") or "").upper()
             polls += 1
             if state == "COMPLETED":
-                break
+                return
             if state in ("FAILED", "ERROR", "CANCELLED"):
-                raise ProviderError(f"{label}: request {request_id} {state.lower()}: {status.get('error') or status}")
+                raise RequestFailed(f"{label}: request {request_id} {state.lower()}: {status.get('error') or status}")
             if polls % 5 == 0:
                 position = status.get("queue_position")
                 on_log(f"   ⏳ {label}: {state.lower() or 'waiting'}" + (f", queue position {position}" if position is not None else ""))
             if time_fn() >= deadline:
                 raise ProviderError(f"{label}: request {request_id} still {state or 'pending'} after {FAL_POLL_BUDGET_SECONDS:.0f}s")
 
-        result = request_json(transport, "GET", response_url, headers=headers, timeout=DEFAULT_TIMEOUT)
+    def _fetch(self, link, request, queued, seed, *, headers, transport, on_submit=None):
+        """Read the completed answer, report its image URL (so a failed download
+        can be resumed), then download it."""
+        result = request_json(transport, "GET", queued["response_url"], headers=headers, timeout=DEFAULT_TIMEOUT)
         images = result.get("images") or ([result["image"]] if isinstance(result.get("image"), dict) else [])
         if not images:
-            raise ProviderError(f"{label}: the answer carried no image: {str(result)[:200]}")
+            raise RequestFailed(f"{describe(link)}: the answer carried no image: {str(result)[:200]}")
         first = images[0]
-        data = request_bytes(transport, "GET", first["url"], headers={}, timeout=DEFAULT_TIMEOUT)
-        ext = _ext_for(first.get("content_type") or "", default=("jpg" if first["url"].lower().endswith((".jpg", ".jpeg")) else "png"))
+        output = {"url": first["url"], "content_type": first.get("content_type"), "width": first.get("width"),
+                  "height": first.get("height"), "seed": result.get("seed", seed)}
+        if on_submit is not None:
+            on_submit({**queued, "output": output})
+        return self._download(link, request, queued, output, seed, transport=transport)
+
+    def _download(self, link, request, queued, output, seed, *, transport):
+        data = request_bytes(transport, "GET", output["url"], headers={}, timeout=DEFAULT_TIMEOUT)
+        ext = _ext_for(output.get("content_type") or "", default=("jpg" if output["url"].lower().endswith((".jpg", ".jpeg")) else "png"))
         path = write_output(_out_dir(request), _name(request, link, seed), data, ext)
-        return GenResult(provider="fal", model=link.model, paths=(path,), seed=result.get("seed", seed),
-                         meta={"request_id": request_id, "width": first.get("width"), "height": first.get("height")})
+        return GenResult(provider="fal", model=link.model, paths=(path,), seed=output["seed"],
+                         meta={"request_id": queued["request_id"], "width": output.get("width"), "height": output.get("height")})
+
+    def generate(self, link, request, *, credentials, on_log, transport=None,
+                 sleep_fn=time.sleep, time_fn=time.monotonic, on_submit=None, **_):
+        transport = transport or urllib_transport
+        app = FAL_APPS.get(link.model) or _unknown_model(link, FAL_APPS)
+        headers = {"Authorization": f"Key {credentials['FAL_KEY']}"}
+        seed = _seed(request)
+        queued = self._submit(link, request, seed, app=app, headers=headers, transport=transport)
+        if on_submit is not None:
+            # Journaled between the queue's answer and the first poll (DEC-151).
+            on_submit(dict(queued))
+        self._poll(link, queued, headers=headers, transport=transport, on_log=on_log, sleep_fn=sleep_fn,
+                   time_fn=time_fn)
+        return self._fetch(link, request, queued, seed, headers=headers, transport=transport, on_submit=on_submit)
+
+    def resume(self, link, request, entry, *, credentials, on_log, transport=None,
+               sleep_fn=time.sleep, time_fn=time.monotonic, on_submit=None, **_):
+        """Finish the request a journal *entry* holds: poll and fetch the same
+        ``request_id``, or download its image when the journal already has the
+        URL. Never a new submit (DEC-152)."""
+        transport = transport or urllib_transport
+        queued = dict(entry.get("request") or {})
+        output = queued.pop("output", None)
+        if not all(queued.get(name) for name in ("request_id", "status_url", "response_url")):
+            raise ProviderError(f"{describe(link)}: the journal holds no request to resume")
+        headers = {"Authorization": f"Key {credentials['FAL_KEY']}"}
+        seed = entry.get("seed") if entry.get("seed") is not None else request.seed
+        if output and output.get("url"):
+            return self._download(link, request, queued, output, seed, transport=transport)
+        self._poll(link, queued, headers=headers, transport=transport, on_log=on_log, sleep_fn=sleep_fn,
+                   time_fn=time_fn)
+        return self._fetch(link, request, queued, seed, headers=headers, transport=transport, on_submit=on_submit)
 
 
 # ------------------------------------------------------------------ openai
@@ -283,6 +337,7 @@ def _openai_client(**kwargs):
 
 class OpenAIImageAdapter(_Adapter):
     provider = "openai"
+    speaks_through_transport = False  # the SDK sends: a failure never proves nothing went out
 
     def generate(self, link, request, *, credentials, on_log, transport=None, client_factory=None, **_):
         model, quality = OPENAI_MODELS.get(link.model) or _unknown_model(link, OPENAI_MODELS)

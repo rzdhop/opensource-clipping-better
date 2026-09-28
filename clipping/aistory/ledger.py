@@ -60,7 +60,10 @@ class CostLedger:
 
     # ------------------------------------------------------------- public
 
-    def append(self, *, step, provider, model, unit, qty, est_usd, paid, ep=None) -> dict:
+    def append(self, *, step, provider, model, unit, qty, est_usd, paid, ep=None, note=None) -> dict:
+        """One row. *note* says why a request was booked without an answer (the
+        generation journal's conservative rule, DEC-153); a row has no ``note``
+        key unless one is given."""
         if unit not in UNITS:
             raise ValueError(f"unit must be one of {', '.join(UNITS)}, not {unit!r}")
         entry = {
@@ -74,6 +77,8 @@ class CostLedger:
             "est_usd": round(float(est_usd), 4),
             "paid": bool(paid),
         }
+        if note is not None:
+            entry["note"] = str(note)
         with self._lock:
             data = self._load()
             data["entries"].append(entry)

@@ -26,8 +26,9 @@ import time
 from collections import namedtuple
 from dataclasses import dataclass, field
 
-from . import errors
+from . import errors, gencache
 from .registry import ChainError, Link, describe, parse_chain
+from .transport import urllib_transport
 
 # ------------------------------------------------------------------ kinds
 
@@ -326,7 +327,9 @@ class NoRunnableLink(errors.ProviderError):
 #   probe(link, *, credentials, **kw) -> (ok: bool, note: str)
 #   generate(link, request, *, credentials, on_log, transport=None, **kw) -> GenResult
 # ``kw`` carries ``transport`` when one is injected (tests) and, for a local
-# link, ``env`` (where LOCAL_COMFYUI_URL / LOCAL_OLLAMA_URL come from).
+# link, ``env`` (where LOCAL_COMFYUI_URL / LOCAL_OLLAMA_URL come from). With a
+# generation cache it also carries ``on_submit``, ``sleep_fn`` and ``time_fn``,
+# and a queued adapter offers ``resume(link, request, entry, **kw)`` (fal).
 # Exceptions raised by ``generate`` carry ``.status_code`` when they come from
 # HTTP, so ``errors.classify`` and ``errors.is_model_unavailable`` apply.
 _ADAPTERS = {}
@@ -363,6 +366,7 @@ def run_generation_chain(
     sleep_fn=time.sleep,
     time_fn=time.monotonic,
     cancel=None,
+    cache=None,
 ):
     """Try each link of *chain* in order; return ``(GenResult, link)`` from the first that works.
 
@@ -371,6 +375,13 @@ def run_generation_chain(
     raises to refuse a paid call; its message is printed and the chain moves
     on. *limiter.acquire(provider)* returns a reason to skip a free link, or
     ``None``. *route* is ``auto`` | ``local`` | ``api`` (spec 8.2).
+
+    *cache* is a ``gencache.GenCache`` (DEC-151..153), or ``None``: then nothing
+    below changes. With one, a request that has a key is journaled: a kept
+    answer is served and a submitted request resumed before any gate, every
+    answer is booked through the cache's ``book`` (``meta["booked"]``, so the
+    caller books nothing), and a submit that cannot be journaled or booked
+    raises ``gencache.JournalError``, stopping the chain.
     """
     env = os.environ if env is None else env
     if cancel is not None:
@@ -421,7 +432,7 @@ def run_generation_chain(
             kind, candidates, request, adapter=adapter, credentials=credentials,
             allow_paid=allow_paid, budget_check=budget_check, limiter=limiter,
             transport=transport, on_log=on_log, sleep_fn=sleep_fn, time_fn=time_fn,
-            failures=failures, extra_kwargs={"env": env} if is_local else {},
+            failures=failures, extra_kwargs={"env": env} if is_local else {}, cache=cache,
         )
         if answered is not None:
             return answered
@@ -440,12 +451,30 @@ def _parse_fallback(spec):
 
 def _run_candidates(kind, candidates, request, *, adapter, credentials, allow_paid,
                     budget_check, limiter, transport, on_log, sleep_fn, time_fn, failures,
-                    extra_kwargs=None):
+                    extra_kwargs=None, cache=None):
     """Run *candidates[0]*, swapping to the next one only on "model not available"."""
     for index, link in enumerate(candidates):
         label = describe(link)
         paid = is_paid(link)
         estimate = None
+        journal = cache.journal(kind, link, request, paid=paid, on_log=on_log) if cache is not None else None
+        if journal is not None:
+            # What an earlier run left comes first: a kept answer or a request
+            # to resume costs nothing more, so it passes no gate (DEC-152).
+            found = journal.lookup()
+            if found == gencache.DONE:
+                paths = journal.restore(request)
+                if paths is not None:
+                    return _kept(link, journal, paths, on_log), link
+            elif found == gencache.SUBMITTED:
+                result = _resume(link, request, journal, adapter=adapter, credentials=credentials,
+                                 transport=transport, on_log=on_log, sleep_fn=sleep_fn, time_fn=time_fn,
+                                 failures=failures, extra_kwargs=extra_kwargs or {})
+                if result is None:
+                    return None
+                result.paid = bool(journal.entry.get("paid"))
+                result.est_cost = float(journal.entry.get("est_usd") or 0.0)
+                return result, link
         if paid:
             if not allow_paid:
                 on_log(f"   ⏭ Skipping {label}: paid link; allow_paid is off.")
@@ -468,10 +497,12 @@ def _run_candidates(kind, candidates, request, *, adapter, credentials, allow_pa
                 failures.append((label, reason))
                 return None
 
+        if journal is not None:
+            journal.begin(_usd(estimate) if paid else 0.0)
         outcome = _attempt(link, request, adapter=adapter, credentials=credentials,
                            transport=transport, on_log=on_log, sleep_fn=sleep_fn,
                            time_fn=time_fn, failures=failures, extra_kwargs=extra_kwargs or {},
-                           paid=paid)
+                           paid=paid, journal=journal)
         if outcome is _SWAP:
             nxt = candidates[index + 1] if index + 1 < len(candidates) else None
             if nxt is None:
@@ -491,7 +522,11 @@ _SWAP = object()
 
 
 def _attempt(link, request, *, adapter, credentials, transport, on_log, sleep_fn, time_fn, failures,
-             extra_kwargs=None, paid=False):
+             extra_kwargs=None, paid=False, journal=None):
+    if journal is not None:
+        return _journaled_attempt(link, request, journal, adapter=adapter, credentials=credentials,
+                                  transport=transport, on_log=on_log, sleep_fn=sleep_fn, time_fn=time_fn,
+                                  failures=failures, extra_kwargs=extra_kwargs or {}, paid=paid)
     label = describe(link)
     # A paid request is billed once the provider accepts it (fal: at submit, before
     # the polls), so a retry after a failed poll bills a second job the ledger
@@ -524,6 +559,148 @@ def _attempt(link, request, *, adapter, credentials, transport, on_log, sleep_fn
         on_log(f"   ✅ {label} answered in {time_fn() - started:.1f}s")
         return result
     return None
+
+
+# ------------------------------------------------ journaled calls (DEC-151..153)
+
+class _Sent:
+    """The transport, counting the requests handed to it: a paid call that
+    failed with none counted provably sent nothing, so it is unbilled (DEC-153)."""
+
+    def __init__(self, transport):
+        self._transport = transport or urllib_transport
+        self.calls = 0
+
+    def __call__(self, *args, **kwargs):
+        self.calls += 1
+        return self._transport(*args, **kwargs)
+
+
+def _journal_kwargs(journal, extra_kwargs, sleep_fn, time_fn) -> dict:
+    # The runner's own sleep (cancel-aware when a token is given) and clock, so
+    # a cancel cuts a poll short and leaves the request journaled.
+    return dict(extra_kwargs, on_submit=journal.on_submit, sleep_fn=sleep_fn, time_fn=time_fn)
+
+
+def _journaled_attempt(link, request, journal, *, adapter, credentials, transport, on_log, sleep_fn,
+                       time_fn, failures, extra_kwargs, paid):
+    """``_attempt`` with a journal: the same attempts, glyphs and swap, plus
+    the journal's seams. A request the provider acknowledged is resumed, never
+    submitted again (:func:`_resume`); a paid call that failed before any
+    acknowledgement is booked by the conservative rule; an answer is booked
+    through the journal."""
+    label = describe(link)
+    kwargs = _journal_kwargs(journal, extra_kwargs, sleep_fn, time_fn)
+    max_attempts = 1 if paid else MAX_ATTEMPTS  # DEC-106: a paid request is submitted once
+    for attempt in range(1, max_attempts + 1):
+        on_log(f"   🔁 {label}: attempt {attempt}/{max_attempts}")
+        started = time_fn()
+        sent = _Sent(transport) if paid and getattr(adapter, "speaks_through_transport", False) else None
+        try:
+            result = adapter.generate(link, request, credentials=credentials, on_log=on_log,
+                                      transport=transport if sent is None else sent, **kwargs)
+        except gencache.JournalError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - classified below
+            if journal.state == gencache.SUBMITTED:
+                return _resume(link, request, journal, adapter=adapter, credentials=credentials,
+                               transport=transport, on_log=on_log, sleep_fn=sleep_fn, time_fn=time_fn,
+                               failures=failures, extra_kwargs=extra_kwargs, failure=exc, used=attempt)
+            reason = f"{type(exc).__name__}: {exc}"
+            if paid:
+                journal.unanswered(exc, sent=None if sent is None else sent.calls > 0)
+            if errors.is_model_unavailable(exc):
+                failures.append((label, reason))
+                return _SWAP
+            verdict = errors.classify(exc)
+            retryable = verdict in (errors.RETRY, errors.RATE_LIMITED)
+            if retryable and attempt < max_attempts:
+                wait = errors.retry_after_seconds(exc) or RETRY_BACKOFF_SECONDS
+                on_log(f"   ⚠️ {label} failed | {reason} → retrying in {wait:.0f}s")
+                sleep_fn(wait)
+                continue
+            if retryable and paid:
+                reason += " (paid link: not retried, a second request could be billed again)"
+            glyph = "⚠️" if retryable else "✖"
+            on_log(f"   {glyph} {label} {'failed' if glyph == '⚠️' else 'fatal'} | {reason}")
+            failures.append((label, reason))
+            return None
+        return _journaled_answer(link, journal, result, started=started, on_log=on_log, time_fn=time_fn)
+    return None
+
+
+def _resume(link, request, journal, *, adapter, credentials, transport, on_log, sleep_fn, time_fn,
+            failures, extra_kwargs, failure=None, used=0):
+    """Poll and fetch the journaled request again, up to ``MAX_ATTEMPTS``
+    attempts in this run (DEC-152): a resume is neither a submit nor a charge,
+    so it is retried and never gated again. The answer, or ``None`` when the
+    link ends: the provider settled the request (``failed``) or it is gone
+    (``lost``), both still booked; or it is kept ``submitted`` for the next run
+    (a poll budget spent, a fatal error, the attempts used up)."""
+    label = describe(link)
+    request_id = journal.request_id
+    resume = getattr(adapter, "resume", None)
+    kwargs = _journal_kwargs(journal, extra_kwargs, sleep_fn, time_fn)
+    while True:
+        if failure is not None:
+            reason = f"{type(failure).__name__}: {failure}"
+            settled = None
+            if errors.status_code(failure) in (404, 410):
+                settled = gencache.LOST
+            elif isinstance(failure, gencache.RequestFailed):
+                settled = gencache.FAILED
+            if settled is not None:
+                journal.settle(settled, reason)
+                on_log(f"   ✖ {label} {settled} | {reason}; request {request_id} stays booked")
+                failures.append((label, f"{reason} (request {request_id} {settled}; it stays booked)"))
+                return None
+            retryable = errors.classify(failure) in (errors.RETRY, errors.RATE_LIMITED)
+            if not (retryable and used < MAX_ATTEMPTS and resume is not None):
+                on_log(f"   ⚠️ {label} failed | {reason}; request {request_id} kept for the next run")
+                failures.append((label, f"{reason} (request {request_id} kept for the next run; it stays booked)"))
+                return None
+            wait = errors.retry_after_seconds(failure) or RETRY_BACKOFF_SECONDS
+            on_log(f"   ⚠️ {label} failed | {reason} → resuming request {request_id} in {wait:.0f}s")
+            sleep_fn(wait)
+        if resume is None:
+            reason = f"request {request_id} is journaled but this adapter cannot resume it"
+            on_log(f"   ⚠️ {label}: {reason}; kept for the next run")
+            failures.append((label, reason))
+            return None
+        used += 1
+        on_log(f"   ↩️ {label}: resuming request {request_id} ({used}/{MAX_ATTEMPTS})")
+        started = time_fn()
+        try:
+            result = resume(link, request, dict(journal.entry), credentials=credentials, on_log=on_log,
+                            transport=transport, **kwargs)
+        except gencache.JournalError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - classified at the top of the loop
+            failure = exc
+            continue
+        result = _journaled_answer(link, journal, result, started=started, on_log=on_log, time_fn=time_fn)
+        result.meta["resumed"] = True
+        return result
+
+
+def _journaled_answer(link, journal, result, *, started, on_log, time_fn):
+    if result.meta is None:
+        result.meta = {}
+    journal.answered(result.paths, seed=result.seed, meta=result.meta)
+    result.meta["booked"] = journal.booked
+    result.meta["cache_key"] = journal.key
+    on_log(f"   ✅ {describe(link)} answered in {time_fn() - started:.1f}s")
+    return result
+
+
+def _kept(link, journal, paths, on_log):
+    """The kept answer as a result: no call, no gate, nothing booked again."""
+    entry = journal.entry
+    on_log(f"   ♻️ {describe(link)}: kept answer {journal.key[:12]}, no call made")
+    meta = dict(entry.get("meta") or {})
+    meta.update(cached=True, booked=entry.get("booked"), cache_key=journal.key)
+    return GenResult(provider=link.provider, model=link.model, paths=paths, seed=entry.get("seed"),
+                     est_cost=0.0, paid=bool(entry.get("paid")), meta=meta)
 
 
 def _usd(estimate) -> float:
