@@ -1,0 +1,1264 @@
+"""Step ``assets``: one episode's shot images, line voices, word timings, SFX
+and BGM (spec 3 step 10, 6.4, 6.5, 8.1, 11; AI Story phase 4, stage 8;
+DEC-151..155, DEC-160, DEC-165).
+
+``ctx.ep`` is the episode. Needs what the script step needs
+(``episode_common.check_episode_preconditions``), an **approved** script and
+an **approved, current** storyboard that covers it: every scene planned from
+its current revision, and prompts resolved from the entities as they are
+now. Otherwise ``StepFailed`` saying what to do, before anything is sent.
+
+One job, under a predictive 30-minute budget (``episode_common.Budget``: a
+call starts only if it can still finish -- an image may take
+:data:`STORY_IMAGE_CALL_SECONDS`, a line ``voice_lines.
+STORY_TTS_CALL_SECONDS``, an alignment :data:`STORY_STT_CALL_SECONDS`); the
+cancel token is checked before every call. It fills only what is missing
+(DEC-124): a complete re-run makes no call.
+
+1. **The plan first** (:func:`asset_units`, calling nothing but a local
+   editor's status probe). In ``references`` mode with shots to make, the
+   DEC-117 readiness check of IMAGE_EDIT_CHAIN: not ready -> stop and ask,
+   zero calls. No image link at all -> stop, naming every link's reason. A
+   paid plan (images on a paid link, paid pinned voices) over any cap --
+   the episode's, the day's, the story's -- stops before the first call,
+   with the numbers.
+2. **Voices first** (``voice_lines.LineMeasurement``, phase 3's
+   measurement, lifted): every line without current audio through its
+   speaker's pinned one-link chain alone; a failing voice fails its own
+   lines, naming the character, and nothing else is tried (DEC-122). The
+   script is re-timed and the storyboard's shot durations follow
+   (``shots.retime_storyboard``): no revision moves and **no approval is
+   cleared** (DEC-135, DEC-155).
+3. **Word timings** (spec 6.4, ``wordtiming``): the provider's words; with
+   ``params.align_words`` (opt-in, DEC-165) a line without them is
+   transcribed by the STT chain and its words aligned; otherwise the even
+   split, labelled approximate. The source is stored per line.
+4. **Images**, for every shot neither locked nor current
+   (:func:`image_state`): ``prompt_only`` -> IMAGE_CHAIN, no reference sent,
+   labelled; ``references`` -> IMAGE_EDIT_CHAIN with the shot's
+   ``reference_images``. **The seed is fixed before the call**
+   (:func:`shot_seed`), so the request has a cache key: every call goes
+   through the story's generation cache (``gencache``, under
+   ``cache/gen/``), which journals it and books it through
+   ``LineGates.booker`` on the ledger the gates read -- the per-episode cap
+   applies to every paid image and voice (RC-A3). The image is kept as
+   ``assets/shots/shot_NN.<ext>`` and recorded in the shot's ``assets``
+   (``seed, provider, model, consistency, route, prompt_hash, est_usd,
+   cache_key, generated_at``); a shot is current while its
+   :func:`prompt_hash` still matches.
+5. **SFX/BGM** (``render.audio_assets``, pure): each cue resolved in the
+   style's pack at its scene's or line's start (a missing cue is
+   ``missing``, reported, never a failure); the BGM mood from the
+   duration-weighted dominant emotion; the track picked deterministically.
+   Written with every line's word source into ``assets.json``
+   (``episode_assets_v1``), keeping its approval: that is derived stale by
+   :func:`assets_fingerprint`, never cleared here.
+6. **The episode's ledger view** (``CostLedger.episode_view``) is written to
+   ``cost_ledger.json`` in the episode's folder after the step, whatever
+   happened.
+
+A shot or a line that failed does not fail the step: it ends awaiting
+approval (the worker's rule), naming each failure and the regenerate target
+that finishes it (``shot:<ep>:<shot_id>``, ``line:<ep>:<line_id>``). A
+journal or booking that could not be written after the provider accepted a
+request stops everything, naming the request id (``gencache.JournalError``).
+
+:func:`regenerate_shot_image` and :func:`regenerate_line_voice` are the
+``shot_image`` and ``line`` targets of ``regenerate``
+(``episode_regenerate``). ``story.json`` is never written (RC-E2).
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import secrets
+import shutil
+import tempfile
+import time
+from types import SimpleNamespace
+
+from clipping.providers import budget as budget_mod
+from clipping.providers import gating, gencache
+from clipping.providers import generation as gen
+from clipping.providers.registry import ChainError, describe
+
+from .. import imaging, refimages, schemas, timing, voices, wordtiming
+from .. import ledger as ledger_mod
+from .. import names as names_mod
+from .. import store as store_mod
+from ..render import audio_assets
+from . import entities, episode_common, llm_call, voice_lines
+from . import script as script_step
+from . import storyboard as storyboard_step
+from .episode_common import SCRIPT_DOC, STORYBOARD_DOC
+from .llm_call import StepFailed
+
+STEP = "assets"
+ASSETS_DOC = store_mod.EPISODE_ASSETS_DOC
+LEDGER_VIEW = "cost_ledger.json"
+
+# The step's one parameter (opt-in forced alignment, DEC-165).
+ALIGN_PARAM = "align_words"
+PARAMS = (ALIGN_PARAM,)
+
+# How long one call may take, for the step budget's predictive check: an
+# image on a queued provider polls for up to five minutes; a line's
+# transcription is a few seconds of audio on a hosted STT link.
+STORY_IMAGE_CALL_SECONDS = 300
+STORY_STT_CALL_SECONDS = 60
+
+# A shot's image is vertical 9:16, the size of the plates it is composed on.
+SHOT_SIZE = refimages.PLATE_SIZE
+SHOTS_DIR = schemas.SHOT_IMAGE_DIR
+PROMPT_ONLY, REFERENCES = refimages.PROMPT_ONLY, refimages.REFERENCES
+
+# What a shot's image is, derived (never stored): no image yet; current (its
+# prompt hash still matches -- or it is locked and does); stale (made from
+# another prompt, negative, mode, size or reference); locked_stale (locked,
+# and would be stale); failed (a regenerate asked for another one and its
+# call did not answer: ``pending`` is still set).
+IMAGE_STATES = ("none", "current", "stale", "locked_stale", "failed")
+
+_FILE_MODE = 0o644
+_SEED_MODULUS = 2**31 - 2
+_NEUTRAL_WORDS = {"characters": "the character", "places": "the place", "props": "the object"}
+_ENTITY_KINDS = ("characters", "places", "props")
+
+
+def _and(items) -> str:
+    """``a``, ``a and b``, ``a, b and c`` (``script._and``, duplicated)."""
+    items = list(items)
+    if len(items) <= 1:
+        return "".join(items)
+    return ", ".join(items[:-1]) + " and " + items[-1]
+
+
+class ShotFailed(Exception):
+    """One shot's image was not made; ``reason`` says why and, where there is
+    one, what to do. The step goes on with the next shot."""
+
+    def __init__(self, reason):
+        super().__init__(reason)
+        self.reason = reason
+
+
+# ------------------------------------------------------------------ targets
+
+def shot_target(ep, shot_id) -> str:
+    return f"shot:{ep}:{shot_id}"
+
+
+def line_target(ep, line_id) -> str:
+    return f"line:{ep}:{line_id}"
+
+
+def image_name(shot_id, ext) -> str:
+    """``shot_03.png`` for shot ``sh03``: the shot's own number
+    (``schemas.SHOT_IMAGE_NAME_PATTERN``)."""
+    return f"shot_{shot_id[2:]}.{ext}"
+
+
+# -------------------------------------------------------------- pure helpers
+
+def _canonical_sha256(payload) -> str:
+    blob = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return hashlib.sha256(blob).hexdigest()
+
+
+def _name_map(entity_docs) -> dict:
+    """``{name: neutral word}`` for every character, place and prop; a
+    character's word wins on a shared name (``shots._story_name_map``'s rule,
+    duplicated: a private helper of another module)."""
+    names = {}
+    for kind in _ENTITY_KINDS:
+        for doc in (entity_docs.get(kind) or {}).values():
+            names.setdefault(doc["name"], _NEUTRAL_WORDS[kind])
+    return names
+
+
+def with_note(prompt, note, entity_docs) -> str:
+    """*prompt*, then ``Author's note: <note>.`` at its tail -- after the
+    locked blocks, never in place of them -- with every entity name in the
+    note replaced by a neutral word (no name enters an image prompt, spec
+    2.3; ``refimages._with_note``'s rule)."""
+    if not note:
+        return prompt
+    text = " ".join(str(note).split())
+    if not text:
+        return prompt
+    text = names_mod.without_names(text, _name_map(entity_docs))
+    if text[-1] not in ".!?":
+        text += "."
+    return f"{prompt} Author's note: {text}"
+
+
+def effective_prompt(shot, entity_docs, note=None) -> str:
+    """What the image is asked for: the shot's ``prompt_override`` when the
+    user wrote one (any entity name in it replaced, as in a note: the
+    resolved ``image_prompt`` never carries one), else its ``image_prompt``;
+    *note* at the tail."""
+    override = shot.get("prompt_override")
+    base = names_mod.without_names(override, _name_map(entity_docs)) if override else shot["image_prompt"]
+    return with_note(base, note, entity_docs)
+
+
+def prompt_hash(prompt, negative, consistency, size, ref_shas) -> str:
+    """sha256 of what a shot's image is made from: the effective prompt, the
+    negative prompt, the consistency mode, the size and the sha256 of each
+    reference image actually sent, in order (plan phase 4, "Documents")."""
+    return _canonical_sha256({"prompt": prompt, "negative": negative or "", "consistency": consistency,
+                              "size": [int(size[0]), int(size[1])], "refs": list(ref_shas)})
+
+
+def derive_seed(story_id, ep, shot_id) -> int:
+    """A shot's own seed in ``references`` mode: the same on every run and in
+    every process (not ``hash()``), 1 .. 2**31-2."""
+    digest = hashlib.sha256(f"shot:{story_id}:{ep}:{shot_id}".encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], "big") % _SEED_MODULUS + 1
+
+
+def _seed_value(value):
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
+
+
+def base_seed(shot, scene, *, story_id, ep, mode, entity_docs) -> int:
+    """The seed a shot's image is asked with when no regenerate left one: in
+    ``prompt_only`` mode the first character's portrait seed (its recorded
+    ``refs.portrait.seed``, else its ``ref_seed``), else the scene's place
+    master plate's -- the seed its reference images were drawn with
+    (DEC-117); otherwise, and in ``references`` mode, :func:`derive_seed`."""
+    if mode == PROMPT_ONLY:
+        first = next((tag[1:] for tag in shot["subject_tags"] if tag.startswith("@")), None)
+        character = (entity_docs.get("characters") or {}).get(first) if first else None
+        if character is not None:
+            portrait = (character.get("refs") or {}).get("portrait") or {}
+            seed = _seed_value(portrait.get("seed"))
+            if seed is None:
+                seed = _seed_value(character.get("ref_seed"))
+            if seed is not None:
+                return seed
+        place = (entity_docs.get("places") or {}).get(scene["place_id"]) if scene else None
+        if place is not None:
+            plate = (place.get("time_variants") or {}).get(schemas.MASTER_PLATE_VARIANT) or {}
+            seed = _seed_value(plate.get("seed"))
+            if seed is not None:
+                return seed
+    return derive_seed(story_id, ep, shot["shot_id"])
+
+
+def shot_seed(shot, scene, *, story_id, ep, mode, entity_docs) -> int:
+    """The seed of the next request for *shot*: a regenerate's ``pending``
+    seed when one is left (so a retry asks for the same image, DEC-154),
+    else :func:`base_seed`."""
+    pending = shot["assets"].get("pending")
+    if pending:
+        return pending["seed"]
+    return base_seed(shot, scene, story_id=story_id, ep=ep, mode=mode, entity_docs=entity_docs)
+
+
+def image_state(assets, *, expected_hash, file_ok) -> str:
+    """One of :data:`IMAGE_STATES` for a shot's ``assets``: *expected_hash*
+    is the :func:`prompt_hash` it would be made with now, *file_ok* whether
+    its recorded image is on disk."""
+    image = assets.get("image")
+    fresh = bool(image) and file_ok and assets.get("prompt_hash") == expected_hash
+    if assets.get("locked"):
+        if not image:
+            return "none"
+        return "current" if fresh else "locked_stale"
+    if assets.get("pending"):
+        return "failed"
+    if not image or not file_ok:
+        return "none"
+    return "current" if fresh else "stale"
+
+
+def route_of(link) -> str:
+    """``free`` | ``local`` | ``paid``: how the link that answered is paid for."""
+    if link.provider == "local":
+        return "local"
+    return "paid" if gen.is_paid(link) else "free"
+
+
+def assets_fingerprint(storyboard, script, assets_doc, *, image_shas, audio_shas) -> str:
+    """sha256 over what an assets approval approves (plan phase 4,
+    "Documents"): every shot's ``(prompt_hash, image sha256, locked)``, every
+    line's ``(text hash, voice, audio sha256)``, and the SFX/BGM files
+    ``assets.json`` names. *image_shas* is ``{shot_id: sha256 | None}``,
+    *audio_shas* ``{line_id: sha256 | None}`` (the files as they are now,
+    :func:`current_fingerprint`). Durations, revisions, approvals and
+    timestamps are not in it: re-timing never makes an approval stale."""
+    assets_doc = assets_doc or {}
+    bgm = assets_doc.get("bgm")
+    payload = {
+        "v": 1,
+        "shots": [[shot["shot_id"], shot["assets"].get("prompt_hash"), image_shas.get(shot["shot_id"]),
+                   bool(shot["assets"].get("locked"))] for shot in storyboard["shots"]],
+        "lines": [[line["line_id"], timing.text_hash(line["text"]), line["timing"].get("voice"),
+                   audio_shas.get(line["line_id"])]
+                  for scene in script["scenes"] for line in scene["lines"]],
+        "sfx": [[cue["scene_id"], cue["at"], cue["cue"], cue["pack"], cue["file"], cue["state"]]
+                for cue in assets_doc.get("sfx") or []],
+        "bgm": None if not bgm else [bgm["mood"], bgm["file"], bgm["sha256"]],
+    }
+    return _canonical_sha256(payload)
+
+
+# ------------------------------------------------------------ files on disk
+
+def _sha256_file(path):
+    """The sha256 of a regular file (never through a symlink), or None."""
+    if not path or os.path.islink(path) or not os.path.isfile(path):
+        return None
+    digest = hashlib.sha256()
+    try:
+        with open(path, "rb") as fh:
+            for block in iter(lambda: fh.read(1 << 20), b""):
+                digest.update(block)
+    except OSError:
+        return None
+    return digest.hexdigest()
+
+
+def _atomic_copy(src, dest) -> None:
+    """Copy *src* to *dest* so a reader sees the old file or the new one
+    (``voices._atomic_copy``'s pattern, duplicated: a private helper of
+    another module)."""
+    handle, tmp = tempfile.mkstemp(dir=os.path.dirname(dest), prefix=".asset-", suffix=".tmp")
+    try:
+        with os.fdopen(handle, "wb") as out, open(src, "rb") as source:
+            shutil.copyfileobj(source, out)
+            out.flush()
+            os.fsync(out.fileno())
+        os.chmod(tmp, _FILE_MODE)
+        os.replace(tmp, dest)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _atomic_write_json(path, data) -> None:
+    handle, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".asset-", suffix=".tmp")
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=2, ensure_ascii=False)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.chmod(tmp, _FILE_MODE)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def shot_image_path(ec, shot):
+    """The real path of the image a shot's ``assets.image`` names, or None
+    when there is none on disk (a symlink is never followed)."""
+    image = shot["assets"].get("image")
+    if not image:
+        return None
+    try:
+        path = ec.store.episode_asset_path(ec.story_id, ec.ep, "shots", image.rpartition("/")[2])
+    except KeyError:
+        return None
+    return path if os.path.isfile(path) else None
+
+
+def line_audio_path(ec, line):
+    """The real path of a measured line's audio, or None."""
+    audio = line["timing"].get("audio")
+    prefix = f"{voice_lines.VOICE_ASSETS}/"
+    if not isinstance(audio, str) or not audio.startswith(prefix):
+        return None
+    try:
+        path = ec.store.episode_asset_path(ec.story_id, ec.ep, "voice", audio[len(prefix):])
+    except KeyError:
+        return None
+    return path if os.path.isfile(path) else None
+
+
+def sidecar_path(ec, line_id):
+    """Where line *line_id*'s ``line_timing_v1`` sidecar is kept, or None."""
+    try:
+        return ec.store.episode_asset_path(ec.story_id, ec.ep, "voice", voice_lines.asset_name(line_id, "json"))
+    except KeyError:
+        return None
+
+
+def read_sidecar(ec, line_id):
+    """Line *line_id*'s sidecar, or None when it is missing or unreadable."""
+    path = sidecar_path(ec, line_id)
+    if path is None or not os.path.isfile(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def reference_paths(ec, shot) -> tuple:
+    """``(paths, missing)``: the real paths of the reference images a shot
+    sends (its ``reference_images``, the first ``refimages.MAX_REFERENCES``:
+    an edit takes no more), and the ones that are not on disk."""
+    paths, missing = [], []
+    for rel in shot["reference_images"][:refimages.MAX_REFERENCES]:
+        parts = rel.split("/")
+        if len(parts) != 4 or parts[0] not in _ENTITY_KINDS or parts[2] != "refs":
+            missing.append(rel)
+            continue
+        try:
+            paths.append(ec.store.media_path(ec.story_id, parts[0], parts[1], parts[3]))
+        except KeyError:
+            missing.append(rel)
+    return paths, missing
+
+
+def request_parts(ec, shot, *, note) -> dict:
+    """What *shot*'s image request is made of in the story's mode now:
+    ``{kind, prompt, negative, consistency, size, references, missing,
+    hash}`` -- ``prompt_only`` sends no reference (IMAGE_CHAIN),
+    ``references`` sends the shot's (IMAGE_EDIT_CHAIN); ``hash`` is
+    :func:`prompt_hash` over what is sent (a missing reference counts by its
+    path, so the hash is never the one of a complete request)."""
+    mode = ec.consistency_mode
+    prompt = effective_prompt(shot, ec.entities, note)
+    negative = shot["negative_prompt"]
+    if mode == PROMPT_ONLY:
+        kind, paths, missing, ref_shas = gen.IMAGE, [], [], []
+    else:
+        kind = gen.IMAGE_EDIT
+        paths, missing = reference_paths(ec, shot)
+        ref_shas = [_sha256_file(path) or f"unreadable:{path}" for path in paths] + [f"missing:{rel}"
+                                                                                     for rel in missing]
+    return {"kind": kind, "prompt": prompt, "negative": negative, "consistency": mode, "size": SHOT_SIZE,
+            "references": paths, "missing": missing,
+            "hash": prompt_hash(prompt, negative, mode, SHOT_SIZE, ref_shas)}
+
+
+def shot_state(ec, shot) -> str:
+    """:func:`image_state` of *shot* now: its hash recomputed with the note
+    its image was made with."""
+    assets = shot["assets"]
+    expected = request_parts(ec, shot, note=assets.get("note"))["hash"]
+    return image_state(assets, expected_hash=expected, file_ok=shot_image_path(ec, shot) is not None)
+
+
+def shots_to_make(ec, storyboard) -> list:
+    """The shots the step makes an image for: neither locked nor current."""
+    return [shot for shot in storyboard["shots"]
+            if not shot["assets"].get("locked") and shot_state(ec, shot) != "current"]
+
+
+def current_fingerprint(ec, storyboard, script, assets_doc) -> str:
+    """:func:`assets_fingerprint` over the files as they are now."""
+    image_shas = {shot["shot_id"]: _sha256_file(shot_image_path(ec, shot)) for shot in storyboard["shots"]}
+    audio_shas = {line["line_id"]: _sha256_file(line_audio_path(ec, line))
+                  for scene in script["scenes"] for line in scene["lines"]}
+    return assets_fingerprint(storyboard, script, assets_doc, image_shas=image_shas, audio_shas=audio_shas)
+
+
+# ------------------------------------------------------------- preconditions
+
+def _outdated_entities(storyboard, entity_docs) -> list:
+    """The entities the storyboard's prompts were resolved from that changed
+    since or are gone (``workflow.outdated_entities``' rule, duplicated: the
+    steps never import the workflow)."""
+    current = {}
+    for docs in entity_docs.values():
+        current.update(docs)
+    outdated = []
+    for eid, stamp in storyboard["resolved_from"].items():
+        doc = current.get(eid)
+        if doc is None:
+            outdated.append(eid)
+        elif doc.get("updated_at") != stamp:
+            outdated.append(doc["name"])
+    return outdated
+
+
+def require_approved(ec) -> tuple:
+    """``(script, storyboard)`` when the script is approved and the storyboard
+    approved and current -- it covers the script, no scene is planned from an
+    older revision, no prompt is outdated; else ``StepFailed`` saying what to
+    do. Nothing is sent before this holds."""
+    ep = ec.ep
+    script = episode_common.read_episode(ec, SCRIPT_DOC)
+    if script is None or not script["scenes"]:
+        raise StepFailed(f"Episode {ep} has no script yet: write it first (the script step).")
+    if not script["approved_at"] or not script_step.is_complete(script, ep) or script_step.needs_check(script):
+        raise StepFailed(f"Approve episode {ep}'s script first: its assets are made from the approved script "
+                         "and storyboard.")
+    board = episode_common.read_episode(ec, STORYBOARD_DOC)
+    if board is None or not board["shots"]:
+        raise StepFailed(f"Episode {ep} has no storyboard yet: plan its shots (the storyboard step) and approve "
+                         "them first.")
+    if not board["approved_at"]:
+        raise StepFailed(f"Approve episode {ep}'s storyboard first: its assets are made from the approved "
+                         "script and storyboard.")
+    if not episode_common.covers(board, script):
+        raise StepFailed(f"Episode {ep}'s storyboard does not cover its script: plan its shots again (the "
+                         "storyboard step) and approve them.")
+    stale = sorted(storyboard_step.stale_scenes(board, script))
+    if stale:
+        raise StepFailed(f"Episode {ep}'s storyboard has scene{'s' if len(stale) > 1 else ''} "
+                         f"{_and(stale)} planned from an older version of the script: plan "
+                         f"{'them' if len(stale) > 1 else 'it'} again (the storyboard step) and approve it.")
+    outdated = _outdated_entities(board, ec.entities)
+    if outdated:
+        raise StepFailed(f"Episode {ep}'s shot prompts are outdated ({_and(outdated)} changed since "
+                         "they were resolved): refresh them and approve the storyboard again.")
+    return script, board
+
+
+# ----------------------------------------------------------------- estimate
+
+def _open_ledger(ec) -> ledger_mod.CostLedger:
+    return ledger_mod.CostLedger(os.path.join(ec.store.story_dir(ec.story_id), voices.LEDGER_NAME))
+
+
+def _alignment_requests(ec, script, *, align_words) -> int:
+    """The lines an opt-in alignment would transcribe: measured lines whose
+    sidecar has no words, and lines to be measured on an engine that times
+    no words (every pinned provider but Edge)."""
+    if not align_words:
+        return 0
+    count = 0
+    for scene in script["scenes"]:
+        for line in scene["lines"]:
+            if voice_lines.is_measured(ec, line):
+                source, _by = wordtiming.source_of(read_sidecar(ec, line["line_id"]))
+                count += source == wordtiming.EVEN_SPLIT
+            else:
+                voice = voice_lines.speaker_voice(ec, line["speaker"]) or {}
+                count += bool(voice.get("provider")) and voice.get("provider") != "edge"
+    return count
+
+
+def asset_units(ec, script, storyboard, *, env, align_words=False, adapters=None, probe_local=False,
+                transport=None, ledger=None) -> dict:
+    """What the assets step would do and spend now, calling nothing (a local
+    editor is asked whether it is there only with *probe_local*: the DEC-117
+    status probe, never a generation)::
+
+        {"images": {"shots": [shot_id, ...], "count", "kind", "chain", "consistency",
+                    "route_class", "link", "est_usd", "links": [...], "ready", "message"},
+         "voices": <voice_lines.measure_estimate>,
+         "alignment": {"opted_in": bool, "requests": n},
+         "paid_links": [{"kind", "link", "allowed", "reason", "est_usd"}],
+         "caps": {"allow_paid", "episode"|"day"|"story": {"cap_usd", "spent_usd", "left_usd"}},
+         "est_usd": x, "over_cap": sentence | None, "ready": bool}
+
+    ``images`` prices every shot neither locked nor current at the first
+    link that would run on the story's route (the image estimate of
+    ``imaging``; in ``references`` mode ``refimages.edit_readiness``, whose
+    ``ready`` false is DEC-117's "stop and ask"). ``voices`` prices the TTS
+    characters of every line without current audio at each pinned voice's
+    price. ``est_usd`` is the paid part of both; ``over_cap`` is the budget's
+    refusal of it -- the episode's cap included -- when paid is on, with the
+    numbers. ``ready``: the images can run (or there are none), every line
+    has a voice that can run, and nothing is over a cap.
+    """
+    story = ec.story
+    route = story["generation_profile"]["route"]
+    ledger = ledger or _open_ledger(ec)
+    story_spent = float(ledger.totals()["est_usd"])
+    ep_spent = float(ledger.totals(ec.ep)["est_usd"])
+    merged = gating.merged_env(env)
+    try:
+        budget_obj = gating.budget_of(merged)
+    except ValueError:
+        budget_obj = None
+
+    todo = shots_to_make(ec, storyboard)
+    mode = ec.consistency_mode
+    kind = gen.IMAGE if mode == PROMPT_ONLY else gen.IMAGE_EDIT
+    if not todo:
+        images = {"est_usd": 0.0, "route_class": None, "link": None, "links": [], "ready": True,
+                  "message": "Every shot has its image."}
+    elif kind == gen.IMAGE_EDIT:
+        images = refimages.edit_readiness(story, env=env, qty=len(todo), story_spent=story_spent, adapters=adapters,
+                                          size=SHOT_SIZE, probe_local=probe_local, transport=transport)
+    else:
+        request = gen.GenRequest(kind=gen.IMAGE, width=SHOT_SIZE[0], height=SHOT_SIZE[1])
+        images = imaging.estimate(gen.IMAGE, env, route=route, request=request, qty=len(todo),
+                                  story_spent=story_spent, adapters=adapters, step=STEP, what="the shot images",
+                                  when="the assets step runs")
+    images = {
+        "shots": [shot["shot_id"] for shot in todo], "count": len(todo), "kind": kind,
+        "chain": gen.ENV_NAMES[kind], "consistency": mode, "route_class": images["route_class"],
+        "link": images["link"], "est_usd": float(images["est_usd"] or 0.0), "links": images["links"],
+        "ready": images["ready"], "message": images["message"],
+    }
+    voices_est = voice_lines.measure_estimate(ec, script, env=env, adapters=adapters)
+
+    paid_links = [{"kind": kind, "link": row["link"], "allowed": row["status"] == "runnable",
+                   "reason": row["reason"], "est_usd": row["est_usd"]}
+                  for row in images["links"] if row["paid"]]
+    for row in voices_est["voices"]:
+        if row["paid"]:
+            paid_links.append({"kind": gen.TTS, "link": row["link"], "allowed": row["allowed"],
+                               "reason": row["reason"], "est_usd": row["est_usd"]})
+
+    images_paid = images["est_usd"] if images["route_class"] == "paid" else 0.0
+    voices_paid = sum(row["est_usd"] for row in voices_est["voices"] if row["paid"])
+    total = round(images_paid + voices_paid, 4)
+    day_spent = budget_mod.day_spent()
+    caps = {"allow_paid": bool(budget_obj and budget_obj.allow_paid)}
+    if budget_obj is not None:
+        for name, cap, spent in (("episode", budget_obj.per_episode_cap_usd, ep_spent),
+                                 ("day", budget_obj.daily_cap_usd, day_spent),
+                                 ("story", budget_obj.per_story_cap_usd, story_spent)):
+            caps[name] = {"cap_usd": cap, "spent_usd": round(spent, 4), "left_usd": round(max(0.0, cap - spent), 4)}
+    over_cap = None
+    if budget_obj is not None and budget_obj.allow_paid and total > 0:
+        plan = SimpleNamespace(est_usd=total, link=f"episode {ec.ep}'s paid images and voices")
+        try:
+            budget_mod.check(plan, None, budget=budget_obj, day_spent=day_spent, ep_spent=ep_spent,
+                             story_spent=story_spent)
+        except budget_mod.BudgetRefused as exc:
+            over_cap = str(exc)
+    return {
+        "images": images, "voices": voices_est,
+        "alignment": {"opted_in": bool(align_words),
+                      "requests": _alignment_requests(ec, script, align_words=align_words)},
+        "paid_links": paid_links, "caps": caps, "est_usd": total, "over_cap": over_cap,
+        "ready": images["ready"] and voices_est["ready"] and over_cap is None,
+    }
+
+
+# ---------------------------------------------------------------- alignment
+
+class AlignError(Exception):
+    """No STT link could transcribe the line; the message says why."""
+
+
+def default_transcriber(env):
+    """``transcribe(path, *, language, on_log, cancel) -> (words, aligned_by)``
+    through the hosted links of ``STT_CHAIN`` (``clipping.providers.stt``)
+    that have a key, in order; or ``(None, reason)`` when none has one."""
+    from clipping.providers import stt
+    from clipping.providers.registry import PROVIDERS
+
+    merged = gating.merged_env(env)
+    try:
+        chain = stt.parse_stt_chain(merged.get("STT_CHAIN") or stt.DEFAULT_STT_CHAIN)
+    except ChainError as exc:
+        return None, f"STT_CHAIN cannot be used: {exc}"
+    keys = {name: merged[provider.env_key].strip() for name, provider in PROVIDERS.items()
+            if (merged.get(provider.env_key) or "").strip()}
+    hosted = [link for link in chain if link.provider != "local" and keys.get(link.provider)]
+    if not hosted:
+        return None, "no hosted link of STT_CHAIN has a key"
+
+    def transcribe(path, *, language, on_log, cancel):
+        failures = []
+        for link in hosted:
+            try:
+                _text, segments, _language = stt.transcribe(path, chain=[link], keys=keys, language=language,
+                                                             on_log=on_log, cancel=cancel)
+            except Exception as exc:  # noqa: BLE001 - the next link; Cancelled is not an Exception
+                failures.append(f"{describe(link)}: {type(exc).__name__}: {exc}")
+                continue
+            return [word for segment in segments for word in segment.get("words") or []], describe(link)
+        raise AlignError("; ".join(failures) or "no link answered")
+
+    return transcribe, None
+
+
+# --------------------------------------------------------------------- the run
+
+class _Assets(voice_lines.LineMeasurement):
+    """One run of the step (or of one of its regenerates): the documents as
+    they stand, the gates every paid call meets, and what failed."""
+
+    measure_step = STEP
+
+    def __init__(self, ctx, ec, *, tools, transcribe=None):
+        self.ctx = ctx
+        self.ec = ec
+        self.tools = tools
+        self.budget = episode_common.Budget(tools.time_fn)
+        self.transcribe = transcribe
+        self.failed = []  # [(what, target, reason)]
+        self.voice_failed = []  # [(line_id, speaker, reason)]
+        self.measured = 0
+        self.board_refused = False
+        self.script = None
+        self.storyboard = None
+        self.gates = None
+        self.made = []  # [(shot_id, cached)]
+        self.aligned = []
+
+    # ---------------------------------------------------------- plumbing
+
+    def failures(self) -> str:
+        return "; ".join(f"{what} failed ({reason})" for what, _target, reason in self.failed)
+
+    def save(self) -> None:
+        episode_common.retime(self.script, self.ec, self.storyboard)
+        episode_common.write_script(self.ec, self.script, now=llm_call.utc_now())
+
+    def open_asset_gates(self):
+        """``voices.LineGates`` of the episode: the Settings, the budget, the
+        story's ledger (checked readable) and the free-tier limiter, shared by
+        every image and line of the run."""
+        ec = self.ec
+        try:
+            self.gates = voices.LineGates(ec.store, ec.story_id, env=self.ctx.settings_env, ep=ec.ep)
+        except voices.VoiceError as exc:
+            raise StepFailed(f"Episode {ec.ep}'s assets cannot be made: {exc}") from None
+        return self.gates
+
+    def cache_root(self) -> str:
+        ec = self.ec
+        try:
+            return ec.store.gen_cache_dir(ec.story_id, create=True)
+        except KeyError:
+            raise StepFailed("The story's generation cache (cache/gen/) is not a real directory; it is never "
+                             "followed: move it away first.") from None
+
+    def cache(self, kind, *, unit, qty) -> gencache.GenCache:
+        """The story's generation cache, booking through the gates' ledger."""
+        return gencache.GenCache(self.cache_root(), book=self.gates.booker(kind, step=STEP, unit=unit, qty=qty))
+
+    def voice_cache(self, gates, line):
+        return self.cache(gen.TTS, unit="char", qty=len(line["text"]))
+
+    def write_ledger_view(self) -> None:
+        """The episode's rows of the story's ledger, as its own file."""
+        ec = self.ec
+        if self.gates is None:
+            return
+        try:
+            path = ec.store.episode_file_path(ec.story_id, ec.ep, LEDGER_VIEW, create=True)
+            self.gates.ledger.episode_view(ec.ep, path)
+        except (KeyError, OSError) as exc:
+            self.ctx.on_log(f"⚠️ The episode's cost ledger view could not be written ({exc}).")
+
+    def journal_failed(self, exc) -> StepFailed:
+        request = exc.request or {}
+        also = self.failures()
+        return StepFailed(
+            f"Episode {self.ec.ep}'s assets stopped: a request the provider accepted could not be journaled or "
+            f"booked, so nothing else was tried. Request {request.get('request_id') or 'unknown'} (status "
+            f"{request.get('status_url') or 'unknown'}, response {request.get('response_url') or 'unknown'}): "
+            f"{exc}" + (f" Also failed in this run: {also}." if also else ""))
+
+    def before_image(self, remaining) -> None:
+        self.ctx.cancel.check()
+
+        def left():
+            ids = [shot["shot_id"] for shot in remaining]
+            return f"the image{'s' if len(ids) > 1 else ''} of shot{'s' if len(ids) > 1 else ''} {_and(ids)}"
+
+        try:
+            self.budget.before_call(left, per_call=STORY_IMAGE_CALL_SECONDS)
+        except StepFailed as exc:
+            message = str(exc)
+            also = "; ".join(part for part in (self.failures(), self.voice_failures()) if part)
+            if also:
+                message += f" Also failed in this run: {also}."
+            raise voice_lines.BudgetSpent(message) from None
+
+    def write_board(self) -> None:
+        try:
+            episode_common.write_storyboard(self.ec, self.storyboard, self.script, now=llm_call.utc_now())
+        except schemas.SchemaError as exc:
+            raise StepFailed(f"Episode {self.ec.ep}'s storyboard could not be written "
+                             f"({'; '.join(exc.errors[:2])}); every image made is kept and cached: plan the "
+                             "shots again, then run the assets step.") from None
+
+    # -------------------------------------------------------------- the plan
+
+    def check_plan(self, units) -> None:
+        """Stop before the first call when the images cannot run (the DEC-117
+        readiness in ``references`` mode: stop and ask) or a paid part is over
+        a cap -- with the numbers."""
+        ec, images = self.ec, units["images"]
+        if images["count"] and not images["ready"]:
+            if images["kind"] == gen.IMAGE_EDIT:
+                reasons = [f"{row['link']}: {row['reason']}" for row in images["links"]] or [images["message"]]
+                readiness = {"message": images["message"], "links": images["links"]}
+                error = refimages.NeedsEditor(reasons, readiness, subject=f"Every shot of episode {ec.ep}")
+                self.ctx.on_log(f"✋ {error}")
+                raise StepFailed(str(error))
+            raise StepFailed(f"Episode {ec.ep}'s shot images cannot be made: {images['message']} Nothing was "
+                             "generated or spent.")
+        if units["over_cap"]:
+            raise StepFailed(f"Episode {ec.ep}'s assets would go over a cap, so nothing was generated or spent: "
+                             f"{units['over_cap']}. Raise the cap, or choose free links, then run the assets "
+                             "step again.")
+
+    # ------------------------------------------------------------- the words
+
+    def align_words(self) -> None:
+        """Opt-in forced alignment of every voiced line whose sidecar has no
+        words (``wordtiming.align``); a line that cannot be aligned keeps the
+        even split, said, never a failure."""
+        ec, ctx = self.ec, self.ctx
+        wanted = []
+        for scene in self.script["scenes"]:
+            for line in scene["lines"]:
+                if not voice_lines.is_measured(ec, line):
+                    continue
+                sidecar = read_sidecar(ec, line["line_id"])
+                if sidecar is not None and wordtiming.source_of(sidecar)[0] == wordtiming.EVEN_SPLIT:
+                    wanted.append((line, sidecar))
+        if not wanted:
+            return
+        transcribe = self.transcribe
+        if transcribe is None:
+            transcribe, reason = default_transcriber(ctx.settings_env)
+            if transcribe is None:
+                ctx.on_log(f"⚠️ Word alignment was asked for, but {reason}: {len(wanted)} line"
+                           f"{'s keep' if len(wanted) != 1 else ' keeps'} the even split (approximate timing).")
+                return
+        ctx.on_log(f"🔤 Aligning the words of {len(wanted)} line{'s' if len(wanted) != 1 else ''} (STT)")
+        for index, (line, sidecar) in enumerate(wanted):
+            ctx.cancel.check()
+            remaining = [item[0]["line_id"] for item in wanted[index:]]
+
+            def left(ids=remaining):
+                return f"the word alignment of line{'s' if len(ids) > 1 else ''} {_and(ids)}"
+
+            try:
+                self.budget.before_call(left, per_call=STORY_STT_CALL_SECONDS)
+            except StepFailed as exc:
+                also = "; ".join(part for part in (self.failures(), self.voice_failures()) if part)
+                raise voice_lines.BudgetSpent(str(exc) + (f" Also failed in this run: {also}." if also else "")) \
+                    from None
+            line_id = line["line_id"]
+            try:
+                words, aligned_by = transcribe(line_audio_path(ec, line), language=ec.language, on_log=ctx.on_log,
+                                               cancel=ctx.cancel)
+            except Exception as exc:  # noqa: BLE001 - the line keeps the even split
+                ctx.on_log(f"⚠️ {line_id}: the words could not be aligned ({exc}); approximate timing kept.")
+                continue
+            aligned = wordtiming.align(line["text"], words, line["timing"]["duration_s"])
+            if aligned is None:
+                ctx.on_log(f"⚠️ {line_id}: no transcribed word matched the line; approximate timing kept.")
+                continue
+            path = sidecar_path(ec, line_id)
+            try:
+                _atomic_write_json(path, wordtiming.aligned_sidecar(sidecar, aligned, aligned_by))
+            except (OSError, TypeError) as exc:
+                ctx.on_log(f"⚠️ {line_id}: the aligned words could not be kept ({exc}); approximate timing kept.")
+                continue
+            self.aligned.append(line_id)
+            ctx.on_log(f"🔤 {line_id}: {len(aligned)} words aligned by {aligned_by}")
+
+    # ------------------------------------------------------------ the images
+
+    def make_image(self, shot, *, seed, note) -> dict:
+        """One shot's image through the story's chain and the generation
+        cache; returns the fields of its ``assets`` record. ``ShotFailed``
+        for this shot alone; ``gencache.JournalError`` passes through."""
+        ec, ctx, tools, gates = self.ec, self.ctx, self.tools, self.gates
+        shot_id = shot["shot_id"]
+        parts = request_parts(ec, shot, note=note)
+        kind = parts["kind"]
+        if parts["missing"]:
+            raise ShotFailed(f"its reference image{'s' if len(parts['missing']) > 1 else ''} "
+                             f"{', '.join(parts['missing'])} {'are' if len(parts['missing']) > 1 else 'is'} not on "
+                             "disk: make the images of the cast and places again, then refresh the prompts")
+        if kind == gen.IMAGE_EDIT and not parts["references"]:
+            raise ShotFailed("it has no reference image to send to an editor")
+        try:
+            chain = gen.chain_from_env(kind, gates.merged)
+        except ChainError as exc:
+            raise ShotFailed(f"{gen.ENV_NAMES[kind]} cannot be used: {exc}") from None
+        route = ec.story["generation_profile"]["route"]
+        cache = self.cache(kind, unit="image", qty=1)
+        with tempfile.TemporaryDirectory(prefix="shot-image-") as incoming:
+            request = gen.GenRequest(kind=kind, prompt=parts["prompt"], negative=parts["negative"],
+                                     width=SHOT_SIZE[0], height=SHOT_SIZE[1], seed=seed,
+                                     references=tuple(parts["references"]), out_dir=incoming,
+                                     extra={"name": f"shot_{shot_id[2:]}"})
+            try:
+                result, answered = gen.run_generation_chain(
+                    kind, chain, request, env=gates.merged, allow_paid=gates.budget.allow_paid, route=route,
+                    on_log=ctx.on_log, budget_check=gates.check, limiter=gates.limiter, adapters=tools.adapters,
+                    transport=tools.transport, sleep_fn=tools.sleep_fn, time_fn=tools.time_fn, cancel=ctx.cancel,
+                    cache=cache)
+            except gencache.JournalError:
+                raise
+            except gen.NoRunnableLink as exc:
+                reasons = [imaging.explain(kind, label, reason, chain=chain, merged=gates.merged,
+                                           budget_obj=gates.budget, request=request, adapters=tools.adapters)
+                           for label, reason in exc.failures]
+                raise ShotFailed(f"no link of {gen.ENV_NAMES[kind]} could make it on route {route}: "
+                                 f"{'; '.join(reasons) or exc}") from None
+            except Exception as exc:  # noqa: BLE001 - an adapter's bug fails this shot, named
+                raise ShotFailed(f"{type(exc).__name__}: {exc}") from None
+
+            meta = result.meta or {}
+            label = describe(answered)
+            if "booked" not in meta:
+                # A request with no key (never one of this step's: the seed is
+                # fixed) is booked the old way, on the same ledger.
+                est = _book_answer(gates, result, answered, kind)
+            else:
+                est = round(float((meta.get("booked") or {}).get("est_usd") or 0.0), 4) if result.paid else 0.0
+            try:
+                produced, ext = imaging.produced_image(result)
+            except imaging.NotKept as exc:
+                raise ShotFailed(f"{label}: {exc} (the call is booked)") from None
+            name = image_name(shot_id, ext)
+            try:
+                dest = ec.store.episode_asset_path(ec.story_id, ec.ep, "shots", name, create=True)
+            except KeyError:
+                raise ShotFailed(f"{SHOTS_DIR}/{name} is not a real file or folder; it is never followed "
+                                 "(the call is booked and cached: move it away and run the step again)") from None
+            _atomic_copy(produced, dest)
+        self.drop_other_images(shot_id, ext)
+        answered_seed = _seed_value(result.seed)
+        return {
+            "image": f"{SHOTS_DIR}/{name}", "seed": seed if answered_seed is None else answered_seed,
+            "provider": answered.provider, "model": answered.model, "consistency": parts["consistency"],
+            "route": route_of(answered), "prompt_hash": parts["hash"], "est_usd": est,
+            "cache_key": meta.get("cache_key"), "generated_at": llm_call.utc_now(), "note": note, "pending": None,
+            "_cached": bool(meta.get("cached")), "_label": label,
+        }
+
+    def drop_other_images(self, shot_id, keep_ext) -> None:
+        """The shot's image of another extension, left by an earlier take."""
+        ec = self.ec
+        for ext in imaging.KEPT_EXTENSIONS:
+            if ext == keep_ext:
+                continue
+            try:
+                path = ec.store.episode_asset_path(ec.story_id, ec.ep, "shots", image_name(shot_id, ext))
+            except KeyError:
+                continue
+            if os.path.isfile(path):
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+
+    def apply_image(self, shot, record) -> None:
+        """*record* into the shot's ``assets`` (``approved``, ``video`` and
+        ``locked`` stay), the storyboard written; its approval never moves."""
+        cached, label = record.pop("_cached"), record.pop("_label")
+        shot["assets"].update(record)
+        self.write_board()
+        self.made.append((shot["shot_id"], cached))
+        paid = " paid" if record["route"] == "paid" else ""
+        how = "kept answer, no call" if cached else f"${record['est_usd']:.3f}{paid}"
+        self.ctx.on_log(f"🖼 {shot['shot_id']} via {label} ({how}), seed {record['seed']}, consistency: "
+                        f"{record['consistency'].replace('_', '-')}")
+
+    def images(self) -> None:
+        ec, ctx = self.ec, self.ctx
+        board = self.storyboard
+        todo = shots_to_make(ec, board)
+        if not todo:
+            ctx.on_log("🖼 Every shot has its image (or is locked): nothing to make.")
+            return
+        mode = ec.consistency_mode
+        chain = gen.ENV_NAMES[gen.IMAGE if mode == PROMPT_ONLY else gen.IMAGE_EDIT]
+        locked = sum(1 for shot in board["shots"] if shot["assets"].get("locked"))
+        ctx.on_log(f"🖼 Making {len(todo)} shot image{'s' if len(todo) != 1 else ''} on {chain}"
+                   + (f" ({locked} locked, kept)" if locked else ""))
+        if mode == PROMPT_ONLY:
+            ctx.on_log(f"🟡 Episode {ec.ep}'s shots: consistency: prompt-only (no reference image is sent)")
+        scenes = {scene["scene_id"]: scene for scene in self.script["scenes"]}
+        for index, shot in enumerate(todo):
+            self.before_image(todo[index:])
+            shot_id = shot["shot_id"]
+            pending = shot["assets"].get("pending")
+            note = pending.get("note") if pending else shot["assets"].get("note")
+            seed = shot_seed(shot, scenes.get(shot["scene_id"]), story_id=ec.story_id, ep=ec.ep, mode=mode,
+                             entity_docs=ec.entities)
+            try:
+                record = self.make_image(shot, seed=seed, note=note)
+            except ShotFailed as exc:
+                self.failed.append((f"shot {shot_id}", shot_target(ec.ep, shot_id), exc.reason))
+                ctx.on_log(f"✖ Shot {shot_id} failed: {exc.reason}")
+                continue
+            self.apply_image(shot, record)
+
+    # ---------------------------------------------------------- sfx, bgm, doc
+
+    def audio_entries(self) -> tuple:
+        """``(sfx, bgm)`` of ``assets.json`` from the script as it is timed now."""
+        ec, ctx, script, board = self.ec, self.ctx, self.script, self.storyboard
+        timing_result, _scenes = timing.episode_pass(script, ec.template, ec.language, style_lock=ec.style_lock,
+                                                     storyboard=board)
+        starts = timing.scene_starts(script, timing_result, ec.template, storyboard=board)
+        offsets = timing.line_offsets(script, timing_result, ec.template, storyboard=board)
+        pack = ec.style_lock["audio"]["sfx_pack"]
+        sfx = []
+        for scene in script["scenes"]:
+            sid = scene["scene_id"]
+            for cue in scene["sfx_cues"]:
+                at = cue["at"]
+                offset = starts[sid] if at == "start" else offsets.get(at, (starts[sid], None))[0]
+                resolved = audio_assets.resolve_sfx(pack, cue["cue"])
+                sfx.append({
+                    "scene_id": sid, "at": at, "cue": cue["cue"], "pack": pack,
+                    "file": f"assets/sfx/{resolved['file']}" if resolved else None,
+                    "offset_s": round(max(0.0, float(offset)), 3),
+                    "state": "resolved" if resolved else "missing",
+                })
+                if resolved is None:
+                    ctx.on_log(f"⚠️ SFX cue {cue['cue']!r} ({sid}, at {at}) is not in the {pack} pack: it is "
+                               "skipped at render.")
+
+        weights, scenes = {}, []
+        for scene in script["scenes"]:
+            seconds = float(timing_result["scenes"][scene["scene_id"]]["duration_s"])
+            weights[scene["emotion"]] = weights.get(scene["emotion"], 0.0) + seconds
+            scenes.append({"emotion": scene["emotion"], "duration_s": seconds})
+        dominant = audio_assets.dominant_emotion(scenes)
+        mood = audio_assets.bgm_mood(ec.style_lock["audio"], dominant) if dominant else None
+        if dominant is None or not mood:
+            return sfx, None
+        bgm = {"mood": mood, "dominant_emotion": dominant,
+               "weights_s": {emotion: round(seconds, 3) for emotion, seconds in weights.items()},
+               "file": None, "sha256": None, "licence": None}
+        try:
+            track = audio_assets.pick_track(audio_assets.load_bgm_index(), mood, ec.story_id, ec.ep)
+        except (OSError, ValueError) as exc:
+            track = None
+            ctx.on_log(f"⚠️ The BGM index cannot be read ({exc}): the episode has no music bed.")
+        sha = _sha256_file(track.get("abs_path")) if track else None
+        if track and sha and track.get("licence"):
+            bgm.update(file=f"assets/bgm/{track['file']}", sha256=sha, licence=str(track["licence"])[:200])
+        else:
+            ctx.on_log(f"⚠️ No BGM track carries the mood {mood!r}: the episode has no music bed.")
+        return sfx, bgm
+
+    def line_entries(self) -> dict:
+        """``{line_id: {words_source, aligned_by?}}`` of every voiced line."""
+        ec, lines = self.ec, {}
+        for scene in self.script["scenes"]:
+            for line in scene["lines"]:
+                if not voice_lines.is_measured(ec, line):
+                    continue
+                source, aligned_by = wordtiming.source_of(read_sidecar(ec, line["line_id"]))
+                entry = {"words_source": source}
+                if source == wordtiming.ALIGNMENT:
+                    entry["aligned_by"] = str(aligned_by or "stt")[:120]
+                lines[line["line_id"]] = entry
+        return lines
+
+    def write_assets_doc(self) -> dict:
+        ec = self.ec
+        previous = episode_common.read_episode(ec, ASSETS_DOC)
+        sfx, bgm = self.audio_entries()
+        now = llm_call.utc_now()
+        doc = {
+            "$schema": schemas.EPISODE_ASSETS_SCHEMA_NAME, "ep": ec.ep, "lines": self.line_entries(),
+            "sfx": sfx, "bgm": bgm,
+            # Kept: an approval is derived stale by the fingerprint, never cleared here.
+            "approved": previous["approved"] if previous else None,
+            "created_at": previous["created_at"] if previous else now, "updated_at": now,
+        }
+        try:
+            return ec.store.write_episode_doc(ec.story_id, ec.ep, ASSETS_DOC, doc, now=now)
+        except (schemas.SchemaError, ValueError, KeyError) as exc:
+            raise StepFailed(f"Episode {ec.ep}'s {ASSETS_DOC} could not be written ({exc}).") from None
+
+    # ------------------------------------------------------------------- run
+
+    def run(self) -> dict:
+        ec, ctx = self.ec, self.ctx
+        self.script, self.storyboard = require_approved(ec)
+        align = bool((ctx.params or {}).get(ALIGN_PARAM))
+        gates = self.open_asset_gates()
+        try:
+            units = asset_units(ec, self.script, self.storyboard, env=ctx.settings_env, align_words=align,
+                                adapters=self.tools.adapters, probe_local=True, transport=self.tools.transport,
+                                ledger=gates.ledger)
+            self.check_plan(units)
+            ctx.cancel.check()
+            try:
+                self.measure(gates)
+                if align:
+                    self.align_words()
+                self.images()
+            except gencache.JournalError as exc:
+                raise self.journal_failed(exc) from None
+            doc = self.write_assets_doc()
+        finally:
+            self.write_ledger_view()
+        return self.finish(doc)
+
+    def finish(self, doc) -> dict:
+        ec, ctx, board = self.ec, self.ctx, self.storyboard
+        states = {shot["shot_id"]: shot_state(ec, shot) for shot in board["shots"]}
+        unvoiced = [line["line_id"] for scene in self.script["scenes"] for line in scene["lines"]
+                    if not voice_lines.is_measured(ec, line)]
+        missing_cues = sum(1 for cue in doc["sfx"] if cue["state"] == "missing")
+        failures = [{"what": what, "target": target, "reason": reason} for what, target, reason in self.failed]
+        failures += [{"what": f"line {line_id}", "target": line_target(ec.ep, line_id),
+                      "reason": f"{voice_lines.speaker_name(ec, speaker)}: {reason.rstrip('.')}"}
+                     for line_id, speaker, reason in self.voice_failed]
+        ctx.on_log(episode_common.timing_line(self.script))
+        if failures:
+            targets = [item["target"] for item in failures]
+            advice = f"regenerate {entities.quoted_list(targets)} or run the assets step again"
+            message = (f"⚠️ Episode {ec.ep}'s assets are not complete: "
+                       + "; ".join(f"{item['what']} failed ({item['reason']})" for item in failures)
+                       + f". To finish them, {advice}.")
+            if self.voice_failed:
+                message += f" {self.voice_message()}"
+            ctx.on_log(message)
+        else:
+            ctx.on_log(f"✅ Episode {ec.ep}'s assets are ready for your approval.")
+        return {
+            "ep": ec.ep,
+            "shots": {"total": len(board["shots"]), "made": sum(1 for _sid, cached in self.made if not cached),
+                      "cached": sum(1 for _sid, cached in self.made if cached),
+                      "locked": sum(1 for shot in board["shots"] if shot["assets"].get("locked")),
+                      "states": states},
+            "lines": {"measured": self.measured, "unvoiced": unvoiced},
+            "aligned": list(self.aligned),
+            "sfx": {"resolved": len(doc["sfx"]) - missing_cues, "missing": missing_cues},
+            "bgm": None if doc["bgm"] is None else doc["bgm"]["mood"],
+            "failed": failures,
+            "complete": not unvoiced and all(shot["assets"].get("locked") or states[shot["shot_id"]] == "current"
+                                             for shot in board["shots"]),
+            "fingerprint": current_fingerprint(ec, board, self.script, doc),
+        }
+
+
+def _book_answer(gates, result, answered, kind) -> float:
+    """Book an answer no journal booked (``imaging.book``'s row, with the
+    episode) on the gates' ledger; returns what it cost."""
+    paid = bool(result.paid)
+    est = float(result.est_cost) if paid else 0.0
+    gates.ledger.append(step=STEP, provider=answered.provider, model=gating.api_model_id(kind, answered),
+                        unit="image", qty=1, est_usd=est, paid=paid, ep=gates.ep)
+    if paid and result.est_cost > 0:
+        budget_mod.record(result.est_cost)
+    return round(est, 4)
+
+
+def run(ctx, *, adapters=None, transport=None, time_fn=time.monotonic, sleep_fn=time.sleep, transcribe=None) -> dict:
+    """The step (module docstring). *adapters*, *transport*, *time_fn*,
+    *sleep_fn* and *transcribe* (the STT stand-in: ``(path, *, language,
+    on_log, cancel) -> (words, aligned_by)``) are for tests."""
+    ec = episode_common.load_episode_context(ctx)
+    episode_common.check_episode_preconditions(ctx, ec)
+    ctx.cancel.check()
+    tools = entities.Tools(time_fn=time_fn, sleep_fn=sleep_fn, adapters=adapters, transport=transport)
+    return _Assets(ctx, ec, tools=tools, transcribe=transcribe).run()
+
+
+# ---------------------------------------------------------------- regenerate
+
+def _noted(note) -> str:
+    return f" (note: {note})" if note else ""
+
+
+def regenerate_shot_image(ctx, ec, target, shot_id, note, *, tools, refuse) -> dict:
+    """``shot:<ep>:<shot_id>`` (kind ``shot_image``): that shot's image again,
+    with *note* at the prompt's tail and a fresh seed (DEC-124) -- persisted
+    as the shot's ``pending{seed, note, requested_at}`` **before** the call,
+    so a retry (this regenerate again with the same note, or the assets step)
+    asks for the same image and the generation cache serves or resumes it
+    (DEC-154). A locked shot is refused ("unlock it first"). *refuse(reason)*
+    is the caller's ``StepFailed`` builder."""
+    host = _Assets(ctx, ec, tools=tools)
+    try:
+        host.script, host.storyboard = require_approved(ec)
+    except StepFailed as exc:
+        raise refuse(str(exc)) from None
+    board = host.storyboard
+    shot = next((s for s in board["shots"] if s["shot_id"] == shot_id), None)
+    if shot is None:
+        raise refuse(f"episode {ec.ep}'s storyboard has no shot {shot_id!r} (it has sh01 to "
+                     f"sh{len(board['shots']):02d}).")
+    if shot["assets"].get("locked"):
+        raise refuse(f"shot {shot_id} is locked: unlock it first.")
+    if note is not None and len(note) > schemas.REGENERATE_NOTE_MAX:
+        raise refuse(f"a note is at most {schemas.REGENERATE_NOTE_MAX} characters ({len(note)} given).")
+    gates = host.open_asset_gates()
+    try:
+        if ec.consistency_mode == REFERENCES:
+            readiness = refimages.edit_readiness(ec.story, env=ctx.settings_env, qty=1,
+                                                 story_spent=gates.spent(), adapters=tools.adapters,
+                                                 size=SHOT_SIZE, probe_local=True, transport=tools.transport)
+            if not readiness["ready"]:
+                reasons = [f"{row['link']}: {row['reason']}" for row in readiness["links"]] or [readiness["message"]]
+                raise refuse(str(refimages.NeedsEditor(reasons, readiness, subject=f"Shot {shot_id}")))
+        pending = shot["assets"].get("pending")
+        # The same request asked again (its call did not answer) keeps its
+        # seed, so a paid request the provider holds is resumed, not bought
+        # twice; a new note is a new request with a fresh seed.
+        seed = pending["seed"] if pending and pending.get("note") == note else entities.fresh_seed()
+        shot["assets"]["pending"] = {"seed": seed, "note": note, "requested_at": llm_call.utc_now()}
+        host.write_board()
+        ctx.on_log(f"🖼 Shot {shot_id} again (seed {seed}){_noted(note)}")
+        ctx.cancel.check()
+        try:
+            record = host.make_image(shot, seed=seed, note=note)
+        except gencache.JournalError as exc:
+            raise host.journal_failed(exc) from None
+        except ShotFailed as exc:
+            raise refuse(f"{exc.reason}. The request is kept (seed {seed}): regenerate {target!r} again, or run "
+                         "the assets step, to ask for the same image.") from None
+        cached = record["_cached"]
+        host.apply_image(shot, record)
+    finally:
+        host.write_ledger_view()
+    ctx.on_log(f"🔁 Regenerated {target} (seed {shot['assets']['seed']}){_noted(note)}")
+    return {"target": target, "shot": shot_id, "seed": shot["assets"]["seed"], "provider": shot["assets"]["provider"],
+            "cached": cached}
+
+
+def regenerate_line_voice(ctx, ec, target, line_id, note, *, tools, refuse) -> dict:
+    """``line:<ep>:<line_id>`` (kind ``line``): that line spoken again by its
+    speaker's pinned voice alone (``voice_lines``: a one-link chain; a
+    failure names the voice to change, nothing else is tried), with a new
+    ``take`` so the generation cache misses on purpose. The script is
+    re-timed and the storyboard follows; no approval is cleared. A voice
+    takes no note."""
+    host = _Assets(ctx, ec, tools=tools)
+    host.voice_take = secrets.token_hex(8)
+    try:
+        host.script, host.storyboard = require_approved(ec)
+    except StepFailed as exc:
+        raise refuse(str(exc)) from None
+    line = next((ln for scene in host.script["scenes"] for ln in scene["lines"] if ln["line_id"] == line_id), None)
+    if line is None:
+        raise refuse(f"episode {ec.ep}'s script has no line {line_id!r}.")
+    if voices.voice_label(voice_lines.speaker_voice(ec, line["speaker"])) is None:
+        who = "the narrator" if line["speaker"] == "narrator" else voice_lines.speaker_name(ec, line["speaker"])
+        raise refuse(f"{voice_lines.no_voice_reason(ec, line['speaker'])}: pick a voice for {who} first.")
+    if note:
+        ctx.on_log("ℹ️ A voice take has no note: the note is not used.")
+    gates = host.open_asset_gates()
+    try:
+        host.before_synthesis([line])
+        try:
+            host.measure_line(gates, line)
+        except gencache.JournalError as exc:
+            raise host.journal_failed(exc) from None
+        if host.voice_failed:
+            raise refuse(host.voice_message())
+        previous = episode_common.read_episode(ec, ASSETS_DOC)
+        entry = host.line_entries().get(line_id)
+        if previous is not None and entry is not None:
+            previous["lines"][line_id] = entry
+            try:
+                ec.store.write_episode_doc(ec.story_id, ec.ep, ASSETS_DOC, previous, now=llm_call.utc_now())
+            except (schemas.SchemaError, ValueError, KeyError) as exc:
+                ctx.on_log(f"⚠️ {ASSETS_DOC} could not be updated ({exc}); the assets step writes it again.")
+    finally:
+        host.write_ledger_view()
+    ctx.on_log(f"🔁 Regenerated {target}")
+    return {"target": target, "line": line_id, "voice": line["timing"]["voice"],
+            "duration_s": line["timing"]["duration_s"], "take": host.voice_take}

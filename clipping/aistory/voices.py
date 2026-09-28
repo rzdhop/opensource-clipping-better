@@ -555,6 +555,27 @@ class LineGates:
         budget_mod.check(estimate, link, budget=self.budget, day_spent=budget_mod.day_spent(),
                          ep_spent=ep_spent, story_spent=self.spent())
 
+    def booker(self, kind, *, step, unit, qty):
+        """``book(entry)`` for a generation cache (``gencache.GenCache``,
+        DEC-151): the journal books each request through it, once, on this
+        ledger -- the one :meth:`check` reads, so what was booked a moment
+        ago counts against the next call's caps. One row (*step*, the gates'
+        episode, *unit*, *qty*, the entry's estimate when it is paid, its
+        ``note`` passed through: absent unless the journal gave one), and
+        today's spend for a paid one (``budget.record``)."""
+
+        def book(entry) -> None:
+            provider, _, model = str(entry["link"]).partition("/")
+            paid = bool(entry.get("paid"))
+            est = float(entry.get("est_usd") or 0.0) if paid else 0.0
+            self.ledger.append(step=step, provider=provider,
+                               model=gating.api_model_id(kind, Link(provider, model)), unit=unit, qty=qty,
+                               est_usd=est, paid=paid, ep=self.ep, note=entry.get("note"))
+            if paid and est > 0:
+                budget_mod.record(est)
+
+        return book
+
 
 def _atomic_copy(src, dest) -> None:
     """Copy *src* to *dest* so a reader sees the old file or the new one (a
@@ -610,7 +631,7 @@ def _line_outputs(result, spoken):
 
 
 def synthesize_line(gates, *, voice, text, dest_for, on_log, cancel, step=MEASURE_STEP, adapters=None,
-                    transport=None) -> dict:
+                    transport=None, cache=None, take=None) -> dict:
     """*text* spoken by the pinned *voice* (a character's ``voice`` block,
     or the narrator's) through a single-link chain built from that voice
     ALONE (DEC-122: never another provider, never another voice, never
@@ -629,25 +650,37 @@ def synthesize_line(gates, *, voice, text, dest_for, on_log, cancel, step=MEASUR
     engine wrote it) and its ``line_timing_v1`` sidecar at
     ``dest_for("json")``, each copied atomically. Returns ``{"ext",
     "duration_s", "source", "voice": "<provider>/<voice_id>", "link",
-    "paid", "est_usd"}``.
+    "paid", "est_usd", "cached"}`` (``cached``: a kept answer of *cache*,
+    no call made).
 
     ``VoiceError`` for a voice that pins nothing or a provider no chain link
     speaks for, a chain that could not run its one link (the refusal of a
     paid link while ``allow_paid`` is off carries the estimate and the
     day's spending), or an answer that cannot be kept. ``Cancelled`` passes
     through.
+
+    *cache* (phase 4, the assets step and its regenerates) is a
+    ``gencache.GenCache`` the request goes through: a kept answer is served
+    without a call, and the journal books every answer through the cache's
+    ``book`` (:meth:`LineGates.booker`), so an answer carrying
+    ``meta["booked"]`` is not booked again here. *take* joins the request
+    (``extra["take"]``, a field of the cache's key) so a voice regenerate
+    misses the cache on purpose. Both None: exactly the call of phase 3
+    (RC-A2, RC-A6). ``gencache.JournalError`` passes through: a request
+    the provider may hold could not be journaled or booked.
     """
     label = voice_label(voice)
     if label is None:
         raise VoiceError("no voice is pinned.")
     link = _chain_link(voice["provider"], voice["voice_id"])
     spoken = _spoken_by(voice, link)
-    request = generation.GenRequest(
-        kind=generation.TTS, text=text, voice=voice["voice_id"],
-        extra={"rate": voice.get("rate"), "pitch": voice.get("pitch")},
-    )
+    extra = {"rate": voice.get("rate"), "pitch": voice.get("pitch")}
+    if take is not None:
+        extra["take"] = take
+    request = generation.GenRequest(kind=generation.TTS, text=text, voice=voice["voice_id"], extra=extra)
     if adapters is None:
         adapters_mod.load_all()
+    journaled = {} if cache is None else {"cache": cache}
 
     with tempfile.TemporaryDirectory(prefix="voice-line-") as scratch:
         request.out_dir = scratch
@@ -655,7 +688,7 @@ def synthesize_line(gates, *, voice, text, dest_for, on_log, cancel, step=MEASUR
             result, answered = generation.run_generation_chain(
                 generation.TTS, [link], request, env=gates.merged, allow_paid=gates.budget.allow_paid,
                 on_log=on_log, budget_check=gates.check, limiter=gates.limiter, adapters=adapters,
-                transport=transport, cancel=cancel,
+                transport=transport, cancel=cancel, **journaled,
             )
         except generation.NoRunnableLink as exc:
             reason = exc.failures[0][1] if exc.failures else str(exc)
@@ -669,7 +702,11 @@ def synthesize_line(gates, *, voice, text, dest_for, on_log, cancel, step=MEASUR
         except pricing.PriceUnknown as exc:
             raise VoiceError(f"{spoken} is a paid link with no price: {exc}") from None
 
-        est = _book(gates.ledger, result, answered, qty=len(text), step=step, ep=gates.ep)
+        if "booked" not in (result.meta or {}):
+            est = _book(gates.ledger, result, answered, qty=len(text), step=step, ep=gates.ep)
+        else:
+            # The journal booked it (or served a kept answer it booked before).
+            est = round(float(result.est_cost) if result.paid else 0.0, 4)
         audio, ext, sidecar, data = _line_outputs(result, spoken)
         try:
             _atomic_copy(audio, dest_for(ext))
@@ -679,7 +716,8 @@ def synthesize_line(gates, *, voice, text, dest_for, on_log, cancel, step=MEASUR
                              f"({type(exc).__name__}: {exc}).") from None
 
     return {"ext": ext, "duration_s": round(float(data["duration_s"]), 3), "source": data["source"],
-            "voice": label, "link": answered, "paid": bool(result.paid), "est_usd": est}
+            "voice": label, "link": answered, "paid": bool(result.paid), "est_usd": est,
+            "cached": bool((result.meta or {}).get("cached"))}
 
 
 def _paid_off_reason(est, link, budget_obj) -> str:

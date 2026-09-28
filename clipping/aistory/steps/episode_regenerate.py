@@ -7,7 +7,15 @@
 - ``hook:<ep>``, ``cliffhanger:<ep>``, ``teaser:<ep>`` -- that partial E3;
 - ``shot:<ep>:<shot_id>:plan`` -- **T1r**: that shot planned again with the
   rest of its scene fixed, then the storyboard built again with the scene's
-  plans updated.
+  plans updated;
+- phase 4 (``assets.regenerate_shot_image`` / ``regenerate_line_voice``):
+  kind ``shot_image`` (``shot:<ep>:<shot_id>``) -- that shot's image again,
+  the note at the prompt's tail, a fresh seed persisted as ``pending``
+  before the call; a locked shot is refused -- and kind ``line``
+  (``line:<ep>:<line_id>``) -- that line spoken again by its pinned voice
+  alone, a new take so the generation cache misses on purpose. Neither
+  clears an approval. (The grammar that reads these two targets is
+  ``regenerate.parse_target``'s, extended at stage 11.)
 
 Each applies only its own keys and reuses its scene's line block
 (``schemas.line_id_for``). A script rewrite goes through
@@ -39,14 +47,23 @@ from .llm_call import StepFailed
 # (``regenerate.parse_target`` reads these targets with every other one).
 from .regenerate import FRAMING_TARGETS, parse_episode_target  # noqa: F401 -- re-exported
 
+# Phase 4's episode kinds (the plan's tuple kinds: ``shot:<ep>:<shot_id>`` is
+# ``("shot_image", ep, shot_id)``, ``line:<ep>:<line_id>`` is ``("line", ep,
+# line_id)``); ``assets`` runs them.
+SHOT_IMAGE_KIND = "shot_image"
+LINE_KIND = "line"
+ASSET_KINDS = (SHOT_IMAGE_KIND, LINE_KIND)
+
 
 def _noted(note) -> str:
     return f" (note: {note})" if note else ""
 
 
-def run(ctx, target, parsed, note, *, runner=None, time_fn=time.monotonic) -> dict:
+def run(ctx, target, parsed, note, *, runner=None, time_fn=time.monotonic, sleep_fn=time.sleep, adapters=None,
+        transport=None) -> dict:
     """Regenerate the episode target *target* (``parse_episode_target``'s
-    *parsed*), with the optional *note*."""
+    *parsed*), with the optional *note*. *sleep_fn*, *adapters* and
+    *transport* reach the generation chains of the phase-4 kinds (tests)."""
     ep = parsed[1]
 
     def refuse(reason):
@@ -62,8 +79,18 @@ def run(ctx, target, parsed, note, *, runner=None, time_fn=time.monotonic) -> di
     if script is None or not script["scenes"]:
         raise refuse(f"episode {ep} has no script yet; write it first (the script step).")
     board = episode_common.read_episode(ec, STORYBOARD_DOC)
-    tools = entities.Tools(runner=runner, time_fn=time_fn)
+    tools = entities.Tools(runner=runner, time_fn=time_fn, sleep_fn=sleep_fn, adapters=adapters,
+                           transport=transport)
     ctx.cancel.check()
+
+    if parsed[0] in ASSET_KINDS:
+        # Imported here: the image and voice chains, which the text targets
+        # never need.
+        from . import assets as assets_step
+
+        regenerate = (assets_step.regenerate_shot_image if parsed[0] == SHOT_IMAGE_KIND
+                      else assets_step.regenerate_line_voice)
+        return regenerate(ctx, ec, target, parsed[2], note, tools=tools, refuse=refuse)
 
     if parsed[0] == "shot":
         return _replan_shot(ctx, ec, target, parsed[2], note, script, board, tools, refuse)

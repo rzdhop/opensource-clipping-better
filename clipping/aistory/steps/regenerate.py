@@ -210,7 +210,8 @@ def run(ctx, *, runner=None, time_fn=time.monotonic, sleep_fn=time.sleep, adapte
         # shot resolution, which the phase-1/2 targets never need.
         from . import episode_regenerate
 
-        return episode_regenerate.run(ctx, target, parsed, _note(params), runner=runner, time_fn=time_fn)
+        return episode_regenerate.run(ctx, target, parsed, _note(params), runner=runner, time_fn=time_fn,
+                                      sleep_fn=sleep_fn, adapters=adapters, transport=transport)
 
     tools = entities.Tools(runner=runner, time_fn=time_fn, sleep_fn=sleep_fn, adapters=adapters,
                            transport=transport)
