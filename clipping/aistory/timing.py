@@ -816,32 +816,56 @@ def _episode_pass(script: dict, template: dict, language: str, *, style_lock: di
     return result, scene_timings
 
 
-def line_offsets(script: dict, timing: dict, template: dict, *, storyboard: dict = None) -> dict:
-    """Absolute ``{line_id: (start_s, end_s)}`` for every line in the
-    episode, from an already-computed :func:`episode_timing` result.
+def scene_starts(script: dict, timing: dict, template: dict, *, storyboard: dict = None) -> dict:
+    """``{scene_id: start_s}``: every scene's own start on the episode's
+    output timeline, from an already-computed :func:`episode_timing`
+    result -- the running sum of the *previous* scenes' (already
+    window-adjusted) durations, minus the overlap of the transition
+    entering it -- the same overlap :func:`episode_timing` subtracted from
+    the total (matched to the storyboard's shots by id, see
+    :func:`_boundary_from_storyboard`, when *storyboard* is given).
 
-    A scene's own start is the running sum of the *previous* scenes'
-    (already window-adjusted) durations, minus the overlap of the
-    transition entering it -- the same overlap :func:`episode_timing`
-    subtracted from the total (matched to the storyboard's shots by id, see
-    :func:`_boundary_from_storyboard`, when *storyboard* is given), so this
-    reconstructs the same timeline. A line's duration is read straight from
-    its persisted ``timing`` (the caller is expected to have already
-    re-timed the script), not re-estimated: this function only places
-    lines, it never times them.
+    Factored out of :func:`line_offsets` (which places every *line*
+    relative to this same per-scene start) so a caller that needs a scene's
+    own start regardless of whether it has any lines -- an ``"at":
+    "start"`` SFX anchor, or a wordless scene, spec 6.4/6.5 -- has one to
+    read, without re-deriving this arithmetic (plan phase 4 stage 4,
+    ``render/timeline.py``). Unrounded, like the running accumulator it
+    always was inside :func:`line_offsets` -- a caller rounds if it wants
+    a display value.
     """
     scenes = script["scenes"]
     boundary = _boundary_transitions(scenes, template, storyboard)
-    pauses = template["pauses_s"]
 
-    offsets = {}
+    starts = {}
     scene_start = 0.0
     for i, scene in enumerate(scenes):
         if i > 0:
             prev_sid = scenes[i - 1]["scene_id"]
             prev_duration = timing["scenes"][prev_sid]["duration_s"]
             scene_start += prev_duration - boundary[i - 1][1]
+        starts[scene["scene_id"]] = scene_start
 
+    return starts
+
+
+def line_offsets(script: dict, timing: dict, template: dict, *, storyboard: dict = None) -> dict:
+    """Absolute ``{line_id: (start_s, end_s)}`` for every line in the
+    episode, from an already-computed :func:`episode_timing` result.
+
+    Each scene's own start is :func:`scene_starts` (so this reconstructs
+    the same timeline). A line's duration is read straight from its
+    persisted ``timing`` (the caller is expected to have already re-timed
+    the script), not re-estimated: this function only places lines, it
+    never times them.
+    """
+    scenes = script["scenes"]
+    starts = scene_starts(script, timing, template, storyboard=storyboard)
+    pauses = template["pauses_s"]
+
+    offsets = {}
+    for scene in scenes:
+        scene_start = starts[scene["scene_id"]]
         t = pauses["before_first_line"]
         lines = scene["lines"]
         for j, line in enumerate(lines):
