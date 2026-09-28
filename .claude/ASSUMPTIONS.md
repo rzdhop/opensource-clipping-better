@@ -211,6 +211,21 @@
 - **A-063** — Gemini's free TTS answered 429 once in 5 lines during the stage-13 measurement walk; the existing
   retry in the TTS path succeeded on the second attempt. UNCONFIRMED whether that rate holds over more lines or
   more days.
+- **A-065** — Montserrat Black (the repo's own `Montserrat-Black.ttf`) is an acceptable stand-in for both phase-4
+  styles' typography: fruit_drama asks Montserrat ExtraBold (else Inter Black), family_3d Fredoka Bold / Baloo 2,
+  and none of those files ship. A template font is used when its file is dropped into `custom_fonts/`; the manifest
+  names the font actually used. family_3d burns no dialogue subtitles (`subtitle_mode: none`), so only its end card,
+  hook overlay, AI label and cover are affected. UNCONFIRMED (a default taken at phase-4 CLARIFY, 2026-09-28).
+- **A-066** — The AI-Story mix targets the spec's `loudnorm I=-14 TP=-1 LRA=11`; `clipping/loudness.py` keeps its
+  own TP −1.5 for clips, and the renderer passes its target explicitly. UNCONFIRMED that −1 dBTP survives the AAC
+  encode without inter-sample overs (measured at Tier-2).
+- **A-067** — The spec's 4× upscale before `zoompan` is affordable on this VPS: a 3.0 s shot renders in 7.9 s at
+  4× vs 5.5 s at 2× (4-core Neoverse-N1, host ffmpeg 6.1.1, libx264 medium, 2026-09-28 scratch bench), projecting
+  ≈ 200 s for a 24-shot 60 s episode. UNCONFIRMED on the container's ffmpeg 7.1.5 and on real episodes (Tier-2
+  records the measured times).
+- **A-068** — The 15 `assets/bgm/` tracks (Clips mode, Pixabay-style names, no licence record in the repo) may be
+  mapped into `bgm_index.json` for AI Story; their licence is recorded as "shipped with Clips, source unrecorded".
+  *Human's choice at phase-4 CLARIFY (2026-09-28): "Self-made SFX + existing BGM".* UNCONFIRMED as a licence fact.
 
 ## Confirmed
 - **A-055** — French speech runs at 0.070 s/char. *Confirmed*: three Edge samples at stage 0 (172 chars in 12.03 s

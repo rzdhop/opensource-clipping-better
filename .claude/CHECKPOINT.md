@@ -1,3 +1,94 @@
+## IN PROGRESS — AI Story **phase 4** (assets, Tier-1 renderer, metadata pack — MVP)
+- **Started:** 2026-09-28, human: "Go with phase 4". Classified FULL.
+- **Current phase:** 4 CHECKPOINT → 5 IMPLEMENT. **Plan approved** by the human ("Yes go go", 2026-09-28), read as
+  also answering Q5 = yes: `feat/ai-story-phase-4` is pushed once at stage 7 so CI records the x86_64 framemd5 key.
+  Plan: `~/.claude/plans/ai-story-phase-4-assets-render.md` (stages 0–17, riskiest = stage 6, sequence + audio graph).
+- **Current stage:** 0 (checkpoint + baseline + worktree). Checkpoint commit = the commit carrying this header on
+  `main` (parent `1367d75`).
+- **Next action:** create worktree `.claude/worktrees/ai-story-phase-4` on `feat/ai-story-phase-4` (node_modules
+  symlinked), Tier-1 baseline both envs + scratch vite build, record host + container `ffmpeg -version`; then stage 1.
+- **LOAD done:** five artifacts, `05-phase-4-assets-render-metadata.md`, master spec §0, §2.7–2.11, §3, §4,
+  §5.1–5.2, §6, §8, §9, §10, §11, §13 read.
+- **EXPLORE map (closed):** render-infra map back (host ffmpeg 6.1.1 arm64 has zoompan/xfade/acrossfade/
+  sidechaincompress/loudnorm/ass/drawtext; **CI installs no ffmpeg**; `loudness.TARGET` is TP −1.5 vs spec −1;
+  no `word_pop`/`two_line`/zoompan code anywhere — all new; every `clipping/studio` module but `ffmpeg_utils`/
+  `helpers` imports cv2/numpy at load; none of the template fonts ship (only Montserrat Black/Regular, Anton);
+  no `assets/sfx/`; the 15 `assets/bgm/` mp3s carry no licence record; **no framemd5 clip-parity test exists** —
+  RC-E3 is the `git diff --stat` check). Paid-generation map back: no cache, no request-id hook, no booking of
+  a post-submit failure (fal raises after `request_id` is known, `images.py:247-271`; `_attempt` returns None);
+  booking is the caller's after success (`imaging.book`, `voices._book`, settings chain test); seams = optional
+  `cache=` in `_run_candidates` before the paid/limiter gates, optional `on_submit` from `_attempt` (fal between
+  `images.py:245/247`), booking in the caller's `on_submit` + skip at success; tests pinning today's booking:
+  `test_story_measure.py:457`, `test_story_refimages.py:716`, `test_generation_chain_api.py:216`,
+  `test_generation_chain.py:132/197/289`, `test_image_adapters.py:215`; storyboard `assets` is a closed object;
+  `EPISODE_ASSET_KINDS = ("voice",)`; `gating.budget_check` passes no `ep_spent` (episode cap not applied).
+  Story/API map back: new steps = entries in `steps/__init__.RUNNERS` + removal from `workflow.LATER_STEPS`
+  (worker dispatch is generic); `LATER_APPROVALS = ("assets",)`, `LATER_TARGETS = ("shot","line","metadata")`;
+  `shot:<ep>:<shid>` collides with `:plan` in `EPISODE_TARGET_DOCS` (needs disambiguation); no staleness link from
+  script/storyboard edits to `shot.assets`; `line_offsets` must not be used on a partial storyboard (use
+  `episode_pass` scene timings); `CostLedger.append/totals(ep=)` already filter per episode; the story defaults
+  agreement test is **four**-place (`tests/test_story_defaults.py`); tests changing on purpose:
+  `test_story_workflow.py:288/293/302`, `test_story_workflow_episode.py:129-155`, `test_stories_api.py:660-709`.
+  Dashboard/media map back: DEC-048 signs `(job_id, filename, exp)` under `SIGNABLE_PREFIXES = ("/api/outputs/",)`
+  (`auth.py:206-334`); Starlette `FileResponse` already serves ranges; story media today is token-gated blob fetch
+  (`story_file`, `entity_media`, `episode_voice` in `routes/stories.py`; `fetch*Url` in `api.js`) — fine for PNG/mp3,
+  wrong for the mp4 (DEC-048 rejected blob video). Cleanest seam: an additive story-scoped signature with its own
+  HMAC context constant. Preview placeholder inline at `EpisodeStudio.jsx:43-52`; `ShotCard` lives inside
+  `StoryboardPane.jsx:276-505`; `RegenerateControl` (`fields.jsx:185`) reusable; no per-shot lock exists;
+  `CostLedger.episode_view` exists; contract tests in `tests/test_story_payload_contract_episode.py`.
+  Bench back (scratch, deleted): 4-core Neoverse-N1, 23 GB; host ffmpeg 6.1.1, **container ffmpeg 7.1.5** (PIL
+  12.3.0, every needed filter present) → a golden framemd5 cannot be one value across host/CI/container. 3.0 s shot
+  at 4× medium 7.9 s (2× 5.5, 1× 5.2); tiny-input 4× 6.5 s; 1 s ultrafast 1.8 s; 10 s 1080×1920 medium pass 6.7 s;
+  3-clip xfade 1.6 s → projected episode render ≈ 200 s at 4× (spec's factor kept).
+- **CLARIFY answers (human, 2026-09-28):** (1) **self-made SFX** from a committed generator for every cue of the
+  seven templates + **existing BGM** mapped by `bgm_index.json` (licence "shipped with Clips, source unrecorded",
+  A-068); (2) **rewrite live ep 1** of `b1104ec66b05` (script + storyboard on the free chain), then assets/render/
+  metadata; (3) **I walk and measure, the human watches both episodes on the phone and acknowledges**; (4) paid path
+  proven with **fakes only, $0**; Tier-2 shows one paid estimate refused by the cap; the live paid step stays
+  deferred.
+- **Defaults taken (A-065…A-067, UNCONFIRMED):** Montserrat Black for both styles; TP −1 passed explicitly by the
+  renderer; 4× upscale.
+- **Open questions:** none.
+- **Next free ids:** DEC-151, A-069 (then A-071; A-070 is taken).
+
+### Stage ledger (phase 4)
+| S | Stage | State |
+|---|---|---|
+| 0 | checkpoint + baseline + worktree | in progress |
+| 1 | generation cache + journal [Opus] | — |
+| 2 | audio + font assets [Sonnet] | — |
+| 3 | documents + store [Opus] | — |
+| 4 | timeline + motion + shot builders [Sonnet] | — |
+| 5 | ASS text + fonts [Sonnet] | — |
+| 6 | sequence + audio graph (**RISKIEST**) [Opus] | — |
+| 7 | runner, manifest, cache, loudness, golden render, CI (+ one push of the branch) [Opus] | — |
+| 8 | assets step [Opus] | — |
+| 9 | render + metadata steps [Opus] | — |
+| 10 | fast track + completed terminal [Opus] | — |
+| 11 | workflow + API [Opus] | — |
+| 12 | signed story media [Opus] | — |
+| 13 | CLI [Sonnet] | — |
+| 14 | dashboard: storyboard assets + fast track [Sonnet] | — |
+| 15 | dashboard: Preview [Sonnet] | — |
+| 16 | merge, deploy, Tier-2 (me; human watches on the phone) | — |
+| 17 | docs + decisions [Sonnet] | — |
+
+### Regression contract (phase 4)
+RC-P1…P11, RC-S1…S4, RC-T1…T3 and RC-E1…E5 (tables below) stay in force, plus:
+| ID | Must keep working | Proven by |
+|---|---|---|
+| RC-A1 | Clip renderers and the legacy assembler untouched | `tests/test_render_layer_guard.py` (stage 7, committed sha256 manifest) + `git diff --stat 1367d75 -- clipping/studio clipping/story` empty at close (carries RC-E3/RC-P9) |
+| RC-A2 | Default generation behaviour unchanged when no cache is passed | unedited: `test_story_measure.py:457`, `test_story_refimages.py:716`, `test_generation_chain_api.py:216`, `test_generation_chain.py:132/197/289`, `test_image_adapters.py:215` |
+| RC-A3 | No paid generation without `allow_paid` + budget check incl. the per-episode cap; one submit per paid request; every billed request booked | stage 1/8/10 tests; `test_budget.py`, `test_limits.py`, `test_generation_chain*.py` unedited |
+| RC-A4 | Steps 1–9 unchanged except the deliberate `later_phase` edits | `test_stories_api*.py`, `test_story_steps.py`, phase-3 step/API tests unedited except `test_story_workflow.py:288/293/302`, `test_story_workflow_episode.py:129-155`, `test_stories_api.py:660-709` (each edit named in the action log) |
+| RC-A5 | DEC-048 clip signatures unchanged; a story signature opens exactly one file | `test_auth_token.py` unedited + stage-12 tests |
+| RC-A6 | Phase-3 voice measurement identical after the lift | `test_story_measure.py` unedited |
+| RC-A7 | Clip loudness unchanged | `test_loudnorm.py` unedited; `loudness.TARGET` unchanged |
+| RC-A8 | Phase-3 episode documents on disk still read and validate | store/schema tests unedited + a copy of live ep01 read at stage 3 |
+| RC-A9 | Clip auto-BGM unchanged by the index | stage-2 guard: `audio_bgm` reads only mood folders |
+
+---
+
 ## CURRENT STATE — AI Story **phase 3 is DONE**. Next: **phase 4**.
 
 - **Stages 0–14 done** on `feat/ai-story-phase-3`, ff-merged to `main`. `main` == `origin/main` == `fb5bbf7`
