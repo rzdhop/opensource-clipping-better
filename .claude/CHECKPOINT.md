@@ -3,12 +3,12 @@
 - **Current phase:** 4 CHECKPOINT → 5 IMPLEMENT. **Plan approved** by the human ("Yes go go", 2026-09-28), read as
   also answering Q5 = yes: `feat/ai-story-phase-4` is pushed once at stage 7 so CI records the x86_64 framemd5 key.
   Plan: `~/.claude/plans/ai-story-phase-4-assets-render.md` (stages 0–17, riskiest = stage 6, sequence + audio graph).
-- **Current stage:** 10 (fast track + completed terminal, Opus). Branch pushed once (Q5) at `4f48515`; CI: compile ✓, test ✗ only as designed
+- **Current stage:** 11 (workflow + API, Opus). Branch pushed once (Q5) at `4f48515`; CI: compile ✓, test ✗ only as designed
   (unknown x86_64 golden key, read from the public check-run annotation and recorded). The rest of CI's test log needs
   a sign-in, so **CI's full green is confirmed only at the next push** (Node 20 deprecation notice on checkout@v4 /
   setup-python@v5 — follow-up). Stage 0 done: checkpoint commit **`86e7f4d`** on `main`
   (parent `1367d75`); worktree `.claude/worktrees/ai-story-phase-4` on `feat/ai-story-phase-4` (node_modules
-  symlinked, excluded); **this worktree's `.claude/` files are the live artifacts until the merge**. Stages 1–9 done.
+  symlinked, excluded); **this worktree's `.claude/` files are the live artifacts until the merge**. Stages 1–10 done.
 - **Stage 1 notes for stage 8 (first real caller of the cache):** catch `gencache.JournalError` (not a
   `NoRunnableLink`) and fail naming the request id; book only when `result.meta` has no `"booked"` (a keyless
   request still books the old way); `book(entry)` sees kind/link/paid/estimate/note/state/request, so step/ep/qty
@@ -17,7 +17,18 @@
 - **Tier-1 baseline (86e7f4d):** local **4486 passed / 1 skipped** (210 s); CI env (`/tmp/cilibs`) **3901 passed /
   555 skipped** (155 s); compileall clean (`PYTHONPYCACHEPREFIX` in scratch); vite build green to a scratch outDir.
   ffmpeg: host `6.1.1-3ubuntu5`, container `7.1.5-0+deb13u1`. Health: 0 jobs.
-- **Next action:** stage 10 per the plan's §2 "Fast track", "Jobs" and §3 row 10.
+- **Next action:** stage 11 per the plan's §2 "API" and §3 row 11.
+- **Stage 10 notes for stages 11/13/14/16:** `steps/fast_track.run(ctx, …)` (param `storyboard` t1|fast; helpers
+  `read_params`, `script_refusal`, `paid_verdict` free|paid_within_caps|stops_before_paid|blocked, `render_seconds`
+  8 s/shot + 60 s authored pending A-069, `estimate(ec, *, env, storyboard, …)`, `STORYBOARD_CHOICES`); every stop
+  raises `StepFailed`; `steps.ends_completed(step, params)` → worker ends render/metadata/fast-track/metadata
+  regenerate COMPLETED ("Story step 'X' is done."); `workflow.approve_assets(stories, story_id, ep, *, now)` sets
+  each shot's `approved` + `approved{at, fingerprint}` — stage 11 wires the route and must also complete older jobs
+  awaiting `script:/storyboard:/assets:<ep>` once a fast track approved them in-process; `render.current_render(ec,
+  params, …)` (no process; hashes inputs + mp4 — cache it against the 4 s poll); `budget=None` seam on script/
+  storyboard/assets/metadata runners; feed prefixes `⏩ Fast track n/6`, `✅ … auto-approved`, `💲`, `🏁`.
+  **Tier-2 step 12 (paid estimate refused by the cap) must run while shots are still unmade** — once every asset
+  is current the estimates price $0.
 - **Stage 9 notes for stages 10/11/14/15/16:** `steps/render.run(ctx, *, profile="final", …)` (params `subtitles`
   style|word_pop|two_line|none, `encoder` libx264|auto — `render.SUBTITLE_CHOICES/ENCODER_CHOICES`) returns `{ep,
   state, profile, params, ran, cached, duration_s, loudness, warnings, output{file, sha256, width, height, fps},
@@ -143,8 +154,8 @@
 | 7 | runner, manifest, cache, loudness, golden render, CI (+ one push of the branch) [Opus] | **done** (local 5136/1, CI 4551/555; 67 new tests; golden keys host 6.1.1 aarch64, container 7.1.5 aarch64, CI 6.1.1 x86_64 from the pushed run's annotation) |
 | 8 | assets step [Opus] | **done** (local 5183/1, CI 4598/555; 47 new tests; phase-3 measurement lifted, `test_story_measure.py` unedited) |
 | 9 | render + metadata steps [Opus] | **done** (local 5286/1, CI 4701/555; 103 new tests; e2e 67.3 s FR episode rendered + metadata pack) |
-| 10 | fast track + completed terminal [Opus] | in progress |
-| 11 | workflow + API [Opus] | — |
+| 10 | fast track + completed terminal [Opus] | **done** (local 5366/1, CI 4766/570; 80 new tests, 15 worker cases skip in CI like every pydantic-backed worker test) |
+| 11 | workflow + API [Opus] | in progress |
 | 12 | signed story media [Opus] | — |
 | 13 | CLI [Sonnet] | — |
 | 14 | dashboard: storyboard assets + fast track [Sonnet] | — |

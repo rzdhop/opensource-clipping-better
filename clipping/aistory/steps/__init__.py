@@ -7,18 +7,24 @@ prints its progress (``ctx.on_log``) exactly as the clip pipeline does, so the
 worker's stdout tee files every line against the job; it checks
 ``ctx.cancel`` between the calls that spend; it writes what it produced into
 the story's folder under ``ctx.outputs_dir``. Returning means "ready for the
-user's approval"; raising means the step failed.
+user's approval" (or, for a step :func:`ends_completed` names, "done");
+raising means the step failed.
 
 Phase 1 registers ``concepts``, ``bible`` and ``regenerate`` (stage 6) and
 ``style_preview`` (stage 8); phase 2 adds ``cast``, ``places_proposal``,
 ``places`` and ``season`` (and the entity targets of ``regenerate``); phase 3
 adds ``script`` and ``storyboard`` (and the episode targets); phase 4 adds
-``assets`` (and the image and voice targets of ``regenerate``), ``render``
-and ``metadata`` (and the metadata target of ``regenerate``). Each is
-registered by module name and imported on its first run, never here:
-importing this package must not pull in the prompt catalogue, the LLM chain
-or the generation chains, so the worker's dispatch and a test that only needs
-the registry stay as light as they were.
+``assets`` (and the image and voice targets of ``regenerate``), ``render``,
+``metadata`` (and the metadata target of ``regenerate``) and ``fast-track``
+(module ``fast_track``). Each is registered by module name and imported on
+its first run, never here: importing this package must not pull in the
+prompt catalogue, the LLM chain or the generation chains, so the worker's
+dispatch and a test that only needs the registry stay as light as they were.
+
+How a step's job ends is :func:`ends_completed`'s answer (DEC-161, amending
+DEC-108): ``render``, ``metadata``, ``fast-track`` and a regenerate of
+``metadata:<ep>:<platform>`` leave nothing to approve and end ``completed``;
+every other step ends ``awaiting_approval``, as it always did.
 
 A runner that fails in a way the user can act on raises :class:`StepFailed`
 with a sentence saying what to do; the worker records it as
@@ -108,7 +114,32 @@ RUNNERS: dict[str, Callable[[StepContext], object]] = {
     "assets": _deferred("assets"),
     "render": _deferred("render"),
     "metadata": _deferred("metadata"),
+    "fast-track": _deferred("fast_track"),
 }
+
+# DEC-161: the steps with nothing to approve, whose job ends ``completed``;
+# and the first word of the regenerate targets that end so too
+# (``metadata:<ep>:<platform>``). Every other step ends awaiting approval.
+COMPLETED_STEPS = ("render", "metadata", "fast-track")
+COMPLETED_TARGET_KINDS = ("metadata",)
+
+
+def ends_completed(step, params=None) -> bool:
+    """Whether a job of *step* (with its *params*) ends ``completed`` rather
+    than ``awaiting_approval`` once its runner returns: :data:`COMPLETED_STEPS`,
+    and a ``regenerate`` whose ``params["target"]`` is
+    ``<kind>:<ep>:<platform>`` with *kind* in :data:`COMPLETED_TARGET_KINDS`.
+    The shape only: a malformed target fails in its runner long before the
+    job's end is decided."""
+    if step in COMPLETED_STEPS:
+        return True
+    if step != "regenerate" or not isinstance(params, dict):
+        return False
+    target = params.get("target")
+    if not isinstance(target, str):
+        return False
+    parts = target.split(":")
+    return len(parts) == 3 and parts[0] in COMPLETED_TARGET_KINDS and all(parts)
 
 
 def run(step: str, ctx: StepContext):

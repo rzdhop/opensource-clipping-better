@@ -337,6 +337,75 @@ def summary_of(ec, result, *, profile, fingerprint) -> dict:
     }
 
 
+# -------------------------------------------------------------- currency
+
+# What the manifest keeps of each input (``manifest.new_manifest``).
+_MANIFEST_INPUT_KEYS = ("role", "id", "source", "staged", "sha256")
+
+
+def current_render(ec, params=None, *, profile="final", custom_fonts_dir=None) -> bool:
+    """Whether the episode's last render is the one :func:`run` would make
+    now -- so running it again would only repeat minutes of ffmpeg (the fast
+    track keeps it; plan phase 4, "Fast track": Continue repeats nothing).
+    Starts no process: the plan is built as :func:`run` builds it, against
+    the ffmpeg the manifest recorded, and must match the manifest -- its
+    profile and params, every input file (role, id, sha256), every stage and
+    its command (all ``done`` or ``cached``) -- and the generated texts in
+    ``render/`` (the subtitles, the end card) must be the ones it would
+    write; the final file must be the one the manifest records. *params* as
+    the step reads them (``subtitles``, ``encoder``; ``encoder: auto`` is
+    never current -- it depends on the machine). Anything unreadable or
+    refused is simply not current."""
+    try:
+        wanted = read_params(params)
+        script, board, assets_doc = require_renderable(ec)
+        manifest = episode_common.read_episode(ec, MANIFEST_DOC)
+    except StepFailed:
+        return False
+    if wanted["encoder"] != DEFAULT_ENCODER or manifest is None or not manifest.get("output"):
+        return False
+    if manifest["profile"] != profile:
+        return False
+    try:
+        final = ec.store.episode_file_path(ec.story_id, ec.ep, FINAL_FILE)
+        render_dir = ec.store.episode_render_dir(ec.story_id, ec.ep)
+    except KeyError:
+        return False
+    if assets_step._sha256_file(final) != manifest["output"]["sha256"]:
+        return False
+    try:
+        inputs = render_inputs(ec, script, board, assets_doc, custom_fonts_dir=custom_fonts_dir)
+        plan = plan_mod.build_render_plan(**plan_args(ec, script, board, assets_doc, inputs,
+                                                      subtitles=wanted["subtitles"], encoder=wanted["encoder"]),
+                                          ffmpeg=manifest["ffmpeg"], profile=profile)
+    except (StepFailed, plan_mod.PlanError, OSError, ValueError, KeyError):
+        return False
+    if manifest["params"] != plan["params"]:
+        return False
+    if manifest["inputs"] != [{key: item[key] for key in _MANIFEST_INPUT_KEYS} for item in plan["inputs"]]:
+        return False
+    done = manifest["stages"]
+    if [(stage["id"], stage["kind"]) for stage in done] != [(stage["id"], stage["kind"]) for stage in plan["stages"]]:
+        return False
+    for entry, stage in zip(done, plan["stages"]):
+        if entry["state"] not in ("done", "cached"):
+            return False
+        # L2's command is built from L1's measurement when it runs.
+        if stage["argv"] is not None and entry["argv"] != stage["argv"]:
+            return False
+    for item in plan["files"]:
+        path = os.path.join(render_dir, item["path"])
+        try:
+            if os.path.islink(path):
+                return False
+            with open(path, encoding="utf-8", newline="") as handle:
+                if handle.read() != item["text"]:
+                    return False
+        except (OSError, UnicodeDecodeError):
+            return False
+    return True
+
+
 # --------------------------------------------------------------------- run
 
 def run(ctx, *, profile="final", run_process=subprocess.run, popen=subprocess.Popen, clock=time.monotonic,

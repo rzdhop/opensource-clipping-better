@@ -217,7 +217,10 @@ def _execute_story_step(job_id: str, job: dict, token: CancelToken) -> None:
     """Run one AI Story step (a job of kind ``story_step``; spec 9.1).
 
     Ends in AWAITING_APPROVAL -- finished for this worker, so the slot is freed
-    as soon as this returns, but not for the user -- or failed, or cancelled.
+    as soon as this returns, but not for the user -- or, for a step with
+    nothing to approve (``steps.ends_completed``: render, metadata,
+    fast-track, a metadata regenerate; DEC-161), COMPLETED; or failed, or
+    cancelled.
     What the step prints reaches the job's feed through the stdout tee, as the
     clip pipeline's output does, and is mirrored into the story's activity.log
     once the step is over.
@@ -252,14 +255,17 @@ def _execute_story_step(job_id: str, job: dict, token: CancelToken) -> None:
 
         # A result that lands after a cancel is not offered for approval.
         token.check()
-        store.set_status(job_id, JobStatus.AWAITING_APPROVAL)
+        completed = steps.ends_completed(step, job.get("params"))
+        store.set_status(job_id, JobStatus.COMPLETED if completed else JobStatus.AWAITING_APPROVAL)
         # The cancel can also land between that check and the write, which the
-        # store then drops (DEC-076). Once awaiting, a cancel is refused.
+        # store then drops (DEC-076). Once awaiting or completed, a cancel is refused.
         current = store.get_job(job_id) or {}
         if current.get("status") == JobStatus.CANCELLED.value:
             raise Cancelled("The job was cancelled.")
         store.append_event(
-            job_id, f"Story step '{step}' is ready: awaiting your approval.",
+            job_id,
+            f"Story step '{step}' is done." if completed
+            else f"Story step '{step}' is ready: awaiting your approval.",
             "step", "worker",
         )
 

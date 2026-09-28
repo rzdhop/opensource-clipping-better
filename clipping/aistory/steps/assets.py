@@ -544,6 +544,56 @@ def _alignment_requests(ec, script, *, align_words) -> int:
     return count
 
 
+def image_quote(ec, qty, *, env, story_spent, adapters=None, probe_local=False, transport=None) -> dict:
+    """What *qty* shot images would cost on the story's route and in its
+    consistency mode, calling nothing (a local editor is probed only with
+    *probe_local*): ``imaging.estimate``'s answer on IMAGE_CHAIN in
+    ``prompt_only`` mode, ``refimages.edit_readiness``' on IMAGE_EDIT_CHAIN in
+    ``references`` mode -- ``{est_usd, route_class, link, links, ready,
+    message, ...}``. :func:`asset_units` prices the shots to make with it;
+    the fast track's estimate prices the shots it predicts."""
+    story = ec.story
+    if ec.consistency_mode != PROMPT_ONLY:
+        return refimages.edit_readiness(story, env=env, qty=qty, story_spent=story_spent, adapters=adapters,
+                                        size=SHOT_SIZE, probe_local=probe_local, transport=transport)
+    request = gen.GenRequest(kind=gen.IMAGE, width=SHOT_SIZE[0], height=SHOT_SIZE[1])
+    return imaging.estimate(gen.IMAGE, env, route=story["generation_profile"]["route"], request=request, qty=qty,
+                            story_spent=story_spent, adapters=adapters, step=STEP, what="the shot images",
+                            when="the assets step runs")
+
+
+def spending_caps(ec, total, *, env, ledger=None) -> tuple:
+    """``(caps, over_cap)`` for a plan that would spend *total* paid
+    dollars on episode *ec.ep*: ``caps`` is ``{"allow_paid", "episode"|"day"|
+    "story": {"cap_usd", "spent_usd", "left_usd"}}`` (the three only when the
+    budget settings read), ``over_cap`` the budget's refusal of *total* --
+    the episode's cap included -- with the numbers, when paid is on; else
+    None. Calls nothing."""
+    ledger = ledger or _open_ledger(ec)
+    story_spent = float(ledger.totals()["est_usd"])
+    ep_spent = float(ledger.totals(ec.ep)["est_usd"])
+    try:
+        budget_obj = gating.budget_of(gating.merged_env(env))
+    except ValueError:
+        budget_obj = None
+    day_spent = budget_mod.day_spent()
+    caps = {"allow_paid": bool(budget_obj and budget_obj.allow_paid)}
+    if budget_obj is not None:
+        for name, cap, spent in (("episode", budget_obj.per_episode_cap_usd, ep_spent),
+                                 ("day", budget_obj.daily_cap_usd, day_spent),
+                                 ("story", budget_obj.per_story_cap_usd, story_spent)):
+            caps[name] = {"cap_usd": cap, "spent_usd": round(spent, 4), "left_usd": round(max(0.0, cap - spent), 4)}
+    over_cap = None
+    if budget_obj is not None and budget_obj.allow_paid and total > 0:
+        plan = SimpleNamespace(est_usd=total, link=f"episode {ec.ep}'s paid images and voices")
+        try:
+            budget_mod.check(plan, None, budget=budget_obj, day_spent=day_spent, ep_spent=ep_spent,
+                             story_spent=story_spent)
+        except budget_mod.BudgetRefused as exc:
+            over_cap = str(exc)
+    return caps, over_cap
+
+
 def asset_units(ec, script, storyboard, *, env, align_words=False, adapters=None, probe_local=False,
                 transport=None, ledger=None) -> dict:
     """What the assets step would do and spend now, calling nothing (a local
@@ -568,16 +618,8 @@ def asset_units(ec, script, storyboard, *, env, align_words=False, adapters=None
     numbers. ``ready``: the images can run (or there are none), every line
     has a voice that can run, and nothing is over a cap.
     """
-    story = ec.story
-    route = story["generation_profile"]["route"]
     ledger = ledger or _open_ledger(ec)
     story_spent = float(ledger.totals()["est_usd"])
-    ep_spent = float(ledger.totals(ec.ep)["est_usd"])
-    merged = gating.merged_env(env)
-    try:
-        budget_obj = gating.budget_of(merged)
-    except ValueError:
-        budget_obj = None
 
     todo = shots_to_make(ec, storyboard)
     mode = ec.consistency_mode
@@ -585,14 +627,9 @@ def asset_units(ec, script, storyboard, *, env, align_words=False, adapters=None
     if not todo:
         images = {"est_usd": 0.0, "route_class": None, "link": None, "links": [], "ready": True,
                   "message": "Every shot has its image."}
-    elif kind == gen.IMAGE_EDIT:
-        images = refimages.edit_readiness(story, env=env, qty=len(todo), story_spent=story_spent, adapters=adapters,
-                                          size=SHOT_SIZE, probe_local=probe_local, transport=transport)
     else:
-        request = gen.GenRequest(kind=gen.IMAGE, width=SHOT_SIZE[0], height=SHOT_SIZE[1])
-        images = imaging.estimate(gen.IMAGE, env, route=route, request=request, qty=len(todo),
-                                  story_spent=story_spent, adapters=adapters, step=STEP, what="the shot images",
-                                  when="the assets step runs")
+        images = image_quote(ec, len(todo), env=env, story_spent=story_spent, adapters=adapters,
+                             probe_local=probe_local, transport=transport)
     images = {
         "shots": [shot["shot_id"] for shot in todo], "count": len(todo), "kind": kind,
         "chain": gen.ENV_NAMES[kind], "consistency": mode, "route_class": images["route_class"],
@@ -612,21 +649,7 @@ def asset_units(ec, script, storyboard, *, env, align_words=False, adapters=None
     images_paid = images["est_usd"] if images["route_class"] == "paid" else 0.0
     voices_paid = sum(row["est_usd"] for row in voices_est["voices"] if row["paid"])
     total = round(images_paid + voices_paid, 4)
-    day_spent = budget_mod.day_spent()
-    caps = {"allow_paid": bool(budget_obj and budget_obj.allow_paid)}
-    if budget_obj is not None:
-        for name, cap, spent in (("episode", budget_obj.per_episode_cap_usd, ep_spent),
-                                 ("day", budget_obj.daily_cap_usd, day_spent),
-                                 ("story", budget_obj.per_story_cap_usd, story_spent)):
-            caps[name] = {"cap_usd": cap, "spent_usd": round(spent, 4), "left_usd": round(max(0.0, cap - spent), 4)}
-    over_cap = None
-    if budget_obj is not None and budget_obj.allow_paid and total > 0:
-        plan = SimpleNamespace(est_usd=total, link=f"episode {ec.ep}'s paid images and voices")
-        try:
-            budget_mod.check(plan, None, budget=budget_obj, day_spent=day_spent, ep_spent=ep_spent,
-                             story_spent=story_spent)
-        except budget_mod.BudgetRefused as exc:
-            over_cap = str(exc)
+    caps, over_cap = spending_caps(ec, total, env=env, ledger=ledger)
     return {
         "images": images, "voices": voices_est,
         "alignment": {"opted_in": bool(align_words),
@@ -683,11 +706,12 @@ class _Assets(voice_lines.LineMeasurement):
 
     measure_step = STEP
 
-    def __init__(self, ctx, ec, *, tools, transcribe=None):
+    def __init__(self, ctx, ec, *, tools, transcribe=None, budget=None):
         self.ctx = ctx
         self.ec = ec
         self.tools = tools
-        self.budget = episode_common.Budget(tools.time_fn)
+        # The fast track hands in its own budget; otherwise the step's own.
+        self.budget = budget if budget is not None else episode_common.Budget(tools.time_fn)
         self.transcribe = transcribe
         self.failed = []  # [(what, target, reason)]
         self.voice_failed = []  # [(line_id, speaker, reason)]
@@ -1146,15 +1170,18 @@ def _book_answer(gates, result, answered, kind) -> float:
     return round(est, 4)
 
 
-def run(ctx, *, adapters=None, transport=None, time_fn=time.monotonic, sleep_fn=time.sleep, transcribe=None) -> dict:
+def run(ctx, *, adapters=None, transport=None, time_fn=time.monotonic, sleep_fn=time.sleep, transcribe=None,
+        budget=None) -> dict:
     """The step (module docstring). *adapters*, *transport*, *time_fn*,
     *sleep_fn* and *transcribe* (the STT stand-in: ``(path, *, language,
-    on_log, cancel) -> (words, aligned_by)``) are for tests."""
+    on_log, cancel) -> (words, aligned_by)``) are for tests. *budget*: an
+    ``episode_common.Budget`` shared with a caller running this step inside
+    its own (the fast track); None gives the step its own."""
     ec = episode_common.load_episode_context(ctx)
     episode_common.check_episode_preconditions(ctx, ec)
     ctx.cancel.check()
     tools = entities.Tools(time_fn=time_fn, sleep_fn=sleep_fn, adapters=adapters, transport=transport)
-    return _Assets(ctx, ec, tools=tools, transcribe=transcribe).run()
+    return _Assets(ctx, ec, tools=tools, transcribe=transcribe, budget=budget).run()
 
 
 # ---------------------------------------------------------------- regenerate

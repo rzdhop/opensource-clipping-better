@@ -570,11 +570,13 @@ class _Run(LineMeasurement):
     """One run of the step: the script as it stands, and what failed. The
     voice measurement is :class:`voice_lines.LineMeasurement`'s."""
 
-    def __init__(self, ctx, ec, *, runner, time_fn, adapters=None, transport=None):
+    def __init__(self, ctx, ec, *, runner, time_fn, adapters=None, transport=None, budget=None):
         self.ctx = ctx
         self.ec = ec
         self.tools = entities.Tools(runner=runner, time_fn=time_fn, adapters=adapters, transport=transport)
-        self.budget = episode_common.Budget(time_fn)
+        # A caller that runs this step inside a longer one (the fast track)
+        # hands in its own budget; otherwise the step's own 30 minutes.
+        self.budget = budget if budget is not None else episode_common.Budget(time_fn)
         self.announced = set()
         self.failed = []  # [(what, target or None, reason)]
         self.calls = 0
@@ -749,8 +751,12 @@ class _Run(LineMeasurement):
         return summary
 
 
-def run(ctx, *, runner=None, time_fn=time.monotonic, adapters=None, transport=None) -> dict:
+def run(ctx, *, runner=None, time_fn=time.monotonic, adapters=None, transport=None, budget=None) -> dict:
+    """The step (module docstring). *budget*: an ``episode_common.Budget``
+    shared with a caller running this step inside its own (the fast track);
+    None gives the step its own."""
     ec = episode_common.load_episode_context(ctx)
     episode_common.check_episode_preconditions(ctx, ec)
     ctx.cancel.check()
-    return _Run(ctx, ec, runner=runner, time_fn=time_fn, adapters=adapters, transport=transport).run()
+    return _Run(ctx, ec, runner=runner, time_fn=time_fn, adapters=adapters, transport=transport,
+                budget=budget).run()

@@ -37,6 +37,7 @@ from . import defaults, imaging, prompting, prompts, refimages, schemas, shots, 
 from . import store as story_store
 from . import uploads as uploads_mod
 from .ledger import CostLedger
+from .steps import assets as assets_step
 from .steps import concepts as concepts_step
 from .steps import entities as entities_step
 from .steps import episode_common, llm_call
@@ -44,6 +45,7 @@ from .steps import regenerate as regenerate_step
 from .steps import script as script_step
 from .steps import season as season_step
 from .steps import storyboard as storyboard_step
+from .steps import voice_lines
 from .steps.llm_call import StepFailed
 
 # ------------------------------------------------------------------ grammar
@@ -1560,6 +1562,7 @@ def delete_entity(stories, story_id, kind, eid, *, now) -> dict:
 
 SCRIPT_DOC = story_store.EPISODE_SCRIPT_DOC
 STORYBOARD_DOC = story_store.EPISODE_STORYBOARD_DOC
+ASSETS_DOC = story_store.EPISODE_ASSETS_DOC
 
 # The keys ``params`` of the episode steps may carry (closed lists).
 SCRIPT_PARAMS = (script_step.MEASURE_PARAM,)
@@ -2038,6 +2041,68 @@ def approve_storyboard(stories, story_id, ep, *, now) -> dict:
                                        f"changed since they were resolved)."))
     board["approved_at"] = now
     return _write(episode_common.write_storyboard, "storyboard", ec, board, script, now=now, code=CONFLICT)
+
+
+def approve_assets(stories, story_id, ep, *, now) -> dict:
+    """Approve episode *ep*'s assets (phase 4; plan "API": ``POST
+    /approve/assets:<ep>``, and the fast track's auto-approval); returns
+    ``assets.json`` as written.
+
+    ``conflict`` before the script is approved and the storyboard approved
+    and current (``assets.require_approved``, the step's own check); without
+    an ``assets.json`` (run the assets step); while a shot has no image, or
+    an unlocked shot's image is not current (``assets.shot_state``: stale,
+    failed, none) -- a locked shot keeps the image it has; and while a line
+    has no audio in its speaker's pinned voice (``voice_lines.is_measured``).
+    Each refusal names the shots or lines and the regenerate target that
+    finishes them. Then every shot's ``assets.approved`` is set (the
+    storyboard is written, nothing else of it moves) and ``assets.json``
+    gains ``approved: {at: now, fingerprint}`` -- the fingerprint of the
+    files as they are now (``assets.current_fingerprint``); once it differs,
+    the approval is stale, derived, never cleared (DEC-155). The script, the
+    storyboard's own approval and the story are untouched (RC-E2)."""
+    story = load(stories, story_id)
+    ep = episode_bounds(stories, story, ep)
+    ec = _context(stories, story_id, ep)
+    try:
+        script, board = assets_step.require_approved(ec)
+    except StepFailed as exc:
+        raise WorkflowError(CONFLICT, str(exc)) from None
+    doc = read_episode(stories, story_id, ep, ASSETS_DOC)
+    if doc is None:
+        raise WorkflowError(CONFLICT, f"Episode {ep} has no assets yet: make them first (the assets step).")
+    missing = []
+    for shot in board["shots"]:
+        state = assets_step.shot_state(ec, shot)
+        imaged = assets_step.shot_image_path(ec, shot) is not None
+        if not imaged or not (state == "current" or (shot["assets"].get("locked") and state == "locked_stale")):
+            missing.append(shot["shot_id"])
+    if missing:
+        targets = [assets_step.shot_target(ep, shot_id) for shot_id in missing]
+        raise WorkflowError(CONFLICT, (f"Episode {ep}'s shot{_plural_s(missing)} {_and(missing)} "
+                                       f"{'has' if len(missing) == 1 else 'have'} no current image: make "
+                                       f"{'it' if len(missing) == 1 else 'them'} (the assets step, or regenerate "
+                                       f"{_and(targets)}) or lock {'it' if len(missing) == 1 else 'them'}, then "
+                                       "approve."))
+    unvoiced = [line["line_id"] for scene in script["scenes"] for line in scene["lines"]
+                if not voice_lines.is_measured(ec, line)]
+    if unvoiced:
+        targets = [assets_step.line_target(ep, line_id) for line_id in unvoiced]
+        raise WorkflowError(CONFLICT, (f"Episode {ep}'s line{_plural_s(unvoiced)} {_and(unvoiced)} "
+                                       f"{'has' if len(unvoiced) == 1 else 'have'} no audio in the speaker's pinned "
+                                       f"voice: speak {'it' if len(unvoiced) == 1 else 'them'} (the assets step, or "
+                                       f"regenerate {_and(targets)}), then approve."))
+    for shot in board["shots"]:
+        shot["assets"]["approved"] = True
+    _write(episode_common.write_storyboard, "storyboard", ec, board, script, now=now, code=CONFLICT)
+    doc["approved"] = {"at": now, "fingerprint": assets_step.current_fingerprint(ec, board, script, doc)}
+    try:
+        return stories.write_episode_doc(story_id, ep, ASSETS_DOC, doc, now=now)
+    except schemas.SchemaError as exc:
+        raise WorkflowError(CONFLICT, {"message": "The assets would not be valid with this approval.",
+                                       "errors": list(exc.errors)}) from None
+    except (KeyError, ValueError) as exc:
+        raise WorkflowError(CONFLICT, f"The assets cannot be written: {exc}.") from None
 
 
 # -------------------------------------------------------------------- edits

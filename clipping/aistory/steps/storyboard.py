@@ -219,13 +219,16 @@ def build_fast(stores, story_id, ep, *, now, on_log) -> dict:
 
 # --------------------------------------------------------------------- T1
 
-def run(ctx, *, runner=None, time_fn=time.monotonic) -> dict:
+def run(ctx, *, runner=None, time_fn=time.monotonic, budget=None) -> dict:
+    """The T1 step (module docstring). *budget*: an ``episode_common.Budget``
+    shared with a caller running this step inside its own (the fast track);
+    None gives the step its own."""
     ec = episode_common.load_episode_context(ctx)
     episode_common.check_episode_preconditions(ctx, ec)
     script = require_complete_script(ec)
     ctx.cancel.check()
     tools = entities.Tools(runner=runner, time_fn=time_fn)
-    budget = episode_common.Budget(time_fn)
+    budget = budget if budget is not None else episode_common.Budget(time_fn)
     announced = set()
 
     board = episode_common.read_episode(ec, STORYBOARD_DOC)

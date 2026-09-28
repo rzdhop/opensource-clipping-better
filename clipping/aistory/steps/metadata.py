@@ -334,18 +334,21 @@ def _cover_missing(ec) -> bool:
 
 # --------------------------------------------------------------------- run
 
-def run(ctx, *, runner=None, time_fn=time.monotonic, run_process=subprocess.run, custom_fonts_dir=None) -> dict:
+def run(ctx, *, runner=None, time_fn=time.monotonic, run_process=subprocess.run, custom_fonts_dir=None,
+        budget=None) -> dict:
     """The step (module docstring). Returns ``{ep, platforms{platform:
     {title, hashtags}}, asked[platforms asked now], kept[platforms kept],
     cover{file, text, shot, sha256} | None, script_rev, render_sha256}``.
     *runner* (the LLM chain), *time_fn*, *run_process* (ffmpeg) and
-    *custom_fonts_dir* are for tests."""
+    *custom_fonts_dir* are for tests. *budget*: an ``episode_common.Budget``
+    shared with a caller running this step inside its own (the fast track);
+    None gives the step its own."""
     ec = episode_common.load_episode_context(ctx)
     episode_common.check_episode_preconditions(ctx, ec)
     ctx.cancel.check()
     script, _manifest, render_sha = require_render(ec)
     tools = entities.Tools(runner=runner, time_fn=time_fn)
-    budget = episode_common.Budget(time_fn)
+    budget = budget if budget is not None else episode_common.Budget(time_fn)
     announced = set()
     ep = ec.ep
 
