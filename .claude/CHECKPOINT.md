@@ -42,6 +42,13 @@
   outline and T2-F7 provider word cues drop the script's punctuation ('sécurité Ils') → fix in progress (Sonnet).
   Next: re-render word_pop, metadata (11), EN story (13) — phase-2 image steps have no pacing, so the EN cast on
   pollinations will need ~1 Continue per image unless the human adds a free Cloudflare key.
+  T2-F6/F7 fixed `207f8c7` (deployed 01:50 UTC): two_line re-render → Kiwilo #E4572E, Mangella #FFFFFF, Broccolia
+  #C5C5C5, all readable, punctuation kept ('sécurité. Ils se trompent.'). Final **word_pop render 13ff2e4e296e: 58.2 s,
+  1080×1920, 30/1, I −14.2 / TP −2.3 / LRA 5.0, 21/21 shots cached, 89 s, no warnings**. (11) metadata 8c3c2379a5f2 (UI,
+  6 s, 3 free calls): tiktok/shorts/reels FR + title_en/hashtags_en, descriptions end on the teaser, pinned 'PARTIE 2 →',
+  hook 'LE JEU COMMENCE', cover = hook shot + hook text (looked at). **FR episode ready for the human's phone watch.**
+  Pending: (12) paid-cap refusal needs the human's OK to flip allow_paid; (13) EN family_3d story; (14) table;
+  (15) resilience checks; (16) the human watches both.
 - **Tier-1 baseline (86e7f4d):** local **4486 passed / 1 skipped** (210 s); CI env (`/tmp/cilibs`) **3901 passed /
   555 skipped** (155 s); compileall clean (`PYTHONPYCACHEPREFIX` in scratch); vite build green to a scratch outDir.
   ffmpeg: host `6.1.1-3ubuntu5`, container `7.1.5-0+deb13u1`. Health: 0 jobs.
