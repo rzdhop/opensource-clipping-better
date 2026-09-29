@@ -755,7 +755,7 @@ _E1_ASK_TEMPLATE = (
     "- place_id: one of the existing places, at most {max_places} distinct places across the whole episode\n"
     "- time_variant: one of that place's own listed variants\n"
     "- characters: 0 to 6 of the existing cast\n"
-    "- props: 0 to 4 of the existing props\n"
+    "{props_line}"
     "- summary: at most 15 words\n"
     "- emotion: one of {emotions}\n"
     "- target_duration_s: a hint inside its own slot's range -- {slot_ranges}\n\n"
@@ -767,6 +767,13 @@ _E1_ASK_TEMPLATE = (
     "{french_line}"
     "Never use real people, brands, studio names or copyrighted characters."
 )
+
+# E1's props line. A story with no props gets an explicit empty list: the ask
+# used to say "0 to 4 of the existing props" with no roster to pick from, and
+# the free tier filled every scene with object names ('magnifying glass')
+# that no prop id matches (Tier-2 T2-F9, 2026-09-29).
+_E1_PROPS_LINE = "- props: 0 to 4 of the existing props\n"
+_E1_NO_PROPS_LINE = "- props: always [] -- this story has no props\n"
 
 
 def _e1_scene_list(slots) -> str:
@@ -834,7 +841,9 @@ def e1_schema(cast_ids, place_ids, prop_ids) -> dict:
         "place_id": {"type": "string", "enum": list(place_ids)} if place_ids else {"type": "string"},
         "time_variant": {"type": "string", "description": "one of that place's own listed variants"},
         "characters": {"type": "array", "description": "0-6 of the existing cast", "items": char_items},
-        "props": {"type": "array", "description": "0-4 of the existing props", "items": prop_items},
+        "props": {"type": "array",
+                  "description": "0-4 of the existing props" if prop_ids else "always empty: the story has no props",
+                  "items": prop_items},
         "summary": {"type": "string", "description": "at most 15 words"},
         "emotion": {"type": "string", "enum": list(schemas.EMOTIONS)},
         "target_duration_s": {"type": "number", "description": "a hint inside the scene's own slot range"},
@@ -887,6 +896,7 @@ def build_e1(pack, *, ep, arc_entry, template, episode_defaults, cast, places, p
         hook_style_line=_HOOK_STYLE_LINES[episode_defaults["hook_style"]],
         cliffhanger_style_line=_CLIFFHANGER_STYLE_LINES[episode_defaults["cliffhanger_style"]],
         french_line=_french_block(pack),
+        props_line=_E1_PROPS_LINE if props else _E1_NO_PROPS_LINE,
     )
 
     cast_ids = [c["char_id"] for c in cast]

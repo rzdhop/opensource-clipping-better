@@ -217,8 +217,9 @@ def _lock():
     return stylelock.lock_style(draft, now=NOW)
 
 
-def _ready_story(store, *, recaps=None, relationships=None):
-    """A French Tentafruit story whose derived status is ``ready``."""
+def _ready_story(store, *, recaps=None, relationships=None, with_prop=True):
+    """A French Tentafruit story whose derived status is ``ready`` (with no
+    prop at all when *with_prop* is False)."""
     story_id = store.create(language="fr", seed_text=None, style_template_id="fruit_drama", now=NOW)["story_id"]
     concept = templates.localize_concept(
         next(c for c in templates.load_concepts() if c["concept_id"] == "tentafruit_island"), "fr")
@@ -240,7 +241,8 @@ def _ready_story(store, *, recaps=None, relationships=None):
         store.write_entity(story_id, "characters", copy.deepcopy(doc), now=NOW)
     for doc in PLACES:
         store.write_entity(story_id, "places", copy.deepcopy(doc), now=NOW)
-    store.write_entity(story_id, "props", copy.deepcopy(PROP), now=NOW)
+    if with_prop:
+        store.write_entity(story_id, "props", copy.deepcopy(PROP), now=NOW)
     store.write_doc(story_id, "season.json", _season(recaps, relationships), now=NOW)
     store.update(story_id, lambda doc: doc["approvals"].update(season=NOW), now=NOW)
     assert store.get(story_id)["status"] == "ready"
@@ -967,6 +969,48 @@ def test_the_script_step_repairs_dropped_french_elisions_in_every_field(store):
     assert script["hook"]["on_screen_text"] == "l'alliance"
     assert script["cliffhanger"]["reveal"] == "C'est l'alliance d'Etat."
     assert script["next_episode_teaser"] == "Demain, l'alliance eclate."
+
+
+def test_a_story_with_no_props_gets_every_scenes_props_emptied_before_e1_is_checked(store):
+    """T2-F9 (live, 2026-09-29): on a story with no props the free tier
+    filled every scene's ``props`` with object names ('magnifying glass')
+    and E1 failed twice. The ask now says the list is always empty, and the
+    reply's props are emptied before its validator runs -- one E1 call, no
+    retry, a valid script."""
+    m = _new()
+    story_id = _ready_story(store, with_prop=False)
+    e1 = copy.deepcopy(E1_REPLY)
+    for k, scene in enumerate(e1["scenes"]):
+        scene["props"] = ["magnifying glass", "notepad"] if k % 2 else ["prop_flashlight"]
+    llm = _script_llm(E1=[e1])
+
+    _, log = _run(m.script, store, story_id, llm=llm)
+
+    assert llm.prompts().count("E1") == 1
+    assert not any("E1 reply rejected" in line for line in log)
+    script = _script(store, story_id)
+    assert all(scene["props"] == [] for scene in script["scenes"])
+    assert schemas.episode_script_errors(script) == []
+    ask = llm.of("E1")[0]["user"]
+    assert "- props: always [] -- this story has no props\n" in ask
+    assert "Existing props:" not in ask and "0 to 4 of the existing props" not in ask
+
+
+def test_a_story_with_props_still_has_an_unknown_prop_refused(store):
+    """The emptying above is for a story with no props only: with a roster,
+    a prop outside it is still refused and asked again (the E1 validator's
+    own context check), never silently dropped."""
+    m = _new()
+    story_id = _ready_story(store)
+    wrong = copy.deepcopy(E1_REPLY)
+    wrong["scenes"][1]["props"] = ["magnifying glass"]  # s02 (s01 is the hook)
+    llm = _script_llm(E1=[wrong, E1_REPLY])
+
+    _, log = _run(m.script, store, story_id, llm=llm)
+
+    assert llm.prompts().count("E1") == 2
+    assert any("E1 reply rejected" in line for line in log)
+    assert _scene(_script(store, story_id), "s02")["props"] == []
 
 
 @pytest.mark.parametrize("ep", [0, 9, None])

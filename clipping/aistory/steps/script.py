@@ -187,7 +187,17 @@ def _repair_e1_reply(ec, reply) -> None:
     text, in place, before its validator runs (spec 4.2, F1): a merged
     elision changes a word count (``"l alliance"`` is 2 "words", "l'alliance"
     is 1), so the repair has to happen before ``validate_e1`` counts them,
-    not only when the reply is later applied to the script."""
+    not only when the reply is later applied to the script.
+
+    A story with no props gets every scene's ``props`` emptied first: no
+    string can name a prop it does not have, and with no ids to enumerate
+    the schema cannot stop the free tier from listing object names there
+    (T2-F9). Only lists are touched; a malformed reply is left to the
+    validator."""
+    if not ec.prop_ids and isinstance(reply, dict) and isinstance(reply.get("scenes"), list):
+        for scene in reply["scenes"]:
+            if isinstance(scene, dict) and isinstance(scene.get("props"), list):
+                scene["props"] = []
     if ec.language != "fr":
         return
     reply["title"] = prompts.repair_fr_elisions(reply["title"])

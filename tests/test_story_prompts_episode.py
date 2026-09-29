@@ -213,6 +213,30 @@ def test_build_e1_golden_fr():
     assert schema == prompts.e1_schema(CAST_IDS, ["place_pool", "place_confessional"], ["prop_phone"])
 
 
+def test_build_e1_without_props_says_the_list_is_always_empty():
+    """T2-F9: a story with no props used to be asked for "0 to 4 of the
+    existing props" with no roster to pick from; the ask and the schema's
+    description now say the list is empty. Everything else is the golden
+    ask above, line for line."""
+    pack = _pack("fr")
+    kwargs = dict(ep=1, arc_entry=ARC_ENTRY, template=TEMPLATE, episode_defaults=EPISODE_DEFAULTS,
+                  cast=CAST_E1, places=PLACES_E1, memory=MEMORY_NONE, slots=SLOTS_EP1)
+    _, with_props, _ = prompts.build_e1(pack, props=PROPS_E1, **kwargs)
+    _, user, schema = prompts.build_e1(_pack("fr"), props=[], **kwargs)
+
+    assert "Existing props:" not in user
+    assert "- props: always [] -- this story has no props\n" in user
+    assert "0 to 4 of the existing props" not in user
+    expected = with_props.replace("Existing props:\n- prop_phone — Le Téléphone\n\n", "").replace(
+        "- props: 0 to 4 of the existing props\n", "- props: always [] -- this story has no props\n")
+    assert user == expected
+    props = schema["properties"]["scenes"]["items"]["properties"]["props"]
+    assert props["description"] == "always empty: the story has no props"
+    assert props["items"] == {"type": "string"}
+    # The strict-mode subset (schemas.py): no item-count keyword is sent to a model.
+    assert "maxItems" not in props and "minItems" not in props
+
+
 def test_build_e1_ep2_shows_the_previous_recap_and_recap_slot():
     pack = _pack("fr")
     _, user, _ = prompts.build_e1(

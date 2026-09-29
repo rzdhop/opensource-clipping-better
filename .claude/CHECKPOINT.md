@@ -66,6 +66,35 @@
   (15) resilience checks; (16) the human watches both.
   (13 started) EN story `0a9572a6a8be` created + concept `midnight_fridge` chosen via the API (the wizard steps 1–7 were
   walked in the UI in phases 1–2); paused there at the human's request.
+  (13 resumed 2026-09-29 07:25 UTC, new session; `usage.json` cb322b15…6723, no `spend.json`, 0 jobs) bible
+  857441d84b25 14 s (3 Gemini calls) → approved; style draft (family_3d) → approved, no preview; story switched to
+  `prompt_only` (PATCH generation_profile); cast 73162f83d087 (Pickle + Egg): Pickle text + portrait OK, turnaround/
+  expressions HTTP 402 (pollinations 1/min, expected), **T2-F8: Egg's K1 text refused twice — `schemas.py` K1 check
+  is a substring match of the name, so a character named for what it is ("Egg") can never describe itself** →
+  phase-2 rule, follow-up, not fixed; `char_egg` deleted, cast re-run with **Detective Pickle + Madame Brie** once a
+  minute (scratch `step_loop.sh`): 5 rounds 07:26:57→07:31:01, one image each, 6/6 images, voices pinned by the cast
+  step (edge en-US-GuyNeural / en-US-JennyNeural, samples made); both portraits HUMAN + watermark (T2-F2 again) →
+  approved; places_proposal 3 s → places with ONE place "Top Dairy Shelf", props [] (an empty params object would
+  fall back to the saved proposal and make everything) → 402 then 1 paced round → plate OK → approved; season
+  1ff9ef62e866 31 s (8 eps) → approved → **`ready` 07:32:37** (bible→ready 7 min 20 s, $0). **Fast track pressed from
+  the dashboard at 375 px 07:32:54 → job `e4cff4059060`** (storyboard t1). Its confirm said "Voices: 0 lines / 1231
+  chars" before a script exists (cosmetic, follow-up). FR ep01 re-measured by scratch `measure_ep.py`: 58.2 s,
+  12.31 MB, h264 1080×1920 30/1, aac 48 kHz 2 ch, ebur128 I −14.2 / TP −2.3 / LRA 4.9, ledger 55 rows all with
+  `ep`, $0, 0 paid; ducking median 11.6 dB over 9 line/gap pairs adjacent to ≥ 0.8 s gaps (two pairs under 6 dB:
+  the intro while the bed rises, and a 1 s line at 38.5 s where the bed falls −12 → −19 dB across the line).
+  **T2-F9 (blocks step 13):** fast track e4cff4059060 stopped at the script after 8 s — E1 rejected twice: on a story
+  with NO props gemini filled every scene's `props` with free text ('magnifying glass', 'notepad', …) vs the
+  `^prop_…$` pattern. Root cause (Explore/Sonnet, verified): `prompts.e1_schema` enumerates prop ids only when there
+  are some — with none, `props` items fall back to a bare string — and `_E1_ASK_TEMPLATE` still asked "0 to 4 of the
+  existing props" with no roster; the FR story passed because its enum constrains the model. Fix attempt 1 (inline,
+  files scoped by the agent): `_E1_NO_PROPS_LINE` "- props: always [] -- this story has no props" + schema
+  description (no `maxItems`: the strict-mode subset, `schemas.py:670-677`) + `script._repair_e1_reply` empties
+  every scene's props before validation when the story has none (DEC-144-style; a story WITH props still has an
+  unknown prop refused and retried). Fail-first: 2 new tests fail on HEAD, pass after; 1 pin passes both. Next:
+  Tier-1 both envs → commit → ff-merge → restart (the FR assets job 27294a95911d awaits approval across it: the
+  step-15 restart check) → Continue the fast track. Step 15 done early: RC-P1 `/clips/job/b37b36a9b34e` 7 clips, a clip 200
+  (22.5 MB) and range 206, the SPA route 200 and 7 `<video>` at 375; no overflow at 375/820/1280 on /story, both
+  story pages, FR ep 1 Script/Storyboard/Preview, the clip job and /settings (EN Preview re-checked once rendered).
 - **Tier-2 findings kept as follow-ups (not fixed):** T2-F2 pollinations flux draws human faces for fruit-head
   descriptors (A-058 invalidated on this route); T2-F3 its 'pollinations.ai' watermark; prompt-only shots reuse the
   portrait seed → near-identical portraits; the pacing feed prints '✖ Shot shNN failed' just before a paced retry;
@@ -74,7 +103,7 @@
   anyway used); E-prompt echo duplicates (l04 = l08 text); the script pane's flag links render as default blue
   links; CI full green only confirmed at the next push (Node 20 deprecation notice on checkout@v4/setup-python@v5);
   `test_clip_serving.py`'s spa fixture leaks a '/' mount; a line regenerate's take is not persisted; a T1 re-plan
-  drops shot locks/notes.
+  drops shot locks/notes; T2-F8 K1's own-name check is a substring match (a character named "Egg" cannot pass).
 - **Tier-1 baseline (86e7f4d):** local **4486 passed / 1 skipped** (210 s); CI env (`/tmp/cilibs`) **3901 passed /
   555 skipped** (155 s); compileall clean (`PYTHONPYCACHEPREFIX` in scratch); vite build green to a scratch outDir.
   ffmpeg: host `6.1.1-3ubuntu5`, container `7.1.5-0+deb13u1`. Health: 0 jobs.
