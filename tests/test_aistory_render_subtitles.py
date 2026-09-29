@@ -645,3 +645,33 @@ def test_color_distance_is_symmetric_and_zero_for_identical_colours():
     assert sub._color_distance("#FFD400", "#FFD400") == 0.0
     assert sub._color_distance("#000000", "#FFFFFF") == pytest.approx(441.6729, abs=1e-3)
     assert sub._color_distance("#F2C14E", "#FFD400") == sub._color_distance("#FFD400", "#F2C14E")
+
+
+# ------------------------------------------------ French spaced punctuation
+# Tier-2 (2026-09-29): French writes a space before ? ! : ; and inside « »,
+# so a lone "?" was split off and popped as a word of its own at 45 s of the
+# live FR episode. A punctuation-only token joins its neighbour instead.
+
+def test_a_spaced_question_mark_joins_the_word_before_it_in_an_even_split():
+    spans, approx = sub._line_word_spans("Tu es à ta place ?", 3.0, None)
+    assert approx is True
+    assert [text for text, _start, _end in spans] == ["Tu", "es", "à", "ta", "place ?"]
+    assert spans[-1][2] == pytest.approx(3.0)
+
+
+def test_a_provider_punctuation_cue_extends_the_word_before_it():
+    words = [{"word": "Vraiment", "start": 0.0, "end": 0.5}, {"word": "?", "start": 0.55, "end": 0.7}]
+    spans, approx = sub._line_word_spans("Vraiment ?", 0.8, words)
+    assert approx is False
+    assert spans == [("Vraiment ?", 0.0, 0.7)]
+
+
+def test_opening_guillemets_join_the_word_after_them():
+    spans, _approx = sub._line_word_spans("« Bonjour » dit-il !", 2.0, None)
+    assert [text for text, _start, _end in spans] == ["« Bonjour »", "dit-il !"]
+    assert spans[0][1] == 0.0
+
+
+def test_a_line_of_punctuation_alone_keeps_its_one_span():
+    spans, _approx = sub._line_word_spans("?!", 1.0, None)
+    assert [text for text, _start, _end in spans] == ["?!"]

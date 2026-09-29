@@ -301,7 +301,7 @@ def _line_word_spans(text: str, duration_s: float, words) -> tuple:
             if end <= start:
                 end = start + 0.001
             spans.append((str(word["word"]), start, end))
-        return spans, False
+        return _join_spaced_punctuation(spans), False
 
     tokens = text.split() if text else []
     if not tokens:
@@ -313,7 +313,37 @@ def _line_word_spans(text: str, duration_s: float, words) -> tuple:
         start = i * each
         end = duration_s if i == n - 1 else (i + 1) * each
         spans.append((token, start, end))
-    return spans, True
+    return _join_spaced_punctuation(spans), True
+
+
+def _join_spaced_punctuation(spans) -> list:
+    """*spans* with every punctuation-only token joined to its neighbour.
+
+    French writes a space before ``? ! : ;`` and inside ``« »``, so a split
+    on whitespace (or a provider's cues) leaves a lone ``?`` that would pop
+    as a word of its own (Tier-2, 2026-09-29). A token with no letter or
+    digit joins the word before it, keeping the space and extending that
+    word's end; an opening one (``«`` first) joins the word after it. A line
+    of punctuation alone keeps its single span."""
+    joined = []
+    pending = None  # leading punctuation waiting for its word: (text, start)
+    for text, start, end in spans:
+        if not any(ch.isalnum() for ch in text):
+            if joined:
+                prev_text, prev_start, prev_end = joined[-1]
+                joined[-1] = (f"{prev_text} {text}", prev_start, max(prev_end, end))
+            elif pending:
+                pending = (f"{pending[0]} {text}", pending[1])
+            else:
+                pending = (text, start)
+            continue
+        if pending:
+            text, start = f"{pending[0]} {text}", pending[1]
+            pending = None
+        joined.append((text, start, end))
+    if pending:
+        joined.append((pending[0], pending[1], spans[-1][2]))
+    return joined
 
 
 def _wrap_word_indices(word_count: int, word_lengths, max_chars: int, max_lines: int) -> list:
