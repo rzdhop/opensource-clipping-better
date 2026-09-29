@@ -1,7 +1,9 @@
 # API
 
-Every route needs the API token except `GET /api/health`. Pass it as
-`Authorization: Bearer <token>` or `X-API-Key: <token>`. See
+Auth is opt-in: every route needs the API token except `GET /api/health`, but
+only when the server has `API_TOKEN` set. Pass it as
+`Authorization: Bearer <token>` or `X-API-Key: <token>`. With no token set on
+the server, the header can be dropped entirely. See
 [deploy-tailscale.md](deploy-tailscale.md) for where the token comes from.
 
 **The one exception: media URLs inside a job response.** A `<video src>` and an
@@ -190,7 +192,8 @@ with httpx.stream("GET", f"{base}/api/jobs/{job_id}/status",
 | Code | Meaning |
 |---|---|
 | `400` | The payload is missing a source, a field is out of range, or the chain would run on its slow floor alone (see above). |
-| `401` | Missing or wrong token. |
+| `401` | Missing or wrong token. Only happens when the server has `API_TOKEN` set. |
+| `403` | A browser's cross-site write, while the server has no `API_TOKEN` set -- the request came from another site's page, not this app. |
 | `404` | No such job or file. |
 | `409` | Attaching a source to a job that is not waiting for one, a chain test already running, cancelling a job that already finished, or rerunning (`reuse_job_id`) a job that is still running. |
 | `413` | Upload over 2 GB. |

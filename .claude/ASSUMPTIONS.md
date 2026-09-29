@@ -223,6 +223,14 @@
 - **A-078** — M1's per-platform length and hashtag limits, as of 2026-09. UNCONFIRMED: the limits are authored,
   not sourced from each platform's own current documentation.
 
+- **A-080** — No public deployment besides the Caddy `domain` profile and the Kaggle notebook's ngrok tunnel relied
+  on the generated `data/api_token`; an install exposed another way (a hand-made reverse proxy, a port opened to the
+  internet) becomes open on upgrade, with only the startup banner and the CHANGELOG to say so. UNCONFIRMED (DEC-173
+  accepts the risk).
+- **A-081** — Making `tools/rzclips-fetch.py` run without a token (it refused before, and pointed at
+  `/app/data/api_token`) is part of "remove all access restrictions", done in auth stage 2 though the approved plan
+  did not list it. UNCONFIRMED: named in the stage-2 report for the human to veto.
+
 ## Confirmed
 - **A-069** — Measured render times on the VPS (container ffmpeg `7.1.5-0+deb13u1/aarch64`, final profile,
   libx264): a full 21-shot FR render 160 s, a full 20-shot EN render 161 s; per shot at 4× mean 3.6–3.8 s (median

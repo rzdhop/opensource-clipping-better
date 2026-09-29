@@ -4,8 +4,8 @@ import { checkToken, setToken } from '../api'
 /**
  * Token entry.
  *
- * The token is printed by the backend on first start and stored server-side in
- * data/api_token. There is no account system and no password: one token, one
+ * Auth is opt-in (DEC-173): this screen only appears when the server has
+ * API_TOKEN set. There is no account system and no password: one token, one
  * install, pasted once per device and kept in localStorage.
  */
 export default function Login({ onAuthenticated }) {
@@ -17,7 +17,7 @@ export default function Login({ onAuthenticated }) {
     event.preventDefault()
     const token = value.trim()
     if (!token) {
-      setError('Paste the token the server printed at startup.')
+      setError('Paste the API_TOKEN value set on the server.')
       return
     }
 
@@ -45,8 +45,8 @@ export default function Login({ onAuthenticated }) {
       <form className="login-card" onSubmit={submit}>
         <h1>🎬 Sign in</h1>
         <p className="login-help">
-          Paste the API token the server printed when it started. It is also in{' '}
-          <code>data/api_token</code> on the machine running the backend.
+          Paste the <code>API_TOKEN</code> value set on the machine running the
+          backend.
         </p>
 
         <input

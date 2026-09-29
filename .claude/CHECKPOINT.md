@@ -6,10 +6,10 @@
 - **Phase-5 answers already given** (for when it starts): plan against merged `main`; export/import bundle
   **deferred** (follow-up, no DEC); **ship the OFL fonts** the five styles name; memory runs on an **approved
   script**; at the end of phase 5 the human funds the chosen providers for a paid live test (plan stage 14b).
-- **Current phase:** IMPLEMENT. **Current stage:** auth stage 2 (exposure paths, notebook, docs). **Checkpoint:**
-  branch `fix/auth-opt-in` from `main` **`b60938e`**; stage 0 `ad6da47`; stage 1 closed at the commit carrying
-  this line (WIP `ff44862` + the Linux Tier-1 fixes). Execution host: the **Ubuntu VPS**, worktree
-  `.claude/worktrees/auth-opt-in` (the main checkout stays on `main`: the container runs its code).
+- **Current phase:** IMPLEMENT. **Current stage:** auth stage 3 (deploy + Tier-2 on this VPS). **Checkpoint:**
+  branch `fix/auth-opt-in` from `main` **`b60938e`**; stage 0 `ad6da47`; stage 1 `fa3478f`; stage 2 at the commit
+  carrying this line. Execution host: the **Ubuntu VPS**, worktree `.claude/worktrees/auth-opt-in` (the main checkout
+  stays on `main` until the stage-3 fast-forward: the container runs its on-disk code).
 - **Tier-1 baseline:** VPS reference (phase 4 close, `b60938e`) local **5643 passed / 1 skipped**, CI env **4936 /
   677**. Windows baseline (5492/57/67/28, all platform-only) is history: the work moved to the VPS 2026-09-29
   ("you are running on the wrong machine"; the Windows C: disk/Docker cleanup stays the human's, nothing pruned).
@@ -22,10 +22,22 @@
   `/api/jobs` → 401 with no token (old always-on default) — it now sets `API_TOKEN` for the 401 and asserts the
   open answer is JSON 200 (fail-first on `ad6da47`: 401 == 200); `test_auth_opt_in.py`'s unsigned-clip test
   imported the FastAPI route before its `importorskip` (CI env error → skip).
-- **Stage 2 scope addition (logged):** `tools/rzclips-fetch.py` refuses to run without `--token` (`:250`) and points
-  at `/app/data/api_token` (`:191`) — against an open server that is a leftover restriction; stage 2 makes the token
-  optional (header only when given) with a test. Also `web/dashboard/src/App.jsx:30` comment names `data/api_token`.
-- **Next action:** stage 2 per the plan (Sonnet agent), then Tier-1, commit; then stage 3 deploy + Tier-2 here.
+- **Stage 2 (done):** compose passes `DOMAIN` to the backend (comments reworded, no `DISABLE_AUTH`), Caddyfile comment,
+  Kaggle notebook generates + prints a token when no `API_TOKEN` secret (cell 6, `from secrets import token_urlsafe`
+  before the `secrets = UserSecretsClient()` shadowing), `.env.example`, README/README_ID, `docs/deploy-tailscale.md`
+  (Funnel: set `API_TOKEN` first), `docs/api.md` (401 only with a token; 403 cross-site), Login/App copy, CHANGELOG
+  Security entry; **scope addition** `tools/rzclips-fetch.py` runs tokenless (header only with a token; A-081).
+  Tier-1: local **5692 / 1**, CI env **4976 / 686**, compileall clean, vite build green. Tests: +2
+  `test_notebooks.py`, +4/−1 `test_pc_helper.py` (the refusal pin replaced, named), `test_static_studio_retired.py`
+  re-pinned to `API_TOKEN` (named). In-stage finding fixed: the new notebook test leaked its generated `API_TOKEN`
+  into later tests (delenv records nothing for an unset var) — shown with a probe, fixed with setenv-then-delenv.
+- **Stage 3 prep:** this VPS's `.env` has no `DOMAIN` (backend will start). The gitignored
+  `docker-compose.override.yml` (`DISABLE_AUTH=1`) is moved to `/home/ubuntu/backups/auth-opt-in/`, not deleted.
+  Git-excluded launch configs `auth-token-scratch` (:8014, token read from the session scratchpad) and
+  `auth-token-dashboard` (:5176 → :8014) serve check (e). Check (d) uses `POST /api/jobs/<missing>/cancel`
+  (403 cross-site vs the route's 404 without the header): no POST is both harmless and 200.
+- **Next action:** stage 3 — 0 jobs → ff `main` → move the override → `rm -sfv backend` + `up -d --build backend` →
+  checks (a)–(f); the human acknowledges on the phone. Then stage 4 (DEC-173, VISION, close-out) and push.
 - **Open questions:** none blocking.
 
 ### Regression contract (auth task)
@@ -42,7 +54,7 @@
 |---|---|---|
 | 0 | checkpoint + baseline | **done** (this commit) |
 | 1 | opt-in auth in the backend (**RISKIEST**) [Opus] | **done** (Linux Tier-1 local 5686/1, CI 4970/686; 2 in-stage test fixes) |
-| 2 | exposure paths, notebook, docs [Sonnet] | — |
+| 2 | exposure paths, notebook, docs [Sonnet] | **done** (local 5692/1, CI 4976/686; +fetch tool, A-081) |
 | 3 | deploy + Tier-2 on the VPS | — |
 | 4 | decisions + artifacts | — |
 

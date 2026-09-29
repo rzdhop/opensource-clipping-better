@@ -1,8 +1,8 @@
 # Reaching the app from your phone
 
 The backend binds `127.0.0.1:8000`. It is deliberately not reachable from the
-internet: this machine has a public IP, and until recently the API had no
-authentication at all — anyone who found the port could read every job, upload a
+internet: this machine has a public IP, and auth is opt-in — with no
+`API_TOKEN` set, anyone who found the port could read every job, upload a
 2 GB file, or call `POST /api/shutdown`.
 
 Two ways to reach it. Start with Tailscale.
@@ -35,9 +35,10 @@ stays signed in.
 ### Why not Funnel
 
 `tailscale funnel` publishes the same thing to the open internet. Serve keeps it
-inside the tailnet and adds identity headers. Use Funnel only if you need to
-show the app to someone who is not on your tailnet, and understand that the API
-token becomes the only thing standing between your jobs and the internet.
+inside the tailnet and adds identity headers. Auth is opt-in, and the tailnet
+setup above leaves it off by default. **Set `API_TOKEN` in `.env` before using
+Funnel** -- once the app is public, the token becomes the only thing standing
+between your jobs and the internet.
 
 ## Your own domain, later
 
@@ -55,22 +56,17 @@ block everything but SSH by default, which is the step most people miss).
 
 ## The API token
 
-Printed on first start:
-
-```
-🔑 API token: <a long random string>
-   Stored in /app/data/api_token (0600). Set API_TOKEN to pin it.
-```
-
-Get it again at any time:
+Auth is opt-in. With no `API_TOKEN` set the API is open -- fine on
+a private tailnet, since only devices on your tailnet can reach it at all. Put
+a long random string in `.env` to require it on every request:
 
 ```bash
-docker compose exec backend cat /app/data/api_token
+API_TOKEN=...
 ```
 
-Pin it across rebuilds by putting `API_TOKEN=...` in `.env`. Every `/api` route
-requires it except `/api/health`, which reports only booleans and counts so a
-healthcheck or a proxy can use it without a credential.
+Every `/api` route requires it once set, except `/api/health`, which reports
+only booleans and counts so a healthcheck or a proxy can use it without a
+credential.
 
 Use it from a script with either header:
 
@@ -83,6 +79,11 @@ curl -H "X-API-Key: $API_TOKEN" https://<host>/api/jobs
 
 ```bash
 curl -s http://127.0.0.1:8000/api/health            # 200, no token needed
+```
+
+With `API_TOKEN` set in `.env`:
+
+```bash
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8000/api/jobs   # 401
 curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $API_TOKEN" \
      http://127.0.0.1:8000/api/jobs                 # 200

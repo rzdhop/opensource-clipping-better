@@ -3,9 +3,11 @@
 # Caddy does TLS and rate limiting. It does NOT do authentication: the API
 # token does that, and it does it whether or not Caddy is in front. Putting
 # auth in the proxy instead would mean the app is unprotected the moment
-# someone reaches it another way.
+# someone reaches it another way. Auth is opt-in (DEC-173), but this profile
+# puts the API on the public internet, so the backend refuses to start here
+# unless API_TOKEN is set -- set it in .env alongside DOMAIN.
 #
-# Set DOMAIN and ACME_EMAIL in .env, then:
+# Set DOMAIN, ACME_EMAIL and API_TOKEN in .env, then:
 #   docker compose --profile domain up -d
 
 {$DOMAIN} {

@@ -42,7 +42,7 @@ def test_the_readme_describes_the_dashboard_the_api_serves():
     for name in ("README.md", "README_ID.md"):
         text = (ROOT / name).read_text(encoding="utf-8")
         assert "http://localhost:8000/" in text, name
-        assert "data/api_token" in text, name
+        assert "API_TOKEN" in text, name
         assert "docs/deploy-tailscale.md" in text, name
 
 

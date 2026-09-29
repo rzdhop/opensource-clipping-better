@@ -10,6 +10,27 @@ All notable changes to the **rzdhop AI** project will be documented in this file
 
 ## [Unreleased]
 
+### Auth becomes opt-in
+
+The backend used to generate and store a token on every first start, which
+asked for a credential on machines nobody but the operator could reach in the
+first place. Auth is now opt-in: nothing changes for an install that already
+sets `API_TOKEN`, and the two paths that do reach the public internet stay
+guarded either way.
+
+#### Security
+
+- **A token is required only when `API_TOKEN` is set.** A fresh start no
+  longer generates `data/api_token`, and an existing one is no longer read --
+  set `API_TOKEN` to its value to keep token auth.
+- The Caddy `domain` profile refuses to start without `API_TOKEN`: that
+  profile puts the API on the public internet, and it must never do so open.
+- The Kaggle notebook generates a token when no `API_TOKEN` secret is set, so
+  a run behind ngrok is never open either.
+- With no token, a browser's cross-site write (`POST`/`PUT`/`PATCH`/`DELETE`
+  from another site) is refused with `403`; same-origin pages and non-browser
+  clients are unaffected.
+
 ### Onboarding, stopping jobs, and the render layer
 
 A comparison with the upstream project found the fork well ahead on analysis

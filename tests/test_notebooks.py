@@ -16,6 +16,7 @@ Stdlib-only: notebooks are JSON, and these are text checks.
 
 import ast
 import json
+import os
 import pathlib
 import re
 
@@ -189,3 +190,58 @@ def test_the_kaggle_server_reads_the_ngrok_secret():
     code = "\n".join(_code(ROOT / "notebooks" / "kaggle-studio-server.ipynb"))
     assert re.search(r'NGROK_AUTHTOKEN\s*=\s*get_secret\("NGROK_AUTHTOKEN"\)', code)
     assert not re.search(r'NGROK_AUTHTOKEN\s*=\s*""', code)
+
+
+# ------------------------------------------------ the server always has a token
+#
+# The Kaggle server is reached through a public ngrok tunnel (DEC-173's other
+# guarded path, alongside the Caddy DOMAIN profile refusing to start without
+# API_TOKEN): it must never come up open. These exec the secrets cell for
+# real, in a sandbox with no Kaggle or Colab modules importable, so it falls
+# back to the plain os.environ reader -- exactly what this pytest-only CI job
+# sees, and exactly the trap where `secrets = UserSecretsClient()` would
+# shadow the stdlib `secrets` module if `token_urlsafe` were reached through
+# `secrets.token_urlsafe` instead of its own `from secrets import` binding.
+
+SECRET_ENV_VARS = ("GROQ_API_KEY", "GOOGLE_API_KEY", "NVIDIA_API_KEY",
+                    "NGROK_AUTHTOKEN", "API_TOKEN", "PEXELS_API_KEY", "HF_TOKEN")
+
+
+def _kaggle_secrets_cell_source():
+    for source in _code(ROOT / "notebooks" / "kaggle-studio-server.ipynb"):
+        if "UserSecretsClient" in source:
+            return source
+    raise AssertionError("could not find the Kaggle/Colab secrets cell")
+
+
+def _run_kaggle_secrets_cell(monkeypatch, tmp_path, **env):
+    """Exec the secrets cell and return the namespace it ran in.
+
+    monkeypatch.chdir is required: the cell writes `.env` into the current
+    directory. Every secret env var is cleared first so the sandbox is
+    deterministic regardless of what the host happens to have set.
+    """
+    monkeypatch.chdir(tmp_path)
+    for name in SECRET_ENV_VARS:
+        # setenv first so monkeypatch records the original state: the cell
+        # writes os.environ directly, and delenv alone records nothing for an
+        # unset variable -- its generated API_TOKEN would outlive the test.
+        monkeypatch.setenv(name, "")
+        monkeypatch.delenv(name)
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    namespace = {}
+    exec(compile(_kaggle_secrets_cell_source(), "kaggle-studio-server.ipynb#secrets", "exec"),
+         namespace)
+    return namespace
+
+
+def test_the_server_always_has_a_token_behind_ngrok(monkeypatch, tmp_path):
+    _run_kaggle_secrets_cell(monkeypatch, tmp_path)
+    token = os.environ.get("API_TOKEN", "")
+    assert len(token) >= 32
+
+
+def test_an_api_token_secret_is_kept_as_is(monkeypatch, tmp_path):
+    _run_kaggle_secrets_cell(monkeypatch, tmp_path, API_TOKEN="pinned-from-secret")
+    assert os.environ.get("API_TOKEN") == "pinned-from-secret"

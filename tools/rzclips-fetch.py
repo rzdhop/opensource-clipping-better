@@ -11,9 +11,9 @@ finished files travel to the server.
         --server https://your-machine.your-tailnet.ts.net \
         --token YOUR_API_TOKEN
 
-The token is printed by the server on first start and stored in
-``data/api_token``. You can also put it in the RZCLIPS_TOKEN environment
-variable and leave --token off.
+Auth is opt-in on the server: ``--token`` is only needed when its operator set
+``API_TOKEN``. Pass it with ``--token`` or the RZCLIPS_TOKEN environment
+variable when it does; leave both off when the server is open.
 
 Standard library only, so it runs on a bare Python install with nothing but
 yt-dlp on PATH. Tested against Python 3.10+.
@@ -133,6 +133,19 @@ def _best_subtitle(directory, video_path):
 
 # ----------------------------------------------------------------- uploading
 
+def _auth_headers(token, *, content_type):
+    """Headers for a POST: Authorization only when a token was given.
+
+    Auth is opt-in on the server, so a token-less run must not send an empty
+    or made-up credential -- it sends no Authorization header at all, exactly
+    like a server with no API_TOKEN set expects.
+    """
+    headers = {"Content-Type": content_type}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
 def post_multipart(url, token, file_path, *, opener=None, chunk_log=True):
     """Upload one file. Returns the parsed JSON body."""
     boundary = uuid.uuid4().hex
@@ -156,10 +169,7 @@ def post_multipart(url, token, file_path, *, opener=None, chunk_log=True):
     request = urllib.request.Request(
         url,
         data=body,
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Content-Type": f"multipart/form-data; boundary={boundary}",
-        },
+        headers=_auth_headers(token, content_type=f"multipart/form-data; boundary={boundary}"),
         method="POST",
     )
     return _send(request, opener)
@@ -169,10 +179,7 @@ def post_json(url, token, payload, *, opener=None):
     request = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-        },
+        headers=_auth_headers(token, content_type="application/json"),
         method="POST",
     )
     return _send(request, opener)
@@ -187,8 +194,8 @@ def _send(request, opener=None):
         detail = exc.read().decode("utf-8", "replace")[:300]
         if exc.code == 401:
             raise SystemExit(
-                "The server rejected the API token (401).\n"
-                "  Get it with: docker compose exec backend cat /app/data/api_token"
+                "The server rejected the request (401): it has API_TOKEN set.\n"
+                "  Pass its value with --token or the RZCLIPS_TOKEN environment variable."
             )
         raise SystemExit(f"HTTP {exc.code} from {request.full_url}: {detail}")
     except urllib.error.URLError as exc:
@@ -224,7 +231,7 @@ def main(argv=None):
     )
     parser.add_argument(
         "--token", default=os.environ.get("RZCLIPS_TOKEN", ""),
-        help="API token (or set RZCLIPS_TOKEN).",
+        help="API token, only needed if the server has API_TOKEN set (or set RZCLIPS_TOKEN).",
     )
     parser.add_argument("--clips", type=int, default=7, help="How many clips.")
     parser.add_argument(
@@ -246,9 +253,6 @@ def main(argv=None):
         help="Keep the downloaded files instead of deleting them.",
     )
     args = parser.parse_args(argv)
-
-    if not args.token:
-        parser.error("no API token: pass --token or set RZCLIPS_TOKEN")
 
     server = args.server.rstrip("/")
     work_dir = tempfile.mkdtemp(prefix="rzclips_")

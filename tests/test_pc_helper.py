@@ -11,6 +11,7 @@ rather than a package module. No network and no subprocess.
 
 import importlib.util
 import json
+import os
 import pathlib
 
 import pytest
@@ -171,7 +172,91 @@ def test_the_token_can_come_from_the_environment(helper, monkeypatch):
     assert parser.parse_args([]).token == "from-env"
 
 
-def test_a_missing_token_is_a_usage_error(helper, monkeypatch):
+def test_a_missing_token_no_longer_refuses_to_run(helper, monkeypatch, tmp_path):
+    """Auth on the server is opt-in (DEC-173): a token is required only when
+    its operator set API_TOKEN, so this client must not refuse to even try
+    without one -- it used to, back when the server always required a token.
+    """
     monkeypatch.delenv("RZCLIPS_TOKEN", raising=False)
-    with pytest.raises(SystemExit):
-        helper.main(["--url", "https://x/a", "--server", "https://s"])
+    video = tmp_path / "a.mp4"
+    video.write_bytes(b"x")
+    monkeypatch.setattr(helper, "download", lambda *a, **k: (str(video), None))
+
+    tokens_used = []
+
+    def fake_post_multipart(url, token, file_path, **kwargs):
+        tokens_used.append(token)
+        return {"filename": os.path.basename(file_path)}
+
+    def fake_post_json(url, token, payload, **kwargs):
+        tokens_used.append(token)
+        return {"id": "job1"}
+
+    monkeypatch.setattr(helper, "post_multipart", fake_post_multipart)
+    monkeypatch.setattr(helper, "post_json", fake_post_json)
+
+    exit_code = helper.main(["--url", "https://x/a", "--server", "https://s"])
+
+    assert exit_code == helper.EXIT_OK
+    assert tokens_used == ["", ""]
+
+
+# ------------------------------------------------------------- the auth header
+
+def _capturing_opener(body="{}"):
+    """A fake urlopen that records the Request it was given."""
+    captured = {}
+
+    def opener(request, timeout=None):
+        captured["request"] = request
+
+        class _Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self):
+                return body.encode("utf-8")
+
+        return _Response()
+
+    return opener, captured
+
+
+def test_post_multipart_sends_no_authorization_header_without_a_token(helper, tmp_path):
+    """Auth is opt-in on the server: a token-less run must not invent one."""
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"x")
+    opener, captured = _capturing_opener('{"filename": "v.mp4"}')
+
+    helper.post_multipart("https://s/api/upload", "", str(video), opener=opener, chunk_log=False)
+
+    assert "Authorization" not in captured["request"].headers
+
+
+def test_post_multipart_sends_bearer_with_a_token(helper, tmp_path):
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"x")
+    opener, captured = _capturing_opener('{"filename": "v.mp4"}')
+
+    helper.post_multipart("https://s/api/upload", "tok123", str(video), opener=opener, chunk_log=False)
+
+    assert captured["request"].headers["Authorization"] == "Bearer tok123"
+
+
+def test_post_json_sends_no_authorization_header_without_a_token(helper):
+    opener, captured = _capturing_opener('{"id": "job1"}')
+
+    helper.post_json("https://s/api/jobs", "", {"a": 1}, opener=opener)
+
+    assert "Authorization" not in captured["request"].headers
+
+
+def test_post_json_sends_bearer_with_a_token(helper):
+    opener, captured = _capturing_opener('{"id": "job1"}')
+
+    helper.post_json("https://s/api/jobs", "tok123", {"a": 1}, opener=opener)
+
+    assert captured["request"].headers["Authorization"] == "Bearer tok123"

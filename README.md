@@ -207,9 +207,9 @@ Or without Docker:
 uvicorn web.api.app:app --host 127.0.0.1 --port 8000
 ```
 
-Open **http://localhost:8000/** and sign in with the API token. It is printed
-in the log on first start (`🔑 API token: …`) and kept in `data/api_token`;
-set `API_TOKEN` in `.env` to pin it. The backend binds loopback on purpose —
+Auth is opt-in: with no `API_TOKEN` set, **http://localhost:8000/** opens
+straight to the dashboard. Set `API_TOKEN` in `.env` to require a sign-in —
+paste that value on the login screen. The backend binds loopback on purpose —
 to reach it from your phone, follow [docs/deploy-tailscale.md](docs/deploy-tailscale.md).
 
 From the dashboard you upload a video (and optionally its transcript) or paste

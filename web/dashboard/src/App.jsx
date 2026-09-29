@@ -27,9 +27,10 @@ function App() {
   const location = useLocation()
 
   // 'checking' until the server has answered. A stored token can be stale --
-  // the server regenerates it if data/api_token is lost -- so its presence is
-  // not proof of anything; and a server started with DISABLE_AUTH needs no
-  // token at all, so its absence is not proof either (DEC-092). Ask first.
+  // the server's API_TOKEN may have changed since it was pasted here -- so its
+  // presence is not proof of anything; and a server with no API_TOKEN set
+  // needs no token at all, so its absence is not proof either (DEC-092,
+  // DEC-173). Ask first.
   const [auth, setAuth] = useState('checking')
 
   useEffect(() => {

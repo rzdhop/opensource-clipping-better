@@ -132,9 +132,9 @@ Atau tanpa Docker:
 uvicorn web.api.app:app --host 127.0.0.1 --port 8000
 ```
 
-Buka **http://localhost:8000/** lalu masuk dengan API token. Token dicetak di
-log saat pertama kali start (`🔑 API token: …`) dan disimpan di
-`data/api_token`; isi `API_TOKEN` di `.env` agar tetap. Backend sengaja hanya
+Autentikasi bersifat opt-in: tanpa `API_TOKEN`, **http://localhost:8000/**
+langsung terbuka ke dashboard. Isi `API_TOKEN` di `.env` untuk mewajibkan
+login — tempelkan nilai itu di layar masuk. Backend sengaja hanya
 mendengarkan di loopback — untuk mengaksesnya dari HP, ikuti
 [docs/deploy-tailscale.md](docs/deploy-tailscale.md).
 

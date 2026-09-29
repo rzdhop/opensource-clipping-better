@@ -9,9 +9,9 @@ services:
     # Override in .env when your uid is not 1000: DOCKER_UID=$(id -u).
     user: "${DOCKER_UID:-1000}:${DOCKER_GID:-1000}"
     ports:
-      # Bound to loopback, not 0.0.0.0. This host has a public IP, and the API
-      # was reachable from the internet with no authentication at all. Reach it
-      # over the tailnet with:
+      # Bound to loopback, not 0.0.0.0. This host has a public IP, and auth is
+      # opt-in (see API_TOKEN below) -- with it unset, this loopback bind is
+      # the only thing keeping the API private. Reach it over the tailnet with:
       #   tailscale serve --bg --https=443 http://127.0.0.1:8000
       # See docs/deploy-tailscale.md.
       - "127.0.0.1:8000:8000"
@@ -47,10 +47,14 @@ services:
       # `user:` above may be a uid with no /etc/passwd entry, which leaves HOME
       # unset and makes libraries that cache under it fall over.
       - HOME=/tmp
-      # Pin the API token here to keep it stable across rebuilds. Left unset,
-      # the backend generates one on first start and prints it.
+      # Auth is opt-in: set API_TOKEN to require it on every request. Left
+      # unset, the API is open to whoever can reach the port -- keep it on
+      # localhost or a private tailnet. Required with the domain profile.
       - API_TOKEN=${API_TOKEN:-}
       - PUBLIC_URL=${PUBLIC_URL:-}
+      # Only set for the Caddy `domain` profile below; with it set, the
+      # backend refuses to start unless API_TOKEN is also set.
+      - DOMAIN=${DOMAIN:-}
       - GROQ_API_KEY=${GROQ_API_KEY:-}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
       - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
