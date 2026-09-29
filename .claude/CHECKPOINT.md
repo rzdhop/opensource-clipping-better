@@ -6,7 +6,7 @@
 - **Phase-5 answers already given** (for when it starts): plan against merged `main`; export/import bundle
   **deferred** (follow-up, no DEC); **ship the OFL fonts** the five styles name; memory runs on an **approved
   script**; at the end of phase 5 the human funds the chosen providers for a paid live test (plan stage 14b).
-- **Current phase:** IMPLEMENT. **Current stage:** auth stage 3 (deploy + Tier-2 on this VPS). **Checkpoint:**
+- **Current phase:** IMPLEMENT. **Current stage:** auth stage 3 (deploy + Tier-2 on this VPS) — checks done, ack pending. **Checkpoint:**
   branch `fix/auth-opt-in` from `main` **`b60938e`**; stage 0 `ad6da47`; stage 1 `fa3478f`; stage 2 at the commit
   carrying this line. Execution host: the **Ubuntu VPS**, worktree `.claude/worktrees/auth-opt-in` (the main checkout
   stays on `main` until the stage-3 fast-forward: the container runs its on-disk code).
@@ -31,13 +31,29 @@
   `test_notebooks.py`, +4/−1 `test_pc_helper.py` (the refusal pin replaced, named), `test_static_studio_retired.py`
   re-pinned to `API_TOKEN` (named). In-stage finding fixed: the new notebook test leaked its generated `API_TOKEN`
   into later tests (delenv records nothing for an unset var) — shown with a probe, fixed with setenv-then-delenv.
-- **Stage 3 prep:** this VPS's `.env` has no `DOMAIN` (backend will start). The gitignored
-  `docker-compose.override.yml` (`DISABLE_AUTH=1`) is moved to `/home/ubuntu/backups/auth-opt-in/`, not deleted.
-  Git-excluded launch configs `auth-token-scratch` (:8014, token read from the session scratchpad) and
-  `auth-token-dashboard` (:5176 → :8014) serve check (e). Check (d) uses `POST /api/jobs/<missing>/cancel`
-  (403 cross-site vs the route's 404 without the header): no POST is both harmless and 200.
-- **Next action:** stage 3 — 0 jobs → ff `main` → move the override → `rm -sfv backend` + `up -d --build backend` →
-  checks (a)–(f); the human acknowledges on the phone. Then stage 4 (DEC-173, VISION, close-out) and push.
+- **Stage 3 (checks done, awaiting the human's phone acknowledgement):** `main` ff `b60938e..b76f0a9` at 0 jobs;
+  `docker-compose.override.yml` (`DISABLE_AUTH=1`) moved to `/home/ubuntu/backups/auth-opt-in/`; `rm -sfv backend` +
+  `up -d --build backend` (started 15:12:40 UTC, 0 restarts; env: no DISABLE_AUTH, DOMAIN or API_TOKEN).
+  (a) live dashboard at 375 px through the pane: no sign-in; tailnet `100.112.96.111:8000/api/jobs` and
+  `/api/settings` 200 with no token. (b) clip `b37b36a9b34e` rank 1: plain URL, 200 + Range 206, seeks to 10.00 s in
+  the page (7 videos, no overflow); FR episode Preview: plain `…/media/episode_final.mp4`, readyState 4, 58.2 s, seek
+  to 40 s plays, download link `?download=1` → 206 attachment, cover plain; served sha `53cb3bcc…` = disk. (c) banner
+  "🔓 No API_TOKEN — the API is OPEN…" + "/app/data/api_token is no longer read". (d) `POST /api/jobs/000000000000/cancel`:
+  cross-site 403 (guard message), same-origin / no header 404 (route reached); cross-site GET 200. (e) scratch server
+  :8014 with a token: health 200, no header 401, Bearer/X-API-Key 200, wrong 401, cross-site POST 401 (gate, guard
+  inactive); dashboard :5176 shows Sign in with the new copy (token not typed); both stopped. (f) source run and a
+  one-off `DOMAIN=… docker compose run --rm --no-deps backend`: exit 3, "⛔ DOMAIN=… API_TOKEN is not set",
+  "Application startup failed". CI: `ff44862` (WIP) failed as reproduced in stage 1; `b76f0a9` run 36588385377.
+- **The human, mid-stage 3 (2026-09-29):** "Damn remember no auth to the app wtf 5 times i told you" (likely the
+  scratch sign-in screen in the pane). Answered: the live app is open; the sign-in was the throwaway :8014 server.
+  Asked what else to remove → **"Keep as is"**: the cross-site guard, the Kaggle token and the API_TOKEN option
+  stay (the guard's veto was offered and declined). Memory `no-auth-on-the-app`: never show a sign-in screen again,
+  not even from a scratch server.
+- **fal.ai:** the human put **$10 on fal.ai** ("Do not use all 10$"); `fal_key_set` true, `allow_paid` false, caps
+  per episode $1 / daily $3 / per story $10. This is phase-5 stage 14b's paid test; nothing paid runs before the
+  human confirms a ceiling and says go.
+- **Next action:** the human's phone acknowledgement of stage 3 → stage 4 (DEC-173, VISION, close-out) → push
+  branch + `main`.
 - **Open questions:** none blocking.
 
 ### Regression contract (auth task)
@@ -55,7 +71,7 @@
 | 0 | checkpoint + baseline | **done** (this commit) |
 | 1 | opt-in auth in the backend (**RISKIEST**) [Opus] | **done** (Linux Tier-1 local 5686/1, CI 4970/686; 2 in-stage test fixes) |
 | 2 | exposure paths, notebook, docs [Sonnet] | **done** (local 5692/1, CI 4976/686; +fetch tool, A-081) |
-| 3 | deploy + Tier-2 on the VPS | — |
+| 3 | deploy + Tier-2 on the VPS | checks (a)–(f) **pass**; deployed `b76f0a9`; human phone ack pending |
 | 4 | decisions + artifacts | — |
 
 ---
