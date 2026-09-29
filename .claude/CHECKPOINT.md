@@ -1,10 +1,8 @@
-## CURRENT STATE — AI Story **phase 5 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–5 **done**; next: **stage 6**
+## CURRENT STATE — AI Story **phase 5 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–6 **done**; next: **stage 7**
 - **In-progress header** (keep current):
   - **Current phase:** IMPLEMENT (phases 0–3 done: the plan was mapped, clarified and approved 2026-09-29).
-  - **Current stage:** 5 done → next **stage 6** (whole-frame shot timing, with the spike's `whole_frames` flag)
-    [Opus agent].
-  - **Next action:** spawn the stage-6 agent on the spike's design (notes below); fail-first; golden and stored
-    documents unchanged.
+  - **Current stage:** 6 done → next **stage 7** (re-edit operations) [Opus agent].
+  - **Next action:** spawn the stage-7 agent (plan stage 7 + the stage 3/6 notes below); fail-first.
   - **Open questions:** none blocking. Stage 12 needs the human to confirm font filenames, sources and sizes
     before any download.
 - **Started** 2026-09-29 on the human's "Start AI Story phase 5 under the repo protocol (FULL task), on this
@@ -100,6 +98,15 @@
   old-style. 7 files (+114/−24); 3 phase-3 tests re-pin (tails +1/60 s); golden and 40/40 stored docs identical;
   later-shot frame drift 20 % → 0. Edge: up to +½ frame per scene; `voice_lines.save()` must re-time the script
   again after a board converts. Notes: session scratchpad `stage6-spike-notes.md`, patch `stage6-spike/gated.patch`.
+- **Stage 6 notes for stages 7–14:** timing functions default to whole frames; every call that times a stored
+  document passes `timing.board_whole_frames(board)` (audited by me: timeline, `audio_entries`, `retime`,
+  `retime_storyboard`, golden). New boards carry `whole_frames: true`; an old board converts on its first full
+  re-time (FR live board: 7/21 render keys change once, EN 2/20; FR total 1745 → 1746 frames), and any path calling
+  `retime_storyboard` re-times the script afterwards on conversion (`voice_lines.sync_storyboard` pattern). Window
+  states decided on frame counts (fixes a 54.997 s = 1650-frame episode marked "under"). Edge: of 1500 random
+  episodes, 5 tightened at 79.83–79.91 s become "over" (fast track refuses) and 2 at 74.96–74.99 s "tightened".
+  Latent old-timing bug (not fixed; whole-frame boards cannot hit it): an unflagged board whose total lands on an
+  exact half frame can be refused at plan time (1/32 random episodes on HEAD).
 - **Rollback:** code: delete the worktree and the branch (or revert a stage's commit). Live data: restore the
   tars (`tar -C outputs/stories -xzf …`) and check `sha256sum -c enfr-before.sha`.
 
@@ -126,8 +133,8 @@ RC-P1…P11, RC-S1…S4, RC-T1…T3, RC-E1…E5 and RC-A1…A9 (tables below) st
 | 3 | continuity in the episode prompts [Opus] | **done** (local 6017/1, CI 5301/686; 67 new tests; ep-1 E1/E3/E4 request shas pinned from HEAD incl. max_tokens; 1 review round) |
 | 4 | steps memory, feedback, propose-next and the gate [Opus] | **done** (local 6061/1, CI 5348/683; 45 new tests + 8 reverted mutation proofs; the later-phase pins moved, named) |
 | 5 | series API and CLI [Sonnet] | **done** (local 6125/1, CI 5367/728; 64 new tests, 45 API ones skip in CI like every route test; 3 named re-pins) |
-| 6 | whole-frame shot timing (second riskiest) [Opus] | next (spike done: GO with a flag) |
-| 7 | re-edit operations [Opus] | — |
+| 6 | whole-frame shot timing (second riskiest) [Opus] | **done** (local 6149/1, CI 5391/728; 24 new tests; golden + framemd5 unedited; live FR/EN ep01 plans byte-identical; drift 20 % → 0) |
+| 7 | re-edit operations [Opus] | next |
 | 8 | partial re-render (**RISKIEST**) [Opus] | — |
 | 9 | re-edit API and CLI [Sonnet] | — |
 | 10 | dashboard: SeasonBoard series panel [Sonnet] | — |

@@ -223,10 +223,14 @@ class LineMeasurement:
     def sync_storyboard(self) -> None:
         """The storyboard's shot durations re-timed from the lines as they
         are now, written when one moved (``shots.retime_storyboard``: plans,
-        prompts, ids, revision and approval untouched)."""
+        prompts, ids, revision and approval untouched). A storyboard timed
+        before whole frames that this re-time switches to them (phase 5
+        stage 6) has the script -- saved just before, in the old timing --
+        re-timed and saved again beside it, so the two stay one timing."""
         board, ec = self.storyboard, self.ec
         if board is None or self.board_refused:
             return
+        switching = not timing.board_whole_frames(board)
         if not shots.retime_storyboard(board, self.script, template=ec.template, language=ec.language,
                                        style_lock=ec.style_lock):
             return
@@ -239,6 +243,9 @@ class LineMeasurement:
             self.storyboard = episode_common.read_episode(ec, STORYBOARD_DOC)
             self.ctx.on_log(f"⚠️ The storyboard's shot durations could not be re-timed "
                             f"({'; '.join(exc.errors[:2])}); run the storyboard step again.")
+            return
+        if switching and timing.board_whole_frames(board):
+            self.save()
 
     def drop_other_take(self, line_id, ext) -> None:
         """A line measured again with an engine of the other format (mp3 <->

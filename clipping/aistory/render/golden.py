@@ -214,8 +214,10 @@ def build_documents() -> dict:
                       "assets": {"image": f"assets/shots/shot_{order:02d}.png", "video": None, "seed": None,
                                  "provider": None, "approved": True}})
     board = {"shots": shots, "transitions": [{"after": "sh02", "type": "dissolve", "duration_s": 0.4}]}
+    # A board timed before whole frames (no ``whole_frames`` flag): its shots
+    # are cut to the timing the render reads for it, the recorded frames'.
     real, _scene_t = timing.episode_pass(script, TEMPLATE, STORY["language"], style_lock=STYLE_LOCK,
-                                         storyboard=board)
+                                         storyboard=board, whole_frames=timing.board_whole_frames(board))
     for scene_id in ("s01", "s02"):
         own = [shot for shot in shots if shot["scene_id"] == scene_id]
         total = real["scenes"][scene_id]["duration_s"]

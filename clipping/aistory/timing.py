@@ -41,6 +41,43 @@ CHARS_PER_WORD = {"fr": 5.7, "en": 5.5}
 # A line never estimates shorter than this, even a single short word.
 MIN_LINE_S = 0.5
 
+# The render's frame rate (``render.profiles.FPS``: kept here so this module
+# stays pure; ``tests/test_story_frame_stable_timing.py`` checks the two
+# agree). Timed in whole frames (the ``whole_frames`` keyword below, DEC-142
+# as amended by AI Story phase 5 stage 6), every scene and shot lasts a whole
+# number of these frames, stored as ``round(n / FPS, 3)`` so that
+# ``round(d * FPS) == n``: a change in one scene then moves every later shot
+# by whole frames only, and their frame counts (and render cache keys) stay.
+FPS = 30
+
+
+def _to_frames(seconds: float) -> int:
+    """The nearest whole frame of *seconds*, ties up (never banker's
+    rounding)."""
+    return int(math.floor(seconds * FPS + 0.5 + 1e-9))
+
+
+def _from_frames(frames: int) -> float:
+    """*frames* in seconds, as a duration is stored (3 decimals)."""
+    return round(frames / FPS, 3)
+
+
+def _frames_down(seconds: float) -> int:
+    """The whole frames that fit in *seconds* (rounded down; a hair of float
+    noise under a whole frame still counts it)."""
+    return int(math.floor(seconds * FPS + 1e-6))
+
+
+def board_whole_frames(storyboard) -> bool:
+    """Whether a script timed beside *storyboard* -- and the storyboard's
+    own shots -- are timed in whole frames: yes for a storyboard that says
+    so (``whole_frames: true``, written by ``shots.build_storyboard`` since
+    phase 5 stage 6, or by the first full re-time of an older one,
+    ``shots.retime_storyboard``) and for no storyboard at all (the next one
+    is built in whole frames); no for a storyboard timed before, which keeps
+    -- and renders in -- the timing it was cut to."""
+    return storyboard is None or bool(storyboard.get("whole_frames"))
+
 
 def _check_language(language: str) -> None:
     if language not in RATE_PER_CHAR:
@@ -177,7 +214,7 @@ def episode_slots(template: dict, ep: int) -> list:
 # ------------------------------------------------------------ scene timing
 
 def scene_timing(scene: dict, template: dict, language: str, *, style_lock: dict = None,
-                  tail_floor: float = None, min_duration_s: float = None) -> dict:
+                  tail_floor: float = None, min_duration_s: float = None, whole_frames: bool = True) -> dict:
     """One scene's duration, tail, hold and per-line start offsets.
 
     A scene with no lines (a quiet beat, a text-only recap or hook) just
@@ -202,6 +239,15 @@ def scene_timing(scene: dict, template: dict, language: str, *, style_lock: dict
     slot are raised to it, so a scene is never shorter than its shots -- the
     shortfall is held like any other (``hold_s``) and a tail is never
     shortened below it. ``line_starts`` never move: a hold is at the end.
+
+    *whole_frames* (the default; phase 5 stage 6): the duration becomes a
+    whole number of frames (:data:`FPS`) -- the nearest one, ties up, the
+    difference going into what follows the last line (the hold when there
+    is one, else the tail), so no line moves; the next frame up instead when
+    rounding down would take that hold under zero or that tail under its
+    floor (a scene tightened to the floor, or ``"over"``). Off, the scene is timed exactly
+    as before phase 5 stage 6 (a storyboard timed then still renders in it,
+    :func:`board_whole_frames`).
     """
     lo, hi = slot_range(scene, template, style_lock=style_lock)
     if min_duration_s is not None:
@@ -215,6 +261,9 @@ def scene_timing(scene: dict, template: dict, language: str, *, style_lock: dict
 
     if not lines:
         duration = _clamp(scene["target_duration_s"], lo, hi)
+        if whole_frames:
+            # The slot's ends are whole frames: the nearest one stays inside.
+            duration = _from_frames(_to_frames(duration))
         return {
             "duration_s": round(duration, 3), "tail_s": 0.0, "hold_s": 0.0,
             "speech_s": 0.0, "state": "ok", "line_starts": {},
@@ -259,6 +308,19 @@ def scene_timing(scene: dict, template: dict, language: str, *, style_lock: dict
         duration = raw
         state = "ok"
         tail_used = tail
+
+    if whole_frames:
+        frames = _to_frames(duration)
+        delta = frames / FPS - duration
+        spare = hold if hold > 0.0 else tail_used - floor
+        if delta < 0.0 and spare + delta < -1e-9:
+            frames += 1
+            delta = frames / FPS - duration
+        if hold > 0.0:
+            hold += delta
+        else:
+            tail_used += delta
+        duration = _from_frames(frames)
 
     return {
         "duration_s": round(duration, 3), "tail_s": round(tail_used, 3), "hold_s": round(hold, 3),
@@ -442,7 +504,7 @@ def _boundary_transitions(scenes: list, template: dict, storyboard: dict = None)
 
 # ---------------------------------------------------------------- shots
 
-def allocate_shots(scene: dict, scene_t: dict, shots: list, template: dict) -> tuple:
+def allocate_shots(scene: dict, scene_t: dict, shots: list, template: dict, *, whole_frames: bool = True) -> tuple:
     """Split one scene's duration across its shots. Returns ``(durations,
     extra_hold_s)``.
 
@@ -475,6 +537,14 @@ def allocate_shots(scene: dict, scene_t: dict, shots: list, template: dict) -> t
     that would put a shot under ``min_shot_s`` falls back to the even split
     of step 2 instead. Still deterministic, still exactly sums to the scene
     duration, still respects the minimum.
+
+    *whole_frames* (the default; phase 5 stage 6; *scene_t* then lasts a
+    whole number of frames, :func:`scene_timing`): every shot boundary
+    inside the scene lands on the nearest whole frame of where it falls (the
+    running sum, so no shot drifts), each shot stored as ``round(frames /
+    FPS, 3)``, and the last shot takes the rest, so the shots still sum
+    exactly to the scene's stored duration. A shot that rounding would put under ``min_shot_s``
+    makes the scene fall back to the even split, as above.
     """
     duration = scene_t["duration_s"]
     min_shot = template["min_shot_s"]
@@ -483,7 +553,16 @@ def allocate_shots(scene: dict, scene_t: dict, shots: list, template: dict) -> t
         return [], 0.0
 
     def _round_last(values):
-        rounded = [round(v, 3) for v in values[:-1]]
+        if whole_frames:
+            rounded = []
+            cumulative, previous = 0.0, 0
+            for value in values[:-1]:
+                cumulative += value
+                frames = _to_frames(cumulative)
+                rounded.append(_from_frames(frames - previous))
+                previous = frames
+        else:
+            rounded = [round(v, 3) for v in values[:-1]]
         rounded.append(round(duration - sum(rounded), 3))
         return rounded
 
@@ -541,7 +620,10 @@ def allocate_shots(scene: dict, scene_t: dict, shots: list, template: dict) -> t
     if any(d < min_shot - 1e-9 for d in durations):
         return _even_split()
 
-    return _round_last(durations), 0.0
+    rounded = _round_last(durations)
+    if whole_frames and any(d < min_shot - 1e-9 for d in rounded):
+        return _even_split()
+    return rounded, 0.0
 
 
 # ------------------------------------------------------------- episode timing
@@ -571,7 +653,7 @@ def _longest_lines(scenes: list, language: str) -> list:
 
 
 def episode_timing(script: dict, template: dict, language: str, *, style_lock: dict = None,
-                    storyboard: dict = None) -> dict:
+                    storyboard: dict = None, whole_frames: bool = True) -> dict:
     """The episode's ``timing`` object (spec 2.7): total length, per-scene
     durations and the window state, computed end to end from the script's
     text (or its already-measured lines).
@@ -607,18 +689,26 @@ def episode_timing(script: dict, template: dict, language: str, *, style_lock: d
     (it did not fit even after its own tail was shrunk to the floor) adds
     a ``scene_over`` flag and a ``trim_line`` flag on its own longest line.
 
+    Whole frames (*whole_frames*, the default; phase 5 stage 6): every
+    scene is timed in whole frames (:func:`scene_timing`) and the window
+    pass shortens a tail or extends a hold by whole frames only -- a tail's
+    room rounded down, so it never goes under its floor -- so every scene
+    duration stays a whole number of frames. Off, the episode is timed
+    exactly as before phase 5 stage 6, as a storyboard timed then still is
+    (:func:`board_whole_frames`).
+
     The storyboard, when given, must cover every scene of the script
     (:func:`covers`); :func:`episode_pass` is the same computation for any
     storyboard, and also returns each scene's line starts.
     """
     boundary = _boundary_transitions(script["scenes"], template, storyboard)
     result, _scene_timings = _episode_pass(script, template, language, style_lock=style_lock, boundary=boundary,
-                                           shot_floors=_shot_floors(storyboard, template))
+                                           shot_floors=_shot_floors(storyboard, template), whole_frames=whole_frames)
     return result
 
 
 def episode_pass(script: dict, template: dict, language: str, *, style_lock: dict = None,
-                 storyboard: dict = None) -> tuple:
+                 storyboard: dict = None, whole_frames: bool = True) -> tuple:
     """``(timing, scenes)``: the one timing a script and its storyboard
     share -- the script's stored ``timing`` is the first, and a storyboard's
     shots are cut to the second (``shots.build_storyboard``,
@@ -636,17 +726,28 @@ def episode_pass(script: dict, template: dict, language: str, *, style_lock: dic
     plus ``speech_s`` and ``line_starts`` (:func:`scene_timing`'s; the
     window pass only moves a tail or a hold, both after the last line, so a
     line never moves) -- what :func:`allocate_shots` splits.
+
+    *whole_frames*: :func:`episode_timing`'s (whole frames by default;
+    off, exactly as before phase 5 stage 6) -- :func:`board_whole_frames`
+    says which one a script beside a given storyboard is timed with, and
+    every caller timing a stored document passes it.
     """
     boundary_board = storyboard if covers(storyboard, script) else None
     boundary = _boundary_transitions(script["scenes"], template, boundary_board)
     return _episode_pass(script, template, language, style_lock=style_lock, boundary=boundary,
-                         shot_floors=_shot_floors(storyboard, template))
+                         shot_floors=_shot_floors(storyboard, template), whole_frames=whole_frames)
 
 
 def _episode_pass(script: dict, template: dict, language: str, *, style_lock: dict, boundary: list,
-                  shot_floors: dict) -> tuple:
+                  shot_floors: dict, whole_frames: bool = True) -> tuple:
     """:func:`episode_timing`'s computation, given the scene *boundary*
-    transitions and the *shot_floors*; ``(timing, scene_timings)``."""
+    transitions and the *shot_floors*; ``(timing, scene_timings)``.
+
+    In whole frames, what the window pass moves is counted in frames: every
+    scene duration, slot end, shot floor and the hold cap is a whole number
+    of them already (the 3-decimal storage noise of a sum of them stays far
+    under half a frame, so the nearest frame is exact), and a tail's room
+    -- the one amount that is not -- is rounded down."""
     scenes = script["scenes"]
 
     scene_timings = {}
@@ -660,10 +761,11 @@ def _episode_pass(script: dict, template: dict, language: str, *, style_lock: di
         floor = _effective_tail_floor(i, scenes, boundary, template, script)
         shot_floor = shot_floors.get(sid)
         scene_t = scene_timing(scene, template, language, style_lock=style_lock, tail_floor=floor,
-                               min_duration_s=shot_floor)
+                               min_duration_s=shot_floor, whole_frames=whole_frames)
         floor_hold[sid] = 0.0
         if shot_floor is not None:
-            natural = scene_timing(scene, template, language, style_lock=style_lock, tail_floor=floor)
+            natural = scene_timing(scene, template, language, style_lock=style_lock, tail_floor=floor,
+                                   whole_frames=whole_frames)
             floor_hold[sid] = max(0.0, scene_t["duration_s"] - natural["duration_s"])
         scene_timings[sid] = scene_t
         slot_hi_by_scene[sid] = slot_range(scene, template, style_lock=style_lock)[1]
@@ -676,13 +778,23 @@ def _episode_pass(script: dict, template: dict, language: str, *, style_lock: di
         return sum(scene_timings[s["scene_id"]]["duration_s"] for s in scenes) \
             - sum(dur for _kind, dur in boundary) + end_card_addition
 
+    def _beyond(limit, value) -> float:
+        """Whether *value* is past *limit* (> 0) or short of it (< 0), for
+        the window's decisions -- in whole frames counted in frames: *value*
+        is a sum of 3-decimal durations, a few milliseconds of storage noise
+        off its whole frame, which must never tip a window state (55.0 s
+        held as 54.998 s). A flag still says the plain difference."""
+        if whole_frames:
+            return (_to_frames(value) - _to_frames(limit)) / FPS
+        return value - limit
+
     total = _current_total()
     window_lo, window_hi = template["window_s"]
     tighten_above = template["tighten_above_s"]
     flags = []
     state = "ok"
 
-    if total > tighten_above:
+    if _beyond(tighten_above, total) > 0:
         need = total - tighten_above
         by_tail_desc = sorted(scenes, key=lambda s: scene_timings[s["scene_id"]]["tail_s"], reverse=True)
         for scene in by_tail_desc:
@@ -692,21 +804,33 @@ def _episode_pass(script: dict, template: dict, language: str, *, style_lock: di
             i = scenes.index(scene)
             floor = _effective_tail_floor(i, scenes, boundary, template, script)
             scene_t = scene_timings[sid]
-            room = max(0.0, scene_t["tail_s"] - floor)
-            if sid in shot_floors:
-                room = max(0.0, min(room, scene_t["duration_s"] - shot_floors[sid]))
-            shrink = min(need, room)
-            if shrink <= 0:
-                continue
+            if whole_frames:
+                room_frames = _frames_down(scene_t["tail_s"] - floor)
+                if sid in shot_floors:
+                    room_frames = min(room_frames,
+                                      _to_frames(scene_t["duration_s"]) - _to_frames(shot_floors[sid]))
+                shrink_frames = min(_to_frames(need), room_frames)
+                if shrink_frames <= 0:
+                    continue
+                shrink = shrink_frames / FPS
+                duration = _from_frames(_to_frames(scene_t["duration_s"]) - shrink_frames)
+            else:
+                room = max(0.0, scene_t["tail_s"] - floor)
+                if sid in shot_floors:
+                    room = max(0.0, min(room, scene_t["duration_s"] - shot_floors[sid]))
+                shrink = min(need, room)
+                if shrink <= 0:
+                    continue
+                duration = round(scene_t["duration_s"] - shrink, 3)
             scene_timings[sid] = {
                 **scene_t,
                 "tail_s": round(scene_t["tail_s"] - shrink, 3),
-                "duration_s": round(scene_t["duration_s"] - shrink, 3),
+                "duration_s": duration,
             }
             need -= shrink
         total = _current_total()
         state = "tightened"
-        if total > window_hi:
+        if _beyond(window_hi, total) > 0:
             state = "over"
             excess = total - window_hi
             flags.append({
@@ -724,7 +848,7 @@ def _episode_pass(script: dict, template: dict, language: str, *, style_lock: di
                 })
                 flagged_sum += dur
 
-    elif total < window_lo:
+    elif _beyond(window_lo, total) < 0:
         need = window_lo - total
         cliff = next((s for s in scenes if s["function"] == "cliffhanger"), None)
         order = []
@@ -742,19 +866,30 @@ def _episode_pass(script: dict, template: dict, language: str, *, style_lock: di
                 break
             scene_t = scene_timings[sid]
             hi = slot_hi_by_scene[sid]
-            room = max(0.0, hi - scene_t["duration_s"])
-            cap = max(0.0, template["hold_extension_max_s"] - floor_hold[sid])
-            extend = min(need, cap, room)
-            if extend <= 0:
-                continue
+            if whole_frames:
+                frames = _to_frames(scene_t["duration_s"])
+                room_frames = _frames_down(hi) - frames
+                cap_frames = _frames_down(template["hold_extension_max_s"]) - _to_frames(floor_hold[sid])
+                extend_frames = min(_to_frames(need), cap_frames, room_frames)
+                if extend_frames <= 0:
+                    continue
+                extend = extend_frames / FPS
+                duration = _from_frames(frames + extend_frames)
+            else:
+                room = max(0.0, hi - scene_t["duration_s"])
+                cap = max(0.0, template["hold_extension_max_s"] - floor_hold[sid])
+                extend = min(need, cap, room)
+                if extend <= 0:
+                    continue
+                duration = round(scene_t["duration_s"] + extend, 3)
             scene_timings[sid] = {
                 **scene_t,
                 "hold_s": round(scene_t["hold_s"] + extend, 3),
-                "duration_s": round(scene_t["duration_s"] + extend, 3),
+                "duration_s": duration,
             }
             need -= extend
         total = _current_total()
-        if total < window_lo:
+        if _beyond(window_lo, total) < 0:
             state = "under"
             shortfall = window_lo - total
             flags.append({

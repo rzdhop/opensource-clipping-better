@@ -636,6 +636,42 @@ def test_retime_storyboard_leaves_a_stale_scene_as_it_was(store):
                                    style_lock=ec.style_lock) is False
 
 
+def test_a_measurement_that_converts_an_old_storyboard_re_times_the_script_after_it(store):
+    """Phase 5 stage 6: a storyboard timed before whole frames (no
+    ``whole_frames`` flag, its script timed beside it the old way) is
+    converted by its first full re-time -- here a re-measure with every line
+    measured already, which only re-times the storyboard -- and the script
+    is re-timed and written again after it, so the two stay one timing."""
+    m = eps._new()
+    story_id = eps._written_script(store)
+    m.storyboard.build_fast(store, story_id, 1, now=NOW, on_log=eps.Log())
+    _measure(store, story_id, adapters=_adapters(Edge()))
+    ec = m.common.load_context(store, story_id, 1)
+    script, board = eps._script(store, story_id), eps._storyboard(store, story_id)
+    assert board["whole_frames"] is True
+    del board["whole_frames"]  # as a storyboard of phase 4 was stored
+    shots._time_shots(board["shots"], board["transitions"], script, template=ec.template, language=ec.language,
+                      style_lock=ec.style_lock, whole_frames=False)
+    m.common.retime(script, ec, board)
+    store.write_episode_doc(story_id, 1, "storyboard.json", board, now=NOW)
+    store.write_episode_doc(story_id, 1, "script.json", script, now=NOW)
+    old_timing = script["timing"]
+    edge = Edge()
+
+    summary, _log = _measure(store, story_id, adapters=_adapters(edge))
+
+    assert edge.calls == [] and summary["measured"] == 0
+    script, board = eps._script(store, story_id), eps._storyboard(store, story_id)
+    assert board["whole_frames"] is True
+    assert script["timing"] != old_timing
+    assert script["timing"] == timing.episode_timing(script, _template(), "fr", style_lock=_lock(store, story_id),
+                                                     storyboard=board)
+    sums = {}
+    for shot in board["shots"]:
+        sums[shot["scene_id"]] = round(sums.get(shot["scene_id"], 0.0) + shot["duration_s"], 3)
+    assert sums == {sid: scene["duration_s"] for sid, scene in script["timing"]["scenes"].items()}
+
+
 # ============================================================ cancel, budget
 
 def test_a_cancel_between_lines_keeps_what_was_measured(store):

@@ -744,7 +744,7 @@ def _collect_resolved_from(resolved_from, subject_tags, scene, entities) -> None
         resolved_from[scene["place_id"]] = place_doc["updated_at"]
 
 
-def _time_shots(shots, transitions, script, *, template, language, style_lock, skip=()) -> list:
+def _time_shots(shots, transitions, script, *, template, language, style_lock, skip=(), whole_frames) -> list:
     """Every shot's ``duration_s``, in place, the one way a storyboard is
     timed: each scene's EPISODE-LEVEL timing -- :func:`timing.episode_pass`
     over the whole *script* beside these very shots and transitions, the
@@ -752,12 +752,15 @@ def _time_shots(shots, transitions, script, *, template, language, style_lock, s
     (``episode_common.retime``), window pass and shot floor included --
     split across the scene's shots by :func:`timing.allocate_shots`. So a
     scene's shots always sum to ``script.timing.scenes[sid].duration_s``.
-    A scene in *skip* keeps its shots' durations. Returns the notes (a scene
+    *whole_frames*: the episode timing and the split are in whole frames
+    (DEC-142 as amended by phase 5 stage 6); off, a storyboard timed before
+    is kept in its old timing. A scene in *skip* keeps its shots' durations. Returns the notes (a scene
     whose shots sit at the floor length -- never expected: the shot floor
     already grew every scene to what its shots need)."""
     notes = []
     _timing, scene_timings = timing.episode_pass(
-        script, template, language, style_lock=style_lock, storyboard={"shots": shots, "transitions": transitions})
+        script, template, language, style_lock=style_lock, storyboard={"shots": shots, "transitions": transitions},
+        whole_frames=whole_frames)
     shots_by_scene: dict = {}
     for shot in shots:
         shots_by_scene.setdefault(shot["scene_id"], []).append(shot)
@@ -769,7 +772,8 @@ def _time_shots(shots, transitions, script, *, template, language, style_lock, s
         scene_t = scene_timings[sid]
         scene_shots = shots_by_scene[sid]
         scene_plans_for_alloc = [{"lines": shot["lines"]} for shot in scene_shots]
-        durations, extra_hold = timing.allocate_shots(scene, scene_t, scene_plans_for_alloc, template)
+        durations, extra_hold = timing.allocate_shots(scene, scene_t, scene_plans_for_alloc, template,
+                                                      whole_frames=whole_frames)
         for shot, duration in zip(scene_shots, durations):
             shot["duration_s"] = duration
         if extra_hold > 0:
@@ -788,7 +792,15 @@ def retime_storyboard(storyboard, script, *, template, language, style_lock) -> 
     its shots may name lines it no longer has. Returns whether any duration
     changed. The other scenes follow the episode-level timing the script is
     stored with (:func:`_time_shots`): a change in one scene can move
-    another one's durations through the episode's window pass."""
+    another one's durations through the episode's window pass.
+
+    Whole frames (phase 5 stage 6): a storyboard flagged ``whole_frames`` is
+    re-timed in whole frames. One timed before keeps its old timing while
+    any of its shots keeps its duration (a skipped scene's shots would
+    disagree with a whole-frame episode timing at render); its first re-time
+    that re-cuts every shot switches it to whole frames and sets the flag
+    (returned as a change, so the caller writes it -- and must re-time the
+    script beside it again, ``episode_common.retime``)."""
     scenes_in_order = [scene for scene in script["scenes"] if scene["scene_id"] in storyboard["scenes"]]
     line_ids = {scene["scene_id"]: {line["line_id"] for line in scene["lines"]} for scene in scenes_in_order}
     skip = {scene["scene_id"] for scene in script["scenes"] if scene["scene_id"] not in storyboard["scenes"]}
@@ -807,9 +819,15 @@ def retime_storyboard(storyboard, script, *, template, language, style_lock) -> 
         # refuses it too, and a PATCH that made it is refused whole.
         return False
     before = [shot["duration_s"] for shot in storyboard["shots"]]
+    whole_frames = timing.board_whole_frames(storyboard) or not any(
+        shot["scene_id"] in skip for shot in storyboard["shots"])
     _time_shots(storyboard["shots"], storyboard["transitions"], script, template=template,
-                language=language, style_lock=style_lock, skip=skip)
-    return [shot["duration_s"] for shot in storyboard["shots"]] != before
+                language=language, style_lock=style_lock, skip=skip, whole_frames=whole_frames)
+    changed = [shot["duration_s"] for shot in storyboard["shots"]] != before
+    if whole_frames and not storyboard.get("whole_frames"):
+        storyboard["whole_frames"] = True
+        changed = True
+    return changed
 
 
 def _non_cut_inside_a_scene(storyboard) -> bool:
@@ -828,7 +846,8 @@ def build_storyboard(script, plans, sources, *, entities, style_lock, template, 
     cross-scene :func:`rule_pass`, ``sh01..`` ids, every shot resolved
     (:func:`resolve_shot`), durations from the episode-level
     :func:`timing.episode_pass` + :func:`timing.allocate_shots`
-    (:func:`_time_shots`), and transitions from
+    (:func:`_time_shots`) in whole frames (the document says so:
+    ``whole_frames: true``), and transitions from
     :func:`timing.plan_transitions`. Raises ``ValueError`` (never writes a
     document that fails its own validation -- a bug, not a user error) when
     the result does not pass ``schemas.storyboard_errors`` and
@@ -866,7 +885,7 @@ def build_storyboard(script, plans, sources, *, entities, style_lock, template, 
 
     transitions = timing.plan_transitions(shots, scenes_by_id, template)
     notes.extend(_time_shots(shots, transitions, script, template=template, language=language,
-                             style_lock=style_lock))
+                             style_lock=style_lock, whole_frames=True))
 
     doc = {
         "$schema": schemas.STORYBOARD_SCHEMA_NAME,
@@ -878,6 +897,9 @@ def build_storyboard(script, plans, sources, *, entities, style_lock, template, 
             for scene in scenes_in_order
         },
         "resolved_from": resolved_from,
+        # Timed in whole frames (phase 5 stage 6): the timeline and every
+        # re-time read it (timing.board_whole_frames).
+        "whole_frames": True,
         "approved_at": None,
         "rev": (previous["rev"] + 1) if previous is not None else 1,
         "created_at": previous["created_at"] if previous is not None else now,

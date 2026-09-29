@@ -2340,6 +2340,11 @@ STORYBOARD_SCHEMA = _document({
     "rev": {"type": "integer", "minimum": 1},
     "created_at": _NON_EMPTY_STRING,
     "updated_at": _NON_EMPTY_STRING,
+}, optional={
+    # Phase 5 stage 6: the shots are timed in whole frames
+    # (timing.board_whole_frames). Absent on a storyboard timed before, which
+    # keeps -- and renders in -- its old timing until a full re-time.
+    "whole_frames": {"type": "boolean"},
 })
 
 

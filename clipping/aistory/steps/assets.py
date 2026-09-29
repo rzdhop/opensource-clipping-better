@@ -1285,7 +1285,7 @@ class _Assets(voice_lines.LineMeasurement):
         """``(sfx, bgm)`` of ``assets.json`` from the script as it is timed now."""
         ec, ctx, script, board = self.ec, self.ctx, self.script, self.storyboard
         timing_result, _scenes = timing.episode_pass(script, ec.template, ec.language, style_lock=ec.style_lock,
-                                                     storyboard=board)
+                                                     storyboard=board, whole_frames=timing.board_whole_frames(board))
         starts = timing.scene_starts(script, timing_result, ec.template, storyboard=board)
         offsets = timing.line_offsets(script, timing_result, ec.template, storyboard=board)
         pack = ec.style_lock["audio"]["sfx_pack"]

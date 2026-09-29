@@ -275,8 +275,12 @@ def build_timeline(script: dict, storyboard: dict, template: dict, language: str
     card_s = template["end_card_s"]
     cut_to_black = script["cliffhanger"]["cut_to_black"]
 
+    # The board's own timing: whole frames when it says so, else the timing
+    # it was cut to (a board timed before phase 5 stage 6 renders exactly as
+    # it did).
     timing_result, _scene_timings = timing_mod.episode_pass(
-        script, template, language, style_lock=style_lock, storyboard=storyboard)
+        script, template, language, style_lock=style_lock, storyboard=storyboard,
+        whole_frames=timing_mod.board_whole_frames(storyboard))
 
     shot_entries, last_shot_natural_end = _shots_timeline(
         storyboard, cut_to_black=cut_to_black, fadeblack_s=fadeblack_s, card_s=card_s, fps=fps)

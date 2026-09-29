@@ -420,13 +420,17 @@ def retime(script, ec, storyboard=None) -> dict:
     shorter than they need. The one computation (``timing.episode_pass``)
     the storyboard's shot durations are cut to as well
     (``shots.build_storyboard``, ``shots.retime_storyboard``), so the two
-    agree. Derived: the revision and the approvals never move. A script with
-    no scene yet has no timing."""
+    agree -- in whole frames with no storyboard or one timed in them, in
+    the old timing beside a storyboard timed before
+    (``timing.board_whole_frames``; phase 5 stage 6). Derived: the revision
+    and the approvals never move. A script with no scene yet has no
+    timing."""
     if not script["scenes"]:
         script["timing"] = None
         return script
     script["timing"], _scenes = timing.episode_pass(script, ec.template, ec.language, style_lock=ec.style_lock,
-                                                    storyboard=storyboard)
+                                                    storyboard=storyboard,
+                                                    whole_frames=timing.board_whole_frames(storyboard))
     return script
 
 

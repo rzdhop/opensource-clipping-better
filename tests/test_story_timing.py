@@ -323,7 +323,7 @@ def test_scene_timing_over_hi_stays_over_once_the_tail_hits_the_floor():
     scene = _scene("s02", "setup", lines=lines)
     raw = 0.35 + 9.0 + 0.6  # = 9.95
     max_shrink = 0.6 - TEMPLATE["pauses_s"]["tail_floor"]  # 0.3
-    result = timing.scene_timing(scene, TEMPLATE, EN)
+    result = timing.scene_timing(scene, TEMPLATE, EN, whole_frames=False)
     assert result["state"] == "over"
     assert result["tail_s"] == TEMPLATE["pauses_s"]["tail_floor"]
     assert result["duration_s"] == round(raw - max_shrink, 3)
@@ -334,7 +334,7 @@ def test_scene_timing_tail_floor_argument_raises_the_effective_floor():
     lines = [_timed_line("l01", "A longer line that fills the scene.", 7.6)]
     scene = _scene("s02", "setup", lines=lines)
     raw = 0.35 + 7.6 + 0.6
-    result = timing.scene_timing(scene, TEMPLATE, EN, tail_floor=0.5)
+    result = timing.scene_timing(scene, TEMPLATE, EN, tail_floor=0.5, whole_frames=False)
     # only 0.1 s of shrink room now (0.6 - 0.5), not the template's 0.3
     assert result["tail_s"] == 0.5
     assert result["duration_s"] == round(raw - 0.1, 3)
@@ -588,7 +588,7 @@ def test_episode_timing_ok_case():
 def test_episode_timing_tightened_case():
     scenes = _ok_scenes(n_body=10)
     script = _episode_script(scenes, cut_to_black=False)
-    result = timing.episode_timing(script, TEMPLATE, EN)
+    result = timing.episode_timing(script, TEMPLATE, EN, whole_frames=False)
 
     assert result["state"] == "tightened"
     assert result["flags"] == []
