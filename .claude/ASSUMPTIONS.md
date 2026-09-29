@@ -179,8 +179,6 @@
 - **A-054** — K1 follows a design reference's colours and accessories but bends a reference that conflicts
   with the style (a human-looking girl for a fruit_drama character) toward the style. Seen once. UNCONFIRMED.
 
-- **A-056** — English speech runs at 0.065 s/char. Authored, never measured — no episode has been written in
-  English; every phase-3 fixture and live walk is French. UNCONFIRMED.
 - **A-057** — An E-prompt's JSON validity holds up across the free providers. Bench (stage 12, seeded copy, 3
   reps): `gemini/gemini-3.5-flash-lite` E1 0/3 @ 19 s ("expected 8–12", 7 scenes), E2 3/3 @ 8.3 s, T1 3/3 @ 1.5 s;
   `nvidia/nemotron-3.5-lightning` E1 0/3 (6 scenes + `InternalServerError`), E2 3/3 @ 6.4 s, T1 0/3
@@ -226,8 +224,18 @@
 - **A-068** — The 15 `assets/bgm/` tracks (Clips mode, Pixabay-style names, no licence record in the repo) may be
   mapped into `bgm_index.json` for AI Story; their licence is recorded as "shipped with Clips, source unrecorded".
   *Human's choice at phase-4 CLARIFY (2026-09-28): "Self-made SFX + existing BGM".* UNCONFIRMED as a licence fact.
+- **A-079** — A 48.8 s English episode (under the 55–80 s window) is acceptable for phase 4's Tier-2 watch. The
+  fast track refused the 48.7 s script (DEC-162, correct); I approved it myself, as its stop message offers and as
+  the French walk's approve-anyway was, rather than write lines into it; the render warns "outside 55-75 s". The
+  shortfall is E2 writing at the low end of its word range with a two-character cast (T2-F10), not the speech
+  rate (A-056 confirmed). Taken while the human was away, 2026-09-29. UNCONFIRMED until the human's phone watch.
 
 ## Confirmed
+- **A-056** — English speech runs at 0.065 s/char. *Confirmed at phase 4's Tier-2 (2026-09-29)*: the first
+  English episode (Midnight Fridge ep 1) measured 14 lines, 586 characters, 38.04 s of speech from Edge's word
+  timings (en-US-GuyNeural and en-US-JennyNeural) = 0.0649 s/char (per line median 0.0662, range 0.0528–0.0854).
+  Two voice samples read 0.0688 s/char, but a sample's mp3 carries padding the line measure excludes. The same
+  script-level measure on the French ep 1 gives 0.0687 s/char over 18 lines (A-055 stands).
 - **A-055** — French speech runs at 0.070 s/char. *Confirmed*: three Edge samples at stage 0 (172 chars in 12.03 s
   average across three voices), corroborated live in stage 13's measurement walk — 15 real lines measured
   39.704 s of audio against 39.48 s the estimate had predicted, a +0.6 % error.

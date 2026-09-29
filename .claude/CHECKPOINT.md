@@ -3,19 +3,18 @@
 - **Current phase:** 4 CHECKPOINT → 5 IMPLEMENT. **Plan approved** by the human ("Yes go go", 2026-09-28), read as
   also answering Q5 = yes: `feat/ai-story-phase-4` is pushed once at stage 7 so CI records the x86_64 framemd5 key.
   Plan: `~/.claude/plans/ai-story-phase-4-assets-render.md` (stages 0–17, riskiest = stage 6, sequence + audio graph).
-- **RESUME HERE (session paused 2026-09-29 ~02:00 UTC at the human's request, 0 jobs running):** stage 16, Tier-2
-  step 13. Code: `main` == `feat/ai-story-phase-4` code at **`207f8c7`**, deployed (backend restarted at 0 jobs after
-  each fix); artifacts committed on the branch and ff-merged to `main` (see the log's last line). `origin/main` is
-  still `fb5bbf7` (NOT pushed); `origin/feat/ai-story-phase-4` is `4f48515` (the one Q5 push). Tier-1 at `207f8c7`:
-  local **5638 passed / 1 skipped**, CI env **4931 / 677**, compileall clean.
-  **EN story `0a9572a6a8be`** ("Midnight Fridge", en, family_3d) created via the API and its library concept chosen
-  (`concept_chosen`); next: bible → approve → style (approve; preview images optional) → cast of **2** characters
-  (switch to prompt-only as DEC-117; press Continue about once a minute per image — pollinations admits ~1/min and
-  the phase-2 image steps have no pacing) → voices (Edge EN) → places: **1** place, no props → season → `ready` →
-  **Fast track ep 1 from the dashboard at 375 px** (storyboard t1) → measure. Then steps 14 (table), 15
-  (resilience), 16 (the human watches both episodes on the phone and acknowledges), then stage 17 (docs + decisions).
-  The old FR ep01 (pre-phase-4) is kept at `/home/ubuntu/backups/ai-story-phase4/` (tar sha256 0da2a73e…d015 + the
-  folder). The FR `style_preview` job d95e7a469714 still awaits the human.
+- **RESUME HERE (2026-09-29 ~08:40 UTC, 0 jobs running):** stage 16, Tier-2 **step 16 — waiting for the human's
+  phone watch of both episodes and their acknowledgement**; steps 13 (EN fast track), 14 (table below) and 15
+  (resilience) are DONE. Code: `main` == `feat/ai-story-phase-4` at **`7083c39`** (+ this checkpoint commit),
+  deployed (restarted at 0 jobs after each fix). This session's fixes: T2-F9 `2fbd9f0` (E1 on a story with no
+  props), T2-F12 `7083c39` (a cancelled render stops within 2 s). `origin/main` still `fb5bbf7` (NOT pushed);
+  `origin/feat/ai-story-phase-4` `4f48515`. Tier-1 at `7083c39`: local **5643 passed / 1 skipped**, CI env
+  **4936 / 677**, compileall clean. Episodes to watch: FR `/story/b1104ec66b05/episodes/1` (58.2 s, word_pop) and
+  EN `/story/0a9572a6a8be/episodes/1` (48.8 s, no subtitles — under the window, A-079 UNCONFIRMED). On the human's
+  ack: stage 17 (docs + decisions; the list in the session brief + DEC for T2-F9/T2-F12, A-079 settled). Findings
+  kept as follow-ups this session: T2-F8, T2-F10, T2-F11 (see the list below). The old FR ep01 (pre-phase-4) is
+  kept at `/home/ubuntu/backups/ai-story-phase4/` (tar sha256 0da2a73e…d015 + the folder). The FR `style_preview`
+  job d95e7a469714 still awaits the human.
 - **Stage 16 log:** `main` first ff-merged to `bc4dfb8` 2026-09-28 ~22:35 UTC at 0 jobs, backend rebuilt
   (`rm -sfv` + `up -d --build`); fixes T2-F1 `d9a2e92`, T2-F4 `2d26371`, T2-F5 `d360b66`, T2-F6/F7 `207f8c7` each
   ff-merged + `docker compose restart backend` at 0 jobs. Live artifacts: this worktree's `.claude/`.
@@ -138,7 +137,33 @@
   1 (inline; runner.py scoped): `CANCEL_GRACE_S = 1.0` for a cancel only (timeouts keep 3.0; both pins unedited);
   fail-first (killed 3.0 s after the cancel on HEAD); Tier-1 local **5643/1**, CI **4936/677**. Next: commit →
   ff-merge → restart → repeat the live cancel (expect ≤ 2 s) → re-render EN subtitles none (restores the
-  pack's render sha if the output is byte-identical, else regenerate metadata). Step 15 done early: RC-P1 `/clips/job/b37b36a9b34e` 7 clips, a clip 200
+  pack's render sha if the output is byte-identical, else regenerate metadata).
+  → committed **`7083c39`**, `main` ff-merged, restart 08:33:00 at 0 jobs. **Live cancel repeated: 1.43 s** from
+  'Cancel requested' (08:33:22.282) to '⏹ … cancelled during F' (08:33:23.709), partial mkv 2.6 MB kept, previous
+  mp4 untouched → **step 15 cancel PASS**. EN restored: render e61411b5d8c5 subtitles none, 7 ran / 21 cached, 84 s,
+  output **byte-identical** (sha 4fe85df1…) → metadata pack current again. EN Preview/Script/Storyboard: no overflow
+  at 375/820/1280; video readyState 4, 48.8 s, 1080×1920. Cosmetic: "Write remaining metadata · 0 LLM calls" shows
+  on a complete pack. **Step 15 DONE.**
+
+### Tier-2 measurement table (step 14; both on container ffmpeg 7.1.5 aarch64, final profile, libx264)
+| | FR ep01 (b1104ec66b05, fruit_drama) | EN ep01 (0a9572a6a8be, family_3d) |
+|---|---|---|
+| Route | manual walk steps 3–11 | Fast track (8 presses; see T2-F9/F10/F11) |
+| Length | 58.2 s (55–75 ✓) | **48.8 s (under 55–75; render warns; T2-F10)** |
+| Size / video / audio | 12.31 MB · h264 1080×1920 30/1 · aac 48 kHz 2 ch | 9.68 MB · h264 1080×1920 30/1 · aac 48 kHz 2 ch |
+| ebur128 I / TP / LRA | −14.2 / −2.3 / 4.9 (manifest −14.2 / −2.3 / 5.0) | −14.1 / −2.1 / 2.7 (manifest −14.16 / −2.06 / 2.6) |
+| Ducking (adjacent line/gap pairs) | median 11.6 dB, 9 pairs (≥ 6 ✓; 2 pairs < 6 dB) | median 10.2 dB, 16 pairs (≥ 6 ✓; min 2.3) |
+| Subtitles / ending | word_pop (two_line tried) · hard_stop | none · cut_to_black + PART 2 + title |
+| Full render | 160 s (80af58a4c007, 21 shots, pre-T2-F4) | 161 s (f91f204b484d, 20 shots, 28 stages) |
+| Per shot at 4× | mean 3.76 s, median 3.80, max 6.5 | mean 3.62 s, median 3.05, max 9.4 |
+| Final pass F / mux M | 61.5 s / 11.4 s | 69.8 s / 10.1 s |
+| Cached re-render | 96 s (1 shot new), 90 s / 89 s (subtitles) | 84 s (subtitles), byte-identical output |
+| Ledger | 55 rows, all `ep`, $0.00, 0 paid (15 voice_measure + 40 assets) | 34 rows, all `ep`, $0.00, 0 paid (assets) |
+| Speech rate | 0.0687 s/char over 18 lines (A-055 0.070) | **0.0649 s/char over 14 lines (A-056 0.065 ✓)** |
+| Metadata | FR + title_en/hashtags_en, PARTIE 2 → | EN, PART 2 →, no EN duplicates |
+After: 0 jobs running (only FR style_preview d95e7a469714 awaits the human, pre-existing); `usage.json` free counters
+only (edge 16, pollinations 82 today; sha d3257c79…); no `spend.json`; both stories `ready`, cost $0.00.
+**Next: step 16 — ask the human to watch both episodes on the phone and acknowledge; then stage 17.** Step 15 done early: RC-P1 `/clips/job/b37b36a9b34e` 7 clips, a clip 200
   (22.5 MB) and range 206, the SPA route 200 and 7 `<video>` at 375; no overflow at 375/820/1280 on /story, both
   story pages, FR ep 1 Script/Storyboard/Preview, the clip job and /settings (EN Preview re-checked once rendered).
 - **Tier-2 findings kept as follow-ups (not fixed):** T2-F2 pollinations flux draws human faces for fruit-head
@@ -149,7 +174,13 @@
   anyway used); E-prompt echo duplicates (l04 = l08 text); the script pane's flag links render as default blue
   links; CI full green only confirmed at the next push (Node 20 deprecation notice on checkout@v4/setup-python@v5);
   `test_clip_serving.py`'s spa fixture leaks a '/' mount; a line regenerate's take is not persisted; a T1 re-plan
-  drops shot locks/notes; T2-F8 K1's own-name check is a substring match (a character named "Egg" cannot pass).
+  drops shot locks/notes; T2-F8 K1's own-name check is a substring match (a character named "Egg" cannot pass);
+  T2-F10 E2 lands at the low end of its word range (EN ep 1: 48.7 s est. with 2 characters and 5 one-line
+  single-speaker scenes; a regenerate note cannot lengthen past the budget); T2-F11 a single pollinations HTTP 500
+  in a paced round (its retry then 402s) gives the provider up and fails the rest (2 of 2 continues); T1 still
+  under-shoots one-line scenes (s02/s09 refused 5 times on EN); the fast-track confirm said "0 lines / 1231 chars"
+  before a script existed; "Write remaining metadata · 0 LLM calls" shows on a complete pack; after a fast-track stop
+  the episode page's first screen at 375 px showed no stop reason (it is in the job's feed) — check before fixing.
 - **Tier-1 baseline (86e7f4d):** local **4486 passed / 1 skipped** (210 s); CI env (`/tmp/cilibs`) **3901 passed /
   555 skipped** (155 s); compileall clean (`PYTHONPYCACHEPREFIX` in scratch); vite build green to a scratch outDir.
   ffmpeg: host `6.1.1-3ubuntu5`, container `7.1.5-0+deb13u1`. Health: 0 jobs.
@@ -309,7 +340,7 @@
 - **Defaults taken (A-065…A-067, UNCONFIRMED):** Montserrat Black for both styles; TP −1 passed explicitly by the
   renderer; 4× upscale.
 - **Open questions:** none.
-- **Next free ids:** DEC-151, A-069 (then A-071; A-070 is taken).
+- **Next free ids:** DEC-151, A-069 (then A-071…A-078 per the plan's §6; A-070 and A-079 are taken; next A-080).
 
 ### Stage ledger (phase 4)
 | S | Stage | State |
