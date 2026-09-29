@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 
 from clipping import __version__
 
-from .auth import announce, require_token
+from .auth import CrossSiteWriteGuard, announce, open_public_exposure, require_token
 from .routes import jobs, files, settings, hardware, stories
 
 
@@ -26,6 +26,13 @@ from .routes import jobs, files, settings, hardware, stories
 async def lifespan(app: FastAPI):
     """Application startup/shutdown lifecycle."""
     print(f"🚀 rzdhop AI v{__version__} — backend starting...")
+
+    # Auth is opt-in (DEC-173), so a server on a public domain with no token
+    # would be open to the internet. Refuse to start rather than run that way.
+    exposure = open_public_exposure()
+    if exposure:
+        print(f"⛔ {exposure}")
+        raise RuntimeError(exposure)
 
     # A job whose worker thread died with the previous process is stuck in a
     # non-terminal status forever: nothing re-queues it and nothing fails it, so
@@ -96,6 +103,10 @@ if _ALLOWED:
         allow_headers=["*"],
     )
 
+# With no API_TOKEN the API is open (DEC-173); this keeps other websites open in
+# the same browser from writing to it. Inactive when a token is set.
+app.add_middleware(CrossSiteWriteGuard, allowed_origins=_ALLOWED)
+
 # Routes
 app.include_router(jobs.router)
 app.include_router(files.router)
@@ -121,8 +132,9 @@ import asyncio
 async def shutdown_server():
     """Trigger graceful shutdown of the FastAPI server.
 
-    Behind the token like everything else. This was an unauthenticated kill
-    switch on a port bound to 0.0.0.0.
+    Behind the token like everything else when one is set. This was an
+    unauthenticated kill switch on a port bound to 0.0.0.0; with no token the
+    cross-site guard keeps other websites off it.
     """
     # Send SIGINT to own process to trigger uvicorn graceful shutdown
     async def _shutdown():

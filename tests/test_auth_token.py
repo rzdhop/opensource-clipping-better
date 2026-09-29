@@ -12,7 +12,6 @@ import ast
 import os
 import pathlib
 import re
-import stat
 import time
 from types import SimpleNamespace
 
@@ -82,52 +81,29 @@ def test_bearer_wins_over_x_api_key():
     ) == "from-bearer"
 
 
-# ------------------------------------------------------------ token storage
+# ------------------------------------------------------------- token source
+#
+# DEC-173 made auth opt-in: API_TOKEN is the only source, and data/api_token is
+# neither generated, read nor written. The tests that stood here pinned the old
+# default (a token generated on first start, stored 0600, reused, unique); the
+# rule that replaced them is covered in full by tests/test_auth_opt_in.py.
 
-def test_an_env_token_wins(tmp_path):
-    path = str(tmp_path / "api_token")
-    assert auth.load_or_create_token(path, env={"API_TOKEN": "pinned"}) == "pinned"
-    assert not os.path.exists(path), "an env token must not be written to disk"
+def test_an_env_token_wins(tmp_path, monkeypatch):
+    monkeypatch.setattr(auth, "TOKEN_PATH", str(tmp_path / "api_token"))
+    assert auth.configured_token({"API_TOKEN": "pinned"}) == "pinned"
+    assert not os.path.exists(auth.TOKEN_PATH), "an env token must not be written to disk"
 
 
-def test_a_stored_token_is_reused(tmp_path):
+def test_a_stored_token_is_no_longer_read_or_created(tmp_path, monkeypatch):
     path = tmp_path / "api_token"
     path.write_text("stored-token", encoding="utf-8")
-    assert auth.load_or_create_token(str(path), env={}) == "stored-token"
-
-
-def test_a_token_is_generated_and_persisted_on_first_start(tmp_path):
-    """Generating rather than refusing to start is deliberate: a server that
-    will not boot without a hand-written token is one people work around by
-    disabling auth."""
-    path = str(tmp_path / "api_token")
-    first = auth.load_or_create_token(path, env={})
-    assert len(first) >= 32
-    assert auth.load_or_create_token(path, env={}) == first
-
-
-def test_the_token_file_is_not_readable_by_anyone_else(tmp_path):
-    path = str(tmp_path / "api_token")
-    auth.load_or_create_token(path, env={})
-    assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
-
-
-def test_an_unwritable_location_still_yields_a_usable_token(tmp_path):
-    """Better a token that changes on restart than a server that will not run."""
-    blocked = tmp_path / "blocked"
-    blocked.mkdir()
-    blocked.chmod(0o500)
-    try:
-        token = auth.load_or_create_token(str(blocked / "api_token"), env={})
-        assert token
-    finally:
-        blocked.chmod(0o700)
-
-
-def test_generated_tokens_differ(tmp_path):
-    a = auth.load_or_create_token(str(tmp_path / "a"), env={})
-    b = auth.load_or_create_token(str(tmp_path / "b"), env={})
-    assert a != b
+    monkeypatch.setattr(auth, "TOKEN_PATH", str(path))
+    monkeypatch.setattr(auth, "_TOKEN", None)
+    monkeypatch.delenv("API_TOKEN", raising=False)
+    assert auth.current_token() is None
+    path.unlink()
+    assert auth.current_token() is None
+    assert not path.exists()
 
 
 # ------------------------------------------------------------- public paths

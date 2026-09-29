@@ -908,8 +908,11 @@ def test_the_episode_page_after_the_render_and_the_metadata(api, episodes):
         "total": len(stages), "ran": sum(s["state"] == "done" for s in stages),
         "cached": sum(s["state"] == "cached" for s in stages), "shots": sum(s["kind"] == "shot" for s in stages),
         "shots_cached": sum(s["kind"] == "shot" and s["state"] == "cached" for s in stages)}
-    for field, name in (("video_url", "episode_final.mp4"), ("cover_url", "cover.jpg")):  # signed (DEC-163)
-        assert render["media"][field].startswith(f"/api/stories/{story_id}/episodes/1/media/{name}?exp=")
+    # The episode media route, signed only when a token is set (DEC-163, DEC-173). This api runs
+    # with auth off, so the page hands out the plain path; the signed page URLs are pinned with a
+    # token in test_story_media_serving.py.
+    for field, name in (("video_url", "episode_final.mp4"), ("cover_url", "cover.jpg")):
+        assert render["media"][field] == f"/api/stories/{story_id}/episodes/1/media/{name}"
         assert api.client.get(render["media"][field]).content == (_ep_dir(api, story_id) / name).read_bytes()
 
     metadata = page["metadata"]

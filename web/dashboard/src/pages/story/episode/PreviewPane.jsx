@@ -191,6 +191,10 @@ function RenderMedia({ episode, assetsApproved, onChange }) {
     )
   }
 
+  // Signed when the server has a token (?exp=&sig=), the plain path when it has
+  // none (DEC-173): the download flag needs & in the first case and ? in the
+  // second -- a bare &download=1 on a plain path names a file that is not there.
+  const downloadUrl = `${render.media.video_url}${render.media.video_url.includes('?') ? '&' : '?'}download=1`
   const loudness = render.loudness || {}
   const stages = render.stages || {}
 
@@ -227,7 +231,7 @@ function RenderMedia({ episode, assetsApproved, onChange }) {
           {render.warnings.map((warning, i) => <li key={i}>{warning}</li>)}
         </ul>
       )}
-      <a className="btn btn-secondary btn-sm" href={`${render.media.video_url}&download=1`} download>
+      <a className="btn btn-secondary btn-sm" href={downloadUrl} download>
         ⬇ Download video
       </a>
     </div>

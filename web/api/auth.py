@@ -1,15 +1,16 @@
-"""A bearer token on every API route.
+"""An opt-in bearer token on every API route (DEC-037, made opt-in by DEC-173).
 
-Until now there was no authentication of any kind, and the backend bound
-0.0.0.0:8000 on a machine with a public IP. Anyone who found it could read every
-job, upload a 2 GB file, read back which API keys were configured, or call
-`POST /api/shutdown` — which was, until this module, an unauthenticated kill
-switch.
+Auth is ON exactly when ``API_TOKEN`` is set. With nothing set the API is open:
+this app runs on localhost or a private tailnet, and asking for a token there
+was friction with no one to keep out. The two paths that do reach the public
+internet stay guarded -- a public ``DOMAIN`` (the Caddy profile) refuses to
+start without a token, and the Kaggle notebook sets its own -- and in open mode
+a browser's cross-site write is refused, which blocks another website, never
+the user.
 
-The token is checked with `hmac.compare_digest`, generated on first start if
-absent, and stored 0600 next to the settings. `/api/health` stays open so a
-container healthcheck and a reverse proxy can use it without a credential; it
-reports only booleans and counts.
+When auth is on, the token is checked with `hmac.compare_digest` on every
+router, `/api/health` stays open (it reports only booleans and counts), and
+media the browser fetches by itself carries a signed, expiring URL.
 
 Stdlib plus FastAPI. The FastAPI import is deferred into the dependency so the
 pure functions stay testable in the pytest-only CI environment.
@@ -20,7 +21,6 @@ from __future__ import annotations
 import hashlib
 import hmac
 import os
-import secrets
 import time
 from urllib.parse import quote
 
@@ -42,6 +42,9 @@ except ImportError:  # pragma: no cover - CI installs pytest and nothing else
 DATA_DIR = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "data")
 )
+# Where the token USED to be generated and stored. It is no longer read or
+# written (DEC-173); the startup banner names a leftover file so an install that
+# relied on it knows to move its value into API_TOKEN.
 TOKEN_PATH = os.path.join(DATA_DIR, "api_token")
 
 # Paths reachable without a token. Deliberately tiny: everything here must be
@@ -51,41 +54,14 @@ PUBLIC_PATHS = frozenset({"/api/health"})
 BEARER_PREFIX = "bearer "
 
 
-def load_or_create_token(path=None, *, env=None):
-    """The API token: ``$API_TOKEN``, else the stored one, else a new one.
+def configured_token(env=None):
+    """The API token from ``$API_TOKEN``, or None when it is unset or blank.
 
-    Generating rather than refusing to start is deliberate. A server that will
-    not boot without a hand-written token is a server people work around by
-    disabling auth; one that prints a token on first run is one they use.
+    The only source. A generated, stored token (the old default) made every
+    fresh start ask for a credential on machines nobody else can reach.
     """
     env = os.environ if env is None else env
-    from_env = (env.get("API_TOKEN") or "").strip()
-    if from_env:
-        return from_env
-
-    path = path or TOKEN_PATH
-    try:
-        with open(path, "r", encoding="utf-8") as handle:
-            existing = handle.read().strip()
-        if existing:
-            return existing
-    except OSError:
-        pass
-
-    token = secrets.token_urlsafe(32)
-    try:
-        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        # Create 0600 from the outset rather than chmod-ing afterwards, so the
-        # token is never briefly world-readable.
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(token)
-    except OSError as exc:
-        print(
-            f"⚠️ Could not save the API token to {path}: {exc}. "
-            f"It will change on the next restart — set API_TOKEN to pin it."
-        )
-    return token
+    return (env.get("API_TOKEN") or "").strip() or None
 
 
 def token_from_request(headers):
@@ -121,31 +97,77 @@ def is_public(path):
 
 
 def auth_disabled(env=None):
-    """Escape hatch, off unless explicitly set. Never set in compose."""
+    """Force auth off even with a token set. Never set in compose.
+
+    Kept for the machines and tests that already set it; with auth opt-in it
+    only matters when API_TOKEN is set too.
+    """
     env = os.environ if env is None else env
     return str(env.get("DISABLE_AUTH", "")).strip().lower() in {"1", "true", "yes"}
 
 
+# A pinned token, for tests that stand in for a configured server. When None,
+# the environment is read on every call -- no cache, so a token set or unset
+# at runtime takes effect at once and nothing stale outlives a test.
 _TOKEN = None
 
 
 def current_token():
-    """The process's token, resolved once."""
-    global _TOKEN
-    if _TOKEN is None:
-        _TOKEN = load_or_create_token()
-    return _TOKEN
+    """The token this server requires, or None when auth is off."""
+    return _TOKEN if _TOKEN is not None else configured_token()
+
+
+def auth_enabled(env=None):
+    """Whether requests need a token: one is configured and DISABLE_AUTH is not set.
+
+    With *env*, decided from that mapping alone; without it, from this process
+    (the environment, or a pinned token).
+    """
+    if auth_disabled(env):
+        return False
+    if env is not None:
+        return configured_token(env) is not None
+    return bool(current_token())
+
+
+def open_public_exposure(env=None):
+    """Why this server must not start, or None.
+
+    ``DOMAIN`` is set only by the Caddy profile, which serves the API on the
+    public internet with a certificate. Open there, anyone could read every job,
+    rewrite the provider keys and spend on them, or shut the server down.
+    """
+    env = os.environ if env is None else env
+    domain = (env.get("DOMAIN") or "").strip()
+    if not domain or auth_enabled(env):
+        return None
+    why = "DISABLE_AUTH is set" if auth_disabled(env) else "API_TOKEN is not set"
+    return (
+        f"DOMAIN={domain} serves this API on the public internet, but {why}. "
+        "Set API_TOKEN (and unset DISABLE_AUTH), or unset DOMAIN to stay private."
+    )
 
 
 def announce(token=None, *, host_hint=None):
-    """Print the token once at startup, with how to reach the app."""
-    token = token or current_token()
+    """Say at startup whether the API asks for a token, and how to reach it.
+
+    The token itself is never printed: it was set by the operator, and a log
+    line is the easiest place for it to leak from.
+    """
     if auth_disabled():
         print("🔓 DISABLE_AUTH is set — the API is UNAUTHENTICATED. Do not "
               "expose this port.")
         return
-    print(f"🔑 API token: {token}")
-    print(f"   Stored in {TOKEN_PATH} (0600). Set API_TOKEN to pin it.")
+    if token or current_token():
+        print("🔑 Token auth is ON (API_TOKEN is set): send it as "
+              "'Authorization: Bearer <token>'.")
+    else:
+        print("🔓 No API_TOKEN — the API is OPEN to anyone who can reach this "
+              "port. Keep it on localhost or a private tailnet; set API_TOKEN "
+              "before exposing it.")
+        if os.path.exists(TOKEN_PATH):
+            print(f"   {TOKEN_PATH} is no longer read: set API_TOKEN to its "
+                  "value to keep token auth.")
     if host_hint:
         print(f"   From any device on your tailnet: {host_hint}")
 
@@ -187,10 +209,22 @@ def media_url_ttl(env=None):
     return ttl if ttl >= MIN_MEDIA_URL_TTL else DEFAULT_MEDIA_URL_TTL
 
 
+def _signing_secret(token=None):
+    """The token to derive a signing key from; never a value anyone could guess.
+
+    With no token, ``str(None)`` or ``""`` would be a public key and every
+    signature forgeable, so this raises instead. Open servers mint plain paths
+    and never get here.
+    """
+    secret = token if token is not None else current_token()
+    if not secret:
+        raise ValueError("no API token to sign with: auth is off")
+    return str(secret).encode("utf-8")
+
+
 def _media_key(token=None):
     """The signing key: HMAC of the API token under a fixed context string."""
-    secret = str(token if token is not None else current_token()).encode("utf-8")
-    return hmac.new(secret, MEDIA_KEY_CONTEXT, hashlib.sha256).digest()
+    return hmac.new(_signing_secret(token), MEDIA_KEY_CONTEXT, hashlib.sha256).digest()
 
 
 def _media_payload(job_id, filename, exp):
@@ -241,10 +275,17 @@ def media_expiry(now=None, ttl=None):
 
 
 def media_url(job_id, filename, *, token=None, now=None, ttl=None):
-    """A signed, expiring URL for one output file, fetchable with no headers."""
+    """A URL for one output file, fetchable with no headers.
+
+    Signed and expiring when auth is on (or a token is passed); the plain path
+    when it is off, because the gate lets it through and there is no secret to
+    sign with.
+    """
+    path = f"/api/outputs/{quote(str(job_id), safe='')}/{quote(str(filename), safe='')}"
+    if token is None and not auth_enabled():
+        return path
     exp = media_expiry(now=now, ttl=ttl)
     sig = sign_media(job_id, filename, exp, token=token)
-    path = f"/api/outputs/{quote(str(job_id), safe='')}/{quote(str(filename), safe='')}"
     return f"{path}?exp={exp}&sig={sig}"
 
 
@@ -255,6 +296,8 @@ def media_signature_is_valid(job_id, filename, exp, sig, *, token=None, now=None
     not an exception that some caller might catch into a default of True.
     """
     if not job_id or not filename or not sig:
+        return False
+    if not (token or current_token()):
         return False
     try:
         exp_int = int(str(exp).strip())
@@ -352,8 +395,7 @@ STORY_MEDIA_ROUTE = "/api/stories/{story_id}/episodes/{ep}/media/{name}"
 
 def _story_media_key(token=None):
     """The story signing key: HMAC of the API token under its own context."""
-    secret = str(token if token is not None else current_token()).encode("utf-8")
-    return hmac.new(secret, STORY_MEDIA_KEY_CONTEXT, hashlib.sha256).digest()
+    return hmac.new(_signing_secret(token), STORY_MEDIA_KEY_CONTEXT, hashlib.sha256).digest()
 
 
 def _story_media_payload(story_id, ep, name, exp):
@@ -381,10 +423,14 @@ def story_media_path(story_id, ep, name):
 
 
 def story_media_url(story_id, ep, name, *, token=None, now=None, ttl=None):
-    """A signed, expiring URL for one episode file, fetchable with no headers."""
+    """A URL for one episode file, fetchable with no headers: signed when auth
+    is on (or a token is passed), the plain path when it is off."""
+    path = story_media_path(story_id, ep, name)
+    if token is None and not auth_enabled():
+        return path
     exp = media_expiry(now=now, ttl=ttl)
     sig = sign_story_media(story_id, ep, name, exp, token=token)
-    return f"{story_media_path(story_id, ep, name)}?exp={exp}&sig={sig}"
+    return f"{path}?exp={exp}&sig={sig}"
 
 
 def story_media_signature_is_valid(story_id, ep, name, exp, sig, *, token=None, now=None):
@@ -437,12 +483,16 @@ def signed_story_media_request_is_valid(request):
 async def require_token(request: "Request"):
     """FastAPI dependency: 401 unless a valid token or media signature is given.
 
+    Only when auth is on (DEC-173): with no API_TOKEN every request passes, and
+    the check returns before the token comparison -- whose "empty never matches"
+    rule would otherwise turn an open server into one that refuses everyone.
+
     The header is checked first; the signature is only consulted when no valid
     token was presented, so nothing about the authenticated path changes.
     """
     from fastapi import HTTPException
 
-    if auth_disabled() or is_public(request.url.path):
+    if not auth_enabled() or is_public(request.url.path):
         return
 
     presented = token_from_request(request.headers)
@@ -463,3 +513,65 @@ async def require_token(request: "Request"):
         detail="Missing or invalid API token.",
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+
+# ---------------------------------------------------------------------------
+# Cross-site writes, refused while the API is open (DEC-173)
+#
+# With no token, the only thing between a website open in the same browser and
+# POST /api/shutdown, an upload or PUT /api/settings was nothing: a form POST
+# or a no-cors fetch is a "simple" request the browser sends without asking.
+# Browsers label every request with Sec-Fetch-Site, so a write marked
+# "cross-site" is refused. The dashboard is same-origin and curl or a script
+# sends no such header, so neither is ever caught; the Vite dev server on
+# another localhost port is "same-site", not cross-site. With a token the guard
+# steps aside -- a cross-site request cannot carry the Authorization header, so
+# the gate already refuses it.
+# ---------------------------------------------------------------------------
+
+SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+def is_cross_site_write(method, headers):
+    """Whether a browser sent a state-changing request from another site."""
+    if str(method or "").upper() in SAFE_METHODS:
+        return False
+    get = headers.get if hasattr(headers, "get") else lambda k, d=None: None
+    return str(get("sec-fetch-site") or "").strip().lower() == "cross-site"
+
+
+class CrossSiteWriteGuard:
+    """Pure ASGI middleware: 403 for a cross-site write while auth is off.
+
+    Plain ASGI rather than BaseHTTPMiddleware, so a request it lets through --
+    a video's range read, the job stream -- reaches the app untouched and
+    unbuffered. Origins named in ALLOWED_ORIGINS are trusted and may write.
+    """
+
+    def __init__(self, app, allowed_origins=()):
+        self.app = app
+        self.allowed_origins = frozenset(o.rstrip("/") for o in allowed_origins if o)
+
+    def refuses(self, method, headers):
+        if auth_enabled() or not is_cross_site_write(method, headers):
+            return False
+        origin = str(headers.get("origin") or "").rstrip("/")
+        return origin not in self.allowed_origins
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") == "http":
+            headers = {
+                key.decode("latin-1").lower(): value.decode("latin-1")
+                for key, value in scope.get("headers") or []
+            }
+            if self.refuses(scope.get("method"), headers):
+                from starlette.responses import JSONResponse
+
+                response = JSONResponse(
+                    {"detail": "Cross-site write refused: this API has no token, "
+                               "so only its own pages may change anything."},
+                    status_code=403,
+                )
+                await response(scope, receive, send)
+                return
+        await self.app(scope, receive, send)

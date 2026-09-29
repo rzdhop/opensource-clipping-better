@@ -747,8 +747,12 @@ def test_video_uses_the_signed_media_url_directly_and_is_keyed_on_the_output_sha
 
 
 def test_download_link_appends_download_flag_to_the_signed_url():
+    # Signed URLs carry ?exp=&sig=; with no token the page hands out the plain
+    # path (DEC-173), so the flag's separator follows the URL, as in JobDetail.
     src = PREVIEW_PANE.read_text(encoding="utf-8")
-    assert "href={`${render.media.video_url}&download=1`}" in src
+    assert "render.media.video_url.includes('?') ? '&' : '?'}download=1" in src
+    assert "href={downloadUrl}" in src
+    assert "&download=1`}" not in src
     assert " download>" in src or " download\n" in src
 
 

@@ -295,9 +295,13 @@ def test_the_reserved_chain_test_directory_is_served_by_the_signed_outputs_route
 
     (outputs / "_chain_test").mkdir()
     (outputs / "_chain_test" / "sample.png").write_bytes(PNG)
+    # Signed URLs exist only when auth is on, and auth is opt-in (DEC-173):
+    # this server needs a token of its own to be "strict".
+    monkeypatch.setenv("API_TOKEN", "chain-test-token")
+    monkeypatch.setattr(auth, "_TOKEN", None)
     with make_client(monkeypatch, disable_auth=False) as strict:
-        # Signed with whatever token this server holds (it may be cached from
-        # an earlier test), exactly as the settings route signs its samples.
+        # Signed with the token this server holds, exactly as the settings
+        # route signs its samples.
         url = auth.media_url("_chain_test", "sample.png", token=auth.current_token())
         assert strict.get(url).status_code == 200
         assert strict.get("/api/outputs/_chain_test/sample.png").status_code == 401

@@ -15,10 +15,31 @@
   scratch `baseline_local_failed.txt` (124 ids). Rule for this task: **no new failure on Windows**, and the auth
   test files run green on **Linux** (a throwaway container from the local backend image) — the VPS reference is
   local 5643/1, CI 4936/677.
-- **Next action:** apply stage 1 (drafts in scratch `stage1/`), prove the new tests fail on `b60938e`, run the
-  auth files on Linux + the full Windows suite, commit.
-- **Open questions:** none. VPS access from this machine (SSH host key not in `known_hosts`) is needed at stage 3
-  (deploy) — ask the human then.
+- **Stage 1 state (uncommitted on `fix/auth-opt-in`):** `web/api/auth.py` (opt-in rule, no-key signing refused,
+  plain media paths when open, banner, `open_public_exposure`, `CrossSiteWriteGuard`), `web/api/app.py` (start
+  refusal + guard), new `tests/test_auth_opt_in.py` (**fail-first: 42 failed / 5 passed on `b60938e`**, 47 pass
+  now). Pinned tests changed on purpose: `test_auth_token.py` token-storage section (generator gone), 
+  `test_generation_chain_api.py` signed-URL test (sets its own token), `test_stories_api_phase4.py:912` (page
+  URL is the plain path when open). **Finding fixed in-stage:** `PreviewPane.jsx` appended `&download=1` to
+  a URL that is now a plain path when open (→ 404) — separator now follows the URL, as `JobDetail.jsx` does;
+  `test_story_payload_contract_episode.py`'s download pin updated. Targeted Windows runs: only baseline
+  failures; compileall clean; vite build green (scratch outDir).
+- **HANDOFF → the Ubuntu VPS (2026-09-29, the human: "you are running on the wrong machine").** Work moved
+  off the Windows workstation, whose C: kept filling up (Docker Desktop's `docker_data.vhdx` is 111 GB, 78.8 GB
+  of it the `nwodtuhs/exegol:nightly` image; the human decides any cleanup there — nothing was pruned). Stage 1's
+  code was committed as **WIP** on `fix/auth-opt-in` and pushed. Windows evidence only: targeted auth files had
+  no failure outside the baseline; the full Windows suite died on ENOSPC at ~9 min (its partial output showed
+  only baseline ids, not a result). **Not verified yet — do this first on the VPS:**
+  1. `git fetch && git switch fix/auth-opt-in` in a worktree (as phases 1–4 did; the container runs main's
+     on-disk code via the bind mount — never switch the main checkout's branch).
+  2. Tier-1 on Linux: `python -m pytest -p no:warnings` (never `-q`) and the CI env (`/tmp/cilibs`);
+     compileall; `npm run build` to a scratch outDir (move a built `web/dashboard/dist/` aside first).
+     Expected: VPS baseline local 5643/1, CI 4936/677 **plus** the new `tests/test_auth_opt_in.py` (47 tests;
+     its app tests skip in the CI env) and minus the 4 removed token-generator tests. Any other change is a
+     finding. `test_story_media_serving.py` (RC-U1/RC-A5) must pass **unedited** — it could not run on Windows.
+  3. If green: a normal commit closing stage 1 (ledger row + log line), then stage 2 per the plan.
+- **Next action:** the three steps above, on the VPS.
+- **Open questions:** none blocking. The Windows disk/Docker cleanup is the human's, outside this task.
 
 ### Regression contract (auth task)
 | ID | Must keep working | Proven by |
@@ -33,7 +54,7 @@
 | S | Stage | State |
 |---|---|---|
 | 0 | checkpoint + baseline | **done** (this commit) |
-| 1 | opt-in auth in the backend (**RISKIEST**) [Opus] | in progress |
+| 1 | opt-in auth in the backend (**RISKIEST**) [Opus] | **code committed as WIP** (fail-first 42/47 shown); Linux Tier-1 pending on the VPS |
 | 2 | exposure paths, notebook, docs [Sonnet] | — |
 | 3 | deploy + Tier-2 on the VPS | — |
 | 4 | decisions + artifacts | — |
