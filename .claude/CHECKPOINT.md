@@ -5,8 +5,9 @@
   A-067, A-075, A-079 recorded as accepted at that go-ahead).
 - **Code:** `main` == `feat/ai-story-phase-4` at the close-out commit (the one carrying this line), deployed (bind
   mount; the last backend restart 08:33 UTC carries every code change — stage 17 is docs and artifacts only).
-  Push: the branch first (CI), then `main` fast-forwarded on origin (origin/main was `fb5bbf7`). Tier-1 at close:
-  see the stage-17 ledger row. `git diff --stat 1367d75 -- clipping/studio clipping/story` **empty**;
+  **Pushed 2026-09-29:** `feat/ai-story-phase-4` `4f48515..b68f018`, CI run 36550933190 **green** (compile +
+  test incl. the x86_64 golden render, 09:47 UTC), then `main` `fb5bbf7..b68f018` (fast-forward = the merge);
+  this checkpoint line is one commit later on both. Tier-1 at close: see the stage-17 ledger row. `git diff --stat 1367d75 -- clipping/studio clipping/story` **empty**;
   `tests/test_render_layer_guard.py` green (RC-A1). Dashboard lockfile `npm audit`: 0 vulnerabilities; phase 4
   changed no Python or npm manifest (only `.github/workflows/ci.yml`'s apt ffmpeg pin); `pip-audit` is not
   installed here, so the Python audit stays on VISION's carried dependency pass.
@@ -180,7 +181,7 @@ only (edge 16, pollinations 82 today; sha d3257c79…); no `spend.json`; both st
   per-link call allowance (300 s sized for fal) would buy ~3 more paced rounds; a three-pass linear loudnorm chain;
   listen to the ep01 TTS noise burst (13.19–13.31 s); phase-2 image steps have no pacing; E4 variance (approve
   anyway used); E-prompt echo duplicates (l04 = l08 text); the script pane's flag links render as default blue
-  links; CI full green only confirmed at the next push (Node 20 deprecation notice on checkout@v4/setup-python@v5);
+  links; the Node 20 deprecation notice on checkout@v4/setup-python@v5 (CI itself green on the close-out push);
   `test_clip_serving.py`'s spa fixture leaks a '/' mount; a line regenerate's take is not persisted; a T1 re-plan
   drops shot locks/notes; T2-F8 K1's own-name check is a substring match (a character named "Egg" cannot pass);
   T2-F10 E2 lands at the low end of its word range (EN ep 1: 48.7 s est. with 2 characters and 5 one-line
