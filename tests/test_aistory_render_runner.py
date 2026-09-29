@@ -616,6 +616,43 @@ def test_a_process_that_ignores_terminate_is_killed_after_three_seconds(tmp_path
     assert proc.killed_at < runner.KILL_GRACE_S + runner.POLL_S + 1e-9
 
 
+def test_a_cancel_kills_a_process_that_ignores_terminate_within_two_seconds(tmp_path):
+    """T2-F12 (live, 2026-09-29): ffmpeg answers SIGTERM by flushing its
+    encoder (~3 s on the 1080x1920 final pass), so a cancel waited out the
+    whole kill grace and ended 3.4 s after the request. A cancel's output is
+    thrown away: it waits CANCEL_GRACE_S, and the render ends cancelled
+    within 2 s of the request."""
+    plan = _plan(tmp_path)
+    token = cancel_mod.CancelToken()
+    cancel_at = []
+
+    def on_wait(clock):
+        if clock.t >= 2.0 and not token.cancelled:
+            token.cancel()  # the user presses Cancel while F runs
+            cancel_at.append(clock.t)
+
+    fake = FakeFFmpeg(behave=lambda argv: "stubborn" if argv[-1] == plan_mod.PRE_REL else None, on_wait=on_wait)
+    result = _run(tmp_path, plan, fake, cancel=token)
+    proc = fake.procs[-1]
+    assert result["state"] == "cancelled" and result["failed_stage"] == "F"
+    assert proc.terminated_at - cancel_at[0] <= runner.POLL_S
+    assert proc.killed_at - cancel_at[0] < 2.0
+    assert proc.killed_at - proc.terminated_at >= runner.CANCEL_GRACE_S
+    doc = json.loads((tmp_path / "render_manifest.json").read_text())
+    assert doc["stages"][-1]["state"] == "cancelled" and schemas.render_manifest_errors(doc) == []
+
+
+def test_a_timeout_still_gives_a_stubborn_process_the_full_kill_grace(tmp_path):
+    """Only a cancel is shortened: a hung stage past its timeout is still
+    terminated and killed KILL_GRACE_S later."""
+    plan = _plan(tmp_path)
+    fake = FakeFFmpeg(behave=lambda argv: "stubborn" if argv[-1] == plan["stages"][0]["write"] else None)
+    result = _run(tmp_path, plan, fake, timeouts={"shot": 2.0})
+    proc = fake.procs[0]
+    assert result["state"] == "failed" and result["failed_stage"] == "S:sh01"
+    assert proc.killed_at - proc.terminated_at >= runner.KILL_GRACE_S
+
+
 def test_a_stage_that_outlives_its_timeout_fails(tmp_path):
     plan = _plan(tmp_path)
     fake = FakeFFmpeg(behave=lambda argv: "hang" if argv[-1] == plan["stages"][0]["write"] else None)

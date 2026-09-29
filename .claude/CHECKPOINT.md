@@ -90,9 +90,55 @@
   files scoped by the agent): `_E1_NO_PROPS_LINE` "- props: always [] -- this story has no props" + schema
   description (no `maxItems`: the strict-mode subset, `schemas.py:670-677`) + `script._repair_e1_reply` empties
   every scene's props before validation when the story has none (DEC-144-style; a story WITH props still has an
-  unknown prop refused and retried). Fail-first: 2 new tests fail on HEAD, pass after; 1 pin passes both. Next:
-  Tier-1 both envs → commit → ff-merge → restart (the FR assets job 27294a95911d awaits approval across it: the
-  step-15 restart check) → Continue the fast track. Step 15 done early: RC-P1 `/clips/job/b37b36a9b34e` 7 clips, a clip 200
+  unknown prop refused and retried). Fail-first: 2 new tests fail on HEAD, pass after; 1 pin passes both. Tier-1
+  local **5641/1**, CI env **4934/677**, compileall clean → committed **`2fbd9f0`**, `main` ff-merged, `docker compose
+  restart backend` 07:48:14 at 0 running jobs (container carries the fix). **Step 15 restart check PASS:** FR assets
+  job 27294a95911d (a $0 re-run: 0 images, 0 lines) awaited before and after the restart, same `updated_at`; the
+  FR style_preview d95e7a469714 also still awaits; FR assets re-approved 07:48:24 → the job completed, render still
+  current (sha 53cb3bcc…), metadata current. **Fast track re-pressed at 375 px 07:48:49 → job `efec1d210410`.**
+  T2-F9 fix PROVEN live: E1 first attempt OK, script written 07:48:47→07:49:54 (67 s: E1 + 8 E2, one E2 over-budget
+  retry accepted, E3, E4). The fast track then stopped at its own gate (DEC-162, correct): E4 2 issues (s05 summary
+  and line l28 said 'dairy aisle') and **T2-F10: 48.7 s estimated, under 55–80** — 14 lines / 101 words / 587 chars,
+  every E2 reply inside its word range (9–14 of a 13-word budget), 5 single-speaker scenes with one line each; a
+  scene regenerate with a 'fuller back-and-forth' note gave s05 8 words (E2's range caps near the budget, so a
+  regenerate cannot lengthen much). EN Edge samples measure **0.0688 s/char** (Pickle 52 ch 3.58 s, Brie 65 ch 4.46 s)
+  vs A-056's 0.065. Operator actions (recorded): PATCH s05 summary + l28 'dairy aisle' → 'dairy shelf' (rev 3);
+  Fast track 07:52:47 (b5b17d5515c9): E4 passed, stopped on 'under' only; **script approved by me 07:53:07** (the
+  stop message's "approve it yourself"; like FR's approve-anyway, no length criterion in step 13) → Fast track
+  07:53:20 → job **`9184bffd17dd`** (script 0 calls; storyboard t1 → assets → render → metadata).
+  Storyboard: T1 refused s02 and s09 twice each ('1 shot(s), expected 2-4' — both one-line single-speaker
+  scenes, the known phase-3 T1 under-shoot); Continue a671bbbdee09 planned s02, s09 refused twice more; Continue
+  **b20642641a62** (07:55:30) planned s09 first try → 20 shots / 10 scenes, storyboard auto-approved, paid check
+  "nothing paid" ($0), assets started 07:55:31: 14/14 lines voiced by 07:55:39 (Edge, ~0.5 s each), 20 images
+  paced on pollinations. **A-056 measured:** 14 EN lines, 586 chars, 38.04 s of speech (tts_word_timestamps) =
+  **0.0649 s/char** (median 0.0662, range 0.0528–0.0854; Guy + Jenny) → CONFIRMED at 0.065; the 0.0688 of the two
+  voice samples includes mp3 padding. Same script-level method on FR ep01: 0.0687 s/char over 18 lines.
+  Assets (b20642641a62): 5 images 07:55:43→07:59:46 one a minute (sh01, sh07, sh13, sh19 in the first pass, then
+  sh02 in paced round 1), measured length 48.7 s (under); **T2-F11:** paced round 2 got a pollinations HTTP 500
+  (transient) instead of an image → "still rate-limited after a 60 s pause: 15 shots left as failed" at 08:00:52 —
+  one no-progress round gives the provider up (T2-F1's rule), so a single 5xx ends the pacing; follow-up, not fixed
+  (Continue resumes). Also seen: sh07/sh13/sh19 reuse Pickle's portrait seed 1224875959 (known follow-up).
+  Fast track Continue 08:01:47 (15 images left, render ~3.7 min, metadata 3 calls) → c91b639504e1 made 8 images then
+  T2-F11 again at 08:10:53 (HTTP 500 after 13 s, the retry 402, round gave up; 2 of 2 continues); Continue 08:11:34 →
+  **f91f204b484d COMPLETED 08:20:57**: last 7 images by 08:17:51, assets auto-approved (fingerprint e7d18c484304),
+  render 08:17:51→08:20:32 (**161 s, 28 stages, 0 cached**, 20 shots), metadata 3 M1 calls (25 s), "🏁 Fast track
+  done … (9.4 min; auto-approved: assets)". **EN ep01 measured:** 48.8 s, 9.68 MB, h264 1080×1920 30/1, aac 48 kHz
+  2 ch, ebur128 I −14.1 / TP −2.1 / LRA 2.7 (manifest −14.16/−2.06/2.6), render warning "48.8 s long, outside
+  55-75 s" (T2-F10), ducking median 10.2 dB over 16 adjacent line/gap pairs (min 2.3), bed silent only in its first
+  100 ms, ledger 34 rows all `ep`, $0, 0 paid; subtitles none ✓, cut_to_black + 'PART 2' + 'Midnight Fridge' end
+  card ✓, 'AI-generated' label ✓, mood `warm_family` (dominant tension; a romantic-piano bed under a noir mystery —
+  A-074 taste point for the watch) ✓. Frames: human faces + watermark (T2-F2), near-identical shots (seed reuse).
+  Fast-track wall time 07:32:54→08:20:57 (48 min incl. the T2-F9 fix + restart); summed job time ≈ 26 min over 8
+  presses; any one job ≤ 9.4 min (A-076: 60 min covers it).
+  **Step 15 cancel:** EN render 374ac47f5cc4 (subtitles word_pop; E cached, A, L1 ran) cancelled 10 s into F:
+  API status `cancelled` 0.17 s after the POST, manifest F `cancelled`, partial episode_pre.mkv (621 KB, unfinalised)
+  kept, the previous episode_final.mp4 untouched (4fe85df1…), no ffmpeg left — but the worker's '⏹ … cancelled during
+  F' came **3.38 s** after the request: **T2-F12** — ffmpeg answers SIGTERM by flushing the x264 lookahead (~3 s at
+  15 fps on 1080×1920; its log stops at frame 146, no exit line) and was SIGKILLed at KILL_GRACE_S = 3.0. Fix attempt
+  1 (inline; runner.py scoped): `CANCEL_GRACE_S = 1.0` for a cancel only (timeouts keep 3.0; both pins unedited);
+  fail-first (killed 3.0 s after the cancel on HEAD); Tier-1 local **5643/1**, CI **4936/677**. Next: commit →
+  ff-merge → restart → repeat the live cancel (expect ≤ 2 s) → re-render EN subtitles none (restores the
+  pack's render sha if the output is byte-identical, else regenerate metadata). Step 15 done early: RC-P1 `/clips/job/b37b36a9b34e` 7 clips, a clip 200
   (22.5 MB) and range 206, the SPA route 200 and 7 `<video>` at 375; no overflow at 375/820/1280 on /story, both
   story pages, FR ep 1 Script/Storyboard/Preview, the clip job and /settings (EN Preview re-checked once rendered).
 - **Tier-2 findings kept as follow-ups (not fixed):** T2-F2 pollinations flux draws human faces for fruit-head

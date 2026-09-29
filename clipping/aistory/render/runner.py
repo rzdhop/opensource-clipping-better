@@ -20,7 +20,8 @@ stage 7, "Renderer" -> runner.py; DEC-156).
 the process runs in ``render/`` with stdin closed and stdout/stderr going to
 ``render/logs/``; the runner polls it every :data:`POLL_S` seconds for exit,
 cancel and the stage's timeout. A cancel or a timeout terminates the
-process, and kills it after :data:`KILL_GRACE_S`. Afterwards the entry is
+process, and kills it after :data:`KILL_GRACE_S` (a cancel after
+:data:`CANCEL_GRACE_S`). Afterwards the entry is
 ``done`` (output sha256, seconds), ``failed`` (stderr tail; partial files
 are kept where the process left them) or ``cancelled``. The first stage that
 does not finish ends the render.
@@ -64,6 +65,10 @@ REQUIRED_FILTERS = ("zoompan", "xfade", "sidechaincompress", "loudnorm", "ass")
 
 POLL_S = 0.25
 KILL_GRACE_S = 3.0
+# A cancel throws the stage's output away, so it does not wait out ffmpeg's
+# SIGTERM path -- an encoder flush, ~3 s on the 1080x1920 final pass (T2-F12):
+# the render ends cancelled within POLL_S + CANCEL_GRACE_S of the request.
+CANCEL_GRACE_S = 1.0
 # Per-stage ceilings, generous against the measured times (A-067, A-069):
 # they only catch a hung process.
 STAGE_TIMEOUT_S = {
@@ -268,7 +273,7 @@ def _wait(proc, *, cancel, clock, timeout_s):
         if rc is not None:
             return "exited", rc
         if cancel.cancelled:
-            _stop(proc, clock=clock)
+            _stop(proc, clock=clock, grace_s=CANCEL_GRACE_S)
             return "cancelled", None
         if clock() - started > timeout_s:
             _stop(proc, clock=clock)
@@ -279,13 +284,14 @@ def _wait(proc, *, cancel, clock, timeout_s):
             pass
 
 
-def _stop(proc, *, clock) -> None:
-    """Terminate, then kill after :data:`KILL_GRACE_S`."""
+def _stop(proc, *, clock, grace_s=KILL_GRACE_S) -> None:
+    """Terminate, then kill after *grace_s* (:data:`KILL_GRACE_S`; a cancel
+    passes :data:`CANCEL_GRACE_S`)."""
     try:
         proc.terminate()
     except OSError:
         pass
-    deadline = clock() + KILL_GRACE_S
+    deadline = clock() + grace_s
     while proc.poll() is None and clock() < deadline:
         try:
             proc.wait(timeout=POLL_S)
