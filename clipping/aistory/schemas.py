@@ -11,6 +11,7 @@ keywords (``description``, ``title``, ...) are harmless.
 
 from __future__ import annotations
 
+import copy
 import math
 import re
 import unicodedata
@@ -794,6 +795,17 @@ def _check_text(errors, path, value, *, max_words=None) -> None:
         errors.append(f"{path}: {_words(value)} words, expected at most {max_words}")
 
 
+def _check_chars(errors, path, value, max_chars) -> None:
+    """Same as ``_check_text``, capped in characters rather than words --
+    for fields whose stored counterpart is itself character-capped
+    (``_text``), e.g. N1's proposed character fields (spec 4.2, row N1)."""
+    if not (isinstance(value, str) and value.strip()):
+        errors.append(f"{path}: must be a non-empty string")
+        return
+    if len(value) > max_chars:
+        errors.append(f"{path}: {len(value)} characters, expected at most {max_chars}")
+
+
 def c1_errors(doc, style_ids) -> list:
     """Post-validation for a C1 response, beyond what ``c1_schema`` can express."""
     schema = c1_schema(style_ids)
@@ -1476,6 +1488,20 @@ HOOKS_OPENED_MAX = 3
 MEMORY_KEY_PATTERN = r"^ep(0[1-9]|[1-9][0-9])$"
 # "<char_a>|<char_b>": two character ids, a < b (``series_memory.pair_key``).
 RELATIONSHIP_PAIR_PATTERN = r"^(char_[a-z0-9_]{1,40})\|(char_[a-z0-9_]{1,40})$"
+# Plan 11 stage 2 (S3): a relationship delta's own text had no cap in stage
+# 1 -- ``test_story_episode_prompt_budgets.py`` already sizes E1's budget on
+# ~15-word relationship texts, so that is the number both S3's reply and a
+# stored entry are held to.
+RELATIONSHIP_DELTA_MAX_WORDS = 15
+# How many pairs one S3 reply may report a delta for. Not a stage-1 field
+# (a stored entry may carry as many as its episodes accumulate), but S3's
+# own *reply* needs a stated bound the same way every other array field of
+# this catalogue has one (hooks_opened <= 3, characters <= 5, ...): without
+# one the "largest French reply" a cap is measured against grows with the
+# cast size alone (28 pairs at 8 cast) rather than with what one episode
+# could plausibly shift. Five is the same order of magnitude as
+# HOOKS_OPENED_MAX and realistic for 60 seconds of story.
+RELATIONSHIP_DELTAS_MAX = 5
 
 _MEMORY_ENTRY_SCHEMA = _document({
     "recap": _NON_EMPTY_STRING,
@@ -1535,8 +1561,9 @@ def memory_entry_errors(entry, path="$") -> list:
     ``RECAP_MAX_WORDS`` words), each hook non-blank and listed once, none
     both opened and closed, and each relationship key a pair of two
     different character ids in order (``RELATIONSHIP_PAIR_PATTERN``, a < b)
-    valued with a non-blank text. What needs more than the entry -- the hooks
-    open before it, the story's cast -- is ``series_memory.entry_errors``."""
+    valued with a non-blank text of at most ``RELATIONSHIP_DELTA_MAX_WORDS``
+    words. What needs more than the entry -- the hooks open before it, the
+    story's cast -- is ``series_memory.entry_errors``."""
     errors = validate(entry, _MEMORY_ENTRY_SCHEMA, path)
     if errors:
         return errors
@@ -1557,7 +1584,7 @@ def memory_entry_errors(entry, path="$") -> list:
             errors.append(f"{path}.relationship_deltas: {key!r} is not a pair key "
                           "('<char_a>|<char_b>', two different character ids in order)")
             continue
-        _check_text(errors, f"{path}.relationship_deltas.{key}", text)
+        _check_text(errors, f"{path}.relationship_deltas.{key}", text, max_words=RELATIONSHIP_DELTA_MAX_WORDS)
     return errors
 
 
@@ -3305,3 +3332,374 @@ def u1_errors(doc) -> list:
     errors = []
     _check_text(errors, "$.appearance_notes", doc["appearance_notes"], max_words=U1_MAX_WORDS)
     return errors
+
+
+# ============================================================ LLM output schemas (spec 4.2) -- phase 5
+#
+# S3/F1/N1 (plan 11 stage 2): same strict-mode subset as the phase-2 section
+# above, model schema + ``*_errors`` post-validator co-located here rather
+# than in ``prompts.py`` (unlike the phase-3/4 E1-E4/T1/T1r/M1 builders,
+# these three read straight off this module's own stage-1 constants --
+# ``RECAP_MAX_WORDS``, ``HOOKS_OPENED_MAX``, ``HOOK_MAX_LENGTH``,
+# ``RELATIONSHIP_DELTA_MAX_WORDS``, ``CHARACTER_ROLES``, ``TWIST_HOOKS_MAX``
+# -- so keeping the validator beside them means one file to change when a
+# cap moves, not two kept in sync by hand).
+#
+# A repair function per prompt applies the French-elision fix (DEC-144) to
+# every model-written text field before its ``*_errors`` runs (a merged
+# elision changes a word count, so it must happen first -- the same order
+# ``steps/script.py``'s ``_repair_e*_reply`` uses). The rule lives here, once:
+# this module cannot import ``prompts`` (``prompts`` imports this module), so
+# ``prompts.repair_fr_elisions`` -- the name every step calls -- is this same
+# function.
+#
+# The elidable words this repairs (spec 4.2, F1): le/la, de, je, ce, ne, me,
+# se (one letter once their own vowel is dropped) and que (only its "e"
+# drops, not the "u"). Matched case-insensitively and standalone -- neither
+# lookaround uses ``\w`` loosely: "des" and "quand" never match, only a
+# whole word spelled exactly "d" or "qu" -- followed by whitespace and a
+# word starting with a vowel or "h" (accented vowels included). "y", "a" and
+# "à" are never treated as a vowel-starting word to elide *into* (the
+# human's own choice: "il y a" is a different word, not a dropped
+# apostrophe, and is not worth the false positives).
+_FR_ELIDABLE_RE = re.compile(r"(?<!\w)(qu|[ldjcnms])(?!\w)([ \t]+)(\S+)", re.IGNORECASE)
+_FR_VOWEL_OR_H = set("aeiouAEIOUhH" "àâäæçéèêëîïôöœùûü" "ÀÂÄÆÇÉÈÊËÎÏÔÖŒÙÛÜ")
+_FR_NEVER_ELIDED = {"y", "a", "à"}
+
+
+def _fr_lead_word(token: str) -> str:
+    """The leading run of letters of *token* (stops at the first digit,
+    punctuation mark or apostrophe): what the elision check itself reads,
+    a trailing comma or period never part of the question."""
+    match = re.match(r"[^\W\d_]+", token)
+    return match.group(0) if match else ""
+
+
+def _fr_elision_sub(match) -> str:
+    prefix, word = match.group(1), match.group(3)
+    lead = _fr_lead_word(word)
+    if not lead or lead.lower() in _FR_NEVER_ELIDED or lead[0] not in _FR_VOWEL_OR_H:
+        return match.group(0)
+    return f"{prefix}'{word}"
+
+
+def repair_fr_elisions(text: str) -> str:
+    """Deterministic repair of a French reply's dropped elision apostrophe
+    (spec 4.2, F1; DEC-144): ``"l alliance"`` -> ``"l'alliance"``, ``"d Etat"`` ->
+    ``"d'Etat"``, ``"m échappent"`` -> ``"m'échappent"``. No call, cannot
+    fail (pure text -> text), and never touches *text* that already carries
+    an apostrophe anywhere, straight or curly -- a reply with one correct
+    elision and one dropped one is left exactly as it is, the safer of the
+    two ways for this to be wrong.
+
+    Applied by the steps (never by a builder) to every model-written field
+    they store when the story's language is ``"fr"``; ``prompts`` exposes it
+    as ``prompts.repair_fr_elisions``."""
+    if "'" in text or "’" in text:
+        return text
+    return _FR_ELIDABLE_RE.sub(_fr_elision_sub, text)
+
+
+def _repair_text_field(value):
+    return repair_fr_elisions(value) if isinstance(value, str) else value
+
+
+# ------------------------------------------------------------------------- S3 (series_memory_entry)
+
+def s3_schema(open_hooks, pairs) -> dict:
+    """The S3 output schema (spec 2.6, 4.2, row S3): the series memory entry
+    for an approved episode -- recap, hooks opened and closed, relationship
+    deltas.
+
+    *open_hooks* are the hooks open before this episode
+    (``series_memory.open_hooks_before``), verbatim: ``hooks_closed`` is an
+    enum of exactly those strings, so a hook is only ever closed by its
+    exact text (spec 2.6), never fuzzy-matched -- with none open, the item
+    schema falls back to a bare string (DEC-171's empty-enum precedent: an
+    empty ``enum`` is not valid JSON Schema), and the ask asks for an
+    always-empty list instead.
+
+    *pairs* are every sorted ``"<char_a>|<char_b>"`` combination of the
+    cast. ``relationship_deltas`` cannot be the stored dict shape here: the
+    strict-mode subset this module's LLM schemas share (the note above
+    ``_llm_obj``) has no way to enumerate an *object's keys*, only a
+    string's values -- so it is an array of ``{pair, text}`` with ``pair``
+    the enum, which ``s3_errors``/the memory step turn into the
+    ``memory_entry_v1`` dict.
+    """
+    hooks_closed_item = {"type": "string", "enum": list(open_hooks)} if open_hooks else {"type": "string"}
+    pair_item = {"type": "string", "enum": list(pairs)} if pairs else {"type": "string"}
+    delta = _llm_obj({
+        "pair": pair_item,
+        "text": {"type": "string", "description": f"at most {RELATIONSHIP_DELTA_MAX_WORDS} words"},
+    })
+    return _llm_obj({
+        "recap": {"type": "string", "description": f"at most {RECAP_MAX_WORDS} words"},
+        "hooks_opened": {
+            "type": "array",
+            "description": f"0-{HOOKS_OPENED_MAX} new hooks, each at most {HOOK_MAX_LENGTH} characters",
+            "items": {"type": "string"},
+        },
+        "hooks_closed": {
+            "type": "array",
+            "description": ("which of the open hooks above this episode resolves"
+                            if open_hooks else "always []: there are no open hooks yet"),
+            "items": hooks_closed_item,
+        },
+        "relationship_deltas": {
+            "type": "array",
+            "description": (f"0-{RELATIONSHIP_DELTAS_MAX} updates, one per pair that changed"
+                            if pairs else "always []: fewer than two characters exist yet"),
+            "items": delta,
+        },
+    })
+
+
+def s3_errors(reply, *, open_hooks, pairs) -> list:
+    """Post-validation for an S3 reply, beyond what ``s3_schema`` can
+    express: the recap's word cap; each ``hooks_opened`` item's character
+    cap, the array's own count cap, and no duplicate; each ``hooks_closed``
+    item exactly one of *open_hooks*, no duplicate, and never also in
+    ``hooks_opened``; at most ``RELATIONSHIP_DELTAS_MAX`` relationship
+    deltas, each ``pair`` exactly one of *pairs*, no pair twice, and its
+    ``text`` within ``RELATIONSHIP_DELTA_MAX_WORDS``."""
+    errors = validate(reply, s3_schema(open_hooks, pairs))
+    if errors:
+        return errors
+
+    errors = []
+    _check_text(errors, "$.recap", reply["recap"], max_words=RECAP_MAX_WORDS)
+
+    opened = reply["hooks_opened"]
+    if len(opened) > HOOKS_OPENED_MAX:
+        errors.append(f"$.hooks_opened: {len(opened)} hook(s), expected at most {HOOKS_OPENED_MAX}")
+    for i, hook in enumerate(opened):
+        _check_chars(errors, f"$.hooks_opened[{i}]", hook, HOOK_MAX_LENGTH)
+    for hook in sorted({h for h in opened if isinstance(h, str) and opened.count(h) > 1}):
+        errors.append(f"$.hooks_opened: {hook!r} is listed twice")
+
+    closed = reply["hooks_closed"]
+    for i, hook in enumerate(closed):
+        if hook not in open_hooks:
+            errors.append(f"$.hooks_closed[{i}]: {hook!r} is not an open hook "
+                          "(a hook is closed only by its exact text)")
+    for hook in sorted({h for h in closed if isinstance(h, str) and closed.count(h) > 1}):
+        errors.append(f"$.hooks_closed: {hook!r} is listed twice")
+    for hook in sorted(set(opened) & set(closed)):
+        errors.append(f"$: {hook!r} is both opened and closed")
+
+    deltas = reply["relationship_deltas"]
+    if len(deltas) > RELATIONSHIP_DELTAS_MAX:
+        errors.append(f"$.relationship_deltas: {len(deltas)} update(s), expected at most {RELATIONSHIP_DELTAS_MAX}")
+    seen_pairs = set()
+    for i, item in enumerate(deltas):
+        pair = item["pair"]
+        if pair not in pairs:
+            errors.append(f"$.relationship_deltas[{i}].pair: {pair!r} is not one of the cast's pairs")
+        elif pair in seen_pairs:
+            errors.append(f"$.relationship_deltas[{i}].pair: {pair!r} is listed twice")
+        seen_pairs.add(pair)
+        _check_text(errors, f"$.relationship_deltas[{i}].text", item["text"],
+                    max_words=RELATIONSHIP_DELTA_MAX_WORDS)
+    return errors
+
+
+def repair_s3_reply(reply, language):
+    """A copy of *reply* with the French elision fix (DEC-144) applied to
+    ``recap``, every ``hooks_opened`` item and every ``relationship_deltas``
+    item's ``text`` -- before ``s3_errors`` runs (a merged elision changes a
+    word count). ``hooks_closed`` is never touched: it must match one of
+    *open_hooks* byte for byte. A story whose language is not French comes
+    back an unmodified copy."""
+    reply = copy.deepcopy(reply)
+    if language != "fr" or not isinstance(reply, dict):
+        return reply
+    if isinstance(reply.get("recap"), str):
+        reply["recap"] = repair_fr_elisions(reply["recap"])
+    if isinstance(reply.get("hooks_opened"), list):
+        reply["hooks_opened"] = [_repair_text_field(hook) for hook in reply["hooks_opened"]]
+    if isinstance(reply.get("relationship_deltas"), list):
+        for item in reply["relationship_deltas"]:
+            if isinstance(item, dict) and isinstance(item.get("text"), str):
+                item["text"] = repair_fr_elisions(item["text"])
+    return reply
+
+
+# ------------------------------------------------------------------------- F1 (audience_feedback_digest)
+
+# Not stated by the spec table (only "60 words + 3 directions" is): a
+# direction is one suggested pivot sentence, not a scene -- capped the same
+# order of magnitude as a hook (15 words) or a K1 want/fear (25 words); 25
+# was picked so three directions plus the digest stay comfortably inside
+# F1's own 250-token spec cap once measured (see prompts.py's MAX_TOKENS
+# comment).
+F1_DIRECTION_MAX_WORDS = 25
+
+
+def f1_schema() -> dict:
+    """The F1 output schema (spec 2.6, 4.2, row F1): a short digest of
+    pasted audience feedback plus exactly ``FEEDBACK_DIRECTIONS`` suggested
+    directions for the next episode."""
+    return _llm_obj({
+        "digest": {"type": "string", "description": f"at most {FEEDBACK_DIGEST_MAX_WORDS} words"},
+        "directions": {
+            "type": "array",
+            "description": f"exactly {FEEDBACK_DIRECTIONS} directions, each at most {F1_DIRECTION_MAX_WORDS} words",
+            "items": {"type": "string"},
+        },
+    })
+
+
+def f1_errors(reply) -> list:
+    """Post-validation for an F1 reply, beyond what ``f1_schema`` can
+    express: the digest's word cap, exactly ``FEEDBACK_DIRECTIONS``
+    directions, each within ``F1_DIRECTION_MAX_WORDS``."""
+    errors = validate(reply, f1_schema())
+    if errors:
+        return errors
+
+    errors = []
+    _check_text(errors, "$.digest", reply["digest"], max_words=FEEDBACK_DIGEST_MAX_WORDS)
+    directions = reply["directions"]
+    if len(directions) != FEEDBACK_DIRECTIONS:
+        errors.append(f"$.directions: {len(directions)} direction(s), expected exactly {FEEDBACK_DIRECTIONS}")
+    for i, direction in enumerate(directions):
+        _check_text(errors, f"$.directions[{i}]", direction, max_words=F1_DIRECTION_MAX_WORDS)
+    return errors
+
+
+def repair_f1_reply(reply, language):
+    """A copy of *reply* with the French elision fix applied to ``digest``
+    and every ``directions`` item, before ``f1_errors`` runs. See
+    :func:`repair_s3_reply`."""
+    reply = copy.deepcopy(reply)
+    if language != "fr" or not isinstance(reply, dict):
+        return reply
+    if isinstance(reply.get("digest"), str):
+        reply["digest"] = repair_fr_elisions(reply["digest"])
+    if isinstance(reply.get("directions"), list):
+        reply["directions"] = [_repair_text_field(d) for d in reply["directions"]]
+    return reply
+
+
+# ------------------------------------------------------------------------- N1 (next_episode_proposals)
+
+# The proposed character/twist fields mirror next_proposals_v1's own caps
+# (schemas.py's ``_PROPOSED_CHARACTER_SCHEMA``/``_PROPOSED_TWIST_SCHEMA`,
+# themselves character_v1's/season_arc_v1's own): character-counted, not
+# word-counted, so a model-facing reply and the stored proposal agree on
+# what "too long" means.
+N1_NAME_MAX_CHARS = 60
+N1_ONE_LINE_MAX_CHARS = 200
+N1_WHY_MAX_CHARS = 300
+N1_ARCHETYPE_MAX_CHARS = 60
+
+
+def n1_schema(target_eps) -> dict:
+    """The N1 output schema (spec 2.6, 4.2, row N1): up to
+    ``PROPOSALS_MAX_CHARACTERS`` new characters and up to
+    ``PROPOSALS_MAX_TWISTS`` twists for the episode after the one memory was
+    written from.
+
+    *target_eps* are the arc's own episodes after that one (what a twist may
+    target, spec 4.2): enumerated the same way S2's ``characters`` enums the
+    existing cast, never free text, so Python never has to guess which arc
+    entry an accepted twist amends. None yet in the arc falls back to the
+    bare-integer schema (DEC-171's empty-enum precedent) and the ask asks
+    for an always-empty ``twists`` instead.
+    """
+    character = _llm_obj({
+        "name": {"type": "string", "description": f"at most {N1_NAME_MAX_CHARS} characters"},
+        "role": {"type": "string", "enum": list(CHARACTER_ROLES)},
+        "one_line": {"type": "string", "description": f"at most {N1_ONE_LINE_MAX_CHARS} characters"},
+        "archetype": {"type": ["string", "null"], "description": f"at most {N1_ARCHETYPE_MAX_CHARS} characters, or null"},
+        "why": {"type": "string", "description": f"at most {N1_WHY_MAX_CHARS} characters"},
+    })
+    target_ep_item = {"type": "integer", "enum": list(target_eps)} if target_eps else {"type": "integer"}
+    twist = _llm_obj({
+        "target_ep": target_ep_item,
+        "summary": {"type": "string", "description": f"at most {ARC_SUMMARY_MAX_WORDS} words"},
+        "open_hooks_out": {
+            "type": "array",
+            "description": f"0-{TWIST_HOOKS_MAX} new hooks this leaves open, each at most {HOOK_MAX_LENGTH} characters",
+            "items": {"type": "string"},
+        },
+        "why": {"type": "string", "description": f"at most {N1_WHY_MAX_CHARS} characters"},
+    })
+    return _llm_obj({
+        "characters": {
+            "type": "array",
+            "description": f"0-{PROPOSALS_MAX_CHARACTERS} new characters, prefer role recurring or guest",
+            "items": character,
+        },
+        "twists": {
+            "type": "array",
+            "description": (f"0-{PROPOSALS_MAX_TWISTS} twists, target_ep one of the episodes above"
+                            if target_eps else "always []: there is no episode after this one in the arc yet"),
+            "items": twist,
+        },
+    })
+
+
+def n1_errors(reply, *, target_eps) -> list:
+    """Post-validation for an N1 reply, beyond what ``n1_schema`` can
+    express: at most ``PROPOSALS_MAX_CHARACTERS`` characters and
+    ``PROPOSALS_MAX_TWISTS`` twists, each proposed field's character cap,
+    each twist's ``target_ep`` exactly one of *target_eps*, its
+    ``summary``'s word cap and ``open_hooks_out``'s count and character cap."""
+    errors = validate(reply, n1_schema(target_eps))
+    if errors:
+        return errors
+
+    errors = []
+    characters = reply["characters"]
+    if len(characters) > PROPOSALS_MAX_CHARACTERS:
+        errors.append(f"$.characters: {len(characters)} character(s), expected at most {PROPOSALS_MAX_CHARACTERS}")
+    for i, item in enumerate(characters):
+        path = f"$.characters[{i}]"
+        _check_chars(errors, f"{path}.name", item["name"], N1_NAME_MAX_CHARS)
+        _check_chars(errors, f"{path}.one_line", item["one_line"], N1_ONE_LINE_MAX_CHARS)
+        _check_chars(errors, f"{path}.why", item["why"], N1_WHY_MAX_CHARS)
+        if item["archetype"] is not None:
+            _check_chars(errors, f"{path}.archetype", item["archetype"], N1_ARCHETYPE_MAX_CHARS)
+
+    twists = reply["twists"]
+    if len(twists) > PROPOSALS_MAX_TWISTS:
+        errors.append(f"$.twists: {len(twists)} twist(s), expected at most {PROPOSALS_MAX_TWISTS}")
+    for i, item in enumerate(twists):
+        path = f"$.twists[{i}]"
+        if item["target_ep"] not in target_eps:
+            errors.append(f"{path}.target_ep: {item['target_ep']} is not one of {target_eps}")
+        _check_text(errors, f"{path}.summary", item["summary"], max_words=ARC_SUMMARY_MAX_WORDS)
+        _check_chars(errors, f"{path}.why", item["why"], N1_WHY_MAX_CHARS)
+        hooks = item["open_hooks_out"]
+        if len(hooks) > TWIST_HOOKS_MAX:
+            errors.append(f"{path}.open_hooks_out: {len(hooks)} hook(s), expected at most {TWIST_HOOKS_MAX}")
+        for j, hook in enumerate(hooks):
+            _check_chars(errors, f"{path}.open_hooks_out[{j}]", hook, HOOK_MAX_LENGTH)
+    return errors
+
+
+def repair_n1_reply(reply, language):
+    """A copy of *reply* with the French elision fix applied to every
+    proposed character's ``name``/``one_line``/``why``/``archetype`` and
+    every twist's ``summary``/``why``/``open_hooks_out`` items, before
+    ``n1_errors`` runs. See :func:`repair_s3_reply`."""
+    reply = copy.deepcopy(reply)
+    if language != "fr" or not isinstance(reply, dict):
+        return reply
+    for item in reply.get("characters") or []:
+        if not isinstance(item, dict):
+            continue
+        for field in ("name", "one_line", "why", "archetype"):
+            if isinstance(item.get(field), str):
+                item[field] = repair_fr_elisions(item[field])
+    for item in reply.get("twists") or []:
+        if not isinstance(item, dict):
+            continue
+        for field in ("summary", "why"):
+            if isinstance(item.get(field), str):
+                item[field] = repair_fr_elisions(item[field])
+        if isinstance(item.get("open_hooks_out"), list):
+            item["open_hooks_out"] = [_repair_text_field(hook) for hook in item["open_hooks_out"]]
+    return reply

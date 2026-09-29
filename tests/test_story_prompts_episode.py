@@ -1382,7 +1382,7 @@ def test_e4_worst_case_fixture_fits_its_input_budget():
 
 def test_input_budget_names_every_episode_prompt():
     # Stage 6 sized E1/E2/E3/T1/T1r on live-sized data (tests/test_story_episode_prompt_budgets.py).
-    assert list(prompts.INPUT_BUDGET) == ["E1", "E2", "E3", "E4", "T1", "T1r"]
+    assert list(prompts.INPUT_BUDGET) == ["E1", "E2", "E3", "E4", "T1", "T1r", "S3", "F1"]
 
 
 @pytest.mark.parametrize(

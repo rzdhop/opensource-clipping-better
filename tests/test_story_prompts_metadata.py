@@ -230,7 +230,7 @@ def test_the_ask_asks_for_no_duration_or_path(platform):
 def test_m1_is_registered_in_the_catalogue():
     assert prompts.SCHEMA_NAMES["M1"] == "episode_metadata"
     assert prompts.TEMPERATURE["M1"] is prompts.WRITING_TEMPERATURE
-    assert prompts.PROMPT_VERSION == "s5"
+    assert prompts.PROMPT_VERSION == "s6"
     assert "M1" not in prompts.INPUT_BUDGET  # the default 1,200-token pack budget holds (below)
 
 

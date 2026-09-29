@@ -1,9 +1,9 @@
-## CURRENT STATE — AI Story **phase 5 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–1 **done**; next: **stage 2**
+## CURRENT STATE — AI Story **phase 5 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–2 **done**; next: **stage 3**
 - **In-progress header** (keep current):
   - **Current phase:** IMPLEMENT (phases 0–3 done: the plan was mapped, clarified and approved 2026-09-29).
-  - **Current stage:** 1 done → next **stage 2** (prompts S3, F1, N1) [Sonnet agent].
-  - **Next action:** spawn the stage-2 agent (brief drafted in the session scratchpad; the plan's stage 2 section is
-    the source); fail-first tests before code.
+  - **Current stage:** 2 done → next **stage 3** (continuity in the episode prompts) [Opus agent].
+  - **Next action:** spawn the stage-3 agent (the plan's stage 3 section + the N1 follow-ups below); fail-first
+    tests before code; episode-1 prompts byte-identical (RC-M1).
   - **Open questions:** none blocking. Stage 12 needs the human to confirm font filenames, sources and sizes
     before any download.
 - **Started** 2026-09-29 on the human's "Start AI Story phase 5 under the repo protocol (FULL task), on this
@@ -55,7 +55,14 @@
   - `proposals.json` sits in the folder of `for_ep`; `target_ep <= episodes_planned` needs the season → checked by
     stage 4 on write and accept. One `audience_feedback` item per episode is not enforced → stage 5 replaces or
     refuses a second paste. A full S1 rewrite drops arc `history` (S2 keeps it).
-  - Relationship delta text had no length cap → stage 2 adds `RELATIONSHIP_DELTA_MAX_WORDS`.
+  - Relationship delta text had no length cap → stage 2 added `RELATIONSHIP_DELTA_MAX_WORDS` (15) and
+    `RELATIONSHIP_DELTAS_MAX` (5).
+- **Stage 2 notes for stages 3–5:** the builders take plain lists: the step resolves
+  `open_hooks_before(season, N)` and the arc's `open_hooks_out` before `build_s3`; the repairs
+  (`schemas.repair_s3_reply`/`f1`/`n1`) run before validation; `hooks_closed` is never repaired. **N1 follow-ups
+  (stage 3):** `_n1_memory_block` reads the stored `open_hooks` (must be the hooks open before N+1, passed in) and
+  the chosen direction is printed twice in N1's user text. **F1's stats text is unbounded** in the builder;
+  `INPUT_BUDGET["F1"]` (3950) assumes stats ≤ 6,000 chars → stage 5's API must cap it at 6,000 too.
 - **Rollback:** code: delete the worktree and the branch (or revert a stage's commit). Live data: restore the
   tars (`tar -C outputs/stories -xzf …`) and check `sha256sum -c enfr-before.sha`.
 
@@ -78,8 +85,8 @@ RC-P1…P11, RC-S1…S4, RC-T1…T3, RC-E1…E5 and RC-A1…A9 (tables below) st
 |---|---|---|
 | 0 | checkpoint + baseline + worktree + backups | **done** (this commit; baseline local 5697/1, CI 4981/686) |
 | 1 | memory documents and the pure fold [Opus] | **done** (local 5897/1, CI 5181/686; 200 new tests; 2 named re-pins; 4 live seasons validate unchanged) |
-| 2 | prompts S3, F1, N1 [Sonnet] | next |
-| 3 | continuity in the episode prompts [Opus] | — |
+| 2 | prompts S3, F1, N1 [Sonnet] | **done** (local 5950/1, CI 5234/686; 53 new tests; 5 named registry re-pins; elision repair made single-sourced) |
+| 3 | continuity in the episode prompts [Opus] | next |
 | 4 | steps memory, feedback, propose-next and the gate [Opus] | — |
 | 5 | series API and CLI [Sonnet] | — |
 | 6 | whole-frame shot timing (second riskiest) [Opus] | — |
