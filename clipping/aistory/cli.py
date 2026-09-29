@@ -57,8 +57,8 @@ Phase 3 (steps 8-9): ``script`` and ``storyboard`` write one episode
 (``--ep N``, required for these two steps; the season decides which numbers
 exist). Preconditions, parameters and approvals are ``workflow``'s alone
 (DEC-114): the story ``ready``, the episode one the season plans, and -- from
-episode 2 on -- the previous episode's recap (phase 5's memory step, not yet
-built, so today only episode 1 can be written). ``script`` takes
+episode 2 on -- the previous episode's series memory written, approved and
+fresh (the memory step; DEC-130 as amended by plan 11 stage 4). ``script`` takes
 ``--measure-voices`` (after writing, every line is spoken through its
 character's pinned voice and the audio kept); ``storyboard`` needs a complete
 script and takes ``--fast`` (every scene's shots planned deterministically,
@@ -837,8 +837,8 @@ def _phase3_step(args, stories, story) -> int:
 
     In the workflow's order: the episode's preconditions
     (``workflow.episode_context`` -- the story ready, the episode one the
-    season plans, and from episode 2 on the previous episode's recap,
-    naming phase 5's memory step), then the step's own parameters
+    season plans, and from episode 2 on the previous episode's series memory
+    written, approved and fresh, naming which), then the step's own parameters
     (``workflow.script_request``/``storyboard_request``), then -- a
     storyboard, fast or not -- a complete script
     (``workflow.require_complete_script``). ``--fast`` builds the storyboard

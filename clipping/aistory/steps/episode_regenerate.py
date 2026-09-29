@@ -80,7 +80,7 @@ def run(ctx, target, parsed, note, *, runner=None, time_fn=time.monotonic, sleep
     stores = store_mod.StoryStore(ctx.outputs_dir, on_log=ctx.on_log)
     try:
         ec = episode_common.load_context(stores, ctx.story_id, ep)
-        episode_common.check_episode_preconditions(ctx, ec, require_recap=False)
+        episode_common.check_episode_preconditions(ctx, ec, require_memory=False)
         script = episode_common.read_episode(ec, SCRIPT_DOC)
     except StepFailed as exc:
         raise refuse(str(exc)) from None

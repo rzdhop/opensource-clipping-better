@@ -1,5 +1,6 @@
-"""The story rules of steps 1-12 and the fast track, shared by the API and the
-CLI (spec 3, 9.1-9.3).
+"""The story rules of steps 1-12, the fast track and the series steps (step
+13: memory, feedback, propose-next), shared by the API and the CLI (spec 3,
+9.1-9.3).
 
 ``web/api/routes/stories.py`` (the HTTP face) and ``clipping/aistory/cli.py``
 (``python main.py --ai-story``) both call these functions, so a story is
@@ -42,6 +43,7 @@ from . import (
     prompts,
     refimages,
     schemas,
+    series_memory,
     shots,
     stylelock,
     templates,
@@ -57,7 +59,10 @@ from .steps import concepts as concepts_step
 from .steps import entities as entities_step
 from .steps import episode_common, llm_call
 from .steps import fast_track as fast_track_step
+from .steps import feedback as feedback_step
+from .steps import memory as memory_step
 from .steps import metadata as metadata_step
+from .steps import propose_next as propose_next_step
 from .steps import regenerate as regenerate_step
 from .steps import render as render_step
 from .steps import script as script_step
@@ -69,7 +74,7 @@ from .steps.llm_call import StepFailed
 # ------------------------------------------------------------------ grammar
 
 # Spec 9.1. What phase 1 runs, what phase 2 runs, what phase 3 runs, what
-# phase 4 runs, what comes later.
+# phase 4 runs, what phase 5 runs, what comes later.
 LLM_STEPS = ("concepts", "bible")
 INLINE_STEPS = ("style",)
 PREVIEW_STEP = "style_preview"
@@ -87,17 +92,28 @@ PHASE3_STEPS = ("script", "storyboard")
 # the script to the pack (DEC-162). The last three end completed.
 PHASE4_STEPS = ("assets", "render", "metadata", "fast-track")
 EPISODE_STEPS = PHASE3_STEPS + PHASE4_STEPS
-LATER_STEPS = ("memory", "feedback", "propose-next", "rerender", "import")
+# Step 13 (phase 5, plan 11 stage 4): the series steps, one episode each
+# (``ep``, "N"), one LLM call each (S3, F1, N1), all ending awaiting approval
+# -- ``memory:<N>``, ``feedback:<N>`` and ``proposals:<N+1>`` (the proposals
+# sit in the folder of the episode they are for: :func:`series_job_doc`).
+SERIES_STEPS = ("memory", "feedback", "propose-next")
+LATER_STEPS = ("rerender", "import")
 
 # Spec 9.2, approve grammar: "season" bare, the others "<kind>:<id>". Phase 2
 # approves ``character:<id>``, ``place:<id>``, ``prop:<id>`` and ``season``;
-# phase 3 ``script:<ep>`` and ``storyboard:<ep>``; phase 4 ``assets:<ep>``.
+# phase 3 ``script:<ep>`` and ``storyboard:<ep>``; phase 4 ``assets:<ep>``;
+# phase 5 ``memory:<ep>``, ``feedback:<ep>`` (with a direction) and
+# ``proposals:<ep>`` (:data:`SERIES_APPROVALS`, :func:`approve_series`).
 # No approval of the grammar is a later phase's any more.
 LATER_APPROVALS_BARE = ()
 LATER_APPROVALS = ()
 # The episode documents an approval names (``<word>:<ep>``), and the step
 # jobs that write them (their job's document is ``<step>:<ep>``).
 EPISODE_APPROVALS = ("script", "storyboard", "assets")
+# The series documents an approval names (``<word>:<ep>``): the memory entry
+# and the feedback item live in ``season.json``, the proposals in
+# ``episodes/ep<NN>/proposals.json``.
+SERIES_APPROVALS = ("memory", "feedback", "proposals")
 
 # Spec 9.2, regenerate grammar: every "<kind>:..." target of a later phase.
 # Phase 2's, phase 3's and phase 4's targets are ``regenerate.parse_target``'s;
@@ -745,6 +761,10 @@ GROUP_APPROVAL = {CHARACTERS: "cast", PLACES: "places", PROPS: "places"}
 # A cast has at most this many characters (Edge speaks 8 French voices).
 MAX_CAST = 8
 CAST_PARAMS = ("selected", "custom")
+# What a cast job may carry: the user's params, and ``introduced_in`` -- set
+# by an accepted N1 character (phase 5, :func:`decide_proposal`), never by
+# the cast form.
+CAST_JOB_PARAMS = CAST_PARAMS + ("introduced_in",)
 CUSTOM_CHARACTER_KEYS = ("name", "role", "one_line", "archetype")
 PLACES_PARAMS = ("places", "props")
 PLACE_ITEM_KEYS = ("name", "one_line")
@@ -1027,12 +1047,21 @@ def check_sketch_names(story, selected) -> None:
 
 def cast_request(stories, story, params) -> tuple:
     """``(selected names, custom entries)`` of a cast step's *params*,
-    checked before a job exists (``invalid``): only ``selected`` and
-    ``custom``; each selected name one of the concept's cast sketch; each
-    custom character ``{name, role, one_line, archetype?}`` with a role of
-    ``schemas.CHARACTER_ROLES``; at most :data:`MAX_CAST` characters once the
-    new ones join the story's; and at least one character in all."""
-    _unknown_keys(params, CAST_PARAMS, "cast")
+    checked before a job exists (``invalid``): only ``selected``, ``custom``
+    and ``introduced_in``; each selected name one of the concept's cast
+    sketch; each custom character ``{name, role, one_line, archetype?}`` with
+    a role of ``schemas.CHARACTER_ROLES``; ``introduced_in`` (phase 5: an
+    accepted N1 proposal) an episode of the season; at most :data:`MAX_CAST`
+    characters once the new ones join the story's; and at least one character
+    in all."""
+    _unknown_keys(params, CAST_JOB_PARAMS, "cast")
+    introduced = params.get("introduced_in")
+    if introduced is not None:
+        arc = season(stories, story["story_id"])
+        planned = arc["episodes_planned"] if arc else 0
+        if type(introduced) is not int or not 1 <= introduced <= planned:
+            raise WorkflowError(INVALID, (f"params.introduced_in is an episode of the season (1 to {planned}), not "
+                                          f"{introduced!r}."))
     selected = params.get("selected")
     custom = params.get("custom")
     selected = [] if selected is None else selected
@@ -1407,7 +1436,9 @@ def approve_season(stories, story_id, *, now) -> dict:
     ``conflict`` until the places and props are approved (the status is a
     contiguous prefix), without a ``season.json``, or while the arc does not
     hold ``episodes_planned`` entries each with a summary. Sets the arc's
-    ``approved_at`` and ``approvals.season``.
+    ``approved_at`` -- on ``season.json`` re-read under the store lock
+    (``StoryStore.update_doc``), so a series step's write landing meanwhile
+    is kept -- and ``approvals.season``.
     """
     story = load(stories, story_id)
     if not reached(story, "places_approved"):
@@ -1420,8 +1451,21 @@ def approve_season(stories, story_id, *, now) -> dict:
     if len(doc["arc"]) != planned or len(written) != planned:
         raise WorkflowError(CONFLICT, (f"The season arc is not complete: {len(written)} of {planned} episodes "
                                        "have a summary."))
-    doc["approved_at"] = now
-    write_doc(stories, story_id, SEASON_DOC, doc, now=now, validator=schemas.season_arc_errors)
+
+    def approve(current):
+        # Re-read under the store lock: a memory entry, a feedback digest or
+        # an amended arc entry written meanwhile is kept (plan 11 stage 4).
+        if current is None:
+            raise WorkflowError(CONFLICT, "There is no season arc to approve yet: run the season step first.")
+        current["approved_at"] = now
+        return current
+
+    try:
+        stories.update_doc(story_id, SEASON_DOC, approve, now=now, validator=schemas.season_arc_errors)
+    except KeyError:
+        raise not_found() from None
+    except schemas.SchemaError as exc:
+        raise StoryUnreadable(story_id, exc.name, exc.errors) from None
 
     def mutate(story_doc):
         story_doc["approvals"]["season"] = now
@@ -1645,7 +1689,9 @@ _EPISODE_REFUSALS = {
     episode_common.NOT_READY: CONFLICT,
     episode_common.OUTSIDE_SEASON: INVALID,
     episode_common.NO_ARC_ENTRY: CONFLICT,
-    episode_common.NO_RECAP: CONFLICT,
+    episode_common.MEMORY_MISSING: CONFLICT,
+    episode_common.MEMORY_UNAPPROVED: CONFLICT,
+    episode_common.MEMORY_STALE: CONFLICT,
 }
 
 _TAG_KINDS = {"char": CHARACTERS, "place": PLACES, "prop": PROPS}
@@ -1709,24 +1755,31 @@ def _context(stories, story_id, ep) -> episode_common.EpisodeContext:
         raise WorkflowError(CONFLICT, str(exc)) from None
 
 
-def episode_context(stories, story, ep, *, step, require_recap=True) -> episode_common.EpisodeContext:
+def episode_context(stories, story, ep, *, step, require_memory=True) -> episode_common.EpisodeContext:
     """The :class:`episode_common.EpisodeContext` of an episode step's (or
-    an episode target's) episode *ep*, once the step may run on it -- the
-    runners' own preconditions, in their order:
+    an episode target's, or a series step's) episode *ep*, once the step may
+    run on it -- the runners' own preconditions, in their order:
 
     ``conflict`` for a story that is not ``ready`` (naming what to approve);
     ``invalid`` without an episode number, or for one the season does not
-    plan; ``conflict`` for an arc with no entry for it, or -- from episode 2
-    on, unless *require_recap* is off (a regenerate) -- without the recap of
-    the episode before it in the season's memory (naming phase 5's memory
-    step)."""
+    plan; ``conflict`` for an arc with no entry for it, or -- the gate
+    (DEC-130 as amended by plan 11 stage 4), from episode 2 on, for a *step*
+    that writes the episode's script or storyboard
+    (``episode_common.needs_memory``: the script and storyboard steps, the
+    fast track until both are approved) unless *require_memory* is off (a
+    regenerate) -- while the series memory of the episode before it is not
+    written, approved and fresh, naming which of the three
+    (``episode_common.memory_refusal``). The assets, the render and the
+    metadata never meet the gate."""
     _episode_refused(episode_common.check_story_ready, story)
     if type(ep) is not int:
         arc = season(stories, story["story_id"]) or {}
         raise WorkflowError(INVALID, (f"'{step}' works on one episode: send its number as ep (the season plans "
                                       f"1 to {arc.get('episodes_planned', 0)})."))
     ec = _context(stories, story["story_id"], ep)
-    _episode_refused(episode_common.check_episode_preconditions, None, ec, require_recap=require_recap)
+    _episode_refused(episode_common.check_episode_preconditions, None, ec, require_memory=False)
+    if require_memory and _step_refusal(episode_common.needs_memory, ec, step):
+        _episode_refused(episode_common.check_episode_preconditions, None, ec, require_memory=True)
     return ec
 
 
@@ -2267,7 +2320,7 @@ def check_episode_target(stories, story, parsed) -> None:
     """An episode regenerate target (``regenerate.parse_target``'s tuple)
     checked against the story before a job exists, as the runner checks it
     (``episode_regenerate.run``): the episode's preconditions without the
-    recap (:func:`episode_context`); then ``conflict`` without a script (or,
+    memory gate (:func:`episode_context`); then ``conflict`` without a script (or,
     for a shot, without a storyboard, or when the shot's scene was rewritten
     since it was planned); ``not_found`` for a scene, a framing scene or a
     shot the episode does not have.
@@ -2281,7 +2334,7 @@ def check_episode_target(stories, story, parsed) -> None:
     (``metadata.require_render``) or with a pack written for another render
     or script (the metadata step writes every platform again)."""
     kind, ep = parsed[0], parsed[1]
-    episode_context(stories, story, ep, step="regenerate", require_recap=False)
+    episode_context(stories, story, ep, step="regenerate", require_memory=False)
     story_id = story["story_id"]
     script = read_episode(stories, story_id, ep, SCRIPT_DOC)
     if script is None or not script["scenes"]:
@@ -3127,3 +3180,480 @@ def fast_track_estimate(ec, *, env, storyboard=None) -> dict:
     params = {} if storyboard is None else {fast_track_step.STORYBOARD_PARAM: storyboard}
     mode = fast_track_step.read_params(phase4_request("fast-track", params))[fast_track_step.STORYBOARD_PARAM]
     return _step_refusal(fast_track_step.estimate, ec, env=env, storyboard=mode)
+
+
+# ================================================================== phase 5
+#
+# Step 13 (spec 3, 2.6, 9.1-9.2; plan 11 stage 4): the series steps. Each is a
+# job of one episode "N" (``ep``) making one LLM call on the free chain
+# (``llm_call.call_json``: a paid link is never called while ``allow_paid``
+# is off, DEC-115; the front ends' key gate refuses a chain whose only keyed
+# links are paid before a job exists) and ending ``awaiting_approval``:
+#
+# - ``memory`` (S3): episode N's series memory entry from its approved
+#   script, merged into ``season.json`` under the store lock; approved by
+#   ``memory:<N>`` (:func:`approve_memory`). Its state (:func:`memory_state`)
+#   is what the gate of episode N+1 reads (``episode_common.memory_refusal``);
+# - ``feedback`` (F1): the audience feedback pasted for episode N
+#   (:func:`store_feedback`) digested into three directions; approved by
+#   ``feedback:<N>`` with the direction chosen (:func:`approve_feedback`);
+# - ``propose-next`` (N1): new characters and twists for episode N+1 from N's
+#   fresh approved memory, in ``episodes/ep<N+1>/proposals.json``; each item
+#   accepted or rejected (:func:`decide_proposal`), then ``proposals:<N+1>``
+#   approved once every item is decided (:func:`approve_proposals`).
+#
+# None of them, nor any of these functions, writes the story's approvals or
+# status (RC-M5); only the cast step an accepted lead or support character is
+# queued on folds the cast approval, as it always has (DEC-123).
+
+SERIES_PROMPTS = {"memory": memory_step.PROMPT, "feedback": feedback_step.PROMPT,
+                  "propose-next": propose_next_step.PROMPT}
+_SERIES_MODULES = {"memory": memory_step, "feedback": feedback_step, "propose-next": propose_next_step}
+PROPOSALS_DOC = story_store.EPISODE_PROPOSALS_DOC
+# approve_series without a direction (None is a choice: no direction).
+_NO_DIRECTION = object()
+
+
+def series_job_doc(step, ep):
+    """The document a series step's job writes, and so the approval that
+    completes it: ``memory:<ep>``, ``feedback:<ep>``, and -- the proposals sit
+    in the folder of the episode they are for -- ``proposals:<ep + 1>``. None
+    without an episode number, or for another step."""
+    if step not in SERIES_STEPS or type(ep) is not int:
+        return None
+    if step == "propose-next":
+        return f"proposals:{ep + 1}"
+    return f"{step}:{ep}"
+
+
+def is_series_approval(doc) -> bool:
+    """Whether *doc* is ``<word>:<something>`` with *word* one of
+    :data:`SERIES_APPROVALS` (the number is checked when it is approved)."""
+    word, sep, rest = doc.partition(":")
+    return bool(sep) and bool(rest) and word in SERIES_APPROVALS
+
+
+def series_request(step, params) -> dict:
+    """A series step's *params*: it takes none beyond ``ep`` (``invalid``
+    otherwise). Returns them."""
+    if params:
+        raise WorkflowError(INVALID, f"'{step}' takes no parameters.")
+    return {}
+
+
+def series_context(stories, story, ep, *, step) -> episode_common.EpisodeContext:
+    """The :class:`episode_common.EpisodeContext` of a series step's episode
+    *ep*, once the step may run on it -- its runner's own checks, in its
+    order, calling nothing: the episode's preconditions without the memory
+    gate (:func:`episode_context`: ``conflict`` for a story that is not
+    ``ready``, ``invalid`` without an episode number or for one the season
+    does not plan), then ``conflict`` with the runner's sentence: ``memory``
+    an approved script (``memory.require_approved_script``); ``feedback`` a
+    pasted feedback item (``feedback.require_feedback``); ``propose-next``
+    an episode after it in the season and its memory written, approved and
+    fresh (``propose_next.check``). Any other *step* is ``refuse_step``'s."""
+    if step not in SERIES_STEPS:
+        refuse_step(step)
+    ec = episode_context(stories, story, ep, step=step, require_memory=False)
+    _step_refusal(_SERIES_MODULES[step].check, ec)
+    return ec
+
+
+def series_units(ec, step) -> dict:
+    """What a series step calls: ``{"llm_calls": 1, "prompt": "S3"|"F1"|"N1"}``
+    -- one call on the free chain, whatever the episode (the estimate's
+    ``_llm_estimate`` of one call, as the metadata's)."""
+    return {"llm_calls": 1, "prompt": SERIES_PROMPTS[step]}
+
+
+def _update_season(stories, story_id, mutate, *, now) -> dict:
+    """``StoryStore.update_doc`` of ``season.json`` (re-read, *mutate*, write,
+    under the store lock): ``not_found`` for a story gone meanwhile;
+    ``StoryUnreadable`` for a season on disk that does not validate;
+    ``invalid`` with every error when the changed one would not."""
+    try:
+        return stories.update_doc(story_id, SEASON_DOC, mutate, now=now, validator=schemas.season_arc_errors)
+    except KeyError:
+        raise not_found() from None
+    except schemas.SchemaError as exc:
+        if exc.name == SEASON_DOC:  # the write's own validation
+            raise WorkflowError(INVALID, {"message": "The season would not be valid with these values.",
+                                          "errors": list(exc.errors)}) from None
+        raise StoryUnreadable(story_id, exc.name, exc.errors) from None
+
+
+def _require_season(current):
+    if current is None:
+        raise WorkflowError(CONFLICT, "There is no season arc yet: run the season step first.")
+    return current
+
+
+# ------------------------------------------------------------------ memory
+
+def memory_state(stories, story, ep) -> str:
+    """``none`` | ``draft`` | ``approved`` | ``stale`` of episode *ep*'s series
+    memory (``series_memory.memory_state``: stale once the script moved on
+    from the revision the entry was written from, whatever its approval).
+    What the episode views show; a stale entry never un-approves anything of
+    episode *ep* + 1, it only blocks a new script or storyboard there."""
+    story_id = story["story_id"]
+    ep = episode_bounds(stories, story, ep)
+    return series_memory.memory_state(season(stories, story_id), ep, read_episode(stories, story_id, ep, SCRIPT_DOC))
+
+
+def approve_memory(stories, story_id, ep, *, now) -> dict:
+    """Approve episode *ep*'s series memory entry (``memory:<ep>``); returns
+    the entry as written.
+
+    ``conflict`` without an entry (run memory first) and for a stale one
+    (the script changed since it was written: run memory again). Its
+    ``approved_at`` becomes *now*, on ``season.json`` re-read under the store
+    lock; nothing else moves -- not the fold, not the season's approval, not
+    the story's approvals or status (RC-M5)."""
+    story = load(stories, story_id)
+    ep = episode_bounds(stories, story, ep)
+    key = series_memory.memory_key(ep)
+    script = read_episode(stories, story_id, ep, SCRIPT_DOC)
+
+    def approve(current):
+        entry = series_memory.entry_map(_require_season(current)).get(key)
+        if entry is None:
+            raise WorkflowError(CONFLICT, f"Episode {ep} has no series memory yet: run memory for episode {ep} first.")
+        if series_memory.entry_is_stale(entry, script):
+            run = f"run memory for episode {ep}"
+            if not (script and script["approved_at"]):
+                run = f"approve episode {ep}'s script, then {run}"
+            raise WorkflowError(CONFLICT, (f"Episode {ep}'s series memory is out of date: episode {ep}'s script "
+                                           f"changed since it was written. {run[0].upper()}{run[1:]} again, then "
+                                           "approve that."))
+        entry["approved_at"] = now
+        return current
+
+    saved = _update_season(stories, story_id, approve, now=now)
+    return copy.deepcopy(saved["series_memory"]["entries"][key])
+
+
+# ---------------------------------------------------------------- feedback
+
+def feedback_item(stories, story_id, ep):
+    """Episode *ep*'s pasted feedback item (a copy), or None."""
+    item = feedback_step.feedback_item(season(stories, story_id), ep)
+    return copy.deepcopy(item) if item is not None else None
+
+
+def _pasted(what, value, limit) -> None:
+    if len(value) > limit:
+        raise WorkflowError(INVALID, (f"The {what} is {len(value)} characters: at most {limit} are taken, and it is "
+                                      "never shortened -- paste less (the part that matters most)."))
+
+
+def store_feedback(stories, story_id, ep, text, stats=None, *, now) -> dict:
+    """Store the audience feedback pasted for episode *ep* (stage 5's
+    endpoint; the ``feedback`` step reads it); returns the item.
+
+    ``invalid`` for an empty text, and for a text or *stats* over
+    ``schemas.FEEDBACK_TEXT_MAX_LENGTH`` / ``FEEDBACK_STATS_MAX_LENGTH``
+    (6,000 characters each): refused whole, **never trimmed** -- a paste is
+    kept exactly as it was sent. ``conflict`` without a season. One item per
+    episode: the new ``{ep, pasted_at: now, text, stats?}`` replaces any
+    earlier one of *ep*, its digest, directions and chosen direction with it
+    (the item goes last). Written on ``season.json`` re-read under the store
+    lock; the season's approval and the story's never move."""
+    if not isinstance(text, str) or not text.strip():
+        raise WorkflowError(INVALID, "The feedback text is empty: paste the comments first.")
+    _pasted("feedback text", text, schemas.FEEDBACK_TEXT_MAX_LENGTH)
+    if stats is not None:
+        if not isinstance(stats, str):
+            raise WorkflowError(INVALID, f"The stats are a text, not {type(stats).__name__}.")
+        _pasted("stats text", stats, schemas.FEEDBACK_STATS_MAX_LENGTH)
+    story = load(stories, story_id)
+    ep = episode_bounds(stories, story, ep)
+    item = {"ep": ep, "pasted_at": now, "text": text}
+    if stats is not None and stats.strip():
+        item["stats"] = stats
+
+    def paste(current):
+        current = _require_season(current)
+        current["audience_feedback"] = [old for old in current["audience_feedback"] if old.get("ep") != ep]
+        current["audience_feedback"].append(copy.deepcopy(item))
+        return current
+
+    _update_season(stories, story_id, paste, now=now)
+    return item
+
+
+def approve_feedback(stories, story_id, ep, *, direction, now) -> dict:
+    """Approve episode *ep*'s digested feedback (``feedback:<ep>``) with the
+    *direction* chosen: 0, 1 or 2 (an index into its three directions), or
+    None for none; returns the item as written.
+
+    ``invalid`` for any other *direction* (a bool, a float, a text);
+    ``conflict`` without a pasted item, and before F1 has digested it (run
+    feedback first). ``chosen_direction`` becomes *direction* on
+    ``season.json`` re-read under the store lock; it steers E1 of episode
+    *ep* + 1 only (``series_memory.chosen_direction``) and N1."""
+    if direction is not None and (type(direction) is not int or direction not in range(schemas.FEEDBACK_DIRECTIONS)):
+        raise WorkflowError(INVALID, f"direction is 0, 1, 2 or null (no direction), not {direction!r}.")
+    story = load(stories, story_id)
+    ep = episode_bounds(stories, story, ep)
+
+    def choose(current):
+        item = feedback_step.feedback_item(_require_season(current), ep)
+        if item is None:
+            raise WorkflowError(CONFLICT, f"Episode {ep} has no audience feedback yet: paste it first.")
+        if "directions" not in item:
+            raise WorkflowError(CONFLICT, (f"Episode {ep}'s feedback has not been digested yet: run feedback for "
+                                           f"episode {ep} first."))
+        item["chosen_direction"] = direction
+        return current
+
+    saved = _update_season(stories, story_id, choose, now=now)
+    return copy.deepcopy(feedback_step.feedback_item(saved, ep))
+
+
+# --------------------------------------------------------------- proposals
+
+def proposals(stories, story_id, ep):
+    """Episode *ep*'s ``proposals.json`` (N1's, for this episode), or None."""
+    return read_episode(stories, story_id, ep, PROPOSALS_DOC)
+
+
+def _require_proposals(stories, story_id, ep) -> dict:
+    doc = proposals(stories, story_id, ep)
+    if doc is None:
+        if ep < 2:
+            raise WorkflowError(CONFLICT, "Episode 1 has no proposals: they are made for episode 2 on.")
+        raise WorkflowError(CONFLICT, (f"Episode {ep} has no proposals yet: run propose-next for episode {ep - 1} "
+                                       "first."))
+    return doc
+
+
+def _proposal_item(doc, item_id):
+    """``(item, "character"|"twist")``; ``not_found`` for another id."""
+    for kind, key in (("character", "characters"), ("twist", "twists")):
+        for item in doc[key]:
+            if item["item_id"] == item_id:
+                return item, kind
+    raise WorkflowError(NOT_FOUND, f"Episode {doc['for_ep']}'s proposals have no item {item_id!r}.")
+
+
+def _require_proposals_current(stories, story_id, doc) -> None:
+    """``conflict`` unless the memory the proposals were written from still
+    stands: episode N's entry approved, fresh, and of the script revision
+    they record (``based_on``)."""
+    memory_ep = doc["based_on"]["memory_ep"]
+    arc = season(stories, story_id)
+    state = series_memory.memory_state(arc, memory_ep, read_episode(stories, story_id, memory_ep, SCRIPT_DOC))
+    entry = series_memory.entry_for(arc, memory_ep)
+    if state == "approved" and entry["script_rev"] == doc["based_on"]["script_rev"]:
+        return
+    why = {"none": "it is gone", "draft": "it is not approved", "stale": f"episode {memory_ep}'s script changed"}.get(
+        state, "it was written from another revision of the script")
+    raise WorkflowError(CONFLICT, (f"Episode {doc['for_ep']}'s proposals were written from episode {memory_ep}'s "
+                                   f"series memory as it was then, and {why} since: run propose-next for episode "
+                                   f"{memory_ep} again, or reject them."))
+
+
+def proposal_request(stories, story, ep, item_id, *, accept, role=None) -> dict:
+    """What deciding item *item_id* of episode *ep*'s proposals would do,
+    checked as :func:`decide_proposal` checks it, writing nothing -- so a
+    front end can run the cast step's gates on ``cast.params`` before the
+    decision is recorded::
+
+        {"ep", "item_id", "kind": "character"|"twist", "decision": "accepted"|"rejected", "item",
+         # an accepted character:
+         "role", "folds_cast", "cast": {"step": "cast", "params": {"custom": [..], "introduced_in": ep}},
+         "message"}
+
+    ``invalid`` for *accept* not a bool, a *role* outside
+    ``schemas.CHARACTER_ROLES``, or a role with anything but accepting a
+    character; ``conflict`` without proposals; ``not_found`` for an unknown
+    item; ``conflict`` for an item decided already (a decision is final: run
+    propose-next again for new proposals). Accepting, not rejecting, also
+    needs the memory the proposals were written from to stand
+    (``conflict``); a twist, its target episode still in the arc; a
+    character, a name the cast does not have yet (``conflict``: reject it
+    instead) and room in the cast (:func:`cast_request`'s rules, ``invalid``).
+    The role is the proposal's unless *role* overrides it; a lead or support
+    character ``folds_cast``: once the cast step writes it, unapproved, the
+    cast approval is cleared and the story leaves ``ready`` until it is
+    approved (DEC-123, unchanged) -- ``message`` says so."""
+    if type(accept) is not bool:
+        raise WorkflowError(INVALID, f"accept is true or false, not {accept!r}.")
+    if role is not None and role not in schemas.CHARACTER_ROLES:
+        raise WorkflowError(INVALID, f"role is one of {', '.join(schemas.CHARACTER_ROLES)}, not {role!r}.")
+    story_id = story["story_id"]
+    ep = episode_bounds(stories, story, ep)
+    doc = _require_proposals(stories, story_id, ep)
+    item, kind = _proposal_item(doc, item_id)
+    if role is not None and not (accept and kind == "character"):
+        raise WorkflowError(INVALID, "A role is chosen only when accepting a character.")
+    decided = doc["decisions"].get(item_id)
+    if decided:
+        raise WorkflowError(CONFLICT, (f"'{item_id}' is already {decided}: a decision is final (run propose-next for "
+                                       f"episode {ep - 1} again for new proposals)."))
+    request = {"ep": ep, "item_id": item_id, "kind": kind, "decision": "accepted" if accept else "rejected",
+               "item": copy.deepcopy(item)}
+    if not accept:
+        return request
+    _require_proposals_current(stories, story_id, doc)
+    if kind == "twist":
+        arc = season(stories, story_id)
+        if not any(entry["ep"] == item["target_ep"] for entry in (arc or {}).get("arc") or []):
+            raise WorkflowError(CONFLICT, (f"The season arc has no episode {item['target_ep']} any more: reject this "
+                                           "twist, or run propose-next again."))
+        request["message"] = (f"Episode {item['target_ep']}'s arc entry now tells this twist; what it said before is "
+                              "kept in its history. Accepting the twist is its approval: the season stays approved.")
+        return request
+
+    role = role or item["role"]
+    names = {entities_step.name_key(entity["name"]) for entity in list_entities(stories, story_id, CHARACTERS)}
+    if entities_step.name_key(item["name"]) in names:
+        raise WorkflowError(CONFLICT, f"{item['name']} is already a character of this story: reject this proposal "
+                                      "instead.")
+    custom = {"name": item["name"], "role": role, "one_line": item["one_line"]}
+    if item.get("archetype"):
+        custom["archetype"] = item["archetype"]
+    params = {"custom": [custom], "introduced_in": ep}
+    cast_request(stories, story, params)
+    folds = role in schemas.CAST_APPROVAL_ROLES
+    message = (f"{item['name']} joins the cast as a {role} character, introduced in episode {ep}: the cast step "
+               "writes them (K1, the portrait, the sheets and a voice).")
+    if folds:
+        message += (f" A {role} character must be approved before the story is ready again: once the cast step "
+                    f"writes {item['name']}, the cast approval is cleared (DEC-123) until you approve them.")
+    else:
+        message += f" A {role} character never holds up the cast approval: the story stays ready."
+    request.update(role=role, folds_cast=folds, cast={"step": "cast", "params": params}, message=message)
+    return request
+
+
+def decide_proposal(stories, story_id, ep, item_id, *, accept, role=None, now) -> dict:
+    """Accept or reject item *item_id* of episode *ep*'s proposals (*ep* is
+    the proposals' ``for_ep``: the folder they sit in); returns
+    :func:`proposal_request`'s payload, the decision recorded.
+
+    Checked first by :func:`proposal_request` (every refusal is its). Then,
+    under the store lock, on the documents as they are now (the item must
+    still be the one checked -- proposals written again meanwhile are a
+    ``conflict``):
+
+    - **reject**: the decision is recorded, nothing else;
+    - **accept a twist**: the target arc entry's ``summary`` and
+      ``open_hooks_out`` become the twist's, the old ones pushed onto its
+      ``history`` (``{summary, open_hooks_out, replaced_at: now, source:
+      "proposal"}``); the acceptance *is* the approval: ``season.json``'s
+      ``approved_at`` and ``approvals.season`` never move;
+    - **accept a character**: the decision is recorded and the payload's
+      ``cast`` names the job to queue -- the existing cast path, ``params =
+      {"custom": [{name, role, one_line, archetype?}], "introduced_in": ep}``
+      -- which the caller queues (the job store is the web layer's; the CLI
+      runs it): K1, the sheets and a voice, then
+      ``series_memory.introduced["epNN"]`` records the new id.
+
+    Neither touches the story's approvals or status here (RC-M5); a lead or
+    support character folds the cast approval when the cast step writes it
+    (DEC-123)."""
+    story = load(stories, story_id)
+    request = proposal_request(stories, story, ep, item_id, accept=accept, role=role)
+    ep = request["ep"]
+    checked = request["item"]
+
+    def amend(current):
+        entry = next((entry for entry in _require_season(current)["arc"] if entry["ep"] == checked["target_ep"]),
+                     None)
+        if entry is None:
+            raise WorkflowError(CONFLICT, (f"The season arc has no episode {checked['target_ep']} any more: reject "
+                                           "this twist, or run propose-next again."))
+        entry.setdefault("history", []).append({
+            "summary": entry["summary"], "open_hooks_out": list(entry["open_hooks_out"]), "replaced_at": now,
+            "source": "proposal"})
+        entry["summary"] = checked["summary"]
+        entry["open_hooks_out"] = list(checked["open_hooks_out"])
+        return current
+
+    def decide(current):
+        if current is None:
+            raise WorkflowError(CONFLICT, f"Episode {ep}'s proposals are gone: run propose-next for episode {ep - 1}.")
+        try:
+            item, _kind = _proposal_item(current, item_id)
+        except WorkflowError:
+            item = None
+        if item != checked or item_id in current["decisions"]:
+            raise WorkflowError(CONFLICT, (f"Episode {ep}'s proposals changed meanwhile: look at them again, then "
+                                           "decide."))
+        if request["kind"] == "twist" and accept:
+            _update_season(stories, story_id, amend, now=now)  # the store lock is re-entrant
+        current["decisions"][item_id] = request["decision"]
+        return current
+
+    try:
+        stories.update_episode_doc(story_id, ep, PROPOSALS_DOC, decide, now=now)
+    except KeyError:
+        raise not_found() from None
+    except schemas.SchemaError as exc:
+        raise StoryUnreadable(story_id, exc.name, exc.errors) from None
+    except ValueError as exc:
+        raise WorkflowError(CONFLICT, f"The proposals cannot be written: {exc}.") from None
+    return request
+
+
+def approve_proposals(stories, story_id, ep, *, now) -> dict:
+    """Approve episode *ep*'s proposals (``proposals:<ep>``, the job of
+    ``propose-next`` for *ep* - 1); returns them. Allowed once every item is
+    accepted or rejected -- ``conflict`` naming the undecided ones, and
+    without proposals. The decisions are the record: nothing is written (the
+    document has no approval of its own), so *now* is unused."""
+    story = load(stories, story_id)
+    ep = episode_bounds(stories, story, ep)
+    doc = _require_proposals(stories, story_id, ep)
+    ids = [item["item_id"] for item in doc["characters"] + doc["twists"]]
+    undecided = [item_id for item_id in ids if item_id not in doc["decisions"]]
+    if undecided:
+        raise WorkflowError(CONFLICT, (f"Episode {ep}'s proposals are not all decided: accept or reject "
+                                       f"{entities_step.quoted_list(undecided)} first."))
+    return doc
+
+
+def approve_series(stories, story_id, doc, *, direction=_NO_DIRECTION, now) -> dict:
+    """The series part of the approve grammar: ``memory:<ep>``
+    (:func:`approve_memory`), ``feedback:<ep>`` with *direction* -- required,
+    None being "no direction" -- (:func:`approve_feedback`) and
+    ``proposals:<ep>`` (:func:`approve_proposals`). ``not_found`` for any
+    other document, ``invalid`` for a malformed episode, a feedback approval
+    without *direction* or another approval with one."""
+    if not is_series_approval(doc):
+        raise WorkflowError(NOT_FOUND, f"Nothing to approve under {doc!r}.")
+    word, _sep, rest = doc.partition(":")
+    ep = episode_number(rest)
+    if word == "feedback":
+        if direction is _NO_DIRECTION:
+            raise WorkflowError(INVALID, "Approving feedback:<ep> takes a direction: 0, 1, 2, or null for none.")
+        return approve_feedback(stories, story_id, ep, direction=direction, now=now)
+    if direction is not _NO_DIRECTION:
+        raise WorkflowError(INVALID, f"A direction is chosen only when approving feedback:<ep>, not {doc}.")
+    if word == "memory":
+        return approve_memory(stories, story_id, ep, now=now)
+    return approve_proposals(stories, story_id, ep, now=now)
+
+
+def series_view(stories, story, ep) -> dict:
+    """What an episode page shows of the series (stage 5 wires it)::
+
+        {"ep", "memory": {"state": none|draft|approved|stale, "entry": entry | null},
+         "feedback": item | null, "proposals": proposals.json | null}
+
+    ``proposals`` are the ones *for* this episode (N1 of the episode
+    before). Calls nothing; ``StoryUnreadable`` for a document that does not
+    validate."""
+    story_id = story["story_id"]
+    ep = episode_bounds(stories, story, ep)
+    arc = season(stories, story_id)
+    script = read_episode(stories, story_id, ep, SCRIPT_DOC)
+    item = feedback_step.feedback_item(arc, ep)
+    return {
+        "ep": ep,
+        "memory": {"state": series_memory.memory_state(arc, ep, script), "entry": series_memory.entry_for(arc, ep)},
+        "feedback": copy.deepcopy(item) if item is not None else None,
+        "proposals": proposals(stories, story_id, ep),
+    }

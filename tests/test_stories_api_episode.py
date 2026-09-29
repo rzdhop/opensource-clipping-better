@@ -238,7 +238,7 @@ def test_an_episode_step_is_refused_before_any_job(api, step):
             ({}, 400, "send its number as ep"),
             ({"ep": 0}, 400, "The season plans episodes 1 to 8; there is no episode 0."),
             ({"ep": 9}, 400, "there is no episode 9"),
-            ({"ep": 2}, 409, "phase 5"),
+            ({"ep": 2}, 409, "Episode 1's series memory is not written yet"),
             ({"ep": 1, "params": {"nope": True}}, 400, f"Unknown {step} parameter(s) nope"),
     ):
         response = api.client.post(_url(story_id, f"/steps/{step}"), json=body)
@@ -536,7 +536,7 @@ def test_the_script_estimate_counts_only_what_is_missing(api):
     assert _estimate(api, story_id, "script", ep=1, measure=1)["measure"]["lines"] == 0
     assert api.client.get(_url(story_id, "/estimate/script")).status_code == 400
     response = api.client.get(_url(story_id, "/estimate/script"), params={"ep": 2})
-    assert response.status_code == 409 and "phase 5" in response.json()["detail"]
+    assert response.status_code == 409 and "Episode 1's series memory is not written yet" in response.json()["detail"]
 
     job = _post_step(api, story_id, "script", ep=1).json()
     _run(api, job["id"], _script_llm(E4=[E4_PASSED]))

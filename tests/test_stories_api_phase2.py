@@ -1720,7 +1720,7 @@ def test_the_places_season_and_proposal_estimates(api):
     assert portrait["units"] == {"llm_calls": 0, "images": 1, "edit_images": 2, "tts_chars": 0}
     assert api.client.get(regen, params={"target": "character:char_nobody:text"}).status_code == 404
     assert api.client.get(regen, params={"target": "character:char_kiwilo:image:extra:1"}).status_code == 400
-    assert api.client.get(_url(story_id, "/estimate/memory")).status_code == 400
+    assert api.client.get(_url(story_id, "/estimate/rerender")).status_code == 400
     assert api.client.get(_url(story_id, "/estimate/script"), params={"ep": 1}).status_code == 409  # phase 3: not ready
 
 

@@ -1,9 +1,10 @@
-## CURRENT STATE — AI Story **phase 5 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–3 **done**; next: **stage 4**
+## CURRENT STATE — AI Story **phase 5 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–4 **done**; next: **stage 5**
 - **In-progress header** (keep current):
   - **Current phase:** IMPLEMENT (phases 0–3 done: the plan was mapped, clarified and approved 2026-09-29).
-  - **Current stage:** 3 done → next **stage 4** (steps memory, feedback, propose-next and the gate) [Opus agent].
-  - **Next action:** spawn the stage-4 agent (the plan's stage 4 section + the stage 1–3 notes below); fail-first
-    tests before code; the DEC-130 gate change ships with the memory step.
+  - **Current stage:** 4 done → next **stage 5** (series API and CLI) [Sonnet agent]; then stage 6 with the spike's
+    design (below).
+  - **Next action:** spawn the stage-5 agent; until it lands, `POST /steps/memory|feedback|propose-next` answer 404
+    (the worker runs them; no route calls them yet) — never deploy between stages 4 and 5.
   - **Open questions:** none blocking. Stage 12 needs the human to confirm font filenames, sources and sizes
     before any download.
 - **Started** 2026-09-29 on the human's "Start AI Story phase 5 under the repo protocol (FULL task), on this
@@ -72,6 +73,24 @@
   rewritten → consider in stage 7. `tools/bench_llm.py` builds E1 without the new inputs → stage 13's bench.
   DECISIONS to record (stage 15): one hook per scene, the 4-hook window, "latest decided feedback item", the
   pre-check as `hook_payoff` issues before E4, the separate payoff cap, E4 shows only earlier episodes' recaps.
+- **Stage 4 notes:** the gate (DEC-130 amended) blocks the script, the storyboard and the fast track (only while it
+  would write one of them) of episode N+1 until `entries[epN]` is approved and fresh; a hand-written recap with no
+  entry no longer passes (no live season has one). Re-running memory clears its approval. Proposals for N+1 are
+  the job document `proposals:<N+1>`; ids `char_1/char_2/twist_1/twist_2`; decisions final; accepting needs the
+  source memory still approved and fresh; `approve proposals:<ep>` only when every item is decided (writes
+  nothing). Feedback stores `stats` too (≤ 6000, never trimmed); one item per episode; re-running F1 clears the
+  choice. `approve_season` now re-reads under the lock. `CAST_PARAMS` unchanged; `introduced_in` rides in
+  `CAST_JOB_PARAMS`.
+- **Stage 6 spike (done early, scratch copy of `1cd0106`, read-only against the worktree): GO, with a flag the plan
+  lacked.** The plan's "stored documents render exactly as today because the timeline is unchanged" is wrong:
+  `render/timeline.py:278` and `assets.audio_entries` re-run `episode_pass` on every render and compare stored shot
+  durations within 1e-3 s, so ungated quantization breaks 39/40 stored documents and moves the golden framemd5.
+  Fix inside the plan's intent (RC-M3): `whole_frames=True` on `episode_pass`/`scene_timing`/`allocate_shots`;
+  `build_storyboard` writes an optional `whole_frames: true`; timeline and `audio_entries` follow the board's flag;
+  an old board converts on its first full re-time (a one-time re-render of most of its shots); golden builds
+  old-style. 7 files (+114/−24); 3 phase-3 tests re-pin (tails +1/60 s); golden and 40/40 stored docs identical;
+  later-shot frame drift 20 % → 0. Edge: up to +½ frame per scene; `voice_lines.save()` must re-time the script
+  again after a board converts. Notes: session scratchpad `stage6-spike-notes.md`, patch `stage6-spike/gated.patch`.
 - **Rollback:** code: delete the worktree and the branch (or revert a stage's commit). Live data: restore the
   tars (`tar -C outputs/stories -xzf …`) and check `sha256sum -c enfr-before.sha`.
 
@@ -96,8 +115,8 @@ RC-P1…P11, RC-S1…S4, RC-T1…T3, RC-E1…E5 and RC-A1…A9 (tables below) st
 | 1 | memory documents and the pure fold [Opus] | **done** (local 5897/1, CI 5181/686; 200 new tests; 2 named re-pins; 4 live seasons validate unchanged) |
 | 2 | prompts S3, F1, N1 [Sonnet] | **done** (local 5950/1, CI 5234/686; 53 new tests; 5 named registry re-pins; elision repair made single-sourced) |
 | 3 | continuity in the episode prompts [Opus] | **done** (local 6017/1, CI 5301/686; 67 new tests; ep-1 E1/E3/E4 request shas pinned from HEAD incl. max_tokens; 1 review round) |
-| 4 | steps memory, feedback, propose-next and the gate [Opus] | next |
-| 5 | series API and CLI [Sonnet] | — |
+| 4 | steps memory, feedback, propose-next and the gate [Opus] | **done** (local 6061/1, CI 5348/683; 45 new tests + 8 reverted mutation proofs; the later-phase pins moved, named) |
+| 5 | series API and CLI [Sonnet] | next |
 | 6 | whole-frame shot timing (second riskiest) [Opus] | — |
 | 7 | re-edit operations [Opus] | — |
 | 8 | partial re-render (**RISKIEST**) [Opus] | — |

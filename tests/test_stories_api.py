@@ -657,7 +657,9 @@ def test_a_bad_or_unknown_id_is_a_404_everywhere(api, bad_id, method, suffix, bo
 
 # ============================================================ grammar edges
 
-LATER_STEPS = ["memory", "feedback", "propose-next", "rerender", "import"]
+# Phase 5 stage 4 registered memory, feedback and propose-next (the API wires
+# them in stage 5): rerender (stage 8) and import (phase 7) are still later.
+LATER_STEPS = ["rerender", "import"]
 # Phase 3 (stage 8) runs these; on a story that is not ready they wait for it.
 EPISODE_STEPS = ["script", "storyboard"]
 NOT_READY = "The story is not ready yet: approve the cast, the places and the season first."
@@ -1055,7 +1057,7 @@ def test_the_estimate_of_each_phase_one_step(api):
 
     # Stage 8: the preview has its own estimate (tests/test_style_preview.py).
     assert api.client.get(f"{url}/style_preview").json()["units"] == {"images": 3}
-    assert api.client.get(f"{url}/memory").status_code == 400
+    assert api.client.get(f"{url}/rerender").status_code == 400
     assert api.client.get(f"{url}/script", params={"ep": 1}).status_code == 409  # phase 3: waits for a ready story
     assert api.client.get(f"{url}/nope").status_code == 404
 

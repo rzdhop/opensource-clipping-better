@@ -135,7 +135,7 @@ function SeriesMemoryPanel() {
   return (
     <div className="card story-season-memory">
       <h4 className="card-title">Series memory</h4>
-      <p className="form-hint">Filled as episodes are approved (phase 5).</p>
+      <p className="form-hint">Filled by the memory step once an episode's script is approved.</p>
     </div>
   )
 }

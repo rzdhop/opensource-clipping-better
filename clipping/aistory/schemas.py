@@ -1516,10 +1516,13 @@ _MEMORY_ENTRY_SCHEMA = _document({
     "approved_at": _TIMESTAMP_OR_NULL,
 })
 
-# audience_feedback items (spec 2.6, phase 5): the pasted text, F1's digest
-# and its three directions once F1 ran, and the direction the user chose
-# (or none) when approving it.
+# audience_feedback items (spec 2.6, phase 5): the pasted text (and, from
+# stage 4, the optional pasted stats F1 reads beside it), F1's digest and its
+# three directions once F1 ran, and the direction the user chose (or none)
+# when approving it. Both pasted texts are capped, never trimmed: over the
+# cap the paste is refused (``workflow.store_feedback``).
 FEEDBACK_TEXT_MAX_LENGTH = 6000
+FEEDBACK_STATS_MAX_LENGTH = 6000
 FEEDBACK_DIGEST_MAX_WORDS = 60
 FEEDBACK_DIRECTIONS = 3
 
@@ -1528,6 +1531,7 @@ _AUDIENCE_FEEDBACK_SCHEMA = _document({
     "pasted_at": _NON_EMPTY_STRING,
     "text": _text(FEEDBACK_TEXT_MAX_LENGTH),
 }, optional={
+    "stats": _text(FEEDBACK_STATS_MAX_LENGTH),
     "digest": _NON_EMPTY_STRING,
     "directions": {"type": "array", "items": _NON_EMPTY_STRING,
                    "minItems": FEEDBACK_DIRECTIONS, "maxItems": FEEDBACK_DIRECTIONS},
@@ -1590,6 +1594,8 @@ def memory_entry_errors(entry, path="$") -> list:
 
 def _audience_feedback_errors(errors, path, item) -> None:
     _check_text(errors, f"{path}.text", item["text"])
+    if "stats" in item:
+        _check_text(errors, f"{path}.stats", item["stats"])
     if "digest" in item:
         _check_text(errors, f"{path}.digest", item["digest"], max_words=FEEDBACK_DIGEST_MAX_WORDS)
     for i, direction in enumerate(item.get("directions") or []):

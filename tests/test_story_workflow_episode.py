@@ -128,7 +128,8 @@ def _shots_of(board, sid):
 
 def test_the_episode_steps_approvals_and_targets_left_the_later_phases(wf):
     assert wf.PHASE3_STEPS == ("script", "storyboard")
-    assert wf.LATER_STEPS == ("memory", "feedback", "propose-next", "rerender", "import")
+    # Phase 5 stage 4 registered memory, feedback and propose-next: rerender and import are still later.
+    assert wf.LATER_STEPS == ("rerender", "import")
     assert wf.LATER_APPROVALS == ()
     # shot:<ep>:<shid>:video (phase 6) is still to come; phase 4 reads the shot's image first.
     assert wf.LATER_TARGETS == ("shot",)
@@ -167,12 +168,25 @@ def test_an_episode_step_needs_a_ready_story_an_episode_of_the_season_and_the_re
         assert _refused(wf, "invalid", wf.episode_context, store, story, ep, step="script") == (
             f"The season plans episodes 1 to 8; there is no episode {ep}.")
     detail = _refused(wf, "conflict", wf.episode_context, store, story, 2, step="script")
-    assert "recap of episode 1" in detail and "phase 5" in detail
-    # A regenerate works on a script that exists: no recap asked.
-    assert wf.episode_context(store, story, 2, step="script", require_recap=False).ep == 2
+    # Plan 11 stage 4 (DEC-130 amended): episode 1's series memory, written, approved and fresh.
+    assert detail == ("Episode 1's series memory is not written yet: approve episode 1's script, then run memory "
+                      "for episode 1 and approve it, before writing episode 2.")
+    # A regenerate works on a script that exists: no memory asked.
+    assert wf.episode_context(store, story, 2, step="script", require_memory=False).ep == 2
 
+    # A recap no memory step wrote is not a memory: refused alike.
     with_recap = _ready_story(store, recaps={"ep01": "Kiwilo et Mangella se sont alliés en secret."})
-    assert wf.episode_context(store, store.get(with_recap), 2, step="script").ep == 2
+    assert _refused(wf, "conflict", wf.episode_context, store, store.get(with_recap), 2, step="script") == detail
+    # Episode 1 written (rev 1) and its memory entry approved at that revision: episode 2 may be written.
+    from clipping.aistory import series_memory
+
+    with_memory = _ready_story(store)
+    _run(_new().script, store, with_memory, llm=_script_llm())
+    entry = {"recap": "Kiwilo et Mangella se sont alliés en secret.", "hooks_opened": [], "hooks_closed": [],
+             "relationship_deltas": {}, "script_rev": 1, "at": NOW, "approved_at": NOW}
+    season = series_memory.merge_entry(store.read_doc(with_memory, "season.json"), 1, entry)
+    store.write_doc(with_memory, "season.json", season, now=NOW)
+    assert wf.episode_context(store, store.get(with_memory), 2, step="script").ep == 2
 
     store.update(story_id, lambda doc: doc["approvals"].update(season=None), now=NOW)
     detail = _refused(wf, "conflict", wf.episode_context, store, store.get(story_id), 1, step="script")

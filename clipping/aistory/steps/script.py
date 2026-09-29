@@ -2,8 +2,9 @@
 (spec 3 step 8, 2.7, 4.2 rows E1-E4; AI Story phase 3).
 
 ``ctx.ep`` is the episode. Needs a ``ready`` story, an episode the season
-plans, and -- from episode 2 on -- the previous episode's recap in the
-season's memory (``episode_common.check_episode_preconditions``).
+plans, and -- from episode 2 on -- the previous episode's series memory
+written, approved and fresh (the gate, DEC-130 as amended by plan 11 stage
+4: ``episode_common.check_episode_preconditions``).
 
 One job fills whatever the episode's ``script.json`` is still missing, in
 this order, writing the script after **every** accepted call (atomic,
@@ -17,7 +18,10 @@ was paid for survives a failure, a cancel or the step's time budget:
    2 on (phase 5, plan 11 stage 3), E1 is handed the hooks open when the
    episode starts (``series_memory.open_hooks_before``) and the audience
    direction chosen on the previous episode's feedback; a scene keeps the
-   open hook it pays off (``pays_off``), at least one body scene naming one;
+   open hook it pays off (``pays_off``), at least one body scene naming one.
+   E1 is offered the **approved** characters only (:func:`e1_cast`, plan 11
+   stage 4): one an N1 proposal just added is written into an episode once
+   it is approved;
 2. every body scene still a stub, in order -> **E2**, its lines (ids from
    the scene's own block, ``schemas.line_id_for``; an estimated timing
    each), sfx cues anchored to ``start`` or a line id, optional on-screen
@@ -358,8 +362,18 @@ def audience_direction(ec):
     return series_memory.chosen_direction(ec.season, ec.ep - 1) if ec.ep >= 2 else None
 
 
+def e1_cast(ec) -> list:
+    """The characters E1 may put in a scene: the story's approved ones, in
+    cast order (plan 11 stage 4). A character not approved yet -- a guest or
+    recurring one an accepted N1 proposal added, whose text and sheets may
+    not even exist -- is left out until it is; a ``ready`` story always has
+    its leads and support approved."""
+    return [doc for doc in ec.cast if doc.get("approved_at")]
+
+
 def write_beat_sheet(ctx, ec, script, *, tools, announced) -> None:
-    """E1 into *script* (in place; the caller writes it). From episode 2 on,
+    """E1 into *script* (in place; the caller writes it), offered the
+    approved characters (:func:`e1_cast`). From episode 2 on,
     E1 is handed the hooks open when the episode starts (:func:`episode_open_hooks`)
     to pay off and the chosen audience direction (:func:`audience_direction`);
     with a hook offered, the call's cap is the payoff variant's
@@ -367,9 +381,10 @@ def write_beat_sheet(ctx, ec, script, *, tools, announced) -> None:
     pack = _pack(ec, ctx, announced)
     slots = timing.episode_slots(ec.template, ec.ep)
     hooks = episode_open_hooks(ec)
+    cast = e1_cast(ec)
     system, user, schema = prompts.build_e1(
         pack, ep=ec.ep, arc_entry=ec.arc_entry, template=ec.template, episode_defaults=ec.episode_defaults,
-        cast=[{"char_id": doc["char_id"], "name": doc["name"]} for doc in ec.cast],
+        cast=[{"char_id": doc["char_id"], "name": doc["name"]} for doc in cast],
         places=[{"place_id": pid, "name": ec.entities["places"][pid]["name"], "time_variants": variants}
                 for pid, variants in ec.places.items()],
         props=[{"prop_id": pid, "name": ec.entities["props"][pid]["name"]} for pid in ec.prop_ids],
@@ -380,7 +395,7 @@ def write_beat_sheet(ctx, ec, script, *, tools, announced) -> None:
     def validate(reply):
         _repair_e1_reply(ec, reply)
         errors = prompts.validate_e1(reply, ep=ec.ep, template=ec.template, episode_defaults=ec.episode_defaults,
-                                     cast_ids=list(ec.entities["characters"]), places=ec.places,
+                                     cast_ids=[doc["char_id"] for doc in cast], places=ec.places,
                                      prop_ids=ec.prop_ids, open_hooks=hooks)
         if errors:
             return errors

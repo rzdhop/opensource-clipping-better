@@ -16,7 +16,9 @@ Phase 1 registers ``concepts``, ``bible`` and ``regenerate`` (stage 6) and
 adds ``script`` and ``storyboard`` (and the episode targets); phase 4 adds
 ``assets`` (and the image and voice targets of ``regenerate``), ``render``,
 ``metadata`` (and the metadata target of ``regenerate``) and ``fast-track``
-(module ``fast_track``). Each is registered by module name and imported on
+(module ``fast_track``); phase 5 adds the series steps ``memory``,
+``feedback`` and ``propose-next`` (module ``propose_next``), each one LLM
+call ending awaiting approval. Each is registered by module name and imported on
 its first run, never here: importing this package must not pull in the
 prompt catalogue, the LLM chain or the generation chains, so the worker's
 dispatch and a test that only needs the registry stay as light as they were.
@@ -115,6 +117,9 @@ RUNNERS: dict[str, Callable[[StepContext], object]] = {
     "render": _deferred("render"),
     "metadata": _deferred("metadata"),
     "fast-track": _deferred("fast_track"),
+    "memory": _deferred("memory"),
+    "feedback": _deferred("feedback"),
+    "propose-next": _deferred("propose_next"),
 }
 
 # DEC-161: the steps with nothing to approve, whose job ends ``completed``;

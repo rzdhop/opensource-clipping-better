@@ -183,14 +183,15 @@ def test_a_story_that_is_not_ready_is_refused(cli):
 
 
 def test_episode_2_is_refused_naming_the_memory_step(cli):
-    story_id = _ready(cli)  # no recap for episode 1 yet
+    story_id = _ready(cli)  # no memory for episode 1 yet
     _keyed(cli)
 
     code = cli.run("step", story_id, "script", "--ep", "2")
 
     assert code == 1
     err = cli.capsys.readouterr().err
-    assert "phase 5" in err and "memory" in err
+    assert ("Episode 1's series memory is not written yet: approve episode 1's script, then run memory for "
+            "episode 1 and approve it, before writing episode 2.") in err
 
 
 def test_auto_approve_approves_a_passed_script(cli):

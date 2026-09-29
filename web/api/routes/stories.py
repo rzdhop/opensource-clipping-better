@@ -281,10 +281,14 @@ def _job_doc(step, params, ep=None):
     ``shot:<ep>:<shid>:plan``. Phase 4: ``assets:<ep>`` for the assets step
     and for a shot's image (``shot:<ep>:<shid>``) or a line's voice
     (``line:<ep>:<lid>``); none for the render, the metadata, the fast track
-    and a ``metadata:<ep>:<platform>`` (they end completed, DEC-161). None for
-    anything else."""
+    and a ``metadata:<ep>:<platform>`` (they end completed, DEC-161). Phase 5
+    (``workflow.series_job_doc``): ``memory:<ep>``, ``feedback:<ep>`` and --
+    the proposals sit in the folder of the episode they are for --
+    ``proposals:<ep + 1>`` for ``propose-next``. None for anything else."""
     if step in workflow.EPISODE_APPROVALS:
         return f"{step}:{ep}" if type(ep) is int else None
+    if step in workflow.SERIES_STEPS:
+        return workflow.series_job_doc(step, ep)
     if step in LLM_STEPS:
         return step
     if step == PREVIEW_STEP:
@@ -894,8 +898,9 @@ async def run_step(story_id: str, step: str, response: Response,
     queued job, or -- the storyboard with ``params.fast`` -- 200 with the
     episode page, built here (see ``_episode_step``). ``assets``, ``render``,
     ``metadata``, ``fast-track`` (phase 4, one episode: ``ep``): 201 with the
-    queued job (see ``_phase4_step``). Any other step of 9.1: 400, a later
-    phase. Anything else: 404.
+    queued job (see ``_phase4_step``). A step of 9.1 still a later phase's
+    (``workflow.LATER_STEPS``): 400. Anything else -- the phase-5 series steps
+    too, until their routes are wired (plan 11 stage 5) -- 404.
     """
     stories = _stories()
     story = _load(stories, story_id)
@@ -978,8 +983,9 @@ async def _episode_step(stories, story, step, params, ep, response):
     Refused before any job exists, in this order: the episode's
     preconditions (``workflow.episode_context``: 409 for a story that is not
     ready, naming what to approve; 400 without ``ep`` or for one the season
-    does not plan; 409 from episode 2 on without the recap of the one before,
-    naming phase 5's memory step), then the parameters (400: ``script``
+    does not plan; 409 from episode 2 on while the series memory of the one
+    before is not written, approved and fresh, naming which -- the gate,
+    DEC-130 as amended by plan 11 stage 4), then the parameters (400: ``script``
     ``{measure_voices?}``, ``storyboard`` ``{fast?}``, closed lists), then --
     the storyboard -- a complete script (409 naming what is missing), then
     what every job meets (``_create_step_job``: 409 while a step of the story
@@ -1042,7 +1048,8 @@ async def _phase4_step(stories, story, step, params, ep) -> JobResponse:
     Refused before any job exists, in this order: the episode's
     preconditions (``workflow.episode_context``, as the phase-3 steps: 409 for
     a story that is not ready, 400 without ``ep`` or for one the season does
-    not plan, 409 from episode 2 on without the recap), then the parameters
+    not plan; the memory gate for the fast track alone, while it would write
+    the script or the storyboard), then the parameters
     (400, the step's closed list: ``assets`` ``{align_words?}``, ``render``
     ``{subtitles?, encoder?}``, ``fast-track`` ``{storyboard?}``, ``metadata``
     none), then what the step is made from (409 with the step's own sentence:

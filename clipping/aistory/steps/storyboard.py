@@ -2,7 +2,7 @@
 5; AI Story phase 3).
 
 Needs what the script step needs (``episode_common.
-check_episode_preconditions``) and a complete script: every scene written
+check_episode_preconditions``, the memory gate included) and a complete script: every scene written
 and every framing part there; otherwise ``StepFailed`` naming what is
 missing.
 

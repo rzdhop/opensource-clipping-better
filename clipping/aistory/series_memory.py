@@ -35,6 +35,14 @@ Re-running memory for an episode replaces its one entry and re-folds
 (:func:`merge_entry`), which is idempotent: the result depends on the
 entries alone.
 
+What the memory step and the gate read (plan 11 stage 4):
+:func:`memory_state` -- ``none``, ``draft``, ``approved`` or ``stale`` (the
+entry written from another revision of its script) -- and, for S3, the
+relationships as they stand before an episode
+(:func:`relationship_state_before`) and the pairs of the cast
+(:func:`cast_pairs`). A :class:`FoldError` carries its failures as
+``(episode, hook)`` too, so the step can name the later episode.
+
 Pure: no I/O, no store. No function modifies its arguments; what they
 return shares nothing with them.
 """
@@ -55,10 +63,15 @@ _CHAR_ID = re.compile(schemas.CHAR_ID_PATTERN)
 
 
 class FoldError(ValueError):
-    """The entries do not fold: a hook is closed that is not open then."""
+    """The entries do not fold: a hook is closed that is not open then.
 
-    def __init__(self, problems):
+    ``problems`` are the sentences (:func:`fold_errors`'); ``closings`` the
+    same failures as ``(episode, hook)``: the episode whose entry closes
+    *hook* while it is not open then (what the memory step names)."""
+
+    def __init__(self, problems, closings=()):
         self.problems = list(problems)
+        self.closings = list(closings)
         super().__init__("; ".join(self.problems))
 
 
@@ -114,26 +127,31 @@ def _ordered(entries):
 
 
 def _fold(entries):
-    recaps, open_hooks, state, problems = {}, [], {}, []
+    """``(derived, closings)``: the folded fields, and each ``(key, hook)``
+    closed while it is not open then."""
+    recaps, open_hooks, state, closings = {}, [], {}, []
     for key, entry in _ordered(entries):
         for hook in entry["hooks_closed"]:
             if hook in open_hooks:
                 open_hooks.remove(hook)
             else:
-                problems.append(f"{key} closes {hook!r}, which is not an open hook then "
-                                "(a hook is closed only by its exact text)")
+                closings.append((key, hook))
         for hook in entry["hooks_opened"]:
             if hook not in open_hooks:
                 open_hooks.append(hook)
         recaps[key] = entry["recap"]
         state.update(entry["relationship_deltas"])
     derived = {"recaps": recaps, "open_hooks": open_hooks, "relationship_state": dict(sorted(state.items()))}
-    return derived, problems
+    return derived, closings
+
+
+def _problem(key, hook) -> str:
+    return f"{key} closes {hook!r}, which is not an open hook then (a hook is closed only by its exact text)"
 
 
 def fold_errors(entries) -> list:
     """Why *entries* do not fold (a closed hook that is not open then), or []."""
-    return _fold(entries)[1]
+    return [_problem(key, hook) for key, hook in _fold(entries)[1]]
 
 
 def fold_memory(entries) -> dict:
@@ -141,10 +159,18 @@ def fold_memory(entries) -> dict:
     *entries* (``series_memory.entries``; None or {} fold to empty fields).
     The entries must each be valid (``schemas.memory_entry_errors``);
     :class:`FoldError` (a ValueError) when a closed hook is not open then."""
-    derived, problems = _fold(entries)
-    if problems:
-        raise FoldError(problems)
+    derived, closings = _fold(entries)
+    if closings:
+        raise FoldError([_problem(key, hook) for key, hook in closings],
+                        [(_episode_of(key), hook) for key, hook in closings])
     return derived
+
+
+def _before(season, ep) -> dict:
+    """The fold of the entries of the episodes before *ep*."""
+    memory_key(ep)
+    entries = entry_map(season)
+    return fold_memory({key: entry for key, entry in entries.items() if _episode_of(key) < ep})
 
 
 def open_hooks_before(season, ep) -> list:
@@ -152,10 +178,21 @@ def open_hooks_before(season, ep) -> list:
     the episodes before it (what S3 may close for *ep*, and what E1 of *ep*
     must pay off). The stored ``open_hooks`` is the fold of every entry,
     later ones included."""
-    memory_key(ep)
-    entries = entry_map(season)
-    earlier = {key: entry for key, entry in entries.items() if _episode_of(key) < ep}
-    return fold_memory(earlier)["open_hooks"]
+    return _before(season, ep)["open_hooks"]
+
+
+def relationship_state_before(season, ep) -> dict:
+    """The relationships as they stand when episode *ep* starts: the fold of
+    the entries before it (what S3 of *ep* is shown as "current"). The
+    stored ``relationship_state`` folds later episodes' deltas too."""
+    return _before(season, ep)["relationship_state"]
+
+
+def cast_pairs(char_ids) -> list:
+    """Every :func:`pair_key` of two of *char_ids*, sorted: the pairs S3 may
+    report a delta for (``schemas.s3_schema``'s enum)."""
+    ids = sorted(set(char_ids))
+    return [pair_key(a, b) for i, a in enumerate(ids) for b in ids[i + 1:]]
 
 
 # --------------------------------------------------------- audience feedback
@@ -270,8 +307,8 @@ def drop_character(memory, char_id):
     # A stored season's entries fold (the store validates it on every read);
     # ones that do not are left for the season's validator to report.
     if entries and _foldable(entries):
-        derived, problems = _fold(entries)
-        if not problems:
+        derived, closings = _fold(entries)
+        if not closings:
             new.update(derived)
     return new, removed
 
@@ -288,6 +325,25 @@ def entry_is_stale(entry, script_doc) -> bool:
     script than *script_doc* (``script_rev`` against the script's ``rev``),
     or from a script that is gone (*script_doc* None)."""
     return script_doc is None or entry["script_rev"] != script_doc["rev"]
+
+
+# What an episode's memory is, for the gate and the episode views (plan 11
+# stage 4): no entry; written, waiting for its approval; approved; or
+# written from another revision of the script (stale, whatever its approval).
+MEMORY_STATES = ("none", "draft", "approved", "stale")
+
+
+def memory_state(season, ep, script_doc) -> str:
+    """``none`` | ``draft`` | ``approved`` | ``stale`` (:data:`MEMORY_STATES`)
+    of episode *ep*'s memory entry against *script_doc*, its script as it is
+    now (None when it has none). Stale wins over approved: an approval of
+    another revision of the script approves nothing now."""
+    entry = entry_map(season).get(memory_key(ep))
+    if entry is None:
+        return "none"
+    if entry_is_stale(entry, script_doc):
+        return "stale"
+    return "approved" if entry["approved_at"] else "draft"
 
 
 def is_stale(season, ep, script_doc) -> bool:

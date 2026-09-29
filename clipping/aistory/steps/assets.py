@@ -3,7 +3,9 @@ and BGM (spec 3 step 10, 6.4, 6.5, 8.1, 11; AI Story phase 4, stage 8;
 DEC-151..155, DEC-160, DEC-165).
 
 ``ctx.ep`` is the episode. Needs what the script step needs
-(``episode_common.check_episode_preconditions``), an **approved** script and
+(``episode_common.check_episode_preconditions``) but the memory gate (plan
+11 stage 4: the script and storyboard it is made from met it), an
+**approved** script and
 an **approved, current** storyboard that covers it: every scene planned from
 its current revision, and prompts resolved from the entities as they are
 now. Otherwise ``StepFailed`` saying what to do, before anything is sent.
@@ -1446,7 +1448,9 @@ def run(ctx, *, adapters=None, transport=None, time_fn=time.monotonic, sleep_fn=
     ``episode_common.Budget`` shared with a caller running this step inside
     its own (the fast track); None gives the step its own."""
     ec = episode_common.load_episode_context(ctx)
-    episode_common.check_episode_preconditions(ctx, ec)
+    # Made from an approved script and storyboard, which met the memory gate
+    # when they were written: this step never meets it (plan 11 stage 4).
+    episode_common.check_episode_preconditions(ctx, ec, require_memory=False)
     ctx.cancel.check()
     tools = entities.Tools(time_fn=time_fn, sleep_fn=sleep_fn, adapters=adapters, transport=transport)
     return _Assets(ctx, ec, tools=tools, transcribe=transcribe, budget=budget).run()

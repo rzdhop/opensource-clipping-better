@@ -344,7 +344,9 @@ def run(ctx, *, runner=None, time_fn=time.monotonic, run_process=subprocess.run,
     shared with a caller running this step inside its own (the fast track);
     None gives the step its own."""
     ec = episode_common.load_episode_context(ctx)
-    episode_common.check_episode_preconditions(ctx, ec)
+    # Made from an approved script and storyboard, which met the memory gate
+    # when they were written: this step never meets it (plan 11 stage 4).
+    episode_common.check_episode_preconditions(ctx, ec, require_memory=False)
     ctx.cancel.check()
     script, _manifest, render_sha = require_render(ec)
     tools = entities.Tools(runner=runner, time_fn=time_fn)

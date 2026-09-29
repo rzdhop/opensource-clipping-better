@@ -895,16 +895,21 @@ def test_episode_2_waits_for_the_recap_of_episode_1(store):
 
     message, _ = _failed(m.script, store, story_id, llm=llm, ep=2)
 
-    assert "recap" in message and "phase 5" in message and "memory" in message
+    # Plan 11 stage 4 (DEC-130 amended): the recap comes with episode 1's series memory, which the gate
+    # needs written, approved and fresh; it names what is missing.
+    assert message == ("Episode 1's series memory is not written yet: approve episode 1's script, then run memory "
+                       "for episode 1 and approve it, before writing episode 2.")
     assert llm.calls == []
     assert store.list_episodes(story_id) == []
 
 
 def test_episode_2_with_the_recap_asks_for_a_recap_scene(store):
     m = _new()
-    # series_memory in its spec-2.6 shape: recaps by "epNN", relationships by "<char_a>|<char_b>".
-    story_id = _ready_story(store, recaps={"ep01": "Kiwilo et Mangella se sont alliés en secret."},
-                            relationships={f"{KIWILO}|{MANGELLA}": "publiquement ennemis, secrètement alliés"})
+    # series_memory in its spec-2.6 shape: recaps by "epNN", relationships by "<char_a>|<char_b>" -- folded
+    # from episode 1's memory entry, which the gate needs (plan 11 stage 4); it opens no hook.
+    story_id = _continuity_story(store, entries=((1, _memory_entry(
+        "Kiwilo et Mangella se sont alliés en secret.", [],
+        deltas={f"{KIWILO}|{MANGELLA}": "publiquement ennemis, secrètement alliés"})),), chosen=None)
     e1 = copy.deepcopy(E1_REPLY)
     e1["scenes"].insert(0, _stub("recap", PARLOIR, "day", [KIWILO], [], "Ce qui s'est passé au parloir.",
                                  "tension", 2.5))
@@ -934,7 +939,7 @@ def test_the_script_step_repairs_dropped_french_elisions_in_every_field(store):
     hook's on-screen text, the cliffhanger's reveal, the recap's on-screen
     text and the next-episode teaser (episode 2, so the recap applies)."""
     m = _new()
-    story_id = _ready_story(store, recaps={"ep01": "Un resume."})
+    story_id = _continuity_story(store, entries=((1, _memory_entry("Un resume.", [])),), chosen=None)
     e1 = copy.deepcopy(E1_REPLY)
     e1["title"] = "L histoire d une île"
     e1["scenes"].insert(0, _stub("recap", PARLOIR, "day", [KIWILO], [], "Ce qui s est passe au parloir.",
@@ -1471,6 +1476,9 @@ def _continuity_story(store, *, entries=((1, EP1_ENTRY),), chosen=1):
     from clipping.aistory import series_memory
 
     story_id = _ready_story(store)
+    # Episode 1's script, at the revision the entries record (1): the gate needs its memory fresh (plan 11
+    # stage 4).
+    _run(_new().script, store, story_id, llm=_script_llm())
     season = store.read_doc(story_id, "season.json")
     for ep, entry in entries:
         season = series_memory.merge_entry(season, ep, entry)

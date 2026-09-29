@@ -82,7 +82,9 @@ Rules this module keeps:
   ``StoryStore`` in the process: the API and the worker thread each build
   their own instance, and the index is a read-modify-write. Processes (the CLI
   next to the server) do not coordinate; writes stay atomic and the index can
-  be rebuilt.
+  be rebuilt. ``update_doc``/``update_episode_doc`` re-read a document and
+  write it back under that lock (phase 5: a step merges its LLM reply into
+  ``season.json`` as it is at the write, never as it was before the call).
 
 Stdlib only (DEC-012).
 """
@@ -835,6 +837,38 @@ class StoryStore:
             messages = self._save_story(story, now=now)
         self._log(messages)
         return copy.deepcopy(new)
+
+    def update_doc(self, story_id, name, mutate, *, now, validator=None):
+        """Re-read one of the story's documents and write it back changed,
+        all under the story lock (re-read-then-write, phase 5 stage 4).
+
+        *mutate* is handed a copy of the document as it is on disk now
+        (None when there is none yet) and returns the document to write, or
+        None to write nothing; it may raise to refuse. The write is
+        :meth:`write_doc`'s (validated, atomic, the story's ``updated_at``
+        moves). Every other writer that takes the lock -- another
+        ``update_doc``, an entity delete's cleanup (``delete_entity``) -- is
+        serialised with this one, so neither loses the other's change: a
+        caller that spent minutes on an LLM reply merges it into the document
+        as it is *now*, never into the one it read before the call. Returns
+        what was written, or the document as read when nothing was. The lock
+        is re-entrant: *mutate* may read (or update) another document."""
+        with self._lock:
+            current = self.read_doc(story_id, name)
+            new = mutate(copy.deepcopy(current) if current is not None else None)
+            if new is None:
+                return current
+            return self.write_doc(story_id, name, new, now=now, validator=validator)
+
+    def update_episode_doc(self, story_id, ep, name, mutate, *, now, validator=None):
+        """:meth:`update_doc` for an episode document (``read_episode_doc`` /
+        ``write_episode_doc``), under the same story lock."""
+        with self._lock:
+            current = self.read_episode_doc(story_id, ep, name)
+            new = mutate(copy.deepcopy(current) if current is not None else None)
+            if new is None:
+                return current
+            return self.write_episode_doc(story_id, ep, name, new, now=now, validator=validator)
 
     def append_activity(self, story_id, line) -> None:
         """Append one line to the story's activity.log. Best effort: never

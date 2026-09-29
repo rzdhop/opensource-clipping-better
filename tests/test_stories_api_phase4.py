@@ -101,7 +101,8 @@ def test_the_phase_4_steps_approvals_and_targets_left_the_later_phases():
     from clipping.aistory.steps import regenerate
 
     assert workflow.PHASE4_STEPS == PHASE4_STEPS
-    assert workflow.LATER_STEPS == ("memory", "feedback", "propose-next", "rerender", "import")
+    # Phase 5 stage 4 registered memory, feedback and propose-next: rerender and import are still later.
+    assert workflow.LATER_STEPS == ("rerender", "import")
     assert not set(workflow.PHASE4_STEPS) & set(workflow.LATER_STEPS)
     assert workflow.LATER_APPROVALS == () and workflow.LATER_APPROVALS_BARE == ()
     assert not workflow.is_later_approval("assets:1")
@@ -360,11 +361,14 @@ def test_each_step_queues_one_job_of_its_episode_with_its_params(api, episodes):
 @pytest.mark.parametrize("step", PHASE4_STEPS)
 def test_a_step_is_refused_before_any_job_outside_its_episode(api, episodes, step):
     story_id = episode(api, episodes, "rendered")
+    # Plan 11 stage 4: of these four, only the fast track meets the memory gate (it would write episode 2's
+    # script); the assets, the render and the metadata are refused by what they are made from.
+    ep2 = "Episode 1's series memory is not written yet" if step == "fast-track" else "Episode 2 has no script yet"
     for body, status, needle in (
             ({}, 400, "send its number as ep"),
             ({"ep": 0}, 400, "The season plans episodes 1 to 8; there is no episode 0."),
             ({"ep": 9}, 400, "there is no episode 9"),
-            ({"ep": 2}, 409, "phase 5"),
+            ({"ep": 2}, 409, ep2),
     ):
         response = api.client.post(_url(story_id, f"/steps/{step}"), json=body)
         assert response.status_code == status, (body, response.text)
@@ -843,7 +847,7 @@ def test_an_estimate_is_refused_as_its_step_is(api, episodes):
     for step in PHASE4_STEPS:
         assert api.client.get(_url(story_id, f"/estimate/{step}")).status_code == 400, step  # no ep
         assert api.client.get(_url(story_id, f"/estimate/{step}"), params={"ep": 9}).status_code == 400, step
-    assert api.client.get(_url(story_id, "/estimate/memory"), params={"ep": 1}).status_code == 400
+    assert api.client.get(_url(story_id, "/estimate/rerender"), params={"ep": 1}).status_code == 400
     assert api.jobs.list_jobs() == []
 
 

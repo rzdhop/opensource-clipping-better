@@ -426,7 +426,9 @@ def run(ctx, *, profile="final", run_process=subprocess.run, popen=subprocess.Po
     if profile not in schemas.RENDER_PROFILES:
         raise StepFailed(f"Unknown render profile {profile!r} (one of {', '.join(schemas.RENDER_PROFILES)}).")
     ec = episode_common.load_episode_context(ctx)
-    episode_common.check_episode_preconditions(ctx, ec)
+    # Made from an approved script and storyboard, which met the memory gate
+    # when they were written: this step never meets it (plan 11 stage 4).
+    episode_common.check_episode_preconditions(ctx, ec, require_memory=False)
     params = read_params(ctx.params)
     ep = ec.ep
     script, board, assets_doc = require_renderable(ec)

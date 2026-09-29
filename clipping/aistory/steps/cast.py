@@ -2,11 +2,16 @@
 step 5, 2.3, 8.1, 11; phase-2 plan, DEC-119).
 
 ``params = {"selected": [sketch names], "custom": [{name, role, one_line,
-archetype?}]}``, both optional. Each selected name is an entry of the chosen
-concept's ``cast_sketch`` (an unknown name is refused, naming the valid ones,
+archetype?}], "introduced_in": N}``, each optional. Each selected name is an
+entry of the chosen concept's ``cast_sketch`` (an unknown name is refused, naming the valid ones,
 before anything is written or called); each custom entry is a character of
 the user's own. A new ``character_v1`` is created for each -- unless a
 character of that name already exists, which is then simply included.
+With ``introduced_in`` (phase 5, plan 11 stage 4: an accepted N1 proposal
+queues this path), the characters created are recorded in
+``season.json``'s ``series_memory.introduced["epNN"]`` as soon as they exist
+(:func:`record_introduced`, under the store lock: re-read, then write), so a
+run that fails later still leaves them recorded; an existing name is not.
 
 Then the step **fills what is missing**, for every character of the story
 (leads, support, recurring, guest), in this order:
@@ -47,13 +52,16 @@ from __future__ import annotations
 import copy
 import time
 
-from .. import context, prompting, prompts, refimages, schemas, voices
+from .. import context, prompting, prompts, refimages, schemas, series_memory, voices
+from .. import store as store_mod
 from .. import uploads as uploads_mod
 from . import entities, llm_call
 from .entities import CHARACTERS
 from .llm_call import StepFailed
 
 SHEETS = ("turnaround", "expressions")
+# The episode the characters this run creates are introduced in (phase 5).
+INTRODUCED_PARAM = "introduced_in"
 
 _EMPTY_PERSONALITY = {"traits": [], "wants": None, "fears": None, "speech_style": None}
 
@@ -173,6 +181,54 @@ def _create(ctx, store, story, params) -> list:
         store.write_entity(ctx.story_id, CHARACTERS, doc, now=doc["created_at"])
         ctx.on_log(f"👤 {doc['name']}: created ({doc['role']}, from the {doc['source']})")
     return [doc["char_id"] for doc in docs]
+
+
+def introduced_in(store, story_id, params):
+    """``params.introduced_in``: None, or an episode of the season;
+    ``StepFailed`` otherwise, before anything is written."""
+    ep = (params or {}).get(INTRODUCED_PARAM)
+    if ep is None:
+        return None
+    try:
+        series_memory.memory_key(ep)
+    except ValueError:
+        raise StepFailed(f"'{INTRODUCED_PARAM}' is an episode number, not {ep!r}.") from None
+    try:
+        season = store.read_doc(story_id, store_mod.SEASON_DOC)
+    except schemas.SchemaError as exc:
+        raise StepFailed(f"{exc.name} does not validate ({'; '.join(exc.errors[:3])}); fix it first.") from None
+    planned = season["episodes_planned"] if season else 0
+    if not 1 <= ep <= planned:
+        raise StepFailed(f"'{INTRODUCED_PARAM}' is an episode of the season (1 to {planned}), not {ep}.")
+    return ep
+
+
+def record_introduced(ctx, store, char_ids, ep) -> list:
+    """Add *char_ids* to ``series_memory.introduced["ep{ep:02d}"]`` (each once,
+    after what is there), under the store lock -- the season re-read, then
+    written; its approval never moves. Returns the ids added."""
+    key = series_memory.memory_key(ep)
+    added = []
+
+    def add(season):
+        if season is None:
+            return None
+        introduced = season["series_memory"]["introduced"]
+        listed = list(introduced.get(key) or [])
+        added.extend(cid for cid in char_ids if cid not in listed)
+        if not added:
+            return None
+        introduced[key] = listed + added
+        return season
+
+    try:
+        store.update_doc(ctx.story_id, store_mod.SEASON_DOC, add, now=llm_call.utc_now())
+    except schemas.SchemaError as exc:
+        raise StepFailed(f"{exc.name} does not validate ({'; '.join(exc.errors[:3])}); the new characters are "
+                         f"created but not recorded as introduced in episode {ep}.") from None
+    if added:
+        ctx.on_log(f"📅 Introduced in episode {ep}: {', '.join(added)}")
+    return added
 
 
 # ------------------------------------------------------------------------ K1
@@ -459,7 +515,10 @@ def run(ctx, *, runner=None, time_fn=time.monotonic, sleep_fn=time.sleep, adapte
     store, story = llm_call.open_story(ctx)
     entities.require_status(story, "style_approved", "Approve the style first.")
     entities.read_lock(store, ctx.story_id)
+    introduced = introduced_in(store, ctx.story_id, ctx.params)
     created = _create(ctx, store, story, ctx.params or {})
+    if introduced is not None and created:
+        record_introduced(ctx, store, created, introduced)
 
     run_ = _Run(ctx)
     announced = set()

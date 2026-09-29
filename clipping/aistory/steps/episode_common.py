@@ -11,8 +11,10 @@ common live here, once:
   its script was written against, else the story's choice), and its
   characters, places (with their existing variant names) and props;
 - :func:`check_episode_preconditions` -- the story is ``ready``; the episode
-  is one the season plans; an episode after the first needs the recap of the
-  one before it in ``series_memory`` (written by phase 5's memory step). Its
+  is one the season plans; and -- the gate, DEC-130 as amended by plan 11
+  stage 4 -- a step that writes an episode's script or storyboard from
+  episode 2 on needs the series memory of the episode before it written,
+  approved and fresh (:func:`memory_refusal`, :func:`needs_memory`). Its
   refusals are :class:`EpisodeRefused`, typed so ``workflow`` (the API and
   the CLI) answers each with its own code from this one implementation;
 - :class:`Budget` -- a step's own time budget, checked **predictively**: a
@@ -41,7 +43,7 @@ import time
 from dataclasses import dataclass
 from typing import Callable, Optional
 
-from .. import schemas, templates, timing
+from .. import schemas, series_memory, templates, timing
 from .. import store as store_mod
 from . import entities
 from .entities import CHARACTERS, PLACES, PROPS
@@ -65,13 +67,26 @@ _NOT_A_FOLDER = ("Episode {ep}'s folder (episodes/ep{ep:02d}/) is not a real dir
 NOT_READY = "not_ready"
 OUTSIDE_SEASON = "outside_season"
 NO_ARC_ENTRY = "no_arc_entry"
-NO_RECAP = "no_recap"
+# The gate (plan 11 stage 4, amending DEC-130's "no recap"): the memory of
+# the episode before is missing, written but not approved, or out of date.
+MEMORY_MISSING = "memory_missing"
+MEMORY_UNAPPROVED = "memory_unapproved"
+MEMORY_STALE = "memory_stale"
+MEMORY_REFUSALS = (MEMORY_MISSING, MEMORY_UNAPPROVED, MEMORY_STALE)
+
+# The steps that write an episode's script or storyboard, and so meet the
+# gate: always the script and the storyboard (T1 or fast); the fast track
+# while it would write one of them (:func:`needs_memory`). The assets, the
+# render and the metadata are made from an approved script and storyboard,
+# which met the gate when they were written: they never meet it themselves,
+# so a memory going stale later un-approves nothing downstream.
+MEMORY_GATED_STEPS = ("script", "storyboard")
 
 
 class EpisodeRefused(StepFailed):
     """:func:`check_episode_preconditions` refuses the episode; ``kind`` says
-    why (``NOT_READY``, ``OUTSIDE_SEASON``, ``NO_ARC_ENTRY``, ``NO_RECAP``).
-    A runner treats it as any other ``StepFailed``."""
+    why (``NOT_READY``, ``OUTSIDE_SEASON``, ``NO_ARC_ENTRY``, or one of
+    :data:`MEMORY_REFUSALS`). A runner treats it as any other ``StepFailed``."""
 
     def __init__(self, kind, message):
         super().__init__(message)
@@ -199,15 +214,19 @@ def check_story_ready(story) -> None:
         raise EpisodeRefused(NOT_READY, str(exc)) from None
 
 
-def check_episode_preconditions(ctx, ec, *, require_recap=True) -> None:
+def check_episode_preconditions(ctx, ec, *, require_memory=True) -> None:
     """:class:`EpisodeRefused` (a ``StepFailed``) with what to do, before
     anything is sent, unless the story is ``ready`` (its derived status),
-    *ec*'s episode is one of ``1..season.episodes_planned``, and -- from
-    episode 2 on -- the season's memory holds the recap of the episode before
-    it (``recaps["ep01"]`` for episode 2; phase 5's memory step writes it once
-    an episode is approved). A regenerate works on a script that already
-    exists, so it passes ``require_recap=False``. *ctx* is not read (the web
-    layer and the fast storyboard call this without one)."""
+    *ec*'s episode is one of ``1..season.episodes_planned``, the arc has an
+    entry for it, and -- from episode 2 on, with *require_memory* -- the
+    series memory of the episode before it is written, approved and fresh
+    (:func:`memory_refusal`: DEC-130 as amended by plan 11 stage 4; a recap
+    no memory step wrote does not count). The script and storyboard steps
+    keep the default; a step that writes neither -- the assets, the render,
+    the metadata, the series steps, a regenerate of a document that already
+    exists, the fast track once both are approved (:func:`needs_memory`) --
+    passes ``require_memory=False``. *ctx* is not read (the web layer and the
+    fast storyboard call this without one)."""
     check_story_ready(ec.story)
     planned = ec.season["episodes_planned"] if ec.season else 0
     ep = ec.ep
@@ -215,12 +234,65 @@ def check_episode_preconditions(ctx, ec, *, require_recap=True) -> None:
         raise EpisodeRefused(OUTSIDE_SEASON, f"The season plans episodes 1 to {planned}; there is no episode {ep!r}.")
     if ec.arc_entry is None:
         raise EpisodeRefused(NO_ARC_ENTRY, f"The season arc has no entry for episode {ep}; write the season again.")
-    if ep >= 2 and require_recap:
-        recaps = (ec.season.get("series_memory") or {}).get("recaps") or {}
-        if not recaps.get(recap_key(ep - 1)):
-            raise EpisodeRefused(NO_RECAP, (
-                f"Episode {ep} is written from the recap of episode {ep - 1}, and the season's memory has none "
-                f"yet: approve episode {ep - 1} and run the memory step (it arrives in phase 5) first."))
+    if ep >= 2 and require_memory:
+        refusal = memory_refusal(ec, ep - 1, before=f"before writing episode {ep}")
+        if refusal is not None:
+            raise refusal
+
+
+def _script_of(ec, ep):
+    """Episode *ep*'s script (another episode than ``ec.ep``, maybe), or
+    None; :class:`EpisodeRefused` (``MEMORY_STALE``) for one that cannot be
+    read: its memory cannot be checked against it."""
+    try:
+        return ec.store.read_episode_doc(ec.story_id, ep, SCRIPT_DOC)
+    except schemas.SchemaError as exc:
+        reason = "; ".join(exc.errors[:3])
+    except KeyError:
+        reason = f"episodes/ep{ep:02d}/ is not a real directory"
+    raise EpisodeRefused(MEMORY_STALE, (f"Episode {ep}'s {SCRIPT_DOC} cannot be read ({reason}), so its series "
+                                        "memory cannot be checked against it: fix or remove it first."))
+
+
+def memory_refusal(ec, ep, *, before) -> Optional[EpisodeRefused]:
+    """Why episode *ep*'s series memory does not stand -- as an
+    :class:`EpisodeRefused` to raise -- or None when its entry is written,
+    approved and fresh (its ``script_rev`` the script's ``rev``). The gate of
+    episode ``ep + 1`` and the precondition of ``propose-next`` for *ep*.
+    Each refusal names the missing piece and what to do; *before* ends the
+    sentence ("before writing episode 2"). Read from ``ec.season`` and
+    episode *ep*'s script as they are now; the story is not read."""
+    script = _script_of(ec, ep)
+    state = series_memory.memory_state(ec.season, ep, script)
+    if state == "approved":
+        return None
+    if state == "draft":
+        return EpisodeRefused(MEMORY_UNAPPROVED, (f"Episode {ep}'s series memory is written but not approved: "
+                                                  f"approve it (memory:{ep}), {before}."))
+    run = f"run memory for episode {ep}"
+    if not (script and script["approved_at"]):
+        run = f"approve episode {ep}'s script, then {run}"
+    if state == "none":
+        return EpisodeRefused(MEMORY_MISSING, (f"Episode {ep}'s series memory is not written yet: {run} and "
+                                               f"approve it, {before}."))
+    return EpisodeRefused(MEMORY_STALE, (f"Episode {ep}'s series memory is out of date: episode {ep}'s script "
+                                         f"changed since it was written. {run[0].upper()}{run[1:]} again and "
+                                         f"approve it, {before}."))
+
+
+def needs_memory(ec, step) -> bool:
+    """Whether *step* on ``ec.ep`` writes the episode's script or storyboard,
+    and so meets the gate (:data:`MEMORY_GATED_STEPS`): the script and the
+    storyboard steps always; the fast track unless both documents are
+    approved already (it keeps an approved document as it is, writing
+    neither); any other step never."""
+    if step in MEMORY_GATED_STEPS:
+        return True
+    if step != "fast-track":
+        return False
+    script = read_episode(ec, SCRIPT_DOC)
+    board = read_episode(ec, STORYBOARD_DOC)
+    return not (script and script["approved_at"] and board and board["approved_at"])
 
 
 # ------------------------------------------------------------------- budget

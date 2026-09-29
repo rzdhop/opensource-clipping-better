@@ -274,7 +274,8 @@ def test_an_unwritten_character_may_have_up_to_three_items(change):
 PHASE5_OPTIONAL = {
     ("SEASON_ARC_SCHEMA", "$.properties.arc.items"): {"history"},
     ("SEASON_ARC_SCHEMA", "$.properties.series_memory"): {"entries"},
-    ("SEASON_ARC_SCHEMA", "$.properties.audience_feedback.items"): {"digest", "directions", "chosen_direction"},
+    ("SEASON_ARC_SCHEMA", "$.properties.audience_feedback.items"): {"stats", "digest", "directions",
+                                                                     "chosen_direction"},
 }
 
 
@@ -557,8 +558,11 @@ SEASON_BREAKS.update({
     "history unknown source": _set("arc.0.history", [dict(_HISTORY, source="edit")]),
     "history summary too many words": _set("arc.0.history", [dict(_HISTORY, summary=_words(61))]),
     "history extra key": _set("arc.0.history", [dict(_HISTORY, ep=1)]),
-    "feedback item extra key": _set("audience_feedback", [dict(_FEEDBACK, stats="x")]),
+    # Stage 4 made "stats" a field (the pasted stats F1 reads): another key is the extra one.
+    "feedback item extra key": _set("audience_feedback", [dict(_FEEDBACK, views="x")]),
     "feedback text over 6000 characters": _set("audience_feedback", [dict(_FEEDBACK, text="t" * 6001)]),
+    "feedback stats over 6000 characters": _set("audience_feedback", [dict(_FEEDBACK, stats="s" * 6001)]),
+    "feedback stats blank": _set("audience_feedback", [dict(_FEEDBACK, stats="   ")]),
     "feedback two directions": _set("audience_feedback", [dict(_FEEDBACK, directions=["a", "b"])]),
     "feedback chosen without directions": _set("audience_feedback", [dict(_FEEDBACK, chosen_direction=0)]),
     "feedback chosen out of range": _set("audience_feedback", [dict(_FEEDBACK, directions=["a", "b", "c"],
@@ -570,8 +574,8 @@ def _phase5_good():
     good = _season(arc=_arc(range(1, 9)), approved_at=LATER)
     _memory(_memory_entry())(good)
     good["arc"][0]["history"] = [copy.deepcopy(_HISTORY)]
-    good["audience_feedback"] = [dict(_FEEDBACK), dict(_FEEDBACK, ep=2, directions=["a", "b", "c"],
-                                                       chosen_direction=None)]
+    good["audience_feedback"] = [dict(_FEEDBACK), dict(_FEEDBACK, ep=2, stats="12 400 views",
+                                                       directions=["a", "b", "c"], chosen_direction=None)]
     return good
 
 

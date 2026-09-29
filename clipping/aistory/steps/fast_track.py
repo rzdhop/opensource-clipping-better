@@ -4,7 +4,9 @@ DEC-162, A-076).
 
 ``ctx.ep`` is the episode; ``params.storyboard`` is ``t1`` (default: one T1
 call per scene) or ``fast`` (the deterministic plan, no call). Needs what
-every episode step needs (``episode_common.check_episode_preconditions``).
+every episode step needs (``episode_common.check_episode_preconditions``),
+and -- while it would write the script or the storyboard -- the memory of the
+episode before (the gate, ``episode_common.needs_memory``).
 
 **One job, not chained jobs** (the DEC-131 precedent): the step runners are
 called in-process, in order, under **one predictive budget** of
@@ -496,7 +498,10 @@ class _FastTrack:
     def run(self) -> dict:
         ctx = self.ctx
         ec = self.context()
-        episode_common.check_episode_preconditions(ctx, ec)
+        # The memory gate while it would write the script or the storyboard
+        # (plan 11 stage 4); their own runners meet it again when they run.
+        gated = episode_common.needs_memory(ec, STEP)
+        episode_common.check_episode_preconditions(ctx, ec, require_memory=gated)
         ctx.cancel.check()
         mode = self.params[STORYBOARD_PARAM]
         self.log(f"⏩ Fast track of episode {ec.ep}: script → storyboard ({mode}) → paid check → assets → render → "
