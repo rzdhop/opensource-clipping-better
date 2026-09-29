@@ -3,12 +3,25 @@
 - **Current phase:** 4 CHECKPOINT → 5 IMPLEMENT. **Plan approved** by the human ("Yes go go", 2026-09-28), read as
   also answering Q5 = yes: `feat/ai-story-phase-4` is pushed once at stage 7 so CI records the x86_64 framemd5 key.
   Plan: `~/.claude/plans/ai-story-phase-4-assets-render.md` (stages 0–17, riskiest = stage 6, sequence + audio graph).
-- **Current stage:** 16 in progress (Tier-2). `main` ff-merged to **`bc4dfb8`** 2026-09-28 ~22:35 UTC at 0 jobs; backend
-  rebuilt (`rm -sfv` + `up -d --build`), health OK; the two awaiting FR jobs survived the restart. Live artifacts:
-  this worktree's `.claude/` (fixes during Tier-2 land on `feat/ai-story-phase-4`, then ff-merge again).
-- **Tier-2 so far:** (before) FR story tar `scratchpad/tier2/b1104ec66b05-before.tgz` sha256 0da2a73e…d015 (1.8 MB),
+- **RESUME HERE (session paused 2026-09-29 ~02:00 UTC at the human's request, 0 jobs running):** stage 16, Tier-2
+  step 13. Code: `main` == `feat/ai-story-phase-4` code at **`207f8c7`**, deployed (backend restarted at 0 jobs after
+  each fix); artifacts committed on the branch and ff-merged to `main` (see the log's last line). `origin/main` is
+  still `fb5bbf7` (NOT pushed); `origin/feat/ai-story-phase-4` is `4f48515` (the one Q5 push). Tier-1 at `207f8c7`:
+  local **5638 passed / 1 skipped**, CI env **4931 / 677**, compileall clean.
+  **EN story `0a9572a6a8be`** ("Midnight Fridge", en, family_3d) created via the API and its library concept chosen
+  (`concept_chosen`); next: bible → approve → style (approve; preview images optional) → cast of **2** characters
+  (switch to prompt-only as DEC-117; press Continue about once a minute per image — pollinations admits ~1/min and
+  the phase-2 image steps have no pacing) → voices (Edge EN) → places: **1** place, no props → season → `ready` →
+  **Fast track ep 1 from the dashboard at 375 px** (storyboard t1) → measure. Then steps 14 (table), 15
+  (resilience), 16 (the human watches both episodes on the phone and acknowledges), then stage 17 (docs + decisions).
+  The old FR ep01 (pre-phase-4) is kept at `/home/ubuntu/backups/ai-story-phase4/` (tar sha256 0da2a73e…d015 + the
+  folder). The FR `style_preview` job d95e7a469714 still awaits the human.
+- **Stage 16 log:** `main` first ff-merged to `bc4dfb8` 2026-09-28 ~22:35 UTC at 0 jobs, backend rebuilt
+  (`rm -sfv` + `up -d --build`); fixes T2-F1 `d9a2e92`, T2-F4 `2d26371`, T2-F5 `d360b66`, T2-F6/F7 `207f8c7` each
+  ff-merged + `docker compose restart backend` at 0 jobs. Live artifacts: this worktree's `.claude/`.
+- **Tier-2 so far:** (before) FR story tar (now `/home/ubuntu/backups/ai-story-phase4/b1104ec66b05-before.tgz`) sha256 0da2a73e…d015 (1.8 MB),
   `usage.json` a11610f6…9d96, no `spend.json`; (1) golden render in the container: `7.1.5-0+deb13u1/aarch64` matches,
-  7.5 s — PASS; (2) old ep01 moved to `scratchpad/tier2/ep01-pre-phase4/` (also in the tar); (3) script job
+  7.5 s — PASS; (2) old ep01 moved aside (now `/home/ubuntu/backups/ai-story-phase4/ep01-pre-phase4/`, also in the tar); (3) script job
   `bdf8c2124a53` started 22:39:40 UTC from the dashboard at 375 px (estimate $0.00 · 11 LLM calls, gemini free).
   The awaiting `style_preview` job d95e7a469714 is the human's to approve/reject; it did not block the script step.
   (3 cont.) script done 22:41:06 (86 s): 10 scenes, 18 lines, 58.7 s estimated (ok); E4 flagged s10 repeating
@@ -47,8 +60,21 @@
   1080×1920, 30/1, I −14.2 / TP −2.3 / LRA 5.0, 21/21 shots cached, 89 s, no warnings**. (11) metadata 8c3c2379a5f2 (UI,
   6 s, 3 free calls): tiktok/shorts/reels FR + title_en/hashtags_en, descriptions end on the teaser, pinned 'PARTIE 2 →',
   hook 'LE JEU COMMENCE', cover = hook shot + hook text (looked at). **FR episode ready for the human's phone watch.**
-  Pending: (12) paid-cap refusal needs the human's OK to flip allow_paid; (13) EN family_3d story; (14) table;
+  (12) paid-cap refusal with allow_paid on: **deferred by the human** ("We'll try a paid run soon enough don't worry for
+  now", 2026-09-29); today's estimate already lists fal 'refused: est $0.059 … allow_paid is off'. EN story (13): human
+  chose the free route with me pressing Continue per image (small cast: 2 characters, 1 place). Pending: (13) EN family_3d story; (14) table;
   (15) resilience checks; (16) the human watches both.
+  (13 started) EN story `0a9572a6a8be` created + concept `midnight_fridge` chosen via the API (the wizard steps 1–7 were
+  walked in the UI in phases 1–2); paused there at the human's request.
+- **Tier-2 findings kept as follow-ups (not fixed):** T2-F2 pollinations flux draws human faces for fruit-head
+  descriptors (A-058 invalidated on this route); T2-F3 its 'pollinations.ai' watermark; prompt-only shots reuse the
+  portrait seed → near-identical portraits; the pacing feed prints '✖ Shot shNN failed' just before a paced retry;
+  per-link call allowance (300 s sized for fal) would buy ~3 more paced rounds; a three-pass linear loudnorm chain;
+  listen to the ep01 TTS noise burst (13.19–13.31 s); phase-2 image steps have no pacing; E4 variance (approve
+  anyway used); E-prompt echo duplicates (l04 = l08 text); the script pane's flag links render as default blue
+  links; CI full green only confirmed at the next push (Node 20 deprecation notice on checkout@v4/setup-python@v5);
+  `test_clip_serving.py`'s spa fixture leaks a '/' mount; a line regenerate's take is not persisted; a T1 re-plan
+  drops shot locks/notes.
 - **Tier-1 baseline (86e7f4d):** local **4486 passed / 1 skipped** (210 s); CI env (`/tmp/cilibs`) **3901 passed /
   555 skipped** (155 s); compileall clean (`PYTHONPYCACHEPREFIX` in scratch); vite build green to a scratch outDir.
   ffmpeg: host `6.1.1-3ubuntu5`, container `7.1.5-0+deb13u1`. Health: 0 jobs.
