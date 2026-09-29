@@ -7,8 +7,17 @@
   fal, openai; edit: comfyui, gemini, fal seedream, fal kontext, gemini), `LLM_CHAIN` empty (default: groq, gemini,
   **openrouter (paid, keyed)**, mistral, nvidia); no `data/spend.json`; 0 jobs. Keys set: google, nvidia, openrouter,
   fal, pexels.
-- **Current phase:** A (free build of T1, Sonnet agent, `allow_paid` off). **Next action:** T1's id and shot count,
-  then phase B.
+- **Done so far:** T1 `999b08623375` built free (EN family_3d prompt_only, 1 char, 1 place, 3 eps, 20 shots, 17 min,
+  pollinations 402-paced). Phase B: `.env` pinned (image `fal/flux-schnell`, edit `fal/seedream-4-edit`, LLM chain
+  without openrouter; backup `env.before`), backend recreated, chains `source: env`. **(a)** 409 "allow_paid is off …
+  Nothing was generated or spent". **(b)** episode / day / story cap $0.01 → 409 naming both numbers each. **(c)** caps
+  0.20/0.50/0.50: c1 job `136ab587a9ee` cancelled 80 ms after request `01a0ede7…` was booked (1 row, journal
+  `submitted`, spend $0.0028); c2 `7b3f01a6419f` "resuming request 01a0ede7… (1/2)" (no rebook), 20/20 shots with only
+  7 new requests — 12 shots served as "kept answer" because the fast storyboard gives prompt-only shots identical
+  prompt+seed (phase-4 T2-F3); c3 `b11879959919` sh05 deleted → restored from the cache byte-identical, $0. **T1 total
+  $0.0224** (8 paid rows = journal 8 done = spend.json).
+- **Current phase:** C (T2, references). **Next action:** caps 0.80/1.20/1.00, build T2 with `allow_paid` on, then its
+  assets on seedream; then (d) totals vs the fal dashboard, then revert.
 - **Backups (2026-09-29 15:42 UTC):** `/home/ubuntu/backups/fal-test/`: `b1104ec66b05.tgz` sha256 `24776975…dd77`,
   `0a9572a6a8be.tgz` `4edcbdb7…4abc`, `enfr-before.sha` (363 files; `sha256sum -c` from the repo root). Phase B
   copies `.env` to `env.before` (0600) before pinning the chains; the revert copies it back.
