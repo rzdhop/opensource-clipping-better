@@ -231,6 +231,16 @@
   `/app/data/api_token`) is part of "remove all access restrictions", done in auth stage 2 though the approved plan
   did not list it. UNCONFIRMED: named in the stage-2 report for the human to veto.
 
+- **A-082** — fal.ai as measured in the paid test (2026-09-29, DEC-174):
+  - 35 requests with 0 failures: 13 `fal-ai/flux/schnell` (4–13 s each; booked $0.0028 at 720x1280, $0.0018 for a
+    style-preview image) and 22 `seedream-4-edit` (30–40 s each; $0.03).
+  - Total booked $0.6934, equal to `spend.json`.
+  - A request cancelled 80 ms after its submit was resumed by poll on Continue and delivered, with no re-buy.
+  - flux-schnell draws a fruit-head descriptor as the fruit (a pickle detective); pollinations drew human faces
+    (A-058). UNCONFIRMED until the human compares fal's own dashboard: expect 13 + 22 requests and about $0.69 (fal
+    may round flux-schnell up to a whole megapixel). A-071 (is a queued request that later *fails* billed?) is
+    still open: no request failed.
+
 ## Confirmed
 - **A-069** — Measured render times on the VPS (container ffmpeg `7.1.5-0+deb13u1/aarch64`, final profile,
   libx264): a full 21-shot FR render 160 s, a full 20-shot EN render 161 s; per shot at 4× mean 3.6–3.8 s (median

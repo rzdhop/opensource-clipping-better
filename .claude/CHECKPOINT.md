@@ -1,4 +1,4 @@
-## IN PROGRESS — Paid-path live test on fal.ai (DEC-174, $3 hard ceiling), then AI Story phase 5
+## CURRENT STATE — Paid-path live test on fal.ai **DONE** ($0.6934 of the $3 ceiling, DEC-174). Next: AI Story phase 5
 - **Approved** 2026-09-29: "Go: shots + reference edits (Recommended)" (about $0.80 expected). Runbook:
   `.claude/plans/paid-fal-test.md`. **Checkpoint:** `main` at the commit carrying this line (code == `2076beb`, deployed,
   CI run 36590704564 green); no code changes in this test, only live settings, `.env` chain lines and two throwaway
@@ -16,8 +16,31 @@
   7 new requests — 12 shots served as "kept answer" because the fast storyboard gives prompt-only shots identical
   prompt+seed (phase-4 T2-F3); c3 `b11879959919` sh05 deleted → restored from the cache byte-identical, $0. **T1 total
   $0.0224** (8 paid rows = journal 8 done = spend.json).
-- **Current phase:** C (T2, references). **Next action:** caps 0.80/1.20/1.00, build T2 with `allow_paid` on, then its
-  assets on seedream; then (d) totals vs the fal dashboard, then revert.
+- **T2 `ab8fc500173e`** (EN family_3d **references**, "Grandma's Rules", 1 char, 1 place day, 3 eps, 20 shots),
+  run by me under guards (allow_paid on, caps 0.80/1.20/1.00, fal-only chains, LLM chain without openrouter):
+  - build: style preview 3 × $0.0018, portrait $0.0028, turnaround + expressions 2 × $0.03 seedream edits, place day
+    plate $0.0028 = $0.0710; script/season on the free LLM chain ($0, no ledger rows);
+  - assets job `634cc0c4e59b`: 20/20 seedream reference edits, 20 bookings, $0.60, 0 failures.
+- **Totals (d):** 35 paid requests: 13 flux-schnell, 22 seedream-4-edit. Ledgers T1 $0.0224 + T2 $0.6710 =
+  **$0.6934** = `data/spend.json` = journal bookings + unjournaled answered rows. The human compares fal's dashboard
+  (pending; A-082). Contact sheet: `/home/ubuntu/backups/fal-test/fal_test_contact_sheet.jpg`.
+- **Reverted (16:28 UTC):**
+  - `allow_paid` off and caps back to 1/3/10;
+  - `.env` restored byte-identical from `env.before`, the backend recreated, chains `source: default`, `LLM_CHAIN`
+    empty;
+  - the EN/FR `sha256sum -c` passed on all 363 files, and both estimates read "nothing to generate, $0.00".
+
+  T1 and T2 are kept; deleting them is the human's call.
+- **Findings / follow-ups:**
+  - (1) A paid LLM link is usable with `allow_paid` on and is never booked or capped (`steps/llm_call.py:150-153`).
+    Don't fund OpenRouter until it is: phase 6, paid estimates end to end.
+  - (2) Chains can only be changed through `.env` + a container recreate (DEC-112's route selector is still open).
+  - (3) The fast storyboard gives prompt-only shots identical prompt+seed, so 12 of T1's 20 shots reuse one image
+    (phase-4 T2-F3, reconfirmed on fal).
+  - (4) Style preview, cast and places are not journaled, so a failed poll there is billed but not booked.
+  - (5) With the default chains and `allow_paid` on, any pollinations failure falls through to fal silently (by
+    design, but invisible).
+- **Next action:** phase 5 stage 0 (`.claude/plans/ai-story/11-phase-5-plan.md`; ids from **DEC-175 / A-083**).
 - **Backups (2026-09-29 15:42 UTC):** `/home/ubuntu/backups/fal-test/`: `b1104ec66b05.tgz` sha256 `24776975…dd77`,
   `0a9572a6a8be.tgz` `4edcbdb7…4abc`, `enfr-before.sha` (363 files; `sha256sum -c` from the repo root). Phase B
   copies `.env` to `env.before` (0600) before pinning the chains; the revert copies it back.
@@ -46,7 +69,7 @@
   use all 10$"; "Right after auth, $3 cap"). Before anything paid: show the paid links, prices and per-step
   estimate, get the human's **go**; `allow_paid` is off (caps per episode $1, daily $3, per story $10;
   `fal_key_set` true). Walk = phase-5 plan stage 14b (a)–(d); (e) waits for phase-5 stages 7–8. Then phase 5
-  stage 0 from `.claude/plans/ai-story/11-phase-5-plan.md` (ids from **DEC-175 / A-082**).
+  stage 0 from `.claude/plans/ai-story/11-phase-5-plan.md` (ids from **DEC-175 / A-083**).
 - **The human, 2026-09-29, durable:** no auth on the app, ever — never show a sign-in screen, not even from a
   scratch token-on server (memory `no-auth-on-the-app`). Asked what else to remove: "Keep as is".
 - **Tier-1 baseline:** VPS reference (phase 4 close, `b60938e`) local **5643 passed / 1 skipped**, CI env **4936 /
