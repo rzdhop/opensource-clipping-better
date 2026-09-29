@@ -7,10 +7,13 @@
   fal, openai; edit: comfyui, gemini, fal seedream, fal kontext, gemini), `LLM_CHAIN` empty (default: groq, gemini,
   **openrouter (paid, keyed)**, mistral, nvidia); no `data/spend.json`; 0 jobs. Keys set: google, nvidia, openrouter,
   fal, pexels.
-- **Current phase:** A (free build of T1). **Next action:** snapshot the EN/FR sha256s, then build T1.
+- **Current phase:** A (free build of T1, Sonnet agent, `allow_paid` off). **Next action:** T1's id and shot count,
+  then phase B.
+- **Backups (2026-09-29 15:42 UTC):** `/home/ubuntu/backups/fal-test/`: `b1104ec66b05.tgz` sha256 `24776975…dd77`,
+  `0a9572a6a8be.tgz` `4edcbdb7…4abc`, `enfr-before.sha` (363 files; `sha256sum -c` from the repo root). Phase B
+  copies `.env` to `env.before` (0600) before pinning the chains; the revert copies it back.
 - **Revert if interrupted:** `PUT /api/settings {"allow_paid":false,"per_episode_cap_usd":1.0,"daily_cap_usd":3.0,
-  "per_story_cap_usd":10.0}`; remove `IMAGE_CHAIN` / `IMAGE_EDIT_CHAIN` / the pinned `LLM_CHAIN` value from `.env`
-  (restore `LLM_CHAIN=` empty); `sudo docker compose up -d backend` at 0 jobs.
+  "per_story_cap_usd":10.0}`; `cp -p /home/ubuntu/backups/fal-test/env.before .env` (if it exists); `sudo docker compose up -d backend` at 0 jobs.
 
 ## CURRENT STATE — Auth opt-in is **DONE** (DEC-173). Next: the paid fal.ai test (DEC-174, $3 cap), then AI Story phase 5
 - **Asked** 2026-09-29: "remove all access restrictions to the app, it's only local or via tailscale". Answers:
