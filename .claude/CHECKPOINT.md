@@ -1,8 +1,9 @@
-## CURRENT STATE — AI Story **phase 5 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stage 0 **done**; next: **stage 1**
+## CURRENT STATE — AI Story **phase 5 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–1 **done**; next: **stage 2**
 - **In-progress header** (keep current):
   - **Current phase:** IMPLEMENT (phases 0–3 done: the plan was mapped, clarified and approved 2026-09-29).
-  - **Current stage:** 0 done → next **stage 1** (memory documents and the pure fold) [Opus agent].
-  - **Next action:** spawn the stage-1 agent in the worktree; fail-first tests before code.
+  - **Current stage:** 1 done → next **stage 2** (prompts S3, F1, N1) [Sonnet agent].
+  - **Next action:** spawn the stage-2 agent (brief drafted in the session scratchpad; the plan's stage 2 section is
+    the source); fail-first tests before code.
   - **Open questions:** none blocking. Stage 12 needs the human to confirm font filenames, sources and sizes
     before any download.
 - **Started** 2026-09-29 on the human's "Start AI Story phase 5 under the repo protocol (FULL task), on this
@@ -43,6 +44,18 @@
   `open_hooks []`, `relationship_state {}`, `introduced {}`) and no `audience_feedback`.
 - **Housekeeping:** the merged worktrees `auth-opt-in` and `fal-pricing` and their branches (`fix/auth-opt-in`,
   `fix/fal-megapixel-rounding`, both ancestors of `main`) were removed, as the human allowed.
+- **Stage 1 notes for stages 2–4** (from the stage-1 report, verified by me):
+  - The fold counts every entry, approved or not; approval/freshness is the gate's question. So a draft's recap
+    already satisfies today's DEC-130 `recaps` gate: **the stage-4 gate change must ship with the memory step.**
+  - Prompts for episode N and `entry_errors` use `series_memory.open_hooks_before(season, N)`, never the stored
+    `open_hooks` (it folds later entries too).
+  - Re-running memory for N can raise `FoldError` if a later entry closes a hook the new N no longer opens: stage 4
+    turns it into a failed step naming the later episode. The first `merge_entry` drops legacy memory text no
+    entry backs (the live seasons have none).
+  - `proposals.json` sits in the folder of `for_ep`; `target_ep <= episodes_planned` needs the season → checked by
+    stage 4 on write and accept. One `audience_feedback` item per episode is not enforced → stage 5 replaces or
+    refuses a second paste. A full S1 rewrite drops arc `history` (S2 keeps it).
+  - Relationship delta text had no length cap → stage 2 adds `RELATIONSHIP_DELTA_MAX_WORDS`.
 - **Rollback:** code: delete the worktree and the branch (or revert a stage's commit). Live data: restore the
   tars (`tar -C outputs/stories -xzf …`) and check `sha256sum -c enfr-before.sha`.
 
@@ -64,8 +77,8 @@ RC-P1…P11, RC-S1…S4, RC-T1…T3, RC-E1…E5 and RC-A1…A9 (tables below) st
 | S | Stage | State |
 |---|---|---|
 | 0 | checkpoint + baseline + worktree + backups | **done** (this commit; baseline local 5697/1, CI 4981/686) |
-| 1 | memory documents and the pure fold [Opus] | next |
-| 2 | prompts S3, F1, N1 [Sonnet] | — |
+| 1 | memory documents and the pure fold [Opus] | **done** (local 5897/1, CI 5181/686; 200 new tests; 2 named re-pins; 4 live seasons validate unchanged) |
+| 2 | prompts S3, F1, N1 [Sonnet] | next |
 | 3 | continuity in the episode prompts [Opus] | — |
 | 4 | steps memory, feedback, propose-next and the gate [Opus] | — |
 | 5 | series API and CLI [Sonnet] | — |

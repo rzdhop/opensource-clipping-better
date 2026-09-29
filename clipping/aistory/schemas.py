@@ -1443,6 +1443,18 @@ HOOK_MAX_LENGTH = 120
 
 _HOOKS = {"type": "array", "items": _text(HOOK_MAX_LENGTH)}
 
+# Phase 5 (plan 11, stage 1). An arc entry a twist rewrote keeps what it said
+# before, newest last. ``source`` says what rewrote it: an accepted N1 twist
+# (``proposal``) is the only writer so far; the list is closed and can grow.
+ARC_HISTORY_SOURCES = ("proposal",)
+
+_ARC_HISTORY_ITEM_SCHEMA = _document({
+    "summary": _NON_EMPTY_STRING,
+    "open_hooks_out": _HOOKS,
+    "replaced_at": _NON_EMPTY_STRING,
+    "source": {"type": "string", "enum": list(ARC_HISTORY_SOURCES)},
+})
+
 _ARC_ENTRY_SCHEMA = _document({
     "ep": {"type": "integer", "minimum": 1},
     "function": {"type": "string", "enum": list(ARC_FUNCTIONS)},
@@ -1450,6 +1462,51 @@ _ARC_ENTRY_SCHEMA = _document({
     "open_hooks_in": _HOOKS,
     "open_hooks_out": _HOOKS,
     "characters": _id_array(CHAR_ID_PATTERN),
+}, optional={
+    "history": {"type": "array", "items": _ARC_HISTORY_ITEM_SCHEMA},
+})
+
+# series_memory.entries (phase 5): what the memory step (S3) wrote for each
+# episode, keyed like ``recaps`` ("ep01".."ep99"). The spec-2.6 fields
+# ``recaps``, ``open_hooks`` and ``relationship_state`` are folded from them
+# (``series_memory.fold_memory``) and stored alongside, so their readers are
+# unchanged; ``introduced`` is the cast path's and is not folded.
+RECAP_MAX_WORDS = 40
+HOOKS_OPENED_MAX = 3
+MEMORY_KEY_PATTERN = r"^ep(0[1-9]|[1-9][0-9])$"
+# "<char_a>|<char_b>": two character ids, a < b (``series_memory.pair_key``).
+RELATIONSHIP_PAIR_PATTERN = r"^(char_[a-z0-9_]{1,40})\|(char_[a-z0-9_]{1,40})$"
+
+_MEMORY_ENTRY_SCHEMA = _document({
+    "recap": _NON_EMPTY_STRING,
+    "hooks_opened": {"type": "array", "items": _text(HOOK_MAX_LENGTH), "maxItems": HOOKS_OPENED_MAX},
+    # Each exactly the text of a hook open before this episode (the fold checks it).
+    "hooks_closed": _HOOKS,
+    # pair key -> what the pair now is, checked in memory_entry_errors.
+    "relationship_deltas": {"type": "object"},
+    # The script's ``rev`` the entry was written from; another rev is stale.
+    "script_rev": {"type": "integer", "minimum": 1},
+    "at": _NON_EMPTY_STRING,
+    "approved_at": _TIMESTAMP_OR_NULL,
+})
+
+# audience_feedback items (spec 2.6, phase 5): the pasted text, F1's digest
+# and its three directions once F1 ran, and the direction the user chose
+# (or none) when approving it.
+FEEDBACK_TEXT_MAX_LENGTH = 6000
+FEEDBACK_DIGEST_MAX_WORDS = 60
+FEEDBACK_DIRECTIONS = 3
+
+_AUDIENCE_FEEDBACK_SCHEMA = _document({
+    "ep": {"type": "integer", "minimum": 1, "maximum": 99},
+    "pasted_at": _NON_EMPTY_STRING,
+    "text": _text(FEEDBACK_TEXT_MAX_LENGTH),
+}, optional={
+    "digest": _NON_EMPTY_STRING,
+    "directions": {"type": "array", "items": _NON_EMPTY_STRING,
+                   "minItems": FEEDBACK_DIRECTIONS, "maxItems": FEEDBACK_DIRECTIONS},
+    # An index into directions; the type keeps True and 1.0 out of the enum.
+    "chosen_direction": {"type": ["integer", "null"], "enum": [*range(FEEDBACK_DIRECTIONS), None]},
 })
 
 SEASON_ARC_SCHEMA = _document({
@@ -1462,17 +1519,100 @@ SEASON_ARC_SCHEMA = _document({
         "open_hooks": {"type": "array", "items": {"type": "string"}},
         "relationship_state": {"type": "object"},
         "introduced": {"type": "object"},
+    }, optional={
+        # "epNN" -> _MEMORY_ENTRY_SCHEMA, checked in season_arc_errors.
+        "entries": {"type": "object"},
     }),
-    "audience_feedback": {"type": "array", "items": {"type": "object"}},
+    "audience_feedback": {"type": "array", "items": _AUDIENCE_FEEDBACK_SCHEMA},
     "approved_at": _TIMESTAMP_OR_NULL,
     "updated_at": _NON_EMPTY_STRING,
 })
 
 
+def memory_entry_errors(entry, path="$") -> list:
+    """What can be checked of one ``series_memory.entries`` value on its own:
+    ``_MEMORY_ENTRY_SCHEMA``, the recap (non-blank, at most
+    ``RECAP_MAX_WORDS`` words), each hook non-blank and listed once, none
+    both opened and closed, and each relationship key a pair of two
+    different character ids in order (``RELATIONSHIP_PAIR_PATTERN``, a < b)
+    valued with a non-blank text. What needs more than the entry -- the hooks
+    open before it, the story's cast -- is ``series_memory.entry_errors``."""
+    errors = validate(entry, _MEMORY_ENTRY_SCHEMA, path)
+    if errors:
+        return errors
+
+    errors = []
+    _check_text(errors, f"{path}.recap", entry["recap"], max_words=RECAP_MAX_WORDS)
+    for field in ("hooks_opened", "hooks_closed"):
+        hooks = entry[field]
+        for i, hook in enumerate(hooks):
+            _check_text(errors, f"{path}.{field}[{i}]", hook)
+        for hook in sorted({hook for hook in hooks if hooks.count(hook) > 1}):
+            errors.append(f"{path}.{field}: {hook!r} is listed twice")
+    for hook in sorted(set(entry["hooks_opened"]) & set(entry["hooks_closed"])):
+        errors.append(f"{path}: {hook!r} is both opened and closed")
+    for key, text in entry["relationship_deltas"].items():
+        match = _search(RELATIONSHIP_PAIR_PATTERN, key) if isinstance(key, str) else None
+        if match is None or not match.group(1) < match.group(2):
+            errors.append(f"{path}.relationship_deltas: {key!r} is not a pair key "
+                          "('<char_a>|<char_b>', two different character ids in order)")
+            continue
+        _check_text(errors, f"{path}.relationship_deltas.{key}", text)
+    return errors
+
+
+def _audience_feedback_errors(errors, path, item) -> None:
+    _check_text(errors, f"{path}.text", item["text"])
+    if "digest" in item:
+        _check_text(errors, f"{path}.digest", item["digest"], max_words=FEEDBACK_DIGEST_MAX_WORDS)
+    for i, direction in enumerate(item.get("directions") or []):
+        _check_text(errors, f"{path}.directions[{i}]", direction)
+    if "chosen_direction" in item and "directions" not in item:
+        errors.append(f"{path}.chosen_direction: there are no directions to choose from")
+
+
+def _series_memory_errors(errors, memory) -> None:
+    """``entries``, when there are any: each keyed by an episode and valid on
+    its own (``memory_entry_errors``), their fold without error, and the
+    stored ``recaps``/``open_hooks``/``relationship_state`` equal to that
+    fold (a season whose derived fields disagree with its entries is
+    corrupt). No entries (absent or empty) leaves those fields as loose as
+    before phase 5."""
+    entries = memory.get("entries")
+    if not entries:
+        return
+    found = []
+    for key, entry in entries.items():
+        if not (isinstance(key, str) and _search(MEMORY_KEY_PATTERN, key)):
+            found.append(f"$.series_memory.entries: {key!r} is not an episode key (ep01..ep99)")
+            continue
+        found.extend(memory_entry_errors(entry, f"$.series_memory.entries.{key}"))
+    if found:
+        errors.extend(found)
+        return
+
+    from . import series_memory  # it builds on this module, so it is imported here, not at the top
+
+    problems = series_memory.fold_errors(entries)
+    if problems:
+        errors.extend(f"$.series_memory.entries: {problem}" for problem in problems)
+        return
+    folded = series_memory.fold_memory(entries)
+    for field in series_memory.DERIVED_FIELDS:
+        if memory[field] != folded[field]:
+            errors.append(f"$.series_memory.{field}: does not match the fold of series_memory.entries")
+
+
 def season_arc_errors(doc) -> list:
     """``validate()`` against ``SEASON_ARC_SCHEMA``, plus: each summary's word
-    cap; the arc is empty (before S1) or exactly episodes 1..episodes_planned
-    in order; an empty arc is never approved."""
+    cap (a history item's too); the arc is empty (before S1) or exactly
+    episodes 1..episodes_planned in order; an empty arc is never approved;
+    each feedback item's text and directions non-blank, its digest's word
+    cap, a chosen direction only among directions; the series memory's
+    entries and the fields folded from them (``_series_memory_errors``).
+
+    Only what season.json decides on its own: the checks against the story's
+    cast are ``series_memory.entry_errors``, which the memory step runs."""
     errors = validate(doc, SEASON_ARC_SCHEMA)
     if errors:
         return errors
@@ -1481,12 +1621,18 @@ def season_arc_errors(doc) -> list:
     arc = doc["arc"]
     for i, entry in enumerate(arc):
         _check_text(errors, f"$.arc[{i}].summary", entry["summary"], max_words=ARC_SUMMARY_MAX_WORDS)
+        for j, item in enumerate(entry.get("history") or []):
+            _check_text(errors, f"$.arc[{i}].history[{j}].summary", item["summary"],
+                        max_words=ARC_SUMMARY_MAX_WORDS)
     planned = doc["episodes_planned"]
     episodes = [entry["ep"] for entry in arc]
     if arc and episodes != list(range(1, planned + 1)):
         errors.append(f"$.arc: episodes {episodes} must be exactly 1..{planned} in order")
     if doc["approved_at"] is not None and not arc:
         errors.append("$.approved_at: an empty arc cannot be approved")
+    for i, item in enumerate(doc["audience_feedback"]):
+        _audience_feedback_errors(errors, f"$.audience_feedback[{i}]", item)
+    _series_memory_errors(errors, doc["series_memory"])
     return errors
 
 
@@ -2638,6 +2784,105 @@ def metadata_pack_errors(doc) -> list:
             for tag in sorted({tag for tag in tags if tags.count(tag) > 1}):
                 errors.append(f"{path}.{field}: {tag!r} is listed twice")
 
+    return errors
+
+
+# ============================================================ phase 5 documents (plan 11, stage 1)
+
+# ---------------------------------------------- next_proposals_v1 (episodes/epNN/proposals.json)
+#
+# N1's proposals for the next episode: at most two new characters and two
+# twists, written from episode ``based_on.memory_ep``'s approved memory
+# (and the script rev it was written from) into the folder of the episode
+# they are for (``for_ep`` = memory_ep + 1). ``decisions`` records what the
+# user accepted or rejected, item by item.
+
+NEXT_PROPOSALS_SCHEMA_NAME = "next_proposals_v1"
+PROPOSALS_MAX_CHARACTERS = 2
+PROPOSALS_MAX_TWISTS = 2
+TWIST_HOOKS_MAX = 3
+# An item's id is also a URL segment (the accept/reject route): a short slug.
+PROPOSAL_ITEM_ID_PATTERN = r"^[a-z][a-z0-9_]{0,39}$"
+PROPOSAL_DECISIONS = ("accepted", "rejected")
+
+_PROPOSAL_ITEM_ID = {"type": "string", "pattern": PROPOSAL_ITEM_ID_PATTERN}
+
+_PROPOSED_CHARACTER_SCHEMA = _document({
+    "item_id": _PROPOSAL_ITEM_ID,
+    # The caps of character_v1.
+    "name": _text(60),
+    "role": {"type": "string", "enum": list(CHARACTER_ROLES)},
+    "one_line": _text(200),
+    "why": _text(300),
+}, optional={
+    "archetype": _text(60),
+})
+
+_PROPOSED_TWIST_SCHEMA = _document({
+    "item_id": _PROPOSAL_ITEM_ID,
+    "target_ep": _EP,
+    # What the target arc entry's summary and open_hooks_out become (season_arc_v1's caps).
+    "summary": _NON_EMPTY_STRING,
+    "open_hooks_out": {"type": "array", "items": _text(HOOK_MAX_LENGTH), "maxItems": TWIST_HOOKS_MAX},
+    "why": _text(300),
+})
+
+NEXT_PROPOSALS_SCHEMA = _document({
+    "$schema": {"type": "string", "const": NEXT_PROPOSALS_SCHEMA_NAME},
+    "for_ep": _EP,
+    "based_on": _document({
+        "memory_ep": _EP,
+        "script_rev": {"type": "integer", "minimum": 1},
+    }),
+    "characters": {"type": "array", "items": _PROPOSED_CHARACTER_SCHEMA, "maxItems": PROPOSALS_MAX_CHARACTERS},
+    "twists": {"type": "array", "items": _PROPOSED_TWIST_SCHEMA, "maxItems": PROPOSALS_MAX_TWISTS},
+    # item_id -> one of PROPOSAL_DECISIONS, checked in next_proposals_errors.
+    "decisions": {"type": "object"},
+    "created_at": _NON_EMPTY_STRING,
+    "updated_at": _NON_EMPTY_STRING,
+})
+
+
+def next_proposals_errors(doc) -> list:
+    """``validate()`` against ``NEXT_PROPOSALS_SCHEMA``, plus: the proposals
+    are for the episode after the memory they were written from
+    (``for_ep == based_on.memory_ep + 1``); each twist targets an episode
+    after that memory; the texts non-blank, a twist's summary within the
+    arc's word cap; each item id used once across characters and twists;
+    ``decisions`` keyed by those ids, each accepted or rejected."""
+    errors = validate(doc, NEXT_PROPOSALS_SCHEMA)
+    if errors:
+        return errors
+
+    errors = []
+    memory_ep = doc["based_on"]["memory_ep"]
+    if doc["for_ep"] != memory_ep + 1:
+        errors.append(f"$.for_ep: {doc['for_ep']} is not the episode after based_on.memory_ep {memory_ep}")
+
+    ids = []
+    for i, item in enumerate(doc["characters"]):
+        path = f"$.characters[{i}]"
+        for field in ("name", "one_line", "why", "archetype"):
+            if field in item:
+                _check_text(errors, f"{path}.{field}", item[field])
+        ids.append(item["item_id"])
+    for i, item in enumerate(doc["twists"]):
+        path = f"$.twists[{i}]"
+        if item["target_ep"] <= memory_ep:
+            errors.append(f"{path}.target_ep: {item['target_ep']} is not after based_on.memory_ep {memory_ep}")
+        _check_text(errors, f"{path}.summary", item["summary"], max_words=ARC_SUMMARY_MAX_WORDS)
+        _check_text(errors, f"{path}.why", item["why"])
+        for j, hook in enumerate(item["open_hooks_out"]):
+            _check_text(errors, f"{path}.open_hooks_out[{j}]", hook)
+        ids.append(item["item_id"])
+    for item_id in sorted({item_id for item_id in ids if ids.count(item_id) > 1}):
+        errors.append(f"$: item id {item_id!r} is used twice")
+
+    for item_id, decision in doc["decisions"].items():
+        if item_id not in ids:
+            errors.append(f"$.decisions: {item_id!r} is not a proposed item")
+        elif decision not in PROPOSAL_DECISIONS:
+            errors.append(f"$.decisions.{item_id}: {decision!r} is not one of {list(PROPOSAL_DECISIONS)}")
     return errors
 
 

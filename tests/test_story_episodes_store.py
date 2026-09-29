@@ -184,15 +184,17 @@ def test_the_builders_validate():
 
 
 def test_the_episode_documents_and_their_validators():
-    # Phase 4 adds the assets, render-manifest and metadata-pack documents (DEC-155).
+    # Phase 4 adds the assets, render-manifest and metadata-pack documents (DEC-155);
+    # phase 5 adds N1's proposals for the episode (plan 11, stage 1).
     assert store.EPISODE_DOC_NAMES == (
-        SCRIPT, STORYBOARD, "assets.json", "render_manifest.json", "metadata_pack.json",
+        SCRIPT, STORYBOARD, "assets.json", "render_manifest.json", "metadata_pack.json", "proposals.json",
     )
     assert store.EPISODE_DOC_VALIDATORS == {
         SCRIPT: schemas.episode_script_errors, STORYBOARD: schemas.storyboard_errors,
         "assets.json": schemas.episode_assets_errors,
         "render_manifest.json": schemas.render_manifest_errors,
         "metadata_pack.json": schemas.metadata_pack_errors,
+        "proposals.json": schemas.next_proposals_errors,
     }
     # Episode documents are never story documents: read_doc/write_doc cannot reach them.
     assert not set(store.EPISODE_DOC_NAMES) & set(store.DOC_NAMES)

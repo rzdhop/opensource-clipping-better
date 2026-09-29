@@ -268,6 +268,16 @@ def test_an_unwritten_character_may_have_up_to_three_items(change):
     assert schemas.character_errors(_changed(_character(), change)) == []
 
 
+# The keys phase 5 adds to objects phase 2 already wrote (plan 11, stage 1):
+# optional, so a season on disk without them still validates. Every other
+# property of every object stays required.
+PHASE5_OPTIONAL = {
+    ("SEASON_ARC_SCHEMA", "$.properties.arc.items"): {"history"},
+    ("SEASON_ARC_SCHEMA", "$.properties.series_memory"): {"entries"},
+    ("SEASON_ARC_SCHEMA", "$.properties.audience_feedback.items"): {"digest", "directions", "chosen_direction"},
+}
+
+
 @pytest.mark.parametrize("schema_name", [
     "CHARACTER_SCHEMA", "PLACE_SCHEMA", "PROP_SCHEMA", "SEASON_ARC_SCHEMA", "PLACES_PROPOSAL_SCHEMA",
 ])
@@ -286,7 +296,10 @@ def test_every_fixed_object_is_closed(schema_name):
     assert found and found[0][0] == "$"
     for path, obj in found:
         assert obj.get("additionalProperties") is False, path
-        assert set(obj["required"]) == set(obj["properties"]), path
+        optional = PHASE5_OPTIONAL.get((schema_name, path), set())
+        assert optional <= set(obj["properties"]), path
+        assert set(obj["required"]) == set(obj["properties"]) - optional, path
+    assert {path for name, path in PHASE5_OPTIONAL if name == schema_name} <= {path for path, _ in found}
 
 
 def test_the_consistency_labels():
@@ -470,6 +483,101 @@ SEASON_BREAKS = {
     "an empty arc approved": _set("arc", []),
     "approved_at empty": _set("approved_at", ""),
 }
+
+
+# Phase 5 (plan 11, stage 1): series_memory.entries (one S3 entry per
+# episode, the spec-2.6 fields folded from them), typed audience_feedback
+# items and an arc entry's history. Each break below differs from
+# ``_phase5_good`` (which validates) by one rule.
+
+_PHONE = "who stole the coconut phone"
+
+
+def _memory_entry(**changes):
+    entry = {"recap": "Kiwilo hid the coconut phone.", "hooks_opened": [_PHONE], "hooks_closed": [],
+             "relationship_deltas": {"char_kiwilo|char_mangella": "rivals"}, "script_rev": 1, "at": NOW,
+             "approved_at": None}
+    entry.update(changes)
+    return entry
+
+
+def _memory(entry, key="ep01"):
+    """series_memory holding one entry, the derived fields folded by hand
+    (one entry: its recap, its hooks, its deltas)."""
+    def change(doc):
+        doc["series_memory"] = {
+            "recaps": {key: entry.get("recap")},
+            "open_hooks": list(entry.get("hooks_opened") or []),
+            "relationship_state": dict(entry.get("relationship_deltas") or {}),
+            "introduced": {},
+            "entries": {key: copy.deepcopy(entry)},
+        }
+    return change
+
+
+def _without(entry, key):
+    entry = copy.deepcopy(entry)
+    del entry[key]
+    return entry
+
+
+def _then(*changes):
+    def change(doc):
+        for each in changes:
+            each(doc)
+    return change
+
+
+_HISTORY = {"summary": "Episode 1: the vote looms.", "open_hooks_out": [_PHONE], "replaced_at": LATER,
+            "source": "proposal"}
+_FEEDBACK = {"ep": 1, "pasted_at": NOW, "text": "top comments", "digest": "They love Mangella."}
+
+SEASON_BREAKS.update({
+    "memory entries not an object": _set("series_memory.entries", []),
+    "memory entry key ep1": _memory(_memory_entry(), key="ep1"),
+    "memory entry key ep00": _memory(_memory_entry(), key="ep00"),
+    "memory entry extra key": _memory(_memory_entry(cliffhanger="x")),
+    "memory entry missing script_rev": _memory(_without(_memory_entry(), "script_rev")),
+    "memory entry missing approved_at": _memory(_without(_memory_entry(), "approved_at")),
+    "memory recap over 40 words": _memory(_memory_entry(recap=_words(41))),
+    "memory recap blank": _memory(_memory_entry(recap="  ")),
+    "memory hook over 120 characters": _memory(_memory_entry(hooks_opened=["h" * 121])),
+    "memory four hooks opened": _memory(_memory_entry(hooks_opened=["a", "b", "c", "d"])),
+    "memory pair key unsorted": _memory(_memory_entry(relationship_deltas={"char_mangella|char_kiwilo": "x"})),
+    "memory pair key one character": _memory(_memory_entry(relationship_deltas={"char_kiwilo|char_kiwilo": "x"})),
+    "memory pair key not ids": _memory(_memory_entry(relationship_deltas={"kiwilo|mangella": "x"})),
+    "memory script_rev zero": _memory(_memory_entry(script_rev=0)),
+    "memory closes a hook never opened": _memory(_memory_entry(hooks_closed=["never opened"])),
+    "memory open_hooks disagree with entries": _then(_memory(_memory_entry()), _set("series_memory.open_hooks", [])),
+    "memory recaps disagree with entries": _then(_memory(_memory_entry()), _set("series_memory.recaps", {})),
+    "memory relationships disagree with entries": _then(_memory(_memory_entry()),
+                                                        _set("series_memory.relationship_state", {})),
+    "history not a list": _set("arc.0.history", _HISTORY),
+    "history missing replaced_at": _set("arc.0.history", [_without(_HISTORY, "replaced_at")]),
+    "history unknown source": _set("arc.0.history", [dict(_HISTORY, source="edit")]),
+    "history summary too many words": _set("arc.0.history", [dict(_HISTORY, summary=_words(61))]),
+    "history extra key": _set("arc.0.history", [dict(_HISTORY, ep=1)]),
+    "feedback item extra key": _set("audience_feedback", [dict(_FEEDBACK, stats="x")]),
+    "feedback text over 6000 characters": _set("audience_feedback", [dict(_FEEDBACK, text="t" * 6001)]),
+    "feedback two directions": _set("audience_feedback", [dict(_FEEDBACK, directions=["a", "b"])]),
+    "feedback chosen without directions": _set("audience_feedback", [dict(_FEEDBACK, chosen_direction=0)]),
+    "feedback chosen out of range": _set("audience_feedback", [dict(_FEEDBACK, directions=["a", "b", "c"],
+                                                                     chosen_direction=3)]),
+})
+
+
+def _phase5_good():
+    good = _season(arc=_arc(range(1, 9)), approved_at=LATER)
+    _memory(_memory_entry())(good)
+    good["arc"][0]["history"] = [copy.deepcopy(_HISTORY)]
+    good["audience_feedback"] = [dict(_FEEDBACK), dict(_FEEDBACK, ep=2, directions=["a", "b", "c"],
+                                                       chosen_direction=None)]
+    return good
+
+
+def test_a_season_with_memory_entries_history_and_feedback_validates():
+    # The good twin of every phase-5 break above.
+    assert schemas.season_arc_errors(_phase5_good()) == []
 
 
 @pytest.mark.parametrize("change", list(SEASON_BREAKS.values()), ids=list(SEASON_BREAKS))
@@ -1681,6 +1789,65 @@ def test_deleting_a_character_keeps_the_approvals_it_touches_so_the_cast_can_app
     story = stories.get(referenced)
     assert story["approvals"]["cast"] == LATEST
     assert story["status"] == "places_approved"  # the place and both props were approved all along
+
+
+def _memory_naming_kiwilo():
+    """Two memory entries whose relationship deltas name char_kiwilo, and one
+    pair that does not; the derived fields folded by hand."""
+    ep01 = _memory_entry(relationship_deltas={"char_kiwilo|char_mangella": "rivals",
+                                              "char_figuette|char_mangella": "sisters"})
+    ep02 = _memory_entry(recap="Mangella found the phone.", hooks_opened=[], hooks_closed=[_PHONE],
+                         relationship_deltas={"char_figuette|char_kiwilo": "confidants"}, script_rev=2,
+                         approved_at=LATER)
+    return {
+        "recaps": {"ep01": ep01["recap"], "ep02": ep02["recap"]},
+        "open_hooks": [],
+        "relationship_state": {"char_figuette|char_kiwilo": "confidants", "char_figuette|char_mangella": "sisters",
+                               "char_kiwilo|char_mangella": "rivals"},
+        "introduced": {"ep01": ["char_kiwilo", "char_mangella"], "ep02": ["char_figuette"]},
+        "entries": {"ep01": ep01, "ep02": ep02},
+    }
+
+
+def test_deleting_a_character_removes_its_relationship_keys_and_refolds_the_memory(stories, referenced, logs):
+    season = stories.read_doc(referenced, "season.json")
+    season["series_memory"] = _memory_naming_kiwilo()
+    stories.write_doc(referenced, "season.json", season, now=NOW)
+    del logs[:]
+
+    stories.delete_entity(referenced, "characters", "char_kiwilo", now=LATEST)
+
+    season = stories.read_doc(referenced, "season.json")  # validates: the derived fields match the entries
+    expected = _memory_naming_kiwilo()
+    expected["entries"]["ep01"]["relationship_deltas"] = {"char_figuette|char_mangella": "sisters"}
+    expected["entries"]["ep02"]["relationship_deltas"] = {}
+    expected["relationship_state"] = {"char_figuette|char_mangella": "sisters"}
+    expected["introduced"] = {"ep01": ["char_mangella"], "ep02": ["char_figuette"]}
+    # Only the pairs went: recaps, hooks, each entry's script_rev and approval stand, and the season's.
+    assert season["series_memory"] == expected
+    assert season["approved_at"] == LATER
+    cleaned = [line for line in logs if line.startswith(f"Cleaned outputs/stories/{referenced}/season.json")]
+    assert len(cleaned) == 1
+    assert "char_figuette|char_kiwilo" in cleaned[0] and "char_kiwilo|char_mangella" in cleaned[0]
+    assert "char_figuette|char_mangella" not in cleaned[0]
+
+
+def test_deleting_a_character_removes_its_relationship_keys_from_a_memory_without_entries(stories, referenced,
+                                                                                         logs):
+    season = stories.read_doc(referenced, "season.json")
+    season["series_memory"]["relationship_state"] = {
+        "char_kiwilo|char_mangella": "rivals", "char_figuette|char_mangella": "sisters",
+        "char_mangella|char_kiwilo": "an unsorted key, as a hand-edited file may hold"}
+    stories.write_doc(referenced, "season.json", season, now=NOW)
+    del logs[:]
+
+    stories.delete_entity(referenced, "characters", "char_kiwilo", now=LATEST)
+
+    memory = stories.read_doc(referenced, "season.json")["series_memory"]
+    assert memory["relationship_state"] == {"char_figuette|char_mangella": "sisters"}
+    assert "entries" not in memory, "a delete never adds entries"
+    cleaned = [line for line in logs if line.startswith(f"Cleaned outputs/stories/{referenced}/season.json")]
+    assert len(cleaned) == 1 and "char_mangella|char_kiwilo" in cleaned[0]
 
 
 def test_deleting_a_place_clears_the_characters_located_there(stories, outputs, referenced, logs):

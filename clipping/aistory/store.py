@@ -29,6 +29,7 @@ Layout, under the same ``outputs/`` directory the job store uses::
             assets.json             # word sources, SFX, BGM, the grid approval (episode_assets_v1)
             render_manifest.json    # RenderManifest (render_manifest_v1)
             metadata_pack.json      # MetadataPack (metadata_pack_v1)
+            proposals.json          # N1's proposals for this episode (next_proposals_v1)
             episode_final.mp4, subtitles.ass, cover.jpg, cost_ledger.json  # EPISODE_FILE_NAMES
             assets/voice/line_<NN>.mp3|.wav|.json  # the opt-in voice measurement
             assets/shots/shot_<NN>.png|.jpg|.jpeg|.webp  # each shot's image
@@ -69,9 +70,9 @@ Rules this module keeps:
   folders included) and its cache/ with its folder.
 - Deleting an entity leaves no id pointing at it: a deleted character leaves
   the other characters' ``relationships``, its props' ``owner_char_id``, the
-  season arc and the places proposal; a deleted place leaves the characters'
-  ``state.location``. The documents touched keep their approvals (bookkeeping,
-  not content).
+  season arc (its series memory's relationship keys too) and the places
+  proposal; a deleted place leaves the characters' ``state.location``. The
+  documents touched keep their approvals (bookkeeping, not content).
 - A phase-1 ``story.json`` (``approvals`` without ``cast``/``places``/
   ``season``) is read as if those were null and saved with them.
 - The index is a cache of the folders. Missing, torn or foreign, it is rebuilt
@@ -99,7 +100,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Callable, NamedTuple
 
-from . import defaults, schemas, templates
+from . import defaults, schemas, series_memory, templates
 
 STORY_ID_PATTERN = re.compile(r"^[0-9a-f]{12}$")
 
@@ -185,9 +186,11 @@ EPISODE_STORYBOARD_DOC = "storyboard.json"
 EPISODE_ASSETS_DOC = "assets.json"
 EPISODE_RENDER_MANIFEST_DOC = "render_manifest.json"
 EPISODE_METADATA_PACK_DOC = "metadata_pack.json"
+EPISODE_PROPOSALS_DOC = "proposals.json"
 EPISODE_DOC_NAMES = (
     EPISODE_SCRIPT_DOC, EPISODE_STORYBOARD_DOC,
     EPISODE_ASSETS_DOC, EPISODE_RENDER_MANIFEST_DOC, EPISODE_METADATA_PACK_DOC,
+    EPISODE_PROPOSALS_DOC,
 )
 EPISODE_DOC_VALIDATORS = {
     EPISODE_SCRIPT_DOC: schemas.episode_script_errors,
@@ -195,13 +198,19 @@ EPISODE_DOC_VALIDATORS = {
     EPISODE_ASSETS_DOC: schemas.episode_assets_errors,
     EPISODE_RENDER_MANIFEST_DOC: schemas.render_manifest_errors,
     EPISODE_METADATA_PACK_DOC: schemas.metadata_pack_errors,
+    EPISODE_PROPOSALS_DOC: schemas.next_proposals_errors,
 }
 # The episode documents that carry created_at/updated_at: every one of them
 # (spec 2: every JSON document carries an updated_at).
 EPISODE_DOCS_WITH_TIMESTAMPS = (
     EPISODE_SCRIPT_DOC, EPISODE_STORYBOARD_DOC,
     EPISODE_ASSETS_DOC, EPISODE_RENDER_MANIFEST_DOC, EPISODE_METADATA_PACK_DOC,
+    EPISODE_PROPOSALS_DOC,
 )
+# The field that names the episode a document belongs to, which must be its
+# folder's: ``ep``, except N1's proposals, which sit in the folder of the
+# episode they are *for*.
+_EPISODE_FIELDS = {EPISODE_PROPOSALS_DOC: "for_ep"}
 
 # The files an episode keeps in assets/<kind>/, and the only names each kind
 # may hold. A shot's image is named by the shot's own number (sh03 ->
@@ -469,10 +478,12 @@ def _episode_number(name):
 
 def _episode_doc_errors(name, doc, ep) -> list:
     """The episode document's own checks (``EPISODE_DOC_VALIDATORS``), then
-    its ``ep`` against the folder it is read from or written to."""
+    its ``ep`` (``for_ep`` for the proposals, ``_EPISODE_FIELDS``) against
+    the folder it is read from or written to."""
     errors = EPISODE_DOC_VALIDATORS[name](doc)
-    if not errors and doc["ep"] != ep:
-        errors = [f"$.ep: {doc['ep']!r} does not match its folder {_episode_folder(ep)!r}"]
+    field = _EPISODE_FIELDS.get(name, "ep")
+    if not errors and doc[field] != ep:
+        errors = [f"$.{field}: {doc[field]!r} does not match its folder {_episode_folder(ep)!r}"]
     return errors
 
 
@@ -1106,9 +1117,13 @@ class StoryStore:
         A character: its id leaves every other character's ``relationships``;
         a prop it owned has no owner (``owner_char_id`` null); it leaves
         ``season.json`` (each arc entry's ``characters``, each list of
-        ``series_memory.introduced``) and ``places_proposal.json`` (a proposed
-        prop's ``owner`` becomes null). A place: a character located there
-        (``state.location``) is located nowhere. Nothing refers to a prop.
+        ``series_memory.introduced``, every relationship key naming it in
+        ``series_memory.relationship_state`` and in each memory entry's
+        ``relationship_deltas``, the derived fields then re-folded from the
+        entries -- ``series_memory.drop_character``) and
+        ``places_proposal.json`` (a proposed prop's ``owner`` becomes null).
+        A place: a character located there (``state.location``) is located
+        nowhere. Nothing refers to a prop.
 
         This is bookkeeping, not content: a touched document **keeps its
         approval** (``approved_at``, the season's too) -- what was approved
@@ -1181,11 +1196,16 @@ class StoryStore:
                     if isinstance(value, list) and eid in value:
                         doc["series_memory"]["introduced"][key] = [cid for cid in value if cid != eid]
                         introduced.append(key)
+                doc["series_memory"], pairs = series_memory.drop_character(doc["series_memory"], eid)
                 where = []
                 if episodes:
                     where.append(f"episode(s) {', '.join(episodes)}")
                 if introduced:
                     where.append(f"series_memory.introduced {', '.join(introduced)}")
+                if pairs["relationship_state"]:
+                    where.append(f"series_memory.relationship_state {', '.join(pairs['relationship_state'])}")
+                for key, removed in pairs["entries"].items():
+                    where.append(f"series_memory.entries.{key}.relationship_deltas {', '.join(removed)}")
                 return f"{eid} removed from {' and '.join(where)}" if where else None
 
             def proposal(doc):
