@@ -55,8 +55,23 @@ def test_an_estimate_is_arithmetic_on_the_table():
 def test_a_per_megapixel_price_uses_the_requested_size():
     est = estimate(link("fal/flux-schnell"), 1, width=1080, height=1920)
     assert est.unit == "image"
-    assert abs(est.est_usd - 0.0062) < 0.0001
-    assert estimate(link("fal/flux-schnell"), 1, width=1024, height=1024).est_usd == 0.0031
+    assert est.est_usd == 0.006
+    assert estimate(link("fal/flux-schnell"), 1, width=1024, height=1024).est_usd == 0.003
+
+
+@pytest.mark.parametrize("width,height,usd", [
+    (720, 1280, 0.003),    # an AI Story shot: 0.88 MP bills as 1
+    (576, 1024, 0.003),    # a style-preview sample
+    (1024, 1024, 0.003),   # exactly one megapixel
+    (1025, 1024, 0.006),   # one column over bills as 2
+    (1080, 1920, 0.006),   # 1.98 MP bills as 2
+])
+def test_fal_bills_whole_megapixels_rounded_up(width, height, usd):
+    """fal: "$0.003 per megapixel. Images are billed by rounding up to the
+    nearest megapixel", a megapixel being 1024x1024. The paid test of
+    2026-09-29 booked $0.6934 against fal's $0.70 before this rule."""
+    assert estimate(link("fal/flux-schnell"), 1, width=width, height=height).est_usd == usd
+    assert estimate(link("fal/flux-schnell"), 20, width=width, height=height).est_usd == round(usd * 20, 4)
 
 
 def test_a_paid_link_without_a_price_is_refused_not_guessed():

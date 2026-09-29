@@ -65,8 +65,8 @@ PAID_ON = {"ALLOW_PAID": "1"}
 COMFY = {"LOCAL_COMFYUI_URL": "http://comfy.test:8188"}
 FREE = {"IMAGE_CHAIN": "pollinations/flux"}
 
-# $0.003 per megapixel at 576x1024, rounded as pricing.estimate rounds it.
-FAL_PER_IMAGE = 0.0018
+# $0.003 per megapixel at 576x1024, billed as one whole megapixel (fal rounds up).
+FAL_PER_IMAGE = 0.003
 # gemini-3.1-flash-lite-image at 1K, per image whatever the size.
 GEMINI_PER_IMAGE = 0.0336
 
@@ -467,7 +467,7 @@ def test_paid_on_within_the_caps_sends_one_request_per_sample_and_books_each_ima
     assert [json.loads(c["body"])["image_size"] for c in submits] == [{"width": 576, "height": 1024}] * 3
     # Booked once per image: the story ledger and today's spend, nothing else.
     assert booked == [FAL_PER_IMAGE] * 3
-    assert list(json.loads(_spend(tmp_path).read_text())["days"].values()) == [0.0054]
+    assert list(json.loads(_spend(tmp_path).read_text())["days"].values()) == [0.009]
     assert _rows(_ledger(store, story_id)) == [
         ("style_preview", "fal", "fal-ai/flux/schnell", "image", 1, FAL_PER_IMAGE, True, None)] * 3
     # A paid call never touches the free counters.
@@ -476,12 +476,12 @@ def test_paid_on_within_the_caps_sends_one_request_per_sample_and_books_each_ima
     doc = store.read_doc(story_id, "style_preview.json")
     assert [(i["link"], i["paid"], i["est_usd"]) for i in doc["images"]] == [
         ("fal/flux-schnell", True, FAL_PER_IMAGE)] * 3
-    assert outcome == {"images": 3, "failed": 0, "est_usd": 0.0054}
-    assert log.count("   💸 fal/flux-schnell: est $0.002 (paid, allowed)") == 3
+    assert outcome == {"images": 3, "failed": 0, "est_usd": 0.009}
+    assert log.count("   💸 fal/flux-schnell: est $0.003 (paid, allowed)") == 3
     assert log.count("   🔁 fal/flux-schnell: attempt 1/1") == 3
     assert [line for line in log if line.startswith("🖼 preview")] == [
-        f"🖼 preview {n}/3 via fal/flux-schnell ($0.002 paid)" for n in (1, 2, 3)]
-    assert log[-1] == "🖼 Style preview ready: 3/3 images ($0.005 paid)."
+        f"🖼 preview {n}/3 via fal/flux-schnell ($0.003 paid)" for n in (1, 2, 3)]
+    assert log[-1] == "🖼 Style preview ready: 3/3 images ($0.009 paid)."
 
 
 def test_a_cap_that_does_not_fit_is_refused_before_any_request(store, tmp_path):
@@ -733,7 +733,7 @@ def test_the_estimate_on_a_keyless_machine_names_the_free_link_and_never_a_paid_
             {"link": "local/comfyui", "status": "runnable", "reason": "probed when it runs", "paid": False,
              "est_usd": 0.0},
             {"link": "fal/flux-schnell", "status": "skipped", "reason": "no API key (FAL_KEY is not set)",
-             "paid": True, "est_usd": 0.0054},
+             "paid": True, "est_usd": 0.009},
             {"link": "openai/gpt-image-2-low", "status": "skipped",
              "reason": "no API key (OPENAI_API_KEY is not set)", "paid": True, "est_usd": 0.015},
         ],
@@ -750,9 +750,9 @@ def test_a_paid_estimate_is_three_times_the_links_price():
     gemini = m.estimate({"IMAGE_CHAIN": "gemini/nano-banana-2-lite", **GEMINI, **PAID_ON}, route="auto")
 
     assert (fal["route_class"], fal["link"], fal["est_usd"], fal["ready"]) == (
-        "paid", "fal/flux-schnell", 0.0054, True)
+        "paid", "fal/flux-schnell", 0.009, True)
     assert fal["links"][0] == {"link": "fal/flux-schnell", "status": "runnable", "reason": "paid, allowed",
-                               "paid": True, "est_usd": 0.0054}
+                               "paid": True, "est_usd": 0.009}
     assert (gemini["route_class"], gemini["est_usd"]) == ("paid", round(3 * GEMINI_PER_IMAGE, 6))
     assert "$0.101" in gemini["message"]
 
@@ -767,7 +767,7 @@ def test_the_estimate_is_blocked_when_nothing_can_run_and_says_why_per_link():
     reasons = [row["reason"] for row in body["links"]]
     assert reasons == [
         "refused: est $0.101 on gemini/nano-banana-2-lite; allow_paid is off (today $0.00 of $3.00)",
-        "refused: est $0.005 on fal/flux-schnell; allow_paid is off (today $0.00 of $3.00)",
+        "refused: est $0.009 on fal/flux-schnell; allow_paid is off (today $0.00 of $3.00)",
     ]
     for label, reason in zip(("gemini/nano-banana-2-lite", "fal/flux-schnell"), reasons):
         assert f"{label}: {reason}" in body["message"]

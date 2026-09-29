@@ -40,7 +40,10 @@
   - (4) Style preview, cast and places are not journaled, so a failed poll there is billed but not booked.
   - (5) With the default chains and `allow_paid` on, any pollinations failure falls through to fal silently (by
     design, but invisible).
-- **Next action:** phase 5 stage 0 (`.claude/plans/ai-story/11-phase-5-plan.md`; ids from **DEC-175 / A-083**).
+- **fal dashboard (the human, 2026-09-29):** $0.70, 32 requests. The cost matches after **DEC-175** (per-megapixel
+  prices bill whole 1024x1024 megapixels, rounded up; branch `fix/fal-megapixel-rounding`, merged and deployed). The
+  count, 32 vs our 35, stays open in A-082.
+- **Next action:** phase 5 stage 0 (`.claude/plans/ai-story/11-phase-5-plan.md`; ids from **DEC-176 / A-083**).
 - **Backups (2026-09-29 15:42 UTC):** `/home/ubuntu/backups/fal-test/`: `b1104ec66b05.tgz` sha256 `24776975…dd77`,
   `0a9572a6a8be.tgz` `4edcbdb7…4abc`, `enfr-before.sha` (363 files; `sha256sum -c` from the repo root). Phase B
   copies `.env` to `env.before` (0600) before pinning the chains; the revert copies it back.
@@ -69,7 +72,7 @@
   use all 10$"; "Right after auth, $3 cap"). Before anything paid: show the paid links, prices and per-step
   estimate, get the human's **go**; `allow_paid` is off (caps per episode $1, daily $3, per story $10;
   `fal_key_set` true). Walk = phase-5 plan stage 14b (a)–(d); (e) waits for phase-5 stages 7–8. Then phase 5
-  stage 0 from `.claude/plans/ai-story/11-phase-5-plan.md` (ids from **DEC-175 / A-083**).
+  stage 0 from `.claude/plans/ai-story/11-phase-5-plan.md` (ids from **DEC-176 / A-083**, after DEC-175 and A-082).
 - **The human, 2026-09-29, durable:** no auth on the app, ever — never show a sign-in screen, not even from a
   scratch token-on server (memory `no-auth-on-the-app`). Asked what else to remove: "Keep as is".
 - **Tier-1 baseline:** VPS reference (phase 4 close, `b60938e`) local **5643 passed / 1 skipped**, CI env **4936 /

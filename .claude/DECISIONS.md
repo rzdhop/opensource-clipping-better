@@ -3051,3 +3051,17 @@ dashboard — runs before phase 5 on fal only, never above $3 in total. Nothing 
 per-step estimate and said go; `allow_paid` goes back off afterwards. 14b(e) (re-edit and partial re-render on paid
 assets) waits for phase-5 stages 7–8.
 **Consequence.** Phase 5's stage 14b shrinks to (e). Phase 5 takes ids from DEC-175 / A-082.
+
+## DEC-175 — A per-megapixel price bills whole megapixels of 1024x1024, rounded up (fal's rule)
+**Context.** The paid test (DEC-174) booked $0.6934 for 35 fal requests, and fal's dashboard showed $0.70. fal's
+FLUX.1 [schnell] page says "$0.003 per megapixel. Images are billed by rounding up to the nearest megapixel", and fal
+prices a 1024x1024 image as one megapixel. `pricing.estimate` multiplied by the exact size in decimal megapixels, so
+a 720x1280 shot was booked $0.0028 against fal's $0.003, and a 576x1024 preview $0.0018 against $0.003.
+**Decision.** `per_megapixel` prices count whole megapixels of `MEGAPIXEL = 1024 * 1024` pixels, rounded up with an
+integer ceiling. flux-schnell is the only per-megapixel price today. Its note now reads "$0.003 at 720x1280, $0.006
+at 1080x1920".
+**Consequence.** Estimates and bookings for flux-schnell match fal's bill: 13 × $0.003 + 22 × $0.03 = $0.699, which
+fal shows as $0.70. Every estimate is at least as high as before, so a cap never lets more through. Deliberate test
+re-pins (named in the log): `test_pricing.py` (1080x1920 → $0.006, 1024x1024 → $0.003), `test_image_adapters.py`,
+`test_generation_chain_api.py` and `test_style_preview.py` (3 previews → $0.009). New test: five sizes across the
+rounding edge. Stored ledgers keep what they booked.

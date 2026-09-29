@@ -186,7 +186,7 @@ def test_the_chain_test_calls_free_links_and_reports_paid_ones_without_calling(c
     assert (outputs / "_chain_test").is_dir() and list((outputs / "_chain_test").glob("image_pollinations_flux*.png"))
     assert rows["local/comfyui"]["status"] == "unreachable"
     fal = rows["fal/flux-schnell"]
-    assert fal["status"] == "refused" and fal["paid"] is True and abs(fal["est_usd"] - 0.0062) < 0.0001
+    assert fal["status"] == "refused" and fal["paid"] is True and fal["est_usd"] == 0.006
     assert "allow_paid is off" in fal["reason"] and fal["allowed"] is False
     assert rows["openai/gpt-image-2-low"]["status"] == "no_key"
     assert not any("fal.run" in u or "openai.com" in u for u in transport.urls())

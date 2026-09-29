@@ -23,7 +23,10 @@ PRICES_AS_OF = "2026-09-25"
 UNITS = ("image", "second", "char", "token")
 
 # ``usd`` is the price of ONE unit. ``per_megapixel`` says the price is per
-# megapixel of output and scales with the requested size.
+# megapixel of output and scales with the requested size: whole megapixels of
+# 1024x1024, rounded up, as fal bills them ("billed by rounding up to the
+# nearest megapixel") -- a 720x1280 shot costs one full megapixel.
+MEGAPIXEL = 1024 * 1024
 Price = namedtuple("Price", "unit usd note per_megapixel", defaults=("", False))
 
 PRICES = {
@@ -32,7 +35,7 @@ PRICES = {
     "pollinations/flux": Price("image", 0.0, "pollen credits; keyless at the legacy rate"),
     "gemini/nano-banana-2-lite": Price("image", 0.0336, "gemini-3.1-flash-lite-image at 1K; batch $0.0168; not on the free tier"),
     "gemini/nano-banana-2": Price("image", 0.067, "gemini-3.1-flash-image at 1K; not on the free tier"),
-    "fal/flux-schnell": Price("image", 0.003, "$0.003 per megapixel: about $0.0062 at 1080x1920", per_megapixel=True),
+    "fal/flux-schnell": Price("image", 0.003, "$0.003 per megapixel, rounded up: $0.003 at 720x1280, $0.006 at 1080x1920", per_megapixel=True),
     "fal/seedream-4-edit": Price("image", 0.03, "multi-reference edit"),
     "fal/flux-kontext-pro": Price("image", 0.04, "single-reference edit"),
     "openai/gpt-image-2-low": Price("image", 0.005, "quality low, 1024x1536"),
@@ -91,7 +94,8 @@ def estimate(link, qty=1, *, width=None, height=None) -> Estimate:
     paid = is_paid(link)
     unit_price = price.usd
     if price.per_megapixel:
-        megapixels = (width or 1080) * (height or 1920) / 1_000_000
+        pixels = (width or 1080) * (height or 1920)
+        megapixels = -(-pixels // MEGAPIXEL)  # ceiling, in integers
         unit_price = price.usd * megapixels
     est = round(unit_price * qty, 4) if paid else 0.0
     return Estimate(describe(link), price.unit, qty, round(unit_price, 6), est, paid)

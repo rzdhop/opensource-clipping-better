@@ -237,9 +237,12 @@
   - Total booked $0.6934, equal to `spend.json`.
   - A request cancelled 80 ms after its submit was resumed by poll on Continue and delivered, with no re-buy.
   - flux-schnell draws a fruit-head descriptor as the fruit (a pickle detective); pollinations drew human faces
-    (A-058). UNCONFIRMED until the human compares fal's own dashboard: expect 13 + 22 requests and about $0.69 (fal
-    may round flux-schnell up to a whole megapixel). A-071 (is a queued request that later *fails* billed?) is
-    still open: no request failed.
+    (A-058).
+  - fal's dashboard, read by the human on 2026-09-29, shows a **cost estimate of $0.70 and 32 requests** over the last
+    7 days. **The cost matches** once flux-schnell is billed per whole megapixel (DEC-175: 13 × $0.003 + 22 × $0.03 =
+    $0.699). **The count is 3 short of our 35 and stays UNCONFIRMED.** The cause is unknown: dashboard aggregation
+    lag, or fal counting some requests differently. fal's per-endpoint request list would settle it.
+  - A-071 (is a queued request that later *fails* billed?) is still open: no request failed.
 
 ## Confirmed
 - **A-069** — Measured render times on the VPS (container ffmpeg `7.1.5-0+deb13u1/aarch64`, final profile,

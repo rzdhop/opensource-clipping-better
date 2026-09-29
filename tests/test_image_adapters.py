@@ -275,7 +275,7 @@ def test_fal_reports_a_failed_request_with_the_providers_message(tmp_path):
 
 def test_fal_estimates_from_the_price_table_and_the_size():
     est = images.FAL.estimate(Link("fal", "flux-schnell"), request(width=1080, height=1920))
-    assert abs(est.est_usd - 0.0062) < 0.0001
+    assert est.est_usd == 0.006  # 1.98 MP billed as 2 whole megapixels
     assert images.FAL.estimate(Link("fal", "seedream-4-edit"), request("image_edit")).est_usd == 0.03
 
 
