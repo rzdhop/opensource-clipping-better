@@ -1,3 +1,17 @@
+## IN PROGRESS — Paid-path live test on fal.ai (DEC-174, $3 hard ceiling), then AI Story phase 5
+- **Approved** 2026-09-29: "Go: shots + reference edits (Recommended)" (about $0.80 expected). Runbook:
+  `.claude/plans/paid-fal-test.md`. **Checkpoint:** `main` at the commit carrying this line (code == `2076beb`, deployed,
+  CI run 36590704564 green); no code changes in this test, only live settings, `.env` chain lines and two throwaway
+  stories. Tier-1 at `2076beb`: local 5692/1, CI env 4976/686.
+- **Live state before:** `allow_paid` false, caps 1/3/10, chains default (image: cloudflare, pollinations, comfyui,
+  fal, openai; edit: comfyui, gemini, fal seedream, fal kontext, gemini), `LLM_CHAIN` empty (default: groq, gemini,
+  **openrouter (paid, keyed)**, mistral, nvidia); no `data/spend.json`; 0 jobs. Keys set: google, nvidia, openrouter,
+  fal, pexels.
+- **Current phase:** A (free build of T1). **Next action:** snapshot the EN/FR sha256s, then build T1.
+- **Revert if interrupted:** `PUT /api/settings {"allow_paid":false,"per_episode_cap_usd":1.0,"daily_cap_usd":3.0,
+  "per_story_cap_usd":10.0}`; remove `IMAGE_CHAIN` / `IMAGE_EDIT_CHAIN` / the pinned `LLM_CHAIN` value from `.env`
+  (restore `LLM_CHAIN=` empty); `sudo docker compose up -d backend` at 0 jobs.
+
 ## CURRENT STATE — Auth opt-in is **DONE** (DEC-173). Next: the paid fal.ai test (DEC-174, $3 cap), then AI Story phase 5
 - **Asked** 2026-09-29: "remove all access restrictions to the app, it's only local or via tailscale". Answers:
   auth **off by default with an opt-in token**; a **separate task before phase 5**. Classified FULL (auth).
