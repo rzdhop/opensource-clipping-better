@@ -2286,6 +2286,9 @@ dashboard's stream hook and the wizard both missed a step finishing until two fi
 (the hook reacts to a terminal progress frame; the wizard polls its story while a
 step is in flight).
 
+*Amended by DEC-161 (2026-09-29): render, metadata, fast-track and a metadata regenerate end `completed` instead
+of `awaiting_approval`, because they have nothing for the user to approve.*
+
 ## DEC-109 — A step with no external call runs in the request; approval lives on the document
 **Context.** One worker slot is shared with clip jobs, so a pure step (choosing a
 concept, building or locking a style) would wait behind a 50-minute clip render.
@@ -2297,6 +2300,9 @@ approved bible field clears `approvals.bible`; the style approval is kept (the l
 reads no bible text). One step job per story at a time (409).
 **Consequence.** Locking a style never queues. An approval cannot be left stale by an
 edit, and status cannot drift from what was approved.
+
+*Amended by DEC-161 (2026-09-29): render is also a job, though it calls no LLM or image API, because it needs
+minutes of CPU on the shared worker slot.*
 
 ## DEC-110 — `stories.json` is written atomically and can be rebuilt from the folders
 **Context.** The spec asked for "the same atomic-write discipline as jobs.json"; the
@@ -2707,3 +2713,284 @@ skipped without Node or `node_modules` (DEC-012 holds: CI still needs pytest onl
 history) shows a fixed duration once a job ends. A finishing path that ever goes silent before its end would
 understate the total by that silence (A-070).
 
+## DEC-151 — Never lose a paid generation: a generation cache and submit journal, opt-in and story-scoped
+**Context.** A paid generation that failed after its submit was billed, unrecorded and lost (DEC-106's open item);
+nothing cached an answer, so a rerun re-bought it. `clipping/providers/generation.py` had no seam for a durable
+record between a submit and its outcome.
+**Decision.** New stdlib module `clipping/providers/gencache.py`: a canonical sha256 key over kind, link, prompt,
+negative, reference bytes, seed, size, text, voice, rate, pitch, template and take; a `gen_journal_v1` entry per
+key (`sending|submitted|done|failed|lost`) written atomically beside its outputs. `run_generation_chain` takes an
+optional `cache=`; when given, `cache.lookup` runs before the paid, budget and limiter gates on every candidate —
+a `done` entry is served from disk at $0, a `submitted` entry is resumed, a `sending` entry left by a crash is
+booked conservatively first. Booking itself is done by the journal, through the caller's own `book(entry)`.
+Without a cache, nothing changes: phase-2 sheets, the Settings chain test and clip jobs pass none (RC-A2).
+**Consequence.** Only phase 4's assets and regenerate paths pass a cache, so every other generation call keeps its
+exact pre-phase-4 behaviour, proven by the unedited pinned tests (`test_story_measure.py`, `test_story_refimages.py`,
+`test_generation_chain_api.py`, `test_generation_chain.py`, `test_image_adapters.py`). `FalAdapter` now exposes
+`_submit/_poll/_fetch` plus `resume(...)`, so a queued request's `request_id` survives a crash between polls.
+
+## DEC-152 — Resuming a journaled request is not a re-submit
+**Context.** DEC-106 allows a paid link exactly one attempt; a journal that simply retried a submitted request on
+every rerun would silently buy a second generation for a request that was merely slow or interrupted.
+**Decision.** A `submitted` journal entry is resumed by polling and fetching the same `request_id`, retried up to
+`MAX_ATTEMPTS` and never passed through the budget gate again, across runs. A fal FAILED/CANCELLED answer moves the
+entry to `failed`; a 404/410 on the status or response URL moves it to `lost`. Both stay booked and the link then
+ends for that run — no second submit on the same link, though the chain still tries its next link through its own
+gates, and a later explicit run may submit again. A poll-budget timeout or a cancel simply leaves the entry
+`submitted` for the next run.
+**Consequence.** DEC-106's open item is closed: a paid request can no longer vanish between a submit and a crash.
+If the journal or its booking cannot be written right after a submit, the whole chain stops rather than risk an
+unrecorded charge, printing the `request_id` and URLs to the activity feed.
+
+## DEC-153 — Conservative booking: booked unless proven unbilled
+**Context.** Sync paid adapters (Gemini, OpenAI images) and ambiguous transport failures had no rule for whether a
+possibly-billed call should be recorded before its outcome is known.
+**Decision.** A paid request is booked unless an HTTP 4xx answer (400/401/403/404/409/413/422/429) or a failure
+before the transport was ever called proves it unbilled. Everything else — a 5xx, a timeout or reset after
+sending, a 200 with no output, or an unknown outcome after a crash — is booked, carrying a `note` explaining why.
+**Consequence.** A crash between two writes can over-report the ledger by at most one estimate; it can never
+under-report. `CostLedger` rows gained an optional `note`, absent unless given, so every exact-row pinned test still
+holds unedited.
+
+## DEC-154 — Python fixes an image's seed before the call; a regenerate's fresh seed is persisted as `pending`
+**Context.** The generation cache's key includes the seed, so a `None` seed (today's default on most calls) would
+make every image request key-less and bypass the cache entirely — exactly today's behaviour, but never cacheable.
+**Decision.** Before an image call, the assets step fixes the seed itself: `pending.seed` if a regenerate left one,
+else in `prompt_only` mode the first `@char` portrait's recorded seed (else the place plate's), else in
+`references` mode `derive(story_id, ep, shot_id)`. A regenerate picks a fresh random seed and writes it as
+`pending` *before* the call, so a retry of the same note hits the same cache key. A request with no seed still
+bypasses the cache, exactly as before.
+**Consequence.** Extends DEC-124 (fill missing, persist a fresh seed as pending): identical shot requests now share
+one cached image and are booked once, proven live (24 shots → 20 calls on the phase-8 fixture).
+
+## DEC-155 — Shot images live in `storyboard.shots[].assets`; grid approval and audio resolution live in
+`assets.json`, guarded by a fingerprint
+**Context.** The shot `assets` object is closed with five required keys (the phase-3 shape); phase 4 needed a
+place for the generated image, its provider/model/route/seed, and a place for line word-source, SFX/BGM
+resolution and the episode's own approval — without a second source of truth for the image.
+**Decision.** The shot's `assets` object gains optional keys (`model`, `consistency`, `route`, `prompt_hash`,
+`locked`, `note`, `generated_at`, `est_usd`, `cache_key`, `pending`); it stays closed with the original five still
+required, so every phase-3 board still validates unchanged. `assets.json` (`episode_assets_v1`) holds per-line
+word source, SFX/BGM resolution and one `approved{at, fingerprint}` — the fingerprint is a sha256 over every
+shot's `(prompt_hash, image sha256, locked)`, every line's `(text_hash, voice, audio sha256)` and the SFX/BGM
+files, so approval is derived stale the moment the fingerprint changes; no phase-3 writer had to learn to clear
+it. Measuring and re-timing the board clear no approval (extends DEC-135).
+**Consequence.** Rejected: mirroring image records into `assets.json` as well — that would be a second source of
+truth beside `shot.assets`. RC-A8 held: a copy of live ep01 validated unchanged under the new schema.
+
+## DEC-156 — The AI-Story renderer is pure FFmpeg, separate from the clip studio, with its own golden-render
+parity rule keyed by ffmpeg version × architecture
+**Context.** `clipping/studio` renders clips and must stay untouched (RC-A1); the AI-Story renderer needed its own
+home, and one framemd5 cannot hold across the host's ffmpeg 6.1.1/aarch64, the container's 7.1.5/aarch64 and CI's
+x86_64.
+**Decision.** New stdlib package `clipping/aistory/render/`; `clipping/studio/ffmpeg_utils.detect_video_encoder`
+is imported lazily and only for the opt-in `encoder=auto`. `tests/test_aistory_render_golden.py` never skips and
+keys its framemd5 digest by `"<ffmpeg version>/<machine>"`; an unknown key fails loudly, printing the digest and
+how to record it (`tools/render_golden.py --record`) rather than silently passing. CI is pinned to
+`runs-on: ubuntu-24.04` with `apt-get install ffmpeg`, still `pip install pytest` only (DEC-012 holds). A
+stdlib test over a committed `tests/fixtures/render_layer_sha256.json` guards `clipping/studio/**` and
+`clipping/story/**` byte-for-byte, because CI's shallow checkout cannot run `git diff` against an old commit.
+**Consequence.** Keys recorded for host `6.1.1-3ubuntu5/aarch64`, the container's `7.1.5-0+deb13u1/aarch64`, and
+CI's `x86_64` (pushed once at stage 7 per the human's Q5 answer). At close, `git diff --stat 1367d75 --
+clipping/studio clipping/story` is empty and the guard test is green — RC-A1 held through all 17 stages.
+
+## DEC-157 — Audio-mix constants; the loudness target amended mid-phase to TP −2.5 with AAC PNS disabled
+**Context.** The plan set weights (dialogue 1.0, BGM 0.30, SFX 0.8), `sidechaincompress 0.03/8/20/300`,
+`amix normalize=0`, a 0.5 s (`cut_to_black`) / 50 ms (`hard_stop`) bed fade-out, a 48 kHz mix, and a two-pass
+`loudnorm` target of `I=-14:TP=-1:LRA=11`. Tier-2's live FR render measured **+0.57 dBTP** after the AAC encode
+against that −1 target: the mix itself peaked +1.30 dBFS, so `loudnorm`'s linear pass could never fit under a −1
+ceiling and silently fell back to its dynamic mode; on top of that, AAC's PNS (perceptual noise substitution)
+resynthesised a TTS noise burst (13.19–13.31 s) with build-dependent peaks (−0.7 dBTP on the host, +0.6 on the
+container).
+**Decision.** `render/profiles.py`'s `LOUDNORM_TARGET` moves to `I=-14:TP=-2.5:LRA=11`, and the final AAC encode
+now passes `-aac_pns 0`. Warning thresholds are unchanged (−1.0 dBTP, ±1 LU either side of −14 LUFS), and
+`clipping/loudness.py`'s own `TARGET` for clips is untouched — `loudness.py` only gained an optional `target=`
+parameter, so clip output is byte-identical. Measured after the fix, on the real mix on both host and container:
+FR I −14.2 / TP −2.3 / LRA 4.9; and later, on the finished episodes: FR I −14.2 / TP −2.3, EN I −14.1 / TP −2.1.
+Fix commit `2d26371`.
+**Consequence.** A-066 (the −1 dBTP target would survive the AAC encode) is invalidated by this measurement. The
+golden render's video framemd5 was unaffected (audio-only change) on both host and container.
+
+## DEC-158 — Tier-1 audio is one absolute timeline; `acrossfade` is deferred to phase 6
+**Context.** Rejected alternative: per-shot audio segments joined with `acrossfade`. Every dissolve would then
+risk desync and cost an extra encode, and "no line inside a transition window" would no longer be directly
+checkable against a single timeline.
+**Decision.** Every dialogue line, SFX cue and the BGM bed are placed on one absolute output timeline (`adelay`
+per line and per SFX anchor; the bed `-stream_loop`ed and trimmed to the total). `acrossfade` is not built until a
+shot carries its own audio, in phase 6.
+**Consequence.** The "no line falls inside a transition window" invariant is a plain arithmetic check on the
+timeline, proven by golden tests in stage 6 (line onsets within 0.02 ms of target on the fixture).
+
+## DEC-159 — Every burned text is libass from ASS built in Python; no PIL in the render path
+**Context.** Rejected alternative: PIL for the end card and cover. CI has no PIL, so the golden render would have
+to skip there, and the project would carry two text engines with two typographies.
+**Decision.** Subtitles (`word_pop`, `two_line`, `none`), the hook overlay, the `ai_label`, the end card and the
+cover are all ASS documents built in Python (`render/subtitles.py`) and burned with libass (`ass=` in the
+filtergraph). Fonts resolve in order: the template's family file in `custom_fonts/` (checked with
+`clipping.fonts.font_file_declares`), else the committed Montserrat Black; the chosen font is staged per render
+into `render/fonts/`, and the manifest records the family, file, sha256 and why it was chosen.
+**Consequence.** One text-rendering path end to end, provable by the golden render test, which never skips.
+Stage 5's live check also found and fixed a `two_line` accent too close to its highlight colour to read — folded
+into DEC-169 below.
+
+## DEC-160 — SFX are self-made by a committed generator; BGM is the shipped Clips tracks through `bgm_index.json`
+**Context.** Human's CLARIFY answer 1 (2026-09-28): self-made SFX from a committed generator for every cue in the
+seven templates, plus the existing 15 `assets/bgm/` tracks, with the licence recorded as "shipped with Clips,
+source unrecorded" pending a CC0 replacement.
+**Decision.** `tools/make_sfx.py` (stdlib `wave`/`math`/seeded `random`) synthesises 33 distinct cue names across
+the seven packs, 22.05 kHz mono 16-bit WAV, each ≤ 3 s, listed in `sfx_index.json` with sha256 and licence
+"self-made". `bgm_index.json` maps the 15 existing tracks to every mood any style names. The mood is the emotion
+with the largest summed scene duration (ties go to the earliest scene), mapped through `emotion_to_mood`; the
+track is picked deterministically by `sha256(story_id:ep) mod n` among tracks carrying that mood.
+**Consequence.** A-068 (the BGM licence) stays UNCONFIRMED by design — it is a licence fact, not something code
+can settle. CC0 replacements for the 15 tracks are a follow-up, not this phase's job.
+
+## DEC-161 — Render, metadata, fast-track and a metadata regenerate end `completed`, amending DEC-108 and DEC-109
+**Context.** DEC-108 ("a step ends awaiting approval") does not fit render, metadata or fast-track, which have
+nothing for the user to approve. DEC-109 ("only steps that call an API are jobs") does not fit render, which
+calls no API but needs minutes of CPU on the shared worker slot.
+**Decision.** `steps.ends_completed(step, params)` makes render, metadata, fast-track and a `metadata:` regenerate
+end `completed` instead of `awaiting_approval`; every other story step is unchanged. Render is still a job — it
+occupies the one worker slot for its CPU time — even though it calls no LLM or image API.
+**Consequence.** Both conflicts are resolved inline rather than reopened as new rules; DEC-108 and DEC-109 each
+carry a one-line amendment pointer to this entry.
+
+## DEC-162 — Fast track is one resumable job under a predictive 60-minute budget, with its own auto-approval rule
+and a stop before any paid spending
+**Context.** Rejected alternative: chained jobs, one per step. Their state would have to survive restarts, and
+auto-approvals would have to cross job boundaries; the DEC-131 precedent (one resumable job with no cross-restart
+orchestration state) fits fast track directly.
+**Decision.** `steps/fast_track.py` runs script → storyboard → assets → render → metadata in-process under one
+`Budget(3600)`. It auto-approves the script only when it is complete, E4 passed and is fresh, and its timing is
+not `over` or `under` — approve-anyway is never used by fast track. Storyboard and assets have their own,
+narrower auto-approval rules. Any paid part of the assets estimate needs `allow_paid` on and every cap (episode,
+day, story) satisfied; otherwise fast track stops before making any generation call, showing the numbers. Every
+stop ends the job `failed`, naming the sub-step; "Continue" re-runs and makes 0 repeated calls.
+**Consequence.** Measured live (A-076): the EN Midnight Fridge fast track needed 8 presses across a 48-minute wall
+time (including a mid-run bug fix and restart), but any single job press ran ≤ 9.4 minutes, well inside the
+60-minute budget; summed job time was about 26 minutes.
+
+## DEC-163 — Signed story media uses its own HMAC context and a closed file list; DEC-048 is untouched
+**Context.** A `<video>`/`<img>` tag cannot send the bearer header DEC-048's clip signatures rely on, and blob
+video breaks seeking — both already rejected for clips (DEC-048, DEC-113).
+**Decision.** `web/api/auth.py` gains a second signing context, `b"rzc-story-media-v1"`, over a length-prefixed
+`("episode-media", story_id, ep, name, exp)` payload, checked against an allow-list of exactly two names
+(`episode_final.mp4`, `cover.jpg`). It reuses `media_expiry` bucketing so the signed URL stays byte-identical
+across `EpisodeStudio`'s 4-second poll. `require_token` gains one new branch, checked after the existing clip
+check; a tokenless deployment (DEC-092/105) still opens everything.
+**Consequence.** RC-A5 held: a story signature opens exactly the one named file and nothing else — verified
+against every other story route, every clip route, six path-traversal attempts and both signature kinds tried
+against each other's routes.
+
+## DEC-164 — The subtitles toggle is a per-episode render parameter; switching it re-runs only the audio-to-mux
+stages, never the shots
+**Context.** A soft WebVTT track cannot draw `word_pop`'s per-word pop animation, so subtitles must be burned
+in per render rather than served as a separate track.
+**Decision.** `subtitles: style|word_pop|two_line|none` is a render parameter. Every per-shot clip (stage S) and
+the end card (stage E) stay cached across a subtitles change; only the audio mix, loudness passes and final mux
+(A…M) re-run.
+**Consequence.** Measured live: a subtitles switch on the 21-shot FR episode ran in 89–90 s against a full
+render's 160 s, all 21 shots reported `cached`.
+
+## DEC-165 — Forced alignment is opt-in per assets run; the word source is stored per line
+**Context.** Spec 6.4's timing order is provider words, then optionally forced alignment, then an even split as
+the last resort; alignment costs an extra STT call per line and should not run unasked.
+**Decision.** `params.align_words` on the assets step opts a run into forced alignment: `stt.transcribe` runs on
+each line's audio, its words are matched to the script's own words with `difflib`, and any gap is interpolated
+(`wordtiming.py`, pure). Without the flag, provider word cues are used, falling back to an even split labelled
+"approximate timing". `words_source` (`provider|alignment|even_split`) is stored per line, plus `aligned_by` when
+alignment ran.
+**Consequence.** The STT fake in stage 8's tests is called only when `align_words` is set, proven by a dedicated
+test; the grid can show an "approximate timing" flag per line without guessing.
+
+## DEC-166 — M1 is one LLM call per platform; the teaser, pinned comment and cover are built by Python
+**Context.** DEC-027/107/138: every LLM call belongs on a click's own estimate chip and should be sized against
+measured limits, not guessed ones.
+**Decision.** `steps/metadata.py` makes exactly one `llm_call.call_json` per platform (tiktok, shorts, reels) on
+free links only (DEC-115), against a schema of `{title, description, hashtags[3-6], hook_text}` in the story's
+language, plus `title_en`/`hashtags_en` for French stories. The `next_episode_teaser` is appended to `description`
+and the pinned comment built by Python, not asked of the model; the cover is the hook scene's first shot plus
+`hook.on_screen_text` (else M1's `hook_text`), rendered as an ASS overlay. The prompt's token cap is 330 (DEC-138),
+sized from the measured French-Reels worst case (216 tokens × 1.3 headroom × 1.15).
+**Consequence.** Proven live: FR metadata (3 platforms, 6 s, 3 free calls) produced `title_en`/`hashtags_en`,
+teaser-ended descriptions, "PARTIE 2 →" and a cover with the hook text; EN metadata produced "PART 2 →" with no
+EN-duplicate fields.
+
+## DEC-167 — Phase 4's Tier-2 was walked by me; the human watches both finished episodes
+**Context.** CLARIFY answer 3 (2026-09-28): the plan's live walk (steps 3–15, both episodes) is done by the
+session at 375 px, measuring everything the spec's numeric gates ask for; only the final phone watch is the
+human's own check.
+**Decision.** Every Tier-2 step through resilience (steps 1–15) ran under this session's own judgement —
+approvals, approve-anyway calls, operator edits (the EN script's summary and one line) and fix decisions were all
+mine, logged as they happened. Step 16 — watching both finished episodes on the phone over the tailnet and
+acknowledging them — is reserved for the human alone.
+**Consequence.** Every numeric gate in the plan's §4 (length, loudness, ducking, no overflow, resilience) is
+already measured and recorded before the human ever opens a phone; their watch is a taste and framing check, not
+a re-verification of the numbers.
+
+## DEC-168 — The assets step paces itself against free-tier rate limits instead of failing an item outright
+**Context.** Tier-2 finding T2-F1: the live FR assets run (`3a415855191c`) ended with only 4/21 images and 15/18
+lines — pollinations answered HTTP 402 except for about one image a minute, and Gemini TTS answered 429 after
+about four calls a minute, both of which the step had been treating as a hard per-item failure.
+**Decision.** After its first pass, `steps/assets.py` retries the items a free tier held back — an HTTP 429 from
+a free non-local link, or an HTTP 402 specifically from pollinations, and never an item whose chain already sent
+a paid request — in further rounds, each opening with one cancel-aware 60 s pause (`RATE_LIMIT_PAUSE_S`) that
+serves every held-back provider at once. A pause only starts if the predictive budget has room for it plus the
+next call; a provider that makes no progress across a whole round is given up on for that run (the existing
+pinned-voice advice still applies). Every retry reuses the same seed/voice/cache key, so nothing is bought twice.
+**Consequence.** Fix commit `d9a2e92`. Measured live after the fix: the FR run finished 21/21 images and 18/18
+lines in 17 minutes over 14 paced rounds, roughly one image a minute, still $0. The known gap, T2-F11: a single
+pollinations HTTP 500 inside a paced round (whose own retry then answers 402) still gives that provider up for
+the round exactly as a 402 does — "Continue" resumes it on the next press; recorded as a follow-up, not fixed
+this phase.
+
+## DEC-169 — Subtitles show the script's own tokens, timed by the provider's word cues; `two_line` speaker
+accents must clear WCAG contrast against the outline
+**Context.** Tier-2 findings T2-F6 and T2-F7 on the live FR `two_line` render: Broccolia's speaker accent
+(`#1E1E24`) sat unreadable against the subtitle's 3 px black outline because the existing distance rule skipped
+an accent that equalled the style's own highlight colour; separately, Edge's provider word cues carry bare words,
+so the burned subtitles were dropping the script's own punctuation (reading "sécurité Ils" instead of
+"sécurité. Ils").
+**Decision.** `render/subtitles.py` now times the script's own word tokens by aligning them to the provider's
+cues with `wordtiming.align` (difflib on normalised words, interpolating any unmatched token), falling back to
+the provider's own tokens only when nothing matches. Every `two_line` speaker accent must clear
+`TWO_LINE_MIN_CONTRAST_RATIO` (WCAG 4.5:1) against the outline, on top of the existing distance-from-highlight
+and distance-from-each-other rules; the neutral fallback ramp is now light greys that pass.
+**Consequence.** Fix commit `207f8c7`. Live re-render: Kiwilo `#E4572E`, Mangella `#FFFFFF`, Broccolia `#C5C5C5`,
+all readable on the outline; punctuation restored ("sécurité. Ils se trompent.").
+
+## DEC-170 — French spaced punctuation joins its preceding (or following) word in subtitles
+**Context.** Tier-2 finding T2-F5: the live FR render popped a lone "?" as its own subtitle word at 45 s, because
+French writes a space before `? ! : ;` and inside `« »`, and a plain whitespace split (plus a provider's separate
+punctuation cue) left punctuation-only tokens.
+**Decision.** `render/subtitles.py._join_spaced_punctuation` runs on both the provider-word and even-split paths
+of `_line_word_spans`: a token with no letter or digit joins the word before it (keeping the space, extending the
+end time); an opening mark (`«`) joins the word after it; a line made of punctuation alone still keeps one span
+rather than vanishing.
+**Consequence.** Fix commit `d360b66`. The golden render's framemd5 was unaffected (a text-only change); every
+subsequent live render carried correctly-joined punctuation.
+
+## DEC-171 — E1 on a story with no props asks for an always-empty list and repairs a stray reply before validation
+**Context.** Tier-2 finding T2-F9: the EN fast track stopped at the script twice — on a story with no props,
+`prompts.e1_schema` had been enumerating prop ids only when some exist, so with none `props` items fell back to a
+bare string, and `_E1_ASK_TEMPLATE` still asked for "0 to 4 of the existing props" with no roster to choose from.
+The French story had passed only because its non-empty prop enum happened to constrain the model.
+**Decision.** `prompts.py` gains an `_E1_NO_PROPS_LINE` ("props: always [] — this story has no props") slotted
+into the ask whenever a story has none, plus a schema description saying the same; the model-facing schema stays
+in the strict-mode subset (no `maxItems`, matching `schemas.py:670-677`). `steps/script.py._repair_e1_reply`
+empties every scene's `props` before validation when the story has no props, defensively, in case a reply still
+strays. A story that does have props is asked byte-identically to before, and an unknown prop id is still
+refused and retried.
+**Consequence.** Fix commit `2fbd9f0`. Proven live: the EN fast track's next script attempt wrote clean on the
+first try (67 s, E1 + 8×E2 + E3 + E4).
+
+## DEC-172 — A cancelled render waits 1.0 s before killing ffmpeg; a stalled stage still waits the full 3.0 s
+**Context.** Tier-2 finding T2-F12: cancelling an EN render mid-final-pass answered the API in 0.17 s, but the
+worker's own "cancelled during F" line landed 3.38 s later — ffmpeg's SIGTERM handler flushes x264's lookahead
+buffer (about 3 s at 1080×1920) before it can exit, so the cancel was riding the same `KILL_GRACE_S = 3.0 s`
+meant for a genuinely stuck stage.
+**Decision.** `render/runner.py` gains `CANCEL_GRACE_S = 1.0`, passed by `_wait` to `_stop` only on a cancel; a
+plain stage timeout still waits the full `KILL_GRACE_S = 3.0` before SIGKILL, so a slow-but-alive stage is not cut
+short.
+**Consequence.** Fix commit `7083c39`. Live repeat: the same cancel-during-F now completes in 1.43 s, down from
+3.38 s, with the previous `episode_final.mp4` untouched and the partial file kept.

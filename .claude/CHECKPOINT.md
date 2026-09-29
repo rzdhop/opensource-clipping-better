@@ -1,20 +1,28 @@
-## IN PROGRESS — AI Story **phase 4** (assets, Tier-1 renderer, metadata pack — MVP)
-- **Started:** 2026-09-28, human: "Go with phase 4". Classified FULL.
-- **Current phase:** 4 CHECKPOINT → 5 IMPLEMENT. **Plan approved** by the human ("Yes go go", 2026-09-28), read as
-  also answering Q5 = yes: `feat/ai-story-phase-4` is pushed once at stage 7 so CI records the x86_64 framemd5 key.
-  Plan: `~/.claude/plans/ai-story-phase-4-assets-render.md` (stages 0–17, riskiest = stage 6, sequence + audio graph).
-- **RESUME HERE (2026-09-29 ~08:40 UTC, 0 jobs running):** stage 16, Tier-2 **step 16 — waiting for the human's
-  phone watch of both episodes and their acknowledgement**; steps 13 (EN fast track), 14 (table below) and 15
-  (resilience) are DONE. Code: `main` == `feat/ai-story-phase-4` at **`7083c39`** (+ this checkpoint commit),
-  deployed (restarted at 0 jobs after each fix). This session's fixes: T2-F9 `2fbd9f0` (E1 on a story with no
-  props), T2-F12 `7083c39` (a cancelled render stops within 2 s). `origin/main` still `fb5bbf7` (NOT pushed);
-  `origin/feat/ai-story-phase-4` `4f48515`. Tier-1 at `7083c39`: local **5643 passed / 1 skipped**, CI env
-  **4936 / 677**, compileall clean. Episodes to watch: FR `/story/b1104ec66b05/episodes/1` (58.2 s, word_pop) and
-  EN `/story/0a9572a6a8be/episodes/1` (48.8 s, no subtitles — under the window, A-079 UNCONFIRMED). On the human's
-  ack: stage 17 (docs + decisions; the list in the session brief + DEC for T2-F9/T2-F12, A-079 settled). Findings
-  kept as follow-ups this session: T2-F8, T2-F10, T2-F11 (see the list below). The old FR ep01 (pre-phase-4) is
-  kept at `/home/ubuntu/backups/ai-story-phase4/` (tar sha256 0da2a73e…d015 + the folder). The FR `style_preview`
-  job d95e7a469714 still awaits the human.
+## CURRENT STATE — AI Story **phase 4 is DONE** (the MVP) and pushed. Next: **phase 5**.
+- **Started** 2026-09-28 ("Go with phase 4"), FULL; plan `~/.claude/plans/ai-story-phase-4-assets-render.md`
+  (stages 0–17, riskiest stage 6) approved ("Yes go go"). **Closed 2026-09-29** on the human's "Finish, update
+  artefact, push then merge", read as the step-16 acknowledgement of both episodes (no specific remarks: A-065,
+  A-067, A-075, A-079 recorded as accepted at that go-ahead).
+- **Code:** `main` == `feat/ai-story-phase-4` at the close-out commit (the one carrying this line), deployed (bind
+  mount; the last backend restart 08:33 UTC carries every code change — stage 17 is docs and artifacts only).
+  Push: the branch first (CI), then `main` fast-forwarded on origin (origin/main was `fb5bbf7`). Tier-1 at close:
+  see the stage-17 ledger row. `git diff --stat 1367d75 -- clipping/studio clipping/story` **empty**;
+  `tests/test_render_layer_guard.py` green (RC-A1). Dashboard lockfile `npm audit`: 0 vulnerabilities; phase 4
+  changed no Python or npm manifest (only `.github/workflows/ci.yml`'s apt ffmpeg pin); `pip-audit` is not
+  installed here, so the Python audit stays on VISION's carried dependency pass.
+- **Episodes:** FR `/story/b1104ec66b05/episodes/1` (58.2 s, word_pop, I −14.2 / TP −2.3) and EN
+  `/story/0a9572a6a8be/episodes/1` (48.8 s, no subtitles, I −14.1 / TP −2.1), both $0.00, both stories `ready`.
+  The FR `style_preview` job d95e7a469714 still awaits the human (pre-existing, theirs to approve or reject). The
+  old FR ep01 (pre-phase-4) is kept at `/home/ubuntu/backups/ai-story-phase4/` (tar sha256 0da2a73e…d015).
+- **Stage 17 (docs + decisions):** `docs/AI_STORY.md` (steps 10–12, Fast track, CLI, costs/pacing, render facts,
+  on-disk layout, limits), README (AI Story bullet + "MVP: AI Story"), VISION (phase 4 done; next phase 5),
+  DECISIONS DEC-151…DEC-172 appended (+ one "Amended by DEC-161" line on DEC-108 and DEC-109; nothing else
+  edited), ASSUMPTIONS (A-069 and A-071…A-078 added; A-056, A-065, A-067, A-069, A-076, A-077, A-079 confirmed;
+  A-058 and A-066 invalidated; A-051 extended; A-068, A-071–A-074, A-078 stay UNCONFIRMED).
+- **Close-out per artifact:** CHECKPOINT — this header, ledger rows 16/17, follow-ups; claude-action.log — the
+  stage-17 line; ASSUMPTIONS — as above; DECISIONS — DEC-151…172; VISION — "Where it stands (2026-09-29)" + next.
+- **Next session:** phase 5 (series memory → episode 2, audience steering, per-scene re-edit, remaining styles),
+  starting with LOAD + EXPLORE; the phase-4 follow-ups below are candidates for its plan or a small fix round.
 - **Stage 16 log:** `main` first ff-merged to `bc4dfb8` 2026-09-28 ~22:35 UTC at 0 jobs, backend rebuilt
   (`rm -sfv` + `up -d --build`); fixes T2-F1 `d9a2e92`, T2-F4 `2d26371`, T2-F5 `d360b66`, T2-F6/F7 `207f8c7` each
   ff-merged + `docker compose restart backend` at 0 jobs. Live artifacts: this worktree's `.claude/`.
@@ -184,11 +192,7 @@ only (edge 16, pollinations 82 today; sha d3257c79…); no `spend.json`; both st
 - **Tier-1 baseline (86e7f4d):** local **4486 passed / 1 skipped** (210 s); CI env (`/tmp/cilibs`) **3901 passed /
   555 skipped** (155 s); compileall clean (`PYTHONPYCACHEPREFIX` in scratch); vite build green to a scratch outDir.
   ffmpeg: host `6.1.1-3ubuntu5`, container `7.1.5-0+deb13u1`. Health: 0 jobs.
-- **Next action:** stage 16 — ff-merge `feat/ai-story-phase-4` → `main` at 0 jobs, rebuild the container
-  (`sudo -n docker compose rm -sfv backend && sudo -n docker compose up -d --build backend`), run
-  `tools/render_golden.py` inside it, then the plan's §4 Tier-2 script (step 12's paid-cap refusal while shots are
-  still unmade; ask before flipping `allow_paid`). Throwaway seed story `447cacdaf1e5` lives only in the worktree's
-  git-ignored `outputs/`.
+- **Next action:** phase 5 — LOAD, then EXPLORE (see the header).
 - **Stage 14 notes:** api.js `fetchShotImageUrl`, `patchEpisodeAssets`, `fetchStoryEstimate(…, {alignWords, storyboard})`;
   StoryboardPane `ShotStateBadge`, `ShotImageBlock`, `AssetsHeader`, `ApproveAssets`; ScriptPane `LineRow` word-source
   label + voice regenerate + cast link; EpisodeStudio `FastTrackHeader` (window.confirm split dialog); layout risk:
@@ -340,7 +344,7 @@ only (edge 16, pollinations 82 today; sha d3257c79…); no `spend.json`; both st
 - **Defaults taken (A-065…A-067, UNCONFIRMED):** Montserrat Black for both styles; TP −1 passed explicitly by the
   renderer; 4× upscale.
 - **Open questions:** none.
-- **Next free ids:** DEC-151, A-069 (then A-071…A-078 per the plan's §6; A-070 and A-079 are taken; next A-080).
+- **Next free ids:** DEC-173, A-080.
 
 ### Stage ledger (phase 4)
 | S | Stage | State |
@@ -361,8 +365,8 @@ only (edge 16, pollinations 82 today; sha d3257c79…); no `spend.json`; both st
 | 13 | CLI [Sonnet] | **done** (local 5552/1, CI 4845/677; 17 new tests) |
 | 14 | dashboard: storyboard assets + fast track [Sonnet] | **done** (local 5564/1, CI 4857/677; 12 new contract tests; build green; browser check with stage 15) |
 | 15 | dashboard: Preview [Sonnet] | **done** (local 5578/1, CI 4871/677; 14 new contract tests; browser check 375/820/1280 by me: 1 overflow + 2 polish fixed) |
-| 16 | merge, deploy, Tier-2 (me; human watches on the phone) | in progress |
-| 17 | docs + decisions [Sonnet] | — |
+| 16 | merge, deploy, Tier-2 (me; human watches on the phone) | **done** (fixes T2-F1/F4/F5/F6/F7/F9/F12; both episodes accepted 2026-09-29; local 5643/1, CI 4936/677) |
+| 17 | docs + decisions [Sonnet] | **done** (docs/AI_STORY.md, README, VISION, DEC-151…172, A-069/071…079; Tier-1 local 5643/1, CI 4936/677) |
 
 ### Regression contract (phase 4)
 RC-P1…P11, RC-S1…S4, RC-T1…T3 and RC-E1…E5 (tables below) stay in force, plus:

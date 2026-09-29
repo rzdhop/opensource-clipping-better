@@ -29,7 +29,7 @@ renders through FFmpeg/OpenCV. AI Story reuses that chain system and extends it
 to images, image editing, video, TTS and vision, with every paid call gated by a
 budget and every free call counted against its daily limit.
 
-## Where it stands (2026-09-27)
+## Where it stands (2026-09-29)
 - **Clips**: stable; the render layer may change only with frame-parity proof.
 - **AI Story phase 0** (foundation): product renamed rzdhop AI, two-mode shell,
   generation chains and adapters, pricing, free-tier limiters, budget with caps
@@ -53,17 +53,27 @@ budget and every free call counted against its daily limit.
   line audio. Episode approvals live on the episode documents, never on the story (DEC-129); episode N ≥ 2 waits
   for phase 5's memory step (DEC-130). Live Tier-2 walked by me at 375 px, one round of majors fixed (episode
   length, storyboard timing against the episode-level window pass), **acknowledged by the human 2026-09-27**;
-  merged to `main` and deployed, **not yet pushed**.
+  merged to `main`, deployed and pushed with phase 4.
+- **AI Story phase 4 — the MVP** (steps 10–12) is **done**: assets (shot images on the free image chain with
+  paced retries for rate-limited free tiers, line audio in each speaker's pinned voice, self-made SFX, shipped BGM
+  picked by the episode's dominant emotion), a pure-FFmpeg Tier-1 renderer (1080×1920, 30 fps, motion on stills,
+  ducked music bed, loudnorm I −14 / TP −2.5, four subtitle modes, the AI label and end card; golden framemd5
+  per ffmpeg build), the metadata pack (TikTok, Shorts, Reels; EN fields for a French story; the cover), a generation
+  cache that never loses a paid generation, signed episode media, and a one-job fast track that stops before any
+  paid spending. Tier-2 walked live for $0.00: a French episode step by step (58.2 s) and an English one through the
+  fast track (48.8 s); both **accepted by the human 2026-09-29** ("Finish, update artefact, push then
+  merge"); merged to `main` and pushed.
 
 ## Next, in order
-1. **Phase 4** — assets, Tier-1 renderer, metadata pack (**MVP**), with the
-   generation cache that never loses a paid generation (DEC-106 follow-up).
-2. **Phase 5** — series memory, audience steering, per-scene re-edit, remaining styles.
-3. **Phase 6** — Tier 2/3 video, local ComfyUI workflows, paid estimates end to end.
-4. **Phase 7** — reference-video import.
+1. **Phase 5** — series memory (episode 2 onward), audience steering, per-scene re-edit, remaining styles.
+2. **Phase 6** — Tier 2/3 video, local ComfyUI workflows, paid estimates end to end (incl. the deferred live
+   paid assets step, which settles whether fal bills a failed queued request, A-071).
+3. **Phase 7** — reference-video import.
 Carried alongside: the Settings per-task route selector (DEC-112); the clip-upload token-before-spool fix; the deferred paid Tier-2 step of phase 0; a dependency pass
 (extras, lockfile, audit, setuptools ≥ 83); `jobs.json` atomic write and
 `needs_upload` at restart; tests isolated from a real `.env`; phase 3's own
 follow-ups (a garbled French accent with no code fix, storyboard/script
 re-timing after an edit, T1 occasionally under-shooting a scene's shot
-count — see `.claude/CHECKPOINT.md`).
+count — see `.claude/CHECKPOINT.md`); phase 4's own follow-ups (free-tier image quality on pollinations,
+a single HTTP 500 ending the paced rounds, short English scripts, the BGM licence record — see
+`.claude/CHECKPOINT.md`).

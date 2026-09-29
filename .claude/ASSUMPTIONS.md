@@ -171,7 +171,9 @@
 - **A-050** — Gemini's image editors do not honour seeds (`seed_honoured: False` in the adapter); a
   prompt-only or edited sheet on Gemini would not reproduce. Not exercised live (paid). UNCONFIRMED.
 - **A-051** — Keyless Pollinations answers a fresh image in ~2–46 s (live 2026-09-26: 2.5 s, 44 s, 45 s, 11 s…;
-  repeated prompts from cache in 0.2 s). A cast of 3 + places costs ~10 minutes of waiting. UNCONFIRMED over time.
+  repeated prompts from cache in 0.2 s). A cast of 3 + places costs ~10 minutes of waiting. Live 2026-09-28/29,
+  keyless pollinations admits about one image a minute and answers HTTP 402 otherwise (T2-F1), occasionally
+  HTTP 500. UNCONFIRMED over time.
 - **A-052** — The free vision chain (Gemini flash-lite) is available for upload descriptions (live: 2.6 s, $0).
   UNCONFIRMED against quota over a day.
 - **A-053** — Eight French Edge voices (5 fr-FR, 3 fr-CA) cap a cast's distinct voices at 8 (MAX_CAST = 8).
@@ -189,9 +191,6 @@
   later call. Reading across all of this: Gemini's free tier is reliable enough to carry a whole episode; NVIDIA's
   free tier is not usable for story calls at all (see A-062). UNCONFIRMED as a general free-provider claim — it
   holds for the one free provider actually used.
-- **A-058** — Descriptor handles (the leading noun phrase used in place of a character/place/prop's tag) read
-  well to an image model. Nothing generates an image from a handle yet — that is phase 4's job — so this stays
-  exactly as unverified as the plan recorded it. UNCONFIRMED.
 - **A-059** — `serial_90s_v1`'s numbers (window 75–100, target 85, tighten above 95, body 5–10 × 6–10) are
   authored, mirroring `serial_60s_v1`'s shape. No 90-second episode was written this phase — every Tier-2 walk
   used the 60-second template. UNCONFIRMED.
@@ -209,28 +208,50 @@
 - **A-063** — Gemini's free TTS answered 429 once in 5 lines during the stage-13 measurement walk; the existing
   retry in the TTS path succeeded on the second attempt. UNCONFIRMED whether that rate holds over more lines or
   more days.
-- **A-065** — Montserrat Black (the repo's own `Montserrat-Black.ttf`) is an acceptable stand-in for both phase-4
-  styles' typography: fruit_drama asks Montserrat ExtraBold (else Inter Black), family_3d Fredoka Bold / Baloo 2,
-  and none of those files ship. A template font is used when its file is dropped into `custom_fonts/`; the manifest
-  names the font actually used. family_3d burns no dialogue subtitles (`subtitle_mode: none`), so only its end card,
-  hook overlay, AI label and cover are affected. UNCONFIRMED (a default taken at phase-4 CLARIFY, 2026-09-28).
-- **A-066** — The AI-Story mix targets the spec's `loudnorm I=-14 TP=-1 LRA=11`; `clipping/loudness.py` keeps its
-  own TP −1.5 for clips, and the renderer passes its target explicitly. UNCONFIRMED that −1 dBTP survives the AAC
-  encode without inter-sample overs (measured at Tier-2).
-- **A-067** — The spec's 4× upscale before `zoompan` is affordable on this VPS: a 3.0 s shot renders in 7.9 s at
-  4× vs 5.5 s at 2× (4-core Neoverse-N1, host ffmpeg 6.1.1, libx264 medium, 2026-09-28 scratch bench), projecting
-  ≈ 200 s for a 24-shot 60 s episode. UNCONFIRMED on the container's ffmpeg 7.1.5 and on real episodes (Tier-2
-  records the measured times).
 - **A-068** — The 15 `assets/bgm/` tracks (Clips mode, Pixabay-style names, no licence record in the repo) may be
   mapped into `bgm_index.json` for AI Story; their licence is recorded as "shipped with Clips, source unrecorded".
   *Human's choice at phase-4 CLARIFY (2026-09-28): "Self-made SFX + existing BGM".* UNCONFIRMED as a licence fact.
+- **A-071** — fal bills a queued request at submit even when it later fails. UNCONFIRMED; the live paid step is
+  deferred.
+- **A-072** — A Gemini/OpenAI image 4xx is unbilled; a 5xx or timeout may be billed. UNCONFIRMED.
+- **A-073** — ubuntu-24.04's apt ffmpeg stays at 6.1.1; `-threads 1` makes x264 in the golden profile
+  thread-independent. UNCONFIRMED over time: CI's `6.1.1/x86_64` golden key was recorded at stage 7 and needs
+  re-checking whenever the runner image's ffmpeg build moves.
+- **A-074** — The mood → BGM track mapping is authored. UNCONFIRMED: the EN episode's `warm_family` mood picked a
+  romantic-piano track under what plays as a noir mystery — a taste point noted for the human's watch, not a code
+  defect.
+- **A-078** — M1's per-platform length and hashtag limits, as of 2026-09. UNCONFIRMED: the limits are authored,
+  not sourced from each platform's own current documentation.
+
+## Confirmed
+- **A-069** — Measured render times on the VPS (container ffmpeg `7.1.5-0+deb13u1/aarch64`, final profile,
+  libx264): a full 21-shot FR render 160 s, a full 20-shot EN render 161 s; per shot at 4× mean 3.6–3.8 s (median
+  3.05–3.80, max 9.4 s); the final pass 62–70 s; the mux 10–11 s; a cached re-render 84–96 s. *Confirmed, measured
+  at phase 4's Tier-2 (2026-09-29); the full numbers are in `.claude/CHECKPOINT.md`'s step-14 table.*
+- **A-065** — Montserrat Black (the repo's own `Montserrat-Black.ttf`) is an acceptable stand-in for both phase-4
+  styles' typography: fruit_drama asks Montserrat ExtraBold (else Inter Black), family_3d Fredoka Bold / Baloo 2,
+  and none of those files ship. A template font is used when its file is dropped into `custom_fonts/`; the
+  manifest names the font actually used. family_3d burns no dialogue subtitles (`subtitle_mode: none`), so only
+  its end card, hook overlay, AI label and cover are affected. *Confirmed: accepted at the human's go-ahead with
+  no specific remark (2026-09-29).*
+- **A-067** — The spec's 4× upscale before `zoompan` is affordable on this VPS: a 3.0 s shot renders in 7.9 s at
+  4× vs 5.5 s at 2× (4-core Neoverse-N1, host ffmpeg 6.1.1, libx264 medium, 2026-09-28 scratch bench), projecting
+  ≈ 200 s for a 24-shot 60 s episode. *Confirmed by A-069's measured container times, plus the human's go-ahead
+  after the phone watch, with no remark on visible zoom jitter.*
+- **A-075** — The self-made SFX read as the cue names they carry (judged at the human's watch). *Confirmed:
+  accepted at the human's go-ahead with no specific remark (2026-09-29).*
+- **A-076** — 60 minutes covers a free-chain fast-track episode. *Confirmed: every fast-track job pressed during
+  Tier-2 ran ≤ 9.4 minutes, summing to about 26 minutes across the 8 presses the EN episode needed (A-069's
+  render seconds plus the paced-image rounds).*
+- **A-077** — Label strings: "AI-generated" and "Généré par IA". *Confirmed on rendered frames: the FR word_pop
+  and two_line renders show "Généré par IA" and the EN render shows "AI-generated", both checked by eye at
+  Tier-2.*
 - **A-079** — A 48.8 s English episode (under the 55–80 s window) is acceptable for phase 4's Tier-2 watch. The
   fast track refused the 48.7 s script (DEC-162, correct); I approved it myself, as its stop message offers and as
   the French walk's approve-anyway was, rather than write lines into it; the render warns "outside 55-75 s". The
   shortfall is E2 writing at the low end of its word range with a two-character cast (T2-F10), not the speech
-  rate (A-056 confirmed). Taken while the human was away, 2026-09-29. UNCONFIRMED until the human's phone watch.
-
-## Confirmed
+  rate (A-056 confirmed). *Confirmed: the human answered "Finish, update artefact, push then merge" after being
+  told the EN episode is 48.8 s and asked whether they'd rather have a longer rewrite (2026-09-29).*
 - **A-056** — English speech runs at 0.065 s/char. *Confirmed at phase 4's Tier-2 (2026-09-29)*: the first
   English episode (Midnight Fridge ep 1) measured 14 lines, 586 characters, 38.04 s of speech from Edge's word
   timings (en-US-GuyNeural and en-US-JennyNeural) = 0.0649 s/char (per line median 0.0662, range 0.0528–0.0854).
@@ -334,8 +355,10 @@
   error — it simply answered nothing, for 120s, on an 8-token request. Every
   test on that string passed throughout. Replaced by DEC-056's liveness probe,
   which is the only thing that can catch this: a real request.
-
-- (none)
+- **A-058** — INVALIDATED 2026-09-29 on the pollinations route (T2-F2): fruit/food-head descriptors are drawn as
+  human faces, not stylised fruit-people.
+- **A-066** — INVALIDATED 2026-09-29: replaced by DEC-157's amended target, loudnorm TP −2.5 with AAC PNS
+  disabled (T2-F4).
 
 ## Notes
 A-007 is closed. The container uid fix is verified against a live daemon

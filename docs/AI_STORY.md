@@ -16,9 +16,10 @@ and capped at **$1 per episode** by default (Settings → Budget). Nothing
 paid ever runs unless you turn it on.
 
 This document covers what exists today. AI Story is being built in phases;
-this is the phase-1 through phase-3 foundation, steps 1–9 of the 13-step
-workflow. It is extended as each later phase lands — see "Where it stands"
-below for what is not here yet.
+this is the phase-1 through phase-4 foundation, steps 1–12 of the 13-step
+workflow — enough to take an episode from concept to a finished vertical
+`.mp4` with its metadata pack. It is extended as each later phase lands —
+see "Where it stands" below for what is not here yet.
 
 ## Where it stands
 
@@ -33,9 +34,9 @@ below for what is not here yet.
 | 7 | Season arc | the season's episode-by-episode arc | available |
 | 8 | Episode script | scenes and dialogue for one episode | available |
 | 9 | Storyboard | shots, framing, camera moves for the script | available |
-| 10 | Assets | the images, voice lines, SFX/BGM for the storyboard | phase 4 |
-| 11 | Render | the final `.mp4` with burned subtitles | phase 4 |
-| 12 | Metadata pack | title/description/hashtags per platform | phase 4 |
+| 10 | Assets | the images, voice lines, SFX/BGM for the storyboard | available |
+| 11 | Render | the final `.mp4` with burned subtitles | available |
+| 12 | Metadata pack | title/description/hashtags per platform | available |
 | 13 | Next episode | recap, audience-feedback digest, new characters/twists | phase 5 |
 
 In other words: today you can create a story, pick or invent a concept,
@@ -44,9 +45,10 @@ characters with reference sheets and voices, populate its places and props,
 and plan its season arc — a story reaches **ready** once the cast, the
 places and props, and the season are each approved. From there you can
 write and storyboard episode 1: a script (scenes, dialogue, timing), then
-shots for it. You cannot yet render anything — that's phase 4 — and episode
-2 is refused until phase 5's memory step exists, so only episode 1 can be
-produced right now.
+shots for it, then its assets (shot images, voice lines, SFX and BGM), then
+render it to a finished vertical `.mp4` and write its metadata pack — or run
+the whole thing in one go with the fast track. Episode 2 is refused until
+phase 5's memory step exists, so only episode 1 can be produced right now.
 
 ## Walkthrough (dashboard)
 
@@ -396,14 +398,167 @@ a re-plan.
 current against it, and no outdated prompts — in that order, named by
 whichever the button is still waiting on.
 
-**Preview** is a placeholder for now: "Rendering arrives in phase 4."
+**Preview** is the render and metadata tab — see "11. Render" and "12.
+Metadata pack" below.
+
+### 10. Assets
+
+Unlocked once the storyboard is approved. **Assets** sits at the bottom of
+the same Storyboard tab, under the shots themselves — there is no separate
+tab for it. An **"Align words"** checkbox (opt-in forced-alignment word
+timings, through the STT chain, for a line whose voice timed no words of
+its own; without it, such a line's on-screen words fall back to an even
+split, labelled approximate) sits above **"Generate assets"**
+("Generate remaining assets" once some exist already), with an estimate
+chip (the paid part, the image and line counts) and a route chip in front
+of it. The button is disabled with "Approve the storyboard first." until
+the storyboard is approved.
+
+Generating fills in, for every shot neither locked nor already current and
+every line not yet voiced: the shot's image (`prompt_only` mode sends no
+reference image; `references` mode edits from the shot's own reference
+images, and — exactly as Cast and Places & props do — stops before any call
+and asks when no editor can run), then the line's voice, through its
+speaker's pinned voice alone, then the episode's SFX cues (resolved against
+the style's own sound pack; a cue the pack does not carry is skipped and
+reported, never a failure) and one BGM track (its mood follows the
+episode's dominant emotion — the emotion with the most total scene
+duration, ties going to whichever comes first — through the style's own
+mood table, then a track is picked deterministically from the shipped
+library). A free tier that pushes back (Pollinations' roughly
+one-image-a-minute limit, Gemini TTS's own per-minute limit) is paced
+automatically: everything it held back is asked again in rounds, a minute's
+pause before each, until it succeeds or a round makes no more progress at
+all. The run then ends **awaiting approval**, naming every shot and line
+still missing and its regenerate target; running the step again ("Continue")
+retries only what is still missing, buying nothing twice.
+
+Back among the shots themselves, each shot's card now also shows its own
+generated image (or "No image yet" / "Failed to load"), a state badge —
+`no image` / `current` / `stale` / `locked · stale` / `failed` — the route
+it was made on, a **"Lock this image"** checkbox (a locked image is never
+remade by the step and cannot be regenerated until unlocked), and its own
+regenerate: a fresh seed, an optional note.
+
+**Approve assets** (its own card, a fingerprint chip reading `none` /
+`current` / `stale`) needs every shot current or locked and every line
+voiced. Approving stamps the fingerprint the render step checks against, so
+a later change — a regenerated shot, a re-voiced line — makes the assets
+stale again: regenerate what changed, or run the step again, then approve
+again before rendering.
+
+### 11. Render
+
+The **Preview** tab. Unlocked once the assets are approved (otherwise:
+"Approve the episode's assets first (the Storyboard tab)."). A
+**Subtitles** select — `Style default`, `Word pop`, `Two line` or `None` —
+sits above **Render** (`Render again` once one exists), with an estimate
+chip (the paid part, the shot count, an estimated render time) and a route
+chip.
+
+The renderer is pure FFmpeg: 1080×1920, 30 fps, `libx264`. Every shot's
+still picture gets its own Ken Burns move — a pan/zoom, eased in and out —
+from the style's own motion rules, and shots cross-fade into each other per
+the storyboard's own transitions. The audio is one continuous music bed,
+ducked under the dialogue by sidechain compression, mixed with the dialogue
+itself and the episode's self-made sound effects (from `assets/sfx`) and
+the BGM track the assets step picked (from the shipped `assets/bgm`
+library, by way of `assets/bgm/bgm_index.json`); the whole mix is levelled
+in two passes to an integrated loudness of −14 LUFS, a true peak of
+−2.5 dBTP and a loudness range of 11, with the AAC encoder's perceptual
+noise substitution turned off (measured on two real episodes: I −14.2 / TP −2.3 on
+one, I −14.1 / TP −2.1 on the other). Every render carries the
+"AI-generated" ("Généré par IA" in French) disclosure, and ends either on
+an end card — "PART 2" ("PARTIE 2" in French) plus the story's own title,
+cut to black — or a hard stop, per the style. Subtitles burn whichever mode
+you picked: `word_pop` (one word at a time, popping in), `two_line` (each
+speaker keeps its own colour, always readable against the outline), the
+style's own default, or none; switching subtitles re-runs only the final
+pass, not the shots themselves. Text is set in a template's own font when
+one is dropped into `custom_fonts/`, otherwise the committed Montserrat
+Black.
+
+The finished video plays back in a player below (its poster is the cover),
+with a summary strip — duration, size and fps, loudness (I / TP / LRA),
+seconds spent rendering, shots served from the cache versus freshly made,
+stages run versus cached — any warning (a length outside the template's
+window, or a loudness or true peak outside spec, is a warning here, never a
+failure), and a **"Download video"** link. A render that no longer matches
+the episode's current assets is flagged **"Out of date"**, asking you to
+render again. Cancelling a render stops it in about a second and a half and
+keeps whatever it had already finished, including every shot already
+rendered.
+
+Measured on this project's 4-core VPS: a full 20–21-shot render took
+160–161 seconds; re-rendering with every shot already cached (switching
+subtitles, say) took 84–96 seconds — a shot changes only its own cached
+clip, so editing one shot's image never re-renders the rest.
+
+### 12. Metadata pack
+
+Unlocked once the episode is rendered (otherwise: "Render the episode
+first."). **Write metadata** (`Write remaining metadata` once some
+platforms are written already) asks the model once per platform — TikTok,
+YouTube Shorts, Instagram Reels — for a title, a description, hashtags (3
+to 5 on TikTok and Instagram Reels, exactly 3 on YouTube Shorts) and the
+cover's hook text; Python builds the rest: the description ends with the
+script's own next-episode teaser, and the pinned comment is that same
+teaser followed by "PART 2 →" ("PARTIE 2 →" in French). A French story's
+cards also carry an English title and English hashtags.
+
+The **cover** — the hook scene's first shot, filled to 1080×1920, with its
+hook text burned over it in the style's own font, one frame kept as
+`cover.jpg` — is made the first time the pack is written for this render,
+and again whenever it goes missing; regenerating one platform's text alone
+never remakes it.
+
+Each written platform gets its own card: title (and an English title where
+one exists), description, hashtags (and English hashtags where they exist),
+hook text and pinned comment, each with its own **Copy** button, and its
+own regenerate — an optional note re-asks that one platform alone, leaving
+every other platform and the cover untouched. The pack is marked **stale**
+once the script or the render changes under it; writing metadata again then
+fills in whatever is missing, keeping any platform already written for the
+current render and script.
+
+The episode's **cost ledger** sits below the metadata cards: one row per
+call this episode has made — step, provider/model, quantity, cost, free or
+paid — with totals underneath.
+
+### Fast track
+
+**Fast track**, in the episode page's header, runs the script, the
+storyboard (T1, one call per scene — the dashboard always plans this way;
+the fast, no-call storyboard is CLI-only), the assets, the render and the
+metadata as a single job, under a one-hour budget, picking up wherever the
+episode already stands: a document already approved is kept as it is,
+assets already approved and current are kept, a render already current is
+kept — so pressing it again after a partial run, or after fixing whatever
+it stopped on, repeats nothing already done. Whatever it writes fresh is
+auto-approved only by that document's own approval rule (never "approve
+anyway"): a complete script with a fresh, passed consistency check inside
+the template's length window; a storyboard that covers it; a complete
+assets grid. Before making or spending anything it checks the plan against
+the budget and stops before any paid image or voice unless paid generation
+is allowed and every cap — the episode's, the day's and the story's — fits,
+naming the numbers.
+
+Pressing it asks you to confirm first, with the estimate's own split (LLM
+calls, images, voices, render minutes, a total) and the same
+"stops before any paid spending" line. If it stops partway — a script under
+the template's window, a plan over a cap, a scene T1 under-planned — it
+names the sub-step, what happened and what to do next, then **Fast track**
+again to continue exactly from there.
 
 ### The episode page
 
-Above about **1,100 px** wide, Script, Storyboard and Preview sit as three
-panes side by side; narrower, they're **tabs** below the episode header
-(arrow keys/Home/End move between them). Only one layout is ever mounted —
-a pane hidden by the tab layout still isn't left polling in the background.
+The episode header carries the episode's number and, beside it, the
+**Fast track** button (see "Fast track" above) — present whichever tab or
+layout you are on. Above about **1,100 px** wide, Script, Storyboard and
+Preview sit as three panes side by side; narrower, they're **tabs** below
+the episode header (arrow keys/Home/End move between them). Only one layout
+is ever mounted — a pane hidden by the tab layout still isn't left polling
+in the background.
 
 ### Estimate and route chips
 
@@ -447,8 +602,9 @@ is queued or running is refused (409), telling you to wait or cancel.
 
 ## From the CLI
 
-`python main.py --ai-story` covers all nine steps for scripting or
-testing, without a browser. Three subcommands: `new`, `step`, `list`.
+`python main.py --ai-story` covers all twelve steps for scripting or
+testing, without a browser. Five subcommands: `new`, `step`, `render`,
+`fast-track`, `list`.
 
 ```
 python main.py --ai-story new --lang fr --concept tentafruit_island --style fruit_drama
@@ -470,6 +626,12 @@ python main.py --ai-story step STORY_ID script --ep 1 --auto-approve
 python main.py --ai-story step STORY_ID script --ep 1 --measure-voices
 python main.py --ai-story step STORY_ID storyboard --ep 1 --fast --auto-approve
 python main.py --ai-story step STORY_ID storyboard --ep 1
+python main.py --ai-story step STORY_ID assets --ep 1 --auto-approve
+python main.py --ai-story step STORY_ID assets --ep 1 --align-words
+python main.py --ai-story step STORY_ID render --ep 1 --subtitles word_pop
+python main.py --ai-story render STORY_ID --ep 1 --encoder auto
+python main.py --ai-story step STORY_ID metadata --ep 1
+python main.py --ai-story fast-track STORY_ID --ep 1 --storyboard fast
 python main.py --ai-story list
 ```
 
@@ -480,6 +642,22 @@ process: no LLM call, so no key gate either. `--measure-voices` (`script`
 only) measures every line through its speaker's pinned voice, after
 writing, and keeps the audio. Episode 2 and beyond are refused, naming
 phase 5's memory step, exactly as the API refuses them.
+
+`assets`, `render` and `metadata` also take `--ep N`, required, as phase 3's
+steps do. `render` and `fast-track` are their own top-level commands too:
+`render STORY_ID --ep N` is exactly `step STORY_ID render --ep N`, spelled
+shorter, and `fast-track STORY_ID --ep N` runs the script through the
+metadata pack in one job (see "Fast track" in the walkthrough above).
+`assets` takes `--align-words` (opt-in forced-alignment word timings,
+through the STT chain, instead of an even split) and meets the image and
+voice chains' own gates inside the step, stopping before its first call
+when a paid part is over a cap, with the numbers — never a wasted call.
+`render` takes `--subtitles` (`style`, `word_pop`, `two_line` or `none`,
+default `style`, the style lock's own) and `--encoder` (`libx264` or
+`auto`, default `libx264`) and calls no API. `metadata` takes no
+parameters. `fast-track` takes `--storyboard` (`t1`, the default, or
+`fast`) and meets the LLM key gate exactly as the API does for every
+fast-track job.
 
 `cast` takes `--characters NAME` (repeatable: a name from the concept's cast
 sketch) and `--custom 'Name|role|one line'` (repeatable; `role` one of
@@ -503,8 +681,13 @@ already has everything, naming anything left short of that instead of
 failing the command; for `script` and `storyboard` it approves through the
 same rule the dashboard's Approve button uses — a complete script with a
 fresh, passed consistency check, or a fully and currently planned
-storyboard — and **never** "approve anyway": with issues still open it
-prints them and exits 1 instead of forcing the approval through.
+storyboard; for `assets` it approves the grid once every shot is current or
+locked and every line voiced — and **never** "approve anyway": with issues
+still open it prints them and exits 1 instead of forcing the approval
+through. `render`, `metadata` and `fast-track` take no `--auto-approve`:
+their job ends completed once it is done, with nothing left to approve
+(the fast track auto-approves each document it writes fresh by that
+document's own rule regardless, never through this flag).
 
 `new` creates a draft story and, with `--concept`, chooses a library concept
 in the same call. `--lang` is required — there is no default, on the CLI
@@ -528,9 +711,10 @@ status, language, title. Run `python main.py --ai-story --help` (or
 `... new --help`, `... step --help`) for the full option list.
 
 Keys and `LLM_CHAIN` — and, for `cast` and `places`, `IMAGE_CHAIN`,
-`IMAGE_EDIT_CHAIN`, `TTS_CHAIN` and `VISION_CHAIN` — come from the
-**environment or `.env`**, the same file the clip CLI reads — never from the
-dashboard's Settings. A story created or stepped from the CLI shows up in
+`IMAGE_EDIT_CHAIN`, `TTS_CHAIN` and `VISION_CHAIN`; for `assets`, those same
+three plus `STT_CHAIN` when `--align-words` asks for it; for `metadata` and
+`fast-track`, `LLM_CHAIN` again — come from the **environment or `.env`**,
+the same file the clip CLI reads — never from the dashboard's Settings. A story created or stepped from the CLI shows up in
 the dashboard immediately (same
 `outputs/stories/` folder, same index), but the CLI and a running server
 don't coordinate: running a step from both at once on the same story lets
@@ -594,6 +778,27 @@ voices to try instead of the one that failed.
 once through vision) run on `VISION_CHAIN`: Gemini's `flash-lite` model by
 default (needs `GOOGLE_API_KEY`, free), then an OpenRouter free vision
 model, a local Ollama vision model, or Gemini's larger `flash` model.
+
+**An episode's images and voices** (the assets step) go through the same
+`IMAGE_CHAIN` / `IMAGE_EDIT_CHAIN` / `TTS_CHAIN` as Cast and Places & props,
+with one addition: a free link that pushes back — Pollinations' roughly
+one-image-a-minute limit, Gemini TTS's own per-minute quota — is not a
+failure. The step retries every item it was held back on in rounds, a
+60-second pause before each, until they succeed or a round makes no more
+progress. A free Cloudflare key (`CLOUDFLARE_API_TOKEN` and
+`CLOUDFLARE_ACCOUNT_ID`, still free) skips that limit and is much faster;
+Edge TTS is free and effectively unlimited. A paid link — `fal/flux-schnell`
+for an image, a paid voice — is only ever reached with `allow_paid` on and
+only within the per-episode, daily and per-story caps; the fast track goes
+further and stops before spending anything paid unless every cap fits, with
+the numbers, before the first call.
+
+**The generation cache** (`cache/gen/` in the story's own folder) means a
+regenerated or re-run shot or line that asks for exactly the same image or
+voice again — the same prompt, seed and references, or the same pinned
+voice and text — costs nothing and calls nothing: it is served from the
+cache instead. Every call this makes, cached or not, free or paid, is one
+row of the story's cost ledger, tagged with the episode it belongs to.
 
 **Settings → Budget**:
 
@@ -674,9 +879,27 @@ outputs/
     episodes/ep<NN>/                  # NN = 01..99, one per written episode
       script.json                    # scenes, lines, timing, hook/cliffhanger/teaser, consistency report
       storyboard.json                # shots, transitions, per-scene planning source
-      assets/voice/
-        line_<NN>.mp3 (or .wav)      # one measured line's audio (opt-in "Measure with real voices")
-        line_<NN>.json               # its timing sidecar (source, text hash, provider/voice)
+      assets.json                    # word sources, SFX/BGM picks, the assets grid's own approval
+      assets/
+        shots/shot_<NN>.png          # (or .jpg/.jpeg/.webp) one image per shot
+        voice/
+          line_<NN>.mp3 (or .wav)    # a measured line's audio ("Measure with real voices", or the assets step)
+          line_<NN>.json             # its timing sidecar (source, text hash, provider/voice)
+      cost_ledger.json               # this episode's own rows of the story's cost ledger
+      render_manifest.json           # every render command, its inputs and their hashes, per stage
+      episode_final.mp4              # the rendered episode
+      subtitles.ass                  # the burned-in subtitles, kept as their own file too
+      cover.jpg                      # the hook shot + its hook text, for the metadata pack
+      metadata_pack.json             # title/description/hashtags/hook/pinned comment per platform
+      render/                        # the renderer's own working folder
+        cache/                      # each shot's and the end card's own encode, keyed by content
+        in/                         # staged copies of every input image, audio file and font
+        fonts/                      # the resolved font, staged for libass
+        stems/                      # the audio mix's own dialogue/bgm/sfx stems
+        logs/                       # ffmpeg's own stderr, one file per stage
+    cache/gen/                        # the generation cache and journal: a repeated request (the same
+                                       # seed, prompt and references, or the same voice and text) is
+                                       # served from here, never asked again
     cost_ledger.json                 # every call this story has made, with its cost
     activity.log                     # everything a step has printed, one line each
 ```
@@ -807,3 +1030,43 @@ repaired automatically before you ever see it; an occasional garbled accent
 (e.g. a `â` coming back wrong) is not — it's a rare raw-model quirk, not
 something the pipeline introduces, and it can be fixed the same way any
 other line is: edit the line's text by hand.
+
+**Pollinations pushes back hard during assets** — asking for a whole
+episode's worth of shots, Pollinations answers `HTTP 402` above roughly one
+image a minute; the assets step paces around this on its own (a pause, then
+a fresh round for whatever is still held back) and usually needs nothing
+from you. As seen live: a single Pollinations `HTTP 500` in the middle of a
+paced round currently ends that round early and leaves whatever was still
+queued as failed, rather than being retried again in the same run. Press
+**Continue** (run the assets step again) — it picks the failures back up
+and repeats nothing already made.
+
+**Pollinations' flux and stylised characters** — its free `flux` model
+tends to draw a realistic human face for a character described as a fruit
+or a piece of food, and stamps a small "pollinations.ai" watermark on every
+image it makes; neither is specific to AI Story's own prompts. A shot with
+no reference image to send (`prompt_only` consistency) reuses the
+character's own portrait seed, so shots made this way can end up looking
+more alike than the storyboard's framing alone would suggest.
+
+**A script under the length window** — the fast track's own script
+auto-approval refuses a script outside the template's length window, "over"
+or "under" alike. A short one — a run of one-line, single-speaker scenes,
+say — can land under it. The fast track stops there: lengthen the short
+scenes (edit them, or regenerate a scene with a note asking for more
+back-and-forth — a regenerate's own word budget caps how much longer that
+can make it) and run the fast track again, or approve the script yourself
+from the Script tab despite the warning.
+
+**T1 plans too few shots for a one-line scene** — T1 sometimes plans a
+single shot for a scene with one short line, and the storyboard step
+refuses it (every scene needs 2 to 4). "Plan remaining with T1" (or
+Continue, from the fast track) re-plans only the scenes still missing —
+a scene that already has shots is left alone.
+
+**A character named for exactly what it is** — K1, the cast step's text
+call, checks that a character's own description actually names it, and a
+name that is already the plain word for the thing itself (a character
+called "Egg", say) can fail that check indefinitely: a description of an
+egg has no particular reason to contain the word "Egg". Give the character
+a name that is not also its own description, and try again.

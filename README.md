@@ -26,7 +26,7 @@
 ## Two modes
 
 - **Clips** (`/clips`) — the long-form video → vertical highlight clips pipeline this README is mostly about: karaoke subtitles, B-roll, BGM, hooks, auto-metadata.
-- **AI Story** (`/story`) — a gated, step-by-step studio that turns a concept into a persistent story workspace (world, cast, a locked visual style, a season arc) and produces serialized ~60-second AI episodes with consistent characters. Steps 1–7 (new story, concepts, bible, style, cast, places & props, season arc) are available today; episodes and rendering ship in later phases. See [docs/AI_STORY.md](docs/AI_STORY.md).
+- **AI Story** (`/story`) — a gated, step-by-step studio that turns a concept into a persistent story workspace (world, cast, a locked visual style, a season arc) and produces serialized ~60-second AI episodes with consistent characters. Steps 1–12 are available: episode 1 goes from concept to a rendered vertical episode with its own metadata pack; episode 2 onward is a later phase. See [docs/AI_STORY.md](docs/AI_STORY.md).
 
 ## 🔱 About this fork
 
@@ -257,6 +257,29 @@ uses. A running job is cancelled first and removed once it stops.
 
 At most `MAX_QUEUED_JOBS` jobs (default 20) wait for a worker; past that, a new
 job is refused with `429` until one starts.
+
+---
+
+## 🎭 MVP: AI Story
+
+Next to Clips, **AI Story** (`/story`) is its own mode: pick or
+invent a concept, lock a visual style, cast characters with reference sheets
+and voices, plan places, props and a season arc, then write, storyboard,
+image, voice and render one episode — end to end, from a blank story to a
+finished vertical `.mp4` with a TikTok/Shorts/Reels metadata pack ready to
+paste in. **Fast track**, on the episode page, runs the whole thing — script
+through metadata — as a single job.
+
+It runs free by default on hosted free tiers (Gemini or Groq for text,
+Pollinations or Cloudflare for images, Edge or Gemini for voices). Paid
+generation is off until you turn it on, and even then it stays inside
+per-episode, per-day and per-story spending caps.
+
+Episode 1 is what this MVP delivers; episode 2 and later wait on a memory
+step still to come. Output lands under
+`outputs/stories/<id>/episodes/ep01/` — see
+[docs/AI_STORY.md](docs/AI_STORY.md) for the full walkthrough, the CLI and
+what's kept on disk.
 
 ---
 
