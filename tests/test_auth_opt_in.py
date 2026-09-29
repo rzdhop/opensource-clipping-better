@@ -200,6 +200,7 @@ def test_with_no_token_every_router_answers(monkeypatch, path):
 
 
 def test_with_no_token_a_clip_is_served_unsigned(monkeypatch, tmp_path):
+    pytest.importorskip("fastapi")  # before the route import, which needs it
     from web.api.routes import files as files_route
 
     (tmp_path / "abc123def456").mkdir()

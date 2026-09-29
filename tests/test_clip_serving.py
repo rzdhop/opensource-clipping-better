@@ -445,9 +445,20 @@ def test_a_missing_file_is_still_404(spa, path):
     assert spa.get(path).status_code == 404
 
 
-def test_the_api_is_untouched_by_the_fallback(spa):
+def test_the_api_is_untouched_by_the_fallback(spa, monkeypatch):
     """The mount is last, so /api/* must still reach its routes rather than
     being answered with index.html."""
+    # The gate's 401 is an answer index.html never gives. Auth is opt-in since
+    # DEC-173, so this server needs a token of its own to have a gate.
+    monkeypatch.setenv("API_TOKEN", TEST_TOKEN)
+    monkeypatch.delenv("DISABLE_AUTH", raising=False)
+    monkeypatch.setattr(auth, "_TOKEN", None)
     assert spa.get("/api/health").status_code == 200
     assert spa.get("/api/jobs").status_code == 401
     assert spa.get("/api/nope").status_code == 404
+
+    # Open, the route itself answers: JSON, not the dashboard's HTML.
+    monkeypatch.delenv("API_TOKEN")
+    response = spa.get("/api/jobs")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/json")

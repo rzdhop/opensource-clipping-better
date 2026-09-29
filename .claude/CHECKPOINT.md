@@ -6,40 +6,27 @@
 - **Phase-5 answers already given** (for when it starts): plan against merged `main`; export/import bundle
   **deferred** (follow-up, no DEC); **ship the OFL fonts** the five styles name; memory runs on an **approved
   script**; at the end of phase 5 the human funds the chosen providers for a paid live test (plan stage 14b).
-- **Current phase:** IMPLEMENT. **Current stage:** auth stage 1 (backend). **Checkpoint:** branch
-  `fix/auth-opt-in` from `main` **`b60938e`** (clean tree), on the Windows workstation clone.
-- **Tier-1 baseline (b60938e, Windows 11, Python 3.11.15, ffmpeg 8.1.1):** local **5492 passed / 57 failed / 67
-  errors / 28 skipped** (1300 s). Every failure is platform-only: WinError 1314 symlink privilege (83, incl. all
-  67 errors = `test_story_media_serving.py`'s fixture), POSIX file modes 0600/0644 (~27), cp1252 encoding (3),
-  CRLF checkout changing `test_render_layer_guard.py`'s sha256s (2), no framemd5 key for ffmpeg 8.1.1 (1). List:
-  scratch `baseline_local_failed.txt` (124 ids). Rule for this task: **no new failure on Windows**, and the auth
-  test files run green on **Linux** (a throwaway container from the local backend image) — the VPS reference is
-  local 5643/1, CI 4936/677.
-- **Stage 1 state (uncommitted on `fix/auth-opt-in`):** `web/api/auth.py` (opt-in rule, no-key signing refused,
-  plain media paths when open, banner, `open_public_exposure`, `CrossSiteWriteGuard`), `web/api/app.py` (start
-  refusal + guard), new `tests/test_auth_opt_in.py` (**fail-first: 42 failed / 5 passed on `b60938e`**, 47 pass
-  now). Pinned tests changed on purpose: `test_auth_token.py` token-storage section (generator gone), 
-  `test_generation_chain_api.py` signed-URL test (sets its own token), `test_stories_api_phase4.py:912` (page
-  URL is the plain path when open). **Finding fixed in-stage:** `PreviewPane.jsx` appended `&download=1` to
-  a URL that is now a plain path when open (→ 404) — separator now follows the URL, as `JobDetail.jsx` does;
-  `test_story_payload_contract_episode.py`'s download pin updated. Targeted Windows runs: only baseline
-  failures; compileall clean; vite build green (scratch outDir).
-- **HANDOFF → the Ubuntu VPS (2026-09-29, the human: "you are running on the wrong machine").** Work moved
-  off the Windows workstation, whose C: kept filling up (Docker Desktop's `docker_data.vhdx` is 111 GB, 78.8 GB
-  of it the `nwodtuhs/exegol:nightly` image; the human decides any cleanup there — nothing was pruned). Stage 1's
-  code was committed as **WIP** on `fix/auth-opt-in` and pushed. Windows evidence only: targeted auth files had
-  no failure outside the baseline; the full Windows suite died on ENOSPC at ~9 min (its partial output showed
-  only baseline ids, not a result). **Not verified yet — do this first on the VPS:**
-  1. `git fetch && git switch fix/auth-opt-in` in a worktree (as phases 1–4 did; the container runs main's
-     on-disk code via the bind mount — never switch the main checkout's branch).
-  2. Tier-1 on Linux: `python -m pytest -p no:warnings` (never `-q`) and the CI env (`/tmp/cilibs`);
-     compileall; `npm run build` to a scratch outDir (move a built `web/dashboard/dist/` aside first).
-     Expected: VPS baseline local 5643/1, CI 4936/677 **plus** the new `tests/test_auth_opt_in.py` (47 tests;
-     its app tests skip in the CI env) and minus the 4 removed token-generator tests. Any other change is a
-     finding. `test_story_media_serving.py` (RC-U1/RC-A5) must pass **unedited** — it could not run on Windows.
-  3. If green: a normal commit closing stage 1 (ledger row + log line), then stage 2 per the plan.
-- **Next action:** the three steps above, on the VPS.
-- **Open questions:** none blocking. The Windows disk/Docker cleanup is the human's, outside this task.
+- **Current phase:** IMPLEMENT. **Current stage:** auth stage 2 (exposure paths, notebook, docs). **Checkpoint:**
+  branch `fix/auth-opt-in` from `main` **`b60938e`**; stage 0 `ad6da47`; stage 1 closed at the commit carrying
+  this line (WIP `ff44862` + the Linux Tier-1 fixes). Execution host: the **Ubuntu VPS**, worktree
+  `.claude/worktrees/auth-opt-in` (the main checkout stays on `main`: the container runs its code).
+- **Tier-1 baseline:** VPS reference (phase 4 close, `b60938e`) local **5643 passed / 1 skipped**, CI env **4936 /
+  677**. Windows baseline (5492/57/67/28, all platform-only) is history: the work moved to the VPS 2026-09-29
+  ("you are running on the wrong machine"; the Windows C: disk/Docker cleanup stays the human's, nothing pruned).
+- **Stage 1 (done):** `web/api/auth.py` (opt-in rule, no-key signing refused, plain media paths when open, banner,
+  `open_public_exposure`, `CrossSiteWriteGuard`), `web/api/app.py` (start refusal + guard), new
+  `tests/test_auth_opt_in.py` (fail-first 42 failed / 5 passed on `b60938e`). Linux Tier-1: local **5686 passed / 1
+  skipped** (= 5643 + 47 new − 4 removed generator tests), CI env **4970 / 686**; compileall clean; vite build green
+  (scratch outDir). `tests/test_story_media_serving.py` **unedited and green** (RC-U1/RC-A5). Two Linux findings
+  fixed in-stage (attempt 1 each): `test_clip_serving.py::test_the_api_is_untouched_by_the_fallback` pinned
+  `/api/jobs` → 401 with no token (old always-on default) — it now sets `API_TOKEN` for the 401 and asserts the
+  open answer is JSON 200 (fail-first on `ad6da47`: 401 == 200); `test_auth_opt_in.py`'s unsigned-clip test
+  imported the FastAPI route before its `importorskip` (CI env error → skip).
+- **Stage 2 scope addition (logged):** `tools/rzclips-fetch.py` refuses to run without `--token` (`:250`) and points
+  at `/app/data/api_token` (`:191`) — against an open server that is a leftover restriction; stage 2 makes the token
+  optional (header only when given) with a test. Also `web/dashboard/src/App.jsx:30` comment names `data/api_token`.
+- **Next action:** stage 2 per the plan (Sonnet agent), then Tier-1, commit; then stage 3 deploy + Tier-2 here.
+- **Open questions:** none blocking.
 
 ### Regression contract (auth task)
 | ID | Must keep working | Proven by |
@@ -54,7 +41,7 @@
 | S | Stage | State |
 |---|---|---|
 | 0 | checkpoint + baseline | **done** (this commit) |
-| 1 | opt-in auth in the backend (**RISKIEST**) [Opus] | **code committed as WIP** (fail-first 42/47 shown); Linux Tier-1 pending on the VPS |
+| 1 | opt-in auth in the backend (**RISKIEST**) [Opus] | **done** (Linux Tier-1 local 5686/1, CI 4970/686; 2 in-stage test fixes) |
 | 2 | exposure paths, notebook, docs [Sonnet] | — |
 | 3 | deploy + Tier-2 on the VPS | — |
 | 4 | decisions + artifacts | — |
