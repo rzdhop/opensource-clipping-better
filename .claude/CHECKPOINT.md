@@ -1,15 +1,28 @@
-## IN PROGRESS — Auth becomes opt-in (no token unless `API_TOKEN` is set), then AI Story phase 5
+## CURRENT STATE — Auth opt-in is **DONE** (DEC-173). Next: the paid fal.ai test (DEC-174, $3 cap), then AI Story phase 5
 - **Asked** 2026-09-29: "remove all access restrictions to the app, it's only local or via tailscale". Answers:
   auth **off by default with an opt-in token**; a **separate task before phase 5**. Classified FULL (auth).
   Both plans approved in chat ("Ok go"): `.claude/plans/auth-opt-in-token.md` (stages 0–4, riskiest stage 1) and
   `.claude/plans/ai-story/11-phase-5-plan.md` (phase 5, stages 0–15 + 14b; it starts after this task).
 - **Phase-5 answers already given** (for when it starts): plan against merged `main`; export/import bundle
   **deferred** (follow-up, no DEC); **ship the OFL fonts** the five styles name; memory runs on an **approved
-  script**; at the end of phase 5 the human funds the chosen providers for a paid live test (plan stage 14b).
-- **Current phase:** IMPLEMENT. **Current stage:** auth stage 3 (deploy + Tier-2 on this VPS) — checks done, ack pending. **Checkpoint:**
-  branch `fix/auth-opt-in` from `main` **`b60938e`**; stage 0 `ad6da47`; stage 1 `fa3478f`; stage 2 at the commit
-  carrying this line. Execution host: the **Ubuntu VPS**, worktree `.claude/worktrees/auth-opt-in` (the main checkout
-  stays on `main` until the stage-3 fast-forward: the container runs its on-disk code).
+  script**; the paid live test (plan stage 14b) **moved ahead of phase 5** on fal.ai with a $3 cap (DEC-174); 14b(e)
+  stays after stages 7–8.
+- **Closed 2026-09-29** on the human's phone acknowledgement ("Yes, all works"). Branch `fix/auth-opt-in` from `main`
+  `b60938e`: stage 0 `ad6da47`, stage 1 `fa3478f`, stage 2 `b76f0a9` (deployed, CI run 36588385377 green), stage 3
+  checkpoint `dc04a68`, stage 4 = the commit carrying this line; `main` fast-forwarded to it and both pushed.
+  Execution host: the Ubuntu VPS (worktree `.claude/worktrees/auth-opt-in`).
+- **Close-out per artifact:** CHECKPOINT — this header, ledger rows 1–4; claude-action.log — stage 1–4 lines;
+  ASSUMPTIONS — A-080 (accepted upgrade risk) and A-081 (fetch tool made tokenless; no objection raised at the
+  ack) added, both UNCONFIRMED; DECISIONS — DEC-173 (auth opt-in) and DEC-174 (paid test first, $3) appended, plus
+  one "Superseded" line each on DEC-037, DEC-092 and DEC-105 (nothing else edited: 57 lines added, 0 removed);
+  VISION — business context, "Auth is opt-in" bullet, next list (paid test, then phase 5).
+- **Next action: the paid-path test (DEC-174).** fal.ai only, **$3 hard ceiling** (the human: $10 funded, "Do not
+  use all 10$"; "Right after auth, $3 cap"). Before anything paid: show the paid links, prices and per-step
+  estimate, get the human's **go**; `allow_paid` is off (caps per episode $1, daily $3, per story $10;
+  `fal_key_set` true). Walk = phase-5 plan stage 14b (a)–(d); (e) waits for phase-5 stages 7–8. Then phase 5
+  stage 0 from `.claude/plans/ai-story/11-phase-5-plan.md` (ids from **DEC-175 / A-082**).
+- **The human, 2026-09-29, durable:** no auth on the app, ever — never show a sign-in screen, not even from a
+  scratch token-on server (memory `no-auth-on-the-app`). Asked what else to remove: "Keep as is".
 - **Tier-1 baseline:** VPS reference (phase 4 close, `b60938e`) local **5643 passed / 1 skipped**, CI env **4936 /
   677**. Windows baseline (5492/57/67/28, all platform-only) is history: the work moved to the VPS 2026-09-29
   ("you are running on the wrong machine"; the Windows C: disk/Docker cleanup stays the human's, nothing pruned).
@@ -31,7 +44,7 @@
   `test_notebooks.py`, +4/−1 `test_pc_helper.py` (the refusal pin replaced, named), `test_static_studio_retired.py`
   re-pinned to `API_TOKEN` (named). In-stage finding fixed: the new notebook test leaked its generated `API_TOKEN`
   into later tests (delenv records nothing for an unset var) — shown with a probe, fixed with setenv-then-delenv.
-- **Stage 3 (checks done, awaiting the human's phone acknowledgement):** `main` ff `b60938e..b76f0a9` at 0 jobs;
+- **Stage 3 (done, acknowledged on the phone):** `main` ff `b60938e..b76f0a9` at 0 jobs;
   `docker-compose.override.yml` (`DISABLE_AUTH=1`) moved to `/home/ubuntu/backups/auth-opt-in/`; `rm -sfv backend` +
   `up -d --build backend` (started 15:12:40 UTC, 0 restarts; env: no DISABLE_AUTH, DOMAIN or API_TOKEN).
   (a) live dashboard at 375 px through the pane: no sign-in; tailnet `100.112.96.111:8000/api/jobs` and
@@ -44,16 +57,8 @@
   inactive); dashboard :5176 shows Sign in with the new copy (token not typed); both stopped. (f) source run and a
   one-off `DOMAIN=… docker compose run --rm --no-deps backend`: exit 3, "⛔ DOMAIN=… API_TOKEN is not set",
   "Application startup failed". CI: `ff44862` (WIP) failed as reproduced in stage 1; `b76f0a9` run 36588385377.
-- **The human, mid-stage 3 (2026-09-29):** "Damn remember no auth to the app wtf 5 times i told you" (likely the
-  scratch sign-in screen in the pane). Answered: the live app is open; the sign-in was the throwaway :8014 server.
-  Asked what else to remove → **"Keep as is"**: the cross-site guard, the Kaggle token and the API_TOKEN option
-  stay (the guard's veto was offered and declined). Memory `no-auth-on-the-app`: never show a sign-in screen again,
-  not even from a scratch server.
-- **fal.ai:** the human put **$10 on fal.ai** ("Do not use all 10$"); `fal_key_set` true, `allow_paid` false, caps
-  per episode $1 / daily $3 / per story $10. This is phase-5 stage 14b's paid test; nothing paid runs before the
-  human confirms a ceiling and says go.
-- **Next action:** the human's phone acknowledgement of stage 3 → stage 4 (DEC-173, VISION, close-out) → push
-  branch + `main`.
+- **Stage 4 (done):** DEC-173, DEC-174, the supersede lines, VISION, this close-out. Docs/artifacts only; Tier-1 re-run
+  on the final tree (see the stage-4 log line).
 - **Open questions:** none blocking.
 
 ### Regression contract (auth task)
@@ -71,8 +76,8 @@
 | 0 | checkpoint + baseline | **done** (this commit) |
 | 1 | opt-in auth in the backend (**RISKIEST**) [Opus] | **done** (Linux Tier-1 local 5686/1, CI 4970/686; 2 in-stage test fixes) |
 | 2 | exposure paths, notebook, docs [Sonnet] | **done** (local 5692/1, CI 4976/686; +fetch tool, A-081) |
-| 3 | deploy + Tier-2 on the VPS | checks (a)–(f) **pass**; deployed `b76f0a9`; human phone ack pending |
-| 4 | decisions + artifacts | — |
+| 3 | deploy + Tier-2 on the VPS | **done** (a)–(f) pass; deployed `b76f0a9`; human ack "Yes, all works" |
+| 4 | decisions + artifacts | **done** (DEC-173/174, VISION, close-out) |
 
 ---
 

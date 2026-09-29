@@ -17,7 +17,9 @@ one dashboard, one auth, one settings store and one deploy:
 Published open-source, used through Colab/Kaggle notebooks and the web
 dashboard, mostly from a phone. Users do not control the machine it runs on and
 often have no working CUDA stack; this deployment is a CPU-only VPS reached over
-a tailnet with no token (DEC-105). AI Story runs on **free** hosted tiers by
+a tailnet with no token. Auth is opt-in (DEC-173): a token is asked only when
+`API_TOKEN` is set, and the two public paths (a Caddy domain, the Kaggle ngrok
+tunnel) never start open. AI Story runs on **free** hosted tiers by
 default, on a local GPU when one is detected, and on paid APIs only by explicit
 opt-in with caps (default ceiling $1 per episode).
 
@@ -30,6 +32,9 @@ to images, image editing, video, TTS and vision, with every paid call gated by a
 budget and every free call counted against its daily limit.
 
 ## Where it stands (2026-09-29)
+- **Auth is opt-in** (DEC-173, done 2026-09-29): no sign-in unless `API_TOKEN` is set, as the human asked
+  ("remove all access restrictions to the app"); the VPS runs open on its tailnet with no override, the public paths
+  refuse to run open, and an open API refuses other websites' writes. Acknowledged by the human on the phone.
 - **Clips**: stable; the render layer may change only with frame-parity proof.
 - **AI Story phase 0** (foundation): product renamed rzdhop AI, two-mode shell,
   generation chains and adapters, pricing, free-tier limiters, budget with caps
@@ -65,11 +70,13 @@ budget and every free call counted against its daily limit.
   merge"); merged to `main` and pushed.
 
 ## Next, in order
-1. **Phase 5** — series memory (episode 2 onward), audience steering, per-scene re-edit, remaining styles.
-2. **Phase 6** — Tier 2/3 video, local ComfyUI workflows, paid estimates end to end (incl. the deferred live
+1. **The paid-path test** on fal.ai, $3 hard ceiling, before phase 5 (DEC-174): refusals, the cap, a real paid
+   assets run, resume without re-buying, the gencache, the ledger against fal's dashboard.
+2. **Phase 5** — series memory (episode 2 onward), audience steering, per-scene re-edit, remaining styles.
+3. **Phase 6** — Tier 2/3 video, local ComfyUI workflows, paid estimates end to end (incl. the deferred live
    paid assets step, which settles whether fal bills a failed queued request, A-071).
-3. **Phase 7** — reference-video import.
-Carried alongside: the Settings per-task route selector (DEC-112); the clip-upload token-before-spool fix; the deferred paid Tier-2 step of phase 0; a dependency pass
+4. **Phase 7** — reference-video import.
+Carried alongside: the Settings per-task route selector (DEC-112); the clip-upload token-before-spool fix; a dependency pass
 (extras, lockfile, audit, setuptools ≥ 83); `jobs.json` atomic write and
 `needs_upload` at restart; tests isolated from a real `.env`; phase 3's own
 follow-ups (a garbled French accent with no code fix, storyboard/script

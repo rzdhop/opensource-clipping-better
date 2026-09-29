@@ -716,6 +716,9 @@ every function was individually correct. Only a live request showed it, which is
 why `tests/test_auth_token.py` now drives a real `TestClient` and asserts 401
 rather than 422.
 
+*Superseded in part by DEC-173 (2026-09-29): a token is required only when `API_TOKEN` is set; nothing is generated
+or stored in `data/api_token` any more. The router-level dependency, `/api/health` and the 401-not-422 rule stay.*
+
 ## DEC-038 — The dashboard is served by the API, and SSE moves off EventSource
 **Context.** The production image ran the **Vite dev server**. The dashboard
 also hardcodes `API_BASE = '/api'`, so it only ever worked same-origin.
@@ -2062,6 +2065,9 @@ dashboard now asks the server before deciding the user is signed out.
 - With auth on, the dashboard makes one extra request (a 401) before showing
   the sign-in form. Nothing else changes.
 
+*Superseded by DEC-173 (2026-09-29): the shipped default is now open, so this machine needs no override; the file
+was moved to `/home/ubuntu/backups/auth-opt-in/`.*
+
 <!-- ===================== AI Story phase 0 (stage 14) ===================== -->
 
 ## DEC-093 — The product is "rzdhop AI"; the Python package and the CLI names do not move
@@ -2217,6 +2223,9 @@ the public interface `10.0.0.113` does not. The gitignored override's header was
 rewritten to say so. Undo with `sudo tailscale serve --tcp=8000 off`. A first
 attempt with `--http 80` answered only by hostname (404 on the bare IP) and was
 turned off. **Revisit before this machine ever leaves a trusted tailnet.**
+
+*Superseded by DEC-173 (2026-09-29): the tailnet exposure stays, now as the default rather than an override; a
+public `DOMAIN` refuses to start without `API_TOKEN`, which answers the "revisit" above.*
 
 ## DEC-106 — A paid link gets exactly one attempt; the runner never retries it
 **Context.** Found on 2026-09-26 while mapping the paid path, before the first
@@ -2994,3 +3003,51 @@ plain stage timeout still waits the full `KILL_GRACE_S = 3.0` before SIGKILL, so
 short.
 **Consequence.** Fix commit `7083c39`. Live repeat: the same cancel-during-F now completes in 1.43 s, down from
 3.38 s, with the previous `episode_final.mp4` untouched and the partial file kept.
+
+## DEC-173 — Auth is opt-in: a token is required only when `API_TOKEN` is set
+**Context.** The human, 2026-09-29: "remove all access restrictions to the app, it's only local or via tailscale",
+answered as "auth off by default with an opt-in token", done as its own task before AI Story phase 5. Until then a
+token always existed (DEC-037: `$API_TOKEN`, else `data/api_token`, else a generated one stored 0600), and this VPS ran
+tokenless only through the gitignored `DISABLE_AUTH=1` override (DEC-092/105). Two paths reach the public internet —
+the Caddy `domain` profile and the Kaggle notebook's ngrok tunnel — and a naive flip would open both, including
+`POST /api/shutdown` and `PUT /api/settings` (provider keys, paid spending). Two traps in the old code:
+`token_is_valid` never accepts an empty value (so "no token" must short-circuit before it, or every route turns
+401), and the signing keys used `str(token or current_token())` (so no token would sign with a public key).
+**Decision.**
+- `auth_enabled()` is the single source: on iff `API_TOKEN` is non-empty after trimming and `DISABLE_AUTH` is not
+  set. `data/api_token` is neither read nor written; a leftover file is named in the startup banner ("set API_TOKEN
+  to its value to keep token auth"). The token is read live from the environment, with no cache.
+- Open: `require_token` returns before any header or signature check; `media_url` / `story_media_url` return the
+  plain path; `_signing_secret` raises rather than sign with no token, and verification with no token is `False`. The
+  banner says the API is OPEN and never prints a token.
+- Public paths never start open: compose passes `DOMAIN` to the backend, which refuses to start when `DOMAIN` is set
+  without a token (`open_public_exposure`); the Kaggle notebook generates and prints a token when no `API_TOKEN`
+  secret is set; the Funnel section of `docs/deploy-tailscale.md` says to set `API_TOKEN` first.
+- Open mode keeps one restriction: `CrossSiteWriteGuard` (pure ASGI) answers 403 to a POST/PUT/PATCH/DELETE carrying
+  `Sec-Fetch-Site: cross-site` unless its `Origin` is in `ALLOWED_ORIGINS`. It blocks other websites open in the
+  same browser, never the user: same-origin pages, same-site dev servers and non-browser clients pass. It steps
+  aside when a token is set (the gate already refuses a cross-site request, which cannot carry the header). The
+  human was offered its removal mid-Tier-2 and answered "Keep as is".
+- Token-on deployments behave exactly as before: header or `X-API-Key`, clip and story signatures (DEC-048, DEC-113,
+  DEC-163), 401 not 422.
+- `tools/rzclips-fetch.py` runs without a token and sends `Authorization` only when it has one (A-081).
+**Consequence.** Supersedes DEC-037's "a token always exists", DEC-092's override and DEC-105's "revisit" note; the
+VPS's override moved to `/home/ubuntu/backups/auth-opt-in/`. Tests: `tests/test_auth_opt_in.py` (47, fail-first
+42/47 on `b60938e`), the SPA-fallback test now proves both modes, notebook and fetch-tool tests; the four
+token-generator tests are gone. **Accepted risk:** a third-party install that relied on the generated token and is
+reachable some other way (its own proxy, an open port) becomes open on upgrade, with only the banner and the
+CHANGELOG Security entry to say so (A-080). Verified live 2026-09-29 (deploy `b76f0a9`): no sign-in on the tailnet,
+clips and the FR episode play and seek from plain URLs, cross-site POST 403, a scratch token-on server 401/200, and
+`DOMAIN` without a token exits 3 from source and from compose. The human acknowledged on the phone.
+
+## DEC-174 — The paid-path test runs right after the auth task, on fal.ai, with a $3 hard ceiling
+**Context.** Phase 5's plan put the paid live test at its end (stage 14b), after the human funds providers. On
+2026-09-29 the human put $10 on fal.ai ("Do not use all 10$") and, asked when and how much, answered "Right after
+auth, $3 cap".
+**Decision.** Stage 14b's walk (a)–(d) — paid links refused without `allow_paid`, a cap below the estimate refused
+with both numbers, a real paid assets run with one submit per request and the journal booked at submit, a forced
+poll failure resumed without re-buying, a same-input regenerate served from the gencache, ledger vs fal's
+dashboard — runs before phase 5 on fal only, never above $3 in total. Nothing paid runs until the human has seen the
+per-step estimate and said go; `allow_paid` goes back off afterwards. 14b(e) (re-edit and partial re-render on paid
+assets) waits for phase-5 stages 7–8.
+**Consequence.** Phase 5's stage 14b shrinks to (e). Phase 5 takes ids from DEC-175 / A-082.
