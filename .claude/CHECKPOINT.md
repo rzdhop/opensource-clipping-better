@@ -1,3 +1,88 @@
+## CURRENT STATE — AI Story **phase 5 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stage 0 **done**; next: **stage 1**
+- **In-progress header** (keep current):
+  - **Current phase:** IMPLEMENT (phases 0–3 done: the plan was mapped, clarified and approved 2026-09-29).
+  - **Current stage:** 0 done → next **stage 1** (memory documents and the pure fold) [Opus agent].
+  - **Next action:** spawn the stage-1 agent in the worktree; fail-first tests before code.
+  - **Open questions:** none blocking. Stage 12 needs the human to confirm font filenames, sources and sizes
+    before any download.
+- **Started** 2026-09-29 on the human's "Start AI Story phase 5 under the repo protocol (FULL task), on this
+  Ubuntu VPS". Plan: `.claude/plans/ai-story/11-phase-5-plan.md` (**APPROVED**, stages 0–15; copy at
+  `~/.claude/plans/ai-story-phase-5-plan.md`). Brief: `.claude/plans/ai-story/06-phase-5-series-reedit-styles.md`.
+- **Where:** worktree `.claude/worktrees/ai-story-phase-5`, branch `feat/ai-story-phase-5` from `main` `d1c38ae`;
+  `web/dashboard/node_modules` symlinked from the main checkout. The main checkout stays on `main`: the
+  `rzc-backend` container runs it through a bind mount. **Never switch its branch.** The live artifacts of this
+  phase are this worktree's `.claude/`.
+- **Checkpoint:** `d1c38ae` (`main` == `origin/main`, pushed, deployed, 0 jobs). Stage 0's commit carries this
+  header on `feat/ai-story-phase-5`; `main` is fast-forwarded to it (docs only, `.claude/` is dockerignored) so a
+  fresh session in the main checkout lands here.
+- **Tier-1 baseline at `d1c38ae`** (worktree, 2026-09-29): local **5697 passed / 1 skipped**; CI env **4981 passed / 686 skipped**; compileall
+  clean; vite build green to a scratch outDir (js 478.13 kB, gzip 135.45 kB).
+- **Ids:** next free **DEC-176** and **A-083** (after DEC-175 / A-082). The plan's expected DEC-174…DEC-183 become
+  DEC-176…DEC-185 in the same order; its A-081+ become A-083+.
+- **Scope set at start:**
+  - Stage 14b is reduced to **14b(e)** (re-edit and partial re-render on paid assets, after stages 7–8);
+    (a)–(d) ran in the paid fal.ai test (DEC-174).
+  - Stage 12: confirm the font filenames, sources and sizes with the human **before any download**.
+  - Live walks (stages 13–14) at 375 px; the human watches episode 2 and one new-style episode on the phone.
+- **Standing rules (the human, 2026-09-29):**
+  - **No auth on the app, ever.** Never set `API_TOKEN` on this VPS; never show a sign-in screen, not even from a
+    scratch server. The token-on path is proven by tests or curl only.
+  - **Paid:** `allow_paid` stays OFF. fal.ai balance ≈ $9.30. Anything paid (14b(e)) needs a shown estimate and
+    the human's explicit go. Never add or fund an OpenRouter paid link (paid LLM calls are not booked or capped
+    yet; follow-up).
+  - Push with `GIT_SSH_COMMAND="ssh -i ~/.ssh/github_osc_better -F /dev/null -o IdentitiesOnly=yes"`. Commits use
+    explicit paths and no trailers. "Save" = commit and push.
+  - Deploy only at 0 jobs. Python change: `sudo docker compose restart backend`. Dashboard change:
+    `sudo docker compose rm -sfv backend && sudo docker compose up -d --build backend`.
+  - The paid-test throwaways T1 `999b08623375` and T2 `ab8fc500173e` are kept; deleting them is the human's call.
+- **Backups (2026-09-29 17:01 UTC):** `/home/ubuntu/backups/ai-story-phase-5/`:
+  - `b1104ec66b05.tgz` sha256 `24776975…dd77`, `0a9572a6a8be.tgz` `4edcbdb7…4abc` (`tars.sha256`). Both are
+    byte-identical to the fal-test tars of 15:42, so neither story changed since.
+  - `enfr-before.sha`: 615 files; `sha256sum -c` from the main checkout's root passes.
+- **Live data at start:** all four stories' `season.json` carry an empty `series_memory` (`recaps {}`,
+  `open_hooks []`, `relationship_state {}`, `introduced {}`) and no `audience_feedback`.
+- **Housekeeping:** the merged worktrees `auth-opt-in` and `fal-pricing` and their branches (`fix/auth-opt-in`,
+  `fix/fal-megapixel-rounding`, both ancestors of `main`) were removed, as the human allowed.
+- **Rollback:** code: delete the worktree and the branch (or revert a stage's commit). Live data: restore the
+  tars (`tar -C outputs/stories -xzf …`) and check `sha256sum -c enfr-before.sha`.
+
+### Regression contract (phase 5)
+RC-P1…P11, RC-S1…S4, RC-T1…T3, RC-E1…E5 and RC-A1…A9 (tables below) stay in force, plus:
+| ID | Must keep working | Proven by |
+|---|---|---|
+| RC-M1 | Episode-1 prompts byte-identical (no memory, no `pays_off`) | `test_story_prompts_episode.py` ep-1 goldens unedited |
+| RC-M2 | Golden render unchanged on all three keys | `tests/test_aistory_render_golden.py` + `framemd5.json` unedited |
+| RC-M3 | Stored episodes read, validate and re-render byte-identical with no edit | stage-1/6 copy checks + Tier-2 (f) (live ep 1 sha) |
+| RC-M4 | A `style_lock.json` never changes when its template does | new `tests/test_style_lock.py` test (stage 12; UNVERIFIED until then — the behaviour holds today by `build_style_lock`'s deep copy) |
+| RC-M5 | Memory, feedback and propose-next never touch `story.status`/`approvals`; only an accepted lead/support folds cast (DEC-123) | stage-4 tests |
+| RC-M6 | Clip mode untouched | `test_render_layer_guard.py` + `git diff --stat b60938e -- clipping/studio clipping/story` empty |
+| RC-M7 | No paid call from the new steps without `allow_paid` | stage-4 tests + DEC-115 tests unedited |
+| RC-M8 | A partial re-render's output equals a full render of the same documents | stage-8 real-ffmpeg test (UNVERIFIED until stage 8) |
+| RC-M9 | No auth: with `API_TOKEN` unset every route and media URL stays open; token-on proven by tests/curl only | `tests/test_auth_opt_in.py` + `test_auth_token.py` unedited |
+
+### Stage ledger (phase 5)
+| S | Stage | State |
+|---|---|---|
+| 0 | checkpoint + baseline + worktree + backups | **done** (this commit; baseline local 5697/1, CI 4981/686) |
+| 1 | memory documents and the pure fold [Opus] | next |
+| 2 | prompts S3, F1, N1 [Sonnet] | — |
+| 3 | continuity in the episode prompts [Opus] | — |
+| 4 | steps memory, feedback, propose-next and the gate [Opus] | — |
+| 5 | series API and CLI [Sonnet] | — |
+| 6 | whole-frame shot timing (second riskiest) [Opus] | — |
+| 7 | re-edit operations [Opus] | — |
+| 8 | partial re-render (**RISKIEST**) [Opus] | — |
+| 9 | re-edit API and CLI [Sonnet] | — |
+| 10 | dashboard: SeasonBoard series panel [Sonnet] | — |
+| 11 | dashboard: EpisodeStudio re-edit [Sonnet] | — |
+| 12 | fonts (confirm with the human first) and per-style renderer gaps [Sonnet] | — |
+| 13 | merge, deploy, Tier-2 series walk (me at 375 px; the human watches ep 2) | — |
+| 14 | Tier-2 per style (5 short episodes, free route; the human watches one) | — |
+| 14b(e) | re-edit + partial re-render on paid assets (estimate + the human's go first) | — |
+| 15 | docs and decisions [Sonnet] | — |
+
+---
+
 ## CURRENT STATE — Paid-path live test on fal.ai **DONE** ($0.6934 of the $3 ceiling, DEC-174). Next: AI Story phase 5
 - **Approved** 2026-09-29: "Go: shots + reference edits (Recommended)" (about $0.80 expected). Runbook:
   `.claude/plans/paid-fal-test.md`. **Checkpoint:** `main` at the commit carrying this line (code == `2076beb`, deployed,
