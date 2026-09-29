@@ -1,3 +1,45 @@
+## IN PROGRESS — Auth becomes opt-in (no token unless `API_TOKEN` is set), then AI Story phase 5
+- **Asked** 2026-09-29: "remove all access restrictions to the app, it's only local or via tailscale". Answers:
+  auth **off by default with an opt-in token**; a **separate task before phase 5**. Classified FULL (auth).
+  Both plans approved in chat ("Ok go"): `.claude/plans/auth-opt-in-token.md` (stages 0–4, riskiest stage 1) and
+  `.claude/plans/ai-story/11-phase-5-plan.md` (phase 5, stages 0–15 + 14b; it starts after this task).
+- **Phase-5 answers already given** (for when it starts): plan against merged `main`; export/import bundle
+  **deferred** (follow-up, no DEC); **ship the OFL fonts** the five styles name; memory runs on an **approved
+  script**; at the end of phase 5 the human funds the chosen providers for a paid live test (plan stage 14b).
+- **Current phase:** IMPLEMENT. **Current stage:** auth stage 1 (backend). **Checkpoint:** branch
+  `fix/auth-opt-in` from `main` **`b60938e`** (clean tree), on the Windows workstation clone.
+- **Tier-1 baseline (b60938e, Windows 11, Python 3.11.15, ffmpeg 8.1.1):** local **5492 passed / 57 failed / 67
+  errors / 28 skipped** (1300 s). Every failure is platform-only: WinError 1314 symlink privilege (83, incl. all
+  67 errors = `test_story_media_serving.py`'s fixture), POSIX file modes 0600/0644 (~27), cp1252 encoding (3),
+  CRLF checkout changing `test_render_layer_guard.py`'s sha256s (2), no framemd5 key for ffmpeg 8.1.1 (1). List:
+  scratch `baseline_local_failed.txt` (124 ids). Rule for this task: **no new failure on Windows**, and the auth
+  test files run green on **Linux** (a throwaway container from the local backend image) — the VPS reference is
+  local 5643/1, CI 4936/677.
+- **Next action:** apply stage 1 (drafts in scratch `stage1/`), prove the new tests fail on `b60938e`, run the
+  auth files on Linux + the full Windows suite, commit.
+- **Open questions:** none. VPS access from this machine (SSH host key not in `known_hosts`) is needed at stage 3
+  (deploy) — ask the human then.
+
+### Regression contract (auth task)
+| ID | Must keep working | Proven by |
+|---|---|---|
+| RC-U1 | With `API_TOKEN` set, auth behaves exactly as before (header, clip/story signatures, 401 not 422) | `test_auth_token.py` client-fixture tests + `test_story_media_serving.py` unedited (Linux) |
+| RC-U2 | With no token, every page, clip and episode video works unsigned | new `tests/test_auth_opt_in.py` + Tier-2 |
+| RC-U3 | No `DISABLE_AUTH` in committed compose files; backend port bound to loopback | `test_auth_token.py` compose guards unedited |
+| RC-U4 | The public paths never start open (Caddy `DOMAIN`; Kaggle ngrok) | new tests + Tier-2 |
+| RC-A5 | A story signature opens exactly one file (token on) | phase-4 stage-12 tests unedited |
+
+### Stage ledger (auth task)
+| S | Stage | State |
+|---|---|---|
+| 0 | checkpoint + baseline | **done** (this commit) |
+| 1 | opt-in auth in the backend (**RISKIEST**) [Opus] | in progress |
+| 2 | exposure paths, notebook, docs [Sonnet] | — |
+| 3 | deploy + Tier-2 on the VPS | — |
+| 4 | decisions + artifacts | — |
+
+---
+
 ## CURRENT STATE — AI Story **phase 4 is DONE** (the MVP) and pushed. Next: **phase 5**.
 - **Started** 2026-09-28 ("Go with phase 4"), FULL; plan `~/.claude/plans/ai-story-phase-4-assets-render.md`
   (stages 0–17, riskiest stage 6) approved ("Yes go go"). **Closed 2026-09-29** on the human's "Finish, update
