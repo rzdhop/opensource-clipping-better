@@ -33,9 +33,12 @@ The audio-mix constants (DEC-157: the amix weights, the
 ``sidechaincompress`` ducking values, the bed fade-outs per ending, the
 48 kHz stereo mix format) live at the bottom of this module, in one block,
 so ``filtergraph.audio_mix_argv`` and its tests read one source of truth.
-DEC-157's two-pass ``loudnorm`` target (I -14, TP -1, LRA 11) sits in the same
-block (:data:`LOUDNORM_TARGET`): the render plan hands it to ``loudness.py``'s
-``target=``, whose own default stays the clips' TP -1.5 (A-066, RC-A7).
+DEC-157's two-pass ``loudnorm`` target (I -14, LRA 11, its true-peak ceiling
+lowered to -2.5 by the Tier-2 measurement) sits in the same block
+(:data:`LOUDNORM_TARGET`), with the final AAC encode's own options
+(:data:`AAC_ENCODER_ARGS`): the render plan hands the target to
+``loudness.py``'s ``target=``, whose own default stays the clips' TP -1.5
+(RC-A7).
 
 Stdlib only (DEC-012).
 """
@@ -163,12 +166,18 @@ DUCK_RELEASE_MS = 300
 ENDINGS = ("cut_to_black", "hard_stop")
 BED_FADE_OUT_S = {"cut_to_black": 0.5, "hard_stop": 0.05}
 
-# Two-pass loudnorm of the episode (DEC-157, A-066): passed as ``target=`` to
+# Two-pass loudnorm of the episode (DEC-157): passed as ``target=`` to
 # ``clipping.loudness.measure_cmd``/``apply_cmd`` by ``render/plan.py``.
 # ``clipping.loudness.TARGET`` (the clips', TP -1.5) is left as it is.
-LOUDNORM_TARGET = "I=-14:TP=-1:LRA=11"
+# TP -2.5, not the spec's -1 (Tier-2, FR ep01): the mix's peaks put loudnorm in
+# its dynamic mode, whose -1 ceiling measured +0.57 dBTP after the AAC encode.
+LOUDNORM_TARGET = "I=-14:TP=-2.5:LRA=11"
+# The final AAC encode's options, after its bitrate (``plan.loudness_apply_argv``):
+# PNS off, as its synthesized noise turned a -2.4 dBTP burst into a +4 dBTP over.
+AAC_ENCODER_ARGS = ("-aac_pns", "0")
 # A finished episode outside these is a warning in the manifest, never a
-# failure (plan phase 4: "-14 +/- 1 LU"; A-066's true-peak ceiling).
+# failure (plan phase 4: "-14 +/- 1 LU"; the spec's -1 dBTP delivery limit,
+# which the -2.5 ceiling above sits under).
 LOUDNESS_TARGET_I = -14.0
 LOUDNESS_TOLERANCE_LU = 1.0
 TRUE_PEAK_MAX_DBTP = -1.0

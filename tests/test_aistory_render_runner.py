@@ -200,7 +200,7 @@ def _stage_ids(plan):
 
 def test_the_clips_loudness_target_is_unchanged():
     assert loudness.TARGET == "I=-14:TP=-1.5:LRA=11"
-    assert profiles.LOUDNORM_TARGET == "I=-14:TP=-1:LRA=11"
+    assert profiles.LOUDNORM_TARGET == "I=-14:TP=-2.5:LRA=11"
 
 
 def test_the_default_commands_are_byte_identical_to_before():
@@ -222,9 +222,9 @@ def test_the_default_commands_are_byte_identical_to_before():
 def test_a_target_is_passed_through_both_passes():
     measured = loudness.parse_measurement(MEASURED_STDERR)
     measure = loudness.measure_cmd("mix.wav", target=profiles.LOUDNORM_TARGET)
-    assert measure[measure.index("-af") + 1] == "loudnorm=I=-14:TP=-1:LRA=11:print_format=json"
+    assert measure[measure.index("-af") + 1] == "loudnorm=I=-14:TP=-2.5:LRA=11:print_format=json"
     apply = loudness.apply_cmd("pre.mkv", "final.mp4", measured, 48000, target=profiles.LOUDNORM_TARGET)
-    assert apply[apply.index("-af") + 1].startswith("loudnorm=I=-14:TP=-1:LRA=11:measured_I=-21.85")
+    assert apply[apply.index("-af") + 1].startswith("loudnorm=I=-14:TP=-2.5:LRA=11:measured_I=-21.85")
     assert apply[-3:] == ["-movflags", "+faststart", "final.mp4"]
     assert loudness.TARGET == "I=-14:TP=-1.5:LRA=11"
 
@@ -280,19 +280,51 @@ def test_every_argv_is_relative_and_every_input_staged_by_content(tmp_path):
                      ("line", "l01"), ("line", "l02"), ("line", "l03"), ("sfx", "dramatic_sting"), ("bgm", None)]
 
 
-def test_the_ai_story_loudness_target_is_tp_minus_one(tmp_path):
+def test_the_ai_story_loudness_target_is_tp_minus_two_and_a_half(tmp_path):
     plan = _plan(tmp_path)
     stages = {stage["id"]: stage for stage in plan["stages"]}
-    assert stages["L1"]["argv"] == loudness.measure_cmd("mix.wav", target="I=-14:TP=-1:LRA=11")
-    assert stages["P:loudness"]["argv"] == loudness.measure_cmd("episode_final.mp4", target="I=-14:TP=-1:LRA=11")
+    assert stages["L1"]["argv"] == loudness.measure_cmd("mix.wav", target="I=-14:TP=-2.5:LRA=11")
+    assert stages["P:loudness"]["argv"] == loudness.measure_cmd("episode_final.mp4", target="I=-14:TP=-2.5:LRA=11")
     level = stages["L2"]
     assert level["argv"] is None
     argv = plan_mod.loudness_apply_argv(level, loudness.parse_measurement(MEASURED_STDERR))
-    assert argv[argv.index("-af") + 1].startswith("loudnorm=I=-14:TP=-1:LRA=11:measured_I=-21.85")
+    assert argv[argv.index("-af") + 1].startswith("loudnorm=I=-14:TP=-2.5:LRA=11:measured_I=-21.85")
     assert argv[argv.index("-c:v") + 1] == "copy" and argv[argv.index("-b:a") + 1] == "192k"
     assert argv[argv.index("-movflags") + 1] == "+faststart"
     assert argv[argv.index("-i") + 1] == "episode_pre.mkv" and argv[-1] == "episode_final.mp4"
     assert loudness.TARGET == "I=-14:TP=-1.5:LRA=11"
+
+
+def test_the_final_aac_encode_is_peak_safe(tmp_path):
+    """The episode's true-peak chain (DEC-157 as amended by the Tier-2 finding
+    that TP -1 did not survive the AAC encode): loudnorm's ceiling at -2.5
+    dBTP, 1.5 dB under the delivery limit the P:loudness warning checks, and
+    the AAC encoder without perceptual noise substitution (its synthesized
+    noise turned a -2.4 dBTP burst in a TTS line into a +4 dBTP over)."""
+    assert profiles.LOUDNORM_TARGET == "I=-14:TP=-2.5:LRA=11"
+    assert profiles.AAC_ENCODER_ARGS == ("-aac_pns", "0")
+    assert profiles.TRUE_PEAK_MAX_DBTP == -1.0
+    assert profiles.LOUDNESS_TARGET_I == -14.0 and profiles.LOUDNESS_TOLERANCE_LU == 1.0
+    ceiling = float(dict(part.split("=") for part in profiles.LOUDNORM_TARGET.split(":"))["TP"])
+    assert profiles.TRUE_PEAK_MAX_DBTP - ceiling >= 1.5
+
+    level = {stage["id"]: stage for stage in _plan(tmp_path)["stages"]}["L2"]
+    assert plan_mod.loudness_apply_argv(level, loudness.parse_measurement(MEASURED_STDERR)) == [
+        "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", "episode_pre.mkv",
+        "-map", "0", "-c:v", "copy",
+        "-af", "loudnorm=I=-14:TP=-2.5:LRA=11:measured_I=-21.85:measured_TP=-4.55:measured_LRA=3.00"
+               ":measured_thresh=-31.85:offset=0.05:linear=true:print_format=summary",
+        "-c:a", "aac", "-b:a", "192k", "-aac_pns", "0", "-ar", "48000",
+        "-movflags", "+faststart", "episode_final.mp4",
+    ]
+    # the clips' own encode keeps its default AAC settings (RC-A7)
+    assert "-aac_pns" not in loudness.apply_cmd("in.mp4", "out.mp4", loudness.parse_measurement(MEASURED_STDERR),
+                                                48000)
+    # the warning still fires on a real over of the delivery limit, not on the chain's margin
+    within = {"duration_s": 4.76, "loudness": {"i": -14.2, "tp": -1.2, "lra": 4.9}}
+    assert runner.output_warnings({"length_window_s": [3, 9]}, within) == []
+    over = {"duration_s": 4.76, "loudness": {"i": -14.07, "tp": 0.57, "lra": 5.6}}
+    assert runner.output_warnings({"length_window_s": [3, 9]}, over) == ["True peak 0.6 dBTP is above -1 dBTP."]
 
 
 def test_the_mix_is_float_until_the_loudnorm_pass(tmp_path):

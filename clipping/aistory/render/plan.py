@@ -25,8 +25,9 @@ keys need, and hands the plan to ``runner.run_render``.
 - ``F`` (``final``) -- ``filtergraph.final_pass_argv`` -> ``episode_pre.mkv``.
 - ``L2`` (``loudness_apply``) -- ``loudness.apply_cmd(episode_pre.mkv,
   episode_final.mp4, <L1's measurement>, 48000, target=...)``: video copied,
-  AAC 192k, ``+faststart``. Its argv needs L1's numbers, so the plan carries
-  its parameters (``apply``) and :func:`loudness_apply_argv` builds it.
+  AAC 192k with ``profiles.AAC_ENCODER_ARGS``, ``+faststart``. Its argv
+  needs L1's numbers, so the plan carries its parameters (``apply``) and
+  :func:`loudness_apply_argv` builds it.
 - ``P`` and ``P:loudness`` (``probe``) -- ``ffprobe`` JSON of the final
   file (``probe.json``), and a loudness measurement of it
   (``loudness_final.json``).
@@ -184,9 +185,13 @@ def framemd5_argv(path: str, out: str) -> list:
 
 
 def loudness_apply_argv(stage: dict, measured: dict) -> list:
-    """L2's argv, once L1 has *measured* the mix (``loudness.parse_measurement``)."""
+    """L2's argv, once L1 has *measured* the mix (``loudness.parse_measurement``):
+    ``loudness.apply_cmd`` with the AI-Story target, and the AAC encoder's own
+    options (``profiles.AAC_ENCODER_ARGS``) right after its bitrate."""
     apply = stage["apply"]
-    return loudness.apply_cmd(apply["src"], apply["dst"], measured, apply["sample_rate"], target=apply["target"])
+    argv = loudness.apply_cmd(apply["src"], apply["dst"], measured, apply["sample_rate"], target=apply["target"])
+    at = argv.index("-b:a") + 2
+    return argv[:at] + list(apply["aac_args"]) + argv[at:]
 
 
 # ------------------------------------------------------------------- public
@@ -413,7 +418,7 @@ def _build(*, script, storyboard, assets, style_lock, template, story, ep, input
     # L2: level it (argv built by the runner from L1's measurement)
     level = _stage("L2", "loudness_apply", None, FINAL_REL)
     level["apply"] = {"src": PRE_REL, "dst": FINAL_REL, "sample_rate": profiles.AUDIO_RATE,
-                      "target": profiles.LOUDNORM_TARGET}
+                      "target": profiles.LOUDNORM_TARGET, "aac_args": list(profiles.AAC_ENCODER_ARGS)}
     stages.append(level)
 
     # P: what came out; M: its frames
