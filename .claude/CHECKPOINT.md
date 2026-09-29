@@ -1,10 +1,10 @@
-## CURRENT STATE — AI Story **phase 5 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–4 **done**; next: **stage 5**
+## CURRENT STATE — AI Story **phase 5 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–5 **done**; next: **stage 6**
 - **In-progress header** (keep current):
   - **Current phase:** IMPLEMENT (phases 0–3 done: the plan was mapped, clarified and approved 2026-09-29).
-  - **Current stage:** 4 done → next **stage 5** (series API and CLI) [Sonnet agent]; then stage 6 with the spike's
-    design (below).
-  - **Next action:** spawn the stage-5 agent; until it lands, `POST /steps/memory|feedback|propose-next` answer 404
-    (the worker runs them; no route calls them yet) — never deploy between stages 4 and 5.
+  - **Current stage:** 5 done → next **stage 6** (whole-frame shot timing, with the spike's `whole_frames` flag)
+    [Opus agent].
+  - **Next action:** spawn the stage-6 agent on the spike's design (notes below); fail-first; golden and stored
+    documents unchanged.
   - **Open questions:** none blocking. Stage 12 needs the human to confirm font filenames, sources and sizes
     before any download.
 - **Started** 2026-09-29 on the human's "Start AI Story phase 5 under the repo protocol (FULL task), on this
@@ -81,6 +81,15 @@
   nothing). Feedback stores `stats` too (≤ 6000, never trimmed); one item per episode; re-running F1 clears the
   choice. `approve_season` now re-reads under the lock. `CAST_PARAMS` unchanged; `introduced_in` rides in
   `CAST_JOB_PARAMS`.
+- **Stage 5 notes for stages 10–13:** routes: `POST /steps/memory|feedback|propose-next {ep}`, `POST /episodes/{ep}/
+  feedback {text, stats?}` (≤ 6000 each → 422, never trimmed; queues F1), `POST /episodes/{ep}/proposals/{item_id}
+  {accept, role?}` (200 with `job` only when a character was accepted), `approve/memory:<ep>`, `feedback:<ep>`
+  (`{direction}` required; absent ≠ null via `model_fields_set`), `proposals:<ep>`; `GET /stories/{id}` gains
+  `series` (one `series_page` per planned episode), `GET /episodes/{ep}` gains `series` with
+  `next_episode_gate` (the exact gate sentence for the dashboard's "why episode 2 is locked"); estimates 1 LLM call.
+  Busy rule = the existing one-job-per-story rule; paste and decide check it before writing. CLI: `step
+  memory|feedback|propose-next --ep N`, `feedback <id> --ep N --text-file F [--stats-file F] [--auto-approve]`;
+  memory and feedback auto-approvable (direction null), propose-next not.
 - **Stage 6 spike (done early, scratch copy of `1cd0106`, read-only against the worktree): GO, with a flag the plan
   lacked.** The plan's "stored documents render exactly as today because the timeline is unchanged" is wrong:
   `render/timeline.py:278` and `assets.audio_entries` re-run `episode_pass` on every render and compare stored shot
@@ -116,8 +125,8 @@ RC-P1…P11, RC-S1…S4, RC-T1…T3, RC-E1…E5 and RC-A1…A9 (tables below) st
 | 2 | prompts S3, F1, N1 [Sonnet] | **done** (local 5950/1, CI 5234/686; 53 new tests; 5 named registry re-pins; elision repair made single-sourced) |
 | 3 | continuity in the episode prompts [Opus] | **done** (local 6017/1, CI 5301/686; 67 new tests; ep-1 E1/E3/E4 request shas pinned from HEAD incl. max_tokens; 1 review round) |
 | 4 | steps memory, feedback, propose-next and the gate [Opus] | **done** (local 6061/1, CI 5348/683; 45 new tests + 8 reverted mutation proofs; the later-phase pins moved, named) |
-| 5 | series API and CLI [Sonnet] | next |
-| 6 | whole-frame shot timing (second riskiest) [Opus] | — |
+| 5 | series API and CLI [Sonnet] | **done** (local 6125/1, CI 5367/728; 64 new tests, 45 API ones skip in CI like every route test; 3 named re-pins) |
+| 6 | whole-frame shot timing (second riskiest) [Opus] | next (spike done: GO with a flag) |
 | 7 | re-edit operations [Opus] | — |
 | 8 | partial re-render (**RISKIEST**) [Opus] | — |
 | 9 | re-edit API and CLI [Sonnet] | — |

@@ -138,7 +138,9 @@ from ..models import (
     StoryApproveRequest,
     StoryboardPatchRequest,
     StoryCreateRequest,
+    StoryEpisodeFeedbackRequest,
     StoryPatchRequest,
+    StoryProposalDecisionRequest,
     StoryRegenerateRequest,
     StoryStepRequest,
 )
@@ -321,13 +323,23 @@ def _doc_of(job) -> Optional[str]:
 
 
 def _episode_of(job) -> Optional[int]:
-    """The episode a step job works on: an episode step's ``ep``; an episode
-    regenerate target's episode (phase 3's and phase 4's). None for
-    anything else."""
+    """The episode a step job works on: an episode step's ``ep``; a series
+    step's (phase 5), the episode of the document it writes
+    (``workflow.series_job_doc``: ``propose-next`` of episode N writes N +
+    1's proposals, so its job counts as N + 1's -- what ``propose-next``
+    would leave busy is the episode its proposals block, not the one its
+    memory was read from); an episode regenerate target's episode (phase 3's
+    and phase 4's). None for anything else."""
     step = job.get("step")
     if step in workflow.EPISODE_STEPS:
         ep = job.get("ep")
         return ep if type(ep) is int else None
+    if step in workflow.SERIES_STEPS:
+        doc = workflow.series_job_doc(step, job.get("ep"))
+        if doc is None:
+            return None
+        _word, _sep, rest = doc.partition(":")
+        return int(rest) if rest.isdigit() else None
     if step == "regenerate":
         parsed = regenerate_step.parse_episode_target((job.get("params") or {}).get("target"))
         return parsed[1] if parsed is not None else None
@@ -670,7 +682,8 @@ async def get_story(story_id: str) -> dict:
                       "props": {prop_id: {"missing": [...]}},
                       "pick_voice": [char_id, ...],
                       "edit_readiness": <the editor's verdict> | null},
-         "episodes": [{ep, title, script_state, storyboard_state, total_s, timing_state}, ...]}
+         "episodes": [{ep, title, script_state, storyboard_state, total_s, timing_state}, ...],
+         "series": [workflow.series_page(...), ...]}
 
     ``progress`` is derived (``workflow.progress``) and calls nothing but a
     local editor's status probe: a character's ``missing`` is among ``text,
@@ -689,6 +702,13 @@ async def get_story(story_id: str) -> dict:
     ``partial``, ``complete``, ``approved``), its length and where it sits
     in the template's window; ``unreadable`` for both states when a document
     does not validate (its episode page says why).
+
+    ``series`` (phase 5, step 13) is one ``workflow.series_page`` per
+    episode the season plans (``[]`` before a season): the memory entry and
+    its state, the audience feedback item, the proposals made for that
+    episode and the gate's current refusal text for the episode after it --
+    the episode page (``_episode_page``) shows one entry the same way, for
+    the episode it is.
     """
     stories = _stories()
     story = _load(stories, story_id)
@@ -701,6 +721,8 @@ async def get_story(story_id: str) -> dict:
         season = workflow.season(stories, story_id)
         proposal = workflow.places_proposal(stories, story_id)
         episodes = workflow.episode_summaries(stories, story)
+        series = [workflow.series_page(stories, story, ep)
+                 for ep in range(1, (season["episodes_planned"] if season else 0) + 1)]
         # Off the event loop: the status probe may wait up to its timeout.
         progress = await run_in_threadpool(workflow.progress, stories, story, env=worker.get_settings_env(),
                                            probe_local=True)
@@ -726,6 +748,7 @@ async def get_story(story_id: str) -> dict:
         "places_proposal": proposal,
         "progress": progress,
         "episodes": episodes,
+        "series": series,
     }
 
 
@@ -898,9 +921,10 @@ async def run_step(story_id: str, step: str, response: Response,
     queued job, or -- the storyboard with ``params.fast`` -- 200 with the
     episode page, built here (see ``_episode_step``). ``assets``, ``render``,
     ``metadata``, ``fast-track`` (phase 4, one episode: ``ep``): 201 with the
-    queued job (see ``_phase4_step``). A step of 9.1 still a later phase's
-    (``workflow.LATER_STEPS``): 400. Anything else -- the phase-5 series steps
-    too, until their routes are wired (plan 11 stage 5) -- 404.
+    queued job (see ``_phase4_step``). ``memory``, ``feedback``,
+    ``propose-next`` (phase 5, step 13, one episode: ``ep``): 201 with the
+    queued job (see ``_series_step``). A step of 9.1 still a later phase's
+    (``workflow.LATER_STEPS``): 400. Anything else: 404.
     """
     stories = _stories()
     story = _load(stories, story_id)
@@ -933,6 +957,8 @@ async def run_step(story_id: str, step: str, response: Response,
         return await _episode_step(stories, story, step, params, ep, response)
     if step in workflow.PHASE4_STEPS:
         return await _phase4_step(stories, story, step, params, ep)
+    if step in workflow.SERIES_STEPS:
+        return await _series_step(stories, story, step, params, ep)
     with _answering():
         workflow.refuse_step(step)
 
@@ -1066,6 +1092,36 @@ async def _phase4_step(stories, story, step, params, ep) -> JobResponse:
     return await _create_step_job(story["story_id"], step, sent, ep=ep, gate=gate)
 
 
+async def _series_step(stories, story, step, params, ep) -> JobResponse:
+    """``memory``, ``feedback`` or ``propose-next`` of episode *ep* (phase 5,
+    step 13).
+
+    Refused before any job exists, in this order: the episode's
+    preconditions and the step's own (``workflow.series_context``, calling
+    nothing: 409 for a story that is not ready; 400 without ``ep`` or for one
+    the season does not plan; ``memory`` 409 without episode *ep*'s script
+    approved; ``feedback`` 409 without episode *ep*'s audience feedback
+    pasted (``POST .../episodes/{ep}/feedback`` first); ``propose-next`` 409
+    without an episode after *ep* in the season, or without episode *ep*'s
+    own series memory written, approved and fresh -- DEC-130 as amended by
+    plan 11 stage 4, the same gate a script or storyboard job meets), then
+    the parameters (400: none of the three take any, ``workflow.
+    series_request``), then what every job meets (``_create_step_job``): 409
+    while a step of the story is queued or running -- the site's one-step rule
+    is global, so it alone already keeps a series step of episode N and a
+    script or storyboard job of episode N from overlapping -- the key gate
+    (400, every series step calls one free LLM link), the queue cap (429).
+    The job carries *ep*; a newer one supersedes the one awaiting approval
+    for the same document (``memory:<ep>`` / ``feedback:<ep>`` /
+    ``proposals:<ep + 1>``, ``workflow.series_job_doc``).
+    """
+    story_id = story["story_id"]
+    with _answering():
+        workflow.series_context(stories, story, ep, step=step)
+        workflow.series_request(step, params)
+    return await _create_step_job(story_id, step, params, ep=ep)
+
+
 def _episode_jobs(story_id, ep) -> list:
     """The story's step jobs queued or running on episode *ep* (its
     documents', and its render, metadata and fast track), as ``GET /{id}``
@@ -1100,11 +1156,14 @@ def _episode_media(story_id, ep, render) -> dict:
 def _episode_page(stories, story, ep) -> dict:
     """``GET /{id}/episodes/{ep}``'s answer: ``workflow.episode_view``,
     ``workflow.episode_outputs`` (phase 4: the assets, the render -- with its
-    media --, the metadata pack, the ledger) and the episode's jobs in
-    flight."""
+    media --, the metadata pack, the ledger), ``workflow.series_page``
+    (phase 5: the memory entry and its state, the audience feedback item, the
+    proposals made for this episode, and the gate's current refusal text for
+    the episode after it) and the episode's jobs in flight."""
     with _answering():
         page = workflow.episode_view(stories, story, ep)
         page.update(workflow.episode_outputs(stories, story, ep))
+        page["series"] = workflow.series_page(stories, story, ep)
     if page["render"] is not None:
         page["render"]["media"] = _episode_media(story["story_id"], ep, page["render"])
     page["jobs"] = _episode_jobs(story["story_id"], ep)
@@ -1186,6 +1245,19 @@ async def approve(story_id: str, doc: str, req: Optional[StoryApproveRequest] = 
     completed. From phase 4 on, every episode approval waits for the
     episode's jobs, the render's and the fast track's included.
 
+    ``memory:<ep>``, ``feedback:<ep>`` (body ``{direction?}``, required and
+    only there -- 400 with any other document), ``proposals:<ep>`` (phase 5,
+    step 13): 400 for an episode number the season does not plan; 409 while a
+    step job of the episode is queued or running; then ``workflow.
+    approve_series`` -- ``memory:<ep>`` (409 without an entry, or for a stale
+    one), ``feedback:<ep>`` (409 without a digested item; ``direction`` 0, 1
+    or 2 chooses one of F1's three, ``null`` chooses none -- either is stored
+    as ``chosen_direction``; any other value is 400, exactly as
+    ``workflow.approve_feedback`` -- a bool, a float or a text -- checks it)
+    or ``proposals:<ep>`` (409 naming every item not yet accepted or
+    rejected); nothing here ever moves the story's approvals or status
+    (RC-M5); the jobs awaiting the document are completed.
+
     No approval of the 9.2 grammar is a later phase's any more. Anything
     else: 404. What each approval requires is ``workflow.approve_*``; the
     step jobs are checked here first.
@@ -1209,6 +1281,19 @@ async def approve(story_id: str, doc: str, req: Optional[StoryApproveRequest] = 
             else:
                 workflow.approve_assets(stories, story_id, ep, now=_now())
         _complete_awaiting(story_id, f"{word}:{ep}")
+        # Off the event loop: the page's phase-4 part hashes the files that moved.
+        return await run_in_threadpool(_episode_page, stories, story, ep)
+
+    if sep and eid and word in workflow.SERIES_APPROVALS:
+        with _answering():
+            ep = workflow.episode_bounds(stories, story, eid)
+        _refuse_episode_busy(story_id, ep, f"approve {word}:{ep} once it is done, or cancel it first.")
+        direction_kwargs = {}
+        if req is not None and "direction" in req.model_fields_set:
+            direction_kwargs["direction"] = req.direction
+        with _answering():
+            workflow.approve_series(stories, story_id, doc, now=_now(), **direction_kwargs)
+        _complete_awaiting(story_id, doc)
         # Off the event loop: the page's phase-4 part hashes the files that moved.
         return await run_in_threadpool(_episode_page, stories, story, ep)
 
@@ -1441,8 +1526,16 @@ async def estimate(story_id: str, step: str, target: Optional[str] = None,
     ``fast-track`` (``?storyboard=t1|fast``): ``fast_track.estimate``'s
     ``llm_calls``, ``images``, ``tts``, ``render``, ``est_usd``, ``paid`` and
     ``stops_at``, with the LLM chain's ``route_class``, ``link``, ``links``,
-    ``ready`` (the key gate passes and nothing stops it) and ``message``. A
-    later step: 400; anything else: 404.
+    ``ready`` (the key gate passes and nothing stops it) and ``message``.
+
+    Phase 5 (``?ep=``, step 13, the step's own refusals first:
+    ``workflow.series_context``, as ``_series_step``): ``memory``,
+    ``feedback``, ``propose-next`` answer the LLM steps' estimate of one call
+    (``workflow.series_units``: one S3, F1 or N1 call, on the free chain like
+    every other step; ``allow_paid`` enforced the same way), with ``ep`` and
+    ``skipped_paid``.
+
+    A later step: 400; anything else: 404.
     """
     stories = _stories()
     story = _load(stories, story_id)
@@ -1489,6 +1582,8 @@ async def estimate(story_id: str, step: str, target: Optional[str] = None,
     if step in workflow.PHASE4_STEPS:
         options = {"align_words": align_words, "subtitles": subtitles, "encoder": encoder, "storyboard": storyboard}
         return await run_in_threadpool(_phase4_estimate, stories, story, step, ep, env=env, **options)
+    if step in workflow.SERIES_STEPS:
+        return _series_estimate(stories, story, step, ep, env=env)
     if step not in LLM_STEPS and step != "regenerate":
         with _answering():
             workflow.refuse_step(step)
@@ -1558,6 +1653,21 @@ def _phase4_estimate(stories, story, step, ep, *, env, align_words, subtitles, e
                              else f"{llm['message']} {body['paid']['message']}"))
     body["skipped_paid"] = [{"link": row["link"], "reason": row["skipped"]} for row in body["links"]
                             if "skipped" in row]
+    return body
+
+
+def _series_estimate(stories, story, step, ep, *, env) -> dict:
+    """The ``memory`` / ``feedback`` / ``propose-next`` estimate of episode
+    *ep* (see ``estimate``), after the step's own refusals
+    (``workflow.series_context``, calling nothing): one LLM call, on the free
+    chain like every other step's (``workflow.series_units``), ``allow_paid``
+    enforced by ``_llm_estimate`` the same way."""
+    with _answering():
+        ec = workflow.series_context(stories, story, ep, step=step)
+        units = workflow.series_units(ec, step)
+    body = _llm_estimate(step, units["llm_calls"], env=env)
+    body.update(ep=ep, skipped_paid=[{"link": row["link"], "reason": row["skipped"]}
+                                     for row in body["links"] if "skipped" in row])
     return body
 
 
@@ -1641,13 +1751,20 @@ async def get_episode(story_id: str, ep: str) -> dict:
                    "missing": [what the script step would still write]},
          "assets": {...} | null, "render": {..., "media": {"video_url", "cover_url"}} | null,
          "metadata": {"pack", "current"} | null, "ledger": {"entries", "totals"},
+         "series": {"ep", "memory": {"state", "entry"}, "feedback", "proposals", "next_episode_gate"},
          "jobs": [the episode's step jobs queued or running]}
 
     (``workflow.episode_view``; phase 4's ``assets``, ``render``,
     ``metadata`` and ``ledger`` are ``workflow.episode_outputs``', which says
     what each holds; ``media`` a signed URL per file that exists:
-    ``_episode_media``). 404 for an unknown story; 400 for an episode number
-    the season does not plan
+    ``_episode_media``; ``series`` (phase 5, step 13) is ``workflow.
+    series_page``: the memory entry and its state (``none``, ``draft``,
+    ``approved``, ``stale``), the audience feedback item (its digest,
+    directions and chosen one, once F1 has run), the proposals made *for*
+    this episode with their decisions, and ``next_episode_gate`` -- the
+    gate's current refusal text for the episode after this one, or null once
+    it may be written ("why episode 2 is locked")). 404 for an unknown story;
+    400 for an episode number the season does not plan
     (``1`` to ``episodes_planned``; 1 to 99 before a season); 200 with nulls
     before anything is written; 500 with one sentence for a document that
     does not validate. Calls nothing; what it hashes (images, audio, the
@@ -1660,6 +1777,90 @@ async def get_episode(story_id: str, ep: str) -> dict:
         number = workflow.episode_bounds(stories, story, ep)
     # Off the event loop: the phase-4 part hashes files when they moved.
     return await run_in_threadpool(_episode_page, stories, story, number)
+
+
+@router.post("/{story_id}/episodes/{ep}/feedback", status_code=201)
+async def post_episode_feedback(story_id: str, ep: str, req: StoryEpisodeFeedbackRequest) -> JobResponse:
+    """Paste episode *ep*'s audience feedback (``{text, stats?}``) and queue
+    the ``feedback`` step; 201 with the queued job.
+
+    ``text`` and ``stats`` are refused whole over 6,000 characters each --
+    422 here (``StoryEpisodeFeedbackRequest``'s own cap), and again, for a
+    caller that skips this model, by ``workflow.store_feedback`` (400) --
+    never trimmed; an empty text is the same function's 400. 400 for an
+    episode number the season does not plan. 409 while a step of the story
+    is queued or running -- checked before the paste is written, so a
+    refused request changes nothing (as ``PATCH .../script`` does): a new
+    paste would race a running step that reads or writes this season
+    document, the ``feedback`` step included. The paste replaces any earlier
+    one of this episode -- its digest, directions and chosen direction with
+    it (``workflow.store_feedback``: one item per episode) -- then the
+    ``feedback`` step is queued exactly as ``POST /steps/feedback`` would
+    (``_create_step_job``: the key gate 400, the queue cap 429; a newer
+    feedback job supersedes one still awaiting approval for this episode).
+    """
+    stories = _stories()
+    story = _load(stories, story_id)
+    with _answering():
+        number = workflow.episode_bounds(stories, story, ep)
+    _refuse_busy(story_id, "paste it once that step is done, or cancel it first.")
+    with _answering():
+        workflow.store_feedback(stories, story_id, number, req.text, req.stats, now=_now())
+    return await _create_step_job(story_id, "feedback", {}, ep=number)
+
+
+@router.post("/{story_id}/episodes/{ep}/proposals/{item_id}")
+async def post_proposal_decision(story_id: str, ep: str, item_id: str,
+                                 req: StoryProposalDecisionRequest) -> dict:
+    """Accept or reject one item of the proposals made *for* episode *ep*
+    (``episodes/ep{ep}/proposals.json``, N1's, written by ``propose-next`` of
+    the episode before); answers ``workflow.decide_proposal``'s payload --
+    ``{ep, item_id, kind, decision, item[, role, folds_cast, cast, message]}``
+    -- with ``job`` added once a character was accepted: the queued cast job,
+    as ``POST /steps/cast`` answers one.
+
+    ``accept`` is required and reaches the workflow exactly as sent, never
+    coerced here, so a non-bool answers the same ``invalid`` (400) the CLI's
+    own check would; a ``role`` sent with anything but accepting a character
+    is the same 400 (``workflow.proposal_request``). 400 for an episode
+    number the season does not plan; 404 for an unknown item; 409 while a
+    step job of the episode is queued or running -- checked, like the
+    feedback paste, before anything is decided --, without proposals, for an
+    item already decided (a decision is final: run ``propose-next`` again for
+    new proposals), or -- accepting only -- when the series memory the
+    proposals were written from no longer stands, a twist's target episode
+    left the arc, or a character's name is already the cast's (reject it
+    instead). Accepting a character also meets the cast step's own gates
+    before anything is decided (as ``POST /steps/cast`` would meet them for
+    the same custom character): the key gate (400), ``IMAGE_CHAIN``'s verdict
+    when a portrait or sheets would be made (409) -- then, once decided, the
+    cast job is queued (``_create_step_job``: the same gate again, the queue
+    cap 429; DEC-123 unchanged -- a lead or support character folds the cast
+    approval once the cast step writes them, which ``message`` says).
+    Rejecting, and accepting a twist, record the decision alone (twist:
+    the target arc entry is amended, the old text kept in its ``history``;
+    the acceptance is its own approval, so ``approvals.season`` is untouched)
+    -- no job, no gate, no ``job`` key.
+    """
+    stories = _stories()
+    story = _load(stories, story_id)
+    env = worker.get_settings_env()
+    with _answering():
+        number = workflow.episode_bounds(stories, story, ep)
+        preview = workflow.proposal_request(stories, story, number, item_id, accept=req.accept, role=req.role)
+    gate = None
+    if preview.get("cast") is not None:
+        units = workflow.cast_units(stories, story, selected=(), custom=preview["cast"]["params"]["custom"])
+        gate = _generation_gate(stories, story, units, env=env)
+        gate()  # before anything is decided: an accept that cannot be fulfilled records nothing
+    _refuse_busy(story_id, "decide it once that step is done, or cancel it first.")
+    with _answering():
+        result = workflow.decide_proposal(stories, story_id, number, item_id, accept=req.accept, role=req.role,
+                                          now=_now())
+    if result.get("cast") is not None:
+        job = await _create_step_job(story_id, result["cast"]["step"], result["cast"]["params"], gate=gate)
+        result = {**result, "job": job.model_dump(mode="json")}
+    return result
 
 
 @router.patch("/{story_id}/episodes/{ep}/script")

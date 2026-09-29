@@ -32,6 +32,7 @@ import copy
 import os
 import re
 import threading
+import types
 
 from clipping.providers import generation as gen
 from clipping.providers import registry
@@ -3657,3 +3658,35 @@ def series_view(stories, story, ep) -> dict:
         "feedback": copy.deepcopy(item) if item is not None else None,
         "proposals": proposals(stories, story_id, ep),
     }
+
+
+def next_episode_gate(stories, story, ep):
+    """The gate's current refusal text (``episode_common.memory_refusal``'s
+    own sentence) blocking episode *ep* + 1's script or storyboard because of
+    episode *ep*'s series memory -- None once episode *ep* + 1 may be
+    written, or when the season plans no episode after *ep* (stage 5: "why
+    episode 2 is locked"). Read-only: episode *ep*'s script and the season as
+    they are now; nothing is called and nothing is written."""
+    story_id = story["story_id"]
+    ep = episode_bounds(stories, story, ep)
+    arc = season(stories, story_id)
+    planned = arc["episodes_planned"] if arc else 0
+    if ep >= planned:
+        return None
+    ns = types.SimpleNamespace(season=arc, store=stories, story_id=story_id)
+    try:
+        refusal = episode_common.memory_refusal(ns, ep, before=f"before writing episode {ep + 1}")
+    except episode_common.EpisodeRefused as exc:
+        return str(exc)
+    return str(refusal) if refusal is not None else None
+
+
+def series_page(stories, story, ep) -> dict:
+    """:func:`series_view` plus :func:`next_episode_gate`, under
+    ``"next_episode_gate"`` -- what both ``GET /{story_id}`` (once per
+    planned episode) and ``GET /{story_id}/episodes/{ep}`` show of the
+    series (stage 5). A new key only: :func:`series_view` itself, and its own
+    test, are unchanged."""
+    view = series_view(stories, story, ep)
+    view["next_episode_gate"] = next_episode_gate(stories, story, ep)
+    return view

@@ -926,12 +926,13 @@ def test_the_help_lists_every_step_of_phases_1_and_2(cli):
 def test_main_py_ai_story_step_help_lists_every_step(tmp_path):
     # DEC-009: choices= mirrors the closed list of steps, so this braced set
     # grows with each phase (phase 3, stage 9, adds script and storyboard;
-    # phase 4, stage 13, adds assets, render and metadata).
+    # phase 4, stage 13, adds assets, render and metadata; phase 5, stage 5,
+    # adds the series steps memory, feedback and propose-next).
     result = _main_py("--ai-story", "step", "--help", tmp_path=tmp_path)
 
     assert result.returncode == 0, result.stderr
     assert ("{concepts,bible,style,style_preview,cast,places_proposal,places,season,script,storyboard,"
-           "assets,render,metadata}" in result.stdout)
+           "assets,render,metadata,memory,feedback,propose-next}" in result.stdout)
 
 
 # ------------------------------------------------------------------ cast

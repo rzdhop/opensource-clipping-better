@@ -92,7 +92,8 @@ def test_the_episode_request_models_declare_exactly_the_workflows_closed_lists()
     assert _class_fields("StoryboardPatchRequest") == list(workflow.STORYBOARD_PATCH_FIELDS)
     assert _class_fields("StoryboardShotPatch") == ["shot_id", *workflow.STORYBOARD_SHOT_PATCH_FIELDS]
     assert _class_fields("StoryboardTransitionPatch") == ["after", *workflow.STORYBOARD_TRANSITION_PATCH_FIELDS]
-    assert _class_fields("StoryApproveRequest") == ["approve_anyway"]
+    # Phase 5, stage 5: "direction" (feedback:<ep> only, required there) joined "approve_anyway".
+    assert _class_fields("StoryApproveRequest") == ["approve_anyway", "direction"]
     assert "episode_template_id" in _class_fields("StoryPatchRequest")
     # Default-strict like the other story models: no extra= override, "sent" is model_fields_set.
     for name in ("ScriptPatchRequest", "ScriptLinePatch", "ScriptScenePatch", "StoryboardPatchRequest",
@@ -578,6 +579,12 @@ def test_the_episode_page_and_the_story_pages_summary(api):
                   "prompts_outdated": False, "missing": ["beat_sheet"]},
         "assets": None, "render": None, "metadata": None,
         "ledger": {"entries": [], "totals": {"est_usd": 0.0, "paid_usd": 0.0, "entries": 0}},
+        # Phase 5, stage 5: workflow.series_page's own fields (no memory, feedback or proposals yet;
+        # the gate blocking episode 2 until episode 1's script is approved and its memory written).
+        "series": {"ep": 1, "memory": {"state": "none", "entry": None}, "feedback": None, "proposals": None,
+                  "next_episode_gate": ("Episode 1's series memory is not written yet: approve episode 1's "
+                                        "script, then run memory for episode 1 and approve it, before writing "
+                                        "episode 2.")},
         "jobs": [],
     }
     for ep, status in (("9", 400), ("0", 400), ("x", 400), ("01", 400)):

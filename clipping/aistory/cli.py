@@ -1,8 +1,8 @@
-"""``python main.py --ai-story ...`` -- AI Story steps 1-9 from a terminal (spec 9.3).
+"""``python main.py --ai-story ...`` -- AI Story steps 1-13 from a terminal (spec 9.3).
 
 ``main.py`` hands everything after ``--ai-story`` to :func:`main` before the
 clip parser sees it (DEC-114): this is a parser of its own, and the clip CLI's
-options and defaults are untouched. Three commands::
+options and defaults are untouched. Commands::
 
     main.py --ai-story new --lang fr [--concept ID] [--style ID] [--seed-text TEXT]
                            [--tier N] [--route R] [--consistency-mode M] [--budget-profile P]
@@ -10,8 +10,10 @@ options and defaults are untouched. Three commands::
     main.py --ai-story step <story_id> cast|places_proposal|places|season [options]
     main.py --ai-story step <story_id> script|storyboard --ep N [options]
     main.py --ai-story step <story_id> assets|render|metadata --ep N [options]
+    main.py --ai-story step <story_id> memory|feedback|propose-next --ep N [options]
     main.py --ai-story render <story_id> --ep N [options]
     main.py --ai-story fast-track <story_id> --ep N [options]
+    main.py --ai-story feedback <story_id> --ep N --text-file F [--stats-file F] [options]
     main.py --ai-story list
 
 The story rules are ``clipping.aistory.workflow``'s, the ones the API applies,
@@ -92,6 +94,28 @@ completed. A short summary follows every run (images made and cached, lines
 voiced, render duration and loudness, metadata platforms, the fast track's
 sub-steps).
 
+Phase 5 (step 13, plan 11 stage 5): ``memory``, ``feedback`` and
+``propose-next`` each write one episode (``--ep N``), one free-chain LLM
+call (S3, F1, N1); preconditions, parameters and approvals are
+``workflow``'s (DEC-114), the same as the API's (``workflow.series_context``
+/ ``series_request``). ``memory`` needs episode N's script approved;
+``feedback`` needs its audience comments pasted first, with the ``feedback``
+command (its own top-level command, since pasting a file is not a ``step``
+option: ``--ep N --text-file F [--stats-file F]``, refused whole, never
+trimmed, over 6,000 characters each, naming the size) -- it also runs the
+``feedback`` step once the paste is stored, so it is the one-command way to
+go from a comments file to a digest; ``propose-next`` needs episode N's own
+series memory written, approved and fresh (the same gate episode N + 1's
+script or storyboard meets, DEC-130 as amended). ``--auto-approve``
+(``AUTO_APPROVABLE``) applies to ``memory`` (``workflow.approve_memory``)
+and to ``feedback`` (``workflow.approve_feedback`` with no direction chosen
+-- choosing one of F1's three digested directions needs the dashboard or the
+API, which show them first); ``propose-next`` never takes it, because each
+proposed character and twist needs a human decision (``POST .../episodes/
+{ep}/proposals/{item_id}``, from the dashboard or the API only -- there is
+no CLI command for it). A short summary follows every run (hooks opened and
+closed, directions digested, characters and twists proposed).
+
 Limitation: the CLI and a running server do not coordinate step runs on the
 same story. The server's one-step-per-story rule lives in its job store
 (``web/api/store.py``), which the CLI does not read, so running a step here
@@ -141,11 +165,19 @@ EXIT_INTERRUPTED = 130
 # is its own top-level command, not one of `step`'s (module docstring).
 _PHASE4_JOB_STEPS = ("assets", "render", "metadata")
 
-# Every step `step` runs, phase 1 then phase 2 then phase 3 then phase 4.
-STEPS = workflow.PHASE1_STEPS + workflow.PHASE2_STEPS + workflow.PHASE3_STEPS + _PHASE4_JOB_STEPS
+# Every step `step` runs, phase 1 then phase 2 then phase 3 then phase 4 then
+# phase 5's series steps (step 13: memory, feedback, propose-next).
+STEPS = workflow.PHASE1_STEPS + workflow.PHASE2_STEPS + workflow.PHASE3_STEPS + _PHASE4_JOB_STEPS + \
+    workflow.SERIES_STEPS
 
-# The steps --auto-approve approves, and what to do for the others.
-AUTO_APPROVABLE = ("bible", "style", "cast", "places", "season") + workflow.PHASE3_STEPS + ("assets",)
+# The steps --auto-approve approves, and what to do for the others. `memory`
+# approves like `bible`/`season` (workflow.approve_memory, unconditionally);
+# `feedback` approves with no direction chosen (workflow.approve_feedback,
+# direction=None) -- choosing one needs the dashboard or the API, which read
+# the three digested directions first; `propose-next` is never auto-approved
+# (below): each item needs a human decision.
+AUTO_APPROVABLE = ("bible", "style", "cast", "places", "season") + workflow.PHASE3_STEPS + \
+    ("assets", "memory", "feedback")
 _NOT_AUTO_APPROVABLE = {
     "concepts": (
         "a concept is approved by choosing it: in the dashboard's concept step, or, for a "
@@ -162,14 +194,21 @@ _NOT_AUTO_APPROVABLE = {
     ),
     "render": "the render ends completed once it is done: there is nothing to approve.",
     "metadata": "the metadata pack ends completed once it is written: there is nothing to approve.",
+    "propose-next": (
+        "each proposed character and twist needs a human decision, from the dashboard or the API "
+        "(POST .../episodes/{ep}/proposals/{item_id}): accept or reject it, then approve "
+        "proposals:<ep> once every item is decided."
+    ),
 }
 
 # The steps that call the LLM chain, and so meet the key gate (the storyboard
 # with --fast calls nothing, but the option applies to the step, not the flag
 # combination: the gate itself is skipped for --fast in _phase3_step; `assets`
 # and `render` call no LLM, so they are not here -- `assets` meets the image
-# and voice chains' own gates instead, inside the step).
-_KEYED_STEPS = workflow.LLM_STEPS + workflow.PHASE2_STEPS + workflow.PHASE3_STEPS + ("metadata",)
+# and voice chains' own gates instead, inside the step). `memory`, `feedback`
+# and `propose-next` each make one free-chain call (S3, F1, N1).
+_KEYED_STEPS = workflow.LLM_STEPS + workflow.PHASE2_STEPS + workflow.PHASE3_STEPS + ("metadata",) + \
+    workflow.SERIES_STEPS
 
 # The options of `step` that only some steps take: (dest, flag, steps).
 _STEP_ONLY = (
@@ -183,7 +222,7 @@ _STEP_ONLY = (
     ("place", "--place", ("places",)),
     ("prop", "--prop", ("places",)),
     ("episodes", "--episodes", ("season",)),
-    ("ep", "--ep", workflow.PHASE3_STEPS + _PHASE4_JOB_STEPS),
+    ("ep", "--ep", workflow.PHASE3_STEPS + _PHASE4_JOB_STEPS + workflow.SERIES_STEPS),
     ("fast", "--fast", ("storyboard",)),
     ("measure_voices", "--measure-voices", ("script",)),
     ("align_words", "--align-words", ("assets",)),
@@ -230,6 +269,9 @@ def build_parser() -> argparse.ArgumentParser:
             f"  {PROG} step STORY_ID metadata --ep 1\n"
             f"  {PROG} render STORY_ID --ep 1 --subtitles word_pop\n"
             f"  {PROG} fast-track STORY_ID --ep 1 --storyboard fast\n"
+            f"  {PROG} step STORY_ID memory --ep 1 --auto-approve\n"
+            f"  {PROG} feedback STORY_ID --ep 1 --text-file comments.txt --auto-approve\n"
+            f"  {PROG} step STORY_ID propose-next --ep 1\n"
             f"  {PROG} list"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -238,7 +280,8 @@ def build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--outputs-dir", default=None, help=argparse.SUPPRESS)
 
-    commands = parser.add_subparsers(dest="command", metavar="{new,step,render,fast-track,list}", required=True)
+    commands = parser.add_subparsers(dest="command", metavar="{new,step,render,fast-track,feedback,list}",
+                                     required=True)
 
     # ---- new
     new = commands.add_parser(
@@ -280,7 +323,12 @@ def build_parser() -> argparse.ArgumentParser:
             "assets makes one episode's images, voices and sounds (--ep), meeting the image "
             "and voice chains' own gates; render turns them into episode_final.mp4 (--ep), "
             "calling no API; metadata writes the publishing pack (--ep, one M1 call per "
-            "platform)."
+            "platform); memory (--ep) writes episode ep's series memory from its approved "
+            "script (S3), which episode ep + 1 needs, approved, before it can be written; "
+            "feedback (--ep) digests the audience comments pasted for episode ep (F1; paste "
+            "them first with the 'feedback' command); propose-next (--ep) proposes new "
+            "characters and twists for episode ep + 1 from episode ep's approved memory (N1) "
+            "-- each item is decided from the dashboard or the API, never here."
         ),
     )
     step.add_argument("story_id", help="the story's id (see 'list')")
@@ -316,8 +364,9 @@ def build_parser() -> argparse.ArgumentParser:
                             "(sheets and time variants drawn from text, not edited from a reference "
                             "image, and labelled prompt_only)"))
     step.add_argument("--ep", type=int, default=None, metavar="N",
-                      help=("script, storyboard: the episode number to run it on (required for these two "
-                            "steps; the season plans which numbers exist)"))
+                      help=("script, storyboard, assets, render, metadata, memory, feedback, propose-next: "
+                            "the episode number to run it on (required for these steps; the season plans "
+                            "which numbers exist; propose-next writes for episode N + 1)"))
     step.add_argument("--fast", action="store_true",
                       help=("storyboard only: plan every scene's shots deterministically, in this "
                             "process, with no LLM call and so no key gate"))
@@ -343,7 +392,9 @@ def build_parser() -> argparse.ArgumentParser:
                             "script, storyboard: approve it once the workflow's own rule passes (never "
                             "'approve anyway'); assets: approve the grid once every shot is current or "
                             "locked and every line voiced (workflow.approve_assets, also never 'approve "
-                            "anyway')"))
+                            "anyway'); memory: approve the entry once it is written; feedback: approve "
+                            "the digest with no direction chosen (choosing one needs the dashboard or the "
+                            "API); propose-next does not take it -- each item needs a human decision"))
     step.add_argument("--allow-slow-chain", action="store_true",
                       help=("the steps that call the LLM chain: run on the chain's slow floor alone; "
                             "also settable as ALLOW_SLOW_CHAIN=1"))
@@ -383,6 +434,27 @@ def build_parser() -> argparse.ArgumentParser:
         help=(f"how the shots are planned, one of {', '.join(fast_track_step.STORYBOARD_CHOICES)} "
               f"(default: {fast_track_step.T1}, one T1 call per scene)"),
     )
+
+    # ---- feedback (phase 5, step 13: paste, then 'step ID feedback --ep N')
+    feedback_cmd = commands.add_parser(
+        "feedback", parents=[common], help="paste one episode's audience feedback, then digest it (F1)",
+        description=(
+            "Paste episode --ep's audience comments (and, optionally, its stats) from a file -- exactly "
+            "what 'POST .../episodes/{ep}/feedback' stores, refused whole over 6,000 characters each, "
+            "never trimmed -- replacing any earlier paste of that episode, then run the feedback step "
+            "(F1) on it, meeting the key gate as any other LLM step."
+        ),
+    )
+    feedback_cmd.add_argument("story_id", help="the story's id (see 'list')")
+    feedback_cmd.add_argument("--ep", type=int, required=True, metavar="N",
+                              help="the episode number the feedback is for")
+    feedback_cmd.add_argument("--text-file", required=True, metavar="FILE",
+                              help="a text file (UTF-8) of the audience comments to paste, at most 6,000 characters")
+    feedback_cmd.add_argument("--stats-file", default=None, metavar="FILE",
+                              help=("a text file (UTF-8) of the episode's stats to paste alongside it, at most "
+                                    "6,000 characters; optional"))
+    feedback_cmd.add_argument("--auto-approve", action="store_true",
+                              help="approve the digest once it is done, with no direction chosen")
 
     # ---- list
     commands.add_parser("list", parents=[common], help="list the stories",
@@ -572,7 +644,7 @@ def _cmd_step(args, stories) -> int:
     for dest, flag, applies in _STEP_ONLY:
         if _given(getattr(args, dest)) and step not in applies:
             return _usage_error("step", f"{flag} applies to {_quoted(applies)} only, not to '{step}'.")
-    if step in workflow.PHASE3_STEPS + _PHASE4_JOB_STEPS and args.ep is None:
+    if step in workflow.PHASE3_STEPS + _PHASE4_JOB_STEPS + workflow.SERIES_STEPS and args.ep is None:
         return _usage_error("step", f"--ep is required for '{step}': which episode to run it on.")
     try:
         overrides = parse_overrides(args.override)
@@ -591,6 +663,9 @@ def _cmd_step(args, stories) -> int:
 
     if step in _PHASE4_JOB_STEPS:
         return _phase4_step(args, stories, story)
+
+    if step in workflow.SERIES_STEPS:
+        return _series_step(args, stories, story)
 
     if step == "style":
         params = {}
@@ -994,6 +1069,122 @@ def _phase4_step(args, stories, story) -> int:
     return EXIT_OK
 
 
+# ------------------------------------------------------------------ phase 5
+
+def _print_series_summary(step, result) -> None:
+    """After ``memory``, ``feedback`` or ``propose-next``: what the step just
+    wrote, from its own ``run()`` return -- the step's own log lines (printed
+    as it ran, ``on_log``) already named the document to approve or, for
+    ``propose-next``, that each item needs a decision."""
+    if step == "memory":
+        print(f"🧠 Episode {result['ep']}'s memory ({'written again' if result['replaced'] else 'written'}): "
+              f"{len(result['hooks_opened'])} hook(s) opened, {len(result['hooks_closed'])} closed, "
+              f"{result['relationships']} relationship(s).")
+    elif step == "feedback":
+        print(f"💬 Episode {result['ep']}'s feedback digested: {len(result['directions'])} direction(s).")
+    else:
+        print(f"💡 Episode {result['for_ep']}'s proposals ({'written again' if result['replaced'] else 'written'}): "
+              f"{len(result['characters'])} character(s), {len(result['twists'])} twist(s).")
+
+
+def _series_step(args, stories, story) -> int:
+    """``memory``, ``feedback`` or ``propose-next`` of episode ``args.ep``
+    (phase 5, step 13): exactly the rules ``workflow`` applies for the API
+    (DEC-114): the episode's preconditions and the step's own
+    (``workflow.series_context``, calling nothing -- ``memory`` an approved
+    script, ``feedback`` a pasted item (paste it first with the ``feedback``
+    command), ``propose-next`` an episode after this one and this one's own
+    memory written, approved and fresh: the same gate a script or storyboard
+    job meets, DEC-130 as amended by plan 11 stage 4), then the parameters
+    (``workflow.series_request``: none of the three take any), the key gate
+    (every one calls one free-chain LLM link), then the run through the
+    worker's registry, a short summary, then ``--auto-approve``
+    (``AUTO_APPROVABLE``, checked before this runs): ``memory``
+    (``workflow.approve_memory``) and ``feedback`` with no direction chosen
+    (``workflow.approve_feedback(..., direction=None)`` -- choosing one of
+    F1's three digested directions needs the dashboard or the API, which show
+    them first); ``propose-next`` never reaches here with ``--auto-approve``
+    (each item needs a human decision, from the dashboard or the API)."""
+    step, story_id, ep = args.step, story["story_id"], args.ep
+    workflow.series_context(stories, story, ep, step=step)
+    params = workflow.series_request(step, {})
+
+    refusal = _llm_refusal(args.allow_slow_chain)
+    if refusal:
+        _err(refusal)
+        return EXIT_FAILED
+    interrupted, result = _run_step(stories, story_id, step, params, ep=ep)
+    if interrupted:
+        return interrupted
+
+    _print_series_summary(step, result)
+
+    if args.auto_approve:
+        if step == "memory":
+            workflow.approve_memory(stories, story_id, ep, now=_now())
+            print(f"✅ Episode {ep}'s memory approved.")
+        else:  # feedback: AUTO_APPROVABLE excludes propose-next
+            workflow.approve_feedback(stories, story_id, ep, direction=None, now=_now())
+            print(f"✅ Episode {ep}'s feedback approved (no direction chosen).")
+    print(_line(workflow.load(stories, story_id)))
+    return EXIT_OK
+
+
+def _read_text_file(path) -> str:
+    """A file's contents exactly as they are (UTF-8, nothing trimmed): the
+    ``feedback`` command's ``--text-file``/``--stats-file``. ``OSError`` for
+    a path that cannot be read (the caller answers it)."""
+    with open(path, encoding="utf-8") as fh:
+        return fh.read()
+
+
+def _cmd_feedback(args, stories) -> int:
+    """``feedback``: paste episode ``--ep``'s audience comments (and,
+    optionally, its stats) from a file, then run the ``feedback`` step (F1)
+    on them -- module docstring; exactly what ``POST .../episodes/{ep}/
+    feedback`` does, in one process. The episode's own bounds are checked
+    first (``workflow.episode_bounds``), before either file is read; the
+    paste meets ``workflow.store_feedback``'s own cap (6,000 characters each,
+    refused whole, never trimmed, naming the size) and replaces any earlier
+    paste of this episode; the run meets the key gate as any other LLM step.
+    A file that cannot be read is ``EXIT_FAILED``, naming it, before anything
+    is pasted. ``--auto-approve`` approves the digest with no direction
+    chosen (choosing one needs the dashboard or the API)."""
+    story = workflow.load(stories, args.story_id)
+    story_id = story["story_id"]
+    ep = workflow.episode_bounds(stories, story, args.ep)
+
+    try:
+        text = _read_text_file(args.text_file)
+    except OSError as exc:
+        _err(f"Cannot read {args.text_file}: {exc.strerror or exc}.")
+        return EXIT_FAILED
+    stats = None
+    if args.stats_file is not None:
+        try:
+            stats = _read_text_file(args.stats_file)
+        except OSError as exc:
+            _err(f"Cannot read {args.stats_file}: {exc.strerror or exc}.")
+            return EXIT_FAILED
+
+    workflow.store_feedback(stories, story_id, ep, text, stats, now=_now())
+
+    refusal = _llm_refusal(False)  # no --allow-slow-chain here, like render/fast-track; ALLOW_SLOW_CHAIN=1 still works
+    if refusal:
+        _err(refusal)
+        return EXIT_FAILED
+    interrupted, result = _run_step(stories, story_id, "feedback", {}, ep=ep)
+    if interrupted:
+        return interrupted
+    _print_series_summary("feedback", result)
+
+    if args.auto_approve:
+        workflow.approve_feedback(stories, story_id, ep, direction=None, now=_now())
+        print(f"✅ Episode {ep}'s feedback approved (no direction chosen).")
+    print(_line(workflow.load(stories, story_id)))
+    return EXIT_OK
+
+
 def _run_render_step(stories, story, ep, *, subtitles, encoder) -> int:
     """``render`` of episode *ep*, shared by ``step ID render --ep N`` and
     the ``render`` command (its alias)."""
@@ -1065,7 +1256,7 @@ def _cmd_fast_track(args, stories) -> int:
 
 
 _COMMANDS = {"new": _cmd_new, "step": _cmd_step, "render": _cmd_render, "fast-track": _cmd_fast_track,
-             "list": _cmd_list}
+             "feedback": _cmd_feedback, "list": _cmd_list}
 
 
 def main(argv=None) -> int:

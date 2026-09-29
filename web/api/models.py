@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import enum
 from datetime import datetime
-from typing import Literal, Optional, Union
+from typing import Any, Literal, Optional, Union
 
 from pydantic import BaseModel, Field
 
@@ -773,8 +773,19 @@ class StoryboardPatchRequest(BaseModel):
 class StoryApproveRequest(BaseModel):
     """POST /api/stories/{id}/approve/{doc}'s optional body. ``approve_anyway``
     (``script:<ep>`` only) approves a script whose consistency check found
-    issues; the approval records it."""
+    issues; the approval records it.
+
+    ``direction`` (phase 5, ``feedback:<ep>`` only, required there -- 0, 1, 2
+    or null for none) chooses which of F1's three directions steers episode
+    ``ep`` + 1's script and its proposals; sent for any other document, the
+    workflow answers 400. "Sent or not" is ``model_fields_set``, as PATCH
+    above: a body that leaves ``direction`` out is not the same as one that
+    sends ``"direction": null`` -- the first is not a choice, the second is
+    "no direction". Its value reaches ``workflow.approve_series`` exactly as
+    sent, never coerced here (``Any``, not ``int``), so a bool, a float or a
+    text answers the same ``invalid`` the CLI's own check would."""
     approve_anyway: Optional[bool] = None
+    direction: Optional[Any] = None
 
 
 # Phase 4 (spec 3 steps 10-12 and the fast track, 9.2). The params of the new
@@ -818,3 +829,36 @@ class AssetsPatchRequest(BaseModel):
     storyboard's revision or approval; it is part of the fingerprint the
     assets are approved with, so a new one makes that approval stale."""
     shots: Optional[list[AssetsShotPatch]] = None
+
+
+# Phase 5 (spec 2.6, 9.1, 9.2, plan 11 stages 4-5): the series steps --
+# ``memory``, ``feedback``, ``propose-next`` -- run through the generic
+# ``POST /steps/{step}`` (``StoryStepRequest``, unchanged) like any other
+# episode step. These two are the series' own endpoints.
+
+class StoryEpisodeFeedbackRequest(BaseModel):
+    """POST /api/stories/{id}/episodes/{ep}/feedback: the audience comments
+    pasted for the episode (and, optionally, its stats), stored as one item
+    per episode -- a new paste replaces the one before -- then the
+    ``feedback`` step is queued. ``text`` and ``stats`` are refused whole,
+    never trimmed, over 6,000 characters each (422 here, pydantic's own
+    ``max_length``, the same cap as ``clipping.aistory.schemas.
+    FEEDBACK_TEXT_MAX_LENGTH`` / ``FEEDBACK_STATS_MAX_LENGTH``); an empty
+    text is ``workflow.store_feedback``'s own 400, which also re-checks the
+    cap for a caller that skips this model (the CLI)."""
+    text: str = Field(..., max_length=6000)
+    stats: Optional[str] = Field(None, max_length=6000)
+
+
+class StoryProposalDecisionRequest(BaseModel):
+    """POST /api/stories/{id}/episodes/{ep}/proposals/{item_id}: accept or
+    reject one item of the N1 proposals made for episode ``ep``.
+
+    ``accept`` is required and reaches ``workflow.decide_proposal`` exactly
+    as sent, never coerced here (``Any``, not ``bool``), so a non-bool (a
+    ``1``, a ``"yes"``) answers the same ``invalid`` (400) the CLI's own
+    check would. ``role`` overrides the proposal's own role, chosen only
+    when accepting a character (one of ``clipping.aistory.schemas.
+    CHARACTER_ROLES``; sent otherwise, the workflow answers 400)."""
+    accept: Any
+    role: Optional[str] = None
