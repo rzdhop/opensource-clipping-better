@@ -13,7 +13,11 @@ was paid for survives a failure, a cancel or the step's time budget:
 1. no scene yet -> **E1**, the beat sheet: every scene a stub (function,
    place and time variant, characters, props, a summary, an emotion, a
    duration hint clamped into its slot), ids ``s00`` (the recap, from the
-   template's ``recap_from_episode``) then ``s01``... in order;
+   template's ``recap_from_episode``) then ``s01``... in order. From episode
+   2 on (phase 5, plan 11 stage 3), E1 is handed the hooks open when the
+   episode starts (``series_memory.open_hooks_before``) and the audience
+   direction chosen on the previous episode's feedback; a scene keeps the
+   open hook it pays off (``pays_off``), at least one body scene naming one;
 2. every body scene still a stub, in order -> **E2**, its lines (ids from
    the scene's own block, ``schemas.line_id_for``; an estimated timing
    each), sfx cues anchored to ``start`` or a line id, optional on-screen
@@ -21,12 +25,14 @@ was paid for survives a failure, a cancel or the step's time budget:
    written silent, without a call. A scene whose E2 fails is printed and
    left a stub; the others go on;
 3. the framing parts E2 never writes -- the hook's lines and on-screen text,
-   the cliffhanger's reveal and line, the recap (episode >= 2), the
-   next-episode teaser -> **E3**, in full when every one is missing, else
-   one partial E3 per missing part;
+   the cliffhanger's reveal and line, the recap (episode >= 2, written from
+   the previous episode's recap), the next-episode teaser -> **E3**, in full
+   when every one is missing, else one partial E3 per missing part;
 4. a complete script whose consistency report is missing, stale or of an
-   older revision -> **E4** (analytic), the report
-   ``{passed, issues, checked_rev, checked_at, stale: false}``.
+   older revision -> the hook-payoff pre-check (:func:`payoff_issues`, no
+   call), then **E4** (analytic), the report
+   ``{passed, issues, checked_rev, checked_at, stale: false}`` -- the
+   pre-check's ``hook_payoff`` issues first, failing it whatever E4 says.
 
 After each write the script is re-timed (``episode_common.retime``, with the
 storyboard when there is one). A complete script re-run makes no call. The
@@ -64,7 +70,7 @@ from __future__ import annotations
 import copy
 import time
 
-from .. import context, prompts, schemas, timing
+from .. import context, prompts, schemas, series_memory, timing
 from . import entities, episode_common, llm_call
 from .episode_common import SCRIPT_DOC, STORYBOARD_DOC
 from .llm_call import StepFailed
@@ -305,8 +311,9 @@ def _normalize_episode_targets(ec, scenes) -> tuple:
 
 
 def apply_e1(ec, script, reply) -> tuple:
-    """E1's beat sheet into *script* (in place): one stub per scene. Returns
-    :func:`_normalize_episode_targets`'s own ``(before, after)``."""
+    """E1's beat sheet into *script* (in place): one stub per scene, with the
+    hooks it pays off (``pays_off``, from episode 2 on) when it names any.
+    Returns :func:`_normalize_episode_targets`'s own ``(before, after)``."""
     scenes, number = [], 1
     for stub in reply["scenes"]:
         if stub["function"] == "recap":
@@ -323,6 +330,12 @@ def apply_e1(ec, script, reply) -> tuple:
         }
         lo, hi = timing.slot_range(scene, ec.template, ec.style_lock)
         scene["target_duration_s"] = round(min(max(float(stub["target_duration_s"]), lo), hi), 3)
+        # Phase 5 stage 3: the open hooks the scene pays off, verbatim (never
+        # repaired: each must stay the exact text of a hook), each once;
+        # nothing is stored for none.
+        paid = list(dict.fromkeys(stub.get("pays_off") or []))
+        if paid:
+            scene["pays_off"] = paid
         scenes.append(scene)
     before, after = _normalize_episode_targets(ec, scenes)
     script["title"] = _fr_text(ec, reply["title"])
@@ -330,17 +343,37 @@ def apply_e1(ec, script, reply) -> tuple:
     return before, after
 
 
+def episode_open_hooks(ec) -> list:
+    """The hooks open when episode ``ec.ep`` starts: the fold of the memory
+    entries of the episodes before it (``series_memory.open_hooks_before``)
+    -- never the stored ``open_hooks``, which folds later episodes' entries
+    too. [] for episode 1, and for a season with no memory entry."""
+    return series_memory.open_hooks_before(ec.season, ec.ep)
+
+
+def audience_direction(ec):
+    """The audience direction chosen on the previous episode's feedback
+    (``series_memory.chosen_direction``), which steers this episode's E1;
+    None for episode 1 or when none was chosen."""
+    return series_memory.chosen_direction(ec.season, ec.ep - 1) if ec.ep >= 2 else None
+
+
 def write_beat_sheet(ctx, ec, script, *, tools, announced) -> None:
-    """E1 into *script* (in place; the caller writes it)."""
+    """E1 into *script* (in place; the caller writes it). From episode 2 on,
+    E1 is handed the hooks open when the episode starts (:func:`episode_open_hooks`)
+    to pay off and the chosen audience direction (:func:`audience_direction`);
+    with a hook offered, the call's cap is the payoff variant's
+    (``prompts.E1_PAYOFF_MAX_TOKENS``), else the registry's."""
     pack = _pack(ec, ctx, announced)
     slots = timing.episode_slots(ec.template, ec.ep)
+    hooks = episode_open_hooks(ec)
     system, user, schema = prompts.build_e1(
         pack, ep=ec.ep, arc_entry=ec.arc_entry, template=ec.template, episode_defaults=ec.episode_defaults,
         cast=[{"char_id": doc["char_id"], "name": doc["name"]} for doc in ec.cast],
         places=[{"place_id": pid, "name": ec.entities["places"][pid]["name"], "time_variants": variants}
                 for pid, variants in ec.places.items()],
         props=[{"prop_id": pid, "name": ec.entities["props"][pid]["name"]} for pid in ec.prop_ids],
-        memory=ec.season, slots=slots,
+        memory=ec.season, slots=slots, open_hooks=hooks, audience_direction=audience_direction(ec),
     )
     llm_call.announce_trimmed(ctx, pack, announced)
 
@@ -348,15 +381,18 @@ def write_beat_sheet(ctx, ec, script, *, tools, announced) -> None:
         _repair_e1_reply(ec, reply)
         errors = prompts.validate_e1(reply, ep=ec.ep, template=ec.template, episode_defaults=ec.episode_defaults,
                                      cast_ids=list(ec.entities["characters"]), places=ec.places,
-                                     prop_ids=ec.prop_ids)
+                                     prop_ids=ec.prop_ids, open_hooks=hooks)
         if errors:
             return errors
         trial = copy.deepcopy(script)
         apply_e1(ec, trial, reply)
         return episode_common.trial_errors(ec, trial)
 
+    # The payoff ask (episode 2 on, a hook offered) has a larger reply, and
+    # its own measured cap; every other E1 call keeps the registry's.
+    cap = prompts.E1_PAYOFF_MAX_TOKENS if prompts.offered_hooks(ec.ep, hooks) else None
     reply = llm_call.call_json(ctx, "E1", system, user, schema, validator=validate, runner=tools.runner,
-                               time_fn=tools.time_fn)
+                               time_fn=tools.time_fn, max_tokens=cap)
     before, after = apply_e1(ec, script, reply)
     if after > before + 1e-9:
         ctx.on_log(f"⏱ scene targets raised from {before:.1f} s to {after:.1f} s")
@@ -489,8 +525,10 @@ def _body_line(ec, script, *, first):
 
 def write_framing(ctx, ec, script, part, *, tools, announced, note=None) -> list:
     """E3 into *script* (in place; the caller writes it): every framing
-    part when *part* is None, else that one part alone. Returns the ids of
-    the scenes it rewrote."""
+    part when *part* is None, else that one part alone -- the recap (episode
+    2 on) written from the previous recap, with the hooks open when the
+    episode starts (:func:`episode_open_hooks`). Returns the ids of the scenes it
+    rewrote."""
     keys = e3_parts(ec.ep) if part is None else [part]
     hook, cliff, recap = (framing_scene(script, name) for name in ("hook", "cliffhanger", "recap"))
     speaking = []
@@ -506,7 +544,7 @@ def write_framing(ctx, ec, script, part, *, tools, announced, note=None) -> list
         last_body_line=_body_line(ec, script, first=False), arc_entry=ec.arc_entry,
         next_arc_entry=ec.next_arc_entry, memory=ec.season, episode_defaults=ec.episode_defaults,
         word_budgets=budgets, cast=_cast_lines(ec, speaking, (hook or cliff or {}).get("scene_id")),
-        narrator_enabled=ec.narrator,
+        narrator_enabled=ec.narrator, open_hooks=episode_open_hooks(ec),
     )
     llm_call.announce_trimmed(ctx, pack, announced)
 
@@ -528,9 +566,87 @@ def write_framing(ctx, ec, script, part, *, tools, announced, note=None) -> list
 
 # -------------------------------------------------------------------- E4
 
+# A consistency issue's fix is stored at most this long (episode_script_v1).
+_FIX_MAX_CHARS = 300
+
+
+def scene_payoffs(script, open_hooks) -> dict:
+    """``{hook: [scene_id, ...]}``: each of *open_hooks* some scene of
+    *script* says it pays off (``pays_off``), with those scenes, in script
+    order -- what E4 is asked to judge the lines of. A named hook that is
+    not open is left out: :func:`payoff_issues` reports it."""
+    wanted = set(open_hooks)
+    payoffs = {}
+    for scene in script["scenes"]:
+        for hook in scene.get("pays_off") or []:
+            if hook in wanted:
+                payoffs.setdefault(hook, []).append(scene["scene_id"])
+    return payoffs
+
+
+def _stray_fix(sid, stray, ep) -> str:
+    if len(stray) == 1:
+        return f"Scene {sid} pays off “{stray[0]}”, which is not open before episode {ep}."
+    quoted = ", ".join(f"“{hook}”" for hook in stray)
+    fix = f"Scene {sid} pays off {len(stray)} hooks that are not open before episode {ep}: {quoted}."
+    if len(fix) <= _FIX_MAX_CHARS:
+        return fix
+    return f"Scene {sid} pays off {len(stray)} hooks that are not open before episode {ep}, the first “{stray[0]}”."
+
+
+def payoff_issues(script, ep, open_hooks) -> list:
+    """The hook-payoff pre-check (plan 11 stage 3, DEC-177): deterministic,
+    no call, run before E4 on every consistency check. Its findings are
+    ``hook_payoff`` issues for the consistency report, [] when it passes:
+
+    - with a hook open when episode *ep* starts (*open_hooks*,
+      :func:`episode_open_hooks`), at least one body scene pays one off --
+      one issue for the episode (``scene_id`` null) when none does;
+    - every hook a scene names in ``pays_off`` is one of *open_hooks*,
+      verbatim -- one issue per scene naming any that is not (the memory of
+      an earlier episode written again since E1 ran, say).
+
+    A named scene always exists: ``pays_off`` lives on its scene. The fixes
+    are the app's own text (English, like its other messages), each within
+    the stored report's 300 characters; at most one issue per scene plus one,
+    so with E4's own six a report stays inside its 20. Pure."""
+    wanted = set(open_hooks)
+    issues = []
+    paid = any(hook in wanted for scene in body_scenes(script) for hook in scene.get("pays_off") or [])
+    if open_hooks and not paid:
+        count = len(open_hooks)
+        issues.append({"scene_id": None, "kind": "hook_payoff",
+                       "fix": f"No body scene pays off one of the {count} hook{'s' if count != 1 else ''} open "
+                              f"before episode {ep}."})
+    for scene in script["scenes"]:
+        stray = [hook for hook in scene.get("pays_off") or [] if hook not in wanted]
+        if stray:
+            issues.append({"scene_id": scene["scene_id"], "kind": "hook_payoff",
+                           "fix": _stray_fix(scene["scene_id"], stray, ep)})
+    return issues
+
+
 def check_consistency(ctx, ec, script, *, tools, announced, now) -> dict:
     """E4 over the whole script; the report is set on *script* (in place;
-    the caller writes it) and returned."""
+    the caller writes it) and returned.
+
+    Phase 5 (plan 11 stage 3): the hook-payoff pre-check
+    (:func:`payoff_issues`) runs first; its issues lead the report and fail
+    it whatever E4 says, and E4 still runs so the rest is checked. E4 reads
+    the hooks open when the episode starts and the recaps of the episodes
+    before it and, when scenes pay some off, judges their lines (the
+    ``hook_payoff`` kind, :func:`scene_payoffs`). Episode 1 has none of it:
+    its E4 is what it was."""
+    hooks = episode_open_hooks(ec)
+    payoffs = scene_payoffs(script, hooks)
+    pre = payoff_issues(script, ec.ep, hooks)
+    if pre:
+        ctx.on_log(f"🪝 Hook payoff check: {len(pre)} issue{'s' if len(pre) != 1 else ''}, added to the "
+                   "consistency report")
+    elif hooks:
+        scenes = sorted({sid for sids in payoffs.values() for sid in sids})
+        ctx.on_log(f"🪝 Hook payoff check: passed ({_and(scenes)} pay{'s' if len(scenes) == 1 else ''} off "
+                   "an open hook)")
     digest = prompts.script_digest(script, {
         "places": {pid: doc["name"] for pid, doc in ec.entities["places"].items()},
         "cast": ec.names,
@@ -541,20 +657,21 @@ def check_consistency(ctx, ec, script, *, tools, announced, now) -> dict:
         cast=[{"char_id": doc["char_id"], "name": doc["name"], "personality": doc["personality"]}
               for doc in ec.cast],
         places=[{"place_id": pid, "name": doc["name"]} for pid, doc in ec.entities["places"].items()],
-        memory=ec.season,
+        memory=ec.season, ep=ec.ep, open_hooks=hooks, payoffs=payoffs,
     )
     scene_ids = [scene["scene_id"] for scene in script["scenes"]]
 
     def report_of(reply, checked_at):
         return {
-            "passed": reply["passed"],
-            "issues": [{"scene_id": issue["scene_id"], "kind": issue["kind"], "fix": issue["fix"].strip()}
-                       for issue in reply["issues"]],
+            "passed": reply["passed"] and not pre,
+            "issues": copy.deepcopy(pre) + [
+                {"scene_id": issue["scene_id"], "kind": issue["kind"], "fix": issue["fix"].strip()}
+                for issue in reply["issues"]],
             "checked_rev": script["rev"], "checked_at": checked_at, "stale": False,
         }
 
     def validate(reply):
-        errors = prompts.validate_e4(reply, scene_ids=scene_ids)
+        errors = prompts.validate_e4(reply, scene_ids=scene_ids, hook_payoff=bool(payoffs))
         if errors:
             return errors
         trial = copy.deepcopy(script)

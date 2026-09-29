@@ -718,3 +718,36 @@ def test_the_proposals_document_goes_through_the_store(tmp_path):
     (other / "proposals.json").write_text(json.dumps(saved), encoding="utf-8")
     with pytest.raises(schemas.SchemaError):
         stories.read_episode_doc(story_id, 4, "proposals.json")
+
+
+# ------------------------------------------- stage 3: the chosen audience direction
+
+DIRECTIONS = ["more Mangella", "a new rival", "the vote now"]
+
+
+def test_chosen_direction_is_the_text_the_writer_chose_on_that_episodes_feedback(sm):
+    """Plan 11 stage 3: E1 of episode N+1 (and N1) is steered by the
+    direction chosen when episode N's feedback was approved --
+    ``directions[chosen_direction]``; nothing when it was approved with no
+    direction (null) or not decided yet (absent)."""
+    chosen = _season_feedback(_feedback(directions=DIRECTIONS, chosen_direction=1))
+    assert schemas.season_arc_errors(chosen) == []
+    assert sm.chosen_direction(chosen, 1) == "a new rival"
+    assert sm.chosen_direction(chosen, 2) is None  # another episode's feedback
+    assert sm.chosen_direction(_season_feedback(_feedback(directions=DIRECTIONS, chosen_direction=None)), 1) is None
+    assert sm.chosen_direction(_season_feedback(_feedback(directions=DIRECTIONS)), 1) is None
+    assert sm.chosen_direction(_season_feedback(_feedback()), 1) is None
+    assert sm.chosen_direction(_live_season(), 1) is None
+    assert sm.chosen_direction(None, 1) is None
+
+
+def test_chosen_direction_the_latest_decided_feedback_of_the_episode_wins(sm):
+    first = _feedback(directions=DIRECTIONS, chosen_direction=0)
+    pending = _feedback(pasted_at=LATER, text="more comments", directions=["x", "y", "z"])
+    assert sm.chosen_direction(_season_feedback(first, pending), 1) == "more Mangella"  # pending decides nothing
+    cleared = _feedback(pasted_at=LATER, directions=["x", "y", "z"], chosen_direction=None)
+    assert sm.chosen_direction(_season_feedback(first, cleared), 1) is None  # decided: no direction
+    second = _feedback(pasted_at=LATER, directions=["x", "y", "z"], chosen_direction=2)
+    assert sm.chosen_direction(_season_feedback(first, second, _feedback(ep=2)), 1) == "z"
+    with pytest.raises(ValueError):
+        sm.chosen_direction(_live_season(), 0)

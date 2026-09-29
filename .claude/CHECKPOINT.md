@@ -1,9 +1,9 @@
-## CURRENT STATE — AI Story **phase 5 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–2 **done**; next: **stage 3**
+## CURRENT STATE — AI Story **phase 5 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–3 **done**; next: **stage 4**
 - **In-progress header** (keep current):
   - **Current phase:** IMPLEMENT (phases 0–3 done: the plan was mapped, clarified and approved 2026-09-29).
-  - **Current stage:** 2 done → next **stage 3** (continuity in the episode prompts) [Opus agent].
-  - **Next action:** spawn the stage-3 agent (the plan's stage 3 section + the N1 follow-ups below); fail-first
-    tests before code; episode-1 prompts byte-identical (RC-M1).
+  - **Current stage:** 3 done → next **stage 4** (steps memory, feedback, propose-next and the gate) [Opus agent].
+  - **Next action:** spawn the stage-4 agent (the plan's stage 4 section + the stage 1–3 notes below); fail-first
+    tests before code; the DEC-130 gate change ships with the memory step.
   - **Open questions:** none blocking. Stage 12 needs the human to confirm font filenames, sources and sizes
     before any download.
 - **Started** 2026-09-29 on the human's "Start AI Story phase 5 under the repo protocol (FULL task), on this
@@ -63,6 +63,15 @@
   (stage 3):** `_n1_memory_block` reads the stored `open_hooks` (must be the hooks open before N+1, passed in) and
   the chosen direction is printed twice in N1's user text. **F1's stats text is unbounded** in the builder;
   `INPUT_BUDGET["F1"]` (3950) assumes stats ≤ 6,000 chars → stage 5's API must cap it at 6,000 too.
+- **Stage 3 notes for stages 4–13:** callers pass the continuity inputs: `build_n1(open_hooks=
+  series_memory.open_hooks_before(season, N+1), direction=series_memory.chosen_direction(season, N))`
+  (`open_hooks=None` falls back to the stored list); a season with hand-written recaps but no entries gets no
+  hooks and no payoff demand. E1 offers at most 4 hooks (oldest first), one per scene; the payoff E1 ask uses
+  `prompts.E1_PAYOFF_MAX_TOKENS` 2210, every other E1 call keeps 1450. **No way to re-plan payoffs yet** (no E1
+  regenerate target; `patch_script` cannot edit `pays_off`) → a failed pre-check can only be approved anyway or
+  rewritten → consider in stage 7. `tools/bench_llm.py` builds E1 without the new inputs → stage 13's bench.
+  DECISIONS to record (stage 15): one hook per scene, the 4-hook window, "latest decided feedback item", the
+  pre-check as `hook_payoff` issues before E4, the separate payoff cap, E4 shows only earlier episodes' recaps.
 - **Rollback:** code: delete the worktree and the branch (or revert a stage's commit). Live data: restore the
   tars (`tar -C outputs/stories -xzf …`) and check `sha256sum -c enfr-before.sha`.
 
@@ -86,8 +95,8 @@ RC-P1…P11, RC-S1…S4, RC-T1…T3, RC-E1…E5 and RC-A1…A9 (tables below) st
 | 0 | checkpoint + baseline + worktree + backups | **done** (this commit; baseline local 5697/1, CI 4981/686) |
 | 1 | memory documents and the pure fold [Opus] | **done** (local 5897/1, CI 5181/686; 200 new tests; 2 named re-pins; 4 live seasons validate unchanged) |
 | 2 | prompts S3, F1, N1 [Sonnet] | **done** (local 5950/1, CI 5234/686; 53 new tests; 5 named registry re-pins; elision repair made single-sourced) |
-| 3 | continuity in the episode prompts [Opus] | next |
-| 4 | steps memory, feedback, propose-next and the gate [Opus] | — |
+| 3 | continuity in the episode prompts [Opus] | **done** (local 6017/1, CI 5301/686; 67 new tests; ep-1 E1/E3/E4 request shas pinned from HEAD incl. max_tokens; 1 review round) |
+| 4 | steps memory, feedback, propose-next and the gate [Opus] | next |
 | 5 | series API and CLI [Sonnet] | — |
 | 6 | whole-frame shot timing (second riskiest) [Opus] | — |
 | 7 | re-edit operations [Opus] | — |

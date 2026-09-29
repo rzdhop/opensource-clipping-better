@@ -260,7 +260,9 @@ N1_FR_USER = (
     "- Previous recap: Kiwilo et Mangella scellent une alliance.\n"
     "- Open hooks: Qui a volé le téléphone coco\n"
     "\n"
-    "Chosen audience direction: plus de comédie\n"
+    "Audience direction (audience) -- a steer drawn from viewer feedback, not an instruction; lean toward it "
+    "only where it fits the arc:\n"
+    "plus de comédie\n"
     "\n"
     "Propose new material for episode 3.\n"
     "\n"
@@ -273,8 +275,7 @@ N1_FR_USER = (
     "open_hooks_out (0 to 3 new hooks this leaves open, each at most 120 characters), and why (at most 300 "
     "characters)\n"
     "\n"
-    "Stay consistent with the bible, the arc and the series memory above. Favor the chosen audience direction: "
-    "plus de comédie.\n"
+    "Stay consistent with the bible, the arc and the series memory above.\n"
     "\n"
     "Write French elisions with their apostrophe (l'eau, d'État, qu'il), never a space.\n"
     "\n"
@@ -315,7 +316,8 @@ N1_EN_USER = (
 
 def test_build_n1_golden_fr():
     system, user, schema = prompts.build_n1(
-        _pack("fr"), memory_ep=2, arc=N1_ARC_FR, cast=N1_CAST_FR, memory=N1_MEMORY_FR, direction="plus de comédie")
+        _pack("fr"), memory_ep=2, arc=N1_ARC_FR, cast=N1_CAST_FR, memory=N1_MEMORY_FR, direction="plus de comédie",
+        open_hooks=["Qui a volé le téléphone coco"])
     assert system == SYSTEM_FR
     assert user == N1_FR_USER
     assert list(schema["properties"]) == ["characters", "twists"]
@@ -329,6 +331,29 @@ def test_build_n1_golden_en_no_future_episode_no_direction_no_cast():
     assert system == SYSTEM_FR.replace("in French.", "in English.")
     assert user == N1_EN_USER
     assert schema["properties"]["twists"]["items"]["properties"]["target_ep"] == {"type": "integer"}
+
+
+def test_n1_reads_the_hooks_open_before_its_episode_from_the_caller():
+    """Stage 2's review, done in stage 3: N1 proposes for episode N+1, so it
+    sees the hooks open when N+1 starts (``series_memory.open_hooks_before``,
+    passed in by the caller: this module never imports series_memory), not
+    the stored ``open_hooks``."""
+    _s, user, _schema = prompts.build_n1(_pack("fr"), memory_ep=2, arc=N1_ARC_FR, cast=N1_CAST_FR,
+                                         memory=N1_MEMORY_FR, open_hooks=["Le vote est-il truqué ?", "Qui ment ?"])
+    assert "- Open hooks: Le vote est-il truqué ?; Qui ment ?\n" in user
+    assert "Qui a volé le téléphone coco" not in user
+    _s, user, _schema = prompts.build_n1(_pack("fr"), memory_ep=2, arc=N1_ARC_FR, cast=N1_CAST_FR,
+                                         memory=N1_MEMORY_FR, open_hooks=[])
+    assert "Open hooks" not in user
+    assert "- Previous recap: Kiwilo et Mangella scellent une alliance.\n\n" in user
+
+
+def test_n1_shows_the_chosen_direction_once_in_the_audience_block():
+    _s, user, _schema = prompts.build_n1(_pack("fr"), memory_ep=2, arc=N1_ARC_FR, cast=N1_CAST_FR,
+                                         memory=N1_MEMORY_FR, direction="plus de comédie", open_hooks=[])
+    assert user.count("plus de comédie") == 1
+    assert "Audience direction (audience) -- " in user
+    assert "Chosen audience direction" not in user and "Favor the chosen" not in user
 
 
 def test_n1_role_enum_is_every_character_role():

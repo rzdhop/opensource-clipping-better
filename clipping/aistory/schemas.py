@@ -1944,6 +1944,20 @@ _EPISODE_SCRIPT_SFX_CUE_SCHEMA = _document({
     "cue": {"type": "string", "pattern": _ID_PATTERN},
 })
 
+# Phase 5 (plan 11 stage 3, DEC-177): the most hooks open when an episode
+# starts that E1 offers it to pay off -- the oldest still open first, and
+# the window E4's memory block shows (``prompts._E4_MEMORY_MAX_HOOKS``) --
+# and so the most one scene's ``pays_off`` may name. The fold can hold far
+# more (HOOKS_OPENED_MAX per episode); a prompt never lists them all.
+PAYOFF_HOOKS_MAX = 4
+
+# The kinds of a consistency issue (spec 4.3): E4's own, and ``hook_payoff``
+# (phase 5 stage 3) -- a scene that does not pay off the hook it names, or an
+# episode where no body scene pays off an open one (the script step's
+# pre-check, or E4 judging the lines). Widening the list keeps every stored
+# report valid.
+CONSISTENCY_ISSUE_KINDS = ("continuity", "character", "place", "series_memory", "hook_payoff", "other")
+
 _EPISODE_SCRIPT_SCENE_SCHEMA = _document({
     "scene_id": {"type": "string", "pattern": SCENE_ID_PATTERN},
     "function": {"type": "string", "enum": list(SCENE_FUNCTIONS)},
@@ -1960,6 +1974,12 @@ _EPISODE_SCRIPT_SCENE_SCHEMA = _document({
     "state": {"type": "string", "enum": ["stub", "written"]},
     "source": {"type": "string", "enum": ["E1", "E2", "E3", "edit"]},
     "rev": {"type": "integer", "minimum": 1},
+}, optional={
+    # Phase 5 stage 3: the open hooks E1 said this scene pays off, each
+    # verbatim (checked against the season by the script step's pre-check,
+    # never here: the document does not know the season). Absent means none,
+    # and so does an empty list; a script written before it validates as is.
+    "pays_off": {"type": "array", "items": _text(HOOK_MAX_LENGTH), "maxItems": PAYOFF_HOOKS_MAX},
 })
 
 _EPISODE_SCRIPT_HOOK_SCHEMA = _document({"on_screen_text": {"type": ["string", "null"]}})
@@ -1999,7 +2019,7 @@ _EPISODE_SCRIPT_TIMING_SCHEMA = _or_null(_document({
 
 _EPISODE_SCRIPT_ISSUE_SCHEMA = _document({
     "scene_id": {"type": ["string", "null"]},
-    "kind": {"type": "string", "enum": ["continuity", "character", "place", "series_memory", "other"]},
+    "kind": {"type": "string", "enum": list(CONSISTENCY_ISSUE_KINDS)},
     "fix": {"type": "string", "maxLength": 300},
 })
 
@@ -2042,7 +2062,8 @@ def episode_script_errors(doc) -> list:
     """``validate()`` against ``EPISODE_SCRIPT_SCHEMA``, plus the cross-field
     checks the subset schema cannot express (spec 2.7): scene/line id
     sequencing, the function order, speaker/sfx/cliffhanger references within
-    the episode, word caps, stub scenes carrying no lines, and the timing
+    the episode, word caps, stub scenes carrying no lines, a scene's
+    ``pays_off`` hooks non-blank and each listed once, and the timing
     block's scenes keyed only by real scene ids."""
     errors = validate(doc, EPISODE_SCRIPT_SCHEMA)
     if errors:
@@ -2130,6 +2151,12 @@ def episode_script_errors(doc) -> list:
 
         _word_cap_errors(errors, f"$.scenes[{scene['scene_id']}].summary", scene["summary"], 15)
         _word_cap_errors(errors, f"$.scenes[{scene['scene_id']}].on_screen_text", scene["on_screen_text"], 6)
+
+        paid = scene.get("pays_off") or []
+        for k, hook in enumerate(paid):
+            _check_text(errors, f"$.scenes[{scene['scene_id']}].pays_off[{k}]", hook)
+        for hook in sorted({hook for hook in paid if paid.count(hook) > 1}):
+            errors.append(f"$.scenes[{scene['scene_id']}].pays_off: {hook!r} is listed twice")
 
     cliff_scene_id = doc["cliffhanger"]["scene_id"]
     if cliff_scene_id is not None:

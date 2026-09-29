@@ -1380,6 +1380,24 @@ def test_e4_worst_case_fixture_fits_its_input_budget():
     assert prompts.INPUT_BUDGET["E4"] <= 4000
 
 
+def test_e4_worst_case_fixture_with_hook_payoffs_fits_its_input_budget():
+    """Phase 5 stage 3: the same fixture from episode 2 on, with 33 hooks
+    open at their 120-character cap and 3 of the 4 E4 shows paid off across
+    all 12 scenes (the largest mix -- tests/test_story_episode_prompt_budgets.py
+    searches it): 3,605 estimated tokens, still inside E4's 3,900."""
+    pack = _pack("fr")
+    digest, cast, places, memory = _e4_worst_case_digest_and_memory()
+    hooks = [_fr_hook(i) for i in range(33)]
+    paid = hooks[:3]
+    payoffs = {hook: [f"s{n:02d}" for n in range(12) if n % len(paid) == i] for i, hook in enumerate(paid)}
+    system, user, schema = prompts.build_e4(pack, script_digest=digest, cast=cast, places=places, memory=memory,
+                                            ep=3, open_hooks=hooks, payoffs=payoffs)
+    assert "hook_payoff" in user and schema == prompts.e4_schema(hook_payoff=True)
+    assert "- Episode 1 recap:" in user and "- Episode 2 recap:" in user  # episode 3: both recaps before it
+    tokens = context.check_budget(system, user, budget=prompts.INPUT_BUDGET["E4"])
+    assert tokens <= prompts.INPUT_BUDGET["E4"] <= 4000
+
+
 def test_input_budget_names_every_episode_prompt():
     # Stage 6 sized E1/E2/E3/T1/T1r on live-sized data (tests/test_story_episode_prompt_budgets.py).
     assert list(prompts.INPUT_BUDGET) == ["E1", "E2", "E3", "E4", "T1", "T1r", "S3", "F1"]
@@ -1522,3 +1540,472 @@ def test_rc_e1_phase1_and_phase2_builders_are_byte_identical_to_pre_phase3():
         "user-facing text in {language_name}. Fields marked (English) are "
         "for image and voice models: write them in English."
     )
+
+
+# ==================================================================== phase 5 stage 3: continuity (ep >= 2)
+#
+# Plan 11 stage 3 (DEC-177): from episode 2 on, E1 is handed the hooks open
+# when the episode starts (``series_memory.open_hooks_before``, passed in by
+# the step: this module never imports series_memory) and the audience
+# direction chosen on the previous episode's feedback; it marks
+# ``pays_off: [hook]`` per scene, an enum of those hooks, on at least one
+# body scene. E3's recap scene is written from the previous recap. E4 lists
+# which scene pays off which hook and gains the ``hook_payoff`` kind -- only
+# then. Episode 1 is untouched (RC-M1): every golden above is unedited, and
+# the rendered ep-1 triples are pinned below by their sha256 on HEAD
+# (0ae8efb), before this stage's code existed.
+
+HOOKS_OPEN = ["Le téléphone va-t-il sonner ce soir ?", "Qui a volé la couronne de Broccolia ?"]
+DIRECTION = "Plus de face-à-face entre Kiwilo et Mangella, moins de vote."
+
+
+def _triple_sha(triple) -> str:
+    import hashlib
+
+    system, user, schema = triple
+    blob = json.dumps([system, user, schema], ensure_ascii=False, sort_keys=False)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def _ep1_e1(**extra):
+    return prompts.build_e1(
+        _pack("fr"), ep=1, arc_entry=ARC_ENTRY, template=TEMPLATE, episode_defaults=EPISODE_DEFAULTS,
+        cast=CAST_E1, places=PLACES_E1, props=PROPS_E1, memory=MEMORY_EP2, slots=SLOTS_EP1, **extra)
+
+
+def _ep1_e3(**extra):
+    return prompts.build_e3(
+        _pack("fr"), ep=1, hook_scene=HOOK_SCENE, cliffhanger_scene=CLIFF_SCENE, recap_scene=None,
+        outline=OUTLINE, first_body_line=None, last_body_line=None, arc_entry=ARC_ENTRY,
+        next_arc_entry=NEXT_ARC_ENTRY, memory=MEMORY_EP2, episode_defaults=EPISODE_DEFAULTS,
+        word_budgets={"hook": 8, "cliffhanger": 10}, cast=CAST_E2, narrator_enabled=False, **extra)
+
+
+def _ep1_e4(memory, **extra):
+    digest = prompts.script_digest(SCRIPT_E4, ENTITIES_E4)
+    return prompts.build_e4(_pack("fr"), script_digest=digest, cast=CAST_E4, places=PLACES_E4, memory=memory,
+                            **extra)
+
+
+# sha256 of json.dumps([system, user, schema]) for each ep-1 triple, rendered
+# by HEAD 0ae8efb's builders (the code before this stage) -- E1 and E3 with a
+# season memory present (episode 1 ignores it), E4 with none and with one.
+RC_M1_SHAS = {
+    "E1": "641a9fb0ed83dd07107dda5e9efd8bb9efc73da37aa0dd84d5d06fdf94482072",
+    "E3": "2051d48e0bac5ac30fb221061cdf7cb6667ca82855165e68168f22c533900f8d",
+    "E4-none": "3be939c64679c9d2dc610d66e2d7835f312ec17dc3c5121df1276734e6f0608b",
+    "E4-memory": "4492d189f20a83018df2eea0ac680da82d693cd017a8767329dd5e3282f9362e",
+}
+
+
+def test_rc_m1_episode_1_prompts_are_byte_identical_to_head():
+    assert _triple_sha(_ep1_e1()) == RC_M1_SHAS["E1"]
+    assert _triple_sha(_ep1_e3()) == RC_M1_SHAS["E3"]
+    assert _triple_sha(_ep1_e4(MEMORY_NONE)) == RC_M1_SHAS["E4-none"]
+    assert _triple_sha(_ep1_e4(MEMORY_EP2)) == RC_M1_SHAS["E4-memory"]
+
+
+def test_rc_m1_the_step_s_episode_1_inputs_change_nothing():
+    """What the script step now passes for episode 1 -- the hooks open
+    before it (always none) and no audience direction; E4 with no hook
+    open and no payoff -- renders the same bytes as HEAD."""
+    assert _triple_sha(_ep1_e1(open_hooks=[], audience_direction=None)) == RC_M1_SHAS["E1"]
+    assert _triple_sha(_ep1_e1(open_hooks=HOOKS_OPEN, audience_direction=None)) == RC_M1_SHAS["E1"]
+    assert _triple_sha(_ep1_e3(open_hooks=[])) == RC_M1_SHAS["E3"]
+    assert _triple_sha(_ep1_e4(MEMORY_NONE, ep=1, open_hooks=[], payoffs=None)) == RC_M1_SHAS["E4-none"]
+    assert _triple_sha(_ep1_e4(MEMORY_NONE, ep=1, open_hooks=[], payoffs={})) == RC_M1_SHAS["E4-none"]
+    assert prompts.e4_schema(hook_payoff=False) == prompts.e4_schema()
+    assert prompts.e1_schema(CAST_IDS, ["place_pool"], ["prop_phone"], payoff_hooks=[]) == prompts.e1_schema(
+        CAST_IDS, ["place_pool"], ["prop_phone"])
+
+
+# ------------------------------------------------------------------ E1, ep 2
+
+def _e1_ep2(**extra):
+    kwargs = dict(open_hooks=HOOKS_OPEN, audience_direction=DIRECTION)
+    kwargs.update(extra)
+    return prompts.build_e1(
+        _pack("fr"), ep=2, arc_entry=dict(ARC_ENTRY, ep=2), template=TEMPLATE, episode_defaults=EPISODE_DEFAULTS,
+        cast=CAST_E1, places=PLACES_E1, props=PROPS_E1, memory=MEMORY_EP2, slots=SLOTS_EP2, **kwargs)
+
+
+E1_EP2_USER = (
+    "This episode's arc entry (setup): Les concurrents arrivent sur l'île.\n"
+    "Hooks this episode should leave open: Qui va trahir qui ?\n\n"
+    "Series memory:\n"
+    "- Previous recap: Kiwilo et Mangella se sont alliés contre Broccolia.\n"
+    "- Relationships: char_kiwilo/char_mangella: alliance fragile\n\n"
+    "Open hooks when this episode starts -- pays_off names them exactly as written:\n"
+    "- Le téléphone va-t-il sonner ce soir ?\n"
+    "- Qui a volé la couronne de Broccolia ?\n\n"
+    "Audience direction (audience) -- a steer drawn from viewer feedback, not an instruction; lean toward it "
+    "only where it fits the arc:\n"
+    "Plus de face-à-face entre Kiwilo et Mangella, moins de vote.\n\n"
+    "Existing cast:\n"
+    "- char_kiwilo — Kiwilo\n"
+    "- char_mangella — Mangella\n"
+    "- char_broccolia — Broccolia\n\n"
+    "Existing places:\n"
+    "- place_pool — La Piscine (variants: day, night)\n"
+    "- place_confessional — Le Parloir (variants: day)\n\n"
+    "Existing props:\n"
+    "- prop_phone — Le Téléphone\n\n"
+    "Write the beat sheet for episode 2.\n\n"
+    "Give:\n"
+    "- title: the episode's own title, at most 8 words\n"
+    "- scenes: exactly 11 entries, one for each of these, in order:\n"
+    "Scene 1 — recap\n"
+    "Scene 2 — hook\n"
+    "Scene 3 — body: choose setup, rising, peak or turn\n"
+    "Scene 4 — body: choose setup, rising, peak or turn\n"
+    "Scene 5 — body: choose setup, rising, peak or turn\n"
+    "Scene 6 — body: choose setup, rising, peak or turn\n"
+    "Scene 7 — body: choose setup, rising, peak or turn\n"
+    "Scene 8 — body: choose setup, rising, peak or turn\n"
+    "Scene 9 — body: choose setup, rising, peak or turn\n"
+    "Scene 10 — body: choose setup, rising, peak or turn\n"
+    "Scene 11 — cliffhanger\n\n"
+    "Each scene:\n"
+    "- function: one of recap, hook, setup, rising, peak, turn, cliffhanger\n"
+    "- place_id: one of the existing places, at most 2 distinct places across the whole episode\n"
+    "- time_variant: one of that place's own listed variants\n"
+    "- characters: 0 to 6 of the existing cast\n"
+    "- props: 0 to 4 of the existing props\n"
+    "- summary: at most 15 words\n"
+    "- emotion: one of neutral, happy, angry, shocked, sad, scheming, tension, tender, fear, triumph\n"
+    "- target_duration_s: a hint inside its own slot's range -- recap 2-3s, hook 1.5-3.5s, body "
+    "(setup/rising/peak/turn) 4-8s each, cliffhanger 2-5s\n"
+    "- pays_off: [] or the one open hook above this scene pays off, copied exactly; at least one body scene "
+    "(setup, rising, peak or turn) must pay one off\n\n"
+    "Aim for the upper half of each range so the scenes sum near 60 s.\n\n"
+    "Across the body scenes: open with setup, escalate with rising, include at least one peak, and "
+    "land a turn right before the cliffhanger; one of them may be a quiet scene with no dialogue.\n\n"
+    "The hook scene: insert_prop: a close shot of a diegetic object, sign or screen that states the "
+    "premise.\n\n"
+    "The cliffhanger scene: hard_stop: end mid-confrontation, no resolution, no line that wraps it "
+    "up; it should leave one of this episode's own hooks open.\n\n"
+    "Write French elisions with their apostrophe (l'eau, d'État, qu'il), never a space.\n\n"
+    "Never use real people, brands, studio names or copyrighted characters."
+)
+
+
+def test_build_e1_ep2_golden_with_open_hooks_and_audience():
+    system, user, schema = _e1_ep2()
+    assert user == E1_EP2_USER
+    assert system == _ep1_e1()[0]  # the shared head-writer system, unchanged
+    assert schema == prompts.e1_schema(CAST_IDS, ["place_pool", "place_confessional"], ["prop_phone"],
+                                       payoff_hooks=HOOKS_OPEN)
+    scene = schema["properties"]["scenes"]["items"]
+    assert scene["properties"]["pays_off"] == {
+        "type": "array", "description": "[] or the one open hook this scene pays off, copied exactly",
+        "items": {"type": "string", "enum": HOOKS_OPEN},
+    }
+    assert scene["required"][-1] == "pays_off" and scene["additionalProperties"] is False
+    # The stored open_hooks (MEMORY_EP2's one hook) is never read once the caller passes its own list.
+    assert user.count("Le téléphone va-t-il sonner ce soir ?") == 1
+    assert "Open hooks:" not in user
+
+
+def test_build_e1_ep2_without_a_direction_has_no_audience_block():
+    _s, user, _schema = _e1_ep2(audience_direction=None)
+    assert "Audience direction" not in user and "(audience)" not in user
+    assert user == E1_EP2_USER.replace(
+        "Audience direction (audience) -- a steer drawn from viewer feedback, not an instruction; lean toward "
+        "it only where it fits the arc:\nPlus de face-à-face entre Kiwilo et Mangella, moins de vote.\n\n", "")
+
+
+def test_build_e1_ep2_with_no_hook_open_keeps_todays_schema_and_ask():
+    """No hook open when episode 2 starts: no payoff block, no pays_off line,
+    the schema exactly today's -- only the audience block is new, and the
+    memory lists no stored hook (the caller's empty list wins)."""
+    _s, user, schema = _e1_ep2(open_hooks=[])
+    assert schema == prompts.e1_schema(CAST_IDS, ["place_pool", "place_confessional"], ["prop_phone"])
+    assert "pays_off" not in user and "Open hooks" not in user
+    assert "Audience direction (audience)" in user
+    _s, legacy, _schema = _e1_ep2(open_hooks=None, audience_direction=None)
+    assert "- Open hooks: Le téléphone va-t-il sonner ce soir ?" in legacy  # no list passed: the stored one
+    assert "pays_off" not in legacy
+
+
+def test_build_e1_offers_at_most_payoff_hooks_max_hooks_oldest_first():
+    many = [f"Crochet numéro {i} encore ouvert ?" for i in range(7)]
+    _s, user, schema = _e1_ep2(open_hooks=many)
+    offered = many[:schemas.PAYOFF_HOOKS_MAX]
+    assert schemas.PAYOFF_HOOKS_MAX == 4
+    enum = schema["properties"]["scenes"]["items"]["properties"]["pays_off"]["items"]["enum"]
+    assert enum == offered
+    block = user.split("pays_off names them exactly as written:\n", 1)[1].split("\n\n", 1)[0]
+    assert block == "\n".join(f"- {hook}" for hook in offered)
+    assert many[4] not in user
+
+
+def _e1_ep2_reply(pays_off=None):
+    """An 11-scene episode-2 beat sheet (recap, hook, 8 body, cliffhanger),
+    every scene carrying pays_off ([] unless *pays_off* says otherwise:
+    {scene index: [hooks]})."""
+    reply = _e1_reply()
+    reply["scenes"].insert(0, dict(reply["scenes"][0], function="recap", target_duration_s=2.5))
+    for scene in reply["scenes"]:
+        scene["pays_off"] = []
+    for index, hooks in (pays_off or {}).items():
+        reply["scenes"][index]["pays_off"] = list(hooks)
+    return reply
+
+
+def _validate_ep2(reply, open_hooks=HOOKS_OPEN, ep=2):
+    return prompts.validate_e1(reply, ep=ep, template=TEMPLATE, episode_defaults=EPISODE_DEFAULTS,
+                               cast_ids=CAST_IDS, places=PLACES_DICT, prop_ids=["prop_phone"],
+                               open_hooks=open_hooks)
+
+
+def test_validate_e1_ep2_a_body_scene_paying_off_an_open_hook_passes():
+    assert _validate_ep2(_e1_ep2_reply({4: [HOOKS_OPEN[1]]})) == []
+    # Several scenes may each pay one off, a framing scene too, once a body scene does.
+    assert _validate_ep2(_e1_ep2_reply({1: [HOOKS_OPEN[0]], 3: [HOOKS_OPEN[0]], 6: [HOOKS_OPEN[1]]})) == []
+
+
+def test_validate_e1_ep2_no_scene_paying_off_is_refused():
+    errors = _validate_ep2(_e1_ep2_reply())
+    assert any("no body scene pays off" in e for e in errors), errors
+
+
+def test_validate_e1_ep2_a_hook_not_open_is_refused_by_the_enum():
+    errors = _validate_ep2(_e1_ep2_reply({4: ["Qui a mangé la mangue ?"]}))
+    assert any("pays_off[0]" in e and "is not one of" in e for e in errors), errors
+
+
+def test_validate_e1_ep2_pays_off_on_a_framing_scene_only_is_refused():
+    for framing in (0, 1, 10):  # recap, hook, cliffhanger
+        errors = _validate_ep2(_e1_ep2_reply({framing: [HOOKS_OPEN[0]]}))
+        assert any("no body scene pays off" in e for e in errors), (framing, errors)
+
+
+def test_validate_e1_ep2_two_hooks_in_one_scene_are_refused():
+    errors = _validate_ep2(_e1_ep2_reply({4: list(HOOKS_OPEN)}))
+    assert any("$.scenes[4].pays_off: 2 hooks, expected at most 1" in e for e in errors), errors
+
+
+def test_validate_e1_ep2_a_scene_without_pays_off_is_refused_when_hooks_are_open():
+    reply = _e1_ep2_reply({4: [HOOKS_OPEN[0]]})
+    del reply["scenes"][5]["pays_off"]
+    errors = _validate_ep2(reply)
+    assert any("pays_off: required property missing" in e for e in errors), errors
+
+
+def test_validate_e1_ep1_reply_with_pays_off_is_refused_as_an_extra_key():
+    reply = _e1_reply()
+    reply["scenes"][2]["pays_off"] = [HOOKS_OPEN[0]]
+    for open_hooks in (None, [], HOOKS_OPEN):  # episode 1 never pays off, whatever is passed
+        errors = _validate_ep2(reply, open_hooks=open_hooks, ep=1)
+        assert any("pays_off: additional property not allowed" in e for e in errors), (open_hooks, errors)
+    del reply["scenes"][2]["pays_off"]
+    assert _validate_ep2(reply, open_hooks=HOOKS_OPEN, ep=1) == []
+
+
+def test_validate_e1_ep2_with_no_hook_open_is_todays_validator():
+    plain = _e1_ep2_reply()
+    for scene in plain["scenes"]:
+        del scene["pays_off"]
+    assert _validate_ep2(plain, open_hooks=[]) == []
+    assert _validate_ep2(plain, open_hooks=None) == []
+    errors = _validate_ep2(_e1_ep2_reply({4: [HOOKS_OPEN[0]]}), open_hooks=[])
+    assert any("additional property not allowed" in e for e in errors), errors
+
+
+# ------------------------------------------------------------------ E3, ep 2
+
+E3_EP2_USER = (
+    "Episode outline:\n"
+    "- s01 (hook): Ouverture choc sur l'île. — Kiwilo\n"
+    "- s02 (setup): Ils se disputent au bord du bassin. — Kiwilo, Mangella\n"
+    "- s03 (cliffhanger): Tout bascule enfin. — Mangella\n\n"
+    "Hook scene (hook, emotion: tension): Ouverture choc sur l'île.\n"
+    "Hook style: insert_prop: a close shot of a diegetic object, sign or screen that states the premise\n"
+    "The next scene has no line yet.\n"
+    "Keep the hook's dialogue within 8 words.\n\n"
+    "Cliffhanger scene (cliffhanger, emotion: shocked): Tout bascule enfin.\n"
+    "Cliffhanger style: hard_stop: end mid-confrontation, no resolution, no line that wraps it up\n"
+    "The scene right before it has no line yet.\n"
+    "Leave one of these hooks open: Qui va trahir qui ?\n"
+    "Keep its line within 10 words.\n\n"
+    "Series memory:\n"
+    "- Previous recap: Kiwilo et Mangella se sont alliés contre Broccolia.\n"
+    "- Open hooks: Le téléphone va-t-il sonner ce soir ?; Qui a volé la couronne de Broccolia ?\n"
+    "- Relationships: char_kiwilo/char_mangella: alliance fragile\n\n"
+    "Recap scene (recap, emotion: tension): Ce qui s'est passé avant.\n"
+    "Write it from episode 1's recap: Kiwilo et Mangella se sont alliés contre Broccolia.\n"
+    "Keep its line within 6 words.\n\n"
+    "Next episode's arc entry (escalation): La trahison éclate au grand jour.\n\n"
+    "Characters who may speak:\n"
+    "- char_kiwilo — Kiwilo: wants gagner; fears perdre; speaks: doux\n"
+    "- char_mangella — Mangella: wants dominer; fears trahison; speaks: sec\n\n"
+    "Write recap, hook, cliffhanger, teaser.\n\n"
+    "Give:\n"
+    "- recap: lines (0-1 lines, same shape as a hook line) and on_screen_text (story language, at most 6 words, "
+    "null unless needed)\n"
+    "- hook: lines (1-2 lines, speaker one of char_kiwilo, char_mangella, text story language at most 22 words, "
+    "emotion one of neutral, happy, angry, shocked, sad, scheming, tension, tender, fear, triumph, delivery "
+    "English at most 12 words) and on_screen_text (story language, null unless the hook style needs one)\n"
+    "- cliffhanger: reveal (story language, at most 40 words) and lines (0-1 lines, same shape as a hook line)\n"
+    "- teaser: one sentence about the next episode, at most 15 words, story language\n\n"
+    "Write French elisions with their apostrophe (l'eau, d'État, qu'il), never a space.\n\n"
+    "Never use real people, brands, studio names or copyrighted characters."
+)
+
+
+def _e3_ep2(part=None, **extra):
+    return prompts.build_e3(
+        _pack("fr"), ep=2, part=part, hook_scene=HOOK_SCENE, cliffhanger_scene=CLIFF_SCENE,
+        recap_scene=RECAP_SCENE, outline=OUTLINE, first_body_line=None, last_body_line=None, arc_entry=ARC_ENTRY,
+        next_arc_entry=NEXT_ARC_ENTRY, memory=MEMORY_EP2, episode_defaults=EPISODE_DEFAULTS,
+        word_budgets={"hook": 8, "cliffhanger": 10, "recap": 6}, cast=CAST_E2, narrator_enabled=False, **extra)
+
+
+def test_build_e3_ep2_golden_the_recap_scene_is_written_from_the_recap():
+    system, user, schema = _e3_ep2(open_hooks=HOOKS_OPEN)
+    assert user == E3_EP2_USER
+    assert system == _ep1_e3()[0]
+    assert schema == prompts.e3_schema(None, 2, ["char_kiwilo", "char_mangella"])
+
+
+def test_build_e3_recap_part_alone_carries_the_recap_too():
+    _s, user, _schema = _e3_ep2(part="recap", open_hooks=[])
+    assert ("Recap scene (recap, emotion: tension): Ce qui s'est passé avant.\n"
+            "Write it from episode 1's recap: Kiwilo et Mangella se sont alliés contre Broccolia.\n"
+            "Keep its line within 6 words.") in user
+    assert "Open hooks" not in user  # the caller's empty list, not the stored hook
+
+
+def test_build_e3_ep2_with_no_recap_recorded_says_nothing_of_it():
+    memory = {"series_memory": dict(MEMORY_EP2["series_memory"], recaps={})}
+    _s, user, _schema = prompts.build_e3(
+        _pack("fr"), ep=2, part="recap", hook_scene=HOOK_SCENE, cliffhanger_scene=CLIFF_SCENE,
+        recap_scene=RECAP_SCENE, outline=OUTLINE, first_body_line=None, last_body_line=None, arc_entry=ARC_ENTRY,
+        next_arc_entry=NEXT_ARC_ENTRY, memory=memory, episode_defaults=EPISODE_DEFAULTS, word_budgets={},
+        cast=CAST_E2, narrator_enabled=False)
+    assert "Write it from" not in user
+    assert "Recap scene (recap, emotion: tension): Ce qui s'est passé avant.\n\n" in user
+
+
+# ------------------------------------------------------------------ E4, ep 2
+
+E4_EP2_USER = (
+    "Bible written so far:\n"
+    "Sur une île de téléréalité, des fruits forment des couples et complotent. Chaque semaine, les concurrents "
+    "forment des couples pour ne pas être éliminés. Tone: mélodramatique, complice, rapide.\n\n"
+    "Cast (speech style, for the character check):\n"
+    "- char_kiwilo — Kiwilo: speaks doux\n\n"
+    "Places (for the place check):\n"
+    "- place_pool — La Piscine\n\n"
+    "Series memory:\n"
+    "- Episode 1 recap: Kiwilo et Mangella se sont alliés contre Broccolia.\n"
+    "- Open hooks: Qui ment au parloir ?\n"
+    "- Relationships: char_kiwilo/char_mangella: alliance fragile\n\n"
+    "Scene s01 (hook) -- La Piscine, day -- characters: Kiwilo\n"
+    "Ouverture.\n"
+    "Kiwilo: Regardez ca\n\n"
+    "Scene s02 (setup) -- La Piscine, day -- characters: Kiwilo\n"
+    "Suite.\n"
+    "Narrator: Il pleut sur l'île\n\n"
+    "Hook payoffs the beat sheet planned -- each scene's own lines must actually pay its hook off:\n"
+    "- s02 pays off: Le téléphone va-t-il sonner ce soir ?\n"
+    "- s01, s02 pay off: Qui a volé la couronne de Broccolia ?\n\n"
+    "Check this script for consistency.\n\n"
+    "Look for: continuity errors against the bible and the series memory above; a character speaking out of "
+    "character (against their own personality or speech_style); a scene's action contradicting its own "
+    "place; a planned hook payoff above whose scene's lines do not actually pay that hook off (kind "
+    "hook_payoff).\n\n"
+    "Give:\n"
+    "- passed: true only when you found no issue\n"
+    "- issues: at most 6, each with scene_id (one of the script's own scene ids, or null when the issue is not "
+    "tied to one scene), kind (one of continuity, character, place, series_memory, hook_payoff, other), and "
+    "fix (at most 40 words, in the story language)"
+)
+
+E4_PAYOFFS = {HOOKS_OPEN[0]: ["s02"], HOOKS_OPEN[1]: ["s01", "s02"]}
+
+
+def test_build_e4_ep2_golden_with_hook_payoffs():
+    """Each hook's text is shown once: the memory block's open hooks are
+    the ones this episode does not pay off; the payoff block has the rest,
+    each with the scenes that pay it off (grouped by hook, so the block is
+    bounded by the hooks E1 was offered, never by the scene count)."""
+    system, user, schema = _ep1_e4(MEMORY_EP2, ep=2, open_hooks=HOOKS_OPEN + ["Qui ment au parloir ?"],
+                                   payoffs=E4_PAYOFFS)
+    assert user == E4_EP2_USER
+    assert system == _ep1_e4(MEMORY_EP2)[0]  # the continuity editor's system text is never widened
+    assert schema == prompts.e4_schema(hook_payoff=True)
+    kinds = schema["properties"]["issues"]["items"]["properties"]["kind"]["enum"]
+    assert kinds == ["continuity", "character", "place", "series_memory", "hook_payoff", "other"]
+
+
+def test_build_e4_without_payoffs_keeps_todays_ask_and_schema_but_reads_the_hooks_given():
+    _s, user, schema = _ep1_e4(MEMORY_EP2, open_hooks=HOOKS_OPEN[1:], payoffs=None)
+    assert schema == prompts.e4_schema()
+    assert "hook_payoff" not in user and "Hook payoffs" not in user
+    assert "- Open hooks: Qui a volé la couronne de Broccolia ?\n" in user
+    assert "Le téléphone va-t-il sonner ce soir ?" not in user  # the stored hook, not open before this episode
+    _s, user, _schema = _ep1_e4(MEMORY_EP2, open_hooks=[])
+    assert "Open hooks" not in user and "- Episode 1 recap:" in user
+
+
+MEMORY_THREE_RECAPS = {"series_memory": {
+    "recaps": {"ep01": "Premier récapitulatif.", "ep02": "Deuxième récapitulatif.", "ep03": "Troisième récapitulatif."},
+    "open_hooks": [], "relationship_state": {}, "introduced": {},
+}}
+
+
+@pytest.mark.parametrize("ep, shown", [
+    (1, []),                                   # nothing before episode 1
+    (2, [1]),                                  # never episode 2's own recap
+    (3, [1, 2]),
+    (4, [2, 3]),                               # the most recent two before it (_E4_MEMORY_MAX_RECAPS)
+    (None, [2, 3]),                            # no episode named: every recap, as before
+])
+def test_build_e4_shows_only_the_recaps_of_episodes_before_the_one_checked(ep, shown):
+    """E4 checks one episode against what the season remembered when it
+    started: the recaps of the episodes before it, never its own (once its
+    memory ran) or a later one's."""
+    kwargs = {} if ep is None else {"ep": ep}
+    _s, user, _schema = _ep1_e4(MEMORY_THREE_RECAPS, **kwargs)
+    listed = [int(n) for n in re.findall(r"^- Episode (\d+) recap:", user, flags=re.M)]
+    assert listed == shown
+    if not shown:
+        assert "Series memory: none recorded yet." in user
+
+
+def test_e4_schema_and_validator_accept_hook_payoff_only_when_asked():
+    reply = {"passed": False, "issues": [{"scene_id": "s02", "kind": "hook_payoff",
+                                          "fix": "La scène ne répond jamais à la question du téléphone."}]}
+    assert any("hook_payoff" in e for e in prompts.validate_e4(reply, scene_ids=["s01", "s02"]))
+    assert prompts.validate_e4(reply, scene_ids=["s01", "s02"], hook_payoff=True) == []
+    assert "hook_payoff" not in prompts.e4_schema()["properties"]["issues"]["items"]["properties"]["kind"]["enum"]
+
+
+# ------------------------------------------------------------------ E1's cap with pays_off
+
+def _fr_hook(i):
+    """A distinct French hook of exactly schemas.HOOK_MAX_LENGTH characters."""
+    text = f"{i} " + _fr_words(30)
+    return text[:schemas.HOOK_MAX_LENGTH - 1].rstrip() + "?"
+
+
+def test_the_largest_french_e1_reply_with_pays_off_fits_its_own_cap():
+    """The payoff variant of E1 (episode 2 on, a hook open) has its own cap,
+    E1_PAYOFF_MAX_TOKENS, measured the same way: 12 scenes each naming a
+    120-character hook (one each, the ask's maximum) need ~1,914 tokens,
+    past the registry's E1 cap -- which stays 1,450 for every other E1 call,
+    episode 1 included (the no-payoff reply is the truncation guard's above)."""
+    hooks = [_fr_hook(i) for i in range(schemas.PAYOFF_HOOKS_MAX)]
+    assert all(len(hook) <= schemas.HOOK_MAX_LENGTH for hook in hooks) and len(set(hooks)) == len(hooks)
+    reply = _largest_e1_reply()
+    for scene in reply["scenes"]:
+        scene["pays_off"] = [max(hooks, key=len)]  # every scene names the longest hook (one each: the ask's max)
+    assert prompts.validate_e1(reply, ep=2, template=TEMPLATE_90, episode_defaults=EPISODE_DEFAULTS,
+                               cast_ids=CAST_IDS, places=PLACES_DICT, prop_ids=["prop_phone"],
+                               open_hooks=hooks) == []
+    needed = estimate_tokens(json.dumps(reply, ensure_ascii=False)) * FRENCH_TOKEN_FACTOR
+    cap = prompts.E1_PAYOFF_MAX_TOKENS
+    assert cap // 2 < needed <= cap, (needed, cap)
+    assert needed > prompts.MAX_TOKENS["E1"] == 1450  # why the variant needs a cap of its own
+    assert cap == 2210  # ~1,914 + 15 %, rounded up to ten (DEC-138)

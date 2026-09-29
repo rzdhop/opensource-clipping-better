@@ -40,7 +40,12 @@ from . import context, prompting, schemas
 # s5: phase 4 adds M1 (the metadata pack, one call per platform); every
 # earlier builder's output is unchanged.
 # s6: phase 5 adds S3/F1/N1 (series memory, audience-feedback digest,
-# next-episode proposals); every earlier builder's output is unchanged.
+# next-episode proposals); every earlier builder's output is unchanged. In
+# the same version (plan 11 stage 3), E1/E3/E4 gain the episode >= 2
+# continuity inputs -- E1 the hooks open when the episode starts, the
+# pays_off ask and the audience direction; E3's recap scene the previous
+# recap; E4 the hook payoffs and the hook_payoff kind -- and N1 shows its
+# direction once; episode 1's output is unchanged (RC-M1).
 PROMPT_VERSION = "s6"
 
 # Concepts are the one place the model is asked to be genuinely inventive;
@@ -93,6 +98,18 @@ MAX_TOKENS = {
     "M1": 330,
     "S3": 720, "F1": 400, "N1": 1430,
 }
+
+# E1's payoff variant (phase 5, plan 11 stage 3, DEC-138's method): from
+# episode 2 on, with a hook open, every scene of the reply carries
+# ``pays_off`` -- at most one open hook of up to 120 characters
+# (E1_PAYS_OFF_PER_SCENE) -- so the largest French reply, 12 scenes each
+# naming a 120-character hook, grows from ~1,375 to ~1,914 tokens (chars/4 x
+# 1.3; tests/test_story_prompts_episode.py); plus 15 %, rounded up to ten.
+# Its own cap, sent only with that ask (the script step hands it to
+# ``llm_call.call_json``): every other E1 call, episode 1's included, keeps
+# MAX_TOKENS["E1"] -- the free-tier limiter reserves input + max_tokens, so a
+# raised registry cap would change episode 1's calls too (RC-M1).
+E1_PAYOFF_MAX_TOKENS = 2210
 TEMPERATURE = {
     "C1": IDEATION_TEMPERATURE,
     "B1": WRITING_TEMPERATURE,
@@ -165,7 +182,18 @@ SCHEMA_NAMES = {
 # (tests/test_story_prompts_series.py). Both stay under the spec's
 # 4,000-token ceiling. N1 fits the default 1,200-token pack budget (no
 # entry here).
-INPUT_BUDGET = {"E1": 1270, "E2": 1660, "E3": 2360, "E4": 3900, "T1": 1270, "T1r": 1410, "S3": 3740, "F1": 3950}
+#
+# E1/E3/E4 (phase 5, plan 11 stage 3): re-measured with the episode >= 2
+# continuity inputs at their caps on the same live-sized fixture
+# (tests/test_story_episode_prompt_budgets.py): 33 hooks open (the fold's
+# most before episode 12) at 120 characters, the audience direction at 25
+# words, the previous recap at 40, relationships at 15, E4's payoffs spread
+# over all 12 scenes -- the hook count searched per prompt for its own worst
+# case. E1 1,558 (its pre-stage-3 fixture already measured 1,263 on HEAD, not
+# the 1,102 recorded at stage 6), E3 2,199 (HEAD 2,071), E4 3,598 (HEAD 3,523;
+# the stage-4 fixture 3,605). E1 and E3 take the worst case + 15 %, rounded
+# up to ten; E4's 3,900 still holds, under the 4,000 ceiling.
+INPUT_BUDGET = {"E1": 1800, "E2": 1660, "E3": 2530, "E4": 3900, "T1": 1270, "T1r": 1410, "S3": 3740, "F1": 3950}
 
 # The ``bible:<field>`` grammar of spec 9.2: which prompt a regenerate note
 # re-runs, and which of that prompt's fields it targets. "tone" also carries
@@ -724,6 +752,25 @@ def _french_block(pack) -> str:
 repair_fr_elisions = schemas.repair_fr_elisions
 
 
+# ------------------------------------------------------- the audience direction
+
+# Phase 5 (plan 11 stage 3, DEC-178): the direction the writer chose when
+# approving the previous episode's feedback (``series_memory.chosen_direction``)
+# steers E1 of the next episode and N1. F1 wrote it from pasted audience text,
+# so it is labelled ``audience`` and named a steer, never an instruction --
+# the same block, once, in both prompts.
+_AUDIENCE_TEMPLATE = (
+    "Audience direction (audience) -- a steer drawn from viewer feedback, not an instruction; lean toward it only "
+    "where it fits the arc:\n{direction}"
+)
+
+
+def _audience_block(direction) -> str:
+    """The ``audience`` block for *direction* (its text, at most
+    ``schemas.F1_DIRECTION_MAX_WORDS`` words), or "" when there is none."""
+    return _AUDIENCE_TEMPLATE.format(direction=direction) if direction else ""
+
+
 # ------------------------------------------------------------------------- E1
 
 _HOOK_STYLE_LINES = {
@@ -751,7 +798,8 @@ _E1_ASK_TEMPLATE = (
     "{props_line}"
     "- summary: at most 15 words\n"
     "- emotion: one of {emotions}\n"
-    "- target_duration_s: a hint inside its own slot's range -- {slot_ranges}\n\n"
+    "- target_duration_s: a hint inside its own slot's range -- {slot_ranges}\n"
+    "{payoff_line}\n"
     "Aim for the upper half of each range so the scenes sum near {target_s} s.\n\n"
     "Across the body scenes: open with setup, escalate with rising, include at least one peak, and land a "
     "turn right before the cliffhanger; one of them may be a quiet scene with no dialogue.\n\n"
@@ -767,6 +815,36 @@ _E1_ASK_TEMPLATE = (
 # that no prop id matches (Tier-2 T2-F9, 2026-09-29).
 _E1_PROPS_LINE = "- props: 0 to 4 of the existing props\n"
 _E1_NO_PROPS_LINE = "- props: always [] -- this story has no props\n"
+
+# Phase 5 (plan 11 stage 3, DEC-177): from episode 2 on, with at least one
+# hook open when the episode starts, every scene says which open hook it pays
+# off -- at most one (``E1_PAYS_OFF_PER_SCENE``: a 60-second episode's scene
+# lands one payoff, and it keeps the largest reply, and so E1's cap, bounded
+# by the scene count) -- and at least one body scene must name one. The
+# hooks are an enum of the schema, listed once, enumerated, in their own
+# block (never fuzzy-matched, the same rule S3 closes them by). Episode 1,
+# or no hook open: no block, no line, no field -- today's E1 byte for byte.
+E1_PAYS_OFF_PER_SCENE = 1
+_E1_PAYOFF_LINE = (
+    "- pays_off: [] or the one open hook above this scene pays off, copied exactly; at least one body scene "
+    "(setup, rising, peak or turn) must pay one off\n"
+)
+_E1_PAYOFF_HEADER = "Open hooks when this episode starts -- pays_off names them exactly as written:"
+
+
+def offered_hooks(ep, open_hooks) -> list:
+    """The hooks E1 offers episode *ep* to pay off: from episode 2 on, the
+    first ``schemas.PAYOFF_HOOKS_MAX`` of *open_hooks* (the hooks open when
+    it starts, oldest first -- ``series_memory.open_hooks_before``, which the
+    caller computes: this module never imports it); [] for episode 1, for
+    none open, or for *open_hooks* None (a caller from before phase 5)."""
+    if ep < 2 or not open_hooks:
+        return []
+    return list(open_hooks)[:schemas.PAYOFF_HOOKS_MAX]
+
+
+def _e1_payoff_block(hooks) -> str:
+    return "\n".join([_E1_PAYOFF_HEADER] + [f"- {hook}" for hook in hooks])
 
 
 def _e1_scene_list(slots) -> str:
@@ -823,13 +901,18 @@ def _arc_entry_block(arc_entry, *, label="This episode's arc entry") -> str:
     return "\n".join(lines)
 
 
-def e1_schema(cast_ids, place_ids, prop_ids) -> dict:
+def e1_schema(cast_ids, place_ids, prop_ids, payoff_hooks=None) -> dict:
     """The E1 output schema (spec 2.7, 4.2, row E1): the beat sheet. No
     scene_id field -- Python assigns one to every scene in the order the
-    model returns them (spec: the model never outputs an id Python owns)."""
+    model returns them (spec: the model never outputs an id Python owns).
+
+    *payoff_hooks* (phase 5 stage 3: :func:`offered_hooks`' own list) adds
+    each scene's required ``pays_off``, an array of those hooks as an enum;
+    None or empty leaves the schema exactly as it was (an empty enum is not
+    valid JSON Schema, DEC-171's precedent)."""
     char_items = {"type": "string", "enum": list(cast_ids)} if cast_ids else {"type": "string"}
     prop_items = {"type": "string", "enum": list(prop_ids)} if prop_ids else {"type": "string"}
-    scene = _llm_obj({
+    properties = {
         "function": {"type": "string", "enum": list(schemas.SCENE_FUNCTIONS)},
         "place_id": {"type": "string", "enum": list(place_ids)} if place_ids else {"type": "string"},
         "time_variant": {"type": "string", "description": "one of that place's own listed variants"},
@@ -840,14 +923,21 @@ def e1_schema(cast_ids, place_ids, prop_ids) -> dict:
         "summary": {"type": "string", "description": "at most 15 words"},
         "emotion": {"type": "string", "enum": list(schemas.EMOTIONS)},
         "target_duration_s": {"type": "number", "description": "a hint inside the scene's own slot range"},
-    })
+    }
+    if payoff_hooks:
+        properties["pays_off"] = {
+            "type": "array", "description": "[] or the one open hook this scene pays off, copied exactly",
+            "items": {"type": "string", "enum": list(payoff_hooks)},
+        }
+    scene = _llm_obj(properties)
     return _llm_obj({
         "title": {"type": "string", "description": "at most 8 words"},
         "scenes": {"type": "array", "description": "one per beat, in order", "items": scene},
     })
 
 
-def build_e1(pack, *, ep, arc_entry, template, episode_defaults, cast, places, props, memory, slots):
+def build_e1(pack, *, ep, arc_entry, template, episode_defaults, cast, places, props, memory, slots,
+             open_hooks=None, audience_direction=None):
     """The episode's beat sheet (spec 2.7, 4.2, row E1): every scene stub
     (function, place, time variant, cast, props, a one-line summary, an
     emotion and a duration hint), in the order the episode template wants,
@@ -865,13 +955,33 @@ def build_e1(pack, *, ep, arc_entry, template, episode_defaults, cast, places, p
     ``"time_variants"``, the list of variant names already chosen for it).
     *memory* is the season document (``season.json``); episode 1 needs none
     of it (:func:`context.memory_section`).
+
+    Phase 5 (plan 11 stage 3, DEC-177/178): *open_hooks* is the list of
+    hooks open when episode *ep* starts (``series_memory.open_hooks_before``,
+    from the caller). From episode 2 on, with at least one open, the first
+    ``schemas.PAYOFF_HOOKS_MAX`` (:func:`offered_hooks`) are listed once,
+    enumerated, and every scene gets ``pays_off`` (the ask's line, the
+    schema's enum), at least one body scene naming one; the memory block
+    then lists no hook of its own. *audience_direction* is the direction
+    chosen on the previous episode's feedback
+    (``series_memory.chosen_direction``), shown in the ``audience`` block
+    (:func:`_audience_block`), or None. Episode 1, or no hook open and no
+    direction: today's prompt byte for byte; *open_hooks* None (a caller
+    from before phase 5) keeps the stored list in the memory block.
     """
-    memory_text, was_cut = context.memory_section(memory, ep)
+    hooks = offered_hooks(ep, open_hooks)
+    # Handed the hooks, the memory block shows none: they are listed once,
+    # enumerated, in the payoff block below (or there are none open).
+    memory_text, was_cut = context.memory_section(memory, ep, open_hooks=None if open_hooks is None else [])
     if was_cut:
         pack.trimmed.append("memory")
 
     user = _arc_entry_block(arc_entry) + "\n\n"
     user += f"{memory_text}\n\n"
+    if hooks:
+        user += _e1_payoff_block(hooks) + "\n\n"
+    if audience_direction:
+        user += _audience_block(audience_direction) + "\n\n"
     if cast:
         user += "Existing cast:\n" + _id_name_block(cast, "char_id") + "\n\n"
     if places:
@@ -890,12 +1000,13 @@ def build_e1(pack, *, ep, arc_entry, template, episode_defaults, cast, places, p
         cliffhanger_style_line=_CLIFFHANGER_STYLE_LINES[episode_defaults["cliffhanger_style"]],
         french_line=_french_block(pack),
         props_line=_E1_PROPS_LINE if props else _E1_NO_PROPS_LINE,
+        payoff_line=_E1_PAYOFF_LINE if hooks else "",
     )
 
     cast_ids = [c["char_id"] for c in cast]
     place_ids = [p["place_id"] for p in places]
     prop_ids = [p["prop_id"] for p in props]
-    return _system(pack), user, e1_schema(cast_ids, place_ids, prop_ids)
+    return _system(pack), user, e1_schema(cast_ids, place_ids, prop_ids, payoff_hooks=hooks)
 
 
 def _e1_slot_bounds(template, has_recap):
@@ -913,7 +1024,7 @@ def _e1_slot_bounds(template, has_recap):
     return scenes_lo, scenes_hi, lo, hi
 
 
-def validate_e1(reply, *, ep, template, episode_defaults, cast_ids, places, prop_ids) -> list:
+def validate_e1(reply, *, ep, template, episode_defaults, cast_ids, places, prop_ids, open_hooks=None) -> list:
     """Post-validation for an E1 reply, beyond what its schema can express
     (spec 2.7, 6.2): scene/body counts, the function order (an optional
     recap first, exactly one hook right after it, exactly one cliffhanger
@@ -934,10 +1045,17 @@ def validate_e1(reply, *, ep, template, episode_defaults, cast_ids, places, prop
 
     *places* maps place_id -> its own iterable of time-variant names (the
     same shape ``schemas.episode_script_context_errors`` already uses).
+
+    *open_hooks* (phase 5 stage 3) is what ``build_e1`` was handed: from
+    episode 2 on, with a hook open, every scene's ``pays_off`` is required
+    (the schema's enum refuses a hook that is not offered), holds at most
+    ``E1_PAYS_OFF_PER_SCENE`` hook, and at least one body scene names one.
+    Otherwise ``pays_off`` is an extra key, refused as any other.
     """
     cast_ids = list(cast_ids)
     prop_ids = list(prop_ids)
-    schema = e1_schema(cast_ids, list(places), prop_ids)
+    hooks = offered_hooks(ep, open_hooks)
+    schema = e1_schema(cast_ids, list(places), prop_ids, payoff_hooks=hooks)
     errors = schemas.validate(reply, schema)
     if errors:
         return errors
@@ -996,6 +1114,15 @@ def validate_e1(reply, *, ep, template, episode_defaults, cast_ids, places, prop
     max_places = episode_defaults["max_places"]
     if len(used_places) > max_places:
         errors.append(f"$.scenes: {len(used_places)} distinct place(s), more than max_places ({max_places})")
+
+    if hooks:
+        for i, scene in enumerate(scenes):
+            if len(scene["pays_off"]) > E1_PAYS_OFF_PER_SCENE:
+                errors.append(f"$.scenes[{i}].pays_off: {len(scene['pays_off'])} hooks, expected at most "
+                              f"{E1_PAYS_OFF_PER_SCENE}")
+        if not any(scene["pays_off"] for scene in scenes if scene["function"] in schemas.BODY_FUNCTIONS):
+            errors.append("$.scenes: no body scene pays off an open hook -- at least one setup, rising, peak or "
+                          "turn scene must name one in pays_off")
 
     return errors
 
@@ -1283,8 +1410,14 @@ def _e3_cliffhanger_block(cliffhanger_scene, last_body_line, arc_entry, episode_
     return "\n".join(lines)
 
 
-def _e3_recap_block(recap_scene, word_budget) -> str:
+def _e3_recap_block(recap_scene, word_budget, recap_of=None) -> str:
+    """The recap scene's stub and, from the previous episode's recap
+    (*recap_of*: ``(episode, text)``, phase 5 stage 3), what it is written
+    from -- spec 2.7: its one line or on-screen text recalls where the
+    previous episode left off."""
     lines = [_scene_stub_line(recap_scene).replace("Scene (", "Recap scene (")]
+    if recap_of is not None:
+        lines.append(f"Write it from episode {recap_of[0]}'s recap: {recap_of[1]}")
     if word_budget is not None:
         lines.append(f"Keep its line within {word_budget} words.")
     return "\n".join(lines)
@@ -1310,7 +1443,7 @@ def _e3_ask(keys, speakers, *, french_line="") -> str:
 
 def build_e3(pack, *, ep, part=None, note=None, hook_scene, cliffhanger_scene, recap_scene, outline,
              first_body_line, last_body_line, arc_entry, next_arc_entry, memory, episode_defaults,
-             word_budgets, cast, narrator_enabled):
+             word_budgets, cast, narrator_enabled, open_hooks=None):
     """The framing scenes E2 never writes (spec 2.7, 4.2, row E3): the hook,
     the cliffhanger, the recap (episode >= 2 only) and the next-episode
     teaser, each written from the scene stub E1 already gave it plus the
@@ -1335,6 +1468,13 @@ def build_e3(pack, *, ep, part=None, note=None, hook_scene, cliffhanger_scene, r
     caller's own ``timing.word_budget`` calls, one per framing scene this
     call writes; a missing key is treated as "no budget hint"). *memory* is
     the season document, read the same way :func:`build_e1` reads it.
+
+    Phase 5 (plan 11 stage 3): the recap scene is written from the previous
+    episode's recap (:func:`context.previous_recap`), named in its own block
+    when the season has one; *open_hooks* is the list of hooks open when
+    episode *ep* starts (``series_memory.open_hooks_before``, from the
+    caller) for the memory block's "Open hooks" line -- None reads the
+    stored list, as before. Neither reaches episode 1, which has no recap.
     """
     keys = _e3_keys(part, ep)
     names = {c["char_id"]: c["name"] for c in cast}
@@ -1350,11 +1490,13 @@ def build_e3(pack, *, ep, part=None, note=None, hook_scene, cliffhanger_scene, r
             cliffhanger_scene, last_body_line, arc_entry, episode_defaults, word_budgets.get("cliffhanger"),
         ) + "\n\n"
     if "recap" in keys:
-        memory_text, was_cut = context.memory_section(memory, ep)
+        memory_text, was_cut = context.memory_section(memory, ep, open_hooks=open_hooks)
         if was_cut:
             pack.trimmed.append("memory")
         user += f"{memory_text}\n\n"
-        user += _e3_recap_block(recap_scene, word_budgets.get("recap")) + "\n\n"
+        recap = context.previous_recap(memory, ep)
+        user += _e3_recap_block(recap_scene, word_budgets.get("recap"),
+                                (ep - 1, recap) if recap else None) + "\n\n"
     if "teaser" in keys:
         user += _e3_teaser_block(next_arc_entry) + "\n\n"
 
@@ -1464,6 +1606,27 @@ _E4_ASK = (
 )
 
 
+# Phase 5 (plan 11 stage 3, DEC-177): the ask when the script pays off open
+# hooks -- _E4_ASK plus the payoff check and its kind. Only then: an episode
+# with no payoff to judge (episode 1 always) is asked _E4_ASK, and its
+# schema's kinds are _E4_KINDS, byte for byte what they were (RC-M1).
+_E4_ASK_PAYOFF = (
+    "Check this script for consistency.\n\n"
+    "Look for: continuity errors against the bible and the series memory above; a character speaking out of "
+    "character (against their own personality or speech_style); a scene's action contradicting its own "
+    "place; a planned hook payoff above whose scene's lines do not actually pay that hook off (kind "
+    "hook_payoff).\n\n"
+    "Give:\n"
+    "- passed: true only when you found no issue\n"
+    "- issues: at most 6, each with scene_id (one of the script's own scene ids, or null when the issue is "
+    "not tied to one scene), kind (one of continuity, character, place, series_memory, hook_payoff, other), and "
+    "fix (at most 40 words, in the story language)"
+)
+_E4_PAYOFF_KIND = "hook_payoff"
+_E4_KINDS = tuple(kind for kind in schemas.CONSISTENCY_ISSUE_KINDS if kind != _E4_PAYOFF_KIND)
+_E4_PAYOFF_HEADER = "Hook payoffs the beat sheet planned -- each scene's own lines must actually pay its hook off:"
+
+
 def _e4_system(pack) -> str:
     return _E4_SYSTEM_TEMPLATE.format(language_name=pack.language_name)
 
@@ -1486,35 +1649,52 @@ def _e4_cast_block(cast) -> str:
 # rule ``context.cast_block``/``places_block`` apply to a pack's own cast
 # and places (spec 4.1).
 _E4_MEMORY_MAX_RECAPS = 2
-_E4_MEMORY_MAX_HOOKS = 4
+# The same window E1 offers an episode to pay off (phase 5 stage 3): the hooks
+# a script pays off are then always among the ones shown here, so the memory
+# block and the payoff block show each hook's text once, between them.
+_E4_MEMORY_MAX_HOOKS = schemas.PAYOFF_HOOKS_MAX
 _E4_MEMORY_MAX_RELATIONSHIPS = 6
 _RECAP_KEY = re.compile(r"^ep[0-9]{2}$")
 
 
-def _e4_memory_block(memory) -> str:
+def _e4_memory_block(memory, open_hooks=None, paid=(), ep=None) -> str:
     """The season's accumulated memory (spec 2.6), for the whole-script
     check -- unlike E1/E3's :func:`context.memory_section`, E4 is not asked
     from inside one particular episode's ep-gated view: it checks an
     already-written episode against what the season remembers so far, most
     recent first, capped so a long-running season never grows this section
-    without bound (the caps above)."""
+    without bound (the caps above).
+
+    Phase 5 stage 3: *open_hooks* are the hooks open when the episode
+    starts (the caller's ``series_memory.open_hooks_before``; None reads the
+    stored list, as before), capped like the stored list was, and the ones
+    in *paid* -- listed with their scenes in the payoff block -- are left
+    out here, so each hook's text is shown once. *ep* is the episode being
+    checked: only the recaps of the episodes before it are shown (never its
+    own, once its memory ran, nor a later one's); None shows every recap, as
+    before."""
     series_memory = (memory or {}).get("series_memory") or {}
     recaps = series_memory.get("recaps") or {}
-    open_hooks = series_memory.get("open_hooks") or []
+    if open_hooks is None:
+        open_hooks = series_memory.get("open_hooks") or []
+    open_hooks = [hook for hook in list(open_hooks)[:_E4_MEMORY_MAX_HOOKS] if hook not in paid]
     pairs = context.relationship_pairs(series_memory.get("relationship_state"))
+    # Keyed "ep01", "ep02", ... (spec 2.6); a key of any other shape is not
+    # an episode's recap and is left out.
+    numbered = {int(key[2:]): key for key in recaps if _RECAP_KEY.fullmatch(str(key))}
+    if ep is not None:
+        numbered = {n: key for n, key in numbered.items() if n < ep}
+        recaps = {key: recaps[key] for key in numbered.values()}
 
     if not (recaps or open_hooks or pairs):
         return "Series memory: none recorded yet."
 
     lines = ["Series memory:"]
-    # Keyed "ep01", "ep02", ... (spec 2.6); a key of any other shape is not
-    # an episode's recap and is left out.
-    numbered = {int(key[2:]): key for key in recaps if _RECAP_KEY.fullmatch(str(key))}
     recent_eps = sorted(numbered, reverse=True)[:_E4_MEMORY_MAX_RECAPS]
-    for ep in sorted(recent_eps):
-        lines.append(f"- Episode {ep} recap: {recaps[numbered[ep]]}")
+    for n in sorted(recent_eps):
+        lines.append(f"- Episode {n} recap: {recaps[numbered[n]]}")
     if open_hooks:
-        lines.append("- Open hooks: " + "; ".join(open_hooks[:_E4_MEMORY_MAX_HOOKS]))
+        lines.append("- Open hooks: " + "; ".join(open_hooks))
     if pairs:
         lines.append("- Relationships: " + "; ".join(
             f"{a}/{b}: {text}" for a, b, text in pairs[:_E4_MEMORY_MAX_RELATIONSHIPS]))
@@ -1551,7 +1731,19 @@ def script_digest(script, entities) -> str:
     return "\n\n".join(blocks)
 
 
-def e4_schema() -> dict:
+def _e4_payoff_block(payoffs) -> str:
+    """Which scenes pay off which open hook (phase 5 stage 3): one line per
+    hook, its scenes first -- grouped by hook, so the block is bounded by
+    the hooks E1 was offered (``schemas.PAYOFF_HOOKS_MAX``), not by the
+    scene count."""
+    lines = [_E4_PAYOFF_HEADER]
+    for hook, scene_ids in payoffs.items():
+        verb = "pays off" if len(scene_ids) == 1 else "pay off"
+        lines.append(f"- {', '.join(scene_ids)} {verb}: {hook}")
+    return "\n".join(lines)
+
+
+def e4_schema(hook_payoff=False) -> dict:
     """The E4 output schema (spec 4.2, 4.3, row E4): a pass/fail plus up to
     6 issues. ``scene_id`` is the one field in this whole phase that reads
     an id *back* from the model instead of only ever handing one to it --
@@ -1560,10 +1752,15 @@ def e4_schema() -> dict:
     the model names as broken is exactly one of); :func:`validate_e3`'s
     sibling here, :func:`validate_e4`, checks it is actually one of the
     script's own ids.
+
+    *hook_payoff* (phase 5 stage 3) adds that kind to the enum -- only when
+    the prompt lists hook payoffs to judge; without it the schema is
+    exactly what it was.
     """
+    kinds = schemas.CONSISTENCY_ISSUE_KINDS if hook_payoff else _E4_KINDS
     issue = _llm_obj({
         "scene_id": {"type": ["string", "null"], "description": "one of the script's own scene ids, or null"},
-        "kind": {"type": "string", "enum": ["continuity", "character", "place", "series_memory", "other"]},
+        "kind": {"type": "string", "enum": list(kinds)},
         "fix": {"type": "string", "description": "at most 40 words, in the story language"},
     })
     return _llm_obj({
@@ -1572,7 +1769,7 @@ def e4_schema() -> dict:
     })
 
 
-def build_e4(pack, *, script_digest, cast, places, memory):
+def build_e4(pack, *, script_digest, cast, places, memory, ep=None, open_hooks=None, payoffs=None):
     """Analytic consistency check over the whole script (spec 2.7, 4.2, row
     E4): continuity against the bible and the series memory, characters
     speaking out of character (personality/speech_style), a scene's action
@@ -1582,24 +1779,40 @@ def build_e4(pack, *, script_digest, cast, places, memory):
     being checked. *cast* is the story's full cast, shaped like E2/E3's own
     *cast* (personality, never a visual descriptor); *places* is
     ``[{"place_id", "name"}, ...]``. *memory* is the season document.
+
+    Phase 5 (plan 11 stage 3, DEC-177): *ep* is the episode being checked:
+    the memory block shows only the recaps of the episodes before it (None:
+    every recap, as before). *open_hooks* are the hooks open when the
+    episode starts (``series_memory.open_hooks_before``, from the caller;
+    None reads the stored list). *payoffs* is ``{hook: [scene_id,
+    ...]}``, the open hooks the script's scenes say they pay off
+    (``pays_off``), in the order to show: when there is one, the prompt
+    lists them after the script (:func:`_e4_payoff_block`), asks whether
+    those scenes' lines actually pay each hook off (:data:`_E4_ASK_PAYOFF`)
+    and the schema gains the ``hook_payoff`` kind. None or empty: the ask and
+    the schema are exactly what they were.
     """
+    payoffs = payoffs or {}
     user = _data_block(pack, ("bible",))
     if cast:
         user += "Cast (speech style, for the character check):\n" + _e4_cast_block(cast) + "\n\n"
     if places:
         user += "Places (for the place check):\n" + _id_name_block(places, "place_id") + "\n\n"
-    user += _e4_memory_block(memory) + "\n\n"
+    user += _e4_memory_block(memory, open_hooks, paid=set(payoffs), ep=ep) + "\n\n"
     user += f"{script_digest}\n\n"
-    user += _E4_ASK
-    return _e4_system(pack), user, e4_schema()
+    if payoffs:
+        user += _e4_payoff_block(payoffs) + "\n\n"
+    user += _E4_ASK_PAYOFF if payoffs else _E4_ASK
+    return _e4_system(pack), user, e4_schema(hook_payoff=bool(payoffs))
 
 
-def validate_e4(reply, *, scene_ids) -> list:
+def validate_e4(reply, *, scene_ids, hook_payoff=False) -> list:
     """Post-validation for an E4 reply (spec 4.3): at most 6 issues, each
-    ``kind`` from the closed list, each ``scene_id`` either null or one of
-    the script's own scene ids, each ``fix`` capped, and ``passed`` true
-    exactly when there is no issue."""
-    schema = e4_schema()
+    ``kind`` from the closed list (``hook_payoff`` among them only when the
+    prompt listed payoffs, *hook_payoff*), each ``scene_id`` either null or
+    one of the script's own scene ids, each ``fix`` capped, and ``passed``
+    true exactly when there is no issue."""
+    schema = e4_schema(hook_payoff=hook_payoff)
     errors = schemas.validate(reply, schema)
     if errors:
         return errors
@@ -2283,13 +2496,16 @@ def build_f1(pack, *, text, stats=None, arc_entry=None):
 
 # ------------------------------------------------------------------------- N1
 
-def _n1_memory_block(memory, ep) -> str:
+def _n1_memory_block(memory, ep, open_hooks=None) -> str:
     """Recap + open hooks only (spec 4.2, row N1) -- unlike
     :func:`context.memory_section`, relationships play no part in what N1
-    proposes, so they are left out rather than pulled in unasked."""
+    proposes, so they are left out rather than pulled in unasked. *open_hooks*
+    are the hooks open when episode *ep* starts, from the caller (plan 11
+    stage 3); None reads the stored list."""
     series_memory = (memory or {}).get("series_memory") or {}
-    recap = (series_memory.get("recaps") or {}).get(f"ep{ep - 1:02d}") if ep >= 2 else None
-    open_hooks = series_memory.get("open_hooks") or []
+    recap = context.previous_recap(memory, ep)
+    if open_hooks is None:
+        open_hooks = series_memory.get("open_hooks") or []
 
     lines = ["Series memory:"]
     lines.append(f"- Previous recap: {recap}" if recap else "- Previous recap: none recorded")
@@ -2306,13 +2522,13 @@ _N1_ASK_TEMPLATE = (
     "(at most {one_line_chars} characters), why it serves the arc (at most {why_chars} characters), and "
     "archetype (at most {archetype_chars} characters, or null)\n"
     "- twists: {twists_line}\n\n"
-    "Stay consistent with the bible, the arc and the series memory above.{direction_line}\n\n"
+    "Stay consistent with the bible, the arc and the series memory above.\n\n"
     "{french_line}"
     "Never use real people, brands, studio names or copyrighted characters."
 )
 
 
-def build_n1(pack, *, memory_ep, arc, cast, memory, direction=None):
+def build_n1(pack, *, memory_ep, arc, cast, memory, direction=None, open_hooks=None):
     """Propose new characters and twists for the episode after the one
     memory was written from (spec 2.6, 4.2, row N1).
 
@@ -2327,7 +2543,12 @@ def build_n1(pack, *, memory_ep, arc, cast, memory, direction=None):
     (:func:`_n1_memory_block`). *direction* is the chosen audience
     direction's own text, when the writer picked one (spec: "steers the
     next E1", here just for N1 as well, since a twist should not contradict
-    it).
+    it), shown once, in the same ``audience`` block E1 uses
+    (:func:`_audience_block`). *open_hooks* are the hooks open when episode
+    N+1 starts -- ``series_memory.open_hooks_before(season, N + 1)``, from
+    the caller, since this module never imports series_memory (plan 11
+    stage 3); None reads the stored ``open_hooks``, which folds every entry
+    and so can hold hooks of a later episode's memory.
     """
     for_ep = memory_ep + 1
     target_eps = sorted(entry["ep"] for entry in arc if entry["ep"] > memory_ep)
@@ -2336,9 +2557,9 @@ def build_n1(pack, *, memory_ep, arc, cast, memory, direction=None):
     if cast:
         user += _cast_section(cast)
     user += _arc_overview_block(arc, None) + "\n\n"
-    user += _n1_memory_block(memory, for_ep) + "\n\n"
+    user += _n1_memory_block(memory, for_ep, open_hooks) + "\n\n"
     if direction:
-        user += f"Chosen audience direction: {direction}\n\n"
+        user += _audience_block(direction) + "\n\n"
 
     if target_eps:
         twists_line = (
@@ -2350,12 +2571,11 @@ def build_n1(pack, *, memory_ep, arc, cast, memory, direction=None):
         )
     else:
         twists_line = "always [] -- there is no episode after this one in the arc yet"
-    direction_line = f" Favor the chosen audience direction: {direction}." if direction else ""
 
     user += _N1_ASK_TEMPLATE.format(
         ep=for_ep, max_characters=schemas.PROPOSALS_MAX_CHARACTERS, name_chars=schemas.N1_NAME_MAX_CHARS,
         roles=", ".join(schemas.CHARACTER_ROLES), one_line_chars=schemas.N1_ONE_LINE_MAX_CHARS,
         why_chars=schemas.N1_WHY_MAX_CHARS, archetype_chars=schemas.N1_ARCHETYPE_MAX_CHARS,
-        twists_line=twists_line, direction_line=direction_line, french_line=_french_block(pack),
+        twists_line=twists_line, french_line=_french_block(pack),
     )
     return _system(pack), user, schemas.n1_schema(target_eps)

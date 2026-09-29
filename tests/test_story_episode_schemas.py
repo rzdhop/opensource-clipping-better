@@ -311,6 +311,39 @@ def _line_duration_not_positive(doc):
     doc["scenes"][0]["lines"][0]["timing"]["duration_s"] = 0
 
 
+# Phase 5 stage 3: a scene's optional ``pays_off`` (the open hooks E1 said it
+# pays off; absent = none, [] also none).
+_HOOK = "Who stole the coconut phone?"
+
+
+def _pays_off_not_a_list(doc):
+    doc["scenes"][2]["pays_off"] = _HOOK
+
+
+def _pays_off_item_not_a_string(doc):
+    doc["scenes"][2]["pays_off"] = [3]
+
+
+def _pays_off_item_blank(doc):
+    doc["scenes"][2]["pays_off"] = ["   "]
+
+
+def _pays_off_item_empty(doc):
+    doc["scenes"][2]["pays_off"] = [""]
+
+
+def _pays_off_item_too_long(doc):
+    doc["scenes"][2]["pays_off"] = ["x" * 121]
+
+
+def _pays_off_listed_twice(doc):
+    doc["scenes"][2]["pays_off"] = [_HOOK, _HOOK]
+
+
+def _pays_off_too_many(doc):
+    doc["scenes"][2]["pays_off"] = [f"hook {i}" for i in range(5)]
+
+
 SCRIPT_BREAKS = {
     "scene ids not increasing": (_swap_scene_ids, "does not strictly increase after"),
     "s00 not a recap scene": (_s00_not_recap, "must have function 'recap'"),
@@ -328,6 +361,13 @@ SCRIPT_BREAKS = {
     "stub scene has lines": (_stub_scene_has_lines, "a stub scene must have no lines"),
     "timing scene unknown key": (_timing_scene_unknown_key, "is not one of the episode's scene ids"),
     "line duration not positive": (_line_duration_not_positive, "must be > 0"),
+    "pays_off not a list": (_pays_off_not_a_list, "pays_off: expected type array"),
+    "pays_off item not a string": (_pays_off_item_not_a_string, "pays_off[0]: expected type string"),
+    "pays_off item blank": (_pays_off_item_blank, "pays_off[0]: must be a non-empty string"),
+    "pays_off item empty": (_pays_off_item_empty, "pays_off[0]: length 0 < minLength 1"),
+    "pays_off item over the hook cap": (_pays_off_item_too_long, "pays_off[0]: length 121 > maxLength 120"),
+    "pays_off hook listed twice": (_pays_off_listed_twice, "is listed twice"),
+    "pays_off more hooks than E1 offers": (_pays_off_too_many, "pays_off: 5 items > maxItems 4"),
 }
 
 
@@ -337,6 +377,39 @@ def test_a_broken_script_is_refused(label):
     doc = _mutate(_script(), mutate)
     errors = schemas.episode_script_errors(doc)
     assert any(keyword in e for e in errors), errors
+
+
+def test_pays_off_is_optional_and_a_script_without_it_still_validates():
+    """Phase 5 stage 3: ``pays_off`` is an optional scene field -- every
+    script written before it (none of its scenes carry it) validates
+    unchanged; one naming hooks validates; an empty list means none too."""
+    doc = _script()
+    assert all("pays_off" not in scene for scene in doc["scenes"])
+    assert schemas.episode_script_errors(doc) == []
+    paid = _mutate(doc, lambda d: d["scenes"][2].__setitem__("pays_off", [_HOOK]))
+    assert schemas.episode_script_errors(paid) == []
+    several = _mutate(doc, lambda d: d["scenes"][3].__setitem__("pays_off", [f"hook {i}" for i in range(4)]))
+    assert schemas.episode_script_errors(several) == []
+    empty = _mutate(doc, lambda d: d["scenes"][2].__setitem__("pays_off", []))
+    assert schemas.episode_script_errors(empty) == []
+    framing = _mutate(doc, lambda d: d["scenes"][0].__setitem__("pays_off", [_HOOK]))
+    assert schemas.episode_script_errors(framing) == []  # which scene must pay off is the pre-check's rule
+    assert schemas.PAYOFF_HOOKS_MAX == 4
+
+
+def _report(*kinds):
+    return {"passed": not kinds, "issues": [{"scene_id": None, "kind": kind, "fix": "Fix it."} for kind in kinds],
+            "checked_rev": 1, "checked_at": NOW, "stale": False}
+
+
+def test_the_consistency_report_kinds_widen_to_hook_payoff_backward_compatibly():
+    old_kinds = ("continuity", "character", "place", "series_memory", "other")
+    assert schemas.episode_script_errors(_script(consistency_report=_report(*old_kinds))) == []
+    assert schemas.episode_script_errors(_script(consistency_report=_report("hook_payoff"))) == []
+    assert schemas.CONSISTENCY_ISSUE_KINDS == ("continuity", "character", "place", "series_memory",
+                                               "hook_payoff", "other")
+    errors = schemas.episode_script_errors(_script(consistency_report=_report("payoff")))
+    assert any("'payoff' is not one of" in e for e in errors), errors
 
 
 # ================================================ 2b. episode_script_context_errors

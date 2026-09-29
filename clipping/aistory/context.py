@@ -330,26 +330,45 @@ def relationship_pairs(relationship_state) -> list:
     return pairs
 
 
-def memory_section(season, ep):
+def previous_recap(season, ep):
+    """The recap of the episode before *ep* in *season*'s ``series_memory``
+    (``recaps["ep01"]`` for episode 2; spec 2.6, the memory step writes it),
+    or None: for episode 1, or when none is recorded."""
+    if ep < 2:
+        return None
+    memory = (season or {}).get("series_memory") or {}
+    # Keyed "ep01", "ep02", ... (spec 2.6; the memory step writes them).
+    return (memory.get("recaps") or {}).get(f"ep{ep - 1:02d}")
+
+
+def memory_section(season, ep, open_hooks=None):
     """``(text, was_cut)`` for E1/E3's series-memory block (spec 2.6, 4.2).
 
     Episode 1 opens a season with no history: the literal text
     ``"none yet"``, never cut. From episode 2 on, the previous episode's
-    recap, the season's still-open hooks and its current relationship state
-    come from *season*'s ``series_memory`` (spec 2.6: ``recaps``,
-    ``open_hooks``, ``relationship_state``, filled in by the S3 step once an
-    episode is approved) -- a season with none yet recorded (a fresh story,
-    or ep 2 written before ep 1 was ever approved) says so per field rather
-    than omitting it silently. Cut to ``_MEMORY_WORD_LIMIT`` words like every
-    other pack section, the cut named exactly as ``cast``/``places`` are.
+    recap (:func:`previous_recap`), the open hooks and the season's current
+    relationship state come from *season*'s ``series_memory`` (spec 2.6:
+    ``recaps``, ``open_hooks``, ``relationship_state``, filled in by the S3
+    step once an episode is approved) -- a season with none yet recorded (a
+    fresh story, or ep 2 written before ep 1 was ever approved) says so per
+    field rather than omitting it silently. Cut to ``_MEMORY_WORD_LIMIT``
+    words like every other pack section, the cut named exactly as
+    ``cast``/``places`` are.
+
+    *open_hooks* (phase 5 stage 3) is the list the "Open hooks" line shows:
+    the caller's -- the hooks open when episode *ep* starts,
+    ``series_memory.open_hooks_before`` -- since the stored ``open_hooks``
+    folds later episodes' entries too; an empty list shows none (E1 lists
+    its own, enumerated, with the payoff ask). None reads the stored list,
+    as every caller did before.
     """
     if ep < 2:
         return _MEMORY_NONE_YET, False
 
     memory = (season or {}).get("series_memory") or {}
-    # Keyed "ep01", "ep02", ... (spec 2.6; the memory step writes them).
-    recap = (memory.get("recaps") or {}).get(f"ep{ep - 1:02d}")
-    open_hooks = memory.get("open_hooks") or []
+    recap = previous_recap(season, ep)
+    if open_hooks is None:
+        open_hooks = memory.get("open_hooks") or []
     pairs = relationship_pairs(memory.get("relationship_state"))
 
     lines = ["Series memory:"]

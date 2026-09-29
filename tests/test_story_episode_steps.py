@@ -1435,3 +1435,363 @@ def test_retime_is_derived_and_never_moves_the_revision(store):
 def test_the_episode_steps_are_registered():
     for name in ("script", "storyboard"):
         assert name in steps.RUNNERS and callable(steps.RUNNERS[name])
+
+
+# ================================================================== phase 5 stage 3: continuity
+#
+# Plan 11 stage 3 (DEC-177): from episode 2 on, E1 is handed the hooks open
+# when the episode starts (series_memory.open_hooks_before: the fold of the
+# entries before it, never the stored open_hooks, which folds later entries
+# too) and the direction chosen on the previous episode's feedback, and marks
+# pays_off; the script keeps it; E3's recap is written from the recap; a
+# deterministic pre-check runs before E4 and records a hook_payoff issue in
+# the consistency report when no body scene pays off an open hook or a scene
+# names one that is not open; E4 judges the lines of the scenes that do.
+
+HOOK_PHONE = "Qui a volé le téléphone ?"
+HOOK_BETRAY = "Kiwilo va-t-il trahir Mangella ?"
+HOOK_VOTE = "Le vote est-il truqué ?"
+DIRECTIONS = ["Plus de Broccolia.", "Un vote truqué, sous les yeux de tous.", "Kiwilo seul contre tous."]
+
+
+def _memory_entry(recap, opened, closed=(), deltas=None):
+    return {"recap": recap, "hooks_opened": list(opened), "hooks_closed": list(closed),
+            "relationship_deltas": dict(deltas or {}), "script_rev": 1, "at": NOW, "approved_at": NOW}
+
+
+EP1_ENTRY = _memory_entry("Kiwilo et Mangella se sont alliés en secret.", [HOOK_PHONE, HOOK_BETRAY],
+                          deltas={f"{KIWILO}|{MANGELLA}": "alliés en secret"})
+# Episode 2's own memory, as if a first draft of it had been through the
+# memory step: it closes the phone and opens the vote -- in the stored,
+# folded open_hooks, never in what episode 2 starts with.
+EP2_ENTRY = _memory_entry("Le téléphone retrouvé, le vote approche.", [HOOK_VOTE], [HOOK_PHONE])
+
+
+def _continuity_story(store, *, entries=((1, EP1_ENTRY),), chosen=1):
+    from clipping.aistory import series_memory
+
+    story_id = _ready_story(store)
+    season = store.read_doc(story_id, "season.json")
+    for ep, entry in entries:
+        season = series_memory.merge_entry(season, ep, entry)
+    season["audience_feedback"] = [{"ep": 1, "pasted_at": NOW, "text": "Top commentaires : on veut un vote !",
+                                    "digest": "Le public veut du vote.", "directions": list(DIRECTIONS),
+                                    "chosen_direction": chosen}]
+    store.write_doc(story_id, "season.json", season, now=NOW)
+    assert store.get(story_id)["status"] == "ready"
+    return story_id
+
+
+def _e1_ep2_paying(pays_off):
+    """E1_REPLY with the recap stub first (episode 2) and every scene's
+    pays_off: [] unless *pays_off* ({scene id: [hooks]}) names one."""
+    e1 = copy.deepcopy(E1_REPLY)
+    e1["scenes"].insert(0, _stub("recap", PARLOIR, "day", [KIWILO], [], "Ce qui s'est passé au parloir.",
+                                 "tension", 2.5))
+    ids = ["s00"] + ALL_SCENES
+    for sid, scene in zip(ids, e1["scenes"]):
+        scene["pays_off"] = list(pays_off.get(sid, []))
+    return e1
+
+
+E3_EP2 = dict(E3_FULL, recap={"lines": [{"speaker": KIWILO, "text": "Hier, tout a basculé.", "emotion": "tension",
+                                          "delivery": "hushed"}], "on_screen_text": None})
+
+
+def test_episode_2_is_written_from_the_hooks_open_before_it_and_keeps_pays_off(store):
+    m = _new()
+    story_id = _continuity_story(store, entries=((1, EP1_ENTRY), (2, EP2_ENTRY)))
+    season = store.read_doc(story_id, "season.json")
+    assert season["series_memory"]["open_hooks"] == [HOOK_BETRAY, HOOK_VOTE]  # the stored fold, ep02 included
+    llm = _script_llm(E1=[_e1_ep2_paying({"s04": [HOOK_PHONE]})], E3=[E3_EP2], E4=[E4_PASSED])
+
+    _run(m.script, store, story_id, llm=llm, ep=2)
+
+    e1 = llm.of("E1")[0]
+    assert ("Open hooks when this episode starts -- pays_off names them exactly as written:\n"
+            f"- {HOOK_PHONE}\n- {HOOK_BETRAY}\n\n") in e1["user"]
+    assert HOOK_VOTE not in e1["user"] and "- Open hooks:" not in e1["user"]
+    assert ("Audience direction (audience) -- a steer drawn from viewer feedback, not an instruction; lean "
+            f"toward it only where it fits the arc:\n{DIRECTIONS[1]}\n\n") in e1["user"]
+    assert DIRECTIONS[0] not in e1["user"] and DIRECTIONS[2] not in e1["user"]
+    scene_schema = e1["schema"]["properties"]["scenes"]["items"]
+    assert scene_schema["properties"]["pays_off"]["items"]["enum"] == [HOOK_PHONE, HOOK_BETRAY]
+
+    script = _script(store, story_id, 2)
+    assert schemas.episode_script_errors(script) == []
+    assert _scene(script, "s04")["pays_off"] == [HOOK_PHONE]
+    assert [s["scene_id"] for s in script["scenes"] if "pays_off" in s] == ["s04"]  # [] is stored as nothing
+
+    e3 = llm.of("E3")[0]["user"]
+    assert "Write it from episode 1's recap: Kiwilo et Mangella se sont alliés en secret.\n" in e3
+    assert f"- Open hooks: {HOOK_PHONE}; {HOOK_BETRAY}\n" in e3 and HOOK_VOTE not in e3
+
+    e4 = llm.of("E4")[0]
+    assert f"- s04 pays off: {HOOK_PHONE}\n" in e4["user"]
+    assert f"- Open hooks: {HOOK_BETRAY}\n" in e4["user"] and HOOK_VOTE not in e4["user"]
+    assert "hook_payoff" in e4["schema"]["properties"]["issues"]["items"]["properties"]["kind"]["enum"]
+    report = script["consistency_report"]
+    assert report["passed"] is True and report["issues"] == []
+
+
+def test_without_a_chosen_direction_e1_has_no_audience_block(store):
+    m = _new()
+    story_id = _continuity_story(store, chosen=None)
+    llm = _script_llm(E1=[_e1_ep2_paying({"s03": [HOOK_BETRAY]})], E3=[E3_EP2], E4=[E4_PASSED])
+
+    _run(m.script, store, story_id, llm=llm, ep=2)
+
+    assert "Audience direction" not in llm.of("E1")[0]["user"]
+    assert _scene(_script(store, story_id, 2), "s03")["pays_off"] == [HOOK_BETRAY]
+
+
+def test_an_e1_reply_paying_off_nothing_is_asked_again_then_accepted(store):
+    m = _new()
+    story_id = _continuity_story(store)
+    llm = _script_llm(E1=[_e1_ep2_paying({}), _e1_ep2_paying({"s05": [HOOK_BETRAY]})], E3=[E3_EP2],
+                      E4=[E4_PASSED])
+
+    _summary, log = _run(m.script, store, story_id, llm=llm, ep=2)
+
+    assert llm.prompts()[:2] == ["E1", "E1"]
+    assert any("E1 reply rejected" in line and "no body scene pays off" in line for line in log)
+    assert _scene(_script(store, story_id, 2), "s05")["pays_off"] == [HOOK_BETRAY]
+
+
+def test_the_payoff_pre_check_records_a_hook_payoff_issue_and_e4_still_runs(store):
+    """The script was written paying off the phone; the memory of episode 1
+    is then written again without that hook. The next consistency check
+    runs the pre-check first: no body scene pays off a hook open before
+    episode 2, and s04 names one that is not open -- two hook_payoff issues
+    in the report, E4's own verdict (passed) kept for the rest, the report
+    failed."""
+    from clipping.aistory import series_memory
+
+    m = _new()
+    story_id = _continuity_story(store)
+    _run(m.script, store, story_id, llm=_script_llm(E1=[_e1_ep2_paying({"s04": [HOOK_PHONE]})], E3=[E3_EP2],
+                                                    E4=[E4_PASSED]), ep=2)
+    season = series_memory.merge_entry(store.read_doc(story_id, "season.json"), 1,
+                                       dict(EP1_ENTRY, hooks_opened=[HOOK_BETRAY]))
+    store.write_doc(story_id, "season.json", season, now=NOW)
+    script = _script(store, story_id, 2)
+    script["consistency_report"]["stale"] = True
+    store.write_episode_doc(story_id, 2, "script.json", script, now=NOW)
+    llm = FakeLLM(E4=[E4_PASSED])
+
+    _summary, log = _run(m.script, store, story_id, llm=llm, ep=2)
+
+    assert llm.prompts() == ["E4"]
+    report = _script(store, story_id, 2)["consistency_report"]
+    assert report["passed"] is False and report["stale"] is False
+    assert [(issue["scene_id"], issue["kind"]) for issue in report["issues"]] == [(None, "hook_payoff"),
+                                                                                  ("s04", "hook_payoff")]
+    assert "No body scene pays off" in report["issues"][0]["fix"] and "episode 2" in report["issues"][0]["fix"]
+    assert HOOK_PHONE in report["issues"][1]["fix"] and "not open before episode 2" in report["issues"][1]["fix"]
+    e4 = llm.of("E4")[0]
+    assert "Hook payoffs" not in e4["user"]  # nothing left to judge: the only named hook is not open
+    assert "hook_payoff" not in e4["schema"]["properties"]["issues"]["items"]["properties"]["kind"]["enum"]
+    assert f"- Open hooks: {HOOK_BETRAY}\n" in e4["user"]
+    assert any("Hook payoff check: 2 issues" in line for line in log)
+    assert any("Consistency: 2 issues" in line for line in log)
+
+
+def test_e4_of_episode_2_reads_only_the_recaps_before_it(store):
+    """Episode 2's own memory entry exists (a first draft went through the
+    memory step): its recap is in the stored recaps, never in what E4 checks
+    episode 2 against."""
+    m = _new()
+    story_id = _continuity_story(store, entries=((1, EP1_ENTRY), (2, EP2_ENTRY)))
+    llm = _script_llm(E1=[_e1_ep2_paying({"s04": [HOOK_PHONE]})], E3=[E3_EP2], E4=[E4_PASSED])
+
+    _run(m.script, store, story_id, llm=llm, ep=2)
+
+    user = llm.of("E4")[0]["user"]
+    assert f"- Episode 1 recap: {EP1_ENTRY['recap']}\n" in user
+    assert EP2_ENTRY["recap"] not in user and "Episode 2 recap" not in user
+
+
+# ------------------------------------------------------------ E1's cap
+
+def test_an_episode_1_e1_call_keeps_the_registry_cap(store):
+    m = _new()
+    story_id = _ready_story(store)
+    llm = _script_llm()
+
+    _run(m.script, store, story_id, llm=llm)
+
+    assert [call["max_tokens"] for call in llm.of("E1")] == [prompts.MAX_TOKENS["E1"]] == [1450]
+
+
+def test_an_episode_2_e1_call_with_no_hook_open_keeps_the_registry_cap(store):
+    m = _new()
+    story_id = _continuity_story(store, entries=((1, dict(EP1_ENTRY, hooks_opened=[])),))
+    e1 = _e1_ep2_paying({})
+    for scene in e1["scenes"]:
+        del scene["pays_off"]
+    llm = _script_llm(E1=[e1], E3=[E3_EP2], E4=[E4_PASSED])
+
+    _run(m.script, store, story_id, llm=llm, ep=2)
+
+    call = llm.of("E1")[0]
+    assert "pays_off" not in call["user"] and "Audience direction (audience)" in call["user"]
+    assert call["max_tokens"] == 1450
+
+
+def test_an_episode_2_e1_call_paying_off_a_hook_gets_the_payoff_cap_on_every_attempt(store):
+    m = _new()
+    story_id = _continuity_story(store)
+    llm = _script_llm(E1=[_e1_ep2_paying({}), _e1_ep2_paying({"s05": [HOOK_BETRAY]})], E3=[E3_EP2],
+                      E4=[E4_PASSED])
+
+    _summary, log = _run(m.script, store, story_id, llm=llm, ep=2)
+
+    assert [call["max_tokens"] for call in llm.of("E1")] == [prompts.E1_PAYOFF_MAX_TOKENS] * 2 == [2210, 2210]
+    assert any(line.startswith("✍️ E1 via") and "(cap 2210)" in line for line in log)
+    # Only E1 takes the variant's cap: E2, E3 and E4 keep their own.
+    assert {call["max_tokens"] for call in llm.of("E2")} == {prompts.MAX_TOKENS["E2"]}
+    assert llm.of("E3")[0]["max_tokens"] == prompts.MAX_TOKENS["E3"]
+    assert llm.of("E4")[0]["max_tokens"] == prompts.MAX_TOKENS["E4"]
+
+
+def test_call_json_sends_the_registry_cap_unless_handed_one_the_same_on_the_retry():
+    from clipping.aistory.steps import llm_call
+
+    ctx, _log = _ctx(SimpleNamespace(outputs_dir="/nonexistent"), "0123456789ab")
+    replies = []
+
+    def runner(chain, **kwargs):
+        replies.append(kwargs["max_tokens"])
+        return {"n": len(replies)}, LINK
+
+    validator = lambda value: [] if value["n"] % 2 == 0 else ["the first answer is refused"]  # noqa: E731
+    llm_call.call_json(ctx, "E1", "system", "user", {}, validator=validator, runner=runner)
+    assert replies == [1450, 1450]
+    replies.clear()
+    llm_call.call_json(ctx, "E1", "system", "user", {}, validator=validator, runner=runner, max_tokens=None)
+    assert replies == [1450, 1450]
+    replies.clear()
+    llm_call.call_json(ctx, "E1", "system", "user", {}, validator=validator, runner=runner, max_tokens=2210)
+    assert replies == [2210, 2210]
+
+
+def test_regenerating_the_recap_writes_it_from_the_recap(store):
+    m = _new()
+    story_id = _continuity_story(store)
+    _run(m.script, store, story_id, llm=_script_llm(E1=[_e1_ep2_paying({"s04": [HOOK_PHONE]})], E3=[E3_EP2],
+                                                    E4=[E4_PASSED]), ep=2)
+    llm = FakeLLM(E3=[{"recap": E3_EP2["recap"]}])
+
+    _regenerate(store, story_id, "scene:2:s00", llm=llm)
+
+    user = llm.of("E3")[0]["user"]
+    assert "Write it from episode 1's recap: Kiwilo et Mangella se sont alliés en secret.\n" in user
+    assert f"- Open hooks: {HOOK_PHONE}; {HOOK_BETRAY}\n" in user
+    assert _scene(_script(store, story_id, 2), "s04")["pays_off"] == [HOOK_PHONE]  # a rewrite keeps it
+
+
+def test_apply_e1_persists_pays_off_once_and_nothing_for_an_empty_list(store):
+    m = _new()
+    story_id = _continuity_story(store)
+    ec = m.common.load_context(store, story_id, 2)
+    script = m.script.skeleton(ec, now=NOW)
+    reply = _e1_ep2_paying({"s02": [HOOK_BETRAY, HOOK_BETRAY], "s04": [HOOK_PHONE]})
+
+    m.script.apply_e1(ec, script, reply)
+
+    assert _scene(script, "s02")["pays_off"] == [HOOK_BETRAY]
+    assert _scene(script, "s04")["pays_off"] == [HOOK_PHONE]
+    assert all("pays_off" not in scene for scene in script["scenes"] if scene["scene_id"] not in ("s02", "s04"))
+    assert m.common.trial_errors(ec, script) == []
+
+
+# ------------------------------------------------------------ the pre-check (pure)
+
+def _pre_script(*scenes):
+    """A script reduced to what the pre-check reads: each scene's id,
+    function and optional pays_off."""
+    out = []
+    for sid, function, *paid in scenes:
+        scene = {"scene_id": sid, "function": function}
+        if paid:
+            scene["pays_off"] = paid[0]
+        out.append(scene)
+    return {"scenes": out}
+
+
+def test_payoff_pre_check_passes_when_a_body_scene_pays_off_an_open_hook():
+    m = _new()
+    script = _pre_script(("s00", "recap"), ("s01", "hook"), ("s02", "setup", [HOOK_PHONE]), ("s03", "cliffhanger"))
+    assert m.script.payoff_issues(script, 2, [HOOK_PHONE, HOOK_BETRAY]) == []
+    # Nothing open, nothing named: nothing to check (episode 1, or every hook closed).
+    plain = _pre_script(("s01", "hook"), ("s02", "setup"), ("s03", "cliffhanger"))
+    assert m.script.payoff_issues(plain, 1, []) == []
+    assert m.script.payoff_issues(plain, 3, []) == []
+
+
+def test_payoff_pre_check_no_body_scene_paying_off():
+    m = _new()
+    for script in (_pre_script(("s00", "recap"), ("s01", "hook"), ("s02", "setup"), ("s03", "cliffhanger")),
+                   _pre_script(("s00", "recap"), ("s01", "hook", [HOOK_PHONE]), ("s02", "setup", []),
+                               ("s03", "cliffhanger", [HOOK_BETRAY]))):
+        issues = m.script.payoff_issues(script, 2, [HOOK_PHONE, HOOK_BETRAY])
+        assert [(i["scene_id"], i["kind"]) for i in issues] == [(None, "hook_payoff")], issues
+        assert issues[0]["fix"].startswith("No body scene pays off one of the 2 hooks open before episode 2")
+
+
+def test_payoff_pre_check_a_hook_that_is_not_open():
+    m = _new()
+    script = _pre_script(("s00", "recap"), ("s01", "hook"), ("s02", "setup", [HOOK_PHONE]),
+                         ("s03", "rising", [HOOK_VOTE]), ("s04", "cliffhanger"))
+    issues = m.script.payoff_issues(script, 2, [HOOK_PHONE])
+    assert [(i["scene_id"], i["kind"]) for i in issues] == [("s03", "hook_payoff")]
+    assert issues[0]["fix"] == f"Scene s03 pays off “{HOOK_VOTE}”, which is not open before episode 2."
+    # Named with no hook open at all (every one closed since): the same issue, and no "no payoff" one.
+    issues = m.script.payoff_issues(_pre_script(("s01", "hook"), ("s02", "setup", [HOOK_VOTE])), 3, [])
+    assert [(i["scene_id"], i["kind"]) for i in issues] == [("s02", "hook_payoff")]
+
+
+def test_payoff_pre_check_issues_fit_the_stored_report():
+    """Every fix fits the report's 300 characters; one issue per scene at
+    most, plus one for the whole episode: at most 13 for 12 scenes, which
+    with E4's own 6 stays under the report's 20."""
+    m = _new()
+    long_hooks = [f"{i} " + "x" * 117 for i in range(4)]
+    scenes = [(f"s{i:02d}", "setup", list(long_hooks)) for i in range(2, 12)]
+    script = _pre_script(("s00", "recap", list(long_hooks)), ("s01", "hook", list(long_hooks)), *scenes)
+    issues = m.script.payoff_issues(script, 2, ["un autre crochet"])
+    assert len(issues) == 13
+    assert all(len(issue["fix"]) <= 300 for issue in issues)
+    report = {"passed": False, "issues": issues + [{"scene_id": None, "kind": "other", "fix": "x"}] * 6,
+              "checked_rev": 1, "checked_at": NOW, "stale": False}
+    errors = schemas.validate(report, schemas.EPISODE_SCRIPT_SCHEMA["properties"]["consistency_report"])
+    assert errors == []
+
+
+# ------------------------------------------------------------ RC-M1 at the step
+
+# sha256 of json.dumps([system, user, schema, max_tokens]) of the E1, E3 and E4
+# requests an episode-1 script run sends, rendered by HEAD 0ae8efb's step
+# (before this stage): the cap is pinned too -- the limiter reserves input +
+# max_tokens, so a raised cap changes an episode-1 call as surely as its text.
+RC_M1_STEP_SHAS = {
+    "E1": "fa6931fbc0a96213f6443d759fec60e34e25861e0090d8753f1fc68a80fe1ce2",
+    "E3": "8e66f56f1ea8429ec26c4dff29cd2f08d26b556a090bd33cc2bb72fc1b2427dd",
+    "E4": "eb481a5184e0fd7d7f0188798c07d11907b09085f830ba1e259d0f85cc57cad1",
+}
+
+
+def _request_sha(call):
+    blob = json.dumps([call["system"], call["user"], call["schema"], call["max_tokens"]], ensure_ascii=False)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def test_rc_m1_an_episode_1_script_run_sends_the_same_e1_e3_e4_as_head(store):
+    m = _new()
+    story_id = _ready_story(store)
+    llm = _script_llm()
+
+    _run(m.script, store, story_id, llm=llm)
+
+    assert {prompt: _request_sha(llm.of(prompt)[0]) for prompt in ("E1", "E3", "E4")} == RC_M1_STEP_SHAS
+    assert all("pays_off" not in scene for scene in _script(store, story_id)["scenes"])

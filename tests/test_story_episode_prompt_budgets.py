@@ -54,7 +54,9 @@ LIVE_ARC_DENSITY = (52, 362)  # the longest live arc summary
 
 # The measured worst cases (tokens, chars / 4) and the budgets set on them.
 # The larger of the scratch-copy run and this fixture's (they differ by at most 4).
-MEASURED = {"E1": 1102, "E2": 1440, "E3": 2050, "E4": 3523, "T1": 1100, "T1r": 1218}
+# E1, E3 and E4: phase 5 stage 3's continuity worst cases (MEASURED_CONTINUITY,
+# below), which are larger; stage 6 recorded 1,102, 2,050 and 3,523.
+MEASURED = {"E1": 1558, "E2": 1440, "E3": 2199, "E4": 3598, "T1": 1100, "T1r": 1218}
 
 
 def _filler(words, chars):
@@ -327,3 +329,173 @@ def test_e1_and_e3_for_episode_2_read_the_spec_shape():
         next_arc_entry=ARC3, memory=SPEC_MEMORY, episode_defaults=DEFAULTS, word_budgets={}, cast=PERSONALITIES,
         narrator_enabled=False)
     assert "- Previous recap: Kiwilo et Mangella scellent une alliance secrète." in user
+
+
+# ================================================================ phase 5 stage 3: continuity (DEC-138)
+#
+# From episode 2 on, E1 also lists the hooks open when the episode starts (at
+# most schemas.PAYOFF_HOOKS_MAX of them, oldest first), the audience direction
+# chosen on the previous episode's feedback and the pays_off ask; E3's recap
+# block carries the previous recap and its memory lists the hooks open before
+# the episode; E4 lists the hook payoffs (and gains the hook_payoff kind). The
+# fold can hold HOOKS_OPENED_MAX (3) hooks for each of the 11 episodes before
+# the last one (EPISODES_PLANNED_MAX, 12): 33, each at the 120-character cap,
+# in dense French. The audience direction is at its 25-word cap
+# (F1_DIRECTION_MAX_WORDS); the relationships are the fixture's own (15-word
+# texts, RELATIONSHIP_DELTA_MAX_WORDS). E1 pays off one hook per scene at
+# most, so E4's payoffs spread over all 12 scenes.
+#
+# How many hooks make the worst case differs per prompt, so it is searched
+# (every count from 0 to 33, every number of the offered hooks paid off --
+# test_each_continuity_worst_case_is_the_maximum_over_every_hook_count):
+# E1 shows at most 4, so any 4 or more; E3's memory is cut at 150 words, and
+# one hook leaves the most of them to the relationships, the densest text;
+# E4 is largest with 3 of its 4 offered hooks paid off (one left in the
+# memory block's line, three with their scenes in the payoff block).
+#
+# Measured (chars / 4): E1 1,558 (HEAD 0ae8efb's own fixture: 1,263, 99 % of
+# its 1,270 -- the 1,102 recorded above predates stage 12b's numbered scene
+# list), E3 2,199 in full (HEAD: 2,071) and 1,549 for the recap alone (HEAD:
+# 1,421), E4 3,598 (HEAD: 3,523; the stage-4 fixture of
+# test_story_prompts_episode.py: 3,530 -> 3,605). E1 and E3 take the measured
+# worst case + 15 %, rounded up to ten (1,800 and 2,530); E4's 3,900 still
+# holds (+8 %) under the spec's 4,000 ceiling, as stage 6 left it.
+
+from clipping.aistory import schemas  # noqa: E402 -- this section's own names
+
+FOLD_HOOKS_MAX = schemas.HOOKS_OPENED_MAX * (schemas.EPISODES_PLANNED_MAX - 1)
+
+
+def _hook(i):
+    """A distinct hook of exactly HOOK_MAX_LENGTH (120) characters, dense French."""
+    text = (f"{i:02d} " + _fr(40))[:schemas.HOOK_MAX_LENGTH - 1] + "?"
+    assert len(text) == schemas.HOOK_MAX_LENGTH
+    return text
+
+
+OPEN_HOOKS = [_hook(i) for i in range(FOLD_HOOKS_MAX)]
+DIRECTION_AT_CAP = _fr(schemas.F1_DIRECTION_MAX_WORDS)
+E3_WORST_HOOKS = 1
+E4_WORST_PAID = 3
+
+
+def _offered(hooks=None):
+    """The hooks E1 offers (and E4 shows) of *hooks* (OPEN_HOOKS): the
+    oldest PAYOFF_HOOKS_MAX. A function, so that on the parent commit (no
+    such constant) each test fails on its own instead of the file failing to
+    collect (test_story_prompts_metadata imports this module)."""
+    return (OPEN_HOOKS if hooks is None else hooks)[:schemas.PAYOFF_HOOKS_MAX]
+
+
+def _payoffs(hooks=None, paid=None):
+    """One hook paid off per scene (E1's own maximum), across all 12 scenes,
+    round-robin over the first *paid* (E4_WORST_PAID) offered hooks, grouped
+    by hook as E4 takes them."""
+    chosen = _offered(hooks)[:E4_WORST_PAID if paid is None else paid]
+    return {hook: [scene["scene_id"] for n, scene in enumerate(SCENES) if n % len(chosen) == i]
+            for i, hook in enumerate(chosen)}
+
+
+# The continuity worst cases, measured (chars / 4) on this fixture.
+MEASURED_CONTINUITY = {"E1": 1558, "E3": 2199, "E3-recap": 1549, "E4": 3598}
+
+
+def _e1_continuity(hooks=None):
+    return prompts.build_e1(
+        _pack(), ep=2, arc_entry=ARC2, template=TEMPLATE_90, episode_defaults=DEFAULTS,
+        cast=[{"char_id": c["char_id"], "name": c["name"]} for c in CAST],
+        places=[{k: p[k] for k in ("place_id", "name", "time_variants")} for p in PLACES],
+        props=[{"prop_id": PROP["prop_id"], "name": PROP["name"]}], memory=MEMORY,
+        slots=timing.episode_slots(TEMPLATE_90, 2), open_hooks=OPEN_HOOKS if hooks is None else hooks,
+        audience_direction=DIRECTION_AT_CAP)
+
+
+def _e3_continuity(part, hooks=None):
+    pack = _pack(None if part is None else NOTE)
+    return prompts.build_e3(
+        pack, ep=2, part=part, note=pack.note, hook_scene=SCENES[1], cliffhanger_scene=SCENES[-1],
+        recap_scene=SCENES[0], outline=SCENES, first_body_line=LINE, last_body_line=LINE, arc_entry=ARC2,
+        next_arc_entry=ARC3, memory=MEMORY, episode_defaults=DEFAULTS,
+        word_budgets={"hook": 9, "cliffhanger": 12, "recap": 9}, cast=PERSONALITIES, narrator_enabled=False,
+        open_hooks=OPEN_HOOKS[:E3_WORST_HOOKS] if hooks is None else hooks)
+
+
+def _e4_continuity(hooks=None, paid=None):
+    """E4 checks only against the recaps of the episodes before it: episode 3
+    is the first to see both of the fixture's (ep01, ep02) -- its worst case."""
+    digest = prompts.script_digest({"scenes": SCENES}, {"places": {p["place_id"]: p["name"] for p in PLACES},
+                                                         "cast": NAMES})
+    return prompts.build_e4(_pack(), script_digest=digest, cast=PERSONALITIES,
+                            places=[{"place_id": p["place_id"], "name": p["name"]} for p in PLACES], memory=MEMORY,
+                            ep=3, open_hooks=OPEN_HOOKS if hooks is None else hooks, payoffs=_payoffs(hooks, paid))
+
+
+def _tokens(triple):
+    return context.estimate_tokens(triple[0], triple[1])
+
+
+def test_the_continuity_fixture_is_at_its_caps():
+    assert FOLD_HOOKS_MAX == 33 and len(set(OPEN_HOOKS)) == 33
+    assert all(len(hook) == 120 for hook in OPEN_HOOKS)
+    assert len(DIRECTION_AT_CAP.split()) == 25
+    assert sorted(sid for sids in _payoffs(paid=4).values() for sid in sids) == [s["scene_id"] for s in SCENES]
+    _s, user, schema = _e1_continuity()
+    assert all(hook in user for hook in _offered()) and OPEN_HOOKS[4] not in user
+    assert DIRECTION_AT_CAP in user
+    enum = schema["properties"]["scenes"]["items"]["properties"]["pays_off"]["items"]["enum"]
+    assert enum == _offered()
+    _s, user, schema = _e4_continuity()
+    assert all(hook in user for hook in _offered()) and "hook_payoff" in user
+
+
+@pytest.mark.parametrize("prompt_id", ["E1", "E3", "E3-recap", "E4"])
+def test_the_continuity_worst_cases_measure_what_is_recorded_and_fit_their_budgets(prompt_id):
+    system, user, _schema = {"E1": _e1_continuity, "E3": lambda: _e3_continuity(None),
+                             "E3-recap": lambda: _e3_continuity("recap"), "E4": _e4_continuity}[prompt_id]()
+    tokens = _fits(prompt_id.split("-")[0], system, user)
+    assert tokens == MEASURED_CONTINUITY[prompt_id]
+    assert prompts.INPUT_BUDGET[prompt_id.split("-")[0]] <= 4000
+
+
+def test_each_continuity_worst_case_is_the_maximum_over_every_hook_count():
+    counts = range(FOLD_HOOKS_MAX + 1)
+    assert max(_tokens(_e1_continuity(OPEN_HOOKS[:k])) for k in counts) == MEASURED_CONTINUITY["E1"]
+    assert max(_tokens(_e3_continuity(None, OPEN_HOOKS[:k])) for k in counts) == MEASURED_CONTINUITY["E3"]
+    assert max(_tokens(_e3_continuity("recap", OPEN_HOOKS[:k])) for k in counts) == MEASURED_CONTINUITY["E3-recap"]
+    e4 = max(_tokens(_e4_continuity(OPEN_HOOKS[:k], paid)) for k in counts
+             for paid in range(min(k, schemas.PAYOFF_HOOKS_MAX) + 1))
+    assert e4 == MEASURED_CONTINUITY["E4"]
+
+
+def test_the_measured_worst_case_of_e1_and_e3_is_the_continuity_one():
+    """MEASURED (which the budgets are sized on, above) holds the larger of
+    the pre-stage-3 worst case and the continuity one."""
+    assert MEASURED["E1"] == max(MEASURED_CONTINUITY["E1"], _tokens(_e1()))
+    assert MEASURED["E3"] == max(MEASURED_CONTINUITY["E3"], MEASURED_CONTINUITY["E3-recap"], _tokens(_e3(None)))
+    assert MEASURED["E4"] == max(MEASURED_CONTINUITY["E4"], _tokens(_e4()))
+
+
+@pytest.mark.parametrize("part", ["hook", "cliffhanger", "teaser"])
+def test_e3_partials_with_the_continuity_inputs_fit_too(part):
+    _fits("E3", *_e3_continuity(part)[:2])
+
+
+def test_memory_section_lists_the_hooks_it_is_handed():
+    """Stage 3: the caller hands memory_section the hooks open when the
+    episode starts (series_memory.open_hooks_before); None keeps reading the
+    stored list, an empty list lists none, episode 1 is "none yet"."""
+    text, cut = context.memory_section(SPEC_MEMORY, 2, open_hooks=["Le vote est-il truqué ?"])
+    assert not cut
+    assert text == (
+        "Series memory:\n"
+        "- Previous recap: Kiwilo et Mangella scellent une alliance secrète.\n"
+        "- Open hooks: Le vote est-il truqué ?\n"
+        "- Relationships: char_kiwilo/char_mangella: publiquement ennemis, secrètement alliés; "
+        "char_mangella/char_broccolia: méfiance glaciale"
+    )
+    text, _cut = context.memory_section(SPEC_MEMORY, 2, open_hooks=[])
+    assert "Open hooks" not in text and "- Previous recap:" in text
+    assert context.memory_section(SPEC_MEMORY, 2, open_hooks=None) == context.memory_section(SPEC_MEMORY, 2)
+    assert context.memory_section(SPEC_MEMORY, 1, open_hooks=["x"]) == ("none yet", False)
+    assert context.previous_recap(SPEC_MEMORY, 2) == "Kiwilo et Mangella scellent une alliance secrète."
+    assert context.previous_recap(SPEC_MEMORY, 1) is None and context.previous_recap(SPEC_MEMORY, 3) is None

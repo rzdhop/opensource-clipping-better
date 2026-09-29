@@ -26,6 +26,11 @@ while it awaits review; whether an entry is approved (``approved_at``) and
 fresh (:func:`entry_is_stale`) is the gate's question, not the fold's.
 ``introduced`` is written by the cast path and never derived.
 
+The hooks open when an episode starts (:func:`open_hooks_before`) and the
+audience direction chosen on the episode before it (:func:`chosen_direction`)
+are what the episode prompts read (plan 11 stage 3): the script step hands
+them to E1/E3/E4, since ``prompts`` never imports this module.
+
 Re-running memory for an episode replaces its one entry and re-folds
 (:func:`merge_entry`), which is idempotent: the result depends on the
 entries alone.
@@ -151,6 +156,28 @@ def open_hooks_before(season, ep) -> list:
     entries = entry_map(season)
     earlier = {key: entry for key, entry in entries.items() if _episode_of(key) < ep}
     return fold_memory(earlier)["open_hooks"]
+
+
+# --------------------------------------------------------- audience feedback
+
+def chosen_direction(season, ep):
+    """The text of the audience direction chosen on episode *ep*'s feedback
+    (``audience_feedback``), which steers the next episode's E1 (and N1),
+    or None.
+
+    The latest of *ep*'s feedback items whose choice was made decides
+    (``chosen_direction`` present): its ``directions[chosen_direction]``,
+    or None when it was approved with no direction (null). An item still
+    waiting for its choice (the key absent: pasted, digested, not approved
+    yet) decides nothing, so it never hides an earlier choice.
+    ValueError unless *ep* is an episode (:func:`memory_key`)."""
+    memory_key(ep)
+    for item in reversed((season or {}).get("audience_feedback") or []):
+        if item.get("ep") != ep or "chosen_direction" not in item:
+            continue
+        index = item["chosen_direction"]
+        return None if index is None else item["directions"][index]
+    return None
 
 
 # ------------------------------------------------------------------ entries

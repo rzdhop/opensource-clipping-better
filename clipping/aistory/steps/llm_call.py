@@ -4,7 +4,8 @@
 story-writing call shares:
 
 - the prompt's own cap and temperature (``prompts.MAX_TOKENS`` /
-  ``TEMPERATURE``), the same on a second try -- a reply is never "fixed" by
+  ``TEMPERATURE``; a measured variant's cap when the caller names one, E1's
+  payoff ask), the same on a second try -- a reply is never "fixed" by
   asking for less, and never trimmed after it arrives;
 - the pack budget (``context.check_budget``) before anything is sent;
 - a reply the post-validator rejects is asked for once more, printed, and a
@@ -244,12 +245,19 @@ def call_json(
     validator,
     runner=None,
     time_fn=time.monotonic,
+    max_tokens=None,
 ) -> dict:
     """One accepted JSON reply for *prompt_id* (``"C1"``, ``"B1"``, ...).
 
     *validator* returns a list of errors, empty for a usable reply. *runner*
     is ``llm.run_chain`` unless a test hands in a stand-in; it is looked up
     when the call is made, not when this module is imported.
+
+    *max_tokens* is the reply's cap: None (every caller but one) is the
+    prompt's own ``prompts.MAX_TOKENS[prompt_id]``; a caller whose ask is a
+    measured variant of the prompt hands in that variant's cap instead
+    (E1's payoff variant, ``prompts.E1_PAYOFF_MAX_TOKENS``). Either way the
+    same cap is sent on the second try.
 
     Raises ``StepFailed`` (the chain failed, the reply was rejected twice,
     or -- before anything is sent -- the budget settings cannot be read, or
@@ -281,7 +289,7 @@ def call_json(
         keyed = [link for link in paid if keys.get(link.provider)] or paid
         reason = paid_off_message(keyed, chain)
         raise StepFailed(f"{prompt_id}: {reason}", reason=reason)
-    cap = prompts.MAX_TOKENS[prompt_id]
+    cap = prompts.MAX_TOKENS[prompt_id] if max_tokens is None else max_tokens
     # No keyword at all for a run without a token (the CLI's NEVER), as the
     # analyzer does it.
     cancel_kwargs = cancel_mod.kwargs_for(ctx.cancel)
