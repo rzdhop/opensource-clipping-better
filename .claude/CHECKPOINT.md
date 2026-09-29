@@ -27,6 +27,21 @@
   (Opus): paced follow-up passes for rate-limited free items inside `steps/assets.py`, providers untouched —
   committed on the branch (local 5616/1, CI 4909/677), ff-merged, backend restarted at 0 jobs, then Continue.
   Also seen: l04 and l08 carry identical text (E-prompt echo, F12 family) → the cache served l08 at $0 ('kept answer').
+  (6 cont.) after T2-F1 (`d9a2e92`, deployed): Continue → **21/21 images, 18/18 lines** in 17 min (14 paced rounds,
+  ~1 image/min), $0. T2-F2/F3 (recorded, not fixed): pollinations flux draws HUMAN faces for the fruit-head
+  descriptors (the phase-2 portraits the human approved are human too — A-058 invalidated on this route) and
+  stamps a 'pollinations.ai' watermark; prompt-only shots reuse the portrait seed → many near-identical portraits.
+  (7) UI regenerate `shot:1:sh09` with a note → only sh09 changed (seed 130852438); lock sh02 → regenerate answers 409
+  'Shot sh02 is locked: unlock it first.'; approve assets 23:48:59 (fingerprint current, 21/21 approved; the awaiting
+  assets/regenerate jobs completed). (8) render 80af58a4c007 final profile 160 s, 28 stages: 58.2 s, 1080×1920, 30/1,
+  I −14.07 but **TP +0.57 dBTP** (T2-F4) → fixed `2d26371` (TP −2.5 + `-aac_pns 0`; A-066 invalidated, DEC-157
+  amended); ducking median 8.9 dB over 8 line/gap pairs (≥ 6 dB), no bed gap; frames: word_pop, 'Généré par IA',
+  push-in; a lone '?' popped at 45 s (T2-F5) → fixed `d360b66`. (9) sh13 regenerated + re-approve + re-render
+  10c70d28c364: **20/21 shots cached, 8 stages ran, 96 s, I −14.2 / TP −2.3 / LRA 5.0, no warnings**. (10) subtitles →
+  two_line 5b1d4dad9846: 21/21 cached, 7 stages, 90 s; FOUND T2-F6 Broccolia's accent #1E1E24 unreadable on the black
+  outline and T2-F7 provider word cues drop the script's punctuation ('sécurité Ils') → fix in progress (Sonnet).
+  Next: re-render word_pop, metadata (11), EN story (13) — phase-2 image steps have no pacing, so the EN cast on
+  pollinations will need ~1 Continue per image unless the human adds a free Cloudflare key.
 - **Tier-1 baseline (86e7f4d):** local **4486 passed / 1 skipped** (210 s); CI env (`/tmp/cilibs`) **3901 passed /
   555 skipped** (155 s); compileall clean (`PYTHONPYCACHEPREFIX` in scratch); vite build green to a scratch outDir.
   ffmpeg: host `6.1.1-3ubuntu5`, container `7.1.5-0+deb13u1`. Health: 0 jobs.

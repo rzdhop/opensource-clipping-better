@@ -22,9 +22,15 @@ the TTS sidecar's own ``line_timing_v1["words"]`` list (``clipping.
 providers.tts._write_timing``): ``[{"word", "start", "end"}, ...]``, with
 ``start``/``end`` in seconds **relative to that one line's own audio**
 (each line is one ``edge_tts.Communicate`` call producing one audio file,
-so its cues are 0-based on that file, never on the episode). A missing or
-empty entry (``SOURCE_DURATION``: "no word cues, the audio duration only")
-falls back to an even split of the line's own ``duration_s`` across its
+so its cues are 0-based on that file, never on the episode). The DISPLAYED
+text is always the script's own (:func:`_line_word_spans`, Tier-2,
+2026-09-29): a provider's bare word cues are used only for TIMING, matched
+to the script's own tokens (punctuation, capitals, apostrophes) by
+``wordtiming.align``'s difflib match on normalised words -- never the
+provider's own tokenisation verbatim, so a punctuation-dropping provider
+never drops it from what is shown. A missing or empty entry
+(``SOURCE_DURATION``: "no word cues, the audio duration only") falls back
+to an even split of the line's own ``duration_s`` across its
 ``text.split()`` tokens -- spec 6.4.1c's "approximate timing" -- and that
 line's id is reported back in :func:`build_subtitles_ass`'s ``meta`` so a
 caller can label it in the UI. Nothing here silently drops the
@@ -59,6 +65,7 @@ import math
 import re
 
 from . import profiles
+from .. import wordtiming
 
 # --------------------------------------------------------------- constants
 
@@ -118,13 +125,37 @@ TWO_LINE_RESET_TAG = r"\r"
 # distance assertions for the exact numbers per shipped style.
 TWO_LINE_MIN_COLOR_DISTANCE = 100.0
 
+# Tier-2 (2026-09-29), FR fruit_drama episode 1: the live story's own
+# style_lock.json (outputs/stories/b1104ec66b05/style_lock.json) swaps the
+# shipped fruit_drama accent #FFFFFF for #ffd400 -- the SAME colour as its
+# own highlight -- so :func:`_pick_next_accent` (correctly) skipped it for
+# every speaker on the highlight-distance rule, but then handed a speaker
+# #1E1E24: a near-black accent that, against this style's own 3 px BLACK
+# outline (:data:`TWO_LINE_OUTLINE_HEX`), is nearly invisible -- the line
+# only read where the highlighted word covered it. :func:`_color_distance`
+# never checked readability against the OUTLINE, only against the highlight
+# and the other speakers' accents. :func:`_contrast_ratio` is the WCAG 2.x
+# relative-luminance contrast ratio (1.0 identical, 21.0 pure black vs pure
+# white) computed straight from the formula (no colour-science dependency,
+# DEC-012); :data:`TWO_LINE_MIN_CONTRAST_RATIO` (4.5, WCAG AA for normal
+# text) is a HARD gate in :func:`_pick_next_accent` -- unlike the
+# already-chosen-speaker distinctness check, it is never relaxed under
+# pressure, exactly like the highlight-distance rule already wasn't.
+TWO_LINE_MIN_CONTRAST_RATIO = 4.5
+
 # Used only once a style's own palette + accents run out of colours that
-# clear the threshold against the highlight AND every accent already
-# chosen for an earlier speaker in the same episode (:func:`_speaker_accents`):
-# a small fixed grayscale ramp, deterministic and, being fully desaturated,
-# reliably far (in this same RGB metric) from any realistically saturated
-# typography highlight colour.
-TWO_LINE_NEUTRAL_FALLBACK = ("#FFFFFF", "#000000", "#B3B3B3", "#4D4D4D")
+# clear BOTH thresholds against the highlight/outline AND every accent
+# already chosen for an earlier speaker in the same episode
+# (:func:`_speaker_accents`): a small fixed grayscale ramp, deterministic,
+# and -- because every stop is light enough to clear
+# :data:`TWO_LINE_MIN_CONTRAST_RATIO` against a black outline on its own --
+# always usable regardless of how a style's own palette reads. Exactly 3
+# stops: within the luminance band that clears 4.5:1 against black
+# (roughly 117-255 per channel for a pure gray), a 4th stop 100 units below
+# the 3rd would drop below that floor -- 3 is the most this metric supports
+# while also staying >= :data:`TWO_LINE_MIN_COLOR_DISTANCE` apart from each
+# other (see the module's own colour-distance tests for the exact numbers).
+TWO_LINE_NEUTRAL_FALLBACK = ("#FFFFFF", "#C5C5C5", "#8B8B8B")
 
 # Hook overlay (spec 6.4.1: "a separate top-third style"; fruit_drama's own
 # overlay_style: "uppercase, 84 px, drop shadow, centered upper third, <=6
@@ -259,6 +290,28 @@ def _color_distance(hex_a: str, hex_b: str) -> float:
     return ((ra - rb) ** 2 + (ga - gb) ** 2 + (ba - bb) ** 2) ** 0.5
 
 
+def _relative_luminance(hex_str: str) -> float:
+    """The WCAG 2.x relative luminance of a ``#RRGGBB`` colour (0.0 for pure
+    black to 1.0 for pure white), the sRGB gamma-decode + weighted-sum
+    formula from the spec, computed directly (stdlib only, DEC-012 -- no
+    colour-science dependency)."""
+    def channel(c: int) -> float:
+        v = c / 255.0
+        return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+
+    r, g, b = _rgb(hex_str)
+    return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+
+
+def _contrast_ratio(hex_a: str, hex_b: str) -> float:
+    """The WCAG 2.x contrast ratio between two ``#RRGGBB`` colours: 1.0 for
+    two identical colours, ``21.0`` for pure black against pure white.
+    Symmetric (the lighter of the two always sits on top of the ratio)."""
+    la, lb = _relative_luminance(hex_a), _relative_luminance(hex_b)
+    lighter, darker = max(la, lb), min(la, lb)
+    return (lighter + 0.05) / (darker + 0.05)
+
+
 def _hex_to_bgr(hex_str: str) -> str:
     r, g, b = _rgb(hex_str)
     return f"{b:02X}{g:02X}{r:02X}"
@@ -278,29 +331,55 @@ def _ass_override_color(hex_str: str) -> str:
 
 # --------------------------------------------------------------- word spans
 
+def _spans_from_words(words) -> list:
+    """``[(word_text, start_s, end_s), ...]`` from a ``[{"word","start",
+    "end"}, ...]`` list (a provider's own cues, or :func:`wordtiming.align`'s
+    script-timed ones): each entry's own ``start``/``end`` used as-is, an
+    end at or before its own start (a zero-length cue) nudged forward by
+    one millisecond."""
+    spans = []
+    for word in words:
+        start = float(word["start"])
+        end = float(word["end"])
+        if end <= start:
+            end = start + 0.001
+        spans.append((str(word["word"]), start, end))
+    return spans
+
+
 def _line_word_spans(text: str, duration_s: float, words) -> tuple:
     """``([(word_text, start_offset_s, end_offset_s), ...], is_approximate)``
     for one line, offsets relative to the line's OWN start (never the
     episode's).
 
     *words* is the TTS sidecar's own list (module docstring) or falsy
-    (``None``/``[]``, ``SOURCE_DURATION``'s "no word cues"). When given,
-    each entry's own ``start``/``end`` are used as-is (never re-derived
-    from *text*, so a provider's own tokenisation -- contractions,
-    hyphenation -- always wins): ``is_approximate`` is ``False``. Otherwise
-    *text* is split on whitespace and *duration_s* is divided evenly across
-    the tokens (spec 6.4.1c): ``is_approximate`` is ``True``. An end offset
-    at or before its own start (a zero-length provider cue) is nudged
-    forward by one millisecond so it always occupies non-zero time before
-    the centisecond rounding in :func:`event_time_pair` runs."""
+    (``None``/``[]``, ``SOURCE_DURATION``'s "no word cues"). When given, the
+    DISPLAYED tokens are the SCRIPT's own (``text.split()``, so punctuation,
+    capitals and apostrophes always come from the script -- Tier-2,
+    2026-09-29: Edge's own word-boundary cues carry bare words, so a
+    provider's own tokenisation used to drop the period off "sécurité." and
+    the "?"/"!"/"," a word_pop line ended on), each timed from the provider
+    cue it matches: :func:`wordtiming.align`'s order-preserving difflib
+    match on normalised words (case, accents, surrounding punctuation do
+    not count -- reused as-is, this module's own contract for it is
+    identical: "the script's words timed from ... the line's own audio",
+    whether the transcription came from an STT chain or, here, the
+    provider's own boundary events). A script token the provider missed is
+    interpolated between its matched neighbours, never overlapping, never
+    negative, its own end never past *duration_s* (:func:`wordtiming.align`'s
+    own contract). When not one script token matches at all (:func:`
+    wordtiming.align` returns ``None`` -- an unrelated *words* list), the
+    provider's own bare tokens are used as-is instead of dropping real
+    timing data on the floor. Either way ``is_approximate`` is ``False``.
+    Otherwise (no *words* at all) *text* is split on whitespace and
+    *duration_s* is divided evenly across the tokens (spec 6.4.1c):
+    ``is_approximate`` is ``True``. An end offset at or before its own start
+    is nudged forward by one millisecond (:func:`_spans_from_words`) so it
+    always occupies non-zero time before the centisecond rounding in
+    :func:`event_time_pair` runs."""
     if words:
-        spans = []
-        for word in words:
-            start = float(word["start"])
-            end = float(word["end"])
-            if end <= start:
-                end = start + 0.001
-            spans.append((str(word["word"]), start, end))
+        aligned = wordtiming.align(text, words, duration_s)
+        spans = _spans_from_words(aligned if aligned is not None else words)
         return _join_spaced_punctuation(spans), False
 
     tokens = text.split() if text else []
@@ -482,29 +561,44 @@ def _speaker_style_name(speaker: str) -> str:
     return f"TwoLine_{slug}"
 
 
+def _is_readable(color: str) -> bool:
+    """*color* clears :data:`TWO_LINE_MIN_CONTRAST_RATIO` against
+    :data:`TWO_LINE_OUTLINE_HEX` -- the outline colour every two_line style
+    is actually built with (:func:`two_line_dialogue`'s own ``_style_line``
+    call), read from that one constant rather than a fresh literal."""
+    return _contrast_ratio(color, TWO_LINE_OUTLINE_HEX) >= TWO_LINE_MIN_CONTRAST_RATIO
+
+
 def _pick_next_accent(candidates: list, highlight_hex: str, already_chosen: list) -> str:
     """The next speaker's accent colour, deterministic for fixed inputs
-    (module constants' own docstring): the first *candidates* entry that
-    clears :data:`TWO_LINE_MIN_COLOR_DISTANCE` from BOTH *highlight_hex*
-    and every colour in *already_chosen*. When every candidate that is far
-    enough from every already-chosen accent has been used up (more
+    (module constants' own docstring): the first *candidates* entry that is
+    readable against the outline (:func:`_is_readable`), clears
+    :data:`TWO_LINE_MIN_COLOR_DISTANCE` from *highlight_hex*, AND clears it
+    from every colour in *already_chosen*. Readability and the
+    highlight-distance rule are HARD gates, never relaxed -- an unreadable
+    or highlight-coloured accent is always wrong, no matter how many
+    speakers there are (module constants' own docstring: the #1E1E24
+    "broccolia" bug this exists to fix). When every candidate that is ALSO
+    far enough from every already-chosen accent has been used up (more
     speakers than the palette can keep mutually distinct), the search
-    relaxes to "far enough from the highlight only" and cycles the
-    candidates again from the start -- still never picks a colour that
-    reads too close to the highlight itself. The absolute last resort
-    (every candidate, including the neutral ramp, somehow sits within the
-    threshold of the highlight -- not reachable by either shipped style)
-    is whichever of pure black/white is farther from the highlight."""
+    relaxes to "readable AND far enough from the highlight only" and cycles
+    the candidates again from the start. The absolute last resort (every
+    candidate, including the neutral ramp, somehow fails one of the two
+    hard gates -- not reachable by either shipped style, since the neutral
+    ramp is built to always clear both) is plain white, itself readable
+    against any outline this module ever builds."""
     for color in candidates:
+        if not _is_readable(color):
+            continue
         if _color_distance(color, highlight_hex) < TWO_LINE_MIN_COLOR_DISTANCE:
             continue
         if any(_color_distance(color, chosen) < TWO_LINE_MIN_COLOR_DISTANCE for chosen in already_chosen):
             continue
         return color
     for color in candidates:
-        if _color_distance(color, highlight_hex) >= TWO_LINE_MIN_COLOR_DISTANCE:
+        if _is_readable(color) and _color_distance(color, highlight_hex) >= TWO_LINE_MIN_COLOR_DISTANCE:
             return color
-    return "#FFFFFF" if _color_distance("#FFFFFF", highlight_hex) >= _color_distance("#000000", highlight_hex) else "#000000"
+    return "#FFFFFF"
 
 
 def _speaker_accents(lines: list, palette: dict, highlight_hex: str) -> dict:
@@ -512,9 +606,10 @@ def _speaker_accents(lines: list, palette: dict, highlight_hex: str) -> dict:
     assigned in first-appearance order (deterministic for a fixed script)
     from ``palette["primary"] + palette["accents"]`` (plan: "accent taken
     from the palette"), then :data:`TWO_LINE_NEUTRAL_FALLBACK` -- each pick
-    made by :func:`_pick_next_accent` so every accent stays clearly
-    distinct from *highlight_hex* AND from every other speaker's own
-    accent (module constants' own docstring: the bug this exists to fix)."""
+    made by :func:`_pick_next_accent` so every accent stays readable
+    against the outline, clearly distinct from *highlight_hex*, AND from
+    every other speaker's own accent (module constants' own docstring: the
+    bugs this exists to fix)."""
     candidates = list(palette.get("primary") or []) + list(palette.get("accents") or []) + list(TWO_LINE_NEUTRAL_FALLBACK)
     accents = {}
     chosen = []

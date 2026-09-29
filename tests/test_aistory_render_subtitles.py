@@ -19,6 +19,11 @@ Sections, in order:
     from ``test_aistory_render_timeline``/``test_story_shots``)
 12. two_line accent colours stay distinct from the highlight and from each
     other, for both shipped styles' own real palette + typography
+13. two_line accent colours are readable (WCAG contrast) against the
+    outline, for both shipped styles AND the live episode's own palette,
+    at 3 and 4 speakers
+14. script text, provider timing: displayed tokens are the script's own,
+    timed from a matching provider cue, punctuation kept
 
 Stdlib + pytest only (DEC-012): this file runs in the CI environment.
 """
@@ -601,12 +606,20 @@ def test_fruit_drama_three_speaker_accents_are_the_expected_colours():
     """Golden: the exact, deterministic pick for fruit_drama's own shipped
     palette (primary ``#F2C14E, #E4572E, #3A7D44``, accents ``#FFFFFF,
     #1E1E24``) against its own highlight ``#FFD400``. ``#F2C14E`` (~81
-    units from the highlight) is skipped for every speaker; the first three
-    candidates that clear the threshold from the highlight AND from each
-    other are picked in palette order."""
+    units from the highlight) is skipped for every speaker, same as before
+    the readability fix.
+
+    DELIBERATE CHANGE (Tier-2, 2026-09-29, the "broccolia" bug): ``char_b``
+    and ``char_c`` are no longer ``#3A7D44``/``#FFFFFF`` -- ``#3A7D44`` (a
+    dark forest green) now fails :func:`sub._contrast_ratio` against the
+    style's own black outline (~4.20:1, under the 4.5:1 WCAG gate), so it is
+    skipped for every speaker; ``#1E1E24`` was already failing it far worse
+    (~1.27:1, the actual reported bug). With both dark palette entries
+    excluded, only ``#E4572E`` and ``#FFFFFF`` remain in-palette, and the
+    3rd speaker now comes from :data:`sub.TWO_LINE_NEUTRAL_FALLBACK`."""
     style = templates_mod.load_style("fruit_drama")
     accents = sub._speaker_accents(_three_speaker_lines(), style["palette"], style["typography"]["highlight_colour"])
-    assert accents == {"char_a": "#E4572E", "char_b": "#3A7D44", "char_c": "#FFFFFF"}
+    assert accents == {"char_a": "#E4572E", "char_b": "#FFFFFF", "char_c": "#C5C5C5"}
 
 
 def test_family_3d_three_speaker_accents_are_the_expected_colours():
@@ -647,6 +660,88 @@ def test_color_distance_is_symmetric_and_zero_for_identical_colours():
     assert sub._color_distance("#F2C14E", "#FFD400") == sub._color_distance("#FFD400", "#F2C14E")
 
 
+# ================================================== 13. two_line readability
+#
+# Regression coverage for the second Tier-2 finding (2026-09-29, the "FR
+# fruit_drama episode 1, two_line render" bug report): the live story's own
+# style_lock.json (outputs/stories/b1104ec66b05/style_lock.json, read-only)
+# swaps the shipped fruit_drama accent #FFFFFF for #ffd400 -- the SAME
+# colour as its own highlight -- so a speaker ended up with #1E1E24 as a
+# base fill: a near-black accent that, against the style's own 3 px BLACK
+# outline, was nearly invisible. The old contrast/distance rule never
+# checked readability against the OUTLINE, only against the highlight and
+# other speakers. Copied into ``LIVE_FRUIT_DRAMA_PALETTE`` below because it
+# differs from the shipped template (the file itself is never read here).
+
+LIVE_FRUIT_DRAMA_PALETTE = {"primary": ["#F2C14E", "#E4572E", "#3A7D44"], "accents": ["#FFD400", "#1E1E24"]}
+LIVE_FRUIT_DRAMA_HIGHLIGHT = "#FFD400"
+
+
+def _four_speaker_lines():
+    return _three_speaker_lines() + [
+        {"line_id": "l4", "scene_id": "s1", "start_s": 3.0, "duration_s": 1.0, "text": "d", "speaker": "char_d"},
+    ]
+
+
+def _assert_accents_are_readable_distinct_and_far_from_highlight(accents, highlight):
+    colours = list(accents.values())
+    assert len(set(colours)) == len(colours), "every speaker must get its own colour"
+    for speaker, colour in accents.items():
+        assert sub._contrast_ratio(colour, sub.TWO_LINE_OUTLINE_HEX) >= sub.TWO_LINE_MIN_CONTRAST_RATIO, (
+            f"{speaker}'s accent {colour} fails WCAG contrast against the outline {sub.TWO_LINE_OUTLINE_HEX}")
+        assert sub._color_distance(colour, highlight) >= sub.TWO_LINE_MIN_COLOR_DISTANCE, (
+            f"{speaker}'s accent {colour} is too close to the highlight {highlight}")
+    for i in range(len(colours)):
+        for j in range(i + 1, len(colours)):
+            assert sub._color_distance(colours[i], colours[j]) >= sub.TWO_LINE_MIN_COLOR_DISTANCE, (
+                f"{colours[i]} and {colours[j]} are too close to each other")
+
+
+@pytest.mark.parametrize("style_id", ["fruit_drama", "family_3d"])
+@pytest.mark.parametrize("build_lines", [_three_speaker_lines, _four_speaker_lines],
+                          ids=["3_speakers", "4_speakers"])
+def test_shipped_style_accents_are_readable_against_the_outline(style_id, build_lines):
+    style = templates_mod.load_style(style_id)
+    highlight = style["typography"]["highlight_colour"]
+    accents = sub._speaker_accents(build_lines(), style["palette"], highlight)
+    assert len(accents) == len(build_lines())
+    _assert_accents_are_readable_distinct_and_far_from_highlight(accents, highlight)
+
+
+@pytest.mark.parametrize("build_lines", [_three_speaker_lines, _four_speaker_lines],
+                          ids=["3_speakers", "4_speakers"])
+def test_live_fruit_drama_palette_accents_are_readable_against_the_outline(build_lines):
+    """The exact palette from the live episode's style_lock.json: its own
+    #1E1E24 accent must never be picked for any speaker (it is the accent
+    that was actually unreadable in the scratch render), and its #ffd400
+    accent -- identical to the highlight -- must never be picked either."""
+    accents = sub._speaker_accents(build_lines(), LIVE_FRUIT_DRAMA_PALETTE, LIVE_FRUIT_DRAMA_HIGHLIGHT)
+    assert len(accents) == len(build_lines())
+    _assert_accents_are_readable_distinct_and_far_from_highlight(accents, LIVE_FRUIT_DRAMA_HIGHLIGHT)
+    colours = {c.upper() for c in accents.values()}
+    assert "#1E1E24" not in colours
+    assert "#FFD400" not in colours
+
+
+def test_the_reported_unreadable_accent_fails_contrast_against_the_black_outline():
+    """Sanity-check on the bug report itself: #1E1E24 (the accent actually
+    burned into subtitles.ass in the scratch render) fails the WCAG gate
+    against the style's own black outline well before it would ever fail
+    the (unrelated) colour-distance rule."""
+    assert sub._contrast_ratio("#1E1E24", sub.TWO_LINE_OUTLINE_HEX) < sub.TWO_LINE_MIN_CONTRAST_RATIO
+
+
+def test_neutral_fallback_colours_are_all_light_and_readable():
+    for colour in sub.TWO_LINE_NEUTRAL_FALLBACK:
+        assert sub._contrast_ratio(colour, sub.TWO_LINE_OUTLINE_HEX) >= sub.TWO_LINE_MIN_CONTRAST_RATIO, colour
+
+
+def test_contrast_ratio_is_symmetric_bounded_and_one_for_identical_colours():
+    assert sub._contrast_ratio("#1E1E24", "#000000") == sub._contrast_ratio("#000000", "#1E1E24")
+    assert sub._contrast_ratio("#FFD400", "#FFD400") == pytest.approx(1.0, abs=1e-9)
+    assert sub._contrast_ratio("#000000", "#FFFFFF") == pytest.approx(21.0, abs=1e-2)
+
+
 # ------------------------------------------------ French spaced punctuation
 # Tier-2 (2026-09-29): French writes a space before ? ! : ; and inside « »,
 # so a lone "?" was split off and popped as a word of its own at 45 s of the
@@ -660,10 +755,22 @@ def test_a_spaced_question_mark_joins_the_word_before_it_in_an_even_split():
 
 
 def test_a_provider_punctuation_cue_extends_the_word_before_it():
+    """DELIBERATE CHANGE (Tier-2, 2026-09-29): the displayed tokens are now
+    the SCRIPT's own, matched to the provider's cues by normalised words
+    (module docstring). A punctuation-only script token ("?") normalises to
+    nothing (:func:`wordtiming.normalise`), so it can never match anything
+    on either side (same rule ``wordtiming.align`` already applies to a
+    dash or an ellipsis) -- the provider's own "?" cue is simply unused, and
+    the script's "?" is interpolated from the end of "Vraiment"'s match to
+    the line's own duration, same as :func:`wordtiming.align`'s own
+    "spread to the end of the line's audio" rule for a trailing unmatched
+    word. ``_join_spaced_punctuation`` still joins it to "Vraiment", now
+    ending at the line's duration (0.8) rather than the provider's own
+    (discarded) cue end (0.7)."""
     words = [{"word": "Vraiment", "start": 0.0, "end": 0.5}, {"word": "?", "start": 0.55, "end": 0.7}]
     spans, approx = sub._line_word_spans("Vraiment ?", 0.8, words)
     assert approx is False
-    assert spans == [("Vraiment ?", 0.0, 0.7)]
+    assert spans == [("Vraiment ?", 0.0, 0.8)]
 
 
 def test_opening_guillemets_join_the_word_after_them():
@@ -675,3 +782,111 @@ def test_opening_guillemets_join_the_word_after_them():
 def test_a_line_of_punctuation_alone_keeps_its_one_span():
     spans, _approx = sub._line_word_spans("?!", 1.0, None)
     assert [text for text, _start, _end in spans] == ["?!"]
+
+
+# ================================================ 14. script text, provider timing
+#
+# Tier-2 (2026-09-29): Edge's own word-boundary cues (the sidecar ``words``)
+# carry bare words -- no punctuation -- so displaying the provider's own
+# tokens verbatim dropped "sécurité."'s period and "trompent."'s (last word
+# of the live FR episode's line): "...en sécurité. Ils se trompent." showed
+# as "sécurité Ils se trompent". The fix: display the SCRIPT's own tokens
+# (``text.split()``), each timed from the provider cue it matches via
+# ``wordtiming.align``'s difflib match on normalised words.
+
+def _cues(*words_with_times):
+    return [{"word": w, "start": s, "end": e} for w, s, e in words_with_times]
+
+
+def test_provider_cues_without_punctuation_keep_the_scripts_own_punctuation():
+    text = "Nos rivaux croient être en sécurité. Ils se trompent."
+    bare = ["Nos", "rivaux", "croient", "être", "en", "sécurité", "Ils", "se", "trompent"]
+    words = _cues(*[(w, i * 0.3, i * 0.3 + 0.25) for i, w in enumerate(bare)])
+    spans, is_approx = sub._line_word_spans(text, len(bare) * 0.3, words)
+    assert is_approx is False
+    assert [t for t, _s, _e in spans] == [
+        "Nos", "rivaux", "croient", "être", "en", "sécurité.", "Ils", "se", "trompent."]
+    # Real provider timestamps still drive every span (never re-derived from
+    # an even split): the matched "sécurité." keeps its own provider cue.
+    securite = spans[5]
+    assert securite[1] == pytest.approx(5 * 0.3) and securite[2] == pytest.approx(5 * 0.3 + 0.25)
+
+
+def test_provider_cues_preserve_french_elision_and_apostrophes():
+    text = "Tu n'as pas le choix, chérie."
+    words = _cues(
+        ("Tu", 0.0, 0.2), ("n’as", 0.25, 0.5), ("pas", 0.55, 0.8), ("le", 0.85, 1.0),
+        ("choix", 1.05, 1.4), ("cherie", 1.5, 2.0),  # curly apostrophe + an accent-free "cherie"
+    )
+    spans, is_approx = sub._line_word_spans(text, 2.2, words)
+    assert is_approx is False
+    assert [t for t, _s, _e in spans] == ["Tu", "n'as", "pas", "le", "choix,", "chérie."]
+    assert spans[0][1] == pytest.approx(0.0) and spans[-1][2] == pytest.approx(2.0)
+
+
+def test_provider_cues_with_a_missing_word_interpolate_between_matched_neighbours():
+    text = "Nos rivaux croient être en sécurité."
+    # "être" was not heard by the provider (a missing cue).
+    words = _cues(
+        ("Nos", 0.0, 0.2), ("rivaux", 0.25, 0.55), ("croient", 0.6, 0.95),
+        ("en", 1.3, 1.5), ("sécurité", 1.55, 1.9),
+    )
+    spans, is_approx = sub._line_word_spans(text, 2.0, words)
+    assert is_approx is False
+    assert [t for t, _s, _e in spans] == ["Nos", "rivaux", "croient", "être", "en", "sécurité."]
+    etre_start, etre_end = spans[3][1], spans[3][2]
+    assert 0.95 <= etre_start < etre_end <= 1.3  # interpolated inside the "croient" .. "en" gap
+    for i in range(1, len(spans)):
+        assert spans[i][1] >= spans[i - 1][2] - 1e-9  # never overlapping, never going back in time
+    assert spans[-1][2] <= 2.0 + 1e-9  # last end never past the line's own duration
+
+
+def test_provider_cues_with_an_extra_word_still_keep_the_scripts_own_tokens():
+    text = "Ils se trompent."
+    # The provider heard a stray repeated "se" that is not in the script.
+    words = _cues(("Ils", 0.0, 0.2), ("se", 0.25, 0.4), ("se", 0.42, 0.55), ("trompent", 0.6, 0.95))
+    spans, is_approx = sub._line_word_spans(text, 1.0, words)
+    assert is_approx is False
+    assert [t for t, _s, _e in spans] == ["Ils", "se", "trompent."]
+
+
+def test_provider_cues_missing_a_spaced_punctuation_token_still_join_it_by_interpolation():
+    text = "Vraiment ? Ils se trompent."
+    words = _cues(("Vraiment", 0.0, 0.4), ("Ils", 0.6, 0.8), ("se", 0.85, 1.0), ("trompent", 1.05, 1.4))
+    spans, is_approx = sub._line_word_spans(text, 1.5, words)
+    assert is_approx is False
+    assert [t for t, _s, _e in spans] == ["Vraiment ?", "Ils", "se", "trompent."]
+
+
+def test_provider_cues_that_do_not_match_the_script_at_all_fall_back_to_the_provider_tokens():
+    """``wordtiming.align`` returns ``None`` when not one word matches (its
+    own contract) -- rather than lose the provider's real timing entirely,
+    the provider's own bare tokens are used as-is, same as before this fix."""
+    text = "Bonjour tout le monde"
+    words = _cues(("hello", 0.0, 0.4), ("world", 0.5, 0.9))
+    spans, is_approx = sub._line_word_spans(text, 1.0, words)
+    assert is_approx is False
+    assert [t for t, _s, _e in spans] == ["hello", "world"]
+
+
+def test_word_pop_events_carry_the_scripts_punctuation_from_provider_word_timings():
+    lines = _one_line("Vraiment ? Ils se trompent.", duration_s=1.5)
+    words = {"l1": [
+        {"word": "Vraiment", "start": 0.0, "end": 0.4}, {"word": "Ils", "start": 0.6, "end": 0.8},
+        {"word": "se", "start": 0.85, "end": 1.0}, {"word": "trompent", "start": 1.05, "end": 1.4},
+    ]}
+    _styles, events, approx = sub.word_pop_dialogue(lines, word_timings=words, typography=TYPOGRAPHY)
+    assert approx == {"l1": False}
+    texts = [_strip_tags(ev.split(",", 9)[9]) for ev in events]
+    assert texts == ["VRAIMENT ?", "ILS", "SE", "TROMPENT."]
+
+
+def test_word_pop_events_keep_the_scripts_period_with_a_provider_missing_a_final_word():
+    lines = _one_line("Nos rivaux croient être en sécurité. Ils se trompent.", duration_s=2.7, line_id="l1")
+    bare = ["Nos", "rivaux", "croient", "être", "en", "sécurité", "Ils", "se", "trompent"]
+    words = {"l1": [{"word": w, "start": i * 0.3, "end": i * 0.3 + 0.25} for i, w in enumerate(bare)]}
+    _styles, events, approx = sub.word_pop_dialogue(lines, word_timings=words, typography=TYPOGRAPHY)
+    assert approx == {"l1": False}
+    texts = [_strip_tags(ev.split(",", 9)[9]) for ev in events]
+    assert texts[-1] == "TROMPENT."
+    assert "SÉCURITÉ." in texts
