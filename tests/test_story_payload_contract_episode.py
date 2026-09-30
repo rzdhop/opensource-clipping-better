@@ -287,7 +287,10 @@ def test_measure_voices_stays_disabled_while_only_the_check_is_missing():
     src = SCRIPT_PANE.read_text(encoding="utf-8")
     measure_body = src.split("function MeasureVoices", 1)[1].split("function ApproveScript", 1)[0]
     assert "const ready = scriptComplete && !checkNeeded" in measure_body
-    assert "disabled={!ready || busy || running}" in measure_body
+    # Plan 11 stage 11's browser-check fix round added a fourth disabling
+    # condition (a blocked estimate, estimateError) alongside these three;
+    # `ready`'s own gating is unchanged and still required.
+    assert "disabled={!ready || busy || running || Boolean(estimateError)}" in measure_body
     assert "Check the consistency first." in measure_body
     assert "Finish the script first." in measure_body
     assert "complete={episode.state.missing.length === 0}" not in src

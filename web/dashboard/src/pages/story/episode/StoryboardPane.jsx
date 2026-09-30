@@ -283,8 +283,16 @@ function ConsistencyChip({ consistency }) {
 // --------------------------------------------------------------- shot image
 
 // clipping.aistory.steps.assets.shot_state, verbatim (tests/test_story_payload_contract_episode.py).
+// "stale" reads as "needs a new image" (plan 11 stage 11): a framing, action
+// or prompt edit is what moves a shot here (assets.outdated_images), and
+// that is also the render refusal's own reason for the shot
+// (render.require_renderable) -- the label says what to do about it, not
+// just that it changed. A locked shot never reaches plain "stale" (assets.
+// shot_state: locked and outdated is always "locked_stale"), so its label
+// stays distinct -- no actionable "needs a new image" control shows there
+// either (RegenerateControl is disabled with its own "Unlock first" hint).
 const SHOT_STATE_LABELS = {
-  none: 'no image', current: 'current', stale: 'stale', locked_stale: 'locked · stale', failed: 'failed',
+  none: 'no image', current: 'current', stale: 'needs a new image', locked_stale: 'locked · stale', failed: 'failed',
 }
 
 function ShotStateBadge({ state }) {
@@ -781,10 +789,21 @@ function AssetsHeader({ storyId, ep, episode, busy, onChange }) {
   const [running, setRunning] = useState(false)
   const [error, setError] = useState('')
   const [errors, setErrors] = useState(null)
+  // assets.require_approved needs the script AND the storyboard approved
+  // and current (stage 7): a text-only edit clears only the script's
+  // approval while the storyboard's own stays, so gating this fetch on
+  // storyboardApproved alone still lets it 409 -- shown here and the button
+  // disabled, rather than an estimate that stays null forever (stage-10
+  // lesson, browser-check finding).
+  const [estimateError, setEstimateError] = useState('')
 
   useEffect(() => {
-    if (!storyboardApproved) { setEstimate(null); return }
-    fetchStoryEstimate(storyId, 'assets', { ep, alignWords }).then(setEstimate).catch(() => setEstimate(null))
+    setEstimate(null)
+    setEstimateError('')
+    if (!storyboardApproved) return
+    fetchStoryEstimate(storyId, 'assets', { ep, alignWords })
+      .then((data) => { setEstimate(data); setEstimateError('') })
+      .catch((err) => { setEstimate(null); setEstimateError(err.message) })
   }, [storyId, ep, storyboardApproved, alignWords])
 
   const reason = busy ? 'A step is running.' : !storyboardApproved ? 'Approve the storyboard first.' : null
@@ -813,18 +832,22 @@ function AssetsHeader({ storyId, ep, episode, busy, onChange }) {
           type="button"
           className="btn btn-primary"
           onClick={handleRun}
-          disabled={Boolean(reason) || running}
-          title={reason || undefined}
+          disabled={Boolean(reason) || Boolean(estimateError) || running}
+          title={reason || estimateError || undefined}
         >
           {running ? <><span className="spinner"></span> Generating…</> : hasAssets ? 'Generate remaining assets' : 'Generate assets'}
         </button>
-        {estimate && (
-          <span className="chip" title={estimate.message || ''}>
-            est. ${fmtUsd(estimate.est_usd)} · {estimate.images.count} image{estimate.images.count === 1 ? '' : 's'}
-            {' · '}{estimate.voices.lines} line{estimate.voices.lines === 1 ? '' : 's'}
-          </span>
+        {estimateError ? (
+          <span className="chip chip-warn chip-wrap">{estimateError}</span>
+        ) : estimate && (
+          <>
+            <span className="chip" title={estimate.message || ''}>
+              est. ${fmtUsd(estimate.est_usd)} · {estimate.images.count} image{estimate.images.count === 1 ? '' : 's'}
+              {' · '}{estimate.voices.lines} line{estimate.voices.lines === 1 ? '' : 's'}
+            </span>
+            <RouteChip routeClass={estimate.images.route_class} link={estimate.images.link} />
+          </>
         )}
-        {estimate && <RouteChip routeClass={estimate.images.route_class} link={estimate.images.link} />}
       </div>
       <label className="story-checkbox">
         <input
@@ -835,7 +858,7 @@ function AssetsHeader({ storyId, ep, episode, busy, onChange }) {
         />
         Align words (forced alignment for lines the voice timed no words for)
       </label>
-      {estimate && alignWords && estimate.alignment.requests > 0 && (
+      {estimate && !estimateError && alignWords && estimate.alignment.requests > 0 && (
         <p className="form-hint">
           {estimate.alignment.requests} line{estimate.alignment.requests === 1 ? '' : 's'} would be aligned.
         </p>

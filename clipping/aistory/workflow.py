@@ -2206,6 +2206,10 @@ def _derived_key(ec, script, board, doc, manifest) -> tuple:
     for line in lines:
         files.append(_file_stamp(assets_step.line_audio_path(ec, line)))
         files.append(_file_stamp(assets_step.sidecar_path(ec, line["line_id"])))
+        # has_audio (below) reads these same two paths independently of the
+        # script's own timing.audio pointer, so its own answer must move the
+        # key too -- a stray file appearing, vanishing or being replaced.
+        files.extend(_file_stamp(path) for path in voice_lines.audio_path_candidates(ec, line["line_id"]))
     files.append(_file_stamp(_store_path(ec.store.episode_file_path, story_id, ep, render_step.FINAL_FILE)))
     files.append(_file_stamp(_store_path(ec.store.episode_doc_path, story_id, ep, MANIFEST_DOC)))
     entities = tuple(sorted((kind, eid, entity.get("updated_at"))
@@ -2232,7 +2236,8 @@ def _derive(ec, script, board, doc, manifest) -> dict:
             voiced = voice_lines.is_measured(ec, line)
             source, aligned_by = (wordtiming.source_of(assets_step.read_sidecar(ec, line["line_id"])) if voiced
                                   else (None, None))
-            lines[line["line_id"]] = {"voiced": voiced, "words_source": source, "aligned_by": aligned_by}
+            lines[line["line_id"]] = {"voiced": voiced, "words_source": source, "aligned_by": aligned_by,
+                                       "has_audio": voice_lines.has_audio(ec, line["line_id"])}
     out_of_date = None
     if manifest is not None and manifest.get("output"):
         params = manifest["params"]
@@ -2303,9 +2308,14 @@ def _assets_view(ec, script, board, doc, derived) -> dict:
                 "approximate": known["words_source"] not in (wordtiming.PROVIDER, wordtiming.ALIGNMENT),
                 # Phase 5 stage 7's take, and stage 9's own note (a pending
                 # regenerate's, else the take's): what EpisodeStudio's
-                # "Re-voice this line" needs (plan 11 stage 11).
+                # "Re-voice this line" needs (plan 11 stage 11). has_audio
+                # (browser-check fix round 2): a line the plain assets step
+                # voiced and a later text edit made stale (voiced false) but
+                # never regenerated (take still null) still has its old
+                # audio file on disk -- without this, the dashboard cannot
+                # tell that line apart from one never voiced at all.
                 "take": take, "note": (pending or take or {}).get("note"), "pending": bool(pending),
-                "target": assets_step.line_target(ep, line["line_id"]),
+                "has_audio": known["has_audio"], "target": assets_step.line_target(ep, line["line_id"]),
             })
     approved = (doc or {}).get("approved")
     return {"doc": doc, "consistency": ec.consistency_mode, "fingerprint": derived["fingerprint"],
@@ -2374,7 +2384,7 @@ def episode_outputs(stories, story, ep) -> dict:
                     "lines": [{line_id, scene_id, speaker, voiced, voice, words_source:
                                provider|alignment|even_split|null, aligned_by, approximate,
                                take: {id, note, audio_sha256} | null, note, pending: bool,
-                               target: "line:<ep>:<lid>"}]} | null,
+                               has_audio: bool, target: "line:<ep>:<lid>"}]} | null,
          "render": {"state": completed|failed|cancelled|incomplete, "profile", "params": {subtitles, encoder},
                     "duration_s", "loudness": {i, tp, lra}, "fps", "width", "height",
                     "output": {"file": "episode_final.mp4", "sha256"} | null,
@@ -2391,8 +2401,12 @@ def episode_outputs(stories, story, ep) -> dict:
 
     ``assets`` is null before the episode has a script or a storyboard (a
     line's ``take`` is stage 7's persisted take, ``note`` its own or a
-    pending regenerate's, whichever is newer -- what EpisodeStudio's
-    "Re-voice this line" needs, plan 11 stage 11); ``render`` before a
+    pending regenerate's, whichever is newer, ``has_audio`` whether a
+    synthesised file for it exists on disk at all, current text or not
+    (``voice_lines.has_audio``) -- together what EpisodeStudio's "Re-voice
+    this line" needs to read even a line the plain assets step voiced and a
+    later text edit made stale, never regenerated: plan 11 stage 11, its
+    browser-check fix round 2); ``render`` before a
     manifest (``out_of_date`` null while the render has no output; else
     whether rendering again with the same params would make another file:
     ``render.current_render``, so an ``encoder: auto`` render is always out

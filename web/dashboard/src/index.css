@@ -908,6 +908,20 @@ html, body {
   color: var(--warning);
 }
 
+/* A chip carrying a full sentence (an estimate's own refusal message, an
+   EpisodeStudio precondition) rather than a short label needs this override
+   -- .chip is nowrap by default (stage-10 lesson; the browser-check fix
+   round for plan 11 stage 11 applied it to every estimate chip that can
+   answer with one: MetadataHeader, AssetsHeader, FastTrackHeader,
+   MeasureVoices, in addition to .story-render-reuse-summary's own copy of
+   the same override above). */
+.chip-wrap {
+  display: block;
+  width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .chip-sub {
   font-family: var(--font-mono);
   font-size: 10px;
@@ -2400,6 +2414,22 @@ html, body {
   min-width: 0;
 }
 
+/* Plan 11 stage 11: a step's own stop reason, kept on screen (not just the
+   job feed) past the moment the job leaves episode.jobs. */
+.episode-studio-stopped {
+  margin: 12px 0;
+}
+
+.episode-studio-stopped .story-error {
+  margin-bottom: 8px;
+}
+
+/* Matches each Tabs label exactly (including its "✓") above the wide-layout
+   pane that has no tab bar of its own to show it in. */
+.episode-studio-pane-heading {
+  margin: 0 0 10px;
+}
+
 .episode-script-header .form-group {
   margin-bottom: 10px;
 }
@@ -2817,6 +2847,12 @@ html, body {
   margin-top: 8px;
 }
 
+/* The persisted take's note (plan 11 stage 11): plain user text, so it wraps
+   like any other form-hint rather than riding on .chip's nowrap. */
+.story-script-line-take {
+  margin: 0;
+}
+
 .episode-studio-fast-track {
   display: flex;
   flex-direction: column;
@@ -2884,6 +2920,25 @@ html, body {
   flex-wrap: wrap;
   gap: 6px;
   margin-bottom: 10px;
+}
+
+/* Plan 11 stage 11: the manifest's reuse summary ("3 of 11 shots
+   re-rendered · 8 reused", the whole-frames conversion note folded in when
+   it applies) and the "Changes since last render" dry-run's own version of
+   the same text -- a sentence, not a short pill, so it gets the same
+   nowrap -> normal override as .story-render-outdated / .story-season-
+   blocked-reason, and its own full-width line even inside a flex-wrap
+   chip row. */
+.story-render-reuse-summary {
+  display: block;
+  width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  margin: 0;
+}
+
+.story-render-changes {
+  margin: 14px 0;
 }
 
 .story-render-cover-image {

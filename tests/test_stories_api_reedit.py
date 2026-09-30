@@ -564,6 +564,87 @@ def test_a_line_regenerate_with_a_note_persists_a_take_exposed_by_the_episode_vi
     assert line["pending"] is False
 
 
+def test_a_line_voiced_by_the_plain_assets_step_then_edited_still_shows_has_audio(api, episodes):
+    """Browser-check finding (plan 11 stage 11, fix round 2): a line voiced
+    by the assets step (never regenerated, so it has no ``take``) whose
+    words are then edited answers ``voiced: false`` (assets.is_measured: the
+    text hash no longer matches) with its audio file still on disk -- the
+    common case, and exactly what stage 13's walk would hit on every edited
+    line. The dashboard needs ``has_audio`` to tell it apart from a line
+    that was never voiced at all (both otherwise look identical: ``voiced``
+    false, ``take`` null)."""
+    story_id = episode(api, episodes, "rendered")
+
+    before = next(item for item in _episode(api, story_id)["assets"]["lines"] if item["line_id"] == "l08")
+    assert before["voiced"] is True and before["take"] is None
+    assert before["has_audio"] is True  # a currently-measured line always has its audio on disk
+
+    response = _patch_script(api, story_id, 1, lines=[{"line_id": "l08", "text": tre.NEW_WORDS}])
+    assert response.status_code == 200, response.text
+
+    page = _episode(api, story_id)
+    line = next(item for item in page["assets"]["lines"] if item["line_id"] == "l08")
+    assert line["voiced"] is False and line["take"] is None  # never regenerated: no take either
+    assert line["has_audio"] is True, "the file line_08.mp3/.wav is still on disk; the edit only cleared the pointer"
+
+
+def test_a_never_voiced_line_has_no_audio(api, episodes):
+    story_id = episode(api, episodes, "planned")  # before the assets step ever ran
+
+    page = _episode(api, story_id)
+    assert page["assets"]["doc"] is None
+    for line in page["assets"]["lines"]:
+        assert line["voiced"] is False and line["take"] is None
+        assert line["has_audio"] is False, line
+
+
+def test_has_audio_is_cached_like_every_other_derived_field(api, episodes, monkeypatch):
+    """The view is memoised while nothing that feeds it moves (_derived_key,
+    stage 9); has_audio reads two paths _derived_key did not stamp before
+    (voice_lines.audio_path_candidates, independent of timing.audio) -- a
+    stray file's own appearance must still invalidate the cache."""
+    from clipping.aistory import workflow
+
+    story_id = episode(api, episodes, "rendered")
+    _patch_script(api, story_id, 1, lines=[{"line_id": "l08", "text": tre.NEW_WORDS}])
+
+    calls = {"n": 0}
+    real = workflow._derive
+
+    def counted(*args, **kwargs):
+        calls["n"] += 1
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(workflow, "_derive", counted)
+
+    first = _episode(api, story_id)
+    line = next(item for item in first["assets"]["lines"] if item["line_id"] == "l08")
+    assert line["has_audio"] is True
+    settled = calls["n"]
+
+    assert _episode(api, story_id) == first and calls["n"] == settled  # nothing moved: not derived again
+
+    # The audio file that made has_audio true disappears: the next poll must
+    # notice (the cache key must stamp the candidate paths, not only
+    # timing.audio's, which this edit already cleared).
+    from clipping.aistory import workflow as wf
+
+    ec = wf._context(api.store, story_id, 1)
+    from clipping.aistory.steps import voice_lines as voice_lines_step
+
+    removed = False
+    for path in voice_lines_step.audio_path_candidates(ec, "l08"):
+        if path and Path(path).is_file():
+            Path(path).unlink()
+            removed = True
+    assert removed, "l08's audio file was not found on disk to remove"
+
+    after = _episode(api, story_id)
+    assert calls["n"] > settled
+    line = next(item for item in after["assets"]["lines"] if item["line_id"] == "l08")
+    assert line["has_audio"] is False
+
+
 def test_a_motion_swap_through_the_api_keeps_the_image_and_only_moves_the_render_key(api, episodes):
     story_id = episode(api, episodes, "rendered")
     board_before = _board(api, story_id)

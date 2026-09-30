@@ -19,6 +19,16 @@ function fmtUsd(value) {
   return amount === 0 ? '0.00' : amount.toFixed(3)
 }
 
+// clipping.aistory.render.partial.RENDER_REUSE_REASONS / schemas.
+// RENDER_REUSE_REASONS, verbatim: one line per shot in "Changes since last
+// render" (plan 11 stage 11).
+const REUSE_REASON_LABELS = {
+  image: 'the image changed', motion: 'the camera motion changed', frames: 'the timing changed',
+  modifiers: 'the modifiers changed', overlay: 'the style overlay changed',
+  missing: 'missing from the cache', corrupt: 'the cached clip is corrupt', new: 'a new shot',
+  settings: 'the render settings changed',
+}
+
 // clipping.aistory.steps.render.SUBTITLE_CHOICES, verbatim
 // (tests/test_story_payload_contract_episode.py): "style" is the style
 // lock's own mode (the render step's default); the rest are
@@ -91,10 +101,22 @@ function RenderHeader({ storyId, ep, episode, assetsApproved, busy, onChange }) 
   const [running, setRunning] = useState(false)
   const [error, setError] = useState('')
   const [errors, setErrors] = useState(null)
+  // The render's own precondition (an outdated shot image, an unvoiced
+  // line, ...) answers the estimate with a 409 naming the shot to fix
+  // (render.require_renderable) -- shown here and the button disabled,
+  // rather than an estimate that silently never arrives (stage-10 lesson:
+  // never an endless "estimating…" for a control that cannot run).
+  const [estimateError, setEstimateError] = useState('')
+  const [estimateErrors, setEstimateErrors] = useState(null)
 
   useEffect(() => {
-    if (!assetsApproved) { setEstimate(null); return }
-    fetchStoryEstimate(storyId, 'render', { ep, subtitles }).then(setEstimate).catch(() => setEstimate(null))
+    setEstimate(null)
+    setEstimateError('')
+    setEstimateErrors(null)
+    if (!assetsApproved) return
+    fetchStoryEstimate(storyId, 'render', { ep, subtitles })
+      .then((data) => { setEstimate(data); setEstimateError(''); setEstimateErrors(null) })
+      .catch((err) => { setEstimate(null); setEstimateError(err.message); setEstimateErrors(err.errors || null) })
   }, [storyId, ep, assetsApproved, subtitles])
 
   const reason = busy ? 'A step is running.'
@@ -138,21 +160,25 @@ function RenderHeader({ storyId, ep, episode, assetsApproved, busy, onChange }) 
           type="button"
           className="btn btn-primary"
           onClick={handleRun}
-          disabled={Boolean(reason) || running}
-          title={reason || undefined}
+          disabled={Boolean(reason) || Boolean(estimateError) || running}
+          title={reason || estimateError || undefined}
         >
           {running ? <><span className="spinner"></span> Rendering…</> : hasRender ? 'Render again' : 'Render'}
         </button>
-        {estimate && (
+        {estimate && !estimateError && (
           <span className="chip" title={estimate.message || ''}>
             est. ${fmtUsd(estimate.est_usd)} · {estimate.units.shots} shot{estimate.units.shots === 1 ? '' : 's'}
             {' · ~'}{estimate.minutes} min
           </span>
         )}
-        {estimate && <RouteChip routeClass={estimate.route_class} />}
+        {estimate && !estimateError && <RouteChip routeClass={estimate.route_class} />}
       </div>
       {reason && <p className="form-hint">{reason}</p>}
-      <StepError message={error} errors={errors} className="story-step-error" />
+      <StepError
+        message={estimateError || error}
+        errors={estimateError ? estimateErrors : errors}
+        className="story-step-error"
+      />
     </div>
   )
 }
@@ -223,7 +249,20 @@ function RenderMedia({ episode, assetsApproved, onChange }) {
           {' '}· LRA {loudness.lra != null ? loudness.lra.toFixed(1) : '—'}
         </span>
         <span className="chip">{render.seconds != null ? `${render.seconds.toFixed(0)} s to render` : '—'}</span>
-        <span className="chip">{stages.shots_cached || 0}/{stages.shots || 0} shots cached</span>
+        {render.reuse ? (
+          // The manifest's own reuse record (plan 11 stage 11, replacing the
+          // "N/M shots cached" chip): "3 of 11 shots re-rendered", with the
+          // whole-frames conversion note folded in already
+          // (render.reuse_view/partial.summary) when a board converted.
+          // Null for a render with no baseline to compare against (the
+          // episode's very first render) -- the old cached-count chip still
+          // answers that case below.
+          <p className="chip chip-accent story-render-reuse-summary">
+            {render.reuse.summary} · {render.reuse.shots_reused.length} reused
+          </p>
+        ) : (
+          <span className="chip">{stages.shots_cached || 0}/{stages.shots || 0} shots cached</span>
+        )}
         <span className="chip">{stages.ran || 0} ran · {stages.cached || 0} cached of {stages.total || 0} stages</span>
       </div>
       {render.warnings && render.warnings.length > 0 && (
@@ -238,6 +277,81 @@ function RenderMedia({ episode, assetsApproved, onChange }) {
   )
 }
 
+// ------------------------------------------------------- changes / re-render
+
+/**
+ * "Changes since last render" (plan 11 stage 9's dry-run block, exposed as
+ * `episode.render.changes` -- no separate estimate fetch: the episode page
+ * already carries it, cached against the last-good manifest and the cache
+ * folder's own stats, so reading it here costs nothing new). A shot-by-shot
+ * reason list and a Re-render button with its own count, or -- the episode
+ * cannot be rendered right now (an outdated shot's image, the same sentence
+ * `render.require_renderable` gives the route and the estimate) -- that
+ * sentence instead of a button certain to 409 (stage-10 lesson). Renders
+ * nothing before the episode has a finished render to compare against
+ * (`changes` is null then: no "Changes since last render" before a first
+ * render).
+ */
+function ChangesSinceRender({ storyId, ep, episode, busy, onChange }) {
+  const [running, setRunning] = useState(false)
+  const [error, setError] = useState('')
+  const [errors, setErrors] = useState(null)
+
+  const changes = episode.render && episode.render.changes
+
+  if (!changes) return null
+
+  const handleRerender = async () => {
+    setRunning(true)
+    setError('')
+    setErrors(null)
+    try {
+      await runStoryStep(storyId, 'rerender', { ep })
+      onChange()
+    } catch (err) {
+      setError(err.message)
+      setErrors(err.errors || null)
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  return (
+    <div className="card story-render-changes">
+      <h4 className="card-title">Changes since last render</h4>
+      {changes.blocked ? (
+        <p className="form-hint">{changes.blocked}</p>
+      ) : changes.current ? (
+        <p className="form-hint">Nothing changed since the last render: re-rendering would repeat it.</p>
+      ) : (
+        <>
+          <ul className="story-field-list">
+            {changes.rebuild.map((shotId) => (
+              <li key={shotId}>
+                {shotId}: {REUSE_REASON_LABELS[changes.reasons[shotId]] || changes.reasons[shotId]}
+              </li>
+            ))}
+          </ul>
+          <div className="story-step-actions">
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={handleRerender}
+              disabled={busy || running}
+            >
+              {running ? <><span className="spinner"></span> Re-rendering…</> : 'Re-render'}
+            </button>
+            <p className="chip chip-accent story-render-reuse-summary">
+              {changes.summary} · {changes.reuse.length} reused
+            </p>
+          </div>
+        </>
+      )}
+      <StepError message={error} errors={errors} className="story-step-error" />
+    </div>
+  )
+}
+
 // -------------------------------------------------------------- metadata
 
 function MetadataHeader({ storyId, ep, episode, renderReady, busy, onChange }) {
@@ -246,10 +360,23 @@ function MetadataHeader({ storyId, ep, episode, renderReady, busy, onChange }) {
   const [running, setRunning] = useState(false)
   const [error, setError] = useState('')
   const [errors, setErrors] = useState(null)
+  // The metadata step's own precondition (an approved script, a finished
+  // render: metadata.require_render) answers a 409 naming what to do first
+  // once a render exists but the script's approval cleared under it (a
+  // text-only edit, stage 7) -- renderReady stays true (the old render.output
+  // is still there), so the fetch still runs and must not swallow the
+  // refusal: EstimateChip renders "estimating…" forever for a null estimate,
+  // whatever the reason it stayed null (browser-check finding, stage-10
+  // lesson applied here too).
+  const [estimateError, setEstimateError] = useState('')
 
   useEffect(() => {
-    if (!renderReady) { setEstimate(null); return }
-    fetchStoryEstimate(storyId, 'metadata', { ep }).then(setEstimate).catch(() => setEstimate(null))
+    setEstimate(null)
+    setEstimateError('')
+    if (!renderReady) return
+    fetchStoryEstimate(storyId, 'metadata', { ep })
+      .then((data) => { setEstimate(data); setEstimateError('') })
+      .catch((err) => { setEstimate(null); setEstimateError(err.message) })
   }, [storyId, ep, renderReady])
 
   const reason = busy ? 'A step is running.' : !renderReady ? 'Render the episode first.' : null
@@ -278,12 +405,16 @@ function MetadataHeader({ storyId, ep, episode, renderReady, busy, onChange }) {
           type="button"
           className="btn btn-primary"
           onClick={handleRun}
-          disabled={Boolean(reason) || running}
-          title={reason || undefined}
+          disabled={Boolean(reason) || Boolean(estimateError) || running}
+          title={reason || estimateError || undefined}
         >
           {running ? <><span className="spinner"></span> Writing…</> : hasMetadata ? 'Write remaining metadata' : 'Write metadata'}
         </button>
-        <EstimateChip estimate={estimate} />
+        {estimateError ? (
+          <span className="chip chip-warn chip-wrap">{estimateError}</span>
+        ) : (
+          <EstimateChip estimate={estimate} />
+        )}
       </div>
       {reason && <p className="form-hint">{reason}</p>}
       <StepError message={error} errors={errors} className="story-step-error" />
@@ -422,6 +553,7 @@ export default function PreviewPane({ episode, storyId, ep, story, inFlightJob, 
     <div className="story-step-body">
       <RenderHeader storyId={storyId} ep={ep} episode={episode} assetsApproved={assetsApproved} busy={busy} onChange={onChange} />
       <RenderMedia episode={episode} assetsApproved={assetsApproved} onChange={onChange} />
+      <ChangesSinceRender storyId={storyId} ep={ep} episode={episode} busy={busy} onChange={onChange} />
 
       <MetadataHeader storyId={storyId} ep={ep} episode={episode} renderReady={renderReady} busy={busy} onChange={onChange} />
       {frenchStory && !metadataPlatforms && renderReady && (

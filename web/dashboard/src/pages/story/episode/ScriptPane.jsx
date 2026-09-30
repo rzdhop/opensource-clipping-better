@@ -278,11 +278,33 @@ function LineRow({ storyId, ep, line, assetLine, unvoicedReason, sceneCharacters
       {assetLine && (
         <div className="story-script-line-asset">
           {wordsLabel && <span className="chip" title={wordsSource}>{wordsLabel}</span>}
+          {assetLine.take && (
+            // Stage 7's persisted take and its note (a pending regenerate's,
+            // else the take's own -- assetLine.note already resolves that),
+            // so a re-voice with a style note stays visible after it lands
+            // instead of only flashing by in the job feed (plan 11 stage 11).
+            <p className="form-hint story-script-line-take">
+              {assetLine.pending ? 'Re-voicing' : 'Current take'}
+              {assetLine.note ? ` — note: "${assetLine.note}"` : ' — no note.'}
+            </p>
+          )}
           <RegenerateControl
             disabled={busy}
             onRegenerate={regenerateVoice}
-            empty={!assetLine.voiced}
+            // assetLine.voiced (assets.is_measured) reads false both for a
+            // line that never had audio and one edited since its last
+            // measurement (a text-only edit resets its own timing to a
+            // fresh estimate, audio: null); assetLine.take only exists once
+            // a *regenerate* has run, so it misses the common case of a
+            // line the plain assets step voiced and a later edit staled
+            // (browser-check round 2: l12 had real audio on disk, voiced
+            // false, take null, and still read "Make voice"). assetLine.
+            // has_audio (workflow._assets_view, voice_lines.has_audio)
+            // answers that directly: a synthesised file on disk for this
+            // line at all, current text or not.
+            empty={!assetLine.voiced && !assetLine.take && !assetLine.has_audio}
             label="voice"
+            actionLabel="Re-voice this line"
           />
           {unvoicedReason && (
             <p className="form-hint">
@@ -434,6 +456,10 @@ function MeasureVoices({ storyId, ep, scriptComplete, checkNeeded, busy, onChang
   const [running, setRunning] = useState(false)
   const [error, setError] = useState('')
   const [errors, setErrors] = useState(null)
+  // As RenderHeader/MetadataHeader (stage-10 lesson, browser-check finding):
+  // never swallow a 409 to an endlessly-null estimate -- show its sentence
+  // and disable the button.
+  const [estimateError, setEstimateError] = useState('')
 
   // Measuring is a script-step call (params.measure_voices): the runner
   // writes whatever the step is still missing -- including a stale or
@@ -448,8 +474,12 @@ function MeasureVoices({ storyId, ep, scriptComplete, checkNeeded, busy, onChang
   const ready = scriptComplete && !checkNeeded
 
   useEffect(() => {
-    if (!ready) { setEstimate(null); return }
-    fetchStoryEstimate(storyId, 'script', { ep, measure: true }).then(setEstimate).catch(() => setEstimate(null))
+    setEstimate(null)
+    setEstimateError('')
+    if (!ready) return
+    fetchStoryEstimate(storyId, 'script', { ep, measure: true })
+      .then((data) => { setEstimate(data); setEstimateError('') })
+      .catch((err) => { setEstimate(null); setEstimateError(err.message) })
   }, [storyId, ep, ready])
 
   const handleMeasure = async () => {
@@ -478,11 +508,13 @@ function MeasureVoices({ storyId, ep, scriptComplete, checkNeeded, busy, onChang
           type="button"
           className="btn btn-secondary"
           onClick={handleMeasure}
-          disabled={!ready || busy || running}
+          disabled={!ready || busy || running || Boolean(estimateError)}
         >
           {running ? <><span className="spinner"></span> Measuring…</> : 'Measure with real voices'}
         </button>
-        {block && (
+        {estimateError ? (
+          <span className="chip chip-warn chip-wrap">{estimateError}</span>
+        ) : block && (
           <span className="chip" title={block.ready ? '' : 'Some lines have no pinned voice'}>
             {block.lines} line{block.lines === 1 ? '' : 's'} · {block.chars} char{block.chars === 1 ? '' : 's'} · est. ${fmtUsd(block.est_usd)}
           </span>

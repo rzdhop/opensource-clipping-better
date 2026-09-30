@@ -1,10 +1,11 @@
-## CURRENT STATE — AI Story **phase 5 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–10 **done**; next: **stage 11**
+## CURRENT STATE — AI Story **phase 5 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–11 **done**; next: **stage 12**
 - **In-progress header** (keep current):
   - **Current phase:** IMPLEMENT (phases 0–3 done: the plan was mapped, clarified and approved 2026-09-29).
-  - **Current stage:** 10 done → next **stage 11** (dashboard: EpisodeStudio re-edit) [Sonnet agent], then my
-    browser check at 375/820/1280 on the scratch copy (`phase5-throwaway` :8015 + `phase5-dashboard` :5177 in the
-    local `.claude/launch.json`; the FR copy lives in the worktree's own `outputs/stories/`, never the live one).
-  - **Next action:** spawn the stage-11 agent.
+  - **Current stage:** 11 done → next **stage 12** (fonts — the human chose "All 5 as named" — and per-style
+    renderer gaps) [Sonnet agent].
+  - **Next action:** spawn the stage-12 agent (brief in the session scratchpad: the approved download table with
+    byte sizes and git blobs). The scratch servers (`phase5-throwaway` :8015, `phase5-dashboard` :5177) may still
+    run on the worktree's own FR copy (edited: l12 text, sh06 motion, sh08 framing) — throwaway data.
   - **Open questions:** none blocking. **Stage 12 fonts answered 2026-09-30: "All 5 as named"** — from
     github.com/google/fonts `main`, checked against the repo's git blob SHA: `ofl/bangers/Bangers-Regular.ttf`
     93,148 B (blob 9b0f8c1f…), `apache/luckiestguy/LuckiestGuy-Regular.ttf` 73,320 B (5ca663c2…),
@@ -182,8 +183,8 @@ RC-P1…P11, RC-S1…S4, RC-T1…T3, RC-E1…E5 and RC-A1…A9 (tables below) st
 | 8 | partial re-render (**RISKIEST**) [Opus] | **done** (local 6241/1, CI 5483/728; 55 new tests; partial == full under real ffmpeg; golden + framemd5 unedited; later-phase pins moved to `import`) |
 | 9 | re-edit API and CLI [Sonnet] | **done** (local 6278/1, CI 5497/751; 37 new tests, 23 API ones skip in CI; 1 named re-pin) |
 | 10 | dashboard: SeasonBoard series panel [Sonnet] | **done** (local 6315/1, CI 5534/751 incl. the sign-out fix; 34 new contract tests; browser check 375/820/1280: 4 findings fixed in 1 round) |
-| 11 | dashboard: EpisodeStudio re-edit [Sonnet] | next |
-| 12 | fonts (confirm with the human first) and per-style renderer gaps [Sonnet] | — |
+| 11 | dashboard: EpisodeStudio re-edit [Sonnet] | **done** (local 6347/1, CI 5563/754; 32 new tests; browser check 375/820/1280: 2 findings, fixed in 2 rounds) |
+| 12 | fonts (confirmed: all 5 as named) and per-style renderer gaps [Sonnet] | next |
 | 13 | merge, deploy, Tier-2 series walk (me at 375 px; the human watches ep 2) | — |
 | 14 | Tier-2 per style (5 short episodes, free route; the human watches one) | — |
 | 14b(e) | re-edit + partial re-render on paid assets (estimate + the human's go first) | — |

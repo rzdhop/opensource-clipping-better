@@ -181,8 +181,11 @@ export function EditableList({ label, value, onSave, exactLines, disabled, hint 
  * there is nothing to iterate on, so the control reads "Make <label>"
  * instead and skips the note input; the target and the estimate chip stay
  * the same either way, so a first make and a later regenerate cost the same.
+ * `actionLabel` overrides the non-empty button's default "↻ Regenerate" text
+ * (e.g. ScriptPane.jsx's "Re-voice this line", plan 11 stage 11) -- every
+ * other caller keeps the generic wording.
  */
-export function RegenerateControl({ onRegenerate, disabled, estimateChip, empty, label }) {
+export function RegenerateControl({ onRegenerate, disabled, estimateChip, empty, label, actionLabel }) {
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -231,7 +234,7 @@ export function RegenerateControl({ onRegenerate, disabled, estimateChip, empty,
         disabled={disabled || busy}
       />
       <button type="button" className="btn btn-secondary btn-sm" onClick={() => run(note.trim() || null)} disabled={disabled || busy}>
-        {busy ? 'Regenerating…' : '↻ Regenerate'}
+        {busy ? 'Regenerating…' : (actionLabel || '↻ Regenerate')}
       </button>
       {estimateChip}
       <StepError message={error} errors={errors} />

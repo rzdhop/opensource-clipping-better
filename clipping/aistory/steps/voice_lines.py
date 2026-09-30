@@ -124,6 +124,41 @@ def is_measured(ec, line) -> bool:
             and label is not None and current.get("voice") == label and _audio_kept(ec, current.get("audio")))
 
 
+# The extensions a synthesis has ever been kept under (module docstring:
+# "assets/voice/line_NN.mp3|.wav").
+_AUDIO_EXTS = ("mp3", "wav")
+
+
+def audio_path_candidates(ec, line_id) -> list:
+    """The real paths line *line_id*'s audio could be at (``line_NN.mp3``,
+    ``line_NN.wav``), whether or not either exists yet -- unlike
+    :func:`_audio_kept`, not keyed to the script's own current ``timing.
+    audio`` pointer, which a text edit clears (``timing.estimated_timing``)
+    while the file made for the words it replaced is kept on disk (``workflow.
+    patch_script``'s own docstring). ``None`` where the store refuses a path
+    (an unknown episode) in place of that extension's entry."""
+    paths = []
+    for ext in _AUDIO_EXTS:
+        try:
+            paths.append(ec.store.episode_asset_path(ec.story_id, ec.ep, "voice", asset_name(line_id, ext)))
+        except KeyError:
+            paths.append(None)
+    return paths
+
+
+def has_audio(ec, line_id) -> bool:
+    """Whether line *line_id* has a synthesised audio file on disk at
+    either extension, current text or not -- the common case of a line the
+    plain assets step voiced and a later text edit then made stale, which
+    never gets a ``take`` (that is only recorded by a ``line:`` regenerate):
+    without this, EpisodeStudio's "Re-voice this line" has nothing left to
+    tell it apart from a line that was never voiced at all (plan 11 stage
+    11, browser-check fix round 2). One stat per candidate extension, no
+    symlink followed (``os.path.isfile``, as :func:`_audio_kept` reads the
+    same folder)."""
+    return any(path is not None and os.path.isfile(path) for path in audio_path_candidates(ec, line_id))
+
+
 def lines_to_measure(ec, script) -> list:
     """Every line of *script* the measurement would synthesise, in reading order."""
     return [line for scene in script["scenes"] for line in scene["lines"] if not is_measured(ec, line)]

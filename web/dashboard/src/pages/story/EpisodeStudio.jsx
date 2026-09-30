@@ -15,11 +15,7 @@ function fmtUsd(value) {
   return amount === 0 ? '0.00' : amount.toFixed(3)
 }
 
-const TABS = [
-  { id: 'script', label: 'Script' },
-  { id: 'storyboard', label: 'Storyboard' },
-  { id: 'preview', label: 'Preview' },
-]
+const TAB_IDS = ['script', 'storyboard', 'preview']
 
 const IN_FLIGHT = ['queued', 'running']
 const EPISODE_POLL_MS = 4000
@@ -28,7 +24,25 @@ const WIDE_BREAKPOINT = 1100
 function tabFromHash() {
   if (typeof window === 'undefined') return 'script'
   const id = window.location.hash.slice(1)
-  return TABS.some((tab) => tab.id === id) ? id : 'script'
+  return TAB_IDS.includes(id) ? id : 'script'
+}
+
+/**
+ * Script/Storyboard/Preview, each labelled with its own approval. Phase 5
+ * stage 7 let script and storyboard approval diverge (a text-only edit clears
+ * the script's while keeping the storyboard's, "storyboard approved, script
+ * not approved"), so a single combined "approved" reading of the episode
+ * would misstate one pane or the other; each tab shows only its own
+ * document's state -- never a contradictory badge (plan 11 stage 11).
+ */
+function tabsFor(episode) {
+  const scriptApproved = Boolean(episode.script && episode.script.approved_at)
+  const storyboardApproved = Boolean(episode.storyboard && episode.storyboard.approved_at)
+  return [
+    { id: 'script', label: `Script${scriptApproved ? ' ✓' : ''}` },
+    { id: 'storyboard', label: `Storyboard${storyboardApproved ? ' ✓' : ''}` },
+    { id: 'preview', label: 'Preview' },
+  ]
 }
 
 /** Three panes side by side at >=1100px; Tabs below that -- tracked with
@@ -61,9 +75,18 @@ function FastTrackHeader({ storyId, ep, busy, onChange }) {
   const [running, setRunning] = useState(false)
   const [error, setError] = useState('')
   const [errors, setErrors] = useState(null)
+  // As every other estimate-driven header (stage-10 lesson, browser-check
+  // finding): a 409 must show its own sentence, not leave the button
+  // disabled with nothing said about why (fast_track.estimate does refuse a
+  // document that fails to validate, StepFailed -> conflict).
+  const [estimateError, setEstimateError] = useState('')
 
   useEffect(() => {
-    fetchStoryEstimate(storyId, 'fast-track', { ep, storyboard: 't1' }).then(setEstimate).catch(() => setEstimate(null))
+    setEstimate(null)
+    setEstimateError('')
+    fetchStoryEstimate(storyId, 'fast-track', { ep, storyboard: 't1' })
+      .then((data) => { setEstimate(data); setEstimateError('') })
+      .catch((err) => { setEstimate(null); setEstimateError(err.message) })
   }, [storyId, ep])
 
   const confirmMessage = (est) => [
@@ -102,11 +125,13 @@ function FastTrackHeader({ storyId, ep, busy, onChange }) {
           type="button"
           className="btn btn-secondary"
           onClick={handleRun}
-          disabled={busy || running || !estimate}
+          disabled={busy || running || !estimate || Boolean(estimateError)}
         >
           {running ? <><span className="spinner"></span> Fast tracking…</> : 'Fast track'}
         </button>
-        {estimate && (
+        {estimateError ? (
+          <span className="chip chip-warn chip-wrap">{estimateError}</span>
+        ) : estimate && (
           <span className="chip" title={estimate.message || ''}>est. ${fmtUsd(estimate.est_usd)} total</span>
         )}
       </div>
@@ -124,6 +149,14 @@ export default function EpisodeStudio() {
   const [loadError, setLoadError] = useState('')
   const [tab, setTab] = useState(tabFromHash)
   const wide = useIsWide(WIDE_BREAKPOINT)
+  // The last job that stopped with a reason worth reading, kept on screen
+  // past the moment it leaves episode.jobs (phase-4 follow-up, plan 11 stage
+  // 11): episode.jobs lists only queued/running work, so a fast-track (or
+  // any step) that fails clears inFlightJob the instant the page refreshes
+  // -- which used to erase its own reason from the screen at the same
+  // moment, leaving only the job's own (by then unreachable) feed to have
+  // ever shown it.
+  const [stoppedJob, setStoppedJob] = useState(null)
 
   const refresh = useCallback(async () => {
     try {
@@ -159,8 +192,19 @@ export default function EpisodeStudio() {
     return () => clearInterval(timer)
   }, [inFlightJob, refresh])
 
-  const { job: liveJob, events, streamState } = useJobFeed(inFlightJob ? inFlightJob.id : null, {
+  // A new job starting (a fresh id in episode.jobs) means whatever the
+  // previous one stopped with is no longer this page's news.
+  const inFlightJobId = inFlightJob ? inFlightJob.id : null
+  useEffect(() => {
+    if (inFlightJobId) setStoppedJob(null)
+  }, [inFlightJobId])
+
+  const { job: liveJob, events, streamState } = useJobFeed(inFlightJobId, {
     onJob: (job) => {
+      // Captured before the refresh below can drop it from episode.jobs and
+      // null out inFlightJob -- the same render that hides the live feed
+      // must not also erase the one sentence that explains why it stopped.
+      if (job && job.status === 'failed' && job.error) setStoppedJob(job)
       if (job && job.status !== 'queued' && job.status !== 'running') refresh()
     },
   })
@@ -174,6 +218,7 @@ export default function EpisodeStudio() {
   if (!story || !episode) return null
 
   const arcEntry = ((story.season && story.season.arc) || []).find((entry) => entry.ep === epNumber)
+  const tabs = tabsFor(episode)
 
   const panes = {
     script: (
@@ -224,21 +269,40 @@ export default function EpisodeStudio() {
         <FastTrackHeader storyId={storyId} ep={epNumber} busy={Boolean(inFlightJob)} onChange={refresh} />
       </div>
 
-      {inFlightJob && liveJob && (
+      {inFlightJob && liveJob ? (
         liveJob.status === 'queued'
           ? <p className="form-hint">queued — waiting for the worker</p>
           : <LiveActivity job={liveJob} events={events} streamState={streamState} />
+      ) : stoppedJob && (
+        // The stop reason, visible on this first screen without scrolling
+        // (phase-4 follow-up, plan 11 stage 11) -- kept until a new step
+        // starts (the effect above) or the human dismisses it.
+        <div className="card episode-studio-stopped">
+          <StepError message={`${stoppedJob.step || 'The step'} stopped: ${stoppedJob.error}`} />
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setStoppedJob(null)}>
+            Dismiss
+          </button>
+        </div>
       )}
 
       {wide ? (
         <div className="episode-studio-panes">
-          <div className="episode-studio-pane">{panes.script}</div>
-          <div className="episode-studio-pane">{panes.storyboard}</div>
-          <div className="episode-studio-pane">{panes.preview}</div>
+          <div className="episode-studio-pane">
+            <h3 className="card-title episode-studio-pane-heading">{tabs[0].label}</h3>
+            {panes.script}
+          </div>
+          <div className="episode-studio-pane">
+            <h3 className="card-title episode-studio-pane-heading">{tabs[1].label}</h3>
+            {panes.storyboard}
+          </div>
+          <div className="episode-studio-pane">
+            <h3 className="card-title episode-studio-pane-heading">{tabs[2].label}</h3>
+            {panes.preview}
+          </div>
         </div>
       ) : (
         <div className="episode-studio-tabs">
-          <Tabs tabs={TABS} active={tab} onChange={onTabChange}>
+          <Tabs tabs={tabs} active={tab} onChange={onTabChange}>
             {(id) => panes[id]}
           </Tabs>
         </div>
