@@ -1,11 +1,10 @@
 ## CURRENT STATE — AI Story **phase 5 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–12 **done**; next: **stage 13** (merge, deploy, live series walk)
 - **In-progress header** (keep current):
   - **Current phase:** IMPLEMENT (phases 0–3 done: the plan was mapped, clarified and approved 2026-09-29).
-  - **Current stage:** 12 done → next **stage 13**: ff `main` to the branch, deploy at 0 jobs (dashboard changed:
-    `rm -sfv` + `up -d --build`), then the live walk on FR `b1104ec66b05` per the runbook (session scratchpad
-    `stage13-runbook.md`): memory → feedback → propose-next → ep 2 → re-edit + rerender → ep 1 unchanged →
-    overflow → $0 ledger → free-link bench; the human watches ep 2 on the phone.
-  - **Next action:** pre-flight (0 jobs, `allow_paid` off, spend/ledger recorded), then merge + deploy.
+  - **Current stage:** 13 — the live walk (a)–(h) and the bench are done; waiting for the human to watch ep 2 on
+    the phone and acknowledge; then stage 14 (one episode per remaining style).
+  - **Next action:** the human's ack of ep 2 (tailnet `http://100.112.96.111:8000/story/b1104ec66b05/episodes/2`),
+    and their answer on F4 (pace the cast step now or follow-up).
   - **Open questions:** none blocking. **Stage 12 fonts answered 2026-09-30: "All 5 as named"** — from
     github.com/google/fonts `main`, checked against the repo's git blob SHA: `ofl/bangers/Bangers-Regular.ttf`
     93,148 B (blob 9b0f8c1f…), `apache/luckiestguy/LuckiestGuy-Regular.ttf` 73,320 B (5ca663c2…),
@@ -152,27 +151,42 @@
   (since `c53949b`) and set the app to signed out, which renders `Login` — so on the live open app at ≥ 768 px one
   click showed the sign-in screen the human ruled out (hidden on the phone: the sidebar is desktop-only). Now it
   renders only while a token is stored, and signing out re-checks the server (an open server answers "in").
-- **Stage 13 live walk (in progress, 2026-09-30):** `main` ff to `1af310a`, deployed at 0 jobs (`rm -sfv` + `up -d
-  --build`; health 200, OPEN banner, `API_TOKEN` empty, new bundle `index-Cr1fobVv.js`); fix T2-P5-F3 `64ed69e`
-  ff-merged + `restart backend` at 0 jobs.
-  - (a) memory ep 1 via the UI: S3 gemini free 4 s (openrouter paid skipped), 29-word FR recap, both arc hooks
-    verbatim, 2 sorted deltas, script_rev 2 → approved (job f324809a4414).
-  - (b) 6 fake FR comments (295 UI / 294 server: T2-P5-F2) → F1 1 s: 36-word digest + 3 directions → direction 1.
-  - (c) propose-next failed before any call: N1 1,536 > 1,200 (T2-P5-F3) → fixed `64ed69e` (INPUT_BUDGET N1 3740,
-    hooks capped at 4) → N1 3 s: guest "Ananass" + twist for ep 2. Twist accepted: arc ep 2 summary/hooks replaced,
-    old text in `history` (source proposal), season approval 2026-09-26 kept, story ready. Character accepted
-    (guest) → cast path: K1 + voice ok; portrait/turnaround/expressions each needed a "Continue cast" ≥ 1 min apart
-    (pollinations 402; T2-P5-F4: the cast step does not pace like DEC-168's assets step; 6 cast jobs) → approved;
-    `introduced.ep02 = [char_ananass]`. Approve proposals:2 → job completed (the button stays: T2-P5-F5).
-  - (d) ep 2 script (68 s, 11 scenes, recap s00 "L'alliance a volé en éclats.", E1 pays_off on s01+s02, pre-check
-    passed); E4 flagged hook_payoff ×2 → 2 regenerate rounds with notes + a text-only `pays_off` edit clearing s01
-    (stage 7's path, storyboard untouched) → pre-check passed on s02, E4 still flagged the payoff (T2-P5-F6: E4
-    flash-lite judgement variance, like A-057) → approved anyway via the UI checkbox. Fast track (storyboard T1 →
-    assets → render → metadata) started 10:30 UTC.
-  - Findings so far: F1 the wizard collapses the Season step after a series job; F2 UTF-16 vs code-point count; F3
-    fixed; F4 cast step unpaced (pre-existing, follow-up); F5 "Approve proposals" stays after approval; F6 E4 payoff
-    variance; also pollinations draws a human with pineapple hair (pre-existing A-058 family), and the Cast step's
-    Turnaround/Expressions chips sit on "estimating…" beside "Make the portrait first" (pre-existing, F1 class).
+- **Stage 13 live walk (2026-09-30) — (a)–(h) + bench DONE; waiting for the human's phone watch of ep 2.**
+  Deployed `1af310a` (`rm -sfv` + `up -d --build`), then fixes ff-merged + `restart backend` at 0 jobs: T2-P5-F3
+  `64ed69e`, F7 `7b9cc92`, F9 `10acc3d`. Live `main` = `10acc3d` + checkpoint commits.
+  - (a) memory ep 1 (S3 gemini free 4 s; 29-word FR recap; both arc hooks; 2 sorted deltas; rev 2) → approved.
+  - (b) 6 fake FR comments → F1 1 s: 36-word digest + 3 directions → direction 1 chosen.
+  - (c) N1 (after F3: 3 s): guest "Ananass" + a twist for ep 2. Twist accepted: arc ep 2 replaced, old text in
+    `history` (source proposal), season approval kept, story ready. Character accepted (guest): K1 + voice at once;
+    portrait/turnaround/expressions over 6 cast presses ≥ 1 min apart (F4) → approved; `introduced.ep02`.
+    `approve proposals:2` → propose-next job completed.
+  - (d) ep 2 script: 68 s, 11 scenes, recap s00, E1 pays_off s01+s02, pre-check passed; E4 hook_payoff × 2 →
+    2 regenerate rounds + a text-only pays_off edit (s01 cleared) → still flagged (F6) → approved anyway (UI
+    checkbox). Fast track T1 → assets → render → metadata: 5 automatic Continues over ~40 min (pollinations
+    402/500; T2-F11), 23/23 images, 19/19 lines, board `whole_frames: true`, render 57.3 s, −14.2 LUFS, TP −2.1,
+    metadata pack + cover; final `cd186d65…`.
+  - (e) text-only edits l12 (Mangella/Gemini) + l17 (Kiwilo/Edge): script approval cleared, **storyboard approval
+    kept**, s03/s04 `retime_only` → E4 again (F6 → approve anyway) → re-voice l12 with a note: **Gemini spoke the
+    note (8.05 s; Whisper transcript) → F9 fixed `10acc3d` → re-voiced 3.89 s, transcript = the line only**; l17
+    2.01 s (Edge) → sh14 regenerated with a note (fresh seed) → assets approved → dry run **"3 of 23 shots
+    re-rendered" (sh08 frames, sh11 frames, sh14 image)** → Re-render from the UI → manifest `shots_rebuilt =
+    [sh08, sh11, sh14]`, same reasons, 20 reused, only S:sh08/S:sh11/S:sh14 + A…M ran, 2 min 7 s (full 2 min 49 s);
+    58.5 s; final `1552d925…`.
+  - (f) ep 1 rendered again with no edits (word_pop, unflagged old board): **byte-identical `53cb3bcc…`**, 21/21
+    shots from the cache (RC-M3 live).
+  - (g) no overflow at 375/820/1280 on the story page (series panel) and EpisodeStudio ep 2; no Sign in/out.
+  - (h) `data/spend.json` byte-unchanged (`adccaa84…`); ep 2's 45 new ledger rows (edge, gemini, pollinations) all
+    $0, 0 paid; `allow_paid` false.
+  - Bench (free chain, scratch copy, the steps' own code): S3 3/3, F1 3/3, N1 3/3, E1-ep2 3/3 first-try valid on
+    gemini flash-lite (S3 1.3 s, F1 1.0–2.4 s, N1 1.5–1.8 s, E1 4.1–4.6 s); E1 put pays_off on the hook scene in
+    every run → F7.
+  - Findings: F3/F7/F9 fixed (above). Open, minor: F1 the wizard collapses the Season step after a series job;
+    F2 the paste counter counts UTF-16 units (295) vs the server's code points (294); F4 the cast step does not
+    pace pollinations (pre-existing; the human asked whether to fix — pending); F5 "Approve proposals" stays after
+    the approval; F6 E4 (flash-lite) keeps judging a present payoff as missing; F8 "Re-voice this line" enabled
+    while the script is unapproved (the server refuses with a clear sentence, nothing spent). Pre-existing, noted:
+    pollinations draws humans with fruit hair (A-058 family), the Cast step's Turnaround/Expressions chips sit on
+    "estimating…", an E-prompt echo (l37 = l40 "Parle, je t'écoute.").
 - **Rollback:** code: delete the worktree and the branch (or revert a stage's commit). Live data: restore the
   tars (`tar -C outputs/stories -xzf …`) and check `sha256sum -c enfr-before.sha`.
 
