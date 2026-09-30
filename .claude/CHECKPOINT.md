@@ -3,8 +3,11 @@
   - **Current phase:** IMPLEMENT (phases 0–3 done: the plan was mapped, clarified and approved 2026-09-29).
   - **Current stage:** 13 — the live walk (a)–(h) and the bench are done; waiting for the human to watch ep 2 on
     the phone and acknowledge; then stage 14 (one episode per remaining style).
-  - **Next action:** the human's ack of ep 2 (tailnet `http://100.112.96.111:8000/story/b1104ec66b05/episodes/2`),
-    and their answer on F4 (pace the cast step now or follow-up).
+  - **Next action (a new session):** the human starts it with the close prompt saved in
+    `.claude/plans/ai-story/12-phase-5-close-prompt.md` (stage 13b polish incl. F4 → deploy → stage 14 five styles
+    unattended → 14b(e) capped at $0.10 → stage 15 docs/decisions → push + close). Its three decision lines (ep 2
+    acknowledged, fix F4 now, the capped 14b(e) go) count only when the human sends them in that session.
+    Ep 2 to watch: tailnet `http://100.112.96.111:8000/story/b1104ec66b05/episodes/2`.
   - **Open questions:** none blocking. **Stage 12 fonts answered 2026-09-30: "All 5 as named"** — from
     github.com/google/fonts `main`, checked against the repo's git blob SHA: `ofl/bangers/Bangers-Regular.ttf`
     93,148 B (blob 9b0f8c1f…), `apache/luckiestguy/LuckiestGuy-Regular.ttf` 73,320 B (5ca663c2…),
