@@ -114,6 +114,10 @@
     (a)–(d) ran in the paid fal.ai test (DEC-174).
   - Stage 12: confirm the font filenames, sources and sizes with the human **before any download**.
   - Live walks (stages 13–14) at 375 px; the human watches episode 2 and one new-style episode on the phone.
+- **Test scope (the human, 2026-09-30, close session):** "Some test will happen via the usage of the app, do not
+  test every possible outcome, only the essential one" → one fail-first test per fix + the guard of the working
+  path; live checks walk the main path only; agents are told "essential tests only". Tier-1 and fail-first stay.
+  To record as a DEC in stage 15 (durable override).
 - **Standing rules (the human, 2026-09-29):**
   - **No auth on the app, ever.** Never set `API_TOKEN` on this VPS; never show a sign-in screen, not even from a
     scratch server. The token-on path is proven by tests or curl only.
