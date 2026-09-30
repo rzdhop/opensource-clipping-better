@@ -116,10 +116,10 @@ from clipping.aistory import uploads as uploads_mod
 from clipping.aistory.steps import bible as bible_step
 from clipping.aistory.steps import concepts as concepts_step
 from clipping.aistory.steps import entities as entities_step
-from clipping.aistory.steps import llm_call
+from clipping.aistory.steps import llm_call, llm_spend
 from clipping.aistory.steps import regenerate as regenerate_step
 from clipping.aistory.steps import style_preview as preview_step
-from clipping.providers import registry
+from clipping.providers import pricing, registry
 
 from .. import store, worker
 from ..auth import require_token, story_media_url
@@ -1511,15 +1511,19 @@ def _llm_calls(step, target):
     return 1
 
 
-def _estimate_message(rows, calls, refusal, *, label=None) -> str:
+def _estimate_message(rows, calls, refusal, *, label=None, per_call=None) -> str:
     if refusal:
         return refusal
     usable = [row for row in rows if row["keyed"] and "skipped" not in row]
     first = usable[0]
     calls_text = f"{label or calls} LLM call{'s' if label or calls != 1 else ''}"
-    note = "There is no LLM price table, so est_usd stays 0.0."
+    note = "est_usd counts the first link only, so it stays 0.0."
     if not first["free"]:
-        return f"{calls_text} on {first['link']}, which is billed. {note}"
+        if per_call is None:
+            return (f"{calls_text} on {first['link']}, which is billed and has no price in the LLM price "
+                    "table: the step refuses it before any call.")
+        return (f"{calls_text} on {first['link']}, which is billed: est_usd is the worst case, "
+                f"${per_call:.4f} a call (the widest prompt and reply cap at its price).")
     paid_later = [row["link"] for row in usable[1:] if not row["free"]]
     text = f"{calls_text} on {first['link']} (free tier)."
     if paid_later:
@@ -1540,7 +1544,7 @@ async def estimate(story_id: str, step: str, target: Optional[str] = None,
                    storyboard: Optional[str] = None) -> dict:
     """What a step would cost and where it would run::
 
-        {"step", "est_usd": 0.0, "units": {"llm_calls": n},
+        {"step", "est_usd", "units": {"llm_calls": n},
          "route_class": "free" | "paid" | "blocked" | "local",
          "link": <first usable keyed link> | null,
          "links": [{"link", "keyed", "free"[, "skipped": <reason>]}, ...],
@@ -1553,8 +1557,11 @@ async def estimate(story_id: str, step: str, target: Optional[str] = None,
     link that is not skipped decides the class (``free`` when the link is
     free -- its provider's default model is, DEC-088, or it is an OpenRouter
     ``:free`` model). No such link is ``blocked`` with the key gate's
-    message. ``style`` runs here: 0 calls, ``local``. ``style_preview``:
-    ``units {"images": 3}``, the story's route applied, each link's gates as
+    message. ``est_usd`` is 0.0 unless that first link is paid (so
+    ``allow_paid`` is on): then n times the worst call a story step can make
+    on it (``llm_spend.worst_call_usd``), 0.0 still for a paid link with no
+    price, which the step refuses. ``style`` runs here: 0 calls, ``local``.
+    ``style_preview``: ``units {"images": 3}``, the story's route applied, each link's gates as
     the step will meet them and nothing called (``style_preview.estimate``;
     its links are ``{"link", "status", "reason", "paid", "est_usd"}``).
 
@@ -1581,8 +1588,8 @@ async def estimate(story_id: str, step: str, target: Optional[str] = None,
     from the beat sheet once written, else the episode's own body slots),
     ``skipped_paid [{link, reason}]`` and ``measure`` -- with ``?measure=1``,
     what measuring the lines with the pinned voices would do
-    (``script.measure_estimate``), else null. ``est_usd`` stays 0.0: LLM
-    spend is not booked (DEC-115). ``storyboard``: ``t1_calls`` (one per
+    (``script.measure_estimate``), else null. ``est_usd`` as the LLM steps
+    above. ``storyboard``: ``t1_calls`` (one per
     scene with no plan, a stale one or a fast one), ``fast_calls`` 0,
     ``link``, ``skipped_paid``; not ``ready`` while the script is not
     complete.
@@ -1785,15 +1792,25 @@ def _llm_estimate(step, calls, *, env, label=None) -> dict:
         route_class = "blocked"
     else:
         route_class = "free" if first["free"] else "paid"
+    # A paid first link (allow_paid is on: story_chain skips it otherwise) is
+    # priced at the worst call a step can make (llm_spend); a free one is $0.
+    est_usd, per_call = 0.0, None
+    if first is not None and not first["free"]:
+        try:
+            per_call = llm_spend.worst_call_usd(links[rows.index(first)])
+        except pricing.PriceUnknown:
+            per_call = None
+        else:
+            est_usd = round(calls * per_call, 6)
     return {
         "step": step,
-        "est_usd": 0.0,
+        "est_usd": est_usd,
         "units": {"llm_calls": calls},
         "route_class": route_class,
         "link": first["link"] if first else None,
         "links": rows,
         "ready": refusal is None,
-        "message": _estimate_message(rows, calls, refusal, label=label),
+        "message": _estimate_message(rows, calls, refusal, label=label, per_call=per_call),
     }
 
 

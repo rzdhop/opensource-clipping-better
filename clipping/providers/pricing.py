@@ -68,6 +68,28 @@ FREE_PROVIDER_PRICES = {
 
 Estimate = namedtuple("Estimate", "link unit qty price_usd est_usd paid")
 
+# --- LLM links, per million tokens (AI Story phase 6, stage 5; DEC-115's
+# follow-up). Only the PAID links a story step can reach by default: the
+# default chain's OpenRouter model and the model DEC-089 falls back to on the
+# same key (``registry.PROVIDERS["openrouter"].fallback_models``); every other
+# default link is free (``llm_call.is_free_link``). A paid link with no row is
+# refused before any call, never guessed.
+#
+# OpenRouter serves one model from several hosts at different prices and
+# picks the host per request, so each row holds the DEAREST host's price read
+# on the model's endpoints page: an estimate checked against a cap must never
+# be low. What a reply is booked at is its own ``usage.cost`` whenever it
+# carries one (OpenRouter returns it with every response); this table prices
+# the estimate, and a reply without it.
+LLM_PRICES_AS_OF = "2026-09-30"
+
+LlmPrice = namedtuple("LlmPrice", "input_usd_per_m output_usd_per_m note")
+
+LLM_PRICES = {
+    "openrouter/mistralai/mistral-small-3.2-24b-instruct": LlmPrice(0.10, 0.30, "the dearest of 4 hosts (Mistral's own), read on 2026-09-30 at https://openrouter.ai/api/v1/models/mistralai/mistral-small-3.2-24b-instruct/endpoints; the model's listed price at https://openrouter.ai/api/v1/models is $0.09375 in / $0.25 out, DeepInfra $0.075 / $0.20 the cheapest"),
+    "openrouter/meta-llama/llama-3.3-70b-instruct": LlmPrice(1.04, 1.04, "the dearest of 11 hosts (Together), read on 2026-09-30 at https://openrouter.ai/api/v1/models/meta-llama/llama-3.3-70b-instruct/endpoints; the model's listed price at https://openrouter.ai/api/v1/models is $0.10 in / $0.32 out (DeepInfra, the cheapest); DEC-089's fallback, reached only when the default model is unavailable"),
+}
+
 
 class PriceUnknown(LookupError):
     """A paid link has no price in the table. Add it; never guess."""
@@ -101,6 +123,24 @@ def estimate(link, qty=1, *, width=None, height=None) -> Estimate:
         unit_price = price.usd * megapixels
     est = round(unit_price * qty, 4) if paid else 0.0
     return Estimate(describe(link), price.unit, qty, round(unit_price, 6), est, paid)
+
+
+def llm_price_for(link) -> LlmPrice:
+    """The :class:`LlmPrice` of the LLM *link*; :class:`PriceUnknown` without a row."""
+    label = describe(link)
+    price = LLM_PRICES.get(label)
+    if price is None:
+        raise PriceUnknown(
+            f"No price for {label} in the LLM price table dated {LLM_PRICES_AS_OF} "
+            f"(clipping/providers/pricing.py, LLM_PRICES). Add it before calling a paid link."
+        )
+    return price
+
+
+def llm_cost(link, tokens_in, tokens_out) -> float:
+    """What *tokens_in* prompt and *tokens_out* completion tokens on *link* cost, unrounded."""
+    price = llm_price_for(link)
+    return (tokens_in * price.input_usd_per_m + tokens_out * price.output_usd_per_m) / 1_000_000
 
 
 def price_table() -> list:

@@ -1,11 +1,33 @@
-## CURRENT STATE — AI Story **phase 6 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–4 **done**; next: **stage 5**
+## CURRENT STATE — AI Story **phase 6 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–5 **done**; next: **stage 6**
 - **In-progress header** (keep current):
   - **Current phase:** IMPLEMENT. EXPLORE/CLARIFY/PLAN were done 2026-09-30 in a session run in parallel with phase 5's
     close: three maps, two rounds of questions, an Opus design. The human approved the plan.
   - **Plan:** `.claude/plans/ai-story/14-phase-6-plan.md` (**APPROVED 2026-09-30**; copy at
     `~/.claude/plans/ai-story-phase-6-plan.md`). Brief: `.claude/plans/ai-story/07-phase-6-video-tiers-local.md`.
-  - **Current stage:** 5 — the paid LLM booking seam in `steps/llm_call.py` [Opus]. Independent of video.
-  - **Next action:** dispatch stage 5, then Tier-1 in both environments, then commit.
+  - **Current stage:** 6 — the sticky image link per episode (A-087) [Opus: data mutation].
+  - **Next action:** dispatch stage 6, then Tier-1 in both environments, then commit.
+  - **Stage 5 notes for stages 11, 12 and 14:**
+    - **Meter.** New `steps/llm_spend.py`, hooked into `llm_call.call_json` (:304). It opens only when the chain has
+      a keyed paid link and the runner is the real `llm.run_chain`. Production dispatches `module.run(ctx)` with
+      runner None (`steps/__init__.py:100`), so it is always metered; stand-in runners in tests are not.
+      - Each paid link is estimated with `pacing.estimate_tokens` plus the reply cap, times `LLM_PRICES`.
+      - It is checked with the assets step's `voices.LineGates` (episode, day, story). A refused or unpriced link is
+        dropped with a printed line.
+      - Each reply is booked at once: unit `token`, cost `usage.cost`, else usage × price, else the estimate with a
+        DEC-153 note. Amounts round up to $0.0001.
+      - Every row goes to the story ledger and to `budget.record` (the day's spend).
+      - With `allow_paid` off, `run_chain` gets exactly today's arguments.
+    - **Prices.** `pricing.LLM_PRICES`, `LLM_PRICES_AS_OF` 2026-09-30, the dearest OpenRouter host:
+      - mistral-small-3.2: $0.10 / $0.30 per M;
+      - llama-3.3-70b (DEC-089 fallback): $1.04 / $1.04.
+    - **Estimate.** `stories.py:1800 _llm_estimate`: calls × worst case (global, $0.0009 a call on the default link),
+      only when the first usable link is paid.
+    - **Follow-ups (stage 14, or later):**
+      - The fast-track, cast and places estimates leave paid LLM spend out.
+      - `_generation_message` still says "no LLM price table", and an `EstimateChip.jsx` comment is stale.
+      - `budget.check`'s `:.3f` formatting reads "$0.000" for LLM amounts; the parenthetical carries the real
+        number.
+      - `ready` stays true for an unpriced paid first link (pinned by an existing test).
   - **Stage 4 notes for stages 8, 12 and 14:**
     - **Templates.** `templates/workflows/i2v_wan22_5b.json`, `i2v_wan22_14b_lightning.json` and `i2v_ltx2.json`, all
       `verified_live: false` (A-035). Sources: Comfy-Org `workflow_templates`, read 2026-09-30.
@@ -132,8 +154,8 @@
 | 2 | provider foundations: video cache key, `GEMINI_PAID_API_KEY`, prices [Opus] | done |
 | 3 | hosted video adapters (fal ×3, Veo) [Opus] | done |
 | 4 | local ComfyUI video, fake server only [Opus] | done |
-| 5 | paid LLM booking seam [Opus] | next |
-| 6 | sticky image link per episode (A-087) [Opus] | — |
+| 5 | paid LLM booking seam [Opus] | done |
+| 6 | sticky image link per episode (A-087) [Opus] | next |
 | 7 | clip documents and the estimate [Opus] | — |
 | 8 | the video phase and `shot:…:video` [Opus] — **RISKIEST** | — |
 | 9 | renderer: clips, hold, `fill_failed_with_motion`, Tier-2 golden [Opus] | — |
