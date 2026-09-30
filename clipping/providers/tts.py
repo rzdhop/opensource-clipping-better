@@ -16,10 +16,12 @@ word timestamps from the engine, or the audio duration alone. Nothing here
 is a silent fallback -- an engine that is missing says how to install it.
 
 A request may carry a spoken direction (``extra["direction"]``, how the
-line should be said: an AI Story voice regenerate's note). Gemini speaks it
-as its own style instruction ahead of the line; Edge and the local engines
-cannot follow one and say it was recorded, not applied -- as for rate and
-pitch. A request without one is exactly what it always was.
+line should be said: an AI Story voice regenerate's note). No engine here
+applies it: every one says it was recorded (with the take), not applied --
+as for rate and pitch -- and sends the line alone. Gemini was tried with its
+own style form ("Say <note>: <line>") and read a French note aloud on the
+free TTS (Tier-2 T2-P5-F9, 2026-09-30); a note must never reach the audio.
+A request without one is exactly what it always was.
 """
 
 from __future__ import annotations
@@ -135,16 +137,6 @@ def _direction(request) -> str:
     return " ".join(str((request.extra or {}).get("direction") or "").split()).rstrip(" .:;")
 
 
-def _directed(text: str, direction: str) -> str:
-    """*text* with *direction* as Gemini's own style instruction, the form
-    its speech-generation guide gives for one speaker ("Say cheerfully:
-    Have a wonderful day!"). No direction: *text* as it is."""
-    if not direction:
-        return text
-    how = direction if direction.lower().startswith("say ") else f"Say {direction}"
-    return f"{how}: {text}"
-
-
 def _warn_unsupported_direction(request, link, on_log) -> None:
     """An engine that cannot follow a spoken direction says so once -- the
     direction was recorded (with its take), not applied -- never a silent
@@ -247,11 +239,10 @@ class GeminiTtsAdapter(_Adapter):
     def generate(self, link, request, *, credentials, on_log, transport=None, **_):
         transport = transport or urllib_transport
         model = GEMINI_TTS_MODELS.get(link.model) or _unknown_model(link, GEMINI_TTS_MODELS)
-        # A spoken direction is Gemini's own style instruction ahead of the
-        # line; without one the request is exactly what it always was.
-        text = _directed(_text(request), _direction(request))
+        text = _text(request)
         voice = request.voice or GEMINI_DEFAULT_VOICE
         _warn_unsupported_rate_pitch(request, link, on_log)
+        _warn_unsupported_direction(request, link, on_log)
         body = {
             "contents": [{"parts": [{"text": text}]}],
             "generationConfig": {

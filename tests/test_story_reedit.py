@@ -509,22 +509,31 @@ def _gemini_answer():
     return tta.FakeTransport([(200, {"candidates": [{"content": {"parts": [audio]}}]})])
 
 
-def test_gemini_speaks_a_direction_as_its_style_instruction_and_nothing_changes_without_one(tmp_path):
+def test_gemini_records_a_direction_without_speaking_it(tmp_path):
+    """Tier-2 finding T2-P5-F9 (2026-09-30): sent as Gemini's own style form
+    ("Say <note>: <line>"), a French note was read aloud by the free TTS --
+    the live l12 came back 8.05 s instead of 3.49 s, transcribed "C'est d'une
+    voix glacial et tremblante de colère. Tu as falsifié ...". A note must
+    never reach the audio: Gemini, like Edge, records it (with the take) and
+    sends the line alone."""
     link = Link("gemini", "flash-lite-tts")
     transport = _gemini_answer()
     request = GenRequest(kind="tts", text="Tu me trahis ?", voice="Kore", out_dir=str(tmp_path),
-                         extra={"direction": "  in a frightened whisper. "})
+                         extra={"direction": "  d'une voix glaciale. "})
     log = []
     tts.GEMINI_TTS.generate(link, request, credentials={"GOOGLE_API_KEY": "gk"}, on_log=log.append,
                             transport=transport)
     body = json.loads(transport.calls[0]["body"])
-    assert body["contents"][0]["parts"] == [{"text": "Say in a frightened whisper: Tu me trahis ?"}]
-    assert not any("not applied" in line for line in log)
+    assert body["contents"][0]["parts"] == [{"text": "Tu me trahis ?"}]
+    assert [line for line in log if "direction" in line] == [
+        "   ⚠️ a spoken direction is not supported by gemini/flash-lite-tts; recorded, not applied."]
 
     plain = _gemini_answer()
+    quiet = []
     tts.GEMINI_TTS.generate(link, GenRequest(kind="tts", text="Tu me trahis ?", voice="Kore", out_dir=str(tmp_path)),
-                            credentials={"GOOGLE_API_KEY": "gk"}, on_log=log.append, transport=plain)
+                            credentials={"GOOGLE_API_KEY": "gk"}, on_log=quiet.append, transport=plain)
     assert json.loads(plain.calls[0]["body"])["contents"][0]["parts"] == [{"text": "Tu me trahis ?"}]
+    assert not any("direction" in line for line in quiet)
 
 
 def test_edge_and_the_local_engines_record_a_direction_without_applying_it(tmp_path, monkeypatch):
