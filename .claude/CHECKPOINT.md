@@ -1,3 +1,32 @@
+## SIDE TASK — transport redirects drop credential headers off-origin (FULL, small). Branch `Feature/silly-almeida-f5cda1`
+- **Scope:** only `clipping/providers/transport.py` and one new test file. The phase-6 state is in the next section and
+  in the `ai-story-phase-6` worktree; this branch leaves both alone.
+- **In-progress header** (keep current):
+  - **Current phase:** IMPLEMENT, stage 1 of 2.
+    - EXPLORE: one Sonnet Explore agent; the map is in the plan.
+    - PLAN: `.claude/plans/transport-redirect-credentials.md`. The approach and tests are the human's own chat
+      request, so that request stands as the approval (A-098, UNCONFIRMED).
+  - **Next action:**
+    - Stage 1: write `tests/test_transport_redirects.py`, show it failing, add the redirect handler to `transport.py`,
+      and move `test_provider_http.py`'s patch target.
+    - Then the scoped Tier-1 in both environments, and commit.
+    - Stage 2: artifacts (DEC-195, A-097/A-098, action log).
+  - **Open questions:** none blocking. At close, ask the human to acknowledge the Tier-2 deferral and the
+    patch-target move.
+- **Where:** worktree `.claude/worktrees/magical-greider-2955e5`, branch `Feature/silly-almeida-f5cda1` from `main`
+  `16b946e`. Never merged or deployed from here: the main checkout is bind-mounted by the live container.
+- **Checkpoint:** `16b946e` (== `main`), clean tree.
+- **Tier-1 baseline at `16b946e`** (2026-09-30). Scope is the human's chat instruction: only these files, not the full
+  suites.
+  - Files: `tests/test_image_adapters.py`, `tests/test_generation_chain.py`, `tests/test_generation_chain_api.py`
+    (`tests/test_video_adapters.py` exists only on the phase-6 branch).
+  - `python -m pytest -p no:warnings`: **87 passed**.
+  - `PYTHONNOUSERSITE=1 PYTHONPATH=/tmp/cilibs python3 -m pytest -p no:warnings`: **75 passed / 12 skipped**.
+- **Regression contract:**
+  - RC-T1: the transport's contract is unchanged (`Response`, and the `HttpStatusError` / `APIConnectionError` /
+    `APITimeoutError` mapping). Proven by the three baseline files staying green and unedited.
+  - RC-T2: every adapter that goes through the transport keeps working. Proven by the same files.
+
 ## CURRENT STATE — AI Story **phase 6 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stage 0 **done**; next: **stage 1**
 - **In-progress header** (keep current):
   - **Current phase:** IMPLEMENT. EXPLORE/CLARIFY/PLAN were done 2026-09-30 in a session run in parallel with phase 5's
