@@ -2156,6 +2156,130 @@ html, body {
   margin: 16px 0;
 }
 
+/* --- Series memory panel (phase 5, stage 10): one card per planned
+   episode -- memory, audience feedback, propose-next, proposals. Phone-first
+   (375 px): every free-text block wraps instead of forcing horizontal
+   scroll, same as .story-season-entry above. --------------------------- */
+
+.story-season-memory-episode {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border-color);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.story-season-memory-episode:last-child {
+  border-bottom: none;
+}
+
+.story-season-memory-banner {
+  /* .chip/.chip-warn are display: inline-flex + white-space: nowrap (sized
+     for a short pill label); this banner is a full sentence, so both are
+     overridden here or it would force horizontal scroll at 375 px. */
+  display: block;
+  white-space: normal;
+  margin: 6px 0 10px;
+  overflow-wrap: anywhere;
+}
+
+.story-season-memory-gate {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border-color);
+}
+
+.story-season-feedback-textarea {
+  margin-bottom: 4px;
+}
+
+.story-season-feedback-current p {
+  margin: 0 0 4px;
+}
+
+.story-season-feedback-digest,
+.story-season-propose-next,
+.story-season-proposals {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-color);
+}
+
+.story-season-feedback-directions label {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 13px;
+  padding: 4px 0;
+}
+
+.story-season-proposal-list {
+  list-style: none;
+  margin-left: 0;
+}
+
+.story-season-proposal-item {
+  margin-bottom: 14px;
+  padding: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.story-season-proposal-item:last-child {
+  margin-bottom: 0;
+}
+
+.story-season-proposal-role {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.story-season-proposal-warning {
+  /* Same override as .story-season-memory-banner: this is a full sentence
+     (the role-fold warning), not a short pill label. */
+  display: block;
+  white-space: normal;
+  width: 100%;
+  margin: 4px 0;
+  overflow-wrap: anywhere;
+}
+
+.story-season-proposal-role .form-select {
+  width: auto;
+}
+
+/* --- Coordinator fix attempt 1 (browser check, F1-F4) ------------------- */
+
+/* F1/F3: why a control is disabled (no approved script, no approved memory,
+   a step already running) or a surprise 409 from its estimate -- a full
+   sentence, so it gets the same nowrap/inline-flex override as
+   .story-season-memory-banner / .story-season-proposal-warning above when
+   it rides on .chip. */
+.story-season-blocked-reason {
+  display: block;
+  white-space: normal;
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}
+
+/* F2: the collapsed "nothing yet" line for a run of episodes with no
+   script, memory, feedback or proposals yet. */
+.story-season-memory-empty-range {
+  padding: 6px 0;
+}
+
+/* F4: a pasted comment (or LLM prose: a recap, a digest) keeps its line
+   breaks instead of running every paragraph together, while still wrapping
+   a long line at 375 px. */
+.story-season-preserve-lines {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .story-season-actions {
   display: flex;
   flex-direction: column;

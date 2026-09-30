@@ -47,6 +47,11 @@ STORY_FUNCTIONS = [
     # Approve/regenerate/step/estimate are reused unchanged (fetchStoryEstimate
     # above gained new phase-4-only options, not a new function).
     "fetchShotImageUrl", "patchEpisodeAssets",
+    # Phase 5, stage 10 (SeriesMemoryPanel): the audience-feedback paste and a
+    # proposal decision. runStoryStep/approveStoryDoc/fetchStoryEstimate are
+    # reused unchanged for memory/feedback/propose-next (series steps run
+    # through the generic dispatch and approve grammar, spec 9.1/9.2).
+    "postEpisodeFeedback", "decideProposal",
 ]
 
 
@@ -86,7 +91,7 @@ def _function_body(src: str, name: str) -> str:
 def test_the_readers_see_something():
     """A broken regex would make every assertion below pass for free."""
     assert len(_job_status_values()) >= 8
-    assert len(STORY_FUNCTIONS) == 28
+    assert len(STORY_FUNCTIONS) == 30
 
 
 # --------------------------------------------------------- components/ActivityFeed.jsx

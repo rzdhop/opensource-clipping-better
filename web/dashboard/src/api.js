@@ -839,3 +839,42 @@ export async function patchEpisodeAssets(storyId, ep, shots) {
   if (!res.ok) throw await apiError(res, 'Failed to update the assets')
   return res.json()
 }
+
+// ------------------------------------------------------- episodes (phase 5)
+
+/**
+ * Paste episode `ep`'s audience feedback (`StoryEpisodeFeedbackRequest`:
+ * `{text, stats?}`, each at most 6,000 characters -- the same cap as
+ * `clipping.aistory.schemas.FEEDBACK_TEXT_MAX_LENGTH` /
+ * `FEEDBACK_STATS_MAX_LENGTH`; refused whole, never trimmed, over the cap
+ * (422) -- `SeasonStep.jsx` checks the cap client-side before calling this).
+ * Stores the item -- replacing any earlier one of this episode -- and queues
+ * the `feedback` step; 201 with the queued job.
+ */
+export async function postEpisodeFeedback(storyId, ep, payload) {
+  const res = await request(`/stories/${storyId}/episodes/${ep}/feedback`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) throw await apiError(res, 'Failed to submit the feedback')
+  return res.json()
+}
+
+/**
+ * Accept or reject one item of episode `ep`'s proposals
+ * (`StoryProposalDecisionRequest`: `{accept, role?}` -- `role` only on an
+ * accepted character). Answers `workflow.proposal_request`'s payload: an
+ * accepted character carries `job` (the queued cast job); a rejection or an
+ * accepted twist never does. A decision is final -- the caller confirms
+ * before calling this.
+ */
+export async function decideProposal(storyId, ep, itemId, payload) {
+  const res = await request(`/stories/${storyId}/episodes/${ep}/proposals/${itemId}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) throw await apiError(res, 'Failed to decide the proposal')
+  return res.json()
+}
