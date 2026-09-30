@@ -351,16 +351,18 @@ def github_annotation(problem: str) -> str:
     return f"::error title=AI-Story golden render::{message}"
 
 
-def parity_problem(key: str, digest: str, keys: dict):
+def parity_problem(key: str, digest: str, keys: dict, *, command: str = RECORD_COMMAND):
     """None when *digest* is the one recorded for *key*; otherwise the
     failure message. An unknown key is a failure too, never a pass: a new
-    ffmpeg (or machine) is exactly what the parity rule exists to catch."""
+    ffmpeg (or machine) is exactly what the parity rule exists to catch.
+    *command* is the one that records a key (the tier-2 sibling,
+    ``render/golden_tier2.py``, names its own)."""
     if key not in keys:
         return (f"No golden framemd5 is recorded for {key!r} (this ffmpeg on this machine). "
                 f"This render's framemd5 sha256 is {digest}. Look at the frames, then record it with "
-                f"`{RECORD_COMMAND}` (known keys: {sorted(keys) or 'none'}).")
+                f"`{command}` (known keys: {sorted(keys) or 'none'}).")
     if keys[key] != digest:
         return (f"The golden render's frames changed on {key!r}: framemd5 sha256 {digest}, recorded "
                 f"{keys[key]}. If the change is intended, look at the frames and re-record with "
-                f"`{RECORD_COMMAND}`.")
+                f"`{command}`.")
     return None

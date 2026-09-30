@@ -22,7 +22,25 @@ lock's own mode), ``word_pop``, ``two_line`` or ``none`` (a per-episode
 render parameter, DEC-164); ``encoder`` -- ``libx264`` (default) or
 ``auto``, opt-in: ``clipping.studio.ffmpeg_utils.detect_video_encoder``
 (imported lazily, only then) picks a hardware encoder for the final pass
-(``profiles.HARDWARE_ENCODERS``); anything else it answers keeps libx264.
+(``profiles.HARDWARE_ENCODERS``); anything else it answers keeps libx264;
+``fill_failed_with_motion`` -- off by default (phase 6 stage 9, "Clips"
+below), recorded in the manifest's params only when on.
+
+**Clips** (phase 6 stage 9; :func:`shot_clips`). At tier 1 the render reads
+no clip: its inputs, plan and manifest are the ones it always made. At tier
+2 or 3 each shot is cut from what it has now: its clip when the clip is
+current (``clips.clip_state`` on the episode's video link: made from the
+shot's image and video prompt as they are, its file on disk) and the shot's
+**effective** flags (``clips.shot_flags``: an ``assets.json`` override over
+the storyboard's own) do not keep it still; else its image with Tier-1
+motion -- a shot kept still, or one the plan never animated (no clip
+record). A shot not kept still whose clip record is not current -- failed,
+stale, a re-animate pending, a file gone, or still generating -- refuses the
+render before any process, naming each with what to do (its regenerate
+target; only Continue for one still generating); with
+``fill_failed_with_motion`` such shots get Tier-1 motion instead. The
+manifest's ``shot_modes`` (``schemas.RENDER_SHOT_MODES``) records which shot
+got what, whenever one is not plain motion.
 
 **The render** (``render/plan.py``, ``render/runner.py``): the plan is
 built from the episode's documents and the files as they are now -- each
@@ -73,7 +91,7 @@ from ..render import partial
 from ..render import plan as plan_mod
 from ..render import runner as runner_mod
 from . import assets as assets_step
-from . import episode_common, voice_lines
+from . import clips, episode_common, sticky_link, voice_lines
 from .llm_call import StepFailed
 
 STEP = "render"
@@ -85,7 +103,8 @@ SUBTITLES_FILE = plan_mod.SUBTITLES_REL
 
 SUBTITLES_PARAM = "subtitles"
 ENCODER_PARAM = "encoder"
-PARAMS = (SUBTITLES_PARAM, ENCODER_PARAM)
+FILL_PARAM = schemas.RENDER_FILL_PARAM
+PARAMS = (SUBTITLES_PARAM, ENCODER_PARAM, FILL_PARAM)
 # "style" is the style lock's own mode; the rest are the closed list.
 STYLE_SUBTITLES = "style"
 SUBTITLE_CHOICES = (STYLE_SUBTITLES,) + schemas.SUBTITLE_MODES
@@ -117,8 +136,10 @@ def _plural(items, one, many) -> str:
 
 def read_params(params) -> dict:
     """``{"subtitles", "encoder"}`` from the step's params, defaults filled in
-    (``style``, ``libx264``); ``StepFailed`` naming the choices for a value
-    that is not one of them. Other keys are not the render's and are left
+    (``style``, ``libx264``), plus ``fill_failed_with_motion: true`` only
+    when it is on (off, the default, is not written: the params are the ones
+    a render always had); ``StepFailed`` naming the choices for a value that
+    is not one of them. Other keys are not the render's and are left
     alone."""
     params = params or {}
     subtitles = params.get(SUBTITLES_PARAM)
@@ -129,7 +150,13 @@ def read_params(params) -> dict:
     encoder = DEFAULT_ENCODER if encoder is None else encoder
     if encoder not in ENCODER_CHOICES:
         raise StepFailed(f"The encoder must be one of {', '.join(ENCODER_CHOICES)}, not {encoder!r}.")
-    return {"subtitles": subtitles, "encoder": encoder}
+    fill = params.get(FILL_PARAM)
+    if fill is not None and not isinstance(fill, bool):
+        raise StepFailed(f"{FILL_PARAM} must be true or false, not {fill!r}.")
+    wanted = {"subtitles": subtitles, "encoder": encoder}
+    if fill:
+        wanted[FILL_PARAM] = True
+    return wanted
 
 
 # ------------------------------------------------------------ preconditions
@@ -184,7 +211,92 @@ def require_renderable(ec) -> tuple:
     return script, board, doc
 
 
+# -------------------------------------------------------------------- clips
+
+def _clip_problem(ec, shot, state):
+    """``(what, still_generating)``: why *shot*'s clip record is not the
+    clip the render may cut the shot from (*state*: ``clips.clip_state``'s),
+    and whether its request is still open in the generation journal (only
+    Continue collects it: ``assets.open_clip_request``)."""
+    clip = shot["assets"].get("clip") or {}
+    if assets_step.open_clip_request(ec, [clip.get("cache_key")]) is not None:
+        return "is still generating", True
+    if clip.get("pending"):
+        return "waits for its re-animate", False
+    if state == "failed":
+        return "failed", False
+    if state == "stale":
+        return "is out of date (its image, its video prompt or the episode's video link changed)", False
+    return "file is missing", False
+
+
+def clip_refusal(ec, blocked) -> str:
+    """The render's refusal of *blocked* (``[(shot, state)]``: shots not kept
+    still whose clip record is not current): each shot named with what went
+    wrong, its regenerate target -- or, still generating, only Continue
+    (``assets.CONTINUE_ONLY``, DEC-152: a new seed would buy a second clip) --
+    and the param that renders them with Tier-1 motion instead."""
+    ep = ec.ep
+    said, targets, held = [], [], []
+    for shot, state in blocked:
+        shot_id = shot["shot_id"]
+        what, still = _clip_problem(ec, shot, state)
+        said.append(f"shot {shot_id}'s clip {what}")
+        if still:
+            held.append(shot_id)
+        else:
+            targets.append(assets_step.clip_target(ep, shot_id))
+    fixes = []
+    if targets:
+        fixes.append(f"make {_plural(targets, 'it', 'them')} again (regenerate {_and(targets)}, or run the assets "
+                     "step again), approve the assets again, then render")
+    if held:
+        fixes.append(f"for {_and(held)}, still generating: {assets_step.CONTINUE_ONLY}")
+    them = _plural(blocked, "it", "them")
+    return (f"Episode {ep} cannot be rendered: {_and(said)}. To cut {_plural(blocked, 'that shot', 'those shots')} "
+            f"from {_plural(blocked, 'its clip', 'their clips')}, {'; '.join(fixes)}. Or render with {FILL_PARAM} "
+            f"on to give {them} Tier-1 motion instead.")
+
+
+def shot_clips(ec, script, board, assets_doc, *, fill_failed=False):
+    """What each shot is cut from (module docstring, "Clips"), or None at
+    tier 1 -- the render reads no clip there::
+
+        {"videos": {shot_id: file record of its current clip},
+         "keep_still": {shot_id: effective flag}, "filled": [shot ids]}
+
+    ``filled``: the shots not kept still whose clip record is not current,
+    rendered with Tier-1 motion -- only with *fill_failed*; without it they
+    refuse the render (``StepFailed``, :func:`clip_refusal`). Reads the
+    storyboard's clip records, ``assets.json``'s overrides and links, the
+    shots' images (hashed) and the generation journal; starts nothing."""
+    tier = clips.tier_of(ec)
+    if tier < 2:
+        return None
+    link = (sticky_link.recorded(assets_doc, sticky_link.VIDEO) or {}).get("link")
+    videos, keep_still, blocked = {}, {}, []
+    for shot in board["shots"]:
+        shot_id = shot["shot_id"]
+        flags = clips.shot_flags(shot, assets_doc)
+        keep_still[shot_id] = bool(flags["keep_still"])
+        if keep_still[shot_id] or not shot["assets"].get("clip"):
+            continue
+        image = assets_step.shot_image_path(ec, shot)
+        state = clips.clip_state(ec, shot, script, link=link, tier=tier, flags=flags,
+                                 image_sha=assets_step._sha256_file(image) if image is not None else None)
+        if state == "current":
+            videos[shot_id] = runner_mod.file_record(clips.shot_clip_path(ec, shot), shot["assets"]["video"])
+        else:
+            blocked.append((shot, state))
+    if blocked and not fill_failed:
+        raise StepFailed(clip_refusal(ec, blocked))
+    return {"videos": videos, "keep_still": keep_still, "filled": [shot["shot_id"] for shot, _state in blocked]}
+
+
 # ------------------------------------------------------------------- inputs
+
+_RESOLVE = object()
+
 
 def _shipped_file(rel, prefix, base):
     """The real path of a shipped file ``assets.json`` names
@@ -196,13 +308,17 @@ def _shipped_file(rel, prefix, base):
     return None if found is None else os.fspath(found)
 
 
-def render_inputs(ec, script, board, assets_doc, *, custom_fonts_dir=None) -> dict:
+def render_inputs(ec, script, board, assets_doc, *, custom_fonts_dir=None, fill_failed_with_motion=False,
+                  shot_clips_now=_RESOLVE) -> dict:
     """The plan's ``inputs`` (``plan.build_render_plan``): every file the
     render reads, resolved through the store and hashed now
     (``runner.file_record``); ``source`` is the path the manifest shows --
     relative to the episode's folder for its own files, to the repository
     for the shipped ones. ``StepFailed`` for a shipped file that is gone or
-    changed since the assets step named it."""
+    changed since the assets step named it. At tier >= 2 also ``videos``,
+    ``keep_still`` and ``filled`` (:func:`shot_clips`, resolved now unless
+    the caller did: *shot_clips_now*; its refusal as it says); at tier 1
+    exactly the inputs a render always had."""
     ep = ec.ep
     shots = {shot["shot_id"]: runner_mod.file_record(assets_step.shot_image_path(ec, shot), shot["assets"]["image"])
              for shot in board["shots"]}
@@ -238,21 +354,30 @@ def render_inputs(ec, script, board, assets_doc, *, custom_fonts_dir=None) -> di
         bgm = record
 
     font = fonts.resolve_font(ec.style_lock["typography"]["font_family"], custom_fonts_dir=custom_fonts_dir)
-    return {"shots": shots, "lines": lines, "sfx": sfx, "bgm": bgm, "overlay": runner_mod.paper_texture_record(),
-            "font": font, "word_timings": word_timings}
+    inputs = {"shots": shots, "lines": lines, "sfx": sfx, "bgm": bgm, "overlay": runner_mod.paper_texture_record(),
+              "font": font, "word_timings": word_timings}
+    resolved = (shot_clips(ec, script, board, assets_doc, fill_failed=fill_failed_with_motion)
+                if shot_clips_now is _RESOLVE else shot_clips_now)
+    if resolved is not None:
+        inputs.update(videos=resolved["videos"], keep_still=resolved["keep_still"], filled=resolved["filled"])
+    return inputs
 
 
-def plan_args(ec, script, board, assets_doc, inputs, *, subtitles, encoder, video_encoder=None) -> dict:
+def plan_args(ec, script, board, assets_doc, inputs, *, subtitles, encoder, video_encoder=None,
+              fill_failed_with_motion=False) -> dict:
     """The keyword arguments of ``plan.build_render_plan`` (but ``ffmpeg``
     and ``profile``) for this episode: its documents, the story's id, title
     and language (the end card's title), the resolved *inputs* and the
-    step's params."""
-    return {
+    step's params (``fill_failed_with_motion`` passed only when on)."""
+    args = {
         "script": script, "storyboard": board, "assets": assets_doc, "style_lock": ec.style_lock,
         "template": ec.template, "ep": ec.ep, "inputs": inputs,
         "story": {"story_id": ec.story_id, "title": ec.story["title"], "language": ec.language},
         "subtitles": subtitles, "encoder": encoder, "video_encoder": video_encoder,
     }
+    if fill_failed_with_motion:
+        args["fill_failed_with_motion"] = True
+    return args
 
 
 # ------------------------------------------------------------------ encoder
@@ -385,9 +510,12 @@ def _plan_now(ec, wanted, script, board, assets_doc, ffmpeg, *, profile, custom_
     """The plan :func:`run` would build now, keyed with *ffmpeg* (no
     pre-flight): the files as they are, hashed. ``PlanError``/``StepFailed``
     as the render meets them."""
-    inputs = render_inputs(ec, script, board, assets_doc, custom_fonts_dir=custom_fonts_dir)
+    fill = bool(wanted.get(FILL_PARAM))
+    inputs = render_inputs(ec, script, board, assets_doc, custom_fonts_dir=custom_fonts_dir,
+                           fill_failed_with_motion=fill)
     return plan_mod.build_render_plan(**plan_args(ec, script, board, assets_doc, inputs,
-                                                  subtitles=wanted["subtitles"], encoder=wanted["encoder"]),
+                                                  subtitles=wanted["subtitles"], encoder=wanted["encoder"],
+                                                  fill_failed_with_motion=fill),
                                       ffmpeg=ffmpeg, profile=profile)
 
 
@@ -643,6 +771,9 @@ def render_episode(ctx, ec, params, *, step=STEP, profile="final", run_process=s
     ep = ec.ep
     script, board, assets_doc = require_renderable(ec)
     fingerprint = assets_doc["approved"]["fingerprint"]
+    fill = bool(params.get(FILL_PARAM))
+    # Tier >= 2: a clip that is not current refuses before any process.
+    resolved = shot_clips(ec, script, board, assets_doc, fill_failed=fill)
     ctx.cancel.check()
 
     try:
@@ -651,11 +782,12 @@ def render_episode(ctx, ec, params, *, step=STEP, profile="final", run_process=s
         raise StepFailed(f"Episode {ep} cannot be rendered: ffmpeg pre-flight: {exc}. Install ffmpeg with libass "
                          "(it needs zoompan, xfade, sidechaincompress, loudnorm and ass), then render again.") from None
     video_encoder = detect_encoder(ctx, detect=detect) if params["encoder"] == AUTO_ENCODER else None
-    inputs = render_inputs(ec, script, board, assets_doc, custom_fonts_dir=custom_fonts_dir)
+    inputs = render_inputs(ec, script, board, assets_doc, custom_fonts_dir=custom_fonts_dir,
+                           fill_failed_with_motion=fill, shot_clips_now=resolved)
     try:
         plan = plan_mod.build_render_plan(**plan_args(ec, script, board, assets_doc, inputs,
                                                       subtitles=params["subtitles"], encoder=params["encoder"],
-                                                      video_encoder=video_encoder),
+                                                      video_encoder=video_encoder, fill_failed_with_motion=fill),
                                           ffmpeg=info, profile=profile)
     except plan_mod.PlanError as exc:
         raise StepFailed(f"Episode {ep} cannot be rendered: {exc}") from None

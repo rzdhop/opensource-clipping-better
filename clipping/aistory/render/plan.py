@@ -14,8 +14,13 @@ keys need, and hands the plan to ``runner.run_render``.
 - ``S:<shot_id>`` (``shot``) -- one per timeline shot:
   ``filtergraph.shot_argv`` on the shot's image, or
   ``filtergraph.tier2_clip_argv`` when the storyboard shot carries a video
-  (``assets.video``), is not ``keep_still`` and the caller resolved that
-  video. A still shot's zoompan takes the style's own
+  (``assets.video``), is not kept still and the caller resolved that video
+  (phase 6 stage 9: the render step resolves only a current clip, at tier
+  >= 2, and hands each shot's **effective** ``keep_still`` -- its
+  ``assets.json`` override over the storyboard's own -- in the inputs; the
+  planner reads no file). Each shot's mode (``schemas.RENDER_SHOT_MODES``)
+  is the plan's ``shot_modes``, present only when some shot is not plain
+  ``motion``. A still shot's zoompan takes the style's own
   ``motion_rules.tier1.pan_pct`` (phase 5 stage 12, DEC-183), defaulting to
   ``motion.PAN_PCT`` when the style_lock carries none (a hand-built fixture
   literal, e.g. ``render/golden.py``) -- both shipped MVP styles' own
@@ -203,7 +208,8 @@ def loudness_apply_argv(stage: dict, measured: dict) -> list:
 
 def build_render_plan(*, script: dict, storyboard: dict, assets: dict, style_lock: dict, template: dict,
                       story: dict, ep: int, inputs: dict, ffmpeg: dict, profile: str = "final",
-                      subtitles=None, encoder: str = "libx264", video_encoder=None) -> dict:
+                      subtitles=None, encoder: str = "libx264", video_encoder=None,
+                      fill_failed_with_motion: bool = False) -> dict:
     """The plan of one render (module docstring).
 
     - *story*: ``{"story_id", "title", "language"}`` (the end card's title).
@@ -214,7 +220,14 @@ def build_render_plan(*, script: dict, storyboard: dict, assets: dict, style_loc
       resolved), ``bgm`` (or None), ``overlay`` (the paper texture, needed
       only when the style asks for it), ``font`` (``fonts.resolve_font``'s
       record) and optional ``word_timings{line_id: [...]}`` (the TTS
-      sidecars' words).
+      sidecars' words). At tier >= 2 (phase 6 stage 9) also
+      ``keep_still{shot_id: bool}`` -- each shot's effective flag, read in
+      place of the storyboard's own -- and ``filled[shot_id]``: the shots
+      whose clip failed, went stale or is still generating, rendered with
+      Tier-1 motion (``motion_fill``). Without ``keep_still`` the storyboard's
+      flag is read and no shot is labelled kept still (tier 1).
+    - *fill_failed_with_motion*: the render step's param, recorded in the
+      plan's ``params`` only when it is on.
     - *ffmpeg*: ``runner.preflight``'s ``{"version", "machine"}``.
     - *subtitles*: ``None``/``"style"`` (the style lock's mode) or one of
       ``schemas.SUBTITLE_MODES``. *encoder*: ``"libx264"``, or ``"auto"``
@@ -231,12 +244,15 @@ def build_render_plan(*, script: dict, storyboard: dict, assets: dict, style_loc
     whole_frames}`` -- ``whole_frames``: whether the storyboard's shots are
     timed in whole frames (``timing.board_whole_frames``; the manifest
     records it, so a re-render can say when its timing converted, phase 5
-    stage 8). Raises :class:`PlanError` naming the problem.
+    stage 8) -- and ``shot_modes{shot_id: mode}`` only when some shot is not
+    plain ``motion`` (module docstring). Raises :class:`PlanError` naming
+    the problem.
     """
     try:
         return _build(script=script, storyboard=storyboard, assets=assets, style_lock=style_lock,
                       template=template, story=story, ep=ep, inputs=inputs, ffmpeg=ffmpeg, profile=profile,
-                      subtitles=subtitles, encoder=encoder, video_encoder=video_encoder)
+                      subtitles=subtitles, encoder=encoder, video_encoder=video_encoder,
+                      fill=bool(fill_failed_with_motion))
     except PlanError:
         raise
     except (ValueError, KeyError) as exc:
@@ -267,7 +283,7 @@ def _final_encoder(encoder, video_encoder, profile):
 
 
 def _build(*, script, storyboard, assets, style_lock, template, story, ep, inputs, ffmpeg, profile, subtitles,
-           encoder, video_encoder) -> dict:
+           encoder, video_encoder, fill) -> dict:
     if profile not in _STAGE_PROFILES:
         raise PlanError(f"unknown render profile {profile!r}, expected one of {list(_STAGE_PROFILES)}")
     if encoder not in schemas.RENDER_ENCODERS:
@@ -329,16 +345,26 @@ def _build(*, script, storyboard, assets, style_lock, template, story, ep, input
     board_shots = {shot["shot_id"]: shot for shot in storyboard["shots"]}
     shot_inputs = inputs.get("shots") or {}
     video_inputs = inputs.get("videos") or {}
+    # tier >= 2 (phase 6 stage 9): the step's effective flags, and the shots
+    # whose clip is filled with motion; tier 1 hands neither.
+    keep_still_of = inputs.get("keep_still")
+    filled = set(inputs.get("filled") or ())
     stages = []
     shot_outputs = {}
+    shot_modes = {}
     for tl_shot in timeline["shots"]:
         shot_id = tl_shot["shot_id"]
         board_shot = board_shots[shot_id]
         video = (board_shot.get("assets") or {}).get("video")
-        if video and not board_shot.get("keep_still") and shot_id in video_inputs:
+        if keep_still_of is not None and shot_id in keep_still_of:
+            still = bool(keep_still_of[shot_id])
+        else:
+            still = bool(board_shot.get("keep_still"))
+        if video and not still and shot_id in video_inputs:
             rel = add_input("shot", shot_id, video_inputs[shot_id])
             argv0 = filtergraph.tier2_clip_argv(rel, tl_shot, shot_profile, _OUT_TOKEN)
             input_shas = {rel: video_inputs[shot_id]["sha256"]}
+            shot_modes[shot_id] = "video"
         else:
             if shot_id not in shot_inputs:
                 raise PlanError(f"shot {shot_id!r} has no image")
@@ -347,6 +373,12 @@ def _build(*, script, storyboard, assets, style_lock, template, story, ep, input
             input_shas = {rel: shot_inputs[shot_id]["sha256"]}
             if overlay_sha is not None:
                 input_shas[filtergraph.PAPER_TEXTURE_REL] = overlay_sha
+            if keep_still_of is not None and still:
+                shot_modes[shot_id] = "motion_keep_still"
+            elif shot_id in filled:
+                shot_modes[shot_id] = "motion_fill"
+            else:
+                shot_modes[shot_id] = "motion"
         stage = _cached_stage(f"S:{shot_id}", "shot", argv0, input_shas=input_shas, render_profile=profile,
                               ffmpeg_version=version)
         stages.append(stage)
@@ -444,10 +476,13 @@ def _build(*, script, storyboard, assets, style_lock, template, story, ep, input
     stages.append(_stage("M", "framemd5", framemd5_argv(FINAL_REL, FRAMEMD5_REL), FRAMEMD5_REL))
 
     window = template["window_s"]
-    return {
+    params = {"subtitles": mode, "encoder": encoder}
+    if fill:
+        params[schemas.RENDER_FILL_PARAM] = True
+    plan = {
         "ep": ep,
         "profile": profile,
-        "params": {"subtitles": mode, "encoder": encoder},
+        "params": params,
         "ffmpeg": {"version": ffmpeg["version"], "machine": ffmpeg["machine"]},
         "font": {key: font[key] for key in ("family", "file", "sha256", "reason")},
         "timeline": timeline,
@@ -461,3 +496,6 @@ def _build(*, script, storyboard, assets, style_lock, template, story, ep, input
         "approx_line_ids": meta["approx_line_ids"],
         "whole_frames": timing_mod.board_whole_frames(storyboard),
     }
+    if any(value != "motion" for value in shot_modes.values()):
+        plan["shot_modes"] = shot_modes
+    return plan

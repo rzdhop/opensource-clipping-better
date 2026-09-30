@@ -2766,6 +2766,15 @@ RENDER_STAGE_STATES = ("running", "done", "failed", "cancelled", "cached")
 # Only these stages' outputs are kept in render/cache/ and reused.
 RENDER_CACHED_KINDS = ("shot", "end_card")
 RENDER_INPUT_ROLES = ("shot", "line", "sfx", "bgm", "overlay")
+# What a shot was cut from at tier >= 2 (phase 6 stage 9): its own clip
+# (``video``), or its image with Tier-1 motion -- plain (``motion``: tier 1,
+# or no clip was planned for it), because its effective flags keep it still
+# (``motion_keep_still``), or in place of a clip that failed, went stale or is
+# still generating, by the render param ``fill_failed_with_motion``
+# (``motion_fill``). The render step's own param name is
+# ``RENDER_FILL_PARAM``.
+RENDER_SHOT_MODES = ("video", "motion", "motion_keep_still", "motion_fill")
+RENDER_FILL_PARAM = "fill_failed_with_motion"
 RENDER_STAGE_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_:.-]{0,39}$"
 STDERR_TAIL_MAX = 4000
 
@@ -2796,6 +2805,10 @@ _RENDER_STAGE_SCHEMA = _document({
 _RENDER_PARAMS_SCHEMA = _document({
     "subtitles": {"type": "string", "enum": list(SUBTITLE_MODES)},
     "encoder": {"type": "string", "enum": list(RENDER_ENCODERS)},
+}, optional={
+    # Phase 6 stage 9: recorded only when it is on (a render without it is
+    # the one it always was).
+    RENDER_FILL_PARAM: {"type": "boolean", "const": True},
 })
 
 # The framemd5 parity key is "<version>/<machine>" (DEC-156).
@@ -2890,6 +2903,10 @@ RENDER_MANIFEST_SCHEMA = _document({
     # making recorded -- so a clip the previous manifest named is still
     # provable after this one replaced it (an edit undone).
     "cache": {"type": "object"},
+    # Phase 6 stage 9: {shot id: one of RENDER_SHOT_MODES}, one per shot (checked
+    # below); written only when some shot is not plain ``motion``, so a tier-1
+    # render's manifest is the one it always was.
+    "shot_modes": {"type": "object"},
 })
 
 
@@ -2933,7 +2950,9 @@ def render_manifest_errors(doc) -> list:
     is done or cached, and its loudness is finite. The optional ``reuse``
     record (phase 5 stage 8) tells the truth about the stages
     (``_render_reuse_errors``); the optional ``cache`` map names cache keys,
-    each with its recorded sha256s."""
+    each with its recorded sha256s; the optional ``shot_modes`` (phase 6
+    stage 9) names one of ``RENDER_SHOT_MODES`` for every shot it lists, and
+    lists every S stage's shot."""
     errors = validate(doc, RENDER_MANIFEST_SCHEMA)
     if errors:
         return errors
@@ -2968,6 +2987,15 @@ def render_manifest_errors(doc) -> list:
                 isinstance(sha, str) and re.match(SHA256_PATTERN, sha) for sha in shas):
             errors.append(f"$.cache: {key!r} must be a cache key naming a list of sha256s")
             break
+
+    modes = doc.get("shot_modes")
+    if modes is not None:
+        shot_ids = [stage["id"][2:] for stage in doc["stages"] if stage["kind"] == "shot"]
+        if not modes or any(not re.match(SHOT_ID_PATTERN, str(key)) or value not in RENDER_SHOT_MODES
+                            for key, value in modes.items()):
+            errors.append(f"$.shot_modes: each shot id must name one of {list(RENDER_SHOT_MODES)}")
+        elif any(shot_id not in modes for shot_id in shot_ids):
+            errors.append("$.shot_modes: every S stage's shot needs its mode")
 
     errors.extend(_render_reuse_errors(doc))
     return errors

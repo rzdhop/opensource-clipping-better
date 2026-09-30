@@ -43,7 +43,9 @@ class ManifestError(RuntimeError):
 def new_manifest(plan: dict, *, now: str) -> dict:
     """The manifest of a render that is about to start: no stage, no output,
     the timings open. *plan* is ``render/plan.py``'s plan; its
-    ``whole_frames`` (phase 5 stage 8) is recorded when it has one."""
+    ``whole_frames`` (phase 5 stage 8) is recorded when it has one, and its
+    ``shot_modes`` (phase 6 stage 9) when some shot is not plain motion --
+    a tier-1 render's manifest never has them."""
     doc = {
         "$schema": schemas.RENDER_MANIFEST_SCHEMA_NAME,
         "ep": plan["ep"],
@@ -64,6 +66,8 @@ def new_manifest(plan: dict, *, now: str) -> dict:
     }
     if isinstance(plan.get("whole_frames"), bool):
         doc["whole_frames"] = plan["whole_frames"]
+    if plan.get("shot_modes"):
+        doc["shot_modes"] = dict(plan["shot_modes"])
     return doc
 
 

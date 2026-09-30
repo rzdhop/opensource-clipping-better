@@ -1,18 +1,43 @@
-## CURRENT STATE — AI Story **phase 6 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–8 **done**; next: **stage 9**
+## CURRENT STATE — AI Story **phase 6 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–9 **done**; next: **stage 10**
 - **In-progress header** (keep current):
   - **Current phase:** IMPLEMENT. EXPLORE/CLARIFY/PLAN were done 2026-09-30 in a session run in parallel with phase 5's
     close: three maps, two rounds of questions, an Opus design. The human approved the plan.
   - **Plan:** `.claude/plans/ai-story/14-phase-6-plan.md` (**APPROVED 2026-09-30**; copy at
     `~/.claude/plans/ai-story-phase-6-plan.md`). Brief: `.claude/plans/ai-story/07-phase-6-video-tiers-local.md`.
-  - **Current stage:** 9 — renderer [Opus]:
-    - clips into `render_inputs`;
-    - effective `keep_still`;
-    - `fill_failed_with_motion`;
-    - the last-frame hold;
-    - `shot_modes`;
-    - a sibling Tier-2 golden.
-  - **Next action:** dispatch stage 9, then Tier-1 in both environments (+ vite if the dashboard changes), then
-    commit.
+  - **Current stage:** 10 — Tier-3 native audio, tests only [Opus].
+  - **Next action:** dispatch stage 10, then Tier-1 in both environments, then commit.
+  - **Stage 9 notes for stages 10, 11, 12, 13 and 14:**
+    - **Tier ≥ 2 only.** `steps/render.py` `shot_clips()` fills `inputs.videos`/`keep_still`/`filled`; tier 1 gives
+      exactly today's inputs (guard pinned; all 9 live stories are tier 1).
+    - **Refusal.** A shot that is not kept still and whose clip record is not current (failed, stale, pending,
+      missing) refuses before ffmpeg, with the target (or Continue).
+      - Render param `fill_failed_with_motion` (default off, recorded only when true) gives those shots Tier-1 motion
+        (`motion_fill`).
+      - A shot with no clip record renders plain motion.
+    - **Hold.** `tier2_clip_argv` is `fps=30,tpad=stop_mode=clone:stop_duration=<d>,trim=duration=<d>`, keeping
+      `-an`. Before it, a 1.0 s clip on a 1.5 s shot made 30 of 45 frames, and the render still "completed".
+    - **Manifest.** `shot_modes` is written only when some shot is not plain motion.
+    - **Tier-2 golden.** A sibling: `render/golden_tier2.py`, `tests/test_aistory_render_golden_tier2.py`,
+      `tests/fixtures/aistory_golden_tier2/framemd5.json`.
+      - Keys: host `6.1.1-3ubuntu5/aarch64`; app image `7.1.5-0+deb13u1/aarch64` (via `docker run --rm` of the image).
+      - **The x86_64 CI key is missing.** The first branch push fails this test as designed. Read the digest from its
+        `::error` annotation through the unauthenticated check-runs API (phase 4's way, log line 395), then record it
+        with `python3 tools/render_golden.py --tier2 --record`-equivalent.
+    - **RC-M8.** Partial == full, proven with a real ffmpeg run on the tiny episode.
+    - **For stage 10:**
+      - extend `shot_clips` with the tier-3 `keep_native_audio` current clips;
+      - add their audio as a stem in plan `_build`'s A stage (`filtergraph.audio_mix_argv`) at the shot's `start_s`,
+        dropping that shot's lines;
+      - `tier2_clip_argv` keeps `-an`;
+      - extend `RENDER_INPUT_ROLES`/`RENDER_SHOT_MODES` if needed.
+    - **For stage 11:** `render_estimate` and the API pre-job check call only `require_renderable`, so the clip
+      refusal surfaces in the job. Call `shot_clips` there for a 409.
+    - **Follow-ups (stage 14):**
+      - the runner never checks the final's frame count against `total_frames`;
+      - a pending re-animate that is already submitted is offered its target in the render refusal (the regenerate
+        itself refuses correctly);
+      - a re-render keeps a filled render's param;
+      - `tier2_clip_argv` has no `setsar=1`.
   - **Stage 8 notes for stages 9, 11, 12, 13 and 14:**
     - **Where it sits.** Last in `assets.run()`, after `write_assets_doc`. The assets param `animate` (default on) is
       mirrored in `AssetsStepParams`, and `StoryboardPane` sends `animate: true`.
@@ -258,8 +283,8 @@
 | 6 | sticky image link per episode (A-087) [Opus] | done |
 | 7 | clip documents and the estimate [Opus] | done |
 | 8 | the video phase and `shot:…:video` [Opus] — **RISKIEST** | done |
-| 9 | renderer: clips, hold, `fill_failed_with_motion`, Tier-2 golden [Opus] | next |
-| 10 | Tier-3 native audio, tests only [Opus] | — |
+| 9 | renderer: clips, hold, `fill_failed_with_motion`, Tier-2 golden [Opus] | done |
+| 10 | Tier-3 native audio, tests only [Opus] | next |
 | 11 | API and CLI [Sonnet] | — |
 | 12 | dashboard [Sonnet] | — |
 | 13 | deploy and the Tier-2 live walk (≤ $0.55) [Opus] | — |

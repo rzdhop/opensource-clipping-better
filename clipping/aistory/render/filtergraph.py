@@ -182,10 +182,21 @@ def tier2_clip_argv(video_rel, shot, profile, out_rel) -> list:
     """The argv for a Tier >= 2 shot that already has its own ``.mp4``
     (spec 6.5): scaled and padded to ``profiles.WIDTH``x``profiles.HEIGHT``
     (letterboxed, never cropped or stretched -- ``force_original_aspect_ratio
-    =decrease`` + a centred ``pad``), resampled to a 30 fps CFR stream, and
-    trimmed to the shot's own ``duration_s``. A golden-string-only builder
-    at this stage (no Tier >= 2 source exists yet to sanity-run it against,
-    DEC-158/phase 6): the argv is still exact and relative-paths-only.
+    =decrease`` + a centred ``pad``), resampled to a 30 fps CFR stream,
+    held on its last frame (``tpad=stop_mode=clone``, phase 6 stage 9) and
+    trimmed to the shot's own ``duration_s``; ``-frames:v`` pins the shot's
+    exact frames and ``-an`` drops the clip's own sound (tier 2 never keeps
+    it; tier 3's native audio is a stem of the audio mix, never this clip's
+    track).
+
+    **The hold.** A clip is sold in whole seconds, at least the shot's
+    length -- but a clip may still come back shorter (a model's own frame
+    rule, a local workflow's frame cap): without the hold its clip would end
+    early, and every later shot, the subtitles and the audio would drift
+    against the final pass's frame clock. ``stop_duration`` is the shot's own
+    duration -- always enough, whatever the clip's length, so the argv never
+    depends on probing the file -- and the ``trim`` after it cuts whatever
+    is too long, the hold included.
 
     *shot* is a ``render.timeline`` entry, read here for ``duration_s`` and
     ``frames`` only (a Tier >= 2 clip carries no Tier-1 ``motion``).
@@ -193,11 +204,13 @@ def tier2_clip_argv(video_rel, shot, profile, out_rel) -> list:
     _assert_relative(video_rel, what="video_rel")
     _assert_relative(out_rel, what="out_rel")
 
+    duration = _num(shot["duration_s"])
     vf = (
         f"scale={profiles.WIDTH}:{profiles.HEIGHT}:force_original_aspect_ratio=decrease,"
         f"pad={profiles.WIDTH}:{profiles.HEIGHT}:(ow-iw)/2:(oh-ih)/2,"
         f"fps={profiles.FPS},"
-        f"trim=duration={_num(shot['duration_s'])},"
+        f"tpad=stop_mode=clone:stop_duration={duration},"
+        f"trim=duration={duration},"
         f"format={profile.pix_fmt}"
     )
 

@@ -817,11 +817,14 @@ class AssetsStepParams(BaseModel):
 
 class RenderStepParams(BaseModel):
     """``POST /steps/render``'s params: ``subtitles`` (``style`` -- the style
-    lock's own --, ``word_pop``, ``two_line``, ``none``; DEC-164) and
+    lock's own --, ``word_pop``, ``two_line``, ``none``; DEC-164),
     ``encoder`` (``libx264``, or ``auto``: a hardware encoder for the final
-    pass, opt-in)."""
+    pass, opt-in) and ``fill_failed_with_motion`` (phase 6 stage 9: at tier
+    >= 2 a shot whose clip failed, went stale or is still generating gets
+    Tier-1 motion instead of refusing the render; off by default)."""
     subtitles: Optional[str] = None
     encoder: Optional[str] = None
+    fill_failed_with_motion: Optional[bool] = None
 
 
 class FastTrackStepParams(BaseModel):

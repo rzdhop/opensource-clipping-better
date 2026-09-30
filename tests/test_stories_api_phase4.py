@@ -81,7 +81,7 @@ def test_the_phase_4_request_models_declare_exactly_the_workflows_closed_lists()
     from clipping.aistory import workflow
 
     assert workflow.ASSETS_PARAMS == ("align_words", "animate")
-    assert workflow.RENDER_PARAMS == ("subtitles", "encoder")
+    assert workflow.RENDER_PARAMS == ("subtitles", "encoder", "fill_failed_with_motion")  # phase 6 stage 9
     assert workflow.METADATA_PARAMS == ()
     assert workflow.FAST_TRACK_PARAMS == ("storyboard",)
     assert _class_fields("AssetsStepParams") == list(workflow.ASSETS_PARAMS)
@@ -385,7 +385,7 @@ def test_a_step_is_refused_before_any_job_outside_its_episode(api, episodes, ste
 @pytest.mark.parametrize("step, params, needle", [
     ("assets", {"nope": 1}, "Unknown assets parameter(s) nope (known: align_words, animate)."),
     ("assets", {"align_words": "yes"}, "params.align_words is true or false, not 'yes'."),
-    ("render", {"nope": 1}, "Unknown render parameter(s) nope (known: subtitles, encoder)."),
+    ("render", {"nope": 1}, "Unknown render parameter(s) nope (known: subtitles, encoder, fill_failed_with_motion)."),
     ("render", {"subtitles": "karaoke"},
      "The subtitles must be one of style, word_pop, two_line, none, not 'karaoke'."),
     ("render", {"encoder": "nvenc"}, "The encoder must be one of libx264, auto, not 'nvenc'."),

@@ -401,8 +401,10 @@ def test_tier2_clip_argv_golden():
     assert argv == [
         "ffmpeg", "-hide_banner", "-nostdin", "-y",
         "-i", "in/clip.mp4",
+        # phase 6 stage 9: a clip shorter than its shot holds its last frame
+        # (tpad, before the trim) to the shot's exact frames.
         "-vf", "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,"
-               "fps=30,trim=duration=2,format=yuv420p",
+               "fps=30,tpad=stop_mode=clone:stop_duration=2,trim=duration=2,format=yuv420p",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "12", "-pix_fmt", "yuv420p",
         "-r", "30", "-frames:v", "60", "-an", "cache/sh01_t2.mp4",
     ]
