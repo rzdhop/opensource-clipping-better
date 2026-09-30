@@ -1,12 +1,23 @@
-## CURRENT STATE — AI Story **phase 6 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stage 0 **done**; next: **stage 1**
+## CURRENT STATE — AI Story **phase 6 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–1 **done**; next: **stage 2**
 - **In-progress header** (keep current):
   - **Current phase:** IMPLEMENT. EXPLORE/CLARIFY/PLAN were done 2026-09-30 in a session run in parallel with phase 5's
     close: three maps, two rounds of questions, an Opus design. The human approved the plan.
   - **Plan:** `.claude/plans/ai-story/14-phase-6-plan.md` (**APPROVED 2026-09-30**; copy at
     `~/.claude/plans/ai-story-phase-6-plan.md`). Brief: `.claude/plans/ai-story/07-phase-6-video-tiers-local.md`.
-  - **Current stage:** 1 — pure video planning, the new `clipping/aistory/video_plan.py` [Sonnet]. Then stages 2–14
-    in the plan's order.
-  - **Next action:** dispatch stage 1 (essential tests, fail-first), then Tier-1 in both environments, then commit.
+  - **Current stage:** 2 — provider foundations [Opus]: the video cache key, `GEMINI_PAID_API_KEY` per link, and the
+    video prices re-verified on the provider pages.
+  - **Next action:** dispatch stage 2 (essential tests, fail-first; guard pins the image and TTS key hexes from the
+    pre-change code), then Tier-1 in both environments, then commit.
+  - **Stage 1 notes for stages 7–8:**
+    - `plan_animation(shots, scene_function, dialogue_seconds, *, link, price_per_second, cap_usd,
+      committed_usd, current_shot_ids, mode, priority, lengths)`.
+      - The caller resolves `scene_id → script scene "function"` (`schemas.py:140`, 1969).
+      - The caller sums shot `lines[]` → script `timing.duration_s` into `dialogue_seconds`.
+      - A pinned shot is always selected (then `over_cap`), and `seconds` counts new clips only.
+      - In mode "none", a current (not pinned) clip lands in `still` with `mode_none`. Stage 8 decides whether the
+        render still uses it.
+    - The style lock carries `motion_rules.tier2_prompt_suffix` and `negative_prompt` unchanged from the template.
+    - `MODIFIER_PHRASES` covers `schemas.MODIFIERS` (handheld, jitter_stopmotion).
   - **Open questions:** none blocking.
 - **Human's binding answers (2026-09-30)** — full list in the plan:
   - **No GPU anywhere.** Local ComfyUI is proven only against a fake server; A-035 stays open.
@@ -52,8 +63,8 @@
 | S | Stage | State |
 |---|---|---|
 | 0 | checkpoint, worktree, baseline, backups | done |
-| 1 | pure video planning (`video_plan.py`) [Sonnet] | next |
-| 2 | provider foundations: video cache key, `GEMINI_PAID_API_KEY`, prices [Opus] | — |
+| 1 | pure video planning (`video_plan.py`) [Sonnet] | done |
+| 2 | provider foundations: video cache key, `GEMINI_PAID_API_KEY`, prices [Opus] | next |
 | 3 | hosted video adapters (fal ×3, Veo) [Opus] | — |
 | 4 | local ComfyUI video, fake server only [Opus] | — |
 | 5 | paid LLM booking seam [Opus] | — |
