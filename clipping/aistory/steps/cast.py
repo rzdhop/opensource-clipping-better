@@ -42,6 +42,24 @@ is left for the next run. Anything the step writes clears the entity's
 ``approved_at``. Run again, it makes only what is still missing: with
 nothing missing it calls nothing and writes nothing.
 
+**A free tier that pushes back is paced, not failed** (DEC-168, extended
+here in phase 5: an accepted proposed character's cast job -- portrait,
+sheets and sample -- must finish in one press on the free route, not one
+press per minute). Once every character's images and every pinned voice's
+sample have been tried, the sheets and samples a free link held back
+(``pacing.rate_limited_by``: HTTP 429 from a free link, HTTP 402 from
+``pollinations``) are asked again in rounds: a
+:data:`pacing.RATE_LIMIT_PAUSE_S` pause through the cancel-aware sleep, then
+each provider's items in order until that provider pushes back again; one
+pause serves every provider held back. A provider whose round makes no
+progress is given up; a pause starts only while the step's own budget still
+fits it and the call after it (else the round stops, naming what is left).
+Each item is asked again with the same request -- a portrait's or a sheet's
+seed is derived the same way every time, a sample speaks the pinned voice's
+own line -- so a retry never buys twice. Nothing else is asked again: no
+key, a paid refusal, another status, an item whose paid link was sent;
+``NeedsEditor`` still stops that character's sheets immediately, never paced.
+
 Returns ``{created, written, images, needs_editor, voices, pick_voice,
 samples}``; any failed part ends the step with a ``StepFailed`` naming the
 character, the part, the reason and the target that finishes it.
@@ -55,7 +73,7 @@ import time
 from .. import context, prompting, prompts, refimages, schemas, series_memory, voices
 from .. import store as store_mod
 from .. import uploads as uploads_mod
-from . import entities, llm_call
+from . import entities, episode_common, llm_call, pacing, voice_lines
 from .entities import CHARACTERS
 from .llm_call import StepFailed
 
@@ -64,6 +82,33 @@ SHEETS = ("turnaround", "expressions")
 INTRODUCED_PARAM = "introduced_in"
 
 _EMPTY_PERSONALITY = {"traits": [], "wants": None, "fears": None, "speech_style": None}
+
+# What asking a held-back item again came to (:func:`_pace`), and how long
+# its call may take for the step budget's predictive check: a portrait or a
+# sheet is an image call (``assets.STORY_IMAGE_CALL_SECONDS``, duplicated: an
+# image on a queued provider polls for up to five minutes); a voice sample is
+# a TTS call (``voice_lines.STORY_TTS_CALL_SECONDS``).
+_DONE, _LIMITED, _FAILED = "done", "limited", "failed"
+_CAST_IMAGE_CALL_SECONDS = 300
+_CALL_SECONDS = {"image": _CAST_IMAGE_CALL_SECONDS, "sample": voice_lines.STORY_TTS_CALL_SECONDS}
+
+
+def _and(items) -> str:
+    """``a``, ``a and b``, ``a, b and c`` (``assets._and``, duplicated)."""
+    items = list(items)
+    if len(items) <= 1:
+        return "".join(items)
+    return ", ".join(items[:-1]) + " and " + items[-1]
+
+
+def _counted(items) -> str:
+    """``2 images and 1 voice sample`` for ``[(kind, char_id, which)]``."""
+    parts = []
+    for kind, label in (("image", "image"), ("sample", "voice sample")):
+        count = sum(1 for item_kind, _char_id, _which in items if item_kind == kind)
+        if count:
+            parts.append(f"{count} {label}{'s' if count != 1 else ''}")
+    return _and(parts)
 
 
 # -------------------------------------------------------------- new characters
@@ -377,10 +422,21 @@ class _Run:
         self.pick_voice = []
         self.samples = {}
         self.failures = []  # (name, part, reason, target)
+        # The chain failures behind a still-open image or sample failure, by
+        # (char_id, which) or char_id: what the pacing reads
+        # (:func:`pacing.rate_limited_by`), popped once the part is made.
+        self.image_failures = {}
+        self.sample_failures = {}
 
     def fail(self, character, part, reason, target):
         self.failures.append((character["name"], part, reason, target))
         self.ctx.on_log(f"✖ {character['name']} {part} failed: {reason}")
+
+    def retry_failed(self, index, name, part, reason, target) -> None:
+        """A held-back part asked again (:func:`_pace`) still failed: its
+        place among the failures is kept, as :meth:`fail` would print it."""
+        self.failures[index] = (name, part, reason, target)
+        self.ctx.on_log(f"✖ {name} {part} failed: {reason}")
 
     def made(self, character, which, ref):
         self.images.setdefault(character["char_id"], {})[which] = ref["consistency"]
@@ -402,9 +458,10 @@ def _text(run, ctx, store, character, tools, announced) -> bool:
 
 
 def _image(run, ctx, store, char_id, which, tools):
-    """One missing image: its ref, or None when it failed (recorded). A sheet
-    with no editor to make it raises ``NeedsEditor`` for the caller to record
-    and stop at; nothing was called or written then."""
+    """One missing image: its ref, or None when it failed (recorded, its raw
+    chain failures kept for the pacing). A sheet with no editor to make it
+    raises ``NeedsEditor`` for the caller to record and stop at; nothing was
+    called or written then."""
     character = store.read_entity(ctx.story_id, CHARACTERS, char_id)
     ctx.on_log(f"👤 {character['name']}: {which}")
     try:
@@ -413,7 +470,9 @@ def _image(run, ctx, store, char_id, which, tools):
         if isinstance(exc, refimages.NeedsEditor) and which in SHEETS:
             raise
         run.fail(character, which, str(exc), entities.target(CHARACTERS, char_id, "image", which))
+        run.image_failures[(char_id, which)] = exc.failures
         return None
+    run.image_failures.pop((char_id, which), None)
     run.made(character, which, ref)
     entities.clear_approval(store, ctx.story_id, CHARACTERS, char_id, now=ref["created_at"])
     return ref
@@ -491,14 +550,223 @@ def _samples(run, ctx, store, tools) -> None:
             if exc.alternates:
                 reason += " Other voices: " + ", ".join(f"{v.provider}/{v.voice_id}" for v in exc.alternates) + "."
             run.fail(doc, "voice sample", reason, entities.target(CHARACTERS, doc["char_id"], "voice"))
+            # The one-link chain's failures behind a ``VoiceError`` (none
+            # when it did not come from the chain: no voice pinned, no
+            # sample line) -- what the pacing reads.
+            run.sample_failures[doc["char_id"]] = tuple(getattr(exc.__cause__, "failures", None) or ())
             continue
         except KeyError:
             if entities.exists(store, ctx.story_id, CHARACTERS, doc["char_id"]):
                 raise
             ctx.on_log(f"ℹ️ {doc['name']} was removed while the step ran; skipped.")
             continue
+        run.sample_failures.pop(doc["char_id"], None)
         run.samples[doc["char_id"]] = sample["name"]
         entities.clear_approval(store, ctx.story_id, CHARACTERS, doc["char_id"], now=llm_call.utc_now())
+
+
+# ------------------------------------------------------------------ the pacing
+
+def held_back(run) -> list:
+    """What a free tier held back in this run (:func:`pacing.rate_limited_by`):
+    ``[(provider, "image" | "sample", char_id, which)]`` -- ``which`` is None
+    for a sample. In the order each part is currently open
+    (``run.image_failures``/``run.sample_failures``, popped once made)."""
+    items = []
+    for (char_id, which), failures in run.image_failures.items():
+        provider = pacing.rate_limited_by(failures)
+        if provider:
+            items.append((provider, "image", char_id, which))
+    for char_id, failures in run.sample_failures.items():
+        provider = pacing.rate_limited_by(failures)
+        if provider:
+            items.append((provider, "sample", char_id, None))
+    return items
+
+
+def _enqueue_new(run, queues) -> None:
+    """Fold in a held-back item :func:`held_back` names that is not queued
+    yet -- a sheet a portrait just made made relevant, tried at once by
+    :func:`_images` and held back in its own turn (:func:`_retry_image`) --
+    so it gets a later round instead of being lost. Appended, so an item
+    already at the front of its provider's queue (mid-round) keeps its
+    place."""
+    queued = {(kind, char_id, which) for items in queues.values() for kind, char_id, which in items}
+    for provider, kind, char_id, which in held_back(run):
+        if (kind, char_id, which) not in queued:
+            queues.setdefault(provider, []).append((kind, char_id, which))
+
+
+def _item_name(run, kind, char_id, which) -> str:
+    """The character name :meth:`_Run.fail` printed for this item, from its
+    still-open entry of ``run.failures``."""
+    target = (entities.target(CHARACTERS, char_id, "image", which) if kind == "image"
+              else entities.target(CHARACTERS, char_id, "voice"))
+    entry = next((item for item in run.failures if item[3] == target), None)
+    return entry[0] if entry else char_id
+
+
+def _left(run, items) -> str:
+    """``the portrait of Kiwilo; the voice sample of Mangella`` for
+    ``[(kind, char_id, which)]`` (each keeps its failure and regenerate
+    target)."""
+    parts = []
+    for kind, char_id, which in items:
+        name = _item_name(run, kind, char_id, which)
+        parts.append(f"the {which} of {name}" if kind == "image" else f"the voice sample of {name}")
+    return "; ".join(parts)
+
+
+def _fits(budget, seconds) -> bool:
+    """Whether the step budget still has *seconds* (``Budget.before_call``'s rule)."""
+    try:
+        budget.before_call(lambda: "", per_call=seconds)
+    except StepFailed:
+        return False
+    return True
+
+
+def _stop_pacing(run, ctx, budget, waiting, what) -> None:
+    """No pause is started that the step budget cannot fit: said, with what
+    is left (each keeps its failure and regenerate target)."""
+    ctx.on_log(f"⏳ Not waiting again: the step's {int(budget.limit // 60)}-minute budget cannot fit "
+               f"{what} ({budget.elapsed() / 60:.1f} min used). Left: {_left(run, waiting)}.")
+
+
+def _retry_image(run, ctx, store, tools, char_id, which) -> str:
+    """*which* of *char_id* asked again: ``done``, ``limited`` (held back
+    again) or ``failed`` (for another reason, now its failure); its place
+    among the failures is kept.
+
+    A made portrait unlocks its sheets -- :func:`_images` (idempotent) is
+    called for the whole character, so a sheet the first pass never got to
+    (it returns once the portrait fails) is tried the moment it can be, not
+    lost; whatever :func:`_images` leaves held back is folded into the
+    pacing by the caller (:func:`_enqueue_new`), for its own later round. A
+    fresh ``NeedsEditor`` on a sheet (the editor went away between rounds)
+    stops it the same way the first pass does -- recorded, not retried
+    again; :func:`_images` handles that itself."""
+    target = entities.target(CHARACTERS, char_id, "image", which)
+    index = next(i for i, entry in enumerate(run.failures) if entry[3] == target)
+    if which == "portrait":
+        # Removed before the retry, not after: _images (via _image) appends
+        # a fresh failure of its own on the same target if it fails again,
+        # and must not find this stale one still there.
+        del run.failures[index]
+        run.image_failures.pop((char_id, which), None)
+        _images(run, ctx, store, char_id, tools)
+        character = store.read_entity(ctx.story_id, CHARACTERS, char_id)
+        if entities.has_file(store, ctx.story_id, CHARACTERS, char_id, character["refs"]["portrait"]):
+            return _DONE
+        failures = run.image_failures.get((char_id, which), ())
+        return _LIMITED if pacing.rate_limited_by(failures) else _FAILED
+
+    character = store.read_entity(ctx.story_id, CHARACTERS, char_id)
+    try:
+        ref = refimages.character_image(store, ctx.story_id, char_id, which, **tools.image_kwargs(ctx))
+    except refimages.NeedsEditor as exc:
+        del run.failures[index]
+        run.image_failures.pop((char_id, which), None)
+        run.needs_editor.append({"char_id": char_id, "name": character["name"],
+                                 "message": exc.readiness["message"]})
+        return _DONE
+    except refimages.RefImageError as exc:
+        run.retry_failed(index, character["name"], which, str(exc), target)
+        run.image_failures[(char_id, which)] = exc.failures
+        return _LIMITED if pacing.rate_limited_by(exc.failures) else _FAILED
+    del run.failures[index]
+    run.image_failures.pop((char_id, which), None)
+    run.made(character, which, ref)
+    entities.clear_approval(store, ctx.story_id, CHARACTERS, char_id, now=ref["created_at"])
+    return _DONE
+
+
+def _retry_sample(run, ctx, store, tools, char_id) -> str:
+    """*char_id*'s voice sample asked again on its pinned voice alone
+    (:func:`_samples`'s request): ``done``, ``limited`` or ``failed``, as
+    :func:`_retry_image`."""
+    doc = store.read_entity(ctx.story_id, CHARACTERS, char_id)
+    target = entities.target(CHARACTERS, char_id, "voice")
+    index = next(i for i, entry in enumerate(run.failures) if entry[3] == target)
+    try:
+        sample = voices.synthesize_sample(store, ctx.story_id, char_id, **tools.voice_kwargs(ctx))
+    except voices.VoiceError as exc:
+        reason = str(exc)
+        if exc.alternates:
+            reason += " Other voices: " + ", ".join(f"{v.provider}/{v.voice_id}" for v in exc.alternates) + "."
+        run.retry_failed(index, doc["name"], "voice sample", reason, target)
+        failures = tuple(getattr(exc.__cause__, "failures", None) or ())
+        run.sample_failures[char_id] = failures
+        return _LIMITED if pacing.rate_limited_by(failures) else _FAILED
+    del run.failures[index]
+    run.sample_failures.pop(char_id, None)
+    run.samples[char_id] = sample["name"]
+    entities.clear_approval(store, ctx.story_id, CHARACTERS, char_id, now=llm_call.utc_now())
+    return _DONE
+
+
+def _retry(run, ctx, store, tools, kind, char_id, which) -> str:
+    """One held-back item asked again; ``done`` when a character is deleted
+    meanwhile (its failure is dropped, as the first pass would skip it)."""
+    try:
+        if kind == "image":
+            return _retry_image(run, ctx, store, tools, char_id, which)
+        return _retry_sample(run, ctx, store, tools, char_id)
+    except KeyError:
+        if entities.exists(store, ctx.story_id, CHARACTERS, char_id):
+            raise
+        ctx.on_log("ℹ️ a character was removed while the step ran; skipped.")
+        target = (entities.target(CHARACTERS, char_id, "image", which) if kind == "image"
+                  else entities.target(CHARACTERS, char_id, "voice"))
+        run.failures[:] = [entry for entry in run.failures if entry[3] != target]
+        if kind == "image":
+            run.image_failures.pop((char_id, which), None)
+        else:
+            run.sample_failures.pop(char_id, None)
+        return _DONE
+
+
+def _pace(run, ctx, store, tools, budget) -> None:
+    """The rounds over what a free tier held back (module docstring,
+    DEC-168): before each, a :data:`pacing.RATE_LIMIT_PAUSE_S` pause
+    (cancel-aware) that the budget fits together with the call after it; then
+    each provider's items in order until it holds one back again. A provider
+    whose round makes no progress is given up."""
+    queues = {}
+    for provider, kind, char_id, which in held_back(run):
+        queues.setdefault(provider, []).append((kind, char_id, which))
+    if not queues:
+        return
+    sleep = ctx.cancel.sleeper(tools.sleep_fn)
+    while queues:
+        waiting = [item for items in queues.values() for item in items]
+        if not _fits(budget, pacing.RATE_LIMIT_PAUSE_S + _CALL_SECONDS[waiting[0][0]]):
+            _stop_pacing(run, ctx, budget, waiting, f"a {pacing.RATE_LIMIT_PAUSE_S} s pause and the call after it")
+            return
+        ctx.on_log(f"⏳ {_and(list(queues))} rate-limited: waiting {pacing.RATE_LIMIT_PAUSE_S} s before retrying "
+                   f"{_counted(waiting)}")
+        sleep(pacing.RATE_LIMIT_PAUSE_S)
+        for provider in list(queues):
+            items, progress = queues[provider], False
+            while items:
+                kind, char_id, which = items[0]
+                if not _fits(budget, _CALL_SECONDS[kind]):
+                    _stop_pacing(run, ctx, budget, [item for rest in queues.values() for item in rest],
+                                "another call")
+                    return
+                ctx.cancel.check()
+                outcome = _retry(run, ctx, store, tools, kind, char_id, which)
+                _enqueue_new(run, queues)
+                if outcome == _LIMITED:
+                    break
+                items.pop(0)
+                if outcome == _DONE:
+                    progress = True
+            if items and not progress:
+                ctx.on_log(f"⏳ {provider} is still rate-limited after a {pacing.RATE_LIMIT_PAUSE_S} s pause: "
+                           f"{_counted(items)} left as failed.")
+            if not items or not progress:
+                del queues[provider]
 
 
 def needs_editor_line(waiting) -> str:
@@ -509,9 +777,14 @@ def needs_editor_line(waiting) -> str:
             f"{' '.join(messages)}")
 
 
-def run(ctx, *, runner=None, time_fn=time.monotonic, sleep_fn=time.sleep, adapters=None, transport=None) -> dict:
+def run(ctx, *, runner=None, time_fn=time.monotonic, sleep_fn=time.sleep, adapters=None, transport=None,
+        budget=None) -> dict:
+    """*budget*: an ``episode_common.Budget`` for the pacing rounds (module
+    docstring); None gives the step its own, started here -- so a "N min
+    used" a pause cannot fit counts the whole step, not only the pacing."""
     tools = entities.Tools(runner=runner, time_fn=time_fn, sleep_fn=sleep_fn, adapters=adapters,
                            transport=transport)
+    budget = budget if budget is not None else episode_common.Budget(tools.time_fn)
     store, story = llm_call.open_story(ctx)
     entities.require_status(story, "style_approved", "Approve the style first.")
     entities.read_lock(store, ctx.story_id)
@@ -534,6 +807,7 @@ def run(ctx, *, runner=None, time_fn=time.monotonic, sleep_fn=time.sleep, adapte
 
     _pin_voices(run_, ctx, store, story)
     _samples(run_, ctx, store, tools)
+    _pace(run_, ctx, store, tools, budget)
 
     if run_.needs_editor:
         ctx.on_log(needs_editor_line(run_.needs_editor))

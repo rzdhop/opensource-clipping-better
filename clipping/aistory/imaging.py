@@ -53,10 +53,15 @@ PAID_OFF = "paid link; allow_paid is off"
 
 
 class NoImage(Exception):
-    """No link of the chain made the image; ``reasons`` has one line per link."""
+    """No link of the chain made the image; ``reasons`` has one line per link.
 
-    def __init__(self, reasons):
+    ``failures`` is the chain's raw ``(label, reason)`` pairs
+    (``NoRunnableLink.failures``, one per link tried or skipped) -- empty for
+    a caller that built this directly, without a chain run behind it."""
+
+    def __init__(self, reasons, failures=()):
         self.reasons = list(reasons)
+        self.failures = tuple(failures)
         super().__init__("; ".join(self.reasons))
 
 
@@ -291,7 +296,7 @@ def run_one(kind, chain, request, *, merged, budget_obj, route, budget_check, li
     except gen.NoRunnableLink as exc:
         reasons = [explain(kind, label, reason, chain=chain, merged=merged, budget_obj=budget_obj,
                            request=request, adapters=adapters) for label, reason in exc.failures]
-        raise NoImage(reasons or [str(exc)]) from None
+        raise NoImage(reasons or [str(exc)], failures=exc.failures) from None
 
 
 def book(ledger, result, answered, *, kind, step) -> float:

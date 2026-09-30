@@ -123,11 +123,18 @@ _VARIANT_NAME = re.compile(schemas.TIME_VARIANT_PATTERN)
 
 class RefImageError(Exception):
     """An image that was not made; ``str()`` says why and what to do,
-    ``reasons`` lists what each link or check said when there is more."""
+    ``reasons`` lists what each link or check said when there is more.
 
-    def __init__(self, message, *, reasons=()):
+    ``failures`` is the chain's raw ``(label, reason)`` pairs
+    (``NoRunnableLink.failures``, passed through from ``imaging.NoImage`` when
+    there is a chain run behind this; empty for every other refusal -- a
+    style lock, a chain or a budget that cannot be used, before anything is
+    spent), what :func:`pacing.rate_limited_by` reads."""
+
+    def __init__(self, message, *, reasons=(), failures=()):
         super().__init__(message)
         self.reasons = list(reasons)
+        self.failures = tuple(failures)
 
 
 class NeedsEditor(RefImageError):
@@ -449,7 +456,7 @@ def _make(stories, story, plan, *, entity, eid, lock, env, on_log, cancel, adapt
         except imaging.NoImage as exc:
             on_log(f"✖ {plan.subject} not made: {'; '.join(exc.reasons)}")
             raise RefImageError(f"{plan.subject}: no link of {gen.ENV_NAMES[plan.kind]} could make it on route "
-                                f"{route}.", reasons=exc.reasons) from None
+                                f"{route}.", reasons=exc.reasons, failures=exc.failures) from None
         except Exception as exc:  # noqa: BLE001 - an adapter's bug fails this image, named
             reason = f"{type(exc).__name__}: {exc}"
             on_log(f"✖ {plan.subject} not made: {reason}")
