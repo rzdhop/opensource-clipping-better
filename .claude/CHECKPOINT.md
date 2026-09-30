@@ -147,6 +147,10 @@
   ($0, `rebuild`/`reuse`/`reasons`/`message`), episode page `render.changes` = null | `{blocked}` | the dry-run block
   (cached on the last-good manifest's and the cache files' stats), `assets.lines[].take/note/pending`;
   `storyboard.scenes[sid].retime_only` comes from the raw board. CLI `step <id> rerender --ep N [--dry-run]`.
+- **Found in the stage-10 browser check (fixed, own commit):** the sidebar's "🔒 Sign out" rendered on every server
+  (since `c53949b`) and set the app to signed out, which renders `Login` — so on the live open app at ≥ 768 px one
+  click showed the sign-in screen the human ruled out (hidden on the phone: the sidebar is desktop-only). Now it
+  renders only while a token is stored, and signing out re-checks the server (an open server answers "in").
 - **Rollback:** code: delete the worktree and the branch (or revert a stage's commit). Live data: restore the
   tars (`tar -C outputs/stories -xzf …`) and check `sha256sum -c enfr-before.sha`.
 
@@ -162,7 +166,7 @@ RC-P1…P11, RC-S1…S4, RC-T1…T3, RC-E1…E5 and RC-A1…A9 (tables below) st
 | RC-M6 | Clip mode untouched | `test_render_layer_guard.py` + `git diff --stat b60938e -- clipping/studio clipping/story` empty |
 | RC-M7 | No paid call from the new steps without `allow_paid` | stage-4 tests + DEC-115 tests unedited |
 | RC-M8 | A partial re-render's output equals a full render of the same documents | stage-8 real-ffmpeg test (UNVERIFIED until stage 8) |
-| RC-M9 | No auth: with `API_TOKEN` unset every route and media URL stays open; token-on proven by tests/curl only | `tests/test_auth_opt_in.py` + `test_auth_token.py` unedited |
+| RC-M9 | No auth: with `API_TOKEN` unset every route and media URL stays open, and the dashboard never shows a sign-in screen (no "Sign out" without a stored token; signing out re-checks the server); token-on proven by tests/curl only | `tests/test_auth_opt_in.py` + `test_auth_token.py` unedited; `tests/test_dashboard_no_sign_in.py` (added 2026-09-30) |
 
 ### Stage ledger (phase 5)
 | S | Stage | State |

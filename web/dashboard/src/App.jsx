@@ -53,9 +53,11 @@ function App() {
     if (current) rememberMode(current)
   }, [location.pathname])
 
+  // Ask the server again rather than assume: one with no API_TOKEN answers
+  // "in", so signing out there never reaches the Login screen (DEC-173).
   const signOut = () => {
     clearToken()
-    setAuth('out')
+    setAuth('checking')
   }
 
   if (auth === 'checking') {
@@ -98,10 +100,13 @@ function App() {
           </NavLink>
         </nav>
         <div style={{ padding: '12px 14px', borderTop: '1px solid var(--border-color)' }}>
-          <button type="button" className="nav-link sign-out" onClick={signOut}>
-            <span className="icon">🔒</span>
-            Sign out
-          </button>
+          {/* Only a deployment with a token has anything to sign out of. */}
+          {getToken() && (
+            <button type="button" className="nav-link sign-out" onClick={signOut}>
+              <span className="icon">🔒</span>
+              Sign out
+            </button>
+          )}
           <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
             rzdhop AI
           </div>
