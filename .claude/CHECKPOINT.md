@@ -8,6 +8,10 @@
     regenerate on fal with the estimate logged first — stop if > $0.10, approve, dry run, rerender $0; manifest
     "N of M" == dry run; `allow_paid` on only for that run with caps 0.10/0.10/0.10, then off + 1/3/10 at once;
     ledger booked and compared with fal's price table; no OpenRouter).
+  - **Stage 14 anime paused** for two findings (log 2026-09-30): T2-P5-F10 K1 own-name check matched substrings
+    (Rin/earrings) → whole-word fix `d2ba496`; T2-P5-F11 Edge retired `en-US-DavisNeural` → catalogue AndrewNeural
+    `3cfce9a`; Tier-1 local 6473/1, CI 5687/756; deployed (restart at 0 jobs); Kaito re-pinned (job 95e2705b2d51);
+    anime resumed (`run_style.py anime dcc0998db8ae`). F4 proven live on Kaito's sheets.
   - **Current stage:** 14 — anime running (background, `stage14/run_style.py anime`); then cinematic_real,
     cartoon_flat, storybook_watercolor, claymation, one at a time. 13b **done** (`a833287`, `065a02c`), deployed at
     0 jobs (`rm -sfv` + `up -d --build`), live `main` = `065a02c`. 13b was: F4 (cast pacing), F1 (Season step stays open after a
