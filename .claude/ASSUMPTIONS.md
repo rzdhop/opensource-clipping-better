@@ -299,6 +299,18 @@
   follow-up), then one E4 approve-anyway. The human watches this one. UNCONFIRMED: the short French scripts
   (A-086) share one cause.
 
+- **A-089** — `storybook_watercolor` (v1) holds well (stage 14, 2026-09-30, FR `grandmas_rules`, story
+  `14ff154d3bff`, Mamie Nell + Tomi, Edge voices). Episode 1: **48.0 s** (under 55–75 s: 13 lines over 10 scenes),
+  −14.21 LUFS / TP −2.37, 21 shots, render 154 s, **29.9 MB** (the paper_texture overlay roughly doubles the bitrate
+  of the others' 10–17 MB). two_line in **Patrick Hand** from the shipped file + the hook overlay ("NE JAMAIS
+  OUVRIR"); French accents correct. Motion pan_lr, pan 5 %, overlay paper_texture. **Held:** the watercolor cottage
+  (fireplace, bookshelves) across every shot; Mamie Nell (grey bun, round glasses, patchwork shawl) and Tomi (blue
+  beret) recognisable. **Drifted:** flux paints a fake artist signature now and then. **Friction:** the fast track
+  refused the script 21 times as "under its length window: 54.3 s estimated — under 55–80 s", which a Continue can
+  never pass (it asks for an edit or a manual approval); approved by me through the API like the UI's button, then
+  3 presses. UNCONFIRMED: a "fast track stops at the length gate" should stop the automatic Continue loop (driver
+  rule, not app code).
+
 ## Confirmed
 - **A-069** — Measured render times on the VPS (container ffmpeg `7.1.5-0+deb13u1/aarch64`, final profile,
   libx264): a full 21-shot FR render 160 s, a full 20-shot EN render 161 s; per shot at 4× mean 3.6–3.8 s (median

@@ -12,7 +12,10 @@
     (Rin/earrings) → whole-word fix `d2ba496`; T2-P5-F11 Edge retired `en-US-DavisNeural` → catalogue AndrewNeural
     `3cfce9a`; Tier-1 local 6473/1, CI 5687/756; deployed (restart at 0 jobs); Kaito re-pinned (job 95e2705b2d51);
     anime resumed (`run_style.py anime dcc0998db8ae`). F4 proven live on Kaito's sheets.
-  - **Stage 14 per style:** anime **done** (A-085). Stories: cinematic_real `560e901c1b3d` (fast track, many
+  - **Stage 14 DONE** (A-085…A-089): anime `dcc0998db8ae` 52.7 s, cinematic_real `560e901c1b3d` 41.3 s, cartoon_flat
+    `979c8376e43e` 56.9 s, claymation `04feb539840f` 45.2 s (the human's watch: `http://100.112.96.111:8000/story/04feb539840f/episodes/1`),
+    storybook_watercolor `14ff154d3bff` 48.0 s. **Next: 14b(e).** (History below.)
+  - **Stage 14 per style (history):** anime **done** (A-085). Stories: cinematic_real `560e901c1b3d` (fast track, many
     presses), cartoon_flat `979c8376e43e` (fast track), storybook_watercolor `14ff154d3bff` (cast), claymation
     `04feb539840f` (cast done, places). Voices: the CLI's cast pins Edge only (Gemini TTS free = 10 req/day/model).
     The human added Cloudflare keys → findings F12 (counter burned by 401s; `279b572`) and F13 (adapter's seed
@@ -311,7 +314,7 @@ RC-P1…P11, RC-S1…S4, RC-T1…T3, RC-E1…E5 and RC-A1…A9 (tables below) st
 | 12 | fonts (confirmed: all 5 as named) and per-style renderer gaps [Sonnet] | **done** (local 6420/1, CI 5636/754; 10 files verified by size + git blob; pan_pct plumbed, 4 % styles byte-identical; RC-M4 proven by a reverted mutation) |
 | 13 | merge, deploy, Tier-2 series walk (me at 375 px; the human watches ep 2) | **done** (walk (a)–(h) + bench 12/12; fixes F3/F7/F9 live; ep 2 watched and acknowledged by the human 2026-09-30) |
 | 13b | polish round: F4 cast pacing, F1/F2/F5/F8 dashboard, F6 → A-084 [Sonnet] | **done** (local 6464/1, CI 5678/756; 40 new tests; 2 named payload re-pins; browser check 375 px on a scratch copy) |
-| 14 | Tier-2 per style (5 short episodes, free route; the human watches one) | — |
+| 14 | Tier-2 per style (5 short episodes, free route; the human watches one) | **done** (A-085…A-089; all five fonts from the shipped files; $0; fixes F10–F13; claymation link sent for the human's watch) |
 | 14b(e) | re-edit + partial re-render on paid assets (estimate + the human's go first) | — |
 | 15 | docs and decisions [Sonnet] | — |
 
