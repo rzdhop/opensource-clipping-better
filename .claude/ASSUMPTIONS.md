@@ -278,6 +278,16 @@
   12 fast-track presses on pollinations before Cloudflare worked, 1 after. UNCONFIRMED: why E1–E3 wrote so few lines
   (compare with the FR `fruit_drama` episodes at 58 s before any length fix).
 
+- **A-087** — `cartoon_flat` (v1) renders right, but **mixing image providers inside one episode breaks the look**
+  (stage 14, 2026-09-30, EN `two_minutes_heroes`, story `979c8376e43e`, Captain Obvious + Miss Overthink). Episode
+  1: 56.9 s (in the window), −14.49 LUFS / TP −2.32, 10 scenes / 15 lines / 20 shots, render 145 s, one press after
+  the Cloudflare fix. word_pop and the hook overlay ("GIANT TOASTER ATTACKS CITY!") in **Luckiest Guy** from the
+  shipped file. Motion hold, pan 4 %, no overlays. **Held:** the flat, bright city-square look on every Cloudflare
+  shot. **Drifted:** Cloudflare's flux-1-schnell draws the heroes as flat mascot shapes (a red triangle, a yellow
+  block with glasses and a cape) while the pollinations shots draw realistic humans — prompt-only consistency does not
+  survive a provider switch mid-episode (the chain falls through per shot). UNCONFIRMED: whether pinning one image
+  provider per episode (or per story) is worth a setting — a phase-6 candidate.
+
 ## Confirmed
 - **A-069** — Measured render times on the VPS (container ffmpeg `7.1.5-0+deb13u1/aarch64`, final profile,
   libx264): a full 21-shot FR render 160 s, a full 20-shot EN render 161 s; per shot at 4× mean 3.6–3.8 s (median
