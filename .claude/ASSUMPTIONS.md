@@ -268,6 +268,16 @@
   comes out as a generic corridor; keyless pollinations stamps its logo bottom-right. The run found T2-P5-F10/F11
   (fixed) and the Gemini TTS daily quota (Rin moved to Edge Aria). UNCONFIRMED: the look on a stronger image link.
 
+- **A-086** — `cinematic_real` (v1) renders right but its French scripts run short (stage 14, 2026-09-30, FR
+  `last_bus_3am`, story `560e901c1b3d`, Chauffeur Sam + Le Passager, Edge voices). Episode 1: **41.3 s** (far under
+  55–75 s: 13 lines over 10 scenes; the fast track only warns on "under"), −14.19 LUFS / TP −2.37, 20 shots, render
+  123 s. Subtitles two_line in **Bebas Neue** from the shipped file; French accents burn correctly (ARRÊT, ÉTRANGE,
+  VERROUILLÉE); highlight #D98E04; "Généré par IA" label. Motion push_in + handheld, pan 3 %, no overlays. **Held:**
+  the photographic night-bus look; the passenger's trench coat. **Drifted:** the driver's face and cap change shot
+  to shot (prompt-only); shots mix pollinations (logo) and Cloudflare (no logo, square native size, cropped to 9:16).
+  12 fast-track presses on pollinations before Cloudflare worked, 1 after. UNCONFIRMED: why E1–E3 wrote so few lines
+  (compare with the FR `fruit_drama` episodes at 58 s before any length fix).
+
 ## Confirmed
 - **A-069** — Measured render times on the VPS (container ffmpeg `7.1.5-0+deb13u1/aarch64`, final profile,
   libx264): a full 21-shot FR render 160 s, a full 20-shot EN render 161 s; per shot at 4× mean 3.6–3.8 s (median
