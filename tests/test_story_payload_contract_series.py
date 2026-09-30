@@ -28,6 +28,7 @@ PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[1]
 MODELS = PROJECT_ROOT / "web" / "api" / "models.py"
 API_JS = PROJECT_ROOT / "web" / "dashboard" / "src" / "api.js"
 SEASON_STEP = PROJECT_ROOT / "web" / "dashboard" / "src" / "pages" / "story" / "steps" / "SeasonStep.jsx"
+NEW_STORY_WIZARD = PROJECT_ROOT / "web" / "dashboard" / "src" / "pages" / "story" / "NewStoryWizard.jsx"
 INDEX_CSS = PROJECT_ROOT / "web" / "dashboard" / "src" / "index.css"
 
 FOLD_WARNING = "approving this character re-opens the cast approval"
@@ -499,3 +500,141 @@ def test_recap_and_digest_preserve_line_breaks_too():
     assert "feedback.digest" in feedback_body
     digest_section = feedback_body[feedback_body.index("feedback.digest") - 200:feedback_body.index("feedback.digest") + 50]
     assert "story-season-preserve-lines" in digest_section, "the digest is not rendered with preserved line breaks"
+
+
+# =================================================== coordinator fix-attempt-2
+# (F1/F2/F5, live walk on the real FR story, 375 px, 2026-09-30, stage 13b)
+
+# ------------------------------------------------------------------------ F1
+# The wizard collapsed the Season step back to Cast the instant any series-
+# panel action (or its own job's completion) succeeded: every one of them
+# was wired to the wizard's ordinary afterAction, which always clears
+# manualStep -- fine for concepts/bible/style/cast/places (advancing makes
+# sense there), wrong here once the season is already approved and nothing
+# else is 'active' (expanded falls back to 'cast').
+
+def test_the_wizard_defines_a_series_change_callback_that_never_clears_manual_step():
+    src = NEW_STORY_WIZARD.read_text(encoding="utf-8")
+    match = re.search(r"const afterSeriesAction = \(\) => \{([\s\S]*?)\n  \}", src)
+    assert match, "NewStoryWizard.jsx does not define afterSeriesAction"
+    assert "setManualStep(null)" not in match.group(1), (
+        "afterSeriesAction must never clear manualStep -- the Season step must stay open"
+    )
+    assert "refresh()" in match.group(1)
+
+
+def test_season_step_receives_the_series_change_callback_alongside_the_ordinary_one():
+    src = NEW_STORY_WIZARD.read_text(encoding="utf-8")
+    match = re.search(r"<SeasonStep\b([^>]*)/>", src)
+    assert match, "SeasonStep is not rendered in NewStoryWizard.jsx"
+    tag = match.group(1)
+    assert "onSeriesChange={afterSeriesAction}" in tag, tag
+    # Every other step's behaviour (and the season's own advance) is unchanged.
+    assert "onChange={afterAction}" in tag, tag
+
+
+def test_the_series_panel_is_wired_to_the_series_change_callback_not_the_ordinary_one():
+    """SeriesMemoryPanel -- and so MemoryCard/FeedbackBox/ProposeNextControl/
+    ProposalItem/ProposalsCard, which all take their onChange from it --
+    must receive onSeriesChange, or a series action collapses the step the
+    instant it succeeds, exactly the live-walk symptom (F1)."""
+    src = SEASON_STEP.read_text(encoding="utf-8")
+    match = re.search(r"function SeasonStep\(\{([^}]*)\}\)\s*\{", src)
+    assert match, "SeasonStep not found"
+    assert "onSeriesChange" in match.group(1), "SeasonStep does not take an onSeriesChange prop"
+    body = _function_body(src, src[match.start():match.end() - 1])
+    panel_call = re.search(r"<SeriesMemoryPanel\b([^>]*)/>", body)
+    assert panel_call, "SeriesMemoryPanel is not rendered"
+    assert "onChange={onSeriesChange}" in panel_call.group(1), panel_call.group(1)
+
+
+def test_the_jobfeed_completion_callback_uses_the_series_change_callback():
+    """useJobFeed's onJob (the season step's own job -- 'season' or a
+    'regenerate' of 'season:<ep>') must not clear manualStep either: the
+    same collapse, fired asynchronously once the job's status is seen to
+    have left queued/running."""
+    src = SEASON_STEP.read_text(encoding="utf-8")
+    match = re.search(r"onJob: \(job\) => \{([\s\S]*?)\n\s*\},", src)
+    assert match, "useJobFeed's onJob callback not found in SeasonStep.jsx"
+    assert "onSeriesChange()" in match.group(1), match.group(1)
+    assert "onChange()" not in match.group(1), match.group(1)
+
+
+def test_the_season_arcs_own_approve_and_replan_keep_the_ordinary_callback():
+    """SeasonActions (approve/re-plan the whole season) is unchanged --
+    only the series panel's own actions and its job feed move to
+    onSeriesChange."""
+    src = SEASON_STEP.read_text(encoding="utf-8")
+    match = re.search(r"<SeasonActions\b([^>]*)/>", src)
+    assert match, "SeasonActions is not rendered"
+    assert "onChange={onChange}" in match.group(1), match.group(1)
+
+
+# ------------------------------------------------------------------------ F2
+# The paste counter counted UTF-16 units (text.length): the server
+# (workflow._pasted, Python len()) counts Unicode code points -- an emoji
+# reads one character short client-side (295 vs the server's 294, live).
+
+def test_a_code_point_length_helper_is_defined_and_used_for_the_caps():
+    src = SEASON_STEP.read_text(encoding="utf-8")
+    assert re.search(r"function codePointLength\(", src), "no codePointLength(...) helper defined"
+    text_match = re.search(r"const overText = (.*)", src)
+    assert text_match and "codePointLength(text)" in text_match.group(1), (
+        f"overText does not count code points: {text_match.group(1) if text_match else None}"
+    )
+    stats_match = re.search(r"const overStats = (.*)", src)
+    assert stats_match and "codePointLength(stats)" in stats_match.group(1), (
+        f"overStats does not count code points: {stats_match.group(1) if stats_match else None}"
+    )
+
+
+def test_the_cap_message_counts_code_points_not_utf16_units():
+    src = SEASON_STEP.read_text(encoding="utf-8")
+    match = re.search(r"const capMessage = \(what, value, limit\) =>([\s\S]*?)\n\n", src)
+    assert match, "capMessage not found in SeasonStep.jsx"
+    assert "value.length" not in match.group(1), "capMessage still counts UTF-16 units (value.length)"
+    assert "codePointLength(value)" in match.group(1)
+
+
+def test_the_live_counters_show_code_points_not_utf16_units():
+    src = SEASON_STEP.read_text(encoding="utf-8")
+    match = re.search(r"function FeedbackBox\(\{[^}]*\}\)\s*\{", src)
+    body = _function_body(src, src[match.start():match.end() - 1])
+    assert "{text.length} / {FEEDBACK_TEXT_MAX_LENGTH}" not in body
+    assert "{stats.length} / {FEEDBACK_STATS_MAX_LENGTH}" not in body
+    assert "{codePointLength(text)} / {FEEDBACK_TEXT_MAX_LENGTH}" in body
+    assert "{codePointLength(stats)} / {FEEDBACK_STATS_MAX_LENGTH}" in body
+
+
+# ------------------------------------------------------------------------ F5
+# "Approve proposals" stayed an actionable button forever after the
+# approval (approve_proposals writes nothing of its own -- "the decisions
+# are the record" -- so nothing in the proposals document itself ever
+# changes). The payload now carries proposals_approved (derived from the
+# job that completes on approval); the card must mirror the season's own
+# approved_at -> "Approved" pattern instead of leaving the button live.
+
+def test_proposals_card_takes_an_approved_prop():
+    src = SEASON_STEP.read_text(encoding="utf-8")
+    match = re.search(r"function ProposalsCard\(\{([^}]*)\}\)\s*\{", src)
+    assert match, "ProposalsCard not found"
+    assert "approved" in match.group(1), "ProposalsCard does not take an approved prop"
+
+
+def test_proposals_card_mirrors_the_seasons_approved_at_pattern():
+    src = SEASON_STEP.read_text(encoding="utf-8")
+    match = re.search(r"function ProposalsCard\(\{[^}]*\}\)\s*\{", src)
+    body = _function_body(src, src[match.start():match.end() - 1])
+    disabled_match = re.search(r"onClick=\{handleApprove\}[\s\S]*?disabled=\{([^}]*)\}", body)
+    assert disabled_match, "Approve proposals button not found"
+    assert "approved" in disabled_match.group(1), f"not disabled once approved: {disabled_match.group(1)}"
+    assert re.search(r"approved \? 'Approved'", body) or re.search(r'approved \? "Approved"', body), (
+        "the button does not read Approved once approved"
+    )
+
+
+def test_the_panel_passes_proposals_approved_into_the_card():
+    src = SEASON_STEP.read_text(encoding="utf-8")
+    match = re.search(r"<ProposalsCard\b([^>]*)/>", src)
+    assert match, "ProposalsCard is not rendered"
+    assert "row.page.proposals_approved" in match.group(1), match.group(1)

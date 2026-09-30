@@ -2087,6 +2087,19 @@ def _template_view(story, script) -> dict:
             "tighten_above_s": template["tighten_above_s"]}
 
 
+def _regenerate_blocked(ec, precondition) -> str | None:
+    """*precondition* (``assets.require_approved`` / ``metadata.
+    require_render``) applied to *ec* right now: its own refusal sentence,
+    single-sourced for the dashboard's regenerate controls (F8, phase 5
+    stage 13b) instead of a copied string that can drift from it -- or None
+    when it would not refuse."""
+    try:
+        precondition(ec)
+    except StepFailed as exc:
+        return str(exc)
+    return None
+
+
 def episode_view(stories, story, ep) -> dict:
     """What the episode page shows (the web layer adds the episode's jobs)::
 
@@ -2096,15 +2109,34 @@ def episode_view(stories, story, ep) -> dict:
                    "storyboard": none|partial|complete|approved,
                    "report": none|passed|issues|stale,
                    "stale_scenes": [scene_id, ...], "prompts_outdated": bool,
-                   "missing": [what the script step would still write]}}
+                   "missing": [what the script step would still write],
+                   "assets_regenerate_blocked": str | null,
+                   "metadata_regenerate_blocked": str | null}}
 
     ``template`` is the one the script was written against, else the
-    story's choice. Calls nothing; ``StoryUnreadable`` for a document that
-    does not validate."""
+    story's choice. ``assets_regenerate_blocked``/``metadata_regenerate_
+    blocked`` (F8, phase 5 stage 13b) are ``assets.require_approved``'s /
+    ``metadata.require_render``'s own refusal sentence right now -- what a
+    line's re-voice, a shot's image regenerate or a platform's metadata
+    regenerate would 409 with -- or None while neither would refuse; also
+    None without a script yet (those controls are not shown then) or when
+    the episode's context itself does not read (a style not locked, an
+    unready story: a conflict of a different kind, shown elsewhere on the
+    page). Calls nothing else; ``StoryUnreadable`` for a document that does
+    not validate."""
     story_id = story["story_id"]
     script = read_episode(stories, story_id, ep, SCRIPT_DOC)
     board = read_episode(stories, story_id, ep, STORYBOARD_DOC)
     outdated = outdated_entities(board, _entities(stories, story_id)) if board else []
+    assets_blocked = metadata_blocked = None
+    if script is not None and script["scenes"]:
+        try:
+            ec = _context(stories, story_id, ep)
+        except WorkflowError:
+            ec = None
+        if ec is not None:
+            assets_blocked = _regenerate_blocked(ec, assets_step.require_approved)
+            metadata_blocked = _regenerate_blocked(ec, metadata_step.require_render)
     return {
         "ep": ep, "script": script, "storyboard": board, "template": _template_view(story, script),
         "state": {
@@ -2114,6 +2146,8 @@ def episode_view(stories, story, ep) -> dict:
             "stale_scenes": sorted(storyboard_step.stale_scenes(board, script)) if board and script else [],
             "prompts_outdated": bool(outdated),
             "missing": script_missing(script, ep),
+            "assets_regenerate_blocked": assets_blocked,
+            "metadata_regenerate_blocked": metadata_blocked,
         },
     }
 

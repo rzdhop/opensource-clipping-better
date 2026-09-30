@@ -313,7 +313,7 @@ function ShotStateBadge({ state }) {
  * one entry of `episode.assets.shots` (null before the episode has a
  * storyboard -- the caller only renders this once one exists).
  */
-function ShotImageBlock({ storyId, ep, assetShot, planConsistency, busy, onChange }) {
+function ShotImageBlock({ storyId, ep, assetShot, planConsistency, assetsBlocked, busy, onChange }) {
   const [url, setUrl] = useState(null)
   const [loadFailed, setLoadFailed] = useState(false)
   const [lockSaving, setLockSaving] = useState(false)
@@ -385,7 +385,7 @@ function ShotImageBlock({ storyId, ep, assetShot, planConsistency, busy, onChang
       </label>
       <StepError message={lockError} />
       <RegenerateControl
-        disabled={busy || Boolean(assetShot.locked)}
+        disabled={busy || Boolean(assetShot.locked) || Boolean(assetsBlocked)}
         onRegenerate={regenerateImage}
         empty={!assetShot.image_name}
         label="image"
@@ -397,7 +397,7 @@ function ShotImageBlock({ storyId, ep, assetShot, planConsistency, busy, onChang
 
 // ------------------------------------------------------------------------- shot
 
-function ShotCard({ storyId, ep, shot, assetShot, scene, maps, busy, onChange }) {
+function ShotCard({ storyId, ep, shot, assetShot, scene, maps, assetsBlocked, busy, onChange }) {
   const [fieldError, setFieldError] = useState('')
   const [fieldErrors, setFieldErrors] = useState(null)
   const [actionEditing, setActionEditing] = useState(false)
@@ -500,7 +500,7 @@ function ShotCard({ storyId, ep, shot, assetShot, scene, maps, busy, onChange })
 
       {assetShot && (
         <ShotImageBlock storyId={storyId} ep={ep} assetShot={assetShot} planConsistency={shot.consistency}
-          busy={busy} onChange={onChange} />
+          assetsBlocked={assetsBlocked} busy={busy} onChange={onChange} />
       )}
 
       <div className="story-shot-controls">
@@ -934,6 +934,11 @@ export default function StoryboardPane({ episode, characters, places, props, sto
   const storyboard = episode.storyboard
   const busy = Boolean(inFlightJob)
   const maps = buildEntityMaps(characters, places, props)
+  // F8 (phase 5 stage 13b): assets.require_approved's own refusal sentence
+  // right now, or null -- single-sourced (workflow.episode_view), so a
+  // shot's image regenerate is disabled instead of round-tripping into a
+  // 409 that spends nothing.
+  const assetsBlocked = episode.state.assets_regenerate_blocked
   const scenesById = script ? Object.fromEntries(script.scenes.map((scene) => [scene.scene_id, scene])) : {}
   const assetsByShotId = episode.assets
     ? Object.fromEntries(episode.assets.shots.map((assetShot) => [assetShot.shot_id, assetShot]))
@@ -946,6 +951,8 @@ export default function StoryboardPane({ episode, characters, places, props, sto
       {storyboard && storyboard.shots.length > 0 && script && (
         <>
           <StoryboardBanners storyId={storyId} ep={ep} episode={episode} busy={busy} onChange={onChange} />
+
+          {assetsBlocked && <p className="form-hint story-storyboard-assets-blocked">{assetsBlocked}</p>}
 
           <div className="story-storyboard-scenes">
             {buildShotGroups(storyboard, scenesById).map((group, i, groups) => {
@@ -969,6 +976,7 @@ export default function StoryboardPane({ episode, characters, places, props, sto
                           assetShot={assetsByShotId[shot.shot_id]}
                           scene={group.scene}
                           maps={maps}
+                          assetsBlocked={assetsBlocked}
                           busy={busy}
                           onChange={onChange}
                         />

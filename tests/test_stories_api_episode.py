@@ -575,13 +575,19 @@ def test_the_episode_page_and_the_story_pages_summary(api):
     assert page == {
         "ep": 1, "script": None, "storyboard": None,
         "template": {"id": "serial_60s_v1", "window_s": [55, 80], "target_s": 60, "tighten_above_s": 75},
+        # F8, phase 5 stage 13b: no script yet -- neither regenerate control
+        # is shown, so both read null rather than a precondition sentence.
         "state": {"script": "none", "storyboard": "none", "report": "none", "stale_scenes": [],
-                  "prompts_outdated": False, "missing": ["beat_sheet"]},
+                  "prompts_outdated": False, "missing": ["beat_sheet"],
+                  "assets_regenerate_blocked": None, "metadata_regenerate_blocked": None},
         "assets": None, "render": None, "metadata": None,
         "ledger": {"entries": [], "totals": {"est_usd": 0.0, "paid_usd": 0.0, "entries": 0}},
         # Phase 5, stage 5: workflow.series_page's own fields (no memory, feedback or proposals yet;
         # the gate blocking episode 2 until episode 1's script is approved and its memory written).
+        # F5, stage 13b: no propose-next job on record for this episode either -- proposals_approved
+        # is False, not an error, exactly like proposals itself being None.
         "series": {"ep": 1, "memory": {"state": "none", "entry": None}, "feedback": None, "proposals": None,
+                  "proposals_approved": False,
                   "next_episode_gate": ("Episode 1's series memory is not written yet: approve episode 1's "
                                         "script, then run memory for episode 1 and approve it, before writing "
                                         "episode 2.")},

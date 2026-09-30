@@ -736,6 +736,52 @@ def test_the_story_and_episode_pages_expose_the_series_fields(api, m):
         assert key in page
 
 
+
+# --------------------------------------------------- F5 (stage 13b polish)
+# "Approve proposals" writes nothing of its own (approve_proposals: "the
+# decisions are the record") but does complete the propose-next job that
+# was awaiting approval for the episode -- proposals_approved is derived
+# from that job's status, not from the proposals document.
+
+def test_proposals_approved_is_false_without_a_propose_next_job_on_record(api, m):
+    """`_proposed` writes proposals.json directly (the step module, never
+    through a job) -- exactly like a story whose propose-next job is long
+    gone (deleted, or from before this field existed): nothing to derive
+    "approved" from, so it reads False, never an error."""
+    story_id, _llm = _proposed(api, m, feedback=False)
+
+    ep2 = _story(api, story_id)["series"][1]
+
+    assert ep2["ep"] == 2
+    assert ep2["proposals_approved"] is False
+
+
+def test_proposals_approved_follows_the_latest_propose_next_jobs_status(api, m):
+    story_id, _llm = _proposed(api, m, feedback=False)
+    job_id = _job(api, story_id, "propose-next", status="awaiting_approval", ep=1)
+
+    ep2 = _story(api, story_id)["series"][1]
+    assert ep2["proposals_approved"] is False  # awaiting approval, not completed yet
+
+    for item_id in ("char_1", "char_2", "twist_1"):
+        _decide(api, story_id, 2, item_id, accept=False)
+    response = _approve(api, story_id, "proposals:2")
+    assert response.status_code == 200, response.text
+
+    # The approve route's own answer (the episode page) already reflects it.
+    assert response.json()["series"]["proposals_approved"] is True
+
+    from web.api.models import JobStatus
+    assert api.jobs.get_job(job_id)["status"] == JobStatus.COMPLETED.value
+    ep2 = _story(api, story_id)["series"][1]
+    assert ep2["proposals_approved"] is True
+
+    # A newer propose-next run (a re-run) makes it not approved again.
+    _job(api, story_id, "propose-next", status="awaiting_approval", ep=1)
+    ep2 = _story(api, story_id)["series"][1]
+    assert ep2["proposals_approved"] is False
+
+
 def test_a_season_with_no_episodes_planned_yet_has_an_empty_series_list(api):
     story_id = api.store.create(language="fr", seed_text=None, now=NOW)["story_id"]
 

@@ -1,13 +1,70 @@
-## CURRENT STATE — AI Story **phase 5 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–12 **done**; next: **stage 13** (merge, deploy, live series walk)
+## CURRENT STATE — AI Story **phase 5 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–13b **done**; next: **deploy at 0 jobs, then stage 14** (five styles)
 - **In-progress header** (keep current):
   - **Current phase:** IMPLEMENT (phases 0–3 done: the plan was mapped, clarified and approved 2026-09-29).
-  - **Current stage:** 13 — the live walk (a)–(h) and the bench are done; waiting for the human to watch ep 2 on
-    the phone and acknowledge; then stage 14 (one episode per remaining style).
-  - **Next action (a new session):** the human starts it with the close prompt saved in
-    `.claude/plans/ai-story/12-phase-5-close-prompt.md` (stage 13b polish incl. F4 → deploy → stage 14 five styles
-    unattended → 14b(e) capped at $0.10 → stage 15 docs/decisions → push + close). Its three decision lines (ep 2
-    acknowledged, fix F4 now, the capped 14b(e) go) count only when the human sends them in that session.
-    Ep 2 to watch: tailnet `http://100.112.96.111:8000/story/b1104ec66b05/episodes/2`.
+  - **Close session started 2026-09-30** with the close prompt (`12-phase-5-close-prompt.md`), sent by the human
+    with its three decision lines: **episode 2 watched and acknowledged (stage 13 closed)**; **fix T2-P5-F4 now**
+    (the cast step paces free-tier image limits like assets, DEC-168's rounds, never a paid fallback);
+    **14b(e) go, hard cap $0.10**, on T2 `ab8fc500173e` (one text-only line edit + re-voice $0, one shot image
+    regenerate on fal with the estimate logged first — stop if > $0.10, approve, dry run, rerender $0; manifest
+    "N of M" == dry run; `allow_paid` on only for that run with caps 0.10/0.10/0.10, then off + 1/3/10 at once;
+    ledger booked and compared with fal's price table; no OpenRouter).
+  - **Current stage:** 13b **done** (commits below) → next: ff `main`, deploy at 0 jobs (`rm -sfv` + `up -d
+    --build`: the dashboard changed), then stage 14. 13b was: F4 (cast pacing), F1 (Season step stays open after a
+    series job), F2 (paste counter in code points), F5 ("Approve proposals" shows approved once the propose-next job
+    is completed), F8 (re-voice and other controls needing the approved script disabled with the server's reason);
+    F6 → A-084 only. **Browser check (me, 375 px, scratch copy of the live FR story + its 68 job records in the
+    worktree's `outputs/`):** F5 ep 2 "Approved" (disabled) from the completed propose-next job; F2 "Génial 😀" →
+    8 / 6000 (was 9); F1 Reject on an undecided twist (made undecided in the scratch copy only) → "Rejected." and
+    the Season step stays open (Cast collapsed); F8 after a text-only edit of l13: the `require_approved` sentence
+    once above the Script scenes, 19/19 "Re-voice this line" disabled, the 23 shot-image regenerates disabled (the
+    23 `:plan` text regenerates stay enabled, as the server allows), Preview's 3 metadata regenerates disabled with
+    `require_render`'s sentence; scrollWidth 375 everywhere. The scratch copy is now edited (twist rejected, l13
+    changed) — refresh it from the live story before reusing it.
+  - **Stage 14 runbook (mapped, scripts ready in the session scratchpad `stage14/run_style.py` + `measure.py`):**
+    per style `new --lang L --concept C --style S --consistency-mode prompt_only`, `step bible|style --auto-approve`,
+    `step cast --characters A --characters B --auto-approve` (3 attempts, 80 s apart), `step places --place
+    'Name|line' --auto-approve`, `step season --episodes 3 --auto-approve` — all `sudo docker exec rzc-backend python
+    main.py --ai-story …` on a new story (A-044 safe); `style_preview` skipped (not auto-approvable, not required);
+    then `POST /api/stories/{id}/steps/fast-track {ep:1, params:{storyboard:t1}}` polled to a terminal status; a
+    failed job whose error says "Then Continue the fast track" → 80 s → press again (≤ 20); stopped at the script
+    on E4 issues → `approve/script:1 {approve_anyway:true}` once (as the UI checkbox; A-084) → press again; any other
+    end stops the style. Concepts/cast/lang: anime `detective_dawn` Rin+Kaito EN; cinematic_real `last_bus_3am`
+    Driver Sam+The Passenger FR; cartoon_flat `two_minutes_heroes` Captain Obvious+Miss Overthink EN;
+    storybook_watercolor `grandmas_rules` Grandma Nell+Tomi FR; claymation `clay_town_confessions` Mayor
+    Dough+Baker Pim FR (FR names from the sketch). One background run per style; checkpoint after each.
+  - **14b(e) guard (found while mapping):** the default `LLM_CHAIN` includes OpenRouter (paid, keyed), so
+    `allow_paid` on would open it: pin `LLM_CHAIN` without openrouter and fal-only image chains in `.env` for the run
+    (the paid test's runbook `.claude/plans/paid-fal-test.md`), do every LLM step (E4) and approval with
+    `allow_paid` still off, turn it on only for the fal shot regenerate, then off + 1/3/10 and `.env` restored.
+  - **13b plan (two commits, one Tier-1 run, each commit reverts alone):**
+    - **13b-1 F4 [Sonnet agent, backend]:** root cause: `steps/cast.py` has no pacing (a 402/429 → `run.fail()` →
+      `StepFailed` "Cast incomplete…"), and `imaging.run_one`/`refimages._make` drop the raw `(label, reason)`
+      failures DEC-168's predicates read. Fix: move the pure predicates (`is_rate_limit`, `_paid_sent`,
+      `rate_limited_by`, `RATE_LIMIT_PAUSE_S`) to a new `steps/pacing.py`, re-imported by `assets.py` under the
+      same names (assets' round engine untouched); keep raw failures on `NoImage`/`RefImageError`; the cast step
+      paces held-back sheets and samples in DEC-168 rounds (one cancel-aware 60 s pause per round, budget check
+      before a pause, give up a provider with no progress, never an item with a paid request sent, never a
+      `NeedsEditor` stop). **Rejected:** generalising `_Assets.pace` into a shared engine (bigger blast radius in the
+      assets path that works, for a small gain); copying the predicates (the "held back" rule would drift).
+    - **13b-2 F1/F2/F5/F8 [Sonnet agent, dashboard + 2 payload fields]:** F1 series-panel actions and their job
+      callbacks never move the open wizard step; F2 `[...s].length` (code points) for the feedback caps; F5 the
+      payload says whether the latest propose-next job for the episode is `completed` (an approval completes it,
+      `stories.py:1309/1333`), and the card shows "Approved" then; F8 the episode page carries the server's own
+      refusal sentence (`assets.require_approved`, `metadata.require_render`) and the re-voice / shot-image /
+      metadata regenerate controls are disabled with it shown as visible text (a `title` is invisible on a phone).
+    - **Riskiest:** 13b-1 (it runs in every free cast press; the paid predicate must stay byte-identical).
+    - **DECISIONS check:** DEC-168 (extended to the cast step, amended in stage 15), DEC-117 (stop-and-ask kept),
+      DEC-115/RC-M7 (paid gate unchanged), DEC-173/RC-M9 (no auth code touched). No conflicts.
+    - **Verification:** fail-first targeted tests by the agents; my Tier-1 both envs + compileall + vite build; my
+      browser check at 375 px on the scratch servers (`phase5-throwaway` :8015 / `phase5-dashboard` :5177).
+    - **Rollback:** revert the stage's commit(s); nothing live changes until the deploy.
+  - **Order after 13b:** deploy at 0 jobs (`rm -sfv` + `up -d --build`) → stage 14 (5 styles unattended, the human
+    watches claymation) → 14b(e) → stage 15 → close (Tier-1, ff `main`, deploy, push branch then `main`, CI green).
+  - **Live state at session start:** 0 jobs, `allow_paid` false, caps 1/3/10, `main` == branch == `edf9a64`.
+  - **Tier-1 baseline of the close session at `edf9a64`:** in the worktree both suites green (no F/E; the doubled
+    `-q` hid the counts) + compileall clean; counts from a `git archive` copy: local 6415 passed / 9 skipped, CI env
+    5631 passed / 762 skipped, each + 1 failure that is the copy's missing `.git`
+    (`test_auth_token.py::test_the_data_directory_is_tracked_but_its_contents_are_not` runs `git`).
   - **Open questions:** none blocking. **Stage 12 fonts answered 2026-09-30: "All 5 as named"** — from
     github.com/google/fonts `main`, checked against the repo's git blob SHA: `ofl/bangers/Bangers-Regular.ttf`
     93,148 B (blob 9b0f8c1f…), `apache/luckiestguy/LuckiestGuy-Regular.ttf` 73,320 B (5ca663c2…),
@@ -223,7 +280,8 @@ RC-P1…P11, RC-S1…S4, RC-T1…T3, RC-E1…E5 and RC-A1…A9 (tables below) st
 | 10 | dashboard: SeasonBoard series panel [Sonnet] | **done** (local 6315/1, CI 5534/751 incl. the sign-out fix; 34 new contract tests; browser check 375/820/1280: 4 findings fixed in 1 round) |
 | 11 | dashboard: EpisodeStudio re-edit [Sonnet] | **done** (local 6347/1, CI 5563/754; 32 new tests; browser check 375/820/1280: 2 findings, fixed in 2 rounds) |
 | 12 | fonts (confirmed: all 5 as named) and per-style renderer gaps [Sonnet] | **done** (local 6420/1, CI 5636/754; 10 files verified by size + git blob; pan_pct plumbed, 4 % styles byte-identical; RC-M4 proven by a reverted mutation) |
-| 13 | merge, deploy, Tier-2 series walk (me at 375 px; the human watches ep 2) | next |
+| 13 | merge, deploy, Tier-2 series walk (me at 375 px; the human watches ep 2) | **done** (walk (a)–(h) + bench 12/12; fixes F3/F7/F9 live; ep 2 watched and acknowledged by the human 2026-09-30) |
+| 13b | polish round: F4 cast pacing, F1/F2/F5/F8 dashboard, F6 → A-084 [Sonnet] | **done** (local 6464/1, CI 5678/756; 40 new tests; 2 named payload re-pins; browser check 375 px on a scratch copy) |
 | 14 | Tier-2 per style (5 short episodes, free route; the human watches one) | — |
 | 14b(e) | re-edit + partial re-render on paid assets (estimate + the human's go first) | — |
 | 15 | docs and decisions [Sonnet] | — |

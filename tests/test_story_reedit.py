@@ -903,3 +903,27 @@ def test_no_re_edit_path_rebuilds_the_storyboard_and_untouched_shots_keep_their_
     step(lambda: wf.patch_storyboard(store, story_id, 1, {"transitions": [
         {"after": "sh05", "type": "cut" if between["type"] != "cut" else "dissolve"}]}, now=LATER))
     assert _shot(_board(store, story_id), "sh09")["assets"]["locked"] is True
+
+
+# ============================================== 9. F8 regenerate-blocked (13b)
+
+def test_metadata_regenerate_is_not_blocked_once_the_episode_is_rendered_and_current(store, tmp_path, built):
+    """F8 (phase 5 stage 13b): metadata.require_render's own sentence blocks
+    the metadata regenerate controls until the episode is actually
+    rendered -- ``_episode`` alone (script/storyboard/assets approved, no
+    render yet) still leaves it blocked; a real render (FakeFFmpeg, real
+    bytes and sha256, same as every other test here) clears it. assets stays
+    unblocked throughout (script and storyboard were already approved)."""
+    wf = _wf()
+    story_id = _episode(store, tmp_path, built)
+
+    before = wf.episode_view(store, store.get(story_id), 1)["state"]
+    assert before["assets_regenerate_blocked"] is None
+    assert before["metadata_regenerate_blocked"] == "Episode 1 is not rendered yet: render it first (the render step)."
+
+    summary, _log, _fake = trs.render(store, story_id, tmp_path=tmp_path)
+    assert summary["state"] == "completed"
+
+    after = wf.episode_view(store, store.get(story_id), 1)["state"]
+    assert after["assets_regenerate_blocked"] is None
+    assert after["metadata_regenerate_blocked"] is None

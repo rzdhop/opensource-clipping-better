@@ -347,6 +347,29 @@ def _episode_of(job) -> Optional[int]:
     return None
 
 
+def _proposals_approved(story_id: str, ep: int) -> bool:
+    """Whether episode *ep*'s proposals (``proposals:<ep>``) are approved
+    (F5, phase 5 stage 13b): ``workflow.approve_proposals`` writes nothing
+    of its own -- "the decisions are the record" -- so this reads it off the
+    propose-next job that wrote them instead: the latest one whose target
+    episode (:func:`_episode_of`) is *ep*, completed. False without one (no
+    job on record, or its latest one still awaiting approval); a later
+    propose-next run for the same episode (a fresh job awaiting approval)
+    makes it not approved again."""
+    jobs = [job for job in store.list_step_jobs(story_id, step="propose-next") if _episode_of(job) == ep]
+    return bool(jobs) and _status_of(jobs[-1]) == JobStatus.COMPLETED.value
+
+
+def _series_page(stories, story, ep) -> dict:
+    """:func:`workflow.series_page` plus ``proposals_approved`` (F5, phase 5
+    stage 13b): the workflow function stays pure (it has no job access), so
+    the job-derived field is added here, where ``store.list_step_jobs``
+    naturally lives."""
+    page = workflow.series_page(stories, story, ep)
+    page["proposals_approved"] = _proposals_approved(story["story_id"], ep)
+    return page
+
+
 def _in_flight(story_id, *, doc=None) -> list:
     """The story's step jobs that are queued or running, oldest first.
 
@@ -705,7 +728,10 @@ async def get_story(story_id: str) -> dict:
     does not validate (its episode page says why).
 
     ``series`` (phase 5, step 13) is one ``workflow.series_page`` per
-    episode the season plans (``[]`` before a season): the memory entry and
+    episode the season plans (``[]`` before a season), plus
+    ``proposals_approved`` (F5, stage 13b: whether the latest propose-next
+    job that wrote this episode's proposals is completed -- job access
+    ``workflow.series_page`` itself has none of): the memory entry and
     its state, the audience feedback item, the proposals made for that
     episode and the gate's current refusal text for the episode after it --
     the episode page (``_episode_page``) shows one entry the same way, for
@@ -722,7 +748,7 @@ async def get_story(story_id: str) -> dict:
         season = workflow.season(stories, story_id)
         proposal = workflow.places_proposal(stories, story_id)
         episodes = workflow.episode_summaries(stories, story)
-        series = [workflow.series_page(stories, story, ep)
+        series = [_series_page(stories, story, ep)
                  for ep in range(1, (season["episodes_planned"] if season else 0) + 1)]
         # Off the event loop: the status probe may wait up to its timeout.
         progress = await run_in_threadpool(workflow.progress, stories, story, env=worker.get_settings_env(),
@@ -1213,7 +1239,7 @@ def _episode_page(stories, story, ep) -> dict:
     with _answering():
         page = workflow.episode_view(stories, story, ep)
         page.update(workflow.episode_outputs(stories, story, ep))
-        page["series"] = workflow.series_page(stories, story, ep)
+        page["series"] = _series_page(stories, story, ep)
     if page["render"] is not None:
         page["render"]["media"] = _episode_media(story["story_id"], ep, page["render"])
     page["jobs"] = _episode_jobs(story["story_id"], ep)

@@ -249,6 +249,16 @@
   environments, 0 failed). UNCONFIRMED over time: a test that passes serially but fails or flakes in parallel is a
   finding (logged as flaky per Section 9), never re-run until green; the serial command stays the tiebreaker.
 
+- **A-084** — E4 on the free Gemini flash-lite link judges hook payoffs with variance, and the "approve anyway"
+  checkbox is the accepted way past a false `hook_payoff` issue (T2-P5-F6, no code by the human's call, 2026-09-30).
+  Live evidence, FR `b1104ec66b05` ep 2: E1 marked `s02` (setup) `pays_off` "Kiwilo va-t-il trahir Mangella dès ce
+  soir ?"; its first line is "Tu m'as trahie au bord de l'eau, Kiwilo !" — a direct answer — yet E4 flagged `s02`
+  `hook_payoff` ("ne paie pas correctement le hook … intégrer une réplique explicite") across 2 regenerate rounds, a
+  text-only `pays_off` edit and the re-check after stage 13(e)'s line edits (report rev 6, `passed: false`), and the
+  script was approved anyway (`approved_anyway` 11:21:30 UTC). Before F7 (`7b9cc92`) part of the same flags were E1
+  putting a payoff on the hook scene, which E4 rightly refused. UNCONFIRMED: whether a stronger free judge or a
+  second E4 opinion would stop the false flags — measure with `tools/bench_llm.py` before any prompt change.
+
 ## Confirmed
 - **A-069** — Measured render times on the VPS (container ffmpeg `7.1.5-0+deb13u1/aarch64`, final profile,
   libx264): a full 21-shot FR render 160 s, a full 20-shot EN render 161 s; per shot at 4× mean 3.6–3.8 s (median

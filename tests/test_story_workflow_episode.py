@@ -665,7 +665,8 @@ def test_the_episode_view_and_the_story_summaries_follow_the_documents(wf, store
     assert wf.episode_view(store, story, 1) == {
         "ep": 1, "script": None, "storyboard": None, "template": template,
         "state": {"script": "none", "storyboard": "none", "report": "none", "stale_scenes": [],
-                  "prompts_outdated": False, "missing": ["beat_sheet"]},
+                  "prompts_outdated": False, "missing": ["beat_sheet"],
+                  "assets_regenerate_blocked": None, "metadata_regenerate_blocked": None},
     }
     assert wf.episode_summaries(store, story) == []
 
@@ -673,8 +674,16 @@ def test_the_episode_view_and_the_story_summaries_follow_the_documents(wf, store
     view = wf.episode_view(store, story, 1)
     script = _script(store, story_id)
     assert view["script"] == script and view["storyboard"] is None and view["template"] == template
-    assert view["state"] == {"script": "complete", "storyboard": "none", "report": "issues", "stale_scenes": [],
-                             "prompts_outdated": False, "missing": []}
+    # F8 (stage 13b): a written, unapproved script already blocks both --
+    # assets.require_approved and metadata.require_render's own sentences.
+    assert view["state"] == {
+        "script": "complete", "storyboard": "none", "report": "issues", "stale_scenes": [],
+        "prompts_outdated": False, "missing": [],
+        "assets_regenerate_blocked": "Approve episode 1's script first: its assets are made from the approved "
+                                     "script and storyboard.",
+        "metadata_regenerate_blocked": "Episode 1's script is not approved: approve it, render the episode, "
+                                       "then write its metadata.",
+    }
     assert wf.episode_summaries(store, story) == [{
         "ep": 1, "title": E1_REPLY["title"], "script_state": "complete", "storyboard_state": "none",
         "total_s": script["timing"]["total_s"], "timing_state": script["timing"]["state"]}]
@@ -690,8 +699,16 @@ def test_the_episode_view_and_the_story_summaries_follow_the_documents(wf, store
     wf.patch_script(store, story_id, 1, {"lines": [{"line_id": "l08", "text": "Tu me trahis ?", "emotion": "angry"}]},
                     now=LATEST)
     state = wf.episode_view(store, story, 1)["state"]
-    assert state == {"script": "complete", "storyboard": "partial", "report": "stale", "stale_scenes": ["s02"],
-                     "prompts_outdated": False, "missing": ["consistency_check"]}
+    # The edit cleared the script's approval (RC-... phase 3): both
+    # regenerate-blocked fields go back to "approve the script first".
+    assert state == {
+        "script": "complete", "storyboard": "partial", "report": "stale", "stale_scenes": ["s02"],
+        "prompts_outdated": False, "missing": ["consistency_check"],
+        "assets_regenerate_blocked": "Approve episode 1's script first: its assets are made from the approved "
+                                     "script and storyboard.",
+        "metadata_regenerate_blocked": "Episode 1's script is not approved: approve it, render the episode, "
+                                       "then write its metadata.",
+    }
 
     kiwi = store.read_entity(story_id, "characters", KIWILO)
     store.write_entity(story_id, "characters", kiwi, now=LATEST)
@@ -703,6 +720,45 @@ def test_the_view_of_a_partial_script_names_what_is_missing(wf, store):
     state = wf.episode_view(store, store.get(story_id), 1)["state"]
     assert state["script"] == "writing" and state["report"] == "none"
     assert state["missing"] == ["s04", "hook", "cliffhanger", "teaser", "consistency_check"]
+
+
+# ==================================================== F8 regenerate-blocked
+# (phase 5 stage 13b, coordinator fix-attempt-2): the episode page's own
+# assets_regenerate_blocked / metadata_regenerate_blocked -- assets.
+# require_approved's and metadata.require_render's own refusal sentence
+# right now, single-sourced for the re-voice / shot-image / metadata
+# regenerate controls (never a copied string) -- or null once neither would
+# refuse.
+
+def test_regenerate_blocked_fields_are_null_before_any_script(wf, store):
+    story_id = _ready_story(store)
+    state = wf.episode_view(store, store.get(story_id), 1)["state"]
+    assert state["assets_regenerate_blocked"] is None
+    assert state["metadata_regenerate_blocked"] is None
+
+
+def test_regenerate_blocked_fields_carry_the_exact_require_approved_and_require_render_sentences(wf, store):
+    """A written, unapproved script (_boarded: script passed its check, a
+    fast storyboard built, neither approved yet) -- exactly what a live
+    episode looks like right after Continue, before Approve is clicked."""
+    story_id = _boarded(wf, store)
+    state = wf.episode_view(store, store.get(story_id), 1)["state"]
+    assert state["assets_regenerate_blocked"] == (
+        "Approve episode 1's script first: its assets are made from the approved script and storyboard.")
+    assert state["metadata_regenerate_blocked"] == (
+        "Episode 1's script is not approved: approve it, render the episode, then write its metadata.")
+
+
+def test_assets_regenerate_is_not_blocked_once_the_script_and_storyboard_are_approved(wf, store):
+    story_id = _boarded(wf, store)
+    wf.approve_script(store, story_id, 1, now=LATER)
+    wf.approve_storyboard(store, story_id, 1, now=LATER)
+
+    state = wf.episode_view(store, store.get(story_id), 1)["state"]
+
+    assert state["assets_regenerate_blocked"] is None
+    # Still not rendered: metadata is blocked on its own next precondition.
+    assert state["metadata_regenerate_blocked"] == "Episode 1 is not rendered yet: render it first (the render step)."
 
 
 # ================================================================= targets

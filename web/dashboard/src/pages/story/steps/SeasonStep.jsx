@@ -47,6 +47,16 @@ function clampEpisodes(value) {
   return Math.min(MAX_EPISODES, Math.max(MIN_EPISODES, Math.round(n)))
 }
 
+// Coordinator fix attempt 2 (F2, phase 5 stage 13b): the server counts a
+// paste in Unicode code points (clipping.aistory.workflow._pasted, Python
+// len()), not UTF-16 code units -- a JS string's own .length over-counts an
+// emoji or other astral character by one (live: 295 vs the server's 294).
+// Spreading a string iterates by code point, so this keeps the client's
+// count, cap check and message in agreement with the server's either way.
+function codePointLength(value) {
+  return [...value].length
+}
+
 // ------------------------------------------------------------- no arc yet
 
 function NoSeasonYet({ storyId, onChange }) {
@@ -362,14 +372,15 @@ function FeedbackBox({ storyId, ep, feedback, disabled, onChange }) {
 
   const digested = Boolean(feedback && 'directions' in feedback)
   const chosen = Boolean(feedback && 'chosen_direction' in feedback)
-  const overText = text.length > FEEDBACK_TEXT_MAX_LENGTH
-  const overStats = stats.length > FEEDBACK_STATS_MAX_LENGTH
+  const overText = codePointLength(text) > FEEDBACK_TEXT_MAX_LENGTH
+  const overStats = codePointLength(stats) > FEEDBACK_STATS_MAX_LENGTH
 
   // Same wording as the API's own refusal (clipping.aistory.workflow._pasted):
   // refused whole, never trimmed -- shown client-side before the cap is hit
-  // on the server, so the count and the message agree either way.
+  // on the server, so the count and the message agree either way. Counted in
+  // code points (F2), like the server, not UTF-16 units.
   const capMessage = (what, value, limit) =>
-    `The ${what} is ${value.length} characters: at most ${limit} are taken, and it is never shortened -- paste ` +
+    `The ${what} is ${codePointLength(value)} characters: at most ${limit} are taken, and it is never shortened -- paste ` +
     'less (the part that matters most).'
 
   const startEditing = () => {
@@ -437,7 +448,7 @@ function FeedbackBox({ storyId, ep, feedback, disabled, onChange }) {
             onChange={(e) => setText(e.target.value)}
             disabled={disabled || submitting}
           />
-          <p className="form-hint">{text.length} / {FEEDBACK_TEXT_MAX_LENGTH}</p>
+          <p className="form-hint">{codePointLength(text)} / {FEEDBACK_TEXT_MAX_LENGTH}</p>
           {overText && <p className="story-error">{capMessage('feedback text', text, FEEDBACK_TEXT_MAX_LENGTH)}</p>}
           <textarea
             className="form-input story-season-feedback-textarea"
@@ -447,7 +458,7 @@ function FeedbackBox({ storyId, ep, feedback, disabled, onChange }) {
             onChange={(e) => setStats(e.target.value)}
             disabled={disabled || submitting}
           />
-          <p className="form-hint">{stats.length} / {FEEDBACK_STATS_MAX_LENGTH}</p>
+          <p className="form-hint">{codePointLength(stats)} / {FEEDBACK_STATS_MAX_LENGTH}</p>
           {overStats && <p className="story-error">{capMessage('stats text', stats, FEEDBACK_STATS_MAX_LENGTH)}</p>}
           <div className="story-step-actions">
             <button
@@ -740,8 +751,14 @@ function ProposalItem({ storyId, ep, item, kind, decision, disabled, onChange })
  * proposals`): a card per item, and "Approve proposals" once every one is
  * decided (`workflow.approve_proposals`: 409 naming the undecided ones
  * otherwise -- disabled here so that refusal is never hit in the ordinary
- * path). */
-function ProposalsCard({ storyId, ep, proposals, disabled, onChange }) {
+ * path).
+ *
+ * `approved` (coordinator fix attempt 2, F5) is `series[ep].
+ * proposals_approved`: `approve_proposals` writes nothing of its own ("the
+ * decisions are the record"), so once it has run the button must not stay
+ * live forever -- it reads "Approved" and disables, the same pattern
+ * SeasonActions' own `season.approved_at` already uses below. */
+function ProposalsCard({ storyId, ep, proposals, approved, disabled, onChange }) {
   const [approving, setApproving] = useState(false)
   const [approveError, setApproveError] = useState('')
 
@@ -788,9 +805,9 @@ function ProposalsCard({ storyId, ep, proposals, disabled, onChange }) {
           type="button"
           className="btn btn-primary btn-sm"
           onClick={handleApprove}
-          disabled={disabled || approving || !allDecided}
+          disabled={disabled || approving || !allDecided || approved}
         >
-          {approving ? 'Approving…' : 'Approve proposals'}
+          {approving ? 'Approving…' : approved ? 'Approved' : 'Approve proposals'}
         </button>
       </div>
       <StepError message={approveError} className="story-step-error" />
@@ -895,7 +912,14 @@ function SeriesMemoryPanel({ storyId, series, episodes, characters, totalEpisode
               onChange={onChange}
             />
           )}
-          <ProposalsCard storyId={storyId} ep={row.page.ep} proposals={row.page.proposals} disabled={disabled} onChange={onChange} />
+          <ProposalsCard
+            storyId={storyId}
+            ep={row.page.ep}
+            proposals={row.page.proposals}
+            approved={row.page.proposals_approved}
+            disabled={disabled}
+            onChange={onChange}
+          />
         </div>
       )))}
     </div>
@@ -970,7 +994,7 @@ function SeasonActions({ storyId, season, disabled, onChange }) {
 
 // --------------------------------------------------------------------- page
 
-export default function SeasonStep({ data, storyId, inFlightJob, onChange }) {
+export default function SeasonStep({ data, storyId, inFlightJob, onChange, onSeriesChange }) {
   const { season, characters, series, episodes } = data
 
   const myJob = inFlightJob && (
@@ -980,9 +1004,13 @@ export default function SeasonStep({ data, storyId, inFlightJob, onChange }) {
         && inFlightJob.params.target.startsWith('season:'))
   ) ? inFlightJob : null
 
+  // Coordinator fix attempt 2 (F1): this job feed watches the season step's
+  // own jobs (plan/re-plan, an arc entry's regenerate) -- its completion
+  // must not collapse the step either, the same reason SeriesMemoryPanel
+  // below takes onSeriesChange instead of onChange.
   const { job: liveJob, events, streamState } = useJobFeed(myJob ? myJob.id : null, {
     onJob: (job) => {
-      if (job && job.status !== 'queued' && job.status !== 'running') onChange()
+      if (job && job.status !== 'queued' && job.status !== 'running') onSeriesChange()
     },
   })
 
@@ -1029,7 +1057,7 @@ export default function SeasonStep({ data, storyId, inFlightJob, onChange }) {
         characters={characters}
         totalEpisodes={season.episodes_planned}
         disabled={busy}
-        onChange={onChange}
+        onChange={onSeriesChange}
       />
 
       <SeasonActions storyId={storyId} season={season} disabled={busy} onChange={onChange} />

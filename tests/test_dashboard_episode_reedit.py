@@ -380,3 +380,126 @@ def test_line_row_offers_re_voice_for_a_line_the_plain_assets_step_voiced_then_a
     src = _read(SCRIPT_PANE)
     line_row = _function_body(src, r"function LineRow\(\{[^)]*\}\)\s*\{", "LineRow")
     assert "assetLine.has_audio" in line_row
+
+
+# ================================================== 13b polish round (F8)
+#
+# Found live: "Re-voice this line" (and the shot-image / metadata regenerate
+# controls) stayed enabled while the episode's script was not approved --
+# the server refuses (assets.require_approved / metadata.require_render),
+# spending nothing, but the click still had to round-trip into a 409 before
+# the dashboard showed anything. The episode page now carries the server's
+# own refusal sentence (episode.state.assets_regenerate_blocked / .
+# metadata_regenerate_blocked, workflow.episode_view), single-sourced; the
+# controls disable on it, and each pane shows the sentence once (not once
+# per line/shot/platform, to avoid a wall of repeated text).
+
+def test_script_pane_reads_the_assets_regenerate_blocked_field():
+    src = _read(SCRIPT_PANE)
+    assert "episode.state.assets_regenerate_blocked" in src
+
+
+def test_line_row_takes_an_assets_blocked_prop():
+    src = _read(SCRIPT_PANE)
+    match = re.search(r"function LineRow\(\{([^)]*)\}\)\s*\{", src)
+    assert match, "LineRow not found"
+    assert "assetsBlocked" in match.group(1), "LineRow does not take an assetsBlocked prop"
+
+
+def test_line_rows_re_voice_control_is_disabled_while_assets_regeneration_is_blocked():
+    src = _read(SCRIPT_PANE)
+    line_row = _function_body(src, r"function LineRow\(\{[^)]*\}\)\s*\{", "LineRow")
+    match = re.search(r"<RegenerateControl[\s\S]*?disabled=\{([^}]*)\}", line_row)
+    assert match, "RegenerateControl not found in LineRow"
+    assert "assetsBlocked" in match.group(1), match.group(1)
+    # The sentence itself is shown once at the pane level (below), never
+    # repeated per line.
+    assert "assetsBlocked &&" not in line_row
+
+
+def test_script_pane_shows_the_blocked_sentence_once_as_visible_text():
+    src = _read(SCRIPT_PANE)
+    page = _function_body(src, r"export default function ScriptPane\(\{[^)]*\}\)\s*\{", "ScriptPane")
+    assert re.search(r"assetsBlocked && <p[^{]*\{assetsBlocked\}</p>", page), (
+        "ScriptPane does not show assets_regenerate_blocked as a visible sentence"
+    )
+
+
+# ============================================================ StoryboardPane.jsx (F8)
+
+def test_storyboard_pane_reads_the_assets_regenerate_blocked_field():
+    src = _read(STORYBOARD_PANE)
+    assert "episode.state.assets_regenerate_blocked" in src
+
+
+def test_shot_image_block_takes_an_assets_blocked_prop():
+    src = _read(STORYBOARD_PANE)
+    match = re.search(r"function ShotImageBlock\(\{([^)]*)\}\)\s*\{", src)
+    assert match, "ShotImageBlock not found"
+    assert "assetsBlocked" in match.group(1), "ShotImageBlock does not take an assetsBlocked prop"
+
+
+def test_shot_images_regenerate_control_is_disabled_while_assets_regeneration_is_blocked():
+    src = _read(STORYBOARD_PANE)
+    block = _function_body(src, r"function ShotImageBlock\(\{[^)]*\}\)\s*\{", "ShotImageBlock")
+    match = re.search(r"<RegenerateControl[\s\S]*?disabled=\{([^}]*)\}", block)
+    assert match, "RegenerateControl not found in ShotImageBlock"
+    assert "assetsBlocked" in match.group(1), match.group(1)
+    # The existing "locked" reason keeps its own per-shot message; the new
+    # blocked sentence is shown once at the pane level, not repeated here.
+    assert "assetsBlocked &&" not in block
+
+
+def test_storyboard_pane_shows_the_blocked_sentence_once_as_visible_text():
+    src = _read(STORYBOARD_PANE)
+    page = _function_body(src, r"export default function StoryboardPane\(\{[^)]*\}\)\s*\{", "StoryboardPane")
+    assert re.search(r"assetsBlocked && <p[^{]*\{assetsBlocked\}</p>", page), (
+        "StoryboardPane does not show assets_regenerate_blocked as a visible sentence"
+    )
+
+
+# ============================================================ PreviewPane.jsx (F8)
+
+def test_preview_pane_reads_the_metadata_regenerate_blocked_field():
+    src = _read(PREVIEW_PANE)
+    assert "episode.state.metadata_regenerate_blocked" in src
+
+
+def test_platform_card_takes_a_metadata_blocked_prop():
+    src = _read(PREVIEW_PANE)
+    match = re.search(r"function PlatformCard\(\{([^)]*)\}\)\s*\{", src)
+    assert match, "PlatformCard not found"
+    assert "metadataBlocked" in match.group(1), "PlatformCard does not take a metadataBlocked prop"
+
+
+def test_platform_cards_regenerate_control_is_disabled_while_metadata_regeneration_is_blocked():
+    src = _read(PREVIEW_PANE)
+    card = _function_body(src, r"function PlatformCard\(\{[^)]*\}\)\s*\{", "PlatformCard")
+    match = re.search(r"<RegenerateControl[\s\S]*?disabled=\{([^}]*)\}", card)
+    assert match, "RegenerateControl not found in PlatformCard"
+    assert "metadataBlocked" in match.group(1), match.group(1)
+    assert "metadataBlocked &&" not in card, "PlatformCard must not repeat the blocked sentence per platform"
+
+
+def test_preview_pane_shows_the_metadata_blocked_sentence_once_as_visible_text():
+    src = _read(PREVIEW_PANE)
+    page = _function_body(src, r"export default function PreviewPane\(\{[^)]*\}\)\s*\{", "PreviewPane")
+    assert re.search(r"metadataBlocked && <p[^{]*\{metadataBlocked\}</p>", page), (
+        "PreviewPane does not show metadata_regenerate_blocked as a visible sentence"
+    )
+
+
+def test_no_login_or_token_reference_added_by_the_13b_polish_round():
+    # Whole-file for ScriptPane/StoryboardPane; PreviewPane already has a
+    # legitimate, pre-existing "token" reference (a media URL's signing
+    # token, DEC-163) unrelated to auth -- scoped to PlatformCard, the only
+    # piece this round touches there, same reasoning as the stage-11 guard
+    # above (test_no_login_or_token_reference_added_to_preview_pane).
+    for path in (SCRIPT_PANE, STORYBOARD_PANE):
+        src = _read(path)
+        assert "token" not in src.lower()
+        assert "sign in" not in src.lower() and "sign-in" not in src.lower()
+
+    card = _function_body(_read(PREVIEW_PANE), r"function PlatformCard\(\{[^)]*\}\)\s*\{", "PlatformCard")
+    assert "token" not in card.lower()
+    assert "sign in" not in card.lower() and "sign-in" not in card.lower()

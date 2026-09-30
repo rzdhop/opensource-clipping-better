@@ -422,7 +422,7 @@ function MetadataHeader({ storyId, ep, episode, renderReady, busy, onChange }) {
   )
 }
 
-function PlatformCard({ storyId, ep, platform, entry, stale, busy, onChange }) {
+function PlatformCard({ storyId, ep, platform, entry, stale, metadataBlocked, busy, onChange }) {
   const hashtags = entry.hashtags || []
   const hashtagsEn = entry.hashtags_en || []
 
@@ -488,7 +488,7 @@ function PlatformCard({ storyId, ep, platform, entry, stale, busy, onChange }) {
         <CopyButton text={entry.pinned_comment} label="pinned comment" />
       </div>
 
-      <RegenerateControl disabled={busy} onRegenerate={regenerate} />
+      <RegenerateControl disabled={busy || Boolean(metadataBlocked)} onRegenerate={regenerate} />
     </div>
   )
 }
@@ -548,6 +548,11 @@ export default function PreviewPane({ episode, storyId, ep, story, inFlightJob, 
   const renderReady = Boolean(episode.render && episode.render.output)
   const metadataPlatforms = episode.metadata && episode.metadata.pack ? episode.metadata.pack.platforms : null
   const frenchStory = Boolean(story && story.story && story.story.language === 'fr')
+  // F8 (phase 5 stage 13b): metadata.require_render's own refusal sentence
+  // right now, or null -- single-sourced (workflow.episode_view), so a
+  // platform's metadata regenerate is disabled instead of round-tripping
+  // into a 409 that spends nothing.
+  const metadataBlocked = episode.state.metadata_regenerate_blocked
 
   return (
     <div className="story-step-body">
@@ -563,6 +568,7 @@ export default function PreviewPane({ episode, storyId, ep, story, inFlightJob, 
       {metadataPlatforms ? (
         <>
           <CoverImage episode={episode} />
+          {metadataBlocked && <p className="form-hint story-metadata-regenerate-blocked">{metadataBlocked}</p>}
           <div className="story-metadata-cards">
             {PLATFORMS.filter((platform) => metadataPlatforms[platform]).map((platform) => (
               <PlatformCard
@@ -572,6 +578,7 @@ export default function PreviewPane({ episode, storyId, ep, story, inFlightJob, 
                 platform={platform}
                 entry={metadataPlatforms[platform]}
                 stale={!episode.metadata.current}
+                metadataBlocked={metadataBlocked}
                 busy={busy}
                 onChange={onChange}
               />

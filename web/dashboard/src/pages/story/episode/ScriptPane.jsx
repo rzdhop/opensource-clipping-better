@@ -180,7 +180,9 @@ function ConsistencyPanel({ report, state }) {
 
 // ------------------------------------------------------------------------ lines
 
-function LineRow({ storyId, ep, line, assetLine, unvoicedReason, sceneCharacters, narratorEnabled, busy, onChange }) {
+function LineRow({
+  storyId, ep, line, assetLine, unvoicedReason, sceneCharacters, narratorEnabled, assetsBlocked, busy, onChange,
+}) {
   const [playUrl, setPlayUrl] = useState(null)
   const [selectError, setSelectError] = useState('')
   const [selectErrors, setSelectErrors] = useState(null)
@@ -289,7 +291,7 @@ function LineRow({ storyId, ep, line, assetLine, unvoicedReason, sceneCharacters
             </p>
           )}
           <RegenerateControl
-            disabled={busy}
+            disabled={busy || Boolean(assetsBlocked)}
             onRegenerate={regenerateVoice}
             // assetLine.voiced (assets.is_measured) reads false both for a
             // line that never had audio and one edited since its last
@@ -320,7 +322,8 @@ function LineRow({ storyId, ep, line, assetLine, unvoicedReason, sceneCharacters
 // ------------------------------------------------------------------------ scenes
 
 function SceneCard({
-  storyId, ep, scene, issues, characters, places, narratorEnabled, assetsByLineId, unvoicedByLineId, busy, onChange,
+  storyId, ep, scene, issues, characters, places, narratorEnabled, assetsByLineId, unvoicedByLineId, assetsBlocked,
+  busy, onChange,
 }) {
   const place = places.find((p) => p.place_id === scene.place_id)
   const sceneCharacters = scene.characters
@@ -376,6 +379,7 @@ function SceneCard({
             unvoicedReason={unvoicedByLineId[line.line_id]}
             sceneCharacters={sceneCharacters}
             narratorEnabled={narratorEnabled}
+            assetsBlocked={assetsBlocked}
             busy={busy}
             onChange={onChange}
           />
@@ -608,6 +612,11 @@ export default function ScriptPane({ episode, storyDoc, characters, places, epis
   const script = episode.script
   const busy = Boolean(inFlightJob)
   const narratorEnabled = Boolean(storyDoc.narrator && storyDoc.narrator.enabled)
+  // F8 (phase 5 stage 13b): assets.require_approved's own refusal sentence
+  // right now, or null -- single-sourced (workflow.episode_view), so
+  // "Re-voice this line" is disabled instead of round-tripping into a 409
+  // that spends nothing.
+  const assetsBlocked = episode.state.assets_regenerate_blocked
 
   const issuesByScene = {};
   if (script && script.consistency_report) {
@@ -657,6 +666,8 @@ export default function ScriptPane({ episode, storyDoc, characters, places, epis
 
           <ConsistencyPanel report={script.consistency_report} state={episode.state.report} />
 
+          {assetsBlocked && <p className="form-hint story-script-assets-blocked">{assetsBlocked}</p>}
+
           <div className="story-script-scenes">
             {script.scenes.map((scene) => (
               <SceneCard
@@ -670,6 +681,7 @@ export default function ScriptPane({ episode, storyDoc, characters, places, epis
                 narratorEnabled={narratorEnabled}
                 assetsByLineId={assetsByLineId}
                 unvoicedByLineId={unvoicedByLineId}
+                assetsBlocked={assetsBlocked}
                 busy={busy}
                 onChange={onChange}
               />

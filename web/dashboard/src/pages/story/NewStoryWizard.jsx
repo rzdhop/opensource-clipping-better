@@ -378,6 +378,17 @@ function ExistingStory({ storyId }) {
     refresh()
   }
 
+  // Coordinator fix attempt 2 (F1, phase 5 stage 13b, live walk): a series
+  // panel action (memory, feedback, propose-next, a proposal decision, its
+  // own "Approve proposals") -- and the Season step's own job feed -- must
+  // never collapse the step. Every other step's afterAction closing on
+  // success is fine (there is somewhere to advance to); once the season is
+  // approved nothing is 'active' any more, so clearing manualStep here fell
+  // back to 'cast' the instant a series action succeeded.
+  const afterSeriesAction = () => {
+    refresh()
+  }
+
   if (loading) {
     return <div className="fade-in"><div className="empty-state"><span className="spinner"></span></div></div>
   }
@@ -464,7 +475,7 @@ function ExistingStory({ storyId }) {
                     <PlacesStep data={data} storyId={storyId} inFlightJob={inFlightJob} onChange={afterAction} onAdvance={afterAdvance} />
                   )}
                   {step.key === 'season' && (
-                    <SeasonStep data={data} storyId={storyId} inFlightJob={inFlightJob} onChange={afterAction} onAdvance={afterAdvance} />
+                    <SeasonStep data={data} storyId={storyId} inFlightJob={inFlightJob} onChange={afterAction} onSeriesChange={afterSeriesAction} onAdvance={afterAdvance} />
                   )}
                 </div>
               )}
