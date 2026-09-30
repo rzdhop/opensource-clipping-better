@@ -475,3 +475,67 @@ def test_no_absolute_path_in_any_built_argv():
         for arg in argv:
             assert not arg.startswith("/"), argv
             assert not (len(arg) >= 2 and arg[1] == ":" and arg[0].isalpha()), argv
+
+
+# ============================== 9. pan_pct plumbing (phase 5 stage 12, DEC-183)
+#
+# ``motion.zoompan_expr`` already took ``pan_pct`` as a keyword (default
+# ``motion.PAN_PCT``); what was missing was a way for a caller ABOVE it
+# (``plan.py``, per style_lock) to ever pass a different value down through
+# ``filtergraph.shot_argv``/``_base_chain``. These tests pin: (a) the
+# keyword defaults to today's constant, so every existing caller (none of
+# which passes it) is untouched; (b) a different value changes a PAN shot's
+# zoompan and nothing else -- non-pan motions never read pan_pct at all.
+
+def _pan_shot(pan_pct_test_id="lr"):
+    return _shot(motion_d=_m("pan_lr", 1.0, 1.0, "lr"))
+
+
+def test_shot_argv_pan_pct_keyword_defaults_to_the_motion_constant():
+    shot = _pan_shot()
+    default_argv = filtergraph.shot_argv("in/a.png", shot, profiles.SHOT, [], "out.mp4")
+    explicit_argv = filtergraph.shot_argv("in/a.png", shot, profiles.SHOT, [], "out.mp4", pan_pct=motion.PAN_PCT)
+    assert default_argv == explicit_argv
+
+
+def test_shot_argv_pan_pct_of_4_is_byte_identical_to_no_pan_pct_at_all():
+    """RC-M2 acceptance: both shipped MVP styles carry ``pan_pct: 4``, the
+    same number as :data:`motion.PAN_PCT` -- passing it explicitly must
+    never move a single byte of the argv."""
+    shot = _pan_shot()
+    for overlays in ([], ["film_grain"], ["vignette", "paper_texture"]):
+        assert (filtergraph.shot_argv("in/a.png", shot, profiles.SHOT, overlays, "out.mp4")
+                == filtergraph.shot_argv("in/a.png", shot, profiles.SHOT, overlays, "out.mp4", pan_pct=4))
+        assert (filtergraph.shot_argv("in/a.png", shot, profiles.SHOT, overlays, "out.mp4")
+                == filtergraph.shot_argv("in/a.png", shot, profiles.SHOT, overlays, "out.mp4", pan_pct=4.0))
+
+
+@pytest.mark.parametrize("pan_pct", [3, 5, 3.0, 5.0])
+def test_shot_argv_a_different_pan_pct_changes_a_pan_shots_zoompan(pan_pct):
+    shot = _pan_shot()
+    default_argv = filtergraph.shot_argv("in/a.png", shot, profiles.SHOT, [], "out.mp4")
+    changed_argv = filtergraph.shot_argv("in/a.png", shot, profiles.SHOT, [], "out.mp4", pan_pct=pan_pct)
+    assert default_argv != changed_argv
+    # the change is exactly the eased x expression's zoom-derived room term.
+    expected = motion.zoompan_expr(shot["motion"], shot["frames"], modifiers=[], pan_pct=pan_pct)["x"]
+    assert any(expected in tok for tok in changed_argv)
+
+
+@pytest.mark.parametrize("motion_type,zoom_from,zoom_to", [
+    ("hold", 1.0, 1.0), ("push_in", 1.0, 1.1), ("pull_out", 1.18, 1.0),
+])
+def test_shot_argv_pan_pct_never_affects_a_non_pan_motion(motion_type, zoom_from, zoom_to):
+    shot = _shot(motion_d=_m(motion_type, zoom_from, zoom_to))
+    default_argv = filtergraph.shot_argv("in/a.png", shot, profiles.SHOT, [], "out.mp4")
+    changed_argv = filtergraph.shot_argv("in/a.png", shot, profiles.SHOT, [], "out.mp4", pan_pct=3)
+    assert default_argv == changed_argv
+
+
+def test_shot_argv_pan_pct_keyword_is_forwarded_through_base_chain():
+    """A white-box check that :func:`filtergraph._base_chain` itself takes
+    and forwards ``pan_pct`` (the internal seam :func:`shot_argv` calls),
+    not just that the end-to-end argv happens to change."""
+    shot = _pan_shot()
+    chain_default, _f, _fps = filtergraph._base_chain("in/a.png", shot, profiles.SHOT)
+    chain_changed, _f2, _fps2 = filtergraph._base_chain("in/a.png", shot, profiles.SHOT, pan_pct=3)
+    assert chain_default != chain_changed

@@ -390,6 +390,63 @@ def test_final_mode_uses_the_shot_and_final_profiles(tmp_path):
     assert {s["id"]: s["cache_key"] for s in golden_plan["stages"]}["S:sh01"] != stages["S:sh01"]["cache_key"]
 
 
+# ==================================== pan_pct plumbing (phase 5 stage 12, DEC-183)
+#
+# The golden fixture's own sh03 is a real ``pan_lr`` shot (``render/
+# golden.py``'s SHOTS), so it is used directly rather than a new fixture.
+# ``golden.STYLE_LOCK`` carries no ``pan_pct`` key at all (it is a literal,
+# not derived from a real template) -- ``build_render_plan`` must fall back
+# to ``motion.PAN_PCT`` exactly when it is absent, so the golden digest
+# never moves (RC-M2, unedited).
+
+def test_pan_pct_from_the_style_lock_changes_only_the_pan_shots_argv(tmp_path):
+    default_plan = _plan(tmp_path / "default")
+    args = _plan_args(tmp_path / "changed")
+    assert "pan_pct" not in args["style_lock"]["motion_rules"]["tier1"]
+    args["style_lock"]["motion_rules"]["tier1"]["pan_pct"] = 3
+    changed_plan = plan_mod.build_render_plan(**args, ffmpeg=dict(FFMPEG), profile="golden")
+
+    default_by_id = {s["id"]: s for s in default_plan["stages"]}
+    changed_by_id = {s["id"]: s for s in changed_plan["stages"]}
+
+    assert default_by_id["S:sh03"]["argv"] != changed_by_id["S:sh03"]["argv"], (
+        "sh03 is golden.py's own pan_lr shot: a different style pan_pct must reach it")
+    assert default_by_id["S:sh01"]["argv"] == changed_by_id["S:sh01"]["argv"], "sh01 (push_in) is unaffected"
+    assert default_by_id["S:sh02"]["argv"] == changed_by_id["S:sh02"]["argv"], "sh02 (hold) is unaffected"
+    # the audio mix never reads pan_pct at all.
+    assert default_by_id["A"]["argv"] == changed_by_id["A"]["argv"]
+    # "F" (the final pass) DOES change: it references sh03's own output
+    # path, which is named by its cache key (module docstring), and that
+    # key legitimately changes when sh03's own argv does -- this is the
+    # cache correctly invalidating, not a stray effect of pan_pct itself.
+    assert default_by_id["F"]["argv"] != changed_by_id["F"]["argv"]
+
+
+def test_pan_pct_absent_from_the_style_lock_defaults_to_the_motion_constant(tmp_path):
+    from clipping.aistory.render import motion as motion_mod
+
+    args = _plan_args(tmp_path / "explicit")
+    assert "pan_pct" not in args["style_lock"]["motion_rules"]["tier1"]
+    args["style_lock"]["motion_rules"]["tier1"]["pan_pct"] = motion_mod.PAN_PCT
+    explicit_plan = plan_mod.build_render_plan(**args, ffmpeg=dict(FFMPEG), profile="golden")
+
+    default_plan = _plan(tmp_path / "default")
+    assert explicit_plan["stages"] == default_plan["stages"]
+
+
+def test_fruit_drama_and_family_3d_pan_pct_equals_todays_constant():
+    """RC-M2 acceptance: both MVP styles' own shipped ``pan_pct`` is exactly
+    :data:`motion.PAN_PCT` (4), so plumbing the template's own value through
+    the renderer changes nothing about their argv -- the golden strings
+    stay byte-identical without needing a single MVP-style special case."""
+    from clipping.aistory import templates as templates_mod
+    from clipping.aistory.render import motion as motion_mod
+
+    for style_id in ("fruit_drama", "family_3d"):
+        template = templates_mod.load_style(style_id)
+        assert template["motion_rules"]["tier1"]["pan_pct"] == motion_mod.PAN_PCT
+
+
 def test_a_board_that_does_not_cover_the_script_is_a_plan_error(tmp_path):
     args = _plan_args(tmp_path)
     board = args["storyboard"]

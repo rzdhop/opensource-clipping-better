@@ -24,6 +24,8 @@ Sections, in order:
     at 3 and 4 speakers
 14. script text, provider timing: displayed tokens are the script's own,
     timed from a matching provider cue, punctuation kept
+15. two_line accents for the phase-5 styles (cinematic_real, claymation,
+    storybook_watercolor) against DEC-169's outline-contrast gate
 
 Stdlib + pytest only (DEC-012): this file runs in the CI environment.
 """
@@ -890,3 +892,171 @@ def test_word_pop_events_keep_the_scripts_period_with_a_provider_missing_a_final
     texts = [_strip_tags(ev.split(",", 9)[9]) for ev in events]
     assert texts[-1] == "TROMPENT."
     assert "SÉCURITÉ." in texts
+
+
+# =========================== 15. two_line accents, the phase-5 styles (DEC-169)
+#
+# Stage 12's own measurement: the plan named cinematic_real and claymation's
+# palettes as suspicious (a near-black accent against a black outline); the
+# storybook_watercolor palette (also two_line) is checked too. Read from the
+# REAL shipped templates (``templates.load_style``), never a hand-picked
+# fixture, exactly like section 12/13's own MVP-style coverage above.
+#
+# Measured directly with the production picker (no reimplementation): every
+# one of the three styles' own dark/near-highlight palette entries already
+# fails one of DEC-169's two hard gates and is therefore NEVER selected --
+# the existing fallback mechanism (readability + highlight-distance +
+# already-chosen-distinctness, relaxing onto TWO_LINE_NEUTRAL_FALLBACK) was
+# already substituting correctly before this stage touched anything here.
+# No template edit, no version bump: recorded as an A-entry for stage 14's
+# live check instead (module docstring's own "if the substitution is
+# visibly wrong" test -- it is not).
+
+TWO_LINE_PHASE5_STYLES = ("cinematic_real", "claymation", "storybook_watercolor")
+
+# Per style, the palette entries that fail :func:`sub._is_readable` against
+# the black outline (measured with real _contrast_ratio numbers below) --
+# these must NEVER appear in any :func:`sub._speaker_accents` result.
+UNREADABLE_PALETTE_ENTRIES = {
+    "cinematic_real": ("#0B1C2C", "#5C6B73"),   # contrast ~1.22 and ~3.81 (< 4.5)
+    "claymation": ("#264653",),                  # contrast ~2.08
+    "storybook_watercolor": ("#6B4F3A",),        # contrast ~2.80
+}
+
+
+@pytest.mark.parametrize("style_id", TWO_LINE_PHASE5_STYLES)
+def test_two_line_style_has_a_palette_entry_that_fails_the_outline_contrast_gate(style_id):
+    """Sanity-check on the measurement itself (mirrors section 12's own
+    ``test_shipped_style_closest_primary_is_actually_close_to_its_own_
+    highlight`` sanity-check): each of these three styles really does carry
+    at least one palette entry unreadable against a black outline, which is
+    exactly why this section exists."""
+    style = templates_mod.load_style(style_id)
+    palette_colours = style["palette"]["primary"] + style["palette"]["accents"]
+    for expected_bad in UNREADABLE_PALETTE_ENTRIES[style_id]:
+        assert expected_bad in palette_colours
+        assert sub._contrast_ratio(expected_bad, sub.TWO_LINE_OUTLINE_HEX) < sub.TWO_LINE_MIN_CONTRAST_RATIO
+
+
+def _assert_accents_are_readable_and_far_from_highlight(accents, highlight):
+    """The two HARD DEC-169 gates only (readability, highlight-distance) --
+    unlike section 13's ``_assert_accents_are_readable_distinct_and_far_
+    from_highlight``, this does NOT require every speaker to get a distinct
+    colour: :func:`sub._pick_next_accent`'s own docstring says the
+    already-chosen-distinctness check is relaxed, and cycles the palette
+    again, once a small palette runs out of mutually distinct options --
+    see ``test_two_line_phase5_style_distinctness_is_limited_by_a_small_
+    palette`` below for exactly where that happens for these three styles."""
+    for speaker, colour in accents.items():
+        assert sub._contrast_ratio(colour, sub.TWO_LINE_OUTLINE_HEX) >= sub.TWO_LINE_MIN_CONTRAST_RATIO, (
+            f"{speaker}'s accent {colour} fails WCAG contrast against the outline")
+        assert sub._color_distance(colour, highlight) >= sub.TWO_LINE_MIN_COLOR_DISTANCE, (
+            f"{speaker}'s accent {colour} is too close to the highlight {highlight}")
+
+
+@pytest.mark.parametrize("style_id", TWO_LINE_PHASE5_STYLES)
+@pytest.mark.parametrize("build_lines", [_three_speaker_lines, _four_speaker_lines],
+                          ids=["3_speakers", "4_speakers"])
+def test_two_line_phase5_style_accents_are_readable_and_far_from_highlight(style_id, build_lines):
+    style = templates_mod.load_style(style_id)
+    highlight = style["typography"]["highlight_colour"]
+    accents = sub._speaker_accents(build_lines(), style["palette"], highlight)
+    assert len(accents) == len(build_lines())
+    _assert_accents_are_readable_and_far_from_highlight(accents, highlight)
+
+
+# Finding (measured, not a bug): cinematic_real and claymation's usable
+# palette -- once the outline-contrast and highlight-distance HARD gates
+# (above) strip out their dark/near-highlight entries -- is down to just 1-2
+# colours, so :func:`sub._pick_next_accent`'s documented relaxation (reuse a
+# colour once the palette can no longer keep every speaker distinct) kicks
+# in as early as the 2nd/3rd speaker; storybook_watercolor's is a little
+# larger and only collides at a 4th speaker. Every accent stays readable
+# regardless (DEC-169's hard gate never relaxes) -- this is a distinctness
+# ceiling, not a legibility bug, so no template edit/version bump: recorded
+# as an A-entry for stage 14's live check (module docstring: "only if the
+# substitution is visibly wrong").
+TWO_LINE_PHASE5_COLLISIONS = {
+    # style_id: {n_speakers: expected duplicate accent}
+    "cinematic_real": {3: "#F2F2F2", 4: "#F2F2F2"},
+    "claymation": {3: "#2A9D8F", 4: "#2A9D8F"},
+    "storybook_watercolor": {4: "#A7C7E7"},  # 3 speakers stay fully distinct
+}
+
+
+@pytest.mark.parametrize("style_id,n_speakers,dup_colour", [
+    (style_id, n, colour)
+    for style_id, by_n in TWO_LINE_PHASE5_COLLISIONS.items()
+    for n, colour in by_n.items()
+])
+def test_two_line_phase5_style_distinctness_is_limited_by_a_small_palette(style_id, n_speakers, dup_colour):
+    style = templates_mod.load_style(style_id)
+    highlight = style["typography"]["highlight_colour"]
+    build_lines = _three_speaker_lines if n_speakers == 3 else _four_speaker_lines
+    accents = sub._speaker_accents(build_lines(), style["palette"], highlight)
+    colours = list(accents.values())
+    assert len(set(colours)) < len(colours), (
+        f"{style_id} at {n_speakers} speakers: expected a repeated accent (small-palette ceiling), got all-distinct")
+    assert colours.count(dup_colour) >= 2
+
+
+def test_storybook_watercolor_three_speakers_stay_fully_distinct():
+    """The one case among the three where the palette is just big enough:
+    3 speakers, unlike cinematic_real/claymation at the same count."""
+    style = templates_mod.load_style("storybook_watercolor")
+    highlight = style["typography"]["highlight_colour"]
+    accents = sub._speaker_accents(_three_speaker_lines(), style["palette"], highlight)
+    colours = list(accents.values())
+    assert len(set(colours)) == len(colours)
+
+
+@pytest.mark.parametrize("style_id", TWO_LINE_PHASE5_STYLES)
+@pytest.mark.parametrize("build_lines", [_three_speaker_lines, _four_speaker_lines],
+                          ids=["3_speakers", "4_speakers"])
+def test_two_line_phase5_style_never_selects_its_own_unreadable_palette_entry(style_id, build_lines):
+    """The exact DEC-169 acceptance: the accent the renderer actually burns
+    is never one of the style's own dark/unreadable palette entries -- the
+    fallback ramp substitutes for it every time, never leaving the
+    near-invisible original colour in the chosen set."""
+    style = templates_mod.load_style(style_id)
+    highlight = style["typography"]["highlight_colour"]
+    accents = sub._speaker_accents(build_lines(), style["palette"], highlight)
+    chosen = {c.upper() for c in accents.values()}
+    for bad in UNREADABLE_PALETTE_ENTRIES[style_id]:
+        assert bad.upper() not in chosen, f"{style_id}: unreadable {bad} was substituted into a speaker's accent"
+
+
+def test_cinematic_real_speaker_accents_are_the_expected_colours():
+    """Golden (measured against the real shipped template, 2026-09-30):
+    primary ``#0B1C2C, #D98E04, #5C6B73`` and accent ``#F2F2F2`` against
+    highlight ``#D98E04``. ``#0B1C2C``/``#5C6B73`` fail the outline-contrast
+    gate; ``#D98E04`` is the highlight itself (distance 0). Only ``#F2F2F2``
+    ever clears every gate from the style's own palette -- every further
+    speaker falls to :data:`sub.TWO_LINE_NEUTRAL_FALLBACK`, relaxed to
+    reuse ``#F2F2F2`` once the ramp's own distinct-from-each-other budget
+    (3 speakers apart) is exhausted."""
+    style = templates_mod.load_style("cinematic_real")
+    accents = sub._speaker_accents(_three_speaker_lines(), style["palette"], style["typography"]["highlight_colour"])
+    assert accents == {"char_a": "#F2F2F2", "char_b": "#8B8B8B", "char_c": "#F2F2F2"}
+
+
+def test_claymation_speaker_accents_are_the_expected_colours():
+    """Golden: primary ``#E76F51, #2A9D8F, #E9C46A``, accents ``#264653,
+    #F4F1DE`` against highlight ``#E9C46A``. ``#264653`` fails the outline
+    gate; ``#E9C46A`` is the highlight itself; ``#E76F51`` is only ~88.6
+    units from the highlight (< the 100-unit gate) and is excluded too --
+    only ``#2A9D8F`` and ``#F4F1DE`` remain."""
+    style = templates_mod.load_style("claymation")
+    accents = sub._speaker_accents(_three_speaker_lines(), style["palette"], style["typography"]["highlight_colour"])
+    assert accents == {"char_a": "#2A9D8F", "char_b": "#F4F1DE", "char_c": "#2A9D8F"}
+
+
+def test_storybook_watercolor_speaker_accents_are_the_expected_colours():
+    """Golden: primary ``#A7C7E7, #F4A6A6, #C9E4CA``, accent ``#6B4F3A``
+    against highlight ``#F4A6A6``. ``#6B4F3A`` fails the outline gate;
+    ``#F4A6A6`` is the highlight itself; ``#C9E4CA`` is only ~83.6 units
+    from the highlight and is excluded too -- ``#A7C7E7`` and the neutral
+    fallback (``#FFFFFF``, then ``#8B8B8B``) carry every speaker."""
+    style = templates_mod.load_style("storybook_watercolor")
+    accents = sub._speaker_accents(_three_speaker_lines(), style["palette"], style["typography"]["highlight_colour"])
+    assert accents == {"char_a": "#A7C7E7", "char_b": "#FFFFFF", "char_c": "#8B8B8B"}

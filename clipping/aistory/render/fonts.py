@@ -1,21 +1,32 @@
 """Font resolution and staging for the AI-Story renderer (spec 6.4/6.5;
-plan phase 4 stage 5, "Renderer" -> fonts.py; DEC-159).
+plan phase 4 stage 5, "Renderer" -> fonts.py; phase 5 stage 12, "fonts and
+per-style renderer gaps"; DEC-159, DEC-183).
 
-Resolution order (:func:`resolve_font`), spec: "the template family's file
-in custom_fonts/ ... else the committed Montserrat Black":
+Resolution order (:func:`resolve_font`), amended by DEC-183 for the five
+per-style OFL/Apache TTFs shipped in phase 5 stage 12 (spec: "the template
+family's file ... else the committed Montserrat Black"):
 
 1. the first file (sorted, so the search order is deterministic) in
-   ``custom_fonts/`` whose declared family matches the style template's own
-   requested *family* -- checked with ``clipping.fonts.font_file_declares``
-   (RC-A1: that module may be imported, never modified) when PIL is
-   importable, else accepted on a loose filename match, since without PIL
-   there is no way to read a font file's own name table at all. Either way
-   *why* a file was (or was not) accepted is recorded in the returned
-   ``reason``, never silently.
-2. otherwise the committed ``assets/fonts/Montserrat-Black.ttf`` (DEC-159,
+   ``assets/fonts/`` -- EXCLUDING the fallback file itself
+   (``Montserrat-Black.ttf``, step 3 below is its own dedicated branch, not
+   a generic match) -- whose declared family matches the style template's
+   own requested *family*. DEC-183's five shipped fonts (Bangers, Luckiest
+   Guy, Bebas Neue, Chewy, Patrick Hand) are resolved here.
+2. otherwise the first file (sorted) in ``custom_fonts/`` matching the same
+   way (unchanged from before this stage).
+3. otherwise the committed ``assets/fonts/Montserrat-Black.ttf`` (DEC-159,
    OFL-licensed, tracked on purpose despite ``.gitignore``'s general
    ``custom_fonts/``/``*.ttf`` exclusion -- see ``assets/fonts/
-   fonts_index.json``).
+   fonts_index.json``). The MVP styles' own families ("Montserrat
+   ExtraBold", "Fredoka Bold") are shipped by neither step 1 nor step 2, so
+   they still land here exactly as before this stage.
+
+Steps 1 and 2 share the same matching rule: ``clipping.fonts.
+font_file_declares`` (RC-A1: that module may be imported, never modified)
+when PIL is importable, else a loose filename match, since without PIL
+there is no way to read a font file's own name table at all. Either way
+*why* a file was (or was not) accepted is recorded in the returned
+``reason``, never silently.
 
 **PIL stays out of the render path at import time** (DEC-159, RC-A1): this
 module imports nothing beyond the standard library and ``clipping.fonts``
@@ -32,6 +43,14 @@ alias is picked by guesswork here: :data:`FALLBACK_FONT_FAMILY` is pinned
 to whichever string a real ``ass=...:fontsdir=...`` libass render actually
 matched (this stage's own scratch-render verification step) rather than
 assumed from the name table alone.
+
+**The five DEC-183 fonts' own ASS Fontname** is simply their requested
+*family* itself, exactly like a ``custom_fonts/`` match (module function
+docstring) -- each one's real name table declares exactly the template's
+own ``typography.font_family`` string (Bangers/Regular, Luckiest Guy/
+Regular, Bebas Neue/Regular, Chewy/Regular, Patrick Hand/Regular; verified
+with ``clipping.fonts.font_family_name`` against the real downloaded files,
+this stage's own verification step), so no alias pinning is needed for them.
 """
 
 from __future__ import annotations
@@ -46,7 +65,8 @@ from clipping import fonts as _clipping_fonts
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 CUSTOM_FONTS_DIR = REPO_ROOT / "custom_fonts"
-FALLBACK_FONT_FILE = REPO_ROOT / "assets" / "fonts" / "Montserrat-Black.ttf"
+SHIPPED_FONTS_DIR = REPO_ROOT / "assets" / "fonts"
+FALLBACK_FONT_FILE = SHIPPED_FONTS_DIR / "Montserrat-Black.ttf"
 
 # Pinned against a real libass render (this stage's scratch-proof step),
 # not guessed from the name table alone -- see module docstring.
@@ -115,27 +135,17 @@ def _fallback_record() -> dict:
     }
 
 
-# ------------------------------------------------------------------- public
-
-def resolve_font(family: str, *, custom_fonts_dir=None) -> dict:
-    """Resolve the font file to burn subtitles with for a style template
-    requesting *family* (its own ``typography.font_family``, e.g.
-    "Montserrat ExtraBold"). *custom_fonts_dir* defaults to
-    :data:`CUSTOM_FONTS_DIR`; a caller (a test, or a future runner given a
-    non-default layout) may pass any directory.
-
-    Returns ``{"family", "file", "sha256", "reason"}`` (module docstring):
-    ``family`` is the ASS ``Fontname`` styles must reference -- for a
-    ``custom_fonts/`` match this is *family* itself (the match already
-    proves that string resolves to the accepted file); for the fallback it
-    is :data:`FALLBACK_FONT_FAMILY`, pinned separately (module docstring).
-    ``file`` is repo-relative, ``sha256`` is of the file's own bytes, and
-    ``reason`` names which branch fired and why -- never silent.
-    """
-    directory = Path(custom_fonts_dir) if custom_fonts_dir is not None else CUSTOM_FONTS_DIR
-    pil_ok = _pil_available()
-
+def _search_dir(directory, family: str, *, pil_ok: bool, label: str, exclude=()) -> dict | None:
+    """The first file (sorted) in *directory* matching *family* (module
+    docstring's shared matching rule), or ``None``. *label* names the
+    branch in the returned ``reason`` (e.g. ``"assets/fonts"``,
+    ``"custom_fonts"``); *exclude* (basenames) is never matched here -- used
+    to keep the fallback file itself out of a generic ``assets/fonts/``
+    search (module docstring step 1 vs step 3)."""
+    directory = Path(directory)
     for name in _candidate_files(directory):
+        if name in exclude:
+            continue
         path = directory / name
         if pil_ok:
             if _clipping_fonts.font_file_declares(str(path), family):
@@ -143,7 +153,7 @@ def resolve_font(family: str, *, custom_fonts_dir=None) -> dict:
                     "family": family,
                     "file": _repo_relative(path),
                     "sha256": _sha256(path),
-                    "reason": f"custom_fonts/{name} declares the requested family {family!r} (clipping.fonts.font_file_declares)",
+                    "reason": f"{label}/{name} declares the requested family {family!r} (clipping.fonts.font_file_declares)",
                 }
         else:
             if _filename_matches(name, family):
@@ -152,10 +162,47 @@ def resolve_font(family: str, *, custom_fonts_dir=None) -> dict:
                     "file": _repo_relative(path),
                     "sha256": _sha256(path),
                     "reason": (
-                        f"PIL is not installed, so custom_fonts/{name} was accepted by a filename match "
+                        f"PIL is not installed, so {label}/{name} was accepted by a filename match "
                         f"against requested family {family!r}; the file's own declared family is unverified"
                     ),
                 }
+    return None
+
+
+# ------------------------------------------------------------------- public
+
+def resolve_font(family: str, *, custom_fonts_dir=None, shipped_fonts_dir=None) -> dict:
+    """Resolve the font file to burn subtitles with for a style template
+    requesting *family* (its own ``typography.font_family``, e.g.
+    "Montserrat ExtraBold"). *custom_fonts_dir* defaults to
+    :data:`CUSTOM_FONTS_DIR`, *shipped_fonts_dir* to :data:`SHIPPED_FONTS_DIR`;
+    a caller (a test, or a future runner given a non-default layout) may
+    pass either directory explicitly.
+
+    Resolution order (module docstring, DEC-183): *shipped_fonts_dir*
+    (excluding the fallback file itself) first, then *custom_fonts_dir*,
+    then the committed Montserrat Black fallback.
+
+    Returns ``{"family", "file", "sha256", "reason"}`` (module docstring):
+    ``family`` is the ASS ``Fontname`` styles must reference -- for a
+    shipped or ``custom_fonts/`` match this is *family* itself (the match
+    already proves that string resolves to the accepted file); for the
+    fallback it is :data:`FALLBACK_FONT_FAMILY`, pinned separately (module
+    docstring). ``file`` is repo-relative, ``sha256`` is of the file's own
+    bytes, and ``reason`` names which branch fired and why -- never silent.
+    """
+    shipped_dir = Path(shipped_fonts_dir) if shipped_fonts_dir is not None else SHIPPED_FONTS_DIR
+    custom_dir = Path(custom_fonts_dir) if custom_fonts_dir is not None else CUSTOM_FONTS_DIR
+    pil_ok = _pil_available()
+
+    shipped = _search_dir(shipped_dir, family, pil_ok=pil_ok, label="assets/fonts",
+                          exclude=(FALLBACK_FONT_FILE.name,))
+    if shipped is not None:
+        return shipped
+
+    custom = _search_dir(custom_dir, family, pil_ok=pil_ok, label="custom_fonts")
+    if custom is not None:
+        return custom
 
     return _fallback_record()
 

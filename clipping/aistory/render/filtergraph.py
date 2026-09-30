@@ -62,10 +62,11 @@ def _assert_relative(path, *, what: str = "path") -> None:
         raise ValueError(f"{what} must be relative, not a Windows absolute path: {path!r}")
 
 
-def _base_chain(image_rel, shot, profile) -> tuple:
+def _base_chain(image_rel, shot, profile, *, pan_pct=motion_mod.PAN_PCT) -> tuple:
     """``(chain_fragments, zoompan_frames, zoompan_fps)`` for one shot:
     ``scale`` (per *profile*'s upscale), then ``zoompan`` (eased per
-    ``shot["motion"]``/``shot["modifiers"]``), then the ``handheld`` crop
+    ``shot["motion"]``/``shot["modifiers"]``, its pan travel room per
+    *pan_pct* -- phase 5 stage 12, DEC-183), then the ``handheld`` crop
     when present. Does not include overlays or ``format`` -- those are
     layered on by :func:`shot_argv` itself, since ``paper_texture``
     branches the graph (module docstring)."""
@@ -77,7 +78,7 @@ def _base_chain(image_rel, shot, profile) -> tuple:
     zoompan_fps = motion_mod.JITTER_FPS if jittered else profiles.FPS
     zoompan_frames = motion_mod.jitter_stopmotion_frames(duration_s) if jittered else shot["frames"]
 
-    z = motion_mod.zoompan_expr(motion, zoompan_frames, modifiers=modifiers)
+    z = motion_mod.zoompan_expr(motion, zoompan_frames, modifiers=modifiers, pan_pct=pan_pct)
     canvas_w, canvas_h = motion_mod.zoompan_canvas(modifiers)
     scaled_w = profiles.WIDTH * profile.upscale
 
@@ -115,7 +116,7 @@ def _overlay_fragments(style_overlays) -> list:
 
 # -------------------------------------------------------------------- shot
 
-def shot_argv(image_rel, shot, profile, style_overlays, out_rel) -> list:
+def shot_argv(image_rel, shot, profile, style_overlays, out_rel, *, pan_pct=motion_mod.PAN_PCT) -> list:
     """The argv for one shot's image -> clip render (spec 6.5): a looped
     still image, scaled by *profile*'s own upscale factor, an eased
     zoompan driven by ``shot["motion"]`` and ``shot["modifiers"]``
@@ -123,6 +124,17 @@ def shot_argv(image_rel, shot, profile, style_overlays, out_rel) -> list:
     (``film_grain``, ``vignette``, ``paper_texture`` -- spec 6.3, a style's
     own ``motion_rules.tier1.overlays``, applied in a fixed order), a final
     ``format=<profile.pix_fmt>``, and *profile*'s own encode settings.
+
+    *pan_pct* (phase 5 stage 12, DEC-183) is the style's own
+    ``motion_rules.tier1.pan_pct`` -- how much of the frame a ``pan_*``
+    shot's crop leaves as travel room (:func:`motion.pan_zoom`); it affects
+    only ``pan_lr``/``pan_rl``/``pan_ud``/``pan_du`` shots, never
+    ``hold``/``push_in``/``pull_out``. Defaults to :data:`motion.PAN_PCT`
+    (4), so every existing caller that does not pass it is byte-for-byte
+    unaffected -- both shipped MVP styles (fruit_drama, family_3d) carry
+    exactly that value too (asserted in
+    ``tests/test_aistory_render_runner.py``), so plumbing the template's own
+    value through the renderer (``plan.py``) never moves their argv.
 
     *shot* is a ``render.timeline`` shot entry: ``{"duration_s", "frames",
     "motion", "modifiers", ...}`` (``build_timeline``'s per-shot dict --
@@ -141,7 +153,7 @@ def shot_argv(image_rel, shot, profile, style_overlays, out_rel) -> list:
     _assert_relative(image_rel, what="image_rel")
     _assert_relative(out_rel, what="out_rel")
 
-    chain, _zoompan_frames, _zoompan_fps = _base_chain(image_rel, shot, profile)
+    chain, _zoompan_frames, _zoompan_fps = _base_chain(image_rel, shot, profile, pan_pct=pan_pct)
     chain.extend(_overlay_fragments(style_overlays))
     main_chain = ",".join(chain)
 

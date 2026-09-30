@@ -1,6 +1,7 @@
 """The render plan: every ffmpeg/ffprobe command of one episode render, in
 order, decided before anything runs (spec 6.5, 2.9; plan phase 4 stage 7,
-"Renderer" -> runner.py/manifest.py/plan.py; DEC-156..159).
+"Renderer" -> runner.py/manifest.py/plan.py; phase 5 stage 12; DEC-156..159,
+DEC-183).
 
 :func:`build_render_plan` is **pure**: documents and already-hashed input
 files in, a JSON-able plan out -- no disk, no clock, no subprocess. The
@@ -14,7 +15,11 @@ keys need, and hands the plan to ``runner.run_render``.
   ``filtergraph.shot_argv`` on the shot's image, or
   ``filtergraph.tier2_clip_argv`` when the storyboard shot carries a video
   (``assets.video``), is not ``keep_still`` and the caller resolved that
-  video.
+  video. A still shot's zoompan takes the style's own
+  ``motion_rules.tier1.pan_pct`` (phase 5 stage 12, DEC-183), defaulting to
+  ``motion.PAN_PCT`` when the style_lock carries none (a hand-built fixture
+  literal, e.g. ``render/golden.py``) -- both shipped MVP styles' own
+  ``pan_pct`` already equals that constant, so their argv never moves.
 - ``E`` (``end_card``) -- only under ``cut_to_black``:
   ``filtergraph.end_card_argv`` over ``end_card.ass``.
 - ``A`` (``audio_mix``) -- ``filtergraph.audio_mix_argv`` -> ``mix.wav`` and
@@ -60,7 +65,7 @@ import re
 from ... import loudness
 from .. import schemas
 from .. import timing as timing_mod
-from . import filtergraph, profiles
+from . import filtergraph, motion, profiles
 from . import subtitles as subtitles_mod
 from . import timeline as timeline_mod
 
@@ -287,6 +292,14 @@ def _build(*, script, storyboard, assets, style_lock, template, story, ep, input
         final_profile = profiles.with_encoder(final_profile, hardware_args)
     version = ffmpeg["version"]
     overlays = list(style_lock["motion_rules"]["tier1"].get("overlays") or [])
+    # phase 5 stage 12, DEC-183: the style's own pan_pct, plumbed into every
+    # shot's zoompan (filtergraph.shot_argv). Every real template carries
+    # this field (schemas.py's motion_rules.tier1 is required), so the
+    # ``.get`` default only matters for a hand-built style_lock that omits
+    # it (render/golden.py's own fixture literal) -- there it falls back to
+    # exactly motion.PAN_PCT, the constant every shot already used before
+    # this stage, so the golden digest never moves.
+    pan_pct = style_lock["motion_rules"]["tier1"].get("pan_pct", motion.PAN_PCT)
 
     if not timing_mod.covers(storyboard, script):
         raise PlanError("the storyboard does not cover the script: every scene needs its shots, in script order")
@@ -330,7 +343,7 @@ def _build(*, script, storyboard, assets, style_lock, template, story, ep, input
             if shot_id not in shot_inputs:
                 raise PlanError(f"shot {shot_id!r} has no image")
             rel = add_input("shot", shot_id, shot_inputs[shot_id])
-            argv0 = filtergraph.shot_argv(rel, tl_shot, shot_profile, overlays, _OUT_TOKEN)
+            argv0 = filtergraph.shot_argv(rel, tl_shot, shot_profile, overlays, _OUT_TOKEN, pan_pct=pan_pct)
             input_shas = {rel: shot_inputs[shot_id]["sha256"]}
             if overlay_sha is not None:
                 input_shas[filtergraph.PAPER_TEXTURE_REL] = overlay_sha

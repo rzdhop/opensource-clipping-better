@@ -8,6 +8,56 @@
       "sha256": "ea67b37f8776eebea135cd1fe9adeaf6f9427683e8dc11ab8398b6be5f102c60",
       "licence": "OFL-1.1",
       "licence_file": "OFL.txt"
+    },
+    {
+      "file": "Bangers-Regular.ttf",
+      "family": "Bangers",
+      "style": "Regular",
+      "sha256": "4160a7311de9342674cce9160cde9fcbb30f48190397d86ff1b70b455af65824",
+      "licence": "OFL-1.1",
+      "licence_file": "Bangers-OFL.txt",
+      "source_url": "https://raw.githubusercontent.com/google/fonts/main/ofl/bangers/Bangers-Regular.ttf",
+      "git_blob_sha1": "9b0f8c1f1b45e7bb4971b7d6a8604f9aacacdd32"
+    },
+    {
+      "file": "LuckiestGuy-Regular.ttf",
+      "family": "Luckiest Guy",
+      "style": "Regular",
+      "sha256": "cfbdd68a039f92df51cf3721506af6242e64594c6325fe0bedbeff3fe385d980",
+      "licence": "Apache-2.0",
+      "licence_file": "LuckiestGuy-LICENSE.txt",
+      "source_url": "https://raw.githubusercontent.com/google/fonts/main/apache/luckiestguy/LuckiestGuy-Regular.ttf",
+      "git_blob_sha1": "5ca663c2f05761356ca4427c084e4443a157f834"
+    },
+    {
+      "file": "BebasNeue-Regular.ttf",
+      "family": "Bebas Neue",
+      "style": "Regular",
+      "sha256": "08e4623805102d819f58601e46e345648846075e363b2ceb23313c2d1c83ec73",
+      "licence": "OFL-1.1",
+      "licence_file": "BebasNeue-OFL.txt",
+      "source_url": "https://raw.githubusercontent.com/google/fonts/main/ofl/bebasneue/BebasNeue-Regular.ttf",
+      "git_blob_sha1": "c328c6e08b20a20a1de47d823e007ee73812a438"
+    },
+    {
+      "file": "Chewy-Regular.ttf",
+      "family": "Chewy",
+      "style": "Regular",
+      "sha256": "7cf75ea288f82fd20badea8ab4da7a656a96a7277c170811e813b3d3d6294147",
+      "licence": "Apache-2.0",
+      "licence_file": "Chewy-LICENSE.txt",
+      "source_url": "https://raw.githubusercontent.com/google/fonts/main/apache/chewy/Chewy-Regular.ttf",
+      "git_blob_sha1": "609eeb393c167df58d434d3d007364944a727894"
+    },
+    {
+      "file": "PatrickHand-Regular.ttf",
+      "family": "Patrick Hand",
+      "style": "Regular",
+      "sha256": "0f173b3e6cb6d1af25babf7f0057c5ac4ee11f9992b0469bb817e967ef4ad0fc",
+      "licence": "OFL-1.1",
+      "licence_file": "PatrickHand-OFL.txt",
+      "source_url": "https://raw.githubusercontent.com/google/fonts/main/ofl/patrickhand/PatrickHand-Regular.ttf",
+      "git_blob_sha1": "fb45ccdbd344ab7f9f4ae98792521405e48cda3e"
     }
   ]
 }

@@ -29,8 +29,12 @@ width/height as travel room:  ``room = iw*(1 - 1/zoom)``, solved for
 are -- this constant zoom is an internal zoompan detail of the *renderer*,
 never a change to the shot's own schema/storyboard document.
 :data:`PAN_PCT` (4, spec 5's shipped default for both fruit_drama and
-family_3d) is a documented MVP constant here; a per-style override is a
-follow-up, not required by either shipped template today.
+family_3d) is this module's own default when no caller passes a value.
+Phase 5 stage 12 (DEC-183) plumbs each style's own
+``motion_rules.tier1.pan_pct`` through ``filtergraph``/``plan`` down to
+:func:`zoompan_expr`'s ``pan_pct`` keyword, which already existed here --
+what stage 12 added is a caller (``plan.py``) that ever passes a value
+other than this default.
 
 **Escaping.** None of the expressions built here ever contain ``:``, ``,``
 or ``;`` by design (see :func:`_step_sign`'s comma-free ``floor``-based

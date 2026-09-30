@@ -201,3 +201,45 @@ def test_apply_overrides_is_pure():
     result1 = stylelock.apply_overrides(base, {"typography.ai_label": False}, now=LATER)
     result2 = stylelock.apply_overrides(base, {"typography.ai_label": False}, now=LATER)
     assert result1 == result2
+
+
+# ==================================================== immutability (RC-M4)
+#
+# Acceptance (phase 5 stage 12): "a stored style_lock.json never changes
+# when its template does." The behaviour already holds -- build_style_lock
+# builds every field off ``copy.deepcopy(template)`` -- so this is new
+# coverage, not a bug fix. The deliberate-mutation proof (make
+# build_style_lock keep a plain reference instead of a deep copy, watch this
+# test fail, then revert) is recorded in the stage-12 report, not committed.
+
+@pytest.mark.parametrize("style_id", templates.list_style_ids())
+def test_a_lock_never_changes_when_its_own_template_is_mutated_afterwards(style_id):
+    template = templates.load_style(style_id)
+    lock = stylelock.build_style_lock(template, now=NOW)
+    before = copy.deepcopy(lock)
+
+    # Mutate every level of the template a real edit could touch, deeply.
+    template["motion_rules"]["tier1"]["pan_pct"] = 999
+    template["motion_rules"]["tier1"]["overlays"].append("mutated_overlay")
+    template["palette"]["primary"].append("#000000")
+    template["palette"]["accents"].clear()
+    template["typography"]["font_family"] = "Mutated Family"
+    template["episode_defaults"]["hook_style"] = "mutated"
+    template["version"] = 999999
+
+    assert lock == before, f"{style_id}: the stored lock moved when its template was mutated afterwards"
+
+
+def test_a_lock_never_changes_when_a_second_lock_is_built_and_mutated(style_id="fruit_drama"):
+    """Two locks built from the SAME template must be fully independent of
+    each other too -- mutating one (as a caller holding a reference might)
+    must never reach the other."""
+    template = templates.load_style(style_id)
+    lock_a = stylelock.build_style_lock(template, now=NOW)
+    lock_b = stylelock.build_style_lock(template, now=NOW)
+    before_a = copy.deepcopy(lock_a)
+
+    lock_b["palette"]["primary"][0] = "#000000"
+    lock_b["motion_rules"]["tier1"]["pan_pct"] = 1
+
+    assert lock_a == before_a

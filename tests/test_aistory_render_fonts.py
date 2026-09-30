@@ -177,7 +177,12 @@ def test_first_match_wins_in_sorted_filename_order(tmp_path, monkeypatch):
     monkeypatch.setattr(fonts_mod, "_pil_available", lambda: True)
     monkeypatch.setattr(fonts_mod._clipping_fonts, "font_file_declares", lambda path, family: True)
 
-    record = fonts_mod.resolve_font("Whatever", custom_fonts_dir=custom)
+    # EDITED (stage 12): the always-True monkeypatch now also "matches" the
+    # first real file in the committed assets/fonts/ (searched before
+    # custom_fonts/, DEC-183) -- isolate the real shipped dir out of this
+    # custom_fonts/-only test with an empty one.
+    record = fonts_mod.resolve_font("Whatever", custom_fonts_dir=custom,
+                                    shipped_fonts_dir=tmp_path / "no_shipped_fonts_here")
     assert record["file"].endswith("Alpha.ttf")
 
 
@@ -188,8 +193,13 @@ def test_resolve_font_is_deterministic_for_the_same_inputs(tmp_path, monkeypatch
     monkeypatch.setattr(fonts_mod, "_pil_available", lambda: True)
     monkeypatch.setattr(fonts_mod._clipping_fonts, "font_file_declares", lambda path, family: True)
 
-    r1 = fonts_mod.resolve_font("Family", custom_fonts_dir=custom)
-    r2 = fonts_mod.resolve_font("Family", custom_fonts_dir=custom)
+    # EDITED (stage 12): isolated from the real shipped dir, same reason as
+    # test_first_match_wins_in_sorted_filename_order above -- this test's
+    # own point is custom_fonts/ determinism, not the (also-deterministic)
+    # shipped dir this module now searches first.
+    shipped = tmp_path / "no_shipped_fonts_here"
+    r1 = fonts_mod.resolve_font("Family", custom_fonts_dir=custom, shipped_fonts_dir=shipped)
+    r2 = fonts_mod.resolve_font("Family", custom_fonts_dir=custom, shipped_fonts_dir=shipped)
     assert r1 == r2
 
 
@@ -217,7 +227,9 @@ def test_stage_copies_a_custom_fonts_file(tmp_path, monkeypatch):
     monkeypatch.setattr(fonts_mod, "_pil_available", lambda: True)
     monkeypatch.setattr(fonts_mod._clipping_fonts, "font_file_declares", lambda path, family: True)
 
-    record = fonts_mod.resolve_font("Requested Family", custom_fonts_dir=custom)
+    # EDITED (stage 12): same isolation as the two tests above.
+    record = fonts_mod.resolve_font("Requested Family", custom_fonts_dir=custom,
+                                    shipped_fonts_dir=tmp_path / "no_shipped_fonts_here")
     fonts_dir = tmp_path / "render" / "fonts"
     staged_path = fonts_mod.stage(record, fonts_dir)
     assert open(staged_path, "rb").read() == b"unique custom font bytes"
@@ -259,3 +271,203 @@ def test_fallback_family_and_sha_match_fonts_index_json():
     assert entry["sha256"] == _sha256_of(FALLBACK_FILE)
     assert entry["family"] == "Montserrat"
     assert entry["style"] == "Black"
+
+
+# ============================================ 7. assets/fonts/ (phase 5 stage 12, DEC-183)
+#
+# Five per-style OFL/Apache TTFs, approved by the human 2026-09-30 ("All 5
+# as named"), ship under assets/fonts/ alongside Montserrat. resolve_font
+# must resolve a template family from assets/fonts/ BEFORE custom_fonts/
+# (then custom_fonts/, then the Montserrat fallback, exactly as before).
+
+SHIPPED_FONTS_DIR = fonts_mod.SHIPPED_FONTS_DIR
+
+# (template font_family, shipped filename) -- the approved download table.
+SHIPPED_TEMPLATE_FONTS = [
+    ("Bangers", "Bangers-Regular.ttf"),
+    ("Luckiest Guy", "LuckiestGuy-Regular.ttf"),
+    ("Bebas Neue", "BebasNeue-Regular.ttf"),
+    ("Chewy", "Chewy-Regular.ttf"),
+    ("Patrick Hand", "PatrickHand-Regular.ttf"),
+]
+
+
+def test_shipped_fonts_dir_constant_is_assets_fonts():
+    assert SHIPPED_FONTS_DIR == REPO_ROOT / "assets" / "fonts"
+
+
+@pytest.mark.parametrize("family,filename", SHIPPED_TEMPLATE_FONTS)
+def test_each_template_family_resolves_to_its_own_shipped_file(family, filename):
+    """The real, committed file (real PIL name-table read, no monkeypatch):
+    every one of the five templates' own ``typography.font_family`` must
+    resolve to exactly its own shipped file, never the Montserrat fallback
+    and never another shipped file."""
+    record = fonts_mod.resolve_font(family)
+    assert record["family"] == family
+    assert record["file"] == f"assets/fonts/{filename}"
+    assert record["sha256"] == _sha256_of(SHIPPED_FONTS_DIR / filename)
+    assert "assets/fonts" in record["reason"]
+    assert family in record["reason"]
+
+
+def test_shipped_font_resolution_is_deterministic():
+    r1 = fonts_mod.resolve_font("Bangers")
+    r2 = fonts_mod.resolve_font("Bangers")
+    assert r1 == r2
+
+
+@pytest.mark.parametrize("style_id,family", [("fruit_drama", "Montserrat ExtraBold"),
+                                              ("family_3d", "Fredoka Bold")])
+def test_mvp_styles_still_resolve_to_the_montserrat_fallback_unchanged(style_id, family):
+    """Acceptance (stage 12): adding the five new shipped fonts must not
+    change either MVP style's own resolution -- neither is shipped, so both
+    keep landing on the exact same fallback record as before this stage."""
+    record = fonts_mod.resolve_font(family)
+    assert record == fonts_mod._fallback_record()
+    assert record["family"] == "Montserrat Black"
+    assert record["file"] == "assets/fonts/Montserrat-Black.ttf"
+
+
+def test_shipped_fonts_dir_wins_over_a_custom_fonts_match(tmp_path, monkeypatch):
+    """Resolution order: assets/fonts/ BEFORE custom_fonts/. A file in
+    custom_fonts/ that would otherwise match must never be picked once the
+    real shipped file for the same family exists."""
+    custom = tmp_path / "custom_fonts"
+    custom.mkdir()
+    (custom / "Bangers-FromCustom.ttf").write_bytes(b"a custom override, never picked")
+    monkeypatch.setattr(fonts_mod, "_pil_available", lambda: False)  # loose filename match on both sides
+
+    record = fonts_mod.resolve_font("Bangers", custom_fonts_dir=custom)
+    assert record["file"] == "assets/fonts/Bangers-Regular.ttf"
+    assert record["sha256"] == _sha256_of(SHIPPED_FONTS_DIR / "Bangers-Regular.ttf")
+
+
+def test_shipped_fonts_dir_search_is_overridable_for_tests(tmp_path, monkeypatch):
+    """A caller (this test) may point *shipped_fonts_dir* at a tmp directory
+    instead of the real committed assets/fonts/ -- the same seam
+    *custom_fonts_dir* already offers, needed to test the ordering/matching
+    logic hermetically, without parsing a real font file."""
+    shipped = tmp_path / "shipped"
+    shipped.mkdir()
+    font_file = shipped / "Requested-Family.ttf"
+    font_file.write_bytes(b"shipped bytes")
+    custom = tmp_path / "custom_fonts"
+    custom.mkdir()
+    (custom / "Requested-Family.ttf").write_bytes(b"custom bytes, never picked")
+
+    monkeypatch.setattr(fonts_mod, "_pil_available", lambda: False)
+    record = fonts_mod.resolve_font("Requested Family", custom_fonts_dir=custom, shipped_fonts_dir=shipped)
+    assert record["file"].endswith("shipped/Requested-Family.ttf")
+    assert record["sha256"] == _sha256_of(font_file)
+
+
+def test_shipped_fonts_dir_montserrat_fallback_file_is_never_matched_by_the_generic_search(tmp_path, monkeypatch):
+    """The committed Montserrat-Black.ttf sits IN assets/fonts/ too, but it
+    is the deliberate last-resort fallback (DEC-159), never a generic
+    assets/fonts/ match -- requesting "Montserrat" (not "Montserrat
+    ExtraBold"/"Montserrat Black") must still land on the ONE, well-known
+    fallback record/reason, not a second, differently-worded "shipped dir"
+    match for the same file."""
+    monkeypatch.setattr(fonts_mod, "_pil_available", lambda: False)
+    record = fonts_mod.resolve_font("Montserrat", custom_fonts_dir=tmp_path / "empty_custom_fonts")
+    assert record == fonts_mod._fallback_record()
+
+
+def test_empty_custom_fonts_dir_with_real_shipped_dir_still_resolves_shipped_fonts(tmp_path):
+    """No behaviour change to the existing empty-custom-fonts case (section
+    4 above) other than the five new families now resolving before the
+    fallback ever runs."""
+    record = fonts_mod.resolve_font("Bangers", custom_fonts_dir=tmp_path / "empty_custom_fonts")
+    assert record["file"] == "assets/fonts/Bangers-Regular.ttf"
+
+
+# ================================================ 8. fonts_index.json entries
+
+FONTS_INDEX_PATH = REPO_ROOT / "assets" / "fonts" / "fonts_index.json"
+
+# (filename, family, style, licence, licence_file, git_blob_sha1, source_url
+# path) -- the approved table, DEC-183. git_blob_sha1 is `git hash-object
+# <file>`, independently verified against github.com/google/fonts before
+# download; the source_url path is that same approved table's own column.
+_GH_BASE = "https://raw.githubusercontent.com/google/fonts/main/"
+EXPECTED_FONT_INDEX = [
+    ("Bangers-Regular.ttf", "Bangers", "Regular", "OFL-1.1", "Bangers-OFL.txt",
+     "9b0f8c1f1b45e7bb4971b7d6a8604f9aacacdd32", _GH_BASE + "ofl/bangers/Bangers-Regular.ttf"),
+    ("LuckiestGuy-Regular.ttf", "Luckiest Guy", "Regular", "Apache-2.0", "LuckiestGuy-LICENSE.txt",
+     "5ca663c2f05761356ca4427c084e4443a157f834", _GH_BASE + "apache/luckiestguy/LuckiestGuy-Regular.ttf"),
+    ("BebasNeue-Regular.ttf", "Bebas Neue", "Regular", "OFL-1.1", "BebasNeue-OFL.txt",
+     "c328c6e08b20a20a1de47d823e007ee73812a438", _GH_BASE + "ofl/bebasneue/BebasNeue-Regular.ttf"),
+    ("Chewy-Regular.ttf", "Chewy", "Regular", "Apache-2.0", "Chewy-LICENSE.txt",
+     "609eeb393c167df58d434d3d007364944a727894", _GH_BASE + "apache/chewy/Chewy-Regular.ttf"),
+    ("PatrickHand-Regular.ttf", "Patrick Hand", "Regular", "OFL-1.1", "PatrickHand-OFL.txt",
+     "fb45ccdbd344ab7f9f4ae98792521405e48cda3e", _GH_BASE + "ofl/patrickhand/PatrickHand-Regular.ttf"),
+]
+
+LICENCE_FILE_BLOBS = {
+    "Bangers-OFL.txt": "bf717d4be410cf7616b9bd345b40ab4817a26e6f",
+    "LuckiestGuy-LICENSE.txt": "d645695673349e3947e8e5ae42332d0ac3164cd7",
+    "BebasNeue-OFL.txt": "da9571488f44176ef90d7f10c0f402c8be74db67",
+    "Chewy-LICENSE.txt": "d645695673349e3947e8e5ae42332d0ac3164cd7",
+    "PatrickHand-OFL.txt": "4d5f9447f48357b6a4ac294604954b274059d119",
+}
+
+
+def _load_fonts_index() -> dict:
+    import json
+    return json.loads(FONTS_INDEX_PATH.read_text(encoding="utf-8"))
+
+
+def test_fonts_index_still_starts_with_montserrat_unchanged():
+    """Untouched, named by the brief: Montserrat's own entry stays first
+    and exactly as it was (also proven independently, unedited, by
+    ``test_fallback_family_and_sha_match_fonts_index_json`` above)."""
+    index = _load_fonts_index()
+    assert index["fonts"][0]["file"] == "Montserrat-Black.ttf"
+    assert index["fonts"][0]["licence"] == "OFL-1.1"
+
+
+def test_fonts_index_has_exactly_six_entries():
+    index = _load_fonts_index()
+    assert len(index["fonts"]) == 6
+
+
+@pytest.mark.parametrize("filename,family,style,licence,licence_file,git_blob_sha1,source_url", EXPECTED_FONT_INDEX)
+def test_fonts_index_entry_matches_the_shipped_file_and_licence(filename, family, style, licence, licence_file,
+                                                                 git_blob_sha1, source_url):
+    index = _load_fonts_index()
+    entry = next((e for e in index["fonts"] if e["file"] == filename), None)
+    assert entry is not None, f"no fonts_index.json entry for {filename}"
+    assert entry["family"] == family
+    assert entry["style"] == style
+    assert entry["licence"] == licence
+    assert entry["licence_file"] == licence_file
+    assert entry["sha256"] == _sha256_of(SHIPPED_FONTS_DIR / filename)
+    assert entry["git_blob_sha1"] == git_blob_sha1
+    assert entry["source_url"] == source_url
+    assert (SHIPPED_FONTS_DIR / filename).is_file()
+
+
+@pytest.mark.parametrize("licence_file,git_blob_sha1", sorted(LICENCE_FILE_BLOBS.items()))
+def test_fonts_index_licence_file_exists_and_matches_its_own_git_blob(licence_file, git_blob_sha1):
+    path = SHIPPED_FONTS_DIR / licence_file
+    assert path.is_file()
+    text = path.read_bytes()
+    # git blob sha1: "blob <len>\0<content>"
+    header = f"blob {len(text)}\0".encode("ascii")
+    assert hashlib.sha1(header + text).hexdigest() == git_blob_sha1
+
+
+def test_apache_licence_files_are_apache_2_0():
+    for filename in ("LuckiestGuy-LICENSE.txt", "Chewy-LICENSE.txt"):
+        text = (SHIPPED_FONTS_DIR / filename).read_text(encoding="utf-8")
+        assert "Apache License" in text and "Version 2.0" in text
+
+
+def test_ofl_licence_files_are_sil_open_font_license_1_1():
+    for filename in ("Bangers-OFL.txt", "BebasNeue-OFL.txt", "PatrickHand-OFL.txt"):
+        text = (SHIPPED_FONTS_DIR / filename).read_text(encoding="utf-8")
+        assert "SIL Open Font License, Version 1.1" in text
+
+
+def test_fonts_index_schema_is_still_fonts_index_v1():
+    assert _load_fonts_index()["$schema"] == "fonts_index_v1"
