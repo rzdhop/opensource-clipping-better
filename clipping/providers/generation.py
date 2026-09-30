@@ -502,7 +502,7 @@ def _run_candidates(kind, candidates, request, *, adapter, credentials, allow_pa
         outcome = _attempt(link, request, adapter=adapter, credentials=credentials,
                            transport=transport, on_log=on_log, sleep_fn=sleep_fn,
                            time_fn=time_fn, failures=failures, extra_kwargs=extra_kwargs or {},
-                           paid=paid, journal=journal)
+                           paid=paid, journal=journal, limiter=limiter)
         if outcome is _SWAP:
             nxt = candidates[index + 1] if index + 1 < len(candidates) else None
             if nxt is None:
@@ -521,12 +521,27 @@ def _run_candidates(kind, candidates, request, *, adapter, credentials, allow_pa
 _SWAP = object()
 
 
+def _release_free_slot(limiter, paid, link, exc) -> None:
+    """Give back the free-tier slot the runner counted for *link* when the
+    provider refused the call for credentials (401/403) instead of actually
+    spending the allowance (T2-P5-F12): the counter must reflect calls the
+    provider served, not calls it turned away at the door. A paid link is
+    never counted by the limiter, and not every limiter offers ``release``
+    (fakes in tests), so both are checked first."""
+    if paid or limiter is None or errors.status_code(exc) not in (401, 403):
+        return
+    release = getattr(limiter, "release", None)
+    if release is not None:
+        release(link.provider)
+
+
 def _attempt(link, request, *, adapter, credentials, transport, on_log, sleep_fn, time_fn, failures,
-             extra_kwargs=None, paid=False, journal=None):
+             extra_kwargs=None, paid=False, journal=None, limiter=None):
     if journal is not None:
         return _journaled_attempt(link, request, journal, adapter=adapter, credentials=credentials,
                                   transport=transport, on_log=on_log, sleep_fn=sleep_fn, time_fn=time_fn,
-                                  failures=failures, extra_kwargs=extra_kwargs or {}, paid=paid)
+                                  failures=failures, extra_kwargs=extra_kwargs or {}, paid=paid,
+                                  limiter=limiter)
     label = describe(link)
     # A paid request is billed once the provider accepts it (fal: at submit, before
     # the polls), so a retry after a failed poll bills a second job the ledger
@@ -552,6 +567,7 @@ def _attempt(link, request, *, adapter, credentials, transport, on_log, sleep_fn
                 continue
             if retryable and paid:
                 reason += " (paid link: not retried, a second request could be billed again)"
+            _release_free_slot(limiter, paid, link, exc)
             glyph = "⚠️" if retryable else "✖"
             on_log(f"   {glyph} {label} {'failed' if glyph == '⚠️' else 'fatal'} | {reason}")
             failures.append((label, reason))
@@ -583,7 +599,7 @@ def _journal_kwargs(journal, extra_kwargs, sleep_fn, time_fn) -> dict:
 
 
 def _journaled_attempt(link, request, journal, *, adapter, credentials, transport, on_log, sleep_fn,
-                       time_fn, failures, extra_kwargs, paid):
+                       time_fn, failures, extra_kwargs, paid, limiter=None):
     """``_attempt`` with a journal: the same attempts, glyphs and swap, plus
     the journal's seams. A request the provider acknowledged is resumed, never
     submitted again (:func:`_resume`); a paid call that failed before any
@@ -621,6 +637,7 @@ def _journaled_attempt(link, request, journal, *, adapter, credentials, transpor
                 continue
             if retryable and paid:
                 reason += " (paid link: not retried, a second request could be billed again)"
+            _release_free_slot(limiter, paid, link, exc)
             glyph = "⚠️" if retryable else "✖"
             on_log(f"   {glyph} {label} {'failed' if glyph == '⚠️' else 'fatal'} | {reason}")
             failures.append((label, reason))

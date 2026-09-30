@@ -73,6 +73,11 @@ class FreeTierLimiter:
     def acquire(self, provider):
         return limits.acquire(provider)
 
+    def release(self, provider):
+        """Give back a slot :meth:`acquire` counted for a call the provider
+        refused for credentials (``run_generation_chain``'s 401/403 handling)."""
+        limits.release(provider)
+
 
 def api_model_id(kind, link) -> str:
     """The provider's own model id behind a chain link (for the ledger)."""

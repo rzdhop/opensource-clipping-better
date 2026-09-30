@@ -143,6 +143,22 @@ class DailyUsage:
             self._write(data)
             return True, calls + 1
 
+    def release(self, provider: str) -> int:
+        """Give back one call counted by :meth:`try_increment` -- the provider
+        never actually served it (refused for credentials). Never drops below
+        zero, so a release racing a same-day reset is harmless. Returns the
+        count after the release."""
+        with self._lock:
+            data = self._load()
+            entry = data["providers"].setdefault(provider, {"calls": 0})
+            calls = int(entry.get("calls", 0))
+            if calls <= 0:
+                return calls
+            entry["calls"] = calls - 1
+            data["updated_at"] = datetime.fromtimestamp(self._time(), tz=timezone.utc).isoformat()
+            self._write(data)
+            return calls - 1
+
 
 _DEFAULT_USAGE = None
 _DEFAULT_USAGE_LOCK = threading.Lock()
@@ -219,6 +235,15 @@ def acquire(provider: str, *, usage=None, limits=None, time_fn=None, sleep_fn=No
             _CALL.time_fn = None
             _CALL.sleep_fn = None
     return None
+
+
+def release(provider: str, *, usage=None) -> None:
+    """Give back one call counted by :func:`acquire` for *provider* -- the
+    provider refused it for credentials (401/403), so nothing was actually
+    spent today. Only for a call :func:`acquire` counted; a provider with no
+    entry in the table has nothing to release."""
+    store = usage or default_usage()
+    store.release(provider)
 
 
 def budget_left_today(*, usage=None, limits=None) -> dict:

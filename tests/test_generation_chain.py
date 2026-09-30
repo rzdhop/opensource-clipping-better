@@ -7,7 +7,7 @@ or an SDK.
 
 import pytest
 
-from clipping.providers import errors, generation, registry, transport
+from clipping.providers import errors, generation, limits as limits_mod, registry, transport
 from clipping.providers.generation import (
     DEFAULT_CHAINS, ENV_NAMES, KINDS, GenRequest, GenResult, NoRunnableLink,
     chain_from_env, is_paid, local_url, parse_generation_chain, run_generation_chain,
@@ -222,6 +222,25 @@ def test_a_spent_daily_allowance_moves_the_chain_on():
                               {("image", "cloudflare"): cf, ("image", "pollinations"): pol}, limiter=Limiter())
     assert cf.calls == [] and link.provider == "pollinations"
     assert any("⏳" in line and "170/170" in line for line in log)
+
+
+def test_a_401_from_a_free_link_gives_its_daily_slot_back(tmp_path):
+    """T2-P5-F12: a bad token answers every call with HTTP 401; the provider
+    never actually served anything, so the daily counter must not move."""
+    store = limits_mod.DailyUsage(str(tmp_path / "usage.json"))
+    table = {"cloudflare": limits_mod.Limit(rpm=None, rpd=170)}
+
+    class Limiter:
+        def acquire(self, provider):
+            return limits_mod.acquire(provider, usage=store, limits=table)
+
+        def release(self, provider):
+            limits_mod.release(provider, usage=store)
+
+    cf = FakeAdapter(fail=[transport.HttpStatusError(401, "https://api.cloudflare.com/x", "Authentication error")])
+    with pytest.raises(NoRunnableLink):
+        run("image", "cloudflare/flux-1-schnell", {("image", "cloudflare"): cf}, limiter=Limiter())
+    assert store.calls("cloudflare") == 0
 
 
 def test_a_local_link_is_skipped_with_its_url_when_unreachable():
