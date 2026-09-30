@@ -2523,6 +2523,10 @@ a script clears both approvals and stales the report; a storyboard edit clears o
 **Consequence.** Editing episode 1 never touches `story.status`, which stays `ready` throughout (RC-E2); each
 episode approves independently of every other.
 
+*Amended by DEC-185 (2026-09-30): a text-only line edit (words, delivery, or a scene's `pays_off`, with the same
+line ids, speakers and emotions) clears only the script approval and keeps the storyboard approval; only a
+structural edit clears both, as this entry originally described.*
+
 ## DEC-130 — Phase 3 writes episode 1 only; episode N ≥ 2 waits for episode N−1's recap in series memory
 **Context.** Spec's series-memory step (phase 5) is what would give E3 something true to recap; without it a
 "recap" scene would be invented.
@@ -2531,6 +2535,9 @@ episode approves independently of every other.
 phase 5) first."
 **Consequence.** Only episode 1 can be produced this phase; the E3 recap prompt itself is built and
 golden-tested now, ready for phase 5 to call.
+
+*Amended by DEC-179 (2026-09-30): the gate now needs episode N-1's memory entry approved and fresh, not merely a
+`recaps` string — a hand-written recap with no entry behind it no longer passes.*
 
 ## DEC-131 — A script is one resumable job (E1 → E2×N → E3 → E4), saved after every call, under a predictive
 30-minute step budget
@@ -2652,6 +2659,9 @@ inside the existing 1.0 s hold-extension cap; a tightened episode never tightens
 **Consequence.** Script timing can now depend on the storyboard's own shot count — a scene planned with more
 shots may hold slightly longer than it would on script alone; verified on the copy at 0.000 s difference between
 script and shot durations on every scene, fast and T1 alike.
+
+*Amended by DEC-183 (2026-09-30): timing is quantized to whole frames at 30 fps; the single-source rule this entry
+established is unchanged, only what it rounds to.*
 
 ## DEC-143 — E1 aims for the upper half of each slot; E2 asks a two-sided word range with one retry, then accepts
 **Context.** Episode 1 first came out at 38.6 s, under the 55–80 s window: E1 was picking low targets inside its
@@ -2953,6 +2963,9 @@ pollinations HTTP 500 inside a paced round (whose own retry then answers 402) st
 the round exactly as a 402 does — "Continue" resumes it on the next press; recorded as a follow-up, not fixed
 this phase.
 
+*Amended by DEC-190 (2026-09-30): the cast step now paces itself against free-tier rate limits the same way,
+sharing the predicates from the new `steps/pacing.py`.*
+
 ## DEC-169 — Subtitles show the script's own tokens, timed by the provider's word cues; `two_line` speaker
 accents must clear WCAG contrast against the outline
 **Context.** Tier-2 findings T2-F6 and T2-F7 on the live FR `two_line` render: Broccolia's speaker accent
@@ -3090,3 +3103,281 @@ time on gemini's rate limiter.
 14 min 21 s → 6 min 19 s for both suites; with no duplicate runs, test time per stage drops from 25–40 min to about
 6 min. Amends the global agreement's Section 9 practice only in who runs Tier-1 and how (the human's chat instruction
 takes precedence). A-083 records the xdist-safety assumption.
+
+## DEC-177 — Series memory is the only carrier of continuity between episodes
+**Context.** Episode 2 needs to open on a true recap and pay off a real hook. The season arc's own `open_hooks_out`
+are only suggestions, and nothing else in the story documents records what an episode actually did once it aired.
+**Decision.** Episode N's approved script is read once, by one S3 call, into that episode's own series-memory entry
+(a recap, the hooks it opened and closed, relationship deltas). Every continuity-dependent prompt — E1's recap and
+open-hooks block, E3's recap scene, E4's payoff check, N1's proposals — reads only the folded series memory, never a
+prior episode's script directly.
+**Consequence.** Continuity is exactly as good as the entries are: an episode approved with no memory entry does not
+propagate (the gate, DEC-179), and a hand-written recap with no entry behind it no longer passes. The model's
+continuity input stays small and auditable instead of growing with every prior episode's full text.
+
+## DEC-178 — Memory is a fold over per-episode entries, not incrementally merged state; re-running an episode's
+memory is idempotent
+**Context.** The rejected alternative (incrementally merging each S3 reply into one running state) would
+double-apply a re-run's deltas — a memory step re-run after a script edit would count its own hooks twice.
+**Decision.** `series_memory.entries[epNN]` holds each episode's own entry (recap, hooks_opened, hooks_closed,
+relationship_deltas, script_rev). `recaps`, `open_hooks` and `relationship_state` are *derived* from a pure fold
+over `entries` (`fold_memory`), stored so existing readers (`memory_section`, E4, the spec-shape test) see them
+unchanged. `open_hooks_before(season, N)` folds only the entries before N — the function every prompt for episode N
+must call, never the stored `open_hooks`, which folds later entries too. Re-running episode N's memory replaces its
+one entry and re-folds from scratch, so a re-run is idempotent. A later episode's memory that closes a hook the new
+entry no longer opens raises `FoldError`, naming the later episode; nothing is written.
+**Consequence.** An edited-and-re-approved script re-runs memory safely. The fold is deterministic and
+order-independent by episode number; a season with hand-written recaps but no entries gets no hooks and no payoff
+demand, so old data degrades gracefully rather than breaking. Proven by golden fold cases and by all four live
+seasons validating unchanged (stage 1).
+
+## DEC-179 — Memory runs on an approved script, goes stale on a script change, and gates episode N+1's script,
+storyboard and fast track (amends DEC-130)
+**Context.** DEC-130 gated episode N+1 on `series_memory.recaps["ep{N-1}"]` existing at all — any string would do,
+including a hand-written one with nothing behind it. Phase 5 needs the gate to mean something: a real, current entry
+from the script that was actually approved.
+**Decision.** The `memory` step needs episode N's script **approved** and records the script's `rev` in the entry.
+`entry_is_stale` compares that `rev` against the script's current one: a later edit (even one that re-approves)
+makes the entry stale. Episode N+1's script, storyboard and the fast track — only while any of them would actually
+write — refuse until `entries[epN]` is both approved and fresh, each refusal naming the exact missing piece
+(missing, not approved, or stale).
+**Consequence.** A hand-written recap with no entry no longer passes (no live season had one, so nothing broke).
+The gate does not touch assets, render, metadata or their regenerates — only writing new script/storyboard content
+for N+1.
+
+## DEC-180 — Hooks are closed by an enumerated value, never fuzzy matching; E1 marks `pays_off`, E4 checks it
+**Context.** The rejected alternative, fuzzy-matching hook text, is non-deterministic — the same reply could close a
+hook on one run and miss it on the next.
+**Decision.** `hooks_closed` in an S3 reply is an enum of the hooks open before that episode, verbatim — never free
+text. E1 for episode ≥ 2 with open hooks is shown at most `PAYOFF_HOOKS_MAX` (4) of them, oldest first, and a
+per-scene `pays_off` field (one hook per scene) that at least one body scene must fill; a framing scene (recap,
+hook, cliffhanger) that pays one off has it cleared before validation. A deterministic pre-check (`payoff_issues`)
+runs before E4: no body scene paying off anything, or a scene naming a hook that isn't open. E4 gains the
+`hook_payoff` issue kind and judges whether the lines actually deliver the payoff, shown only earlier episodes' own
+recaps (never a later one).
+**Consequence.** A hook can only close on a value the model was actually offered, so a closed hook is always
+traceable to an open one. Live free-chain bench: E1 put `pays_off` on the hook scene itself in every run
+(T2-P5-F7) — fixed by restricting the field to body scenes only (see DEC-188).
+
+## DEC-181 — Audience feedback is pasted, capped and never trimmed; one item per episode; the latest decided
+direction steers only the next E1
+**Context.** A paste of unbounded length would blow past F1's input budget silently, or get silently cut and digest
+the wrong half of the comments.
+**Decision.** `POST /episodes/{ep}/feedback` stores `{text, stats?}`, each capped at 6,000 characters (code points)
+at the API, refused whole over the cap, never trimmed. One item per episode — a second paste replaces the first. F1
+digests it (≤ 60 words) into exactly three directions (≤ 25 words each); approving `feedback:<ep>` with
+`{direction: 0|1|2|null}` records `chosen_direction`. Only the latest *decided* feedback item's direction steers the
+next episode's E1 (and N1) — never the story overall, never more than one episode ahead.
+**Consequence.** The pasted text is fenced in the prompt as untrusted data, not instructions. Re-running F1 clears
+any direction already chosen, since it would point at superseded text.
+
+## DEC-182 — N1 proposals: fixed ids, recurring/guest by default, decisions are final; accepting a twist rewrites
+the arc entry with the old text kept in `history`; approving the proposals document writes nothing new
+**Context.** Each proposal needs a stable handle for the dashboard's accept/reject UI, and a twist accepted for a
+future episode has to land somewhere the season arc already reads from.
+**Decision.** `episodes/ep{N+1}/proposals.json` holds up to two characters (`char_1`, `char_2`) and up to two twists
+(`twist_1`, `twist_2`), each targeting an arc episode after N. A character's role defaults to `recurring` or `guest`
+so the story stays `ready`; `lead`/`support` is allowed but folds the cast approval (DEC-123, unchanged) and the
+dashboard shows that warning before it's sent. Accepting a character queues the existing cast path (K1, sheets,
+voice) with `introduced_in = N+1`. Accepting a twist replaces the target arc entry's summary and `open_hooks_out`,
+pushing the old text into that entry's `history`; the acceptance *is* the approval, so `approvals.season` is not
+cleared. Every decision (`accepted`/`rejected`) is final. `approve proposals:<ep>` is only reachable once every item
+is decided, and it writes nothing — it completes the propose-next job that is already `awaiting_approval`
+(`stories.py`'s `_complete_awaiting`), which is what the dashboard's "Approved" reads (stage 13b F5).
+**Consequence.** A re-run of propose-next replaces the whole document and its decisions start over, but anything an
+earlier acceptance already did (a character queued, an arc entry amended) stays done — re-running is not a
+rollback.
+
+## DEC-183 — Shot timing moves to whole frames at the source (amends DEC-142); a storyboard written before this
+converts once, on its next full re-time
+**Context.** Stage 6's key finding: cumulative frame rounding over a script's scene durations meant a single line
+edit could flip the frame count — and so the render cache key — of roughly a third of the shots after it (measured
+22.6% live), which made "rebuild only the changed shots" impossible. DEC-142 named `episode_pass` the single timing
+source but never required whole frames.
+**Decision.** `timing.episode_pass` (and `scene_timing`/`allocate_shots` beneath it) now default to
+`whole_frames=True`: every scene and shot duration is the nearest frame at 30 fps, window states
+(tightened/under/over) decided on frame counts rather than the rounded seconds figure. A new storyboard carries
+`whole_frames: true`; an old one converts on its first full re-time (every scene re-timed, not skipped), which
+re-renders most of its shots once. Golden and every stored document already rendered continue to render
+byte-identical, because the timeline and `audio_entries` re-run `episode_pass` on every render and compare against
+the board's own flag.
+**Consequence.** Later-shot frame drift from an edit measured 22.6% before the fix, 0% after (spike, 110-episode
+sample). One latent old-timing bug survives, unfixed and now unreachable by a whole-frame board: an unflagged board
+whose total lands on an exact half frame can be refused as unplannable at plan time (~1 in 32 random episodes on the
+old code). Both live stories converted once on stage 13's walk (FR 7/21 shots, EN 2/20).
+
+## DEC-184 — The partial re-render's baseline is the last good manifest; a clip is reused only when its recorded
+sha256 matches; partial and full renders must agree exactly
+**Context.** The runner already reused a cached clip by key, but only checked that the cached file existed and was
+non-empty — never that its bytes were the ones actually rendered for that key. The manifest was overwritten on
+every run, including a failed one, so nothing recorded what had been reused relative to a *good* render, and a
+failed re-render could replace the manifest while the previous `episode_final.mp4` stayed on disk untouched.
+**Decision.** `render_manifest.last_good.json` is written only by a render that completes, and only after the final
+file is read back — never by a failed or cancelled one. `render/partial.cache_state` is the one hit predicate
+shared by the runner and the dry run: a cached clip is reused only when its sha256 is one the last good render (or
+the current run) actually recorded for that exact key. `render/partial.select` returns `{rebuild, reuse, reasons}`
+with one reason per shot (image, overlay, modifiers, frames, motion, settings, new, missing, corrupt). A real-ffmpeg
+CI test proves partial and full renders of the same edited documents produce an identical framemd5.
+**Consequence.** A stale reuse — the one failure mode that would ship an old frame silently — is structurally
+impossible: reuse requires a recorded, hash-verified match, not merely a file being present. This was named the
+riskiest stage of the phase-5 plan; proven by `tests/test_aistory_render_partial.py` (55 tests) and the golden
+test, both unedited elsewhere and green.
+
+## DEC-185 — Re-edit rules (amends DEC-129): a text-only line edit keeps the storyboard approval and re-times in
+place; a framing swap outdates the image and a stale image is never rendered; a rule violation is refused; a voice
+regenerate persists its take and its note
+**Context.** Before phase 5, any script edit — even fixing a typo — cleared both the script and storyboard
+approvals and forced a full storyboard re-plan, which dropped every shot's locks, notes and images (DEC-129 as
+originally written). Separately, `render.py` never checked a shot's own `shot_state`, so a re-approved storyboard
+could render an image that had gone stale underneath it.
+**Decision.**
+- A **text-only edit** — a line's words or delivery, or a scene's `pays_off`, with the same line ids, speakers and
+  emotions — clears only the script approval and stales E4; the **storyboard approval and every shot are kept**,
+  the scene is marked `retime_only` and re-timed in place once its lines are re-voiced. Speaker or emotion changes,
+  or added/removed lines, stay **structural**: exactly today's behaviour (both approvals cleared, a full re-plan).
+- **Re-voicing** one line (`line:<ep>:<lid>`) now applies its note to the TTS request instead of ignoring it, and
+  persists the resulting take (audio sha256, the note) on the line entry, closing a phase-4 loss.
+- A **framing, action or prompt edit** marks the shot's image stale (`shot_state`); `render.require_renderable` and
+  `current_render` now refuse a render with a stale or failed unlocked shot image, naming exactly which shot to
+  regenerate. A framing edit that would break a cross-scene rule (no back-to-back repeated framing, etc.) is refused
+  outright rather than silently moving a neighbouring shot.
+- A **motion swap** or **transition change** keeps the image and only changes that shot's own render key (DEC-141
+  kept); a transition edit can still shift whole frames of the scene it leaves, but never another scene's shots.
+- Live fix T2-P5-F9 (`10acc3d`): Gemini's free TTS spoke a French re-voice note aloud instead of treating it as
+  style direction (Google's "Say `<note>`: `<line>`" example form is read as text on `flash-lite`). Gemini now
+  sends the line alone, like Edge and the local engines; the note is recorded with the take, never sent to any TTS
+  provider.
+**Consequence.** One line edit's cost drops from "E4 → script approval → a full re-plan (every image lost) →
+storyboard approval → assets → assets approval" to "E4 → script approval → re-voice", for the common case. Proven
+by `tests/test_story_reedit.py` (36 tests) and the phase-3 re-time tests passing unedited once their inputs were
+changed to stay structural (named in the log).
+
+## DEC-186 — The per-style fonts ship (Bangers, Bebas Neue, Patrick Hand under OFL-1.1; Luckiest Guy, Chewy under
+Apache-2.0 — the human chose to ship them knowing that), with one licence file each, sizes and git blob SHAs
+recorded in `fonts_index.json`; a template change bumps its `version` and names the re-pinned test; a style lock
+never changes when its template does
+**Context.** Only Montserrat Black had ever shipped; three of the five new styles specify `two_line`, which neither
+MVP style renders, and `pan_pct` had been a hardcoded constant (4) regardless of what a template asked for.
+**Decision.** The five named faces (confirmed by the human, "All 5 as named", 2026-09-30) are committed to
+`assets/fonts/`, each verified against its approved byte size and its git blob sha from `google/fonts` `main`, with
+its own licence file (`<Name>-OFL.txt` or, for the two Apache-2.0 faces, `<Name>-LICENSE.txt`) and an entry in
+`fonts_index.json` (licence, sha256, licence file, source URL, git blob sha). `render.fonts.resolve_font` looks in
+`assets/fonts/` before `custom_fonts/`, then the Montserrat fallback. `render.plan`/`filtergraph`/`motion` now read
+the style lock's own `motion_rules.tier1.pan_pct` instead of the hardcoded constant; the two MVP styles' value
+already equals it, so their render argv is unchanged (asserted). `tests/test_style_lock.py` proves a style lock
+never changes when its template does (a deliberate mutation, `lock = template`, fails 12 tests).
+**Consequence.** All six typefaces carry French glyph coverage (checked with `fc-query` against the accented
+character set the language needs); the two_line speaker accents of the three new styles were measured against the
+WCAG contrast rule (DEC-169) and three of them fail it, so the renderer substitutes its own readable grey rather
+than the template's colour — recorded as a stage-14 A-entry, no template edited.
+
+## DEC-187 — Live fix T2-P5-F3: N1 gets its own measured input budget and a bounded open-hooks list
+**Context.** "Propose next episode" on the live FR story failed before any LLM call — "prompt is 1536 estimated
+tokens, over the 1200-token budget" — because N1 had shipped on the default budget measured from a small fixture,
+and its open-hooks list was unbounded (a season's fold can hold dozens of entries).
+**Decision.** `INPUT_BUDGET['N1']` is remeasured at 3,740 tokens from the live-sized worst case (DEC-138's method:
+chars/4, +15%, rounded up to ten) — an 8-character cast, a 12-episode arc, a full recap and direction, and at most
+4 open hooks. `_n1_memory_block` now shows only the oldest `PAYOFF_HOOKS_MAX` (4) open hooks — the same window E1
+offers — instead of the whole stored list.
+**Consequence.** Fix `64ed69e`. The live story's proposals ran on the next attempt. `tests/test_story_prompts_series.py`
+gained a worst-case-input-fits-its-budget test and a hooks-window test (10 hooks shown as 4; 30 hooks equal to 4 in
+token count).
+
+## DEC-188 — Live fix T2-P5-F7: only a body scene pays off a hook; E1's reply is repaired before validation
+**Context.** Live ep-2 E1 and a 4-of-4 free-chain bench both put `pays_off` on the hook scene itself (s01) as well
+as a body scene; E4 then refused the payoff on the framing scene (part of T2-P5-F6).
+**Decision.** `prompts._E1_PAYOFF_LINE` now says explicitly: body scenes (setup, rising, peak, turn) only, always
+`[]` on the recap, hook and cliffhanger. `steps/script._repair_e1_reply` empties a framing scene's `pays_off` before
+validation, defensively, the same pattern already used for stray `props` (T2-F9) — no retry spent on the free tier
+for something Python can fix in place. Episode 1 is unaffected (no payoff line is ever sent to it).
+**Consequence.** Fix `7b9cc92`. `tests/test_story_episode_steps.py` gained a test for the repair; the ep-2 E1
+goldens and the measured input budgets moved by the longer ask line (named re-pins in the log).
+
+## DEC-189 — The dashboard never offers "Sign out" without a stored token, and signing out re-checks the server
+**Context.** Found in the stage-10 browser check: the sidebar's "🔒 Sign out" control had rendered on every server
+since an earlier commit and, clicked, set the app to signed-out, which renders the Login screen. On the live open
+app at desktop widths (the sidebar is desktop-only) one click showed the sign-in screen the human had explicitly
+ruled out (memory: no auth on the app, ever).
+**Decision.** "Sign out" renders only while a token is actually stored client-side; signing out re-checks the
+server rather than trusting the client's own state, so an open server always answers "in".
+**Consequence.** Complements DEC-173 (auth stays opt-in) and is itself part of RC-M9, the no-auth regression item.
+`tests/test_dashboard_no_sign_in.py` added.
+
+## DEC-190 — The cast step paces itself against free-tier rate limits, the same way the assets step does (amends
+DEC-168)
+**Context.** T2-P5-F4: an accepted proposed character needed six separate cast presses, roughly a minute apart, to
+finish — `steps/cast.py` had no pacing at all, so a Pollinations 402 or a Gemini 429 failed the step outright
+("Cast incomplete…") instead of being retried. The predicates DEC-168 built for the assets step (`is_rate_limit`,
+`_paid_sent`, `rate_limited_by`, `RATE_LIMIT_PAUSE_S`) lived only in `assets.py`.
+**Decision.** The predicates move, byte-for-byte, to a new `steps/pacing.py`; `assets.py` re-imports them under its
+own names, so nothing that already patches `assets.RATE_LIMIT_PAUSE_S` etc. changes. `cast.run` paces every
+held-back sheet and voice sample in DEC-168-shaped rounds: one cancel-aware 60-second pause per round, checked
+against the step's own 1800-second budget before each pause and each call, a provider making no progress across a
+whole round given up on for that run, a paid-sent item never retried, and a `NeedsEditor` stop never paced (it
+never will succeed on its own).
+**Consequence.** Proven live 2026-09-30 on the stage-14 anime cast: a character's portrait, turnaround and
+expressions sheet all completed in one press, through one paced round ("⏳ pollinations rate-limited: waiting 60 s
+before retrying 1 image"). The places step does not yet pace the same way — a known gap, not fixed this phase (see
+`docs/AI_STORY.md`).
+
+## DEC-191 — Dashboard series polish (stage 13b): the Season step stays open after a series action, the feedback
+counter counts code points, and the episode page shows the server's own refusal sentence for a blocked regenerate
+**Context.** Stage 13's browser check and the human's own use surfaced four small dashboard gaps: (F1) any series
+action (approving memory, digesting feedback, deciding a proposal) collapsed the wizard back to the Cast step; (F2)
+the pasted-feedback counter counted UTF-16 code units (295) against the server's 6,000-code-point cap (294 for the
+same text), so it could read under the cap while the server was already at it; (F5) "Approve proposals" stayed a
+clickable button after the approval, which writes nothing (DEC-182), so nothing visibly changed; (F8) "Re-voice
+this line", a shot-image regenerate and a metadata regenerate all stayed enabled while the server would refuse them
+with a 409, wasting a press to learn why.
+**Decision.** The Season step's wizard state now only refreshes on a series action instead of navigating away. The
+feedback counter uses `[...s].length` (code points), matching the server exactly. The episode and story pages carry
+`proposals_approved` (true once the latest propose-next job for that episode is `completed`) and
+`assets_regenerate_blocked` / `metadata_regenerate_blocked` (the server's own refusal sentence, `None` when the
+action is allowed); the dashboard disables each control with that sentence shown as visible text, not a
+hover-only `title`.
+**Consequence.** All four verified in a 375 px browser check on a scratch copy of the live story. F6 (E4 sometimes
+still judging a present payoff as missing on `flash-lite`) is recorded as A-084 rather than fixed — no code change
+is justified by one model's occasional variance.
+
+## DEC-192 — Testing scope: one fail-first test per fix plus the working-path guard; live checks walk the main
+path only (amends the agreement's Section 9 practice, alongside DEC-176)
+**Context.** The human, 2026-09-30, mid-close: "Some test will happen via the usage of the app, do not test every
+possible outcome, only the essential one."
+**Decision.** From this point in the phase: each fix gets one fail-first test proving the bug, plus a guard that
+the already-working path still passes — not an exhaustive combinatorial suite. Live browser and CLI walks exercise
+the main path only (the plan's own acceptance walk), not every edge case a step could hit. Tier-1 (full suites,
+both environments, every stage) and the fail-first requirement for new behaviour are unchanged; this narrows only
+how much *new* coverage a single fix earns.
+**Consequence.** Stage 14's five per-style episodes keep the plan's own per-style acceptance (a manifest, a contact
+sheet) rather than a full regression pass per style; 14b(e) runs exactly its stated path. Recorded as a durable
+override so a later session does not over-test by default.
+
+## DEC-193 — The free-tier daily counter gives a slot back when the provider refused the credentials; stage 14's
+live fixes to the free links
+**Context.** Stage 14 ran the first Cloudflare Workers AI calls ever (the human added keys mid-stage). A mistyped
+token made every call answer 401 while `limits.acquire` took a slot before each call, so the app declared the day's
+170 calls spent although Cloudflare served none (T2-P5-F12); with the right token every call then answered 400
+because the adapter sent a `seed` the model's schema refuses (T2-P5-F13). The same stage found the K1 own-name check
+matching substrings ("Rin" in "earrings", T2-P5-F10) and an Edge voice Microsoft retired (`en-US-DavisNeural`,
+T2-P5-F11).
+**Decision.** A free link's final 401 or 403 releases the slot it took (`DailyUsage.release`, `limits.release`,
+`FreeTierLimiter.release`, called by the chain runner); every other failure still counts, since the provider may
+have spent the allowance; paid links stay uncounted. Cloudflare's request carries only `prompt` and `steps`, and
+its result says `seed_honoured: False` (the Gemini/OpenAI convention). K1 matches the name as a whole word or phrase,
+case-insensitive and Unicode-aware. The voice catalogue swaps DavisNeural for AndrewNeural.
+**Consequence.** Commits `279b572`, `d08c92d`, `d2ba496`, `3cfce9a`, each with one fail-first test (DEC-192).
+Today's Cloudflare counter was corrected twice by hand to the images actually served (0), with backups
+(`/home/ubuntu/backups/ai-story-phase-5/usage.before-cloudflare-reset*.json`). A 400 still counts; the catalogue has
+no live check (A-093).
+
+## DEC-194 — A capped paid test on a story that already spent: the daily cap is the hard limit
+**Context.** Stage 14b(e)'s go was "hard cap $0.10" on T2 `ab8fc500173e`, which already held $0.671 ($0.60 in episode
+1). The caps are cumulative: `budget.check` adds the episode's and the story's earlier spend, so caps of
+0.10/0.10/0.10 refused the $0.03 regenerate before any submit ("would bring this episode to $0.63 of its $0.10
+cap"). The human, asked, answered "Decide for me".
+**Decision.** For such a test the **daily** cap carries the hard limit (0.10, on a day with $0.00 paid so far) and the
+episode and story caps are set to what they already hold plus the same headroom (0.70 and 0.78); `allow_paid` is on
+only for the one paid call, inside a shell `trap` that restores off and 1/3/10 whatever happens, with `LLM_CHAIN`
+pinned without OpenRouter and every LLM call made while `allow_paid` is still off.
+**Consequence.** 14b(e) spent exactly $0.030 (one fal seedream-4-edit, journaled at submit), `allow_paid` was on for
+31 s, and the re-render's manifest matched its dry run (2 of 20). A-094 records the numbers.

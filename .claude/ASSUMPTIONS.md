@@ -311,6 +311,37 @@
   3 presses. UNCONFIRMED: a "fast track stops at the length gate" should stop the automatic Continue loop (driver
   rule, not app code).
 
+- **A-090** — Phase 5's new prompts hold JSON on the free Gemini flash-lite link: the stage-13 bench (scratch copy,
+  the steps' own code) gave S3 3/3, F1 3/3, N1 3/3 and episode-2 E1 3/3 first-try valid (12/12; S3 1.3 s, F1
+  1.0–2.4 s, N1 1.5–1.8 s, E1 4.1–4.6 s). UNCONFIRMED on groq/mistral (no keys here) and over more runs.
+
+- **A-091** — Gemini's free TTS (`flash-lite-tts`) is unfit for a whole cast on the free route: it read a re-voice
+  note aloud (T2-P5-F9, fixed: notes are recorded, never sent) and its free tier allows **10 requests a day per
+  model** (live 2026-09-30: `GenerateRequestsPerDayPerProjectPerModel-FreeTier 10`, spent by the stage-13 re-voices,
+  samples and one cast); DEC-168's pacing cannot help a daily quota. Edge has no daily cap. UNCONFIRMED: the voice
+  picker should prefer Edge on the free route (phase-6 follow-up).
+
+- **A-092** — Keyless pollinations serves about one image a minute per IP (A-048/A-051), and the paced rounds (DEC-168,
+  cast since DEC-190) cope with one run at a time; **runs in parallel starve each other** (each round sees no progress
+  and gives up) — stage 14 had to serialise until Cloudflare worked. The places step still has no pacing (its single
+  plate needed up to 4 presses). Keyless images carry a pollinations logo bottom-right.
+
+- **A-093** — Edge's voice list drifts: `en-US-DavisNeural` was retired (T2-P5-F11, replaced by AndrewNeural). The
+  catalogue has no live check; UNCONFIRMED that the other 16 Edge voices stay (a `edge_tts.list_voices()` probe before
+  each phase's Tier-2 is cheap).
+
+- **A-094** — fal in the capped re-edit test (14b(e), 2026-09-30): one `seedream-4-edit` request, journaled and booked
+  at submit ($0.030 = `pricing.py` = fal's table), answered in 29.4 s; the caps are cumulative (an episode already
+  holding $0.60 refused a $0.03 call under a $0.10 episode cap, so a capped test on a story with earlier spend sets
+  the **daily** cap as its hard limit and episode/story caps as spent + headroom). UNCONFIRMED: fal's dashboard shows
+  +1 request / +$0.03 for 2026-09-30 (the human to read).
+
+- **A-095** — Cloudflare Workers AI `flux-1-schnell` (keys added 2026-09-30) is fast and free on this account: ~2 s
+  per image, no logo, square native size cropped to 9:16; it takes no seed (T2-P5-F13) so prompt-only shots are not
+  reproducible there, and it draws cartoon characters as mascot shapes where pollinations draws humans (A-087). The
+  app counts it against rpd 170 (the free 10,000 neurons); a 401/403 no longer burns a slot (T2-P5-F12). UNCONFIRMED:
+  the real neuron cost per 9:16 image.
+
 ## Confirmed
 - **A-069** — Measured render times on the VPS (container ffmpeg `7.1.5-0+deb13u1/aarch64`, final profile,
   libx264): a full 21-shot FR render 160 s, a full 20-shot EN render 161 s; per shot at 4× mean 3.6–3.8 s (median

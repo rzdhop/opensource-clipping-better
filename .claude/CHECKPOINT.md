@@ -1,4 +1,38 @@
-## CURRENT STATE — AI Story **phase 5 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–13b **done**, deployed `065a02c`; now: **stage 14** (five styles, anime running)
+## CURRENT STATE — AI Story **phase 5 DONE** (2026-09-30). Next: **phase 6** (start prompt: `.claude/plans/ai-story/13-phase-6-start-prompt.md`)
+- **Close-out (2026-09-30):** stages 0–15 done (ledger below). `feat/ai-story-phase-5` fast-forwarded into `main`
+  and pushed with the phase-5 close commit; CI result in the action log's last line.
+- **Final Tier-1** (the closing tree, 2026-09-30 17:02–17:08 UTC): local 6474 passed / 1 skipped, CI env 5688 passed /
+  756 skipped, compileall clean (dashboard unchanged since stage 13b's green vite build).
+- **Live state:** deployed code `d08c92d` (== the final code; later commits touch only `.claude/` and `docs/`),
+  0 jobs, `allow_paid` false, caps 1/3/10, chains default (`.env` byte-identical to its backup `3952425dedb4…`),
+  no `API_TOKEN`, `data/spend.json` = {2026-09-29: 0.6934, 2026-09-30: 0.03}. Settings hold GOOGLE, FAL, OPENROUTER
+  (unfunded, never used: no paid LLM booking yet) and the human's Cloudflare keys (working since 15:58 UTC).
+- **Stories kept** (deleting any is the human's call): live FR `b1104ec66b05` (eps 1–2), EN `0a9572a6a8be`, paid-test
+  T1 `999b08623375`, T2 `ab8fc500173e` (14b(e) edits: l28 text, sh05 fal image, re-rendered), stage-14 anime
+  `dcc0998db8ae`, cinematic_real `560e901c1b3d`, cartoon_flat `979c8376e43e`, claymation `04feb539840f`,
+  storybook_watercolor `14ff154d3bff`. Backups: `/home/ubuntu/backups/ai-story-phase-5/` (stage-0 tars, T2 before
+  14b(e), `.env` before 14b(e), usage.json before both Cloudflare counter resets).
+- **Waiting on the human (not blocking the close):** watch claymation ep 1
+  (`http://100.112.96.111:8000/story/04feb539840f/episodes/1`); read fal's dashboard for 2026-09-30 (expect +1 request,
+  +$0.03, A-094).
+- **Regression contract:** RC-M1…M9 and the earlier RC tables intact — every named test unedited and green in the
+  final Tier-1; RC-M3 live (ep-1 re-render byte-identical, stage 13f); RC-M8 live twice (stage 13e 3 of 23, 14b(e)
+  2 of 20, manifest == dry run); RC-M9 no sign-in anywhere (stage 10 fix, DEC-189).
+- **Per artifact:**
+  - `VISION.md` — "Where it stands" 2026-09-30: the paid test and phase 5 done with stage-14/14b(e) numbers; "Next":
+    phase 6, phase 7; phase-5 follow-ups carried alongside.
+  - `CHECKPOINT.md` — this close-out; the close session's working notes follow as history.
+  - `claude-action.log` — one line per stage, fix, deviation and surprise of the close session (appended only).
+  - `ASSUMPTIONS.md` — A-084 (E4 variance) … A-095 (Cloudflare) added, all UNCONFIRMED where marked.
+  - `DECISIONS.md` — DEC-177 … DEC-194 appended (the plan's ten, the live fixes F3/F7/F9, no sign-out, cast pacing,
+    13b polish, testing scope, stage-14 free-link fixes, capped-test caps); amendment notes under DEC-129/130/142/168.
+- **Phase-5 follow-ups handed to phase 6+:** export/import bundle (deliberate); places pacing; voice picker vs Gemini
+  TTS 10/day; one image provider per episode (A-087); French scripts short (A-086/A-088/A-089); T1 under-shoot
+  retries; a CLI switch to use the stored Settings; Edge catalogue live check (A-093); Hugging Face TTS candidate;
+  paid LLM booking/capping before any OpenRouter funding.
+- **Ids:** next free **DEC-195** and **A-096** (the parallel phase-6 planning session was told to start at DEC-200 / A-100).
+
+## Phase-5 close session — working notes (history)
 - **In-progress header** (keep current):
   - **Current phase:** IMPLEMENT (phases 0–3 done: the plan was mapped, clarified and approved 2026-09-29).
   - **Close session started 2026-09-30** with the close prompt (`12-phase-5-close-prompt.md`), sent by the human
@@ -14,7 +48,10 @@
     anime resumed (`run_style.py anime dcc0998db8ae`). F4 proven live on Kaito's sheets.
   - **Stage 14 DONE** (A-085…A-089): anime `dcc0998db8ae` 52.7 s, cinematic_real `560e901c1b3d` 41.3 s, cartoon_flat
     `979c8376e43e` 56.9 s, claymation `04feb539840f` 45.2 s (the human's watch: `http://100.112.96.111:8000/story/04feb539840f/episodes/1`),
-    storybook_watercolor `14ff154d3bff` 48.0 s. **Next: 14b(e).** (History below.)
+    storybook_watercolor `14ff154d3bff` 48.0 s.
+  - **Stage 14b(e) DONE** ($0.03, see the log line): episode cap 0.10 refused first (the episode's $0.60 counts),
+    then 0.70/0.10/0.78 → 1 fal seedream edit, dry run 2 of 20 == manifest. **Next: stage 15 close-out** (docs/DEC
+    drafts in the worktree, A-090…, Tier-1, ff `main`, push, CI). (History below.)
   - **Stage 14 per style (history):** anime **done** (A-085). Stories: cinematic_real `560e901c1b3d` (fast track, many
     presses), cartoon_flat `979c8376e43e` (fast track), storybook_watercolor `14ff154d3bff` (cast), claymation
     `04feb539840f` (cast done, places). Voices: the CLI's cast pins Edge only (Gemini TTS free = 10 req/day/model).
@@ -315,8 +352,8 @@ RC-P1…P11, RC-S1…S4, RC-T1…T3, RC-E1…E5 and RC-A1…A9 (tables below) st
 | 13 | merge, deploy, Tier-2 series walk (me at 375 px; the human watches ep 2) | **done** (walk (a)–(h) + bench 12/12; fixes F3/F7/F9 live; ep 2 watched and acknowledged by the human 2026-09-30) |
 | 13b | polish round: F4 cast pacing, F1/F2/F5/F8 dashboard, F6 → A-084 [Sonnet] | **done** (local 6464/1, CI 5678/756; 40 new tests; 2 named payload re-pins; browser check 375 px on a scratch copy) |
 | 14 | Tier-2 per style (5 short episodes, free route; the human watches one) | **done** (A-085…A-089; all five fonts from the shipped files; $0; fixes F10–F13; claymation link sent for the human's watch) |
-| 14b(e) | re-edit + partial re-render on paid assets (estimate + the human's go first) | — |
-| 15 | docs and decisions [Sonnet] | — |
+| 14b(e) | re-edit + partial re-render on paid assets (estimate + the human's go first) | **done** ($0.03 fal seedream, dry run 2 of 20 == manifest; allow_paid off, caps 1/3/10, .env restored) |
+| 15 | docs and decisions [Sonnet] | **done** (docs/AI_STORY.md, VISION, DEC-177…194, A-084…095) |
 
 ---
 

@@ -16,9 +16,13 @@ and capped at **$1 per episode** by default (Settings → Budget). Nothing
 paid ever runs unless you turn it on.
 
 This document covers what exists today. AI Story is being built in phases;
-this is the phase-1 through phase-4 foundation, steps 1–12 of the 13-step
-workflow — enough to take an episode from concept to a finished vertical
-`.mp4` with its metadata pack. It is extended as each later phase lands —
+this is the phase-1 through phase-5 foundation, all 13 steps of the workflow
+— enough to take an episode from concept to a finished vertical `.mp4` with
+its metadata pack, then carry it into episode 2 and beyond: a series memory
+that opens each new episode on a recap and a hook to pay off, audience
+feedback that can steer where the story goes, new characters and twists
+proposed between episodes, and a re-edit path that changes one line or one
+shot without rebuilding the rest. It is extended as each later phase lands —
 see "Where it stands" below for what is not here yet.
 
 ## Where it stands
@@ -37,7 +41,7 @@ see "Where it stands" below for what is not here yet.
 | 10 | Assets | the images, voice lines, SFX/BGM for the storyboard | available |
 | 11 | Render | the final `.mp4` with burned subtitles | available |
 | 12 | Metadata pack | title/description/hashtags per platform | available |
-| 13 | Next episode | recap, audience-feedback digest, new characters/twists | phase 5 |
+| 13 | Next episode | series memory, audience-feedback digest, proposed characters/twists | available |
 
 In other words: today you can create a story, pick or invent a concept,
 write and edit its bible, build and lock its visual style, cast its
@@ -47,8 +51,11 @@ places and props, and the season are each approved. From there you can
 write and storyboard episode 1: a script (scenes, dialogue, timing), then
 shots for it, then its assets (shot images, voice lines, SFX and BGM), then
 render it to a finished vertical `.mp4` and write its metadata pack — or run
-the whole thing in one go with the fast track. Episode 2 is refused until
-phase 5's memory step exists, so only episode 1 can be produced right now.
+the whole thing in one go with the fast track. Once an episode's script is
+approved, its series memory can be written and approved (step 13) — that
+unlocks episode N+1's script, storyboard and fast track, so the season can
+carry on past episode 1. A line, or one shot, can then be changed and
+re-rendered on its own, without rebuilding the whole episode.
 
 ## Walkthrough (dashboard)
 
@@ -174,7 +181,11 @@ per character left with none, then a ~3-second **voice sample** of each.
 Every field the model writes for image or voice prompts is in **English**;
 what you type yourself (name, one-line) stays in the story's language.
 Everything a run makes is saved as it is made, so a run that fails partway
-keeps whatever it already finished — see "Troubleshooting" below.
+keeps whatever it already finished — see "Troubleshooting" below. A free
+tier that pushes back (Pollinations' image limit, Gemini TTS's per-minute
+quota) is paced the same way the assets step paces an episode's shots: the
+run keeps going in further rounds, a minute's pause before each, for
+whatever was held back, instead of failing the character outright.
 
 **Consistency.** The portrait is drawn from text alone. The turnaround and
 the expressions sheet are, by default, **edited from the portrait** (plus
@@ -274,15 +285,56 @@ S2 failed keeps its S1 outline (see "Troubleshooting").
 
 The timeline shows one card per episode: its number, its function badge,
 its summary, any hooks in/out, the characters in it, and a **Regenerate**
-(S2 again for that entry alone, with an optional note). A **"Series
-memory"** panel is present but stays empty until phase 5, when episodes
-start being approved. **Re-plan** replaces the whole arc from scratch (a
-confirm dialog warns this is a full replacement, at the same episode
-count).
+(S2 again for that entry alone, with an optional note). **Re-plan** replaces
+the whole arc from scratch (a confirm dialog warns this is a full
+replacement, at the same episode count).
 
 **Approve season** needs the places and props already approved and every
 planned episode to carry a summary; approving makes the story **ready** —
 the state phase 3's episode script picks up from.
+
+**Series memory, audience feedback and next-episode proposals.** The
+**"Series memory"** panel on this page is where the season keeps going past
+episode 1. It fills in per episode, once that episode's own script is
+approved:
+
+- **Update memory** — a card per episode reads its script and writes one
+  memory entry: a recap (at most 40 words), the hooks it opened and the ones
+  it closed, and any relationship changes between characters, shown by name.
+  It's one small model call, ending awaiting approval like any other step;
+  **Approve memory** stamps it. Editing the script again afterwards — even
+  just re-approving it — marks the entry **stale** (a banner, and the card
+  greys out); write it again once the new script is settled. Episode N+1's
+  script, storyboard and the fast track are refused until episode N's entry
+  is both approved and fresh — the refusal names exactly which of the three
+  is missing.
+- **Audience feedback** — paste what viewers said about an episode (up to
+  6,000 characters; the live counter follows what you typed, refused, never
+  silently cut, if you go over) and press **Digest feedback**. One call reads
+  it back as a short digest (at most 60 words) and three possible directions
+  the next episode could take (at most 25 words each); pick one, or leave
+  none picked. Only the *latest* direction you've picked steers anything, and
+  only the next episode's opening (its E1 beat sheet and, if you use it,
+  "Propose next episode") — it never rewrites anything already written, and
+  it never reaches past one episode.
+- **Propose next episode** — needs the episode before it to have its memory
+  approved and fresh. One call proposes up to two new characters (recurring
+  or guest by default — pick `lead` or `support` instead and the picker warns
+  you that it will fold the cast's approval, same as adding one by hand) and
+  up to two twists for a later episode, each with why it's suggested. Accept
+  or reject each one — a confirm dialog says the decision is final. Accepting
+  a character queues the same build the Cast step runs (text, portrait,
+  turnaround, expressions, voice) for it alone; accepting a twist rewrites
+  that episode's arc entry on the spot (the season keeps its approval — a
+  twist is additive, not a replan) and keeps the old summary, in case you
+  want to see what changed. Once every item is decided, the card reads
+  **Approved**.
+
+The recap, hooks and relationships read by episode N+1's script (and by
+"Propose next episode") show only the hooks still open when N+1 starts and
+the memory of episodes before it — never a later episode's own memory, and
+never more of the season than the character reading it would plausibly
+know.
 
 ### 8. Episode script
 
@@ -317,6 +369,16 @@ scene's own timing state), a running total labelled `estimated`, `measured`
 or `partly measured`, and, below it, any flags — a scene over its slot, a
 line to trim — each linking straight to the scene or line it names.
 
+Under the hood, every scene and shot is timed to the nearest whole frame (at
+30 fps) rather than to a fraction of a second — the number shown is rounded
+the same way either way, but timing to a whole frame means an edit that only
+moves a scene by a fraction of a frame moves nothing measurable after it, so
+the shots that weren't touched keep the same render cache key. That's what
+makes the partial re-render (see "Render", below) able to tell "changed"
+from "unchanged" so precisely. A storyboard planned before this shipped
+converts to whole frames automatically, the one time it's next fully
+re-timed — most of its shots re-render once when that happens, then settle.
+
 **Consistency** shows the E4 report under the duration bar: "Passed ✓", a
 stale notice once the script has changed since the last check, or the list
 of issues, each one linked to the scene it's about.
@@ -324,9 +386,20 @@ of issues, each one linked to the scene it's about.
 **Editing** — every scene's summary and on-screen text, and each line's
 text, delivery, speaker and emotion, are editable inline, no job needed. A
 line's chip shows its duration and whether it's `estimated` or `measured`,
-with a ▶ to play a measured line back. Editing anything re-times the
-episode, clears both the script's and the storyboard's approval, and marks
-the consistency report stale.
+with a ▶ to play a measured line back, and, once one has been recorded, its
+**"Re-voice this line"** control — an optional note ("more urgent", "quieter")
+that reaches the voice as a style direction (a provider that can't follow a
+spoken direction — Edge, a local engine — records it without applying it;
+the note and the take it produced are kept either way). Editing anything
+marks the consistency report stale, and always clears the script's own
+approval — but what happens to the **storyboard's** approval depends on the
+edit: a **text-only** change (a line's words or delivery, or which hook a
+scene pays off — same lines, same speakers, same emotions) keeps the
+storyboard approval and every shot exactly as they were, re-timing the
+scene in place the next time its lines are re-voiced. A **structural**
+change — a speaker swapped, an emotion changed, a line added or removed —
+clears the storyboard's approval too and calls for a re-plan, exactly as
+editing the script always has.
 
 **Regenerating a scene** takes an optional note and re-runs just that scene
 (E2); the hook's on-screen text, the cliffhanger's reveal and the
@@ -350,8 +423,14 @@ issues still open, a ticked **"Approve anyway"**. Approving stamps
 storyboard's).
 
 **Episode 2 and beyond** are refused — by the write button, its estimate,
-and the CLI alike — until phase 5's memory step has written the previous
-episode's recap into series memory. Phase 3 delivers episode 1 only.
+and the CLI alike — until the previous episode's series memory is written,
+approved and still fresh (step 13, in the Season arc panel). Once it is,
+episode N ≥ 2 opens on a recap scene built from it, and E1 is shown the
+season's still-open hooks (the oldest four) and asked to pay at least one
+off on a body scene — the consistency check then verifies the payoff really
+lands, alongside its other checks. If you picked an audience direction on
+the previous episode's feedback (step 13), E1 also sees it as a steer, never
+an instruction it must follow literally.
 
 ### 9. Storyboard
 
@@ -387,6 +466,18 @@ scene boundary it's an editable select (`cut`, `dissolve`, `fadeblack`,
 `fadewhite`, `wipeleft`, `wiperight`, `slideup`). A shot made under
 `prompt_only` consistency carries the same `consistency: prompt-only`
 warning chip used everywhere else in the app for that mode.
+
+Editing a shot has different consequences depending on what changed.
+Swapping the **camera motion**, toggling a **modifier**, or changing the
+**transition** keeps the shot's existing image and only changes what the
+render does with it. Editing the **framing**, the **action**, or the
+**prompt override** invalidates the image instead — the shot's card shows
+"needs a new image" until you press its own regenerate, and the render (and
+the re-render, below) refuses to run on a shot whose image has gone stale
+this way, naming it, rather than quietly using the old picture. A framing
+edit that would break one of the cross-scene rules (no two shots back to
+back with the same framing, say) is refused outright — it never silently
+moves a neighbouring shot to make room.
 
 When the script changes after shots exist, the affected scenes are named in
 a banner ("The script changed: re-plan scene s04.") and marked stale on
@@ -458,8 +549,10 @@ chip.
 
 The renderer is pure FFmpeg: 1080×1920, 30 fps, `libx264`. Every shot's
 still picture gets its own Ken Burns move — a pan/zoom, eased in and out —
-from the style's own motion rules, and shots cross-fade into each other per
-the storyboard's own transitions. The audio is one continuous music bed,
+from the style's own motion rules, including how far a pan travels across
+the frame (`pan_pct`, each style's own value now, not one fixed number), and
+shots cross-fade into each other per the storyboard's own transitions. The
+audio is one continuous music bed,
 ducked under the dialogue by sidechain compression, mixed with the dialogue
 itself and the episode's self-made sound effects (from `assets/sfx`) and
 the BGM track the assets step picked (from the shipped `assets/bgm`
@@ -474,9 +567,11 @@ cut to black — or a hard stop, per the style. Subtitles burn whichever mode
 you picked: `word_pop` (one word at a time, popping in), `two_line` (each
 speaker keeps its own colour, always readable against the outline), the
 style's own default, or none; switching subtitles re-runs only the final
-pass, not the shots themselves. Text is set in a template's own font when
-one is dropped into `custom_fonts/`, otherwise the committed Montserrat
-Black.
+pass, not the shots themselves. Text is set in the template's own font:
+Montserrat Black for the two original styles, and, for the five added since,
+one committed face each — Bangers, Bebas Neue and Patrick Hand (OFL-1.1),
+Luckiest Guy and Chewy (Apache-2.0) — or your own font in `custom_fonts/`
+when you drop one in there.
 
 The finished video plays back in a player below (its poster is the cover),
 with a summary strip — duration, size and fps, loudness (I / TP / LRA),
@@ -489,10 +584,28 @@ render again. Cancelling a render stops it in about a second and a half and
 keeps whatever it had already finished, including every shot already
 rendered.
 
+Once an episode has a finished render, editing it — a line, a shot's image,
+its motion, a transition — shows a **"Changes since last render"** list
+here: one line per shot that would be made again and why (its image
+changed, its frames moved, its motion or modifiers changed, …), with a
+**Re-render** button carrying its own estimate ("≈3 of 11 shots"). Pressing
+it makes again only the shots the list named — every other shot's clip is
+reused byte-for-byte from the last render that actually finished, verified
+by its own recorded hash, never merely by the file being present — and ends
+immediately with nothing left to approve. The summary strip then reads "3
+of 11 shots re-rendered · 8 reused" instead of the old render's own count.
+Re-render is blocked, with the reason shown instead of the button, on
+exactly what a full render would also refuse on — most often a shot whose
+image needs regenerating first ("needs a new image", in the Storyboard tab).
+
 Measured on this project's 4-core VPS: a full 20–21-shot render took
 160–161 seconds; re-rendering with every shot already cached (switching
-subtitles, say) took 84–96 seconds — a shot changes only its own cached
-clip, so editing one shot's image never re-renders the rest.
+subtitles, say) took 84–96 seconds; a live 23-shot episode re-rendered after
+two text-only line edits and one shot's image (3 of 23 shots remade) took
+2 min 7 s against 2 min 49 s for the same episode's full render — most of a
+render's time is the final mux and audio pass, shared by a partial and a
+full render alike, so a partial re-render saves the shot-encoding time, not
+the whole thing.
 
 ### 12. Metadata pack
 
@@ -602,9 +715,9 @@ is queued or running is refused (409), telling you to wait or cancel.
 
 ## From the CLI
 
-`python main.py --ai-story` covers all twelve steps for scripting or
-testing, without a browser. Five subcommands: `new`, `step`, `render`,
-`fast-track`, `list`.
+`python main.py --ai-story` covers all thirteen steps for scripting or
+testing, without a browser. Six subcommands: `new`, `step`, `render`,
+`fast-track`, `feedback`, `list`.
 
 ```
 python main.py --ai-story new --lang fr --concept tentafruit_island --style fruit_drama
@@ -632,6 +745,12 @@ python main.py --ai-story step STORY_ID render --ep 1 --subtitles word_pop
 python main.py --ai-story render STORY_ID --ep 1 --encoder auto
 python main.py --ai-story step STORY_ID metadata --ep 1
 python main.py --ai-story fast-track STORY_ID --ep 1 --storyboard fast
+python main.py --ai-story step STORY_ID memory --ep 1 --auto-approve
+python main.py --ai-story feedback STORY_ID --ep 1 --text-file comments.txt --auto-approve
+python main.py --ai-story step STORY_ID propose-next --ep 1
+python main.py --ai-story step STORY_ID script --ep 2 --auto-approve
+python main.py --ai-story step STORY_ID rerender --ep 1 --dry-run
+python main.py --ai-story step STORY_ID rerender --ep 1
 python main.py --ai-story list
 ```
 
@@ -640,8 +759,9 @@ number, bounded by how many episodes the season planned. `--fast`
 (`storyboard` only) builds every scene's shots deterministically in this
 process: no LLM call, so no key gate either. `--measure-voices` (`script`
 only) measures every line through its speaker's pinned voice, after
-writing, and keeps the audio. Episode 2 and beyond are refused, naming
-phase 5's memory step, exactly as the API refuses them.
+writing, and keeps the audio. Episode 2 and beyond are refused, naming the
+memory step (below), until episode N-1's own series memory is approved and
+fresh.
 
 `assets`, `render` and `metadata` also take `--ep N`, required, as phase 3's
 steps do. `render` and `fast-track` are their own top-level commands too:
@@ -659,6 +779,31 @@ parameters. `fast-track` takes `--storyboard` (`t1`, the default, or
 `fast`) and meets the LLM key gate exactly as the API does for every
 fast-track job.
 
+**Series steps (step 13)**, all taking `--ep N`, required: `memory` writes
+episode N's series memory from its approved script (one free-chain call);
+`propose-next` proposes new characters and twists for episode N + 1 from
+episode N's approved, fresh memory (one call) — each proposed item is then
+accepted or rejected from the dashboard or the API, never from the CLI.
+`feedback` (episode N's audience comments) is its own top-level command
+rather than a `step` subcommand, because it has to store the paste before it
+can digest it: `feedback STORY_ID --ep N --text-file F [--stats-file F]
+[--auto-approve]` reads `F` (and, optionally, a second file of stats) and
+stores it exactly as `POST /episodes/{ep}/feedback` would — refused whole
+over 6,000 characters each, never trimmed — then runs the `feedback` step
+(F1) in the same call, so one command takes you from a comments file to a
+digest. `--auto-approve` on `memory` approves the entry it just wrote; on
+`feedback` it approves with no direction chosen (choose one from the
+dashboard or the API afterwards, if you want one to steer the next
+episode); `propose-next` never takes it — each item needs a human decision.
+
+**`rerender --ep N`** makes the episode's render again, remaking only the
+shots that changed since its last good render — the same partial re-render
+"Re-render" in the dashboard runs. `--dry-run` prints what it would remake
+and why, one "shot: reason" line each, and calls no ffmpeg; without it, the
+command renders. Both refuse the same way a normal render does when a
+precondition isn't met (an outdated shot image, no finished render yet),
+naming what's missing.
+
 `cast` takes `--characters NAME` (repeatable: a name from the concept's cast
 sketch) and `--custom 'Name|role|one line'` (repeatable; `role` one of
 `lead`, `support`, `recurring`, `guest`). Neither is required: with no
@@ -674,20 +819,23 @@ printed before the step runs — nothing else ever sets it. `--episodes N`
 character still lacks is printed, with a hint to re-run with `--prompt-only`
 when a sheet is waiting on an editor.
 
-`--auto-approve` means something different per step: for `bible`, `style`
-and `season` it approves the one document the step just wrote; for `cast`
-and `places` it approves every character, or every place and prop, that
-already has everything, naming anything left short of that instead of
+`--auto-approve` means something different per step: for `bible`, `style`,
+`season` and `memory` it approves the one document the step just wrote; for
+`cast` and `places` it approves every character, or every place and prop,
+that already has everything, naming anything left short of that instead of
 failing the command; for `script` and `storyboard` it approves through the
 same rule the dashboard's Approve button uses — a complete script with a
 fresh, passed consistency check, or a fully and currently planned
 storyboard; for `assets` it approves the grid once every shot is current or
-locked and every line voiced — and **never** "approve anyway": with issues
-still open it prints them and exits 1 instead of forcing the approval
-through. `render`, `metadata` and `fast-track` take no `--auto-approve`:
-their job ends completed once it is done, with nothing left to approve
-(the fast track auto-approves each document it writes fresh by that
-document's own rule regardless, never through this flag).
+locked and every line voiced; for `feedback` it approves with no direction
+chosen — and **never** "approve anyway": with issues still open it prints
+them and exits 1 instead of forcing the approval through. `render`,
+`metadata`, `fast-track` and `rerender` take no `--auto-approve`: their job
+ends completed once it is done, with nothing left to approve (the fast
+track auto-approves each document it writes fresh by that document's own
+rule regardless, never through this flag); `propose-next` never takes it
+either — each proposed item needs a human decision, from the dashboard or
+the API.
 
 `new` creates a draft story and, with `--concept`, chooses a library concept
 in the same call. `--lang` is required — there is no default, on the CLI
@@ -699,11 +847,12 @@ drifting apart).
 
 `step` runs one step in this same process, printing the same lines the
 dashboard's activity feed shows. `--auto-approve` applies to `bible`,
-`style`, `cast`, `places`, `season`, `script` and `storyboard` (a concept is
-approved by choosing it, and a preview is approved together with the style
-it belongs to — the CLI's usage error says so if you try it on either).
-`--ep` is required for `script`/`storyboard` and rejected for every other
-step. `--allow-slow-chain`
+`style`, `cast`, `places`, `season`, `script`, `storyboard`, `memory` and
+`feedback` (a concept is approved by choosing it, and a preview is approved
+together with the style it belongs to — the CLI's usage error says so if you
+try it on either). `--ep` is required for `script`, `storyboard`, `assets`,
+`render`, `metadata`, `memory`, `feedback`, `propose-next` and `rerender`,
+and rejected for every step before them. `--allow-slow-chain`
 (or `ALLOW_SLOW_CHAIN=1`) lets an LLM step run on a chain whose only
 reachable link is the slow floor
 (mirrors the clip CLI's own flag). `list` prints one line per story: id,
@@ -712,9 +861,12 @@ status, language, title. Run `python main.py --ai-story --help` (or
 
 Keys and `LLM_CHAIN` — and, for `cast` and `places`, `IMAGE_CHAIN`,
 `IMAGE_EDIT_CHAIN`, `TTS_CHAIN` and `VISION_CHAIN`; for `assets`, those same
-three plus `STT_CHAIN` when `--align-words` asks for it; for `metadata` and
-`fast-track`, `LLM_CHAIN` again — come from the **environment or `.env`**,
-the same file the clip CLI reads — never from the dashboard's Settings. A story created or stepped from the CLI shows up in
+three plus `STT_CHAIN` when `--align-words` asks for it; for `metadata`,
+`memory`, `feedback` and `propose-next`, `LLM_CHAIN` again — come from the
+**environment or `.env`**, the same file the clip CLI reads — **never** from
+the dashboard's Settings store, on the CLI, for any step (see "Not yet"
+below). `rerender` calls no API at all, so it needs no key. A story created
+or stepped from the CLI shows up in
 the dashboard immediately (same
 `outputs/stories/` folder, same index), but the CLI and a running server
 don't coordinate: running a step from both at once on the same story lets
@@ -824,6 +976,22 @@ as an estimate before anything runs.
   Pollinations, …), shared with clip jobs. A paid call never touches this
   file — it's proof a paid call didn't quietly eat into a free allowance.
 
+## Not yet
+
+A few things phase 5 deliberately leaves for later:
+
+- **Exporting or importing a story as a bundle** — a folder you can move to
+  another install, or share — isn't here. It's a deliberate follow-up, not
+  an oversight.
+- **Places doesn't pace a free tier's rate limit the way Cast and Assets do**
+  — Pollinations pushing back on a place's plate fails that place outright
+  rather than retrying it in a later round; run the places step again
+  ("Continue places & props") to pick it back up.
+- **The CLI only ever reads keys from the environment or `.env`**, never from
+  the dashboard's Settings store, for any step — including the ones this
+  phase adds. If you keep your keys in Settings, either mirror them into
+  `.env` for a CLI session or use the dashboard for the steps that need one.
+
 ## Local generation
 
 If you run ComfyUI and/or Ollama, AI Story can use them instead of a hosted
@@ -864,7 +1032,8 @@ outputs/
     style_preview.json               # the preview strip's record (images, failures)
     styles/preview/preview_<n>.png   # the preview strip's actual images
     places_proposal.json             # the proposed places and props (before they're made)
-    season.json                      # the season arc: episodes_planned, arc[], series memory
+    season.json                      # the season arc: episodes_planned, arc[], series memory (entries per
+                                      #   episode, folded recap/hooks/relationships), audience_feedback[]
     characters/<char_id>/
       character.json                 # descriptor, signature items, personality, voice, ...
       refs/portrait.png, turnaround.png, expressions.png
@@ -877,16 +1046,21 @@ outputs/
       prop.json                      # descriptor, owner, image
       refs/image.png
     episodes/ep<NN>/                  # NN = 01..99, one per written episode
-      script.json                    # scenes, lines, timing, hook/cliffhanger/teaser, consistency report
-      storyboard.json                # shots, transitions, per-scene planning source
-      assets.json                    # word sources, SFX/BGM picks, the assets grid's own approval
+      script.json                    # scenes, lines, timing (whole frames), hook/cliffhanger/teaser, pays_off,
+                                      #   consistency report
+      storyboard.json                # shots, transitions, per-scene planning source, whole_frames flag
+      assets.json                    # word sources, SFX/BGM picks, each line's take/note/pending, the assets
+                                      #   grid's own approval
       assets/
         shots/shot_<NN>.png          # (or .jpg/.jpeg/.webp) one image per shot
         voice/
           line_<NN>.mp3 (or .wav)    # a measured line's audio ("Measure with real voices", or the assets step)
           line_<NN>.json             # its timing sidecar (source, text hash, provider/voice)
+      proposals.json                 # this episode's new-character/twist proposals for the episode after it
       cost_ledger.json               # this episode's own rows of the story's cost ledger
       render_manifest.json           # every render command, its inputs and their hashes, per stage
+      render_manifest.last_good.json # the baseline the next partial re-render compares against; written only
+                                      #   by a render that completed
       episode_final.mp4              # the rendered episode
       subtitles.ass                  # the burned-in subtitles, kept as their own file too
       cover.jpg                      # the hook shot + its hook text, for the metadata pack
@@ -997,11 +1171,13 @@ chain failed twice) keeps the upload — it is simply not folded into the
 character's text yet; regenerating the character's text (K1) tries
 describing it again first.
 
-**"...approve episode N and run the memory step (it arrives in phase 5)
-first."** — episode 2 needs episode 1's recap in series memory, which
-phase 5's memory step writes once episode 1 is approved and that step runs.
-Until then, only episode 1 can be written, storyboarded or estimated; the
-dashboard, the API and the CLI all refuse the same way.
+**"Approve episode N's memory first" / "Episode N's memory is stale — write
+it again."** — episode N+1's script, storyboard and the fast track each need
+episode N's series memory written, approved and current with its script
+(step 13, in the Season arc panel — see the walkthrough above). Write and
+approve it (or write it again, if the script changed since); the dashboard,
+the API and the CLI all refuse the same way, naming exactly which of the
+three is missing.
 
 **"Check the consistency first."** — "Measure with real voices" won't run
 while the consistency check is missing or stale, even though the script

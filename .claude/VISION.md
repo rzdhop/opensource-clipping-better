@@ -31,7 +31,7 @@ renders through FFmpeg/OpenCV. AI Story reuses that chain system and extends it
 to images, image editing, video, TTS and vision, with every paid call gated by a
 budget and every free call counted against its daily limit.
 
-## Where it stands (2026-09-29)
+## Where it stands (2026-09-30)
 - **Auth is opt-in** (DEC-173, done 2026-09-29): no sign-in unless `API_TOKEN` is set, as the human asked
   ("remove all access restrictions to the app"); the VPS runs open on its tailnet with no override, the public paths
   refuse to run open, and an open API refuses other websites' writes. Acknowledged by the human on the phone.
@@ -68,14 +68,30 @@ budget and every free call counted against its daily limit.
   paid spending. Tier-2 walked live for $0.00: a French episode step by step (58.2 s) and an English one through the
   fast track (48.8 s); both **accepted by the human 2026-09-29** ("Finish, update artefact, push then
   merge"); merged to `main` and pushed.
+- **The paid-path test** on fal.ai is **done** ($0.6934 of a $3 hard ceiling, DEC-174): every refusal and cap shown
+  with its numbers before anything ran, a real paid assets run (35 requests: shots and reference edits), a forced
+  poll failure resumed without re-buying, a same-input regenerate served from the gencache at $0. The ledger
+  matched fal's own dashboard ($0.70) once the per-megapixel price was fixed to round up whole megapixels, the way
+  fal actually bills (DEC-175). `allow_paid` went back off afterwards; both throwaway test stories are kept.
+- **AI Story phase 5** (step 13 + re-edit) is **done**: series memory as a fold over each approved episode's own
+  entry (a recap, hooks opened/closed, relationship deltas), gating episode N+1's script, storyboard and the fast
+  track on the previous episode's memory being approved and fresh; pasted audience feedback (capped at 6,000
+  characters, never trimmed) digested into three directions, the chosen one steering only the next episode's
+  opening; new characters and twists proposed between episodes and decided one at a time, a twist rewriting the
+  arc entry with the old text kept; a text-only line edit that now keeps the storyboard approval and re-times in
+  place instead of forcing a full re-plan, a re-voice that persists its note, and a shot-image regenerate — each
+  re-rendered *only* for the shots that actually changed (the partial re-render, proven equal to a full render
+  under real ffmpeg); shot timing quantized to whole frames so an edit's render cache keys survive it; five more
+  style templates each with their own OFL/Apache-2.0 font. Walked live on the FR story for $0 end to end (stage 13,
+  acknowledged by the human on the phone). Stage 14 rendered one episode per remaining style on the free route
+  (anime 52.7 s, cinematic_real 41.3 s, cartoon_flat 56.9 s, claymation 45.2 s, storybook_watercolor 48.0 s; every
+  font from the shipped file, −14.1…−14.5 LUFS) and fixed four live bugs on the way (DEC-193); the capped paid
+  re-edit test spent $0.03 on fal and its re-render matched the dry run (DEC-194).
 
 ## Next, in order
-1. **The paid-path test** on fal.ai, $3 hard ceiling, before phase 5 (DEC-174): refusals, the cap, a real paid
-   assets run, resume without re-buying, the gencache, the ledger against fal's dashboard.
-2. **Phase 5** — series memory (episode 2 onward), audience steering, per-scene re-edit, remaining styles.
-3. **Phase 6** — Tier 2/3 video, local ComfyUI workflows, paid estimates end to end (incl. the deferred live
-   paid assets step, which settles whether fal bills a failed queued request, A-071).
-4. **Phase 7** — reference-video import.
+1. **Phase 6** — Tier 2/3 video, local ComfyUI workflows, paid estimates end to end including booking and capping
+   paid LLM calls (OpenRouter, the one paid LLM link, stays unfunded and unbooked until this ships).
+2. **Phase 7** — reference-video import.
 Carried alongside: the Settings per-task route selector (DEC-112); the clip-upload token-before-spool fix; a dependency pass
 (extras, lockfile, audit, setuptools ≥ 83); `jobs.json` atomic write and
 `needs_upload` at restart; tests isolated from a real `.env`; phase 3's own
@@ -83,4 +99,8 @@ follow-ups (a garbled French accent with no code fix, storyboard/script
 re-timing after an edit, T1 occasionally under-shooting a scene's shot
 count — see `.claude/CHECKPOINT.md`); phase 4's own follow-ups (free-tier image quality on pollinations,
 a single HTTP 500 ending the paced rounds, short English scripts, the BGM licence record — see
-`.claude/CHECKPOINT.md`).
+`.claude/CHECKPOINT.md`); phase 5's own follow-ups (the export/import bundle, a deliberate follow-up rather than
+an oversight; the places step has no free-tier pacing yet, unlike cast and assets; a CLI switch to use the stored
+Settings instead of the environment/`.env` only; E4's occasional payoff-variance false negative, A-084; French
+scripts running short, 41–48 s; one image provider per episode, since mixing breaks the look, A-087; the voice picker
+avoiding Gemini TTS on the free route, 10 requests a day, A-091; Hugging Face TTS as a candidate voice link).
