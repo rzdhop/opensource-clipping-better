@@ -131,9 +131,10 @@ class CloudflareAdapter(_Adapter):
         token = credentials["CLOUDFLARE_API_TOKEN"]
         seed = _seed(request)
         url = f"{CLOUDFLARE_BASE}/accounts/{account}/ai/run/{model}"
+        # The model's schema refuses a seed (HTTP 400): the seed is recorded, not reproducible.
         payload = request_json(
             transport, "POST", url, headers={"Authorization": f"Bearer {token}"},
-            json_body={"prompt": request.prompt, "steps": 4, "seed": seed}, timeout=DEFAULT_TIMEOUT,
+            json_body={"prompt": request.prompt, "steps": 4}, timeout=DEFAULT_TIMEOUT,
         )
         if not payload.get("success", True):
             messages = "; ".join(str(e.get("message", e)) for e in payload.get("errors", []) if e) or "unsuccessful"
@@ -143,7 +144,7 @@ class CloudflareAdapter(_Adapter):
             raise ProviderError(f"{describe(link)}: the answer carried no image")
         path = write_output(_out_dir(request), _name(request, link, seed), base64.b64decode(image), "jpg")
         return GenResult(provider="cloudflare", model=link.model, paths=(path,), seed=seed,
-                         meta={"size": "native (the model ignores width/height)"})
+                         meta={"size": "native (the model ignores width/height)", "seed_honoured": False})
 
 
 # ------------------------------------------------------------- pollinations

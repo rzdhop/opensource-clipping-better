@@ -104,7 +104,8 @@ def test_cloudflare_posts_the_prompt_and_writes_the_decoded_image(tmp_path):
     assert call["method"] == "POST"
     assert call["url"] == "https://api.cloudflare.com/client/v4/accounts/acc/ai/run/@cf/black-forest-labs/flux-1-schnell"
     assert call["headers"]["Authorization"] == "Bearer tok"
-    assert transport.json(0) == {"prompt": "an anthropomorphic kiwi in a linen shirt", "steps": 4, "seed": 42}
+    assert transport.json(0) == {"prompt": "an anthropomorphic kiwi in a linen shirt", "steps": 4}
+    assert result.meta["seed_honoured"] is False
     assert result.provider == "cloudflare" and result.model == "flux-1-schnell" and result.seed == 42
     assert pathlib.Path(result.paths[0]).read_bytes() == JPG
     assert result.paths[0].endswith("test.jpg")
