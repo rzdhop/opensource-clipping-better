@@ -1,3 +1,91 @@
+## CURRENT STATE — AI Story **phase 6 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stage 0 **done**; next: **stage 1**
+- **In-progress header** (keep current):
+  - **Current phase:** IMPLEMENT. EXPLORE/CLARIFY/PLAN were done 2026-09-30 in a session run in parallel with phase 5's
+    close: three maps, two rounds of questions, an Opus design. The human approved the plan.
+  - **Plan:** `.claude/plans/ai-story/14-phase-6-plan.md` (**APPROVED 2026-09-30**; copy at
+    `~/.claude/plans/ai-story-phase-6-plan.md`). Brief: `.claude/plans/ai-story/07-phase-6-video-tiers-local.md`.
+  - **Current stage:** 1 — pure video planning, the new `clipping/aistory/video_plan.py` [Sonnet]. Then stages 2–14
+    in the plan's order.
+  - **Next action:** dispatch stage 1 (essential tests, fail-first), then Tier-1 in both environments, then commit.
+  - **Open questions:** none blocking.
+- **Human's binding answers (2026-09-30)** — full list in the plan:
+  - **No GPU anywhere.** Local ComfyUI is proven only against a fake server; A-035 stays open.
+  - **Paid walk:**
+    - fal: 1 shot, hard cap $0.30, including an A-071 probe of at most $0.05;
+    - Veo: 1 shot of 4 s, cap $0.25, with a separate billing-enabled `GEMINI_PAID_API_KEY`;
+    - the refusal is shown under the $1.00 episode cap.
+  - **Paid LLM booking:** tests only; OpenRouter stays unfunded.
+  - **Sticky links:** one image link and one video link per episode (A-087).
+  - **Nano-banana:** stays on `GOOGLE_API_KEY`; moving it is a follow-up.
+- **Where:** worktree `.claude/worktrees/ai-story-phase-6`, branch `feat/ai-story-phase-6` from `main` `772a540`.
+  - `web/dashboard/node_modules` is symlinked from the main checkout.
+  - The main checkout stays on `main`, because `rzc-backend` bind-mounts it. **Never switch its branch.**
+  - This worktree's `.claude/` holds the live artifacts.
+- **Checkpoint:** `772a540`. It equals `origin/main`: phase 5 closed, CI green on `f06a299`, 0 jobs, deployed
+  `f06a299`. The stage-0 commit carries this header; `main` is fast-forwarded to it (docs only, and `.claude/` is
+  dockerignored).
+- **Tier-1 baseline at `772a540`** (worktree, 2026-09-30, `-n 4`):
+  - local **6479 passed / 1 skipped**;
+  - CI env **5693 passed / 756 skipped**;
+  - compileall clean.
+  - The CI-faithful replica (A-096) is owed before any push that adds a test needing an optional package.
+- **Backups (2026-09-30 18:40 UTC):** `/home/ubuntu/backups/ai-story-phase-6/`.
+  - `979c8376e43e.tgz` sha256 `5edfff0b…d310`; `04feb539840f.tgz` `dbde9f8d…1c8d`.
+  - `spend.json` `3f4bfecd…6e3f`; `usage.json` `7cfc8c35…e86e`. All four are listed in `sha256.txt`.
+  - `stories-before.sha` covers 543 files; `sha256sum -c` passes from `outputs/stories`.
+- **Ids:** DEC-200+ and A-100+. DEC-195…199 and A-096…099 stay free for late phase-5 notes (A-096 is already taken
+  by phase 5's CI note).
+- **Test policy:**
+  - DEC-176: Tier-1 once per stage, by me, both environments, `-n 4`.
+  - DEC-192: essential tests only — one fail-first test per behaviour plus the working-path guard. Agents run only
+    their new and touched tests.
+  - Never `git stash`; never revert files with `git checkout` for a fail-first check.
+- **Standing rules:**
+  - No auth, ever.
+  - `allow_paid` stays OFF in Settings. Paid runs are single CLI processes with per-process caps (DEC-194 pattern),
+    and each one needs a shown estimate and the human's go.
+  - Deploy only at 0 jobs.
+  - Keep every story.
+  - Push with the `github_osc_better` key and `-F /dev/null`. Commits use explicit paths and no trailers.
+- **Stage ledger:**
+
+| S | Stage | State |
+|---|---|---|
+| 0 | checkpoint, worktree, baseline, backups | done |
+| 1 | pure video planning (`video_plan.py`) [Sonnet] | next |
+| 2 | provider foundations: video cache key, `GEMINI_PAID_API_KEY`, prices [Opus] | — |
+| 3 | hosted video adapters (fal ×3, Veo) [Opus] | — |
+| 4 | local ComfyUI video, fake server only [Opus] | — |
+| 5 | paid LLM booking seam [Opus] | — |
+| 6 | sticky image link per episode (A-087) [Opus] | — |
+| 7 | clip documents and the estimate [Opus] | — |
+| 8 | the video phase and `shot:…:video` [Opus] — **RISKIEST** | — |
+| 9 | renderer: clips, hold, `fill_failed_with_motion`, Tier-2 golden [Opus] | — |
+| 10 | Tier-3 native audio, tests only [Opus] | — |
+| 11 | API and CLI [Sonnet] | — |
+| 12 | dashboard [Sonnet] | — |
+| 13 | deploy and the Tier-2 live walk (≤ $0.55) [Opus] | — |
+| 14 | docs and decisions [Sonnet] | — |
+
+### Regression contract (phase 6)
+| ID | Must keep working | Proven by |
+|---|---|---|
+| RC-V1 | A tier-1 story's estimate, assets and render are byte-identical, and it makes no video call | stage 7/8 guards + the walk's re-render sha (UNVERIFIED until then) |
+| RC-V2 | Image and TTS cache keys are unchanged | stage-2 pinned-hex guard |
+| RC-V3 | No paid clip or LLM call without `allow_paid` and the caps; one submit per clip; every billed call booked | stage 3/5/8 tests |
+| RC-V4 | The free Gemini chain never reads `GEMINI_PAID_API_KEY`; Veo never reads `GOOGLE_API_KEY` | stage 2 |
+| RC-V5 | No silent mixing of image or video links inside an episode | stage 6/8 |
+| RC-V6 | The estimate and the run agree on the shots and the dollars | stage 8 |
+| RC-V7 | A failed or stale clip never renders unless "fill" is ticked | stage 9 |
+| RC-V8 | Settings "Test chain" never buys a clip | stage 4 |
+
+Carried unchanged, each proven by its named tests staying unedited:
+- RC-M2: golden `framemd5.json`.
+- RC-M3, RC-M6 (clip mode), RC-M7, RC-M8.
+- RC-M9: no auth.
+- RC-A2, RC-A3, RC-P5.
+- RC-S4: `llm.py` untouched.
+
 ## CURRENT STATE — AI Story **phase 5 DONE** (2026-09-30). Next: **phase 6** (start prompt: `.claude/plans/ai-story/13-phase-6-start-prompt.md`)
 - **Close-out (2026-09-30):** stages 0–15 done (ledger below). `feat/ai-story-phase-5` fast-forwarded into `main`
   and pushed. **CI GREEN** on `f06a299` (runs 36755806580 main, 36755803010 branch) after one CI-only fix: T2-P5-F14,
