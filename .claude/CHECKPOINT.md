@@ -1,11 +1,11 @@
-## CURRENT STATE — AI Story **phase 5 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–11 **done**; next: **stage 12**
+## CURRENT STATE — AI Story **phase 5 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–12 **done**; next: **stage 13** (merge, deploy, live series walk)
 - **In-progress header** (keep current):
   - **Current phase:** IMPLEMENT (phases 0–3 done: the plan was mapped, clarified and approved 2026-09-29).
-  - **Current stage:** 11 done → next **stage 12** (fonts — the human chose "All 5 as named" — and per-style
-    renderer gaps) [Sonnet agent].
-  - **Next action:** spawn the stage-12 agent (brief in the session scratchpad: the approved download table with
-    byte sizes and git blobs). The scratch servers (`phase5-throwaway` :8015, `phase5-dashboard` :5177) may still
-    run on the worktree's own FR copy (edited: l12 text, sh06 motion, sh08 framing) — throwaway data.
+  - **Current stage:** 12 done → next **stage 13**: ff `main` to the branch, deploy at 0 jobs (dashboard changed:
+    `rm -sfv` + `up -d --build`), then the live walk on FR `b1104ec66b05` per the runbook (session scratchpad
+    `stage13-runbook.md`): memory → feedback → propose-next → ep 2 → re-edit + rerender → ep 1 unchanged →
+    overflow → $0 ledger → free-link bench; the human watches ep 2 on the phone.
+  - **Next action:** pre-flight (0 jobs, `allow_paid` off, spend/ledger recorded), then merge + deploy.
   - **Open questions:** none blocking. **Stage 12 fonts answered 2026-09-30: "All 5 as named"** — from
     github.com/google/fonts `main`, checked against the repo's git blob SHA: `ofl/bangers/Bangers-Regular.ttf`
     93,148 B (blob 9b0f8c1f…), `apache/luckiestguy/LuckiestGuy-Regular.ttf` 73,320 B (5ca663c2…),
@@ -162,7 +162,7 @@ RC-P1…P11, RC-S1…S4, RC-T1…T3, RC-E1…E5 and RC-A1…A9 (tables below) st
 | RC-M1 | Episode-1 prompts byte-identical (no memory, no `pays_off`) | `test_story_prompts_episode.py` ep-1 goldens unedited |
 | RC-M2 | Golden render unchanged on all three keys | `tests/test_aistory_render_golden.py` + `framemd5.json` unedited |
 | RC-M3 | Stored episodes read, validate and re-render byte-identical with no edit | stage-1/6 copy checks + Tier-2 (f) (live ep 1 sha) |
-| RC-M4 | A `style_lock.json` never changes when its template does | new `tests/test_style_lock.py` test (stage 12; UNVERIFIED until then — the behaviour holds today by `build_style_lock`'s deep copy) |
+| RC-M4 | A `style_lock.json` never changes when its template does | `tests/test_style_lock.py` (stage 12; proven by a reverted mutation: `lock = template` → 12 tests fail) |
 | RC-M5 | Memory, feedback and propose-next never touch `story.status`/`approvals`; only an accepted lead/support folds cast (DEC-123) | stage-4 tests |
 | RC-M6 | Clip mode untouched | `test_render_layer_guard.py` + `git diff --stat b60938e -- clipping/studio clipping/story` empty |
 | RC-M7 | No paid call from the new steps without `allow_paid` | stage-4 tests + DEC-115 tests unedited |
@@ -184,8 +184,8 @@ RC-P1…P11, RC-S1…S4, RC-T1…T3, RC-E1…E5 and RC-A1…A9 (tables below) st
 | 9 | re-edit API and CLI [Sonnet] | **done** (local 6278/1, CI 5497/751; 37 new tests, 23 API ones skip in CI; 1 named re-pin) |
 | 10 | dashboard: SeasonBoard series panel [Sonnet] | **done** (local 6315/1, CI 5534/751 incl. the sign-out fix; 34 new contract tests; browser check 375/820/1280: 4 findings fixed in 1 round) |
 | 11 | dashboard: EpisodeStudio re-edit [Sonnet] | **done** (local 6347/1, CI 5563/754; 32 new tests; browser check 375/820/1280: 2 findings, fixed in 2 rounds) |
-| 12 | fonts (confirmed: all 5 as named) and per-style renderer gaps [Sonnet] | next |
-| 13 | merge, deploy, Tier-2 series walk (me at 375 px; the human watches ep 2) | — |
+| 12 | fonts (confirmed: all 5 as named) and per-style renderer gaps [Sonnet] | **done** (local 6420/1, CI 5636/754; 10 files verified by size + git blob; pan_pct plumbed, 4 % styles byte-identical; RC-M4 proven by a reverted mutation) |
+| 13 | merge, deploy, Tier-2 series walk (me at 375 px; the human watches ep 2) | next |
 | 14 | Tier-2 per style (5 short episodes, free route; the human watches one) | — |
 | 14b(e) | re-edit + partial re-render on paid assets (estimate + the human's go first) | — |
 | 15 | docs and decisions [Sonnet] | — |
