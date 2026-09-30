@@ -210,7 +210,10 @@ def paid_verdict(units, *, ep, predicted=False) -> dict:
     cannot run (no image link, a line with no voice, a local editor not
     ready) is ``blocked``. ``stop`` is the sentence the fast track stops
     with -- the numbers, the caps, "nothing was generated or spent" and
-    what to do -- or None when it may go on."""
+    what to do -- or None when it may go on. The episode's image link gone
+    for now (``images.sticky.gone``, A-087) stops with its own offer --
+    ``stops_before_paid`` for a paid link the gates refuse, else
+    ``blocked``."""
     images, voices_est, caps = units["images"], units["voices"], units.get("caps") or {}
     allow = bool(caps.get("allow_paid"))
     upto = "up to " if predicted else ""
@@ -256,7 +259,11 @@ def paid_verdict(units, *, ep, predicted=False) -> dict:
 
     head = f"Episode {ep}'s assets"
     stop = None
-    if parts and not allow:
+    gone = (images.get("sticky") or {}).get("gone") if count else None
+    if gone:
+        verdict = STOPS_BEFORE_PAID if gone["paid"] else BLOCKED
+        stop = gone["message"]
+    elif parts and not allow:
         verdict = STOPS_BEFORE_PAID
         stop = (f"{head} need paid generation -- {_and(parts)}, est {upto}${total:.3f} in all -- and allow_paid is "
                 f"off. {caps_line} Nothing was generated or spent: turn allow_paid on in Settings (the episode, day "
@@ -652,14 +659,20 @@ def estimate(ec, *, env, storyboard=T1, adapters=None, transport=None, custom_fo
         count = scenes * int(ec.episode_defaults["shots_per_scene"][1])
         images_exact, shots_total = False, count
     if count:
+        # The shots of an approved storyboard are priced on the episode's
+        # image link when it has one (A-087), as the assets step asks them.
+        link_info = assets_step.episode_image_link(ec, board, env=env, doc=doc) if images_exact else None
         quote = assets_step.image_quote(ec, count, env=env, story_spent=story_spent, adapters=adapters,
-                                        transport=transport)
+                                        transport=transport, storyboard=board if images_exact else None,
+                                        link_info=link_info)
     else:
         quote = {"est_usd": 0.0, "route_class": None, "link": None, "links": [], "ready": True,
                  "message": "Every shot has its image."}
     images = {"count": count, "exact": images_exact, "route_class": quote["route_class"], "link": quote["link"],
               "est_usd": float(quote["est_usd"] or 0.0), "links": quote["links"], "ready": quote["ready"],
               "message": quote["message"]}
+    if quote.get("sticky") is not None:
+        images["sticky"] = quote["sticky"]
     if script is not None and script_step.is_complete(script, ep):
         voices_est = voice_lines.measure_estimate(ec, script, env=env, adapters=adapters)
         tts_exact = True

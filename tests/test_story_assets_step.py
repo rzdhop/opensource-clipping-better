@@ -511,6 +511,10 @@ def test_the_episode_cap_refuses_a_paid_image_at_the_call_with_the_numbers_and_o
     ledger.append(step="assets", provider="fal", model="x", unit="image", qty=1, est_usd=5.0, paid=True, ep=2)
     fal = FakeImage(price=FAL_PRICE)
     settings = _settings(**PAID_IMAGES, ALLOW_PAID="1")
+    # Phase 6 stage 6 (A-087): the episode's images are Pollinations'; making
+    # one on fal is a switch of its image link, asked for.
+    from clipping.aistory import workflow
+    workflow.patch_assets(store, story_id, 1, {"links": {"image": "fal/flux-schnell"}}, now=NOW, env=settings)
 
     first = _regenerate_shot(store, story_id, "sh05", adapters=_adapters(fal=fal), settings=settings)
 

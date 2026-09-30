@@ -1669,6 +1669,10 @@ PHASE4_PARAMS = {"assets": ASSETS_PARAMS, "render": RENDER_PARAMS, "metadata": M
                  "fast-track": FAST_TRACK_PARAMS}
 ASSETS_PATCH_FIELDS = ("shots",)
 ASSETS_SHOT_PATCH_FIELDS = ("locked",)
+# Phase 6 stage 6 (A-087): the switch of the episode's image link,
+# ``{"links": {"image": "<link>"}}`` -- taken by :func:`patch_assets`; the
+# API's AssetsPatchRequest gains it with the dashboard's offer (stages 11-12).
+ASSETS_LINKS_FIELD = "links"
 
 # The document of each episode regenerate target: the one its job writes,
 # and so the one whose approval completes it. A ``metadata:<ep>:<platform>``
@@ -2263,7 +2267,9 @@ def _derived_key(ec, script, board, doc, manifest) -> tuple:
 
 def _derive(ec, script, board, doc, manifest) -> dict:
     """The hashed part of :func:`episode_outputs` (see ``_DERIVED_CACHE``)."""
-    shots = {shot["shot_id"]: assets_step.shot_state(ec, shot) for shot in (board or {}).get("shots") or []}
+    link = assets_step.recorded_image_link(doc)
+    shots = {shot["shot_id"]: assets_step.shot_state(ec, shot, link=link)
+             for shot in (board or {}).get("shots") or []}
     lines = {}
     for scene in (script or {}).get("scenes") or []:
         for line in scene["lines"]:
@@ -2682,8 +2688,9 @@ def approve_assets(stories, story_id, ep, *, now) -> dict:
     if doc is None:
         raise WorkflowError(CONFLICT, f"Episode {ep} has no assets yet: make them first (the assets step).")
     missing = []
+    link = assets_step.recorded_image_link(doc)
     for shot in board["shots"]:
-        state = assets_step.shot_state(ec, shot)
+        state = assets_step.shot_state(ec, shot, link=link)
         imaged = assets_step.shot_image_path(ec, shot) is not None
         if not imaged or not (state == "current" or (shot["assets"].get("locked") and state == "locked_stale")):
             missing.append(shot["shot_id"])
@@ -3239,9 +3246,20 @@ def patch_storyboard(stories, story_id, ep, fields, *, now) -> dict:
     return written
 
 
-def patch_assets(stories, story_id, ep, fields, *, now) -> dict:
-    """Edit episode *ep*'s assets (``fields``: ``ASSETS_PATCH_FIELDS``);
-    returns the storyboard as written.
+def patch_assets(stories, story_id, ep, fields, *, now, env=None) -> dict:
+    """Edit episode *ep*'s assets (``fields``: ``ASSETS_PATCH_FIELDS``, and
+    :data:`ASSETS_LINKS_FIELD`); returns the storyboard as written.
+
+    ``links`` ``{"image": "<link>"}`` -- phase 6 stage 6, A-087 -- switches
+    the link the episode's shot images are made on to that link of its image
+    chain (IMAGE_CHAIN, or IMAGE_EDIT_CHAIN in ``references`` mode, as *env*
+    -- the Settings values -- names it): ``assets.json``'s ``links.image``
+    becomes ``{link, since: now, switched_from}``
+    (``assets.switched_assets_doc``). The images another link made are then
+    stale, so the next assets run makes exactly those again; the storyboard
+    is not written (its revision and approval never move) and the assets
+    approval goes stale (the fingerprint covers the links). Nothing ever
+    switches on its own; the link the episode already has: nothing written.
 
     ``shots`` ``[{shot_id, locked?}]`` -- a locked shot keeps the image it
     has: the assets step skips it, a regenerate of it is refused ("unlock it
@@ -3255,7 +3273,7 @@ def patch_assets(stories, story_id, ep, fields, *, now) -> dict:
     storyboard."""
     story = load(stories, story_id)
     ep = episode_bounds(stories, story, ep)
-    _unknown_fields(fields, ASSETS_PATCH_FIELDS, "assets")
+    _unknown_fields(fields, ASSETS_PATCH_FIELDS + (ASSETS_LINKS_FIELD,), "assets")
     board = read_episode(stories, story_id, ep, STORYBOARD_DOC)
     if board is None or not board["shots"]:
         raise _no_storyboard(ep)
@@ -3283,11 +3301,33 @@ def patch_assets(stories, story_id, ep, fields, *, now) -> dict:
                           "step), then lock it")
         elif locked != bool(shot["assets"].get("locked")):
             shot["assets"]["locked"] = locked
+    wanted = None
+    if ASSETS_LINKS_FIELD in fields:
+        wanted = assets_step.link_switch(ec, fields[ASSETS_LINKS_FIELD], env=env, errors=errors)
     if errors:
         raise _invalid_values("The assets would not be valid with these values.", errors)
-    if trial == board:
-        return board
-    return _write(episode_common.write_storyboard, "storyboard", ec, trial, script, now=now)
+    if trial != board:
+        board = _write(episode_common.write_storyboard, "storyboard", ec, trial, script, now=now)
+    if wanted is not None:
+        _switch_image_link(stories, story_id, ep, ec, board, wanted, env=env, now=now)
+    return board
+
+
+def _switch_image_link(stories, story_id, ep, ec, board, wanted, *, env, now) -> None:
+    """:func:`patch_assets`' ``links``: ``assets.json`` with the episode's
+    image link switched to *wanted* (``assets.switched_assets_doc``), written;
+    nothing when it is already the episode's link."""
+    doc = read_episode(stories, story_id, ep, ASSETS_DOC)
+    new = assets_step.switched_assets_doc(ec, board, doc, wanted, env=env, now=now)
+    if new is None:
+        return
+    try:
+        stories.write_episode_doc(story_id, ep, ASSETS_DOC, new, now=now)
+    except schemas.SchemaError as exc:
+        raise WorkflowError(CONFLICT, {"message": "The assets would not be valid with this image link.",
+                                       "errors": list(exc.errors)}) from None
+    except (KeyError, ValueError) as exc:
+        raise WorkflowError(CONFLICT, f"The assets cannot be written: {exc}.") from None
 
 
 def build_fast_storyboard(stories, story, ep, *, now, on_log) -> dict:

@@ -2585,6 +2585,20 @@ _EPISODE_ASSETS_APPROVED_SCHEMA = _or_null(_document({
     "fingerprint": _SHA256,
 }))
 
+# Phase 6 stage 6 (A-087): the one link an episode's shot images are made on
+# (``steps/sticky_link.py``): the chain link's label, since when, and the link
+# it replaced when the user switched to it. ``video`` is the clips' slot
+# (stage 8). Optional: a document written before it validates unchanged.
+EPISODE_LINK_PATTERN = r"^[a-z][a-z0-9_-]*/[^\s,*]+$"
+_EPISODE_LINK_LABEL = {"type": "string", "maxLength": 160, "pattern": EPISODE_LINK_PATTERN}
+_EPISODE_LINK_SCHEMA = _document({
+    "link": _EPISODE_LINK_LABEL,
+    "since": _NON_EMPTY_STRING,
+}, optional={
+    "switched_from": _EPISODE_LINK_LABEL,
+})
+_EPISODE_LINKS_SCHEMA = _document({}, optional={"image": _EPISODE_LINK_SCHEMA, "video": _EPISODE_LINK_SCHEMA})
+
 EPISODE_ASSETS_SCHEMA = _document({
     "$schema": {"type": "string", "const": EPISODE_ASSETS_SCHEMA_NAME},
     "ep": _EP,
@@ -2595,6 +2609,8 @@ EPISODE_ASSETS_SCHEMA = _document({
     "approved": _EPISODE_ASSETS_APPROVED_SCHEMA,
     "created_at": _NON_EMPTY_STRING,
     "updated_at": _NON_EMPTY_STRING,
+}, optional={
+    "links": _EPISODE_LINKS_SCHEMA,
 })
 
 

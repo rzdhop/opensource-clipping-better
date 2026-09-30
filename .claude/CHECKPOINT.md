@@ -1,11 +1,38 @@
-## CURRENT STATE — AI Story **phase 6 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–5 **done**; next: **stage 6**
+## CURRENT STATE — AI Story **phase 6 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–6 **done**; next: **stage 7**
 - **In-progress header** (keep current):
   - **Current phase:** IMPLEMENT. EXPLORE/CLARIFY/PLAN were done 2026-09-30 in a session run in parallel with phase 5's
     close: three maps, two rounds of questions, an Opus design. The human approved the plan.
   - **Plan:** `.claude/plans/ai-story/14-phase-6-plan.md` (**APPROVED 2026-09-30**; copy at
     `~/.claude/plans/ai-story-phase-6-plan.md`). Brief: `.claude/plans/ai-story/07-phase-6-video-tiers-local.md`.
-  - **Current stage:** 6 — the sticky image link per episode (A-087) [Opus: data mutation].
-  - **Next action:** dispatch stage 6, then Tier-1 in both environments, then commit.
+  - **Current stage:** 7 — clip documents and the video estimate, no calls [Opus: data mutation].
+  - **Next action:** dispatch stage 7, then Tier-1 in both environments, then commit.
+  - **Stage 6 notes for stages 8, 11, 12 and 14:**
+    - **Module.** New pure `steps/sticky_link.py`: `recorded`, `record`, `gone_why`, `StickyLinkGone`. Assets docs
+      carry optional `links {image?, video?: {link, since, switched_from?}}`.
+    - **Record lifecycle.** Written when the first image is served (a cache restore counts); carried by
+      `write_assets_doc`.
+      - Derived (not written) when every kept image shares one link.
+      - A legacy mixed episode prints a note and behaves as today. Live mixed: `560e901c1b3d`, `979c8376e43e`
+        (walk story A: no new images are needed there).
+    - **Sticky link in force.** The runner gets a one-link chain; DEC-089 swaps apply; a 402/429 goes into DEC-168's
+      paced rounds.
+    - **Link gone.** No key, allowance spent, allow_paid or a cap refuses, 401/403, or unreachable.
+      - Before any call: `asset_units()["images"]["sticky"]["gone"]`, the ✋ refusal (assets, the fast-track paid
+        check, regenerate).
+      - Mid-run: the remaining shots fail with the short reason; `summary["image_link"]["gone"]`.
+      - Offer fields: `kind, link, why, chain, next_link, next_route_class, redo, todo, qty, est_usd, paid, switch,
+        message`.
+    - **Switch.** Only via `workflow.patch_assets(..., {"links": {"image": L}}, env=Settings)`. Images made on
+      another link go stale (locked → `locked_stale`); the storyboard is untouched. The fingerprint gains a `links`
+      part only when present.
+    - **Stage 8:** reuse `sticky_link` for `links.video`. `StickyLinkGone` hardcodes "image": add a `kind`.
+    - **Stages 11–12:** add `links` to `ASSETS_PATCH_FIELDS` and `AssetsPatchRequest`, re-pinning
+      `test_stories_api_phase4.py:88`. The API route must pass `env` (Settings) to `patch_assets`.
+    - **Known edges:**
+      - The plan-time sticky check does not see the episode cap; the existing over-cap message still stops.
+      - While a link is in force, the estimate's fall-through text disappears.
+      - A cache restore on an approved single-link episode can stale its approval once.
+      - The render's "out of date" sentence does not name a link switch.
   - **Stage 5 notes for stages 11, 12 and 14:**
     - **Meter.** New `steps/llm_spend.py`, hooked into `llm_call.call_json` (:304). It opens only when the chain has
       a keyed paid link and the runner is the real `llm.run_chain`. Production dispatches `module.run(ctx)` with
@@ -155,8 +182,8 @@
 | 3 | hosted video adapters (fal ×3, Veo) [Opus] | done |
 | 4 | local ComfyUI video, fake server only [Opus] | done |
 | 5 | paid LLM booking seam [Opus] | done |
-| 6 | sticky image link per episode (A-087) [Opus] | next |
-| 7 | clip documents and the estimate [Opus] | — |
+| 6 | sticky image link per episode (A-087) [Opus] | done |
+| 7 | clip documents and the estimate [Opus] | next |
 | 8 | the video phase and `shot:…:video` [Opus] — **RISKIEST** | — |
 | 9 | renderer: clips, hold, `fill_failed_with_motion`, Tier-2 golden [Opus] | — |
 | 10 | Tier-3 native audio, tests only [Opus] | — |
