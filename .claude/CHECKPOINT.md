@@ -153,12 +153,26 @@
   click showed the sign-in screen the human ruled out (hidden on the phone: the sidebar is desktop-only). Now it
   renders only while a token is stored, and signing out re-checks the server (an open server answers "in").
 - **Stage 13 live walk (in progress, 2026-09-30):** `main` ff to `1af310a`, deployed at 0 jobs (`rm -sfv` + `up -d
-  --build`; health 200, OPEN banner, `API_TOKEN` empty, new bundle `index-Cr1fobVv.js`). (a) memory ep 1 via the UI:
-  S3 on gemini free in 4 s (openrouter paid skipped), 29-word FR recap, both arc hooks verbatim, 2 sorted relationship
-  deltas, script_rev 2 → approved. (b) 6 fake FR comments pasted (295 in the UI / 294 on the server: T2-P5-F2, the
-  UI counts UTF-16 units) → F1 in 1 s: 36-word digest + 3 directions → direction 1 chosen. (c) propose-next FAILED
-  before any call: N1 1,536 tokens > the default 1,200 (T2-P5-F3) → fix attempt 1 below. T2-P5-F1: the wizard
-  collapses the Season step after a series job finishes (the panel disappears until reopened).
+  --build`; health 200, OPEN banner, `API_TOKEN` empty, new bundle `index-Cr1fobVv.js`); fix T2-P5-F3 `64ed69e`
+  ff-merged + `restart backend` at 0 jobs.
+  - (a) memory ep 1 via the UI: S3 gemini free 4 s (openrouter paid skipped), 29-word FR recap, both arc hooks
+    verbatim, 2 sorted deltas, script_rev 2 → approved (job f324809a4414).
+  - (b) 6 fake FR comments (295 UI / 294 server: T2-P5-F2) → F1 1 s: 36-word digest + 3 directions → direction 1.
+  - (c) propose-next failed before any call: N1 1,536 > 1,200 (T2-P5-F3) → fixed `64ed69e` (INPUT_BUDGET N1 3740,
+    hooks capped at 4) → N1 3 s: guest "Ananass" + twist for ep 2. Twist accepted: arc ep 2 summary/hooks replaced,
+    old text in `history` (source proposal), season approval 2026-09-26 kept, story ready. Character accepted
+    (guest) → cast path: K1 + voice ok; portrait/turnaround/expressions each needed a "Continue cast" ≥ 1 min apart
+    (pollinations 402; T2-P5-F4: the cast step does not pace like DEC-168's assets step; 6 cast jobs) → approved;
+    `introduced.ep02 = [char_ananass]`. Approve proposals:2 → job completed (the button stays: T2-P5-F5).
+  - (d) ep 2 script (68 s, 11 scenes, recap s00 "L'alliance a volé en éclats.", E1 pays_off on s01+s02, pre-check
+    passed); E4 flagged hook_payoff ×2 → 2 regenerate rounds with notes + a text-only `pays_off` edit clearing s01
+    (stage 7's path, storyboard untouched) → pre-check passed on s02, E4 still flagged the payoff (T2-P5-F6: E4
+    flash-lite judgement variance, like A-057) → approved anyway via the UI checkbox. Fast track (storyboard T1 →
+    assets → render → metadata) started 10:30 UTC.
+  - Findings so far: F1 the wizard collapses the Season step after a series job; F2 UTF-16 vs code-point count; F3
+    fixed; F4 cast step unpaced (pre-existing, follow-up); F5 "Approve proposals" stays after approval; F6 E4 payoff
+    variance; also pollinations draws a human with pineapple hair (pre-existing A-058 family), and the Cast step's
+    Turnaround/Expressions chips sit on "estimating…" beside "Make the portrait first" (pre-existing, F1 class).
 - **Rollback:** code: delete the worktree and the branch (or revert a stage's commit). Live data: restore the
   tars (`tar -C outputs/stories -xzf …`) and check `sha256sum -c enfr-before.sha`.
 
