@@ -2746,6 +2746,33 @@ _RENDER_TIMINGS_SCHEMA = _document({
     "total_s": {"type": ["number", "null"], "minimum": 0},
 })
 
+# Why a shot's clip is made again rather than taken from the render cache
+# (phase 5 stage 8, ``render/partial.py``): what changed in its command since
+# the last good render -- its image (or video), its camera motion, its frame
+# count, its modifiers, the style's overlays -- or, its command unchanged, a
+# clip that is not in the cache or not the one recorded (missing, corrupt); a
+# shot the last good render did not have (new); anything else in the command's
+# key -- the ffmpeg, the render profile, the encoder settings (settings).
+RENDER_REUSE_REASONS = ("image", "motion", "frames", "modifiers", "overlay", "missing", "corrupt", "new",
+                        "settings")
+
+# What a render made again and took from the cache, relative to the last good
+# render of the episode (``render_manifest.last_good.json``); absent or null
+# when there was none to compare with. Written before the first process, true
+# at every write: once the output is recorded, the shots it lists as rebuilt
+# are exactly the ``S:`` stages that ran, the reused ones those found cached.
+_RENDER_REUSE_SCHEMA = _or_null(_document({
+    "baseline_output_sha256": _SHA256,
+    "shots_total": {"type": "integer", "minimum": 0},
+    "shots_rebuilt": {"type": "array", "items": {"type": "string", "pattern": SHOT_ID_PATTERN}},
+    "shots_reused": {"type": "array", "items": {"type": "string", "pattern": SHOT_ID_PATTERN}},
+    # {shot id: one of RENDER_REUSE_REASONS}, one per rebuilt shot (checked below)
+    "reasons": {"type": "object"},
+    # The shots' timing moved to whole frames (phase 5 stage 6) since the last
+    # good render: most of their frames moved once, so this render is not partial.
+    "timing_converted": {"type": "boolean"},
+}))
+
 RENDER_MANIFEST_SCHEMA = _document({
     "$schema": {"type": "string", "const": RENDER_MANIFEST_SCHEMA_NAME},
     "ep": _EP,
@@ -2761,7 +2788,50 @@ RENDER_MANIFEST_SCHEMA = _document({
     "warnings": {"type": "array", "items": _text(300)},
     "created_at": _NON_EMPTY_STRING,
     "updated_at": _NON_EMPTY_STRING,
+}, optional={
+    # Phase 5 stage 8: whether the storyboard it was cut from is timed in
+    # whole frames (``timing.board_whole_frames``; a manifest written before
+    # has no flag), and what it rebuilt and reused against the last good render.
+    "whole_frames": {"type": "boolean"},
+    "reuse": _RENDER_REUSE_SCHEMA,
+    # {cache key: [sha256, ...]}: the clips render/cache/ keeps once the render
+    # completed (this render's and the last one's), each with the sha256 its
+    # making recorded -- so a clip the previous manifest named is still
+    # provable after this one replaced it (an edit undone).
+    "cache": {"type": "object"},
 })
+
+
+def _render_reuse_errors(doc) -> list:
+    """The ``reuse`` record's own rules (``_RENDER_REUSE_SCHEMA``): the rebuilt
+    and the reused shots are apart and count ``shots_total``, one reason of
+    ``RENDER_REUSE_REASONS`` per rebuilt shot and none else; once the output is
+    recorded, they are exactly the ``S:`` stages that ran and those found
+    cached."""
+    reuse = doc.get("reuse")
+    if reuse is None:
+        return []
+    errors = []
+    rebuilt, reused = reuse["shots_rebuilt"], reuse["shots_reused"]
+    if len(set(rebuilt)) != len(rebuilt) or len(set(reused)) != len(reused) or set(rebuilt) & set(reused):
+        errors.append("$.reuse: a shot is listed twice between shots_rebuilt and shots_reused")
+    if reuse["shots_total"] != len(rebuilt) + len(reused):
+        errors.append(f"$.reuse.shots_total: {reuse['shots_total']} is not the {len(rebuilt) + len(reused)} shots "
+                      "listed")
+    reasons = reuse["reasons"]
+    if set(reasons) != set(rebuilt):
+        errors.append("$.reuse.reasons: one reason per rebuilt shot, and none for another")
+    for shot_id, reason in reasons.items():
+        if reason not in RENDER_REUSE_REASONS:
+            errors.append(f"$.reuse.reasons.{shot_id}: {reason!r} is not one of {list(RENDER_REUSE_REASONS)}")
+    if doc["output"] is not None:
+        shot_stages = [stage for stage in doc["stages"] if stage["kind"] == "shot"]
+        ran = [stage["id"][2:] for stage in shot_stages if stage["state"] == "done"]
+        found = [stage["id"][2:] for stage in shot_stages if stage["state"] == "cached"]
+        if sorted(ran) != sorted(rebuilt) or sorted(found) != sorted(reused):
+            errors.append("$.reuse: the shots it lists as rebuilt and reused are not the S stages that ran and "
+                          "those found cached")
+    return errors
 
 
 def render_manifest_errors(doc) -> list:
@@ -2769,7 +2839,10 @@ def render_manifest_errors(doc) -> list:
     stage's life: ids unique; a running stage has no result yet; a done or
     cached one names its output and its sha256; only a shot or the end card
     is cached, and by its key. An output is recorded only once every stage
-    is done or cached, and its loudness is finite."""
+    is done or cached, and its loudness is finite. The optional ``reuse``
+    record (phase 5 stage 8) tells the truth about the stages
+    (``_render_reuse_errors``); the optional ``cache`` map names cache keys,
+    each with its recorded sha256s."""
     errors = validate(doc, RENDER_MANIFEST_SCHEMA)
     if errors:
         return errors
@@ -2799,6 +2872,13 @@ def render_manifest_errors(doc) -> list:
             errors.append(f"$.output: recorded while stage(s) {unsettled} are not done or cached")
         _finite_errors(errors, "$.output.loudness", output["loudness"])
 
+    for key, shas in (doc.get("cache") or {}).items():
+        if not re.match(SHA256_PATTERN, key) or not isinstance(shas, list) or not shas or not all(
+                isinstance(sha, str) and re.match(SHA256_PATTERN, sha) for sha in shas):
+            errors.append(f"$.cache: {key!r} must be a cache key naming a list of sha256s")
+            break
+
+    errors.extend(_render_reuse_errors(doc))
     return errors
 
 

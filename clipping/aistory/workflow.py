@@ -92,13 +92,17 @@ PHASE3_STEPS = ("script", "storyboard")
 # ffmpeg, calling no API: DEC-161), the metadata pack, and the fast track from
 # the script to the pack (DEC-162). The last three end completed.
 PHASE4_STEPS = ("assets", "render", "metadata", "fast-track")
-EPISODE_STEPS = PHASE3_STEPS + PHASE4_STEPS
 # Step 13 (phase 5, plan 11 stage 4): the series steps, one episode each
 # (``ep``, "N"), one LLM call each (S3, F1, N1), all ending awaiting approval
 # -- ``memory:<N>``, ``feedback:<N>`` and ``proposals:<N+1>`` (the proposals
 # sit in the folder of the episode they are for: :func:`series_job_doc`).
 SERIES_STEPS = ("memory", "feedback", "propose-next")
-LATER_STEPS = ("rerender", "import")
+# The re-edit's render (phase 5, plan 11 stage 8): one episode, ending
+# completed -- the render again, making only the shot clips that changed since
+# the last good render (``steps/rerender.py``). Its route and CLI are stage 9's.
+REEDIT_STEPS = ("rerender",)
+EPISODE_STEPS = PHASE3_STEPS + PHASE4_STEPS + REEDIT_STEPS
+LATER_STEPS = ("import",)
 
 # Spec 9.2, approve grammar: "season" bare, the others "<kind>:<id>". Phase 2
 # approves ``character:<id>``, ``place:<id>``, ``prop:<id>`` and ``season``;
@@ -2237,6 +2241,7 @@ def _render_view(manifest, derived) -> dict:
         "seconds": manifest["timings"]["total_s"], "started_at": manifest["timings"]["started_at"],
         "finished_at": manifest["timings"]["finished_at"], "warnings": list(manifest["warnings"]),
         "ffmpeg": dict(manifest["ffmpeg"]), "out_of_date": derived["out_of_date"],
+        "reuse": render_step.reuse_view(manifest),
     }
 
 
@@ -2276,7 +2281,9 @@ def episode_outputs(stories, story, ep) -> dict:
                     "output": {"file": "episode_final.mp4", "sha256"} | null,
                     "stages": {total, ran, cached, shots, shots_cached},
                     "seconds", "started_at", "finished_at", "warnings": [...], "ffmpeg": {version, machine},
-                    "out_of_date": bool | null} | null,
+                    "out_of_date": bool | null,
+                    "reuse": {baseline_output_sha256, shots_total, shots_rebuilt, shots_reused, reasons,
+                              timing_converted, summary: "3 of 11 shots re-rendered"} | null} | null,
          "metadata": {"pack": metadata_pack.json, "current": bool} | null,
          "ledger": {"entries": [...], "totals": {est_usd, paid_usd, entries}}}
 
@@ -2284,7 +2291,9 @@ def episode_outputs(stories, story, ep) -> dict:
     ``render`` before a manifest (``out_of_date`` null while the render has
     no output; else whether rendering again with the same params would make
     another file: ``render.current_render``, so an ``encoder: auto`` render
-    is always out of date); ``metadata`` before a pack (``current``:
+    is always out of date; ``reuse`` the manifest's record of what the render
+    made again since the last good render, phase 5 stage 8, null for a
+    render with none before it); ``metadata`` before a pack (``current``:
     ``metadata.is_current`` against the render's recorded output). Calls
     nothing; what it hashes is remembered while nothing it reads moves
     (``_DERIVED_CACHE``). ``StoryUnreadable`` for a document that does not

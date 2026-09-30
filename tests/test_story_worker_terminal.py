@@ -22,7 +22,8 @@ from clipping.aistory import steps
 from clipping.cancel import CancelToken
 from test_story_step_jobs import _messages, _register, _step_job, job_store, worker  # noqa: F401 -- fixtures
 
-COMPLETED = ("render", "metadata", "fast-track")
+# Phase 5 stage 8 adds the re-render (DEC-161: nothing to approve).
+COMPLETED = ("render", "metadata", "fast-track", "rerender")
 AWAITING = ("concepts", "bible", "style_preview", "cast", "places_proposal", "places", "season", "script",
             "storyboard", "assets", "regenerate")
 

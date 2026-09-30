@@ -26,10 +26,23 @@ process, and kills it after :data:`KILL_GRACE_S` (a cancel after
 are kept where the process left them) or ``cancelled``. The first stage that
 does not finish ends the render.
 
-**Cache.** A shot or end-card stage whose ``cache/<key>.mp4`` exists is
-``cached``: no process is started. Once a render completes, every file in
-``cache/`` whose key neither this manifest nor the previous one names is
-pruned. A, L, F, P and M always run.
+**Cache.** A shot or end-card stage whose ``cache/<key>.mp4`` is the clip a
+manifest recorded for its key -- the same sha256, not only a file of some
+size (``partial.cache_state``, phase 5 stage 8) -- is ``cached``: no process
+is started. Any other is made again: a missing, empty or corrupt clip is
+never reused. Once a render completes, every file in ``cache/`` whose key
+neither this manifest nor the previous one names is pruned, and the manifest
+records the sha256 of every clip kept (``cache``), so the next render can
+still prove the previous one's. A, L, F, P and M always run.
+
+**Baseline** (phase 5 stage 8). The manifest of the last render that
+completed is copied to ``render_manifest.last_good.json`` beside
+``render_manifest.json`` -- by a completed render only, so a failed one never
+becomes the baseline, and the final file is published only once it has been
+read back, so a failed render leaves the last good final where it was. A
+render measured against a baseline (``partial.baseline_of``) records what it
+made again and what it reused, and why, in the manifest's ``reuse``
+(``partial.select``), written before its first process and kept true.
 
 **Result** (every entry point): ``{"state": "completed"|"failed"|
 "cancelled", "error", "failed_stage", "manifest", "output", "warnings",
@@ -58,6 +71,7 @@ from ... import loudness
 from ... import cancel as cancel_mod
 from . import fonts as fonts_mod
 from . import manifest as manifest_mod
+from . import partial
 from . import plan as plan_mod
 from . import profiles
 
@@ -315,8 +329,10 @@ def _finite(value) -> float:
     return number
 
 
-def _output_record(plan, render_dir, final_path, manifest_dir) -> dict:
-    """``output`` of the manifest, from P's probe, P:loudness and M."""
+def _output_record(plan, render_dir, made_path, final_path, manifest_dir) -> dict:
+    """``output`` of the manifest, from P's probe, P:loudness and M: the file
+    made (*made_path*, hashed) as it will be once published at
+    *final_path*."""
     probe = _read_json(os.path.join(render_dir, plan_mod.PROBE_REL))
     video = next((s for s in probe.get("streams", []) if s.get("codec_type") == "video"), None)
     if video is None:
@@ -326,7 +342,7 @@ def _output_record(plan, render_dir, final_path, manifest_dir) -> dict:
     framemd5 = os.path.join(render_dir, plan_mod.FRAMEMD5_REL)
     return {
         "path": manifest_mod.relative_to(final_path, manifest_dir),
-        "sha256": _sha256_file(final_path),
+        "sha256": _sha256_file(made_path),
         "duration_s": round(_finite(fmt.get("duration")), 3),
         "width": int(video["width"]),
         "height": int(video["height"]),
@@ -381,20 +397,23 @@ def _publish(src: str, dest: str) -> None:
 
 # ----------------------------------------------------------------------- run
 
-def run_render(plan: dict, *, render_dir, manifest_path, final_path=None, cancel=None, popen=subprocess.Popen,
-               clock=time.monotonic, now=_utc_now, timeouts=None, on_log=None) -> dict:
+def run_render(plan: dict, *, render_dir, manifest_path, final_path=None, last_good_path=None, cancel=None,
+               popen=subprocess.Popen, clock=time.monotonic, now=_utc_now, timeouts=None, on_log=None) -> dict:
     """Run *plan* (``plan.build_render_plan``) in *render_dir*.
 
     *manifest_path* is where ``render_manifest.json`` is written; its folder
     must contain *render_dir* and *final_path* (manifest paths never climb).
     *final_path* is where ``episode_final.mp4`` is moved once every stage
-    is done (default: it stays in *render_dir*). *cancel* is a
-    ``clipping.cancel.CancelToken`` (default: never cancelled). *timeouts*
-    overrides :data:`STAGE_TIMEOUT_S` per stage kind. Returns the result
-    dict (module docstring). Raises :class:`RunnerError` before writing
-    anything when a work folder is a symlink, and ValueError when a path
-    is outside the manifest's folder: both are the caller's layout, not
-    the render's.
+    is done and its output read back (default: it stays in *render_dir*).
+    *last_good_path* is where a completed render's manifest is copied, the
+    baseline of the next one (default: ``manifest.last_good_path``, beside
+    *manifest_path*). *cancel* is a ``clipping.cancel.CancelToken``
+    (default: never cancelled). *timeouts* overrides
+    :data:`STAGE_TIMEOUT_S` per stage kind. Returns the result dict (module
+    docstring). Raises :class:`RunnerError` before writing anything when a
+    work folder or the baseline is a symlink, and ValueError when a path is
+    outside the manifest's folder: both are the caller's layout, not the
+    render's.
     """
     cancel = cancel if cancel is not None else cancel_mod.NEVER
     log = on_log or (lambda message: None)
@@ -404,27 +423,50 @@ def run_render(plan: dict, *, render_dir, manifest_path, final_path=None, cancel
     manifest_dir = os.path.dirname(manifest_path)
     final_path = os.path.abspath(os.fspath(final_path)) if final_path is not None \
         else os.path.join(render_dir, plan_mod.FINAL_REL)
+    last_good_path = os.path.abspath(os.fspath(last_good_path)) if last_good_path is not None \
+        else manifest_mod.last_good_path(manifest_path)
     manifest_mod.relative_to(render_dir, manifest_dir)
     manifest_mod.relative_to(final_path, manifest_dir)
+    manifest_mod.relative_to(last_good_path, manifest_dir)
+    if os.path.islink(last_good_path) or (os.path.lexists(last_good_path) and not os.path.isfile(last_good_path)):
+        raise RunnerError(f"{last_good_path} is a symlink or not a regular file; refused, never followed")
 
     _real_dir(render_dir)
     for sub in plan_mod.WORK_DIRS:
         _real_dir(os.path.join(render_dir, sub))
+    cache_dir = os.path.join(render_dir, plan_mod.CACHE_DIR)
 
     previous_keys = manifest_mod.cache_keys(manifest_mod.read_manifest(manifest_path))
+    # What the last renders recorded, read before this one's manifest replaces
+    # the last: the baseline, and every clip whose bytes are known.
+    known = partial.load_state(manifest_path, last_good_path)
+    recorded = known["recorded"]
+    selection = partial.select(known["baseline"], plan, cache_dir, recorded=recorded)
+    shot_order = [partial.shot_id_of(stage["id"]) for stage in plan["stages"] if stage["kind"] == "shot"]
     started = clock()
     doc = manifest_mod.new_manifest(plan, now=now())
     doc["warnings"] = [_clip(w, 300) for w in doc["warnings"]]
+    record = None
+    if known["baseline"] is not None:
+        record = doc["reuse"] = partial.reuse_record(known["baseline"], selection)
+        why = ", ".join(f"{shot_id} {reason}" for shot_id, reason in record["reasons"].items())
+        log(f"reuse: {partial.summary(record)} since the last good render" + (f" ({why})" if why else ""))
     ran, cached = [], []
 
-    def save():
-        doc["updated_at"] = now()
+    def save(*, stamp=True):
+        if stamp:
+            doc["updated_at"] = now()
         manifest_mod.write_manifest(manifest_path, doc)
 
     def finish(state, *, error=None, failed_stage=None, output=None):
         doc["timings"]["finished_at"] = now()
         doc["timings"]["total_s"] = round(max(0.0, clock() - started), 3)
-        save()
+        doc["updated_at"] = now()
+        if state == "completed":
+            # The baseline first: a crash between the two writes leaves the
+            # published final with the manifest that made it.
+            manifest_mod.write_manifest(last_good_path, doc)
+        save(stamp=False)
         return _result(state, error=error, failed_stage=failed_stage, manifest=doc, output=output,
                        warnings=doc["warnings"], ran=ran, cached=cached)
 
@@ -441,17 +483,23 @@ def run_render(plan: dict, *, render_dir, manifest_path, final_path=None, cancel
         if cancel.cancelled:
             return finish("cancelled", error="cancelled before stage " + stage["id"])
 
+        shot_id = partial.shot_id_of(stage["id"]) if stage["kind"] == "shot" else None
         if stage["cache_key"] is not None:
-            hit = os.path.join(render_dir, stage["output"])
-            if os.path.isfile(hit) and not os.path.islink(hit) and os.path.getsize(hit) > 0:
+            outcome, sha = partial.cache_state(cache_dir, stage["cache_key"], recorded)
+            if outcome == partial.HIT:
                 entry = manifest_mod.stage_entry(stage, stage["argv"], state="cached")
                 entry["output"] = stage["output"]
-                entry["output_sha256"] = _sha256_file(hit)
+                entry["output_sha256"] = sha
                 doc["stages"].append(entry)
+                if shot_id is not None:
+                    partial.settle(record, shot_order, shot_id, rebuilt=False)
                 save()
                 cached.append(stage["id"])
                 log(f"{stage['id']}: cached")
                 continue
+            if shot_id is not None:
+                partial.settle(record, shot_order, shot_id, rebuilt=True,
+                               reason=selection["changed"].get(shot_id) or outcome)
 
         argv = stage["argv"] if stage["argv"] is not None else plan_mod.loudness_apply_argv(stage, measured_mix)
         entry = manifest_mod.stage_entry(stage, argv)
@@ -518,27 +566,38 @@ def run_render(plan: dict, *, render_dir, manifest_path, final_path=None, cancel
         entry["state"] = "done"
         entry["output"] = stage["output"]
         entry["output_sha256"] = _sha256_file(os.path.join(render_dir, stage["output"]))
+        if stage["cache_key"] is not None:
+            # a later stage asking for the same clip takes this one
+            recorded.setdefault(stage["cache_key"], set()).add(entry["output_sha256"])
         save()
         log(f"{stage['id']}: done in {entry['seconds']:.1f} s")
 
+    # Read back before publishing: a render that fails here leaves the last
+    # good final where it was, with the baseline that made it.
+    made = os.path.join(render_dir, plan_mod.FINAL_REL)
     try:
-        _publish(os.path.join(render_dir, plan_mod.FINAL_REL), final_path)
-        output = _output_record(plan, render_dir, final_path, manifest_dir)
+        output = _output_record(plan, render_dir, made, final_path, manifest_dir)
     except (OSError, ValueError, KeyError, TypeError, RunnerError) as exc:
         return finish("failed", error=f"the finished render could not be read back: {exc}")
+    try:
+        _publish(made, final_path)
+    except OSError as exc:
+        return finish("failed", error=f"the finished render could not be moved into place: {exc}")
     doc["warnings"] += [_clip(w, 300) for w in output_warnings(plan, output)]
     doc["output"] = output
-    result = finish("completed", output=output)
     keep = manifest_mod.cache_keys(doc) | previous_keys
-    removed = prune_cache(os.path.join(render_dir, plan_mod.CACHE_DIR), keep)
+    # the clips the cache keeps, with their recorded bytes: provable next time
+    doc["cache"] = {key: sorted(recorded[key]) for key in sorted(keep) if recorded.get(key)}
+    result = finish("completed", output=output)
+    removed = prune_cache(cache_dir, keep)
     if removed:
         log(f"cache: pruned {len(removed)} file(s)")
     return result
 
 
-def render(*, plan_args: dict, render_dir, manifest_path, final_path=None, profile="final", run=subprocess.run,
-           popen=subprocess.Popen, cancel=None, clock=time.monotonic, now=_utc_now, timeouts=None, on_log=None,
-           machine=None) -> dict:
+def render(*, plan_args: dict, render_dir, manifest_path, final_path=None, last_good_path=None, profile="final",
+           run=subprocess.run, popen=subprocess.Popen, cancel=None, clock=time.monotonic, now=_utc_now, timeouts=None,
+           on_log=None, machine=None) -> dict:
     """Pre-flight, plan (``plan.build_render_plan(**plan_args,
     ffmpeg=..., profile=...)``) and run. A pre-flight or plan failure is a
     failed result with its message and writes nothing."""
@@ -551,4 +610,5 @@ def render(*, plan_args: dict, render_dir, manifest_path, final_path=None, profi
     except plan_mod.PlanError as exc:
         return _result("failed", error=f"render plan: {exc}")
     return run_render(plan, render_dir=render_dir, manifest_path=manifest_path, final_path=final_path,
-                      cancel=cancel, popen=popen, clock=clock, now=now, timeouts=timeouts, on_log=on_log)
+                      last_good_path=last_good_path, cancel=cancel, popen=popen, clock=clock, now=now,
+                      timeouts=timeouts, on_log=on_log)

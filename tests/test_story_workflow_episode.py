@@ -128,8 +128,8 @@ def _shots_of(board, sid):
 
 def test_the_episode_steps_approvals_and_targets_left_the_later_phases(wf):
     assert wf.PHASE3_STEPS == ("script", "storyboard")
-    # Phase 5 stage 4 registered memory, feedback and propose-next: rerender and import are still later.
-    assert wf.LATER_STEPS == ("rerender", "import")
+    # Phase 5 stage 4 registered memory, feedback and propose-next, stage 8 rerender: import is still later.
+    assert wf.LATER_STEPS == ("import",)
     assert wf.LATER_APPROVALS == ()
     # shot:<ep>:<shid>:video (phase 6) is still to come; phase 4 reads the shot's image first.
     assert wf.LATER_TARGETS == ("shot",)

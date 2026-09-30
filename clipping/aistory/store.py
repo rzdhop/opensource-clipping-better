@@ -28,6 +28,7 @@ Layout, under the same ``outputs/`` directory the job store uses::
             storyboard.json         # Storyboard (storyboard_v1), each shot's image record included
             assets.json             # word sources, SFX, BGM, the grid approval (episode_assets_v1)
             render_manifest.json    # RenderManifest (render_manifest_v1)
+            render_manifest.last_good.json  # the last render that completed (render_manifest_v1)
             metadata_pack.json      # MetadataPack (metadata_pack_v1)
             proposals.json          # N1's proposals for this episode (next_proposals_v1)
             episode_final.mp4, subtitles.ass, cover.jpg, cost_ledger.json  # EPISODE_FILE_NAMES
@@ -189,10 +190,14 @@ EPISODE_ASSETS_DOC = "assets.json"
 EPISODE_RENDER_MANIFEST_DOC = "render_manifest.json"
 EPISODE_METADATA_PACK_DOC = "metadata_pack.json"
 EPISODE_PROPOSALS_DOC = "proposals.json"
+# Phase 5 stage 8: a copy of the manifest of the last render that completed,
+# written by the render runner only then -- the baseline a partial re-render
+# is measured against, and the manifest of the episode_final.mp4 on disk.
+EPISODE_RENDER_LAST_GOOD_DOC = "render_manifest.last_good.json"
 EPISODE_DOC_NAMES = (
     EPISODE_SCRIPT_DOC, EPISODE_STORYBOARD_DOC,
     EPISODE_ASSETS_DOC, EPISODE_RENDER_MANIFEST_DOC, EPISODE_METADATA_PACK_DOC,
-    EPISODE_PROPOSALS_DOC,
+    EPISODE_PROPOSALS_DOC, EPISODE_RENDER_LAST_GOOD_DOC,
 )
 EPISODE_DOC_VALIDATORS = {
     EPISODE_SCRIPT_DOC: schemas.episode_script_errors,
@@ -201,13 +206,14 @@ EPISODE_DOC_VALIDATORS = {
     EPISODE_RENDER_MANIFEST_DOC: schemas.render_manifest_errors,
     EPISODE_METADATA_PACK_DOC: schemas.metadata_pack_errors,
     EPISODE_PROPOSALS_DOC: schemas.next_proposals_errors,
+    EPISODE_RENDER_LAST_GOOD_DOC: schemas.render_manifest_errors,
 }
 # The episode documents that carry created_at/updated_at: every one of them
 # (spec 2: every JSON document carries an updated_at).
 EPISODE_DOCS_WITH_TIMESTAMPS = (
     EPISODE_SCRIPT_DOC, EPISODE_STORYBOARD_DOC,
     EPISODE_ASSETS_DOC, EPISODE_RENDER_MANIFEST_DOC, EPISODE_METADATA_PACK_DOC,
-    EPISODE_PROPOSALS_DOC,
+    EPISODE_PROPOSALS_DOC, EPISODE_RENDER_LAST_GOOD_DOC,
 )
 # The field that names the episode a document belongs to, which must be its
 # folder's: ``ep``, except N1's proposals, which sit in the folder of the
@@ -1503,7 +1509,8 @@ class StoryStore:
         """The path of the episode document *name* (``EPISODE_DOC_NAMES``),
         for the one writer that is not this store: the render runner keeps
         ``render_manifest.json`` itself, rewriting it at every change of a
-        stage's state (``render/manifest.py``, validated and atomic on every
+        stage's state, and ``render_manifest.last_good.json`` once a render
+        completes (``render/manifest.py``, validated and atomic on every
         write). Everything else reads and writes documents through
         ``read_episode_doc``/``write_episode_doc``.
 

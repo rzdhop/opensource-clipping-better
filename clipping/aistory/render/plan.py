@@ -222,8 +222,11 @@ def build_render_plan(*, script: dict, storyboard: dict, assets: dict, style_loc
       golden render never takes ``"auto"`` (parity is libx264's).
 
     Returns ``{ep, profile, params, ffmpeg, font, timeline, expected,
-    length_window_s, inputs, files, stages, warnings, approx_line_ids}``.
-    Raises :class:`PlanError` naming the problem.
+    length_window_s, inputs, files, stages, warnings, approx_line_ids,
+    whole_frames}`` -- ``whole_frames``: whether the storyboard's shots are
+    timed in whole frames (``timing.board_whole_frames``; the manifest
+    records it, so a re-render can say when its timing converted, phase 5
+    stage 8). Raises :class:`PlanError` naming the problem.
     """
     try:
         return _build(script=script, storyboard=storyboard, assets=assets, style_lock=style_lock,
@@ -443,4 +446,5 @@ def _build(*, script, storyboard, assets, style_lock, template, story, ep, input
         "stages": stages,
         "warnings": warnings,
         "approx_line_ids": meta["approx_line_ids"],
+        "whole_frames": timing_mod.board_whole_frames(storyboard),
     }

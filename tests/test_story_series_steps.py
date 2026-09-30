@@ -985,9 +985,9 @@ def test_the_series_steps_are_registered_and_end_awaiting_approval(wf):
         assert step not in steps.COMPLETED_STEPS and steps.ends_completed(step, {"ep": 1}) is False
     assert wf.SERIES_STEPS == ("memory", "feedback", "propose-next")
     assert wf.SERIES_APPROVALS == ("memory", "feedback", "proposals")
-    assert wf.LATER_STEPS == ("rerender", "import")
+    assert wf.LATER_STEPS == ("import",)  # stage 8 registered rerender
     assert not set(wf.SERIES_STEPS) & set(wf.LATER_STEPS)
-    assert _refused(wf, "later_phase", wf.refuse_step, "rerender") == "'rerender' arrives in a later phase."
+    assert _refused(wf, "later_phase", wf.refuse_step, "import") == "'import' arrives in a later phase."
     # The document each job awaits: the proposals sit in the folder of the episode they are for.
     assert [wf.series_job_doc(step, 3) for step in wf.SERIES_STEPS] == ["memory:3", "feedback:3", "proposals:4"]
     assert wf.series_job_doc("memory", None) is None

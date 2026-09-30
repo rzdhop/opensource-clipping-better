@@ -19,6 +19,13 @@ shipped template must not move the golden digest. What does move it -- the
 timing engine, the builders, the ASS layout, ffmpeg itself -- is exactly what
 the parity rule is for.
 
+**Variants.** ``variant_shot`` (a shot id: other colours for its image) and
+``line_seconds`` (``{line_id: seconds}``: that line's blip and its timing
+last longer or shorter, so its scene, and the shot that ends it, do too) make
+the edited documents the partial re-render test renders twice -- over a warm
+cache and clean (phase 5 stage 8, RC-M8). Without them the fixture is the one
+the parity keys record.
+
 **Parity keys.** ``tests/fixtures/aistory_golden/framemd5.json`` maps
 ``"<ffmpeg version>/<machine>"`` (the manifest's ``ffmpeg`` block) to the
 sha256 of the ``.framemd5`` file of the video. An unknown key is a failure,
@@ -182,9 +189,13 @@ def _bed(rate: int, seconds: float):
 
 # ------------------------------------------------------------------ fixture
 
-def _line(line_id, speaker, text):
+def _line_seconds(line_id, line_seconds) -> float:
+    return float((line_seconds or {}).get(line_id, LINE_S))
+
+
+def _line(line_id, speaker, text, seconds=LINE_S):
     return {"line_id": line_id, "speaker": speaker, "text": text, "emotion": "neutral", "delivery": "calm",
-            "timing": {"source": "tts_word_timestamps", "duration_s": LINE_S, "text_hash": timing.text_hash(text),
+            "timing": {"source": "tts_word_timestamps", "duration_s": seconds, "text_hash": timing.text_hash(text),
                        "voice": "edge/en-US-GuyNeural", "audio": f"assets/voice/{line_id}.wav"}}
 
 
@@ -195,11 +206,12 @@ def _scene(scene_id, function, lines, sfx_cues=()):
             "state": "written", "source": "E2", "rev": 1}
 
 
-def build_documents() -> dict:
-    """The script, storyboard, assets doc, style lock and template (no files)."""
+def build_documents(*, line_seconds=None) -> dict:
+    """The script, storyboard, assets doc, style lock and template (no files).
+    *line_seconds* (``{line_id: seconds}``) times those lines otherwise."""
     by_scene = {}
     for line_id, scene_id, speaker, text, _hz in LINES:
-        by_scene.setdefault(scene_id, []).append(_line(line_id, speaker, text))
+        by_scene.setdefault(scene_id, []).append(_line(line_id, speaker, text, _line_seconds(line_id, line_seconds)))
     scenes = [
         _scene("s01", "hook", by_scene["s01"], [{"at": "start", "cue": SFX_CUE}]),
         _scene("s02", "cliffhanger", by_scene["s02"]),
@@ -236,10 +248,11 @@ def build_documents() -> dict:
             "template": copy.deepcopy(TEMPLATE)}
 
 
-def write_sources(workdir, *, variant_shot=None) -> dict:
+def write_sources(workdir, *, variant_shot=None, line_seconds=None) -> dict:
     """Write the fixture's media under ``<workdir>/sources/`` and return the
     plan's ``inputs`` (hashed). *variant_shot* (a shot id) gets different
-    colours."""
+    colours; *line_seconds* (``{line_id: seconds}``) makes those lines'
+    blips that long."""
     src = Path(workdir) / "sources"
     for sub in ("shots", "voice", "bgm", "custom_fonts"):
         (src / sub).mkdir(parents=True, exist_ok=True)
@@ -253,7 +266,7 @@ def write_sources(workdir, *, variant_shot=None) -> dict:
     lines = {}
     for line_id, _scene, _speaker, _text, hz in LINES:
         path = src / "voice" / f"{line_id}.wav"
-        wav_bytes_to(path, LINE_RATE, _blip(LINE_RATE, LINE_S, hz))
+        wav_bytes_to(path, LINE_RATE, _blip(LINE_RATE, _line_seconds(line_id, line_seconds), hz))
         lines[line_id] = runner.file_record(path, f"fixture/voice/{path.name}")
 
     bed = src / "bgm" / "bed.wav"
@@ -274,15 +287,18 @@ def write_sources(workdir, *, variant_shot=None) -> dict:
     }
 
 
-def render_fixture(workdir, *, variant_shot=None, run=subprocess.run, popen=subprocess.Popen, on_log=None) -> dict:
+def render_fixture(workdir, *, variant_shot=None, line_seconds=None, run=subprocess.run, popen=subprocess.Popen,
+                   on_log=None) -> dict:
     """Write the fixture into *workdir* and render it with the real runner
     (GOLDEN profile): ``render/`` is the working folder,
-    ``render_manifest.json`` and ``episode_final.mp4`` sit beside it.
-    Returns the runner's result plus ``seconds`` and ``key``."""
+    ``render_manifest.json`` (and, once a render completed,
+    ``render_manifest.last_good.json``) and ``episode_final.mp4`` sit
+    beside it. *variant_shot* and *line_seconds*: module docstring,
+    "Variants". Returns the runner's result plus ``seconds`` and ``key``."""
     workdir = Path(workdir)
     workdir.mkdir(parents=True, exist_ok=True)
-    docs = build_documents()
-    inputs = write_sources(workdir, variant_shot=variant_shot)
+    docs = build_documents(line_seconds=line_seconds)
+    inputs = write_sources(workdir, variant_shot=variant_shot, line_seconds=line_seconds)
     started = time.monotonic()
     result = runner.render(
         plan_args={**docs, "story": dict(STORY), "ep": EP, "inputs": inputs},

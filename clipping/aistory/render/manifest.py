@@ -6,6 +6,12 @@ rewrites it at every change of state, so a reader -- the dashboard, a crashed
 job's next run, a human -- always sees which command is running, with the
 exact argv, before the process exists (**manifest-before-run**).
 
+Once a render completes, the runner copies its manifest to
+``render_manifest.last_good.json`` beside it (:func:`last_good_path`, phase 5
+stage 8): the baseline a partial re-render is measured against
+(``render/partial.py``), and the manifest of the final file on disk -- a
+render that fails never becomes it.
+
 Every write here is validated with ``schemas.render_manifest_errors`` first
 and then written atomically (``store._atomic_write_json``: a temp file in the
 same folder, then ``os.replace``). An invalid document is never written: it
@@ -26,6 +32,9 @@ from .. import store as store_mod
 
 _CACHE_KEY_RE = re.compile(r"^[0-9a-f]{64}$")
 
+# ``render_manifest.json`` -> ``render_manifest.last_good.json``
+LAST_GOOD_SUFFIX = ".last_good.json"
+
 
 class ManifestError(RuntimeError):
     """A manifest the runner was about to write does not validate."""
@@ -33,8 +42,9 @@ class ManifestError(RuntimeError):
 
 def new_manifest(plan: dict, *, now: str) -> dict:
     """The manifest of a render that is about to start: no stage, no output,
-    the timings open. *plan* is ``render/plan.py``'s plan."""
-    return {
+    the timings open. *plan* is ``render/plan.py``'s plan; its
+    ``whole_frames`` (phase 5 stage 8) is recorded when it has one."""
+    doc = {
         "$schema": schemas.RENDER_MANIFEST_SCHEMA_NAME,
         "ep": plan["ep"],
         "profile": plan["profile"],
@@ -52,6 +62,9 @@ def new_manifest(plan: dict, *, now: str) -> dict:
         "created_at": now,
         "updated_at": now,
     }
+    if isinstance(plan.get("whole_frames"), bool):
+        doc["whole_frames"] = plan["whole_frames"]
+    return doc
 
 
 def stage_entry(stage: dict, argv: list, *, state: str = "running") -> dict:
@@ -86,6 +99,29 @@ def read_manifest(path: str):
     except (OSError, ValueError):
         return None
     return doc if isinstance(doc, dict) else None
+
+
+def last_good_path(manifest_path) -> str:
+    """Where the copy of the last completed render's manifest sits: beside
+    *manifest_path*, ``<name>.last_good.json`` (``render_manifest.json`` ->
+    ``render_manifest.last_good.json``, the store's
+    ``EPISODE_RENDER_LAST_GOOD_DOC``)."""
+    manifest_path = os.path.abspath(os.fspath(manifest_path))
+    stem, _ext = os.path.splitext(os.path.basename(manifest_path))
+    return os.path.join(os.path.dirname(manifest_path), stem + LAST_GOOD_SUFFIX)
+
+
+def read_checked(path):
+    """The manifest at *path* when it is a regular file (never through a
+    symlink) that validates (``schemas.render_manifest_errors``); None
+    otherwise -- a render that cannot be trusted is no baseline and records
+    no clip. None for a *path* of None."""
+    if path is None or os.path.islink(path) or not os.path.isfile(path):
+        return None
+    doc = read_manifest(path)
+    if doc is None or schemas.render_manifest_errors(doc):
+        return None
+    return doc
 
 
 def cache_keys(doc) -> set:

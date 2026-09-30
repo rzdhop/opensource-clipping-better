@@ -18,15 +18,17 @@ adds ``script`` and ``storyboard`` (and the episode targets); phase 4 adds
 ``metadata`` (and the metadata target of ``regenerate``) and ``fast-track``
 (module ``fast_track``); phase 5 adds the series steps ``memory``,
 ``feedback`` and ``propose-next`` (module ``propose_next``), each one LLM
-call ending awaiting approval. Each is registered by module name and imported on
-its first run, never here: importing this package must not pull in the
-prompt catalogue, the LLM chain or the generation chains, so the worker's
-dispatch and a test that only needs the registry stay as light as they were.
+call ending awaiting approval, and ``rerender`` (stage 8: the render again,
+making only the shot clips that changed since the last good render). Each is
+registered by module name and imported on its first run, never here:
+importing this package must not pull in the prompt catalogue, the LLM chain
+or the generation chains, so the worker's dispatch and a test that only
+needs the registry stay as light as they were.
 
 How a step's job ends is :func:`ends_completed`'s answer (DEC-161, amending
-DEC-108): ``render``, ``metadata``, ``fast-track`` and a regenerate of
-``metadata:<ep>:<platform>`` leave nothing to approve and end ``completed``;
-every other step ends ``awaiting_approval``, as it always did.
+DEC-108): ``render``, ``metadata``, ``fast-track``, ``rerender`` and a
+regenerate of ``metadata:<ep>:<platform>`` leave nothing to approve and end
+``completed``; every other step ends ``awaiting_approval``, as it always did.
 
 A runner that fails in a way the user can act on raises :class:`StepFailed`
 with a sentence saying what to do; the worker records it as
@@ -120,12 +122,13 @@ RUNNERS: dict[str, Callable[[StepContext], object]] = {
     "memory": _deferred("memory"),
     "feedback": _deferred("feedback"),
     "propose-next": _deferred("propose_next"),
+    "rerender": _deferred("rerender"),
 }
 
 # DEC-161: the steps with nothing to approve, whose job ends ``completed``;
 # and the first word of the regenerate targets that end so too
 # (``metadata:<ep>:<platform>``). Every other step ends awaiting approval.
-COMPLETED_STEPS = ("render", "metadata", "fast-track")
+COMPLETED_STEPS = ("render", "metadata", "fast-track", "rerender")
 COMPLETED_TARGET_KINDS = ("metadata",)
 
 

@@ -1,11 +1,17 @@
-## CURRENT STATE — AI Story **phase 5 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–7 **done**; next: **stage 8**
+## CURRENT STATE — AI Story **phase 5 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–8 **done**; next: **stage 9**
 - **In-progress header** (keep current):
   - **Current phase:** IMPLEMENT (phases 0–3 done: the plan was mapped, clarified and approved 2026-09-29).
-  - **Current stage:** 7 done → next **stage 8** (partial re-render, **RISKIEST**) [Opus agent].
-  - **Next action:** spawn the stage-8 agent (plan stage 8 + stage 7's edit table below); partial == full under
-    real ffmpeg; golden unedited.
-  - **Open questions:** none blocking. Stage 12 needs the human to confirm font filenames, sources and sizes
-    before any download.
+  - **Current stage:** 8 done → next **stage 9** (re-edit API and CLI) [Sonnet agent].
+  - **Next action:** spawn the stage-9 agent; until it lands `POST /steps/rerender` answers 404 (never deploy
+    between stages 8 and 9).
+  - **Open questions:** none blocking. **Stage 12 fonts answered 2026-09-30: "All 5 as named"** — from
+    github.com/google/fonts `main`, checked against the repo's git blob SHA: `ofl/bangers/Bangers-Regular.ttf`
+    93,148 B (blob 9b0f8c1f…), `apache/luckiestguy/LuckiestGuy-Regular.ttf` 73,320 B (5ca663c2…),
+    `ofl/bebasneue/BebasNeue-Regular.ttf` 61,400 B (c328c6e0…), `apache/chewy/Chewy-Regular.ttf` 41,248 B
+    (609eeb39…), `ofl/patrickhand/PatrickHand-Regular.ttf` 214,772 B (fb45ccdb…); one licence file per font
+    (`<Name>-OFL.txt` from each OFL folder; `<Name>-LICENSE.txt` = the Apache-2.0 `LICENSE.txt`, 11,358 B, blob
+    d6456956…). **Luckiest Guy and Chewy are Apache-2.0, not OFL** (the human was told and chose to ship them).
+    Montserrat and its `OFL.txt` untouched.
 - **Started** 2026-09-29 on the human's "Start AI Story phase 5 under the repo protocol (FULL task), on this
   Ubuntu VPS". Plan: `.claude/plans/ai-story/11-phase-5-plan.md` (**APPROVED**, stages 0–15; copy at
   `~/.claude/plans/ai-story-phase-5-plan.md`). Brief: `.claude/plans/ai-story/06-phase-5-series-reedit-styles.md`.
@@ -120,6 +126,15 @@
   approvals (stage 15). Plan contradiction resolved: the plan said the old :312 re-time test passes unedited, but it
   asserted the DEC-129 behaviour stage 7 amends → its input (and 2 others') now also changes an emotion so they keep
   testing the structural path; assertions unchanged.
+- **Stage 8 notes:** one predicate `render/partial.cache_state` serves the runner and the dry run (a clip is reused
+  only when its sha256 is one a manifest recorded for its key); baseline `render_manifest.last_good.json`, written
+  only by a completed render and before the manifest; the final is published only after read-back; manifests gain
+  optional `reuse`, `whole_frames`, `cache` (old ones validate). Reasons: image, overlay, modifiers, frames, motion,
+  settings, new, missing, corrupt. `rerender` takes no params (the last good render's subtitles/encoder), refuses
+  without a finished render, a foreign `episode_final.mp4`, or any render precondition (outdated image), ends
+  `completed`. `render.render_changes(ec, None)` = the dry run (hashes clips → cache it). `LATER_STEPS =
+  ("import",)`. Expect the live FR episode's first re-render after a text edit to be **7 of 21** (board converts),
+  not 1 — say so on the walk. Real-ffmpeg partial == full test ≈ 27 s.
 - **Rollback:** code: delete the worktree and the branch (or revert a stage's commit). Live data: restore the
   tars (`tar -C outputs/stories -xzf …`) and check `sha256sum -c enfr-before.sha`.
 
@@ -148,8 +163,8 @@ RC-P1…P11, RC-S1…S4, RC-T1…T3, RC-E1…E5 and RC-A1…A9 (tables below) st
 | 5 | series API and CLI [Sonnet] | **done** (local 6125/1, CI 5367/728; 64 new tests, 45 API ones skip in CI like every route test; 3 named re-pins) |
 | 6 | whole-frame shot timing (second riskiest) [Opus] | **done** (local 6149/1, CI 5391/728; 24 new tests; golden + framemd5 unedited; live FR/EN ep01 plans byte-identical; drift 20 % → 0) |
 | 7 | re-edit operations [Opus] | **done** (local 6185/1, CI 5427/728; 36 new tests + 8 reverted mutations; 3 named input re-pins) |
-| 8 | partial re-render (**RISKIEST**) [Opus] | next |
-| 9 | re-edit API and CLI [Sonnet] | — |
+| 8 | partial re-render (**RISKIEST**) [Opus] | **done** (local 6241/1, CI 5483/728; 55 new tests; partial == full under real ffmpeg; golden + framemd5 unedited; later-phase pins moved to `import`) |
+| 9 | re-edit API and CLI [Sonnet] | next |
 | 10 | dashboard: SeasonBoard series panel [Sonnet] | — |
 | 11 | dashboard: EpisodeStudio re-edit [Sonnet] | — |
 | 12 | fonts (confirm with the human first) and per-style renderer gaps [Sonnet] | — |

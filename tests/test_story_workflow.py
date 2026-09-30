@@ -285,7 +285,7 @@ def test_approving_the_style_locks_it_once(wf, stories):
 def test_the_phase_one_steps_and_the_later_ones(wf):
     assert wf.PHASE1_STEPS == ("concepts", "bible", "style", "style_preview")
     assert not set(wf.PHASE1_STEPS) & set(wf.LATER_STEPS)
-    assert _refused(wf, "later_phase", wf.refuse_step, "rerender") == "'rerender' arrives in a later phase."
+    assert _refused(wf, "later_phase", wf.refuse_step, "import") == "'import' arrives in a later phase."
     assert _refused(wf, "not_found", wf.refuse_step, "nope") == "Unknown step 'nope'."
 
 

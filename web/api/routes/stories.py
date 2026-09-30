@@ -282,8 +282,9 @@ def _job_doc(step, params, ep=None):
     ``cliffhanger`` and ``teaser`` targets, ``storyboard:<ep>`` for a
     ``shot:<ep>:<shid>:plan``. Phase 4: ``assets:<ep>`` for the assets step
     and for a shot's image (``shot:<ep>:<shid>``) or a line's voice
-    (``line:<ep>:<lid>``); none for the render, the metadata, the fast track
-    and a ``metadata:<ep>:<platform>`` (they end completed, DEC-161). Phase 5
+    (``line:<ep>:<lid>``); none for the render, the metadata, the fast track,
+    a ``metadata:<ep>:<platform>`` and -- phase 5 -- the re-render (they end
+    completed, DEC-161). Phase 5
     (``workflow.series_job_doc``): ``memory:<ep>``, ``feedback:<ep>`` and --
     the proposals sit in the folder of the episode they are for --
     ``proposals:<ep + 1>`` for ``propose-next``. None for anything else."""
@@ -924,7 +925,8 @@ async def run_step(story_id: str, step: str, response: Response,
     queued job (see ``_phase4_step``). ``memory``, ``feedback``,
     ``propose-next`` (phase 5, step 13, one episode: ``ep``): 201 with the
     queued job (see ``_series_step``). A step of 9.1 still a later phase's
-    (``workflow.LATER_STEPS``): 400. Anything else: 404.
+    (``workflow.LATER_STEPS``): 400. Anything else -- ``rerender`` too, until
+    its route is wired (plan 11 stage 9) -- 404.
     """
     stories = _stories()
     story = _load(stories, story_id)

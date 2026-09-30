@@ -101,8 +101,8 @@ def test_the_phase_4_steps_approvals_and_targets_left_the_later_phases():
     from clipping.aistory.steps import regenerate
 
     assert workflow.PHASE4_STEPS == PHASE4_STEPS
-    # Phase 5 stage 4 registered memory, feedback and propose-next: rerender and import are still later.
-    assert workflow.LATER_STEPS == ("rerender", "import")
+    # Phase 5 stage 4 registered memory, feedback and propose-next, stage 8 rerender: import is still later.
+    assert workflow.LATER_STEPS == ("import",)
     assert not set(workflow.PHASE4_STEPS) & set(workflow.LATER_STEPS)
     assert workflow.LATER_APPROVALS == () and workflow.LATER_APPROVALS_BARE == ()
     assert not workflow.is_later_approval("assets:1")
@@ -847,7 +847,7 @@ def test_an_estimate_is_refused_as_its_step_is(api, episodes):
     for step in PHASE4_STEPS:
         assert api.client.get(_url(story_id, f"/estimate/{step}")).status_code == 400, step  # no ep
         assert api.client.get(_url(story_id, f"/estimate/{step}"), params={"ep": 9}).status_code == 400, step
-    assert api.client.get(_url(story_id, "/estimate/rerender"), params={"ep": 1}).status_code == 400
+    assert api.client.get(_url(story_id, "/estimate/import"), params={"ep": 1}).status_code == 400
     assert api.jobs.list_jobs() == []
 
 
