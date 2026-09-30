@@ -65,7 +65,9 @@
     - **Rollback:** revert the stage's commit(s); nothing live changes until the deploy.
   - **Order after 13b:** deploy at 0 jobs (`rm -sfv` + `up -d --build`) → stage 14 (5 styles unattended, the human
     watches claymation) → 14b(e) → stage 15 → close (Tier-1, ff `main`, deploy, push branch then `main`, CI green).
-  - **OPEN QUESTION for the human (blocks only 14b(e), not stage 14):** the caps are cumulative per story
+  - **ANSWERED 2026-09-30 — the human: "Go go finish the phase 5", then "Decide for me" → caps for the 14b(e) run:
+    episode 0.10, daily 0.10 (the real hard cap: today's paid spend $0.00), per-story 0.78; stage 14 keeps five
+    styles.** Was: the caps are cumulative per story
     (`budget.check`: `story_spent + estimate > per_story_cap_usd`; `gating.budget_check` passes the story ledger's
     total and today's spend, no episode spend). T2 `ab8fc500173e` already booked **$0.671**, so with caps
     0.10/0.10/0.10 the $0.03 seedream regenerate is refused ("would bring this story to $0.70 of its $0.10 cap").
