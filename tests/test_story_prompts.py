@@ -1456,6 +1456,74 @@ def test_k1_errors_name_leak_is_case_insensitive():
     assert any("own name" in e for e in errors)
 
 
+def test_k1_errors_name_substring_inside_other_words_is_not_a_mention():
+    doc = _good_k1_doc()
+    doc["descriptor"] = "a lean figure with gold earrings and a long string of beads"
+    assert schemas.k1_errors(doc, "Rin") == []
+
+
+def test_k1_errors_name_as_a_whole_word_is_refused():
+    doc = _good_k1_doc()
+    doc["descriptor"] = "Rin wears a patched green coat with a frayed collar"
+    errors = schemas.k1_errors(doc, "Rin")
+    assert errors
+    assert any("own name" in e for e in errors)
+
+
+def test_k1_errors_name_with_possessive_is_refused():
+    doc = _good_k1_doc()
+    doc["descriptor"] = "Rin's locket hangs from a cord around the neck"
+    errors = schemas.k1_errors(doc, "Rin")
+    assert errors
+    assert any("own name" in e for e in errors)
+
+
+def test_k1_errors_name_upper_case_is_refused():
+    doc = _good_k1_doc()
+    doc["descriptor"] = "always called RIN by the crew, sharp-eyed and quick"
+    errors = schemas.k1_errors(doc, "Rin")
+    assert errors
+    assert any("own name" in e for e in errors)
+
+
+def test_k1_errors_multiword_name_matches_as_a_phrase():
+    doc = _good_k1_doc()
+    doc["descriptor"] = "captain obvious grins beneath a battered old hat"
+    errors = schemas.k1_errors(doc, "Captain Obvious")
+    assert errors
+    assert any("own name" in e for e in errors)
+
+
+def test_k1_errors_multiword_name_out_of_order_is_not_a_mention():
+    doc = _good_k1_doc()
+    doc["descriptor"] = "an obvious captain's hat sits crooked on the head"
+    assert schemas.k1_errors(doc, "Captain Obvious") == []
+
+
+def test_k1_errors_name_accented_case_insensitive():
+    doc = _good_k1_doc()
+    doc["descriptor"] = "le maire pâton sourit doucement à la foule rassemblée"
+    errors = schemas.k1_errors(doc, "Maire Pâton")
+    assert errors
+    assert any("own name" in e for e in errors)
+
+
+def test_k1_errors_name_leak_in_signature_item_is_still_caught():
+    doc = _good_k1_doc()
+    doc["signature_items"] = ["Rin's woven bracelet", "a small tin whistle"]
+    errors = schemas.k1_errors(doc, "Rin")
+    assert errors
+    assert any("signature_items" in e and "own name" in e for e in errors)
+
+
+def test_k1_errors_name_leak_in_sample_line_is_still_caught():
+    doc = _good_k1_doc()
+    doc["voice"]["sample_line"] = "Rin never backs down from a challenge."
+    errors = schemas.k1_errors(doc, "Rin")
+    assert errors
+    assert any("voice.sample_line" in e and "own name" in e for e in errors)
+
+
 def _good_p0_doc():
     return {
         "places": [

@@ -3193,15 +3193,19 @@ def k1_errors(doc, name) -> list:
     for i, relationship in enumerate(relationships):
         _check_text(errors, f"$.relationships[{i}].relation", relationship["relation"], max_words=K1_RELATION_MAX_WORDS)
 
-    name = (name or "").strip().lower()
+    name = (name or "").strip()
     if name:
+        name_pattern = re.compile(
+            r"(?<!\w)" + r"\s+".join(re.escape(word) for word in name.split()) + r"(?!\w)",
+            re.IGNORECASE,
+        )
         haystacks = [("$.descriptor", descriptor)] + [
             (f"$.signature_items[{i}]", item) for i, item in enumerate(items)
         ]
         if isinstance(sample_line, str):
             haystacks.append(("$.voice.sample_line", sample_line))
         for path, text in haystacks:
-            if isinstance(text, str) and name in text.lower():
+            if isinstance(text, str) and name_pattern.search(text):
                 errors.append(f"{path}: must not mention the character's own name")
 
     return errors
