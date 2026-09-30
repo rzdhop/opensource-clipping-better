@@ -288,6 +288,17 @@
   survive a provider switch mid-episode (the chain falls through per shot). UNCONFIRMED: whether pinning one image
   provider per episode (or per story) is worth a setting — a phase-6 candidate.
 
+- **A-088** — `claymation` (v1) holds best of the five on one provider (stage 14, 2026-09-30, FR
+  `clay_town_confessions`, story `04feb539840f`, Maire Pâton + Boulangère Pim, Edge voices). Episode 1: **45.2 s**
+  (under 55–75 s: 12 lines over 9 scenes), −14.29 LUFS / TP −2.30, 18 shots all on Cloudflare, render 104 s.
+  two_line in **Chewy** from the shipped file, French accents correct (immédiatement, maléfique, calomnie), speaker
+  accents readable. Motion hold + jitter_stopmotion, pan 4 %, no overlays. **Held:** the clay miniature-town look in
+  every shot; the mayor (bald, grey suit, "MAYOR" sash) in every shot; the baker's pink apron and rolling pin.
+  **Drifted:** the baker's hair colour and age now and then (prompt-only). **Friction:** 12 fast-track presses —
+  T1 refused scene s02 ten times ("the reply failed validation twice") before it passed (the known T1 under-shoot
+  follow-up), then one E4 approve-anyway. The human watches this one. UNCONFIRMED: the short French scripts
+  (A-086) share one cause.
+
 ## Confirmed
 - **A-069** — Measured render times on the VPS (container ffmpeg `7.1.5-0+deb13u1/aarch64`, final profile,
   libx264): a full 21-shot FR render 160 s, a full 20-shot EN render 161 s; per shot at 4× mean 3.6–3.8 s (median
