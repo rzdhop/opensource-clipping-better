@@ -3381,3 +3381,40 @@ only for the one paid call, inside a shell `trap` that restores off and 1/3/10 w
 pinned without OpenRouter and every LLM call made while `allow_paid` is still off.
 **Consequence.** 14b(e) spent exactly $0.030 (one fal seedream-4-edit, journaled at submit), `allow_paid` was on for
 31 s, and the re-render's manifest matched its dry run (2 of 20). A-094 records the numbers.
+
+## DEC-195 — A redirect carries the credential headers only while it stays on their origin
+**Context.** `transport.urllib_transport` opened every request through the stdlib's default opener. On Python
+3.12.3, `HTTPRedirectHandler.redirect_request` copies every header except `Content-Length`/`Content-Type` onto the
+redirected request, whatever its host. A 30x from a provider to a CDN or a signed-URL host would therefore have
+carried fal's `Authorization: Key …`, Gemini's `x-goog-api-key`, or the Cloudflare or pollinations bearer token
+there. No adapter can see that redirect:
+- fal's `status_url`/`response_url` come from fal's answer;
+- phase 6's Veo `_download` checks the host once, before it sends.
+
+The human asked for the fix on 2026-09-30.
+**Decision.**
+- `urllib_transport` opens through a module-level `_OPENER`, built with `_CredentialSafeRedirectHandler`. After the
+  stdlib's `redirect_request`, the handler removes every header named in `CREDENTIAL_HEADERS` when the hop's
+  (scheme, host, port) differs from the previous hop's. The names are `authorization`, `proxy-authorization`,
+  `x-goog-api-key` and `x-api-key`, matched case-insensitively.
+  - The default port is filled in.
+  - A malformed port counts as another origin.
+  - A same-origin hop keeps the credentials. Once dropped, they never come back later in the chain.
+  - A proxy's own `Proxy-Authorization` is re-added by `ProxyHandler` on each hop.
+- Signature, `Response` and the whole exception mapping are unchanged, and no exception class is added (DEC-012).
+- Rejected:
+  - `add_unredirected_header` drops the credentials on same-origin redirects too, and no code shows that no
+    provider relies on those.
+  - `install_opener` is a process-wide side effect on every `urlopen` user.
+  - Per-adapter host checks cannot see a redirect inside `urlopen`.
+
+**Consequence.**
+- `tests/test_transport_redirects.py` runs two local servers.
+  - The cross-origin test failed first: server B received all four credentials. It now proves B gets none of them,
+    while `X-Trace` still arrives.
+  - The same-origin guard passed both before and after the fix. An "always drop" mutation fails it.
+- `test_provider_http.py`'s error-mapping test now patches `transport._OPENER.open`. Its fakes and four assertions
+  are unchanged (A-098).
+- Not covered, same class, follow-ups: `stt.py` `_post_multipart` (Groq/Mistral bearer) and `studio/broll.py` (the
+  Pexels key) call `urlopen` directly.
+- A-097 records the provider-side assumption.

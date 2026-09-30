@@ -2,17 +2,21 @@
 - **Scope:** only `clipping/providers/transport.py` and one new test file. The phase-6 state is in the next section and
   in the `ai-story-phase-6` worktree; this branch leaves both alone.
 - **In-progress header** (keep current):
-  - **Current phase:** IMPLEMENT, stage 1 of 2.
-    - EXPLORE: one Sonnet Explore agent; the map is in the plan.
-    - PLAN: `.claude/plans/transport-redirect-credentials.md`. The approach and tests are the human's own chat
-      request, so that request stands as the approval (A-098, UNCONFIRMED).
-  - **Next action:**
-    - Stage 1: write `tests/test_transport_redirects.py`, show it failing, add the redirect handler to `transport.py`,
-      and move `test_provider_http.py`'s patch target.
-    - Then the scoped Tier-1 in both environments, and commit.
-    - Stage 2: artifacts (DEC-195, A-097/A-098, action log).
-  - **Open questions:** none blocking. At close, ask the human to acknowledge the Tier-2 deferral and the
-    patch-target move.
+  - **Current phase:** DOCUMENT done. Stages 1 and 2 are committed. **NOT done** until the human acknowledges the
+    items below.
+    - Stage 1 (`ded664f`): `transport._OPENER` with `_CredentialSafeRedirectHandler`; new
+      `tests/test_transport_redirects.py`; `test_provider_http.py`'s patch target moved.
+    - Stage 2: DEC-195, A-097, A-098, and the action-log lines.
+  - **Scoped Tier-1 after stage 1:**
+    - Files: the new file + `test_provider_http.py` + the three baseline files.
+    - Local **94 passed**, CI env **82 passed / 12 skipped**, compileall clean.
+  - **Waiting on the human:**
+    - acknowledge the Tier-2 deferral (no UI/API surface; the test scope came from the chat);
+    - acknowledge A-098 (the chat request as the plan's approval, and the patch-target move);
+    - say whether and when to merge into `main`. Merging changes the live container's on-disk code, so only at 0 jobs.
+    - Phase 6 (`feat/ai-story-phase-6`) touches neither file. Whichever lands second rebases, and only
+      `.claude/*` artifacts can conflict.
+  - **Follow-up offered:** the same leak in `stt.py` `_post_multipart` and `studio/broll.py` (direct `urlopen`).
 - **Where:** worktree `.claude/worktrees/magical-greider-2955e5`, branch `Feature/silly-almeida-f5cda1` from `main`
   `16b946e`. Never merged or deployed from here: the main checkout is bind-mounted by the live container.
 - **Checkpoint:** `16b946e` (== `main`), clean tree.
