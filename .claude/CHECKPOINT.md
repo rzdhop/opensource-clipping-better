@@ -1,12 +1,35 @@
-## CURRENT STATE — AI Story **phase 6 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–2 **done**; next: **stage 3**
+## CURRENT STATE — AI Story **phase 6 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–3 **done**; next: **stage 4**
 - **In-progress header** (keep current):
   - **Current phase:** IMPLEMENT. EXPLORE/CLARIFY/PLAN were done 2026-09-30 in a session run in parallel with phase 5's
     close: three maps, two rounds of questions, an Opus design. The human approved the plan.
   - **Plan:** `.claude/plans/ai-story/14-phase-6-plan.md` (**APPROVED 2026-09-30**; copy at
     `~/.claude/plans/ai-story-phase-6-plan.md`). Brief: `.claude/plans/ai-story/07-phase-6-video-tiers-local.md`.
-  - **Current stage:** 3 — the hosted video adapters in `clipping/providers/video.py` [Opus]: fal seedance and
-    kling, fal LTX-2.3 fast, Veo.
-  - **Next action:** dispatch stage 3, then Tier-1 in both environments, then commit.
+  - **Current stage:** 4 — local ComfyUI video [Opus; fake server only]: the three I2V templates, the
+    `ComfyUIVideoAdapter`, `/free`, `hardware.VIDEO_WORKFLOWS`, and a video "Test chain" that never generates.
+  - **Next action:** dispatch stage 4, then Tier-1 in both environments, then commit.
+  - **Stage 3 notes for stages 4, 8, 13 and 14:**
+    - **Adapters.** `clipping/providers/video.py` holds `FalVideoAdapter` (seedance, kling, ltx-2.3-fast) and
+      `GeminiVeoAdapter`.
+      - `clip_seconds()` refuses before any call a request with no duration, no seed, not exactly one keyframe, an
+        unsupported length or no `out_dir`, and refuses `fal/ltx-2-fast` (16:9 only).
+      - `CLIP_LENGTHS` has a single source there; `video_plan` re-exports it. ltx-2.3-fast sells 6/8/10.
+    - **Default chain.** `local/comfyui, fal/seedance-1-pro-fast, fal/ltx-2.3-fast, fal/kling-2.5-turbo-std,
+      gemini/veo-3.1-lite`. The ltx-2.3-fast row is $0.06/s at 1080p (its smallest size, 9:16 = 1080×1920).
+    - **Veo constants the walk may flip.**
+      - `VEO_IMAGE_SHAPE = "bytesBase64Encoded"`; the alternative is `"inlineData"`.
+      - `VEO_DURATION_TYPE = int`; the alternative is `str`.
+      - On a 400 naming it, add `personGeneration: "allow_adult"`.
+      - Not sent: `negativePrompt`, `seed`.
+    - **Veo key.** Attached only when the download URI's host is Google's API host. The transport's redirects are a
+      repo-wide follow-up (task chip "Stop forwarding provider auth headers on redirects").
+    - **For stage 4:** Settings builds video requests with no clip length. The chain summary therefore shows
+      "est $0.000" for paid video links, and pressing Test raises `ValueError` before any call (0 calls). Stage 4's
+      video test must price a default clip length and never generate. Start from stage 3's re-pin
+      `test_generation_chain_api.py::…_local_without_an_adapter_and_hosted_links_unkeyed`.
+    - **For stage 8:** an estimate `ValueError` escapes `run_generation_chain`. The step must always pass a
+      supported `duration_s` and a seed.
+    - **For stage 14:** the stale "video adapters arrive in phase 6" text in `images.FalAdapter._inputs`; the spec
+      and plan still name `fal/ltx-2-fast`.
   - **Stage 2 notes for stages 3, 8 and 12:**
     - **Request shape.** A video `GenRequest` carries the clip length in `duration_s` and has new `fps` and
       `native_audio` fields.
@@ -79,8 +102,8 @@
 | 0 | checkpoint, worktree, baseline, backups | done |
 | 1 | pure video planning (`video_plan.py`) [Sonnet] | done |
 | 2 | provider foundations: video cache key, `GEMINI_PAID_API_KEY`, prices [Opus] | done |
-| 3 | hosted video adapters (fal ×3, Veo) [Opus] | next |
-| 4 | local ComfyUI video, fake server only [Opus] | — |
+| 3 | hosted video adapters (fal ×3, Veo) [Opus] | done |
+| 4 | local ComfyUI video, fake server only [Opus] | next |
 | 5 | paid LLM booking seam [Opus] | — |
 | 6 | sticky image link per episode (A-087) [Opus] | — |
 | 7 | clip documents and the estimate [Opus] | — |

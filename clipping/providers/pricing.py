@@ -43,6 +43,7 @@ PRICES = {
     # page on 2026-09-30: no price had moved; the notes carry what was learned.
     "fal/seedance-1-pro-fast": Price("second", 0.022, "token-billed, $1.00 per million tokens, tokens = width x height x 24 fps x seconds / 1024: 720x1280 is 21,600 tokens, $0.0216, a second (rounded up); 1080p, the endpoint's default, is $0.0486 a second; no audio"),
     "fal/ltx-2-fast": Price("second", 0.04, "1080p, its smallest size, audio included; its output is locked to 16:9; its fal-ai/ltx-2 twin was deprecated on 2026-08-15 for LTX-2.3 fast ($0.06 a second at 1080p, with 9:16)"),
+    "fal/ltx-2.3-fast": Price("second", 0.06, "fal-ai/ltx-2.3/image-to-video/fast, read on its fal page and schema on 2026-09-30: $0.06 a second at 1080p, its smallest size (9:16 is 1080x1920), $0.12 at 1440p, $0.24 at 2160p; audio not priced apart; a summary block on the same page says $0.04 at 1080p, the higher 'your request will cost' line is kept"),
     "fal/kling-2.5-turbo-std": Price("second", 0.042, "$0.21 per 5 s, $0.042 per extra second; 5 or 10 s; no audio"),
     "gemini/veo-3.1-lite": Price("second", 0.05, "veo-3.1-lite-generate-preview at 720p ($0.20 per 4 s), audio always on and included; $0.08 a second at 1080p (8 s only); no free tier"),
     # --- speech (appendix C)

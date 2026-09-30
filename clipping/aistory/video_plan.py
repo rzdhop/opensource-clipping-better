@@ -6,11 +6,14 @@ and ``quality`` budget profiles need (``budget_profiles.json``'s ``animate``/
 ``animate_priority`` fields, validated by ``schemas.py`` but read nowhere
 until this module).
 
-Nothing here does I/O, touches the network, or imports a provider adapter:
-every function takes its inputs explicit (the style lock, the per-second
-price, the episode's shots and scene functions, ...) and returns a plain
-value, so the same inputs always produce the same output. This keeps the
-estimate shown before a run and the run itself provably in agreement
+Nothing here does I/O or touches the network. Its one provider import is
+the clip-length table the video adapters enforce
+(``clipping.providers.video.CLIP_LENGTHS``), so a plan never asks for a
+length they refuse. Every function takes its inputs explicit (the style
+lock, the per-second price, the episode's shots and scene functions, ...)
+and returns a plain value, so the same inputs always produce the same
+output. This keeps the estimate shown before a run and the run itself
+provably in agreement
 (DEC-203: the planner's selection is derived, never stored) and keeps the
 module testable with pytest alone (DEC-012).
 
@@ -21,6 +24,7 @@ from __future__ import annotations
 
 from typing import Mapping, NamedTuple, Sequence
 
+from ..providers.video import CLIP_LENGTHS
 from . import schemas
 
 # ------------------------------------------------------------ camera phrases
@@ -163,21 +167,12 @@ def build_video_prompt(
 
 # --------------------------------------------------------------- clip lengths
 
-# Supported whole-second clip lengths per hosted link of
-# ``clipping.providers.generation``'s default ``VIDEO_CHAIN``
-# (``"local/comfyui,fal/seedance-1-pro-fast,fal/ltx-2-fast,
-# fal/kling-2.5-turbo-std,gemini/veo-3.1-lite"``). Read from each provider's
-# own docs as of 2026-09-30 (stage 1's map); stage 2/3 re-verify them against
-# the live provider pages and record one A-entry per model id before any
-# paid call is made against them. ``local/comfyui`` is deliberately absent:
-# its templates set their own frame rule (stage 4), which is not a fixed
-# per-second table.
-CLIP_LENGTHS: dict[str, tuple[int, ...]] = {
-    "fal/seedance-1-pro-fast": tuple(range(2, 13)),  # 2..12 s, every integer second
-    "fal/ltx-2-fast": (6, 8, 10),
-    "fal/kling-2.5-turbo-std": (5, 10),
-    "gemini/veo-3.1-lite": (4, 6, 8),
-}
+# ``CLIP_LENGTHS`` (imported above) holds the supported whole-second clip
+# lengths per hosted link of ``clipping.providers.generation``'s default
+# ``VIDEO_CHAIN``: defined once in ``clipping.providers.video``, whose
+# adapters refuse any other length (A-100..A-103, read 2026-09-30).
+# ``local/comfyui`` is deliberately absent: its templates set their own frame
+# rule (stage 4), which is not a fixed per-second table.
 
 
 def requested_seconds(link: str, duration_s: float, *, lengths: Sequence[int] | None = None) -> int:

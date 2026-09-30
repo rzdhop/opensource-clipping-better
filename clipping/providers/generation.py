@@ -63,7 +63,7 @@ DEFAULT_CHAINS = {
         "fal/flux-kontext-pro,gemini/nano-banana-2"
     ),
     VIDEO: (
-        "local/comfyui,fal/seedance-1-pro-fast,fal/ltx-2-fast,"
+        "local/comfyui,fal/seedance-1-pro-fast,fal/ltx-2.3-fast,"
         "fal/kling-2.5-turbo-std,gemini/veo-3.1-lite"
     ),
     TTS: "edge/fr-FR-HenriNeural,gemini/flash-lite-tts,local/piper,local/kokoro,local/chatterbox",

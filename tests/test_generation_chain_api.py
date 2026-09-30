@@ -128,7 +128,8 @@ def test_get_settings_reports_the_generation_surface(client):
     assert seedream["paid"] is True and seedream["keyed"] is False and seedream["adapter"] is True
     assert seedream["missing_keys"] == ["FAL_KEY"] and seedream["allowed"] is False
     assert seedream["est_usd"] == 0.03
-    assert all(r["adapter"] is False for r in chains["video"]["links"])
+    # local/comfyui video arrives in stage 4; the hosted links have theirs (phase 6 stage 3).
+    assert [r["adapter"] for r in chains["video"]["links"]] == [False, True, True, True, True]
     assert data["local_comfyui_url"] == "http://127.0.0.1:8188" and data["local_ollama_url"] == "http://127.0.0.1:11434"
     assert "day" in data["usage_today"] and data["usage_today"]["cloudflare"]["rpd"] == 170
     assert data["spend_today_usd"] == 0.0
@@ -256,11 +257,12 @@ def test_a_paid_link_over_the_daily_cap_is_refused_with_the_numbers(client, tran
     assert not any("fal.run" in u for u in transport.urls())
 
 
-def test_the_video_chain_reports_no_adapter_yet(client, transport):
+def test_the_video_chain_reports_local_without_an_adapter_and_hosted_links_unkeyed(client, transport, monkeypatch):
+    monkeypatch.delenv("GEMINI_PAID_API_KEY", raising=False)
     data = client.post("/api/settings/test-generation-chain", json={"kind": "video"}).json()
-    assert data["verdict"] == "no_adapter"
-    assert [r["status"] for r in data["results"]] == ["no_adapter"] * 5
-    assert "phase 6" in data["message"]
+    assert data["verdict"] == "blocked"
+    assert [r["status"] for r in data["results"]] == ["no_adapter", "no_key", "no_key", "no_key", "no_key"]
+    assert "phase 6" in data["results"][0]["reason"]
     assert transport.calls == []
 
 
@@ -324,10 +326,12 @@ def test_env_example_documents_the_generation_surface():
 
 
 def test_load_all_registers_every_adapter_of_phase_0():
-    from clipping.providers import adapters, generation
+    from clipping.providers import adapters, generation, video
 
     adapters.load_all()
     for kind, provider in (("image", "cloudflare"), ("image", "fal"), ("image_edit", "gemini"), ("image_edit", "local"),
                            ("tts", "edge"), ("tts", "local"), ("vision", "gemini"), ("vision", "local")):
         assert generation.adapter_for(kind, provider) is not None, (kind, provider)
-    assert all(generation.adapter_for("video", p) is None for p in ("local", "fal", "gemini"))
+    assert generation.adapter_for("video", "fal") is video.FAL_VIDEO
+    assert generation.adapter_for("video", "gemini") is video.VEO
+    assert generation.adapter_for("video", "local") is None  # stage 4
