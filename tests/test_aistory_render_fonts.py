@@ -310,6 +310,16 @@ def test_each_template_family_resolves_to_its_own_shipped_file(family, filename)
     assert family in record["reason"]
 
 
+@pytest.mark.parametrize("family,filename", SHIPPED_TEMPLATE_FONTS)
+def test_the_pil_free_filename_match_finds_every_shipped_family(family, filename):
+    """CI installs no PIL, so the filename fallback must find each shipped
+    family on its own -- a two-word family is written without its space in
+    the filename ("Luckiest Guy" -> ``LuckiestGuy-Regular.ttf``)."""
+    assert fonts_mod._filename_matches(filename, family)
+    others = [name for _family, name in SHIPPED_TEMPLATE_FONTS if name != filename]
+    assert not any(fonts_mod._filename_matches(name, family) for name in others)
+
+
 def test_shipped_font_resolution_is_deterministic():
     r1 = fonts_mod.resolve_font("Bangers")
     r2 = fonts_mod.resolve_font("Bangers")

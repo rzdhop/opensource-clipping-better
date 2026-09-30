@@ -115,7 +115,12 @@ def _filename_matches(filename: str, family: str) -> bool:
     norm_family = _normalise_family(family)
     if not norm_family or not norm_file:
         return False
-    return norm_family in norm_file or norm_file in norm_family
+    if norm_family in norm_file or norm_file in norm_family:
+        return True
+    # A two-word family is usually written without its space in a filename
+    # ("LuckiestGuy-Regular.ttf" for "Luckiest Guy").
+    compact_file, compact_family = norm_file.replace(" ", ""), norm_family.replace(" ", "")
+    return compact_family in compact_file or compact_file in compact_family
 
 
 def _candidate_files(directory) -> list:
