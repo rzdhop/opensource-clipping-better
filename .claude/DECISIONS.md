@@ -3065,3 +3065,28 @@ fal shows as $0.70. Every estimate is at least as high as before, so a cap never
 re-pins (named in the log): `test_pricing.py` (1080x1920 → $0.006, 1024x1024 → $0.003), `test_image_adapters.py`,
 `test_generation_chain_api.py` and `test_style_preview.py` (3 previews → $0.009). New test: five sizes across the
 rounding edge. Stored ledgers keep what they booked.
+
+## DEC-176 — Tier-1 runs once per stage, in parallel; implementation agents run only the targeted tests
+**Context.** The human, 2026-09-30: "The test are running for littéral hours and make me loose days of work, find a
+workaround to take less time on tests and still keep the best quality of produced code". Measured on phase 5's
+stage-9 tree: each stage ran the full local suite (~7.8 min) and the CI-env suite (~6.5 min) once or more inside the
+implementation agent and again by the orchestrator, single-core on a 4-core VPS — 25–40 minutes of test time per
+stage. One test (`test_a_paid_link_is_never_called_and_a_keyless_one_never_built`, since phase 3) waited 60 s of real
+time on gemini's rate limiter.
+**Decision.**
+- Tier-1 runs with pytest-xdist, 4 workers, in both environments: local `PYTHONPATH=~/.cache/rzc-xdist python -m
+  pytest -p no:warnings -n 4`; CI env `PYTHONNOUSERSITE=1 PYTHONPATH=/tmp/cilibs:~/.cache/rzc-xdist python3 -m
+  pytest -p no:warnings -n 4`. pytest-xdist 3.8.0 + execnet 2.1.2 live in `~/.cache/rzc-xdist` (installed with
+  `pip install --no-deps --target`; PEP 668 refuses a user-site install and nothing is forced): a local dev tool, not
+  a project dependency; `/tmp/cilibs` and `.github/workflows/ci.yml` are unchanged, so the CI-env run still mirrors
+  CI's packages.
+- The full suites run **once per stage, by the orchestrator**. Implementation agents run only the new and touched
+  test files and their neighbours (and show fail-first there); they never run the full suites.
+- Unchanged: fail-first for every behaviour test, both environments every stage, compileall, the real-ffmpeg golden
+  and partial == full tests inside the suite, and the CI-env run before any push.
+- A test never waits on wall-clock time it does not assert on: the 60 s test now paces its limiter on a fake clock
+  (0.21 s; a new `clock > 0` assertion proves the limiter still paced).
+**Consequence.** Stage 9's tree: identical counts serial and parallel (local 6278 / 1, CI env 5497 / 751, 0 failed),
+14 min 21 s → 6 min 19 s for both suites; with no duplicate runs, test time per stage drops from 25–40 min to about
+6 min. Amends the global agreement's Section 9 practice only in who runs Tier-1 and how (the human's chat instruction
+takes precedence). A-083 records the xdist-safety assumption.

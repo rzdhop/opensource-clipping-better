@@ -25,8 +25,14 @@
   fresh session in the main checkout lands here.
 - **Tier-1 baseline at `d1c38ae`** (worktree, 2026-09-29): local **5697 passed / 1 skipped**; CI env **4981 passed / 686 skipped**; compileall
   clean; vite build green to a scratch outDir (js 478.13 kB, gzip 135.45 kB).
-- **Ids:** next free **DEC-176** and **A-083** (after DEC-175 / A-082). The plan's expected DEC-174…DEC-183 become
-  DEC-176…DEC-185 in the same order; its A-081+ become A-083+.
+- **Ids:** DEC-176 (test policy, below) and A-083 (xdist safety) are taken; next free **DEC-177** and **A-084**. The
+  plan's expected DEC-174…DEC-183 become **DEC-177…DEC-186** in the same order; its A-081+ become A-084+.
+- **Test policy (DEC-176, the human 2026-09-30):** Tier-1 once per stage, by me, parallel: local
+  `PYTHONPATH=~/.cache/rzc-xdist python -m pytest -p no:warnings -n 4`; CI env `PYTHONNOUSERSITE=1
+  PYTHONPATH=/tmp/cilibs:~/.cache/rzc-xdist python3 -m pytest -p no:warnings -n 4`; compileall; vite build when the
+  dashboard changed. Agents run only new/touched test files + neighbours (fail-first there), never the full suites.
+  If `~/.cache/rzc-xdist` is gone: `pip install --no-deps --target ~/.cache/rzc-xdist pytest-xdist==3.8.0
+  execnet==2.1.2`. Serial runs stay the tiebreaker for any parallel-only failure (A-083).
 - **Scope set at start:**
   - Stage 14b is reduced to **14b(e)** (re-edit and partial re-render on paid assets, after stages 7–8);
     (a)–(d) ran in the paid fal.ai test (DEC-174).

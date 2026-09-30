@@ -1075,9 +1075,19 @@ def test_a_paid_link_is_never_called_and_a_keyless_one_never_built(store):
         raise AssertionError(f"the chain tried to sleep {seconds}s")
 
     runner = functools.partial(llm_mod.run_chain, client_factory=factory, sleep_fn=no_sleep)
+    # The chain's sleep is faked above, but gemini's rate limiter keeps real
+    # time: a whole script's calls in a row waited out its one-minute window
+    # for real (60 s). The limiter still paces on this fake clock, instantly;
+    # the fixture drops it after the test.
+    from clipping.providers import pacing, registry
+
+    clock = [0.0]
+    pacing.limiter_for(registry.PROVIDERS["gemini"], time_fn=lambda: clock[0],
+                       sleep_fn=lambda seconds: clock.__setitem__(0, clock[0] + seconds))
     ctx, log = _ctx(store, story_id, settings=settings)
     m.script.run(ctx, runner=runner)
 
+    assert clock[0] > 0  # the limiter did pace
     assert constructed == ["gemini"] * (len(BODY) + 3)
     assert log.count("   ⏭ Skipping openrouter/test-model: paid link, allow_paid is off "
                      "(AI Story spends only on opt-in).") == len(BODY) + 3

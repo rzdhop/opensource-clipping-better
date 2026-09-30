@@ -244,6 +244,11 @@
     lag, or fal counting some requests differently. fal's per-endpoint request list would settle it.
   - A-071 (is a queued request that later *fails* billed?) is still open: no request failed.
 
+- **A-083** — The suite is safe under pytest-xdist (`-n 4`): tests share no process-global state across workers that
+  changes an outcome. Verified once on phase 5's stage-9 tree (identical counts serial vs parallel in both
+  environments, 0 failed). UNCONFIRMED over time: a test that passes serially but fails or flakes in parallel is a
+  finding (logged as flaky per Section 9), never re-run until green; the serial command stays the tiebreaker.
+
 ## Confirmed
 - **A-069** — Measured render times on the VPS (container ffmpeg `7.1.5-0+deb13u1/aarch64`, final profile,
   libx264): a full 21-shot FR render 160 s, a full 20-shot EN render 161 s; per shot at 4× mean 3.6–3.8 s (median
