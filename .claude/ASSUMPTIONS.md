@@ -356,13 +356,14 @@
   - A signed-URL or CDN host authenticates through its URL.
   - If a provider ever answers 401/403 after a cross-origin 30x, this assumption is the first suspect.
   - UNCONFIRMED: provider behaviour, not visible from the code.
+
+## Confirmed
 - **A-098** — The human's chat request for the redirect fix named the approach (an opener whose redirect handler
   drops the credentials off-origin and keeps them same-origin) and the acceptance tests. So it stands as the plan's
   approval (`.claude/plans/transport-redirect-credentials.md`), including the one consequence the request did not
   name: `test_provider_http.py`'s error-mapping test patches `transport._OPENER.open` instead of the global `urlopen`.
-  UNCONFIRMED until the human acknowledges it.
-
-## Confirmed
+  *Confirmed 2026-09-30.* The explicit question was "record that you approved the plan, including the moved patch
+  target", and the human answered "Go go". That confirmation covers this plan only.
 - **A-069** — Measured render times on the VPS (container ffmpeg `7.1.5-0+deb13u1/aarch64`, final profile,
   libx264): a full 21-shot FR render 160 s, a full 20-shot EN render 161 s; per shot at 4× mean 3.6–3.8 s (median
   3.05–3.80, max 9.4 s); the final pass 62–70 s; the mux 10–11 s; a cached re-render 84–96 s. *Confirmed, measured
