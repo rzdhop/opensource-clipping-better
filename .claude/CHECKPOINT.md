@@ -1,11 +1,11 @@
 ## CURRENT STATE — AI Story **phase 5 DONE** (2026-09-30). Next: **phase 6** (start prompt: `.claude/plans/ai-story/13-phase-6-start-prompt.md`)
 - **Close-out (2026-09-30):** stages 0–15 done (ledger below). `feat/ai-story-phase-5` fast-forwarded into `main`
-  and pushed (`1b91db2`). **OPEN: CI is RED** on `1b91db2` (run 36749226496, job `test`, pytest step; the log needs
-  admin rights). Ruled out: Python 3.11, syntax, the golden/partial ffmpeg tests (see the log). Next: the human
-  pastes the FAILED lines → one fix, Tier-1, push. **No phase-6 merge/push until `main` is green.**
-- **Final Tier-1** (the closing tree, 2026-09-30 17:02–17:08 UTC): local 6474 passed / 1 skipped, CI env 5688 passed /
-  756 skipped, compileall clean (dashboard unchanged since stage 13b's green vite build).
-- **Live state:** deployed code `d08c92d` (== the final code; later commits touch only `.claude/` and `docs/`),
+  and pushed. **CI GREEN** on `f06a299` (runs 36755806580 main, 36755803010 branch) after one CI-only fix: T2-P5-F14,
+  the PIL-free font match missed two-word families (CI installs no PIL; A-096). No phase-6 blocker left.
+- **Final Tier-1** (the closing tree `f06a299`): local 6479 passed / 1 skipped, CI env 5693 passed / 756 skipped,
+  compileall clean; the CI-exact replica (Python 3.11 container, `python -S`, pytest only, serial) 5659 passed with
+  only its own git-ownership artifact failing. Dashboard unchanged since stage 13b's green vite build.
+- **Live state:** deployed code `f06a299` (== the final code; restarted at 0 jobs after the font fix),
   0 jobs, `allow_paid` false, caps 1/3/10, chains default (`.env` byte-identical to its backup `3952425dedb4…`),
   no `API_TOKEN`, `data/spend.json` = {2026-09-29: 0.6934, 2026-09-30: 0.03}. Settings hold GOOGLE, FAL, OPENROUTER
   (unfunded, never used: no paid LLM booking yet) and the human's Cloudflare keys (working since 15:58 UTC).
@@ -32,7 +32,7 @@
   TTS 10/day; one image provider per episode (A-087); French scripts short (A-086/A-088/A-089); T1 under-shoot
   retries; a CLI switch to use the stored Settings; Edge catalogue live check (A-093); Hugging Face TTS candidate;
   paid LLM booking/capping before any OpenRouter funding.
-- **Ids:** next free **DEC-195** and **A-096** (the parallel phase-6 planning session was told to start at DEC-200 / A-100).
+- **Ids:** next free **DEC-195** and **A-097** (the parallel phase-6 planning session was told to start at DEC-200 / A-100).
 
 ## Phase-5 close session — working notes (history)
 - **In-progress header** (keep current):

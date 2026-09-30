@@ -42,3 +42,5 @@ Session-local helpers the next session may need (not in the repo):
 - The CLI inside the container reads keys only from its environment; this VPS keeps them in Settings. Phase 5's
   stage-14 driver loaded the Settings store into the CLI process (paid keys skipped) — see the action log,
   2026-09-30 "the CLI does not see the Settings keys".
+- DEC-176's CI-env run still sees the host's system site-packages; the CI-faithful run is the app image's Python 3.11
+  with `python -S` (A-096). Run it before any push that adds a test depending on an optional package (PIL, fastapi).

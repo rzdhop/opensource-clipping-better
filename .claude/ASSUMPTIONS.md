@@ -342,6 +342,15 @@
   app counts it against rpd 170 (the free 10,000 neurons); a 401/403 no longer burns a slot (T2-P5-F12). UNCONFIRMED:
   the real neuron cost per 9:16 image.
 
+- **A-096** — DEC-176's "CI env" run is not a faithful copy of CI: `PYTHONNOUSERSITE=1` hides only the user site, so
+  the host's **system** site-packages (PIL among them) stay importable, while CI installs pytest alone. Phase 5's
+  three two-word font tests passed here for weeks and failed only in CI (T2-P5-F14, fixed `f06a299`). The faithful
+  replica is the app image's Python 3.11 with `python -S` and pytest on `PYTHONPATH`, run as the host user
+  (`docker run --user $(id -u):$(id -g) -e HOME=/tmp -v <clone>:/src -v /tmp/cilibs:/cilibs:ro -w /src
+  -e PYTHONPATH=/cilibs --entrypoint python opensource-clipping-better-backend -S -m pytest`); only its
+  `test_the_data_directory_is_tracked_but_its_contents_are_not` fails there (git ownership of the mounted clone).
+  UNCONFIRMED: whether phase 6 swaps DEC-176's CI-env command for it (the human's call).
+
 ## Confirmed
 - **A-069** — Measured render times on the VPS (container ffmpeg `7.1.5-0+deb13u1/aarch64`, final profile,
   libx264): a full 21-shot FR render 160 s, a full 20-shot EN render 161 s; per shot at 4× mean 3.6–3.8 s (median
