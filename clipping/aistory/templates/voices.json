@@ -14,7 +14,7 @@
       {"voice_id": "en-US-GuyNeural", "lang": "en-US", "gender": "m", "age": "adult", "style_tags": ["newscast", "confident"]},
       {"voice_id": "en-US-JennyNeural", "lang": "en-US", "gender": "f", "age": "adult", "style_tags": ["friendly", "assistant"]},
       {"voice_id": "en-US-AriaNeural", "lang": "en-US", "gender": "f", "age": "adult", "style_tags": ["expressive", "chat"]},
-      {"voice_id": "en-US-DavisNeural", "lang": "en-US", "gender": "m", "age": "adult", "style_tags": ["calm", "narrator"]},
+      {"voice_id": "en-US-AndrewNeural", "lang": "en-US", "gender": "m", "age": "adult", "style_tags": ["calm", "narrator"]},
       {"voice_id": "en-US-AnaNeural", "lang": "en-US", "gender": "f", "age": "child", "style_tags": ["cute", "child"]},
       {"voice_id": "en-US-ChristopherNeural", "lang": "en-US", "gender": "m", "age": "adult", "style_tags": ["reliable", "narrator"]},
       {"voice_id": "en-US-MichelleNeural", "lang": "en-US", "gender": "f", "age": "adult", "style_tags": ["pleasant"]},

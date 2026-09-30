@@ -205,7 +205,7 @@ def test_catalogue_multi_voices_count_for_every_language(monkeypatch):
     gemini_ids = {v.voice_id for v in cat_en if v.provider == "gemini"}
     assert gemini_ids == {"Kore", "Puck", "Charon", "Fenrir", "Aoede", "Leda", "Orus", "Zephyr"}
     edge_en = {v.voice_id for v in cat_en if v.provider == "edge"}
-    assert edge_en == {"en-US-GuyNeural", "en-US-JennyNeural", "en-US-AriaNeural", "en-US-DavisNeural",
+    assert edge_en == {"en-US-GuyNeural", "en-US-JennyNeural", "en-US-AriaNeural", "en-US-AndrewNeural",
                        "en-US-AnaNeural", "en-US-ChristopherNeural", "en-US-MichelleNeural",
                        "en-GB-RyanNeural", "en-GB-SoniaNeural"}
 
