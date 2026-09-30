@@ -375,7 +375,9 @@ def test_s3_f1_n1_are_registered_in_the_catalogue():
     assert prompts.TEMPERATURE["S3"] is prompts.ANALYTIC_TEMPERATURE
     assert prompts.TEMPERATURE["F1"] is prompts.ANALYTIC_TEMPERATURE
     assert prompts.TEMPERATURE["N1"] is prompts.IDEATION_TEMPERATURE == 0.9
-    assert "N1" not in prompts.INPUT_BUDGET  # the default 1,200-token pack budget holds (below)
+    # Tier-2 finding T2-P5-F3 (2026-09-30): the live FR story's N1 prompt was 1,536 tokens, past the
+    # default 1,200 -- N1 now has a budget of its own, sized on the worst case below (DEC-138).
+    assert "N1" in prompts.INPUT_BUDGET
 
 
 # ============================================================ schema shape
@@ -736,7 +738,53 @@ def test_f1_worst_case_input_fits_its_budget():
     assert prompts.INPUT_BUDGET["F1"] <= 4000
 
 
-@pytest.mark.parametrize("prompt_id", ["S3", "F1"])
+def _n1_worst_case_input(open_hooks_count):
+    """N1 on live-sized worst-case data (Tier-2 finding T2-P5-F3: the live FR
+    story's own N1 prompt was 1,536 tokens, past the default 1,200-token pack
+    budget): the bible past the pack's 120-word cut, the world at B2's caps
+    (an 80-word setting, 6 rules of 25 words, a 6-word period, 3 motifs), 8
+    cast members with a 200-character one-line, a 12-episode arc of 60-word
+    summaries, a 40-word recap, *open_hooks_count* hooks at their
+    120-character cap and a 25-word chosen direction."""
+    import test_story_episode_prompt_budgets as budgets
+
+    story = dict(budgets.STORY)
+    story["world"] = {
+        "setting_summary": _fr_words(80),
+        "rules": [_fr_words(25) for _ in range(6)],
+        "time_period": _fr_words(6),
+        "recurring_motifs": [_fr_words(3) for _ in range(3)],
+    }
+    pack = context.build_pack(language="fr", story=story)
+    arc = [{"ep": ep, "function": "escalation", "summary": _fr_words(60),
+            "open_hooks_in": [], "open_hooks_out": [], "characters": []} for ep in range(1, 13)]
+    cast = [{"name": _fr_chars(24, salt=i), "role": "recurring", "one_line": _fr_chars(200, salt=i)}
+            for i in range(8)]
+    memory = {"series_memory": {"recaps": {"ep05": _fr_words(40)}, "open_hooks": [],
+                                "relationship_state": {}, "introduced": {}}}
+    hooks = [_fr_chars(schemas.HOOK_MAX_LENGTH, salt=100 + i) for i in range(open_hooks_count)]
+    return prompts.build_n1(pack, memory_ep=5, arc=arc, cast=cast, memory=memory,
+                            direction=_fr_words(schemas.F1_DIRECTION_MAX_WORDS), open_hooks=hooks)
+
+
+def test_n1_worst_case_input_fits_its_own_budget():
+    system, user, _schema = _n1_worst_case_input(4)
+    tokens = context.check_budget(system, user, budget=prompts.INPUT_BUDGET["N1"])
+    assert context.PACK_TOKEN_BUDGET < tokens <= prompts.INPUT_BUDGET["N1"] <= 4000
+
+
+def test_n1_shows_at_most_the_oldest_payoff_window_of_open_hooks():
+    """The fold can hold dozens of open hooks over a season; N1 shows the
+    oldest ``schemas.PAYOFF_HOOKS_MAX`` (the same window E1 offers), so its
+    input stays bounded however many are open."""
+    _s, user, _schema = _n1_worst_case_input(10)
+    shown = [_fr_chars(schemas.HOOK_MAX_LENGTH, salt=100 + i) in user for i in range(10)]
+    assert shown == [True] * schemas.PAYOFF_HOOKS_MAX + [False] * (10 - schemas.PAYOFF_HOOKS_MAX)
+    many = context.check_budget(*_n1_worst_case_input(30)[:2], budget=prompts.INPUT_BUDGET["N1"])
+    assert many == context.check_budget(*_n1_worst_case_input(4)[:2], budget=prompts.INPUT_BUDGET["N1"])
+
+
+@pytest.mark.parametrize("prompt_id", ["S3", "F1", "N1"])
 def test_a_prompt_over_its_own_budget_still_raises_before_any_call(prompt_id):
     from clipping.aistory import steps
     from clipping.aistory.steps import llm_call

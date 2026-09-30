@@ -152,6 +152,13 @@
   (since `c53949b`) and set the app to signed out, which renders `Login` — so on the live open app at ≥ 768 px one
   click showed the sign-in screen the human ruled out (hidden on the phone: the sidebar is desktop-only). Now it
   renders only while a token is stored, and signing out re-checks the server (an open server answers "in").
+- **Stage 13 live walk (in progress, 2026-09-30):** `main` ff to `1af310a`, deployed at 0 jobs (`rm -sfv` + `up -d
+  --build`; health 200, OPEN banner, `API_TOKEN` empty, new bundle `index-Cr1fobVv.js`). (a) memory ep 1 via the UI:
+  S3 on gemini free in 4 s (openrouter paid skipped), 29-word FR recap, both arc hooks verbatim, 2 sorted relationship
+  deltas, script_rev 2 → approved. (b) 6 fake FR comments pasted (295 in the UI / 294 on the server: T2-P5-F2, the
+  UI counts UTF-16 units) → F1 in 1 s: 36-word digest + 3 directions → direction 1 chosen. (c) propose-next FAILED
+  before any call: N1 1,536 tokens > the default 1,200 (T2-P5-F3) → fix attempt 1 below. T2-P5-F1: the wizard
+  collapses the Season step after a series job finishes (the panel disappears until reopened).
 - **Rollback:** code: delete the worktree and the branch (or revert a stage's commit). Live data: restore the
   tars (`tar -C outputs/stories -xzf …`) and check `sha256sum -c enfr-before.sha`.
 

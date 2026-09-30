@@ -193,7 +193,17 @@ SCHEMA_NAMES = {
 # the 1,102 recorded at stage 6), E3 2,199 (HEAD 2,071), E4 3,598 (HEAD 3,523;
 # the stage-4 fixture 3,605). E1 and E3 take the worst case + 15 %, rounded
 # up to ten; E4's 3,900 still holds, under the 4,000 ceiling.
-INPUT_BUDGET = {"E1": 1800, "E2": 1660, "E3": 2530, "E4": 3900, "T1": 1270, "T1r": 1410, "S3": 3740, "F1": 3950}
+# N1 (Tier-2 finding T2-P5-F3, 2026-09-30): stage 2 measured N1 inside the
+# default 1,200-token pack budget on a small fixture, but the live French
+# story's own N1 prompt (bible, world, 3 cast, an 8-episode arc of S2's
+# 60-word summaries, the recap, the chosen direction) was 1,536 tokens and
+# failed before any call. Sized like the others on live-sized worst-case data
+# (tests/test_story_prompts_series.py): the bible past its 120-word cut, the
+# world at B2's caps, 8 cast with 200-character one-lines, a 12-episode arc of
+# 60-word summaries, a 40-word recap, 4 hooks at 120 characters (N1 shows the
+# oldest PAYOFF_HOOKS_MAX, as E1 does) and a 25-word direction: ~3,244
+# tokens; plus 15 %, rounded up to ten.
+INPUT_BUDGET = {"E1": 1800, "E2": 1660, "E3": 2530, "E4": 3900, "T1": 1270, "T1r": 1410, "S3": 3740, "F1": 3950, "N1": 3740}
 
 # The ``bible:<field>`` grammar of spec 9.2: which prompt a regenerate note
 # re-runs, and which of that prompt's fields it targets. "tone" also carries
@@ -2506,6 +2516,9 @@ def _n1_memory_block(memory, ep, open_hooks=None) -> str:
     recap = context.previous_recap(memory, ep)
     if open_hooks is None:
         open_hooks = series_memory.get("open_hooks") or []
+    # The oldest PAYOFF_HOOKS_MAX, the same window E1 offers (offered_hooks):
+    # a season's fold can hold dozens, and N1's input must stay bounded.
+    open_hooks = list(open_hooks)[:schemas.PAYOFF_HOOKS_MAX]
 
     lines = ["Series memory:"]
     lines.append(f"- Previous recap: {recap}" if recap else "- Previous recap: none recorded")
