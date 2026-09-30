@@ -430,6 +430,9 @@ class SettingsResponse(BaseModel):
     cloudflare_api_token_set: bool = False
     cloudflare_account_id_set: bool = False
     pollinations_api_key_set: bool = False
+    # Veo's own key (a separate, billing-enabled Google project). Reported
+    # here; the field that sets it arrives with its Settings control.
+    gemini_paid_api_key_set: bool = False
     local_comfyui_url: str = ""
     local_ollama_url: str = ""
     generation_chains: dict = {}

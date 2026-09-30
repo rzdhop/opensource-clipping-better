@@ -138,5 +138,5 @@ def link_summary(kind, link, merged, budget_obj, request, *, qty=1, story_spent=
         "paid": paid, "keyed": not missing, "missing_keys": missing,
         "adapter": adapter is not None,
         "allowed": allowed, "est_usd": est, "reason": reason,
-        "env_keys": list(provider.env_keys), "signup_url": provider.signup_url,
+        "env_keys": list(gen.env_keys_for(link)), "signup_url": provider.signup_url,
     }

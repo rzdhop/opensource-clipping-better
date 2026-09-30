@@ -66,6 +66,8 @@ PERSISTED_KEYS = frozenset({
     "CLOUDFLARE_API_TOKEN",
     "CLOUDFLARE_ACCOUNT_ID",
     "POLLINATIONS_API_KEY",
+    # Veo only: a separate, billing-enabled Google project (RC-V4).
+    "GEMINI_PAID_API_KEY",
     "LOCAL_COMFYUI_URL",
     "LOCAL_OLLAMA_URL",
 })
@@ -89,6 +91,7 @@ SECRET_KEYS = frozenset({
     "CLOUDFLARE_API_TOKEN",
     "CLOUDFLARE_ACCOUNT_ID",
     "POLLINATIONS_API_KEY",
+    "GEMINI_PAID_API_KEY",
 })
 
 

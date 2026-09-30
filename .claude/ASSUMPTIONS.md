@@ -351,6 +351,38 @@
   `test_the_data_directory_is_tracked_but_its_contents_are_not` fails there (git ownership of the mounted clone).
   UNCONFIRMED: whether phase 6 swaps DEC-176's CI-env command for it (the human's call).
 
+- **A-100** — `fal/seedance-1-pro-fast` (`fal-ai/bytedance/seedance/v1/pro/fast/image-to-video`), read on 2026-09-30:
+  - **Price.** Billed by tokens at $1.00 per million, where tokens = width × height × 24 × seconds / 1024. At 720×1280
+    that is $0.0216 a second, kept as 0.022.
+  - **720p must be sent explicitly.** The endpoint's default is 1080p, at $0.0486 a second.
+  - **Clips:** 2–12 s. No audio, no negative prompt. Takes a seed.
+  - **Request fields:** `image_url`, `prompt`, `duration` (string), `aspect_ratio`, `resolution`, `seed`,
+    `camera_fixed`. The output is `video.url`.
+  - UNCONFIRMED until the phase-6 walk's ledger row is compared with fal's billing.
+- **A-101** — `fal/ltx-2-fast` (`fal-ai/ltxv-2/image-to-video/fast`) cannot make vertical video.
+  - Its output is locked to 16:9 at 1080p or larger, for $0.04 a second with audio.
+  - Its `fal-ai/ltx-2` twin was deprecated on 2026-08-15 for LTX-2.3.
+  - LTX-2.3 fast (`fal-ai/ltx-2.3/image-to-video/fast`) costs $0.06 a second at 1080p and offers `aspect_ratio`
+    "9:16", fps 24/25/48/50 and `generate_audio`.
+  - Phase 6 stage 3 moves the default-chain link there, as the spec's §8.7 foresaw.
+  - UNCONFIRMED: LTX-2.3's clip lengths and its price at the smallest 9:16 size (stage 3 re-reads the page).
+- **A-102** — `fal/kling-2.5-turbo-std` (`fal-ai/kling-video/v2.5-turbo/standard/image-to-video`):
+  - **Price:** $0.21 per 5 s, then $0.042 per extra second.
+  - **Clips:** 5 or 10 s.
+  - **Request fields:** `negative_prompt` and `cfg_scale`. No seed, no audio, and no aspect or resolution field.
+  - UNCONFIRMED: the output aspect follows the 9:16 keyframe (not stated on the page).
+- **A-103** — `gemini/veo-3.1-lite` (`veo-3.1-lite-generate-preview`), read on 2026-09-30:
+  - **Price:** $0.05 a second at 720p; $0.08 at 1080p (8 s only). Audio is always on and included. No free tier.
+  - **Clips:** 4/6/8 s, 9:16 and 720p supported.
+  - **Call shape:** REST `predictLongRunning`, then poll the operation until `done`, then fetch
+    `response.generateVideoResponse.generatedSamples[0].video.uri`.
+  - UNCONFIRMED until the live Veo shot:
+    - the image field shape (`{bytesBase64Encoded, mimeType}` by a forum thread and a GitHub PR, not by Google's
+      page);
+    - whether `durationSeconds` is a string or a number;
+    - `negativePrompt` support (undocumented);
+    - whether the seed is honoured ("not deterministic" per the docs).
+
 ## Confirmed
 - **A-069** — Measured render times on the VPS (container ffmpeg `7.1.5-0+deb13u1/aarch64`, final profile,
   libx264): a full 21-shot FR render 160 s, a full 20-shot EN render 161 s; per shot at 4× mean 3.6–3.8 s (median

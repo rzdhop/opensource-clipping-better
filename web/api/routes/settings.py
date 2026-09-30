@@ -550,6 +550,7 @@ def _generation_fields(env) -> dict:
         "cloudflare_api_token_set": bool(merged.get("CLOUDFLARE_API_TOKEN")),
         "cloudflare_account_id_set": bool(merged.get("CLOUDFLARE_ACCOUNT_ID")),
         "pollinations_api_key_set": bool(merged.get("POLLINATIONS_API_KEY")),
+        "gemini_paid_api_key_set": bool(merged.get("GEMINI_PAID_API_KEY")),
         "local_comfyui_url": gen.local_url("comfyui", merged),
         "local_ollama_url": gen.local_url("ollama", merged),
         "generation_chains": chains,

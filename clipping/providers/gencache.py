@@ -5,12 +5,14 @@ named by the request's key, with the request's outputs beside it:
 
 * the **key** is the sha256 of the request's canonical JSON -- kind, link,
   prompt, negative, the sha256 of each reference file's *bytes*, seed, size,
-  text, voice, rate, pitch, template and take. Where the answer is written
-  (``out_dir``, ``extra["name"]``) is not part of it. An image request without
-  a seed has **no key**: nothing is cached or journaled, and the runner takes
-  exactly the path it takes without a cache (DEC-154). Neither has a video or
-  vision request: the key has no field for a clip's length or the frames to
-  describe.
+  text, voice, rate, pitch, template and take; a video request adds its
+  clip's length (``clip_s``), frame rate and native audio, and its keyframe
+  is its one reference. Where the answer is written (``out_dir``,
+  ``extra["name"]``) is not part of it. An image or video request without a
+  seed has **no key**: nothing is cached or journaled, and the runner takes
+  exactly the path it takes without a cache (DEC-154). Neither has a video
+  request without its clip length, nor a vision request: the key has no
+  field for the frames to describe.
 * the **entry** (``gen_journal_v1``) follows one request through
   ``sending`` (a paid call is about to go out) -> ``submitted`` (a queue
   acknowledged it with a request id) -> ``done`` (its outputs are kept here),
@@ -62,9 +64,10 @@ FAILED = "failed"
 LOST = "lost"
 STATES = (SENDING, SUBMITTED, DONE, FAILED, LOST)
 
-# generation.IMAGE / IMAGE_EDIT / TTS, spelled out: generation imports this module.
-CACHED_KINDS = ("image", "image_edit", "tts")
-SEEDED_KINDS = ("image", "image_edit")
+# generation.IMAGE / IMAGE_EDIT / TTS / VIDEO, spelled out: generation imports this module.
+CACHED_KINDS = ("image", "image_edit", "tts", "video")
+SEEDED_KINDS = ("image", "image_edit", "video")
+VIDEO = "video"
 
 # Answers that prove the provider refused the request before doing (and
 # billing) any work (DEC-153). Any other failure after sending is booked.
@@ -105,11 +108,21 @@ def _sha256_file(path) -> str:
     return digest.hexdigest()
 
 
+def _number(value):
+    """A whole number as an int (``5.0`` -> ``5``), so the same clip length
+    written either way is the same request, never a second purchase."""
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return value
+
+
 def key_payload(kind, link, request):
     """The request as its key sees it, or ``None`` when it gets no key."""
     if kind not in CACHED_KINDS:
         return None
     if kind in SEEDED_KINDS and request.seed is None:
+        return None
+    if kind == VIDEO and request.duration_s is None:
         return None
     refs = []
     for path in request.references or ():
@@ -119,7 +132,7 @@ def key_payload(kind, link, request):
             # No key: the adapter then fails on the same file before sending, as today.
             return None
     extra = request.extra or {}
-    return {
+    payload = {
         "v": KEY_VERSION,
         "kind": kind,
         "link": link if isinstance(link, str) else describe(link),
@@ -136,6 +149,15 @@ def key_payload(kind, link, request):
         "template": extra.get("template"),
         "take": extra.get("take"),
     }
+    if kind == VIDEO:
+        # Only a clip carries these, so every image and voice key is the one
+        # it always was (KEY_VERSION stays).
+        payload.update(
+            clip_s=_number(request.duration_s),
+            fps=_number(request.fps),
+            native_audio=bool(request.native_audio),
+        )
+    return payload
 
 
 def request_key(kind, link, request):

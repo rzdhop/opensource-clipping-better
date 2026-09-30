@@ -1,13 +1,27 @@
-## CURRENT STATE — AI Story **phase 6 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–1 **done**; next: **stage 2**
+## CURRENT STATE — AI Story **phase 6 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–2 **done**; next: **stage 3**
 - **In-progress header** (keep current):
   - **Current phase:** IMPLEMENT. EXPLORE/CLARIFY/PLAN were done 2026-09-30 in a session run in parallel with phase 5's
     close: three maps, two rounds of questions, an Opus design. The human approved the plan.
   - **Plan:** `.claude/plans/ai-story/14-phase-6-plan.md` (**APPROVED 2026-09-30**; copy at
     `~/.claude/plans/ai-story-phase-6-plan.md`). Brief: `.claude/plans/ai-story/07-phase-6-video-tiers-local.md`.
-  - **Current stage:** 2 — provider foundations [Opus]: the video cache key, `GEMINI_PAID_API_KEY` per link, and the
-    video prices re-verified on the provider pages.
-  - **Next action:** dispatch stage 2 (essential tests, fail-first; guard pins the image and TTS key hexes from the
-    pre-change code), then Tier-1 in both environments, then commit.
+  - **Current stage:** 3 — the hosted video adapters in `clipping/providers/video.py` [Opus]: fal seedance and
+    kling, fal LTX-2.3 fast, Veo.
+  - **Next action:** dispatch stage 3, then Tier-1 in both environments, then commit.
+  - **Stage 2 notes for stages 3, 8 and 12:**
+    - **Request shape.** A video `GenRequest` carries the clip length in `duration_s` and has new `fps` and
+      `native_audio` fields.
+    - **No key, no journal.** Without `duration_s` or a seed the request gets **no key**, so it is not journaled.
+      The stage-3 adapters therefore refuse such a request before sending. The stage-8 step always sets both,
+      passing the derived shot seed even to models that ignore seeds.
+    - **Credentials.** `generation.env_keys_for(link)`; Veo reads only `GEMINI_PAID_API_KEY`.
+      `SettingsResponse.gemini_paid_api_key_set` is reported. The request field, the React input and the badge land
+      together in **stage 12**: `test_dashboard_payload_contract.py` requires the pair. Until then the key comes
+      from `.env` or the settings file.
+    - **Prices.** `PRICES_AS_OF` stays "2026-09-25", because it stamps the whole table; the four video rows' notes
+      carry their 2026-09-30 re-read. See A-100…A-103.
+    - **LTX.** LTX-2 fast is 16:9 only (A-101), so stage 3 moves the default chain to LTX-2.3 fast (spec §8.7).
+    - **Follow-up.** `FALLBACK_LINKS` hands the main link's credentials to its fallback model. That is fine today;
+      a future fallback crossing the two Google keys would get the wrong one.
   - **Stage 1 notes for stages 7–8:**
     - `plan_animation(shots, scene_function, dialogue_seconds, *, link, price_per_second, cap_usd,
       committed_usd, current_shot_ids, mode, priority, lengths)`.
@@ -64,8 +78,8 @@
 |---|---|---|
 | 0 | checkpoint, worktree, baseline, backups | done |
 | 1 | pure video planning (`video_plan.py`) [Sonnet] | done |
-| 2 | provider foundations: video cache key, `GEMINI_PAID_API_KEY`, prices [Opus] | next |
-| 3 | hosted video adapters (fal ×3, Veo) [Opus] | — |
+| 2 | provider foundations: video cache key, `GEMINI_PAID_API_KEY`, prices [Opus] | done |
+| 3 | hosted video adapters (fal ×3, Veo) [Opus] | next |
 | 4 | local ComfyUI video, fake server only [Opus] | — |
 | 5 | paid LLM booking seam [Opus] | — |
 | 6 | sticky image link per episode (A-087) [Opus] | — |
