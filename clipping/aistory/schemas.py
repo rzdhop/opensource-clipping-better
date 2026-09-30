@@ -2325,6 +2325,12 @@ _STORYBOARD_SCENE_ENTRY_SCHEMA = _document({
     "source": {"type": "string", "enum": ["t1", "fast"]},
     "script_rev": {"type": "integer", "minimum": 1},
     "stale": {"type": "boolean"},
+}, optional={
+    # Phase 5 stage 7: a text-only edit of the scene's lines kept its shot
+    # plan (DEC-129 as amended): its shots are re-timed in place once its
+    # lines are measured again (shots.retime_storyboard clears it). Absent
+    # on every scene no such edit touched.
+    "retime_only": {"type": "boolean"},
 })
 
 STORYBOARD_SCHEMA = _document({
@@ -2527,11 +2533,26 @@ EPISODE_ASSETS_SCHEMA_NAME = "episode_assets_v1"
 WORD_SOURCES = ("provider", "alignment", "even_split")
 SFX_STATES = ("resolved", "missing")
 
-_EPISODE_ASSETS_LINE_SCHEMA = _document(
-    {"words_source": {"type": "string", "enum": list(WORD_SOURCES)}},
+# A voice regenerate's take (``secrets.token_hex(8)``): a field of the
+# generation cache's key, so a new take misses it on purpose (phase 4).
+LINE_TAKE_PATTERN = r"^[0-9a-f]{16}$"
+_LINE_TAKE = {"type": "string", "pattern": LINE_TAKE_PATTERN}
+
+# ``words_source`` is required but on an entry holding a pending take alone
+# (a line never voiced yet, a regenerate asked): episode_assets_errors.
+_EPISODE_ASSETS_LINE_SCHEMA = _document({}, optional={
+    "words_source": {"type": "string", "enum": list(WORD_SOURCES)},
     # The STT link that aligned the words; only with "alignment".
-    optional={"aligned_by": _text(120)},
-)
+    "aligned_by": _text(120),
+    # Phase 5 stage 7: the voice regenerate take the line's audio was spoken
+    # with, the note it was directed with, and that audio's sha256 (a record
+    # of another file no longer describes the line: dropped).
+    "take": _document({"id": _LINE_TAKE, "note": _NOTE_OR_NULL, "audio_sha256": _SHA256}),
+    # A voice regenerate asked and not answered yet, persisted before the
+    # call: a retry with the same note asks the same take, so a request the
+    # provider holds is resumed, never bought twice (DEC-154's rule).
+    "pending": _document({"take": _LINE_TAKE, "note": _NOTE_OR_NULL, "requested_at": _NON_EMPTY_STRING}),
+})
 
 _EPISODE_ASSETS_SFX_SCHEMA = _document({
     "scene_id": {"type": "string", "pattern": SCENE_ID_PATTERN},
@@ -2579,7 +2600,9 @@ EPISODE_ASSETS_SCHEMA = _document({
 
 def episode_assets_errors(doc) -> list:
     """``validate()`` against ``EPISODE_ASSETS_SCHEMA``, plus: ``lines`` keyed
-    by line ids, ``aligned_by`` exactly when the words were aligned, an SFX
+    by line ids, each with its ``words_source`` but an entry holding a
+    pending voice take alone (phase 5 stage 7), ``aligned_by`` exactly when
+    the words were aligned, an SFX
     cue's file there exactly when it resolved, the BGM weights keyed by
     emotions with the dominant one the heaviest, and a track's file, sha256
     and licence recorded together."""
@@ -2596,6 +2619,11 @@ def episode_assets_errors(doc) -> list:
         found = validate(entry, _EPISODE_ASSETS_LINE_SCHEMA, path)
         if found:
             errors.extend(found)
+            continue
+        if "words_source" not in entry:
+            if set(entry) != {"pending"}:
+                errors.append(f"{path}.words_source: required (only an entry holding a pending take alone goes "
+                              "without)")
             continue
         if (entry["words_source"] == "alignment") != ("aligned_by" in entry):
             errors.append(f"{path}.aligned_by: present exactly when words_source is 'alignment'")

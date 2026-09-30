@@ -24,13 +24,19 @@ voices") unchanged in behaviour, so the script step and the assets step
 step's ``_Run``, the assets step's): it reads the run's ``ctx``, ``ec``,
 ``script``, ``storyboard``, ``budget`` and ``tools``, calls its ``save()``
 and ``failures()``, and keeps ``voice_failed``, ``measured`` and
-``board_refused`` on it. Three hooks change what the assets step asks for,
+``board_refused`` on it. Four hooks change what the assets step asks for,
 and nothing when left alone (the script step): :attr:`measure_step` (the
 ledger's ``step``), :meth:`voice_cache` (the generation cache a line's
-request goes through, DEC-151) and :attr:`voice_take` (a voice regenerate's
-take, so the cache misses on purpose); a fourth, :meth:`voice_refused`,
-hands it a failed line's ``VoiceError`` (its chain failures pace a voice a
-free tier held back).
+request goes through, DEC-151), :attr:`voice_take` (a voice regenerate's
+take, so the cache misses on purpose) and :attr:`voice_direction` (its
+note, the take's spoken direction, phase 5 stage 7); a fifth,
+:meth:`voice_refused`, hands it a failed line's ``VoiceError`` (its chain
+failures pace a voice a free tier held back).
+
+The storyboard follows every measured line (:meth:`sync_storyboard`): a
+scene a text-only edit marked ``retime_only`` is re-timed in place with the
+others, and its mark goes once its lines are all measured again
+(``shots.retime_storyboard``, phase 5 stage 7).
 
 The story's own document is never read for writing (RC-E2).
 """
@@ -172,6 +178,9 @@ class LineMeasurement:
     # A voice regenerate's take (``gencache``'s key field): None asks for
     # the line as it always was.
     voice_take = None
+    # A voice regenerate's note, the take's spoken direction (phase 5 stage
+    # 7; ``voices.synthesize_line``): None asks for the line as it always was.
+    voice_direction = None
 
     def voice_cache(self, gates, line):
         """The generation cache *line*'s request goes through, or None (the
@@ -280,6 +289,8 @@ class LineMeasurement:
                 extra["cache"] = cache
             if self.voice_take is not None:
                 extra["take"] = self.voice_take
+            if self.voice_direction is not None:
+                extra["direction"] = self.voice_direction
             try:
                 spoken = voices.synthesize_line(gates, voice=voice, text=line["text"], dest_for=dest_for,
                                                 on_log=ctx.on_log, cancel=ctx.cancel, step=self.measure_step,

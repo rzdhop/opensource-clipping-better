@@ -8,7 +8,9 @@ the worker's slot, which is why it is a job (DEC-161, amending DEC-109).
 **Preconditions**, each refused with what to do before any process starts:
 the script and the storyboard approved and current
 (``assets.require_approved``); ``assets.json`` written; every shot's image
-and every line's audio (in its speaker's pinned voice) on disk; the assets
+on disk and current -- a shot edited since its image was made is refused,
+naming it, unless it is locked (``assets.outdated_images``, phase 5 stage
+7) -- and every line's audio (in its speaker's pinned voice) on disk; the assets
 **approved** with a fingerprint that is still the current one
 (``assets.current_fingerprint``: an image, a voice or a sound changed since
 the approval makes it stale); then ffmpeg and ffprobe present with every
@@ -137,6 +139,19 @@ def require_renderable(ec) -> tuple:
                          f"{_plural(no_image, 'has', 'have')} no image. Make "
                          f"{_plural(no_image, 'it', 'them')} (the assets step, or regenerate {_and(targets)}), "
                          "approve the assets again, then render.")
+
+    # Phase 5 stage 7: a shot whose framing, action or prompt changed since its
+    # image was made keeps its old image on disk, and the assets approval's
+    # fingerprint (the recorded hashes) does not move -- never rendered.
+    outdated = assets_step.outdated_images(ec, board)
+    if outdated:
+        targets = [assets_step.shot_target(ep, shot_id) for shot_id in outdated]
+        raise StepFailed(f"Episode {ep} cannot be rendered: {_plural(outdated, 'shot', 'shots')} {_and(outdated)} "
+                         f"{_plural(outdated, 'has an image', 'have images')} out of date (the shot changed since "
+                         f"{_plural(outdated, 'it was', 'they were')} made, or a regenerate of "
+                         f"{_plural(outdated, 'it', 'them')} has not answered yet). Make "
+                         f"{_plural(outdated, 'it', 'them')} again (the assets step, or regenerate {_and(targets)}) "
+                         f"or lock {_plural(outdated, 'it', 'them')}, approve the assets again, then render.")
 
     lines = [line for scene in script["scenes"] for line in scene["lines"]]
     unvoiced = [line["line_id"] for line in lines if not voice_lines.is_measured(ec, line)]

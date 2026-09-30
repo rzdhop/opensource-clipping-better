@@ -723,16 +723,23 @@ class ScriptLinePatch(BaseModel):
 
 
 class ScriptScenePatch(BaseModel):
-    """One scene of ``PATCH /episodes/{ep}/script``'s ``scenes``."""
+    """One scene of ``PATCH /episodes/{ep}/script``'s ``scenes``;
+    ``pays_off`` (AI Story phase 5 stage 7) names at most one hook open
+    before the episode, [] or null for none."""
     scene_id: str
     summary: Optional[str] = None
     on_screen_text: Optional[str] = None
+    pays_off: Optional[list[str]] = None
 
 
 class ScriptPatchRequest(BaseModel):
     """PATCH /api/stories/{id}/episodes/{ep}/script. A change re-times the
-    script, clears the script's and the storyboard's approvals, and stales
-    the consistency report and the storyboard's scenes it changed."""
+    script, clears the script's approval and stales the consistency report;
+    a text-only edit (a line's words or delivery, a scene's ``pays_off``)
+    keeps the storyboard's approval and its shots -- a scene whose words
+    changed is re-timed in place once re-voiced -- and any other change
+    clears it and stales the storyboard's scenes it changed (DEC-129 as
+    amended, ``workflow.patch_script``)."""
     lines: Optional[list[ScriptLinePatch]] = None
     scenes: Optional[list[ScriptScenePatch]] = None
     hook_on_screen_text: Optional[str] = None

@@ -14,6 +14,12 @@ Every line gets a timing file next to its audio (``line_timing_v1``) that
 records the duration and the *source* of the timestamps (spec 6.4): real
 word timestamps from the engine, or the audio duration alone. Nothing here
 is a silent fallback -- an engine that is missing says how to install it.
+
+A request may carry a spoken direction (``extra["direction"]``, how the
+line should be said: an AI Story voice regenerate's note). Gemini speaks it
+as its own style instruction ahead of the line; Edge and the local engines
+cannot follow one and say it was recorded, not applied -- as for rate and
+pitch. A request without one is exactly what it always was.
 """
 
 from __future__ import annotations
@@ -122,6 +128,31 @@ def _warn_unsupported_rate_pitch(request, link, on_log) -> None:
         on_log(f"   ⚠️ rate/pitch are not supported by {describe(link)}; recorded, not applied.")
 
 
+def _direction(request) -> str:
+    """The request's spoken direction (``extra["direction"]``: how the line
+    should be said -- an AI Story voice regenerate's note), whitespace
+    collapsed, its closing punctuation dropped; "" without one."""
+    return " ".join(str((request.extra or {}).get("direction") or "").split()).rstrip(" .:;")
+
+
+def _directed(text: str, direction: str) -> str:
+    """*text* with *direction* as Gemini's own style instruction, the form
+    its speech-generation guide gives for one speaker ("Say cheerfully:
+    Have a wonderful day!"). No direction: *text* as it is."""
+    if not direction:
+        return text
+    how = direction if direction.lower().startswith("say ") else f"Say {direction}"
+    return f"{how}: {text}"
+
+
+def _warn_unsupported_direction(request, link, on_log) -> None:
+    """An engine that cannot follow a spoken direction says so once -- the
+    direction was recorded (with its take), not applied -- never a silent
+    drop of what the note asked for."""
+    if _direction(request):
+        on_log(f"   ⚠️ a spoken direction is not supported by {describe(link)}; recorded, not applied.")
+
+
 def audio_duration(path: str):
     """Seconds of audio in *path* by ffprobe, or ``None`` when ffprobe is missing or fails."""
     if not shutil.which("ffprobe"):
@@ -168,6 +199,7 @@ class EdgeTtsAdapter(_Adapter):
     def generate(self, link, request, *, credentials, on_log, transport=None, synthesize=None, probe_duration=None, **_):
         text = _text(request)
         rate, pitch = _rate_pitch(request)
+        _warn_unsupported_direction(request, link, on_log)
         if synthesize is None:
             if not _installed("edge_tts"):
                 raise ProviderError(f"{describe(link)}: edge-tts is not installed: {EDGE_INSTALL}")
@@ -215,7 +247,9 @@ class GeminiTtsAdapter(_Adapter):
     def generate(self, link, request, *, credentials, on_log, transport=None, **_):
         transport = transport or urllib_transport
         model = GEMINI_TTS_MODELS.get(link.model) or _unknown_model(link, GEMINI_TTS_MODELS)
-        text = _text(request)
+        # A spoken direction is Gemini's own style instruction ahead of the
+        # line; without one the request is exactly what it always was.
+        text = _directed(_text(request), _direction(request))
         voice = request.voice or GEMINI_DEFAULT_VOICE
         _warn_unsupported_rate_pitch(request, link, on_log)
         body = {
@@ -326,6 +360,7 @@ class LocalTtsAdapter(_Adapter):
             raise ProviderError(f"{describe(link)}: {link.model} is not installed ({package} package): {LOCAL_TTS_EXTRA}")
         text = _text(request)
         _warn_unsupported_rate_pitch(request, link, on_log)
+        _warn_unsupported_direction(request, link, on_log)
         out_dir = _out_dir(request)
         name = _name(request, link)
         audio_path = os.path.join(out_dir, f"{name}.wav")

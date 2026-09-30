@@ -13,7 +13,9 @@
   the note at the prompt's tail, a fresh seed persisted as ``pending``
   before the call; a locked shot is refused -- and kind ``line``
   (``line:<ep>:<line_id>``) -- that line spoken again by its pinned voice
-  alone, a new take so the generation cache misses on purpose. Neither
+  alone, a new take so the generation cache misses on purpose, the note its
+  spoken direction and the take persisted as ``pending`` in the line's
+  ``assets.json`` entry before the call (phase 5 stage 7). Neither
   clears an approval. (``regenerate.parse_target`` reads these two targets.)
 - phase 4 (``metadata.regenerate_platform``): kind ``metadata``
   (``metadata:<ep>:<platform>``, the tuple ``("metadata", ep, platform)``)

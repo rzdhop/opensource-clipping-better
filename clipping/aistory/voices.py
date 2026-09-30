@@ -631,7 +631,7 @@ def _line_outputs(result, spoken):
 
 
 def synthesize_line(gates, *, voice, text, dest_for, on_log, cancel, step=MEASURE_STEP, adapters=None,
-                    transport=None, cache=None, take=None) -> dict:
+                    transport=None, cache=None, take=None, direction=None) -> dict:
     """*text* spoken by the pinned *voice* (a character's ``voice`` block,
     or the narrator's) through a single-link chain built from that voice
     ALONE (DEC-122: never another provider, never another voice, never
@@ -668,6 +668,13 @@ def synthesize_line(gates, *, voice, text, dest_for, on_log, cancel, step=MEASUR
     misses the cache on purpose. Both None: exactly the call of phase 3
     (RC-A2, RC-A6). ``gencache.JournalError`` passes through: a request
     the provider may hold could not be journaled or booked.
+
+    *direction* (phase 5 stage 7: a voice regenerate's note) joins the
+    request as ``extra["direction"]``, how the take should be spoken: an
+    engine that can follow one speaks it (Gemini), the others say it was
+    recorded, not applied (``providers.tts``). It is not a field of the
+    cache's key: a regenerate asks it with its own take, and asks that take
+    again only with the same note.
     """
     label = voice_label(voice)
     if label is None:
@@ -677,6 +684,8 @@ def synthesize_line(gates, *, voice, text, dest_for, on_log, cancel, step=MEASUR
     extra = {"rate": voice.get("rate"), "pitch": voice.get("pitch")}
     if take is not None:
         extra["take"] = take
+    if direction:
+        extra["direction"] = direction
     request = generation.GenRequest(kind=generation.TTS, text=text, voice=voice["voice_id"], extra=extra)
     if adapters is None:
         adapters_mod.load_all()

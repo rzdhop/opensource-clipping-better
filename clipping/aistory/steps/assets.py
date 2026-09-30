@@ -565,6 +565,24 @@ def shot_state(ec, shot) -> str:
     return image_state(assets, expected_hash=expected, file_ok=shot_image_path(ec, shot) is not None)
 
 
+def outdated_images(ec, storyboard) -> list:
+    """The ids of the shots whose image on disk is not the one to use now:
+    stale (its framing, action or prompt changed since it was made: its
+    :func:`prompt_hash` moved) or failed (a regenerate asked another one) --
+    a locked shot keeps the image it has (DEC-155, as the assets approval
+    takes it). What a render refuses (phase 5 stage 7): an assets approval's
+    fingerprint holds each image's *recorded* hash, so it does not see the
+    shot change under it."""
+    outdated = []
+    for shot in storyboard["shots"]:
+        if shot_image_path(ec, shot) is None:
+            continue
+        state = shot_state(ec, shot)
+        if state != "current" and not (shot["assets"].get("locked") and state == "locked_stale"):
+            outdated.append(shot["shot_id"])
+    return outdated
+
+
 def shots_to_make(ec, storyboard) -> list:
     """The shots the step makes an image for: neither locked nor current."""
     return [shot for shot in storyboard["shots"]
@@ -1330,18 +1348,33 @@ class _Assets(voice_lines.LineMeasurement):
             ctx.on_log(f"⚠️ No BGM track carries the mood {mood!r}: the episode has no music bed.")
         return sfx, bgm
 
-    def line_entries(self) -> dict:
-        """``{line_id: {words_source, aligned_by?}}`` of every voiced line."""
+    def line_entries(self, previous=None) -> dict:
+        """``{line_id: {words_source, aligned_by?, take?, pending?}}`` of every
+        voiced line. *previous* (the ``lines`` of the ``assets.json`` written
+        before, phase 5 stage 7) hands on each line's voice regenerate
+        records: its ``pending`` take -- a line not voiced yet keeps an entry
+        holding it alone -- and its ``take`` while the audio on disk is still
+        the one that take made (its sha256); a take of another file no
+        longer describes the line and is dropped."""
         ec, lines = self.ec, {}
+        kept = previous or {}
         for scene in self.script["scenes"]:
             for line in scene["lines"]:
-                if not voice_lines.is_measured(ec, line):
-                    continue
-                source, aligned_by = wordtiming.source_of(read_sidecar(ec, line["line_id"]))
-                entry = {"words_source": source}
-                if source == wordtiming.ALIGNMENT:
-                    entry["aligned_by"] = str(aligned_by or "stt")[:120]
-                lines[line["line_id"]] = entry
+                line_id = line["line_id"]
+                old = kept.get(line_id) or {}
+                entry = {}
+                if voice_lines.is_measured(ec, line):
+                    source, aligned_by = wordtiming.source_of(read_sidecar(ec, line_id))
+                    entry["words_source"] = source
+                    if source == wordtiming.ALIGNMENT:
+                        entry["aligned_by"] = str(aligned_by or "stt")[:120]
+                    take = old.get("take")
+                    if take and take.get("audio_sha256") == _sha256_file(line_audio_path(ec, line)):
+                        entry["take"] = take
+                if old.get("pending"):
+                    entry["pending"] = old["pending"]
+                if entry:
+                    lines[line_id] = entry
         return lines
 
     def write_assets_doc(self) -> dict:
@@ -1350,7 +1383,8 @@ class _Assets(voice_lines.LineMeasurement):
         sfx, bgm = self.audio_entries()
         now = llm_call.utc_now()
         doc = {
-            "$schema": schemas.EPISODE_ASSETS_SCHEMA_NAME, "ep": ec.ep, "lines": self.line_entries(),
+            "$schema": schemas.EPISODE_ASSETS_SCHEMA_NAME, "ep": ec.ep,
+            "lines": self.line_entries(previous["lines"] if previous else None),
             "sfx": sfx, "bgm": bgm,
             # Kept: an approval is derived stale by the fingerprint, never cleared here.
             "approved": previous["approved"] if previous else None,
@@ -1522,11 +1556,21 @@ def regenerate_line_voice(ctx, ec, target, line_id, note, *, tools, refuse) -> d
     """``line:<ep>:<line_id>`` (kind ``line``): that line spoken again by its
     speaker's pinned voice alone (``voice_lines``: a one-link chain; a
     failure names the voice to change, nothing else is tried), with a new
-    ``take`` so the generation cache misses on purpose. The script is
-    re-timed and the storyboard follows; no approval is cleared. A voice
-    takes no note."""
+    ``take`` so the generation cache misses on purpose, and *note* as the
+    take's spoken direction (phase 5 stage 7, ``voices.synthesize_line``: an
+    engine that cannot follow one says it was recorded, not applied).
+
+    The take is persisted in the line's entry of ``assets.json`` (phase 5
+    stage 7; it was lost with the job's result before): as ``pending{take,
+    note, requested_at}`` **before** the call -- a retry with the same note
+    asks the same take, so a request the provider holds is resumed, never
+    bought twice (DEC-154's rule, for voices) -- then, once spoken, as
+    ``take{id, note, audio_sha256}``. An episode with no ``assets.json`` yet
+    (the assets step never finished) keeps no record, as before. The script
+    is re-timed and the storyboard follows -- a scene a text-only edit
+    marked ``retime_only`` is re-timed in place -- and no approval is
+    cleared."""
     host = _Assets(ctx, ec, tools=tools)
-    host.voice_take = secrets.token_hex(8)
     try:
         host.script, host.storyboard = require_approved(ec)
     except StepFailed as exc:
@@ -1537,20 +1581,44 @@ def regenerate_line_voice(ctx, ec, target, line_id, note, *, tools, refuse) -> d
     if voices.voice_label(voice_lines.speaker_voice(ec, line["speaker"])) is None:
         who = "the narrator" if line["speaker"] == "narrator" else voice_lines.speaker_name(ec, line["speaker"])
         raise refuse(f"{voice_lines.no_voice_reason(ec, line['speaker'])}: pick a voice for {who} first.")
-    if note:
-        ctx.on_log("ℹ️ A voice take has no note: the note is not used.")
+    if note is not None:
+        note = " ".join(str(note).split()) or None
+    if note is not None and len(note) > schemas.REGENERATE_NOTE_MAX:
+        raise refuse(f"a note is at most {schemas.REGENERATE_NOTE_MAX} characters ({len(note)} given).")
+    try:
+        doc = episode_common.read_episode(ec, ASSETS_DOC)
+    except StepFailed as exc:
+        raise refuse(str(exc)) from None
+    pending = ((doc or {}).get("lines", {}).get(line_id) or {}).get("pending")
+    # The same request asked again (its call did not answer) keeps its take;
+    # a new note is a new request with a fresh one.
+    take = pending["take"] if pending and pending.get("note") == note else secrets.token_hex(8)
+    host.voice_take, host.voice_direction = take, note
+    if doc is not None:
+        entry = dict(doc["lines"].get(line_id) or {})
+        entry["pending"] = {"take": take, "note": note, "requested_at": llm_call.utc_now()}
+        doc["lines"][line_id] = entry
+        try:
+            ec.store.write_episode_doc(ec.story_id, ec.ep, ASSETS_DOC, doc, now=llm_call.utc_now())
+        except (schemas.SchemaError, ValueError, KeyError) as exc:
+            raise refuse(f"its take could not be kept in {ASSETS_DOC} before the call ({exc}); nothing was "
+                         "asked.") from None
     gates = host.open_asset_gates()
     try:
         host.before_synthesis([line])
+        ctx.on_log(f"🎙 Line {line_id} again (take {take}){_noted(note)}")
         try:
             host.measure_line(gates, line)
         except gencache.JournalError as exc:
             raise host.journal_failed(exc) from None
         if host.voice_failed:
-            raise refuse(host.voice_message())
+            kept = (f" The take is kept ({take}): regenerate {target!r} again with the same note to ask for it "
+                    "again." if doc is not None else "")
+            raise refuse(f"{host.voice_message()}{kept}")
         previous = episode_common.read_episode(ec, ASSETS_DOC)
         entry = host.line_entries().get(line_id)
         if previous is not None and entry is not None:
+            entry["take"] = {"id": take, "note": note, "audio_sha256": _sha256_file(line_audio_path(ec, line))}
             previous["lines"][line_id] = entry
             try:
                 ec.store.write_episode_doc(ec.story_id, ec.ep, ASSETS_DOC, previous, now=llm_call.utc_now())
@@ -1558,6 +1626,6 @@ def regenerate_line_voice(ctx, ec, target, line_id, note, *, tools, refuse) -> d
                 ctx.on_log(f"⚠️ {ASSETS_DOC} could not be updated ({exc}); the assets step writes it again.")
     finally:
         host.write_ledger_view()
-    ctx.on_log(f"🔁 Regenerated {target}")
+    ctx.on_log(f"🔁 Regenerated {target}{_noted(note)}")
     return {"target": target, "line": line_id, "voice": line["timing"]["voice"],
-            "duration_s": line["timing"]["duration_s"], "take": host.voice_take}
+            "duration_s": line["timing"]["duration_s"], "take": take}

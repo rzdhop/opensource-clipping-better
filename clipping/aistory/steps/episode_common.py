@@ -29,7 +29,9 @@ common live here, once:
   documents: the revisions move, both approvals and ``approved_anyway`` are
   cleared, the consistency report and every storyboard scene planned from an
   older revision of its scene become stale. An approval never outlives what
-  it approved (DEC-123, extended to episodes).
+  it approved (DEC-123, extended to episodes). A text-only edit (phase 5
+  stage 7, DEC-129 as amended) keeps the storyboard's approval and its
+  scenes' plans: a scene whose words moved is marked ``retime_only``.
 
 Nothing here reads or writes ``story.json``: an episode never changes the
 story's approvals or status (RC-E2).
@@ -451,7 +453,7 @@ def timing_line(script) -> str:
 
 # ------------------------------------------------------------------ changes
 
-def mark_changed(script, storyboard, *, scene_ids, now) -> None:
+def mark_changed(script, storyboard, *, scene_ids, now, plan_kept=None, keep_approval=False) -> None:
     """What rewriting part of a script does to both documents (in place; the
     caller writes them): ``script.rev`` and each rewritten scene's ``rev``
     move on, ``approved_at`` and ``approved_anyway`` are cleared, a
@@ -459,8 +461,22 @@ def mark_changed(script, storyboard, *, scene_ids, now) -> None:
     every one of its scenes planned from another revision of its scene --
     or from a scene the script no longer has -- becomes stale. *now*
     becomes both documents' ``updated_at`` (the store sets it again on
-    write)."""
+    write).
+
+    A text-only edit (phase 5 stage 7, DEC-129 as amended): *plan_kept*
+    ``{scene_id: retime}`` names the rewritten scenes whose shot plan still
+    holds -- a line's words or delivery, a scene's ``pays_off``: same line
+    ids, speakers and emotions. Such a scene, when its storyboard entry was
+    current before the edit, follows the new revision instead of going
+    stale, marked ``retime_only`` when *retime* (its words moved: its shots
+    are re-timed in place once its lines are measured again,
+    ``shots.retime_storyboard``); one planned from an older revision stays
+    stale. *keep_approval* keeps the storyboard's approval: the caller says
+    every change was one of those. The script's side never changes: its
+    words changed, so its approval goes and E4 must be fresh again."""
     wanted = set(scene_ids)
+    plan_kept = dict(plan_kept or {})
+    before = {scene["scene_id"]: scene["rev"] for scene in script["scenes"]}
     script["rev"] += 1
     for scene in script["scenes"]:
         if scene["scene_id"] in wanted:
@@ -473,8 +489,16 @@ def mark_changed(script, storyboard, *, scene_ids, now) -> None:
     if storyboard is None:
         return
     revs = {scene["scene_id"]: scene["rev"] for scene in script["scenes"]}
-    storyboard["approved_at"] = None
     for sid, entry in storyboard["scenes"].items():
-        if revs.get(sid) != entry["script_rev"]:
+        if sid in plan_kept and sid in wanted and not entry.get("stale") and entry["script_rev"] == before.get(sid):
+            entry["script_rev"] = revs[sid]
+            if plan_kept[sid]:
+                entry["retime_only"] = True
+        elif revs.get(sid) != entry["script_rev"]:
             entry["stale"] = True
+            entry.pop("retime_only", None)
+            # A stale scene is never approved over, whatever the caller said.
+            keep_approval = False
+    if not keep_approval:
+        storyboard["approved_at"] = None
     storyboard["updated_at"] = now

@@ -337,8 +337,11 @@ def test_editing_a_line_re_times_it_stales_the_check_and_clears_both_approvals(w
                       "voice": "edge/fr-FR-HenriNeural", "audio": "assets/voice/line_08.mp3"}
     store.write_episode_doc(story_id, 1, "script.json", script, now=NOW)
 
+    # Phase 5 stage 7 (DEC-129 as amended): other words alone keep the storyboard's approval and plan
+    # (tests/test_story_reedit.py); another emotion keeps this the structural edit it pins, as before.
     written = wf.patch_script(store, story_id, 1, {"lines": [{"line_id": "l08",
-                                                              "text": "  Tu me trahis déjà, Mangella ?  "}]},
+                                                              "text": "  Tu me trahis déjà, Mangella ?  ",
+                                                              "emotion": "angry"}]},
                               now=LATEST)
 
     script, board = _script(store, story_id), _storyboard(store, story_id)
@@ -683,7 +686,9 @@ def test_the_episode_view_and_the_story_summaries_follow_the_documents(wf, store
     wf.approve_storyboard(store, story_id, 1, now=LATER)
     assert wf.episode_summaries(store, story)[0]["storyboard_state"] == "approved"
 
-    wf.patch_script(store, story_id, 1, {"lines": [{"line_id": "l08", "text": "Tu me trahis ?"}]}, now=LATEST)
+    # A structural edit (another emotion; other words alone keep the plan since phase 5 stage 7).
+    wf.patch_script(store, story_id, 1, {"lines": [{"line_id": "l08", "text": "Tu me trahis ?", "emotion": "angry"}]},
+                    now=LATEST)
     state = wf.episode_view(store, story, 1)["state"]
     assert state == {"script": "complete", "storyboard": "partial", "report": "stale", "stale_scenes": ["s02"],
                      "prompts_outdated": False, "missing": ["consistency_check"]}
@@ -730,5 +735,7 @@ def test_an_episode_target_is_checked_against_the_story_before_any_job(wf, store
     assert check("shot:1:sh01:plan") is None
     assert "has no shot 'sh99'" in _refused(wf, "not_found", check, "shot:1:sh99:plan")
     s02_shot = _shots_of(_storyboard(store, story_id), "s02")[0]["shot_id"]
-    wf.patch_script(store, story_id, 1, {"lines": [{"line_id": "l08", "text": "Tu me trahis ?"}]}, now=LATER)
+    # A structural edit (another emotion; other words alone keep the plan since phase 5 stage 7).
+    wf.patch_script(store, story_id, 1, {"lines": [{"line_id": "l08", "text": "Tu me trahis ?", "emotion": "angry"}]},
+                    now=LATER)
     assert "rewritten since its shots were planned" in _refused(wf, "conflict", check, f"shot:1:{s02_shot}:plan")

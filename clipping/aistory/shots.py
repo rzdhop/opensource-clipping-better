@@ -731,6 +731,37 @@ def rule_pass(plans_by_scene, style_lock) -> tuple:
     return plans_by_scene, notes
 
 
+REPEATED_FRAMING = "two shots in a row would repeat a framing"
+NO_CLOSE_UP = "three scenes in a row would hold no close-up"
+
+
+def rule_moves(storyboard, script, style_lock) -> dict:
+    """``{shot_id: (framing, framing the rules give it, why)}``: the shots
+    :func:`rule_pass` would move were *storyboard* built again from its own
+    plans (:func:`plans_from_storyboard`) -- *why* is
+    :data:`REPEATED_FRAMING` (rule a) or :data:`NO_CLOSE_UP` (rule b). A
+    storyboard that keeps the rules gives ``{}``. An edit that makes one
+    breaks them (phase 5 stage 7: refused, never a neighbour moved
+    silently). Pure; *storyboard* is not changed."""
+    plans = plans_from_storyboard(storyboard, script)
+    ordered = [(scene, plans[scene["scene_id"]]) for scene in script["scenes"] if scene["scene_id"] in plans]
+    by_scene: dict = {}
+    for shot in storyboard["shots"]:
+        by_scene.setdefault(shot["scene_id"], []).append(shot["shot_id"])
+    ids = [shot_id for scene, _plans in ordered for shot_id in by_scene[scene["scene_id"]]]
+    start = [plan["framing"] for _scene, scene_plans in ordered for plan in scene_plans]
+
+    repeats = [(scene, [dict(plan) for plan in scene_plans]) for scene, scene_plans in ordered]
+    for _ in range(len(start) + 2):
+        if not _apply_no_repeat_framing(repeats, []):
+            break
+    after_a = [plan["framing"] for _scene, scene_plans in repeats for plan in scene_plans]
+    moved, _notes = rule_pass(ordered, style_lock)
+    end = [plan["framing"] for _scene, scene_plans in moved for plan in scene_plans]
+    return {ids[i]: (start[i], end[i], REPEATED_FRAMING if after_a[i] != start[i] else NO_CLOSE_UP)
+            for i in range(len(start)) if end[i] != start[i]}
+
+
 # ------------------------------------------------------------- storyboard
 
 def _collect_resolved_from(resolved_from, subject_tags, scene, entities) -> None:
@@ -794,6 +825,12 @@ def retime_storyboard(storyboard, script, *, template, language, style_lock) -> 
     stored with (:func:`_time_shots`): a change in one scene can move
     another one's durations through the episode's window pass.
 
+    A scene marked ``retime_only`` (phase 5 stage 7: a text-only edit kept
+    its plan, and its entry follows the new revision) is no stale one: it is
+    re-timed with the rest, in place, and its mark is dropped once every one
+    of its lines is measured for its words (returned as a change, so the
+    caller writes it).
+
     Whole frames (phase 5 stage 6): a storyboard flagged ``whole_frames`` is
     re-timed in whole frames. One timed before keeps its old timing while
     any of its shots keeps its duration (a skipped scene's shots would
@@ -827,7 +864,22 @@ def retime_storyboard(storyboard, script, *, template, language, style_lock) -> 
     if whole_frames and not storyboard.get("whole_frames"):
         storyboard["whole_frames"] = True
         changed = True
+    for scene in scenes_in_order:
+        entry = storyboard["scenes"][scene["scene_id"]]
+        if entry.get("retime_only") and scene["scene_id"] not in skip and all(
+                _measured_for_its_words(line) for line in scene["lines"]):
+            del entry["retime_only"]
+            changed = True
     return changed
+
+
+def _measured_for_its_words(line) -> bool:
+    """Whether *line*'s timing is a measurement of its words as they are now
+    (not an estimate, not a take of other words): the part of
+    ``voice_lines.is_measured`` a pure function can see."""
+    current = line.get("timing") or {}
+    return current.get("source") not in (None, "estimated") and current.get("text_hash") == timing.text_hash(
+        line["text"])
 
 
 def _non_cut_inside_a_scene(storyboard) -> bool:

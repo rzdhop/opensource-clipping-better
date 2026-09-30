@@ -1676,7 +1676,9 @@ EPISODE_TARGET_DOCS = {"scene": "script", "hook": "script", "cliffhanger": "scri
 # the steps' to write.
 SCRIPT_PATCH_FIELDS = ("lines", "scenes", "hook_on_screen_text", "cliffhanger_reveal", "next_episode_teaser")
 SCRIPT_LINE_PATCH_FIELDS = ("text", "speaker", "emotion", "delivery")
-SCRIPT_SCENE_PATCH_FIELDS = ("summary", "on_screen_text")
+# ``pays_off`` (phase 5 stage 7): a scene's payoff re-planned by hand, checked
+# against the hooks open before the episode (``_edit_pays_off``).
+SCRIPT_SCENE_PATCH_FIELDS = ("summary", "on_screen_text", "pays_off")
 STORYBOARD_PATCH_FIELDS = ("shots", "transitions", "refresh_prompts")
 STORYBOARD_SHOT_PATCH_FIELDS = ("framing", "camera_motion", "modifiers", "action", "keep_still", "prompt_override")
 STORYBOARD_TRANSITION_PATCH_FIELDS = ("type",)
@@ -2628,11 +2630,51 @@ def _unknown_fields(fields, editable, what) -> None:
                                       f"(editable: {', '.join(editable)})."))
 
 
-def _edit_script(ec, script, fields, errors) -> list:
-    """*fields* into *script* (in place); returns the scene ids whose content
-    changed, in the script's order."""
+def _edit_pays_off(ec, path, scene, value, errors) -> None:
+    """A scene's new ``pays_off`` (phase 5 stage 7; stage 3 left no way to
+    re-plan a payoff): a list of at most ``prompts.E1_PAYS_OFF_PER_SCENE``
+    hooks, each one open when the episode starts
+    (``series_memory.open_hooks_before``, verbatim: E1's own rule), null or
+    an empty list for none -- stored as nothing, as E1 stores it. Whether a
+    body scene still pays one off is the consistency check's question (the
+    script step's pre-check, ``script.payoff_issues``), asked again since
+    the edit stales it."""
+    if value is None:
+        value = []
+    if not isinstance(value, list) or not all(isinstance(hook, str) for hook in value):
+        errors.append(f"{path}.pays_off: expected a list of open hooks")
+        return
+    hooks = list(dict.fromkeys(value))
+    most = prompts.E1_PAYS_OFF_PER_SCENE
+    if len(hooks) > most:
+        errors.append(f"{path}.pays_off: {len(hooks)} hooks, at most {most} a scene")
+        return
+    open_hooks = series_memory.open_hooks_before(ec.season, ec.ep) if ec.season else []
+    shut = [hook for hook in hooks if hook not in open_hooks]
+    for hook in shut:
+        listed = "; ".join(open_hooks) if open_hooks else "none"
+        errors.append(f"{path}.pays_off: {hook!r} is not a hook open before episode {ec.ep} (open: {listed})")
+    if shut or hooks == (scene.get("pays_off") or []):
+        return
+    if hooks:
+        scene["pays_off"] = hooks
+    else:
+        scene.pop("pays_off", None)
+
+
+def _edit_script(ec, script, fields, errors) -> tuple:
+    """*fields* into *script* (in place). Returns ``(touched, plan_kept,
+    keep_approval)``: the scene ids whose content changed, in the script's
+    order; ``{scene_id: retime}`` of those whose every change keeps their
+    shot plan (phase 5 stage 7: a line's words or delivery, the scene's
+    ``pays_off`` -- same line ids, speakers and emotions; *retime* when
+    words moved); and whether every change of the edit was such a one (the
+    storyboard's approval then stands, DEC-129 as amended). A speaker, an
+    emotion, a summary, an on-screen text, the hook's text, the
+    cliffhanger's reveal or the teaser clears it as before."""
     ep = ec.ep
-    touched = set()
+    touched, structural, retime = set(), set(), set()
+    other = False
     lines = {line["line_id"]: (scene, line) for scene in script["scenes"] for line in scene["lines"]}
     for path, item in _items(errors, fields, "lines", "line_id", SCRIPT_LINE_PATCH_FIELDS):
         found = lines.get(item.get("line_id"))
@@ -2658,6 +2700,13 @@ def _edit_script(ec, script, fields, errors) -> list:
             line["timing"] = timing.estimated_timing(line["text"], ec.language)
         if line != before:
             touched.add(scene["scene_id"])
+            # The shots were planned from who speaks and how they feel
+            # (shots.fast_plan's framings, T1's input): another speaker or
+            # emotion re-plans the scene; other words only re-time it.
+            if line["speaker"] != before["speaker"] or line["emotion"] != before["emotion"]:
+                structural.add(scene["scene_id"])
+            elif line["text"] != before["text"]:
+                retime.add(scene["scene_id"])
 
     scenes = {scene["scene_id"]: scene for scene in script["scenes"]}
     for path, item in _items(errors, fields, "scenes", "scene_id", SCRIPT_SCENE_PATCH_FIELDS):
@@ -2665,13 +2714,17 @@ def _edit_script(ec, script, fields, errors) -> list:
         if scene is None:
             errors.append(f"{path}.scene_id: {item.get('scene_id')!r} is not a scene of episode {ep}")
             continue
-        before = dict(scene)
+        before = copy.deepcopy(scene)
         if "summary" in item:
             value = _required_text(errors, f"{path}.summary", item["summary"])
             if value is not None:
                 scene["summary"] = value
         if "on_screen_text" in item:
             scene["on_screen_text"] = _optional_text(item["on_screen_text"])
+        if (scene["summary"], scene["on_screen_text"]) != (before["summary"], before["on_screen_text"]):
+            structural.add(scene["scene_id"])
+        if "pays_off" in item:
+            _edit_pays_off(ec, path, scene, item["pays_off"], errors)
         if scene != before:
             touched.add(scene["scene_id"])
 
@@ -2681,20 +2734,27 @@ def _edit_script(ec, script, fields, errors) -> list:
         value = _optional_text(fields["hook_on_screen_text"])
         if value != script["hook"]["on_screen_text"]:
             script["hook"]["on_screen_text"] = value
+            other = True
             if hook is not None:
                 touched.add(hook["scene_id"])
+                structural.add(hook["scene_id"])
     if "cliffhanger_reveal" in fields:
         value = _required_text(errors, "cliffhanger_reveal", fields["cliffhanger_reveal"])
         if value is not None and value != script["cliffhanger"]["reveal"]:
             script["cliffhanger"]["reveal"] = value
+            other = True
             if cliff is not None:
                 script["cliffhanger"]["scene_id"] = cliff["scene_id"]
                 touched.add(cliff["scene_id"])
+                structural.add(cliff["scene_id"])
     if "next_episode_teaser" in fields:
         value = _required_text(errors, "next_episode_teaser", fields["next_episode_teaser"])
-        if value is not None:
+        if value is not None and value != script["next_episode_teaser"]:
             script["next_episode_teaser"] = value
-    return [scene["scene_id"] for scene in script["scenes"] if scene["scene_id"] in touched]
+            other = True
+    ordered = [scene["scene_id"] for scene in script["scenes"] if scene["scene_id"] in touched]
+    plan_kept = {sid: sid in retime for sid in ordered if sid not in structural}
+    return ordered, plan_kept, not structural and not other
 
 
 def patch_script(stories, story_id, ep, fields, *, now) -> dict:
@@ -2702,18 +2762,25 @@ def patch_script(stories, story_id, ep, fields, *, now) -> dict:
     returns it as written.
 
     ``lines`` ``[{line_id, text?, speaker?, emotion?, delivery?}]``,
-    ``scenes`` ``[{scene_id, summary?, on_screen_text?}]``,
+    ``scenes`` ``[{scene_id, summary?, on_screen_text?, pays_off?}]``,
     ``hook_on_screen_text`` (null clears it), ``cliffhanger_reveal`` and
     ``next_episode_teaser`` (texts). Checked as the steps check what they
     write -- the script's schema and rules (a speaker of the scene or the
-    narrator, at most 22 words a line, ...) and the story's -- and refused
-    whole (``invalid`` with every error; nothing written). A line with other
-    words or another speaker gets a fresh estimated timing (its measured take
-    stays on disk). A change moves the revisions and clears both approvals,
-    stales the consistency report and the storyboard's scenes planned from
-    the scenes it changed (``episode_common.mark_changed``); the script is
-    re-timed; the storyboard is written before the script. Nothing sent, or
-    nothing changed: nothing written. ``conflict`` without a script."""
+    narrator, at most 22 words a line, a payoff one hook open before the
+    episode, ...) and the story's -- and refused whole (``invalid`` with
+    every error; nothing written). A line with other words or another
+    speaker gets a fresh estimated timing (its measured take stays on disk).
+    A change moves the revisions, clears the script's approval and stales
+    the consistency report (``episode_common.mark_changed``); the script is
+    re-timed; the storyboard is written before the script.
+
+    The storyboard (phase 5 stage 7, DEC-129 as amended): a text-only edit
+    -- a line's words or delivery, a scene's ``pays_off`` -- keeps its
+    approval and every shot; a scene whose words changed is marked
+    ``retime_only`` (planned from its new revision, re-timed in place once
+    its lines are re-voiced). Any other change clears its approval and
+    stales the scenes it changed, as before. Nothing sent, or nothing
+    changed: nothing written. ``conflict`` without a script."""
     story = load(stories, story_id)
     ep = episode_bounds(stories, story, ep)
     _unknown_fields(fields, SCRIPT_PATCH_FIELDS, "script")
@@ -2725,7 +2792,7 @@ def patch_script(stories, story_id, ep, fields, *, now) -> dict:
     ec = _context(stories, story_id, ep)
     trial = copy.deepcopy(script)
     errors = []
-    touched = _edit_script(ec, trial, fields, errors)
+    touched, plan_kept, keep_approval = _edit_script(ec, trial, fields, errors)
     message = "The script would not be valid with these values."
     if errors:
         raise _invalid_values(message, errors)
@@ -2739,7 +2806,8 @@ def patch_script(stories, story_id, ep, fields, *, now) -> dict:
         raise _invalid_values(message, errors)
 
     board = read_episode(stories, story_id, ep, STORYBOARD_DOC)
-    episode_common.mark_changed(trial, board, scene_ids=touched, now=now)
+    episode_common.mark_changed(trial, board, scene_ids=touched, now=now, plan_kept=plan_kept,
+                                keep_approval=keep_approval)
     episode_common.retime(trial, ec, board)
     # The storyboard first: a failure between the two writes can only leave
     # an approval cleared too early (episode_regenerate's order).
@@ -2799,8 +2867,10 @@ def _edit_action(ec, path, shot, scene, value, errors) -> None:
 def _edit_storyboard(ec, script, board, fields, errors) -> tuple:
     """*fields* into *board* (in place): the shots and transitions edited.
     Returns ``(to_resolve, retime)``: ``{shot_id: (path, camera motion sent
-    or None)}`` of the shots to resolve again, and whether a transition
-    changed."""
+    or None, prompt)}`` of the shots to move and resolve again -- *prompt*
+    when their framing, action or subjects changed (a motion swap alone
+    keeps the prompt its image was made from, phase 5 stage 7) -- and
+    whether a transition changed."""
     ep, lock = ec.ep, ec.style_lock
     scenes = {scene["scene_id"]: scene for scene in script["scenes"]}
     by_id = {shot["shot_id"]: shot for shot in board["shots"]}
@@ -2827,7 +2897,7 @@ def _edit_storyboard(ec, script, board, fields, errors) -> tuple:
                 errors.append(f"{path}.camera_motion: {item['camera_motion']!r} is not one of "
                               f"{', '.join(schemas.CAMERA_MOTIONS)}")
             else:
-                to_resolve[shot["shot_id"]] = (path, item["camera_motion"])
+                to_resolve[shot["shot_id"]] = (path, item["camera_motion"], False)
         if "modifiers" in item:
             value = item["modifiers"]
             if not isinstance(value, list) or not all(isinstance(m, str) for m in value):
@@ -2853,7 +2923,8 @@ def _edit_storyboard(ec, script, board, fields, errors) -> tuple:
             else:
                 shot["prompt_override"] = _optional_text(value)
         if (shot["framing"], shot["action"], shot["subject_tags"]) != before:
-            to_resolve.setdefault(shot["shot_id"], (path, None))
+            _path, wanted, _prompt = to_resolve.get(shot["shot_id"], (path, None, True))
+            to_resolve[shot["shot_id"]] = (path, wanted, True)
 
     retime = False
     transitions = {transition["after"]: transition for transition in board["transitions"]}
@@ -2877,15 +2948,19 @@ def _edit_storyboard(ec, script, board, fields, errors) -> tuple:
 
 
 def _resolve_again(ec, script, board, to_resolve, errors) -> None:
-    """Each shot of *to_resolve* moved and resolved again, as the storyboard
-    resolves it (``shots.motion_for``, ``shots.resolve_shot``). A camera
-    motion sent that the style overrides for the shot's framing or scene is
-    an error rather than silently replaced."""
+    """Each shot of *to_resolve* moved and -- when its framing, action or
+    subjects changed -- resolved again, as the storyboard resolves it
+    (``shots.motion_for``, ``shots.resolve_shot``). A camera motion sent
+    that the style overrides for the shot's framing or scene is an error
+    rather than silently replaced (DEC-141). A motion swap alone keeps the
+    shot's prompt as it is, so its image stays current (phase 5 stage 7):
+    re-resolving it would take in an entity edited since, outdating the
+    image for a change it does not show."""
     lock = ec.style_lock
     by_function = lock["motion_rules"]["tier1"]["by_function"]
     scenes = {scene["scene_id"]: scene for scene in script["scenes"]}
     by_id = {shot["shot_id"]: shot for shot in board["shots"]}
-    for shot_id, (path, wanted) in to_resolve.items():
+    for shot_id, (path, wanted, prompt) in to_resolve.items():
         shot = by_id[shot_id]
         scene = scenes[shot["scene_id"]]
         motion = shots.motion_for(shot["framing"], wanted or shot["camera_motion"], scene["function"], lock)
@@ -2893,6 +2968,10 @@ def _resolve_again(ec, script, board, to_resolve, errors) -> None:
             what = (f"a {shot['framing']} shot" if shot["framing"] in by_function
                     else f"a {scene['function']} scene")
             errors.append(f"{path}.camera_motion: the style moves {what} with {motion['type']}, not {wanted!r}")
+            continue
+        if not prompt:
+            shot["camera_motion"] = motion["type"]
+            shot["motion"] = motion
             continue
         try:
             resolved = shots.resolve_shot({"framing": shot["framing"], "action": shot["action"],
@@ -2908,21 +2987,48 @@ def _resolve_again(ec, script, board, to_resolve, errors) -> None:
         _stamp_resolved(board["resolved_from"], shot, scene, ec.entities)
 
 
+def _check_framing_rules(ec, script, board, trial, errors) -> None:
+    """A framing edit keeps the storyboard's cross-scene rules
+    (``shots.rule_pass``: no two shots in a row share a framing, every
+    three scenes hold a close-up) or it is refused, naming the shot the
+    rules would move -- the edited one or a neighbour -- instead of that
+    shot being moved silently the next time the storyboard is built
+    (phase 5 stage 7). Only what the edit breaks counts: a rule a storyboard
+    already broke before it (edited by hand before this check) is left to
+    whoever made it."""
+    if all(new["framing"] == old["framing"] for new, old in zip(trial["shots"], board["shots"])):
+        return
+    before = shots.rule_moves(board, script, ec.style_lock)
+    for shot_id, move in shots.rule_moves(trial, script, ec.style_lock).items():
+        if before.get(shot_id) == move:
+            continue
+        framing, wanted, why = move
+        errors.append(f"shots: the framing edit breaks the storyboard's cross-scene rules ({why}): they would move "
+                      f"{shot_id} from {framing!r} to {wanted!r}; it is refused rather than moving a shot silently, "
+                      "pick another framing")
+
+
 def patch_storyboard(stories, story_id, ep, fields, *, now) -> dict:
     """Edit episode *ep*'s storyboard (``fields``: ``STORYBOARD_PATCH_FIELDS``);
     returns it as written.
 
     ``shots`` ``[{shot_id, framing?, camera_motion?, modifiers?, action?,
-    keep_still?, prompt_override?}]`` -- a shot whose framing, motion or
-    action changed is moved and resolved again (its action tagged as T1 tags
-    one: the scene's tags only, no name); ``transitions`` ``[{after, type}]``
+    keep_still?, prompt_override?}]`` -- a shot whose framing or action
+    changed is moved and resolved again (its action tagged as T1 tags one:
+    the scene's tags only, no name), so its image goes stale
+    (``assets.shot_state``); a framing that breaks the cross-scene rules is
+    refused, naming the shot they would move (:func:`_check_framing_rules`);
+    a camera motion alone moves the shot and keeps its prompt, so its image
+    stays current and only its render changes (a motion the style fixes is
+    refused, DEC-141); ``transitions`` ``[{after, type}]``
     -- the template's duration for it, a non-cut type only between two
     scenes, and the shots re-timed around it; ``refresh_prompts: true`` --
     every shot's prompt resolved again from the entities as they are now
     (``shots.refresh_prompts``). Refused whole (``invalid`` with every error;
     nothing written). A change clears the storyboard's approval and moves its
     revision; the script is re-timed with it (its revision and approval
-    never move). Nothing sent, or nothing changed: nothing written.
+    never move); no shot's ``assets`` moves (phase 5 stage 7: never a
+    rebuild). Nothing sent, or nothing changed: nothing written.
     ``conflict`` without a storyboard."""
     story = load(stories, story_id)
     ep = episode_bounds(stories, story, ep)
@@ -2945,6 +3051,8 @@ def patch_storyboard(stories, story_id, ep, fields, *, now) -> dict:
     message = "The storyboard would not be valid with these values."
     if not errors:
         _resolve_again(ec, script, trial, to_resolve, errors)
+    if not errors:
+        _check_framing_rules(ec, script, board, trial, errors)
     if errors:
         raise _invalid_values(message, errors)
     if retime:

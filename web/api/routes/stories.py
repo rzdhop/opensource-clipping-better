@@ -1867,11 +1867,13 @@ async def post_proposal_decision(story_id: str, ep: str, item_id: str,
 async def patch_episode_script(story_id: str, ep: str, req: ScriptPatchRequest) -> dict:
     """Edit an episode's script inline (``ScriptPatchRequest``:
     ``lines [{line_id, text?, speaker?, emotion?, delivery?}]``, ``scenes
-    [{scene_id, summary?, on_screen_text?}]``, ``hook_on_screen_text``,
+    [{scene_id, summary?, on_screen_text?, pays_off?}]``, ``hook_on_screen_text``,
     ``cliffhanger_reveal``, ``next_episode_teaser``); see ``_episode_edit``
     and ``workflow.patch_script``: an edited line gets a fresh estimated
-    timing, the script is re-timed, its report goes stale, both documents
-    lose their approval and the storyboard's scenes it changed go stale."""
+    timing, the script is re-timed, its report goes stale and it loses its
+    approval; a text-only edit keeps the storyboard's (its re-timed scenes
+    marked ``retime_only``), any other change clears it and stales the
+    storyboard's scenes it changed."""
     return await run_in_threadpool(_episode_edit, story_id, ep, req, workflow.patch_script)
 
 

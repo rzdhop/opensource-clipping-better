@@ -1,8 +1,9 @@
-## CURRENT STATE — AI Story **phase 5 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–6 **done**; next: **stage 7**
+## CURRENT STATE — AI Story **phase 5 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–7 **done**; next: **stage 8**
 - **In-progress header** (keep current):
   - **Current phase:** IMPLEMENT (phases 0–3 done: the plan was mapped, clarified and approved 2026-09-29).
-  - **Current stage:** 6 done → next **stage 7** (re-edit operations) [Opus agent].
-  - **Next action:** spawn the stage-7 agent (plan stage 7 + the stage 3/6 notes below); fail-first.
+  - **Current stage:** 7 done → next **stage 8** (partial re-render, **RISKIEST**) [Opus agent].
+  - **Next action:** spawn the stage-8 agent (plan stage 8 + stage 7's edit table below); partial == full under
+    real ffmpeg; golden unedited.
   - **Open questions:** none blocking. Stage 12 needs the human to confirm font filenames, sources and sizes
     before any download.
 - **Started** 2026-09-29 on the human's "Start AI Story phase 5 under the repo protocol (FULL task), on this
@@ -107,6 +108,18 @@
   episodes, 5 tightened at 79.83–79.91 s become "over" (fast track refuses) and 2 at 74.96–74.99 s "tightened".
   Latent old-timing bug (not fixed; whole-frame boards cannot hit it): an unflagged board whose total lands on an
   exact half frame can be refused at plan time (1/32 random episodes on HEAD).
+- **Stage 7 notes:** text-only edit = a line's words/delivery or a scene's `pays_off` with the same line ids,
+  speakers and emotions → script approval cleared, E4 stale, **storyboard approval and every shot kept**, the scene
+  `retime_only` (words changed) and re-timed in place at re-voice. Speaker/emotion and other script fields stay
+  structural (as today). A voice regenerate's note is Gemini's style instruction ("Say <note>: <line>"; **live
+  behaviour unchecked → stage 13**), recorded-not-applied on Edge/local; its take persisted (pending before the
+  call, recorded after). Render refuses an outdated unlocked shot image naming its regenerate target
+  (`render.require_renderable`); a framing edit creating a rule move is refused. A transition edit can shift the
+  scene it leaves by whole frames (the plan's "no shot key changes" does not hold in general). The dashboard must
+  handle "storyboard approved, script not" (stage 11); `docs/AI_STORY.md:328` still says every edit clears both
+  approvals (stage 15). Plan contradiction resolved: the plan said the old :312 re-time test passes unedited, but it
+  asserted the DEC-129 behaviour stage 7 amends → its input (and 2 others') now also changes an emotion so they keep
+  testing the structural path; assertions unchanged.
 - **Rollback:** code: delete the worktree and the branch (or revert a stage's commit). Live data: restore the
   tars (`tar -C outputs/stories -xzf …`) and check `sha256sum -c enfr-before.sha`.
 
@@ -134,8 +147,8 @@ RC-P1…P11, RC-S1…S4, RC-T1…T3, RC-E1…E5 and RC-A1…A9 (tables below) st
 | 4 | steps memory, feedback, propose-next and the gate [Opus] | **done** (local 6061/1, CI 5348/683; 45 new tests + 8 reverted mutation proofs; the later-phase pins moved, named) |
 | 5 | series API and CLI [Sonnet] | **done** (local 6125/1, CI 5367/728; 64 new tests, 45 API ones skip in CI like every route test; 3 named re-pins) |
 | 6 | whole-frame shot timing (second riskiest) [Opus] | **done** (local 6149/1, CI 5391/728; 24 new tests; golden + framemd5 unedited; live FR/EN ep01 plans byte-identical; drift 20 % → 0) |
-| 7 | re-edit operations [Opus] | next |
-| 8 | partial re-render (**RISKIEST**) [Opus] | — |
+| 7 | re-edit operations [Opus] | **done** (local 6185/1, CI 5427/728; 36 new tests + 8 reverted mutations; 3 named input re-pins) |
+| 8 | partial re-render (**RISKIEST**) [Opus] | next |
 | 9 | re-edit API and CLI [Sonnet] | — |
 | 10 | dashboard: SeasonBoard series panel [Sonnet] | — |
 | 11 | dashboard: EpisodeStudio re-edit [Sonnet] | — |
