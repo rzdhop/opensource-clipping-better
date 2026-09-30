@@ -1,6 +1,8 @@
 ## CURRENT STATE — AI Story **phase 5 DONE** (2026-09-30). Next: **phase 6** (start prompt: `.claude/plans/ai-story/13-phase-6-start-prompt.md`)
 - **Close-out (2026-09-30):** stages 0–15 done (ledger below). `feat/ai-story-phase-5` fast-forwarded into `main`
-  and pushed with the phase-5 close commit; CI result in the action log's last line.
+  and pushed (`1b91db2`). **OPEN: CI is RED** on `1b91db2` (run 36749226496, job `test`, pytest step; the log needs
+  admin rights). Ruled out: Python 3.11, syntax, the golden/partial ffmpeg tests (see the log). Next: the human
+  pastes the FAILED lines → one fix, Tier-1, push. **No phase-6 merge/push until `main` is green.**
 - **Final Tier-1** (the closing tree, 2026-09-30 17:02–17:08 UTC): local 6474 passed / 1 skipped, CI env 5688 passed /
   756 skipped, compileall clean (dashboard unchanged since stage 13b's green vite build).
 - **Live state:** deployed code `d08c92d` (== the final code; later commits touch only `.claude/` and `docs/`),
