@@ -1,4 +1,4 @@
-## CURRENT STATE — AI Story **phase 5 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–13b **done**; next: **deploy at 0 jobs, then stage 14** (five styles)
+## CURRENT STATE — AI Story **phase 5 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–13b **done**, deployed `065a02c`; now: **stage 14** (five styles, anime running)
 - **In-progress header** (keep current):
   - **Current phase:** IMPLEMENT (phases 0–3 done: the plan was mapped, clarified and approved 2026-09-29).
   - **Close session started 2026-09-30** with the close prompt (`12-phase-5-close-prompt.md`), sent by the human
@@ -8,8 +8,9 @@
     regenerate on fal with the estimate logged first — stop if > $0.10, approve, dry run, rerender $0; manifest
     "N of M" == dry run; `allow_paid` on only for that run with caps 0.10/0.10/0.10, then off + 1/3/10 at once;
     ledger booked and compared with fal's price table; no OpenRouter).
-  - **Current stage:** 13b **done** (commits below) → next: ff `main`, deploy at 0 jobs (`rm -sfv` + `up -d
-    --build`: the dashboard changed), then stage 14. 13b was: F4 (cast pacing), F1 (Season step stays open after a
+  - **Current stage:** 14 — anime running (background, `stage14/run_style.py anime`); then cinematic_real,
+    cartoon_flat, storybook_watercolor, claymation, one at a time. 13b **done** (`a833287`, `065a02c`), deployed at
+    0 jobs (`rm -sfv` + `up -d --build`), live `main` = `065a02c`. 13b was: F4 (cast pacing), F1 (Season step stays open after a
     series job), F2 (paste counter in code points), F5 ("Approve proposals" shows approved once the propose-next job
     is completed), F8 (re-voice and other controls needing the approved script disabled with the server's reason);
     F6 → A-084 only. **Browser check (me, 375 px, scratch copy of the live FR story + its 68 job records in the
