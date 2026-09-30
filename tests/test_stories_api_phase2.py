@@ -427,7 +427,7 @@ def test_the_phase_2_grammar_moved_out_of_the_later_phases():
                    "place:place_beach:text", "place:place_beach:image:night", "prop:prop_phone:text",
                    "prop:prop_phone:image", "season:12"):
         assert workflow.check_regenerate_target(target) is None, target
-    for target in ("character:char_kiwilo:image:extra:1", "shot:1:sh03:video"):
+    for target in ("character:char_kiwilo:image:extra:1", "shot:1:sh03:frames"):
         with pytest.raises(workflow.WorkflowError) as caught:
             workflow.check_regenerate_target(target)
         assert caught.value.code == "later_phase"

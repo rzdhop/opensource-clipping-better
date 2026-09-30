@@ -508,7 +508,7 @@ def test_the_readers_see_phase4_things():
     """A broken regex would make every assertion below pass for free."""
     assert len(_class_fields("AssetsShotPatch")) >= 2
     assert len(_class_fields("AssetsPatchRequest")) >= 1
-    assert len(workflow.ASSETS_PARAMS) == 1
+    assert len(workflow.ASSETS_PARAMS) == 2
     assert len(workflow.FAST_TRACK_PARAMS) == 1
 
 

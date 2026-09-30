@@ -600,6 +600,26 @@ def _generation_estimate(stories, story, step, units, *, env, probe_local=False)
     }
 
 
+def _clip_estimate(stories, story, parsed, env) -> dict:
+    """``shot:<ep>:<shid>:video``'s estimate (``workflow.
+    regenerate_clip_estimate``): one clip's seconds x the price on the
+    episode's video link. Blocking (a local ComfyUI is asked its status), so
+    it runs off the event loop."""
+    with _answering():
+        return workflow.regenerate_clip_estimate(stories, story, parsed, env=env, probe_local=True)
+
+
+def _clip_gate(estimate):
+    """The gate of a shot's clip regenerate: 409 with its estimate's sentence
+    when the clip cannot run now or would go over a cap."""
+
+    def gate():
+        if not estimate["ready"]:
+            raise HTTPException(status_code=409, detail=estimate["message"])
+
+    return gate
+
+
 def _generation_gate(stories, story, units, *, env, llm=True, needs_editor=False):
     """The gate of a phase-2 job, before it exists (``_create_step_job``):
     the key gate when it calls the LLM (400, as phase 1), then
@@ -1090,9 +1110,11 @@ def _phase4_checks(stories, story, step, params, ep, env):
     model = _STEP_PARAMS.get(step)
     sent = _sent(model(**params)) if model is not None else {}
     if step == "assets":
+        animate = params.get("animate") is not False  # the step's own default: on
+
         def gate():  # the plan's own stop, before the first call
             with _answering():
-                workflow.assets_gate(ec, env=env)
+                workflow.assets_gate(ec, env=env, animate=animate)
     elif step == "render":
         def gate():  # it calls nothing: no gate
             return None
@@ -1467,9 +1489,16 @@ async def regenerate(story_id: str, req: StoryRegenerateRequest) -> JobResponse:
     render or with a pack written for another render or script; then the key
     gate (400).
 
+    Phase 6: a shot's clip ``shot:<ep>:<shid>:video`` is a job of
+    ``assets:<ep>`` -- 404 for a shot the episode does not have; 409 until
+    the script and a current storyboard are approved, below tier 2, for a
+    shot kept still or a keyframe that is not current, and when its one clip
+    cannot run now or would go over a cap (``workflow.
+    regenerate_clip_estimate``).
+
     A later phase's target of the 9.2 grammar
-    (``character:<id>:image:extra:<n>``, ``shot:<ep>:<shid>:video`` among
-    them): 400. Anything else: 400 naming the valid shapes.
+    (``character:<id>:image:extra:<n>``, any other ``shot:<ep>:<shid>:<word>``
+    among them): 400. Anything else: 400 naming the valid shapes.
     """
     stories = _stories()
     story = _load(stories, story_id)
@@ -1492,8 +1521,12 @@ async def regenerate(story_id: str, req: StoryRegenerateRequest) -> JobResponse:
         voice = workflow.check_entity_target(stories, story, parsed, voice=voice, env=env)
         units = workflow.target_units(stories, story, parsed)
         needs_editor = workflow.target_needs_editor(story, parsed)
-    gate = _generation_gate(stories, story, units, env=env, llm=bool(units["llm_calls"]),
-                            needs_editor=needs_editor)
+    if parsed[0] == regenerate_step.SHOT_VIDEO_KIND:
+        clip = await run_in_threadpool(_clip_estimate, stories, story, parsed, env)
+        gate = _clip_gate(clip)
+    else:
+        gate = _generation_gate(stories, story, units, env=env, llm=bool(units["llm_calls"]),
+                                needs_editor=needs_editor)
     return await _create_step_job(story_id, "regenerate", {"target": target, "note": req.note, "voice": voice},
                                   gate=gate)
 
@@ -1682,6 +1715,8 @@ async def estimate(story_id: str, step: str, target: Optional[str] = None,
             parsed = regenerate_step.parse_target(target)
             workflow.check_entity_target(stories, story, parsed)
             units = workflow.target_units(stories, story, parsed)
+        if parsed[0] == regenerate_step.SHOT_VIDEO_KIND:
+            return await run_in_threadpool(_clip_estimate, stories, story, parsed, env)
         if not units["llm_calls"]:
             return _generation_estimate(stories, story, step, units, env=env)
 

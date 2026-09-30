@@ -125,11 +125,12 @@ EPISODE_APPROVALS = ("script", "storyboard", "assets")
 SERIES_APPROVALS = ("memory", "feedback", "proposals")
 
 # Spec 9.2, regenerate grammar: every "<kind>:..." target of a later phase.
-# Phase 2's, phase 3's and phase 4's targets are ``regenerate.parse_target``'s;
-# its ``character:<id>:image:extra:<n>`` is still a later phase's, and so is
-# every other ``shot:`` form -- ``shot:<ep>:<shid>:video`` (phase 6) among
-# them: ``shot:<ep>:<shid>:plan`` and the shot's image ``shot:<ep>:<shid>``
-# are read before this list is (DEC-140).
+# Phase 2's, phase 3's, phase 4's and phase 6's targets are
+# ``regenerate.parse_target``'s; its ``character:<id>:image:extra:<n>`` is
+# still a later phase's, and so is every other ``shot:`` form (``:frames``
+# among them): ``shot:<ep>:<shid>:plan``, the shot's image
+# ``shot:<ep>:<shid>`` and -- phase 6 stage 8 -- its clip
+# ``shot:<ep>:<shid>:video`` are read before this list is (DEC-140).
 LATER_TARGETS = ("shot",)
 
 # What approving the bible requires (spec 2.1, 3 step 3).
@@ -354,10 +355,11 @@ def check_regenerate_target(target) -> None:
     """A target this phase regenerates passes -- phase 1's fixed ones, phase
     2's entity targets and the episode targets of phases 3 and 4
     (``regenerate.parse_target``: the shape only; the entity or the episode
-    itself is checked by :func:`check_entity_target`). A later phase's target
-    of the 9.2 grammar -- ``character:<id>:image:extra:<n>`` and
-    ``shot:<ep>:<shid>:video`` among them -- is ``later_phase``; anything else
-    is ``invalid``, naming the valid shapes."""
+    itself is checked by :func:`check_entity_target`) -- phase 6's
+    ``shot:<ep>:<shid>:video`` among them. A later phase's target of the 9.2
+    grammar -- ``character:<id>:image:extra:<n>`` and any other
+    ``shot:<ep>:<shid>:<word>`` -- is ``later_phase``; anything else is
+    ``invalid``, naming the valid shapes."""
     if target in regenerate_step.VALID_TARGETS:
         return
     if regenerate_step.parse_target(target) is not None:
@@ -1241,8 +1243,12 @@ def target_units(stories, story, parsed) -> dict:
     or one image (``prompt_only``); a day plate or a prop image one image; a
     voice the characters of its sample line. Phase 4: a shot's image one
     image (``prompt_only``) or one edit (``references``: the shot's
-    references are sent); a line's voice the characters of its text."""
+    references are sent); a line's voice the characters of its text. Phase
+    6: a shot's clip none of these (no LLM call, no image, no voice): its
+    one clip is priced by :func:`regenerate_clip_estimate`."""
     prompt_only = story["generation_profile"]["consistency_mode"] == refimages.PROMPT_ONLY
+    if parsed[0] == regenerate_step.SHOT_VIDEO_KIND:
+        return _units()
     if parsed[0] == regenerate_step.SHOT_IMAGE_KIND:
         return _units(images=1) if prompt_only else _units(edit_images=1)
     if parsed[0] == regenerate_step.LINE_KIND:
@@ -1686,7 +1692,7 @@ ASSETS_LINKS_FIELD = "links"
 # has none: its job ends completed (DEC-161).
 EPISODE_TARGET_DOCS = {"scene": "script", "hook": "script", "cliffhanger": "script", "teaser": "script",
                        "shot": "storyboard", regenerate_step.SHOT_IMAGE_KIND: "assets",
-                       regenerate_step.LINE_KIND: "assets"}
+                       regenerate_step.SHOT_VIDEO_KIND: "assets", regenerate_step.LINE_KIND: "assets"}
 
 # What an edit may set (the API's ScriptPatchRequest / StoryboardPatchRequest
 # and their items). An item names what it edits by its id (``line_id``,
@@ -1838,7 +1844,8 @@ def require_complete_script(ec) -> dict:
 def phase4_request(step, params) -> dict:
     """A phase-4 step's *params*, checked as its runner reads them (closed
     lists; ``invalid`` otherwise, naming the choices): ``assets``
-    ``{align_words?}`` (true or false), ``render`` ``{subtitles?, encoder?}``
+    ``{align_words?, animate?}`` (true or false; ``animate``, phase 6 stage
+    8, is on unless sent false), ``render`` ``{subtitles?, encoder?}``
     (``render.SUBTITLE_CHOICES``, ``render.ENCODER_CHOICES``), ``fast-track``
     ``{storyboard?}`` (``fast_track.STORYBOARD_CHOICES``); ``metadata`` takes
     none. Returns them as sent."""
@@ -1848,6 +1855,7 @@ def phase4_request(step, params) -> dict:
     _unknown_keys(params, known, step)
     if step == "assets":
         _flag(params, assets_step.ALIGN_PARAM)
+        _flag(params, assets_step.ANIMATE_PARAM)
     try:
         if step == "render":
             render_step.read_params(params)
@@ -1926,19 +1934,21 @@ def reedit_changes(ec) -> dict:
         raise WorkflowError(CONFLICT, str(exc)) from None
 
 
-def assets_gate(ec, *, env) -> None:
+def assets_gate(ec, *, env, animate=True) -> None:
     """The assets step's own stop before its first call
     (``assets.plan_refusal``) checked before a job exists, calling nothing (a
     local editor is not asked: the step asks it): ``conflict`` when the shot
     images cannot run on the story's route -- in ``references`` mode, no
-    editor: DEC-117's stop and ask -- or a paid part is over a cap, with the
+    editor: DEC-117's stop and ask -- the clips cannot (tier >= 2, *animate*
+    -- the step's param -- on; clips that wait only on a local ComfyUI's
+    answer are the step's to refuse), or a paid part is over a cap, with the
     numbers."""
     try:
         script, board = assets_step.require_approved(ec)
-        units = assets_step.asset_units(ec, script, board, env=env)
+        units = assets_step.asset_units(ec, script, board, env=env, animate=animate)
     except StepFailed as exc:
         raise WorkflowError(CONFLICT, str(exc)) from None
-    refusal = assets_step.plan_refusal(ec, units)
+    refusal = assets_step.plan_refusal(ec, units, unprobed=True)
     if refusal is not None:
         raise WorkflowError(CONFLICT, refusal)
 
@@ -2514,7 +2524,12 @@ def check_episode_target(stories, story, parsed) -> None:
     first") and for a line whose speaker has no pinned voice. A platform's
     metadata (``metadata``) -- ``conflict`` without a finished render
     (``metadata.require_render``) or with a pack written for another render
-    or script (the metadata step writes every platform again)."""
+    or script (the metadata step writes every platform again).
+
+    Phase 6: a shot's clip (``shot_video``) -- ``not_found`` for a shot the
+    episode does not have; ``conflict`` unless the script and a current
+    storyboard are approved, and (``assets.clip_target_refusal``) for a story
+    below tier 2, a shot kept still or a keyframe that is not current."""
     kind, ep = parsed[0], parsed[1]
     episode_context(stories, story, ep, step="regenerate", require_memory=False)
     story_id = story["story_id"]
@@ -2541,6 +2556,8 @@ def check_episode_target(stories, story, parsed) -> None:
                                            "plan it again first (the storyboard step)."))
     elif kind in (regenerate_step.SHOT_IMAGE_KIND, regenerate_step.LINE_KIND):
         _check_asset_target(stories, story_id, ep, parsed, script)
+    elif kind == regenerate_step.SHOT_VIDEO_KIND:
+        _check_clip_target(stories, story_id, ep, parsed)
     elif kind == regenerate_step.METADATA_KIND:
         ec = _context(stories, story_id, ep)
         try:
@@ -2582,6 +2599,59 @@ def _check_asset_target(stories, story_id, ep, parsed, script) -> None:
         who = "the narrator" if line["speaker"] == "narrator" else voice_lines.speaker_name(ec, line["speaker"])
         raise WorkflowError(CONFLICT, f"{voice_lines.no_voice_reason(ec, line['speaker'])}: pick a voice for {who} "
                                       "first.")
+
+
+def _clip_shot(stories, story_id, ep, parsed):
+    """``(ec, script, board, shot)`` of a ``shot:<ep>:<shid>:video`` target,
+    checked as ``assets.regenerate_shot_clip`` checks it before any call."""
+    board = read_episode(stories, story_id, ep, STORYBOARD_DOC)
+    if board is None or not board["shots"]:
+        raise _no_storyboard(ep)
+    shot = next((s for s in board["shots"] if s["shot_id"] == parsed[2]), None)
+    if shot is None:
+        raise WorkflowError(NOT_FOUND, (f"Episode {ep}'s storyboard has no shot {parsed[2]!r} (it has sh01 to "
+                                        f"sh{len(board['shots']):02d})."))
+    ec = _context(stories, story_id, ep)
+    try:
+        script, board = assets_step.require_approved(ec)
+    except StepFailed as exc:
+        raise WorkflowError(CONFLICT, str(exc)) from None
+    shot = next(s for s in board["shots"] if s["shot_id"] == parsed[2])
+    reason = assets_step.clip_target_refusal(ec, shot)
+    if reason is not None:
+        raise WorkflowError(CONFLICT, f"Cannot regenerate 'shot:{ep}:{parsed[2]}:video': {reason}")
+    return ec, script, board, shot
+
+
+def _check_clip_target(stories, story_id, ep, parsed) -> None:
+    """:func:`check_episode_target` of ``shot:<ep>:<shid>:video`` (phase 6
+    stage 8)."""
+    _clip_shot(stories, story_id, ep, parsed)
+
+
+def regenerate_clip_estimate(stories, story, parsed, *, env, adapters=None, probe_local=False) -> dict:
+    """What ``shot:<ep>:<shid>:video`` would cost and where it would run
+    (``GET /estimate/regenerate?target=``), after its checks
+    (:func:`check_episode_target`)::
+
+        {"step": "regenerate", "target", "est_usd", "units": {"clips": 1, "seconds"},
+         "route_class": "paid" | "local" | None, "link", "links", "ready", "message"}
+
+    One clip's seconds times the price per second on the episode's video
+    link -- its recorded ``links.video``, else the one the planner would take
+    (``assets.clip_quote``) -- ``ready`` false when it cannot run now or
+    would go over a cap. Calls nothing but, with *probe_local*, a local
+    ComfyUI's status."""
+    ep = parsed[1]
+    episode_context(stories, story, ep, step="regenerate", require_memory=False)
+    ec, script, board, shot = _clip_shot(stories, story["story_id"], ep, parsed)
+    quote = assets_step.clip_quote(ec, script, board, shot, env=env, adapters=adapters, probe_local=probe_local)
+    paid = quote["route_class"] == "paid"
+    return {"step": "regenerate", "target": f"shot:{ep}:{shot['shot_id']}:video",
+            "est_usd": quote["est_usd"] if paid else 0.0,
+            "units": {"clips": 1, "seconds": quote["clip_s"]}, "route_class": quote["route_class"],
+            "link": quote["link"], "links": quote["video"]["links"], "ready": quote["ready"],
+            "message": quote["message"]}
 
 
 # ---------------------------------------------------------------- approvals

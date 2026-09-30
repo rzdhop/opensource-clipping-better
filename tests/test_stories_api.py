@@ -703,7 +703,7 @@ def test_an_episode_approval_needs_its_document(api, doc, needle):
 
 
 @pytest.mark.parametrize("target", [
-    "shot:1:sh03:video",
+    "shot:1:sh03:frames",
 ])
 def test_a_later_phase_regenerate_target_is_a_400(api, target):
     story_id = _with_bible(api)
@@ -1050,7 +1050,7 @@ def test_the_estimate_of_each_phase_one_step(api):
 
     assert api.client.get(f"{url}/regenerate", params={"target": "concepts"}).json()["units"] == {"llm_calls": 10}
     assert api.client.get(f"{url}/regenerate", params={"target": "bible:tone"}).json()["units"] == {"llm_calls": 1}
-    assert api.client.get(f"{url}/regenerate", params={"target": "shot:1:sh01:video"}).status_code == 400
+    assert api.client.get(f"{url}/regenerate", params={"target": "shot:1:sh01:frames"}).status_code == 400
 
     style = api.client.get(f"{url}/style").json()
     assert (style["units"], style["route_class"], style["est_usd"], style["ready"], style["link"]) == (

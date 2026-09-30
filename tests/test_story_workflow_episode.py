@@ -131,7 +131,8 @@ def test_the_episode_steps_approvals_and_targets_left_the_later_phases(wf):
     # Phase 5 stage 4 registered memory, feedback and propose-next, stage 8 rerender: import is still later.
     assert wf.LATER_STEPS == ("import",)
     assert wf.LATER_APPROVALS == ()
-    # shot:<ep>:<shid>:video (phase 6) is still to come; phase 4 reads the shot's image first.
+    # Every other shot:<ep>:<shid>:<word> is still to come; phase 4 reads the shot's image first and
+    # phase 6 (stage 8) its clip, shot:<ep>:<shid>:video.
     assert wf.LATER_TARGETS == ("shot",)
     assert wf.SCRIPT_PARAMS == ("measure_voices",) and wf.STORYBOARD_PARAMS == ("fast",)
     assert not wf.is_later_approval("script:1") and not wf.is_later_approval("storyboard:1")
@@ -148,7 +149,7 @@ def test_the_episode_targets_joined_the_one_regenerate_grammar(wf):
         assert wf.check_regenerate_target(target) is None, target
         assert regenerate.parse_target(target) == parsed, target
     assert set(regenerate.EPISODE_TARGETS) <= set(regenerate.ENTITY_TARGETS)
-    for target in ("shot:1:sh03:video",):
+    for target in ("shot:1:sh03:frames",):
         assert "later phase" in _refused(wf, "later_phase", wf.check_regenerate_target, target)
     for target in ("scene:1:s3", "scene:0:s03", "hook:x", "teaser:1:x", "cliffhanger:"):
         detail = _refused(wf, "invalid", wf.check_regenerate_target, target)

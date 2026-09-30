@@ -808,8 +808,11 @@ class StoryApproveRequest(BaseModel):
 
 class AssetsStepParams(BaseModel):
     """``POST /steps/assets``'s params: ``align_words`` opts in to forced
-    alignment of the lines whose voice timed no words (DEC-165)."""
+    alignment of the lines whose voice timed no words (DEC-165); ``animate``
+    (tier >= 2, phase 6 stage 8) makes the clips after the images and
+    voices unless sent false."""
     align_words: Optional[bool] = None
+    animate: Optional[bool] = None
 
 
 class RenderStepParams(BaseModel):

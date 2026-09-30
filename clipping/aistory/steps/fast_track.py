@@ -219,7 +219,8 @@ def paid_verdict(units, *, ep, predicted=False) -> dict:
     paid ones on a hosted link) are a paid part as a paid image is -- priced
     even while ``allow_paid`` is off, so the check stops on them with their
     numbers; clips that cannot be planned at all are a blocker. A tier-1
-    estimate has no ``video``: its verdict is unchanged."""
+    estimate has no ``video``: its verdict is unchanged; nor does one made
+    with ``animate`` off count its clips (stage 8)."""
     images, voices_est, caps = units["images"], units["voices"], units.get("caps") or {}
     allow = bool(caps.get("allow_paid"))
     upto = "up to " if predicted else ""
@@ -260,6 +261,8 @@ def paid_verdict(units, *, ep, predicted=False) -> dict:
     if voices_usd is None:
         voices_usd = sum(float(row["est_usd"] or 0.0) for row in voice_rows if row["paid"])
     video = units.get("video")
+    if video is not None and not video.get("animate", True):
+        video = None  # animate off (phase 6 stage 8): no clip is made, none is counted
     video_usd = 0.0
     if video is not None:
         clips = video.get("count") or 0
@@ -489,9 +492,10 @@ class _FastTrack:
             if failures:
                 what = "; ".join(f"{item['what']} failed ({item['reason']})" for item in failures)
                 targets = _and(f"'{item['target']}'" for item in failures if item.get("target"))
+                # A clip still generating has no target (phase 6 stage 8): running again collects it.
+                redo = f"regenerate {targets}, or " if targets else ""
                 raise StepFailed(f"Episode {ec.ep}'s assets are not complete: {what}. Every other image and voice "
-                                 f"is kept: regenerate {targets}, or run the fast track again to ask only for what "
-                                 "is missing.")
+                                 f"is kept: {redo}run the fast track again to ask only for what is missing.")
             raise StepFailed(f"Episode {ec.ep}'s assets are not complete (not every shot has a current image and "
                              "every line a voice): run the fast track again to make what is missing.")
         ec = self.context()

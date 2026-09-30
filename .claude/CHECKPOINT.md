@@ -1,11 +1,51 @@
-## CURRENT STATE — AI Story **phase 6 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–7 **done**; next: **stage 8** (RISKIEST)
+## CURRENT STATE — AI Story **phase 6 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–8 **done**; next: **stage 9**
 - **In-progress header** (keep current):
   - **Current phase:** IMPLEMENT. EXPLORE/CLARIFY/PLAN were done 2026-09-30 in a session run in parallel with phase 5's
     close: three maps, two rounds of questions, an Opus design. The human approved the plan.
   - **Plan:** `.claude/plans/ai-story/14-phase-6-plan.md` (**APPROVED 2026-09-30**; copy at
     `~/.claude/plans/ai-story-phase-6-plan.md`). Brief: `.claude/plans/ai-story/07-phase-6-video-tiers-local.md`.
-  - **Current stage:** 8 — the video phase of the assets step and `shot:<ep>:<shid>:video` [Opus] — **RISKIEST**.
-  - **Next action:** dispatch stage 8, then Tier-1 in both environments, then commit.
+  - **Current stage:** 9 — renderer [Opus]:
+    - clips into `render_inputs`;
+    - effective `keep_still`;
+    - `fill_failed_with_motion`;
+    - the last-frame hold;
+    - `shot_modes`;
+    - a sibling Tier-2 golden.
+  - **Next action:** dispatch stage 9, then Tier-1 in both environments (+ vite if the dashboard changes), then
+    commit.
+  - **Stage 8 notes for stages 9, 11, 12, 13 and 14:**
+    - **Where it sits.** Last in `assets.run()`, after `write_assets_doc`. The assets param `animate` (default on) is
+      mirrored in `AssetsStepParams`, and `StoryboardPane` sends `animate: true`.
+    - **Plan-time refusal.** At tier ≥ 2 with animate on, a video part that is not ready refuses before any call,
+      suggesting animate off.
+    - **RC-V6.** The phase recomputes the plan once. If the link, ids, seconds or $ moved, it refuses with both
+      lists; images and voices stay written.
+      - **Consequence:** a first tier-2 run on unmeasured voices re-times the shots and hits this refusal once. A
+        second press animates. Document the flow as "animate off first" (stage 14) and show it in the UI (stage 12).
+    - **Link and failures.** A one-link chain (sticky `links.video`, recorded after the first clip).
+      - A gone link (gate refusal, 401/403, unreachable) stops the rest with the video offer.
+      - Any other failure fails only that clip (`assets.clip.state failed`, `video` cleared) and the phase goes on.
+    - **Booking.** `unit second`, qty `clip_s`, through `LineGates.booker`. fal books at submit; a resume never
+      resubmits.
+    - **Already-booked clips.** A clip booked but not yet collected (poll timeout, or a lost file) is planned at $0
+      (`why: booked`). This fixed a stage-7 double-price that blocked Continue.
+    - **Still generating.** The clip is offered only "press Continue" (`CONTINUE_ONLY`). Its regenerate is refused
+      while its journal entry is open (`open_clip_request`, a 409 via the workflow check). A settled failed clip
+      stays regenerable.
+    - **Regenerate `shot:<ep>:<shid>:video`.** Tier ≥ 2, not keep-still, keyframe current. `clip_quote` prices it;
+      a note gives a fresh seed and becomes `clip.pending`. Other `shot:…:*` words (`:frames`) stay later-phase.
+    - **For stage 9:**
+      - read `assets.video` and `assets.clip` from the storyboard;
+      - the state comes from `clips.clip_state(ec, shot, script, link=links.video, tier, flags, image_sha)`, where
+        pending counts as failed;
+      - keep-still comes from `clips.shot_flags(shot, assets_doc)`;
+      - the files from `clips.shot_clip_path`.
+    - **Follow-ups (stages 11, 12, 14):**
+      - no `links.video` switch yet (`patch_assets`; re-pins `test_story_sticky_link.py:265`);
+      - the planner's cap+1e-9 against `budget.check`'s strict `>` at exactly the cap;
+      - `/free` untested (no GPU);
+      - identical requests of two shots share one purchase (a $0 rerun can attach extra clips);
+      - a clip regenerate's over-cap text still says "paid images and voices".
   - **Stage 7 notes for stages 8, 9, 11 and 12:**
     - **Clip record.** It lives beside the image record, in **storyboard** `shots[].assets.clip {state
       current|stale|failed, link, route, clip_s, est_usd, prompt_hash, image_sha256, cache_key, generated_at, note?,
@@ -217,8 +257,8 @@
 | 5 | paid LLM booking seam [Opus] | done |
 | 6 | sticky image link per episode (A-087) [Opus] | done |
 | 7 | clip documents and the estimate [Opus] | done |
-| 8 | the video phase and `shot:…:video` [Opus] — **RISKIEST** | next |
-| 9 | renderer: clips, hold, `fill_failed_with_motion`, Tier-2 golden [Opus] | — |
+| 8 | the video phase and `shot:…:video` [Opus] — **RISKIEST** | done |
+| 9 | renderer: clips, hold, `fill_failed_with_motion`, Tier-2 golden [Opus] | next |
 | 10 | Tier-3 native audio, tests only [Opus] | — |
 | 11 | API and CLI [Sonnet] | — |
 | 12 | dashboard [Sonnet] | — |

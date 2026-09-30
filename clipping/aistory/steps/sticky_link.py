@@ -17,12 +17,15 @@ The record lives in the episode's ``assets.json`` (``episode_assets_v1``)::
 
 ``link`` is the chain link's label (``registry.describe``), as the shot
 records it (``provider``/``model``); a like-for-like model swap of that link
-(``generation.FALLBACK_LINKS``, DEC-089) is the same link. ``video`` is
-reserved for the clips (stage 8): only its slot exists here.
+(``generation.FALLBACK_LINKS``, DEC-089) is the same link. ``video`` is the
+clips' (stage 8): the first link that serves one of the episode's clips, the
+only link every later clip is asked of.
 
 Pure helpers (nothing here reads or writes a document): the assets step does
 the wiring (``assets.episode_image_link``, ``assets.image_quote``,
-``_Assets.make_image``) and ``workflow.patch_assets`` the switch.
+``_Assets.make_image``; for the clips ``_Assets.make_clip``,
+``_Assets.keep_video_link`` and ``assets.video_offer``) and
+``workflow.patch_assets`` the image link's switch.
 
 Stdlib only (DEC-012).
 """
@@ -131,17 +134,27 @@ def _images(count) -> str:
     return f"{count} image{'' if count == 1 else 's'}"
 
 
+def _clips(count) -> str:
+    return f"{count} clip{'' if count == 1 else 's'}"
+
+
 class StickyLinkGone(Exception):
-    """The episode's image link cannot serve today, so the step stops and
-    asks (DEC-117's "stop and ask" shape, ``refimages.NeedsEditor``): the
-    link, why, the next link of the chain that could run, the shots a switch
-    makes again (those the old link served) with the ones still to make, and
-    what that would cost. ``str()`` is the sentence; :meth:`as_dict` the
-    structured offer a caller shows (``switch`` is the assets edit that
-    takes it)."""
+    """The episode's image link -- or, *kind* :data:`VIDEO`, its video link
+    (stage 8) -- cannot serve today, so the step stops and asks (DEC-117's
+    "stop and ask" shape, ``refimages.NeedsEditor``): the link, why, the
+    next link of the chain that could run, the shots a switch makes again
+    (those the old link served) with the ones still to make, and what that
+    would cost. ``str()`` is the sentence; :meth:`as_dict` the structured
+    offer a caller shows (``switch`` is the assets edit that takes it -- an
+    image link's only: the video link's switch is not an assets edit yet, so
+    its offer names the next link and its price and asks for nothing
+    else)."""
 
     def __init__(self, *, ep, link, why, chain, next_link=None, next_route=None, next_reason=None, redo=(),
-                 todo=(), est_usd=0.0, paid=False, before_any_call=True):
+                 todo=(), est_usd=0.0, paid=False, before_any_call=True, kind=IMAGE):
+        if kind not in KINDS:
+            raise ValueError(f"kind must be one of {', '.join(KINDS)}, not {kind!r}")
+        self.kind = kind
         self.ep = ep
         self.link = link
         self.why = why
@@ -161,10 +174,13 @@ class StickyLinkGone(Exception):
         return len(self.redo) + len(self.todo)
 
     def switch(self):
-        """The assets edit that switches the episode to the next link, or None."""
-        return {"links": {IMAGE: self.next_link}} if self.next_link else None
+        """The assets edit that switches the episode to the next link, or None
+        (always for a video link: its switch is not an assets edit yet)."""
+        return {"links": {IMAGE: self.next_link}} if self.next_link and self.kind == IMAGE else None
 
     def sentence(self) -> str:
+        if self.kind == VIDEO:
+            return self._video_sentence()
         head = (f"Episode {self.ep}'s image link {self.link} cannot serve now: {self.why}. An episode keeps its "
                 "shots on one link, so no other link was tried")
         head += (": nothing was generated or spent." if self.before_any_call
@@ -185,8 +201,29 @@ class StickyLinkGone(Exception):
         return (f"{head} Bring it back and run the assets step again, or switch the episode's image link to "
                 f"{self.next_link} (the assets edit {{\"links\": {{\"image\": \"{self.next_link}\"}}}}){plan}.")
 
+    def _video_sentence(self) -> str:
+        head = (f"Episode {self.ep}'s video link {self.link} cannot serve now: {self.why}. An episode keeps its "
+                "clips on one link, so no other link was tried")
+        head += (": nothing was generated or spent." if self.before_any_call
+                 else " for the clips left, and they are left as failed.")
+        if self.next_link is None:
+            return (f"{head} Bring it back and run the assets step again; no other link of {self.chain} can run "
+                    f"now either{f' ({self.next_reason})' if self.next_reason else ''}.")
+        price = "$0.00" if self.next_route in ("free", "local") else f"est ${self.est_usd:.3f}"
+        where = {"local": " (on your own hardware)", "paid": " (paid)"}.get(self.next_route, "")
+        what = []
+        if self.redo:
+            many = len(self.redo) > 1
+            what.append(f"shot{'s' if many else ''} {_and(self.redo)}, animated on {self.link}")
+        if self.todo:
+            what.append(f"the {len(self.todo)} still to animate")
+        plan = f" ({' with '.join(what)}: {_clips(self.qty)}, {price})" if what else ""
+        return (f"{head} Bring it back and run the assets step again. The next link of {self.chain} that could "
+                f"run is {self.next_link}{where}{plan}; an episode's clips move to another link only when you "
+                "choose it.")
+
     def as_dict(self) -> dict:
-        return {"kind": IMAGE, "link": self.link, "why": self.why, "chain": self.chain,
+        return {"kind": self.kind, "link": self.link, "why": self.why, "chain": self.chain,
                 "next_link": self.next_link, "next_route_class": self.next_route, "redo": list(self.redo),
                 "todo": list(self.todo), "qty": self.qty, "est_usd": self.est_usd, "paid": self.paid,
                 "switch": self.switch(), "message": str(self)}

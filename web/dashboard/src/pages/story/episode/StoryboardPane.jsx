@@ -813,7 +813,8 @@ function AssetsHeader({ storyId, ep, episode, busy, onChange }) {
     setError('')
     setErrors(null)
     try {
-      const assetsParams = { align_words: alignWords }
+      // animate: the step's own default (phase 6); the toggle arrives with the clip controls.
+      const assetsParams = { align_words: alignWords, animate: true }
       await runStoryStep(storyId, 'assets', { ep, params: assetsParams })
       onChange()
     } catch (err) {

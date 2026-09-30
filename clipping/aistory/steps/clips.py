@@ -77,6 +77,10 @@ LINK_POLICIES = (CHEAPEST, FIRST)
 
 ETA_NONE = "no measured history"
 
+# Why the local link is not ready in an estimate made without *probe_local*
+# (a check before a job exists asks no server): the assets step asks it.
+LOCAL_NOT_ASKED = "not asked before the assets step runs"
+
 # A shot not timed yet (0 s) is asked at the link's shortest length.
 _UNTIMED_S = 0.01
 
@@ -280,7 +284,7 @@ def _still_rows(shots, flags, reason) -> list:
 
 
 def video_units(ec, script, storyboard, assets_doc, *, env, caps, committed_usd, adapters=None, probe_local=False,
-                transport=None, image_sha=None) -> dict:
+                transport=None, image_sha=None, booked=None) -> dict:
     """The ``video`` part of the assets estimate at tier >= 2, calling
     nothing but -- with *probe_local* -- a local ComfyUI's status::
 
@@ -296,6 +300,11 @@ def video_units(ec, script, storyboard, assets_doc, *, env, caps, committed_usd,
     episode's cap bounds the plan), *committed_usd* what the episode has
     spent plus the rest of this estimate's paid part, *image_sha(shot)* the
     sha256 of a shot's image on disk (for a recorded clip's state).
+    *booked(shot, *, link, clip_s, template)* (phase 6 stage 8) says whether
+    the story's generation journal already holds a shot's next clip request
+    bought -- submitted (the next run collects it) or kept: such a clip is
+    planned at $0, ``why`` ``booked``, and not counted as one to buy
+    (DEC-152: a clip is never charged twice).
 
     A route refused only because ``allow_paid`` is off still shows the plan
     on the hosted link it would take, with its price (``refused`` says why,
@@ -352,8 +361,7 @@ def video_units(ec, script, storyboard, assets_doc, *, env, caps, committed_usd,
             elif not local_adapter:
                 local_info.update(ok=False, template=None, profile=None, note="no adapter yet for local video")
             elif not probe_local:
-                local_info.update(ok=False, template=None, profile=None,
-                                  note="not asked before the assets step runs")
+                local_info.update(ok=False, template=None, profile=None, note=LOCAL_NOT_ASKED)
             else:
                 local_info.update(local_video_status(merged, transport=transport))
         return local_info
@@ -464,6 +472,19 @@ def video_units(ec, script, storyboard, assets_doc, *, env, caps, committed_usd,
                                image_sha=image_sha(shot))
             if state == "current":
                 current_ids.append(shot["shot_id"])
+    booked_ids = []
+    if booked is not None:
+        for shot in shots:
+            shot_id = shot["shot_id"]
+            if shot_id in current_ids or flags[shot_id]["keep_still"]:
+                continue
+            try:
+                clip_s = video_plan.requested_seconds(link, max(float(shot["duration_s"] or 0.0), _UNTIMED_S),
+                                                      lengths=lengths)
+            except ValueError:
+                continue
+            if booked(shot, link=link, clip_s=clip_s, template=units["template"]):
+                booked_ids.append(shot_id)
     seconds_of = {line["line_id"]: float((line.get("timing") or {}).get("duration_s") or 0.0)
                   for scene in script["scenes"] for line in scene["lines"]}
     planned = [{"shot_id": shot["shot_id"], "order": shot["order"], "scene_id": shot["scene_id"],
@@ -475,14 +496,15 @@ def video_units(ec, script, storyboard, assets_doc, *, env, caps, committed_usd,
             planned, {scene["scene_id"]: scene["function"] for scene in script["scenes"]},
             {shot["shot_id"]: sum(seconds_of.get(line_id, 0.0) for line_id in shot["lines"]) for shot in shots},
             link=link, price_per_second=price, cap_usd=cap, committed_usd=committed,
-            current_shot_ids=current_ids, mode=mode, priority=priority, lengths=lengths)
+            current_shot_ids=current_ids + booked_ids, mode=mode, priority=priority, lengths=lengths)
     except ValueError as exc:
         return stop(f"No clip can be planned on {link}: {exc}.", reason=str(exc))
 
-    new = [entry for entry in plan.selected if entry["shot_id"] not in current_ids]
+    new = [entry for entry in plan.selected if entry["shot_id"] not in current_ids + booked_ids]
     count, seconds, est = len(new), int(plan.seconds), round(float(plan.video_usd), 4)
     units.update(plan=[{"shot_id": entry["shot_id"], "clip_s": entry["clip_s"], "est_usd": round(entry["est_usd"], 4),
-                        "why": entry["why"]} for entry in plan.selected],
+                        "why": "booked" if entry["shot_id"] in booked_ids and entry["why"] != "pinned"
+                        else entry["why"]} for entry in plan.selected],
                  still=list(plan.still), count=count, seconds=seconds, est_usd=est)
     if seconds:
         key = gen_timings.timing_key(link, units["template"], units["profile"])
@@ -496,13 +518,23 @@ def video_units(ec, script, storyboard, assets_doc, *, env, caps, committed_usd,
 
     units["refused"] = refusal if count else None
     units["ready"] = units["refused"] is None
-    units["message"] = _message(units, plan, current_ids, profile_name)
+    units["message"] = _message(units, plan, current_ids, profile_name, booked_ids)
     return units
 
 
-def _message(units, plan, current_ids, profile_name) -> str:
+def local_unasked(video) -> bool:
+    """Whether the ``video`` part *video* (:func:`video_units`) left the local
+    ComfyUI unasked (made without *probe_local*): its readiness is then the
+    assets step's to decide, when it asks the server."""
+    return any(row.get("link") == LOCAL_LINK and row.get("reason") == LOCAL_NOT_ASKED
+               for row in (video or {}).get("links") or [])
+
+
+def _message(units, plan, current_ids, profile_name, booked_ids=()) -> str:
     link, count, seconds, est = units["link"], units["count"], units["seconds"], units["est_usd"]
     kept = [f"{len(current_ids)} current clip{_s(len(current_ids))} kept"] if current_ids else []
+    if booked_ids:
+        kept.append(f"{len(booked_ids)} bought already, collected at $0")
     still = len(plan.still)
     if still:
         kept.append(f"{still} shot{_s(still)} still")
