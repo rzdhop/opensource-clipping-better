@@ -14,7 +14,7 @@ from clipping.aistory.hardware import (
     PROFILES, HardwareProfile, classify, parse_comfy_system_stats, parse_meminfo, parse_nvidia_smi,
     parse_rocm_smi, parse_system_profiler, parse_wmic, probe, recommendations_for, to_dict,
 )
-from clipping.providers.local_comfyui import TEMPLATES, load_template
+from clipping.providers.local_comfyui import TEMPLATES, VIDEO_TEMPLATES, load_template
 
 FIX = pathlib.Path(__file__).resolve().parent / "fixtures" / "hardware"
 
@@ -189,7 +189,7 @@ def test_every_profile_has_recommendations_whose_workflows_it_can_run(name):
         assert set(row) >= {"task", "model", "install_hint"}, row
         workflow = row.get("workflow")
         if workflow:
-            assert workflow in TEMPLATES
+            assert workflow in TEMPLATES + VIDEO_TEMPLATES
             assert RANK[load_template(workflow)["min_profile"]] <= RANK[name], (name, workflow)
     if name in ("cpu_only", "container_no_gpu"):
         assert all(not r.get("workflow") for r in rows), "no local image workflow without a GPU"

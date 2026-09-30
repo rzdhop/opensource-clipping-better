@@ -3,6 +3,7 @@
   "name": "edit_qwen_image",
   "task": "edit",
   "min_profile": "high",
+  "verified_live": false,
   "description": "Image edit with Qwen-Image-Edit-2509 (Apache-2.0) as a GGUF through the ComfyUI-GGUF custom node; one reference image. Authored from ComfyUI's default API-format graph for this model, with the literal inputs replaced by placeholders (spec 8.7). Validated at run time against /object_info: a missing node or model file is refused with its name, never worked around.",
   "placeholders": [
     "prompt",

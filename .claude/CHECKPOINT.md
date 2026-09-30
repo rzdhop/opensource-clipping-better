@@ -1,12 +1,40 @@
-## CURRENT STATE — AI Story **phase 6 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–3 **done**; next: **stage 4**
+## CURRENT STATE — AI Story **phase 6 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–4 **done**; next: **stage 5**
 - **In-progress header** (keep current):
   - **Current phase:** IMPLEMENT. EXPLORE/CLARIFY/PLAN were done 2026-09-30 in a session run in parallel with phase 5's
     close: three maps, two rounds of questions, an Opus design. The human approved the plan.
   - **Plan:** `.claude/plans/ai-story/14-phase-6-plan.md` (**APPROVED 2026-09-30**; copy at
     `~/.claude/plans/ai-story-phase-6-plan.md`). Brief: `.claude/plans/ai-story/07-phase-6-video-tiers-local.md`.
-  - **Current stage:** 4 — local ComfyUI video [Opus; fake server only]: the three I2V templates, the
-    `ComfyUIVideoAdapter`, `/free`, `hardware.VIDEO_WORKFLOWS`, and a video "Test chain" that never generates.
-  - **Next action:** dispatch stage 4, then Tier-1 in both environments, then commit.
+  - **Current stage:** 5 — the paid LLM booking seam in `steps/llm_call.py` [Opus]. Independent of video.
+  - **Next action:** dispatch stage 5, then Tier-1 in both environments, then commit.
+  - **Stage 4 notes for stages 8, 12 and 14:**
+    - **Templates.** `templates/workflows/i2v_wan22_5b.json`, `i2v_wan22_14b_lightning.json` and `i2v_ltx2.json`, all
+      `verified_live: false` (A-035). Sources: Comfy-Org `workflow_templates`, read 2026-09-30.
+      | Template | fps | Frame rule | Max frames | 9:16 size | Lengths |
+      |---|---|---|---|---|---|
+      | Wan 5B | 24 | 4n+1 | 121 | 704×1280 | 2–5 s |
+      | Wan 14B Lightning | 16 | 4n+1 | 81 | 480×832 | 2–5 s |
+      | LTX-2 | 25 | 8n+1 | 121 | 704×1280 | 2–4 s, silent |
+      All save through core `SaveVideo` as mp4/h264.
+    - **Adapter.** `local_comfyui.ComfyUIVideoAdapter` `(VIDEO, local)` refuses before any call: no template in
+      `extra["template"]`, no length or seed, a length the template does not offer, or an fps other than its own.
+      - It validates `/object_info` before queueing; `install_message` names each missing node and file with its
+        folder.
+      - It journals the prompt id; resume never re-queues, and an unknown prompt is marked lost.
+      - `free()` exists, and the adapter never calls it.
+    - **Helpers:** `frames_for`, `video_clip_lengths`; `hardware.VIDEO_WORKFLOWS`, `video_workflow_for`,
+      `profile_from_system_stats`.
+    - **For stage 8:** pass `extra["template"] = video_workflow_for(profile)`, no fps (or the template's own), and a
+      length from `video_clip_lengths()`.
+    - **Settings video "Test chain" never generates (RC-V8, amends DEC-103 for video).**
+      - A local link is checked with `/system_stats` and `/object_info` only.
+      - A hosted link shows its key and a 5 s estimate, and is never called even when pressed: seedance $0.11,
+        ltx-2.3 $0.36, kling $0.21, veo $0.30.
+    - **Unverified live:** every graph, the node input names on real versions, model sizes and fits, `SaveVideo`'s
+      history shape (the templates send both `format` shapes), the websocket path, timings.
+    - **Noted for follow-up:**
+      - The websocket connects after queueing, so a prompt that finishes first waits up to the socket timeout
+        (30 min for video) before falling back to polling. The image path has the same pattern.
+      - The error classifier retries a refused `ValueError` once. That makes no call; it is pre-existing.
   - **Stage 3 notes for stages 4, 8, 13 and 14:**
     - **Adapters.** `clipping/providers/video.py` holds `FalVideoAdapter` (seedance, kling, ltx-2.3-fast) and
       `GeminiVeoAdapter`.
@@ -103,8 +131,8 @@
 | 1 | pure video planning (`video_plan.py`) [Sonnet] | done |
 | 2 | provider foundations: video cache key, `GEMINI_PAID_API_KEY`, prices [Opus] | done |
 | 3 | hosted video adapters (fal ×3, Veo) [Opus] | done |
-| 4 | local ComfyUI video, fake server only [Opus] | next |
-| 5 | paid LLM booking seam [Opus] | — |
+| 4 | local ComfyUI video, fake server only [Opus] | done |
+| 5 | paid LLM booking seam [Opus] | next |
 | 6 | sticky image link per episode (A-087) [Opus] | — |
 | 7 | clip documents and the estimate [Opus] | — |
 | 8 | the video phase and `shot:…:video` [Opus] — **RISKIEST** | — |

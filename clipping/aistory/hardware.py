@@ -197,6 +197,28 @@ _HOST_HINT = ("run ComfyUI and Ollama on the Docker host and point the container
 _LOCAL_TTS = "pip install 'rzdhop-ai[local-tts]'"
 _KLEIN_FILES = ("download flux2-klein-4b.safetensors → ComfyUI/models/diffusion_models, qwen_3_4b.safetensors → "
                 "models/text_encoders, flux2-vae.safetensors → models/vae")
+_UMT5 = "umt5_xxl_fp8_e4m3fn_scaled.safetensors → models/text_encoders"
+
+# The local image-to-video workflow of each profile (``local_comfyui.VIDEO_TEMPLATES``).
+# Under 8 GB, without a GPU and on Apple MPS there is none: the hosted
+# VIDEO_CHAIN links make the clips. When ComfyUI's ``/system_stats`` answers,
+# its VRAM decides the profile (``probe`` step 9), so a container without a GPU
+# still gets the workflow of the host's card.
+VIDEO_WORKFLOWS = {"mid": "i2v_wan22_5b", "high": "i2v_wan22_14b_lightning", "pro": "i2v_ltx2"}
+
+
+def video_workflow_for(profile: str):
+    """The video template for *profile*, or ``None`` when it runs no local video."""
+    return VIDEO_WORKFLOWS.get(profile)
+
+
+_NO_GPU_VIDEO = {"task": "video", "model": "none locally without a GPU",
+                 "install_hint": "the hosted VIDEO_CHAIN links make the clips; a ComfyUI on a GPU host "
+                                 "(LOCAL_COMFYUI_URL) is profiled by its own /system_stats",
+                 "workflow": None}
+
+# Only the "low" profile: mid and above inherit _LOW_ROWS and run Wan 2.2 5B or better.
+_LOW_VIDEO = {"task": "video", "model": "none locally under 8 GB VRAM (Wan 2.2 5B needs a mid profile)", "install_hint": "the hosted VIDEO_CHAIN links make the clips", "workflow": None}
 
 _CPU_ROWS = [
     {"task": "render", "model": "FFmpeg (Tier 1 stills + motion)", "install_hint": "already required by the clip pipeline", "workflow": None},
@@ -208,33 +230,31 @@ _CPU_ROWS = [
 _LOW_ROWS = [
     {"task": "images", "model": "FLUX.2 [klein] 4B (text to image)", "install_hint": f"ComfyUI; {_KLEIN_FILES}", "workflow": "t2i_flux2_klein"},
     {"task": "images", "model": "SDXL-Turbo", "install_hint": "ComfyUI; sd_xl_turbo_1.0_fp16.safetensors → models/checkpoints", "workflow": None},
-    {"task": "video", "model": "LTX-Video 2B (short clips, phase 6)", "install_hint": "ComfyUI; ltx-video-2b → models/checkpoints", "workflow": None},
 ]
 _MID_ROWS = [
     {"task": "image edit", "model": "FLUX.2 [klein] 4B with reference images", "install_hint": f"ComfyUI; {_KLEIN_FILES}", "workflow": "edit_flux2_klein_multiref"},
     {"task": "images", "model": "FLUX.1 schnell fp8", "install_hint": "ComfyUI; flux1-schnell-fp8.safetensors → models/checkpoints", "workflow": None},
-    {"task": "video", "model": "Wan 2.1 1.3B / Wan 2.2 5B with offload (phase 6)", "install_hint": "ComfyUI; wan2.2_ti2v_5B_fp8.safetensors → models/diffusion_models", "workflow": None},
+    {"task": "video", "model": "Wan 2.2 TI2V 5B (image to video, 704×1280, 24 fps, 2–5 s)", "install_hint": f"ComfyUI (core nodes); wan2.2_ti2v_5B_fp16.safetensors → models/diffusion_models, {_UMT5}, wan2.2_vae.safetensors → models/vae", "workflow": "i2v_wan22_5b"},
     {"task": "tts", "model": "Chatterbox Multilingual (zero-shot voices)", "install_hint": _LOCAL_TTS, "workflow": None},
 ]
 _HIGH_ROWS = [
     {"task": "image edit", "model": "Qwen-Image-Edit-2509 (GGUF q4)", "install_hint": "ComfyUI + ComfyUI-GGUF custom node; qwen_image_edit_2509_q4.gguf → models/unet, qwen_2.5_vl_7b_fp8_scaled.safetensors → models/text_encoders, qwen_image_vae.safetensors → models/vae", "workflow": "edit_qwen_image"},
     {"task": "images", "model": "FLUX.1 dev fp8", "install_hint": "ComfyUI; flux1-dev-fp8.safetensors → models/checkpoints", "workflow": None},
-    {"task": "video", "model": "Wan 2.2 14B GGUF + Lightning LoRA (phase 6)", "install_hint": "ComfyUI + ComfyUI-GGUF; wan2.2 14B q4 → models/unet", "workflow": None},
+    {"task": "video", "model": "Wan 2.2 I2V 14B fp8 + Lightning 4-step LoRAs (480×832, 16 fps, 2–5 s)", "install_hint": f"ComfyUI (core nodes); wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors and wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors → models/diffusion_models, wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors and wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors → models/loras, {_UMT5}, wan_2.1_vae.safetensors → models/vae", "workflow": "i2v_wan22_14b_lightning"},
 ]
 _PRO_ROWS = [
-    {"task": "video", "model": "Wan 2.2 14B fp8 (phase 6)", "install_hint": "ComfyUI; wan2.2 14B fp8 → models/diffusion_models", "workflow": None},
-    {"task": "video", "model": "LTX-2 (phase 6)", "install_hint": "ComfyUI; ltx-2-13b.safetensors → models/checkpoints", "workflow": None},
-    {"task": "video", "model": "HunyuanVideo 1.5 (phase 6)", "install_hint": "ComfyUI; hunyuanvideo 1.5 → models/diffusion_models", "workflow": None},
+    {"task": "video", "model": "LTX-2 19B dev fp8, two passes (704×1280, 25 fps, 2–4 s)", "install_hint": "ComfyUI (core nodes); ltx-2-19b-dev-fp8.safetensors → models/checkpoints, gemma_3_12B_it_fp4_mixed.safetensors → models/text_encoders, ltx-2-19b-distilled-lora-384.safetensors → models/loras, ltx-2-spatial-upscaler-x2-1.0.safetensors → models/latent_upscale_models", "workflow": "i2v_ltx2"},
+    {"task": "video", "model": "HunyuanVideo 1.5 (no bundled workflow)", "install_hint": "ComfyUI; hunyuanvideo 1.5 → models/diffusion_models, run from ComfyUI's own template", "workflow": None},
 ]
 _APPLE_ROWS = [
     {"task": "images", "model": "FLUX.2 [klein] 4B via ComfyUI on MPS", "install_hint": f"ComfyUI (MPS); {_KLEIN_FILES}", "workflow": "t2i_flux2_klein"},
-    {"task": "video", "model": "none recommended on MPS (no Wan)", "install_hint": "use the hosted VIDEO_CHAIN links (phase 6)", "workflow": None},
+    {"task": "video", "model": "none recommended on MPS (no Wan)", "install_hint": "the hosted VIDEO_CHAIN links make the clips", "workflow": None},
 ]
 
 RECOMMENDATIONS = {
-    "cpu_only": _CPU_ROWS,
-    "container_no_gpu": [{"task": "local generation", "model": "ComfyUI / Ollama on the host", "install_hint": _HOST_HINT, "workflow": None}] + _CPU_ROWS,
-    "low": _CPU_ROWS + _LOW_ROWS,
+    "cpu_only": _CPU_ROWS + [_NO_GPU_VIDEO],
+    "container_no_gpu": [{"task": "local generation", "model": "ComfyUI / Ollama on the host", "install_hint": _HOST_HINT, "workflow": None}] + _CPU_ROWS + [_NO_GPU_VIDEO],
+    "low": _CPU_ROWS + _LOW_ROWS + [_LOW_VIDEO],
     "mid": _CPU_ROWS + _LOW_ROWS + _MID_ROWS,
     "high": _CPU_ROWS + _LOW_ROWS + _MID_ROWS + _HIGH_ROWS,
     "pro": _CPU_ROWS + _LOW_ROWS + _MID_ROWS + _HIGH_ROWS + _PRO_ROWS,
@@ -244,6 +264,20 @@ RECOMMENDATIONS = {
 
 def recommendations_for(profile: str) -> list:
     return [dict(row) for row in RECOMMENDATIONS.get(profile, _CPU_ROWS)]
+
+
+def profile_from_system_stats(stats: dict, *, in_container: bool = False):
+    """``(profile, vram_gb, gpu_name)`` from ComfyUI's own ``/system_stats``
+    alone, read as :func:`probe` step 9 reads it (the largest device wins):
+    what a caller that only talks to ComfyUI -- the Settings video check --
+    uses to pick :func:`video_workflow_for`."""
+    _, devices = parse_comfy_system_stats(stats)
+    best = max(devices, key=lambda d: d["vram_gb"]) if devices else None
+    if best is None or best["vram_gb"] <= 0:
+        return classify(None, "cpu", in_container), None, None
+    kind = best["type"].lower()
+    backend = "mps" if kind == "mps" else "rocm" if "rocm" in kind or "hip" in kind else "cuda"
+    return classify(best["vram_gb"], backend, in_container), best["vram_gb"], best["name"]
 
 
 # ------------------------------------------------------------------- probes

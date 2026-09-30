@@ -291,7 +291,7 @@ def test_run_reports_progress_from_the_socket():
 def test_the_comfyui_adapter_is_registered_for_image_and_edit():
     assert generation.adapter_for("image", "local") is local_comfyui.COMFYUI
     assert generation.adapter_for("image_edit", "local") is local_comfyui.COMFYUI
-    assert generation.adapter_for("video", "local") is None
+    assert generation.adapter_for("video", "local") is local_comfyui.COMFYUI_VIDEO  # its own adapter (phase 6 stage 4)
     assert local_comfyui.COMFYUI.estimate(Link("local", "comfyui"), GenRequest(kind="image")) is None
 
 
