@@ -1576,6 +1576,25 @@ def test_an_e1_reply_paying_off_nothing_is_asked_again_then_accepted(store):
     assert _scene(_script(store, story_id, 2), "s05")["pays_off"] == [HOOK_BETRAY]
 
 
+def test_a_framing_scene_paying_off_a_hook_is_cleared_before_validation(store):
+    """Tier-2 finding T2-P5-F7 (2026-09-30): on the live French story E1 put
+    pays_off on the hook scene s01 in 4 of 4 runs, and E4 then judged that a
+    hook scene does not pay off last episode's hook. Only a body scene pays a
+    hook off: a recap, hook or cliffhanger scene's pays_off is emptied before
+    validation (like T2-F9's props repair) -- no retry, the body scene's kept."""
+    m = _new()
+    story_id = _continuity_story(store)
+    llm = _script_llm(E1=[_e1_ep2_paying({"s00": [HOOK_PHONE], "s01": [HOOK_PHONE], "s05": [HOOK_BETRAY]})],
+                      E3=[E3_EP2], E4=[E4_PASSED])
+
+    _summary, log = _run(m.script, store, story_id, llm=llm, ep=2)
+
+    assert llm.prompts().count("E1") == 1
+    script = _script(store, story_id, 2)
+    assert [s["scene_id"] for s in script["scenes"] if "pays_off" in s] == ["s05"]
+    assert _scene(script, "s05")["pays_off"] == [HOOK_BETRAY]
+
+
 def test_the_payoff_pre_check_records_a_hook_payoff_issue_and_e4_still_runs(store):
     """The script was written paying off the phone; the memory of episode 1
     is then written again without that hook. The next consistency check

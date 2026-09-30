@@ -189,7 +189,7 @@ SCHEMA_NAMES = {
 # most before episode 12) at 120 characters, the audience direction at 25
 # words, the previous recap at 40, relationships at 15, E4's payoffs spread
 # over all 12 scenes -- the hook count searched per prompt for its own worst
-# case. E1 1,558 (its pre-stage-3 fixture already measured 1,263 on HEAD, not
+# case. E1 1,574 (1,558 before T2-P5-F7's longer payoff line; its pre-stage-3 fixture already measured 1,263 on HEAD, not
 # the 1,102 recorded at stage 6), E3 2,199 (HEAD 2,071), E4 3,598 (HEAD 3,523;
 # the stage-4 fixture 3,605). E1 and E3 take the worst case + 15 %, rounded
 # up to ten; E4's 3,900 still holds, under the 4,000 ceiling.
@@ -203,7 +203,7 @@ SCHEMA_NAMES = {
 # 60-word summaries, a 40-word recap, 4 hooks at 120 characters (N1 shows the
 # oldest PAYOFF_HOOKS_MAX, as E1 does) and a 25-word direction: ~3,244
 # tokens; plus 15 %, rounded up to ten.
-INPUT_BUDGET = {"E1": 1800, "E2": 1660, "E3": 2530, "E4": 3900, "T1": 1270, "T1r": 1410, "S3": 3740, "F1": 3950, "N1": 3740}
+INPUT_BUDGET = {"E1": 1820, "E2": 1660, "E3": 2530, "E4": 3900, "T1": 1270, "T1r": 1410, "S3": 3740, "F1": 3950, "N1": 3740}
 
 # The ``bible:<field>`` grammar of spec 9.2: which prompt a regenerate note
 # re-runs, and which of that prompt's fields it targets. "tone" also carries
@@ -835,9 +835,13 @@ _E1_NO_PROPS_LINE = "- props: always [] -- this story has no props\n"
 # block (never fuzzy-matched, the same rule S3 closes them by). Episode 1,
 # or no hook open: no block, no line, no field -- today's E1 byte for byte.
 E1_PAYS_OFF_PER_SCENE = 1
+# Only a body scene pays a hook off: on the live French story E1 put pays_off on
+# the hook scene in 4 runs of 4 and E4 then refused it (Tier-2 T2-P5-F7); the
+# script step also empties a framing scene's pays_off before validation.
 _E1_PAYOFF_LINE = (
-    "- pays_off: [] or the one open hook above this scene pays off, copied exactly; at least one body scene "
-    "(setup, rising, peak or turn) must pay one off\n"
+    "- pays_off: [] or the one open hook above this scene pays off, copied exactly -- body scenes (setup, "
+    "rising, peak or turn) only, always [] on the recap, hook and cliffhanger; at least one body scene must pay "
+    "one off\n"
 )
 _E1_PAYOFF_HEADER = "Open hooks when this episode starts -- pays_off names them exactly as written:"
 

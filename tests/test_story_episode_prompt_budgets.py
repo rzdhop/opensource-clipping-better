@@ -56,7 +56,7 @@ LIVE_ARC_DENSITY = (52, 362)  # the longest live arc summary
 # The larger of the scratch-copy run and this fixture's (they differ by at most 4).
 # E1, E3 and E4: phase 5 stage 3's continuity worst cases (MEASURED_CONTINUITY,
 # below), which are larger; stage 6 recorded 1,102, 2,050 and 3,523.
-MEASURED = {"E1": 1558, "E2": 1440, "E3": 2199, "E4": 3598, "T1": 1100, "T1r": 1218}
+MEASURED = {"E1": 1574, "E2": 1440, "E3": 2199, "E4": 3598, "T1": 1100, "T1r": 1218}
 
 
 def _filler(words, chars):
@@ -353,12 +353,12 @@ def test_e1_and_e3_for_episode_2_read_the_spec_shape():
 # E4 is largest with 3 of its 4 offered hooks paid off (one left in the
 # memory block's line, three with their scenes in the payoff block).
 #
-# Measured (chars / 4): E1 1,558 (HEAD 0ae8efb's own fixture: 1,263, 99 % of
+# Measured (chars / 4): E1 1,574 (T2-P5-F7's longer payoff line; 1,558 before) (HEAD 0ae8efb's own fixture: 1,263, 99 % of
 # its 1,270 -- the 1,102 recorded above predates stage 12b's numbered scene
 # list), E3 2,199 in full (HEAD: 2,071) and 1,549 for the recap alone (HEAD:
 # 1,421), E4 3,598 (HEAD: 3,523; the stage-4 fixture of
 # test_story_prompts_episode.py: 3,530 -> 3,605). E1 and E3 take the measured
-# worst case + 15 %, rounded up to ten (1,800 and 2,530); E4's 3,900 still
+# worst case + 15 %, rounded up to ten (1,820 -- 1,800 before T2-P5-F7 -- and 2,530); E4's 3,900 still
 # holds (+8 %) under the spec's 4,000 ceiling, as stage 6 left it.
 
 from clipping.aistory import schemas  # noqa: E402 -- this section's own names
@@ -397,7 +397,7 @@ def _payoffs(hooks=None, paid=None):
 
 
 # The continuity worst cases, measured (chars / 4) on this fixture.
-MEASURED_CONTINUITY = {"E1": 1558, "E3": 2199, "E3-recap": 1549, "E4": 3598}
+MEASURED_CONTINUITY = {"E1": 1574, "E3": 2199, "E3-recap": 1549, "E4": 3598}
 
 
 def _e1_continuity(hooks=None):

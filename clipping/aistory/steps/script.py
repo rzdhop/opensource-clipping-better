@@ -203,11 +203,20 @@ def _repair_e1_reply(ec, reply) -> None:
     string can name a prop it does not have, and with no ids to enumerate
     the schema cannot stop the free tier from listing object names there
     (T2-F9). Only lists are touched; a malformed reply is left to the
-    validator."""
-    if not ec.prop_ids and isinstance(reply, dict) and isinstance(reply.get("scenes"), list):
+    validator.
+
+    Only a body scene pays a hook off: a recap, hook or cliffhanger scene's
+    ``pays_off`` is emptied too (Tier-2 T2-P5-F7 -- the free tier put it on
+    the hook scene every time, and E4 then refused the payoff), so the
+    validator and E4 only ever see body-scene payoffs."""
+    if isinstance(reply, dict) and isinstance(reply.get("scenes"), list):
         for scene in reply["scenes"]:
-            if isinstance(scene, dict) and isinstance(scene.get("props"), list):
+            if not isinstance(scene, dict):
+                continue
+            if not ec.prop_ids and isinstance(scene.get("props"), list):
                 scene["props"] = []
+            if isinstance(scene.get("pays_off"), list) and scene.get("function") not in schemas.BODY_FUNCTIONS:
+                scene["pays_off"] = []
     if ec.language != "fr":
         return
     reply["title"] = prompts.repair_fr_elisions(reply["title"])
