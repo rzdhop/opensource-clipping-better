@@ -12,9 +12,13 @@
     (Rin/earrings) → whole-word fix `d2ba496`; T2-P5-F11 Edge retired `en-US-DavisNeural` → catalogue AndrewNeural
     `3cfce9a`; Tier-1 local 6473/1, CI 5687/756; deployed (restart at 0 jobs); Kaito re-pinned (job 95e2705b2d51);
     anime resumed (`run_style.py anime dcc0998db8ae`). F4 proven live on Kaito's sheets.
-  - **Stage 14 per style:** anime **done** (A-085: 52.7 s, −14.12 LUFS, Bangers word_pop, push_in 4 %, characters
-    held, look drifted to semi-real); cinematic_real **running** (FR `last_bus_3am`). Voices: the CLI's cast pins Edge
-    only (Gemini TTS free = 10 requests/day/model, spent today).
+  - **Stage 14 per style:** anime **done** (A-085). Stories: cinematic_real `560e901c1b3d` (fast track, many
+    presses), cartoon_flat `979c8376e43e` (fast track), storybook_watercolor `14ff154d3bff` (cast), claymation
+    `04feb539840f` (cast done, places). Voices: the CLI's cast pins Edge only (Gemini TTS free = 10 req/day/model).
+    The human added Cloudflare keys → findings F12 (counter burned by 401s; `279b572`) and F13 (adapter's seed
+    refused; `d08c92d`); today's cloudflare counter reset 170 → 0 once (ledgers: 0 served; backup in
+    `/home/ubuntu/backups/ai-story-phase-5/usage.before-cloudflare-reset.json`). **Now:** drivers paused → restart at
+    0 jobs → reset the counter again to what was served → relaunch the four in parallel.
   - **Current stage:** 14 — (was: anime running); then cinematic_real,
     cartoon_flat, storybook_watercolor, claymation, one at a time. 13b **done** (`a833287`, `065a02c`), deployed at
     0 jobs (`rm -sfv` + `up -d --build`), live `main` = `065a02c`. 13b was: F4 (cast pacing), F1 (Season step stays open after a
