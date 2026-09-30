@@ -1,11 +1,44 @@
-## CURRENT STATE — AI Story **phase 6 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–6 **done**; next: **stage 7**
+## CURRENT STATE — AI Story **phase 6 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–7 **done**; next: **stage 8** (RISKIEST)
 - **In-progress header** (keep current):
   - **Current phase:** IMPLEMENT. EXPLORE/CLARIFY/PLAN were done 2026-09-30 in a session run in parallel with phase 5's
     close: three maps, two rounds of questions, an Opus design. The human approved the plan.
   - **Plan:** `.claude/plans/ai-story/14-phase-6-plan.md` (**APPROVED 2026-09-30**; copy at
     `~/.claude/plans/ai-story-phase-6-plan.md`). Brief: `.claude/plans/ai-story/07-phase-6-video-tiers-local.md`.
-  - **Current stage:** 7 — clip documents and the video estimate, no calls [Opus: data mutation].
-  - **Next action:** dispatch stage 7, then Tier-1 in both environments, then commit.
+  - **Current stage:** 8 — the video phase of the assets step and `shot:<ep>:<shid>:video` [Opus] — **RISKIEST**.
+  - **Next action:** dispatch stage 8, then Tier-1 in both environments, then commit.
+  - **Stage 7 notes for stages 8, 9, 11 and 12:**
+    - **Clip record.** It lives beside the image record, in **storyboard** `shots[].assets.clip {state
+      current|stale|failed, link, route, clip_s, est_usd, prompt_hash, image_sha256, cache_key, generated_at, note?,
+      pending?, reason?}`.
+      - `assets.video = assets/clips/shot_NN.mp4` is set only while the clip is current; `storyboard_errors` enforces
+        this. The renderer reads the storyboard.
+    - **Per-shot overrides.** In `assets.json` under `shots.{id}.{keep_still, animate, keep_native_audio}`.
+      - `video_plan.effective_shot_flags` / `clips.shot_flags` resolve them.
+      - They are patched by `workflow.patch_assets` (`ASSETS_SHOT_FLAG_FIELDS`; the storyboard approval is untouched).
+      - The API fields wait for stage 11 (`test_stories_api_phase4.py:89-90` pins).
+      - **Stage 9:** `render/plan.py:338` must use the effective flags.
+    - **New modules.** `steps/clips.py`: `clip_request_parts`, `clip_prompt_hash`, `clip_state`,
+      `local_video_status`, `pick_hosted`, `video_units`. `providers/gen_timings.py`: `timing_key`, `record`,
+      `eta_s`.
+    - **Estimate.** `asset_units()["video"]` appears only at tier ≥ 2.
+      - Link choice: the sticky `links.video` if recorded (no fallback); else route local
+        (`video_workflow_for(profile)`), or api with `video_link_policy` (cheapest / first).
+      - Mode: one_dollar = key_shots_within_cap; quality = all_shots; free = only on a ready local route, with a $0 cap
+        (DEC-203).
+      - `committed` = the episode's ledger total + this estimate's paid images and voices.
+      - An `allow_paid`-only refusal keeps the plan, with `ready` false and `refused` set (the walk's step 2).
+      - At plan time local counts as not ready.
+    - **Totals.** The top-level `est_usd` includes clips when video is ready; the over-cap text names clip counts and
+      seconds; `fast_track.paid_verdict` counts clips.
+    - **Stage 8 must:**
+      - take the plan from `asset_units(probe_local=True)["video"]` (RC-V6);
+      - add an `animate` flag (off drops the video part);
+      - make `plan_refusal` refuse on video not ready while animate is on;
+      - store clips via `clip_name`/`clip_rel`, write the storyboard with its approval kept;
+      - call `gen_timings.record` and `sticky_link.record(…, "video")` (with a `kind` for `StickyLinkGone`).
+    - **For stages 11 and 14:** `fast_track.estimate()` builds its own units without video; its stop sentence still
+      advises only on images and voices; `local_video_status` duplicates the Settings check.
+    - **Checks.** Live episodes, read-only: 10/10 validate and 9/9 approved fingerprints recompute unchanged.
   - **Stage 6 notes for stages 8, 11, 12 and 14:**
     - **Module.** New pure `steps/sticky_link.py`: `recorded`, `record`, `gone_why`, `StickyLinkGone`. Assets docs
       carry optional `links {image?, video?: {link, since, switched_from?}}`.
@@ -183,8 +216,8 @@
 | 4 | local ComfyUI video, fake server only [Opus] | done |
 | 5 | paid LLM booking seam [Opus] | done |
 | 6 | sticky image link per episode (A-087) [Opus] | done |
-| 7 | clip documents and the estimate [Opus] | next |
-| 8 | the video phase and `shot:…:video` [Opus] — **RISKIEST** | — |
+| 7 | clip documents and the estimate [Opus] | done |
+| 8 | the video phase and `shot:…:video` [Opus] — **RISKIEST** | next |
 | 9 | renderer: clips, hold, `fill_failed_with_motion`, Tier-2 golden [Opus] | — |
 | 10 | Tier-3 native audio, tests only [Opus] | — |
 | 11 | API and CLI [Sonnet] | — |

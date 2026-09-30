@@ -218,8 +218,8 @@ def test_the_episode_bounds_are_the_schemas_own():
 
 
 def test_the_asset_kinds_are_closed():
-    # Phase 4 adds the shot images (DEC-155).
-    assert store.EPISODE_ASSET_KINDS == ("voice", "shots")
+    # Phase 4 adds the shot images (DEC-155); phase 6 stage 7 their clips.
+    assert store.EPISODE_ASSET_KINDS == ("voice", "shots", "clips")
     assert set(store.EPISODE_ASSET_NAME_PATTERNS) == set(store.EPISODE_ASSET_KINDS)
 
 

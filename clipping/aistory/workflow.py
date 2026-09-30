@@ -49,6 +49,7 @@ from . import (
     stylelock,
     templates,
     timing,
+    video_plan,
     voices,
     wordtiming,
 )
@@ -1669,6 +1670,12 @@ PHASE4_PARAMS = {"assets": ASSETS_PARAMS, "render": RENDER_PARAMS, "metadata": M
                  "fast-track": FAST_TRACK_PARAMS}
 ASSETS_PATCH_FIELDS = ("shots",)
 ASSETS_SHOT_PATCH_FIELDS = ("locked",)
+# Phase 6 stage 7: a shot item's overrides of what its clip does --
+# ``keep_still``, ``animate`` (a pin), ``keep_native_audio``; true, false or
+# null (clear) -- taken by :func:`patch_assets` into ``assets.json``'s
+# ``shots``; the API's AssetsShotPatch gains them with the dashboard's
+# controls (stages 11-12).
+ASSETS_SHOT_FLAG_FIELDS = schemas.SHOT_OVERRIDE_FLAGS
 # Phase 6 stage 6 (A-087): the switch of the episode's image link,
 # ``{"links": {"image": "<link>"}}`` -- taken by :func:`patch_assets`; the
 # API's AssetsPatchRequest gains it with the dashboard's offer (stages 11-12).
@@ -3268,7 +3275,18 @@ def patch_assets(stories, story_id, ep, fields, *, now, env=None) -> dict:
     lives in the shot's ``assets`` (DEC-155): the storyboard's revision and
     approval never move, and the fingerprint the assets were approved with
     covers it, so a new lock makes that approval stale (derived, never
-    cleared). Refused whole (``invalid`` with every error; nothing written).
+    cleared).
+
+    Phase 6 stage 7: a shot item may also set :data:`ASSETS_SHOT_FLAG_FIELDS`
+    -- ``keep_still`` (over the storyboard's own), ``animate`` (a pin: the
+    planner animates it first, even past the cap) and ``keep_native_audio``
+    (tier 3) -- true or false, or null to clear the override. They go to
+    ``assets.json``'s ``shots`` (``assets.overridden_assets_doc``; a
+    minimal document is started when there is none), never to the
+    storyboard, so its bytes, revision and approval never move; the assets
+    approval is kept and goes stale exactly when a shot's effective flags
+    move (the fingerprint's ``clips`` part). A pin on a shot kept still is
+    refused. Refused whole (``invalid`` with every error; nothing written).
     Nothing sent, or nothing changed: nothing written. ``conflict`` without a
     storyboard."""
     story = load(stories, story_id)
@@ -3286,11 +3304,20 @@ def patch_assets(stories, story_id, ep, fields, *, now, env=None) -> dict:
     trial = copy.deepcopy(board)
     by_id = {shot["shot_id"]: shot for shot in trial["shots"]}
     errors = []
-    for path, item in _items(errors, fields, "shots", "shot_id", ASSETS_SHOT_PATCH_FIELDS):
+    flag_changes, flag_paths = {}, {}
+    for path, item in _items(errors, fields, "shots", "shot_id", ASSETS_SHOT_PATCH_FIELDS + ASSETS_SHOT_FLAG_FIELDS):
         shot = by_id.get(item.get("shot_id"))
         if shot is None:
             errors.append(f"{path}.shot_id: {item.get('shot_id')!r} is not a shot of episode {ep}")
             continue
+        for name in ASSETS_SHOT_FLAG_FIELDS:
+            if name not in item:
+                continue
+            if item[name] is not None and type(item[name]) is not bool:
+                errors.append(f"{path}.{name}: expected true, false or null")
+            else:
+                flag_changes.setdefault(shot["shot_id"], {})[name] = item[name]
+                flag_paths[shot["shot_id"]] = path
         if "locked" not in item:
             continue
         locked = item["locked"]
@@ -3304,13 +3331,47 @@ def patch_assets(stories, story_id, ep, fields, *, now, env=None) -> dict:
     wanted = None
     if ASSETS_LINKS_FIELD in fields:
         wanted = assets_step.link_switch(ec, fields[ASSETS_LINKS_FIELD], env=env, errors=errors)
+    overridden = None
+    if flag_changes and not errors:
+        overridden = _overridden_assets(stories, story_id, ep, ec, board, flag_changes, flag_paths, errors, now=now)
     if errors:
         raise _invalid_values("The assets would not be valid with these values.", errors)
     if trial != board:
         board = _write(episode_common.write_storyboard, "storyboard", ec, trial, script, now=now)
+    if overridden is not None:
+        _write_assets_doc(stories, story_id, ep, overridden, now=now, what="these shot overrides")
     if wanted is not None:
         _switch_image_link(stories, story_id, ep, ec, board, wanted, env=env, now=now)
     return board
+
+
+def _overridden_assets(stories, story_id, ep, ec, board, changes, paths, errors, *, now):
+    """:func:`patch_assets`' per-shot overrides: ``assets.json`` with
+    *changes* applied (``assets.overridden_assets_doc``), or None when
+    nothing changes; *errors* gains a pin on a shot that would be kept still
+    (the planner drops a kept-still shot first: the pin would do nothing)."""
+    doc = read_episode(stories, story_id, ep, ASSETS_DOC)
+    new = assets_step.overridden_assets_doc(ec, doc, changes, now=now)
+    if new is None:
+        return None
+    for shot in board["shots"]:
+        if shot["shot_id"] not in changes:
+            continue
+        flags = video_plan.effective_shot_flags(shot, video_plan.shot_overrides(new, shot["shot_id"]))
+        if flags["keep_still"] and flags["animate"]:
+            errors.append(f"{paths[shot['shot_id']]}.animate: shot {shot['shot_id']} is kept still, so a pin would "
+                          "not animate it: send keep_still false with it")
+    return new
+
+
+def _write_assets_doc(stories, story_id, ep, doc, *, now, what) -> None:
+    try:
+        stories.write_episode_doc(story_id, ep, ASSETS_DOC, doc, now=now)
+    except schemas.SchemaError as exc:
+        raise WorkflowError(CONFLICT, {"message": f"The assets would not be valid with {what}.",
+                                       "errors": list(exc.errors)}) from None
+    except (KeyError, ValueError) as exc:
+        raise WorkflowError(CONFLICT, f"The assets cannot be written: {exc}.") from None
 
 
 def _switch_image_link(stories, story_id, ep, ec, board, wanted, *, env, now) -> None:

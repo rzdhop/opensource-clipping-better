@@ -34,6 +34,7 @@ Layout, under the same ``outputs/`` directory the job store uses::
             episode_final.mp4, subtitles.ass, cover.jpg, cost_ledger.json  # EPISODE_FILE_NAMES
             assets/voice/line_<NN>.mp3|.wav|.json  # the opt-in voice measurement
             assets/shots/shot_<NN>.png|.jpg|.jpeg|.webp  # each shot's image
+            assets/clips/shot_<NN>.mp4  # a shot's clip (tier >= 2, phase 6)
             render/                 # the renderer's working folder: in/, fonts/, cache/, stems/, logs/
         cache/gen/                  # the generation cache and journal (providers/gencache.py)
         cost_ledger.json            # what each call cost (ledger.CostLedger)
@@ -222,13 +223,15 @@ _EPISODE_FIELDS = {EPISODE_PROPOSALS_DOC: "for_ep"}
 
 # The files an episode keeps in assets/<kind>/, and the only names each kind
 # may hold. A shot's image is named by the shot's own number (sh03 ->
-# shot_03.<ext>). SFX and BGM are not copied: assets.json names the shipped
-# files, and the renderer stages what it uses into render/in/.
+# shot_03.<ext>), and so is its clip (phase 6 stage 7: shot_03.mp4). SFX
+# and BGM are not copied: assets.json names the shipped files, and the
+# renderer stages what it uses into render/in/.
 EPISODE_ASSETS_DIRNAME = "assets"
-EPISODE_ASSET_KINDS = ("voice", "shots")
+EPISODE_ASSET_KINDS = ("voice", "shots", "clips")
 EPISODE_ASSET_NAME_PATTERNS = {
     "voice": re.compile(r"^line_[0-9]{2}\.(mp3|wav|json)$"),
     "shots": re.compile(schemas.SHOT_IMAGE_NAME_PATTERN),
+    "clips": re.compile(schemas.SHOT_CLIP_NAME_PATTERN),
 }
 
 # The files at the top of an episode's folder besides its documents -- the

@@ -202,6 +202,36 @@ def requested_seconds(link: str, duration_s: float, *, lengths: Sequence[int] | 
     return supported[-1]
 
 
+# ------------------------------------------------------- per-shot overrides
+
+# The per-shot overrides the user sets in ``assets.json`` (``shots``,
+# ``workflow.patch_assets``; phase 6 stage 7).
+SHOT_FLAGS = schemas.SHOT_OVERRIDE_FLAGS
+
+
+def shot_overrides(assets_doc, shot_id):
+    """Shot *shot_id*'s override entry in *assets_doc* (``assets.json``'s
+    ``shots``), or None."""
+    entry = ((assets_doc or {}).get("shots") or {}).get(shot_id)
+    return entry if isinstance(entry, dict) else None
+
+
+def effective_shot_flags(board_shot: Mapping, assets_shot: Mapping | None = None) -> dict:
+    """``{"keep_still", "animate", "keep_native_audio"}`` of one shot, as the
+    planner, the video phase and the renderer must all read them: each is
+    the override *assets_shot* sets (``assets.json``'s ``shots[shot_id]``,
+    :func:`shot_overrides`) when it sets one, else the storyboard's own
+    ``keep_still`` for ``keep_still``, else False. ``animate`` True is a pin;
+    a shot kept still is never animated, pin or not (:func:`plan_animation`
+    drops it first)."""
+    flags = {"keep_still": bool(board_shot.get("keep_still")), "animate": False, "keep_native_audio": False}
+    for name in SHOT_FLAGS:
+        value = (assets_shot or {}).get(name)
+        if isinstance(value, bool):
+            flags[name] = value
+    return flags
+
+
 # ------------------------------------------------------------- the planner
 
 

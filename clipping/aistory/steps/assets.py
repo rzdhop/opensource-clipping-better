@@ -123,7 +123,7 @@ from .. import ledger as ledger_mod
 from .. import names as names_mod
 from .. import store as store_mod
 from ..render import audio_assets
-from . import entities, episode_common, llm_call, sticky_link, voice_lines
+from . import clips, entities, episode_common, llm_call, sticky_link, voice_lines
 from . import script as script_step
 from . import storyboard as storyboard_step
 from .episode_common import SCRIPT_DOC, STORYBOARD_DOC
@@ -368,7 +368,7 @@ def route_of(link) -> str:
     return "paid" if gen.is_paid(link) else "free"
 
 
-def assets_fingerprint(storyboard, script, assets_doc, *, image_shas, audio_shas) -> str:
+def assets_fingerprint(storyboard, script, assets_doc, *, image_shas, audio_shas, clip_shas=None, tier=1) -> str:
     """sha256 over what an assets approval approves (plan phase 4,
     "Documents"): every shot's ``(prompt_hash, image sha256, locked)``, every
     line's ``(text hash, voice, audio sha256)``, and the SFX/BGM files
@@ -378,7 +378,17 @@ def assets_fingerprint(storyboard, script, assets_doc, *, image_shas, audio_shas
     fingerprint it always had. *image_shas* is ``{shot_id: sha256 | None}``,
     *audio_shas* ``{line_id: sha256 | None}`` (the files as they are now,
     :func:`current_fingerprint`). Durations, revisions, approvals and
-    timestamps are not in it: re-timing never makes an approval stale."""
+    timestamps are not in it: re-timing never makes an approval stale.
+
+    Phase 6 stage 7: a ``clips`` part -- the story's *tier*, and every
+    shot's effective flags (``keep_still``, ``animate``,
+    ``keep_native_audio``: :func:`clips.shot_flags`) with its clip record's
+    ``(state, link, prompt_hash, image_sha256)`` and its clip file's sha256
+    (*clip_shas*, ``{shot_id: sha256 | None}``) -- only when the story is at
+    tier >= 2, a shot has a clip record, or an override moves a shot's
+    flags. A tier-1 episode with none of these fingerprints byte for byte
+    as before (RC-V1); an override equal to the storyboard's own value
+    changes nothing."""
     assets_doc = assets_doc or {}
     bgm = assets_doc.get("bgm")
     payload = {
@@ -395,7 +405,25 @@ def assets_fingerprint(storyboard, script, assets_doc, *, image_shas, audio_shas
     links = assets_doc.get("links")
     if links:
         payload["links"] = {kind: entry.get("link") for kind, entry in links.items()}
+    clips_part = _clips_part(storyboard, assets_doc, clip_shas or {}, tier)
+    if clips_part is not None:
+        payload["clips"] = clips_part
     return _canonical_sha256(payload)
+
+
+def _clips_part(storyboard, assets_doc, clip_shas, tier):
+    """:func:`assets_fingerprint`'s ``clips`` part, or None when it has none."""
+    rows, recorded = [], False
+    for shot in storyboard["shots"]:
+        flags = clips.shot_flags(shot, assets_doc)
+        clip = shot["assets"].get("clip") or {}
+        recorded = recorded or bool(clip)
+        rows.append([shot["shot_id"], flags["keep_still"], flags["animate"], flags["keep_native_audio"],
+                     clip.get("state"), clip.get("link"), clip.get("prompt_hash"), clip.get("image_sha256"),
+                     clip_shas.get(shot["shot_id"])])
+    if int(tier) < 2 and not recorded and not clips.flags_moved(storyboard, assets_doc):
+        return None
+    return {"tier": int(tier), "shots": rows}
 
 
 # ------------------------------------------------------------ files on disk
@@ -658,11 +686,15 @@ def mixed_note(ec, info) -> str:
 
 
 def current_fingerprint(ec, storyboard, script, assets_doc) -> str:
-    """:func:`assets_fingerprint` over the files as they are now."""
+    """:func:`assets_fingerprint` over the files as they are now, at the
+    story's tier."""
     image_shas = {shot["shot_id"]: _sha256_file(shot_image_path(ec, shot)) for shot in storyboard["shots"]}
     audio_shas = {line["line_id"]: _sha256_file(line_audio_path(ec, line))
                   for scene in script["scenes"] for line in scene["lines"]}
-    return assets_fingerprint(storyboard, script, assets_doc, image_shas=image_shas, audio_shas=audio_shas)
+    clip_shas = {shot["shot_id"]: _sha256_file(clips.shot_clip_path(ec, shot)) for shot in storyboard["shots"]
+                 if shot["assets"].get("video")}
+    return assets_fingerprint(storyboard, script, assets_doc, image_shas=image_shas, audio_shas=audio_shas,
+                              clip_shas=clip_shas, tier=clips.tier_of(ec))
 
 
 # ------------------------------------------------------------- preconditions
@@ -917,13 +949,47 @@ def switched_assets_doc(ec, storyboard, doc, wanted, *, env, now):
     return new
 
 
-def spending_caps(ec, total, *, env, ledger=None) -> tuple:
+def overridden_assets_doc(ec, doc, changes, *, now):
+    """*doc* (``assets.json``, or None: a minimal one is started) with the
+    per-shot overrides *changes* (``{shot_id: {flag: True | False | None}}``,
+    ``schemas.SHOT_OVERRIDE_FLAGS``; None clears the flag) applied to its
+    ``shots`` map -- an entry left empty is dropped, and so is an empty map
+    -- or None when nothing changes (phase 6 stage 7,
+    ``workflow.patch_assets``). The storyboard is never touched, and the
+    approval is kept: the fingerprint's ``clips`` part decides whether it
+    is stale (:func:`assets_fingerprint`)."""
+    base = doc if doc is not None else {
+        "$schema": schemas.EPISODE_ASSETS_SCHEMA_NAME, "ep": ec.ep, "lines": {}, "sfx": [], "bgm": None,
+        "approved": None, "created_at": now, "updated_at": now}
+    shots = {shot_id: dict(entry) for shot_id, entry in (base.get("shots") or {}).items()}
+    for shot_id, flags in changes.items():
+        entry = shots.get(shot_id, {})
+        for name, value in flags.items():
+            if value is None:
+                entry.pop(name, None)
+            else:
+                entry[name] = value
+        if entry:
+            shots[shot_id] = {name: entry[name] for name in schemas.SHOT_OVERRIDE_FLAGS if name in entry}
+        else:
+            shots.pop(shot_id, None)
+    if shots == (base.get("shots") or {}):
+        return None
+    new = copy.deepcopy(base)
+    new.pop("shots", None)
+    if shots:
+        new["shots"] = {shot_id: shots[shot_id] for shot_id in sorted(shots)}
+    return new
+
+
+def spending_caps(ec, total, *, env, ledger=None, video=None) -> tuple:
     """``(caps, over_cap)`` for a plan that would spend *total* paid
     dollars on episode *ec.ep*: ``caps`` is ``{"allow_paid", "episode"|"day"|
     "story": {"cap_usd", "spent_usd", "left_usd"}}`` (the three only when the
     budget settings read), ``over_cap`` the budget's refusal of *total* --
     the episode's cap included -- with the numbers, when paid is on; else
-    None. Calls nothing."""
+    None. Calls nothing. With *video* (``asset_units``' ``video`` part, phase
+    6 stage 7) the refusal names the clips' numbers too."""
     ledger = ledger or _open_ledger(ec)
     story_spent = float(ledger.totals()["est_usd"])
     ep_spent = float(ledger.totals(ec.ep)["est_usd"])
@@ -940,7 +1006,12 @@ def spending_caps(ec, total, *, env, ledger=None) -> tuple:
             caps[name] = {"cap_usd": cap, "spent_usd": round(spent, 4), "left_usd": round(max(0.0, cap - spent), 4)}
     over_cap = None
     if budget_obj is not None and budget_obj.allow_paid and total > 0:
-        plan = SimpleNamespace(est_usd=total, link=f"episode {ec.ep}'s paid images and voices")
+        what = "paid images and voices"
+        if video:
+            count = video["count"]
+            what = (f"paid images, voices and {count} clip{'' if count == 1 else 's'} ({video['seconds']} s on "
+                    f"{video['link']}, est ${video['est_usd']:.3f})")
+        plan = SimpleNamespace(est_usd=total, link=f"episode {ec.ep}'s {what}")
         try:
             budget_mod.check(plan, None, budget=budget_obj, day_spent=day_spent, ep_spent=ep_spent,
                              story_spent=story_spent)
@@ -963,6 +1034,11 @@ def asset_units(ec, script, storyboard, *, env, align_words=False, adapters=None
          "caps": {"allow_paid", "episode"|"day"|"story": {"cap_usd", "spent_usd", "left_usd"}},
          "est_usd": x, "over_cap": sentence | None, "ready": bool}
 
+    and, only at the story's ``generation_profile.tier`` >= 2 (phase 6 stage
+    7; a tier-1 answer is byte for byte what it was), ``"video"``
+    (``clips.video_units``: the planner's clips on the episode's video link,
+    seconds x price) after ``alignment``.
+
     ``images`` prices every shot neither locked nor current at the first
     link that would run on the story's route (the image estimate of
     ``imaging``; in ``references`` mode ``refimages.edit_readiness``, whose
@@ -975,7 +1051,12 @@ def asset_units(ec, script, storyboard, *, env, align_words=False, adapters=None
     price. ``est_usd`` is the paid part of both; ``over_cap`` is the budget's
     refusal of it -- the episode's cap included -- when paid is on, with the
     numbers. ``ready``: the images can run (or there are none), every line
-    has a voice that can run, and nothing is over a cap.
+    has a voice that can run, and nothing is over a cap. At tier >= 2 the
+    clips to buy are in ``est_usd`` (when they can run) and ``over_cap``
+    (with their numbers), the paid video link in ``paid_links``, and
+    ``ready`` needs ``video.ready`` too; what the episode spent and the rest
+    of the paid part are committed before the planner spends the episode's
+    cap on clips.
     """
     ledger = ledger or _open_ledger(ec)
     story_spent = float(ledger.totals()["est_usd"])
@@ -1013,15 +1094,43 @@ def asset_units(ec, script, storyboard, *, env, align_words=False, adapters=None
 
     images_paid = images["est_usd"] if images["route_class"] == "paid" else 0.0
     voices_paid = sum(row["est_usd"] for row in voices_est["voices"] if row["paid"])
-    total = round(images_paid + voices_paid, 4)
-    caps, over_cap = spending_caps(ec, total, env=env, ledger=ledger)
-    return {
+    video, video_paid = None, 0.0
+    if clips.tier_of(ec) >= 2:
+        video = _video_units(ec, script, storyboard, doc, env=env, ledger=ledger, adapters=adapters,
+                             probe_local=probe_local, transport=transport, committed=images_paid + voices_paid)
+        if video["route_class"] == "paid" and video["count"]:
+            paid_links.append({"kind": gen.VIDEO, "link": video["link"], "allowed": video["ready"],
+                               "reason": video["refused"] or "paid, allowed", "est_usd": video["est_usd"]})
+            if video["ready"]:
+                video_paid = video["est_usd"]
+    total = round(images_paid + voices_paid + video_paid, 4)
+    caps, over_cap = spending_caps(ec, total, env=env, ledger=ledger, video=video if video_paid else None)
+    units = {
         "images": images, "voices": voices_est,
         "alignment": {"opted_in": bool(align_words),
                       "requests": _alignment_requests(ec, script, align_words=align_words)},
+    }
+    if video is not None:
+        units["video"] = video
+    units.update({
         "paid_links": paid_links, "caps": caps, "est_usd": total, "over_cap": over_cap,
         "ready": images["ready"] and voices_est["ready"] and over_cap is None,
-    }
+    })
+    if video is not None:
+        units["ready"] = bool(units["ready"] and video["ready"])
+    return units
+
+
+def _video_units(ec, script, storyboard, doc, *, env, ledger, adapters, probe_local, transport, committed):
+    """``clips.video_units`` for :func:`asset_units`: the caps as they stand
+    (the episode's bounds the plan), and committed before any clip what the
+    episode's ledger already holds -- every kind, as the per-episode cap
+    counts it -- plus *committed*, the rest of this estimate's paid part."""
+    caps, _over = spending_caps(ec, 0.0, env=env, ledger=ledger)
+    spent = float((caps.get("episode") or {}).get("spent_usd") or 0.0)
+    return clips.video_units(ec, script, storyboard, doc, env=env, caps=caps, committed_usd=spent + committed,
+                             adapters=adapters, probe_local=probe_local, transport=transport,
+                             image_sha=lambda shot: _sha256_file(shot_image_path(ec, shot)))
 
 
 def needs_editor(units) -> bool:
@@ -1728,6 +1837,9 @@ class _Assets(voice_lines.LineMeasurement):
             links[sticky_link.IMAGE] = self.link_pending
         if links:
             doc["links"] = links
+        # The user's per-shot overrides (phase 6 stage 7): carried as they are.
+        if (previous or {}).get("shots"):
+            doc["shots"] = previous["shots"]
         doc.update({
             # Kept: an approval is derived stale by the fingerprint, never cleared here.
             "approved": previous["approved"] if previous else None,

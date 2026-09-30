@@ -213,7 +213,13 @@ def paid_verdict(units, *, ep, predicted=False) -> dict:
     what to do -- or None when it may go on. The episode's image link gone
     for now (``images.sticky.gone``, A-087) stops with its own offer --
     ``stops_before_paid`` for a paid link the gates refuse, else
-    ``blocked``."""
+    ``blocked``.
+
+    Phase 6 stage 7: at tier >= 2 the clips to buy (``units["video"]``, the
+    paid ones on a hosted link) are a paid part as a paid image is -- priced
+    even while ``allow_paid`` is off, so the check stops on them with their
+    numbers; clips that cannot be planned at all are a blocker. A tier-1
+    estimate has no ``video``: its verdict is unchanged."""
     images, voices_est, caps = units["images"], units["voices"], units.get("caps") or {}
     allow = bool(caps.get("allow_paid"))
     upto = "up to " if predicted else ""
@@ -253,7 +259,19 @@ def paid_verdict(units, *, ep, predicted=False) -> dict:
     voices_usd = voices_est.get("paid_usd")
     if voices_usd is None:
         voices_usd = sum(float(row["est_usd"] or 0.0) for row in voice_rows if row["paid"])
-    total = round(images_usd + float(voices_usd), 4)
+    video = units.get("video")
+    video_usd = 0.0
+    if video is not None:
+        clips = video.get("count") or 0
+        if clips and video.get("route_class") == "paid":
+            video_usd = float(video["est_usd"] or 0.0)
+            parts.append(f"{upto}{clips} clip{_s(clips)} ({video['seconds']} s) on {video['link']} "
+                         f"(est ${video_usd:.3f})")
+            if not video.get("ready") and video.get("refused"):
+                refused.append(f"{video['link']}: {video['refused']}")
+        elif not video.get("ready"):
+            blockers.append(video.get("message") or "the clips cannot be made")
+    total = round(images_usd + float(voices_usd) + video_usd, 4)
     over = units.get("over_cap")
     caps_line = _caps_line(caps)
 
@@ -294,6 +312,8 @@ def paid_verdict(units, *, ep, predicted=False) -> dict:
             made.append(f"{upto}{count} shot image{_s(count)} on {images.get('link') or 'the image chain'}")
         if voice_rows and chars:
             made.append(f"{upto}{chars} characters on {_and(dict.fromkeys(row['voice'] for row in voice_rows))}")
+        if video is not None and video.get("count"):
+            made.append(f"{upto}{video['count']} clip{_s(video['count'])} on {video['link']}")
         message = (f"{head}: nothing paid -- {_and(made)}, $0.00." if made
                    else f"{head}: nothing to generate, $0.00.")
     return {"verdict": verdict, "paid": bool(parts), "allow_paid": allow, "est_usd": total, "parts": parts,
