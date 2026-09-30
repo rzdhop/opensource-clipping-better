@@ -53,13 +53,13 @@ def test_connection_failures_and_timeouts_are_retryable_by_name():
 def test_the_urllib_transport_maps_errors(monkeypatch):
     def refuse(request, timeout):
         raise urllib.error.URLError("connection refused")
-    monkeypatch.setattr(transport.urllib.request, "urlopen", refuse)
+    monkeypatch.setattr(transport._OPENER, "open",refuse)
     with pytest.raises(APIConnectionError):
         transport.urllib_transport("GET", "https://x/y", headers={}, timeout=1)
 
     def slow(request, timeout):
         raise socket.timeout("timed out")
-    monkeypatch.setattr(transport.urllib.request, "urlopen", slow)
+    monkeypatch.setattr(transport._OPENER, "open",slow)
     with pytest.raises(APITimeoutError):
         transport.urllib_transport("GET", "https://x/y", headers={}, timeout=1)
 
@@ -73,12 +73,12 @@ def test_the_urllib_transport_maps_errors(monkeypatch):
         def __exit__(self, *a):
             return False
 
-    monkeypatch.setattr(transport.urllib.request, "urlopen", lambda request, timeout: Body(b'{"a":1}', 200))
+    monkeypatch.setattr(transport._OPENER, "open",lambda request, timeout: Body(b'{"a":1}', 200))
     assert transport.urllib_transport("GET", "https://x/y", headers={}, timeout=1).status == 200
 
     def http_error(request, timeout):
         raise urllib.error.HTTPError("https://x/y", 429, "Too Many", {"Retry-After": "7"}, None)
-    monkeypatch.setattr(transport.urllib.request, "urlopen", http_error)
+    monkeypatch.setattr(transport._OPENER, "open",http_error)
     response = transport.urllib_transport("GET", "https://x/y", headers={}, timeout=1)
     assert response.status == 429
 

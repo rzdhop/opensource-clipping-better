@@ -7,7 +7,9 @@ carries ``status_code`` so ``errors.classify`` and ``errors.is_model_unavailable
 read it exactly as they read an SDK error. A refused connection or a timeout
 is raised under the names the classifier already retries
 (``APIConnectionError`` / ``APITimeoutError``): the classifier works off class
-names on purpose (DEC-012), and these two are the names it knows.
+names on purpose (DEC-012), and these two are the names it knows. A redirect
+carries the credential headers only while it stays on the origin they were
+addressed to (DEC-195).
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ import os
 import socket
 import tempfile
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections import namedtuple
 
@@ -46,10 +49,42 @@ class APITimeoutError(Exception):
     """The host did not answer in time. Named for ``errors.RETRYABLE_EXC_NAMES``."""
 
 
+# Header names (lower case) that carry a provider credential.
+CREDENTIAL_HEADERS = frozenset({"authorization", "proxy-authorization", "x-goog-api-key", "x-api-key"})
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def _origin(url):
+    """(scheme, host, port) with the default port filled in; None for a malformed port."""
+    parts = urllib.parse.urlsplit(url)
+    try:
+        port = parts.port or _DEFAULT_PORTS.get(parts.scheme)
+    except ValueError:
+        return None
+    return parts.scheme, parts.hostname, port
+
+
+class _CredentialSafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """The stdlib copies every header but the content ones onto a redirect, to
+    any host: a 30x to a CDN or a signed-URL host would carry the API key. A
+    credential header is dropped as soon as a hop leaves its origin, so it
+    never comes back later in the chain; a same-origin hop keeps it."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        new = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if new is not None and _origin(new.full_url) != _origin(req.full_url):
+            for name in [name for name in new.headers if name.lower() in CREDENTIAL_HEADERS]:
+                new.remove_header(name)
+        return new
+
+
+_OPENER = urllib.request.build_opener(_CredentialSafeRedirectHandler)
+
+
 def urllib_transport(method, url, *, headers=None, body=None, timeout=DEFAULT_TIMEOUT) -> Response:
     request = urllib.request.Request(url, data=body, headers=dict(headers or {}), method=method)
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with _OPENER.open(request, timeout=timeout) as response:
             return Response(int(getattr(response, "status", 200)), dict(response.headers or {}), response.read())
     except urllib.error.HTTPError as exc:
         try:
