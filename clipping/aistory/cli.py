@@ -11,6 +11,7 @@ options and defaults are untouched. Commands::
     main.py --ai-story step <story_id> script|storyboard --ep N [options]
     main.py --ai-story step <story_id> assets|render|metadata --ep N [options]
     main.py --ai-story step <story_id> memory|feedback|propose-next --ep N [options]
+    main.py --ai-story step <story_id> rerender --ep N [--dry-run]
     main.py --ai-story render <story_id> --ep N [options]
     main.py --ai-story fast-track <story_id> --ep N [options]
     main.py --ai-story feedback <story_id> --ep N --text-file F [--stats-file F] [options]
@@ -116,6 +117,20 @@ proposed character and twist needs a human decision (``POST .../episodes/
 no CLI command for it). A short summary follows every run (hooks opened and
 closed, directions digested, characters and twists proposed).
 
+Phase 5, plan 11 stage 9: ``rerender`` renders one episode (``--ep N``)
+again from its documents as they are now, making again only the shot clips
+that changed since its last good render; preconditions are ``workflow``'s,
+the same as the API's (``workflow.episode_context`` then ``workflow.
+require_reedit_inputs``: a finished render to re-render, then every render
+precondition, naming an outdated shot's regenerate target). It takes no
+other parameter and calls no API, so there is no key gate; ``--auto-approve``
+does not apply to it (it ends completed, nothing to approve). ``--dry-run``
+prints the same count the run would make -- how many shots, which ones and
+why (``workflow.reedit_changes``, also ``GET /estimate/rerender``'s own) --
+without rendering anything. A short summary follows a real run (how many of
+the episode's shots were made again versus reused, the render's own
+numbers).
+
 Limitation: the CLI and a running server do not coordinate step runs on the
 same story. The server's one-step-per-story rule lives in its job store
 (``web/api/store.py``), which the CLI does not read, so running a step here
@@ -166,9 +181,10 @@ EXIT_INTERRUPTED = 130
 _PHASE4_JOB_STEPS = ("assets", "render", "metadata")
 
 # Every step `step` runs, phase 1 then phase 2 then phase 3 then phase 4 then
-# phase 5's series steps (step 13: memory, feedback, propose-next).
+# phase 5's series steps (step 13: memory, feedback, propose-next) then its
+# re-edit render (plan 11 stage 9: rerender).
 STEPS = workflow.PHASE1_STEPS + workflow.PHASE2_STEPS + workflow.PHASE3_STEPS + _PHASE4_JOB_STEPS + \
-    workflow.SERIES_STEPS
+    workflow.SERIES_STEPS + workflow.REEDIT_STEPS
 
 # The steps --auto-approve approves, and what to do for the others. `memory`
 # approves like `bible`/`season` (workflow.approve_memory, unconditionally);
@@ -194,6 +210,7 @@ _NOT_AUTO_APPROVABLE = {
     ),
     "render": "the render ends completed once it is done: there is nothing to approve.",
     "metadata": "the metadata pack ends completed once it is written: there is nothing to approve.",
+    "rerender": "the re-render ends completed once it is done: there is nothing to approve.",
     "propose-next": (
         "each proposed character and twist needs a human decision, from the dashboard or the API "
         "(POST .../episodes/{ep}/proposals/{item_id}): accept or reject it, then approve "
@@ -222,13 +239,14 @@ _STEP_ONLY = (
     ("place", "--place", ("places",)),
     ("prop", "--prop", ("places",)),
     ("episodes", "--episodes", ("season",)),
-    ("ep", "--ep", workflow.PHASE3_STEPS + _PHASE4_JOB_STEPS + workflow.SERIES_STEPS),
+    ("ep", "--ep", workflow.PHASE3_STEPS + _PHASE4_JOB_STEPS + workflow.SERIES_STEPS + workflow.REEDIT_STEPS),
     ("fast", "--fast", ("storyboard",)),
     ("measure_voices", "--measure-voices", ("script",)),
     ("align_words", "--align-words", ("assets",)),
     ("subtitles", "--subtitles", ("render",)),
     ("encoder", "--encoder", ("render",)),
     ("allow_slow_chain", "--allow-slow-chain", _KEYED_STEPS),
+    ("dry_run", "--dry-run", workflow.REEDIT_STEPS),
 )
 
 # The list options' items, split on "|": (shape, keys, how many are required).
@@ -328,7 +346,10 @@ def build_parser() -> argparse.ArgumentParser:
             "feedback (--ep) digests the audience comments pasted for episode ep (F1; paste "
             "them first with the 'feedback' command); propose-next (--ep) proposes new "
             "characters and twists for episode ep + 1 from episode ep's approved memory (N1) "
-            "-- each item is decided from the dashboard or the API, never here."
+            "-- each item is decided from the dashboard or the API, never here; rerender "
+            "(--ep) renders episode ep again from its documents as they are now, making again "
+            "only the shot clips that changed since its last good render, calling no API -- "
+            "--dry-run prints what it would re-render without rendering."
         ),
     )
     step.add_argument("story_id", help="the story's id (see 'list')")
@@ -364,9 +385,9 @@ def build_parser() -> argparse.ArgumentParser:
                             "(sheets and time variants drawn from text, not edited from a reference "
                             "image, and labelled prompt_only)"))
     step.add_argument("--ep", type=int, default=None, metavar="N",
-                      help=("script, storyboard, assets, render, metadata, memory, feedback, propose-next: "
-                            "the episode number to run it on (required for these steps; the season plans "
-                            "which numbers exist; propose-next writes for episode N + 1)"))
+                      help=("script, storyboard, assets, render, metadata, memory, feedback, propose-next, "
+                            "rerender: the episode number to run it on (required for these steps; the "
+                            "season plans which numbers exist; propose-next writes for episode N + 1)"))
     step.add_argument("--fast", action="store_true",
                       help=("storyboard only: plan every scene's shots deterministically, in this "
                             "process, with no LLM call and so no key gate"))
@@ -386,6 +407,9 @@ def build_parser() -> argparse.ArgumentParser:
         help=(f"render only: the final pass's encoder, one of {', '.join(render_step.ENCODER_CHOICES)} "
               f"(default: {render_step.DEFAULT_ENCODER})"),
     )
+    step.add_argument("--dry-run", action="store_true",
+                      help=("rerender only: print what a re-render would make again now -- how many of "
+                            "the episode's shots, which ones and why -- without rendering anything"))
     step.add_argument("--auto-approve", action="store_true",
                       help=("bible, style, season: approve the result once the step is done; cast, "
                             "places: approve every character, place and prop that has everything; "
@@ -644,7 +668,8 @@ def _cmd_step(args, stories) -> int:
     for dest, flag, applies in _STEP_ONLY:
         if _given(getattr(args, dest)) and step not in applies:
             return _usage_error("step", f"{flag} applies to {_quoted(applies)} only, not to '{step}'.")
-    if step in workflow.PHASE3_STEPS + _PHASE4_JOB_STEPS + workflow.SERIES_STEPS and args.ep is None:
+    if (step in workflow.PHASE3_STEPS + _PHASE4_JOB_STEPS + workflow.SERIES_STEPS + workflow.REEDIT_STEPS
+            and args.ep is None):
         return _usage_error("step", f"--ep is required for '{step}': which episode to run it on.")
     try:
         overrides = parse_overrides(args.override)
@@ -666,6 +691,9 @@ def _cmd_step(args, stories) -> int:
 
     if step in workflow.SERIES_STEPS:
         return _series_step(args, stories, story)
+
+    if step in workflow.REEDIT_STEPS:
+        return _reedit_step(args, stories, story)
 
     if step == "style":
         params = {}
@@ -1126,6 +1154,61 @@ def _series_step(args, stories, story) -> int:
         else:  # feedback: AUTO_APPROVABLE excludes propose-next
             workflow.approve_feedback(stories, story_id, ep, direction=None, now=_now())
             print(f"✅ Episode {ep}'s feedback approved (no direction chosen).")
+    print(_line(workflow.load(stories, story_id)))
+    return EXIT_OK
+
+
+# ------------------------------------------------------------------ re-edit
+
+def _print_rerender_summary(result) -> None:
+    """After ``rerender``: what changed since the last good render, first
+    (the same sentence the feed already printed while it ran), then the
+    render's own numbers -- ``rerender.run``'s own return, ``render.
+    summary_of`` with ``reuse``."""
+    reuse, loud, out = result["reuse"], result["loudness"], result["output"]
+    reused = f" · {len(reuse['shots_reused'])} reused" if reuse else ""
+    print(f"🎬 Episode {result['ep']} re-rendered: {reuse['summary'] if reuse else 'every shot made again'}"
+          f"{reused}, {result['duration_s']:.1f} s, {out['width']}x{out['height']} at {out['fps']} fps, "
+          f"{loud['i']:.1f} LUFS (true peak {loud['tp']:.1f} dBTP); {result['seconds']:.1f} s total.")
+    for warning in result["warnings"]:
+        print(f"⚠️ {warning}")
+
+
+def _print_reedit_dry_run(ep, changes) -> None:
+    """``--dry-run``: what a re-render of episode *ep* would make again right
+    now (``workflow.reedit_changes``'s own shape -- stage 8's predicate,
+    RC-M8: the same one the run then uses, and ``GET /estimate/rerender``'s),
+    without rendering anything: the count, then one line per shot to be made
+    again and why."""
+    total, rebuild = changes["shots_total"], changes["rebuild"]
+    print(f"🔎 Episode {ep}: {changes['summary']} ({len(changes['reuse'])} reused).")
+    for shot_id in rebuild:
+        print(f"   {shot_id}: {changes['reasons'][shot_id]}")
+
+
+def _reedit_step(args, stories, story) -> int:
+    """``rerender`` of episode ``args.ep`` (phase 5, plan 11 stage 9): the
+    episode's preconditions (``workflow.episode_context``, as every episode
+    step), then, before anything runs or is estimated, a finished render to
+    re-render and every render precondition (``workflow.
+    require_reedit_inputs``: ``rerender.require_finished_render`` then
+    ``render.require_renderable``, the same two refusals the route meets
+    before a job exists). ``--dry-run`` prints the selection alone
+    (``workflow.reedit_changes``) and renders nothing; otherwise the run
+    goes through the worker's registry, its own feed lines print as it runs,
+    and a short summary follows. Takes no other parameter; never
+    ``--auto-approve`` (``AUTO_APPROVABLE`` excludes it: it ends completed,
+    nothing to approve)."""
+    step, story_id, ep = args.step, story["story_id"], args.ep
+    ec = workflow.episode_context(stories, story, ep, step=step)
+    workflow.require_reedit_inputs(ec)
+    if args.dry_run:
+        _print_reedit_dry_run(ep, workflow.reedit_changes(ec))
+        return EXIT_OK
+    interrupted, result = _run_step(stories, story_id, step, {}, ep=ep)
+    if interrupted:
+        return interrupted
+    _print_rerender_summary(result)
     print(_line(workflow.load(stories, story_id)))
     return EXIT_OK
 

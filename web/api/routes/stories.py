@@ -924,9 +924,13 @@ async def run_step(story_id: str, step: str, response: Response,
     ``metadata``, ``fast-track`` (phase 4, one episode: ``ep``): 201 with the
     queued job (see ``_phase4_step``). ``memory``, ``feedback``,
     ``propose-next`` (phase 5, step 13, one episode: ``ep``): 201 with the
-    queued job (see ``_series_step``). A step of 9.1 still a later phase's
-    (``workflow.LATER_STEPS``): 400. Anything else -- ``rerender`` too, until
-    its route is wired (plan 11 stage 9) -- 404.
+    queued job (see ``_series_step``). ``rerender`` (phase 5, plan 11 stage
+    9, one episode: ``ep``): 201 with the queued job (see ``_reedit_step``),
+    refused before any job exists with a finished render's own sentence
+    (``rerender.require_finished_render``) or the render's own (``render.
+    require_renderable``, naming an outdated shot's regenerate target), no
+    key gate (it calls nothing, like the render step). A step of 9.1 still a
+    later phase's (``workflow.LATER_STEPS``): 400. Anything else: 404.
     """
     stories = _stories()
     story = _load(stories, story_id)
@@ -961,6 +965,8 @@ async def run_step(story_id: str, step: str, response: Response,
         return await _phase4_step(stories, story, step, params, ep)
     if step in workflow.SERIES_STEPS:
         return await _series_step(stories, story, step, params, ep)
+    if step in workflow.REEDIT_STEPS:
+        return await _reedit_step(stories, story, step, params, ep)
     with _answering():
         workflow.refuse_step(step)
 
@@ -1122,6 +1128,48 @@ async def _series_step(stories, story, step, params, ep) -> JobResponse:
         workflow.series_context(stories, story, ep, step=step)
         workflow.series_request(step, params)
     return await _create_step_job(story_id, step, params, ep=ep)
+
+
+# --------------------------------------------------------------- re-edit
+
+def _reedit_checks(stories, story, step, params, ep):
+    """The checks of ``rerender`` of episode *ep* before a job exists (see
+    ``_reedit_step``); returns its params (``{}``: it takes none) and its
+    gate (a no-op: it calls nothing, like the render step's own -- no key
+    gate). Blocking (``workflow.require_reedit_inputs`` hashes nothing itself
+    but ``render.require_renderable`` reads every file it checks), so it
+    runs off the event loop."""
+    with _answering():
+        ec = workflow.episode_context(stories, story, ep, step=step)
+        workflow.reedit_request(params)
+        workflow.require_reedit_inputs(ec)
+
+    def gate():  # it calls nothing: no gate
+        return None
+
+    return {}, gate
+
+
+async def _reedit_step(stories, story, step, params, ep) -> JobResponse:
+    """``rerender`` of episode *ep* (phase 5, plan 11 stage 9).
+
+    Refused before any job exists, in this order: the episode's
+    preconditions (``workflow.episode_context``, as the other episode steps:
+    409 for a story that is not ready, 400 without ``ep`` or for one the
+    season does not plan), then the parameters (400: it takes none,
+    ``workflow.reedit_request``), then what it is made from -- a finished
+    render to re-render, then every render precondition (409, each with the
+    runner's own sentence, naming an outdated shot's regenerate target:
+    ``workflow.require_reedit_inputs``, ``rerender.require_finished_render``
+    then ``render.require_renderable``), then what every job meets
+    (``_create_step_job``): 409 while a step of the story is queued or
+    running, no key gate (it calls no API, like the render step), the queue
+    cap (429). The job carries *ep* and no params; it ends completed
+    (``steps.COMPLETED_STEPS``), so nothing supersedes it and no approval
+    completes it (``_job_doc`` answers None for it)."""
+    story_id = story["story_id"]
+    sent, gate = await run_in_threadpool(_reedit_checks, stories, story, step, params, ep)
+    return await _create_step_job(story_id, step, sent, ep=ep, gate=gate)
 
 
 def _episode_jobs(story_id, ep) -> list:
@@ -1535,7 +1583,11 @@ async def estimate(story_id: str, step: str, target: Optional[str] = None,
     ``feedback``, ``propose-next`` answer the LLM steps' estimate of one call
     (``workflow.series_units``: one S3, F1 or N1 call, on the free chain like
     every other step; ``allow_paid`` enforced the same way), with ``ep`` and
-    ``skipped_paid``.
+    ``skipped_paid``. ``rerender`` (plan 11 stage 9, the step's own refusals
+    first: a finished render to re-render, then the render's own, as
+    ``_reedit_step``): $0, no LLM call, the dry run's own count
+    (``workflow.reedit_estimate``, stage 8's predicate, RC-M8) --
+    ``shots_total``, ``rebuild``, ``reuse``, ``reasons`` and ``current``.
 
     A later step: 400; anything else: 404.
     """
@@ -1586,6 +1638,8 @@ async def estimate(story_id: str, step: str, target: Optional[str] = None,
         return await run_in_threadpool(_phase4_estimate, stories, story, step, ep, env=env, **options)
     if step in workflow.SERIES_STEPS:
         return _series_estimate(stories, story, step, ep, env=env)
+    if step in workflow.REEDIT_STEPS:
+        return await run_in_threadpool(_reedit_estimate, stories, story, ep)
     if step not in LLM_STEPS and step != "regenerate":
         with _answering():
             workflow.refuse_step(step)
@@ -1671,6 +1725,18 @@ def _series_estimate(stories, story, step, ep, *, env) -> dict:
     body.update(ep=ep, skipped_paid=[{"link": row["link"], "reason": row["skipped"]}
                                      for row in body["links"] if "skipped" in row])
     return body
+
+
+def _reedit_estimate(stories, story, ep) -> dict:
+    """The ``rerender`` estimate of episode *ep* (see ``estimate``), after
+    its own refusals (``workflow.episode_context`` then ``workflow.
+    require_reedit_inputs``, as ``_reedit_step`` meets before a job exists):
+    ``workflow.reedit_estimate`` -- $0, no LLM call, the dry run's own count.
+    Blocking (it hashes the render cache's clips), so it runs off the event
+    loop."""
+    with _answering():
+        ec = workflow.episode_context(stories, story, ep, step="rerender")
+        return workflow.reedit_estimate(ec)
 
 
 def _llm_estimate(step, calls, *, env, label=None) -> dict:

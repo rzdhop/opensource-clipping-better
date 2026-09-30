@@ -1,9 +1,10 @@
-## CURRENT STATE — AI Story **phase 5 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–8 **done**; next: **stage 9**
+## CURRENT STATE — AI Story **phase 5 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–9 **done**; next: **stage 10**
 - **In-progress header** (keep current):
   - **Current phase:** IMPLEMENT (phases 0–3 done: the plan was mapped, clarified and approved 2026-09-29).
-  - **Current stage:** 8 done → next **stage 9** (re-edit API and CLI) [Sonnet agent].
-  - **Next action:** spawn the stage-9 agent; until it lands `POST /steps/rerender` answers 404 (never deploy
-    between stages 8 and 9).
+  - **Current stage:** 9 done → next **stage 10** (dashboard: SeasonBoard series panel) [Sonnet agent], then my
+    browser check at 375/820/1280 on a scratch copy (`phase5-throwaway` :8015 + `phase5-dashboard` :5177 in the
+    local `.claude/launch.json`).
+  - **Next action:** spawn the stage-10 agent.
   - **Open questions:** none blocking. **Stage 12 fonts answered 2026-09-30: "All 5 as named"** — from
     github.com/google/fonts `main`, checked against the repo's git blob SHA: `ofl/bangers/Bangers-Regular.ttf`
     93,148 B (blob 9b0f8c1f…), `apache/luckiestguy/LuckiestGuy-Regular.ttf` 73,320 B (5ca663c2…),
@@ -135,6 +136,11 @@
   `completed`. `render.render_changes(ec, None)` = the dry run (hashes clips → cache it). `LATER_STEPS =
   ("import",)`. Expect the live FR episode's first re-render after a text edit to be **7 of 21** (board converts),
   not 1 — say so on the walk. Real-ffmpeg partial == full test ≈ 27 s.
+- **Stage 9 notes for stages 11 and 13:** `POST /steps/rerender {ep}` (201; 400 on params; 409 no finished render /
+  outdated image naming the shot and its `shot:<ep>:<shid>` target / busy; no key gate), `GET /estimate/rerender`
+  ($0, `rebuild`/`reuse`/`reasons`/`message`), episode page `render.changes` = null | `{blocked}` | the dry-run block
+  (cached on the last-good manifest's and the cache files' stats), `assets.lines[].take/note/pending`;
+  `storyboard.scenes[sid].retime_only` comes from the raw board. CLI `step <id> rerender --ep N [--dry-run]`.
 - **Rollback:** code: delete the worktree and the branch (or revert a stage's commit). Live data: restore the
   tars (`tar -C outputs/stories -xzf …`) and check `sha256sum -c enfr-before.sha`.
 
@@ -164,8 +170,8 @@ RC-P1…P11, RC-S1…S4, RC-T1…T3, RC-E1…E5 and RC-A1…A9 (tables below) st
 | 6 | whole-frame shot timing (second riskiest) [Opus] | **done** (local 6149/1, CI 5391/728; 24 new tests; golden + framemd5 unedited; live FR/EN ep01 plans byte-identical; drift 20 % → 0) |
 | 7 | re-edit operations [Opus] | **done** (local 6185/1, CI 5427/728; 36 new tests + 8 reverted mutations; 3 named input re-pins) |
 | 8 | partial re-render (**RISKIEST**) [Opus] | **done** (local 6241/1, CI 5483/728; 55 new tests; partial == full under real ffmpeg; golden + framemd5 unedited; later-phase pins moved to `import`) |
-| 9 | re-edit API and CLI [Sonnet] | next |
-| 10 | dashboard: SeasonBoard series panel [Sonnet] | — |
+| 9 | re-edit API and CLI [Sonnet] | **done** (local 6278/1, CI 5497/751; 37 new tests, 23 API ones skip in CI; 1 named re-pin) |
+| 10 | dashboard: SeasonBoard series panel [Sonnet] | next |
 | 11 | dashboard: EpisodeStudio re-edit [Sonnet] | — |
 | 12 | fonts (confirm with the human first) and per-style renderer gaps [Sonnet] | — |
 | 13 | merge, deploy, Tier-2 series walk (me at 375 px; the human watches ep 2) | — |

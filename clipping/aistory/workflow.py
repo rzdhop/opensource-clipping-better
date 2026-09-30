@@ -66,6 +66,7 @@ from .steps import metadata as metadata_step
 from .steps import propose_next as propose_next_step
 from .steps import regenerate as regenerate_step
 from .steps import render as render_step
+from .steps import rerender as rerender_step
 from .steps import script as script_step
 from .steps import season as season_step
 from .steps import storyboard as storyboard_step
@@ -99,7 +100,9 @@ PHASE4_STEPS = ("assets", "render", "metadata", "fast-track")
 SERIES_STEPS = ("memory", "feedback", "propose-next")
 # The re-edit's render (phase 5, plan 11 stage 8): one episode, ending
 # completed -- the render again, making only the shot clips that changed since
-# the last good render (``steps/rerender.py``). Its route and CLI are stage 9's.
+# the last good render (``steps/rerender.py``). Its route (``run_step``,
+# ``estimate``) and its CLI (``step <id> rerender --ep N``) are stage 9's:
+# ``require_reedit_inputs``, ``reedit_request`` and ``reedit_changes`` below.
 REEDIT_STEPS = ("rerender",)
 EPISODE_STEPS = PHASE3_STEPS + PHASE4_STEPS + REEDIT_STEPS
 LATER_STEPS = ("import",)
@@ -1862,6 +1865,56 @@ def require_step_inputs(ec, step) -> None:
         raise WorkflowError(CONFLICT, str(exc)) from None
 
 
+def reedit_request(params) -> dict:
+    """A rerender step's *params*: none. ``invalid`` otherwise, with the
+    runner's own sentence (``rerender.run``) duplicated here since the
+    runner never gets to raise it -- the route and the CLI check this before
+    a job exists (plan 11 stage 9). Returns ``{}``."""
+    if params:
+        extra = ", ".join(sorted(params))
+        raise WorkflowError(INVALID, (f"A re-render keeps the last render's subtitles and encoder and takes no "
+                                      f"parameters (got {extra}); to change them, render the episode (the render "
+                                      "step)."))
+    return {}
+
+
+def require_reedit_inputs(ec) -> dict:
+    """What a re-render is made from, checked before anything runs or is
+    estimated, calling nothing (``conflict`` with the runner's own
+    sentence, in the runner's own order): a finished render of the episode to
+    re-render (``rerender.require_finished_render``), then every render
+    precondition, naming an outdated shot's regenerate target
+    (``render.require_renderable`` -- the render's own check, RC-M8: never a
+    second implementation). The route and the CLI meet both before a job
+    exists; the dry run (:func:`reedit_changes`) and the estimate meet them
+    too, so a re-render that would be refused is never estimated as though
+    it could run. Returns the baseline manifest a re-render would meet."""
+    try:
+        baseline = rerender_step.require_finished_render(ec)
+    except StepFailed as exc:
+        raise WorkflowError(CONFLICT, str(exc)) from None
+    try:
+        render_step.require_renderable(ec)
+    except StepFailed as exc:
+        raise WorkflowError(CONFLICT, str(exc)) from None
+    return baseline
+
+
+def reedit_changes(ec) -> dict:
+    """The dry run of a re-render of *ec*'s episode right now (``GET
+    /estimate/rerender``, ``step ID rerender --dry-run``): ``render.
+    render_changes(ec, None)`` -- stage 8's own predicate (RC-M8: the runner
+    and the dry run share one implementation, never a second) -- after
+    :func:`require_reedit_inputs`. ``conflict`` with the render's own
+    sentence when the episode cannot be rendered, or has no finished render
+    to re-render, right now. Calls nothing; hashes the cache's clips."""
+    require_reedit_inputs(ec)
+    try:
+        return render_step.render_changes(ec, None)
+    except StepFailed as exc:
+        raise WorkflowError(CONFLICT, str(exc)) from None
+
+
 def assets_gate(ec, *, env) -> None:
     """The assets step's own stop before its first call
     (``assets.plan_refusal``) checked before a job exists, calling nothing (a
@@ -2131,6 +2184,21 @@ def _store_path(call, *args):
         return None
 
 
+def _cache_files_stamp(cache_dir) -> tuple:
+    """``((name, (size, mtime_ns) | None), ...)`` of a render's cache folder
+    (``render/cache/``), sorted by name; ``()`` for no folder yet. Part of
+    the "changes since last render" block's cache key (:func:`_derived_key`,
+    stage 9), so ``render.render_changes`` -- which hashes those clips
+    (``render/partial.py``) -- runs again only when one of them moved."""
+    if not cache_dir:
+        return ()
+    try:
+        names = sorted(os.listdir(cache_dir))
+    except OSError:
+        return ()
+    return tuple((name, _file_stamp(os.path.join(cache_dir, name))) for name in names)
+
+
 def _derived_key(ec, script, board, doc, manifest) -> tuple:
     story_id, ep = ec.story_id, ec.ep
     lines = [line for scene in (script or {}).get("scenes") or [] for line in scene["lines"]]
@@ -2144,7 +2212,15 @@ def _derived_key(ec, script, board, doc, manifest) -> tuple:
                             for kind, docs in ec.entities.items() for eid, entity in docs.items()))
     stamps = tuple((current or {}).get("updated_at") for current in (script, board, doc, manifest))
     lock = (ec.style_lock.get("locked_at"), ec.style_lock.get("updated_at"))
-    return (stamps, ec.story.get("updated_at"), lock, ec.consistency_mode, entities, tuple(files))
+    # Stage 9: the reedit block below hashes the render cache's clips
+    # (render.render_changes); its own stamp -- the last good render's file
+    # and the cache folder's own files -- keeps that from running again on
+    # every request when nothing moved.
+    known = render_step.last_render(ec)
+    last_good_stamp = _file_stamp(_store_path(ec.store.episode_doc_path, story_id, ep, render_step.LAST_GOOD_DOC))
+    cache_stamp = _cache_files_stamp(known["cache_dir"])
+    return (stamps, ec.story.get("updated_at"), lock, ec.consistency_mode, entities, tuple(files),
+            last_good_stamp, cache_stamp)
 
 
 def _derive(ec, script, board, doc, manifest) -> dict:
@@ -2162,8 +2238,23 @@ def _derive(ec, script, board, doc, manifest) -> dict:
         params = manifest["params"]
         out_of_date = not render_step.current_render(ec, {"subtitles": params["subtitles"],
                                                           "encoder": params["encoder"]})
+    reedit = None
+    if render_step.last_render(ec)["baseline"] is not None:
+        try:
+            changes = render_step.render_changes(ec, None)
+        except StepFailed as exc:
+            # Stage 9: the episode page never 500s over this -- a StepFailed
+            # ("cannot be rendered") becomes the block's own sentence.
+            reedit = {"blocked": str(exc)}
+        else:
+            reedit = {
+                "blocked": None, "current": changes["current"], "shots_total": changes["shots_total"],
+                "rebuild": changes["rebuild"], "reuse": changes["reuse"], "reasons": changes["reasons"],
+                "end_card": changes["end_card"], "timing_converted": changes["timing_converted"],
+                "summary": changes["summary"], "stages": changes["stages"], "inputs": changes["inputs"],
+            }
     return {"shots": shots, "lines": lines, "fingerprint": assets_approval_state(ec, board, script, doc),
-            "out_of_date": out_of_date}
+            "out_of_date": out_of_date, "reedit": reedit}
 
 
 def _derived(stories, ec, script, board, doc, manifest) -> dict:
@@ -2203,11 +2294,17 @@ def _assets_view(ec, script, board, doc, derived) -> dict:
     for scene in (script or {}).get("scenes") or []:
         for line in scene["lines"]:
             known = derived["lines"][line["line_id"]]
+            entry = ((doc or {}).get("lines") or {}).get(line["line_id"]) or {}
+            pending, take = entry.get("pending"), entry.get("take")
             lines.append({
                 "line_id": line["line_id"], "scene_id": scene["scene_id"], "speaker": line["speaker"],
                 "voiced": known["voiced"], "voice": line["timing"].get("voice") if known["voiced"] else None,
                 "words_source": known["words_source"], "aligned_by": known["aligned_by"],
                 "approximate": known["words_source"] not in (wordtiming.PROVIDER, wordtiming.ALIGNMENT),
+                # Phase 5 stage 7's take, and stage 9's own note (a pending
+                # regenerate's, else the take's): what EpisodeStudio's
+                # "Re-voice this line" needs (plan 11 stage 11).
+                "take": take, "note": (pending or take or {}).get("note"), "pending": bool(pending),
                 "target": assets_step.line_target(ep, line["line_id"]),
             })
     approved = (doc or {}).get("approved")
@@ -2242,6 +2339,7 @@ def _render_view(manifest, derived) -> dict:
         "finished_at": manifest["timings"]["finished_at"], "warnings": list(manifest["warnings"]),
         "ffmpeg": dict(manifest["ffmpeg"]), "out_of_date": derived["out_of_date"],
         "reuse": render_step.reuse_view(manifest),
+        "changes": derived["reedit"],
     }
 
 
@@ -2275,6 +2373,7 @@ def episode_outputs(stories, story, ep) -> dict:
                                est_usd, generated_at, locked, approved, pending, target: "shot:<ep>:<shid>"}],
                     "lines": [{line_id, scene_id, speaker, voiced, voice, words_source:
                                provider|alignment|even_split|null, aligned_by, approximate,
+                               take: {id, note, audio_sha256} | null, note, pending: bool,
                                target: "line:<ep>:<lid>"}]} | null,
          "render": {"state": completed|failed|cancelled|incomplete, "profile", "params": {subtitles, encoder},
                     "duration_s", "loudness": {i, tp, lra}, "fps", "width", "height",
@@ -2283,19 +2382,29 @@ def episode_outputs(stories, story, ep) -> dict:
                     "seconds", "started_at", "finished_at", "warnings": [...], "ffmpeg": {version, machine},
                     "out_of_date": bool | null,
                     "reuse": {baseline_output_sha256, shots_total, shots_rebuilt, shots_reused, reasons,
-                              timing_converted, summary: "3 of 11 shots re-rendered"} | null} | null,
+                              timing_converted, summary: "3 of 11 shots re-rendered"} | null,
+                    "changes": {"blocked": str} | {"blocked": null, "current", "shots_total",
+                                "rebuild": [shot ids], "reuse": [shot ids], "reasons", "end_card",
+                                "timing_converted", "summary", "stages", "inputs"} | null} | null,
          "metadata": {"pack": metadata_pack.json, "current": bool} | null,
          "ledger": {"entries": [...], "totals": {est_usd, paid_usd, entries}}}
 
-    ``assets`` is null before the episode has a script or a storyboard;
-    ``render`` before a manifest (``out_of_date`` null while the render has
-    no output; else whether rendering again with the same params would make
-    another file: ``render.current_render``, so an ``encoder: auto`` render
-    is always out of date; ``reuse`` the manifest's record of what the render
-    made again since the last good render, phase 5 stage 8, null for a
-    render with none before it); ``metadata`` before a pack (``current``:
-    ``metadata.is_current`` against the render's recorded output). Calls
-    nothing; what it hashes is remembered while nothing it reads moves
+    ``assets`` is null before the episode has a script or a storyboard (a
+    line's ``take`` is stage 7's persisted take, ``note`` its own or a
+    pending regenerate's, whichever is newer -- what EpisodeStudio's
+    "Re-voice this line" needs, plan 11 stage 11); ``render`` before a
+    manifest (``out_of_date`` null while the render has no output; else
+    whether rendering again with the same params would make another file:
+    ``render.current_render``, so an ``encoder: auto`` render is always out
+    of date; ``reuse`` the manifest's record of what the render made again
+    since the last good render, phase 5 stage 8, null for a render with none
+    before it; ``changes`` -- stage 9 -- the dry run of a render right now,
+    ``render.render_changes(ec, None)``, null before a finished render to
+    compare with, ``blocked`` naming why the episode cannot be rendered
+    right now instead of a 500 when it cannot); ``metadata`` before a pack
+    (``current``: ``metadata.is_current`` against the render's recorded
+    output). Calls nothing; what it hashes -- ``changes`` hashes the render
+    cache's clips too -- is remembered while nothing it reads moves
     (``_DERIVED_CACHE``). ``StoryUnreadable`` for a document that does not
     validate, or an episode whose context cannot be read."""
     story_id = story["story_id"]
@@ -3275,6 +3384,30 @@ def render_estimate(ec, params) -> dict:
         "basis": (f"estimate: {fast_track_step.RENDER_SECONDS_PER_SHOT:g} s a shot + "
                   f"{fast_track_step.RENDER_TAIL_SECONDS:g} s (stage-0 bench; A-069 records the measured times)"),
         "ready": True, "message": message,
+    }
+
+
+def reedit_estimate(ec) -> dict:
+    """What a re-render would do now (``GET /estimate/rerender``): $0, no
+    LLM call, the dry run's own count (:func:`reedit_changes`, stage 8's
+    predicate, RC-M8: never a second implementation)::
+
+        {"step": "rerender", "ep", "est_usd": 0.0, "units": {"llm_calls": 0, "shots"},
+         "route_class": "local", "ready": true, "current": bool, "shots_total",
+         "rebuild": [shot ids], "reuse": [shot ids], "reasons": {shot id: reason},
+         "message": "3 of 11 shots re-rendered"}
+
+    ``conflict`` with the render's own sentence while the episode cannot be
+    rendered, or has no finished render to re-render, right now -- the same
+    two refusals the route meets before a job exists. Calls nothing; hashes
+    the cache's clips."""
+    changes = reedit_changes(ec)
+    total = changes["shots_total"]
+    return {
+        "step": "rerender", "ep": ec.ep, "est_usd": 0.0, "units": {"llm_calls": 0, "shots": total},
+        "route_class": "local", "ready": True, "current": changes["current"],
+        "shots_total": total, "rebuild": list(changes["rebuild"]), "reuse": list(changes["reuse"]),
+        "reasons": dict(changes["reasons"]), "message": changes["summary"],
     }
 
 
