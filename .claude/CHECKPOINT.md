@@ -61,6 +61,17 @@
     - **Rollback:** revert the stage's commit(s); nothing live changes until the deploy.
   - **Order after 13b:** deploy at 0 jobs (`rm -sfv` + `up -d --build`) → stage 14 (5 styles unattended, the human
     watches claymation) → 14b(e) → stage 15 → close (Tier-1, ff `main`, deploy, push branch then `main`, CI green).
+  - **OPEN QUESTION for the human (blocks only 14b(e), not stage 14):** the caps are cumulative per story
+    (`budget.check`: `story_spent + estimate > per_story_cap_usd`; `gating.budget_check` passes the story ledger's
+    total and today's spend, no episode spend). T2 `ab8fc500173e` already booked **$0.671**, so with caps
+    0.10/0.10/0.10 the $0.03 seedream regenerate is refused ("would bring this story to $0.70 of its $0.10 cap").
+    Proposed: episode 0.10, daily 0.10 (today's paid spend is $0.00, so new spend stays ≤ $0.10), per-story **0.78**
+    (= $0.671 + $0.10 headroom). Nothing paid runs until the human answers.
+  - **Stage 14 surprise (worked around, logged):** the CLI reads keys only from its process environment
+    (`cli.py`: `settings_env={}`); this VPS keeps them in the Settings store, so `step bible` refused ("no key").
+    The driver runs the same CLI in a process that first loads the Settings store into its environment **minus every
+    paid key** (`FAL_KEY`, `OPENROUTER_API_KEY`, …), inside the container, values never printed. Anime story
+    `dcc0998db8ae` (created by the first attempt) is resumed, not duplicated.
   - **Live state at session start:** 0 jobs, `allow_paid` false, caps 1/3/10, `main` == branch == `edf9a64`.
   - **Tier-1 baseline of the close session at `edf9a64`:** in the worktree both suites green (no F/E; the doubled
     `-q` hid the counts) + compileall clean; counts from a `git archive` copy: local 6415 passed / 9 skipped, CI env
