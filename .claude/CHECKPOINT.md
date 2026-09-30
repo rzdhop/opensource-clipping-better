@@ -12,7 +12,10 @@
     (Rin/earrings) → whole-word fix `d2ba496`; T2-P5-F11 Edge retired `en-US-DavisNeural` → catalogue AndrewNeural
     `3cfce9a`; Tier-1 local 6473/1, CI 5687/756; deployed (restart at 0 jobs); Kaito re-pinned (job 95e2705b2d51);
     anime resumed (`run_style.py anime dcc0998db8ae`). F4 proven live on Kaito's sheets.
-  - **Current stage:** 14 — anime running (background, `stage14/run_style.py anime`); then cinematic_real,
+  - **Stage 14 per style:** anime **done** (A-085: 52.7 s, −14.12 LUFS, Bangers word_pop, push_in 4 %, characters
+    held, look drifted to semi-real); cinematic_real **running** (FR `last_bus_3am`). Voices: the CLI's cast pins Edge
+    only (Gemini TTS free = 10 requests/day/model, spent today).
+  - **Current stage:** 14 — (was: anime running); then cinematic_real,
     cartoon_flat, storybook_watercolor, claymation, one at a time. 13b **done** (`a833287`, `065a02c`), deployed at
     0 jobs (`rm -sfv` + `up -d --build`), live `main` = `065a02c`. 13b was: F4 (cast pacing), F1 (Season step stays open after a
     series job), F2 (paste counter in code points), F5 ("Approve proposals" shows approved once the propose-next job

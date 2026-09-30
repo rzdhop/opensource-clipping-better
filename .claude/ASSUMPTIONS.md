@@ -259,6 +259,15 @@
   putting a payoff on the hook scene, which E4 rightly refused. UNCONFIRMED: whether a stronger free judge or a
   second E4 opinion would stop the false flags — measure with `tools/bench_llm.py` before any prompt change.
 
+- **A-085** — `anime` (v1) holds on the free route, except the look (stage 14, 2026-09-30, EN `detective_dawn`,
+  story `dcc0998db8ae`, Rin + Kaito, 1 place, prompt-only). Episode 1: 52.7 s (under the 55–75 s window, the known
+  short-English-script gap), −14.12 LUFS / TP −2.18, 1080×1920 30 fps, 9 scenes / 14 lines / 18 shots, render 147 s.
+  Subtitles word_pop in **Bangers** from the shipped file (no fallback). Motion push_in, pan 4 %, no modifiers or
+  overlays. **Held:** both characters stay recognisable in every shot (Rin's red braid and olive trench, Kaito's
+  black coat and locket). **Drifted:** pollinations draws semi-realistic faces, not anime; the note-covered apartment
+  comes out as a generic corridor; keyless pollinations stamps its logo bottom-right. The run found T2-P5-F10/F11
+  (fixed) and the Gemini TTS daily quota (Rin moved to Edge Aria). UNCONFIRMED: the look on a stronger image link.
+
 ## Confirmed
 - **A-069** — Measured render times on the VPS (container ffmpeg `7.1.5-0+deb13u1/aarch64`, final profile,
   libx264): a full 21-shot FR render 160 s, a full 20-shot EN render 161 s; per shot at 4× mean 3.6–3.8 s (median
