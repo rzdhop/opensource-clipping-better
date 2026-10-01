@@ -345,13 +345,25 @@ def _wardrobe(look, wardrobe_set):
     return sets[0]
 
 
-def render_look(doc, *, wardrobe_set=None, others=()) -> str:
-    """A character's look in at most :data:`LOOK_MAX_WORDS` words: build, its
+def _lower_first(text) -> str:
+    """*text* with its first letter lower case when the rest of that word
+    and of the text is lower case already ("Comically oversized glass" ->
+    "comically oversized glass"; "DJ booth" is kept): a stored signature
+    item said inside a sentence."""
+    if len(text) > 1 and text[0].isupper() and text[1:] == text[1:].lower():
+        return text[0].lower() + text[1:]
+    return text
+
+
+def render_look(doc, *, wardrobe_set=None, others=(), max_words=LOOK_MAX_WORDS) -> str:
+    """A character's look in at most *max_words* words (default
+    :data:`LOOK_MAX_WORDS`; a tighter cap ends on a whole part): build, its
     height against *others* (other character documents in the same frame,
     named by their handle), silhouette, face, hair, skin or material,
     "wearing" the wardrobe set's items (*wardrobe_set* by id, default the
     first), "colours" the palette, then "with" each signature item the
-    wardrobe does not already say. Over the cap, parts are dropped in
+    wardrobe does not already say (its first letter lower case inside the
+    sentence, :func:`_lower_first`). Over the cap, parts are dropped in
     ``_LOOK_DROP_ORDER``. ``ValueError`` when *doc* has no look."""
     look = doc.get("look")
     if not look:
@@ -362,7 +374,8 @@ def render_look(doc, *, wardrobe_set=None, others=()) -> str:
         value = _strip_period(value)
         return "" if _normal(value) in ("none", "no hair", "n a") else value
 
-    extra = [_strip_period(item) for item in doc.get("signature_items") or () if not _already_worn(item, worn)]
+    extra = [_lower_first(_strip_period(item)) for item in doc.get("signature_items") or ()
+             if not _already_worn(item, worn)]
     parts = {
         "build": _strip_period(look["build"]),
         "height": _height_part(doc, others),
@@ -379,11 +392,15 @@ def render_look(doc, *, wardrobe_set=None, others=()) -> str:
         return _collapse_ws(", ".join(value for value in parts.values() if value))
 
     for key in _LOOK_DROP_ORDER:
-        if len(text().split()) <= LOOK_MAX_WORDS:
+        if len(text().split()) <= max_words:
             break
         parts[key] = ""
     words = text().split()
-    return " ".join(words[:LOOK_MAX_WORDS]).rstrip(",;")
+    if max_words < LOOK_MAX_WORDS and len(words) > max_words:
+        # A tighter cap (a layered shot prompt's, phase 7 stage 3b) ends on a
+        # whole part, never inside one ("wearing stiff rectangular blue").
+        return prompting.fit_words(text(), max_words) or " ".join(words[:max_words]).rstrip(",;")
+    return " ".join(words[:max_words]).rstrip(",;")
 
 
 def _place_light(look, variant) -> str:
@@ -519,7 +536,292 @@ def _story_name_map(entities) -> dict:
     return names
 
 
-def resolve_shot(shot, *, scene, entities, style_lock, consistency_mode) -> dict:
+# ------------------------------------------------- layered shots (phase 7, A8/A9)
+#
+# A v2 story's shot is resolved into the layered prompt of
+# ``prompting.layered_shot_prompt`` and its clip prompt
+# (``prompting.layered_clip_prompt``); a legacy story's never reaches here.
+
+# The most reference images a v2 shot carries: the smallest per-link limit
+# ``steps/assets.REFERENCE_LIMITS`` knows, so what the role text names is
+# always what is sent.
+V2_MAX_REFERENCES = 10
+_EXPRESSION_FRAMINGS = ("close_up", "extreme_close_up")
+# Where the characters of a frame stand, in subject order.
+_POSITIONS = {1: ("In the centre",), 2: ("On the left", "On the right"),
+              3: ("On the left", "In the centre", "On the right"),
+              4: ("Far left", "Centre left", "Centre right", "Far right")}
+# An emotion said as an adjective ("neutral" is not said).
+_EMOTION_WORDS = {"tension": "tense", "fear": "afraid", "triumph": "triumphant", "neutral": ""}
+_DELIVERY_MAX_WORDS = 8
+# The word budgets tried in turn until a keyframe prompt fits its cap:
+# (each look's words, the place's words -- None: whole --, the rendering's).
+# The rendering goes first (the references show the style), then the look
+# and the place shrink in alternate steps, so neither is emptied for the other.
+_LAYERED_BUDGETS = ((LOOK_MAX_WORDS, None, 30), (LOOK_MAX_WORDS, None, 8)) + tuple(
+    (look, place, 8) for look, place in ((40, None), (40, 50), (34, 50), (34, 42), (28, 42), (28, 36), (24, 36),
+                                         (24, 30), (21, 30), (21, 26), (18, 26), (18, 22), (14, 22), (14, 18)))
+_REFERENCES_MODE = "references"
+
+
+def _frame_characters(subject_tags, characters) -> list:
+    """``[(char_id, doc), ...]`` of the character tags, in subject order,
+    each once. ``ValueError`` for a tag no character of the story has."""
+    out, seen = [], set()
+    for tag in subject_tags:
+        if tag.startswith("@"):
+            _kind, cid, _variant = parse_tag(tag)
+            if cid not in characters:
+                raise ValueError(f"resolve_shot: unknown character tag {tag!r}")
+            if cid not in seen:
+                seen.add(cid)
+                out.append((cid, characters[cid]))
+    return out
+
+
+def _frame_props(subject_tags, props) -> list:
+    out, seen = [], set()
+    for tag in subject_tags:
+        if tag.startswith("%"):
+            _kind, pid, _variant = parse_tag(tag)
+            if pid not in props:
+                raise ValueError(f"resolve_shot: unknown prop tag {tag!r}")
+            if pid not in seen:
+                seen.add(pid)
+                out.append((pid, props[pid]))
+    return out
+
+
+def _reference_images_v2(subject_tags, *, scene, framing, characters, places, props, char_handles,
+                         prop_handles) -> list:
+    """A v2 shot's references as ``[(path, role, handle), ...]``, in the
+    order they are sent (A9): one identity sheet per character in subject
+    order (its full-body portrait; the expression sheet instead on a
+    close-up or extreme close-up when it has one), the place's own variant
+    (falling back to the day plate), each character's turnaround, then the
+    props; an entity with no such image is skipped; at most
+    :data:`V2_MAX_REFERENCES`."""
+    refs = []
+    frame = _frame_characters(subject_tags, characters)
+    for cid, doc in frame:
+        own = doc.get("refs") or {}
+        portrait, expressions = own.get("portrait"), own.get("expressions")
+        if framing in _EXPRESSION_FRAMINGS and expressions and expressions.get("name"):
+            refs.append((f"characters/{cid}/refs/{expressions['name']}", prompting.ROLE_EXPRESSIONS,
+                         char_handles[cid]))
+        elif portrait and portrait.get("name"):
+            refs.append((f"characters/{cid}/refs/{portrait['name']}", prompting.ROLE_IDENTITY, char_handles[cid]))
+
+    place_doc = places.get(scene["place_id"])
+    if place_doc is not None:
+        variants = place_doc.get("time_variants") or {}
+        ref = variants.get(scene["time_variant"]) or variants.get(schemas.MASTER_PLATE_VARIANT)
+        if ref and ref.get("name"):
+            refs.append((f"places/{scene['place_id']}/refs/{ref['name']}", prompting.ROLE_SET, ""))
+
+    for cid, doc in frame:
+        turnaround = (doc.get("refs") or {}).get("turnaround")
+        if turnaround and turnaround.get("name"):
+            refs.append((f"characters/{cid}/refs/{turnaround['name']}", prompting.ROLE_TURNAROUND,
+                         char_handles[cid]))
+
+    for pid, doc in _frame_props(subject_tags, props):
+        image = doc.get("image")
+        if image and image.get("name"):
+            refs.append((f"props/{pid}/refs/{image['name']}", prompting.ROLE_PROP, prop_handles[pid]))
+
+    return refs[:V2_MAX_REFERENCES]
+
+
+def _shot_lines(plan, scene) -> list:
+    """The script lines a plan covers: its ``lines`` are 1-based numbers into
+    the scene's lines (a plan) or line ids (a storyboard shot); one the
+    scene no longer has is left out."""
+    by_id = {line["line_id"]: line for line in scene.get("lines") or ()}
+    ordered = list(scene.get("lines") or ())
+    out = []
+    for entry in plan.get("lines") or ():
+        if isinstance(entry, int) and not isinstance(entry, bool):
+            if 1 <= entry <= len(ordered):
+                out.append(ordered[entry - 1])
+        elif entry in by_id:
+            out.append(by_id[entry])
+    return out
+
+
+def _delivery_clause(lines, char_handles) -> str:
+    """The first spoken line's emotion and delivery as one short clause
+    ("the cylinder looks shocked while speaking (slow, monotone)"), or ''."""
+    for line in lines:
+        handle = char_handles.get(line.get("speaker"))
+        if not handle:
+            continue
+        emotion = line.get("emotion") or ""
+        feeling = _EMOTION_WORDS.get(emotion, emotion)
+        delivery = prompting.fit_words(line.get("delivery") or "", _DELIVERY_MAX_WORDS)
+        delivery = _lower_first(delivery) if delivery else ""
+        if feeling and delivery:
+            return f"{handle} looks {feeling} while speaking ({delivery})"
+        if feeling:
+            return f"{handle} looks {feeling} while speaking"
+        if delivery:
+            return f"{handle} speaks ({delivery})"
+        return ""
+    return ""
+
+
+def _plain_look(doc, max_words) -> str:
+    """A character with no look yet, in words: its descriptor and the
+    signature items it does not already say."""
+    descriptor = _strip_period(doc["descriptor"])
+    extra = [_lower_first(_strip_period(item)) for item in doc.get("signature_items") or ()
+             if not _already_worn(item, descriptor)]
+    text = f"{descriptor}, with {_and_join(extra)}" if extra else descriptor
+    return prompting.fit_words(text, max_words) or " ".join(text.split()[:max_words])
+
+
+def _holder(prop_doc, frame_ids, char_handles) -> str:
+    for entry in (prop_doc.get("look") or {}).get("where_when") or ():
+        holder = entry.get("holder_char_id")
+        if holder in frame_ids:
+            return char_handles[holder]
+    return ""
+
+
+def _staging(frame, frame_props, *, char_handles, look_words) -> str:
+    """Each character of the frame by its handle, where it stands (left,
+    right, centre in subject order) and its look -- its height said against
+    the others in the frame --, two facing each other; then each prop of
+    the shot with its look and who holds it."""
+    sentences = []
+    n = len(frame)
+    positions = _POSITIONS.get(n) or tuple(f"Position {i} from the left" for i in range(1, n + 1))
+    docs = [doc for _cid, doc in frame]
+    for (cid, doc), where in zip(frame, positions):
+        others = [other for other in docs if other is not doc]
+        look = (render_look(doc, others=others, max_words=look_words) if doc.get("look")
+                else _plain_look(doc, look_words))
+        sentences.append(prompting.as_sentence(f"{where}, {char_handles[cid]}: {look}"))
+    if n == 2:
+        sentences.append("They face each other.")
+    frame_ids = {cid for cid, _doc in frame}
+    for _pid, doc in frame_props:
+        held = _holder(doc, frame_ids, char_handles)
+        text = render_prop(doc)
+        sentences.append(prompting.as_sentence(f"{text}, held by {held}" if held else text))
+    return " ".join(sentence for sentence in sentences if sentence)
+
+
+def _place_slice(place_doc, variant, framing, props) -> str:
+    """The place in words for the framing (``render_place``): with a look,
+    the full layout on a wide or medium framing, the light and one
+    background element on a close one; without a look, its descriptor (and
+    its layout notes on a wide or medium framing) and the variant's light."""
+    if place_doc.get("look"):
+        here = [props[pid] for pid in place_doc["look"].get("props_here") or () if pid in props]
+        text = render_place(place_doc, variant, framing, props=here)
+        return text if framing in _CLOSE_PLACE_FRAMINGS else f"Setting: {text}"
+    light = f"Light: {variant.replace('_', ' ')} light."
+    if framing in _CLOSE_PLACE_FRAMINGS:
+        return f"Setting: {prompting.fit_words(place_doc['descriptor'], 20)}. {light}"
+    return f"Setting: {_place_block(place_doc)}. {light}"
+
+
+# The sentences of a place slice, by what they start with, in the order a
+# tight budget keeps them: where things are and the light before the
+# descriptor (the set image shows it), the scale and the dressing last.
+_PLACE_SENTENCE_START = re.compile(r"(?<=\.) (?=(?:Layout|Light|Scale|Set dressing|Behind): )")
+_PLACE_KEEP_ORDER = ("Layout:", "Light:", "Behind:", "Setting:", "Scale:", "Set dressing:")
+
+
+def _fit_place(text, max_words) -> str:
+    """The place slice *text* in at most *max_words* words: its sentences kept
+    whole in ``_PLACE_KEEP_ORDER`` while they fit (the first one that does
+    not is cut at a clause boundary), said in their own order."""
+    sentences = _PLACE_SENTENCE_START.split(text)
+    rank = {sentence: next((i for i, start in enumerate(_PLACE_KEEP_ORDER) if sentence.startswith(start)),
+                           len(_PLACE_KEEP_ORDER)) for sentence in sentences}
+    kept, left = {}, max_words
+    for sentence in sorted(sentences, key=lambda sentence: rank[sentence]):
+        words = len(sentence.split())
+        if words <= left:
+            kept[sentence] = sentence
+            left -= words
+            continue
+        cut = prompting.fit_words(sentence, left)
+        if len(cut.split()) > 1:
+            kept[sentence] = prompting.as_sentence(cut)
+            left -= len(cut.split())
+        break
+    return " ".join(kept[sentence] for sentence in sentences if sentence in kept)
+
+
+def _layered(plan, *, scene, entities, style_lock, consistency_mode, video_action, char_handles,
+             prop_handles, name_map) -> dict:
+    """The v2 half of :func:`resolve_shot`: ``image_prompt`` (layered,
+    within ``KEYFRAME_V2_MAX_WORDS`` -- the looks, the place and the
+    rendering shortened in turn until it fits), ``video_prompt``,
+    ``reference_images`` and ``prompt_layout``."""
+    characters = entities.get("characters", {})
+    places = entities.get("places", {})
+    props = entities.get("props", {})
+    framing = plan["framing"]
+    frame = _frame_characters(plan["subjects"], characters)
+    frame_props = _frame_props(plan["subjects"], props)
+    handles = [char_handles[cid] for cid, _doc in frame]
+    held = [prop_handles[pid] for pid, _doc in frame_props]
+
+    refs = _reference_images_v2(plan["subjects"], scene=scene, framing=framing, characters=characters,
+                                places=places, props=props, char_handles=char_handles, prop_handles=prop_handles)
+    # The roles are written from the very list stored and sent (capped to the
+    # smallest per-link limit), so image N of the text is image N of the request.
+    roles = (prompting.role_text([(role, handle) for _path, role, handle in refs])
+             if consistency_mode == _REFERENCES_MODE else "")
+
+    clause = _delivery_clause(_shot_lines(plan, scene), char_handles)
+    beat = " ".join(part for part in (prompting.as_sentence(video_action), prompting.as_sentence(clause)) if part)
+    beat = names_mod.without_names(beat, name_map)
+    composition = prompting.as_sentence(
+        f"Camera: {prompting.layered_framing_phrase(framing, characters=handles, props=held)}, "
+        f"{prompting.layered_lens_phrase(style_lock, framing)}")
+    place_full = _place_slice(places[scene["place_id"]], scene["time_variant"], framing, props)
+    constraints = (prompting.CONSTRAINTS_KEYFRAME if frame else prompting.CONSTRAINTS_KEYFRAME_NO_PEOPLE)
+
+    for look_words, place_words, rendering_words in _LAYERED_BUDGETS:
+        staging = names_mod.without_names(
+            _staging(frame, frame_props, char_handles=char_handles, look_words=look_words), name_map)
+        place_text = place_full if place_words is None else _fit_place(place_full, place_words)
+        image_prompt = prompting.layered_shot_prompt(
+            style_lock, roles_text=roles, beat=beat, staging=staging, composition=composition,
+            place_text=place_text, constraints=constraints, rendering_words=rendering_words)
+        if len(image_prompt.split()) <= prompting.KEYFRAME_V2_MAX_WORDS:
+            break
+
+    camera_motion = plan.get("camera_motion")
+    if camera_motion not in prompting.CAMERA_PHRASES:
+        camera_motion = motion_for(framing, None, scene["function"], style_lock)["type"]
+    if len(handles) >= 2:
+        secondary = f"{handles[1]} reacts with a small natural movement"
+    elif handles:
+        secondary = "small natural idle movements in between"
+    else:
+        secondary = ""
+    subject = _and_join(handles) or (held[0] if held else "the set")
+    motion = names_mod.without_names(_collapse_ws(plan.get("motion") or video_action), name_map)
+    modifiers = [prompting.MODIFIER_PHRASES[m] for m in plan.get("modifiers") or () if m in prompting.MODIFIER_PHRASES]
+    video_prompt = prompting.layered_clip_prompt(
+        style_lock, subject=subject, motion=_strip_period(motion),
+        camera_phrase=prompting.CAMERA_PHRASES[camera_motion], modifiers=modifiers, secondary=secondary)
+
+    return {
+        "image_prompt": image_prompt,
+        "video_prompt": video_prompt,
+        "reference_images": [path for path, _role, _handle in refs],
+        "prompt_layout": prompting.LAYERED_V1,
+    }
+
+
+def resolve_shot(shot, *, scene, entities, style_lock, consistency_mode, v2=False) -> dict:
     """*shot* (a plan: ``framing``/``action``/``subjects``) resolved into
     ``{"image_prompt", "video_action", "negative_prompt", "reference_images",
     "consistency"}``. Every entity name is stripped from the resolved action
@@ -529,7 +831,16 @@ def resolve_shot(shot, *, scene, entities, style_lock, consistency_mode) -> dict
     a place's own name recurring as ordinary words inside its own descriptor
     (phase 7 D2) survives untouched. ``prompt_override`` is never touched
     here -- the caller decides whether to use it instead of
-    ``image_prompt``."""
+    ``image_prompt``.
+
+    *v2* (``media_policy.is_v2`` of the story, phase 7 stage 3b): the shot
+    is resolved into the layered prompt instead (:func:`_layered`):
+    ``image_prompt`` is the layered text, ``reference_images`` the v2 list
+    (:func:`_reference_images_v2`), and the result also holds
+    ``video_prompt`` (the clip prompt) and ``prompt_layout``
+    (``"layered_v1"``). The plan may then carry ``lines`` (numbers or line
+    ids), ``camera_motion``, ``modifiers`` and ``motion``. Off, the result
+    is exactly the legacy one (RC-Q1)."""
     characters = entities.get("characters", {})
     places = entities.get("places", {})
     props = entities.get("props", {})
@@ -547,6 +858,20 @@ def resolve_shot(shot, *, scene, entities, style_lock, consistency_mode) -> dict
     # image_prompt is assembled with, so neither a raw tag nor a leaked name
     # ever reaches either prompt.
     video_action = names_mod.without_names(resolved_action, _story_name_map(entities))
+    if v2:
+        layered = _layered(shot, scene=scene, entities=entities, style_lock=style_lock,
+                           consistency_mode=consistency_mode, video_action=video_action,
+                           char_handles=char_handles_map, prop_handles=prop_handles_map,
+                           name_map=_story_name_map(entities))
+        return {
+            "image_prompt": layered["image_prompt"],
+            "video_action": video_action,
+            "negative_prompt": prompting.negative_prompt(style_lock),
+            "reference_images": layered["reference_images"],
+            "consistency": consistency_mode,
+            "video_prompt": layered["video_prompt"],
+            "prompt_layout": layered["prompt_layout"],
+        }
     subjects_block = _subjects_block(shot["subjects"], characters=characters, props=props)
 
     place_doc = places[scene["place_id"]]
@@ -1081,7 +1406,7 @@ def _non_cut_inside_a_scene(storyboard) -> bool:
 
 
 def build_storyboard(script, plans, sources, *, entities, style_lock, template, language, consistency_mode,
-                     now, previous=None) -> tuple:
+                     now, previous=None, v2=False) -> tuple:
     """*plans* (``{scene_id: [plan, ...]}``) and *sources* (``{scene_id:
     "t1"|"fast"}``) resolved into a complete ``storyboard_v1`` document:
     scenes in the script's own order (only the ones *plans* covers), the
@@ -1094,6 +1419,7 @@ def build_storyboard(script, plans, sources, *, entities, style_lock, template, 
     document that fails its own validation -- a bug, not a user error) when
     the result does not pass ``schemas.storyboard_errors`` and
     ``schemas.storyboard_context_errors``. Returns ``(document, notes)``.
+    *v2*: every shot is resolved layered (:func:`resolve_shot`).
     """
     scenes_by_id = {scene["scene_id"]: scene for scene in script["scenes"]}
     scenes_in_order = [scene for scene in script["scenes"] if scene["scene_id"] in plans]
@@ -1111,9 +1437,9 @@ def build_storyboard(script, plans, sources, *, entities, style_lock, template, 
             line_ids = [scene["lines"][n - 1]["line_id"] for n in plan["lines"]]
             motion = motion_for(plan["framing"], plan["camera_motion"], scene["function"], style_lock)
             resolved = resolve_shot(plan, scene=scene, entities=entities, style_lock=style_lock,
-                                    consistency_mode=consistency_mode)
+                                    consistency_mode=consistency_mode, v2=v2)
             _collect_resolved_from(resolved_from, plan["subjects"], scene, entities)
-            shots.append({
+            shot = {
                 "shot_id": shot_id, "scene_id": scene["scene_id"], "order": order,
                 "framing": plan["framing"], "camera_motion": motion["type"],
                 "modifiers": list(plan["modifiers"]), "subject_tags": list(plan["subjects"]),
@@ -1122,9 +1448,12 @@ def build_storyboard(script, plans, sources, *, entities, style_lock, template, 
                 "negative_prompt": resolved["negative_prompt"],
                 "prompt_override": None, "reference_images": resolved["reference_images"],
                 "consistency": resolved["consistency"], "duration_s": 0.0, "keep_still": False,
-                "motion": motion, "video_prompt": None,
+                "motion": motion, "video_prompt": resolved.get("video_prompt"),
                 "assets": {"image": None, "video": None, "seed": None, "provider": None, "approved": False},
-            })
+            }
+            if "prompt_layout" in resolved:
+                shot["prompt_layout"] = resolved["prompt_layout"]
+            shots.append(shot)
 
     transitions = timing.plan_transitions(shots, scenes_by_id, template)
     notes.extend(_time_shots(shots, transitions, script, template=template, language=language,
@@ -1157,21 +1486,25 @@ def build_storyboard(script, plans, sources, *, entities, style_lock, template, 
     return doc, notes
 
 
-def refresh_prompts(storyboard, script, *, entities, style_lock, consistency_mode) -> dict:
+def refresh_prompts(storyboard, script, *, entities, style_lock, consistency_mode, v2=False) -> dict:
     """*storyboard* with every shot's ``image_prompt``/``video_action``/
     ``negative_prompt``/``reference_images``/``consistency`` and the
     document's ``resolved_from`` re-resolved from *entities* as they are now
     -- plans (framing, camera motion, modifiers, action, subject_tags,
     lines), durations, motion and transitions are left exactly as they were
-    (used when an entity changes after the storyboard was built)."""
+    (used when an entity changes after the storyboard was built). *v2*:
+    resolved layered, ``video_prompt`` and ``prompt_layout`` re-written too."""
     scenes_by_id = {scene["scene_id"]: scene for scene in script["scenes"]}
     resolved_from: dict = {}
     new_shots = []
     for shot in storyboard["shots"]:
         scene = scenes_by_id[shot["scene_id"]]
         plan = {"framing": shot["framing"], "action": shot["action"], "subjects": shot["subject_tags"]}
+        if v2:
+            plan.update(lines=list(shot["lines"]), camera_motion=shot["camera_motion"],
+                        modifiers=list(shot["modifiers"]))
         resolved = resolve_shot(plan, scene=scene, entities=entities, style_lock=style_lock,
-                                consistency_mode=consistency_mode)
+                                consistency_mode=consistency_mode, v2=v2)
         _collect_resolved_from(resolved_from, shot["subject_tags"], scene, entities)
         new_shot = dict(shot)
         new_shot["image_prompt"] = resolved["image_prompt"]
@@ -1179,6 +1512,9 @@ def refresh_prompts(storyboard, script, *, entities, style_lock, consistency_mod
         new_shot["negative_prompt"] = resolved["negative_prompt"]
         new_shot["reference_images"] = resolved["reference_images"]
         new_shot["consistency"] = resolved["consistency"]
+        if v2:
+            new_shot["video_prompt"] = resolved["video_prompt"]
+            new_shot["prompt_layout"] = resolved["prompt_layout"]
         new_shots.append(new_shot)
 
     new_doc = dict(storyboard)

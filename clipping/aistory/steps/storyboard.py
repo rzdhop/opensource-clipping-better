@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import time
 
-from .. import prompts, shots
+from .. import media_policy, prompts, shots
 from . import entities, episode_common, llm_call
 from . import script as script_step
 from .episode_common import SCRIPT_DOC, STORYBOARD_DOC
@@ -97,7 +97,7 @@ def build(ec, script, plans, sources, previous, *, stale, now) -> tuple:
         return shots.build_storyboard(
             script, {sid: plans[sid] for sid in chosen}, {sid: sources[sid] for sid in chosen},
             entities=ec.entities, style_lock=ec.style_lock, template=ec.template, language=ec.language,
-            consistency_mode=ec.consistency_mode, now=now, previous=previous)
+            consistency_mode=ec.consistency_mode, now=now, previous=previous, v2=media_policy.is_v2(ec.story))
 
     try:
         board, notes = attempt(list(plans))

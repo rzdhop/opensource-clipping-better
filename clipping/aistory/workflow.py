@@ -3370,7 +3370,11 @@ def _edit_storyboard(ec, script, board, fields, errors) -> tuple:
                     errors.append(f"{path}.modifiers: {modifier!r} is not a modifier the style allows "
                                   f"({', '.join(allowed_modifiers) or 'none'})")
                 if not refused:
+                    changed = shot["modifiers"] != list(dict.fromkeys(value))
                     shot["modifiers"] = list(dict.fromkeys(value))
+                    if changed and media_policy.is_v2(ec.story) and shot["shot_id"] not in to_resolve:
+                        # A v2 shot's clip prompt says its modifiers (phase 7 stage 3b).
+                        to_resolve[shot["shot_id"]] = (path, None, False)
         if "action" in item:
             _edit_action(ec, path, shot, scene, item["action"], errors)
         if "keep_still" in item:
@@ -3419,6 +3423,7 @@ def _resolve_again(ec, script, board, to_resolve, errors) -> None:
     re-resolving it would take in an entity edited since, outdating the
     image for a change it does not show."""
     lock = ec.style_lock
+    v2 = media_policy.is_v2(ec.story)
     by_function = lock["motion_rules"]["tier1"]["by_function"]
     scenes = {scene["scene_id"]: scene for scene in script["scenes"]}
     by_id = {shot["shot_id"]: shot for shot in board["shots"]}
@@ -3431,19 +3436,28 @@ def _resolve_again(ec, script, board, to_resolve, errors) -> None:
                     else f"a {scene['function']} scene")
             errors.append(f"{path}.camera_motion: the style moves {what} with {motion['type']}, not {wanted!r}")
             continue
-        if not prompt:
+        # A v2 shot's clip prompt names its camera (phase 7 stage 3b): a motion
+        # swap writes it again, and only it -- the image prompt stays as it is.
+        if not prompt and not v2:
             shot["camera_motion"] = motion["type"]
             shot["motion"] = motion
             continue
+        plan = {"framing": shot["framing"], "action": shot["action"], "subjects": shot["subject_tags"]}
+        if v2:
+            plan.update(lines=list(shot["lines"]), camera_motion=motion["type"], modifiers=list(shot["modifiers"]))
         try:
-            resolved = shots.resolve_shot({"framing": shot["framing"], "action": shot["action"],
-                                           "subjects": shot["subject_tags"]}, scene=scene, entities=ec.entities,
-                                          style_lock=lock, consistency_mode=ec.consistency_mode)
+            resolved = shots.resolve_shot(plan, scene=scene, entities=ec.entities, style_lock=lock,
+                                          consistency_mode=ec.consistency_mode, v2=v2)
         except (KeyError, ValueError) as exc:
             raise WorkflowError(CONFLICT, (f"Shot {shot_id} names something the story no longer has ({exc}): plan "
                                            f"scene {scene['scene_id']} again (the storyboard step).")) from None
         shot["camera_motion"] = motion["type"]
         shot["motion"] = motion
+        if v2:
+            shot["video_prompt"] = resolved["video_prompt"]
+            if not prompt:
+                continue
+            shot["prompt_layout"] = resolved["prompt_layout"]
         shot.update(image_prompt=resolved["image_prompt"], video_action=resolved["video_action"],
                     negative_prompt=resolved["negative_prompt"],
                     reference_images=resolved["reference_images"], consistency=resolved["consistency"])
@@ -3522,7 +3536,7 @@ def patch_storyboard(stories, story_id, ep, fields, *, now) -> dict:
         shots.retime_storyboard(trial, script, template=ec.template, language=ec.language, style_lock=ec.style_lock)
     if refresh:
         trial = shots.refresh_prompts(trial, script, entities=ec.entities, style_lock=ec.style_lock,
-                                      consistency_mode=ec.consistency_mode)
+                                      consistency_mode=ec.consistency_mode, v2=media_policy.is_v2(ec.story))
     if trial == board:
         return board
     trial["approved_at"] = None

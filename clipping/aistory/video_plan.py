@@ -25,32 +25,19 @@ from __future__ import annotations
 from typing import Mapping, NamedTuple, Sequence
 
 from ..providers.video import CLIP_LENGTHS
-from . import schemas
+from . import prompting, schemas
 
 # ------------------------------------------------------------ camera phrases
 
 # Exactly ``schemas.CAMERA_MOTIONS`` (spec 6.3's closed list), each mapped to
 # a short English phrase a hosted or local image-to-video model is prompted
-# with. ``pan_ud``/``pan_du`` follow ``render/motion.py``'s own reading of
-# the same tokens (``ud``: low to high y, i.e. top to bottom; ``du``: the
-# reverse) so Tier 1's rendered motion and Tier 2's requested motion agree.
-CAMERA_PHRASES: dict[str, str] = {
-    "hold": "static camera, locked-off shot",
-    "push_in": "slow push-in toward the subject",
-    "pull_out": "slow pull-out from the subject",
-    "pan_lr": "slow pan from left to right",
-    "pan_rl": "slow pan from right to left",
-    "pan_ud": "slow pan from top to bottom",
-    "pan_du": "slow pan from bottom to top",
-}
-
-# Exactly ``schemas.MODIFIERS`` (also a closed list, spec 6.3). A shot's
+# with; and exactly ``schemas.MODIFIERS``, a phrase each (a shot's
 # ``modifiers`` array is empty on most shots, so this only ever adds to the
-# prompt when the storyboard actually asked for one of these.
-MODIFIER_PHRASES: dict[str, str] = {
-    "handheld": "handheld camera with subtle shake",
-    "jitter_stopmotion": "subtle stop-motion jitter between frames",
-}
+# prompt when the storyboard actually asked for one of these). Both tables
+# live in the pure ``prompting`` (phase 7 stage 3b: a v2 shot's clip prompt
+# is written at resolve time, by ``shots``); these are the same dicts.
+CAMERA_PHRASES: dict[str, str] = prompting.CAMERA_PHRASES
+MODIFIER_PHRASES: dict[str, str] = prompting.MODIFIER_PHRASES
 
 # Appended to every Tier-2/3 negative prompt on top of the style's own
 # (``build_video_prompt``): the failure modes generic to image-to-video
@@ -112,7 +99,11 @@ def build_video_prompt(
     """The (prompt, negative) pair an image-to-video adapter is called with
     for one shot.
 
-    The prompt is, in order: the shot's own action sentence (``shot
+    A shot whose ``video_prompt`` is a non-empty string (a v2 shot, phase 7
+    stage 3b: ``prompting.layered_clip_prompt``, written at resolve time)
+    sends it in place of the four parts below; the speech cue and the note
+    follow it the same way. Every other shot: the prompt is, in order: the
+    shot's own action sentence (``shot
     ["video_action"]`` when present -- the tag-resolved, name-swept action
     ``shots.resolve_shot`` stores on a storyboard shot, phase 7 D1 -- else
     the raw ``shot["action"]``, spec 2.8's English grammar; a shot with no
@@ -147,12 +138,19 @@ def build_video_prompt(
     if camera_motion not in CAMERA_PHRASES:
         raise ValueError(f"not a Tier-1 camera_motion: {camera_motion!r}")
 
-    parts = [shot.get("video_action") or shot["action"],
-             style_lock["motion_rules"]["tier2_prompt_suffix"], CAMERA_PHRASES[camera_motion]]
-    for modifier in shot.get("modifiers", ()):
-        phrase = MODIFIER_PHRASES.get(modifier)
-        if phrase:
-            parts.append(phrase)
+    video_prompt = shot.get("video_prompt")
+    if isinstance(video_prompt, str) and video_prompt.strip():
+        # A v2 shot (phase 7 stage 3b): its clip prompt was written whole at
+        # resolve time (prompting.layered_clip_prompt) -- action, camera,
+        # modifiers, the stays-still clause and the motion suffix in it.
+        parts = [video_prompt]
+    else:
+        parts = [shot.get("video_action") or shot["action"],
+                 style_lock["motion_rules"]["tier2_prompt_suffix"], CAMERA_PHRASES[camera_motion]]
+        for modifier in shot.get("modifiers", ()):
+            phrase = MODIFIER_PHRASES.get(modifier)
+            if phrase:
+                parts.append(phrase)
 
     if tier == 3 and lines:
         speech = " ".join(line.strip() for line in lines if line and line.strip())

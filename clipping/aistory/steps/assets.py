@@ -149,6 +149,7 @@ from .. import (defaults, hardware, imaging, media_policy, refimages, schemas, t
                wordtiming)
 from .. import ledger as ledger_mod
 from .. import names as names_mod
+from .. import shots as shots_mod
 from .. import store as store_mod
 from ..render import audio_assets, imagesize
 from . import clips, entities, episode_common, llm_call, sticky_link, voice_lines
@@ -626,12 +627,30 @@ def read_sidecar(ec, line_id):
     return data if isinstance(data, dict) else None
 
 
-def reference_paths(ec, shot) -> tuple:
+# Phase 7 stage 3b (A9): how many reference images one keyframe request of
+# a layered (v2) shot sends, per link. Every value is at least
+# shots.V2_MAX_REFERENCES, the most a v2 shot carries, so the images its role
+# text names are the images sent.
+REFERENCE_LIMITS = {"fal/seedream-4.5-edit": 10, "gemini/nano-banana-2": 14, "gemini/nano-banana-2-lite": 14}
+
+
+def reference_limit(shot, link=None) -> int:
+    """How many of *shot*'s references a request on *link* sends: a layered
+    shot (``prompt_layout`` set) up to the link's own limit
+    (:data:`REFERENCE_LIMITS`; a link not in it, or none chosen yet, takes
+    all ``shots.V2_MAX_REFERENCES`` the shot holds); every other shot the
+    first ``refimages.MAX_REFERENCES``, as always."""
+    if not shot.get("prompt_layout"):
+        return refimages.MAX_REFERENCES
+    return REFERENCE_LIMITS.get(link, shots_mod.V2_MAX_REFERENCES)
+
+
+def reference_paths(ec, shot, *, link=None) -> tuple:
     """``(paths, missing)``: the real paths of the reference images a shot
-    sends (its ``reference_images``, the first ``refimages.MAX_REFERENCES``:
-    an edit takes no more), and the ones that are not on disk."""
+    sends (its ``reference_images``, the first :func:`reference_limit` on
+    *link*: an edit takes no more), and the ones that are not on disk."""
     paths, missing = [], []
-    for rel in shot["reference_images"][:refimages.MAX_REFERENCES]:
+    for rel in shot["reference_images"][:reference_limit(shot, link)]:
         parts = rel.split("/")
         if len(parts) != 4 or parts[0] not in _ENTITY_KINDS or parts[2] != "refs":
             missing.append(rel)
@@ -643,13 +662,14 @@ def reference_paths(ec, shot) -> tuple:
     return paths, missing
 
 
-def request_parts(ec, shot, *, note) -> dict:
+def request_parts(ec, shot, *, note, link=None) -> dict:
     """What *shot*'s image request is made of in the story's mode now:
     ``{kind, prompt, negative, consistency, size, references, missing,
     hash}`` -- ``prompt_only`` sends no reference (IMAGE_CHAIN),
     ``references`` sends the shot's (IMAGE_EDIT_CHAIN); ``hash`` is
     :func:`prompt_hash` over what is sent (a missing reference counts by its
-    path, so the hash is never the one of a complete request)."""
+    path, so the hash is never the one of a complete request). *link*: the
+    episode's image link, when it has one (:func:`reference_limit`)."""
     mode = ec.consistency_mode
     prompt = effective_prompt(shot, ec.entities, note)
     negative = shot["negative_prompt"]
@@ -657,7 +677,7 @@ def request_parts(ec, shot, *, note) -> dict:
         kind, paths, missing, ref_shas = gen.IMAGE, [], [], []
     else:
         kind = gen.IMAGE_EDIT
-        paths, missing = reference_paths(ec, shot)
+        paths, missing = reference_paths(ec, shot, link=link)
         ref_shas = [_sha256_file(path) or f"unreadable:{path}" for path in paths] + [f"missing:{rel}"
                                                                                      for rel in missing]
     return {"kind": kind, "prompt": prompt, "negative": negative, "consistency": mode, "size": SHOT_SIZE,
@@ -688,7 +708,7 @@ def shot_state(ec, shot, *, link=_READ) -> str:
     if link is _READ:
         link = recorded_image_link(_read_assets_doc(ec))
     assets = shot["assets"]
-    expected = request_parts(ec, shot, note=assets.get("note"))["hash"]
+    expected = request_parts(ec, shot, note=assets.get("note"), link=link)["hash"]
     return image_state(assets, expected_hash=expected, file_ok=shot_image_path(ec, shot) is not None, link=link)
 
 
@@ -1942,7 +1962,7 @@ class _Assets(voice_lines.LineMeasurement):
         for this shot alone; ``gencache.JournalError`` passes through."""
         ec, ctx, tools, gates = self.ec, self.ctx, self.tools, self.gates
         shot_id = shot["shot_id"]
-        parts = request_parts(ec, shot, note=note)
+        parts = request_parts(ec, shot, note=note, link=self.link)
         kind = parts["kind"]
         if parts["missing"]:
             raise ShotFailed(f"its reference image{'s' if len(parts['missing']) > 1 else ''} "

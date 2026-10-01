@@ -437,3 +437,204 @@ def prop_prompt_v2(style_lock: dict, *, prop_text: str) -> str:
     prop = _fit(prop_text, room)
     before = f"{head}: {prop}." if prop else f"{head}."
     return _styled(PROP_V2_MAX_WORDS, before=before, after=after, rendering=style_lock["rendering"])
+
+
+# ============================================================ phase 7 (v2 keyframes and clips, stage 3b)
+#
+# A v2 shot's keyframe prompt is layered (A8), in this order: the reference
+# roles (what each image sent is for, A9), the beat, the staging, the
+# composition, the place slice, the style tail and the constraints clause
+# (A7). Its clip prompt is the subject and what moves, one secondary motion,
+# the camera, a stays-still clause and the style's motion suffix. The texts
+# are rendered by ``shots.resolve_shot`` and stored on the shot, so what the
+# shot card shows is what is sent.
+
+LAYERED_V1 = schemas.STORYBOARD_PROMPT_LAYOUT_V1
+KEYFRAME_V2_MAX_WORDS = 220
+KEYFRAME_V2_MIN_WORDS = 130
+CLIP_V2_MAX_WORDS = 80
+CONSTRAINTS_KEYFRAME = "Clean frame: no captions, logos or watermarks; each character appears once."
+CONSTRAINTS_KEYFRAME_NO_PEOPLE = _CONSTRAINTS_NO_PEOPLE
+STAYS_STILL = "The set, the lighting and every character's look stay exactly as in the first frame."
+
+# Exactly ``schemas.CAMERA_MOTIONS`` (spec 6.3's closed list), each mapped to
+# a short English phrase a hosted or local image-to-video model is prompted
+# with. ``pan_ud``/``pan_du`` follow ``render/motion.py``'s own reading of
+# the same tokens (``ud``: low to high y, i.e. top to bottom; ``du``: the
+# reverse) so Tier 1's rendered motion and Tier 2's requested motion agree.
+# Kept here, pure, so ``shots`` can write a v2 clip prompt at resolve time;
+# ``video_plan`` serves the same dicts.
+CAMERA_PHRASES = {
+    "hold": "static camera, locked-off shot",
+    "push_in": "slow push-in toward the subject",
+    "pull_out": "slow pull-out from the subject",
+    "pan_lr": "slow pan from left to right",
+    "pan_rl": "slow pan from right to left",
+    "pan_ud": "slow pan from top to bottom",
+    "pan_du": "slow pan from bottom to top",
+}
+
+# Exactly ``schemas.MODIFIERS`` (also a closed list, spec 6.3).
+MODIFIER_PHRASES = {
+    "handheld": "handheld camera with subtle shake",
+    "jitter_stopmotion": "subtle stop-motion jitter between frames",
+}
+
+# The roles a reference image of a v2 shot plays (shots._reference_images_v2).
+ROLE_IDENTITY, ROLE_EXPRESSIONS, ROLE_SET, ROLE_TURNAROUND, ROLE_PROP = (
+    "identity", "expressions", "set", "turnaround", "prop")
+
+
+def as_sentence(text: str) -> str:
+    """*text* as one sentence: whitespace collapsed, its first letter upper
+    case, ending on exactly one '.' (or the '!'/'?' it has)."""
+    text = _strip_trailing_period(_collapse_ws(text)).rstrip(",;: ")
+    if not text:
+        return ""
+    text = text[0].upper() + text[1:]
+    return text if text[-1] in "!?" else f"{text}."
+
+
+def fit_words(text: str, limit: int) -> str:
+    """*text* cut to at most *limit* words at a clause boundary (',', ';',
+    '.'), with no trailing punctuation; empty when not even its first
+    clause fits."""
+    return _fit(text, limit)
+
+
+def role_text(roles) -> str:
+    """What each reference image is, in the order the images are sent:
+    *roles* is ``[(role, handle), ...]`` -- ``identity`` (a character's
+    full-body sheet), ``expressions`` (its expression sheet, a close-up's
+    identity image), ``set`` (the place's plate), ``turnaround`` (said
+    against the character's own identity image) or ``prop``. Empty when
+    nothing is sent."""
+    sentences, identity_of = [], {}
+    for number, (role, handle) in enumerate(roles, start=1):
+        if role == ROLE_IDENTITY:
+            identity_of.setdefault(handle, number)
+            sentences.append(f"Image {number} is {handle}'s reference (keep identity, proportions and outfit "
+                             "exactly).")
+        elif role == ROLE_EXPRESSIONS:
+            identity_of.setdefault(handle, number)
+            sentences.append(f"Image {number} is {handle}'s expression sheet (keep identity, face and outfit "
+                             "exactly).")
+        elif role == ROLE_SET:
+            sentences.append(f"Image {number} is the set (keep layout and light).")
+        elif role == ROLE_TURNAROUND:
+            own = identity_of.get(handle)
+            sentences.append(f"Image {number} is image {own}'s turnaround." if own
+                             else f"Image {number} is {handle}'s turnaround.")
+        elif role == ROLE_PROP:
+            sentences.append(f"Image {number} is {handle} (keep its shape and colour).")
+        else:
+            raise ValueError(f"unknown reference role: {role!r}")
+    return " ".join(sentences)
+
+
+def layered_lens_phrase(style_lock: dict, framing: str) -> str:
+    """The lens of a layered shot: :func:`lens_phrase`, except that a tight
+    framing never forces an 85mm shallow focus on a style whose camera says
+    it has no depth of field (and a wide one says only its deep focus)."""
+    _check_framing(framing)
+    flat = "no depth of field" in style_lock["camera"]
+    if framing in _TIGHT_FRAMINGS and flat:
+        return "flat staging, no depth of field"
+    if framing in _WIDE_FRAMINGS and flat:
+        return "deep focus"
+    return lens_phrase(style_lock, framing)
+
+
+def _group(count: int) -> str:
+    return "both characters" if count == 2 else f"all {count} characters"
+
+
+def layered_framing_phrase(framing: str, *, characters=(), props=()) -> str:
+    """The framing in words, coerced to what the frame holds: *characters*
+    and *props* are the handles of the shot's subjects, in subject order. A
+    single framing with several characters reads as a two-shot (or a group
+    shot), a two-shot of one character as a single, an over-the-shoulder
+    shot names whose shoulder (the second character's, facing the first),
+    a close framing of two holds both faces."""
+    _check_framing(framing)
+    n = len(characters)
+    first = characters[0] if characters else ""
+    obj = props[0] if props else ""
+
+    if framing == "wide_establishing":
+        if n == 0:
+            return "wide establishing shot of the whole set"
+        return f"wide establishing shot, {'the character' if n == 1 else _group(n)} small in the frame"
+    if framing in ("medium_single", "medium_two_shot", "over_shoulder") and n == 0:
+        return f"medium shot of {obj}" if obj else "medium shot of the set"
+    if framing in ("medium_single", "medium_two_shot", "over_shoulder") and n == 1:
+        return f"medium shot of {first}, framed from mid-body up"
+    if framing in ("medium_single", "medium_two_shot"):
+        return ("medium two-shot, both characters side by side in the frame" if n == 2
+                else f"medium group shot, {_group(n)} in the frame")
+    if framing == "over_shoulder":
+        return f"over-the-shoulder shot past {characters[1]}'s shoulder in the foreground, looking at {first}"
+    if framing == "close_up":
+        if n == 0:
+            return f"close-up on {obj}" if obj else "close-up on one detail of the set"
+        if n == 1:
+            return f"tight close-up on {first}'s face"
+        return f"tight close two-shot, {_group(n)}' faces filling the frame"
+    if framing == "extreme_close_up":
+        if n == 0:
+            return f"extreme close-up on {obj}" if obj else "extreme close-up on one detail of the set"
+        return (f"extreme close-up on {first}'s eyes and expression" if n == 1
+                else f"extreme close-up on {_group(n)}' faces")
+    if framing in ("low_angle", "high_angle"):
+        way = "up" if framing == "low_angle" else "down"
+        target = first if n == 1 else (_group(n) if n else (obj or "the set"))
+        return f"{framing.replace('_', '-')} shot looking {way} at {target}"
+    # insert_prop
+    if obj:
+        return f"insert shot, tight on {obj}"
+    return "insert shot, tight on the detail the action names"
+
+
+def layered_style_tail(style_lock: dict, *, rendering_words: int = _RENDERING_V2_MAX_WORDS) -> str:
+    """The style tail of a layered prompt: the rendering (cut at a clause
+    boundary to *rendering_words*) and the palette, nothing else."""
+    rendering = _fit(style_lock["rendering"], rendering_words)
+    palette = _strip_trailing_period(palette_line(style_lock))
+    return _collapse_ws(" ".join(part for part in (
+        f"Style: {rendering}." if rendering else "", f"Palette: {palette}." if palette else "") if part))
+
+
+def layered_shot_prompt(style_lock: dict, *, roles_text: str, beat: str, staging: str, composition: str,
+                        place_text: str, constraints: str,
+                        rendering_words: int = _RENDERING_V2_MAX_WORDS) -> str:
+    """A v2 keyframe prompt (A8), its layers in this fixed order: the
+    reference roles (:func:`role_text`), the beat, the staging, the
+    composition, the place, the style tail (:func:`layered_style_tail`) and
+    the constraints clause. Each layer is one or more whole sentences; an
+    empty one is left out. The caller keeps it within
+    ``KEYFRAME_V2_MAX_WORDS`` (``shots.resolve_shot`` shortens the looks and
+    the place first)."""
+    layers = (roles_text, beat, staging, composition, place_text,
+              layered_style_tail(style_lock, rendering_words=rendering_words), constraints)
+    text = _collapse_ws(" ".join(_collapse_ws(layer) for layer in layers if layer and layer.strip()))
+    return text.replace(".,", ",").replace("..", ".")
+
+
+def layered_clip_prompt(style_lock: dict, *, subject: str, motion: str, camera_phrase: str, modifiers=(),
+                        secondary: str = "") -> str:
+    """A v2 shot's clip prompt (A8), at most ``CLIP_V2_MAX_WORDS`` words: the
+    subject and what moves (*motion*: the shot's resolved, name-free action,
+    or the planned motion; it is said as it is when it already names the
+    *subject*), one *secondary* motion, the camera phrase and its *modifiers*,
+    the stays-still clause, then the style's ``tier2_prompt_suffix``. The
+    motion is cut at a clause boundary when the whole would be longer."""
+    suffix = as_sentence(style_lock["motion_rules"]["tier2_prompt_suffix"])
+    camera = as_sentence(", ".join([_strip_trailing_period(camera_phrase)]
+                                 + [_strip_trailing_period(m) for m in modifiers if m]))
+    tail = [as_sentence(secondary), camera, STAYS_STILL, suffix]
+    room = CLIP_V2_MAX_WORDS - sum(_word_count(part) for part in tail)
+    moving = _collapse_ws(motion)
+    if subject and subject.lower() not in moving.lower():
+        moving = f"{subject}: {moving}"
+    lead = as_sentence(_fit(moving, room, stops=",;.") if _word_count(moving) > room else moving)
+    return _collapse_ws(" ".join(part for part in [lead] + tail if part))

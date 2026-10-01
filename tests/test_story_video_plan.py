@@ -156,6 +156,63 @@ def test_clip_prompt_has_no_entity_tags():
     assert fallback_negative == old_negative
 
 
+
+_STAYS_STILL = "The set, the lighting and every character's look stay exactly as in the first frame."
+
+
+def test_layered_clip_prompt_under_80_words():
+    """Phase 7 stage 3b (A8): a v2 shot's clip prompt is written at resolve
+    time into ``shot["video_prompt"]`` -- the subject and what moves, one
+    secondary motion, the camera, the stays-still clause, the style's motion
+    suffix -- at most 80 words; ``build_video_prompt`` sends it as it is. A
+    legacy shot (``video_prompt`` None) keeps its clip prompt and hash."""
+    from clipping.aistory import prompting
+    from clipping.aistory.steps import clips
+
+    style = _load_style_json("cartoon_flat")
+    long_motion = ("the tall yellow geometric cylinder and the short red triangle character stand in the setting "
+                   "looking shocked at a giant toaster that rattles and spits sparks while the crowd scatters "
+                   "behind them in every direction under the clock tower " * 2)
+    for motion in ("the tall yellow geometric cylinder and the short red triangle character stand in the setting "
+                   "looking shocked at a giant toaster", long_motion):
+        clip = prompting.layered_clip_prompt(
+            style, subject="the tall yellow geometric cylinder and the short red triangle character",
+            motion=motion, camera_phrase=video_plan.CAMERA_PHRASES["push_in"],
+            modifiers=[video_plan.MODIFIER_PHRASES["handheld"]],
+            secondary="the short red triangle character trembles slightly")
+        assert len(clip.split()) <= 80, len(clip.split())
+        assert _STAYS_STILL in clip
+        # Each part is its own sentence (sentence case): the camera, then the motion suffix last.
+        assert video_plan.CAMERA_PHRASES["push_in"] in clip.lower()
+        assert clip.rstrip(".").lower().endswith(style["motion_rules"]["tier2_prompt_suffix"].lower())
+        assert clip.index(_STAYS_STILL) < clip.lower().index(style["motion_rules"]["tier2_prompt_suffix"].lower())
+        assert "@" not in clip and "#" not in clip and "%" not in clip
+        assert ".." not in clip and ".," not in clip
+
+    shot = _shot("sh01", 1, "s01", 3.0, action="@char_x waves.", camera_motion="push_in")
+    shot.update(video_action="the cylinder waves.", video_prompt=clip)
+    prompt, _negative = video_plan.build_video_prompt(shot, style, tier=2)
+    assert prompt == clip.rstrip(".")
+    assert "@char_x" not in prompt and "the cylinder waves" not in prompt
+
+    # Story A sh01 as stored (no video_action, video_prompt None): the clip
+    # prompt, and the hash its stored clip record holds (48955e43...), unchanged.
+    stored = _shot("sh01", 1, "s01", 2.367, camera_motion="hold", lines=("l04",),
+                   action=("@char_captain_obvious and @char_miss_overthink stand in #place_city_square:day "
+                           "looking shocked at a giant toaster."),
+                   negative_prompt=("text, watermark, logo, signature, extra limbs, extra fingers, deformed hands, "
+                                    "duplicated character, cropped face, blurry, low resolution, jpeg artifacts, "
+                                    "out of frame, split screen, collage, frame border, caption, 3D, "
+                                    "photorealistic, gradients, painterly, sketchy lines, anime"))
+    stored["video_prompt"] = None
+    prompt, negative = video_plan.build_video_prompt(stored, style, tier=2)
+    assert prompt == ("@char_captain_obvious and @char_miss_overthink stand in #place_city_square:day looking "
+                      "shocked at a giant toaster. snappy 2D animation, limited frames feel, bouncy motion. "
+                      "static camera, locked-off shot")
+    assert clips.clip_prompt_hash(prompt, negative) == (
+        "48955e43930140e17219200f820f38ccb481f1df944e2f71e821ea6800da5ee3")
+
+
 # =============================================================== clip lengths
 
 @pytest.mark.parametrize("link,duration_s,expected", [

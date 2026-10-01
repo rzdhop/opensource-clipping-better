@@ -1087,3 +1087,193 @@ def test_refresh_prompts_changes_only_prompts_refs_and_resolved_from():
     assert changed_any_prompt
     assert refreshed["transitions"] == doc["transitions"]
     assert refreshed["scenes"] == doc["scenes"]
+
+
+# ======================================================== 12. layered prompts (phase 7 stage 3b)
+#
+# A v2 story's shot is resolved into the layered keyframe prompt (A8): the
+# reference roles, the beat, the staging, the composition coerced to the
+# subject count, the place slice, the style tail and the constraints clause,
+# in that order. A legacy story resolves exactly as before (RC-Q1).
+
+CARTOON_FLAT = templates.load_style("cartoon_flat")
+_V2_CONSTRAINTS = "Clean frame: no captions, logos or watermarks; each character appears once."
+_STAYS_STILL = "The set, the lighting and every character's look stay exactly as in the first frame."
+
+
+def _v2_look(**changes):
+    look = {
+        "build": "tall narrow cylinder body", "silhouette": "upright tube with a square cape",
+        "face": "dot eyes, flat line mouth, round glasses", "hair": "bald flat top",
+        "skin_material": "smooth matte yellow plastic", "height_cm": 180, "palette": ["yellow", "blue"],
+        "wardrobe_sets": [{"id": "daily", "context": "every day",
+                           "items": "stiff rectangular blue cape, round glasses"}],
+        "season_change": None,
+    }
+    look.update(changes)
+    return look
+
+
+def _v2_char(cid, name, descriptor, items, look):
+    doc = _char(cid, descriptor, items, name=name, portrait="portrait.jpg")
+    doc["refs"]["turnaround"] = _ref("turnaround.jpg")
+    doc["refs"]["expressions"] = _ref("expressions.jpg")
+    doc["look"] = look
+    return doc
+
+
+def _v2_entities():
+    tall = _v2_char("char_captain_obvious", "Captain Obvious", "A tall yellow geometric cylinder with a blue cape",
+                    ["Stiff rectangular blue cape", "Comically oversized magnifying glass"], _v2_look())
+    short = _v2_char("char_miss_overthink", "Miss Overthink", "A short red triangle character with tiny dot eyes",
+                     ["bulging utility belt", "shaking stopwatch"],
+                     _v2_look(build="small sharp triangle body", silhouette="pointed red wedge", face="tiny dot eyes",
+                              hair="none", skin_material="glossy red card", height_cm=90, palette=["red"],
+                              wardrobe_sets=[{"id": "daily", "context": "every day",
+                                              "items": "bulging utility belt with index cards"}]))
+    place = _place("place_clocktown", "a busy square with a digital clock tower and colourful storefronts",
+                   "newsstand left, lamppost right", name="Clocktown Plaza",
+                   variants={"day": _ref("variant_day.jpg"), "night": None})
+    place["look"] = {
+        "layout_map": {"left": "a bright yellow newsstand", "right": "a tall lamppost", "back": "the clock tower",
+                       "foreground": "", "centre": "an empty park bench"},
+        "scale_note": "a wide square, the tower ten people high",
+        "lighting": {"day": "flat bright noon light", "night": "orange street lamps"},
+        "props_here": [],
+    }
+    return {"characters": {tall["char_id"]: tall, short["char_id"]: short},
+            "places": {place["place_id"]: place}, "props": {}}
+
+
+def _v2_scene():
+    line = _line("l04", "char_captain_obvious", "That object is a giant toaster.", emotion="shocked")
+    line["delivery"] = "Slow, monotone, and absolutely certain."
+    return _scene("s01", "hook", place_id="place_clocktown", characters=["char_captain_obvious", "char_miss_overthink"],
+                  lines=[line], emotion="shocked")
+
+
+_V2_ACTION = ("@char_captain_obvious and @char_miss_overthink stand in #place_clocktown:day looking shocked at a "
+              "giant toaster.")
+
+
+def _v2_resolve(framing, subjects, *, consistency_mode="references"):
+    plan = {"framing": framing, "action": _V2_ACTION, "subjects": subjects, "lines": [1], "camera_motion": "hold",
+            "modifiers": []}
+    return shots.resolve_shot(plan, scene=_v2_scene(), entities=_v2_entities(), style_lock=CARTOON_FLAT,
+                              consistency_mode=consistency_mode, v2=True)
+
+
+def _no_v2_names(text):
+    for name in ("Captain", "Obvious", "Overthink", "Clocktown", "Plaza"):
+        assert name not in text, name
+
+
+def test_layered_prompt_beat_before_place_and_roles_first():
+    subjects = ["@char_captain_obvious", "@char_miss_overthink", "#place_clocktown:day"]
+    # medium_single with two characters in it: the composition reads as a two-shot.
+    resolved = _v2_resolve("medium_single", subjects)
+    prompt = resolved["image_prompt"]
+
+    assert resolved["prompt_layout"] == "layered_v1"
+    # (1) the reference roles open it, in the order the images are sent.
+    assert prompt.startswith("Image 1 is the tall yellow geometric cylinder's reference")
+    assert resolved["reference_images"] == [
+        "characters/char_captain_obvious/refs/portrait.jpg", "characters/char_miss_overthink/refs/portrait.jpg",
+        "places/place_clocktown/refs/variant_day.jpg", "characters/char_captain_obvious/refs/turnaround.jpg",
+        "characters/char_miss_overthink/refs/turnaround.jpg"]
+    assert "Image 3 is the set (keep layout and light)." in prompt
+    # (2) the beat (the resolved action, then the line's delivery) comes before the place.
+    beat = prompt.index("The tall yellow geometric cylinder and the short red triangle character stand")
+    assert "slow, monotone, and absolutely certain" in prompt.lower()
+    assert prompt.index("Image 5") < beat < prompt.index("on the left a bright yellow newsstand")
+    # (3) staging by position and relative height; (4) the framing coerced to two subjects.
+    assert "On the left, the tall yellow geometric cylinder" in prompt and "They face each other." in prompt
+    assert "about twice as tall as the short red triangle character" in prompt
+    assert "two-shot" in prompt and "single character" not in prompt
+    # (6) the style tail is the rendering and palette only; (7) the constraints end it.
+    assert "Palette: flat saturated primaries" in prompt
+    assert CARTOON_FLAT["character_design_rules"].split(".")[0] not in prompt and "9:16" not in prompt
+    assert prompt.endswith(_V2_CONSTRAINTS)
+    assert 130 <= len(prompt.split()) <= 220, len(prompt.split())
+    assert ".," not in prompt and ".." not in prompt and "@" not in prompt and "#" not in prompt
+    _no_v2_names(prompt)
+    # The clip prompt of the same shot (A8): at most 80 words, the stays-still clause in it.
+    assert len(resolved["video_prompt"].split()) <= 80 and _STAYS_STILL in resolved["video_prompt"]
+    _no_v2_names(resolved["video_prompt"])
+
+
+def test_close_up_omits_layout():
+    resolved = _v2_resolve("close_up", ["@char_miss_overthink", "#place_clocktown:day"])
+    prompt = resolved["image_prompt"]
+
+    # The lighting of the variant and one background element, never the layout map.
+    assert "flat bright noon light" in prompt
+    assert "newsstand" not in prompt and "lamppost" not in prompt and "Layout:" not in prompt
+    # No forced 85mm shallow focus on a style whose camera has no depth of field.
+    assert "85mm" not in prompt and "shallow depth of field" not in prompt and "skin detail" not in prompt
+    # A close-up's identity image is the expression sheet.
+    assert resolved["reference_images"][0] == "characters/char_miss_overthink/refs/expressions.jpg"
+    assert prompt.startswith("Image 1 is the short red triangle character's expression sheet")
+    assert prompt.endswith(_V2_CONSTRAINTS)
+    assert ".," not in prompt and ".." not in prompt
+    _no_v2_names(prompt)
+
+
+# Story A (979c8376e43e) as stored in the main checkout's outputs/ on
+# 2026-10-01: its two characters and its place, the fields resolve_shot reads.
+_A_CHARACTERS = {
+    "char_captain_obvious": dict(_char(
+        "char_captain_obvious",
+        "A tall yellow geometric cylinder with a solid rectangular blue cape, wearing oversized round glasses, "
+        "sporting simple dot eyes and a permanent flat line mouth.",
+        ["Comically oversized magnifying glass", "Stiff rectangular blue cape"],
+        name="Captain Obvious", portrait="portrait.jpg")),
+    "char_miss_overthink": dict(_char(
+        "char_miss_overthink",
+        "A short red triangle character with tiny dot eyes, wearing a thick utility belt overflowing with colorful "
+        "index cards and clutching a shaking stopwatch.",
+        ["bulging utility belt with index cards", "shaking stopwatch", "stack of color-coded contingency charts"],
+        name="Miss Overthink", portrait="portrait.jpg")),
+}
+_A_PLACES = {"place_city_square": _place(
+    "place_city_square",
+    "A bustling urban city square featuring a giant digital countdown clock tower in the center, surrounded by "
+    "colorful storefronts, paved stone ground, and an empty park bench.",
+    "In the foreground is a crack in the pavement. To the left stands a bright yellow newsstand. To the right is a "
+    "tall lamppost with a green street sign. In the background looms the massive red digital countdown clock tower.",
+    name="City square", variants={"day": _ref("variant_day.jpg"), "dusk": None, "rain": None})}
+_A_ENTITIES = {"characters": _A_CHARACTERS, "places": _A_PLACES, "props": {}}
+_A_SH01 = {"framing": "medium_two_shot", "camera_motion": "hold", "modifiers": [], "lines": [1],
+           "subjects": ["@char_captain_obvious", "@char_miss_overthink", "#place_city_square:day"],
+           "action": ("@char_captain_obvious and @char_miss_overthink stand in #place_city_square:day looking "
+                      "shocked at a giant toaster.")}
+# RC-Q1: story A sh01 resolved by the code of HEAD 7567458 (after stage 1),
+# from a copy of the main checkout's outputs/stories/979c8376e43e read through
+# the store into a scratch directory (episode_common.load_context): the
+# sha256 of its image_prompt (257 words) and its exact negative_prompt.
+_A_SH01_IMAGE_SHA256 = "71348b926de831d606660c2ed57dacff4d3bbe3d156f5af3e69a517c41f27e62"
+_A_SH01_NEGATIVE = (
+    "text, watermark, logo, signature, extra limbs, extra fingers, deformed hands, duplicated character, cropped "
+    "face, blurry, low resolution, jpeg artifacts, out of frame, split screen, collage, frame border, caption, 3D, "
+    "photorealistic, gradients, painterly, sketchy lines, anime")
+
+
+def test_legacy_story_resolves_byte_identical():
+    import hashlib
+
+    scene = _scene("s01", "hook", place_id="place_city_square",
+                   characters=["char_captain_obvious", "char_miss_overthink"],
+                   lines=[_line("l04", "char_captain_obvious", "That object is a giant toaster.", emotion="shocked")],
+                   emotion="shocked")
+    by_default = shots.resolve_shot(_A_SH01, scene=scene, entities=_A_ENTITIES, style_lock=CARTOON_FLAT,
+                                    consistency_mode="prompt_only")
+    legacy = shots.resolve_shot(_A_SH01, scene=scene, entities=_A_ENTITIES, style_lock=CARTOON_FLAT,
+                                consistency_mode="prompt_only", v2=False)
+
+    assert legacy == by_default
+    assert hashlib.sha256(legacy["image_prompt"].encode("utf-8")).hexdigest() == _A_SH01_IMAGE_SHA256
+    assert legacy["negative_prompt"] == _A_SH01_NEGATIVE
+    assert "prompt_layout" not in legacy and "video_prompt" not in legacy
+    assert legacy["reference_images"] == ["characters/char_captain_obvious/refs/portrait.jpg",
+                                          "characters/char_miss_overthink/refs/portrait.jpg",
+                                          "places/place_city_square/refs/variant_day.jpg"]

@@ -856,6 +856,7 @@ function ShotCard({ storyId, ep, shot, assetShot, tier, scene, maps, assetsBlock
           <div className="story-field-label">Negative prompt</div>
           <p className="story-field-value">{shot.negative_prompt}</p>
         </div>
+        {shot.prompt_layout && <LayeredPromptDetails shot={shot} />}
         <EditableText
           label="Prompt override"
           value={shot.prompt_override}
@@ -875,6 +876,53 @@ function ShotCard({ storyId, ep, shot, assetShot, tier, scene, maps, assetsBlock
 
       <RegenerateControl disabled={busy} onRegenerate={regenerate} />
     </div>
+  )
+}
+
+// A v2 shot (phase 7 stage 3b: `prompt_layout` set) is resolved into a layered
+// image prompt that opens on what each reference image is for, and carries its
+// clip prompt in `video_prompt`. The word targets are clipping.aistory.prompting's
+// KEYFRAME_V2_MAX_WORDS and CLIP_V2_MAX_WORDS.
+const IMAGE_PROMPT_TARGET_WORDS = 220
+const CLIP_PROMPT_TARGET_WORDS = 80
+const ROLE_SENTENCE = /Image \d+ is [^.]*\./g
+
+function wordCount(text) {
+  return (text || '').split(/\s+/).filter(Boolean).length
+}
+
+function WordCount({ label, text, target }) {
+  const count = wordCount(text)
+  return (
+    <span className={count > target ? 'chip chip-warn' : 'chip'}>
+      {label}: {count} / {target} words
+    </span>
+  )
+}
+
+function LayeredPromptDetails({ shot }) {
+  const roles = shot.image_prompt.match(ROLE_SENTENCE) || []
+  return (
+    <>
+      <div className="story-field">
+        <div className="story-field-label">Clip prompt</div>
+        <p className="story-field-value">{shot.video_prompt || '—'}</p>
+      </div>
+      <div className="story-field">
+        <div className="story-field-label">Reference roles</div>
+        {roles.length > 0 ? (
+          <ol className="story-field-value">
+            {roles.map((role) => <li key={role}>{role}</li>)}
+          </ol>
+        ) : (
+          <p className="story-field-value">No reference image is sent (prompt-only mode).</p>
+        )}
+      </div>
+      <div className="story-field">
+        <WordCount label="Image prompt" text={shot.image_prompt} target={IMAGE_PROMPT_TARGET_WORDS} />{' '}
+        <WordCount label="Clip prompt" text={shot.video_prompt} target={CLIP_PROMPT_TARGET_WORDS} />
+      </div>
+    </>
   )
 }
 

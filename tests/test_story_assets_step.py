@@ -1246,3 +1246,28 @@ def test_the_real_transcriber_walks_the_keyed_hosted_links_of_stt_chain(monkeypa
         ("/scratch/line_05.mp3", ["mistral/voxtral-mini-latest"], "fr")]
     only_local, why = m.assets.default_transcriber({"STT_CHAIN": "local/faster-whisper", "GROQ_API_KEY": "x"})
     assert only_local is None and "no hosted link" in why
+
+
+# ------------------------------------------------------------------ phase 7 stage 3b: references per link
+
+def test_a_v2_shot_on_seedream_sends_up_to_ten_references_a_legacy_shot_four():
+    """A layered (v2) shot carries up to 10 references in their role order
+    and sends as many as its link takes (``REFERENCE_LIMITS``); every other
+    shot keeps the first four, whatever the link."""
+    m = _new()
+
+    class Store:
+        def media_path(self, story_id, kind, entity_id, name):
+            return f"/media/{story_id}/{kind}/{entity_id}/{name}"
+
+    ec = SimpleNamespace(store=Store(), story_id="s1")
+    refs = [f"characters/char_c{i}/refs/portrait.jpg" for i in range(10)]
+    v2 = {"reference_images": refs, "prompt_layout": "layered_v1"}
+    legacy = {"reference_images": refs}
+
+    paths, missing = m.assets.reference_paths(ec, v2, link="fal/seedream-4.5-edit")
+    assert missing == [] and paths == [f"/media/s1/characters/char_c{i}/portrait.jpg" for i in range(10)]
+    assert len(m.assets.reference_paths(ec, v2, link="gemini/nano-banana-2-lite")[0]) == 10
+    for link in ("fal/seedream-4.5-edit", None):
+        assert m.assets.reference_paths(ec, legacy, link=link)[0] == paths[:4]
+    assert m.assets.reference_paths(ec, legacy) == (paths[:4], [])
