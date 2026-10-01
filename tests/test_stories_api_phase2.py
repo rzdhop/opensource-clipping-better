@@ -1664,9 +1664,10 @@ def test_the_cast_estimate_on_a_v2_story_points_to_the_quality_keys_not_prompt_o
 
     body = _estimate(api, story_id, "cast")
 
-    # Phase 7 stage 3a (DEC-226): a v2 run writes each look-less character's
-    # look (D2) before its sheets, and the estimate counts those 3 calls.
-    assert body["units"] == {"llm_calls": 3, "images": 0, "edit_images": 6, "tts_chars": 0}
+    # Phase 7 stage 3a (DEC-226) and 5a (DEC-228): a v2 run writes each
+    # character's dossier (D1) and look (D2) before its sheets, and the
+    # estimate counts those 3 x 2 calls.
+    assert body["units"] == {"llm_calls": 6, "images": 0, "edit_images": 6, "tts_chars": 0}
     assert body["edit"]["ready"] is False
     assert "need an editor or prompt-only consistency" not in body["message"]
     assert "prompt-only" not in body["message"] and "prompt_only" not in body["message"]

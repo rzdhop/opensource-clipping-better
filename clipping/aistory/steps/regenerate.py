@@ -307,19 +307,21 @@ def _regenerate_text(ctx, store, target, kind, eid, note, tools) -> dict:
     if kind == CHARACTERS:
         from . import cast
 
-        text, look = cast.write_text, cast.write_look
+        # A character's dossier is written from its text too (phase 7, D1 before D2).
+        text, after = cast.write_text, (cast.write_dossier, cast.write_look)
     elif kind == PLACES:
         from . import places
 
-        text, look = places.write_place_text, places.write_place_look
+        text, after = places.write_place_text, (places.write_place_look,)
     else:
         from . import places
 
-        text, look = places.write_prop_text, places.write_prop_look
+        text, after = places.write_prop_text, (places.write_prop_look,)
     text(ctx, store, eid, tools=tools, note=note, regenerate=True)
     if media_policy.is_v2(store.get(ctx.story_id)):
         # A v2 story's look is drawn from the text: written again with it (phase 7).
-        look(ctx, store, eid, tools=tools, note=note, regenerate=True)
+        for write in after:
+            write(ctx, store, eid, tools=tools, note=note, regenerate=True)
     ctx.on_log(f"🔁 Regenerated {target}{_noted(note)}")
     return {"target": target}
 

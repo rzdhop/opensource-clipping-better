@@ -360,22 +360,35 @@ def _run_cast(store, story_id, llm, events, image=None):
     return cast.run(ctx, runner=llm, time_fn=lambda: 100.0, sleep_fn=no_sleep, adapters=adapters)
 
 
-def test_v2_cast_runs_k1_then_d2_then_the_sheets_and_a_legacy_story_makes_no_d2_call(tmp_path, hermetic):
+def _d1(backstory, *, with_=None):
+    relationships = [] if with_ is None else [{"with": with_, "history": "Rivaux depuis la saison passée.",
+                                                "now": "Alliés par nécessité."}]
+    return {"backstory": backstory, "goal": "Gagner l'île.", "need": "Faire confiance.", "fears": "Être trahi.",
+            "secrets": ["Il a truqué le premier vote."], "relationships": relationships,
+            "voice": {"patterns": "Phrases courtes, pauses.", "vocabulary": "Argot de plage.",
+                      "catchphrases": ["Tranquille."]},
+            "arc": "Du tricheur au leader loyal."}
+
+
+# Phase 7 stage 5a (DEC-228): re-pinned on purpose -- a v2 cast now writes the dossier (D1) between K1
+# and D2 (A14: K1 -> D1 -> D2 -> sheets), so the estimate counts three calls per new character.
+def test_v2_cast_runs_k1_d1_d2_then_the_sheets_and_a_legacy_story_makes_no_d1_or_d2_call(tmp_path, hermetic):
     from clipping.aistory import workflow
 
     store = StoryStore(tmp_path / "outputs", on_log=lambda line: None)
 
-    # v2: the estimate counts K1 and D2 for each new character.
+    # v2: the estimate counts K1, D1 and D2 for each new character.
     v2_id = _story(store, v2=True)
-    assert workflow.cast_units(store, store.get(v2_id), selected=["Kiwilo", "Mangella"])["llm_calls"] == 4
+    assert workflow.cast_units(store, store.get(v2_id), selected=["Kiwilo", "Mangella"])["llm_calls"] == 6
     events = Events()
     llm = FakeLLM(events, K1=[_k1("a fuzzy kiwi", ["gold chain", "linen shirt"]),
                               _k1("a sly mango", ["red dress", "crown clip"])],
+                  D1=[_d1("Né sur la plage.", with_="Mangella"), _d1("Reine du parloir.", with_="Kiwilo")],
                   D2=[_d2(175), _d2(160)])
     image = FakeImage(events)
     _run_cast(store, v2_id, llm, events, image)
-    assert events == ["K1", "D2", "image:portrait", "image:turnaround", "image:expressions",
-                      "K1", "D2", "image:portrait", "image:turnaround", "image:expressions"]
+    assert events == ["K1", "D1", "D2", "image:portrait", "image:turnaround", "image:expressions",
+                      "K1", "D1", "D2", "image:portrait", "image:turnaround", "image:expressions"]
     # The sheets are drawn from the look: a full-body portrait, then edits of it.
     portrait, turnaround, expressions = image.requests[:3]
     assert portrait.prompt.startswith("Full-body character reference sheet, head to toe")
@@ -385,6 +398,15 @@ def test_v2_cast_runs_k1_then_d2_then_the_sheets_and_a_legacy_story_makes_no_d2_
     assert turnaround.kind == "image_edit" and len(turnaround.references) == 1
     chars = {doc["char_id"]: doc for doc in store.list_entities(v2_id, "characters")}
     assert chars["char_kiwilo"]["look"]["height_cm"] == 175 and chars["char_kiwilo"]["look"]["season_change"] is None
+    # The dossier is saved, its relationship mapped from the name to the id -- D1 is shown every other
+    # cast member (name, role, one-line), written or not.
+    assert chars["char_kiwilo"]["dossier"]["backstory"] == "Né sur la plage."
+    assert chars["char_kiwilo"]["dossier"]["relationships"] == [
+        {"with": "char_mangella", "history": "Rivaux depuis la saison passée.", "now": "Alliés par nécessité."}]
+    assert chars["char_mangella"]["dossier"]["relationships"][0]["with"] == "char_kiwilo"
+    first_d1 = llm.of("D1")[0]
+    assert "Mangella (lead)" in first_d1["user"] and "Gagner." in first_d1["user"]
+    assert first_d1["max_tokens"] == prompts.MAX_TOKENS["D1"]
     # The second D2 is shown the first character's height (one scale for the cast).
     first, second = (call["user"] for call in llm.of("D2"))
     assert "175 cm" not in first and "175 cm" in second
@@ -394,8 +416,16 @@ def test_v2_cast_runs_k1_then_d2_then_the_sheets_and_a_legacy_story_makes_no_d2_
     events.clear()
     _run_cast(store, v2_id, FakeLLM(events), events)
     assert events == []
+    # A character with its look but no dossier: one call left, D1 alone.
+    store.write_entity(v2_id, "characters", {k: v for k, v in chars["char_mangella"].items() if k != "dossier"},
+                       now=NOW)
+    assert workflow.cast_units(store, store.get(v2_id))["llm_calls"] == 1
+    llm = FakeLLM(events, D1=[_d1("Reine du parloir.")])
+    _run_cast(store, v2_id, llm, events)
+    assert events == ["D1"]
+    assert store.read_entity(v2_id, "characters", "char_mangella")["dossier"]["relationships"] == []
 
-    # Legacy: no D2, in the estimate or the run, and no look.
+    # Legacy: no D1 or D2, in the estimate or the run, and no dossier or look.
     legacy_id = _story(store, v2=False)
     assert workflow.cast_units(store, store.get(legacy_id), selected=["Kiwilo", "Mangella"])["llm_calls"] == 2
     events = Events()
@@ -403,9 +433,9 @@ def test_v2_cast_runs_k1_then_d2_then_the_sheets_and_a_legacy_story_makes_no_d2_
                               _k1("a sly mango", ["red dress", "crown clip"])])
     image = FakeImage(events)
     _run_cast(store, legacy_id, llm, events, image)
-    assert "D2" not in events and events[:2] == ["K1", "image:portrait"]
+    assert "D1" not in events and "D2" not in events and events[:2] == ["K1", "image:portrait"]
     assert image.requests[0].prompt.startswith("Character portrait, a fuzzy kiwi, wearing gold chain, linen shirt.")
-    assert all("look" not in doc for doc in store.list_entities(legacy_id, "characters"))
+    assert all("look" not in doc and "dossier" not in doc for doc in store.list_entities(legacy_id, "characters"))
 
 
 def test_v2_places_run_p1_d3_plate_then_r1_r1v2_prop_image(tmp_path, hermetic):
@@ -459,6 +489,8 @@ def _d2_look(height):
     return schemas.d2_look(_d2(height))
 
 
+# Phase 7 stage 5a (DEC-228): re-pinned on purpose -- the text regenerate rewrites the dossier (D1) too,
+# between K1 and D2: three calls.
 def test_v2_regenerating_a_characters_text_writes_its_look_again(tmp_path, hermetic):
     from clipping.aistory import workflow
     from clipping.aistory.steps import regenerate
@@ -466,19 +498,23 @@ def test_v2_regenerating_a_characters_text_writes_its_look_again(tmp_path, herme
     store = StoryStore(tmp_path / "outputs", on_log=lambda line: None)
     story_id = _story(store, v2=True)
     kiwi = _character("char_kiwilo", "Kiwilo", "a fuzzy kiwi", ["gold chain", "linen shirt"], look=_d2_look(175))
+    kiwi["dossier"] = {**_d1("Né sur la plage."), "relationships": []}
     store.write_entity(story_id, "characters", kiwi, now=NOW)
     target = "character:char_kiwilo:text"
-    assert workflow.target_units(store, store.get(story_id), regenerate.parse_target(target))["llm_calls"] == 2
+    assert workflow.target_units(store, store.get(story_id), regenerate.parse_target(target))["llm_calls"] == 3
 
     events = Events()
-    llm = FakeLLM(events, K1=[_k1("a fuzzy kiwi in a hat", ["gold chain", "straw hat"])], D2=[_d2(150)])
+    llm = FakeLLM(events, K1=[_k1("a fuzzy kiwi in a hat", ["gold chain", "straw hat"])],
+                  D1=[_d1("Né dans un chapeau.")], D2=[_d2(150)])
     ctx = steps.StepContext(job_id="job000000001", story_id=story_id, step="regenerate", ep=None,
                             params={"target": target, "note": "plus petit"}, cancel=CancelToken(),
                             settings_env=dict(SETTINGS), outputs_dir=store.outputs_dir, on_log=lambda line: None)
     regenerate.run(ctx, runner=llm, time_fn=lambda: 100.0)
-    assert events == ["K1", "D2"]
+    assert events == ["K1", "D1", "D2"]
     assert "Current values:" in llm.of("D2")[0]["user"] and "plus petit" in llm.of("D2")[0]["user"]
-    assert store.read_entity(story_id, "characters", "char_kiwilo")["look"]["height_cm"] == 150
+    assert "Né sur la plage." in llm.of("D1")[0]["user"] and "plus petit" in llm.of("D1")[0]["user"]
+    saved = store.read_entity(story_id, "characters", "char_kiwilo")
+    assert saved["look"]["height_cm"] == 150 and saved["dossier"]["backstory"] == "Né dans un chapeau."
 
 
 def test_the_largest_look_replies_fit_their_caps():

@@ -99,6 +99,15 @@ C1_CALLS = 10
 # of 60-character names), R1v2 ~177 (2 where-when entries, the reply's bound;
 # tests/test_story_look.py).
 #
+# D1 (phase 7 stage 5a, DEC-228, DEC-138's method): the plan's 420 cannot hold
+# the dossier's own word caps in French -- every stated limit hit (a 60-word
+# backstory, goal/need/fears at 20, 2 secrets at 20, voice patterns and
+# vocabulary at 20, 2 catchphrases at 10, a 30-word arc) needs ~677 tokens with
+# no relationship at all (chars/4 x 1.3); with D1's reply bound of 3
+# relationships (D1_RELATIONSHIPS_MAX: a 60-character name, a 30-word history,
+# a 15-word now) ~1,117; plus 15 %, rounded up to ten
+# (tests/test_story_episode_prompt_budgets.py).
+#
 # T1v2/T1rv2 (phase 7 stage 4, DEC-227, DEC-138's method): the largest French
 # reply each ask allows -- two beat shots (one for T1rv2), each a 45-word
 # action, a 25-word motion, 4 staging entries at 4 + 4 words, 5 subjects, a
@@ -112,6 +121,7 @@ MAX_TOKENS = {
     "S3": 720, "F1": 400, "N1": 1430,
     "D2": 380, "D3": 300, "R1v2": 220,
     "T1v2": 1040, "T1rv2": 520,
+    "D1": 1290,
 }
 
 # E1's payoff variant (phase 5, plan 11 stage 3, DEC-138's method): from
@@ -152,6 +162,7 @@ TEMPERATURE = {
     "R1v2": WRITING_TEMPERATURE,
     "T1v2": WRITING_TEMPERATURE,
     "T1rv2": WRITING_TEMPERATURE,
+    "D1": WRITING_TEMPERATURE,
 }
 SCHEMA_NAMES = {
     "C1": "story_concepts", "B1": "bible_core", "B2": "bible_world", "B3": "bible_values",
@@ -164,6 +175,7 @@ SCHEMA_NAMES = {
     "S3": "series_memory_entry", "F1": "audience_feedback_digest", "N1": "next_episode_proposals",
     "D2": "character_look", "D3": "place_look", "R1v2": "prop_look",
     "T1v2": "storyboard_beat_shots", "T1rv2": "storyboard_beat_shot_replan",
+    "D1": "character_dossier",
 }
 
 # E4's input is the whole script, not a small pack -- it needs a wider
@@ -237,8 +249,14 @@ SCHEMA_NAMES = {
 # with their own inputs at their caps (tests/test_story_episode_prompt_budgets.py):
 # T1v2 1,756, T1rv2 1,787; each the worst case + 15 %, rounded up to ten (the
 # plan's 2,000 was an estimate).
+#
+# D1 (phase 7 stage 5a, DEC-228): the bible past its cut, the world at B2's
+# caps, K1's text at its caps, 11 other cast members at their name and
+# one-line caps, and a regenerate with the current dossier at its caps and a
+# 60-word note (tests/test_story_episode_prompt_budgets.py): D1 3,380;
+# + 15 %, rounded up to ten.
 INPUT_BUDGET = {"E1": 1820, "E2": 1660, "E3": 2530, "E4": 3900, "T1": 1270, "T1r": 1410, "S3": 3740, "F1": 3950, "N1": 3740,
-                "D2": 2290, "D3": 1940, "R1v2": 1170, "T1v2": 2020, "T1rv2": 2060}
+                "D2": 2290, "D3": 1940, "R1v2": 1170, "T1v2": 2020, "T1rv2": 2060, "D1": 3890}
 
 # The ``bible:<field>`` grammar of spec 9.2: which prompt a regenerate note
 # re-runs, and which of that prompt's fields it targets. "tone" also carries
@@ -602,6 +620,80 @@ def build_r1(pack, *, prop, cast, regenerate=None):
         user += _regenerate_block(regenerate)
     user += _R1_ASK
     return _system(pack), user, schemas.r1_schema(_cast_names(cast))
+
+
+# ============================================================ D1 (phase 7, the dossier)
+#
+# A v2 story writes each character's dossier in its own call right after K1
+# (A14): backstory, goal and need, fears, secrets, relationships with their
+# history, the voice, the arc -- what the writers (and the context builder)
+# know about the character. It is text for the writers, never for an image
+# model: written in the story's language, names allowed.
+
+_D1_ASK = (
+    "Write this character's dossier: what the writers know about them, so every episode stays true to "
+    "who they are.\n\n"
+    "Give (in the story language; names are allowed here):\n"
+    "- backstory: where they come from and what shaped them, at most 60 words\n"
+    "- goal: what they want this season, at most 20 words\n"
+    "- need: what they truly need, often not what they want, at most 20 words\n"
+    "- fears: at most 20 words\n"
+    "- secrets: 0 to 2 secrets the others do not know, each at most 20 words\n"
+    f"- relationships: 0 to {schemas.D1_RELATIONSHIPS_MAX} of the other characters above that matter most, "
+    "each with `with` (their exact name), history (their past together, at most 30 words) and now (where "
+    "they stand when the story starts, at most 15 words)\n"
+    "- voice: patterns (rhythm and habits of speech, at most 20 words), vocabulary (the words they use or "
+    "avoid, at most 20 words) and 0 to 2 catchphrases (each at most 10 words)\n"
+    "- arc: how they change over the season, at most 30 words\n\n"
+    "Stay consistent with the character's text, the bible and the world above. Never use real people, "
+    "brands, studio names or copyrighted characters."
+)
+
+
+def _others_section(others) -> str:
+    others = list(others)[:context._CAST_MAX_MEMBERS - 1]
+    if not others:
+        return "No other character yet.\n\n"
+    return "Other characters:\n" + "\n".join(
+        f"- {other['name']} ({other['role']}): {other['one_line']}" for other in others) + "\n\n"
+
+
+def _character_to_know_block(character) -> str:
+    archetype = character.get("archetype")
+    label = f"{character['role']}, {archetype}" if archetype else character["role"]
+    personality = character["personality"]
+    lines = [
+        f"Character: {character['name']} ({label})",
+        f"One line: {character['one_line']}",
+        f"Traits: {', '.join(personality['traits'])}",
+        f"Wants: {personality['wants']}",
+        f"Fears: {personality['fears']}",
+        f"Speech style: {personality['speech_style']}",
+    ]
+    relationships = character.get("relationships") or {}
+    if relationships:
+        lines.append("Relationships: " + "; ".join(f"{name}: {relation}" for name, relation in relationships.items()))
+    return "\n".join(lines)
+
+
+def build_d1(pack, *, character, others, regenerate=None):
+    """One character's dossier (phase 7, D1): the bible and world, K1's text
+    (*character*: ``{name, role, archetype, one_line, personality,
+    relationships: {name: relation}}``) and the other cast members
+    (*others*: ``[{name, role, one_line}]``, written or not).
+
+    Not the season arc: D1 runs in the cast step, before the season exists;
+    for a character added later, the arc at its caps (12 summaries of 60
+    words, ~1,430 tokens) would take the call past the spec's 4,000-token
+    ceiling -- its place in the season is the knowledge step's timeline."""
+    user = _data_block(pack, ("bible", "world"))
+    user += _others_section(others)
+    user += _character_to_know_block(character) + "\n\n"
+    if regenerate is not None:
+        user += _regenerate_block(regenerate)
+    user += _D1_ASK
+    names = [other["name"] for other in others][:context._CAST_MAX_MEMBERS - 1]
+    return _system(pack), user, schemas.d1_schema(names)
 
 
 # ============================================================ D2/D3/R1v2 (phase 7, the look)

@@ -24,6 +24,11 @@ Then the step **fills what is missing**, for every character of the story
    personality, relationships (K1's names mapped to ids -- an unknown name is
    dropped and printed), the voice brief (``voice_hints``) and the
    ``prompt_block``;
+1a. on a v2 story (phase 7, A14), the dossier (no ``dossier`` yet): D1, shown
+   K1's text and every other cast member's name, role and one-line; it writes
+   the backstory, goal, need, fears, secrets, relationships (names mapped to
+   ids, an unknown one dropped and printed), voice and arc. A failed dossier
+   does not hold back the look or the images;
 1b. on a v2 story (phase 7, A14), the look (no ``look`` yet): D2, shown K1's
    text and the build and height of every character whose look is written,
    so the cast shares one height scale; the sheets are drawn from it;
@@ -411,6 +416,79 @@ def write_text(ctx, store, char_id, *, tools, note=None, regenerate=False, annou
     return saved
 
 
+# ------------------------------------------------------------ D1 (v2: the dossier)
+
+def apply_d1(doc, reply, *, others) -> list:
+    """D1's reply into the character *doc* (in place) as its ``dossier``, and
+    clear its approval; returns the relationship names dropped (no other
+    character of that name, or one already used)."""
+    known = entities.by_name(others)
+
+    def char_id(name):
+        other = known.get(entities.name_key(name))
+        return None if other is None else other["char_id"]
+
+    doc["dossier"], dropped = schemas.d1_dossier(reply, char_id)
+    doc["approved_at"] = None
+    return dropped
+
+
+def _current_dossier(dossier, cast) -> dict:
+    """The dossier for a regenerate's "current values" block: relationships
+    by name, not id."""
+    names = {doc["char_id"]: doc["name"] for doc in cast}
+    current = copy.deepcopy(dossier)
+    current["relationships"] = [dict(item, **{"with": names.get(item["with"], item["with"])})
+                                for item in dossier["relationships"]]
+    return current
+
+
+def write_dossier(ctx, store, char_id, *, tools, note=None, regenerate=False, announced=None) -> dict:
+    """D1 for one character of a v2 story, written into its ``dossier``;
+    returns the document. D1 reads K1's text (so the character must be
+    written) and every other cast member's name, role and one-line, written
+    or not. With *regenerate*, D1 is shown the current dossier and the
+    *note*. ``StepFailed`` as ``llm_call.call_json``."""
+    story = store.get(ctx.story_id)
+    character = store.read_entity(ctx.story_id, CHARACTERS, char_id)
+    if not character["descriptor"]:
+        raise StepFailed(f"{character['name']}: write the character first -- D1 reads its text.")
+    cast = entities.cast_order(store.list_entities(ctx.story_id, CHARACTERS))
+    others = [doc for doc in cast if doc["char_id"] != char_id]
+    pack = context.build_pack(language=story["language"], story=story, note=note)
+    llm_call.announce_trimmed(ctx, pack, set() if announced is None else announced)
+    regen = None
+    if regenerate and character.get("dossier"):
+        regen = {"field": "dossier", "current": _current_dossier(character["dossier"], cast), "note": pack.note}
+    names = {doc["char_id"]: doc["name"] for doc in cast}
+    k1 = dict(_k1_character(story, character), personality=character["personality"],
+              relationships={names.get(cid, cid): relation for cid, relation in character["relationships"].items()})
+    system, user, schema = prompts.build_d1(
+        pack, character=k1, others=[{key: doc[key] for key in ("name", "role", "one_line")} for doc in others],
+        regenerate=regen)
+
+    def validate(reply):
+        errors = schemas.d1_errors(reply)
+        if errors:
+            return errors
+        trial = copy.deepcopy(character)
+        apply_d1(trial, reply, others=others)
+        return schemas.character_errors(trial)
+
+    reply = llm_call.call_json(ctx, "D1", system, user, schema, validator=validate,
+                               runner=tools.runner, time_fn=tools.time_fn)
+    dropped = []
+
+    def write(doc):
+        dropped.extend(apply_d1(doc, reply, others=others))
+
+    saved = entities.write_character(store, ctx.story_id, char_id, write, now=llm_call.utc_now())
+    for name in dropped:
+        ctx.on_log(f"ℹ️ {character['name']}: dossier relationship with {name!r} dropped -- no other character of "
+                   "that name, or named twice.")
+    return saved
+
+
 # ------------------------------------------------------------ D2 (v2: the look)
 
 def apply_d2(doc, reply) -> None:
@@ -510,6 +588,22 @@ def _text(run, ctx, store, character, tools, announced) -> bool:
         return False
     run.written.append(character["char_id"])
     return True
+
+
+def _dossier(run, ctx, store, char_id, tools, announced) -> None:
+    """Part 1a, a v2 story only (A14): D1 when the character has no dossier
+    yet. Nothing else is drawn from it, so a failure is recorded and the
+    look and the images still go ahead; the next run writes what is missing."""
+    character = store.read_entity(ctx.story_id, CHARACTERS, char_id)
+    if character.get("dossier"):
+        return
+    ctx.cancel.check()
+    ctx.on_log(f"👤 {character['name']}: dossier")
+    try:
+        write_dossier(ctx, store, char_id, tools=tools, announced=announced)
+    except StepFailed as exc:
+        # Regenerating the text writes the dossier again (``regenerate``).
+        run.fail(character, "dossier", exc.reason, entities.target(CHARACTERS, char_id, "text"))
 
 
 def _look(run, ctx, store, char_id, tools, announced) -> bool:
@@ -875,9 +969,11 @@ def run(ctx, *, runner=None, time_fn=time.monotonic, sleep_fn=time.sleep, adapte
     for character in entities.cast_order(store.list_entities(ctx.story_id, CHARACTERS)):
         ctx.cancel.check()
         try:
-            if _text(run_, ctx, store, character, tools, announced) and (
-                    not v2 or _look(run_, ctx, store, character["char_id"], tools, announced)):
-                _images(run_, ctx, store, character["char_id"], tools)
+            if _text(run_, ctx, store, character, tools, announced):
+                if v2:
+                    _dossier(run_, ctx, store, character["char_id"], tools, announced)
+                if not v2 or _look(run_, ctx, store, character["char_id"], tools, announced):
+                    _images(run_, ctx, store, character["char_id"], tools)
         except KeyError:
             if entities.exists(store, ctx.story_id, CHARACTERS, character["char_id"]):
                 raise

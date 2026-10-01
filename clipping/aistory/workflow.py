@@ -1195,7 +1195,8 @@ def cast_units(stories, story, *, selected=(), custom=()) -> dict:
     fully: K1, a portrait, two sheets, a sample of up to
     :data:`SAMPLE_CHARS_ESTIMATE` characters. The sheets are edits in
     ``references`` mode and text-to-image in ``prompt_only`` mode. A v2
-    story (phase 7) also counts D2 for each character with no look yet."""
+    story (phase 7) also counts D1 and D2 for each character with no
+    dossier and no look yet."""
     story_id = story["story_id"]
     prompt_only = story["generation_profile"]["consistency_mode"] == refimages.PROMPT_ONLY
     v2 = media_policy.is_v2(story)
@@ -1209,6 +1210,7 @@ def cast_units(stories, story, *, selected=(), custom=()) -> dict:
     for doc in existing:
         missing = character_missing(stories, story_id, doc)
         units["llm_calls"] += "text" in missing
+        units["llm_calls"] += v2 and not doc.get("dossier")
         units["llm_calls"] += v2 and not doc.get("look")
         units["images"] += "portrait" in missing
         sheets(sum(sheet in missing for sheet in SHEETS))
@@ -1219,7 +1221,7 @@ def cast_units(stories, story, *, selected=(), custom=()) -> dict:
         if key in names:
             continue
         names.add(key)
-        units["llm_calls"] += 2 if v2 else 1
+        units["llm_calls"] += 3 if v2 else 1
         units["images"] += 1
         sheets(len(SHEETS))
         units["tts_chars"] += SAMPLE_CHARS_ESTIMATE
@@ -1280,8 +1282,11 @@ def target_units(stories, story, parsed) -> dict:
     if parsed[0] in regenerate_step.EPISODE_KINDS or parsed[0] == "season":
         return _units(llm_calls=1)
     if parsed[2] == "text":
-        # A v2 story's entity text is written again with its look (phase 7).
-        return _units(llm_calls=2 if media_policy.is_v2(story) else 1)
+        # A v2 story's entity text is written again with its look, a character's
+        # with its dossier too (phase 7).
+        if not media_policy.is_v2(story):
+            return _units(llm_calls=1)
+        return _units(llm_calls=3 if ENTITY_KINDS_BY_WORD[parsed[0]] == CHARACTERS else 2)
     kind = ENTITY_KINDS_BY_WORD[parsed[0]]
     doc = read_entity(stories, story["story_id"], kind, parsed[1])
     if parsed[2] == "voice":

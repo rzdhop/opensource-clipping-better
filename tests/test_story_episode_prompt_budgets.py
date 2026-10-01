@@ -627,3 +627,71 @@ def test_look_worst_cases_measure_what_is_recorded_and_fit_their_budgets(prompt_
     assert budget == -(-round(worst * 1.15, 1) // 10) * 10
     for style in ALL_STYLES:
         _fits(prompt_id, *_LOOK_BUILDERS[prompt_id](style)[:2])
+
+
+# ================================================================ phase 7: D1 (the dossier)
+#
+# Stage 5a (DEC-228, DEC-138's method). The input: the bible past its 120-word
+# cut, the world at B2's caps (an 80-word setting, 6 rules at 25 words, a
+# 6-word period, 3 motifs -- uncapped, measured at 8 words), K1's text at its
+# caps (a 60-character name and archetype, a 200-character one-line, 5 traits
+# of 4 words, wants/fears/speech style at 25 French words, 5 relationships at 15
+# words), the 11 other cast members (the cast block's cap less the one written)
+# with 60-character names and 200-character one-lines, and a regenerate: the
+# current dossier at its caps with D1's 3 relationships, and a 60-word note.
+# (Not the season arc: at its caps it alone is ~1,430 tokens and took the
+# worst case to 4,812, past the spec's 4,000 ceiling -- see build_d1.)
+# Budget = worst case + 15 %, rounded up to ten.
+#
+# The reply: every stated limit of D1's ask hit in French (a 60-word backstory,
+# goal/need/fears at 20, 2 secrets at 20, D1_RELATIONSHIPS_MAX (3)
+# relationships of a 60-character name, a 30-word history and a 15-word now,
+# voice patterns and vocabulary at 20, 2 catchphrases at 10, a 30-word arc),
+# chars/4 x 1.3, + 15 %, rounded up to ten.
+
+MEASURED_DOSSIER = {"D1": 3380}
+MEASURED_DOSSIER_REPLY = 1116.7
+FRENCH_TOKEN_FACTOR = 1.3
+
+
+def _dossier_at_caps(relationships):
+    return {"backstory": _fr(60), "goal": _fr(20), "need": _fr(20), "fears": _fr(20), "secrets": [_fr(20)] * 2,
+            "relationships": relationships,
+            "voice": {"patterns": _fr(20), "vocabulary": _fr(20), "catchphrases": [_fr(10)] * 2},
+            "arc": _fr(30)}
+
+
+def _d1():
+    story = dict(STORY, world={"setting_summary": _fr(80), "rules": [_fr(25)] * 6, "time_period": _fr(6),
+                               "recurring_motifs": [_fr(8)] * 3})
+    pack = context.build_pack(language="fr", story=story, note=NOTE)
+    character = {"name": _name(60), "role": "support", "archetype": _filler(8, 60), "one_line": _filler(30, 200),
+                 "personality": {"traits": [_fr(4)] * 5, "wants": _fr(25), "fears": _fr(25),
+                                 "speech_style": _fr(25)},
+                 "relationships": {f"{_name(59)}{i}": _fr(15) for i in range(5)}}
+    others = [{"name": _name(60), "role": "support", "one_line": _filler(30, 200)} for _ in range(11)]
+    current = _dossier_at_caps([{"with": _name(60), "history": _fr(30), "now": _fr(15)}] * 3)
+    return prompts.build_d1(pack, character=character, others=others,
+                            regenerate={"field": "dossier", "current": current, "note": pack.note})
+
+
+def test_dossier_worst_case_measures_what_is_recorded_and_fits_its_budget():
+    worst = _tokens(_d1())
+    assert worst == MEASURED_DOSSIER["D1"]
+    budget = prompts.INPUT_BUDGET["D1"]
+    assert budget == -(-round(worst * 1.15, 1) // 10) * 10
+    _fits("D1", *_d1()[:2])
+
+
+def test_the_largest_french_dossier_reply_fits_its_cap():
+    import json
+
+    from clipping.aistory import schemas
+
+    reply = _dossier_at_caps([{"with": _name(60), "history": _fr(30), "now": _fr(15)}]
+                             * schemas.D1_RELATIONSHIPS_MAX)
+    assert schemas.d1_errors(reply) == []
+    needed = context.estimate_tokens("", json.dumps(reply, ensure_ascii=False)) * FRENCH_TOKEN_FACTOR
+    assert needed == pytest.approx(MEASURED_DOSSIER_REPLY, abs=0.05)
+    cap = prompts.MAX_TOKENS["D1"]
+    assert cap == -(-round(needed * 1.15, 1) // 10) * 10

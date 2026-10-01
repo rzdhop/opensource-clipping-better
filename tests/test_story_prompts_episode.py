@@ -1447,8 +1447,9 @@ def test_input_budget_names_every_episode_prompt():
     # Phase 7 stage 3a (DEC-226): the look writers have measured budgets too.
     # Phase 7 stage 4 (DEC-227): re-pinned on purpose -- T1 v2 and its re-plan (T1v2/T1rv2), measured
     # the same way (tests/test_story_episode_prompt_budgets.py); the v1 rows are unchanged (RC-M1).
+    # Phase 7 stage 5a (DEC-228): re-pinned on purpose -- the dossier writer (D1), measured the same way.
     assert list(prompts.INPUT_BUDGET) == ["E1", "E2", "E3", "E4", "T1", "T1r", "S3", "F1", "N1", "D2", "D3", "R1v2",
-                                          "T1v2", "T1rv2"]
+                                          "T1v2", "T1rv2", "D1"]
 
 
 @pytest.mark.parametrize(

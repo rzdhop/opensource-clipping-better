@@ -277,6 +277,9 @@ def test_max_tokens():
         "D2": 380, "D3": 300, "R1v2": 220,
         # Phase 7 stage 4 (DEC-227): re-pinned on purpose -- T1 v2 and its re-plan, new ids (v1 rows unchanged).
         "T1v2": 1040, "T1rv2": 520,
+        # Phase 7 stage 5a (DEC-228): re-pinned on purpose -- the dossier writer (D1), its French worst case
+        # measured (tests/test_story_episode_prompt_budgets.py).
+        "D1": 1290,
     }
 
 
@@ -308,6 +311,8 @@ def test_schema_names():
         "D2": "character_look", "D3": "place_look", "R1v2": "prop_look",
         # Phase 7 stage 4 (DEC-227): re-pinned on purpose -- T1 v2 and its re-plan, new ids (v1 rows unchanged).
         "T1v2": "storyboard_beat_shots", "T1rv2": "storyboard_beat_shot_replan",
+        # Phase 7 stage 5a (DEC-228): re-pinned on purpose -- the dossier writer.
+        "D1": "character_dossier",
     }
 
 
