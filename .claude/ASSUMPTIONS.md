@@ -350,6 +350,17 @@
   -e PYTHONPATH=/cilibs --entrypoint python opensource-clipping-better-backend -S -m pytest`); only its
   `test_the_data_directory_is_tracked_but_its_contents_are_not` fails there (git ownership of the mounted clone).
   UNCONFIRMED: whether phase 6 swaps DEC-176's CI-env command for it (the human's call).
+- **A-097** — No provider needs its credential header to follow a redirect **to another origin** (DEC-195).
+  - fal's media download already sends no header.
+  - Phase 6's Veo `_download` sends the key only to `generativelanguage.googleapis.com`.
+  - A signed-URL or CDN host authenticates through its URL.
+  - If a provider ever answers 401/403 after a cross-origin 30x, this assumption is the first suspect.
+  - UNCONFIRMED: provider behaviour, not visible from the code.
+- **A-098** — The human's chat request for the redirect fix named the approach (an opener whose redirect handler
+  drops the credentials off-origin and keeps them same-origin) and the acceptance tests. So it stands as the plan's
+  approval (`.claude/plans/transport-redirect-credentials.md`), including the one consequence the request did not
+  name: `test_provider_http.py`'s error-mapping test patches `transport._OPENER.open` instead of the global `urlopen`.
+  UNCONFIRMED until the human acknowledges it.
 
 - **A-100** — `fal/seedance-1-pro-fast` (`fal-ai/bytedance/seedance/v1/pro/fast/image-to-video`), read on 2026-09-30:
   - **Price.** Billed by tokens at $1.00 per million, where tokens = width × height × 24 × seconds / 1024. At 720×1280

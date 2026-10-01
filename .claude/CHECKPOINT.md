@@ -387,6 +387,39 @@ Carried unchanged, each proven by its named tests staying unedited:
 - RC-A2, RC-A3, RC-P5.
 - RC-S4: `llm.py` untouched.
 
+## SIDE TASK — transport redirects drop credential headers off-origin (FULL, small). Branch `Feature/silly-almeida-f5cda1`
+- **Scope:** only `clipping/providers/transport.py` and one new test file. The phase-6 state is in the next section and
+  in the `ai-story-phase-6` worktree; this branch leaves both alone.
+- **In-progress header** (keep current):
+  - **Current phase:** DOCUMENT done. Stages 1 and 2 are committed. **NOT done** until the human acknowledges the
+    items below.
+    - Stage 1 (`ded664f`): `transport._OPENER` with `_CredentialSafeRedirectHandler`; new
+      `tests/test_transport_redirects.py`; `test_provider_http.py`'s patch target moved.
+    - Stage 2: DEC-195, A-097, A-098, and the action-log lines.
+  - **Scoped Tier-1 after stage 1:**
+    - Files: the new file + `test_provider_http.py` + the three baseline files.
+    - Local **94 passed**, CI env **82 passed / 12 skipped**, compileall clean.
+  - **Waiting on the human:**
+    - acknowledge the Tier-2 deferral (no UI/API surface; the test scope came from the chat);
+    - acknowledge A-098 (the chat request as the plan's approval, and the patch-target move);
+    - say whether and when to merge into `main`. Merging changes the live container's on-disk code, so only at 0 jobs.
+    - Phase 6 (`feat/ai-story-phase-6`) touches neither file. Whichever lands second rebases, and only
+      `.claude/*` artifacts can conflict.
+  - **Follow-up offered:** the same leak in `stt.py` `_post_multipart` and `studio/broll.py` (direct `urlopen`).
+- **Where:** worktree `.claude/worktrees/magical-greider-2955e5`, branch `Feature/silly-almeida-f5cda1` from `main`
+  `16b946e`. Never merged or deployed from here: the main checkout is bind-mounted by the live container.
+- **Checkpoint:** `16b946e` (== `main`), clean tree.
+- **Tier-1 baseline at `16b946e`** (2026-09-30). Scope is the human's chat instruction: only these files, not the full
+  suites.
+  - Files: `tests/test_image_adapters.py`, `tests/test_generation_chain.py`, `tests/test_generation_chain_api.py`
+    (`tests/test_video_adapters.py` exists only on the phase-6 branch).
+  - `python -m pytest -p no:warnings`: **87 passed**.
+  - `PYTHONNOUSERSITE=1 PYTHONPATH=/tmp/cilibs python3 -m pytest -p no:warnings`: **75 passed / 12 skipped**.
+- **Regression contract:**
+  - RC-T1: the transport's contract is unchanged (`Response`, and the `HttpStatusError` / `APIConnectionError` /
+    `APITimeoutError` mapping). Proven by the three baseline files staying green and unedited.
+  - RC-T2: every adapter that goes through the transport keeps working. Proven by the same files.
+
 ## CURRENT STATE — AI Story **phase 5 DONE** (2026-09-30). Next: **phase 6** (start prompt: `.claude/plans/ai-story/13-phase-6-start-prompt.md`)
 - **Close-out (2026-09-30):** stages 0–15 done (ledger below). `feat/ai-story-phase-5` fast-forwarded into `main`
   and pushed. **CI GREEN** on `f06a299` (runs 36755806580 main, 36755803010 branch) after one CI-only fix: T2-P5-F14,
