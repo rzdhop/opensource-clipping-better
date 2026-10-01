@@ -405,8 +405,10 @@ Carried unchanged, each proven by its named tests staying unedited:
     - Conflicts were only in `.claude/CHECKPOINT.md` (phase 6's header kept on top, this section placed above the
       transport side task) and in the action log (both sides kept).
     - Tier-1 on the merge (the seven files): local **119 passed / 1 skipped**, CI env **119 / 1**. compileall clean.
-    - **Next action:** re-check `GET /api/health` for 0 jobs, then fast-forward `main` to the merge commit. No
-      container restart (the task's rule).
+    - The fast-forward of `main` was **refused by the session's permission check** (it modifies the shared,
+      bind-mounted main checkout). `main` is still `216bf38`.
+    - **Next action (the human):** confirm `GET /api/health` shows 0 jobs, then
+      `git -C <repo> merge --ff-only Feature/musing-lamport-e6a02a`. No container restart.
     - Stage 0 (`8edb8ea`): checkpoint, plan, baseline.
     - Stage 1 (`b4d1c3d`): `stt._post_multipart` opens through `transport._OPENER`; new
       `tests/test_stt_broll_redirects.py`.
