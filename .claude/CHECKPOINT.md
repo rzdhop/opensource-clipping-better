@@ -1,4 +1,4 @@
-## CURRENT STATE — AI Story **phase 6 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–12 **done**; stage 13 (live walk) **mostly done**; next: **stage 13b** (still stretch), then finish 13, then 14 — **PAUSED 2026-10-01 07:25 UTC for a session handoff**
+## CURRENT STATE — AI Story **phase 6 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–12 **done**; stage 13 (live walk) **mostly done**; next: **stage 13b** (still stretch), then finish 13, then 14 — paused 07:25 UTC for a handoff, **RESUMED 2026-10-01 in a new session**
 - **In-progress header** (keep current):
   - **Current phase:** IMPLEMENT. EXPLORE/CLARIFY/PLAN were done 2026-09-30 in a session run in parallel with phase 5's
     close: three maps, two rounds of questions, an Opus design. The human approved the plan.
@@ -6,6 +6,17 @@
     `~/.claude/plans/ai-story-phase-6-plan.md`). Brief: `.claude/plans/ai-story/07-phase-6-video-tiers-local.md`.
   - **PAUSED for a handoff (the human, 2026-10-01: "stop, save the state, give me the handoff prompt").** No agent or
     job is running. The worktree is clean except these artifacts (committed and pushed with this header).
+  - **RESUMED 2026-10-01 (new session).** First the human asked to fold the two idle side-task branches into this
+    one, so that one branch carries all the work:
+    - `Feature/musing-lamport-e6a02a` (stt/broll redirect credentials, DEC-196, A-099): merge `22a0d3f`. Its code:
+      `clipping/providers/stt.py`, `clipping/studio/broll.py`, `tests/test_stt_broll_redirects.py`.
+    - `Feature/silly-almeida-f5cda1`'s close-out `b0e938b` (A-098 confirmed): merge `70783db`. Its code was already in.
+    - Conflicts only in `.claude/` (log: both sides kept in date order; ASSUMPTIONS: A-098 under Confirmed).
+    - Scoped tests on the merged tree (the redirect, transport, stt and studio files) pass. Full Tier-1 runs at
+      step 2.
+    - Both reach `main` with step 3's fast-forward. `stt.py`/`broll.py` are Python, so step 3 needs a restart.
+    - `Feature/eager-chaplygin-e0a0a3` (09-18, studio import audit) was NOT merged: stale, it conflicts with the
+      studio package.
   - **Where things are:**
     - **Branch `feat/ai-story-phase-6`** (pushed) = local `main` + `ea19ab2`, the T2-P6-F1 clip cover+crop fix
       (NOT deployed).
@@ -89,7 +100,9 @@
     - `partial.shot_facts` labels tier-2 rebuilds as "modifiers" once.
     - Nano-banana → the paid key.
     - The music-bed truncation on ffmpeg 7.1.5 (task chip).
-    - The same credential leak in `stt.py`/`broll.py` (offered by the transport task).
+    - ~~The same credential leak in `stt.py`/`broll.py`~~: done by DEC-196, merged here (`22a0d3f`).
+    - Groq's Cloudflare answers 403 "error code: 1010" to urllib's User-Agent from this host (DEC-196's Tier 2):
+      hosted STT on Groq may fail whatever the key.
     - A live local ComfyUI run when a GPU exists (A-035).
     - Veo live (A-103).
   - **Scratch tools** (session scratchpad, re-creatable):
@@ -488,8 +501,8 @@ Carried unchanged, each proven by its named tests staying unedited:
     - Tier-1 on the merge (the seven files): local **119 passed / 1 skipped**, CI env **119 / 1**. compileall clean.
     - The fast-forward of `main` was **refused by the session's permission check** (it modifies the shared,
       bind-mounted main checkout). `main` is still `216bf38`.
-    - **Next action (the human):** confirm `GET /api/health` shows 0 jobs, then
-      `git -C <repo> merge --ff-only Feature/musing-lamport-e6a02a`. No container restart.
+    - ~~**Next action (the human):** the fast-forward.~~ **Superseded 2026-10-01:** merged into
+      `feat/ai-story-phase-6` (`22a0d3f`) at the human's request; it reaches `main` with phase 6's next deploy.
     - Stage 0 (`8edb8ea`): checkpoint, plan, baseline.
     - Stage 1 (`b4d1c3d`): `stt._post_multipart` opens through `transport._OPENER`; new
       `tests/test_stt_broll_redirects.py`.
@@ -548,8 +561,9 @@ Carried unchanged, each proven by its named tests staying unedited:
 - **Scope:** only `clipping/providers/transport.py` and one new test file. The phase-6 state is in the next section and
   in the `ai-story-phase-6` worktree; this branch leaves both alone.
 - **In-progress header** (keep current):
-  - **Current phase:** DOCUMENT done. Stages 1 and 2 are committed. **NOT done** until the human acknowledges the
-    items below.
+  - **Current phase: DONE.** The code (`ded664f`) reached `main` at `0ca00b8` and was deployed with phase 6
+    (`216bf38`). A-098 was confirmed ("Go go", `b0e938b`), and that commit was merged into `feat/ai-story-phase-6`
+    (`70783db`) on 2026-10-01. The items below are kept as history.
     - Stage 1 (`ded664f`): `transport._OPENER` with `_CredentialSafeRedirectHandler`; new
       `tests/test_transport_redirects.py`; `test_provider_http.py`'s patch target moved.
     - Stage 2: DEC-195, A-097, A-098, and the action-log lines.
