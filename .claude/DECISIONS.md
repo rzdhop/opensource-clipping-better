@@ -3746,3 +3746,52 @@ product's target, not the walk.
 - Pins moved on purpose: the two fruit_drama plate goldens (the added period) and RC-V1's `TIER1_BOARD_SHA` (the new
   key only: the board with `video_action` removed from all 24 shots still hashes to `859441d7…4cf4`).
 - Commit `9850fa5`.
+
+## DEC-221 — Phase 7 stage 2a: image links per role, the "Quality (billed APIs)" profile, quality-only images on v2 stories (amends DEC-117 for v2 stories; makes the budget profiles' `images` policy real)
+**Context.** DEC-219: characters, places and props are never made on cheap image AI. EXPLORE found 87 % of character
+sheets and 56 % of shot images on pollinations, and 8 of 9 stories on prompt-only because the edit chain never ran
+while `allow_paid` was off (A-123). The budget profiles' `images` key was validated and never read (E5 D4).
+**Decision.**
+- A story created from phase 7 on may carry `generation_profile.pipeline: "v2"` (optional schema key; own commit
+  `7425fd3`). It is the one switch for every phase-7 behaviour (plan A1).
+- New `clipping/aistory/media_policy.py`: `role_chain(role, kind, merged, story)` for the roles sheet, plate, prop and
+  keyframe. A legacy story gets `gen.chain_from_env(kind, merged)` unchanged. A v2 story gets its budget profile's
+  `roles[role]` when the profile's `images` policy is `quality_roles`, else its env chain; either way with
+  `LOW_QUALITY_LINKS` (cloudflare/flux-1-schnell, pollinations/flux, fal/flux-schnell, openai/gpt-image-2-low) removed.
+  The style preview is not a role and keeps the free chain, labelled a draft.
+- Every chain site that serves these roles asks it: `imaging.resolve`/`estimate`, the refimages plans, and in
+  `steps/assets.py` the quote, the chain rows, the sticky slot validation, the switch offer and `make_image` (before
+  the DEC-204 pin). The estimate and the run use one chain (RC-V6).
+- The shipped `quality` profile becomes "Quality (billed APIs)": `cap_usd 2.0`, `images quality_roles`, roles sheet /
+  plate / prop `gemini/nano-banana-2`, keyframe `fal/seedream-4.5-edit` then `gemini/nano-banana-2-lite`,
+  `video_resolution 720p`. `roles` and `video_resolution` are optional profile keys, validated when present.
+- `fal/seedream-4.5-edit`: `fal-ai/bytedance/seedream/v4.5/edit`, up to 10 references, a custom size scaled up to the
+  model's smallest area (720×1280 → 1440×2560, an exact 9:16), no negative field; $0.04 an image (A-111).
+- A v2 story must use `references`: prompt-only is refused at create, patch, the style step and the CLI
+  `--prompt-only`. Its "needs an editor" message names each link's reason and the keys to add, with no prompt-only
+  offer. Legacy messages are byte-identical.
+- A v2 keyframe that is not an exact, even 9:16 is centre-cropped at the source by one ffmpeg frame
+  (`media_policy.keyframe_crop`; ffmpeg missing or failing is a `ShotFailed`, never a silent keep).
+- New stories: the API create route and CLI `new` give the quality profile (`defaults.quality_generation_profile`:
+  tier 2, route api, references, quality, v2) when no profile is sent and both FAL_KEY and GEMINI_PAID_API_KEY are
+  set; otherwise today's default. An explicit profile is honoured as sent.
+**Consequence.** RC-Q2 (no v2 sheet/plate/prop/keyframe on a draft link) is tested. Legacy stories keep every chain,
+message and estimate (the revert experiment: with caps and keys put back, all affected files pass). Commit `e00a97a`.
+
+## DEC-222 — Nano-banana reads only GEMINI_PAID_API_KEY (amends DEC-205; RC-V4 re-pinned)
+**Context.** The human funds a paid Gemini key for images (CLARIFY answer 2). Nano-banana had stayed on
+`GOOGLE_API_KEY`, the free chains' project, as a phase-6 follow-up.
+**Decision.** `LINK_ENV_KEYS` adds `gemini/nano-banana-2` and `gemini/nano-banana-2-lite` on `GEMINI_PAID_API_KEY`;
+`GeminiImageAdapter` reads the link's own variable and sends `imageConfig.imageSize "1K"`. The free Gemini LLM, vision
+and TTS links never read the paid key; Veo and nano-banana never read `GOOGLE_API_KEY`.
+**Consequence.** Until the human adds `GEMINI_PAID_API_KEY` in Settings, nano-banana is skipped as "no API key" on
+every story (legacy chains included; none used it, since `allow_paid` is off). The RC-V4 test is re-pinned on purpose.
+
+## DEC-223 — Cap defaults 2.00 / 6.00 / 20.00
+**Context.** The human set the per-episode budget for an every-shot episode at about $1.50 with caps $2 / $6 / $20
+(CLARIFY answer 1).
+**Decision.** `PER_EPISODE_CAP_USD 2.00`, `DAILY_CAP_USD 6.00`, `PER_STORY_CAP_USD 20.00` in all five places (budget,
+config/CLI, API models, config adapter, the dashboard Settings form). `allow_paid` stays off.
+**Consequence.** Caps already saved in Settings still win (this VPS saved 1/3/10: the human changes them in Settings
+when ready). The five-place agreement test is re-pinned on purpose; tests that pinned 1/3/10 moved to the new numbers;
+three estimate-guard hashes re-pinned, each reproduced with the caps forced to 1/3/10.

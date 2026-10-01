@@ -399,7 +399,9 @@
 - **A-110** — (phase 7) seedance-1-pro-fast's prompt length limit is not published; the v2 clip prompt is kept ≤ 80 words. UNCONFIRMED.
 - **A-111** — (phase 7) `fal-ai/bytedance/seedream/v4.5/edit` ($0.04, up to 10 references, output ≤ 4 MP) exposes an
   `image_size` that reaches a 9:16 portrait near 1 MP, a `seed` and a prompt length that holds 220 words; its negative
-  prompt field is absent or ignored. Read from fal's OpenAPI schema in stage 2a. UNCONFIRMED.
+  prompt field is absent or ignored. Read from fal's OpenAPI schema in stage 2a (2026-10-01): `image_urls` ≤ 10, `image_size` presets or a custom size
+  of at least 2560×1440 pixels and ≤ 4096 a side (so 1440×2560 is used), `seed`, no `negative_prompt`, no stated
+  prompt length. Schema facts read; behaviour UNCONFIRMED until a live call.
 - **A-112** — (phase 7) nano-banana-2 / -lite have no negative prompt and no stated prompt limit; positive constraint
   phrasing ("Clean frame: no captions …") is honoured. UNCONFIRMED.
 - **A-113** — (phase 7) the project behind `GEMINI_PAID_API_KEY` has the Gemini image models enabled and billed. UNCONFIRMED.
