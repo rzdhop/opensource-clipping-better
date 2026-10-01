@@ -2558,6 +2558,9 @@ _STORYBOARD_ASSETS_SCHEMA = _document({
     "clip": _STORYBOARD_CLIP_SCHEMA,
 })
 
+# The one prompt layout a storyboard shot names (phase 7 stage 3b).
+STORYBOARD_PROMPT_LAYOUT_V1 = "layered_v1"
+
 _STORYBOARD_SHOT_SCHEMA = _document({
     "shot_id": {"type": "string", "pattern": SHOT_ID_PATTERN},
     "scene_id": {"type": "string", "pattern": SCENE_ID_PATTERN},
@@ -2571,8 +2574,10 @@ _STORYBOARD_SHOT_SCHEMA = _document({
     "image_prompt": {"type": "string"},
     "negative_prompt": {"type": "string"},
     "prompt_override": {"type": ["string", "null"]},
+    # At most 8 on a legacy shot (shots._reference_images), 10 on a v2 one
+    # (shots.V2_MAX_REFERENCES, phase 7 stage 3b): a relaxed maximum.
     "reference_images": {
-        "type": "array", "items": {"type": "string", "pattern": REFERENCE_IMAGE_PATH_PATTERN}, "maxItems": 8,
+        "type": "array", "items": {"type": "string", "pattern": REFERENCE_IMAGE_PATH_PATTERN}, "maxItems": 10,
     },
     "consistency": {"type": "string", "enum": list(_DERIVED)},
     "duration_s": {"type": "number", "minimum": 0},
@@ -2589,6 +2594,11 @@ _STORYBOARD_SHOT_SCHEMA = _document({
     # raw `action` (video_plan.build_video_prompt falls back to it), so an
     # already-stored clip stays "current" until the storyboard is refreshed.
     "video_action": {"type": "string"},
+    # Phase 7 stage 3b (A8): how image_prompt was written -- "layered_v1" on a
+    # v2 story's shot (shots.resolve_shot), whose video_prompt then holds its
+    # clip prompt and whose references are sent up to the link's own limit
+    # (steps/assets.REFERENCE_LIMITS). Absent on every legacy shot.
+    "prompt_layout": {"type": "string", "enum": [STORYBOARD_PROMPT_LAYOUT_V1]},
 })
 
 _STORYBOARD_TRANSITION_SCHEMA = _document({
