@@ -348,6 +348,8 @@
   the real neuron cost per 9:16 image.
 
   **CORRECTION 2026-10-01 (phase 6, T2-P6-F1):** the still path does NOT crop a square image to 9:16. `shot_argv` runs `scale=4320:-2` then `zoompan … s=1080x1920`, which STRETCHES it (a centred 32×32 square came out 364×648). So every Cloudflare still has been rendered vertically stretched since 2026-09-30. Clips now cover+crop (`filtergraph._cover_fill`); the still stretch is a separate decision (the human's call).
+  **Fixed 2026-10-01 (phase 6 stage 13b, `3841a1d`):** a still more than 2% off 9:16 is centre-cropped to an exact
+  9:16 before the scale; the stored 1:1 stills re-render unstretched. Still UNCONFIRMED: the neuron cost.
 - **A-096** — DEC-176's "CI env" run is not a faithful copy of CI: `PYTHONNOUSERSITE=1` hides only the user site, so
   the host's **system** site-packages (PIL among them) stay importable, while CI installs pytest alone. Phase 5's
   three two-word font tests passed here for weeks and failed only in CI (T2-P5-F14, fixed `f06a299`). The faithful

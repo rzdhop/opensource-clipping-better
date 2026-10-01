@@ -25,7 +25,12 @@
     - **Local `main` = `216bf38`**, deployed at 07:50 UTC on 2026-10-01: phase-6 stages 0–12 + the merged transport
       fix (DEC-195), with 0 jobs at the time.
     - **`origin/main` is still `772a540`.** Push `main` only at the close, after CI is green.
-  - **Current stage:** 13b, then the rest of 13, then 14.
+  - **Current stage:** 13b **done** (`3841a1d`, plus `7b44675` the RC-A1 guard re-record for DEC-196's broll.py and
+    `be0fff6` the tier-2 golden's x86_64 key). Next: step 3 (push, CI), then 4–9 below.
+    - Non-9:16 episodes to re-render at step 5: `04feb539840f` (18/18), `14ff154d3bff` (21/21), `979c8376e43e`
+      (14/20), `560e901c1b3d` (3/20); reason `settings`. The other five rendered episodes stay current.
+    - Follow-up (not folded in): a near-9:16 size inside the 2% tolerance whose upscale is not exact (832×1472,
+      736×1312) breaks the final pass's concat on SAR. Pre-existing; no live still has such a size.
   - **Next actions, in order:**
     1. **Stage 13b [Opus]** (the human chose "Fix now, in phase 6"): a still whose image is not 9:16 is cover-cropped
        to 9:16 before the motion.
@@ -463,7 +468,7 @@
 | 11 | API and CLI [Opus, escalated from Sonnet] | done |
 | 12 | dashboard [Sonnet] | done |
 | 13 | deploy and the Tier-2 live walk (≤ $0.55) [Opus] | in progress: steps 2–9, 11 done ($0.32); 10 and 12 wait for the human; re-render after 13b |
-| 13b | still path: cover-crop non-9:16 images (pre-existing stretch; the human: fix now) [Opus] | next |
+| 13b | still path: cover-crop non-9:16 images (pre-existing stretch; the human: fix now) [Opus] | done (`3841a1d`; Tier-1 local 6635/1, CI env 5841/761) |
 | 14 | docs and decisions [Sonnet] | — |
 
 ### Regression contract (phase 6)
