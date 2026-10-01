@@ -3965,3 +3965,15 @@ Seedream 4.5 takes up to 10 references (A-111).
 - Re-pins on purpose: the template count (3), the MAX_TOKENS/SCHEMA_NAMES/INPUT_BUDGET registries, the dashboard's
   template list and its payload-contract count.
 - Commits `e78b887` (schema) and `a2881ae`.
+
+**DEC-224 amendment (2026-10-01, the walk's finding).** As built, every story call skipped both NIM links: their 330 s
+provider timeout did not fit the 300 s per-call budget, so all writing still ran on gemini. Fix: per-model timeouts
+(`registry.MODEL_TIMEOUTS`: ultra 60 s, super 40 s; others unchanged, so the Clips mode keeps 330 s) and a separate
+per-call deadline `STORY_CALL_DEADLINE_SECONDS = 480` (both NIM retry ladders, 3 × 60 + 3 × 40, plus one 180 s gemini
+request). A step's predictive planning keeps `STORY_CALL_BUDGET_SECONDS = 300`, so step budgets and their tests are
+unchanged; a call can run past 300 s only when every NIM attempt times out.
+
+**DEC-234 addendum (the human, 2026-10-01: "Parallelize what can be done in parallel of the tests").** The two
+environments' runs start together (`-n 4` each) instead of one after the other, and work that does not depend on a
+test result goes on while they run. Measured on the 63-file selection: 3 min 15 s together vs 3 min 48 s in a row.
+A wait loop must never `pgrep -f` a pattern its own command line contains: wait on the PIDs or on `wait`.
