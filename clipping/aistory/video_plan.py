@@ -112,9 +112,14 @@ def build_video_prompt(
     """The (prompt, negative) pair an image-to-video adapter is called with
     for one shot.
 
-    The prompt is, in order: the shot's own action sentence
-    (``shot["action"]``, spec 2.8's English grammar), the style's
-    ``motion_rules.tier2_prompt_suffix`` (the style lock is a deep copy of
+    The prompt is, in order: the shot's own action sentence (``shot
+    ["video_action"]`` when present -- the tag-resolved, name-swept action
+    ``shots.resolve_shot`` stores on a storyboard shot, phase 7 D1 -- else
+    the raw ``shot["action"]``, spec 2.8's English grammar; a shot with no
+    ``video_action`` key, from a storyboard built before this field existed,
+    keeps its old, byte-identical prompt so an already-stored clip stays
+    "current"), the style's ``motion_rules.tier2_prompt_suffix`` (the style
+    lock is a deep copy of
     its style template -- ``stylelock.build_style_lock`` -- so it carries
     the same ``motion_rules``/``negative_prompt`` fields the template ships,
     ``templates/styles/*.json``), then the camera phrase for
@@ -142,7 +147,8 @@ def build_video_prompt(
     if camera_motion not in CAMERA_PHRASES:
         raise ValueError(f"not a Tier-1 camera_motion: {camera_motion!r}")
 
-    parts = [shot["action"], style_lock["motion_rules"]["tier2_prompt_suffix"], CAMERA_PHRASES[camera_motion]]
+    parts = [shot.get("video_action") or shot["action"],
+             style_lock["motion_rules"]["tier2_prompt_suffix"], CAMERA_PHRASES[camera_motion]]
     for modifier in shot.get("modifiers", ()):
         phrase = MODIFIER_PHRASES.get(modifier)
         if phrase:

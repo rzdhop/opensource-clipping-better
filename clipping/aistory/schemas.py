@@ -2349,6 +2349,15 @@ _STORYBOARD_SHOT_SCHEMA = _document({
     "motion": _STORYBOARD_MOTION_SCHEMA,
     "video_prompt": {"type": ["string", "null"]},
     "assets": _STORYBOARD_ASSETS_SCHEMA,
+}, optional={
+    # Phase 7 stage 1 (D1): the shot's action with every @char/#place/%prop
+    # tag resolved AND every entity name swept (shots.resolve_shot), stored
+    # so video_plan.build_video_prompt never puts a raw tag or a leaked name
+    # in the I2V clip prompt. Absent on a storyboard built before this key
+    # existed, which keeps -- and its clip prompt still builds from -- its
+    # raw `action` (video_plan.build_video_prompt falls back to it), so an
+    # already-stored clip stays "current" until the storyboard is refreshed.
+    "video_action": {"type": "string"},
 })
 
 _STORYBOARD_TRANSITION_SCHEMA = _document({

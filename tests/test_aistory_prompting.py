@@ -204,7 +204,9 @@ def test_master_plate_prompt_fruit_drama_golden():
         "with chandeliers, beach camps, villa kitchens, restaurants — "
         "photographed like a reality-TV show or a live-action comedy, props at "
         "human scale; exteriors in golden hour, interiors cold blue-grey with "
-        "warm candle or lamp practicals photorealistic 3D render of "
+        # Re-pinned on purpose (DEC-220, phase 7 stage 1): environment_rules now
+        # ends with a period before the rendering text.
+        "warm candle or lamp practicals. photorealistic 3D render of "
         "anthropomorphic fruits and vegetables with expressive human-like faces "
         "(eyes, brows, mouths) on realistic fruit heads, human-proportioned "
         "bodies in real fabric outfits, subsurface scattering on fruit skin, "
@@ -364,11 +366,41 @@ def test_golden_outputs_have_no_double_punctuation_or_spaces():
             place_descriptor="a place",
             time_variant="a time",
         ),
+        prompting.character_prompt_block(FRUIT_DRAMA, descriptor=DESCRIPTOR, signature_items=SIGNATURE_ITEMS),
     ]
     for output in outputs:
         assert ".." not in output
         assert "  " not in output
         assert not output.endswith(" ")
+
+
+def test_sheet_and_plate_prompts_have_no_period_comma():
+    """D3 fix (phase 7 stage 1): a descriptor that already ends in "." must
+    not produce a run-on like "...mouth., wearing ..." once the builder's
+    own skeleton appends ", wearing ..." right after it. Also: the
+    environment_rules sentence feeding master_plate_prompt/variant_prompt
+    must be terminated before the rendering text follows -- never a run-on
+    like "...practicals photorealistic 3D render...". """
+    descriptor = "a tired-looking kiwi sitting on a park bench with faded green paint."
+    place_descriptor = "a weathered wooden bench beneath an old oak tree."
+
+    portrait = prompting.portrait_prompt(FRUIT_DRAMA, descriptor=descriptor, signature_items=SIGNATURE_ITEMS)
+    turnaround = prompting.turnaround_prompt(FRUIT_DRAMA, descriptor=descriptor, signature_items=SIGNATURE_ITEMS)
+    expressions = prompting.expressions_prompt(FRUIT_DRAMA, descriptor=descriptor, signature_items=SIGNATURE_ITEMS)
+    block = prompting.character_prompt_block(FRUIT_DRAMA, descriptor=descriptor, signature_items=SIGNATURE_ITEMS)
+    master_plate = prompting.master_plate_prompt(FRUIT_DRAMA, place_descriptor=place_descriptor, time_variant="day")
+    variant = prompting.variant_prompt(FRUIT_DRAMA, place_descriptor=place_descriptor, variant="night")
+
+    for output in (portrait, turnaround, expressions, block, master_plate, variant):
+        assert ".," not in output
+
+    # Sanity: the fixture style's own environment_rules has no trailing
+    # period (true of every shipped style template, spec 5) -- the bug this
+    # guards is specifically a MISSING period, not a doubled one.
+    env_rules = FRUIT_DRAMA["environment_rules"].strip()
+    assert not env_rules.endswith((".", "!", "?"))
+    assert f"{env_rules}. {FRUIT_DRAMA['rendering']}" in master_plate
+    assert f"{env_rules}. {FRUIT_DRAMA['rendering']}" in variant
 
 
 # ------------------------------------------------------- character_prompt_block
@@ -509,7 +541,9 @@ def test_variant_prompt_fruit_drama_golden():
         "with chandeliers, beach camps, villa kitchens, restaurants — "
         "photographed like a reality-TV show or a live-action comedy, props at "
         "human scale; exteriors in golden hour, interiors cold blue-grey with "
-        "warm candle or lamp practicals photorealistic 3D render of "
+        # Re-pinned on purpose (DEC-220, phase 7 stage 1): environment_rules now
+        # ends with a period before the rendering text.
+        "warm candle or lamp practicals. photorealistic 3D render of "
         "anthropomorphic fruits and vegetables with expressive human-like faces "
         "(eyes, brows, mouths) on realistic fruit heads, human-proportioned "
         "bodies in real fabric outfits, subsurface scattering on fruit skin, "

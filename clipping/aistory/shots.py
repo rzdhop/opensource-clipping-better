@@ -341,11 +341,15 @@ def _story_name_map(entities) -> dict:
 
 def resolve_shot(shot, *, scene, entities, style_lock, consistency_mode) -> dict:
     """*shot* (a plan: ``framing``/``action``/``subjects``) resolved into
-    ``{"image_prompt", "negative_prompt", "reference_images",
-    "consistency"}``. Every entity name is stripped from ``image_prompt`` at
-    the very end, even one a plan's action wrongly spelled out instead of
-    using a tag (spec 2.3). ``prompt_override`` is never touched here --
-    the caller decides whether to use it instead of ``image_prompt``."""
+    ``{"image_prompt", "video_action", "negative_prompt", "reference_images",
+    "consistency"}``. Every entity name is stripped from the resolved action
+    alone (``video_action``, which also feeds ``image_prompt``'s action
+    sentence), even one a plan's action wrongly spelled out instead of using
+    a tag (spec 2.3) -- never from the whole assembled ``image_prompt``, so
+    a place's own name recurring as ordinary words inside its own descriptor
+    (phase 7 D2) survives untouched. ``prompt_override`` is never touched
+    here -- the caller decides whether to use it instead of
+    ``image_prompt``."""
     characters = entities.get("characters", {})
     places = entities.get("places", {})
     props = entities.get("props", {})
@@ -357,6 +361,12 @@ def resolve_shot(shot, *, scene, entities, style_lock, consistency_mode) -> dict
     resolved_action = resolve_action(
         shot["action"], char_handles=char_handles_map, prop_handles=prop_handles_map, place_names=place_names,
     )
+    # Phase 7 D1/D2: every entity name swept from the resolved action (tags
+    # already resolved above) -- this is both the text an I2V clip prompt is
+    # built from (video_plan.build_video_prompt) and the action sentence
+    # image_prompt is assembled with, so neither a raw tag nor a leaked name
+    # ever reaches either prompt.
+    video_action = names_mod.without_names(resolved_action, _story_name_map(entities))
     subjects_block = _subjects_block(shot["subjects"], characters=characters, props=props)
 
     place_doc = places[scene["place_id"]]
@@ -365,15 +375,15 @@ def resolve_shot(shot, *, scene, entities, style_lock, consistency_mode) -> dict
     image_prompt = prompting.shot_prompt(
         style_lock,
         subjects_block=subjects_block,
-        action=resolved_action,
+        action=video_action,
         place_block=place_block,
         time_variant=scene["time_variant"],
         framing=shot["framing"],
     )
-    image_prompt = names_mod.without_names(image_prompt, _story_name_map(entities))
 
     return {
         "image_prompt": image_prompt,
+        "video_action": video_action,
         "negative_prompt": prompting.negative_prompt(style_lock),
         "reference_images": _reference_images(shot["subjects"], scene=scene, characters=characters,
                                               places=places, props=props),
@@ -928,7 +938,8 @@ def build_storyboard(script, plans, sources, *, entities, style_lock, template, 
                 "framing": plan["framing"], "camera_motion": motion["type"],
                 "modifiers": list(plan["modifiers"]), "subject_tags": list(plan["subjects"]),
                 "action": plan["action"], "lines": line_ids,
-                "image_prompt": resolved["image_prompt"], "negative_prompt": resolved["negative_prompt"],
+                "image_prompt": resolved["image_prompt"], "video_action": resolved["video_action"],
+                "negative_prompt": resolved["negative_prompt"],
                 "prompt_override": None, "reference_images": resolved["reference_images"],
                 "consistency": resolved["consistency"], "duration_s": 0.0, "keep_still": False,
                 "motion": motion, "video_prompt": None,
@@ -967,12 +978,12 @@ def build_storyboard(script, plans, sources, *, entities, style_lock, template, 
 
 
 def refresh_prompts(storyboard, script, *, entities, style_lock, consistency_mode) -> dict:
-    """*storyboard* with every shot's ``image_prompt``/``negative_prompt``/
-    ``reference_images``/``consistency`` and the document's ``resolved_from``
-    re-resolved from *entities* as they are now -- plans (framing, camera
-    motion, modifiers, action, subject_tags, lines), durations, motion and
-    transitions are left exactly as they were (used when an entity changes
-    after the storyboard was built)."""
+    """*storyboard* with every shot's ``image_prompt``/``video_action``/
+    ``negative_prompt``/``reference_images``/``consistency`` and the
+    document's ``resolved_from`` re-resolved from *entities* as they are now
+    -- plans (framing, camera motion, modifiers, action, subject_tags,
+    lines), durations, motion and transitions are left exactly as they were
+    (used when an entity changes after the storyboard was built)."""
     scenes_by_id = {scene["scene_id"]: scene for scene in script["scenes"]}
     resolved_from: dict = {}
     new_shots = []
@@ -984,6 +995,7 @@ def refresh_prompts(storyboard, script, *, entities, style_lock, consistency_mod
         _collect_resolved_from(resolved_from, shot["subject_tags"], scene, entities)
         new_shot = dict(shot)
         new_shot["image_prompt"] = resolved["image_prompt"]
+        new_shot["video_action"] = resolved["video_action"]
         new_shot["negative_prompt"] = resolved["negative_prompt"]
         new_shot["reference_images"] = resolved["reference_images"]
         new_shot["consistency"] = resolved["consistency"]

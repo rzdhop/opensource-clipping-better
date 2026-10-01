@@ -120,6 +120,42 @@ def test_note_is_appended_as_a_final_direction_sentence():
     assert prompt.endswith("Make it snappier")
 
 
+def test_clip_prompt_has_no_entity_tags():
+    """D1 fix (phase 7 stage 1): a raw @char_/#place_/%prop_ tag must never
+    reach the I2V clip prompt. ``shots.resolve_shot`` stores a tag-free,
+    name-swept ``video_action`` on the shot; ``build_video_prompt`` prefers
+    it over the raw ``action`` when present.
+
+    Backward compatibility: a shot with no ``video_action`` key (a stored
+    storyboard built before this field existed) must give exactly the old
+    prompt, built from the raw ``action`` -- so an already-stored clip,
+    hashed against that prompt, stays "current" (steps.clips.clip_state)."""
+    style = _load_style_json("cartoon_flat")
+    tagged_action = "@char_kiwilo glares at #place_parloir:day near %prop_phone"
+    resolved_video_action = "the character glares at the setting near the object"
+
+    shot = _shot("sh08", 8, "s01", 3.0, action=tagged_action, camera_motion="hold")
+    shot["video_action"] = resolved_video_action
+    prompt, _negative = video_plan.build_video_prompt(shot, style, tier=2)
+    assert "@char_" not in prompt
+    assert "#place_" not in prompt
+    assert "%prop_" not in prompt
+    assert resolved_video_action in prompt
+    assert tagged_action not in prompt
+
+    shot_no_video_action = _shot("sh09", 9, "s01", 3.0, action=tagged_action, camera_motion="hold")
+    assert "video_action" not in shot_no_video_action
+    old_prompt, old_negative = video_plan.build_video_prompt(shot_no_video_action, style, tier=2)
+    assert tagged_action in old_prompt
+
+    # Removing video_action after the fact must reproduce that exact old
+    # prompt byte-for-byte: the fallback path is `action` alone.
+    del shot["video_action"]
+    fallback_prompt, fallback_negative = video_plan.build_video_prompt(shot, style, tier=2)
+    assert fallback_prompt == old_prompt
+    assert fallback_negative == old_negative
+
+
 # =============================================================== clip lengths
 
 @pytest.mark.parametrize("link,duration_s,expected", [

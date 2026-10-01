@@ -169,7 +169,7 @@ def negative_prompt(style_lock: dict) -> str:
 def portrait_prompt(style_lock: dict, *, descriptor: str, signature_items) -> str:
     items = _join_items(signature_items)
     text = (
-        f"Character portrait, {descriptor}, wearing {items}. "
+        f"Character portrait, {_strip_trailing_period(descriptor)}, wearing {items}. "
         "Neutral expression, looking at camera, three-quarter view, chest-up. "
         f"{style_lock['rendering']}. {style_lock['character_design_rules']} "
         f"Plain {style_lock['sheet_background']} background, even soft studio lighting, "
@@ -181,7 +181,8 @@ def portrait_prompt(style_lock: dict, *, descriptor: str, signature_items) -> st
 def turnaround_prompt(style_lock: dict, *, descriptor: str, signature_items) -> str:
     items = _join_items(signature_items)
     text = (
-        f"Character design turnaround sheet of the same character: {descriptor}, {items}. "
+        f"Character design turnaround sheet of the same character: "
+        f"{_strip_trailing_period(descriptor)}, {items}. "
         "Four full-body views side by side in one row: front, three-quarter, profile, back. "
         f"Identical proportions and outfit in every view. {style_lock['rendering']}. "
         f"{style_lock['character_design_rules']} Plain {style_lock['sheet_background']} "
@@ -193,7 +194,7 @@ def turnaround_prompt(style_lock: dict, *, descriptor: str, signature_items) -> 
 def expressions_prompt(style_lock: dict, *, descriptor: str, signature_items) -> str:
     items = _join_items(signature_items)
     text = (
-        f"Expression sheet of the same character: {descriptor}, {items}. "
+        f"Expression sheet of the same character: {_strip_trailing_period(descriptor)}, {items}. "
         "Six head-and-shoulders portraits in a 3x2 grid: neutral, happy, angry, shocked, "
         "sad, scheming. Same face, same outfit, same lighting in every cell. "
         f"{style_lock['rendering']}. Plain {style_lock['sheet_background']} background, no text."
@@ -202,9 +203,13 @@ def expressions_prompt(style_lock: dict, *, descriptor: str, signature_items) ->
 
 
 def master_plate_prompt(style_lock: dict, *, place_descriptor: str, time_variant: str) -> str:
+    environment_rules = style_lock["environment_rules"].strip()
+    if environment_rules and environment_rules[-1] not in ".!?":
+        environment_rules += "."
     text = (
-        f"Establishing wide shot of {place_descriptor}, {time_variant}, no people, no characters. "
-        f"{style_lock['environment_rules']} {style_lock['rendering']}. "
+        f"Establishing wide shot of {_strip_trailing_period(place_descriptor)}, {time_variant}, "
+        "no people, no characters. "
+        f"{environment_rules} {style_lock['rendering']}. "
         f"Palette: {palette_line(style_lock)}. Camera: wide, eye level, 24mm equivalent. "
         f"Lighting: {style_lock['lighting']}. Vertical 9:16, horizon in the upper third, "
         f"foreground detail in the lower third. {style_lock['quality_tail']}"
@@ -241,7 +246,7 @@ def character_prompt_block(style_lock: dict, *, descriptor: str, signature_items
     style_lock.character_design_rules. Pure and deterministic.
     """
     items = _join_items(signature_items)
-    text = f"{descriptor}, wearing {items}. {style_lock['character_design_rules']}"
+    text = f"{_strip_trailing_period(descriptor)}, wearing {items}. {style_lock['character_design_rules']}"
     return _collapse_ws(text)
 
 

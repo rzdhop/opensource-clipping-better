@@ -530,6 +530,40 @@ def test_no_entity_name_survives_across_a_whole_fast_storyboard():
             assert name not in shot["image_prompt"]
 
 
+def test_place_name_in_its_own_descriptor_survives():
+    """D2 fix (phase 7 stage 1): a place's own name recurring as ordinary
+    words inside its own descriptor (e.g. a place named "City square" whose
+    descriptor opens with "a bustling urban city square") must not be
+    corrupted by the name sweep -- the sweep now runs on the resolved action
+    only (D1/D2), never on the whole assembled image_prompt."""
+    place_citysquare = _place(
+        "place_citysquare",
+        "A bustling urban city square featuring cobblestone paths and a central fountain",
+        "Market stalls ring the edges. A stone fountain sits at the center.",
+        name="City square", variants={"day": _ref("variant_day.jpg")},
+    )
+    entities = {
+        "characters": CHARACTERS,
+        "places": {**PLACES, "place_citysquare": place_citysquare},
+        "props": PROPS,
+    }
+    scene = {"place_id": "place_citysquare", "time_variant": "day"}
+    plan = {
+        "framing": "wide_establishing",
+        "action": f"@{CHAR_KIWILO} glares at #place_citysquare:day near %{PROP_PHONE}",
+        "subjects": [f"@{CHAR_KIWILO}"],
+    }
+    resolved = shots.resolve_shot(plan, scene=scene, entities=entities, style_lock=FRUIT_DRAMA,
+                                  consistency_mode="references")
+    assert "urban city square" in resolved["image_prompt"]
+    assert "the place featuring" not in resolved["image_prompt"]
+
+    video_action = resolved["video_action"]
+    assert "@" not in video_action and "#" not in video_action and "%" not in video_action
+    for doc in list(CHARACTERS.values()) + [place_citysquare] + list(PROPS.values()):
+        assert doc["name"] not in video_action
+
+
 # ======================================================== 6. reference_images
 
 def test_reference_images_order_and_paths():

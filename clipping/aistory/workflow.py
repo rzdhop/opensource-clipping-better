@@ -3425,7 +3425,8 @@ def _resolve_again(ec, script, board, to_resolve, errors) -> None:
                                            f"scene {scene['scene_id']} again (the storyboard step).")) from None
         shot["camera_motion"] = motion["type"]
         shot["motion"] = motion
-        shot.update(image_prompt=resolved["image_prompt"], negative_prompt=resolved["negative_prompt"],
+        shot.update(image_prompt=resolved["image_prompt"], video_action=resolved["video_action"],
+                    negative_prompt=resolved["negative_prompt"],
                     reference_images=resolved["reference_images"], consistency=resolved["consistency"])
         _stamp_resolved(board["resolved_from"], shot, scene, ec.entities)
 

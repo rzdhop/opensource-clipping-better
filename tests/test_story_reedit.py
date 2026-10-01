@@ -656,6 +656,20 @@ def test_a_framing_action_or_prompt_edit_outdates_only_that_shots_image(store, t
     assert _assets_bytes(board) == _assets_bytes(board_before)
 
 
+def test_an_action_edit_refreshes_the_clip_action_too(store, tmp_path, built):
+    """Phase 7 D1: the stored ``video_action`` (the clip prompt's action)
+    follows an action edit -- a clip is never prompted with the old action."""
+    wf = _wf()
+    story_id = _episode(store, tmp_path, built)
+    edited = f"@{KIWILO} leans toward @{MANGELLA}, whispering."
+
+    wf.patch_storyboard(store, story_id, 1, {"shots": [{"shot_id": "sh04", "action": edited}]}, now=LATER)
+
+    shot = _shot(_board(store, story_id), "sh04")
+    assert "whispering" in shot["video_action"]
+    assert "@" not in shot["video_action"]
+
+
 def test_a_render_refuses_a_stale_shot_image_naming_the_shot(store, tmp_path, built):
     """The bug: a framing edit, the storyboard approved again, and the
     render used the old image -- its fingerprint (the recorded prompt hash,
