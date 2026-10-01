@@ -266,3 +266,174 @@ def prop_prompt_block(style_lock: dict, *, descriptor: str) -> str:
     """
     text = f"{_strip_trailing_period(descriptor)}. {style_lock['rendering']}"
     return _collapse_ws(text)
+
+
+# ============================================================ phase 7 (v2 sheets, plates, props)
+#
+# A v2 story's reference images are drawn from the entity's structured look
+# (``shots.render_look/render_place/render_prop``), not from the legacy
+# descriptor builders above, which stay byte for byte as they are (their
+# golden strings). Each v2 builder holds a word cap (A8): the look and the
+# fixed skeleton are kept whole, the style's rendering is cut at a clause
+# boundary and its design rules keep only the whole sentences that fit. The
+# image links of a v2 story take no negative prompt, so each ends on a short
+# positive constraints clause instead (A7).
+
+SHEET_V2_MAX_WORDS = 130
+PLATE_V2_MAX_WORDS = 150
+PROP_V2_MAX_WORDS = 80
+# The most of the rendering a v2 prompt keeps, and the least it is worth keeping.
+_RENDERING_V2_MAX_WORDS = 30
+_RENDERING_V2_MIN_WORDS = 8
+
+ROLE_TEXT_PORTRAIT = "Image 1 is this character's reference: keep identity, proportions and outfit exactly."
+CONSTRAINTS_ONE_CHARACTER = "Clean frame: no captions, logos or watermarks; one character."
+_CONSTRAINTS_SAME_CHARACTER = "Clean frame: no captions, logos or watermarks; the same single character throughout."
+_CONSTRAINTS_NO_PEOPLE = "Clean frame: no captions, logos or watermarks; no people."
+_CONSTRAINTS_OBJECT = "Clean frame: no captions, logos or watermarks; no people, no hands."
+
+
+def _word_count(text: str) -> int:
+    return len(text.split())
+
+
+def _pieces(text: str, stops: str) -> list:
+    """*text* split after each character of *stops* that is followed by a
+    space, outside parentheses; every piece keeps its own punctuation."""
+    pieces, start, depth = [], 0, 0
+    for i, char in enumerate(text):
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth = max(0, depth - 1)
+        elif char in stops and depth == 0 and i + 1 < len(text) and text[i + 1] == " ":
+            pieces.append(text[start:i + 1].strip())
+            start = i + 1
+    tail = text[start:].strip()
+    if tail:
+        pieces.append(tail)
+    return pieces
+
+
+def _fit(text: str, limit: int, *, stops: str = ",;.") -> str:
+    """*text* cut to at most *limit* words at a piece boundary (:func:`_pieces`),
+    with no trailing '.', ',' or ';'; empty when not even the first piece fits."""
+    text = _collapse_ws(text)
+    kept, count = [], 0
+    for piece in _pieces(text, stops):
+        words = _word_count(piece)
+        if count + words > limit:
+            break
+        kept.append(piece)
+        count += words
+    return " ".join(kept).rstrip(",;. ")
+
+
+def _not_in_look(look_text: str, signature_items) -> list:
+    """The signature items *look_text* does not already say (case-folded)."""
+    said = look_text.lower()
+    return [_strip_trailing_period(item) for item in signature_items
+            if _strip_trailing_period(item).lower() not in said]
+
+
+def _with_items(look_text: str, signature_items) -> str:
+    look = _strip_trailing_period(_collapse_ws(look_text))
+    extra = _not_in_look(look, signature_items or ())
+    if extra:
+        look = f"{look}, with {', '.join(extra)}"
+    return look
+
+
+def _styled(cap: int, *, before: str, after: str, rendering: str, rules: str = "") -> str:
+    """``before`` + the rendering + the design rules + ``after``, at most *cap*
+    words: the rendering cut to what is left (at most
+    ``_RENDERING_V2_MAX_WORDS``), then the whole rule sentences that still fit."""
+    left = cap - _word_count(before) - _word_count(after) - 1  # "Style:"
+    style = _fit(rendering, min(left, _RENDERING_V2_MAX_WORDS))
+    left -= _word_count(style)
+    kept = []
+    for sentence in _pieces(_collapse_ws(rules), ".!?"):
+        if _word_count(sentence) > left:
+            break
+        kept.append(sentence)
+        left -= _word_count(sentence)
+    parts = [before, f"Style: {style}." if style else "", " ".join(kept), after]
+    return _collapse_ws(" ".join(part for part in parts if part))
+
+
+def _sheet_v2(style_lock, *, head, look_text, signature_items, tail, constraints, rules=True) -> str:
+    look = _with_items(look_text, signature_items)
+    before = f"{head}: {look}."
+    after = f"{tail} {constraints}"
+    return _styled(SHEET_V2_MAX_WORDS, before=before, after=after, rendering=style_lock["rendering"],
+                   rules=style_lock["character_design_rules"] if rules else "")
+
+
+def portrait_prompt_v2(style_lock: dict, *, look_text: str, signature_items) -> str:
+    """A v2 character's base reference: full body, head to toe, front
+    three-quarter, neutral pose, from its rendered look (``shots.render_look``)
+    -- at most ``SHEET_V2_MAX_WORDS`` words. A signature item the look does not
+    say yet is added with "with"."""
+    return _sheet_v2(
+        style_lock,
+        head=("Full-body character reference sheet, head to toe, front three-quarter view, neutral standing "
+              "pose, arms relaxed"),
+        look_text=look_text, signature_items=signature_items,
+        tail=f"Plain {style_lock['sheet_background']} background, even soft studio light. Vertical 9:16.",
+        constraints=CONSTRAINTS_ONE_CHARACTER,
+    )
+
+
+def turnaround_prompt_v2(style_lock: dict, *, look_text: str, signature_items) -> str:
+    """The v2 turnaround, an edit of the portrait (image 1): four full-body
+    views of the same character, at most ``SHEET_V2_MAX_WORDS`` words."""
+    return _sheet_v2(
+        style_lock,
+        head=(f"{ROLE_TEXT_PORTRAIT} Turnaround sheet of this character, four full-body views side by side "
+              "in one row, front, three-quarter, profile and back, head to toe in each"),
+        look_text=look_text, signature_items=signature_items,
+        tail=f"Plain {style_lock['sheet_background']} background, flat even light, no labels.",
+        constraints=_CONSTRAINTS_SAME_CHARACTER,
+    )
+
+
+def expressions_prompt_v2(style_lock: dict, *, look_text: str, signature_items) -> str:
+    """The v2 expression sheet, an edit of the portrait (image 1): six
+    head-and-shoulders portraits, at most ``SHEET_V2_MAX_WORDS`` words."""
+    return _sheet_v2(
+        style_lock,
+        head=(f"{ROLE_TEXT_PORTRAIT} Expression sheet of this character, six head-and-shoulders portraits "
+              "in a 3x2 grid, neutral, happy, angry, shocked, sad and scheming, same face and outfit in every "
+              "cell"),
+        look_text=look_text, signature_items=signature_items,
+        tail=f"Plain {style_lock['sheet_background']} background, even soft light, no labels.",
+        constraints=_CONSTRAINTS_SAME_CHARACTER, rules=False,
+    )
+
+
+def plate_prompt_v2(style_lock: dict, *, place_text: str, variant: str) -> str:
+    """A v2 place's plate for one time variant: the place in words
+    (``shots.render_place``: descriptor, layout map, the variant's light,
+    the props that live there), no people, a wide camera, the style's
+    rendering and palette -- at most ``PLATE_V2_MAX_WORDS`` words."""
+    if not isinstance(variant, str) or re.fullmatch(schemas.TIME_VARIANT_PATTERN, variant) is None:
+        raise ValueError(f"not a time variant name: {variant!r}")
+    head = f"Establishing wide shot of an empty set, {variant.replace('_', ' ')}, no people, no characters:"
+    after = (f"Camera: wide, eye level, 24mm equivalent, deep focus. "
+             f"Palette: {_strip_trailing_period(palette_line(style_lock))}. Vertical 9:16. {_CONSTRAINTS_NO_PEOPLE}")
+    room = PLATE_V2_MAX_WORDS - _word_count(head) - _word_count(after) - _RENDERING_V2_MIN_WORDS - 1
+    place = _fit(place_text, room)
+    before = f"{head} {place}." if place else f"{head[:-1]}."
+    return _styled(PLATE_V2_MAX_WORDS, before=before, after=after, rendering=style_lock["rendering"])
+
+
+def prop_prompt_v2(style_lock: dict, *, prop_text: str) -> str:
+    """A v2 prop's reference image (``shots.render_prop``: look and real
+    scale), alone on the sheet background -- at most ``PROP_V2_MAX_WORDS``."""
+    head = "Reference image of one object, alone, centred, shown at its real scale"
+    after = (f"Plain {style_lock['sheet_background']} background, even soft studio light. "
+             f"{_CONSTRAINTS_OBJECT}")
+    room = PROP_V2_MAX_WORDS - _word_count(head) - _word_count(after) - _RENDERING_V2_MIN_WORDS - 2
+    prop = _fit(prop_text, room)
+    before = f"{head}: {prop}." if prop else f"{head}."
+    return _styled(PROP_V2_MAX_WORDS, before=before, after=after, rendering=style_lock["rendering"])

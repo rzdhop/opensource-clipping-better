@@ -50,7 +50,12 @@ honour a seed); ``fal/flux-kontext-pro`` uses only the first -- the portrait
 and a line says when it used fewer references than it was sent.
 
 Prompts come from ``prompting.py`` and never carry a name (spec 2.3):
-characters are drawn from their descriptor and signature items. A
+characters are drawn from their descriptor and signature items. On a v2
+story (phase 7) an entity with a ``look`` is drawn from it instead, through
+the v2 builders (``portrait/turnaround/expressions/plate/prop_prompt_v2``
+over ``shots.render_look/render_place/render_prop``); the turnaround and the
+expressions are edits of the portrait whose prompt says so first. A legacy
+story, or an entity with no look, gets the legacy builders byte for byte. A
 regenerate-with-note appends ``Author's note: <note>.`` after the locked
 blocks, never in place of them; the name of any entity of the story in the
 note is replaced by a neutral word ("the character", "the place", "the
@@ -79,7 +84,7 @@ from clipping.providers import adapters as adapters_mod
 from clipping.providers import gating
 from clipping.providers import generation as gen
 
-from . import imaging, media_policy, prompting, schemas
+from . import imaging, media_policy, prompting, schemas, shots
 from . import names as names_mod
 from . import uploads as uploads_mod
 
@@ -100,6 +105,12 @@ _CHARACTER_PROMPTS = {
     "portrait": prompting.portrait_prompt,
     "turnaround": prompting.turnaround_prompt,
     "expressions": prompting.expressions_prompt,
+}
+# Phase 7: a v2 story's character with a look is drawn from it (A8).
+_CHARACTER_PROMPTS_V2 = {
+    "portrait": prompting.portrait_prompt_v2,
+    "turnaround": prompting.turnaround_prompt_v2,
+    "expressions": prompting.expressions_prompt_v2,
 }
 
 MASTER_PLATE = schemas.MASTER_PLATE_VARIANT
@@ -574,8 +585,12 @@ def character_image(stories, story_id, char_id, which, *, env, on_log, cancel, n
         raise RefImageError(f"{name}: write the character first -- its descriptor and signature items "
                             "make every image.")
     lock = imaging.read_lock(stories, story_id, error=RefImageError)
-    prompt = _CHARACTER_PROMPTS[which](lock, descriptor=character["descriptor"],
-                                       signature_items=character["signature_items"])
+    if media_policy.is_v2(story) and character.get("look"):
+        prompt = _CHARACTER_PROMPTS_V2[which](lock, look_text=shots.render_look(character),
+                                              signature_items=character["signature_items"])
+    else:
+        prompt = _CHARACTER_PROMPTS[which](lock, descriptor=character["descriptor"],
+                                           signature_items=character["signature_items"])
     prompt = _with_note(prompt, note, stories=stories, story_id=story_id)
     step = f"character_image:{char_id}:{which}"
     size = CHARACTER_SIZES[which]
@@ -658,7 +673,12 @@ def place_image(stories, story_id, place_id, variant, *, env, on_log, cancel, no
     if not place["descriptor"]:
         raise RefImageError(f"{name}: write the place first -- its descriptor makes every image.")
     lock = imaging.read_lock(stories, story_id, error=RefImageError)
-    prompt = prompting.variant_prompt(lock, place_descriptor=place["descriptor"], variant=variant)
+    if media_policy.is_v2(story) and place.get("look"):
+        place_text = shots.render_place(place, variant, "wide_establishing",
+                                        props=_props_here(stories, story_id, place["look"]))
+        prompt = prompting.plate_prompt_v2(lock, place_text=place_text, variant=variant)
+    else:
+        prompt = prompting.variant_prompt(lock, place_descriptor=place["descriptor"], variant=variant)
     prompt = _with_note(prompt, note, stories=stories, story_id=story_id)
     step = f"place_image:{place_id}:{variant}"
     stem = f"variant_{variant}"
@@ -696,6 +716,20 @@ def place_image(stories, story_id, place_id, variant, *, env, on_log, cancel, no
     return _done(on_log, plan, ref, label, est, paid)
 
 
+def _props_here(stories, story_id, look) -> list:
+    """The written prop documents a place's look says live there (set
+    dressing on its plate); a prop gone or not written yet is left out."""
+    props = []
+    for prop_id in look.get("props_here") or ():
+        try:
+            prop = stories.read_entity(story_id, PROPS, prop_id)
+        except (KeyError, schemas.SchemaError):
+            continue
+        if prop["descriptor"]:
+            props.append(prop)
+    return props
+
+
 # ---------------------------------------------------------------------- props
 
 def prop_image(stories, story_id, prop_id, *, env, on_log, cancel, note=None, seed=None, adapters=None,
@@ -713,8 +747,11 @@ def prop_image(stories, story_id, prop_id, *, env, on_log, cancel, note=None, se
     if not prop["descriptor"]:
         raise RefImageError(f"{name}: write the prop first -- its descriptor makes its image.")
     lock = imaging.read_lock(stories, story_id, error=RefImageError)
-    prompt = _with_note(prompting.prop_image_prompt(lock, descriptor=prop["descriptor"]), note,
-                        stories=stories, story_id=story_id)
+    if media_policy.is_v2(story) and prop.get("look"):
+        prompt = prompting.prop_prompt_v2(lock, prop_text=shots.render_prop(prop))
+    else:
+        prompt = prompting.prop_image_prompt(lock, descriptor=prop["descriptor"])
+    prompt = _with_note(prompt, note, stories=stories, story_id=story_id)
     if seed is None:
         seed = _seed_of(prop["image"])
     if seed is None:

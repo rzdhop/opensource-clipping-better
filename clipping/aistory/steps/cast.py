@@ -24,6 +24,9 @@ Then the step **fills what is missing**, for every character of the story
    personality, relationships (K1's names mapped to ids -- an unknown name is
    dropped and printed), the voice brief (``voice_hints``) and the
    ``prompt_block``;
+1b. on a v2 story (phase 7, A14), the look (no ``look`` yet): D2, shown K1's
+   text and the build and height of every character whose look is written,
+   so the cast shares one height scale; the sheets are drawn from it;
 2. the portrait, then 3. the turnaround and the expressions sheet
    (``refimages``). A sheet with no editor to make it (``NeedsEditor``, spec
    8.1's "stop and ask", raised before any call) is **not** a failure: the
@@ -408,6 +411,58 @@ def write_text(ctx, store, char_id, *, tools, note=None, regenerate=False, annou
     return saved
 
 
+# ------------------------------------------------------------ D2 (v2: the look)
+
+def apply_d2(doc, reply) -> None:
+    """D2's reply into the character *doc* (in place) as its ``look``, and
+    clear its approval."""
+    doc["look"] = schemas.d2_look(reply)
+    doc["approved_at"] = None
+
+
+def _look_line(doc) -> dict:
+    """What D2 is told about another character whose look is written."""
+    return {"name": doc["name"], "build": doc["look"]["build"], "height_cm": doc["look"]["height_cm"]}
+
+
+def write_look(ctx, store, char_id, *, tools, note=None, regenerate=False, announced=None) -> dict:
+    """D2 for one character of a v2 story, written into its ``look``; returns
+    the document. D2 reads K1's text (so the character must be written) and
+    the build and height of every other character whose look is written, so
+    the whole cast shares one height scale. With *regenerate*, D2 is shown
+    the current look and the *note*. ``StepFailed`` as ``llm_call.call_json``."""
+    story = store.get(ctx.story_id)
+    lock = entities.read_lock(store, ctx.story_id)
+    character = store.read_entity(ctx.story_id, CHARACTERS, char_id)
+    if not character["descriptor"]:
+        raise StepFailed(f"{character['name']}: write the character first -- D2 reads its descriptor.")
+    cast = entities.cast_order(store.list_entities(ctx.story_id, CHARACTERS))
+    others = [_look_line(doc) for doc in cast if doc["char_id"] != char_id and doc.get("look")]
+    pack = context.build_pack(language=story["language"], story=story, template=lock, note=note)
+    llm_call.announce_trimmed(ctx, pack, set() if announced is None else announced)
+    regen = None
+    if regenerate and character.get("look"):
+        regen = {"field": "look", "current": character["look"], "note": pack.note}
+    k1 = dict(_k1_character(story, character), descriptor=character["descriptor"],
+              signature_items=list(character["signature_items"]))
+    system, user, schema = prompts.build_d2(pack, character=k1, others=others, rendering=lock["rendering"],
+                                            regenerate=regen)
+    names = [doc["name"] for doc in cast]
+
+    def validate(reply):
+        errors = schemas.d2_errors(reply, names)
+        if errors:
+            return errors
+        trial = copy.deepcopy(character)
+        apply_d2(trial, reply)
+        return schemas.character_errors(trial)
+
+    reply = llm_call.call_json(ctx, "D2", system, user, schema, validator=validate,
+                               runner=tools.runner, time_fn=tools.time_fn)
+    return entities.write_character(store, ctx.story_id, char_id, lambda doc: apply_d2(doc, reply),
+                                    now=llm_call.utc_now())
+
+
 # -------------------------------------------------------------------- the run
 
 class _Run:
@@ -454,6 +509,24 @@ def _text(run, ctx, store, character, tools, announced) -> bool:
         run.fail(character, "text", exc.reason, entities.target(CHARACTERS, character["char_id"], "text"))
         return False
     run.written.append(character["char_id"])
+    return True
+
+
+def _look(run, ctx, store, char_id, tools, announced) -> bool:
+    """Part 1b, a v2 story only (A14): D2 when the character has no look
+    yet; True when it has one afterwards. The look is written before the
+    portrait, which is drawn from it."""
+    character = store.read_entity(ctx.story_id, CHARACTERS, char_id)
+    if character.get("look"):
+        return True
+    ctx.cancel.check()
+    ctx.on_log(f"👤 {character['name']}: look")
+    try:
+        write_look(ctx, store, char_id, tools=tools, announced=announced)
+    except StepFailed as exc:
+        # Regenerating the text writes the look again (``regenerate``).
+        run.fail(character, "look", exc.reason, entities.target(CHARACTERS, char_id, "text"))
+        return False
     return True
 
 
@@ -798,10 +871,12 @@ def run(ctx, *, runner=None, time_fn=time.monotonic, sleep_fn=time.sleep, adapte
 
     run_ = _Run(ctx)
     announced = set()
+    v2 = media_policy.is_v2(story)
     for character in entities.cast_order(store.list_entities(ctx.story_id, CHARACTERS)):
         ctx.cancel.check()
         try:
-            if _text(run_, ctx, store, character, tools, announced):
+            if _text(run_, ctx, store, character, tools, announced) and (
+                    not v2 or _look(run_, ctx, store, character["char_id"], tools, announced)):
                 _images(run_, ctx, store, character["char_id"], tools)
         except KeyError:
             if entities.exists(store, ctx.story_id, CHARACTERS, character["char_id"]):

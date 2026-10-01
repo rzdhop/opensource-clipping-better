@@ -258,6 +258,186 @@ def _place_block(doc) -> str:
     return _collapse_ws(f"{descriptor}. {layout}")
 
 
+# ----------------------------------------------- the look in words (phase 7, A10)
+#
+# A v2 story's entities carry a structured ``look`` (``schemas.CHARACTER_LOOK_
+# SCHEMA`` & co.); these render it into prompt words. Pure, like everything
+# here, and never a name: another character is named by its handle
+# (:func:`character_handles`), a prop by its own.
+
+LOOK_MAX_WORDS = 45
+# The parts of a character's look dropped, in this order, while it is over
+# LOOK_MAX_WORDS: what the reference images show anyway goes first.
+_LOOK_DROP_ORDER = ("palette", "skin_material", "silhouette", "hair", "items", "face")
+# How many other characters a look's height is said against.
+_HEIGHT_OTHERS_MAX = 2
+_CLOSE_PLACE_FRAMINGS = ("close_up", "extreme_close_up", "insert_prop")
+_LAYOUT_PHRASES = (("left", "on the left"), ("right", "on the right"), ("back", "at the back"),
+                   ("foreground", "in the foreground"), ("centre", "in the centre"))
+# The one background element a close framing keeps, first found.
+_BACKGROUND_KEYS = ("back", "centre", "left", "right", "foreground")
+
+
+def _and_join(items) -> str:
+    items = [item for item in items if item]
+    if len(items) <= 1:
+        return "".join(items)
+    return ", ".join(items[:-1]) + " and " + items[-1]
+
+
+def _normal(text) -> str:
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", text.lower()).split())
+
+
+def _already_worn(item, worn) -> bool:
+    """Whether the signature *item* is already said by the wardrobe text
+    *worn*: as a phrase, or every word of it longer than two letters."""
+    item_n, worn_n = _normal(item), _normal(worn)
+    if not item_n:
+        return True
+    if f" {item_n} " in f" {worn_n} ":
+        return True
+    words = [word for word in item_n.split() if len(word) > 2]
+    return bool(words) and set(words) <= set(worn_n.split())
+
+
+def height_phrase(height_cm, other_height_cm, handle) -> str:
+    """How a *height_cm* character reads next to one of *other_height_cm*
+    named by *handle*: "about twice as tall as ...", "about half the height
+    of ...", "about the same height as ..." and the steps between."""
+    ratio = height_cm / other_height_cm
+    if ratio >= 2.5:
+        return f"more than twice as tall as {handle}"
+    if ratio >= 1.75:
+        return f"about twice as tall as {handle}"
+    if ratio >= 1.15:
+        return f"taller than {handle}"
+    if ratio > 1 / 1.15:
+        return f"about the same height as {handle}"
+    if ratio > 1 / 1.75:
+        return f"shorter than {handle}"
+    if ratio >= 1 / 2.5:
+        return f"about half the height of {handle}"
+    return f"less than half the height of {handle}"
+
+
+def _height_part(doc, others) -> str:
+    own = doc["look"]["height_cm"]
+    sized = [other for other in others
+             if other.get("descriptor") and (other.get("look") or {}).get("height_cm")
+             and other.get("char_id") != doc.get("char_id")][:_HEIGHT_OTHERS_MAX]
+    if not sized:
+        return ""
+    roster = {other["char_id"]: other for other in sized}
+    if doc.get("descriptor"):
+        roster = {doc["char_id"]: doc, **roster}
+    handles = character_handles(roster)
+    return " and ".join(height_phrase(own, other["look"]["height_cm"], handles[other["char_id"]])
+                        for other in sized)
+
+
+def _wardrobe(look, wardrobe_set):
+    sets = look["wardrobe_sets"]
+    if wardrobe_set is not None:
+        for entry in sets:
+            if entry["id"] == wardrobe_set:
+                return entry
+    return sets[0]
+
+
+def render_look(doc, *, wardrobe_set=None, others=()) -> str:
+    """A character's look in at most :data:`LOOK_MAX_WORDS` words: build, its
+    height against *others* (other character documents in the same frame,
+    named by their handle), silhouette, face, hair, skin or material,
+    "wearing" the wardrobe set's items (*wardrobe_set* by id, default the
+    first), "colours" the palette, then "with" each signature item the
+    wardrobe does not already say. Over the cap, parts are dropped in
+    ``_LOOK_DROP_ORDER``. ``ValueError`` when *doc* has no look."""
+    look = doc.get("look")
+    if not look:
+        raise ValueError("render_look: the character has no look")
+    worn = _strip_period(_wardrobe(look, wardrobe_set)["items"])
+
+    def said(value):
+        value = _strip_period(value)
+        return "" if _normal(value) in ("none", "no hair", "n a") else value
+
+    extra = [_strip_period(item) for item in doc.get("signature_items") or () if not _already_worn(item, worn)]
+    parts = {
+        "build": _strip_period(look["build"]),
+        "height": _height_part(doc, others),
+        "silhouette": said(look["silhouette"]),
+        "face": said(look["face"]),
+        "hair": said(look["hair"]),
+        "skin_material": said(look["skin_material"]),
+        "wearing": f"wearing {worn}",
+        "palette": f"colours {_and_join([_strip_period(c) for c in look['palette']])}",
+        "items": f"with {_and_join(extra)}" if extra else "",
+    }
+
+    def text():
+        return _collapse_ws(", ".join(value for value in parts.values() if value))
+
+    for key in _LOOK_DROP_ORDER:
+        if len(text().split()) <= LOOK_MAX_WORDS:
+            break
+        parts[key] = ""
+    words = text().split()
+    return " ".join(words[:LOOK_MAX_WORDS]).rstrip(",;")
+
+
+def _place_light(look, variant) -> str:
+    light = (look.get("lighting") or {}).get(variant)
+    return _strip_period(light) if light else f"{variant.replace('_', ' ')} light"
+
+
+def render_prop(doc, *, short=False) -> str:
+    """A prop in words: its descriptor, material, colour and real-scale
+    phrase; *short* (set dressing on a plate): its handle with colour,
+    material and scale. Without a look, the descriptor (or the handle)."""
+    descriptor = _strip_period(doc["descriptor"])
+    look = doc.get("look")
+    if short:
+        handle = _handle_from_descriptor(descriptor)
+        if not look:
+            return handle
+        return (f"{handle} ({_strip_period(look['colour'])} {_strip_period(look['material'])}, "
+                f"{_strip_period(look['scale_phrase'])})")
+    if not look:
+        return descriptor
+    return _collapse_ws(f"{descriptor}, {_strip_period(look['material'])}, {_strip_period(look['colour'])}, "
+                        f"{_strip_period(look['scale_phrase'])}")
+
+
+def render_place(doc, variant, framing, *, props=()) -> str:
+    """A place in words for *variant* and *framing*: the descriptor, the
+    layout map ("on the left ...", ...), the variant's light, the scale note
+    and *props* (prop documents living there) as set dressing; a close
+    framing (close-up, extreme close-up, insert) keeps only the light and
+    one background element. ``ValueError`` when *doc* has no look or the
+    framing is unknown."""
+    if framing not in schemas.FRAMINGS:
+        raise ValueError(f"unknown framing: {framing!r}")
+    look = doc.get("look")
+    if not look:
+        raise ValueError("render_place: the place has no look")
+    layout = look["layout_map"]
+    light = _place_light(look, variant)
+    if framing in _CLOSE_PLACE_FRAMINGS:
+        behind = next((_strip_period(layout[key]) for key in _BACKGROUND_KEYS if layout[key].strip()), "")
+        return f"Light: {light}." + (f" Behind: {behind}." if behind else "")
+    sentences = [_strip_period(doc["descriptor"])]
+    sides = [f"{phrase} {_strip_period(layout[key])}" for key, phrase in _LAYOUT_PHRASES if layout[key].strip()]
+    if sides:
+        sentences.append("Layout: " + ", ".join(sides))
+    sentences.append(f"Light: {light}")
+    sentences.append(f"Scale: {_strip_period(look['scale_note'])}")
+    dressing = [render_prop(prop, short=True) for prop in props if prop.get("descriptor")]
+    if dressing:
+        sentences.append("Set dressing: " + ", ".join(dressing))
+    return _collapse_ws(". ".join(sentences) + ".")
+
+
 def _subjects_block(subject_tags, *, characters, props) -> str:
     """Spec 5's ``subjects_block``: every character tag's descriptor +
     signature items (WITHOUT the style's character_design_rules --

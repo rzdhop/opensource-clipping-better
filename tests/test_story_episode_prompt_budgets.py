@@ -499,3 +499,76 @@ def test_memory_section_lists_the_hooks_it_is_handed():
     assert context.memory_section(SPEC_MEMORY, 1, open_hooks=["x"]) == ("none yet", False)
     assert context.previous_recap(SPEC_MEMORY, 2) == "Kiwilo et Mangella scellent une alliance secrète."
     assert context.previous_recap(SPEC_MEMORY, 1) is None and context.previous_recap(SPEC_MEMORY, 3) is None
+
+
+# ================================================================ phase 7: D2/D3/R1v2 (the look)
+#
+# The look calls of a v2 story (stage 3a), measured the same way (DEC-138):
+# every input at the cap its own source document sets, on the style whose
+# texts are the longest, French, on a regenerate (the current look at its caps
+# and a 60-word note). D2: 11 other characters (the cast block's cap less the
+# one drawn) with 60-character names and 15-word builds; K1's text at its caps
+# (a 45-word descriptor at the live density, 3 items of 60 characters, a
+# 200-character one-line, a 60-character archetype). D3: a 45-word descriptor,
+# 60-word layout notes, all 5 time variants, 8 props (D6's registry cap) with
+# 60-character names and 200-character one-lines. R1v2: a 30-word descriptor,
+# the owner's 15-word build, 12 cast names and 8 place names of 60 characters.
+# Budget = worst case + 15 %, rounded up to ten.
+
+MEASURED_LOOK = {"D2": 1987, "D3": 1685, "R1v2": 1014}
+ALL_STYLES = [templates.load_style(style_id) for style_id in templates.list_style_ids()]
+_DESCRIPTOR_DENSITY = LIVE_CHARACTERS["char_kiwilo"]["descriptor"]
+
+
+def _look_at_caps():
+    return {"build": _filler(15, 90), "silhouette": _filler(12, 72), "face": _filler(15, 90),
+            "hair": _filler(12, 72), "skin_material": _filler(12, 72), "height_cm": 175,
+            "palette": [_filler(3, 18)] * 4,
+            "wardrobe_sets": [{"id": f"set_{i}", "context": _filler(8, 48), "items": _filler(20, 120)}
+                              for i in range(3)],
+            "season_change": _filler(20, 120)}
+
+
+def _d2(style):
+    pack = context.build_pack(language="fr", story=STORY, template=style, note=NOTE)
+    character = {"name": _name(60), "role": "lead", "archetype": _filler(8, 60), "one_line": _filler(30, 200),
+                 "descriptor": _at_density(45, _DESCRIPTOR_DENSITY), "signature_items": [_filler(8, 60)] * 3}
+    others = [{"name": _name(60), "build": _filler(15, 90), "height_cm": 175} for _ in range(11)]
+    return prompts.build_d2(pack, character=character, others=others, rendering=style["rendering"],
+                            regenerate={"field": "look", "current": _look_at_caps(), "note": pack.note})
+
+
+def _d3(style):
+    pack = context.build_pack(language="fr", story=STORY, template=style, note=NOTE)
+    place = {"name": _name(60), "descriptor": _at_density(45, _DESCRIPTOR_DENSITY),
+             "layout_notes": _at_density(60, LIVE_PLACES["place_la_piscine_de_la_trahison"]["layout_notes"]),
+             "time_variants": ["day", "night", "dusk", "rain", "dawn"]}
+    props = [{"name": _name(60), "one_line": _filler(30, 200)} for _ in range(8)]
+    current = {"layout_map": {key: _filler(15, 90) for key in ("left", "right", "back", "foreground", "centre")},
+               "scale_note": _filler(15, 90), "lighting": {v: _filler(15, 90) for v in place["time_variants"]},
+               "props_here": [f"prop_{'x' * 40}"] * 8}
+    return prompts.build_d3(pack, place=place, environment_rules=style["environment_rules"], props=props,
+                            regenerate={"field": "look", "current": current, "note": pack.note})
+
+
+def _r1v2(style):
+    pack = context.build_pack(language="fr", story=STORY, template=style, note=NOTE)
+    prop = {"name": _name(60), "one_line": _filler(30, 200), "descriptor": _filler(30, 180)}
+    owner = {"name": _name(60), "build": _filler(15, 90), "height_cm": 175}
+    current = {"scale_cm": 12.5, "material": _filler(8, 48), "colour": _filler(6, 36), "scale_phrase": _filler(10, 60)}
+    return prompts.build_r1v2(pack, prop=prop, owner=owner, cast=[{"name": _name(60)}] * 12,
+                              places=[{"name": _name(60)}] * 8,
+                              regenerate={"field": "look", "current": current, "note": pack.note})
+
+
+_LOOK_BUILDERS = {"D2": _d2, "D3": _d3, "R1v2": _r1v2}
+
+
+@pytest.mark.parametrize("prompt_id", ["D2", "D3", "R1v2"])
+def test_look_worst_cases_measure_what_is_recorded_and_fit_their_budgets(prompt_id):
+    worst = max(_tokens(_LOOK_BUILDERS[prompt_id](style)) for style in ALL_STYLES)
+    assert worst == MEASURED_LOOK[prompt_id]
+    budget = prompts.INPUT_BUDGET[prompt_id]
+    assert budget == -(-round(worst * 1.15, 1) // 10) * 10
+    for style in ALL_STYLES:
+        _fits(prompt_id, *_LOOK_BUILDERS[prompt_id](style)[:2])

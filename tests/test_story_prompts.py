@@ -273,6 +273,8 @@ def test_max_tokens():
         "E1": 1450, "E2": 600, "E3": 720, "E4": 800, "T1": 580, "T1r": 150,
         "M1": 330,
         "S3": 720, "F1": 400, "N1": 1430,
+        # Phase 7 stage 3a (DEC-226): the look writers.
+        "D2": 380, "D3": 300, "R1v2": 220,
     }
 
 
@@ -300,6 +302,8 @@ def test_schema_names():
         "E4": "episode_consistency_check", "T1": "storyboard_shots", "T1r": "storyboard_shot_replan",
         "M1": "episode_metadata",
         "S3": "series_memory_entry", "F1": "audience_feedback_digest", "N1": "next_episode_proposals",
+        # Phase 7 stage 3a (DEC-226): the look writers.
+        "D2": "character_look", "D3": "place_look", "R1v2": "prop_look",
     }
 
 

@@ -18,7 +18,9 @@ Phase 2 (the entity targets; each touches its own item only):
 - ``character:<id>:text`` -- K1 again with the note (``cast.write_text``:
   each design reference not yet described is described first, a failure
   printed and K1 run without it); the images and the pinned voice stay, the
-  voice brief is rewritten.
+  voice brief is rewritten. On a v2 story (phase 7) every ``<kind>:<id>:text``
+  writes the entity's look again right after its text (D2, D3 or R1v2, shown
+  the current look and the note): no separate target.
 - ``character:<id>:image:portrait`` -- a fresh seed and the note; then the
   turnaround and the expressions sheet **that already existed** are made
   again from the new portrait (they were drawn from the old one). A sheet
@@ -62,7 +64,7 @@ from __future__ import annotations
 import re
 import time
 
-from .. import prompts, refimages, schemas, voices
+from .. import media_policy, prompts, refimages, schemas, voices
 from .. import store as store_mod
 from . import bible, concepts, entities, llm_call
 from .entities import CHARACTERS, PLACES, PROPS
@@ -305,15 +307,19 @@ def _regenerate_text(ctx, store, target, kind, eid, note, tools) -> dict:
     if kind == CHARACTERS:
         from . import cast
 
-        cast.write_text(ctx, store, eid, tools=tools, note=note, regenerate=True)
+        text, look = cast.write_text, cast.write_look
     elif kind == PLACES:
         from . import places
 
-        places.write_place_text(ctx, store, eid, tools=tools, note=note, regenerate=True)
+        text, look = places.write_place_text, places.write_place_look
     else:
         from . import places
 
-        places.write_prop_text(ctx, store, eid, tools=tools, note=note, regenerate=True)
+        text, look = places.write_prop_text, places.write_prop_look
+    text(ctx, store, eid, tools=tools, note=note, regenerate=True)
+    if media_policy.is_v2(store.get(ctx.story_id)):
+        # A v2 story's look is drawn from the text: written again with it (phase 7).
+        look(ctx, store, eid, tools=tools, note=note, regenerate=True)
     ctx.on_log(f"🔁 Regenerated {target}{_noted(note)}")
     return {"target": target}
 

@@ -1194,9 +1194,11 @@ def cast_units(stories, story, *, selected=(), custom=()) -> dict:
     yet (a selected sketch name or a custom entry the story lacks) counts
     fully: K1, a portrait, two sheets, a sample of up to
     :data:`SAMPLE_CHARS_ESTIMATE` characters. The sheets are edits in
-    ``references`` mode and text-to-image in ``prompt_only`` mode."""
+    ``references`` mode and text-to-image in ``prompt_only`` mode. A v2
+    story (phase 7) also counts D2 for each character with no look yet."""
     story_id = story["story_id"]
     prompt_only = story["generation_profile"]["consistency_mode"] == refimages.PROMPT_ONLY
+    v2 = media_policy.is_v2(story)
     units = _units()
 
     def sheets(count):
@@ -1207,6 +1209,7 @@ def cast_units(stories, story, *, selected=(), custom=()) -> dict:
     for doc in existing:
         missing = character_missing(stories, story_id, doc)
         units["llm_calls"] += "text" in missing
+        units["llm_calls"] += v2 and not doc.get("look")
         units["images"] += "portrait" in missing
         sheets(sum(sheet in missing for sheet in SHEETS))
         if "sample" in missing:
@@ -1216,7 +1219,7 @@ def cast_units(stories, story, *, selected=(), custom=()) -> dict:
         if key in names:
             continue
         names.add(key)
-        units["llm_calls"] += 1
+        units["llm_calls"] += 2 if v2 else 1
         units["images"] += 1
         sheets(len(SHEETS))
         units["tts_chars"] += SAMPLE_CHARS_ESTIMATE
@@ -1228,8 +1231,10 @@ def places_units(stories, story, params=None) -> dict:
     P1/R1 when its text is missing and its day plate or image when missing;
     each item of the list (*params*, else the saved proposal) not created yet
     counts fully (one call, one image). Time variants are made on demand
-    (``place:<id>:image:<variant>``) and are not counted."""
+    (``place:<id>:image:<variant>``) and are not counted. A v2 story (phase
+    7) also counts D3 / R1v2 for each place and prop with no look yet."""
     story_id = story["story_id"]
+    v2 = media_policy.is_v2(story)
     params = params or {}
     if params.get("places") is None and params.get("props") is None:
         params = places_proposal(stories, story_id) or {}
@@ -1240,13 +1245,14 @@ def places_units(stories, story, params=None) -> dict:
         for doc in existing:
             missing = MISSING[kind](stories, story_id, doc)
             units["llm_calls"] += "text" in missing
+            units["llm_calls"] += v2 and not doc.get("look")
             units["images"] += len(missing) - ("text" in missing)
         for item in params.get(key) or ():
             name = item.get("name") if isinstance(item, dict) else None
             if not isinstance(name, str) or entities_step.name_key(name) in names:
                 continue
             names.add(entities_step.name_key(name))
-            units["llm_calls"] += 1
+            units["llm_calls"] += 2 if v2 else 1
             units["images"] += 1
     return units
 
@@ -1271,8 +1277,11 @@ def target_units(stories, story, parsed) -> dict:
         script = read_episode(stories, story["story_id"], parsed[1], SCRIPT_DOC) or {"scenes": []}
         line = next((ln for scene in script["scenes"] for ln in scene["lines"] if ln["line_id"] == parsed[2]), None)
         return _units(tts_chars=len(line["text"]) if line else 0)
-    if parsed[0] in regenerate_step.EPISODE_KINDS or parsed[0] == "season" or parsed[2] == "text":
+    if parsed[0] in regenerate_step.EPISODE_KINDS or parsed[0] == "season":
         return _units(llm_calls=1)
+    if parsed[2] == "text":
+        # A v2 story's entity text is written again with its look (phase 7).
+        return _units(llm_calls=2 if media_policy.is_v2(story) else 1)
     kind = ENTITY_KINDS_BY_WORD[parsed[0]]
     doc = read_entity(stories, story["story_id"], kind, parsed[1])
     if parsed[2] == "voice":

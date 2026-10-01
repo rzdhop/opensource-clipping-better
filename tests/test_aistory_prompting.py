@@ -588,3 +588,50 @@ def test_prop_and_variant_prompts_hygiene_for_every_template(style_id):
 def test_prop_and_variant_prompts_have_no_name_parameter():
     assert "name" not in inspect.signature(prompting.prop_image_prompt).parameters
     assert "name" not in inspect.signature(prompting.variant_prompt).parameters
+
+
+# ------------------------------------------------------- phase 7 (v2 sheets)
+
+LOOK_TEXT = ("lean human body with a fuzzy round kiwi head, about the same height as the sly mango, "
+             "fuzzy brown kiwi skin, wearing white linen shirt, thin gold chain, colours brown and green, "
+             "with left-eyebrow scar.")
+
+
+@pytest.mark.parametrize("style_id", templates.list_style_ids())
+def test_portrait_v2_full_body_from_look(style_id):
+    style_lock = templates.load_style(style_id)
+    result = prompting.portrait_prompt_v2(style_lock, look_text=LOOK_TEXT, signature_items=SIGNATURE_ITEMS)
+    assert "full-body" in result.lower() and "head to toe" in result.lower()
+    assert "chest-up" not in result
+    # The look, its period stripped before the skeleton goes on.
+    assert "wearing white linen shirt, thin gold chain, colours brown and green, with left-eyebrow scar" in result
+    assert result.endswith("Clean frame: no captions, logos or watermarks; one character.")
+    assert "Vertical 9:16." in result and f"Plain {style_lock['sheet_background']} background" in result
+    assert len(result.split()) <= 130
+    assert ".," not in result and ".." not in result and "  " not in result
+    # A signature item the look does not mention yet is added with "with", never "wearing".
+    extra = prompting.portrait_prompt_v2(style_lock, look_text=LOOK_TEXT,
+                                         signature_items=SIGNATURE_ITEMS + ["tiny brass whistle"])
+    assert "with tiny brass whistle" in extra and "wearing tiny brass whistle" not in extra
+    assert len(extra.split()) <= 130
+    # The turnaround and the expressions are edits of the portrait: the role text comes first.
+    for builder in (prompting.turnaround_prompt_v2, prompting.expressions_prompt_v2):
+        sheet = builder(style_lock, look_text=LOOK_TEXT, signature_items=SIGNATURE_ITEMS)
+        assert sheet.startswith("Image 1 is this character's reference: keep identity, proportions and outfit "
+                                "exactly.")
+        assert len(sheet.split()) <= 130 and ".," not in sheet and ".." not in sheet
+
+
+@pytest.mark.parametrize("style_id", templates.list_style_ids())
+def test_plate_and_prop_v2_prompts_hold_their_caps(style_id):
+    style_lock = templates.load_style(style_id)
+    place_text = ("a city square with a clock tower; on the left a newsstand, on the right a lamppost, at the back "
+                  "the clock tower; a wide square, the tower ten people high; light: orange street lamps; "
+                  "set dressing: chrome toaster (silver polished chrome, as big as a suitcase).")
+    plate = prompting.plate_prompt_v2(style_lock, place_text=place_text, variant="night")
+    assert "no people, no characters" in plate and "on the left a newsstand" in plate
+    assert len(plate.split()) <= 150 and ".," not in plate and ".." not in plate
+    prop = prompting.prop_prompt_v2(style_lock, prop_text="a chrome toaster, polished chrome, silver, as big as a "
+                                                          "suitcase.")
+    assert "as big as a suitcase" in prop and "alone" in prop
+    assert len(prop.split()) <= 80 and ".," not in prop and ".." not in prop

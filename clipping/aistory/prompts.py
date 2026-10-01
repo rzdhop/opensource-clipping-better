@@ -91,12 +91,20 @@ C1_CALLS = 10
 # TWIST_HOOKS_MAX (3) hooks at 120 characters) -- needs ~624/347/1238 tokens
 # respectively (chars/4 x 1.3), plus 15 %, rounded up to ten
 # (tests/test_story_prompts_series.py).
+#
+# D2/D3/R1v2 (phase 7, stage 3a): the plan's caps 380/300/220, checked
+# against the largest English reply each ask allows -- every stated word and
+# count limit hit at 6 characters a word, chars/4 (the fields are English, so
+# no French factor): D2 ~346, D3 ~290 (3 time variants, P1's most, and 3 props
+# of 60-character names), R1v2 ~177 (2 where-when entries, the reply's bound;
+# tests/test_story_look.py).
 MAX_TOKENS = {
     "C1": 700, "B1": 400, "B2": 520, "B3": 300,
     "K1": 750, "P0": 420, "P1": 260, "R1": 100, "S1": 950, "S2": 350, "U1": 120,
     "E1": 1450, "E2": 600, "E3": 720, "E4": 800, "T1": 580, "T1r": 150,
     "M1": 330,
     "S3": 720, "F1": 400, "N1": 1430,
+    "D2": 380, "D3": 300, "R1v2": 220,
 }
 
 # E1's payoff variant (phase 5, plan 11 stage 3, DEC-138's method): from
@@ -132,6 +140,9 @@ TEMPERATURE = {
     "S3": ANALYTIC_TEMPERATURE,
     "F1": ANALYTIC_TEMPERATURE,
     "N1": IDEATION_TEMPERATURE,
+    "D2": WRITING_TEMPERATURE,
+    "D3": WRITING_TEMPERATURE,
+    "R1v2": WRITING_TEMPERATURE,
 }
 SCHEMA_NAMES = {
     "C1": "story_concepts", "B1": "bible_core", "B2": "bible_world", "B3": "bible_values",
@@ -142,6 +153,7 @@ SCHEMA_NAMES = {
     "E4": "episode_consistency_check", "T1": "storyboard_shots", "T1r": "storyboard_shot_replan",
     "M1": "episode_metadata",
     "S3": "series_memory_entry", "F1": "audience_feedback_digest", "N1": "next_episode_proposals",
+    "D2": "character_look", "D3": "place_look", "R1v2": "prop_look",
 }
 
 # E4's input is the whole script, not a small pack -- it needs a wider
@@ -203,7 +215,15 @@ SCHEMA_NAMES = {
 # 60-word summaries, a 40-word recap, 4 hooks at 120 characters (N1 shows the
 # oldest PAYOFF_HOOKS_MAX, as E1 does) and a 25-word direction: ~3,244
 # tokens; plus 15 %, rounded up to ten.
-INPUT_BUDGET = {"E1": 1820, "E2": 1660, "E3": 2530, "E4": 3900, "T1": 1270, "T1r": 1410, "S3": 3740, "F1": 3950, "N1": 3740}
+#
+# D2/D3/R1v2 (phase 7, stage 3a, DEC-138's method): each look call measured on
+# its own worst case -- every input at the cap its source document sets, on the
+# style with the longest texts, French, on a regenerate with the current look
+# at its caps and a 60-word note (tests/test_story_episode_prompt_budgets.py):
+# D2 1,987 (11 other characters' builds and heights), D3 1,685 (5 variants, 8
+# props), R1v2 1,014; each the worst case + 15 %, rounded up to ten.
+INPUT_BUDGET = {"E1": 1820, "E2": 1660, "E3": 2530, "E4": 3900, "T1": 1270, "T1r": 1410, "S3": 3740, "F1": 3950, "N1": 3740,
+                "D2": 2290, "D3": 1940, "R1v2": 1170}
 
 # The ``bible:<field>`` grammar of spec 9.2: which prompt a regenerate note
 # re-runs, and which of that prompt's fields it targets. "tone" also carries
@@ -567,6 +587,160 @@ def build_r1(pack, *, prop, cast, regenerate=None):
         user += _regenerate_block(regenerate)
     user += _R1_ASK
     return _system(pack), user, schemas.r1_schema(_cast_names(cast))
+
+
+# ============================================================ D2/D3/R1v2 (phase 7, the look)
+#
+# A v2 story (``media_policy.is_v2``) writes each entity's structured look in
+# its own call, right after its text (A14): D2 after K1, D3 after P1, R1v2
+# after R1. Same data-first-then-task shape as the builders above; every
+# field is for an image model, so the whole reply is English and never
+# carries a name (the validators check it, ``schemas.d2_errors`` & co.).
+
+# The other characters D2 is shown (their build and height), at most: the
+# cast block's own cap less the character being drawn.
+D2_OTHERS_MAX = context._CAST_MAX_MEMBERS - 1
+
+_D2_ASK = (
+    "Write this character's visual look for the image models.\n\n"
+    "Give (English, appearance only, never a name -- not this character's, not anyone's):\n"
+    "- build: body type and proportions, at most 15 words\n"
+    "- silhouette: the outline read at a glance, at most 12 words\n"
+    "- face: at most 15 words\n"
+    "- hair: hair, fur or whatever tops the head, at most 12 words\n"
+    "- skin_material: skin, fur, clay or surface, at most 12 words\n"
+    "- height_cm: a whole number from 5 to 500, on the same scale as the cast heights above, so every "
+    "character's size stays consistent with every descriptor\n"
+    "- palette: 1 to 4 short colour names\n"
+    "- wardrobe_sets: 1 to 3 outfits, the everyday one first, each with an id (lowercase, e.g. daily, "
+    "night_out), a context (when it is worn, at most 8 words) and items (what is worn, at most 20 words)\n"
+    "- season_change: how the look changes with the seasons, at most 20 words, or an empty string\n\n"
+    "Stay consistent with the descriptor and the signature items. Never use real people, brands, studio "
+    "names or copyrighted characters."
+)
+
+
+def _heights_section(others) -> str:
+    others = list(others)[:D2_OTHERS_MAX]
+    if not others:
+        return "No other character has a height yet: this one sets the scale for the whole cast.\n\n"
+    lines = [f"- {other['name']}: {other['build']}; {other['height_cm']} cm" for other in others]
+    return "Cast heights already set (one scale for the whole cast):\n" + "\n".join(lines) + "\n\n"
+
+
+def _character_to_draw_block(character) -> str:
+    archetype = character.get("archetype")
+    label = f"{character['role']}, {archetype}" if archetype else character["role"]
+    return "\n".join([
+        f"Character to draw: {character['name']} ({label})",
+        f"One line: {character['one_line']}",
+        f"Descriptor (English): {character['descriptor']}",
+        f"Signature items (English): {'; '.join(character['signature_items'])}",
+    ])
+
+
+def build_d2(pack, *, character, others, rendering, regenerate=None):
+    """One character's look (phase 7, D2): K1's text and the other
+    characters' build and height (*others*: ``[{name, build, height_cm}]``,
+    the looks written so far) so the heights share one scale."""
+    user = _data_block(pack, ("bible", "style", "character_design_rules"))
+    user += f"Rendering: {rendering}\n\n"
+    user += _heights_section(others)
+    user += _character_to_draw_block(character) + "\n\n"
+    if regenerate is not None:
+        user += _regenerate_block(regenerate)
+    user += _D2_ASK
+    return _system(pack), user, schemas.d2_schema()
+
+
+_D3_ASK = (
+    "Write this place's layout and light for the image models.\n\n"
+    "Give (English, the place alone: no people, no characters, never a name):\n"
+    "- layout_map: what stands on the left, on the right, at the back, in the foreground and in the "
+    "centre of the wide view, each at most 15 words, or an empty string when nothing stands there; "
+    "consistent with the layout notes\n"
+    "- scale_note: how big the space is against a person, at most 15 words\n"
+    "- lighting: one light for each time variant listed above, each at most 15 words\n"
+    "- props_here: 0 to 3 props of the story above that live in this place, by their exact name\n\n"
+    "Never use real people, brands, studio names or copyrighted characters."
+)
+
+
+def _props_list_section(props) -> str:
+    if not props:
+        return "The story has no props yet: props_here stays empty.\n\n"
+    lines = [f"- {prop['name']}: {prop['one_line']}" for prop in props]
+    return "Props of the story:\n" + "\n".join(lines) + "\n\n"
+
+
+def build_d3(pack, *, place, environment_rules, props, regenerate=None):
+    """One place's look (phase 7, D3): P1's text, the style's environment
+    rule and the story's props (``[{name, one_line}]``)."""
+    user = _data_block(pack, ("style",))
+    user += f"Environment rule: {environment_rules}\n\n"
+    user += "\n".join([
+        f"Place to lay out: {place['name']}",
+        f"Descriptor (English): {place['descriptor']}",
+        f"Layout notes (English): {place['layout_notes']}",
+        f"Time variants: {', '.join(place['time_variants'])}",
+    ]) + "\n\n"
+    user += _props_list_section(props)
+    if regenerate is not None:
+        user += _regenerate_block(regenerate)
+    user += _D3_ASK
+    names = [prop["name"] for prop in props]
+    return _system(pack), user, schemas.d3_schema(list(place["time_variants"]), names)
+
+
+_R1V2_ASK = (
+    "Write this prop's look for the image models.\n\n"
+    "Give (English, the object alone, never a name):\n"
+    "- scale_cm: its longest side in centimetres, a number more than 0, consistent with the owner's "
+    "height above\n"
+    "- material: at most 8 words\n"
+    "- colour: at most 6 words\n"
+    "- scale_phrase: its size in everyday words, at most 10 words (e.g. \"fits in one hand\", \"twice a "
+    "person's height\")\n"
+    "- where_when: 0 to 2 entries saying where and with whom it is in the episodes, each with ep "
+    "(1-based), holder (a cast member, or null), place (a place of the story, or null) and a note (at "
+    "most 12 words)\n\n"
+    "Never use real people, brands, studio names or copyrighted characters."
+)
+
+
+def _owner_line(owner) -> str:
+    if owner is None:
+        return "Owner: none"
+    height = owner.get("height_cm")
+    build = owner.get("build")
+    if height is None:
+        return f"Owner: {owner['name']}"
+    return f"Owner: {owner['name']} ({build}; {height} cm tall)" if build else \
+        f"Owner: {owner['name']} ({height} cm tall)"
+
+
+def build_r1v2(pack, *, prop, owner, cast, places, regenerate=None):
+    """One prop's look (phase 7, R1v2): R1's text and its owner's build and
+    height (*owner*: ``{name, build, height_cm}`` or None), so its real size
+    matches the cast's scale. *cast* and *places* are names (``where_when``)."""
+    cast_names = [doc["name"] for doc in cast][:context._CAST_MAX_MEMBERS]
+    place_names = [doc["name"] for doc in places][:context._PLACES_MAX_ITEMS]
+    user = _data_block(pack, ("style",))
+    lines = [
+        f"Prop to size: {prop['name']}",
+        f"One line: {prop['one_line']}",
+        f"Descriptor (English): {prop['descriptor']}",
+        _owner_line(owner),
+    ]
+    if cast_names:
+        lines.append(f"Cast: {', '.join(cast_names)}")
+    if place_names:
+        lines.append(f"Places: {', '.join(place_names)}")
+    user += "\n".join(lines) + "\n\n"
+    if regenerate is not None:
+        user += _regenerate_block(regenerate)
+    user += _R1V2_ASK
+    return _system(pack), user, schemas.r1v2_schema(cast_names, place_names)
 
 
 # ------------------------------------------------------------------------- S1

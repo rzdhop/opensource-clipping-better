@@ -19,6 +19,13 @@ the story:
 - a prop's text: R1 -- the descriptor, the owner (R1's name mapped to an id;
   an owner the user gave is kept) and the ``prompt_block``; then its image.
 
+On a v2 story (phase 7, A14) each entity's ``look`` is written between its
+text and its image, when it has none: D3 for a place (layout map, scale,
+light per time variant, the props that live there), R1v2 for a prop (real
+size against its owner's height, material, colour). The plate and the prop
+image are then drawn from the look (``refimages``). A look that fails is a
+local failure like the text, finished by regenerating the text.
+
 The plates and the prop images are text to image (never an editor). Each
 part is a local failure: printed, recorded, the next still runs; the image
 of an entity whose text failed is left for the next run. Anything written
@@ -34,7 +41,7 @@ from __future__ import annotations
 import copy
 import time
 
-from .. import context, prompting, prompts, refimages, schemas
+from .. import context, media_policy, prompting, prompts, refimages, schemas
 from .. import store as store_mod
 from . import entities, llm_call
 from .entities import CHARACTERS, PLACES, PROPS
@@ -283,6 +290,135 @@ def write_prop_text(ctx, store, prop_id, *, tools, note=None, regenerate=False, 
     return saved
 
 
+# --------------------------------------------------- D3 / R1v2 (v2: the look)
+
+def apply_d3(doc, reply, *, props) -> None:
+    """D3's reply into the place *doc* (in place) as its ``look`` -- the
+    props named by D3 mapped to their ids (*props*: the story's prop
+    documents) -- and clear its approval."""
+    ids = entities.by_name(props)
+    doc["look"] = {
+        "layout_map": {key: reply["layout_map"][key] for key in schemas.LAYOUT_MAP_KEYS},
+        "scale_note": reply["scale_note"],
+        "lighting": dict(reply["lighting"]),
+        "props_here": [ids[entities.name_key(name)]["prop_id"] for name in reply["props_here"]
+                       if entities.name_key(name) in ids],
+    }
+    doc["approved_at"] = None
+
+
+def write_place_look(ctx, store, place_id, *, tools, note=None, regenerate=False, announced=None) -> dict:
+    """D3 for one place of a v2 story, written into its ``look``; returns the
+    document. D3 reads P1's text, the style's environment rule and the
+    story's props (``props_here`` is chosen among them). With *regenerate*,
+    D3 is shown the current look and the *note*. ``StepFailed`` as
+    ``llm_call.call_json``."""
+    story = store.get(ctx.story_id)
+    lock = entities.read_lock(store, ctx.story_id)
+    place = store.read_entity(ctx.story_id, PLACES, place_id)
+    if not (place["descriptor"] and place["layout_notes"]):
+        raise StepFailed(f"{place['name']}: write the place first -- D3 reads its descriptor and layout notes.")
+    props = store.list_entities(ctx.story_id, PROPS)
+    cast = store.list_entities(ctx.story_id, CHARACTERS)
+    pack = context.build_pack(language=story["language"], story=story, template=lock, note=note)
+    llm_call.announce_trimmed(ctx, pack, set() if announced is None else announced)
+    regen = None
+    if regenerate and place.get("look"):
+        regen = {"field": "look", "current": place["look"], "note": pack.note}
+    variants = list(place["time_variants"])
+    system, user, schema = prompts.build_d3(
+        pack, place={"name": place["name"], "descriptor": place["descriptor"],
+                     "layout_notes": place["layout_notes"], "time_variants": variants},
+        environment_rules=lock["environment_rules"],
+        props=[{"name": doc["name"], "one_line": doc["one_line"]} for doc in props], regenerate=regen,
+    )
+    prop_names = [doc["name"] for doc in props]
+    names = [doc["name"] for doc in cast] + [place["name"]]
+
+    def validate(reply):
+        errors = schemas.d3_errors(reply, variants, prop_names, names)
+        if errors:
+            return errors
+        trial = copy.deepcopy(place)
+        apply_d3(trial, reply, props=props)
+        return schemas.place_errors(trial)
+
+    reply = llm_call.call_json(ctx, "D3", system, user, schema, validator=validate,
+                               runner=tools.runner, time_fn=tools.time_fn)
+    return entities.write_entity(store, ctx.story_id, PLACES, place_id,
+                                 lambda doc: apply_d3(doc, reply, props=props), now=llm_call.utc_now())
+
+
+def apply_r1v2(doc, reply, *, cast, places) -> None:
+    """R1v2's reply into the prop *doc* (in place) as its ``look`` -- the
+    holders and places named mapped to their ids, a name matching none
+    left null -- and clear its approval."""
+    holders, rooms = entities.by_name(cast), entities.by_name(places)
+
+    def mapped(index, name, field):
+        if name is None:
+            return None
+        doc_ = index.get(entities.name_key(name))
+        return doc_[field] if doc_ else None
+
+    doc["look"] = {
+        "scale_cm": reply["scale_cm"],
+        "material": reply["material"],
+        "colour": reply["colour"],
+        "scale_phrase": reply["scale_phrase"],
+        "where_when": [{"ep": entry["ep"], "holder_char_id": mapped(holders, entry["holder"], "char_id"),
+                        "place_id": mapped(rooms, entry["place"], "place_id"), "note": entry["note"]}
+                       for entry in reply["where_when"]],
+    }
+    doc["approved_at"] = None
+
+
+def write_prop_look(ctx, store, prop_id, *, tools, note=None, regenerate=False, announced=None) -> dict:
+    """R1v2 for one prop of a v2 story, written into its ``look``; returns
+    the document. R1v2 reads R1's text and its owner's build and height (when
+    the owner's look is written), so its size matches the cast's scale. With
+    *regenerate*, it is shown the current look and the *note*. ``StepFailed``
+    as ``llm_call.call_json``."""
+    story = store.get(ctx.story_id)
+    lock = entities.read_lock(store, ctx.story_id)
+    prop = store.read_entity(ctx.story_id, PROPS, prop_id)
+    if not prop["descriptor"]:
+        raise StepFailed(f"{prop['name']}: write the prop first -- R1v2 reads its descriptor.")
+    cast = entities.cast_order(store.list_entities(ctx.story_id, CHARACTERS))
+    places_ = store.list_entities(ctx.story_id, PLACES)
+    owner_doc = next((doc for doc in cast if doc["char_id"] == prop["owner_char_id"]), None)
+    owner = None
+    if owner_doc is not None:
+        look = owner_doc.get("look") or {}
+        owner = {"name": owner_doc["name"], "build": look.get("build"), "height_cm": look.get("height_cm")}
+    pack = context.build_pack(language=story["language"], story=story, template=lock, note=note)
+    llm_call.announce_trimmed(ctx, pack, set() if announced is None else announced)
+    regen = None
+    if regenerate and prop.get("look"):
+        # Its size and surface; where it has been is the knowledge's, not shown again.
+        current = {key: prop["look"][key] for key in ("scale_cm", "material", "colour", "scale_phrase")}
+        regen = {"field": "look", "current": current, "note": pack.note}
+    system, user, schema = prompts.build_r1v2(
+        pack, prop={"name": prop["name"], "one_line": prop["one_line"], "descriptor": prop["descriptor"]},
+        owner=owner, cast=cast, places=places_, regenerate=regen,
+    )
+    names = [doc["name"] for doc in cast]
+
+    def validate(reply):
+        errors = schemas.r1v2_errors(reply, names)
+        if errors:
+            return errors
+        trial = copy.deepcopy(prop)
+        apply_r1v2(trial, reply, cast=cast, places=places_)
+        return schemas.prop_errors(trial)
+
+    reply = llm_call.call_json(ctx, "R1v2", system, user, schema, validator=validate,
+                               runner=tools.runner, time_fn=tools.time_fn)
+    return entities.write_entity(store, ctx.story_id, PROPS, prop_id,
+                                 lambda doc: apply_r1v2(doc, reply, cast=cast, places=places_),
+                                 now=llm_call.utc_now())
+
+
 # -------------------------------------------------------------------- the run
 
 class _Run:
@@ -311,6 +447,24 @@ def _text(run, ctx, doc, eid, kind, write, tools, store, announced) -> bool:
     return True
 
 
+def _look(run, ctx, store, eid, kind, write, tools, announced) -> bool:
+    """A v2 story only (A14): D3 (a place) or R1v2 (a prop) when the entity
+    has no look yet; True when it has one afterwards. The look is written
+    before the image, which is drawn from it."""
+    doc = store.read_entity(ctx.story_id, kind, eid)
+    if doc.get("look"):
+        return True
+    ctx.cancel.check()
+    ctx.on_log(f"🗺 {doc['name']}: look")
+    try:
+        write(ctx, store, eid, tools=tools, announced=announced)
+    except StepFailed as exc:
+        # Regenerating the text writes the look again (``regenerate``).
+        run.fail(doc, "look", exc.reason, entities.target(kind, eid, "text"))
+        return False
+    return True
+
+
 def _image(run, ctx, store, doc, kind, eid, slot, make) -> None:
     ctx.cancel.check()
     ctx.on_log(f"🗺 {doc['name']}: {slot}")
@@ -335,9 +489,12 @@ def run(ctx, *, runner=None, time_fn=time.monotonic, sleep_fn=time.sleep, adapte
     run_ = _Run(ctx)
     announced = set()
     kwargs = tools.image_kwargs(ctx)
+    v2 = media_policy.is_v2(story)
 
     def fill_place(place, pid):
         if not _text(run_, ctx, place, pid, PLACES, write_place_text, tools, store, announced):
+            return
+        if v2 and not _look(run_, ctx, store, pid, PLACES, write_place_look, tools, announced):
             return
         place = store.read_entity(ctx.story_id, PLACES, pid)
         if not entities.has_file(store, ctx.story_id, PLACES, pid, place["time_variants"].get(MASTER_PLATE)):
@@ -346,6 +503,8 @@ def run(ctx, *, runner=None, time_fn=time.monotonic, sleep_fn=time.sleep, adapte
 
     def fill_prop(prop, rid):
         if not _text(run_, ctx, prop, rid, PROPS, write_prop_text, tools, store, announced):
+            return
+        if v2 and not _look(run_, ctx, store, rid, PROPS, write_prop_look, tools, announced):
             return
         prop = store.read_entity(ctx.story_id, PROPS, rid)
         if not entities.has_file(store, ctx.story_id, PROPS, rid, prop["image"]):
