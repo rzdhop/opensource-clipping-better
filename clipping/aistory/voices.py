@@ -159,7 +159,23 @@ def _chain_link(provider: str, voice_id: str) -> Link:
     raise VoiceError(f"{provider!r} is not a TTS provider this module knows how to build a chain link for.")
 
 
-def catalogue(language, *, env) -> list:
+# A v2 story's default locale per language (phase 7 stage 6c, A17): a bare
+# language prefix like "fr" matches both "fr-FR" and "fr-CA" (E1 finding 10
+# -- story B's mayor got an fr-CA voice in an fr-FR story), so a v2 request
+# keeps to one locale. ``schemas.LANGUAGES`` names only "fr"/"en" today; a
+# language with no entry here falls back to the bare prefix, matching the
+# legacy behaviour. Legacy (v2=False) is untouched -- byte-identical.
+_V2_LOCALE = {"fr": "fr-FR", "en": "en-US"}
+
+
+def _wanted_lang(language, v2) -> str:
+    language = (language or "").strip().lower()
+    if v2:
+        return _V2_LOCALE.get(language, language).lower()
+    return language
+
+
+def catalogue(language, *, env, v2=False) -> list:
     """Voices ``TTS_CHAIN`` can reach for *language*, in chain order.
 
     Every entry of ``voices.json`` for each link's provider, kept only when
@@ -168,7 +184,9 @@ def catalogue(language, *, env) -> list:
     (``tts.LOCAL_ENGINES``), Edge needs neither (it ships as a base
     dependency, never an extra). Filtered to *language* (``"fr"`` matches
     ``"fr-FR"``/``"fr-CA"``; a ``"multi"`` voice -- Gemini's prebuilt voices,
-    Chatterbox's zero-shot clone -- counts for every language).
+    Chatterbox's zero-shot clone -- counts for every language). With *v2*
+    True, kept to the story's default locale instead (:data:`_V2_LOCALE`):
+    ``"fr"`` then matches ``"fr-FR"`` only, never ``"fr-CA"``.
 
     *env* is the Settings overrides as saved (not yet merged with the process
     environment); this function merges them itself (``gating.merged_env``),
@@ -180,7 +198,7 @@ def catalogue(language, *, env) -> list:
     except ChainError:
         return []
 
-    wanted = (language or "").strip().lower()
+    wanted = _wanted_lang(language, v2)
     voices, seen = [], set()
     for link in chain:
         if link.provider == "edge":
@@ -264,7 +282,7 @@ def _preference(character) -> dict:
     return character.get("voice_hints") or character.get("voice") or {}
 
 
-def propose(characters, language, *, env, taken=(), on_log=print) -> dict:
+def propose(characters, language, *, env, taken=(), on_log=print, v2=False) -> dict:
     """One distinct voice per lead/support character; ``{char_id: Voice|None}``.
 
     *characters* is ordered leads -> support -> recurring -> guest, then
@@ -280,9 +298,11 @@ def propose(characters, language, *, env, taken=(), on_log=print) -> dict:
     *taken* is ``{(provider, voice_id)}`` already pinned by characters left
     out of *characters* (the cast step proposes only for the unpinned ones):
     those voices are never proposed fresh. *on_log* prints the two lines
-    (``print`` by default; a step hands its own log).
+    (``print`` by default; a step hands its own log). *v2* keeps the pool to
+    the story's default locale (:func:`catalogue`); legacy (default) is
+    unchanged.
     """
-    pool = catalogue(language, env=env)
+    pool = catalogue(language, env=env, v2=v2)
     ordered = sorted(
         characters,
         key=lambda c: (_ROLE_ORDER.get(c.get("role"), len(_ROLE_ORDER)), c.get("created_at") or "",
@@ -308,14 +328,52 @@ def propose(characters, language, *, env, taken=(), on_log=print) -> dict:
     return result
 
 
-def alternates(character, language, *, env, taken) -> list:
+def alternates(character, language, *, env, taken, v2=False) -> list:
     """Up to :data:`ALTERNATES_LIMIT` other voices for *character*, best
     first, excluding every voice in *taken* (the other lead/support
-    characters' pinned voices). Same scoring as :func:`propose`."""
+    characters' pinned voices). Same scoring as :func:`propose`. *v2* keeps
+    the pool to the story's default locale (:func:`catalogue`); legacy
+    (default) is unchanged."""
     excluded = set(taken or ())
-    pool = [voice for voice in catalogue(language, env=env) if _voice_key(voice) not in excluded]
+    pool = [voice for voice in catalogue(language, env=env, v2=v2) if _voice_key(voice) not in excluded]
     prefer = _preference(character)
     return _ranked(prefer, pool)[:ALTERNATES_LIMIT]
+
+
+# A character's BASE rate/pitch, read off a v2 dossier's own free-text
+# ``voice.patterns`` (D1's prose, schemas.CHARACTER_DOSSIER_SCHEMA) at cast
+# time (phase 7 stage 6c, BUILD item 4): the first keyword of either table
+# found in the text, case-insensitive, wins that axis -- a small map, not an
+# LLM call, so pinning stays deterministic and free. A legacy character has
+# no dossier at all (:func:`base_prosody` then returns ``(None, None)``,
+# exactly today's always-None rate/pitch).
+_PATTERN_RATE_KEYWORDS = (
+    ("fast", "+12%"), ("quick", "+12%"), ("rapid", "+12%"), ("hurried", "+10%"),
+    ("slow", "-12%"), ("deliberate", "-12%"), ("measured", "-8%"), ("unhurried", "-8%"),
+)
+_PATTERN_PITCH_KEYWORDS = (
+    ("deep", "-6Hz"), ("low", "-6Hz"), ("gravelly", "-4Hz"), ("baritone", "-6Hz"),
+    ("high", "+6Hz"), ("shrill", "+6Hz"), ("squeaky", "+6Hz"), ("piping", "+6Hz"),
+)
+
+
+def base_prosody(patterns) -> tuple:
+    """``(rate, pitch)`` -- each one of the keyword tables' own values or
+    ``None`` -- read off a dossier's ``voice.patterns`` text (*patterns*,
+    falsy for a legacy character or one with no dossier yet). Pure,
+    deterministic: the caller (the cast step's voice pin, part 4) pins the
+    result once; it is never re-derived per line."""
+    text = str(patterns or "").lower()
+
+    def _first(table):
+        for keyword, value in table:
+            # Word-boundary, not a bare substring: "slow" must never match
+            # "low" (pitch) off the "slow"/"low" (rate) overlap in the text.
+            if re.search(rf"\b{re.escape(keyword)}\b", text):
+                return value
+        return None
+
+    return _first(_PATTERN_RATE_KEYWORDS), _first(_PATTERN_PITCH_KEYWORDS)
 
 
 def pin(character, voice: Voice, *, rate=None, pitch=None) -> dict:
@@ -630,8 +688,59 @@ def _line_outputs(result, spoken):
     return audio[0], audio[1], sidecar, data
 
 
+# Per-emotion delta onto a line's voice (phase 7 stage 6c, BUILD item 4):
+# (rate_pct, pitch_hz), additive onto the voice's own base. Every other
+# ``schemas.EMOTIONS`` value (neutral, happy, scheming, tension, triumph)
+# gets no delta -- the voice's own base carries the whole line.
+_EMOTION_DELTA = {
+    "angry": (6, 2),
+    "sad": (-8, -3),
+    "fear": (8, 3),
+    "shocked": (5, 4),
+    "tender": (-5, -1),
+}
+
+# tts._rate_pitch's own clamp (phase 7 stage 6c): no combination of a
+# character's base and a line's emotion delta ever leaves this range.
+_RATE_CLAMP_PCT = 20
+_PITCH_CLAMP_HZ = 8
+
+
+def _pct(value) -> float:
+    return float(str(value).rstrip("%")) if value else 0.0
+
+
+def _hz(value) -> float:
+    return float(str(value).rstrip("Hz")) if value else 0.0
+
+
+def prosody_for(voice: dict, line: dict) -> tuple:
+    """``(rate, pitch)`` for *voice* speaking *line* -- each a
+    ``tts._rate_pitch``-shaped string (``"+10%"``/``"-5Hz"``) or ``None``
+    when the combined value is exactly 0, same as *voice* carrying no
+    rate/pitch at all. Pure: no I/O, no clock, the same *voice*/*line*
+    inputs always the same answer (phase 7 stage 6c, BUILD item 4).
+
+    The base is *voice*'s own ``rate``/``pitch`` (:func:`base_prosody`,
+    pinned once at cast time): a slow, deep voice stays slow and deep on
+    every line. *line*'s own ``emotion`` adds a fixed delta on top
+    (:data:`_EMOTION_DELTA`), the sum clamped to
+    :data:`_RATE_CLAMP_PCT`/:data:`_PITCH_CLAMP_HZ` so a strong base and a
+    strong emotion together never leave the range ``tts._rate_pitch``
+    accepts.
+    """
+    rate_pct = _pct(voice.get("rate"))
+    pitch_hz = _hz(voice.get("pitch"))
+    d_rate, d_pitch = _EMOTION_DELTA.get(line.get("emotion"), (0, 0))
+    rate_pct = max(-_RATE_CLAMP_PCT, min(_RATE_CLAMP_PCT, rate_pct + d_rate))
+    pitch_hz = max(-_PITCH_CLAMP_HZ, min(_PITCH_CLAMP_HZ, pitch_hz + d_pitch))
+    rate = f"{rate_pct:+.0f}%" if rate_pct else None
+    pitch = f"{pitch_hz:+.0f}Hz" if pitch_hz else None
+    return rate, pitch
+
+
 def synthesize_line(gates, *, voice, text, dest_for, on_log, cancel, step=MEASURE_STEP, adapters=None,
-                    transport=None, cache=None, take=None, direction=None) -> dict:
+                    transport=None, cache=None, take=None, direction=None, line=None, v2=False) -> dict:
     """*text* spoken by the pinned *voice* (a character's ``voice`` block,
     or the narrator's) through a single-link chain built from that voice
     ALONE (DEC-122: never another provider, never another voice, never
@@ -675,13 +784,24 @@ def synthesize_line(gates, *, voice, text, dest_for, on_log, cancel, step=MEASUR
     recorded, not applied (``providers.tts``). It is not a field of the
     cache's key: a regenerate asks it with its own take, and asks that take
     again only with the same note.
+
+    *line* and *v2* (phase 7 stage 6c): with both given -- *line* the
+    script line's own dict (its ``emotion`` read) and *v2* the story's
+    pipeline flag -- the rate/pitch sent is :func:`prosody_for`'s, not
+    *voice*'s own raw ``rate``/``pitch``. Either missing (the default), the
+    request is exactly what it always was: *voice*'s own ``rate``/``pitch``,
+    unchanged by this parameter pair.
     """
     label = voice_label(voice)
     if label is None:
         raise VoiceError("no voice is pinned.")
     link = _chain_link(voice["provider"], voice["voice_id"])
     spoken = _spoken_by(voice, link)
-    extra = {"rate": voice.get("rate"), "pitch": voice.get("pitch")}
+    if line is not None and v2:
+        rate, pitch = prosody_for(voice, line)
+    else:
+        rate, pitch = voice.get("rate"), voice.get("pitch")
+    extra = {"rate": rate, "pitch": pitch}
     if take is not None:
         extra["take"] = take
     if direction:

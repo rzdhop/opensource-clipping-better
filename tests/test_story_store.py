@@ -256,6 +256,16 @@ def test_a_new_story_has_every_field_as_a_draft(stories):
         assert doc[key] == [], key
 
 
+def test_a_v2_story_opens_with_the_narrator_on(stories):
+    """Phase 7 stage 6c: a story created on the v2 pipeline starts with the
+    narrator enabled (the human's CLARIFY answer 7); legacy (the default
+    generation profile, no ``pipeline`` key) keeps it off, as
+    ``test_a_new_story_has_every_field_as_a_draft`` already pins."""
+    doc = stories.create(language="en", generation_profile=defaults.quality_generation_profile(), now=NOW)
+    assert doc["generation_profile"]["pipeline"] == defaults.PIPELINE_V2
+    assert doc["narrator"] == {"enabled": True, "voice": None}
+
+
 def test_story_json_keeps_a_readable_field_order(stories, outputs):
     """Never sort_keys: a human reads story.json top to bottom."""
     doc = stories.create(language="fr", now=NOW)

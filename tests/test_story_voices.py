@@ -24,7 +24,7 @@ import pytest
 from clipping.aistory import schemas, voices
 from clipping.aistory.store import StoryStore
 from clipping.cancel import CancelToken
-from clipping.providers import tts
+from clipping.providers import generation, tts
 from clipping.providers.errors import ProviderError
 from clipping.providers.generation import GenRequest, GenResult
 from clipping.providers.registry import Link
@@ -551,3 +551,95 @@ def test_the_catalogue_senior_counts_as_elder():
     env = {"TTS_CHAIN": "edge/fr-FR-HenriNeural"}
     ranked = voices.alternates(senior_male, "fr", env=env, taken=())
     assert ranked[0].voice_id == "fr-CA-ThierryNeural"
+
+
+# ------------------------------------------------------ phase 7 stage 6c: v2 locale
+
+def test_v2_catalogue_keeps_to_the_default_locale(monkeypatch):
+    """E1 finding 10: a bare language prefix like "fr" matches both fr-FR
+    and fr-CA -- a v2 story keeps to its one default locale instead
+    (:data:`voices._V2_LOCALE`); legacy (v2=False, the default) is
+    untouched."""
+    monkeypatch.setenv("TTS_CHAIN", "edge/fr-FR-HenriNeural")
+    legacy = voices.catalogue("fr", env={})
+    assert any(v.lang == "fr-CA" for v in legacy)  # today's behaviour: both locales
+
+    v2 = voices.catalogue("fr", env={}, v2=True)
+    assert v2 and all(v.lang == "fr-FR" for v in v2)
+    assert not any(v.lang == "fr-CA" for v in v2)
+
+
+def test_v2_propose_gives_a_french_story_only_fr_fr_voices(monkeypatch):
+    monkeypatch.setenv("TTS_CHAIN", "edge/fr-FR-HenriNeural")
+    characters = [_char(f"char_{n}", role="lead", created_at=f"2026-09-26T10:00:0{n}+00:00") for n in range(3)]
+    result = voices.propose(characters, "fr", env={}, v2=True)
+    chosen = [result[c["char_id"]] for c in characters]
+    assert all(v is not None and v.lang == "fr-FR" for v in chosen)
+
+
+# --------------------------------------------------- phase 7 stage 6c: prosody
+
+def test_base_prosody_reads_the_dossiers_keyword_map():
+    assert voices.base_prosody(None) == (None, None)
+    assert voices.base_prosody("") == (None, None)
+    rate, pitch = voices.base_prosody("Speaks fast, with a deep, gravelly voice.")
+    assert rate == "+12%"
+    assert pitch == "-6Hz"
+    rate, pitch = voices.base_prosody("A slow, high-pitched drawl.")
+    assert rate == "-12%"
+    assert pitch == "+6Hz"
+
+
+def test_v2_line_prosody_legacy_request_identical(store, monkeypatch):
+    """phase 7 stage 6c, BUILD item 4: ``prosody_for`` combines the voice's
+    own base rate/pitch with a per-emotion delta, clamped to +-20%/+-8Hz;
+    ``synthesize_line`` only uses it with a *line* AND *v2* both given --
+    anything else (no line, or a legacy v2=False request) sends exactly the
+    voice's own raw rate/pitch, today's request, byte for byte."""
+    # Pure function: an angry line's delta on top of the voice's own base.
+    voice = {"provider": "edge", "voice_id": "fr-FR-HenriNeural", "rate": "+2%", "pitch": "-1Hz"}
+    line = {"line_id": "l1", "text": "Attention !", "emotion": "angry", "delivery": ""}
+    rate, pitch = voices.prosody_for(voice, line)
+    assert rate == "+8%"   # 2 + 6
+    assert pitch == "+1Hz"  # -1 + 2
+
+    # The clamp: an extreme base is never pushed past +-20% / +-8Hz by a delta.
+    hot_voice = {"provider": "edge", "voice_id": "fr-FR-HenriNeural", "rate": "+18%", "pitch": "+7Hz"}
+    rate, pitch = voices.prosody_for(hot_voice, {"emotion": "angry"})
+    assert rate == "+20%"
+    assert pitch == "+8Hz"
+
+    # No emotion delta at all (e.g. "neutral"): the voice's own base, unchanged.
+    rate, pitch = voices.prosody_for(voice, {"emotion": "neutral"})
+    assert rate == "+2%"
+    assert pitch == "-1Hz"
+
+    # synthesize_line: capture the request's extra instead of calling a
+    # provider (generation.run_generation_chain faked to refuse at once).
+    story_id = store.create(language="fr", seed_text="x", now=NOW)["story_id"]
+    gates = voices.LineGates(store, story_id, env={})
+    captured = []
+
+    def fake_chain(kind, chain, request, **kwargs):
+        captured.append(copy.copy(request))
+        raise generation.NoRunnableLink("no link reached", failures=[])
+
+    monkeypatch.setattr(voices.generation, "run_generation_chain", fake_chain)
+
+    def dest_for(ext):
+        return str(Path(store.story_dir(story_id)) / f"line.{ext}")
+
+    def speak(**extra):
+        with pytest.raises(voices.VoiceError):
+            voices.synthesize_line(gates, voice=voice, text=line["text"], dest_for=dest_for,
+                                   on_log=lambda l: None, cancel=CancelToken(), **extra)
+        return captured[-1].extra
+
+    # Legacy (neither line nor v2): the voice's own raw rate/pitch -- today's request.
+    assert speak() == {"rate": "+2%", "pitch": "-1Hz"}
+    # A line given but the story not v2: still untouched.
+    assert speak(line=line, v2=False) == {"rate": "+2%", "pitch": "-1Hz"}
+    # v2 but no line: still untouched (nothing to read an emotion off).
+    assert speak(v2=True) == {"rate": "+2%", "pitch": "-1Hz"}
+    # Both given: prosody_for's own combined rate/pitch.
+    assert speak(line=line, v2=True) == {"rate": "+8%", "pitch": "+1Hz"}

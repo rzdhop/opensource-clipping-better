@@ -399,7 +399,7 @@ def _chosen_voice(ctx, story, character, wanted, taken):
     provider, voice_id = wanted.get("provider"), wanted.get("voice_id")
     if not (isinstance(provider, str) and provider and isinstance(voice_id, str) and voice_id):
         raise StepFailed("A voice is {provider, voice_id} (and optionally rate, pitch).")
-    catalogue = voices.catalogue(story["language"], env=ctx.settings_env)
+    catalogue = voices.catalogue(story["language"], env=ctx.settings_env, v2=media_policy.is_v2(story))
     choice = next((v for v in catalogue if (v.provider, v.voice_id) == (provider, voice_id)), None)
     if choice is None:
         offered = ", ".join(f"{v.provider}/{v.voice_id}" for v in catalogue) or "none"
@@ -429,7 +429,8 @@ def _regenerate_voice(ctx, store, story, target, char_id, params, tools) -> dict
         excluded = set(taken)
         if current:
             excluded.add((current["provider"], current["voice_id"]))
-        others = voices.alternates(character, story["language"], env=ctx.settings_env, taken=excluded)
+        others = voices.alternates(character, story["language"], env=ctx.settings_env, taken=excluded,
+                                   v2=media_policy.is_v2(story))
         if not others:
             raise StepFailed(f"No other voice is available for {character['name']} on TTS_CHAIN in "
                              f"{story['language']}; add a TTS provider or pick a voice.")

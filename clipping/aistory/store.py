@@ -104,7 +104,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Callable, NamedTuple
 
-from . import defaults, schemas, series_memory, templates
+from . import defaults, media_policy, schemas, series_memory, templates
 
 STORY_ID_PATTERN = re.compile(r"^[0-9a-f]{12}$")
 
@@ -768,7 +768,10 @@ class StoryStore:
             # A v2 story starts on the v2 template (DEC-227); a legacy one as before.
             "episode_template_id": defaults.episode_template_for(profile),
             "generation_profile": profile,
-            "narrator": {"enabled": False, "voice": None},
+            # A v2 story opens with the narrator on (phase 7 stage 6c, the
+            # human's CLARIFY answer 7); legacy stays off as before. The cast
+            # step pins the narrator's voice once the profile is v2.
+            "narrator": {"enabled": media_policy.is_v2({"generation_profile": profile}), "voice": None},
             "approvals": approvals,
             "status": derive_status(approvals),
             "created_at": now,

@@ -45,7 +45,7 @@ from __future__ import annotations
 
 import os
 
-from .. import schemas, shots, timing, voices
+from .. import media_policy, schemas, shots, timing, voices
 from .. import store as store_mod
 from . import episode_common, llm_call
 from .episode_common import STORYBOARD_DOC
@@ -330,7 +330,7 @@ class LineMeasurement:
                 spoken = voices.synthesize_line(gates, voice=voice, text=line["text"], dest_for=dest_for,
                                                 on_log=ctx.on_log, cancel=ctx.cancel, step=self.measure_step,
                                                 adapters=self.tools.adapters, transport=self.tools.transport,
-                                                **extra)
+                                                line=line, v2=media_policy.is_v2(ec.story), **extra)
             except voices.VoiceError as exc:
                 reason = str(exc)
                 self.voice_refused(line, exc)

@@ -675,7 +675,7 @@ def _pin_voices(run, ctx, store, story) -> None:
     ctx.cancel.check()
     taken = {(doc["voice"]["provider"], doc["voice"]["voice_id"]) for doc in cast if doc["voice"]}
     proposal = voices.propose(unpinned, story["language"], env=ctx.settings_env, taken=taken,
-                              on_log=ctx.on_log)
+                              on_log=ctx.on_log, v2=media_policy.is_v2(story))
     for doc in unpinned:
         choice = proposal.get(doc["char_id"])
         if choice is None:
@@ -686,7 +686,12 @@ def _pin_voices(run, ctx, store, story) -> None:
         def pin(current, choice=choice):
             if current["voice"]:
                 return  # pinned meanwhile: kept
-            current["voice"] = voices.pin(current, choice)
+            # A v2 character's base rate/pitch, read off its dossier's own
+            # voice.patterns (phase 7 stage 6c); a legacy character has no
+            # dossier at all, so both come back None -- today's pin exactly.
+            patterns = (current.get("dossier") or {}).get("voice", {}).get("patterns")
+            rate, pitch = voices.base_prosody(patterns)
+            current["voice"] = voices.pin(current, choice, rate=rate, pitch=pitch)
             current["approved_at"] = None
             pinned.update(current["voice"])
 
@@ -701,6 +706,42 @@ def _pin_voices(run, ctx, store, story) -> None:
             label = f"{pinned['provider']}/{pinned['voice_id']}"
             run.voices[doc["char_id"]] = label
             ctx.on_log(f"👤 {doc['name']}: voice {label}")
+
+
+def _pin_narrator(run, ctx, store, story) -> None:
+    """Part 4b, a v2 story only (phase 7 stage 6c, the human's CLARIFY
+    answer 7): the narrator's voice, pinned once the narrator is enabled and
+    has none yet. Read fresh off the cast :func:`_pin_voices` just wrote, so
+    the narrator never lands on a voice a character just took -- proposed
+    with a lead/support role (``schemas.CAST_APPROVAL_ROLES``) so ``propose``
+    never silently reuses a taken voice for it (spec 11's "no two lead
+    characters share a voice" extended to the narrator here); with none left
+    unused, the pick is left to the human, same as an unpinned character."""
+    if not media_policy.is_v2(story) or not (story.get("narrator") or {}).get("enabled"):
+        return
+    if (story.get("narrator") or {}).get("voice"):
+        return
+    ctx.cancel.check()
+    cast = store.list_entities(ctx.story_id, CHARACTERS)
+    taken = {(doc["voice"]["provider"], doc["voice"]["voice_id"]) for doc in cast if doc["voice"]}
+    narrator_doc = {"char_id": "narrator", "role": "support", "created_at": "", "voice_hints": {}}
+    proposal = voices.propose([narrator_doc], story["language"], env=ctx.settings_env, taken=taken,
+                              on_log=ctx.on_log, v2=True)
+    choice = proposal.get("narrator")
+    if choice is None:
+        run.pick_voice.append("narrator")
+        return
+    pinned_voice = voices.pin(narrator_doc, choice)
+
+    def pin(doc):
+        if (doc["narrator"] or {}).get("voice"):
+            return  # pinned meanwhile: kept
+        doc["narrator"] = {**doc["narrator"], "voice": pinned_voice}
+
+    store.update(ctx.story_id, pin, now=llm_call.utc_now())
+    label = f"{pinned_voice['provider']}/{pinned_voice['voice_id']}"
+    run.voices["narrator"] = label
+    ctx.on_log(f"🗣️ narrator: voice {label}")
 
 
 def _samples(run, ctx, store, tools) -> None:
@@ -980,6 +1021,7 @@ def run(ctx, *, runner=None, time_fn=time.monotonic, sleep_fn=time.sleep, adapte
             ctx.on_log(f"ℹ️ {character['name']} was removed while the step ran; skipped.")
 
     _pin_voices(run_, ctx, store, story)
+    _pin_narrator(run_, ctx, store, story)
     _samples(run_, ctx, store, tools)
     _pace(run_, ctx, store, tools, budget)
 

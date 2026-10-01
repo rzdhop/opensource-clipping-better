@@ -617,17 +617,39 @@ def build_style(stories, story_id, params, *, now) -> dict:
             f"The style is locked (since {current['locked_at']}); it cannot change.",
         )
 
+    v2 = media_policy.is_v2(story)
+    # A draft stays on the same template/version takes the new overrides on
+    # top of its own; anything else is built fresh and its old overrides are
+    # discarded (the docstring above) -- the v2 subtitle default below only
+    # applies on a fresh build, so it never clobbers a user's own choice on
+    # an otherwise-unrelated edit (e.g. a palette tweak).
+    fresh = not (current is not None and current.get("template_id") == template_id
+                 and current.get("template_version") == template["version"])
+    if v2 and fresh:
+        # Two-line subtitles by default on a v2 story (phase 7 stage 6c, the
+        # human's CLARIFY answer 11); an explicit override in this same call
+        # wins (``setdefault``), and legacy keeps the template's own default.
+        overrides = dict(overrides)
+        overrides.setdefault("typography.subtitle_mode", "two_line")
+
     try:
-        if (current is not None and current.get("template_id") == template_id
-                and current.get("template_version") == template["version"]):
-            lock = stylelock.apply_overrides(current, overrides, now=now)
-        else:
+        if fresh:
             lock = stylelock.build_style_lock(template, overrides, now=now)
+        else:
+            lock = stylelock.apply_overrides(current, overrides, now=now)
     except stylelock.StyleLockError as exc:
         raise WorkflowError(
             INVALID,
             {"message": f"The style was refused: {exc.name}.", "errors": list(exc.errors)},
         ) from None
+
+    if v2:
+        # Not a user-facing override (CLARIFY answer 11's 150 ms floor has
+        # no entry in ``stylelock.OVERRIDABLE``): kept on every v2 build, so
+        # an edit to another override never silently drops it. Read by
+        # render/subtitles.py's word_pop_dialogue only when present (RC-M2:
+        # the golden fixture's STYLE_LOCK has none, so it stays untouched).
+        lock["typography"]["word_min_card_ms"] = 150
 
     written = write_doc(stories, story_id, STYLE_LOCK_DOC, lock, now=now,
                         validator=schemas.style_lock_errors)
@@ -1386,7 +1408,8 @@ def character_voices(stories, story, char_id, *, env) -> dict:
     taken = set(_pinned_by_others(stories, story_id, char_id))
     pinned = {"provider": doc["voice"]["provider"], "voice_id": doc["voice"]["voice_id"]} if doc["voice"] else None
     exclude_own = {(pinned["provider"], pinned["voice_id"])} if pinned else set()
-    pool = voices.alternates(doc, story["language"], env=env, taken=taken | exclude_own)
+    pool = voices.alternates(doc, story["language"], env=env, taken=taken | exclude_own,
+                             v2=media_policy.is_v2(story))
     return {
         "pinned": pinned,
         "alternates": [_voice_json(voice) for voice in pool],
@@ -1417,7 +1440,7 @@ def check_voice_choice(stories, story, char_id, voice, *, env) -> dict:
         if value is not None and (not isinstance(value, str) or re.fullmatch(pattern, value) is None):
             raise WorkflowError(INVALID, f"{key} {value!r} is not like {example!r}.")
     language = story["language"]
-    catalogue = voices.catalogue(language, env=env)
+    catalogue = voices.catalogue(language, env=env, v2=media_policy.is_v2(story))
     if not any((v.provider, v.voice_id) == (provider, voice_id) for v in catalogue):
         offered = ", ".join(f"{v.provider}/{v.voice_id}" for v in catalogue) or "none"
         raise WorkflowError(INVALID, (f"{provider}/{voice_id} is not a {language} voice TTS_CHAIN can reach; "

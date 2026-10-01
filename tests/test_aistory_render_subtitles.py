@@ -207,6 +207,28 @@ def test_word_pop_absolute_start_offset_from_the_lines_own_start_s():
     assert first_start == "0:00:10.00"
 
 
+def test_word_pop_floor_only_when_lock_says():
+    """phase 7 stage 6c: ``typography.word_min_card_ms`` stretches a card
+    too short to read to the floor; absent (every shipped template, every
+    legacy lock, RC-M2's golden fixture), today's output is unchanged."""
+    lines = _one_line("hi there", duration_s=0.56)
+    words = {"l1": [{"word": "hi", "start": 0.0, "end": 0.5}, {"word": "there", "start": 0.5, "end": 0.56}]}
+
+    _styles, events, _approx = sub.word_pop_dialogue(lines, word_timings=words, typography=TYPOGRAPHY)
+    assert len(events) == 2
+    assert (events[1].split(",")[1], events[1].split(",")[2]) == ("0:00:00.50", "0:00:00.56")  # untouched: 60 ms
+
+    v2_typography = dict(TYPOGRAPHY, word_min_card_ms=150)
+    _styles2, events2, _approx2 = sub.word_pop_dialogue(lines, word_timings=words, typography=v2_typography)
+    assert len(events2) == 2
+    first_start, first_end = events2[0].split(",")[1], events2[0].split(",")[2]
+    second_start, second_end = events2[1].split(",")[1], events2[1].split(",")[2]
+    assert (first_start, first_end) == ("0:00:00.00", "0:00:00.50")  # already >= the floor: untouched
+    assert second_start == "0:00:00.50"
+    assert second_end == "0:00:00.65"  # 60 ms stretched up to the 150 ms floor
+    assert second_start == first_end  # touching, never overlapping
+
+
 # ======================================================== 5. two_line
 
 def test_two_line_one_style_per_speaker():

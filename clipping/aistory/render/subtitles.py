@@ -525,12 +525,57 @@ def merge_timeline_lines(timeline: dict, script: dict) -> list:
 
 # ------------------------------------------------------------------ word_pop
 
+def _apply_word_card_floor(spans: list, min_card_s: float) -> list:
+    """*spans* (:func:`_line_word_spans`'s own shape: chronological, never
+    overlapping) with every card stretched to at least *min_card_s* seconds
+    -- phase 7 stage 6c's ``typography.word_min_card_ms``, the caller's to
+    read and convert.
+
+    A card too short to reach the floor on its own is MERGED with the next
+    card(s) -- their text joined by a space, becoming one Dialogue event --
+    until the combined span reaches the floor or there is nothing left to
+    merge with. Chosen over shifting the next card's start: a shift would
+    drift every later word in the line forward, compounding across a long
+    run of short words and potentially past the line's own end; a merge
+    only ever uses time the short cards already had between them. Every
+    merged card's new end is one of the original spans' own end (never
+    invented), so two cards never overlap; only the very last card of the
+    line -- nothing left to merge with -- is stretched past its own
+    original end.
+    """
+    if min_card_s <= 0 or not spans:
+        return list(spans)
+    result = []
+    i, n = 0, len(spans)
+    while i < n:
+        text, start, end = spans[i]
+        j = i
+        while end - start < min_card_s and j + 1 < n:
+            j += 1
+            next_text, _next_start, next_end = spans[j]
+            text = f"{text} {next_text}"
+            end = next_end
+        if end - start < min_card_s:
+            end = start + min_card_s  # the line's last card(s): nothing follows to overlap
+        result.append((text, start, end))
+        i = j + 1
+    return result
+
+
 def word_pop_dialogue(lines: list, *, word_timings=None, typography: dict) -> tuple:
     """``(style_lines, event_lines, approx_by_line)`` for ``subtitle_mode
     == "word_pop"`` (module constants for the exact numbers): one
     uppercase Dialogue event per word, each visible for its own span
     (:func:`_line_word_spans`), fixed ``\\an5\\pos(540,1488)`` (77.5 % of
-    height), and the pop tag verbatim."""
+    height), and the pop tag verbatim.
+
+    When *typography* carries ``word_min_card_ms`` (a v2 story's style lock
+    only, phase 7 stage 6c), every card is stretched to at least that many
+    milliseconds (:func:`_apply_word_card_floor`) before the Dialogue events
+    are built. Absent (every shipped template, every legacy lock, and
+    render/golden.py's STYLE_LOCK -- RC-M2), nothing here changes: byte-for-
+    byte the same output as before this key existed.
+    """
     style_lines = [_style_line(
         WORD_POP_STYLE_NAME, typography["font_family"], WORD_POP_FONT_SIZE,
         WORD_POP_PRIMARY_HEX, WORD_POP_OUTLINE_HEX,
@@ -539,11 +584,15 @@ def word_pop_dialogue(lines: list, *, word_timings=None, typography: dict) -> tu
     event_lines = []
     approx_by_line = {}
     word_timings = word_timings or {}
+    min_card_ms = typography.get("word_min_card_ms")
+    min_card_s = min_card_ms / 1000.0 if min_card_ms else 0.0
 
     override = f"{{\\an5\\pos({_CENTER_X},{WORD_POP_Y}){WORD_POP_POP_TAG}}}"
 
     for line in lines:
         spans, is_approx = _line_word_spans(line["text"], line["duration_s"], word_timings.get(line["line_id"]))
+        if min_card_s:
+            spans = _apply_word_card_floor(spans, min_card_s)
         approx_by_line[line["line_id"]] = is_approx
         for word_text, off_start, off_end in spans:
             start_tc, end_tc = event_time_pair(line["start_s"] + off_start, line["start_s"] + off_end)
