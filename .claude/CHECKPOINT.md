@@ -1,4 +1,25 @@
-## CURRENT STATE — AI Story **phase 6 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–12 **done**; stage 13 (live walk) **mostly done**; next: **stage 13b** (still stretch), then finish 13, then 14 — paused 07:25 UTC for a handoff, **RESUMED 2026-10-01 in a new session**
+## CURRENT STATE — AI Story **phase 6 DONE** (2026-10-01). Next: **phase 7 = the quality overhaul** (start prompt: `.claude/plans/ai-story/15-phase-7-quality-overhaul.md` §8)
+- **Close-out (2026-10-01):**
+  - **Stages 0–14 and 13b are done** (ledger below).
+  - **The human's acknowledgement of walk step 12:** "Close phase 6 now", which accepts the Tier-2 substitute:
+    local ComfyUI is not run (A-035/A-104), Tier 3 is proven by tests only, and Kling ran instead of Veo
+    (DEC-218, A-103 open).
+  - **The watch's verdict** (T2-P6-F2…F5, DEC-219) and the audit's defects T2-P6-F6 (raw tags in the clip prompt)
+    and T2-P6-F7 (name stripping) **all move to phase 7**, by the human's call. Phase 6's code ships as it is.
+  - **Deployed:** `main` = `efd5fa4` (13b + the stt/broll and transport side tasks) at 0 jobs. After `efd5fa4`, only
+    `.claude/` and `docs/` changed, so no restart was needed.
+  - **Pushed:** see the close line in the action log for the final hashes and CI.
+  - **Paid spend in phase 6:** booked $0.32. fal's export billed $0.272634 (the A-071 probe was not billed: A-109).
+    `allow_paid` is off; caps 1/3/10; no `API_TOKEN`.
+  - **Live stories:** all kept. Four non-9:16 episodes were re-rendered at $0, with backups in
+    `/home/ubuntu/backups/ai-story-phase-6/before-13b/`.
+  - **The side-task branches** `Feature/musing-lamport-e6a02a` and `Feature/silly-almeida-f5cda1` are merged here.
+    Their worktrees can be removed by the human. `Feature/eager-chaplygin-e0a0a3` (09-18) is stale and unmerged.
+  - **Follow-ups** (not quality, so not in phase 7 unless its plan argues for one): see "Follow-ups collected" in
+    the phase-6 notes below, plus the Groq 1010 User-Agent block and the near-9:16 SAR edge (DEC-217).
+
+## Phase 6 — working notes (history). Original title: AI Story phase 6 IN PROGRESS
+
 - **In-progress header** (keep current):
   - **Current phase:** IMPLEMENT. EXPLORE/CLARIFY/PLAN were done 2026-09-30 in a session run in parallel with phase 5's
     close: three maps, two rounds of questions, an Opus design. The human approved the plan.
@@ -489,9 +510,9 @@
 | 10 | Tier-3 native audio, tests only [Opus] | done |
 | 11 | API and CLI [Opus, escalated from Sonnet] | done |
 | 12 | dashboard [Sonnet] | done |
-| 13 | deploy and the Tier-2 live walk (≤ $0.55) [Opus] | in progress: steps 2–9, 11 done ($0.32); 10 and 12 wait for the human; re-render after 13b |
+| 13 | deploy and the Tier-2 live walk (≤ $0.55) [Opus] | done: steps 2–12 ($0.32 booked, $0.27 billed); the human's verdict → phase 7 |
 | 13b | still path: cover-crop non-9:16 images (pre-existing stretch; the human: fix now) [Opus] | done (`3841a1d`; Tier-1 local 6635/1, CI env 5841/761) |
-| 14 | docs and decisions [Sonnet] | — |
+| 14 | docs and decisions [Sonnet] | done (`35c7eb0`; DEC-200…219, A-104…109) |
 
 ### Regression contract (phase 6)
 | ID | Must keep working | Proven by |

@@ -89,13 +89,13 @@ budget and every free call counted against its daily limit.
   re-edit test spent $0.03 on fal and its re-render matched the dry run (DEC-194).
 
 ## Next, in order
-1. **Phase 6 close** — Tier 2 (I2V clips) and Tier 3 (native audio, opt-in per shot) now exist, gated by each
+1. **Phase 6 — DONE (2026-10-01).** Tier 2 (I2V clips) and Tier 3 (native audio, opt-in per shot) now exist, gated by each
    story's own tier/route, behind the same `allow_paid` switch and per-episode/daily/per-story caps as every other
    paid call. Video runs hosted (fal seedance/ltx-2.3/kling, Gemini Veo) or on a local ComfyUI; local video is
    built but **unverified live** — no GPU exists on this deployment, so it has only run against a fake server.
    One image provider and one video provider now stick per episode, offered a switch rather than silently mixed.
-   Paid LLM calls are estimated, capped and booked too (OpenRouter itself stays unfunded by choice). Remaining
-   before close: the live walk's billing comparison, the human's final phone watch, and the merge to `main`.
+   Paid LLM calls are estimated, capped and booked too (OpenRouter itself stays unfunded by choice). The live walk
+   booked $0.32 (fal billed $0.27); the human's phone watch judged the output not yet good enough, which is phase 7.
 2. **Phase 7 — quality overhaul** (DEC-219, the human's verdict after phase 6's phone watch): every shot animated,
    quality image models for characters, places and props (never cheap or free image AI), billed APIs strongly
    recommended when the host cannot run good models (this VPS has no GPU), prompts with real context, and an
