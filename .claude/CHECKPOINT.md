@@ -4,15 +4,14 @@
   - **Current phase:** IMPLEMENT. EXPLORE (E1–E5), CLARIFY (11 answers) and PLAN (Opus design, stages 1–8) were done on
     2026-10-01 in one session; the human approved the plan with its three go-items (hook 3–6 s; keyframes on
     seedream-4.5-edit with nano-banana-2-lite fallback; ≈ $1.73 per episode under the $2 cap).
-  - **Current stage:** 2c DONE. **Next action:** W-mid — the free steps of a new v2 story run from the worktree with
-    the driver `scratchpad/walk7/walk7.py` into `outputs-walk7/` (git-excluded; no live story touched, nothing
-    deployed); then show the CLI's own estimate for the paid part and wait for the human's go.
-  - **Test selection (DEC-234, the human 2026-10-01):** per stage, run only the new/edited tests, the test files that
-    import or name a changed module, and the RC guards of the touched areas, in both envs; push after every stage so
-    CI runs the full suite; one full local run before merging to main.
-  - **Tier-1 hygiene:** never keep `web/dashboard/dist/` in the worktree during Tier-1: with a real build present 15
-    auth/clip-serving tests fail (pre-existing interaction, follow-up). The 2a build is kept in the scratchpad
-    (`dashboard-dist-2a`). `node_modules` (npm ci) stays: it lets 8 more tests run, all green.
+  - **Current stage (2026-10-01 evening):** stages 1, 2a–2d, 3a–3d, 4, W-mid, 5a, 5b DONE and pushed (head e1d459f +
+    checkpoints). **In progress:** 5c (context builder, Opus agent). **Next:** 5d (continuity ledger), 6a (J1 judge,
+    duplicate check, hook text, hard length gate, fill pass), 6b (J2 keyframe judge + keyframe approval), 6c (narrator,
+    subtitles floor, prosody, fr-FR locale), 7 (hardware advice, dashboard incl. the WIZARD DEFECT: the new-story form
+    always sends a v1 profile, so dashboard stories never get v2; PATCH for look/dossier/knowledge), 8 (docs, close,
+    acceptance walk). Scopes for 6–7 in the scratchpad (`stage6-7-scope.md`), 5b/5c (`stage5-scope.md`).
+  - **Walk story:** `782ee78899b0` "L'Héritage du verger" in `outputs-walk7/` (git-excluded), run in the container
+    from the frozen worktree `.claude/worktrees/walk7-code` via `scratchpad/walk7/walk7.py`; W-mid spent $1.38.
   - **Funding (DEC-235, the human 2026-10-01):** fal only; no money on the Gemini API (a Gemini app subscription does
     not fund it). Stage 2c (after stage 4) moves sheets/plates/props to fal Seedream 4.5 (text-to-image + edit).
   - **The human must, before W-mid:** set the caps to 2/6/20 in Settings (saved 1/3/10 override the new defaults) and
