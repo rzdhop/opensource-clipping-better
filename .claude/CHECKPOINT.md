@@ -1,11 +1,31 @@
-## CURRENT STATE — AI Story **phase 6 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–9 **done**; next: **stage 10**
+## CURRENT STATE — AI Story **phase 6 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–10 **done**; next: **stage 11**
 - **In-progress header** (keep current):
   - **Current phase:** IMPLEMENT. EXPLORE/CLARIFY/PLAN were done 2026-09-30 in a session run in parallel with phase 5's
     close: three maps, two rounds of questions, an Opus design. The human approved the plan.
   - **Plan:** `.claude/plans/ai-story/14-phase-6-plan.md` (**APPROVED 2026-09-30**; copy at
     `~/.claude/plans/ai-story-phase-6-plan.md`). Brief: `.claude/plans/ai-story/07-phase-6-video-tiers-local.md`.
-  - **Current stage:** 10 — Tier-3 native audio, tests only [Opus].
-  - **Next action:** dispatch stage 10, then Tier-1 in both environments, then commit.
+  - **Current stage:** 11 — API and CLI. **Escalated Sonnet → Opus**: it now also carries the video-link switch
+    (data mutation), the clip refusal as a 409, and the paid estimates (the route preview, fast-track video units).
+  - **Next action:** dispatch stage 11, then Tier-1 in both environments, then commit.
+  - **Stage 10 notes for stages 12–14:**
+    - **When.** Tier 3 with an effective `keep_native_audio` and a current clip that has a sound track.
+      `clips.clip_has_audio` reads the mp4 boxes in pure Python and starts no process.
+    - **Mix.** The clip's audio joins the A stage as a `clip_audio` stem: `amovie` + `atrim` to the shot's samples +
+      10 ms fades + `adelay` to the shot's first frame. That shot's TTS lines are left out. Ducking is unchanged
+      (the sidechain is the TTS lines); the video stage keeps `-an`.
+    - **Labels.** Manifest role `clip_audio`, shot mode `video_native_audio`.
+    - **No sound track.** The shot renders as tier 2, keeping its lines, with one printed note.
+    - **Measured.** Onset 1.506 s against a 1.500 s shot start; the shot's own line tones 0.0; the trim proved.
+    - **Unverified live:** real Veo/LTX audio, lip-sync, and the native audio's loudness against the TTS.
+    - **FINDING (task chip "Investigate the music bed cut short on ffmpeg 7.1.5"):** on the app image's ffmpeg
+      7.1.5, an mp4 as an `-i` input of the A stage cut the bgm stem short in 10 of 12 runs. `amovie` avoids it
+      (0 of 20). Once in about 76 plain tier-2 runs, the bed was cut too, and it could not be reproduced. **It may
+      affect live tier-1 renders → separate investigation.**
+    - **Follow-ups:**
+      - `amovie` (and `movie`) are missing from `REQUIRED_FILTERS`;
+      - a clip whose sound is shorter than its shot loses its fade-out;
+      - seedance, the cheapest default link, carries no audio, so tier-3 shots on it always fall back, and the
+        estimate does not warn (stage 12 UI hint / stage 14 docs).
   - **Stage 9 notes for stages 10, 11, 12, 13 and 14:**
     - **Tier ≥ 2 only.** `steps/render.py` `shot_clips()` fills `inputs.videos`/`keep_still`/`filled`; tier 1 gives
       exactly today's inputs (guard pinned; all 9 live stories are tier 1).
@@ -284,8 +304,8 @@
 | 7 | clip documents and the estimate [Opus] | done |
 | 8 | the video phase and `shot:…:video` [Opus] — **RISKIEST** | done |
 | 9 | renderer: clips, hold, `fill_failed_with_motion`, Tier-2 golden [Opus] | done |
-| 10 | Tier-3 native audio, tests only [Opus] | next |
-| 11 | API and CLI [Sonnet] | — |
+| 10 | Tier-3 native audio, tests only [Opus] | done |
+| 11 | API and CLI [Opus, escalated from Sonnet] | next |
 | 12 | dashboard [Sonnet] | — |
 | 13 | deploy and the Tier-2 live walk (≤ $0.55) [Opus] | — |
 | 14 | docs and decisions [Sonnet] | — |

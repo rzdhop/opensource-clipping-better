@@ -28,7 +28,9 @@ keys need, and hands the plan to ``runner.run_render``.
 - ``E`` (``end_card``) -- only under ``cut_to_black``:
   ``filtergraph.end_card_argv`` over ``end_card.ass``.
 - ``A`` (``audio_mix``) -- ``filtergraph.audio_mix_argv`` -> ``mix.wav`` and
-  ``stems/``.
+  ``stems/``; at tier 3 a shot that keeps its clip's sound (the inputs'
+  ``native_audio``, phase 6 stage 10) gives it one more stem there, in place
+  of its lines, and is labelled ``video_native_audio``.
 - ``L1`` (``loudness_measure``) -- ``loudness.measure_cmd(mix.wav,
   target=profiles.LOUDNORM_TARGET)``; the runner parses its stderr into
   ``loudness_mix.json``.
@@ -225,7 +227,13 @@ def build_render_plan(*, script: dict, storyboard: dict, assets: dict, style_loc
       place of the storyboard's own -- and ``filled[shot_id]``: the shots
       whose clip failed, went stale or is still generating, rendered with
       Tier-1 motion (``motion_fill``). Without ``keep_still`` the storyboard's
-      flag is read and no shot is labelled kept still (tier 1).
+      flag is read and no shot is labelled kept still (tier 1). At tier 3
+      (phase 6 stage 10, DEC-201) also ``native_audio[shot_id]``: shots cut
+      from their clip whose clip's sound is heard in place of the storyboard
+      shot's ``lines`` (``video_native_audio``; the clip staged again as the
+      A stage's ``clip_audio`` input, ``filtergraph.audio_mix_argv``'s
+      *native_audio*). Without it, no clip's sound is ever read (tiers 1
+      and 2: ``tier2_clip_argv`` keeps ``-an``).
     - *fill_failed_with_motion*: the render step's param, recorded in the
       plan's ``params`` only when it is on.
     - *ffmpeg*: ``runner.preflight``'s ``{"version", "machine"}``.
@@ -349,6 +357,9 @@ def _build(*, script, storyboard, assets, style_lock, template, story, ep, input
     # whose clip is filled with motion; tier 1 hands neither.
     keep_still_of = inputs.get("keep_still")
     filled = set(inputs.get("filled") or ())
+    # tier 3 (phase 6 stage 10): the shots whose clip's sound is heard in
+    # place of their lines; tiers 1 and 2 hand none.
+    native = list(inputs.get("native_audio") or ())
     stages = []
     shot_outputs = {}
     shot_modes = {}
@@ -364,7 +375,7 @@ def _build(*, script, storyboard, assets, style_lock, template, story, ep, input
             rel = add_input("shot", shot_id, video_inputs[shot_id])
             argv0 = filtergraph.tier2_clip_argv(rel, tl_shot, shot_profile, _OUT_TOKEN)
             input_shas = {rel: video_inputs[shot_id]["sha256"]}
-            shot_modes[shot_id] = "video"
+            shot_modes[shot_id] = "video_native_audio" if shot_id in native else "video"
         else:
             if shot_id not in shot_inputs:
                 raise PlanError(f"shot {shot_id!r} has no image")
@@ -412,6 +423,18 @@ def _build(*, script, storyboard, assets, style_lock, template, story, ep, input
             raise PlanError(f"line {line_id!r} has no audio")
         line_inputs[line_id] = add_input("line", line_id, line_files[line_id])
 
+    # tier 3: each native shot's clip, staged again (the same file, the same
+    # name) as the mix's input, heard in place of the storyboard shot's lines
+    not_cut = [shot_id for shot_id in native if shot_modes.get(shot_id) != "video_native_audio"]
+    if not_cut:
+        raise PlanError(f"shot(s) {not_cut} keep their clip's sound but are not cut from a clip")
+    native_audio = {}
+    for tl_shot in timeline["shots"]:
+        shot_id = tl_shot["shot_id"]
+        if shot_id in native:
+            native_audio[shot_id] = {"input": add_input("clip_audio", shot_id, video_inputs[shot_id]),
+                                     "lines": list(board_shots[shot_id].get("lines") or [])}
+
     # SFX: the cues the assets step resolved; a missing one is skipped and
     # reported (spec 11), never a failure.
     sfx_files = inputs.get("sfx") or {}
@@ -440,9 +463,11 @@ def _build(*, script, storyboard, assets, style_lock, template, story, ep, input
             raise PlanError(f"the BGM track {bgm_doc['file']!r} was not given")
         bgm_input = add_input("bgm", None, inputs["bgm"])
 
-    stages.append(_stage("A", "audio_mix", filtergraph.audio_mix_argv(
-        timeline, line_inputs=line_inputs, sfx_inputs=sfx_inputs, bgm_input=bgm_input, ending=ending,
-        out_rel=MIX_REL, stems_rel=dict(STEMS_REL)), MIX_REL))
+    mix_args = {"line_inputs": line_inputs, "sfx_inputs": sfx_inputs, "bgm_input": bgm_input, "ending": ending,
+                "out_rel": MIX_REL, "stems_rel": dict(STEMS_REL)}
+    if native_audio:
+        mix_args["native_audio"] = native_audio
+    stages.append(_stage("A", "audio_mix", filtergraph.audio_mix_argv(timeline, **mix_args), MIX_REL))
 
     # L1: measure the mix
     stages.append(_stage("L1", "loudness_measure", loudness.measure_cmd(MIX_REL, target=profiles.LOUDNORM_TARGET),

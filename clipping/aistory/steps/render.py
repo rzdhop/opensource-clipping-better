@@ -42,6 +42,16 @@ target; only Continue for one still generating); with
 manifest's ``shot_modes`` (``schemas.RENDER_SHOT_MODES``) records which shot
 got what, whenever one is not plain motion.
 
+**Native audio** (phase 6 stage 10, DEC-201): a model's own sound is
+discarded at tier 2 -- dialogue comes from our TTS, for voice consistency --
+and kept only at tier 3, for a shot cut from its current clip whose
+effective flags keep it (``keep_native_audio``) and whose clip has a sound
+track (``clips.clip_has_audio``, the file's own boxes): that sound is a stem
+of the audio mix at the shot's first frame, heard in place of the shot's
+lines (``video_native_audio``); the subtitles and the ducking still follow
+every line's TTS timing. A clip with no sound track leaves its shot as at
+tier 2, its lines spoken, and the feed says so.
+
 **The render** (``render/plan.py``, ``render/runner.py``): the plan is
 built from the episode's documents and the files as they are now -- each
 shot's image (``assets/shots``), each line's audio and the words of its
@@ -258,23 +268,39 @@ def clip_refusal(ec, blocked) -> str:
             f"on to give {them} Tier-1 motion instead.")
 
 
+def silent_clip_note(shot) -> str:
+    """The feed's note for a tier-3 shot that keeps its native audio but
+    whose clip has no sound track: rendered as at tier 2, its lines spoken
+    (never a line silenced without a word)."""
+    link = (shot["assets"].get("clip") or {}).get("link") or "its link"
+    return (f"ℹ️ Shot {shot['shot_id']} keeps its native audio, but its clip (from {link}) has no sound track: "
+            "it is rendered as at tier 2, its lines spoken by their voices.")
+
+
 def shot_clips(ec, script, board, assets_doc, *, fill_failed=False):
     """What each shot is cut from (module docstring, "Clips"), or None at
     tier 1 -- the render reads no clip there::
 
         {"videos": {shot_id: file record of its current clip},
-         "keep_still": {shot_id: effective flag}, "filled": [shot ids]}
+         "keep_still": {shot_id: effective flag}, "filled": [shot ids],
+         "native_audio": [shot ids], "notes": [sentences]}
 
     ``filled``: the shots not kept still whose clip record is not current,
     rendered with Tier-1 motion -- only with *fill_failed*; without it they
-    refuse the render (``StepFailed``, :func:`clip_refusal`). Reads the
-    storyboard's clip records, ``assets.json``'s overrides and links, the
-    shots' images (hashed) and the generation journal; starts nothing."""
+    refuse the render (``StepFailed``, :func:`clip_refusal`).
+    ``native_audio`` (tier 3 only, DEC-201): the shots cut from their clip
+    whose effective flags keep its native audio and whose clip has a sound
+    track (``clips.clip_has_audio``) -- heard in place of their lines; a
+    clip with none leaves its shot as at tier 2, with a note
+    (:func:`silent_clip_note`) in ``notes``. Reads the storyboard's clip
+    records, ``assets.json``'s overrides and links, the shots' images
+    (hashed), the clips' boxes and the generation journal; starts
+    nothing."""
     tier = clips.tier_of(ec)
     if tier < 2:
         return None
     link = (sticky_link.recorded(assets_doc, sticky_link.VIDEO) or {}).get("link")
-    videos, keep_still, blocked = {}, {}, []
+    videos, keep_still, blocked, native, notes = {}, {}, [], [], []
     for shot in board["shots"]:
         shot_id = shot["shot_id"]
         flags = clips.shot_flags(shot, assets_doc)
@@ -285,12 +311,19 @@ def shot_clips(ec, script, board, assets_doc, *, fill_failed=False):
         state = clips.clip_state(ec, shot, script, link=link, tier=tier, flags=flags,
                                  image_sha=assets_step._sha256_file(image) if image is not None else None)
         if state == "current":
-            videos[shot_id] = runner_mod.file_record(clips.shot_clip_path(ec, shot), shot["assets"]["video"])
+            path = clips.shot_clip_path(ec, shot)
+            videos[shot_id] = runner_mod.file_record(path, shot["assets"]["video"])
+            if tier == 3 and flags["keep_native_audio"]:
+                if clips.clip_has_audio(path):
+                    native.append(shot_id)
+                else:
+                    notes.append(silent_clip_note(shot))
         else:
             blocked.append((shot, state))
     if blocked and not fill_failed:
         raise StepFailed(clip_refusal(ec, blocked))
-    return {"videos": videos, "keep_still": keep_still, "filled": [shot["shot_id"] for shot, _state in blocked]}
+    return {"videos": videos, "keep_still": keep_still, "filled": [shot["shot_id"] for shot, _state in blocked],
+            "native_audio": native, "notes": notes}
 
 
 # ------------------------------------------------------------------- inputs
@@ -360,6 +393,8 @@ def render_inputs(ec, script, board, assets_doc, *, custom_fonts_dir=None, fill_
                 if shot_clips_now is _RESOLVE else shot_clips_now)
     if resolved is not None:
         inputs.update(videos=resolved["videos"], keep_still=resolved["keep_still"], filled=resolved["filled"])
+        if resolved.get("native_audio"):
+            inputs["native_audio"] = list(resolved["native_audio"])
     return inputs
 
 
@@ -774,6 +809,8 @@ def render_episode(ctx, ec, params, *, step=STEP, profile="final", run_process=s
     fill = bool(params.get(FILL_PARAM))
     # Tier >= 2: a clip that is not current refuses before any process.
     resolved = shot_clips(ec, script, board, assets_doc, fill_failed=fill)
+    for note in (resolved or {}).get("notes") or ():
+        ctx.on_log(note)
     ctx.cancel.check()
 
     try:

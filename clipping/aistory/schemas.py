@@ -2765,22 +2765,27 @@ RENDER_STAGE_KINDS = (
 RENDER_STAGE_STATES = ("running", "done", "failed", "cancelled", "cached")
 # Only these stages' outputs are kept in render/cache/ and reused.
 RENDER_CACHED_KINDS = ("shot", "end_card")
-RENDER_INPUT_ROLES = ("shot", "line", "sfx", "bgm", "overlay")
+# Phase 6 stage 10: ``clip_audio`` -- a tier-3 shot's clip, staged again as
+# the audio mix's input, its sound kept in place of the shot's lines.
+RENDER_INPUT_ROLES = ("shot", "line", "sfx", "bgm", "overlay", "clip_audio")
 # What a shot was cut from at tier >= 2 (phase 6 stage 9): its own clip
 # (``video``), or its image with Tier-1 motion -- plain (``motion``: tier 1,
 # or no clip was planned for it), because its effective flags keep it still
 # (``motion_keep_still``), or in place of a clip that failed, went stale or is
 # still generating, by the render param ``fill_failed_with_motion``
 # (``motion_fill``). The render step's own param name is
-# ``RENDER_FILL_PARAM``.
-RENDER_SHOT_MODES = ("video", "motion", "motion_keep_still", "motion_fill")
+# ``RENDER_FILL_PARAM``. Phase 6 stage 10 (DEC-201): at tier 3, its own clip
+# with the clip's sound heard in place of the shot's lines
+# (``video_native_audio``).
+RENDER_SHOT_MODES = ("video", "motion", "motion_keep_still", "motion_fill", "video_native_audio")
 RENDER_FILL_PARAM = "fill_failed_with_motion"
 RENDER_STAGE_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_:.-]{0,39}$"
 STDERR_TAIL_MAX = 4000
 
 _RENDER_INPUT_SCHEMA = _document({
     "role": {"type": "string", "enum": list(RENDER_INPUT_ROLES)},
-    # The shot, line, cue or overlay it belongs to; null for the bed.
+    # The shot (its image, its clip, or its clip's sound), line, cue or
+    # overlay it belongs to; null for the bed.
     "id": {"type": ["string", "null"], "maxLength": 40, "pattern": _ID_PATTERN},
     # Where it came from (the story's folder, or the shipped assets/)...
     "source": _RELATIVE_PATH,

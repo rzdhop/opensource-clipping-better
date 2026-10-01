@@ -587,6 +587,105 @@ def _ms(seconds) -> int:
     return int(round(float(seconds) * 1000))
 
 
+# A tier-3 clip's sound fades in and out over this at its shot's edges (phase
+# 6 stage 10), so a cut never clicks.
+NATIVE_FADE_S = 0.01
+
+
+def _native_stems(timeline, native_audio) -> list:
+    """The tier-3 clip sounds of *native_audio* (phase 6 stage 10, DEC-201)
+    -- ``{shot_id: {"input": rel, "lines": [line_id, ...]}}``, each shot's
+    clip and the lines its sound is heard in place of -- in timeline order:
+    ``[{"shot_id", "input", "lines", "start_sample", "samples"}]``. A stem
+    starts at the first sample of its shot's first video frame
+    (:func:`sequence_plan`'s ``start_frames``: the frame the final pass puts
+    it on) and lasts exactly its shot's ``frames``, at
+    ``profiles.AUDIO_RATE``. :class:`GraphError` for a shot or a line the
+    timeline does not have, a line claimed by two shots, a path that is not
+    relative, or a shot too short for its two fades."""
+    if not isinstance(native_audio, dict):
+        raise GraphError("native_audio must be a dict of shot_id -> {input, lines}")
+    shots = [shot for shot in timeline["shots"] if shot["shot_id"] in native_audio]
+    unknown = sorted(set(native_audio) - {shot["shot_id"] for shot in shots})
+    if unknown:
+        raise GraphError(f"native_audio: {unknown} are not shots of the timeline")
+    line_ids = {line["line_id"] for line in timeline["lines"]}
+    start_frames = sequence_plan(timeline)["start_frames"]
+    rate, fps = profiles.AUDIO_RATE, profiles.FPS
+    fade = round(NATIVE_FADE_S * rate)
+    stems, owner = [], {}
+    for shot in shots:
+        shot_id = shot["shot_id"]
+        entry = native_audio[shot_id]
+        if not isinstance(entry, dict) or not isinstance(entry.get("lines"), (list, tuple)):
+            raise GraphError(f"native_audio[{shot_id!r}] must be {{input, lines}}")
+        _assert_relative(entry.get("input"), what=f"native_audio[{shot_id!r}]")
+        for line_id in entry["lines"]:
+            if line_id not in line_ids:
+                raise GraphError(f"native_audio[{shot_id!r}]: line {line_id!r} is not in the timeline")
+            if line_id in owner:
+                raise GraphError(f"line {line_id!r} is heard in place of both {owner[line_id]!r} and {shot_id!r}")
+            owner[line_id] = shot_id
+        samples = round(shot["frames"] * rate / fps)
+        if samples <= 2 * fade:
+            raise GraphError(f"shot {shot_id!r} ({shot['frames']} frames) is too short for its clip's sound")
+        stems.append({"shot_id": shot_id, "input": entry["input"], "lines": list(entry["lines"]),
+                      "start_sample": round(start_frames[shot_id] * rate / fps), "samples": samples})
+    return stems
+
+
+def _native_dialogue(argv, graph, lines, line_inputs, natives, *, sidechain, normalise, silence) -> int:
+    """The dialogue section of :func:`audio_mix_argv` at tier 3 (its
+    docstring, "Tier 3"), appended to *argv* and *graph*; returns the next
+    input index. What is heard -- ``[dlg_mix]``, ``[dlg_stem]`` -- is every
+    line no stem replaces plus the stems (*natives*, :func:`_native_stems`);
+    the sidechain ``[dlg_sc]`` (with a bed: *sidechain*) is every line, in
+    timeline order over the same silent base, so the bed ducks exactly as it
+    would with every line heard.
+
+    A stem's clip is read inside the graph (``amovie``, as a shot's paper
+    texture is read with ``movie``), never as an ``-i`` input: on ffmpeg
+    7.1.5 (the app image) an mp4 among the mix's inputs -- even one left
+    unread -- ended the ducked bed's stem early in most runs, a different
+    length each time, while the other outputs ran to the end (measured
+    during phase 6 stage 10; never on 6.1.1). Read with ``amovie``, 20 runs
+    out of 20 were whole and identical."""
+    dropped = {line_id for stem in natives for line_id in stem["lines"]}
+    heard, side = [], []
+    index = 0
+    for k, line in enumerate(lines):
+        kept = line["line_id"] not in dropped
+        if not kept and not sidechain:
+            continue
+        argv += ["-i", line_inputs[line["line_id"]]]
+        chain = f"[{index}:a]{normalise},adelay=delays={_ms(line['start_s'])}:all=1"
+        if kept and sidechain:
+            graph.append(f"{chain},asplit=2[l{k}][s{k}]")
+        else:
+            graph.append(f"{chain}[{'l' if kept else 's'}{k}]")
+        if kept:
+            heard.append(f"[l{k}]")
+        if sidechain:
+            side.append(f"[s{k}]")
+        index += 1
+    fade = round(NATIVE_FADE_S * profiles.AUDIO_RATE)
+    for j, stem in enumerate(natives):
+        samples = stem["samples"]
+        graph.append(f"amovie={motion_mod.escape_expr(stem['input'])},{normalise},asetpts=N/SR/TB,"
+                     f"atrim=end_sample={samples},afade=t=in:ss=0:ns={fade},"
+                     f"afade=t=out:ss={samples - fade}:ns={fade},adelay=delays={stem['start_sample']}S:all=1[n{j}]")
+        heard.append(f"[n{j}]")
+    graph.append(f"{silence}[dlg_base]")
+    graph.append(f"[dlg_base]{''.join(heard)}amix=inputs={len(heard) + 1}:normalize=0:duration=first,"
+                 f"asplit=2[dlg_mix][dlg_stem]")
+    if sidechain and side:
+        graph.append(f"{silence}[sc_base]")
+        graph.append(f"[sc_base]{''.join(side)}amix=inputs={len(side) + 1}:normalize=0:duration=first[dlg_sc]")
+    elif sidechain:
+        graph.append(f"{silence}[dlg_sc]")
+    return index
+
+
 def _wav_output_args() -> list:
     """Per-WAV output options: 48 kHz stereo ``profiles.MIX_CODEC`` (32-bit
     float, so a sum above full scale is not clipped on write), no metadata
@@ -596,7 +695,8 @@ def _wav_output_args() -> list:
             "-map_metadata", "-1", "-fflags", "+bitexact", "-flags:a", "+bitexact"]
 
 
-def audio_mix_argv(timeline, *, line_inputs, sfx_inputs, bgm_input, ending, out_rel, stems_rel) -> list:
+def audio_mix_argv(timeline, *, line_inputs, sfx_inputs, bgm_input, ending, out_rel, stems_rel,
+                   native_audio=None) -> list:
     """The episode's audio mix (spec 6.5 "Audio graph"; plan: "Audio mix";
     DEC-157, DEC-158): one absolute timeline of exactly ``total_s``.
 
@@ -627,6 +727,20 @@ def audio_mix_argv(timeline, *, line_inputs, sfx_inputs, bgm_input, ending, out_
     *sfx_inputs* maps cue names to files; *bgm_input* is a file or
     ``None``; *ending* is ``"cut_to_black"``/``"hard_stop"`` and must agree
     with the timeline's end card. Every path must be relative.
+
+    **Tier 3** (phase 6 stage 10, DEC-201): *native_audio* --
+    ``{shot_id: {"input": clip, "lines": [line_id, ...]}}``, None or empty
+    at tiers 1 and 2, whose argv is then exactly the one above -- makes each
+    shot's clip sound one more stem of the same absolute timeline
+    (:func:`_native_stems`): its best audio stream, read inside the graph
+    (``amovie``, :func:`_native_dialogue` says why), resampled like every
+    input, re-stamped from 0, trimmed to its shot's frames, faded in and out
+    over :data:`NATIVE_FADE_S` and ``adelay``ed to the sample of its shot's
+    first frame. It is heard in place of that shot's *lines*: the dialogue
+    stem (and what the mix takes of it) is the other lines plus these stems.
+    The ducking does not move: the sidechain is still every line's TTS
+    audio, summed as above (a line heard is split to both; a line not heard
+    feeds the sidechain alone, and is not read at all without a bed).
     """
     if ending not in profiles.ENDINGS:
         raise GraphError(f"unknown ending {ending!r}, expected one of {profiles.ENDINGS}")
@@ -648,6 +762,7 @@ def audio_mix_argv(timeline, *, line_inputs, sfx_inputs, bgm_input, ending, out_
     for kind in STEM_KINDS:
         _assert_relative(stems_rel[kind], what=f"stems_rel[{kind!r}]")
     _assert_relative(out_rel, what="out_rel")
+    natives = _native_stems(timeline, native_audio) if native_audio else []
 
     ordered = sorted(lines, key=lambda line: line["start_s"])
     for line in ordered:
@@ -673,20 +788,24 @@ def audio_mix_argv(timeline, *, line_inputs, sfx_inputs, bgm_input, ending, out_
     index = 0
 
     # dialogue
-    line_labels = []
-    for k, line in enumerate(lines):
-        argv += ["-i", line_inputs[line["line_id"]]]
-        graph.append(f"[{index}:a]{normalise},adelay=delays={_ms(line['start_s'])}:all=1[l{k}]")
-        line_labels.append(f"[l{k}]")
-        index += 1
-    dialogue_outputs = "[dlg_mix][dlg_stem][dlg_sc]" if bgm_input is not None else "[dlg_mix][dlg_stem]"
-    n_split = 3 if bgm_input is not None else 2
-    if line_labels:
-        graph.append(f"{silence}[dlg_base]")
-        graph.append(f"[dlg_base]{''.join(line_labels)}amix=inputs={len(line_labels) + 1}:normalize=0:"
-                     f"duration=first,asplit={n_split}{dialogue_outputs}")
+    if natives:
+        index = _native_dialogue(argv, graph, lines, line_inputs, natives, sidechain=bgm_input is not None,
+                                 normalise=normalise, silence=silence)
     else:
-        graph.append(f"{silence},asplit={n_split}{dialogue_outputs}")
+        line_labels = []
+        for k, line in enumerate(lines):
+            argv += ["-i", line_inputs[line["line_id"]]]
+            graph.append(f"[{index}:a]{normalise},adelay=delays={_ms(line['start_s'])}:all=1[l{k}]")
+            line_labels.append(f"[l{k}]")
+            index += 1
+        dialogue_outputs = "[dlg_mix][dlg_stem][dlg_sc]" if bgm_input is not None else "[dlg_mix][dlg_stem]"
+        n_split = 3 if bgm_input is not None else 2
+        if line_labels:
+            graph.append(f"{silence}[dlg_base]")
+            graph.append(f"[dlg_base]{''.join(line_labels)}amix=inputs={len(line_labels) + 1}:normalize=0:"
+                         f"duration=first,asplit={n_split}{dialogue_outputs}")
+        else:
+            graph.append(f"{silence},asplit={n_split}{dialogue_outputs}")
 
     # sfx
     sfx_labels = []

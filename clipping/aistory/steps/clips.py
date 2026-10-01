@@ -49,6 +49,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import struct
 
 from clipping.providers import adapters as adapters_mod
 from clipping.providers import budget as budget_mod
@@ -124,6 +125,56 @@ def shot_clip_path(ec, shot):
     except KeyError:
         return None
     return path if os.path.isfile(path) else None
+
+
+# The boxes from an MP4's top level down to a track's handler (ISO/IEC
+# 14496-12): moov > trak > mdia > hdlr, whose handler type names the track's
+# kind -- ``soun`` for a sound track.
+_TRACK_PATH = (b"moov", b"trak", b"mdia")
+_SOUND_HANDLER = b"soun"
+
+
+def _mp4_has_sound(handle, start, end, depth) -> bool:
+    offset = start
+    while offset + 8 <= end:
+        handle.seek(offset)
+        header = handle.read(8)
+        if len(header) < 8:
+            return False
+        size, kind = struct.unpack(">I4s", header)
+        head = 8
+        if size == 1:
+            large = handle.read(8)
+            if len(large) < 8:
+                return False
+            size, head = struct.unpack(">Q", large)[0], 16
+        elif size == 0:
+            size = end - offset
+        if size < head or offset + size > end:
+            return False
+        if depth < len(_TRACK_PATH) and kind == _TRACK_PATH[depth]:
+            if _mp4_has_sound(handle, offset + head, offset + size, depth + 1):
+                return True
+        elif depth == len(_TRACK_PATH) and kind == b"hdlr":
+            handle.seek(offset + head + 8)  # version and flags, pre_defined
+            if handle.read(4) == _SOUND_HANDLER:
+                return True
+        offset += size
+    return False
+
+
+def clip_has_audio(path) -> bool:
+    """Whether the clip at *path* carries a sound track: an MP4 track whose
+    handler is ``soun`` (phase 6 stage 10). Read from the file's own boxes
+    in pure Python -- no process, so a dry run (the render's ``current`` and
+    ``changes``) decides as the render does -- whatever the link said it
+    would make. False for a file that is not such an MP4 or cannot be read:
+    the shot then keeps its lines."""
+    try:
+        with open(path, "rb") as handle:
+            return _mp4_has_sound(handle, 0, os.fstat(handle.fileno()).st_size, 0)
+    except (OSError, TypeError, ValueError):
+        return False
 
 
 # ---------------------------------------------------------------- the flags
