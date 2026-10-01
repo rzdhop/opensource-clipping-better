@@ -12,7 +12,7 @@
     "clipping/story/source_manager.py": "0d5108ea6983a43df30ff17ea58798146aeb5beff5934a81cf2ed26c642a26ba",
     "clipping/studio/__init__.py": "72bd93dc62605ea16b4bc91050cec672b7fbeb59747f991b39a0eb4629756a54",
     "clipping/studio/audio_bgm.py": "b7245893fcc640323d3ecfa45d383360128177a590d90b9c72f771b6c93794a4",
-    "clipping/studio/broll.py": "0836a8ef52ad74272994dbdc51b0629fef135d2d2b8c0a2d445a12d6fa6830cb",
+    "clipping/studio/broll.py": "9c6d4de9f52fe803e78d1c1531c8a5b13677ebfbd72cb91e83d26be00a0f0d07",
     "clipping/studio/core.py": "f01ec0333aedc8d30cced65539e30c0b7b9de1349f792a7bbb24754bc7f952bf",
     "clipping/studio/edge_glow.py": "a72fc21035b5e52ecc1b3346c0ff608bb42ebbfca173e43e42eece0b83fae34f",
     "clipping/studio/effects.py": "32e8daa7d459f01443d1de64ef03747ab7238cc8ebbf35929a01e75b95f0dc31",
