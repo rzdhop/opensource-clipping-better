@@ -3,6 +3,7 @@
   "name": "edit_flux2_klein_multiref",
   "task": "edit",
   "min_profile": "mid",
+  "verified_live": false,
   "description": "Image edit with up to four reference images on FLUX.2 [klein] 4B: each reference is encoded and chained as a ReferenceLatent conditioning. Authored from ComfyUI's default API-format graph for this model, with the literal inputs replaced by placeholders (spec 8.7). Validated at run time against /object_info: a missing node or model file is refused with its name, never worked around.",
   "placeholders": [
     "prompt",

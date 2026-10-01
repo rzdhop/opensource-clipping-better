@@ -43,11 +43,12 @@ Phase 3 (the episode targets, ``episode_regenerate``): ``scene:<ep>:<sid>``,
 one grammar for the web layer, the CLI and this runner.
 
 Phase 4 (``episode_regenerate`` too): ``shot:<ep>:<shid>`` -- the shot's
-image, tuple kind ``shot_image`` (DEC-140: ``:plan`` is read first, and
-``shot:<ep>:<shid>:video`` is still a later phase's) --, ``line:<ep>:<lid>``
--- the line's voice, kind ``line`` -- and ``metadata:<ep>:<platform>`` -- one
-platform's metadata, kind ``metadata``, ``platform`` one of
-``schemas.PLATFORMS``.
+image, tuple kind ``shot_image`` (DEC-140: ``:plan`` is read first) --,
+``line:<ep>:<lid>`` -- the line's voice, kind ``line`` -- and
+``metadata:<ep>:<platform>`` -- one platform's metadata, kind ``metadata``,
+``platform`` one of ``schemas.PLATFORMS``. Phase 6 (stage 8):
+``shot:<ep>:<shid>:video`` -- the shot's clip, kind ``shot_video``; any other
+``shot:<ep>:<shid>:<word>`` is still a later phase's.
 
 Every entity regenerate clears that entity's ``approved_at`` -- an approval
 never outlives what it approved; ``approvals.cast``/``places`` re-fold as the
@@ -86,14 +87,16 @@ EPISODE_TARGETS = (
     "teaser:<ep>",
     "shot:<ep>:<shot_id>:plan",
     "shot:<ep>:<shot_id>",
+    "shot:<ep>:<shot_id>:video",
     "line:<ep>:<line_id>",
     f"metadata:<ep>:{'|'.join(schemas.PLATFORMS)}",
 )
 FRAMING_TARGETS = ("hook", "cliffhanger", "teaser")
 SHOT_IMAGE_KIND = "shot_image"
+SHOT_VIDEO_KIND = "shot_video"
 LINE_KIND = "line"
 METADATA_KIND = "metadata"
-EPISODE_KINDS = ("scene",) + FRAMING_TARGETS + ("shot", SHOT_IMAGE_KIND, LINE_KIND, METADATA_KIND)
+EPISODE_KINDS = ("scene",) + FRAMING_TARGETS + ("shot", SHOT_IMAGE_KIND, SHOT_VIDEO_KIND, LINE_KIND, METADATA_KIND)
 
 # The entity and episode target shapes (spec 9.2) -- every shape
 # :func:`parse_target` reads -- as a refusal names them.
@@ -136,10 +139,11 @@ def _invalid(target) -> StepFailed:
 def parse_episode_target(target):
     """``("scene", ep, scene_id)``, ``("hook"|"cliffhanger"|"teaser", ep)``,
     ``("shot", ep, shot_id)`` (its ``:plan``), ``("shot_image", ep,
-    shot_id)``, ``("line", ep, line_id)`` or ``("metadata", ep, platform)``
-    for an episode target, None for anything else -- ``shot:<ep>:<shid>:video``
-    among them (a later phase's). The shape only (the episode 1..99, the id
-    patterns, the platforms), never the story."""
+    shot_id)``, ``("shot_video", ep, shot_id)`` (its ``:video``, phase 6),
+    ``("line", ep, line_id)`` or ``("metadata", ep, platform)`` for an
+    episode target, None for anything else -- another
+    ``shot:<ep>:<shid>:<word>`` among them (a later phase's). The shape only
+    (the episode 1..99, the id patterns, the platforms), never the story."""
     if not isinstance(target, str):
         return None
     parts = target.split(":")
@@ -156,6 +160,8 @@ def parse_episode_target(target):
             return (SHOT_IMAGE_KIND, ep, parts[2])
         if parts[3] == "plan":
             return ("shot", ep, parts[2])
+        if parts[3] == "video":
+            return (SHOT_VIDEO_KIND, ep, parts[2])
     if kind == LINE_KIND and len(parts) == 3 and _LINE.fullmatch(parts[2]):
         return (LINE_KIND, ep, parts[2])
     if kind == METADATA_KIND and len(parts) == 3 and parts[2] in schemas.PLATFORMS:

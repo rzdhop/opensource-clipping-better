@@ -11,7 +11,7 @@ import pathlib
 
 import pytest
 
-from clipping.providers import errors, generation, images
+from clipping.providers import errors, generation, images, video
 from clipping.providers.generation import GenRequest, NoRunnableLink, parse_generation_chain, run_generation_chain
 from clipping.providers.registry import Link
 from clipping.providers.transport import APIConnectionError, Response
@@ -67,7 +67,7 @@ def test_the_adapters_register_for_their_kinds_only():
     assert generation.adapter_for("image_edit", "fal") is images.FAL
     assert generation.adapter_for("image", "openai") is images.OPENAI
     assert generation.adapter_for("image_edit", "openai") is images.OPENAI
-    assert generation.adapter_for("video", "fal") is None, "video adapters arrive in phase 6"
+    assert generation.adapter_for("video", "fal") is video.FAL_VIDEO, "video has its own fal adapter (video.py)"
     assert generation.adapter_for("image_edit", "cloudflare") is None
 
 

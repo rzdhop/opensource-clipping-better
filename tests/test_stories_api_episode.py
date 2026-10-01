@@ -494,7 +494,7 @@ def test_regenerating_a_scene_or_a_shot_reaches_its_runner_as_a_job_of_its_docum
             ({"target": "hook:1", "voice": {"provider": "edge", "voice_id": "x"}}, 400, "voice"),
             ({"target": "scene:9:s03"}, 400, "there is no episode 9"),
             ({"target": "teaser:2"}, 409, "Episode 2 has no script yet"),
-            ({"target": "shot:1:sh01:video"}, 400, "later phase"),
+            ({"target": "shot:1:sh01:frames"}, 400, "later phase"),
     ):
         response = api.client.post(_url(story_id, "/regenerate"), json=body)
         assert response.status_code == status, (body, response.text)

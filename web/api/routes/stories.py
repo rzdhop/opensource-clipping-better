@@ -80,6 +80,17 @@ A story is a folder under ``outputs/stories/<story_id>/`` kept by
   page mints for it (DEC-163: a ``<video src>`` and an ``<a download>`` cannot
   send the header).
 
+- Phase 6 (tiers 2 and 3, stage 11): the assets edit also takes each
+  shot's clip flags (``keep_still``, ``animate``, ``keep_native_audio``) and
+  ``links {image?, video?}`` -- the sticky offers' switch, checked against
+  the Settings chains; ``GET /estimate/assets?route=`` prices another route
+  without patching the story; the render meets its clip refusal before a job
+  exists (409) unless ``fill_failed_with_motion`` is sent; a shot's clip is
+  served by ``GET /{id}/episodes/{ep}/clips/{name}`` behind the router's
+  token like the shot images (DEC-113; open while ``API_TOKEN`` is unset,
+  DEC-173), and the episode page carries each shot's clip, the tier, the
+  episode's links and the video estimate (``workflow.episode_clips``).
+
 Every ``{story_id}`` is checked against the store's id rule before anything
 else, so a malformed id is a 404 and never reaches a path; an unknown one is a
 404; a story whose files do not validate is a 500 with one short sentence and
@@ -99,12 +110,14 @@ details and their order are the ones the API has always given.
 
 from __future__ import annotations
 
+import functools
 import os
 import re
 import tempfile
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Optional
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
@@ -116,10 +129,10 @@ from clipping.aistory import uploads as uploads_mod
 from clipping.aistory.steps import bible as bible_step
 from clipping.aistory.steps import concepts as concepts_step
 from clipping.aistory.steps import entities as entities_step
-from clipping.aistory.steps import llm_call
+from clipping.aistory.steps import llm_call, llm_spend
 from clipping.aistory.steps import regenerate as regenerate_step
 from clipping.aistory.steps import style_preview as preview_step
-from clipping.providers import registry
+from clipping.providers import pricing, registry
 
 from .. import store, worker
 from ..auth import require_token, story_media_url
@@ -175,6 +188,10 @@ _EPISODE_IN_PATH = re.compile(r"^[1-9][0-9]?$")
 # Phase 4: what GET /{id}/episodes/{ep}/shots/{name} serves -- a shot's image,
 # named by its shot (the store's own pattern).
 _SHOT_NAME = re.compile(schemas.SHOT_IMAGE_NAME_PATTERN)
+# Phase 6 stage 11: what GET /{id}/episodes/{ep}/clips/{name} serves -- a
+# shot's clip, named by its shot (the store's own pattern) -- and its path.
+_CLIP_NAME = re.compile(schemas.SHOT_CLIP_NAME_PATTERN)
+_CLIP_ROUTE = "/api/stories/{story_id}/episodes/{ep}/clips/{name}"
 # Phase 4: what GET /{id}/episodes/{ep}/media/{name} serves -- the episode's
 # final video and its cover, exactly the files a story media signature may
 # open (auth.STORY_MEDIA_NAMES, DEC-163) -- and the field each fills in the
@@ -598,6 +615,26 @@ def _generation_estimate(stories, story, step, units, *, env, probe_local=False)
         "route_class": images["route_class"], "link": images["link"], "links": images["links"],
         "edit": edit, "ready": not refusals, "message": _generation_message(units, images, edit, refusals),
     }
+
+
+def _clip_estimate(stories, story, parsed, env) -> dict:
+    """``shot:<ep>:<shid>:video``'s estimate (``workflow.
+    regenerate_clip_estimate``): one clip's seconds x the price on the
+    episode's video link. Blocking (a local ComfyUI is asked its status), so
+    it runs off the event loop."""
+    with _answering():
+        return workflow.regenerate_clip_estimate(stories, story, parsed, env=env, probe_local=True)
+
+
+def _clip_gate(estimate):
+    """The gate of a shot's clip regenerate: 409 with its estimate's sentence
+    when the clip cannot run now or would go over a cap."""
+
+    def gate():
+        if not estimate["ready"]:
+            raise HTTPException(status_code=409, detail=estimate["message"])
+
+    return gate
 
 
 def _generation_gate(stories, story, units, *, env, llm=True, needs_editor=False):
@@ -1086,13 +1123,15 @@ def _phase4_checks(stories, story, step, params, ep, env):
     with _answering():
         ec = workflow.episode_context(stories, story, ep, step=step)
         workflow.phase4_request(step, params)
-        workflow.require_step_inputs(ec, step)
+        workflow.require_step_inputs(ec, step, params=params)
     model = _STEP_PARAMS.get(step)
     sent = _sent(model(**params)) if model is not None else {}
     if step == "assets":
+        animate = params.get("animate") is not False  # the step's own default: on
+
         def gate():  # the plan's own stop, before the first call
             with _answering():
-                workflow.assets_gate(ec, env=env)
+                workflow.assets_gate(ec, env=env, animate=animate)
     elif step == "render":
         def gate():  # it calls nothing: no gate
             return None
@@ -1113,7 +1152,9 @@ async def _phase4_step(stories, story, step, params, ep) -> JobResponse:
     (400, the step's closed list: ``assets`` ``{align_words?}``, ``render``
     ``{subtitles?, encoder?}``, ``fast-track`` ``{storyboard?}``, ``metadata``
     none), then what the step is made from (409 with the step's own sentence:
-    ``workflow.require_step_inputs``), then what every job meets
+    ``workflow.require_step_inputs`` -- for the render at tier >= 2 also its
+    clip refusal, unless ``fill_failed_with_motion`` is sent: phase 6 stage
+    11), then what every job meets
     (``_create_step_job``: 409 while a step of the story is in flight; the
     step's gate -- the key gate for ``metadata`` and ``fast-track`` (400), the
     plan's own stop for ``assets`` (409: ``workflow.assets_gate``), none for
@@ -1235,15 +1276,43 @@ def _episode_page(stories, story, ep) -> dict:
     media --, the metadata pack, the ledger), ``workflow.series_page``
     (phase 5: the memory entry and its state, the audience feedback item, the
     proposals made for this episode, and the gate's current refusal text for
-    the episode after it) and the episode's jobs in flight."""
+    the episode after it), ``workflow.episode_clips`` merged into the assets
+    (phase 6 stage 11, on the Settings: ``_merge_clips``) and the episode's
+    jobs in flight."""
     with _answering():
         page = workflow.episode_view(stories, story, ep)
         page.update(workflow.episode_outputs(stories, story, ep))
         page["series"] = _series_page(stories, story, ep)
+        if page["assets"] is not None:
+            _merge_clips(page["assets"], story["story_id"], ep,
+                         workflow.episode_clips(stories, story, ep, env=worker.get_settings_env()))
     if page["render"] is not None:
         page["render"]["media"] = _episode_media(story["story_id"], ep, page["render"])
     page["jobs"] = _episode_jobs(story["story_id"], ep)
     return page
+
+
+def _clip_url(story_id, ep, name) -> str:
+    """The path of ``GET /{id}/episodes/{ep}/clips/{name}``, each part
+    percent-encoded: fetched as is while ``API_TOKEN`` is unset (DEC-173),
+    as a blob with the header when it is set (DEC-113) -- a clip is not one
+    of the signed story media (``auth.STORY_MEDIA_NAMES``)."""
+    return _CLIP_ROUTE.format(story_id=quote(str(story_id), safe=""), ep=quote(str(ep), safe=""),
+                              name=quote(str(name), safe=""))
+
+
+def _merge_clips(assets, story_id, ep, clips) -> None:
+    """``workflow.episode_clips`` into the page's ``assets`` (phase 6 stage
+    11): ``tier``, ``links``, ``video``, ``image_offer`` (stage 12 follow-up:
+    at any tier, unlike ``video``), and each shot's ``clip`` -- None at
+    tier 1 -- with ``url``, the clip route's path while its file is there."""
+    assets.update(tier=clips["tier"], links=clips["links"], video=clips["video"],
+                  image_offer=clips["image_offer"])
+    for shot in assets["shots"]:
+        clip = clips["shots"].get(shot["shot_id"])
+        if clip is not None:
+            clip = dict(clip, url=_clip_url(story_id, ep, clip["name"]) if clip["name"] else None)
+        shot["clip"] = clip
 
 
 def _style_step(stories, story, params) -> dict:
@@ -1467,9 +1536,16 @@ async def regenerate(story_id: str, req: StoryRegenerateRequest) -> JobResponse:
     render or with a pack written for another render or script; then the key
     gate (400).
 
+    Phase 6: a shot's clip ``shot:<ep>:<shid>:video`` is a job of
+    ``assets:<ep>`` -- 404 for a shot the episode does not have; 409 until
+    the script and a current storyboard are approved, below tier 2, for a
+    shot kept still or a keyframe that is not current, and when its one clip
+    cannot run now or would go over a cap (``workflow.
+    regenerate_clip_estimate``).
+
     A later phase's target of the 9.2 grammar
-    (``character:<id>:image:extra:<n>``, ``shot:<ep>:<shid>:video`` among
-    them): 400. Anything else: 400 naming the valid shapes.
+    (``character:<id>:image:extra:<n>``, any other ``shot:<ep>:<shid>:<word>``
+    among them): 400. Anything else: 400 naming the valid shapes.
     """
     stories = _stories()
     story = _load(stories, story_id)
@@ -1492,8 +1568,12 @@ async def regenerate(story_id: str, req: StoryRegenerateRequest) -> JobResponse:
         voice = workflow.check_entity_target(stories, story, parsed, voice=voice, env=env)
         units = workflow.target_units(stories, story, parsed)
         needs_editor = workflow.target_needs_editor(story, parsed)
-    gate = _generation_gate(stories, story, units, env=env, llm=bool(units["llm_calls"]),
-                            needs_editor=needs_editor)
+    if parsed[0] == regenerate_step.SHOT_VIDEO_KIND:
+        clip = await run_in_threadpool(_clip_estimate, stories, story, parsed, env)
+        gate = _clip_gate(clip)
+    else:
+        gate = _generation_gate(stories, story, units, env=env, llm=bool(units["llm_calls"]),
+                                needs_editor=needs_editor)
     return await _create_step_job(story_id, "regenerate", {"target": target, "note": req.note, "voice": voice},
                                   gate=gate)
 
@@ -1511,15 +1591,19 @@ def _llm_calls(step, target):
     return 1
 
 
-def _estimate_message(rows, calls, refusal, *, label=None) -> str:
+def _estimate_message(rows, calls, refusal, *, label=None, per_call=None) -> str:
     if refusal:
         return refusal
     usable = [row for row in rows if row["keyed"] and "skipped" not in row]
     first = usable[0]
     calls_text = f"{label or calls} LLM call{'s' if label or calls != 1 else ''}"
-    note = "There is no LLM price table, so est_usd stays 0.0."
+    note = "est_usd counts the first link only, so it stays 0.0."
     if not first["free"]:
-        return f"{calls_text} on {first['link']}, which is billed. {note}"
+        if per_call is None:
+            return (f"{calls_text} on {first['link']}, which is billed and has no price in the LLM price "
+                    "table: the step refuses it before any call.")
+        return (f"{calls_text} on {first['link']}, which is billed: est_usd is the worst case, "
+                f"${per_call:.4f} a call (the widest prompt and reply cap at its price).")
     paid_later = [row["link"] for row in usable[1:] if not row["free"]]
     text = f"{calls_text} on {first['link']} (free tier)."
     if paid_later:
@@ -1537,10 +1621,11 @@ async def estimate(story_id: str, step: str, target: Optional[str] = None,
                    place: Optional[list[str]] = Query(None), prop: Optional[list[str]] = Query(None),
                    ep: Optional[int] = None, measure: bool = False, align_words: bool = False,
                    subtitles: Optional[str] = None, encoder: Optional[str] = None,
-                   storyboard: Optional[str] = None) -> dict:
+                   storyboard: Optional[str] = None, route: Optional[str] = None,
+                   fill_failed_with_motion: bool = False) -> dict:
     """What a step would cost and where it would run::
 
-        {"step", "est_usd": 0.0, "units": {"llm_calls": n},
+        {"step", "est_usd", "units": {"llm_calls": n},
          "route_class": "free" | "paid" | "blocked" | "local",
          "link": <first usable keyed link> | null,
          "links": [{"link", "keyed", "free"[, "skipped": <reason>]}, ...],
@@ -1553,8 +1638,11 @@ async def estimate(story_id: str, step: str, target: Optional[str] = None,
     link that is not skipped decides the class (``free`` when the link is
     free -- its provider's default model is, DEC-088, or it is an OpenRouter
     ``:free`` model). No such link is ``blocked`` with the key gate's
-    message. ``style`` runs here: 0 calls, ``local``. ``style_preview``:
-    ``units {"images": 3}``, the story's route applied, each link's gates as
+    message. ``est_usd`` is 0.0 unless that first link is paid (so
+    ``allow_paid`` is on): then n times the worst call a story step can make
+    on it (``llm_spend.worst_call_usd``), 0.0 still for a paid link with no
+    price, which the step refuses. ``style`` runs here: 0 calls, ``local``.
+    ``style_preview``: ``units {"images": 3}``, the story's route applied, each link's gates as
     the step will meet them and nothing called (``style_preview.estimate``;
     its links are ``{"link", "status", "reason", "paid", "est_usd"}``).
 
@@ -1581,8 +1669,8 @@ async def estimate(story_id: str, step: str, target: Optional[str] = None,
     from the beat sheet once written, else the episode's own body slots),
     ``skipped_paid [{link, reason}]`` and ``measure`` -- with ``?measure=1``,
     what measuring the lines with the pinned voices would do
-    (``script.measure_estimate``), else null. ``est_usd`` stays 0.0: LLM
-    spend is not booked (DEC-115). ``storyboard``: ``t1_calls`` (one per
+    (``script.measure_estimate``), else null. ``est_usd`` as the LLM steps
+    above. ``storyboard``: ``t1_calls`` (one per
     scene with no plan, a stale one or a fast one), ``fast_calls`` 0,
     ``link``, ``skipped_paid``; not ``ready`` while the script is not
     complete.
@@ -1594,10 +1682,15 @@ async def estimate(story_id: str, step: str, target: Optional[str] = None,
     route; a local editor that would run them is asked whether it is
     there), ``voices``, ``alignment``, ``paid_links``, ``caps``, ``est_usd``,
     ``over_cap``, ``ready``, with ``paid`` (the fast track's verdict) and its
-    ``message``. ``render`` (``?subtitles=``, ``?encoder=``): ``units
-    {llm_calls: 0, shots}``, ``needed`` (false while the last render is the
-    one it would make), ``seconds``/``minutes`` (an authored estimate, A-069),
-    ``params``, $0 and ``local``. ``metadata``: the LLM steps' estimate of
+    ``message``; at tier >= 2 also ``video`` (the clips, phase 6), and
+    ``?route=auto|local|api`` (stage 11) prices it all on that route instead
+    of the story's own without patching the story (400 for another value).
+    ``render`` (``?subtitles=``, ``?encoder=``, ``?fill_failed_with_motion=1``
+    -- phase 6 stage 12 follow-up: priced as the real render params would be,
+    so a clip refusal here clears exactly when the real run's would):
+    ``units {llm_calls: 0, shots}``, ``needed`` (false while the last render
+    is the one it would make), ``seconds``/``minutes`` (an authored estimate,
+    A-069), ``params``, $0 and ``local``. ``metadata``: the LLM steps' estimate of
     one M1 call per platform still to write, with ``platforms``.
     ``fast-track`` (``?storyboard=t1|fast``): ``fast_track.estimate``'s
     ``llm_calls``, ``images``, ``tts``, ``render``, ``est_usd``, ``paid`` and
@@ -1660,7 +1753,8 @@ async def estimate(story_id: str, step: str, target: Optional[str] = None,
     if step in workflow.PHASE3_STEPS:
         return _episode_estimate(stories, story, step, ep, measure=measure, env=env)
     if step in workflow.PHASE4_STEPS:
-        options = {"align_words": align_words, "subtitles": subtitles, "encoder": encoder, "storyboard": storyboard}
+        options = {"align_words": align_words, "subtitles": subtitles, "encoder": encoder, "storyboard": storyboard,
+                   "route": route, "fill_failed_with_motion": fill_failed_with_motion}
         return await run_in_threadpool(_phase4_estimate, stories, story, step, ep, env=env, **options)
     if step in workflow.SERIES_STEPS:
         return _series_estimate(stories, story, step, ep, env=env)
@@ -1675,6 +1769,8 @@ async def estimate(story_id: str, step: str, target: Optional[str] = None,
             parsed = regenerate_step.parse_target(target)
             workflow.check_entity_target(stories, story, parsed)
             units = workflow.target_units(stories, story, parsed)
+        if parsed[0] == regenerate_step.SHOT_VIDEO_KIND:
+            return await run_in_threadpool(_clip_estimate, stories, story, parsed, env)
         if not units["llm_calls"]:
             return _generation_estimate(stories, story, step, units, env=env)
 
@@ -1707,17 +1803,26 @@ def _episode_estimate(stories, story, step, ep, *, measure, env) -> dict:
     return body
 
 
-def _phase4_estimate(stories, story, step, ep, *, env, align_words, subtitles, encoder, storyboard) -> dict:
+def _phase4_estimate(stories, story, step, ep, *, env, align_words, subtitles, encoder, storyboard,
+                     route=None, fill_failed_with_motion=False) -> dict:
     """The phase-4 estimate of episode *ep* (see ``estimate``), after the
     step's own refusals. Blocking (it hashes files; the assets' asks a local
     editor), so it runs off the event loop."""
     with _answering():
         ec = workflow.episode_context(stories, story, ep, step=step)
         if step == "assets":
-            return workflow.assets_estimate(ec, env=env, align_words=align_words, probe_local=True)
+            return workflow.assets_estimate(ec, env=env, align_words=align_words, probe_local=True, route=route)
         if step == "render":
-            params = {name: value for name, value in (("subtitles", subtitles), ("encoder", encoder))
-                      if value is not None}
+            # fill_failed_with_motion (phase 6 stage 12 follow-up): priced
+            # the same way the real render params would be, so the Preview
+            # pane's checkbox can clear a clip refusal here too, before any
+            # job exists -- render.read_params/require_clips already honor
+            # this key (workflow.RENDER_PARAMS); only the query param itself
+            # was missing from this route.
+            params = {name: value for name, value in (
+                ("subtitles", subtitles), ("encoder", encoder),
+                ("fill_failed_with_motion", fill_failed_with_motion or None),
+            ) if value is not None}
             return workflow.render_estimate(ec, params)
         if step == "metadata":
             units = workflow.metadata_units(ec)
@@ -1785,15 +1890,25 @@ def _llm_estimate(step, calls, *, env, label=None) -> dict:
         route_class = "blocked"
     else:
         route_class = "free" if first["free"] else "paid"
+    # A paid first link (allow_paid is on: story_chain skips it otherwise) is
+    # priced at the worst call a step can make (llm_spend); a free one is $0.
+    est_usd, per_call = 0.0, None
+    if first is not None and not first["free"]:
+        try:
+            per_call = llm_spend.worst_call_usd(links[rows.index(first)])
+        except pricing.PriceUnknown:
+            per_call = None
+        else:
+            est_usd = round(calls * per_call, 6)
     return {
         "step": step,
-        "est_usd": 0.0,
+        "est_usd": est_usd,
         "units": {"llm_calls": calls},
         "route_class": route_class,
         "link": first["link"] if first else None,
         "links": rows,
         "ready": refusal is None,
-        "message": _estimate_message(rows, calls, refusal, label=label),
+        "message": _estimate_message(rows, calls, refusal, label=label, per_call=per_call),
     }
 
 
@@ -1843,7 +1958,8 @@ async def get_episode(story_id: str, ep: str) -> dict:
                    "report": none|passed|issues|stale,
                    "stale_scenes": [scene_id, ...], "prompts_outdated": bool,
                    "missing": [what the script step would still write]},
-         "assets": {...} | null, "render": {..., "media": {"video_url", "cover_url"}} | null,
+         "assets": {..., "tier", "links", "video", "shots": [{..., "clip": {...} | null}]} | null,
+         "render": {..., "media": {"video_url", "cover_url"}} | null,
          "metadata": {"pack", "current"} | null, "ledger": {"entries", "totals"},
          "series": {"ep", "memory": {"state", "entry"}, "feedback", "proposals", "next_episode_gate"},
          "jobs": [the episode's step jobs queued or running]}
@@ -1851,7 +1967,9 @@ async def get_episode(story_id: str, ep: str) -> dict:
     (``workflow.episode_view``; phase 4's ``assets``, ``render``,
     ``metadata`` and ``ledger`` are ``workflow.episode_outputs``', which says
     what each holds; ``media`` a signed URL per file that exists:
-    ``_episode_media``; ``series`` (phase 5, step 13) is ``workflow.
+    ``_episode_media``; the assets' ``tier``, ``links``, ``video`` and
+    each shot's ``clip`` (phase 6 stage 11, with ``url``: the clip route's
+    path) are ``workflow.episode_clips``'; ``series`` (phase 5, step 13) is ``workflow.
     series_page``: the memory entry and its state (``none``, ``draft``,
     ``approved``, ``stale``), the audience feedback item (its digest,
     directions and chosen one, once F1 has run), the proposals made *for*
@@ -1987,13 +2105,19 @@ async def patch_episode_storyboard(story_id: str, ep: str, req: StoryboardPatchR
 @router.patch("/{story_id}/episodes/{ep}/assets")
 async def patch_episode_assets(story_id: str, ep: str, req: AssetsPatchRequest) -> dict:
     """Lock or unlock shots inline (``AssetsPatchRequest``: ``shots
-    [{shot_id, locked?}]``); see ``_episode_edit`` and
+    [{shot_id, locked?, keep_still?, animate?, keep_native_audio?}]``,
+    ``links {image?, video?}``); see ``_episode_edit`` and
     ``workflow.patch_assets``: a locked shot keeps its image (the assets step
     skips it, a regenerate of it is 409 "unlock it first"), only a shot with
     an image may be locked, an unknown shot is a 400 naming it; the
     storyboard's revision and approval never move, and the assets approval
-    goes stale (its fingerprint covers the locks)."""
-    return await run_in_threadpool(_episode_edit, story_id, ep, req, workflow.patch_assets)
+    goes stale (its fingerprint covers the locks). Phase 6 stage 11: a
+    shot's clip flags (true, false, or null to clear) live in
+    ``assets.json``; ``links`` switches the episode's image or video link to
+    a link of the chain the **Settings** name (the sticky offer's
+    ``switch``; 400 naming the chain's links otherwise)."""
+    edit = functools.partial(workflow.patch_assets, env=worker.get_settings_env())
+    return await run_in_threadpool(_episode_edit, story_id, ep, req, edit)
 
 
 @router.get("/{story_id}/episodes/{ep}/shots/{name}")
@@ -2020,6 +2144,40 @@ async def episode_shot(story_id: str, ep: str, name: str):
     return FileResponse(
         path,
         media_type=_PREVIEW_MEDIA_TYPES[os.path.splitext(name)[1]],
+        filename=name,
+        content_disposition_type="inline",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@router.get("/{story_id}/episodes/{ep}/clips/{name}")
+async def episode_clip(story_id: str, ep: str, name: str):
+    """One shot's clip, ``shot_NN.mp4`` (the assets step's video phase,
+    named by its shot; phase 6 stage 11) -- the twin of the shot image's
+    route.
+
+    The episode number and the name are checked before a path is built, and
+    the file is served only as a regular file in the episode's real
+    ``assets/clips/`` folder -- no symlink at any level
+    (``StoryStore.episode_asset_path``). Anything else, another story's clip
+    included, is a 404. Behind the router's token dependency like every
+    story route -- open while ``API_TOKEN`` is unset (DEC-173) -- and fetched
+    as a blob with the header when it is set (DEC-113); Range requests
+    answer 206 (``FileResponse``); ``no-store``: a re-animated clip reuses
+    its name.
+    """
+    _check_id(story_id)
+    if _EPISODE_IN_PATH.fullmatch(ep) is None or _CLIP_NAME.fullmatch(name) is None:
+        raise HTTPException(status_code=404, detail="File not found")
+    try:
+        path = _stories().episode_asset_path(story_id, int(ep), "clips", name)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="File not found") from None
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(
+        path,
+        media_type="video/mp4",
         filename=name,
         content_disposition_type="inline",
         headers={"Cache-Control": "no-store"},

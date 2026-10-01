@@ -205,6 +205,7 @@ async def update_settings(req: SettingsRequest) -> SettingsResponse:
                         ("CLOUDFLARE_API_TOKEN", req.cloudflare_api_token),
                         ("CLOUDFLARE_ACCOUNT_ID", req.cloudflare_account_id),
                         ("POLLINATIONS_API_KEY", req.pollinations_api_key),
+                        ("GEMINI_PAID_API_KEY", req.gemini_paid_api_key),
                         ("LOCAL_COMFYUI_URL", req.local_comfyui_url), ("LOCAL_OLLAMA_URL", req.local_ollama_url)):
         if value is not None:
             env_updates[name] = value.strip()
@@ -512,10 +513,28 @@ def _link_summary(kind, link, merged, budget_obj) -> dict:
     """The gates' verdict on *link* for the chain test's request (``gating.link_summary``)."""
     from clipping.providers import gating
 
-    return gating.link_summary(kind, link, merged, budget_obj, _summary_request(kind))
+    return gating.link_summary(kind, link, merged, budget_obj, _summary_request(kind, link))
 
 
-def _summary_request(kind):
+# The clip a video link is priced for in Settings: never bought (RC-V8), only
+# estimated, at the link's own length for a shot this long.
+VIDEO_TEST_CLIP_SECONDS = 5.0
+
+
+def _video_test_seconds(link):
+    """The length *link* would sell for a :data:`VIDEO_TEST_CLIP_SECONDS` shot, or
+    ``None`` for a link with no table of lengths (local, or refused)."""
+    from clipping.aistory import video_plan
+    from clipping.providers.registry import describe
+    from clipping.providers.video import CLIP_LENGTHS
+
+    label = describe(link)
+    if label not in CLIP_LENGTHS:
+        return None
+    return video_plan.requested_seconds(label, VIDEO_TEST_CLIP_SECONDS)
+
+
+def _summary_request(kind, link=None):
     """A request shaped like the chain test's, for estimates only (no files are read)."""
     from clipping.providers.generation import GenRequest
 
@@ -523,6 +542,10 @@ def _summary_request(kind):
         return GenRequest(kind=kind, text=_TEST_TEXT["fr"])
     if kind == "vision":
         return GenRequest(kind=kind, prompt=_TEST_VISION_PROMPT, images=("reference.png",))
+    if kind == "video":
+        seconds = _video_test_seconds(link) if link is not None else None
+        return GenRequest(kind=kind, prompt=_TEST_IMAGE_PROMPT, width=1080, height=1920,
+                          duration_s=float(seconds) if seconds else None)
     return GenRequest(kind=kind, prompt=_TEST_IMAGE_PROMPT, width=1080, height=1920)
 
 
@@ -550,6 +573,7 @@ def _generation_fields(env) -> dict:
         "cloudflare_api_token_set": bool(merged.get("CLOUDFLARE_API_TOKEN")),
         "cloudflare_account_id_set": bool(merged.get("CLOUDFLARE_ACCOUNT_ID")),
         "pollinations_api_key_set": bool(merged.get("POLLINATIONS_API_KEY")),
+        "gemini_paid_api_key_set": bool(merged.get("GEMINI_PAID_API_KEY")),
         "local_comfyui_url": gen.local_url("comfyui", merged),
         "local_ollama_url": gen.local_url("ollama", merged),
         "generation_chains": chains,
@@ -628,12 +652,98 @@ def _artifact_kind(kind, path) -> str:
     return "file"
 
 
+def _check_local_video(merged):
+    """``(status, text)`` for ``local/comfyui`` video without generating:
+    ComfyUI's ``/system_stats`` picks the profile's template and
+    ``/object_info`` says whether its nodes and model files are there."""
+    from clipping.aistory import hardware
+    from clipping.providers import generation as gen, local_comfyui
+
+    client = local_comfyui.ComfyUIClient(gen.local_url("comfyui", merged), transport=_TRANSPORT)
+    try:
+        stats = client.system_stats()
+    except Exception as exc:  # noqa: BLE001 - any failure to answer is a server that is not there
+        return "unreachable", f"ComfyUI unreachable at {client.base_url} ({type(exc).__name__}: {exc})"
+    profile, vram, gpu = hardware.profile_from_system_stats(stats, in_container=gen.in_container())
+    name = hardware.video_workflow_for(profile)
+    card = f"{gpu}, {vram:g} GB" if vram else "no GPU reported"
+    if name is None:
+        return "unreachable", (f"ComfyUI at {client.base_url} ({card}) is profile {profile}: no local video "
+                               "workflow for it; the hosted links make the clips")
+    try:
+        problems = local_comfyui.validate_template(local_comfyui.load_template(name), client.object_info())
+    except Exception as exc:  # noqa: BLE001 - reported, never a 500
+        return "failed", f"{type(exc).__name__}: {exc}"
+    if problems:
+        return "unreachable", local_comfyui.install_message(name, client.base_url, problems)
+    return "ok", (f"{name} can run on ComfyUI at {client.base_url} ({card}, profile {profile}); checked with "
+                  "/object_info only: video links are never test-generated")
+
+
+def _test_video_links(links, tested, env):
+    """Video is never test-generated (DEC-103 amended for video, RC-V8): a
+    local link is checked with ``/system_stats`` and ``/object_info`` only; a
+    hosted link reports its key and the estimate of a default clip and is
+    never called, even when it is the named link and allowed."""
+    from clipping.providers import adapters, gating
+
+    adapters.load_all()
+    merged = _merged_env(env)
+    budget_obj = gating.budget_of(merged)
+    rows = []
+    for link in links:
+        summary = _link_summary("video", link, merged, budget_obj)
+        row = GenerationLinkResult(
+            label=summary["label"], provider=link.provider, model=link.model, status="skipped",
+            paid=summary["paid"], est_usd=summary["est_usd"], allowed=summary["allowed"],
+            env_keys=summary["env_keys"], missing_keys=summary["missing_keys"], signup_url=summary["signup_url"],
+        )
+        if not summary["adapter"]:
+            row.status, row.reason = "no_adapter", f"no adapter yet for {link.provider} video"
+        elif summary["missing_keys"]:
+            row.status = "no_key"
+            row.reason = f"no API key ({' and '.join(summary['missing_keys'])} not set)"
+        elif link.provider == "local":
+            status, text = _check_local_video(merged)
+            row.status = status
+            if status == "ok":
+                row.note = text
+            else:
+                row.reason = text
+        else:
+            seconds = _video_test_seconds(link)
+            row.note = (f"video links are never test-generated; the estimate is ${summary['est_usd']:.3f} "
+                        f"for {seconds} s" if seconds else
+                        "video links are never test-generated; this link has no clip length to price")
+            if summary["paid"] and not summary["allowed"]:
+                row.status, row.reason = "refused", summary["reason"]
+        rows.append(row)
+
+    statuses = [r.status for r in rows]
+    if rows and all(s == "no_adapter" for s in statuses):
+        verdict, message = "no_adapter", "No video adapter exists for this chain."
+    elif any(r.status == "ok" for r in rows):
+        verdict = "ready"
+        message = f"{', '.join(r.label for r in rows if r.status == 'ok')} can run; video links are never test-generated."
+    elif any(r.status == "skipped" and r.paid and r.allowed for r in rows):
+        verdict = "paid_only"
+        message = ("No local link can run; a paid video link is keyed and allowed. Video links are never "
+                   "test-generated: see each row's estimate.")
+        if tested is not None:
+            message = f"{rows[0].label}: {rows[0].note}."
+    else:
+        verdict, message = "blocked", "No link of this chain can run right now; see each row. Video links are never test-generated."
+    return rows, verdict, message
+
+
 def _test_generation_links(kind, links, tested, env):
     """The blocking half: run the free and local links, report the paid ones, run the named one."""
     from clipping.aistory.ledger import CostLedger
     from clipping.providers import adapters, budget as budget_mod, gating, generation as gen
     from ..auth import media_url
 
+    if kind == "video":
+        return _test_video_links(links, tested, env)
     adapters.load_all()
     merged = _merged_env(env)
     budget_obj = gating.budget_of(merged)
@@ -729,8 +839,10 @@ async def run_generation_chain_test(req: GenerationChainTestRequest) -> Generati
     """Run a generation chain's free and local links; report the paid ones (DEC-103).
 
     A paid link is called only when ``link`` names it, at most once, after the
-    budget verdict, and the call is booked. Shares the LLM chain test's lock
-    and ceiling: one chain test at a time per process.
+    budget verdict, and the call is booked. A video chain generates nothing,
+    named link or not (RC-V8): local is checked with ``/object_info``, hosted
+    links report their key and estimate. Shares the LLM chain test's lock and
+    ceiling: one chain test at a time per process.
     """
     from clipping.providers import generation as gen
     from clipping.providers.registry import ChainError

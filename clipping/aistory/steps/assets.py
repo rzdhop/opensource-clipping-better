@@ -48,6 +48,23 @@ cancel token is checked before every call. It fills only what is missing
    (``seed, provider, model, consistency, route, prompt_hash, est_usd,
    cache_key, generated_at``); a shot is current while its
    :func:`prompt_hash` still matches.
+
+   **One image link per episode** (A-087, phase 6 stage 6,
+   ``sticky_link``): the first link that serves one of the episode's
+   images is recorded as ``assets.json``'s ``links.image``, and every later
+   image is asked of that link alone (a one-link chain; its DEC-089 model
+   swap still applies). Without a record the link is derived -- only when
+   every kept image (current, or locked) was made on one link; a legacy
+   episode whose images mix links keeps walking the chain per shot, as
+   before, with one printed note. A link that pushes back is waited on in
+   the paced rounds below, never traded for the next link; a link gone for
+   the day (no key, its free allowance spent, ``allow_paid`` off or a cap,
+   HTTP 401/403, a local server that does not answer) stops the step before
+   any call -- or, mid-run, fails the shots left -- with the offer
+   (:class:`sticky_link.StickyLinkGone`): switch to the next link, remaking
+   the shots the old one served. Only the user switches
+   (``workflow.patch_assets``, :func:`switched_assets_doc`); once switched,
+   an image made on another link is stale.
 5. **SFX/BGM** (``render.audio_assets``, pure): each cue resolved in the
    style's pack at its scene's or line's start (a missing cue is
    ``missing``, reported, never a failure); the BGM mood from the
@@ -55,7 +72,32 @@ cancel token is checked before every call. It fills only what is missing
    Written with every line's word source into ``assets.json``
    (``episode_assets_v1``), keeping its approval: that is derived stale by
    :func:`assets_fingerprint`, never cleared here.
-6. **The episode's ledger view** (``CostLedger.episode_view``) is written to
+6. **The clips** (phase 6 stage 8, DEC-202), last, at the story's
+   ``generation_profile.tier`` >= 2 with the ``animate`` param on (its
+   default; a tier-1 story never reaches this and its run is unchanged,
+   RC-V1). The plan is :func:`asset_units`' ``video`` part, derived again
+   **once** when the phase starts and animated exactly, in its order; a
+   plan that moved since the step's own check (prices, spend or caps)
+   stops the phase before any clip with both lists (RC-V6). Each clip is
+   asked of the plan's one link -- the episode's recorded ``links.video``,
+   written once a clip is served (A-087), never another link (RC-V5) --
+   through the generation cache, so a paid clip is journaled at submit and
+   booked once in seconds (RC-V3), under the same gates as an image (the
+   caps, ``allow_paid``, the free-tier limiter). Its keyframe must be
+   current; its seed is the keyframe's own (a re-animate's ``pending`` seed
+   first, DEC-154). A clip is kept as ``assets/clips/shot_NN.mp4`` and
+   recorded in the shot's ``assets.clip`` next to its image, the storyboard
+   approval kept; a clip that fails is recorded ``failed`` with the reason
+   and the phase goes on with the next shot; the link gone for now fails
+   the clips left with the video offer (:class:`sticky_link.StickyLinkGone`,
+   kind ``video``); only the user switches it (stage 11: the offer's
+   ``switch``, ``workflow.patch_assets``' ``links.video``,
+   :func:`switched_video_doc`), and the clips another link made are then
+   stale. A poll that runs out leaves the request ``submitted``:
+   the next run collects it, never buying it again (DEC-152). The plan
+   cannot run at all (no link, ``allow_paid`` off, a cap): the step stops
+   before its first call, images included, unless ``animate`` is off.
+7. **The episode's ledger view** (``CostLedger.episode_view``) is written to
    ``cost_ledger.json`` in the episode's folder after the step, whatever
    happened.
 
@@ -86,6 +128,8 @@ request stops everything, naming the request id (``gencache.JournalError``).
 
 from __future__ import annotations
 
+import copy
+import dataclasses
 import hashlib
 import json
 import os
@@ -96,35 +140,52 @@ import time
 from types import SimpleNamespace
 
 from clipping.providers import budget as budget_mod
-from clipping.providers import gating, gencache
+from clipping.providers import gating, gen_timings, gencache, local_comfyui
 from clipping.providers import generation as gen
-from clipping.providers.registry import ChainError, describe
+from clipping.providers.registry import ChainError, Link, describe
 
-from .. import imaging, refimages, schemas, timing, voices, wordtiming
+from .. import defaults, hardware, imaging, refimages, schemas, timing, video_plan, voices, wordtiming
 from .. import ledger as ledger_mod
 from .. import names as names_mod
 from .. import store as store_mod
 from ..render import audio_assets
-from . import entities, episode_common, llm_call, voice_lines
+from . import clips, entities, episode_common, llm_call, sticky_link, voice_lines
 from . import script as script_step
 from . import storyboard as storyboard_step
 from .episode_common import SCRIPT_DOC, STORYBOARD_DOC
 from .llm_call import StepFailed
 from .pacing import RATE_LIMIT_PAUSE_S, _paid_sent, is_rate_limit, rate_limited_by
+from .sticky_link import StickyLinkGone
 
 STEP = "assets"
 ASSETS_DOC = store_mod.EPISODE_ASSETS_DOC
 LEDGER_VIEW = "cost_ledger.json"
 
-# The step's one parameter (opt-in forced alignment, DEC-165).
+# The step's parameters (a closed list): opt-in forced alignment (DEC-165)
+# and -- at tier >= 2 -- whether the clips are made after the images and
+# voices (phase 6 stage 8, DEC-202; on unless sent false: off makes the
+# keyframes first).
 ALIGN_PARAM = "align_words"
-PARAMS = (ALIGN_PARAM,)
+ANIMATE_PARAM = "animate"
+PARAMS = (ALIGN_PARAM, ANIMATE_PARAM)
 
 # How long one call may take, for the step budget's predictive check: an
 # image on a queued provider polls for up to five minutes; a line's
 # transcription is a few seconds of audio on a hosted STT link.
 STORY_IMAGE_CALL_SECONDS = 300
 STORY_STT_CALL_SECONDS = 60
+# A clip polls for up to ten minutes on a hosted link (fal, Veo); one that
+# runs longer is kept submitted and collected by the next run.
+STORY_CLIP_CALL_SECONDS = 600
+
+# What a clip still generating is offered -- never its regenerate target: a
+# new seed would buy a second clip while the first is billed (DEC-152).
+CONTINUE_ONLY = "press Continue (the assets step resumes it; nothing is bought again)"
+
+# A local ComfyUI card of at most this many GB is asked ``POST /free`` once
+# before the first clip when a shot image ran on it in the same run: the
+# image model is unloaded so the video model fits (phase 6 plan, stage 8).
+FREE_VRAM_GB = 12
 
 # The pause before a free link that pushed back is asked again
 # (:data:`pacing.RATE_LIMIT_PAUSE_S`, re-imported above under this name).
@@ -136,10 +197,15 @@ PROMPT_ONLY, REFERENCES = refimages.PROMPT_ONLY, refimages.REFERENCES
 
 # What a shot's image is, derived (never stored): no image yet; current (its
 # prompt hash still matches -- or it is locked and does); stale (made from
-# another prompt, negative, mode, size or reference); locked_stale (locked,
-# and would be stale); failed (a regenerate asked for another one and its
-# call did not answer: ``pending`` is still set).
+# another prompt, negative, mode, size or reference, or on another link than
+# the episode's recorded image link); locked_stale (locked, and would be
+# stale); failed (a regenerate asked for another one and its call did not
+# answer: ``pending`` is still set).
 IMAGE_STATES = ("none", "current", "stale", "locked_stale", "failed")
+
+# "Read the episode's recorded image link from assets.json" (the default of
+# :func:`shot_state` and its callers, which pass it when they already have it).
+_READ = object()
 
 _FILE_MODE = 0o644
 _SEED_MODULUS = 2**31 - 2
@@ -198,6 +264,21 @@ class ShotFailed(Exception):
         self.failures = tuple(failures)
 
 
+class ClipFailed(Exception):
+    """One shot's clip was not made (phase 6 stage 8); ``reason`` says why
+    and what to do. The phase goes on with the next planned shot. ``record``
+    holds what the request was (link, route, length, estimate, prompt hash,
+    keyframe sha256, cache key) for the shot's failed ``assets.clip``;
+    ``still`` is true when the provider still holds the request (a poll ran
+    out: the next run collects it)."""
+
+    def __init__(self, reason, *, record=None, still=False):
+        super().__init__(reason)
+        self.reason = reason
+        self.record = dict(record or {})
+        self.still = still
+
+
 # ------------------------------------------------------------------ targets
 
 def shot_target(ep, shot_id) -> str:
@@ -206,6 +287,16 @@ def shot_target(ep, shot_id) -> str:
 
 def line_target(ep, line_id) -> str:
     return f"line:{ep}:{line_id}"
+
+
+def clip_target(ep, shot_id) -> str:
+    return f"shot:{ep}:{shot_id}:video"
+
+
+def animate_param(params) -> bool:
+    """The step's ``animate`` param: on unless sent false."""
+    value = (params or {}).get(ANIMATE_PARAM)
+    return True if value is None else bool(value)
 
 
 def image_name(shot_id, ext) -> str:
@@ -312,12 +403,20 @@ def shot_seed(shot, scene, *, story_id, ep, mode, entity_docs) -> int:
     return base_seed(shot, scene, story_id=story_id, ep=ep, mode=mode, entity_docs=entity_docs)
 
 
-def image_state(assets, *, expected_hash, file_ok) -> str:
+def served_link(assets):
+    """The link a shot's image was made on (``provider/model``), or None."""
+    return sticky_link.label(assets.get("provider"), assets.get("model"))
+
+
+def image_state(assets, *, expected_hash, file_ok, link=None) -> str:
     """One of :data:`IMAGE_STATES` for a shot's ``assets``: *expected_hash*
     is the :func:`prompt_hash` it would be made with now, *file_ok* whether
-    its recorded image is on disk."""
+    its recorded image is on disk, *link* the episode's recorded image link
+    (``links.image``; None: none) -- an image made on another is not fresh."""
     image = assets.get("image")
     fresh = bool(image) and file_ok and assets.get("prompt_hash") == expected_hash
+    if fresh and link is not None and not sticky_link.on_link(served_link(assets), link):
+        fresh = False
     if assets.get("locked"):
         if not image:
             return "none"
@@ -336,14 +435,27 @@ def route_of(link) -> str:
     return "paid" if gen.is_paid(link) else "free"
 
 
-def assets_fingerprint(storyboard, script, assets_doc, *, image_shas, audio_shas) -> str:
+def assets_fingerprint(storyboard, script, assets_doc, *, image_shas, audio_shas, clip_shas=None, tier=1) -> str:
     """sha256 over what an assets approval approves (plan phase 4,
     "Documents"): every shot's ``(prompt_hash, image sha256, locked)``, every
     line's ``(text hash, voice, audio sha256)``, and the SFX/BGM files
-    ``assets.json`` names. *image_shas* is ``{shot_id: sha256 | None}``,
+    ``assets.json`` names -- and, only when ``assets.json`` records them
+    (phase 6 stage 6), the episode's links (``links.<kind>.link``), so a
+    switch makes the approval stale; a document without ``links`` keeps the
+    fingerprint it always had. *image_shas* is ``{shot_id: sha256 | None}``,
     *audio_shas* ``{line_id: sha256 | None}`` (the files as they are now,
     :func:`current_fingerprint`). Durations, revisions, approvals and
-    timestamps are not in it: re-timing never makes an approval stale."""
+    timestamps are not in it: re-timing never makes an approval stale.
+
+    Phase 6 stage 7: a ``clips`` part -- the story's *tier*, and every
+    shot's effective flags (``keep_still``, ``animate``,
+    ``keep_native_audio``: :func:`clips.shot_flags`) with its clip record's
+    ``(state, link, prompt_hash, image_sha256)`` and its clip file's sha256
+    (*clip_shas*, ``{shot_id: sha256 | None}``) -- only when the story is at
+    tier >= 2, a shot has a clip record, or an override moves a shot's
+    flags. A tier-1 episode with none of these fingerprints byte for byte
+    as before (RC-V1); an override equal to the storyboard's own value
+    changes nothing."""
     assets_doc = assets_doc or {}
     bgm = assets_doc.get("bgm")
     payload = {
@@ -357,7 +469,28 @@ def assets_fingerprint(storyboard, script, assets_doc, *, image_shas, audio_shas
                 for cue in assets_doc.get("sfx") or []],
         "bgm": None if not bgm else [bgm["mood"], bgm["file"], bgm["sha256"]],
     }
+    links = assets_doc.get("links")
+    if links:
+        payload["links"] = {kind: entry.get("link") for kind, entry in links.items()}
+    clips_part = _clips_part(storyboard, assets_doc, clip_shas or {}, tier)
+    if clips_part is not None:
+        payload["clips"] = clips_part
     return _canonical_sha256(payload)
+
+
+def _clips_part(storyboard, assets_doc, clip_shas, tier):
+    """:func:`assets_fingerprint`'s ``clips`` part, or None when it has none."""
+    rows, recorded = [], False
+    for shot in storyboard["shots"]:
+        flags = clips.shot_flags(shot, assets_doc)
+        clip = shot["assets"].get("clip") or {}
+        recorded = recorded or bool(clip)
+        rows.append([shot["shot_id"], flags["keep_still"], flags["animate"], flags["keep_native_audio"],
+                     clip.get("state"), clip.get("link"), clip.get("prompt_hash"), clip.get("image_sha256"),
+                     clip_shas.get(shot["shot_id"])])
+    if int(tier) < 2 and not recorded and not clips.flags_moved(storyboard, assets_doc):
+        return None
+    return {"tier": int(tier), "shots": rows}
 
 
 # ------------------------------------------------------------ files on disk
@@ -499,44 +632,136 @@ def request_parts(ec, shot, *, note) -> dict:
             "hash": prompt_hash(prompt, negative, mode, SHOT_SIZE, ref_shas)}
 
 
-def shot_state(ec, shot) -> str:
+def _read_assets_doc(ec):
+    """The episode's ``assets.json``, or None -- also for one that does not
+    validate: a state is never refused over it (the step says so when it
+    writes the document)."""
+    try:
+        return episode_common.read_episode(ec, ASSETS_DOC)
+    except StepFailed:
+        return None
+
+
+def recorded_image_link(doc):
+    """The image link *doc* (``assets.json``) records for its episode, or None."""
+    entry = sticky_link.recorded(doc, sticky_link.IMAGE)
+    return entry["link"] if entry else None
+
+
+def shot_state(ec, shot, *, link=_READ) -> str:
     """:func:`image_state` of *shot* now: its hash recomputed with the note
-    its image was made with."""
+    its image was made with; *link* the episode's recorded image link (read
+    from ``assets.json`` unless given)."""
+    if link is _READ:
+        link = recorded_image_link(_read_assets_doc(ec))
     assets = shot["assets"]
     expected = request_parts(ec, shot, note=assets.get("note"))["hash"]
-    return image_state(assets, expected_hash=expected, file_ok=shot_image_path(ec, shot) is not None)
+    return image_state(assets, expected_hash=expected, file_ok=shot_image_path(ec, shot) is not None, link=link)
 
 
-def outdated_images(ec, storyboard) -> list:
+def outdated_images(ec, storyboard, *, link=_READ) -> list:
     """The ids of the shots whose image on disk is not the one to use now:
     stale (its framing, action or prompt changed since it was made: its
-    :func:`prompt_hash` moved) or failed (a regenerate asked another one) --
-    a locked shot keeps the image it has (DEC-155, as the assets approval
+    :func:`prompt_hash` moved; or it was made on another link than the one
+    the episode was switched to) or failed (a regenerate asked another one)
+    -- a locked shot keeps the image it has (DEC-155, as the assets approval
     takes it). What a render refuses (phase 5 stage 7): an assets approval's
     fingerprint holds each image's *recorded* hash, so it does not see the
     shot change under it."""
+    if link is _READ:
+        link = recorded_image_link(_read_assets_doc(ec))
     outdated = []
     for shot in storyboard["shots"]:
         if shot_image_path(ec, shot) is None:
             continue
-        state = shot_state(ec, shot)
+        state = shot_state(ec, shot, link=link)
         if state != "current" and not (shot["assets"].get("locked") and state == "locked_stale"):
             outdated.append(shot["shot_id"])
     return outdated
 
 
-def shots_to_make(ec, storyboard) -> list:
+def shots_to_make(ec, storyboard, *, link=_READ) -> list:
     """The shots the step makes an image for: neither locked nor current."""
+    if link is _READ:
+        link = recorded_image_link(_read_assets_doc(ec))
     return [shot for shot in storyboard["shots"]
-            if not shot["assets"].get("locked") and shot_state(ec, shot) != "current"]
+            if not shot["assets"].get("locked") and shot_state(ec, shot, link=link) != "current"]
+
+
+def image_kind(ec) -> str:
+    """The chain the episode's shot images are made on: IMAGE_CHAIN in
+    ``prompt_only`` mode, IMAGE_EDIT_CHAIN in ``references`` mode."""
+    return gen.IMAGE if ec.consistency_mode == PROMPT_ONLY else gen.IMAGE_EDIT
+
+
+def _chain_labels(kind, merged) -> list:
+    try:
+        return [describe(link) for link in gen.chain_from_env(kind, merged)]
+    except ChainError:
+        return []
+
+
+def episode_image_link(ec, storyboard, *, env=None, doc=_READ) -> dict:
+    """Which link the episode's shot images are made on now (A-087; calls
+    nothing, writes nothing)::
+
+        {"link": "<provider>/<model>" | None, "source": "record" | "derived" | None,
+         "since", "switched_from", "served": {shot_id: link}, "mixed": [link, ...]}
+
+    ``served`` maps each kept image -- current, or locked -- to the chain
+    link that made it. The link is ``assets.json``'s ``links.image`` when it
+    records one (*doc*, read unless given); else it is **derived** when every
+    kept image was made on one link; else there is none: no image yet, or a
+    legacy episode whose images mix links (``mixed`` names them), which
+    walks the chain per shot as before. A derived link is written as a
+    record only once the step serves an image with it."""
+    if doc is _READ:
+        doc = _read_assets_doc(ec)
+    entry = sticky_link.recorded(doc, sticky_link.IMAGE)
+    link = entry["link"] if entry else None
+    chain = _chain_labels(image_kind(ec), gating.merged_env(env))
+    served = {}
+    for shot in storyboard["shots"]:
+        if shot_image_path(ec, shot) is None:
+            continue
+        if not shot["assets"].get("locked") and shot_state(ec, shot, link=link) != "current":
+            continue
+        made_on = served_link(shot["assets"])
+        if made_on:
+            served[shot["shot_id"]] = sticky_link.head_of(made_on, chain)
+    info = {"link": link, "source": "record" if entry else None,
+            "since": entry.get("since") if entry else None,
+            "switched_from": entry.get("switched_from") if entry else None, "served": served, "mixed": []}
+    if entry is None:
+        links = list(dict.fromkeys(served.values()))
+        if len(links) == 1:
+            info.update(link=links[0], source="derived")
+        elif len(links) > 1:
+            info["mixed"] = links
+    return info
+
+
+def mixed_note(ec, info) -> str:
+    """The one line a legacy episode whose images mix links prints."""
+    counts = {}
+    for made_on in info["served"].values():
+        counts[made_on] = counts.get(made_on, 0) + 1
+    parts = [f"{made_on} made {count} shot{'s' if count != 1 else ''}" for made_on, count in counts.items()]
+    return (f"ℹ️ Episode {ec.ep} mixes image links ({_and(parts)}), so it keeps none: each shot walks "
+            f"{gen.ENV_NAMES[image_kind(ec)]} as before. Choose one with the assets edit "
+            "{\"links\": {\"image\": \"<link>\"}}: the shots made on the others are then made again on it.")
 
 
 def current_fingerprint(ec, storyboard, script, assets_doc) -> str:
-    """:func:`assets_fingerprint` over the files as they are now."""
+    """:func:`assets_fingerprint` over the files as they are now, at the
+    story's tier."""
     image_shas = {shot["shot_id"]: _sha256_file(shot_image_path(ec, shot)) for shot in storyboard["shots"]}
     audio_shas = {line["line_id"]: _sha256_file(line_audio_path(ec, line))
                   for scene in script["scenes"] for line in scene["lines"]}
-    return assets_fingerprint(storyboard, script, assets_doc, image_shas=image_shas, audio_shas=audio_shas)
+    clip_shas = {shot["shot_id"]: _sha256_file(clips.shot_clip_path(ec, shot)) for shot in storyboard["shots"]
+                 if shot["assets"].get("video")}
+    return assets_fingerprint(storyboard, script, assets_doc, image_shas=image_shas, audio_shas=audio_shas,
+                              clip_shas=clip_shas, tier=clips.tier_of(ec))
 
 
 # ------------------------------------------------------------- preconditions
@@ -616,14 +841,23 @@ def _alignment_requests(ec, script, *, align_words) -> int:
     return count
 
 
-def image_quote(ec, qty, *, env, story_spent, adapters=None, probe_local=False, transport=None) -> dict:
+def image_quote(ec, qty, *, env, story_spent, adapters=None, probe_local=False, transport=None, storyboard=None,
+                link_info=None) -> dict:
     """What *qty* shot images would cost on the story's route and in its
     consistency mode, calling nothing (a local editor is probed only with
     *probe_local*): ``imaging.estimate``'s answer on IMAGE_CHAIN in
     ``prompt_only`` mode, ``refimages.edit_readiness``' on IMAGE_EDIT_CHAIN in
     ``references`` mode -- ``{est_usd, route_class, link, links, ready,
     message, ...}``. :func:`asset_units` prices the shots to make with it;
-    the fast track's estimate prices the shots it predicts."""
+    the fast track's estimate prices the shots it predicts.
+
+    With the episode's image link (*link_info*, :func:`episode_image_link`,
+    and its *storyboard*) the images are priced on that link alone
+    (:func:`_sticky_quote`) and the answer gains ``sticky``; without one,
+    it is the chain's answer above, unchanged."""
+    if link_info and link_info.get("link") and storyboard is not None:
+        return _sticky_quote(ec, qty, link_info, storyboard, env=env, story_spent=story_spent, adapters=adapters,
+                             probe_local=probe_local, transport=transport)
     story = ec.story
     if ec.consistency_mode != PROMPT_ONLY:
         return refimages.edit_readiness(story, env=env, qty=qty, story_spent=story_spent, adapters=adapters,
@@ -634,13 +868,223 @@ def image_quote(ec, qty, *, env, story_spent, adapters=None, probe_local=False, 
                             when="the assets step runs")
 
 
-def spending_caps(ec, total, *, env, ledger=None) -> tuple:
+_WHAT, _WHEN = "the shot images", "the assets step runs"
+
+
+def _chain_rows(ec, qty, *, env, story_spent, adapters) -> dict:
+    """``imaging.estimate`` of *qty* shot images on the episode's chain: a
+    row per link through the runner's gates, calling nothing."""
+    kind = image_kind(ec)
+    request = gen.GenRequest(kind=kind, width=SHOT_SIZE[0], height=SHOT_SIZE[1])
+    return imaging.estimate(kind, env, route=ec.story["generation_profile"]["route"], request=request, qty=qty,
+                            story_spent=story_spent, adapters=adapters, step=STEP, what=_WHAT, when=_WHEN)
+
+
+def _local_status(kind, label, env, adapters, transport) -> tuple:
+    """A local link's answer to "are you there" (its adapter's cached status
+    probe when it has one, else its probe; ``refimages._ask_status``'s rule,
+    duplicated: a private helper of another module): ``(ok, note)``."""
+    provider, _, model = label.partition("/")
+    link = Link(provider, model)
+    adapter = gen.adapter_for(kind, provider, adapters)
+    if adapter is None:
+        return True, None  # nothing to ask: the runner decides
+    merged = gating.merged_env(env)
+    probe = getattr(adapter, "probe_cached", None) or adapter.probe
+    kwargs = {"credentials": gen.credentials_for(link, merged), "env": merged}
+    if transport is not None:
+        kwargs["transport"] = transport
+    try:
+        return probe(link, **kwargs)
+    except Exception as exc:  # noqa: BLE001 - a probe that breaks is a server that is not there
+        return False, f"{type(exc).__name__}: {exc}"
+
+
+def _sticky_quote(ec, qty, link_info, storyboard, *, env, story_spent, adapters, probe_local, transport) -> dict:
+    """:func:`image_quote` on the episode's image link alone: the chain's
+    row for that link (the runner's gates, calling nothing; a local link is
+    asked whether it is there with *probe_local*) decides; ``links`` is that
+    row. A link that cannot run is **gone** for now: ``ready`` false and
+    ``sticky.gone`` the offer (:func:`sticky_offer`) -- never the next link."""
+    link = link_info["link"]
+    kind = image_kind(ec)
+    quote = _chain_rows(ec, qty, env=env, story_spent=story_spent, adapters=adapters)
+    sticky = {"link": link, "source": link_info["source"], "since": link_info["since"],
+              "switched_from": link_info["switched_from"], "gone": None}
+    if not quote["links"]:
+        return dict(quote, sticky=sticky)  # the chain or the budget cannot be used: its own sentence
+    row = next((row for row in quote["links"] if row["link"] == link), None)
+    why = None
+    if row is None:
+        why = f"it is not a link of {gen.ENV_NAMES[kind]} any more"
+    elif row["status"] != "runnable":
+        why = row["reason"]
+    elif probe_local and qty and link.startswith("local/"):
+        ok, note = _local_status(kind, link, env, adapters, transport)
+        if not ok:
+            why = note or "not reachable"
+    if why is None:
+        verdict = imaging.verdict(kind, [row], route=ec.story["generation_profile"]["route"], qty=qty, step=STEP,
+                                  what=_WHAT, when=_WHEN)
+        return dict(verdict, sticky=sticky)
+    gone = sticky_offer(ec, storyboard, link, why=why, env=env, story_spent=story_spent, adapters=adapters,
+                        paid=bool(row and row["paid"]))
+    sticky["gone"] = gone.as_dict()
+    return dict(imaging.blocked(STEP, qty, [row] if row else [], str(gone)), sticky=sticky)
+
+
+def sticky_offer(ec, storyboard, link, *, why, env, story_spent, adapters=None, paid=False,
+                 before_any_call=True) -> StickyLinkGone:
+    """The stop-and-ask of an episode whose image link *link* cannot serve
+    (*why*), calling nothing: the next runnable link of the chain (in chain
+    order, the link's own model swaps left out), the shots a switch makes
+    again -- the unlocked current images *link* made -- with the shots still
+    to make, and what they would cost on that next link."""
+    kind = image_kind(ec)
+    todo = [shot["shot_id"] for shot in shots_to_make(ec, storyboard, link=link)]
+    redo = [shot["shot_id"] for shot in storyboard["shots"]
+            if shot["shot_id"] not in todo and not shot["assets"].get("locked")
+            and shot_image_path(ec, shot) is not None and sticky_link.on_link(served_link(shot["assets"]), link)]
+    own = sticky_link.family(link)
+    rows = _chain_rows(ec, max(1, len(todo) + len(redo)), env=env, story_spent=story_spent,
+                       adapters=adapters)["links"]
+    others = [row for row in rows if row["link"] not in own]
+    nxt = next((row for row in others if row["status"] == "runnable"), None)
+    route = None
+    if nxt is not None:
+        route = "paid" if nxt["paid"] else ("local" if nxt["link"].startswith("local/") else "free")
+    return StickyLinkGone(
+        ep=ec.ep, link=link, why=str(why).rstrip(". "), chain=gen.ENV_NAMES[kind],
+        next_link=nxt["link"] if nxt else None, next_route=route,
+        next_reason=None if nxt else "; ".join(f"{row['link']}: {row['reason']}" for row in others) or None,
+        redo=redo, todo=todo, est_usd=nxt["est_usd"] if nxt and nxt["paid"] else 0.0, paid=paid,
+        before_any_call=before_any_call)
+
+
+def link_gone(units):
+    """The offer of an :func:`asset_units` plan whose image link is gone
+    (``images.sticky.gone``), or None."""
+    return ((units["images"].get("sticky") or {}).get("gone")) if units["images"]["count"] else None
+
+
+def link_switch(ec, value, *, env, errors) -> dict:
+    """``{"image"?: link, "video"?: link}``: the links an assets edit's
+    ``links`` (``{"image"?: "<link>", "video"?: "<link>"}``) switches the
+    episode to -- empty when nothing is asked, or *errors* gained why not.
+    ``image`` must be a link of the episode's image chain (IMAGE_CHAIN, or
+    IMAGE_EDIT_CHAIN in ``references`` mode); ``video`` (phase 6 stage 11)
+    a link of VIDEO_CHAIN, or the local ComfyUI (``clips.LOCAL_LINK``). The
+    chains are the ones *env* -- the Settings values -- names."""
+    if not isinstance(value, dict):
+        errors.append("links: expected an object {image?, video?}")
+        return {}
+    extra = sorted(set(map(str, value)) - set(sticky_link.KINDS))
+    if extra:
+        errors.append(f"links: unknown key(s) {', '.join(extra)} (editable: {', '.join(sticky_link.KINDS)})")
+    merged = gating.merged_env(env)
+    wanted = {}
+    for slot in sticky_link.KINDS:
+        if slot not in value:
+            continue
+        kind = image_kind(ec) if slot == sticky_link.IMAGE else gen.VIDEO
+        try:
+            chain = [describe(link) for link in gen.chain_from_env(kind, merged)]
+        except ChainError as exc:
+            errors.append(f"links.{slot}: {gen.ENV_NAMES[kind]} cannot be used ({exc})")
+            continue
+        allowed = chain if slot == sticky_link.IMAGE else chain + [link for link in (clips.LOCAL_LINK,)
+                                                                   if link not in chain]
+        link = value[slot]
+        if not isinstance(link, str) or link not in allowed:
+            errors.append(f"links.{slot}: {link!r} is not a link of {gen.ENV_NAMES[kind]} (its links: "
+                          f"{', '.join(chain)})")
+            continue
+        wanted[slot] = link
+    return wanted
+
+
+def switched_assets_doc(ec, storyboard, doc, wanted, *, env, now):
+    """*doc* (``assets.json``, or None: a minimal one is started) with the
+    episode's image link switched to *wanted* -- ``links.image {link:
+    wanted, since: now, switched_from: the link it had}`` -- or None when
+    that is already its link (recorded, or derived from its images). Only
+    the user switches (A-087): the images another link made are then stale
+    (:func:`image_state`), the next run makes exactly those again, and the
+    assets approval goes stale with the fingerprint's ``links``; the
+    storyboard is not touched."""
+    info = episode_image_link(ec, storyboard, env=env, doc=doc)
+    if info["link"] == wanted:
+        return None
+    if doc is None:
+        doc = {"$schema": schemas.EPISODE_ASSETS_SCHEMA_NAME, "ep": ec.ep, "lines": {}, "sfx": [], "bgm": None,
+               "approved": None, "created_at": now, "updated_at": now}
+    new = copy.deepcopy(doc)
+    new["links"] = dict(new.get("links") or {})
+    new["links"][sticky_link.IMAGE] = sticky_link.record(wanted, now=now, switched_from=info["link"])
+    return new
+
+
+def switched_video_doc(ec, doc, wanted, *, now):
+    """*doc* (``assets.json``, or None: a minimal one is started) with the
+    episode's video link switched to *wanted* -- ``links.video {link:
+    wanted, since: now, switched_from: the link it had}`` -- or None when
+    that is already its recorded link (phase 6 stage 11, A-087). Only the
+    user switches: the clips another link made are then stale
+    (``clips.clip_state`` reads the record), the next run animates exactly
+    those again on *wanted*, and the assets approval goes stale with the
+    fingerprint's ``links``; the storyboard -- its clip records, its
+    approval -- is not touched."""
+    entry = sticky_link.recorded(doc, sticky_link.VIDEO)
+    current = entry["link"] if entry else None
+    if current == wanted:
+        return None
+    new = copy.deepcopy(doc) if doc is not None else _minimal_assets_doc(ec, now)
+    new["links"] = dict(new.get("links") or {})
+    new["links"][sticky_link.VIDEO] = sticky_link.record(wanted, now=now, switched_from=current)
+    return new
+
+
+def overridden_assets_doc(ec, doc, changes, *, now):
+    """*doc* (``assets.json``, or None: a minimal one is started) with the
+    per-shot overrides *changes* (``{shot_id: {flag: True | False | None}}``,
+    ``schemas.SHOT_OVERRIDE_FLAGS``; None clears the flag) applied to its
+    ``shots`` map -- an entry left empty is dropped, and so is an empty map
+    -- or None when nothing changes (phase 6 stage 7,
+    ``workflow.patch_assets``). The storyboard is never touched, and the
+    approval is kept: the fingerprint's ``clips`` part decides whether it
+    is stale (:func:`assets_fingerprint`)."""
+    base = doc if doc is not None else {
+        "$schema": schemas.EPISODE_ASSETS_SCHEMA_NAME, "ep": ec.ep, "lines": {}, "sfx": [], "bgm": None,
+        "approved": None, "created_at": now, "updated_at": now}
+    shots = {shot_id: dict(entry) for shot_id, entry in (base.get("shots") or {}).items()}
+    for shot_id, flags in changes.items():
+        entry = shots.get(shot_id, {})
+        for name, value in flags.items():
+            if value is None:
+                entry.pop(name, None)
+            else:
+                entry[name] = value
+        if entry:
+            shots[shot_id] = {name: entry[name] for name in schemas.SHOT_OVERRIDE_FLAGS if name in entry}
+        else:
+            shots.pop(shot_id, None)
+    if shots == (base.get("shots") or {}):
+        return None
+    new = copy.deepcopy(base)
+    new.pop("shots", None)
+    if shots:
+        new["shots"] = {shot_id: shots[shot_id] for shot_id in sorted(shots)}
+    return new
+
+
+def spending_caps(ec, total, *, env, ledger=None, video=None) -> tuple:
     """``(caps, over_cap)`` for a plan that would spend *total* paid
     dollars on episode *ec.ep*: ``caps`` is ``{"allow_paid", "episode"|"day"|
     "story": {"cap_usd", "spent_usd", "left_usd"}}`` (the three only when the
     budget settings read), ``over_cap`` the budget's refusal of *total* --
     the episode's cap included -- with the numbers, when paid is on; else
-    None. Calls nothing."""
+    None. Calls nothing. With *video* (``asset_units``' ``video`` part, phase
+    6 stage 7) the refusal names the clips' numbers too."""
     ledger = ledger or _open_ledger(ec)
     story_spent = float(ledger.totals()["est_usd"])
     ep_spent = float(ledger.totals(ec.ep)["est_usd"])
@@ -657,7 +1101,12 @@ def spending_caps(ec, total, *, env, ledger=None) -> tuple:
             caps[name] = {"cap_usd": cap, "spent_usd": round(spent, 4), "left_usd": round(max(0.0, cap - spent), 4)}
     over_cap = None
     if budget_obj is not None and budget_obj.allow_paid and total > 0:
-        plan = SimpleNamespace(est_usd=total, link=f"episode {ec.ep}'s paid images and voices")
+        what = "paid images and voices"
+        if video:
+            count = video["count"]
+            what = (f"paid images, voices and {count} clip{'' if count == 1 else 's'} ({video['seconds']} s on "
+                    f"{video['link']}, est ${video['est_usd']:.3f})")
+        plan = SimpleNamespace(est_usd=total, link=f"episode {ec.ep}'s {what}")
         try:
             budget_mod.check(plan, None, budget=budget_obj, day_spent=day_spent, ep_spent=ep_spent,
                              story_spent=story_spent)
@@ -666,8 +1115,24 @@ def spending_caps(ec, total, *, env, ledger=None) -> tuple:
     return caps, over_cap
 
 
+def on_route(ec, route):
+    """*ec* as though its story were on *route* (``auto``, ``local``,
+    ``api``): a copy whose story's ``generation_profile.route`` is *route*,
+    to price another route without patching the story (``GET
+    /estimate/assets?route=``, phase 6 stage 11) -- nothing is written; *ec*
+    itself when *route* is None or already the story's. ``ValueError`` for
+    any other route."""
+    profile = ec.story["generation_profile"]
+    if route is None or route == profile["route"]:
+        return ec
+    if route not in defaults.ROUTES:
+        raise ValueError(f"the route must be one of {', '.join(defaults.ROUTES)}, not {route!r}")
+    story = dict(ec.story, generation_profile=dict(profile, route=route))
+    return dataclasses.replace(ec, story=story)
+
+
 def asset_units(ec, script, storyboard, *, env, align_words=False, adapters=None, probe_local=False,
-                transport=None, ledger=None) -> dict:
+                transport=None, ledger=None, animate=True, route=None) -> dict:
     """What the assets step would do and spend now, calling nothing (a local
     editor is asked whether it is there only with *probe_local*: the DEC-117
     status probe, never a generation)::
@@ -680,20 +1145,44 @@ def asset_units(ec, script, storyboard, *, env, align_words=False, adapters=None
          "caps": {"allow_paid", "episode"|"day"|"story": {"cap_usd", "spent_usd", "left_usd"}},
          "est_usd": x, "over_cap": sentence | None, "ready": bool}
 
+    and, only at the story's ``generation_profile.tier`` >= 2 (phase 6 stage
+    7; a tier-1 answer is byte for byte what it was), ``"video"``
+    (``clips.video_units``: the planner's clips on the episode's video link,
+    seconds x price) after ``alignment``.
+
     ``images`` prices every shot neither locked nor current at the first
     link that would run on the story's route (the image estimate of
     ``imaging``; in ``references`` mode ``refimages.edit_readiness``, whose
-    ``ready`` false is DEC-117's "stop and ask"). ``voices`` prices the TTS
+    ``ready`` false is DEC-117's "stop and ask") -- or, once the episode has
+    an image link (:func:`episode_image_link`), on that link alone, with
+    ``images.sticky`` ``{link, source, since, switched_from, gone}``: ``gone``
+    is the stop-and-ask offer when the link cannot serve (``ready`` false,
+    ``StickyLinkGone.as_dict``). ``voices`` prices the TTS
     characters of every line without current audio at each pinned voice's
     price. ``est_usd`` is the paid part of both; ``over_cap`` is the budget's
     refusal of it -- the episode's cap included -- when paid is on, with the
     numbers. ``ready``: the images can run (or there are none), every line
-    has a voice that can run, and nothing is over a cap.
+    has a voice that can run, and nothing is over a cap. At tier >= 2 the
+    clips to buy are in ``est_usd`` (when they can run) and ``over_cap``
+    (with their numbers), the paid video link in ``paid_links``, and
+    ``ready`` needs ``video.ready`` too; what the episode spent and the rest
+    of the paid part are committed before the planner spends the episode's
+    cap on clips.
+
+    With *animate* off (the step's ``animate`` param, phase 6 stage 8) the
+    ``video`` part is still shown -- ``animate`` false, its message saying so
+    -- but it is left out of the total, ``over_cap``, ``paid_links`` and
+    ``ready``: the run makes no clip.
+
+    *route* (phase 6 stage 11) prices everything on that route instead of
+    the story's own (:func:`on_route`), writing nothing.
     """
+    ec = on_route(ec, route)
     ledger = ledger or _open_ledger(ec)
     story_spent = float(ledger.totals()["est_usd"])
 
-    todo = shots_to_make(ec, storyboard)
+    doc = _read_assets_doc(ec)
+    todo = shots_to_make(ec, storyboard, link=recorded_image_link(doc))
     mode = ec.consistency_mode
     kind = gen.IMAGE if mode == PROMPT_ONLY else gen.IMAGE_EDIT
     if not todo:
@@ -701,13 +1190,18 @@ def asset_units(ec, script, storyboard, *, env, align_words=False, adapters=None
                   "message": "Every shot has its image."}
     else:
         images = image_quote(ec, len(todo), env=env, story_spent=story_spent, adapters=adapters,
-                             probe_local=probe_local, transport=transport)
+                             probe_local=probe_local, transport=transport, storyboard=storyboard,
+                             link_info=episode_image_link(ec, storyboard, env=env, doc=doc))
+    sticky = images.get("sticky")
     images = {
         "shots": [shot["shot_id"] for shot in todo], "count": len(todo), "kind": kind,
         "chain": gen.ENV_NAMES[kind], "consistency": mode, "route_class": images["route_class"],
         "link": images["link"], "est_usd": float(images["est_usd"] or 0.0), "links": images["links"],
         "ready": images["ready"], "message": images["message"],
     }
+    if sticky is not None:
+        # The episode's image link (A-087): {link, source, since, switched_from, gone}.
+        images["sticky"] = sticky
     voices_est = voice_lines.measure_estimate(ec, script, env=env, adapters=adapters)
 
     paid_links = [{"kind": kind, "link": row["link"], "allowed": row["status"] == "runnable",
@@ -720,38 +1214,413 @@ def asset_units(ec, script, storyboard, *, env, align_words=False, adapters=None
 
     images_paid = images["est_usd"] if images["route_class"] == "paid" else 0.0
     voices_paid = sum(row["est_usd"] for row in voices_est["voices"] if row["paid"])
-    total = round(images_paid + voices_paid, 4)
-    caps, over_cap = spending_caps(ec, total, env=env, ledger=ledger)
-    return {
+    video, video_paid = None, 0.0
+    if clips.tier_of(ec) >= 2:
+        video = _video_units(ec, script, storyboard, doc, env=env, ledger=ledger, adapters=adapters,
+                             probe_local=probe_local, transport=transport, committed=images_paid + voices_paid)
+        video["animate"] = bool(animate)
+        if not animate:
+            video["message"] = f"Animate off: no clip is made in this run. {video['message']}".strip()
+        elif video["route_class"] == "paid" and video["count"]:
+            paid_links.append({"kind": gen.VIDEO, "link": video["link"], "allowed": video["ready"],
+                               "reason": video["refused"] or "paid, allowed", "est_usd": video["est_usd"]})
+            if video["ready"]:
+                video_paid = video["est_usd"]
+    total = round(images_paid + voices_paid + video_paid, 4)
+    caps, over_cap = spending_caps(ec, total, env=env, ledger=ledger, video=video if video_paid else None)
+    units = {
         "images": images, "voices": voices_est,
         "alignment": {"opted_in": bool(align_words),
                       "requests": _alignment_requests(ec, script, align_words=align_words)},
+    }
+    if video is not None:
+        units["video"] = video
+    units.update({
         "paid_links": paid_links, "caps": caps, "est_usd": total, "over_cap": over_cap,
         "ready": images["ready"] and voices_est["ready"] and over_cap is None,
-    }
+    })
+    if video is not None and animate:
+        units["ready"] = bool(units["ready"] and video["ready"])
+    return units
+
+
+def _video_units(ec, script, storyboard, doc, *, env, ledger, adapters, probe_local, transport, committed):
+    """``clips.video_units`` for :func:`asset_units`: the caps as they stand
+    (the episode's bounds the plan), and committed before any clip what the
+    episode's ledger already holds -- every kind, as the per-episode cap
+    counts it -- plus *committed*, the rest of this estimate's paid part."""
+    caps, _over = spending_caps(ec, 0.0, env=env, ledger=ledger)
+    spent = float((caps.get("episode") or {}).get("spent_usd") or 0.0)
+    return clips.video_units(ec, script, storyboard, doc, env=env, caps=caps, committed_usd=spent + committed,
+                             adapters=adapters, probe_local=probe_local, transport=transport,
+                             image_sha=lambda shot: _sha256_file(shot_image_path(ec, shot)),
+                             booked=_clip_booked(ec, script, doc))
+
+
+# -------------------------------------------------------------- the clips
+
+def _minimal_assets_doc(ec, now) -> dict:
+    """An ``assets.json`` with nothing in it yet, for a record that needs one."""
+    return {"$schema": schemas.EPISODE_ASSETS_SCHEMA_NAME, "ep": ec.ep, "lines": {}, "sfx": [], "bgm": None,
+            "approved": None, "created_at": now, "updated_at": now}
+
+
+def _video_summary(video, *, animate) -> dict:
+    """The step summary's ``video`` before the phase: nothing made yet."""
+    return {"animate": bool(animate), "planned": len(video["plan"]) if animate else 0, "made": 0, "reused": 0,
+            "failed": [], "seconds": 0, "usd": 0.0, "link": video["link"], "route": video["route_class"]}
+
+
+def clip_seed(shot, *, story_id, ep) -> int:
+    """The seed of the next request for *shot*'s clip: a re-animate's
+    ``pending`` seed when one is left (DEC-154), else the seed its keyframe
+    was made with -- the shot image's own -- else :func:`derive_seed`."""
+    pending = (shot["assets"].get("clip") or {}).get("pending")
+    if pending:
+        return pending["seed"]
+    seed = _seed_value(shot["assets"].get("seed"))
+    return seed if seed is not None else derive_seed(story_id, ep, shot["shot_id"])
+
+
+def clip_request(ec, shot, script, *, link, template, clip_s, seed, note, flags, tier, out_dir=""):
+    """``(parts, request)``: the prompt parts of *shot*'s clip
+    (``clips.clip_request_parts``) and the ``GenRequest`` the video phase
+    sends for it -- its keyframe the shot's image, its length *clip_s*, its
+    seed, the local template in ``extra`` -- whose cache key is the one the
+    generation journal keeps it under (``out_dir`` and the name are not in
+    the key). ``ValueError`` for a prompt that cannot be built."""
+    parts = clips.clip_request_parts(ec, shot, script, tier=tier, flags=flags, note=note)
+    extra = {"name": f"shot_{shot['shot_id'][2:]}"}
+    if template:
+        extra["template"] = template
+    request = gen.GenRequest(kind=gen.VIDEO, prompt=parts["prompt"], negative=parts["negative"], width=SHOT_SIZE[0],
+                             height=SHOT_SIZE[1], seed=seed, references=(shot_image_path(ec, shot),),
+                             duration_s=int(clip_s), native_audio=parts["native_audio"], out_dir=out_dir, extra=extra)
+    return parts, request
+
+
+def _clip_booked(ec, script, doc):
+    """``booked(shot, *, link, clip_s, template)`` for ``clips.video_units``:
+    whether the story's generation journal holds *shot*'s next clip request
+    -- the very one the video phase would send (:func:`clip_request`) --
+    bought: ``submitted`` and booked (the provider holds it: the next run
+    collects it) or ``done`` with its clip kept intact. Such a clip costs
+    nothing more (DEC-152), so the plan never charges it twice. Reads the
+    journal only: never books, never calls. None without a cache folder."""
+    try:
+        root = ec.store.gen_cache_dir(ec.story_id)
+    except KeyError:
+        return None
+    cache = gencache.GenCache(root, book=lambda _entry: None)
+    tier = clips.tier_of(ec)
+
+    def booked(shot, *, link, clip_s, template):
+        if shot_image_path(ec, shot) is None:
+            return False
+        try:
+            _parts, request = clip_request(ec, shot, script, link=link, template=template, clip_s=clip_s,
+                                           seed=clip_seed(shot, story_id=ec.story_id, ep=ec.ep),
+                                           note=clip_note(shot), flags=clips.shot_flags(shot, doc), tier=tier)
+            key = gencache.request_key(gen.VIDEO, link, request)
+            entry = cache.lookup(key) if key else None
+        except (gencache.JournalError, KeyError, ValueError, OSError):
+            return False
+        if not entry or not entry.get("booked"):
+            return False
+        if entry.get("state") == gencache.SUBMITTED:
+            return True
+        if entry.get("state") != gencache.DONE:
+            return False
+        files = (entry.get("output") or {}).get("files") or []
+        return bool(files) and all(_sha256_file(cache.file_path(item.get("file") or "")) == item.get("sha256")
+                                   for item in files)
+
+    return booked
+
+
+def clip_note(shot):
+    """The note *shot*'s next clip is asked with: a re-animate's pending one,
+    else the one its clip was made with."""
+    clip = shot["assets"].get("clip") or {}
+    pending = clip.get("pending")
+    return pending.get("note") if pending else clip.get("note")
+
+
+def keyframe_problem(ec, shot, *, link=_READ):
+    """Why *shot*'s image cannot be its clip's first frame now, or None: it
+    must be on disk and current (a locked image is taken as it is, as the
+    render takes it). *link* the episode's recorded image link."""
+    if shot_image_path(ec, shot) is None:
+        return "keyframe (the shot's image) is not made yet: make it first (the assets step)"
+    state = shot_state(ec, shot, link=link)
+    if state == "current" or (shot["assets"].get("locked") and state == "locked_stale"):
+        return None
+    return (f"keyframe (the shot's image) is {state.replace('_', ' ')}: make it again first (the assets step, or "
+            f"regenerate '{shot_target(ec.ep, shot['shot_id'])}')")
+
+
+def _plan_text(video) -> str:
+    rows = (video or {}).get("plan") or []
+    if not rows:
+        return f"no clip{' on ' + video['link'] if (video or {}).get('link') else ''}"
+    return (", ".join(f"{row['shot_id']} {row['clip_s']} s ${float(row['est_usd']):.3f}" for row in rows)
+            + f" on {video['link']}")
+
+
+def _plan_key(video):
+    return ((video or {}).get("link"),
+            [(row["shot_id"], int(row["clip_s"]), round(float(row["est_usd"]), 4))
+             for row in (video or {}).get("plan") or []])
+
+
+def plan_moved(ec, before, now):
+    """RC-V6: the refusal when the clips' plan *now* (derived once as the
+    video phase starts) is not the one the step's check saw (*before*) --
+    other shots, lengths, prices or link, because prices, spend or caps
+    moved -- or None. A run never buys other clips than its estimate
+    listed: it stops, naming both."""
+    if _plan_key(before) == _plan_key(now):
+        return None
+    return (f"Episode {ec.ep}'s clips were not made: their plan moved since this run's estimate (prices, spend or "
+            f"caps changed), and a run buys only the clips its estimate listed. The estimate: {_plan_text(before)}. "
+            f"Now: {_plan_text(now)}. No clip was asked; the images and voices made in this run are kept. Run the "
+            "assets step again: its estimate is the new plan.")
+
+
+def video_offer(ec, storyboard, link, *, why, env, adapters=None, todo=(), paid=False,
+                before_any_call=True) -> StickyLinkGone:
+    """The stop-and-ask of an episode whose video link *link* cannot serve
+    (*why*), calling nothing (``StickyLinkGone`` kind ``video``): the next
+    hosted link of VIDEO_CHAIN that could run (in chain order, keyed, paid
+    on; the link's own model swaps left out), the clips a switch would make
+    again -- the current ones *link* made -- with *todo*, the ones still to
+    make, and what they would cost there."""
+    merged = gating.merged_env(env)
+    try:
+        chain = gen.chain_from_env(gen.VIDEO, merged)
+    except ChainError:
+        chain = []
+    own = sticky_link.family(link)
+    rows = [row for row in clips.hosted_rows(chain, merged, adapters) if row["link"] not in own]
+    try:
+        allow = gating.budget_of(merged).allow_paid
+    except ValueError:
+        allow = False
+    keyed = [row for row in rows if row["status"] == "keyed"]
+    nxt = keyed[0] if keyed and allow else None
+    todo = list(todo)
+    redo = [shot["shot_id"] for shot in storyboard["shots"]
+            if shot["shot_id"] not in todo and (shot["assets"].get("clip") or {}).get("state") == "current"
+            and sticky_link.on_link((shot["assets"].get("clip") or {}).get("link"), link)]
+    est = 0.0
+    if nxt is not None:
+        durations = {shot["shot_id"]: max(float(shot["duration_s"] or 0.0), 0.01) for shot in storyboard["shots"]}
+        est = sum(video_plan.requested_seconds(nxt["link"], durations[shot_id]) * nxt["price_per_second"]
+                  for shot_id in redo + todo)
+    next_reason = None
+    if nxt is None:
+        next_reason = ("allow_paid is off" if keyed
+                       else "; ".join(f"{row['link']}: {row['reason']}" for row in rows) or None)
+    return StickyLinkGone(
+        ep=ec.ep, link=link, why=str(why).rstrip(". "), chain=gen.ENV_NAMES[gen.VIDEO],
+        next_link=nxt["link"] if nxt else None, next_route="paid" if nxt else None, next_reason=next_reason,
+        redo=redo, todo=todo, est_usd=est, paid=paid, before_any_call=before_any_call, kind=sticky_link.VIDEO)
+
+
+def open_clip_request(ec, keys):
+    """The generation journal's entry under one of *keys* that is still open
+    -- ``sending`` or ``submitted``: the provider may hold it, billed -- or
+    None. An entry that cannot be read counts as open (it may hold a paid
+    request). Reads the journal only: never books, never calls."""
+    try:
+        root = ec.store.gen_cache_dir(ec.story_id)
+    except KeyError:
+        return None
+    cache = gencache.GenCache(root, book=lambda _entry: None)
+    for key in dict.fromkeys(key for key in keys if key):
+        try:
+            entry = cache.lookup(key)
+        except gencache.JournalError as exc:
+            return {"key": key, "state": "unreadable", "note": str(exc)}
+        except ValueError:
+            continue
+        if entry and entry.get("state") in (gencache.SENDING, gencache.SUBMITTED):
+            return entry
+    return None
+
+
+def pending_clip_keys(ec, script, shot, doc, *, link=None) -> list:
+    """The generation-journal keys a re-animate's ``pending`` request of
+    *shot* (DEC-154: its seed and note kept before the call) may have been
+    sent under on *link* -- the episode's video link, else the one its clip
+    records -- or ``[]`` when none is pending. Its length is the one the
+    planner asks for the shot (``video_plan.requested_seconds``) or its
+    clip's own; on a local ComfyUI each shipped workflow's
+    (``hardware.VIDEO_WORKFLOWS``: which one ran is the server's card, not
+    asked here). What the render's refusal checks with
+    :func:`open_clip_request` when the storyboard still holds the old clip's
+    key -- the process stopped after the provider took the request, before
+    its answer was recorded (phase 6 stage 11). Reads files only."""
+    clip = shot["assets"].get("clip") or {}
+    pending = clip.get("pending")
+    link = link or clip.get("link")
+    if not pending or not link or shot_image_path(ec, shot) is None:
+        return []
+    duration = max(float(shot["duration_s"] or 0.0), 0.01)
+    options = [(None, None)]
+    if link.startswith("local/"):
+        options = []
+        for template in dict.fromkeys(hardware.VIDEO_WORKFLOWS.values()):
+            try:
+                options.append((template, local_comfyui.video_clip_lengths(template)))
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
+    flags, tier = clips.shot_flags(shot, doc), clips.tier_of(ec)
+    keys = []
+    for template, lengths in options:
+        seconds = [int(clip["clip_s"])] if clip.get("clip_s") else []
+        try:
+            seconds.insert(0, video_plan.requested_seconds(link, duration, lengths=lengths))
+        except ValueError:
+            pass
+        for clip_s in dict.fromkeys(seconds):
+            try:
+                _parts, request = clip_request(ec, shot, script, link=link, template=template, clip_s=clip_s,
+                                               seed=pending["seed"], note=pending.get("note"), flags=flags, tier=tier)
+                key = gencache.request_key(gen.VIDEO, link, request)
+            except (KeyError, ValueError, OSError):
+                continue
+            if key:
+                keys.append(key)
+    return keys
+
+
+def still_generating(shot, entry) -> str:
+    """The refusal of a re-animate while *shot*'s clip request *entry* is
+    still open (:func:`open_clip_request`): Continue alone collects it."""
+    request_id = (entry.get("request") or {}).get("request_id")
+    held = f"request {request_id}" if request_id else f"journal entry {str(entry.get('key'))[:12]}"
+    return (f"shot {shot['shot_id']}'s clip is still generating ({held} is {entry.get('state')} on "
+            f"{entry.get('link') or 'its video link'}): {CONTINUE_ONLY}. Asking again now would buy a second clip "
+            "while the first is billed.")
+
+
+def clip_target_refusal(ec, shot, *, doc=_READ):
+    """Why *shot*'s clip cannot be made again (``shot:<ep>:<shid>:video``,
+    phase 6 stage 8), calling nothing, or None: the story is not at tier 2
+    or 3, the clip's recorded request is still open in the generation
+    journal (still generating: only Continue collects it,
+    :func:`still_generating`), the shot is kept still (its effective flag,
+    *doc* ``assets.json`` read unless given), or its keyframe is not
+    current. A clip whose request the provider settled stays regenerable."""
+    tier = clips.tier_of(ec)
+    if tier < 2:
+        return (f"the story is at tier {tier}: a shot is animated only at tier 2 or 3 (set its "
+                "generation_profile.tier first).")
+    entry = open_clip_request(ec, [(shot["assets"].get("clip") or {}).get("cache_key")])
+    if entry is not None:
+        return still_generating(shot, entry)
+    if doc is _READ:
+        doc = _read_assets_doc(ec)
+    if clips.shot_flags(shot, doc)["keep_still"]:
+        return f"shot {shot['shot_id']} is kept still: clear its keep_still first."
+    problem = keyframe_problem(ec, shot, link=recorded_image_link(doc))
+    if problem:
+        return f"shot {shot['shot_id']}'s {problem}."
+    return None
+
+
+def clip_quote(ec, script, storyboard, shot, *, env, adapters=None, probe_local=False, transport=None,
+               ledger=None) -> dict:
+    """What one new clip of *shot* would cost now and on which link, calling
+    nothing (a local ComfyUI is asked its status only with *probe_local*):
+    the episode's video link and length as the planner picks them
+    (``clips.video_units`` with that shot pinned and every other kept still;
+    a current clip counts as new: a regenerate always asks), then the caps.
+    Not ready while the shot's clip request is still open in the journal --
+    the one it recorded, or the one the video phase would send next (its
+    pending seed): still generating, Continue alone collects it::
+
+        {"video": <video_units>, "link", "route_class", "clip_s", "est_usd", "over_cap", "ready", "message"}
+    """
+    ledger = ledger or _open_ledger(ec)
+    doc = _read_assets_doc(ec)
+    trial = copy.deepcopy(doc) if doc else {}
+    real = (trial.get("shots") or {})
+    trial["shots"] = {other["shot_id"]: {"keep_still": True} for other in storyboard["shots"]
+                      if other["shot_id"] != shot["shot_id"]}
+    trial["shots"][shot["shot_id"]] = dict(real.get(shot["shot_id"]) or {}, keep_still=False, animate=True)
+    caps, _over = spending_caps(ec, 0.0, env=env, ledger=ledger)
+    spent = float((caps.get("episode") or {}).get("spent_usd") or 0.0)
+    video = clips.video_units(ec, script, storyboard, trial, env=env, caps=caps, committed_usd=spent,
+                              adapters=adapters, probe_local=probe_local, transport=transport, image_sha=None)
+    row = next((item for item in video["plan"] if item["shot_id"] == shot["shot_id"]), None)
+    quote = {"video": video, "link": video["link"], "route_class": video["route_class"],
+             "clip_s": row["clip_s"] if row else None, "est_usd": round(float(row["est_usd"]), 4) if row else 0.0,
+             "over_cap": None, "ready": False, "message": video["message"]}
+    if row is None or not video["ready"]:
+        return quote
+    keys = [(shot["assets"].get("clip") or {}).get("cache_key")]
+    try:
+        _parts, request = clip_request(ec, shot, script, link=video["link"], template=video.get("template"),
+                                       clip_s=row["clip_s"], seed=clip_seed(shot, story_id=ec.story_id, ep=ec.ep),
+                                       note=clip_note(shot), flags=clips.shot_flags(shot, doc),
+                                       tier=clips.tier_of(ec))
+        keys.append(gencache.request_key(gen.VIDEO, video["link"], request))
+    except (KeyError, ValueError, OSError):
+        pass
+    entry = open_clip_request(ec, keys)
+    if entry is not None:
+        quote["message"] = still_generating(shot, entry)
+        return quote
+    paid = video["route_class"] == "paid"
+    _caps, over = spending_caps(ec, quote["est_usd"] if paid else 0.0, env=env, ledger=ledger)
+    what = f"1 clip ({row['clip_s']} s) of shot {shot['shot_id']} on {video['link']}"
+    if over:
+        quote.update(over_cap=over, message=f"{what} would go over a cap, so nothing would be generated or spent: "
+                                             f"{over}.")
+        return quote
+    price = f"paid: est ${quote['est_usd']:.3f}" if paid else "on your own hardware: $0.00"
+    quote.update(ready=True, message=f"{what}, {price}.")
+    return quote
 
 
 def needs_editor(units) -> bool:
     """Whether :func:`asset_units`' plan stops at DEC-117's "stop and ask":
-    shots to make in ``references`` mode and no editor that can run."""
+    shots to make in ``references`` mode and no editor that can run (not an
+    image link that is gone: :func:`link_gone`)."""
     images = units["images"]
-    return bool(images["count"]) and not images["ready"] and images["kind"] == gen.IMAGE_EDIT
+    return (bool(images["count"]) and not images["ready"] and images["kind"] == gen.IMAGE_EDIT
+            and not link_gone(units))
 
 
-def plan_refusal(ec, units):
+def plan_refusal(ec, units, *, unprobed=False):
     """Why the step would stop before its first call on the plan *units*
     (:func:`asset_units`), or None: the shot images cannot run (in
-    ``references`` mode, no editor: stop and ask), or a paid part is over a
-    cap -- with the numbers. The step's own check (``check_plan``), and the
-    web layer's before a job exists."""
+    ``references`` mode, no editor: stop and ask), the clips cannot run
+    (tier >= 2 with ``animate`` on: never a silent skip of the video part),
+    or a paid part is over a cap -- with the numbers. The step's own check
+    (``check_plan``), and the web layer's before a job exists (*unprobed*:
+    its plan asked no local server, so clips waiting only on the local
+    ComfyUI's answer are left to the step). The episode's image link gone
+    for now stops first, with its offer (A-087, :class:`StickyLinkGone`)."""
     images = units["images"]
     if images["count"] and not images["ready"]:
+        gone = link_gone(units)
+        if gone:
+            return gone["message"]
         if needs_editor(units):
             reasons = [f"{row['link']}: {row['reason']}" for row in images["links"]] or [images["message"]]
             readiness = {"message": images["message"], "links": images["links"]}
             return str(refimages.NeedsEditor(reasons, readiness, subject=f"Every shot of episode {ec.ep}"))
         return (f"Episode {ec.ep}'s shot images cannot be made: {images['message']} Nothing was generated or "
                 "spent.")
+    video = units.get("video")
+    if (video is not None and video.get("animate", True) and not video["ready"]
+            and not (unprobed and clips.local_unasked(video))):
+        return (f"Episode {ec.ep}'s clips cannot be made now: {video['message'].strip()} Nothing was generated "
+                "or spent: run the assets step with animate off to make the keyframes first, or fix that and run "
+                "it again.")
     if units["over_cap"]:
         return (f"Episode {ec.ep}'s assets would go over a cap, so nothing was generated or spent: "
                 f"{units['over_cap']}. Raise the cap, or choose free links, then run the assets step again.")
@@ -825,6 +1694,29 @@ class _Assets(voice_lines.LineMeasurement):
         # the pacing reads (:func:`rate_limited_by`).
         self.shot_failures = {}
         self.line_failures = {}
+        # The episode's image link (A-087, :func:`episode_image_link`):
+        # ``link`` is the one every image is asked of (None: no link yet --
+        # the chain until one serves -- or a legacy episode whose images mix
+        # links); ``link_kept`` once ``links.image`` is recorded (or waits in
+        # ``link_pending`` for the ``assets.json`` the step writes at its
+        # end); ``link_gone`` the offer once the link went away in this run.
+        self.link_info = None
+        self.link = None
+        self.link_kept = False
+        self.link_pending = None
+        self.link_gone = None
+        # The clips (phase 6 stage 8): the ``video`` part the step's check saw
+        # (the plan to animate; None: no video phase), the step summary's
+        # ``video``, whether ``links.video`` is recorded, the offer once the
+        # video link went away, the planned shots not asked yet (the offer's
+        # ``todo``), and whether a shot image ran on a local ComfyUI in this run
+        # (``POST /free`` before the first clip).
+        self.planned_video = None
+        self.video = None
+        self.video_link_kept = False
+        self.video_gone = None
+        self.clip_todo = []
+        self.local_image_ran = False
 
     # ---------------------------------------------------------- plumbing
 
@@ -919,7 +1811,7 @@ class _Assets(voice_lines.LineMeasurement):
         refusal = plan_refusal(self.ec, units)
         if refusal is None:
             return
-        if needs_editor(units):
+        if needs_editor(units) or link_gone(units):
             self.ctx.on_log(f"✋ {refusal}")
         raise StepFailed(refusal)
 
@@ -1004,6 +1896,15 @@ class _Assets(voice_lines.LineMeasurement):
             chain = gen.chain_from_env(kind, gates.merged)
         except ChainError as exc:
             raise ShotFailed(f"{gen.ENV_NAMES[kind]} cannot be used: {exc}") from None
+        link = self.link
+        if link is not None:
+            # A-087: the episode's image link alone -- never the next link.
+            if self.link_gone is not None:
+                raise ShotFailed(self.gone_reason())
+            pinned = [candidate for candidate in chain if describe(candidate) == link][:1]
+            if not pinned:
+                raise self.gone(f"it is not a link of {gen.ENV_NAMES[kind]} any more")
+            chain = pinned
         route = ec.story["generation_profile"]["route"]
         cache = self.cache(kind, unit="image", qty=1)
         with tempfile.TemporaryDirectory(prefix="shot-image-") as incoming:
@@ -1020,6 +1921,9 @@ class _Assets(voice_lines.LineMeasurement):
             except gencache.JournalError:
                 raise
             except gen.NoRunnableLink as exc:
+                why = sticky_link.gone_why(exc.failures, link) if link is not None else None
+                if why is not None:
+                    raise self.gone(why, exc.failures) from None
                 reasons = [imaging.explain(kind, label, reason, chain=chain, merged=gates.merged,
                                            budget_obj=gates.budget, request=request, adapters=tools.adapters)
                            for label, reason in exc.failures]
@@ -1080,10 +1984,81 @@ class _Assets(voice_lines.LineMeasurement):
         shot["assets"].update(record)
         self.write_board()
         self.made.append((shot["shot_id"], cached))
+        if record["route"] == "local" and not cached:
+            self.local_image_ran = True
         paid = " paid" if record["route"] == "paid" else ""
         how = "kept answer, no call" if cached else f"${record['est_usd']:.3f}{paid}"
         self.ctx.on_log(f"🖼 {shot['shot_id']} via {label} ({how}), seed {record['seed']}, consistency: "
                         f"{record['consistency'].replace('_', '-')}")
+        self.keep_link(label)
+
+    # ------------------------------------------------- the image link (A-087)
+
+    def resolve_link(self, *, announce=True) -> None:
+        """The episode's image link as it stands before the first image
+        (:func:`episode_image_link`); with *announce*, one line saying which
+        -- or the note of a legacy episode whose images mix links."""
+        ec, ctx = self.ec, self.ctx
+        info = episode_image_link(ec, self.storyboard, env=ctx.settings_env)
+        self.link_info, self.link = info, info["link"]
+        self.link_kept = info["source"] == "record"
+        if not announce:
+            return
+        if info["mixed"]:
+            ctx.on_log(mixed_note(ec, info))
+        elif info["source"] == "record":
+            ctx.on_log(f"🔗 Episode {ec.ep}'s shots stay on its image link {info['link']} (since {info['since']}).")
+        elif info["source"] == "derived":
+            ctx.on_log(f"🔗 Episode {ec.ep}'s shots stay on {info['link']}, the link every image it has was made "
+                       "on.")
+
+    def keep_link(self, label) -> None:
+        """Record the link that just served an image as the episode's
+        ``links.image``, unless one is recorded already or the episode is a
+        legacy mix: at once in ``assets.json`` (a small read-modify-write,
+        atomic, as the store writes every document), or -- no ``assets.json``
+        yet -- when the step writes it at its end. Every later image is asked
+        of that link alone."""
+        ec, ctx = self.ec, self.ctx
+        if self.link_kept or (self.link_info or {}).get("mixed"):
+            return
+        link = self.link or sticky_link.head_of(label, _chain_labels(image_kind(ec), self.gates.merged))
+        entry = sticky_link.record(link, now=llm_call.utc_now())
+        self.link, self.link_kept = link, True
+        ctx.on_log(f"🔗 Episode {ec.ep}'s image link is now {link}: every other shot of it is made on that link "
+                   "alone.")
+        try:
+            doc = episode_common.read_episode(ec, ASSETS_DOC)
+        except StepFailed as exc:
+            self.link_pending = entry
+            ctx.on_log(f"⚠️ The image link is kept for the end of the step: {exc}")
+            return
+        if doc is None:
+            self.link_pending = entry
+            return
+        doc["links"] = dict(doc.get("links") or {})
+        doc["links"][sticky_link.IMAGE] = entry
+        try:
+            ec.store.write_episode_doc(ec.story_id, ec.ep, ASSETS_DOC, doc, now=llm_call.utc_now())
+        except (schemas.SchemaError, ValueError, KeyError) as exc:
+            self.link_pending = entry
+            ctx.on_log(f"⚠️ {ASSETS_DOC} could not record the image link now ({exc}); the step writes it at its "
+                       "end.")
+
+    def gone(self, why, failures=()) -> ShotFailed:
+        """The episode's image link went away in this run (*why*): the offer
+        (:func:`sticky_offer`) is made once and printed, and this shot and
+        every one left fail with the same reason, calling nothing more."""
+        if self.link_gone is None:
+            self.link_gone = sticky_offer(self.ec, self.storyboard, self.link, why=why, env=self.ctx.settings_env,
+                                          story_spent=self.gates.spent(), adapters=self.tools.adapters,
+                                          before_any_call=False)
+            self.ctx.on_log(f"✋ {self.link_gone}")
+        return ShotFailed(self.gone_reason(), failures)
+
+    def gone_reason(self) -> str:
+        gone = self.link_gone
+        return f"its image link {gone.link} cannot serve now ({gone.why}); no other link was tried"
 
     def shot_attempt(self, shot) -> dict:
         """One request for *shot*'s image with the seed and note it is asked
@@ -1109,6 +2084,7 @@ class _Assets(voice_lines.LineMeasurement):
         if not todo:
             ctx.on_log("🖼 Every shot has its image (or is locked): nothing to make.")
             return
+        self.resolve_link()
         mode = ec.consistency_mode
         chain = gen.ENV_NAMES[gen.IMAGE if mode == PROMPT_ONLY else gen.IMAGE_EDIT]
         locked = sum(1 for shot in board["shots"] if shot["assets"].get("locked"))
@@ -1239,6 +2215,305 @@ class _Assets(voice_lines.LineMeasurement):
         self.ctx.on_log(f"⏳ Not waiting again: the step's {int(budget.limit // 60)}-minute budget cannot fit "
                         f"{what} ({budget.elapsed() / 60:.1f} min used). Left: {_left(waiting)}.")
 
+    # ------------------------------------------------------------- the clips
+
+    def also_failed(self) -> str:
+        """`` Also failed in this run: ...`` for a stop's message, or ''."""
+        also = "; ".join(part for part in (self.failures(), self.voice_failures()) if part)
+        return f" Also failed in this run: {also}." if also else ""
+
+    def before_clip(self, remaining) -> None:
+        """The cancel token, then the step budget: a clip starts only while
+        its poll (:data:`STORY_CLIP_CALL_SECONDS`) still fits; *remaining* are
+        the shots whose clips are left."""
+        self.ctx.cancel.check()
+
+        def left():
+            many = len(remaining) > 1
+            return f"the clip{'s' if many else ''} of shot{'s' if many else ''} {_and(remaining)}"
+
+        try:
+            self.budget.before_call(left, per_call=STORY_CLIP_CALL_SECONDS)
+        except StepFailed as exc:
+            raise voice_lines.BudgetSpent(str(exc) + self.also_failed()) from None
+
+    def animate_clips(self, doc) -> dict:
+        """The video phase (module docstring, 6.): the plan derived again
+        once, refused when it moved since the step's check, then each of its
+        clips that is not current, in plan order, on its one link. Returns
+        ``assets.json`` as it stands after (``links.video`` recorded)."""
+        ec, ctx, gates = self.ec, self.ctx, self.gates
+        units = asset_units(ec, self.script, self.storyboard, env=ctx.settings_env, adapters=self.tools.adapters,
+                            probe_local=True, transport=self.tools.transport, ledger=gates.ledger, animate=True)
+        video = units["video"]
+        moved = plan_moved(ec, self.planned_video, video)
+        if moved is not None:
+            raise StepFailed(moved + self.also_failed())
+        if not video["ready"]:
+            raise StepFailed(f"Episode {ec.ep}'s clips cannot be made now: {video['message'].strip()} No clip was "
+                             "asked; everything else made in this run is kept: fix that and run the assets step "
+                             "again." + self.also_failed())
+        self.video.update(link=video["link"], route=video["route_class"])
+        if not video["plan"]:
+            ctx.on_log(f"🎬 {video['message'] or 'No clip is planned.'}")
+            return doc
+        self.video_link_kept = sticky_link.recorded(doc, sticky_link.VIDEO) is not None
+        image_link = recorded_image_link(doc)
+        tier = clips.tier_of(ec)
+        by_id = {shot["shot_id"]: shot for shot in self.storyboard["shots"]}
+        todo = []
+        for row in video["plan"]:
+            shot = by_id[row["shot_id"]]
+            state = clips.clip_state(ec, shot, self.script, link=video["link"], tier=tier,
+                                     flags=clips.shot_flags(shot, doc),
+                                     image_sha=_sha256_file(shot_image_path(ec, shot)))
+            if state == "current":
+                self.video["reused"] += 1
+            else:
+                todo.append(row)
+        if not todo:
+            ctx.on_log(f"🎬 Every planned shot has its current clip on {video['link']}: no clip to make.")
+            return doc
+        seconds = sum(int(row["clip_s"]) for row in todo)
+        price = f", est ${sum(row['est_usd'] for row in todo):.3f} paid" if video["route_class"] == "paid" else ""
+        kept = f" ({self.video['reused']} current, kept)" if self.video["reused"] else ""
+        ctx.on_log(f"🎬 Animating {len(todo)} shot{'s' if len(todo) != 1 else ''} ({seconds} s) on "
+                   f"{video['link']}{price}{kept}")
+        if video["route_class"] == "local":
+            self.free_comfyui()
+        for index, row in enumerate(todo):
+            self.clip_todo = [item["shot_id"] for item in todo[index:]]
+            shot = by_id[row["shot_id"]]
+            self.before_clip(self.clip_todo)
+            try:
+                record, info = self.make_clip(shot, video=video, clip_s=row["clip_s"], est_usd=row["est_usd"],
+                                              seed=clip_seed(shot, story_id=ec.story_id, ep=ec.ep),
+                                              note=clip_note(shot), flags=clips.shot_flags(shot, doc), tier=tier,
+                                              image_link=image_link)
+            except ClipFailed as exc:
+                self.fail_clip(shot, exc)
+                continue
+            self.apply_clip(shot, record, info, video=video)
+        self.clip_todo = []
+        return episode_common.read_episode(ec, ASSETS_DOC) or doc
+
+    def make_clip(self, shot, *, video, clip_s, est_usd, seed, note, flags, tier, image_link):
+        """One clip of *shot* on the plan's one link (*video*: ``asset_units``'
+        video part -- its ``link``, ``route_class``, ``template`` and
+        ``profile``) through the story's generation cache, the gates of every
+        paid call and the free-tier limiter; ``(record, info)``: the shot's
+        ``assets.clip``, and what the call was (``cached``, ``resumed``,
+        ``fresh``, ``wall_s``, ``label``, ``seed``). :class:`ClipFailed` for
+        this shot alone -- never another link; ``gencache.JournalError``
+        passes through."""
+        ec, ctx, tools, gates = self.ec, self.ctx, self.tools, self.gates
+        shot_id = shot["shot_id"]
+        link = video["link"]
+        image_path = shot_image_path(ec, shot)
+        image_sha = (_sha256_file(image_path) if image_path
+                     else _canonical_sha256({"missing": shot["assets"].get("image") or shot_id}))
+        record = {"state": "failed", "link": link, "route": video["route_class"], "clip_s": int(clip_s),
+                  "est_usd": round(float(est_usd or 0.0), 4), "prompt_hash": None, "image_sha256": image_sha,
+                  "cache_key": None, "generated_at": None, "note": note}
+        try:
+            parts = clips.clip_request_parts(ec, shot, self.script, tier=tier, flags=flags, note=note)
+        except (KeyError, ValueError) as exc:
+            record["prompt_hash"] = _canonical_sha256({"unusable": str(exc)})
+            raise ClipFailed(f"its video prompt cannot be built ({exc}); no clip was asked", record=record) from None
+        record["prompt_hash"] = parts["hash"]
+        template = video.get("template")
+
+        def fail(reason, *, still=False):
+            return ClipFailed(reason, record=record, still=still)
+
+        problem = keyframe_problem(ec, shot, link=image_link)
+        if problem:
+            raise fail(f"its {problem}; no clip was asked")
+        if self.video_gone is not None:
+            raise fail(self.video_gone_reason())
+        try:
+            chain = gen.chain_from_env(gen.VIDEO, gates.merged)
+        except ChainError as exc:
+            raise fail(f"{gen.ENV_NAMES[gen.VIDEO]} cannot be used: {exc}") from None
+        # The plan's link alone (A-087): never the next link of the chain.
+        pinned = [candidate for candidate in chain if describe(candidate) == link][:1]
+        if not pinned:
+            raise self.clip_gone(f"it is not a link of {gen.ENV_NAMES[gen.VIDEO]} any more", record)
+        route = ec.story["generation_profile"]["route"]
+        cache = self.cache(gen.VIDEO, unit="second", qty=int(clip_s))
+        with tempfile.TemporaryDirectory(prefix="shot-clip-") as incoming:
+            _parts, request = clip_request(ec, shot, self.script, link=link, template=template, clip_s=clip_s,
+                                           seed=seed, note=note, flags=flags, tier=tier, out_dir=incoming)
+            record["cache_key"] = gencache.request_key(gen.VIDEO, link, request)
+            started = tools.time_fn()
+            try:
+                result, answered = gen.run_generation_chain(
+                    gen.VIDEO, pinned, request, env=gates.merged, allow_paid=gates.budget.allow_paid, route=route,
+                    on_log=ctx.on_log, budget_check=gates.check, limiter=gates.limiter, adapters=tools.adapters,
+                    transport=tools.transport, sleep_fn=tools.sleep_fn, time_fn=tools.time_fn, cancel=ctx.cancel,
+                    cache=cache)
+            except gencache.JournalError:
+                raise
+            except gen.NoRunnableLink as exc:
+                why = sticky_link.gone_why(exc.failures, link)
+                if why is not None:
+                    raise self.clip_gone(why, record) from None
+                held = [str(reason) for _label, reason in exc.failures if "kept for the next run" in str(reason)]
+                if held:
+                    raise fail(f"still generating on {link} ({held[0]}): {CONTINUE_ONLY}", still=True) from None
+                reasons = "; ".join(f"{label}: {reason}" for label, reason in exc.failures) or str(exc)
+                raise fail(f"{reasons}; no other link was tried") from None
+            except Exception as exc:  # noqa: BLE001 - an adapter's bug fails this clip, named
+                raise fail(f"{type(exc).__name__}: {exc}; no other link was tried") from None
+            wall_s = tools.time_fn() - started
+            meta = result.meta or {}
+            label = describe(answered)
+            if "booked" not in meta:
+                # Never one of this phase's requests (a clip always has a key):
+                # booked the old way, on the same ledger, in seconds.
+                est = _book_answer(gates, result, answered, gen.VIDEO, unit="second", qty=int(clip_s))
+            else:
+                est = round(float((meta.get("booked") or {}).get("est_usd") or 0.0), 4) if result.paid else 0.0
+            produced = next((str(path) for path in result.paths if str(path).lower().endswith(".mp4")), None)
+            if produced is None:
+                raise fail(f"{label} answered without an .mp4 clip (the call is booked)")
+            try:
+                dest = ec.store.episode_asset_path(ec.story_id, ec.ep, clips.CLIPS_KIND, clips.clip_name(shot_id),
+                                                   create=True)
+            except KeyError:
+                raise fail(f"{clips.clip_rel(shot_id)} is not a real file or folder; it is never followed (the call "
+                           "is booked and cached: move it away and run the step again)") from None
+            _atomic_copy(produced, dest)
+        cached, resumed = bool(meta.get("cached")), bool(meta.get("resumed"))
+        record.update(state="current", est_usd=est, cache_key=meta.get("cache_key") or record["cache_key"],
+                      generated_at=llm_call.utc_now(), note=note, pending=None)
+        info = {"cached": cached, "resumed": resumed, "fresh": not cached and not resumed, "wall_s": wall_s,
+                "label": label, "seed": seed}
+        return record, info
+
+    def apply_clip(self, shot, record, info, *, video) -> None:
+        """*record* as the shot's ``assets.clip`` and its file as
+        ``assets.video`` -- next to its image, the storyboard written with
+        its approval kept -- the link kept as the episode's video link, the
+        wall time measured (a clip made here, not a kept or resumed one)."""
+        ec, ctx = self.ec, self.ctx
+        shot_id = shot["shot_id"]
+        shot["assets"]["clip"] = record
+        shot["assets"]["video"] = clips.clip_rel(shot_id)
+        self.write_board()
+        self.keep_video_link(record["link"])
+        summary = self.video
+        if info["cached"]:
+            summary["reused"] += 1
+            how = "kept answer, no call"
+        else:
+            summary["made"] += 1
+            if info["resumed"]:
+                how = "collected, booked when it was sent"
+            elif record["route"] == "local":
+                how = "$0.000, on your own hardware"
+            else:
+                how = f"${record['est_usd']:.3f} paid"
+            if info["fresh"]:
+                summary["seconds"] += int(record["clip_s"])
+                summary["usd"] = round(summary["usd"] + float(record["est_usd"]), 4)
+        if info["fresh"] and info["wall_s"] > 0:
+            key = gen_timings.timing_key(video["link"], video.get("template"), video.get("profile"))
+            try:
+                gen_timings.record(key, info["wall_s"], int(record["clip_s"]))
+            except (OSError, ValueError) as exc:
+                ctx.on_log(f"⚠️ The clip's wall time could not be kept ({exc}); the ETA does not count it.")
+        ctx.on_log(f"🎬 {shot_id} via {info['label']} ({how}), {record['clip_s']} s, seed {info['seed']}")
+
+    def fail_clip(self, shot, exc) -> None:
+        """The shot's clip ``failed`` with the reason (a re-animate's
+        ``pending`` kept, so a retry asks the same clip), its ``assets.video``
+        cleared, the storyboard written; the failure named with its
+        regenerate target -- none for a clip still generating (``exc.still``):
+        only Continue collects it without buying it again."""
+        ec, ctx = self.ec, self.ctx
+        shot_id = shot["shot_id"]
+        old = shot["assets"].get("clip") or {}
+        reason = exc.reason if len(exc.reason) <= 1000 else exc.reason[:997] + "..."
+        record = dict(exc.record, state="failed", reason=reason)
+        record.pop("pending", None)
+        if old.get("pending"):
+            record["pending"] = old["pending"]
+        shot["assets"]["clip"] = record
+        shot["assets"]["video"] = None
+        self.write_board()
+        self.failed.append((f"clip of shot {shot_id}", None if exc.still else clip_target(ec.ep, shot_id),
+                            exc.reason))
+        if self.video is not None:
+            self.video["failed"].append({"shot_id": shot_id, "reason": exc.reason})
+        ctx.on_log(f"✖ Clip {shot_id} failed: {exc.reason}")
+
+    def keep_video_link(self, link) -> None:
+        """Record *link*, which just served a clip, as the episode's
+        ``links.video`` unless one is recorded (A-087): every later clip is
+        asked of it alone. ``assets.json`` is read, changed and written at
+        once (a minimal one is started when there is none)."""
+        if self.video_link_kept:
+            return
+        ec, ctx = self.ec, self.ctx
+        now = llm_call.utc_now()
+        try:
+            doc = episode_common.read_episode(ec, ASSETS_DOC)
+        except StepFailed as exc:
+            ctx.on_log(f"⚠️ The video link could not be recorded ({exc}).")
+            return
+        if doc is None:
+            doc = _minimal_assets_doc(ec, now)
+        if sticky_link.recorded(doc, sticky_link.VIDEO) is None:
+            doc["links"] = dict(doc.get("links") or {})
+            doc["links"][sticky_link.VIDEO] = sticky_link.record(link, now=now)
+            try:
+                ec.store.write_episode_doc(ec.story_id, ec.ep, ASSETS_DOC, doc, now=now)
+            except (schemas.SchemaError, ValueError, KeyError) as exc:
+                ctx.on_log(f"⚠️ {ASSETS_DOC} could not record the video link now ({exc}).")
+                return
+            ctx.on_log(f"🔗 Episode {ec.ep}'s video link is now {link}: every other clip of it is made on that link "
+                       "alone.")
+        self.video_link_kept = True
+
+    def clip_gone(self, why, record) -> ClipFailed:
+        """The plan's video link went away in this run (*why*): the offer
+        (:func:`video_offer`) is made once and printed, and this clip and
+        every one left fail with the same reason, calling nothing more."""
+        if self.video_gone is None:
+            self.video_gone = video_offer(self.ec, self.storyboard, record["link"], why=why,
+                                          env=self.ctx.settings_env, adapters=self.tools.adapters,
+                                          todo=list(self.clip_todo), paid=record["route"] == "paid",
+                                          before_any_call=False)
+            self.ctx.on_log(f"✋ {self.video_gone}")
+        return ClipFailed(self.video_gone_reason(), record=record)
+
+    def video_gone_reason(self) -> str:
+        gone = self.video_gone
+        return f"its video link {gone.link} cannot serve now ({gone.why}); no other link was tried"
+
+    def free_comfyui(self) -> None:
+        """``POST /free`` once before the first clip on a local ComfyUI whose
+        card has at most :data:`FREE_VRAM_GB` GB, when a shot image ran on it
+        in this run: the image model makes room for the video model. The card
+        is read from ``/system_stats``; a failure is said, never fatal."""
+        if not self.local_image_ran:
+            return
+        ctx = self.ctx
+        client = local_comfyui.ComfyUIClient(gen.local_url("comfyui", self.gates.merged),
+                                             transport=self.tools.transport)
+        try:
+            _profile, vram, _gpu = hardware.profile_from_system_stats(client.system_stats(),
+                                                                      in_container=gen.in_container())
+            if not vram or float(vram) > FREE_VRAM_GB:
+                return
+            client.free()
+        except Exception as exc:  # noqa: BLE001 - ComfyUI unloads on its own when it must; the clips go on
+            ctx.on_log(f"⚠️ ComfyUI /free could not be asked ({type(exc).__name__}: {exc}); the clips go on.")
+            return
+        ctx.on_log(f"🧹 ComfyUI /free before the first clip: the image model is unloaded for the video model "
+                   f"({float(vram):g} GB card).")
+
     # ---------------------------------------------------------- sfx, bgm, doc
 
     def audio_entries(self) -> tuple:
@@ -1328,10 +2603,22 @@ class _Assets(voice_lines.LineMeasurement):
             "$schema": schemas.EPISODE_ASSETS_SCHEMA_NAME, "ep": ec.ep,
             "lines": self.line_entries(previous["lines"] if previous else None),
             "sfx": sfx, "bgm": bgm,
+        }
+        # The episode's links (A-087): carried as they are, with the image
+        # link this run recorded while there was no document to hold it.
+        links = dict((previous or {}).get("links") or {})
+        if self.link_pending is not None:
+            links[sticky_link.IMAGE] = self.link_pending
+        if links:
+            doc["links"] = links
+        # The user's per-shot overrides (phase 6 stage 7): carried as they are.
+        if (previous or {}).get("shots"):
+            doc["shots"] = previous["shots"]
+        doc.update({
             # Kept: an approval is derived stale by the fingerprint, never cleared here.
             "approved": previous["approved"] if previous else None,
             "created_at": previous["created_at"] if previous else now, "updated_at": now,
-        }
+        })
         try:
             return ec.store.write_episode_doc(ec.story_id, ec.ep, ASSETS_DOC, doc, now=now)
         except (schemas.SchemaError, ValueError, KeyError) as exc:
@@ -1343,12 +2630,19 @@ class _Assets(voice_lines.LineMeasurement):
         ec, ctx = self.ec, self.ctx
         self.script, self.storyboard = require_approved(ec)
         align = bool((ctx.params or {}).get(ALIGN_PARAM))
+        animate = animate_param(ctx.params)
         gates = self.open_asset_gates()
         try:
             units = asset_units(ec, self.script, self.storyboard, env=ctx.settings_env, align_words=align,
                                 adapters=self.tools.adapters, probe_local=True, transport=self.tools.transport,
-                                ledger=gates.ledger)
+                                ledger=gates.ledger, animate=animate)
             self.check_plan(units)
+            video = units.get("video")
+            if video is not None:
+                # Tier >= 2 (a tier-1 plan has no video part: nothing below runs).
+                self.video = _video_summary(video, animate=animate)
+                if animate:
+                    self.planned_video = video
             ctx.cancel.check()
             try:
                 self.measure(gates)
@@ -1361,13 +2655,20 @@ class _Assets(voice_lines.LineMeasurement):
             except gencache.JournalError as exc:
                 raise self.journal_failed(exc) from None
             doc = self.write_assets_doc()
+            if self.planned_video is not None:
+                # Last: the keyframes are final, the SFX/BGM and assets.json written.
+                try:
+                    doc = self.animate_clips(doc)
+                except gencache.JournalError as exc:
+                    raise self.journal_failed(exc) from None
         finally:
             self.write_ledger_view()
         return self.finish(doc)
 
     def finish(self, doc) -> dict:
         ec, ctx, board = self.ec, self.ctx, self.storyboard
-        states = {shot["shot_id"]: shot_state(ec, shot) for shot in board["shots"]}
+        link = recorded_image_link(doc)
+        states = {shot["shot_id"]: shot_state(ec, shot, link=link) for shot in board["shots"]}
         unvoiced = [line["line_id"] for scene in self.script["scenes"] for line in scene["lines"]
                     if not voice_lines.is_measured(ec, line)]
         missing_cues = sum(1 for cue in doc["sfx"] if cue["state"] == "missing")
@@ -1377,17 +2678,25 @@ class _Assets(voice_lines.LineMeasurement):
                      for line_id, speaker, reason in self.voice_failed]
         ctx.on_log(episode_common.timing_line(self.script))
         if failures:
-            targets = [item["target"] for item in failures]
-            advice = f"regenerate {entities.quoted_list(targets)} or run the assets step again"
+            targets = [item["target"] for item in failures if item["target"]]
+            advice = f"regenerate {entities.quoted_list(targets)} or run the assets step again" if targets else ""
+            held = [item["what"] for item in failures if not item["target"]]
+            if held:
+                # A clip still generating (phase 6 stage 8): Continue alone, never its regenerate target.
+                advice += (("; for " if advice else "") + f"{_and(held)}, still generating: {CONTINUE_ONLY}")
             message = (f"⚠️ Episode {ec.ep}'s assets are not complete: "
                        + "; ".join(f"{item['what']} failed ({item['reason']})" for item in failures)
                        + f". To finish them, {advice}.")
             if self.voice_failed:
                 message += f" {self.voice_message()}"
+            if self.link_gone is not None:
+                message += f" {self.link_gone}"
+            if self.video_gone is not None:
+                message += f" {self.video_gone}"
             ctx.on_log(message)
         else:
             ctx.on_log(f"✅ Episode {ec.ep}'s assets are ready for your approval.")
-        return {
+        result = {
             "ep": ec.ep,
             "shots": {"total": len(board["shots"]), "made": sum(1 for _sid, cached in self.made if not cached),
                       "cached": sum(1 for _sid, cached in self.made if cached),
@@ -1402,15 +2711,26 @@ class _Assets(voice_lines.LineMeasurement):
                                              for shot in board["shots"]),
             "fingerprint": current_fingerprint(ec, board, self.script, doc),
         }
+        info = self.link_info or {}
+        if self.link is not None or info.get("mixed"):
+            # A-087: the link the images were asked of, a legacy mix, or the
+            # offer when the link went away in this run.
+            result["image_link"] = {"link": self.link, "mixed": list(info.get("mixed") or []),
+                                    "gone": self.link_gone.as_dict() if self.link_gone else None}
+        if self.video is not None:
+            # Tier >= 2 (phase 6 stage 8): what the video phase did.
+            result["video"] = dict(self.video, gone=self.video_gone.as_dict() if self.video_gone else None)
+        return result
 
 
-def _book_answer(gates, result, answered, kind) -> float:
+def _book_answer(gates, result, answered, kind, *, unit="image", qty=1) -> float:
     """Book an answer no journal booked (``imaging.book``'s row, with the
-    episode) on the gates' ledger; returns what it cost."""
+    episode) on the gates' ledger -- one image, or a clip's *qty* seconds;
+    returns what it cost."""
     paid = bool(result.paid)
     est = float(result.est_cost) if paid else 0.0
     gates.ledger.append(step=STEP, provider=answered.provider, model=gating.api_model_id(kind, answered),
-                        unit="image", qty=1, est_usd=est, paid=paid, ep=gates.ep)
+                        unit=unit, qty=qty, est_usd=est, paid=paid, ep=gates.ep)
     if paid and result.est_cost > 0:
         budget_mod.record(result.est_cost)
     return round(est, 4)
@@ -1462,7 +2782,16 @@ def regenerate_shot_image(ctx, ec, target, shot_id, note, *, tools, refuse) -> d
         raise refuse(f"a note is at most {schemas.REGENERATE_NOTE_MAX} characters ({len(note)} given).")
     gates = host.open_asset_gates()
     try:
-        if ec.consistency_mode == REFERENCES:
+        # A-087: the episode's image link alone; one gone for now stops here,
+        # before any call, with its offer.
+        host.resolve_link()
+        if host.link is not None:
+            quote = image_quote(ec, 1, env=ctx.settings_env, story_spent=gates.spent(), adapters=tools.adapters,
+                                probe_local=True, transport=tools.transport, storyboard=board,
+                                link_info=host.link_info)
+            if quote["sticky"]["gone"]:
+                raise refuse(quote["sticky"]["gone"]["message"])
+        elif ec.consistency_mode == REFERENCES:
             readiness = refimages.edit_readiness(ec.story, env=ctx.settings_env, qty=1,
                                                  story_spent=gates.spent(), adapters=tools.adapters,
                                                  size=SHOT_SIZE, probe_local=True, transport=tools.transport)
@@ -1483,7 +2812,8 @@ def regenerate_shot_image(ctx, ec, target, shot_id, note, *, tools, refuse) -> d
         except gencache.JournalError as exc:
             raise host.journal_failed(exc) from None
         except ShotFailed as exc:
-            raise refuse(f"{exc.reason}. The request is kept (seed {seed}): regenerate {target!r} again, or run "
+            reason = str(host.link_gone).rstrip(".") if host.link_gone is not None else exc.reason
+            raise refuse(f"{reason}. The request is kept (seed {seed}): regenerate {target!r} again, or run "
                          "the assets step, to ask for the same image.") from None
         cached = record["_cached"]
         host.apply_image(shot, record)
@@ -1492,6 +2822,85 @@ def regenerate_shot_image(ctx, ec, target, shot_id, note, *, tools, refuse) -> d
     ctx.on_log(f"🔁 Regenerated {target} (seed {shot['assets']['seed']}){_noted(note)}")
     return {"target": target, "shot": shot_id, "seed": shot["assets"]["seed"], "provider": shot["assets"]["provider"],
             "cached": cached}
+
+
+def regenerate_shot_clip(ctx, ec, target, shot_id, note, *, tools, refuse) -> dict:
+    """``shot:<ep>:<shot_id>:video`` (kind ``shot_video``, phase 6 stage 8):
+    that shot's clip again, one clip, with *note* at its prompt's tail and a
+    fresh seed -- persisted as the clip's ``pending{seed, note,
+    requested_at}`` **before** the call, so a retry (this regenerate again
+    with the same note, or the assets step) asks for the same clip and the
+    generation cache serves or resumes it (DEC-154). Refused before any
+    call: a story below tier 2, a shot kept still, a keyframe that is not
+    current (:func:`clip_target_refusal`), a clip that cannot be made now or
+    would go over a cap (:func:`clip_quote`). The episode's video link alone
+    (the planner's when none is recorded, then recorded), the gates and the
+    journal of the video phase; nothing else is tried. *refuse(reason)* is
+    the caller's ``StepFailed`` builder."""
+    host = _Assets(ctx, ec, tools=tools)
+    try:
+        host.script, host.storyboard = require_approved(ec)
+    except StepFailed as exc:
+        raise refuse(str(exc)) from None
+    board = host.storyboard
+    shot = next((s for s in board["shots"] if s["shot_id"] == shot_id), None)
+    if shot is None:
+        raise refuse(f"episode {ec.ep}'s storyboard has no shot {shot_id!r} (it has sh01 to "
+                     f"sh{len(board['shots']):02d}).")
+    if note is not None and len(note) > schemas.REGENERATE_NOTE_MAX:
+        raise refuse(f"a note is at most {schemas.REGENERATE_NOTE_MAX} characters ({len(note)} given).")
+    doc = _read_assets_doc(ec)
+    reason = clip_target_refusal(ec, shot, doc=doc)
+    if reason is not None:
+        raise refuse(reason)
+    gates = host.open_asset_gates()
+    try:
+        quote = clip_quote(ec, host.script, board, shot, env=ctx.settings_env, adapters=tools.adapters,
+                           probe_local=True, transport=tools.transport, ledger=gates.ledger)
+        if not quote["ready"]:
+            raise refuse(quote["message"])
+        video = quote["video"]
+        host.video = _video_summary(dict(video, plan=[{"shot_id": shot_id}]), animate=True)
+        host.video_link_kept = sticky_link.recorded(doc, sticky_link.VIDEO) is not None
+        host.clip_todo = [shot_id]
+        tier = clips.tier_of(ec)
+        flags = clips.shot_flags(shot, doc)
+        clip = shot["assets"].get("clip")
+        pending = (clip or {}).get("pending")
+        # The same request asked again (its call did not answer) keeps its
+        # seed, so a paid clip the provider holds is resumed, not bought
+        # twice; a new note is a new request with a fresh seed.
+        seed = pending["seed"] if pending and pending.get("note") == note else entities.fresh_seed()
+        requested = {"seed": seed, "note": note, "requested_at": llm_call.utc_now()}
+        if clip:
+            shot["assets"]["clip"] = dict(clip, pending=requested)
+        else:
+            parts = clips.clip_request_parts(ec, shot, host.script, tier=tier, flags=flags, note=note)
+            shot["assets"]["clip"] = {
+                "state": "failed", "link": video["link"], "route": video["route_class"],
+                "clip_s": int(quote["clip_s"]), "est_usd": quote["est_usd"], "prompt_hash": parts["hash"],
+                "image_sha256": _sha256_file(shot_image_path(ec, shot)), "cache_key": None, "generated_at": None,
+                "note": note, "pending": requested, "reason": "asked again: not answered yet"}
+        host.write_board()
+        ctx.on_log(f"🎬 Shot {shot_id}'s clip again (seed {seed}){_noted(note)}")
+        ctx.cancel.check()
+        try:
+            record, info = host.make_clip(shot, video=video, clip_s=quote["clip_s"], est_usd=quote["est_usd"],
+                                          seed=seed, note=note, flags=flags, tier=tier,
+                                          image_link=recorded_image_link(doc))
+        except gencache.JournalError as exc:
+            raise host.journal_failed(exc) from None
+        except ClipFailed as exc:
+            host.fail_clip(shot, exc)
+            why = str(host.video_gone).rstrip(".") if host.video_gone is not None else exc.reason
+            raise refuse(f"{why}. The request is kept (seed {seed}): regenerate {target!r} again with the same "
+                         "note, or run the assets step, to ask for the same clip.") from None
+        host.apply_clip(shot, record, info, video=video)
+    finally:
+        host.write_ledger_view()
+    ctx.on_log(f"🔁 Regenerated {target} (seed {seed}){_noted(note)}")
+    return {"target": target, "shot": shot_id, "seed": seed, "link": record["link"], "clip_s": record["clip_s"],
+            "cached": info["cached"]}
 
 
 def regenerate_line_voice(ctx, ec, target, line_id, note, *, tools, refuse) -> dict:

@@ -10,6 +10,7 @@ options and defaults are untouched. Commands::
     main.py --ai-story step <story_id> cast|places_proposal|places|season [options]
     main.py --ai-story step <story_id> script|storyboard --ep N [options]
     main.py --ai-story step <story_id> assets|render|metadata --ep N [options]
+    main.py --ai-story step <story_id> assets --ep N [--tier T] [--route R] [--no-animate] [--estimate]
     main.py --ai-story step <story_id> memory|feedback|propose-next --ep N [options]
     main.py --ai-story step <story_id> rerender --ep N [--dry-run]
     main.py --ai-story render <story_id> --ep N [options]
@@ -94,6 +95,19 @@ with its own reason otherwise (never 'approve anyway'); ``render``,
 completed. A short summary follows every run (images made and cached, lines
 voiced, render duration and loudness, metadata platforms, the fast track's
 sub-steps).
+
+Phase 6 (tiers 2 and 3, stage 11): ``assets`` takes ``--tier 1|2|3`` and
+``--route auto|local|api`` -- they patch the story's ``generation_profile``
+(``workflow.patch_story``, the API's ``PATCH /stories/{id}``) and print it
+before anything runs; there is no run-level override -- ``--no-animate``
+(the step's ``animate`` param off: no clip in this run) and ``--estimate``
+(``workflow.assets_estimate`` printed as JSON -- images, voices and, at tier 2
+or 3, the clips -- calling nothing and running no step; a local ComfyUI is
+not asked). ``render`` (and the ``render`` command) takes
+``--fill-failed-with-motion``. A clip regenerate with a note
+(``shot:<ep>:<shid>:video``) is the dashboard's or the API's -- the CLI has
+no ``regenerate`` command; running ``assets`` again makes a failed or stale
+clip again.
 
 Phase 5 (step 13, plan 11 stage 5): ``memory``, ``feedback`` and
 ``propose-next`` each write one episode (``--ep N``), one free-chain LLM
@@ -243,8 +257,13 @@ _STEP_ONLY = (
     ("fast", "--fast", ("storyboard",)),
     ("measure_voices", "--measure-voices", ("script",)),
     ("align_words", "--align-words", ("assets",)),
+    ("tier", "--tier", ("assets",)),
+    ("route", "--route", ("assets",)),
+    ("no_animate", "--no-animate", ("assets",)),
+    ("estimate", "--estimate", ("assets",)),
     ("subtitles", "--subtitles", ("render",)),
     ("encoder", "--encoder", ("render",)),
+    ("fill_failed_with_motion", "--fill-failed-with-motion", ("render",)),
     ("allow_slow_chain", "--allow-slow-chain", _KEYED_STEPS),
     ("dry_run", "--dry-run", workflow.REEDIT_STEPS),
 )
@@ -397,6 +416,17 @@ def build_parser() -> argparse.ArgumentParser:
     step.add_argument("--align-words", action="store_true",
                       help=("assets only: opt-in forced-alignment word timings (the STT chain) instead "
                             "of an even split, stored per line"))
+    step.add_argument("--tier", type=int, choices=defaults.TIERS, default=None,
+                      help=("assets only: set the story's generation tier (1 stills with motion, 2 and 3 "
+                            "animated shots) before the run -- the story's profile, not a run-level override"))
+    step.add_argument("--route", choices=defaults.ROUTES, default=None,
+                      help=("assets only: set the story's route (where images and clips are made) before "
+                            "the run -- the story's profile, not a run-level override"))
+    step.add_argument("--no-animate", action="store_true",
+                      help="assets only: make no clip in this run (tier 2 and 3 animate by default)")
+    step.add_argument("--estimate", action="store_true",
+                      help=("assets only: print what the step would make and spend (images, voices and, at "
+                            "tier 2 or 3, clips) and run nothing: no call, no step"))
     step.add_argument(
         "--subtitles", choices=render_step.SUBTITLE_CHOICES, default=None, metavar="MODE",
         help=(f"render only: the subtitle mode, one of {', '.join(render_step.SUBTITLE_CHOICES)} "
@@ -407,6 +437,9 @@ def build_parser() -> argparse.ArgumentParser:
         help=(f"render only: the final pass's encoder, one of {', '.join(render_step.ENCODER_CHOICES)} "
               f"(default: {render_step.DEFAULT_ENCODER})"),
     )
+    step.add_argument("--fill-failed-with-motion", action="store_true",
+                      help=("render only: at tier 2 or 3, give a shot whose clip failed, went stale or is still "
+                            "generating Tier-1 motion instead of refusing the render"))
     step.add_argument("--dry-run", action="store_true",
                       help=("rerender only: print what a re-render would make again now -- how many of "
                             "the episode's shots, which ones and why -- without rendering anything"))
@@ -440,6 +473,9 @@ def build_parser() -> argparse.ArgumentParser:
         help=(f"the final pass's encoder, one of {', '.join(render_step.ENCODER_CHOICES)} "
               f"(default: {render_step.DEFAULT_ENCODER})"),
     )
+    render_cmd.add_argument("--fill-failed-with-motion", action="store_true",
+                            help=("at tier 2 or 3, give a shot whose clip failed, went stale or is still "
+                                  "generating Tier-1 motion instead of refusing the render"))
 
     # ---- fast-track
     fast_track_cmd = commands.add_parser(
@@ -665,6 +701,8 @@ def _cmd_step(args, stories) -> int:
     # Every refusal of the command line comes before anything is read or spent.
     if args.auto_approve and step not in AUTO_APPROVABLE:
         return _usage_error("step", f"--auto-approve does not apply to '{step}': {_NOT_AUTO_APPROVABLE[step]}")
+    if args.auto_approve and args.estimate:
+        return _usage_error("step", "--auto-approve does not apply with --estimate: it runs nothing to approve.")
     for dest, flag, applies in _STEP_ONLY:
         if _given(getattr(args, dest)) and step not in applies:
             return _usage_error("step", f"{flag} applies to {_quoted(applies)} only, not to '{step}'.")
@@ -1000,27 +1038,59 @@ def _and(items) -> str:
     return ", ".join(items[:-1]) + " and " + items[-1]
 
 
-def _render_params(subtitles, encoder) -> dict:
-    """``render``'s params from the CLI's own ``--subtitles``/``--encoder``
-    flags: only what was given, so :func:`render_step.read_params` fills the
-    rest with its own defaults."""
+def _render_params(subtitles, encoder, fill=False) -> dict:
+    """``render``'s params from the CLI's own ``--subtitles``/``--encoder``/
+    ``--fill-failed-with-motion`` flags: only what was given, so
+    :func:`render_step.read_params` fills the rest with its own defaults."""
     params = {}
     if subtitles is not None:
         params[render_step.SUBTITLES_PARAM] = subtitles
     if encoder is not None:
         params[render_step.ENCODER_PARAM] = encoder
+    if fill:
+        params[render_step.FILL_PARAM] = True
     return params
 
 
 def _phase4_params(args, step) -> dict:
     """*step*'s params from the CLI's own flags (``assets``, ``render``;
     ``metadata`` takes none): the modules' own closed lists reach argparse as
-    ``choices=`` (DEC-009), so nothing here is re-typed."""
+    ``choices=`` (DEC-009), so nothing here is re-typed. A flag sends only a
+    change from the step's own default (``--no-animate``: ``animate``
+    false; ``--fill-failed-with-motion``: the fill on)."""
     if step == "assets":
-        return {assets_step.ALIGN_PARAM: True} if args.align_words else {}
+        params = {assets_step.ALIGN_PARAM: True} if args.align_words else {}
+        if args.no_animate:
+            params[assets_step.ANIMATE_PARAM] = False
+        return params
     if step == "render":
-        return _render_params(args.subtitles, args.encoder)
+        return _render_params(args.subtitles, args.encoder, args.fill_failed_with_motion)
     return {}
+
+
+def _set_profile(stories, story, args) -> dict:
+    """``--tier``/``--route`` (assets): the story's ``generation_profile``
+    patched through ``workflow.patch_story`` -- the API's ``PATCH
+    /stories/{id}`` -- and printed; the story as it stands after. Nothing
+    is patched when neither is given."""
+    partial = {name: value for name, value in (("tier", args.tier), ("route", args.route)) if value is not None}
+    if partial:
+        story = workflow.patch_story(stories, story["story_id"], {"generation_profile": partial}, now=_now())
+        profile = story["generation_profile"]
+        print(f"⚙️ Generation profile: tier {profile['tier']}, route {profile['route']}, consistency "
+              f"{profile['consistency_mode']}, budget {profile['budget_profile']}")
+    return story
+
+
+def _print_assets_estimate(stories, story, args) -> None:
+    """``--estimate`` (assets): ``workflow.assets_estimate`` -- the assets
+    step's own estimate (``assets.asset_units``: images, voices and, at tier
+    2 or 3, the clips) with the paid check's verdict -- as JSON. Keys and
+    chains from the process environment (DEC-114); a local ComfyUI is not
+    asked, nothing is called, no step runs."""
+    ec = workflow.episode_context(stories, story, args.ep, step="assets")
+    estimate = workflow.assets_estimate(ec, env={}, align_words=args.align_words, animate=not args.no_animate)
+    print(json.dumps(estimate, indent=2, ensure_ascii=False))
 
 
 def _print_assets_summary(result) -> None:
@@ -1080,6 +1150,11 @@ def _phase4_step(args, stories, story) -> int:
     incomplete grid; never 'approve anyway')."""
     step, story_id, ep = args.step, story["story_id"], args.ep
     workflow.episode_context(stories, story, ep, step=step)
+    if step == "assets":
+        story = _set_profile(stories, story, args)
+        if args.estimate:
+            _print_assets_estimate(stories, story, args)
+            return EXIT_OK
     if step == "metadata":
         refusal = _llm_refusal(args.allow_slow_chain)
         if refusal:
@@ -1268,12 +1343,12 @@ def _cmd_feedback(args, stories) -> int:
     return EXIT_OK
 
 
-def _run_render_step(stories, story, ep, *, subtitles, encoder) -> int:
+def _run_render_step(stories, story, ep, *, subtitles, encoder, fill=False) -> int:
     """``render`` of episode *ep*, shared by ``step ID render --ep N`` and
     the ``render`` command (its alias)."""
     story_id = story["story_id"]
     workflow.episode_context(stories, story, ep, step="render")
-    interrupted, result = _run_step(stories, story_id, "render", _render_params(subtitles, encoder), ep=ep)
+    interrupted, result = _run_step(stories, story_id, "render", _render_params(subtitles, encoder, fill), ep=ep)
     if interrupted:
         return interrupted
     _print_render_summary(result)
@@ -1283,7 +1358,8 @@ def _run_render_step(stories, story, ep, *, subtitles, encoder) -> int:
 
 def _cmd_render(args, stories) -> int:
     story = workflow.load(stories, args.story_id)
-    return _run_render_step(stories, story, args.ep, subtitles=args.subtitles, encoder=args.encoder)
+    return _run_render_step(stories, story, args.ep, subtitles=args.subtitles, encoder=args.encoder,
+                            fill=args.fill_failed_with_motion)
 
 
 def _print_fast_track_summary(result) -> None:

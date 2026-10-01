@@ -81,11 +81,12 @@ class FreeTierLimiter:
 
 def api_model_id(kind, link) -> str:
     """The provider's own model id behind a chain link (for the ledger)."""
-    from . import images, tts, vision
+    from . import images, tts, video, vision
 
     tables = {
         "cloudflare": images.CLOUDFLARE_MODELS, "fal": images.FAL_APPS,
-        "gemini": {**images.GEMINI_MODELS, **tts.GEMINI_TTS_MODELS, **vision.GEMINI_VISION_MODELS},
+        "gemini": {**images.GEMINI_MODELS, **tts.GEMINI_TTS_MODELS, **vision.GEMINI_VISION_MODELS,
+                   **video.GEMINI_VIDEO_MODELS},
         "openai": {name: pair[0] for name, pair in images.OPENAI_MODELS.items()},
     }
     return tables.get(link.provider, {}).get(link.model, link.model)
@@ -138,5 +139,5 @@ def link_summary(kind, link, merged, budget_obj, request, *, qty=1, story_spent=
         "paid": paid, "keyed": not missing, "missing_keys": missing,
         "adapter": adapter is not None,
         "allowed": allowed, "est_usd": est, "reason": reason,
-        "env_keys": list(provider.env_keys), "signup_url": provider.signup_url,
+        "env_keys": list(gen.env_keys_for(link)), "signup_url": provider.signup_url,
     }

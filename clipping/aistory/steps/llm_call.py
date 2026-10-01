@@ -20,7 +20,11 @@ story-writing call shares:
   it is printed as skipped, one ``⏭`` line per link before each chain run,
   and a chain left with no keyed link is a :class:`StepFailed` naming the
   paid links and the free keys to set. Clip jobs are not affected (DEC-088
-  still governs them).
+  still governs them);
+- with ``allow_paid`` on, a keyed paid link is estimated, checked against
+  the episode, day and story caps and every reply it bills booked on the
+  story's ledger and today's spend (``llm_spend``, phase 6 stage 5); a run
+  with no keyed paid link calls ``run_chain`` exactly as before.
 
 The chain and the keys come from the worker's Settings values first and the
 process environment second, the precedence the web layer applies to a clip
@@ -149,9 +153,9 @@ def story_chain(settings_env) -> tuple:
     process environment (``gating.merged_env``/``budget_of``, DEC-097) -- every
     link that is not free (:func:`is_free_link`) is skipped with
     :data:`PAID_SKIP_REASON`: AI Story spends only on opt-in. With
-    ``allow_paid`` on nothing is skipped. Phase 1 does not estimate what an
-    LLM call costs, so the budget's caps are not checked here; they govern
-    generation spend (the images of the style preview), not these calls.
+    ``allow_paid`` on nothing is skipped here: the caps are checked per call
+    by ``call_json`` (``llm_spend``), which leaves a refused link out of that
+    call's chain.
 
     The chain the user configured is not edited, reordered or trimmed
     (DEC-003, DEC-023): this is only which of its links a story step uses.
@@ -294,6 +298,16 @@ def call_json(
     # analyzer does it.
     cancel_kwargs = cancel_mod.kwargs_for(ctx.cancel)
 
+    # A keyed paid link is in the chain only with allow_paid on: it is
+    # estimated, capped and booked (``llm_spend``) when the runner reaches a
+    # real client. Without one, nothing below differs from before.
+    meter = None
+    if any(keys.get(link.provider) and not is_free_link(link) for link in chain):
+        from . import llm_spend
+
+        if llm_spend.is_provider_chain(runner):
+            meter = llm_spend.open_meter(ctx, prompt_id, system=system, user=user, cap=cap)
+
     errors = []
     for attempt in (1, 2):
         ctx.cancel.check()
@@ -302,9 +316,12 @@ def call_json(
         for link in paid:
             ctx.on_log(f"   ⏭ Skipping {_link_label(link)}: paid link, allow_paid is off "
                        "(AI Story spends only on opt-in).")
+        run_links, metered = chain, {}
+        if meter is not None:
+            run_links, metered = meter.plan(chain, keys), {"client_factory": meter.factory}
         try:
             value, link = runner(
-                chain,
+                run_links,
                 system=system,
                 user=user,
                 schema=schema,
@@ -316,12 +333,15 @@ def call_json(
                 deadline=time_fn() + STORY_CALL_BUDGET_SECONDS,
                 time_fn=time_fn,
                 **cancel_kwargs,
+                **metered,
             )
         except provider_errors.ProviderError as exc:
             reason = _provider_reason(exc)
             if paid:
                 labels = ", ".join(dict.fromkeys(_link_label(link) for link in paid))
                 reason += f"; {labels} not tried: {PAID_SKIP_REASON}"
+            if meter is not None:
+                reason += "".join(f"; {label} not tried: {why}" for label, why in meter.refused)
             raise StepFailed(f"{prompt_id}: {reason}", reason=reason) from exc
 
         errors = list(validator(value))

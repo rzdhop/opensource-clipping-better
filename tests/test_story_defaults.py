@@ -116,3 +116,53 @@ def test_the_language_has_no_default_in_any_place():
     lang = _option(new, "--lang")
     assert lang.required is True and lang.default is None
     assert tuple(lang.choices) == schemas.LANGUAGES
+
+
+def test_the_clip_defaults_agree_in_the_step_the_api_the_cli_and_the_dashboard():
+    """Phase 6 stage 11: ``animate`` is on and ``fill_failed_with_motion``
+    off unless sent -- in the steps' own readers, in the API's params (a
+    field left unsent reaches the step as nothing), in the CLI (a flag that
+    turns each away from its default, never a value), and in what the
+    dashboard sends today (the assets run sends ``animate: true``; the render
+    sends no fill)."""
+    from clipping.aistory.steps import assets, render
+
+    # 1. the steps
+    assert assets.animate_param({}) is True and assets.animate_param({"animate": None}) is True
+    assert render.FILL_PARAM not in render.read_params({})
+
+    # 2. the API's params: optional, no default of their own
+    text = MODELS.read_text(encoding="utf-8")
+    assert re.search(r"^    animate: Optional\[bool\] = None$", _class_body(text, "AssetsStepParams"), re.M)
+    assert re.search(r"^    fill_failed_with_motion: Optional\[bool\] = None$", _class_body(text, "RenderStepParams"),
+                     re.M)
+
+    # 3. the CLI: --no-animate (assets) and --fill-failed-with-motion (step render, render) start off
+    cli = importlib.import_module("clipping.aistory.cli")
+    parser = cli.build_parser()
+    commands = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction))
+    step, render_cmd = commands.choices["step"], commands.choices["render"]
+    for command, flag in ((step, "--no-animate"), (step, "--fill-failed-with-motion"),
+                          (render_cmd, "--fill-failed-with-motion")):
+        action = _option(command, flag)
+        assert action.default is False and action.const is True, flag
+    args = parser.parse_args(["step", "0123456789ab", "assets", "--ep", "1"])
+    assert assets.ANIMATE_PARAM not in cli._phase4_params(args, "assets")
+    args = parser.parse_args(["step", "0123456789ab", "render", "--ep", "1"])
+    assert render.FILL_PARAM not in cli._phase4_params(args, "render")
+
+    # 4. the dashboard (phase 6 stage 12): the assets run's "Animate" checkbox
+    # starts ticked (assets.animate_param's own default) and the render
+    # step's "Fill failed shots with motion" checkbox starts unticked
+    # (render.FILL_PARAM's own default) -- both controls are now
+    # user-editable, so the pin is on each checkbox's initial state, not a
+    # literal `true` in the params object (which now forwards the state
+    # variable).
+    pane = ROOT / "web" / "dashboard" / "src" / "pages" / "story" / "episode"
+    storyboard_src = (pane / "StoryboardPane.jsx").read_text(encoding="utf-8")
+    assert re.search(r"const \[animate, setAnimate\] = useState\(true\)", storyboard_src)
+    assert re.search(r"const assetsParams = \{[^}]*\banimate\b[^}]*\}", storyboard_src)
+
+    preview_src = (pane / "PreviewPane.jsx").read_text(encoding="utf-8")
+    assert re.search(r"const \[fillFailedWithMotion, setFillFailedWithMotion\] = useState\(false\)", preview_src)
+    assert re.search(r"const renderParams = \{[^}]*\bfill_failed_with_motion\b[^}]*\}", preview_src)

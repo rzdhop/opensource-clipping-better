@@ -45,9 +45,11 @@ FAL_APPS = {
     "flux-schnell": "fal-ai/flux/schnell",
     "seedream-4-edit": "fal-ai/bytedance/seedream/v4/edit",
     "flux-kontext-pro": "fal-ai/flux-pro/kontext",
-    # Video ids, recorded now; their adapter arrives in phase 6 (DEC-102).
+    # Video ids: their adapter is video.FalVideoAdapter (phase 6). ltx-2-fast stays
+    # listed for the ledger only; the adapter refuses it (16:9 only, A-101).
     "seedance-1-pro-fast": "fal-ai/bytedance/seedance/v1/pro/fast/image-to-video",
     "ltx-2-fast": "fal-ai/ltxv-2/image-to-video/fast",
+    "ltx-2.3-fast": "fal-ai/ltx-2.3/image-to-video/fast",
     "kling-2.5-turbo-std": "fal-ai/kling-video/v2.5-turbo/standard/image-to-video",
 }
 OPENAI_MODELS = {"gpt-image-2-low": ("gpt-image-2", "low")}
@@ -221,6 +223,8 @@ class GeminiImageAdapter(_Adapter):
 
 class FalAdapter(_Adapter):
     provider = "fal"
+    # How long ``_poll`` waits for one request; a video subclass waits longer.
+    poll_budget_seconds = FAL_POLL_BUDGET_SECONDS
 
     def _inputs(self, link, request, seed):
         base = {"prompt": request.prompt, "num_images": 1, "seed": seed}
@@ -257,7 +261,7 @@ class FalAdapter(_Adapter):
         when fal settles it otherwise; a plain error past the poll budget."""
         label = describe(link)
         request_id = queued["request_id"]
-        deadline = time_fn() + FAL_POLL_BUDGET_SECONDS
+        deadline = time_fn() + self.poll_budget_seconds
         polls = 0
         while True:
             sleep_fn(FAL_POLL_INTERVAL_SECONDS)
@@ -272,7 +276,7 @@ class FalAdapter(_Adapter):
                 position = status.get("queue_position")
                 on_log(f"   ⏳ {label}: {state.lower() or 'waiting'}" + (f", queue position {position}" if position is not None else ""))
             if time_fn() >= deadline:
-                raise ProviderError(f"{label}: request {request_id} still {state or 'pending'} after {FAL_POLL_BUDGET_SECONDS:.0f}s")
+                raise ProviderError(f"{label}: request {request_id} still {state or 'pending'} after {self.poll_budget_seconds:.0f}s")
 
     def _fetch(self, link, request, queued, seed, *, headers, transport, on_submit=None):
         """Read the completed answer, report its image URL (so a failed download

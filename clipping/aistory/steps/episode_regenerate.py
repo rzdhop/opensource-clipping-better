@@ -17,6 +17,11 @@
   spoken direction and the take persisted as ``pending`` in the line's
   ``assets.json`` entry before the call (phase 5 stage 7). Neither
   clears an approval. (``regenerate.parse_target`` reads these two targets.)
+- phase 6 (``assets.regenerate_shot_clip``): kind ``shot_video``
+  (``shot:<ep>:<shot_id>:video``) -- that shot's clip again on the episode's
+  video link alone, the note at its prompt's tail, a fresh seed persisted as
+  the clip's ``pending`` before the call; refused below tier 2, for a shot
+  kept still or a keyframe that is not current. No approval is cleared.
 - phase 4 (``metadata.regenerate_platform``): kind ``metadata``
   (``metadata:<ep>:<platform>``, the tuple ``("metadata", ep, platform)``)
   -- that platform's M1 again with the note; the other platforms, the cover
@@ -59,10 +64,11 @@ from .regenerate import (  # noqa: F401 -- re-exported
     LINE_KIND,
     METADATA_KIND,
     SHOT_IMAGE_KIND,
+    SHOT_VIDEO_KIND,
     parse_episode_target,
 )
 
-ASSET_KINDS = (SHOT_IMAGE_KIND, LINE_KIND)
+ASSET_KINDS = (SHOT_IMAGE_KIND, SHOT_VIDEO_KIND, LINE_KIND)
 
 
 def _noted(note) -> str:
@@ -98,8 +104,9 @@ def run(ctx, target, parsed, note, *, runner=None, time_fn=time.monotonic, sleep
         # never need.
         from . import assets as assets_step
 
-        regenerate = (assets_step.regenerate_shot_image if parsed[0] == SHOT_IMAGE_KIND
-                      else assets_step.regenerate_line_voice)
+        regenerate = {SHOT_IMAGE_KIND: assets_step.regenerate_shot_image,
+                      SHOT_VIDEO_KIND: assets_step.regenerate_shot_clip,
+                      LINE_KIND: assets_step.regenerate_line_voice}[parsed[0]]
         return regenerate(ctx, ec, target, parsed[2], note, tools=tools, refuse=refuse)
 
     if parsed[0] == METADATA_KIND:

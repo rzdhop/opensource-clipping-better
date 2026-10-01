@@ -1,0 +1,304 @@
+{
+  "$schema": "comfy_workflow_v1",
+  "name": "i2v_wan22_14b_lightning",
+  "task": "i2v",
+  "min_profile": "high",
+  "verified_live": false,
+  "core_nodes_only": true,
+  "description": "Image to video with Wan 2.2 I2V A14B fp8 (Apache-2.0) and the lightx2v 4-step Lightning LoRAs, 16 fps: the high-noise model takes steps 0-2 of 4, the low-noise model steps 2-4, cfg 1. Authored from ComfyUI's own graph https://raw.githubusercontent.com/Comfy-Org/workflow_templates/main/templates/video_wan2_2_14B_i2v.json (read 2026-09-30), its subgraph flattened along the Lightning branch of its switch (LoRA models, 4 steps, cfg 1, split at step 2); frames = 16 x seconds + 1 as its own length expression. Literal inputs replaced by the spec 8.7 placeholders. 480x832 is Wan 2.2 A14B's 480P in 9:16 (the source's square default is 640x640). Only ComfyUI core nodes. Never run on a GPU here (A-035): verified against a fake ComfyUI only.",
+  "source": {
+    "urls": [
+      "https://raw.githubusercontent.com/Comfy-Org/workflow_templates/main/templates/video_wan2_2_14B_i2v.json",
+      "https://comfyanonymous.github.io/ComfyUI_examples/wan22/"
+    ],
+    "read_on": "2026-09-30",
+    "deviations": [
+      "subgraph flattened; its ComfySwitchNode/Primitive nodes resolved to the Lightning branch",
+      "480x832 instead of the square 640x640 default",
+      "SaveVideo format mp4/h264 instead of auto/auto"
+    ]
+  },
+  "placeholders": [
+    "image_path",
+    "prompt",
+    "negative",
+    "seed",
+    "width",
+    "height",
+    "frames",
+    "fps"
+  ],
+  "frame_rule": {
+    "fps": 16,
+    "frame_step": 4,
+    "max_frames": 81,
+    "width": 480,
+    "height": 832,
+    "lengths": [
+      2,
+      3,
+      4,
+      5
+    ],
+    "rule": "frames = fps x seconds rounded up to a multiple of frame_step, plus 1 (Wan: 4n+1)"
+  },
+  "requires": [
+    {
+      "node": "95",
+      "field": "unet_name",
+      "file": "wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors",
+      "dir": "models/diffusion_models"
+    },
+    {
+      "node": "96",
+      "field": "unet_name",
+      "file": "wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors",
+      "dir": "models/diffusion_models"
+    },
+    {
+      "node": "101",
+      "field": "lora_name",
+      "file": "wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors",
+      "dir": "models/loras"
+    },
+    {
+      "node": "102",
+      "field": "lora_name",
+      "file": "wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors",
+      "dir": "models/loras"
+    },
+    {
+      "node": "84",
+      "field": "clip_name",
+      "file": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "dir": "models/text_encoders"
+    },
+    {
+      "node": "90",
+      "field": "vae_name",
+      "file": "wan_2.1_vae.safetensors",
+      "dir": "models/vae"
+    }
+  ],
+  "image_node": "97",
+  "output_node": "108",
+  "graph": {
+    "95": {
+      "class_type": "UNETLoader",
+      "inputs": {
+        "unet_name": "wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors",
+        "weight_dtype": "default"
+      }
+    },
+    "96": {
+      "class_type": "UNETLoader",
+      "inputs": {
+        "unet_name": "wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors",
+        "weight_dtype": "default"
+      }
+    },
+    "101": {
+      "class_type": "LoraLoaderModelOnly",
+      "inputs": {
+        "model": [
+          "95",
+          0
+        ],
+        "lora_name": "wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors",
+        "strength_model": 1.0
+      }
+    },
+    "102": {
+      "class_type": "LoraLoaderModelOnly",
+      "inputs": {
+        "model": [
+          "96",
+          0
+        ],
+        "lora_name": "wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors",
+        "strength_model": 1.0
+      }
+    },
+    "104": {
+      "class_type": "ModelSamplingSD3",
+      "inputs": {
+        "model": [
+          "101",
+          0
+        ],
+        "shift": 5.0
+      }
+    },
+    "103": {
+      "class_type": "ModelSamplingSD3",
+      "inputs": {
+        "model": [
+          "102",
+          0
+        ],
+        "shift": 5.0
+      }
+    },
+    "84": {
+      "class_type": "CLIPLoader",
+      "inputs": {
+        "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+        "type": "wan",
+        "device": "default"
+      }
+    },
+    "90": {
+      "class_type": "VAELoader",
+      "inputs": {
+        "vae_name": "wan_2.1_vae.safetensors"
+      }
+    },
+    "93": {
+      "class_type": "CLIPTextEncode",
+      "inputs": {
+        "text": "{{prompt}}",
+        "clip": [
+          "84",
+          0
+        ]
+      }
+    },
+    "89": {
+      "class_type": "CLIPTextEncode",
+      "inputs": {
+        "text": "{{negative}}",
+        "clip": [
+          "84",
+          0
+        ]
+      }
+    },
+    "97": {
+      "class_type": "LoadImage",
+      "inputs": {
+        "image": "{{image_path}}"
+      }
+    },
+    "98": {
+      "class_type": "WanImageToVideo",
+      "inputs": {
+        "positive": [
+          "93",
+          0
+        ],
+        "negative": [
+          "89",
+          0
+        ],
+        "vae": [
+          "90",
+          0
+        ],
+        "width": "{{width}}",
+        "height": "{{height}}",
+        "length": "{{frames}}",
+        "batch_size": 1,
+        "start_image": [
+          "97",
+          0
+        ]
+      }
+    },
+    "86": {
+      "class_type": "KSamplerAdvanced",
+      "inputs": {
+        "model": [
+          "104",
+          0
+        ],
+        "add_noise": "enable",
+        "noise_seed": "{{seed}}",
+        "steps": 4,
+        "cfg": 1.0,
+        "sampler_name": "euler",
+        "scheduler": "simple",
+        "positive": [
+          "98",
+          0
+        ],
+        "negative": [
+          "98",
+          1
+        ],
+        "latent_image": [
+          "98",
+          2
+        ],
+        "start_at_step": 0,
+        "end_at_step": 2,
+        "return_with_leftover_noise": "enable"
+      }
+    },
+    "85": {
+      "class_type": "KSamplerAdvanced",
+      "inputs": {
+        "model": [
+          "103",
+          0
+        ],
+        "add_noise": "disable",
+        "noise_seed": 0,
+        "steps": 4,
+        "cfg": 1.0,
+        "sampler_name": "euler",
+        "scheduler": "simple",
+        "positive": [
+          "98",
+          0
+        ],
+        "negative": [
+          "98",
+          1
+        ],
+        "latent_image": [
+          "86",
+          0
+        ],
+        "start_at_step": 2,
+        "end_at_step": 4,
+        "return_with_leftover_noise": "disable"
+      }
+    },
+    "87": {
+      "class_type": "VAEDecode",
+      "inputs": {
+        "samples": [
+          "85",
+          0
+        ],
+        "vae": [
+          "90",
+          0
+        ]
+      }
+    },
+    "94": {
+      "class_type": "CreateVideo",
+      "inputs": {
+        "images": [
+          "87",
+          0
+        ],
+        "fps": "{{fps}}"
+      }
+    },
+    "108": {
+      "class_type": "SaveVideo",
+      "inputs": {
+        "video": [
+          "94",
+          0
+        ],
+        "filename_prefix": "rzdhop_ai/i2v_wan22_14b_lightning",
+        "format": "mp4",
+        "format.codec": "h264",
+        "codec": "h264"
+      }
+    }
+  }
+}

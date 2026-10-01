@@ -39,11 +39,13 @@ PRICES = {
     "fal/seedream-4-edit": Price("image", 0.03, "multi-reference edit"),
     "fal/flux-kontext-pro": Price("image", 0.04, "single-reference edit"),
     "openai/gpt-image-2-low": Price("image", 0.005, "quality low, 1024x1536"),
-    # --- video, per second of output (appendix B)
-    "fal/seedance-1-pro-fast": Price("second", 0.022, "about $0.11 per 5 s at 720p, token-billed"),
-    "fal/ltx-2-fast": Price("second", 0.04, "1080p with native audio; the endpoint is moving to LTX-2.3"),
-    "fal/kling-2.5-turbo-std": Price("second", 0.042, "$0.21 per 5 s"),
-    "gemini/veo-3.1-lite": Price("second", 0.05, "$0.25 per 5 s at 720p"),
+    # --- video, per second of output (appendix B). Re-read on each model's own
+    # page on 2026-09-30: no price had moved; the notes carry what was learned.
+    "fal/seedance-1-pro-fast": Price("second", 0.022, "token-billed, $1.00 per million tokens, tokens = width x height x 24 fps x seconds / 1024: 720x1280 is 21,600 tokens, $0.0216, a second (rounded up); 1080p, the endpoint's default, is $0.0486 a second; no audio"),
+    "fal/ltx-2-fast": Price("second", 0.04, "1080p, its smallest size, audio included; its output is locked to 16:9; its fal-ai/ltx-2 twin was deprecated on 2026-08-15 for LTX-2.3 fast ($0.06 a second at 1080p, with 9:16)"),
+    "fal/ltx-2.3-fast": Price("second", 0.06, "fal-ai/ltx-2.3/image-to-video/fast, read on its fal page and schema on 2026-09-30: $0.06 a second at 1080p, its smallest size (9:16 is 1080x1920), $0.12 at 1440p, $0.24 at 2160p; audio not priced apart; a summary block on the same page says $0.04 at 1080p, the higher 'your request will cost' line is kept"),
+    "fal/kling-2.5-turbo-std": Price("second", 0.042, "$0.21 per 5 s, $0.042 per extra second; 5 or 10 s; no audio"),
+    "gemini/veo-3.1-lite": Price("second", 0.05, "veo-3.1-lite-generate-preview at 720p ($0.20 per 4 s), audio always on and included; $0.08 a second at 1080p (8 s only); no free tier"),
     # --- speech (appendix C)
     "gemini/flash-lite-tts": Price("second", 0.0, "free tier; $0.0015 per 10 s beyond"),
     "gcloud/neural2": Price("char", 0.000016, "$16 per million characters; extension point"),
@@ -65,6 +67,28 @@ FREE_PROVIDER_PRICES = {
 }
 
 Estimate = namedtuple("Estimate", "link unit qty price_usd est_usd paid")
+
+# --- LLM links, per million tokens (AI Story phase 6, stage 5; DEC-115's
+# follow-up). Only the PAID links a story step can reach by default: the
+# default chain's OpenRouter model and the model DEC-089 falls back to on the
+# same key (``registry.PROVIDERS["openrouter"].fallback_models``); every other
+# default link is free (``llm_call.is_free_link``). A paid link with no row is
+# refused before any call, never guessed.
+#
+# OpenRouter serves one model from several hosts at different prices and
+# picks the host per request, so each row holds the DEAREST host's price read
+# on the model's endpoints page: an estimate checked against a cap must never
+# be low. What a reply is booked at is its own ``usage.cost`` whenever it
+# carries one (OpenRouter returns it with every response); this table prices
+# the estimate, and a reply without it.
+LLM_PRICES_AS_OF = "2026-09-30"
+
+LlmPrice = namedtuple("LlmPrice", "input_usd_per_m output_usd_per_m note")
+
+LLM_PRICES = {
+    "openrouter/mistralai/mistral-small-3.2-24b-instruct": LlmPrice(0.10, 0.30, "the dearest of 4 hosts (Mistral's own), read on 2026-09-30 at https://openrouter.ai/api/v1/models/mistralai/mistral-small-3.2-24b-instruct/endpoints; the model's listed price at https://openrouter.ai/api/v1/models is $0.09375 in / $0.25 out, DeepInfra $0.075 / $0.20 the cheapest"),
+    "openrouter/meta-llama/llama-3.3-70b-instruct": LlmPrice(1.04, 1.04, "the dearest of 11 hosts (Together), read on 2026-09-30 at https://openrouter.ai/api/v1/models/meta-llama/llama-3.3-70b-instruct/endpoints; the model's listed price at https://openrouter.ai/api/v1/models is $0.10 in / $0.32 out (DeepInfra, the cheapest); DEC-089's fallback, reached only when the default model is unavailable"),
+}
 
 
 class PriceUnknown(LookupError):
@@ -99,6 +123,24 @@ def estimate(link, qty=1, *, width=None, height=None) -> Estimate:
         unit_price = price.usd * megapixels
     est = round(unit_price * qty, 4) if paid else 0.0
     return Estimate(describe(link), price.unit, qty, round(unit_price, 6), est, paid)
+
+
+def llm_price_for(link) -> LlmPrice:
+    """The :class:`LlmPrice` of the LLM *link*; :class:`PriceUnknown` without a row."""
+    label = describe(link)
+    price = LLM_PRICES.get(label)
+    if price is None:
+        raise PriceUnknown(
+            f"No price for {label} in the LLM price table dated {LLM_PRICES_AS_OF} "
+            f"(clipping/providers/pricing.py, LLM_PRICES). Add it before calling a paid link."
+        )
+    return price
+
+
+def llm_cost(link, tokens_in, tokens_out) -> float:
+    """What *tokens_in* prompt and *tokens_out* completion tokens on *link* cost, unrounded."""
+    price = llm_price_for(link)
+    return (tokens_in * price.input_usd_per_m + tokens_out * price.output_usd_per_m) / 1_000_000
 
 
 def price_table() -> list:

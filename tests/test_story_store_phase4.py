@@ -216,7 +216,8 @@ def test_the_new_documents_are_episode_documents():
 
 
 def test_the_asset_kinds_gain_shots_and_keep_voice():
-    assert store.EPISODE_ASSET_KINDS == ("voice", "shots")
+    # Phase 6 stage 7 adds the shot clips after them.
+    assert store.EPISODE_ASSET_KINDS == ("voice", "shots", "clips")
     assert set(store.EPISODE_ASSET_NAME_PATTERNS) == set(store.EPISODE_ASSET_KINDS)
     assert store.EPISODE_ASSET_NAME_PATTERNS["voice"].pattern == r"^line_[0-9]{2}\.(mp3|wav|json)$"
     assert store.EPISODE_ASSET_NAME_PATTERNS["shots"].pattern == schemas.SHOT_IMAGE_NAME_PATTERN

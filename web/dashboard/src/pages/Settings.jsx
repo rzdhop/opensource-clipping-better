@@ -110,6 +110,8 @@ function Settings() {
   const [cloudflareToken, setCloudflareToken] = useState('')
   const [cloudflareAccountId, setCloudflareAccountId] = useState('')
   const [pollinationsKey, setPollinationsKey] = useState('')
+  // Veo only: a separate, billing-enabled Google project (phase 6 stage 12, RC-V4).
+  const [geminiPaidKey, setGeminiPaidKey] = useState('')
 
   // The endpoint URL and model are not secrets, so they are prefilled.
   const [compatUrl, setCompatUrl] = useState('')
@@ -222,6 +224,7 @@ function Settings() {
       if (cloudflareToken) payload.cloudflare_api_token = cloudflareToken
       if (cloudflareAccountId) payload.cloudflare_account_id = cloudflareAccountId
       if (pollinationsKey) payload.pollinations_api_key = pollinationsKey
+      if (geminiPaidKey) payload.gemini_paid_api_key = geminiPaidKey
 
       // Sent whenever they differ from what the server holds, including when
       // cleared: an empty value removes the override and falls back to .env,
@@ -645,6 +648,13 @@ function Settings() {
                 <SetBadge on={settings?.pollinations_api_key_set} />
               </label>
               <PasswordInput value={pollinationsKey} onChange={setPollinationsKey} placeholder="Paste your Pollinations key (optional)" isSet={settings?.pollinations_api_key_set} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">
+                Gemini paid key (Veo only — a separate billing-enabled Google project)
+                <SetBadge on={settings?.gemini_paid_api_key_set} />
+              </label>
+              <PasswordInput value={geminiPaidKey} onChange={setGeminiPaidKey} placeholder="Paste the billing-enabled project's key" isSet={settings?.gemini_paid_api_key_set} />
             </div>
           </div>
           <ChainLinksPanel

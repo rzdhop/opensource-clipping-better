@@ -1,13 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { createStory, fetchStory, fetchStyles, styleNameOf } from '../../api'
+import { createStory, fetchStory, fetchStoryEstimate, fetchStyles, patchStory, styleNameOf } from '../../api'
 import { LiveActivity, useJobFeed } from '../../components/ActivityFeed'
+import RouteChip from '../../components/RouteChip'
+import { StepError } from './fields'
 import ConceptsStep from './steps/ConceptsStep'
 import BibleStep from './steps/BibleStep'
 import StyleStep from './steps/StyleStep'
 import CastStep from './steps/CastStep'
 import PlacesStep from './steps/PlacesStep'
 import SeasonStep from './steps/SeasonStep'
+
+// Same sub-cent formatting as the episode panes' fmtUsd (duplicated: this
+// page shares no component module with them).
+function fmtUsd(value) {
+  const amount = Number(value) || 0
+  return amount === 0 ? '0.00' : amount.toFixed(3)
+}
+
+const ROUTES = ['auto', 'local', 'api']
 
 // The story defaults (spec 8, 8.1, 8.5): a story that does not name every
 // one of these gets exactly these values. tests/test_story_defaults.py reads
@@ -301,6 +312,116 @@ function StoryJobList({ jobs }) {
   )
 }
 
+// ----------------------------------------------------------- visual tier (phase 6)
+
+/**
+ * The story's generation profile's visual half: tier (1 stills + motion, 2
+ * image-to-video, 3 + native audio) and route (auto/local/api), saved
+ * through `PATCH /api/stories/{id}` (`generation_profile` is merged onto
+ * the current values, so sending only the changed field leaves the rest
+ * alone). Under it, *nextEp*'s assets run priced on each route in turn
+ * (`GET /estimate/assets?route=`, phase 6 stage 11 -- a preview, it patches
+ * nothing): clips/seconds and either the local ETA or the paid cost, the
+ * link, or the refusal sentence when the episode is not ready for it yet
+ * (no script/storyboard approved, no video link ready, ...). *nextEp* is
+ * the latest episode with an approved storyboard, so this priced episode
+ * usually has something to show rather than "no script yet" (browser-check
+ * finding F5); see the caller for the fallback when none does.
+ */
+function GenerationProfileCard({ storyId, story, nextEp, onChange }) {
+  const [tier, setTier] = useState(story.generation_profile.tier)
+  const [route, setRoute] = useState(story.generation_profile.route)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [routeEstimates, setRouteEstimates] = useState({})
+  const [routeErrors, setRouteErrors] = useState({})
+
+  const save = async (patch) => {
+    setSaving(true)
+    setError('')
+    try {
+      await patchStory(storyId, { generation_profile: patch })
+      onChange()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleTier = (value) => { setTier(value); save({ tier: value }) }
+  const handleRoute = (value) => { setRoute(value); save({ route: value }) }
+
+  useEffect(() => {
+    if (tier < 2 || !nextEp) { setRouteEstimates({}); setRouteErrors({}); return undefined }
+    let cancelled = false
+    setRouteEstimates({})
+    setRouteErrors({})
+    ROUTES.forEach((r) => {
+      fetchStoryEstimate(storyId, 'assets', { ep: nextEp, route: r })
+        .then((data) => { if (!cancelled) setRouteEstimates((prev) => ({ ...prev, [r]: data })) })
+        .catch((err) => { if (!cancelled) setRouteErrors((prev) => ({ ...prev, [r]: err.message })) })
+    })
+    return () => { cancelled = true }
+  }, [storyId, tier, nextEp])
+
+  return (
+    <div className="card story-generation-profile" style={{ marginBottom: '16px' }}>
+      <h3 className="card-title">Visual tier</h3>
+      <div className="form-group">
+        <label className="form-label">Tier</label>
+        <select className="form-select" value={tier} onChange={(e) => handleTier(Number(e.target.value))} disabled={saving}>
+          <option value={1}>1 — stills + motion</option>
+          <option value={2}>2 — image-to-video</option>
+          <option value={3}>3 — + native audio (experimental)</option>
+        </select>
+      </div>
+      <div className="form-group">
+        <label className="form-label">Route</label>
+        <select className="form-select" value={route} onChange={(e) => handleRoute(e.target.value)} disabled={saving}>
+          <option value="auto">Auto</option>
+          <option value="local">Local</option>
+          <option value="api">API</option>
+        </select>
+      </div>
+      <StepError message={error} />
+      {tier >= 2 && (
+        <div className="story-generation-profile-routes">
+          <p className="form-hint">Episode {nextEp}'s video estimate, per route:</p>
+          {ROUTES.map((r) => {
+            const est = routeEstimates[r]
+            const err = routeErrors[r]
+            return (
+              <div key={r} className="story-step-actions" style={{ marginBottom: '6px' }}>
+                <span className="chip">{r}</span>
+                {err ? (
+                  <span className="chip chip-warn chip-wrap">{err}</span>
+                ) : est && est.video ? (
+                  <>
+                    <span className="chip" title={est.video.message || ''}>
+                      {est.video.count != null ? `${est.video.count} clip${est.video.count === 1 ? '' : 's'}` : 'nothing to animate yet'}
+                      {est.video.seconds != null ? ` · ${est.video.seconds.toFixed(1)} s` : ''}
+                      {est.video.count != null ? (
+                        est.video.route_class === 'local' && est.video.eta_s != null
+                          ? ` · ~${Math.round(est.video.eta_s)} s local${est.video.eta_note ? ` (${est.video.eta_note})` : ''}`
+                          : ` · $${fmtUsd(est.video.est_usd)}`
+                      ) : ''}
+                    </span>
+                    {est.video.link && <RouteChip routeClass={est.video.route_class} link={est.video.link} />}
+                    {!est.video.ready && est.video.message && <p className="form-hint">{est.video.message}</p>}
+                  </>
+                ) : (
+                  <span className="chip">estimating…</span>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function ExistingStory({ storyId }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -407,6 +528,23 @@ function ExistingStory({ storyId }) {
   // style_approved even though approvals.season was never touched -- the
   // card must not keep claiming the story is ready once that happens.
   const allDone = story.status === 'ready'
+  // The episode the Visual tier card prices its video estimate for
+  // (browser-check finding F5): the LATEST episode with an approved
+  // storyboard -- the assets step can actually run on it -- else (no
+  // episode has one yet) the next one to work on: the first with no timed
+  // script yet (`total_s` is the script's own timing.total_s,
+  // workflow.episode_summaries), else the one after the last created
+  // episode, else episode 1. The estimate itself still answers with its own
+  // refusal sentence when even that fallback episode is not ready for it.
+  const episodesList = data.episodes || []
+  const approvedStoryboardEpisodes = episodesList.filter((entry) => entry.storyboard_state === 'approved')
+  const latestApproved = approvedStoryboardEpisodes.length > 0
+    ? approvedStoryboardEpisodes.reduce((latest, entry) => (entry.ep > latest.ep ? entry : latest))
+    : null
+  const unfinishedEpisode = episodesList.find((entry) => entry.total_s == null)
+  const nextEp = latestApproved ? latestApproved.ep
+    : unfinishedEpisode ? unfinishedEpisode.ep
+    : episodesList.length > 0 ? episodesList[episodesList.length - 1].ep + 1 : 1
 
   return (
     <div className="fade-in">
@@ -416,6 +554,8 @@ function ExistingStory({ storyId }) {
           <p>{story.language === 'fr' ? 'Français' : 'English'}{story.style_template_id ? ` · ${styleNameOf(styles, story.style_template_id)}` : ''}</p>
         </div>
       </div>
+
+      <GenerationProfileCard storyId={storyId} story={story} nextEp={nextEp} onChange={refresh} />
 
       <div className="stepper">
         <div className="stepper-step stepper-step-done">

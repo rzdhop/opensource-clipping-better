@@ -2249,6 +2249,11 @@ _STORYBOARD_MOTION_SCHEMA = _document({
 # store.EPISODE_ASSET_NAME_PATTERNS["shots"] holds.
 SHOT_IMAGE_DIR = "assets/shots"
 SHOT_IMAGE_NAME_PATTERN = r"^shot_(0[1-9]|[1-9][0-9])\.(png|jpg|jpeg|webp)$"
+# A shot's clip (phase 6 stage 7, tier >= 2): assets/clips/shot_NN.mp4, named
+# the image's way. The only names store.EPISODE_ASSET_NAME_PATTERNS["clips"]
+# holds.
+SHOT_CLIP_DIR = "assets/clips"
+SHOT_CLIP_NAME_PATTERN = r"^shot_(0[1-9]|[1-9][0-9])\.mp4$"
 # How an image was paid for: a free API link, a local engine, a paid link.
 IMAGE_ROUTES = ("free", "local", "paid")
 # A full sha256, hex (a prompt hash, a cache key, a file's digest).
@@ -2265,6 +2270,35 @@ _STORYBOARD_PENDING_SCHEMA = _or_null(_document({
     "seed": {"type": "integer", "minimum": 0},
     "note": _NOTE_OR_NULL,
     "requested_at": _NON_EMPTY_STRING,
+}))
+
+# Phase 6 stage 7: a shot's clip (tier >= 2), recorded next to its image in
+# the shot's ``assets`` (DEC-155) -- the video phase (stage 8) writes it with
+# the storyboard's approval kept, as it writes the image. ``state``: current
+# (made from the shot's image and video prompt as they are, on the episode's
+# video link), stale, or failed (``reason`` says why). The file is
+# ``assets.video`` (SHOT_CLIP_DIR/shot_NN.mp4), set only while the clip is
+# current: the renderer reads it (render/plan.py). ``link`` is a chain link's
+# label (EPISODE_LINK_PATTERN's rule); ``route`` how it is paid for.
+CLIP_STATES = ("current", "stale", "failed")
+CLIP_ROUTES = ("local", "paid")
+_STORYBOARD_CLIP_SCHEMA = _or_null(_document({
+    "state": {"type": "string", "enum": list(CLIP_STATES)},
+    "link": {"type": "string", "maxLength": 160, "pattern": r"^[a-z][a-z0-9_-]*/[^\s,*]+$"},
+    "route": {"type": "string", "enum": list(CLIP_ROUTES)},
+    # The length bought (a whole second of the link's or template's table).
+    "clip_s": {"type": "integer", "minimum": 1},
+    "est_usd": {"type": "number", "minimum": 0},
+    # sha256 of the video prompt it was asked with, and of the keyframe sent.
+    "prompt_hash": _SHA256,
+    "image_sha256": _SHA256,
+    "cache_key": {"type": ["string", "null"], "pattern": SHA256_PATTERN},
+    "generated_at": _TIMESTAMP_OR_NULL,
+}, optional={
+    # A re-animate's note, and its fresh seed persisted before the call (DEC-154).
+    "note": _NOTE_OR_NULL,
+    "pending": _STORYBOARD_PENDING_SCHEMA,
+    "reason": {"type": ["string", "null"], "maxLength": 1000},
 }))
 
 # The five keys of spec 2.8 stay required; phase 4's record of the image is
@@ -2289,6 +2323,8 @@ _STORYBOARD_ASSETS_SCHEMA = _document({
     # The generation cache's key for the request (clipping/providers/gencache.py).
     "cache_key": {"type": ["string", "null"], "pattern": SHA256_PATTERN},
     "pending": _STORYBOARD_PENDING_SCHEMA,
+    # Phase 6 stage 7: the shot's clip (_STORYBOARD_CLIP_SCHEMA).
+    "clip": _STORYBOARD_CLIP_SCHEMA,
 })
 
 _STORYBOARD_SHOT_SCHEMA = _document({
@@ -2361,7 +2397,9 @@ def storyboard_errors(doc, *, min_shot_s=0.8) -> list:
     references, a non-cut transition sitting only on a scene boundary (spec
     6.3: ``cut`` inside a scene), the per-shot minimum length once timed, the
     motion type matching the shot's own camera motion, and a shot's image
-    being its own file (``SHOT_IMAGE_DIR``/``shot_NN.<ext>``)."""
+    being its own file (``SHOT_IMAGE_DIR``/``shot_NN.<ext>``), and its clip
+    (phase 6 stage 7) its own ``SHOT_CLIP_DIR``/``shot_NN.mp4``, named only
+    while its ``assets.clip`` is current."""
     errors = validate(doc, STORYBOARD_SCHEMA)
     if errors:
         return errors
@@ -2404,6 +2442,18 @@ def storyboard_errors(doc, *, min_shot_s=0.8) -> list:
                     f"$.shots[{i}].assets.image: {image!r} is not {shot['shot_id']}'s image "
                     f"({SHOT_IMAGE_DIR}/shot_NN.<png|jpg|jpeg|webp>)"
                 )
+        video = shot["assets"]["video"]
+        if video is not None:
+            folder, _, name = video.rpartition("/")
+            if (folder != SHOT_CLIP_DIR or _search(SHOT_CLIP_NAME_PATTERN, name) is None
+                    or name != f"shot_{shot['shot_id'][2:]}.mp4"):
+                errors.append(
+                    f"$.shots[{i}].assets.video: {video!r} is not {shot['shot_id']}'s clip "
+                    f"({SHOT_CLIP_DIR}/shot_NN.mp4)"
+                )
+            elif (shot["assets"].get("clip") or {}).get("state") != "current":
+                errors.append(f"$.shots[{i}].assets.video: set only with a current clip (assets.clip.state "
+                              "'current')")
 
     seen_scenes = []
     for shot in shots:
@@ -2585,6 +2635,31 @@ _EPISODE_ASSETS_APPROVED_SCHEMA = _or_null(_document({
     "fingerprint": _SHA256,
 }))
 
+# Phase 6 stage 6 (A-087): the one link an episode's shot images are made on
+# (``steps/sticky_link.py``): the chain link's label, since when, and the link
+# it replaced when the user switched to it. ``video`` is the clips' slot
+# (stage 8). Optional: a document written before it validates unchanged.
+EPISODE_LINK_PATTERN = r"^[a-z][a-z0-9_-]*/[^\s,*]+$"
+_EPISODE_LINK_LABEL = {"type": "string", "maxLength": 160, "pattern": EPISODE_LINK_PATTERN}
+_EPISODE_LINK_SCHEMA = _document({
+    "link": _EPISODE_LINK_LABEL,
+    "since": _NON_EMPTY_STRING,
+}, optional={
+    "switched_from": _EPISODE_LINK_LABEL,
+})
+_EPISODE_LINKS_SCHEMA = _document({}, optional={"image": _EPISODE_LINK_SCHEMA, "video": _EPISODE_LINK_SCHEMA})
+
+# Phase 6 stage 7: the user's per-shot overrides of what the clips do
+# (``workflow.patch_assets``): ``keep_still`` over the storyboard's own,
+# ``animate`` (a pin: animated first, even past the cap) and
+# ``keep_native_audio`` (tier 3). Kept here, not on the storyboard, so
+# choosing which shots move never clears the storyboard's approval
+# (``video_plan.effective_shot_flags`` resolves them). Keyed by shot id, an
+# entry naming at least one; optional: a document without it validates as
+# before.
+SHOT_OVERRIDE_FLAGS = ("keep_still", "animate", "keep_native_audio")
+_EPISODE_ASSETS_SHOT_SCHEMA = _document({}, optional={flag: {"type": "boolean"} for flag in SHOT_OVERRIDE_FLAGS})
+
 EPISODE_ASSETS_SCHEMA = _document({
     "$schema": {"type": "string", "const": EPISODE_ASSETS_SCHEMA_NAME},
     "ep": _EP,
@@ -2595,6 +2670,10 @@ EPISODE_ASSETS_SCHEMA = _document({
     "approved": _EPISODE_ASSETS_APPROVED_SCHEMA,
     "created_at": _NON_EMPTY_STRING,
     "updated_at": _NON_EMPTY_STRING,
+}, optional={
+    "links": _EPISODE_LINKS_SCHEMA,
+    # keyed by shot id -> _EPISODE_ASSETS_SHOT_SCHEMA, checked in episode_assets_errors.
+    "shots": {"type": "object"},
 })
 
 
@@ -2604,8 +2683,9 @@ def episode_assets_errors(doc) -> list:
     pending voice take alone (phase 5 stage 7), ``aligned_by`` exactly when
     the words were aligned, an SFX
     cue's file there exactly when it resolved, the BGM weights keyed by
-    emotions with the dominant one the heaviest, and a track's file, sha256
-    and licence recorded together."""
+    emotions with the dominant one the heaviest, a track's file, sha256
+    and licence recorded together, and the per-shot overrides (phase 6
+    stage 7) keyed by shot ids, none empty."""
     errors = validate(doc, EPISODE_ASSETS_SCHEMA)
     if errors:
         return errors
@@ -2627,6 +2707,17 @@ def episode_assets_errors(doc) -> list:
             continue
         if (entry["words_source"] == "alignment") != ("aligned_by" in entry):
             errors.append(f"{path}.aligned_by: present exactly when words_source is 'alignment'")
+
+    for key, entry in (doc.get("shots") or {}).items():
+        path = f"$.shots.{key}"
+        if not (isinstance(key, str) and _search(SHOT_ID_PATTERN, key)):
+            errors.append(f"$.shots: {key!r} is not a shot id")
+            continue
+        found = validate(entry, _EPISODE_ASSETS_SHOT_SCHEMA, path)
+        if found:
+            errors.extend(found)
+        elif not entry:
+            errors.append(f"{path}: an override names at least one of {', '.join(SHOT_OVERRIDE_FLAGS)}")
 
     for i, cue in enumerate(doc["sfx"]):
         if (cue["state"] == "resolved") != (cue["file"] is not None):
@@ -2674,13 +2765,27 @@ RENDER_STAGE_KINDS = (
 RENDER_STAGE_STATES = ("running", "done", "failed", "cancelled", "cached")
 # Only these stages' outputs are kept in render/cache/ and reused.
 RENDER_CACHED_KINDS = ("shot", "end_card")
-RENDER_INPUT_ROLES = ("shot", "line", "sfx", "bgm", "overlay")
+# Phase 6 stage 10: ``clip_audio`` -- a tier-3 shot's clip, staged again as
+# the audio mix's input, its sound kept in place of the shot's lines.
+RENDER_INPUT_ROLES = ("shot", "line", "sfx", "bgm", "overlay", "clip_audio")
+# What a shot was cut from at tier >= 2 (phase 6 stage 9): its own clip
+# (``video``), or its image with Tier-1 motion -- plain (``motion``: tier 1,
+# or no clip was planned for it), because its effective flags keep it still
+# (``motion_keep_still``), or in place of a clip that failed, went stale or is
+# still generating, by the render param ``fill_failed_with_motion``
+# (``motion_fill``). The render step's own param name is
+# ``RENDER_FILL_PARAM``. Phase 6 stage 10 (DEC-201): at tier 3, its own clip
+# with the clip's sound heard in place of the shot's lines
+# (``video_native_audio``).
+RENDER_SHOT_MODES = ("video", "motion", "motion_keep_still", "motion_fill", "video_native_audio")
+RENDER_FILL_PARAM = "fill_failed_with_motion"
 RENDER_STAGE_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_:.-]{0,39}$"
 STDERR_TAIL_MAX = 4000
 
 _RENDER_INPUT_SCHEMA = _document({
     "role": {"type": "string", "enum": list(RENDER_INPUT_ROLES)},
-    # The shot, line, cue or overlay it belongs to; null for the bed.
+    # The shot (its image, its clip, or its clip's sound), line, cue or
+    # overlay it belongs to; null for the bed.
     "id": {"type": ["string", "null"], "maxLength": 40, "pattern": _ID_PATTERN},
     # Where it came from (the story's folder, or the shipped assets/)...
     "source": _RELATIVE_PATH,
@@ -2705,6 +2810,10 @@ _RENDER_STAGE_SCHEMA = _document({
 _RENDER_PARAMS_SCHEMA = _document({
     "subtitles": {"type": "string", "enum": list(SUBTITLE_MODES)},
     "encoder": {"type": "string", "enum": list(RENDER_ENCODERS)},
+}, optional={
+    # Phase 6 stage 9: recorded only when it is on (a render without it is
+    # the one it always was).
+    RENDER_FILL_PARAM: {"type": "boolean", "const": True},
 })
 
 # The framemd5 parity key is "<version>/<machine>" (DEC-156).
@@ -2799,6 +2908,10 @@ RENDER_MANIFEST_SCHEMA = _document({
     # making recorded -- so a clip the previous manifest named is still
     # provable after this one replaced it (an edit undone).
     "cache": {"type": "object"},
+    # Phase 6 stage 9: {shot id: one of RENDER_SHOT_MODES}, one per shot (checked
+    # below); written only when some shot is not plain ``motion``, so a tier-1
+    # render's manifest is the one it always was.
+    "shot_modes": {"type": "object"},
 })
 
 
@@ -2842,7 +2955,9 @@ def render_manifest_errors(doc) -> list:
     is done or cached, and its loudness is finite. The optional ``reuse``
     record (phase 5 stage 8) tells the truth about the stages
     (``_render_reuse_errors``); the optional ``cache`` map names cache keys,
-    each with its recorded sha256s."""
+    each with its recorded sha256s; the optional ``shot_modes`` (phase 6
+    stage 9) names one of ``RENDER_SHOT_MODES`` for every shot it lists, and
+    lists every S stage's shot."""
     errors = validate(doc, RENDER_MANIFEST_SCHEMA)
     if errors:
         return errors
@@ -2877,6 +2992,15 @@ def render_manifest_errors(doc) -> list:
                 isinstance(sha, str) and re.match(SHA256_PATTERN, sha) for sha in shas):
             errors.append(f"$.cache: {key!r} must be a cache key naming a list of sha256s")
             break
+
+    modes = doc.get("shot_modes")
+    if modes is not None:
+        shot_ids = [stage["id"][2:] for stage in doc["stages"] if stage["kind"] == "shot"]
+        if not modes or any(not re.match(SHOT_ID_PATTERN, str(key)) or value not in RENDER_SHOT_MODES
+                            for key, value in modes.items()):
+            errors.append(f"$.shot_modes: each shot id must name one of {list(RENDER_SHOT_MODES)}")
+        elif any(shot_id not in modes for shot_id in shot_ids):
+            errors.append("$.shot_modes: every S stage's shot needs its mode")
 
     errors.extend(_render_reuse_errors(doc))
     return errors

@@ -63,7 +63,7 @@ DEFAULT_CHAINS = {
         "fal/flux-kontext-pro,gemini/nano-banana-2"
     ),
     VIDEO: (
-        "local/comfyui,fal/seedance-1-pro-fast,fal/ltx-2-fast,"
+        "local/comfyui,fal/seedance-1-pro-fast,fal/ltx-2.3-fast,"
         "fal/kling-2.5-turbo-std,gemini/veo-3.1-lite"
     ),
     TTS: "edge/fr-FR-HenriNeural,gemini/flash-lite-tts,local/piper,local/kokoro,local/chatterbox",
@@ -238,13 +238,32 @@ def is_paid(link) -> bool:
     return describe(link) in PAID_LINKS
 
 
+# A link that bills another account than its provider's other links reads its
+# own variables instead of the provider's ``env_keys``. Veo is billed on a
+# separate, billing-enabled Google project, so a clip never lands on the free
+# chain's project: it reads GEMINI_PAID_API_KEY and never GOOGLE_API_KEY, and
+# no other gemini link ever reads GEMINI_PAID_API_KEY (RC-V4). The nano-banana
+# image links stay on GOOGLE_API_KEY for now.
+LINK_ENV_KEYS = {
+    "gemini/veo-3.1-lite": ("GEMINI_PAID_API_KEY",),
+}
+
+
+def env_keys_for(link) -> tuple:
+    """The variables *link* needs: its own (``LINK_ENV_KEYS``), else its provider's."""
+    own = LINK_ENV_KEYS.get(describe(link))
+    return tuple(own) if own is not None else tuple(provider_for(link).env_keys)
+
+
 def missing_keys(link, env) -> list:
-    return [name for name in provider_for(link).env_keys if not (env.get(name) or "").strip()]
+    return [name for name in env_keys_for(link) if not (env.get(name) or "").strip()]
 
 
 def credentials_for(link, env) -> dict:
-    provider = provider_for(link)
-    names = tuple(provider.env_keys) + tuple(provider.optional_keys)
+    """The values *link* is called with: its own variables and nothing else. A
+    link with variables of its own gets none of its provider's optional ones."""
+    optional = () if describe(link) in LINK_ENV_KEYS else tuple(provider_for(link).optional_keys)
+    names = env_keys_for(link) + optional
     return {name: env[name].strip() for name in names if (env.get(name) or "").strip()}
 
 
@@ -300,7 +319,9 @@ class GenRequest:
     text: str = ""                # what to speak (tts)
     voice: str = ""               # voice id, when the link's model is not the voice
     images: tuple = ()            # frames to describe (vision)
-    duration_s: float | None = None
+    duration_s: float | None = None  # the clip's length in seconds, as bought (video)
+    fps: int | None = None        # the clip's frame rate (video)
+    native_audio: bool = False    # the clip carries the model's own audio (video)
     out_dir: str = ""
     extra: dict = field(default_factory=dict)
 

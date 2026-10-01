@@ -110,7 +110,8 @@ def test_the_five_spec_keys_stay_required_and_nothing_else_is():
     schema = schemas.STORYBOARD_SCHEMA["properties"]["shots"]["items"]["properties"]["assets"]
     assert schema["required"] == ["image", "video", "seed", "provider", "approved"]
     assert schema["additionalProperties"] is False
-    assert set(schema["properties"]) == set(PHASE4_ASSETS)
+    # Phase 6 stage 7 adds the shot's optional clip record.
+    assert set(schema["properties"]) == set(PHASE4_ASSETS) | {"clip"}
 
 
 def test_a_phase3_board_still_validates():

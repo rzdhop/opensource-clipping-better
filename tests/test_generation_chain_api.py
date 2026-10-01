@@ -128,7 +128,8 @@ def test_get_settings_reports_the_generation_surface(client):
     assert seedream["paid"] is True and seedream["keyed"] is False and seedream["adapter"] is True
     assert seedream["missing_keys"] == ["FAL_KEY"] and seedream["allowed"] is False
     assert seedream["est_usd"] == 0.03
-    assert all(r["adapter"] is False for r in chains["video"]["links"])
+    # Every video link has its adapter: local/comfyui since phase 6 stage 4, the hosted ones since stage 3.
+    assert [r["adapter"] for r in chains["video"]["links"]] == [True, True, True, True, True]
     assert data["local_comfyui_url"] == "http://127.0.0.1:8188" and data["local_ollama_url"] == "http://127.0.0.1:11434"
     assert "day" in data["usage_today"] and data["usage_today"]["cloudflare"]["rpd"] == 170
     assert data["spend_today_usd"] == 0.0
@@ -256,12 +257,15 @@ def test_a_paid_link_over_the_daily_cap_is_refused_with_the_numbers(client, tran
     assert not any("fal.run" in u for u in transport.urls())
 
 
-def test_the_video_chain_reports_no_adapter_yet(client, transport):
+def test_the_video_chain_reports_local_unreachable_and_hosted_links_unkeyed(client, transport, monkeypatch):
+    # Re-pinned in phase 6 stage 4: local/comfyui has its adapter and is asked /system_stats only.
+    monkeypatch.delenv("GEMINI_PAID_API_KEY", raising=False)
+    transport.rules[:] = [("/system_stats", APIConnectionError("connection refused"))]
     data = client.post("/api/settings/test-generation-chain", json={"kind": "video"}).json()
-    assert data["verdict"] == "no_adapter"
-    assert [r["status"] for r in data["results"]] == ["no_adapter"] * 5
-    assert "phase 6" in data["message"]
-    assert transport.calls == []
+    assert data["verdict"] == "blocked"
+    assert [r["status"] for r in data["results"]] == ["unreachable", "no_key", "no_key", "no_key", "no_key"]
+    assert "unreachable at http://127.0.0.1:8188" in data["results"][0]["reason"]
+    assert [(c["method"], c["url"]) for c in transport.calls] == [("GET", "http://127.0.0.1:8188/system_stats")]
 
 
 def test_the_tts_chain_reports_what_is_missing_on_this_host(client, transport, monkeypatch):
@@ -324,10 +328,62 @@ def test_env_example_documents_the_generation_surface():
 
 
 def test_load_all_registers_every_adapter_of_phase_0():
-    from clipping.providers import adapters, generation
+    from clipping.providers import adapters, generation, local_comfyui, video
 
     adapters.load_all()
     for kind, provider in (("image", "cloudflare"), ("image", "fal"), ("image_edit", "gemini"), ("image_edit", "local"),
                            ("tts", "edge"), ("tts", "local"), ("vision", "gemini"), ("vision", "local")):
         assert generation.adapter_for(kind, provider) is not None, (kind, provider)
-    assert all(generation.adapter_for("video", p) is None for p in ("local", "fal", "gemini"))
+    assert generation.adapter_for("video", "fal") is video.FAL_VIDEO
+    assert generation.adapter_for("video", "gemini") is video.VEO
+    assert generation.adapter_for("video", "local") is local_comfyui.COMFYUI_VIDEO  # phase 6 stage 4
+
+
+# ------------------------------------------------- video: never generated (RC-V8)
+
+def comfy_object_info(template, *, drop_file=None):
+    info = {}
+    for node in template["graph"].values():
+        info.setdefault(node["class_type"], {"input": {"required": {}}})
+    for req in template["requires"]:
+        field = info[template["graph"][req["node"]]["class_type"]]["input"]["required"].setdefault(req["field"], [[]])
+        if req["file"] != drop_file and req["file"] not in field[0]:
+            field[0].append(req["file"])
+    return info
+
+
+def test_a_video_press_on_a_paid_link_never_generates_and_answers_with_the_estimate(client, transport, tmp_path):
+    """DEC-103 amended for video: even named, allowed and keyed, a clip is never bought by a test."""
+    from web.api.routes import settings as settings_route
+
+    client.put("/api/settings", json={"fal_key": "fk", "allow_paid": True})
+    transport.rules[:] = fal_rules("fal-ai/bytedance/seedance/v1/pro/fast/image-to-video")
+    data = client.post("/api/settings/test-generation-chain",
+                       json={"kind": "video", "link": "fal/seedance-1-pro-fast"}).json()
+    row = data["results"][0]
+    assert row["label"] == "fal/seedance-1-pro-fast" and row["status"] == "skipped" and row["est_usd"] == 0.11
+    assert "never test-generated" in row["note"] and "$0.110" in row["note"] and "5 s" in row["note"]
+    assert "never test-generated" in data["message"]
+    assert transport.calls == []
+    assert not pathlib.Path(settings_route.CHAIN_TEST_LEDGER).exists() and not (tmp_path / "spend.json").exists()
+    rows = client.get("/api/settings").json()["generation_chains"]["video"]["links"]
+    assert next(r for r in rows if r["label"] == "fal/seedance-1-pro-fast")["est_usd"] == 0.11
+
+
+def test_a_local_video_link_is_checked_with_object_info_only(client, transport):
+    from clipping.providers import local_comfyui
+
+    template = local_comfyui.load_template("i2v_wan22_5b")
+    stats = {"system": {"comfyui_version": "0.4.1"},
+             "devices": [{"name": "cuda:0 NVIDIA RTX 4070 : cudaMallocAsync", "type": "cuda",
+                          "vram_total": 12 * 1024 ** 3, "vram_free": 11 * 1024 ** 3}]}
+    transport.rules[:] = [("/system_stats", (200, stats)),
+                          ("/object_info", (200, comfy_object_info(template, drop_file="wan2.2_vae.safetensors")))]
+    data = client.post("/api/settings/test-generation-chain", json={"kind": "video", "link": "local/comfyui"}).json()
+    row = data["results"][0]
+    assert row["status"] == "unreachable" and "wan2.2_vae.safetensors" in row["reason"] and "models/vae" in row["reason"]
+    transport.rules[:] = [("/system_stats", (200, stats)), ("/object_info", (200, comfy_object_info(template)))]
+    data = client.post("/api/settings/test-generation-chain", json={"kind": "video", "link": "local/comfyui"}).json()
+    row = data["results"][0]
+    assert data["verdict"] == "ready" and row["status"] == "ok" and "i2v_wan22_5b" in row["note"]
+    assert all(c["method"] == "GET" for c in transport.calls), "no upload, no /prompt: nothing is generated"

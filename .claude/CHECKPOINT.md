@@ -1,3 +1,396 @@
+## CURRENT STATE — AI Story **phase 6 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–12 **done**; next: **stage 13** (deploy + live walk)
+- **In-progress header** (keep current):
+  - **Current phase:** IMPLEMENT. EXPLORE/CLARIFY/PLAN were done 2026-09-30 in a session run in parallel with phase 5's
+    close: three maps, two rounds of questions, an Opus design. The human approved the plan.
+  - **Plan:** `.claude/plans/ai-story/14-phase-6-plan.md` (**APPROVED 2026-09-30**; copy at
+    `~/.claude/plans/ai-story-phase-6-plan.md`). Brief: `.claude/plans/ai-story/07-phase-6-video-tiers-local.md`.
+  - **Current stage:** 13 — deploy and the Tier-2 live walk [Opus: paid]. The plan's walk script applies; total paid
+    ceiling $0.55.
+  - **Next action, in order:**
+    1. The CI-faithful replica (A-096) on the branch.
+    2. Push the branch only; CI fails the tier-2 golden as designed.
+    3. Read the x86_64 digest from the check-runs annotation, record it, push, CI green.
+    4. Fast-forward `main`; deploy at 0 jobs (`rm -sfv backend && up -d --build backend`: dashboard + compose
+       changed).
+    5. The walk; every paid step stops for the human's go.
+       - **The human, 2026-10-01: "Skip Veo, use fal.ai in its place".** Step 9 (story B) runs on
+         `fal/kling-2.5-turbo-std` (5 s ≈ $0.21) under the $0.25 cap, or on seedance if the human prefers at the
+         STOP.
+       - No `GEMINI_PAID_API_KEY` is needed. Veo stays tested by recorded replies only (A-103 UNCONFIRMED).
+       - The free `GOOGLE_API_KEY` project's billing is off (the human).
+  - **Stage 12 notes:**
+    - **Dashboard.**
+      - Story page: tier/route + "Episode N's video estimate, per route" (latest episode with an approved
+        storyboard).
+      - Shot cards at tier ≥ 2: clip preview (blob), state/route badges, a reason as text (F1), Animate/Keep still
+        showing the effective state (a second press clears), Re-animate with note + estimate (none while blocked).
+        The storyboard's own Keep Still is hidden at tier ≥ 2.
+      - Assets: the Animate checkbox, a separate clips chip "N clips (est $X, not now)", the Video card, the image
+        and video sticky offers behind a confirmation.
+      - Preview: "Fill failed shots with motion" (the estimate re-fetches with `?fill_failed_with_motion=1`).
+      - Settings: the Gemini paid key + badge; the hardware video rows.
+    - **API.** `assets.image_offer` at any tier; `GET /estimate/render?fill_failed_with_motion=`;
+      `SettingsRequest.gemini_paid_api_key`.
+    - **Browser check (scratch copy of `04feb539840f` at tier 2 with fake clips; keys blank but a dummy FAL_KEY;
+      ALLOW_PAID=0).**
+      - At 375/820/1280: scrollWidth 375/805/1265, no sign-in.
+      - It found F1–F5 (reason missing, stuck estimating…, two keep-still controls, a $0.00 chip + bare "unknown",
+        the estimate on a scriptless episode). All fixed and re-walked OK.
+    - **Cosmetic follow-up:** the story-page per-route card still shows a bare "unknown" route chip on a refused
+      local row.
+    - **Rule learned:** never run Tier-1 while the scratch API server (run from this worktree) is writing — it
+      tripped `test_story_assets_step.py:107`'s outputs guard. That run was not counted.
+  - **Stage 11 notes for stages 12–14:**
+    - **Assets PATCH.** `PATCH …/episodes/{ep}/assets` with `{"shots":[{shot_id, locked?, keep_still?, animate?,
+      keep_native_audio?}], "links":{"image"?, "video"?}}`. It uses the Settings env; a video link must be in
+      Settings `VIDEO_CHAIN` or be `local/comfyui`.
+    - **Estimate preview.** `GET /estimate/assets?ep&route=` previews another route with no write.
+    - **Render 409.** `POST /steps/render` and `GET /estimate/render` give 409 with the clip refusal unless
+      `fill_failed_with_motion`. A pending re-animate whose request is open is offered Continue (the stage-9 gap is
+      closed).
+    - **Clip media.** `GET …/episodes/{ep}/clips/shot_NN.mp4`: `video/mp4`, Range, no-store, open with no token. The
+      payload URL is a plain path, fetched as a blob like shot images.
+    - **Episode page payload:**
+      - `assets.tier` and `assets.links`;
+      - `assets.shots[].clip {state, link, route, clip_s, est_usd, generated_at, name, url, note, reason, pending,
+        target, continue, blocked, flags, overrides}`;
+      - `assets.video` = estimate fields + `render_blocked` + `offer` (send `offer.switch` as the PATCH body).
+    - **Fast track.** `estimate()` prices clips once the storyboard is approved (before that, `video.count` is None);
+      the stop sentence adds a clips way out.
+    - **CLI.**
+      - `step ID assets --ep N [--tier] [--route] [--no-animate] [--estimate]`: `--tier`/`--route` go through
+        `patch_story` and print the profile; `--estimate` calls nothing and makes no job.
+      - `step ID render --ep N --fill-failed-with-motion`.
+      - There is no CLI regenerate command (`shot:…:video` is API/dashboard only).
+    - **For stage 12:**
+      - extend `test_story_defaults` with the render checkbox's initial state;
+      - the page's `video` part does not probe local ComfyUI (the estimate route does).
+    - **Follow-ups:**
+      - a video switch at tier 1 stales the assets approval (the fingerprint covers `links`);
+      - the fast-track stop sentence says "animate off", but the fast track has no animate param;
+      - pending keys on local try every shipped template.
+  - **Stage 10 notes for stages 12–14:**
+    - **When.** Tier 3 with an effective `keep_native_audio` and a current clip that has a sound track.
+      `clips.clip_has_audio` reads the mp4 boxes in pure Python and starts no process.
+    - **Mix.** The clip's audio joins the A stage as a `clip_audio` stem: `amovie` + `atrim` to the shot's samples +
+      10 ms fades + `adelay` to the shot's first frame. That shot's TTS lines are left out. Ducking is unchanged
+      (the sidechain is the TTS lines); the video stage keeps `-an`.
+    - **Labels.** Manifest role `clip_audio`, shot mode `video_native_audio`.
+    - **No sound track.** The shot renders as tier 2, keeping its lines, with one printed note.
+    - **Measured.** Onset 1.506 s against a 1.500 s shot start; the shot's own line tones 0.0; the trim proved.
+    - **Unverified live:** real Veo/LTX audio, lip-sync, and the native audio's loudness against the TTS.
+    - **FINDING (task chip "Investigate the music bed cut short on ffmpeg 7.1.5"):** on the app image's ffmpeg
+      7.1.5, an mp4 as an `-i` input of the A stage cut the bgm stem short in 10 of 12 runs. `amovie` avoids it
+      (0 of 20). Once in about 76 plain tier-2 runs, the bed was cut too, and it could not be reproduced. **It may
+      affect live tier-1 renders → separate investigation.**
+    - **Follow-ups:**
+      - `amovie` (and `movie`) are missing from `REQUIRED_FILTERS`;
+      - a clip whose sound is shorter than its shot loses its fade-out;
+      - seedance, the cheapest default link, carries no audio, so tier-3 shots on it always fall back, and the
+        estimate does not warn (stage 12 UI hint / stage 14 docs).
+  - **Stage 9 notes for stages 10, 11, 12, 13 and 14:**
+    - **Tier ≥ 2 only.** `steps/render.py` `shot_clips()` fills `inputs.videos`/`keep_still`/`filled`; tier 1 gives
+      exactly today's inputs (guard pinned; all 9 live stories are tier 1).
+    - **Refusal.** A shot that is not kept still and whose clip record is not current (failed, stale, pending,
+      missing) refuses before ffmpeg, with the target (or Continue).
+      - Render param `fill_failed_with_motion` (default off, recorded only when true) gives those shots Tier-1 motion
+        (`motion_fill`).
+      - A shot with no clip record renders plain motion.
+    - **Hold.** `tier2_clip_argv` is `fps=30,tpad=stop_mode=clone:stop_duration=<d>,trim=duration=<d>`, keeping
+      `-an`. Before it, a 1.0 s clip on a 1.5 s shot made 30 of 45 frames, and the render still "completed".
+    - **Manifest.** `shot_modes` is written only when some shot is not plain motion.
+    - **Tier-2 golden.** A sibling: `render/golden_tier2.py`, `tests/test_aistory_render_golden_tier2.py`,
+      `tests/fixtures/aistory_golden_tier2/framemd5.json`.
+      - Keys: host `6.1.1-3ubuntu5/aarch64`; app image `7.1.5-0+deb13u1/aarch64` (via `docker run --rm` of the image).
+      - **The x86_64 CI key is missing.** The first branch push fails this test as designed. Read the digest from its
+        `::error` annotation through the unauthenticated check-runs API (phase 4's way, log line 395), then record it
+        with `python3 tools/render_golden.py --tier2 --record`-equivalent.
+    - **RC-M8.** Partial == full, proven with a real ffmpeg run on the tiny episode.
+    - **For stage 10:**
+      - extend `shot_clips` with the tier-3 `keep_native_audio` current clips;
+      - add their audio as a stem in plan `_build`'s A stage (`filtergraph.audio_mix_argv`) at the shot's `start_s`,
+        dropping that shot's lines;
+      - `tier2_clip_argv` keeps `-an`;
+      - extend `RENDER_INPUT_ROLES`/`RENDER_SHOT_MODES` if needed.
+    - **For stage 11:** `render_estimate` and the API pre-job check call only `require_renderable`, so the clip
+      refusal surfaces in the job. Call `shot_clips` there for a 409.
+    - **Follow-ups (stage 14):**
+      - the runner never checks the final's frame count against `total_frames`;
+      - a pending re-animate that is already submitted is offered its target in the render refusal (the regenerate
+        itself refuses correctly);
+      - a re-render keeps a filled render's param;
+      - `tier2_clip_argv` has no `setsar=1`.
+  - **Stage 8 notes for stages 9, 11, 12, 13 and 14:**
+    - **Where it sits.** Last in `assets.run()`, after `write_assets_doc`. The assets param `animate` (default on) is
+      mirrored in `AssetsStepParams`, and `StoryboardPane` sends `animate: true`.
+    - **Plan-time refusal.** At tier ≥ 2 with animate on, a video part that is not ready refuses before any call,
+      suggesting animate off.
+    - **RC-V6.** The phase recomputes the plan once. If the link, ids, seconds or $ moved, it refuses with both
+      lists; images and voices stay written.
+      - **Consequence:** a first tier-2 run on unmeasured voices re-times the shots and hits this refusal once. A
+        second press animates. Document the flow as "animate off first" (stage 14) and show it in the UI (stage 12).
+    - **Link and failures.** A one-link chain (sticky `links.video`, recorded after the first clip).
+      - A gone link (gate refusal, 401/403, unreachable) stops the rest with the video offer.
+      - Any other failure fails only that clip (`assets.clip.state failed`, `video` cleared) and the phase goes on.
+    - **Booking.** `unit second`, qty `clip_s`, through `LineGates.booker`. fal books at submit; a resume never
+      resubmits.
+    - **Already-booked clips.** A clip booked but not yet collected (poll timeout, or a lost file) is planned at $0
+      (`why: booked`). This fixed a stage-7 double-price that blocked Continue.
+    - **Still generating.** The clip is offered only "press Continue" (`CONTINUE_ONLY`). Its regenerate is refused
+      while its journal entry is open (`open_clip_request`, a 409 via the workflow check). A settled failed clip
+      stays regenerable.
+    - **Regenerate `shot:<ep>:<shid>:video`.** Tier ≥ 2, not keep-still, keyframe current. `clip_quote` prices it;
+      a note gives a fresh seed and becomes `clip.pending`. Other `shot:…:*` words (`:frames`) stay later-phase.
+    - **For stage 9:**
+      - read `assets.video` and `assets.clip` from the storyboard;
+      - the state comes from `clips.clip_state(ec, shot, script, link=links.video, tier, flags, image_sha)`, where
+        pending counts as failed;
+      - keep-still comes from `clips.shot_flags(shot, assets_doc)`;
+      - the files from `clips.shot_clip_path`.
+    - **Follow-ups (stages 11, 12, 14):**
+      - no `links.video` switch yet (`patch_assets`; re-pins `test_story_sticky_link.py:265`);
+      - the planner's cap+1e-9 against `budget.check`'s strict `>` at exactly the cap;
+      - `/free` untested (no GPU);
+      - identical requests of two shots share one purchase (a $0 rerun can attach extra clips);
+      - a clip regenerate's over-cap text still says "paid images and voices".
+  - **Stage 7 notes for stages 8, 9, 11 and 12:**
+    - **Clip record.** It lives beside the image record, in **storyboard** `shots[].assets.clip {state
+      current|stale|failed, link, route, clip_s, est_usd, prompt_hash, image_sha256, cache_key, generated_at, note?,
+      pending?, reason?}`.
+      - `assets.video = assets/clips/shot_NN.mp4` is set only while the clip is current; `storyboard_errors` enforces
+        this. The renderer reads the storyboard.
+    - **Per-shot overrides.** In `assets.json` under `shots.{id}.{keep_still, animate, keep_native_audio}`.
+      - `video_plan.effective_shot_flags` / `clips.shot_flags` resolve them.
+      - They are patched by `workflow.patch_assets` (`ASSETS_SHOT_FLAG_FIELDS`; the storyboard approval is untouched).
+      - The API fields wait for stage 11 (`test_stories_api_phase4.py:89-90` pins).
+      - **Stage 9:** `render/plan.py:338` must use the effective flags.
+    - **New modules.** `steps/clips.py`: `clip_request_parts`, `clip_prompt_hash`, `clip_state`,
+      `local_video_status`, `pick_hosted`, `video_units`. `providers/gen_timings.py`: `timing_key`, `record`,
+      `eta_s`.
+    - **Estimate.** `asset_units()["video"]` appears only at tier ≥ 2.
+      - Link choice: the sticky `links.video` if recorded (no fallback); else route local
+        (`video_workflow_for(profile)`), or api with `video_link_policy` (cheapest / first).
+      - Mode: one_dollar = key_shots_within_cap; quality = all_shots; free = only on a ready local route, with a $0 cap
+        (DEC-203).
+      - `committed` = the episode's ledger total + this estimate's paid images and voices.
+      - An `allow_paid`-only refusal keeps the plan, with `ready` false and `refused` set (the walk's step 2).
+      - At plan time local counts as not ready.
+    - **Totals.** The top-level `est_usd` includes clips when video is ready; the over-cap text names clip counts and
+      seconds; `fast_track.paid_verdict` counts clips.
+    - **Stage 8 must:**
+      - take the plan from `asset_units(probe_local=True)["video"]` (RC-V6);
+      - add an `animate` flag (off drops the video part);
+      - make `plan_refusal` refuse on video not ready while animate is on;
+      - store clips via `clip_name`/`clip_rel`, write the storyboard with its approval kept;
+      - call `gen_timings.record` and `sticky_link.record(…, "video")` (with a `kind` for `StickyLinkGone`).
+    - **For stages 11 and 14:** `fast_track.estimate()` builds its own units without video; its stop sentence still
+      advises only on images and voices; `local_video_status` duplicates the Settings check.
+    - **Checks.** Live episodes, read-only: 10/10 validate and 9/9 approved fingerprints recompute unchanged.
+  - **Stage 6 notes for stages 8, 11, 12 and 14:**
+    - **Module.** New pure `steps/sticky_link.py`: `recorded`, `record`, `gone_why`, `StickyLinkGone`. Assets docs
+      carry optional `links {image?, video?: {link, since, switched_from?}}`.
+    - **Record lifecycle.** Written when the first image is served (a cache restore counts); carried by
+      `write_assets_doc`.
+      - Derived (not written) when every kept image shares one link.
+      - A legacy mixed episode prints a note and behaves as today. Live mixed: `560e901c1b3d`, `979c8376e43e`
+        (walk story A: no new images are needed there).
+    - **Sticky link in force.** The runner gets a one-link chain; DEC-089 swaps apply; a 402/429 goes into DEC-168's
+      paced rounds.
+    - **Link gone.** No key, allowance spent, allow_paid or a cap refuses, 401/403, or unreachable.
+      - Before any call: `asset_units()["images"]["sticky"]["gone"]`, the ✋ refusal (assets, the fast-track paid
+        check, regenerate).
+      - Mid-run: the remaining shots fail with the short reason; `summary["image_link"]["gone"]`.
+      - Offer fields: `kind, link, why, chain, next_link, next_route_class, redo, todo, qty, est_usd, paid, switch,
+        message`.
+    - **Switch.** Only via `workflow.patch_assets(..., {"links": {"image": L}}, env=Settings)`. Images made on
+      another link go stale (locked → `locked_stale`); the storyboard is untouched. The fingerprint gains a `links`
+      part only when present.
+    - **Stage 8:** reuse `sticky_link` for `links.video`. `StickyLinkGone` hardcodes "image": add a `kind`.
+    - **Stages 11–12:** add `links` to `ASSETS_PATCH_FIELDS` and `AssetsPatchRequest`, re-pinning
+      `test_stories_api_phase4.py:88`. The API route must pass `env` (Settings) to `patch_assets`.
+    - **Known edges:**
+      - The plan-time sticky check does not see the episode cap; the existing over-cap message still stops.
+      - While a link is in force, the estimate's fall-through text disappears.
+      - A cache restore on an approved single-link episode can stale its approval once.
+      - The render's "out of date" sentence does not name a link switch.
+  - **Stage 5 notes for stages 11, 12 and 14:**
+    - **Meter.** New `steps/llm_spend.py`, hooked into `llm_call.call_json` (:304). It opens only when the chain has
+      a keyed paid link and the runner is the real `llm.run_chain`. Production dispatches `module.run(ctx)` with
+      runner None (`steps/__init__.py:100`), so it is always metered; stand-in runners in tests are not.
+      - Each paid link is estimated with `pacing.estimate_tokens` plus the reply cap, times `LLM_PRICES`.
+      - It is checked with the assets step's `voices.LineGates` (episode, day, story). A refused or unpriced link is
+        dropped with a printed line.
+      - Each reply is booked at once: unit `token`, cost `usage.cost`, else usage × price, else the estimate with a
+        DEC-153 note. Amounts round up to $0.0001.
+      - Every row goes to the story ledger and to `budget.record` (the day's spend).
+      - With `allow_paid` off, `run_chain` gets exactly today's arguments.
+    - **Prices.** `pricing.LLM_PRICES`, `LLM_PRICES_AS_OF` 2026-09-30, the dearest OpenRouter host:
+      - mistral-small-3.2: $0.10 / $0.30 per M;
+      - llama-3.3-70b (DEC-089 fallback): $1.04 / $1.04.
+    - **Estimate.** `stories.py:1800 _llm_estimate`: calls × worst case (global, $0.0009 a call on the default link),
+      only when the first usable link is paid.
+    - **Follow-ups (stage 14, or later):**
+      - The fast-track, cast and places estimates leave paid LLM spend out.
+      - `_generation_message` still says "no LLM price table", and an `EstimateChip.jsx` comment is stale.
+      - `budget.check`'s `:.3f` formatting reads "$0.000" for LLM amounts; the parenthetical carries the real
+        number.
+      - `ready` stays true for an unpriced paid first link (pinned by an existing test).
+  - **Stage 4 notes for stages 8, 12 and 14:**
+    - **Templates.** `templates/workflows/i2v_wan22_5b.json`, `i2v_wan22_14b_lightning.json` and `i2v_ltx2.json`, all
+      `verified_live: false` (A-035). Sources: Comfy-Org `workflow_templates`, read 2026-09-30.
+      | Template | fps | Frame rule | Max frames | 9:16 size | Lengths |
+      |---|---|---|---|---|---|
+      | Wan 5B | 24 | 4n+1 | 121 | 704×1280 | 2–5 s |
+      | Wan 14B Lightning | 16 | 4n+1 | 81 | 480×832 | 2–5 s |
+      | LTX-2 | 25 | 8n+1 | 121 | 704×1280 | 2–4 s, silent |
+      All save through core `SaveVideo` as mp4/h264.
+    - **Adapter.** `local_comfyui.ComfyUIVideoAdapter` `(VIDEO, local)` refuses before any call: no template in
+      `extra["template"]`, no length or seed, a length the template does not offer, or an fps other than its own.
+      - It validates `/object_info` before queueing; `install_message` names each missing node and file with its
+        folder.
+      - It journals the prompt id; resume never re-queues, and an unknown prompt is marked lost.
+      - `free()` exists, and the adapter never calls it.
+    - **Helpers:** `frames_for`, `video_clip_lengths`; `hardware.VIDEO_WORKFLOWS`, `video_workflow_for`,
+      `profile_from_system_stats`.
+    - **For stage 8:** pass `extra["template"] = video_workflow_for(profile)`, no fps (or the template's own), and a
+      length from `video_clip_lengths()`.
+    - **Settings video "Test chain" never generates (RC-V8, amends DEC-103 for video).**
+      - A local link is checked with `/system_stats` and `/object_info` only.
+      - A hosted link shows its key and a 5 s estimate, and is never called even when pressed: seedance $0.11,
+        ltx-2.3 $0.36, kling $0.21, veo $0.30.
+    - **Unverified live:** every graph, the node input names on real versions, model sizes and fits, `SaveVideo`'s
+      history shape (the templates send both `format` shapes), the websocket path, timings.
+    - **Noted for follow-up:**
+      - The websocket connects after queueing, so a prompt that finishes first waits up to the socket timeout
+        (30 min for video) before falling back to polling. The image path has the same pattern.
+      - The error classifier retries a refused `ValueError` once. That makes no call; it is pre-existing.
+  - **Stage 3 notes for stages 4, 8, 13 and 14:**
+    - **Adapters.** `clipping/providers/video.py` holds `FalVideoAdapter` (seedance, kling, ltx-2.3-fast) and
+      `GeminiVeoAdapter`.
+      - `clip_seconds()` refuses before any call a request with no duration, no seed, not exactly one keyframe, an
+        unsupported length or no `out_dir`, and refuses `fal/ltx-2-fast` (16:9 only).
+      - `CLIP_LENGTHS` has a single source there; `video_plan` re-exports it. ltx-2.3-fast sells 6/8/10.
+    - **Default chain.** `local/comfyui, fal/seedance-1-pro-fast, fal/ltx-2.3-fast, fal/kling-2.5-turbo-std,
+      gemini/veo-3.1-lite`. The ltx-2.3-fast row is $0.06/s at 1080p (its smallest size, 9:16 = 1080×1920).
+    - **Veo constants the walk may flip.**
+      - `VEO_IMAGE_SHAPE = "bytesBase64Encoded"`; the alternative is `"inlineData"`.
+      - `VEO_DURATION_TYPE = int`; the alternative is `str`.
+      - On a 400 naming it, add `personGeneration: "allow_adult"`.
+      - Not sent: `negativePrompt`, `seed`.
+    - **Veo key.** Attached only when the download URI's host is Google's API host. The transport's redirects are a
+      repo-wide follow-up (task chip "Stop forwarding provider auth headers on redirects").
+    - **For stage 4:** Settings builds video requests with no clip length. The chain summary therefore shows
+      "est $0.000" for paid video links, and pressing Test raises `ValueError` before any call (0 calls). Stage 4's
+      video test must price a default clip length and never generate. Start from stage 3's re-pin
+      `test_generation_chain_api.py::…_local_without_an_adapter_and_hosted_links_unkeyed`.
+    - **For stage 8:** an estimate `ValueError` escapes `run_generation_chain`. The step must always pass a
+      supported `duration_s` and a seed.
+    - **For stage 14:** the stale "video adapters arrive in phase 6" text in `images.FalAdapter._inputs`; the spec
+      and plan still name `fal/ltx-2-fast`.
+  - **Stage 2 notes for stages 3, 8 and 12:**
+    - **Request shape.** A video `GenRequest` carries the clip length in `duration_s` and has new `fps` and
+      `native_audio` fields.
+    - **No key, no journal.** Without `duration_s` or a seed the request gets **no key**, so it is not journaled.
+      The stage-3 adapters therefore refuse such a request before sending. The stage-8 step always sets both,
+      passing the derived shot seed even to models that ignore seeds.
+    - **Credentials.** `generation.env_keys_for(link)`; Veo reads only `GEMINI_PAID_API_KEY`.
+      `SettingsResponse.gemini_paid_api_key_set` is reported. The request field, the React input and the badge land
+      together in **stage 12**: `test_dashboard_payload_contract.py` requires the pair. Until then the key comes
+      from `.env` or the settings file.
+    - **Prices.** `PRICES_AS_OF` stays "2026-09-25", because it stamps the whole table; the four video rows' notes
+      carry their 2026-09-30 re-read. See A-100…A-103.
+    - **LTX.** LTX-2 fast is 16:9 only (A-101), so stage 3 moves the default chain to LTX-2.3 fast (spec §8.7).
+    - **Follow-up.** `FALLBACK_LINKS` hands the main link's credentials to its fallback model. That is fine today;
+      a future fallback crossing the two Google keys would get the wrong one.
+  - **Stage 1 notes for stages 7–8:**
+    - `plan_animation(shots, scene_function, dialogue_seconds, *, link, price_per_second, cap_usd,
+      committed_usd, current_shot_ids, mode, priority, lengths)`.
+      - The caller resolves `scene_id → script scene "function"` (`schemas.py:140`, 1969).
+      - The caller sums shot `lines[]` → script `timing.duration_s` into `dialogue_seconds`.
+      - A pinned shot is always selected (then `over_cap`), and `seconds` counts new clips only.
+      - In mode "none", a current (not pinned) clip lands in `still` with `mode_none`. Stage 8 decides whether the
+        render still uses it.
+    - The style lock carries `motion_rules.tier2_prompt_suffix` and `negative_prompt` unchanged from the template.
+    - `MODIFIER_PHRASES` covers `schemas.MODIFIERS` (handheld, jitter_stopmotion).
+  - **Open questions:** none blocking.
+- **Human's binding answers (2026-09-30)** — full list in the plan:
+  - **No GPU anywhere.** Local ComfyUI is proven only against a fake server; A-035 stays open.
+  - **Paid walk:**
+    - fal: 1 shot, hard cap $0.30, including an A-071 probe of at most $0.05;
+    - Veo: 1 shot of 4 s, cap $0.25, with a separate billing-enabled `GEMINI_PAID_API_KEY`;
+    - the refusal is shown under the $1.00 episode cap.
+  - **Paid LLM booking:** tests only; OpenRouter stays unfunded.
+  - **Sticky links:** one image link and one video link per episode (A-087).
+  - **Nano-banana:** stays on `GOOGLE_API_KEY`; moving it is a follow-up.
+- **Where:** worktree `.claude/worktrees/ai-story-phase-6`, branch `feat/ai-story-phase-6` from `main` `772a540`.
+  - `web/dashboard/node_modules` is symlinked from the main checkout.
+  - The main checkout stays on `main`, because `rzc-backend` bind-mounts it. **Never switch its branch.**
+  - This worktree's `.claude/` holds the live artifacts.
+- **Checkpoint:** `772a540`. It equals `origin/main`: phase 5 closed, CI green on `f06a299`, 0 jobs, deployed
+  `f06a299`. The stage-0 commit carries this header; `main` is fast-forwarded to it (docs only, and `.claude/` is
+  dockerignored).
+- **Tier-1 baseline at `772a540`** (worktree, 2026-09-30, `-n 4`):
+  - local **6479 passed / 1 skipped**;
+  - CI env **5693 passed / 756 skipped**;
+  - compileall clean.
+  - The CI-faithful replica (A-096) is owed before any push that adds a test needing an optional package.
+- **Backups (2026-09-30 18:40 UTC):** `/home/ubuntu/backups/ai-story-phase-6/`.
+  - `979c8376e43e.tgz` sha256 `5edfff0b…d310`; `04feb539840f.tgz` `dbde9f8d…1c8d`.
+  - `spend.json` `3f4bfecd…6e3f`; `usage.json` `7cfc8c35…e86e`. All four are listed in `sha256.txt`.
+  - `stories-before.sha` covers 543 files; `sha256sum -c` passes from `outputs/stories`.
+- **Ids:** DEC-200+ and A-100+. DEC-195…199 and A-096…099 stay free for late phase-5 notes (A-096 is already taken
+  by phase 5's CI note).
+- **Test policy:**
+  - DEC-176: Tier-1 once per stage, by me, both environments, `-n 4`.
+  - DEC-192: essential tests only — one fail-first test per behaviour plus the working-path guard. Agents run only
+    their new and touched tests.
+  - Never `git stash`; never revert files with `git checkout` for a fail-first check.
+- **Standing rules:**
+  - No auth, ever.
+  - `allow_paid` stays OFF in Settings. Paid runs are single CLI processes with per-process caps (DEC-194 pattern),
+    and each one needs a shown estimate and the human's go.
+  - Deploy only at 0 jobs.
+  - Keep every story.
+  - Push with the `github_osc_better` key and `-F /dev/null`. Commits use explicit paths and no trailers.
+- **Stage ledger:**
+
+| S | Stage | State |
+|---|---|---|
+| 0 | checkpoint, worktree, baseline, backups | done |
+| 1 | pure video planning (`video_plan.py`) [Sonnet] | done |
+| 2 | provider foundations: video cache key, `GEMINI_PAID_API_KEY`, prices [Opus] | done |
+| 3 | hosted video adapters (fal ×3, Veo) [Opus] | done |
+| 4 | local ComfyUI video, fake server only [Opus] | done |
+| 5 | paid LLM booking seam [Opus] | done |
+| 6 | sticky image link per episode (A-087) [Opus] | done |
+| 7 | clip documents and the estimate [Opus] | done |
+| 8 | the video phase and `shot:…:video` [Opus] — **RISKIEST** | done |
+| 9 | renderer: clips, hold, `fill_failed_with_motion`, Tier-2 golden [Opus] | done |
+| 10 | Tier-3 native audio, tests only [Opus] | done |
+| 11 | API and CLI [Opus, escalated from Sonnet] | done |
+| 12 | dashboard [Sonnet] | done |
+| 13 | deploy and the Tier-2 live walk (≤ $0.55) [Opus] | next |
+| 14 | docs and decisions [Sonnet] | — |
+
+### Regression contract (phase 6)
+| ID | Must keep working | Proven by |
+|---|---|---|
+| RC-V1 | A tier-1 story's estimate, assets and render are byte-identical, and it makes no video call | stage 7/8 guards + the walk's re-render sha (UNVERIFIED until then) |
+| RC-V2 | Image and TTS cache keys are unchanged | stage-2 pinned-hex guard |
+| RC-V3 | No paid clip or LLM call without `allow_paid` and the caps; one submit per clip; every billed call booked | stage 3/5/8 tests |
+| RC-V4 | The free Gemini chain never reads `GEMINI_PAID_API_KEY`; Veo never reads `GOOGLE_API_KEY` | stage 2 |
+| RC-V5 | No silent mixing of image or video links inside an episode | stage 6/8 |
+| RC-V6 | The estimate and the run agree on the shots and the dollars | stage 8 |
+| RC-V7 | A failed or stale clip never renders unless "fill" is ticked | stage 9 |
+| RC-V8 | Settings "Test chain" never buys a clip | stage 4 |
+
+Carried unchanged, each proven by its named tests staying unedited:
+- RC-M2: golden `framemd5.json`.
+- RC-M3, RC-M6 (clip mode), RC-M7, RC-M8.
+- RC-M9: no auth.
+- RC-A2, RC-A3, RC-P5.
+- RC-S4: `llm.py` untouched.
+
 ## SIDE TASK — stt's upload and the Pexels search open through the credential-safe opener (FULL, small). Branch `Feature/musing-lamport-e6a02a`
 - **Scope:**
   - `clipping/providers/stt.py` `_post_multipart`;
@@ -5,8 +398,15 @@
   - one new test file, `tests/test_stt_broll_redirects.py`.
   - DEC-195's follow-ups. Phase 6 and the transport side task below are left alone.
 - **In-progress header** (keep current):
-  - **Current phase:** DOCUMENT done. Stages 0–3 are committed. The task is **NOT merged into `main`**: that waits
-    for the human's word, at 0 jobs, because the main checkout is bind-mounted by the live container.
+  - **Current phase:** DOCUMENT done. Stages 0–3 are committed.
+    - The human answered **"Go"** (2026-10-01) to both closing questions: the Tier-2 result and the merge.
+    - `main` had moved to `216bf38`: phase 6, deployed at 06:49 UTC with its walk under way. So `main` was merged
+      into this branch, the pattern of phase 6's `65a1511`.
+    - Conflicts were only in `.claude/CHECKPOINT.md` (phase 6's header kept on top, this section placed above the
+      transport side task) and in the action log (both sides kept).
+    - Tier-1 on the merge (the seven files): local **119 passed / 1 skipped**, CI env **119 / 1**. compileall clean.
+    - **Next action:** re-check `GET /api/health` for 0 jobs, then fast-forward `main` to the merge commit. No
+      container restart (the task's rule).
     - Stage 0 (`8edb8ea`): checkpoint, plan, baseline.
     - Stage 1 (`b4d1c3d`): `stt._post_multipart` opens through `transport._OPENER`; new
       `tests/test_stt_broll_redirects.py`.
@@ -93,94 +493,6 @@
   - RC-T1: the transport's contract is unchanged (`Response`, and the `HttpStatusError` / `APIConnectionError` /
     `APITimeoutError` mapping). Proven by the three baseline files staying green and unedited.
   - RC-T2: every adapter that goes through the transport keeps working. Proven by the same files.
-
-## CURRENT STATE — AI Story **phase 6 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stage 0 **done**; next: **stage 1**
-- **In-progress header** (keep current):
-  - **Current phase:** IMPLEMENT. EXPLORE/CLARIFY/PLAN were done 2026-09-30 in a session run in parallel with phase 5's
-    close: three maps, two rounds of questions, an Opus design. The human approved the plan.
-  - **Plan:** `.claude/plans/ai-story/14-phase-6-plan.md` (**APPROVED 2026-09-30**; copy at
-    `~/.claude/plans/ai-story-phase-6-plan.md`). Brief: `.claude/plans/ai-story/07-phase-6-video-tiers-local.md`.
-  - **Current stage:** 1 — pure video planning, the new `clipping/aistory/video_plan.py` [Sonnet]. Then stages 2–14
-    in the plan's order.
-  - **Next action:** dispatch stage 1 (essential tests, fail-first), then Tier-1 in both environments, then commit.
-  - **Open questions:** none blocking.
-- **Human's binding answers (2026-09-30)** — full list in the plan:
-  - **No GPU anywhere.** Local ComfyUI is proven only against a fake server; A-035 stays open.
-  - **Paid walk:**
-    - fal: 1 shot, hard cap $0.30, including an A-071 probe of at most $0.05;
-    - Veo: 1 shot of 4 s, cap $0.25, with a separate billing-enabled `GEMINI_PAID_API_KEY`;
-    - the refusal is shown under the $1.00 episode cap.
-  - **Paid LLM booking:** tests only; OpenRouter stays unfunded.
-  - **Sticky links:** one image link and one video link per episode (A-087).
-  - **Nano-banana:** stays on `GOOGLE_API_KEY`; moving it is a follow-up.
-- **Where:** worktree `.claude/worktrees/ai-story-phase-6`, branch `feat/ai-story-phase-6` from `main` `772a540`.
-  - `web/dashboard/node_modules` is symlinked from the main checkout.
-  - The main checkout stays on `main`, because `rzc-backend` bind-mounts it. **Never switch its branch.**
-  - This worktree's `.claude/` holds the live artifacts.
-- **Checkpoint:** `772a540`. It equals `origin/main`: phase 5 closed, CI green on `f06a299`, 0 jobs, deployed
-  `f06a299`. The stage-0 commit carries this header; `main` is fast-forwarded to it (docs only, and `.claude/` is
-  dockerignored).
-- **Tier-1 baseline at `772a540`** (worktree, 2026-09-30, `-n 4`):
-  - local **6479 passed / 1 skipped**;
-  - CI env **5693 passed / 756 skipped**;
-  - compileall clean.
-  - The CI-faithful replica (A-096) is owed before any push that adds a test needing an optional package.
-- **Backups (2026-09-30 18:40 UTC):** `/home/ubuntu/backups/ai-story-phase-6/`.
-  - `979c8376e43e.tgz` sha256 `5edfff0b…d310`; `04feb539840f.tgz` `dbde9f8d…1c8d`.
-  - `spend.json` `3f4bfecd…6e3f`; `usage.json` `7cfc8c35…e86e`. All four are listed in `sha256.txt`.
-  - `stories-before.sha` covers 543 files; `sha256sum -c` passes from `outputs/stories`.
-- **Ids:** DEC-200+ and A-100+. DEC-195…199 and A-096…099 stay free for late phase-5 notes (A-096 is already taken
-  by phase 5's CI note).
-- **Test policy:**
-  - DEC-176: Tier-1 once per stage, by me, both environments, `-n 4`.
-  - DEC-192: essential tests only — one fail-first test per behaviour plus the working-path guard. Agents run only
-    their new and touched tests.
-  - Never `git stash`; never revert files with `git checkout` for a fail-first check.
-- **Standing rules:**
-  - No auth, ever.
-  - `allow_paid` stays OFF in Settings. Paid runs are single CLI processes with per-process caps (DEC-194 pattern),
-    and each one needs a shown estimate and the human's go.
-  - Deploy only at 0 jobs.
-  - Keep every story.
-  - Push with the `github_osc_better` key and `-F /dev/null`. Commits use explicit paths and no trailers.
-- **Stage ledger:**
-
-| S | Stage | State |
-|---|---|---|
-| 0 | checkpoint, worktree, baseline, backups | done |
-| 1 | pure video planning (`video_plan.py`) [Sonnet] | next |
-| 2 | provider foundations: video cache key, `GEMINI_PAID_API_KEY`, prices [Opus] | — |
-| 3 | hosted video adapters (fal ×3, Veo) [Opus] | — |
-| 4 | local ComfyUI video, fake server only [Opus] | — |
-| 5 | paid LLM booking seam [Opus] | — |
-| 6 | sticky image link per episode (A-087) [Opus] | — |
-| 7 | clip documents and the estimate [Opus] | — |
-| 8 | the video phase and `shot:…:video` [Opus] — **RISKIEST** | — |
-| 9 | renderer: clips, hold, `fill_failed_with_motion`, Tier-2 golden [Opus] | — |
-| 10 | Tier-3 native audio, tests only [Opus] | — |
-| 11 | API and CLI [Sonnet] | — |
-| 12 | dashboard [Sonnet] | — |
-| 13 | deploy and the Tier-2 live walk (≤ $0.55) [Opus] | — |
-| 14 | docs and decisions [Sonnet] | — |
-
-### Regression contract (phase 6)
-| ID | Must keep working | Proven by |
-|---|---|---|
-| RC-V1 | A tier-1 story's estimate, assets and render are byte-identical, and it makes no video call | stage 7/8 guards + the walk's re-render sha (UNVERIFIED until then) |
-| RC-V2 | Image and TTS cache keys are unchanged | stage-2 pinned-hex guard |
-| RC-V3 | No paid clip or LLM call without `allow_paid` and the caps; one submit per clip; every billed call booked | stage 3/5/8 tests |
-| RC-V4 | The free Gemini chain never reads `GEMINI_PAID_API_KEY`; Veo never reads `GOOGLE_API_KEY` | stage 2 |
-| RC-V5 | No silent mixing of image or video links inside an episode | stage 6/8 |
-| RC-V6 | The estimate and the run agree on the shots and the dollars | stage 8 |
-| RC-V7 | A failed or stale clip never renders unless "fill" is ticked | stage 9 |
-| RC-V8 | Settings "Test chain" never buys a clip | stage 4 |
-
-Carried unchanged, each proven by its named tests staying unedited:
-- RC-M2: golden `framemd5.json`.
-- RC-M3, RC-M6 (clip mode), RC-M7, RC-M8.
-- RC-M9: no auth.
-- RC-A2, RC-A3, RC-P5.
-- RC-S4: `llm.py` untouched.
 
 ## CURRENT STATE — AI Story **phase 5 DONE** (2026-09-30). Next: **phase 6** (start prompt: `.claude/plans/ai-story/13-phase-6-start-prompt.md`)
 - **Close-out (2026-09-30):** stages 0–15 done (ledger below). `feat/ai-story-phase-5` fast-forwarded into `main`

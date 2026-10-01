@@ -299,7 +299,7 @@ def test_the_approval_grammar(wf, doc, code):
 
 @pytest.mark.parametrize("target,code", [
     ("bible:world", None), ("concepts", None),
-    ("shot:1:sh03:video", "later_phase"),
+    ("shot:1:sh03:frames", "later_phase"),
     ("bible:genre_tags", "invalid"), ("nope", "invalid"), ("", "invalid"),
 ])
 def test_the_regenerate_grammar(wf, target, code):

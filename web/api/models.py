@@ -396,6 +396,10 @@ class SettingsRequest(BaseModel):
     cloudflare_api_token: Optional[str] = None
     cloudflare_account_id: Optional[str] = None
     pollinations_api_key: Optional[str] = None
+    # Veo only: a separate, billing-enabled Google project (RC-V4). The
+    # response half (``gemini_paid_api_key_set``) has reported this since
+    # stage 2; this is the save side (phase 6 stage 12).
+    gemini_paid_api_key: Optional[str] = None
     local_comfyui_url: Optional[str] = None
     local_ollama_url: Optional[str] = None
 
@@ -430,6 +434,9 @@ class SettingsResponse(BaseModel):
     cloudflare_api_token_set: bool = False
     cloudflare_account_id_set: bool = False
     pollinations_api_key_set: bool = False
+    # Veo's own key (a separate, billing-enabled Google project). Reported
+    # here; the field that sets it arrives with its Settings control.
+    gemini_paid_api_key_set: bool = False
     local_comfyui_url: str = ""
     local_ollama_url: str = ""
     generation_chains: dict = {}
@@ -805,17 +812,23 @@ class StoryApproveRequest(BaseModel):
 
 class AssetsStepParams(BaseModel):
     """``POST /steps/assets``'s params: ``align_words`` opts in to forced
-    alignment of the lines whose voice timed no words (DEC-165)."""
+    alignment of the lines whose voice timed no words (DEC-165); ``animate``
+    (tier >= 2, phase 6 stage 8) makes the clips after the images and
+    voices unless sent false."""
     align_words: Optional[bool] = None
+    animate: Optional[bool] = None
 
 
 class RenderStepParams(BaseModel):
     """``POST /steps/render``'s params: ``subtitles`` (``style`` -- the style
-    lock's own --, ``word_pop``, ``two_line``, ``none``; DEC-164) and
+    lock's own --, ``word_pop``, ``two_line``, ``none``; DEC-164),
     ``encoder`` (``libx264``, or ``auto``: a hardware encoder for the final
-    pass, opt-in)."""
+    pass, opt-in) and ``fill_failed_with_motion`` (phase 6 stage 9: at tier
+    >= 2 a shot whose clip failed, went stale or is still generating gets
+    Tier-1 motion instead of refusing the render; off by default)."""
     subtitles: Optional[str] = None
     encoder: Optional[str] = None
+    fill_failed_with_motion: Optional[bool] = None
 
 
 class FastTrackStepParams(BaseModel):
@@ -826,16 +839,31 @@ class FastTrackStepParams(BaseModel):
 
 class AssetsShotPatch(BaseModel):
     """One shot of ``PATCH /episodes/{ep}/assets``'s ``shots``: ``locked``
-    keeps the image it has (only a shot with an image may be locked)."""
+    keeps the image it has (only a shot with an image may be locked); phase 6
+    stage 11, what its clip does -- ``keep_still``, ``animate`` (a pin: the
+    planner animates it first) and ``keep_native_audio`` (tier 3) -- true or
+    false, or null to clear the override (``workflow.ASSETS_SHOT_FLAG_FIELDS``,
+    kept in ``assets.json``, never the storyboard). "Sent" is
+    ``model_fields_set``, so a null sent is not a field left out."""
     shot_id: str
     locked: Optional[bool] = None
+    keep_still: Optional[bool] = None
+    animate: Optional[bool] = None
+    keep_native_audio: Optional[bool] = None
 
 
 class AssetsPatchRequest(BaseModel):
     """PATCH /api/stories/{id}/episodes/{ep}/assets. A lock never moves the
     storyboard's revision or approval; it is part of the fingerprint the
-    assets are approved with, so a new one makes that approval stale."""
+    assets are approved with, so a new one makes that approval stale.
+
+    ``links`` (phase 6, A-087) ``{"image"?: "<link>", "video"?: "<link>"}``
+    switches the episode's image or video link -- the sticky offer's
+    ``switch`` -- checked against the Settings chains by
+    ``workflow.patch_assets`` (400 with its errors, not 422, which is why it
+    is a plain object here)."""
     shots: Optional[list[AssetsShotPatch]] = None
+    links: Optional[dict] = None
 
 
 # Phase 5 (spec 2.6, 9.1, 9.2, plan 11 stages 4-5): the series steps --

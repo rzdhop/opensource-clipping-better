@@ -560,9 +560,16 @@ export async function regenerateStory(storyId, payload) {
  * `?prop=`; omitted, the estimate falls back to the saved proposal).
  * `subtitles`/`encoder` only for `render` (its own params -- `step === 'render'` --
  * priced as the render would use them; PreviewPane.jsx sends `subtitles` only).
+ * `route` only for `assets` (phase 6 stage 11): `auto|local|api` prices that
+ * route instead of the story's own, without patching the story.
+ * `fillFailedWithMotion` only for `render` (phase 6 stage 12 follow-up):
+ * priced as the real render params would be, so a failed/stale/still-
+ * generating clip's refusal here clears exactly when the real run's would --
+ * PreviewPane.jsx re-fetches with it on every toggle of its own checkbox.
  */
 export async function fetchStoryEstimate(storyId, step, {
-  target, selected, episodes, places, props, ep, measure, alignWords, storyboard, subtitles, encoder,
+  target, selected, episodes, places, props, ep, measure, alignWords, storyboard, subtitles, encoder, route,
+  fillFailedWithMotion,
 } = {}) {
   const params = new URLSearchParams()
   if (target) params.set('target', target)
@@ -594,6 +601,8 @@ export async function fetchStoryEstimate(storyId, step, {
   // is carried for completeness and left unsent (the render step defaults it).
   if (subtitles) params.set('subtitles', subtitles)
   if (encoder) params.set('encoder', encoder)
+  if (route) params.set('route', route)
+  if (fillFailedWithMotion) params.set('fill_failed_with_motion', '1')
   const qs = params.toString()
   const res = await request(`/stories/${storyId}/estimate/${step}${qs ? `?${qs}` : ''}`)
   if (!res.ok) throw await apiError(res, 'Failed to fetch the estimate')
@@ -826,15 +835,50 @@ export async function fetchShotImageUrl(storyId, ep, imageName) {
 }
 
 /**
- * Edit an episode's assets inline (`AssetsPatchRequest`'s only field:
- * `shots`, each `{shot_id, locked}` -- only an imaged shot may be locked,
- * and locking one stales the assets approval). Answers the episode page.
+ * One shot's clip (`shot_NN.mp4`, `name` from that shot's `assets.shots[].
+ * clip.name`), as a blob URL -- same reasoning as `fetchShotImageUrl`
+ * (DEC-113): the route is behind the bearer header, so it is fetched rather
+ * than used directly as a `<video src>`. The caller is responsible for
+ * revoking the URL. Phase 6 stage 11/12.
+ */
+export async function fetchEpisodeClipUrl(storyId, ep, name) {
+  const res = await request(`/stories/${storyId}/episodes/${ep}/clips/${encodeURIComponent(name)}`)
+  if (!res.ok) throw await apiError(res, 'Failed to load the clip')
+  const blob = await res.blob()
+  return URL.createObjectURL(blob)
+}
+
+/**
+ * Edit an episode's assets inline (`AssetsPatchRequest`'s `shots` field):
+ * each `{shot_id, locked?, keep_still?, animate?, keep_native_audio?}` --
+ * only an imaged shot may be locked, and locking one stales the assets
+ * approval; phase 6 stage 11's clip flags (true, false, or null to clear).
+ * Answers the episode page.
  */
 export async function patchEpisodeAssets(storyId, ep, shots) {
   const res = await request(`/stories/${storyId}/episodes/${ep}/assets`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ shots }),
+  })
+  if (!res.ok) throw await apiError(res, 'Failed to update the assets')
+  return res.json()
+}
+
+/**
+ * Switch an episode's image or video link (`AssetsPatchRequest`'s `links`
+ * field, phase 6 stage 11, A-087): `{image?, video?}`, one of the Settings
+ * chain's links -- a separate function from `patchEpisodeAssets` because
+ * `AssetsPatchRequest` now carries two independent optional top-level
+ * fields, and a caller editing shots never means to touch the episode's
+ * link (and vice versa). `links` is the sticky offer's own `switch` shape
+ * (`offer.switch.links`), sent as is. Answers the episode page.
+ */
+export async function patchEpisodeAssetsLinks(storyId, ep, links) {
+  const res = await request(`/stories/${storyId}/episodes/${ep}/assets`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ links }),
   })
   if (!res.ok) throw await apiError(res, 'Failed to update the assets')
   return res.json()

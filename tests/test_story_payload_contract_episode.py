@@ -508,7 +508,7 @@ def test_the_readers_see_phase4_things():
     """A broken regex would make every assertion below pass for free."""
     assert len(_class_fields("AssetsShotPatch")) >= 2
     assert len(_class_fields("AssetsPatchRequest")) >= 1
-    assert len(workflow.ASSETS_PARAMS) == 1
+    assert len(workflow.ASSETS_PARAMS) == 2
     assert len(workflow.FAST_TRACK_PARAMS) == 1
 
 
@@ -640,7 +640,7 @@ def test_line_row_offers_its_own_voice_regenerate():
 
 def test_the_readers_see_phase4_stage15_things():
     """A broken regex would make every assertion below pass for free."""
-    assert len(workflow.RENDER_PARAMS) == 2
+    assert len(workflow.RENDER_PARAMS) == 3  # phase 6 stage 9: fill_failed_with_motion
     assert len(workflow.METADATA_PARAMS) == 0
     assert len(render_step.SUBTITLE_CHOICES) == 4
     assert len(schemas.PLATFORMS) == 3

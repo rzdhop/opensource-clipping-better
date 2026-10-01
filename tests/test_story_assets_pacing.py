@@ -332,18 +332,21 @@ def test_a_shot_whose_paid_link_was_sent_is_never_paced(store, tmp_path):
     _leave_six(store, story_id)
     clock = Clock()
     poll = Pollinations(clock, every=3600.0)
+    # Phase 6 stage 6 (A-087): the free link serves no image in this run, so
+    # the episode keeps no image link and each shot walks the chain.
+    poll.last = 0.0
     fal = tas.FakeImage(price=tas.FAL_PRICE, fail_for={f"shot_{n:02d}" for n in range(1, MADE + 1)})
     settings = tas._settings(IMAGE_CHAIN="pollinations/flux,fal/flux-schnell", **tas.FAL, ALLOW_PAID="1")
 
     summary, log = _run(store, story_id, adapters=tas._adapters(image=images.POLLINATIONS, fal=fal), clock=clock,
                         transport=poll, settings=settings)
 
-    # sh01 on the free link; every other shot got its 402, then its one paid
-    # request, which failed: never asked again, so never bought twice.
-    assert poll.answers == [0.0] and poll.refusals == MADE - 1
-    assert fal.names() == [f"shot_{n:02d}" for n in range(2, MADE + 1)]
+    # Every shot got its 402, then its one paid request, which failed: never
+    # asked again, so never bought twice.
+    assert poll.answers == [] and poll.refusals == MADE
+    assert fal.names() == [f"shot_{n:02d}" for n in range(1, MADE + 1)]
     assert clock.sleeps == [] and _pauses(log) == []
-    assert [item["target"] for item in summary["failed"]] == [f"shot:1:sh{n:02d}" for n in range(2, MADE + 1)]
+    assert [item["target"] for item in summary["failed"]] == [f"shot:1:sh{n:02d}" for n in range(1, MADE + 1)]
 
 
 # ================================================================== the voices

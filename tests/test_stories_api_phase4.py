@@ -15,8 +15,10 @@ the real worker path (``worker._execute_story_step``) with its handler faked:
 no network, no real key (the Settings values are test values).
 
 Covered: the regenerate grammar (``shot:<ep>:<shid>:plan`` vs the shot's image
-``shot:<ep>:<shid>`` vs ``shot:<ep>:<shid>:video``, still a later phase's;
-``line:``/``metadata:`` reaching their handlers), the four step routes (their
+``shot:<ep>:<shid>`` -- its clip ``shot:<ep>:<shid>:video`` is phase 6's
+(``tests/test_story_video_phase.py``); any other ``shot:<ep>:<shid>:<word>``,
+``:frames`` among them, is still a later phase's; ``line:``/``metadata:``
+reaching their handlers), the four step routes (their
 parameters, preconditions, ep bounds, key gate, one step per story, queue
 cap -- each refusal before any job), the assets approval (what is missing is
 named; the jobs it completes), a fast track's end (completed, or stopped)
@@ -78,16 +80,19 @@ def _class_source(name: str) -> str:
 def test_the_phase_4_request_models_declare_exactly_the_workflows_closed_lists():
     from clipping.aistory import workflow
 
-    assert workflow.ASSETS_PARAMS == ("align_words",)
-    assert workflow.RENDER_PARAMS == ("subtitles", "encoder")
+    assert workflow.ASSETS_PARAMS == ("align_words", "animate")
+    assert workflow.RENDER_PARAMS == ("subtitles", "encoder", "fill_failed_with_motion")  # phase 6 stage 9
     assert workflow.METADATA_PARAMS == ()
     assert workflow.FAST_TRACK_PARAMS == ("storyboard",)
     assert _class_fields("AssetsStepParams") == list(workflow.ASSETS_PARAMS)
     assert _class_fields("RenderStepParams") == list(workflow.RENDER_PARAMS)
     assert _class_fields("FastTrackStepParams") == list(workflow.FAST_TRACK_PARAMS)
-    assert _class_fields("AssetsPatchRequest") == list(workflow.ASSETS_PATCH_FIELDS) == ["shots"]
-    assert _class_fields("AssetsShotPatch") == ["shot_id", *workflow.ASSETS_SHOT_PATCH_FIELDS]
+    # Phase 6 stage 11 (re-pin): the links switch (A-087) and each shot's clip flags.
+    assert _class_fields("AssetsPatchRequest") == list(workflow.ASSETS_PATCH_FIELDS) == ["shots", "links"]
+    assert _class_fields("AssetsShotPatch") == ["shot_id", *workflow.ASSETS_SHOT_PATCH_FIELDS,
+                                                *workflow.ASSETS_SHOT_FLAG_FIELDS]
     assert workflow.ASSETS_SHOT_PATCH_FIELDS == ("locked",)
+    assert workflow.ASSETS_SHOT_FLAG_FIELDS == ("keep_still", "animate", "keep_native_audio")
     # Default-strict like the other story models: no extra= override, "sent" is model_fields_set.
     for name in ("AssetsStepParams", "RenderStepParams", "FastTrackStepParams", "AssetsPatchRequest",
                  "AssetsShotPatch"):
@@ -133,8 +138,8 @@ def test_a_shots_plan_its_image_a_line_and_a_platform_are_targets(target, parsed
     assert workflow.check_regenerate_target(target) is None
 
 
-@pytest.mark.parametrize("target", ["shot:1:sh05:video", "shot:1:sh05:frames"])
-def test_a_shots_video_is_still_a_later_phase(target):
+@pytest.mark.parametrize("target", ["shot:1:sh05:frames"])
+def test_any_other_shot_word_such_as_frames_is_still_a_later_phase(target):
     from clipping.aistory import workflow
     from clipping.aistory.steps import regenerate
 
@@ -334,7 +339,7 @@ def test_each_phase_4_step_and_target_is_a_job_of_its_document(api):
     for step in ("render", "metadata", "fast-track"):
         assert doc(step, {}, ep=1) is None, step
     for target, expected in (("shot:1:sh02:plan", "storyboard:1"), ("shot:1:sh02", "assets:1"),
-                             ("line:2:l04", "assets:2"), ("metadata:1:reels", None), ("shot:1:sh02:video", None),
+                             ("line:2:l04", "assets:2"), ("metadata:1:reels", None), ("shot:1:sh02:video", "assets:1"),
                              ("scene:1:s03", "script:1")):
         assert doc("regenerate", {"target": target}) == expected, target
 
@@ -381,9 +386,9 @@ def test_a_step_is_refused_before_any_job_outside_its_episode(api, episodes, ste
 
 
 @pytest.mark.parametrize("step, params, needle", [
-    ("assets", {"nope": 1}, "Unknown assets parameter(s) nope (known: align_words)."),
+    ("assets", {"nope": 1}, "Unknown assets parameter(s) nope (known: align_words, animate)."),
     ("assets", {"align_words": "yes"}, "params.align_words is true or false, not 'yes'."),
-    ("render", {"nope": 1}, "Unknown render parameter(s) nope (known: subtitles, encoder)."),
+    ("render", {"nope": 1}, "Unknown render parameter(s) nope (known: subtitles, encoder, fill_failed_with_motion)."),
     ("render", {"subtitles": "karaoke"},
      "The subtitles must be one of style, word_pop, two_line, none, not 'karaoke'."),
     ("render", {"encoder": "nvenc"}, "The encoder must be one of libx264, auto, not 'nvenc'."),
@@ -552,7 +557,7 @@ def test_the_phase_4_targets_are_checked_against_the_episode_before_any_job(api,
             ({"target": "shot:1:sh02", "voice": {"provider": "edge", "voice_id": "x"}}, 400, "voice"),
             ({"target": "line:1:l04", "voice": {"provider": "edge", "voice_id": "x"}}, 400, "voice"),
             ({"target": "shot:9:sh02"}, 400, "there is no episode 9"),
-            ({"target": "shot:1:sh02:video"}, 400, "later phase"),
+            ({"target": "shot:1:sh02:frames"}, 400, "later phase"),
             ({"target": "metadata:1:facebook"}, 400, "metadata:<ep>:tiktok|shorts|reels"),
     ):
         response = api.client.post(_url(story_id, "/regenerate"), json=body)
