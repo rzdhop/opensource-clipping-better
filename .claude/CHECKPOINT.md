@@ -1,23 +1,103 @@
-## CURRENT STATE — AI Story **phase 6 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–12 **done**; next: **stage 13** (deploy + live walk)
+## CURRENT STATE — AI Story **phase 6 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–12 **done**; stage 13 (live walk) **mostly done**; next: **stage 13b** (still stretch), then finish 13, then 14 — **PAUSED 2026-10-01 07:25 UTC for a session handoff**
 - **In-progress header** (keep current):
   - **Current phase:** IMPLEMENT. EXPLORE/CLARIFY/PLAN were done 2026-09-30 in a session run in parallel with phase 5's
     close: three maps, two rounds of questions, an Opus design. The human approved the plan.
   - **Plan:** `.claude/plans/ai-story/14-phase-6-plan.md` (**APPROVED 2026-09-30**; copy at
     `~/.claude/plans/ai-story-phase-6-plan.md`). Brief: `.claude/plans/ai-story/07-phase-6-video-tiers-local.md`.
-  - **Current stage:** 13 — deploy and the Tier-2 live walk [Opus: paid]. The plan's walk script applies; total paid
-    ceiling $0.55.
-  - **Next action, in order:**
-    1. The CI-faithful replica (A-096) on the branch.
-    2. Push the branch only; CI fails the tier-2 golden as designed.
-    3. Read the x86_64 digest from the check-runs annotation, record it, push, CI green.
-    4. Fast-forward `main`; deploy at 0 jobs (`rm -sfv backend && up -d --build backend`: dashboard + compose
-       changed).
-    5. The walk; every paid step stops for the human's go.
-       - **The human, 2026-10-01: "Skip Veo, use fal.ai in its place".** Step 9 (story B) runs on
-         `fal/kling-2.5-turbo-std` (5 s ≈ $0.21) under the $0.25 cap, or on seedance if the human prefers at the
-         STOP.
-       - No `GEMINI_PAID_API_KEY` is needed. Veo stays tested by recorded replies only (A-103 UNCONFIRMED).
-       - The free `GOOGLE_API_KEY` project's billing is off (the human).
+  - **PAUSED for a handoff (the human, 2026-10-01: "stop, save the state, give me the handoff prompt").** No agent or
+    job is running. The worktree is clean except these artifacts (committed and pushed with this header).
+  - **Where things are:**
+    - **Branch `feat/ai-story-phase-6`** (pushed) = local `main` + `ea19ab2`, the T2-P6-F1 clip cover+crop fix
+      (NOT deployed).
+    - **CI on `ea19ab2`** (run 36829925090) was in progress at the pause. It is EXPECTED to fail only on the tier-2
+      golden's missing `6.1.1-3ubuntu5/x86_64` key (removed on purpose).
+    - **Local `main` = `216bf38`**, deployed at 07:50 UTC on 2026-10-01: phase-6 stages 0–12 + the merged transport
+      fix (DEC-195), with 0 jobs at the time.
+    - **`origin/main` is still `772a540`.** Push `main` only at the close, after CI is green.
+  - **Current stage:** 13b, then the rest of 13, then 14.
+  - **Next actions, in order:**
+    1. **Stage 13b [Opus]** (the human chose "Fix now, in phase 6"): a still whose image is not 9:16 is cover-cropped
+       to 9:16 before the motion.
+       - Today `shot_argv` runs `scale=4320:-2` + `zoompan … s=1080x1920`, which STRETCHES a square Cloudflare
+         1024×1024 still vertically (a 32×32 square became 364×648). It is pre-existing since phase 5; A-095 is
+         corrected.
+       - Use `filtergraph._cover_fill` (or the same centre-cover rule) only when |w/h − 9/16| exceeds a small
+         tolerance. Read sizes with a pure-Python PNG/JPEG/WEBP header reader (NO PIL: A-096).
+       - 9:16 images must keep a byte-identical argv: the tier-1 golden and its test stay unedited (RC-M2), and
+         stored 9:16 episodes stay byte-identical (RC-M3).
+       - `partial.shot_facts` (~:236) reads any `crop` as handheld: make the cover crop distinct.
+       - The tier-2 golden's still may change: re-record the host + image keys, then x86 via CI.
+       - List the live episodes with non-9:16 images (expected at least: claymation `04feb539840f`, storybook
+         `14ff154d3bff`, parts of cartoon_flat `979c8376e43e` and cinematic_real `560e901c1b3d`).
+       - The first 13b agent was stopped before any edit: nothing partial exists.
+    2. **Tier-1** in both environments (servers stopped).
+    3. **Commit and push the branch.**
+       - CI fails only on the missing x86 tier-2 key. Read it from the check-runs annotation (unauthenticated:
+         `/repos/rzdhop/opensource-clipping-better/actions/runs/<id>/jobs`, then `/check-runs/<job>/annotations`).
+       - Record it in `tests/fixtures/aistory_golden_tier2/framemd5.json`, commit, push, wait for CI green.
+       - Run the A-096 replica before pushing if a new test needs an optional package.
+    4. **Deploy at 0 jobs:** in the main checkout, `git merge --ff-only feat/ai-story-phase-6`, then
+       `sudo docker compose restart backend` (Python only; use `rm -sfv` + `up -d --build` if the dashboard or
+       compose changed).
+    5. **Re-render ($0)** every affected live episode, with backups of their finals first. At least:
+       - story B `04feb539840f` ep 1: its sh01 Kling clip is 960×960, now filled, and its stills are no longer
+         stretched;
+       - story A `979c8376e43e` ep 1;
+       - any other non-9:16 episode from step 1's list.
+       - Check `shot_modes`, that the re-render rebuilt only the changed shots, and the loudness.
+    6. **Walk step 10:** the human reads fal's billing for the three requests; compare with the ledger.
+       - `01a0f63b-f32d-7b51-af55-2f2437b14110`: seedance, booked $0.066.
+       - `01a0f63e-1cd3-79e1-b83e-f9c027fcc2cc`: the A-071 probe, booked $0.044. Was it charged?
+       - `01a0f642-2be4-7463-9f16-4101ddec3934`: kling, booked $0.210.
+       - Then settle A-071 / A-100 / A-102 in ASSUMPTIONS.
+    7. **Walk step 12:** the human watches story A ep 1 and story B ep 1 on the phone at 375 px and acknowledges the
+       Tier-2 substitute. Also offer a fresh watch of the claymation/storybook episodes now unstretched.
+    8. **Stage 14 [Sonnet]: docs and decisions.**
+       - `docs/AI_STORY.md` (tiers, local setup per profile, the planner, sticky links, "animate off first", LoRA as a
+         future extension).
+       - VISION, DEC-200…215 as planned, plus DECs for: T2-P6-F1 (clips cover-crop), 13b (non-9:16 stills crop), the
+         Veo→Kling walk switch, and the transport fix already in as DEC-195.
+       - A-entries; the CHECKPOINT close.
+    9. **Close:** Tier-1, ff `main`, deploy, push the branch then `main`, CI green.
+  - **Live state at the pause:**
+    - 0 jobs; Settings `allow_paid` false, caps 1/3/10; no `API_TOKEN`; chains default.
+    - **Today's paid spend $0.32** (0.066 + 0.044 + 0.21), all booked; walk ceiling $0.55. No further paid run is
+      planned.
+    - **Story A `979c8376e43e`:** tier 2 / api / one_dollar.
+      - 19 shots keep-still (assets overrides), sh01 clip current (seedance, 704×1248), `links.video` = seedance.
+      - Rendered mixed: final sha `3e90b8d2…`; `shot_modes` video 1 + motion_keep_still 19.
+    - **Story B `04feb539840f`:** tier 2 / api / one_dollar.
+      - 17 shots keep-still, sh01 clip current (kling, 960×960), `links.video` = kling.
+      - Rendered BEFORE the F1 fix: sh01 letterboxed, stills stretched. **Re-render after step 4.**
+    - **Anime `dcc0998db8ae`** ep 1: re-rendered on the deployed code, byte-identical `50094394…` (RC-V1/RC-M3
+      live).
+  - **Walk results so far (all logged):**
+    - Step 2: the estimate at 375 px.
+    - Step 3: the $1.00-cap refusal, $1.584, $0 spent.
+    - Step 5: seedance clip.
+    - Step 6: A-071 probe — queued, status COMPLETED, result 422.
+    - Step 7: sticky refusal, $0.
+    - Step 8: A's mixed render.
+    - Step 9: kling clip.
+    - Step 11: byte-identical tier-1 re-render.
+  - **Follow-ups collected (stage 14 lists them):**
+    - F6: the story-page per-route card shows no reason for 0 clips.
+    - F7: there is no budget-profile control on the story page.
+    - The sticky CLI sentence does not name the switch link.
+    - The bare "unknown" route chip on a refused local row.
+    - Source fix: send the model a 9:16 crop of the keyframe (key on the source sha + a crop-rule token).
+    - `partial.shot_facts` labels tier-2 rebuilds as "modifiers" once.
+    - Nano-banana → the paid key.
+    - The music-bed truncation on ffmpeg 7.1.5 (task chip).
+    - The same credential leak in `stt.py`/`broll.py` (offered by the transport task).
+    - A live local ComfyUI run when a GPU exists (A-035).
+    - Veo live (A-103).
+  - **Scratch tools** (session scratchpad, re-creatable):
+    - `walk6.py`: the CLI-in-container driver — Settings → env minus unlisted paid keys, LLM_CHAIN without
+      openrouter, per-process ALLOW_PAID/caps/VIDEO_CHAIN.
+    - `a071_probe.py`.
+    - Scratch servers `phase6-throwaway` :8016 / `phase6-dashboard` :5178 in `.claude/launch.json` (git-excluded).
+      Stop the API server whenever Tier-1 runs.
   - **Stage 12 notes:**
     - **Dashboard.**
       - Story page: tier/route + "Episode N's video estimate, per route" (latest episode with an approved
@@ -369,7 +449,8 @@
 | 10 | Tier-3 native audio, tests only [Opus] | done |
 | 11 | API and CLI [Opus, escalated from Sonnet] | done |
 | 12 | dashboard [Sonnet] | done |
-| 13 | deploy and the Tier-2 live walk (≤ $0.55) [Opus] | next |
+| 13 | deploy and the Tier-2 live walk (≤ $0.55) [Opus] | in progress: steps 2–9, 11 done ($0.32); 10 and 12 wait for the human; re-render after 13b |
+| 13b | still path: cover-crop non-9:16 images (pre-existing stretch; the human: fix now) [Opus] | next |
 | 14 | docs and decisions [Sonnet] | — |
 
 ### Regression contract (phase 6)
