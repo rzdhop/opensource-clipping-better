@@ -3418,3 +3418,47 @@ The human asked for the fix on 2026-09-30.
 - Not covered, same class, follow-ups: `stt.py` `_post_multipart` (Groq/Mistral bearer) and `studio/broll.py` (the
   Pexels key) call `urlopen` directly.
 - A-097 records the provider-side assumption.
+
+## DEC-196 — stt's upload and the Pexels search open through the transport's credential-safe opener (extends DEC-195)
+**Context.**
+- DEC-195 gave `transport.urllib_transport` an opener that drops the credential headers when a redirect leaves
+  their origin. It named two callers that bypass the transport as follow-ups:
+  - `stt._post_multipart`: Groq and Mistral, `Authorization: Bearer`.
+  - `studio/broll.py`'s Pexels search: the key is the `Authorization` value.
+- Both handed their own `Request` to `urllib.request.urlopen`, whose default redirect handler copies the header to
+  any host. A 302 turns stt's POST into a GET, and the bearer key still goes with it.
+- The human asked for the fix on 2026-09-30 and approved the plan in chat
+  (`.claude/plans/stt-broll-redirect-credentials.md`).
+
+**Decision.**
+- Both calls are now `transport._OPENER.open(request, ...)`, with no shared helper: `_OPENER.open` is already the
+  seam `test_provider_http.py` patches.
+  - stt keeps `timeout=REQUEST_TIMEOUT`.
+  - broll keeps no explicit timeout (the socket default, as before).
+- Return values, the `HTTPError` → `SttError` mapping, and broll's `except Exception` → `False` branches are
+  unchanged: `_OPENER` is `build_opener` with only the redirect handler replaced, so it raises the same exceptions.
+- broll gets `PEXELS_VIDEO_SEARCH_URL`, the same URL as a module constant. It is the only seam a local test can
+  point at.
+- broll's CDN download stays on `urlopen`: it sends only `User-Agent`.
+- `broll.py` imports `from ..providers import transport`. It is the studio package's first import from
+  `clipping.providers`, which imports nothing from studio, so there is no cycle.
+- Rejected:
+  - Routing through `urllib_transport`: it returns a `Response` for an `HTTPError` and maps connection errors, so
+    both functions' error handling would change.
+  - A public forwarding helper: one more name for two callers.
+  - Wrapping `_OPENER.open` in the test to rewrite the URL: the fail-first run would have hit api.pexels.com.
+
+**Consequence.**
+- `tests/test_stt_broll_redirects.py` runs two local servers per test; A answers 302 to B.
+  - stt: before the fix, B received `Authorization: Bearer test-groq`. Now B gets one keyless `GET /moved`, and the
+    result is B's JSON.
+  - broll: loaded through `conftest.render_stack_stubbed`, since cv2, mediapipe, numpy and yt_dlp are missing in
+    both environments. Before the fix, B received `test-pexels`. Now B gets the search and the clip with no key,
+    and `download_pexels_broll` returns `True`.
+  - Both tests failed first in both environments, on the leak assertion only.
+- Tier 2 was a keyless live probe through the new code:
+  - Pexels answered 401, and the function returned `False` with no file.
+  - Groq answered **403 "error code: 1010"**. The old `urlopen` gets the same answer: Cloudflare refuses urllib's
+    default `Python-urllib/3.12` User-Agent from this host, before any auth. This is pre-existing and recorded as
+    a follow-up, not fixed here.
+- A-099 records the provider-side assumption.

@@ -472,7 +472,79 @@ Carried unchanged, each proven by its named tests staying unedited:
 - RC-A2, RC-A3, RC-P5.
 - RC-S4: `llm.py` untouched.
 
+## SIDE TASK — stt's upload and the Pexels search open through the credential-safe opener (FULL, small). Branch `Feature/musing-lamport-e6a02a`
+- **Scope:**
+  - `clipping/providers/stt.py` `_post_multipart`;
+  - `clipping/studio/broll.py`'s Pexels search;
+  - one new test file, `tests/test_stt_broll_redirects.py`.
+  - DEC-195's follow-ups. Phase 6 and the transport side task below are left alone.
+- **In-progress header** (keep current):
+  - **Current phase:** DOCUMENT done. Stages 0–3 are committed.
+    - The human answered **"Go"** (2026-10-01) to both closing questions: the Tier-2 result and the merge.
+    - `main` had moved to `216bf38`: phase 6, deployed at 06:49 UTC with its walk under way. So `main` was merged
+      into this branch, the pattern of phase 6's `65a1511`.
+    - Conflicts were only in `.claude/CHECKPOINT.md` (phase 6's header kept on top, this section placed above the
+      transport side task) and in the action log (both sides kept).
+    - Tier-1 on the merge (the seven files): local **119 passed / 1 skipped**, CI env **119 / 1**. compileall clean.
+    - The fast-forward of `main` was **refused by the session's permission check** (it modifies the shared,
+      bind-mounted main checkout). `main` is still `216bf38`.
+    - **Next action (the human):** confirm `GET /api/health` shows 0 jobs, then
+      `git -C <repo> merge --ff-only Feature/musing-lamport-e6a02a`. No container restart.
+    - Stage 0 (`8edb8ea`): checkpoint, plan, baseline.
+    - Stage 1 (`b4d1c3d`): `stt._post_multipart` opens through `transport._OPENER`; new
+      `tests/test_stt_broll_redirects.py`.
+    - Stage 2 (`4912a15`): broll's Pexels search does the same; `PEXELS_VIDEO_SEARCH_URL`; the broll test.
+    - Stage 3: DEC-196, A-099, the action-log lines, this close-out.
+  - **Plan:** `.claude/plans/stt-broll-redirect-credentials.md`. The human **APPROVED** it in chat on 2026-10-01:
+    as written, with no shared helper, and broll's CDN download left on `urlopen`.
+  - **Tier-1 after stage 2:**
+    - Files: the new file + the six baseline files.
+    - Local **119 passed / 1 skipped**; CI env **119 passed / 1 skipped** (baseline + 2 new). compileall clean.
+  - **Tier 2:** the keyless live probe the human chose, run 2026-10-01. Both calls went through `_OPENER`.
+    - Pexels: 401 → `False`, no file.
+    - Groq: `SttError` "HTTP 403 … error code: 1010", not the expected 401. The old `urlopen` gets the same answer:
+      Cloudflare refuses `Python-urllib/3.12` from this host. This is pre-existing and recorded as a follow-up.
+  - **Tier 3:** `tests/test_stt_broll_redirects.py`, one fail-first test per module (DEC-192).
+  - **Dependencies:** none changed, so there is no audit delta.
+  - **Waiting on the human:**
+    - acknowledge the Tier-2 result (Groq's 403/1010 instead of 401);
+    - say whether and when to merge into `main`.
+    - Trial merges (`git merge-tree`):
+      - phase 6 conflicts with this branch only in `.claude/CHECKPOINT.md`.
+      - `Feature/eager-chaplygin-e0a0a3` already conflicts with `main` in `broll.py` and nine other studio files
+        (its base predates the studio package). This branch adds no new conflicting file to that list.
+  - **Follow-up offered:** Groq's Cloudflare 1010 block on urllib's User-Agent (hosted STT may fail from this host).
+  - **Artifacts at close:**
+    - CHECKPOINT: this section.
+    - DECISIONS: DEC-196.
+    - ASSUMPTIONS: A-099 (UNCONFIRMED).
+    - action log: 6 lines.
+    - VISION: reviewed, no change required (no redirect or credential item).
+  - **Open questions:** none blocking.
+- **Where:**
+  - Worktree `.claude/worktrees/musing-lamport-e6a02a`, branch `Feature/musing-lamport-e6a02a` from `main`
+    `0ca00b8`.
+  - `main` already contains ded664f (DEC-195), observed 2026-09-30.
+  - Never merged or deployed from here: the main checkout is bind-mounted by the live container.
+- **Checkpoint:** `0ca00b8` (== `main`), clean tree.
+- **Tier-1 baseline at `0ca00b8`** (2026-09-30). Scope is the chat's: the existing tests of the touched modules.
+  - Files: `tests/test_stt_stitching.py`, `tests/test_transcript_dispatch.py`, `tests/test_cancel.py`,
+    `tests/test_story_assets_step.py`, `tests/test_studio_package.py`, `tests/test_render_temp_cleanup.py`.
+  - `python -m pytest -p no:warnings`: **117 passed / 1 skipped**.
+  - `PYTHONNOUSERSITE=1 PYTHONPATH=/tmp/cilibs python3 -m pytest -p no:warnings`: **117 passed / 1 skipped**.
+  - The skip is `test_studio_package.py::test_the_real_package_imports_where_the_render_stack_exists` (no cv2 on
+    this host).
+- **Regression contract:**
+  - RC-SB1: hosted STT (Groq/Mistral) still posts, parses, and maps an HTTP error to `SttError`. Proven by the four
+    stt files, unedited and green, plus the new stt test's 200 path.
+  - RC-SB2: the studio package still loads, binds its siblings, and has no import cycle. Proven by
+    `test_studio_package.py` and `test_render_temp_cleanup.py`, unedited and green.
+  - RC-SB3: `download_pexels_broll` still searches, picks, downloads and returns `True`/`False`. Proven by the new
+    broll test's full path. The error branches are **UNVERIFIED** by a test: they are unchanged code (DEC-192).
+
 ## SIDE TASK — transport redirects drop credential headers off-origin (FULL, small). Branch `Feature/silly-almeida-f5cda1`
+- **Observed 2026-09-30 by the stt/broll side task above:** `main` is at `0ca00b8`, which contains ded664f and the
+  artifact commits.
 - **Scope:** only `clipping/providers/transport.py` and one new test file. The phase-6 state is in the next section and
   in the `ai-story-phase-6` worktree; this branch leaves both alone.
 - **In-progress header** (keep current):
