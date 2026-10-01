@@ -1267,6 +1267,217 @@ _UPLOAD_SCHEMA = _document({
     "uploaded_at": _NON_EMPTY_STRING,
 })
 
+# ------------------------------------------------- phase 7: the structured look (A10)
+#
+# Optional blocks a v2 story's entities gain (``_document(optional=)``):
+# checked when present, never required, so every document a legacy story
+# wrote still validates (the plan's schema rule). ``look`` is what the image
+# prompts are rendered from (``shots.render_look/render_place/render_prop``);
+# a character's ``dossier`` is its story knowledge (written by D1, a later
+# stage). Word caps are checked by the ``*_look_errors`` helpers below, the
+# way every other word cap here is (``_check_text``).
+
+LOOK_BUILD_MAX_WORDS = 15
+LOOK_SILHOUETTE_MAX_WORDS = 12
+LOOK_FACE_MAX_WORDS = 15
+LOOK_HAIR_MAX_WORDS = 12
+LOOK_SKIN_MAX_WORDS = 12
+# The story's own scale: a mouse may be 8 cm, a giant 400.
+LOOK_HEIGHT_CM = (5, 500)
+LOOK_PALETTE_RANGE = (1, 4)
+LOOK_COLOUR_MAX_WORDS = 3
+LOOK_WARDROBE_SETS_RANGE = (1, 3)
+LOOK_WARDROBE_CONTEXT_MAX_WORDS = 8
+LOOK_WARDROBE_ITEMS_MAX_WORDS = 20
+LOOK_SEASON_CHANGE_MAX_WORDS = 20
+WARDROBE_SET_ID_PATTERN = r"^[a-z][a-z0-9_]{0,39}$"
+
+_LOOK_TEXT_FIELDS = (
+    ("build", LOOK_BUILD_MAX_WORDS),
+    ("silhouette", LOOK_SILHOUETTE_MAX_WORDS),
+    ("face", LOOK_FACE_MAX_WORDS),
+    ("hair", LOOK_HAIR_MAX_WORDS),
+    ("skin_material", LOOK_SKIN_MAX_WORDS),
+)
+
+_WARDROBE_SET_SCHEMA = _document({
+    "id": {"type": "string", "pattern": WARDROBE_SET_ID_PATTERN},
+    "context": _NON_EMPTY_STRING,
+    "items": _NON_EMPTY_STRING,
+})
+
+CHARACTER_LOOK_SCHEMA = _document({
+    "build": _NON_EMPTY_STRING,
+    "silhouette": _NON_EMPTY_STRING,
+    "face": _NON_EMPTY_STRING,
+    "hair": _NON_EMPTY_STRING,
+    "skin_material": _NON_EMPTY_STRING,
+    "height_cm": {"type": "integer", "minimum": LOOK_HEIGHT_CM[0], "maximum": LOOK_HEIGHT_CM[1]},
+    "palette": {"type": "array", "items": _NON_EMPTY_STRING,
+                "minItems": LOOK_PALETTE_RANGE[0], "maxItems": LOOK_PALETTE_RANGE[1]},
+    "wardrobe_sets": {"type": "array", "items": _WARDROBE_SET_SCHEMA,
+                      "minItems": LOOK_WARDROBE_SETS_RANGE[0], "maxItems": LOOK_WARDROBE_SETS_RANGE[1]},
+    # How the look changes with the seasons; null when it does not.
+    "season_change": {"type": ["string", "null"], "minLength": 1},
+})
+
+DOSSIER_BACKSTORY_MAX_WORDS = 60
+DOSSIER_GOAL_MAX_WORDS = 20
+DOSSIER_SECRETS_MAX = 2
+DOSSIER_SECRET_MAX_WORDS = 20
+DOSSIER_HISTORY_MAX_WORDS = 30
+DOSSIER_NOW_MAX_WORDS = 15
+DOSSIER_VOICE_MAX_WORDS = 20
+DOSSIER_CATCHPHRASES_MAX = 2
+DOSSIER_CATCHPHRASE_MAX_WORDS = 10
+DOSSIER_ARC_MAX_WORDS = 30
+
+CHARACTER_DOSSIER_SCHEMA = _document({
+    "backstory": _NON_EMPTY_STRING,
+    "goal": _NON_EMPTY_STRING,
+    "need": _NON_EMPTY_STRING,
+    "fears": _NON_EMPTY_STRING,
+    "secrets": {"type": "array", "items": _NON_EMPTY_STRING, "maxItems": DOSSIER_SECRETS_MAX},
+    "relationships": {"type": "array", "items": _document({
+        "with": {"type": "string", "pattern": CHAR_ID_PATTERN},
+        "history": _NON_EMPTY_STRING,
+        "now": _NON_EMPTY_STRING,
+    })},
+    "voice": _document({
+        "patterns": _NON_EMPTY_STRING,
+        "vocabulary": _NON_EMPTY_STRING,
+        "catchphrases": {"type": "array", "items": _NON_EMPTY_STRING, "maxItems": DOSSIER_CATCHPHRASES_MAX},
+    }),
+    "arc": _NON_EMPTY_STRING,
+})
+
+LAYOUT_MAP_KEYS = ("left", "right", "back", "foreground", "centre")
+LAYOUT_MAP_MAX_WORDS = 15
+SCALE_NOTE_MAX_WORDS = 15
+LIGHTING_MAX_WORDS = 15
+
+PLACE_LOOK_SCHEMA = _document({
+    # Any side may be an empty string: nothing there.
+    "layout_map": _document({key: {"type": "string"} for key in LAYOUT_MAP_KEYS}),
+    "scale_note": _NON_EMPTY_STRING,
+    # Time variant name -> its light (keys checked by place_look_errors).
+    "lighting": {"type": "object"},
+    "props_here": _id_array(PROP_ID_PATTERN),
+})
+
+PROP_MATERIAL_MAX_WORDS = 8
+PROP_COLOUR_MAX_WORDS = 6
+PROP_SCALE_PHRASE_MAX_WORDS = 10
+WHERE_WHEN_NOTE_MAX_WORDS = 12
+
+PROP_LOOK_SCHEMA = _document({
+    "scale_cm": {"type": "number", "minimum": 0},
+    "material": _NON_EMPTY_STRING,
+    "colour": _NON_EMPTY_STRING,
+    "scale_phrase": _NON_EMPTY_STRING,
+    "where_when": {"type": "array", "items": _document({
+        "ep": {"type": "integer", "minimum": 1},
+        "holder_char_id": {"type": ["string", "null"], "pattern": CHAR_ID_PATTERN},
+        "place_id": {"type": ["string", "null"], "pattern": PLACE_ID_PATTERN},
+        "note": _NON_EMPTY_STRING,
+    })},
+})
+
+
+def character_look_errors(look, path="$.look") -> list:
+    """``validate()`` against ``CHARACTER_LOOK_SCHEMA``, plus every field's
+    word cap, each colour's, and the wardrobe set ids unique."""
+    errors = validate(look, CHARACTER_LOOK_SCHEMA, path)
+    if errors:
+        return errors
+    for key, cap in _LOOK_TEXT_FIELDS:
+        _check_text(errors, f"{path}.{key}", look[key], max_words=cap)
+    for i, colour in enumerate(look["palette"]):
+        _check_text(errors, f"{path}.palette[{i}]", colour, max_words=LOOK_COLOUR_MAX_WORDS)
+    ids = []
+    for i, wardrobe in enumerate(look["wardrobe_sets"]):
+        _check_text(errors, f"{path}.wardrobe_sets[{i}].context", wardrobe["context"],
+                    max_words=LOOK_WARDROBE_CONTEXT_MAX_WORDS)
+        _check_text(errors, f"{path}.wardrobe_sets[{i}].items", wardrobe["items"],
+                    max_words=LOOK_WARDROBE_ITEMS_MAX_WORDS)
+        if wardrobe["id"] in ids:
+            errors.append(f"{path}.wardrobe_sets[{i}].id: {wardrobe['id']!r} is used twice")
+        ids.append(wardrobe["id"])
+    if look["season_change"] is not None:
+        _check_text(errors, f"{path}.season_change", look["season_change"], max_words=LOOK_SEASON_CHANGE_MAX_WORDS)
+    return errors
+
+
+def character_dossier_errors(dossier, char_id, path="$.dossier") -> list:
+    """``validate()`` against ``CHARACTER_DOSSIER_SCHEMA``, plus the word caps
+    and the relationships: another character each, at most once."""
+    errors = validate(dossier, CHARACTER_DOSSIER_SCHEMA, path)
+    if errors:
+        return errors
+    _check_text(errors, f"{path}.backstory", dossier["backstory"], max_words=DOSSIER_BACKSTORY_MAX_WORDS)
+    for key in ("goal", "need", "fears"):
+        _check_text(errors, f"{path}.{key}", dossier[key], max_words=DOSSIER_GOAL_MAX_WORDS)
+    for i, secret in enumerate(dossier["secrets"]):
+        _check_text(errors, f"{path}.secrets[{i}]", secret, max_words=DOSSIER_SECRET_MAX_WORDS)
+    seen = set()
+    for i, relationship in enumerate(dossier["relationships"]):
+        other = relationship["with"]
+        if other == char_id:
+            errors.append(f"{path}.relationships[{i}].with: {other!r} is the character itself")
+        elif other in seen:
+            errors.append(f"{path}.relationships[{i}].with: {other!r} is listed twice")
+        seen.add(other)
+        _check_text(errors, f"{path}.relationships[{i}].history", relationship["history"],
+                    max_words=DOSSIER_HISTORY_MAX_WORDS)
+        _check_text(errors, f"{path}.relationships[{i}].now", relationship["now"], max_words=DOSSIER_NOW_MAX_WORDS)
+    voice = dossier["voice"]
+    _check_text(errors, f"{path}.voice.patterns", voice["patterns"], max_words=DOSSIER_VOICE_MAX_WORDS)
+    _check_text(errors, f"{path}.voice.vocabulary", voice["vocabulary"], max_words=DOSSIER_VOICE_MAX_WORDS)
+    for i, phrase in enumerate(voice["catchphrases"]):
+        _check_text(errors, f"{path}.voice.catchphrases[{i}]", phrase, max_words=DOSSIER_CATCHPHRASE_MAX_WORDS)
+    _check_text(errors, f"{path}.arc", dossier["arc"], max_words=DOSSIER_ARC_MAX_WORDS)
+    return errors
+
+
+def place_look_errors(look, path="$.look") -> list:
+    """``validate()`` against ``PLACE_LOOK_SCHEMA``, plus the word caps, the
+    lighting keyed by time variant names, and no prop listed twice."""
+    errors = validate(look, PLACE_LOOK_SCHEMA, path)
+    if errors:
+        return errors
+    for key in LAYOUT_MAP_KEYS:
+        value = look["layout_map"][key]
+        if value.strip():
+            _check_text(errors, f"{path}.layout_map.{key}", value, max_words=LAYOUT_MAP_MAX_WORDS)
+    _check_text(errors, f"{path}.scale_note", look["scale_note"], max_words=SCALE_NOTE_MAX_WORDS)
+    for key, value in look["lighting"].items():
+        if not (isinstance(key, str) and _search(TIME_VARIANT_PATTERN, key)):
+            errors.append(f"{path}.lighting: {key!r} is not a variant name ({TIME_VARIANT_PATTERN})")
+            continue
+        _check_text(errors, f"{path}.lighting.{key}", value, max_words=LIGHTING_MAX_WORDS)
+    props = look["props_here"]
+    for prop_id in sorted({prop_id for prop_id in props if props.count(prop_id) > 1}):
+        errors.append(f"{path}.props_here: {prop_id!r} is listed twice")
+    return errors
+
+
+def prop_look_errors(look, path="$.look") -> list:
+    """``validate()`` against ``PROP_LOOK_SCHEMA``, plus a real size (more
+    than 0 cm) and the word caps."""
+    errors = validate(look, PROP_LOOK_SCHEMA, path)
+    if errors:
+        return errors
+    scale = look["scale_cm"]
+    if not (math.isfinite(scale) and scale > 0):
+        errors.append(f"{path}.scale_cm: {scale!r} is not a size (more than 0 cm)")
+    _check_text(errors, f"{path}.material", look["material"], max_words=PROP_MATERIAL_MAX_WORDS)
+    _check_text(errors, f"{path}.colour", look["colour"], max_words=PROP_COLOUR_MAX_WORDS)
+    _check_text(errors, f"{path}.scale_phrase", look["scale_phrase"], max_words=PROP_SCALE_PHRASE_MAX_WORDS)
+    for i, entry in enumerate(look["where_when"]):
+        _check_text(errors, f"{path}.where_when[{i}].note", entry["note"], max_words=WHERE_WHEN_NOTE_MAX_WORDS)
+    return errors
+
+
 CHARACTER_SCHEMA = _document({
     "$schema": {"type": "string", "const": CHARACTER_SCHEMA_NAME},
     "char_id": {"type": "string", "pattern": CHAR_ID_PATTERN},
@@ -1307,6 +1518,10 @@ CHARACTER_SCHEMA = _document({
     "approved_at": _TIMESTAMP_OR_NULL,
     "created_at": _NON_EMPTY_STRING,
     "updated_at": _NON_EMPTY_STRING,
+}, optional={
+    # Phase 7, a v2 story: D2's look (A10) and D1's dossier.
+    "look": CHARACTER_LOOK_SCHEMA,
+    "dossier": CHARACTER_DOSSIER_SCHEMA,
 })
 
 
@@ -1350,6 +1565,10 @@ def character_errors(doc) -> list:
             errors.append(f"$.refs.extra[{i}].name: {extra['name']!r} is not an extra image")
     _unique_names(errors, "$.refs.extra", refs["extra"])
     _unique_names(errors, "$.refs.uploads", refs["uploads"])
+    if "look" in doc:
+        errors.extend(character_look_errors(doc["look"]))
+    if "dossier" in doc:
+        errors.extend(character_dossier_errors(doc["dossier"], doc["char_id"]))
     return errors
 
 
@@ -1373,6 +1592,9 @@ PLACE_SCHEMA = _document({
     "approved_at": _TIMESTAMP_OR_NULL,
     "created_at": _NON_EMPTY_STRING,
     "updated_at": _NON_EMPTY_STRING,
+}, optional={
+    # Phase 7, a v2 story: D3's look (A10).
+    "look": PLACE_LOOK_SCHEMA,
 })
 
 
@@ -1407,6 +1629,8 @@ def place_errors(doc) -> list:
             continue
         allowed = _BASE_ONLY if key == MASTER_PLATE_VARIANT else _DERIVED
         _slot_errors(errors, path, ref, stem=f"variant_{key}", allowed=allowed)
+    if "look" in doc:
+        errors.extend(place_look_errors(doc["look"]))
     return errors
 
 
@@ -1427,6 +1651,9 @@ PROP_SCHEMA = _document({
     "approved_at": _TIMESTAMP_OR_NULL,
     "created_at": _NON_EMPTY_STRING,
     "updated_at": _NON_EMPTY_STRING,
+}, optional={
+    # Phase 7, a v2 story: R1v2's look (A10).
+    "look": PROP_LOOK_SCHEMA,
 })
 
 
@@ -1443,6 +1670,8 @@ def prop_errors(doc) -> list:
     if doc["descriptor"] is not None:
         _check_text(errors, "$.descriptor", doc["descriptor"], max_words=PROP_DESCRIPTOR_MAX_WORDS)
     _slot_errors(errors, "$.image", doc["image"], stem="image", allowed=_BASE_ONLY)
+    if "look" in doc:
+        errors.extend(prop_look_errors(doc["look"]))
     return errors
 
 
@@ -3481,6 +3710,172 @@ def r1_errors(doc) -> list:
 
     errors = []
     _check_text(errors, "$.descriptor", doc["descriptor"], max_words=PROP_DESCRIPTOR_MAX_WORDS)
+    return errors
+
+
+# ------------------------------------------------- D2 / D3 / R1v2 (phase 7, the look)
+#
+# One artifact per call (DEC-027): a v2 story's character look (D2, after
+# K1), place look (D3, after P1) and prop look (R1v2, after R1). Each reply is
+# checked with the document's own ``*_look_errors`` (one set of caps for the
+# reply and the stored block), plus the name-leak check: no name of the story
+# may appear in a field an image model reads (spec 2.3).
+
+def _name_pattern(name):
+    return re.compile(r"(?<!\w)" + r"\s+".join(re.escape(word) for word in name.split()) + r"(?!\w)",
+                      re.IGNORECASE)
+
+
+def _name_leaks(errors, haystacks, names) -> None:
+    """One error per (field, name) pair where a name appears in the field."""
+    patterns = [(name, _name_pattern(name)) for name in dict.fromkeys(n.strip() for n in names if n and n.strip())]
+    for path, text in haystacks:
+        if not isinstance(text, str):
+            continue
+        for name, pattern in patterns:
+            if pattern.search(text):
+                errors.append(f"{path}: must not mention a name ({name!r})")
+
+
+def d2_schema() -> dict:
+    """The D2 output schema: one character's look (``CHARACTER_LOOK_SCHEMA``'s
+    fields; ``season_change`` an empty string when the look does not change)."""
+    wardrobe = _llm_obj({
+        "id": {"type": "string", "description": "lowercase slug, e.g. daily, night_out"},
+        "context": {"type": "string", "description": "English, when it is worn, at most 8 words"},
+        "items": {"type": "string", "description": "English, what is worn, at most 20 words"},
+    })
+    return _llm_obj({
+        "build": {"type": "string", "description": "English, body type and proportions, at most 15 words"},
+        "silhouette": {"type": "string", "description": "English, the outline at a glance, at most 12 words"},
+        "face": {"type": "string", "description": "English, at most 15 words"},
+        "hair": {"type": "string", "description": "English, at most 12 words"},
+        "skin_material": {"type": "string", "description": "English, skin or surface, at most 12 words"},
+        "height_cm": {"type": "integer", "description": "5-500, the cast's own scale"},
+        "palette": {"type": "array", "description": "1-4 short colour names", "items": {"type": "string"}},
+        "wardrobe_sets": {"type": "array", "description": "1-3 outfits, the everyday one first", "items": wardrobe},
+        "season_change": {"type": "string", "description": "English, at most 20 words, or empty"},
+    })
+
+
+def d2_look(doc) -> dict:
+    """D2's reply as the stored ``look`` block (an empty season change is null)."""
+    season = (doc.get("season_change") or "").strip()
+    return {
+        "build": doc["build"], "silhouette": doc["silhouette"], "face": doc["face"], "hair": doc["hair"],
+        "skin_material": doc["skin_material"], "height_cm": doc["height_cm"], "palette": list(doc["palette"]),
+        "wardrobe_sets": [{"id": item["id"], "context": item["context"], "items": item["items"]}
+                          for item in doc["wardrobe_sets"]],
+        "season_change": season or None,
+    }
+
+
+def d2_errors(doc, names) -> list:
+    """Post-validation for a D2 response: the stored look's own rules
+    (``character_look_errors``) and no name of *names* (the story's
+    characters, places and props) in any visual field."""
+    errors = validate(doc, d2_schema())
+    if errors:
+        return errors
+    errors = character_look_errors(d2_look(doc), "$")
+    haystacks = [(f"$.{key}", doc[key]) for key, _cap in _LOOK_TEXT_FIELDS]
+    haystacks += [(f"$.palette[{i}]", colour) for i, colour in enumerate(doc["palette"])]
+    haystacks += [(f"$.wardrobe_sets[{i}].items", item["items"]) for i, item in enumerate(doc["wardrobe_sets"])]
+    haystacks.append(("$.season_change", doc["season_change"]))
+    _name_leaks(errors, haystacks, names)
+    return errors
+
+
+def d3_schema(variants, prop_names) -> dict:
+    """The D3 output schema: one place's layout map, scale note, one light
+    per time variant of the place (*variants*, fixed keys) and the props of
+    the story that live there, by name (*prop_names*; none: always empty)."""
+    lighting = _llm_obj({variant: {"type": "string", "description": "English, at most 15 words"}
+                         for variant in variants})
+    prop_item = {"type": "string", "enum": list(prop_names)} if prop_names else {"type": "string"}
+    return _llm_obj({
+        "layout_map": _llm_obj({key: {"type": "string", "description": "English, at most 15 words, or empty"}
+                                for key in LAYOUT_MAP_KEYS}),
+        "scale_note": {"type": "string", "description": "English, the size against a person, at most 15 words"},
+        "lighting": lighting,
+        "props_here": {"type": "array", "description": f"0-{D3_PROPS_HERE_MAX} props of the story that live here",
+                       "items": prop_item},
+    })
+
+
+def d3_errors(doc, variants, prop_names, names) -> list:
+    """Post-validation for a D3 response: the place look's rules on the
+    reply, one light per variant exactly, props of the story only (once), no
+    name in a visual field."""
+    errors = validate(doc, d3_schema(variants, prop_names))
+    if errors:
+        return errors
+    look = {"layout_map": doc["layout_map"], "scale_note": doc["scale_note"], "lighting": doc["lighting"],
+            "props_here": []}
+    errors = place_look_errors(look, "$")
+    if set(doc["lighting"]) != set(variants):
+        errors.append(f"$.lighting: expected one light for each of {', '.join(variants)}")
+    known = set(prop_names)
+    for i, name in enumerate(doc["props_here"]):
+        if name not in known:
+            errors.append(f"$.props_here[{i}]: {name!r} is no prop of the story")
+    if len(set(doc["props_here"])) != len(doc["props_here"]):
+        errors.append("$.props_here: a prop is listed twice")
+    if len(doc["props_here"]) > D3_PROPS_HERE_MAX:
+        errors.append(f"$.props_here: {len(doc['props_here'])} props, expected at most {D3_PROPS_HERE_MAX}")
+    haystacks = [(f"$.layout_map.{key}", doc["layout_map"][key]) for key in LAYOUT_MAP_KEYS]
+    haystacks.append(("$.scale_note", doc["scale_note"]))
+    haystacks += [(f"$.lighting.{key}", value) for key, value in doc["lighting"].items()]
+    _name_leaks(errors, haystacks, names)
+    return errors
+
+
+# How many places a D3 reply may dress with props, and how many where-when
+# entries an R1v2 reply may give: reply bounds (not the stored document's),
+# so the largest reply each ask allows fits its output cap (MAX_TOKENS).
+D3_PROPS_HERE_MAX = 3
+R1V2_WHERE_WHEN_MAX = 2
+
+
+def r1v2_schema(cast_names, place_names) -> dict:
+    """The R1v2 output schema: one prop's look; ``where_when`` names its
+    holder and place by the cast's and the places' names (or null)."""
+
+    def named(names):
+        return {"type": ["string", "null"], "enum": list(names) + [None]} if names else {"type": ["string", "null"]}
+
+    entry = _llm_obj({
+        "ep": {"type": "integer", "description": "the episode, 1-based"},
+        "holder": named(cast_names),
+        "place": named(place_names),
+        "note": {"type": "string", "description": "English, at most 12 words"},
+    })
+    return _llm_obj({
+        "scale_cm": {"type": "number", "description": "its longest side in centimetres, more than 0"},
+        "material": {"type": "string", "description": "English, at most 8 words"},
+        "colour": {"type": "string", "description": "English, at most 6 words"},
+        "scale_phrase": {"type": "string", "description": "English, its size in words, at most 10 words"},
+        "where_when": {"type": "array", "description": f"0-{R1V2_WHERE_WHEN_MAX} entries: where and with whom it is",
+                       "items": entry},
+    })
+
+
+def r1v2_errors(doc, names) -> list:
+    """Post-validation for an R1v2 response: the prop look's rules on the
+    reply (``prop_look_errors``, holders and places checked once mapped) and
+    no name in a visual field."""
+    errors = validate(doc, r1v2_schema((), ()))
+    if errors:
+        return errors
+    look = {"scale_cm": doc["scale_cm"], "material": doc["material"], "colour": doc["colour"],
+            "scale_phrase": doc["scale_phrase"],
+            "where_when": [{"ep": entry["ep"], "holder_char_id": None, "place_id": None, "note": entry["note"]}
+                           for entry in doc["where_when"]]}
+    errors = prop_look_errors(look, "$")
+    if len(doc["where_when"]) > R1V2_WHERE_WHEN_MAX:
+        errors.append(f"$.where_when: {len(doc['where_when'])} entries, expected at most {R1V2_WHERE_WHEN_MAX}")
+    haystacks = [(f"$.{key}", doc[key]) for key in ("material", "colour", "scale_phrase")]
+    _name_leaks(errors, haystacks, names)
     return errors
 
 

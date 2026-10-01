@@ -276,6 +276,11 @@ PHASE5_OPTIONAL = {
     ("SEASON_ARC_SCHEMA", "$.properties.series_memory"): {"entries"},
     ("SEASON_ARC_SCHEMA", "$.properties.audience_feedback.items"): {"stats", "digest", "directions",
                                                                      "chosen_direction"},
+    # Phase 7 stage 3a (DEC-226): the structured look and the dossier are
+    # optional blocks, absent on every stored story.
+    ("CHARACTER_SCHEMA", "$"): {"look", "dossier"},
+    ("PLACE_SCHEMA", "$"): {"look"},
+    ("PROP_SCHEMA", "$"): {"look"},
 }
 
 
