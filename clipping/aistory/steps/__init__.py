@@ -19,7 +19,9 @@ adds ``script`` and ``storyboard`` (and the episode targets); phase 4 adds
 (module ``fast_track``); phase 5 adds the series steps ``memory``,
 ``feedback`` and ``propose-next`` (module ``propose_next``), each one LLM
 call ending awaiting approval, and ``rerender`` (stage 8: the render again,
-making only the shot clips that changed since the last good render). Each is
+making only the shot clips that changed since the last good render); phase 7
+(stage 5b) adds ``knowledge``, a v2 story's knowledge base, ending awaiting
+approval like the season. Each is
 registered by module name and imported on its first run, never here:
 importing this package must not pull in the prompt catalogue, the LLM chain
 or the generation chains, so the worker's dispatch and a test that only
@@ -113,6 +115,7 @@ RUNNERS: dict[str, Callable[[StepContext], object]] = {
     "places_proposal": _deferred("places_proposal"),
     "places": _deferred("places"),
     "season": _deferred("season"),
+    "knowledge": _deferred("knowledge"),
     "script": _deferred("script"),
     "storyboard": _deferred("storyboard"),
     "assets": _deferred("assets"),

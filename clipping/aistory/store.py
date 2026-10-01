@@ -555,6 +555,46 @@ def _lock_for(root: str) -> threading.RLock:
 
 # ------------------------------------------------------------------- store
 
+def _drop_from_knowledge(doc, kind, eid):
+    """Remove the deleted entity *eid* of *kind* from a ``knowledge.json``
+    document (in place) and move its ``rev`` on; a sentence of what was
+    removed, or None when the document does not name it (nothing changes)."""
+    where = set()
+    for entry in doc.get("timeline") or []:
+        for beat in entry["beats"]:
+            if kind == "characters":
+                if eid in beat["who"]:
+                    beat["who"] = [cid for cid in beat["who"] if cid != eid]
+                    where.add("timeline")
+                if eid in beat["knows_after"]:
+                    del beat["knows_after"][eid]
+                    where.add("timeline")
+            elif kind == "places" and beat["place_id"] == eid:
+                beat["place_id"] = None
+                where.add("timeline")
+            elif kind == "props" and eid in beat["objects"]:
+                beat["objects"] = [pid for pid in beat["objects"] if pid != eid]
+                where.add("timeline")
+    if kind == "props" and eid in (doc.get("props_registry") or []):
+        doc["props_registry"] = [pid for pid in doc["props_registry"] if pid != eid]
+        where.add("props_registry")
+    ledger = doc.get("ledger_seed") or {}
+    if kind == "characters" and eid in ledger:
+        del ledger[eid]
+        where.add("ledger_seed")
+    for state in ledger.values():
+        if kind == "places" and state["location"] == eid:
+            state["location"] = None
+            where.add("ledger_seed")
+        elif kind == "props" and eid in state["possessions"]:
+            state["possessions"] = [pid for pid in state["possessions"] if pid != eid]
+            where.add("ledger_seed")
+    if not where:
+        return None
+    doc["rev"] += 1
+    return f"{eid} removed from {', '.join(sorted(where))}; the knowledge base must be approved again"
+
+
 class StoryStore:
     def __init__(self, outputs_dir, *, id_factory=new_story_id, on_log=print):
         self.outputs_dir = os.path.abspath(str(outputs_dir))
@@ -911,11 +951,24 @@ class StoryStore:
             return self.write_doc(story_id, KNOWLEDGE_DOC, doc, now=now,
                                   validator=self._knowledge_references(story_id))
 
-    def update_knowledge(self, story_id, mutate, *, now):
+    def update_knowledge(self, story_id, mutate, *, now, bump_rev=True):
         """:meth:`update_doc` for ``knowledge.json`` (re-read, then write under
-        the story lock), checked as :meth:`write_knowledge`."""
+        the story lock), checked as :meth:`write_knowledge`.
+
+        Every write moves ``rev`` on by one (1 for the first), whatever
+        *mutate* set (stage 5b, DEC-228): an approval names the ``rev`` it was
+        given at (``approved_rev``), so any later write leaves it out of date.
+        The approval itself writes with ``bump_rev=False``."""
+
+        def write(current):
+            before = current["rev"] if current is not None else 0
+            new = mutate(current)
+            if new is not None and bump_rev:
+                new["rev"] = before + 1
+            return new
+
         with self._lock:
-            return self.update_doc(story_id, KNOWLEDGE_DOC, mutate, now=now,
+            return self.update_doc(story_id, KNOWLEDGE_DOC, write, now=now,
                                    validator=self._knowledge_references(story_id))
 
     def update_episode_doc(self, story_id, ep, name, mutate, *, now, validator=None):
@@ -1215,7 +1268,13 @@ class StoryStore:
         entries -- ``series_memory.drop_character``) and
         ``places_proposal.json`` (a proposed prop's ``owner`` becomes null).
         A place: a character located there (``state.location``) is located
-        nowhere. Nothing refers to a prop.
+        nowhere. And, any kind (stage 5b, DEC-228), ``knowledge.json``: the id
+        leaves every beat (``who``, ``objects``, ``knows_after``, a
+        ``place_id`` becomes null), the props registry and the ledger seed (a
+        character's entry, a location, a possession) -- and, unlike the
+        others, the knowledge base's ``rev`` moves, so its approval no longer
+        holds (the episode gate asks for it again): what was approved named
+        something that no longer exists.
 
         This is bookkeeping, not content: a touched document **keeps its
         approval** (``approved_at``, the season's too) -- what was approved
@@ -1320,6 +1379,7 @@ class StoryStore:
                 return None
 
             entities("characters", location)
+        document(KNOWLEDGE_DOC, lambda doc: _drop_from_knowledge(doc, kind, eid))
         return messages
 
     # -------------------------------------------------------------- media

@@ -114,6 +114,16 @@ C1_CALLS = 10
 # action, a 25-word motion, 4 staging entries at 4 + 4 words, 5 subjects, a
 # modifier and its lines -- needs ~904 / ~450 tokens (chars/4 x 1.3), plus
 # 15 %, rounded up to ten (tests/test_story_prompts_episode.py).
+#
+# D4/D5/D6 (phase 7 stage 5b, DEC-228, DEC-138's method): the largest French
+# reply each ask allows (chars/4 x 1.3, tests/test_story_episode_prompt_budgets.py):
+# D4 a 60-word geography, 30-word period details and 4 motifs at 12 words,
+# ~373 (the plan's ~300 was an estimate); D5 8 beats, each a 25-word what, a
+# 60-character place, D5_WHO_MAX (4) and D5_OBJECTS_MAX (2) names of 60
+# characters and D5_KNOWS_MAX (2) knows-after at 15 words, ~2,891 (the plan's
+# 420 held the beats' what alone); D6 5 kept names and 3 new props (a
+# 60-character name and owner, a 200-character one-line), ~465. Each plus 15 %,
+# rounded up to ten.
 MAX_TOKENS = {
     "C1": 700, "B1": 400, "B2": 520, "B3": 300,
     "K1": 750, "P0": 420, "P1": 260, "R1": 100, "S1": 950, "S2": 350, "U1": 120,
@@ -123,6 +133,7 @@ MAX_TOKENS = {
     "D2": 380, "D3": 300, "R1v2": 220,
     "T1v2": 1040, "T1rv2": 520,
     "D1": 1290,
+    "D4": 430, "D5": 3330, "D6": 540,
 }
 
 # E1's payoff variant (phase 5, plan 11 stage 3, DEC-138's method): from
@@ -164,6 +175,9 @@ TEMPERATURE = {
     "T1v2": WRITING_TEMPERATURE,
     "T1rv2": WRITING_TEMPERATURE,
     "D1": WRITING_TEMPERATURE,
+    "D4": WRITING_TEMPERATURE,
+    "D5": WRITING_TEMPERATURE,
+    "D6": WRITING_TEMPERATURE,
 }
 SCHEMA_NAMES = {
     "C1": "story_concepts", "B1": "bible_core", "B2": "bible_world", "B3": "bible_values",
@@ -177,6 +191,7 @@ SCHEMA_NAMES = {
     "D2": "character_look", "D3": "place_look", "R1v2": "prop_look",
     "T1v2": "storyboard_beat_shots", "T1rv2": "storyboard_beat_shot_replan",
     "D1": "character_dossier",
+    "D4": "knowledge_world", "D5": "knowledge_timeline", "D6": "knowledge_props",
 }
 
 # E4's input is the whole script, not a small pack -- it needs a wider
@@ -258,8 +273,20 @@ SCHEMA_NAMES = {
 # one-line caps, and a regenerate with the current dossier at its caps and a
 # 60-word note (tests/test_story_episode_prompt_budgets.py): D1 3,380;
 # + 15 %, rounded up to ten.
+#
+# D4/D5/D6 (phase 7 stage 5b, DEC-228): each on its French worst case
+# (tests/test_story_episode_prompt_budgets.py) -- D4: the bible past its cut,
+# the world at B2's caps, 8 places (60-character names, 200-character
+# one-lines, a 45-word descriptor shown at 12 words) and 8 props with a
+# 60-character owner: 1,966; D5: an arc entry at its caps with 3 + 3 hooks, the
+# 8 beats of the episode before, 5 dossiers in short form at their caps (3
+# relationships), 7 other names, 8 places and 8 props: 3,416 (the bible and
+# world left out: with them it passed the 4,000 ceiling); D6: the bible, 24 new
+# objects (2 an episode over 12) each with its beat, 8 props named in all 12
+# episodes, 8 props in full and 12 names: 3,094. Each + 15 %, rounded up to ten.
 INPUT_BUDGET = {"E1": 1820, "E2": 1660, "E3": 2530, "E4": 3900, "T1": 1270, "T1r": 1410, "S3": 3740, "F1": 3950, "N1": 3740,
-                "D2": 2370, "D3": 1940, "R1v2": 1170, "T1v2": 2020, "T1rv2": 2060, "D1": 3890}
+                "D2": 2370, "D3": 1940, "R1v2": 1170, "T1v2": 2020, "T1rv2": 2060, "D1": 3890,
+                "D4": 2270, "D5": 3930, "D6": 3560}
 
 # The ``bible:<field>`` grammar of spec 9.2: which prompt a regenerate note
 # re-runs, and which of that prompt's fields it targets. "tone" also carries
@@ -697,6 +724,188 @@ def build_d1(pack, *, character, others, regenerate=None):
     user += _D1_ASK
     names = [other["name"] for other in others][:context._CAST_MAX_MEMBERS - 1]
     return _system(pack), user, schemas.d1_schema(names)
+
+
+# ============================================================ D4/D5/D6 (phase 7 stage 5b, the knowledge base)
+#
+# The knowledge step (A14, DEC-228) writes a v2 story's knowledge base one
+# artifact per call, after the season is approved and before episode 1: D4
+# the world notes, D5 one episode's beats (one call per planned episode),
+# D6 the props registry. Text for the writers, never for an image model:
+# written in the story's language, names allowed. The step hands each
+# builder plain, already-short data (names, one-lines, the dossiers' short
+# form), so these stay pure functions of strings.
+
+# The props a D4/D5/D6 prompt lists, at most (the registry's own cap), and
+# the characters D5 shows in full (S2's own 1-5 characters an episode).
+KNOWLEDGE_PROPS_SHOWN = schemas.KNOWLEDGE_PROPS_MAX
+D5_CAST_DETAILED_MAX = 5
+_KNOWLEDGE_ONE_LINE_WORDS = 15
+
+_D4_ASK = (
+    "Write the world notes the writers keep for the whole season.\n\n"
+    "Give (in the story language; names are allowed here):\n"
+    "- geography: where the places above stand from one another and how the characters move between them, "
+    "at most 60 words\n"
+    "- period_details: the period, technology and customs every scene must respect, at most 30 words\n"
+    f"- visual_motifs: 1 to {schemas.WORLD_VISUAL_MOTIFS_MAX} images or objects that come back through the "
+    "season, each at most 12 words\n\n"
+    "Stay consistent with the bible, the world and the places above. Never use real people, brands, studio "
+    "names or copyrighted characters."
+)
+
+
+def _owned_props_section(props, label="Props of the story") -> str:
+    props = list(props)[:KNOWLEDGE_PROPS_SHOWN]
+    if not props:
+        return f"{label}: none yet.\n\n"
+    lines = []
+    for prop in props:
+        line = f"- {prop['name']}"
+        if prop.get("one_line"):
+            line += f": {context.trim_words(prop['one_line'], _KNOWLEDGE_ONE_LINE_WORDS)[0]}"
+        if prop.get("owner"):
+            line += f" (owner: {prop['owner']})"
+        lines.append(line)
+    return f"{label}:\n" + "\n".join(lines) + "\n\n"
+
+
+def build_d4(pack, *, places, props):
+    """The world notes of the knowledge base (phase 7 stage 5b, D4): the
+    bible and world, the places (*places*: ``[{name, one_line,
+    descriptor?}]``, rendered short as every entity line is) and the props
+    (*props*: ``[{name, owner}]``, owner a name or None)."""
+    user = _data_block(pack, ("bible", "world"))
+    user += _places_section(places) or "No place yet.\n\n"
+    user += _owned_props_section(props)
+    user += _D4_ASK
+    return _system(pack), user, schemas.d4_schema()
+
+
+def _d5_ask(ep) -> str:
+    return (
+        f"Plan episode {ep}'s beats: what happens, in order, so every episode stays consistent with the "
+        "season.\n\n"
+        "Give (in the story language; names are allowed here):\n"
+        f"- beats: 1 to {schemas.TIMELINE_BEATS_MAX} beats in story order, each with:\n"
+        "  - what: what happens, at most 25 words\n"
+        "  - place: where it happens, one of the places above by its exact name, or null\n"
+        f"  - who: 1 to {schemas.D5_WHO_MAX} characters above who act in it, by their exact name\n"
+        f"  - objects: 0 to {schemas.D5_OBJECTS_MAX} objects that matter in it, by name: a prop above by its "
+        f"exact name, or a new object the story needs (at most {schemas.D5_NEW_OBJECTS_MAX} new objects in the "
+        "whole episode)\n"
+        f"  - knows_after: 0 to {schemas.D5_KNOWS_MAX} characters whose knowledge changes, each with who (their "
+        "exact name) and knows (what they know after the beat, at most 15 words)\n\n"
+        "Stay true to the arc entry, the characters' goals, needs and secrets, and the beats before. Never use "
+        "real people, brands, studio names or copyrighted characters."
+    )
+
+
+def _dossier_line(member) -> str:
+    line = f"- {member['name']} ({member['role']})"
+    if member.get("goal") is None:
+        return f"{line}: {member['one_line']}" if member.get("one_line") else line
+    parts = [f"goal: {member['goal']}", f"need: {member['need']}"]
+    if member.get("secrets"):
+        parts.append("secrets: " + " | ".join(member["secrets"]))
+    if member.get("now"):
+        parts.append("now: " + "; ".join(f"with {item['with']}: {item['now']}" for item in member["now"]))
+    return f"{line}: " + "; ".join(parts)
+
+
+def _d5_cast_block(cast, others) -> str:
+    lines = ["Characters in this episode:"] + [_dossier_line(member) for member in cast]
+    text = "\n".join(lines) + "\n\n"
+    if others:
+        text += "Other characters: " + ", ".join(f"{other['name']} ({other['role']})" for other in others) + "\n\n"
+    return text
+
+
+def _previous_beats_block(ep, previous) -> str:
+    if not previous:
+        return ""
+    lines = [f"Episode {ep - 1}'s beats (already planned):"]
+    lines += [f"{i}. {what}" for i, what in enumerate(previous, 1)]
+    return "\n".join(lines) + "\n\n"
+
+
+def _knowledge_places_block(places) -> str:
+    places = list(places)[:context._PLACES_MAX_ITEMS]
+    if not places:
+        return "Places: none yet.\n\n"
+    lines = [f"- {place['name']}: {context.trim_words(place['one_line'], _KNOWLEDGE_ONE_LINE_WORDS)[0]}"
+             if place.get("one_line") else f"- {place['name']}" for place in places]
+    return "Places:\n" + "\n".join(lines) + "\n\n"
+
+
+def build_d5(pack, *, ep, planned, entry, previous, cast, others, places, props):
+    """One episode's beats (phase 7 stage 5b, D5): episode *ep*'s arc entry
+    (of *planned*), what happens in the episode before (*previous*: its
+    beats' ``what``, or None), the episode's characters in short form
+    (*cast*: ``[{name, role, goal, need, secrets, now: [{with, now}]}]``, or
+    ``{name, role, one_line}`` without a dossier), the others by name and
+    role (*others*), the places (``[{name, one_line}]``) and the props
+    (``[{name, owner}]``).
+
+    Not the bible, the world or D4's notes: the arc entry and the dossiers
+    were written from them, and with them the French worst case (5 dossiers
+    at their caps, 8 beats before) passes the spec's 4,000-token ceiling."""
+    cast = list(cast)[:D5_CAST_DETAILED_MAX]
+    others = list(others)[:context._CAST_MAX_MEMBERS - len(cast)]
+    user = _arc_entry_block(entry, label=f"Season arc, episode {ep} of {planned}") + "\n\n"
+    user += _previous_beats_block(ep, previous)
+    user += _d5_cast_block(cast, others)
+    user += _knowledge_places_block(places)
+    user += _owned_props_section(props)
+    user += _d5_ask(ep)
+    names = [member["name"] for member in cast] + [other["name"] for other in others]
+    places = list(places)[:context._PLACES_MAX_ITEMS]
+    return _system(pack), user, schemas.d5_schema(names, [place["name"] for place in places])
+
+
+_D6_ASK = (
+    "Register the story's props: the objects the season's beats need on screen, so each is drawn once and "
+    "stays the same in every episode.\n\n"
+    "Give (in the story language; names are allowed here):\n"
+    "- keep: the props of the story above that matter to the beats, by their exact name\n"
+    f"- new_props: 0 to {schemas.D6_NEW_PROPS_MAX} new props, only for new objects above that the story truly "
+    "needs and that no prop above already is, each with name (at most 60 characters), one_line (what it is "
+    "and why it matters, at most 20 words) and owner (a character above by their exact name, or null)\n\n"
+    f"At most {schemas.KNOWLEDGE_PROPS_MAX} props in all, kept and new. Never use real people, brands, studio "
+    "names or copyrighted characters."
+)
+
+
+def _timeline_objects_block(objects) -> str:
+    if not objects:
+        return "Objects the beats name: none.\n\n"
+    lines = []
+    for item in objects:
+        episodes = ", ".join(str(ep) for ep in item["episodes"])
+        if item["new"]:
+            line = f"- New object: {item['name']} (episode {episodes})"
+            if item.get("what"):
+                line += f": {item['what']}"
+        else:
+            line = f"- Prop: {item['name']} (episode {episodes})"
+        lines.append(line)
+    return "Objects the beats name:\n" + "\n".join(lines) + "\n\n"
+
+
+def build_d6(pack, *, objects, props, cast):
+    """The props registry (phase 7 stage 5b, D6): the bible, the objects
+    the timeline names (*objects*: ``[{name, new, episodes, what?}]`` -- a new
+    one with the first beat naming it), the story's props (*props*:
+    ``[{name, one_line, owner}]``) and the characters' names (*cast*, the new
+    props' possible owners)."""
+    props = list(props)[:KNOWLEDGE_PROPS_SHOWN]
+    cast = list(cast)[:context._CAST_MAX_MEMBERS]
+    user = _data_block(pack, ("bible",))
+    user += _timeline_objects_block(objects)
+    user += _owned_props_section(props)
+    user += ("Characters: " + ", ".join(cast) + "\n\n") if cast else ""
+    user += _D6_ASK
+    return _system(pack), user, schemas.d6_schema([prop["name"] for prop in props], cast)
 
 
 # ============================================================ D2/D3/R1v2 (phase 7, the look)

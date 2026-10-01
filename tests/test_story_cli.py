@@ -916,7 +916,8 @@ def test_the_help_lists_every_step_of_phases_1_and_2(cli):
     from clipping.aistory import workflow
 
     steps_ = workflow.PHASE1_STEPS + workflow.PHASE2_STEPS
-    assert set(workflow.PHASE2_STEPS) == {"cast", "places_proposal", "places", "season"}
+    # Phase 7 stage 5b (DEC-228): re-pinned on purpose -- the knowledge step joins phase 2's, after the season.
+    assert set(workflow.PHASE2_STEPS) == {"cast", "places_proposal", "places", "season", "knowledge"}
     for argv in (["--help"], ["step", "--help"]):
         assert cli_module.main(argv) == 0
         out = cli.capsys.readouterr().out
@@ -938,7 +939,8 @@ def test_main_py_ai_story_step_help_lists_every_step(tmp_path):
     result = _main_py("--ai-story", "step", "--help", tmp_path=tmp_path)
 
     assert result.returncode == 0, result.stderr
-    assert ("{concepts,bible,style,style_preview,cast,places_proposal,places,season,script,storyboard,"
+    # Phase 7 stage 5b (DEC-228): re-pinned on purpose -- knowledge, after season.
+    assert ("{concepts,bible,style,style_preview,cast,places_proposal,places,season,knowledge,script,storyboard,"
            "assets,render,metadata,memory,feedback,propose-next,rerender}" in result.stdout)
 
 

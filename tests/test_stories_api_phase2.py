@@ -419,7 +419,8 @@ def test_the_patch_models_declare_exactly_the_editable_fields():
 def test_the_phase_2_grammar_moved_out_of_the_later_phases():
     from clipping.aistory import workflow
 
-    assert workflow.PHASE2_STEPS == ("cast", "places_proposal", "places", "season")
+    # Phase 7 stage 5b (DEC-228): re-pinned on purpose -- the knowledge step, after the season.
+    assert workflow.PHASE2_STEPS == ("cast", "places_proposal", "places", "season", "knowledge")
     assert not set(workflow.PHASE2_STEPS) & set(workflow.LATER_STEPS)
     assert workflow.PHASE1_STEPS == ("concepts", "bible", "style", "style_preview")  # the CLI's choices
     for target in ("character:char_kiwilo:text", "character:char_kiwilo:image:portrait",

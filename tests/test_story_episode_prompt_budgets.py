@@ -699,3 +699,100 @@ def test_the_largest_french_dossier_reply_fits_its_cap():
     assert needed == pytest.approx(MEASURED_DOSSIER_REPLY, abs=0.05)
     cap = prompts.MAX_TOKENS["D1"]
     assert cap == -(-round(needed * 1.15, 1) // 10) * 10
+
+
+# ================================================================ phase 7: D4/D5/D6 (the knowledge base)
+#
+# Stage 5b (DEC-228, DEC-138's method), each input at the cap its source sets,
+# in French. D4: the bible past its cut, the world at B2's caps, 8 places
+# (60-character names, 200-character one-lines, a 45-word descriptor the
+# entity line clips to 12 words) and 8 props with a 60-character owner. D5:
+# an arc entry with a 60-word summary and 3 + 3 hooks at 120 characters, the 8
+# beats of the episode before at 25 words, 5 dossiers in short form at their
+# caps (goal, need, 2 secrets, 3 relationships' "now"), 7 other names, 8
+# places and 8 props (no bible or world: see build_d5). D6: the bible, 24 new
+# objects (2 an episode over 12) each with its 25-word beat, 8 props named in
+# all 12 episodes, 8 props in full and 12 names. Budget = worst case + 15 %,
+# rounded up to ten.
+#
+# The replies: every stated limit of each ask hit in French (D4 a 60-word
+# geography, 30-word period details, 4 motifs at 12 words; D5 8 beats of a
+# 25-word what, a 60-character place, 4 who and 2 objects of 60 characters,
+# 2 knows-after at 15 words; D6 5 kept and 3 new props of a 60-character
+# name and owner and a 200-character one-line), chars/4 x 1.3, + 15 %,
+# rounded up to ten.
+
+MEASURED_KNOWLEDGE = {"D4": 1966, "D5": 3416, "D6": 3094}
+MEASURED_KNOWLEDGE_REPLY = {"D4": 373.1, "D5": 2891.2, "D6": 465.4}
+
+
+def _knowledge_story():
+    return dict(STORY, world={"setting_summary": _fr(80), "rules": [_fr(25)] * 6, "time_period": _fr(6),
+                              "recurring_motifs": [_fr(8)] * 3})
+
+
+def _d4():
+    pack = context.build_pack(language="fr", story=_knowledge_story())
+    places = [{"name": _name(60), "one_line": _filler(30, 200), "descriptor": _at_density(45, _DESCRIPTOR_DENSITY)}
+              for _ in range(8)]
+    return prompts.build_d4(pack, places=places, props=[{"name": _name(60), "owner": _name(60)}] * 8)
+
+
+def _d5():
+    pack = context.build_pack(language="fr", story=_knowledge_story())
+    entry = {"ep": 12, "function": "climax_and_reset", "summary": _at_density(60, LIVE_ARC_DENSITY),
+             "open_hooks_in": [_filler(15, 120)] * 3, "open_hooks_out": [_filler(15, 120)] * 3, "characters": []}
+    cast = [{"name": _name(60), "role": "support", "goal": _fr(20), "need": _fr(20), "secrets": [_fr(20)] * 2,
+             "now": [{"with": _name(60), "now": _fr(15)}] * 3} for _ in range(5)]
+    return prompts.build_d5(pack, ep=12, planned=12, entry=entry, previous=[_fr(25)] * 8, cast=cast,
+                            others=[{"name": _name(60), "role": "recurring"}] * 7,
+                            places=[{"name": _name(60), "one_line": _filler(30, 200)}] * 8,
+                            props=[{"name": _name(60), "owner": _name(60)}] * 8)
+
+
+def _d6():
+    pack = context.build_pack(language="fr", story=_knowledge_story())
+    objects = ([{"name": _name(60), "new": True, "episodes": [i // 2 + 1], "what": _fr(25)} for i in range(24)]
+               + [{"name": _name(60), "new": False, "episodes": list(range(1, 13))}] * 8)
+    props = [{"name": _name(60), "one_line": _filler(30, 200), "owner": _name(60)}] * 8
+    return prompts.build_d6(pack, objects=objects, props=props, cast=[_name(60)] * 12)
+
+
+_KNOWLEDGE_BUILDERS = {"D4": _d4, "D5": _d5, "D6": _d6}
+
+
+def _knowledge_reply(prompt_id):
+    if prompt_id == "D4":
+        return {"geography": _fr(60), "period_details": _fr(30), "visual_motifs": [_fr(12)] * 4}
+    if prompt_id == "D5":
+        beat = {"what": _fr(25), "place": _name(60), "who": [_name(60)] * 4, "objects": [_name(60)] * 2,
+                "knows_after": [{"who": _name(60), "knows": _fr(15)}] * 2}
+        return {"beats": [beat] * 8}
+    return {"keep": [_name(60)] * 5,
+            "new_props": [{"name": _name(60), "one_line": _filler(20, 200), "owner": _name(60)}] * 3}
+
+
+@pytest.mark.parametrize("prompt_id", ["D4", "D5", "D6"])
+def test_knowledge_worst_cases_measure_what_is_recorded_and_fit_their_budgets(prompt_id):
+    worst = _tokens(_KNOWLEDGE_BUILDERS[prompt_id]())
+    assert worst == MEASURED_KNOWLEDGE[prompt_id]
+    budget = prompts.INPUT_BUDGET[prompt_id]
+    assert budget == -(-round(worst * 1.15, 1) // 10) * 10
+    assert budget <= 4000  # the spec's ceiling
+    _fits(prompt_id, *_KNOWLEDGE_BUILDERS[prompt_id]()[:2])
+
+
+@pytest.mark.parametrize("prompt_id", ["D4", "D5", "D6"])
+def test_the_largest_french_knowledge_reply_fits_its_cap(prompt_id):
+    import json
+
+    from clipping.aistory import schemas
+
+    reply = _knowledge_reply(prompt_id)
+    errors = {"D4": schemas.d4_errors, "D5": schemas.d5_errors, "D6": schemas.d6_errors}[prompt_id](reply)
+    # D5's repeated filler names count as "named twice" in a beat; D6's too: only the counts and caps matter here.
+    assert [error for error in errors if "twice" not in error] == []
+    needed = context.estimate_tokens("", json.dumps(reply, ensure_ascii=False)) * FRENCH_TOKEN_FACTOR
+    assert needed == pytest.approx(MEASURED_KNOWLEDGE_REPLY[prompt_id], abs=0.05)
+    cap = prompts.MAX_TOKENS[prompt_id]
+    assert cap == -(-round(needed * 1.15, 1) // 10) * 10

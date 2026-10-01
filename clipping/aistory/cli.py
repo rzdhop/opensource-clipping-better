@@ -7,7 +7,7 @@ options and defaults are untouched. Commands::
     main.py --ai-story new --lang fr [--concept ID] [--style ID] [--seed-text TEXT]
                            [--tier N] [--route R] [--consistency-mode M] [--budget-profile P]
     main.py --ai-story step <story_id> concepts|bible|style|style_preview [options]
-    main.py --ai-story step <story_id> cast|places_proposal|places|season [options]
+    main.py --ai-story step <story_id> cast|places_proposal|places|season|knowledge [options]
     main.py --ai-story step <story_id> script|storyboard --ep N [options]
     main.py --ai-story step <story_id> assets|render|metadata --ep N [options]
     main.py --ai-story step <story_id> assets --ep N [--tier T] [--route R] [--no-animate] [--estimate]
@@ -55,7 +55,9 @@ editor. ``--auto-approve`` approves by the API's rules
 (``workflow.approve_entity`` / ``approve_season``): every character (``cast``)
 or place and prop (``places``) that has everything, naming the others and
 what they lack; the season once its arc is complete. A proposal is not
-approved: its places are chosen with the ``places`` step.
+approved: its places are chosen with the ``places`` step. ``knowledge``
+(phase 7 stage 5b, a v2 story whose season is approved) writes the knowledge
+base; ``--auto-approve`` approves it once complete (``approve_knowledge``).
 
 Phase 3 (steps 8-9): ``script`` and ``storyboard`` write one episode
 (``--ep N``, required for these two steps; the season decides which numbers
@@ -206,7 +208,7 @@ STEPS = workflow.PHASE1_STEPS + workflow.PHASE2_STEPS + workflow.PHASE3_STEPS + 
 # direction=None) -- choosing one needs the dashboard or the API, which read
 # the three digested directions first; `propose-next` is never auto-approved
 # (below): each item needs a human decision.
-AUTO_APPROVABLE = ("bible", "style", "cast", "places", "season") + workflow.PHASE3_STEPS + \
+AUTO_APPROVABLE = ("bible", "style", "cast", "places", "season", "knowledge") + workflow.PHASE3_STEPS + \
     ("assets", "memory", "feedback")
 _NOT_AUTO_APPROVABLE = {
     "concepts": (
@@ -371,7 +373,8 @@ def build_parser() -> argparse.ArgumentParser:
             "Run one step in this process. concepts and bible call the LLM chain; style "
             "builds the draft style lock here; style_preview calls the image chain; cast, "
             "places_proposal, places and season call the LLM chain, and the cast and the "
-            "places the image and voice chains too; script and storyboard write one "
+            "places the image and voice chains too; knowledge (a v2 story, once its season "
+            "is approved) writes the knowledge base, one LLM call at a time; script and storyboard write one "
             "episode (--ep) and call the LLM chain too, unless storyboard is run --fast; "
             "assets makes one episode's images, voices and sounds (--ep), meeting the image "
             "and voice chains' own gates; render turns them into episode_final.mp4 (--ep), "
@@ -860,6 +863,9 @@ def _phase2_params(args, stories, story, items):
         workflow.require_places_ready(stories, story, params)
         workflow.places_request(stories, story, params)
         units = workflow.places_units(stories, checked, params)
+    elif step == "knowledge":
+        workflow.require_knowledge_runnable(story)
+        workflow.knowledge_request(params)
     else:
         workflow.require_cast_approved(story)
         if args.episodes is not None:
@@ -930,7 +936,7 @@ def _approve_complete(stories, story_id, kinds) -> None:
 
 
 def _phase2_step(args, stories, story, items) -> int:
-    """``cast``, ``places_proposal``, ``places`` or ``season``, in this
+    """``cast``, ``places_proposal``, ``places``, ``season`` or ``knowledge``, in this
     process: the API's rules (``_phase2_params``), the key gate, the image
     chain's verdict when a picture would be made, then ``--prompt-only``,
     the run, what the cast still lacks, and ``--auto-approve``."""
@@ -972,6 +978,9 @@ def _phase2_step(args, stories, story, items) -> int:
             _approve_complete(stories, story_id, (workflow.CHARACTERS,))
         elif step == "places":
             _approve_complete(stories, story_id, (workflow.PLACES, workflow.PROPS))
+        elif step == "knowledge":
+            workflow.approve_knowledge(stories, story_id, now=_now())
+            print("✅ Knowledge base approved.")
         else:
             workflow.approve_season(stories, story_id, now=_now())
             print("✅ Season approved.")

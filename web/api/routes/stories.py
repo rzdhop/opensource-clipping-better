@@ -319,6 +319,8 @@ def _job_doc(step, params, ep=None):
         return "places"
     if step == "season":
         return "season"
+    if step == "knowledge":
+        return "knowledge"
     if step == "regenerate":
         target = (params or {}).get("target")
         if target == regenerate_step.CONCEPTS_TARGET:
@@ -753,6 +755,7 @@ async def get_story(story_id: str) -> dict:
          "characters": [character.json, ... in cast order],
          "places": [place.json, ...], "props": [prop.json, ...],
          "season": season.json | null, "places_proposal": places_proposal.json | null,
+         "knowledge": knowledge.json | null,
          "progress": {"characters": {char_id: {"missing": [...], "needs_editor": bool}},
                       "places": {place_id: {"missing": [...]}},
                       "props": {prop_id: {"missing": [...]}},
@@ -799,6 +802,7 @@ async def get_story(story_id: str) -> dict:
         props = workflow.list_entities(stories, story_id, PROPS)
         season = workflow.season(stories, story_id)
         proposal = workflow.places_proposal(stories, story_id)
+        knowledge = workflow.knowledge(stories, story_id)
         episodes = workflow.episode_summaries(stories, story)
         series = [_series_page(stories, story, ep)
                  for ep in range(1, (season["episodes_planned"] if season else 0) + 1)]
@@ -825,6 +829,7 @@ async def get_story(story_id: str) -> dict:
         "props": props,
         "season": season,
         "places_proposal": proposal,
+        "knowledge": knowledge,
         "progress": progress,
         "episodes": episodes,
         "series": series,
@@ -1050,7 +1055,9 @@ async def run_step(story_id: str, step: str, response: Response,
 
 
 async def _phase2_step(stories, story, step, params, ep) -> JobResponse:
-    """Queue ``cast``, ``places_proposal``, ``places`` or ``season``.
+    """Queue ``cast``, ``places_proposal``, ``places``, ``season`` or
+    ``knowledge`` (phase 7 stage 5b: a v2 story whose season is approved, no
+    parameters).
 
     Refused before any job exists, in this order: the step's precondition
     (409: the style approved for the cast and the proposal, and a character
@@ -1081,6 +1088,9 @@ async def _phase2_step(stories, story, step, params, ep) -> JobResponse:
             workflow.require_places_ready(stories, story, params)
             workflow.places_request(stories, story, params)
             units = workflow.places_units(stories, story, params)
+        elif step == "knowledge":
+            workflow.require_knowledge_runnable(story)
+            workflow.knowledge_request(params)
         else:
             workflow.require_cast_approved(story)
             workflow.season_request(params)
@@ -1379,7 +1389,12 @@ async def approve(story_id: str, doc: str, req: Optional[StoryApproveRequest] = 
     jobs awaiting it. ``season``: 409 while a season step is in flight,
     until the places are approved, or while the arc lacks an entry; then
     ``approvals.season`` is set (``ready``) and the season jobs awaiting
-    approval are completed.
+    approval are completed. ``knowledge`` (phase 7 stage 5b, a v2 story):
+    409 while a knowledge step is in flight, for a legacy story, or until
+    every section is written (``workflow.approve_knowledge``); then
+    ``knowledge.json`` gains ``approved_at`` and ``approved_rev`` -- never the
+    story's approvals or status -- the knowledge jobs awaiting approval are
+    completed, and the answer is the knowledge document.
 
     ``script:<ep>``, ``storyboard:<ep>`` (phase 3; body ``{approve_anyway?}``,
     the script's alone -- 400 with any other document): 400 for an episode
@@ -1468,6 +1483,14 @@ async def approve(story_id: str, doc: str, req: Optional[StoryApproveRequest] = 
         if story["approvals"].get(group):
             _complete_awaiting(story_id, group)
         return story
+
+    if doc == "knowledge":
+        _refuse_busy(story_id, "approve the knowledge base once that step is done, or cancel it first.",
+                     docs=("knowledge",))
+        with _answering():
+            approved = workflow.approve_knowledge(stories, story_id, now=_now())
+        _complete_awaiting(story_id, "knowledge")
+        return approved
 
     if doc == "season":
         _refuse_busy(story_id, "approve the season once that step is done, or cancel it first.",
@@ -1765,6 +1788,11 @@ async def estimate(story_id: str, step: str, target: Optional[str] = None,
         return _llm_estimate(step, 1 + count, env=env)
     if step == "places_proposal":
         return _llm_estimate(step, 1, env=env)
+    if step == "knowledge":
+        with _answering():
+            workflow.require_knowledge_runnable(story)
+            calls = workflow.knowledge_calls(stories, story)
+        return _llm_estimate(step, calls, env=env)
     if step in workflow.PHASE3_STEPS:
         return _episode_estimate(stories, story, step, ep, measure=measure, env=env)
     if step in workflow.PHASE4_STEPS:

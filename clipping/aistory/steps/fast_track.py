@@ -536,7 +536,10 @@ class _FastTrack:
         # The memory gate while it would write the script or the storyboard
         # (plan 11 stage 4); their own runners meet it again when they run.
         gated = episode_common.needs_memory(ec, STEP)
-        episode_common.check_episode_preconditions(ctx, ec, require_memory=gated)
+        # And, on a v2 story, the knowledge gate while it would write the
+        # script (phase 7 stage 5b, DEC-228).
+        episode_common.check_episode_preconditions(ctx, ec, require_memory=gated,
+                                                   require_knowledge=episode_common.needs_knowledge(ec, STEP))
         ctx.cancel.check()
         mode = self.params[STORYBOARD_PARAM]
         self.log(f"⏩ Fast track of episode {ec.ep}: script → storyboard ({mode}) → paid check → assets → render → "

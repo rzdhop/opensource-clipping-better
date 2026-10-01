@@ -10,6 +10,7 @@ import StyleStep from './steps/StyleStep'
 import CastStep from './steps/CastStep'
 import PlacesStep from './steps/PlacesStep'
 import SeasonStep from './steps/SeasonStep'
+import KnowledgeStep, { knowledgeState } from './steps/KnowledgeStep'
 
 // Same sub-cent formatting as the episode panes' fmtUsd (duplicated: this
 // page shares no component module with them).
@@ -33,12 +34,20 @@ const STEPS = [
   { key: 'cast', number: 5, label: 'Cast' },
   { key: 'places', number: 6, label: 'Places & props' },
   { key: 'season', number: 7, label: 'Season' },
+  // Phase 7 stage 5b (DEC-228): a v2 story only (stepsFor).
+  { key: 'knowledge', number: 8, label: 'Knowledge base' },
 ]
+
+// clipping.aistory.defaults.PIPELINE_V2: only a v2 story has a knowledge base.
+function stepsFor(story) {
+  const v2 = Boolean(story && story.generation_profile && story.generation_profile.pipeline === 'v2')
+  return STEPS.filter((s) => s.key !== 'knowledge' || v2)
+}
 
 const IN_FLIGHT = ['queued', 'running']
 const STORY_POLL_MS = 4000
 
-function statusOf(key, story) {
+function statusOf(key, story, data) {
   if (key === 'concepts') return story.approvals.concept ? 'done' : 'active'
   if (key === 'bible') {
     if (story.approvals.bible) return 'done'
@@ -60,6 +69,12 @@ function statusOf(key, story) {
     if (story.approvals.season) return 'done'
     return story.approvals.places ? 'active' : 'disabled'
   }
+  if (key === 'knowledge') {
+    // Done only while approved and current (approved_rev === rev): the
+    // episode gate's own rule (episode_common.knowledge_state).
+    if (knowledgeState(data && data.knowledge) === 'approved') return 'done'
+    return story.approvals.season ? 'active' : 'disabled'
+  }
   return 'disabled'
 }
 
@@ -69,6 +84,7 @@ function disabledReason(key) {
   if (key === 'cast') return 'Approve the style first.'
   if (key === 'places') return 'Approve the cast first.'
   if (key === 'season') return 'Approve every place and prop first.'
+  if (key === 'knowledge') return 'Approve the season first.'
   return ''
 }
 
@@ -94,6 +110,10 @@ function summaryFor(key, story, data) {
   if (key === 'season') {
     const season = data.season
     return season && season.episodes_planned ? `${season.episodes_planned} episodes planned.` : 'No season yet.'
+  }
+  if (key === 'knowledge') {
+    const timeline = (data.knowledge && data.knowledge.timeline) || []
+    return `Approved: ${timeline.length} episode${timeline.length === 1 ? '' : 's'} of beats.`
   }
   return ''
 }
@@ -467,7 +487,7 @@ function ExistingStory({ storyId }) {
     if (!scrollPending.current) return
     scrollPending.current = false
     if (!data) return
-    const activeStep = STEPS.find((s) => statusOf(s.key, data.story) === 'active')
+    const activeStep = stepsFor(data.story).find((s) => statusOf(s.key, data.story, data) === 'active')
     const key = manualStep || (activeStep ? activeStep.key : 'cast')
     const el = stepRefs.current[key]
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -520,7 +540,7 @@ function ExistingStory({ storyId }) {
 
   const { story } = data
   const inFlightJob = data.jobs.find((j) => IN_FLIGHT.includes(j.status)) || null
-  const defaultExpanded = STEPS.find((s) => statusOf(s.key, story) === 'active')
+  const defaultExpanded = stepsFor(story).find((s) => statusOf(s.key, story, data) === 'active')
   const expanded = manualStep || (defaultExpanded ? defaultExpanded.key : 'cast')
   // Keyed on the server's own derived status (store.derive_status), not
   // approvals.season alone: a voice regeneration can clear a character's
@@ -569,8 +589,8 @@ function ExistingStory({ storyId }) {
           </div>
         </div>
 
-        {STEPS.map((step) => {
-          const status = statusOf(step.key, story)
+        {stepsFor(story).map((step) => {
+          const status = statusOf(step.key, story, data)
           const reopenable = status === 'done' && step.key !== 'style'
           const isOpen = status !== 'disabled' && expanded === step.key
           const clickable = status === 'active' || reopenable
@@ -616,6 +636,9 @@ function ExistingStory({ storyId }) {
                   )}
                   {step.key === 'season' && (
                     <SeasonStep data={data} storyId={storyId} inFlightJob={inFlightJob} onChange={afterAction} onSeriesChange={afterSeriesAction} onAdvance={afterAdvance} />
+                  )}
+                  {step.key === 'knowledge' && (
+                    <KnowledgeStep data={data} storyId={storyId} inFlightJob={inFlightJob} onChange={afterSeriesAction} />
                   )}
                 </div>
               )}

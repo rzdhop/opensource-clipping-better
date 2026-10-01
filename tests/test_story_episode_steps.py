@@ -217,11 +217,16 @@ def _lock():
     return stylelock.lock_style(draft, now=NOW)
 
 
-def _ready_story(store, *, recaps=None, relationships=None, with_prop=True, v2=False):
+def _ready_story(store, *, recaps=None, relationships=None, with_prop=True, v2=False, knowledge=True):
     """A French Tentafruit story whose derived status is ``ready`` (with no
     prop at all when *with_prop* is False). *v2* (phase 7 stage 3c, A11)
     puts the story on the v2 pipeline (``media_policy.is_v2``), the only
-    thing E1's ``new_objects`` and the storyboard's prop-image gate read."""
+    thing E1's ``new_objects`` and the storyboard's prop-image gate read.
+
+    Phase 7 stage 5b (DEC-228), re-pinned on purpose: a v2 story's script is
+    written only from an approved, current knowledge base (the episode
+    gate), so a v2 story here gets one (:func:`_approved_knowledge`) unless
+    *knowledge* is False; a legacy story never has one."""
     story_id = store.create(language="fr", seed_text=None, style_template_id="fruit_drama", now=NOW)["story_id"]
     concept = templates.localize_concept(
         next(c for c in templates.load_concepts() if c["concept_id"] == "tentafruit_island"), "fr")
@@ -249,8 +254,24 @@ def _ready_story(store, *, recaps=None, relationships=None, with_prop=True, v2=F
         store.write_entity(story_id, "props", copy.deepcopy(PROP), now=NOW)
     store.write_doc(story_id, "season.json", _season(recaps, relationships), now=NOW)
     store.update(story_id, lambda doc: doc["approvals"].update(season=NOW), now=NOW)
+    if v2 and knowledge:
+        store.write_knowledge(story_id, _approved_knowledge(), now=NOW)
     assert store.get(story_id)["status"] == "ready"
     return story_id
+
+
+def _approved_knowledge():
+    """A minimal knowledge base with its four sections, approved at its
+    revision (phase 7 stage 5b): what the v2 episode gate needs."""
+    return {
+        "$schema": "story_knowledge_v1", "rev": 1, "approved_at": NOW, "approved_rev": 1, "updated_at": NOW,
+        "world": {"geography": "Le parloir domine la piscine.", "period_details": "Une téléréalité.",
+                  "visual_motifs": ["des noix de coco fêlées"]},
+        "timeline": [{"ep": 1, "beats": [{"what": "Le téléphone sonne au parloir.", "place_id": PARLOIR,
+                                          "who": [KIWILO], "objects": [], "knows_after": {}}]}],
+        "props_registry": [],
+        "ledger_seed": {},
+    }
 
 
 def _story_bytes(store, story_id):

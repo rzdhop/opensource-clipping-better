@@ -47,6 +47,7 @@ CONCEPTS_STEP = STORY_SRC / "steps" / "ConceptsStep.jsx"
 CAST_STEP = STORY_SRC / "steps" / "CastStep.jsx"
 PLACES_STEP = STORY_SRC / "steps" / "PlacesStep.jsx"
 SEASON_STEP = STORY_SRC / "steps" / "SeasonStep.jsx"
+KNOWLEDGE_STEP = STORY_SRC / "steps" / "KnowledgeStep.jsx"
 FIELDS = STORY_SRC / "fields.jsx"
 
 
@@ -320,6 +321,29 @@ def _season_params() -> set[str]:
 def test_season_params_matches_workflow_season_params_exactly():
     sent = _season_params()
     assert sent == set(workflow.SEASON_PARAMS), (sent, workflow.SEASON_PARAMS)
+
+
+def test_knowledge_step_sends_what_the_backend_takes_and_reads_what_it_writes():
+    """Phase 7 stage 5b (DEC-228): the Knowledge step's run params are
+    ``workflow.KNOWLEDGE_PARAMS`` exactly (none), it runs and approves the
+    ``knowledge`` step and document by those names, and every field of
+    ``knowledge.json`` it reads is one the schema declares."""
+    src = KNOWLEDGE_STEP.read_text(encoding="utf-8")
+    match = re.search(r"const knowledgeParams = \{([^}]*)\}", src)
+    assert match, "knowledgeParams object literal not found in KnowledgeStep.jsx"
+    sent = set(re.findall(r"([a-z0-9_]+)\s*(?::[^,]*)?(?:,|$)", match.group(1)))
+    assert sent == set(workflow.KNOWLEDGE_PARAMS), (sent, workflow.KNOWLEDGE_PARAMS)
+    assert "runStoryStep(storyId, 'knowledge'" in src and "knowledge" in workflow.PHASE2_STEPS
+    assert "approveStoryDoc(storyId, 'knowledge')" in src
+    assert "fetchStoryEstimate(storyId, 'knowledge')" in src
+    declared = set(schemas.KNOWLEDGE_SCHEMA["properties"])
+    for key in ("approved_at", "approved_rev", "rev", "world", "timeline", "props_registry", "ledger_seed"):
+        assert key in declared and f"knowledge.{key}" in src, key
+    beat = set(schemas.KNOWLEDGE_SCHEMA["properties"]["timeline"]["items"]["properties"]["beats"]["items"]
+               ["properties"])
+    for key in re.findall(r"beat\.([a-z_]+)", src):
+        assert key in beat, key
+    assert "story-step-error" in src
 
 
 def _patch_place_call_sites() -> list[str]:

@@ -969,7 +969,9 @@ def run(ctx, *, runner=None, time_fn=time.monotonic, adapters=None, transport=No
     shared with a caller running this step inside its own (the fast track);
     None gives the step its own."""
     ec = episode_common.load_episode_context(ctx)
-    episode_common.check_episode_preconditions(ctx, ec)
+    # A v2 story writes its script from an approved, current knowledge base
+    # (phase 7 stage 5b, DEC-228); a legacy story is never held back by it.
+    episode_common.check_episode_preconditions(ctx, ec, require_knowledge=True)
     ctx.cancel.check()
     return _Run(ctx, ec, runner=runner, time_fn=time_fn, adapters=adapters, transport=transport,
                 budget=budget).run()

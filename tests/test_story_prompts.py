@@ -280,6 +280,10 @@ def test_max_tokens():
         # Phase 7 stage 5a (DEC-228): re-pinned on purpose -- the dossier writer (D1), its French worst case
         # measured (tests/test_story_episode_prompt_budgets.py).
         "D1": 1290,
+        # Phase 7 stage 5b (DEC-228): re-pinned on purpose -- the knowledge step's writers (world notes,
+        # one episode's timeline, the props registry), each measured on its French worst case
+        # (tests/test_story_episode_prompt_budgets.py).
+        "D4": 430, "D5": 3330, "D6": 540,
     }
 
 
@@ -313,6 +317,8 @@ def test_schema_names():
         "T1v2": "storyboard_beat_shots", "T1rv2": "storyboard_beat_shot_replan",
         # Phase 7 stage 5a (DEC-228): re-pinned on purpose -- the dossier writer.
         "D1": "character_dossier",
+        # Phase 7 stage 5b (DEC-228): re-pinned on purpose -- the knowledge step's writers.
+        "D4": "knowledge_world", "D5": "knowledge_timeline", "D6": "knowledge_props",
     }
 
 

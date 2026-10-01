@@ -45,7 +45,7 @@ import time
 from dataclasses import dataclass
 from typing import Callable, Optional
 
-from .. import schemas, series_memory, templates, timing
+from .. import media_policy, schemas, series_memory, templates, timing
 from .. import store as store_mod
 from . import entities
 from .entities import CHARACTERS, PLACES, PROPS
@@ -75,6 +75,13 @@ MEMORY_MISSING = "memory_missing"
 MEMORY_UNAPPROVED = "memory_unapproved"
 MEMORY_STALE = "memory_stale"
 MEMORY_REFUSALS = (MEMORY_MISSING, MEMORY_UNAPPROVED, MEMORY_STALE)
+# The knowledge gate (phase 7 stage 5b, A14, DEC-228): a v2 story's script is
+# written only from an approved, current knowledge base (``knowledge.json``):
+# missing, written but not approved, or changed since its approval.
+KNOWLEDGE_MISSING = "knowledge_missing"
+KNOWLEDGE_UNAPPROVED = "knowledge_unapproved"
+KNOWLEDGE_STALE = "knowledge_stale"
+KNOWLEDGE_REFUSALS = (KNOWLEDGE_MISSING, KNOWLEDGE_UNAPPROVED, KNOWLEDGE_STALE)
 
 # The steps that write an episode's script or storyboard, and so meet the
 # gate: always the script and the storyboard (T1 or fast); the fast track
@@ -83,6 +90,10 @@ MEMORY_REFUSALS = (MEMORY_MISSING, MEMORY_UNAPPROVED, MEMORY_STALE)
 # which met the gate when they were written: they never meet it themselves,
 # so a memory going stale later un-approves nothing downstream.
 MEMORY_GATED_STEPS = ("script", "storyboard")
+# The steps the knowledge gate holds back on a v2 story: the script (the fast
+# track while it would write one, :func:`needs_knowledge`). The storyboard is
+# planned from a script that met it.
+KNOWLEDGE_GATED_STEPS = ("script",)
 
 
 class EpisodeRefused(StepFailed):
@@ -224,7 +235,7 @@ def check_story_ready(story) -> None:
         raise EpisodeRefused(NOT_READY, str(exc)) from None
 
 
-def check_episode_preconditions(ctx, ec, *, require_memory=True) -> None:
+def check_episode_preconditions(ctx, ec, *, require_memory=True, require_knowledge=False) -> None:
     """:class:`EpisodeRefused` (a ``StepFailed``) with what to do, before
     anything is sent, unless the story is ``ready`` (its derived status),
     *ec*'s episode is one of ``1..season.episodes_planned``, the arc has an
@@ -235,8 +246,12 @@ def check_episode_preconditions(ctx, ec, *, require_memory=True) -> None:
     keep the default; a step that writes neither -- the assets, the render,
     the metadata, the series steps, a regenerate of a document that already
     exists, the fast track once both are approved (:func:`needs_memory`) --
-    passes ``require_memory=False``. *ctx* is not read (the web layer and the
-    fast storyboard call this without one)."""
+    passes ``require_memory=False``. With *require_knowledge* (the script
+    step, the fast track while it writes a script: :func:`needs_knowledge`),
+    a v2 story's knowledge base must be approved and current too
+    (:func:`knowledge_refusal`, phase 7 stage 5b); a legacy story never meets
+    that gate. *ctx* is not read (the web layer and the fast storyboard call
+    this without one)."""
     check_story_ready(ec.story)
     planned = ec.season["episodes_planned"] if ec.season else 0
     ep = ec.ep
@@ -248,6 +263,61 @@ def check_episode_preconditions(ctx, ec, *, require_memory=True) -> None:
         refusal = memory_refusal(ec, ep - 1, before=f"before writing episode {ep}")
         if refusal is not None:
             raise refusal
+    if require_knowledge:
+        refusal = knowledge_refusal(ec, before=f"before writing episode {ep}'s script")
+        if refusal is not None:
+            raise refusal
+
+
+def knowledge_state(doc) -> str:
+    """Where a ``knowledge.json`` document stands: ``"none"`` (no document),
+    ``"draft"`` (not approved), ``"stale"`` (approved, then written again:
+    ``approved_rev`` is not ``rev``) or ``"approved"``."""
+    if doc is None:
+        return "none"
+    if not doc.get("approved_at"):
+        return "draft"
+    return "approved" if doc.get("approved_rev") == doc["rev"] else "stale"
+
+
+def knowledge_refusal(ec, *, before) -> Optional[EpisodeRefused]:
+    """Why *ec*'s story may not write an episode script for want of its
+    knowledge base -- as an :class:`EpisodeRefused` to raise -- or None: a
+    legacy story (never gated), or a v2 story whose ``knowledge.json`` is
+    approved and current. Each refusal names the step to run; *before* ends
+    the sentence."""
+    if not media_policy.is_v2(ec.story):
+        return None
+    try:
+        doc = ec.store.read_knowledge(ec.story_id)
+    except schemas.SchemaError as exc:
+        return EpisodeRefused(KNOWLEDGE_STALE, (f"The knowledge base ({store_mod.KNOWLEDGE_DOC}) cannot be read "
+                                                f"({'; '.join(exc.errors[:3])}): fix or remove it, then run the "
+                                                f"knowledge step and approve it, {before}."))
+    state = knowledge_state(doc)
+    if state == "approved":
+        return None
+    if state == "none":
+        return EpisodeRefused(KNOWLEDGE_MISSING, ("The story's knowledge base is not written yet: run the knowledge "
+                                                  f"step and approve it, {before}."))
+    if state == "draft":
+        return EpisodeRefused(KNOWLEDGE_UNAPPROVED, ("The story's knowledge base is written but not approved: "
+                                                     "approve it (knowledge) -- run the knowledge step again first "
+                                                     f"if a part is missing -- {before}."))
+    return EpisodeRefused(KNOWLEDGE_STALE, ("The story's knowledge base changed since it was approved: review it "
+                                            f"and approve it again (knowledge), {before}."))
+
+
+def needs_knowledge(ec, step) -> bool:
+    """Whether *step* on ``ec.ep`` writes the episode's script, and so meets
+    the knowledge gate: the script step always, the fast track while the
+    script is not approved yet; any other step never."""
+    if step in KNOWLEDGE_GATED_STEPS:
+        return True
+    if step != "fast-track":
+        return False
+    script = read_episode(ec, SCRIPT_DOC)
+    return not (script and script["approved_at"])
 
 
 def _script_of(ec, ep):

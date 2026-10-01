@@ -68,6 +68,7 @@ from .steps import entities as entities_step
 from .steps import clips as clips_step
 from .steps import episode_common, llm_call, sticky_link
 from .steps import fast_track as fast_track_step
+from .steps import knowledge as knowledge_step
 from .steps import feedback as feedback_step
 from .steps import memory as memory_step
 from .steps import metadata as metadata_step
@@ -91,8 +92,10 @@ PREVIEW_STEP = "style_preview"
 PHASE1_STEPS = LLM_STEPS + INLINE_STEPS + (PREVIEW_STEP,)
 # Steps 5-7 (phase 2): jobs, each calling the LLM chain (and, for the cast
 # and the places, the image and voice chains). ``places_proposal`` is the
-# small P0 step that proposes the list the ``places`` step makes.
-PHASE2_STEPS = ("cast", "places_proposal", "places", "season")
+# small P0 step that proposes the list the ``places`` step makes. Phase 7
+# stage 5b (DEC-228): ``knowledge``, a v2 story's knowledge base, after the
+# season (D4, D5 per episode, D6; ending awaiting its approval).
+PHASE2_STEPS = ("cast", "places_proposal", "places", "season", "knowledge")
 # Steps 8-9 (phase 3): one episode's script (a job: E1, E2 per scene, E3, E4)
 # and its storyboard (a T1 job, or the fast plan, run inline: DEC-109).
 PHASE3_STEPS = ("script", "storyboard")
@@ -119,7 +122,8 @@ LATER_STEPS = ("import",)
 # approves ``character:<id>``, ``place:<id>``, ``prop:<id>`` and ``season``;
 # phase 3 ``script:<ep>`` and ``storyboard:<ep>``; phase 4 ``assets:<ep>``;
 # phase 5 ``memory:<ep>``, ``feedback:<ep>`` (with a direction) and
-# ``proposals:<ep>`` (:data:`SERIES_APPROVALS`, :func:`approve_series`).
+# ``proposals:<ep>`` (:data:`SERIES_APPROVALS`, :func:`approve_series`);
+# phase 7 stage 5b ``knowledge`` bare (:func:`approve_knowledge`, a v2 story).
 # No approval of the grammar is a later phase's any more.
 LATER_APPROVALS_BARE = ()
 LATER_APPROVALS = ()
@@ -776,6 +780,7 @@ def patch_story(stories, story_id, fields, *, now) -> dict:
 CHARACTERS, PLACES, PROPS = entities_step.CHARACTERS, entities_step.PLACES, entities_step.PROPS
 SEASON_DOC = story_store.SEASON_DOC
 PLACES_PROPOSAL_DOC = story_store.PLACES_PROPOSAL_DOC
+KNOWLEDGE_DOC = story_store.KNOWLEDGE_DOC
 
 # The approve and regenerate grammar's word for each entity kind, and back.
 ENTITY_WORDS = dict(entities_step.TARGET_KINDS)
@@ -795,6 +800,7 @@ PLACES_PARAMS = ("places", "props")
 PLACE_ITEM_KEYS = ("name", "one_line")
 PROP_ITEM_KEYS = ("name", "one_line", "owner")
 SEASON_PARAMS = ("episodes",)
+KNOWLEDGE_PARAMS = ()
 
 # The fields an inline edit may set (the API's Character/Place/PropPatchRequest).
 CHARACTER_PATCH_FIELDS = (
@@ -866,6 +872,12 @@ def season(stories, story_id):
 def places_proposal(stories, story_id):
     """The story's ``places_proposal.json``, or None before P0."""
     return read_doc(stories, story_id, PLACES_PROPOSAL_DOC, schemas.places_proposal_errors)
+
+
+def knowledge(stories, story_id):
+    """The story's ``knowledge.json`` (phase 7 stage 5b), or None before the
+    knowledge step (every legacy story)."""
+    return read_doc(stories, story_id, KNOWLEDGE_DOC, schemas.knowledge_errors)
 
 
 # ------------------------------------------------------------ what is missing
@@ -1161,6 +1173,26 @@ def places_request(stories, story, params) -> None:
                     errors.append(f"{path}.owner: {owner!r} is no character of this story")
     if errors:
         raise _invalid_values("These places and props cannot be made.", errors)
+
+
+def require_knowledge_runnable(story) -> None:
+    """The knowledge step (phase 7 stage 5b) runs on a v2 story whose season
+    is approved (``knowledge.require_runnable``'s rule): ``conflict``
+    otherwise, with its sentence."""
+    _step_refusal(knowledge_step.require_runnable, story)
+
+
+def knowledge_request(params) -> None:
+    """A knowledge step's *params*: none (``invalid`` otherwise)."""
+    _unknown_keys(params, KNOWLEDGE_PARAMS, "knowledge")
+
+
+def knowledge_calls(stories, story) -> int:
+    """How many LLM calls the knowledge step would make now (D4, D5 per
+    episode not written, D6): the estimate's count."""
+    arc = season(stories, story["story_id"])
+    planned = arc["episodes_planned"] if arc else 0
+    return knowledge_step.calls_left(knowledge(stories, story["story_id"]), planned)
 
 
 def season_request(params) -> int:
@@ -1518,6 +1550,47 @@ def approve_season(stories, story_id, *, now) -> dict:
     return update(stories, story_id, mutate, now=now)
 
 
+def approve_knowledge(stories, story_id, *, now) -> dict:
+    """Approve the story's knowledge base (phase 7 stage 5b, DEC-228); returns
+    ``knowledge.json`` as written.
+
+    ``conflict`` for a legacy story, without a ``knowledge.json``, until all
+    four sections (world, timeline, props registry, ledger seed) are written
+    -- the timeline one entry for each episode the season plans -- or while
+    a beat still names a new object D6 has not registered. Sets
+    ``approved_at`` and ``approved_rev`` (the ``rev`` approved), re-read
+    under the store lock, without moving ``rev``: a later write moves it, and
+    the episode gate then asks for the approval again. Never the story's
+    approvals or status (no seventh approval key, A14)."""
+    story = load(stories, story_id)
+    _step_refusal(knowledge_step.require_runnable, story)
+    arc = season(stories, story_id)
+    planned = arc["episodes_planned"] if arc else 0
+
+    def approve(current):
+        if current is None:
+            raise WorkflowError(CONFLICT, "There is no knowledge base to approve yet: run the knowledge step first.")
+        todo = knowledge_step.left(current, planned)
+        if any((todo["world"], todo["episodes"], todo["registry"], todo["ledger"])):
+            raise WorkflowError(CONFLICT, (f"The knowledge base is not complete: {knowledge_step.describe_left(todo)} "
+                                           "still to write; run the knowledge step again first."))
+        pending = [name for entry in current["timeline"] for beat in entry["beats"]
+                   for name in beat.get("new_objects") or ()]
+        if pending:
+            raise WorkflowError(CONFLICT, (f"The timeline still names unregistered objects ({', '.join(pending)}); "
+                                           "run the knowledge step again first."))
+        current["approved_at"] = now
+        current["approved_rev"] = current["rev"]
+        return current
+
+    try:
+        return stories.update_knowledge(story_id, approve, now=now, bump_rev=False)
+    except KeyError:
+        raise not_found() from None
+    except schemas.SchemaError as exc:
+        raise StoryUnreadable(story_id, exc.name, exc.errors) from None
+
+
 # -------------------------------------------------------------------- edits
 
 def _prompt_block(kind, lock, doc):
@@ -1749,6 +1822,9 @@ _EPISODE_REFUSALS = {
     episode_common.MEMORY_MISSING: CONFLICT,
     episode_common.MEMORY_UNAPPROVED: CONFLICT,
     episode_common.MEMORY_STALE: CONFLICT,
+    episode_common.KNOWLEDGE_MISSING: CONFLICT,
+    episode_common.KNOWLEDGE_UNAPPROVED: CONFLICT,
+    episode_common.KNOWLEDGE_STALE: CONFLICT,
 }
 
 _TAG_KINDS = {"char": CHARACTERS, "place": PLACES, "prop": PROPS}
@@ -1826,8 +1902,12 @@ def episode_context(stories, story, ep, *, step, require_memory=True) -> episode
     fast track until both are approved) unless *require_memory* is off (a
     regenerate) -- while the series memory of the episode before it is not
     written, approved and fresh, naming which of the three
-    (``episode_common.memory_refusal``). The assets, the render and the
-    metadata never meet the gate."""
+    (``episode_common.memory_refusal``); and -- the knowledge gate (phase 7
+    stage 5b), a v2 story only -- for a *step* that writes the script
+    (``episode_common.needs_knowledge``) unless *require_memory* is off, while
+    its knowledge base is missing, not approved or changed since its approval
+    (``episode_common.knowledge_refusal``). The assets, the render and the
+    metadata never meet either gate."""
     _episode_refused(episode_common.check_story_ready, story)
     if type(ep) is not int:
         arc = season(stories, story["story_id"]) or {}
@@ -1837,6 +1917,9 @@ def episode_context(stories, story, ep, *, step, require_memory=True) -> episode
     _episode_refused(episode_common.check_episode_preconditions, None, ec, require_memory=False)
     if require_memory and _step_refusal(episode_common.needs_memory, ec, step):
         _episode_refused(episode_common.check_episode_preconditions, None, ec, require_memory=True)
+    if require_memory and _step_refusal(episode_common.needs_knowledge, ec, step):
+        _episode_refused(episode_common.check_episode_preconditions, None, ec, require_memory=False,
+                         require_knowledge=True)
     return ec
 
 
