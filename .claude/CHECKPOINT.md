@@ -4,11 +4,10 @@
   - **Current phase:** IMPLEMENT. EXPLORE (E1–E5), CLARIFY (11 answers) and PLAN (Opus design, stages 1–8) were done on
     2026-10-01 in one session; the human approved the plan with its three go-items (hook 3–6 s; keyframes on
     seedream-4.5-edit with nano-banana-2-lite fallback; ≈ $1.73 per episode under the $2 cap).
-  - **Current stage:** 3a DONE (`6caed8f` schema, `ffcfa4d`; DEC-226 part 1). **Next action:** stage 3b [Opus] —
-    layered keyframe and clip prompts (`layered_shot_prompt`, `layered_clip_prompt`, `role_text`), `resolve_shot`
-    v2 kwarg from its three callers, `_reference_images_v2` (≤ 10, roles), per-link `REFERENCE_LIMITS` replacing the
-    hard `[:4]` slice, `video_prompt` stored and preferred, the shot-card preview; lowercase stored signature items
-    inside prose. Scope: scratchpad `stage3-scope.md` section 3b.
+  - **Current stage:** 3b DONE (`2c6c786` schema, `5eef509`; DEC-225). **Next action:** stage 3c [Sonnet] — props as
+    entities: E1 v2 `new_objects` (≤ 2) replacing `_E1_NO_PROPS_LINE` (amends DEC-171), prop stubs from the script step,
+    R1/R1v2 + prop image, the storyboard waits for a scene's prop image (estimate shown), `validate_t1` v2 refuses
+    `insert_prop` without a prop.
   - **Test selection (DEC-234, the human 2026-10-01):** per stage, run only the new/edited tests, the test files that
     import or name a changed module, and the RC guards of the touched areas, in both envs; push after every stage so
     CI runs the full suite; one full local run before merging to main.
@@ -37,7 +36,7 @@
   | 2a quality chains, preset, caps 2/6/20, nano-banana paid key, 9:16 source crop | DONE (local 6640/9, CI env 5845/773, build ok) | 7425fd3, e00a97a |
   | 2b writing chain (nvidia → openrouter mistral-medium-3.1 → free) | DONE (local 6655/1, CI env 5860/765) | c02ec6b |
   | 3a structured look + dossier, sheet/plate/prop v2 prompts | DONE (local 6680/1, CI env 5885/765) | 6caed8f, ffcfa4d |
-  | 3b layered keyframe/clip prompts, reference roles, preview | todo | |
+  | 3b layered keyframe/clip prompts, reference roles, preview | DONE (selection: 67 files local 3012 / CI env 2402+610s; no-auth guards; build) | 2c6c786, 5eef509 |
   | 3c props as entities | todo | |
   | 4 serial_60s_v2 (6–10 shots), seedance on every shot, 1080p switch | todo | |
   | W-mid paid walk ≤ $1.60 | todo | |

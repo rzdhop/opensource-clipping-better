@@ -3878,3 +3878,37 @@ environment, x86).
 **Consequence.** A stage's test time follows its blast radius. The action-log line of every stage names the
 selection rule it used and its counts; a skipped area is a stated choice, never a silent one. CI on the push is the
 backstop for anything the selection missed, so a push is due after every stage.
+
+## DEC-225 — Layered keyframe and clip prompts with reference roles; positive constraints instead of an unsent negative (v2 stories)
+**Context.** E1: the shot's own content was 7.6 % of a 190–280-word prompt, after 34–72 words of descriptors; about 70 %
+was episode-wide boilerplate; the reference images were sent with no role; no hosted image link sends a negative
+prompt; the clip prompt was the raw action. E2: nano-banana and seedream read long natural prose and weigh references
+by instruction; seedance's prompt limit is unpublished (A-110).
+**Decision.**
+- `prompting.layered_shot_prompt` (130–220 words), in order: reference roles ("Image 1 is <handle>'s reference (keep
+  identity, proportions and outfit exactly) …"), the beat (`video_action` and the spoken line's emotion and delivery),
+  staging (each subject by handle with `render_look` and its relative height, left/right, facing), the framing
+  coerced to the subject count (a two-shot for two characters on `medium_single`; `over_shoulder` names whose
+  shoulder; no "skin detail" or forced shallow focus on a style with no depth of field), the place slice (full layout
+  for wide/medium, light and one element for tight framings), a style tail (rendering and palette) and the clause
+  "Clean frame: no captions, logos or watermarks; each character appears once."
+- `prompting.layered_clip_prompt` (≤ 80 words): what moves (the shot's `motion` when stage 4 provides it, else
+  `video_action`), one secondary motion, the camera phrase, "The set, the lighting and every character's look stay
+  exactly as in the first frame.", the style's motion suffix. Stored in `shot.video_prompt`; `build_video_prompt`
+  sends it when present.
+- References on v2: identity sheets (the expressions sheet for close-ups), the set, the turnarounds, the props, up to
+  10; per-link limits (seedream-4.5-edit 10, nano-banana 14) apply only to shots with `prompt_layout: "layered_v1"`;
+  every other shot keeps 4. The role text is written from the list actually sent.
+- The negative prompt keeps being computed and hashed (no hash moves); links with a negative field (kling) still send
+  it.
+- `resolve_shot(v2=)` from build_storyboard, refresh_prompts and the storyboard edit path; on v2 a camera or
+  modifier edit rewrites only the clip prompt.
+- The v2 shot card shows the clip prompt, the reference roles and word counts against 220 / 80 (read-only).
+**Consequence.**
+- RC-Q1: story A sh01 resolves byte-identically on the legacy path (image sha `71348b92…`, clip hash `48955e43…`).
+- Dry check on a v2 copy of story A with sample looks: sh01's image prompt is 217 words and its clip prompt 59;
+  across the 20 shots, images 159–220 words (one place-only close-up 91) and clips 45–70; no names, no "..", no ".,".
+- A v2 shot on a link outside `REFERENCE_LIMITS` defaults to 10 references: a 4-slot local ComfyUI would refuse it
+  visibly. Not reachable on the quality profile.
+- Not built: the plan's optional `plan` key on the shot (unneeded so far).
+- Commits `2c6c786` (schema) and `5eef509`.
