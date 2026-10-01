@@ -29,6 +29,12 @@
     `be0fff6` the tier-2 golden's x86_64 key). Next: step 3 (push, CI), then 4–9 below.
     - Non-9:16 episodes to re-render at step 5: `04feb539840f` (18/18), `14ff154d3bff` (21/21), `979c8376e43e`
       (14/20), `560e901c1b3d` (3/20); reason `settings`. The other five rendered episodes stay current.
+    - **Steps 3–5 DONE (2026-10-01 08:40 UTC):** CI green on `efd5fa4` (run 36836095797); deployed (main =
+      `efd5fa4`, restart, 0 jobs); the four episodes re-rendered at $0 (backups in
+      `/home/ubuntu/backups/ai-story-phase-6/before-13b/`): story A `0896bde9…` (14 rebuilt), story B `89732483…`
+      (18), storybook `486662c3…` (21), cinematic_real `59507ab8…` (3); loudness −14.2…−14.5 LUFS, TP ≈ −2.3.
+    - **Next:** step 6 (walk step 10, the human reads fal's billing) and step 7 (walk step 12, the phone watch), then
+      stage 14 and the close. `origin/main` is still `772a540`.
     - Follow-up (not folded in): a near-9:16 size inside the 2% tolerance whose upscale is not exact (832×1472,
       736×1312) breaks the final pass's concat on SAR. Pre-existing; no live still has such a size.
   - **Next actions, in order:**
