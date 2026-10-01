@@ -1,14 +1,41 @@
-## CURRENT STATE — AI Story **phase 6 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–11 **done**; next: **stage 12**
+## CURRENT STATE — AI Story **phase 6 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–12 **done**; next: **stage 13** (deploy + live walk)
 - **In-progress header** (keep current):
   - **Current phase:** IMPLEMENT. EXPLORE/CLARIFY/PLAN were done 2026-09-30 in a session run in parallel with phase 5's
     close: three maps, two rounds of questions, an Opus design. The human approved the plan.
   - **Plan:** `.claude/plans/ai-story/14-phase-6-plan.md` (**APPROVED 2026-09-30**; copy at
     `~/.claude/plans/ai-story-phase-6-plan.md`). Brief: `.claude/plans/ai-story/07-phase-6-video-tiers-local.md`.
-  - **Current stage:** 12 — the dashboard [Sonnet], then my browser check at 375/820/1280 px on scratch servers
-    `phase6-throwaway` :8016 / `phase6-dashboard` :5178. Keys are blanked, `ALLOW_PAID=0`, and a scratch copy of a
-    story is set to tier 2 with fake clip records.
-  - **Next action:** dispatch stage 12, then Tier-1 in both environments + vite build, then the browser check, then
-    commit.
+  - **Current stage:** 13 — deploy and the Tier-2 live walk [Opus: paid]. The plan's walk script applies; total paid
+    ceiling $0.55.
+  - **Next action, in order:**
+    1. The CI-faithful replica (A-096) on the branch.
+    2. Push the branch only; CI fails the tier-2 golden as designed.
+    3. Read the x86_64 digest from the check-runs annotation, record it, push, CI green.
+    4. Fast-forward `main`; deploy at 0 jobs (`rm -sfv backend && up -d --build backend`: dashboard + compose
+       changed).
+    5. The walk: preconditions with the human (`GEMINI_PAID_API_KEY` in Settings; the `GOOGLE_API_KEY` project's
+       billing off); every paid step stops for the human's go.
+  - **Stage 12 notes:**
+    - **Dashboard.**
+      - Story page: tier/route + "Episode N's video estimate, per route" (latest episode with an approved
+        storyboard).
+      - Shot cards at tier ≥ 2: clip preview (blob), state/route badges, a reason as text (F1), Animate/Keep still
+        showing the effective state (a second press clears), Re-animate with note + estimate (none while blocked).
+        The storyboard's own Keep Still is hidden at tier ≥ 2.
+      - Assets: the Animate checkbox, a separate clips chip "N clips (est $X, not now)", the Video card, the image
+        and video sticky offers behind a confirmation.
+      - Preview: "Fill failed shots with motion" (the estimate re-fetches with `?fill_failed_with_motion=1`).
+      - Settings: the Gemini paid key + badge; the hardware video rows.
+    - **API.** `assets.image_offer` at any tier; `GET /estimate/render?fill_failed_with_motion=`;
+      `SettingsRequest.gemini_paid_api_key`.
+    - **Browser check (scratch copy of `04feb539840f` at tier 2 with fake clips; keys blank but a dummy FAL_KEY;
+      ALLOW_PAID=0).**
+      - At 375/820/1280: scrollWidth 375/805/1265, no sign-in.
+      - It found F1–F5 (reason missing, stuck estimating…, two keep-still controls, a $0.00 chip + bare "unknown",
+        the estimate on a scriptless episode). All fixed and re-walked OK.
+    - **Cosmetic follow-up:** the story-page per-route card still shows a bare "unknown" route chip on a refused
+      local row.
+    - **Rule learned:** never run Tier-1 while the scratch API server (run from this worktree) is writing — it
+      tripped `test_story_assets_step.py:107`'s outputs guard. That run was not counted.
   - **Stage 11 notes for stages 12–14:**
     - **Assets PATCH.** `PATCH …/episodes/{ep}/assets` with `{"shots":[{shot_id, locked?, keep_still?, animate?,
       keep_native_audio?}], "links":{"image"?, "video"?}}`. It uses the Settings env; a video link must be in
@@ -337,8 +364,8 @@
 | 9 | renderer: clips, hold, `fill_failed_with_motion`, Tier-2 golden [Opus] | done |
 | 10 | Tier-3 native audio, tests only [Opus] | done |
 | 11 | API and CLI [Opus, escalated from Sonnet] | done |
-| 12 | dashboard [Sonnet] | next |
-| 13 | deploy and the Tier-2 live walk (≤ $0.55) [Opus] | — |
+| 12 | dashboard [Sonnet] | done |
+| 13 | deploy and the Tier-2 live walk (≤ $0.55) [Opus] | next |
 | 14 | docs and decisions [Sonnet] | — |
 
 ### Regression contract (phase 6)

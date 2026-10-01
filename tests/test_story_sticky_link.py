@@ -173,6 +173,35 @@ def test_a_gone_sticky_link_stops_before_any_call_with_the_offer(store, tmp_path
     assert caught.value.detail == message
 
 
+def test_the_episode_page_carries_the_sticky_image_offer_at_any_tier(store, tmp_path):
+    """Phase 6 stage 12 follow-up: ``workflow.episode_clips``'s own
+    ``image_offer`` surfaces the same stop-and-ask the assets step itself
+    would meet (:func:`test_a_gone_sticky_link_stops_before_any_call_with_the_offer`'s
+    "no_key" case, read through the page instead of ``asset_units``
+    directly) -- at a **tier-1** story, since A-087's image stickiness is
+    not a tier >= 2 thing like the video offer. Calls nothing (no key, no
+    adapter is ever reached: the recorded link is simply not in the chain
+    any more)."""
+    _assets, workflow, _render = _m()
+    story_id = _all_on(store, tmp_path, CF)
+    _drop_images(store, story_id, "sh01", "sh02")
+    shots = [shot["shot_id"] for shot in tas._shots(store, story_id)]
+    redo = [shot_id for shot_id in shots if shot_id not in ("sh01", "sh02")]
+    settings = tas._settings(IMAGE_CHAIN=BOTH["IMAGE_CHAIN"])  # Cloudflare's key is gone; Pollinations is keyed
+
+    story = workflow.load(store, story_id)
+    assert story["generation_profile"]["tier"] == 1
+    page = workflow.episode_clips(store, story, 1, env=settings)
+
+    offer = page["image_offer"]
+    assert offer is not None, "a gone recorded image link with shots still to make must offer the next link"
+    assert offer["link"] == CF and offer["next_link"] == POLL
+    assert offer["todo"] == ["sh01", "sh02"] and offer["redo"] == redo
+    assert offer["switch"] == {"links": {"image": POLL}}
+    # The video offer stays absent (tier 1: no clips at all).
+    assert page["video"] is None
+
+
 # ================================================================ the rest
 
 def test_a_link_gone_mid_run_fails_the_shots_left_without_the_next_link(store, tmp_path):

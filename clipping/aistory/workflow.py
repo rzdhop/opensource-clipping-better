@@ -2573,6 +2573,21 @@ def _shot_clip(ec, script, shot, doc, *, link, tier, image_sha) -> dict:
     }
 
 
+def _image_offer_view(ec, script, board, *, env):
+    """The sticky image-link offer (phase 6 stage 12 follow-up: A-087's
+    switch applies at tier 1 too, unlike the video one which only exists
+    once there are clips): ``assets_step.asset_units``'s own
+    ``images.sticky.gone`` (:func:`assets_step.link_gone`), calling nothing
+    -- no ``probe_local`` (unlike the on-demand assets estimate, this is a
+    page-load computation, read-only). None once every shot has its image
+    (nothing left to be gone for) or on any refusal reading the episode."""
+    try:
+        units = assets_step.asset_units(ec, script or {"scenes": []}, board, env=env)
+    except StepFailed:
+        return None
+    return assets_step.link_gone(units)
+
+
 def _video_view(ec, script, board, doc, *, env):
     """The assets estimate's video part as the page shows it (see
     :func:`episode_clips`), or None while the script and a current
@@ -2618,6 +2633,7 @@ def episode_clips(stories, story, ep, *, env=None) -> dict:
                              "note", "reason", "pending": bool, "target": "shot:<ep>:<shid>:video" | None,
                              "continue": bool, "blocked": sentence | None,
                              "flags": {keep_still, animate, keep_native_audio}, "overrides": {...}}},
+         "image_offer": <the sticky image offer> | None,
          "video": {<the assets estimate's video part: tier, budget_profile, route, mode, route_class, link,
                     source, template, profile, price_per_second, plan, still, count, seconds, est_usd, eta_s,
                     eta_note, refused, ready, message>,
@@ -2625,33 +2641,46 @@ def episode_clips(stories, story, ep, *, env=None) -> dict:
 
     ``links`` is ``assets.json``'s (A-087). At tier 1, or before a
     storyboard, ``shots`` is empty and ``video`` None: nothing is hashed.
-    At tier >= 2, per shot: ``state`` is ``clips.clip_state`` on the
-    episode's video link (``none`` without a record); ``name`` the clip file
-    on disk, served by ``GET /episodes/{ep}/clips/{name}``; ``continue`` --
-    the provider holds its request (the record's, or a pending re-animate's):
-    only Continue collects it, so ``target`` is None; ``blocked`` the F8
-    pattern -- the 409 a re-animate would answer now (``Cannot regenerate
-    '<target>': ...``), None while it may run; ``flags`` the effective
-    overrides (``overrides`` the ones ``assets.json`` sets). ``video``: the
-    assets estimate's video part on the story's route (*env* -- the Settings
+    ``image_offer`` is computed at **any** tier once the episode has a
+    storyboard (A-087's image stickiness is not a tier >= 2 thing): the
+    stop-and-ask of a recorded image link that cannot serve any more shot
+    still to make (``assets_step.asset_units``'s own ``images.sticky.gone``),
+    None while every shot has its image or the link is fine; its ``switch``
+    is the assets edit that takes the next link, the same shape the video
+    offer's ``switch`` already uses. At tier >= 2, per shot: ``state`` is
+    ``clips.clip_state`` on the episode's video link (``none`` without a
+    record); ``name`` the clip file on disk, served by ``GET
+    /episodes/{ep}/clips/{name}``; ``continue`` -- the provider holds its
+    request (the record's, or a pending re-animate's): only Continue
+    collects it, so ``target`` is None; ``blocked`` the F8 pattern -- the
+    409 a re-animate would answer now (``Cannot regenerate '<target>':
+    ...``), None while it may run; ``flags`` the effective overrides
+    (``overrides`` the ones ``assets.json`` sets). ``video``: the assets
+    estimate's video part on the story's route (*env* -- the Settings
     values; a local ComfyUI is not asked), ``render_blocked`` the render's
     clip refusal while ``fill_failed_with_motion`` is off, ``offer`` the
     stop-and-ask of a recorded video link that cannot serve (its ``switch``
     is the assets edit that takes the next link); None while the script and
     a current storyboard are not approved. Calls nothing; remembered while
-    nothing it reads moves (``_CLIPS_CACHE``)."""
+    nothing it reads moves (``_CLIPS_CACHE`` -- ``image_offer`` is computed
+    fresh every call, outside that cache, since it is cheap and now runs at
+    every tier)."""
     story_id = story["story_id"]
     board = read_episode(stories, story_id, ep, STORYBOARD_DOC)
     doc = read_episode(stories, story_id, ep, ASSETS_DOC)
     tier = int(story["generation_profile"]["tier"])
     view = {"tier": tier, "links": {kind: copy.deepcopy(sticky_link.recorded(doc, kind)) for kind in sticky_link.KINDS},
-            "shots": {}, "video": None}
-    if tier < 2 or board is None or not board["shots"]:
+            "shots": {}, "video": None, "image_offer": None}
+    if board is None or not board["shots"]:
         return view
     script = read_episode(stories, story_id, ep, SCRIPT_DOC)
     try:
         ec = _context(stories, story_id, ep)
     except WorkflowError:
+        return view
+    # Any tier: the image link's own stickiness (A-087) applies at tier 1 too.
+    view["image_offer"] = _image_offer_view(ec, script, board, env=env)
+    if tier < 2:
         return view
     where = (os.path.realpath(stories.root), story_id, ep)
     key = _clips_key(ec, script, board, doc, env)

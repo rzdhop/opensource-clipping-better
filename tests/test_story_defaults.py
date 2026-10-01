@@ -151,8 +151,18 @@ def test_the_clip_defaults_agree_in_the_step_the_api_the_cli_and_the_dashboard()
     args = parser.parse_args(["step", "0123456789ab", "render", "--ep", "1"])
     assert render.FILL_PARAM not in cli._phase4_params(args, "render")
 
-    # 4. the dashboard: the assets run animates, the render does not fill
+    # 4. the dashboard (phase 6 stage 12): the assets run's "Animate" checkbox
+    # starts ticked (assets.animate_param's own default) and the render
+    # step's "Fill failed shots with motion" checkbox starts unticked
+    # (render.FILL_PARAM's own default) -- both controls are now
+    # user-editable, so the pin is on each checkbox's initial state, not a
+    # literal `true` in the params object (which now forwards the state
+    # variable).
     pane = ROOT / "web" / "dashboard" / "src" / "pages" / "story" / "episode"
-    assert re.search(r"const assetsParams = \{[^}]*\banimate: true\b", (pane / "StoryboardPane.jsx").read_text(
-        encoding="utf-8"))
-    assert not re.search(r"fill_failed_with_motion:\s*true", (pane / "PreviewPane.jsx").read_text(encoding="utf-8"))
+    storyboard_src = (pane / "StoryboardPane.jsx").read_text(encoding="utf-8")
+    assert re.search(r"const \[animate, setAnimate\] = useState\(true\)", storyboard_src)
+    assert re.search(r"const assetsParams = \{[^}]*\banimate\b[^}]*\}", storyboard_src)
+
+    preview_src = (pane / "PreviewPane.jsx").read_text(encoding="utf-8")
+    assert re.search(r"const \[fillFailedWithMotion, setFillFailedWithMotion\] = useState\(false\)", preview_src)
+    assert re.search(r"const renderParams = \{[^}]*\bfill_failed_with_motion\b[^}]*\}", preview_src)

@@ -15,7 +15,10 @@ function plural(n, word) {
  * The phase-2 generation estimates (cast, places, an image or a voice
  * regenerate) count several units at once — `{llm_calls, images,
  * edit_images, tts_chars}` — and every non-zero one is shown:
- * "5 LLM · 5 images · 10 edits · voice ~180 chars".
+ * "5 LLM · 5 images · 10 edits · voice ~180 chars". Phase 6 stage 12: a
+ * clip regenerate's estimate (`{clips, seconds}`,
+ * `workflow.regenerate_clip_estimate`) joins the same units object, so its
+ * two fields are shown here too: "1 clip · 4s video".
  */
 function generationUnitsLabel(units) {
   const parts = []
@@ -23,6 +26,8 @@ function generationUnitsLabel(units) {
   if (units.images) parts.push(plural(units.images, 'image'))
   if (units.edit_images) parts.push(plural(units.edit_images, 'edit'))
   if (units.tts_chars) parts.push(`voice ~${plural(units.tts_chars, 'char')}`)
+  if (units.clips) parts.push(plural(units.clips, 'clip'))
+  if (units.seconds) parts.push(`${units.seconds}s video`)
   return parts.join(' · ') || 'nothing to make'
 }
 

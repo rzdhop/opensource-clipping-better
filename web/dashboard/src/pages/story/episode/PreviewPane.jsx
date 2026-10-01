@@ -97,6 +97,10 @@ function CopyButton({ text, label }) {
 function RenderHeader({ storyId, ep, episode, assetsApproved, busy, onChange }) {
   const initialSubtitles = (episode.render && episode.render.params && episode.render.params.subtitles) || 'style'
   const [subtitles, setSubtitles] = useState(initialSubtitles)
+  // Phase 6 stage 9's own default (render.FILL_PARAM): off, so a failed,
+  // stale or still-generating clip refuses the render (409) instead of
+  // silently falling back to Tier-1 motion unless this is ticked.
+  const [fillFailedWithMotion, setFillFailedWithMotion] = useState(false)
   const [estimate, setEstimate] = useState(null)
   const [running, setRunning] = useState(false)
   const [error, setError] = useState('')
@@ -114,23 +118,29 @@ function RenderHeader({ storyId, ep, episode, assetsApproved, busy, onChange }) 
     setEstimateError('')
     setEstimateErrors(null)
     if (!assetsApproved) return
-    fetchStoryEstimate(storyId, 'render', { ep, subtitles })
+    fetchStoryEstimate(storyId, 'render', { ep, subtitles, fillFailedWithMotion })
       .then((data) => { setEstimate(data); setEstimateError(''); setEstimateErrors(null) })
       .catch((err) => { setEstimate(null); setEstimateError(err.message); setEstimateErrors(err.errors || null) })
-  }, [storyId, ep, assetsApproved, subtitles])
+  }, [storyId, ep, assetsApproved, subtitles, fillFailedWithMotion])
 
   const reason = busy ? 'A step is running.'
     : !assetsApproved ? "Approve the episode's assets first (the Storyboard tab)."
     : null
 
   const hasRender = Boolean(episode.render)
+  // The render's own clip-refusal pre-check (phase 6 stage 11/12), computed
+  // server-side with fill_failed=False (workflow.episode_clips's
+  // `video.render_blocked`) -- the sentence the render would 409 with right
+  // now unless the box below is ticked. Null at tier 1 (episode.assets.video
+  // is null there) and once nothing is blocking it.
+  const renderBlocked = episode.assets && episode.assets.video && episode.assets.video.render_blocked
 
   const handleRun = async () => {
     setRunning(true)
     setError('')
     setErrors(null)
     try {
-      const renderParams = { subtitles }
+      const renderParams = { subtitles, fill_failed_with_motion: fillFailedWithMotion }
       await runStoryStep(storyId, 'render', { ep, params: renderParams })
       onChange()
     } catch (err) {
@@ -155,6 +165,18 @@ function RenderHeader({ storyId, ep, episode, assetsApproved, busy, onChange }) 
           {SUBTITLE_MODES.map((mode) => <option key={mode.id} value={mode.id}>{mode.label}</option>)}
         </select>
       </div>
+      {episode.assets && episode.assets.tier >= 2 && (
+        <label className="story-checkbox">
+          <input
+            type="checkbox"
+            checked={fillFailedWithMotion}
+            onChange={(e) => setFillFailedWithMotion(e.target.checked)}
+            disabled={busy || running}
+          />
+          Fill failed shots with motion
+        </label>
+      )}
+      {!fillFailedWithMotion && renderBlocked && <p className="form-hint">{renderBlocked}</p>}
       <div className="story-step-actions">
         <button
           type="button"

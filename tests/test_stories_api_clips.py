@@ -131,6 +131,38 @@ def test_the_render_is_refused_before_a_job_with_the_clip_refusal_unless_it_is_f
     assert api.jobs.get_job(queued.json()["id"])["params"] == {"fill_failed_with_motion": True}
 
 
+def test_the_render_estimate_meets_the_same_clip_refusal_unless_the_flag_is_sent(api, tmp_path):
+    """Phase 6 stage 12 follow-up: ``GET /estimate/render`` gains
+    ``?fill_failed_with_motion=1`` (default off), priced the same way the
+    real render params would be -- a failed clip refuses the estimate (409,
+    the same sentence ``POST /steps/render`` gives) unless the flag clears
+    it, so the Preview pane's checkbox can make the estimate chip's own
+    refusal go away before the real request does. No job is ever created by
+    an estimate, filled or not."""
+    shot_ids = {}
+
+    def video(planned):
+        shot_ids["failed"] = planned[0]
+        return tvp.FakeVideo(fail_for={f"shot_{planned[0][2:]}"})
+
+    story_id, _planned = trc._animated(api.store, tmp_path, video=video)
+    failed = shot_ids["failed"]
+    path = _url(story_id, "/estimate/render")
+
+    refused = api.client.get(path, params={"ep": 1})
+
+    assert refused.status_code == 409, refused.text
+    detail = refused.json()["detail"]
+    assert f"shot {failed}'s clip failed" in detail and f"shot:1:{failed}:video" in detail
+    assert "fill_failed_with_motion" in detail
+
+    filled = api.client.get(path, params={"ep": 1, "fill_failed_with_motion": 1})
+
+    assert filled.status_code == 200, filled.text
+    assert filled.json()["params"] == {"subtitles": "style", "encoder": "libx264", "fill_failed_with_motion": True}
+    assert api.jobs.list_jobs() == []
+
+
 def test_the_clip_route_serves_a_stored_clip_open_without_a_token_and_nothing_else(api, tmp_path, monkeypatch):
     """A clip the video phase made: the episode page names it -- its state,
     link, route and the plain path of the clip route (auth is off) -- and that

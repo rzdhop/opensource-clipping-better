@@ -396,6 +396,10 @@ class SettingsRequest(BaseModel):
     cloudflare_api_token: Optional[str] = None
     cloudflare_account_id: Optional[str] = None
     pollinations_api_key: Optional[str] = None
+    # Veo only: a separate, billing-enabled Google project (RC-V4). The
+    # response half (``gemini_paid_api_key_set``) has reported this since
+    # stage 2; this is the save side (phase 6 stage 12).
+    gemini_paid_api_key: Optional[str] = None
     local_comfyui_url: Optional[str] = None
     local_ollama_url: Optional[str] = None
 

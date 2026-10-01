@@ -7,7 +7,8 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   runStoryStep, approveStoryDoc, regenerateStory, fetchStoryEstimate,
-  patchEpisodeStoryboard, patchEpisodeAssets, fetchStoryMediaUrl, fetchShotImageUrl,
+  patchEpisodeStoryboard, patchEpisodeAssets, patchEpisodeAssetsLinks,
+  fetchStoryMediaUrl, fetchShotImageUrl, fetchEpisodeClipUrl,
 } from '../../../api'
 import EstimateChip from '../../../components/EstimateChip'
 import RouteChip from '../../../components/RouteChip'
@@ -395,9 +396,246 @@ function ShotImageBlock({ storyId, ep, assetShot, planConsistency, assetsBlocked
   )
 }
 
+// ----------------------------------------------------------------- clip (phase 6)
+
+// clipping.aistory.steps.clips.CLIP_DERIVED_STATES, plus the two states the
+// page derives on top (clip.continue/clip.pending, workflow.episode_clips):
+// a held request only Continue (the assets step) can collect reads as
+// "generating", a queued regenerate not yet picked up as "pending".
+const CLIP_STATE_LABELS = { none: 'no clip', current: 'current', stale: 'stale', failed: 'failed' }
+
+function clipStatusLabel(clip) {
+  if (clip.continue) return 'generating'
+  if (clip.pending) return 'pending…'
+  return CLIP_STATE_LABELS[clip.state] || clip.state
+}
+
+function ClipStateBadge({ clip }) {
+  const warn = clip.state === 'stale' || clip.state === 'failed'
+  return (
+    <span className={`chip${warn ? ' chip-warn' : clip.state === 'current' ? ' chip-accent' : ''}`}>
+      {clipStatusLabel(clip)}
+    </span>
+  )
+}
+
+// Links known to carry no sound track of their own (checkpoint stage 10:
+// seedance -- the cheapest default link -- and kling always fall back for a
+// kept-native-audio shot); matched loosely against the recorded `provider/model`
+// link string, since this is a UI hint, not the gate itself (the render step's
+// own fallback is what actually decides, per shot, with its own printed note).
+const NO_AUDIO_LINK_RE = /seedance|kling/i
+
+/**
+ * One shot's clip regenerate-with-note (`shot:<ep>:<shid>:video`), with its
+ * own estimate fetched first (`GET /estimate/regenerate?target=`,
+ * `workflow.regenerate_clip_estimate`) -- shown before anything is spent,
+ * same reasoning as every other estimate-driven control in this file.
+ *
+ * While `clip.blocked` is set the target is still non-null (a "kept still"
+ * or similar refusal still names its target; only a held `continue` request
+ * clears `target`), so the estimate was still fetched and 409'd -- caught
+ * and swallowed, leaving the chip stuck on "estimating…" forever (browser-
+ * check finding F2). `clip.blocked` is already shown as the control's own
+ * reason, so nothing is fetched or shown here while it is set.
+ */
+function ClipRegenerate({ storyId, ep, clip, disabled, onChange }) {
+  const [estimate, setEstimate] = useState(null)
+
+  useEffect(() => {
+    setEstimate(null)
+    if (!clip.target || clip.blocked) return undefined
+    let cancelled = false
+    fetchStoryEstimate(storyId, 'regenerate', { target: clip.target })
+      .then((data) => { if (!cancelled) setEstimate(data) })
+      .catch(() => { if (!cancelled) setEstimate(null) })
+    return () => { cancelled = true }
+  }, [storyId, clip.target, clip.blocked])
+
+  const regenerate = async (note) => {
+    await regenerateStory(storyId, { target: clip.target, note })
+    onChange()
+  }
+
+  return (
+    <RegenerateControl
+      disabled={disabled || !clip.target}
+      onRegenerate={regenerate}
+      estimateChip={clip.blocked ? null : <EstimateChip estimate={estimate} />}
+      actionLabel="Re-animate with note"
+    />
+  )
+}
+
+/**
+ * One shot's clip (tier >= 2 only, never rendered at tier 1 -- RC: a tier-1
+ * story's episode page keeps looking exactly as it did before phase 6): the
+ * clip itself (fetched as a blob with the same helper the shot image uses,
+ * DEC-113), a state badge, a route badge, "Animate"/"Keep still" pins
+ * (`PATCH .../assets`'s per-shot flags) and the note-driven re-animate above,
+ * each disabled with the server's own sentence shown as visible text (the F8
+ * pattern -- a `title` alone is invisible on a phone) rather than only a
+ * `title`. `keep_native_audio` only at tier 3.
+ */
+function ShotClipBlock({ storyId, ep, shotId, clip, tier, busy, onChange }) {
+  const [url, setUrl] = useState(null)
+  const [loadFailed, setLoadFailed] = useState(false)
+  const [actionBusy, setActionBusy] = useState(false)
+  const [actionError, setActionError] = useState('')
+  const urlRef = useRef(null)
+
+  useEffect(() => {
+    setUrl(null)
+    setLoadFailed(false)
+    if (!clip.url) return undefined
+    let cancelled = false
+    fetchEpisodeClipUrl(storyId, ep, clip.name).then((fresh) => {
+      if (cancelled) { URL.revokeObjectURL(fresh); return }
+      urlRef.current = fresh
+      setUrl(fresh)
+    }).catch(() => { if (!cancelled) setLoadFailed(true) })
+    return () => {
+      cancelled = true
+      if (urlRef.current) { URL.revokeObjectURL(urlRef.current); urlRef.current = null }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storyId, ep, clip.url, clip.name])
+
+  // Each pin clears the other, so the two read as one exclusive choice in
+  // the UI even though they are two independent override fields in
+  // assets.json (video_plan.effective_shot_flags resolves them). Each call
+  // site sends its own literal shot item (rather than through one shared
+  // helper taking a variable) so the payload-contract guard
+  // (tests/test_story_payload_contract_episode.py) can read every key this
+  // page sends as text, the same way every other patchEpisodeAssets call in
+  // this file already does.
+  //
+  // Browser-check finding F3: each button shows and toggles the EFFECTIVE
+  // flag (`clip.flags`, which already folds the storyboard's own keep_still
+  // -- video_plan.effective_shot_flags); a second press of an already-
+  // pressed button clears the override (null) instead of re-sending it.
+  const toggleAnimate = async () => {
+    setActionBusy(true)
+    setActionError('')
+    try {
+      if (clip.flags.animate) {
+        await patchEpisodeAssets(storyId, ep, [{ shot_id: shotId, animate: null }])
+      } else {
+        await patchEpisodeAssets(storyId, ep, [{ shot_id: shotId, animate: true, keep_still: null }])
+      }
+      onChange()
+    } catch (err) {
+      setActionError(err.message)
+    } finally {
+      setActionBusy(false)
+    }
+  }
+
+  const toggleKeepStill = async () => {
+    setActionBusy(true)
+    setActionError('')
+    try {
+      if (clip.flags.keep_still) {
+        await patchEpisodeAssets(storyId, ep, [{ shot_id: shotId, keep_still: null }])
+      } else {
+        await patchEpisodeAssets(storyId, ep, [{ shot_id: shotId, keep_still: true, animate: null }])
+      }
+      onChange()
+    } catch (err) {
+      setActionError(err.message)
+    } finally {
+      setActionBusy(false)
+    }
+  }
+
+  const toggleNativeAudio = async (value) => {
+    setActionBusy(true)
+    setActionError('')
+    try {
+      await patchEpisodeAssets(storyId, ep, [{ shot_id: shotId, keep_native_audio: value }])
+      onChange()
+    } catch (err) {
+      setActionError(err.message)
+    } finally {
+      setActionBusy(false)
+    }
+  }
+
+  // Browser-check finding F1: the "still generating" wording also doubles as
+  // the status line under the badges (so it is never shown only inside a
+  // title); a failed or stale clip's own reason (the provider's failure
+  // text, e.g. "HTTP 500 from fal…") was never rendered anywhere before this.
+  const isGenerating = Boolean(clip.continue)
+  const clipStatusReason = isGenerating
+    ? 'Still generating — press Continue on the assets step.'
+    : (clip.state === 'failed' || clip.state === 'stale') ? clip.reason : null
+  // The F8 pattern (phase 5 stage 13b): the server's own regenerate-refusal
+  // sentence, shown as text next to the disabled control, never only inside
+  // its title. In the "generating" case this is identical to the status
+  // line above (the backend's own ``blocked`` wraps the same held request),
+  // so it is not repeated a second time.
+  const regenerateReason = isGenerating ? clipStatusReason : clip.blocked
+
+  return (
+    <div className="story-shot-asset">
+      <div className="story-shot-asset-media">
+        {url ? (
+          <video className="story-shot-asset-image" src={url} playsInline muted controls />
+        ) : (
+          <span className="story-shot-asset-placeholder" aria-hidden="true">
+            {loadFailed ? 'Failed to load' : clip.url ? '' : 'No clip yet'}
+          </span>
+        )}
+      </div>
+      <div className="story-shot-asset-meta">
+        <ClipStateBadge clip={clip} />
+        {clip.route && <RouteChip routeClass={clip.route} link={clip.link} />}
+      </div>
+      {clipStatusReason && <p className="form-hint">{clipStatusReason}</p>}
+      <div className="story-shot-asset-meta">
+        <button
+          type="button"
+          className={`btn btn-sm ${clip.flags.animate ? 'btn-primary' : 'btn-secondary'}`}
+          onClick={toggleAnimate}
+          disabled={busy || actionBusy}
+          aria-pressed={Boolean(clip.flags.animate)}
+        >
+          {clip.flags.animate ? '✓ Animate' : 'Animate'}
+        </button>
+        <button
+          type="button"
+          className={`btn btn-sm ${clip.flags.keep_still ? 'btn-primary' : 'btn-secondary'}`}
+          onClick={toggleKeepStill}
+          disabled={busy || actionBusy}
+          aria-pressed={Boolean(clip.flags.keep_still)}
+        >
+          {clip.flags.keep_still ? '✓ Keep still' : 'Keep still'}
+        </button>
+      </div>
+      {tier === 3 && (
+        <label className="story-checkbox">
+          <input
+            type="checkbox"
+            checked={Boolean(clip.flags.keep_native_audio)}
+            onChange={(e) => toggleNativeAudio(e.target.checked)}
+            disabled={busy || actionBusy}
+          />
+          Keep native audio
+        </label>
+      )}
+      {tier === 3 && NO_AUDIO_LINK_RE.test(clip.link || '') && (
+        <p className="form-hint">seedance and kling clips have no sound; the line is kept</p>
+      )}
+      <StepError message={actionError} />
+      <ClipRegenerate storyId={storyId} ep={ep} clip={clip} disabled={busy || actionBusy || Boolean(regenerateReason)} onChange={onChange} />
+      {!isGenerating && regenerateReason && <p className="form-hint">{regenerateReason}</p>}
+    </div>
+  )
+}
+
 // ------------------------------------------------------------------------- shot
 
-function ShotCard({ storyId, ep, shot, assetShot, scene, maps, assetsBlocked, busy, onChange }) {
+function ShotCard({ storyId, ep, shot, assetShot, tier, scene, maps, assetsBlocked, busy, onChange }) {
   const [fieldError, setFieldError] = useState('')
   const [fieldErrors, setFieldErrors] = useState(null)
   const [actionEditing, setActionEditing] = useState(false)
@@ -503,6 +741,11 @@ function ShotCard({ storyId, ep, shot, assetShot, scene, maps, assetsBlocked, bu
           assetsBlocked={assetsBlocked} busy={busy} onChange={onChange} />
       )}
 
+      {tier >= 2 && assetShot && assetShot.clip && (
+        <ShotClipBlock storyId={storyId} ep={ep} shotId={shot.shot_id} clip={assetShot.clip} tier={tier}
+          busy={busy} onChange={onChange} />
+      )}
+
       <div className="story-shot-controls">
         <div className="form-group story-shot-control">
           <label className="form-label">Framing</label>
@@ -540,15 +783,17 @@ function ShotCard({ storyId, ep, shot, assetShot, scene, maps, assetsBlocked, bu
             {mod}
           </label>
         ))}
-        <label className="story-checkbox">
-          <input
-            type="checkbox"
-            checked={shot.keep_still}
-            onChange={(e) => saveKeepStill(e.target.checked)}
-            disabled={busy}
-          />
-          Keep still
-        </label>
+        {tier < 2 && (
+          <label className="story-checkbox">
+            <input
+              type="checkbox"
+              checked={shot.keep_still}
+              onChange={(e) => saveKeepStill(e.target.checked)}
+              disabled={busy}
+            />
+            Keep still
+          </label>
+        )}
       </div>
 
       <StepError message={fieldError} errors={fieldErrors} />
@@ -784,7 +1029,12 @@ function AssetsHeader({ storyId, ep, episode, busy, onChange }) {
   const storyboard = episode.storyboard
   const storyboardApproved = Boolean(storyboard && storyboard.approved_at)
   const hasAssets = Boolean(episode.assets && episode.assets.doc)
+  const tier = episode.assets ? episode.assets.tier : 1
   const [alignWords, setAlignWords] = useState(false)
+  // Phase 6 stage 8's own default (assets.animate_param): on, so a tier >= 2
+  // run makes the clips right after the images and voices unless turned off
+  // here (stage 12's own toggle, test_story_defaults.py pins this default).
+  const [animate, setAnimate] = useState(true)
   const [estimate, setEstimate] = useState(null)
   const [running, setRunning] = useState(false)
   const [error, setError] = useState('')
@@ -813,8 +1063,7 @@ function AssetsHeader({ storyId, ep, episode, busy, onChange }) {
     setError('')
     setErrors(null)
     try {
-      // animate: the step's own default (phase 6); the toggle arrives with the clip controls.
-      const assetsParams = { align_words: alignWords, animate: true }
+      const assetsParams = { align_words: alignWords, animate }
       await runStoryStep(storyId, 'assets', { ep, params: assetsParams })
       onChange()
     } catch (err) {
@@ -842,11 +1091,29 @@ function AssetsHeader({ storyId, ep, episode, busy, onChange }) {
           <span className="chip chip-warn chip-wrap">{estimateError}</span>
         ) : estimate && (
           <>
+            {/* Browser-check finding F4: the clip count used to be folded into this
+                same "est. $x" chip, which read as if the clips were included in that
+                total (``asset_units``'s own ``est_usd`` leaves them out whenever
+                ``video.ready`` is false -- allow_paid off, over a cap, ...). The
+                video part now gets its own chip with its own ready/cost reading. */}
             <span className="chip" title={estimate.message || ''}>
               est. ${fmtUsd(estimate.est_usd)} · {estimate.images.count} image{estimate.images.count === 1 ? '' : 's'}
               {' · '}{estimate.voices.lines} line{estimate.voices.lines === 1 ? '' : 's'}
             </span>
-            <RouteChip routeClass={estimate.images.route_class} link={estimate.images.link} />
+            {/* A RouteChip with no route_class (nothing left to route: every shot
+                already has its image) used to render as a bare "unknown" chip. */}
+            {estimate.images.route_class && (
+              <RouteChip routeClass={estimate.images.route_class} link={estimate.images.link} />
+            )}
+            {estimate.video && estimate.video.count != null && (
+              <span className={`chip${estimate.video.ready ? '' : ' chip-warn'}`} title={estimate.video.message || ''}>
+                {estimate.video.count} clip{estimate.video.count === 1 ? '' : 's'}
+                {' '}
+                {estimate.video.ready
+                  ? (estimate.video.route_class === 'local' ? '(local)' : `($${fmtUsd(estimate.video.est_usd)})`)
+                  : `(est $${fmtUsd(estimate.video.est_usd)}, not now)`}
+              </span>
+            )}
           </>
         )}
       </div>
@@ -864,8 +1131,149 @@ function AssetsHeader({ storyId, ep, episode, busy, onChange }) {
           {estimate.alignment.requests} line{estimate.alignment.requests === 1 ? '' : 's'} would be aligned.
         </p>
       )}
+      {tier >= 2 && (
+        <>
+          <label className="story-checkbox">
+            <input
+              type="checkbox"
+              checked={animate}
+              onChange={(e) => setAnimate(e.target.checked)}
+              disabled={busy || running}
+            />
+            Animate (make the clips right after the images and voices)
+          </label>
+          {!hasAssets && (
+            <p className="form-hint">
+              Make the keyframes first (animate off), then animate — the clip lengths follow the measured voices.
+            </p>
+          )}
+        </>
+      )}
       {reason && <p className="form-hint">{reason}</p>}
       <StepError message={error} errors={errors} className="story-step-error" />
+    </div>
+  )
+}
+
+/**
+ * The sticky image-link offer (phase 6 stage 12 follow-up, A-087): from
+ * `episode.assets.image_offer` -- already computed server-side
+ * (`workflow.episode_clips`'s `image_offer`, merged into the page), so this
+ * reads it directly rather than running its own estimate fetch. Unlike the
+ * video offer (`VideoPhaseHeader`, tier >= 2 only), this applies at **any**
+ * tier -- image generation exists from tier 1 -- so it is never gated on
+ * tier, and never rendered inside a clip control's own gate. Same shape and
+ * same confirmation pattern as the video offer: `offer.message` names what
+ * a switch redoes and at what price, `offer.switch` is sent as is through
+ * `patchEpisodeAssetsLinks`.
+ */
+function ImageOfferBanner({ storyId, ep, episode, busy, onChange }) {
+  const [switching, setSwitching] = useState(false)
+  const [switchError, setSwitchError] = useState('')
+  const offer = episode.assets && episode.assets.image_offer
+  if (!offer) return null
+
+  const handleSwitch = async () => {
+    if (!offer.switch) return
+    if (!window.confirm(`${offer.message}\n\nSwitch now?`)) return
+    setSwitching(true)
+    setSwitchError('')
+    try {
+      await patchEpisodeAssetsLinks(storyId, ep, offer.switch.links)
+      onChange()
+    } catch (err) {
+      setSwitchError(err.message)
+    } finally {
+      setSwitching(false)
+    }
+  }
+
+  return (
+    <div className="card story-assets-header">
+      <h4 className="card-title">Image link</h4>
+      <div className="story-storyboard-banner">
+        <span className="chip chip-warn chip-wrap">{offer.message}</span>
+        {offer.switch && (
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={handleSwitch}
+            disabled={busy || switching}
+          >
+            {switching ? 'Switching…' : `Switch to ${offer.next_link}`}
+          </button>
+        )}
+        <StepError message={switchError} />
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The episode's shared video-phase status (phase 6 stage 11/12), from
+ * `episode.assets.video` -- already computed server-side
+ * (`workflow.episode_clips`, merged into the page), so this reads it
+ * directly rather than running its own estimate fetch: the next assets run's
+ * clip count/seconds and either the local ETA (`eta_s`/`eta_note`) or the
+ * paid cost (`est_usd`), its route/link, and -- when the recorded video link
+ * cannot serve -- the sticky offer (`offer`) to switch it, behind a
+ * confirmation naming what the switch redoes and at what price
+ * (`offer.message`), sending `offer.switch` as the assets PATCH. Null (and
+ * nothing rendered) before tier 2 or before a script/storyboard exist.
+ */
+function VideoPhaseHeader({ storyId, ep, episode, busy, onChange }) {
+  const [switching, setSwitching] = useState(false)
+  const [switchError, setSwitchError] = useState('')
+  const video = episode.assets && episode.assets.video
+  if (!video) return null
+
+  const handleSwitch = async () => {
+    if (!video.offer || !video.offer.switch) return
+    if (!window.confirm(`${video.offer.message}\n\nSwitch now?`)) return
+    setSwitching(true)
+    setSwitchError('')
+    try {
+      await patchEpisodeAssetsLinks(storyId, ep, video.offer.switch.links)
+      onChange()
+    } catch (err) {
+      setSwitchError(err.message)
+    } finally {
+      setSwitching(false)
+    }
+  }
+
+  return (
+    <div className="card story-assets-header">
+      <h4 className="card-title">Video</h4>
+      <div className="story-step-actions">
+        {video.route_class && <RouteChip routeClass={video.route_class} link={video.link} />}
+        <span className="chip" title={video.message || ''}>
+          {video.count != null ? `${video.count} clip${video.count === 1 ? '' : 's'}` : 'nothing to animate yet'}
+          {video.seconds != null ? ` · ${video.seconds.toFixed(1)} s` : ''}
+          {video.count != null ? (
+            video.route_class === 'local' && video.eta_s != null
+              ? ` · ~${Math.round(video.eta_s)} s local${video.eta_note ? ` (${video.eta_note})` : ''}`
+              : ` · $${fmtUsd(video.est_usd)}`
+          ) : ''}
+        </span>
+      </div>
+      {!video.ready && video.message && <p className="form-hint">{video.message}</p>}
+      {video.offer && (
+        <div className="story-storyboard-banner">
+          <span className="chip chip-warn chip-wrap">{video.offer.message}</span>
+          {video.offer.switch && (
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={handleSwitch}
+              disabled={busy || switching}
+            >
+              {switching ? 'Switching…' : `Switch to ${video.offer.next_link}`}
+            </button>
+          )}
+          <StepError message={switchError} />
+        </div>
+      )}
     </div>
   )
 }
@@ -944,6 +1352,10 @@ export default function StoryboardPane({ episode, characters, places, props, sto
   const assetsByShotId = episode.assets
     ? Object.fromEntries(episode.assets.shots.map((assetShot) => [assetShot.shot_id, assetShot]))
     : {}
+  // 1 unless the page has merged workflow.episode_clips in (phase 6 stage
+  // 11, once a script or storyboard exists) -- tier >= 2 gates every clip
+  // control; a tier-1 story therefore renders none of them (RC).
+  const tier = episode.assets ? episode.assets.tier : 1
 
   return (
     <div className="story-step-body">
@@ -975,6 +1387,7 @@ export default function StoryboardPane({ episode, characters, places, props, sto
                           ep={ep}
                           shot={shot}
                           assetShot={assetsByShotId[shot.shot_id]}
+                          tier={tier}
                           scene={group.scene}
                           maps={maps}
                           assetsBlocked={assetsBlocked}
@@ -996,6 +1409,8 @@ export default function StoryboardPane({ episode, characters, places, props, sto
           <ApproveStoryboard storyId={storyId} ep={ep} episode={episode} busy={busy} onChange={onChange} />
 
           <AssetsHeader storyId={storyId} ep={ep} episode={episode} busy={busy} onChange={onChange} />
+          <ImageOfferBanner storyId={storyId} ep={ep} episode={episode} busy={busy} onChange={onChange} />
+          <VideoPhaseHeader storyId={storyId} ep={ep} episode={episode} busy={busy} onChange={onChange} />
           <ApproveAssets storyId={storyId} ep={ep} episode={episode} busy={busy} onChange={onChange} />
         </>
       )}

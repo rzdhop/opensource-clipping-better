@@ -205,6 +205,7 @@ async def update_settings(req: SettingsRequest) -> SettingsResponse:
                         ("CLOUDFLARE_API_TOKEN", req.cloudflare_api_token),
                         ("CLOUDFLARE_ACCOUNT_ID", req.cloudflare_account_id),
                         ("POLLINATIONS_API_KEY", req.pollinations_api_key),
+                        ("GEMINI_PAID_API_KEY", req.gemini_paid_api_key),
                         ("LOCAL_COMFYUI_URL", req.local_comfyui_url), ("LOCAL_OLLAMA_URL", req.local_ollama_url)):
         if value is not None:
             env_updates[name] = value.strip()
