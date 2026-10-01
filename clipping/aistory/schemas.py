@@ -227,6 +227,12 @@ _TYPOGRAPHY_SCHEMA = {
         "highlight_colour": {"type": "string", "pattern": HEX_COLOUR},
         "overlay_style": {"type": "string"},
         "ai_label": {"type": "boolean"},
+        # A v2 story's style lock only (phase 7 stage 6c, the human's
+        # CLARIFY answer 11): the minimum time a word_pop card stays on
+        # screen, in ms. Optional -- absent on every shipped template and on
+        # a legacy lock, so render/subtitles.py's floor applies only when it
+        # is present (RC-M2: golden.py's STYLE_LOCK has none).
+        "word_min_card_ms": {"type": "integer", "minimum": 1},
     },
     "required": [
         "font_family", "font_fallback", "subtitle_mode", "subtitle_style",
