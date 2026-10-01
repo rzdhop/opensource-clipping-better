@@ -7,8 +7,12 @@ headers when the scheme, host or port changes (DEC-195, DEC-196)."""
 
 import contextlib
 import http.server
+import importlib
+import json
 import threading
 from types import SimpleNamespace
+
+import pytest
 
 from clipping.providers import stt
 
@@ -66,3 +70,27 @@ def test_the_stt_upload_does_not_carry_the_bearer_key_to_another_origin(tmp_path
     [(method, path, second)] = b.seen
     assert (method, path) == ("GET", "/moved")  # the stdlib follows a 302'd POST with a GET
     assert "authorization" not in second
+
+
+@pytest.fixture
+def broll(render_stack_stubbed, monkeypatch):
+    module = importlib.import_module("clipping.studio.broll")
+    monkeypatch.setattr(module, "USED_PEXELS_IDS", set())
+    return module
+
+
+def test_the_pexels_search_does_not_carry_the_key_to_another_origin(broll, tmp_path, monkeypatch):
+    out = tmp_path / "broll.mp4"
+    with _server() as b, _server() as a:
+        monkeypatch.setattr(broll, "PEXELS_VIDEO_SEARCH_URL", f"{a.url}/videos/search")
+        a.routes["/videos/search"] = (302, {"Location": f"{b.url}/moved"}, b"")
+        video = {"id": 7, "video_files": [
+            {"file_type": "video/mp4", "quality": "hd", "width": 1080, "height": 1920, "link": f"{b.url}/clip.mp4"}]}
+        b.routes["/moved"] = (200, {"Content-Type": "application/json"}, json.dumps({"videos": [video]}).encode())
+        b.routes["/clip.mp4"] = (200, {"Content-Type": "video/mp4"}, b"mp4 bytes")
+        assert broll.download_pexels_broll("city", "9:16", str(out), "test-pexels") is True
+    assert out.read_bytes() == b"mp4 bytes"
+    [(_, _, first)] = a.seen
+    assert first["authorization"] == "test-pexels"  # the host it was addressed to got it
+    assert [(method, path) for method, path, _ in b.seen] == [("GET", "/moved"), ("GET", "/clip.mp4")]
+    assert not [headers for _, _, headers in b.seen if "authorization" in headers]

@@ -21,6 +21,7 @@ from mediapipe.tasks.python import vision as mp_vision
 from PIL import Image, ImageDraw, ImageFont
 
 from . import utils
+from ..providers import transport
 _resize_frame = utils._resize_frame
 _is_vertical_ratio = utils._is_vertical_ratio
 
@@ -39,6 +40,7 @@ build_ffmpeg_progress_cmd = _ffmpeg_utils.build_ffmpeg_progress_cmd
 run_ffmpeg_with_progress = _ffmpeg_utils.run_ffmpeg_with_progress
 
 USED_PEXELS_IDS = set()
+PEXELS_VIDEO_SEARCH_URL = "https://api.pexels.com/videos/search"
 
 
 def download_pexels_broll(query, rasio, output_filename, pexels_api_key):
@@ -80,7 +82,7 @@ def download_pexels_broll(query, rasio, output_filename, pexels_api_key):
             "resolution_name": "1080p",
         }
     )
-    search_url = f"https://api.pexels.com/videos/search?{params}"
+    search_url = f"{PEXELS_VIDEO_SEARCH_URL}?{params}"
 
     req = urllib.request.Request(
         search_url,
@@ -91,7 +93,8 @@ def download_pexels_broll(query, rasio, output_filename, pexels_api_key):
     )
 
     try:
-        with urllib.request.urlopen(req) as response:
+        # The transport's opener: a redirect to another origin drops the key (DEC-195).
+        with transport._OPENER.open(req) as response:
             data = json.load(response)
     except Exception as e:
         print(f"   ⚠️ Pexels API error while searching for '{query}': {e}")
