@@ -3715,3 +3715,34 @@ product's target, not the walk.
 - Reference-video import (`08-phase-7-reference-import.md`) is taken off the schedule. Its file is kept.
 - The verdict's four points are findings T2-P6-F2…F5 (action log, 2026-10-01). Phase 6's code is not changed by
   this decision.
+
+## DEC-220 — Phase 7 stage 1 (W0): the clip prompt's action is resolved and stored; names are stripped from the action only; no run-on sheet or plate prompts
+**Context.** The phase-7 audit (T2-P6-F6/F7, E1, E5) found three defects under every later improvement:
+- The I2V clip prompt was built from the storyboard shot's raw `action`, with `@char_…`/`#place_…:variant`/`%prop_…`
+  tags (`steps/clips.py:220` → `video_plan.build_video_prompt`). Only the image path resolved them, and never stored
+  the result. Story A's paid seedance clip was prompted "@char_captain_obvious and @char_miss_overthink stand in
+  #place_city_square:day …".
+- `names.without_names` ran over the whole assembled image prompt (`shots.py:373`), so a place named "City square"
+  turned its own descriptor into "A bustling urban the place featuring…" in all 20 of story A's shot prompts.
+- The sheet and plate builders spliced a descriptor that ends with a period ("mouth., wearing", "bench., day"), and
+  the plate ran `environment_rules` into the rendering text with no period.
+
+**Decision.**
+- `shots.resolve_shot` sweeps entity names from the resolved action only and returns it as `video_action`.
+  `build_storyboard`, `refresh_prompts` and the storyboard edit path (`workflow.py`, an action or subject edit) store
+  it as an optional storyboard-shot key. The image prompt's action sentence is the same text.
+- `video_plan.build_video_prompt` uses `shot.get("video_action") or shot["action"]`.
+- `portrait_prompt`, `turnaround_prompt`, `expressions_prompt`, `character_prompt_block` and `master_plate_prompt`
+  strip the descriptor's trailing period; `environment_rules` gets a terminal period when it has none.
+- The budget profile's dead `images`/`tts` keys (E5 D4) are not touched here: stage 2a makes `images` real.
+
+**Consequence.**
+- Stored storyboards have no `video_action`, so their clip prompts stay byte-identical: story A's sh01 hash
+  `48955e43…` equals the recorded `prompt_hash`, and both live clips stay `current`. A new storyboard, a
+  `refresh_prompts` or an action edit writes the field and stales only the shots whose prompt changed.
+- Sheet and plate prompts are built at generation time with no stored hash, so no stored sheet or plate goes stale.
+- A character descriptor that contains its own name is no longer stripped from the image prompt (K1 writes
+  "appearance only", so this is unlikely; the user note and the prompt override are still stripped).
+- Pins moved on purpose: the two fruit_drama plate goldens (the added period) and RC-V1's `TIER1_BOARD_SHA` (the new
+  key only: the board with `video_action` removed from all 24 shots still hashes to `859441d7…4cf4`).
+- Commit `9850fa5`.

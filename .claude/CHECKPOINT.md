@@ -4,17 +4,20 @@
   - **Current phase:** IMPLEMENT. EXPLORE (E1–E5), CLARIFY (11 answers) and PLAN (Opus design, stages 1–8) were done on
     2026-10-01 in one session; the human approved the plan with its three go-items (hook 3–6 s; keyframes on
     seedream-4.5-edit with nano-banana-2-lite fallback; ≈ $1.73 per episode under the $2 cap).
-  - **Current stage:** 1 (W0 defects) — not started. **Next action:** Tier-1 baseline in both environments on this
-    checkpoint, then a Sonnet agent implements stage 1 on `shots.py`, `video_plan.py`, `schemas.py`, `prompting.py`
-    with the three fail-first tests named in the plan.
+  - **Current stage:** 1 DONE (`9850fa5`, DEC-220). **Next action:** stage 2a (quality chains, preset, caps
+    2/6/20, nano-banana on the paid key, v2 keyframe 9:16 crop). Its read-only scope is saved in the session
+    scratchpad (`stage2a-scope.md`): chain seams, fal seedream v4.5/edit schema (image_urls ≤ 10, `image_size` presets
+    incl. `portrait_16_9` or custom ≥ ~1920 px a side, seed, no negative), the five cap places + `tests/test_budget.py:29`,
+    create-time Settings env via `worker.get_settings_env()`, A-123 confirmed, the crop as a single-frame ffmpeg pass
+    at `steps/assets.py:1942-1950`.
   - **Open questions:** none. The plan's assumptions A-110…A-124 are UNCONFIRMED.
   - **Worktree:** `.claude/worktrees/ai-story-phase-7`, branch `feat/ai-story-phase-7` from `main` 30604dd. The main
     checkout stays on `main` (bind-mounted by `rzc-backend`); deploy only at 0 jobs by fast-forward.
   - **Checkpoint commit:** 30604dd (clean tree; this artifacts commit sits on top).
-  - **Tier-1 baseline (2026-10-01, on 86f0692 = 30604dd + artifacts, `-n 4`):** local 6633 passed / 11 skipped /
-    0 failed; CI env 5839 passed / 771 skipped / 0 failed; `compileall` clean. (Phase-6 close: 6635/1 and 5841/761.
-    The difference is skips only, which depend on the host; nothing fails.) The summary line is not printed (`-q`
-    twice), so counts are taken from the progress markers.
+  - **Tier-1 baseline (2026-10-01, on 4f9ff39, `-n 4`):** local 6627 passed / 9 skipped / 0 failed; CI env 5833
+    passed / 769 skipped / 0 failed (6602 collected); `compileall` clean. (First recorded as 6633/11 and 5839/771 from
+    progress markers, which counted the two "bringing up nodes..." lines; corrected. Run with `-o addopts=""` so the
+    summary line prints.)
   - **Live state:** `main` = 30604dd deployed; health 200, 0 jobs; `allow_paid` false; caps 1/3/10 (the plan moves the
     defaults to 2/6/20 in stage 2a); keys set: google, fal, cloudflare, nvidia, openrouter; `GEMINI_PAID_API_KEY` to be
     added by the human before W-mid. All 9 stories kept; none is touched by this phase (RC-M3).
@@ -23,7 +26,7 @@
 - **Stage ledger** (each: Tier-1 green → commit → log line):
   | Stage | Status | Commit |
   |---|---|---|
-  | 1 W0 defects (D1 `video_action`, D2 names on the action only, D3 run-ons) | todo | |
+  | 1 W0 defects (D1 `video_action`, D2 names on the action only, D3 run-ons) | DONE (local 6631/9, CI env 5837/772) | 9850fa5 |
   | 2a quality chains, preset, caps 2/6/20, nano-banana paid key, 9:16 source crop | todo | |
   | 2b writing chain (nvidia → openrouter mistral-medium-3.1 → free) | todo | |
   | 3a structured look + dossier, sheet/plate/prop v2 prompts | todo | |
