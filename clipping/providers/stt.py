@@ -36,6 +36,7 @@ import uuid
 
 from .. import transcript as transcript_mod
 from . import audio as audio_mod
+from . import transport
 from .registry import PROVIDERS
 
 DEFAULT_STT_CHAIN = "groq/whisper-large-v3-turbo,mistral/voxtral-mini-latest"
@@ -272,7 +273,8 @@ def _post_multipart(url, api_key, file_path, fields):
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT) as response:
+        # The transport's opener: a redirect to another origin drops the key (DEC-195).
+        with transport._OPENER.open(request, timeout=REQUEST_TIMEOUT) as response:
             return json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", "replace")[:300]
