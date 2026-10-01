@@ -119,6 +119,15 @@ explicit go gate every paid call; keep every story.
   - Boilerplate is short and comes last.
 - **G4, a story you can follow.** A first-time viewer can tell who wants what, what happens and why it matters.
   The episode sits inside its length window, has no repeated lines, and each shot shows its beat.
+- **G5, a story that knows itself.** Before episode 1 is written, the story holds a deep, approved knowledge base:
+  - for each character: a dossier (history, personality, goals, secrets, relationships with their history,
+    speech, and a structured look with wardrobe sets);
+  - a world and places bible, and a props registry;
+  - a season timeline of events, with what each character knows and when;
+  - a continuity state carried from episode to episode.
+
+  Every generation call (script, storyboard, image, clip, voice) gets the slice it needs from that base, so
+  characters look, act and sound the same from shot to shot and episode to episode.
 - **The phase's acceptance walk:** one new story, episode 1, made end to end on the new quality preset, every shot
   animated, under a budget the human sets. The human watches it on the phone and says the story is clear, the
   characters and places look good, and every shot moves.
@@ -151,16 +160,39 @@ each (DEC-192). A clip whose prompt changes goes stale, so the estimate shows th
 - **Clip resolution** (720p vs 1080p) against cost.
 - **Profile defaults:** what `quality` means now, and whether `one_dollar` survives.
 
-**W3. Prompts with context.**
-- **A structured visual spec** per character, place and prop. This is a schema change, with backward compatibility
-  for stored stories. Who writes it: K1 / the places step on a stronger LLM?
-- **Raise or rework the caps:** K1's 45 words, T1's 30-word action, the ≤ 10-word handle.
-- **Assembly order:** specific first (subject + action + expression + composition), then the place with its layout,
-  then a compact style tail.
-- **Place layout notes go into the master plate.** Props carry owner and scale.
-- **Per-model prompt adapters:** video models want motion verbs and camera language; image editors want reference
-  roles.
-- **A prompt preview on the shot card,** read-only, so the human can see what is sent.
+**W3. The context each generator receives: investigate first, then redesign** (the human, 2026-10-01: "investigate
+the quality and structure of the context given to the image and video generators").
+- **E1, a context-anatomy audit.** For every generation call type, dump the exact request the code assembles today,
+  dry and with no paid call, on a scratch copy of story A and story B.
+  - The call types: character portrait, turnaround and expressions; place master plate; prop; shot keyframe
+    (text-only and with references); I2V clip; TTS direction; and the LLM calls that write the script and the
+    storyboard (E1/E2/T1…).
+  - The full request: the text, the reference images sent and the role each plays, and the parameters (size, seed,
+    steps, negative prompt, duration, fps).
+  - Annotate every part with:
+    - where it comes from (which document and field);
+    - its length in words and tokens;
+    - whether the target model can use it, or truncates or ignores it;
+    - what a shot needs that is missing (who, doing what, where, expression, composition, scale between subjects,
+      continuity from the previous shot).
+- **E2, read each target model's own prompting guide live**, at session time: seedream 4.x, nano-banana 2,
+  flux-kontext, gpt-image, seedance, kling, veo, plus whatever W1/W2 shortlist. Then compare with E1.
+  - **Text-encoder limits:** for example FLUX's T5 sequence length, or a CLIP 77-token window. Does a 300-word
+    prompt get cut, and where?
+  - **References:** how the model weighs reference images, and how many it takes.
+  - **Structure:** the order and form it rewards (subject first, labelled sections, natural prose) and its
+    negative-prompt support.
+  - **Video:** motion verbs and camera language for video models, and what their sound prompts need.
+- **Then the design:**
+  - a **layered prompt** per call type: the shot's subject and action with the entities resolved, then the
+    expressions and the composition, then the place with its layout, then a compact style tail. No boilerplate
+    repeated in front of the specific part, and each layer sized to the model's limits;
+  - a **structured visual spec** per character, place and prop (a schema change with backward compatibility for
+    stored stories; it comes from W6's dossiers);
+  - **reworked caps:** K1's 45 words, T1's 30-word action, the ≤ 10-word handle;
+  - **place layout notes** in the master plate, and **props** with owner and scale;
+  - **per-model adapters** that render the layered prompt the way each model reads best;
+  - a **read-only prompt preview** on the shot card, so the human sees exactly what is sent.
 
 **W4. A story you can follow.**
 - **Diagnose before fixing.** Re-read story A and B's scripts and storyboards against the episode on the phone,
@@ -184,6 +216,46 @@ each (DEC-192). A clip whose prompt changes goes stale, so the estimate shows th
   run only with `allow_paid`, the caps, the shown estimate and the human's go.
 - **The free route stays available,** labelled for what it is.
 
+**W6. Pre-write the story's knowledge, for consistency** (the human, 2026-10-01: "pre-write a maximum of context
+and info for better consistency on the character history, storyline, timeline").
+- **E3, a gap analysis of what a story holds today:**
+  - `story.json`: logline, premise, tone, a 4-field `world`, themes;
+  - `season.json`: a 3-item `arc`, plus `series_memory` {introduced, open_hooks, recaps, relationship_state};
+  - `characters/*/character.json`: a ≤ 45-word descriptor, 2–3 signature items, personality {traits, wants,
+    fears, speech_style}, relationships, state {alive, location, arc_notes}, voice;
+  - `places/*/place.json`: descriptor, layout notes, time variants;
+  - props: almost none.
+
+  Measure what each generation call actually reads from these, and what it never sees.
+- **Design a story knowledge base**, written once up front with a strong LLM, approved by the human, locked and
+  versioned:
+  - **a character dossier:**
+    - history and backstory, personality, goal and need, fears and secrets;
+    - relationships, each with its history;
+    - the voice: speech patterns, vocabulary, catchphrases;
+    - a structured look: build, height relative to the others, face, hair, skin or material, palette;
+    - wardrobe sets per context, and signature items;
+    - how the character changes across the season;
+  - **a world bible:** rules, geography between places, time period, recurring visual motifs;
+  - **places:** a layout map in words, lighting per time variant, and the props that live there;
+  - **a props registry:** owner, scale, look, and where each prop is at each point of the story;
+  - **a season timeline:** all planned episodes outlined beat by beat up front, as an event log (what happens,
+    when, who is there, who knows what afterwards);
+  - **a continuity ledger** written at the end of each episode: location, wardrobe, injuries, possessions,
+    relationship state and open hooks. It extends phase 5's series memory.
+- **Retrieval:** a context builder hands each call the slice it needs and no more:
+  - the entities in this shot, with their current state;
+  - the beat's purpose, and where the timeline stands;
+  - the previous shot, for continuity.
+
+  The slice stays within the model's limits (from E2), and the same builder feeds the LLM writing steps, so the
+  script stays faithful to the dossiers.
+- **Cost and control.** A deep base is LLM text: cheap next to images and video, but paid on a strong model
+  (DEC-206 books it). The dashboard shows the dossiers and the timeline for editing and approval. A change re-stales
+  only what depends on it.
+- **Stored stories:** they keep working unchanged (fields optional). A "deepen this story's bible" action is
+  opt-in and estimated.
+
 ## 5. Out of scope
 - **Reference-video import** (the old phase 7, `08-phase-7-reference-import.md`): removed from this phase by the
   human on 2026-10-01; kept for later.
@@ -202,6 +274,9 @@ each (DEC-192). A clip whose prompt changes goes stale, so the estimate shows th
 5. **Narrator and subtitles defaults,** and whether a "first-watch" judge may block approval.
 6. **The free route:** keep it for drafts and previews, or hide it behind the advice?
 7. **New-story defaults:** tier 2 with the quality preset whenever the keys are present?
+8. **Knowledge-base depth:** how deep the dossiers and the timeline go (and their LLM cost per story), whether every
+   planned episode is outlined up front, and whether the human edits them in the dashboard before episode 1.
+9. **The writing LLM** for the knowledge base and the scripts: which provider and model the human will fund.
 
 ## 7. Constraints for the plan
 - **Repo protocol:** a FULL task; plan stages each committable and revertible; the riskiest stage named; a
@@ -222,23 +297,49 @@ each (DEC-192). A clip whose prompt changes goes stale, so the estimate shows th
 
 ```text
 Start AI Story phase 7 — the quality overhaul — under the repo protocol (FULL task), on this Ubuntu VPS.
-It replaces the old phase 7 (reference import, off the schedule; do not plan it).
+It replaces the old phase 7 (reference import: off the schedule, do not plan it). Direction: DEC-219.
 Work in a new worktree .claude/worktrees/ai-story-phase-7 on a branch feat/ai-story-phase-7 from main; never switch
 the main checkout's branch (the rzc-backend container bind-mounts it).
 
-Load first: .claude/plans/ai-story/15-phase-7-quality-overhaul.md (this phase's brief: my verdict, the audit's
-facts with file:line, goals G1–G4, workstreams W0–W5, my CLARIFY questions); DEC-219 in .claude/DECISIONS.md (the
-direction) and DEC-200…218 (phase 6); .claude/CHECKPOINT.md top section (the phase-6 close and its follow-ups);
-.claude/ASSUMPTIONS.md A-100…A-109; .claude/claude-action.log tail; .claude/plans/ai-story/00-MASTER-SPEC.md parts
-on prompts (2.x), assets and the budget profiles.
+LOAD first:
+- .claude/plans/ai-story/15-phase-7-quality-overhaul.md — this phase's brief: my verdict (T2-P6-F2..F5), the
+  audit's facts with file:line, goals G1-G5, workstreams W0-W6, my CLARIFY questions. Do not re-derive its facts.
+- DEC-219 and DEC-200..218 in .claude/DECISIONS.md; .claude/CHECKPOINT.md top section (the phase-6 close);
+  .claude/ASSUMPTIONS.md A-100..A-109; .claude/claude-action.log tail; .claude/plans/ai-story/00-MASTER-SPEC.md parts
+  on prompts (2.x), the bible, cast, places, season and series memory, assets and the budget profiles.
 
-Then EXPLORE (agents; include a live price check of current image and video models on fal, Google and OpenAI,
-read on their pages at session time), CLARIFY (section 6's questions plus what EXPLORE opens), and PLAN. Wait for
-my approval before any code. W0's defects (tags in the clip prompt, name stripping) are stage 1.
+EXPLORE (agents, read-only, no paid call) must deliver, before any question or plan:
+E1. Context anatomy. For every generation call type (character portrait / turnaround / expressions, place plate,
+    prop, shot keyframe text-only and with references, I2V clip, TTS direction, and the LLM calls that write the
+    script and the storyboard), dump the exact request the code assembles today, dry, on scratch copies of stories
+    979c8376e43e and 04feb539840f: the text, every reference image and its role, the parameters. Annotate every
+    part: its source field, its words and tokens, whether the target model can use it or truncates or ignores it,
+    and what the shot needs that is missing (who, doing what, where, expression, composition, scale between
+    subjects, continuity with the previous shot). Show me two annotated examples side by side with the result
+    image.
+E2. Model guides, read live on the providers' pages at session time: the prompt structure, length and
+    text-encoder limits, reference-image handling and negative prompts of today's best image models (fal seedream
+    4.x, flux-kontext or successor, Google nano-banana 2 / Imagen, OpenAI gpt-image) and video models (seedance,
+    kling, veo, others current), with their live prices. A comparison table: quality notes, limits, $ per image,
+    $ per second, the cost of an every-shot episode.
+E3. Knowledge-base gaps: what story.json, season.json, character.json, place.json and props hold today, what each
+    generation call reads from them and what it never sees; what a consistent series needs and does not have
+    (character history, structured look and wardrobe sets, relationship history, a season timeline of events, who
+    knows what when, a continuity ledger per episode).
+E4. Comprehension diagnosis: re-read story A and B ep 1's script and storyboard against the rendered episode and
+    list concretely where a first-time viewer gets lost, and why (LLM, length, structure, images not showing the
+    beat, missing narrator or context).
+E5. Today's code paths for W0's two defects (raw tags in the clip prompt, name stripping), with the fix and its
+    fail-first test.
+
+CLARIFY: the brief's section 6 questions plus whatever E1-E5 open; use the tables to show me costs.
+PLAN: staged, each stage committable and revertible, W0 as stage 1; the riskiest stage named; a rejected
+alternative; the DECISIONS check. Wait for my approval before any code.
 
 Standing rules: NO AUTH on the app, ever. allow_paid stays OFF in Settings; any paid run needs a shown estimate and
 my explicit go, as a single CLI process with per-process caps. Deploy only at 0 jobs. Never run Tier-1 while a
-scratch API server from the worktree is writing. Tests: DEC-176 and DEC-192. Commits use explicit paths and no
-trailers; never git stash; never revert with git checkout for fail-first. Push with
-GIT_SSH_COMMAND="ssh -i ~/.ssh/github_osc_better -F /dev/null -o IdentitiesOnly=yes". Keep all stories.
+scratch API server from the worktree is writing; never re-run the full Tier-1 when only docs or .claude changed.
+Tests: DEC-176 and DEC-192. Commits use explicit paths and no trailers; never git stash; never revert with git
+checkout for fail-first. Push with GIT_SSH_COMMAND="ssh -i ~/.ssh/github_osc_better -F /dev/null -o
+IdentitiesOnly=yes". Keep all stories.
 ```
