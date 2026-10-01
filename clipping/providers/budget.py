@@ -28,9 +28,11 @@ from collections import namedtuple
 from datetime import datetime, timezone
 
 ALLOW_PAID = False
-PER_EPISODE_CAP_USD = 1.00   # the author's ceiling (spec 8.5)
-DAILY_CAP_USD = 3.00
-PER_STORY_CAP_USD = 10.00
+# DEC-223 (AI Story phase 7): 2 / 6 / 20, up from 1 / 3 / 10, so one episode
+# on the Quality (billed APIs) preset fits its cap. allow_paid stays off.
+PER_EPISODE_CAP_USD = 2.00   # the author's ceiling (spec 8.5)
+DAILY_CAP_USD = 6.00
+PER_STORY_CAP_USD = 20.00
 BUDGET_PROFILE = ""          # "" = resolved from allow_paid
 
 PROFILE_WHEN_FREE = "free"
@@ -95,6 +97,38 @@ def budget_from_env(env=None) -> Budget:
 
 _REQUIRED_PROFILE_KEYS = ("cap_usd", "images", "tts", "animate")
 
+# Optional keys (phase 7, DEC-221). ``roles``: the image links of each role of
+# a v2 story (``clipping/aistory/media_policy.py``), required by the
+# ``quality_roles`` images policy; ``video_resolution``: the clips' size.
+PROFILE_ROLES = ("sheet", "plate", "prop", "keyframe")
+QUALITY_ROLES_POLICY = "quality_roles"
+VIDEO_RESOLUTIONS = ("720p", "1080p")
+
+
+def _profile_errors(name, profile) -> list:
+    """What is wrong with the optional keys of profile *name*."""
+    errors = []
+    roles = profile.get("roles")
+    if roles is not None:
+        if not isinstance(roles, dict) or not roles:
+            errors.append(f"profile {name!r}: \"roles\" must be an object of role -> links")
+        else:
+            unknown = sorted(set(map(str, roles)) - set(PROFILE_ROLES))
+            if unknown:
+                errors.append(f"profile {name!r}: unknown role(s) {', '.join(unknown)} "
+                              f"(known: {', '.join(PROFILE_ROLES)})")
+            for role, links in roles.items():
+                if (not isinstance(links, list) or not links
+                        or not all(isinstance(link, str) and link.strip() for link in links)):
+                    errors.append(f"profile {name!r}: roles.{role} must be a non-empty list of links")
+    if profile.get("images") == QUALITY_ROLES_POLICY and not isinstance(roles, dict):
+        errors.append(f"profile {name!r}: images {QUALITY_ROLES_POLICY!r} needs a \"roles\" table")
+    resolution = profile.get("video_resolution")
+    if resolution is not None and resolution not in VIDEO_RESOLUTIONS:
+        errors.append(f"profile {name!r}: video_resolution must be one of {', '.join(VIDEO_RESOLUTIONS)}, "
+                      f"not {resolution!r}")
+    return errors
+
 
 def load_profiles(path=None) -> dict:
     """The shipped ``budget_profiles.json`` (spec 8.5.1), validated. A bad file raises."""
@@ -113,6 +147,9 @@ def load_profiles(path=None) -> dict:
         for key in _REQUIRED_PROFILE_KEYS:
             if key not in profile:
                 raise ValueError(f"{path}: profile {name!r} lacks {key!r}")
+        errors = _profile_errors(name, profile)
+        if errors:
+            raise ValueError(f"{path}: {'; '.join(errors)}")
     return data
 
 

@@ -79,7 +79,7 @@ from clipping.providers import adapters as adapters_mod
 from clipping.providers import gating
 from clipping.providers import generation as gen
 
-from . import imaging, prompting, schemas
+from . import imaging, media_policy, prompting, schemas
 from . import names as names_mod
 from . import uploads as uploads_mod
 
@@ -137,18 +137,50 @@ class RefImageError(Exception):
         self.failures = tuple(failures)
 
 
+# DEC-117's offer, word for word (a legacy story).
+LEGACY_EDITOR_ADVICE = "Start ComfyUI, or allow a paid editor, or switch the story to prompt-only consistency."
+
+
+def quality_advice(readiness) -> str:
+    """What a v2 story's stop-and-ask asks for (DEC-221): the quality keys and
+    ``allow_paid``, with the estimate of the first paid link -- never the
+    prompt-only switch, which a v2 story does not have."""
+    paid = next((row for row in readiness.get("links") or () if row.get("paid")), None)
+    estimate = ""
+    if paid is not None:
+        qty = (readiness.get("units") or {}).get("images", 1)
+        estimate = (f" (est ${paid['est_usd']:.3f} for {qty} image{'' if qty == 1 else 's'} on "
+                    f"{paid['link']})")
+    return (f"Add {' and '.join(media_policy.QUALITY_KEYS)} in Settings and allow paid providers{estimate}: "
+            "this story's images run on quality links only.")
+
+
+def editor_advice(story, readiness) -> str:
+    """The last sentence of a stop-and-ask: DEC-117's offer for a legacy
+    story, :func:`quality_advice` for a v2 one."""
+    return quality_advice(readiness) if media_policy.is_v2(story) else LEGACY_EDITOR_ADVICE
+
+
 class NeedsEditor(RefImageError):
     """Spec 8.1's "stop and ask": the image needs an editor and no link of
     IMAGE_EDIT_CHAIN can run for the story's route and budget. Raised before
     any generation request; nothing was spent or written. ``reasons`` has
-    each link's reason, ``readiness`` the pre-check (:func:`edit_readiness`)."""
+    each link's reason, ``readiness`` the pre-check (:func:`edit_readiness`).
 
-    def __init__(self, reasons, readiness, *, subject="This image"):
-        super().__init__(
-            f"{subject} needs an editor: {readiness['message']} Nothing was generated or spent. "
-            "Start ComfyUI, or allow a paid editor, or switch the story to prompt-only consistency.",
-            reasons=reasons,
-        )
+    For a v2 *story* (phase 7, DEC-221) it says that no quality image link can
+    run, each link's reason, and the keys and the switch to add with the
+    estimate -- never the prompt-only offer. A legacy story's words are
+    DEC-117's, unchanged."""
+
+    def __init__(self, reasons, readiness, *, subject="This image", story=None):
+        if media_policy.is_v2(story):
+            why = "; ".join(reasons) or readiness["message"]
+            message = (f"{subject} cannot be made: no quality image link can run ({why}). Nothing was "
+                       f"generated or spent. {quality_advice(readiness)}")
+        else:
+            message = (f"{subject} needs an editor: {readiness['message']} Nothing was generated or spent. "
+                       f"{LEGACY_EDITOR_ADVICE}")
+        super().__init__(message, reasons=reasons)
         self.readiness = readiness
 
 
@@ -166,6 +198,7 @@ class _Plan:
     stem: str                   # the file's name without its extension
     step: str                   # the ledger's step
     via: str                    # how, for the first log line
+    role: str = "sheet"         # media_policy's role: sheet | plate | prop (phase 7)
 
 
 # ------------------------------------------------------------------ helpers
@@ -253,17 +286,18 @@ def _with_note(prompt, note, *, stories, story_id) -> str:
     return f"{prompt} Author's note: {text}"
 
 
-def _derived(story, *, subject, prompt, size, seed, references, stem, step, source) -> _Plan:
+def _derived(story, *, subject, prompt, size, seed, references, stem, step, source, role) -> _Plan:
     """An image made from another (a sheet from the portrait, a variant from
     the plate): an edit with *references* in ``references`` mode, the same
     prompt and seed on IMAGE_CHAIN in ``prompt_only`` mode -- the user's
     choice, never made here."""
     if story["generation_profile"]["consistency_mode"] == PROMPT_ONLY:
         return _Plan(subject, gen.IMAGE, prompt, size, seed, (), PROMPT_ONLY, stem, step,
-                     f"{gen.ENV_NAMES[gen.IMAGE]}, text only with {source}'s seed {seed}")
+                     f"{gen.ENV_NAMES[gen.IMAGE]}, text only with {source}'s seed {seed}", role=role)
     count = len(references)
     return _Plan(subject, gen.IMAGE_EDIT, prompt, size, seed, tuple(references), REFERENCES, stem, step,
-                 f"{gen.ENV_NAMES[gen.IMAGE_EDIT]} with {count} reference image{'' if count == 1 else 's'}")
+                 f"{media_policy.chain_name(role, gen.IMAGE_EDIT, story)} with {count} reference "
+                 f"image{'' if count == 1 else 's'}", role=role)
 
 
 def _remove_other_extensions(stories, story_id, kind, eid, stem, keep) -> None:
@@ -288,7 +322,7 @@ def _remove_other_extensions(stories, story_id, kind, eid, stem, keep) -> None:
 # ------------------------------------------------------------------ readiness
 
 def edit_readiness(story, *, env, qty=1, stories=None, story_spent=None, adapters=None,
-                   size=TURNAROUND_SIZE, probe_local=False, transport=None) -> dict:
+                   size=TURNAROUND_SIZE, probe_local=False, transport=None, role="sheet") -> dict:
     """Whether IMAGE_EDIT_CHAIN can make *qty* reference images for *story*
     right now, calling nothing unless *probe_local* -- the same shape as the
     style preview's estimate::
@@ -314,6 +348,10 @@ def edit_readiness(story, *, env, qty=1, stories=None, story_spent=None, adapter
     link decides -- blocked when none is left. *transport* is handed to that
     probe (tests). The runner's own pre-check (:func:`_make`) leaves it off
     and probes afresh.
+
+    *role* (phase 7): the images' ``media_policy`` role -- a v2 story's
+    edits run on that role's quality links; a legacy story's on
+    IMAGE_EDIT_CHAIN whatever the role.
     """
     if story_spent is None:
         story_spent = 0.0
@@ -325,9 +363,10 @@ def edit_readiness(story, *, env, qty=1, stories=None, story_spent=None, adapter
     request = gen.GenRequest(kind=gen.IMAGE_EDIT, width=size[0], height=size[1])
     readiness = imaging.estimate(gen.IMAGE_EDIT, env, route=route, request=request, qty=qty,
                                  story_spent=story_spent, adapters=adapters, step=READINESS_STEP,
-                                 what=_EDIT_WHAT, when=_EDIT_WHEN)
+                                 what=_EDIT_WHAT, when=_EDIT_WHEN, role=role, story=story)
     if probe_local and qty > 0 and readiness["ready"]:
-        readiness = _ask_locals_first(readiness, env, route=route, adapters=adapters, transport=transport)
+        readiness = _ask_locals_first(readiness, env, route=route, adapters=adapters, transport=transport,
+                                      role=role, story=story)
     return readiness
 
 
@@ -344,7 +383,7 @@ def _ask_status(adapter, link, merged, transport):
         return False, f"{type(exc).__name__}: {exc}"
 
 
-def _ask_locals_first(readiness, env, *, route, adapters, transport) -> dict:
+def _ask_locals_first(readiness, env, *, route, adapters, transport, role="sheet", story=None) -> dict:
     """``edit_readiness(probe_local=True)``: while the link that would run
     first is a local server, ask it whether it is there (:func:`_ask_status`).
     One that does not answer is ``skipped`` with the probe's reason, as the
@@ -353,7 +392,7 @@ def _ask_locals_first(readiness, env, *, route, adapters, transport) -> dict:
     left. The first local link that answers -- or a first runnable link that
     is not local -- leaves *readiness* as it was."""
     merged = gating.merged_env(env)
-    links = {gen.describe(link): link for link in gen.chain_from_env(gen.IMAGE_EDIT, merged)}
+    links = {gen.describe(link): link for link in media_policy.role_chain(role, gen.IMAGE_EDIT, merged, story)}
     rows = copy.deepcopy(readiness["links"])
     skipped = False
     for row in rows:
@@ -370,11 +409,13 @@ def _ask_locals_first(readiness, env, *, route, adapters, transport) -> dict:
         skipped = True
     if not skipped:
         return readiness
+    name = media_policy.chain_name(role, gen.IMAGE_EDIT, story)
     return imaging.verdict(gen.IMAGE_EDIT, rows, route=route, qty=readiness["units"]["images"],
-                           step=READINESS_STEP, what=_EDIT_WHAT, when=_EDIT_WHEN)
+                           step=READINESS_STEP, what=_EDIT_WHAT, when=_EDIT_WHEN,
+                           chain_name=None if name == gen.ENV_NAMES[gen.IMAGE_EDIT] else name)
 
 
-def _probe_locals(readiness, chain, merged, *, route, adapters, transport) -> dict:
+def _probe_locals(readiness, chain, merged, *, route, adapters, transport, chain_name=None) -> dict:
     """When the only links the pre-check found runnable are local servers,
     ask each whether it is there (its adapter's probe: no generation, nothing
     spent). None answering makes the readiness blocked -- a server that is
@@ -403,7 +444,7 @@ def _probe_locals(readiness, chain, merged, *, route, adapters, transport) -> di
         if ok:
             return readiness
         row.update(status="skipped", reason=note or "not reachable")
-    message = imaging.no_link_message(gen.IMAGE_EDIT, probed, what=_EDIT_WHAT, route=route)
+    message = imaging.no_link_message(gen.IMAGE_EDIT, probed, what=_EDIT_WHAT, route=route, chain_name=chain_name)
     return imaging.blocked(READINESS_STEP, readiness["units"]["images"], probed, message)
 
 
@@ -416,18 +457,20 @@ def _make(stories, story, plan, *, entity, eid, lock, env, on_log, cancel, adapt
     caller's to write."""
     story_id = story["story_id"]
     route = story["generation_profile"]["route"]
-    merged, chain, budget_obj = imaging.resolve(plan.kind, env, error=RefImageError)
+    merged, chain, budget_obj = imaging.resolve(plan.kind, env, error=RefImageError, role=plan.role, story=story)
+    name = media_policy.chain_name(plan.role, plan.kind, story)
     if adapters is None:
         adapters_mod.load_all()
     ledger = imaging.open_ledger(stories, story_id, error=RefImageError, doing="making an image")
 
     if plan.kind == gen.IMAGE_EDIT:
         readiness = edit_readiness(story, env=env, story_spent=ledger.totals()["est_usd"], adapters=adapters,
-                                   size=plan.size)
-        readiness = _probe_locals(readiness, chain, merged, route=route, adapters=adapters, transport=transport)
+                                   size=plan.size, role=plan.role)
+        readiness = _probe_locals(readiness, chain, merged, route=route, adapters=adapters, transport=transport,
+                                  chain_name=None if name == gen.ENV_NAMES[plan.kind] else name)
         if not readiness["ready"]:
             reasons = [f"{row['link']}: {row['reason']}" for row in readiness["links"]] or [readiness["message"]]
-            error = NeedsEditor(reasons, readiness, subject=plan.subject)
+            error = NeedsEditor(reasons, readiness, subject=plan.subject, story=story)
             on_log(f"✋ {error}")
             raise error
 
@@ -455,7 +498,7 @@ def _make(stories, story, plan, *, entity, eid, lock, env, on_log, cancel, adapt
             )
         except imaging.NoImage as exc:
             on_log(f"✖ {plan.subject} not made: {'; '.join(exc.reasons)}")
-            raise RefImageError(f"{plan.subject}: no link of {gen.ENV_NAMES[plan.kind]} could make it on route "
+            raise RefImageError(f"{plan.subject}: no link of {name} could make it on route "
                                 f"{route}.", reasons=exc.reasons, failures=exc.failures) from None
         except Exception as exc:  # noqa: BLE001 - an adapter's bug fails this image, named
             reason = f"{type(exc).__name__}: {exc}"
@@ -543,7 +586,7 @@ def character_image(stories, story_id, char_id, which, *, env, on_log, cancel, n
         if seed is None:
             seed = image_seed(story_id, CHARACTERS, char_id)
         plan = _Plan(subject, gen.IMAGE, prompt, size, seed, (), BASE, which, step,
-                     f"{gen.ENV_NAMES[gen.IMAGE]}, text to image")
+                     f"{media_policy.chain_name('sheet', gen.IMAGE, story)}, text to image", role="sheet")
     else:
         portrait = character["refs"]["portrait"]
         portrait_path = _existing(stories, story_id, CHARACTERS, char_id, portrait)
@@ -567,7 +610,7 @@ def character_image(stories, story_id, char_id, which, *, env, on_log, cancel, n
                 on_log(f"ℹ️ {subject}: {left} design reference(s) left out -- an edit takes at most "
                        f"{MAX_REFERENCES} reference images (the portrait first).")
         plan = _derived(story, subject=subject, prompt=prompt, size=size, seed=seed, references=references,
-                        stem=which, step=step, source="the portrait")
+                        stem=which, step=step, source="the portrait", role="sheet")
 
     ref, label, est, paid = _make(stories, story, plan, entity=CHARACTERS, eid=char_id, lock=lock, env=env,
                                   on_log=on_log, cancel=cancel, adapters=adapters, transport=transport,
@@ -627,7 +670,7 @@ def place_image(stories, story_id, place_id, variant, *, env, on_log, cancel, no
         if seed is None:
             seed = image_seed(story_id, PLACES, place_id)
         plan = _Plan(subject, gen.IMAGE, prompt, PLATE_SIZE, seed, (), BASE, stem, step,
-                     f"{gen.ENV_NAMES[gen.IMAGE]}, text to image")
+                     f"{media_policy.chain_name('plate', gen.IMAGE, story)}, text to image", role="plate")
     else:
         plate_path = _existing(stories, story_id, PLACES, place_id, plate)
         if plate_path is None:
@@ -637,7 +680,7 @@ def place_image(stories, story_id, place_id, variant, *, env, on_log, cancel, no
         if seed is None:
             seed = image_seed(story_id, PLACES, place_id)
         plan = _derived(story, subject=subject, prompt=prompt, size=VARIANT_SIZE, seed=seed,
-                        references=[plate_path], stem=stem, step=step, source="the master plate")
+                        references=[plate_path], stem=stem, step=step, source="the master plate", role="plate")
 
     ref, label, est, paid = _make(stories, story, plan, entity=PLACES, eid=place_id, lock=lock, env=env,
                                   on_log=on_log, cancel=cancel, adapters=adapters, transport=transport,
@@ -677,7 +720,7 @@ def prop_image(stories, story_id, prop_id, *, env, on_log, cancel, note=None, se
     if seed is None:
         seed = image_seed(story_id, PROPS, prop_id)
     plan = _Plan(subject, gen.IMAGE, prompt, PROP_SIZE, seed, (), BASE, "image", f"prop_image:{prop_id}",
-                 f"{gen.ENV_NAMES[gen.IMAGE]}, text to image")
+                 f"{media_policy.chain_name('prop', gen.IMAGE, story)}, text to image", role="prop")
 
     ref, label, est, paid = _make(stories, story, plan, entity=PROPS, eid=prop_id, lock=lock, env=env,
                                   on_log=on_log, cancel=cancel, adapters=adapters, transport=transport,

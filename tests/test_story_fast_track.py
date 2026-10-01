@@ -344,7 +344,8 @@ def test_a_paid_plan_with_allow_paid_off_stops_before_any_generation_call_with_t
     assert message.startswith("Fast track stopped at the paid check (step 3 of 6): Episode 1's assets need paid "
                               f"generation -- {shots} shot images on fal/flux-schnell (est ${est:.3f}), est "
                               f"${est:.3f} in all -- and allow_paid is off.")
-    assert "Caps: this episode $0.00 of $1.00, today $0.00 of $3.00 and this story $0.00 of $10.00." in message
+    # DEC-223 (AI Story phase 7 stage 2a): the default caps are now 2 / 6 / 20 (were 1 / 3 / 10).
+    assert "Caps: this episode $0.00 of $2.00, today $0.00 of $6.00 and this story $0.00 of $20.00." in message
     assert "Nothing was generated or spent: turn allow_paid on in Settings" in message
     # before ANY generation call: no image, no voice, nothing booked, no spend file
     assert fal.requests == [] and fakes.edge.calls == [] and fakes.generation_calls() == 0

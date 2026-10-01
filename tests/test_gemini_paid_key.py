@@ -1,7 +1,8 @@
 """Veo bills a separate, billing-enabled Google project (AI Story phase 6,
 RC-V4): ``gemini/veo-3.1-lite`` reads ``GEMINI_PAID_API_KEY`` and never
-``GOOGLE_API_KEY``, and no other gemini link -- the free text, vision and
-TTS ones, and the nano-banana images for now -- ever reads
+``GOOGLE_API_KEY``, and the free gemini links -- text, vision and TTS --
+never read ``GEMINI_PAID_API_KEY``. Since phase 7 stage 2a (DEC-222) the
+nano-banana images bill that paid project too and read only
 ``GEMINI_PAID_API_KEY``. The Settings store keeps and masks the new key
 like ``FAL_KEY``. Stdlib + pytest only (DEC-012).
 """
@@ -58,7 +59,9 @@ def test_veo_with_only_the_free_key_is_skipped_naming_the_paid_one():
     ("video", VEO, {"GEMINI_PAID_API_KEY": "paid"}),
     ("tts", "gemini/flash-lite-tts", {"GOOGLE_API_KEY": "free"}),
     ("vision", "gemini/flash-lite", {"GOOGLE_API_KEY": "free"}),
-    ("image_edit", "gemini/nano-banana-2-lite", {"GOOGLE_API_KEY": "free"}),
+    # Re-pinned on purpose (DEC-222, amends DEC-205 / RC-V4): nano-banana was
+    # handed GOOGLE_API_KEY; it now bills the paid project and gets its key alone.
+    ("image_edit", "gemini/nano-banana-2-lite", {"GEMINI_PAID_API_KEY": "paid"}),
 ], ids=["veo", "tts", "vision", "nano-banana"])
 def test_each_gemini_link_is_handed_its_own_key_and_never_the_other(kind, chain, handed):
     adapter = Recorder()

@@ -70,7 +70,7 @@ from __future__ import annotations
 import copy
 import time
 
-from .. import context, prompting, prompts, refimages, schemas, series_memory, voices
+from .. import context, media_policy, prompting, prompts, refimages, schemas, series_memory, voices
 from .. import store as store_mod
 from .. import uploads as uploads_mod
 from . import entities, episode_common, llm_call, pacing, voice_lines
@@ -769,10 +769,13 @@ def _pace(run, ctx, store, tools, budget) -> None:
                 del queues[provider]
 
 
-def needs_editor_line(waiting) -> str:
-    """The 🟡 line naming every character waiting for an editor."""
+def needs_editor_line(waiting, *, story=None) -> str:
+    """The 🟡 line naming every character waiting for an editor (a v2 *story*:
+    for a quality image link -- it has no prompt-only mode, DEC-221)."""
     names = ", ".join(item["name"] for item in waiting)
     messages = list(dict.fromkeys(item["message"] for item in waiting))
+    if media_policy.is_v2(story):
+        return f"🟡 Needs a quality image link for: {names} — {' '.join(messages)}"
     return (f"🟡 Needs a reference-capable editor or prompt-only consistency for: {names} — "
             f"{' '.join(messages)}")
 
@@ -810,7 +813,7 @@ def run(ctx, *, runner=None, time_fn=time.monotonic, sleep_fn=time.sleep, adapte
     _pace(run_, ctx, store, tools, budget)
 
     if run_.needs_editor:
-        ctx.on_log(needs_editor_line(run_.needs_editor))
+        ctx.on_log(needs_editor_line(run_.needs_editor, story=story))
 
     if run_.failures:
         parts = "; ".join(f"{name} {part} failed ({reason})" for name, part, reason, _ in run_.failures)
@@ -819,7 +822,8 @@ def run(ctx, *, runner=None, time_fn=time.monotonic, sleep_fn=time.sleep, adapte
                    f"{entities.quoted_list(targets)}.")
         if run_.needs_editor:
             names = ", ".join(item["name"] for item in run_.needs_editor)
-            message += f" Waiting for an editor or prompt-only consistency: {names}."
+            message += (f" Waiting for a quality image link: {names}." if media_policy.is_v2(story)
+                        else f" Waiting for an editor or prompt-only consistency: {names}.")
         raise StepFailed(message)
 
     return {

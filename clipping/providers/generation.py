@@ -239,13 +239,16 @@ def is_paid(link) -> bool:
 
 
 # A link that bills another account than its provider's other links reads its
-# own variables instead of the provider's ``env_keys``. Veo is billed on a
-# separate, billing-enabled Google project, so a clip never lands on the free
-# chain's project: it reads GEMINI_PAID_API_KEY and never GOOGLE_API_KEY, and
-# no other gemini link ever reads GEMINI_PAID_API_KEY (RC-V4). The nano-banana
-# image links stay on GOOGLE_API_KEY for now.
+# own variables instead of the provider's ``env_keys``. Veo and the nano-banana
+# image links are billed on a separate, billing-enabled Google project, so a
+# paid call never lands on the free chains' project: they read
+# GEMINI_PAID_API_KEY and never GOOGLE_API_KEY, and the FREE gemini chains --
+# LLM, vision, TTS -- never read GEMINI_PAID_API_KEY (RC-V4; nano-banana
+# moved to the paid key in AI Story phase 7, DEC-222, amending DEC-205).
 LINK_ENV_KEYS = {
     "gemini/veo-3.1-lite": ("GEMINI_PAID_API_KEY",),
+    "gemini/nano-banana-2": ("GEMINI_PAID_API_KEY",),
+    "gemini/nano-banana-2-lite": ("GEMINI_PAID_API_KEY",),
 }
 
 

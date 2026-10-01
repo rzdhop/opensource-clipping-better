@@ -27,20 +27,23 @@ def read(rel):
 # ---------------------------------------------------------- the five places
 
 def test_the_defaults_agree_in_all_five_places():
+    # Re-pinned on purpose (DEC-223, AI Story phase 7 stage 2a; the human's
+    # CLARIFY answer 1): the caps were 1 / 3 / 10, they are 2 / 6 / 20 so one
+    # episode on the Quality (billed APIs) preset fits. allow_paid stays off.
     # 1. the config constants (imported from budget.py, so one definition)
     assert config.ALLOW_PAID is False
-    assert config.PER_EPISODE_CAP_USD == budget.PER_EPISODE_CAP_USD == 1.0
-    assert config.DAILY_CAP_USD == budget.DAILY_CAP_USD == 3.0
-    assert config.PER_STORY_CAP_USD == budget.PER_STORY_CAP_USD == 10.0
+    assert config.PER_EPISODE_CAP_USD == budget.PER_EPISODE_CAP_USD == 2.0
+    assert config.DAILY_CAP_USD == budget.DAILY_CAP_USD == 6.0
+    assert config.PER_STORY_CAP_USD == budget.PER_STORY_CAP_USD == 20.0
     assert config.BUDGET_PROFILE == budget.BUDGET_PROFILE == ""
     assert "from clipping.providers.budget import" in read("clipping/config.py")
 
     # 2. the CLI
     parser = config._build_parser()
     assert parser.get_default("allow_paid") is False
-    assert parser.get_default("per_episode_cap_usd") == 1.0
-    assert parser.get_default("daily_cap_usd") == 3.0
-    assert parser.get_default("per_story_cap_usd") == 10.0
+    assert parser.get_default("per_episode_cap_usd") == 2.0
+    assert parser.get_default("daily_cap_usd") == 6.0
+    assert parser.get_default("per_story_cap_usd") == 20.0
     assert parser.get_default("budget_profile") is None
     src = read("clipping/config.py")
     for flag in ("--allow-paid", "--per-episode-cap-usd", "--daily-cap-usd", "--per-story-cap-usd", "--budget-profile"):
@@ -52,8 +55,8 @@ def test_the_defaults_agree_in_all_five_places():
     for line in ("allow_paid: Optional[bool] = None", "per_episode_cap_usd: Optional[float] = None",
                  "daily_cap_usd: Optional[float] = None", "per_story_cap_usd: Optional[float] = None",
                  "budget_profile: Optional[str] = None",
-                 "allow_paid: bool = False", "per_episode_cap_usd: float = 1.0", "daily_cap_usd: float = 3.0",
-                 "per_story_cap_usd: float = 10.0", 'budget_profile: str = ""', 'effective_budget_profile: str = "free"'):
+                 "allow_paid: bool = False", "per_episode_cap_usd: float = 2.0", "daily_cap_usd: float = 6.0",
+                 "per_story_cap_usd: float = 20.0", 'budget_profile: str = ""', 'effective_budget_profile: str = "free"'):
         assert line in models, line
 
     # 4. the web config adapter and the settings route
@@ -107,7 +110,18 @@ def test_the_shipped_profiles_match_the_spec():
     assert one["cap_usd"] == 1.0
     assert one["animate_priority"] == ["hook", "cliffhanger", "peak", "turn", "longest_dialogue"]
     assert profiles["profiles"]["free"]["cap_usd"] == 0.0
-    assert profiles["profiles"]["quality"]["cap_usd"] is None
+    # DEC-221 (AI Story phase 7 stage 2a): the shipped quality profile is no longer a stub -- a
+    # real cap, the quality_roles images policy with its roles table, and 720p video.
+    quality = profiles["profiles"]["quality"]
+    assert quality["cap_usd"] == 2.0
+    assert quality["images"] == "quality_roles"
+    assert quality["roles"] == {
+        "sheet": ["gemini/nano-banana-2"],
+        "plate": ["gemini/nano-banana-2"],
+        "prop": ["gemini/nano-banana-2"],
+        "keyframe": ["fal/seedream-4.5-edit", "gemini/nano-banana-2-lite"],
+    }
+    assert quality["video_resolution"] == "720p"
 
 
 def test_a_broken_profiles_file_is_refused_not_patched(tmp_path):
@@ -121,9 +135,10 @@ def test_a_broken_profiles_file_is_refused_not_patched(tmp_path):
 # ------------------------------------------------------------ the env read
 
 def test_budget_from_env_defaults_and_overrides():
-    assert budget_from_env({}) == Budget(False, 1.0, 3.0, 10.0, "free")
+    # DEC-223 (AI Story phase 7 stage 2a): the caps default to 2 / 6 / 20, up from 1 / 3 / 10.
+    assert budget_from_env({}) == Budget(False, 2.0, 6.0, 20.0, "free")
     got = budget_from_env({"ALLOW_PAID": "1", "PER_EPISODE_CAP_USD": "0.50", "DAILY_CAP_USD": "", "BUDGET_PROFILE": ""})
-    assert got == Budget(True, 0.5, 3.0, 10.0, "one_dollar")
+    assert got == Budget(True, 0.5, 6.0, 20.0, "one_dollar")
 
 
 def test_a_garbage_cap_is_refused_naming_the_variable():

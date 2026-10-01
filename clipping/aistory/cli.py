@@ -167,7 +167,7 @@ import os
 import sys
 from datetime import datetime, timezone
 
-from . import defaults, refimages, schemas, templates, workflow
+from . import defaults, media_policy, refimages, schemas, templates, workflow
 from . import store as story_store
 from .steps import StepFailed
 from .steps import assets as assets_step
@@ -281,6 +281,19 @@ PROMPT_ONLY_HINT = "re-run with --prompt-only to continue with prompt-only consi
 
 # ------------------------------------------------------------------ parser
 
+class _ProfileFlag(argparse.Action):
+    """A ``new`` profile option that also notes it was given: a story created
+    with none of them gets the quality preset when the keys are set (phase 7,
+    ``media_policy.new_story_profile``); one that names any is honoured as
+    sent."""
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        setattr(namespace, self.dest, values)
+        given = set(getattr(namespace, "profile_given", None) or ())
+        given.add(self.dest)
+        namespace.profile_given = given
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=PROG,
@@ -337,15 +350,18 @@ def build_parser() -> argparse.ArgumentParser:
     concepts = [concept["concept_id"] for concept in templates.load_concepts()]
     new.add_argument("--concept", default=None, choices=concepts, metavar="ID",
                      help=f"a library concept to choose at once: {', '.join(concepts)}")
+    # Without any of the four below, a story is created on the quality preset
+    # (v2, tier 2, api, references, quality) when FAL_KEY and
+    # GEMINI_PAID_API_KEY are both set, else on these defaults (phase 7).
     new.add_argument("--tier", type=int, choices=defaults.TIERS, default=defaults.DEFAULT_TIER,
-                     help="generation tier (default: %(default)s)")
+                     action=_ProfileFlag, help="generation tier (default: %(default)s)")
     new.add_argument("--route", choices=defaults.ROUTES, default=defaults.DEFAULT_ROUTE,
-                     help="where images are made (default: %(default)s)")
+                     action=_ProfileFlag, help="where images are made (default: %(default)s)")
     new.add_argument("--consistency-mode", choices=defaults.CONSISTENCY_MODES,
-                     default=defaults.DEFAULT_CONSISTENCY_MODE,
+                     default=defaults.DEFAULT_CONSISTENCY_MODE, action=_ProfileFlag,
                      help="how characters are kept consistent (default: %(default)s)")
     new.add_argument("--budget-profile", choices=defaults.BUDGET_PROFILES,
-                     default=defaults.DEFAULT_BUDGET_PROFILE,
+                     default=defaults.DEFAULT_BUDGET_PROFILE, action=_ProfileFlag,
                      help="the story's budget profile (default: %(default)s)")
 
     # ---- step
@@ -659,6 +675,10 @@ def _cmd_new(args, stories) -> int:
         "consistency_mode": args.consistency_mode,
         "budget_profile": args.budget_profile,
     }
+    if not getattr(args, "profile_given", None):
+        # No profile option given: the quality preset when this process's
+        # environment holds both quality keys (the API's rule, on its Settings).
+        profile = media_policy.new_story_profile({}) or profile
     try:
         story = stories.create(
             language=args.lang, seed_text=args.seed_text, style_template_id=args.style,
@@ -809,6 +829,11 @@ def _phase2_params(args, stories, story, items):
     others)."""
     step, story_id = args.step, story["story_id"]
     checked = story
+    if args.prompt_only and media_policy.is_v2(story):
+        raise workflow.WorkflowError(
+            workflow.INVALID,
+            "--prompt-only cannot be used on a v2 story: its images run on quality links with their reference "
+            "images and never fall back to prompt-only consistency (DEC-221).")
     if args.prompt_only:
         checked = copy.deepcopy(story)
         checked["generation_profile"]["consistency_mode"] = refimages.PROMPT_ONLY
@@ -873,7 +898,10 @@ def _print_cast_progress(stories, story_id) -> None:
               + (" (waiting for an editor)" if item["needs_editor"] else ""))
     if any(item["needs_editor"] for item in progress["characters"].values()):
         print(f"🟡 {progress['edit_readiness']['message']}")
-        print(f"➡️ {PROMPT_ONLY_HINT}")
+        if media_policy.is_v2(story):
+            print(f"➡️ {refimages.quality_advice(progress['edit_readiness'])}")
+        else:
+            print(f"➡️ {PROMPT_ONLY_HINT}")
 
 
 def _approve_complete(stories, story_id, kinds) -> None:

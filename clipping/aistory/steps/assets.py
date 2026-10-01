@@ -135,6 +135,7 @@ import json
 import os
 import secrets
 import shutil
+import subprocess
 import tempfile
 import time
 from types import SimpleNamespace
@@ -144,11 +145,12 @@ from clipping.providers import gating, gen_timings, gencache, local_comfyui
 from clipping.providers import generation as gen
 from clipping.providers.registry import ChainError, Link, describe
 
-from .. import defaults, hardware, imaging, refimages, schemas, timing, video_plan, voices, wordtiming
+from .. import (defaults, hardware, imaging, media_policy, refimages, schemas, timing, video_plan, voices,
+               wordtiming)
 from .. import ledger as ledger_mod
 from .. import names as names_mod
 from .. import store as store_mod
-from ..render import audio_assets
+from ..render import audio_assets, imagesize
 from . import clips, entities, episode_common, llm_call, sticky_link, voice_lines
 from . import script as script_step
 from . import storyboard as storyboard_step
@@ -509,6 +511,37 @@ def _sha256_file(path):
     return digest.hexdigest()
 
 
+def v2_keyframe_source(story, produced, *, out_dir, run=None) -> str:
+    """The file a shot's image is stored from (phase 7, A6): *produced* as it
+    came for a legacy story; for a v2 story, centre-cropped to an exact, even
+    9:16 (``media_policy.keyframe_crop`` on ``imagesize.image_size``) by one
+    single-frame ffmpeg pass into *out_dir*, in the same format, when it is
+    not one already -- so the near-9:16 concat edge of DEC-217 never arises.
+    An unreadable size keeps the file (the render frames it as before).
+    ``ShotFailed`` when ffmpeg is missing or fails: never a silent keep.
+    *run* is ``subprocess.run`` (None) or a test's stand-in."""
+    if not media_policy.is_v2(story):
+        return produced
+    crop = media_policy.keyframe_crop(imagesize.image_size(produced))
+    if crop is None:
+        return produced
+    run = run or subprocess.run
+    ext = os.path.splitext(produced)[1] or ".png"
+    out = os.path.join(out_dir, f"keyframe-9x16{ext}")
+    argv = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", produced,
+            "-vf", f"crop={crop[0]}:{crop[1]}", "-frames:v", "1", out]
+    try:
+        result = run(argv, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    except OSError as exc:
+        raise ShotFailed(f"ffmpeg is needed to crop the image to 9:16 and cannot run ({exc}); install ffmpeg "
+                         "and run the step again (the call is booked and cached)") from None
+    if result.returncode != 0 or not os.path.isfile(out):
+        detail = (getattr(result, "stderr", "") or "").strip()[-200:]
+        raise ShotFailed(f"ffmpeg could not crop the image to {crop[0]}x{crop[1]} (exit {result.returncode}"
+                         f"{': ' + detail if detail else ''}); the call is booked and cached") from None
+    return out
+
+
 def _atomic_copy(src, dest) -> None:
     """Copy *src* to *dest* so a reader sees the old file or the new one
     (``voices._atomic_copy``'s pattern, duplicated: a private helper of
@@ -694,9 +727,25 @@ def image_kind(ec) -> str:
     return gen.IMAGE if ec.consistency_mode == PROMPT_ONLY else gen.IMAGE_EDIT
 
 
-def _chain_labels(kind, merged) -> list:
+# The ``media_policy`` role of a shot's image (phase 7, DEC-221).
+KEYFRAME_ROLE = "keyframe"
+
+
+def image_chain(ec, kind, merged) -> list:
+    """The chain the episode's shot images are made on: the env chain of
+    *kind* for a legacy story, the ``keyframe`` role's quality links for a
+    v2 one (``media_policy.role_chain``). ``ChainError`` passes through."""
+    return media_policy.role_chain(KEYFRAME_ROLE, kind, merged, ec.story)
+
+
+def chain_name(ec, kind) -> str:
+    """How that chain is named in a message (the env variable when legacy)."""
+    return media_policy.chain_name(KEYFRAME_ROLE, kind, ec.story)
+
+
+def _chain_labels(ec, kind, merged) -> list:
     try:
-        return [describe(link) for link in gen.chain_from_env(kind, merged)]
+        return [describe(link) for link in image_chain(ec, kind, merged)]
     except ChainError:
         return []
 
@@ -719,7 +768,7 @@ def episode_image_link(ec, storyboard, *, env=None, doc=_READ) -> dict:
         doc = _read_assets_doc(ec)
     entry = sticky_link.recorded(doc, sticky_link.IMAGE)
     link = entry["link"] if entry else None
-    chain = _chain_labels(image_kind(ec), gating.merged_env(env))
+    chain = _chain_labels(ec, image_kind(ec), gating.merged_env(env))
     served = {}
     for shot in storyboard["shots"]:
         if shot_image_path(ec, shot) is None:
@@ -748,7 +797,7 @@ def mixed_note(ec, info) -> str:
         counts[made_on] = counts.get(made_on, 0) + 1
     parts = [f"{made_on} made {count} shot{'s' if count != 1 else ''}" for made_on, count in counts.items()]
     return (f"ℹ️ Episode {ec.ep} mixes image links ({_and(parts)}), so it keeps none: each shot walks "
-            f"{gen.ENV_NAMES[image_kind(ec)]} as before. Choose one with the assets edit "
+            f"{chain_name(ec, image_kind(ec))} as before. Choose one with the assets edit "
             "{\"links\": {\"image\": \"<link>\"}}: the shots made on the others are then made again on it.")
 
 
@@ -861,11 +910,12 @@ def image_quote(ec, qty, *, env, story_spent, adapters=None, probe_local=False, 
     story = ec.story
     if ec.consistency_mode != PROMPT_ONLY:
         return refimages.edit_readiness(story, env=env, qty=qty, story_spent=story_spent, adapters=adapters,
-                                        size=SHOT_SIZE, probe_local=probe_local, transport=transport)
+                                        size=SHOT_SIZE, probe_local=probe_local, transport=transport,
+                                        role=KEYFRAME_ROLE)
     request = gen.GenRequest(kind=gen.IMAGE, width=SHOT_SIZE[0], height=SHOT_SIZE[1])
     return imaging.estimate(gen.IMAGE, env, route=story["generation_profile"]["route"], request=request, qty=qty,
                             story_spent=story_spent, adapters=adapters, step=STEP, what="the shot images",
-                            when="the assets step runs")
+                            when="the assets step runs", role=KEYFRAME_ROLE, story=story)
 
 
 _WHAT, _WHEN = "the shot images", "the assets step runs"
@@ -877,7 +927,8 @@ def _chain_rows(ec, qty, *, env, story_spent, adapters) -> dict:
     kind = image_kind(ec)
     request = gen.GenRequest(kind=kind, width=SHOT_SIZE[0], height=SHOT_SIZE[1])
     return imaging.estimate(kind, env, route=ec.story["generation_profile"]["route"], request=request, qty=qty,
-                            story_spent=story_spent, adapters=adapters, step=STEP, what=_WHAT, when=_WHEN)
+                            story_spent=story_spent, adapters=adapters, step=STEP, what=_WHAT, when=_WHEN,
+                            role=KEYFRAME_ROLE, story=ec.story)
 
 
 def _local_status(kind, label, env, adapters, transport) -> tuple:
@@ -916,7 +967,7 @@ def _sticky_quote(ec, qty, link_info, storyboard, *, env, story_spent, adapters,
     row = next((row for row in quote["links"] if row["link"] == link), None)
     why = None
     if row is None:
-        why = f"it is not a link of {gen.ENV_NAMES[kind]} any more"
+        why = f"it is not a link of {chain_name(ec, kind)} any more"
     elif row["status"] != "runnable":
         why = row["reason"]
     elif probe_local and qty and link.startswith("local/"):
@@ -954,7 +1005,7 @@ def sticky_offer(ec, storyboard, link, *, why, env, story_spent, adapters=None, 
     if nxt is not None:
         route = "paid" if nxt["paid"] else ("local" if nxt["link"].startswith("local/") else "free")
     return StickyLinkGone(
-        ep=ec.ep, link=link, why=str(why).rstrip(". "), chain=gen.ENV_NAMES[kind],
+        ep=ec.ep, link=link, why=str(why).rstrip(". "), chain=chain_name(ec, kind),
         next_link=nxt["link"] if nxt else None, next_route=route,
         next_reason=None if nxt else "; ".join(f"{row['link']}: {row['reason']}" for row in others) or None,
         redo=redo, todo=todo, est_usd=nxt["est_usd"] if nxt and nxt["paid"] else 0.0, paid=paid,
@@ -987,16 +1038,18 @@ def link_switch(ec, value, *, env, errors) -> dict:
         if slot not in value:
             continue
         kind = image_kind(ec) if slot == sticky_link.IMAGE else gen.VIDEO
+        name = chain_name(ec, kind) if slot == sticky_link.IMAGE else gen.ENV_NAMES[kind]
         try:
-            chain = [describe(link) for link in gen.chain_from_env(kind, merged)]
+            links = image_chain(ec, kind, merged) if slot == sticky_link.IMAGE else gen.chain_from_env(kind, merged)
+            chain = [describe(link) for link in links]
         except ChainError as exc:
-            errors.append(f"links.{slot}: {gen.ENV_NAMES[kind]} cannot be used ({exc})")
+            errors.append(f"links.{slot}: {name} cannot be used ({exc})")
             continue
         allowed = chain if slot == sticky_link.IMAGE else chain + [link for link in (clips.LOCAL_LINK,)
                                                                    if link not in chain]
         link = value[slot]
         if not isinstance(link, str) or link not in allowed:
-            errors.append(f"links.{slot}: {link!r} is not a link of {gen.ENV_NAMES[kind]} (its links: "
+            errors.append(f"links.{slot}: {link!r} is not a link of {name} (its links: "
                           f"{', '.join(chain)})")
             continue
         wanted[slot] = link
@@ -1195,7 +1248,7 @@ def asset_units(ec, script, storyboard, *, env, align_words=False, adapters=None
     sticky = images.get("sticky")
     images = {
         "shots": [shot["shot_id"] for shot in todo], "count": len(todo), "kind": kind,
-        "chain": gen.ENV_NAMES[kind], "consistency": mode, "route_class": images["route_class"],
+        "chain": chain_name(ec, kind), "consistency": mode, "route_class": images["route_class"],
         "link": images["link"], "est_usd": float(images["est_usd"] or 0.0), "links": images["links"],
         "ready": images["ready"], "message": images["message"],
     }
@@ -1611,8 +1664,10 @@ def plan_refusal(ec, units, *, unprobed=False):
             return gone["message"]
         if needs_editor(units):
             reasons = [f"{row['link']}: {row['reason']}" for row in images["links"]] or [images["message"]]
-            readiness = {"message": images["message"], "links": images["links"]}
-            return str(refimages.NeedsEditor(reasons, readiness, subject=f"Every shot of episode {ec.ep}"))
+            readiness = {"message": images["message"], "links": images["links"],
+                         "units": {"images": images["count"]}}
+            return str(refimages.NeedsEditor(reasons, readiness, subject=f"Every shot of episode {ec.ep}",
+                                             story=ec.story))
         return (f"Episode {ec.ep}'s shot images cannot be made: {images['message']} Nothing was generated or "
                 "spent.")
     video = units.get("video")
@@ -1673,6 +1728,9 @@ class _Assets(voice_lines.LineMeasurement):
     they stand, the gates every paid call meets, and what failed."""
 
     measure_step = STEP
+    # The ffmpeg runner of a v2 keyframe's source crop (A6); None is
+    # ``subprocess.run``, read when it runs (a test hands in a fake).
+    crop_run = None
 
     def __init__(self, ctx, ec, *, tools, transcribe=None, budget=None):
         self.ctx = ctx
@@ -1893,9 +1951,10 @@ class _Assets(voice_lines.LineMeasurement):
         if kind == gen.IMAGE_EDIT and not parts["references"]:
             raise ShotFailed("it has no reference image to send to an editor")
         try:
-            chain = gen.chain_from_env(kind, gates.merged)
+            # The role's chain (phase 7), built BEFORE the sticky pin below (DEC-204).
+            chain = image_chain(ec, kind, gates.merged)
         except ChainError as exc:
-            raise ShotFailed(f"{gen.ENV_NAMES[kind]} cannot be used: {exc}") from None
+            raise ShotFailed(f"{chain_name(ec, kind)} cannot be used: {exc}") from None
         link = self.link
         if link is not None:
             # A-087: the episode's image link alone -- never the next link.
@@ -1903,7 +1962,7 @@ class _Assets(voice_lines.LineMeasurement):
                 raise ShotFailed(self.gone_reason())
             pinned = [candidate for candidate in chain if describe(candidate) == link][:1]
             if not pinned:
-                raise self.gone(f"it is not a link of {gen.ENV_NAMES[kind]} any more")
+                raise self.gone(f"it is not a link of {chain_name(ec, kind)} any more")
             chain = pinned
         route = ec.story["generation_profile"]["route"]
         cache = self.cache(kind, unit="image", qty=1)
@@ -1927,7 +1986,7 @@ class _Assets(voice_lines.LineMeasurement):
                 reasons = [imaging.explain(kind, label, reason, chain=chain, merged=gates.merged,
                                            budget_obj=gates.budget, request=request, adapters=tools.adapters)
                            for label, reason in exc.failures]
-                raise ShotFailed(f"no link of {gen.ENV_NAMES[kind]} could make it on route {route}: "
+                raise ShotFailed(f"no link of {chain_name(ec, kind)} could make it on route {route}: "
                                  f"{'; '.join(reasons) or exc}", exc.failures) from None
             except Exception as exc:  # noqa: BLE001 - an adapter's bug fails this shot, named
                 raise ShotFailed(f"{type(exc).__name__}: {exc}") from None
@@ -1950,6 +2009,8 @@ class _Assets(voice_lines.LineMeasurement):
             except KeyError:
                 raise ShotFailed(f"{SHOTS_DIR}/{name} is not a real file or folder; it is never followed "
                                  "(the call is booked and cached: move it away and run the step again)") from None
+            # A v2 keyframe is stored as an exact 9:16 (A6); a legacy one as it came.
+            produced = v2_keyframe_source(ec.story, produced, out_dir=incoming, run=self.crop_run)
             _atomic_copy(produced, dest)
         self.drop_other_images(shot_id, ext)
         answered_seed = _seed_value(result.seed)
@@ -2022,7 +2083,7 @@ class _Assets(voice_lines.LineMeasurement):
         ec, ctx = self.ec, self.ctx
         if self.link_kept or (self.link_info or {}).get("mixed"):
             return
-        link = self.link or sticky_link.head_of(label, _chain_labels(image_kind(ec), self.gates.merged))
+        link = self.link or sticky_link.head_of(label, _chain_labels(ec, image_kind(ec), self.gates.merged))
         entry = sticky_link.record(link, now=llm_call.utc_now())
         self.link, self.link_kept = link, True
         ctx.on_log(f"🔗 Episode {ec.ep}'s image link is now {link}: every other shot of it is made on that link "
@@ -2086,7 +2147,7 @@ class _Assets(voice_lines.LineMeasurement):
             return
         self.resolve_link()
         mode = ec.consistency_mode
-        chain = gen.ENV_NAMES[gen.IMAGE if mode == PROMPT_ONLY else gen.IMAGE_EDIT]
+        chain = chain_name(ec, gen.IMAGE if mode == PROMPT_ONLY else gen.IMAGE_EDIT)
         locked = sum(1 for shot in board["shots"] if shot["assets"].get("locked"))
         ctx.on_log(f"🖼 Making {len(todo)} shot image{'s' if len(todo) != 1 else ''} on {chain}"
                    + (f" ({locked} locked, kept)" if locked else ""))
@@ -2794,10 +2855,12 @@ def regenerate_shot_image(ctx, ec, target, shot_id, note, *, tools, refuse) -> d
         elif ec.consistency_mode == REFERENCES:
             readiness = refimages.edit_readiness(ec.story, env=ctx.settings_env, qty=1,
                                                  story_spent=gates.spent(), adapters=tools.adapters,
-                                                 size=SHOT_SIZE, probe_local=True, transport=tools.transport)
+                                                 size=SHOT_SIZE, probe_local=True, transport=tools.transport,
+                                                 role=KEYFRAME_ROLE)
             if not readiness["ready"]:
                 reasons = [f"{row['link']}: {row['reason']}" for row in readiness["links"]] or [readiness["message"]]
-                raise refuse(str(refimages.NeedsEditor(reasons, readiness, subject=f"Shot {shot_id}")))
+                raise refuse(str(refimages.NeedsEditor(reasons, readiness, subject=f"Shot {shot_id}",
+                                                       story=ec.story)))
         pending = shot["assets"].get("pending")
         # The same request asked again (its call did not answer) keeps its
         # seed, so a paid request the provider holds is resumed, not bought

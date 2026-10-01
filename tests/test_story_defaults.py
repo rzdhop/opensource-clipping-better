@@ -166,3 +166,47 @@ def test_the_clip_defaults_agree_in_the_step_the_api_the_cli_and_the_dashboard()
     preview_src = (pane / "PreviewPane.jsx").read_text(encoding="utf-8")
     assert re.search(r"const \[fillFailedWithMotion, setFillFailedWithMotion\] = useState\(false\)", preview_src)
     assert re.search(r"const renderParams = \{[^}]*\bfill_failed_with_motion\b[^}]*\}", preview_src)
+
+
+def test_new_story_is_v2_quality_when_keys_present(monkeypatch, tmp_path, capsys):
+    """Phase 7 stage 2a (the human's answer: "tier 2 + the quality preset
+    when the keys are present"): a story created without a generation
+    profile -- through the API route's helper or ``--ai-story new`` without
+    any profile flag -- is a v2 story on the quality preset when Settings (or
+    the CLI's environment) hold both FAL_KEY and GEMINI_PAID_API_KEY; else
+    today's default. An explicit profile is honoured as sent, and
+    ``store.create``'s own default never moves."""
+    from clipping.aistory import media_policy
+    from clipping.aistory import store as story_store
+
+    quality = {"tier": 2, "route": "api", "consistency_mode": "references", "budget_profile": "quality",
+               "pipeline": "v2"}
+    assert defaults.quality_generation_profile() == quality
+    for name in ("FAL_KEY", "GEMINI_PAID_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+
+    # 1. the API route's helper, on the Settings values
+    assert media_policy.new_story_profile({"FAL_KEY": "fk", "GEMINI_PAID_API_KEY": "pk"}) == quality
+    assert media_policy.new_story_profile({"FAL_KEY": "fk"}) is None
+    assert media_policy.new_story_profile({"GEMINI_PAID_API_KEY": "pk"}) is None
+    assert media_policy.new_story_profile({}) is None
+
+    # 2. the CLI, on its own environment
+    cli = importlib.import_module("clipping.aistory.cli")
+    outputs = tmp_path / "outputs"
+    stories = story_store.StoryStore(outputs, on_log=lambda *a: None)
+
+    def created(*flags):
+        assert cli.main(["new", "--lang", "fr", "--outputs-dir", str(outputs), *flags]) == 0
+        newest = max(stories.list(), key=lambda entry: entry["created_at"] + entry["story_id"])
+        return stories.get(newest["story_id"])["generation_profile"]
+
+    assert created() == defaults.default_generation_profile()
+    monkeypatch.setenv("FAL_KEY", "fk")
+    monkeypatch.setenv("GEMINI_PAID_API_KEY", "pk")
+    assert created() == quality
+    assert created("--tier", "1") == defaults.default_generation_profile()
+
+    # 3. the store's own default is today's
+    assert stories.create(language="fr", now="2026-10-01T10:00:00+00:00")["generation_profile"] == \
+        defaults.default_generation_profile()

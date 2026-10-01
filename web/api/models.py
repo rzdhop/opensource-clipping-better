@@ -8,7 +8,7 @@ import enum
 from datetime import datetime
 from typing import Any, Literal, Optional, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_serializer
 
 # Render defaults are sourced from the CLI config so the API and the CLI cannot
 # drift apart: config_adapter falls back to these same constants.
@@ -396,7 +396,8 @@ class SettingsRequest(BaseModel):
     cloudflare_api_token: Optional[str] = None
     cloudflare_account_id: Optional[str] = None
     pollinations_api_key: Optional[str] = None
-    # Veo only: a separate, billing-enabled Google project (RC-V4). The
+    # Veo and the nano-banana images (DEC-222): a separate, billing-enabled
+    # Google project (RC-V4). The
     # response half (``gemini_paid_api_key_set``) has reported this since
     # stage 2; this is the save side (phase 6 stage 12).
     gemini_paid_api_key: Optional[str] = None
@@ -421,9 +422,9 @@ class SettingsResponse(BaseModel):
     allow_slow_chain: bool = False
     # Budget (AI Story): five-place defaults, clipping/providers/budget.py
     allow_paid: bool = False
-    per_episode_cap_usd: float = 1.0
-    daily_cap_usd: float = 3.0
-    per_story_cap_usd: float = 10.0
+    per_episode_cap_usd: float = 2.0
+    daily_cap_usd: float = 6.0
+    per_story_cap_usd: float = 20.0
     budget_profile: str = ""
     effective_budget_profile: str = "free"
     spend_today_usd: float = 0.0
@@ -434,7 +435,7 @@ class SettingsResponse(BaseModel):
     cloudflare_api_token_set: bool = False
     cloudflare_account_id_set: bool = False
     pollinations_api_key_set: bool = False
-    # Veo's own key (a separate, billing-enabled Google project). Reported
+    # Veo's and nano-banana's key (a separate, billing-enabled Google project). Reported
     # here; the field that sets it arrives with its Settings control.
     gemini_paid_api_key_set: bool = False
     local_comfyui_url: str = ""
@@ -592,6 +593,16 @@ class GenerationProfileModel(BaseModel):
     route: Literal["auto","local","api"] = "auto"
     consistency_mode: Literal["references","prompt_only"] = "references"
     budget_profile: Literal["free","one_dollar","quality"] = "free"
+    # Optional (phase 7, DEC-221): left out, a story is on the legacy pipeline.
+    pipeline: Optional[Literal["v2"]] = None
+
+    @model_serializer(mode="wrap")
+    def _without_unset_pipeline(self, handler):
+        # An absent pipeline is no key at all, as in a story written before it.
+        data = handler(self)
+        if isinstance(data, dict) and data.get("pipeline") is None:
+            data.pop("pipeline", None)
+        return data
 
 
 class StoryCreateRequest(BaseModel):

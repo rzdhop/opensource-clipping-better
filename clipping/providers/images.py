@@ -44,6 +44,7 @@ GEMINI_MODELS = {
 FAL_APPS = {
     "flux-schnell": "fal-ai/flux/schnell",
     "seedream-4-edit": "fal-ai/bytedance/seedream/v4/edit",
+    "seedream-4.5-edit": "fal-ai/bytedance/seedream/v4.5/edit",
     "flux-kontext-pro": "fal-ai/flux-pro/kontext",
     # Video ids: their adapter is video.FalVideoAdapter (phase 6). ltx-2-fast stays
     # listed for the ledger only; the adapter refuses it (16:9 only, A-101).
@@ -63,6 +64,18 @@ FAL_POLL_INTERVAL_SECONDS = 2.0
 FAL_POLL_BUDGET_SECONDS = 300.0
 
 _RATIOS = ("1:1", "9:16", "16:9", "3:4", "4:3", "2:3", "3:2", "4:5", "5:4", "21:9")
+
+# Gemini's ``generationConfig.imageConfig.imageSize`` (phase 7, A-113/A-121):
+# the 1K tier the price table's nano-banana rows are read at.
+GEMINI_IMAGE_SIZE = "1K"
+
+# fal seedream v4.5 edit (schema read 2026-10-01, A-111): a custom
+# ``image_size`` must hold at least 2560x1440 pixels and at most 4096 a side;
+# a request below that is scaled up keeping its ratio (720x1280 -> 1440x2560,
+# an exact 9:16), and at most 10 reference images are taken.
+SEEDREAM45_MIN_PIXELS = 2560 * 1440
+SEEDREAM45_MAX_SIDE = 4096
+SEEDREAM45_MAX_REFERENCES = 10
 
 
 # ------------------------------------------------------------------ helpers
@@ -86,6 +99,20 @@ def _aspect_ratio(width, height) -> str:
     want = (width or 1080) / (height or 1920)
     best = min(_RATIOS, key=lambda r: abs(int(r.split(":")[0]) / int(r.split(":")[1]) - want))
     return best
+
+
+def _seedream45_size(width, height) -> dict:
+    """``{width, height}`` for seedream v4.5: *width* x *height* (the request's
+    size, 9:16 when unset) scaled up, ratio kept, to the model's smallest
+    custom size; each side a multiple of 16 and at most 4096."""
+    width, height = (width or 1080), (height or 1920)
+    factor = max(1.0, (SEEDREAM45_MIN_PIXELS / (width * height)) ** 0.5)
+    sides = []
+    for side in (width, height):
+        scaled = side * factor
+        rounded = int(-(-round(scaled, 6) // 16) * 16)
+        sides.append(min(SEEDREAM45_MAX_SIDE, rounded))
+    return {"width": sides[0], "height": sides[1]}
 
 
 def _unknown_model(link, table):
@@ -182,7 +209,9 @@ class GeminiImageAdapter(_Adapter):
     def generate(self, link, request, *, credentials, on_log, transport=None, **_):
         transport = transport or urllib_transport
         model = GEMINI_MODELS.get(link.model) or _unknown_model(link, GEMINI_MODELS)
-        key = credentials["GOOGLE_API_KEY"]
+        # The link's own variable: GEMINI_PAID_API_KEY for nano-banana
+        # (DEC-222), never GOOGLE_API_KEY.
+        key = credentials[generation.env_keys_for(link)[0]]
         seed = _seed(request)
         parts = [{"text": request.prompt}]
         for path in request.references or ():
@@ -192,7 +221,8 @@ class GeminiImageAdapter(_Adapter):
             "contents": [{"parts": parts}],
             "generationConfig": {
                 "responseModalities": ["IMAGE"],
-                "imageConfig": {"aspectRatio": _aspect_ratio(request.width, request.height)},
+                "imageConfig": {"aspectRatio": _aspect_ratio(request.width, request.height),
+                                "imageSize": GEMINI_IMAGE_SIZE},
             },
         }
         url = f"{GEMINI_BASE}/models/{model}:generateContent"
@@ -235,6 +265,12 @@ class FalAdapter(_Adapter):
                 raise ValueError(f"{describe(link)} needs at least one reference image")
             return {**base, "image_urls": [data_url(p) for p in request.references],
                     "image_size": {"width": request.width, "height": request.height}}
+        if link.model == "seedream-4.5-edit":
+            # No negative prompt: the model has no such field (A-111).
+            if not request.references:
+                raise ValueError(f"{describe(link)} needs at least one reference image")
+            return {**base, "image_urls": [data_url(p) for p in request.references[:SEEDREAM45_MAX_REFERENCES]],
+                    "image_size": _seedream45_size(request.width, request.height)}
         if link.model == "flux-kontext-pro":
             if not request.references:
                 raise ValueError(f"{describe(link)} needs a reference image")

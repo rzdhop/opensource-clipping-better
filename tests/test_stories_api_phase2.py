@@ -1650,6 +1650,29 @@ def test_the_cast_estimate_counts_only_what_is_missing(api):
     assert body["units"] == {"llm_calls": 1, "images": 1, "edit_images": 8, "tts_chars": 120}
 
 
+def test_the_cast_estimate_on_a_v2_story_points_to_the_quality_keys_not_prompt_only(api):
+    """DEC-221/TASK 2 (phase 7 stage 2a): a v2 story has no prompt-only switch
+    to fall back to (store._merge_generation_profile), so its stop-and-ask
+    must say no quality image link can run and point to the quality keys
+    (refimages.quality_advice/editor_advice), never the legacy "need an
+    editor or prompt-only consistency" sentence meant for a story that does
+    have that switch."""
+    story_id = _cast_via_api(api, settings=NO_EDITOR)  # portraits, voices, samples; no sheet
+    response = api.client.patch(_url(story_id), json={
+        "generation_profile": {"pipeline": "v2", "budget_profile": "quality"}})
+    assert response.status_code == 200, response.text
+
+    body = _estimate(api, story_id, "cast")
+
+    assert body["units"] == {"llm_calls": 0, "images": 0, "edit_images": 6, "tts_chars": 0}
+    assert body["edit"]["ready"] is False
+    assert "need an editor or prompt-only consistency" not in body["message"]
+    assert "prompt-only" not in body["message"] and "prompt_only" not in body["message"]
+    assert "no quality image link can run" in body["message"]
+    assert "GEMINI_PAID_API_KEY" in body["message"] and "FAL_KEY" in body["message"]
+    assert "allow paid providers" in body["message"]
+
+
 def test_the_cast_estimate_counts_existing_missing_sheets_as_images_once_switched_to_prompt_only(api):
     """Regression lock for the Tier-2 walk finding "prompt-only sheets
     estimated as edits": a cast already stalled on missing sheets in

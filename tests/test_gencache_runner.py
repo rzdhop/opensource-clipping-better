@@ -26,7 +26,8 @@ from clipping.providers.transport import APITimeoutError, Response
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
 PROMPT = "an anthropomorphic kiwi in a linen shirt"
-ENV = {"FAL_KEY": "fk", "GOOGLE_API_KEY": "gk", "OPENAI_API_KEY": "ok"}
+# DEC-222: nano-banana reads GEMINI_PAID_API_KEY only, never GOOGLE_API_KEY.
+ENV = {"FAL_KEY": "fk", "GOOGLE_API_KEY": "gk", "GEMINI_PAID_API_KEY": "gk", "OPENAI_API_KEY": "ok"}
 
 APP = "fal-ai/flux/schnell"
 BASE = f"https://queue.fal.run/{APP}/requests/req-1"

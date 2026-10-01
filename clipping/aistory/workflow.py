@@ -45,6 +45,7 @@ from clipping.providers import registry
 from . import (
     defaults,
     imaging,
+    media_policy,
     prompting,
     prompts,
     refimages,
@@ -598,6 +599,13 @@ def build_style(stories, story_id, params, *, now) -> dict:
              f"{', '.join(defaults.CONSISTENCY_MODES)}, not {consistency!r}."),
         )
 
+    if consistency == refimages.PROMPT_ONLY and media_policy.is_v2(story):
+        raise WorkflowError(
+            INVALID,
+            "consistency_mode must stay references on a v2 story: it never falls back to prompt-only "
+            "consistency (DEC-221).",
+        )
+
     current = style_lock(stories, story_id)
     if current is not None and current.get("locked_at"):
         raise WorkflowError(
@@ -915,13 +923,15 @@ def image_verdict(stories, story, qty, *, env) -> dict:
     (``imaging.estimate``: the story's route, keys, ``allow_paid`` and the
     caps with the story's ledger total, the free allowance; a local link is
     "probed when it runs"). Nothing is called. The API's gate and estimate
-    and the CLI's gate ask this same question."""
+    and the CLI's gate ask this same question. A v2 story's portraits, plates
+    and props are asked of the ``sheet`` role's quality links (phase 7: the
+    three roles share one table row today); a legacy story's of IMAGE_CHAIN."""
     width, height = refimages.PORTRAIT_SIZE
     return imaging.estimate(
         gen.IMAGE, env, route=story["generation_profile"]["route"],
         request=gen.GenRequest(kind=gen.IMAGE, width=width, height=height), qty=qty,
         story_spent=cost_total(stories, story["story_id"]), step="image",
-        what="a reference image", when="the step runs",
+        what="a reference image", when="the step runs", role="sheet", story=story,
     )
 
 

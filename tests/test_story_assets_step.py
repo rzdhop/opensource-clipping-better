@@ -452,12 +452,14 @@ def test_a_paid_plan_over_the_episode_cap_stops_before_the_first_call_with_the_n
     assert fal.requests == [] and edge.calls == [] and _ledger(store, story_id) == []
 
     # With what the episode spent already, the plan as a whole goes over.
-    _spent(store, story_id, 0.9)
+    # DEC-223 (AI Story phase 7 stage 2a): the episode cap is now $2.00 (was $1.00); 1.9 pre-spent
+    # keeps the plan over it (1.9 + 24 * 0.01 = $2.14 > $2.00).
+    _spent(store, story_id, 1.9)
     message = _failed(store, story_id, adapters=_adapters(edge, fal=fal),
                       settings=_settings(IMAGE_CHAIN="fal/flux-schnell,pollinations/flux", **FAL, ALLOW_PAID="1"))
 
-    total = 0.9 + shots * FAL_PRICE
-    assert f"would bring this episode to ${total:.2f} of its $1.00 cap" in message
+    total = 1.9 + shots * FAL_PRICE
+    assert f"would bring this episode to ${total:.2f} of its $2.00 cap" in message
     assert "would go over a cap, so nothing was generated or spent" in message
     assert fal.requests == [] and edge.calls == [] and len(_ledger(store, story_id)) == 1
     assert not Path(os.environ["SPEND_PATH"]).exists()
@@ -522,13 +524,15 @@ def test_the_episode_cap_refuses_a_paid_image_at_the_call_with_the_numbers_and_o
     rows = [row for row in _ledger(store, story_id) if row["provider"] == "fal" and row["ep"] == 1]
     assert [(row["step"], row["est_usd"], row["paid"]) for row in rows] == [("assets", FAL_PRICE, True)]
     # Now this episode is at the edge of its cap: the next paid image is refused before the call.
-    ledger.append(step="assets", provider="fal", model="x", unit="image", qty=1, est_usd=0.985, paid=True, ep=1)
+    # DEC-223 (AI Story phase 7 stage 2a): the episode cap is now $2.00 (was $1.00); 1.985 keeps
+    # this episode's total (0.01 + 1.985 = $1.995) just under it, same margin as before.
+    ledger.append(step="assets", provider="fal", model="x", unit="image", qty=1, est_usd=1.985, paid=True, ep=1)
     with pytest.raises(steps.StepFailed) as caught:
         _regenerate_shot(store, story_id, "sh06", adapters=_adapters(fal=fal), settings=settings)
     message = str(caught.value)
     assert len(fal.requests) == 1
-    assert "would bring this episode to $1.00" in message or "would bring this episode to $1.01" in message
-    assert "of its $1.00 cap" in message and "sh06" not in message or "shot:1:sh06" in message
+    assert "would bring this episode to $2.00" in message or "would bring this episode to $2.01" in message
+    assert "of its $2.00 cap" in message and "sh06" not in message or "shot:1:sh06" in message
     shot = next(s for s in _shots(store, story_id) if s["shot_id"] == "sh06")
     assert shot["assets"]["pending"] is not None and shot["assets"]["provider"] == "pollinations"
     assert m.assets.shot_state(_ec(store, story_id), shot) == "failed"

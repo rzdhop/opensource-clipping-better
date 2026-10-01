@@ -110,7 +110,7 @@ function Settings() {
   const [cloudflareToken, setCloudflareToken] = useState('')
   const [cloudflareAccountId, setCloudflareAccountId] = useState('')
   const [pollinationsKey, setPollinationsKey] = useState('')
-  // Veo only: a separate, billing-enabled Google project (phase 6 stage 12, RC-V4).
+  // Veo and nano-banana: a separate, billing-enabled Google project (phase 6 stage 12, RC-V4; DEC-222).
   const [geminiPaidKey, setGeminiPaidKey] = useState('')
 
   // The endpoint URL and model are not secrets, so they are prefilled.
@@ -651,7 +651,7 @@ function Settings() {
             </div>
             <div className="form-group">
               <label className="form-label">
-                Gemini paid key (Veo only — a separate billing-enabled Google project)
+                Gemini paid key (Veo and the nano-banana images — a separate billing-enabled Google project)
                 <SetBadge on={settings?.gemini_paid_api_key_set} />
               </label>
               <PasswordInput value={geminiPaidKey} onChange={setGeminiPaidKey} placeholder="Paste the billing-enabled project's key" isSet={settings?.gemini_paid_api_key_set} />
@@ -767,7 +767,7 @@ function Settings() {
                   <option value="">auto — free until paid is allowed, then one_dollar</option>
                   <option value="free">free — $0.00: free chains or local, stills + motion</option>
                   <option value="one_dollar">one_dollar — ≤ $1 per episode: reference images + key shots animated</option>
-                  <option value="quality">quality — your cap: animate every shot</option>
+                  <option value="quality">quality — Quality (billed APIs): ≤ $2 per episode, quality image links, every shot animated</option>
                 </select>
                 <p className="form-hint">
                   In force now: <strong>{settings?.effective_budget_profile || 'free'}</strong>

@@ -123,7 +123,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
 from starlette.concurrency import run_in_threadpool
 
-from clipping.aistory import schemas, templates, workflow
+from clipping.aistory import media_policy, refimages, schemas, templates, workflow
 from clipping.aistory import store as story_store
 from clipping.aistory import uploads as uploads_mod
 from clipping.aistory.steps import bible as bible_step
@@ -560,7 +560,7 @@ def _plural(count, word) -> str:
     return f"{count} {word}{'' if count == 1 else 's'}"
 
 
-def _generation_message(units, images, edit, refusals) -> str:
+def _generation_message(units, images, edit, refusals, *, story) -> str:
     if refusals:
         return " ".join(refusals)
     parts = []
@@ -572,6 +572,11 @@ def _generation_message(units, images, edit, refusals) -> str:
         what = _plural(units["edit_images"], "reference image")
         if edit["ready"]:
             parts.append(f"Then {what} edited from the portraits: {edit['message']}")
+        elif media_policy.is_v2(story):
+            # DEC-221: a v2 story has no prompt-only switch to offer -- no quality image link can
+            # run, point to the keys (refimages.editor_advice dispatches to quality_advice).
+            parts.append(f"The {what}: no quality image link can run, so the step stops and asks "
+                         f"before them: {edit['message']} {refimages.editor_advice(story, edit)}")
         else:
             parts.append(f"The {what} need an editor or prompt-only consistency, so the step stops and asks "
                          f"before them: {edit['message']}")
@@ -613,7 +618,8 @@ def _generation_estimate(stories, story, step, units, *, env, probe_local=False)
     return {
         "step": step, "est_usd": round(est, 6), "units": dict(units),
         "route_class": images["route_class"], "link": images["link"], "links": images["links"],
-        "edit": edit, "ready": not refusals, "message": _generation_message(units, images, edit, refusals),
+        "edit": edit, "ready": not refusals,
+        "message": _generation_message(units, images, edit, refusals, story=story),
     }
 
 
@@ -655,9 +661,9 @@ def _generation_gate(stories, story, units, *, env, llm=True, needs_editor=False
         if needs_editor:
             edit = workflow.edit_readiness(stories, story, env=env, qty=max(units["edit_images"], 1))
             if not edit["ready"]:
+                # DEC-117's offer for a legacy story; the keys and allow_paid for a v2 one.
                 raise HTTPException(status_code=409, detail=(
-                    f"{edit['message']} Start ComfyUI, or allow a paid editor, or switch the story to "
-                    "prompt-only consistency."))
+                    f"{edit['message']} {refimages.editor_advice(story, edit)}"))
 
     return gate
 
@@ -678,8 +684,16 @@ async def create_story(req: StoryCreateRequest) -> dict:
 
     ``language`` is required (422 without it). An unknown
     ``style_template_id`` is a 400 naming the shipped ones.
+
+    Without a ``generation_profile`` the story is on the quality preset (v2,
+    tier 2, api, references, quality) when Settings hold both FAL_KEY and
+    GEMINI_PAID_API_KEY (``media_policy.new_story_profile``), else on the
+    story defaults; a profile that is sent is honoured as sent.
     """
-    profile = req.generation_profile.model_dump() if req.generation_profile is not None else None
+    if req.generation_profile is not None:
+        profile = req.generation_profile.model_dump()
+    else:
+        profile = media_policy.new_story_profile(worker.get_settings_env())
     try:
         return _stories().create(
             language=req.language,

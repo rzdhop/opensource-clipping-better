@@ -41,9 +41,23 @@ VIDEO_API = {"VIDEO_CHAIN": SEEDANCE, **tas.FAL}
 # order, so a moved key counts) and its assets fingerprints -- after a run
 # (``links`` recorded, phase 6 stage 6), without ``links`` (a phase-4/5
 # document), and the pure function's over hand-made inputs.
-TIER1_PAID_UNITS_SHA = "e1d7f3325f16506dfd79d30da9b2d5835bf6d4e486033139f8d181552446ab03"
-TIER1_FREE_UNITS_SHA = "91eecd2fd095d5becc4f201630f83ce36b5659aa006af8bb43cbbd1d65c75951"
-TIER1_UNITS_AFTER_RUN_SHA = "ef1a91f980aa0457e607e985ee4415f7b4ebae5e984b535fcb6d1ce05008f264"
+#
+# DEC-223 (AI Story phase 7 stage 2a): the *_UNITS_SHA constants below were
+# recomputed after the budget caps moved from 1/3/10 to 2/6/20 -- asset_units
+# embeds the caps (assets.py's "caps" field) so its hash moves with them.
+# Proof the move is caused only by the caps, nothing else in this guard: with
+# DAILY_CAP_USD/PER_STORY_CAP_USD (and PER_EPISODE_CAP_USD on the free-route
+# call) forced back to 1.00/3.00/10.00 via `env=dict(paid, DAILY_CAP_USD=...)`
+# -- the test's own settings mechanism, no source edited -- asset_units on
+# this same fixture reproduces the OLD pinned values byte for byte:
+#   paid:       e1d7f3325f16506dfd79d30da9b2d5835bf6d4e486033139f8d181552446ab03
+#   free:       91eecd2fd095d5becc4f201630f83ce36b5659aa006af8bb43cbbd1d65c75951
+#   after_run:  ef1a91f980aa0457e607e985ee4415f7b4ebae5e984b535fcb6d1ce05008f264
+# The fingerprint constants (current_fingerprint, assets_fingerprint) take no
+# env/caps and are unchanged -- verified the same way, byte for byte.
+TIER1_PAID_UNITS_SHA = "25339e021855433006083e738c5fb2b549186873534993d40007b56ef7024d54"
+TIER1_FREE_UNITS_SHA = "275f78232679994ccc721d0a41c78cc6d7e7092bc1d1f9b5cbb2a62ddfeb45af"
+TIER1_UNITS_AFTER_RUN_SHA = "2c542ebfd346bc9bbbbb9665b4bbc3c40d20e2a89f125da397bdddf2d036813d"
 TIER1_FP_AFTER_RUN = "ace3809bca051e4c02e5ac90cac73eead1a21e73a8f9cf50a0c47a649174dccd"
 TIER1_FP_WITHOUT_LINKS = "85401247ad999e25ea0edac11e06b194b85ce7195c27d4311c448622ae357c4b"
 PURE_FP = "8f4570c1156f97a1ef87dbfbf3a8f9d950e659583530e3765fdb4963f0b081eb"

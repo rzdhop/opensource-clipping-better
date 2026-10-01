@@ -59,7 +59,9 @@ REAL_STORIES = (ROOT / "outputs" / "stories", ROOT / "outputs" / "stories.json")
 
 # Test values only: every request goes to a fake.
 FAL = {"FAL_KEY": "test-fal-key"}
-GEMINI = {"GOOGLE_API_KEY": "test-google-key"}
+# DEC-222: nano-banana (the only gemini image/edit link) reads GEMINI_PAID_API_KEY only, never
+# GOOGLE_API_KEY.
+GEMINI = {"GOOGLE_API_KEY": "test-google-key", "GEMINI_PAID_API_KEY": "test-google-key"}
 PAID_ON = {"ALLOW_PAID": "1"}
 COMFY = {"LOCAL_COMFYUI_URL": "http://comfy.test:8188"}
 FREE = {"IMAGE_CHAIN": "pollinations/flux"}
@@ -581,14 +583,15 @@ def test_no_editor_on_the_route_stops_before_any_call_of_any_kind(store, tmp_pat
     error, log = _refused(m.character_image, store, story_id, CHAR, "turnaround", env={**FREE, **GEMINI},
                           adapters=adapters, error=m.NeedsEditor)
 
+    # DEC-223 (AI Story phase 7 stage 2a): the default daily cap is now $6.00 (was $3.00).
     assert error.reasons == [
         "local/comfyui: route is api",
         "gemini/nano-banana-2-lite: refused: est $0.034 on gemini/nano-banana-2-lite; allow_paid is off "
-        "(today $0.00 of $3.00)",
+        "(today $0.00 of $6.00)",
         "fal/seedream-4-edit: no API key (FAL_KEY is not set)",
         "fal/flux-kontext-pro: no API key (FAL_KEY is not set)",
         "gemini/nano-banana-2: refused: est $0.067 on gemini/nano-banana-2; allow_paid is off "
-        "(today $0.00 of $3.00)",
+        "(today $0.00 of $6.00)",
     ]
     assert (error.readiness["ready"], error.readiness["route_class"], error.readiness["link"]) == (
         False, "blocked", None)
@@ -707,8 +710,9 @@ def test_paid_off_refuses_a_paid_editor_with_the_numbers_and_sends_nothing(store
     error, _log = _refused(m.character_image, store, story_id, CHAR, "turnaround", env=SEEDREAM,
                            transport=transport, error=m.NeedsEditor)
 
+    # DEC-223 (AI Story phase 7 stage 2a): the default daily cap is now $6.00 (was $3.00).
     assert error.reasons == [
-        "fal/seedream-4-edit: refused: est $0.030 on fal/seedream-4-edit; allow_paid is off (today $0.00 of $3.00)"]
+        "fal/seedream-4-edit: refused: est $0.030 on fal/seedream-4-edit; allow_paid is off (today $0.00 of $6.00)"]
     assert transport.calls == []  # RC-T3 / RC-P10
     assert _ledger(store, story_id) == [] and not _spend(tmp_path).exists()
 
@@ -833,11 +837,12 @@ def test_no_link_of_the_image_chain_names_every_reason_with_the_numbers(store, t
     error, log = _refused(m.character_image, store, story_id, CHAR, "portrait", env=env, transport=transport)
 
     assert not isinstance(error, m.NeedsEditor)
+    # DEC-223 (AI Story phase 7 stage 2a): the default daily cap is now $6.00 (was $3.00).
     assert error.reasons == [
         "gemini/nano-banana-2-lite: paid link; allow_paid is off (est $0.034 per image; today $0.00 of the "
-        "$3.00 daily cap)",
+        "$6.00 daily cap)",
         "fal/flux-schnell: paid link; allow_paid is off (est $0.003 per image; today $0.00 of the "
-        "$3.00 daily cap)",
+        "$6.00 daily cap)",
     ]
     assert "no link of IMAGE_CHAIN could make it on route auto" in str(error)
     assert transport.calls == [] and _ledger(store, story_id) == []
@@ -1152,12 +1157,13 @@ def test_edit_readiness_is_a_no_call_precheck_in_the_style_preview_shape(store, 
 
     assert set(body) == set(style_preview.estimate({}, route="api"))
     assert (body["ready"], body["route_class"], body["link"], body["est_usd"]) == (False, "blocked", None, 0.0)
+    # DEC-222: nano-banana reads GEMINI_PAID_API_KEY only, never GOOGLE_API_KEY.
     assert [(row["link"], row["reason"]) for row in body["links"]] == [
         ("local/comfyui", "route is api"),
-        ("gemini/nano-banana-2-lite", "no API key (GOOGLE_API_KEY is not set)"),
+        ("gemini/nano-banana-2-lite", "no API key (GEMINI_PAID_API_KEY is not set)"),
         ("fal/seedream-4-edit", "no API key (FAL_KEY is not set)"),
         ("fal/flux-kontext-pro", "no API key (FAL_KEY is not set)"),
-        ("gemini/nano-banana-2", "no API key (GOOGLE_API_KEY is not set)"),
+        ("gemini/nano-banana-2", "no API key (GEMINI_PAID_API_KEY is not set)"),
     ]
     assert body["message"].startswith("No link of IMAGE_EDIT_CHAIN can make a reference image on route api: ")
     # An estimate reads; it writes nothing and probes nothing (no_network would fail).

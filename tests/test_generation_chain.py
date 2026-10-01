@@ -121,7 +121,8 @@ class FakeAdapter:
 
 def run(kind, chain, adapters, **kw):
     log = []
-    kw.setdefault("env", {"FAL_KEY": "f", "GOOGLE_API_KEY": "g", "OPENAI_API_KEY": "o",
+    # DEC-222: nano-banana reads GEMINI_PAID_API_KEY only, never GOOGLE_API_KEY.
+    kw.setdefault("env", {"FAL_KEY": "f", "GOOGLE_API_KEY": "g", "GEMINI_PAID_API_KEY": "g", "OPENAI_API_KEY": "o",
                           "CLOUDFLARE_API_TOKEN": "c", "CLOUDFLARE_ACCOUNT_ID": "acc"})
     kw.setdefault("sleep_fn", lambda s: None)
     result = run_generation_chain(kind, parse_generation_chain(kind, chain), GenRequest(kind=kind, prompt="a kiwi"),

@@ -41,7 +41,7 @@ from clipping.providers import generation as gen
 from clipping.providers.registry import ChainError
 
 from . import ledger as ledger_mod
-from . import schemas
+from . import media_policy, schemas
 
 LOCK_NAME = "style_lock.json"
 LEDGER_NAME = "cost_ledger.json"
@@ -88,15 +88,20 @@ def read_lock(stories, story_id, *, error) -> dict:
     return lock
 
 
-def resolve(kind, settings_env, *, error):
+def resolve(kind, settings_env, *, error, role=None, story=None):
     """``(merged env, chain, budget)`` for *kind*: the Settings values over the
     process environment, the chain they name and the budget they describe.
-    *error* when the chain or a cap cannot be used."""
+    *error* when the chain or a cap cannot be used.
+
+    With *role* and *story* (phase 7, DEC-221) the chain is
+    ``media_policy.role_chain``'s: the env chain for a legacy story, the
+    role's quality links for a v2 one. Without them it is the env chain."""
     merged = gating.merged_env(settings_env)
     try:
-        chain = gen.chain_from_env(kind, merged)
+        chain = (media_policy.role_chain(role, kind, merged, story) if role is not None
+                 else gen.chain_from_env(kind, merged))
     except ChainError as exc:
-        raise error(f"{gen.ENV_NAMES[kind]} cannot be used: {exc}") from None
+        raise error(f"{media_policy.chain_name(role, kind, story)} cannot be used: {exc}") from None
     try:
         budget_obj = gating.budget_of(merged)
     except ValueError as exc:
@@ -187,10 +192,12 @@ def blocked(step, qty, rows, why) -> dict:
     }
 
 
-def no_link_message(kind, rows, *, what, route) -> str:
-    """"No link of <CHAIN> can make <what> on route <route>: <each link's reason>."."""
+def no_link_message(kind, rows, *, what, route, chain_name=None) -> str:
+    """"No link of <CHAIN> can make <what> on route <route>: <each link's reason>."
+    *chain_name* names the chain instead of *kind*'s env variable (a v2
+    story's role, ``media_policy.chain_name``)."""
     detail = "; ".join(f"{row['link']}: {row['reason']}" for row in rows) or "the chain is empty"
-    return f"No link of {gen.ENV_NAMES[kind]} can make {what} on route {route}: {detail}."
+    return f"No link of {chain_name or gen.ENV_NAMES[kind]} can make {what} on route {route}: {detail}."
 
 
 def _images(qty) -> str:
@@ -198,7 +205,7 @@ def _images(qty) -> str:
 
 
 def estimate(kind, settings_env, *, route, request, qty=1, story_spent=0.0, adapters=None,
-             step, what, when) -> dict:
+             step, what, when, role=None, story=None) -> dict:
     """What *qty* requests like *request* on *kind*'s chain would cost and
     where they would run; nothing is called::
 
@@ -217,14 +224,19 @@ def estimate(kind, settings_env, *, route, request, qty=1, story_spent=0.0, adap
     local -- and each row's ``est_usd`` is the same for that link.
     ``blocked``: no link can run; ``message`` then names every link's reason
     ("No link of <CHAIN> can make <what> on route <route>: ...").
+
+    *role* and *story* (phase 7): the chain is ``media_policy.role_chain``'s,
+    the one :func:`resolve` hands the run (the env chain for a legacy story).
     """
     if adapters is None:
         adapters_mod.load_all()
     merged = gating.merged_env(settings_env)
+    name = media_policy.chain_name(role, kind, story)
     try:
-        chain = gen.chain_from_env(kind, merged)
+        chain = (media_policy.role_chain(role, kind, merged, story) if role is not None
+                 else gen.chain_from_env(kind, merged))
     except ChainError as exc:
-        return blocked(step, qty, [], f"{gen.ENV_NAMES[kind]} cannot be used: {exc}")
+        return blocked(step, qty, [], f"{name} cannot be used: {exc}")
     try:
         budget_obj = gating.budget_of(merged)
     except ValueError as exc:
@@ -232,10 +244,11 @@ def estimate(kind, settings_env, *, route, request, qty=1, story_spent=0.0, adap
 
     rows = [estimate_row(kind, link, merged, budget_obj, request, qty=qty, route=route,
                          story_spent=story_spent, adapters=adapters) for link in chain]
-    return verdict(kind, rows, route=route, qty=qty, step=step, what=what, when=when)
+    return verdict(kind, rows, route=route, qty=qty, step=step, what=what, when=when,
+                   chain_name=None if name == gen.ENV_NAMES[kind] else name)
 
 
-def verdict(kind, rows, *, route, qty, step, what, when) -> dict:
+def verdict(kind, rows, *, route, qty, step, what, when, chain_name=None) -> dict:
     """:func:`estimate`'s answer from its rows (:func:`estimate_row`): the
     first runnable link decides the class, the price and the message; none
     is ``blocked``. A caller that learns more than the estimate knew -- a
@@ -243,7 +256,8 @@ def verdict(kind, rows, *, route, qty, step, what, when) -> dict:
     ``skipped`` and asks again."""
     first = next((row for row in rows if row["status"] == "runnable"), None)
     if first is None:
-        return blocked(step, qty, rows, no_link_message(kind, rows, what=what, route=route))
+        return blocked(step, qty, rows, no_link_message(kind, rows, what=what, route=route,
+                                                        chain_name=chain_name))
 
     label = first["link"]
     if first["paid"]:

@@ -808,7 +808,8 @@ def test_measure_estimate_prices_a_paid_voice_and_says_what_blocks_it(store, mon
     assert kore["link"] == GEMINI_LINK and kore["paid"] is True and kore["lines"] == 5
     assert kore["chars"] == sum(len(line["text"]) for line in theirs)
     assert kore["est_usd"] == price and kore["allowed"] is False
-    assert kore["reason"] == f"refused: est ${price:.3f} on {GEMINI_LINK}; allow_paid is off (today $0.00 of $3.00)"
+    # DEC-223 (AI Story phase 7 stage 2a): the default daily cap is now $6.00 (was $3.00).
+    assert kore["reason"] == f"refused: est ${price:.3f} on {GEMINI_LINK}; allow_paid is off (today $0.00 of $6.00)"
     assert estimate["est_usd"] == price and estimate["allow_paid"] is False
     assert estimate["paid_links"] == [{"link": GEMINI_LINK, "allowed": False, "reason": kore["reason"]}]
     # A paid link never draws on the free allowance.

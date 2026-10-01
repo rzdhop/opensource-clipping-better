@@ -275,6 +275,7 @@ _PROFILE_CHOICES = {
     "route": defaults.ROUTES,
     "consistency_mode": defaults.CONSISTENCY_MODES,
     "budget_profile": defaults.BUDGET_PROFILES,
+    "pipeline": defaults.PIPELINES,
 }
 
 _INDEX_ENTRY_SCHEMA = {
@@ -519,6 +520,12 @@ def _merge_generation_profile(partial) -> dict:
             raise ValueError(
                 f"generation_profile.{key} must be one of {list(choices)}, not {value!r}")
         profile[key] = value
+    if profile.get("pipeline") == defaults.PIPELINE_V2 and profile["consistency_mode"] != "references":
+        # DEC-221: a v2 story's images are edits of its references; it has no
+        # prompt-only mode to fall back to.
+        raise ValueError(
+            "generation_profile.consistency_mode must be references on a v2 story (pipeline v2), "
+            f"not {profile['consistency_mode']!r}: it never falls back to prompt-only consistency")
     return profile
 
 

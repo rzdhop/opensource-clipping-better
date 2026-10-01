@@ -152,7 +152,8 @@ def test_gemini_edits_with_reference_images_over_rest(tmp_path, ref):
     transport = FakeTransport([(200, gemini_answer())])
     result = images.GEMINI.generate(
         Link("gemini", "nano-banana-2-lite"), request("image_edit", out_dir=str(tmp_path), references=(ref,), width=1080, height=1920),
-        credentials={"GOOGLE_API_KEY": "gk"}, on_log=lambda *a: None, transport=transport)
+        # DEC-222: nano-banana reads GEMINI_PAID_API_KEY only, never GOOGLE_API_KEY.
+        credentials={"GEMINI_PAID_API_KEY": "gk"}, on_log=lambda *a: None, transport=transport)
     call = transport.calls[0]
     assert call["url"] == "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-image:generateContent"
     assert call["headers"]["x-goog-api-key"] == "gk"
@@ -172,8 +173,9 @@ def test_gemini_edits_with_reference_images_over_rest(tmp_path, ref):
 def test_gemini_reports_an_answer_without_an_image(tmp_path):
     transport = FakeTransport([(200, {"candidates": [{"content": {"parts": [{"text": "I cannot draw that"}]}, "finishReason": "SAFETY"}]})])
     with pytest.raises(errors.ProviderError) as excinfo:
+        # DEC-222: nano-banana reads GEMINI_PAID_API_KEY only, never GOOGLE_API_KEY.
         images.GEMINI.generate(Link("gemini", "nano-banana-2-lite"), request(out_dir=str(tmp_path)),
-                               credentials={"GOOGLE_API_KEY": "gk"}, on_log=lambda *a: None, transport=transport)
+                               credentials={"GEMINI_PAID_API_KEY": "gk"}, on_log=lambda *a: None, transport=transport)
     assert "no image" in str(excinfo.value) and "SAFETY" in str(excinfo.value)
 
 
@@ -190,8 +192,9 @@ def test_a_retired_gemini_image_model_is_swapped_inside_gemini_by_the_runner(tmp
 
 def run_edit(chain, transport, tmp_path, *, allow_paid, env=None, budget_check=lambda e, l: None):
     log = []
-    env = env if env is not None else {"GOOGLE_API_KEY": "gk", "FAL_KEY": "fk", "OPENAI_API_KEY": "ok",
-                                       "LOCAL_COMFYUI_URL": "http://127.0.0.1:8188"}
+    # DEC-222: nano-banana reads GEMINI_PAID_API_KEY only, never GOOGLE_API_KEY.
+    env = env if env is not None else {"GOOGLE_API_KEY": "gk", "GEMINI_PAID_API_KEY": "gk", "FAL_KEY": "fk",
+                                       "OPENAI_API_KEY": "ok", "LOCAL_COMFYUI_URL": "http://127.0.0.1:8188"}
     out = run_generation_chain("image_edit", parse_generation_chain("image_edit", chain),
                                request("image_edit", out_dir=str(tmp_path)), env=env, allow_paid=allow_paid,
                                on_log=log.append, budget_check=budget_check, transport=transport,

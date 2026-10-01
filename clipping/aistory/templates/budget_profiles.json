@@ -17,11 +17,19 @@
       "video_link_policy": "cheapest_available"
     },
     "quality": {
-      "cap_usd": null,
-      "images": "best_editor_with_refs",
+      "label": "Quality (billed APIs)",
+      "cap_usd": 2.0,
+      "images": "quality_roles",
+      "roles": {
+        "sheet": ["gemini/nano-banana-2"],
+        "plate": ["gemini/nano-banana-2"],
+        "prop": ["gemini/nano-banana-2"],
+        "keyframe": ["fal/seedream-4.5-edit", "gemini/nano-banana-2-lite"]
+      },
       "tts": "free_or_local",
       "animate": "all_shots",
       "video_link_policy": "first_in_chain",
+      "video_resolution": "720p",
       "tier3_native_audio": "opt_in"
     }
   }
