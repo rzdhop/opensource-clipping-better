@@ -334,7 +334,12 @@ def test_the_default_chain_with_no_key_names_its_primaries(cli):
 
     assert cli.run("step", story_id, "concepts") == 1
     err = cli.capsys.readouterr().err
-    for name in ("groq", "gemini", "openrouter", "mistral"):
+    # DEC-224: the AI Story default chain (phase 7 stage 2b); its primaries
+    # are openrouter and gemini (the nvidia links are the floor).
+    primaries = {link.provider for link in registry.parse_chain(registry.DEFAULT_STORY_LLM_CHAIN)
+                 if registry.is_primary(link)}
+    assert primaries == {"openrouter", "gemini"}
+    for name in primaries:
         assert registry.PROVIDERS[name].env_key in err
 
 
@@ -345,7 +350,8 @@ def test_the_slow_floor_alone_is_refused_unless_allowed(cli):
 
     assert cli.run("step", story_id, "bible") == 1
     err = cli.capsys.readouterr().err
-    assert "GROQ_API_KEY" in err and "--allow-slow-chain" in err
+    # DEC-224: the AI Story default chain names gemini (not groq) as a free primary.
+    assert "GOOGLE_API_KEY" in err and "--allow-slow-chain" in err
     assert runner.calls == []
 
     assert cli.run("step", story_id, "bible", "--allow-slow-chain") == 0

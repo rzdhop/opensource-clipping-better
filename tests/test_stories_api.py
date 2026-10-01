@@ -404,7 +404,9 @@ def test_the_no_key_refusal_names_the_keys_of_the_default_chain(api):
 
     detail = api.client.post(f"/api/stories/{story_id}/concepts/generate").json()["detail"]
 
-    for name in ("groq", "gemini", "openrouter", "mistral"):
+    # DEC-224: the AI Story default chain (phase 7 stage 2b) names openrouter
+    # and gemini as its primaries; the nvidia links are the floor.
+    for name in ("gemini", "openrouter"):
         assert registry.PROVIDERS[name].env_key in detail
     assert "OPENROUTER_API_KEY (https://openrouter.ai/keys) (paid)" in detail
 
@@ -419,8 +421,13 @@ def test_the_slow_floor_alone_is_refused_exactly_as_a_clip_job_is(api):
     clip_response = api.client.post("/api/jobs", json={"upload_filename": "talk.mp4"})
 
     assert story_response.status_code == clip_response.status_code == 400
-    assert story_response.json()["detail"] == clip_response.json()["detail"]
-    assert "GROQ_API_KEY" in story_response.json()["detail"]
+    # DEC-224: AI Story has its own default chain since phase 7 stage 2b, so the
+    # two refusals name different links and keys; the rule and its words are one.
+    story_detail, clip_detail = story_response.json()["detail"], clip_response.json()["detail"]
+    for detail in (story_detail, clip_detail):
+        assert detail.startswith("This job would run on nvidia/")
+        assert detail.endswith('Set any one of them, or turn on "Run on the slow chain anyway" in Settings.')
+    assert "GOOGLE_API_KEY" in story_detail and "GROQ_API_KEY" in clip_detail
     assert api.jobs.list_jobs() == [] and api.submitted == []
 
 
@@ -1099,7 +1106,8 @@ def test_an_estimate_on_the_slow_floor_is_not_ready(api):
     body = api.client.get(f"/api/stories/{story_id}/estimate/concepts").json()
 
     assert body["route_class"] == "free" and body["link"].startswith("nvidia/")
-    assert body["ready"] is False and "GROQ_API_KEY" in body["message"]
+    # DEC-224: the AI Story default chain names gemini (not groq) as a free primary.
+    assert body["ready"] is False and "GOOGLE_API_KEY" in body["message"]
 
 
 # ============================================ paid links need allow_paid (DEC-097)
@@ -1188,8 +1196,9 @@ def test_a_skipped_paid_primary_can_leave_a_story_step_on_the_slow_floor(api):
 
     assert response.status_code == 400
     detail = response.json()["detail"]
-    assert "GROQ_API_KEY" in detail and "OPENROUTER_API_KEY" not in detail
-    assert detail.endswith(f"(Not used by AI Story: openrouter/mistralai/mistral-small-3.2-24b-instruct, {PAID_REASON}.)")
+    # DEC-224: the AI Story default chain (phase 7 stage 2b).
+    assert "GOOGLE_API_KEY" in detail and "OPENROUTER_API_KEY" not in detail
+    assert detail.endswith(f"(Not used by AI Story: openrouter/mistralai/mistral-medium-3.1, {PAID_REASON}.)")
     assert api.jobs.list_jobs() == [] and api.submitted == []
     # A clip job on the same Settings is not affected: it starts.
     clip = api.client.post("/api/jobs", json={"upload_filename": "talk.mp4"})

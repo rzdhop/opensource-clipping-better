@@ -51,6 +51,11 @@ PERSISTED_KEYS = frozenset({
     "DEFAULT_WHISPER_MODEL",
     "DEFAULT_WHISPER_DEVICE",
     "DEFAULT_AI_PROVIDER",
+    # AI Story's own chain override (phase 7 stage 2b, DEC-224). Not a secret:
+    # a provider/model list, like LLM_CHAIN -- which is deliberately NOT in
+    # this set. LLM_CHAIN has only ever been a per-job or process-env value;
+    # STORY_LLM_CHAIN is the first chain spec a Settings save can persist.
+    "STORY_LLM_CHAIN",
     # Not a secret: a switch. Stored as "1" or not at all (DEC-043, DEC-073).
     "ALLOW_SLOW_CHAIN",
     # Budget (AI Story, DEC-097): a switch stored like ALLOW_SLOW_CHAIN, three

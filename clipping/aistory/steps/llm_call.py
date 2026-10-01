@@ -93,8 +93,18 @@ _TRIMMED_LABELS = {
 # ------------------------------------------------------------- chain + keys
 
 def resolve_chain(settings_env) -> list:
-    """The ``LLM_CHAIN`` to run: Settings, then the process env, then the
-    shipped default.
+    """The chain a story step runs: ``STORY_LLM_CHAIN`` in Settings, then
+    ``STORY_LLM_CHAIN`` in the process env, then ``LLM_CHAIN`` in Settings,
+    then ``LLM_CHAIN`` in the process env, then the shipped AI Story default
+    (``registry.DEFAULT_STORY_LLM_CHAIN``).
+
+    ``STORY_LLM_CHAIN`` lets AI Story be pointed at a different chain than
+    Clips without disturbing a Clips job (DEC-224): an operator who already
+    set ``LLM_CHAIN`` keeps exactly today's behaviour (it is checked before
+    the new default), and an installation with nothing set at all -- no
+    Settings, no .env -- gets the AI Story chain instead of silently
+    inheriting Clips' chain (DEFAULT_LLM_CHAIN), which was never benchmarked
+    against a story-writing prompt.
 
     A blank value at one level falls through to the next, as it does for a
     clip job (the web layer passes ``""`` on and ``chain_from_env`` then
@@ -102,10 +112,14 @@ def resolve_chain(settings_env) -> list:
     a configuration error, not a failed call, and is not retried.
     """
     env = settings_env or {}
-    spec = str(env.get("LLM_CHAIN") or "").strip()
+    spec = str(env.get("STORY_LLM_CHAIN") or "").strip()
+    if not spec:
+        spec = os.environ.get("STORY_LLM_CHAIN", "").strip()
+    if not spec:
+        spec = str(env.get("LLM_CHAIN") or "").strip()
     if not spec:
         spec = os.environ.get("LLM_CHAIN", "").strip()
-    return registry.parse_chain(spec or registry.DEFAULT_LLM_CHAIN)
+    return registry.parse_chain(spec or registry.DEFAULT_STORY_LLM_CHAIN)
 
 
 def resolve_keys(settings_env) -> dict:

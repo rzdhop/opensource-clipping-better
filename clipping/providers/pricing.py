@@ -89,6 +89,14 @@ LlmPrice = namedtuple("LlmPrice", "input_usd_per_m output_usd_per_m note")
 LLM_PRICES = {
     "openrouter/mistralai/mistral-small-3.2-24b-instruct": LlmPrice(0.10, 0.30, "the dearest of 4 hosts (Mistral's own), read on 2026-09-30 at https://openrouter.ai/api/v1/models/mistralai/mistral-small-3.2-24b-instruct/endpoints; the model's listed price at https://openrouter.ai/api/v1/models is $0.09375 in / $0.25 out, DeepInfra $0.075 / $0.20 the cheapest"),
     "openrouter/meta-llama/llama-3.3-70b-instruct": LlmPrice(1.04, 1.04, "the dearest of 11 hosts (Together), read on 2026-09-30 at https://openrouter.ai/api/v1/models/meta-llama/llama-3.3-70b-instruct/endpoints; the model's listed price at https://openrouter.ai/api/v1/models is $0.10 in / $0.32 out (DeepInfra, the cheapest); DEC-089's fallback, reached only when the default model is unavailable"),
+    # AI Story's own chain (phase 7 stage 2b, DEC-224, A-115): the dearest
+    # host, read 2026-10-01 at https://openrouter.ai/api/v1/models/mistralai/mistral-medium-3.1/endpoints
+    # ($0.44 in / $2.20 out); the cheapest host on the same page lists
+    # $0.40 / $2.00. DEC-206's metering books whatever ``usage.cost`` a reply
+    # actually carries; this row only prices the pre-call estimate, and a
+    # reply without one, and is never contacted while allow_paid is off
+    # (DEC-115, story_chain/is_free_link).
+    "openrouter/mistralai/mistral-medium-3.1": LlmPrice(0.44, 2.20, "the dearest host, read 2026-10-01 at https://openrouter.ai/api/v1/models/mistralai/mistral-medium-3.1/endpoints; the cheapest host lists $0.40 in / $2.00 out (A-115)"),
 }
 
 

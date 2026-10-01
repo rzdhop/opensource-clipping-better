@@ -372,6 +372,11 @@ class SettingsRequest(BaseModel):
     openai_compat_base_url: Optional[str] = None
     openai_compat_api_key: Optional[str] = None
     openai_compat_model: Optional[str] = None
+    # AI Story's own chain override (phase 7 stage 2b, DEC-224). Empty clears
+    # it, like every other value here (DEC-043); a non-empty value is
+    # validated as a chain (registry.parse_chain) before it is stored. No
+    # dashboard field reads or writes this yet (stage 7).
+    story_llm_chain: Optional[str] = None
     # Defaults
     default_clips: Optional[int] = None
     default_ratio: Optional[AspectRatio] = None
@@ -419,6 +424,10 @@ class SettingsResponse(BaseModel):
     # them and New Job has to say which of the three is still missing.
     openai_compat_base_url: str = ""
     openai_compat_model: str = ""
+    # Echoed back like the compat URL/model above: not a secret, and the
+    # Settings page needs its value to prefill. "" means AI Story falls
+    # through to LLM_CHAIN, then to DEFAULT_STORY_LLM_CHAIN (resolve_chain).
+    story_llm_chain: str = ""
     allow_slow_chain: bool = False
     # Budget (AI Story): five-place defaults, clipping/providers/budget.py
     allow_paid: bool = False

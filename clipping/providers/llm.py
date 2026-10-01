@@ -183,7 +183,13 @@ def _next_level(level):
 # cosmetic gap: nemotron-3.5-lightning was rejected as "reasoning prose,
 # unparseable" in one benchmark and, with thinking off, answers the same request
 # in ~20s with usable candidates. A model was disqualified by a missing flag.
-_NIM_REASONING_FAMILIES = ("deepseek", "nemotron-3.5-lightning", "glm-")
+#
+# nemotron-3-ultra-550b-a55b and nemotron-3-super-120b-a12b were added after
+# the 2026-10-01 AI Story bench (story B FR, story A EN; E1/E2/T1; 3 samples):
+# both returned NO JSON at all with thinking on, and usable beat sheets with it
+# off. The trailing hyphen in "nemotron-3-" is deliberate: it matches both of
+# those model ids but not "nemotron-3.5-lightning", already listed above.
+_NIM_REASONING_FAMILIES = ("deepseek", "nemotron-3.5-lightning", "nemotron-3-", "glm-")
 
 
 def _extra_body(link):

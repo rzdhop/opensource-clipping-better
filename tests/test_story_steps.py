@@ -897,7 +897,8 @@ def test_the_settings_chain_beats_the_process_env(monkeypatch):
 @pytest.mark.parametrize("settings_env", [{"LLM_CHAIN": ""}, {"LLM_CHAIN": "   "}, {}, None])
 def test_an_empty_chain_spec_falls_back_to_the_default_chain(settings_env):
     m = _new()
-    assert m.llm_call.resolve_chain(settings_env) == registry.parse_chain(registry.DEFAULT_LLM_CHAIN)
+    # DEC-224: AI Story has its own default chain since phase 7 stage 2b.
+    assert m.llm_call.resolve_chain(settings_env) == registry.parse_chain(registry.DEFAULT_STORY_LLM_CHAIN)
 
 
 def test_the_settings_keys_beat_the_process_env(monkeypatch):
@@ -957,7 +958,8 @@ def test_story_chain_skips_a_paid_link_only_while_allow_paid_is_off(spec, allow_
 
 def test_story_chain_keeps_the_order_and_reads_allow_paid_like_the_preview_does(monkeypatch):
     m = _new()
-    default = registry.parse_chain(registry.DEFAULT_LLM_CHAIN)
+    # DEC-224: AI Story has its own default chain since phase 7 stage 2b.
+    default = registry.parse_chain(registry.DEFAULT_STORY_LLM_CHAIN)
     paid = [link for link in default if link.provider == "openrouter"]
 
     assert m.llm_call.story_chain({}) == ([link for link in default if link not in paid],

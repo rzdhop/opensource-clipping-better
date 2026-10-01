@@ -440,6 +440,41 @@ DEFAULT_LLM_CHAIN = (
 )
 
 
+# AI Story's own default chain (phase 7 stage 2b), separate from the Clips
+# chain above (DEFAULT_LLM_CHAIN) because the two jobs were measured on
+# different requests and want different links (DEC-224).
+#
+# The 2026-10-01 free bench (story B FR and story A EN; E1/E2/T1; 3 samples;
+# thinking disabled on every NIM model, see llm.py's _NIM_REASONING_FAMILIES):
+#
+#   nvidia/nemotron-3-ultra-550b-a55b   the strongest beat sheets; 11-70s when
+#                                        it answers, but frequent HTTP 500
+#                                        (fails in <1s, so a dead link costs
+#                                        nothing and the chain falls through)
+#   nvidia/nemotron-3-super-120b-a12b   1-23s, ~65% valid (failures are
+#                                        word-cap overruns, not malformed JSON)
+#   openrouter/mistralai/mistral-medium-3.1  paid, placed after the two NIM
+#                                        links so a funded key is only spent
+#                                        when both free NIM links failed
+#   gemini/gemini-3.5-flash-lite        the free floor: today's AI Story
+#                                        default in practice (see GEMINI_
+#                                        DEFAULT_MODEL above), kept last
+#
+# NVIDIA's default NIM model, nemotron-3.5-lightning, timed out at 300s on all
+# three prompts; z-ai/glm-5.3 was too slow (110-300s). Neither is in this
+# chain. Re-pick with tools/bench_llm.py.
+STORY_NVIDIA_ULTRA_MODEL = "nvidia/nemotron-3-ultra-550b-a55b"
+STORY_NVIDIA_SUPER_MODEL = "nvidia/nemotron-3-super-120b-a12b"
+STORY_OPENROUTER_MODEL = "mistralai/mistral-medium-3.1"
+
+DEFAULT_STORY_LLM_CHAIN = (
+    f"nvidia/{STORY_NVIDIA_ULTRA_MODEL},"
+    f"nvidia/{STORY_NVIDIA_SUPER_MODEL},"
+    f"openrouter/{STORY_OPENROUTER_MODEL},"
+    f"gemini/{GEMINI_DEFAULT_MODEL}"
+)
+
+
 def chain_from_env(default: str = DEFAULT_LLM_CHAIN) -> list:
     """The chain named by ``LLM_CHAIN``, or the shipped default."""
     return parse_chain(os.environ.get("LLM_CHAIN", "").strip() or default)
