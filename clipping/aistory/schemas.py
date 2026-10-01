@@ -1995,6 +1995,12 @@ BEAT_KNOWS_AFTER_MAX_WORDS = 15
 KNOWLEDGE_PROPS_MAX = 8
 KNOWLEDGE_SECTIONS = ("world", "timeline", "props_registry", "ledger_seed")
 
+# Stage 5b (DEC-228): the objects a beat names that are no prop of the story
+# yet, by name, until the props registry (D6) registers them (their ids then
+# join ``objects``) or leaves them out; D6 clears every one.
+BEAT_NEW_OBJECTS_MAX = 2
+BEAT_NEW_OBJECT_MAX_CHARS = 60
+
 _BEAT_SCHEMA = _document({
     "what": _NON_EMPTY_STRING,
     "place_id": {"type": ["string", "null"], "pattern": PLACE_ID_PATTERN},
@@ -2002,6 +2008,8 @@ _BEAT_SCHEMA = _document({
     "objects": _id_array(PROP_ID_PATTERN),
     # char id -> what they know after the beat, checked in knowledge_errors.
     "knows_after": {"type": "object"},
+}, optional={
+    "new_objects": {"type": "array", "items": _text(BEAT_NEW_OBJECT_MAX_CHARS), "maxItems": BEAT_NEW_OBJECTS_MAX},
 })
 
 KNOWLEDGE_SCHEMA = _document({
@@ -2010,6 +2018,10 @@ KNOWLEDGE_SCHEMA = _document({
     "approved_at": _TIMESTAMP_OR_NULL,
     "updated_at": _NON_EMPTY_STRING,
 }, optional={
+    # Stage 5b (DEC-228): the ``rev`` the approval was given at; the episode
+    # gate holds a v2 script back while it differs from ``rev`` (any write
+    # after the approval moves ``rev``).
+    "approved_rev": {"type": "integer", "minimum": 1},
     "world": _document({
         "geography": _NON_EMPTY_STRING,
         "period_details": _NON_EMPTY_STRING,
@@ -4042,6 +4054,156 @@ def d1_dossier(doc, ids_by_name) -> tuple:
         "arc": doc["arc"],
     }
     return dossier, dropped
+
+
+# ------------------------------------------------- D4 / D5 / D6 (phase 7 stage 5b, the knowledge step)
+#
+# The knowledge step's calls (A14, DEC-228), one artifact each: D4 the
+# world notes, D5 one episode's timeline, D6 the props registry. Text for
+# the writers, never for an image model: the story's language, names allowed.
+# A reply names characters, places and props by name; the step maps them to
+# ids (an unknown name is dropped and printed, as K1's and S2's are).
+
+# D5's reply bounds, per beat, so its largest reply has a measured cap
+# (MAX_TOKENS["D5"]): the characters acting in it, the objects that matter in
+# it, the characters whose knowledge it changes; and the new objects (no prop
+# of the story yet) of one episode, at most, for D6 to register.
+D5_WHO_MAX = 4
+D5_OBJECTS_MAX = 2
+D5_KNOWS_MAX = 2
+D5_NEW_OBJECTS_MAX = BEAT_NEW_OBJECTS_MAX
+# D6: the new props it may create in one call, and a new prop's one-line.
+D6_NEW_PROPS_MAX = 3
+D6_ONE_LINE_MAX_WORDS = 20
+D6_ONE_LINE_MAX_CHARS = 200
+D6_NAME_MAX_CHARS = 60
+
+
+def _named(names) -> dict:
+    """A name constrained to *names* (none: free text)."""
+    return {"type": "string", "enum": list(names)} if names else {"type": "string"}
+
+
+def _named_or_null(names) -> dict:
+    return {"type": ["string", "null"], "enum": list(names) + [None]} if names else {"type": ["string", "null"]}
+
+
+def d4_schema() -> dict:
+    """The D4 output schema: the world notes of the knowledge base."""
+    return _llm_obj({
+        "geography": {"type": "string", "description": "story language, at most 60 words"},
+        "period_details": {"type": "string", "description": "story language, at most 30 words"},
+        "visual_motifs": {"type": "array", "description": f"1-{WORLD_VISUAL_MOTIFS_MAX}, each at most 12 words",
+                          "items": {"type": "string"}},
+    })
+
+
+def d4_errors(doc) -> list:
+    """Post-validation for a D4 response: the world's word caps and 1 to
+    ``WORLD_VISUAL_MOTIFS_MAX`` motifs."""
+    errors = validate(doc, d4_schema())
+    if errors:
+        return errors
+    errors = []
+    _check_text(errors, "$.geography", doc["geography"], max_words=WORLD_GEOGRAPHY_MAX_WORDS)
+    _check_text(errors, "$.period_details", doc["period_details"], max_words=WORLD_PERIOD_DETAILS_MAX_WORDS)
+    motifs = doc["visual_motifs"]
+    if not 1 <= len(motifs) <= WORLD_VISUAL_MOTIFS_MAX:
+        errors.append(f"$.visual_motifs: {len(motifs)} motif(s), expected 1-{WORLD_VISUAL_MOTIFS_MAX}")
+    for i, motif in enumerate(motifs):
+        _check_text(errors, f"$.visual_motifs[{i}]", motif, max_words=WORLD_VISUAL_MOTIF_MAX_WORDS)
+    return errors
+
+
+def d5_schema(cast_names, place_names) -> dict:
+    """The D5 output schema: one episode's beats. *cast_names* constrain
+    ``who`` and ``knows_after[].who``, *place_names* ``place`` (or null);
+    ``objects`` stay free text (a prop's name, or a new object's)."""
+    knows = _llm_obj({
+        "who": _named(cast_names),
+        "knows": {"type": "string", "description": "story language, what they know after the beat, at most 15 words"},
+    })
+    beat = _llm_obj({
+        "what": {"type": "string", "description": "story language, what happens, at most 25 words"},
+        "place": _named_or_null(place_names),
+        "who": {"type": "array", "description": f"1-{D5_WHO_MAX} characters", "items": _named(cast_names)},
+        "objects": {"type": "array", "description": f"0-{D5_OBJECTS_MAX} objects, by name",
+                    "items": {"type": "string"}},
+        "knows_after": {"type": "array", "description": f"0-{D5_KNOWS_MAX}", "items": knows},
+    })
+    return _llm_obj({
+        "beats": {"type": "array", "description": f"1-{TIMELINE_BEATS_MAX} beats in story order", "items": beat},
+    })
+
+
+def d5_errors(doc) -> list:
+    """Post-validation for a D5 response: 1 to ``TIMELINE_BEATS_MAX`` beats,
+    each within its counts (``D5_WHO_MAX``, ``D5_OBJECTS_MAX``,
+    ``D5_KNOWS_MAX``) and word caps, an object named at most once a beat.
+    Which objects are new (at most ``D5_NEW_OBJECTS_MAX`` an episode) needs
+    the story's props: the step checks it."""
+    errors = validate(doc, d5_schema((), ()))
+    if errors:
+        return errors
+    errors = []
+    beats = doc["beats"]
+    if not 1 <= len(beats) <= TIMELINE_BEATS_MAX:
+        errors.append(f"$.beats: {len(beats)} beat(s), expected 1-{TIMELINE_BEATS_MAX}")
+    for i, beat in enumerate(beats):
+        path = f"$.beats[{i}]"
+        _check_text(errors, f"{path}.what", beat["what"], max_words=BEAT_WHAT_MAX_WORDS)
+        for key, low, high in (("who", 1, D5_WHO_MAX), ("objects", 0, D5_OBJECTS_MAX),
+                               ("knows_after", 0, D5_KNOWS_MAX)):
+            if not low <= len(beat[key]) <= high:
+                errors.append(f"{path}.{key}: {len(beat[key])} item(s), expected {low}-{high}")
+        for j, name in enumerate(beat["objects"]):
+            _check_chars(errors, f"{path}.objects[{j}]", name, BEAT_NEW_OBJECT_MAX_CHARS)
+        keys = [str(name).strip().casefold() for name in beat["objects"]]
+        if len(set(keys)) != len(keys):
+            errors.append(f"{path}.objects: an object is named twice")
+        for j, item in enumerate(beat["knows_after"]):
+            _check_text(errors, f"{path}.knows_after[{j}].knows", item["knows"], max_words=BEAT_KNOWS_AFTER_MAX_WORDS)
+    return errors
+
+
+def d6_schema(prop_names, cast_names) -> dict:
+    """The D6 output schema: the props that matter (*prop_names*, the
+    story's), and the new ones to create (an owner of *cast_names*, or null)."""
+    new_prop = _llm_obj({
+        "name": {"type": "string", "description": f"story language, at most {D6_NAME_MAX_CHARS} characters"},
+        "one_line": {"type": "string",
+                     "description": f"story language, what it is and why it matters, at most {D6_ONE_LINE_MAX_WORDS} words"},
+        "owner": _named_or_null(cast_names),
+    })
+    return _llm_obj({
+        "keep": {"type": "array", "description": f"the props that matter, at most {KNOWLEDGE_PROPS_MAX} in all",
+                 "items": _named(prop_names)},
+        "new_props": {"type": "array", "description": f"0-{D6_NEW_PROPS_MAX} new props", "items": new_prop},
+    })
+
+
+def d6_errors(doc) -> list:
+    """Post-validation for a D6 response: at most ``D6_NEW_PROPS_MAX`` new
+    props, ``KNOWLEDGE_PROPS_MAX`` in all, each name once, a new prop's name
+    and one-line within their caps."""
+    errors = validate(doc, d6_schema((), ()))
+    if errors:
+        return errors
+    errors = []
+    new = doc["new_props"]
+    if len(new) > D6_NEW_PROPS_MAX:
+        errors.append(f"$.new_props: {len(new)} prop(s), expected at most {D6_NEW_PROPS_MAX}")
+    if len(doc["keep"]) + len(new) > KNOWLEDGE_PROPS_MAX:
+        errors.append(f"$: {len(doc['keep'])} kept and {len(new)} new prop(s), expected at most "
+                      f"{KNOWLEDGE_PROPS_MAX} in all")
+    for i, item in enumerate(new):
+        _check_chars(errors, f"$.new_props[{i}].name", item["name"], D6_NAME_MAX_CHARS)
+        _check_chars(errors, f"$.new_props[{i}].one_line", item["one_line"], D6_ONE_LINE_MAX_CHARS)
+        _check_text(errors, f"$.new_props[{i}].one_line", item["one_line"], max_words=D6_ONE_LINE_MAX_WORDS)
+    keys = [str(name).strip().casefold() for name in list(doc["keep"]) + [item["name"] for item in new]]
+    if len(set(keys)) != len(keys):
+        errors.append("$: a prop is named twice")
+    return errors
 
 
 # ------------------------------------------------- D2 / D3 / R1v2 (phase 7, the look)
