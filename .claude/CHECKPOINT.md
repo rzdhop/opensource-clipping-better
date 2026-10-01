@@ -9,6 +9,9 @@
     v2 kwarg from its three callers, `_reference_images_v2` (≤ 10, roles), per-link `REFERENCE_LIMITS` replacing the
     hard `[:4]` slice, `video_prompt` stored and preferred, the shot-card preview; lowercase stored signature items
     inside prose. Scope: scratchpad `stage3-scope.md` section 3b.
+  - **Test selection (DEC-234, the human 2026-10-01):** per stage, run only the new/edited tests, the test files that
+    import or name a changed module, and the RC guards of the touched areas, in both envs; push after every stage so
+    CI runs the full suite; one full local run before merging to main.
   - **Tier-1 hygiene:** never keep `web/dashboard/dist/` in the worktree during Tier-1: with a real build present 15
     auth/clip-serving tests fail (pre-existing interaction, follow-up). The 2a build is kept in the scratchpad
     (`dashboard-dist-2a`). `node_modules` (npm ci) stays: it lets 8 more tests run, all green.

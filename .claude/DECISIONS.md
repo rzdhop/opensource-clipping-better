@@ -3852,3 +3852,29 @@ props have no scale. DEC-219 asks for proportions, traits and wardrobe in the pr
   5b's D6 allows 8) can overflow it: re-measure in stage 5b.
 - A signature item keeps its stored capital inside the prose ("with Comically oversized …"): cosmetic, for stage 3b.
 - Commits `6caed8f` (schema) and `ffcfa4d`.
+
+## DEC-234 — Tests are chosen by what a change touches; the full suite runs on CI and once before main (amends DEC-176)
+**Context.** The human, 2026-10-01, during phase 7: "Think when running tests which are useful and which can be skipped
+because the edit did not touch the part. Keep this reasoning at all times." DEC-176 ran both full suites (≈ 3.5 + 3 min)
+after every stage, even when a stage touched a few modules. CI already runs the full suite on every push (CI
+environment, x86).
+**Decision.** For each stage, before running anything, write down the selection and why:
+1. The stage's new and edited tests.
+2. Every test file that imports or names a changed module or file: `grep -rlE "<module import name>|<path>" tests/`
+   for each changed file (for a changed template, schema or JSON, the tests that load it).
+3. The guard tests of the regression-contract items whose area the diff touches, and only those:
+   - `clipping/aistory/render/**`, timing or the subtitle builder → `tests/test_aistory_render_golden*.py` (RC-M2) and
+     the partial-render test (RC-M8);
+   - `web/api/**` or the dashboard → the no-auth tests (RC-M9): `tests/test_auth_opt_in.py`,
+     `tests/test_auth_token.py`, `tests/test_dashboard_no_sign_in.py`;
+   - `clipping/studio/**` → `tests/test_render_layer_guard.py` (RC-A1);
+   - prompts, prompting or shots → the prompt goldens of the touched builders (RC-M1, RC-Q1);
+   - budget, config or Settings defaults → the five-place agreement tests.
+4. Run that selection in both environments (`-o addopts="" -n 4`), since the CI environment skips the local-only API
+   tests.
+5. The full suites run: on CI at every push (the full CI environment); one full local run before a merge to `main`,
+   at the phase close, or when a selection grows past about half the suite. Docs- or `.claude/`-only changes run only
+   the tests that read those files (unchanged from the memory rule of 2026-10-01).
+**Consequence.** A stage's test time follows its blast radius. The action-log line of every stage names the
+selection rule it used and its counts; a skipped area is a stated choice, never a silent one. CI on the push is the
+backstop for anything the selection missed, so a push is due after every stage.
