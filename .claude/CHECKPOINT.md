@@ -4,11 +4,13 @@
   - **Current phase:** IMPLEMENT. EXPLORE (E1–E5), CLARIFY (11 answers) and PLAN (Opus design, stages 1–8) were done on
     2026-10-01 in one session; the human approved the plan with its three go-items (hook 3–6 s; keyframes on
     seedream-4.5-edit with nano-banana-2-lite fallback; ≈ $1.73 per episode under the $2 cap).
-  - **Current stage:** 2a DONE (`7425fd3` schema, `e00a97a`; DEC-221/222/223). **Next action:** stage 2b, the
-    writing chain. The free NIM bench (story B, FR; E1/E2/T1, 1 sample) found today's default
-    nemotron-3.5-lightning timing out at 300 s on all three; glm-5.3 best (E1 ok 87 s, E2 a validator error, T1 ok
-    124 s); deepseek-v4.1-flash and kimi-k3 slow (245-300 s); nemotron-3 ultra/super answer fast but no JSON (thinking
-    on?); kimi-k2.6 and mistral-large not found. A re-bench with thinking off for nemotron-3/kimi is running.
+  - **Current stage:** 2b DONE (`c02ec6b`, DEC-224). **Next action:** stage 3a [Opus] — structured look + dossier
+    blocks (optional schema, own commit), D2/D3/R1 v2 builders with explicit INPUT_BUDGET rows, v2 call order in
+    cast/places, `render_look/place/prop`, `*_prompt_v2` sheet/plate/prop builders, the estimate extended
+    (`cast_units`/`places_units`). Scope saved in the session scratchpad (`stage3-scope.md`).
+  - **Tier-1 hygiene:** never keep `web/dashboard/dist/` in the worktree during Tier-1: with a real build present 15
+    auth/clip-serving tests fail (pre-existing interaction, follow-up). The 2a build is kept in the scratchpad
+    (`dashboard-dist-2a`). `node_modules` (npm ci) stays: it lets 8 more tests run, all green.
   - **The human must, before W-mid:** add `GEMINI_PAID_API_KEY` in Settings (nano-banana reads only it now) and set
     the caps to 2/6/20 in Settings (saved 1/3/10 override the new defaults).
   - **Open questions:** none. The plan's assumptions A-110…A-124 are UNCONFIRMED.
@@ -29,7 +31,7 @@
   |---|---|---|
   | 1 W0 defects (D1 `video_action`, D2 names on the action only, D3 run-ons) | DONE (local 6631/9, CI env 5837/772) | 9850fa5 |
   | 2a quality chains, preset, caps 2/6/20, nano-banana paid key, 9:16 source crop | DONE (local 6640/9, CI env 5845/773, build ok) | 7425fd3, e00a97a |
-  | 2b writing chain (nvidia → openrouter mistral-medium-3.1 → free) | todo | |
+  | 2b writing chain (nvidia → openrouter mistral-medium-3.1 → free) | DONE (local 6655/1, CI env 5860/765) | c02ec6b |
   | 3a structured look + dossier, sheet/plate/prop v2 prompts | todo | |
   | 3b layered keyframe/clip prompts, reference roles, preview | todo | |
   | 3c props as entities | todo | |

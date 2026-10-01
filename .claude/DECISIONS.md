@@ -3795,3 +3795,31 @@ config/CLI, API models, config adapter, the dashboard Settings form). `allow_pai
 **Consequence.** Caps already saved in Settings still win (this VPS saved 1/3/10: the human changes them in Settings
 when ready). The five-place agreement test is re-pinned on purpose; tests that pinned 1/3/10 moved to the new numbers;
 three estimate-guard hashes re-pinned, each reproduced with the caps forced to 1/3/10.
+
+## DEC-224 — AI Story's own writing chain: NIM nemotron-3 ultra, then super, then OpenRouter mistral-medium-3.1, then free Gemini (amends DEC-206's chain, RC-S4 exception in `llm.py`)
+**Context.** E4 found 100 % of the writing on `gemini/gemini-3.5-flash-lite`, with a climax line spoken twice and a beat
+sheet with no causality. The human: "use the Nvidia free endpoint if possible, else OpenRouter". A free bench on
+2026-10-01 (story B FR and story A EN; E1/E2/T1; 3 samples; `tools/bench_llm.py --episode-prompts` with replies kept):
+- the NIM default `nemotron-3.5-lightning` timed out at 300 s on all three prompts;
+- `nemotron-3-ultra-550b-a55b` and `nemotron-3-super-120b-a12b` return no JSON unless thinking is off; with it off,
+  super answers in 1–23 s (about 65 % valid; failures are word-cap overruns) and ultra in 11–70 s with the best beat
+  sheets, but often answers HTTP 500 in under a second;
+- `glm-5.3` writes well but takes 110–300 s; `deepseek-v4.1-flash` and `kimi-k3` 125–300 s; `kimi-k2.6` and
+  `mistral-large` are not served;
+- every model fails E2's `sfx_cues[].at` in the same way: a prompt problem, left to stage 5c.
+**Decision.**
+- `registry.DEFAULT_STORY_LLM_CHAIN` = `nvidia/nvidia/nemotron-3-ultra-550b-a55b`,
+  `nvidia/nvidia/nemotron-3-super-120b-a12b`, `openrouter/mistralai/mistral-medium-3.1`, `gemini/gemini-3.5-flash-lite`.
+- `llm_call.resolve_chain`: `STORY_LLM_CHAIN` (Settings, then env), then `LLM_CHAIN` (Settings, then env), then the new
+  default. Clip jobs keep `DEFAULT_LLM_CHAIN`. `STORY_LLM_CHAIN` is a persisted, validated Settings key.
+- `llm._NIM_REASONING_FAMILIES` gains `"nemotron-3-"` (thinking off). It does not match `nemotron-3.5-…`. This is the
+  stated RC-S4 exception.
+- `pricing.LLM_PRICES` gains `openrouter/mistralai/mistral-medium-3.1` at $0.44 / $2.20 per M (A-115). DEC-115 keeps it
+  skipped while `allow_paid` is off; DEC-206 books it when on.
+**Consequence.**
+- On this VPS (no `LLM_CHAIN` set) AI Story writing now tries NIM first and falls back to Gemini.
+- The NIM links are still the DEC-073 floor (`primary=False`): a host keyed only on NVIDIA is refused unless the slow
+  chain is allowed; here Gemini is keyed.
+- Seven tests that pinned `DEFAULT_LLM_CHAIN` as the story chain now pin the new default. The story/clip refusal test
+  keeps its one-rule check, but the two texts now name different keys.
+- Commit `c02ec6b`.

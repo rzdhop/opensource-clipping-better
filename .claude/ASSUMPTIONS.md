@@ -406,7 +406,9 @@
   phrasing ("Clean frame: no captions …") is honoured. UNCONFIRMED.
 - **A-113** — (phase 7) the project behind `GEMINI_PAID_API_KEY` has the Gemini image models enabled and billed. UNCONFIRMED.
 - **A-114** — (phase 7) the NIM model picked by the free `tools/bench_llm.py` run writes valid French JSON within the
-  330 s timeout at ≤ ~420 output tokens. UNCONFIRMED until the bench.
+  330 s timeout at ≤ ~420 output tokens. **Partly confirmed 2026-10-01** (free bench, DEC-224): with thinking off,
+  nemotron-3-super writes valid FR/EN E1/E2/T1 JSON in 1–23 s about 65 % of the time (failures: word-cap overruns),
+  nemotron-3-ultra in 11–70 s but often HTTP 500. Writing quality is judged only by reading 3 samples; the walks confirm.
 - **A-115** — (phase 7) openrouter `mistralai/mistral-medium-3.1` is $0.40 in / $2.00 out per M tokens ($0.44 / $2.20 on
   the EU host), read 2026-10-01 at openrouter.ai/api/v1/models/mistralai/mistral-medium-3.1/endpoints. UNCONFIRMED by a bill.
 - **A-116** — (phase 7) a 150 ms floor per word_pop card is legible on a phone (31 % of story A's cards were under it). UNCONFIRMED.
