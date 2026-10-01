@@ -62,6 +62,16 @@ def _assert_relative(path, *, what: str = "path") -> None:
         raise ValueError(f"{what} must be relative, not a Windows absolute path: {path!r}")
 
 
+def _cover_fill() -> str:
+    """The one cover rule: scale to cover ``profiles.WIDTH``x``profiles.HEIGHT``
+    and centre-crop the overflow (``crop``'s default ``x``/``y``), square
+    pixels -- never letterboxed, never stretched. The cover's image
+    (:func:`cover_argv`) and a Tier >= 2 clip (:func:`tier2_clip_argv`) are
+    framed by it."""
+    w, h = profiles.WIDTH, profiles.HEIGHT
+    return f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},setsar=1"
+
+
 def _base_chain(image_rel, shot, profile, *, pan_pct=motion_mod.PAN_PCT) -> tuple:
     """``(chain_fragments, zoompan_frames, zoompan_fps)`` for one shot:
     ``scale`` (per *profile*'s upscale), then ``zoompan`` (eased per
@@ -180,10 +190,11 @@ def shot_argv(image_rel, shot, profile, style_overlays, out_rel, *, pan_pct=moti
 
 def tier2_clip_argv(video_rel, shot, profile, out_rel) -> list:
     """The argv for a Tier >= 2 shot that already has its own ``.mp4``
-    (spec 6.5): scaled and padded to ``profiles.WIDTH``x``profiles.HEIGHT``
-    (letterboxed, never cropped or stretched -- ``force_original_aspect_ratio
-    =decrease`` + a centred ``pad``), resampled to a 30 fps CFR stream,
-    held on its last frame (``tpad=stop_mode=clone``, phase 6 stage 9) and
+    (spec 6.5): it covers ``profiles.WIDTH``x``profiles.HEIGHT`` and is
+    centre-cropped (:func:`_cover_fill`, the rule the cover frames a shot's
+    image with -- never letterboxed, never stretched: a square Kling clip
+    once came out between black bars, T2-P6-F1), resampled to a 30 fps CFR
+    stream, held on its last frame (``tpad=stop_mode=clone``, phase 6 stage 9) and
     trimmed to the shot's own ``duration_s``; ``-frames:v`` pins the shot's
     exact frames and ``-an`` drops the clip's own sound (tier 2 never keeps
     it; tier 3's native audio is a stem of the audio mix, never this clip's
@@ -206,8 +217,7 @@ def tier2_clip_argv(video_rel, shot, profile, out_rel) -> list:
 
     duration = _num(shot["duration_s"])
     vf = (
-        f"scale={profiles.WIDTH}:{profiles.HEIGHT}:force_original_aspect_ratio=decrease,"
-        f"pad={profiles.WIDTH}:{profiles.HEIGHT}:(ow-iw)/2:(oh-ih)/2,"
+        f"{_cover_fill()},"
         f"fps={profiles.FPS},"
         f"tpad=stop_mode=clone:stop_duration={duration},"
         f"trim=duration={duration},"
@@ -869,11 +879,9 @@ def cover_argv(image_rel, ass_rel, fontsdir_rel, out_rel) -> list:
     for value, what in ((image_rel, "image_rel"), (ass_rel, "ass_rel"), (fontsdir_rel, "fontsdir_rel"),
                         (out_rel, "out_rel")):
         _assert_relative(value, what=what)
-    w, h = profiles.WIDTH, profiles.HEIGHT
     ass_value = motion_mod.escape_expr(ass_rel)
     fontsdir_value = motion_mod.escape_expr(fontsdir_rel)
-    vf = (f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},setsar=1,"
-          f"ass={ass_value}:fontsdir={fontsdir_value}")
+    vf = f"{_cover_fill()},ass={ass_value}:fontsdir={fontsdir_value}"
     argv = list(_ARGV_PREFIX)
     argv += ["-i", image_rel, "-vf", vf, "-frames:v", "1", "-update", "1", "-q:v", str(COVER_JPEG_QSCALE),
              out_rel]

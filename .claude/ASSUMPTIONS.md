@@ -213,6 +213,11 @@
   *Human's choice at phase-4 CLARIFY (2026-09-28): "Self-made SFX + existing BGM".* UNCONFIRMED as a licence fact.
 - **A-071** — fal bills a queued request at submit even when it later fails. UNCONFIRMED; the live paid step is
   deferred.
+  **Probe 2026-10-01 (phase 6 walk step 6, the human's go ≤ $0.044):** a 2 s seedance request whose `image_url`
+  is a missing file on fal's CDN was QUEUED (`IN_QUEUE` → `IN_PROGRESS`), and its status ended `COMPLETED`;
+  only the result endpoint answered HTTP 422 `file_download_error`. Request
+  `01a0f63e-1cd3-79e1-b83e-f9c027fcc2cc`; the app booked $0.044 at submit (DEC-153). So a failed queued
+  request runs through the whole queue. Whether fal CHARGED it: pending the human's reading of fal's billing.
 - **A-072** — A Gemini/OpenAI image 4xx is unbilled; a 5xx or timeout may be billed. UNCONFIRMED.
 - **A-073** — ubuntu-24.04's apt ffmpeg stays at 6.1.1; `-threads 1` makes x264 in the golden profile
   thread-independent. UNCONFIRMED over time: CI's `6.1.1/x86_64` golden key was recorded at stage 7 and needs
@@ -342,6 +347,7 @@
   app counts it against rpd 170 (the free 10,000 neurons); a 401/403 no longer burns a slot (T2-P5-F12). UNCONFIRMED:
   the real neuron cost per 9:16 image.
 
+  **CORRECTION 2026-10-01 (phase 6, T2-P6-F1):** the still path does NOT crop a square image to 9:16. `shot_argv` runs `scale=4320:-2` then `zoompan … s=1080x1920`, which STRETCHES it (a centred 32×32 square came out 364×648). So every Cloudflare still has been rendered vertically stretched since 2026-09-30. Clips now cover+crop (`filtergraph._cover_fill`); the still stretch is a separate decision (the human's call).
 - **A-096** — DEC-176's "CI env" run is not a faithful copy of CI: `PYTHONNOUSERSITE=1` hides only the user site, so
   the host's **system** site-packages (PIL among them) stay importable, while CI installs pytest alone. Phase 5's
   three two-word font tests passed here for weeks and failed only in CI (T2-P5-F14, fixed `f06a299`). The faithful
@@ -381,7 +387,10 @@
   - **Price:** $0.21 per 5 s, then $0.042 per extra second.
   - **Clips:** 5 or 10 s.
   - **Request fields:** `negative_prompt` and `cfg_scale`. No seed, no audio, and no aspect or resolution field.
-  - UNCONFIRMED: the output aspect follows the 9:16 keyframe (not stated on the page).
+  - ~~UNCONFIRMED: the output aspect follows the 9:16 keyframe.~~ **Measured 2026-10-01 (walk step 9): it follows
+    the INPUT image's aspect.** A 1024×1024 keyframe gave a 960×960 clip at 24 fps, 5.04 s; 70.2 s on fal; $0.21
+    booked. Our square Cloudflare keyframes therefore give square clips, which the renderer letterboxed
+    (T2-P6-F1, fixed by cover+crop in the renderer). Still UNCONFIRMED: fal's billed amount (dashboard).
 - **A-103** — `gemini/veo-3.1-lite` (`veo-3.1-lite-generate-preview`), read on 2026-09-30:
   - **Price:** $0.05 a second at 720p; $0.08 at 1080p (8 s only). Audio is always on and included. No free tier.
   - **Clips:** 4/6/8 s, 9:16 and 720p supported.

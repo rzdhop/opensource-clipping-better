@@ -6,10 +6,11 @@ A tiny episode rendered with the real runner in the GOLDEN profile:
 
 - ``sh01`` (the hook) is cut from a **1.0 s clip** that ffmpeg itself makes
   here -- ``lavfi`` ``testsrc`` at 24 fps with a two-decimal timestamp, a
-  120x208 frame (not 9:16, so the clip is padded), encoded with the golden
-  profile's own libx264 settings and parity flags -- for a shot of 1.5 s: the
-  clip is shorter than its shot, so ``filtergraph.tier2_clip_argv`` holds its
-  last frame to the shot's exact frame count;
+  120x208 frame (not 9:16, so the clip is centre-cropped -- T2-P6-F1),
+  encoded with the golden profile's own libx264 settings and parity flags --
+  for a shot of 1.5 s: the clip is shorter than its shot, so
+  ``filtergraph.tier2_clip_argv`` holds its last frame to the shot's exact
+  frame count;
 - ``sh02`` (the cliffhanger) is a still with a push-in and the paper texture,
   cut to ``sh01``;
 - three line blips, the synthetic bed, ``word_pop`` subtitles and the AI
@@ -54,7 +55,7 @@ EP = golden.EP
 STORY = dict(golden.STORY, title="Golden Tier Two")
 
 # The clip: shorter than its shot (the hold), at another rate than the
-# render's (24 -> 30 fps) and not 9:16 (padded, never cropped).
+# render's (24 -> 30 fps) and not 9:16 (centre-cropped, never letterboxed: T2-P6-F1).
 CLIP_SHOT = "sh01"
 CLIP_S = 1.0
 CLIP_FPS = 24

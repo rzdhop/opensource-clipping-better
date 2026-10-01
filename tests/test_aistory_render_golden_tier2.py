@@ -138,3 +138,75 @@ def test_one_changed_clip_re_renders_only_its_shot_and_equals_a_full_render(firs
         "shots_reused": ["sh02"], "reasons": {"sh01": "image"}, "timing_converted": False}
     assert partial["output"]["framemd5"]["sha256"] == full["output"]["framemd5"]["sha256"]
     assert partial["output"]["framemd5"]["sha256"] != first["output"]["framemd5"]["sha256"]
+
+
+# ------------------------------------------------- framing (T2-P6-F1)
+
+def _cut_frame(tmp_path, size) -> tuple:
+    """A clip of *size* -- red top quarter, blue bottom quarter, grey between,
+    a white square at its centre a third of its width -- cut by
+    ``tier2_clip_argv`` (GOLDEN profile), and the cut's first frame decoded:
+    ``(width, height, rgb24 bytes)``."""
+    from clipping.aistory.render import filtergraph, profiles
+
+    _require_ffmpeg()
+    width, height = size
+    box = width // 3
+    source = (f"color=c=gray:s={width}x{height}:r=24:d=0.5,"
+              f"drawbox=x=0:y=0:w={width}:h={height // 4}:color=red:t=fill,"
+              f"drawbox=x=0:y={height - height // 4}:w={width}:h={height // 4}:color=blue:t=fill,"
+              f"drawbox=x={(width - box) // 2}:y={(height - box) // 2}:w={box}:h={box}:color=white:t=fill")
+    subprocess.run(["ffmpeg", "-hide_banner", "-nostdin", "-y", "-f", "lavfi", "-i", source]
+                   + profiles.GOLDEN.video_encode_args() + ["-an", "clip.mp4"],
+                   cwd=tmp_path, capture_output=True, stdin=subprocess.DEVNULL, check=True)
+    argv = filtergraph.tier2_clip_argv("clip.mp4", {"duration_s": 0.2, "frames": 6}, profiles.GOLDEN, "cut.mp4")
+    subprocess.run(argv, cwd=tmp_path, capture_output=True, stdin=subprocess.DEVNULL, check=True)
+    raw = subprocess.run(["ffmpeg", "-hide_banner", "-nostdin", "-i", "cut.mp4", "-frames:v", "1", "-f", "rawvideo",
+                          "-pix_fmt", "rgb24", "-"], cwd=tmp_path, capture_output=True, stdin=subprocess.DEVNULL,
+                         check=True).stdout
+    return 1080, 1920, raw
+
+
+def _pixel(frame, x, y) -> tuple:
+    width, _height, raw = frame
+    at = (y * width + x) * 3
+    return tuple(raw[at:at + 3])
+
+
+def _black(rgb) -> bool:
+    return max(rgb) < 40
+
+
+def test_a_square_clip_fills_the_frame_cropped_around_its_centre_never_letterboxed(tmp_path):
+    """T2-P6-F1: a 960x960 Kling clip came out as a square between black
+    bars. A clip that is not 9:16 covers the frame and is centre-cropped,
+    as the cover frames a shot's image (``filtergraph.cover_argv``): its
+    top and bottom rows are the clip's own (red, blue -- not black), and
+    its centre square stays a square at the frame's centre (cropped, not
+    stretched)."""
+    frame = _cut_frame(tmp_path, (96, 96))
+    width, height, _raw = frame
+
+    top = [_pixel(frame, x, 0) for x in range(0, width, 60)]
+    bottom = [_pixel(frame, x, height - 1) for x in range(0, width, 60)]
+    assert not any(_black(rgb) for rgb in top + bottom), (top, bottom)
+    assert all(r > 150 and b < 90 for r, _g, b in top) and all(b > 150 and r < 90 for r, _g, b in bottom)
+
+    def white(x, y):
+        return min(_pixel(frame, x, y)) > 200
+
+    across = [x for x in range(width) if white(x, height // 2)]
+    down = [y for y in range(height) if white(width // 2, y)]
+    assert white(width // 2, height // 2)
+    assert abs((across[0] + across[-1]) / 2 - width / 2) <= 4 and abs((down[0] + down[-1]) / 2 - height / 2) <= 4
+    assert abs(len(across) - len(down)) <= 8, (len(across), len(down))
+
+
+def test_guard_a_9_16_clip_fills_the_frame_edge_to_edge(tmp_path):
+    """A clip already 9:16 fills the frame as it did: no edge row or column
+    is black."""
+    frame = _cut_frame(tmp_path, (72, 128))
+    width, height, _raw = frame
+    edges = ([_pixel(frame, x, y) for x in range(0, width, 60) for y in (0, height - 1)]
+             + [_pixel(frame, x, y) for y in range(0, height, 60) for x in (0, width - 1)])
+    assert not any(_black(rgb) for rgb in edges), edges
