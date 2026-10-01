@@ -3823,3 +3823,32 @@ sheet with no causality. The human: "use the Nvidia free endpoint if possible, e
 - Seven tests that pinned `DEFAULT_LLM_CHAIN` as the story chain now pin the new default. The story/clip refusal test
   keeps its one-rule check, but the two texts now name different keys.
 - Commit `c02ec6b`.
+
+## DEC-226 — Structured looks and v2 sheet, plate and prop prompts (part 1 of 2; part 2 = props as entities, stage 3c)
+**Context.** E1/E3: a character's look is a ≤ 45-word free-text descriptor; the portrait is chest-up, so no image
+ever carries full-body proportions or a height against the rest of the cast; the plate omits the layout notes;
+props have no scale. DEC-219 asks for proportions, traits and wardrobe in the prompts.
+**Decision.**
+- Optional schema blocks (own commit `6caed8f`): `character.look` {build, silhouette, face, hair, skin_material,
+  height_cm 5–500, palette ≤ 4, wardrobe_sets 1–3, season_change}; `character.dossier` (its writer D1 is stage 5a);
+  `place.look` {layout_map, scale_note, lighting per time variant, props_here}; `prop.look` {scale_cm, material,
+  colour, scale_phrase, where_when}.
+- New calls on v2 stories: D2 character look (380 tokens out, input budget 2290), D3 place look (300 / 1940), R1v2
+  prop look (220 / 1170). D2 runs in cast order and sees every height already written, so the cast shares one scale.
+  No entity name may appear in a visual field.
+- v2 order: K1 → D2 → sheets; P1 → D3 → plate; R1 → R1v2 → prop image. Calls are idempotent and saved. A
+  `<kind>:<id>:text` regenerate rewrites the look too (no new target; the estimate counts 2 calls). The cast and
+  places estimates count the new calls on v2 only.
+- Renderers `shots.render_look/render_place/render_prop` (≤ 45 words; relative height against the others in the
+  frame, by handle). New builders `portrait/turnaround/expressions/plate/prop_prompt_v2`: a full-body reference
+  (≤ 130 words), the turnaround and expressions as edits of it with role text, the plate with its layout map,
+  lighting and resident props (≤ 150), the prop at real scale (≤ 80); each ends with the positive constraints clause
+  (DEC-225's negative-prompt rule, A7). Legacy builders and their goldens are untouched.
+**Consequence.**
+- Legacy stories: every prompt, estimate and golden unchanged (Tier-1: local 6680/1, CI env 5885/765).
+- Re-pins on purpose: the closed-object guard's optional-key table, the MAX_TOKENS / SCHEMA_NAMES / INPUT_BUDGET
+  registries (three new ids), and the v2 cast-estimate test (3 D2 calls).
+- D3's 300-token cap fits up to P1's 3 time variants; a place with more variants or a larger props registry (stage
+  5b's D6 allows 8) can overflow it: re-measure in stage 5b.
+- A signature item keeps its stored capital inside the prose ("with Comically oversized …"): cosmetic, for stage 3b.
+- Commits `6caed8f` (schema) and `ffcfa4d`.

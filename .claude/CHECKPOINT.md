@@ -4,10 +4,11 @@
   - **Current phase:** IMPLEMENT. EXPLORE (E1–E5), CLARIFY (11 answers) and PLAN (Opus design, stages 1–8) were done on
     2026-10-01 in one session; the human approved the plan with its three go-items (hook 3–6 s; keyframes on
     seedream-4.5-edit with nano-banana-2-lite fallback; ≈ $1.73 per episode under the $2 cap).
-  - **Current stage:** 2b DONE (`c02ec6b`, DEC-224). **Next action:** stage 3a [Opus] — structured look + dossier
-    blocks (optional schema, own commit), D2/D3/R1 v2 builders with explicit INPUT_BUDGET rows, v2 call order in
-    cast/places, `render_look/place/prop`, `*_prompt_v2` sheet/plate/prop builders, the estimate extended
-    (`cast_units`/`places_units`). Scope saved in the session scratchpad (`stage3-scope.md`).
+  - **Current stage:** 3a DONE (`6caed8f` schema, `ffcfa4d`; DEC-226 part 1). **Next action:** stage 3b [Opus] —
+    layered keyframe and clip prompts (`layered_shot_prompt`, `layered_clip_prompt`, `role_text`), `resolve_shot`
+    v2 kwarg from its three callers, `_reference_images_v2` (≤ 10, roles), per-link `REFERENCE_LIMITS` replacing the
+    hard `[:4]` slice, `video_prompt` stored and preferred, the shot-card preview; lowercase stored signature items
+    inside prose. Scope: scratchpad `stage3-scope.md` section 3b.
   - **Tier-1 hygiene:** never keep `web/dashboard/dist/` in the worktree during Tier-1: with a real build present 15
     auth/clip-serving tests fail (pre-existing interaction, follow-up). The 2a build is kept in the scratchpad
     (`dashboard-dist-2a`). `node_modules` (npm ci) stays: it lets 8 more tests run, all green.
@@ -32,7 +33,7 @@
   | 1 W0 defects (D1 `video_action`, D2 names on the action only, D3 run-ons) | DONE (local 6631/9, CI env 5837/772) | 9850fa5 |
   | 2a quality chains, preset, caps 2/6/20, nano-banana paid key, 9:16 source crop | DONE (local 6640/9, CI env 5845/773, build ok) | 7425fd3, e00a97a |
   | 2b writing chain (nvidia → openrouter mistral-medium-3.1 → free) | DONE (local 6655/1, CI env 5860/765) | c02ec6b |
-  | 3a structured look + dossier, sheet/plate/prop v2 prompts | todo | |
+  | 3a structured look + dossier, sheet/plate/prop v2 prompts | DONE (local 6680/1, CI env 5885/765) | 6caed8f, ffcfa4d |
   | 3b layered keyframe/clip prompts, reference roles, preview | todo | |
   | 3c props as entities | todo | |
   | 4 serial_60s_v2 (6–10 shots), seedance on every shot, 1080p switch | todo | |
