@@ -3912,3 +3912,15 @@ by instruction; seedance's prompt limit is unpublished (A-110).
   visibly. Not reachable on the quality profile.
 - Not built: the plan's optional `plan` key on the shot (unneeded so far).
 - Commits `2c6c786` (schema) and `5eef509`.
+
+## DEC-226 (part 2) — The plot's objects become props (amends DEC-171 for v2 stories)
+**Context.** E1 was told "props: always [] -- this story has no props" (DEC-171), so story A's toaster and story B's
+key were never entities: no look, no scale, no reference; the toaster was on screen about 6 % of story A's runtime.
+**Decision.** On a v2 story from episode 2, E1 may name up to 2 `new_objects` {name ≤ 4 words, one_line ≤ 15,
+owner}; scenes tag them `%prop_<slug>`. The script step creates idempotent prop stubs (no descriptor), which the next
+places run completes with R1 and R1v2 and an image (already estimated there). The storyboard refuses on v2, before
+any call, while a scene's prop has no image (named, with its estimate). `validate_t1` on v2 refuses `insert_prop`
+without a prop subject. Episode 1's objects come from the knowledge step's props registry (stage 5b).
+**Consequence.** v1 prompts and schemas unchanged (the field is absent unless offered). A new unapproved prop folds
+the story's places approval back (DEC-123), so the episode gate fires first; the storyboard refusal is the second
+line. Commit recorded in the action log.
