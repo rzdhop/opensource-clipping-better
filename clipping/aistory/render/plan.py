@@ -4,10 +4,14 @@ order, decided before anything runs (spec 6.5, 2.9; plan phase 4 stage 7,
 DEC-183).
 
 :func:`build_render_plan` is **pure**: documents and already-hashed input
-files in, a JSON-able plan out -- no disk, no clock, no subprocess. The
-caller resolves where each file is and hashes it (``runner.file_record``),
-runs the ffmpeg pre-flight (``runner.preflight``) for the version the cache
-keys need, and hands the plan to ``runner.run_render``.
+files in, a JSON-able plan out -- no clock, no subprocess, and no disk but
+the header of each still a shot is drawn from (its pixel size,
+``imagesize.image_size``: a still that is not 9:16 is centre-cropped, phase 6
+stage 13b -- the size is the bytes' own, so the sha256 the cache key holds
+still decides it). The caller resolves where each file is and hashes it
+(``runner.file_record``), runs the ffmpeg pre-flight (``runner.preflight``)
+for the version the cache keys need, and hands the plan to
+``runner.run_render``.
 
 **Stages**, in the order they run (``schemas.RENDER_STAGE_KINDS``):
 
@@ -72,7 +76,7 @@ import re
 from ... import loudness
 from .. import schemas
 from .. import timing as timing_mod
-from . import filtergraph, motion, profiles
+from . import filtergraph, imagesize, motion, profiles
 from . import subtitles as subtitles_mod
 from . import timeline as timeline_mod
 
@@ -380,7 +384,11 @@ def _build(*, script, storyboard, assets, style_lock, template, story, ep, input
             if shot_id not in shot_inputs:
                 raise PlanError(f"shot {shot_id!r} has no image")
             rel = add_input("shot", shot_id, shot_inputs[shot_id])
-            argv0 = filtergraph.shot_argv(rel, tl_shot, shot_profile, overlays, _OUT_TOKEN, pan_pct=pan_pct)
+            # phase 6 stage 13b: a still that is not 9:16 is centre-cropped
+            # (an unreadable size keeps the argv it always had)
+            size = imagesize.image_size(shot_inputs[shot_id].get("path"))
+            argv0 = filtergraph.shot_argv(rel, tl_shot, shot_profile, overlays, _OUT_TOKEN, pan_pct=pan_pct,
+                                          image_size=size)
             input_shas = {rel: shot_inputs[shot_id]["sha256"]}
             if overlay_sha is not None:
                 input_shas[filtergraph.PAPER_TEXTURE_REL] = overlay_sha

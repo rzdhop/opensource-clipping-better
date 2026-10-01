@@ -17,6 +17,8 @@ argv, every time (golden-testable, spec 13).
 
 from __future__ import annotations
 
+import math
+
 from . import motion as motion_mod
 from . import profiles
 
@@ -72,9 +74,41 @@ def _cover_fill() -> str:
     return f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},setsar=1"
 
 
-def _base_chain(image_rel, shot, profile, *, pan_pct=motion_mod.PAN_PCT) -> tuple:
-    """``(chain_fragments, zoompan_frames, zoompan_fps)`` for one shot:
-    ``scale`` (per *profile*'s upscale), then ``zoompan`` (eased per
+# A still's aspect may differ from 9:16 by this much (relative to 9:16) and
+# still render uncropped: a provider's near-9:16 size (768x1344 = 4:7 is
+# +1.6 %) keeps its argv, a square or 2:3 one is cropped (phase 6 stage 13b).
+STILL_ASPECT_TOLERANCE = 0.02
+
+
+def still_crop(image_size):
+    """``(width, height)`` of the centre crop that makes a still of
+    *image_size* (``(w, h)`` in pixels, or None: unknown) 9:16 in its own
+    pixels; None when it needs none -- its aspect is within
+    :data:`STILL_ASPECT_TOLERANCE` of 9:16 -- or its size is unknown.
+
+    The crop is the largest exact 9:16 that fits, an even multiple of 9x16
+    (1024x1024 -> 576x1024): even on both axes (a 4:2:0 picture is cropped
+    exactly as asked) and the scale after it lands on exactly 9:16 times the
+    upscale, so the pixels stay square. A crop the scale must round (an odd
+    574x1022) leaves a sample aspect ratio that is not 1:1, and the final
+    pass's ``concat`` refuses a cut between two shots whose ratios differ."""
+    if not image_size:
+        return None
+    width, height = image_size
+    if abs((width / height) / (profiles.WIDTH / profiles.HEIGHT) - 1) <= STILL_ASPECT_TOLERANCE:
+        return None
+    unit = math.gcd(profiles.WIDTH, profiles.HEIGHT)
+    unit_w, unit_h = profiles.WIDTH // unit, profiles.HEIGHT // unit
+    k = min(width // unit_w, height // unit_h)
+    k -= k % 2
+    return (unit_w * k, unit_h * k) if k else None
+
+
+def _base_chain(image_rel, shot, profile, *, pan_pct=motion_mod.PAN_PCT, image_size=None) -> tuple:
+    """``(chain_fragments, zoompan_frames, zoompan_fps)`` for one shot: a
+    centre ``crop`` to 9:16 when the still is not 9:16 (:func:`still_crop`
+    on *image_size* -- never letterboxed, never stretched), ``scale`` (per
+    *profile*'s upscale), then ``zoompan`` (eased per
     ``shot["motion"]``/``shot["modifiers"]``, its pan travel room per
     *pan_pct* -- phase 5 stage 12, DEC-183), then the ``handheld`` crop
     when present. Does not include overlays or ``format`` -- those are
@@ -92,7 +126,11 @@ def _base_chain(image_rel, shot, profile, *, pan_pct=motion_mod.PAN_PCT) -> tupl
     canvas_w, canvas_h = motion_mod.zoompan_canvas(modifiers)
     scaled_w = profiles.WIDTH * profile.upscale
 
-    chain = [f"scale={scaled_w}:-2"]
+    chain = []
+    cover = still_crop(image_size)
+    if cover is not None:
+        chain.append(f"crop={cover[0]}:{cover[1]}")
+    chain.append(f"scale={scaled_w}:-2")
     chain.append(
         f"zoompan=z={z['z']}:x={z['x']}:y={z['y']}:d={zoompan_frames}:s={canvas_w}x{canvas_h}:fps={zoompan_fps}"
     )
@@ -126,7 +164,8 @@ def _overlay_fragments(style_overlays) -> list:
 
 # -------------------------------------------------------------------- shot
 
-def shot_argv(image_rel, shot, profile, style_overlays, out_rel, *, pan_pct=motion_mod.PAN_PCT) -> list:
+def shot_argv(image_rel, shot, profile, style_overlays, out_rel, *, pan_pct=motion_mod.PAN_PCT,
+              image_size=None) -> list:
     """The argv for one shot's image -> clip render (spec 6.5): a looped
     still image, scaled by *profile*'s own upscale factor, an eased
     zoompan driven by ``shot["motion"]`` and ``shot["modifiers"]``
@@ -146,6 +185,13 @@ def shot_argv(image_rel, shot, profile, style_overlays, out_rel, *, pan_pct=moti
     ``tests/test_aistory_render_runner.py``), so plumbing the template's own
     value through the renderer (``plan.py``) never moves their argv.
 
+    *image_size* (phase 6 stage 13b) is the still's ``(width, height)``
+    (``imagesize.image_size``; None: unknown). A still that is not 9:16 is
+    centre-cropped to 9:16 in its own pixels before the scale
+    (:func:`still_crop`) -- a square one was stretched vertically before.
+    A 9:16 still, a near-9:16 one and one of unknown size get no crop: their
+    argv is byte-for-byte the one before this keyword existed.
+
     *shot* is a ``render.timeline`` shot entry: ``{"duration_s", "frames",
     "motion", "modifiers", ...}`` (``build_timeline``'s per-shot dict --
     ``frames`` there is the shot's own exact 30 fps frame count). The graph
@@ -163,7 +209,8 @@ def shot_argv(image_rel, shot, profile, style_overlays, out_rel, *, pan_pct=moti
     _assert_relative(image_rel, what="image_rel")
     _assert_relative(out_rel, what="out_rel")
 
-    chain, _zoompan_frames, _zoompan_fps = _base_chain(image_rel, shot, profile, pan_pct=pan_pct)
+    chain, _zoompan_frames, _zoompan_fps = _base_chain(image_rel, shot, profile, pan_pct=pan_pct,
+                                                       image_size=image_size)
     chain.extend(_overlay_fragments(style_overlays))
     main_chain = ",".join(chain)
 

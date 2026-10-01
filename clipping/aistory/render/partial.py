@@ -33,9 +33,10 @@ image or video), ``overlay`` (the style's overlays, or the paper texture's
 bytes), ``modifiers`` (``handheld``, ``jitter_stopmotion``), ``frames`` (its
 frame count: a re-time, a transition, a conversion to whole frames),
 ``motion`` (its camera motion), else ``settings`` (the ffmpeg, the profile,
-the encoder settings). A shot the baseline did not have is ``new``; one whose
-key did not move is ``missing`` or ``corrupt``. One reason a shot, the first
-that applies: an image and its frames changed together is an ``image``.
+the encoder settings, the framing: a still's 9:16 crop, a clip's cover). A
+shot the baseline did not have is ``new``; one whose key did not move is
+``missing`` or ``corrupt``. One reason a shot, the first that applies: an
+image and its frames changed together is an ``image``.
 
 **Conversion.** A storyboard timed before whole frames converts on its first
 full re-time (stage 6), and most of its shots' frames move once: the
@@ -218,9 +219,11 @@ def shot_facts(argv) -> dict:
     ``tier2_clip_argv``) says about the shot: ``source`` (its input and
     whether it is a looped still), ``frames`` (``-frames:v`` and zoompan's
     ``d``), ``overlays`` (the overlay filters of its graph), ``modifiers``
-    (zoompan's canvas and rate, a ``crop``, an ``fps`` after zoompan) and
-    ``motion`` (zoompan's ``z``/``x``/``y``). ValueError when *argv* is not
-    a shot's command."""
+    (zoompan's canvas and rate, a ``crop`` or an ``fps`` after zoompan --
+    ``handheld`` and ``jitter_stopmotion``; a crop before zoompan or without
+    one frames the picture, the still's 9:16 crop and a clip's cover, phase 6
+    stage 13b) and ``motion`` (zoompan's ``z``/``x``/``y``). ValueError when
+    *argv* is not a shot's command."""
     argv = list(argv)
     if "-i" not in argv or "-frames:v" not in argv:
         raise ValueError("not a shot's command")
@@ -233,7 +236,7 @@ def shot_facts(argv) -> dict:
         "source": (_after(argv, "-i"), "-loop" in argv),
         "frames": (_after(argv, "-frames:v"), zoompan.get("d")),
         "overlays": tuple(sorted(name for name in names if name in _OVERLAY_FILTERS)),
-        "modifiers": (zoompan.get("s"), zoompan.get("fps"), "crop" in names, "fps" in after_zoompan),
+        "modifiers": (zoompan.get("s"), zoompan.get("fps"), "crop" in after_zoompan, "fps" in after_zoompan),
         "motion": (zoompan.get("z"), zoompan.get("x"), zoompan.get("y")),
     }
 
