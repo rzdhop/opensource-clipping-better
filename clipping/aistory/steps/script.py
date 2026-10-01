@@ -74,8 +74,9 @@ from __future__ import annotations
 import copy
 import time
 
-from .. import context, prompts, schemas, series_memory, timing
+from .. import context, media_policy, prompts, schemas, series_memory, timing
 from . import entities, episode_common, llm_call
+from . import places as places_step
 from .episode_common import SCRIPT_DOC, STORYBOARD_DOC
 from .llm_call import StepFailed
 # The voice measurement lives in ``voice_lines`` (lifted unchanged, phase 4
@@ -192,7 +193,7 @@ def _fr_text(ec, text: str) -> str:
     return text
 
 
-def _repair_e1_reply(ec, reply) -> None:
+def _repair_e1_reply(ec, reply, *, new_objects_offered=False) -> None:
     """Repair a dropped French elision apostrophe in an E1 reply's own free
     text, in place, before its validator runs (spec 4.2, F1): a merged
     elision changes a word count (``"l alliance"`` is 2 "words", "l'alliance"
@@ -203,7 +204,9 @@ def _repair_e1_reply(ec, reply) -> None:
     string can name a prop it does not have, and with no ids to enumerate
     the schema cannot stop the free tier from listing object names there
     (T2-F9). Only lists are touched; a malformed reply is left to the
-    validator.
+    validator. Skipped when *new_objects_offered* (phase 7 stage 3c, A11): a
+    v2 story's scene may legitimately reference a new object by
+    ``%prop_<slug>`` even when ``ec.prop_ids`` is still empty.
 
     Only a body scene pays a hook off: a recap, hook or cliffhanger scene's
     ``pays_off`` is emptied too (Tier-2 T2-P5-F7 -- the free tier put it on
@@ -213,7 +216,7 @@ def _repair_e1_reply(ec, reply) -> None:
         for scene in reply["scenes"]:
             if not isinstance(scene, dict):
                 continue
-            if not ec.prop_ids and isinstance(scene.get("props"), list):
+            if not ec.prop_ids and not new_objects_offered and isinstance(scene.get("props"), list):
                 scene["props"] = []
             if isinstance(scene.get("pays_off"), list) and scene.get("function") not in schemas.BODY_FUNCTIONS:
                 scene["pays_off"] = []
@@ -323,10 +326,61 @@ def _normalize_episode_targets(ec, scenes) -> tuple:
     return before, after
 
 
+def _new_object_props(ec, new_objects) -> dict:
+    """``{name: prop_id}`` for E1's ``new_objects`` (phase 7 stage 3c, A11):
+    a prop stub (``places.new_prop`` -- the same creation path the places
+    step's own list uses) for every entry whose name is not already one of
+    the story's props, idempotent by name like ``places._create`` (a name
+    already taken is reused, never duplicated -- this also makes a retried
+    E1 call, whose validator runs this more than once, safe). The stub has
+    no ``descriptor`` and no image yet: R1 (and, on a v2 story, R1v2) write
+    them at the next places step run, the same gate as any other prop with
+    no text yet -- this step makes no image or text call, so its own budget
+    and estimate are unaffected.
+
+    *ec* gains every prop created (``entities["props"]``, ``prop_ids``), so
+    the rest of this reply's validation and application (``trial_errors``,
+    ``apply_e1``'s own tag resolution) see it as a real, known id. Nothing
+    is created for ``new_objects`` empty."""
+    if not new_objects:
+        return {}
+    existing = entities.by_name(ec.entities["props"].values())
+    taken = set(ec.prop_ids)
+    ids = {}
+    for obj in new_objects:
+        key = entities.name_key(obj["name"])
+        doc = existing.get(key)
+        if doc is None:
+            eid = schemas.entity_id(entities.PROPS, obj["name"], taken)
+            now = llm_call.utc_now()
+            doc = places_step.new_prop(eid, obj["name"], obj["one_line"], obj.get("owner_char_id"), now=now)
+            errors = schemas.prop_errors(doc)
+            if errors:
+                raise StepFailed(f"{obj['name']} cannot be created: {'; '.join(errors[:3])}.")
+            ec.store.write_entity(ec.story_id, entities.PROPS, doc, now=now)
+            ec.entities["props"][eid] = doc
+            ec.prop_ids.append(eid)
+            existing[key] = doc
+            taken.add(eid)
+        ids[obj["name"]] = doc["prop_id"]
+    return ids
+
+
 def apply_e1(ec, script, reply) -> tuple:
     """E1's beat sheet into *script* (in place): one stub per scene, with the
     hooks it pays off (``pays_off``, from episode 2 on) when it names any.
+
+    Phase 7 stage 3c (A11): *reply*'s ``new_objects`` (a v2 story, episode 2
+    on) are created first (:func:`_new_object_props`), then every scene's
+    ``%prop_<slug>`` tag (``prompts.new_object_tag``) is resolved to the id
+    just created -- the story's ``prop_ids`` gains it, and the script never
+    stores the transient tag, only real ids, like any other prop.
+
     Returns :func:`_normalize_episode_targets`'s own ``(before, after)``."""
+    new_objects = reply.get("new_objects") or []
+    created = _new_object_props(ec, new_objects)
+    tag_ids = {prompts.new_object_tag(obj["name"]): created[obj["name"]]
+               for obj in new_objects if obj["name"] in created}
     scenes, number = [], 1
     for stub in reply["scenes"]:
         if stub["function"] == "recap":
@@ -337,7 +391,8 @@ def apply_e1(ec, script, reply) -> tuple:
         scene = {
             "scene_id": sid, "function": stub["function"], "place_id": stub["place_id"],
             "time_variant": stub["time_variant"], "characters": list(dict.fromkeys(stub["characters"])),
-            "props": list(dict.fromkeys(stub["props"])), "summary": _fr_text(ec, stub["summary"]),
+            "props": [tag_ids.get(pid, pid) for pid in dict.fromkeys(stub["props"])],
+            "summary": _fr_text(ec, stub["summary"]),
             "emotion": stub["emotion"], "target_duration_s": 0.0, "lines": [], "sfx_cues": [],
             "on_screen_text": None, "state": "stub", "source": "E1", "rev": 1,
         }
@@ -386,26 +441,33 @@ def write_beat_sheet(ctx, ec, script, *, tools, announced) -> None:
     E1 is handed the hooks open when the episode starts (:func:`episode_open_hooks`)
     to pay off and the chosen audience direction (:func:`audience_direction`);
     with a hook offered, the call's cap is the payoff variant's
-    (``prompts.E1_PAYOFF_MAX_TOKENS``), else the registry's."""
+    (``prompts.E1_PAYOFF_MAX_TOKENS``), else the registry's.
+
+    Phase 7 stage 3c (A11): ``media_policy.is_v2(ec.story)`` is resolved
+    once and passed to every E1 call (``build_e1``, ``validate_e1``,
+    ``_repair_e1_reply``), so they all agree on whether ``new_objects`` is
+    offered this call."""
     pack = _pack(ec, ctx, announced)
     slots = timing.episode_slots(ec.template, ec.ep)
     hooks = episode_open_hooks(ec)
     cast = e1_cast(ec)
+    v2 = media_policy.is_v2(ec.story)
+    new_objects_offered = prompts.offers_new_objects(ec.ep, v2)
     system, user, schema = prompts.build_e1(
         pack, ep=ec.ep, arc_entry=ec.arc_entry, template=ec.template, episode_defaults=ec.episode_defaults,
         cast=[{"char_id": doc["char_id"], "name": doc["name"]} for doc in cast],
         places=[{"place_id": pid, "name": ec.entities["places"][pid]["name"], "time_variants": variants}
                 for pid, variants in ec.places.items()],
         props=[{"prop_id": pid, "name": ec.entities["props"][pid]["name"]} for pid in ec.prop_ids],
-        memory=ec.season, slots=slots, open_hooks=hooks, audience_direction=audience_direction(ec),
+        memory=ec.season, slots=slots, open_hooks=hooks, audience_direction=audience_direction(ec), v2=v2,
     )
     llm_call.announce_trimmed(ctx, pack, announced)
 
     def validate(reply):
-        _repair_e1_reply(ec, reply)
+        _repair_e1_reply(ec, reply, new_objects_offered=new_objects_offered)
         errors = prompts.validate_e1(reply, ep=ec.ep, template=ec.template, episode_defaults=ec.episode_defaults,
                                      cast_ids=[doc["char_id"] for doc in cast], places=ec.places,
-                                     prop_ids=ec.prop_ids, open_hooks=hooks)
+                                     prop_ids=ec.prop_ids, open_hooks=hooks, v2=v2)
         if errors:
             return errors
         trial = copy.deepcopy(script)

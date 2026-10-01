@@ -33,7 +33,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from clipping.aistory import prompts, schemas, steps, stylelock, templates, timing
+from clipping.aistory import defaults, prompts, schemas, steps, stylelock, templates, timing
 from clipping.aistory.store import StoryStore
 from clipping.cancel import CancelToken, Cancelled
 from clipping.providers.errors import ProviderError
@@ -217,9 +217,11 @@ def _lock():
     return stylelock.lock_style(draft, now=NOW)
 
 
-def _ready_story(store, *, recaps=None, relationships=None, with_prop=True):
+def _ready_story(store, *, recaps=None, relationships=None, with_prop=True, v2=False):
     """A French Tentafruit story whose derived status is ``ready`` (with no
-    prop at all when *with_prop* is False)."""
+    prop at all when *with_prop* is False). *v2* (phase 7 stage 3c, A11)
+    puts the story on the v2 pipeline (``media_policy.is_v2``), the only
+    thing E1's ``new_objects`` and the storyboard's prop-image gate read."""
     story_id = store.create(language="fr", seed_text=None, style_template_id="fruit_drama", now=NOW)["story_id"]
     concept = templates.localize_concept(
         next(c for c in templates.load_concepts() if c["concept_id"] == "tentafruit_island"), "fr")
@@ -232,6 +234,8 @@ def _ready_story(store, *, recaps=None, relationships=None, with_prop=True):
         doc["premise"] = "Chaque semaine, un couple est éliminé. Le téléphone en noix de coco annonce le vote."
         doc["tone"] = "Sombre, cynique, satirique"
         doc["generation_profile"]["consistency_mode"] = "prompt_only"
+        if v2:
+            doc["generation_profile"]["pipeline"] = defaults.PIPELINE_V2
         for key in ("concept", "bible", "style"):
             doc["approvals"][key] = NOW
 
@@ -1482,12 +1486,12 @@ EP1_ENTRY = _memory_entry("Kiwilo et Mangella se sont alliés en secret.", [HOOK
 EP2_ENTRY = _memory_entry("Le téléphone retrouvé, le vote approche.", [HOOK_VOTE], [HOOK_PHONE])
 
 
-def _continuity_story(store, *, entries=((1, EP1_ENTRY),), chosen=1):
+def _continuity_story(store, *, entries=((1, EP1_ENTRY),), chosen=1, v2=False):
     from clipping.aistory import series_memory
 
-    story_id = _ready_story(store)
+    story_id = _ready_story(store, v2=v2)
     # Episode 1's script, at the revision the entries record (1): the gate needs its memory fresh (plan 11
-    # stage 4).
+    # stage 4). Episode 1 is legacy-shaped even on a v2 story (new_objects is offered from episode 2 on).
     _run(_new().script, store, story_id, llm=_script_llm())
     season = store.read_doc(story_id, "season.json")
     for ep, entry in entries:
@@ -1550,6 +1554,44 @@ def test_episode_2_is_written_from_the_hooks_open_before_it_and_keeps_pays_off(s
     assert "hook_payoff" in e4["schema"]["properties"]["issues"]["items"]["properties"]["kind"]["enum"]
     report = script["consistency_report"]
     assert report["passed"] is True and report["issues"] == []
+
+
+def test_a_v2_script_turns_new_objects_into_a_prop_stub_in_prop_ids(store):
+    """Phase 7 stage 3c (A11, amends DEC-171): E1 report finding 6 -- the
+    plot's own objects (a giant toaster, a key) were never entities, only
+    free text reinvented in every shot. From episode 2 on, a v2 story's E1
+    may name ``new_objects``; the script step creates a prop stub for each
+    through the places step's own creation path (``places.new_prop``) and
+    resolves the scene's ``%prop_<slug>`` tag to the id just created -- the
+    story's ``prop_ids`` gains it, like any prop a human lists."""
+    m = _new()
+    story_id = _continuity_story(store, v2=True)
+    e1 = _e1_ep2_paying({"s04": [HOOK_PHONE]})
+    e1["new_objects"] = [{"name": "Giant Toaster", "one_line": "The runaway toaster chasing the whole cast.",
+                          "owner_char_id": None}]
+    rising = e1["scenes"][(["s00"] + ALL_SCENES).index("s03")]
+    assert rising["props"] == []  # the base fixture's s03 (rising) has no prop
+    rising["props"] = ["%prop_giant_toaster"]
+    llm = _script_llm(E1=[e1], E3=[E3_EP2], E4=[E4_PASSED])
+
+    assert "prop_giant_toaster" not in store.get(story_id)["prop_ids"]
+
+    _run(m.script, store, story_id, llm=llm, ep=2)
+
+    story = store.get(story_id)
+    assert "prop_giant_toaster" in story["prop_ids"]
+    assert PHONE in story["prop_ids"]  # the existing prop is kept, not replaced
+    prop = store.read_entity(story_id, "props", "prop_giant_toaster")
+    assert prop["name"] == "Giant Toaster"
+    assert prop["one_line"] == "The runaway toaster chasing the whole cast."
+    assert prop["owner_char_id"] is None
+    # No text or image yet: R1 (and, v2, R1v2) write them at the next places
+    # step run, the same gate as any other prop with no text (places.py).
+    assert prop["descriptor"] is None and prop["image"] is None
+
+    script = _script(store, story_id, 2)
+    assert _scene(script, "s03")["props"] == ["prop_giant_toaster"]
+    assert schemas.episode_script_errors(script) == []
 
 
 def test_without_a_chosen_direction_e1_has_no_audience_block(store):

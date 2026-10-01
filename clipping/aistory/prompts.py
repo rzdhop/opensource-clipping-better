@@ -973,7 +973,8 @@ _E1_ASK_TEMPLATE = (
     "Give:\n"
     "- title: the episode's own title, at most 8 words\n"
     "- scenes: exactly {n} entries, one for each of these, in order:\n"
-    "{scene_list}\n\n"
+    "{scene_list}\n"
+    "{new_objects_line}\n"
     "Each scene:\n"
     "- function: one of {functions}\n"
     "- place_id: one of the existing places, at most {max_places} distinct places across the whole episode\n"
@@ -1000,6 +1001,41 @@ _E1_ASK_TEMPLATE = (
 _E1_PROPS_LINE = "- props: 0 to 4 of the existing props\n"
 _E1_NO_PROPS_LINE = "- props: always [] -- this story has no props\n"
 
+# Phase 7 stage 3c (A11, amends DEC-171): on a v2 story, from episode 2 on
+# (episode 1's objects come from the knowledge step instead, once it exists --
+# stage 5), E1 may name up to two NEW objects this episode's plot needs --
+# the antagonist, the clue, the key -- that are not already one of the
+# story's props, so the object becomes a real entity instead of being
+# reinvented, undrawn, in every shot's own prompt (E1 report finding 6: both
+# live stories had ``prop_ids: []`` and were told "this story has no props",
+# so the giant toaster and the key were never anything but free text).
+# Replaces both ``_E1_PROPS_LINE`` and ``_E1_NO_PROPS_LINE``: their schema's
+# enum of existing prop ids cannot also list an id that does not exist until
+# this very reply creates it, so a scene refers to a new object by
+# ``%prop_<slug of its name>`` instead -- the post-validator, not the schema,
+# checks every such tag matches one of this reply's own ``new_objects``
+# (:func:`validate_e1`).
+NEW_OBJECT_TAG_PREFIX = "%prop_"
+_E1_PROPS_LINE_V2 = (
+    "- props: the existing props this scene uses, by id; a new object may be referenced as "
+    "%prop_<slug of its name> once it is named in new_objects below\n"
+)
+_E1_NEW_OBJECTS_LINE = (
+    "- new_objects: 0 to 2 new objects this episode's plot needs that are not already one of the existing "
+    "props (the antagonist, the clue, the key -- an object a scene shows or the plot turns on) -- each with "
+    "name (at most 4 words), one_line (at most 15 words) and owner_char_id (one of the existing cast, or "
+    "null)\n"
+)
+
+
+def new_object_tag(name) -> str:
+    """The ``%prop_<slug>`` tag a scene's ``props`` uses for a ``new_objects``
+    entry named *name*, before it is a real prop (``NEW_OBJECT_TAG_PREFIX`` +
+    ``schemas.slugify``) -- the one place this mapping is computed, reused by
+    :func:`validate_e1` and by the script step, which creates the entity and
+    must resolve the same tag to the id it got."""
+    return NEW_OBJECT_TAG_PREFIX + schemas.slugify(name)
+
 # Phase 5 (plan 11 stage 3, DEC-177): from episode 2 on, with at least one
 # hook open when the episode starts, every scene says which open hook it pays
 # off -- at most one (``E1_PAYS_OFF_PER_SCENE``: a 60-second episode's scene
@@ -1018,6 +1054,17 @@ _E1_PAYOFF_LINE = (
     "one off\n"
 )
 _E1_PAYOFF_HEADER = "Open hooks when this episode starts -- pays_off names them exactly as written:"
+
+
+def offers_new_objects(ep, v2) -> bool:
+    """Whether E1 offers ``new_objects`` this call (phase 7 stage 3c, A11):
+    a v2 story only, from episode 2 on -- episode 1's props are meant to come
+    from the knowledge step instead (stage 5, not built yet), so episode 1
+    stays on the legacy ask. *v2* is the caller's own
+    ``media_policy.is_v2(story)``; this module stays free of that import
+    (the same pattern ``steps/storyboard.py`` already passes ``v2`` into
+    ``shots.build_storyboard``)."""
+    return bool(v2) and ep >= 2
 
 
 def offered_hooks(ep, open_hooks) -> list:
@@ -1089,7 +1136,7 @@ def _arc_entry_block(arc_entry, *, label="This episode's arc entry") -> str:
     return "\n".join(lines)
 
 
-def e1_schema(cast_ids, place_ids, prop_ids, payoff_hooks=None) -> dict:
+def e1_schema(cast_ids, place_ids, prop_ids, payoff_hooks=None, new_objects_allowed=False) -> dict:
     """The E1 output schema (spec 2.7, 4.2, row E1): the beat sheet. No
     scene_id field -- Python assigns one to every scene in the order the
     model returns them (spec: the model never outputs an id Python owns).
@@ -1097,17 +1144,28 @@ def e1_schema(cast_ids, place_ids, prop_ids, payoff_hooks=None) -> dict:
     *payoff_hooks* (phase 5 stage 3: :func:`offered_hooks`' own list) adds
     each scene's required ``pays_off``, an array of those hooks as an enum;
     None or empty leaves the schema exactly as it was (an empty enum is not
-    valid JSON Schema, DEC-171's precedent)."""
+    valid JSON Schema, DEC-171's precedent).
+
+    *new_objects_allowed* (phase 7 stage 3c, A11, :func:`offers_new_objects`)
+    adds a top-level ``new_objects`` array and drops ``props``' own enum of
+    existing ids: a scene may then reference a new object by
+    ``%prop_<slug>`` before it exists, which a fixed enum could never list,
+    so ``validate_e1`` checks every reference by hand instead. False (the
+    default) renders exactly today's schema, byte for byte."""
     char_items = {"type": "string", "enum": list(cast_ids)} if cast_ids else {"type": "string"}
-    prop_items = {"type": "string", "enum": list(prop_ids)} if prop_ids else {"type": "string"}
+    if new_objects_allowed:
+        prop_items = {"type": "string"}
+        props_description = ("the existing props this scene uses, by id, plus %prop_<slug> for a new object "
+                              "named in new_objects")
+    else:
+        prop_items = {"type": "string", "enum": list(prop_ids)} if prop_ids else {"type": "string"}
+        props_description = "0-4 of the existing props" if prop_ids else "always empty: the story has no props"
     properties = {
         "function": {"type": "string", "enum": list(schemas.SCENE_FUNCTIONS)},
         "place_id": {"type": "string", "enum": list(place_ids)} if place_ids else {"type": "string"},
         "time_variant": {"type": "string", "description": "one of that place's own listed variants"},
         "characters": {"type": "array", "description": "0-6 of the existing cast", "items": char_items},
-        "props": {"type": "array",
-                  "description": "0-4 of the existing props" if prop_ids else "always empty: the story has no props",
-                  "items": prop_items},
+        "props": {"type": "array", "description": props_description, "items": prop_items},
         "summary": {"type": "string", "description": "at most 15 words"},
         "emotion": {"type": "string", "enum": list(schemas.EMOTIONS)},
         "target_duration_s": {"type": "number", "description": "a hint inside the scene's own slot range"},
@@ -1118,14 +1176,28 @@ def e1_schema(cast_ids, place_ids, prop_ids, payoff_hooks=None) -> dict:
             "items": {"type": "string", "enum": list(payoff_hooks)},
         }
     scene = _llm_obj(properties)
-    return _llm_obj({
+    top = {
         "title": {"type": "string", "description": "at most 8 words"},
         "scenes": {"type": "array", "description": "one per beat, in order", "items": scene},
-    })
+    }
+    if new_objects_allowed:
+        owner_items = ({"type": ["string", "null"], "enum": list(cast_ids) + [None]} if cast_ids
+                       else {"type": ["string", "null"]})
+        new_object = _llm_obj({
+            "name": {"type": "string", "description": "at most 4 words"},
+            "one_line": {"type": "string", "description": "at most 15 words"},
+            "owner_char_id": owner_items,
+        })
+        top["new_objects"] = {
+            "type": "array",
+            "description": "0-2 new objects this episode's plot needs that are not already a prop",
+            "items": new_object,
+        }
+    return _llm_obj(top)
 
 
 def build_e1(pack, *, ep, arc_entry, template, episode_defaults, cast, places, props, memory, slots,
-             open_hooks=None, audience_direction=None):
+             open_hooks=None, audience_direction=None, v2=False):
     """The episode's beat sheet (spec 2.7, 4.2, row E1): every scene stub
     (function, place, time variant, cast, props, a one-line summary, an
     emotion and a duration hint), in the order the episode template wants,
@@ -1156,8 +1228,16 @@ def build_e1(pack, *, ep, arc_entry, template, episode_defaults, cast, places, p
     (:func:`_audience_block`), or None. Episode 1, or no hook open and no
     direction: today's prompt byte for byte; *open_hooks* None (a caller
     from before phase 5) keeps the stored list in the memory block.
+
+    Phase 7 stage 3c (A11): *v2* is the caller's own
+    ``media_policy.is_v2(story)`` (this module stays free of that import).
+    With it True and *ep* >= 2 (:func:`offers_new_objects`), the ask gains
+    the ``new_objects`` bullet and the props line is replaced
+    (:data:`_E1_PROPS_LINE_V2`); otherwise the prompt and schema are today's,
+    byte for byte (RC-M1).
     """
     hooks = offered_hooks(ep, open_hooks)
+    new_objects = offers_new_objects(ep, v2)
     # Handed the hooks, the memory block shows none: they are listed once,
     # enumerated, in the payoff block below (or there are none open).
     memory_text, was_cut = context.memory_section(memory, ep, open_hooks=None if open_hooks is None else [])
@@ -1187,14 +1267,16 @@ def build_e1(pack, *, ep, arc_entry, template, episode_defaults, cast, places, p
         hook_style_line=_HOOK_STYLE_LINES[episode_defaults["hook_style"]],
         cliffhanger_style_line=_CLIFFHANGER_STYLE_LINES[episode_defaults["cliffhanger_style"]],
         french_line=_french_block(pack),
-        props_line=_E1_PROPS_LINE if props else _E1_NO_PROPS_LINE,
+        props_line=_E1_PROPS_LINE_V2 if new_objects else (_E1_PROPS_LINE if props else _E1_NO_PROPS_LINE),
+        new_objects_line=_E1_NEW_OBJECTS_LINE if new_objects else "",
         payoff_line=_E1_PAYOFF_LINE if hooks else "",
     )
 
     cast_ids = [c["char_id"] for c in cast]
     place_ids = [p["place_id"] for p in places]
     prop_ids = [p["prop_id"] for p in props]
-    return _system(pack), user, e1_schema(cast_ids, place_ids, prop_ids, payoff_hooks=hooks)
+    return _system(pack), user, e1_schema(cast_ids, place_ids, prop_ids, payoff_hooks=hooks,
+                                          new_objects_allowed=new_objects)
 
 
 def _e1_slot_bounds(template, has_recap):
@@ -1212,7 +1294,8 @@ def _e1_slot_bounds(template, has_recap):
     return scenes_lo, scenes_hi, lo, hi
 
 
-def validate_e1(reply, *, ep, template, episode_defaults, cast_ids, places, prop_ids, open_hooks=None) -> list:
+def validate_e1(reply, *, ep, template, episode_defaults, cast_ids, places, prop_ids, open_hooks=None,
+                v2=False) -> list:
     """Post-validation for an E1 reply, beyond what its schema can express
     (spec 2.7, 6.2): scene/body counts, the function order (an optional
     recap first, exactly one hook right after it, exactly one cliffhanger
@@ -1239,11 +1322,20 @@ def validate_e1(reply, *, ep, template, episode_defaults, cast_ids, places, prop
     (the schema's enum refuses a hook that is not offered), holds at most
     ``E1_PAYS_OFF_PER_SCENE`` hook, and at least one body scene names one.
     Otherwise ``pays_off`` is an extra key, refused as any other.
+
+    *v2* (phase 7 stage 3c, A11) is the caller's own ``media_policy.
+    is_v2(story)``. With it True and *ep* >= 2 (:func:`offers_new_objects`),
+    ``new_objects`` is checked (count, word caps) and every scene's
+    ``props`` entry is checked by hand -- an existing id, or a
+    ``%prop_<slug>`` tag naming one of this reply's own ``new_objects`` --
+    since the schema (:func:`e1_schema`) drops the enum that would otherwise
+    do it, a fixed list that cannot include an id this very reply creates.
     """
     cast_ids = list(cast_ids)
     prop_ids = list(prop_ids)
     hooks = offered_hooks(ep, open_hooks)
-    schema = e1_schema(cast_ids, list(places), prop_ids, payoff_hooks=hooks)
+    new_objects = offers_new_objects(ep, v2)
+    schema = e1_schema(cast_ids, list(places), prop_ids, payoff_hooks=hooks, new_objects_allowed=new_objects)
     errors = schemas.validate(reply, schema)
     if errors:
         return errors
@@ -1311,6 +1403,24 @@ def validate_e1(reply, *, ep, template, episode_defaults, cast_ids, places, prop
         if not any(scene["pays_off"] for scene in scenes if scene["function"] in schemas.BODY_FUNCTIONS):
             errors.append("$.scenes: no body scene pays off an open hook -- at least one setup, rising, peak or "
                           "turn scene must name one in pays_off")
+
+    if new_objects:
+        objects = reply.get("new_objects") or []
+        if len(objects) > 2:
+            errors.append(f"$.new_objects: {len(objects)} entries, expected at most 2")
+        for i, obj in enumerate(objects):
+            _text_errors(errors, f"$.new_objects[{i}].name", obj["name"], max_words=4)
+            _text_errors(errors, f"$.new_objects[{i}].one_line", obj["one_line"], max_words=15)
+        tags = {new_object_tag(obj["name"]) for obj in objects if isinstance(obj.get("name"), str)}
+        for i, scene in enumerate(scenes):
+            for j, ref in enumerate(scene["props"]):
+                if not isinstance(ref, str):
+                    continue
+                if ref.startswith(NEW_OBJECT_TAG_PREFIX):
+                    if ref not in tags:
+                        errors.append(f"$.scenes[{i}].props[{j}]: {ref!r} does not name a new_objects entry")
+                elif ref not in prop_ids:
+                    errors.append(f"$.scenes[{i}].props[{j}]: {ref!r} is not one of the existing props")
 
     return errors
 
@@ -2183,12 +2293,19 @@ def _t1_shot_errors(errors, path, shot, *, names, previous_framing) -> None:
         errors.append(f"{path}.framing: {shot['framing']!r} repeats the previous shot's framing")
 
 
-def validate_t1(reply, *, scene, shots_per_scene, modifiers_allowed, tags_allowed, n_lines, names) -> list:
+def validate_t1(reply, *, scene, shots_per_scene, modifiers_allowed, tags_allowed, n_lines, names,
+                v2=False) -> list:
     """Post-validation for a T1 reply (spec 2.8, 6.2-6.3): shot count,
     every ``@``/``%``/``#`` tag used in ``action`` also listed in
     ``subjects``, no character name inside ``action`` (case-insensitive,
     whole word), line numbers valid, each used at most once, ascending
-    across shots, and no two consecutive shots sharing a framing."""
+    across shots, and no two consecutive shots sharing a framing.
+
+    Phase 7 stage 3c (A11): on a v2 story (*v2*), a shot framed
+    ``insert_prop`` must list at least one prop tag (``%...``) among its
+    ``subjects`` -- the framing's whole point (spec: "a close shot of a
+    diegetic object") is empty otherwise. A legacy story is unchanged
+    (*v2* defaults False): v1 never refuses this."""
     lo, hi = shots_per_scene
     schema = t1_schema((lo, hi), modifiers_allowed, tags_allowed)
     errors = schemas.validate(reply, schema)
@@ -2206,6 +2323,8 @@ def validate_t1(reply, *, scene, shots_per_scene, modifiers_allowed, tags_allowe
         path = f"$.shots[{i}]"
         _t1_shot_errors(errors, path, shot, names=names, previous_framing=previous_framing)
         previous_framing = shot["framing"]
+        if v2 and shot["framing"] == "insert_prop" and not any(tag.startswith("%") for tag in shot["subjects"]):
+            errors.append(f"{path}.subjects: framing 'insert_prop' needs a prop tag (%...) among the subjects")
 
         for line_no in shot["lines"]:
             if not (1 <= line_no <= n_lines):

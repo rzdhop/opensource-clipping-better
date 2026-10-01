@@ -4,7 +4,11 @@
 Needs what the script step needs (``episode_common.
 check_episode_preconditions``, the memory gate included) and a complete script: every scene written
 and every framing part there; otherwise ``StepFailed`` naming what is
-missing.
+missing. A v2 story also needs, before any call, an approved image for
+every prop a scene references (:func:`require_prop_images`, phase 7 stage
+3c, A11): a script step's ``new_objects`` can leave a referenced prop with
+no image yet, and planning its shots before the image exists would reference
+an entity that never renders. Legacy stories are never refused for this.
 
 Two ways to plan the shots, both ending in ``shots.build_storyboard`` (the
 cross-scene rule pass, name-free resolved prompts, reference images, motion,
@@ -29,6 +33,8 @@ from __future__ import annotations
 
 import time
 
+from clipping.providers import pricing
+
 from .. import media_policy, prompts, shots
 from . import entities, episode_common, llm_call
 from . import script as script_step
@@ -36,6 +42,16 @@ from .episode_common import SCRIPT_DOC, STORYBOARD_DOC
 from .llm_call import StepFailed
 
 FAST, T1 = "fast", "t1"
+
+# Phase 7 stage 3c (A11): the estimate the prop-image refusal below quotes --
+# nano-banana-2's own per-image price (pricing.py), the link every v2 budget
+# profile's quality `prop` role is drawn from (media_policy.ROLES). Read
+# straight from the price table rather than resolving the story's actual
+# chain (media_policy.role_chain), which needs the merged env/keys and can
+# raise ChainError: this message is informational, shown before any call and
+# any key is even looked at, not a charge.
+_PROP_IMAGE_LINK = "gemini/nano-banana-2"
+_PROP_IMAGE_ESTIMATE_USD = pricing.PRICES[_PROP_IMAGE_LINK].usd
 
 
 # ----------------------------------------------------------------- helpers
@@ -57,6 +73,48 @@ def require_complete_script(ec) -> dict:
         raise StepFailed(f"Episode {ec.ep}'s script is not complete ({script_step._and(missing)} not written "
                          "yet): run the script step again to finish it before planning shots.")
     return script
+
+
+def _missing_prop_images(ec, script) -> list:
+    """Every prop *script* references that has no approved image yet, once
+    each, in first-reference order: a stub ``steps/script.py`` created from
+    an episode's ``new_objects`` (phase 7 stage 3c, A11) starts this way, and
+    stays this way until the places step draws it."""
+    missing, seen = [], set()
+    for scene in script["scenes"]:
+        for pid in scene["props"]:
+            if pid in seen:
+                continue
+            seen.add(pid)
+            doc = ec.entities["props"].get(pid)
+            if doc is not None and not entities.has_file(ec.store, ec.story_id, entities.PROPS, pid, doc["image"]):
+                missing.append(doc)
+    return missing
+
+
+def require_prop_images(ec, script) -> None:
+    """A v2 story only (A11): refuse to plan shots -- before any LLM call --
+    while *script* references a prop with no approved image yet. Names every
+    such prop and what drawing them would cost (:data:`_PROP_IMAGE_ESTIMATE_USD`
+    each, on :data:`_PROP_IMAGE_LINK`) and the step that finishes them. A
+    legacy story is never refused for this (RC-M1): v1 stories do not create
+    prop stubs from a script (DEC-171 keeps their props always an existing,
+    already-drawn id), and nothing else leaves a prop referenced before its
+    own image exists."""
+    if not media_policy.is_v2(ec.story):
+        return
+    missing = _missing_prop_images(ec, script)
+    if not missing:
+        return
+    names = entities.quoted_list(sorted({doc["name"] for doc in missing}))
+    est = len(missing) * _PROP_IMAGE_ESTIMATE_USD
+    plural = len(missing) > 1
+    raise StepFailed(
+        f"Episode {ec.ep}'s script uses the prop{'s' if plural else ''} {names}, which "
+        f"{'have' if plural else 'has'} no approved image yet (about ${est:.3f} on {_PROP_IMAGE_LINK}, "
+        f"{len(missing)} image{'s' if plural else ''}): run the places step to draw "
+        f"{'them' if plural else 'it'} before planning the shots."
+    )
 
 
 def stale_scenes(storyboard, script) -> set:
@@ -179,7 +237,7 @@ def plan_scene(ctx, ec, script, plans, scene, *, tools, announced) -> list:
         return prompts.validate_t1(reply, scene=scene, shots_per_scene=inputs["shots_per_scene"],
                                    modifiers_allowed=inputs["modifiers_allowed"],
                                    tags_allowed=inputs["tags_allowed"], n_lines=len(scene["lines"]),
-                                   names=inputs["names"])
+                                   names=inputs["names"], v2=media_policy.is_v2(ec.story))
 
     reply = llm_call.call_json(ctx, "T1", system, user, schema, validator=validate, runner=tools.runner,
                                time_fn=tools.time_fn)
@@ -201,6 +259,7 @@ def build_fast(stores, story_id, ep, *, now, on_log) -> dict:
     ec = episode_common.load_context(stores, story_id, ep)
     episode_common.check_episode_preconditions(None, ec)
     script = require_complete_script(ec)
+    require_prop_images(ec, script)
     previous = episode_common.read_episode(ec, STORYBOARD_DOC)
     plans, seen = {}, set()
     for scene in script["scenes"]:
@@ -226,6 +285,7 @@ def run(ctx, *, runner=None, time_fn=time.monotonic, budget=None) -> dict:
     ec = episode_common.load_episode_context(ctx)
     episode_common.check_episode_preconditions(ctx, ec)
     script = require_complete_script(ec)
+    require_prop_images(ec, script)
     ctx.cancel.check()
     tools = entities.Tools(runner=runner, time_fn=time_fn)
     budget = budget if budget is not None else episode_common.Budget(time_fn)

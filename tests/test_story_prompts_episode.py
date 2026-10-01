@@ -237,6 +237,50 @@ def test_build_e1_without_props_says_the_list_is_always_empty():
     assert "maxItems" not in props and "minItems" not in props
 
 
+def test_e1_v2_offers_new_objects_not_always_empty():
+    """Phase 7 stage 3c (A11, amends DEC-171): E1 report finding 6 -- both
+    live stories had ``prop_ids: []`` and were told "this story has no
+    props", so the plot's own objects (a giant toaster, a key) were never
+    anything but free text, reinvented and undrawn in every shot. On a v2
+    story, from episode 2 on, the "always []" line is gone: E1 may name up
+    to two new_objects, and a scene may reference one by %prop_<slug>
+    before it is a real prop (the schema drops the enum that could not list
+    an id this very reply creates). Episode 1 and a legacy (v1) story are
+    untouched, byte for byte (RC-M1): episode 1's objects are meant to come
+    from the knowledge step instead (stage 5, not built yet)."""
+    pack = _pack("fr")
+    kwargs = dict(ep=2, arc_entry=dict(ARC_ENTRY, ep=2), template=TEMPLATE, episode_defaults=EPISODE_DEFAULTS,
+                  cast=CAST_E1, places=PLACES_E1, props=[], memory=MEMORY_EP2, slots=SLOTS_EP2)
+
+    _, v1_user, v1_schema = prompts.build_e1(pack, **kwargs)  # v2 defaults False
+    assert "- props: always [] -- this story has no props\n" in v1_user
+    assert "new_objects" not in v1_user
+    assert "new_objects" not in v1_schema["properties"]
+
+    _, v2_user, v2_schema = prompts.build_e1(pack, v2=True, **kwargs)
+    assert "always [] -- this story has no props" not in v2_user
+    assert "0 to 4 of the existing props" not in v2_user
+    assert "- new_objects: 0 to 2 new objects" in v2_user
+    assert "%prop_<slug of its name>" in v2_user
+    scene_props = v2_schema["properties"]["scenes"]["items"]["properties"]["props"]
+    assert scene_props["items"] == {"type": "string"}
+    assert "enum" not in scene_props["items"]
+    assert "new_objects" in v2_schema["properties"]
+    assert v2_schema["required"] == ["title", "scenes", "new_objects"]
+    new_object_item = v2_schema["properties"]["new_objects"]["items"]
+    assert set(new_object_item["properties"]) == {"name", "one_line", "owner_char_id"}
+    assert new_object_item["properties"]["owner_char_id"]["enum"] == CAST_IDS + [None]
+
+    # Episode 1 on the same v2 story is untouched: the "always []" line and
+    # today's schema stay exactly as they are.
+    ep1_kwargs = dict(kwargs, ep=1, arc_entry=ARC_ENTRY, slots=SLOTS_EP1, memory=MEMORY_NONE)
+    _, ep1_user, ep1_schema = prompts.build_e1(pack, v2=True, **ep1_kwargs)
+    assert "- props: always [] -- this story has no props\n" in ep1_user
+    assert "new_objects" not in ep1_user
+    assert "new_objects" not in ep1_schema["properties"]
+    assert ep1_schema == prompts.e1_schema(CAST_IDS, ["place_pool", "place_confessional"], [])
+
+
 def test_build_e1_ep2_shows_the_previous_recap_and_recap_slot():
     pack = _pack("fr")
     _, user, _ = prompts.build_e1(
