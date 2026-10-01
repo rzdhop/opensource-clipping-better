@@ -3924,3 +3924,17 @@ without a prop subject. Episode 1's objects come from the knowledge step's props
 **Consequence.** v1 prompts and schemas unchanged (the field is absent unless offered). A new unapproved prop folds
 the story's places approval back (DEC-123), so the episode gate fires first; the storyboard refusal is the second
 line. Commit recorded in the action log.
+
+## DEC-235 — fal only for every quality image: no Google billing (amends DEC-221's roles; DEC-222 stays as code)
+**Context.** The human, 2026-10-01: "I have a Gemini subscription, I already put a Gemini API key but no money on it."
+A Gemini app subscription does not fund the Gemini API, and nano-banana is priced per image there, so the plan's
+sheet, plate and prop links (nano-banana-2) could not run. Asked to choose, the human picked "fal only".
+**Decision.** The Quality profile's roles move to fal Seedream 4.5: the first portrait, the plates and the props on
+its text-to-image endpoint, the turnaround, expressions and other variants on `fal/seedream-4.5-edit` with the
+portrait or plate as reference; keyframes stay on `fal/seedream-4.5-edit`. Nano-banana stays in the code on
+`GEMINI_PAID_API_KEY` (DEC-222), unused by default; `nano-banana-2-lite` remains the keyframe role's second link and is
+skipped as "no key" while no paid Gemini key exists. The free `GOOGLE_API_KEY` keeps serving the free LLM, vision and
+TTS calls. Built as stage 2c after stage 4.
+**Consequence.** One funded key (fal). One-off images per story (3 characters × 3 sheets, 2 plates, 3 props) ≈ $0.56
+instead of ≈ $0.94; keyframes $0.04 each as planned. Nano-banana's 4 character + 3 style reference slots are not used;
+Seedream 4.5 takes up to 10 references (A-111).

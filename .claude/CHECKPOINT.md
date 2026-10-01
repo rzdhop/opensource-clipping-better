@@ -14,8 +14,10 @@
   - **Tier-1 hygiene:** never keep `web/dashboard/dist/` in the worktree during Tier-1: with a real build present 15
     auth/clip-serving tests fail (pre-existing interaction, follow-up). The 2a build is kept in the scratchpad
     (`dashboard-dist-2a`). `node_modules` (npm ci) stays: it lets 8 more tests run, all green.
-  - **The human must, before W-mid:** add `GEMINI_PAID_API_KEY` in Settings (nano-banana reads only it now) and set
-    the caps to 2/6/20 in Settings (saved 1/3/10 override the new defaults).
+  - **Funding (DEC-235, the human 2026-10-01):** fal only; no money on the Gemini API (a Gemini app subscription does
+    not fund it). Stage 2c (after stage 4) moves sheets/plates/props to fal Seedream 4.5 (text-to-image + edit).
+  - **The human must, before W-mid:** set the caps to 2/6/20 in Settings (saved 1/3/10 override the new defaults) and
+    give the go on W-mid's shown estimate.
   - **Open questions:** none. The plan's assumptions A-110…A-124 are UNCONFIRMED.
   - **Worktree:** `.claude/worktrees/ai-story-phase-7`, branch `feat/ai-story-phase-7` from `main` 30604dd. The main
     checkout stays on `main` (bind-mounted by `rzc-backend`); deploy only at 0 jobs by fast-forward.
@@ -35,7 +37,8 @@
   | 1 W0 defects (D1 `video_action`, D2 names on the action only, D3 run-ons) | DONE (local 6631/9, CI env 5837/772) | 9850fa5 |
   | 2a quality chains, preset, caps 2/6/20, nano-banana paid key, 9:16 source crop | DONE (local 6640/9, CI env 5845/773, build ok) | 7425fd3, e00a97a |
   | 2b writing chain (nvidia → openrouter mistral-medium-3.1 → free) | DONE (local 6655/1, CI env 5860/765) | c02ec6b |
-  | 3a structured look + dossier, sheet/plate/prop v2 prompts | DONE (local 6680/1, CI env 5885/765) | 6caed8f, ffcfa4d |
+  | 2c fal only for sheets/plates/props (Seedream 4.5 t2i + edit), DEC-235 | todo | |
+| 3a structured look + dossier, sheet/plate/prop v2 prompts | DONE (local 6680/1, CI env 5885/765) | 6caed8f, ffcfa4d |
   | 3b layered keyframe/clip prompts, reference roles, preview | DONE (selection: 67 files local 3012 / CI env 2402+610s; no-auth guards; build) | 2c6c786, 5eef509 |
   | 3c props as entities | DONE (selection 13 files: local 1110, CI env 1090+20s) | see log |
   | 4 serial_60s_v2 (6–10 shots), seedance on every shot, 1080p switch | todo | |
