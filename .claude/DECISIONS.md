@@ -3462,3 +3462,225 @@ The human asked for the fix on 2026-09-30.
     default `Python-urllib/3.12` User-Agent from this host, before any auth. This is pre-existing and recorded as
     a follow-up, not fixed here.
 - A-099 records the provider-side assumption.
+
+## DEC-200 — Keyframe-first I2V
+**Context.** Phase 6 turns a shot's existing image into a short clip at tier ≥ 2. Spec 8 requires a video model
+never invent a character from text: the phase-4 shot image is the character's only proven look.
+**Decision.** Every video adapter, hosted and local alike, takes the shot's own current image as its one keyframe
+input; no `VIDEO_CHAIN` link runs text-to-video, and none is given a text-only fallback.
+**Consequence.** A shot's video can only be made once its image is current, which is why the video phase runs last
+in `assets.run()`, after images, voices, SFX and BGM (DEC-202). `clip_seconds()` refuses before any call a request
+with no keyframe.
+
+## DEC-201 — Native model audio is discarded at Tier 2
+**Context.** Several hosted video models can speak dialogue in their own voice. That voice would not match the
+character's pinned TTS voice from Cast, breaking the voice consistency every earlier phase built.
+**Decision.** Native model audio is discarded at Tier 2 — dialogue comes from our TTS for voice consistency — and
+kept only under the Tier-3 opt-in.
+**Consequence.** Every Tier-2 clip is generated and rendered with `-an` (`tier2_clip_argv`); the shot's own TTS
+line is placed exactly as it was before phase 6. Only a Tier-3 shot with `keep_native_audio` set adds the clip's
+own audio as a further stem (DEC-210), still timed and subtitled against our own line text.
+
+## DEC-202 — Video is the last phase of the assets step
+**Context.** A separate "animate" step or fast-track sub-step was considered. It would add a step, a gate, an
+estimate and a CLI path, and re-pin `SUB_STEPS` — for no parallelism gained, since the busy rule allows one job
+per story, and an `animate` param already lets keyframes be reviewed before any clip is bought.
+**Decision.** Video generation is the last phase inside `assets.run()`, after `write_assets_doc`, gated by an
+`animate` assets param (default on, mirrored in `AssetsStepParams`; the dashboard's `StoryboardPane` sends
+`animate: true`).
+**Consequence.** Turning `animate` off runs images, voices, SFX and BGM only — nothing video-related is attempted
+or spent. See "animate off first" in `docs/AI_STORY.md`.
+
+## DEC-203 — The planner's selection is derived, never stored
+**Context.** Storing the planner's shot selection was considered and rejected: it would go stale the moment a
+price, the day's spend, or a cap moved, letting the shown estimate and the actual run disagree.
+**Decision.** `plan_animation`'s pick of which shots to animate is recomputed every time from the current cap,
+committed spend and what already exists — never written to a document. A shot is pinned in or out of the plan
+only through `patch_assets` (`animate` / `keep_still` per shot). The `free` budget profile animates only shots a
+ready local route can make, since that is the only way to animate at $0.
+**Consequence.** The estimate and the run always agree on what will be made (RC-V6); an episode's cap or spend can
+move without ever leaving a stale plan on disk.
+
+## DEC-204 — Sticky image and video links per episode (amends DEC-168's fall-through)
+**Context.** Phase 5 found that mixing two image providers inside one episode breaks the look (A-087): a
+character drawn flat-cartoon by one link and photoreal by another no longer reads as the same character. The
+human's answer for phase 6: one image provider and one video provider per episode, sticky, with stop-and-ask on a
+switch — closing A-087 and extending the same rule to video.
+**Decision.** `assets.json` gains an optional `links {image?, video?: {link, since, switched_from?}}`, written
+once the first asset of that kind is served (a cache restore counts). While a link is recorded, the runner gets a
+one-link chain: `FALLBACK_LINKS` retired-model swaps still apply, and a 402/429 waits inside DEC-168's paced
+rounds rather than falling through to the next link. A link that is gone — no key, the day's allowance spent, an
+`allow_paid`/cap refusal, a 401/403, or an unreachable local server — stops before any call with a DEC-117-shaped
+offer: the link, why, the next runnable link, the shots to redo, and the estimate. Switching is only through
+`patch_assets {"links": {"image"|"video": link}}`, which stales exactly the assets made on the old link and
+leaves the storyboard approval untouched. A legacy episode with no record, mixed under the old fall-through rule,
+prints one note and behaves as it did before.
+**Consequence.** RC-V5: no episode can silently mix two image or two video providers again. A rate-limited link in
+force still paces instead of hopping to a different provider mid-episode.
+
+## DEC-205 — `GEMINI_PAID_API_KEY`
+**Context.** Gemini's existing credential (`GOOGLE_API_KEY`) serves the free image and TTS chains. Reusing it for
+Veo would bill the free chain's own project the moment a paid video call ran. Veo needs a key from a separate,
+billing-enabled project.
+**Decision.** `generation.LINK_ENV_KEYS` adds `"gemini/veo-3.1-lite": ("GEMINI_PAID_API_KEY",)`, read through a new
+`env_keys_for(link)` and used by `missing_keys`, `credentials_for` and `gating.link_summary`. The key is added to
+`PERSISTED_KEYS` and `SECRET_KEYS`, saved and masked exactly like `FAL_KEY`, and reported as
+`gemini_paid_api_key_set`.
+**Consequence.** RC-V4: Veo never reads `GOOGLE_API_KEY`, and no other Gemini link ever reads
+`GEMINI_PAID_API_KEY`. Nano-banana stays on `GOOGLE_API_KEY` for now — moving it to its own paid key is a
+follow-up, safe while that project's billing stays off.
+
+## DEC-206 — Paid LLM metered and booked (amends DEC-115)
+**Context.** DEC-115's follow-up: paid LLM calls were neither estimated, capped nor booked, so OpenRouter — the
+one paid LLM link — could never be funded without bypassing every other paid link's discipline.
+**Decision.** New `steps/llm_spend.py` meters every call through `run_chain`'s existing `client_factory` seam, so
+`llm.py` needs no edit (`git diff 25abdd1 -- clipping/providers/llm.py` stays empty, keeping RC-S4). With
+`allow_paid` on and a keyed paid link in the chain: each paid link is estimated (tokens of system + user + the
+reply cap, times `pricing.LLM_PRICES`) and checked against the assets step's `LineGates` for the episode, the day
+and the story; a refused or unpriced link is dropped with a printed line, and free links still run. Each paid
+reply is booked once: unit `token`, cost from `usage.cost` where the provider gives it, else usage × price, else
+the estimate with a DEC-153 note.
+**Consequence.** OpenRouter can now be funded and booked like any other paid link, the same budget discipline as
+images and voices. `pricing.LLM_PRICES` holds the dearest OpenRouter host's verified prices for `DEFAULT_LLM_CHAIN`
+(mistral-small-3.2 $0.10 / $0.30 per M tokens; llama-3.3-70b, the DEC-089 fallback, $1.04 / $1.04). Tested only
+this phase — OpenRouter itself stays unfunded, the human's standing choice.
+
+## DEC-207 — The video cache key
+**Context.** The generation cache (`gencache`) had no `"video"` kind, so a clip request had no key shape and could
+never be served from cache or protected against a double-buy.
+**Decision.** `"video"` joins `CACHED_KINDS` and `SEEDED_KINDS`. Only when `kind == "video"` the cache payload adds
+`clip_s`, `fps` and `native_audio` (whole floats become ints); the keyframe's sha comes through the existing
+`refs`; `KEY_VERSION` stays 1. A request with no `duration_s` or no seed gets no key at all, so it is never
+journaled.
+**Consequence.** A same-input video request (same keyframe, duration, fps, native_audio and seed) is served from
+cache at $0, exactly like an image. The stage-3/8 adapters refuse an un-keyable request before it is ever sent.
+
+## DEC-208 — The clip-length table; trim or hold at render
+**Context.** Every hosted and local link offers only a handful of fixed clip lengths, never a shot's exact
+`duration_s`.
+**Decision.** `CLIP_LENGTHS` (one source in `clipping/providers/video.py`, re-exported by `video_plan`) lists each
+link's supported seconds: seedance 2–12 s continuous, `ltx-2.3-fast` 6/8/10 s, kling 5/10 s, veo 4/6/8 s, and each
+local template's own frame rule. `requested_seconds` picks the smallest supported length that is at least the
+shot's `duration_s`, or the longest offered length if none reaches it. The render then trims a clip that ran long,
+or holds its last frame (`tpad stop_mode=clone` before `trim`) when it ran short.
+**Consequence.** A shot is never asked for a length no link offers, and a render is never left short of frames —
+the pre-fix bug this closes: a 1.0 s clip on a 1.5 s shot made only 30 of 45 frames and the render still reported
+"completed".
+
+## DEC-209 — `fill_failed_with_motion` is a render param, default off
+**Context.** Without an escape hatch, a single failed, stale or missing clip would block the whole episode's
+render.
+**Decision.** A render param `fill_failed_with_motion` (default off, recorded in the manifest only when true) lets
+such a shot render with Tier-1 motion instead of refusing. Without it, the render refuses and names the shots,
+each with its regenerate target or, for a request still open, a Continue offer.
+**Consequence.** RC-V7: a failed or stale clip never silently renders. Ticking the box (dashboard) or passing
+`--fill-failed-with-motion` (CLI) is a deliberate choice to accept the substitute, and the manifest's
+`shot_modes` records which shots were filled (`motion_fill`) versus actually animated.
+
+## DEC-210 — Tier-3 audio stem (amends DEC-158)
+**Context.** DEC-158 kept Tier-1's audio as one absolute timeline and deferred per-shot audio mixing
+(`acrossfade`-style) to phase 6. Tier 3 needed a way to keep a model's own clip audio without breaking that
+timeline or the existing ducking.
+**Decision.** At tier 3, for a shot with `keep_native_audio` set whose current clip's mp4 actually carries a
+sound track (`clips.clip_has_audio` reads the mp4 boxes directly — no subprocess), the clip's own audio becomes
+one more stem in the A-stage mix: `amovie`, `atrim` to the shot's own samples, 10 ms edge fades, `adelay` to the
+shot's start. That shot's own TTS line is left out of the mix, though subtitles still come from our line text and
+TTS timing; ducking is unchanged; the video stage itself keeps `-an`. A clip with no sound track renders as
+Tier 2, with one printed note.
+**Consequence.** Tier 3 is proven by tests only this phase, never run live (budget; see A-105). A Tier-2 clip's
+audio stays discarded by a guard test. A shot on a link that carries no audio at all (seedance — A-108) always
+falls back to the Tier-2 path, silently correct but never native.
+
+## DEC-211 — `gen_timings.json`
+**Context.** An ETA for local generation needs a measured history, but `data/usage.json` resets daily
+(`limits.py:95-101`) and cannot hold one.
+**Decision.** New `providers/gen_timings.py` and `data/gen_timings.json` (schema `gen_timings_v1`) hold the last
+20 `{wall_s, clip_s}` rows per link, template and profile. The shown ETA is the median rate times the planned
+seconds; with no history yet it is null, shown as "no measured history".
+**Consequence.** Local ComfyUI's ETA on the dashboard improves as more clips are made on a given template and
+profile, and nothing is lost across a day boundary the way a `usage.json`-based history would be.
+
+## DEC-212 — The video "Test chain" never generates (amends DEC-103)
+**Context.** DEC-103 lets Settings' "Test chain" spend once on a pressed paid link, to prove it reachable. For
+video, that would buy a whole clip just to check a key.
+**Decision.** Pressing Test chain on `VIDEO_CHAIN` never generates. A local link is checked with `/system_stats`
+and `/object_info` only. A hosted link shows its key status and a priced estimate for a default clip length, and
+is never called even when pressed.
+**Consequence.** RC-V8. The stage-4 estimates recorded at test time: seedance $0.11, `ltx-2.3-fast` $0.36, kling
+$0.21, veo $0.30 — each the price of the clip length nearest 5 s that the link actually offers.
+
+## DEC-213 — CLI `--tier`/`--route` patch the story
+**Context.** A run-level `--tier` override on the CLI was considered and rejected: it would let the dashboard and
+the estimate disagree with what actually ran, and there is no per-episode tier field, only a per-story one.
+**Decision.** `step ID assets --ep N --tier N --route R` patches the story's own `generation_profile` (not a
+run-only override) and prints the resulting profile before the step runs.
+**Consequence.** The CLI, the dashboard and the API always agree on one story-level tier and route; a change made
+from the CLI is visible to the next dashboard session too, not only to the CLI process that set it.
+
+## DEC-214 — `PRICES_AS_OF`
+**Context.** Stage 2 re-read all four video model prices on their own provider pages on 2026-09-30. None had
+moved against the figures already in `pricing.py`, but the re-read itself needed recording somewhere.
+**Decision.** `PRICES_AS_OF` keeps its existing date — it stamps the whole price table, not one row. The four
+video price rows instead carry their own per-row note of the 2026-09-30 re-read, backed by A-100 through A-103.
+**Consequence.** A future full price-table refresh still only needs to bump the one shared date; a reader
+checking just the video rows has their own re-read date sitting beside them instead.
+
+## DEC-215 — Paid walks use per-process caps
+**Context.** Settings' `allow_paid` must stay off in the live app (standing rule), yet the Tier-2 live walk still
+needed to spend real money on specific, bounded shots.
+**Decision.** Every paid run of the walk is a single CLI process inside the container, given `ALLOW_PAID` and its
+own episode/day/story caps as that process's own environment only (DEC-114's CLI environment isolation) — nothing
+persisted to Settings. This reuses DEC-194's capped-test pattern for phase 6.
+**Consequence.** Settings' `allow_paid` measured false throughout the whole walk. Each paid shot needed a shown
+estimate and the human's explicit go before its process ran. The walk's total ceiling was $0.55 ($0.30 fal,
+including the A-071 probe, plus $0.25 reserved for Veo); actual spend $0.32, after the Veo shot was replaced by
+Kling (DEC-218).
+
+## DEC-216 — T2-P6-F1: a Tier ≥ 2 clip that is not 9:16 is covered and centre-cropped
+**Context.** Walk step 9 found story B's Kling clip playing as a square boxed in black bars: Kling
+(`fal/kling-2.5-turbo-std`) keeps the **input keyframe's own aspect ratio** rather than a requested one (A-102,
+measured live) — a square 1024×1024 Cloudflare keyframe gave a 960×960 clip — while `tier2_clip_argv` padded such
+a clip down and letterboxed it, the opposite of the still path's own cover-crop rule for a non-9:16 image.
+**Decision.** `tier2_clip_argv` now covers and centre-crops every Tier ≥ 2 clip with the renderer's own cover rule
+(`filtergraph._cover_fill`, the same string shared with the still path's `cover_argv`), plus `setsar=1` to
+normalize the sample aspect ratio. A clip is never letterboxed or padded again. Fixed in commit `ea19ab2`.
+**Consequence.** Measured before → after: a 960×960 and a 96×96 clip had 420 black rows top and bottom → 0; a
+120×208 clip 24 black rows → 0; the 704×1248 seedance clip had 2+4 black rows and SAR 4213:4212 → 3 columns
+cropped, SAR 1:1; a 720×1280 clip was frame-identical either way. The tier-2 golden was re-recorded (host and
+image keys; the x86_64 key followed from CI). The source fix — sending the model a 9:16 crop of the keyframe in
+the first place, so its own output is already vertical — is a follow-up, keyed on the source sha plus a crop-rule
+token.
+
+## DEC-217 — Stage 13b: a still more than 2% off 9:16 is centre-cropped before the scale, never stretched
+**Context.** The still path (`shot_argv`: `scale=<W×upscale>:-2` then `zoompan … s=1080x1920`) had been
+**stretching** any non-9:16 still vertically since phase 5 — a pre-existing bug, not a phase-6 regression. A
+centred 32×32 square came out 364×648. (A-095 first misread this as an existing crop; corrected once measured.)
+Asked mid-walk, the human chose "fix now, in phase 6."
+**Decision.** A still more than 2% (relative) off the 9:16 ratio is centre-cropped to an exact 9:16 before the
+scale — `crop=<9k>:<16k>` at the largest even multiple of 9×16 that fits the source, which keeps SAR 1:1 (e.g.
+1024×1024 → 576×1024, measured) — never stretched. A 9:16 still, a near-9:16 still inside the 2% tolerance, and a
+still whose size cannot be read all keep their argv byte for byte (RC-M2, RC-M3). Sizes are read by a new
+stdlib-only header reader, `clipping/aistory/render/imagesize.py` (PNG/JPEG/WebP), with no PIL (A-096).
+`partial.shot_facts` now counts only a crop applied **after** `zoompan` as the handheld modifier, so this still's
+own cover crop (and a clip's cover crop, DEC-216) reads framing reason `settings`, not `modifiers`. Fixed in
+commit `3841a1d`.
+**Consequence.**
+- A rounded-crop alternative (crop to the nearest even dimensions without landing exactly on 9:16) was rejected:
+  it leaves SAR 26281:26280, which breaks the final pass's concat (measured: exit code 234).
+- 9:16, near-9:16 and unreadable sizes keep today's argv byte for byte (RC-M2, RC-M3).
+- The live $0 re-renders (walk step 5): `560e901c1b3d` 3/20 rebuilt, `979c8376e43e` 14/20 (13 stills plus sh01's
+  clip, DEC-216), `04feb539840f` 18/18, `14ff154d3bff` 21/21; the fully-9:16 rendered episodes read current with
+  0 shots to rebuild on the deployed code (RC-M3 live; not re-rendered).
+- Follow-ups left open: a near-9:16 size inside the 2% tolerance whose upscale is not exact breaks the final
+  pass's concat the same way (832×1472, 736×1312 — no live still has such a size yet); EXIF orientation is not
+  read; the centre crop can lose an off-centre subject.
+
+## DEC-218 — The walk's Veo shot was replaced by fal Kling 2.5 turbo std
+**Context.** Walk step 9 (story B `04feb539840f`, FR) was planned as the one live Veo shot (4 s, about $0.20,
+cap $0.25). The human's call: "Skip Veo, use fal.ai in its place."
+**Decision.** The shot ran on `fal/kling-2.5-turbo-std` instead — 5 s, about $0.21, inside the same $0.25 cap, a
+second fal adapter path beside story A's seedance shot. `ltx-2.3-fast` was considered and rejected: its 6 s
+minimum would cost $0.36, over the $0.25 cap.
+**Consequence.** Veo stays proven only by its recorded API-documentation replies, never by a live call; A-103
+stays UNCONFIRMED. The T2-P6-F1 finding (DEC-216) came out of this substitution — Kling's aspect-keeping
+behaviour, not a Veo behaviour. A live Veo shot remains a follow-up.

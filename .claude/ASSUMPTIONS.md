@@ -407,6 +407,30 @@
     - `negativePrompt` support (undocumented);
     - whether the seed is honoured ("not deterministic" per the docs).
 
+- **A-104** — The three local ComfyUI I2V templates (`i2v_wan22_5b`, `i2v_wan22_14b_lightning`, `i2v_ltx2`) are
+  verified **against a fake ComfyUI server only**, the same way A-035's image templates are: no real ComfyUI has
+  run them, and the probe on this host reports unreachable (no GPU on this deployment, the human's standing
+  choice — see A-035). First contact with a real daemon is the actual test. UNCONFIRMED.
+- **A-105** — A Tier-3 kept clip's own lip movement is expected to mismatch our own subtitle and dialogue timing:
+  the clip's native audio is kept verbatim (DEC-210) while that shot's subtitles, and every other shot's lines,
+  still come from our own TTS. Not measured live — Tier 3 is proven by tests only this phase (budget; no model
+  with usable native audio was run against a real shot). UNCONFIRMED how large the mismatch reads in practice.
+- **A-106** — fal's and Google's own billing views are expected to lag behind this app's booked ledger rows by
+  more than the time a clip itself takes to generate. Measured generation time, Tier-2 walk step 5/9: a seedance
+  clip answered in 30.9 s, a kling clip in 70.2 s (both submit to a usable file). Walk step 10 (pending) has the
+  human read fal's and Google's billing pages against the ledger later, precisely because an immediate read may
+  not yet reflect a request that already ran. UNCONFIRMED how long the billing-side lag actually runs.
+- **A-107** — Whether Google bills a Veo clip's audio track (always on per A-103, with no way to turn it off)
+  separately from its video seconds, or folds it into the one per-second price, is unconfirmed: Veo was never run
+  live this phase — the walk's one Veo shot ran on fal/kling-2.5-turbo-std instead, the human's call (DEC-218).
+  UNCONFIRMED.
+- **A-108** — `fal/seedance-1-pro-fast`, the cheapest link in the default `VIDEO_CHAIN` and the one the walk's own
+  story A shot used, carries no audio track at all (A-100). So a Tier-3 shot whose sticky video link resolves to
+  seedance always falls back to rendering as Tier 2 with its own TTS lines (DEC-210's no-sound-track case) — never
+  a failure, but never native audio either, on the link most stories will actually reach first. The estimate does
+  not warn about this ahead of a run. UNCONFIRMED whether that is clear enough without a UI hint or a line in
+  these docs (stage-10 follow-up).
+
 ## Confirmed
 - **A-098** — The human's chat request for the redirect fix named the approach (an opener whose redirect handler
   drops the credentials off-origin and keeps them same-origin) and the acceptance tests. So it stands as the plan's

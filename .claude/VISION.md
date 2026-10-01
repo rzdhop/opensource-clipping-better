@@ -89,8 +89,13 @@ budget and every free call counted against its daily limit.
   re-edit test spent $0.03 on fal and its re-render matched the dry run (DEC-194).
 
 ## Next, in order
-1. **Phase 6** — Tier 2/3 video, local ComfyUI workflows, paid estimates end to end including booking and capping
-   paid LLM calls (OpenRouter, the one paid LLM link, stays unfunded and unbooked until this ships).
+1. **Phase 6 close** — Tier 2 (I2V clips) and Tier 3 (native audio, opt-in per shot) now exist, gated by each
+   story's own tier/route, behind the same `allow_paid` switch and per-episode/daily/per-story caps as every other
+   paid call. Video runs hosted (fal seedance/ltx-2.3/kling, Gemini Veo) or on a local ComfyUI; local video is
+   built but **unverified live** — no GPU exists on this deployment, so it has only run against a fake server.
+   One image provider and one video provider now stick per episode, offered a switch rather than silently mixed.
+   Paid LLM calls are estimated, capped and booked too (OpenRouter itself stays unfunded by choice). Remaining
+   before close: the live walk's billing comparison, the human's final phone watch, and the merge to `main`.
 2. **Phase 7** — reference-video import.
 Carried alongside: the Settings per-task route selector (DEC-112); the clip-upload token-before-spool fix; a dependency pass
 (extras, lockfile, audit, setuptools ≥ 83); `jobs.json` atomic write and

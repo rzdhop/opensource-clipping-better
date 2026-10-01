@@ -73,10 +73,13 @@ stories as cards (title, status, style, language); **New story** starts one.
   Family Film, Anime/Manga, Realistic Cinematic, 2D Cartoon/Flat, Storybook
   Watercolor, Claymation/Stop-motion.
 - **Generation profile** (collapsible, defaults are fine to leave alone):
-  tier (1 = stills, 2/3 = animated — tiers above 1 have no adapter yet, so
-  they do nothing until phase 6), route (`auto` / `local` / `api` — where
-  images are made), consistency mode (`references` / `prompt_only`), budget
-  profile (`free` / `one_dollar` / `quality`).
+  tier (`1` = stills only; `2` animates shots into short I2V clips; `3` keeps
+  a kept clip's own native audio as an opt-in on top of tier 2 — see "Tier
+  2/3: animating shots" below), route (`auto` / `local` / `api` — now
+  governs video as well as images: `local` is your own ComfyUI, `api` the
+  hosted video links), consistency mode (`references` / `prompt_only`),
+  budget profile (`free` / `one_dollar` / `quality` — decides which shots,
+  if any, animate; see below).
 
 **Create story** opens the story page, a vertical stepper: New story (done),
 Concepts, Bible, Style. Each step unlocks once the one before it is
@@ -538,6 +541,92 @@ a later change — a regenerated shot, a re-voiced line — makes the assets
 stale again: regenerate what changed, or run the step again, then approve
 again before rendering.
 
+### Tier 2/3: animating shots
+
+At tier ≥ 2, the same **Generate assets** run that fills in images and
+voices also turns some or all of the episode's shots into short animated
+clips — the last thing the step does, after every image, voice, SFX cue and
+the BGM pick are in place. Three tiers:
+
+- **Tier 1** — stills only, each with its own Ken Burns move at render time.
+  No video call of any kind, ever.
+- **Tier 2** — shots the planner picks (see below) are sent to a video model
+  as **image-to-video**: the shot's own current image is always the one and
+  only keyframe — a video model is never asked to invent a character from
+  text — and the clip plays back with our own TTS dialogue, not whatever
+  audio the model may have produced.
+- **Tier 3** — the same clips, plus an opt-in per shot (`keep_native_audio`)
+  to keep that one model's own audio track instead of discarding it. The
+  shot's subtitles and every other shot's dialogue still come from our own
+  TTS and line timing, so a kept track's lip movement is not guaranteed to
+  match what's burned on screen — an expected mismatch, not a bug report. A
+  clip whose link carries no audio at all (seedance, the cheapest default
+  link) simply falls back to the Tier-2 behaviour for that one shot, with a
+  printed note.
+
+**Route** governs video the same way it already governs images: `local`
+(your own ComfyUI — see "Local generation" below), `api` (the hosted
+`VIDEO_CHAIN` links — see "Costs and providers" below), or `auto`, which
+picks whichever is actually ready.
+
+**Budget profile decides which shots animate**, and how many:
+
+- `free` animates only shots a ready local route can make, since local
+  generation is the only way to animate at $0; with no local ComfyUI
+  reachable, nothing animates under `free`.
+- `one_dollar` runs a planner over what's left of the episode's cap: pinned
+  shots (set with the per-shot **Animate** checkbox) go first, then shots
+  ranked hook → cliffhanger → peak reveal → turn, then the longest remaining
+  dialogue shot, picking as many as fit — ties go to shot order. The
+  estimate shows the split and the running total before anything is spent.
+- `quality` animates every shot that isn't individually kept still.
+
+A separate **clips** chip next to the usual estimate — "N clips (est $X, not
+now)" — and a **Video** card on the Assets panel show the planner's current
+pick before you press anything. This selection is never stored — it's
+recomputed from the current cap, the day's spend and what already exists
+every time the estimate or the step runs, so it can never go stale the way
+a saved plan could. A shot can still be pinned in or out by hand: each
+shot's card gets its own **Animate** / **Keep still** toggle (pressing the
+active one again clears it back to the planner's own pick) and its own
+**Re-animate** with a note, mirroring the
+image regenerate; the storyboard's own per-shot "Keep still" is replaced by
+this one once the tier is 2 or above. A clip shows a state badge — `current`
+/ `stale` / `failed` / a pending regenerate — and its route, next to a
+preview of the clip itself.
+
+**Sticky image and video links.** Starting this phase, both the image chain
+and the video chain settle on **one provider per episode**, offered once the
+first asset of that kind is served — mixing providers inside one episode was
+found to break the look (a character drawn flat-cartoon by one link and
+photoreal by another no longer reads as the same character). While a link is
+in force, every image (or every clip) in that episode comes from it alone; a
+link that becomes unreachable mid-episode — no key, the day's free-tier or
+paid allowance spent, a budget refusal, an outright rejection, or a local
+server gone — stops before any further call and offers a switch: which link
+would run next, which shots would need to be redone, and what that would
+cost. Nothing is generated or charged by the offer itself. Switching is a
+deliberate action — a confirmation on the dashboard's sticky-link offer, or
+`links.image` / `links.video` on the assets PATCH — and stales exactly the
+assets made on the link you're leaving, nothing else.
+
+**"Animate off first."** An episode's shot durations are not fully settled
+until its lines are actually voiced — a voice can run a little faster or
+slower than estimated, which moves a shot's length and, with it, which clip
+length the length table picks, which link is sticky, or the dollar total.
+The video phase recomputes its plan once, right before it would spend
+anything, and if that recomputed plan disagrees with the one shown before
+the run — even by one shot or one cent — it refuses, naming both plans, while
+keeping whatever images and voices it already made. In practice this means a
+**first** tier-2 (or tier-3) run on an episode with unmeasured voices often
+hits this refusal once, after making every image and voice but before buying
+any clip; running the step again (the "Continue" you'd press anyway) now
+sees the real, measured durations, and that second plan matches what's
+actually there — it animates. Unticking **Animate** (or `--no-animate` on
+the CLI) for that first pass makes this deliberate: images and voices only,
+reviewed, then animated as a second, separate pass once everything is
+settled.
+
 ### 11. Render
 
 The **Preview** tab. Unlocked once the assets are approved (otherwise:
@@ -545,7 +634,13 @@ The **Preview** tab. Unlocked once the assets are approved (otherwise:
 **Subtitles** select — `Style default`, `Word pop`, `Two line` or `None` —
 sits above **Render** (`Render again` once one exists), with an estimate
 chip (the paid part, the shot count, an estimated render time) and a route
-chip.
+chip. At tier ≥ 2, once some shot's clip isn't current (failed, stale, still
+generating or never animated), a **"Fill failed shots with motion"**
+checkbox appears too, off by default: leave it unticked and such a shot
+blocks the render, named, with its regenerate target or a Continue offer;
+tick it and those shots render with Tier-1 motion instead — the estimate
+re-fetches with it set, so the chip reflects what pressing Render would
+actually do.
 
 The renderer is pure FFmpeg: 1080×1920, 30 fps, `libx264`. Every shot's
 still picture gets its own Ken Burns move — a pan/zoom, eased in and out —
@@ -572,6 +667,15 @@ Montserrat Black for the two original styles, and, for the five added since,
 one committed face each — Bangers, Bebas Neue and Patrick Hand (OFL-1.1),
 Luckiest Guy and Chewy (Apache-2.0) — or your own font in `custom_fonts/`
 when you drop one in there.
+
+**Framing.** Every still and, since phase 6, every Tier ≥ 2 clip is fit to
+the vertical frame the same way: centred and **cropped** to an exact 9:16
+when it isn't already close to one — a still more than 2% off, or any clip,
+since a hosted video model can hand back its own shape regardless of what
+was asked for (Kling, for one, keeps the input keyframe's own aspect ratio
+rather than cropping or padding to what was requested) — never stretched and
+never letterboxed. A source already at 9:16, or within 2% of it, keeps
+exactly the encode it had before.
 
 The finished video plays back in a player below (its poster is the cover),
 with a summary strip — duration, size and fps, loudness (I / TP / LRA),
@@ -772,10 +876,22 @@ metadata pack in one job (see "Fast track" in the walkthrough above).
 through the STT chain, instead of an even split) and meets the image and
 voice chains' own gates inside the step, stopping before its first call
 when a paid part is over a cap, with the numbers — never a wasted call.
-`render` takes `--subtitles` (`style`, `word_pop`, `two_line` or `none`,
-default `style`, the style lock's own) and `--encoder` (`libx264` or
-`auto`, default `libx264`) and calls no API. `metadata` takes no
-parameters. `fast-track` takes `--storyboard` (`t1`, the default, or
+At tier ≥ 2 it also takes `--tier N` and `--route local|api|auto`, which
+patch the story's own `generation_profile` before the step runs and print
+the result — the same profile the dashboard's story page edits, never a
+run-only override — `--no-animate` (images, voices, SFX and BGM only;
+nothing video-related is attempted or spent — the same switch as the
+dashboard's Animate checkbox), and `--estimate`, which prints the step's
+plan (including any clips, their seconds and their dollars) and calls
+nothing — no job is even created. `render` takes `--subtitles` (`style`,
+`word_pop`, `two_line` or `none`, default `style`, the style lock's own),
+`--encoder` (`libx264` or `auto`, default `libx264`) and, at tier ≥ 2,
+`--fill-failed-with-motion` (default off; lets a shot whose clip is failed,
+stale or missing render with Tier-1 motion instead of refusing — the same
+box as "Fill failed shots with motion" in the dashboard); `render` calls no
+API. `metadata` takes no parameters. There is no CLI command to regenerate
+one shot's clip (`shot:<ep>:<shid>:video`) — that's dashboard/API only.
+`fast-track` takes `--storyboard` (`t1`, the default, or
 `fast`) and meets the LLM key gate exactly as the API does for every
 fast-track job.
 
@@ -945,6 +1061,48 @@ only within the per-episode, daily and per-story caps; the fast track goes
 further and stops before spending anything paid unless every cap fits, with
 the numbers, before the first call.
 
+**At tier ≥ 2, video calls** run on `VIDEO_CHAIN` — local ComfyUI, or four
+hosted links, each adapted the same way an image link is, but priced and
+billed by the second instead of per image. The shipped default chain:
+
+```
+local/comfyui, fal/seedance-1-pro-fast, fal/ltx-2.3-fast,
+fal/kling-2.5-turbo-std, gemini/veo-3.1-lite
+```
+
+| Link | Price | Clip lengths |
+|---|---|---|
+| `fal/seedance-1-pro-fast` | $0.022/s at 720p | 2–12 s |
+| `fal/ltx-2.3-fast` | $0.06/s at 1080p | 6, 8 or 10 s |
+| `fal/kling-2.5-turbo-std` | $0.21 for 5 s, then $0.042/extra s | 5 or 10 s |
+| `gemini/veo-3.1-lite` | $0.05/s at 720p; $0.08/s at 1080p (8 s only) | 4, 6 or 8 s |
+
+Prices as of 2026-09-30. Seedance's 720p price only applies when 720p is
+requested explicitly — left unset, it defaults to 1080p at $0.049/s.
+Seedance and kling send no negative prompt; kling and veo take no seed.
+`ltx-2.3-fast` sends `generate_audio` only for a Tier-3 shot; veo's audio is
+always on and included, with no free tier, through its own
+`GEMINI_PAID_API_KEY`, kept separate from `GOOGLE_API_KEY`. Kling's clip
+keeps the **input keyframe's own aspect ratio** rather than a requested
+one — measured live: a 1024×1024 keyframe gave a 960×960 clip (see
+"Framing" under Render, above).
+
+A clip never costs more than the length actually sent: each shot's own
+length is rounded up to the nearest length the chosen link offers, and the
+render trims or holds the result to the shot's exact timing. A video link
+needs `allow_paid` on and the same per-episode, daily and per-story caps as
+any paid image or voice, shown as an estimate (seconds × price) before
+anything runs — local ComfyUI, when reachable, costs $0 and needs none of
+this.
+
+Like images and voices, **sticky per-episode links** apply to video too —
+one video provider per episode, offered a switch rather than silently mixed
+(see "Tier 2/3: animating shots" above). Settings → Providers shows a
+`GEMINI_PAID_API_KEY` field and badge next to the rest of your keys;
+Settings → Local hardware adds a row naming which of the three local video
+workflows your detected hardware would use, if any (see "Local generation"
+below).
+
 **The generation cache** (`cache/gen/` in the story's own folder) means a
 regenerated or re-run shot or line that asks for exactly the same image or
 voice again — the same prompt, seed and references, or the same pinned
@@ -991,6 +1149,13 @@ A few things phase 5 deliberately leaves for later:
   the dashboard's Settings store, for any step — including the ones this
   phase adds. If you keep your keys in Settings, either mirror them into
   `.env` for a CLI session or use the dashboard for the steps that need one.
+- **Per-character LoRA training** — teaching a model's own weights a
+  character's look, instead of leaning on a keyframe and a prompt for every
+  shot — isn't here. It's a deliberate future extension, flagged but not
+  built this phase. Neither a fal-hosted training cost nor a local training
+  cost has been measured or priced anywhere in this project's own sources
+  yet, so none is given here — treat any such number you see elsewhere as
+  unverified until this project records one itself.
 
 ## Local generation
 
@@ -1019,6 +1184,44 @@ character's turnaround and expressions sheet, and a place's non-`day` time
 variants, need either a local ComfyUI reachable at `LOCAL_COMFYUI_URL` or a
 paid editor (`allow_paid` on) — without either, those steps stop and ask,
 and the story can still be finished with `prompt_only` consistency instead.
+
+**Local video (Tier 2/3)** works the same way, through `VIDEO_CHAIN`'s
+`local/comfyui` link, reached at the same `LOCAL_COMFYUI_URL`. Settings →
+Local hardware's probe picks one of three shipped image-to-video workflows
+by your detected VRAM; under 8 GB, with no GPU at all, or on Apple MPS,
+there isn't a local video workflow — those profiles animate through the
+hosted links instead, or not at all under the `free` budget profile.
+
+| Profile | VRAM | Workflow | fps | Max length | 9:16 size |
+|---|---|---|---|---|---|
+| `mid` | 8–16 GB | Wan 2.2 5B (`i2v_wan22_5b`) | 24 | 2–5 s | 704×1280 |
+| `high` | 16–24 GB | Wan 2.2 14B Lightning (`i2v_wan22_14b_lightning`) | 16 | 2–5 s | 480×832 |
+| `pro` | ≥ 24 GB | LTX-2 (`i2v_ltx2`) | 25 | 2–4 s, silent | 704×1280 |
+
+Each workflow needs its own model files dropped into ComfyUI's `models/`
+folders before it can run. The app checks `object_info` before every queue
+and names any file this host doesn't have, with the ComfyUI subfolder it
+belongs in:
+
+- **Wan 2.2 5B** — `wan2.2_ti2v_5B_fp16.safetensors` (`models/diffusion_models`),
+  `umt5_xxl_fp8_e4m3fn_scaled.safetensors` (`models/text_encoders`),
+  `wan2.2_vae.safetensors` (`models/vae`).
+- **Wan 2.2 14B Lightning** — `wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors`
+  and `wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors`
+  (`models/diffusion_models`), `wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors`
+  and `wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors` (`models/loras`),
+  `umt5_xxl_fp8_e4m3fn_scaled.safetensors` (`models/text_encoders`),
+  `wan_2.1_vae.safetensors` (`models/vae`).
+- **LTX-2** — `ltx-2-19b-dev-fp8.safetensors` (`models/checkpoints`),
+  `gemma_3_12B_it_fp4_mixed.safetensors` (`models/text_encoders`),
+  `ltx-2-19b-distilled-lora-384.safetensors` (`models/loras`),
+  `ltx-2-spatial-upscaler-x2-1.0.safetensors` (`models/latent_upscale_models`).
+
+**Unverified live — no GPU yet.** All three templates were authored from
+ComfyUI's own published default graphs and are proven only against a fake
+ComfyUI server in this repository's own tests; nothing has run them against
+a real daemon, because this deployment has no GPU anywhere (the human's
+standing choice). First contact with a real ComfyUI is the actual test.
 
 ## Where your story lives on disk
 
