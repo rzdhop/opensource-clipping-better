@@ -1,4 +1,41 @@
+## SIDE TASK — stt's upload and the Pexels search open through the credential-safe opener (FULL, small). Branch `Feature/musing-lamport-e6a02a`
+- **Scope:**
+  - `clipping/providers/stt.py` `_post_multipart`;
+  - `clipping/studio/broll.py`'s Pexels search;
+  - one new test file, `tests/test_stt_broll_redirects.py`.
+  - DEC-195's follow-ups. Phase 6 and the transport side task below are left alone.
+- **In-progress header** (keep current):
+  - **Current phase:** IMPLEMENT. EXPLORE, PLAN and the Tier-1 baseline are done.
+  - **Plan:** `.claude/plans/stt-broll-redirect-credentials.md`. The human **APPROVED** it in chat on 2026-10-01:
+    as written, with no shared helper, and broll's CDN download left on `urlopen`.
+  - **Tier 2:** the human chose the keyless live probe, one real HTTPS call per module sending no real credential.
+  - **Current stage:** 1 (stt). Stage 0, the checkpoint commit, carries this header.
+  - **Next action:** stage 1, fail-first. Then stage 2 (broll, the riskiest), then stage 3 (artifacts).
+  - **Open questions:** none.
+- **Where:**
+  - Worktree `.claude/worktrees/musing-lamport-e6a02a`, branch `Feature/musing-lamport-e6a02a` from `main`
+    `0ca00b8`.
+  - `main` already contains ded664f (DEC-195), observed 2026-09-30.
+  - Never merged or deployed from here: the main checkout is bind-mounted by the live container.
+- **Checkpoint:** `0ca00b8` (== `main`), clean tree.
+- **Tier-1 baseline at `0ca00b8`** (2026-09-30). Scope is the chat's: the existing tests of the touched modules.
+  - Files: `tests/test_stt_stitching.py`, `tests/test_transcript_dispatch.py`, `tests/test_cancel.py`,
+    `tests/test_story_assets_step.py`, `tests/test_studio_package.py`, `tests/test_render_temp_cleanup.py`.
+  - `python -m pytest -p no:warnings`: **117 passed / 1 skipped**.
+  - `PYTHONNOUSERSITE=1 PYTHONPATH=/tmp/cilibs python3 -m pytest -p no:warnings`: **117 passed / 1 skipped**.
+  - The skip is `test_studio_package.py::test_the_real_package_imports_where_the_render_stack_exists` (no cv2 on
+    this host).
+- **Regression contract:**
+  - RC-SB1: hosted STT (Groq/Mistral) still posts, parses, and maps an HTTP error to `SttError`. Proven by the four
+    stt files, unedited and green, plus the new stt test's 200 path.
+  - RC-SB2: the studio package still loads, binds its siblings, and has no import cycle. Proven by
+    `test_studio_package.py` and `test_render_temp_cleanup.py`, unedited and green.
+  - RC-SB3: `download_pexels_broll` still searches, picks, downloads and returns `True`/`False`. Proven by the new
+    broll test's full path. The error branches are **UNVERIFIED** by a test: they are unchanged code (DEC-192).
+
 ## SIDE TASK — transport redirects drop credential headers off-origin (FULL, small). Branch `Feature/silly-almeida-f5cda1`
+- **Observed 2026-09-30 by the stt/broll side task above:** `main` is at `0ca00b8`, which contains ded664f and the
+  artifact commits.
 - **Scope:** only `clipping/providers/transport.py` and one new test file. The phase-6 state is in the next section and
   in the `ai-story-phase-6` worktree; this branch leaves both alone.
 - **In-progress header** (keep current):
