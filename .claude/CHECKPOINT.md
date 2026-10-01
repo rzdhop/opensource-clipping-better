@@ -5,13 +5,39 @@
   - one new test file, `tests/test_stt_broll_redirects.py`.
   - DEC-195's follow-ups. Phase 6 and the transport side task below are left alone.
 - **In-progress header** (keep current):
-  - **Current phase:** IMPLEMENT. EXPLORE, PLAN and the Tier-1 baseline are done.
+  - **Current phase:** DOCUMENT done. Stages 0–3 are committed. The task is **NOT merged into `main`**: that waits
+    for the human's word, at 0 jobs, because the main checkout is bind-mounted by the live container.
+    - Stage 0 (`8edb8ea`): checkpoint, plan, baseline.
+    - Stage 1 (`b4d1c3d`): `stt._post_multipart` opens through `transport._OPENER`; new
+      `tests/test_stt_broll_redirects.py`.
+    - Stage 2 (`4912a15`): broll's Pexels search does the same; `PEXELS_VIDEO_SEARCH_URL`; the broll test.
+    - Stage 3: DEC-196, A-099, the action-log lines, this close-out.
   - **Plan:** `.claude/plans/stt-broll-redirect-credentials.md`. The human **APPROVED** it in chat on 2026-10-01:
     as written, with no shared helper, and broll's CDN download left on `urlopen`.
-  - **Tier 2:** the human chose the keyless live probe, one real HTTPS call per module sending no real credential.
-  - **Current stage:** 1 (stt). Stage 0, the checkpoint commit, carries this header.
-  - **Next action:** stage 1, fail-first. Then stage 2 (broll, the riskiest), then stage 3 (artifacts).
-  - **Open questions:** none.
+  - **Tier-1 after stage 2:**
+    - Files: the new file + the six baseline files.
+    - Local **119 passed / 1 skipped**; CI env **119 passed / 1 skipped** (baseline + 2 new). compileall clean.
+  - **Tier 2:** the keyless live probe the human chose, run 2026-10-01. Both calls went through `_OPENER`.
+    - Pexels: 401 → `False`, no file.
+    - Groq: `SttError` "HTTP 403 … error code: 1010", not the expected 401. The old `urlopen` gets the same answer:
+      Cloudflare refuses `Python-urllib/3.12` from this host. This is pre-existing and recorded as a follow-up.
+  - **Tier 3:** `tests/test_stt_broll_redirects.py`, one fail-first test per module (DEC-192).
+  - **Dependencies:** none changed, so there is no audit delta.
+  - **Waiting on the human:**
+    - acknowledge the Tier-2 result (Groq's 403/1010 instead of 401);
+    - say whether and when to merge into `main`.
+    - Trial merges (`git merge-tree`):
+      - phase 6 conflicts with this branch only in `.claude/CHECKPOINT.md`.
+      - `Feature/eager-chaplygin-e0a0a3` already conflicts with `main` in `broll.py` and nine other studio files
+        (its base predates the studio package). This branch adds no new conflicting file to that list.
+  - **Follow-up offered:** Groq's Cloudflare 1010 block on urllib's User-Agent (hosted STT may fail from this host).
+  - **Artifacts at close:**
+    - CHECKPOINT: this section.
+    - DECISIONS: DEC-196.
+    - ASSUMPTIONS: A-099 (UNCONFIRMED).
+    - action log: 6 lines.
+    - VISION: reviewed, no change required (no redirect or credential item).
+  - **Open questions:** none blocking.
 - **Where:**
   - Worktree `.claude/worktrees/musing-lamport-e6a02a`, branch `Feature/musing-lamport-e6a02a` from `main`
     `0ca00b8`.

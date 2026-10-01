@@ -361,6 +361,13 @@
   approval (`.claude/plans/transport-redirect-credentials.md`), including the one consequence the request did not
   name: `test_provider_http.py`'s error-mapping test patches `transport._OPENER.open` instead of the global `urlopen`.
   UNCONFIRMED until the human acknowledges it.
+- **A-099** — A-097's twin for the two callers outside the transport (DEC-196): neither Groq's and Mistral's
+  transcription endpoints nor Pexels' video search need their key to follow a redirect **to another origin**.
+  - A same-origin redirect still carries it.
+  - Pexels' CDN download never had a key.
+  - If hosted STT or the B-roll search ever answers 401/403 after a cross-origin 30x, this assumption is the first
+    suspect.
+  - UNCONFIRMED: provider behaviour, not visible from the code.
 
 ## Confirmed
 - **A-069** — Measured render times on the VPS (container ffmpeg `7.1.5-0+deb13u1/aarch64`, final profile,
