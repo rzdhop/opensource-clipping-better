@@ -74,6 +74,14 @@ __all__ = [
 # step: a bible is three calls, and B3 must not be refused because B1 was slow.
 STORY_CALL_BUDGET_SECONDS = 300
 
+# The deadline one story call hands run_chain (phase 7, DEC-224): both
+# nemotron-3 retry ladders (3 x 60 s and 3 x 40 s, registry.MODEL_TIMEOUTS)
+# and still one full 180 s request to the free gemini floor, so a NIM outage
+# never leaves a story call without a model. A step's own planning keeps
+# STORY_CALL_BUDGET_SECONDS: a call that runs past it is the rare case of
+# every NIM attempt timing out.
+STORY_CALL_DEADLINE_SECONDS = 480
+
 # Why a story step leaves a link of the chain out (spec 0: printed, never
 # silent). The ⏭ line and the estimate's "skipped" carry it.
 PAID_SKIP_REASON = "paid link: allow_paid is off (AI Story spends only on opt-in)"
@@ -344,7 +352,7 @@ def call_json(
                 temperature=prompts.TEMPERATURE[prompt_id],
                 keys=keys,
                 on_log=ctx.on_log,
-                deadline=time_fn() + STORY_CALL_BUDGET_SECONDS,
+                deadline=time_fn() + STORY_CALL_DEADLINE_SECONDS,
                 time_fn=time_fn,
                 **cancel_kwargs,
                 **metered,

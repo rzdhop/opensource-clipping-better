@@ -269,7 +269,8 @@ def test_the_free_path_hands_run_chain_exactly_what_it_did_before(story, monkeyp
     assert kwargs == {
         "system": SYSTEM, "user": USER, "schema": {}, "schema_name": "bible_core", "max_tokens": B1_CAP,
         "temperature": 0.5, "keys": {"gemini": "test-gemini-key", "openrouter": "test-openrouter-key"},
-        "on_log": log, "deadline": 1300.0, "time_fn": TIME_FN, "cancel": ctx.cancel,
+        # DEC-224 (phase 7): run_chain's deadline is STORY_CALL_DEADLINE_SECONDS (480 s).
+        "on_log": log, "deadline": 1480.0, "time_fn": TIME_FN, "cancel": ctx.cancel,
     }
     assert sent_chain == chain
     assert (factory is not None) is metered

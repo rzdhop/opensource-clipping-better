@@ -853,7 +853,10 @@ def test_each_run_gets_its_own_budgeted_deadline_the_keys_and_the_token(tmp_path
     m.llm_call.call_json(ctx, "B1", *_b1_prompt(), validator=schemas.b1_errors, runner=runner, time_fn=time_fn)
 
     assert m.llm_call.STORY_CALL_BUDGET_SECONDS == 300
-    assert [call["deadline"] for call in runner.calls] == [1300.0, 1340.0]
+    # DEC-224 (phase 7): run_chain's deadline is 480 s, room for both NIM
+    # ladders and the free floor.
+    assert m.llm_call.STORY_CALL_DEADLINE_SECONDS == 480
+    assert [call["deadline"] for call in runner.calls] == [1480.0, 1520.0]
     assert all(call["time_fn"] is time_fn for call in runner.calls)
     assert all(call["cancel"] is token for call in runner.calls)
     assert all(call["keys"] == {"gemini": "test-gemini-key"} for call in runner.calls)

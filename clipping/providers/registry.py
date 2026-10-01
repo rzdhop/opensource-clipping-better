@@ -230,6 +230,17 @@ def env_key_for(link) -> str:
     return PROVIDERS[link.provider].env_key
 
 
+# One model's own request timeout, where it answers far inside its provider's
+# default (phase 7, DEC-224): the nemotron-3 writers, thinking off, answered
+# in 11-70 s (ultra) and 1-23 s (super) on the 2026-10-01 bench, while NIM's
+# 330 s default would not even fit one AI Story call's budget. The Clips
+# mode's NIM default (nemotron-3.5-lightning) keeps the provider's 330 s.
+MODEL_TIMEOUTS = {
+    ("nvidia", "nvidia/nemotron-3-ultra-550b-a55b"): 60,
+    ("nvidia", "nvidia/nemotron-3-super-120b-a12b"): 40,
+}
+
+
 def effective_timeout(link, override=None) -> float:
     """How long ONE request to *link* may take, in seconds.
 
@@ -246,7 +257,10 @@ def effective_timeout(link, override=None) -> float:
         value = float(override or 0)
     except (TypeError, ValueError):
         value = 0.0
-    return value if value > 0 else float(provider_for(link).default_timeout)
+    if value > 0:
+        return value
+    model_timeout = MODEL_TIMEOUTS.get((link.provider, link.model))
+    return float(model_timeout if model_timeout is not None else provider_for(link).default_timeout)
 
 
 def probe_timeout(link, override=None) -> float:

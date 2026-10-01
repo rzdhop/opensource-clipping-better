@@ -145,3 +145,23 @@ def test_a_non_matching_nvidia_model_gets_no_extra_body():
     from clipping.providers import llm
 
     assert llm._extra_body(Link("nvidia", "meta/llama-3.3-70b-instruct")) is None
+
+
+def test_the_story_chain_tries_nvidia_and_still_reaches_the_free_floor():
+    """The phase-7 walk found every NIM link skipped: "a 330s request does not
+    fit the 300s left in the time budget". The nemotron-3 links get their own
+    measured timeouts, and one story call's budget holds both NIM retry
+    ladders (MAX_ATTEMPTS each) and still a full request to the free gemini
+    floor, so a NIM outage never leaves a step without a model."""
+    from clipping.aistory.steps import llm_call
+    from clipping.providers import llm, registry
+
+    chain = registry.parse_chain(registry.DEFAULT_STORY_LLM_CHAIN)
+    timeouts = {registry.describe(link): registry.effective_timeout(link) for link in chain}
+    nim = [t for label, t in timeouts.items() if label.startswith("nvidia/")]
+    floor = timeouts["gemini/" + registry.GEMINI_DEFAULT_MODEL]
+
+    assert all(t < llm_call.STORY_CALL_BUDGET_SECONDS for t in nim)  # a step plans with it
+    assert llm.MAX_ATTEMPTS * sum(nim) + floor <= llm_call.STORY_CALL_DEADLINE_SECONDS
+    # The Clips mode's NIM default keeps the provider's own timeout.
+    assert registry.effective_timeout(registry.parse_spec("nvidia/nvidia/nemotron-3.5-lightning-30b-a3b")) == 330
