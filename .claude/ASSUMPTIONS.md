@@ -211,13 +211,6 @@
 - **A-068** — The 15 `assets/bgm/` tracks (Clips mode, Pixabay-style names, no licence record in the repo) may be
   mapped into `bgm_index.json` for AI Story; their licence is recorded as "shipped with Clips, source unrecorded".
   *Human's choice at phase-4 CLARIFY (2026-09-28): "Self-made SFX + existing BGM".* UNCONFIRMED as a licence fact.
-- **A-071** — fal bills a queued request at submit even when it later fails. UNCONFIRMED; the live paid step is
-  deferred.
-  **Probe 2026-10-01 (phase 6 walk step 6, the human's go ≤ $0.044):** a 2 s seedance request whose `image_url`
-  is a missing file on fal's CDN was QUEUED (`IN_QUEUE` → `IN_PROGRESS`), and its status ended `COMPLETED`;
-  only the result endpoint answered HTTP 422 `file_download_error`. Request
-  `01a0f63e-1cd3-79e1-b83e-f9c027fcc2cc`; the app booked $0.044 at submit (DEC-153). So a failed queued
-  request runs through the whole queue. Whether fal CHARGED it: pending the human's reading of fal's billing.
 - **A-072** — A Gemini/OpenAI image 4xx is unbilled; a 5xx or timeout may be billed. UNCONFIRMED.
 - **A-073** — ubuntu-24.04's apt ffmpeg stays at 6.1.1; `-threads 1` makes x264 in the golden profile
   thread-independent. UNCONFIRMED over time: CI's `6.1.1/x86_64` golden key was recorded at stage 7 and needs
@@ -236,18 +229,6 @@
   `/app/data/api_token`) is part of "remove all access restrictions", done in auth stage 2 though the approved plan
   did not list it. UNCONFIRMED: named in the stage-2 report for the human to veto.
 
-- **A-082** — fal.ai as measured in the paid test (2026-09-29, DEC-174):
-  - 35 requests with 0 failures: 13 `fal-ai/flux/schnell` (4–13 s each; booked $0.0028 at 720x1280, $0.0018 for a
-    style-preview image) and 22 `seedream-4-edit` (30–40 s each; $0.03).
-  - Total booked $0.6934, equal to `spend.json`.
-  - A request cancelled 80 ms after its submit was resumed by poll on Continue and delivered, with no re-buy.
-  - flux-schnell draws a fruit-head descriptor as the fruit (a pickle detective); pollinations drew human faces
-    (A-058).
-  - fal's dashboard, read by the human on 2026-09-29, shows a **cost estimate of $0.70 and 32 requests** over the last
-    7 days. **The cost matches** once flux-schnell is billed per whole megapixel (DEC-175: 13 × $0.003 + 22 × $0.03 =
-    $0.699). **The count is 3 short of our 35 and stays UNCONFIRMED.** The cause is unknown: dashboard aggregation
-    lag, or fal counting some requests differently. fal's per-endpoint request list would settle it.
-  - A-071 (is a queued request that later *fails* billed?) is still open: no request failed.
 
 - **A-083** — The suite is safe under pytest-xdist (`-n 4`): tests share no process-global state across workers that
   changes an outcome. Verified once on phase 5's stage-9 tree (identical counts serial vs parallel in both
@@ -335,11 +316,6 @@
   catalogue has no live check; UNCONFIRMED that the other 16 Edge voices stay (a `edge_tts.list_voices()` probe before
   each phase's Tier-2 is cheap).
 
-- **A-094** — fal in the capped re-edit test (14b(e), 2026-09-30): one `seedream-4-edit` request, journaled and booked
-  at submit ($0.030 = `pricing.py` = fal's table), answered in 29.4 s; the caps are cumulative (an episode already
-  holding $0.60 refused a $0.03 call under a $0.10 episode cap, so a capped test on a story with earlier spend sets
-  the **daily** cap as its hard limit and episode/story caps as spent + headroom). UNCONFIRMED: fal's dashboard shows
-  +1 request / +$0.03 for 2026-09-30 (the human to read).
 
 - **A-095** — Cloudflare Workers AI `flux-1-schnell` (keys added 2026-09-30) is fast and free on this account: ~2 s
   per image, no logo, square native size cropped to 9:16; it takes no seed (T2-P5-F13) so prompt-only shots are not
@@ -372,14 +348,6 @@
     suspect.
   - UNCONFIRMED: provider behaviour, not visible from the code.
 
-- **A-100** — `fal/seedance-1-pro-fast` (`fal-ai/bytedance/seedance/v1/pro/fast/image-to-video`), read on 2026-09-30:
-  - **Price.** Billed by tokens at $1.00 per million, where tokens = width × height × 24 × seconds / 1024. At 720×1280
-    that is $0.0216 a second, kept as 0.022.
-  - **720p must be sent explicitly.** The endpoint's default is 1080p, at $0.0486 a second.
-  - **Clips:** 2–12 s. No audio, no negative prompt. Takes a seed.
-  - **Request fields:** `image_url`, `prompt`, `duration` (string), `aspect_ratio`, `resolution`, `seed`,
-    `camera_fixed`. The output is `video.url`.
-  - UNCONFIRMED until the phase-6 walk's ledger row is compared with fal's billing.
 - **A-101** — `fal/ltx-2-fast` (`fal-ai/ltxv-2/image-to-video/fast`) cannot make vertical video.
   - Its output is locked to 16:9 at 1080p or larger, for $0.04 a second with audio.
   - Its `fal-ai/ltx-2` twin was deprecated on 2026-08-15 for LTX-2.3.
@@ -387,14 +355,6 @@
     "9:16", fps 24/25/48/50 and `generate_audio`.
   - Phase 6 stage 3 moves the default-chain link there, as the spec's §8.7 foresaw.
   - UNCONFIRMED: LTX-2.3's clip lengths and its price at the smallest 9:16 size (stage 3 re-reads the page).
-- **A-102** — `fal/kling-2.5-turbo-std` (`fal-ai/kling-video/v2.5-turbo/standard/image-to-video`):
-  - **Price:** $0.21 per 5 s, then $0.042 per extra second.
-  - **Clips:** 5 or 10 s.
-  - **Request fields:** `negative_prompt` and `cfg_scale`. No seed, no audio, and no aspect or resolution field.
-  - ~~UNCONFIRMED: the output aspect follows the 9:16 keyframe.~~ **Measured 2026-10-01 (walk step 9): it follows
-    the INPUT image's aspect.** A 1024×1024 keyframe gave a 960×960 clip at 24 fps, 5.04 s; 70.2 s on fal; $0.21
-    booked. Our square Cloudflare keyframes therefore give square clips, which the renderer letterboxed
-    (T2-P6-F1, fixed by cover+crop in the renderer). Still UNCONFIRMED: fal's billed amount (dashboard).
 - **A-103** — `gemini/veo-3.1-lite` (`veo-3.1-lite-generate-preview`), read on 2026-09-30:
   - **Price:** $0.05 a second at 720p; $0.08 at 1080p (8 s only). Audio is always on and included. No free tier.
   - **Clips:** 4/6/8 s, 9:16 and 720p supported.
@@ -430,8 +390,55 @@
   a failure, but never native audio either, on the link most stories will actually reach first. The estimate does
   not warn about this ahead of a run. UNCONFIRMED whether that is clear enough without a UI hint or a line in
   these docs (stage-10 follow-up).
+- **A-109** — fal does not bill a queued request whose input fails to download. One sample: A-071's probe
+  `01a0f63e…` (queued, status COMPLETED, result HTTP 422 `file_download_error`) is absent from fal's usage export
+  (2026-10-01). The app still books such a request at submit (DEC-153), so it over-books by that request's
+  estimate ($0.044 on 2026-10-01). UNCONFIRMED: whether a failure after generation started (a model error, a
+  timeout) is billed.
 
 ## Confirmed
+- **A-082** — fal.ai as measured in the paid test (2026-09-29, DEC-174):
+  - 35 requests with 0 failures: 13 `fal-ai/flux/schnell` (4–13 s each; booked $0.0028 at 720x1280, $0.0018 for a
+    style-preview image) and 22 `seedream-4-edit` (30–40 s each; $0.03).
+  - Total booked $0.6934, equal to `spend.json`.
+  - A request cancelled 80 ms after its submit was resumed by poll on Continue and delivered, with no re-buy.
+  - flux-schnell draws a fruit-head descriptor as the fruit (a pickle detective); pollinations drew human faces
+    (A-058).
+  - fal's dashboard, read by the human on 2026-09-29, shows a **cost estimate of $0.70 and 32 requests** over the last
+    7 days. **The cost matches** once flux-schnell is billed per whole megapixel (DEC-175: 13 × $0.003 + 22 × $0.03 =
+    $0.699). ~~The count is 3 short of our 35 and stays UNCONFIRMED.~~ Settled below.
+  - A-071 (is a queued request that later *fails* billed?) was settled on 2026-10-01: see A-109.
+  *Confirmed 2026-10-01 by fal's usage export (2026-09-24…10-01, the human):*
+  2026-09-29 bills flux-schnell 13 megapixels ($0.039) and seedream-4-edit 22 images ($0.66) = $0.699, so all 35
+  requests were billed; the dashboard's "32 requests" was a display count. (A $0.001 `any-llm` playground request that day is not the app's.)
+- **A-094** — fal in the capped re-edit test (14b(e), 2026-09-30): one `seedream-4-edit` request, journaled and booked
+  at submit ($0.030 = `pricing.py` = fal's table), answered in 29.4 s; the caps are cumulative (an episode already
+  holding $0.60 refused a $0.03 call under a $0.10 episode cap, so a capped test on a story with earlier spend sets
+  the **daily** cap as its hard limit and episode/story caps as spent + headroom).
+  *Confirmed 2026-10-01 by fal's usage export (2026-09-24…10-01, the human):*
+  2026-09-30 bills seedream-4-edit 1 image, $0.03 — the booking.
+- **A-100** — `fal/seedance-1-pro-fast` (`fal-ai/bytedance/seedance/v1/pro/fast/image-to-video`), read on 2026-09-30:
+  - **Price.** Billed by tokens at $1.00 per million, where tokens = width × height × 24 × seconds / 1024. At 720×1280
+    that is $0.0216 a second, kept as 0.022.
+  - **720p must be sent explicitly.** The endpoint's default is 1080p, at $0.0486 a second.
+  - **Clips:** 2–12 s. No audio, no negative prompt. Takes a seed.
+  - **Request fields:** `image_url`, `prompt`, `duration` (string), `aspect_ratio`, `resolution`, `seed`,
+    `camera_fixed`. The output is `video.url`.
+  *Confirmed 2026-10-01 by fal's usage export (2026-09-24…10-01, the human):*
+  the 3 s clip (request `01a0f63b…`, output 704×1248, 73 frames) billed 62,634 tokens = $0.062634 = width × height
+  × frames / 1024, at the OUTPUT's own size (not 720×1280) with frames = 24 × seconds + 1. The app's 0.022/s booked $0.066 (+5 %, conservative). The day's seedance amount is
+  exactly this clip, so the A-071 probe was not billed (A-109).
+- **A-102** — `fal/kling-2.5-turbo-std` (`fal-ai/kling-video/v2.5-turbo/standard/image-to-video`):
+  - **Price:** $0.21 per 5 s, then $0.042 per extra second.
+  - **Clips:** 5 or 10 s.
+  - **Request fields:** `negative_prompt` and `cfg_scale`. No seed, no audio, and no aspect or resolution field.
+  - ~~UNCONFIRMED: the output aspect follows the 9:16 keyframe.~~ **Measured 2026-10-01 (walk step 9): it follows
+    the INPUT image's aspect.** A 1024×1024 keyframe gave a 960×960 clip at 24 fps, 5.04 s; 70.2 s on fal; $0.21
+    booked. Our square Cloudflare keyframes therefore give square clips, which the renderer letterboxed
+    (T2-P6-F1, fixed by cover+crop in the renderer).
+  *Confirmed 2026-10-01 by fal's usage export (2026-09-24…10-01, the human):*
+  the 5 s clip (request `01a0f642…`) billed 5 seconds × $0.042 =
+  $0.21, equal to the booking.
 - **A-098** — The human's chat request for the redirect fix named the approach (an opener whose redirect handler
   drops the credentials off-origin and keeps them same-origin) and the acceptance tests. So it stands as the plan's
   approval (`.claude/plans/transport-redirect-credentials.md`), including the one consequence the request did not
@@ -559,6 +566,8 @@
   correctly clamped to the clip start.*
 
 ## Invalidated
+- **A-071** — INVALIDATED 2026-10-01: "fal bills a queued request at submit even when it later fails". fal's usage
+  export shows the probe `01a0f63e…` (failed at input download) was not billed. Replaced by A-109.
 - **A-004** — INVALIDATED 2026-09-26: `-v` (`--video`) and `-t` (`--transcript`)
   are taken now, as are `-n` and `-r`; only `-u` is free. Replaced by the grep in
   the phase-1 exploration (`clipping/config.py:303,308,325,334`).

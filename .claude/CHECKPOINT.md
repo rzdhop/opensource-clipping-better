@@ -34,8 +34,9 @@
       `/home/ubuntu/backups/ai-story-phase-6/before-13b/`): story A `0896bde9…` (14 rebuilt), story B `89732483…`
       (18), storybook `486662c3…` (21), cinematic_real `59507ab8…` (3); loudness −14.2…−14.5 LUFS, TP ≈ −2.3.
     - **Stage 14 first pass DONE** (`35c7eb0`): docs/AI_STORY.md, DEC-200…218, A-104…108, VISION.
-    - **WAITING ON THE HUMAN (asked 2026-10-01 ~08:45 UTC):** walk step 10 (fal's billed amounts for the three
-      requests; was the A-071 probe charged?) and walk step 12 (phone watch of story A and B ep 1 at 375 px, and
+    - **Walk step 10 DONE (09:10 UTC):** fal's export: seedance $0.062634 (the good clip only), kling $0.21; the
+      A-071 probe was NOT billed (A-071 invalidated → A-109; A-082/A-094/A-100/A-102 confirmed).
+    - **WAITING ON THE HUMAN:** walk step 12 (phone watch of story A and B ep 1 at 375 px, and
       the Tier-2 substitute acknowledged). Then: settle A-071/A-100/A-102, VISION's 'remaining' line, the CHECKPOINT
       close, Tier-1, ff `main`, deploy if code changed, push the branch then `main`, CI green.
       `origin/main` is still `772a540`; `main` = `efd5fa4` (deployed).
@@ -120,6 +121,8 @@
       hosted STT on Groq may fail whatever the key.
     - A live local ComfyUI run when a GPU exists (A-035).
     - Veo live (A-103).
+    - Book $0 (or release the booking) for a fal request whose result is a 422 `file_download_error` (A-109).
+    - The seedance price row books 0.022/s on 720×1280; fal bills the output's own size × (24 s + 1) frames.
   - **Scratch tools** (session scratchpad, re-creatable):
     - `walk6.py`: the CLI-in-container driver — Settings → env minus unlisted paid keys, LLM_CHAIN without
       openrouter, per-process ALLOW_PAID/caps/VIDEO_CHAIN.
