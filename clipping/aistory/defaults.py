@@ -32,12 +32,21 @@ BUDGET_PROFILES = ("free", "one_dollar", "quality")
 PIPELINE_V2 = "v2"
 PIPELINES = (PIPELINE_V2,)
 
+# Phase 7 stage 4 (DEC-227): the optional ``generation_profile.video_resolution``,
+# the per-story 1080p switch of the human's answer 3. Absent: the budget
+# profile's ``video_resolution``, else 720p (``media_policy.video_resolution``).
+VIDEO_RESOLUTION_DEFAULT = "720p"
+VIDEO_RESOLUTIONS = (VIDEO_RESOLUTION_DEFAULT, "1080p")
+
 # ------------------------------------------------------------- story (spec 2.1, 6.2)
 
 EPISODE_TEMPLATE_ID = "serial_60s_v1"
+# The template a v2 story is created on (phase 7 stage 4, DEC-227): 6-10 beat
+# shots of 5-12 s, one clip each. A legacy story keeps EPISODE_TEMPLATE_ID.
+EPISODE_TEMPLATE_ID_V2 = "serial_60s_v2"
 # The episode templates shipped in templates/episodes/ (spec 6.2), in the
 # order story_bible_v1.episode_template_id's enum lists them.
-EPISODE_TEMPLATE_IDS = ("serial_60s_v1", "serial_90s_v1")
+EPISODE_TEMPLATE_IDS = ("serial_60s_v1", "serial_90s_v1", EPISODE_TEMPLATE_ID_V2)
 
 # In order, each derived from a contiguous prefix of ``approvals``
 # (store.derive_status): concept, bible, style, then -- phase 2 -- cast,
@@ -61,6 +70,14 @@ def default_generation_profile() -> dict:
         "consistency_mode": DEFAULT_CONSISTENCY_MODE,
         "budget_profile": DEFAULT_BUDGET_PROFILE,
     }
+
+
+def episode_template_for(profile) -> str:
+    """The episode template a story created with *profile* starts on: the v2
+    one for a v2 pipeline (DEC-227), else :data:`EPISODE_TEMPLATE_ID`."""
+    if (profile or {}).get("pipeline") == PIPELINE_V2:
+        return EPISODE_TEMPLATE_ID_V2
+    return EPISODE_TEMPLATE_ID
 
 
 def quality_generation_profile() -> dict:

@@ -574,6 +574,9 @@ _GENERATION_PROFILE_SCHEMA = {
         "budget_profile": {"type": "string", "enum": list(defaults.BUDGET_PROFILES)},
         # Optional (phase 7, DEC-221): absent on every story created before it.
         "pipeline": {"type": "string", "enum": list(defaults.PIPELINES)},
+        # Optional (phase 7 stage 4, DEC-227): the clips' size; absent, the
+        # budget profile's, else 720p (media_policy.video_resolution).
+        "video_resolution": {"type": "string", "enum": list(defaults.VIDEO_RESOLUTIONS)},
     },
     "required": ["tier", "route", "consistency_mode", "budget_profile"],
     "additionalProperties": False,
@@ -1991,6 +1994,12 @@ EPISODE_TEMPLATE_SCHEMA = _document({
     # keys checked against TRANSITIONS exactly in episode_template_errors.
     "transitions_s": {"type": "object"},
     "notes": {"type": "string"},
+}, optional={
+    # Phase 7 stage 4 (DEC-227): a template may set its own shots per scene
+    # (EpisodeContext.episode_defaults merges it over the style's) and the
+    # longest shot one clip covers; absent on the v1 templates.
+    "shots_per_scene": {"type": "array", "items": {"type": "integer", "minimum": 1}, "minItems": 2, "maxItems": 2},
+    "max_shot_s": {"type": "number", "minimum": 0},
 })
 
 
@@ -2029,6 +2038,10 @@ def episode_template_errors(doc) -> list:
     _range_pair_errors(errors, "$.window_s", doc["window_s"])
     _range_pair_errors(errors, "$.scenes", doc["scenes"])
     _range_pair_errors(errors, "$.shots", doc["shots"])
+    if "shots_per_scene" in doc:
+        _range_pair_errors(errors, "$.shots_per_scene", doc["shots_per_scene"])
+    if "max_shot_s" in doc and doc["max_shot_s"] < doc["min_shot_s"]:
+        errors.append(f"$.max_shot_s: {doc['max_shot_s']} is below min_shot_s ({doc['min_shot_s']})")
 
     window_lo, window_hi = doc["window_s"]
     target, tighten = doc["target_s"], doc["tighten_above_s"]
@@ -2561,6 +2574,15 @@ _STORYBOARD_ASSETS_SCHEMA = _document({
 # The one prompt layout a storyboard shot names (phase 7 stage 3b).
 STORYBOARD_PROMPT_LAYOUT_V1 = "layered_v1"
 
+# Where a T1 v2 shot's subject stands (phase 7 stage 4).
+STAGING_POSITIONS = ("left", "centre", "right", "back")
+STORYBOARD_STAGING_SCHEMA = _document({
+    "subject": {"type": "string", "pattern": SUBJECT_TAG_PATTERN},
+    "position": {"type": "string", "enum": list(STAGING_POSITIONS)},
+    "facing": {"type": "string", "maxLength": 120},
+    "expression": {"type": "string", "maxLength": 120},
+})
+
 _STORYBOARD_SHOT_SCHEMA = _document({
     "shot_id": {"type": "string", "pattern": SHOT_ID_PATTERN},
     "scene_id": {"type": "string", "pattern": SCENE_ID_PATTERN},
@@ -2599,6 +2621,13 @@ _STORYBOARD_SHOT_SCHEMA = _document({
     # clip prompt and whose references are sent up to the link's own limit
     # (steps/assets.REFERENCE_LIMITS). Absent on every legacy shot.
     "prompt_layout": {"type": "string", "enum": [STORYBOARD_PROMPT_LAYOUT_V1]},
+    # Phase 7 stage 4 (DEC-227): T1 v2's ``motion`` -- what the characters do
+    # during the clip, in tags like ``action`` (the clip prompt's action,
+    # shots._layered) -- and its ``staging`` (where each subject stands, faces
+    # and what it shows: the keyframe's positions). Absent on every shot T1 v2
+    # did not plan; the existing ``motion`` key is the Tier-1 camera motion.
+    "clip_motion": _text(400),
+    "staging": {"type": "array", "items": STORYBOARD_STAGING_SCHEMA, "maxItems": 4},
 })
 
 _STORYBOARD_TRANSITION_SCHEMA = _document({
