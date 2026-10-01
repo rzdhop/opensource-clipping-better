@@ -33,8 +33,12 @@
       `efd5fa4`, restart, 0 jobs); the four episodes re-rendered at $0 (backups in
       `/home/ubuntu/backups/ai-story-phase-6/before-13b/`): story A `0896bde9…` (14 rebuilt), story B `89732483…`
       (18), storybook `486662c3…` (21), cinematic_real `59507ab8…` (3); loudness −14.2…−14.5 LUFS, TP ≈ −2.3.
-    - **Next:** step 6 (walk step 10, the human reads fal's billing) and step 7 (walk step 12, the phone watch), then
-      stage 14 and the close. `origin/main` is still `772a540`.
+    - **Stage 14 first pass DONE** (`35c7eb0`): docs/AI_STORY.md, DEC-200…218, A-104…108, VISION.
+    - **WAITING ON THE HUMAN (asked 2026-10-01 ~08:45 UTC):** walk step 10 (fal's billed amounts for the three
+      requests; was the A-071 probe charged?) and walk step 12 (phone watch of story A and B ep 1 at 375 px, and
+      the Tier-2 substitute acknowledged). Then: settle A-071/A-100/A-102, VISION's 'remaining' line, the CHECKPOINT
+      close, Tier-1, ff `main`, deploy if code changed, push the branch then `main`, CI green.
+      `origin/main` is still `772a540`; `main` = `efd5fa4` (deployed).
     - Follow-up (not folded in): a near-9:16 size inside the 2% tolerance whose upscale is not exact (832×1472,
       736×1312) breaks the final pass's concat on SAR. Pre-existing; no live still has such a size.
   - **Next actions, in order:**
