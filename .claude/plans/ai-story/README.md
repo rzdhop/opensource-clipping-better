@@ -13,7 +13,8 @@ Written 2026-09-25 from a question-and-answer session with the author, then revi
 | `05-phase-4-assets-render-metadata.md` | Assets, Tier-1 renderer, metadata pack — **MVP**. |
 | `06-phase-5-series-reedit-styles.md` | Series memory, audience steering, per-scene re-edit, remaining styles, export. |
 | `07-phase-6-video-tiers-local.md` | Tier 2/3 video, local ComfyUI, paid opt-in. |
-| `08-phase-7-reference-import.md` | Reference-video import (style / premise / archetypes). |
+| `08-phase-7-reference-import.md` | Reference-video import (style / premise / archetypes). **Off the schedule since 2026-10-01** (the human; DEC-219), kept for later. |
+| `15-phase-7-quality-overhaul.md` | **Phase 7 (since 2026-10-01): the quality overhaul** — every shot animated, quality media, prompts with context, a story you can follow; facts, goals, workstreams, CLARIFY questions and the start prompt. |
 | `09-APPENDIX-research-2026-09-25.md` | Provider prices, free tiers, prior art, genre notes — the source for `pricing.py`. |
 | `10-REFERENCE-ANALYSIS-2026-09-25.md` + `reference-v1/v2-contact-sheet.jpg` | Measured structure, pacing, captions, audio and style of the author's two inspiration videos; the "measured vs assumed" table that shaped §6.2 and the two MVP styles. |
 

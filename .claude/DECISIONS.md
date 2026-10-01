@@ -3684,3 +3684,34 @@ minimum would cost $0.36, over the $0.25 cap.
 **Consequence.** Veo stays proven only by its recorded API-documentation replies, never by a live call; A-103
 stays UNCONFIRMED. The T2-P6-F1 finding (DEC-216) came out of this substitution — Kling's aspect-keeping
 behaviour, not a Veo behaviour. A live Veo shot remains a follow-up.
+
+## DEC-219 — Quality before $0: every shot animated, no cheap image AI for the cast, places and props, billed APIs urged on weak hardware, richer prompts (the human's verdict after the phase-6 walk; amends the planning bundle's "free tiers by default" and the `one_dollar` "key shots animated" target)
+**Context.** Walk step 12, 2026-10-01: the human watched story A `979c8376e43e` and story B `04feb539840f` ep 1 on
+the phone. Their verdict:
+- only one shot was animated, and they want the whole video animated, every shot;
+- the story is not understandable;
+- the pollinations images are "awfully ugly": do not use cheap AI to generate characters, decors and props;
+- if the machine cannot run good image, text or video generation, the app should strongly recommend billed APIs;
+- the prompts are too short and give too little context about proportions, traits and the specific image a shot
+  needs, so they must be upgraded.
+
+The walk animated one shot per story on purpose, under its $0.55 ceiling. So the first point is about the
+product's target, not the walk.
+**Decision.** This is a durable direction for the next phase (phase 7, which replaces reference-video import):
+- At tier ≥ 2 a story aims to animate **every** shot; "key shots within $1" is no longer the target. The
+  per-episode budget that makes this possible is a question for the next phase's CLARIFY.
+- Characters, places (decors) and props are never generated on cheap or free image links (pollinations and the
+  like). They use a quality image model. When the host cannot run a good model locally (this VPS has no GPU), the
+  app strongly recommends billed APIs instead of falling through to free links without a word.
+- Prompts carry enough context: proportions, traits, wardrobe, the place, the props, and the specific image each
+  shot needs.
+- An episode must be understandable on a first watch. The next phase diagnoses why it is not before choosing
+  fixes.
+- Unchanged: `allow_paid`, the caps, a shown estimate and the human's go still gate every paid call (DEC-194/215).
+  No auth, ever.
+
+**Consequence.**
+- `.claude/plans/ai-story/15-phase-7-quality-overhaul.md` frames the next session (EXPLORE → CLARIFY → PLAN).
+- Reference-video import (`08-phase-7-reference-import.md`) is taken off the schedule. Its file is kept.
+- The verdict's four points are findings T2-P6-F2…F5 (action log, 2026-10-01). Phase 6's code is not changed by
+  this decision.

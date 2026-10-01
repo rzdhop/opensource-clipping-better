@@ -96,7 +96,11 @@ budget and every free call counted against its daily limit.
    One image provider and one video provider now stick per episode, offered a switch rather than silently mixed.
    Paid LLM calls are estimated, capped and booked too (OpenRouter itself stays unfunded by choice). Remaining
    before close: the live walk's billing comparison, the human's final phone watch, and the merge to `main`.
-2. **Phase 7** — reference-video import.
+2. **Phase 7 — quality overhaul** (DEC-219, the human's verdict after phase 6's phone watch): every shot animated,
+   quality image models for characters, places and props (never cheap or free image AI), billed APIs strongly
+   recommended when the host cannot run good models (this VPS has no GPU), prompts with real context, and an
+   episode a first-time viewer can follow. Brief: `.claude/plans/ai-story/15-phase-7-quality-overhaul.md`.
+   Reference-video import (the old phase 7) is off the schedule, kept for later.
 Carried alongside: the Settings per-task route selector (DEC-112); the clip-upload token-before-spool fix; a dependency pass
 (extras, lockfile, audit, setuptools ≥ 83); `jobs.json` atomic write and
 `needs_upload` at restart; tests isolated from a real `.env`; phase 3's own

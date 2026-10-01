@@ -36,7 +36,16 @@
     - **Stage 14 first pass DONE** (`35c7eb0`): docs/AI_STORY.md, DEC-200…218, A-104…108, VISION.
     - **Walk step 10 DONE (09:10 UTC):** fal's export: seedance $0.062634 (the good clip only), kling $0.21; the
       A-071 probe was NOT billed (A-071 invalidated → A-109; A-082/A-094/A-100/A-102 confirmed).
-    - **WAITING ON THE HUMAN:** walk step 12 (phone watch of story A and B ep 1 at 375 px, and
+    - **Walk step 12 DONE (2026-10-01):** the human watched story A and B ep 1 on the phone. Verdict →
+      T2-P6-F2…F5 and DEC-219 (every shot animated; no cheap image AI for cast/places/props; billed APIs urged on
+      weak hardware; richer prompts; the story was not understandable). An audit found T2-P6-F6 (the clip prompt
+      sends raw @char/#place tags, `steps/clips.py:220`) and T2-P6-F7 (`names.without_names` strips place-name
+      phrases out of descriptors). All of it goes to **phase 7 = the quality overhaul**
+      (`.claude/plans/ai-story/15-phase-7-quality-overhaul.md`, with its start prompt); reference import is off
+      the schedule.
+    - **Next: the phase-6 close** (the human's go asked 2026-10-01): Tier-1, ff `main` (docs/.claude only since
+      `efd5fa4`: no deploy needed), push the branch then `main`, CI green.
+    - (history) WAITING ON THE HUMAN: walk step 12 (phone watch of story A and B ep 1 at 375 px, and
       the Tier-2 substitute acknowledged). Then: settle A-071/A-100/A-102, VISION's 'remaining' line, the CHECKPOINT
       close, Tier-1, ff `main`, deploy if code changed, push the branch then `main`, CI green.
       `origin/main` is still `772a540`; `main` = `efd5fa4` (deployed).
