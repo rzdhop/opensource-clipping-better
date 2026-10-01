@@ -42,7 +42,7 @@
   | 3c props as entities | DONE (selection 13 files: local 1110, CI env 1090+20s) | see log |
   | 4 serial_60s_v2 (6–10 shots), seedance on every shot, 1080p switch | DONE (full suites by the agent: local 6701+2 fixed, CI env 5906+2 fixed; my selection 258 / 218+40s) | e78b887, a2881ae |
   | W-mid paid walk ≤ $1.60 | todo | |
-  | 3d image-prompt fixes from W-mid (prop refs without scale/hands/faces, expressions same head, look.presentation) | todo | |
+  | 3d image-prompt fixes from W-mid (prop refs without scale/hands/faces, expressions same head, look.presentation) + T1 v2 tag repair | DONE (81 files: local 4418, CI env 3965+453s) | see log |
 | 5a KB schemas + D1 | DONE (full suites in parallel: local 6712+1 re-pinned, CI env 5918/765) | see log |
   | 5b knowledge step + gate | todo | |
   | 5c context builder | todo | |
