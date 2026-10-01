@@ -11,8 +11,10 @@
   - **Worktree:** `.claude/worktrees/ai-story-phase-7`, branch `feat/ai-story-phase-7` from `main` 30604dd. The main
     checkout stays on `main` (bind-mounted by `rzc-backend`); deploy only at 0 jobs by fast-forward.
   - **Checkpoint commit:** 30604dd (clean tree; this artifacts commit sits on top).
-  - **Tier-1 baseline:** (pending — recorded below once both environments ran; expected ≈ local 6635 passed / 1
-    skipped, CI env 5841 / 761 as at the phase-6 close.)
+  - **Tier-1 baseline (2026-10-01, on 86f0692 = 30604dd + artifacts, `-n 4`):** local 6633 passed / 11 skipped /
+    0 failed; CI env 5839 passed / 771 skipped / 0 failed; `compileall` clean. (Phase-6 close: 6635/1 and 5841/761.
+    The difference is skips only, which depend on the host; nothing fails.) The summary line is not printed (`-q`
+    twice), so counts are taken from the progress markers.
   - **Live state:** `main` = 30604dd deployed; health 200, 0 jobs; `allow_paid` false; caps 1/3/10 (the plan moves the
     defaults to 2/6/20 in stage 2a); keys set: google, fal, cloudflare, nvidia, openrouter; `GEMINI_PAID_API_KEY` to be
     added by the human before W-mid. All 9 stories kept; none is touched by this phase (RC-M3).
