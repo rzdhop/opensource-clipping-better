@@ -25,6 +25,13 @@ ROUTES = ("auto", "local", "api")
 CONSISTENCY_MODES = ("references", "prompt_only")
 BUDGET_PROFILES = ("free", "one_dollar", "quality")
 
+# Phase 7 (DEC-221): the optional ``generation_profile.pipeline``. Absent is
+# the legacy pipeline; "v2" gates the quality-only image links per role
+# (``media_policy``) and the phase-7 behaviour built on it. Never in the
+# fresh profile below: a story is v2 only when it is created so.
+PIPELINE_V2 = "v2"
+PIPELINES = (PIPELINE_V2,)
+
 # ------------------------------------------------------------- story (spec 2.1, 6.2)
 
 EPISODE_TEMPLATE_ID = "serial_60s_v1"
@@ -53,4 +60,19 @@ def default_generation_profile() -> dict:
         "route": DEFAULT_ROUTE,
         "consistency_mode": DEFAULT_CONSISTENCY_MODE,
         "budget_profile": DEFAULT_BUDGET_PROFILE,
+    }
+
+
+def quality_generation_profile() -> dict:
+    """The profile a new story gets when the quality keys are set (phase 7,
+    the human's answer: "tier 2 + the quality preset when the keys are
+    present"): the v2 pipeline on the Quality (billed APIs) budget profile,
+    hosted links, reference images. ``StoryStore.create``'s own default
+    stays :func:`default_generation_profile`."""
+    return {
+        "tier": 2,
+        "route": "api",
+        "consistency_mode": "references",
+        "budget_profile": "quality",
+        "pipeline": PIPELINE_V2,
     }

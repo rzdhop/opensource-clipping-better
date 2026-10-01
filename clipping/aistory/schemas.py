@@ -572,6 +572,8 @@ _GENERATION_PROFILE_SCHEMA = {
         "route": {"type": "string", "enum": list(defaults.ROUTES)},
         "consistency_mode": {"type": "string", "enum": list(defaults.CONSISTENCY_MODES)},
         "budget_profile": {"type": "string", "enum": list(defaults.BUDGET_PROFILES)},
+        # Optional (phase 7, DEC-221): absent on every story created before it.
+        "pipeline": {"type": "string", "enum": list(defaults.PIPELINES)},
     },
     "required": ["tier", "route", "consistency_mode", "budget_profile"],
     "additionalProperties": False,
