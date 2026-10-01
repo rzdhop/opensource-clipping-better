@@ -3938,3 +3938,30 @@ TTS calls. Built as stage 2c after stage 4.
 **Consequence.** One funded key (fal). One-off images per story (3 characters × 3 sheets, 2 plates, 3 props) ≈ $0.56
 instead of ≈ $0.94; keyframes $0.04 each as planned. Nano-banana's 4 character + 3 style reference slots are not used;
 Seedream 4.5 takes up to 10 references (A-111).
+
+## DEC-227 — serial_60s_v2: 6–10 beat shots of 5–12 s, T1 v2 with motion and staging, every shot animated, a per-story 1080p switch (v2 stories)
+**Context.** The human (CLARIFY 3 and 5): seedance at 720p on every shot, 1080p a per-story switch; drop the shot count
+("fal can generate up to 15 s videos") to 6–10 shots of 5–12 s in the 55–75 s window; the 3–6 s hook was accepted.
+**Decision.**
+- New template `serial_60s_v2` (window 55–75, target 62, `tighten_above_s` 72 because the schema needs it below the
+  window's end; scenes and shots 6–10; body 5–11 s, count 4–7, default 6; hook 3–6 s; cliffhanger 4–10 s; recap 3–4 s;
+  `min_shot_s` 3.0; optional `shots_per_scene [1, 2]` and `max_shot_s 12`). A v2 story is created on it;
+  `episode_defaults` takes the template's `shots_per_scene`. v1 templates are untouched.
+- T1 v2 / T1rv2 (new ids; T1/T1r untouched): exactly 1 shot per scene, 2 only past 12 s; action ≤ 45 words, `motion`
+  ≤ 25 (stored as the shot's `clip_motion`, since `motion` is the Tier-1 camera dict), `staging` ≤ 4 {subject,
+  position, facing, expression}. Inputs: the place descriptor, each line's delivery, on-screen text and sfx, the props
+  with their look, the previous shot's action and staging, the beat's purpose. A close-up ask stops the rule pass
+  cascading with one shot per scene. Caps measured (DEC-138): T1v2 1040 out / 2020 in, T1rv2 520 / 2060.
+- Every shot animated (`animate: all_shots`): `spending_caps`/`plan_refusal` already refused an over-cap run before
+  any clip; the refusal now carries the numbers sentence. A shot over 12 s gets 12 s of seedance and a held last frame,
+  noted in the estimate.
+- 1080p: optional `generation_profile.video_resolution`; `media_policy.video_resolution` = story, else profile, else
+  720p; it reaches seedance through `request.extra`; priced from `fal/seedance-1-pro-fast@1080p` (0.0486/s) through
+  `pricing.price_key`; the cache key and the clip request hash add the resolution only when it is not 720p, so every
+  stored key and clip stays current and a switch re-buys.
+**Consequence.**
+- Dry check on story B made v2: 8 shots (4.5–6.5 s), 42.1 s, state "under": its lines were written for v1's shorter
+  slots, so the writer side must fill v2 body scenes (stage 5c/6a's fill pass and the hard length gate).
+- Re-pins on purpose: the template count (3), the MAX_TOKENS/SCHEMA_NAMES/INPUT_BUDGET registries, the dashboard's
+  template list and its payload-contract count.
+- Commits `e78b887` (schema) and `a2881ae`.
