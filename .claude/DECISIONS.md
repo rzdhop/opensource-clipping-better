@@ -3995,3 +3995,14 @@ goals, secrets, relationship history, voice patterns and a continuity state were
 **Consequence.** Stored stories are unchanged. A v2 character costs 3 writing calls (K1, D1, D2). Follow-ups: deleting
 an entity leaves its id in `knowledge.json` (the next write is refused until fixed: stage 5b); `drop_character` does
 not drop a ledger entry (stage 5d). Commits recorded in the action log.
+
+**DEC-228 part 2 (stage 5b, 2026-10-01).** The `knowledge` step (v2 only, after the season; ends awaiting approval):
+D4 world, D5 one timeline call per planned episode, D6 props registry (≤ 3 new props, ≤ 8 registered; new props made
+through `places.new_prop` and drawn by the next places run), a deterministic ledger seed; saved per call, resumable,
+stopped cleanly by the 30-minute step budget. Measured caps: D4 430 out / 2270 in, D5 3330 / 3930 (the plan's 420 held
+only the beats' "what"), D6 540 / 3560; D5's input leaves out the bible and world to stay under 4000 tokens.
+`approve_knowledge` requires all four sections, every planned episode and every new object registered, and records
+`approved_rev`; any write bumps `rev`, so the base reads stale. The gate is on the script step (and fast-track) only:
+storyboards, assets and renders are not gated. Deleting an entity removes its id from the base and makes it stale. The
+season's approval is the step's precondition (D6's new props lower the story status until the places run draws them).
+Dashboard: a read-and-approve Knowledge step for v2 stories; editing is stage 7.
