@@ -3977,3 +3977,21 @@ unchanged; a call can run past 300 s only when every NIM attempt times out.
 environments' runs start together (`-n 4` each) instead of one after the other, and work that does not depend on a
 test result goes on while they run. Measured on the 63-file selection: 3 min 15 s together vs 3 min 48 s in a row.
 A wait loop must never `pgrep -f` a pattern its own command line contains: wait on the PIDs or on `wait`.
+
+## DEC-228 — The story knowledge base (part 1: the document and the dossiers)
+**Context.** The human (CLARIFY 8): a full knowledge base, dashboard-approved before episode 1. E3: backstories,
+goals, secrets, relationship history, voice patterns and a continuity state were stored nowhere.
+**Decision (stage 5a).**
+- `knowledge.json` (`story_knowledge_v1`): `rev`, `approved_at`, `world` {geography, period details, visual motifs},
+  `timeline` [per episode: ≤ 8 beats {what, place, who, objects, knows_after}], `props_registry` (≤ 8),
+  `ledger_seed` {per character: location, wardrobe set, possessions, injuries, relationship notes}; an approved
+  document needs all four sections. The same per-character ledger is optional on a series-memory entry (stage 5d
+  writes it). Store helpers are atomic and check every id against the story.
+- D1 (character dossier) runs on v2 after K1 and before D2. Its caps are measured: 1290 tokens out (the French worst
+  case with 3 relationships; the plan's "≤ 420 per call" cannot hold the dossier's own caps), 3890 in. The season arc
+  is left out of D1's input (it does not exist when the cast runs, and it would push the worst case past 4000 tokens);
+  a character's place in the season comes from the stage-5b timeline.
+- A failed D1 does not hold back D2 or the sheets: it is recorded, the step ends failed, and a rerun fills it.
+**Consequence.** Stored stories are unchanged. A v2 character costs 3 writing calls (K1, D1, D2). Follow-ups: deleting
+an entity leaves its id in `knowledge.json` (the next write is refused until fixed: stage 5b); `drop_character` does
+not drop a ledger entry (stage 5d). Commits recorded in the action log.
