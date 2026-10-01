@@ -1417,11 +1417,6 @@ def character_dossier_errors(dossier, char_id, path="$.dossier") -> list:
     errors = validate(dossier, CHARACTER_DOSSIER_SCHEMA, path)
     if errors:
         return errors
-    _check_text(errors, f"{path}.backstory", dossier["backstory"], max_words=DOSSIER_BACKSTORY_MAX_WORDS)
-    for key in ("goal", "need", "fears"):
-        _check_text(errors, f"{path}.{key}", dossier[key], max_words=DOSSIER_GOAL_MAX_WORDS)
-    for i, secret in enumerate(dossier["secrets"]):
-        _check_text(errors, f"{path}.secrets[{i}]", secret, max_words=DOSSIER_SECRET_MAX_WORDS)
     seen = set()
     for i, relationship in enumerate(dossier["relationships"]):
         other = relationship["with"]
@@ -1430,6 +1425,18 @@ def character_dossier_errors(dossier, char_id, path="$.dossier") -> list:
         elif other in seen:
             errors.append(f"{path}.relationships[{i}].with: {other!r} is listed twice")
         seen.add(other)
+    _dossier_text_errors(errors, dossier, path)
+    return errors
+
+
+def _dossier_text_errors(errors, dossier, path) -> None:
+    """The dossier's word caps (the stored block's and D1's reply's)."""
+    _check_text(errors, f"{path}.backstory", dossier["backstory"], max_words=DOSSIER_BACKSTORY_MAX_WORDS)
+    for key in ("goal", "need", "fears"):
+        _check_text(errors, f"{path}.{key}", dossier[key], max_words=DOSSIER_GOAL_MAX_WORDS)
+    for i, secret in enumerate(dossier["secrets"]):
+        _check_text(errors, f"{path}.secrets[{i}]", secret, max_words=DOSSIER_SECRET_MAX_WORDS)
+    for i, relationship in enumerate(dossier["relationships"]):
         _check_text(errors, f"{path}.relationships[{i}].history", relationship["history"],
                     max_words=DOSSIER_HISTORY_MAX_WORDS)
         _check_text(errors, f"{path}.relationships[{i}].now", relationship["now"], max_words=DOSSIER_NOW_MAX_WORDS)
@@ -1439,7 +1446,6 @@ def character_dossier_errors(dossier, char_id, path="$.dossier") -> list:
     for i, phrase in enumerate(voice["catchphrases"]):
         _check_text(errors, f"{path}.voice.catchphrases[{i}]", phrase, max_words=DOSSIER_CATCHPHRASE_MAX_WORDS)
     _check_text(errors, f"{path}.arc", dossier["arc"], max_words=DOSSIER_ARC_MAX_WORDS)
-    return errors
 
 
 def place_look_errors(look, path="$.look") -> list:
@@ -1737,6 +1743,52 @@ RELATIONSHIP_DELTA_MAX_WORDS = 15
 # HOOKS_OPENED_MAX and realistic for 60 seconds of story.
 RELATIONSHIP_DELTAS_MAX = 5
 
+# The continuity ledger (phase 7, A14/A13): one character's state at a point
+# of the story -- where they are, what they wear (a wardrobe set of their
+# look), what they hold, how they are hurt, how they stand with the others.
+# The knowledge document's ``ledger_seed`` is the state before episode 1; a
+# memory entry's optional ``ledger`` the state after its episode (written by
+# the ledger step, L1). Keyed by character id; "none" is null (or an empty
+# possessions list). The ids are checked against the story where the whole
+# story is at hand (``knowledge_reference_errors``).
+LEDGER_INJURIES_MAX_WORDS = 10
+LEDGER_RELATIONSHIP_NOTES_MAX_WORDS = 20
+
+LEDGER_STATE_SCHEMA = _document({
+    "location": {"type": ["string", "null"], "pattern": PLACE_ID_PATTERN},
+    "wardrobe_set": {"type": ["string", "null"], "pattern": WARDROBE_SET_ID_PATTERN},
+    "possessions": _id_array(PROP_ID_PATTERN),
+    "injuries": {"type": ["string", "null"], "minLength": 1},
+    "relationship_notes": {"type": ["string", "null"], "minLength": 1},
+})
+
+
+def ledger_errors(ledger, path) -> list:
+    """A ledger (``{char_id: state}``) on its own: an object keyed by
+    character ids, each state ``LEDGER_STATE_SCHEMA`` with its word caps and
+    no prop held twice."""
+    if not isinstance(ledger, dict):
+        return [f"{path}: expected an object"]
+    errors = []
+    for char_id, state in ledger.items():
+        where = f"{path}.{char_id}"
+        if not (isinstance(char_id, str) and _search(CHAR_ID_PATTERN, char_id)):
+            errors.append(f"{path}: {char_id!r} is not a character id")
+            continue
+        found = validate(state, LEDGER_STATE_SCHEMA, where)
+        if found:
+            errors.extend(found)
+            continue
+        if state["injuries"] is not None:
+            _check_text(errors, f"{where}.injuries", state["injuries"], max_words=LEDGER_INJURIES_MAX_WORDS)
+        if state["relationship_notes"] is not None:
+            _check_text(errors, f"{where}.relationship_notes", state["relationship_notes"],
+                        max_words=LEDGER_RELATIONSHIP_NOTES_MAX_WORDS)
+        if len(set(state["possessions"])) != len(state["possessions"]):
+            errors.append(f"{where}.possessions: a prop is listed twice")
+    return errors
+
+
 _MEMORY_ENTRY_SCHEMA = _document({
     "recap": _NON_EMPTY_STRING,
     "hooks_opened": {"type": "array", "items": _text(HOOK_MAX_LENGTH), "maxItems": HOOKS_OPENED_MAX},
@@ -1748,6 +1800,9 @@ _MEMORY_ENTRY_SCHEMA = _document({
     "script_rev": {"type": "integer", "minimum": 1},
     "at": _NON_EMPTY_STRING,
     "approved_at": _TIMESTAMP_OR_NULL,
+}, optional={
+    # Phase 7 (a v2 story): the ledger after this episode, checked in memory_entry_errors.
+    "ledger": {"type": "object"},
 })
 
 # audience_feedback items (spec 2.6, phase 5): the pasted text (and, from
@@ -1823,6 +1878,8 @@ def memory_entry_errors(entry, path="$") -> list:
                           "('<char_a>|<char_b>', two different character ids in order)")
             continue
         _check_text(errors, f"{path}.relationship_deltas.{key}", text, max_words=RELATIONSHIP_DELTA_MAX_WORDS)
+    if "ledger" in entry:
+        errors.extend(ledger_errors(entry["ledger"], f"{path}.ledger"))
     return errors
 
 
@@ -1900,6 +1957,149 @@ def season_arc_errors(doc) -> list:
     for i, item in enumerate(doc["audience_feedback"]):
         _audience_feedback_errors(errors, f"$.audience_feedback[{i}]", item)
     _series_memory_errors(errors, doc["series_memory"])
+    return errors
+
+
+# ------------------------------------------------------ story_knowledge_v1 (phase 7, A14)
+#
+# A v2 story's knowledge base, one story-level document (``knowledge.json``)
+# written by the knowledge step before episode 1 and approved in the
+# dashboard: the world's geography, period details and visual motifs; a
+# timeline of beats per planned episode (what happens, where, who, with
+# which objects, and what each character knows afterwards); the props the
+# step registered; and every character's starting ledger. The sections are
+# optional until written (the step is resumable, one call at a time); an
+# approved document has all of them. Ids are checked against the story when
+# the document is written (``knowledge_reference_errors``,
+# ``StoryStore.write_knowledge``); stored stories have no such document.
+KNOWLEDGE_SCHEMA_NAME = "story_knowledge_v1"
+WORLD_GEOGRAPHY_MAX_WORDS = 60
+WORLD_PERIOD_DETAILS_MAX_WORDS = 30
+WORLD_VISUAL_MOTIFS_MAX = 4
+WORLD_VISUAL_MOTIF_MAX_WORDS = 12
+TIMELINE_BEATS_MAX = 8
+BEAT_WHAT_MAX_WORDS = 25
+BEAT_KNOWS_AFTER_MAX_WORDS = 15
+# D6's registry (A14): the props the knowledge step creates, at most.
+KNOWLEDGE_PROPS_MAX = 8
+KNOWLEDGE_SECTIONS = ("world", "timeline", "props_registry", "ledger_seed")
+
+_BEAT_SCHEMA = _document({
+    "what": _NON_EMPTY_STRING,
+    "place_id": {"type": ["string", "null"], "pattern": PLACE_ID_PATTERN},
+    "who": _id_array(CHAR_ID_PATTERN),
+    "objects": _id_array(PROP_ID_PATTERN),
+    # char id -> what they know after the beat, checked in knowledge_errors.
+    "knows_after": {"type": "object"},
+})
+
+KNOWLEDGE_SCHEMA = _document({
+    "$schema": {"type": "string", "const": KNOWLEDGE_SCHEMA_NAME},
+    "rev": {"type": "integer", "minimum": 1},
+    "approved_at": _TIMESTAMP_OR_NULL,
+    "updated_at": _NON_EMPTY_STRING,
+}, optional={
+    "world": _document({
+        "geography": _NON_EMPTY_STRING,
+        "period_details": _NON_EMPTY_STRING,
+        "visual_motifs": {"type": "array", "items": _NON_EMPTY_STRING, "maxItems": WORLD_VISUAL_MOTIFS_MAX},
+    }),
+    "timeline": {"type": "array", "maxItems": EPISODES_PLANNED_MAX, "items": _document({
+        "ep": {"type": "integer", "minimum": 1, "maximum": EPISODES_PLANNED_MAX},
+        "beats": {"type": "array", "items": _BEAT_SCHEMA, "minItems": 1, "maxItems": TIMELINE_BEATS_MAX},
+    })},
+    "props_registry": dict(_id_array(PROP_ID_PATTERN), maxItems=KNOWLEDGE_PROPS_MAX),
+    # char id -> LEDGER_STATE_SCHEMA, checked in knowledge_errors.
+    "ledger_seed": {"type": "object"},
+})
+
+
+def _listed_once(errors, path, ids) -> None:
+    for item in sorted({item for item in ids if ids.count(item) > 1}):
+        errors.append(f"{path}: {item!r} is listed twice")
+
+
+def knowledge_errors(doc) -> list:
+    """``validate()`` against ``KNOWLEDGE_SCHEMA``, plus what it cannot say:
+    the world's and each beat's word caps; the timeline's episodes in
+    increasing order, each once; ``knows_after`` keyed by character ids; no
+    id listed twice in a beat or the registry; the ledger seed's states
+    (``ledger_errors``); an approved document has every section. Only what
+    the document decides on its own: the ids against the story are
+    :func:`knowledge_reference_errors`."""
+    errors = validate(doc, KNOWLEDGE_SCHEMA)
+    if errors:
+        return errors
+
+    errors = []
+    world = doc.get("world")
+    if world is not None:
+        _check_text(errors, "$.world.geography", world["geography"], max_words=WORLD_GEOGRAPHY_MAX_WORDS)
+        _check_text(errors, "$.world.period_details", world["period_details"],
+                    max_words=WORLD_PERIOD_DETAILS_MAX_WORDS)
+        for i, motif in enumerate(world["visual_motifs"]):
+            _check_text(errors, f"$.world.visual_motifs[{i}]", motif, max_words=WORLD_VISUAL_MOTIF_MAX_WORDS)
+    timeline = doc.get("timeline") or []
+    episodes = [entry["ep"] for entry in timeline]
+    if episodes != sorted(set(episodes)):
+        errors.append(f"$.timeline: episodes {episodes} must be in increasing order, each once")
+    for i, entry in enumerate(timeline):
+        for j, beat in enumerate(entry["beats"]):
+            path = f"$.timeline[{i}].beats[{j}]"
+            _check_text(errors, f"{path}.what", beat["what"], max_words=BEAT_WHAT_MAX_WORDS)
+            _listed_once(errors, f"{path}.who", beat["who"])
+            _listed_once(errors, f"{path}.objects", beat["objects"])
+            for char_id, fact in beat["knows_after"].items():
+                if not _search(CHAR_ID_PATTERN, char_id):
+                    errors.append(f"{path}.knows_after: {char_id!r} is not a character id")
+                    continue
+                _check_text(errors, f"{path}.knows_after.{char_id}", fact, max_words=BEAT_KNOWS_AFTER_MAX_WORDS)
+    if "props_registry" in doc:
+        _listed_once(errors, "$.props_registry", doc["props_registry"])
+    if "ledger_seed" in doc:
+        errors.extend(ledger_errors(doc["ledger_seed"], "$.ledger_seed"))
+    if doc["approved_at"] is not None:
+        missing = [section for section in KNOWLEDGE_SECTIONS if section not in doc]
+        if missing:
+            errors.append(f"$.approved_at: the knowledge is approved with {', '.join(missing)} not written")
+    return errors
+
+
+def knowledge_reference_errors(doc, *, char_ids, place_ids, prop_ids, wardrobe_sets=None) -> list:
+    """Every id the knowledge document names is one the story has:
+    characters (*char_ids*) in each beat's ``who`` and ``knows_after`` and the
+    ledger seed's keys, places (*place_ids*) and props (*prop_ids*) where
+    they are named; with *wardrobe_sets* (``{char_id: [set ids of its
+    look]}``), a ledger's wardrobe set is one of that character's. Run on a
+    document :func:`knowledge_errors` accepts."""
+    chars, places, props = set(char_ids), set(place_ids), set(prop_ids)
+    errors = []
+
+    def check(path, value, known, what):
+        if value is not None and value not in known:
+            errors.append(f"{path}: {value!r} is no {what} of the story")
+
+    for i, entry in enumerate(doc.get("timeline") or []):
+        for j, beat in enumerate(entry["beats"]):
+            path = f"$.timeline[{i}].beats[{j}]"
+            check(f"{path}.place_id", beat["place_id"], places, "place")
+            for k, char_id in enumerate(beat["who"]):
+                check(f"{path}.who[{k}]", char_id, chars, "character")
+            for k, prop_id in enumerate(beat["objects"]):
+                check(f"{path}.objects[{k}]", prop_id, props, "prop")
+            for char_id in beat["knows_after"]:
+                check(f"{path}.knows_after.{char_id}", char_id, chars, "character")
+    for i, prop_id in enumerate(doc.get("props_registry") or []):
+        check(f"$.props_registry[{i}]", prop_id, props, "prop")
+    for char_id, state in (doc.get("ledger_seed") or {}).items():
+        path = f"$.ledger_seed.{char_id}"
+        check(path, char_id, chars, "character")
+        check(f"{path}.location", state["location"], places, "place")
+        for k, prop_id in enumerate(state["possessions"]):
+            check(f"{path}.possessions[{k}]", prop_id, props, "prop")
+        if wardrobe_sets is not None and char_id in chars:
+            check(f"{path}.wardrobe_set", state["wardrobe_set"], set(wardrobe_sets.get(char_id) or ()),
+                  f"wardrobe set of {char_id}")
     return errors
 
 
@@ -3750,6 +3950,87 @@ def r1_errors(doc) -> list:
     errors = []
     _check_text(errors, "$.descriptor", doc["descriptor"], max_words=PROP_DESCRIPTOR_MAX_WORDS)
     return errors
+
+
+# ------------------------------------------------- D1 (phase 7, the dossier)
+#
+# One character's dossier, written right after K1 on a v2 story (A14): story
+# knowledge for the writers, never sent to an image model, so names are
+# allowed and the text is in the story's language. ``relationships[].with``
+# names another cast member (mapped to its id by the cast step; an unknown
+# name, the character itself or a repeat is dropped and printed, as K1's).
+# The reply bounds its relationships (the stored block does not), so the
+# largest reply fits its cap (MAX_TOKENS["D1"]).
+D1_RELATIONSHIPS_MAX = 3
+
+
+def d1_schema(other_names) -> dict:
+    """The D1 output schema; *other_names* (the other cast members) constrain
+    ``relationships[].with`` (none: free text, the reply's list stays empty)."""
+    with_schema = {"type": "string", "enum": list(other_names)} if other_names else {"type": "string"}
+    relationship = _llm_obj({
+        "with": with_schema,
+        "history": {"type": "string", "description": "story language, their past together, at most 30 words"},
+        "now": {"type": "string", "description": "story language, where they stand now, at most 15 words"},
+    })
+    voice = _llm_obj({
+        "patterns": {"type": "string", "description": "story language, how they speak, at most 20 words"},
+        "vocabulary": {"type": "string", "description": "story language, the words they use, at most 20 words"},
+        "catchphrases": {"type": "array", "description": f"0-{DOSSIER_CATCHPHRASES_MAX}, each at most 10 words",
+                         "items": {"type": "string"}},
+    })
+    return _llm_obj({
+        "backstory": {"type": "string", "description": "story language, at most 60 words"},
+        "goal": {"type": "string", "description": "story language, what they want, at most 20 words"},
+        "need": {"type": "string", "description": "story language, what they truly need, at most 20 words"},
+        "fears": {"type": "string", "description": "story language, at most 20 words"},
+        "secrets": {"type": "array", "description": f"0-{DOSSIER_SECRETS_MAX}, each at most 20 words",
+                    "items": {"type": "string"}},
+        "relationships": {"type": "array", "description": f"0-{D1_RELATIONSHIPS_MAX} other cast members",
+                          "items": relationship},
+        "voice": voice,
+        "arc": {"type": "string", "description": "story language, how they change, at most 30 words"},
+    })
+
+
+def d1_errors(doc) -> list:
+    """Post-validation for a D1 response: the counts (secrets,
+    relationships, catchphrases) and the dossier's word caps."""
+    errors = validate(doc, d1_schema(()))
+    if errors:
+        return errors
+    errors = []
+    for key, items, cap in (("secrets", doc["secrets"], DOSSIER_SECRETS_MAX),
+                            ("relationships", doc["relationships"], D1_RELATIONSHIPS_MAX),
+                            ("voice.catchphrases", doc["voice"]["catchphrases"], DOSSIER_CATCHPHRASES_MAX)):
+        if len(items) > cap:
+            errors.append(f"$.{key}: {len(items)} item(s), expected at most {cap}")
+    _dossier_text_errors(errors, doc, "$")
+    return errors
+
+
+def d1_dossier(doc, ids_by_name) -> tuple:
+    """D1's reply as the stored ``dossier`` block, and the relationship names
+    dropped: *ids_by_name* maps a name to the other character's id (None:
+    no such character, or the character itself); a name already used is
+    dropped too."""
+    relationships, dropped, seen = [], [], set()
+    for item in doc["relationships"]:
+        char_id = ids_by_name(item["with"])
+        if char_id is None or char_id in seen:
+            dropped.append(item["with"])
+            continue
+        seen.add(char_id)
+        relationships.append({"with": char_id, "history": item["history"], "now": item["now"]})
+    voice = doc["voice"]
+    dossier = {
+        "backstory": doc["backstory"], "goal": doc["goal"], "need": doc["need"], "fears": doc["fears"],
+        "secrets": list(doc["secrets"]), "relationships": relationships,
+        "voice": {"patterns": voice["patterns"], "vocabulary": voice["vocabulary"],
+                  "catchphrases": list(voice["catchphrases"])},
+        "arc": doc["arc"],
+    }
+    return dossier, dropped
 
 
 # ------------------------------------------------- D2 / D3 / R1v2 (phase 7, the look)

@@ -117,12 +117,15 @@ ACTIVITY_LOG = "activity.log"
 
 SEASON_DOC = "season.json"
 PLACES_PROPOSAL_DOC = "places_proposal.json"
+# Phase 7 (A14): a v2 story's knowledge base (``schemas.KNOWLEDGE_SCHEMA``),
+# written by the knowledge step; absent on every other story.
+KNOWLEDGE_DOC = "knowledge.json"
 
 # The JSON documents of a story that read_doc/write_doc may name. Nothing else:
 # a name is never joined onto a path unless it is one of these.
 DOC_NAMES = (
     STORY_FILENAME, "style_lock.json", "concepts.json", "style_preview.json",
-    SEASON_DOC, PLACES_PROPOSAL_DOC,
+    SEASON_DOC, PLACES_PROPOSAL_DOC, KNOWLEDGE_DOC,
 )
 
 # The documents the store validates itself, on every read and every write
@@ -130,6 +133,7 @@ DOC_NAMES = (
 DOC_VALIDATORS = {
     SEASON_DOC: schemas.season_arc_errors,
     PLACES_PROPOSAL_DOC: schemas.places_proposal_errors,
+    KNOWLEDGE_DOC: schemas.knowledge_errors,
 }
 
 # The preview strip's folder, one level at a time, and the files in it.
@@ -877,6 +881,42 @@ class StoryStore:
             if new is None:
                 return current
             return self.write_doc(story_id, name, new, now=now, validator=validator)
+
+    # ------------------------------------------------- the knowledge base
+
+    def read_knowledge(self, story_id):
+        """The story's ``knowledge.json``, or None (a story without a
+        knowledge base: every stored story). ``SchemaError`` as ``read_doc``."""
+        return self.read_doc(story_id, KNOWLEDGE_DOC)
+
+    def _knowledge_references(self, story_id):
+        """The validator a knowledge write runs on top of the document's own:
+        every id it names is one of the story's entities, each ledger's
+        wardrobe set one of that character's look (none without a look)."""
+        characters = self.list_entities(story_id, "characters")
+        refs = {
+            "char_ids": [doc["char_id"] for doc in characters],
+            "place_ids": [doc["place_id"] for doc in self.list_entities(story_id, "places")],
+            "prop_ids": [doc["prop_id"] for doc in self.list_entities(story_id, "props")],
+            "wardrobe_sets": {doc["char_id"]: [item["id"] for item in (doc.get("look") or {}).get("wardrobe_sets", ())]
+                              for doc in characters},
+        }
+        return lambda doc: schemas.knowledge_reference_errors(doc, **refs)
+
+    def write_knowledge(self, story_id, doc, *, now) -> dict:
+        """Write ``knowledge.json`` (atomically, as :meth:`write_doc`): its own
+        checks (``schemas.knowledge_errors``) and every id against the story's
+        entities; either refused raises ``SchemaError`` and writes nothing."""
+        with self._lock:
+            return self.write_doc(story_id, KNOWLEDGE_DOC, doc, now=now,
+                                  validator=self._knowledge_references(story_id))
+
+    def update_knowledge(self, story_id, mutate, *, now):
+        """:meth:`update_doc` for ``knowledge.json`` (re-read, then write under
+        the story lock), checked as :meth:`write_knowledge`."""
+        with self._lock:
+            return self.update_doc(story_id, KNOWLEDGE_DOC, mutate, now=now,
+                                   validator=self._knowledge_references(story_id))
 
     def update_episode_doc(self, story_id, ep, name, mutate, *, now, validator=None):
         """:meth:`update_doc` for an episode document (``read_episode_doc`` /
