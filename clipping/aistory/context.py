@@ -10,7 +10,9 @@ survive"), and nothing is ever shortened silently: a cut section is *named* in
 
 Stdlib only (DEC-012); the one cross-package import is
 ``clipping.providers.pacing.estimate_tokens``, which is itself stdlib-only
-(the ``providers`` package imports no SDK at module scope).
+(the ``providers`` package imports no SDK at module scope). The phase-7
+slices (stage 5c, at the end) read ``shots`` and ``series_memory`` of this
+package, imported where used: neither imports this module.
 """
 
 from __future__ import annotations
@@ -399,3 +401,402 @@ def outline_section(scenes, names) -> str:
         suffix = f" — {who}" if who else ""
         lines.append(f"- {scene['scene_id']} ({scene['function']}): {scene['summary']}{suffix}")
     return "\n".join(lines)
+
+
+# ============================================================ phase 7 stage 5c (A13)
+#
+# The context slices a v2 story's writing calls read (E1v2/E2v2/E3v2, T1 v2):
+# what the approved knowledge base (``knowledge.json``), the dossiers, the
+# looks and the continuity ledger say about the scene being written -- only
+# the entities present, never the whole story. Each part is word-capped (a
+# cut part ends on "…", never dropped without a trace), so a slice is bounded
+# by construction and its prompt's ``INPUT_BUDGET`` row is measured on it
+# (DEC-138). Pure: the caller reads the documents (the knowledge base may be
+# None -- a regenerate of a story whose base is gone still gets the dossiers).
+
+SLICE_BEAT_WORDS = 35
+SLICE_CAST_WORDS = 120
+SLICE_CHARACTER_WORDS = 45
+SLICE_RELATIONSHIPS_WORDS = 50
+SLICE_KNOWS_WORDS = 50
+SLICE_STATE_WORDS = 40
+SLICE_PLACE_WORDS = 50
+# What one character is said to know, at most: the latest facts first.
+SLICE_KNOWS_PER_CHARACTER = 2
+_SLICE_RECAP_WORDS = 25
+_SLICE_HEADER = "Scene context (from the story's knowledge base):"
+# The scene slice's words at most: its parts' caps and its header.
+SCENE_SLICE_MAX_WORDS = (len(_SLICE_HEADER.split()) + SLICE_BEAT_WORDS + SLICE_CAST_WORDS
+                         + SLICE_RELATIONSHIPS_WORDS + SLICE_KNOWS_WORDS + SLICE_STATE_WORDS + SLICE_PLACE_WORDS)
+
+# E1v2's episode slice: the episode's planned beats, who wants what, and
+# where things stand before it (the memory block already says what is known).
+SLICE_EPISODE_BEATS_WORDS = 240
+_EPISODE_HEADER = "Episode plan (from the story's knowledge base):"
+EPISODE_SLICE_MAX_WORDS = (len(_EPISODE_HEADER.split()) + SLICE_EPISODE_BEATS_WORDS + SLICE_CAST_WORDS
+                           + SLICE_STATE_WORDS)
+
+# The words a secret must share with the beat to be "relevant to it": a word
+# of at least this many letters (short function words never match).
+_SECRET_WORD_MIN = 5
+# A line cut to fit its part keeps at least this many words, else it is left
+# out whole (a lone "- Name:…" says nothing).
+_CUT_LINE_MIN_WORDS = 4
+_WORD = re.compile(r"\w+", re.UNICODE)
+
+
+def _trim_lines(lines, limit):
+    """*lines* kept whole while their words fit *limit*; the first that does
+    not is cut (:func:`trim_words`, ending on "…") and the rest dropped.
+    Returns the kept lines (a line of a part is one fact: cutting one in the
+    middle is marked, never silent)."""
+    kept, left = [], limit
+    for line in lines:
+        words = len(line.split())
+        if words <= left:
+            kept.append(line)
+            left -= words
+            continue
+        if left >= _CUT_LINE_MIN_WORDS:
+            kept.append(trim_words(line, left)[0])
+        break
+    return kept
+
+
+def timeline_beats(knowledge, ep) -> list:
+    """The beats the knowledge base's timeline plans for episode *ep* ([]
+    without one)."""
+    for entry in (knowledge or {}).get("timeline") or ():
+        if entry.get("ep") == ep:
+            return list(entry.get("beats") or ())
+    return []
+
+
+def ledger_before(knowledge, season, ep):
+    """``{char_id: state}``: where every character stands when episode *ep*
+    starts -- per character, the ledger of the latest series-memory entry
+    before *ep* that has one for it (written after each episode, stage 5d),
+    else the knowledge base's ``ledger_seed``. None when there is no
+    knowledge base (a legacy story: no ledger at all)."""
+    if knowledge is None:
+        return None
+    ledger = {cid: dict(state) for cid, state in (knowledge.get("ledger_seed") or {}).items()}
+    entries = ((season or {}).get("series_memory") or {}).get("entries") or {}
+    for key in sorted(entries):
+        if not (isinstance(key, str) and re.fullmatch(r"ep[0-9]{2}", key)) or int(key[2:]) >= ep:
+            continue
+        for cid, state in (entries[key].get("ledger") or {}).items():
+            ledger[cid] = dict(state)
+    return ledger
+
+
+def _content_words(text) -> set:
+    return {word for word in _WORD.findall((text or "").lower()) if len(word) >= _SECRET_WORD_MIN}
+
+
+def beat_for_scene(beats, scene):
+    """``(index, beat)`` of the planned beat *scene* stages, or None: the beat
+    sharing the most with it -- its place (2), each character (1), each
+    object (1) -- the earliest on a tie; a beat sharing nothing never maps."""
+    best, best_score = None, 0
+    chars, props = set(scene.get("characters") or ()), set(scene.get("props") or ())
+    for index, beat in enumerate(beats):
+        score = (2 if beat.get("place_id") and beat.get("place_id") == scene.get("place_id") else 0)
+        score += len(chars & set(beat.get("who") or ())) + len(props & set(beat.get("objects") or ()))
+        if score > best_score:
+            best, best_score = (index, beat), score
+    return best
+
+
+def known_facts(knowledge, ep, before_beat, char_ids) -> dict:
+    """``{char_id: [fact, ...]}``: what each of *char_ids* knows when beat
+    *before_beat* (an index, or None: the episode's start) of episode *ep*
+    begins -- every ``knows_after`` of the beats of the episodes before,
+    then of this episode's beats before that one, oldest first."""
+    wanted = set(char_ids)
+    facts = {cid: [] for cid in char_ids}
+    for entry in sorted((knowledge or {}).get("timeline") or (), key=lambda item: item.get("ep", 0)):
+        if entry.get("ep", 0) > ep:
+            break
+        beats = entry.get("beats") or ()
+        if entry.get("ep") == ep:
+            beats = beats[:before_beat] if before_beat is not None else ()
+        for beat in beats:
+            for cid, fact in (beat.get("knows_after") or {}).items():
+                if cid in wanted:
+                    facts[cid].append(fact)
+    return facts
+
+
+def _relevant_secret(secrets, texts):
+    """The secret of *secrets* sharing the most content words with *texts*
+    (the beat, the scene), or None when none shares one."""
+    words = set().union(*(_content_words(text) for text in texts)) if texts else set()
+    best, best_overlap = None, 0
+    for secret in secrets or ():
+        overlap = len(_content_words(secret) & words)
+        if overlap > best_overlap:
+            best, best_overlap = secret, overlap
+    return best
+
+
+def _names_of(ec, kind, ids) -> list:
+    docs = ec.entities.get(kind, {})
+    return [docs[eid]["name"] for eid in ids if eid in docs]
+
+
+def _wardrobe_context(doc, set_id, *, items=True):
+    """The wardrobe set *set_id* of a character's look said in words (its
+    context, then its items unless *items* is False), or ''."""
+    for entry in ((doc.get("look") or {}).get("wardrobe_sets") or ()):
+        if entry.get("id") == set_id:
+            context_text = entry["context"].strip().rstrip(".")
+            return f"{context_text}: {entry['items'].strip().rstrip('.')}" if items else context_text
+    return ""
+
+
+def _state_line(ec, cid, state) -> str:
+    doc = ec.entities["characters"][cid]
+    parts = []
+    location = state.get("location")
+    if location and location in ec.entities.get("places", {}):
+        parts.append(f"at {ec.entities['places'][location]['name']}")
+    wearing = _wardrobe_context(doc, state.get("wardrobe_set"), items=False)
+    if wearing:
+        parts.append(f"dressed for {wearing}")
+    held = _names_of(ec, "props", state.get("possessions") or ())
+    if held:
+        parts.append("holding " + ", ".join(held))
+    if state.get("injuries"):
+        parts.append(f"hurt: {state['injuries']}")
+    return f"- {doc['name']}: {'; '.join(parts)}" if parts else ""
+
+
+def _state_lines(ec, char_ids, ledger) -> list:
+    if not ledger:
+        return []
+    lines = [_state_line(ec, cid, ledger[cid]) for cid in char_ids if cid in ledger]
+    return [line for line in lines if line]
+
+
+def _profile_line(doc, share, texts) -> str:
+    """One character as a scene reads them: goal, the secret relevant to the
+    beat (if any; *texts* None: never one), need, catchphrases -- at most
+    *share* words, cut from the end."""
+    dossier = doc.get("dossier")
+    if not dossier:
+        return ""
+    parts = [f"goal: {dossier['goal']}"]
+    secret = _relevant_secret(dossier.get("secrets"), texts) if texts is not None else None
+    if secret:
+        parts.append(f"hides: {secret}")
+    parts.append(f"needs: {dossier['need']}")
+    phrases = (dossier.get("voice") or {}).get("catchphrases") or ()
+    if phrases:
+        parts.append("says: " + " / ".join(f"“{phrase}”" for phrase in phrases))
+    return trim_words(f"- {doc['name']}: " + "; ".join(parts), share)[0]
+
+
+def _cast_lines(ec, char_ids, texts) -> list:
+    characters = ec.entities["characters"]
+    present = [characters[cid] for cid in char_ids if cid in characters and characters[cid].get("dossier")]
+    if not present:
+        return []
+    share = min(SLICE_CHARACTER_WORDS, max(1, SLICE_CAST_WORDS // len(present)))
+    return [line for line in (_profile_line(doc, share, texts) for doc in present) if line]
+
+
+def _relationship_lines(ec, char_ids) -> list:
+    """The relationship history among *char_ids*, from their dossiers (each
+    pair once, the first one's side), with where it stands now from the
+    series memory when it says so."""
+    from . import series_memory  # the fold; a lazy import keeps this module's load light
+
+    characters = ec.entities["characters"]
+    present = [cid for cid in char_ids if cid in characters]
+    try:
+        state = series_memory.relationship_state_before(ec.season, ec.ep) if ec.ep and ec.ep >= 2 else {}
+    except ValueError:
+        state = {}
+    lines, seen = [], set()
+    for cid in present:
+        for item in ((characters[cid].get("dossier") or {}).get("relationships") or ()):
+            other = item.get("with")
+            if other not in present or other == cid:
+                continue
+            pair = tuple(sorted((cid, other)))
+            if pair in seen:
+                continue
+            seen.add(pair)
+            now = state.get(f"{pair[0]}|{pair[1]}") or item["now"]
+            lines.append(f"- {characters[cid]['name']} & {characters[other]['name']}: {item['history']}; now: {now}")
+    return lines
+
+
+def _knows_lines(ec, char_ids, facts) -> list:
+    lines = []
+    recap = previous_recap(ec.season, ec.ep) if ec.ep else None
+    if recap:
+        lines.append("- Last episode: " + trim_words(recap, _SLICE_RECAP_WORDS)[0])
+    characters = ec.entities["characters"]
+    for cid in char_ids:
+        known = (facts.get(cid) or [])[-SLICE_KNOWS_PER_CHARACTER:]
+        if known and cid in characters:
+            lines.append(f"- {characters[cid]['name']} knows: " + "; ".join(known))
+    return lines
+
+
+def _place_text(ec, scene) -> str:
+    """The scene's place as a wide framing reads it (its layout and the
+    variant's light, ``shots.render_place``), or its descriptor and layout
+    notes without a look."""
+    from . import shots  # the renderers; shots imports nothing of this module
+
+    place = ec.entities.get("places", {}).get(scene.get("place_id"))
+    if place is None:
+        return ""
+    variant = scene["time_variant"]
+    if place.get("look") and place.get("descriptor"):
+        props = ec.entities.get("props", {})
+        here = [props[pid] for pid in place["look"].get("props_here") or () if pid in props]
+        # The light, then the layout, the scale and the set dressing; the
+        # descriptor (what the set image shows) is left to the image calls.
+        text = shots.render_place(place, variant, "wide_establishing", props=here)
+        sentences = shots._PLACE_SENTENCE_START.split(text)
+        light = [sentence for sentence in sentences if sentence.startswith("Light:")]
+        rest = [sentence for sentence in sentences if sentence.startswith(("Layout:", "Scale:", "Set dressing:"))]
+        return " ".join(light + rest)
+    parts = [(place.get("descriptor") or "").strip().rstrip("."), (place.get("layout_notes") or "").strip().rstrip("."),
+             f"Light: {variant.replace('_', ' ')} light"]
+    return ". ".join(part for part in parts if part) + "."
+
+
+def _part(label, lines, limit) -> list:
+    """A labelled part (its label counted in *limit*), or [] when empty."""
+    lines = [line for line in lines if line]
+    if not lines:
+        return []
+    return _trim_lines([label] + lines, limit)
+
+
+def slice_for_scene(ec, scene, *, knowledge) -> str:
+    """The context block of one scene (A13) for E2v2/E3v2: only the
+    characters present (``scene["characters"]``), each part word-capped --
+
+    - the beat's purpose: "ep N, beat k of m: <what>" when the scene maps to
+      a beat of the knowledge timeline (:func:`beat_for_scene`), else the
+      scene's own function and summary;
+    - who is here: each one's goal, need, the secret relevant to this beat
+      (one sharing words with it, :func:`_relevant_secret`; none otherwise)
+      and catchphrases, from the dossier;
+    - the relationship history among those present (dossiers; where it
+      stands now from the series memory when recorded);
+    - what each knows so far: the previous episode's recap, and the
+      timeline's ``knows_after`` up to this episode's previous beats
+      (:func:`known_facts`);
+    - where things stand: the ledger (:func:`ledger_before`): location,
+      wardrobe set, possessions, injuries;
+    - the place's layout and light (``shots.render_place``).
+
+    *ec* is the episode's ``EpisodeContext`` (its ``entities``, ``ep`` and
+    ``season``); *knowledge* the story's ``knowledge.json`` or None. At most
+    :data:`SCENE_SLICE_MAX_WORDS` words; '' when nothing is known."""
+    beats = timeline_beats(knowledge, ec.ep)
+    mapped = beat_for_scene(beats, scene)
+    if mapped is not None:
+        index, beat = mapped
+        purpose = f"ep {ec.ep}, beat {index + 1} of {len(beats)}: {beat['what']}"
+        texts = [beat["what"], scene.get("summary") or ""] + list((beat.get("knows_after") or {}).values())
+    else:
+        index = None
+        purpose = f"ep {ec.ep}, {scene['function']}: {scene.get('summary') or ''}"
+        texts = [scene.get("summary") or ""]
+    present = [cid for cid in dict.fromkeys(scene.get("characters") or ()) if cid in ec.entities["characters"]]
+    facts = known_facts(knowledge, ec.ep, index, present)
+    parts = [_trim_lines([f"Beat: {purpose}"], SLICE_BEAT_WORDS)]
+    parts.append(_part("Who is here:", _cast_lines(ec, present, texts), SLICE_CAST_WORDS))
+    parts.append(_part("Between them:", _relationship_lines(ec, present), SLICE_RELATIONSHIPS_WORDS))
+    parts.append(_part("Known so far:", _knows_lines(ec, present, facts), SLICE_KNOWS_WORDS))
+    parts.append(_part("Where things stand:",
+                       _state_lines(ec, present, ledger_before(knowledge, ec.season, ec.ep)), SLICE_STATE_WORDS))
+    place = _place_text(ec, scene)
+    if place:
+        parts.append([trim_words(f"Place: {place}", SLICE_PLACE_WORDS)[0]])
+    lines = [line for part in parts for line in part]
+    return "\n".join([_SLICE_HEADER] + lines)
+
+
+def _beat_line(ec, n, beat) -> str:
+    where = _names_of(ec, "places", [beat["place_id"]] if beat.get("place_id") else [])
+    who = _names_of(ec, "characters", beat.get("who") or ())
+    objects = _names_of(ec, "props", beat.get("objects") or ())
+    details = []
+    if where:
+        details.append(f"at {where[0]}")
+    if who:
+        details.append(", ".join(who))
+    if objects:
+        details.append("objects: " + ", ".join(objects))
+    return f"{n}. {beat['what']}" + (f" ({'; '.join(details)})" if details else "")
+
+
+def slice_for_episode(ec, *, knowledge, char_ids) -> str:
+    """E1v2's context block (A13): the episode's planned beats from the
+    knowledge timeline, in order (where, who, which objects); who wants what
+    (goal and need from the dossiers of *char_ids*, the characters E1 may
+    use); where each stands before the episode (:func:`ledger_before`). The
+    series memory is E1's own block already. At most
+    :data:`EPISODE_SLICE_MAX_WORDS` words; '' when nothing is known."""
+    beats = timeline_beats(knowledge, ec.ep)
+    in_beats = [cid for beat in beats for cid in beat.get("who") or ()]
+    cast = [cid for cid in dict.fromkeys(in_beats + list(char_ids)) if cid in char_ids]
+    parts = [_part(f"Planned beats of episode {ec.ep}, in order:",
+                   [_beat_line(ec, n, beat) for n, beat in enumerate(beats, start=1)], SLICE_EPISODE_BEATS_WORDS)]
+    parts.append(_part("Who wants what:", _cast_lines(ec, cast, None), SLICE_CAST_WORDS))
+    parts.append(_part("Where things stand before this episode:",
+                       _state_lines(ec, cast, ledger_before(knowledge, ec.season, ec.ep)), SLICE_STATE_WORDS))
+    lines = [line for part in parts for line in part]
+    if not lines:
+        return ""
+    return "\n".join([_EPISODE_HEADER] + lines)
+
+
+def _tag_names(subjects, kind) -> list:
+    prefix = {"characters": "@", "props": "%"}[kind]
+    return [tag[1:].split(":", 1)[0] for tag in subjects if tag.startswith(prefix)]
+
+
+def slice_for_shot(ec, scene, plan, previous_shot, *, ledger) -> str:
+    """What a shot-planning call (T1 v2) needs beyond what its own prompt
+    already shows (the descriptors, the place, the lines with their
+    delivery, the previous shots: ``prompts.build_t1_v2``): the ledger's
+    facts for the subjects -- each character's current wardrobe set (by its
+    tag) and who holds each prop (only a holder present in the scene). The
+    subjects are *plan*'s (``subjects``, a re-plan) or, with *plan* None, the
+    scene's characters and props. *previous_shot* (``{action, staging}``),
+    when given, adds its action and staging for a caller whose prompt does
+    not show it already. '' when the ledger says nothing about them."""
+    if plan is not None:
+        char_ids = _tag_names(plan.get("subjects") or (), "characters")
+        prop_ids = _tag_names(plan.get("subjects") or (), "props")
+    else:
+        char_ids, prop_ids = list(scene.get("characters") or ()), list(scene.get("props") or ())
+    characters = ec.entities.get("characters", {})
+    present = set(scene.get("characters") or ())
+    lines = []
+    for cid in dict.fromkeys(char_ids):
+        state = (ledger or {}).get(cid)
+        wearing = _wardrobe_context(characters[cid], state.get("wardrobe_set")) if state and cid in characters else ""
+        if wearing:
+            lines.append(f"- @{cid} wears {trim_words(wearing, 16)[0]}")
+    for pid in dict.fromkeys(prop_ids):
+        holder = next((cid for cid, state in (ledger or {}).items()
+                       if cid in present and pid in (state.get("possessions") or ())), None)
+        if holder:
+            lines.append(f"- %{pid} is held by @{holder}")
+    if previous_shot and previous_shot.get("action"):
+        staging = "; ".join(f"{entry['subject']} {entry['position']}" for entry in previous_shot.get("staging") or ())
+        lines.append(f"- Previous shot: {previous_shot['action']}" + (f" Staging: {staging}" if staging else ""))
+    if not lines:
+        return ""
+    return "\n".join(["Continuity now (keep it):"] + lines)

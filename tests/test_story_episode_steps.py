@@ -295,6 +295,9 @@ class Clock:
         return self.now
 
 
+_V2_TWINS = {"E1v2": "E1", "E2v2": "E2", "E3v2": "E3"}
+
+
 class FakeLLM:
     """Stands in for ``llm.run_chain``: answers each prompt id from its own
     queue (or, with ``default``, a builder for every call of that id),
@@ -316,11 +319,17 @@ class FakeLLM:
         self.calls.append(call)
         if self.clock is not None:
             self.clock.now += self.advance
-        queue = self.queues.get(prompt) or []
+        # Phase 7 stage 5c (DEC-228), re-pinned on purpose: a v2 story's script calls E1v2/E2v2/E3v2 (own ids,
+        # own schema names); with nothing queued under that id, they answer from their v1 twin's queue -- the
+        # replies have the same shape -- so a fixture written for either pipeline serves both.
+        source = prompt
+        if not self.queues.get(prompt) and prompt not in self.default and prompt in _V2_TWINS:
+            source = _V2_TWINS[prompt]
+        queue = self.queues.get(source) or []
         if queue:
             reply = queue.pop(0)
-        elif prompt in self.default:
-            reply = self.default[prompt]
+        elif source in self.default:
+            reply = self.default[source]
         else:
             raise AssertionError(f"no {prompt} reply queued (call {len(self.calls)})")
         if callable(reply) and not isinstance(reply, BaseException):

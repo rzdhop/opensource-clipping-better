@@ -284,6 +284,10 @@ def test_max_tokens():
         # one episode's timeline, the props registry), each measured on its French worst case
         # (tests/test_story_episode_prompt_budgets.py).
         "D4": 430, "D5": 3330, "D6": 540,
+        # Phase 7 stage 5c (DEC-228): re-pinned on purpose -- a v2 story's writing calls, new ids (v1 rows
+        # unchanged): E2v2/E3v2 reply as E2/E3; E1v2 adds up to 2 new objects, measured on its French worst
+        # case (tests/test_story_prompts_episode.py).
+        "E1v2": 1750, "E2v2": 600, "E3v2": 720,
     }
 
 
@@ -319,6 +323,8 @@ def test_schema_names():
         "D1": "character_dossier",
         # Phase 7 stage 5b (DEC-228): re-pinned on purpose -- the knowledge step's writers.
         "D4": "knowledge_world", "D5": "knowledge_timeline", "D6": "knowledge_props",
+        # Phase 7 stage 5c (DEC-228): re-pinned on purpose -- a v2 story's writing calls, new ids.
+        "E1v2": "episode_beat_sheet_v2", "E2v2": "episode_scene_dialogue_v2", "E3v2": "episode_framing_scenes_v2",
     }
 
 

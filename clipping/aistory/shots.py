@@ -693,7 +693,13 @@ def _plain_look(doc, max_words) -> str:
     return prompting.fit_words(text, max_words) or " ".join(text.split()[:max_words])
 
 
-def _holder(prop_doc, frame_ids, char_handles) -> str:
+def _holder(prop_doc, frame_ids, char_handles, ledger=None) -> str:
+    """Who in the frame holds the prop: the ledger's (phase 7 stage 5c: a
+    character whose ``possessions`` list it) when it says, else the prop
+    look's ``where_when``; '' when no one in the frame does."""
+    for cid, state in (ledger or {}).items():
+        if cid in frame_ids and prop_doc.get("prop_id") in (state.get("possessions") or ()):
+            return char_handles[cid]
     for entry in (prop_doc.get("look") or {}).get("where_when") or ():
         holder = entry.get("holder_char_id")
         if holder in frame_ids:
@@ -714,7 +720,8 @@ def _staged(entry, resolve) -> str:
     return f" ({', '.join(parts)})" if parts else ""
 
 
-def _staging(frame, frame_props, *, char_handles, look_words, staging=(), resolve=lambda text: text) -> str:
+def _staging(frame, frame_props, *, char_handles, look_words, staging=(), resolve=lambda text: text,
+             ledger=None) -> str:
     """Each character of the frame by its handle, where it stands (left,
     right, centre in subject order) and its look -- its height said against
     the others in the frame --, two facing each other; then each prop of
@@ -724,7 +731,12 @@ def _staging(frame, frame_props, *, char_handles, look_words, staging=(), resolv
     facing, expression}``) places each subject it names where it says, with
     its expression and facing; a subject it does not name keeps the default
     place, and two characters are said to face each other only when nothing
-    is staged. *resolve* turns the tags of those texts into handles."""
+    is staged. *resolve* turns the tags of those texts into handles.
+
+    *ledger* (phase 7 stage 5c: ``{char_id: state}`` when the episode
+    starts, ``context.ledger_before``) dresses each character in its
+    current wardrobe set and says who holds each prop; None: the look's
+    first set, the prop's ``where_when``, as before."""
     sentences = []
     n = len(frame)
     positions = _POSITIONS.get(n) or tuple(f"Position {i} from the left" for i in range(1, n + 1))
@@ -732,7 +744,8 @@ def _staging(frame, frame_props, *, char_handles, look_words, staging=(), resolv
     docs = [doc for _cid, doc in frame]
     for (cid, doc), where in zip(frame, positions):
         others = [other for other in docs if other is not doc]
-        look = (render_look(doc, others=others, max_words=look_words) if doc.get("look")
+        wardrobe_set = ((ledger or {}).get(cid) or {}).get("wardrobe_set")
+        look = (render_look(doc, wardrobe_set=wardrobe_set, others=others, max_words=look_words) if doc.get("look")
                 else _plain_look(doc, look_words))
         entry = staged.get(f"@{cid}")
         if entry is not None:
@@ -744,7 +757,7 @@ def _staging(frame, frame_props, *, char_handles, look_words, staging=(), resolv
         sentences.append("They face each other.")
     frame_ids = {cid for cid, _doc in frame}
     for pid, doc in frame_props:
-        held = _holder(doc, frame_ids, char_handles)
+        held = _holder(doc, frame_ids, char_handles, ledger)
         text = render_prop(doc)
         entry = staged.get(f"%{pid}")
         if entry is not None and entry.get("position") in _STAGED_POSITIONS:
@@ -798,7 +811,7 @@ def _fit_place(text, max_words) -> str:
 
 
 def _layered(plan, *, scene, entities, style_lock, consistency_mode, video_action, char_handles,
-             prop_handles, name_map) -> dict:
+             prop_handles, name_map, ledger=None) -> dict:
     """The v2 half of :func:`resolve_shot`: ``image_prompt`` (layered,
     within ``KEYFRAME_V2_MAX_WORDS`` -- the looks, the place and the
     rendering shortened in turn until it fits), ``video_prompt``,
@@ -837,7 +850,7 @@ def _layered(plan, *, scene, entities, style_lock, consistency_mode, video_actio
     for look_words, place_words, rendering_words in _LAYERED_BUDGETS:
         staging = names_mod.without_names(
             _staging(frame, frame_props, char_handles=char_handles, look_words=look_words, staging=staged,
-                     resolve=resolve), name_map)
+                     resolve=resolve, ledger=ledger), name_map)
         place_text = place_full if place_words is None else _fit_place(place_full, place_words)
         image_prompt = prompting.layered_shot_prompt(
             style_lock, roles_text=roles, beat=beat, staging=staging, composition=composition,
@@ -872,7 +885,7 @@ def _layered(plan, *, scene, entities, style_lock, consistency_mode, video_actio
     }
 
 
-def resolve_shot(shot, *, scene, entities, style_lock, consistency_mode, v2=False) -> dict:
+def resolve_shot(shot, *, scene, entities, style_lock, consistency_mode, v2=False, ledger=None) -> dict:
     """*shot* (a plan: ``framing``/``action``/``subjects``) resolved into
     ``{"image_prompt", "video_action", "negative_prompt", "reference_images",
     "consistency"}``. Every entity name is stripped from the resolved action
@@ -892,7 +905,11 @@ def resolve_shot(shot, *, scene, entities, style_lock, consistency_mode, v2=Fals
     (``"layered_v1"``). The plan may then carry ``lines`` (numbers or line
     ids), ``camera_motion``, ``modifiers``, ``clip_motion`` and ``staging``
     (T1 v2's, phase 7 stage 4). Off, the result
-    is exactly the legacy one (RC-Q1)."""
+    is exactly the legacy one (RC-Q1).
+
+    *ledger* (v2 only, phase 7 stage 5c: ``context.ledger_before`` of the
+    episode, None without a knowledge base): each character is drawn in its
+    current wardrobe set and each prop held by whoever holds it now."""
     characters = entities.get("characters", {})
     places = entities.get("places", {})
     props = entities.get("props", {})
@@ -914,7 +931,7 @@ def resolve_shot(shot, *, scene, entities, style_lock, consistency_mode, v2=Fals
         layered = _layered(shot, scene=scene, entities=entities, style_lock=style_lock,
                            consistency_mode=consistency_mode, video_action=video_action,
                            char_handles=char_handles_map, prop_handles=prop_handles_map,
-                           name_map=_story_name_map(entities))
+                           name_map=_story_name_map(entities), ledger=ledger)
         return {
             "image_prompt": layered["image_prompt"],
             "video_action": video_action,
@@ -1468,7 +1485,7 @@ def _keep_t1_v2(target, source) -> None:
 
 
 def build_storyboard(script, plans, sources, *, entities, style_lock, template, language, consistency_mode,
-                     now, previous=None, v2=False, shots_per_scene=None) -> tuple:
+                     now, previous=None, v2=False, shots_per_scene=None, ledger=None) -> tuple:
     """*plans* (``{scene_id: [plan, ...]}``) and *sources* (``{scene_id:
     "t1"|"fast"}``) resolved into a complete ``storyboard_v1`` document:
     scenes in the script's own order (only the ones *plans* covers), the
@@ -1486,6 +1503,7 @@ def build_storyboard(script, plans, sources, *, entities, style_lock, template, 
     (``EpisodeContext.episode_defaults``: the template's over the style's,
     phase 7 stage 4); None reads the style lock's own, as before. A plan's
     ``clip_motion`` and ``staging`` (T1 v2's) are kept on its shot.
+    *ledger*: :func:`resolve_shot`'s (v2: wardrobe sets and holders).
     """
     scenes_by_id = {scene["scene_id"]: scene for scene in script["scenes"]}
     scenes_in_order = [scene for scene in script["scenes"] if scene["scene_id"] in plans]
@@ -1503,7 +1521,7 @@ def build_storyboard(script, plans, sources, *, entities, style_lock, template, 
             line_ids = [scene["lines"][n - 1]["line_id"] for n in plan["lines"]]
             motion = motion_for(plan["framing"], plan["camera_motion"], scene["function"], style_lock)
             resolved = resolve_shot(plan, scene=scene, entities=entities, style_lock=style_lock,
-                                    consistency_mode=consistency_mode, v2=v2)
+                                    consistency_mode=consistency_mode, v2=v2, ledger=ledger)
             _collect_resolved_from(resolved_from, plan["subjects"], scene, entities)
             shot = {
                 "shot_id": shot_id, "scene_id": scene["scene_id"], "order": order,
@@ -1555,14 +1573,15 @@ def build_storyboard(script, plans, sources, *, entities, style_lock, template, 
     return doc, notes
 
 
-def refresh_prompts(storyboard, script, *, entities, style_lock, consistency_mode, v2=False) -> dict:
+def refresh_prompts(storyboard, script, *, entities, style_lock, consistency_mode, v2=False, ledger=None) -> dict:
     """*storyboard* with every shot's ``image_prompt``/``video_action``/
     ``negative_prompt``/``reference_images``/``consistency`` and the
     document's ``resolved_from`` re-resolved from *entities* as they are now
     -- plans (framing, camera motion, modifiers, action, subject_tags,
     lines), durations, motion and transitions are left exactly as they were
     (used when an entity changes after the storyboard was built). *v2*:
-    resolved layered, ``video_prompt`` and ``prompt_layout`` re-written too."""
+    resolved layered, ``video_prompt`` and ``prompt_layout`` re-written too;
+    *ledger* as :func:`resolve_shot`'s."""
     scenes_by_id = {scene["scene_id"]: scene for scene in script["scenes"]}
     resolved_from: dict = {}
     new_shots = []
@@ -1574,7 +1593,7 @@ def refresh_prompts(storyboard, script, *, entities, style_lock, consistency_mod
                         modifiers=list(shot["modifiers"]))
             _keep_t1_v2(plan, shot)
         resolved = resolve_shot(plan, scene=scene, entities=entities, style_lock=style_lock,
-                                consistency_mode=consistency_mode, v2=v2)
+                                consistency_mode=consistency_mode, v2=v2, ledger=ledger)
         _collect_resolved_from(resolved_from, shot["subject_tags"], scene, entities)
         new_shot = dict(shot)
         new_shot["image_prompt"] = resolved["image_prompt"]

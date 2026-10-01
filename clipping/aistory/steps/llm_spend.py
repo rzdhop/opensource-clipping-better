@@ -85,6 +85,7 @@ def worst_call_usd(link) -> float:
     pairs = [(prompts.INPUT_BUDGET.get(prompt_id, context.PACK_TOKEN_BUDGET), cap)
              for prompt_id, cap in prompts.MAX_TOKENS.items()]
     pairs.append((prompts.INPUT_BUDGET.get("E1", context.PACK_TOKEN_BUDGET), prompts.E1_PAYOFF_MAX_TOKENS))
+    pairs.append((prompts.INPUT_BUDGET["E1v2"], prompts.E1V2_PAYOFF_MAX_TOKENS))  # its v2 twin (stage 5c)
     return ledger_usd(max(pricing.llm_cost(link, tokens_in, tokens_out) for tokens_in, tokens_out in pairs))
 
 

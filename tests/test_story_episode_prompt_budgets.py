@@ -796,3 +796,130 @@ def test_the_largest_french_knowledge_reply_fits_its_cap(prompt_id):
     assert needed == pytest.approx(MEASURED_KNOWLEDGE_REPLY[prompt_id], abs=0.05)
     cap = prompts.MAX_TOKENS[prompt_id]
     assert cap == -(-round(needed * 1.15, 1) // 10) * 10
+
+
+# ================================================================ phase 7: E1v2/E2v2/E3v2 (the context slices)
+#
+# Stage 5c (DEC-228, DEC-138's method). A v2 story's writing calls are their
+# v1 worst cases above (episode 2, French, every input at its cap; E1 and E3
+# with the continuity inputs) plus the context slice of what they write
+# (context.slice_for_episode for E1v2, slice_for_scene for E2v2 and E3v2) and
+# the v2 asks. The slice is built from this file's live-sized cast, places and
+# prop with everything the knowledge base adds at its cap, in dense French: a
+# dossier per character at every cap (2 secrets, a relationship with each of
+# the others), a look whose wardrobe set has an 8-word context and 20 items, a
+# place look at its caps (5 layout sides, the scale and the light at 15
+# words, the prop as set dressing), 8 beats of 25 words in each of the two
+# episodes with every character knowing a 15-word fact after each, and every
+# character's ledger at its caps. The slice's own word caps bound it whatever
+# the cast (context.SCENE_SLICE_MAX_WORDS / EPISODE_SLICE_MAX_WORDS); this
+# fixture hits every one of them. E2v2 says the place by name only (the slice
+# holds its layout and light). T1 v2's continuity block (context.slice_for_shot:
+# each character's wardrobe set, who holds the prop) fits T1v2's own measured
+# budget unchanged. Budget = worst case + 15 %, rounded up to ten.
+
+from types import SimpleNamespace  # noqa: E402 -- this section's own names
+
+MEASURED_SLICED = {"E1v2": 2490, "E2v2": 2101, "E3v2": 2924}
+_PLACE_ID = LONGEST_PLACE["place_id"]
+
+
+def _sliced_ec():
+    def dossier(cid):
+        return {"backstory": _fr(60), "goal": _fr(20), "need": _fr(20), "fears": _fr(20), "secrets": [_fr(20)] * 2,
+                "relationships": [{"with": other, "history": _fr(30), "now": _fr(15)} for other in IDS if other != cid],
+                "voice": {"patterns": _fr(20), "vocabulary": _fr(20), "catchphrases": [_fr(10)] * 2}, "arc": _fr(30)}
+
+    look = {"build": _fr(15), "silhouette": _fr(12), "face": _fr(15), "hair": _fr(12), "skin_material": _fr(12),
+            "height_cm": 170, "palette": [_fr(3)] * 4,
+            "wardrobe_sets": [{"id": "daily", "context": _fr(8), "items": _fr(20)}], "season_change": None}
+    characters = {c["char_id"]: dict(c, dossier=dossier(c["char_id"]), look=look, signature_items=[])
+                  for c in CAST}
+    places = {p["place_id"]: dict(p, descriptor=_fr(45), look={
+        "layout_map": {key: _fr(15) for key in ("left", "right", "back", "foreground", "centre")},
+        "scale_note": _fr(15), "lighting": {variant: _fr(15) for variant in p["time_variants"]},
+        "props_here": [PROP["prop_id"]]}) for p in PLACES}
+    beats = [{"what": _fr(25), "place_id": _PLACE_ID, "who": list(IDS), "objects": [PROP["prop_id"]],
+              "knows_after": {cid: _fr(15) for cid in IDS}} for _ in range(8)]
+    knowledge = {"timeline": [{"ep": 1, "beats": beats}, {"ep": 2, "beats": beats}],
+                 "ledger_seed": {cid: {"location": _PLACE_ID, "wardrobe_set": "daily",
+                                       "possessions": [PROP["prop_id"]], "injuries": _fr(10),
+                                       "relationship_notes": _fr(20)} for cid in IDS}}
+    ec = SimpleNamespace(ep=2, season=MEMORY, entities={"characters": characters, "places": places,
+                                                         "props": {PROP["prop_id"]: PROP}})
+    return ec, knowledge
+
+
+def _e1v2():
+    ec, knowledge = _sliced_ec()
+    slice_text = context.slice_for_episode(ec, knowledge=knowledge, char_ids=IDS)
+    return prompts.build_e1_v2(
+        _pack(), ep=2, arc_entry=ARC2, template=TEMPLATE_90, episode_defaults=DEFAULTS,
+        cast=[{"char_id": c["char_id"], "name": c["name"]} for c in CAST],
+        places=[{k: p[k] for k in ("place_id", "name", "time_variants")} for p in PLACES],
+        props=[{"prop_id": PROP["prop_id"], "name": PROP["name"]}], memory=MEMORY,
+        slots=timing.episode_slots(TEMPLATE_90, 2), open_hooks=OPEN_HOOKS, audience_direction=DIRECTION_AT_CAP,
+        slice_text=slice_text)
+
+
+def _e2v2():
+    ec, knowledge = _sliced_ec()
+    pack = _pack(NOTE)
+    return prompts.build_e2_v2(
+        pack, scene=BODY, scene_number=11, outline=SCENES, previous=dict(LINE, summary=_fr(15)), word_budget=18,
+        cast=PERSONALITIES, place={k: LONGEST_PLACE[k] for k in ("place_id", "name", "layout_notes")},
+        props=[{"prop_id": PROP["prop_id"], "name": PROP["name"]}], sfx_cues=STYLE["audio"]["sfx_cues"],
+        narrator_enabled=False, voice_direction=STYLE["audio"]["voice_direction"], note=pack.note,
+        slice_text=context.slice_for_scene(ec, BODY, knowledge=knowledge))
+
+
+def _e3v2(part):
+    ec, knowledge = _sliced_ec()
+    pack = _pack(None if part is None else NOTE)
+    sliced = SCENES[-1] if part in (None, "cliffhanger", "teaser") else {"hook": SCENES[1], "recap": SCENES[0]}[part]
+    return prompts.build_e3_v2(
+        pack, ep=2, part=part, note=pack.note, hook_scene=SCENES[1], cliffhanger_scene=SCENES[-1],
+        recap_scene=SCENES[0], outline=SCENES, first_body_line=LINE, last_body_line=LINE, arc_entry=ARC2,
+        next_arc_entry=ARC3, memory=MEMORY, episode_defaults=DEFAULTS,
+        word_budgets={"hook": 9, "cliffhanger": 12, "recap": 9}, cast=PERSONALITIES, narrator_enabled=False,
+        open_hooks=OPEN_HOOKS[:E3_WORST_HOOKS], slice_text=context.slice_for_scene(ec, sliced, knowledge=knowledge))
+
+
+def test_the_slices_of_the_v2_fixture_are_at_their_caps():
+    ec, knowledge = _sliced_ec()
+    scene_slice = context.slice_for_scene(ec, BODY, knowledge=knowledge)
+    episode_slice = context.slice_for_episode(ec, knowledge=knowledge, char_ids=IDS)
+    assert context.SCENE_SLICE_MAX_WORDS - 8 <= len(scene_slice.split()) <= context.SCENE_SLICE_MAX_WORDS
+    assert context.EPISODE_SLICE_MAX_WORDS - 8 <= len(episode_slice.split()) <= context.EPISODE_SLICE_MAX_WORDS
+
+
+@pytest.mark.parametrize("prompt_id", ["E1v2", "E2v2", "E3v2"])
+def test_v2_writing_worst_cases_measure_what_is_recorded_and_fit_their_budgets(prompt_id):
+    if prompt_id == "E3v2":
+        worst = max(_tokens(_e3v2(part)) for part in (None, "hook", "cliffhanger", "recap", "teaser"))
+        for part in (None, "hook", "cliffhanger", "recap", "teaser"):
+            _fits("E3v2", *_e3v2(part)[:2])
+    else:
+        triple = {"E1v2": _e1v2, "E2v2": _e2v2}[prompt_id]()
+        worst = _tokens(triple)
+        _fits(prompt_id, *triple[:2])
+    assert worst == MEASURED_SLICED[prompt_id]
+    budget = prompts.INPUT_BUDGET[prompt_id]
+    assert budget == -(-round(worst * 1.15, 1) // 10) * 10
+    assert budget <= 4000  # the spec's ceiling
+    v1 = prompts.INPUT_BUDGET[prompt_id[:2]]
+    assert budget > v1  # the slice needs room of its own; the v1 rows are untouched (RC-M1)
+
+
+def test_t1_v2_with_the_continuity_slice_fits_its_budget():
+    ec, knowledge = _sliced_ec()
+    ledger = context.ledger_before(knowledge, ec.season, ec.ep)
+    continuity = context.slice_for_shot(ec, BODY, None, None, ledger=ledger)
+    assert all(f"@{cid} wears" in continuity for cid in IDS) and f"%{PROP['prop_id']} is held by" in continuity
+    previous = [{"framing": "medium_two_shot", "camera_motion": "push_in"},
+                {"framing": "medium_single", "camera_motion": "push_in", "action": _fr(45),
+                 "staging": _staging_at_caps()}]
+    system, user, _schema = prompts.build_t1_v2(_pack(), previous_shots=previous, continuity=continuity,
+                                                **_t1_v2_kwargs())
+    assert continuity in user
+    _fits("T1v2", system, user)

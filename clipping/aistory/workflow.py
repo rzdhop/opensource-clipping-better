@@ -3512,6 +3512,7 @@ def _resolve_again(ec, script, board, to_resolve, errors) -> None:
     image for a change it does not show."""
     lock = ec.style_lock
     v2 = media_policy.is_v2(ec.story)
+    ledger = script_step.ledger_of(ec)
     by_function = lock["motion_rules"]["tier1"]["by_function"]
     scenes = {scene["scene_id"]: scene for scene in script["scenes"]}
     by_id = {shot["shot_id"]: shot for shot in board["shots"]}
@@ -3535,7 +3536,7 @@ def _resolve_again(ec, script, board, to_resolve, errors) -> None:
             plan.update(lines=list(shot["lines"]), camera_motion=motion["type"], modifiers=list(shot["modifiers"]))
         try:
             resolved = shots.resolve_shot(plan, scene=scene, entities=ec.entities, style_lock=lock,
-                                          consistency_mode=ec.consistency_mode, v2=v2)
+                                          consistency_mode=ec.consistency_mode, v2=v2, ledger=ledger)
         except (KeyError, ValueError) as exc:
             raise WorkflowError(CONFLICT, (f"Shot {shot_id} names something the story no longer has ({exc}): plan "
                                            f"scene {scene['scene_id']} again (the storyboard step).")) from None
@@ -3624,7 +3625,8 @@ def patch_storyboard(stories, story_id, ep, fields, *, now) -> dict:
         shots.retime_storyboard(trial, script, template=ec.template, language=ec.language, style_lock=ec.style_lock)
     if refresh:
         trial = shots.refresh_prompts(trial, script, entities=ec.entities, style_lock=ec.style_lock,
-                                      consistency_mode=ec.consistency_mode, v2=media_policy.is_v2(ec.story))
+                                      consistency_mode=ec.consistency_mode, v2=media_policy.is_v2(ec.story),
+                                      ledger=script_step.ledger_of(ec))
     if trial == board:
         return board
     trial["approved_at"] = None

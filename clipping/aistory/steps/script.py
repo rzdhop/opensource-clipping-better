@@ -279,6 +279,40 @@ def _pack(ec, ctx, announced, note=None):
     return pack
 
 
+# ------------------------------------------------- the v2 context (phase 7 stage 5c)
+
+def knowledge_of(ec):
+    """A v2 story's knowledge base (``knowledge.json``), or None: a legacy
+    story, none written, or one that does not read -- the script step's
+    gate refuses a v2 script without an approved one before any call
+    (``episode_common.check_episode_preconditions``); a regenerate still
+    writes from the dossiers and the ledger it can read."""
+    if not media_policy.is_v2(ec.story):
+        return None
+    try:
+        return ec.store.read_knowledge(ec.story_id)
+    except schemas.SchemaError:
+        return None
+
+
+def ledger_of(ec):
+    """Where every character stands when ``ec.ep`` starts
+    (``context.ledger_before``), or None: a legacy story, or no knowledge
+    base. The storyboard's resolution reads it (wardrobe sets, holders)."""
+    if not media_policy.is_v2(ec.story) or not isinstance(ec.ep, int):
+        return None
+    return context.ledger_before(knowledge_of(ec), ec.season, ec.ep)
+
+
+def _framing_slice_scene(script, part):
+    """The framing scene whose slice an E3v2 call reads: the cliffhanger's
+    (a full E3 or its own part, or the teaser, which follows it), else the
+    hook's or the recap's for those parts alone."""
+    if part in (None, "cliffhanger", "teaser"):
+        return framing_scene(script, "cliffhanger")
+    return framing_scene(script, part)
+
+
 # -------------------------------------------------------------------- E1
 
 def skeleton(ec, *, now) -> dict:
@@ -453,14 +487,23 @@ def write_beat_sheet(ctx, ec, script, *, tools, announced) -> None:
     cast = e1_cast(ec)
     v2 = media_policy.is_v2(ec.story)
     new_objects_offered = prompts.offers_new_objects(ec.ep, v2)
-    system, user, schema = prompts.build_e1(
-        pack, ep=ec.ep, arc_entry=ec.arc_entry, template=ec.template, episode_defaults=ec.episode_defaults,
+    kwargs = dict(
+        ep=ec.ep, arc_entry=ec.arc_entry, template=ec.template, episode_defaults=ec.episode_defaults,
         cast=[{"char_id": doc["char_id"], "name": doc["name"]} for doc in cast],
         places=[{"place_id": pid, "name": ec.entities["places"][pid]["name"], "time_variants": variants}
                 for pid, variants in ec.places.items()],
         props=[{"prop_id": pid, "name": ec.entities["props"][pid]["name"]} for pid in ec.prop_ids],
-        memory=ec.season, slots=slots, open_hooks=hooks, audience_direction=audience_direction(ec), v2=v2,
+        memory=ec.season, slots=slots, open_hooks=hooks, audience_direction=audience_direction(ec),
     )
+    if v2:
+        # Phase 7 stage 5c (A13): E1v2, with the episode's slice of the knowledge base.
+        prompt_id = "E1v2"
+        slice_text = context.slice_for_episode(ec, knowledge=knowledge_of(ec),
+                                               char_ids=[doc["char_id"] for doc in cast])
+        system, user, schema = prompts.build_e1_v2(pack, slice_text=slice_text, **kwargs)
+    else:
+        prompt_id = "E1"
+        system, user, schema = prompts.build_e1(pack, v2=v2, **kwargs)
     llm_call.announce_trimmed(ctx, pack, announced)
 
     def validate(reply):
@@ -476,8 +519,9 @@ def write_beat_sheet(ctx, ec, script, *, tools, announced) -> None:
 
     # The payoff ask (episode 2 on, a hook offered) has a larger reply, and
     # its own measured cap; every other E1 call keeps the registry's.
-    cap = prompts.E1_PAYOFF_MAX_TOKENS if prompts.offered_hooks(ec.ep, hooks) else None
-    reply = llm_call.call_json(ctx, "E1", system, user, schema, validator=validate, runner=tools.runner,
+    payoff_cap = prompts.E1V2_PAYOFF_MAX_TOKENS if v2 else prompts.E1_PAYOFF_MAX_TOKENS
+    cap = payoff_cap if prompts.offered_hooks(ec.ep, hooks) else None
+    reply = llm_call.call_json(ctx, prompt_id, system, user, schema, validator=validate, runner=tools.runner,
                                time_fn=tools.time_fn, max_tokens=cap)
     before, after = apply_e1(ec, script, reply)
     if after > before + 1e-9:
@@ -527,13 +571,21 @@ def write_body_scene(ctx, ec, script, sid, *, tools, announced, note=None) -> bo
     props = [{"prop_id": pid, "name": _entity(ec, "props", pid, sid)["name"]} for pid in scene["props"]]
     pack = _pack(ec, ctx, announced, note=note)
     budget = _word_budget(ec, scene)
-    system, user, schema = prompts.build_e2(
-        pack, scene=scene, scene_number=script["scenes"].index(scene) + 1, outline=script["scenes"],
+    kwargs = dict(
+        scene=scene, scene_number=script["scenes"].index(scene) + 1, outline=script["scenes"],
         previous=_previous_line(ec, script, scene), word_budget=budget, cast=cast,
         place={"place_id": place["place_id"], "name": place["name"], "layout_notes": place["layout_notes"] or ""},
         props=props, sfx_cues=ec.sfx_cues, narrator_enabled=ec.narrator,
         voice_direction=ec.style_lock["audio"]["voice_direction"], note=pack.note,
     )
+    if media_policy.is_v2(ec.story):
+        # Phase 7 stage 5c (A13): E2v2, with the scene's slice of the knowledge base.
+        prompt_id = "E2v2"
+        system, user, schema = prompts.build_e2_v2(
+            pack, slice_text=context.slice_for_scene(ec, scene, knowledge=knowledge_of(ec)), **kwargs)
+    else:
+        prompt_id = "E2"
+        system, user, schema = prompts.build_e2(pack, **kwargs)
 
     # A reply under half the word budget, or over 1.5x it, is retryable
     # (validate_e2; never both at once -- the floor sits below the ceiling
@@ -563,7 +615,7 @@ def write_body_scene(ctx, ec, script, sid, *, tools, announced, note=None) -> bo
         apply_e2(ec, scene_of(trial, sid), reply)
         return episode_common.trial_errors(ec, trial)
 
-    reply = llm_call.call_json(ctx, "E2", system, user, schema, validator=validate, runner=tools.runner,
+    reply = llm_call.call_json(ctx, prompt_id, system, user, schema, validator=validate, runner=tools.runner,
                                time_fn=tools.time_fn)
     apply_e2(ec, scene, reply)
     return True
@@ -624,14 +676,23 @@ def write_framing(ctx, ec, script, part, *, tools, announced, note=None) -> list
     budgets = {key: _word_budget(ec, scene) for key, scene in (("hook", hook), ("cliffhanger", cliff),
                                                                   ("recap", recap)) if scene is not None}
     pack = _pack(ec, ctx, announced, note=note)
-    system, user, schema = prompts.build_e3(
-        pack, ep=ec.ep, part=part, note=pack.note, hook_scene=hook, cliffhanger_scene=cliff, recap_scene=recap,
+    kwargs = dict(
+        ep=ec.ep, part=part, note=pack.note, hook_scene=hook, cliffhanger_scene=cliff, recap_scene=recap,
         outline=script["scenes"], first_body_line=_body_line(ec, script, first=True),
         last_body_line=_body_line(ec, script, first=False), arc_entry=ec.arc_entry,
         next_arc_entry=ec.next_arc_entry, memory=ec.season, episode_defaults=ec.episode_defaults,
         word_budgets=budgets, cast=_cast_lines(ec, speaking, (hook or cliff or {}).get("scene_id")),
         narrator_enabled=ec.narrator, open_hooks=episode_open_hooks(ec),
     )
+    if media_policy.is_v2(ec.story):
+        # Phase 7 stage 5c (A13): E3v2, with the slice of the scene it mostly writes.
+        prompt_id = "E3v2"
+        sliced = _framing_slice_scene(script, part)
+        slice_text = context.slice_for_scene(ec, sliced, knowledge=knowledge_of(ec)) if sliced else ""
+        system, user, schema = prompts.build_e3_v2(pack, slice_text=slice_text, **kwargs)
+    else:
+        prompt_id = "E3"
+        system, user, schema = prompts.build_e3(pack, **kwargs)
     llm_call.announce_trimmed(ctx, pack, announced)
 
     def validate(reply):
@@ -645,7 +706,7 @@ def write_framing(ctx, ec, script, part, *, tools, announced, note=None) -> list
         apply_e3(ec, trial, reply)
         return episode_common.trial_errors(ec, trial)
 
-    reply = llm_call.call_json(ctx, "E3", system, user, schema, validator=validate, runner=tools.runner,
+    reply = llm_call.call_json(ctx, prompt_id, system, user, schema, validator=validate, runner=tools.runner,
                                time_fn=tools.time_fn)
     return apply_e3(ec, script, reply)
 

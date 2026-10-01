@@ -1424,3 +1424,26 @@ def test_v2_storyboard_of_one_shot_per_scene_passes_rule_pass_without_moving_a_p
         "rule_pass: scene s08 shot 1: framing changed 'close_up' -> 'medium_single' (repeated the previous "
         "shot's framing)",
     ]
+
+
+def test_v2_shot_wears_the_ledger_s_wardrobe_set():
+    """Phase 7 stage 5c (A13): a v2 shot dresses each character in its
+    current wardrobe set from the continuity ledger (``ledger``, the
+    episode's ``context.ledger_before``), not always the look's first; no
+    ledger (a story without a knowledge base) keeps the first set."""
+    entities = _v2_entities()
+    short = entities["characters"]["char_miss_overthink"]
+    short["look"]["wardrobe_sets"].append({"id": "gala", "context": "the gala night",
+                                           "items": "shimmering silver sash and tiny top hat"})
+    plan = {"framing": "medium_two_shot", "action": _V2_ACTION, "lines": [1], "camera_motion": "hold",
+            "modifiers": [], "subjects": ["@char_captain_obvious", "@char_miss_overthink", "#place_clocktown:day"]}
+
+    def prompt(ledger):
+        return shots.resolve_shot(plan, scene=_v2_scene(), entities=entities, style_lock=CARTOON_FLAT,
+                                  consistency_mode="references", v2=True, ledger=ledger)["image_prompt"]
+
+    state = {"location": None, "wardrobe_set": "gala", "possessions": [], "injuries": None,
+             "relationship_notes": None}
+    assert "shimmering silver sash and tiny top hat" in prompt({"char_miss_overthink": state})
+    assert "index cards" not in prompt({"char_miss_overthink": state})
+    assert "index cards" in prompt(None) and "silver sash" not in prompt(None)

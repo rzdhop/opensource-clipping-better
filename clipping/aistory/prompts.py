@@ -124,6 +124,14 @@ C1_CALLS = 10
 # 420 held the beats' what alone); D6 5 kept names and 3 new props (a
 # 60-character name and owner, a 200-character one-line), ~465. Each plus 15 %,
 # rounded up to ten.
+#
+# E1v2/E2v2/E3v2 (phase 7 stage 5c, DEC-228, DEC-138's method): E2v2 and E3v2
+# reply exactly as E2 and E3 (the v2 asks change what is written, not its
+# shape), so their caps are those. E1v2 is E1 plus up to 2 new objects (a
+# 4-word name, a 15-word one-line, an owner): ~1,521 tokens (chars/4 x 1.3),
+# + 15 %, rounded up to ten; its payoff variant (every scene naming a
+# 120-character hook) ~2,059, E1V2_PAYOFF_MAX_TOKENS
+# (tests/test_story_prompts_episode.py).
 MAX_TOKENS = {
     "C1": 700, "B1": 400, "B2": 520, "B3": 300,
     "K1": 750, "P0": 420, "P1": 260, "R1": 100, "S1": 950, "S2": 350, "U1": 120,
@@ -134,6 +142,7 @@ MAX_TOKENS = {
     "T1v2": 1040, "T1rv2": 520,
     "D1": 1290,
     "D4": 430, "D5": 3330, "D6": 540,
+    "E1v2": 1750, "E2v2": 600, "E3v2": 720,
 }
 
 # E1's payoff variant (phase 5, plan 11 stage 3, DEC-138's method): from
@@ -147,6 +156,8 @@ MAX_TOKENS = {
 # MAX_TOKENS["E1"] -- the free-tier limiter reserves input + max_tokens, so a
 # raised registry cap would change episode 1's calls too (RC-M1).
 E1_PAYOFF_MAX_TOKENS = 2210
+# E1v2's payoff variant (phase 7 stage 5c): the same ask with the new objects.
+E1V2_PAYOFF_MAX_TOKENS = 2370
 TEMPERATURE = {
     "C1": IDEATION_TEMPERATURE,
     "B1": WRITING_TEMPERATURE,
@@ -178,6 +189,9 @@ TEMPERATURE = {
     "D4": WRITING_TEMPERATURE,
     "D5": WRITING_TEMPERATURE,
     "D6": WRITING_TEMPERATURE,
+    "E1v2": WRITING_TEMPERATURE,
+    "E2v2": WRITING_TEMPERATURE,
+    "E3v2": WRITING_TEMPERATURE,
 }
 SCHEMA_NAMES = {
     "C1": "story_concepts", "B1": "bible_core", "B2": "bible_world", "B3": "bible_values",
@@ -192,6 +206,7 @@ SCHEMA_NAMES = {
     "T1v2": "storyboard_beat_shots", "T1rv2": "storyboard_beat_shot_replan",
     "D1": "character_dossier",
     "D4": "knowledge_world", "D5": "knowledge_timeline", "D6": "knowledge_props",
+    "E1v2": "episode_beat_sheet_v2", "E2v2": "episode_scene_dialogue_v2", "E3v2": "episode_framing_scenes_v2",
 }
 
 # E4's input is the whole script, not a small pack -- it needs a wider
@@ -284,9 +299,18 @@ SCHEMA_NAMES = {
 # world left out: with them it passed the 4,000 ceiling); D6: the bible, 24 new
 # objects (2 an episode over 12) each with its beat, 8 props named in all 12
 # episodes, 8 props in full and 12 names: 3,094. Each + 15 %, rounded up to ten.
+#
+# E1v2/E2v2/E3v2 (phase 7 stage 5c, DEC-228; A13's estimates were 2,400 /
+# 2,200 / 2,900): the v1 worst cases above plus the context slice at every cap
+# (context.SCENE_SLICE_MAX_WORDS, EPISODE_SLICE_MAX_WORDS) and the v2 asks,
+# French (tests/test_story_episode_prompt_budgets.py): E1v2 2,490, E2v2 2,101
+# (its place line says the name only), E3v2 2,924 (in full; its partials
+# less). Each + 15 %, rounded up to ten, under the spec's 4,000 ceiling. T1v2's
+# continuity block (context.slice_for_shot) fits T1v2's own budget unchanged.
 INPUT_BUDGET = {"E1": 1820, "E2": 1660, "E3": 2530, "E4": 3900, "T1": 1270, "T1r": 1410, "S3": 3740, "F1": 3950, "N1": 3740,
                 "D2": 2370, "D3": 1940, "R1v2": 1170, "T1v2": 2020, "T1rv2": 2060, "D1": 3890,
-                "D4": 2270, "D5": 3930, "D6": 3560}
+                "D4": 2270, "D5": 3930, "D6": 3560,
+                "E1v2": 2870, "E2v2": 2420, "E3v2": 3370}
 
 # The ``bible:<field>`` grammar of spec 9.2: which prompt a regenerate note
 # re-runs, and which of that prompt's fields it targets. "tone" also carries
@@ -1312,6 +1336,7 @@ _E1_ASK_TEMPLATE = (
     "turn right before the cliffhanger; one of them may be a quiet scene with no dialogue.\n\n"
     "The hook scene: {hook_style_line}.\n\n"
     "The cliffhanger scene: {cliffhanger_style_line}; it should leave one of this episode's own hooks open.\n\n"
+    "{v2_lines}"
     "{french_line}"
     "Never use real people, brands, studio names or copyrighted characters."
 )
@@ -1558,6 +1583,16 @@ def build_e1(pack, *, ep, arc_entry, template, episode_defaults, cast, places, p
     (:data:`_E1_PROPS_LINE_V2`); otherwise the prompt and schema are today's,
     byte for byte (RC-M1).
     """
+    return _build_e1(pack, ep=ep, arc_entry=arc_entry, template=template, episode_defaults=episode_defaults,
+                     cast=cast, places=places, props=props, memory=memory, slots=slots, open_hooks=open_hooks,
+                     audience_direction=audience_direction, v2=v2)
+
+
+def _build_e1(pack, *, ep, arc_entry, template, episode_defaults, cast, places, props, memory, slots,
+              open_hooks=None, audience_direction=None, v2=False, slice_text=None, v2_lines=""):
+    """:func:`build_e1`'s body; *slice_text* (E1v2's episode slice) is shown
+    after the rosters and *v2_lines* (E1v2's own asks) before the closing
+    sentences -- both empty for E1, whose prompt they leave byte for byte."""
     hooks = offered_hooks(ep, open_hooks)
     new_objects = offers_new_objects(ep, v2)
     # Handed the hooks, the memory block shows none: they are listed once,
@@ -1578,6 +1613,8 @@ def build_e1(pack, *, ep, arc_entry, template, episode_defaults, cast, places, p
         user += "Existing places:\n" + _place_variant_block(places) + "\n\n"
     if props:
         user += "Existing props:\n" + _id_name_block(props, "prop_id") + "\n\n"
+    if slice_text:
+        user += slice_text + "\n\n"
 
     user += _E1_ASK_TEMPLATE.format(
         ep=ep, n=len(slots), scene_list=_e1_scene_list(slots),
@@ -1592,6 +1629,7 @@ def build_e1(pack, *, ep, arc_entry, template, episode_defaults, cast, places, p
         props_line=_E1_PROPS_LINE_V2 if new_objects else (_E1_PROPS_LINE if props else _E1_NO_PROPS_LINE),
         new_objects_line=_E1_NEW_OBJECTS_LINE if new_objects else "",
         payoff_line=_E1_PAYOFF_LINE if hooks else "",
+        v2_lines=v2_lines,
     )
 
     cast_ids = [c["char_id"] for c in cast]
@@ -1759,6 +1797,7 @@ _E2_ASK_TEMPLATE = (
     "- on_screen_text: null unless the scene truly needs one (at most 6 words, story language)\n\n"
     "Write {word_budget_lo}-{word_budget_hi} words of dialogue in total: not fewer than {word_budget_lo}, "
     "not more than {word_budget_hi}.\n\n"
+    "{v2_lines}"
     "{french_line}"
     "Never use real people, brands, studio names or copyrighted characters."
 )
@@ -1837,6 +1876,18 @@ def build_e2(pack, *, scene, scene_number, outline, previous, word_budget, cast,
     :func:`build_e3` and :func:`build_t1r` show theirs (none: the prompt is
     byte-identical to one built without it).
     """
+    return _build_e2(pack, scene=scene, outline=outline, previous=previous, word_budget=word_budget, cast=cast,
+                     place=place, props=props, sfx_cues=sfx_cues, narrator_enabled=narrator_enabled,
+                     voice_direction=voice_direction, note=note)
+
+
+def _build_e2(pack, *, scene, outline, previous, word_budget, cast, place, props, sfx_cues, narrator_enabled,
+              voice_direction, note=None, slice_text=None):
+    """:func:`build_e2`'s body; *slice_text* given (E2v2, :func:`build_e2_v2`):
+    the place line says its name only (the slice says its layout and light),
+    the slice follows the props, the ask gains E2v2's lines and the schema's
+    ``sfx_cues[].at`` is an enum. None: E2, byte for byte."""
+    v2 = slice_text is not None
     names = {c["char_id"]: c["name"] for c in cast}
     user = context.outline_section(outline, names) + "\n\n"
     if previous is None:
@@ -1849,9 +1900,14 @@ def build_e2(pack, *, scene, scene_number, outline, previous, word_budget, cast,
     user += _scene_stub_line(scene) + "\n\n"
     if cast:
         user += "Characters present:\n" + _personality_block(cast) + "\n\n"
-    user += f"Place: {place['name']} -- {place['layout_notes']}\n\n"
+    if v2:
+        user += f"Place: {place['name']}\n\n"
+    else:
+        user += f"Place: {place['name']} -- {place['layout_notes']}\n\n"
     if props:
         user += "Props present:\n" + _id_name_block(props, "prop_id") + "\n\n"
+    if slice_text:
+        user += slice_text + "\n\n"
 
     if note:
         user += f"Follow the author's note: {note}\n\n"
@@ -1866,7 +1922,10 @@ def build_e2(pack, *, scene, scene_number, outline, previous, word_budget, cast,
         word_budget_lo=lo, word_budget_hi=hi,
         voice_direction=voice_direction,
         french_line=_french_block(pack),
+        v2_lines=_e2_v2_lines(scene, outline, names) if v2 else "",
     )
+    if v2:
+        return _system(pack), user, e2_v2_schema(speakers, sfx_cue_names)
     return _system(pack), user, e2_schema(speakers, sfx_cue_names)
 
 
@@ -2014,7 +2073,8 @@ def _e3_hook_block(hook_scene, first_body_line, episode_defaults, word_budget) -
     return "\n".join(lines)
 
 
-def _e3_cliffhanger_block(cliffhanger_scene, last_body_line, arc_entry, episode_defaults, word_budget) -> str:
+def _e3_cliffhanger_block(cliffhanger_scene, last_body_line, arc_entry, episode_defaults, word_budget,
+                          v2=False) -> str:
     lines = [_scene_stub_line(cliffhanger_scene).replace("Scene (", "Cliffhanger scene (")]
     lines.append(f"Cliffhanger style: {_CLIFFHANGER_STYLE_LINES[episode_defaults['cliffhanger_style']]}")
     if last_body_line is None:
@@ -2027,6 +2087,9 @@ def _e3_cliffhanger_block(cliffhanger_scene, last_body_line, arc_entry, episode_
         lines.append("Leave one of these hooks open: " + "; ".join(arc_entry["open_hooks_out"]))
     if word_budget is not None:
         lines.append(f"Keep its line within {word_budget} words.")
+    if v2:
+        lines.append(NO_REPEAT_SENTENCE)
+        lines.append(REVEAL_SHOWN_SENTENCE)
     return "\n".join(lines)
 
 
@@ -2049,11 +2112,14 @@ def _e3_teaser_block(next_arc_entry) -> str:
     return _arc_entry_block(next_arc_entry, label="Next episode's arc entry")
 
 
-def _e3_ask(keys, speakers, *, french_line="") -> str:
+def _e3_ask(keys, speakers, *, french_line="", extra=()) -> str:
     lines = ["Write " + ", ".join(keys) + ".", "", "Give:"]
     for key in keys:
         lines.append(_E3_KEY_ASKS[key].format(speakers=", ".join(speakers), emotions=", ".join(schemas.EMOTIONS)))
     lines.append("")
+    if extra:
+        lines.extend(extra)
+        lines.append("")
     if french_line:
         lines.append(french_line)
         lines.append("")
@@ -2096,6 +2162,21 @@ def build_e3(pack, *, ep, part=None, note=None, hook_scene, cliffhanger_scene, r
     caller) for the memory block's "Open hooks" line -- None reads the
     stored list, as before. Neither reaches episode 1, which has no recap.
     """
+    return _build_e3(pack, ep=ep, part=part, note=note, hook_scene=hook_scene, cliffhanger_scene=cliffhanger_scene,
+                     recap_scene=recap_scene, outline=outline, first_body_line=first_body_line,
+                     last_body_line=last_body_line, arc_entry=arc_entry, next_arc_entry=next_arc_entry, memory=memory,
+                     episode_defaults=episode_defaults, word_budgets=word_budgets, cast=cast,
+                     narrator_enabled=narrator_enabled, open_hooks=open_hooks)
+
+
+def _build_e3(pack, *, ep, part=None, note=None, hook_scene, cliffhanger_scene, recap_scene, outline,
+              first_body_line, last_body_line, arc_entry, next_arc_entry, memory, episode_defaults,
+              word_budgets, cast, narrator_enabled, open_hooks=None, slice_text=None):
+    """:func:`build_e3`'s body; *slice_text* given (E3v2, :func:`build_e3_v2`):
+    the slice follows the characters, the cliffhanger block gains the
+    no-repeat and reveal-shown lines, the ask the first-appearance line.
+    None: E3, byte for byte."""
+    v2 = slice_text is not None
     keys = _e3_keys(part, ep)
     names = {c["char_id"]: c["name"] for c in cast}
     speakers = [c["char_id"] for c in cast] + (["narrator"] if narrator_enabled else [])
@@ -2107,7 +2188,7 @@ def build_e3(pack, *, ep, part=None, note=None, hook_scene, cliffhanger_scene, r
         user += _e3_hook_block(hook_scene, first_body_line, episode_defaults, word_budgets.get("hook")) + "\n\n"
     if "cliffhanger" in keys:
         user += _e3_cliffhanger_block(
-            cliffhanger_scene, last_body_line, arc_entry, episode_defaults, word_budgets.get("cliffhanger"),
+            cliffhanger_scene, last_body_line, arc_entry, episode_defaults, word_budgets.get("cliffhanger"), v2=v2,
         ) + "\n\n"
     if "recap" in keys:
         memory_text, was_cut = context.memory_section(memory, ep, open_hooks=open_hooks)
@@ -2122,10 +2203,13 @@ def build_e3(pack, *, ep, part=None, note=None, hook_scene, cliffhanger_scene, r
 
     if cast:
         user += "Characters who may speak:\n" + _personality_block(cast) + "\n\n"
+    if slice_text:
+        user += slice_text + "\n\n"
     if note:
         user += f"Follow the author's note: {note}\n\n"
 
-    user += _e3_ask(keys, speakers, french_line=_FR_ELISION_SENTENCE if pack.language_name == "French" else "")
+    user += _e3_ask(keys, speakers, french_line=_FR_ELISION_SENTENCE if pack.language_name == "French" else "",
+                    extra=(FIRST_APPEARANCE_SENTENCE,) if v2 else ())
     return _system(pack), user, e3_schema(part, ep, speakers)
 
 
@@ -2202,6 +2286,110 @@ def validate_e3(reply, *, ep, part, hook_scene, cliffhanger_scene, recap_scene, 
         _text_errors(errors, "$.teaser", reply["teaser"], max_words=15)
 
     return errors
+
+
+# ------------------------------------------------- E1v2/E2v2/E3v2 (phase 7 stage 5c)
+#
+# A v2 story's writing calls (A13, DEC-228): the v1 prompts' structure, plus
+# the context slice of what is written (``context.slice_for_episode`` for
+# E1v2, ``context.slice_for_scene`` for E2v2/E3v2) and three asks the E4
+# comprehension diagnosis called for -- story A's climax line was spoken
+# twice verbatim (no call was told not to repeat one, and the cliffhanger's
+# prompt showed the line before it verbatim), Mittens was never introduced,
+# and the cliffhanger's reveal was never shown. New ids, so the v1 E1/E2/E3
+# strings, schemas, caps and budgets are untouched (RC-M1).
+
+NO_REPEAT_SENTENCE = ("Never repeat or paraphrase a line already spoken in this episode; the previous line is shown "
+                      "so you can continue from it, not echo it.")
+FIRST_APPEARANCE_SENTENCE = ("A character's first appearance in the episode makes clear who they are and what they "
+                             "want.")
+REVEAL_SHOWN_SENTENCE = ("Its reveal must be shown or spoken on screen -- in its line or in what the shot shows -- "
+                         "never only described.")
+_E1_V2_LINES = (
+    "Stage the planned beats above, in order, across the body scenes: each body scene's summary says what of its "
+    "beat happens on screen, and every object a beat names is in the props of the scene that shows it.\n"
+    "The scene where a character first appears in this episode makes clear who they are and what they want.\n\n"
+)
+# E2v2's sfx anchor: 'start' or a line number, as an enum (the free tier
+# filled the bare string with a line's text, a time or a cue name); a scene
+# has 1-4 lines (E2's own ask), so the numbers are "1".."4" -- the validator
+# (``validate_e2``, unchanged) still refuses one past the reply's own lines.
+E2_V2_SFX_AT = ("start", "1", "2", "3", "4")
+
+
+def first_appearances(scene, outline) -> list:
+    """The ids of *scene*'s characters who are in no scene of *outline*
+    before it: their first appearance in the episode."""
+    seen = set()
+    for other in outline:
+        if other.get("scene_id") == scene.get("scene_id"):
+            break
+        seen.update(other.get("characters") or ())
+    return [cid for cid in dict.fromkeys(scene.get("characters") or ()) if cid not in seen]
+
+
+def _e2_v2_lines(scene, outline, names) -> str:
+    lines = [NO_REPEAT_SENTENCE, FIRST_APPEARANCE_SENTENCE]
+    new = [names.get(cid, cid) for cid in first_appearances(scene, outline)]
+    if new:
+        lines.append(f"First time on screen in this episode: {', '.join(new)} -- say or show who they are and "
+                     "what they want.")
+    return "\n".join(lines) + "\n\n"
+
+
+def e2_v2_schema(speakers, sfx_cue_names) -> dict:
+    """E2's schema with ``sfx_cues[].at`` an enum of 'start' and the line
+    numbers (:data:`E2_V2_SFX_AT`), the same closed vocabulary as ``cue``."""
+    schema = e2_schema(speakers, sfx_cue_names)
+    sfx = schema["properties"]["sfx_cues"]["items"]
+    sfx["properties"]["at"] = {"type": "string", "enum": list(E2_V2_SFX_AT),
+                               "description": "'start' or a line number 1-n"}
+    return schema
+
+
+def build_e1_v2(pack, *, ep, arc_entry, template, episode_defaults, cast, places, props, memory, slots,
+                slice_text, open_hooks=None, audience_direction=None):
+    """E1 for a v2 story (phase 7 stage 5c): :func:`build_e1` with ``v2``
+    (``new_objects`` from episode 2 on), plus *slice_text*
+    (``context.slice_for_episode``: the planned beats, who wants what, where
+    things stand) after the rosters, and the asks to stage the beats in
+    order and introduce each character where it first appears. The schema
+    is E1's (v2)."""
+    return _build_e1(pack, ep=ep, arc_entry=arc_entry, template=template, episode_defaults=episode_defaults,
+                     cast=cast, places=places, props=props, memory=memory, slots=slots, open_hooks=open_hooks,
+                     audience_direction=audience_direction, v2=True, slice_text=slice_text or None,
+                     v2_lines=_E1_V2_LINES)
+
+
+def build_e2_v2(pack, *, scene, scene_number, outline, previous, word_budget, cast, place, props, sfx_cues,
+                narrator_enabled, voice_direction, slice_text, note=None):
+    """E2 for a v2 story (phase 7 stage 5c): :func:`build_e2`'s structure,
+    the scene's *slice_text* (``context.slice_for_scene``) after the props
+    (the place line then says its name only: the slice holds its layout and
+    light), never to repeat or paraphrase a line already spoken (the
+    previous line is shown to continue from), each character's first
+    appearance introduced (:func:`first_appearances` named), and
+    ``sfx_cues[].at`` an enum (:func:`e2_v2_schema`). The validator is
+    ``validate_e2``, unchanged."""
+    return _build_e2(pack, scene=scene, outline=outline, previous=previous, word_budget=word_budget, cast=cast,
+                     place=place, props=props, sfx_cues=sfx_cues, narrator_enabled=narrator_enabled,
+                     voice_direction=voice_direction, note=note, slice_text=slice_text or "")
+
+
+def build_e3_v2(pack, *, ep, part=None, note=None, hook_scene, cliffhanger_scene, recap_scene, outline,
+                first_body_line, last_body_line, arc_entry, next_arc_entry, memory, episode_defaults,
+                word_budgets, cast, narrator_enabled, slice_text, open_hooks=None):
+    """E3 for a v2 story (phase 7 stage 5c): :func:`build_e3`'s structure,
+    the *slice_text* of the scene it writes (``context.slice_for_scene``)
+    after the characters, the cliffhanger block saying never to repeat or
+    paraphrase a line (the body's last line is shown to continue from) and
+    that the reveal is shown or spoken, never only described, and the
+    first-appearance ask. The schema and the validator are E3's."""
+    return _build_e3(pack, ep=ep, part=part, note=note, hook_scene=hook_scene, cliffhanger_scene=cliffhanger_scene,
+                     recap_scene=recap_scene, outline=outline, first_body_line=first_body_line,
+                     last_body_line=last_body_line, arc_entry=arc_entry, next_arc_entry=next_arc_entry, memory=memory,
+                     episode_defaults=episode_defaults, word_budgets=word_budgets, cast=cast,
+                     narrator_enabled=narrator_enabled, open_hooks=open_hooks, slice_text=slice_text or "")
 
 
 # ------------------------------------------------------------------------- E4
@@ -2881,7 +3069,7 @@ def t1_v2_schema(shots_per_scene, modifiers_allowed, tags_allowed) -> dict:
 
 
 def build_t1_v2(pack, *, scene, lines, characters, place, props, previous_shots, shots_per_scene, camera,
-                modifiers_allowed, hook_style):
+                modifiers_allowed, hook_style, continuity=None):
     """One v2 scene's beat shots (phase 7 stage 4, A12): *shots_per_scene*
     (1-1, or 2-2 for a scene longer than one clip), each a framing, a camera
     motion, modifiers, the plot beat (``action``), what moves (``motion``),
@@ -2896,11 +3084,17 @@ def build_t1_v2(pack, *, scene, lines, characters, place, props, previous_shots,
     shots of the episode so far, each ``{framing, camera_motion}`` and the
     last one's ``action`` and ``staging`` too. When neither of the two holds
     a close-up, this scene is asked for one (the rule pass's 3-scene window,
-    ``shots.rule_pass``, would force it otherwise)."""
+    ``shots.rule_pass``, would force it otherwise).
+
+    *continuity* (phase 7 stage 5c, ``context.slice_for_shot``): the
+    ledger's wardrobe and holder facts for the scene's subjects, shown after
+    the scene; None or '' leaves the prompt as it was."""
     tag_by_char, place_tag, prop_tags, tags_allowed = _t1_tags(characters, place, props, scene["time_variant"])
     names = {c["char_id"]: c["name"] for c in characters}
 
     user = _t1_v2_context(scene, lines, characters, place, props, camera, tag_by_char, place_tag, prop_tags, names)
+    if continuity:
+        user += continuity + "\n\n"
     if previous_shots:
         rows = []
         for i, shot in enumerate(previous_shots):

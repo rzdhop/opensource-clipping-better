@@ -1449,8 +1449,10 @@ def test_input_budget_names_every_episode_prompt():
     # the same way (tests/test_story_episode_prompt_budgets.py); the v1 rows are unchanged (RC-M1).
     # Phase 7 stage 5a (DEC-228): re-pinned on purpose -- the dossier writer (D1), measured the same way.
     # Phase 7 stage 5b (DEC-228): re-pinned on purpose -- the knowledge step's D4/D5/D6, measured the same way.
+    # Phase 7 stage 5c (DEC-228): re-pinned on purpose -- a v2 story's writing calls with their context slice
+    # (E1v2/E2v2/E3v2), measured the same way; the v1 rows are unchanged (RC-M1).
     assert list(prompts.INPUT_BUDGET) == ["E1", "E2", "E3", "E4", "T1", "T1r", "S3", "F1", "N1", "D2", "D3", "R1v2",
-                                          "T1v2", "T1rv2", "D1", "D4", "D5", "D6"]
+                                          "T1v2", "T1rv2", "D1", "D4", "D5", "D6", "E1v2", "E2v2", "E3v2"]
 
 
 @pytest.mark.parametrize(
@@ -2175,4 +2177,134 @@ def test_the_largest_t1_v2_replies_fit_their_caps_but_not_much_smaller_ones():
         needed = estimate_tokens(json.dumps(reply, ensure_ascii=False)) * FRENCH_TOKEN_FACTOR
         cap = prompts.MAX_TOKENS[prompt_id]
         assert cap // 2 < needed <= cap, (prompt_id, needed, cap)
+        assert prompts.TEMPERATURE[prompt_id] is prompts.WRITING_TEMPERATURE
+
+
+# ==================================================================== E1v2/E2v2/E3v2 (phase 7 stage 5c, DEC-228)
+#
+# A v2 story's writing calls read the context slice of what they write
+# (context.slice_for_scene / slice_for_episode) and the asks E4's diagnosis
+# called for: story A's climax line was spoken twice verbatim (no call was
+# told not to repeat a line; the cliffhanger's prompt showed the line before
+# it verbatim), a character was never introduced, the cliffhanger's reveal
+# never shown. E2v2's sfx anchor is an enum (the bare string was filled with
+# anything). The v1 E2/E3 prompts are byte for byte what they were (RC-M1):
+# sha256 of json.dumps([system, user, schema], sort_keys=True,
+# ensure_ascii=False), rendered on HEAD e1d459f before E2v2/E3v2 existed.
+
+_E2_V1_SHA256 = "ecf7ff517492e9744ca4fa352900d4fcf8d5386acb2e97c78cde7aa5a6fbdf1c"
+_E3_V1_EP2_SHA256 = "4b74ff3b5bda6bc291342318e7549d7ce6e58d1789be1a085573f2965b6bc8b3"
+PREVIOUS_E2 = {"summary": "Un premier choc.", "speaker_name": "Kiwilo", "text": "Je n'ai rien fait."}
+LAST_BODY_LINE = {"speaker_name": "Mangella", "text": "Tu ne t'en tireras pas comme ça."}
+SLICE = "Scene context (from the story's knowledge base):\nBeat: ep 2, beat 3 of 5: Kiwilo cache le téléphone."
+NO_REPEAT = ("Never repeat or paraphrase a line already spoken in this episode; the previous line is shown so you "
+             "can continue from it, not echo it.")
+
+
+def _e2_kwargs(**changes):
+    kwargs = dict(scene=BODY_SCENE, scene_number=2, outline=OUTLINE, previous=PREVIOUS_E2, word_budget=20,
+                  cast=CAST_E2, place=PLACE_E2, props=PROPS_E2, sfx_cues=SFX_CUES, narrator_enabled=False,
+                  voice_direction="over-acted", note="Plus de tension.")
+    kwargs.update(changes)
+    return kwargs
+
+
+def _e3_kwargs(**changes):
+    kwargs = dict(ep=2, hook_scene=HOOK_SCENE, cliffhanger_scene=CLIFF_SCENE, recap_scene=RECAP_SCENE,
+                  outline=OUTLINE, first_body_line=PREVIOUS_E2, last_body_line=LAST_BODY_LINE, arc_entry=ARC_ENTRY,
+                  next_arc_entry=NEXT_ARC_ENTRY, memory=MEMORY_EP2, episode_defaults=EPISODE_DEFAULTS,
+                  word_budgets={"hook": 8, "cliffhanger": 10, "recap": 6}, cast=CAST_E2, narrator_enabled=False)
+    kwargs.update(changes)
+    return kwargs
+
+
+def test_e2_v2_asks_never_to_repeat_a_line_and_its_sfx_at_is_an_enum():
+    system, user, schema = prompts.build_e2_v2(_pack("fr"), slice_text=SLICE, **_e2_kwargs())
+
+    assert NO_REPEAT in user
+    assert "Its last line -- Kiwilo: Je n'ai rien fait." in user  # shown to continue from
+    assert "A character's first appearance in the episode makes clear who they are and what they want." in user
+    # Mangella's first scene of the outline is this one; Kiwilo was in the hook already.
+    assert "First time on screen in this episode: Mangella -- say or show who they are and what they want." in user
+    assert SLICE in user and user.index("Props present:") < user.index(SLICE) < user.index("Write this scene's")
+    assert "Place: La Piscine\n\n" in user  # the slice holds the layout and the light
+    at = schema["properties"]["sfx_cues"]["items"]["properties"]["at"]
+    assert at["enum"] == ["start", "1", "2", "3", "4"]
+    assert schema["properties"]["sfx_cues"]["items"]["properties"]["cue"]["enum"] == SFX_CUES
+    assert prompts.SCHEMA_NAMES["E2v2"] != prompts.SCHEMA_NAMES["E2"]
+    # The validator is E2's own, unchanged: an anchor past the reply's lines is still refused.
+    reply = {"lines": [{"speaker": "char_kiwilo", "text": _fr_words(8), "emotion": "tension", "delivery": "low"},
+                       {"speaker": "char_mangella", "text": _fr_words(8), "emotion": "angry", "delivery": "cold"}],
+             "sfx_cues": [{"at": "start", "cue": "gasp_crowd"}, {"at": "2", "cue": "phone_ring"}],
+             "on_screen_text": None}
+    assert schemas.validate(reply, schema) == []
+    assert prompts.validate_e2(reply, scene=BODY_SCENE, narrator_enabled=False, sfx_cues=SFX_CUES) == []
+    past = dict(reply, sfx_cues=[{"at": "4", "cue": "phone_ring"}])
+    assert schemas.validate(past, schema) == []
+    assert any("not 'start' or a line number 1-2" in error
+               for error in prompts.validate_e2(past, scene=BODY_SCENE, narrator_enabled=False, sfx_cues=SFX_CUES))
+
+    # RC-M1: v1 E2 is byte for byte what it was; it never carries the v2 asks or the enum.
+    v1 = prompts.build_e2(_pack("fr"), **_e2_kwargs())
+    assert _sha_call(v1) == _E2_V1_SHA256
+    assert NO_REPEAT not in v1[1] and "enum" not in v1[2]["properties"]["sfx_cues"]["items"]["properties"]["at"]
+
+
+def test_e3_v2_cliffhanger_block_says_never_to_repeat_and_to_show_the_reveal():
+    _system, user, schema = prompts.build_e3_v2(_pack("fr"), slice_text=SLICE, **_e3_kwargs())
+
+    block = user.split("Cliffhanger scene (", 1)[1].split("\n\n", 1)[0]
+    assert "The scene right before it ends with -- Mangella: Tu ne t'en tireras pas comme ça." in block
+    assert NO_REPEAT in block
+    assert "Its reveal must be shown or spoken on screen -- in its line or in what the shot shows -- never only " \
+           "described." in block
+    assert "A character's first appearance in the episode makes clear who they are and what they want." in user
+    assert SLICE in user
+    assert schema == prompts.e3_schema(None, 2, ["char_kiwilo", "char_mangella"])
+    # A cliffhanger part alone carries the same block.
+    _s, part_user, _ = prompts.build_e3_v2(_pack("fr"), slice_text=SLICE, **_e3_kwargs(part="cliffhanger"))
+    assert NO_REPEAT in part_user
+
+    # RC-M1: v1 E3 (episode 2, every part) is byte for byte what it was.
+    v1 = prompts.build_e3(_pack("fr"), **_e3_kwargs())
+    assert _sha_call(v1) == _E3_V1_EP2_SHA256 and NO_REPEAT not in v1[1]
+
+
+def test_e1_v2_reads_the_episode_slice_and_asks_to_stage_the_beats():
+    episode_slice = ("Episode plan (from the story's knowledge base):\nPlanned beats of episode 1, in order:\n"
+                     "1. Ça bouge.")
+    kwargs = dict(ep=1, arc_entry=ARC_ENTRY, template=TEMPLATE, episode_defaults=EPISODE_DEFAULTS, cast=CAST_E1,
+                  places=PLACES_E1, props=PROPS_E1, memory=MEMORY_NONE, slots=SLOTS_EP1)
+    _system, user, schema = prompts.build_e1_v2(_pack("fr"), slice_text=episode_slice, **kwargs)
+    assert episode_slice in user and user.index("Existing props:") < user.index(episode_slice)
+    assert "Stage the planned beats above, in order, across the body scenes" in user
+    assert "The scene where a character first appears in this episode makes clear who they are" in user
+    assert schema == prompts.build_e1(_pack("fr"), v2=True, **kwargs)[2]
+    assert _triple_sha(_ep1_e1()) == RC_M1_SHAS["E1"]  # v1 E1 unchanged
+
+
+def test_the_largest_french_e1_v2_replies_fit_their_caps():
+    """DEC-138's method on E1v2's reply: E1's largest (12 scenes at every
+    cap) plus 2 new objects (a 4-word name, a 15-word one-line, an owner),
+    and the payoff variant with every scene naming a 120-character hook.
+    E2v2 and E3v2 reply exactly as E2 and E3: their caps are those."""
+    new_objects = [{"name": _fr_words(4), "one_line": _fr_words(15), "owner_char_id": "char_broccolia"},
+                   {"name": _fr_words(4), "one_line": _fr_words(15), "owner_char_id": "char_mangella"}]
+    new_objects[1]["name"] = "vérité " + _fr_words(3)
+    reply = dict(_largest_e1_reply(), new_objects=new_objects)
+    check = dict(ep=2, template=TEMPLATE_90, episode_defaults=EPISODE_DEFAULTS, cast_ids=CAST_IDS,
+                 places=PLACES_DICT, prop_ids=["prop_phone"], v2=True)
+    assert prompts.validate_e1(reply, **check) == []
+    hooks = [_fr_hook(i) for i in range(schemas.PAYOFF_HOOKS_MAX)]
+    payoff = dict(reply, scenes=[dict(scene, pays_off=[max(hooks, key=len)]) for scene in reply["scenes"]])
+    assert prompts.validate_e1(payoff, open_hooks=hooks, **check) == []
+    measured = []
+    for prompt_cap, doc in ((prompts.MAX_TOKENS["E1v2"], reply), (prompts.E1V2_PAYOFF_MAX_TOKENS, payoff)):
+        needed = estimate_tokens(json.dumps(doc, ensure_ascii=False)) * FRENCH_TOKEN_FACTOR
+        measured.append(round(needed))
+        assert prompt_cap == -(-round(needed * 1.15, 1) // 10) * 10, (needed, prompt_cap)
+    assert measured == [1521, 2059]  # E1's ~1,374 / ~1,914 plus the two new objects
+    assert prompts.MAX_TOKENS["E2v2"] == prompts.MAX_TOKENS["E2"]
+    assert prompts.MAX_TOKENS["E3v2"] == prompts.MAX_TOKENS["E3"]
+    for prompt_id in ("E1v2", "E2v2", "E3v2"):
         assert prompts.TEMPERATURE[prompt_id] is prompts.WRITING_TEMPERATURE

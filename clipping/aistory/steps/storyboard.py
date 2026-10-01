@@ -37,7 +37,7 @@ import time
 
 from clipping.providers import pricing
 
-from .. import media_policy, prompts, shots, timing
+from .. import context, media_policy, prompts, shots, timing
 from . import entities, episode_common, llm_call
 from . import script as script_step
 from .episode_common import SCRIPT_DOC, STORYBOARD_DOC
@@ -152,13 +152,17 @@ def build(ec, script, plans, sources, previous, *, stale, now) -> tuple:
     in *stale* (planned from an older revision, not planned again) keeps its
     stale mark and the revision it was planned from. Should those old plans
     no longer fit their scene, they are left out (they are planned again by
-    the next run). ``(storyboard, notes)``."""
+    the next run). ``(storyboard, notes)``. A v2 story's shots are resolved
+    with the episode's ledger (``script.ledger_of``: wardrobe sets and
+    holders, phase 7 stage 5c)."""
+    ledger = script_step.ledger_of(ec)
+
     def attempt(chosen):
         return shots.build_storyboard(
             script, {sid: plans[sid] for sid in chosen}, {sid: sources[sid] for sid in chosen},
             entities=ec.entities, style_lock=ec.style_lock, template=ec.template, language=ec.language,
             consistency_mode=ec.consistency_mode, now=now, previous=previous, v2=media_policy.is_v2(ec.story),
-            shots_per_scene=ec.episode_defaults["shots_per_scene"])
+            shots_per_scene=ec.episode_defaults["shots_per_scene"], ledger=ledger)
 
     try:
         board, notes = attempt(list(plans))
@@ -349,11 +353,15 @@ def _repair_t1_v2_reply(reply, *, tags_allowed) -> list:
 
 def plan_scene_v2(ctx, ec, script, plans, scene, *, tools, announced) -> list:
     """T1 v2 for *scene* (phase 7 stage 4, A12): its beat shots as plans,
-    each with T1 v2's ``clip_motion`` and ``staging``."""
+    each with T1 v2's ``clip_motion`` and ``staging``. Phase 7 stage 5c
+    (A13): the call also reads the ledger's wardrobe and holder facts for
+    the scene (``context.slice_for_shot``; the previous shots' action and
+    staging are T1 v2's own block already, so not repeated)."""
     inputs = shot_inputs_v2(ec, script, scene)
     pack = script_step._pack(ec, ctx, announced)
+    continuity = context.slice_for_shot(ec, scene, None, None, ledger=script_step.ledger_of(ec))
     system, user, schema = prompts.build_t1_v2(pack, scene=scene, previous_shots=_previous_shots(
-        script, plans, scene["scene_id"], v2=True), **_builder_kwargs(inputs))
+        script, plans, scene["scene_id"], v2=True), continuity=continuity, **_builder_kwargs(inputs))
 
     def validate(reply):
         added = _repair_t1_v2_reply(reply, tags_allowed=inputs["tags_allowed"])
