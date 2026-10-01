@@ -262,7 +262,9 @@ def test_switching_the_link_stales_exactly_the_shots_the_old_link_made_and_keeps
 
     for bad, error in (({"image": "fal/flux-schnell"}, f"links.image: 'fal/flux-schnell' is not a link of "
                                                       f"IMAGE_CHAIN (its links: {CF}, {POLL})"),
-                       ({"video": "fal/seedance-1-pro-fast"}, "links: unknown key(s) video (editable: image)")):
+                       # Phase 6 stage 11 (re-pin): video is editable now (its own test,
+                       # tests/test_story_clip_controls.py); an unknown slot is still refused.
+                       ({"audio": "edge/x"}, "links: unknown key(s) audio (editable: image, video)")):
         with pytest.raises(workflow.WorkflowError) as caught:
             workflow.patch_assets(store, story_id, 1, {"links": bad}, now=LATER, env=settings)
         assert caught.value.detail["errors"] == [error]

@@ -835,16 +835,31 @@ class FastTrackStepParams(BaseModel):
 
 class AssetsShotPatch(BaseModel):
     """One shot of ``PATCH /episodes/{ep}/assets``'s ``shots``: ``locked``
-    keeps the image it has (only a shot with an image may be locked)."""
+    keeps the image it has (only a shot with an image may be locked); phase 6
+    stage 11, what its clip does -- ``keep_still``, ``animate`` (a pin: the
+    planner animates it first) and ``keep_native_audio`` (tier 3) -- true or
+    false, or null to clear the override (``workflow.ASSETS_SHOT_FLAG_FIELDS``,
+    kept in ``assets.json``, never the storyboard). "Sent" is
+    ``model_fields_set``, so a null sent is not a field left out."""
     shot_id: str
     locked: Optional[bool] = None
+    keep_still: Optional[bool] = None
+    animate: Optional[bool] = None
+    keep_native_audio: Optional[bool] = None
 
 
 class AssetsPatchRequest(BaseModel):
     """PATCH /api/stories/{id}/episodes/{ep}/assets. A lock never moves the
     storyboard's revision or approval; it is part of the fingerprint the
-    assets are approved with, so a new one makes that approval stale."""
+    assets are approved with, so a new one makes that approval stale.
+
+    ``links`` (phase 6, A-087) ``{"image"?: "<link>", "video"?: "<link>"}``
+    switches the episode's image or video link -- the sticky offer's
+    ``switch`` -- checked against the Settings chains by
+    ``workflow.patch_assets`` (400 with its errors, not 422, which is why it
+    is a plain object here)."""
     shots: Optional[list[AssetsShotPatch]] = None
+    links: Optional[dict] = None
 
 
 # Phase 5 (spec 2.6, 9.1, 9.2, plan 11 stages 4-5): the series steps --

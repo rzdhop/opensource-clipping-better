@@ -71,6 +71,7 @@ import time
 from .. import store as store_mod
 from .. import timing, voices
 from . import assets as assets_step
+from . import clips as clips_step
 from . import episode_common, llm_call, voice_lines
 from . import metadata as metadata_step
 from . import render as render_step
@@ -275,6 +276,9 @@ def paid_verdict(units, *, ep, predicted=False) -> dict:
         elif not video.get("ready"):
             blockers.append(video.get("message") or "the clips cannot be made")
     total = round(images_usd + float(voices_usd) + video_usd, 4)
+    # Phase 6 stage 11: paid clips have their own way out.
+    clips_way = ("; for the clips, keep their shots still (the assets edit's keep_still) or run the assets step "
+                 "with animate off" if video_usd else "")
     over = units.get("over_cap")
     caps_line = _caps_line(caps)
 
@@ -288,12 +292,12 @@ def paid_verdict(units, *, ep, predicted=False) -> dict:
         verdict = STOPS_BEFORE_PAID
         stop = (f"{head} need paid generation -- {_and(parts)}, est {upto}${total:.3f} in all -- and allow_paid is "
                 f"off. {caps_line} Nothing was generated or spent: turn allow_paid on in Settings (the episode, day "
-                "and story caps must all fit), or choose free links for the images and the voices.")
+                f"and story caps must all fit), or choose free links for the images and the voices{clips_way}.")
     elif parts and (over or refused):
         verdict = STOPS_BEFORE_PAID
         why = over or "; ".join(refused)
         stop = (f"{head} would go over a cap -- {_and(parts)}, est {upto}${total:.3f} in all: {why}. {caps_line} "
-                "Nothing was generated or spent: raise that cap in Settings, or choose free links.")
+                f"Nothing was generated or spent: raise that cap in Settings, or choose free links{clips_way}.")
     elif blockers or not units.get("ready", True):
         verdict = BLOCKED
         stop = (f"{head} cannot be made as the chains stand: {'; '.join(blockers) or 'they are not ready'}. "
@@ -619,6 +623,7 @@ def estimate(ec, *, env, storyboard=T1, adapters=None, transport=None, custom_fo
                        "script_breakdown": {"E1", "E2", "E3", "E4"}},
          "images": {"count", "exact", "route_class", "link", "est_usd", "ready", "message"},
          "tts": {"lines", "chars", "exact", "est_usd", "voices": [...]},
+         "video": <the assets estimate's video part> (tier >= 2 only),
          "render": {"needed", "shots", "seconds", "minutes", "basis"},
          "est_usd": x, "paid": <paid_verdict>, "stops_at": {"step", "reason"} | None}
 
@@ -631,6 +636,10 @@ def estimate(ec, *, env, storyboard=T1, adapters=None, transport=None, custom_fo
     not measured) or, before those exist, as an upper bound (every scene at
     the top of ``shots_per_scene``; the top of the template's window at the
     language's reading rate, on the dearest voice) -- ``exact`` says which.
+    **Clips** (tier >= 2, phase 6 stage 11): the assets estimate's own video
+    part on the approved storyboard (``assets._video_units``), in the paid
+    part and the total as the run's paid check counts them; before the
+    storyboard is approved, ``video.count`` is None and nothing is priced.
     **Render** minutes from :func:`render_seconds` (an authored estimate
     until A-069), 0 when the last render is current. ``est_usd`` is the paid
     part (a paid link the gates would refuse included: the price of the
@@ -707,10 +716,32 @@ def estimate(ec, *, env, storyboard=T1, adapters=None, transport=None, custom_fo
     voices_paid = voices_est.get("paid_usd")
     if voices_paid is None:
         voices_paid = sum(row["est_usd"] for row in voices_est["voices"] if row["paid"])
-    total = round(images_paid + float(voices_paid), 4)
-    caps, over_cap = assets_step.spending_caps(ec, total, env=env, ledger=ledger)
+    # Phase 6 stage 11: at tier >= 2 the clips the assets step would animate
+    # (its estimate's own video part, on the approved storyboard: the paid
+    # check prices them the same way before any is bought); before a
+    # storyboard is approved they cannot be planned yet.
+    video, video_paid = None, 0.0
+    if clips_step.tier_of(ec) >= 2:
+        if images_exact:
+            video = assets_step._video_units(ec, script, board, doc, env=env, ledger=ledger, adapters=adapters,
+                                             probe_local=False, transport=transport,
+                                             committed=images_paid + float(voices_paid))
+            video["animate"] = True
+            if video["route_class"] == "paid" and video["count"] and video["ready"]:
+                video_paid = video["est_usd"]
+        else:
+            video = {"tier": clips_step.tier_of(ec), "count": None, "seconds": None, "est_usd": 0.0, "plan": [],
+                     "route_class": None, "link": None, "ready": True, "refused": None, "animate": True,
+                     "message": ("The clips are planned once the storyboard is approved; the paid check prices "
+                                 "them before any is bought.")}
+    total = round(images_paid + float(voices_paid) + video_paid, 4)
+    caps, over_cap = assets_step.spending_caps(ec, total, env=env, ledger=ledger,
+                                               video=video if video_paid else None)
     units = {"images": images, "voices": voices_est, "caps": caps, "est_usd": total, "over_cap": over_cap,
              "ready": images["ready"] and voices_est["ready"] and over_cap is None}
+    if video is not None and video["count"] is not None:
+        units["video"] = video
+        units["ready"] = bool(units["ready"] and video["ready"])
     verdict = paid_verdict(units, ep=ep, predicted=not (images_exact and tts_exact))
     if stops_at is None and verdict["stop"]:
         stops_at = {"step": "paid_check", "reason": verdict["stop"]}
@@ -732,6 +763,7 @@ def estimate(ec, *, env, storyboard=T1, adapters=None, transport=None, custom_fo
         "images": images,
         "tts": {"lines": voices_est["lines"], "chars": voices_est["chars"], "exact": tts_exact,
                 "est_usd": round(float(voices_paid), 4), "voices": voices_est["voices"]},
+        **({"video": video} if video is not None else {}),
         "render": {"needed": not render_current, "shots": shots_total, "seconds": seconds,
                    "minutes": round(seconds / 60, 1),
                    "basis": (f"estimate: {RENDER_SECONDS_PER_SHOT:g} s a shot + {RENDER_TAIL_SECONDS:g} s "

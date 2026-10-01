@@ -223,13 +223,19 @@ def require_renderable(ec) -> tuple:
 
 # -------------------------------------------------------------------- clips
 
-def _clip_problem(ec, shot, state):
+def _clip_problem(ec, shot, state, *, script=None, doc=None, link=None):
     """``(what, still_generating)``: why *shot*'s clip record is not the
     clip the render may cut the shot from (*state*: ``clips.clip_state``'s),
     and whether its request is still open in the generation journal (only
-    Continue collects it: ``assets.open_clip_request``)."""
+    Continue collects it: ``assets.open_clip_request``) -- the one its
+    record holds, or (with *script*) a pending re-animate's
+    (``assets.pending_clip_keys`` on *link*, the episode's video link): the
+    provider may hold it while the record still has the old clip's key."""
     clip = shot["assets"].get("clip") or {}
-    if assets_step.open_clip_request(ec, [clip.get("cache_key")]) is not None:
+    keys = [clip.get("cache_key")]
+    if script is not None and clip.get("pending"):
+        keys += assets_step.pending_clip_keys(ec, script, shot, doc, link=link)
+    if assets_step.open_clip_request(ec, keys) is not None:
         return "is still generating", True
     if clip.get("pending"):
         return "waits for its re-animate", False
@@ -240,17 +246,18 @@ def _clip_problem(ec, shot, state):
     return "file is missing", False
 
 
-def clip_refusal(ec, blocked) -> str:
+def clip_refusal(ec, blocked, *, script=None, doc=None, link=None) -> str:
     """The render's refusal of *blocked* (``[(shot, state)]``: shots not kept
     still whose clip record is not current): each shot named with what went
     wrong, its regenerate target -- or, still generating, only Continue
-    (``assets.CONTINUE_ONLY``, DEC-152: a new seed would buy a second clip) --
-    and the param that renders them with Tier-1 motion instead."""
+    (``assets.CONTINUE_ONLY``, DEC-152: a new seed would buy a second clip;
+    a pending re-animate the provider holds included, :func:`_clip_problem`)
+    -- and the param that renders them with Tier-1 motion instead."""
     ep = ec.ep
     said, targets, held = [], [], []
     for shot, state in blocked:
         shot_id = shot["shot_id"]
-        what, still = _clip_problem(ec, shot, state)
+        what, still = _clip_problem(ec, shot, state, script=script, doc=doc, link=link)
         said.append(f"shot {shot_id}'s clip {what}")
         if still:
             held.append(shot_id)
@@ -321,9 +328,23 @@ def shot_clips(ec, script, board, assets_doc, *, fill_failed=False):
         else:
             blocked.append((shot, state))
     if blocked and not fill_failed:
-        raise StepFailed(clip_refusal(ec, blocked))
+        raise StepFailed(clip_refusal(ec, blocked, script=script, doc=assets_doc, link=link))
     return {"videos": videos, "keep_still": keep_still, "filled": [shot["shot_id"] for shot, _state in blocked],
             "native_audio": native, "notes": notes}
+
+
+def require_clips(ec, params=None) -> tuple:
+    """:func:`require_renderable`, then the render's clip refusal
+    (:func:`shot_clips`) with *params*' ``fill_failed_with_motion``
+    (:func:`read_params`) -- what the run meets, in its order, checked
+    before a job exists (phase 6 stage 11: the API's 409, the render
+    estimate): ``StepFailed`` with the run's own sentence, else
+    ``(script, storyboard, assets_doc)``. Nothing more at tier 1. Reads
+    files only."""
+    wanted = read_params(params)
+    script, board, doc = require_renderable(ec)
+    shot_clips(ec, script, board, doc, fill_failed=bool(wanted.get(FILL_PARAM)))
+    return script, board, doc
 
 
 # ------------------------------------------------------------------- inputs

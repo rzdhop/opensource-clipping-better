@@ -90,7 +90,10 @@ cancel token is checked before every call. It fills only what is missing
    approval kept; a clip that fails is recorded ``failed`` with the reason
    and the phase goes on with the next shot; the link gone for now fails
    the clips left with the video offer (:class:`sticky_link.StickyLinkGone`,
-   kind ``video``). A poll that runs out leaves the request ``submitted``:
+   kind ``video``); only the user switches it (stage 11: the offer's
+   ``switch``, ``workflow.patch_assets``' ``links.video``,
+   :func:`switched_video_doc`), and the clips another link made are then
+   stale. A poll that runs out leaves the request ``submitted``:
    the next run collects it, never buying it again (DEC-152). The plan
    cannot run at all (no link, ``allow_paid`` off, a cap): the step stops
    before its first call, images included, unless ``animate`` is off.
@@ -126,6 +129,7 @@ request stops everything, naming the request id (``gencache.JournalError``).
 from __future__ import annotations
 
 import copy
+import dataclasses
 import hashlib
 import json
 import os
@@ -140,7 +144,7 @@ from clipping.providers import gating, gen_timings, gencache, local_comfyui
 from clipping.providers import generation as gen
 from clipping.providers.registry import ChainError, Link, describe
 
-from .. import hardware, imaging, refimages, schemas, timing, video_plan, voices, wordtiming
+from .. import defaults, hardware, imaging, refimages, schemas, timing, video_plan, voices, wordtiming
 from .. import ledger as ledger_mod
 from .. import names as names_mod
 from .. import store as store_mod
@@ -963,32 +967,39 @@ def link_gone(units):
     return ((units["images"].get("sticky") or {}).get("gone")) if units["images"]["count"] else None
 
 
-def link_switch(ec, value, *, env, errors):
-    """The image link an assets edit's ``links`` (``{"image": "<link>"}``)
-    switches the episode to, or None (nothing asked, or *errors* gained why
-    not): a link of the episode's image chain (IMAGE_CHAIN, or
-    IMAGE_EDIT_CHAIN in ``references`` mode). ``video`` (the clips' link,
-    recorded by the video phase) is not editable yet: its offer names the
-    next link and asks for nothing else."""
+def link_switch(ec, value, *, env, errors) -> dict:
+    """``{"image"?: link, "video"?: link}``: the links an assets edit's
+    ``links`` (``{"image"?: "<link>", "video"?: "<link>"}``) switches the
+    episode to -- empty when nothing is asked, or *errors* gained why not.
+    ``image`` must be a link of the episode's image chain (IMAGE_CHAIN, or
+    IMAGE_EDIT_CHAIN in ``references`` mode); ``video`` (phase 6 stage 11)
+    a link of VIDEO_CHAIN, or the local ComfyUI (``clips.LOCAL_LINK``). The
+    chains are the ones *env* -- the Settings values -- names."""
     if not isinstance(value, dict):
-        errors.append("links: expected an object {image}")
-        return None
-    extra = sorted(set(value) - {sticky_link.IMAGE})
+        errors.append("links: expected an object {image?, video?}")
+        return {}
+    extra = sorted(set(map(str, value)) - set(sticky_link.KINDS))
     if extra:
-        errors.append(f"links: unknown key(s) {', '.join(map(str, extra))} (editable: image)")
-    if sticky_link.IMAGE not in value:
-        return None
-    kind = image_kind(ec)
-    try:
-        chain = [describe(link) for link in gen.chain_from_env(kind, gating.merged_env(env))]
-    except ChainError as exc:
-        errors.append(f"links.image: {gen.ENV_NAMES[kind]} cannot be used ({exc})")
-        return None
-    wanted = value[sticky_link.IMAGE]
-    if not isinstance(wanted, str) or wanted not in chain:
-        errors.append(f"links.image: {wanted!r} is not a link of {gen.ENV_NAMES[kind]} (its links: "
-                      f"{', '.join(chain)})")
-        return None
+        errors.append(f"links: unknown key(s) {', '.join(extra)} (editable: {', '.join(sticky_link.KINDS)})")
+    merged = gating.merged_env(env)
+    wanted = {}
+    for slot in sticky_link.KINDS:
+        if slot not in value:
+            continue
+        kind = image_kind(ec) if slot == sticky_link.IMAGE else gen.VIDEO
+        try:
+            chain = [describe(link) for link in gen.chain_from_env(kind, merged)]
+        except ChainError as exc:
+            errors.append(f"links.{slot}: {gen.ENV_NAMES[kind]} cannot be used ({exc})")
+            continue
+        allowed = chain if slot == sticky_link.IMAGE else chain + [link for link in (clips.LOCAL_LINK,)
+                                                                   if link not in chain]
+        link = value[slot]
+        if not isinstance(link, str) or link not in allowed:
+            errors.append(f"links.{slot}: {link!r} is not a link of {gen.ENV_NAMES[kind]} (its links: "
+                          f"{', '.join(chain)})")
+            continue
+        wanted[slot] = link
     return wanted
 
 
@@ -1010,6 +1021,26 @@ def switched_assets_doc(ec, storyboard, doc, wanted, *, env, now):
     new = copy.deepcopy(doc)
     new["links"] = dict(new.get("links") or {})
     new["links"][sticky_link.IMAGE] = sticky_link.record(wanted, now=now, switched_from=info["link"])
+    return new
+
+
+def switched_video_doc(ec, doc, wanted, *, now):
+    """*doc* (``assets.json``, or None: a minimal one is started) with the
+    episode's video link switched to *wanted* -- ``links.video {link:
+    wanted, since: now, switched_from: the link it had}`` -- or None when
+    that is already its recorded link (phase 6 stage 11, A-087). Only the
+    user switches: the clips another link made are then stale
+    (``clips.clip_state`` reads the record), the next run animates exactly
+    those again on *wanted*, and the assets approval goes stale with the
+    fingerprint's ``links``; the storyboard -- its clip records, its
+    approval -- is not touched."""
+    entry = sticky_link.recorded(doc, sticky_link.VIDEO)
+    current = entry["link"] if entry else None
+    if current == wanted:
+        return None
+    new = copy.deepcopy(doc) if doc is not None else _minimal_assets_doc(ec, now)
+    new["links"] = dict(new.get("links") or {})
+    new["links"][sticky_link.VIDEO] = sticky_link.record(wanted, now=now, switched_from=current)
     return new
 
 
@@ -1084,8 +1115,24 @@ def spending_caps(ec, total, *, env, ledger=None, video=None) -> tuple:
     return caps, over_cap
 
 
+def on_route(ec, route):
+    """*ec* as though its story were on *route* (``auto``, ``local``,
+    ``api``): a copy whose story's ``generation_profile.route`` is *route*,
+    to price another route without patching the story (``GET
+    /estimate/assets?route=``, phase 6 stage 11) -- nothing is written; *ec*
+    itself when *route* is None or already the story's. ``ValueError`` for
+    any other route."""
+    profile = ec.story["generation_profile"]
+    if route is None or route == profile["route"]:
+        return ec
+    if route not in defaults.ROUTES:
+        raise ValueError(f"the route must be one of {', '.join(defaults.ROUTES)}, not {route!r}")
+    story = dict(ec.story, generation_profile=dict(profile, route=route))
+    return dataclasses.replace(ec, story=story)
+
+
 def asset_units(ec, script, storyboard, *, env, align_words=False, adapters=None, probe_local=False,
-                transport=None, ledger=None, animate=True) -> dict:
+                transport=None, ledger=None, animate=True, route=None) -> dict:
     """What the assets step would do and spend now, calling nothing (a local
     editor is asked whether it is there only with *probe_local*: the DEC-117
     status probe, never a generation)::
@@ -1126,7 +1173,11 @@ def asset_units(ec, script, storyboard, *, env, align_words=False, adapters=None
     ``video`` part is still shown -- ``animate`` false, its message saying so
     -- but it is left out of the total, ``over_cap``, ``paid_links`` and
     ``ready``: the run makes no clip.
+
+    *route* (phase 6 stage 11) prices everything on that route instead of
+    the story's own (:func:`on_route`), writing nothing.
     """
+    ec = on_route(ec, route)
     ledger = ledger or _open_ledger(ec)
     story_spent = float(ledger.totals()["est_usd"])
 
@@ -1396,6 +1447,52 @@ def open_clip_request(ec, keys):
         if entry and entry.get("state") in (gencache.SENDING, gencache.SUBMITTED):
             return entry
     return None
+
+
+def pending_clip_keys(ec, script, shot, doc, *, link=None) -> list:
+    """The generation-journal keys a re-animate's ``pending`` request of
+    *shot* (DEC-154: its seed and note kept before the call) may have been
+    sent under on *link* -- the episode's video link, else the one its clip
+    records -- or ``[]`` when none is pending. Its length is the one the
+    planner asks for the shot (``video_plan.requested_seconds``) or its
+    clip's own; on a local ComfyUI each shipped workflow's
+    (``hardware.VIDEO_WORKFLOWS``: which one ran is the server's card, not
+    asked here). What the render's refusal checks with
+    :func:`open_clip_request` when the storyboard still holds the old clip's
+    key -- the process stopped after the provider took the request, before
+    its answer was recorded (phase 6 stage 11). Reads files only."""
+    clip = shot["assets"].get("clip") or {}
+    pending = clip.get("pending")
+    link = link or clip.get("link")
+    if not pending or not link or shot_image_path(ec, shot) is None:
+        return []
+    duration = max(float(shot["duration_s"] or 0.0), 0.01)
+    options = [(None, None)]
+    if link.startswith("local/"):
+        options = []
+        for template in dict.fromkeys(hardware.VIDEO_WORKFLOWS.values()):
+            try:
+                options.append((template, local_comfyui.video_clip_lengths(template)))
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
+    flags, tier = clips.shot_flags(shot, doc), clips.tier_of(ec)
+    keys = []
+    for template, lengths in options:
+        seconds = [int(clip["clip_s"])] if clip.get("clip_s") else []
+        try:
+            seconds.insert(0, video_plan.requested_seconds(link, duration, lengths=lengths))
+        except ValueError:
+            pass
+        for clip_s in dict.fromkeys(seconds):
+            try:
+                _parts, request = clip_request(ec, shot, script, link=link, template=template, clip_s=clip_s,
+                                               seed=pending["seed"], note=pending.get("note"), flags=flags, tier=tier)
+                key = gencache.request_key(gen.VIDEO, link, request)
+            except (KeyError, ValueError, OSError):
+                continue
+            if key:
+                keys.append(key)
+    return keys
 
 
 def still_generating(shot, entry) -> str:

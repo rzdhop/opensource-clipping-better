@@ -25,7 +25,8 @@ Pure helpers (nothing here reads or writes a document): the assets step does
 the wiring (``assets.episode_image_link``, ``assets.image_quote``,
 ``_Assets.make_image``; for the clips ``_Assets.make_clip``,
 ``_Assets.keep_video_link`` and ``assets.video_offer``) and
-``workflow.patch_assets`` the image link's switch.
+``workflow.patch_assets`` the switch of either link (the video link's since
+phase 6 stage 11).
 
 Stdlib only (DEC-012).
 """
@@ -145,10 +146,9 @@ class StickyLinkGone(Exception):
     next link of the chain that could run, the shots a switch makes again
     (those the old link served) with the ones still to make, and what that
     would cost. ``str()`` is the sentence; :meth:`as_dict` the structured
-    offer a caller shows (``switch`` is the assets edit that takes it -- an
-    image link's only: the video link's switch is not an assets edit yet, so
-    its offer names the next link and its price and asks for nothing
-    else)."""
+    offer a caller shows (``switch`` is the assets edit that takes it:
+    ``{"links": {"image" | "video": next_link}}`` -- the video link's since
+    phase 6 stage 11)."""
 
     def __init__(self, *, ep, link, why, chain, next_link=None, next_route=None, next_reason=None, redo=(),
                  todo=(), est_usd=0.0, paid=False, before_any_call=True, kind=IMAGE):
@@ -175,8 +175,8 @@ class StickyLinkGone(Exception):
 
     def switch(self):
         """The assets edit that switches the episode to the next link, or None
-        (always for a video link: its switch is not an assets edit yet)."""
-        return {"links": {IMAGE: self.next_link}} if self.next_link and self.kind == IMAGE else None
+        when no other link can run."""
+        return {"links": {self.kind: self.next_link}} if self.next_link else None
 
     def sentence(self) -> str:
         if self.kind == VIDEO:
@@ -218,9 +218,9 @@ class StickyLinkGone(Exception):
         if self.todo:
             what.append(f"the {len(self.todo)} still to animate")
         plan = f" ({' with '.join(what)}: {_clips(self.qty)}, {price})" if what else ""
-        return (f"{head} Bring it back and run the assets step again. The next link of {self.chain} that could "
-                f"run is {self.next_link}{where}{plan}; an episode's clips move to another link only when you "
-                "choose it.")
+        return (f"{head} Bring it back and run the assets step again, or switch the episode's video link to "
+                f"{self.next_link}{where} (the assets edit {{\"links\": {{\"video\": \"{self.next_link}\"}}}})"
+                f"{plan}; an episode's clips move to another link only when you choose it.")
 
     def as_dict(self) -> dict:
         return {"kind": self.kind, "link": self.link, "why": self.why, "chain": self.chain,

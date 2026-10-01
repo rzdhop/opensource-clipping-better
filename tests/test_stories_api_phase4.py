@@ -87,9 +87,12 @@ def test_the_phase_4_request_models_declare_exactly_the_workflows_closed_lists()
     assert _class_fields("AssetsStepParams") == list(workflow.ASSETS_PARAMS)
     assert _class_fields("RenderStepParams") == list(workflow.RENDER_PARAMS)
     assert _class_fields("FastTrackStepParams") == list(workflow.FAST_TRACK_PARAMS)
-    assert _class_fields("AssetsPatchRequest") == list(workflow.ASSETS_PATCH_FIELDS) == ["shots"]
-    assert _class_fields("AssetsShotPatch") == ["shot_id", *workflow.ASSETS_SHOT_PATCH_FIELDS]
+    # Phase 6 stage 11 (re-pin): the links switch (A-087) and each shot's clip flags.
+    assert _class_fields("AssetsPatchRequest") == list(workflow.ASSETS_PATCH_FIELDS) == ["shots", "links"]
+    assert _class_fields("AssetsShotPatch") == ["shot_id", *workflow.ASSETS_SHOT_PATCH_FIELDS,
+                                                *workflow.ASSETS_SHOT_FLAG_FIELDS]
     assert workflow.ASSETS_SHOT_PATCH_FIELDS == ("locked",)
+    assert workflow.ASSETS_SHOT_FLAG_FIELDS == ("keep_still", "animate", "keep_native_audio")
     # Default-strict like the other story models: no extra= override, "sent" is model_fields_set.
     for name in ("AssetsStepParams", "RenderStepParams", "FastTrackStepParams", "AssetsPatchRequest",
                  "AssetsShotPatch"):

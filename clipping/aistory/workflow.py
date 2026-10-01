@@ -29,11 +29,16 @@ where fastapi is not installed.
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
 import os
 import re
 import threading
+import time
 import types
 
+from clipping.providers import budget as budget_mod
+from clipping.providers import gating, gen_timings
 from clipping.providers import generation as gen
 from clipping.providers import registry
 
@@ -59,7 +64,8 @@ from .ledger import CostLedger
 from .steps import assets as assets_step
 from .steps import concepts as concepts_step
 from .steps import entities as entities_step
-from .steps import episode_common, llm_call
+from .steps import clips as clips_step
+from .steps import episode_common, llm_call, sticky_link
 from .steps import fast_track as fast_track_step
 from .steps import feedback as feedback_step
 from .steps import memory as memory_step
@@ -1674,18 +1680,18 @@ METADATA_PARAMS = ()
 FAST_TRACK_PARAMS = fast_track_step.PARAMS
 PHASE4_PARAMS = {"assets": ASSETS_PARAMS, "render": RENDER_PARAMS, "metadata": METADATA_PARAMS,
                  "fast-track": FAST_TRACK_PARAMS}
-ASSETS_PATCH_FIELDS = ("shots",)
+# Phase 6 stage 6 (A-087): the switch of the episode's image link -- and,
+# stage 11, of its video link -- ``{"links": {"image"?: "<link>", "video"?:
+# "<link>"}}``, taken by :func:`patch_assets` (the API's AssetsPatchRequest,
+# stage 11).
+ASSETS_LINKS_FIELD = "links"
+ASSETS_PATCH_FIELDS = ("shots", ASSETS_LINKS_FIELD)
 ASSETS_SHOT_PATCH_FIELDS = ("locked",)
 # Phase 6 stage 7: a shot item's overrides of what its clip does --
 # ``keep_still``, ``animate`` (a pin), ``keep_native_audio``; true, false or
 # null (clear) -- taken by :func:`patch_assets` into ``assets.json``'s
-# ``shots``; the API's AssetsShotPatch gains them with the dashboard's
-# controls (stages 11-12).
+# ``shots``; the API's AssetsShotPatch carries them (stage 11).
 ASSETS_SHOT_FLAG_FIELDS = schemas.SHOT_OVERRIDE_FLAGS
-# Phase 6 stage 6 (A-087): the switch of the episode's image link,
-# ``{"links": {"image": "<link>"}}`` -- taken by :func:`patch_assets`; the
-# API's AssetsPatchRequest gains it with the dashboard's offer (stages 11-12).
-ASSETS_LINKS_FIELD = "links"
 
 # The document of each episode regenerate target: the one its job writes,
 # and so the one whose approval completes it. A ``metadata:<ep>:<platform>``
@@ -1866,15 +1872,19 @@ def phase4_request(step, params) -> dict:
     return dict(params)
 
 
-def require_step_inputs(ec, step) -> None:
+def require_step_inputs(ec, step, *, params=None) -> None:
     """What a phase-4 step is made from, checked as its runner checks it before
     anything runs, calling nothing (``conflict`` with the runner's own
     sentence): the assets an approved script and an approved, current
     storyboard (``assets.require_approved``); the render the assets approved
     with a current fingerprint, every image and voice on disk
-    (``render.require_renderable``); the metadata a finished render
-    (``metadata.require_render``). The fast track starts from what there is."""
-    check = {"assets": assets_step.require_approved, "render": render_step.require_renderable,
+    (``render.require_renderable``) and -- phase 6 stage 11 -- at tier >= 2
+    every shot's clip it would cut current, unless *params* (the render's)
+    fill the others with motion (``render.require_clips``); the metadata a
+    finished render (``metadata.require_render``). The fast track starts
+    from what there is."""
+    check = {"assets": assets_step.require_approved,
+             "render": lambda context: render_step.require_clips(context, params),
              "metadata": metadata_step.require_render}.get(step)
     if check is None:
         return
@@ -2503,6 +2513,160 @@ def episode_outputs(stories, story, ep) -> dict:
         output = (manifest or {}).get("output")
         current = bool(script and output and metadata_step.is_current(pack, script, output["sha256"]))
         view["metadata"] = {"pack": pack, "current": current}
+    return view
+
+
+# ------------------------------------------------------ the page, phase 6
+
+# What the clip part of the episode page (:func:`episode_clips`) derives --
+# each image hashed to tell a clip current, the journal read for a request
+# the provider holds, the assets estimate's video part -- is remembered the
+# same way as ``_DERIVED_CACHE``, under a key that also holds what the
+# estimate reads: the clips' files, the generation journal's files, the
+# story's ledger, the day's spend, the measured clip timings, the Settings
+# values (hashed) and the UTC day.
+_CLIPS_CACHE: dict = {}
+
+# The fields of ``asset_units()["video"]`` the page carries.
+_VIDEO_FIELDS = ("tier", "budget_profile", "route", "mode", "route_class", "link", "source", "template", "profile",
+                 "price_per_second", "plan", "still", "count", "seconds", "est_usd", "eta_s", "eta_note", "refused",
+                 "ready", "message")
+
+
+def _clips_key(ec, script, board, doc, env) -> tuple:
+    shots = (board or {}).get("shots") or []
+    clip_files = tuple(_file_stamp(clips_step.shot_clip_path(ec, shot)) for shot in shots)
+    journal = _cache_files_stamp(_store_path(ec.store.gen_cache_dir, ec.story_id))
+    ledger = _file_stamp(_store_path(lambda: os.path.join(ec.store.story_dir(ec.story_id), COST_LEDGER)))
+    merged = gating.merged_env(env)
+    settings = hashlib.sha256(json.dumps(sorted(merged.items()), ensure_ascii=False).encode("utf-8")).hexdigest()
+    return (_derived_key(ec, script, board, doc, None), clip_files, journal, ledger, settings,
+            _file_stamp(budget_mod.default_spend_path()), _file_stamp(gen_timings.default_timings_path()),
+            time.strftime("%Y-%m-%d", time.gmtime()))
+
+
+def _shot_clip(ec, script, shot, doc, *, link, tier, image_sha) -> dict:
+    """One shot's clip on the page (see :func:`episode_clips`)."""
+    ep, shot_id = ec.ep, shot["shot_id"]
+    record = shot["assets"].get("clip") or {}
+    flags = clips_step.shot_flags(shot, doc)
+    state = "none"
+    if record:
+        state = clips_step.clip_state(ec, shot, script, link=link, tier=tier, flags=flags, image_sha=image_sha)
+    keys = [record.get("cache_key")]
+    if record.get("pending"):
+        keys += assets_step.pending_clip_keys(ec, script, shot, doc, link=link)
+    held = assets_step.open_clip_request(ec, keys)
+    target = assets_step.clip_target(ep, shot_id)
+    if held is not None:
+        blocked = f"Cannot regenerate '{target}': {assets_step.still_generating(shot, held)}"
+    else:
+        reason = assets_step.clip_target_refusal(ec, shot, doc=doc)
+        blocked = f"Cannot regenerate '{target}': {reason}" if reason else None
+    return {
+        "state": state, "link": record.get("link"), "route": record.get("route"), "clip_s": record.get("clip_s"),
+        "est_usd": record.get("est_usd"), "generated_at": record.get("generated_at"),
+        "name": clips_step.clip_name(shot_id) if clips_step.shot_clip_path(ec, shot) is not None else None,
+        "note": assets_step.clip_note(shot), "reason": record.get("reason"), "pending": bool(record.get("pending")),
+        "target": None if held is not None else target, "continue": held is not None, "blocked": blocked,
+        "flags": dict(flags), "overrides": dict(video_plan.shot_overrides(doc, shot_id) or {}),
+    }
+
+
+def _video_view(ec, script, board, doc, *, env):
+    """The assets estimate's video part as the page shows it (see
+    :func:`episode_clips`), or None while the script and a current
+    storyboard are not approved (the estimate's own refusal is the page's
+    ``assets_regenerate_blocked``)."""
+    try:
+        script, board = assets_step.require_approved(ec)
+        units = assets_step.asset_units(ec, script, board, env=env)
+    except StepFailed:
+        return None
+    video = units.get("video") or {}
+    view = {name: copy.deepcopy(video.get(name)) for name in _VIDEO_FIELDS}
+    try:
+        render_step.shot_clips(ec, script, board, doc or {}, fill_failed=False)
+        view["render_blocked"] = None
+    except StepFailed as exc:
+        view["render_blocked"] = str(exc)
+    view["offer"] = None
+    if video.get("source") == "record" and video.get("refused") and not video.get("plan") and video.get("link"):
+        view["offer"] = assets_step.video_offer(ec, board, video["link"], why=video["refused"], env=env).as_dict()
+    return view
+
+
+def _derive_clips(ec, script, board, doc, *, env) -> dict:
+    tier = clips_step.tier_of(ec)
+    link = (sticky_link.recorded(doc, sticky_link.VIDEO) or {}).get("link")
+    shots = {}
+    for shot in board["shots"]:
+        image = assets_step.shot_image_path(ec, shot)
+        sha = assets_step._sha256_file(image) if image is not None and shot["assets"].get("clip") else None
+        shots[shot["shot_id"]] = _shot_clip(ec, script, shot, doc, link=link, tier=tier, image_sha=sha)
+    return {"shots": shots, "video": _video_view(ec, script, board, doc, env=env)}
+
+
+def episode_clips(stories, story, ep, *, env=None) -> dict:
+    """The clip part of the episode page (phase 6 stage 11; the web layer
+    merges it into the page's ``assets``)::
+
+        {"tier": 1 | 2 | 3,
+         "links": {"image": {link, since, switched_from?} | None, "video": {...} | None},
+         "shots": {shot_id: {"state": none|current|stale|failed, "link", "route": local|paid|None,
+                             "clip_s", "est_usd", "generated_at", "name": "shot_NN.mp4" | None,
+                             "note", "reason", "pending": bool, "target": "shot:<ep>:<shid>:video" | None,
+                             "continue": bool, "blocked": sentence | None,
+                             "flags": {keep_still, animate, keep_native_audio}, "overrides": {...}}},
+         "video": {<the assets estimate's video part: tier, budget_profile, route, mode, route_class, link,
+                    source, template, profile, price_per_second, plan, still, count, seconds, est_usd, eta_s,
+                    eta_note, refused, ready, message>,
+                   "render_blocked": sentence | None, "offer": <the sticky video offer> | None} | None}
+
+    ``links`` is ``assets.json``'s (A-087). At tier 1, or before a
+    storyboard, ``shots`` is empty and ``video`` None: nothing is hashed.
+    At tier >= 2, per shot: ``state`` is ``clips.clip_state`` on the
+    episode's video link (``none`` without a record); ``name`` the clip file
+    on disk, served by ``GET /episodes/{ep}/clips/{name}``; ``continue`` --
+    the provider holds its request (the record's, or a pending re-animate's):
+    only Continue collects it, so ``target`` is None; ``blocked`` the F8
+    pattern -- the 409 a re-animate would answer now (``Cannot regenerate
+    '<target>': ...``), None while it may run; ``flags`` the effective
+    overrides (``overrides`` the ones ``assets.json`` sets). ``video``: the
+    assets estimate's video part on the story's route (*env* -- the Settings
+    values; a local ComfyUI is not asked), ``render_blocked`` the render's
+    clip refusal while ``fill_failed_with_motion`` is off, ``offer`` the
+    stop-and-ask of a recorded video link that cannot serve (its ``switch``
+    is the assets edit that takes the next link); None while the script and
+    a current storyboard are not approved. Calls nothing; remembered while
+    nothing it reads moves (``_CLIPS_CACHE``)."""
+    story_id = story["story_id"]
+    board = read_episode(stories, story_id, ep, STORYBOARD_DOC)
+    doc = read_episode(stories, story_id, ep, ASSETS_DOC)
+    tier = int(story["generation_profile"]["tier"])
+    view = {"tier": tier, "links": {kind: copy.deepcopy(sticky_link.recorded(doc, kind)) for kind in sticky_link.KINDS},
+            "shots": {}, "video": None}
+    if tier < 2 or board is None or not board["shots"]:
+        return view
+    script = read_episode(stories, story_id, ep, SCRIPT_DOC)
+    try:
+        ec = _context(stories, story_id, ep)
+    except WorkflowError:
+        return view
+    where = (os.path.realpath(stories.root), story_id, ep)
+    key = _clips_key(ec, script, board, doc, env)
+    with _DERIVED_LOCK:
+        found = _CLIPS_CACHE.get(where)
+    if found is not None and found[0] == key:
+        value = found[1]
+    else:
+        value = _derive_clips(ec, script or {"scenes": []}, board, doc, env=env)
+        with _DERIVED_LOCK:
+            _CLIPS_CACHE.pop(where, None)
+            _CLIPS_CACHE[where] = (key, value)
+            while len(_CLIPS_CACHE) > _DERIVED_CACHE_MAX:
+                _CLIPS_CACHE.pop(next(iter(_CLIPS_CACHE)))
+    view.update(copy.deepcopy(value))
     return view
 
 
@@ -3337,6 +3501,11 @@ def patch_assets(stories, story_id, ep, fields, *, now, env=None) -> dict:
     is not written (its revision and approval never move) and the assets
     approval goes stale (the fingerprint covers the links). Nothing ever
     switches on its own; the link the episode already has: nothing written.
+    ``{"video": "<link>"}`` (stage 11) does the same for the clips: a link
+    of VIDEO_CHAIN (*env*'s) or the local ComfyUI, ``links.video``
+    (``assets.switched_video_doc``); the clips another link made go stale
+    (``clips.clip_state``), so the next run animates exactly those again --
+    the sticky video offer's ``switch`` is this edit.
 
     ``shots`` ``[{shot_id, locked?}]`` -- a locked shot keeps the image it
     has: the assets step skips it, a regenerate of it is refused ("unlock it
@@ -3361,7 +3530,7 @@ def patch_assets(stories, story_id, ep, fields, *, now, env=None) -> dict:
     storyboard."""
     story = load(stories, story_id)
     ep = episode_bounds(stories, story, ep)
-    _unknown_fields(fields, ASSETS_PATCH_FIELDS + (ASSETS_LINKS_FIELD,), "assets")
+    _unknown_fields(fields, ASSETS_PATCH_FIELDS, "assets")
     board = read_episode(stories, story_id, ep, STORYBOARD_DOC)
     if board is None or not board["shots"]:
         raise _no_storyboard(ep)
@@ -3398,7 +3567,7 @@ def patch_assets(stories, story_id, ep, fields, *, now, env=None) -> dict:
                           "step), then lock it")
         elif locked != bool(shot["assets"].get("locked")):
             shot["assets"]["locked"] = locked
-    wanted = None
+    wanted = {}
     if ASSETS_LINKS_FIELD in fields:
         wanted = assets_step.link_switch(ec, fields[ASSETS_LINKS_FIELD], env=env, errors=errors)
     overridden = None
@@ -3410,8 +3579,13 @@ def patch_assets(stories, story_id, ep, fields, *, now, env=None) -> dict:
         board = _write(episode_common.write_storyboard, "storyboard", ec, trial, script, now=now)
     if overridden is not None:
         _write_assets_doc(stories, story_id, ep, overridden, now=now, what="these shot overrides")
-    if wanted is not None:
-        _switch_image_link(stories, story_id, ep, ec, board, wanted, env=env, now=now)
+    if sticky_link.IMAGE in wanted:
+        _switch_image_link(stories, story_id, ep, ec, board, wanted[sticky_link.IMAGE], env=env, now=now)
+    if sticky_link.VIDEO in wanted:
+        doc = read_episode(stories, story_id, ep, ASSETS_DOC)
+        new = assets_step.switched_video_doc(ec, doc, wanted[sticky_link.VIDEO], now=now)
+        if new is not None:
+            _write_assets_doc(stories, story_id, ep, new, now=now, what="this video link")
     return board
 
 
@@ -3556,7 +3730,7 @@ def _step_refusal(call, *args, **kwargs):
         raise WorkflowError(CONFLICT, str(exc)) from None
 
 
-def assets_estimate(ec, *, env, align_words=False, probe_local=False) -> dict:
+def assets_estimate(ec, *, env, align_words=False, probe_local=False, animate=True, route=None) -> dict:
     """What the assets step would do and spend now (``GET
     /estimate/assets``): ``assets.asset_units``' shape -- ``images``,
     ``voices``, ``alignment``, ``paid_links``, ``caps``, ``est_usd``,
@@ -3565,10 +3739,14 @@ def assets_estimate(ec, *, env, align_words=False, probe_local=False) -> dict:
     paid, blocked), whose sentence is ``message``. ``conflict`` with the
     step's own sentence while the script and a current storyboard are not
     approved (it makes nothing then). Calls nothing but, with *probe_local*,
-    a local editor's status probe."""
+    a local editor's status probe. *animate* is the step's param (phase 6
+    stage 8); *route* (stage 11, ``?route=``) prices another route than the
+    story's own, writing nothing (``invalid`` for one that is not a route)."""
+    if route is not None and route not in defaults.ROUTES:
+        raise WorkflowError(INVALID, f"The route must be one of {', '.join(defaults.ROUTES)}, not {route!r}.")
     script, board = _step_refusal(assets_step.require_approved, ec)
     units = _step_refusal(assets_step.asset_units, ec, script, board, env=env, align_words=align_words,
-                          probe_local=probe_local)
+                          probe_local=probe_local, animate=animate, route=route)
     verdict = fast_track_step.paid_verdict(units, ep=ec.ep)
     return dict(units, step="assets", ep=ec.ep, paid=verdict, message=verdict["message"])
 
@@ -3580,14 +3758,16 @@ def render_estimate(ec, params) -> dict:
          "route_class": "local", "params": {"subtitles", "encoder"}, "needed": bool,
          "seconds", "minutes", "basis", "ready": true, "message"}
 
-    *params* as the step reads them (``invalid`` otherwise). ``needed`` is
+    *params* as the step reads them (``invalid`` otherwise); at tier >= 2
+    the clip refusal the run would meet is the ``conflict`` too
+    (``render.require_clips``, phase 6 stage 11). ``needed`` is
     false while the last render is the one it would make
     (``render.current_render``: rendering again would only repeat it); the
     time is the fast track's authored estimate (``fast_track.render_seconds``,
     A-069). ``conflict`` with the step's own sentence while the episode
     cannot be rendered. Calls nothing, starts no process."""
     wanted = render_step.read_params(phase4_request("render", params))
-    _script, board, _doc = _step_refusal(render_step.require_renderable, ec)
+    _script, board, _doc = _step_refusal(render_step.require_clips, ec, wanted)
     current = render_step.current_render(ec, wanted)
     shots = len(board["shots"])
     seconds = 0.0 if current else fast_track_step.render_seconds(shots)

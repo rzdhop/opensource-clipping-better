@@ -1,12 +1,43 @@
-## CURRENT STATE — AI Story **phase 6 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–10 **done**; next: **stage 11**
+## CURRENT STATE — AI Story **phase 6 IN PROGRESS** (FULL). Current phase: IMPLEMENT. Stages 0–11 **done**; next: **stage 12**
 - **In-progress header** (keep current):
   - **Current phase:** IMPLEMENT. EXPLORE/CLARIFY/PLAN were done 2026-09-30 in a session run in parallel with phase 5's
     close: three maps, two rounds of questions, an Opus design. The human approved the plan.
   - **Plan:** `.claude/plans/ai-story/14-phase-6-plan.md` (**APPROVED 2026-09-30**; copy at
     `~/.claude/plans/ai-story-phase-6-plan.md`). Brief: `.claude/plans/ai-story/07-phase-6-video-tiers-local.md`.
-  - **Current stage:** 11 — API and CLI. **Escalated Sonnet → Opus**: it now also carries the video-link switch
-    (data mutation), the clip refusal as a 409, and the paid estimates (the route preview, fast-track video units).
-  - **Next action:** dispatch stage 11, then Tier-1 in both environments, then commit.
+  - **Current stage:** 12 — the dashboard [Sonnet], then my browser check at 375/820/1280 px on scratch servers
+    `phase6-throwaway` :8016 / `phase6-dashboard` :5178. Keys are blanked, `ALLOW_PAID=0`, and a scratch copy of a
+    story is set to tier 2 with fake clip records.
+  - **Next action:** dispatch stage 12, then Tier-1 in both environments + vite build, then the browser check, then
+    commit.
+  - **Stage 11 notes for stages 12–14:**
+    - **Assets PATCH.** `PATCH …/episodes/{ep}/assets` with `{"shots":[{shot_id, locked?, keep_still?, animate?,
+      keep_native_audio?}], "links":{"image"?, "video"?}}`. It uses the Settings env; a video link must be in
+      Settings `VIDEO_CHAIN` or be `local/comfyui`.
+    - **Estimate preview.** `GET /estimate/assets?ep&route=` previews another route with no write.
+    - **Render 409.** `POST /steps/render` and `GET /estimate/render` give 409 with the clip refusal unless
+      `fill_failed_with_motion`. A pending re-animate whose request is open is offered Continue (the stage-9 gap is
+      closed).
+    - **Clip media.** `GET …/episodes/{ep}/clips/shot_NN.mp4`: `video/mp4`, Range, no-store, open with no token. The
+      payload URL is a plain path, fetched as a blob like shot images.
+    - **Episode page payload:**
+      - `assets.tier` and `assets.links`;
+      - `assets.shots[].clip {state, link, route, clip_s, est_usd, generated_at, name, url, note, reason, pending,
+        target, continue, blocked, flags, overrides}`;
+      - `assets.video` = estimate fields + `render_blocked` + `offer` (send `offer.switch` as the PATCH body).
+    - **Fast track.** `estimate()` prices clips once the storyboard is approved (before that, `video.count` is None);
+      the stop sentence adds a clips way out.
+    - **CLI.**
+      - `step ID assets --ep N [--tier] [--route] [--no-animate] [--estimate]`: `--tier`/`--route` go through
+        `patch_story` and print the profile; `--estimate` calls nothing and makes no job.
+      - `step ID render --ep N --fill-failed-with-motion`.
+      - There is no CLI regenerate command (`shot:…:video` is API/dashboard only).
+    - **For stage 12:**
+      - extend `test_story_defaults` with the render checkbox's initial state;
+      - the page's `video` part does not probe local ComfyUI (the estimate route does).
+    - **Follow-ups:**
+      - a video switch at tier 1 stales the assets approval (the fingerprint covers `links`);
+      - the fast-track stop sentence says "animate off", but the fast track has no animate param;
+      - pending keys on local try every shipped template.
   - **Stage 10 notes for stages 12–14:**
     - **When.** Tier 3 with an effective `keep_native_audio` and a current clip that has a sound track.
       `clips.clip_has_audio` reads the mp4 boxes in pure Python and starts no process.
@@ -305,8 +336,8 @@
 | 8 | the video phase and `shot:…:video` [Opus] — **RISKIEST** | done |
 | 9 | renderer: clips, hold, `fill_failed_with_motion`, Tier-2 golden [Opus] | done |
 | 10 | Tier-3 native audio, tests only [Opus] | done |
-| 11 | API and CLI [Opus, escalated from Sonnet] | next |
-| 12 | dashboard [Sonnet] | — |
+| 11 | API and CLI [Opus, escalated from Sonnet] | done |
+| 12 | dashboard [Sonnet] | next |
 | 13 | deploy and the Tier-2 live walk (≤ $0.55) [Opus] | — |
 | 14 | docs and decisions [Sonnet] | — |
 
