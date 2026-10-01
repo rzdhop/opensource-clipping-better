@@ -396,6 +396,33 @@
   estimate ($0.044 on 2026-10-01). UNCONFIRMED: whether a failure after generation started (a model error, a
   timeout) is billed.
 
+- **A-110** — (phase 7) seedance-1-pro-fast's prompt length limit is not published; the v2 clip prompt is kept ≤ 80 words. UNCONFIRMED.
+- **A-111** — (phase 7) `fal-ai/bytedance/seedream/v4.5/edit` ($0.04, up to 10 references, output ≤ 4 MP) exposes an
+  `image_size` that reaches a 9:16 portrait near 1 MP, a `seed` and a prompt length that holds 220 words; its negative
+  prompt field is absent or ignored. Read from fal's OpenAPI schema in stage 2a. UNCONFIRMED.
+- **A-112** — (phase 7) nano-banana-2 / -lite have no negative prompt and no stated prompt limit; positive constraint
+  phrasing ("Clean frame: no captions …") is honoured. UNCONFIRMED.
+- **A-113** — (phase 7) the project behind `GEMINI_PAID_API_KEY` has the Gemini image models enabled and billed. UNCONFIRMED.
+- **A-114** — (phase 7) the NIM model picked by the free `tools/bench_llm.py` run writes valid French JSON within the
+  330 s timeout at ≤ ~420 output tokens. UNCONFIRMED until the bench.
+- **A-115** — (phase 7) openrouter `mistralai/mistral-medium-3.1` is $0.40 in / $2.00 out per M tokens ($0.44 / $2.20 on
+  the EU host), read 2026-10-01 at openrouter.ai/api/v1/models/mistralai/mistral-medium-3.1/endpoints. UNCONFIRMED by a bill.
+- **A-116** — (phase 7) a 150 ms floor per word_pop card is legible on a phone (31 % of story A's cards were under it). UNCONFIRMED.
+- **A-117** — (phase 7) the J2 keyframe judge on the free vision chain has useful recall and few false positives;
+  "approve anyway" stays as the escape. UNCONFIRMED.
+- **A-118** — (phase 7) seedance keeps a character's identity over a 5–12 s clip when the prompt ends with the
+  stays-still clause. UNCONFIRMED until the walks.
+- **A-119** — (phase 7) an every-shot episode on the Quality preset costs ≈ $1.70–1.75 (≈ 60 s of seedance 720p $1.32,
+  ≈ 0.5 s ceil waste per shot, 8 keyframes $0.32), under the $2 episode cap. UNCONFIRMED until the acceptance walk.
+- **A-120** — (phase 7) 6–10 beat clips of 5–12 s read better on a phone than 18–20 cuts of 1–6 s. UNCONFIRMED until the human's watch.
+- **A-121** — (phase 7) Gemini's 9:16 output at 1K is about 768×1376 (inside DEC-217's 2 % tolerance), hence the v2 source crop. UNCONFIRMED.
+- **A-122** — (phase 7) the v2 prompt inputs fit their budgets (E1v2 2400, E2v2 2200, E3v2 2900, T1v2 2000 tokens by the
+  DEC-138 method) with the context-builder slices. UNCONFIRMED until stage 5c's budget test.
+- **A-123** — (phase 7) 8 of 9 stored stories are `prompt_only` because the edit chain never runs while `allow_paid` is
+  off, so the cast step offered the labelled switch (DEC-117) and the human took it. To confirm from the activity logs in stage 2a. UNCONFIRMED.
+- **A-124** — (phase 7) the hook shot's 3–6 s exception to the 5–12 s shot rule is acceptable to the human (accepted with
+  the plan's approval on 2026-10-01). Confirmed by that approval; kept here so the template's exception has a home.
+
 ## Confirmed
 - **A-082** — fal.ai as measured in the paid test (2026-09-29, DEC-174):
   - 35 requests with 0 failures: 13 `fal-ai/flux/schnell` (4–13 s each; booked $0.0028 at 720x1280, $0.0018 for a

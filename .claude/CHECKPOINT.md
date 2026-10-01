@@ -1,3 +1,60 @@
+## CURRENT STATE — AI Story **phase 7 IN PROGRESS** (the quality overhaul, DEC-219). Plan: `.claude/plans/ai-story/16-phase-7-plan.md` (APPROVED 2026-10-01)
+
+- **In-progress header** (keep current):
+  - **Current phase:** IMPLEMENT. EXPLORE (E1–E5), CLARIFY (11 answers) and PLAN (Opus design, stages 1–8) were done on
+    2026-10-01 in one session; the human approved the plan with its three go-items (hook 3–6 s; keyframes on
+    seedream-4.5-edit with nano-banana-2-lite fallback; ≈ $1.73 per episode under the $2 cap).
+  - **Current stage:** 1 (W0 defects) — not started. **Next action:** Tier-1 baseline in both environments on this
+    checkpoint, then a Sonnet agent implements stage 1 on `shots.py`, `video_plan.py`, `schemas.py`, `prompting.py`
+    with the three fail-first tests named in the plan.
+  - **Open questions:** none. The plan's assumptions A-110…A-124 are UNCONFIRMED.
+  - **Worktree:** `.claude/worktrees/ai-story-phase-7`, branch `feat/ai-story-phase-7` from `main` 30604dd. The main
+    checkout stays on `main` (bind-mounted by `rzc-backend`); deploy only at 0 jobs by fast-forward.
+  - **Checkpoint commit:** 30604dd (clean tree; this artifacts commit sits on top).
+  - **Tier-1 baseline:** (pending — recorded below once both environments ran; expected ≈ local 6635 passed / 1
+    skipped, CI env 5841 / 761 as at the phase-6 close.)
+  - **Live state:** `main` = 30604dd deployed; health 200, 0 jobs; `allow_paid` false; caps 1/3/10 (the plan moves the
+    defaults to 2/6/20 in stage 2a); keys set: google, fal, cloudflare, nvidia, openrouter; `GEMINI_PAID_API_KEY` to be
+    added by the human before W-mid. All 9 stories kept; none is touched by this phase (RC-M3).
+  - **Paid spend this phase:** $0 so far. Planned: W-mid ≤ $1.60 after stage 4, the acceptance walk ≈ $2.8 per story,
+    each as a single CLI process with per-process caps after a shown estimate and the human's go (DEC-215).
+- **Stage ledger** (each: Tier-1 green → commit → log line):
+  | Stage | Status | Commit |
+  |---|---|---|
+  | 1 W0 defects (D1 `video_action`, D2 names on the action only, D3 run-ons) | todo | |
+  | 2a quality chains, preset, caps 2/6/20, nano-banana paid key, 9:16 source crop | todo | |
+  | 2b writing chain (nvidia → openrouter mistral-medium-3.1 → free) | todo | |
+  | 3a structured look + dossier, sheet/plate/prop v2 prompts | todo | |
+  | 3b layered keyframe/clip prompts, reference roles, preview | todo | |
+  | 3c props as entities | todo | |
+  | 4 serial_60s_v2 (6–10 shots), seedance on every shot, 1080p switch | todo | |
+  | W-mid paid walk ≤ $1.60 | todo | |
+  | 5a KB schemas + D1 | todo | |
+  | 5b knowledge step + gate | todo | |
+  | 5c context builder | todo | |
+  | 5d continuity ledger | todo | |
+  | 6a J1, duplicate check, hook text, length gate | todo | |
+  | 6b J2 keyframe judge + approval | todo | |
+  | 6c narrator, subtitles floor, prosody | todo | |
+  | 7 hardware advice + dashboard | todo | |
+  | 8 docs, close, acceptance walk | todo | |
+- **Regression contract (phase 7)** — carried from phases 5/6 (tables below) plus the plan's rules:
+  | Item | Must keep working | Proof |
+  |---|---|---|
+  | RC-V1…V8 | phase-6 table below, unchanged (RC-V4 re-pinned on purpose in stage 2a: nano-banana reads the paid key) | the named tests, unedited except the stated re-pin |
+  | RC-M1 | episode-1 v1 prompts byte-identical | `test_story_prompts_episode.py` ep-1 goldens unedited |
+  | RC-M2 | tier-1 golden render unchanged | `tests/test_aistory_render_golden.py` + `framemd5.json` unedited all phase |
+  | RC-M3 | stored stories read, validate and re-render byte-identically | optional-key schema rule; `pipeline: v2` gates every new behaviour; a $0 re-render of one stored episode after stages 4 and 6c |
+  | RC-M8 | partial == full render | existing test unedited |
+  | RC-M9 | no auth, ever | `tests/test_auth_opt_in.py`, `test_auth_token.py`, `test_dashboard_no_sign_in.py` unedited |
+  | RC-A1 | clip render layer untouched | `tests/test_render_layer_guard.py` (nothing under `clipping/studio/**`) |
+  | RC-S4 | `llm.py` untouched unless a NIM reasoning family is added in 2b (then stated in DEC-224) | `git diff 30604dd -- clipping/providers/llm.py` |
+  | RC-Q1 (new) | a v1 story (no `pipeline` key) resolves the same `image_prompt`, `negative_prompt` and clip prompt hash as today | stage-3b test pins story A sh01's E1 dump |
+  | RC-Q2 (new) | no cast/place/prop/keyframe call on a v2 story ever reaches a `LOW_QUALITY_LINKS` link | stage-2a test |
+  | RC-Q3 (new) | no clip is bought on a v2 story before its keyframes are approved | stage-6b test |
+- **Scratch (session, re-creatable):** E1 dumps and `side-by-side.html`, E4 contact sheets, E5 story copies in the
+  session scratchpad; the E1 report at `~/.claude/plans/pasted-content-id-b880-start-ai-luminous-bubble-agent-abe18b955ad1917c9.md`.
+
 ## CURRENT STATE — AI Story **phase 6 DONE** (2026-10-01). Next: **phase 7 = the quality overhaul** (start prompt: `.claude/plans/ai-story/15-phase-7-quality-overhaul.md` §8)
 - **Close-out (2026-10-01):**
   - **Stages 0–14 and 13b are done** (ledger below).
