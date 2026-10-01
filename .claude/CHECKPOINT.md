@@ -12,8 +12,12 @@
     3. Read the x86_64 digest from the check-runs annotation, record it, push, CI green.
     4. Fast-forward `main`; deploy at 0 jobs (`rm -sfv backend && up -d --build backend`: dashboard + compose
        changed).
-    5. The walk: preconditions with the human (`GEMINI_PAID_API_KEY` in Settings; the `GOOGLE_API_KEY` project's
-       billing off); every paid step stops for the human's go.
+    5. The walk; every paid step stops for the human's go.
+       - **The human, 2026-10-01: "Skip Veo, use fal.ai in its place".** Step 9 (story B) runs on
+         `fal/kling-2.5-turbo-std` (5 s ≈ $0.21) under the $0.25 cap, or on seedance if the human prefers at the
+         STOP.
+       - No `GEMINI_PAID_API_KEY` is needed. Veo stays tested by recorded replies only (A-103 UNCONFIRMED).
+       - The free `GOOGLE_API_KEY` project's billing is off (the human).
   - **Stage 12 notes:**
     - **Dashboard.**
       - Story page: tier/route + "Episode N's video estimate, per route" (latest episode with an approved
