@@ -8,12 +8,17 @@ story-writing call shares:
   payoff ask), the same on a second try -- a reply is never "fixed" by
   asking for less, and never trimmed after it arrives;
 - the pack budget (``context.check_budget``) before anything is sent;
-- a reply the post-validator rejects is asked for once more, printed, and a
-  second rejection is a :class:`StepFailed` naming the errors (spec 4.1:
-  salvage -- ``run_chain`` already parses and salvages -- retry once with the
-  same cap, then report);
-- a chain where every link failed is a :class:`StepFailed` carrying every
-  link's reason;
+- a reply the post-validator rejects is asked for once more from the same
+  link, printed; a second rejection moves to the chain's next link rather
+  than failing the call (phase 7 stage 2d -- a word-cap overrun on the first
+  link must not waste a chain with more links left in it), same prompt, same
+  cap, one validated try, no further retry; every link of the chain
+  exhausted this way is a :class:`StepFailed` naming the last link's errors
+  (spec 4.1: salvage -- ``run_chain`` already parses and salvages -- retry
+  the first link once with the same cap, then fall through, then report);
+- a chain where every link failed to answer at all (not a validation
+  rejection -- ``run_chain`` itself could get no parseable reply) is a
+  :class:`StepFailed` carrying every link's reason;
 - the cancel token is checked before each request and handed to the chain;
 - one ``✍️`` line per accepted reply, after the chain's own hop lines;
 - a paid link is never called while ``allow_paid`` is off (``story_chain``):
@@ -285,8 +290,10 @@ def call_json(
     (E1's payoff variant, ``prompts.E1_PAYOFF_MAX_TOKENS``). Either way the
     same cap is sent on the second try.
 
-    Raises ``StepFailed`` (the chain failed, the reply was rejected twice,
-    or -- before anything is sent -- the budget settings cannot be read, or
+    Raises ``StepFailed`` (the chain failed to answer at all, or every link's
+    reply was rejected by *validator* -- the first to answer retried once,
+    each further link given one validated try, in the chain's order -- or --
+    before anything is sent -- the budget settings cannot be read, or
     ``allow_paid`` is off and no free link has a key), ``Cancelled``,
     ``ChainError`` for a chain that cannot be parsed, or ``ValueError`` for
     a prompt over the pack budget -- a builder bug, never trimmed here.
@@ -330,17 +337,30 @@ def call_json(
         if llm_spend.is_provider_chain(runner):
             meter = llm_spend.open_meter(ctx, prompt_id, system=system, user=user, cap=cap)
 
+    # *pos* is where the next ``runner`` call starts in ``chain``: the first
+    # link's one allowed retry keeps it in place (same link again); a link
+    # whose reply fails validation for good -- the first link's second
+    # failure, or any further link's only try -- advances past it. A link
+    # ``runner`` itself could not reach at all is already accounted for by
+    # ``run_chain``'s own hop lines and the ``ProviderError`` path below, so
+    # it never needs a position of its own here.
     errors = []
-    for attempt in (1, 2):
+    pos = 0
+    retry_available = True
+    tried_labels = []
+    while True:
+        attempt_chain = chain[pos:]
+        if not attempt_chain:
+            break
         ctx.cancel.check()
         # The chain's own hop lines follow these: a paid link left out is
         # printed like a keyless one, never silently dropped (spec 0).
         for link in paid:
             ctx.on_log(f"   ⏭ Skipping {_link_label(link)}: paid link, allow_paid is off "
                        "(AI Story spends only on opt-in).")
-        run_links, metered = chain, {}
+        run_links, metered = attempt_chain, {}
         if meter is not None:
-            run_links, metered = meter.plan(chain, keys), {"client_factory": meter.factory}
+            run_links, metered = meter.plan(attempt_chain, keys), {"client_factory": meter.factory}
         try:
             value, link = runner(
                 run_links,
@@ -372,17 +392,41 @@ def call_json(
             ctx.on_log(f"✍️ {prompt_id} via {_link_label(link)} ≈{tokens} tokens out (cap {cap})")
             return value
 
-        if attempt == 1:
+        answered_idx = chain.index(link, pos)
+        label = _link_label(link)
+        if label not in tried_labels:
+            tried_labels.append(label)
+
+        if retry_available:
+            # The first link to answer gets one retry, same link, same cap
+            # -- a reply is never "fixed" by asking for less.
+            retry_available = False
             shown = "; ".join(errors[:_ERRORS_IN_LOG_LINE])
             ctx.on_log(
                 f"⚠️ {prompt_id} reply rejected ({shown}); asking once more with the same cap"
             )
+            pos = answered_idx
+            continue
+
+        # This link's one validated try (or the first link's retry) failed
+        # for good: fall through to whatever is left of the chain, never
+        # back to a link already exhausted.
+        pos = answered_idx + 1
+        if pos < len(chain):
+            ctx.on_log(f"   ↪ {prompt_id}: {label} failed validation; "
+                       f"trying the next link: {_link_label(chain[pos])}")
 
     shown = "; ".join(errors[:_ERRORS_IN_FAILURE])
     more = len(errors) - _ERRORS_IN_FAILURE
     if more > 0:
         shown += f"; and {more} more"
-    reason = f"the reply failed validation twice: {shown}"
+    if len(tried_labels) <= 1:
+        # Legacy wording: a chain of one usable link, tried twice.
+        reason = f"the reply failed validation twice: {shown}"
+    else:
+        tried = ", ".join(tried_labels)
+        reason = (f"every link's reply failed validation ({len(tried_labels)} tried: {tried}); "
+                  f"the last reply ({tried_labels[-1]}): {shown}")
     raise StepFailed(f"{prompt_id}: {reason}", reason=reason)
 
 

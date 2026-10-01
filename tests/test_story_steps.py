@@ -812,6 +812,67 @@ def test_a_reply_rejected_twice_is_a_step_failure(tmp_path):
     assert not any(line.startswith("✍️") for line in log)
 
 
+# Phase 7 stage 2d (the live defect of 2026-10-01, Raisinetta's D2 look): a
+# reply that fails validation twice must fall through to the chain's
+# remaining links rather than failing the whole call.
+_GROQ_LINK = Link("groq", "groq-test")
+_TWO_LINK_SETTINGS = dict(SETTINGS, LLM_CHAIN="gemini/gemini-test,groq/groq-test", GROQ_API_KEY="test-groq-key")
+# One error only (too few genre tags), distinct from INVALID_B1's three, so a
+# test can tell "the last link's errors" apart from "the first link's errors".
+INVALID_B1_ONE_ERROR = dict(B1_REPLY, genre_tags=["soap"])
+
+
+class _QueueRunner:
+    """Like ``FakeRunner``, but each queued reply names its own answering
+    link -- needed to play a chain of more than one link."""
+
+    def __init__(self, *answers):
+        self.queue = list(answers)
+        self.calls = []
+
+    def __call__(self, chain, **kwargs):
+        self.calls.append(dict(kwargs, chain=list(chain)))
+        value, link = self.queue.pop(0)
+        return copy.deepcopy(value), link
+
+
+def test_a_reply_that_fails_validation_twice_falls_through_to_the_next_link(tmp_path):
+    m = _new()
+    ctx, log = _bare_ctx(tmp_path, settings_env=_TWO_LINK_SETTINGS)
+    runner = _QueueRunner((INVALID_B1, LINK), (INVALID_B1, LINK), (B1_REPLY, _GROQ_LINK))
+
+    value = m.llm_call.call_json(ctx, "B1", *_b1_prompt(), validator=schemas.b1_errors, runner=runner)
+
+    assert value == B1_REPLY
+    assert [call["chain"] for call in runner.calls] == [[LINK, _GROQ_LINK], [LINK, _GROQ_LINK], [_GROQ_LINK]]
+    warned = [line for line in log if line.startswith("⚠️")]
+    assert len(warned) == 1 and "asking once more with the same cap" in warned[0]
+    fallthrough = [line for line in log if "trying the next link" in line]
+    assert len(fallthrough) == 1
+    assert "groq/groq-test" in fallthrough[0]
+    assert log[-1].startswith("✍️ B1 via groq/groq-test")
+
+
+def test_every_link_failing_validation_still_fails_the_call(tmp_path):
+    m = _new()
+    ctx, log = _bare_ctx(tmp_path, settings_env=_TWO_LINK_SETTINGS)
+    runner = _QueueRunner((INVALID_B1, LINK), (INVALID_B1, LINK), (INVALID_B1_ONE_ERROR, _GROQ_LINK))
+
+    with pytest.raises(steps.StepFailed) as caught:
+        m.llm_call.call_json(ctx, "B1", *_b1_prompt(), validator=schemas.b1_errors, runner=runner)
+
+    assert len(runner.calls) == 3
+    first_link_errors = schemas.b1_errors(INVALID_B1)
+    last_link_errors = schemas.b1_errors(INVALID_B1_ONE_ERROR)
+    assert last_link_errors != first_link_errors
+    # The failure names the LAST link's errors, not the first's.
+    assert last_link_errors[0] in str(caught.value)
+    assert first_link_errors[0] not in str(caught.value)
+    assert "gemini/gemini-test" in str(caught.value)
+    assert "groq/groq-test" in str(caught.value)
+    assert not any(line.startswith("✍️") for line in log)
+
+
 def test_a_chain_that_failed_is_a_step_failure_carrying_every_links_reason(tmp_path):
     m = _new()
     ctx, _ = _bare_ctx(tmp_path)

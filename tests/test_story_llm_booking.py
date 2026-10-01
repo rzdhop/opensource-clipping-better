@@ -202,6 +202,30 @@ def test_a_paid_reply_that_fails_validation_is_booked_all_the_same(story):
     assert budget.day_spent() == round(rows[0]["est_usd"] + rows[1]["est_usd"], 4)
 
 
+def test_a_paid_links_two_invalid_replies_fall_through_and_each_is_booked_once(story):
+    """Phase 7 stage 2d: the paid link's reply fails validation twice (booked
+    both times, DEC-206, as before) and the call falls through to the next,
+    free link rather than failing -- the free reply is never billed."""
+    story.fake.answer("openrouter", (VALID, usage(1000, 500)), (VALID, usage(900, 450)))
+    story.fake.answer("gemini", (VALID, usage(10, 5)))
+    ctx, log = story.ctx(_settings(PAID, FREE, ALLOW_PAID="1"))
+    seen = {"n": 0}
+
+    def validator(value):
+        seen["n"] += 1
+        return ["not what was asked"] if seen["n"] <= 2 else []
+
+    assert _call(ctx, validator=validator) == {"ok": True}
+
+    assert story.fake.sent == [describe(PAID), describe(PAID), describe(FREE)]
+    rows = story.ledger.entries()
+    # Each of the paid link's two replies booked exactly once; the free
+    # link's accepted reply is never billed.
+    assert [(row["provider"], row["paid"]) for row in rows] == [("openrouter", True), ("openrouter", True)]
+    assert budget.day_spent() == round(rows[0]["est_usd"] + rows[1]["est_usd"], 4)
+    assert any("trying the next link" in line and describe(FREE) in line for line in log)
+
+
 @pytest.mark.parametrize("answer,note", [
     (Garbled("connection dropped mid-reply"), "no usable answer after sending (Garbled): may be billed"),
     ((VALID, None), "no usage in the reply"),
