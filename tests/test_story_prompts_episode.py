@@ -1445,7 +1445,10 @@ def test_e4_worst_case_fixture_with_hook_payoffs_fits_its_input_budget():
 def test_input_budget_names_every_episode_prompt():
     # Stage 6 sized E1/E2/E3/T1/T1r on live-sized data (tests/test_story_episode_prompt_budgets.py).
     # Phase 7 stage 3a (DEC-226): the look writers have measured budgets too.
-    assert list(prompts.INPUT_BUDGET) == ["E1", "E2", "E3", "E4", "T1", "T1r", "S3", "F1", "N1", "D2", "D3", "R1v2"]
+    # Phase 7 stage 4 (DEC-227): re-pinned on purpose -- T1 v2 and its re-plan (T1v2/T1rv2), measured
+    # the same way (tests/test_story_episode_prompt_budgets.py); the v1 rows are unchanged (RC-M1).
+    assert list(prompts.INPUT_BUDGET) == ["E1", "E2", "E3", "E4", "T1", "T1r", "S3", "F1", "N1", "D2", "D3", "R1v2",
+                                          "T1v2", "T1rv2"]
 
 
 @pytest.mark.parametrize(
@@ -2055,3 +2058,119 @@ def test_the_largest_french_e1_reply_with_pays_off_fits_its_own_cap():
     assert cap // 2 < needed <= cap, (needed, cap)
     assert needed > prompts.MAX_TOKENS["E1"] == 1450  # why the variant needs a cap of its own
     assert cap == 2210  # ~1,914 + 15 %, rounded up to ten (DEC-138)
+
+
+# ==================================================================== T1 v2 (phase 7 stage 4, DEC-227)
+
+V2_SCENE = dict(BODY_SCENE, on_screen_text="IL A MENTI", sfx_cues=[{"at": "l07", "cue": "phone_ring"}])
+LINES_T1_V2 = [{"line_id": "l07", "speaker": "char_kiwilo", "text": "Tu m'as menti.", "emotion": "angry",
+                "delivery": "Low, trembling, barely holding back tears."}]
+PLACE_T1_V2 = dict(PLACE_T1, descriptor="a luxurious turquoise pool ringed by white loungers and tiki torches")
+PROPS_T1_V2 = [dict(PROPS_T1[0], look="a coconut-shaped telephone, polished shell, brown and gold, mango-sized")]
+PREVIOUS_V2 = [{"framing": "wide_establishing", "camera_motion": "pan_lr",
+                "action": "@char_kiwilo walks to the pool edge holding %prop_phone.",
+                "staging": [{"subject": "@char_kiwilo", "position": "left", "facing": "the water",
+                             "expression": "worried"}]}]
+# RC-M1: the v1 T1/T1r calls of test_build_t1_key_lines / test_t1_camera_paragraph_present_only_in_t1_and_t1r,
+# sha256 of json.dumps([system, user, schema], sort_keys=True, ensure_ascii=False), computed on HEAD 9032d05
+# before T1 v2 existed.
+_T1_V1_SHA256 = "f7443c9da12e442d4c63b8a2d170c61d0fa17191602682f1879507c64a37f03d"
+_T1R_V1_SHA256 = "9edf17bcdeb28c230fa3d1e77d7c0447dbc3add0dae21d1a5b7c6c99b4e65d72"
+
+
+def _t1_v2(shots_per_scene=(1, 2), previous_shots=PREVIOUS_V2):
+    return prompts.build_t1_v2(
+        _pack("fr"), scene=V2_SCENE, lines=LINES_T1_V2, characters=CHARACTERS_T1, place=PLACE_T1_V2,
+        props=PROPS_T1_V2, previous_shots=previous_shots, shots_per_scene=shots_per_scene, camera=CAMERA_PARAGRAPH,
+        modifiers_allowed=MODIFIERS_ALLOWED, hook_style="insert_prop")
+
+
+def _good_t1_v2_shot(**changes):
+    shot = {"framing": "medium_single", "camera_motion": "push_in", "modifiers": [],
+            "action": "@char_kiwilo confronts the liar by the pool, raising %prop_phone as proof of the betrayal.",
+            "motion": "@char_kiwilo lifts %prop_phone, shakes it, then lowers it slowly while stepping back",
+            "staging": [{"subject": "@char_kiwilo", "position": "centre", "facing": "the camera",
+                         "expression": "furious, close to tears"}],
+            "subjects": ["@char_kiwilo", "%prop_phone", "#place_pool:day"], "lines": [1]}
+    shot.update(changes)
+    return shot
+
+
+def _sha_call(call):
+    import hashlib
+
+    return hashlib.sha256(json.dumps(list(call), sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
+def test_t1_v2_asks_motion_and_staging():
+    system, user, schema = _t1_v2()
+
+    # The ask: 1-2 beat shots, the plot beat (not a pose), what moves, where everyone stands.
+    assert "Give 'shots': 1 to 2 entries" in user
+    assert "- action (English): the plot beat of this shot" in user and "at most 45 words" in user
+    assert "not a pose" in user
+    assert "- motion (English): at most 25 words" in user and "not the camera" in user
+    assert "- staging: 1 to 4 entries" in user and "left, centre, right or back" in user
+    items = schema["properties"]["shots"]["items"]
+    assert {"motion", "staging"} <= set(items["required"])
+    assert items["properties"]["staging"]["items"]["properties"]["position"]["enum"] == [
+        "left", "centre", "right", "back"]
+    # Its inputs: the beat's purpose, the place's descriptor (not only its layout), each line's delivery,
+    # the scene's on-screen text and sound, the props' look, the previous shot's action and staging.
+    assert "Beat (setup, emotion: tension): Ils se disputent au bord du bassin." in user
+    assert PLACE_T1_V2["descriptor"] in user and PLACE_T1["layout_notes"] in user
+    assert "1. Kiwilo: Tu m'as menti. (angry; delivery: Low, trembling, barely holding back tears.)" in user
+    assert "On-screen text: IL A MENTI" in user and "phone_ring (with line 1)" in user
+    assert PROPS_T1_V2[0]["look"] in user
+    assert "@char_kiwilo walks to the pool edge holding %prop_phone." in user
+    assert "@char_kiwilo left, facing the water, worried" in user
+    assert f"Camera: {CAMERA_PARAGRAPH}" in user and "Write all user-facing text in French." in system
+
+    # A scene that fits one clip is asked for exactly one shot.
+    assert "Give 'shots': exactly 1 entry" in _t1_v2((1, 1))[1]
+
+    # A good reply passes; a motion over 25 words or a staged subject not in the shot is refused.
+    check = dict(scene=V2_SCENE, shots_per_scene=(1, 2), modifiers_allowed=MODIFIERS_ALLOWED, tags_allowed=TAGS_T1,
+                 n_lines=1, names=NAMES_T1)
+    assert prompts.validate_t1_v2({"shots": [_good_t1_v2_shot()]}, **check) == []
+    long_motion = _good_t1_v2_shot(motion="@char_kiwilo " + " ".join(["moves"] * 25))
+    assert any("motion" in e and "at most 25" in e for e in prompts.validate_t1_v2({"shots": [long_motion]}, **check))
+    stray = _good_t1_v2_shot(staging=[{"subject": "%prop_phone", "position": "left", "facing": "up",
+                                       "expression": "none"}], subjects=["@char_kiwilo", "#place_pool:day"])
+    assert any("staging" in e for e in prompts.validate_t1_v2({"shots": [stray]}, **check))
+
+    # RC-M1: the v1 T1 and T1r prompts are byte for byte what they were.
+    assert _sha_call(prompts.build_t1(
+        _pack("fr"), scene=BODY_SCENE, lines=LINES_T1, characters=CHARACTERS_T1, place=PLACE_T1, props=PROPS_T1,
+        previous_shots=[{"framing": "wide_establishing", "camera_motion": "pan_lr"}], shots_per_scene=(2, 4),
+        camera=CAMERA_PARAGRAPH, modifiers_allowed=MODIFIERS_ALLOWED, hook_style="insert_prop")) == _T1_V1_SHA256
+    assert _sha_call(prompts.build_t1r(
+        _pack("fr"), scene=BODY_SCENE, shots=_good_t1_shots(), index=0, note=None, lines=LINES_T1,
+        characters=CHARACTERS_T1, place=PLACE_T1, props=PROPS_T1, shots_per_scene=(2, 4), camera=CAMERA_PARAGRAPH,
+        modifiers_allowed=MODIFIERS_ALLOWED, hook_style="insert_prop")) == _T1R_V1_SHA256
+
+
+def test_the_largest_t1_v2_replies_fit_their_caps_but_not_much_smaller_ones():
+    """DEC-138's method on T1 v2's own asks: two beat shots (one for T1r v2)
+    with every stated cap hit -- a 45-word action, a 25-word motion, 4
+    staging entries at 4 + 4 words, 5 subjects, a modifier -- validate and
+    fit MAX_TOKENS (chars/4 x 1.3), which a half-size cap would not."""
+    tags = ["@char_kiwilo", "@char_mangella", "@char_broccolia", "#place_pool:day", "%prop_phone"]
+    staging = [{"subject": tag, "position": "centre", "facing": _fr_words(4), "expression": _fr_words(4)}
+               for tag in tags if not tag.startswith("#")]
+    shot = {"framing": "medium_two_shot", "camera_motion": "push_in", "modifiers": ["handheld"],
+            "action": "@char_kiwilo and @char_mangella " + _fr_words(42), "motion": "@char_kiwilo " + _fr_words(24),
+            "staging": staging, "subjects": tags, "lines": [1, 2]}
+    names = {"char_kiwilo": "Kiwilo", "char_mangella": "Mangella", "char_broccolia": "Broccolia"}
+    t1 = {"shots": [shot, dict(shot, framing="close_up", lines=[3, 4])]}
+    assert prompts.validate_t1_v2(t1, scene=V2_SCENE, shots_per_scene=(2, 2), modifiers_allowed=["handheld"],
+                                  tags_allowed=tags, n_lines=4, names=names) == []
+    t1r = {"shot": dict(shot, framing="close_up", lines=[1])}
+    plans = [{"framing": "medium_single", "camera_motion": "hold", "lines": [1]}]
+    assert prompts.validate_t1r_v2(t1r, scene=V2_SCENE, shots=plans, index=0, modifiers_allowed=["handheld"],
+                                   tags_allowed=tags, n_lines=1, names=names) == []
+    for prompt_id, reply in (("T1v2", t1), ("T1rv2", t1r)):
+        needed = estimate_tokens(json.dumps(reply, ensure_ascii=False)) * FRENCH_TOKEN_FACTOR
+        cap = prompts.MAX_TOKENS[prompt_id]
+        assert cap // 2 < needed <= cap, (prompt_id, needed, cap)
+        assert prompts.TEMPERATURE[prompt_id] is prompts.WRITING_TEMPERATURE

@@ -128,11 +128,18 @@ def clip_seconds(link, request) -> int:
     return seconds
 
 
+def _resolution(request):
+    """The clip size *request* asks (``GenRequest.extra["resolution"]``, phase
+    7 stage 4), or None: the link's own default."""
+    return (request.extra or {}).get("resolution")
+
+
 def _estimate(link, request):
-    """Seconds as bought times the link's price per second."""
+    """Seconds as bought times the link's price per second (at the size the
+    request asks, ``pricing.price_key``)."""
     if request.duration_s is None:
         raise ValueError(f"{describe(link)}: a clip is priced by its length; the request has no duration_s")
-    return pricing.estimate(link, _whole(request.duration_s))
+    return pricing.estimate(link, _whole(request.duration_s), resolution=_resolution(request))
 
 
 def _meta(link, request) -> dict:
@@ -165,8 +172,12 @@ class FalVideoAdapter(images.FalAdapter):
         seconds = clip_seconds(link, request)
         base = {"prompt": request.prompt, "image_url": data_url(request.references[0])}
         if link.model == "seedance-1-pro-fast":
-            # 720p explicitly: the endpoint's default is 1080p, 2.2x the price (A-100).
-            return {**base, "duration": str(seconds), "resolution": "720p", "aspect_ratio": "9:16", "seed": seed}
+            # 720p explicitly unless the request asks 1080p (a story's switch, phase 7
+            # stage 4): the endpoint's default is 1080p, 2.2x the price (A-100).
+            resolution = _resolution(request) or "720p"
+            if resolution not in ("720p", "1080p"):
+                raise ValueError(f"{describe(link)}: clips of 720p or 1080p, not {resolution!r}")
+            return {**base, "duration": str(seconds), "resolution": resolution, "aspect_ratio": "9:16", "seed": seed}
         if link.model == "ltx-2.3-fast":
             # 1080p is its smallest size; audio only when the clip is to keep it.
             return {**base, "duration": seconds, "aspect_ratio": "9:16", "resolution": "1080p",

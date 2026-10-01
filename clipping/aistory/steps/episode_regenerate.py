@@ -45,7 +45,7 @@ from __future__ import annotations
 
 import time
 
-from .. import prompts
+from .. import media_policy, prompts
 from .. import store as store_mod
 from . import entities, episode_common, llm_call
 from . import script as script_step
@@ -174,29 +174,36 @@ def _replan_shot(ctx, ec, target, shot_id, note, script, board, tools, refuse) -
     index = scene_shots.index(shot_id)
     scene_plans = plans[sid]
 
+    # A v2 story's shot is re-planned by T1r v2 (phase 7 stage 4): its motion and staging too.
+    v2 = media_policy.is_v2(ec.story)
+    prompt_id = "T1rv2" if v2 else "T1r"
     try:
-        inputs = storyboard_step.shot_inputs(ec, scene)
+        inputs = (storyboard_step.shot_inputs_v2(ec, script, scene) if v2
+                  else storyboard_step.shot_inputs(ec, scene))
     except StepFailed as exc:
         raise refuse(str(exc)) from None
     announced = set()
     pack = script_step._pack(ec, ctx, announced, note=note)
-    system, user, schema = prompts.build_t1r(
+    build, check = (prompts.build_t1r_v2, prompts.validate_t1r_v2) if v2 else (prompts.build_t1r,
+                                                                               prompts.validate_t1r)
+    system, user, schema = build(
         pack, scene=scene, shots=scene_plans, index=index, note=pack.note,
         **storyboard_step._builder_kwargs(inputs))
 
     def validate(reply):
-        return prompts.validate_t1r(reply, scene=scene, shots=scene_plans, index=index,
-                                    modifiers_allowed=inputs["modifiers_allowed"],
-                                    tags_allowed=inputs["tags_allowed"], n_lines=len(scene["lines"]),
-                                    names=inputs["names"])
+        return check(reply, scene=scene, shots=scene_plans, index=index,
+                     modifiers_allowed=inputs["modifiers_allowed"],
+                     tags_allowed=inputs["tags_allowed"], n_lines=len(scene["lines"]),
+                     names=inputs["names"])
 
-    ctx.on_log(f"🎞 Shot {shot_id} of scene {sid} again (T1r){_noted(note)}")
+    ctx.on_log(f"🎞 Shot {shot_id} of scene {sid} again ({'T1r v2' if v2 else 'T1r'}){_noted(note)}")
     try:
-        reply = llm_call.call_json(ctx, "T1r", system, user, schema, validator=validate, runner=tools.runner,
+        reply = llm_call.call_json(ctx, prompt_id, system, user, schema, validator=validate, runner=tools.runner,
                                    time_fn=tools.time_fn)
     except StepFailed as exc:
         raise refuse(str(exc)) from None
-    plans[sid] = scene_plans[:index] + [dict(reply["shot"])] + scene_plans[index + 1:]
+    new_plan = storyboard_step.t1_v2_plan(reply["shot"]) if v2 else dict(reply["shot"])
+    plans[sid] = scene_plans[:index] + [new_plan] + scene_plans[index + 1:]
 
     now = llm_call.utc_now()
     new_board, notes = storyboard_step.build(ec, script, plans, sources, board, stale=stale, now=now)

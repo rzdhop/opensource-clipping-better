@@ -16,7 +16,9 @@ durations and transitions) and a re-timed script:
 
 - :func:`build_fast` -- every scene by ``shots.fast_plan``: deterministic, no
   call at all (DEC-109), so the web layer runs it inline;
-- :func:`run` (the job) -- **T1** for each scene with no plan, a stale plan
+- :func:`run` (the job) -- **T1** (**T1 v2** on a v2 story, phase 7 stage 4:
+  one beat shot a scene, two past the template's ``max_shot_s``) for each
+  scene with no plan, a stale plan
   (its scene was rewritten since) or a fast one; every other scene keeps its
   plan as it is (``shots.plans_from_storyboard``). The storyboard is written
   after every accepted call; a scene whose T1 fails keeps what it had (a
@@ -35,7 +37,7 @@ import time
 
 from clipping.providers import pricing
 
-from .. import media_policy, prompts, shots
+from .. import media_policy, prompts, shots, timing
 from . import entities, episode_common, llm_call
 from . import script as script_step
 from .episode_common import SCRIPT_DOC, STORYBOARD_DOC
@@ -155,7 +157,8 @@ def build(ec, script, plans, sources, previous, *, stale, now) -> tuple:
         return shots.build_storyboard(
             script, {sid: plans[sid] for sid in chosen}, {sid: sources[sid] for sid in chosen},
             entities=ec.entities, style_lock=ec.style_lock, template=ec.template, language=ec.language,
-            consistency_mode=ec.consistency_mode, now=now, previous=previous, v2=media_policy.is_v2(ec.story))
+            consistency_mode=ec.consistency_mode, now=now, previous=previous, v2=media_policy.is_v2(ec.story),
+            shots_per_scene=ec.episode_defaults["shots_per_scene"])
 
     try:
         board, notes = attempt(list(plans))
@@ -211,23 +214,81 @@ def shot_inputs(ec, scene) -> dict:
     }
 
 
+def scene_seconds(ec, script, scene) -> float:
+    """*scene*'s length as the script is timed now (its stored episode-level
+    ``timing``), else its own scene timing on the template."""
+    stored = ((script.get("timing") or {}).get("scenes") or {}).get(scene["scene_id"]) or {}
+    if stored.get("duration_s") is not None:
+        return float(stored["duration_s"])
+    return float(timing.scene_timing(scene, ec.template, ec.language, style_lock=ec.style_lock)["duration_s"])
+
+
+def beat_shot_count(ec, script, scene):
+    """T1 v2's ``(lo, hi)`` for *scene* (phase 7 stage 4, A12): one beat shot,
+    two only when the scene runs past the template's ``max_shot_s`` (one clip
+    sells at most that much, DEC-208). A template with no ``max_shot_s``
+    keeps the episode's own pair."""
+    max_shot = ec.template.get("max_shot_s")
+    if max_shot is None:
+        return tuple(ec.episode_defaults["shots_per_scene"])
+    lo, hi = ec.episode_defaults["shots_per_scene"]
+    n = 2 if scene_seconds(ec, script, scene) > max_shot else 1
+    n = min(max(n, lo), hi)
+    return n, n
+
+
+def shot_inputs_v2(ec, script, scene) -> dict:
+    """:func:`shot_inputs` for T1 v2 / T1r v2 (phase 7 stage 4): the lines
+    with their ids and delivery, the place's descriptor, each prop's look
+    (``shots.render_prop``), and the scene's own beat-shot count."""
+    inputs = shot_inputs(ec, scene)
+    sid = scene["scene_id"]
+    place = _entity(ec, "places", scene["place_id"], sid)
+    props = [_entity(ec, "props", pid, sid) for pid in scene["props"]]
+    inputs["lines"] = [{"line_id": line["line_id"], "speaker": line["speaker"], "text": line["text"],
+                        "emotion": line["emotion"], "delivery": line.get("delivery") or ""}
+                       for line in scene["lines"]]
+    inputs["place"] = dict(inputs["place"], descriptor=place.get("descriptor") or "")
+    inputs["props"] = [dict(entry, look=shots.render_prop(doc)) if doc.get("descriptor") else entry
+                       for entry, doc in zip(inputs["props"], props)]
+    inputs["shots_per_scene"] = beat_shot_count(ec, script, scene)
+    return inputs
+
+
+def t1_v2_plan(shot) -> dict:
+    """A T1 v2 (or T1r v2) reply's shot as a plan: its ``motion`` text kept
+    as ``clip_motion`` (the storyboard shot's ``motion`` is the Tier-1
+    camera motion)."""
+    plan = {key: value for key, value in shot.items() if key != "motion"}
+    plan["clip_motion"] = shot["motion"]
+    return plan
+
+
 def _builder_kwargs(inputs) -> dict:
     return {key: inputs[key] for key in ("lines", "characters", "place", "props", "shots_per_scene", "camera",
                                           "modifiers_allowed", "hook_style")}
 
 
-def _previous_shots(script, plans, sid) -> list:
-    """The last two shots planned before scene *sid*, in episode order."""
+def _previous_shots(script, plans, sid, *, v2=False) -> list:
+    """The last two shots planned before scene *sid*, in episode order; *v2*
+    (T1 v2): the last one with its action and staging too."""
     before = []
     for scene in script["scenes"]:
         if scene["scene_id"] == sid:
             break
         before.extend(plans.get(scene["scene_id"]) or [])
-    return [{"framing": plan["framing"], "camera_motion": plan["camera_motion"]} for plan in before[-2:]]
+    out = [{"framing": plan["framing"], "camera_motion": plan["camera_motion"]} for plan in before[-2:]]
+    if v2 and out:
+        last = before[-1]
+        out[-1].update(action=last["action"], staging=list(last.get("staging") or []))
+    return out
 
 
 def plan_scene(ctx, ec, script, plans, scene, *, tools, announced) -> list:
-    """T1 for *scene*: its plans (not stored anywhere by this function)."""
+    """T1 for *scene*: its plans (not stored anywhere by this function). A v2
+    story's scene is planned by T1 v2 (:func:`plan_scene_v2`)."""
+    if media_policy.is_v2(ec.story):
+        return plan_scene_v2(ctx, ec, script, plans, scene, tools=tools, announced=announced)
     inputs = shot_inputs(ec, scene)
     pack = script_step._pack(ec, ctx, announced)
     system, user, schema = prompts.build_t1(pack, scene=scene, previous_shots=_previous_shots(
@@ -242,6 +303,25 @@ def plan_scene(ctx, ec, script, plans, scene, *, tools, announced) -> list:
     reply = llm_call.call_json(ctx, "T1", system, user, schema, validator=validate, runner=tools.runner,
                                time_fn=tools.time_fn)
     return [dict(shot) for shot in reply["shots"]]
+
+
+def plan_scene_v2(ctx, ec, script, plans, scene, *, tools, announced) -> list:
+    """T1 v2 for *scene* (phase 7 stage 4, A12): its beat shots as plans,
+    each with T1 v2's ``clip_motion`` and ``staging``."""
+    inputs = shot_inputs_v2(ec, script, scene)
+    pack = script_step._pack(ec, ctx, announced)
+    system, user, schema = prompts.build_t1_v2(pack, scene=scene, previous_shots=_previous_shots(
+        script, plans, scene["scene_id"], v2=True), **_builder_kwargs(inputs))
+
+    def validate(reply):
+        return prompts.validate_t1_v2(reply, scene=scene, shots_per_scene=inputs["shots_per_scene"],
+                                      modifiers_allowed=inputs["modifiers_allowed"],
+                                      tags_allowed=inputs["tags_allowed"], n_lines=len(scene["lines"]),
+                                      names=inputs["names"])
+
+    reply = llm_call.call_json(ctx, "T1v2", system, user, schema, validator=validate, runner=tools.runner,
+                               time_fn=tools.time_fn)
+    return [t1_v2_plan(shot) for shot in reply["shots"]]
 
 
 def _summary_line(board, how) -> str:

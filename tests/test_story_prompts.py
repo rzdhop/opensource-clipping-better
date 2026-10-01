@@ -275,6 +275,8 @@ def test_max_tokens():
         "S3": 720, "F1": 400, "N1": 1430,
         # Phase 7 stage 3a (DEC-226): the look writers.
         "D2": 380, "D3": 300, "R1v2": 220,
+        # Phase 7 stage 4 (DEC-227): re-pinned on purpose -- T1 v2 and its re-plan, new ids (v1 rows unchanged).
+        "T1v2": 1040, "T1rv2": 520,
     }
 
 
@@ -304,6 +306,8 @@ def test_schema_names():
         "S3": "series_memory_entry", "F1": "audience_feedback_digest", "N1": "next_episode_proposals",
         # Phase 7 stage 3a (DEC-226): the look writers.
         "D2": "character_look", "D3": "place_look", "R1v2": "prop_look",
+        # Phase 7 stage 4 (DEC-227): re-pinned on purpose -- T1 v2 and its re-plan, new ids (v1 rows unchanged).
+        "T1v2": "storyboard_beat_shots", "T1rv2": "storyboard_beat_shot_replan",
     }
 
 

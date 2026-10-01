@@ -126,7 +126,15 @@ class EpisodeContext:
 
     @property
     def episode_defaults(self) -> dict:
-        return self.style_lock["episode_defaults"]
+        """The style lock's ``episode_defaults``, with the episode template's
+        own ``shots_per_scene`` over it when the template sets one (phase 7
+        stage 4, DEC-227: a v2 episode plans 1-2 beat shots a scene, not the
+        style's 2-4). A v1 template sets none: the style lock's own dict."""
+        defaults = self.style_lock["episode_defaults"]
+        pair = (self.template or {}).get("shots_per_scene")
+        if pair is None:
+            return defaults
+        return {**defaults, "shots_per_scene": list(pair)}
 
     @property
     def sfx_cues(self) -> list:

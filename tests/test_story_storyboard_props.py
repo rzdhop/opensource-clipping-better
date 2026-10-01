@@ -138,3 +138,83 @@ def test_a_legacy_story_never_refuses_for_a_missing_prop_image(store):
     board = m.storyboard.build_fast(store, story_id, 1, now=eps.NOW, on_log=eps.Log())
 
     assert sorted(board["scenes"]) == eps.ALL_SCENES
+
+
+# ======================================================== T1 v2 (phase 7 stage 4, DEC-227)
+
+def t1_v2_reply(call):
+    """A T1 v2 answer: as many beat shots as the ask names, the scene's lines
+    split across them, each with its motion and staging."""
+    import re
+
+    tags = call["schema"]["properties"]["shots"]["items"]["properties"]["subjects"]["items"]["enum"]
+    place = next(tag for tag in tags if tag.startswith("#"))
+    who = [tag for tag in tags if tag.startswith("@")] or [place]
+    n_lines = eps._numbered_lines(call["user"])
+    count = int(re.search(r"Give 'shots': exactly (\d) entr", call["user"]).group(1))
+    framings = ["close_up", "medium_two_shot"] if "frame one of this scene's shots close_up" in call["user"] \
+        else ["medium_two_shot", "close_up"]
+    if "\n- medium_two_shot / " in call["user"].split("Previous shots", 1)[-1][-200:]:
+        framings.reverse()
+    cut = (n_lines + 1) // 2 if count == 2 else n_lines
+    spans = [list(range(1, cut + 1)), list(range(cut + 1, n_lines + 1))][:count]
+    staged = [{"subject": tag, "position": pos, "facing": "the others", "expression": "tense"}
+              for tag, pos in zip(who, ("left", "right", "centre", "back")) if tag.startswith("@")]
+    return {"shots": [
+        {"framing": framings[i % 2], "camera_motion": "push_in", "modifiers": [],
+         "action": " and ".join(who) + " settle the matter, and the stakes rise.",
+         "motion": f"{who[0]} steps forward and points while the others turn", "staging": staged,
+         "subjects": who, "lines": span} for i, span in enumerate(spans)]}
+
+
+def test_a_v2_story_plans_its_shots_with_t1_v2_one_beat_shot_a_scene(store):
+    """The storyboard step on a v2 story written on serial_60s_v2: one T1 v2
+    call per scene asking one beat shot (two only for a scene past 12 s),
+    the stored shots carrying T1 v2's ``clip_motion`` and ``staging``, the
+    effective 1-2 range validated (not the style's 2-4)."""
+    m = eps._new()
+    story_id = eps._written_script(store)
+    store.update(story_id, lambda doc: (doc["generation_profile"].update(pipeline="v2"),
+                                        doc.update(episode_template_id="serial_60s_v2")), now=eps.NOW)
+    script = eps._script(store, story_id)
+    script["template_id"] = "serial_60s_v2"
+    store.write_episode_doc(story_id, 1, "script.json", script, now=eps.NOW)
+    _plant_image(store, story_id, "props", eps.PHONE)  # the v2 prop-image gate (stage 3c)
+
+    llm = eps.FakeLLM(default={"T1v2": t1_v2_reply})
+    eps._run(m.storyboard, store, story_id, llm=llm, step="storyboard")
+
+    assert llm.prompts() == ["T1v2"] * len(eps.ALL_SCENES)
+    board = eps._storyboard(store, story_id)
+    script = eps._script(store, story_id)
+    per_scene = {}
+    for shot in board["shots"]:
+        per_scene[shot["scene_id"]] = per_scene.get(shot["scene_id"], 0) + 1
+        assert shot["clip_motion"].startswith("@char_") and shot["staging"]
+        assert "@" not in shot["video_prompt"] and shot["prompt_layout"] == "layered_v1"
+    for call, scene in zip(llm.calls, script["scenes"]):
+        asked = 2 if script["timing"]["scenes"][scene["scene_id"]]["duration_s"] > 12 else 1
+        assert per_scene[scene["scene_id"]] == asked, scene["scene_id"]
+        assert ("exactly 2 entries" if asked == 2 else "exactly 1 entry") in call["user"]
+        assert "- motion (English)" in call["user"]
+    assert all(shot["duration_s"] <= 12 for shot in board["shots"])
+
+    # Re-planning one of its shots goes through T1r v2 and keeps a motion and a staging.
+    def t1r_v2_reply(call):
+        import json
+        import re
+
+        found = re.search(r"- shot \d+ <- replace this one: ([a-z_]+) / ([a-z_]+), lines (\[[0-9, ]*\])",
+                          call["user"])
+        return {"shot": {"framing": found.group(1), "camera_motion": found.group(2), "modifiers": [],
+                         "action": "@char_kiwilo turns the vote around in one sentence.",
+                         "motion": "@char_kiwilo slams a hand on the table", "subjects": ["@char_kiwilo"],
+                         "staging": [{"subject": "@char_kiwilo", "position": "centre", "facing": "the camera",
+                                      "expression": "defiant"}],
+                         "lines": json.loads(found.group(3))}}
+
+    replan = eps.FakeLLM(T1rv2=[t1r_v2_reply])
+    eps._regenerate(store, story_id, "shot:1:sh02:plan", llm=replan)
+    assert replan.prompts() == ["T1rv2"]
+    sh02 = next(shot for shot in eps._storyboard(store, story_id)["shots"] if shot["shot_id"] == "sh02")
+    assert sh02["clip_motion"] == "@char_kiwilo slams a hand on the table" and "slams a hand" in sh02["video_prompt"]

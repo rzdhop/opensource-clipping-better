@@ -1277,3 +1277,150 @@ def test_legacy_story_resolves_byte_identical():
     assert legacy["reference_images"] == ["characters/char_captain_obvious/refs/portrait.jpg",
                                           "characters/char_miss_overthink/refs/portrait.jpg",
                                           "places/place_city_square/refs/variant_day.jpg"]
+
+
+# ======================================================== v2: one beat shot per scene (phase 7 stage 4, DEC-227)
+
+def _v2_script():
+    """An 8-scene v2 episode 1 (serial_60s_v2's slot list: hook, 6 body
+    scenes, cliffhanger), lines that fit their slots."""
+    def two(scene_id, n, a, b, speaker_a, speaker_b, **kwargs):
+        return [_line(f"l{n:02d}", speaker_a, a, **kwargs), _line(f"l{n + 1:02d}", speaker_b, b)]
+
+    scenes = [
+        _scene("s01", "hook", place_id=PLACE_PARLOIR, characters=[CHAR_KIWILO, CHAR_MANGELLA], props=[PROP_PHONE],
+               lines=[_line("l01", CHAR_KIWILO, "A shocking secret is about to come out.", emotion="shocked")],
+               emotion="shocked"),
+        _scene("s02", "setup", place_id=PLACE_PARLOIR, characters=[CHAR_MANGELLA, CHAR_KIWILO],
+               lines=two("s02", 2, "I have been waiting for this all week long, Kiwilo.",
+                         "Then sit down and listen to every single word.", CHAR_MANGELLA, CHAR_KIWILO)),
+        _scene("s03", "rising", place_id=PLACE_PISCINE, characters=[CHAR_KIWILO, CHAR_BROCCOLIA],
+               lines=two("s03", 4, "You always take the biggest lounger by the pool.",
+                         "Maybe stop counting my loungers every morning.", CHAR_KIWILO, CHAR_BROCCOLIA,
+                         emotion="angry")),
+        _scene("s04", "peak", place_id=PLACE_PISCINE, characters=[CHAR_KIWILO, CHAR_MANGELLA, CHAR_BROCCOLIA],
+               props=[PROP_PHONE],
+               lines=two("s04", 6, "The phone is ringing again, who is calling now?",
+                         "Nobody answers that phone, nobody at all.", CHAR_MANGELLA, CHAR_BROCCOLIA,
+                         emotion="shocked"), emotion="shocked"),
+        _scene("s05", "turn", place_id=PLACE_PARLOIR, characters=[CHAR_BROCCOLIA, CHAR_KIWILO],
+               lines=two("s05", 8, "Something is not right here and you know it.",
+                         "I know exactly who moved that phone last night.", CHAR_BROCCOLIA, CHAR_KIWILO,
+                         emotion="tension"), emotion="tension"),
+        _scene("s06", "setup", place_id=PLACE_PARLOIR, characters=[CHAR_MANGELLA],
+               lines=[_line("l10", CHAR_MANGELLA, "Alone at last, I can finally read the message.")]),
+        _scene("s07", "rising", place_id=PLACE_PISCINE, characters=[CHAR_KIWILO, CHAR_MANGELLA],
+               lines=two("s07", 11, "One more secret and I am done with this island.",
+                         "Then you will love what I found in your bag.", CHAR_KIWILO, CHAR_MANGELLA)),
+        _scene("s08", "cliffhanger", place_id=PLACE_PARLOIR, time_variant="night",
+               characters=[CHAR_KIWILO, CHAR_MANGELLA, CHAR_BROCCOLIA],
+               lines=[_line("l13", CHAR_KIWILO, "Nobody is leaving this island tonight.", emotion="shocked")],
+               emotion="shocked"),
+    ]
+    return dict(_build_script(), template_id="serial_60s_v2", scenes=scenes,
+                cliffhanger={"scene_id": "s08", "reveal": "A shocking reveal.", "cut_to_black": True})
+
+
+def _v2_plan(framing, subjects, action, *, lines, motion, staging, camera_motion="push_in"):
+    return {"framing": framing, "camera_motion": camera_motion, "modifiers": [], "action": action,
+            "subjects": subjects, "lines": lines, "clip_motion": motion, "staging": staging}
+
+
+def _stage(tag, position, facing="the other", expression="tense"):
+    return {"subject": tag, "position": position, "facing": facing, "expression": expression}
+
+
+K, M, B, P = f"@{CHAR_KIWILO}", f"@{CHAR_MANGELLA}", f"@{CHAR_BROCCOLIA}", f"%{PROP_PHONE}"
+
+
+def _v2_plans():
+    """One T1 v2-shaped plan per scene, framed the way T1 v2 asks: never the
+    previous shot's framing, and a close-up when the two shots before hold
+    none (s03, s06)."""
+    return {
+        "s01": [_v2_plan("insert_prop", [P], f"{P} lights up on the booth's stool as the secret starts to leak.",
+                         lines=[1], motion=f"{P} buzzes and slides a little on the stool", staging=[])],
+        "s02": [_v2_plan("wide_establishing", [f"#{PLACE_PARLOIR}:day", M, K],
+                         f"{M} corners {K} inside the booth, ready to make him confess.", lines=[1, 2],
+                         motion=f"{M} leans in over {K}, who sinks onto the stool",
+                         staging=[_stage(M, "right", "the stool", "smug"), _stage(K, "left", "the curtain")])],
+        "s03": [_v2_plan("close_up", [K, B], f"{K} accuses {B} of stealing the lounger, the rivalry flares.",
+                         lines=[1, 2], motion=f"{K} jabs a finger, {B} folds her arms and turns away",
+                         staging=[_stage(K, "left", "her", "angry"), _stage(B, "right", "him", "scornful")])],
+        "s04": [_v2_plan("medium_single", [M], f"{M} hears the phone ring again and freezes in fear.", lines=[1, 2],
+                         motion=f"{M} stops mid-step and slowly turns her head toward the sound",
+                         staging=[_stage(M, "centre", "the sound", "shocked")])],
+        "s05": [_v2_plan("over_shoulder", [B, K], f"{K} reveals he knows who moved the phone.", lines=[1, 2],
+                         motion=f"{K} steps closer and {B} backs into the wall",
+                         staging=[_stage(B, "left", "him", "wary"), _stage(K, "right", "her", "cold")])],
+        "s06": [_v2_plan("close_up", [M], f"{M}, finally alone, reads the secret message.", lines=[1],
+                         motion=f"{M} unfolds a note and her eyes widen as she reads",
+                         staging=[_stage(M, "centre", "the note", "stunned")])],
+        "s07": [_v2_plan("medium_two_shot", [K, M], f"{M} reveals what she found in {K}'s bag.", lines=[1, 2],
+                         motion=f"{M} pulls something from a bag, {K} lunges for it",
+                         staging=[_stage(K, "left", "her", "panicked"), _stage(M, "right", "him", "triumphant")])],
+        "s08": [_v2_plan("close_up", [K], f"{K} declares nobody leaves the island as the lights die.", lines=[1],
+                         motion=f"{K} slowly raises his head and stares straight ahead",
+                         staging=[_stage(K, "centre", "the camera", "menacing")])],
+    }
+
+
+def test_v2_storyboard_of_one_shot_per_scene_passes_rule_pass_without_moving_a_protected_shot():
+    """A representative 8-scene v2 episode, one T1 v2 plan per scene: it
+    builds a valid storyboard on serial_60s_v2's own shot range (1-2 per
+    scene, not the style's 2-4), every shot a clip can cover (<= 12 s, the
+    hook 3-6 s), the rule pass leaves the protected insert_prop and opening
+    wide shots alone, and each shot keeps T1 v2's motion (``clip_motion``,
+    the clip prompt's action) and staging (the keyframe's positions)."""
+    template_v2 = templates.load_episode_template("serial_60s_v2")
+    script = _v2_script()
+    plans = _v2_plans()
+    pair = template_v2["shots_per_scene"]
+
+    ordered = [(scene, plans[scene["scene_id"]]) for scene in script["scenes"]]
+    _moved, notes = shots.rule_pass(ordered, FRUIT_DRAMA)
+    # Only the style's motion rules move anything (fruit_drama pans a wide establishing shot).
+    assert notes == ["rule_pass: scene s02: camera motion changed 'push_in' -> 'pan_lr'"]
+
+    doc, notes = shots.build_storyboard(script, plans, {sid: "t1" for sid in plans}, entities=ENTITIES,
+                                        style_lock=FRUIT_DRAMA, template=template_v2, language=EN,
+                                        consistency_mode="references", now=NOW, v2=True, shots_per_scene=pair)
+    assert schemas.storyboard_errors(doc, min_shot_s=template_v2["min_shot_s"]) == []
+    assert schemas.storyboard_context_errors(doc, script, shots_per_scene=pair) == []
+    assert [shot["scene_id"] for shot in doc["shots"]] == [scene["scene_id"] for scene in script["scenes"]]
+    assert [shot["framing"] for shot in doc["shots"]] == [plans[sid][0]["framing"] for sid in plans]
+    durations = {shot["scene_id"]: shot["duration_s"] for shot in doc["shots"]}
+    assert all(d <= 12 for d in durations.values()) and 3.0 <= durations["s01"] <= 6.0, durations
+
+    by_scene = {shot["scene_id"]: shot for shot in doc["shots"]}
+    s03 = by_scene["s03"]
+    assert s03["clip_motion"] == plans["s03"][0]["clip_motion"] and s03["staging"] == plans["s03"][0]["staging"]
+    assert "jabs a finger" in s03["video_prompt"] and "@" not in s03["video_prompt"]
+    assert "Kiwilo" not in s03["video_prompt"] and "Broccolia" not in s03["video_prompt"]
+    assert "On the left, the anthropomorphic kiwi (angry, facing her)" in s03["image_prompt"]
+    assert "On the right, the anthropomorphic broccoli (scornful, facing him)" in s03["image_prompt"]
+    assert "They face each other." not in s03["image_prompt"]
+    # Read back, the plans keep both (a later T1 run rebuilds the board from them).
+    assert shots.plans_from_storyboard(doc, script)["s03"][0]["staging"] == plans["s03"][0]["staging"]
+
+    # A model that ignores both asks (no close-up in s01-s03, s05-s07): with one shot a scene the
+    # close-up window forces the third scene's shot, and that cascades into the next scene's
+    # close-up (now a repeat) -- the rules hold again afterwards, and the protected insert_prop hook
+    # and opening wide never move.
+    loose = _v2_plans()
+    for sid, framing in (("s03", "medium_two_shot"), ("s04", "close_up"), ("s06", "medium_single")):
+        loose[sid][0]["framing"] = framing
+    moved, notes = shots.rule_pass([(scene, loose[scene["scene_id"]]) for scene in script["scenes"]], FRUIT_DRAMA)
+    framings = [plan["framing"] for _scene, scene_plans in moved for plan in scene_plans]
+    assert framings == ["insert_prop", "wide_establishing", "close_up", "medium_single", "over_shoulder",
+                        "medium_single", "close_up", "medium_single"]
+    assert [note for note in notes if "camera motion" not in note] == [
+        "rule_pass: scene s03: no close_up/extreme_close_up in this 3-scene window, its last shot was forced "
+        "to close_up",
+        "rule_pass: scene s07: no close_up/extreme_close_up in this 3-scene window, its last shot was forced "
+        "to close_up",
+        "rule_pass: scene s04 shot 1: framing changed 'close_up' -> 'medium_single' (repeated the previous "
+        "shot's framing)",
+        "rule_pass: scene s08 shot 1: framing changed 'close_up' -> 'medium_single' (repeated the previous "
+        "shot's framing)",
+    ]

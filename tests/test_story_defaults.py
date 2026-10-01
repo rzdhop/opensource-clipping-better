@@ -210,3 +210,31 @@ def test_new_story_is_v2_quality_when_keys_present(monkeypatch, tmp_path, capsys
     # 3. the store's own default is today's
     assert stories.create(language="fr", now="2026-10-01T10:00:00+00:00")["generation_profile"] == \
         defaults.default_generation_profile()
+
+
+def test_a_v2_story_is_created_on_the_v2_episode_template(tmp_path):
+    """Phase 7 stage 4 (DEC-227): ``store.create`` -- the API route's and the
+    CLI's way in -- puts a v2 story (pipeline v2, the quality preset) on
+    serial_60s_v2; any other profile, and no profile at all, keeps
+    serial_60s_v1 (``defaults.EPISODE_TEMPLATE_ID``). The per-story 1080p
+    switch is an optional profile key, validated like the others."""
+    from clipping.aistory import store as story_store
+
+    stories = story_store.StoryStore(tmp_path / "outputs", on_log=lambda *a: None)
+    now = "2026-10-01T10:00:00+00:00"
+    v2 = stories.create(language="fr", generation_profile=defaults.quality_generation_profile(), now=now)
+    legacy = stories.create(language="fr", generation_profile={"budget_profile": "quality"}, now=now)
+    default = stories.create(language="en", now=now)
+
+    assert v2["episode_template_id"] == defaults.EPISODE_TEMPLATE_ID_V2 == "serial_60s_v2"
+    assert legacy["episode_template_id"] == default["episode_template_id"] == defaults.EPISODE_TEMPLATE_ID
+    assert "video_resolution" not in v2["generation_profile"]
+    hd = stories.create(language="fr", generation_profile=dict(defaults.quality_generation_profile(),
+                                                                video_resolution="1080p"), now=now)
+    assert hd["generation_profile"]["video_resolution"] == "1080p" and schemas.story_bible_errors(hd) == []
+    try:
+        stories.create(language="fr", generation_profile={"video_resolution": "4k"}, now=now)
+    except ValueError as exc:
+        assert "video_resolution" in str(exc)
+    else:
+        raise AssertionError("an unknown video_resolution must be refused")

@@ -99,6 +99,23 @@ def chain_name(role, kind, story) -> str:
     return f"the quality {role} links ({story['generation_profile']['budget_profile']} budget profile)"
 
 
+def video_resolution(story) -> str:
+    """The size *story*'s clips are bought at (phase 7 stage 4, DEC-227):
+    its ``generation_profile.video_resolution`` (the per-story 1080p switch),
+    else its budget profile's ``video_resolution``, else 720p. A profile
+    that cannot be read counts as one that says nothing."""
+    profile = (story or {}).get("generation_profile") or {}
+    chosen = profile.get("video_resolution")
+    if chosen in defaults.VIDEO_RESOLUTIONS:
+        return chosen
+    try:
+        settings = budget_mod.profile_settings(profile.get("budget_profile"))
+    except (OSError, ValueError, KeyError, TypeError):
+        settings = {}
+    chosen = settings.get("video_resolution")
+    return chosen if chosen in defaults.VIDEO_RESOLUTIONS else defaults.VIDEO_RESOLUTION_DEFAULT
+
+
 def quality_keys_present(merged) -> bool:
     """Whether *merged* holds every :data:`QUALITY_KEYS` value."""
     return all((merged.get(name) or "").strip() for name in QUALITY_KEYS)

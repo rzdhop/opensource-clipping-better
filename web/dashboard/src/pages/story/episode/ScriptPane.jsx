@@ -9,13 +9,15 @@ import RouteChip from '../../../components/RouteChip'
 import { EditableText, RegenerateControl, StepError } from '../fields'
 import DurationBar from './DurationBar'
 
-// The two episode lengths shipped (spec 6.2): FR/EN-agnostic English labels,
+// The episode lengths shipped (spec 6.2; serial_60s_v2 since phase 7, DEC-227:
+// 6-10 beat shots of 5-12 s, every shot animated): FR/EN-agnostic English labels,
 // since the story's language is the *cast's* language, not the workspace
 // UI's. Ids mirror clipping.aistory.defaults.EPISODE_TEMPLATE_IDS exactly
 // (tests/test_story_payload_contract_episode.py).
 const EPISODE_TEMPLATES = [
   { id: 'serial_60s_v1', label: '60 s (55–80)' },
   { id: 'serial_90s_v1', label: '90 s (75–100)' },
+  { id: 'serial_60s_v2', label: '60 s beat shots (55–75)' },
 ]
 
 // clipping.aistory.schemas.EMOTIONS, verbatim.

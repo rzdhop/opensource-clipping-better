@@ -42,6 +42,9 @@ PRICES = {
     "openai/gpt-image-2-low": Price("image", 0.005, "quality low, 1024x1536"),
     # --- video, per second of output (appendix B). Re-read on each model's own
     # page on 2026-09-30: no price had moved; the notes carry what was learned.
+    # The 1080p clip of the same link (phase 7 stage 4, DEC-227: a v2 story's
+    # per-story switch); read by price_key when a request asks 1080p.
+    "fal/seedance-1-pro-fast@1080p": Price("second", 0.0486, "1080x1920 at 24 fps is 48,600 tokens a second at $1.00 per million; read 2026-10-01 on fal.ai (A-100)"),
     "fal/seedance-1-pro-fast": Price("second", 0.022, "token-billed, $1.00 per million tokens, tokens = width x height x 24 fps x seconds / 1024: 720x1280 is 21,600 tokens, $0.0216, a second (rounded up); 1080p, the endpoint's default, is $0.0486 a second; no audio"),
     "fal/ltx-2-fast": Price("second", 0.04, "1080p, its smallest size, audio included; its output is locked to 16:9; its fal-ai/ltx-2 twin was deprecated on 2026-08-15 for LTX-2.3 fast ($0.06 a second at 1080p, with 9:16)"),
     "fal/ltx-2.3-fast": Price("second", 0.06, "fal-ai/ltx-2.3/image-to-video/fast, read on its fal page and schema on 2026-09-30: $0.06 a second at 1080p, its smallest size (9:16 is 1080x1920), $0.12 at 1440p, $0.24 at 2160p; audio not priced apart; a summary block on the same page says $0.04 at 1080p, the higher 'your request will cost' line is kept"),
@@ -104,10 +107,29 @@ class PriceUnknown(LookupError):
     """A paid link has no price in the table. Add it; never guess."""
 
 
-def price_for(link) -> Price:
-    """The :class:`Price` of *link*: exact entry, else the provider's free price."""
+# The clip size every video price row without a suffix is for.
+DEFAULT_RESOLUTION = "720p"
+
+
+def price_key(link, resolution=None) -> str:
+    """The :data:`PRICES` row of *link* at *resolution* (phase 7 stage 4):
+    ``"<link>@<resolution>"`` when the request asks a size other than
+    :data:`DEFAULT_RESOLUTION` and the table has a row for it, else the
+    link's own row -- so every 720p estimate reads the row it always read,
+    and a link that ignores the size keeps its one price."""
     label = describe(link)
-    price = PRICES.get(label)
+    if resolution and resolution != DEFAULT_RESOLUTION:
+        keyed = f"{label}@{resolution}"
+        if keyed in PRICES:
+            return keyed
+    return label
+
+
+def price_for(link, resolution=None) -> Price:
+    """The :class:`Price` of *link* (at *resolution*, :func:`price_key`):
+    exact entry, else the provider's free price."""
+    label = describe(link)
+    price = PRICES.get(price_key(link, resolution))
     if price is not None:
         return price
     if not is_paid(link):
@@ -121,9 +143,10 @@ def price_for(link) -> Price:
     )
 
 
-def estimate(link, qty=1, *, width=None, height=None) -> Estimate:
-    """What *qty* units on *link* would cost, from the table and nothing else."""
-    price = price_for(link)
+def estimate(link, qty=1, *, width=None, height=None, resolution=None) -> Estimate:
+    """What *qty* units on *link* would cost, from the table and nothing else
+    (a clip at *resolution*: :func:`price_key`)."""
+    price = price_for(link, resolution)
     paid = is_paid(link)
     unit_price = price.usd
     if price.per_megapixel:

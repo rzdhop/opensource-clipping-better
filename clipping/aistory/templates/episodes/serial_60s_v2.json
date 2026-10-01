@@ -1,0 +1,28 @@
+{
+  "$schema": "episode_template_v1",
+  "template_id": "serial_60s_v2",
+  "version": 1,
+  "label": {"fr": "Épisode de 60 secondes (plans animés)", "en": "60-second episode (animated beats)"},
+  "window_s": [55, 75],
+  "target_s": 62,
+  "tighten_above_s": 72,
+  "scenes": [6, 10],
+  "shots": [6, 10],
+  "min_shot_s": 3.0,
+  "recap_from_episode": 2,
+  "default_body_count": 6,
+  "shots_per_scene": [1, 2],
+  "max_shot_s": 12,
+  "slots": {
+    "recap":       {"functions": ["recap"], "count": [1, 1], "duration_s": [3.0, 4.0]},
+    "hook":        {"functions": ["hook"], "count": [1, 1], "duration_s": [3.0, 6.0]},
+    "body":        {"functions": ["setup", "rising", "peak", "turn"], "count": [4, 7], "duration_s": [5.0, 11.0]},
+    "cliffhanger": {"functions": ["cliffhanger"], "count": [1, 1], "duration_s": [4.0, 10.0]}
+  },
+  "pauses_s": {"before_first_line": 0.35, "between_lines": 0.25, "tail": 0.6, "tail_peak": 1.2, "tail_floor": 0.3},
+  "tail_peak_functions": ["peak", "cliffhanger"],
+  "hold_extension_max_s": 1.0,
+  "end_card_s": 1.0,
+  "transitions_s": {"cut": 0.0, "dissolve": 0.4, "fadeblack": 0.4, "fadewhite": 0.3, "wipeleft": 0.3, "wiperight": 0.3, "slideup": 0.3},
+  "notes": "Phase 7 (DEC-227, the human's answers 3 and 5, 2026-10-01): a v2 story's episode is 6-10 beat shots of 5-12 s, one seedance clip each (2-12 s sold, DEC-208), the hook the one 3-6 s exception; window 55-75 s, tightening above 72 s (the schema needs tighten_above_s below the window's end). One shot per scene, two only when a scene runs past max_shot_s; a body slot tops out at 11 s so its hold (hold_extension_max_s, never past the slot) keeps a scene under 12 s."
+}

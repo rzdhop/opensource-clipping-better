@@ -99,7 +99,8 @@ def test_the_readers_see_something():
     assert len(_class_fields("StoryApproveRequest")) >= 1
     assert len(workflow.SCRIPT_PARAMS) == 1
     assert len(schemas.EMOTIONS) >= 5
-    assert len(defaults.EPISODE_TEMPLATE_IDS) == 2
+    # Phase 7 stage 4 (DEC-227): serial_60s_v2 joins the two v1 templates.
+    assert len(defaults.EPISODE_TEMPLATE_IDS) == 3
 
 
 # -------------------------------------------------- ScriptPane.jsx: scriptParams

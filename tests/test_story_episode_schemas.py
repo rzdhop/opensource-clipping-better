@@ -41,7 +41,10 @@ def _mutate(doc, fn):
 
 # ======================================================== 1. episode_template_v1
 
-EXPECTED_EPISODE_TEMPLATE_IDS = ("serial_60s_v1", "serial_90s_v1")
+# Re-pinned on purpose (DEC-227, phase 7 stage 4): serial_60s_v2, the template a
+# v2 story is created on, is the third shipped one (count 2 -> 3); the v1 two
+# are unchanged.
+EXPECTED_EPISODE_TEMPLATE_IDS = ("serial_60s_v1", "serial_60s_v2", "serial_90s_v1")
 
 
 def test_exactly_the_two_shipped_episode_template_ids():

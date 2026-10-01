@@ -98,6 +98,12 @@ C1_CALLS = 10
 # no French factor): D2 ~346, D3 ~290 (3 time variants, P1's most, and 3 props
 # of 60-character names), R1v2 ~177 (2 where-when entries, the reply's bound;
 # tests/test_story_look.py).
+#
+# T1v2/T1rv2 (phase 7 stage 4, DEC-227, DEC-138's method): the largest French
+# reply each ask allows -- two beat shots (one for T1rv2), each a 45-word
+# action, a 25-word motion, 4 staging entries at 4 + 4 words, 5 subjects, a
+# modifier and its lines -- needs ~904 / ~450 tokens (chars/4 x 1.3), plus
+# 15 %, rounded up to ten (tests/test_story_prompts_episode.py).
 MAX_TOKENS = {
     "C1": 700, "B1": 400, "B2": 520, "B3": 300,
     "K1": 750, "P0": 420, "P1": 260, "R1": 100, "S1": 950, "S2": 350, "U1": 120,
@@ -105,6 +111,7 @@ MAX_TOKENS = {
     "M1": 330,
     "S3": 720, "F1": 400, "N1": 1430,
     "D2": 380, "D3": 300, "R1v2": 220,
+    "T1v2": 1040, "T1rv2": 520,
 }
 
 # E1's payoff variant (phase 5, plan 11 stage 3, DEC-138's method): from
@@ -143,6 +150,8 @@ TEMPERATURE = {
     "D2": WRITING_TEMPERATURE,
     "D3": WRITING_TEMPERATURE,
     "R1v2": WRITING_TEMPERATURE,
+    "T1v2": WRITING_TEMPERATURE,
+    "T1rv2": WRITING_TEMPERATURE,
 }
 SCHEMA_NAMES = {
     "C1": "story_concepts", "B1": "bible_core", "B2": "bible_world", "B3": "bible_values",
@@ -154,6 +163,7 @@ SCHEMA_NAMES = {
     "M1": "episode_metadata",
     "S3": "series_memory_entry", "F1": "audience_feedback_digest", "N1": "next_episode_proposals",
     "D2": "character_look", "D3": "place_look", "R1v2": "prop_look",
+    "T1v2": "storyboard_beat_shots", "T1rv2": "storyboard_beat_shot_replan",
 }
 
 # E4's input is the whole script, not a small pack -- it needs a wider
@@ -222,8 +232,13 @@ SCHEMA_NAMES = {
 # at its caps and a 60-word note (tests/test_story_episode_prompt_budgets.py):
 # D2 1,987 (11 other characters' builds and heights), D3 1,685 (5 variants, 8
 # props), R1v2 1,014; each the worst case + 15 %, rounded up to ten.
+#
+# T1v2/T1rv2 (phase 7 stage 4, DEC-227): measured on the same live-sized data
+# with their own inputs at their caps (tests/test_story_episode_prompt_budgets.py):
+# T1v2 1,756, T1rv2 1,787; each the worst case + 15 %, rounded up to ten (the
+# plan's 2,000 was an estimate).
 INPUT_BUDGET = {"E1": 1820, "E2": 1660, "E3": 2530, "E4": 3900, "T1": 1270, "T1r": 1410, "S3": 3740, "F1": 3950, "N1": 3740,
-                "D2": 2290, "D3": 1940, "R1v2": 1170}
+                "D2": 2290, "D3": 1940, "R1v2": 1170, "T1v2": 2020, "T1rv2": 2060}
 
 # The ``bible:<field>`` grammar of spec 9.2: which prompt a regenerate note
 # re-runs, and which of that prompt's fields it targets. "tone" also carries
@@ -2273,11 +2288,12 @@ def build_t1(pack, *, scene, lines, characters, place, props, previous_shots, sh
     return _system(pack), user, t1_schema((lo, hi), modifiers_allowed, tags_allowed)
 
 
-def _t1_shot_errors(errors, path, shot, *, names, previous_framing) -> None:
+def _t1_shot_errors(errors, path, shot, *, names, previous_framing, action_words=30) -> None:
     """The per-shot checks :func:`validate_t1` and :func:`validate_t1r`
-    share: the action's word cap, its tags all listed in ``subjects``, no
-    character name leaking into it, and no repeat of *previous_framing*."""
-    _text_errors(errors, f"{path}.action", shot["action"], max_words=30)
+    share: the action's word cap (*action_words*; T1 v2's is 45), its tags
+    all listed in ``subjects``, no character name leaking into it, and no
+    repeat of *previous_framing*."""
+    _text_errors(errors, f"{path}.action", shot["action"], max_words=action_words)
 
     subjects = set(shot["subjects"])
     for tag in _TAG_PATTERN.findall(shot["action"]):
@@ -2422,6 +2438,327 @@ def validate_t1r(reply, *, scene, shots, index, modifiers_allowed, tags_allowed,
     if index < len(shots) - 1 and shot["framing"] == shots[index + 1]["framing"]:
         errors.append(f"$.shot.framing: {shot['framing']!r} repeats the next shot's framing")
 
+    return errors
+
+
+# ------------------------------------------------------------------- T1v2/T1rv2
+#
+# Phase 7 stage 4 (A12, DEC-227): a v2 story's scene becomes 1 beat shot (2
+# only when the scene runs past the template's max_shot_s), each one animated
+# clip. T1 v2 is asked for the plot beat (action, 45 words), what the
+# characters physically do during the clip (motion, 25 words, not the camera)
+# and where each subject stands (staging) -- and is given what the v1 ask
+# never was: the beat's purpose, the place's descriptor, each line's delivery,
+# the scene's on-screen text and sound, the props' look, and the previous
+# shot's action and staging. New ids (T1v2, T1rv2): the v1 T1/T1r strings,
+# caps and budgets are untouched (RC-M1).
+
+T1_V2_ACTION_WORDS = 45
+T1_V2_MOTION_WORDS = 25
+T1_V2_STAGING_MAX = 4
+T1_V2_STAGING_WORDS = 4
+_T1_V2_TIGHT = ("close_up", "extreme_close_up")
+
+_T1_V2_FIELDS = (
+    "- framing: one of {framings}\n"
+    "- camera_motion: one of {camera_motions}\n"
+    "- modifiers: zero or more of {modifiers} (an empty array if none apply)\n"
+    "- action (English): the plot beat of this shot -- who does what to whom, and why it matters to the story -- "
+    "in at most 45 words, not a pose; refer to people, the place and objects only by their tags ({tag_examples}), "
+    "never by name\n"
+    "- motion (English): at most 25 words: what the characters physically do while the clip plays, with motion "
+    "verbs (turns, lifts, steps back), tags only; not the camera, which camera_motion already says\n"
+    "- staging: 1 to 4 entries, one per character or object in the frame: subject (its tag), position (left, "
+    "centre, right or back), facing (at most 4 words), expression (at most 4 words)\n"
+    "- subjects: every tag visible in this shot, from {tags}\n"
+)
+
+_T1_V2_ASK_TEMPLATE = (
+    "Plan this scene as animated beat shots: each shot becomes one video clip, so it carries a whole moment of "
+    "the story, not a pose.\n\n"
+    "Give 'shots': {count}, each with:\n"
+    + _T1_V2_FIELDS +
+    "- lines: which of this scene's numbered lines (1-{n_lines}) are spoken during this shot, in order; every "
+    "line belongs to exactly one shot\n\n"
+    "Vary the framing: never the previous shot's framing.{close_up_note}{insert_prop_note}\n\n"
+    "Never use real people, brands, studio names or copyrighted characters."
+)
+
+_T1R_V2_ASK_TEMPLATE = (
+    "Replace shot {index}, keeping it covering exactly the same lines ({lines}).\n\n"
+    "Give 'shot' with:\n"
+    + _T1_V2_FIELDS +
+    "- lines: the same line numbers as the shot it replaces\n\n"
+    "Never use real people, brands, studio names or copyrighted characters."
+)
+
+
+def _count_text(lo, hi) -> str:
+    if lo == hi:
+        return f"exactly {lo} entr{'y' if lo == 1 else 'ies'}"
+    return f"{lo} to {hi} entries"
+
+
+def _staging_text(staging) -> str:
+    return "; ".join(f"{entry['subject']} {entry['position']}, facing {entry['facing']}, {entry['expression']}"
+                     for entry in staging or ())
+
+
+def _t1_v2_context(scene, lines, characters, place, props, camera, tag_by_char, place_tag, prop_tags,
+                   names) -> str:
+    """The scene as T1 v2 and T1r v2 read it (everything but the ask)."""
+    user = f"Camera: {camera}\n\n"
+    user += f"Beat ({scene['function']}, emotion: {scene['emotion']}): {scene['summary']}\n"
+    if scene.get("on_screen_text"):
+        user += f"On-screen text: {scene['on_screen_text']}\n"
+    numbers = {line.get("line_id"): n for n, line in enumerate(lines, start=1) if line.get("line_id")}
+    cues = []
+    for cue in scene.get("sfx_cues") or ():
+        at = cue.get("at")
+        when = "at the start" if at == "start" else (f"with line {numbers[at]}" if at in numbers else None)
+        cues.append(f"{cue['cue']} ({when})" if when else cue["cue"])
+    if cues:
+        user += f"Sound: {', '.join(cues)}\n"
+    user += "\n"
+    if characters:
+        user += "Characters (tag -- descriptor -- name):\n" + "\n".join(
+            f"- {tag_by_char[c['char_id']]} — {c['descriptor']} — {c['name']}" for c in characters
+        ) + "\n\n"
+    descriptor = (place.get("descriptor") or "").strip().rstrip(".")
+    user += f"Place: {place_tag} — {descriptor + '. ' if descriptor else ''}Layout: {place['layout_notes']}\n\n"
+    if props:
+        user += "Props (tag -- look):\n" + "\n".join(
+            f"- {t} — {p.get('look') or p['descriptor']}" for t, p in zip(prop_tags, props)
+        ) + "\n\n"
+    rendered = []
+    for i, line in enumerate(lines, start=1):
+        speaker = "Narrator" if line["speaker"] == "narrator" else names.get(line["speaker"], line["speaker"])
+        delivery = (line.get("delivery") or "").strip()
+        how = f"{line['emotion']}; delivery: {delivery}" if delivery else line["emotion"]
+        rendered.append(f"{i}. {speaker}: {line['text']} ({how})")
+    user += "Numbered lines:\n" + ("\n".join(rendered) or "none") + "\n\n"
+    return user
+
+
+def _staging_item_schema(tags_allowed) -> dict:
+    subjects = [tag for tag in tags_allowed if not tag.startswith("#")]
+    return _llm_obj({
+        "subject": {"type": "string", "enum": subjects} if subjects else {"type": "string"},
+        "position": {"type": "string", "enum": list(schemas.STAGING_POSITIONS)},
+        "facing": {"type": "string", "description": "at most 4 words"},
+        "expression": {"type": "string", "description": "at most 4 words"},
+    })
+
+
+def _shot_schema_v2(modifiers_allowed, tags_allowed) -> dict:
+    base = _shot_schema(modifiers_allowed, tags_allowed)
+    properties = dict(base["properties"])
+    properties["action"] = {"type": "string", "description": "English, the plot beat, at most 45 words, tags only"}
+    shot = {key: properties[key] for key in ("framing", "camera_motion", "modifiers", "action")}
+    shot["motion"] = {"type": "string",
+                      "description": "English, at most 25 words: what the characters do during the clip"}
+    shot["staging"] = {"type": "array", "description": "1-4 entries, one per subject in the frame",
+                       "items": _staging_item_schema(tags_allowed)}
+    shot["subjects"] = properties["subjects"]
+    shot["lines"] = properties["lines"]
+    return _llm_obj(shot)
+
+
+def t1_v2_schema(shots_per_scene, modifiers_allowed, tags_allowed) -> dict:
+    """The T1 v2 output schema: one scene's beat shots."""
+    lo, hi = shots_per_scene
+    return _llm_obj({
+        "shots": {"type": "array", "description": f"{lo}-{hi} shots",
+                  "items": _shot_schema_v2(modifiers_allowed, tags_allowed)},
+    })
+
+
+def build_t1_v2(pack, *, scene, lines, characters, place, props, previous_shots, shots_per_scene, camera,
+                modifiers_allowed, hook_style):
+    """One v2 scene's beat shots (phase 7 stage 4, A12): *shots_per_scene*
+    (1-1, or 2-2 for a scene longer than one clip), each a framing, a camera
+    motion, modifiers, the plot beat (``action``), what moves (``motion``),
+    where each subject stands (``staging``), the tags visible and the lines
+    it covers.
+
+    Inputs as :func:`build_t1`'s, plus: *scene*'s ``summary`` and ``function``
+    (the beat's purpose), its ``on_screen_text`` and ``sfx_cues``; *lines*
+    each with its ``line_id`` and ``delivery``; *place* with its
+    ``descriptor``; *props* each with its ``look`` (``shots.render_prop``'s
+    words; else its descriptor); *previous_shots* the last (up to two)
+    shots of the episode so far, each ``{framing, camera_motion}`` and the
+    last one's ``action`` and ``staging`` too. When neither of the two holds
+    a close-up, this scene is asked for one (the rule pass's 3-scene window,
+    ``shots.rule_pass``, would force it otherwise)."""
+    tag_by_char, place_tag, prop_tags, tags_allowed = _t1_tags(characters, place, props, scene["time_variant"])
+    names = {c["char_id"]: c["name"] for c in characters}
+
+    user = _t1_v2_context(scene, lines, characters, place, props, camera, tag_by_char, place_tag, prop_tags, names)
+    if previous_shots:
+        rows = []
+        for i, shot in enumerate(previous_shots):
+            row = f"- {shot['framing']} / {shot['camera_motion']}"
+            if i == len(previous_shots) - 1 and shot.get("action"):
+                row += f": {shot['action']}"
+                if shot.get("staging"):
+                    row += f" Staging: {_staging_text(shot['staging'])}"
+            rows.append(row)
+        user += "Previous shots (the last one is just before this scene):\n" + "\n".join(rows) + "\n\n"
+
+    insert_prop_note = ""
+    if scene["function"] == "hook" and hook_style == "insert_prop":
+        insert_prop_note = " This is the hook scene: exactly one shot must use framing insert_prop."
+    close_up_note = ""
+    if len(previous_shots or ()) >= 2 and not any(s["framing"] in _T1_V2_TIGHT for s in previous_shots[-2:]):
+        close_up_note = (" The two shots before this scene hold no close-up: frame one of this scene's shots "
+                         "close_up or extreme_close_up.")
+
+    lo, hi = shots_per_scene
+    user += _T1_V2_ASK_TEMPLATE.format(
+        count=_count_text(lo, hi),
+        framings=_framings_with_meanings(),
+        camera_motions=", ".join(schemas.CAMERA_MOTIONS),
+        modifiers=", ".join(modifiers_allowed) if modifiers_allowed else "none available for this story",
+        tag_examples=f"{next(iter(tag_by_char.values()), '@char_x')}, {prop_tags[0] if prop_tags else '%prop_x'}",
+        tags=", ".join(tags_allowed),
+        n_lines=len(lines),
+        close_up_note=close_up_note,
+        insert_prop_note=insert_prop_note,
+    )
+    return _system(pack), user, t1_v2_schema((lo, hi), modifiers_allowed, tags_allowed)
+
+
+def _t1_v2_shot_errors(errors, path, shot, *, names, previous_framing, tags_allowed) -> None:
+    """:func:`_t1_shot_errors` at T1 v2's 45-word action, plus its own
+    fields: ``motion`` (25 words, its tags in ``subjects``, no name),
+    ``staging`` (at most 4 entries, each subject once and in ``subjects``,
+    facing and expression at most 4 words, their tags the scene's), and the
+    v2 ``insert_prop`` rule (a prop among the subjects, stage 3c)."""
+    _t1_shot_errors(errors, path, shot, names=names, previous_framing=previous_framing,
+                    action_words=T1_V2_ACTION_WORDS)
+    subjects = set(shot["subjects"])
+    _text_errors(errors, f"{path}.motion", shot["motion"], max_words=T1_V2_MOTION_WORDS)
+    for tag in _TAG_PATTERN.findall(shot["motion"]):
+        if tag not in subjects:
+            errors.append(f"{path}.motion: tag {tag!r} is used but not listed in subjects")
+    lowered = shot["motion"].lower()
+    for name in names.values():
+        if re.search(rf"\b{re.escape(name.lower())}\b", lowered):
+            errors.append(f"{path}.motion: names the character {name!r} instead of using a tag")
+
+    staging = shot["staging"]
+    if len(staging) > T1_V2_STAGING_MAX:
+        errors.append(f"{path}.staging: {len(staging)} entries, expected at most {T1_V2_STAGING_MAX}")
+    seen = set()
+    allowed = set(tags_allowed)
+    for j, entry in enumerate(staging):
+        where = f"{path}.staging[{j}]"
+        if entry["subject"] not in subjects:
+            errors.append(f"{where}.subject: {entry['subject']!r} is not one of this shot's subjects")
+        elif entry["subject"] in seen:
+            errors.append(f"{where}.subject: {entry['subject']!r} is staged twice")
+        seen.add(entry["subject"])
+        for key in ("facing", "expression"):
+            _text_errors(errors, f"{where}.{key}", entry[key], max_words=T1_V2_STAGING_WORDS)
+            for tag in _TAG_PATTERN.findall(entry[key] or ""):
+                if tag not in allowed:
+                    errors.append(f"{where}.{key}: tag {tag!r} is not one of this scene's tags")
+    if shot["framing"] == "insert_prop" and not any(tag.startswith("%") for tag in shot["subjects"]):
+        errors.append(f"{path}.subjects: framing 'insert_prop' needs a prop tag (%...) among the subjects")
+
+
+def validate_t1_v2(reply, *, scene, shots_per_scene, modifiers_allowed, tags_allowed, n_lines, names) -> list:
+    """Post-validation for a T1 v2 reply: :func:`validate_t1`'s rules (shot
+    count, tags, names, line numbers once each and ascending, no framing
+    repeated inside the scene) at T1 v2's caps, its own fields
+    (:func:`_t1_v2_shot_errors`), and every line of the scene covered by a
+    shot (a beat shot carries its scene's lines)."""
+    lo, hi = shots_per_scene
+    errors = schemas.validate(reply, t1_v2_schema((lo, hi), modifiers_allowed, tags_allowed))
+    if errors:
+        return errors
+
+    errors = []
+    shots = reply["shots"]
+    if not (lo <= len(shots) <= hi):
+        errors.append(f"$.shots: {len(shots)} shot(s), expected {lo}-{hi}")
+    used_lines = []
+    previous_framing = None
+    for i, shot in enumerate(shots):
+        path = f"$.shots[{i}]"
+        _t1_v2_shot_errors(errors, path, shot, names=names, previous_framing=previous_framing,
+                           tags_allowed=tags_allowed)
+        previous_framing = shot["framing"]
+        for line_no in shot["lines"]:
+            if not (1 <= line_no <= n_lines):
+                errors.append(f"{path}.lines: {line_no} is not a valid line number (1-{n_lines})")
+            elif line_no in used_lines:
+                errors.append(f"{path}.lines: line {line_no} is used in more than one shot")
+            used_lines.append(line_no)
+    if used_lines != sorted(used_lines):
+        errors.append(f"$.shots: line numbers {used_lines} do not ascend across shots")
+    missing = [n for n in range(1, n_lines + 1) if n not in used_lines]
+    if missing:
+        errors.append(f"$.shots: line(s) {missing} belong to no shot; every line belongs to exactly one shot")
+    return errors
+
+
+def t1r_v2_schema(modifiers_allowed, tags_allowed) -> dict:
+    """The T1r v2 output schema: one replacement beat shot."""
+    return _llm_obj({"shot": _shot_schema_v2(modifiers_allowed, tags_allowed)})
+
+
+def build_t1r_v2(pack, *, scene, shots, index, note, lines, characters, place, props, shots_per_scene, camera,
+                 modifiers_allowed, hook_style):
+    """Re-plan one shot of a v2 scene (phase 7 stage 4): :func:`build_t1r`'s
+    contract on :func:`build_t1_v2`'s inputs and fields -- *shots* the
+    scene's own plans so far (each at least ``{framing, camera_motion,
+    lines}``, with its ``action`` when it has one)."""
+    old_shot = shots[index]
+    tag_by_char, place_tag, prop_tags, tags_allowed = _t1_tags(characters, place, props, scene["time_variant"])
+    names = {c["char_id"]: c["name"] for c in characters}
+
+    user = _t1_v2_context(scene, lines, characters, place, props, camera, tag_by_char, place_tag, prop_tags, names)
+    user += "Shots in this scene so far:\n" + "\n".join(
+        f"- shot {i + 1}{' <- replace this one' if i == index else ''}: {s['framing']} / {s['camera_motion']}, "
+        f"lines {s['lines'] or 'none'}{': ' + s['action'] if s.get('action') else ''}"
+        for i, s in enumerate(shots)
+    ) + "\n\n"
+    if note:
+        user += f"Follow the author's note: {note}\n\n"
+    user += _T1R_V2_ASK_TEMPLATE.format(
+        index=index + 1,
+        lines=old_shot["lines"] or "none",
+        framings=_framings_with_meanings(),
+        camera_motions=", ".join(schemas.CAMERA_MOTIONS),
+        modifiers=", ".join(modifiers_allowed) if modifiers_allowed else "none available for this story",
+        tag_examples=f"{next(iter(tag_by_char.values()), '@char_x')}, {prop_tags[0] if prop_tags else '%prop_x'}",
+        tags=", ".join(tags_allowed),
+    )
+    return _system(pack), user, t1r_v2_schema(modifiers_allowed, tags_allowed)
+
+
+def validate_t1r_v2(reply, *, scene, shots, index, modifiers_allowed, tags_allowed, n_lines, names) -> list:
+    """Post-validation for a T1r v2 reply: :func:`validate_t1r`'s rules (the
+    same lines, no framing repeated with either neighbour) on a v2 shot
+    (:func:`_t1_v2_shot_errors`)."""
+    errors = schemas.validate(reply, t1r_v2_schema(modifiers_allowed, tags_allowed))
+    if errors:
+        return errors
+
+    errors = []
+    shot = reply["shot"]
+    previous_framing = shots[index - 1]["framing"] if index > 0 else None
+    _t1_v2_shot_errors(errors, "$.shot", shot, names=names, previous_framing=previous_framing,
+                       tags_allowed=tags_allowed)
+    for line_no in shot["lines"]:
+        if not (1 <= line_no <= n_lines):
+            errors.append(f"$.shot.lines: {line_no} is not a valid line number (1-{n_lines})")
+    old_lines = shots[index]["lines"]
+    if shot["lines"] != old_lines:
+        errors.append(f"$.shot.lines: {shot['lines']} does not cover the same lines as the replaced shot {old_lines}")
+    if index < len(shots) - 1 and shot["framing"] == shots[index + 1]["framing"]:
+        errors.append(f"$.shot.framing: {shot['framing']!r} repeats the next shot's framing")
     return errors
 
 

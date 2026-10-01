@@ -253,6 +253,61 @@ def test_t1r_worst_case_fits_its_budget():
     assert _fits("T1r", *_t1r()[:2]) > context.PACK_TOKEN_BUDGET
 
 
+# Phase 7 stage 4 (DEC-227, DEC-138's method): T1 v2 and its re-plan on the same
+# live-sized data, with what they read beyond T1 at its caps -- the place's
+# descriptor (45 words), each of the four lines' 12-word delivery, a 6-word
+# on-screen text and 6 sound cues, the prop's look as shots.render_prop says it
+# (a 30-word descriptor, material 8, colour 6, scale 10), two shots asked, and
+# the previous shot's 45-word action with 4 staging entries at 4 + 4 words (T1r
+# v2: the scene's two shots so far at 45 words, a 60-word note). Measured
+# (chars / 4): T1v2 1,756, T1rv2 1,787; each budget the worst case + 15 %,
+# rounded up to ten. The v1 rows above are untouched (RC-M1).
+MEASURED_V2 = {"T1v2": 1756, "T1rv2": 1787}
+_DENSITY = LIVE_CHARACTERS["char_kiwilo"]["descriptor"]  # the live descriptor's (words, characters)
+
+
+def _staging_at_caps():
+    return [{"subject": f"@{cid}", "position": "left", "facing": _fr(4), "expression": _fr(4)} for cid in IDS] + [
+        {"subject": f"%{PROP['prop_id']}", "position": "back", "facing": _fr(4), "expression": _fr(4)}]
+
+
+def _t1_v2_kwargs():
+    scene = dict(BODY, on_screen_text=_fr(6),
+                 sfx_cues=[{"at": BODY["lines"][k % 4]["line_id"], "cue": STYLE["audio"]["sfx_cues"][k % 3]}
+                           for k in range(6)])
+    return dict(
+        scene=scene, lines=[{k: line[k] for k in ("line_id", "speaker", "text", "emotion", "delivery")}
+                            for line in BODY["lines"]],
+        characters=[{k: c[k] for k in ("char_id", "name", "descriptor")} for c in CAST],
+        place=dict({k: LONGEST_PLACE[k] for k in ("place_id", "layout_notes")}, descriptor=_at_density(45, _DENSITY)),
+        props=[dict(PROP, look=_at_density(30 + 8 + 6 + 10, _DENSITY))], shots_per_scene=(2, 2),
+        camera=STYLE["camera"], modifiers_allowed=list(STYLE["motion_rules"]["tier1"]["modifiers"]),
+        hook_style=DEFAULTS["hook_style"])
+
+
+def _t1_v2():
+    previous = [{"framing": "medium_two_shot", "camera_motion": "push_in"},
+                {"framing": "medium_single", "camera_motion": "push_in", "action": _fr(45),
+                 "staging": _staging_at_caps()}]
+    return prompts.build_t1_v2(_pack(), previous_shots=previous, **_t1_v2_kwargs())
+
+
+def _t1r_v2():
+    pack = _pack(NOTE)
+    shots = [{"framing": f, "camera_motion": "push_in", "lines": [n, n + 1], "action": _fr(45)}
+             for n, f in ((1, "close_up"), (3, "medium_two_shot"))]
+    return prompts.build_t1r_v2(pack, shots=shots, index=1, note=pack.note, **_t1_v2_kwargs())
+
+
+def test_t1_v2_and_t1r_v2_worst_cases_fit_their_measured_budgets():
+    for prompt_id, build in (("T1v2", _t1_v2), ("T1rv2", _t1r_v2)):
+        system, user, _schema = build()
+        tokens = _fits(prompt_id, system, user)
+        assert tokens == MEASURED_V2[prompt_id], (prompt_id, tokens)
+        assert prompts.INPUT_BUDGET[prompt_id] == -(-round(MEASURED_V2[prompt_id] * 1.15, 1) // 10) * 10
+        assert tokens > prompts.INPUT_BUDGET["T1"]  # past T1's own budget: it needs its own
+
+
 @pytest.mark.parametrize("prompt_id", ["E1", "E2", "E3", "E4", "T1", "T1r"])
 def test_a_prompt_over_its_budget_still_raises_before_any_call(prompt_id):
     from clipping.aistory import steps

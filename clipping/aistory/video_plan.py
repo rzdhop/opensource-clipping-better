@@ -310,7 +310,8 @@ def plan_animation(
     skipping a shot that does not fit and continuing to the next (a cheaper
     shot further down may still fit); ``"all_shots"`` (the ``quality``
     profile) selects every non-``keep_still`` shot regardless of the cap and
-    reports ``over_cap`` rather than trimming anything.
+    reports ``over_cap`` rather than trimming anything -- such a plan is
+    refused whole (:func:`all_shots_refusal`, DEC-227).
 
     ``priority`` defaults to :data:`ANIMATE_PRIORITY`. Every entry that
     names a scene function pulls that function's not-yet-placed shots (shot
@@ -415,6 +416,25 @@ def plan_animation(
         left_usd=left_usd,
         over_cap=over_cap,
     )
+
+
+def all_shots_refusal(plan: VideoPlan, *, link: str, mode: str) -> str | None:
+    """Why an ``all_shots`` plan (the quality profile: every shot animated,
+    phase 7 stage 4, DEC-227) cannot run, or None: it is over the episode's
+    cap (``plan.over_cap``). Such a plan is refused whole -- never trimmed to
+    the shots that fit -- so the sentence names what the whole plan needs:
+    its clips, planned seconds and estimate, what the episode has already
+    spent or committed (``plan.image_usd``), and the cap. Any other *mode*
+    trims to its cap instead (or reports a pin past it), so it is never
+    refused here."""
+    if mode != "all_shots" or not plan.over_cap:
+        return None
+    clips = sum(1 for entry in plan.selected if entry["est_usd"] > 0)
+    total = plan.image_usd + plan.video_usd
+    return (f"Animating every shot needs {clips} clip{'' if clips == 1 else 's'}, {plan.seconds} s on {link}, "
+            f"est ${plan.video_usd:.3f}; with ${plan.image_usd:.2f} already spent or committed that is "
+            f"${total:.2f} of the ${plan.cap_usd:.2f} episode cap. The quality profile animates every shot, so "
+            "the whole plan is refused, never a partial pick")
 
 
 # ---------------------------------------------------------------- routing

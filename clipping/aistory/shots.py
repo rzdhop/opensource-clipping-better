@@ -551,6 +551,9 @@ _EXPRESSION_FRAMINGS = ("close_up", "extreme_close_up")
 _POSITIONS = {1: ("In the centre",), 2: ("On the left", "On the right"),
               3: ("On the left", "In the centre", "On the right"),
               4: ("Far left", "Centre left", "Centre right", "Far right")}
+# Where a T1 v2 staging entry puts its subject (phase 7 stage 4).
+_STAGED_POSITIONS = {"left": "On the left", "centre": "In the centre", "right": "On the right",
+                     "back": "In the background"}
 # An emotion said as an adjective ("neutral" is not said).
 _EMOTION_WORDS = {"tension": "tense", "fear": "afraid", "triumph": "triumphant", "neutral": ""}
 _DELIVERY_MAX_WORDS = 8
@@ -688,26 +691,54 @@ def _holder(prop_doc, frame_ids, char_handles) -> str:
     return ""
 
 
-def _staging(frame, frame_props, *, char_handles, look_words) -> str:
+def _staged(entry, resolve) -> str:
+    """A T1 v2 staging entry's expression and facing as one parenthesis
+    (" (angry, facing the mango)"), or ''."""
+    parts = []
+    expression = _collapse_ws(resolve(entry.get("expression") or ""))
+    facing = _collapse_ws(resolve(entry.get("facing") or ""))
+    if expression:
+        parts.append(_strip_period(expression))
+    if facing:
+        parts.append(f"facing {_strip_period(facing)}")
+    return f" ({', '.join(parts)})" if parts else ""
+
+
+def _staging(frame, frame_props, *, char_handles, look_words, staging=(), resolve=lambda text: text) -> str:
     """Each character of the frame by its handle, where it stands (left,
     right, centre in subject order) and its look -- its height said against
     the others in the frame --, two facing each other; then each prop of
-    the shot with its look and who holds it."""
+    the shot with its look and who holds it.
+
+    *staging* (phase 7 stage 4: T1 v2's entries, ``{subject, position,
+    facing, expression}``) places each subject it names where it says, with
+    its expression and facing; a subject it does not name keeps the default
+    place, and two characters are said to face each other only when nothing
+    is staged. *resolve* turns the tags of those texts into handles."""
     sentences = []
     n = len(frame)
     positions = _POSITIONS.get(n) or tuple(f"Position {i} from the left" for i in range(1, n + 1))
+    staged = {entry["subject"]: entry for entry in staging or () if entry.get("subject")}
     docs = [doc for _cid, doc in frame]
     for (cid, doc), where in zip(frame, positions):
         others = [other for other in docs if other is not doc]
         look = (render_look(doc, others=others, max_words=look_words) if doc.get("look")
                 else _plain_look(doc, look_words))
-        sentences.append(prompting.as_sentence(f"{where}, {char_handles[cid]}: {look}"))
-    if n == 2:
+        entry = staged.get(f"@{cid}")
+        if entry is not None:
+            where = _STAGED_POSITIONS.get(entry.get("position"), where)
+            sentences.append(prompting.as_sentence(f"{where}, {char_handles[cid]}{_staged(entry, resolve)}: {look}"))
+        else:
+            sentences.append(prompting.as_sentence(f"{where}, {char_handles[cid]}: {look}"))
+    if n == 2 and not any(f"@{cid}" in staged for cid, _doc in frame):
         sentences.append("They face each other.")
     frame_ids = {cid for cid, _doc in frame}
-    for _pid, doc in frame_props:
+    for pid, doc in frame_props:
         held = _holder(doc, frame_ids, char_handles)
         text = render_prop(doc)
+        entry = staged.get(f"%{pid}")
+        if entry is not None and entry.get("position") in _STAGED_POSITIONS:
+            text = f"{_STAGED_POSITIONS[entry['position']]}, {text}"
         sentences.append(prompting.as_sentence(f"{text}, held by {held}" if held else text))
     return " ".join(sentence for sentence in sentences if sentence)
 
@@ -787,9 +818,16 @@ def _layered(plan, *, scene, entities, style_lock, consistency_mode, video_actio
     place_full = _place_slice(places[scene["place_id"]], scene["time_variant"], framing, props)
     constraints = (prompting.CONSTRAINTS_KEYFRAME if frame else prompting.CONSTRAINTS_KEYFRAME_NO_PEOPLE)
 
+    place_names = {pid: doc.get("name") for pid, doc in places.items()}
+
+    def resolve(text):
+        return resolve_action(text, char_handles=char_handles, prop_handles=prop_handles, place_names=place_names)
+
+    staged = plan.get("staging") or ()
     for look_words, place_words, rendering_words in _LAYERED_BUDGETS:
         staging = names_mod.without_names(
-            _staging(frame, frame_props, char_handles=char_handles, look_words=look_words), name_map)
+            _staging(frame, frame_props, char_handles=char_handles, look_words=look_words, staging=staged,
+                     resolve=resolve), name_map)
         place_text = place_full if place_words is None else _fit_place(place_full, place_words)
         image_prompt = prompting.layered_shot_prompt(
             style_lock, roles_text=roles, beat=beat, staging=staging, composition=composition,
@@ -807,7 +845,10 @@ def _layered(plan, *, scene, entities, style_lock, consistency_mode, video_actio
     else:
         secondary = ""
     subject = _and_join(handles) or (held[0] if held else "the set")
-    motion = names_mod.without_names(_collapse_ws(plan.get("motion") or video_action), name_map)
+    # T1 v2's motion (phase 7 stage 4: what the characters do during the clip,
+    # in tags) when the plan has one, else the resolved action as before.
+    clip_motion = plan.get("clip_motion")
+    motion = names_mod.without_names(_collapse_ws(resolve(clip_motion) if clip_motion else video_action), name_map)
     modifiers = [prompting.MODIFIER_PHRASES[m] for m in plan.get("modifiers") or () if m in prompting.MODIFIER_PHRASES]
     video_prompt = prompting.layered_clip_prompt(
         style_lock, subject=subject, motion=_strip_period(motion),
@@ -839,7 +880,8 @@ def resolve_shot(shot, *, scene, entities, style_lock, consistency_mode, v2=Fals
     (:func:`_reference_images_v2`), and the result also holds
     ``video_prompt`` (the clip prompt) and ``prompt_layout``
     (``"layered_v1"``). The plan may then carry ``lines`` (numbers or line
-    ids), ``camera_motion``, ``modifiers`` and ``motion``. Off, the result
+    ids), ``camera_motion``, ``modifiers``, ``clip_motion`` and ``staging``
+    (T1 v2's, phase 7 stage 4). Off, the result
     is exactly the legacy one (RC-Q1)."""
     characters = entities.get("characters", {})
     places = entities.get("places", {})
@@ -1405,8 +1447,18 @@ def _non_cut_inside_a_scene(storyboard) -> bool:
     return any(t["type"] != "cut" and same_scene.get(t["after"]) for t in storyboard["transitions"])
 
 
+def _keep_t1_v2(target, source) -> None:
+    """Copy *source*'s T1 v2 fields (phase 7 stage 4: ``clip_motion``,
+    ``staging``) onto *target* -- a plan onto its shot, a shot back onto its
+    plan. A fast or v1 T1 plan has neither, so its shot is unchanged."""
+    if source.get("clip_motion"):
+        target["clip_motion"] = source["clip_motion"]
+    if isinstance(source.get("staging"), list):
+        target["staging"] = [dict(entry) for entry in source["staging"]]
+
+
 def build_storyboard(script, plans, sources, *, entities, style_lock, template, language, consistency_mode,
-                     now, previous=None, v2=False) -> tuple:
+                     now, previous=None, v2=False, shots_per_scene=None) -> tuple:
     """*plans* (``{scene_id: [plan, ...]}``) and *sources* (``{scene_id:
     "t1"|"fast"}``) resolved into a complete ``storyboard_v1`` document:
     scenes in the script's own order (only the ones *plans* covers), the
@@ -1420,6 +1472,10 @@ def build_storyboard(script, plans, sources, *, entities, style_lock, template, 
     the result does not pass ``schemas.storyboard_errors`` and
     ``schemas.storyboard_context_errors``. Returns ``(document, notes)``.
     *v2*: every shot is resolved layered (:func:`resolve_shot`).
+    *shots_per_scene*: the episode's effective ``[lo, hi]``
+    (``EpisodeContext.episode_defaults``: the template's over the style's,
+    phase 7 stage 4); None reads the style lock's own, as before. A plan's
+    ``clip_motion`` and ``staging`` (T1 v2's) are kept on its shot.
     """
     scenes_by_id = {scene["scene_id"]: scene for scene in script["scenes"]}
     scenes_in_order = [scene for scene in script["scenes"] if scene["scene_id"] in plans]
@@ -1453,6 +1509,7 @@ def build_storyboard(script, plans, sources, *, entities, style_lock, template, 
             }
             if "prompt_layout" in resolved:
                 shot["prompt_layout"] = resolved["prompt_layout"]
+            _keep_t1_v2(shot, plan)
             shots.append(shot)
 
     transitions = timing.plan_transitions(shots, scenes_by_id, template)
@@ -1478,8 +1535,10 @@ def build_storyboard(script, plans, sources, *, entities, style_lock, template, 
         "updated_at": now,
     }
 
+    if shots_per_scene is None:
+        shots_per_scene = style_lock["episode_defaults"]["shots_per_scene"]
     errors = schemas.storyboard_errors(doc, min_shot_s=template["min_shot_s"])
-    errors += schemas.storyboard_context_errors(doc, script, shots_per_scene=style_lock["episode_defaults"]["shots_per_scene"])
+    errors += schemas.storyboard_context_errors(doc, script, shots_per_scene=shots_per_scene)
     if errors:
         raise ValueError(f"build_storyboard produced an invalid storyboard: {'; '.join(errors)}")
 
@@ -1503,6 +1562,7 @@ def refresh_prompts(storyboard, script, *, entities, style_lock, consistency_mod
         if v2:
             plan.update(lines=list(shot["lines"]), camera_motion=shot["camera_motion"],
                         modifiers=list(shot["modifiers"]))
+            _keep_t1_v2(plan, shot)
         resolved = resolve_shot(plan, scene=scene, entities=entities, style_lock=style_lock,
                                 consistency_mode=consistency_mode, v2=v2)
         _collect_resolved_from(resolved_from, shot["subject_tags"], scene, entities)
@@ -1541,9 +1601,11 @@ def plans_from_storyboard(storyboard, script) -> dict:
         if scene is None:
             continue
         numbers = {line["line_id"]: n for n, line in enumerate(scene["lines"], start=1)}
-        plans.setdefault(scene["scene_id"], []).append(_plan(
+        plan = _plan(
             framing=shot["framing"], camera_motion=shot["camera_motion"], modifiers=list(shot["modifiers"]),
             action=shot["action"], subjects=list(shot["subject_tags"]),
             lines=[numbers[line_id] for line_id in shot["lines"] if line_id in numbers],
-        ))
+        )
+        _keep_t1_v2(plan, shot)
+        plans.setdefault(scene["scene_id"], []).append(plan)
     return plans

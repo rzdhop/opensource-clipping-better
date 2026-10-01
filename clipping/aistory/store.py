@@ -276,6 +276,7 @@ _PROFILE_CHOICES = {
     "consistency_mode": defaults.CONSISTENCY_MODES,
     "budget_profile": defaults.BUDGET_PROFILES,
     "pipeline": defaults.PIPELINES,
+    "video_resolution": defaults.VIDEO_RESOLUTIONS,
 }
 
 _INDEX_ENTRY_SCHEMA = {
@@ -720,7 +721,8 @@ class StoryStore:
             "place_ids": [],
             "prop_ids": [],
             "style_template_id": style_template_id,
-            "episode_template_id": defaults.EPISODE_TEMPLATE_ID,
+            # A v2 story starts on the v2 template (DEC-227); a legacy one as before.
+            "episode_template_id": defaults.episode_template_for(profile),
             "generation_profile": profile,
             "narrator": {"enabled": False, "voice": None},
             "approvals": approvals,

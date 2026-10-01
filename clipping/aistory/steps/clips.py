@@ -58,7 +58,7 @@ from clipping.providers import generation as gen
 from clipping.providers import video as video_providers
 from clipping.providers.registry import ChainError, describe
 
-from .. import hardware, imaging, schemas, video_plan
+from .. import hardware, imaging, media_policy, schemas, video_plan
 from . import sticky_link
 
 CLIPS_KIND = "clips"
@@ -200,11 +200,17 @@ def flags_moved(storyboard, assets_doc) -> bool:
 
 # ------------------------------------------------------------ a clip's state
 
-def clip_prompt_hash(prompt, negative, *, native_audio=False) -> str:
+def clip_prompt_hash(prompt, negative, *, native_audio=False, resolution="720p") -> str:
     """sha256 of what a clip is asked for: the video prompt, its negative,
-    and whether the model's own sound is kept (tier 3). The keyframe is the
-    record's ``image_sha256``, the link its ``link``."""
-    return _canonical_sha256({"prompt": prompt, "negative": negative or "", "native_audio": bool(native_audio)})
+    whether the model's own sound is kept (tier 3) and, only when it is not
+    720p, the size it is bought at (phase 7 stage 4, DEC-227: a story switched
+    to 1080p re-buys its clips; a 720p request hashes exactly as before, so
+    every stored clip stays current). The keyframe is the record's
+    ``image_sha256``, the link its ``link``."""
+    payload = {"prompt": prompt, "negative": negative or "", "native_audio": bool(native_audio)}
+    if resolution and resolution != "720p":
+        payload["resolution"] = resolution
+    return _canonical_sha256(payload)
 
 
 def clip_request_parts(ec, shot, script, *, tier, flags, note=None) -> dict:
@@ -219,8 +225,9 @@ def clip_request_parts(ec, shot, script, *, tier, flags, note=None) -> dict:
         lines = [texts[line_id] for line_id in shot["lines"] if line_id in texts]
     prompt, negative = video_plan.build_video_prompt(shot, ec.style_lock, tier=tier if tier in (2, 3) else 2,
                                                      lines=lines, note=note)
+    resolution = media_policy.video_resolution(getattr(ec, "story", None))
     return {"prompt": prompt, "negative": negative, "native_audio": native,
-            "hash": clip_prompt_hash(prompt, negative, native_audio=native)}
+            "hash": clip_prompt_hash(prompt, negative, native_audio=native, resolution=resolution)}
 
 
 def clip_state(ec, shot, script, *, link, tier, flags, image_sha) -> str:
@@ -276,11 +283,12 @@ def local_video_status(env, *, transport=None) -> dict:
             "note": f"{name} can run on ComfyUI at {client.base_url} ({card}, profile {profile})"}
 
 
-def hosted_rows(chain, merged, adapters) -> list:
+def hosted_rows(chain, merged, adapters, *, resolution=None) -> list:
     """One row per hosted link of VIDEO_CHAIN, calling nothing:
     ``{"link", "status": "keyed" | "skipped", "reason", "price_per_second"}``
     -- keyed: it has an adapter, a table of sellable lengths, its key and a
-    price per second (every hosted clip is paid)."""
+    price per second (every hosted clip is paid), at *resolution* when the
+    table prices that size apart (``pricing.price_key``, phase 7 stage 4)."""
     rows = []
     for link in chain:
         if link.provider == "local":
@@ -297,7 +305,7 @@ def hosted_rows(chain, merged, adapters) -> list:
             row["reason"] = imaging.missing_keys_reason(gen.missing_keys(link, merged))
         else:
             try:
-                price = pricing.price_for(link)
+                price = pricing.price_for(link, resolution)
             except pricing.PriceUnknown as exc:
                 row["reason"] = str(exc)
             else:
@@ -343,7 +351,7 @@ def video_units(ec, script, storyboard, assets_doc, *, env, caps, committed_usd,
          "link", "source": "record" | "policy" | None, "template", "profile", "price_per_second",
          "plan": [{"shot_id", "clip_s", "est_usd", "why"}], "still": [{"shot_id", "reason"}],
          "count", "seconds", "est_usd", "eta_s": s | None, "eta_note", "links": [...],
-         "refused": sentence | None, "ready": bool, "message"}
+         "refused": sentence | None, "over_cap": sentence | None, "ready": bool, "message"}
 
     ``plan`` is the planner's selection (``video_plan.plan_animation``) in
     plan order; ``count``/``seconds``/``est_usd`` are the clips to make (a
@@ -361,7 +369,15 @@ def video_units(ec, script, storyboard, assets_doc, *, env, caps, committed_usd,
     on the hosted link it would take, with its price (``refused`` says why,
     ``ready`` false) -- as a paid image refused is priced; a route with no
     link at all has no plan. ``ready`` is false while clips are to be
-    bought and cannot be."""
+    bought and cannot be.
+
+    Phase 7 stage 4 (DEC-227): the clips are priced at the story's size
+    (``media_policy.video_resolution``: 720p unless the story or its budget
+    profile says 1080p); an ``all_shots`` plan over the episode's cap carries
+    ``over_cap`` (``video_plan.all_shots_refusal``: the whole plan is
+    refused, ``assets.plan_refusal``); a shot longer than the longest clip
+    the link sells is planned at that length, ``held_s`` on its row and in
+    the message (the render holds the clip's last frame, DEC-208)."""
     tier = tier_of(ec)
     profile_name = ec.story["generation_profile"]["budget_profile"]
     route = ec.story["generation_profile"]["route"]
@@ -370,7 +386,7 @@ def video_units(ec, script, storyboard, assets_doc, *, env, caps, committed_usd,
     units = {"tier": tier, "budget_profile": profile_name, "route": route, "mode": None, "route_class": None,
              "link": None, "source": None, "template": None, "profile": None, "price_per_second": None,
              "plan": [], "still": [], "count": 0, "seconds": 0, "est_usd": 0.0, "eta_s": None,
-             "eta_note": ETA_NONE, "links": [], "refused": None, "ready": True, "message": ""}
+             "eta_note": ETA_NONE, "links": [], "refused": None, "over_cap": None, "ready": True, "message": ""}
 
     def stop(message, *, reason, still="no_link"):
         units.update(still=_still_rows(shots, flags, still), refused=reason, ready=False, message=message)
@@ -399,7 +415,8 @@ def video_units(ec, script, storyboard, assets_doc, *, env, caps, committed_usd,
         return units
 
     # --- the link: the episode's own, else the route and the profile's policy
-    rows = hosted_rows(chain, merged, adapters)
+    resolution = media_policy.video_resolution(ec.story)
+    rows = hosted_rows(chain, merged, adapters, resolution=resolution)
     local_listed = any(link.provider == "local" for link in chain)
     local_adapter = gen.adapter_for(gen.VIDEO, "local", adapters) is not None
     local_info = {}
@@ -553,10 +570,18 @@ def video_units(ec, script, storyboard, assets_doc, *, env, caps, committed_usd,
 
     new = [entry for entry in plan.selected if entry["shot_id"] not in current_ids + booked_ids]
     count, seconds, est = len(new), int(plan.seconds), round(float(plan.video_usd), 4)
-    units.update(plan=[{"shot_id": entry["shot_id"], "clip_s": entry["clip_s"], "est_usd": round(entry["est_usd"], 4),
-                        "why": "booked" if entry["shot_id"] in booked_ids and entry["why"] != "pinned"
-                        else entry["why"]} for entry in plan.selected],
-                 still=list(plan.still), count=count, seconds=seconds, est_usd=est)
+    durations = {row["shot_id"]: row["duration_s"] for row in planned}
+    rows_out = []
+    for entry in plan.selected:
+        row = {"shot_id": entry["shot_id"], "clip_s": entry["clip_s"], "est_usd": round(entry["est_usd"], 4),
+               "why": "booked" if entry["shot_id"] in booked_ids and entry["why"] != "pinned" else entry["why"]}
+        held = round(durations[entry["shot_id"]] - entry["clip_s"], 3)
+        if held > 0:
+            # Longer than the longest clip the link sells: the render holds its last frame (DEC-208).
+            row["held_s"] = held
+        rows_out.append(row)
+    units.update(plan=rows_out, still=list(plan.still), count=count, seconds=seconds, est_usd=est,
+                 over_cap=video_plan.all_shots_refusal(plan, link=link, mode=mode))
     if seconds:
         key = gen_timings.timing_key(link, units["template"], units["profile"])
         eta = gen_timings.eta_s(key, seconds)
@@ -569,7 +594,7 @@ def video_units(ec, script, storyboard, assets_doc, *, env, caps, committed_usd,
 
     units["refused"] = refusal if count else None
     units["ready"] = units["refused"] is None
-    units["message"] = _message(units, plan, current_ids, profile_name, booked_ids)
+    units["message"] = _message(units, plan, current_ids, profile_name, booked_ids, resolution=resolution)
     return units
 
 
@@ -581,7 +606,7 @@ def local_unasked(video) -> bool:
                for row in (video or {}).get("links") or [])
 
 
-def _message(units, plan, current_ids, profile_name, booked_ids=()) -> str:
+def _message(units, plan, current_ids, profile_name, booked_ids=(), *, resolution=None) -> str:
     link, count, seconds, est = units["link"], units["count"], units["seconds"], units["est_usd"]
     kept = [f"{len(current_ids)} current clip{_s(len(current_ids))} kept"] if current_ids else []
     if booked_ids:
@@ -600,7 +625,14 @@ def _message(units, plan, current_ids, profile_name, booked_ids=()) -> str:
         where = f" ({units['template']}, profile {units['profile']})" if units["template"] else ""
         text = f"{clips}{where}, on your own hardware: $0.00{tail}."
     else:
-        text = f"{clips}, paid: est ${est:.3f}{tail}."
+        size = f" at {resolution}" if resolution and resolution != pricing.DEFAULT_RESOLUTION else ""
+        text = f"{clips}{size}, paid: est ${est:.3f}{tail}."
+    held = [row for row in units["plan"] if row.get("held_s")]
+    if held:
+        text += " " + " ".join(f"{row['shot_id']} runs {row['clip_s'] + row['held_s']:g} s: its {row['clip_s']} s "
+                               f"clip is held on its last frame for {row['held_s']:g} s." for row in held)
+    if units["over_cap"]:
+        text += f" Over the cap: {units['over_cap']}."
     if units["refused"]:
         text += f" Not now: {units['refused']}."
     if units["eta_s"]:

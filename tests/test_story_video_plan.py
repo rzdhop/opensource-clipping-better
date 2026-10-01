@@ -357,6 +357,41 @@ def test_plan_animation_mode_all_shots_selects_everything_and_reports_over_cap()
     assert current_entry["est_usd"] == 0.0
 
 
+def test_all_shots_refused_whole_with_numbers():
+    """Phase 7 stage 4 (DEC-227): the quality profile animates every shot.
+    Over the episode's cap the plan is never trimmed to a partial pick: it
+    still selects every non-still shot, reports ``over_cap``, and
+    :func:`video_plan.all_shots_refusal` words the whole-plan refusal with
+    its numbers (the planned seconds, the estimate, the cap, the spend so
+    far) -- the assets step refuses the run before any clip is bought
+    (``steps/assets.plan_refusal``). Under the cap: every non-still shot is
+    planned and nothing is refused."""
+    every = {"sh01", "sh02", "sh04", "sh05", "sh06", "sh07", "sh08"}
+    over = video_plan.plan_animation(
+        _fixture_shots(), SCENE_FUNCTION, DIALOGUE_SECONDS,
+        link=LINK, price_per_second=PRICE, cap_usd=1.00, committed_usd=0.05,
+        current_shot_ids=("sh07",), mode="all_shots",
+    )
+    assert {e["shot_id"] for e in over.selected} == every and over.over_cap is True
+    # sh01 2 + sh02 4 + sh04 3 + sh05 6 + sh06 2 + sh08 2 (seedance's shortest) = 19 s at $0.10.
+    assert (over.seconds, round(over.video_usd, 3)) == (19, 1.9)
+    message = video_plan.all_shots_refusal(over, link=LINK, mode="all_shots")
+    assert "6 clips, 19 s on fal/seedance-1-pro-fast, est $1.900" in message
+    assert "$0.05 already spent or committed" in message and "$1.95 of the $1.00 episode cap" in message
+    assert "whole plan is refused" in message and "never a partial pick" in message
+
+    under = video_plan.plan_animation(
+        _fixture_shots(), SCENE_FUNCTION, DIALOGUE_SECONDS,
+        link=LINK, price_per_second=PRICE, cap_usd=2.00, committed_usd=0.05,
+        current_shot_ids=("sh07",), mode="all_shots",
+    )
+    assert {e["shot_id"] for e in under.selected} == every and under.over_cap is False
+    assert under.still == [{"shot_id": "sh03", "reason": "keep_still"}]
+    assert video_plan.all_shots_refusal(under, link=LINK, mode="all_shots") is None
+    # The one_dollar profile trims to its cap instead: it is never refused whole.
+    assert video_plan.all_shots_refusal(over, link=LINK, mode="key_shots_within_cap") is None
+
+
 def test_animate_priority_default_matches_budget_profiles_json():
     with open(BUDGET_PROFILES_PATH, encoding="utf-8") as fh:
         data = json.load(fh)

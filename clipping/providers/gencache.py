@@ -157,6 +157,11 @@ def key_payload(kind, link, request):
             fps=_number(request.fps),
             native_audio=bool(request.native_audio),
         )
+        # A clip's size (phase 7 stage 4, DEC-227) only when it is not the 720p
+        # every clip was bought at before: those keys stay what they were.
+        resolution = extra.get("resolution")
+        if resolution and resolution != "720p":
+            payload["resolution"] = resolution
     return payload
 
 

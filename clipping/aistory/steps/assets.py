@@ -1366,6 +1366,11 @@ def clip_request(ec, shot, script, *, link, template, clip_s, seed, note, flags,
     extra = {"name": f"shot_{shot['shot_id'][2:]}"}
     if template:
         extra["template"] = template
+    resolution = media_policy.video_resolution(ec.story)
+    if resolution != defaults.VIDEO_RESOLUTION_DEFAULT:
+        # The story's 1080p switch (phase 7 stage 4): seedance reads it, the cache
+        # keys it; a 720p request is the one it always was (DEC-207).
+        extra["resolution"] = resolution
     request = gen.GenRequest(kind=gen.VIDEO, prompt=parts["prompt"], negative=parts["negative"], width=SHOT_SIZE[0],
                              height=SHOT_SIZE[1], seed=seed, references=(shot_image_path(ec, shot),),
                              duration_s=int(clip_s), native_audio=parts["native_audio"], out_dir=out_dir, extra=extra)
@@ -1474,7 +1479,9 @@ def video_offer(ec, storyboard, link, *, why, env, adapters=None, todo=(), paid=
     except ChainError:
         chain = []
     own = sticky_link.family(link)
-    rows = [row for row in clips.hosted_rows(chain, merged, adapters) if row["link"] not in own]
+    rows = [row for row in clips.hosted_rows(chain, merged, adapters,
+                                             resolution=media_policy.video_resolution(ec.story))
+            if row["link"] not in own]
     try:
         allow = gating.budget_of(merged).allow_paid
     except ValueError:
@@ -1697,8 +1704,11 @@ def plan_refusal(ec, units, *, unprobed=False):
                 "or spent: run the assets step with animate off to make the keyframes first, or fix that and run "
                 "it again.")
     if units["over_cap"]:
+        # The quality profile's every-shot plan is refused whole (DEC-227): its numbers too.
+        whole = f" {video['over_cap']}." if video is not None and video.get("animate", True) and video.get(
+            "over_cap") else ""
         return (f"Episode {ec.ep}'s assets would go over a cap, so nothing was generated or spent: "
-                f"{units['over_cap']}. Raise the cap, or choose free links, then run the assets step again.")
+                f"{units['over_cap']}.{whole} Raise the cap, or choose free links, then run the assets step again.")
     return None
 
 

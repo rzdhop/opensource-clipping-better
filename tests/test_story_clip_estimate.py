@@ -298,6 +298,80 @@ def test_a_clip_record_is_optional_and_a_video_path_is_the_shots_own_current_cli
     assert not store_mod.EPISODE_ASSET_NAME_PATTERNS["clips"].fullmatch("shot_01.png")
 
 
+def test_quality_all_shots_over_the_cap_is_refused_whole_before_any_call(store, tmp_path):
+    """Phase 7 stage 4 (DEC-227): the quality profile animates every shot. Over
+    the episode's cap the step refuses the whole plan before any call (the
+    video adapter here raises on any use), naming the planned seconds, the
+    estimate, the cap and what is spent so far -- never a partial pick. Under
+    the cap every shot not kept still is planned."""
+    from clipping.aistory.steps import assets
+
+    story_id = tas._episode(store, tmp_path)
+    _tier(store, story_id, budget_profile="quality")
+    board = tas._board(store, story_id)
+
+    over = _units(store, story_id, _settings(ALLOW_PAID="1", PER_EPISODE_CAP_USD="0.30"))
+    video = over["video"]
+    assert video["mode"] == "all_shots" and sorted(row["shot_id"] for row in video["plan"]) == sorted(
+        shot["shot_id"] for shot in board["shots"])
+    assert video["est_usd"] > 0.30 and over["ready"] is False
+    refusal = assets.plan_refusal(tas._ec(store, story_id), over)
+    assert f"{video['seconds']} s on {SEEDANCE}, est ${video['est_usd']:.3f}" in refusal
+    assert "$0.00 already spent or committed" in refusal and "of the $0.30 episode cap" in refusal
+    assert "whole plan is refused" in refusal and "nothing was generated or spent" in refusal
+
+    _patch(store, story_id, {"shot_id": "sh02", "keep_still": True})
+    under = _units(store, story_id, _settings(ALLOW_PAID="1", PER_EPISODE_CAP_USD="20"))
+    assert under["ready"] is True and under["video"]["over_cap"] is None
+    assert sorted(row["shot_id"] for row in under["video"]["plan"]) == sorted(
+        shot["shot_id"] for shot in board["shots"] if shot["shot_id"] != "sh02")
+    assert assets.plan_refusal(tas._ec(store, story_id), under) is None
+
+
+def test_a_1080p_story_asks_seedance_for_1080p_priced_from_its_row(store, tmp_path):
+    """The per-story 1080p switch (the human's answer 3): a v2 story with
+    ``generation_profile.video_resolution`` 1080p sends seedance
+    ``resolution: 1080p`` (``GenRequest.extra``), and its estimate -- the
+    plan's and the adapter's -- is priced from the 1080p row; a 720p story
+    sends what it always sent and keeps the 720p price."""
+    from clipping.aistory.steps import assets, clips
+    from clipping.providers import pricing, video as video_providers
+    from clipping.providers.registry import Link
+
+    story_id = tas._episode(store, tmp_path)
+    _tier(store, story_id, budget_profile="quality")
+    store.update(story_id, lambda doc: doc["generation_profile"].update(pipeline="v2", video_resolution="1080p"),
+                 now=NOW)
+    ec = tas._ec(store, story_id)
+    script, board = eps._script(store, story_id), tas._board(store, story_id)
+    shot = dict(board["shots"][0])
+    shot["assets"] = dict(shot["assets"], image="assets/shots/shot_01.png")
+    keyframe = tas.Path(store.episode_asset_path(story_id, 1, "shots", "shot_01.png", create=True))
+    keyframe.parent.mkdir(parents=True, exist_ok=True)
+    keyframe.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
+    link = Link("fal", "seedance-1-pro-fast")
+
+    _parts, request = assets.clip_request(ec, shot, script, link=SEEDANCE, template=None, clip_s=5, seed=7,
+                                          note=None, flags=clips.shot_flags(shot, None), tier=2,
+                                          out_dir=str(tmp_path))
+    adapter = video_providers.FalVideoAdapter()
+    assert request.extra["resolution"] == "1080p"
+    assert adapter._inputs(link, request, 7)["resolution"] == "1080p"
+    hd_price = pricing.PRICES["fal/seedance-1-pro-fast@1080p"].usd
+    assert hd_price == 0.0486 and adapter.estimate(link, request).est_usd == round(5 * hd_price, 4)
+    video = _units(store, story_id, _settings(ALLOW_PAID="1", PER_EPISODE_CAP_USD="20"))["video"]
+    assert video["price_per_second"] == hd_price
+    assert video["est_usd"] == pytest.approx(video["seconds"] * hd_price)
+
+    store.update(story_id, lambda doc: doc["generation_profile"].pop("video_resolution"), now=NOW)
+    ec = tas._ec(store, story_id)
+    _parts, request = assets.clip_request(ec, shot, script, link=SEEDANCE, template=None, clip_s=5, seed=7,
+                                          note=None, flags=clips.shot_flags(shot, None), tier=2,
+                                          out_dir=str(tmp_path))
+    assert "resolution" not in request.extra and adapter._inputs(link, request, 7)["resolution"] == "720p"
+    assert adapter.estimate(link, request).est_usd == round(5 * SEEDANCE_PRICE, 4)
+
+
 # ================================================================ guards
 
 def test_guard_a_tier_1_estimate_and_fingerprint_are_the_parent_commits_byte_for_byte(store, tmp_path):

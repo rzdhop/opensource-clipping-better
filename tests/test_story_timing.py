@@ -852,3 +852,106 @@ def test_line_offsets_never_overlap_and_never_precede_their_scene():
             for line in scene["lines"]:
                 start, _end = offsets[line["line_id"]]
                 assert start >= scene_starts[scene["scene_id"]] - 1e-6
+
+
+# ======================================================== 11. serial_60s_v2 (phase 7 stage 4, DEC-227)
+#
+# A v2 story's episode is 6-10 beat shots of 5-12 s (the hook 3-6 s), one
+# seedance clip each: the template is data only (timing.py is unchanged), so
+# these tests check that its slots, its hold cap and its window keep every
+# shot a clip can cover (seedance sells 2-12 s, DEC-208), on any episode
+# whose lines fit their slots.
+
+V2_MAX_SHOT_S = 12
+
+
+def _v2_template():
+    return templates.load_episode_template("serial_60s_v2")
+
+
+def test_v1_template_unchanged():
+    """The v1 template file is not touched by the v2 one (RC-M2's render reads it)."""
+    v1 = templates.load_episode_template("serial_60s_v1")
+    assert (v1["window_s"], v1["target_s"], v1["tighten_above_s"], v1["scenes"], v1["shots"], v1["min_shot_s"],
+            v1["default_body_count"], v1["hold_extension_max_s"], v1["end_card_s"]) == (
+        [55, 80], 60, 75, [8, 12], [16, 30], 0.8, 8, 1.0, 1.0)
+    assert {name: (slot["count"], slot["duration_s"]) for name, slot in v1["slots"].items()} == {
+        "recap": ([1, 1], [2.0, 3.0]), "hook": ([1, 1], [1.5, 3.5]), "body": ([5, 9], [4.0, 8.0]),
+        "cliffhanger": ([1, 1], [2.0, 5.0])}
+    assert "shots_per_scene" not in v1 and "max_shot_s" not in v1
+
+
+def _v2_episode(ep, *, body_lines=(3.5, 3.5), hook_line=3.0, cliff_line=4.0, places=("place_a", "place_b")):
+    """Episode *ep* on serial_60s_v2's own slot list (timing.episode_slots):
+    measured lines, the places alternating every two scenes."""
+    template = _v2_template()
+    scenes, n = [], 0
+    for k, slot in enumerate(timing.episode_slots(template, ep)):
+        n += 1
+        sid = f"s{n:02d}"
+        place = places[(k // 2) % len(places)]
+        if slot == "body":
+            function = ["setup", "rising", "peak", "turn"][(k - 1) % 4]
+            durations = body_lines
+        elif slot == "hook":
+            function, durations = "hook", (hook_line,)
+        elif slot == "recap":
+            function, durations = "recap", (2.0,)
+        else:
+            function, durations = "cliffhanger", (cliff_line,)
+        lines = [_episode_line(f"l{n:02d}{j}", "Une ligne de dialogue.", d) for j, d in enumerate(durations)]
+        scenes.append(_scene(sid, function, place_id=place, lines=lines))
+    return _episode_script(scenes, cut_to_black=True)
+
+
+def test_v2_template_passes_its_schema_and_an_episode_of_6_to_10_shots_lands_in_55_75_s():
+    template = _v2_template()
+    assert schemas.episode_template_errors(template) == []
+    assert (template["window_s"], template["scenes"], template["shots"]) == ([55, 75], [6, 10], [6, 10])
+    assert (template["shots_per_scene"], template["max_shot_s"], template["min_shot_s"]) == ([1, 2], 12, 3.0)
+    assert template["slots"]["hook"]["duration_s"] == [3.0, 6.0]
+
+    for ep in (1, 2):
+        script = _v2_episode(ep)
+        board = _storyboard_from_scenes(script["scenes"], transition_types={
+            i: ("dissolve" if a["place_id"] == b["place_id"] else "fadeblack", 0.4)
+            for i, (a, b) in enumerate(zip(script["scenes"], script["scenes"][1:]))})
+        result, scene_t = timing.episode_pass(script, template, FR, storyboard=board)
+        assert 6 <= len(board["shots"]) <= 10, ep
+        assert result["state"] == "ok" and 55 <= result["total_s"] <= 75, (ep, result["total_s"])
+        for scene in script["scenes"]:
+            durations, extra = timing.allocate_shots(scene, scene_t[scene["scene_id"]], [{"lines": []}], template)
+            assert extra == 0.0 and durations[0] <= V2_MAX_SHOT_S
+
+
+def test_v2_scene_plus_hold_never_exceeds_12s():
+    """Whatever an episode's lines (as long as each scene's lines fit its
+    slot -- a scene the writer overfills is flagged ``over`` and its clip held,
+    DEC-208), a v2 scene's one shot, its held tail and the window pass's hold
+    extension included, never runs past 12 s; a hook lasts 3-6 s. Short
+    episodes (held to reach the window) and long ones (tightened) alike, with
+    and without the family_3d clamp (peak/tender up to 12 s)."""
+    template = _v2_template()
+    rng = random.Random(20261001)
+    checked = 0
+    for _ in range(300):
+        ep = rng.choice((1, 2))
+        script = _v2_episode(
+            ep, body_lines=tuple(round(rng.uniform(0.6, 4.6), 3) for _ in range(rng.randint(1, 3))),
+            hook_line=round(rng.uniform(0.6, 4.4), 3), cliff_line=round(rng.uniform(0.6, 7.0), 3),
+            places=rng.choice((("place_a",), ("place_a", "place_b"), ("place_a", "place_b", "place_c"))))
+        board = _storyboard_from_scenes(script["scenes"])
+        style_lock = rng.choice((None, FAMILY_3D_STYLE_LOCK))
+        _result, scene_t = timing.episode_pass(script, template, EN, style_lock=style_lock, storyboard=board)
+        for scene in script["scenes"]:
+            timed = scene_t[scene["scene_id"]]
+            if timed["state"] == "over":
+                continue  # the writer overfilled it: flagged, its clip is held (DEC-208)
+            (shot,), extra = timing.allocate_shots(scene, timed, [{"lines": [scene["lines"][0]["line_id"]]}],
+                                                   template)
+            assert extra == 0.0
+            assert shot == timed["duration_s"] <= V2_MAX_SHOT_S, (scene["function"], timed)
+            if scene["function"] == "hook":
+                assert 3.0 <= shot <= 6.0, timed
+            checked += 1
+    assert checked > 2000
