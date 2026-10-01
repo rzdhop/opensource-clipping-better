@@ -4006,3 +4006,11 @@ only the beats' "what"), D6 540 / 3560; D5's input leaves out the bible and worl
 storyboards, assets and renders are not gated. Deleting an entity removes its id from the base and makes it stale. The
 season's approval is the step's precondition (D6's new props lower the story status until the places run draws them).
 Dashboard: a read-and-approve Knowledge step for v2 stories; editing is stage 7.
+
+**DEC-228 part 3 (stage 5c).** Every v2 writing call gets a slice of the knowledge base: per scene (present characters'
+goal, need, the relevant secret by word overlap, catchphrases, relationship history among those present, knows-so-far
+from the timeline up to the mapped beat and the series memory, the ledger state, "ep N, beat k of m", the place's light
+and layout; ≤ 352 words), per episode for E1v2 (≤ 457), per shot for T1 v2 (wardrobe and holders). A scene maps to the
+timeline beat that shares the most with it (place 2 points, each character and object 1). New ids E1v2/E2v2/E3v2 with
+the no-repeat, first-appearance and shown-reveal instructions, and E2v2's `sfx_cues[].at` as a closed list — the fix for
+the field every model filled wrong. Budgets 2870 / 2420 / 3370 in, caps 1750 / 600 / 720 out.
