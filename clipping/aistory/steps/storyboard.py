@@ -46,13 +46,13 @@ from .llm_call import StepFailed
 FAST, T1 = "fast", "t1"
 
 # Phase 7 stage 3c (A11): the estimate the prop-image refusal below quotes --
-# nano-banana-2's own per-image price (pricing.py), the link every v2 budget
-# profile's quality `prop` role is drawn from (media_policy.ROLES). Read
-# straight from the price table rather than resolving the story's actual
-# chain (media_policy.role_chain), which needs the merged env/keys and can
-# raise ChainError: this message is informational, shown before any call and
-# any key is even looked at, not a charge.
-_PROP_IMAGE_LINK = "gemini/nano-banana-2"
+# the shipped quality profile's own `prop` role's first (text-to-image) link
+# (templates/budget_profiles.json, media_policy.ROLES; moved to fal by stage
+# 2c, DEC-235). Read straight from the price table rather than resolving the
+# story's actual chain (media_policy.role_chain), which needs the merged
+# env/keys and can raise ChainError: this message is informational, shown
+# before any call and any key is even looked at, not a charge.
+_PROP_IMAGE_LINK = "fal/seedream-4.5"
 _PROP_IMAGE_ESTIMATE_USD = pricing.PRICES[_PROP_IMAGE_LINK].usd
 
 

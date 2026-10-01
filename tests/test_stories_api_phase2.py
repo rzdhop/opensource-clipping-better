@@ -1671,7 +1671,10 @@ def test_the_cast_estimate_on_a_v2_story_points_to_the_quality_keys_not_prompt_o
     assert "need an editor or prompt-only consistency" not in body["message"]
     assert "prompt-only" not in body["message"] and "prompt_only" not in body["message"]
     assert "no quality image link can run" in body["message"]
-    assert "GEMINI_PAID_API_KEY" in body["message"] and "FAL_KEY" in body["message"]
+    # Re-pinned (stage 2c, DEC-235: "fal only"): the quality sheet role's
+    # IMAGE_EDIT link is fal/seedream-4.5-edit alone now, and QUALITY_KEYS is
+    # FAL_KEY alone, so the stop-and-ask never names GEMINI_PAID_API_KEY.
+    assert "FAL_KEY" in body["message"] and "GEMINI_PAID_API_KEY" not in body["message"]
     assert "allow paid providers" in body["message"]
 
 

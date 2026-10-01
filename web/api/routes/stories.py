@@ -686,9 +686,10 @@ async def create_story(req: StoryCreateRequest) -> dict:
     ``style_template_id`` is a 400 naming the shipped ones.
 
     Without a ``generation_profile`` the story is on the quality preset (v2,
-    tier 2, api, references, quality) when Settings hold both FAL_KEY and
-    GEMINI_PAID_API_KEY (``media_policy.new_story_profile``), else on the
-    story defaults; a profile that is sent is honoured as sent.
+    tier 2, api, references, quality) when Settings hold FAL_KEY
+    (``media_policy.new_story_profile``, ``media_policy.QUALITY_KEYS``;
+    stage 2c, DEC-235), else on the story defaults; a profile that is sent
+    is honoured as sent.
     """
     if req.generation_profile is not None:
         profile = req.generation_profile.model_dump()

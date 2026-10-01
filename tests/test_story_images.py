@@ -114,3 +114,23 @@ def test_seedream45_inputs_carry_refs_and_size(tmp_path):
     assert result.seed == 7
     est = pricing.estimate(Link("fal", "seedream-4.5-edit"), 1, width=720, height=1280)
     assert est.est_usd == 0.04 and est.paid is True
+
+
+def test_seedream45_text_to_image_inputs(tmp_path):
+    """fal/seedream-4.5 (stage 2c, DEC-235): the quality sheet/plate/prop
+    roles' text-to-image sibling of the edit model -- no references, no
+    negative prompt (A-111), the same size bounds as the edit endpoint
+    (:func:`images._seedream45_size`)."""
+    body = images.FAL._inputs(
+        Link("fal", "seedream-4.5"),
+        GenRequest(kind="image", prompt="a kiwi in a linen shirt", negative="blurry, watermark",
+                   width=720, height=1280, out_dir=str(tmp_path)),
+        seed=7)
+    assert body["prompt"] == "a kiwi in a linen shirt"
+    # 9:16 exactly, at the model's smallest custom size (2560x1440 pixels in all).
+    assert body["image_size"] == {"width": 1440, "height": 2560}
+    assert body["seed"] == 7 and body["num_images"] == 1
+    assert "image_urls" not in body
+    assert "negative_prompt" not in body
+    est = pricing.estimate(Link("fal", "seedream-4.5"), 1, width=720, height=1280)
+    assert est.est_usd == 0.04 and est.paid is True

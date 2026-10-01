@@ -44,6 +44,7 @@ GEMINI_MODELS = {
 FAL_APPS = {
     "flux-schnell": "fal-ai/flux/schnell",
     "seedream-4-edit": "fal-ai/bytedance/seedream/v4/edit",
+    "seedream-4.5": "fal-ai/bytedance/seedream/v4.5/text-to-image",
     "seedream-4.5-edit": "fal-ai/bytedance/seedream/v4.5/edit",
     "flux-kontext-pro": "fal-ai/flux-pro/kontext",
     # Video ids: their adapter is video.FalVideoAdapter (phase 6). ltx-2-fast stays
@@ -69,10 +70,12 @@ _RATIOS = ("1:1", "9:16", "16:9", "3:4", "4:3", "2:3", "3:2", "4:5", "5:4", "21:
 # the 1K tier the price table's nano-banana rows are read at.
 GEMINI_IMAGE_SIZE = "1K"
 
-# fal seedream v4.5 edit (schema read 2026-10-01, A-111): a custom
-# ``image_size`` must hold at least 2560x1440 pixels and at most 4096 a side;
-# a request below that is scaled up keeping its ratio (720x1280 -> 1440x2560,
-# an exact 9:16), and at most 10 reference images are taken.
+# fal seedream v4.5, edit and text-to-image alike (schema read 2026-10-01,
+# A-111; the text-to-image endpoint's bounds read 2026-10-01, DEC-235): a
+# custom ``image_size`` must hold at least 2560x1440 pixels and at most 4096
+# a side; a request below that is scaled up keeping its ratio (720x1280 ->
+# 1440x2560, an exact 9:16), and the edit endpoint takes at most 10
+# reference images.
 SEEDREAM45_MIN_PIXELS = 2560 * 1440
 SEEDREAM45_MAX_SIDE = 4096
 SEEDREAM45_MAX_REFERENCES = 10
@@ -271,6 +274,11 @@ class FalAdapter(_Adapter):
                 raise ValueError(f"{describe(link)} needs at least one reference image")
             return {**base, "image_urls": [data_url(p) for p in request.references[:SEEDREAM45_MAX_REFERENCES]],
                     "image_size": _seedream45_size(request.width, request.height)}
+        if link.model == "seedream-4.5":
+            # Text-to-image sibling of the edit model: no image_urls, no
+            # negative prompt (A-111), the same size bounds (stage 2c,
+            # DEC-235).
+            return {**base, "image_size": _seedream45_size(request.width, request.height)}
         if link.model == "flux-kontext-pro":
             if not request.references:
                 raise ValueError(f"{describe(link)} needs a reference image")

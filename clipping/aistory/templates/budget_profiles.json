@@ -21,9 +21,9 @@
       "cap_usd": 2.0,
       "images": "quality_roles",
       "roles": {
-        "sheet": ["gemini/nano-banana-2"],
-        "plate": ["gemini/nano-banana-2"],
-        "prop": ["gemini/nano-banana-2"],
+        "sheet": ["fal/seedream-4.5", "fal/seedream-4.5-edit"],
+        "plate": ["fal/seedream-4.5", "fal/seedream-4.5-edit"],
+        "prop": ["fal/seedream-4.5", "fal/seedream-4.5-edit"],
         "keyframe": ["fal/seedream-4.5-edit", "gemini/nano-banana-2-lite"]
       },
       "tts": "free_or_local",

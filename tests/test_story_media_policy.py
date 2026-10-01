@@ -53,13 +53,16 @@ def test_v2_roles_never_use_low_quality_links(monkeypatch, tmp_path):
         for kind in (gen.IMAGE, gen.IMAGE_EDIT):
             chain = labels(media_policy.role_chain(role, kind, CHEAP_FIRST, story))
             assert chain and not set(chain) & media_policy.LOW_QUALITY_LINKS, (role, kind, chain)
-    assert labels(media_policy.role_chain("sheet", gen.IMAGE, CHEAP_FIRST, story)) == ["gemini/nano-banana-2"]
+    # Re-pinned on purpose (DEC-235): the quality sheet/plate/prop roles moved
+    # from gemini/nano-banana-2 to fal (text-to-image on IMAGE, its edit
+    # sibling on IMAGE_EDIT).
+    assert labels(media_policy.role_chain("sheet", gen.IMAGE, CHEAP_FIRST, story)) == ["fal/seedream-4.5"]
     assert labels(media_policy.role_chain("keyframe", gen.IMAGE_EDIT, CHEAP_FIRST, story)) == [
         "fal/seedream-4.5-edit", "gemini/nano-banana-2-lite"]
 
     # The chain every image site resolves is the role's (RC-V6: the estimate and the run agree).
     _merged, chain, _budget = imaging.resolve(gen.IMAGE, CHEAP_FIRST, error=RuntimeError, role="plate", story=story)
-    assert labels(chain) == ["gemini/nano-banana-2"]
+    assert labels(chain) == ["fal/seedream-4.5"]  # re-pinned (DEC-235)
     estimate = imaging.estimate(gen.IMAGE_EDIT, CHEAP_FIRST, route="api", request=gen.GenRequest(
         kind=gen.IMAGE_EDIT, width=720, height=1280), step="t", what="w", when="w", role="keyframe", story=story,
         adapters={})
@@ -82,6 +85,28 @@ def test_legacy_story_keeps_env_chain():
     assert media_policy.role_chain("keyframe", gen.IMAGE_EDIT, {}, story) == gen.chain_from_env(gen.IMAGE_EDIT, {})
     _merged, chain, _budget = imaging.resolve(gen.IMAGE, CHEAP_FIRST, error=RuntimeError, role="sheet", story=story)
     assert chain == gen.chain_from_env(gen.IMAGE, imaging.gating.merged_env(CHEAP_FIRST))
+
+
+def test_v2_sheet_role_uses_fal_text_to_image_then_edit():
+    """Stage 2c (DEC-235): the quality sheet role names ``[fal/seedream-4.5,
+    fal/seedream-4.5-edit]`` -- a text-to-image link next to its edit
+    sibling, so one roles list serves both request kinds. ``role_chain``
+    keeps only the link each kind can actually run: the edit-only link is
+    dropped for gen.IMAGE (it needs references gen.IMAGE never sends), the
+    text-only link for gen.IMAGE_EDIT (it has no image_urls field).
+    plate/prop are the same roles list and behave identically."""
+    story = v2_story()
+    for role in ("sheet", "plate", "prop"):
+        assert labels(media_policy.role_chain(role, gen.IMAGE, CHEAP_FIRST, story)) == ["fal/seedream-4.5"]
+        assert labels(media_policy.role_chain(role, gen.IMAGE_EDIT, CHEAP_FIRST, story)) == ["fal/seedream-4.5-edit"]
+        for kind in (gen.IMAGE, gen.IMAGE_EDIT):
+            chain = labels(media_policy.role_chain(role, kind, CHEAP_FIRST, story))
+            assert not set(chain) & media_policy.LOW_QUALITY_LINKS
+
+    # A legacy story never sees this filter: it keeps exactly today's env chain.
+    legacy = legacy_story()
+    for kind in (gen.IMAGE, gen.IMAGE_EDIT):
+        assert media_policy.role_chain("sheet", kind, CHEAP_FIRST, legacy) == gen.chain_from_env(kind, CHEAP_FIRST)
 
 
 def test_v2_story_refuses_prompt_only(tmp_path):

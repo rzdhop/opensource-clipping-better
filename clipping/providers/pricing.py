@@ -37,6 +37,7 @@ PRICES = {
     "gemini/nano-banana-2": Price("image", 0.067, "gemini-3.1-flash-image at 1K; not on the free tier"),
     "fal/flux-schnell": Price("image", 0.003, "$0.003 per megapixel, rounded up: $0.003 at 720x1280, $0.006 at 1080x1920", per_megapixel=True),
     "fal/seedream-4-edit": Price("image", 0.03, "multi-reference edit"),
+    "fal/seedream-4.5": Price("image", 0.04, "text-to-image, seed honoured, no negative_prompt; read 2026-10-01 on fal.ai (DEC-235)"),
     "fal/seedream-4.5-edit": Price("image", 0.04, "multi-reference edit, up to 10 references, seed honoured; read 2026-10-01 on fal.ai (A-111)"),
     "fal/flux-kontext-pro": Price("image", 0.04, "single-reference edit"),
     "openai/gpt-image-2-low": Price("image", 0.005, "quality low, 1024x1536"),

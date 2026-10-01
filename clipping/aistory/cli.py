@@ -351,8 +351,8 @@ def build_parser() -> argparse.ArgumentParser:
     new.add_argument("--concept", default=None, choices=concepts, metavar="ID",
                      help=f"a library concept to choose at once: {', '.join(concepts)}")
     # Without any of the four below, a story is created on the quality preset
-    # (v2, tier 2, api, references, quality) when FAL_KEY and
-    # GEMINI_PAID_API_KEY are both set, else on these defaults (phase 7).
+    # (v2, tier 2, api, references, quality) when FAL_KEY is set (stage 2c,
+    # DEC-235: media_policy.QUALITY_KEYS), else on these defaults (phase 7).
     new.add_argument("--tier", type=int, choices=defaults.TIERS, default=defaults.DEFAULT_TIER,
                      action=_ProfileFlag, help="generation tier (default: %(default)s)")
     new.add_argument("--route", choices=defaults.ROUTES, default=defaults.DEFAULT_ROUTE,

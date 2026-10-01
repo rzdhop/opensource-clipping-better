@@ -99,7 +99,7 @@ def test_storyboard_waits_for_new_prop_image(store):
     message, _ = eps._failed(m.storyboard, store, story_id, llm=eps.FakeLLM(), step="storyboard", ep=2)
     assert NEW_PROP_NAME in message
     assert "no approved image yet" in message
-    assert "$0.067" in message  # pricing.py: gemini/nano-banana-2, the quality prop role's own link
+    assert "$0.040" in message  # re-pinned (DEC-235): pricing.py fal/seedream-4.5, the quality prop role's own link
     assert "places step" in message
 
     # The fast path (no LLM call at all) refuses too, before it plans anything.

@@ -170,12 +170,12 @@ def test_the_clip_defaults_agree_in_the_step_the_api_the_cli_and_the_dashboard()
 
 def test_new_story_is_v2_quality_when_keys_present(monkeypatch, tmp_path, capsys):
     """Phase 7 stage 2a (the human's answer: "tier 2 + the quality preset
-    when the keys are present"): a story created without a generation
-    profile -- through the API route's helper or ``--ai-story new`` without
-    any profile flag -- is a v2 story on the quality preset when Settings (or
-    the CLI's environment) hold both FAL_KEY and GEMINI_PAID_API_KEY; else
-    today's default. An explicit profile is honoured as sent, and
-    ``store.create``'s own default never moves."""
+    when the keys are present"); re-pinned at stage 2c (DEC-235, "fal only"):
+    a story created without a generation profile -- through the API route's
+    helper or ``--ai-story new`` without any profile flag -- is a v2 story
+    on the quality preset when Settings (or the CLI's environment) hold
+    FAL_KEY alone; else today's default. An explicit profile is honoured as
+    sent, and ``store.create``'s own default never moves."""
     from clipping.aistory import media_policy
     from clipping.aistory import store as story_store
 
@@ -187,9 +187,9 @@ def test_new_story_is_v2_quality_when_keys_present(monkeypatch, tmp_path, capsys
 
     # 1. the API route's helper, on the Settings values
     assert media_policy.new_story_profile({"FAL_KEY": "fk", "GEMINI_PAID_API_KEY": "pk"}) == quality
-    assert media_policy.new_story_profile({"FAL_KEY": "fk"}) is None
+    assert media_policy.new_story_profile({"FAL_KEY": "fk"}) == quality  # re-pinned (DEC-235): FAL_KEY alone suffices
     assert media_policy.new_story_profile({"GEMINI_PAID_API_KEY": "pk"}) is None
-    assert media_policy.new_story_profile({}) is None
+    assert media_policy.new_story_profile({}) is None  # the no-key case, unchanged
 
     # 2. the CLI, on its own environment
     cli = importlib.import_module("clipping.aistory.cli")
@@ -203,8 +203,7 @@ def test_new_story_is_v2_quality_when_keys_present(monkeypatch, tmp_path, capsys
 
     assert created() == defaults.default_generation_profile()
     monkeypatch.setenv("FAL_KEY", "fk")
-    monkeypatch.setenv("GEMINI_PAID_API_KEY", "pk")
-    assert created() == quality
+    assert created() == quality  # re-pinned (DEC-235): FAL_KEY alone is enough
     assert created("--tier", "1") == defaults.default_generation_profile()
 
     # 3. the store's own default is today's

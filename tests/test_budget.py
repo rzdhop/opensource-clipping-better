@@ -112,13 +112,15 @@ def test_the_shipped_profiles_match_the_spec():
     assert profiles["profiles"]["free"]["cap_usd"] == 0.0
     # DEC-221 (AI Story phase 7 stage 2a): the shipped quality profile is no longer a stub -- a
     # real cap, the quality_roles images policy with its roles table, and 720p video.
+    # Re-pinned (stage 2c, DEC-235: "fal only", no Google billing): sheet/plate/prop moved from
+    # gemini/nano-banana-2 to fal (its text-to-image link, then its edit sibling).
     quality = profiles["profiles"]["quality"]
     assert quality["cap_usd"] == 2.0
     assert quality["images"] == "quality_roles"
     assert quality["roles"] == {
-        "sheet": ["gemini/nano-banana-2"],
-        "plate": ["gemini/nano-banana-2"],
-        "prop": ["gemini/nano-banana-2"],
+        "sheet": ["fal/seedream-4.5", "fal/seedream-4.5-edit"],
+        "plate": ["fal/seedream-4.5", "fal/seedream-4.5-edit"],
+        "prop": ["fal/seedream-4.5", "fal/seedream-4.5-edit"],
         "keyframe": ["fal/seedream-4.5-edit", "gemini/nano-banana-2-lite"],
     }
     assert quality["video_resolution"] == "720p"
