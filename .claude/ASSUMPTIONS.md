@@ -419,7 +419,9 @@
 - **A-122** — (phase 7) the v2 prompt inputs fit their budgets (E1v2 2400, E2v2 2200, E3v2 2900, T1v2 2000 tokens by the
   DEC-138 method) with the context-builder slices. UNCONFIRMED until stage 5c's budget test.
 - **A-123** — (phase 7) 8 of 9 stored stories are `prompt_only` because the edit chain never runs while `allow_paid` is
-  off, so the cast step offered the labelled switch (DEC-117) and the human took it. To confirm from the activity logs in stage 2a. UNCONFIRMED.
+  off, so the cast step offered the labelled switch (DEC-117) and the human took it. **CONFIRMED 2026-10-01** by the stage-2a scoping read: `b1104ec66b05/activity.log:144` "Kiwilo turnaround needs an
+  editor: No link of IMAGE_EDIT_CHAIN … allow_paid is off … switch the story to prompt-only consistency", then `:208`
+  prompt-only; the control story `ab8fc500173e` had `allow_paid` on and kept `references`.
 - **A-124** — (phase 7) the hook shot's 3–6 s exception to the 5–12 s shot rule is acceptable to the human (accepted with
   the plan's approval on 2026-10-01). Confirmed by that approval; kept here so the template's exception has a home.
 
