@@ -4014,3 +4014,31 @@ and layout; ≤ 352 words), per episode for E1v2 (≤ 457), per shot for T1 v2 (
 timeline beat that shares the most with it (place 2 points, each character and object 1). New ids E1v2/E2v2/E3v2 with
 the no-repeat, first-appearance and shown-reveal instructions, and E2v2's `sfx_cues[].at` as a closed list — the fix for
 the field every model filled wrong. Budgets 2870 / 2420 / 3370 in, caps 1750 / 600 / 720 out.
+
+## DEC-229 — The continuity ledger (extends DEC-177/178)
+**Context.** E3: location, wardrobe, possessions and injuries were tracked nowhere, so a character could change
+clothes or lose an object between episodes without anyone deciding it.
+**Decision.** On a v2 story the memory step runs L1 after S3: per present character, location, wardrobe set (checked
+against that character's own sets by the step, since a strict schema cannot vary the enum per item), possessions,
+injuries and relationship notes. It is written in the same atomic write as the memory entry, so it goes stale with it.
+L1 sees the episode's own places and props plus what present characters already held (not the whole roster). Caps
+690 out / 3920 in. `series_memory.fold_ledger` gives the state before an episode from the knowledge base's seed;
+`context.ledger_before` uses it. Dropping a character drops it from every ledger.
+**Consequence.** Writers (5c) and shots see the state as of the episode being made. Legacy stories have no ledger.
+Commit `88e4b3f`.
+
+## DEC-231 (part 1) — Narrator on, subtitles floor, prosody and the fr-FR locale (v2 stories; stage 6c)
+**Context.** The human (CLARIFY 7 and 11): narrator on by default; two_line subtitles with a 150 ms floor per word_pop
+card; edge TTS with rate and pitch per character and per line. E1: TTS got text and a voice id only; story B's mayor
+had an fr-CA voice in an fr-FR story; E4: 31 % of story A's word_pop cards lasted under 150 ms.
+**Decision.**
+- A v2 story is created with the narrator on; the cast step pins a narrator voice distinct from the cast's.
+- v2 voice proposals keep to the story's default locale (fr → fr-FR, en → en-US).
+- A v2 style lock starts on `two_line` (a user's choice is kept on later edits) and always carries
+  `typography.word_min_card_ms: 150` (optional schema key, own commit). A word_pop card shorter than the floor merges
+  forward with the next card(s) rather than shifting them, so no card overlaps or drifts; without the key the render
+  is byte-identical (RC-M2: goldens and partial render green).
+- `voices.base_prosody` reads the dossier's voice patterns (fast, slow, deep, high; word-boundary matches) for the
+  pinned base rate and pitch; `voices.prosody_for` adds a per-emotion delta (angry +6 %/+2 Hz, sad −8 %/−3 Hz, fear
+  +8 %/+3 Hz, shocked +5 %/+4 Hz, tender −5 %/−1 Hz), clamped to ±20 % / ±8 Hz, applied only on v2 lines.
+**Consequence.** Built in a parallel worktree and cherry-picked: commits `8fd7f4b` (schema) and `39871dd`.
