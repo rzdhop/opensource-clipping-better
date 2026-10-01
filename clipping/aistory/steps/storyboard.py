@@ -305,6 +305,48 @@ def plan_scene(ctx, ec, script, plans, scene, *, tools, announced) -> list:
     return [dict(shot) for shot in reply["shots"]]
 
 
+def _repair_t1_v2_reply(reply, *, tags_allowed) -> list:
+    """Repair a T1 v2 reply in place before its validator runs (fix B,
+    found when gemini kept failing T1 v2 twice on one scene): a
+    @char/%prop/#place tag used in a shot's ``action``, ``motion`` or
+    ``staging`` (an entry's ``subject``, ``facing`` or ``expression``) that
+    is allowed in this scene (*tags_allowed*, the scene's own characters,
+    props and place) but missing from that shot's own ``subjects`` is
+    appended there -- the model names a tag it forgot to list, and
+    :func:`clipping.aistory.prompts.validate_t1_v2` then refuses it as
+    unlisted ("tag '@char_x' is used but not listed in subjects"). A tag
+    not allowed in the scene at all is left untouched, for the validator to
+    refuse as it always has. Returns one description per tag added, for the
+    caller to log."""
+    added = []
+    if not isinstance(reply, dict) or not isinstance(reply.get("shots"), list):
+        return added
+    allowed = set(tags_allowed)
+    for i, shot in enumerate(reply["shots"]):
+        if not isinstance(shot, dict) or not isinstance(shot.get("subjects"), list):
+            continue
+        subjects = shot["subjects"]
+        present = set(subjects)
+        found = []
+        for field in ("action", "motion"):
+            text = shot.get(field)
+            if isinstance(text, str):
+                found.extend(prompts._TAG_PATTERN.findall(text))
+        for entry in shot.get("staging") or ():
+            if not isinstance(entry, dict):
+                continue
+            for key in ("subject", "facing", "expression"):
+                value = entry.get(key)
+                if isinstance(value, str):
+                    found.extend(prompts._TAG_PATTERN.findall(value))
+        for tag in found:
+            if tag in allowed and tag not in present:
+                subjects.append(tag)
+                present.add(tag)
+                added.append(f"shot {i + 1}: {tag!r} added to subjects")
+    return added
+
+
 def plan_scene_v2(ctx, ec, script, plans, scene, *, tools, announced) -> list:
     """T1 v2 for *scene* (phase 7 stage 4, A12): its beat shots as plans,
     each with T1 v2's ``clip_motion`` and ``staging``."""
@@ -314,6 +356,9 @@ def plan_scene_v2(ctx, ec, script, plans, scene, *, tools, announced) -> list:
         script, plans, scene["scene_id"], v2=True), **_builder_kwargs(inputs))
 
     def validate(reply):
+        added = _repair_t1_v2_reply(reply, tags_allowed=inputs["tags_allowed"])
+        if added:
+            ctx.on_log("🩹 T1 v2 reply repaired: " + "; ".join(added))
         return prompts.validate_t1_v2(reply, scene=scene, shots_per_scene=inputs["shots_per_scene"],
                                       modifiers_allowed=inputs["modifiers_allowed"],
                                       tags_allowed=inputs["tags_allowed"], n_lines=len(scene["lines"]),

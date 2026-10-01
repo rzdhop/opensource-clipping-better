@@ -22,13 +22,16 @@ request leaves the process, nothing is written outside ``tmp_path``.
 
 from __future__ import annotations
 
+import copy
 from pathlib import Path
 
 import pytest
 
-from clipping.aistory import steps
+from clipping.aistory import prompts, steps
+from clipping.aistory.steps import storyboard
 
 import test_story_episode_steps as eps
+import test_story_prompts_episode as tpe
 from test_story_episode_steps import hermetic, store  # noqa: F401 -- fixtures
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 24
@@ -218,3 +221,61 @@ def test_a_v2_story_plans_its_shots_with_t1_v2_one_beat_shot_a_scene(store):
     assert replan.prompts() == ["T1rv2"]
     sh02 = next(shot for shot in eps._storyboard(store, story_id)["shots"] if shot["shot_id"] == "sh02")
     assert sh02["clip_motion"] == "@char_kiwilo slams a hand on the table" and "slams a hand" in sh02["video_prompt"]
+
+
+# ============================================= T1 v2 tag repair (phase 7, fix B)
+#
+# Found when the walk's storyboard failed twice on one scene: gemini keeps
+# naming a @char/%prop/#place tag in a shot's action/motion/staging that it
+# forgot to also list in that shot's own ``subjects``, which
+# ``prompts.validate_t1_v2`` then refuses ("tag '@char_x' is used but not
+# listed in subjects"). ``storyboard._repair_t1_v2_reply`` runs before that
+# validator (``plan_scene_v2``'s ``validate`` closure) and adds the tag to
+# ``subjects`` when it is one the scene actually allows; a tag of a
+# character this scene never cast at all is left for the validator, exactly
+# as before the repair existed.
+
+def _t1_v2_check(**extra):
+    check = dict(scene=tpe.V2_SCENE, shots_per_scene=(1, 2), modifiers_allowed=tpe.MODIFIERS_ALLOWED,
+                 tags_allowed=tpe.TAGS_T1 + ["@char_mangella"], n_lines=1,
+                 names=dict(tpe.NAMES_T1, char_mangella="Mangella"))
+    check.update(extra)
+    return check
+
+
+def test_t1_v2_reply_repairs_an_allowed_tag_missing_from_subjects():
+    check = _t1_v2_check()
+    shot1 = tpe._good_t1_v2_shot()
+    shot2 = tpe._good_t1_v2_shot(
+        framing="close_up",
+        action="@char_kiwilo confronts @char_mangella by the pool, demanding answers once and for all.",
+        lines=[],
+    )
+
+    # Unrepaired, shot 2's tag is refused as unlisted.
+    errors = prompts.validate_t1_v2({"shots": [copy.deepcopy(shot1), copy.deepcopy(shot2)]}, **check)
+    assert any("@char_mangella" in e and "not listed in subjects" in e for e in errors)
+
+    # deepcopy: the reply's own lists must not alias shot1/shot2's, or the repair's in-place
+    # append would also mutate the fixtures the assertions below compare against.
+    reply = {"shots": [copy.deepcopy(shot1), copy.deepcopy(shot2)]}
+    added = storyboard._repair_t1_v2_reply(reply, tags_allowed=check["tags_allowed"])
+    assert reply["shots"][1]["subjects"] == shot2["subjects"] + ["@char_mangella"]
+    assert added and "shot 2" in added[0] and "@char_mangella" in added[0]
+    assert reply["shots"][0]["subjects"] == shot1["subjects"]  # shot 1 had nothing to repair
+
+    # Repaired, the same reply now passes.
+    assert prompts.validate_t1_v2(reply, **check) == []
+
+
+def test_t1_v2_reply_leaves_a_tag_outside_the_scene_for_the_validator():
+    check = _t1_v2_check()
+    shot = tpe._good_t1_v2_shot(
+        action="@char_kiwilo glances toward @char_broccolia offscreen, then turns back to the pool.",
+    )
+    reply = {"shots": [copy.deepcopy(shot)]}
+    added = storyboard._repair_t1_v2_reply(reply, tags_allowed=check["tags_allowed"])
+    assert added == [] and reply["shots"][0]["subjects"] == shot["subjects"]
+
+    errors = prompts.validate_t1_v2(reply, **check)
+    assert any("@char_broccolia" in e and "not listed in subjects" in e for e in errors)
