@@ -623,6 +623,21 @@ def test_portrait_v2_full_body_from_look(style_id):
 
 
 @pytest.mark.parametrize("style_id", templates.list_style_ids())
+def test_expressions_v2_pins_every_cell_to_the_same_head(style_id):
+    """A2: one cell of a character's expression sheet drifted to a human
+    boy's face on the walk, and another sheet came out with five cells
+    instead of six. Right after the role text, every cell is pinned to
+    image 1's head; the grid count is spelled out ("exactly six cells")."""
+    style_lock = templates.load_style(style_id)
+    sheet = prompting.expressions_prompt_v2(style_lock, look_text=LOOK_TEXT, signature_items=SIGNATURE_ITEMS)
+    assert sheet.startswith(
+        "Image 1 is this character's reference: keep identity, proportions and outfit exactly. "
+        "Every cell shows the same head as image 1, never a different face.")
+    assert "exactly six cells" in sheet and "3 by 2 grid" in sheet
+    assert len(sheet.split()) <= 130 and ".," not in sheet and ".." not in sheet
+
+
+@pytest.mark.parametrize("style_id", templates.list_style_ids())
 def test_plate_and_prop_v2_prompts_hold_their_caps(style_id):
     style_lock = templates.load_style(style_id)
     place_text = ("a city square with a clock tower; on the left a newsstand, on the right a lamppost, at the back "
@@ -634,4 +649,26 @@ def test_plate_and_prop_v2_prompts_hold_their_caps(style_id):
     prop = prompting.prop_prompt_v2(style_lock, prop_text="a chrome toaster, polished chrome, silver, as big as a "
                                                           "suitcase.")
     assert "as big as a suitcase" in prop and "alone" in prop
+    assert len(prop.split()) <= 80 and ".," not in prop and ".." not in prop
+
+
+@pytest.mark.parametrize("style_id", templates.list_style_ids())
+def test_prop_reference_prompt_v2_carries_no_scale_or_hand_wording(style_id):
+    """A1: the prop reference image prompt (fed ``shots.render_prop(...,
+    for_reference=True)``'s text, which has no scale phrase) must itself
+    carry no scale or hand wording -- the walk's first paid images showed a
+    human hand holding the monocle because the old head phrase ("shown at
+    its real scale") and "fits in one hand"-style scale phrases invite one."""
+    style_lock = templates.load_style(style_id)
+    # No scale wording in the input text either -- shots.render_prop(for_reference=True)'s contract.
+    prop_text = "a brass monocle, polished brass, gold"
+    prop = prompting.prop_prompt_v2(style_lock, prop_text=prop_text)
+    lowered = prop.lower()
+    assert "scale" not in lowered
+    assert "real scale" not in lowered and "fits in" not in lowered and "one hand" not in lowered
+    assert "the object alone on a plain surface, nothing holding it" in lowered
+    # "no hands" is the one constraint phrase that may say "hand(s)" -- a style's own rendering text
+    # may legitimately use the word too ("hand-painted", "handmade"), which this does not forbid.
+    assert "no hands" in lowered
+    assert prop.endswith(prompting._CONSTRAINTS_OBJECT)
     assert len(prop.split()) <= 80 and ".," not in prop and ".." not in prop

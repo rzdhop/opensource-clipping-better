@@ -569,8 +569,12 @@ def test_memory_section_lists_the_hooks_it_is_handed():
 # 60-character names and 200-character one-lines. R1v2: a 30-word descriptor,
 # the owner's 15-word build, 12 cast names and 8 place names of 60 characters.
 # Budget = worst case + 15 %, rounded up to ten.
+#
+# D2 re-measured for fix A3 (DEC-226's amendment): the ask gained a
+# presentation line (apparent age and gender presentation, optional, at most
+# 8 words), which grows the input a little.
 
-MEASURED_LOOK = {"D2": 1987, "D3": 1685, "R1v2": 1014}
+MEASURED_LOOK = {"D2": 2053, "D3": 1685, "R1v2": 1014}
 ALL_STYLES = [templates.load_style(style_id) for style_id in templates.list_style_ids()]
 _DESCRIPTOR_DENSITY = LIVE_CHARACTERS["char_kiwilo"]["descriptor"]
 

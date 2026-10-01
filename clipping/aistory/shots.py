@@ -357,14 +357,16 @@ def _lower_first(text) -> str:
 
 def render_look(doc, *, wardrobe_set=None, others=(), max_words=LOOK_MAX_WORDS) -> str:
     """A character's look in at most *max_words* words (default
-    :data:`LOOK_MAX_WORDS`; a tighter cap ends on a whole part): build, its
-    height against *others* (other character documents in the same frame,
-    named by their handle), silhouette, face, hair, skin or material,
-    "wearing" the wardrobe set's items (*wardrobe_set* by id, default the
-    first), "colours" the palette, then "with" each signature item the
-    wardrobe does not already say (its first letter lower case inside the
-    sentence, :func:`_lower_first`). Over the cap, parts are dropped in
-    ``_LOOK_DROP_ORDER``. ``ValueError`` when *doc* has no look."""
+    :data:`LOOK_MAX_WORDS`; a tighter cap ends on a whole part): its
+    presentation first when the look has one (A3: apparent age and gender --
+    never dropped under budget), then build, its height against *others*
+    (other character documents in the same frame, named by their handle),
+    silhouette, face, hair, skin or material, "wearing" the wardrobe set's
+    items (*wardrobe_set* by id, default the first), "colours" the palette,
+    then "with" each signature item the wardrobe does not already say (its
+    first letter lower case inside the sentence, :func:`_lower_first`). Over
+    the cap, parts are dropped in ``_LOOK_DROP_ORDER``. ``ValueError`` when
+    *doc* has no look."""
     look = doc.get("look")
     if not look:
         raise ValueError("render_look: the character has no look")
@@ -377,6 +379,7 @@ def render_look(doc, *, wardrobe_set=None, others=(), max_words=LOOK_MAX_WORDS) 
     extra = [_lower_first(_strip_period(item)) for item in doc.get("signature_items") or ()
              if not _already_worn(item, worn)]
     parts = {
+        "presentation": _strip_period(look["presentation"]) if look.get("presentation") else "",
         "build": _strip_period(look["build"]),
         "height": _height_part(doc, others),
         "silhouette": said(look["silhouette"]),
@@ -408,10 +411,15 @@ def _place_light(look, variant) -> str:
     return _strip_period(light) if light else f"{variant.replace('_', ' ')} light"
 
 
-def render_prop(doc, *, short=False) -> str:
+def render_prop(doc, *, short=False, for_reference=False) -> str:
     """A prop in words: its descriptor, material, colour and real-scale
     phrase; *short* (set dressing on a plate): its handle with colour,
-    material and scale. Without a look, the descriptor (or the handle)."""
+    material and scale. *for_reference* (A1, the prop's own reference image):
+    the scale phrase left out -- a reference image shows the object alone,
+    with nothing in frame to judge scale against, so "real scale" wording
+    there invited a hand holding the object; a keyframe, which has the scene
+    to judge scale against, keeps the full text. Without a look, the
+    descriptor (or the handle)."""
     descriptor = _strip_period(doc["descriptor"])
     look = doc.get("look")
     if short:
@@ -422,8 +430,10 @@ def render_prop(doc, *, short=False) -> str:
                 f"{_strip_period(look['scale_phrase'])})")
     if not look:
         return descriptor
-    return _collapse_ws(f"{descriptor}, {_strip_period(look['material'])}, {_strip_period(look['colour'])}, "
-                        f"{_strip_period(look['scale_phrase'])}")
+    text = f"{descriptor}, {_strip_period(look['material'])}, {_strip_period(look['colour'])}"
+    if not for_reference:
+        text = f"{text}, {_strip_period(look['scale_phrase'])}"
+    return _collapse_ws(text)
 
 
 def render_place(doc, variant, framing, *, props=()) -> str:

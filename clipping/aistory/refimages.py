@@ -748,7 +748,7 @@ def prop_image(stories, story_id, prop_id, *, env, on_log, cancel, note=None, se
         raise RefImageError(f"{name}: write the prop first -- its descriptor makes its image.")
     lock = imaging.read_lock(stories, story_id, error=RefImageError)
     if media_policy.is_v2(story) and prop.get("look"):
-        prompt = prompting.prop_prompt_v2(lock, prop_text=shots.render_prop(prop))
+        prompt = prompting.prop_prompt_v2(lock, prop_text=shots.render_prop(prop, for_reference=True))
     else:
         prompt = prompting.prop_image_prompt(lock, descriptor=prop["descriptor"])
     prompt = _with_note(prompt, note, stories=stories, story_id=story_id)

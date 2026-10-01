@@ -290,7 +290,8 @@ ROLE_TEXT_PORTRAIT = "Image 1 is this character's reference: keep identity, prop
 CONSTRAINTS_ONE_CHARACTER = "Clean frame: no captions, logos or watermarks; one character."
 _CONSTRAINTS_SAME_CHARACTER = "Clean frame: no captions, logos or watermarks; the same single character throughout."
 _CONSTRAINTS_NO_PEOPLE = "Clean frame: no captions, logos or watermarks; no people."
-_CONSTRAINTS_OBJECT = "Clean frame: no captions, logos or watermarks; no people, no hands."
+_CONSTRAINTS_OBJECT = ("Clean frame: no captions, logos or watermarks; no people, no hands; "
+                       "objects have no faces.")
 
 
 def _word_count(text: str) -> int:
@@ -399,12 +400,16 @@ def turnaround_prompt_v2(style_lock: dict, *, look_text: str, signature_items) -
 
 def expressions_prompt_v2(style_lock: dict, *, look_text: str, signature_items) -> str:
     """The v2 expression sheet, an edit of the portrait (image 1): six
-    head-and-shoulders portraits, at most ``SHEET_V2_MAX_WORDS`` words."""
+    head-and-shoulders portraits, at most ``SHEET_V2_MAX_WORDS`` words. A2:
+    a sentence right after the role text pins every cell to image 1's head,
+    and the grid count is spelled out ("exactly six cells") -- one sheet had
+    drifted to a human face in one cell, another came out with five cells."""
     return _sheet_v2(
         style_lock,
-        head=(f"{ROLE_TEXT_PORTRAIT} Expression sheet of this character, six head-and-shoulders portraits "
-              "in a 3x2 grid, neutral, happy, angry, shocked, sad and scheming, same face and outfit in every "
-              "cell"),
+        head=(f"{ROLE_TEXT_PORTRAIT} Every cell shows the same head as image 1, never a different face. "
+              "Expression sheet of this character, exactly six cells in a 3 by 2 grid, each a "
+              "head-and-shoulders portrait: neutral, happy, angry, shocked, sad and scheming, same face and "
+              "outfit in every cell"),
         look_text=look_text, signature_items=signature_items,
         tail=f"Plain {style_lock['sheet_background']} background, even soft light, no labels.",
         constraints=_CONSTRAINTS_SAME_CHARACTER, rules=False,
@@ -428,9 +433,11 @@ def plate_prompt_v2(style_lock: dict, *, place_text: str, variant: str) -> str:
 
 
 def prop_prompt_v2(style_lock: dict, *, prop_text: str) -> str:
-    """A v2 prop's reference image (``shots.render_prop``: look and real
-    scale), alone on the sheet background -- at most ``PROP_V2_MAX_WORDS``."""
-    head = "Reference image of one object, alone, centred, shown at its real scale"
+    """A v2 prop's reference image (``shots.render_prop(..., for_reference=True)``:
+    look, no scale -- A1, a scale phrase here invited a hand holding the
+    object for a size reference), the object alone on a plain surface,
+    nothing holding it -- at most ``PROP_V2_MAX_WORDS``."""
+    head = "Reference image of the object alone on a plain surface, nothing holding it, centred"
     after = (f"Plain {style_lock['sheet_background']} background, even soft studio light. "
              f"{_CONSTRAINTS_OBJECT}")
     room = PROP_V2_MAX_WORDS - _word_count(head) - _word_count(after) - _RENDERING_V2_MIN_WORDS - 2

@@ -165,6 +165,19 @@ def test_look_block_is_checked_when_present():
                                                                        "place_id": None, "note": "x"}])))
 
 
+def test_look_presentation_is_optional_and_capped():
+    """A3: a character named Raisinetta was drawn as a man because nothing
+    said otherwise. ``look.presentation`` (apparent age and gender
+    presentation, at most 8 words) is an optional key of the character look
+    schema -- absent, as every look written before it existed, still
+    validates; present, it is checked like every other look field."""
+    assert "presentation" not in TALL["look"]
+    assert schemas.character_errors(TALL) == []  # no presentation at all: still a good look
+    assert schemas.character_errors(dict(TALL, look=_look(presentation="woman in her thirties"))) == []
+    errors = schemas.character_errors(dict(TALL, look=_look(presentation=" ".join(["word"] * 9))))
+    assert errors == ["$.look.presentation: 9 words, expected at most 8"]
+
+
 # ================================================================ renderers
 
 def _words(text):
@@ -191,6 +204,21 @@ def test_render_look_relative_height():
     assert "about the same height as" in same
     # No other in the frame: no height phrase at all.
     assert "tall as" not in shots.render_look(TALL) and "height of" not in shots.render_look(TALL)
+
+
+def test_render_look_presentation_leads_when_present():
+    """A3: ``render_look`` renders ``presentation`` first, before ``build``
+    -- the walk drew a character named Raisinetta as a man because nothing
+    said otherwise. A look without one renders exactly as before (A3 is
+    additive)."""
+    without_presentation = shots.render_look(TALL)
+    assert not without_presentation.startswith("woman") and "presentation" not in without_presentation
+
+    with_presentation = shots.render_look(dict(TALL, look=_look(presentation="woman in her thirties")))
+    assert with_presentation.startswith("woman in her thirties, ")
+    # Dropping presentation again (not touching it) reproduces the old text exactly.
+    assert with_presentation == f"woman in her thirties, {without_presentation}"
+    assert _words(with_presentation) <= 45
 
 
 def test_render_place_and_prop_say_no_name():
@@ -474,7 +502,11 @@ def test_v2_places_run_p1_d3_plate_then_r1_r1v2_prop_image(tmp_path, hermetic):
     assert plate.startswith("Establishing wide shot of an empty set, day, no people, no characters:")
     assert "on the left palm-leaf huts" in plate and "hard tropical sun" in plate
     assert "Plage" not in plate and "Coco" not in plate
-    assert prop_image.startswith("Reference image of one object") and "fits in one hand" in prop_image
+    # A1 (phase 7 quality overhaul): the reference image carries no scale phrase (it invited a hand
+    # holding the object for a size reference) -- "fits in one hand" stays out of this prompt, even
+    # though R1v2 wrote it as the prop's scale_phrase; render_prop keeps it for a keyframe instead.
+    assert prop_image.startswith("Reference image of the object alone on a plain surface, nothing holding it")
+    assert "fits in one hand" not in prop_image and "a hollow coconut with a curly cord and a brass dial" in prop_image
     # Kiwilo's height went to R1v2; D3's prop and R1v2's names became ids.
     assert "Owner: Kiwilo (lean human body; 175 cm tall)" in llm.of("R1v2")[0]["user"]
     place = store.list_entities(story_id, "places")[0]

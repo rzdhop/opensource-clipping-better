@@ -95,9 +95,10 @@ C1_CALLS = 10
 # D2/D3/R1v2 (phase 7, stage 3a): the plan's caps 380/300/220, checked
 # against the largest English reply each ask allows -- every stated word and
 # count limit hit at 6 characters a word, chars/4 (the fields are English, so
-# no French factor): D2 ~346, D3 ~290 (3 time variants, P1's most, and 3 props
-# of 60-character names), R1v2 ~177 (2 where-when entries, the reply's bound;
-# tests/test_story_look.py).
+# no French factor): D2 ~358 (fix A3, DEC-226's amendment: presentation's 8
+# words added, still under the 380 cap, so MAX_TOKENS["D2"] is unchanged), D3
+# ~290 (3 time variants, P1's most, and 3 props of 60-character names), R1v2
+# ~177 (2 where-when entries, the reply's bound; tests/test_story_look.py).
 #
 # D1 (phase 7 stage 5a, DEC-228, DEC-138's method): the plan's 420 cannot hold
 # the dossier's own word caps in French -- every stated limit hit (a 60-word
@@ -242,8 +243,10 @@ SCHEMA_NAMES = {
 # its own worst case -- every input at the cap its source document sets, on the
 # style with the longest texts, French, on a regenerate with the current look
 # at its caps and a 60-word note (tests/test_story_episode_prompt_budgets.py):
-# D2 1,987 (11 other characters' builds and heights), D3 1,685 (5 variants, 8
-# props), R1v2 1,014; each the worst case + 15 %, rounded up to ten.
+# D2 2,053 (11 other characters' builds and heights; re-measured for fix A3,
+# DEC-226's amendment, which adds the presentation line to the D2 ask), D3
+# 1,685 (5 variants, 8 props), R1v2 1,014; each the worst case + 15 %, rounded
+# up to ten.
 #
 # T1v2/T1rv2 (phase 7 stage 4, DEC-227): measured on the same live-sized data
 # with their own inputs at their caps (tests/test_story_episode_prompt_budgets.py):
@@ -256,7 +259,7 @@ SCHEMA_NAMES = {
 # 60-word note (tests/test_story_episode_prompt_budgets.py): D1 3,380;
 # + 15 %, rounded up to ten.
 INPUT_BUDGET = {"E1": 1820, "E2": 1660, "E3": 2530, "E4": 3900, "T1": 1270, "T1r": 1410, "S3": 3740, "F1": 3950, "N1": 3740,
-                "D2": 2290, "D3": 1940, "R1v2": 1170, "T1v2": 2020, "T1rv2": 2060, "D1": 3890}
+                "D2": 2370, "D3": 1940, "R1v2": 1170, "T1v2": 2020, "T1rv2": 2060, "D1": 3890}
 
 # The ``bible:<field>`` grammar of spec 9.2: which prompt a regenerate note
 # re-runs, and which of that prompt's fields it targets. "tone" also carries
@@ -721,7 +724,10 @@ _D2_ASK = (
     "- palette: 1 to 4 short colour names\n"
     "- wardrobe_sets: 1 to 3 outfits, the everyday one first, each with an id (lowercase, e.g. daily, "
     "night_out), a context (when it is worn, at most 8 words) and items (what is worn, at most 20 words)\n"
-    "- season_change: how the look changes with the seasons, at most 20 words, or an empty string\n\n"
+    "- season_change: how the look changes with the seasons, at most 20 words, or an empty string\n"
+    "- presentation (optional, at most 8 words): apparent age and gender presentation, e.g. \"woman in her "
+    "thirties\" -- give it whenever the build, face and species of the character would not already make this "
+    "clear on their own (a human-shaped character in particular)\n\n"
     "Stay consistent with the descriptor and the signature items. Never use real people, brands, studio "
     "names or copyrighted characters."
 )
