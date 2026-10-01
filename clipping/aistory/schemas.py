@@ -1294,6 +1294,11 @@ LOOK_WARDROBE_CONTEXT_MAX_WORDS = 8
 LOOK_WARDROBE_ITEMS_MAX_WORDS = 20
 LOOK_SEASON_CHANGE_MAX_WORDS = 20
 WARDROBE_SET_ID_PATTERN = r"^[a-z][a-z0-9_]{0,39}$"
+# Optional (A3): apparent age and gender presentation, asked for by D2 and
+# rendered first by shots.render_look when present -- a character whose
+# descriptor and signature items leave its presentation unsaid (e.g. a fruit
+# head) was otherwise drawn as a default assumption.
+LOOK_PRESENTATION_MAX_WORDS = 8
 
 _LOOK_TEXT_FIELDS = (
     ("build", LOOK_BUILD_MAX_WORDS),
@@ -1322,6 +1327,10 @@ CHARACTER_LOOK_SCHEMA = _document({
                       "minItems": LOOK_WARDROBE_SETS_RANGE[0], "maxItems": LOOK_WARDROBE_SETS_RANGE[1]},
     # How the look changes with the seasons; null when it does not.
     "season_change": {"type": ["string", "null"], "minLength": 1},
+}, optional={
+    # Apparent age and gender presentation (A3); never required, so a look
+    # written before this field existed still validates.
+    "presentation": _NON_EMPTY_STRING,
 })
 
 DOSSIER_BACKSTORY_MAX_WORDS = 60
@@ -1408,6 +1417,8 @@ def character_look_errors(look, path="$.look") -> list:
         ids.append(wardrobe["id"])
     if look["season_change"] is not None:
         _check_text(errors, f"{path}.season_change", look["season_change"], max_words=LOOK_SEASON_CHANGE_MAX_WORDS)
+    if "presentation" in look:
+        _check_text(errors, f"{path}.presentation", look["presentation"], max_words=LOOK_PRESENTATION_MAX_WORDS)
     return errors
 
 
@@ -4059,13 +4070,15 @@ def _name_leaks(errors, haystacks, names) -> None:
 
 def d2_schema() -> dict:
     """The D2 output schema: one character's look (``CHARACTER_LOOK_SCHEMA``'s
-    fields; ``season_change`` an empty string when the look does not change)."""
+    fields; ``season_change`` an empty string when the look does not change).
+    ``presentation`` (A3) is optional -- the model may leave it out entirely,
+    not just send it empty -- so it is not in the ``required`` list."""
     wardrobe = _llm_obj({
         "id": {"type": "string", "description": "lowercase slug, e.g. daily, night_out"},
         "context": {"type": "string", "description": "English, when it is worn, at most 8 words"},
         "items": {"type": "string", "description": "English, what is worn, at most 20 words"},
     })
-    return _llm_obj({
+    properties = {
         "build": {"type": "string", "description": "English, body type and proportions, at most 15 words"},
         "silhouette": {"type": "string", "description": "English, the outline at a glance, at most 12 words"},
         "face": {"type": "string", "description": "English, at most 15 words"},
@@ -4075,19 +4088,28 @@ def d2_schema() -> dict:
         "palette": {"type": "array", "description": "1-4 short colour names", "items": {"type": "string"}},
         "wardrobe_sets": {"type": "array", "description": "1-3 outfits, the everyday one first", "items": wardrobe},
         "season_change": {"type": "string", "description": "English, at most 20 words, or empty"},
-    })
+        "presentation": {"type": "string",
+                         "description": "English, apparent age and gender presentation, e.g. "
+                                        "'woman in her thirties', at most 8 words"},
+    }
+    return _llm_obj(properties, required=[key for key in properties if key != "presentation"])
 
 
 def d2_look(doc) -> dict:
-    """D2's reply as the stored ``look`` block (an empty season change is null)."""
+    """D2's reply as the stored ``look`` block (an empty season change is
+    null; ``presentation`` kept only when the reply has a non-empty one)."""
     season = (doc.get("season_change") or "").strip()
-    return {
+    look = {
         "build": doc["build"], "silhouette": doc["silhouette"], "face": doc["face"], "hair": doc["hair"],
         "skin_material": doc["skin_material"], "height_cm": doc["height_cm"], "palette": list(doc["palette"]),
         "wardrobe_sets": [{"id": item["id"], "context": item["context"], "items": item["items"]}
                           for item in doc["wardrobe_sets"]],
         "season_change": season or None,
     }
+    presentation = (doc.get("presentation") or "").strip()
+    if presentation:
+        look["presentation"] = presentation
+    return look
 
 
 def d2_errors(doc, names) -> list:
@@ -4102,6 +4124,8 @@ def d2_errors(doc, names) -> list:
     haystacks += [(f"$.palette[{i}]", colour) for i, colour in enumerate(doc["palette"])]
     haystacks += [(f"$.wardrobe_sets[{i}].items", item["items"]) for i, item in enumerate(doc["wardrobe_sets"])]
     haystacks.append(("$.season_change", doc["season_change"]))
+    if doc.get("presentation"):
+        haystacks.append(("$.presentation", doc["presentation"]))
     _name_leaks(errors, haystacks, names)
     return errors
 

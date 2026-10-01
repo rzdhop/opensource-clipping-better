@@ -281,6 +281,9 @@ PHASE5_OPTIONAL = {
     ("CHARACTER_SCHEMA", "$"): {"look", "dossier"},
     ("PLACE_SCHEMA", "$"): {"look"},
     ("PROP_SCHEMA", "$"): {"look"},
+    # Fix A3 (phase 7 quality overhaul): apparent age and gender presentation,
+    # optional on the character look -- absent on every look written before it.
+    ("CHARACTER_SCHEMA", "$.properties.look"): {"presentation"},
 }
 
 
