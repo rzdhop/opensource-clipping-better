@@ -35,6 +35,24 @@ episode N+1 (the gate) and never touches what N+1 already has. The story's
 own document is never written: ``story.json``'s approvals and status do not
 move (RC-M5).
 
+**A v2 story's second call, L1** (phase 7 stage 5d, DEC-229, A13/A14):
+once S3's reply validates, one more call writes the continuity ledger --
+where every character present this episode now stands (location, wardrobe
+set, possessions, injuries, a relationship note) -- from the same script
+digest S3 read, the ledger as it stood before this episode
+(``context.ledger_before``) and the story's places, props and present
+cast's own wardrobe set ids. Its reply becomes the entry's own ``ledger``
+(``schemas.l1_errors`` plus the memory step's own check: a ``wardrobe_set``
+belongs to that specific character, never enumerable at the schema level --
+module docstring of ``schemas.l1_schema``), saved in the *same* atomic
+write as the rest of the entry -- a legacy story, or a v2 one whose script
+names no character, gets no ``ledger`` key at all, and the field stays
+optional for every reader already written for stage 5a. Idempotent exactly
+as S3 is (DEC-178): re-running the step replaces the whole entry, ledger
+included, from what now stands; a script edit that makes the entry stale
+(``series_memory.entry_is_stale``) makes its ledger stale with it -- the
+same field, the same rule, no separate staleness of its own.
+
 Stdlib only (DEC-012).
 """
 
@@ -42,7 +60,7 @@ from __future__ import annotations
 
 import time
 
-from .. import context, prompts, schemas, series_memory
+from .. import context, media_policy, prompts, schemas, series_memory
 from .. import store as store_mod
 from . import entities, episode_common, llm_call
 from .entities import CHARACTERS
@@ -133,7 +151,7 @@ def save_entry(ctx, ec, entry, *, now) -> dict:
     season is gone, the script moved on meanwhile, the entry no longer holds
     against the season or the cast, or the fold breaks."""
     store, ep = ec.store, ec.ep
-    dropped = []
+    dropped, dropped_ledger = [], []
 
     def merge(season):
         if season is None:
@@ -151,6 +169,10 @@ def save_entry(ctx, ec, entry, *, now) -> dict:
             else:
                 dropped.append(key)
         final = dict(entry, relationship_deltas=deltas)
+        if "ledger" in entry:
+            kept = {cid: state for cid, state in entry["ledger"].items() if cid in cast}
+            dropped_ledger.extend(sorted(set(entry["ledger"]) - set(kept)))
+            final["ledger"] = kept
         errors = series_memory.entry_errors(final, open_hooks=series_memory.open_hooks_before(season, ep),
                                             char_ids=cast)
         if errors:
@@ -169,14 +191,127 @@ def save_entry(ctx, ec, entry, *, now) -> dict:
     for key in dropped:
         ctx.on_log(f"ℹ️ Episode {ep}: the relationship {key} was left out -- a character of it was deleted "
                    "while the memory was being written.")
+    for cid in dropped_ledger:
+        ctx.on_log(f"ℹ️ Episode {ep}: {cid}'s ledger entry was left out -- it was deleted while the memory "
+                   "was being written.")
     return saved
+
+
+# -------------------------------------------------------------------- L1 (phase 7 stage 5d)
+
+def present_characters(ec, script) -> list:
+    """The characters present in episode *ec.ep*'s approved script -- the
+    union of every scene's cast, in the story's own cast order (``ec.cast``):
+    who L1 writes a ledger entry for (module docstring). [] for a script
+    whose scenes name no character (L1 is then skipped: an empty ledger says
+    nothing a missing one does not)."""
+    present = {cid for scene in script["scenes"] for cid in scene.get("characters") or ()}
+    return [doc for doc in ec.cast if doc["char_id"] in present]
+
+
+def _l1_known_ids(ec, script, previous) -> tuple:
+    """``(places, props)``: the ``{place_id/prop_id, name}`` rows L1's
+    ``location``/``possessions`` may hold -- the places and props this
+    episode's script actually names (bounded the way its own places are,
+    ``episode_script_context_errors``'s ``max_places``; nothing bounds its
+    props the same way, 5d's own choice of worst case,
+    ``test_l1_worst_case_...``) plus whatever *previous* already held for a
+    character, so one can be written as keeping something this episode never
+    mentions again."""
+    place_ids, prop_ids = set(), set()
+    for scene in script["scenes"]:
+        if scene.get("place_id"):
+            place_ids.add(scene["place_id"])
+        prop_ids.update(scene.get("props") or ())
+    for state in (previous or {}).values():
+        if state.get("location"):
+            place_ids.add(state["location"])
+        prop_ids.update(state.get("possessions") or ())
+    places = [{"place_id": pid, "name": doc["name"]}
+             for pid, doc in ec.entities["places"].items() if pid in place_ids]
+    props = [{"prop_id": pid, "name": doc["name"]}
+            for pid, doc in ec.entities["props"].items() if pid in prop_ids]
+    return places, props
+
+
+def _l1_present_rows(present) -> list:
+    """*present* (character docs, :func:`present_characters`) as L1 reads
+    them: id, name, and that character's own wardrobe set ids and contexts
+    (none without a look yet -- a v2 story may write its episodes before D2
+    runs; ``wardrobe_set`` can then only ever be null for it)."""
+    rows = []
+    for doc in present:
+        sets = (doc.get("look") or {}).get("wardrobe_sets") or ()
+        rows.append({"char_id": doc["char_id"], "name": doc["name"],
+                     "wardrobe_sets": [{"id": s["id"], "context": s["context"]} for s in sets]})
+    return rows
+
+
+def _knowledge_of(ec):
+    """The story's knowledge base (``knowledge.json``), or None: a legacy
+    story, none written, or one that does not read. Mirrors
+    ``steps.script.knowledge_of``, duplicated here rather than imported so
+    this step's own imports stay its own (no cross-step coupling)."""
+    if not media_policy.is_v2(ec.story):
+        return None
+    try:
+        return ec.store.read_knowledge(ec.story_id)
+    except schemas.SchemaError:
+        return None
+
+
+def ledger_of(reply) -> dict:
+    """L1's reply (``schemas.l1_schema``'s array) as a ledger (``{char_id:
+    state}``, the stored shape ``schemas.LEDGER_STATE_SCHEMA`` checks)."""
+    return {item["character"]: {key: item[key] for key in
+                                ("location", "wardrobe_set", "possessions", "injuries", "relationship_notes")}
+            for item in reply["ledger"]}
+
+
+def run_l1(ctx, ec, tools, *, digest, script, present) -> dict:
+    """The L1 call (module docstring): one ledger entry per character of
+    *present*, from *digest* (the same ``script_digest`` text S3 read) and
+    the ledger as it stood before this episode (``context.ledger_before``).
+    Checked by the schema plus one thing it cannot enforce itself -- a
+    ``wardrobe_set`` belonging to that specific character
+    (``schemas.l1_schema``'s section comment: "Unknown ids refused by the
+    validator"). Returns the ledger (:func:`ledger_of`)."""
+    previous = context.ledger_before(_knowledge_of(ec), ec.season, ec.ep) or {}
+    places, props = _l1_known_ids(ec, script, previous)
+    present_rows = _l1_present_rows(present)
+    wardrobe_sets = {row["char_id"]: [s["id"] for s in row["wardrobe_sets"]] for row in present_rows}
+    char_ids = [row["char_id"] for row in present_rows]
+    place_ids = [p["place_id"] for p in places]
+    prop_ids = [p["prop_id"] for p in props]
+
+    pack = context.build_pack(language=ec.language, story=ec.story)
+    system, user, schema = prompts.build_l1(
+        pack, ep=ec.ep, script_digest=digest, previous=previous, present=present_rows, places=places, props=props)
+
+    def validate(reply):
+        errors = schemas.l1_errors(reply, char_ids=char_ids, place_ids=place_ids, prop_ids=prop_ids)
+        if errors:
+            return errors
+        errors = []
+        for item in reply["ledger"]:
+            allowed = wardrobe_sets.get(item["character"]) or ()
+            if item["wardrobe_set"] is not None and item["wardrobe_set"] not in allowed:
+                errors.append(f"$.ledger: {item['wardrobe_set']!r} is no wardrobe set of {item['character']}")
+        return errors
+
+    ctx.on_log(f"🧵 Episode {ec.ep}: continuity ledger (L1), {len(char_ids)} character(s) present")
+    reply = llm_call.call_json(ctx, "L1", system, user, schema, validator=validate, runner=tools.runner,
+                               time_fn=tools.time_fn)
+    return ledger_of(reply)
 
 
 # -------------------------------------------------------------------- run
 
 def run(ctx, *, runner=None, time_fn=time.monotonic) -> dict:
-    """The step (module docstring). Returns ``{ep, recap, hooks_opened,
-    hooks_closed, relationships, script_rev, replaced}``."""
+    """The step (module docstring): S3, then -- a v2 story whose script
+    names at least one character -- L1. Returns ``{ep, recap, hooks_opened,
+    hooks_closed, relationships, script_rev, replaced}`` (the ledger is not
+    in the summary; read it from the entry, as every other reader does)."""
     ec = episode_common.load_episode_context(ctx)
     script = check(ec)
     ctx.cancel.check()
@@ -186,11 +321,12 @@ def run(ctx, *, runner=None, time_fn=time.monotonic) -> dict:
     char_ids = [doc["char_id"] for doc in ec.cast]
     pairs = series_memory.cast_pairs(char_ids)
     replaced = series_memory.entry_for(ec.season, ep) is not None
+    digest = script_digest(ec, script)
 
     pack = context.build_pack(language=ec.language, story=ec.story)
     llm_call.announce_trimmed(ctx, pack, set())
     system, user, schema = prompts.build_s3(
-        pack, ep=ep, script_digest=script_digest(ec, script), open_hooks=open_hooks,
+        pack, ep=ep, script_digest=digest, open_hooks=open_hooks,
         hooks_out=list(ec.arc_entry["open_hooks_out"]),
         relationship_state=series_memory.relationship_state_before(ec.season, ep),
         cast=[{"char_id": doc["char_id"], "name": doc["name"]} for doc in ec.cast],
@@ -207,8 +343,21 @@ def run(ctx, *, runner=None, time_fn=time.monotonic) -> dict:
     ctx.on_log(f"🧠 Episode {ep}: series memory (S3), from the approved script (revision {script['rev']})")
     reply = llm_call.call_json(ctx, PROMPT, system, user, schema, validator=validate, runner=tools.runner,
                                time_fn=tools.time_fn)
+
+    # Phase 7 stage 5d (DEC-229): a v2 story's second call, the continuity
+    # ledger -- skipped for a legacy story, and for a v2 one whose script
+    # names no character (present_characters then returns []).
+    ledger = None
+    if media_policy.is_v2(ec.story):
+        present = present_characters(ec, script)
+        if present:
+            ledger = run_l1(ctx, ec, tools, digest=digest, script=script, present=present)
+
     now = llm_call.utc_now()
-    season = save_entry(ctx, ec, entry_of(reply, script, at=now), now=now)
+    entry = entry_of(reply, script, at=now)
+    if ledger is not None:
+        entry["ledger"] = ledger
+    season = save_entry(ctx, ec, entry, now=now)
     entry = season["series_memory"]["entries"][series_memory.memory_key(ep)]
     ctx.on_log(f"🧠 Episode {ep}'s memory {'written again' if replaced else 'written'}: "
                f"{len(entry['hooks_opened'])} hook(s) opened, {len(entry['hooks_closed'])} closed, "

@@ -4206,6 +4206,71 @@ def d6_errors(doc) -> list:
     return errors
 
 
+# ------------------------------------------------- L1 (phase 7 stage 5d, the continuity ledger)
+#
+# The memory step's second call on a v2 story (DEC-229), after S3: one
+# ``LEDGER_STATE_SCHEMA`` entry per character present the episode, written
+# into the memory entry's own optional ``ledger`` (``_MEMORY_ENTRY_SCHEMA``,
+# stage 5a). ``character``, ``location`` and ``possessions`` are ids the
+# call already knows in full (the episode's present cast, the story's
+# places and props) and so are enumerated at the schema level, the way
+# ``s3_schema`` enumerates hooks and pairs; ``wardrobe_set`` cannot be --
+# each character's own look has its own set of ids, and a strict-mode array
+# schema cannot vary its items' enum by another field of the same item --
+# so it is left a free string here and checked against that one
+# character's own ids by the memory step itself (module docstring: "Unknown
+# ids refused by the validator").
+
+def l1_schema(char_ids, place_ids, prop_ids) -> dict:
+    """The L1 output schema: the continuity ledger after one episode, one
+    entry per character of *char_ids* (the episode's present cast).
+    *place_ids*/*prop_ids* bound ``location``/``possessions`` to the
+    story's own; ``wardrobe_set`` is free text here (see the section
+    comment above)."""
+    item = _llm_obj({
+        "character": _named(char_ids),
+        "location": _named_or_null(place_ids),
+        "wardrobe_set": {"type": ["string", "null"],
+                         "description": "one of that character's own wardrobe set ids shown above, or null"},
+        "possessions": {"type": "array", "items": _named(prop_ids)},
+        "injuries": {"type": ["string", "null"], "description": f"at most {LEDGER_INJURIES_MAX_WORDS} words, or null"},
+        "relationship_notes": {"type": ["string", "null"],
+                               "description": f"at most {LEDGER_RELATIONSHIP_NOTES_MAX_WORDS} words, or null"},
+    })
+    return _llm_obj({
+        "ledger": {"type": "array", "description": f"exactly one entry per character, {len(char_ids)} in all",
+                  "items": item},
+    })
+
+
+def l1_errors(reply, *, char_ids, place_ids, prop_ids) -> list:
+    """Post-validation for an L1 response: the schema (``character``,
+    ``location`` and each of ``possessions`` already bound to *char_ids* /
+    *place_ids* / *prop_ids* there), exactly one entry per character of
+    *char_ids* (none missing, none repeated), then the entries themselves as
+    a ledger (``ledger_errors``: the word caps, no prop held twice). A
+    ``wardrobe_set`` wrong for its own character is the memory step's own
+    check, not this one (it alone knows which ids are whose)."""
+    errors = validate(reply, l1_schema(char_ids, place_ids, prop_ids))
+    if errors:
+        return errors
+    ledger = reply["ledger"]
+    seen = [item["character"] for item in ledger]
+    missing = [cid for cid in char_ids if cid not in seen]
+    extra = sorted({cid for cid in seen if seen.count(cid) > 1})
+    if missing or extra or len(seen) != len(char_ids):
+        parts = []
+        if missing:
+            parts.append(f"missing {', '.join(missing)}")
+        if extra:
+            parts.append(f"{', '.join(extra)} listed twice")
+        return [f"$.ledger: {'; '.join(parts) or f'{len(seen)} entries, expected {len(char_ids)}'}"]
+    as_ledger = {item["character"]: {key: item[key] for key in
+                                    ("location", "wardrobe_set", "possessions", "injuries", "relationship_notes")}
+                for item in ledger}
+    return ledger_errors(as_ledger, "$.ledger")
+
+
 # ------------------------------------------------- D2 / D3 / R1v2 (phase 7, the look)
 #
 # One artifact per call (DEC-027): a v2 story's character look (D2, after

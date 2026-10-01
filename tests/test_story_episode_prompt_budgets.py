@@ -923,3 +923,95 @@ def test_t1_v2_with_the_continuity_slice_fits_its_budget():
                                                 **_t1_v2_kwargs())
     assert continuity in user
     _fits("T1v2", system, user)
+
+
+# ================================================================ phase 7: L1 (the continuity ledger)
+#
+# Stage 5d (DEC-229, DEC-138's method). The memory step's second call, after
+# S3: the same 12-scene French script digest S3 reads (its own worst case,
+# dominant here -- SCENES/NAMES/PLACES are this file's own, as S3's/E4's
+# fixtures read them), 3 present characters (CAST) each with
+# ``schemas.LOOK_WARDROBE_SETS_RANGE``'s max (3) wardrobe sets at their own
+# 8-word context cap, and the ledger as it stood before the episode at the
+# ledger's own caps (a 10-word injuries, a 20-word relationship_notes --
+# ``schemas.LEDGER_INJURIES_MAX_WORDS`` / ``LEDGER_RELATIONSHIP_NOTES_MAX_WORDS``)
+# for 4 places and 4 props -- the episode's own, bounded the way its places
+# already are (``schemas.episode_script_context_errors``'s ``max_places``,
+# 1-4); nothing bounds its props the same way, so 4 is 5d's own worst-case
+# choice, mirrored here (``steps.memory._l1_known_ids``'s own docstring).
+# Budget = worst case + 15 %, rounded up to ten.
+#
+# The reply: every character at every cap too (the ledger's own caps, 4
+# possessions each -- the most the input above offers), chars/4 x 1.3, +
+# 15 %, rounded up to ten.
+
+MEASURED_L1 = 3407
+MEASURED_L1_REPLY = 592.8
+_L1_POOL = 4
+
+
+def _l1_places_and_props():
+    from clipping.aistory import schemas
+
+    places = [{"place_id": f"place_{'x' * 39}{i}", "name": _filler(*LIVE_PLACES["place_la_piscine_de_la_trahison"]["name"])}
+             for i in range(_L1_POOL)]
+    props = [{"prop_id": f"prop_{'x' * 39}{i}", "name": _filler(*LIVE_PROP[1]["name"])} for i in range(_L1_POOL)]
+    return places, props, schemas
+
+
+def _l1_present(schemas):
+    sets = [{"id": f"set{i}", "context": _fr(schemas.LOOK_WARDROBE_CONTEXT_MAX_WORDS)}
+           for i in range(schemas.LOOK_WARDROBE_SETS_RANGE[1])]
+    return [{"char_id": c["char_id"], "name": c["name"], "wardrobe_sets": sets} for c in CAST]
+
+
+def _l1_previous(schemas, places, props):
+    prop_ids = [p["prop_id"] for p in props]
+    return {c["char_id"]: {
+        "location": places[0]["place_id"], "wardrobe_set": "set0", "possessions": list(prop_ids),
+        "injuries": _fr(schemas.LEDGER_INJURIES_MAX_WORDS),
+        "relationship_notes": _fr(schemas.LEDGER_RELATIONSHIP_NOTES_MAX_WORDS),
+    } for c in CAST}
+
+
+def _l1_digest():
+    return prompts.script_digest({"scenes": SCENES}, {"places": {p["place_id"]: p["name"] for p in PLACES},
+                                                       "cast": NAMES})
+
+
+def _l1():
+    places, props, schemas = _l1_places_and_props()
+    previous = _l1_previous(schemas, places, props)
+    return prompts.build_l1(_pack(), ep=2, script_digest=_l1_digest(), previous=previous,
+                            present=_l1_present(schemas), places=places, props=props)
+
+
+def test_l1_worst_case_measures_what_is_recorded_and_fits_its_budget():
+    worst = _tokens(_l1())
+    assert worst == MEASURED_L1
+    budget = prompts.INPUT_BUDGET["L1"]
+    assert budget == -(-round(worst * 1.15, 1) // 10) * 10
+    assert budget <= 4000  # the spec's ceiling
+    _fits("L1", *_l1()[:2])
+
+
+def test_the_largest_french_l1_reply_fits_its_cap():
+    import json
+
+    from clipping.aistory import schemas
+
+    places, props, schemas = _l1_places_and_props()
+    prop_ids = [p["prop_id"] for p in props]
+    reply = {"ledger": [
+        {"character": c["char_id"], "location": places[0]["place_id"], "wardrobe_set": "set0",
+         "possessions": list(prop_ids), "injuries": _fr(schemas.LEDGER_INJURIES_MAX_WORDS),
+         "relationship_notes": _fr(schemas.LEDGER_RELATIONSHIP_NOTES_MAX_WORDS)}
+        for c in CAST
+    ]}
+    errors = schemas.l1_errors(reply, char_ids=[c["char_id"] for c in CAST],
+                               place_ids=[p["place_id"] for p in places], prop_ids=prop_ids)
+    assert errors == []
+    needed = context.estimate_tokens("", json.dumps(reply, ensure_ascii=False)) * FRENCH_TOKEN_FACTOR
+    assert needed == pytest.approx(MEASURED_L1_REPLY, abs=0.05)
+    cap = prompts.MAX_TOKENS["L1"]
+    assert cap == -(-round(needed * 1.15, 1) // 10) * 10

@@ -132,6 +132,20 @@ C1_CALLS = 10
 # + 15 %, rounded up to ten; its payoff variant (every scene naming a
 # 120-character hook) ~2,059, E1V2_PAYOFF_MAX_TOKENS
 # (tests/test_story_prompts_episode.py).
+#
+# L1 (phase 7 stage 5d, DEC-229, DEC-138's method): the memory step's own
+# French worst case (tests/test_story_episode_prompt_budgets.py) -- the
+# 12-scene script digest S3 already reads (its own worst case, dominant
+# here, same as S3's and E4's), 3 present characters each with
+# LOOK_WARDROBE_SETS_RANGE's max (3) wardrobe sets at their own 8-word
+# context cap, the previous ledger state at the ledger's own caps (a
+# 10-word injuries, a 20-word relationship_notes) for 4 places and 4 props
+# (the episode's own, bounded the way its places already are --
+# ``episode_script_context_errors``'s ``max_places`` 1-4 -- nothing bounds
+# its props the same way; 4 is 5d's own worst-case choice, not a schema
+# cap): 3,407; + 15 %, rounded up to ten. The reply: every character at
+# every cap (the same ledger caps, 4 possessions each, the most the input
+# above offers): 592.8 tokens (chars/4 x 1.3); + 15 %, rounded up to ten.
 MAX_TOKENS = {
     "C1": 700, "B1": 400, "B2": 520, "B3": 300,
     "K1": 750, "P0": 420, "P1": 260, "R1": 100, "S1": 950, "S2": 350, "U1": 120,
@@ -143,6 +157,7 @@ MAX_TOKENS = {
     "D1": 1290,
     "D4": 430, "D5": 3330, "D6": 540,
     "E1v2": 1750, "E2v2": 600, "E3v2": 720,
+    "L1": 690,
 }
 
 # E1's payoff variant (phase 5, plan 11 stage 3, DEC-138's method): from
@@ -192,6 +207,7 @@ TEMPERATURE = {
     "E1v2": WRITING_TEMPERATURE,
     "E2v2": WRITING_TEMPERATURE,
     "E3v2": WRITING_TEMPERATURE,
+    "L1": ANALYTIC_TEMPERATURE,
 }
 SCHEMA_NAMES = {
     "C1": "story_concepts", "B1": "bible_core", "B2": "bible_world", "B3": "bible_values",
@@ -207,6 +223,7 @@ SCHEMA_NAMES = {
     "D1": "character_dossier",
     "D4": "knowledge_world", "D5": "knowledge_timeline", "D6": "knowledge_props",
     "E1v2": "episode_beat_sheet_v2", "E2v2": "episode_scene_dialogue_v2", "E3v2": "episode_framing_scenes_v2",
+    "L1": "continuity_ledger",
 }
 
 # E4's input is the whole script, not a small pack -- it needs a wider
@@ -310,7 +327,7 @@ SCHEMA_NAMES = {
 INPUT_BUDGET = {"E1": 1820, "E2": 1660, "E3": 2530, "E4": 3900, "T1": 1270, "T1r": 1410, "S3": 3740, "F1": 3950, "N1": 3740,
                 "D2": 2370, "D3": 1940, "R1v2": 1170, "T1v2": 2020, "T1rv2": 2060, "D1": 3890,
                 "D4": 2270, "D5": 3930, "D6": 3560,
-                "E1v2": 2870, "E2v2": 2420, "E3v2": 3370}
+                "E1v2": 2870, "E2v2": 2420, "E3v2": 3370, "L1": 3920}
 
 # The ``bible:<field>`` grammar of spec 9.2: which prompt a regenerate note
 # re-runs, and which of that prompt's fields it targets. "tone" also carries
@@ -3587,6 +3604,101 @@ def build_s3(pack, *, ep, script_digest, open_hooks, hooks_out, relationship_sta
         hooks_closed_line=hooks_closed_line, deltas_line=deltas_line, french_line=_french_block(pack),
     )
     return _system(pack), user, schemas.s3_schema(open_hooks, pairs)
+
+
+# ------------------------------------------------------------------------- L1
+#
+# Phase 7 stage 5d (DEC-229, A13/A14): the memory step's second call on a v2
+# story, after S3 -- the continuity ledger after the episode (where every
+# present character now stands), folded forward by ``series_memory.
+# fold_ledger`` for the episode after it. Schema + post-validator in
+# ``schemas.py`` (``l1_schema`` / ``l1_errors``), the same split as S3 above.
+
+def _l1_cast_block(present) -> str:
+    """"<char_id> — <name>: wardrobe sets: <id> (<context>), ..." -- one line
+    per character present, its own wardrobe set ids shown right beside it
+    (``wardrobe_set`` cannot be enumerated at the schema level per character,
+    schemas.l1_schema's section comment)."""
+    lines = []
+    for c in present:
+        sets = ", ".join(f"{s['id']} ({s['context']})" for s in c["wardrobe_sets"]) or "none"
+        lines.append(f"- {c['char_id']} — {c['name']}: wardrobe sets: {sets}")
+    return "\n".join(lines)
+
+
+def _l1_state_block(previous, present) -> str:
+    """Where each of *present* stood before this episode (*previous*,
+    ``context.ledger_before``'s fold), one line per character that has a
+    state recorded; '' when none do (episode 1, or a story with no
+    knowledge base's ledger seed yet)."""
+    lines = []
+    for c in present:
+        state = (previous or {}).get(c["char_id"])
+        if not state:
+            continue
+        bits = []
+        if state.get("location"):
+            bits.append(f"at {state['location']}")
+        if state.get("wardrobe_set"):
+            bits.append(f"wearing {state['wardrobe_set']}")
+        if state.get("possessions"):
+            bits.append("holding " + ", ".join(state["possessions"]))
+        if state.get("injuries"):
+            bits.append(state["injuries"])
+        if bits:
+            lines.append(f"- {c['char_id']}: " + "; ".join(bits))
+    return "\n".join(lines)
+
+
+_L1_ASK_TEMPLATE = (
+    "Write the continuity ledger once episode {ep} ends: exactly one entry per character present, the "
+    "{count} listed above, none others.\n\n"
+    "Give, per character:\n"
+    "- location: where they are once the episode ends, one of the place ids above, or null\n"
+    "- wardrobe_set: one of that character's own wardrobe set ids shown above, or null\n"
+    "- possessions: the prop ids they now hold, from the props above\n"
+    "- injuries: at most {injuries_words} words, or null\n"
+    "- relationship_notes: at most {notes_words} words, or null -- only when a relationship with another "
+    "character present visibly shifted this episode\n\n"
+    "{french_line}"
+    "Never use real people, brands, studio names or copyrighted characters."
+)
+
+
+def build_l1(pack, *, ep, script_digest, previous, present, places, props):
+    """The continuity ledger once episode *ep* ends (phase 7 stage 5d,
+    DEC-229, A13/A14): where every character present stands -- location,
+    wardrobe set, possessions, injuries, a relationship note -- from the
+    approved script (*script_digest*, :func:`script_digest`'s own
+    rendering, the same text S3 reads) and where they stood before
+    (*previous*, ``context.ledger_before``'s fold, ``{char_id: state}``;
+    {} or None when nothing is known yet).
+
+    *present* is the episode's present cast (``{char_id, name,
+    wardrobe_sets: [{id, context}]}``, the union of the script's scenes):
+    the only ids ``character`` may hold, and whose own ``wardrobe_sets``
+    bound their own ``wardrobe_set`` (shown here; schemas.l1_schema's
+    section comment says why the schema itself cannot enforce it per
+    character). *places*/*props* are the story's own (``{place_id, name}``
+    / ``{prop_id, name}``): what ``location``/``possessions`` may hold.
+    """
+    user = f"Episode {ep} script:\n{script_digest}\n\n"
+    user += "Characters present, their own wardrobe sets:\n" + _l1_cast_block(present) + "\n\n"
+    state_block = _l1_state_block(previous, present)
+    if state_block:
+        user += "Where things stood before this episode:\n" + state_block + "\n\n"
+    if places:
+        user += "Places:\n" + _id_name_block(places, "place_id") + "\n\n"
+    if props:
+        user += "Props:\n" + _id_name_block(props, "prop_id") + "\n\n"
+    user += _L1_ASK_TEMPLATE.format(
+        ep=ep, count=len(present), injuries_words=schemas.LEDGER_INJURIES_MAX_WORDS,
+        notes_words=schemas.LEDGER_RELATIONSHIP_NOTES_MAX_WORDS, french_line=_french_block(pack),
+    )
+    char_ids = [c["char_id"] for c in present]
+    place_ids = [p["place_id"] for p in places]
+    prop_ids = [p["prop_id"] for p in props]
+    return _system(pack), user, schemas.l1_schema(char_ids, place_ids, prop_ids)
 
 
 # ------------------------------------------------------------------------- F1

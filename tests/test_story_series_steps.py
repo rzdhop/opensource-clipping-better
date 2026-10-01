@@ -1005,6 +1005,46 @@ def test_each_series_step_is_one_llm_call_and_takes_no_parameters(m, wf, store):
     assert "send its number as ep" in _refused(wf, "invalid", wf.series_context, store, story, None, step="memory")
 
 
+def _l1_reply(call):
+    """Every character the schema offers (``character``'s enum), nothing
+    else said -- robust to which characters the v2 fixture's script ends up
+    naming, the way the other fakes in this module read their own schema."""
+    enum = call["schema"]["properties"]["ledger"]["items"]["properties"]["character"]["enum"]
+    return {"ledger": [{"character": cid, "location": None, "wardrobe_set": None, "possessions": [],
+                        "injuries": None, "relationship_notes": None} for cid in enum]}
+
+
+def test_a_v2_entry_gets_a_ledger_and_a_legacy_one_does_not(m, wf, store):
+    """Phase 7 stage 5d (DEC-229): the memory step's second call, L1, runs
+    only for a v2 story, and only once its script names a character; a
+    legacy story's entry never gets a ``ledger`` key at all (byte-identical
+    behaviour, the build instruction's own requirement)."""
+    legacy_id = _approved_memory_story(m, store)
+    legacy_entry = _season(store, legacy_id)["series_memory"]["entries"]["ep01"]
+    assert "ledger" not in legacy_entry
+
+    story_id = eps._ready_story(store, v2=True)
+    eps._run(eps._new().script, store, story_id, llm=eps._script_llm(E4=[eps.E4_PASSED]))
+    wf.approve_script(store, story_id, 1, now=NOW)
+    script = store.read_episode_doc(story_id, 1, "script.json")
+    present = sorted({cid for scene in script["scenes"] for cid in scene["characters"]})
+    assert present  # the fixture's scenes name at least one character
+
+    llm = eps.FakeLLM(S3=[S3_REPLY], L1=[_l1_reply])
+    _run(m.memory, store, story_id, llm=llm, step="memory", ep=1)
+    assert llm.prompts() == ["S3", "L1"]
+    entry = _season(store, story_id)["series_memory"]["entries"]["ep01"]
+    assert sorted(entry["ledger"]) == present
+    for cid in present:
+        assert entry["ledger"][cid] == {"location": None, "wardrobe_set": None, "possessions": [],
+                                        "injuries": None, "relationship_notes": None}
+
+    # Idempotent: re-running the step replaces the entry, ledger included.
+    _run(m.memory, store, story_id, llm=eps.FakeLLM(S3=[S3_REPLY], L1=[_l1_reply]), step="memory", ep=1)
+    entry = _season(store, story_id)["series_memory"]["entries"]["ep01"]
+    assert sorted(entry["ledger"]) == present
+
+
 def test_the_approve_grammar_takes_the_series_documents(m, wf, store):
     story_id = _written_ep1(store)
     _with_memory(m, store, story_id, approve=False)

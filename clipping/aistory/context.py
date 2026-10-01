@@ -476,18 +476,15 @@ def ledger_before(knowledge, season, ep):
     """``{char_id: state}``: where every character stands when episode *ep*
     starts -- per character, the ledger of the latest series-memory entry
     before *ep* that has one for it (written after each episode, stage 5d),
-    else the knowledge base's ``ledger_seed``. None when there is no
-    knowledge base (a legacy story: no ledger at all)."""
+    else the knowledge base's ``ledger_seed`` (``series_memory.fold_ledger``,
+    stage 5d: this is that fold, with the knowledge base read here and
+    nothing read -- not even the fold -- for a legacy story). None when
+    there is no knowledge base (a legacy story: no ledger at all)."""
     if knowledge is None:
         return None
-    ledger = {cid: dict(state) for cid, state in (knowledge.get("ledger_seed") or {}).items()}
-    entries = ((season or {}).get("series_memory") or {}).get("entries") or {}
-    for key in sorted(entries):
-        if not (isinstance(key, str) and re.fullmatch(r"ep[0-9]{2}", key)) or int(key[2:]) >= ep:
-            continue
-        for cid, state in (entries[key].get("ledger") or {}).items():
-            ledger[cid] = dict(state)
-    return ledger
+    from . import series_memory  # the fold; a lazy import keeps this module's load light
+
+    return series_memory.fold_ledger(season, before_ep=ep, knowledge=knowledge)
 
 
 def _content_words(text) -> set:

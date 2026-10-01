@@ -85,6 +85,16 @@ EP3 = _entry(recap="The night call was Figuette.", hooks_opened=[], hooks_closed
 
 ENTRIES = {"ep01": EP1, "ep02": EP2, "ep03": EP3}
 
+
+# Phase 7 stage 5d (DEC-229, A13/A14): a memory entry's optional ``ledger``,
+# the state L1 writes per character present that episode -- the knowledge
+# base's own ``ledger_seed`` shape (stage 5b).
+def _ledger_state(**changes):
+    state = {"location": None, "wardrobe_set": None, "possessions": [], "injuries": None,
+             "relationship_notes": None}
+    state.update(changes)
+    return state
+
 FOLDED = {
     "recaps": {"ep01": EP1["recap"], "ep02": EP2["recap"], "ep03": EP3["recap"]},
     # ep01 opens PHONE; ep02 closes it and opens VOTE, RING; ep03 closes RING.
@@ -350,6 +360,51 @@ def test_memory_key_and_open_hooks_before(sm):
     assert sm.open_hooks_before(season, 3) == [VOTE, RING]
     assert sm.open_hooks_before(season, 4) == [VOTE]
     assert sm.open_hooks_before(_live_season(), 2) == []
+
+
+# ---------------------------------------------------------------- fold_ledger
+
+def test_ledger_folds_latest_state_per_character(sm):
+    """Stage 5d, DEC-229: the fold starts from the knowledge base's seed,
+    then applies each entry's own ``ledger`` in episode order, one character
+    at a time -- a character an entry does not name keeps its latest state
+    from before. Episode 1 changes only Kiwilo's wardrobe set; episode 2
+    only Mangella's location: before episode 3 the fold has both changes;
+    before episode 2 it has only episode 1's."""
+    seed = {KIWI: _ledger_state(location="place_parloir", wardrobe_set="casual"),
+            MANGO: _ledger_state(location="place_parloir", wardrobe_set="casual")}
+    ep1 = _entry(ledger={KIWI: _ledger_state(location="place_parloir", wardrobe_set="formal")})
+    ep2 = _entry(ledger={MANGO: _ledger_state(location="place_piscine", wardrobe_set="casual")})
+    season = {"series_memory": {"entries": {"ep01": ep1, "ep02": ep2}}}
+    knowledge = {"ledger_seed": seed}
+
+    assert sm.fold_ledger(season, before_ep=1, knowledge=knowledge) == seed
+
+    before2 = sm.fold_ledger(season, before_ep=2, knowledge=knowledge)
+    assert before2[KIWI]["wardrobe_set"] == "formal"
+    assert before2[MANGO] == seed[MANGO]  # episode 2 has not been folded in yet
+
+    before3 = sm.fold_ledger(season, before_ep=3, knowledge=knowledge)
+    assert before3[KIWI]["wardrobe_set"] == "formal"  # kept from episode 1
+    assert before3[MANGO]["location"] == "place_piscine"  # episode 2's own change
+
+
+def test_fold_ledger_is_never_stored_only_recomputed(sm):
+    """Unlike ``recaps``/``open_hooks``/``relationship_state``, the ledger is
+    not one of ``DERIVED_FIELDS``: nothing stores it on the season, so an
+    entry with no ``ledger`` at all (a legacy story, or a v2 one before
+    stage 5d) changes nothing, and a missing knowledge base folds to {}."""
+    assert "ledger" not in sm.DERIVED_FIELDS
+    season = {"series_memory": {"entries": {"ep01": _entry()}}}
+    assert sm.fold_ledger(season, before_ep=2, knowledge=None) == {}
+    assert sm.fold_ledger(None, before_ep=5, knowledge={"ledger_seed": {KIWI: _ledger_state()}}) == \
+        {KIWI: _ledger_state()}
+
+
+@pytest.mark.parametrize("ep", [0, -1, 100, "1", 1.0, True])
+def test_fold_ledger_refuses_an_episode_that_is_not_one_to_ninety_nine(sm, ep):
+    with pytest.raises(ValueError):
+        sm.fold_ledger(None, before_ep=ep, knowledge=None)
 
 
 # --------------------------------------------------------------- entry_errors

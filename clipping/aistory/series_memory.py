@@ -188,6 +188,30 @@ def relationship_state_before(season, ep) -> dict:
     return _before(season, ep)["relationship_state"]
 
 
+def fold_ledger(season, *, before_ep, knowledge) -> dict:
+    """``{char_id: state}``: where every character stands when episode
+    *before_ep* starts (phase 7 stage 5d, DEC-229, A13/A14) -- each
+    character's latest ``ledger`` state from the entries before it (the
+    memory step's L1 call, stage 5d), starting from *knowledge*'s own
+    ``ledger_seed`` (stage 5b; ``{}`` without one). An entry with no
+    ``ledger`` at all (a legacy story, or one the memory step wrote before
+    this stage) changes nothing for it.
+
+    Unlike :func:`fold_memory`'s fields, the ledger is never stored on the
+    season: it is recomputed by this fold wherever it is read
+    (``context.ledger_before``, which reads the knowledge base and returns
+    None for a legacy story instead of calling this at all). ValueError as
+    :func:`memory_key` for *before_ep*."""
+    memory_key(before_ep)
+    ledger = {cid: dict(state) for cid, state in ((knowledge or {}).get("ledger_seed") or {}).items()}
+    for key, entry in _ordered(entry_map(season)):
+        if _episode_of(key) >= before_ep:
+            break
+        for cid, state in (entry.get("ledger") or {}).items():
+            ledger[cid] = dict(state)
+    return ledger
+
+
 def cast_pairs(char_ids) -> list:
     """Every :func:`pair_key` of two of *char_ids*, sorted: the pairs S3 may
     report a delta for (``schemas.s3_schema``'s enum)."""
@@ -283,12 +307,21 @@ def merge_entry(season, ep, entry) -> dict:
 def drop_character(memory, char_id):
     """``(new_memory, removed)``: *memory* (a ``series_memory``) without any
     relationship key naming *char_id* -- in ``relationship_state`` and in
-    every entry's ``relationship_deltas`` -- and, when it has entries, its
-    derived fields re-folded. *removed* is ``{"relationship_state": [keys],
-    "entries": {"epNN": [keys]}}``, empty lists/dict when nothing named it.
-    Pure: *memory* is never modified. ``introduced`` is left to the caller."""
+    every entry's ``relationship_deltas`` -- without *char_id*'s own key in
+    any entry's ``ledger`` (phase 7 stage 5d's follow-up, DEC-229: a
+    dropped character keeps no continuity state either) -- and, when it has
+    entries, its derived fields re-folded (the ledger is never one of
+    them: :func:`fold_ledger` is not stored, nothing here re-runs it).
+
+    *removed* is ``{"relationship_state": [keys], "entries": {"epNN":
+    [keys]}, "ledger": ["epNN", ...]}``, empty lists/dict when nothing named
+    it. The first two keys are exactly what this function returned before
+    stage 5d (``store.py``'s caller, written then, reads only those two: a
+    third key it does not know to look for is simply not in the message it
+    builds from them). Pure: *memory* is never modified. ``introduced`` is
+    left to the caller."""
     new = copy.deepcopy(memory)
-    removed = {"relationship_state": [], "entries": {}}
+    removed = {"relationship_state": [], "entries": {}, "ledger": []}
     state = new.get("relationship_state")
     if isinstance(state, dict):
         removed["relationship_state"] = [key for key in state if _names(key, char_id)]
@@ -296,14 +329,19 @@ def drop_character(memory, char_id):
             del state[key]
     entries = new.get("entries") or {}
     for ep_key, entry in entries.items():
-        deltas = entry.get("relationship_deltas") if isinstance(entry, dict) else None
-        if not isinstance(deltas, dict):
+        if not isinstance(entry, dict):
             continue
-        keys = [key for key in deltas if _names(key, char_id)]
-        for key in keys:
-            del deltas[key]
-        if keys:
-            removed["entries"][ep_key] = keys
+        deltas = entry.get("relationship_deltas")
+        if isinstance(deltas, dict):
+            keys = [key for key in deltas if _names(key, char_id)]
+            for key in keys:
+                del deltas[key]
+            if keys:
+                removed["entries"][ep_key] = keys
+        ledger = entry.get("ledger")
+        if isinstance(ledger, dict) and char_id in ledger:
+            del ledger[char_id]
+            removed["ledger"].append(ep_key)
     # A stored season's entries fold (the store validates it on every read);
     # ones that do not are left for the season's validator to report.
     if entries and _foldable(entries):
