@@ -4074,3 +4074,37 @@ showed only when the first clip was bought.
 (deploy the branch at 0 jobs, allow paid on, caps 2 / 6 / 20, ask the providers, switch or create the story, the
 walk with its estimates). Not proven live from this cloud session: fal's Platform API answer shape (read leniently:
 `prices[].unit_price/unit/currency`; A-125), and the fal/Gemini hosts are blocked by this container's network policy.
+
+## DEC-237 — Crowded v2 keyframes fit 220 words; a descriptive name is kept; no lettering drawn (the W-mid leftovers)
+**Context.** The W-mid walk (2026-10-01) left keyframe prompts of 234 and 243 words against
+`KEYFRAME_V2_MAX_WORDS` (220) and a 'P' badge on a vest despite "no logos". Measuring a crowded shot on
+2026-10-02 (three characters with their sheets, the set, two props, a 41-word tagged action) gave 308 words and a
+new defect: "lifts the golden *the object* on a thin chain" — names were swept from the action after its tags
+became descriptor handles, and a prop's name is usually the noun of its own descriptor.
+**Decision (v2 stories only; legacy byte-identical, RC-Q1).**
+- Past the budget ladder, `shots._LAYERED_LAST_RUNGS`: the reference roles in one compact sentence
+  (`prompting.role_text(compact=True)`), props in `render_prop`'s short form, looks/place/rendering cut further, and
+  last the layout and the prop sentences left out (the set and prop images are sent; props stay named in the
+  roles and the beat). Looks keep 4 words so the presentation leads (stage 3d). A prompt that fits earlier is
+  unchanged.
+- `shots._v2_name_map` leaves out a descriptive name (every word, articles aside, in the entity's own descriptor or
+  look); every proper name is still stripped (spec 2.3).
+- Every v2 clean-frame clause says "no captions, lettering, logos or watermarks" (re-pins on purpose:
+  `test_aistory_prompting` and `test_story_shots`' pinned strings). The same-character clause is 13 words (A7's
+  12-word target was a guideline).
+**Consequence.** Commit `8cf3f2c`. Stored v2 prompts (only the walk story) re-resolve on refresh. Whether Seedream
+honours "lettering" is checked in the acceptance walk.
+
+## DEC-238 — A render is complete only when its audio and frames are whole
+**Context.** The action log's open items: the bgm stem cut short on ffmpeg 7.1.5 (phase 6 stage 10: 10/12 with an
+mp4 input of the audio stage, moved to `amovie`; once in ~76 plain runs, never reproduced), and the final's frame
+count never compared with the timeline (the 30/45-frame bug class).
+**Decision.** After stage A the runner measures the mix and its three stems from their WAV headers
+(`runner.wav_seconds`: RIFF `fmt `/`data`, any sample format — the renderer writes 32-bit float, which the stdlib
+`wave` refuses); one shorter than `timeline.total_s` by more than a frame fails the render at A ("render again"),
+nothing after it runs, nothing is published. `_output_record` counts M's framemd5 against `total_frames`; a mismatch
+fails before publishing (the last good final and its baseline stay). Files that are not a WAV / a framemd5 are not
+measured (the runner tests' stand-in bytes). No plan stage was added, so no plan hash moved.
+**Consequence.** Commit `ff7d3ee`. Proven on real ffmpeg 6.1.1 in the cloud container: the tier-1 golden measures
+4.75 s for every WAV and 142 frames and completes. A retry of stage A was not built (a rewrite of the runner's stage
+loop for an unreproduced fault); the user re-renders, and the partial render reuses every cached shot.
