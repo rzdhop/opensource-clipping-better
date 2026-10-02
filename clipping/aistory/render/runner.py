@@ -76,7 +76,9 @@ from . import partial
 from . import plan as plan_mod
 from . import profiles
 
-REQUIRED_FILTERS = ("zoompan", "xfade", "sidechaincompress", "loudnorm", "ass")
+# movie: every render reads the paper texture with it; amovie: a tier-3 shot's
+# native audio (phase 6 stage 10) -- checked up front, never found missing mid-render.
+REQUIRED_FILTERS = ("zoompan", "xfade", "sidechaincompress", "loudnorm", "ass", "movie", "amovie")
 
 POLL_S = 0.25
 KILL_GRACE_S = 3.0

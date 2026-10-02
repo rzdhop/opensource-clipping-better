@@ -75,6 +75,8 @@ FILTERS_OUTPUT = """Filters:
  ..C sidechaincompress AA->A      Sidechain compressor.
  ... loudnorm          A->A       EBU R128 loudness normalization
  ... ass               V->V       Render ASS subtitles onto input video using the libass library.
+ ..C movie             |->N       Read from a media file.
+ ..C amovie            |->N       Read audio from a media file.
 """
 
 
