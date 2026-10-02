@@ -1447,3 +1447,135 @@ def test_v2_shot_wears_the_ledger_s_wardrobe_set():
     assert "shimmering silver sash and tiny top hat" in prompt({"char_miss_overthink": state})
     assert "index cards" not in prompt({"char_miss_overthink": state})
     assert "index cards" in prompt(None) and "silver sash" not in prompt(None)
+
+
+# ======================================================== v2: keyframes consistent by construction (phase 8 stage B)
+#
+# The sheets are drawn in a character's first wardrobe set (refimages renders
+# them with ``render_look(doc)``); a shot dresses it in the ledger's set. When
+# the two differ, the reference role keeps who the character is and says what
+# it wears here instead of "outfit exactly". The previous keyframe of the same
+# scene is a continuity reference, after the sheets and the plate, before the
+# turnarounds and props (dropped first at the cap).
+
+_GALA = {"id": "gala", "context": "the gala night", "items": "shimmering silver sash and tiny top hat"}
+_GALA_STATE = {"location": None, "wardrobe_set": "gala", "possessions": [], "injuries": None,
+               "relationship_notes": None}
+
+
+def _gala_entities():
+    entities = _v2_entities()
+    entities["characters"]["char_miss_overthink"]["look"]["wardrobe_sets"].append(dict(_GALA))
+    return entities
+
+
+def _v2_plan_two():
+    return {"framing": "medium_two_shot", "action": _V2_ACTION, "lines": [1], "camera_motion": "hold",
+            "modifiers": [], "subjects": ["@char_captain_obvious", "@char_miss_overthink", "#place_clocktown:day"]}
+
+
+def test_v2_role_text_says_the_shot_s_outfit_when_it_differs_from_the_sheet():
+    entities = _gala_entities()
+
+    def prompt(ledger):
+        return shots.resolve_shot(_v2_plan_two(), scene=_v2_scene(), entities=entities, style_lock=CARTOON_FLAT,
+                                  consistency_mode="references", v2=True, ledger=ledger)["image_prompt"]
+
+    gala = prompt({"char_miss_overthink": _GALA_STATE})
+    # The sheet shows the everyday set: the gala shot keeps who she is, says what she wears here.
+    assert ("Image 2 is the short red triangle character's reference (keep face, hair, build and proportions "
+            "exactly; here they wear shimmering silver sash and tiny top hat, not the outfit shown).") in gala
+    # The other character wears its sheet's set: outfit exactly, as before.
+    assert "Image 1 is the tall yellow geometric cylinder's reference (keep identity, proportions and outfit " \
+           "exactly)." in gala
+    assert 130 <= len(gala.split()) <= 220
+    # The sheet's own set (or no ledger): the role text is the one it always was.
+    daily = {"char_miss_overthink": dict(_GALA_STATE, wardrobe_set="daily")}
+    for ledger in (daily, None):
+        text = prompt(ledger)
+        assert "Image 2 is the short red triangle character's reference (keep identity, proportions and outfit " \
+               "exactly)." in text and "not the outfit shown" not in text
+
+
+def test_v2_role_text_outfit_on_an_expression_sheet_and_in_the_compact_form():
+    from clipping.aistory import prompting
+
+    roles = [("expressions", "the kiwi"), ("set", ""), ("turnaround", "the kiwi")]
+    text = prompting.role_text(roles, outfits={"the kiwi": "a black tuxedo"})
+    assert text.startswith("Image 1 is the kiwi's expression sheet (keep identity and face exactly; here they "
+                           "wear a black tuxedo, not the outfit shown).")
+    compact = prompting.role_text(roles, compact=True, outfits={"the kiwi": "a black tuxedo"})
+    assert compact == ("Reference images: 1 the kiwi (expressions), 2 the set, 3 image 1's turnaround; keep each "
+                       "identity, outfit, shape, layout and light exactly, except that the kiwi wears a black "
+                       "tuxedo.")
+    # No outfit given: byte for byte the text it always was.
+    assert prompting.role_text(roles) == prompting.role_text(roles, outfits={})
+    assert prompting.role_text(roles, compact=True) == prompting.role_text(roles, compact=True, outfits=None)
+
+
+def test_v2_continuity_reference_sits_after_the_sheets_and_the_plate():
+    plan = _v2_plan_two()
+    resolved = shots.resolve_shot(plan, scene=_v2_scene(), entities=_v2_entities(), style_lock=CARTOON_FLAT,
+                                  consistency_mode="references", v2=True, continuity=True)
+    assert resolved["reference_images"] == [
+        "characters/char_captain_obvious/refs/portrait.jpg", "characters/char_miss_overthink/refs/portrait.jpg",
+        "places/place_clocktown/refs/variant_day.jpg", shots.CONTINUITY_REFERENCE,
+        "characters/char_captain_obvious/refs/turnaround.jpg", "characters/char_miss_overthink/refs/turnaround.jpg"]
+    prompt = resolved["image_prompt"]
+    assert ("Image 4 is the previous shot of this scene (keep the set, the light, the wardrobe and where everyone "
+            "stands continuous).") in prompt
+    assert "Image 5 is image 1's turnaround." in prompt and "Image 6 is image 2's turnaround." in prompt
+    assert 130 <= len(prompt.split()) <= 220
+    # Without it (the first shot of a scene), the shot is the one it always was.
+    alone = shots.resolve_shot(plan, scene=_v2_scene(), entities=_v2_entities(), style_lock=CARTOON_FLAT,
+                               consistency_mode="references", v2=True)
+    assert shots.CONTINUITY_REFERENCE not in alone["reference_images"] and "previous shot" not in \
+        alone["image_prompt"]
+    # The compact form (a crowded keyframe) names it too.
+    from clipping.aistory import prompting
+
+    compact = prompting.role_text([("identity", "the kiwi"), ("set", ""), ("continuity", "")], compact=True)
+    assert compact == ("Reference images: 1 the kiwi, 2 the set, 3 the previous shot of this scene; keep each "
+                       "identity, outfit, shape, layout and light exactly, and continuous with the previous shot.")
+
+
+def test_v2_continuity_reference_drops_the_turnarounds_and_props_first_at_the_cap():
+    entities = _v2_entities()
+    props = {}
+    for i in range(6):
+        pid = f"prop_thing{i}"
+        props[pid] = _prop(pid, f"a small numbered brass token number {i}", name=f"Token {i}", image=f"t{i}.png")
+    entities["props"] = props
+    plan = dict(_v2_plan_two(), subjects=_v2_plan_two()["subjects"] + [f"%{pid}" for pid in props])
+    refs = shots.resolve_shot(plan, scene=_v2_scene(), entities=entities, style_lock=CARTOON_FLAT,
+                              consistency_mode="references", v2=True, continuity=True)["reference_images"]
+    assert len(refs) == shots.V2_MAX_REFERENCES and refs[3] == shots.CONTINUITY_REFERENCE
+    # Two sheets, the plate, the previous shot, two turnarounds, then the props that still fit.
+    assert refs[6:] == [f"props/prop_thing{i}/refs/t{i}.png" for i in range(4)]
+
+
+def test_v2_storyboard_gives_every_shot_but_a_scene_s_first_the_continuity_reference():
+    template_v2 = templates.load_episode_template("serial_60s_v2")
+    script = _v2_script()
+    plans = _v2_plans()
+    # s02 gets a second shot: only it carries the previous shot of its scene.
+    second = _v2_plan("medium_single", [K], f"{K} sinks onto the stool.", lines=[2],
+                      motion=f"{K} sinks onto the stool", staging=[_stage(K, "centre")], camera_motion="hold")
+    plans["s02"][0]["lines"] = [1]
+    plans["s02"].append(second)
+    doc, _notes = shots.build_storyboard(script, plans, {sid: "t1" for sid in plans}, entities=ENTITIES,
+                                         style_lock=FRUIT_DRAMA, template=template_v2, language=EN,
+                                         consistency_mode="references", now=NOW, v2=True,
+                                         shots_per_scene=template_v2["shots_per_scene"])
+    assert schemas.storyboard_errors(doc, min_shot_s=template_v2["min_shot_s"]) == []
+    carrying = [shot["shot_id"] for shot in doc["shots"] if shots.CONTINUITY_REFERENCE in shot["reference_images"]]
+    s02 = [shot["shot_id"] for shot in doc["shots"] if shot["scene_id"] == "s02"]
+    assert carrying == s02[1:] and len(s02) == 2
+    # Refreshed, the prompts keep it where it is; a legacy refresh never has it.
+    refreshed = shots.refresh_prompts(doc, script, entities=ENTITIES, style_lock=FRUIT_DRAMA,
+                                      consistency_mode="references", v2=True)
+    assert [shot["reference_images"] for shot in refreshed["shots"]] == [shot["reference_images"]
+                                                                         for shot in doc["shots"]]
+    legacy = shots.refresh_prompts(doc, script, entities=ENTITIES, style_lock=FRUIT_DRAMA,
+                                   consistency_mode="references")
+    assert not any(shots.CONTINUITY_REFERENCE in shot["reference_images"] for shot in legacy["shots"])

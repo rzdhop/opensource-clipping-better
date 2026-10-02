@@ -113,6 +113,16 @@ caps and its readiness, exactly like ``animate`` off -- and the run makes
 the keyframes and stops before the video phase, saying so; a clip
 regenerate is refused the same way (:func:`clip_target_refusal`).
 
+**A v2 shot's continuity** (phase 8 stage B): every v2 shot but the first
+of its scene carries a continuity slot among its references
+(``shots.CONTINUITY_REFERENCE``), filled at the call with the previous
+keyframe of its scene (:func:`continuity_source`: the images are made in
+storyboard order, so it is made first) and recorded as the shot's
+``assets.continuity``. The slot counts in the prompt hash as one constant
+token (:func:`request_parts`), so redrawing the previous keyframe never
+makes this shot stale -- no cascade of paid redraws; a shot asked while its
+previous keyframe is missing is asked as it resolves without the slot.
+
 **A free tier that pushes back is paced, not failed.** After the images,
 the lines and shots a free link held back (:func:`rate_limited_by`: HTTP
 429 from a free link, HTTP 402 from ``pollinations`` -- its empty pollen
@@ -660,9 +670,13 @@ def reference_limit(shot, link=None) -> int:
 def reference_paths(ec, shot, *, link=None) -> tuple:
     """``(paths, missing)``: the real paths of the reference images a shot
     sends (its ``reference_images``, the first :func:`reference_limit` on
-    *link*: an edit takes no more), and the ones that are not on disk."""
+    *link*: an edit takes no more), and the ones that are not on disk. The
+    continuity slot (``shots.CONTINUITY_REFERENCE``, phase 8 stage B) is
+    neither: :func:`request_parts` fills it."""
     paths, missing = [], []
     for rel in shot["reference_images"][:reference_limit(shot, link)]:
+        if rel == shots_mod.CONTINUITY_REFERENCE:
+            continue
         parts = rel.split("/")
         if len(parts) != 4 or parts[0] not in _ENTITY_KINDS or parts[2] != "refs":
             missing.append(rel)
@@ -674,27 +688,87 @@ def reference_paths(ec, shot, *, link=None) -> tuple:
     return paths, missing
 
 
-def request_parts(ec, shot, *, note, link=None) -> dict:
+# What stands for the continuity slot in a prompt hash (phase 8 stage B): the
+# same token whatever image fills it, or none -- see :func:`request_parts`.
+_CONTINUITY_HASH_TOKEN = "continuity:previous_shot"
+
+
+def continuity_slot(shot, link=None):
+    """The index of *shot*'s continuity reference among the references it
+    sends on *link* (``shots.CONTINUITY_REFERENCE``, phase 8 stage B), or
+    None when it has none."""
+    refs = shot["reference_images"][:reference_limit(shot, link)]
+    return refs.index(shots_mod.CONTINUITY_REFERENCE) if shots_mod.CONTINUITY_REFERENCE in refs else None
+
+
+def continuity_source(ec, storyboard, shot):
+    """``(previous shot, its image path)`` -- the keyframe *shot*'s
+    continuity reference sends (phase 8 stage B): the shot right before it
+    in *storyboard*, in the same scene, whose image is on disk now (made in
+    an earlier run, or just before it in this one: the images are made in
+    storyboard order) -- or None: *shot* carries no continuity slot, is the
+    first of its scene, or that image is not made."""
+    if shots_mod.CONTINUITY_REFERENCE not in (shot.get("reference_images") or ()):
+        return None
+    ids = [item["shot_id"] for item in storyboard["shots"]]
+    if shot["shot_id"] not in ids:
+        return None
+    index = ids.index(shot["shot_id"])
+    if not shots_mod.continues_scene(storyboard["shots"], index):
+        return None
+    previous = storyboard["shots"][index - 1]
+    path = shot_image_path(ec, previous)
+    return (previous, path) if path is not None else None
+
+
+def request_parts(ec, shot, *, note, link=None, continuity=None, alone=None) -> dict:
     """What *shot*'s image request is made of in the story's mode now:
     ``{kind, prompt, negative, consistency, size, references, missing,
     hash}`` -- ``prompt_only`` sends no reference (IMAGE_CHAIN),
     ``references`` sends the shot's (IMAGE_EDIT_CHAIN); ``hash`` is
     :func:`prompt_hash` over what is sent (a missing reference counts by its
     path, so the hash is never the one of a complete request). *link*: the
-    episode's image link, when it has one (:func:`reference_limit`)."""
+    episode's image link, when it has one (:func:`reference_limit`).
+
+    The continuity slot of a v2 shot (phase 8 stage B,
+    :func:`continuity_slot`) is filled with *continuity* -- the path of the
+    previous keyframe of its scene (:func:`continuity_source`) -- in its
+    place; with none to send, the shot is asked as it resolves without the
+    slot (*alone*: ``(image_prompt, reference_images)``, the caller's
+    re-resolution, so no role names an image that is not sent; None: the
+    slot is left out). Either way ``hash`` counts the slot as one constant
+    token (:data:`_CONTINUITY_HASH_TOKEN`) over the stored prompt: which
+    image filled it -- or that none did -- never moves the hash, so a
+    redrawn previous keyframe never makes this shot stale (no cascade of
+    redraws). The record of what was sent is the shot's
+    ``assets.continuity``."""
     mode = ec.consistency_mode
     prompt = effective_prompt(shot, ec.entities, note)
     negative = shot["negative_prompt"]
     if mode == PROMPT_ONLY:
         kind, paths, missing, ref_shas = gen.IMAGE, [], [], []
-    else:
-        kind = gen.IMAGE_EDIT
-        paths, missing = reference_paths(ec, shot, link=link)
-        ref_shas = [_sha256_file(path) or f"unreadable:{path}" for path in paths] + [f"missing:{rel}"
-                                                                                     for rel in missing]
-    return {"kind": kind, "prompt": prompt, "negative": negative, "consistency": mode, "size": SHOT_SIZE,
-            "references": paths, "missing": missing,
-            "hash": prompt_hash(prompt, negative, mode, SHOT_SIZE, ref_shas)}
+        return {"kind": kind, "prompt": prompt, "negative": negative, "consistency": mode, "size": SHOT_SIZE,
+                "references": paths, "missing": missing,
+                "hash": prompt_hash(prompt, negative, mode, SHOT_SIZE, ref_shas)}
+    kind = gen.IMAGE_EDIT
+    paths, missing = reference_paths(ec, shot, link=link)
+    ref_shas = [_sha256_file(path) or f"unreadable:{path}" for path in paths] + [f"missing:{rel}"
+                                                                                 for rel in missing]
+    slot = continuity_slot(shot, link)
+    if slot is None:
+        return {"kind": kind, "prompt": prompt, "negative": negative, "consistency": mode, "size": SHOT_SIZE,
+                "references": paths, "missing": missing,
+                "hash": prompt_hash(prompt, negative, mode, SHOT_SIZE, ref_shas)}
+    digest = prompt_hash(prompt, negative, mode, SHOT_SIZE, ref_shas + [_CONTINUITY_HASH_TOKEN])
+    sent_prompt, sent = prompt, list(paths)
+    if continuity is not None:
+        sent.insert(min(slot, len(sent)), continuity)
+    elif alone is not None and not shot.get("prompt_override"):
+        alone_shot = dict(shot, image_prompt=alone[0], reference_images=list(alone[1]))
+        sent_prompt = effective_prompt(alone_shot, ec.entities, note)
+        sent, missing = reference_paths(ec, alone_shot, link=link)
+    return {"kind": kind, "prompt": sent_prompt, "negative": negative, "consistency": mode, "size": SHOT_SIZE,
+            "references": sent, "missing": missing, "hash": digest}
 
 
 def _read_assets_doc(ec):
@@ -1473,6 +1547,26 @@ def keyframe_items(ec, storyboard, doc) -> list:
     return items
 
 
+def keyframe_context(ec, storyboard, *, ledger=None):
+    """What J2 is shown beside the keyframes (``judge.KeyframeContext``,
+    phase 8 stage B): each character's identity sheet on disk (its
+    portrait: the full-body sheet on a v2 story), the episode's continuity
+    *ledger* (its wardrobe sets) and the scene of every shot."""
+    sheets = {}
+    for cid, doc in ec.entities["characters"].items():
+        portrait = (doc.get("refs") or {}).get("portrait")
+        if not portrait or not portrait.get("name"):
+            continue
+        try:
+            path = ec.store.media_path(ec.story_id, "characters", cid, portrait["name"])
+        except KeyError:
+            continue
+        if path and os.path.isfile(path) and not os.path.islink(path):
+            sheets[cid] = path
+    return judge.KeyframeContext(sheets=sheets, ledger=ledger,
+                                 scenes={shot["shot_id"]: shot["scene_id"] for shot in storyboard["shots"]})
+
+
 def keyframes_fingerprint(ec, storyboard) -> str:
     """``judge.keyframes_fingerprint`` of the keyframes on disk now, in
     storyboard order."""
@@ -1894,6 +1988,8 @@ class _Assets(voice_lines.LineMeasurement):
         self.local_image_ran = False
         # Phase 7 stage 6b: what the keyframe judge (J2) did in this run (None: not a v2 story).
         self.keyframe_check = None
+        # Phase 8 stage B: the episode's continuity ledger, read once (:meth:`ledger_now`).
+        self.ledger_read = _READ
 
     # ---------------------------------------------------------- plumbing
 
@@ -2061,7 +2157,12 @@ class _Assets(voice_lines.LineMeasurement):
         for this shot alone; ``gencache.JournalError`` passes through."""
         ec, ctx, tools, gates = self.ec, self.ctx, self.tools, self.gates
         shot_id = shot["shot_id"]
-        parts = request_parts(ec, shot, note=note, link=self.link)
+        # Phase 8 stage B: the previous keyframe of the scene in a v2 shot's continuity slot.
+        source, alone = self.continuity_for(shot)
+        parts = request_parts(ec, shot, note=note, link=self.link, continuity=source[1] if source else None,
+                              alone=alone)
+        continuity = ({"shot_id": source[0]["shot_id"], "image_sha256": _sha256_file(source[1])}
+                      if source and _sha256_file(source[1]) else None)
         kind = parts["kind"]
         if parts["missing"]:
             raise ShotFailed(f"its reference image{'s' if len(parts['missing']) > 1 else ''} "
@@ -2133,13 +2234,52 @@ class _Assets(voice_lines.LineMeasurement):
             _atomic_copy(produced, dest)
         self.drop_other_images(shot_id, ext)
         answered_seed = _seed_value(result.seed)
-        return {
+        record = {
             "image": f"{SHOTS_DIR}/{name}", "seed": seed if answered_seed is None else answered_seed,
             "provider": answered.provider, "model": answered.model, "consistency": parts["consistency"],
             "route": route_of(answered), "prompt_hash": parts["hash"], "est_usd": est,
             "cache_key": meta.get("cache_key"), "generated_at": llm_call.utc_now(), "note": note, "pending": None,
             "_cached": bool(meta.get("cached")), "_label": label,
         }
+        if shot.get("prompt_layout"):
+            # A layered (v2) shot's record of its continuity reference (phase 8
+            # stage B): what was sent, never what decides "current".
+            record["continuity"] = continuity
+        return record
+
+    def ledger_now(self):
+        """The episode's continuity ledger (``script.ledger_of``), read once
+        a run: the wardrobe sets a shot is resolved with and J2 reads."""
+        if self.ledger_read is _READ:
+            self.ledger_read = script_step.ledger_of(self.ec)
+        return self.ledger_read
+
+    def continuity_for(self, shot):
+        """``(source, alone)`` of *shot*'s request (phase 8 stage B):
+        *source* the ``(previous shot, image path)`` its continuity slot
+        sends (:func:`continuity_source`); with none to send, *alone* the
+        shot's ``(image_prompt, reference_images)`` resolved without the slot
+        (``shots.resolve_shot``, as the storyboard resolves it), so its roles
+        never name an image that is not sent -- None when it cannot be. Both
+        None for a shot with no slot, or in ``prompt_only`` mode."""
+        ec = self.ec
+        if ec.consistency_mode == PROMPT_ONLY or continuity_slot(shot, self.link) is None:
+            return None, None
+        source = continuity_source(ec, self.storyboard, shot)
+        if source is not None:
+            return source, None
+        scene = next((s for s in self.script["scenes"] if s["scene_id"] == shot["scene_id"]), None)
+        if scene is None:
+            return None, None
+        try:
+            resolved = shots_mod.resolve_shot(shots_mod.plan_of(shot, v2=True), scene=scene, entities=ec.entities,
+                                              style_lock=ec.style_lock, consistency_mode=ec.consistency_mode,
+                                              v2=True, ledger=self.ledger_now())
+        except (KeyError, ValueError):
+            return None, None
+        self.ctx.on_log(f"ℹ️ Shot {shot['shot_id']}: the previous shot of its scene has no keyframe yet, so it is "
+                        "asked without its continuity reference.")
+        return None, (resolved["image_prompt"], resolved["reference_images"])
 
     def drop_other_images(self, shot_id, keep_ext) -> None:
         """The shot's image of another extension, left by an earlier take."""
@@ -2853,7 +2993,8 @@ class _Assets(voice_lines.LineMeasurement):
         verdicts, summary = judge.check_keyframes(
             self.ctx, ec, keyframe_items(ec, self.storyboard, doc), doc.get(judge.KEYFRAME_VERDICTS) or {},
             env=self.ctx.settings_env, ledger=self.gates.ledger, step=STEP, before_call=self.before_vision,
-            on_verdict=write, adapters=self.tools.adapters, transport=self.tools.transport)
+            on_verdict=write, adapters=self.tools.adapters, transport=self.tools.transport,
+            context=keyframe_context(ec, self.storyboard, ledger=self.ledger_now()))
         self.keyframe_check = summary
         write(verdicts)
         return written["doc"]

@@ -345,7 +345,8 @@ SCHEMA_NAMES = {
 # notes or memory (a first-time viewer knows only the episode): 3,195;
 # + 15 %, rounded up to ten (tests/test_story_episode_prompt_budgets.py).
 # J2 (stage 6b) is a vision call with no pack, as U1: no entry; its text at
-# its worst case fits the default pack budget (tests/test_story_keyframe_gate.py).
+# its worst case fits the default pack budget (tests/test_story_keyframe_gate.py)
+# -- version 2 (phase 8 stage B: looks, sheets, the scene) too, at 1,145.
 INPUT_BUDGET = {"E1": 1820, "E2": 1660, "E3": 2530, "E4": 3900, "T1": 1270, "T1r": 1410, "S3": 3740, "F1": 3950, "N1": 3740,
                 "D2": 2370, "D3": 1940, "R1v2": 1170, "T1v2": 2020, "T1rv2": 2060, "D1": 3890,
                 "D4": 2270, "D5": 3930, "D6": 3560,
@@ -2922,10 +2923,28 @@ def validate_j1(reply, *, scene_ids) -> list:
 # The verdict: does it show the beat, what is missing, and what changed
 # from the previous keyframe that should not have. English (the app's
 # language for what it shows the user about an image).
+#
+# Phase 8 stage B (J2_PROMPT_VERSION 2): J2 also sees each on-screen
+# character's identity sheet (images 3..), reads each character as its look
+# and this shot's wardrobe set (``steps/judge.keyframe_brief``), and is told
+# whether image 2 is in the same scene -- across a scene change it compares
+# only who the characters are, never the set or the light.
+
+# J2's own version, bumped whenever its wording changes in a way that could
+# change a verdict (PROMPT_VERSION's convention, for the one cache J2 keeps:
+# ``assets.json``'s ``keyframe_verdicts``, each stamped with the version that
+# judged it; a verdict of another version is asked again --
+# ``steps/judge.verdict_current``). 1: stage 6b (a verdict without a stamp);
+# 2: phase 8 stage B (the sheets, the looks, the scene).
+J2_PROMPT_VERSION = 2
 
 J2_MISSING_MAX = 3
 J2_MISSING_MAX_WORDS = 6
 J2_CONTINUITY_MAX_WORDS = 25
+# The most identity sheets one J2 call sends beside the two keyframes (a
+# frame's staging holds at most 4 characters): six images a call, which
+# every link of VISION_CHAIN takes.
+J2_MAX_SHEETS = 4
 
 _J2_SYSTEM = (
     "You check one keyframe of a vertical-video episode against what its shot must show. You only look and "
@@ -2944,6 +2963,35 @@ _J2_CONTINUITY_ASK = (
     f"or size, the set, the light), at most {J2_CONTINUITY_MAX_WORDS} words; null when nothing did"
 )
 _J2_NO_PREVIOUS_ASK = "- continuity_issue: null (this is the episode's first shot)"
+_J2_SHEET_ISSUE = "how a character in image 1 differs from its sheet (face, hair, build, proportions)"
+_J2_SAME_SCENE_ISSUE = ("what changed from image 2 to image 1 that should not have (a character's face, outfit or "
+                        "size, the set, the light)")
+_J2_SCENE_CHANGE_ISSUE = ("what changed from image 2 to image 1 in who a character is ({what}) -- never the set or "
+                          "the light, which change with the scene")
+_J2_SHEETS_NOTE = ("A character sheet shows who the character is: face, hair, build and proportions; the outfit "
+                   "each wears in this shot is the one written below.")
+
+
+def _j2_continuity_ask(*, has_previous, same_scene, sheets, outfit) -> str:
+    """J2's ``continuity_issue`` line: against each character's sheet when
+    *sheets* are sent; against image 2 when there is one -- all of it in the
+    same scene, only who the characters are across a scene change (*same_scene*
+    False: face, build, hair, and the outfit only when *outfit*: each
+    character wears the same set in both shots). With neither, null (the
+    episode's first shot). No sheet and an unknown scene: stage 6b's line."""
+    if not sheets and same_scene is None:
+        return _J2_CONTINUITY_ASK if has_previous else _J2_NO_PREVIOUS_ASK
+    if not sheets and not has_previous:
+        return _J2_NO_PREVIOUS_ASK
+    parts = [_J2_SHEET_ISSUE] if sheets else []
+    if has_previous:
+        if same_scene is False:
+            parts.append(_J2_SCENE_CHANGE_ISSUE.format(what="face, build, hair, outfit" if outfit
+                                                       else "face, build, hair"))
+        else:
+            parts.append(_J2_SAME_SCENE_ISSUE)
+    return (f"- continuity_issue: {'; or '.join(parts)}, at most {J2_CONTINUITY_MAX_WORDS} words; null when "
+            "nothing is wrong")
 
 
 def j2_schema() -> dict:
@@ -2957,27 +3005,46 @@ def j2_schema() -> dict:
     })
 
 
-def build_j2(*, shot_id, brief, previous_shot_id=None):
+def build_j2(*, shot_id, brief, previous_shot_id=None, same_scene=None, sheets=(), outfit=True):
     """The keyframe judge of shot *shot_id* (section above): *brief* is what
     the shot must show (``steps/judge.keyframe_brief``); *previous_shot_id*
-    the shot whose keyframe is image 2, None for the first shot (then
-    ``continuity_issue`` is asked null). Takes no pack: there is no story
-    text to draw on for one image check, as :func:`build_u1`."""
+    the shot whose keyframe is image 2, None for the first shot (then, with
+    no sheet, ``continuity_issue`` is asked null). Takes no pack: there is
+    no story text to draw on for one image check, as :func:`build_u1`.
+
+    Phase 8 stage B: *same_scene* says whether image 2 is in this shot's
+    scene (None: not said, stage 6b's text); *sheets* are the names of the
+    characters whose identity sheet follows the keyframes, in image order;
+    *outfit*: across a scene change, whether the outfits are compared too
+    (:func:`_j2_continuity_ask`)."""
+    has_previous = previous_shot_id is not None
     user = f"Image 1 is the keyframe of shot {shot_id}."
-    if previous_shot_id is not None:
-        user += f" Image 2 is the keyframe of the shot right before it ({previous_shot_id})."
+    if has_previous:
+        user += f" Image 2 is the keyframe of the shot right before it ({previous_shot_id})"
+        if same_scene is True:
+            user += ", in the same scene"
+        elif same_scene is False:
+            user += ", the last shot of the previous scene (another place or moment)"
+        user += "."
+    first = 3 if has_previous else 2
+    for number, name in enumerate(sheets, start=first):
+        user += f" Image {number} is {name}'s character sheet."
+    if sheets:
+        user += f" {_J2_SHEETS_NOTE}"
     user += f"\n\nWhat shot {shot_id} must show:\n{brief}\n\n"
-    user += _J2_ASK + (_J2_CONTINUITY_ASK if previous_shot_id is not None else _J2_NO_PREVIOUS_ASK)
+    user += _J2_ASK + _j2_continuity_ask(has_previous=has_previous, same_scene=same_scene, sheets=sheets,
+                                         outfit=outfit)
     return _J2_SYSTEM, user, j2_schema()
 
 
-def j2_prompt_text(*, shot_id, brief, previous_shot_id=None) -> str:
+def j2_prompt_text(*, shot_id, brief, previous_shot_id=None, same_scene=None, sheets=(), outfit=True) -> str:
     """J2 as the one text a vision adapter sends beside the images: the
     system text, the ask and the reply's schema joined
     (``uploads.vision_prompt``'s shape)."""
     import json  # stdlib; imported here: this module's top level imports only ``re`` (its guard test)
 
-    system, user, schema = build_j2(shot_id=shot_id, brief=brief, previous_shot_id=previous_shot_id)
+    system, user, schema = build_j2(shot_id=shot_id, brief=brief, previous_shot_id=previous_shot_id,
+                                    same_scene=same_scene, sheets=sheets, outfit=outfit)
     shape = json.dumps(schema, ensure_ascii=False, separators=(",", ":"))
     return f"{system}\n\n{user}\n\nThe reply's JSON schema: {shape}"
 
@@ -2985,7 +3052,8 @@ def j2_prompt_text(*, shot_id, brief, previous_shot_id=None) -> str:
 def validate_j2(reply, *, has_previous=True) -> list:
     """Post-validation for a J2 reply: at most :data:`J2_MISSING_MAX`
     missing items within their word cap, a continuity issue within its cap
-    -- and null for the first shot (*has_previous* false)."""
+    -- and null when there is nothing to compare image 1 with (*has_previous*
+    false: the first shot, with no character sheet sent)."""
     errors = schemas.validate(reply, j2_schema())
     if errors:
         return errors

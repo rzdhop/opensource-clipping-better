@@ -318,7 +318,10 @@ def test_j2_sends_the_keyframe_the_previous_one_and_what_the_shot_must_show(stor
     assert first.extra == second.extra == {"max_tokens": 110, "temperature": prompts.ANALYTIC_TEMPERATURE}
     assert "Image 2" not in first.prompt and "- continuity_issue: null (this is the episode's first shot)" \
         in first.prompt
-    assert f"Image 2 is the keyframe of the shot right before it ({board['shots'][0]['shot_id']})." in second.prompt
+    # Phase 8 stage B (J2 version 2), re-pinned on purpose: J2 is told whether image 2 is in the same scene.
+    assert board["shots"][0]["scene_id"] == board["shots"][1]["scene_id"]
+    assert (f"Image 2 is the keyframe of the shot right before it ({board['shots'][0]['shot_id']}), in the same "
+            "scene.") in second.prompt
     shot = board["shots"][1]
     assert f"What shot {shot['shot_id']} must show:\nWhat happens: " in second.prompt
     assert "@char_" not in second.prompt and "#place_" not in second.prompt
@@ -393,6 +396,48 @@ def test_the_j2_text_at_its_worst_case_fits_the_default_pack_budget():
     assert tokens == MEASURED_J2_TEXT
     assert tokens <= context.PACK_TOKEN_BUDGET
     assert schemas.KEYFRAME_MISSING_MAX == prompts.J2_MISSING_MAX
+
+
+MEASURED_J2_V2_TEXT = 1145
+
+
+def test_the_j2_v2_text_at_its_worst_case_fits_the_default_pack_budget():
+    """Phase 8 stage B (J2 version 2), DEC-138's method again: the same shot
+    at every cap, now with looks -- each of the 5 characters with a look at
+    its word caps (presentation 8, build 15, face 15, hair 12, skin 12 words
+    of 9 characters: 120 shown) and a 20-word wardrobe set (90 shown) --,
+    the 4 identity sheets J2 sends at most (``prompts.J2_MAX_SHEETS``) named
+    by 60-character names, and the longest continuity ask (a scene change
+    after a previous keyframe)."""
+    from clipping.aistory import context, prompts
+    from clipping.aistory.steps import judge
+
+    def name(i):
+        return f"{'N' * 59}{i}"
+
+    def words(n):
+        return " ".join(["eightchr"] * n)
+
+    look = {"presentation": words(8), "build": words(15), "face": words(15), "hair": words(12),
+            "skin_material": words(12), "silhouette": words(12), "height_cm": 100, "palette": ["red"],
+            "wardrobe_sets": [{"id": "daily", "context": words(8), "items": words(20)}], "season_change": None}
+    chars = {f"char_c{i}": {"name": name(i), "descriptor": words(45), "look": look} for i in range(5)}
+    props = {f"prop_p{i}": {"name": name(i), "descriptor": " ".join(["material"] * 45)} for i in range(2)}
+    places = {"place_set": {"name": name(9)}}
+    ec = SimpleNamespace(entities={"characters": chars, "places": places, "props": props})
+    tags = [f"@{cid}" for cid in chars] + ["#place_set:night"] + [f"%{pid}" for pid in props]
+    shot = {"shot_id": "sh10", "framing": "medium_two_shot", "subject_tags": tags,
+            "action": ("@char_c0 hands %prop_p0 to @char_c1 " * 20)[:400],
+            "staging": [{"subject": f"@char_c{i}", "position": "left", "facing": "f" * 120, "expression": "e" * 120}
+                        for i in range(4)]}
+    kc = judge.KeyframeContext(sheets={cid: f"/sheets/{cid}.png" for cid in chars},
+                               scenes={"sh10": "s04", "sh09": "s03"})
+    request, has_previous = judge.j2_request(ec, shot, "/k/sh10.png", "sh09", "/k/sh09.png", kc)
+    assert has_previous and len(request.images) == 2 + prompts.J2_MAX_SHEETS
+    assert "never the set or the light, which change with the scene" in request.prompt
+    tokens = context.estimate_tokens(request.prompt, "")
+    assert tokens == MEASURED_J2_V2_TEXT
+    assert tokens <= context.PACK_TOKEN_BUDGET
 
 
 # ============================================================ the API and the CLI

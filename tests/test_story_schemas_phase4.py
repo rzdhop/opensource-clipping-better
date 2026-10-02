@@ -110,8 +110,11 @@ def test_the_five_spec_keys_stay_required_and_nothing_else_is():
     schema = schemas.STORYBOARD_SCHEMA["properties"]["shots"]["items"]["properties"]["assets"]
     assert schema["required"] == ["image", "video", "seed", "provider", "approved"]
     assert schema["additionalProperties"] is False
-    # Phase 6 stage 7 adds the shot's optional clip record.
-    assert set(schema["properties"]) == set(PHASE4_ASSETS) | {"clip"}
+    # Phase 6 stage 7 adds the shot's optional clip record; phase 8 stage B its
+    # optional continuity record (a v2 shot's previous keyframe, null when none).
+    assert set(schema["properties"]) == set(PHASE4_ASSETS) | {"clip", "continuity"}
+    continuity = schema["properties"]["continuity"]
+    assert continuity["type"] == ["object", "null"] and continuity["required"] == ["shot_id", "image_sha256"]
 
 
 def test_a_phase3_board_still_validates():
@@ -312,6 +315,17 @@ def test_the_keyframe_keys_are_optional_and_checked_when_present():
     for label, (changes, keyword) in breaks.items():
         errors = schemas.episode_assets_errors(_assets(**changes))
         assert any(keyword in error for error in errors), (label, errors)
+
+
+def test_a_verdict_carries_the_j2_version_that_judged_it_and_an_old_one_still_validates():
+    """Phase 8 stage B: a verdict stamped with J2's prompt version
+    (``prompts.J2_PROMPT_VERSION``); stage 6b's, without the stamp, stays
+    a valid document."""
+    assert schemas.episode_assets_errors(_assets(keyframe_verdicts={"sh01": _verdict()})) == []
+    assert schemas.episode_assets_errors(_assets(keyframe_verdicts={"sh01": _verdict(prompt_version=2)})) == []
+    for bad, keyword in ((0, "minimum"), ("2", "type"), (True, "type")):
+        errors = schemas.episode_assets_errors(_assets(keyframe_verdicts={"sh01": _verdict(prompt_version=bad)}))
+        assert any(keyword in error for error in errors), (bad, errors)
 
 
 # ================================================================ render_manifest_v1

@@ -37,6 +37,15 @@ sha256 of both images. A verdict stays current while both images are the
 ones it saw (:func:`verdict_current`): a shot judged already is never asked
 again. A vision chain that cannot run skips J2 with a line in the feed.
 
+Phase 8 stage B (J2 version 2, ``prompts.J2_PROMPT_VERSION``): J2 also
+sees each on-screen character's identity sheet (:class:`KeyframeContext`),
+reads each character as its look and the wardrobe set it wears in this
+shot -- not its descriptor's first words -- and is told whether the
+previous shot is in the same scene: across a scene change it compares only
+who the characters are, never the set or the light. Each verdict carries
+the version that judged it; one of an older version stays readable and is
+asked again.
+
 **The keyframe approval** (``workflow.approve_keyframes``):
 ``assets.json``'s ``keyframes_approved {at, anyway, fingerprint}``, the
 fingerprint of the keyframe images (:func:`keyframes_fingerprint`): once
@@ -63,7 +72,7 @@ from clipping.providers import gating, jsonx
 from clipping.providers import generation as gen
 from clipping.providers.registry import ChainError, describe
 
-from .. import context, prompting, prompts
+from .. import context, prompting, prompts, shots
 from .. import ledger as ledger_mod
 from . import episode_common, llm_call
 
@@ -262,10 +271,53 @@ STORY_VISION_CALL_SECONDS = 120
 # worst case is measured, tests/test_story_keyframe_gate.py): the action once
 # its tags are named, a character's or a prop's look (its descriptor's
 # start), a staging entry's facing and expression; a name keeps its own cap.
+# Phase 8 stage B: a character with a look is said as who it is (its
+# presentation, build, face, hair and skin) and what it wears in this shot
+# (its wardrobe set's items), each with its own cap -- the J2 text of version
+# 2 at its worst case (5 such characters, 4 sheets, a scene change) is 1,145
+# tokens, under the default pack budget's 1,200.
 _BRIEF_ACTION_CHARS = 320
 _BRIEF_LOOK_CHARS = 100
+_BRIEF_IDENTITY_CHARS = 120
+_BRIEF_OUTFIT_CHARS = 90
 _BRIEF_STAGING_CHARS = 60
 _TAG = re.compile(r"[@%#][a-z0-9_]+(?::[a-z][a-z0-9_]*)?")
+_IDENTITY_FIELDS = ("presentation", "build", "face", "hair", "skin_material")
+
+
+class KeyframeContext:
+    """What J2 sees beside a shot's keyframes (phase 8 stage B): *sheets*,
+    ``{char_id: path}`` of the identity sheets on disk; *ledger*, the
+    episode's continuity ledger (``context.ledger_before``: each character's
+    wardrobe set; None without one); *scenes*, ``{shot_id: scene_id}`` of
+    the storyboard."""
+
+    def __init__(self, *, sheets=None, ledger=None, scenes=None):
+        self.sheets = dict(sheets or {})
+        self.ledger = ledger
+        self.scenes = dict(scenes or {})
+
+    def characters(self, ec, shot) -> list:
+        """``[(char_id, doc)]`` of *shot*'s character tags, each once, in
+        subject order (the ones the story still has)."""
+        out = []
+        for tag in shot.get("subject_tags") or ():
+            cid = tag[1:]
+            if tag.startswith("@") and cid in ec.entities["characters"] and cid not in dict(out):
+                out.append((cid, ec.entities["characters"][cid]))
+        return out
+
+    def sheets_of(self, ec, shot) -> list:
+        """``[(name, path)]``: the identity sheet of each character on
+        screen, in subject order, at most ``prompts.J2_MAX_SHEETS``."""
+        found = [(doc.get("name") or cid, self.sheets[cid]) for cid, doc in self.characters(ec, shot)
+                 if self.sheets.get(cid)]
+        return found[:prompts.J2_MAX_SHEETS]
+
+    def same_scene(self, shot_id, previous_shot_id):
+        """Whether the two shots are in one scene; None when it is not known."""
+        here, there = self.scenes.get(shot_id), self.scenes.get(previous_shot_id)
+        return None if here is None or there is None else here == there
 
 
 def _clipped(text, limit) -> str:
@@ -292,13 +344,29 @@ def _tag_name(ec, tag) -> str:
     return (doc or {}).get("name") or body
 
 
-def keyframe_brief(ec, shot) -> str:
+def _character_look(doc, wardrobe) -> str:
+    """A character as J2 reads it: with a look (phase 8 stage B), who it is
+    -- its presentation, build, face, hair and skin -- then what it wears in
+    this shot (*wardrobe*, the set ``shots.shot_wardrobe`` dresses it in),
+    each capped; without one, the first words of its descriptor, as
+    before."""
+    look = doc.get("look")
+    if not look or wardrobe is None:
+        return _clipped(doc.get("descriptor"), _BRIEF_LOOK_CHARS)
+    who = ", ".join(" ".join(str(look[key]).split()).rstrip(".") for key in _IDENTITY_FIELDS if look.get(key))
+    return (f"{_clipped(who, _BRIEF_IDENTITY_CHARS)}; wearing "
+            f"{_clipped(str(wardrobe['items']).rstrip('.'), _BRIEF_OUTFIT_CHARS)}")
+
+
+def keyframe_brief(ec, shot, *, ledger=None) -> str:
     """What *shot* must show, for J2: its action with every tag named, its
-    framing, the place and its time, each character with the first words of
-    its look and the staging T1 v2 gave it, and each prop -- the storyboard
-    shot's own text, no prompt layer (the judge checks the frame against the
-    plan, not the prompt against itself). Each part is capped (the
-    ``_BRIEF_*_CHARS`` above)."""
+    framing, the place and its time, each character with its look and the
+    staging T1 v2 gave it, and each prop -- the storyboard shot's own text,
+    no prompt layer (the judge checks the frame against the plan, not the
+    prompt against itself). Each part is capped (the ``_BRIEF_*_CHARS``
+    above). A character with a look is said as who it is and the wardrobe
+    set it wears in this shot -- *ledger*'s (``context.ledger_before``),
+    else its first (phase 8 stage B, :func:`_character_look`)."""
     tags = list(shot.get("subject_tags") or [])
     action = _TAG.sub(lambda match: _tag_name(ec, match.group(0)), shot["action"])
     lines = [f"What happens: {_clipped(action, _BRIEF_ACTION_CHARS)}"]
@@ -315,7 +383,7 @@ def keyframe_brief(ec, shot) -> str:
         lines.append("Who is in it:")
         for tag in people:
             doc = ec.entities["characters"].get(tag[1:]) or {}
-            line = f"- {_tag_name(ec, tag)}: {_clipped(doc.get('descriptor'), _BRIEF_LOOK_CHARS)}"
+            line = f"- {_tag_name(ec, tag)}: {_character_look(doc, shots.shot_wardrobe(doc, ledger, tag[1:]))}"
             place = staging.get(tag)
             if place:
                 line += (f" -- {place['position']}, facing {_clipped(place['facing'], _BRIEF_STAGING_CHARS)}, "
@@ -331,11 +399,20 @@ def keyframe_brief(ec, shot) -> str:
     return "\n".join(lines)
 
 
+def verdict_version(entry) -> int:
+    """The J2 prompt version that judged *entry*: its ``prompt_version``, 1
+    for a verdict of stage 6b (written before the stamp existed)."""
+    return int(entry.get("prompt_version") or 1)
+
+
 def verdict_current(entry, image_sha, previous_sha) -> bool:
     """Whether a stored verdict judged these two images (the shot's
-    keyframe, the previous shot's -- None for the first shot)."""
+    keyframe, the previous shot's -- None for the first shot) with today's
+    J2 (``prompts.J2_PROMPT_VERSION``, phase 8 stage B: a verdict of an
+    older prompt stays readable, and is asked again)."""
     return (entry is not None and image_sha is not None and entry.get("image_sha256") == image_sha
-            and entry.get("previous_sha256") == previous_sha)
+            and entry.get("previous_sha256") == previous_sha
+            and verdict_version(entry) == prompts.J2_PROMPT_VERSION)
 
 
 def verdict_passed(entry) -> bool:
@@ -404,8 +481,30 @@ def _reply_of(result, *, has_previous):
             "continuity_issue": " ".join(value["continuity_issue"].split()) if value["continuity_issue"] else None}, []
 
 
+def j2_request(ec, shot, path, prev_id, prev_path, context=None):
+    """``(request, has_previous)``: the J2 call of *shot* -- its keyframe
+    *path*, the previous one (*prev_path*, None for the first shot), and
+    with a *context* (:class:`KeyframeContext`, phase 8 stage B) each
+    on-screen character's identity sheet after them, the brief with the
+    episode's wardrobe sets, and whether image 2 is in the same scene.
+    *has_previous* is whether the reply may name a continuity issue."""
+    has_previous = prev_path is not None
+    sheets = context.sheets_of(ec, shot) if context is not None else []
+    same_scene = context.same_scene(shot["shot_id"], prev_id) if context is not None and has_previous else None
+    brief = keyframe_brief(ec, shot, ledger=context.ledger if context is not None else None)
+    images = ((path, prev_path) if has_previous else (path,)) + tuple(sheet for _name, sheet in sheets)
+    # One continuity ledger an episode: a character wears one wardrobe set in
+    # every shot of it, so across a scene change its outfit is compared too.
+    text = prompts.j2_prompt_text(shot_id=shot["shot_id"], brief=brief,
+                                  previous_shot_id=prev_id if has_previous else None, same_scene=same_scene,
+                                  sheets=[name for name, _sheet in sheets], outfit=True)
+    request = gen.GenRequest(kind=gen.VISION, prompt=text, images=images,
+                             extra={"max_tokens": prompts.MAX_TOKENS[J2], "temperature": prompts.TEMPERATURE[J2]})
+    return request, has_previous or bool(sheets)
+
+
 def check_keyframes(ctx, ec, items, verdicts, *, env, ledger, step, before_call, on_verdict=None, adapters=None,
-                    transport=None):
+                    transport=None, context=None):
     """J2 over *items* (``[(shot, path, sha, previous_shot_id, previous_path,
     previous_sha)]``, every shot with a current keyframe, in storyboard
     order; the previous ones None for the first shot), keeping each verdict
@@ -416,7 +515,9 @@ def check_keyframes(ctx, ec, items, verdicts, *, env, ledger, step, before_call,
     shot ids not judged yet); *on_verdict(verdicts)*, when given, is handed
     every current verdict after each new one, so the caller keeps what was
     judged should the run stop; each answered call is booked on *ledger*
-    (step *step*, the episode). Calls nothing for a shot judged already."""
+    (step *step*, the episode). Calls nothing for a shot judged already.
+    *context* (:class:`KeyframeContext`, phase 8 stage B): the sheets, the
+    wardrobe sets and the scenes J2 is shown (:func:`j2_request`)."""
     kept, todo = {}, []
     for item in items:
         shot, _path, sha, _prev_id, _prev_path, prev_sha = item
@@ -447,13 +548,7 @@ def check_keyframes(ctx, ec, items, verdicts, *, env, ledger, step, before_call,
     for index, (shot, path, sha, prev_id, prev_path, prev_sha) in enumerate(todo):
         shot_id = shot["shot_id"]
         before_call([item[0]["shot_id"] for item in todo[index:]])
-        has_previous = prev_path is not None
-        request = gen.GenRequest(
-            kind=gen.VISION, prompt=prompts.j2_prompt_text(shot_id=shot_id, brief=keyframe_brief(ec, shot),
-                                                           previous_shot_id=prev_id if has_previous else None),
-            images=(path, prev_path) if has_previous else (path,),
-            extra={"max_tokens": prompts.MAX_TOKENS[J2], "temperature": prompts.TEMPERATURE[J2]},
-        )
+        request, has_previous = j2_request(ec, shot, path, prev_id, prev_path, context)
         found, errors, answered = None, [], None
         for attempt in (1, 2):
             try:
@@ -484,7 +579,7 @@ def check_keyframes(ctx, ec, items, verdicts, *, env, ledger, step, before_call,
             continue
         verdicts = dict(verdicts or {})
         verdicts[shot_id] = dict(found, image_sha256=sha, previous_sha256=prev_sha, link=describe(answered),
-                                 checked_at=llm_call.utc_now())
+                                 checked_at=llm_call.utc_now(), prompt_version=prompts.J2_PROMPT_VERSION)
         summary["judged"].append(shot_id)
         entry = verdicts[shot_id]
         ctx.on_log(f"👁 Shot {shot_id}: {'passed' if verdict_passed(entry) else verdict_text(entry)}")

@@ -4065,8 +4065,11 @@ def _resolve_again(ec, script, board, to_resolve, errors) -> None:
         if v2:
             plan.update(lines=list(shot["lines"]), camera_motion=motion["type"], modifiers=list(shot["modifiers"]))
         try:
+            # Phase 8 stage B: a v2 shot after another of its scene keeps its continuity reference.
+            continuity = v2 and shots.continues_scene(board["shots"], board["shots"].index(shot))
             resolved = shots.resolve_shot(plan, scene=scene, entities=ec.entities, style_lock=lock,
-                                          consistency_mode=ec.consistency_mode, v2=v2, ledger=ledger)
+                                          consistency_mode=ec.consistency_mode, v2=v2, ledger=ledger,
+                                          continuity=continuity)
         except (KeyError, ValueError) as exc:
             raise WorkflowError(CONFLICT, (f"Shot {shot_id} names something the story no longer has ({exc}): plan "
                                            f"scene {scene['scene_id']} again (the storyboard step).")) from None

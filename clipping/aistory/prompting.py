@@ -490,8 +490,9 @@ MODIFIER_PHRASES = {
 }
 
 # The roles a reference image of a v2 shot plays (shots._reference_images_v2).
-ROLE_IDENTITY, ROLE_EXPRESSIONS, ROLE_SET, ROLE_TURNAROUND, ROLE_PROP = (
-    "identity", "expressions", "set", "turnaround", "prop")
+# ``continuity`` (phase 8 stage B): the previous keyframe of the same scene.
+ROLE_IDENTITY, ROLE_EXPRESSIONS, ROLE_SET, ROLE_TURNAROUND, ROLE_PROP, ROLE_CONTINUITY = (
+    "identity", "expressions", "set", "turnaround", "prop", "continuity")
 
 
 def as_sentence(text: str) -> str:
@@ -511,31 +512,46 @@ def fit_words(text: str, limit: int) -> str:
     return _fit(text, limit)
 
 
-def role_text(roles, *, compact=False) -> str:
+def role_text(roles, *, compact=False, outfits=None) -> str:
     """What each reference image is, in the order the images are sent:
     *roles* is ``[(role, handle), ...]`` -- ``identity`` (a character's
     full-body sheet), ``expressions`` (its expression sheet, a close-up's
-    identity image), ``set`` (the place's plate), ``turnaround`` (said
-    against the character's own identity image) or ``prop``. Empty when
-    nothing is sent.
+    identity image), ``set`` (the place's plate), ``continuity`` (the
+    previous keyframe of the same scene, phase 8 stage B), ``turnaround``
+    (said against the character's own identity image) or ``prop``. Empty
+    when nothing is sent.
+
+    *outfits* (phase 8 stage B: ``{handle: wardrobe items}``) names the
+    characters this shot dresses in another wardrobe set than the one their
+    sheets were drawn in (``shots.sheet_wardrobe``): their sheet keeps who
+    they are -- face, hair, build, proportions -- and the text says what they
+    wear here instead of "outfit exactly", so the prompt never asks for the
+    sheet's outfit and another one at once. None or empty: the text it
+    always was.
 
     *compact* (a crowded keyframe past its budget ladder): one sentence,
     each image numbered with a few words and the keep-exactly rule said once
     for all of them -- about half the words of the sentence per image."""
+    outfits = outfits or {}
     if compact:
-        return _compact_role_text(roles)
+        return _compact_role_text(roles, outfits)
     sentences, identity_of = [], {}
     for number, (role, handle) in enumerate(roles, start=1):
+        worn = outfits.get(handle) if role in (ROLE_IDENTITY, ROLE_EXPRESSIONS) else None
+        here = f"; here they wear {worn}, not the outfit shown" if worn else ""
         if role == ROLE_IDENTITY:
             identity_of.setdefault(handle, number)
-            sentences.append(f"Image {number} is {handle}'s reference (keep identity, proportions and outfit "
-                             "exactly).")
+            keep = "face, hair, build and proportions" if worn else "identity, proportions and outfit"
+            sentences.append(f"Image {number} is {handle}'s reference (keep {keep} exactly{here}).")
         elif role == ROLE_EXPRESSIONS:
             identity_of.setdefault(handle, number)
-            sentences.append(f"Image {number} is {handle}'s expression sheet (keep identity, face and outfit "
-                             "exactly).")
+            keep = "identity and face" if worn else "identity, face and outfit"
+            sentences.append(f"Image {number} is {handle}'s expression sheet (keep {keep} exactly{here}).")
         elif role == ROLE_SET:
             sentences.append(f"Image {number} is the set (keep layout and light).")
+        elif role == ROLE_CONTINUITY:
+            sentences.append(f"Image {number} is the previous shot of this scene (keep the set, the light, the "
+                             "wardrobe and where everyone stands continuous).")
         elif role == ROLE_TURNAROUND:
             own = identity_of.get(handle)
             sentences.append(f"Image {number} is image {own}'s turnaround." if own
@@ -547,15 +563,20 @@ def role_text(roles, *, compact=False) -> str:
     return " ".join(sentences)
 
 
-def _compact_role_text(roles) -> str:
+def _compact_role_text(roles, outfits) -> str:
     """:func:`role_text`'s *compact* form."""
-    parts, identity_of = [], {}
+    parts, identity_of, continuity, changed = [], {}, False, []
     for number, (role, handle) in enumerate(roles, start=1):
         if role in (ROLE_IDENTITY, ROLE_EXPRESSIONS):
             identity_of.setdefault(handle, number)
             parts.append(f"{number} {handle}{'' if role == ROLE_IDENTITY else ' (expressions)'}")
+            if outfits.get(handle) and handle not in changed:
+                changed.append(handle)
         elif role == ROLE_SET:
             parts.append(f"{number} the set")
+        elif role == ROLE_CONTINUITY:
+            continuity = True
+            parts.append(f"{number} the previous shot of this scene")
         elif role == ROLE_TURNAROUND:
             own = identity_of.get(handle)
             parts.append(f"{number} image {own}'s turnaround" if own else f"{number} {handle}'s turnaround")
@@ -565,8 +586,13 @@ def _compact_role_text(roles) -> str:
             raise ValueError(f"unknown reference role: {role!r}")
     if not parts:
         return ""
+    tail = ""
+    if continuity:
+        tail += ", and continuous with the previous shot"
+    if changed:
+        tail += ", except that " + " and ".join(f"{handle} wears {outfits[handle]}" for handle in changed)
     return (f"Reference images: {', '.join(parts)}; keep each identity, outfit, shape, layout and light "
-            "exactly.")
+            f"exactly{tail}.")
 
 
 def layered_lens_phrase(style_lock: dict, framing: str) -> str:

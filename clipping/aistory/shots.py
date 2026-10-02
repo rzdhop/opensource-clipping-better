@@ -345,6 +345,26 @@ def _wardrobe(look, wardrobe_set):
     return sets[0]
 
 
+def sheet_wardrobe(doc):
+    """The wardrobe set (``{id, context, items}``) a character's sheets are
+    drawn in -- its look's first: ``refimages`` renders the portrait, the
+    turnaround and the expressions with ``render_look(doc)``, whose default
+    is that set -- or None without a look (phase 8 stage B)."""
+    look = doc.get("look")
+    return _wardrobe(look, None) if look and look.get("wardrobe_sets") else None
+
+
+def shot_wardrobe(doc, ledger, char_id):
+    """The wardrobe set a character wears in a shot of an episode whose
+    continuity *ledger* (``context.ledger_before``, None without a knowledge
+    base) is given: the ledger's set when the look has it, else the first --
+    :func:`_staging`'s own choice -- or None without a look."""
+    look = doc.get("look")
+    if not look or not look.get("wardrobe_sets"):
+        return None
+    return _wardrobe(look, ((ledger or {}).get(char_id) or {}).get("wardrobe_set"))
+
+
 def _lower_first(text) -> str:
     """*text* with its first letter lower case when the rest of that word
     and of the text is lower case already ("Comically oversized glass" ->
@@ -594,6 +614,16 @@ def _v2_name_map(entities) -> dict:
 # ``steps/assets.REFERENCE_LIMITS`` knows, so what the role text names is
 # always what is sent.
 V2_MAX_REFERENCES = 10
+# Phase 8 stage B: the slot of a v2 shot's ``reference_images`` that stands
+# for the previous keyframe of its scene -- not a file of the story's media,
+# so the stored list never names an episode image that a redraw replaces;
+# ``steps/assets.request_parts`` sends that shot's image in its place, and
+# keeps it out of the prompt hash (a redrawn previous keyframe never makes
+# this shot stale).
+CONTINUITY_REFERENCE = "continuity/previous_shot"
+# Words of a wardrobe set a reference role says (phase 8 stage B): the
+# staging says the whole set again.
+_OUTFIT_ROLE_WORDS = 12
 _EXPRESSION_FRAMINGS = ("close_up", "extreme_close_up")
 # Where the characters of a frame stand, in subject order.
 _POSITIONS = {1: ("In the centre",), 2: ("On the left", "On the right"),
@@ -654,13 +684,16 @@ def _frame_props(subject_tags, props) -> list:
 
 
 def _reference_images_v2(subject_tags, *, scene, framing, characters, places, props, char_handles,
-                         prop_handles) -> list:
+                         prop_handles, continuity=False) -> list:
     """A v2 shot's references as ``[(path, role, handle), ...]``, in the
     order they are sent (A9): one identity sheet per character in subject
     order (its full-body portrait; the expression sheet instead on a
     close-up or extreme close-up when it has one), the place's own variant
-    (falling back to the day plate), each character's turnaround, then the
-    props; an entity with no such image is skipped; at most
+    (falling back to the day plate), with *continuity* (phase 8 stage B: the
+    shot is not its scene's first) the previous keyframe of the scene
+    (:data:`CONTINUITY_REFERENCE`), each character's turnaround, then the
+    props -- so the turnarounds and props are the ones the cap drops first;
+    an entity with no such image is skipped; at most
     :data:`V2_MAX_REFERENCES`."""
     refs = []
     frame = _frame_characters(subject_tags, characters)
@@ -679,6 +712,9 @@ def _reference_images_v2(subject_tags, *, scene, framing, characters, places, pr
         ref = variants.get(scene["time_variant"]) or variants.get(schemas.MASTER_PLATE_VARIANT)
         if ref and ref.get("name"):
             refs.append((f"places/{scene['place_id']}/refs/{ref['name']}", prompting.ROLE_SET, ""))
+
+    if continuity:
+        refs.append((CONTINUITY_REFERENCE, prompting.ROLE_CONTINUITY, ""))
 
     for cid, doc in frame:
         turnaround = (doc.get("refs") or {}).get("turnaround")
@@ -860,12 +896,28 @@ def _fit_place(text, max_words) -> str:
     return " ".join(kept[sentence] for sentence in sentences if sentence in kept)
 
 
+def _outfits(frame, char_handles, ledger) -> dict:
+    """``{handle: wardrobe items}`` of each character of *frame* the shot
+    dresses in another set than its sheets show (:func:`sheet_wardrobe`,
+    :func:`shot_wardrobe`; phase 8 stage B): what the reference roles say it
+    wears here instead of "outfit exactly"."""
+    outfits = {}
+    for cid, doc in frame:
+        sheet, worn = sheet_wardrobe(doc), shot_wardrobe(doc, ledger, cid)
+        if sheet is not None and worn is not None and worn["id"] != sheet["id"]:
+            items = _strip_period(worn["items"])
+            outfits[char_handles[cid]] = (prompting.fit_words(items, _OUTFIT_ROLE_WORDS)
+                                          or " ".join(items.split()[:_OUTFIT_ROLE_WORDS]))
+    return outfits
+
+
 def _layered(plan, *, scene, entities, style_lock, consistency_mode, video_action, char_handles,
-             prop_handles, name_map, ledger=None) -> dict:
+             prop_handles, name_map, ledger=None, continuity=False) -> dict:
     """The v2 half of :func:`resolve_shot`: ``image_prompt`` (layered,
     within ``KEYFRAME_V2_MAX_WORDS`` -- the looks, the place and the
     rendering shortened in turn until it fits), ``video_prompt``,
-    ``reference_images`` and ``prompt_layout``."""
+    ``reference_images`` and ``prompt_layout``. *continuity*: the previous
+    keyframe of the scene is one of the references (phase 8 stage B)."""
     characters = entities.get("characters", {})
     places = entities.get("places", {})
     props = entities.get("props", {})
@@ -876,13 +928,17 @@ def _layered(plan, *, scene, entities, style_lock, consistency_mode, video_actio
     held = [prop_handles[pid] for pid, _doc in frame_props]
 
     refs = _reference_images_v2(plan["subjects"], scene=scene, framing=framing, characters=characters,
-                                places=places, props=props, char_handles=char_handles, prop_handles=prop_handles)
+                                places=places, props=props, char_handles=char_handles, prop_handles=prop_handles,
+                                continuity=continuity)
     # The roles are written from the very list stored and sent (capped to the
     # smallest per-link limit), so image N of the text is image N of the request.
     sent = [(role, handle) for _path, role, handle in refs]
     references = consistency_mode == _REFERENCES_MODE
-    roles = prompting.role_text(sent) if references else ""
-    compact_roles = prompting.role_text(sent, compact=True) if references else ""
+    # Phase 8 stage B: a character dressed in another set than its sheet's is
+    # never asked to keep the sheet's outfit too.
+    outfits = _outfits(frame, char_handles, ledger)
+    roles = prompting.role_text(sent, outfits=outfits) if references else ""
+    compact_roles = prompting.role_text(sent, compact=True, outfits=outfits) if references else ""
 
     clause = _delivery_clause(_shot_lines(plan, scene), char_handles)
     beat = " ".join(part for part in (prompting.as_sentence(video_action), prompting.as_sentence(clause)) if part)
@@ -939,7 +995,8 @@ def _layered(plan, *, scene, entities, style_lock, consistency_mode, video_actio
     }
 
 
-def resolve_shot(shot, *, scene, entities, style_lock, consistency_mode, v2=False, ledger=None) -> dict:
+def resolve_shot(shot, *, scene, entities, style_lock, consistency_mode, v2=False, ledger=None,
+                 continuity=False) -> dict:
     """*shot* (a plan: ``framing``/``action``/``subjects``) resolved into
     ``{"image_prompt", "video_action", "negative_prompt", "reference_images",
     "consistency"}``. Every entity name is stripped from the resolved action
@@ -963,7 +1020,11 @@ def resolve_shot(shot, *, scene, entities, style_lock, consistency_mode, v2=Fals
 
     *ledger* (v2 only, phase 7 stage 5c: ``context.ledger_before`` of the
     episode, None without a knowledge base): each character is drawn in its
-    current wardrobe set and each prop held by whoever holds it now."""
+    current wardrobe set and each prop held by whoever holds it now.
+
+    *continuity* (v2 only, phase 8 stage B: the shot is not the first of its
+    scene, :func:`continues_scene`): the previous keyframe of the scene is
+    one of its references (:data:`CONTINUITY_REFERENCE`), with its role."""
     characters = entities.get("characters", {})
     places = entities.get("places", {})
     props = entities.get("props", {})
@@ -987,7 +1048,7 @@ def resolve_shot(shot, *, scene, entities, style_lock, consistency_mode, v2=Fals
         layered = _layered(shot, scene=scene, entities=entities, style_lock=style_lock,
                            consistency_mode=consistency_mode, video_action=video_action,
                            char_handles=char_handles_map, prop_handles=prop_handles_map,
-                           name_map=name_map, ledger=ledger)
+                           name_map=name_map, ledger=ledger, continuity=continuity)
         return {
             "image_prompt": layered["image_prompt"],
             "video_action": video_action,
@@ -1540,6 +1601,35 @@ def _keep_t1_v2(target, source) -> None:
         target["staging"] = [dict(entry) for entry in source["staging"]]
 
 
+def continues_scene(shots_in_order, index) -> bool:
+    """Whether shot *index* of *shots_in_order* (storyboard shots, or plans
+    with their ``scene_id``) follows a shot of its own scene: the shots a v2
+    story resolves with the previous keyframe as a reference (phase 8 stage
+    B, :data:`CONTINUITY_REFERENCE`). The first shot of a scene never does."""
+    return index > 0 and shots_in_order[index - 1]["scene_id"] == shots_in_order[index]["scene_id"]
+
+
+def plan_of(shot, *, v2=False) -> dict:
+    """The plan a storyboard *shot* resolves from (:func:`resolve_shot`):
+    its framing, action and subjects; on *v2* its lines, camera motion,
+    modifiers and T1 v2's ``clip_motion`` and ``staging`` too
+    (:func:`refresh_prompts`' own)."""
+    plan = {"framing": shot["framing"], "action": shot["action"], "subjects": shot["subject_tags"]}
+    if v2:
+        plan.update(lines=list(shot["lines"]), camera_motion=shot["camera_motion"],
+                    modifiers=list(shot["modifiers"]))
+        _keep_t1_v2(plan, shot)
+    return plan
+
+
+def name_map(entities, *, v2=False) -> dict:
+    """``{name: neutral word}`` of every entity name an image prompt never
+    says: :func:`_v2_name_map` on a v2 story (a descriptive name is kept, so
+    a handle is never garbled), else :func:`_story_name_map` -- what
+    :func:`resolve_shot` strips from the action."""
+    return _v2_name_map(entities) if v2 else _story_name_map(entities)
+
+
 def build_storyboard(script, plans, sources, *, entities, style_lock, template, language, consistency_mode,
                      now, previous=None, v2=False, shots_per_scene=None, ledger=None) -> tuple:
     """*plans* (``{scene_id: [plan, ...]}``) and *sources* (``{scene_id:
@@ -1560,6 +1650,8 @@ def build_storyboard(script, plans, sources, *, entities, style_lock, template, 
     phase 7 stage 4); None reads the style lock's own, as before. A plan's
     ``clip_motion`` and ``staging`` (T1 v2's) are kept on its shot.
     *ledger*: :func:`resolve_shot`'s (v2: wardrobe sets and holders).
+    On *v2* every shot but the first of its scene carries the previous
+    keyframe of the scene as a reference (phase 8 stage B).
     """
     scenes_by_id = {scene["scene_id"]: scene for scene in script["scenes"]}
     scenes_in_order = [scene for scene in script["scenes"] if scene["scene_id"] in plans]
@@ -1571,13 +1663,14 @@ def build_storyboard(script, plans, sources, *, entities, style_lock, template, 
     resolved_from = {}
     order = 0
     for scene, scene_plans in plans_by_scene:
-        for plan in scene_plans:
+        for index, plan in enumerate(scene_plans):
             order += 1
             shot_id = f"sh{order:02d}"
             line_ids = [scene["lines"][n - 1]["line_id"] for n in plan["lines"]]
             motion = motion_for(plan["framing"], plan["camera_motion"], scene["function"], style_lock)
             resolved = resolve_shot(plan, scene=scene, entities=entities, style_lock=style_lock,
-                                    consistency_mode=consistency_mode, v2=v2, ledger=ledger)
+                                    consistency_mode=consistency_mode, v2=v2, ledger=ledger,
+                                    continuity=v2 and index > 0)
             _collect_resolved_from(resolved_from, plan["subjects"], scene, entities)
             shot = {
                 "shot_id": shot_id, "scene_id": scene["scene_id"], "order": order,
@@ -1636,20 +1729,18 @@ def refresh_prompts(storyboard, script, *, entities, style_lock, consistency_mod
     -- plans (framing, camera motion, modifiers, action, subject_tags,
     lines), durations, motion and transitions are left exactly as they were
     (used when an entity changes after the storyboard was built). *v2*:
-    resolved layered, ``video_prompt`` and ``prompt_layout`` re-written too;
-    *ledger* as :func:`resolve_shot`'s."""
+    resolved layered, ``video_prompt`` and ``prompt_layout`` re-written too,
+    every shot but a scene's first with its continuity reference (phase 8
+    stage B); *ledger* as :func:`resolve_shot`'s."""
     scenes_by_id = {scene["scene_id"]: scene for scene in script["scenes"]}
     resolved_from: dict = {}
     new_shots = []
-    for shot in storyboard["shots"]:
+    for index, shot in enumerate(storyboard["shots"]):
         scene = scenes_by_id[shot["scene_id"]]
-        plan = {"framing": shot["framing"], "action": shot["action"], "subjects": shot["subject_tags"]}
-        if v2:
-            plan.update(lines=list(shot["lines"]), camera_motion=shot["camera_motion"],
-                        modifiers=list(shot["modifiers"]))
-            _keep_t1_v2(plan, shot)
+        plan = plan_of(shot, v2=v2)
         resolved = resolve_shot(plan, scene=scene, entities=entities, style_lock=style_lock,
-                                consistency_mode=consistency_mode, v2=v2, ledger=ledger)
+                                consistency_mode=consistency_mode, v2=v2, ledger=ledger,
+                                continuity=v2 and continues_scene(storyboard["shots"], index))
         _collect_resolved_from(resolved_from, shot["subject_tags"], scene, entities)
         new_shot = dict(shot)
         new_shot["image_prompt"] = resolved["image_prompt"]

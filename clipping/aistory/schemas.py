@@ -2830,6 +2830,14 @@ _STORYBOARD_ASSETS_SCHEMA = _document({
     "pending": _STORYBOARD_PENDING_SCHEMA,
     # Phase 6 stage 7: the shot's clip (_STORYBOARD_CLIP_SCHEMA).
     "clip": _STORYBOARD_CLIP_SCHEMA,
+    # Phase 8 stage B: the previous keyframe of the scene its image was asked
+    # with (a v2 shot's continuity reference): that shot and the sha256 of the
+    # image sent; null when none was. A record only -- never in prompt_hash, so
+    # a redrawn previous keyframe never makes this image stale.
+    "continuity": _or_null(_document({
+        "shot_id": {"type": "string", "pattern": SHOT_ID_PATTERN},
+        "image_sha256": _SHA256,
+    })),
 })
 
 # The one prompt layout a storyboard shot names (phase 7 stage 3b).
@@ -3215,6 +3223,11 @@ _EPISODE_ASSETS_KEYFRAME_VERDICT_SCHEMA = _document({
     "continuity_issue": {"type": ["string", "null"], "minLength": 1, "maxLength": 300},
     "link": _text(160),
     "checked_at": _NON_EMPTY_STRING,
+}, optional={
+    # Phase 8 stage B: the J2 prompt version that judged it
+    # (prompts.J2_PROMPT_VERSION); absent on a stage-6b verdict (version 1),
+    # which stays readable and is asked again (judge.verdict_current).
+    "prompt_version": {"type": "integer", "minimum": 1},
 })
 
 # The keyframe approval (phase 7 stage 6b, DEC-230): when, whether it went
