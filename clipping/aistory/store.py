@@ -36,6 +36,7 @@ Layout, under the same ``outputs/`` directory the job store uses::
             assets/shots/shot_<NN>.png|.jpg|.jpeg|.webp  # each shot's image
             assets/clips/shot_<NN>.mp4  # a shot's clip (tier >= 2, phase 6)
             render/                 # the renderer's working folder: in/, fonts/, cache/, stems/, logs/
+        episodes/_discarded/ep<NN>-<UTC stamp>/  # an archived episode (discard_episode), never listed
         cache/gen/                  # the generation cache and journal (providers/gencache.py)
         cost_ledger.json            # what each call cost (ledger.CostLedger)
         activity.log                # one line per thing a step printed
@@ -69,7 +70,11 @@ Rules this module keeps:
 - Episode documents never read or write story.json: writing, reading or
   listing an episode changes neither the story's approvals, its status nor
   its index entry. Deleting the story removes its episodes (their render/
-  folders included) and its cache/ with its folder.
+  folders included) and its cache/ with its folder. Discarding an episode
+  (``discard_episode``) moves its folder into ``episodes/_discarded/``,
+  never deletes it, and clears what outside it speaks for it: its memory
+  entry and feedback in ``season.json``, the proposals written from it, its
+  ledger rows' share of the per-episode cap.
 - Deleting an entity leaves no id pointing at it: a deleted character leaves
   the other characters' ``relationships``, its props' ``owner_char_id``, the
   season arc (its series memory's relationship keys too) and the places
@@ -105,6 +110,7 @@ from datetime import datetime, timezone
 from typing import Callable, NamedTuple
 
 from . import defaults, media_policy, schemas, series_memory, templates
+from .ledger import CostLedger
 
 STORY_ID_PATTERN = re.compile(r"^[0-9a-f]{12}$")
 
@@ -184,6 +190,14 @@ EPISODE_MIN = 1
 EPISODE_MAX = 99
 # [0-9], not \d: int() also reads other scripts' digits ("ep٠٥" would be 5).
 EPISODE_DIR_NAME = re.compile(r"^ep[0-9]{2}$")
+# Where a discarded episode goes (``discard_episode``): episodes/_discarded/
+# ep<NN>-<UTC stamp>/, a name no episode scan reads as an episode.
+DISCARDED_DIRNAME = "_discarded"
+# The proposals written from a discarded episode, kept in its archive.
+_ARCHIVED_PROPOSALS = "proposals_for_ep{:02d}.json"
+# The story's cost ledger (``ledger.CostLedger``), whose rows of a discarded
+# episode are marked.
+COST_LEDGER_FILENAME = "cost_ledger.json"
 
 # The documents of an episode that read_episode_doc/write_episode_doc may
 # name, and the checks the store runs on every read and every write: the
@@ -486,11 +500,28 @@ def _episode_folder(ep) -> str:
 
 
 def _episode_number(name):
-    """The episode a folder named *name* holds, or None for any other name."""
+    """The episode a folder named *name* holds, or None for any other name
+    (``_discarded`` among them)."""
     if not isinstance(name, str) or EPISODE_DIR_NAME.fullmatch(name) is None:
         return None
     ep = int(name[2:])
     return ep if EPISODE_MIN <= ep <= EPISODE_MAX else None
+
+
+def _archive_stamp(now) -> str:
+    """*now* (an ISO timestamp) as a folder-name stamp in UTC,
+    ``20261002T110000Z``; the clock's own time when it cannot be read."""
+    try:
+        moment = datetime.fromisoformat(str(now))
+    except ValueError:
+        moment = datetime.now(timezone.utc)
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def _is_regular(path) -> bool:
+    return not os.path.islink(path) and os.path.isfile(path)
 
 
 def _episode_doc_errors(name, doc, ep) -> list:
@@ -1566,6 +1597,119 @@ class StoryStore:
                         numbers.append(ep)
         self._log(messages)
         return sorted(numbers)
+
+    def discard_episode(self, story_id, ep, *, now) -> dict:
+        """Archive episode *ep*: move its folder -- script, storyboard,
+        images, clips, render, final video -- to
+        ``episodes/_discarded/ep<NN>-<UTC stamp of now>/`` (``-2``, ``-3``...
+        when that name is taken), and clear what speaks for it outside the
+        folder, so the episode written in its place starts clean (the
+        pipeline switch's "Regenerate on v2", ``workflow.switch_pipeline``).
+        Nothing is deleted: the archive is recoverable by hand, and no
+        episode scan reads it (:meth:`list_episodes` lists ``ep<NN>`` only).
+
+        Outside the folder, under the store lock:
+
+        - ``season.json`` loses the episode's memory entry and recap, its
+          derived fields folded again (``series_memory.drop_episode``), and
+          the episode's audience feedback items; the arc and its approval
+          stay. Checked before anything moves: a later episode's entry that
+          closes a hook this one opened refuses the discard whole
+          (``series_memory.FoldError``, a ValueError -- discard the later
+          episode first), and a season that cannot be read is never
+          rewritten (``SchemaError``);
+        - the proposals written from it, ``episodes/ep<N+1>/proposals.json``,
+          join the archive (as ``proposals_for_ep<N+1>.json``) while episode
+          N+1 has no script; a folder left empty by them goes. Its own
+          proposals (written from episode N-1, not its work) wait in a fresh
+          ``ep<NN>/`` for the episode written in its place;
+        - its rows of the story's cost ledger are marked ``discarded``
+          (``CostLedger.mark_discarded``): the story total keeps them, the
+          per-episode cap of the new episode no longer counts them.
+
+        Every write is atomic (``os.rename`` for the folders, the JSON
+        writes' own rule). Returns ``{"ep", "archive", "moved_to",
+        "proposals_archived": [eps], "ledger_rows": n, "cleared":
+        [sentences]}``. KeyError for a malformed id, an unknown story, or an
+        episode with no real folder (a symlink in its place is never
+        followed).
+        """
+        self._check_id(story_id)
+        ep = check_episode(ep)
+        name = _episode_folder(ep)
+        label = self._episode_label(story_id, ep)
+        cleared, messages = [], []
+        with self._lock:
+            self._read_story(story_id)
+            parent = self.story_dir(story_id)
+            episodes = _contained(parent, EPISODES_DIRNAME, want_dir=True)
+            source = _contained(episodes, name, want_dir=True) if episodes is not None else None
+            if source is None:
+                raise KeyError(label)
+
+            # Everything that can refuse is checked before anything moves.
+            season = self.read_doc(story_id, SEASON_DOC)
+            new_season = None
+            if season is not None:
+                new_season = copy.deepcopy(season)
+                new_season["series_memory"], removed = series_memory.drop_episode(season["series_memory"], ep)
+                key = series_memory.memory_key(ep)
+                if removed["entry"]:
+                    cleared.append(f"series_memory.entries.{key} removed (the derived fields folded again)")
+                elif removed["recap"]:
+                    cleared.append(f"series_memory.recaps.{key} removed")
+                kept = [item for item in season["audience_feedback"] if item.get("ep") != ep]
+                gone = len(season["audience_feedback"]) - len(kept)
+                new_season["audience_feedback"] = kept
+                if gone:
+                    cleared.append(f"{gone} audience feedback item{'' if gone == 1 else 's'} of episode {ep} removed")
+                if new_season == season:
+                    new_season = None
+
+            archive_root = _descend(episodes, (DISCARDED_DIRNAME,), create=True,
+                                    label=f"{self._label(story_id)}{EPISODES_DIRNAME}/{DISCARDED_DIRNAME}/")
+            archive = f"{name}-{_archive_stamp(now)}"
+            taken = 1
+            while os.path.lexists(os.path.join(archive_root, archive)):
+                taken += 1
+                archive = f"{name}-{_archive_stamp(now)}-{taken}"
+            target = os.path.join(archive_root, archive)
+            os.rename(source, target)
+            moved_to = f"{self._label(story_id)}{EPISODES_DIRNAME}/{DISCARDED_DIRNAME}/{archive}/"
+            messages.append(f"Archived {label} to {moved_to}")
+
+            own = os.path.join(target, EPISODE_PROPOSALS_DOC)
+            if _is_regular(own):
+                os.mkdir(source)
+                os.rename(own, os.path.join(source, EPISODE_PROPOSALS_DOC))
+                messages.append(f"Kept {label}{EPISODE_PROPOSALS_DOC}: written from episode {ep - 1}, which stays")
+
+            proposals_archived = []
+            if ep < EPISODE_MAX:
+                following = _contained(episodes, _episode_folder(ep + 1), want_dir=True)
+                if following is not None and not os.path.lexists(os.path.join(following, EPISODE_SCRIPT_DOC)):
+                    written = os.path.join(following, EPISODE_PROPOSALS_DOC)
+                    if _is_regular(written):
+                        os.rename(written, os.path.join(target, _ARCHIVED_PROPOSALS.format(ep + 1)))
+                        proposals_archived.append(ep + 1)
+                        cleared.append(f"the proposals for episode {ep + 1} (written from episode {ep}) archived")
+                        if not os.listdir(following):
+                            os.rmdir(following)
+
+            if new_season is not None:
+                self.write_doc(story_id, SEASON_DOC, new_season, now=now)
+
+            ledger_rows = 0
+            ledger_path = os.path.join(parent, COST_LEDGER_FILENAME)
+            if _is_regular(ledger_path):
+                ledger_rows = CostLedger(ledger_path).mark_discarded(ep, archive)
+                if ledger_rows:
+                    cleared.append(f"{ledger_rows} cost ledger row{'' if ledger_rows == 1 else 's'} of episode "
+                                   f"{ep} marked discarded (still in the story total, no longer in the "
+                                   "episode's)")
+        self._log(messages + [f"Cleared for {label}: {line}" for line in cleared])
+        return {"ep": ep, "archive": archive, "moved_to": moved_to, "proposals_archived": proposals_archived,
+                "ledger_rows": ledger_rows, "cleared": cleared}
 
     def episode_asset_path(self, story_id, ep, kind, filename, *, create=False) -> str:
         """The path of ``<story>/episodes/ep<NN>/assets/<kind>/<filename>``, to

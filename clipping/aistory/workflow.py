@@ -2796,8 +2796,10 @@ def _render_view(manifest, derived) -> dict:
 
 def episode_ledger(stories, story_id, ep) -> dict:
     """``{"entries": [the story ledger's rows of episode *ep*], "totals":
-    {"est_usd", "paid_usd", "entries"}}`` (``CostLedger.totals(ep)``); empty
-    while the story has no ledger. A symlink in its place is not followed."""
+    {"est_usd", "paid_usd", "entries"}}`` (``CostLedger.episode_entries`` and
+    ``totals(ep)``: an archived take's rows, ``discarded``, are left out);
+    empty while the story has no ledger. A symlink in its place is not
+    followed."""
     try:
         path = os.path.join(stories.story_dir(story_id), COST_LEDGER)
     except KeyError:
@@ -2806,7 +2808,7 @@ def episode_ledger(stories, story_id, ep) -> dict:
         return {"entries": [], "totals": {"est_usd": 0.0, "paid_usd": 0.0, "entries": 0}}
     ledger = CostLedger(path)
     try:
-        return {"entries": [row for row in ledger.entries() if row.get("ep") == ep], "totals": ledger.totals(ep)}
+        return {"entries": ledger.episode_entries(ep), "totals": ledger.totals(ep)}
     except (KeyError, TypeError, ValueError) as exc:
         raise StoryUnreadable(story_id, f"{story_store.STORIES_DIRNAME}/{story_id}/{COST_LEDGER}",
                               [f"{type(exc).__name__}: {exc}"]) from None

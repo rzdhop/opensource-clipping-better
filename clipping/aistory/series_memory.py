@@ -351,6 +351,35 @@ def drop_character(memory, char_id):
     return new, removed
 
 
+def drop_episode(memory, ep):
+    """``(new_memory, removed)``: *memory* (a ``series_memory``) without
+    episode *ep*'s entry and its recap -- the episode was archived
+    (``StoryStore.discard_episode``) and the one written in its place starts
+    a new script at rev 1, so an entry left behind (``script_rev`` 1) would
+    read as current against it (:func:`entry_is_stale`).
+
+    While the memory had entries, its derived fields become the fold of the
+    entries left (empty ones when none is left): :class:`FoldError` (a
+    ValueError, nothing returned) when they no longer fold -- a later
+    episode closes a hook *ep* opened, so that episode goes first. A memory
+    with no entries (written before phase 5) loses only the recap.
+    ``introduced`` is the cast's and stays: the characters do.
+
+    *removed* is ``{"entry": bool, "recap": bool}``. Pure: *memory* is never
+    modified. ValueError as :func:`memory_key` for *ep*."""
+    key = memory_key(ep)
+    new = copy.deepcopy(memory)
+    entries = dict(new.get("entries") or {})
+    removed = {"entry": key in entries, "recap": key in (new.get("recaps") or {})}
+    if removed["entry"]:
+        del entries[key]
+        new["entries"] = entries
+        new.update(fold_memory(entries))
+    elif removed["recap"]:
+        del new["recaps"][key]
+    return new, removed
+
+
 def _foldable(entries) -> bool:
     return all(isinstance(key, str) and _MEMORY_KEY.fullmatch(key) and not schemas.memory_entry_errors(entry)
                for key, entry in entries.items())

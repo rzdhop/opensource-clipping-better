@@ -4,6 +4,14 @@ An append-only list of what each step charged -- estimated from the price
 table at call time -- kept next to the story as ``cost_ledger.json`` and
 filtered per episode into ``episodes/epNN/cost_ledger.json`` for the bundle.
 Totals feed the budget caps and the story page. Stdlib only, atomic writes.
+
+A row is never removed or repriced. The one change a row takes is its
+``discarded`` mark (:meth:`CostLedger.mark_discarded`): the episode it was
+spent on was archived (``StoryStore.discard_episode``, the pipeline switch's
+"Regenerate on v2"), so the money still counts for the story -- it was
+really spent -- but no longer for the episode written in its place: the
+per-episode views (:meth:`CostLedger.totals` with an episode,
+:meth:`CostLedger.episode_entries`, the bundle's view) leave it out.
 """
 
 from __future__ import annotations
@@ -90,15 +98,40 @@ class CostLedger:
         with self._lock:
             return list(self._load()["entries"])
 
+    def episode_entries(self, ep) -> list:
+        """The rows of episode *ep* as it is now: its rows, less those of an
+        archived take of it (``discarded``)."""
+        return [e for e in self.entries() if e.get("ep") == ep and not e.get("discarded")]
+
     def totals(self, ep=None) -> dict:
-        rows = [e for e in self.entries() if ep is None or e.get("ep") == ep]
+        """The whole ledger's totals, or -- with *ep* -- the episode's
+        (:meth:`episode_entries`: what its per-episode cap is held to)."""
+        rows = self.entries() if ep is None else self.episode_entries(ep)
         est = round(sum(float(e["est_usd"]) for e in rows), 4)
         paid = round(sum(float(e["est_usd"]) for e in rows if e.get("paid")), 4)
         return {"est_usd": est, "paid_usd": paid, "entries": len(rows)}
 
+    def mark_discarded(self, ep, archive) -> int:
+        """Mark every row of episode *ep* not marked yet ``"discarded":
+        archive`` (the archive's folder name) -- one atomic rewrite, nothing
+        else of a row changed; returns how many. A row keeps its first mark:
+        a row of a later take is marked by that take's own discard."""
+        marked = 0
+        with self._lock:
+            data = self._load()
+            for entry in data["entries"]:
+                if isinstance(entry, dict) and entry.get("ep") == ep and not entry.get("discarded"):
+                    entry["discarded"] = str(archive)
+                    marked += 1
+            if marked:
+                data["updated_at"] = self._now()
+                self._write(self.path, data)
+        return marked
+
     def episode_view(self, ep, out_path) -> dict:
-        """Write the entries of *ep* as their own ledger file (for the episode bundle)."""
-        rows = [e for e in self.entries() if e.get("ep") == ep]
+        """Write the entries of *ep* as their own ledger file (for the episode
+        bundle): :meth:`episode_entries`."""
+        rows = self.episode_entries(ep)
         data = {"$schema": SCHEMA, "ep": ep, "entries": rows, "updated_at": self._now()}
         self._write(out_path, data)
         return data
