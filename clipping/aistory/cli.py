@@ -194,6 +194,52 @@ PROG = "main.py --ai-story"
 # Where a CLI user sets a key: the refusal's "Set one of: ..., <where>."
 KEYS_WHERE = "in the environment or in .env"
 
+# ``--settings`` (the log sweep, 2026-10-02): the dashboard's stored Settings
+# over the process environment, as the API reads them -- the VPS keeps its
+# keys there. Empty without the flag: the process environment alone, as
+# before. The file is the one ``web.api.settings_store`` writes, read here
+# without importing ``web`` (the CLI never does);
+# tests/test_story_cli_settings.py pins the two to the same path and reading.
+_SETTINGS_ENV: dict = {}
+SETTINGS_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                             "data", "settings.json")
+
+
+def settings_file() -> str:
+    """Where the dashboard's Settings are stored: ``WEB_SETTINGS_FILE``, else
+    ``data/settings.json`` at the repository's root."""
+    return os.environ.get("WEB_SETTINGS_FILE") or SETTINGS_FILE
+
+
+def stored_settings(path=None) -> dict:
+    """The stored Settings as ``{name: value}`` (strings, empty values left
+    out), or ``{}`` when the file is missing or unreadable -- never raises,
+    like the dashboard's own reader."""
+    try:
+        with open(path or settings_file(), "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {str(key): str(value) for key, value in data.items() if value not in (None, "")}
+
+
+def _settings_env() -> dict:
+    """The Settings values this run's steps, estimates and gates read: the
+    stored ones with ``--settings``, else none."""
+    return dict(_SETTINGS_ENV)
+
+
+def _load_settings() -> None:
+    """Read the stored Settings into :data:`_SETTINGS_ENV` and say how many
+    values from where -- never a value."""
+    stored = stored_settings()
+    _SETTINGS_ENV.clear()
+    _SETTINGS_ENV.update(stored)
+    print(f"Using the stored Settings: {len(stored)} value{'' if len(stored) == 1 else 's'} from "
+          f"{settings_file()}, over the environment (no value is printed).")
+
 # The StepContext.job_id of a step run here: there is no job.
 CLI_JOB_ID = "cli"
 
@@ -314,7 +360,7 @@ def build_parser() -> argparse.ArgumentParser:
             "and lock its style, then make its cast, places and props, and season arc,\n"
             "then write and storyboard its episodes.\n"
             "Keys, LLM_CHAIN and the image and voice chains come from the environment\n"
-            "(or .env), not from the dashboard's Settings."
+            "(or .env); add --settings to read the dashboard's stored Settings over it."
         ),
         epilog=(
             "examples:\n"
@@ -341,6 +387,9 @@ def build_parser() -> argparse.ArgumentParser:
     # Hidden, for tests: another outputs/ directory than the repository's.
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--outputs-dir", default=None, help=argparse.SUPPRESS)
+    common.add_argument("--settings", action="store_true",
+                        help="read the keys, chains, caps and allow_paid stored by the dashboard's Settings "
+                             "(data/settings.json, or WEB_SETTINGS_FILE) over the environment")
 
     commands = parser.add_subparsers(dest="command",
                                      metavar="{new,step,render,fast-track,feedback,approve,list}", required=True)
@@ -656,7 +705,7 @@ def _llm_refusal(allow_slow_chain) -> str | None:
                                          hint=config.CLI_SLOW_CHAIN_HINT)
         return None if verdict.ready else verdict.message
 
-    _links, _keys, refusal = workflow.llm_gate({}, readiness=readiness, where=KEYS_WHERE)
+    _links, _keys, refusal = workflow.llm_gate(_settings_env(), readiness=readiness, where=KEYS_WHERE)
     return refusal
 
 
@@ -680,8 +729,9 @@ def _run_step(stories, story_id, step, params, ep=None):
         ep=ep,
         params=params,
         cancel=token,
-        # Keys and chains from the process environment (llm_call's fallback).
-        settings_env={},
+        # Keys and chains from the process environment (llm_call's fallback),
+        # under the stored Settings with --settings.
+        settings_env=_settings_env(),
         outputs_dir=stories.outputs_dir,
         on_log=print,
     )
@@ -706,7 +756,7 @@ def _cmd_new(args, stories) -> int:
     if not getattr(args, "profile_given", None):
         # No profile option given: the quality preset when this process's
         # environment holds both quality keys (the API's rule, on its Settings).
-        profile = media_policy.new_story_profile({}) or profile
+        profile = media_policy.new_story_profile(_settings_env()) or profile
     try:
         story = stories.create(
             language=args.lang, seed_text=args.seed_text, style_template_id=args.style,
@@ -916,7 +966,7 @@ def _print_cast_progress(stories, story_id) -> None:
     page's own), and -- when a sheet waits for an editor -- the editor's
     verdict and the prompt-only hint."""
     story = workflow.load(stories, story_id)
-    progress = workflow.progress(stories, story, env={})
+    progress = workflow.progress(stories, story, env=_settings_env())
     docs = {doc["char_id"]: doc for doc in workflow.list_entities(stories, story_id, workflow.CHARACTERS)}
     for char_id, item in progress["characters"].items():
         doc = docs.get(char_id) or {"name": char_id, "approved_at": None}
@@ -973,7 +1023,7 @@ def _phase2_step(args, stories, story, items) -> int:
         _err(refusal)
         return EXIT_FAILED
     if units is not None and units["images"]:
-        verdict = workflow.image_verdict(stories, checked, units["images"], env={})
+        verdict = workflow.image_verdict(stories, checked, units["images"], env=_settings_env())
         if not verdict["ready"]:
             _err(verdict["message"])
             return EXIT_FAILED
@@ -1151,7 +1201,8 @@ def _print_assets_estimate(stories, story, args) -> None:
     chains from the process environment (DEC-114); a local ComfyUI is not
     asked, nothing is called, no step runs."""
     ec = workflow.episode_context(stories, story, args.ep, step="assets")
-    estimate = workflow.assets_estimate(ec, env={}, align_words=args.align_words, animate=not args.no_animate)
+    estimate = workflow.assets_estimate(ec, env=_settings_env(), align_words=args.align_words,
+                                        animate=not args.no_animate)
     print(json.dumps(estimate, indent=2, ensure_ascii=False))
 
 
@@ -1511,6 +1562,8 @@ def main(argv=None) -> int:
     # dispatched to us; this covers any other caller.
     import clipping.config  # noqa: F401
 
+    if getattr(args, "settings", False):
+        _load_settings()
     outputs_dir = args.outputs_dir or story_store.default_outputs_dir()
     stories = story_store.StoryStore(outputs_dir)
     try:
