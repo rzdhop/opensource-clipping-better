@@ -2510,6 +2510,34 @@ _EPISODE_SCRIPT_CONSISTENCY_REPORT_SCHEMA = _or_null(_document({
     "stale": {"type": "boolean"},
 }))
 
+# Phase 7 stage 6a (A16, DEC-230): a v2 script's first-watch report -- J1,
+# a judge reading the episode as a first-time viewer would, plus the
+# script step's deterministic checks (a line repeating another, a hook with
+# no on-screen text) merged into it. What a viewer takes away after one
+# watch (who wants what, what happens, why it matters), whether it passed,
+# and the issues of this closed list. Its staleness follows the consistency
+# report's: ``checked_rev``, and ``stale`` once the script is rewritten.
+FIRST_WATCH_ISSUE_KINDS = ("unclear_goal", "unmotivated", "unintroduced", "object_unseen", "repeated_line",
+                           "no_hook_text")
+FIRST_WATCH_TEXT_MAX_CHARS = 300
+
+_EPISODE_SCRIPT_FIRST_WATCH_ISSUE_SCHEMA = _document({
+    "scene_id": {"type": ["string", "null"]},
+    "kind": {"type": "string", "enum": list(FIRST_WATCH_ISSUE_KINDS)},
+    "fix": {"type": "string", "maxLength": FIRST_WATCH_TEXT_MAX_CHARS},
+})
+
+_EPISODE_SCRIPT_FIRST_WATCH_SCHEMA = _document({
+    "who_wants_what": {"type": "string", "maxLength": FIRST_WATCH_TEXT_MAX_CHARS},
+    "what_happens": {"type": "string", "maxLength": FIRST_WATCH_TEXT_MAX_CHARS},
+    "why_it_matters": {"type": "string", "maxLength": FIRST_WATCH_TEXT_MAX_CHARS},
+    "passed": {"type": "boolean"},
+    "issues": {"type": "array", "items": _EPISODE_SCRIPT_FIRST_WATCH_ISSUE_SCHEMA, "maxItems": 20},
+    "checked_rev": {"type": "integer"},
+    "checked_at": {"type": "string"},
+    "stale": {"type": "boolean"},
+})
+
 EPISODE_SCRIPT_SCHEMA = _document({
     "$schema": {"type": "string", "const": EPISODE_SCRIPT_SCHEMA_NAME},
     "ep": {"type": "integer", "minimum": 1, "maximum": 99},
@@ -2527,6 +2555,10 @@ EPISODE_SCRIPT_SCHEMA = _document({
     "rev": {"type": "integer", "minimum": 1},
     "created_at": _NON_EMPTY_STRING,
     "updated_at": _NON_EMPTY_STRING,
+}, optional={
+    # Phase 7 stage 6a (DEC-230): a v2 script's own, once J1 has run;
+    # absent on every legacy script and on a v2 one not judged yet.
+    "first_watch": _EPISODE_SCRIPT_FIRST_WATCH_SCHEMA,
 })
 
 

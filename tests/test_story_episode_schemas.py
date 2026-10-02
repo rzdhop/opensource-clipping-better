@@ -415,6 +415,33 @@ def test_the_consistency_report_kinds_widen_to_hook_payoff_backward_compatibly()
     assert any("'payoff' is not one of" in e for e in errors), errors
 
 
+def _first_watch(*kinds, **changes):
+    report = {"who_wants_what": "Kiwilo veut garder le téléphone.", "what_happens": "Le vote est annoncé.",
+              "why_it_matters": "Le perdant quitte l'île.", "passed": not kinds,
+              "issues": [{"scene_id": "s02", "kind": kind, "fix": "Montrez-le."} for kind in kinds],
+              "checked_rev": 1, "checked_at": NOW, "stale": False}
+    report.update(changes)
+    return report
+
+
+def test_first_watch_is_optional_and_checked_when_present():
+    """Phase 7 stage 6a (DEC-230): a v2 script's J1 report is an optional
+    key -- every script written before it validates unchanged; one with a
+    report validates; its kinds are a closed list and its keys closed."""
+    doc = _script()
+    assert "first_watch" not in doc and schemas.episode_script_errors(doc) == []
+    assert schemas.episode_script_errors(_script(first_watch=_first_watch())) == []
+    assert schemas.episode_script_errors(_script(first_watch=_first_watch(*schemas.FIRST_WATCH_ISSUE_KINDS))) == []
+    assert schemas.FIRST_WATCH_ISSUE_KINDS == ("unclear_goal", "unmotivated", "unintroduced", "object_unseen",
+                                               "repeated_line", "no_hook_text")
+    for broken, keyword in ((_first_watch("continuity"), "'continuity' is not one of"),
+                            (dict(_first_watch(), extra=1), "extra"),
+                            ({k: v for k, v in _first_watch().items() if k != "checked_rev"}, "checked_rev"),
+                            (_first_watch(what_happens="x" * 301), "maxLength 300")):
+        errors = schemas.episode_script_errors(_script(first_watch=broken))
+        assert any(keyword in e for e in errors), (broken, errors)
+
+
 # ================================================ 2b. episode_script_context_errors
 
 BASE_CONTEXT_KWARGS = dict(
