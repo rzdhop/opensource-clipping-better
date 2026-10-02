@@ -12,8 +12,10 @@ serialization: a style that is locked once and then injected into every
 image and voice prompt afterwards, and a season structure meant to make
 someone come back for episode 2. Generation runs on free hosted APIs by
 default (or on a local GPU when you point it at one); paid APIs are opt-in
-and capped at **$1 per episode** by default (Settings → Budget). Nothing
-paid ever runs unless you turn it on.
+and capped per episode, per day and per story (**$2 / $6 / $20** by default,
+Settings → Budget). Nothing paid ever runs unless you turn it on. With a fal
+key, a new story starts on the **quality pipeline** — every shot a video
+clip, quality images — described in "The quality pipeline (v2)" below.
 
 This document covers what exists today. AI Story is being built in phases;
 this is the phase-1 through phase-5 foundation, all 13 steps of the workflow
@@ -36,6 +38,7 @@ see "Where it stands" below for what is not here yet.
 | 5 | Cast | characters: reference sheets, voices | available |
 | 6 | Places & props | locations and recurring objects | available |
 | 7 | Season arc | the season's episode-by-episode arc | available |
+| 7b | Knowledge base (v2 stories) | world, beat timeline per episode, props registry, starting state; approved before episode 1 | available |
 | 8 | Episode script | scenes and dialogue for one episode | available |
 | 9 | Storyboard | shots, framing, camera moves for the script | available |
 | 10 | Assets | the images, voice lines, SFX/BGM for the storyboard | available |
@@ -57,6 +60,101 @@ unlocks episode N+1's script, storyboard and fast track, so the season can
 carry on past episode 1. A line, or one shot, can then be changed and
 re-rendered on its own, without rebuilding the whole episode.
 
+## The quality pipeline (v2)
+
+Phase 7 rebuilt how an episode looks and reads, after the first episodes
+were judged hard to follow, mostly still, and drawn on draft-quality free
+image links. Everything below applies to a **v2 story**
+(`generation_profile.pipeline: "v2"`); a story created before it keeps its
+behaviour exactly.
+
+**Who gets it.** With `FAL_KEY` in Settings, a story created without a
+profile — the new-story form leaves the profile to the server unless you
+change it — is a v2 story on the **Quality (billed APIs)** budget profile:
+tier 2, route `api`, `references` consistency, the `serial_60s_v2` episode
+template, the narrator on. The form says so ("Fully animated: every shot is
+a video clip") or says why not (tier 1 is stills with motion; `free` buys no
+clip; `FAL_KEY` missing). An existing story moves onto it with **Animate
+every shot** on its Visual tier card, or by patching its
+`generation_profile`, while no episode has a script; if its cast already
+exists, run the Cast step again afterwards (it writes each character's
+dossier and look and redraws the sheets).
+
+**Every shot is a clip.** An episode is 6–10 beat shots of 5–12 s (the hook
+3–6 s) in a 55–75 s window, and each shot is one image-to-video clip on
+`fal/seedance-1-pro-fast` at 720p (1080p is a per-story switch,
+`generation_profile.video_resolution`). On a v2 story that animates every
+shot, the assets approval and the render refuse while a shot has no current
+clip — never made, failed, stale or still generating — naming each shot and
+what to do; no shot is ever shown as a still with a zoom. The one exemption
+is a shot you pin `keep_still` yourself.
+
+**Images by role, never on draft links.** Character sheets, place plates and
+props are made on fal Seedream 4.5 (text-to-image, then edits of that image
+for the turnaround, expressions and variants), keyframes on
+`fal/seedream-4.5-edit` with up to 10 reference images. The free draft links
+(cloudflare, pollinations, flux-schnell, gpt-image-2-low) are never used for
+these; the style preview stays a free draft. A v2 keyframe is centre-cropped
+to an exact 9:16 when it is made.
+
+**Writing.** AI Story writes on its own chain (`STORY_LLM_CHAIN`, default:
+NVIDIA NIM nemotron-3 ultra, then super, then OpenRouter mistral-medium-3.1 —
+paid, skipped while `allow_paid` is off — then free Gemini). A reply that
+fails validation twice moves on to the next model.
+
+**Looks, dossiers and the knowledge base.** Each character gets a dossier
+(backstory, goal, need, fears, secrets, relationships, voice patterns) and a
+structured look (build, silhouette, face, hair, material, height, palette,
+wardrobe sets, presentation) before its sheets are drawn; each place a look
+(layout map, scale, light per time of day, props that live there); each prop
+a look (material, colour, real scale). After the season, the **Knowledge
+base** step writes the world, a beat-by-beat timeline per planned episode, a
+props registry and each character's starting state; you approve it in the
+dashboard, and episode 1's script waits for that approval (a later change
+makes it stale until approved again). Every writing call then gets its
+slice of it — the goals, secrets and relationships of who is in the scene,
+what each knows so far, the place's layout and light — and after each
+episode a continuity ledger records where everyone is, what they wear and
+hold.
+
+**Prompts.** A keyframe prompt (≤ 220 words) says, in order: what each
+reference image is, the beat (the action and the line's delivery), where
+each character stands with its look and relative height, the camera, the
+place, the style and a clean-frame clause ("no captions, lettering, logos or
+watermarks"). A crowded shot is shortened in steps — compact image roles,
+shorter looks and place, then the layout and prop sentences the sent images
+already show. A clip prompt (≤ 80 words) says what moves, the camera, and
+that the set and the looks stay as in the first frame. Entity names never
+reach a prompt; a name that is only the thing's noun ("Monocle" for a golden
+monocle) is kept so its description is never garbled.
+
+**Voices and subtitles.** The narrator is on with its own voice, distinct
+from the cast's; voices are proposed in the story's locale (fr-FR, en-US);
+each line is spoken with a rate and pitch from the character's voice and the
+line's emotion. Subtitles default to two lines, and a word-pop card is never
+shorter than 150 ms.
+
+**What it costs (fal, 720p).** Per episode ≈ $1.73: about 8 keyframes at
+$0.04 and about 60 s of seedance at $0.022/s, plus rounding each clip up to
+whole seconds — inside the default $2 episode cap. Once per story: sheets,
+plates and props at $0.04 each (≈ $0.5–1.0 for a small cast). Every paid step
+shows its estimate before it runs and is refused whole when it would go over
+a cap. Settings → **Allow paid** must be on, and caps saved earlier in
+Settings (1 / 3 / 10 before phase 7) win over the new defaults until you
+change them.
+
+**Checking the video keys.** Settings → Video → **Ask the providers (free)**
+asks fal (its pricing for the model's endpoint) and Gemini (`models.get` for
+Veo) whether each key is accepted and each model live, and shows fal's live
+price. Nothing is generated or billed; the chain test itself still never
+calls a hosted video link.
+
+**A render is checked before it is published.** After the audio mix, the mix
+and its stems are measured against the episode's length; after the final
+pass, its frames are counted against the timeline. A music bed cut short or a
+final missing frames fails the render (render again; cached shots are
+reused) and the last good final stays in place.
+
 ## Walkthrough (dashboard)
 
 Open **AI Story** in the mode switch, or go to `/story`. It lists your
@@ -72,14 +170,18 @@ stories as cards (title, status, style, language); **New story** starts one.
   "Decide later" and pick it at step 4. The seven: Fruit Drama, 3D Animated
   Family Film, Anime/Manga, Realistic Cinematic, 2D Cartoon/Flat, Storybook
   Watercolor, Claymation/Stop-motion.
-- **Generation profile** (collapsible, defaults are fine to leave alone):
-  tier (`1` = stills only; `2` animates shots into short I2V clips; `3` keeps
-  a kept clip's own native audio as an opt-in on top of tier 2 — see "Tier
-  2/3: animating shots" below), route (`auto` / `local` / `api` — now
+- **Generation profile** (collapsible; it starts from what the server would
+  give a new story — the quality pipeline when `FAL_KEY` is set — and is sent
+  only if you change it): pipeline (`v2` quality / legacy), tier (`1` =
+  stills with motion; `2` animates shots into image-to-video clips; `3`
+  keeps a kept clip's own native audio as an opt-in on top of tier 2 — see
+  "Tier 2/3: animating shots" below), route (`auto` / `local` / `api` —
   governs video as well as images: `local` is your own ComfyUI, `api` the
-  hosted video links), consistency mode (`references` / `prompt_only`),
-  budget profile (`free` / `one_dollar` / `quality` — decides which shots,
-  if any, animate; see below).
+  hosted video links), consistency mode (`references` / `prompt_only`; a v2
+  story is always `references`), budget profile (`free` buys no clip,
+  `one_dollar` animates key shots, `quality` — "Quality (billed APIs)" —
+  animates every shot). A line above it says whether the story will be fully
+  animated, and why not.
 
 **Create story** opens the story page, a vertical stepper: New story (done),
 Concepts, Bible, Style. Each step unlocks once the one before it is
