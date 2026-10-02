@@ -134,6 +134,45 @@ each line is spoken with a rate and pitch from the character's voice and the
 line's emotion. Subtitles default to two lines, and a word-pop card is never
 shorter than 150 ms.
 
+**Two looks before money goes on clips.**
+- *The script.* After the consistency check, a first-watch check (J1) reads
+  the episode as a first-time viewer would — who wants what, what happens,
+  why it matters — and flags an unclear goal, an unmotivated turn, an
+  unintroduced character, an object never shown, a repeated line or a hook
+  with no on-screen text (the last two are also checked without the LLM, and
+  a reply repeating a line is refused and asked again). The script is not
+  approvable while the check is missing or out of date; with issues, only
+  with **Approve anyway**.
+- *The length.* A v2 episode must land in its 55–75 s window: the script and
+  the storyboard are refused outside it (estimated), the assets and the
+  render too (measured) — there is no "anyway". A script that comes out short
+  gets a fill pass (at most two rewrites of its shortest scenes) when the
+  script step runs.
+- *The keyframes.* The assets step with **animate off** makes every keyframe
+  and voice, then a free vision check (J2) looks at each keyframe with the
+  previous one and says whether it shows its beat, what is missing, and what
+  changed that should not have. The storyboard's **Keyframes** card lists
+  each verdict; **Approve keyframes** (or **Approve anyway** after a
+  refusal) is the gate: until it is approved and current, no clip is bought,
+  and a changed keyframe makes it stale. Then run the assets step with
+  animate on: it buys the clips.
+- *The fast track* follows the same rules: it stops at a script it cannot
+  approve (it never approves anyway, and never outside the window) and, on a
+  v2 episode, at the keyframes — approve them, then **Continue**.
+
+**Editing what it writes.** On a v2 story the Cast step edits each
+character's dossier and look, Places & props each place's layout and light
+and each prop's look, and the Knowledge base step edits the world, the
+timeline's beats, the props registry and the starting state inline (each
+edit makes the base "Approve again"). An edited look makes that entity's
+prompts outdated, as a descriptor edit does; its sheets stay until you
+regenerate them.
+
+**Advice on weak hosts.** Settings' hardware card, on a host with no GPU,
+recommends the Quality preset with its price worked out from the price
+table — today ≈ $1.73 an episode (8 shots animated) and ≈ $0.56 once per
+story — and the key to add; the new-story form shows the same numbers.
+
 **What it costs (fal, 720p).** Per episode ≈ $1.73: about 8 keyframes at
 $0.04 and about 60 s of seedance at $0.022/s, plus rounding each clip up to
 whole seconds — inside the default $2 episode cap. Once per story: sheets,
@@ -924,6 +963,20 @@ is queued or running is refused (409), telling you to wait or cancel.
 `python main.py --ai-story` covers all thirteen steps for scripting or
 testing, without a browser. Six subcommands: `new`, `step`, `render`,
 `fast-track`, `feedback`, `list`.
+
+Keys, chains, caps and `allow_paid` come from the environment (or `.env`);
+add **`--settings`** to any subcommand to read the ones the dashboard's
+Settings stored (`data/settings.json`, or `WEB_SETTINGS_FILE`) over it — the
+run says how many values it read, never a value. A v2 episode's keyframes
+are approved with `approve STORY_ID keyframes:1 [--anyway]`, between an
+assets run with `--no-animate` (keyframes, voices and their checks) and one
+without (the clips):
+
+```
+python main.py --ai-story step STORY_ID assets --ep 1 --no-animate --settings
+python main.py --ai-story approve STORY_ID keyframes:1
+python main.py --ai-story step STORY_ID assets --ep 1 --settings --auto-approve
+```
 
 ```
 python main.py --ai-story new --lang fr --concept tentafruit_island --style fruit_drama

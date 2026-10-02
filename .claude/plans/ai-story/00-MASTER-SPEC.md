@@ -1291,7 +1291,46 @@ Nothing is downloaded from platforms; the user uploads the file (same policy as 
 | 4 | `05-phase-4-assets-render-metadata.md` | step 10–12: asset generation, Tier-1 renderer, subtitles, BGM/SFX, metadata pack, preview pane, CLI fast-track | **MVP** (2 styles: fruit_drama, family_3d) |
 | 5 | `06-phase-5-series-reedit-styles.md` | step 13 (memory, feedback, new characters/twists), per-scene re-edit + partial re-render, remaining 5 styles; export/import bundle **optional** (not a user requirement, may be deferred) | |
 | 6 | `07-phase-6-video-tiers-local.md` | Tier 2/3: VIDEO_CHAIN adapters, ComfyUI workflows (Wan/LTX), I2V per shot, paid estimates end-to-end | |
-| 7 | `08-phase-7-reference-import.md` | reference-video import (12), custom style from video, remix, archetypes | |
+| 7 | `15-phase-7-quality-overhaul.md`, `16-phase-7-plan.md` | the quality overhaul (DEC-219): the v2 pipeline, see §16 | |
+| 8 | `08-phase-7-reference-import.md` | reference-video import (12), custom style from video, remix, archetypes (moved from phase 7 by DEC-219) | |
 
 Each phase: its own plan file, checkpoint commit, stages, DEC/A entries, Tier-1 + Tier-2
 with human ack, `docs/AI_STORY.md` updated, VISION "Where it stands" updated.
+
+## 16. Phase 7 deltas — the quality overhaul (DEC-219 … DEC-238)
+
+Everything here applies to a **v2 story** (`generation_profile.pipeline: "v2"`, optional key); a story without
+it behaves as the sections above describe (RC-M3). The decisions hold the details.
+
+- **§2.1 Story.** Optional `generation_profile.pipeline: "v2"` and `video_resolution` (`720p` | `1080p`). A story
+  created without a profile is v2 on the quality preset when Settings hold `FAL_KEY` (DEC-221, DEC-235, DEC-236);
+  a pipeline switch brings the template and the narrator and is refused once an episode has a script (DEC-236).
+- **§2.3–2.5 Entities.** Optional `character.look` {build, silhouette, face, hair, skin_material, height_cm,
+  palette, wardrobe_sets, season_change, presentation}, `character.dossier` {backstory, goal, need, fears,
+  secrets, relationships, voice, arc}, `place.look` {layout_map, scale_note, lighting, props_here}, `prop.look`
+  {scale_cm, material, colour, scale_phrase, where_when} (DEC-226, DEC-228). Editable on v2 (DEC-232).
+- **New story document** `knowledge.json` (`story_knowledge_v1`): world, a beat timeline per planned episode,
+  a props registry, a ledger seed; `rev` / `approved_rev`; approved before episode 1's script (DEC-228). Series
+  memory entries gain an optional per-character `ledger` (DEC-229).
+- **§3 Workflow.** A `knowledge` step after the season (v2). Script: J1 first-watch report (`script.first_watch`),
+  the fill pass, and a hard length gate at script, storyboard, assets and render (DEC-230, DEC-231 part 2).
+  Assets: J2 keyframe verdicts (`assets.keyframe_verdicts`) and the keyframe approval (`assets.keyframes_approved`,
+  target `keyframes:<ep>`) before any clip (RC-Q3); on a fully animated story every shot must have a current
+  clip to approve the assets or render (DEC-236).
+- **§4.2 Prompts.** New ids: D1 dossier, D2 character look, D3 place look, R1v2 prop look, D4 world, D5 timeline,
+  D6 props registry, L1 ledger, E1v2/E2v2/E3v2 (context slices, no-repeat, hook text), T1v2/T1rv2 (one beat
+  shot per scene, motion, staging), J1 first watch, J2 keyframe check. Caps and input budgets are measured and
+  registered (DEC-138 method). Writing chain: `STORY_LLM_CHAIN` (NIM nemotron-3 ultra → super → OpenRouter
+  mistral-medium-3.1 → free Gemini; DEC-224).
+- **§5/§6 Images and prompts.** Layered keyframe prompts (≤ 220 words) with reference roles, staging and a
+  clean-frame clause ("no captions, lettering, logos or watermarks"); clip prompts ≤ 80 words (DEC-225, DEC-237).
+- **§6.2 Episode template** `serial_60s_v2`: window 55–75 s (target 62), 6–10 beat shots of 5–12 s (hook 3–6 s),
+  one clip per shot (DEC-227).
+- **§8 Providers and budget.** Images by role on fal Seedream 4.5 (sheets, plates, props) and seedream-4.5-edit
+  (keyframes); draft links never used for them (DEC-221, DEC-235). Video: `fal/seedance-1-pro-fast` 720p on every
+  shot. Caps default 2 / 6 / 20 (DEC-223); the `quality` profile is "Quality (billed APIs)" (`animate: all_shots`).
+  A free provider key check for video links (`POST /api/settings/check-video-keys`, DEC-236). The render refuses a
+  short music bed or a final missing frames (DEC-238).
+- **§10 Dashboard.** Knowledge step (read, edit, approve), dossier/look editors, the Keyframes card (J2 verdicts,
+  Approve keyframes / anyway), the budget-profile select, the preset's price, "Ask the providers (free)".
+

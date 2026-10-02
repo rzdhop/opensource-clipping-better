@@ -4173,3 +4173,29 @@ loop for an unreproduced fault); the user re-renders, and the partial render reu
 - Each re-run of an under-window, unapproved v2 script spends up to 2 E2v2 calls, plus E4 and J1 again when it was already checked.
 - The fill pass cannot add a scene: an episode whose scenes are all short after two fills still needs a writer's hand.
 - Commit `954ef6e` in the worktree, `32dbd47` on the branch.
+
+## DEC-239 — Phase 7 close-out fixes: the v2 fast track, the keyframe card, the CLI's --settings, two render-path edges
+**Context.** Merging stages 6 and 7 left the agents' open issues and the rest of the log sweep (2026-10-02): the fast
+track auto-approved v2 assets whose clips were held and told the user to "approve it yourself" outside a window v2
+never allows; the keyframe approval had an API and a CLI but no screen; the CLI read keys from the process
+environment only, while the VPS keeps them in Settings; a tier-3 story on a silent link fell back to tier 2 without
+a word before buying; the preflight did not check two filters every render uses.
+**Decision.**
+- **Fast track on v2** (`9287ce4`): after the assets run that makes and checks the keyframes, a v2 episode at
+  tier ≥ 2 whose clips are held stops at the assets with the hold's sentence (approve the keyframes, then Continue);
+  the script refusal names a missing, stale or failed J1 report and never offers "approve it yourself" outside the
+  window; on a fully animated story the paid stop never offers keep-still or animate-off as a way out
+  (`paid_verdict(fully_animated=)`).
+- **The Keyframes card** (`edb719c`): the storyboard pane lists each shot's J2 verdict, Approve keyframes, and
+  after a refusal the server's sentence and Approve anyway; between the keyframes and the video phase.
+- **CLI `--settings`** (`33b740d`): every step, estimate and gate of the run reads the stored Settings over the
+  environment, never printing a value. The CLI reads the file itself (it never imports `web`); a test pins the same
+  path and values as `settings_store.load`.
+- **Tier-3 on a silent link** (`9f1203a`): the clip estimate says the shots render as at tier 2 (A-108).
+- **Preflight** (`2cb7568`): `movie` (the paper texture, every render) and `amovie` (tier-3 native audio) are
+  required filters.
+**Consequence.** Each change fail-first; the selections of the touched areas green in both environments; the final
+full suites on the branch head are recorded in the action log. Not done (follow-ups): a look edit does not mark the
+sheets drawn from the old look stale; regenerating one shot image does not run J2 (the next assets run does); each
+re-run of an unapproved, under-window v2 script spends up to 2 more fill calls; the dashboard cannot add or remove a
+relationship or a wardrobe set (the API can).

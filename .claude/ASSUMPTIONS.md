@@ -396,19 +396,24 @@
   estimate ($0.044 on 2026-10-01). UNCONFIRMED: whether a failure after generation started (a model error, a
   timeout) is billed.
 
-- **A-110** — (phase 7) seedance-1-pro-fast's prompt length limit is not published; the v2 clip prompt is kept ≤ 80 words. UNCONFIRMED.
+- **A-110** — (phase 7) seedance-1-pro-fast's prompt length limit is not published; the v2 clip prompt is kept ≤ 80 words. **Partly confirmed
+  2026-10-01** (W-mid): three clips with 56–77-word prompts were accepted and rendered; the limit itself stays unpublished.
 - **A-111** — (phase 7) `fal-ai/bytedance/seedream/v4.5/edit` ($0.04, up to 10 references, output ≤ 4 MP) exposes an
   `image_size` that reaches a 9:16 portrait near 1 MP, a `seed` and a prompt length that holds 220 words; its negative
   prompt field is absent or ignored. Read from fal's OpenAPI schema in stage 2a (2026-10-01): `image_urls` ≤ 10, `image_size` presets or a custom size
   of at least 2560×1440 pixels and ≤ 4096 a side (so 1440×2560 is used), `seed`, no `negative_prompt`, no stated
-  prompt length. Schema facts read; behaviour UNCONFIRMED until a live call.
+  prompt length. Schema facts read. **Confirmed in use 2026-10-01** (W-mid: 9 keyframes at $0.04, 1440×2560, with
+  references); seedream-4.5 text-to-image and edit also made the sheets, plates and props (stage 2c).
 - **A-112** — (phase 7) nano-banana-2 / -lite have no negative prompt and no stated prompt limit; positive constraint
-  phrasing ("Clean frame: no captions …") is honoured. UNCONFIRMED.
-- **A-113** — (phase 7) the project behind `GEMINI_PAID_API_KEY` has the Gemini image models enabled and billed. UNCONFIRMED.
+  phrasing ("Clean frame: no captions …") is honoured. **MOOT** under DEC-235 (fal only; nano-banana unused by default).
+- **A-113** — (phase 7) the project behind `GEMINI_PAID_API_KEY` has the Gemini image models enabled and billed. **MOOT** under DEC-235
+  (the human: no money on the Gemini API).
 - **A-114** — (phase 7) the NIM model picked by the free `tools/bench_llm.py` run writes valid French JSON within the
   330 s timeout at ≤ ~420 output tokens. **Partly confirmed 2026-10-01** (free bench, DEC-224): with thinking off,
   nemotron-3-super writes valid FR/EN E1/E2/T1 JSON in 1–23 s about 65 % of the time (failures: word-cap overruns),
   nemotron-3-ultra in 11–70 s but often HTTP 500. Writing quality is judged only by reading 3 samples; the walks confirm.
+  W-mid (2026-10-01): NIM wrote in story calls only after the DEC-224 amendment (per-model timeouts), with Gemini taking
+  over on NIM's 503/500s; the acceptance walk judges the writing.
 - **A-115** — (phase 7) openrouter `mistralai/mistral-medium-3.1` is $0.40 in / $2.00 out per M tokens ($0.44 / $2.20 on
   the EU host), read 2026-10-01 at openrouter.ai/api/v1/models/mistralai/mistral-medium-3.1/endpoints. UNCONFIRMED by a bill.
 - **A-116** — (phase 7) a 150 ms floor per word_pop card is legible on a phone (31 % of story A's cards were under it). UNCONFIRMED.
@@ -417,11 +422,14 @@
 - **A-118** — (phase 7) seedance keeps a character's identity over a 5–12 s clip when the prompt ends with the
   stays-still clause. UNCONFIRMED until the walks.
 - **A-119** — (phase 7) an every-shot episode on the Quality preset costs ≈ $1.70–1.75 (≈ 60 s of seedance 720p $1.32,
-  ≈ 0.5 s ceil waste per shot, 8 keyframes $0.32), under the $2 episode cap. UNCONFIRMED until the acceptance walk.
+  ≈ 0.5 s ceil waste per shot, 8 keyframes $0.32), under the $2 episode cap. Computed from `pricing.py` by
+  `media_policy.preset_estimate` (DEC-232): $1.73 an episode, $0.56 once per story. UNCONFIRMED by a bill until the
+  acceptance walk.
 - **A-120** — (phase 7) 6–10 beat clips of 5–12 s read better on a phone than 18–20 cuts of 1–6 s. UNCONFIRMED until the human's watch.
-- **A-121** — (phase 7) Gemini's 9:16 output at 1K is about 768×1376 (inside DEC-217's 2 % tolerance), hence the v2 source crop. UNCONFIRMED.
+- **A-121** — (phase 7) Gemini's 9:16 output at 1K is about 768×1376 (inside DEC-217's 2 % tolerance), hence the v2 source crop. **MOOT** under DEC-235 (keyframes on seedream-4.5-edit at 1440×2560, an exact 9:16).
 - **A-122** — (phase 7) the v2 prompt inputs fit their budgets (E1v2 2400, E2v2 2200, E3v2 2900, T1v2 2000 tokens by the
-  DEC-138 method) with the context-builder slices. UNCONFIRMED until stage 5c's budget test.
+  DEC-138 method) with the context-builder slices. **SUPERSEDED** by the measured budgets of DEC-228 part 3 (E1v2 2870,
+  E2v2 2420, E3v2 3370 → 3380 with DEC-230's hook ask, in) and DEC-227 (T1v2 2020), each pinned by a budget test.
 - **A-123** — (phase 7) 8 of 9 stored stories are `prompt_only` because the edit chain never runs while `allow_paid` is
   off, so the cast step offered the labelled switch (DEC-117) and the human took it. **CONFIRMED 2026-10-01** by the stage-2a scoping read: `b1104ec66b05/activity.log:144` "Kiwilo turnaround needs an
   editor: No link of IMAGE_EDIT_CHAIN … allow_paid is off … switch the story to prompt-only consistency", then `:208`

@@ -67,23 +67,42 @@ To go back to phase 6 later: `git merge --ff-only` cannot undo; note the hash yo
 
 ## 4. The walk (each paid step shows its estimate first)
 
-| # | Step | Expected $ |
-|---|---|---|
-| 1 | Concept, bible, style (writing on NIM, else free Gemini; the style preview is a free draft) | ≈ 0 |
-| 2 | Cast: K1, D1 dossier, D2 look per character; 3 sheets each on fal Seedream 4.5 ($0.04) | ≈ 0.12 per character |
-| 3 | Places and props: plates and prop images ($0.04 each) | ≈ 0.10–0.25 |
-| 4 | Season, then the **Knowledge base** step; approve it in the dashboard (episode 1's script waits for it) | ≈ 0.04–0.12 (new props) |
-| 5 | Script ep 1, storyboard (6–10 shots in 55–75 s) — free | 0 |
-| 6 | Assets with **animate off**: keyframes (6–10 × $0.04) and voices; look at every keyframe | ≈ 0.32 |
-| 7 | Assets with **animate on**: one seedance clip per shot, ≈ 60 s × $0.022 + rounding | ≈ 1.41 |
-| 8 | Approve the assets (refused while a shot has no current clip), then render | 0 |
+| # | Step | Gate (what can stop it) | Expected $ |
+|---|---|---|---|
+| 1 | Concept, bible, style (writing on NIM, else free Gemini; the style preview is a free draft) | — | ≈ 0 |
+| 2 | Cast: K1, D1 dossier, D2 look per character; 3 sheets each on fal Seedream 4.5 ($0.04) | approve each character (dossier and look editable) | ≈ 0.12 per character |
+| 3 | Places and props: plates and prop images ($0.04 each) | approve each | ≈ 0.10–0.25 |
+| 4 | Season, then the **Knowledge base** step | approve the knowledge base (edits make it "Approve again") | ≈ 0.04–0.12 (new props) |
+| 5 | Script ep 1: E1–E4, the fill pass if short, the **first-watch check (J1)** | approve: refused outside 55–75 s (no anyway) or with J1/E4 issues (anyway allowed) | 0 (free chain) |
+| 6 | Storyboard: T1 v2, 6–10 shots | approve: refused outside 55–75 s | 0 |
+| 7 | Assets with **animate off**: keyframes (6–10 × $0.04), voices, the **keyframe check (J2)** per shot | storyboard → **Keyframes** card: Approve keyframes (or anyway) — no clip is bought before | ≈ 0.32 |
+| 8 | Assets with **animate on**: one seedance clip per shot, ≈ 60 s × $0.022 + rounding | caps (refused whole if over) | ≈ 1.41 |
+| 9 | Approve the assets, then render | refused while a shot has no current clip, or the measured length is outside the window; the render also refuses a short music bed or missing frames ("render again") | 0 |
 
-Episode ≈ $1.73 under the $2 cap; story one-off ≈ $0.5–1.0 for sheets, plates and props.
+Episode ≈ $1.73 under the $2 cap; story one-off ≈ $0.56 for 3 characters, 2 places, 3 props.
 
-## Known risk being guarded next
+**What to judge on the phone (the acceptance verdict):** the story is clear on one watch; the looks hold from
+shot to shot; **every shot moves**; the hook has on-screen text; no line is said twice; the music runs to the
+end; no lettering or badges drawn on clothes or signs.
 
-Phase 6 measured the music bed cut short on ffmpeg 7.1.5 when an mp4 is an input of the **audio** stage (10 of
-12 runs); that only happens at tier 3 with native audio, and that path moved to `amovie` (0 of 20). At tier 2
-(this test) the clips feed the video stage only, but a bed cut once in about 76 plain runs and was never
-reproduced. Listen to the end of the music in the first render; a measured check of the bed's length after
-the mix is the next task on the branch.
+**The fast track** does steps 5–9 in one job but stops where a human decides: a script it cannot approve, and
+on a v2 episode the keyframes (approve them, then Continue).
+
+**From the CLI instead of the dashboard** (one process per paid step, the DEC-215 pattern; `--settings` reads
+the keys, caps and `allow_paid` the dashboard stored, so no scratch driver is needed):
+
+```bash
+python main.py --ai-story step STORY_ID assets --ep 1 --no-animate --settings --estimate   # the price first
+python main.py --ai-story step STORY_ID assets --ep 1 --no-animate --settings
+python main.py --ai-story approve STORY_ID keyframes:1            # add --anyway to go over J2's findings
+python main.py --ai-story step STORY_ID assets --ep 1 --settings --estimate
+python main.py --ai-story step STORY_ID assets --ep 1 --settings --auto-approve
+python main.py --ai-story render STORY_ID --ep 1 --settings
+```
+
+## Guarded since this runbook was first written
+
+- A music bed cut short, or a final missing frames, now fails the render before anything is published
+  (DEC-238); render again (cached shots are reused).
+- Crowded keyframes fit their 220 words; a prop's own name is no longer garbled in its description (DEC-237).
+- Groq transcription no longer answers 403 "error code 1010" (the app now names itself in its User-Agent).

@@ -1,31 +1,33 @@
 ## CURRENT STATE — AI Story **phase 7 IN PROGRESS** (the quality overhaul, DEC-219). Plan: `.claude/plans/ai-story/16-phase-7-plan.md` (APPROVED 2026-10-01)
 
 - **In-progress header** (keep current):
-  - **Current phase:** IMPLEMENT. EXPLORE (E1–E5), CLARIFY (11 answers) and PLAN (Opus design, stages 1–8) were done on
-    2026-10-01 in one session; the human approved the plan with its three go-items (hook 3–6 s; keyframes on
-    seedream-4.5-edit with nano-banana-2-lite fallback; ≈ $1.73 per episode under the $2 cap).
-  - **Current stage (2026-10-02, cloud session):** stages 1, 2a–2d, 3a–3d, 4, W-mid, 5a–5d, 6c DONE (head 90d914f on
-    `feat/ai-story-phase-7`). The 2026-10-01 session ended at its limit while two agents built 6a+6b and 7 in local
-    worktrees: nothing of theirs was committed, so both restart from the plan. This session works on branch
-    `claude/phase-7-capability-upgrade-b0huym` (fast-forwarded to 90d914f; pushed there only, the human merges).
-    **Done here:** fully animated stories (DEC-236, `2aa7c00`; the human's runbook
-    `.claude/plans/ai-story/17-phase-7-fully-animated-runbook.md`). **In progress:** 6a+6b (Opus agent, worktree
-    `scratchpad/wt-s6`, branch `work/phase7-s6`). **Next:** 7 (Opus agent after FA: hardware advice + preset estimate,
-    look/dossier/knowledge editing, budget-profile select, estimate texts), the J2 / "Approve keyframes" UI after 6b,
-    the log sweep's bugs (bed-length guard, final frame count, Groq User-Agent, CLI Settings switch, low edges), the
-    W-mid leftovers (keyframe prompts over 220 words, logo badge), 8 (docs, close, acceptance-walk runbook).
-  - **This container:** no provider keys, fal and the doc sites blocked by its network policy; tests run in two envs
-    (`scratchpad/cilibs` = pytest only, `scratchpad/locallibs` = + fastapi/pydantic/httpx/Pillow/numpy/edge-tts).
-    Container-only baseline: 2 root-only failures (`test_an_unwritable_directory_is_reported_not_raised` ×2) and, in the
-    CI-like env, 14 setup errors of `test_generation_chain_api.py` (its fixture imports fastapi). Baseline on 90d914f:
-    local 6763 / 9 skipped, CI-like 6072 / 681 skipped.
+  - **Current phase:** IMPLEMENT DONE (2026-10-02, cloud session) → waiting on **the human's acceptance walk** (runbook
+    `.claude/plans/ai-story/17-phase-7-fully-animated-runbook.md`). EXPLORE, CLARIFY and PLAN were done on 2026-10-01;
+    the human approved the plan with its three go-items (hook 3–6 s; keyframes on seedream-4.5-edit; ≈ $1.73 an episode).
+  - **Current stage:** every code stage is done — 1, 2a–2d, 3a–3d, 4, W-mid, 5a–5d, 6a–6c, 7, the fully animated fix
+    (DEC-236, the human's ask of 2026-10-02), the log sweep's bugs (DEC-237, DEC-238), the close-out fixes (DEC-239) — and
+    stage 8's docs (`docs/AI_STORY.md` v2 section and CLI, MASTER-SPEC §16, ASSUMPTIONS statuses, DECISIONS). The
+    2026-10-01 session ended at its limit while two agents built 6 and 7 in local worktrees; nothing of theirs was
+    committed, so this session rebuilt both from the plan (Opus agents in scratch worktrees, cherry-picked here).
+  - **Branch:** `claude/phase-7-capability-upgrade-b0huym` (pushed; fast-forwarded from `feat/ai-story-phase-7`
+    90d914f). The human merges it into `feat/ai-story-phase-7` / `main`; deploy only at 0 jobs (runbook §1).
+  - **Final suites (this cloud container, head 9f1203a):** local 6892 passed / 1 skipped; CI-like 6193 / 681 skipped;
+    plus the container-only 2 root failures and 14 fastapi-fixture errors (baseline on 90d914f: 6763 / 9 and 6072 / 681).
+  - **Next (the human):** deploy, Settings (allow paid on, caps 2/6/20, FAL_KEY), "Ask the providers (free)" (A-125),
+    then the acceptance walk on a new v2 story (≈ $1.73 + ≈ $0.56): the verdict on the phone confirms or refutes
+    A-116…A-120. Then phase 7's close (CHECKPOINT DONE header, deploy note).
+  - **Follow-ups (not done, stated in DEC-232/DEC-239 and the log sweep):** a look edit does not stale the sheets drawn
+    from the old look; a single shot-image regenerate does not run J2; repeated fill passes on an under-window script;
+    the dashboard cannot add/remove a relationship or a wardrobe set; the 0600 Settings file is read by the CLI only
+    with `--settings`; the near-9:16 SAR edge for legacy stills (DEC-217); EXIF orientation; Groq/stt only through
+    the User-Agent fix (no live check from here); VPS housekeeping (stale side-task worktrees, the walk's
+    `walk7-code` worktree, the 6c branch).
   - **Walk story:** `782ee78899b0` "L'Héritage du verger" in `outputs-walk7/` (git-excluded), run in the container
     from the frozen worktree `.claude/worktrees/walk7-code` via `scratchpad/walk7/walk7.py`; W-mid spent $1.38.
   - **Funding (DEC-235, the human 2026-10-01):** fal only; no money on the Gemini API (a Gemini app subscription does
     not fund it). Stage 2c (after stage 4) moves sheets/plates/props to fal Seedream 4.5 (text-to-image + edit).
-  - **The human must, before the fully animated test:** deploy the branch at 0 jobs, turn allow paid on, set the caps to
-    2/6/20 in Settings (saved 1/3/10 override the new defaults), press "Ask the providers (free)" (runbook 17).
-  - **Open questions:** none. The plan's assumptions A-110…A-124 are UNCONFIRMED.
+  - **Open questions:** none. Assumptions: A-111 confirmed in use, A-110/A-114 partly, A-112/A-113/A-121 moot (DEC-235),
+    A-122 superseded (measured budgets), A-116…A-120 and A-125 wait for the human's walk and key check.
   - **Worktree:** `.claude/worktrees/ai-story-phase-7`, branch `feat/ai-story-phase-7` from `main` 30604dd. The main
     checkout stays on `main` (bind-mounted by `rzc-backend`); deploy only at 0 jobs by fast-forward.
   - **Checkpoint commit:** 30604dd (clean tree; this artifacts commit sits on top).
@@ -33,11 +35,11 @@
     passed / 769 skipped / 0 failed (6602 collected); `compileall` clean. (First recorded as 6633/11 and 5839/771 from
     progress markers, which counted the two "bringing up nodes..." lines; corrected. Run with `-o addopts=""` so the
     summary line prints.)
-  - **Live state:** `main` = 30604dd deployed; health 200, 0 jobs; `allow_paid` false; caps 1/3/10 (the plan moves the
+  - **Live state (as of 2026-10-01; this cloud session cannot see the VPS):** `main` = 30604dd deployed; health 200, 0 jobs; `allow_paid` false; caps 1/3/10 (the plan moves the
     defaults to 2/6/20 in stage 2a); keys set: google, fal, cloudflare, nvidia, openrouter; `GEMINI_PAID_API_KEY` to be
     added by the human before W-mid. All 9 stories kept; none is touched by this phase (RC-M3).
-  - **Paid spend this phase:** $0 so far. Planned: W-mid ≤ $1.60 after stage 4, the acceptance walk ≈ $2.8 per story,
-    each as a single CLI process with per-process caps after a shown estimate and the human's go (DEC-215).
+  - **Paid spend this phase:** W-mid $1.38 booked (2026-10-01); nothing since (this cloud session has no keys). Planned:
+    the acceptance walk ≈ $1.73 an episode + ≈ $0.56 a story, after a shown estimate and the human's go (DEC-215).
 - **Stage ledger** (each: Tier-1 green → commit → log line):
   | Stage | Status | Commit |
   |---|---|---|
@@ -56,11 +58,13 @@
   | 5c context builder | DONE (selection 60 files: local 2680, CI env 2364 + 316s) | 0950a25 |
   | 5d continuity ledger | DONE (selection 41 files: local 2670, CI env 2201 + 469s) | 88e4b3f |
   | 6c narrator, subtitles floor, prosody | DONE (combined full suites: local 6773 / 1, CI env 5977 / 766) | 8fd7f4b, 39871dd |
-  | FA fully animated stories (DEC-236, the human's ask 2026-10-02) | DONE (see the action log) | 2aa7c00 |
-  | 6a J1, duplicate check, hook text, length gate | in progress (agent, wt-s6) | |
-  | 6b J2 keyframe judge + approval | in progress (agent, wt-s6) | |
-  | 7 hardware advice + dashboard | todo | |
-  | 8 docs, close, acceptance walk | todo | |
+  | FA fully animated stories (DEC-236, the human's ask 2026-10-02) | DONE (full suites, see the action log) | 2aa7c00 |
+  | Log-sweep bugs: Groq UA, whole audio/frames, crowded keyframes + descriptive names + lettering, preflight filters | DONE (selections both envs) | cbba56e, ff7d3ee, 8cf3f2c, 2cb7568 |
+  | 7 hardware advice + preset price + editing surfaces (DEC-232) | DONE (agent; combined full suites local 6843, CI env 6145/680) | 97bcc73…14147e8 |
+  | 6a J1, duplicate check, hook text, length gate, fill pass (DEC-230, DEC-231 part 2) | DONE (agent; combined full suites local 6880, CI env 6181/681) | 254f2c9, 32dbd47 |
+  | 6b J2 keyframe judge + approval (DEC-230) | DONE (agent) + the Keyframes card | b46360c, 03781f6, edb719c |
+  | Close-out fixes: v2 fast track, CLI --settings, tier-3 warning (DEC-239) | DONE (selections both envs) | 9287ce4, 33b740d, 9f1203a |
+  | 8 docs, close, acceptance walk | docs DONE; the acceptance walk is the human's (runbook 17) | this commit |
 - **Regression contract (phase 7)** — carried from phases 5/6 (tables below) plus the plan's rules:
   | Item | Must keep working | Proof |
   |---|---|---|
