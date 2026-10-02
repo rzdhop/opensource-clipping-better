@@ -4,18 +4,27 @@
   - **Current phase:** IMPLEMENT. EXPLORE (E1–E5), CLARIFY (11 answers) and PLAN (Opus design, stages 1–8) were done on
     2026-10-01 in one session; the human approved the plan with its three go-items (hook 3–6 s; keyframes on
     seedream-4.5-edit with nano-banana-2-lite fallback; ≈ $1.73 per episode under the $2 cap).
-  - **Current stage (2026-10-01 evening):** stages 1, 2a–2d, 3a–3d, 4, W-mid, 5a, 5b DONE and pushed (head e1d459f +
-    checkpoints). **In progress:** 5c (context builder, Opus agent). **Next:** 5d (continuity ledger), 6a (J1 judge,
-    duplicate check, hook text, hard length gate, fill pass), 6b (J2 keyframe judge + keyframe approval), 6c (narrator,
-    subtitles floor, prosody, fr-FR locale), 7 (hardware advice, dashboard incl. the WIZARD DEFECT: the new-story form
-    always sends a v1 profile, so dashboard stories never get v2; PATCH for look/dossier/knowledge), 8 (docs, close,
-    acceptance walk). Scopes for 6–7 in the scratchpad (`stage6-7-scope.md`), 5b/5c (`stage5-scope.md`).
+  - **Current stage (2026-10-02, cloud session):** stages 1, 2a–2d, 3a–3d, 4, W-mid, 5a–5d, 6c DONE (head 90d914f on
+    `feat/ai-story-phase-7`). The 2026-10-01 session ended at its limit while two agents built 6a+6b and 7 in local
+    worktrees: nothing of theirs was committed, so both restart from the plan. This session works on branch
+    `claude/phase-7-capability-upgrade-b0huym` (fast-forwarded to 90d914f; pushed there only, the human merges).
+    **Done here:** fully animated stories (DEC-236, `2aa7c00`; the human's runbook
+    `.claude/plans/ai-story/17-phase-7-fully-animated-runbook.md`). **In progress:** 6a+6b (Opus agent, worktree
+    `scratchpad/wt-s6`, branch `work/phase7-s6`). **Next:** 7 (Opus agent after FA: hardware advice + preset estimate,
+    look/dossier/knowledge editing, budget-profile select, estimate texts), the J2 / "Approve keyframes" UI after 6b,
+    the log sweep's bugs (bed-length guard, final frame count, Groq User-Agent, CLI Settings switch, low edges), the
+    W-mid leftovers (keyframe prompts over 220 words, logo badge), 8 (docs, close, acceptance-walk runbook).
+  - **This container:** no provider keys, fal and the doc sites blocked by its network policy; tests run in two envs
+    (`scratchpad/cilibs` = pytest only, `scratchpad/locallibs` = + fastapi/pydantic/httpx/Pillow/numpy/edge-tts).
+    Container-only baseline: 2 root-only failures (`test_an_unwritable_directory_is_reported_not_raised` ×2) and, in the
+    CI-like env, 14 setup errors of `test_generation_chain_api.py` (its fixture imports fastapi). Baseline on 90d914f:
+    local 6763 / 9 skipped, CI-like 6072 / 681 skipped.
   - **Walk story:** `782ee78899b0` "L'Héritage du verger" in `outputs-walk7/` (git-excluded), run in the container
     from the frozen worktree `.claude/worktrees/walk7-code` via `scratchpad/walk7/walk7.py`; W-mid spent $1.38.
   - **Funding (DEC-235, the human 2026-10-01):** fal only; no money on the Gemini API (a Gemini app subscription does
     not fund it). Stage 2c (after stage 4) moves sheets/plates/props to fal Seedream 4.5 (text-to-image + edit).
-  - **The human must, before W-mid:** set the caps to 2/6/20 in Settings (saved 1/3/10 override the new defaults) and
-    give the go on W-mid's shown estimate.
+  - **The human must, before the fully animated test:** deploy the branch at 0 jobs, turn allow paid on, set the caps to
+    2/6/20 in Settings (saved 1/3/10 override the new defaults), press "Ask the providers (free)" (runbook 17).
   - **Open questions:** none. The plan's assumptions A-110…A-124 are UNCONFIRMED.
   - **Worktree:** `.claude/worktrees/ai-story-phase-7`, branch `feat/ai-story-phase-7` from `main` 30604dd. The main
     checkout stays on `main` (bind-mounted by `rzc-backend`); deploy only at 0 jobs by fast-forward.
@@ -43,12 +52,13 @@
   | W-mid paid walk ≤ $1.60 | DONE ($1.38: sheets 0.36, places/props 0.24, keyframes 0.36, 3 clips 0.418; story 782ee78899b0 in outputs-walk7) | see log |
   | 3d image-prompt fixes from W-mid (prop refs without scale/hands/faces, expressions same head, look.presentation) + T1 v2 tag repair | DONE (81 files: local 4418, CI env 3965+453s) | see log |
 | 5a KB schemas + D1 | DONE (full suites in parallel: local 6712+1 re-pinned, CI env 5918/765) | see log |
-  | 5b knowledge step + gate | todo | |
-  | 5c context builder | todo | |
-  | 5d continuity ledger | todo | |
-  | 6a J1, duplicate check, hook text, length gate | todo | |
-  | 6b J2 keyframe judge + approval | todo | |
-  | 6c narrator, subtitles floor, prosody | todo | |
+  | 5b knowledge step + gate | DONE (full suites: local 6742 / 1 skipped, CI env 5947 / 766) | 3f3018f |
+  | 5c context builder | DONE (selection 60 files: local 2680, CI env 2364 + 316s) | 0950a25 |
+  | 5d continuity ledger | DONE (selection 41 files: local 2670, CI env 2201 + 469s) | 88e4b3f |
+  | 6c narrator, subtitles floor, prosody | DONE (combined full suites: local 6773 / 1, CI env 5977 / 766) | 8fd7f4b, 39871dd |
+  | FA fully animated stories (DEC-236, the human's ask 2026-10-02) | DONE (see the action log) | 2aa7c00 |
+  | 6a J1, duplicate check, hook text, length gate | in progress (agent, wt-s6) | |
+  | 6b J2 keyframe judge + approval | in progress (agent, wt-s6) | |
   | 7 hardware advice + dashboard | todo | |
   | 8 docs, close, acceptance walk | todo | |
 - **Regression contract (phase 7)** — carried from phases 5/6 (tables below) plus the plan's rules:

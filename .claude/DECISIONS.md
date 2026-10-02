@@ -4042,3 +4042,35 @@ had an fr-CA voice in an fr-FR story; E4: 31 % of story A's word_pop cards laste
   pinned base rate and pitch; `voices.prosody_for` adds a per-emotion delta (angry +6 %/+2 Hz, sad −8 %/−3 Hz, fear
   +8 %/+3 Hz, shocked +5 %/+4 Hz, tender −5 %/−1 Hz), clamped to ±20 % / ±8 Hz, applied only on v2 lines.
 **Consequence.** Built in a parallel worktree and cherry-picked: commits `8fd7f4b` (schema) and `39871dd`.
+
+## DEC-236 — Fully animated stories: a dashboard story starts on v2 Quality, no shot is ever a still, video keys asked for free
+**Context.** The human (2026-10-02), after creating "Cœur Firewall et Larmes de Citron" in the dashboard for a paid
+test: "impossible to animate shots; I want only fully animated episodes, no diaporama, even if it costs money; ask
+the provider for video and check the API key, then start with the desired setting". Choices given: phase-7 code with
+a v2 story, fal Seedance 1 pro fast 720p, refuse unless every shot moves (keep_still the one exemption), caps
+2 / 6 / 20. Three gates were closed for every dashboard story: the form always sent tier 1 + `free` (stills with
+motion, `animate: none`) without `pipeline`, so `media_policy.new_story_profile` never applied and `quality` was not
+offered; `allow_paid` off and saved caps 1 / 3 / 10 (the human's Settings); and nothing refused a shot rendered as a
+still when its clip was missing. The video chain test never asks a hosted video provider (RC-V8), so a wrong key
+showed only when the first clip was bought.
+**Decision.**
+- The new-story form starts from `GET /api/stories/new-profile` (`media_policy.new_story_offer`: the profile a story
+  made now gets, `quality`, `missing_keys`, `allow_paid`; never a key) and sends no profile until the user changes
+  one. It offers the v2 pipeline and "Quality (billed APIs) — every shot animated", and says whether the story will
+  be fully animated and why not.
+- A `generation_profile.pipeline` patch brings what `store.create` gives that pipeline (episode template unless sent,
+  `narrator.enabled` unless sent) and is refused once an episode has a script (`workflow._follow_pipeline_switch`). A
+  cast made before the switch stays; the cast step run again on v2 writes dossiers and looks and redraws the sheets.
+  The Visual tier card gains "Animate every shot".
+- `media_policy.fully_animated(story)`: v2, tier ≥ 2, a budget profile with `animate: all_shots`. On such a story
+  `approve_assets` and the render refuse while a shot not pinned `keep_still` has no current clip (never made,
+  failed, stale, still generating), naming each with what to do; `fill_failed_with_motion` is not offered. Any other
+  story keeps phase 6's behaviour (RC-M3).
+- `video.check_key`: one free GET per keyed hosted video link — fal's Platform API
+  `GET /v1/models/pricing?endpoint_id=` (`Authorization: Key`; the live price comes back), Gemini's
+  `GET /v1beta/models/{model}` (`x-goog-api-key`; proves the key and the model, not the billing). `POST
+  /api/settings/check-video-keys` and Settings' "Ask the providers (free)". The chain test stays call-free (RC-V8).
+**Consequence.** Commit `2aa7c00`. The human's runbook: `.claude/plans/ai-story/17-phase-7-fully-animated-runbook.md`
+(deploy the branch at 0 jobs, allow paid on, caps 2 / 6 / 20, ask the providers, switch or create the story, the
+walk with its estimates). Not proven live from this cloud session: fal's Platform API answer shape (read leniently:
+`prices[].unit_price/unit/currency`; A-125), and the fal/Gemini hosts are blocked by this container's network policy.

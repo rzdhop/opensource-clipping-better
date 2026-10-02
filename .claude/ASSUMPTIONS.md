@@ -428,6 +428,12 @@
   prompt-only; the control story `ab8fc500173e` had `allow_paid` on and kept `references`.
 - **A-124** — (phase 7) the hook shot's 3–6 s exception to the 5–12 s shot rule is acceptable to the human (accepted with
   the plan's approval on 2026-10-01). Confirmed by that approval; kept here so the template's exception has a home.
+- **A-125** — (phase 7, DEC-236) fal's Platform API `GET https://api.fal.ai/v1/models/pricing?endpoint_id=<id>` with
+  `Authorization: Key` answers 200 with `prices[]` rows `{endpoint_id, unit_price, unit, currency}` for a good key, 401
+  or 403 for a refused one, and bills nothing; Gemini's `GET /v1beta/models/{model}` answers a bad key with 400
+  `API_KEY_INVALID` ("API key not valid"). Read from fal's docs as quoted by a web search and the Gemini API reference;
+  this cloud session could not reach either host. `video.check_key` reads the answer leniently (a 200 without a price
+  row is "no_model"). UNCONFIRMED until the human's first "Ask the providers (free)".
 
 ## Confirmed
 - **A-082** — fal.ai as measured in the paid test (2026-09-29, DEC-174):
