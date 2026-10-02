@@ -68,11 +68,13 @@ import dataclasses
 import subprocess
 import time
 
+from .. import media_policy
 from .. import store as store_mod
 from .. import timing, voices
 from . import assets as assets_step
 from . import clips as clips_step
 from . import episode_common, llm_call, voice_lines
+from . import judge as judge_step
 from . import metadata as metadata_step
 from . import render as render_step
 from . import script as script_step
@@ -159,11 +161,16 @@ def read_params(params) -> dict:
 
 # ------------------------------------------------------------------- rules
 
-def script_refusal(script, ep):
+def script_refusal(script, ep, *, v2=False):
     """Why the fast track will not approve *script* (DEC-162), or None when
     it may: complete, its consistency report fresh and passed, its timing
     neither over nor under the template's window. Never approve-anyway: a
-    report with issues is a refusal, whatever the issues."""
+    report with issues is a refusal, whatever the issues.
+
+    *v2* (``media_policy.is_v2`` of the story; DEC-230, DEC-231 part 2): the
+    first-watch report (J1) must be fresh and passed too, and a length
+    outside the window is never offered to the user to approve -- a v2
+    episode outside its window is never approved."""
     if script is None or not script_step.is_complete(script, ep):
         return (f"Episode {ep}'s script is not complete: run it again (the fast track fills what is missing).")
     report = script.get("consistency_report")
@@ -178,13 +185,46 @@ def script_refusal(script, ep):
                 f"{': ' + issues if issues else ''}. The fast track never approves over issues: fix them (edit the "
                 "script, or regenerate the scenes they name) so the check passes, or approve the script anyway "
                 "yourself.")
+    if v2:
+        watch = judge_step.first_watch_state(script)
+        if watch in ("none", "stale"):
+            return (f"Episode {ep}'s first-watch check (J1) has not run on this revision of the script: run it "
+                    "again (the fast track checks it first).")
+        if watch == "issues":
+            report = script[judge_step.FIRST_WATCH]
+            count = len(report["issues"])
+            issues = "; ".join(f"{issue['scene_id'] or 'the episode'} ({issue['kind']}): {issue['fix']}"
+                               for issue in report["issues"])
+            return (f"Episode {ep}'s first-watch check (J1) found {count} issue{_s(count)}"
+                    f"{': ' + issues if issues else ''}. The fast track never approves over issues: fix them (edit "
+                    "the script, or regenerate the scenes they name) so the check passes, or approve the script "
+                    "anyway yourself.")
     state = (script.get("timing") or {}).get("state")
     if state in TIMING_REFUSED:
         how = "shorten" if state == "over" else "lengthen"
+        if v2:
+            fill = (" -- run the script step again: its fill pass lengthens the shortest scenes --"
+                    if state == "under" else "")
+            return (f"Episode {ep}'s script is {state} its length window: {episode_common.timing_line(script)}. A "
+                    f"v2 episode is never approved outside its window: {how} it{fill} (edit it, or regenerate a "
+                    "scene).")
         return (f"Episode {ep}'s script is {state} its length window: {episode_common.timing_line(script)}. The "
                 f"fast track approves only a script inside it: {how} it (edit it, or regenerate a scene), or "
                 "approve it yourself.")
     return None
+
+
+def keyframes_wait(ec):
+    """Why the fast track stops for the keyframe approval (phase 7 stage 6b,
+    DEC-230), or None: a v2 episode at tier >= 2 buys no clip before its
+    keyframes are approved (``assets.clip_hold``), and that approval is the
+    human's, never the fast track's -- so it never auto-approves assets whose
+    clips are held. A legacy episode, or a tier-1 one, never waits."""
+    if not media_policy.is_v2(ec.story) or clips_step.tier_of(ec) < 2:
+        return None
+    board = episode_common.read_episode(ec, STORYBOARD_DOC)
+    doc = episode_common.read_episode(ec, ASSETS_DOC)
+    return assets_step.clip_hold(ec, board, doc) if board else None
 
 
 def _caps_line(caps) -> str:
@@ -194,7 +234,7 @@ def _caps_line(caps) -> str:
     return f"Caps: {_and(parts)}." if parts else ""
 
 
-def paid_verdict(units, *, ep, predicted=False) -> dict:
+def paid_verdict(units, *, ep, predicted=False, fully_animated=False) -> dict:
     """The fast track's paid check on an assets estimate (*units*:
     ``assets.asset_units``' shape; *predicted*: the counts are an upper
     bound, :func:`estimate`'s)::
@@ -221,7 +261,11 @@ def paid_verdict(units, *, ep, predicted=False) -> dict:
     even while ``allow_paid`` is off, so the check stops on them with their
     numbers; clips that cannot be planned at all are a blocker. A tier-1
     estimate has no ``video``: its verdict is unchanged; nor does one made
-    with ``animate`` off count its clips (stage 8)."""
+    with ``animate`` off count its clips (stage 8).
+
+    *fully_animated* (``media_policy.fully_animated`` of the story, DEC-236):
+    every shot must be a clip, so the stop never offers keeping shots still
+    or animate off as a way out of the clips' cost."""
     images, voices_est, caps = units["images"], units["voices"], units.get("caps") or {}
     allow = bool(caps.get("allow_paid"))
     upto = "up to " if predicted else ""
@@ -278,7 +322,7 @@ def paid_verdict(units, *, ep, predicted=False) -> dict:
     total = round(images_usd + float(voices_usd) + video_usd, 4)
     # Phase 6 stage 11: paid clips have their own way out.
     clips_way = ("; for the clips, keep their shots still (the assets edit's keep_still) or run the assets step "
-                 "with animate off" if video_usd else "")
+                 "with animate off" if video_usd and not fully_animated else "")
     over = units.get("over_cap")
     caps_line = _caps_line(caps)
 
@@ -425,7 +469,7 @@ class _FastTrack:
                                   budget=self.budget)
         ec = self.context()
         script = episode_common.read_episode(ec, SCRIPT_DOC)
-        refusal = script_refusal(script, ec.ep)
+        refusal = script_refusal(script, ec.ep, v2=media_policy.is_v2(ec.story))
         if refusal:
             raise StepFailed(refusal)
         self.approve(ec, "script",
@@ -474,7 +518,7 @@ class _FastTrack:
         # verdict is on the link that would really run.
         units = assets_step.asset_units(ec, script, board, env=self.ctx.settings_env, adapters=self.adapters,
                                         transport=self.transport, probe_local=True)
-        verdict = paid_verdict(units, ep=ec.ep)
+        verdict = paid_verdict(units, ep=ec.ep, fully_animated=media_policy.fully_animated(ec.story))
         if verdict["stop"]:
             raise StepFailed(verdict["stop"])
         self.log(f"💲 {verdict['message']}")
@@ -503,6 +547,11 @@ class _FastTrack:
             raise StepFailed(f"Episode {ec.ep}'s assets are not complete (not every shot has a current image and "
                              "every line a voice): run the fast track again to make what is missing.")
         ec = self.context()
+        wait = keyframes_wait(ec)
+        if wait:
+            raise StepFailed(f"Episode {ec.ep}'s keyframes are made and checked (J2), and wait for you: {wait}. "
+                             "Look at each keyframe and its check on the storyboard, then Approve keyframes (or "
+                             "approve anyway); the clips are bought after that.")
         self.approve(ec, "assets",
                      lambda workflow, now: workflow.approve_assets(ec.store, ec.story_id, ec.ep, now=now),
                      f"{summary['shots']['total']} shots current or locked, every line voiced; fingerprint "
@@ -745,7 +794,8 @@ def estimate(ec, *, env, storyboard=T1, adapters=None, transport=None, custom_fo
     if video is not None and video["count"] is not None:
         units["video"] = video
         units["ready"] = bool(units["ready"] and video["ready"])
-    verdict = paid_verdict(units, ep=ep, predicted=not (images_exact and tts_exact))
+    verdict = paid_verdict(units, ep=ep, predicted=not (images_exact and tts_exact),
+                           fully_animated=media_policy.fully_animated(ec.story))
     if stops_at is None and verdict["stop"]:
         stops_at = {"step": "paid_check", "reason": verdict["stop"]}
 

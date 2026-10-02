@@ -4301,7 +4301,7 @@ def assets_estimate(ec, *, env, align_words=False, probe_local=False, animate=Tr
     script, board = _step_refusal(assets_step.require_approved, ec)
     units = _step_refusal(assets_step.asset_units, ec, script, board, env=env, align_words=align_words,
                           probe_local=probe_local, animate=animate, route=route)
-    verdict = fast_track_step.paid_verdict(units, ep=ec.ep)
+    verdict = fast_track_step.paid_verdict(units, ep=ec.ep, fully_animated=media_policy.fully_animated(ec.story))
     return dict(units, step="assets", ep=ec.ep, paid=verdict, message=verdict["message"])
 
 
