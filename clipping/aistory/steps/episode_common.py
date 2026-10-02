@@ -27,11 +27,12 @@ common live here, once:
   approval;
 - :func:`mark_changed` -- what a rewrite of part of a script does to both
   documents: the revisions move, both approvals and ``approved_anyway`` are
-  cleared, the consistency report and every storyboard scene planned from an
-  older revision of its scene become stale. An approval never outlives what
-  it approved (DEC-123, extended to episodes). A text-only edit (phase 5
-  stage 7, DEC-129 as amended) keeps the storyboard's approval and its
-  scenes' plans: a scene whose words moved is marked ``retime_only``.
+  cleared, the consistency report (and a v2 script's first-watch report) and
+  every storyboard scene planned from an older revision of its scene become
+  stale. An approval never outlives what it approved (DEC-123, extended to
+  episodes). A text-only edit (phase 5 stage 7, DEC-129 as amended) keeps the
+  storyboard's approval and its scenes' plans: a scene whose words moved is
+  marked ``retime_only``.
 
 Nothing here reads or writes ``story.json``: an episode never changes the
 story's approvals or status (RC-E2).
@@ -563,6 +564,10 @@ def mark_changed(script, storyboard, *, scene_ids, now, plan_kept=None, keep_app
     script["approved_anyway"] = None
     if script.get("consistency_report") is not None:
         script["consistency_report"]["stale"] = True
+    # Phase 7 stage 6a (DEC-230): a v2 script's first-watch report goes stale
+    # the same way (a legacy script never has one).
+    if script.get("first_watch") is not None:
+        script["first_watch"]["stale"] = True
     script["updated_at"] = now
     if storyboard is None:
         return

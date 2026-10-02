@@ -820,7 +820,9 @@ def test_the_largest_french_knowledge_reply_fits_its_cap(prompt_id):
 
 from types import SimpleNamespace  # noqa: E402 -- this section's own names
 
-MEASURED_SLICED = {"E1v2": 2490, "E2v2": 2101, "E3v2": 2924}
+# Phase 7 stage 6a (DEC-231): E3v2 re-pinned on purpose, 2,924 -> 2,939 (budget 3,370 -> 3,380): its hook
+# ask now says the on-screen text is required whatever the hook style (story B shipped none).
+MEASURED_SLICED = {"E1v2": 2490, "E2v2": 2101, "E3v2": 2939}
 _PLACE_ID = LONGEST_PLACE["place_id"]
 
 
@@ -1015,3 +1017,69 @@ def test_the_largest_french_l1_reply_fits_its_cap():
     assert needed == pytest.approx(MEASURED_L1_REPLY, abs=0.05)
     cap = prompts.MAX_TOKENS["L1"]
     assert cap == -(-round(needed * 1.15, 1) // 10) * 10
+
+
+# ================================================================ phase 7: J1 (the first-watch judge)
+#
+# Stage 6a (DEC-230, DEC-138's method). J1 reads what a first-time viewer
+# would: the 12-scene French script digest E4 and S3 read (this file's own
+# SCENES, its worst case), the previous episode's recap at its cap
+# (schemas.RECAP_MAX_WORDS), the hook's on-screen text (6 words) and the
+# cliffhanger's reveal (40 words) at theirs, and the objects block at its
+# bound: E1 puts at most 4 props in a scene, so 48 mentions over 12 scenes,
+# spread over the most props an episode can show -- the knowledge base's
+# registry (schemas.KNOWLEDGE_PROPS_MAX, 8) plus E1v2's 2 new objects -- each
+# a 60-character name. No bible, cast notes or memory: the viewer knows only
+# the episode. Budget = worst case + 15 %, rounded up to ten.
+#
+# J1's reply: every stated limit hit in French (the three take-aways at 25,
+# 30 and 25 words, 6 issues with a 30-word fix, the longest kind and scene
+# id), chars/4 x 1.3, + 15 %, rounded up to ten.
+
+MEASURED_J1 = 3195
+MEASURED_J1_REPLY = 795.6
+_J1_PROPS = 10
+_J1_PROPS_PER_SCENE = 4
+
+
+def _j1():
+    from clipping.aistory import schemas
+
+    digest = prompts.script_digest({"scenes": SCENES}, {"places": {p["place_id"]: p["name"] for p in PLACES},
+                                                         "cast": NAMES})
+    names = [f"{_filler(8, 59)}{i}" for i in range(_J1_PROPS)]  # 60 characters, each its own
+    shown = {}
+    for i, scene in enumerate(SCENES):
+        for k in range(_J1_PROPS_PER_SCENE):
+            shown.setdefault(names[(i * _J1_PROPS_PER_SCENE + k) % _J1_PROPS], []).append(scene["scene_id"])
+    objects = [(name, shown[name]) for name in names]
+    assert sum(len(ids) for _name, ids in objects) == len(SCENES) * _J1_PROPS_PER_SCENE
+    return prompts.build_j1(_pack(), ep=2, script_digest=digest, objects=objects, hook_text=_fr(6),
+                            reveal=_fr(40), previous_recap=_fr(schemas.RECAP_MAX_WORDS))
+
+
+def test_j1_worst_case_measures_what_is_recorded_and_fits_its_budget():
+    worst = _tokens(_j1())
+    assert worst == MEASURED_J1
+    budget = prompts.INPUT_BUDGET["J1"]
+    assert budget == -(-round(worst * 1.15, 1) // 10) * 10
+    assert budget <= 4000  # the spec's ceiling
+    _fits("J1", *_j1()[:2])
+
+
+def test_the_largest_french_j1_reply_fits_its_cap():
+    import json
+
+    from clipping.aistory import schemas
+
+    kind = max(schemas.FIRST_WATCH_ISSUE_KINDS, key=len)
+    reply = {key: _fr(words) for key, words in prompts.J1_SUMMARY_MAX_WORDS.items()}
+    reply.update(passed=False, issues=[{"scene_id": "s11", "kind": kind, "fix": _fr(prompts.J1_FIX_MAX_WORDS)}]
+                 * prompts.J1_ISSUES_MAX)
+    assert prompts.validate_j1(reply, scene_ids=[s["scene_id"] for s in SCENES]) == []
+    needed = context.estimate_tokens("", json.dumps(reply, ensure_ascii=False)) * FRENCH_TOKEN_FACTOR
+    assert needed == pytest.approx(MEASURED_J1_REPLY, abs=0.05)
+    cap = prompts.MAX_TOKENS["J1"]
+    assert cap == -(-round(needed * 1.15, 1) // 10) * 10
+    assert prompts.TEMPERATURE["J1"] is prompts.ANALYTIC_TEMPERATURE
+

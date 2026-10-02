@@ -78,10 +78,13 @@ would change since the last good render, stage by stage, starting nothing.
 **Afterwards**: ``render/subtitles.ass`` is copied, atomically, to the
 episode's ``subtitles.ass``. A length outside the template's window, a
 loudness outside -14 +/- 1 LUFS or a true peak above -1 dBTP is a warning in
-the feed and the manifest, never a failure. A cancel raises ``Cancelled``
-(the manifest says where it stopped; partial files are kept); a failed
-stage is a ``StepFailed`` naming the stage and its stderr tail. The step
-returns a summary (:func:`run`); ``story.json`` is never written (RC-E2).
+the feed and the manifest, never a failure -- but a v2 story's episode whose
+measured length is outside the window is refused before anything runs
+(``gates.require_length``, the last precondition; phase 7 stage 6a,
+DEC-231). A cancel raises ``Cancelled`` (the manifest says where it stopped;
+partial files are kept); a failed stage is a ``StepFailed`` naming the stage
+and its stderr tail. The step returns a summary (:func:`run`); ``story.json``
+is never written (RC-E2).
 
 Stdlib only (DEC-012).
 """
@@ -101,7 +104,7 @@ from ..render import partial
 from ..render import plan as plan_mod
 from ..render import runner as runner_mod
 from . import assets as assets_step
-from . import clips, episode_common, sticky_link, voice_lines
+from . import clips, episode_common, gates, sticky_link, voice_lines
 from .llm_call import StepFailed
 
 STEP = "render"
@@ -218,6 +221,7 @@ def require_renderable(ec) -> tuple:
     if assets_step.current_fingerprint(ec, board, script, doc) != approved["fingerprint"]:
         raise StepFailed(f"Episode {ep}'s assets changed since they were approved (an image, a voice or a sound is "
                          "not the one approved): look at them, approve them again, then render.")
+    gates.require_length(ec, script, board, stage="render")
     return script, board, doc
 
 

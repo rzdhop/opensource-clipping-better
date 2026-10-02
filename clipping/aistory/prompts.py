@@ -146,6 +146,11 @@ C1_CALLS = 10
 # cap): 3,407; + 15 %, rounded up to ten. The reply: every character at
 # every cap (the same ledger caps, 4 possessions each, the most the input
 # above offers): 592.8 tokens (chars/4 x 1.3); + 15 %, rounded up to ten.
+#
+# J1 (phase 7 stage 6a, DEC-230, DEC-138's method): its largest French
+# reply -- the three take-aways at 25, 30 and 25 words, 6 issues of the
+# longest kind with a 30-word fix -- needs 795.6 tokens (chars/4 x 1.3);
+# + 15 %, rounded up to ten (tests/test_story_episode_prompt_budgets.py).
 MAX_TOKENS = {
     "C1": 700, "B1": 400, "B2": 520, "B3": 300,
     "K1": 750, "P0": 420, "P1": 260, "R1": 100, "S1": 950, "S2": 350, "U1": 120,
@@ -158,6 +163,7 @@ MAX_TOKENS = {
     "D4": 430, "D5": 3330, "D6": 540,
     "E1v2": 1750, "E2v2": 600, "E3v2": 720,
     "L1": 690,
+    "J1": 920,
 }
 
 # E1's payoff variant (phase 5, plan 11 stage 3, DEC-138's method): from
@@ -208,6 +214,7 @@ TEMPERATURE = {
     "E2v2": WRITING_TEMPERATURE,
     "E3v2": WRITING_TEMPERATURE,
     "L1": ANALYTIC_TEMPERATURE,
+    "J1": ANALYTIC_TEMPERATURE,
 }
 SCHEMA_NAMES = {
     "C1": "story_concepts", "B1": "bible_core", "B2": "bible_world", "B3": "bible_values",
@@ -224,6 +231,7 @@ SCHEMA_NAMES = {
     "D4": "knowledge_world", "D5": "knowledge_timeline", "D6": "knowledge_props",
     "E1v2": "episode_beat_sheet_v2", "E2v2": "episode_scene_dialogue_v2", "E3v2": "episode_framing_scenes_v2",
     "L1": "continuity_ledger",
+    "J1": "first_watch_check",
 }
 
 # E4's input is the whole script, not a small pack -- it needs a wider
@@ -322,12 +330,20 @@ SCHEMA_NAMES = {
 # (context.SCENE_SLICE_MAX_WORDS, EPISODE_SLICE_MAX_WORDS) and the v2 asks,
 # French (tests/test_story_episode_prompt_budgets.py): E1v2 2,490, E2v2 2,101
 # (its place line says the name only), E3v2 2,924 (in full; its partials
-# less). Each + 15 %, rounded up to ten, under the spec's 4,000 ceiling. T1v2's
+# less) -- 2,939 since stage 6a (DEC-231): its hook ask says the on-screen
+# text is required. Each + 15 %, rounded up to ten, under the spec's 4,000 ceiling. T1v2's
 # continuity block (context.slice_for_shot) fits T1v2's own budget unchanged.
+#
+# J1 (phase 7 stage 6a, DEC-230): the 12-scene French digest E4 reads, the
+# previous recap at 40 words, the hook text and the reveal at their caps, and
+# the objects block at its bound (48 mentions over 10 props of 60
+# characters: the registry's 8 and E1v2's 2 new objects); no bible, cast
+# notes or memory (a first-time viewer knows only the episode): 3,195;
+# + 15 %, rounded up to ten (tests/test_story_episode_prompt_budgets.py).
 INPUT_BUDGET = {"E1": 1820, "E2": 1660, "E3": 2530, "E4": 3900, "T1": 1270, "T1r": 1410, "S3": 3740, "F1": 3950, "N1": 3740,
                 "D2": 2370, "D3": 1940, "R1v2": 1170, "T1v2": 2020, "T1rv2": 2060, "D1": 3890,
                 "D4": 2270, "D5": 3930, "D6": 3560,
-                "E1v2": 2870, "E2v2": 2420, "E3v2": 3370, "L1": 3920}
+                "E1v2": 2870, "E2v2": 2420, "E3v2": 3380, "L1": 3920, "J1": 3680}
 
 # The ``bible:<field>`` grammar of spec 9.2: which prompt a regenerate note
 # re-runs, and which of that prompt's fields it targets. "tone" also carries
@@ -1275,6 +1291,74 @@ def _personality_block(cast) -> str:
     return "\n".join(lines)
 
 
+# ------------------------------------------------- repeated lines (phase 7 stage 6a)
+#
+# E4's comprehension diagnosis: story A's climax line was spoken twice
+# verbatim. A v2 story's E2/E3 replies (``validate_e2``/``validate_e3`` with
+# *episode_lines*) and its first-watch report (``steps/judge.py``) refuse a
+# line that repeats another of the episode: the normalised-token Jaccard of
+# the two lines -- accents folded, case and punctuation dropped, each line a
+# set of words -- at or above :data:`DUPLICATE_LINE_JACCARD`. A line of fewer
+# than :data:`DUPLICATE_LINE_MIN_TOKENS` words is never compared: a short
+# interjection ("Quoi ?", "Non !") said twice is speech, not a repeated line.
+
+DUPLICATE_LINE_JACCARD = 0.7
+DUPLICATE_LINE_MIN_TOKENS = 3
+DUPLICATE_LINE_PREFIX = "repeats a line already spoken in this episode"
+_LINE_TOKEN_SPLIT = re.compile(r"[\W_]+")
+_QUOTE_MAX_CHARS = 80
+
+
+def line_tokens(text) -> frozenset:
+    """The words of a spoken line as a set, normalised: accents folded
+    (NFKD, combining marks dropped), case folded, split on anything that is
+    not a letter or a digit (an apostrophe, a dash, punctuation)."""
+    import unicodedata  # stdlib; imported here: this module's top level imports only ``re`` (its guard test)
+
+    folded = unicodedata.normalize("NFKD", text or "")
+    folded = "".join(ch for ch in folded if not unicodedata.combining(ch)).casefold()
+    return frozenset(token for token in _LINE_TOKEN_SPLIT.split(folded) if token)
+
+
+def line_similarity(a, b) -> float:
+    """The Jaccard index of two lines' :func:`line_tokens` (0.0 when either
+    is empty)."""
+    ta, tb = line_tokens(a), line_tokens(b)
+    if not ta or not tb:
+        return 0.0
+    return len(ta & tb) / len(ta | tb)
+
+
+def near_duplicate(a, b) -> bool:
+    """Whether line *b* repeats line *a* (module rule above): both at least
+    :data:`DUPLICATE_LINE_MIN_TOKENS` words, their Jaccard index at least
+    :data:`DUPLICATE_LINE_JACCARD`."""
+    if min(len(line_tokens(a)), len(line_tokens(b))) < DUPLICATE_LINE_MIN_TOKENS:
+        return False
+    return line_similarity(a, b) >= DUPLICATE_LINE_JACCARD
+
+
+def quoted_line(text) -> str:
+    """*text* in quotes, cut to :data:`_QUOTE_MAX_CHARS` characters."""
+    text = " ".join(str(text).split())
+    if len(text) > _QUOTE_MAX_CHARS:
+        text = text[:_QUOTE_MAX_CHARS - 1].rstrip() + "…"
+    return f"“{text}”"
+
+
+def _duplicate_line_errors(errors, path, texts, episode_lines) -> None:
+    """One error per line of *texts* (a reply's lines, at *path*) that
+    repeats a line of *episode_lines* (the episode's other lines) or an
+    earlier line of the same reply."""
+    episode_lines = list(episode_lines)
+    for i, text in enumerate(texts):
+        for earlier in episode_lines + list(texts[:i]):
+            if near_duplicate(earlier, text):
+                errors.append(f"{path}[{i}].text: {DUPLICATE_LINE_PREFIX} ({quoted_line(earlier)}): write a new "
+                              "line")
+                break
+
+
 # ------------------------------------------------------- F1: French elisions
 
 # The one sentence every episode ask (E1/E2/E3, never E4 -- it writes no new
@@ -1946,7 +2030,7 @@ def _build_e2(pack, *, scene, outline, previous, word_budget, cast, place, props
     return _system(pack), user, e2_schema(speakers, sfx_cue_names)
 
 
-def validate_e2(reply, *, scene, narrator_enabled, sfx_cues, word_budget=None) -> list:
+def validate_e2(reply, *, scene, narrator_enabled, sfx_cues, word_budget=None, episode_lines=None) -> list:
     """Post-validation for an E2 reply (spec 2.7, 4.2): line count and caps,
     a speaker that is one of the scene's own characters (or ``"narrator"``
     when enabled), sfx cue references against a valid line number, and the
@@ -1966,6 +2050,12 @@ def validate_e2(reply, *, scene, narrator_enabled, sfx_cues, word_budget=None) -
     room to fix a merely-off reply instead of every near-miss being
     rejected. *word_budget* stays ``None`` (neither check) for a caller that
     has none to give.
+
+    *episode_lines* (phase 7 stage 6a, a v2 story's E2v2 only): the texts of
+    the episode's other lines; a reply line that repeats one of them, or an
+    earlier line of the reply (:func:`near_duplicate`), is an error, so the
+    existing retry and fall-through ask again. None (every v1 call): no such
+    check, the result byte for byte what it was.
     """
     speakers = list(scene["characters"]) + (["narrator"] if narrator_enabled else [])
     sfx_cue_names = list(sfx_cues)
@@ -2005,6 +2095,8 @@ def validate_e2(reply, *, scene, narrator_enabled, sfx_cues, word_budget=None) -
                 f"{E2_WORD_CEILING_PREFIX}: {total_words} in total, expected at most {ceiling} "
                 f"(1.5x the {word_budget}-word budget)"
             )
+    if episode_lines is not None:
+        _duplicate_line_errors(errors, "$.lines", [line["text"] for line in lines], episode_lines)
     return errors
 
 
@@ -2129,9 +2221,29 @@ def _e3_teaser_block(next_arc_entry) -> str:
     return _arc_entry_block(next_arc_entry, label="Next episode's arc entry")
 
 
-def _e3_ask(keys, speakers, *, french_line="", extra=()) -> str:
+# E3v2's hook (phase 7 stage 6a): its on-screen text is required whatever
+# the hook style -- story B shipped a hook with none -- so the ask says so
+# (``validate_e3`` with ``v2`` refuses a reply without it).
+_E3_HOOK_ASK_V2 = (
+    "- hook: lines (1-2 lines, speaker one of {speakers}, text story language at most 22 words, emotion "
+    "one of {emotions}, delivery English at most 12 words) and on_screen_text (story language, at most {words} "
+    "words, required whatever the hook style: the premise, on screen from the first frame)"
+)
+
+
+def hook_text_max_words(episode_defaults) -> int:
+    """The hook's on-screen text cap: 5 words for ``insert_prop`` (the
+    diegetic object's text), 6 for every other hook style."""
+    return 5 if episode_defaults["hook_style"] == "insert_prop" else 6
+
+
+def _e3_ask(keys, speakers, *, french_line="", extra=(), hook_text_words=None) -> str:
     lines = ["Write " + ", ".join(keys) + ".", "", "Give:"]
     for key in keys:
+        if key == "hook" and hook_text_words is not None:
+            lines.append(_E3_HOOK_ASK_V2.format(speakers=", ".join(speakers), emotions=", ".join(schemas.EMOTIONS),
+                                                words=hook_text_words))
+            continue
         lines.append(_E3_KEY_ASKS[key].format(speakers=", ".join(speakers), emotions=", ".join(schemas.EMOTIONS)))
     lines.append("")
     if extra:
@@ -2226,7 +2338,8 @@ def _build_e3(pack, *, ep, part=None, note=None, hook_scene, cliffhanger_scene, 
         user += f"Follow the author's note: {note}\n\n"
 
     user += _e3_ask(keys, speakers, french_line=_FR_ELISION_SENTENCE if pack.language_name == "French" else "",
-                    extra=(FIRST_APPEARANCE_SENTENCE,) if v2 else ())
+                    extra=(FIRST_APPEARANCE_SENTENCE,) if v2 else (),
+                    hook_text_words=hook_text_max_words(episode_defaults) if v2 else None)
     return _system(pack), user, e3_schema(part, ep, speakers)
 
 
@@ -2238,7 +2351,7 @@ def _line_field_errors(errors, path, line, allowed_speakers) -> None:
 
 
 def validate_e3(reply, *, ep, part, hook_scene, cliffhanger_scene, recap_scene, narrator_enabled,
-                 episode_defaults) -> list:
+                 episode_defaults, v2=False, episode_lines=None) -> list:
     """Post-validation for an E3 reply (spec 2.7, 4.2), scoped to whichever
     keys *part* asked for (:func:`_e3_keys`; every key, for ``part=None``):
     line counts and caps, a speaker that belongs to the scene actually being
@@ -2246,6 +2359,14 @@ def validate_e3(reply, *, ep, part, hook_scene, cliffhanger_scene, recap_scene, 
     on-screen text rule per ``hook_style`` (spec 6.2: required and <= 5
     words for ``insert_prop``, required for ``text_overlay``, optional
     otherwise, <= 6 words in every case).
+
+    Phase 7 stage 6a, a v2 story's E3v2 only: with *v2*, the hook's
+    on-screen text is required whatever the hook style (story B shipped
+    ``hook.on_screen_text: null``); *episode_lines* (the texts of the
+    episode's lines this call does not rewrite) makes a reply line that
+    repeats one of them, or an earlier line of the reply, an error
+    (:func:`near_duplicate`). Neither given (every v1 call): the result is
+    byte for byte what it was.
     """
     keys = _e3_keys(part, ep)
 
@@ -2278,6 +2399,9 @@ def validate_e3(reply, *, ep, part, hook_scene, cliffhanger_scene, recap_scene, 
             errors.append(
                 "$.hook.on_screen_text: required when hook_style is 'insert_prop' (the diegetic object's text)"
             )
+        elif v2 and text is None:
+            errors.append("$.hook.on_screen_text: required on a v2 story, whatever the hook style (what the "
+                          "episode is about, on screen from the first frame)")
         max_words = 5 if hook_style == "insert_prop" else 6
         _nullable_text_errors(errors, "$.hook.on_screen_text", text, max_words)
 
@@ -2301,6 +2425,14 @@ def validate_e3(reply, *, ep, part, hook_scene, cliffhanger_scene, recap_scene, 
 
     if "teaser" in keys:
         _text_errors(errors, "$.teaser", reply["teaser"], max_words=15)
+
+    if episode_lines is not None:
+        written = list(episode_lines)
+        for key in ("hook", "cliffhanger", "recap"):
+            if key in keys:
+                texts = [line["text"] for line in reply[key]["lines"]]
+                _duplicate_line_errors(errors, f"$.{key}.lines", texts, written)
+                written += texts
 
     return errors
 
@@ -2657,6 +2789,119 @@ def validate_e4(reply, *, scene_ids, hook_payoff=False) -> list:
     if reply["passed"] != (len(issues) == 0):
         errors.append(f"$.passed: {reply['passed']!r} does not agree with {len(issues)} issue(s)")
 
+    return errors
+
+
+# ------------------------------------------------------------------------- J1
+#
+# Phase 7 stage 6a (A16, DEC-230): the first-watch judge of a v2 script,
+# after E4 in the script step. E4 checks the script against the bible; J1
+# reads it as a viewer who knows nothing but the episode (and the previous
+# episode's recap) would on one watch, and says what they took away -- who
+# wants what, what happens, why it matters -- and what kept them from
+# following, from a closed list of kinds (``schemas.FIRST_WATCH_ISSUE_KINDS``).
+# The script step merges its own deterministic checks (a repeated line, a
+# hook with no on-screen text) into the same report (``steps/judge.py``).
+
+J1_SUMMARY_MAX_WORDS = {"who_wants_what": 25, "what_happens": 30, "why_it_matters": 25}
+J1_ISSUES_MAX = 6
+J1_FIX_MAX_WORDS = 30
+
+_J1_SYSTEM_TEMPLATE = (
+    "You are a first-time viewer of one episode of a serialized vertical-video fiction series, watching it once "
+    "on a phone with the sound on. You know only what the episode shows and says, and the recap of the episode "
+    "before it when one is given. You write nothing new: you say what you took away and what kept you from "
+    "following. Reply with JSON only, matching the schema. Write every field in {language_name}."
+)
+
+_J1_ASK = (
+    "Watch this episode once, as written above, then give:\n"
+    "- who_wants_what: who wants what, as you understood it (at most 25 words)\n"
+    "- what_happens: what happens (at most 30 words)\n"
+    "- why_it_matters: why it matters to them, what is at stake (at most 25 words)\n"
+    "- passed: true only when a first-time viewer can follow the episode and you found no issue\n"
+    "- issues: at most 6, each with scene_id (one of the script's own scene ids, or null when the issue is not "
+    "tied to one scene), kind and fix (at most 30 words, in the story language)\n\n"
+    "The kinds:\n"
+    "- unclear_goal: what a main character wants is never said or shown\n"
+    "- unmotivated: someone acts with no reason the viewer saw\n"
+    "- unintroduced: a character speaks or matters before the viewer learns who they are\n"
+    "- object_unseen: the story turns on an object no scene shows\n"
+    "- repeated_line: a line repeats or closely paraphrases an earlier one\n"
+    "- no_hook_text: the hook has no on-screen text saying what the episode is about"
+)
+
+
+def _j1_system(pack) -> str:
+    return _J1_SYSTEM_TEMPLATE.format(language_name=pack.language_name)
+
+
+def j1_schema() -> dict:
+    """The J1 output schema: the viewer's three take-aways, a pass/fail and
+    up to 6 issues of ``schemas.FIRST_WATCH_ISSUE_KINDS`` (``scene_id`` read
+    back from the model, checked by :func:`validate_j1`, as E4's)."""
+    issue = _llm_obj({
+        "scene_id": {"type": ["string", "null"], "description": "one of the script's own scene ids, or null"},
+        "kind": {"type": "string", "enum": list(schemas.FIRST_WATCH_ISSUE_KINDS)},
+        "fix": {"type": "string", "description": f"at most {J1_FIX_MAX_WORDS} words, in the story language"},
+    })
+    properties = {key: {"type": "string", "description": f"at most {words} words"}
+                  for key, words in J1_SUMMARY_MAX_WORDS.items()}
+    properties.update({
+        "passed": {"type": "boolean"},
+        "issues": {"type": "array", "description": f"at most {J1_ISSUES_MAX} issues", "items": issue},
+    })
+    return _llm_obj(properties)
+
+
+def build_j1(pack, *, ep, script_digest, objects, hook_text, reveal, previous_recap=None):
+    """The first-watch judge of episode *ep* (module section above).
+
+    *script_digest* is :func:`script_digest`'s rendering of the script (the
+    text E4 reads); *objects* is ``[(prop name, [scene_id, ...])]``, each
+    prop the episode shows once with the scenes that show it, in order of
+    first appearance (bounded by the story's props, not by the scene
+    count); *hook_text* the hook's on-screen
+    text and *reveal* the cliffhanger's (None: none written);
+    *previous_recap* the previous episode's recap (episode 2 on), what a
+    returning viewer remembers. No bible, cast notes or memory: the viewer
+    knows only the episode."""
+    user = ""
+    if previous_recap:
+        user += f"Previously (episode {ep - 1}'s recap): {previous_recap}\n\n"
+    user += f"{script_digest}\n\n"
+    if objects:
+        user += "Objects, and the scenes that show them:\n" + "\n".join(
+            f"- {name}: {', '.join(scene_ids)}" for name, scene_ids in objects) + "\n\n"
+    user += f"Hook on-screen text: {hook_text if hook_text else 'none'}\n"
+    user += f"Cliffhanger reveal: {reveal if reveal else 'none'}\n\n"
+    user += _J1_ASK
+    return _j1_system(pack), user, j1_schema()
+
+
+def validate_j1(reply, *, scene_ids) -> list:
+    """Post-validation for a J1 reply: the take-aways non-empty and within
+    their caps, at most 6 issues, each ``scene_id`` null or one of the
+    script's own, each ``fix`` capped, and ``passed`` true exactly when
+    there is no issue (E4's rule)."""
+    errors = schemas.validate(reply, j1_schema())
+    if errors:
+        return errors
+
+    errors = []
+    for key, words in J1_SUMMARY_MAX_WORDS.items():
+        _text_errors(errors, f"$.{key}", reply[key], max_words=words)
+    issues = reply["issues"]
+    if len(issues) > J1_ISSUES_MAX:
+        errors.append(f"$.issues: {len(issues)} issue(s), expected at most {J1_ISSUES_MAX}")
+    scene_id_set = set(scene_ids)
+    for i, issue in enumerate(issues):
+        path = f"$.issues[{i}]"
+        if issue["scene_id"] is not None and issue["scene_id"] not in scene_id_set:
+            errors.append(f"{path}.scene_id: {issue['scene_id']!r} is not one of the script's scene ids")
+        _text_errors(errors, f"{path}.fix", issue["fix"], max_words=J1_FIX_MAX_WORDS)
+    if reply["passed"] != (len(issues) == 0):
+        errors.append(f"$.passed: {reply['passed']!r} does not agree with {len(issues)} issue(s)")
     return errors
 
 

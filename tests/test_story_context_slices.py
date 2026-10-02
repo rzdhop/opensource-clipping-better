@@ -189,7 +189,7 @@ def test_a_v2_episode_s_e2_call_receives_the_scene_slice(store):
                          "voice": {"patterns": "Court.", "vocabulary": "Mielleux.", "catchphrases": ["Moi ? Jamais."]},
                          "arc": "Du mensonge à l'aveu."}
     store.write_entity(story_id, "characters", copy.deepcopy(kiwilo), now=eps.NOW)
-    llm = eps._script_llm()
+    llm = eps._script_llm(v2=True)
 
     eps._run(eps._new().script, store, story_id, llm=llm)
 

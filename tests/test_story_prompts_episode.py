@@ -1453,8 +1453,10 @@ def test_input_budget_names_every_episode_prompt():
     # (E1v2/E2v2/E3v2), measured the same way; the v1 rows are unchanged (RC-M1).
     # Phase 7 stage 5d (DEC-229): re-pinned on purpose -- the memory step's second call, the continuity
     # ledger (L1), measured the same way.
+    # Phase 7 stage 6a (DEC-230): re-pinned on purpose -- the first-watch judge (J1), measured the same way.
     assert list(prompts.INPUT_BUDGET) == ["E1", "E2", "E3", "E4", "T1", "T1r", "S3", "F1", "N1", "D2", "D3", "R1v2",
-                                          "T1v2", "T1rv2", "D1", "D4", "D5", "D6", "E1v2", "E2v2", "E3v2", "L1"]
+                                          "T1v2", "T1rv2", "D1", "D4", "D5", "D6", "E1v2", "E2v2", "E3v2", "L1",
+                                          "J1"]
 
 
 @pytest.mark.parametrize(
@@ -2310,3 +2312,69 @@ def test_the_largest_french_e1_v2_replies_fit_their_caps():
     assert prompts.MAX_TOKENS["E3v2"] == prompts.MAX_TOKENS["E3"]
     for prompt_id in ("E1v2", "E2v2", "E3v2"):
         assert prompts.TEMPERATURE[prompt_id] is prompts.WRITING_TEMPERATURE
+
+
+# ==================================================================== phase 7 stage 6a (DEC-230, DEC-231)
+#
+# E4's comprehension diagnosis: story A's climax line was spoken twice
+# verbatim, and story B shipped its hook with no on-screen text. A v2 story's
+# E2v2/E3v2 replies are refused for either (``validate_e2``/``validate_e3``
+# with the v2 keywords), so the existing retry and fall-through ask again; a
+# v1 call passes none of them and is validated exactly as before.
+
+def _e2_line(speaker, text):
+    return {"speaker": speaker, "text": text, "emotion": "tension", "delivery": "low"}
+
+
+def test_e2_rejects_near_duplicate_line():
+    climax = "Tu ne t'en tireras pas comme ça, Kiwilo."
+    reply = {"lines": [_e2_line("char_mangella", "Tu ne t'en tireras pas comme ça !"),
+                       _e2_line("char_kiwilo", "On verra bien qui rira le dernier ce soir.")],
+             "sfx_cues": [], "on_screen_text": None}
+    kwargs = dict(scene=BODY_SCENE, narrator_enabled=False, sfx_cues=SFX_CUES)
+
+    errors = prompts.validate_e2(reply, episode_lines=[climax, "Le vote approche."], **kwargs)
+    assert errors == ["$.lines[0].text: repeats a line already spoken in this episode (“Tu ne t'en tireras pas "
+                      "comme ça, Kiwilo.”): write a new line"]
+    # Accents, case and punctuation do not hide a repeat (a normalised-token Jaccard of 0.7 or more).
+    assert prompts.near_duplicate("TU NE T'EN TIRERAS PAS COMME CA", climax)
+    # A reply repeating itself is refused too.
+    twice = dict(reply, lines=[reply["lines"][1], dict(reply["lines"][1], speaker="char_mangella")])
+    assert any("$.lines[1].text: repeats" in error
+               for error in prompts.validate_e2(twice, episode_lines=[], **kwargs))
+    # A different line sharing a few words is not a repeat; nor is a short interjection said twice.
+    assert prompts.validate_e2(reply, episode_lines=["Tu ne sais pas ce qui t'attend au bord du bassin."],
+                               **kwargs) == []
+    assert not prompts.near_duplicate("Non !", "Non.")
+    assert prompts.line_similarity("a b c d e f g", "a b c d e f g h i x") == 0.7
+    # v1 (no episode_lines): the same reply is accepted, as before.
+    assert prompts.validate_e2(reply, **kwargs) == []
+
+
+def test_e3_v2_requires_the_hook_text_and_refuses_a_repeated_line():
+    reply = _good_e3_full_reply()
+    reply["hook"]["on_screen_text"] = None
+    kwargs = dict(ep=1, part=None, hook_scene=HOOK_SCENE, cliffhanger_scene=CLIFF_SCENE, recap_scene=None,
+                  narrator_enabled=False, episode_defaults=dict(EPISODE_DEFAULTS, hook_style="shocking_image"))
+
+    assert prompts.validate_e3(reply, **kwargs) == []  # v1: a shocking_image hook may have none
+    assert prompts.validate_e3(reply, v2=True, **kwargs) == [
+        "$.hook.on_screen_text: required on a v2 story, whatever the hook style (what the episode is about, on "
+        "screen from the first frame)"]
+    reply["hook"]["on_screen_text"] = "Le vote est truqué"
+    assert prompts.validate_e3(reply, v2=True, **kwargs) == []
+    # The cliffhanger repeating a body line (story A's climax) is refused on v2.
+    errors = prompts.validate_e3(reply, v2=True, episode_lines=["C'est fini, c'est fini !"], **kwargs)
+    assert any(error.startswith("$.cliffhanger.lines[0].text: repeats a line") for error in errors), errors
+
+
+def test_e3_v2_asks_for_the_hook_text_v1_unchanged():
+    _system, user, _schema = prompts.build_e3_v2(_pack("fr"), slice_text=SLICE, **_e3_kwargs())
+    assert ("on_screen_text (story language, at most 5 words, required whatever the hook style: the premise, on "
+            "screen from the first frame)") in user  # fruit_drama's hook is insert_prop: 5 words
+    _system, part_user, _schema = prompts.build_e3_v2(_pack("fr"), slice_text=SLICE,
+                                                      **_e3_kwargs(part="cliffhanger"))
+    assert "on_screen_text (story language, at most" not in part_user  # no hook in a cliffhanger call
+    # RC-M1: v1 E3 is byte for byte what it was.
+    v1 = prompts.build_e3(_pack("fr"), **_e3_kwargs())
+    assert _sha_call(v1) == _E3_V1_EP2_SHA256 and "required whatever the hook style" not in v1[1]

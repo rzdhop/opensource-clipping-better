@@ -68,6 +68,8 @@ from .steps import entities as entities_step
 from .steps import clips as clips_step
 from .steps import episode_common, llm_call, sticky_link
 from .steps import fast_track as fast_track_step
+from .steps import gates as gates_step
+from .steps import judge as judge_step
 from .steps import knowledge as knowledge_step
 from .steps import feedback as feedback_step
 from .steps import memory as memory_step
@@ -2495,7 +2497,10 @@ def episode_view(stories, story, ep) -> dict:
                    "metadata_regenerate_blocked": str | null}}
 
     ``template`` is the one the script was written against, else the
-    story's choice. ``assets_regenerate_blocked``/``metadata_regenerate_
+    story's choice. A v2 story's ``state`` also has ``first_watch``: none |
+    passed | issues | stale (its J1 report, ``judge.first_watch_state``;
+    phase 7 stage 6a) -- a legacy story's page has no such key.
+    ``assets_regenerate_blocked``/``metadata_regenerate_
     blocked`` (F8, phase 5 stage 13b) are ``assets.require_approved``'s /
     ``metadata.require_render``'s own refusal sentence right now -- what a
     line's re-voice, a shot's image regenerate or a platform's metadata
@@ -2518,7 +2523,7 @@ def episode_view(stories, story, ep) -> dict:
         if ec is not None:
             assets_blocked = _regenerate_blocked(ec, assets_step.require_approved)
             metadata_blocked = _regenerate_blocked(ec, metadata_step.require_render)
-    return {
+    view = {
         "ep": ep, "script": script, "storyboard": board, "template": _template_view(story, script),
         "state": {
             "script": script_state(script, ep),
@@ -2531,6 +2536,9 @@ def episode_view(stories, story, ep) -> dict:
             "metadata_regenerate_blocked": metadata_blocked,
         },
     }
+    if media_policy.is_v2(story):
+        view["state"]["first_watch"] = judge_step.first_watch_state(script)
+    return view
 
 
 def episode_summaries(stories, story) -> list:
@@ -3199,6 +3207,15 @@ def regenerate_clip_estimate(stories, story, parsed, *, env, adapters=None, prob
 
 # ---------------------------------------------------------------- approvals
 
+def _refuse_length(ec, script, board, stage) -> None:
+    """The v2 hard length gate (``steps/gates.length_refusal``, phase 7
+    stage 6a, DEC-231): ``conflict`` with its sentence -- never "anyway" --
+    when a v2 episode's length is outside its template's window."""
+    refusal = gates_step.length_refusal(ec, script, board, stage=stage)
+    if refusal is not None:
+        raise WorkflowError(CONFLICT, refusal)
+
+
 def approve_script(stories, story_id, ep, *, approve_anyway=False, now) -> dict:
     """Approve episode *ep*'s script; returns it as written.
 
@@ -3208,7 +3225,15 @@ def approve_script(stories, story_id, ep, *, approve_anyway=False, now) -> dict:
     when the report found issues, listing them -- unless *approve_anyway*.
     ``approved_at`` becomes *now*; ``approved_anyway`` too when the approval
     went over issues. Nothing else moves: not the revision, not the report,
-    not the story (RC-E2)."""
+    not the story (RC-E2).
+
+    A v2 story (phase 7 stage 6a, DEC-230/231) also needs, before the
+    issues are weighed: its first-watch report (J1) written and current --
+    never approvable without (``judge.unjudged_refusal``) -- and its
+    estimated length inside the template's window (:func:`_refuse_length`,
+    never "anyway"); then a first-watch report that found issues refuses,
+    naming them, unless *approve_anyway* -- which ``approved_anyway``
+    records as it does over E4's."""
     story = load(stories, story_id)
     ep = episode_bounds(stories, story, ep)
     script = read_episode(stories, story_id, ep, SCRIPT_DOC)
@@ -3226,6 +3251,13 @@ def approve_script(stories, story_id, ep, *, approve_anyway=False, now) -> dict:
     if script_step.needs_check(script):
         raise WorkflowError(CONFLICT, (f"Episode {ep}'s consistency check is out of date (the script changed "
                                        "since it ran): check it again (run the script step)."))
+    v2 = media_policy.is_v2(story)
+    if v2:
+        unjudged = judge_step.unjudged_refusal(script, ep)
+        if unjudged:
+            raise WorkflowError(CONFLICT, unjudged)
+        _refuse_length(_context(stories, story_id, ep), script,
+                       read_episode(stories, story_id, ep, STORYBOARD_DOC), "script")
     over_issues = not report["passed"]
     if over_issues and not approve_anyway:
         issues = "; ".join(f"{issue['scene_id'] or 'the episode'} ({issue['kind']}): {issue['fix']}"
@@ -3234,9 +3266,12 @@ def approve_script(stories, story_id, ep, *, approve_anyway=False, now) -> dict:
         raise WorkflowError(CONFLICT, (f"Episode {ep}'s consistency check found {count} issue"
                                        f"{'' if count == 1 else 's'}{': ' + issues if issues else ''}. Fix them and "
                                        "check again, or approve anyway."))
+    over_first_watch = v2 and not script[judge_step.FIRST_WATCH]["passed"]
+    if over_first_watch and not approve_anyway:
+        raise WorkflowError(CONFLICT, judge_step.issues_refusal(script, ep))
     ec = _context(stories, story_id, ep)
     script["approved_at"] = now
-    script["approved_anyway"] = now if over_issues else None
+    script["approved_anyway"] = now if over_issues or over_first_watch else None
     return _write(episode_common.write_script, "script", ec, script, now=now, code=CONFLICT)
 
 
@@ -3247,7 +3282,9 @@ def approve_storyboard(stories, story_id, ep, *, now) -> dict:
     scene of the script has no shots, or has shots planned from an older
     version of it (``scenes[sid].script_rev``, or marked stale); and while
     an entity its prompts were resolved from has changed since (refresh
-    them). ``approved_at`` becomes *now*; nothing else moves."""
+    them); a v2 story's, while its estimated length with the storyboard is
+    outside the template's window (:func:`_refuse_length`, phase 7 stage 6a,
+    never "anyway"). ``approved_at`` becomes *now*; nothing else moves."""
     story = load(stories, story_id)
     ep = episode_bounds(stories, story, ep)
     board = read_episode(stories, story_id, ep, STORYBOARD_DOC)
@@ -3275,6 +3312,7 @@ def approve_storyboard(stories, story_id, ep, *, now) -> dict:
     if outdated:
         raise WorkflowError(CONFLICT, (f"Episode {ep}'s prompts are outdated: refresh them ({_and(outdated)} "
                                        f"changed since they were resolved)."))
+    _refuse_length(ec, script, board, "storyboard")
     board["approved_at"] = now
     return _write(episode_common.write_storyboard, "storyboard", ec, board, script, now=now, code=CONFLICT)
 
@@ -3291,7 +3329,9 @@ def approve_assets(stories, story_id, ep, *, now) -> dict:
     failed, none) -- a locked shot keeps the image it has; and while a line
     has no audio in its speaker's pinned voice (``voice_lines.is_measured``).
     Each refusal names the shots or lines and the regenerate target that
-    finishes them. Then every shot's ``assets.approved`` is set (the
+    finishes them. A v2 story's, also while its measured length is outside
+    the template's window (:func:`_refuse_length`, phase 7 stage 6a, never
+    "anyway"). Then every shot's ``assets.approved`` is set (the
     storyboard is written, nothing else of it moves) and ``assets.json``
     gains ``approved: {at: now, fingerprint}`` -- the fingerprint of the
     files as they are now (``assets.current_fingerprint``); once it differs,
@@ -3330,6 +3370,7 @@ def approve_assets(stories, story_id, ep, *, now) -> dict:
                                        f"voice: speak {'it' if len(unvoiced) == 1 else 'them'} (the assets step, or "
                                        f"regenerate {_and(targets)}), then approve."))
     _require_every_clip(ec, script, board, doc)
+    _refuse_length(ec, script, board, "assets")
     for shot in board["shots"]:
         shot["assets"]["approved"] = True
     _write(episode_common.write_storyboard, "storyboard", ec, board, script, now=now, code=CONFLICT)

@@ -38,6 +38,24 @@ was paid for survives a failure, a cancel or the step's time budget:
    ``{passed, issues, checked_rev, checked_at, stale: false}`` -- the
    pre-check's ``hook_payoff`` issues first, failing it whatever E4 says.
 
+**A v2 story** (phase 7 stage 6a, A16/A17, DEC-230/231) also gets:
+
+- E2v2/E3v2 replies refused for a line repeating another of the episode,
+  and E3v2's for a hook with no on-screen text (``prompts.validate_e2`` /
+  ``validate_e3``), so the retry and the chain's next links ask again;
+- the **fill pass** (:meth:`_Run.fill`), once the script is complete,
+  not approved, and its estimate under the template's window: E2v2 again,
+  with a note to write fuller, on the shortest body scenes -- each raised
+  to its slot's top first, so its word budget grows -- at most
+  :data:`FILL_CALLS_MAX` calls, stopping once the estimate is inside; what
+  it did is logged and in the step's result (``fill``). Before E4 and J1,
+  so they judge the filled script; on a script checked already, a
+  rewritten scene goes through ``episode_common.mark_changed`` like a
+  regenerate;
+- **J1** after E4 (``steps/judge.check_first_watch``), the first-watch
+  report ``script.first_watch``, with the repeated-line and hook-text
+  checks merged in -- missing, stale or of an older revision -> one call.
+
 After each write the script is re-timed (``episode_common.retime``, with the
 storyboard when there is one). A complete script re-run makes no call. The
 step ends failed, after everything else it could do, naming each part that
@@ -75,7 +93,7 @@ import copy
 import time
 
 from .. import context, media_policy, prompts, schemas, series_memory, timing
-from . import entities, episode_common, llm_call
+from . import entities, episode_common, judge, llm_call
 from . import places as places_step
 from .episode_common import SCRIPT_DOC, STORYBOARD_DOC
 from .llm_call import StepFailed
@@ -90,6 +108,12 @@ from .voice_lines import (  # noqa: F401 -- re-exported
 FRAMING_FUNCTIONS = ("recap", "hook", "cliffhanger")
 
 MEASURE_PARAM = "measure_voices"
+
+# The v2 fill pass (phase 7 stage 6a, A17): at most this many E2v2 calls a
+# run, on the shortest body scenes, with this note.
+FILL_CALLS_MAX = 2
+FILL_NOTE = ("This scene runs short of the episode's length: write it fuller, close to the top of its word budget, "
+             "with one more line if the beat allows it.")
 
 
 # ----------------------------------------------------------------- helpers
@@ -578,7 +602,12 @@ def write_body_scene(ctx, ec, script, sid, *, tools, announced, note=None) -> bo
         props=props, sfx_cues=ec.sfx_cues, narrator_enabled=ec.narrator,
         voice_direction=ec.style_lock["audio"]["voice_direction"], note=pack.note,
     )
-    if media_policy.is_v2(ec.story):
+    v2 = media_policy.is_v2(ec.story)
+    # Phase 7 stage 6a (DEC-231): a v2 reply may not repeat a line the episode
+    # already has (its other scenes'); a v1 call is validated as before.
+    episode_lines = ([line["text"] for other in script["scenes"] if other["scene_id"] != sid
+                      for line in other["lines"]] if v2 else None)
+    if v2:
         # Phase 7 stage 5c (A13): E2v2, with the scene's slice of the knowledge base.
         prompt_id = "E2v2"
         system, user, schema = prompts.build_e2_v2(
@@ -601,8 +630,9 @@ def write_body_scene(ctx, ec, script, sid, *, tools, announced, note=None) -> bo
     def validate(reply):
         attempt["n"] += 1
         _repair_e2_reply(ec, reply)
+        extra = {} if episode_lines is None else {"episode_lines": episode_lines}
         errors = prompts.validate_e2(reply, scene=scene, narrator_enabled=ec.narrator, sfx_cues=ec.sfx_cues,
-                                     word_budget=budget)
+                                     word_budget=budget, **extra)
         word_count_only = bool(errors) and all(
             e.startswith(prompts.E2_WORD_FLOOR_PREFIX) or e.startswith(prompts.E2_WORD_CEILING_PREFIX)
             for e in errors
@@ -684,7 +714,15 @@ def write_framing(ctx, ec, script, part, *, tools, announced, note=None) -> list
         word_budgets=budgets, cast=_cast_lines(ec, speaking, (hook or cliff or {}).get("scene_id")),
         narrator_enabled=ec.narrator, open_hooks=episode_open_hooks(ec),
     )
-    if media_policy.is_v2(ec.story):
+    v2 = media_policy.is_v2(ec.story)
+    # Phase 7 stage 6a (DEC-231): a v2 reply needs the hook's on-screen text and
+    # may not repeat a line of the scenes this call does not rewrite.
+    rewritten = {scene["scene_id"] for key, scene in (("hook", hook), ("cliffhanger", cliff), ("recap", recap))
+                 if key in keys and scene is not None}
+    v2_checks = ({"v2": True, "episode_lines": [line["text"] for scene in script["scenes"]
+                                                 if scene["scene_id"] not in rewritten for line in scene["lines"]]}
+                 if v2 else {})
+    if v2:
         # Phase 7 stage 5c (A13): E3v2, with the slice of the scene it mostly writes.
         prompt_id = "E3v2"
         sliced = _framing_slice_scene(script, part)
@@ -699,7 +737,7 @@ def write_framing(ctx, ec, script, part, *, tools, announced, note=None) -> list
         _repair_e3_reply(ec, reply)
         errors = prompts.validate_e3(reply, ep=ec.ep, part=part, hook_scene=hook, cliffhanger_scene=cliff,
                                      recap_scene=recap, narrator_enabled=ec.narrator,
-                                     episode_defaults=ec.episode_defaults)
+                                     episode_defaults=ec.episode_defaults, **v2_checks)
         if errors:
             return errors
         trial = copy.deepcopy(script)
@@ -859,6 +897,8 @@ class _Run(LineMeasurement):
         self.voice_failed = []  # [(line_id, speaker, reason)]
         self.measured = 0
         self.board_refused = False
+        # Phase 7 stage 6a: the v2 fill pass's record (None: it did not run).
+        self.filled = None
 
     # ---------------------------------------------------------- bookkeeping
 
@@ -876,6 +916,8 @@ class _Run(LineMeasurement):
             parts.append(f"the {_and(missing)} (E3)")
         if stubs or missing or needs_check(script):
             parts.append("the consistency check (E4)")
+        if media_policy.is_v2(self.ec.story) and (stubs or missing or judge.needs_first_watch(script)):
+            parts.append("the first-watch check (J1)")
         return _and(parts) or "nothing"
 
     def before_call(self) -> None:
@@ -963,6 +1005,67 @@ class _Run(LineMeasurement):
             self.calls += 1
             self.save()
 
+    def fill(self) -> None:
+        """The v2 fill pass (module docstring): a complete, unapproved v2
+        script whose estimate is under the window gets E2v2 again on its
+        shortest body scenes -- each raised to its slot's top first, so its
+        word budget grows -- at most :data:`FILL_CALLS_MAX` calls, stopping
+        once the estimate is inside. A failed call keeps the scene as it was.
+        ``self.filled`` records it: ``{before_s, after_s, window_s, scenes,
+        failed}``."""
+        ec, script = self.ec, self.script
+        if not media_policy.is_v2(ec.story) or script["approved_at"] or not is_complete(script, ec.ep):
+            return
+        result = script.get("timing") or {}
+        if result.get("state") != "under":
+            return
+        lo, hi = result["window_s"]
+        durations = result["scenes"]
+        order = {scene["scene_id"]: index for index, scene in enumerate(script["scenes"])}
+        candidates = sorted((scene for scene in body_scenes(script) if can_speak(ec, scene)),
+                            key=lambda scene: (durations[scene["scene_id"]]["duration_s"], order[scene["scene_id"]]))
+        candidates = candidates[:FILL_CALLS_MAX]
+        if not candidates:
+            return
+        before = result["total_s"]
+        self.filled = {"before_s": before, "after_s": before, "window_s": [lo, hi], "scenes": [], "failed": []}
+        self.ctx.on_log(f"⏱ Fill pass: {before:.1f} s estimated is under {lo:g}–{hi:g} s; writing the shortest "
+                        f"scene{'s' if len(candidates) > 1 else ''} again "
+                        f"({_and(scene['scene_id'] for scene in candidates)}, E2)")
+        for scene in candidates:
+            if (script.get("timing") or {}).get("state") != "under":
+                break
+            sid = scene["scene_id"]
+            self.before_call()
+            target = scene["target_duration_s"]
+            scene["target_duration_s"] = timing.slot_range(scene, ec.template, ec.style_lock)[1]
+            try:
+                write_body_scene(self.ctx, ec, script, sid, tools=self.tools, announced=self.announced,
+                                 note=FILL_NOTE)
+            except StepFailed as exc:
+                scene["target_duration_s"] = target
+                self.calls += 1
+                self.filled["failed"].append(sid)
+                self.ctx.on_log(f"✖ Fill pass: scene {sid} failed ({exc.reason}); it keeps its lines")
+                continue
+            self.calls += 1
+            if script.get("consistency_report") is not None or script.get(judge.FIRST_WATCH) is not None:
+                # A script checked already: rewritten like a regenerate (its
+                # checks go stale; the storyboard, written first, too).
+                now = llm_call.utc_now()
+                episode_common.mark_changed(script, self.storyboard, scene_ids=[sid], now=now)
+                if self.storyboard is not None:
+                    episode_common.write_storyboard(ec, self.storyboard, script, now=now)
+            self.save()
+            self.filled["scenes"].append(sid)
+        after = script["timing"]["total_s"]
+        self.filled["after_s"] = after
+        where = {"ok": "inside", "tightened": "inside", "over": "over", "under": "still under"}[
+            script["timing"]["state"]]
+        self.ctx.on_log(f"⏱ Fill pass: {len(self.filled['scenes'])} scene"
+                        f"{'s' if len(self.filled['scenes']) != 1 else ''} rewritten, {before:.1f} s → {after:.1f} s "
+                        f"estimated — {where} {lo:g}–{hi:g} s")
+
     def consistency(self) -> None:
         ec, script = self.ec, self.script
         if not is_complete(script, ec.ep) or not needs_check(script):
@@ -983,6 +1086,29 @@ class _Run(LineMeasurement):
         self.save()
         self.ctx.on_log(consistency_line(report))
 
+    def first_watch(self) -> None:
+        """J1 on a complete v2 script whose first-watch report is missing,
+        stale or of an older revision (``steps/judge``); a failed call is a
+        failure of the step, like E4's."""
+        ec, script = self.ec, self.script
+        if not media_policy.is_v2(ec.story) or not is_complete(script, ec.ep) or not judge.needs_first_watch(script):
+            return
+        self.before_call()
+        self.ctx.on_log("👀 First-watch check (J1)")
+        try:
+            report = judge.check_first_watch(self.ctx, ec, script, tools=self.tools,
+                                             pack=_pack(ec, self.ctx, self.announced))
+        except BudgetSpent:
+            raise
+        except StepFailed as exc:
+            self.calls += 1
+            self.failed.append(("the first-watch check", None, exc.reason))
+            self.ctx.on_log(f"✖ The first-watch check failed: {exc.reason}")
+            return
+        self.calls += 1
+        self.save()
+        self.ctx.on_log(judge.first_watch_line(report))
+
     def run(self) -> dict:
         ec = self.ec
         self.script = episode_common.read_episode(ec, SCRIPT_DOC)
@@ -992,7 +1118,9 @@ class _Run(LineMeasurement):
             self.beat_sheet()
         self.body()
         self.framing()
+        self.fill()
         self.consistency()
+        self.first_watch()
 
         script = self.script
         if self.calls == 0 and not self.failed:
@@ -1022,6 +1150,11 @@ class _Run(LineMeasurement):
         }
         if measuring:
             summary["measured"] = self.measured
+        if media_policy.is_v2(ec.story):
+            # Phase 7 stage 6a: the first-watch report's verdict and the fill pass's record.
+            first_watch = script.get(judge.FIRST_WATCH)
+            summary["first_watch"] = None if first_watch is None else first_watch["passed"]
+            summary["fill"] = self.filled
         return summary
 
 

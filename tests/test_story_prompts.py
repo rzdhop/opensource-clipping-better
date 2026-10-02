@@ -291,6 +291,9 @@ def test_max_tokens():
         # Phase 7 stage 5d (DEC-229): re-pinned on purpose -- the memory step's second call, the continuity
         # ledger (L1), measured on its French worst case (tests/test_story_episode_prompt_budgets.py).
         "L1": 690,
+        # Phase 7 stage 6a (DEC-230): re-pinned on purpose -- the first-watch judge (J1), measured on its
+        # French worst case (tests/test_story_episode_prompt_budgets.py).
+        "J1": 920,
     }
 
 
@@ -330,6 +333,8 @@ def test_schema_names():
         "E1v2": "episode_beat_sheet_v2", "E2v2": "episode_scene_dialogue_v2", "E3v2": "episode_framing_scenes_v2",
         # Phase 7 stage 5d (DEC-229): re-pinned on purpose -- the continuity ledger (L1).
         "L1": "continuity_ledger",
+        # Phase 7 stage 6a (DEC-230): re-pinned on purpose -- the first-watch judge (J1).
+        "J1": "first_watch_check",
     }
 
 

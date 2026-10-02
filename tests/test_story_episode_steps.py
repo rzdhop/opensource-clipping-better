@@ -456,10 +456,45 @@ E4_ISSUES = {"passed": False, "issues": [
 ]}
 
 
-def _script_llm(**overrides):
-    queues = {"E1": [E1_REPLY], "E2": [e2_reply] * len(BODY), "E3": [E3_FULL], "E4": [E4_ISSUES]}
+# Phase 7 stage 6a (DEC-230/231): a v2 story's script step judges the script
+# (J1) after E4, refuses an E2v2 reply repeating a line of the episode, and --
+# while its estimate is under the window -- rewrites up to 2 of its shortest
+# scenes (the fill pass).
+J1_PASSED = {"who_wants_what": "Kiwilo veut garder le pouvoir sur l'île.",
+             "what_happens": "Le téléphone annonce un vote surprise et désigne Kiwilo.",
+             "why_it_matters": "Le perdant du vote quitte l'île.", "passed": True, "issues": []}
+J1_ISSUES = dict(J1_PASSED, passed=False, issues=[
+    {"scene_id": "s05", "kind": "unmotivated", "fix": "Montrez pourquoi Kiwilo avoue son plan."}])
+
+
+def e2_v2_reply(call, *, short=False):
+    """A v2 story's E2 reply: lines of the scene's own (a tag drawn from its
+    stub line) -- a v2 reply may not repeat a line of the episode -- a little
+    longer than :func:`e2_reply`'s, so the fixture's episode lands inside its
+    window (65.6 s of 55-80 s); *short* lands it under (42.4 s)."""
+    stub = call["user"].split("Scene (", 1)[1].split("\n", 1)[0]
+    tag = hashlib.sha256(stub.encode("utf-8")).hexdigest()[:6]
+    speakers = _speakers(call)
+    if short:
+        first, second = f"Non {tag[:3]}a, si {tag[:3]}b, ça va.", f"Bon, {tag[:3]}c, oh {tag[:3]}d, va."
+    else:
+        first, second = f"Écoute bien alpha{tag} beta{tag} gamma{tag} ce soir.", f"Jamais epsilon{tag} zeta{tag}, chérie."
+    return {
+        "lines": [{"speaker": speakers[0], "text": first, "emotion": "tension", "delivery": "low and sharp"},
+                  {"speaker": speakers[-1], "text": second, "emotion": "scheming", "delivery": "smug whisper"}],
+        "sfx_cues": [{"at": "start", "cue": "dramatic_sting"}, {"at": "2", "cue": "gasp_crowd"}],
+        "on_screen_text": None,
+    }
+
+
+def _script_llm(*, v2=False, **overrides):
+    """The script step's replies; *v2* (phase 7 stage 6a, re-pinned on
+    purpose): E2 replies of each scene's own (:func:`e2_v2_reply`, two more
+    for the fill pass) and J1 answering :data:`J1_PASSED` by default."""
+    e2 = [e2_v2_reply] * (len(BODY) + 2) if v2 else [e2_reply] * len(BODY)
+    queues = {"E1": [E1_REPLY], "E2": e2, "E3": [E3_FULL], "E4": [E4_ISSUES]}
     queues.update(overrides)
-    return FakeLLM(**queues)
+    return FakeLLM(default={"J1": J1_PASSED} if v2 else None, **queues)
 
 
 def _numbered_lines(user):
@@ -1522,7 +1557,7 @@ def _continuity_story(store, *, entries=((1, EP1_ENTRY),), chosen=1, v2=False):
     story_id = _ready_story(store, v2=v2)
     # Episode 1's script, at the revision the entries record (1): the gate needs its memory fresh (plan 11
     # stage 4). Episode 1 is legacy-shaped even on a v2 story (new_objects is offered from episode 2 on).
-    _run(_new().script, store, story_id, llm=_script_llm())
+    _run(_new().script, store, story_id, llm=_script_llm(v2=v2))
     season = store.read_doc(story_id, "season.json")
     for ep, entry in entries:
         season = series_memory.merge_entry(season, ep, entry)
@@ -1602,7 +1637,7 @@ def test_a_v2_script_turns_new_objects_into_a_prop_stub_in_prop_ids(store):
     rising = e1["scenes"][(["s00"] + ALL_SCENES).index("s03")]
     assert rising["props"] == []  # the base fixture's s03 (rising) has no prop
     rising["props"] = ["%prop_giant_toaster"]
-    llm = _script_llm(E1=[e1], E3=[E3_EP2], E4=[E4_PASSED])
+    llm = _script_llm(v2=True, E1=[e1], E3=[E3_EP2], E4=[E4_PASSED])
 
     assert "prop_giant_toaster" not in store.get(story_id)["prop_ids"]
 
