@@ -63,6 +63,7 @@ import os
 import platform
 import re
 import shutil
+import struct
 import subprocess
 import time
 from datetime import datetime, timezone
@@ -329,10 +330,80 @@ def _finite(value) -> float:
     return number
 
 
+# How much shorter than the episode a WAV of the audio stage may be: one video
+# frame. The mix and every stem are trimmed to the timeline's total; a bed cut
+# short by ffmpeg (seen intermittently on 7.1.5, CHECKPOINT phase 6 stage 10)
+# is seconds short, far past this.
+AUDIO_SHORT_TOLERANCE_S = 1.0 / 30
+
+
+def wav_seconds(path):
+    """Seconds of audio in the WAV file at *path*, read from its RIFF
+    ``fmt `` and ``data`` chunks (any sample format, the renderer writes
+    32-bit float, which the stdlib ``wave`` module refuses), or None when it
+    is not a WAV file -- the runner's tests write stand-in bytes. A ``data``
+    size ffmpeg left unset (0 or 0xFFFFFFFF) counts the bytes on disk."""
+    try:
+        with open(path, "rb") as handle:
+            head = handle.read(12)
+            if len(head) < 12 or head[:4] != b"RIFF" or head[8:12] != b"WAVE":
+                return None
+            rate = align = None
+            while True:
+                chunk = handle.read(8)
+                if len(chunk) < 8:
+                    return None
+                name, size = chunk[:4], struct.unpack("<I", chunk[4:])[0]
+                if name == b"fmt ":
+                    body = handle.read(size)
+                    _tag, _channels, rate, _byte_rate, align = struct.unpack("<HHIIH", body[:14])
+                    handle.seek(size % 2, os.SEEK_CUR)
+                elif name == b"data":
+                    if not rate or not align:
+                        return None
+                    available = os.path.getsize(path) - handle.tell()
+                    data = available if size in (0, 0xFFFFFFFF) else min(size, available)
+                    return data / align / rate
+                else:
+                    handle.seek(size + size % 2, os.SEEK_CUR)
+    except (OSError, struct.error):
+        return None
+
+
+def audio_shortfall(plan, render_dir):
+    """A sentence naming each WAV the audio stage (``A``) wrote -- the mix and
+    its stems -- that is shorter than the episode by more than
+    :data:`AUDIO_SHORT_TOLERANCE_S`, or None. A file that is not a WAV is
+    not measured. Reads headers only; starts nothing."""
+    total = float(plan["timeline"]["total_s"])
+    short = []
+    for rel in (plan_mod.MIX_REL, *plan_mod.STEMS_REL.values()):
+        seconds = wav_seconds(os.path.join(render_dir, rel))
+        if seconds is not None and seconds < total - AUDIO_SHORT_TOLERANCE_S:
+            short.append(f"{rel} lasts {seconds:.3f} s")
+    if not short:
+        return None
+    return (f"the audio mix came out short: {', '.join(short)} of a {total:.3f} s episode (ffmpeg cut it; seen "
+            "intermittently on ffmpeg 7.1.5). Nothing was published: render again")
+
+
+def framemd5_frames(path):
+    """The number of frames ``M``'s framemd5 file lists (``-map 0:v``: video
+    frames only), or None when the file is not a framemd5 (no ``#format:
+    frame checksums`` header -- the runner's tests write stand-in bytes)."""
+    with open(path, encoding="utf-8", errors="replace") as handle:
+        lines = handle.read().splitlines()
+    if not any(line.startswith("#format: frame checksums") for line in lines):
+        return None
+    return sum(1 for line in lines if line.strip() and not line.startswith("#"))
+
+
 def _output_record(plan, render_dir, made_path, final_path, manifest_dir) -> dict:
     """``output`` of the manifest, from P's probe, P:loudness and M: the file
     made (*made_path*, hashed) as it will be once published at
-    *final_path*."""
+    *final_path*. :class:`RunnerError` when M counts other than the
+    timeline's ``total_frames`` (a final that came out short is never
+    published as complete)."""
     probe = _read_json(os.path.join(render_dir, plan_mod.PROBE_REL))
     video = next((s for s in probe.get("streams", []) if s.get("codec_type") == "video"), None)
     if video is None:
@@ -340,6 +411,10 @@ def _output_record(plan, render_dir, made_path, final_path, manifest_dir) -> dic
     fmt = probe.get("format") or {}
     loud = _read_json(os.path.join(render_dir, plan_mod.LOUDNESS_FINAL_REL))
     framemd5 = os.path.join(render_dir, plan_mod.FRAMEMD5_REL)
+    frames, expected = framemd5_frames(framemd5), plan["timeline"]["total_frames"]
+    if frames is not None and frames != expected:
+        raise RunnerError(f"the final has {frames} video frames where the timeline has {expected}; it was not "
+                          "published: render again")
     return {
         "path": manifest_mod.relative_to(final_path, manifest_dir),
         "sha256": _sha256_file(made_path),
@@ -552,6 +627,8 @@ def run_render(plan: dict, *, render_dir, manifest_path, final_path=None, last_g
                     raise RunnerError(f"{stage['write']} was not written")
                 if stage["write"] != stage["output"]:
                     os.replace(write_path, os.path.join(render_dir, stage["output"]))
+                if stage["kind"] == "audio_mix":
+                    problem = audio_shortfall(plan, render_dir)
             except (OSError, ValueError, RunnerError) as exc:
                 problem = str(exc)
 
