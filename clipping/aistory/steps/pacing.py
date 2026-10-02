@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import re
 
-from clipping.providers import generation as gen
+from clipping.providers import generation as gen, prompt_limits
 from clipping.providers.registry import Link
 
 from .. import imaging
@@ -39,8 +39,10 @@ RATE_LIMIT_PAUSE_S = 60
 _FAILURE_HEAD = re.compile(r"(?P<name>[A-Za-z_][A-Za-z0-9_]*): (?:HTTP (?P<status>\d{3})\b)?")
 # Why the runner passed a paid link by before sending anything: its route,
 # no adapter, no key (``run_generation_chain``'s skips), ``allow_paid`` off,
-# a cap's refusal (``budget.check``).
-_UNSENT = ("route is ", "no adapter yet", "no API key", imaging.PAID_OFF, "refused: ")
+# a cap's refusal (``budget.check``), a prompt over the link's size limit
+# (``prompt_limits``).
+_UNSENT = ("route is ", "no adapter yet", "no API key", imaging.PAID_OFF, "refused: ",
+           prompt_limits.REFUSAL_HEAD)
 
 
 def _failure_link(label):

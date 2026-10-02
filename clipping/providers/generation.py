@@ -12,6 +12,9 @@ is never contacted (DEC-003/023). Three gates are new for generation:
 * a **free-tier** link asks the limiter first (``limits.py``), so a spent daily
   allowance moves the chain on instead of earning a 429.
 
+Before all three, a prompt over its link's size limit (``prompt_limits``) is
+refused: never truncated, never sent, and the chain moves on.
+
 Adapters register themselves per ``(kind, provider)``; a link whose adapter
 does not exist yet is reported as such and never called -- ``VIDEO_CHAIN``
 parses and tests from phase 0 and gets its adapters in phase 6 (DEC-102).
@@ -26,7 +29,7 @@ import time
 from collections import namedtuple
 from dataclasses import dataclass, field
 
-from . import errors, gencache
+from . import errors, gencache, prompt_limits
 from .registry import ChainError, Link, describe, parse_chain
 from .transport import urllib_transport
 
@@ -499,6 +502,14 @@ def _run_candidates(kind, candidates, request, *, adapter, credentials, allow_pa
                 result.paid = bool(journal.entry.get("paid"))
                 result.est_cost = float(journal.entry.get("est_usd") or 0.0)
                 return result, link
+        refusal = _prompt_refusal(kind, link, request)
+        if refusal is not None:
+            # Free: nothing was sent, so no estimate, no budget verdict, no
+            # free-tier slot and no journal entry; the link stays usable for
+            # a shorter prompt.
+            on_log(f"   ⏭ Skipping {label}: {refusal}.")
+            failures.append((label, refusal))
+            return None
         if paid:
             if not allow_paid:
                 on_log(f"   ⏭ Skipping {label}: paid link; allow_paid is off.")
@@ -543,6 +554,18 @@ def _run_candidates(kind, candidates, request, *, adapter, credentials, allow_pa
 
 
 _SWAP = object()
+
+
+def _prompt_refusal(kind, link, request):
+    """Why *request*'s prompt (a TTS line's text) cannot go to *link*, or None:
+    over the link's size limit (``prompt_limits.check``), as a chain reason
+    headed ``prompt_limits.REFUSAL_HEAD``. A kept answer or a resumed request
+    never comes here: it was accepted when it was sent."""
+    try:
+        prompt_limits.check(link, prompt_limits.sent_text(kind, request))
+    except prompt_limits.PromptTooLong as exc:
+        return f"{prompt_limits.REFUSAL_HEAD}{exc}; not sent"
+    return None
 
 
 def _release_free_slot(limiter, paid, link, exc) -> None:

@@ -43,6 +43,18 @@ def unpaced_cloudflare(monkeypatch):
     monkeypatch.setenv("LIMIT_CLOUDFLARE_RPM", "0")
 
 
+@pytest.fixture(autouse=True)
+def uncapped_cloudflare_prompt(monkeypatch):
+    """Two of the fixture episode's v1 shot prompts run 2164 and 2176
+    characters, over the 2048 Workers AI's flux-1-schnell accepts: the runner
+    now refuses them before the call (prompt_limits), as the real API would
+    with an HTTP 400, and they move on to the next link. These tests pin the
+    sticky link with a fake that takes any prompt, so the cap is lifted here."""
+    from clipping.providers import prompt_limits
+
+    monkeypatch.setitem(prompt_limits.TABLE, CF, prompt_limits.Limit(source="lifted for this test"))
+
+
 def _m():
     from clipping.aistory import workflow
     from clipping.aistory.steps import assets
