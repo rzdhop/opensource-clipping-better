@@ -3345,7 +3345,8 @@ RENDER_STAGE_STATES = ("running", "done", "failed", "cancelled", "cached")
 # Only these stages' outputs are kept in render/cache/ and reused.
 RENDER_CACHED_KINDS = ("shot", "end_card")
 # Phase 6 stage 10: ``clip_audio`` -- a tier-3 shot's clip, staged again as
-# the audio mix's input, its sound kept in place of the shot's lines.
+# the audio mix's input, its sound kept in place of the shot's lines (or,
+# stage E, under them as ambience).
 RENDER_INPUT_ROLES = ("shot", "line", "sfx", "bgm", "overlay", "clip_audio")
 # What a shot was cut from at tier >= 2 (phase 6 stage 9): its own clip
 # (``video``), or its image with Tier-1 motion -- plain (``motion``: tier 1,
@@ -3355,8 +3356,10 @@ RENDER_INPUT_ROLES = ("shot", "line", "sfx", "bgm", "overlay", "clip_audio")
 # (``motion_fill``). The render step's own param name is
 # ``RENDER_FILL_PARAM``. Phase 6 stage 10 (DEC-201): at tier 3, its own clip
 # with the clip's sound heard in place of the shot's lines
-# (``video_native_audio``).
-RENDER_SHOT_MODES = ("video", "motion", "motion_keep_still", "motion_fill", "video_native_audio")
+# (``video_native_audio``). Phase 7 follow-up, stage E: on an ambience story
+# (``media_policy.ambience``), its own clip with the clip's sound heard UNDER
+# the shot's lines (``video_ambience``).
+RENDER_SHOT_MODES = ("video", "motion", "motion_keep_still", "motion_fill", "video_native_audio", "video_ambience")
 RENDER_FILL_PARAM = "fill_failed_with_motion"
 RENDER_STAGE_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_:.-]{0,39}$"
 STDERR_TAIL_MAX = 4000

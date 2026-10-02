@@ -743,6 +743,78 @@ def _native_dialogue(argv, graph, lines, line_inputs, natives, *, sidechain, nor
     return index
 
 
+# ------------------------------------------------- tier-3 ambience (stage E)
+#
+# An ambience story's clips (``media_policy.ambience``; the human's choice of
+# 2026-10-02: the video model's sound is AMBIENCE + SFX ONLY) give the mix
+# one stem each, UNDER the dialogue: never in place of a line (that is the
+# opt-in's ``native_audio``, above). Kept apart from the dialogue's own code:
+# the only lines of :func:`audio_mix_argv` it touches are the SFX bus's input
+# list and the label the final amix takes the dialogue from.
+
+def _fade_samples(samples) -> int:
+    """An ambience stem's fade in and out: ``profiles.AMBIENCE_FADE_S``, never
+    more than half its *samples*."""
+    return min(round(profiles.AMBIENCE_FADE_S * profiles.AUDIO_RATE), samples // 2)
+
+
+def _ambience_stems(timeline, ambience) -> list:
+    """The clip sounds of *ambience* -- ``{shot_id: clip}`` -- in timeline
+    order: ``[{"shot_id", "input", "start_sample", "samples", "fade"}]``. A
+    stem starts at the first sample of its shot's first video frame
+    (:func:`sequence_plan`'s ``start_frames``, as a native stem), lasts its
+    shot's ``frames`` and fades over :func:`_fade_samples`.
+    :class:`GraphError` for a shot the timeline does not have, a path that
+    is not relative, or a shot too short to fade at all."""
+    if not isinstance(ambience, dict):
+        raise GraphError("ambience must be a dict of shot_id -> clip")
+    shots = [shot for shot in timeline["shots"] if shot["shot_id"] in ambience]
+    unknown = sorted(set(ambience) - {shot["shot_id"] for shot in shots})
+    if unknown:
+        raise GraphError(f"ambience: {unknown} are not shots of the timeline")
+    start_frames = sequence_plan(timeline)["start_frames"]
+    rate, fps = profiles.AUDIO_RATE, profiles.FPS
+    stems = []
+    for shot in shots:
+        shot_id = shot["shot_id"]
+        _assert_relative(ambience[shot_id], what=f"ambience[{shot_id!r}]")
+        samples = round(shot["frames"] * rate / fps)
+        fade = _fade_samples(samples)
+        if fade < 1:
+            raise GraphError(f"shot {shot_id!r} ({shot['frames']} frames) is too short for its clip's sound")
+        stems.append({"shot_id": shot_id, "input": ambience[shot_id],
+                      "start_sample": round(start_frames[shot_id] * rate / fps), "samples": samples, "fade": fade})
+    return stems
+
+
+def _ambience_bus(graph, stems, *, normalise, silence) -> str:
+    """The ambience section of :func:`audio_mix_argv` (its docstring,
+    "Ambience"), appended to *graph*; returns the ducked bed's label for the
+    SFX bus. Each clip is read inside the graph (``amovie``: the native
+    stems' reason, :func:`_native_dialogue`), resampled like every input,
+    re-stamped from 0, trimmed to its shot's samples, faded, delayed to its
+    shot's first sample; the stems are summed over a silent ``total_s`` base
+    (so the bed is exactly that long: ``sidechaincompress`` ends with either
+    input), lowered by ``AMBIENCE_GAIN`` and ducked with the
+    ``AMBIENCE_DUCK_*`` values by the dialogue as heard -- ``[dlg_mix]``,
+    split here: the final amix then takes ``[dlg_heard]``."""
+    labels = []
+    for j, stem in enumerate(stems):
+        samples, fade = stem["samples"], stem["fade"]
+        graph.append(f"amovie={motion_mod.escape_expr(stem['input'])},{normalise},asetpts=N/SR/TB,"
+                     f"atrim=end_sample={samples},afade=t=in:ss=0:ns={fade},"
+                     f"afade=t=out:ss={samples - fade}:ns={fade},adelay=delays={stem['start_sample']}S:all=1[amb{j}]")
+        labels.append(f"[amb{j}]")
+    graph.append(f"{silence}[amb_base]")
+    graph.append(f"[amb_base]{''.join(labels)}amix=inputs={len(labels) + 1}:normalize=0:duration=first,"
+                 f"volume={_num(profiles.AMBIENCE_GAIN)}[amb_bed]")
+    graph.append("[dlg_mix]asplit=2[dlg_heard][amb_sc]")
+    graph.append(f"[amb_bed][amb_sc]sidechaincompress=threshold={_num(profiles.AMBIENCE_DUCK_THRESHOLD)}:"
+                 f"ratio={_num(profiles.AMBIENCE_DUCK_RATIO)}:attack={_num(profiles.AMBIENCE_DUCK_ATTACK_MS)}:"
+                 f"release={_num(profiles.AMBIENCE_DUCK_RELEASE_MS)}[amb]")
+    return "[amb]"
+
+
 def _wav_output_args() -> list:
     """Per-WAV output options: 48 kHz stereo ``profiles.MIX_CODEC`` (32-bit
     float, so a sum above full scale is not clipped on write), no metadata
@@ -753,7 +825,7 @@ def _wav_output_args() -> list:
 
 
 def audio_mix_argv(timeline, *, line_inputs, sfx_inputs, bgm_input, ending, out_rel, stems_rel,
-                   native_audio=None) -> list:
+                   native_audio=None, ambience=None) -> list:
     """The episode's audio mix (spec 6.5 "Audio graph"; plan: "Audio mix";
     DEC-157, DEC-158): one absolute timeline of exactly ``total_s``.
 
@@ -798,6 +870,18 @@ def audio_mix_argv(timeline, *, line_inputs, sfx_inputs, bgm_input, ending, out_
     The ducking does not move: the sidechain is still every line's TTS
     audio, summed as above (a line heard is split to both; a line not heard
     feeds the sidechain alone, and is not read at all without a bed).
+
+    **Ambience** (phase 7 follow-up, stage E): *ambience* --
+    ``{shot_id: clip}``, None or empty without it, whose argv is then exactly
+    the one above -- makes each clip's own sound a stem UNDER the dialogue,
+    never in place of a line (:func:`_ambience_stems`, :func:`_ambience_bus`):
+    at its shot's first sample, trimmed to its frames, faded over
+    ``profiles.AMBIENCE_FADE_S``, summed, lowered by
+    ``profiles.AMBIENCE_GAIN`` and ducked by the dialogue as heard with the
+    gentler ``AMBIENCE_DUCK_*`` values, then mixed on the SFX bus -- still
+    three stems, ``stems/sfx.wav`` holding it, so the Tier-2 ducking check
+    of the bed is unchanged. A render keeps one tier-3 mode: *native_audio*
+    and *ambience* together are a :class:`GraphError`.
     """
     if ending not in profiles.ENDINGS:
         raise GraphError(f"unknown ending {ending!r}, expected one of {profiles.ENDINGS}")
@@ -820,6 +904,10 @@ def audio_mix_argv(timeline, *, line_inputs, sfx_inputs, bgm_input, ending, out_
         _assert_relative(stems_rel[kind], what=f"stems_rel[{kind!r}]")
     _assert_relative(out_rel, what="out_rel")
     natives = _native_stems(timeline, native_audio) if native_audio else []
+    ambient = _ambience_stems(timeline, ambience) if ambience else []
+    if natives and ambient:
+        raise GraphError("a render keeps one tier-3 audio mode: a clip's sound heard in place of its lines "
+                         "(native_audio) or under them (ambience), not both")
 
     ordered = sorted(lines, key=lambda line: line["start_s"])
     for line in ordered:
@@ -864,6 +952,9 @@ def audio_mix_argv(timeline, *, line_inputs, sfx_inputs, bgm_input, ending, out_
         else:
             graph.append(f"{silence},asplit={n_split}{dialogue_outputs}")
 
+    # tier-3 ambience (stage E): the clips' own sound, ducked under the dialogue
+    ambience_label = _ambience_bus(graph, ambient, normalise=normalise, silence=silence) if ambient else None
+
     # sfx
     sfx_labels = []
     for k, anchor in enumerate(anchors):
@@ -871,6 +962,8 @@ def audio_mix_argv(timeline, *, line_inputs, sfx_inputs, bgm_input, ending, out_
         graph.append(f"[{index}:a]{normalise},adelay=delays={_ms(anchor['start_s'])}:all=1[x{k}]")
         sfx_labels.append(f"[x{k}]")
         index += 1
+    if ambience_label:
+        sfx_labels.append(ambience_label)
     if sfx_labels:
         graph.append(f"{silence}[sfx_base]")
         graph.append(f"[sfx_base]{''.join(sfx_labels)}amix=inputs={len(sfx_labels) + 1}:normalize=0:"
@@ -893,7 +986,8 @@ def audio_mix_argv(timeline, *, line_inputs, sfx_inputs, bgm_input, ending, out_
 
     weights = dict(profiles.MIX_WEIGHTS)
     order = [kind for kind, _weight in profiles.MIX_WEIGHTS]
-    mix_inputs = "".join({"dialogue": "[dlg_mix]", "bgm": "[bgm_mix]", "sfx": "[sfx_mix]"}[kind] for kind in order)
+    dialogue_mix = "[dlg_heard]" if ambience_label else "[dlg_mix]"  # stage E: [dlg_mix] fed the ambience's ducking
+    mix_inputs = "".join({"dialogue": dialogue_mix, "bgm": "[bgm_mix]", "sfx": "[sfx_mix]"}[kind] for kind in order)
     weight_text = " ".join(_num(weights[kind]) for kind in order)
     graph.append(f"{mix_inputs}amix=inputs=3:weights={weight_text}:normalize=0:duration=first[mix]")
 

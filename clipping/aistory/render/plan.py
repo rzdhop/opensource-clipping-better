@@ -34,7 +34,10 @@ for the version the cache keys need, and hands the plan to
 - ``A`` (``audio_mix``) -- ``filtergraph.audio_mix_argv`` -> ``mix.wav`` and
   ``stems/``; at tier 3 a shot that keeps its clip's sound (the inputs'
   ``native_audio``, phase 6 stage 10) gives it one more stem there, in place
-  of its lines, and is labelled ``video_native_audio``.
+  of its lines, and is labelled ``video_native_audio``; on an ambience story
+  (the inputs' ``ambience``, stage E) a shot cut from a clip with a sound
+  track gives one more stem UNDER its lines, ducked, and is labelled
+  ``video_ambience``.
 - ``L1`` (``loudness_measure``) -- ``loudness.measure_cmd(mix.wav,
   target=profiles.LOUDNORM_TARGET)``; the runner parses its stderr into
   ``loudness_mix.json``.
@@ -237,7 +240,11 @@ def build_render_plan(*, script: dict, storyboard: dict, assets: dict, style_loc
       shot's ``lines`` (``video_native_audio``; the clip staged again as the
       A stage's ``clip_audio`` input, ``filtergraph.audio_mix_argv``'s
       *native_audio*). Without it, no clip's sound is ever read (tiers 1
-      and 2: ``tier2_clip_argv`` keeps ``-an``).
+      and 2: ``tier2_clip_argv`` keeps ``-an``). On an ambience story
+      (phase 7 follow-up, stage E) ``ambience[shot_id]`` instead: shots cut
+      from their clip whose sound is heard under their lines
+      (``video_ambience``; the clip staged again as ``clip_audio``,
+      ``filtergraph.audio_mix_argv``'s *ambience*).
     - *fill_failed_with_motion*: the render step's param, recorded in the
       plan's ``params`` only when it is on.
     - *ffmpeg*: ``runner.preflight``'s ``{"version", "machine"}``.
@@ -364,6 +371,9 @@ def _build(*, script, storyboard, assets, style_lock, template, story, ep, input
     # tier 3 (phase 6 stage 10): the shots whose clip's sound is heard in
     # place of their lines; tiers 1 and 2 hand none.
     native = list(inputs.get("native_audio") or ())
+    # tier 3, an ambience story (stage E): the shots whose clip's sound is
+    # heard under their lines; every other render hands none.
+    ambience = list(inputs.get("ambience") or ())
     stages = []
     shot_outputs = {}
     shot_modes = {}
@@ -379,7 +389,8 @@ def _build(*, script, storyboard, assets, style_lock, template, story, ep, input
             rel = add_input("shot", shot_id, video_inputs[shot_id])
             argv0 = filtergraph.tier2_clip_argv(rel, tl_shot, shot_profile, _OUT_TOKEN)
             input_shas = {rel: video_inputs[shot_id]["sha256"]}
-            shot_modes[shot_id] = "video_native_audio" if shot_id in native else "video"
+            shot_modes[shot_id] = ("video_native_audio" if shot_id in native
+                                   else "video_ambience" if shot_id in ambience else "video")
         else:
             if shot_id not in shot_inputs:
                 raise PlanError(f"shot {shot_id!r} has no image")
@@ -443,6 +454,17 @@ def _build(*, script, storyboard, assets, style_lock, template, story, ep, input
             native_audio[shot_id] = {"input": add_input("clip_audio", shot_id, video_inputs[shot_id]),
                                      "lines": list(board_shots[shot_id].get("lines") or [])}
 
+    # stage E: each ambience shot's clip, staged again the same way, heard
+    # under the shot's lines
+    not_cut = [shot_id for shot_id in ambience if shot_modes.get(shot_id) != "video_ambience"]
+    if not_cut:
+        raise PlanError(f"shot(s) {not_cut} keep their clip's sound as ambience but are not cut from a clip")
+    ambience_inputs = {}
+    for tl_shot in timeline["shots"]:
+        shot_id = tl_shot["shot_id"]
+        if shot_id in ambience:
+            ambience_inputs[shot_id] = add_input("clip_audio", shot_id, video_inputs[shot_id])
+
     # SFX: the cues the assets step resolved; a missing one is skipped and
     # reported (spec 11), never a failure.
     sfx_files = inputs.get("sfx") or {}
@@ -475,6 +497,8 @@ def _build(*, script, storyboard, assets, style_lock, template, story, ep, input
                 "out_rel": MIX_REL, "stems_rel": dict(STEMS_REL)}
     if native_audio:
         mix_args["native_audio"] = native_audio
+    if ambience_inputs:
+        mix_args["ambience"] = ambience_inputs
     stages.append(_stage("A", "audio_mix", filtergraph.audio_mix_argv(timeline, **mix_args), MIX_REL))
 
     # L1: measure the mix

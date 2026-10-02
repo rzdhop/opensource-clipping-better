@@ -52,6 +52,14 @@ lines (``video_native_audio``); the subtitles and the ducking still follow
 every line's TTS timing. A clip with no sound track leaves its shot as at
 tier 2, its lines spoken, and the feed says so.
 
+**Ambience** (phase 7 follow-up, stage E; the human's choice of 2026-10-02:
+the video model's sound is AMBIENCE + SFX ONLY): on a tier-3 ambience story
+(``media_policy.ambience``) every shot cut from its current clip whose clip
+has a sound track hears it UNDER its lines -- a stem at the shot's first
+frame, ducked by the dialogue, on the SFX bus (``video_ambience``) -- and
+every line is heard in its pinned TTS voice (``keep_native_audio`` is not
+read). A clip with no sound track adds nothing, and the feed says so.
+
 **The render** (``render/plan.py``, ``render/runner.py``): the plan is
 built from the episode's documents and the files as they are now -- each
 shot's image (``assets/shots``), each line's audio and the words of its
@@ -344,13 +352,27 @@ def silent_clip_note(shot) -> str:
             "it is rendered as at tier 2, its lines spoken by their voices.")
 
 
+def silent_ambience_note(shot) -> str:
+    """The feed's note for an ambience story's shot whose clip has no sound
+    track (stage E): it adds no ambience; its lines are heard as always."""
+    link = (shot["assets"].get("clip") or {}).get("link") or "its link"
+    return (f"ℹ️ Shot {shot['shot_id']}'s clip (from {link}) has no sound track: no ambience under it; its lines are "
+            "heard as always.")
+
+
 def shot_clips(ec, script, board, assets_doc, *, fill_failed=False):
     """What each shot is cut from (module docstring, "Clips"), or None at
     tier 1 -- the render reads no clip there::
 
         {"videos": {shot_id: file record of its current clip},
          "keep_still": {shot_id: effective flag}, "filled": [shot ids],
-         "native_audio": [shot ids], "notes": [sentences]}
+         "native_audio": [shot ids], "ambience": [shot ids], "notes": [sentences]}
+
+    ``ambience`` (phase 7 follow-up, stage E: a tier-3 ambience story,
+    ``media_policy.ambience``): every shot cut from its current clip whose
+    clip has a sound track -- heard under its lines; a clip with none adds
+    nothing, with a note (:func:`silent_ambience_note`). Such a story never
+    reads ``keep_native_audio``: ``native_audio`` stays empty.
 
     ``filled``: the shots not kept still whose clip record is not current,
     rendered with Tier-1 motion -- only with *fill_failed*; without it they
@@ -373,7 +395,8 @@ def shot_clips(ec, script, board, assets_doc, *, fill_failed=False):
         blocked, unmade = unanimated_shots(ec, script, board, assets_doc)
         if blocked or unmade:
             raise StepFailed(fully_animated_refusal(ec, blocked, unmade, script=script, doc=assets_doc, link=link))
-    videos, keep_still, blocked, native, notes = {}, {}, [], [], []
+    ambient = tier == 3 and media_policy.ambience(ec.story)
+    videos, keep_still, blocked, native, ambience, notes = {}, {}, [], [], [], []
     for shot in board["shots"]:
         shot_id = shot["shot_id"]
         flags = clips.shot_flags(shot, assets_doc)
@@ -386,7 +409,12 @@ def shot_clips(ec, script, board, assets_doc, *, fill_failed=False):
         if state == "current":
             path = clips.shot_clip_path(ec, shot)
             videos[shot_id] = runner_mod.file_record(path, shot["assets"]["video"])
-            if tier == 3 and flags["keep_native_audio"]:
+            if ambient:
+                if clips.clip_has_audio(path):
+                    ambience.append(shot_id)
+                else:
+                    notes.append(silent_ambience_note(shot))
+            elif tier == 3 and flags["keep_native_audio"]:
                 if clips.clip_has_audio(path):
                     native.append(shot_id)
                 else:
@@ -396,7 +424,7 @@ def shot_clips(ec, script, board, assets_doc, *, fill_failed=False):
     if blocked and not fill_failed:
         raise StepFailed(clip_refusal(ec, blocked, script=script, doc=assets_doc, link=link))
     return {"videos": videos, "keep_still": keep_still, "filled": [shot["shot_id"] for shot, _state in blocked],
-            "native_audio": native, "notes": notes}
+            "native_audio": native, "ambience": ambience, "notes": notes}
 
 
 def require_clips(ec, params=None) -> tuple:
@@ -482,6 +510,8 @@ def render_inputs(ec, script, board, assets_doc, *, custom_fonts_dir=None, fill_
         inputs.update(videos=resolved["videos"], keep_still=resolved["keep_still"], filled=resolved["filled"])
         if resolved.get("native_audio"):
             inputs["native_audio"] = list(resolved["native_audio"])
+        if resolved.get("ambience"):
+            inputs["ambience"] = list(resolved["ambience"])
     return inputs
 
 

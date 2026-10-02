@@ -162,6 +162,29 @@ DUCK_RATIO = 8
 DUCK_ATTACK_MS = 20
 DUCK_RELEASE_MS = 300
 
+# Tier-3 ambience (phase 7 follow-up, stage E; ``filtergraph._ambience_bus``):
+# each clip's own sound, at its shot, under the dialogue, on the SFX bus. It
+# is the room the lines are spoken in, not a foreground like the music bed:
+# - AMBIENCE_GAIN: the summed clip sounds are lowered by half (-6 dB) before
+#   the SFX bus's own 0.8, so a model's full-scale ambience sits about 8 dB
+#   under the lines when no one speaks;
+# - the ducking is gentler than the bed's: it starts higher (-24.4 dBFS, so a
+#   breath or a quiet tail does not pull it), reduces less (3:1: about 10 dB
+#   under a line at -10 dBFS, where the bed's 8:1 takes about 13), engages
+#   more slowly (50 ms: a footstep or a door in the clip is not cut by each
+#   syllable) and recovers more slowly (600 ms: it does not pump back up in
+#   the 0.25 s pause between two lines);
+# - AMBIENCE_FADE_S: a clip's sound fades in and out over 80 ms at its shot's
+#   edges (never more than half the shot): long enough that a cut between two
+#   rooms does not click or snap, short enough that a 3 s shot keeps its
+#   sound. Not measured on a live Veo clip yet (A-103): the walk tunes them.
+AMBIENCE_GAIN = 0.5
+AMBIENCE_DUCK_THRESHOLD = 0.06
+AMBIENCE_DUCK_RATIO = 3
+AMBIENCE_DUCK_ATTACK_MS = 50
+AMBIENCE_DUCK_RELEASE_MS = 600
+AMBIENCE_FADE_S = 0.08
+
 # The bed's fade-out at the very end of the episode, per cliffhanger ending.
 ENDINGS = ("cut_to_black", "hard_stop")
 BED_FADE_OUT_S = {"cut_to_black": 0.5, "hard_stop": 0.05}
