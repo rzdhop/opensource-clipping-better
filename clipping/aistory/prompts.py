@@ -151,6 +151,9 @@ C1_CALLS = 10
 # reply -- the three take-aways at 25, 30 and 25 words, 6 issues of the
 # longest kind with a 30-word fix -- needs 795.6 tokens (chars/4 x 1.3);
 # + 15 %, rounded up to ten (tests/test_story_episode_prompt_budgets.py).
+# J2 (stage 6b): its largest reply (English: 3 missing items of 6 words, a
+# 25-word continuity issue, 6-character words) needs 91 (chars/4), + 15 %,
+# rounded up to ten: 110, under the plan's 160.
 MAX_TOKENS = {
     "C1": 700, "B1": 400, "B2": 520, "B3": 300,
     "K1": 750, "P0": 420, "P1": 260, "R1": 100, "S1": 950, "S2": 350, "U1": 120,
@@ -163,7 +166,7 @@ MAX_TOKENS = {
     "D4": 430, "D5": 3330, "D6": 540,
     "E1v2": 1750, "E2v2": 600, "E3v2": 720,
     "L1": 690,
-    "J1": 920,
+    "J1": 920, "J2": 110,
 }
 
 # E1's payoff variant (phase 5, plan 11 stage 3, DEC-138's method): from
@@ -215,6 +218,7 @@ TEMPERATURE = {
     "E3v2": WRITING_TEMPERATURE,
     "L1": ANALYTIC_TEMPERATURE,
     "J1": ANALYTIC_TEMPERATURE,
+    "J2": ANALYTIC_TEMPERATURE,
 }
 SCHEMA_NAMES = {
     "C1": "story_concepts", "B1": "bible_core", "B2": "bible_world", "B3": "bible_values",
@@ -231,7 +235,7 @@ SCHEMA_NAMES = {
     "D4": "knowledge_world", "D5": "knowledge_timeline", "D6": "knowledge_props",
     "E1v2": "episode_beat_sheet_v2", "E2v2": "episode_scene_dialogue_v2", "E3v2": "episode_framing_scenes_v2",
     "L1": "continuity_ledger",
-    "J1": "first_watch_check",
+    "J1": "first_watch_check", "J2": "keyframe_check",
 }
 
 # E4's input is the whole script, not a small pack -- it needs a wider
@@ -340,6 +344,8 @@ SCHEMA_NAMES = {
 # characters: the registry's 8 and E1v2's 2 new objects); no bible, cast
 # notes or memory (a first-time viewer knows only the episode): 3,195;
 # + 15 %, rounded up to ten (tests/test_story_episode_prompt_budgets.py).
+# J2 (stage 6b) is a vision call with no pack, as U1: no entry; its text at
+# its worst case fits the default pack budget (tests/test_story_keyframe_gate.py).
 INPUT_BUDGET = {"E1": 1820, "E2": 1660, "E3": 2530, "E4": 3900, "T1": 1270, "T1r": 1410, "S3": 3740, "F1": 3950, "N1": 3740,
                 "D2": 2370, "D3": 1940, "R1v2": 1170, "T1v2": 2020, "T1rv2": 2060, "D1": 3890,
                 "D4": 2270, "D5": 3930, "D6": 3560,
@@ -2902,6 +2908,100 @@ def validate_j1(reply, *, scene_ids) -> list:
         _text_errors(errors, f"{path}.fix", issue["fix"], max_words=J1_FIX_MAX_WORDS)
     if reply["passed"] != (len(issues) == 0):
         errors.append(f"$.passed: {reply['passed']!r} does not agree with {len(issues)} issue(s)")
+    return errors
+
+
+# ------------------------------------------------------------------------- J2
+#
+# Phase 7 stage 6b (A16, DEC-230): the keyframe judge of a v2 shot, one
+# vision call per shot on VISION_CHAIN (the ``uploads.describe_upload``
+# pattern: the adapter takes the images and one text, no system turn and no
+# schema slot, so the three are joined, :func:`j2_prompt_text`). Image 1 is
+# the shot's keyframe, image 2 the previous shot's (none for the first
+# shot); the text is what the shot must show (``steps/judge.keyframe_brief``).
+# The verdict: does it show the beat, what is missing, and what changed
+# from the previous keyframe that should not have. English (the app's
+# language for what it shows the user about an image).
+
+J2_MISSING_MAX = 3
+J2_MISSING_MAX_WORDS = 6
+J2_CONTINUITY_MAX_WORDS = 25
+
+_J2_SYSTEM = (
+    "You check one keyframe of a vertical-video episode against what its shot must show. You only look and "
+    "report; you never describe a real person or name anyone outside the text you are given. Reply with JSON "
+    "only, matching the schema, in English."
+)
+
+_J2_ASK = (
+    "Give:\n"
+    "- shows_beat: true when image 1 shows what happens in this shot, with the people and objects above\n"
+    "- missing: what the shot must show that image 1 does not (a character, an object, an action), at most "
+    f"{J2_MISSING_MAX} items of at most {J2_MISSING_MAX_WORDS} words each; [] when nothing is missing\n"
+)
+_J2_CONTINUITY_ASK = (
+    "- continuity_issue: what changed from image 2 to image 1 that should not have (a character's face, outfit "
+    f"or size, the set, the light), at most {J2_CONTINUITY_MAX_WORDS} words; null when nothing did"
+)
+_J2_NO_PREVIOUS_ASK = "- continuity_issue: null (this is the episode's first shot)"
+
+
+def j2_schema() -> dict:
+    """The J2 output schema: ``{shows_beat, missing, continuity_issue}``."""
+    return _llm_obj({
+        "shows_beat": {"type": "boolean"},
+        "missing": {"type": "array", "description": f"at most {J2_MISSING_MAX} items",
+                    "items": {"type": "string", "description": f"at most {J2_MISSING_MAX_WORDS} words"}},
+        "continuity_issue": {"type": ["string", "null"],
+                             "description": f"at most {J2_CONTINUITY_MAX_WORDS} words, or null"},
+    })
+
+
+def build_j2(*, shot_id, brief, previous_shot_id=None):
+    """The keyframe judge of shot *shot_id* (section above): *brief* is what
+    the shot must show (``steps/judge.keyframe_brief``); *previous_shot_id*
+    the shot whose keyframe is image 2, None for the first shot (then
+    ``continuity_issue`` is asked null). Takes no pack: there is no story
+    text to draw on for one image check, as :func:`build_u1`."""
+    user = f"Image 1 is the keyframe of shot {shot_id}."
+    if previous_shot_id is not None:
+        user += f" Image 2 is the keyframe of the shot right before it ({previous_shot_id})."
+    user += f"\n\nWhat shot {shot_id} must show:\n{brief}\n\n"
+    user += _J2_ASK + (_J2_CONTINUITY_ASK if previous_shot_id is not None else _J2_NO_PREVIOUS_ASK)
+    return _J2_SYSTEM, user, j2_schema()
+
+
+def j2_prompt_text(*, shot_id, brief, previous_shot_id=None) -> str:
+    """J2 as the one text a vision adapter sends beside the images: the
+    system text, the ask and the reply's schema joined
+    (``uploads.vision_prompt``'s shape)."""
+    import json  # stdlib; imported here: this module's top level imports only ``re`` (its guard test)
+
+    system, user, schema = build_j2(shot_id=shot_id, brief=brief, previous_shot_id=previous_shot_id)
+    shape = json.dumps(schema, ensure_ascii=False, separators=(",", ":"))
+    return f"{system}\n\n{user}\n\nThe reply's JSON schema: {shape}"
+
+
+def validate_j2(reply, *, has_previous=True) -> list:
+    """Post-validation for a J2 reply: at most :data:`J2_MISSING_MAX`
+    missing items within their word cap, a continuity issue within its cap
+    -- and null for the first shot (*has_previous* false)."""
+    errors = schemas.validate(reply, j2_schema())
+    if errors:
+        return errors
+
+    errors = []
+    missing = reply["missing"]
+    if len(missing) > J2_MISSING_MAX:
+        errors.append(f"$.missing: {len(missing)} item(s), expected at most {J2_MISSING_MAX}")
+    for i, item in enumerate(missing):
+        _text_errors(errors, f"$.missing[{i}]", item, max_words=J2_MISSING_MAX_WORDS)
+    issue = reply["continuity_issue"]
+    if issue is not None:
+        if not has_previous:
+            errors.append("$.continuity_issue: must be null for the episode's first shot")
+        else:
+            _text_errors(errors, "$.continuity_issue", issue, max_words=J2_CONTINUITY_MAX_WORDS)
     return errors
 
 

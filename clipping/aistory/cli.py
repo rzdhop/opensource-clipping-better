@@ -16,6 +16,7 @@ options and defaults are untouched. Commands::
     main.py --ai-story render <story_id> --ep N [options]
     main.py --ai-story fast-track <story_id> --ep N [options]
     main.py --ai-story feedback <story_id> --ep N --text-file F [--stats-file F] [options]
+    main.py --ai-story approve <story_id> keyframes:N [--anyway]
     main.py --ai-story list
 
 The story rules are ``clipping.aistory.workflow``'s, the ones the API applies,
@@ -146,6 +147,15 @@ why (``workflow.reedit_changes``, also ``GET /estimate/rerender``'s own) --
 without rendering anything. A short summary follows a real run (how many of
 the episode's shots were made again versus reused, the render's own
 numbers).
+
+Phase 7 stage 6b: ``approve <story_id> keyframes:N`` approves a v2 story's
+episode N keyframes (``workflow.approve_keyframes``, the API's own rule:
+every shot with a current keyframe, every keyframe check (J2) passed --
+``--anyway`` goes over a failed or missing one, and the approval records
+it); no clip of a v2 episode is bought before it is current. It is the one
+document approved by a command of its own: a person approves keyframes
+after looking at them, so no step's ``--auto-approve`` ever does. Any other
+document is refused, pointing at ``--auto-approve``.
 
 Limitation: the CLI and a running server do not coordinate step runs on the
 same story. The server's one-step-per-story rule lives in its job store
@@ -332,8 +342,8 @@ def build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--outputs-dir", default=None, help=argparse.SUPPRESS)
 
-    commands = parser.add_subparsers(dest="command", metavar="{new,step,render,fast-track,feedback,list}",
-                                     required=True)
+    commands = parser.add_subparsers(dest="command",
+                                     metavar="{new,step,render,fast-track,feedback,approve,list}", required=True)
 
     # ---- new
     new = commands.add_parser(
@@ -534,6 +544,21 @@ def build_parser() -> argparse.ArgumentParser:
                                     "6,000 characters; optional"))
     feedback_cmd.add_argument("--auto-approve", action="store_true",
                               help="approve the digest once it is done, with no direction chosen")
+
+    # ---- approve (phase 7 stage 6b: a v2 episode's keyframes)
+    approve_cmd = commands.add_parser(
+        "approve", parents=[common], help="approve a v2 episode's keyframes (keyframes:N)",
+        description=(
+            "Approve episode N's keyframes on a v2 story (keyframes:N), by the API's own rule: every shot "
+            "with a current keyframe and every keyframe check (J2) passed; --anyway goes over a failed or "
+            "missing check, and the approval records it. No clip of a v2 episode is bought before its "
+            "keyframes are approved. The other documents are approved with 'step ... --auto-approve'."
+        ),
+    )
+    approve_cmd.add_argument("story_id", help="the story's id (see 'list')")
+    approve_cmd.add_argument("doc", metavar="keyframes:N", help="the document to approve: keyframes:N")
+    approve_cmd.add_argument("--anyway", action="store_true",
+                             help="approve over keyframe checks (J2) that failed or have not run")
 
     # ---- list
     commands.add_parser("list", parents=[common], help="list the stories",
@@ -1451,8 +1476,26 @@ def _cmd_fast_track(args, stories) -> int:
     return EXIT_OK
 
 
+def _cmd_approve(args, stories) -> int:
+    """``approve``: a v2 episode's keyframes (``keyframes:N``,
+    ``workflow.approve_keyframes``; module docstring). Any other document
+    is a usage error naming ``--auto-approve``."""
+    word, sep, ep = args.doc.partition(":")
+    if word != workflow.KEYFRAMES_APPROVAL or not sep or not ep.isdigit():
+        return _usage_error("approve", f"{args.doc!r} is not keyframes:N -- the one document approved by this "
+                                       "command; approve the others with 'step STORY_ID <step> --auto-approve'")
+    story = workflow.load(stories, args.story_id)
+    story_id = story["story_id"]
+    doc = workflow.approve_keyframes(stories, story_id, int(ep), approve_anyway=args.anyway, now=_now())
+    approved = doc["keyframes_approved"]
+    print(f"✅ Episode {int(ep)}'s keyframes approved{' anyway' if approved['anyway'] else ''} "
+          f"(fingerprint {approved['fingerprint'][:12]}): its clips can be made (the assets step).")
+    print(_line(workflow.load(stories, story_id)))
+    return EXIT_OK
+
+
 _COMMANDS = {"new": _cmd_new, "step": _cmd_step, "render": _cmd_render, "fast-track": _cmd_fast_track,
-             "feedback": _cmd_feedback, "list": _cmd_list}
+             "feedback": _cmd_feedback, "approve": _cmd_approve, "list": _cmd_list}
 
 
 def main(argv=None) -> int:

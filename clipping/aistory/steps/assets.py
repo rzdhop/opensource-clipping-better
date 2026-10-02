@@ -101,6 +101,18 @@ cancel token is checked before every call. It fills only what is missing
    ``cost_ledger.json`` in the episode's folder after the step, whatever
    happened.
 
+**A v2 story** (phase 7 stage 6b, A16, DEC-230): once ``assets.json`` is
+written, the keyframe judge (J2, ``judge.check_keyframes``) checks every
+shot whose keyframe is current and has no current verdict -- free, one
+vision call each -- and the verdicts are written to ``assets.json``'s
+``keyframe_verdicts``. No clip is bought before the keyframes' approval
+(``workflow.approve_keyframes``) is current (RC-Q3, :func:`clip_hold`):
+while it is missing or stale, or a keyframe is still to make in this run,
+the clips' plan is held -- shown, priced, but out of this run's total, its
+caps and its readiness, exactly like ``animate`` off -- and the run makes
+the keyframes and stops before the video phase, saying so; a clip
+regenerate is refused the same way (:func:`clip_target_refusal`).
+
 **A free tier that pushes back is paced, not failed.** After the images,
 the lines and shots a free link held back (:func:`rate_limited_by`: HTTP
 429 from a free link, HTTP 402 from ``pollinations`` -- its empty pollen
@@ -152,7 +164,7 @@ from .. import names as names_mod
 from .. import shots as shots_mod
 from .. import store as store_mod
 from ..render import audio_assets, imagesize
-from . import clips, entities, episode_common, llm_call, sticky_link, voice_lines
+from . import clips, entities, episode_common, judge, llm_call, sticky_link, voice_lines
 from . import script as script_step
 from . import storyboard as storyboard_step
 from .episode_common import SCRIPT_DOC, STORYBOARD_DOC
@@ -1245,7 +1257,9 @@ def asset_units(ec, script, storyboard, *, env, align_words=False, adapters=None
     With *animate* off (the step's ``animate`` param, phase 6 stage 8) the
     ``video`` part is still shown -- ``animate`` false, its message saying so
     -- but it is left out of the total, ``over_cap``, ``paid_links`` and
-    ``ready``: the run makes no clip.
+    ``ready``: the run makes no clip. So is a v2 episode's plan held for the
+    keyframes' approval (``video.hold``, :func:`clip_hold`; phase 7 stage
+    6b, RC-Q3).
 
     *route* (phase 6 stage 11) prices everything on that route instead of
     the story's own (:func:`on_route`), writing nothing.
@@ -1294,7 +1308,8 @@ def asset_units(ec, script, storyboard, *, env, align_words=False, adapters=None
         video["animate"] = bool(animate)
         if not animate:
             video["message"] = f"Animate off: no clip is made in this run. {video['message']}".strip()
-        elif video["route_class"] == "paid" and video["count"]:
+        # A plan held for the keyframes' approval (phase 7 stage 6b, RC-Q3) is out of this run, as animate off.
+        elif video["route_class"] == "paid" and video["count"] and not video.get("hold"):
             paid_links.append({"kind": gen.VIDEO, "link": video["link"], "allowed": video["ready"],
                                "reason": video["refused"] or "paid, allowed", "est_usd": video["est_usd"]})
             if video["ready"]:
@@ -1312,7 +1327,7 @@ def asset_units(ec, script, storyboard, *, env, align_words=False, adapters=None
         "paid_links": paid_links, "caps": caps, "est_usd": total, "over_cap": over_cap,
         "ready": images["ready"] and voices_est["ready"] and over_cap is None,
     })
-    if video is not None and animate:
+    if video is not None and animate and not video.get("hold"):
         units["ready"] = bool(units["ready"] and video["ready"])
     return units
 
@@ -1327,7 +1342,7 @@ def _video_units(ec, script, storyboard, doc, *, env, ledger, adapters, probe_lo
     return clips.video_units(ec, script, storyboard, doc, env=env, caps=caps, committed_usd=spent + committed,
                              adapters=adapters, probe_local=probe_local, transport=transport,
                              image_sha=lambda shot: _sha256_file(shot_image_path(ec, shot)),
-                             booked=_clip_booked(ec, script, doc))
+                             booked=_clip_booked(ec, script, doc), hold=clip_hold(ec, storyboard, doc))
 
 
 # -------------------------------------------------------------- the clips
@@ -1435,6 +1450,64 @@ def keyframe_problem(ec, shot, *, link=_READ):
         return None
     return (f"keyframe (the shot's image) is {state.replace('_', ' ')}: make it again first (the assets step, or "
             f"regenerate '{shot_target(ec.ep, shot['shot_id'])}')")
+
+
+# --------------------------------------------- the keyframes (phase 7 stage 6b)
+
+def keyframe_items(ec, storyboard, doc) -> list:
+    """J2's items (``judge.check_keyframes``): ``[(shot, path, sha,
+    previous_shot_id, previous_path, previous_sha)]`` for every shot whose
+    keyframe is current (:func:`keyframe_problem` finds nothing; a locked
+    image as it is), in storyboard order. The previous ones are the shot
+    before it in the storyboard -- None for the first shot, or one with no
+    image on disk. Hashes every image."""
+    link = recorded_image_link(doc)
+    items, previous = [], (None, None, None)
+    for shot in storyboard["shots"]:
+        path = shot_image_path(ec, shot)
+        sha = _sha256_file(path) if path is not None else None
+        if path is not None and keyframe_problem(ec, shot, link=link) is None:
+            prev_id, prev_path, prev_sha = previous if previous[1] is not None else (None, None, None)
+            items.append((shot, path, sha, prev_id, prev_path, prev_sha))
+        previous = (shot["shot_id"], path, sha)
+    return items
+
+
+def keyframes_fingerprint(ec, storyboard) -> str:
+    """``judge.keyframes_fingerprint`` of the keyframes on disk now, in
+    storyboard order."""
+    return judge.keyframes_fingerprint([(shot["shot_id"], _sha256_file(shot_image_path(ec, shot)))
+                                        for shot in storyboard["shots"]])
+
+
+def keyframes_state(ec, storyboard, doc) -> str:
+    """The keyframe approval's state (``judge.keyframes_state``): ``none`` |
+    ``current`` | ``stale``. Hashes every image."""
+    return judge.keyframes_state((doc or {}).get(judge.KEYFRAMES_APPROVED), keyframes_fingerprint(ec, storyboard))
+
+
+def clip_hold(ec, storyboard, doc):
+    """Why a v2 episode's clips wait (RC-Q3: no clip is bought before the
+    keyframes' approval is current), or None: a legacy story (never held),
+    or keyframes approved, current, and none still to make. Calls
+    nothing; hashes every image."""
+    if not media_policy.is_v2(ec.story):
+        return None
+    ep = ec.ep
+    todo = [shot["shot_id"] for shot in shots_to_make(ec, storyboard, link=recorded_image_link(doc))]
+    if todo:
+        many = len(todo) > 1
+        return (f"shot{'s' if many else ''} {_and(todo)} {'have' if many else 'has'} no current keyframe yet: the "
+                f"assets step makes {'them' if many else 'it'}, then approve the keyframes first "
+                f"({judge.KEYFRAMES_APPROVAL}:{ep}) and run it again to buy the clips")
+    state = keyframes_state(ec, storyboard, doc)
+    if state == "none":
+        return (f"approve the keyframes first ({judge.KEYFRAMES_APPROVAL}:{ep}): no clip of a v2 episode is bought "
+                "before they are approved")
+    if state == "stale":
+        return (f"the keyframes changed since they were approved: approve the keyframes first "
+                f"({judge.KEYFRAMES_APPROVAL}:{ep}), again, before any clip is bought")
+    return None
 
 
 def _plan_text(video) -> str:
@@ -1585,14 +1658,16 @@ def still_generating(shot, entry) -> str:
             "while the first is billed.")
 
 
-def clip_target_refusal(ec, shot, *, doc=_READ):
+def clip_target_refusal(ec, shot, *, doc=_READ, storyboard=None):
     """Why *shot*'s clip cannot be made again (``shot:<ep>:<shid>:video``,
     phase 6 stage 8), calling nothing, or None: the story is not at tier 2
     or 3, the clip's recorded request is still open in the generation
     journal (still generating: only Continue collects it,
     :func:`still_generating`), the shot is kept still (its effective flag,
     *doc* ``assets.json`` read unless given), or its keyframe is not
-    current. A clip whose request the provider settled stays regenerable."""
+    current. A clip whose request the provider settled stays regenerable.
+    A v2 story's, also while the keyframes' approval is not current
+    (:func:`clip_hold` over *storyboard*, read unless given; RC-Q3)."""
     tier = clips.tier_of(ec)
     if tier < 2:
         return (f"the story is at tier {tier}: a shot is animated only at tier 2 or 3 (set its "
@@ -1607,6 +1682,11 @@ def clip_target_refusal(ec, shot, *, doc=_READ):
     problem = keyframe_problem(ec, shot, link=recorded_image_link(doc))
     if problem:
         return f"shot {shot['shot_id']}'s {problem}."
+    if media_policy.is_v2(ec.story):
+        board = storyboard if storyboard is not None else episode_common.read_episode(ec, STORYBOARD_DOC)
+        hold = clip_hold(ec, board, doc) if board is not None else None
+        if hold:
+            return f"{hold}."
     return None
 
 
@@ -1633,12 +1713,13 @@ def clip_quote(ec, script, storyboard, shot, *, env, adapters=None, probe_local=
     caps, _over = spending_caps(ec, 0.0, env=env, ledger=ledger)
     spent = float((caps.get("episode") or {}).get("spent_usd") or 0.0)
     video = clips.video_units(ec, script, storyboard, trial, env=env, caps=caps, committed_usd=spent,
-                              adapters=adapters, probe_local=probe_local, transport=transport, image_sha=None)
+                              adapters=adapters, probe_local=probe_local, transport=transport, image_sha=None,
+                              hold=clip_hold(ec, storyboard, doc))
     row = next((item for item in video["plan"] if item["shot_id"] == shot["shot_id"]), None)
     quote = {"video": video, "link": video["link"], "route_class": video["route_class"],
              "clip_s": row["clip_s"] if row else None, "est_usd": round(float(row["est_usd"]), 4) if row else 0.0,
              "over_cap": None, "ready": False, "message": video["message"]}
-    if row is None or not video["ready"]:
+    if row is None or not video["ready"] or video.get("hold"):
         return quote
     keys = [(shot["assets"].get("clip") or {}).get("cache_key")]
     try:
@@ -1698,7 +1779,7 @@ def plan_refusal(ec, units, *, unprobed=False):
         return (f"Episode {ec.ep}'s shot images cannot be made: {images['message']} Nothing was generated or "
                 "spent.")
     video = units.get("video")
-    if (video is not None and video.get("animate", True) and not video["ready"]
+    if (video is not None and video.get("animate", True) and not video.get("hold") and not video["ready"]
             and not (unprobed and clips.local_unasked(video))):
         return (f"Episode {ec.ep}'s clips cannot be made now: {video['message'].strip()} Nothing was generated "
                 "or spent: run the assets step with animate off to make the keyframes first, or fix that and run "
@@ -1805,6 +1886,8 @@ class _Assets(voice_lines.LineMeasurement):
         self.video_gone = None
         self.clip_todo = []
         self.local_image_ran = False
+        # Phase 7 stage 6b: what the keyframe judge (J2) did in this run (None: not a v2 story).
+        self.keyframe_check = None
 
     # ---------------------------------------------------------- plumbing
 
@@ -2705,6 +2788,12 @@ class _Assets(voice_lines.LineMeasurement):
         # The user's per-shot overrides (phase 6 stage 7): carried as they are.
         if (previous or {}).get("shots"):
             doc["shots"] = previous["shots"]
+        # A v2 episode's keyframe verdicts and approval (phase 7 stage 6b):
+        # carried as they are -- the approval goes stale by its fingerprint,
+        # never cleared here.
+        for key in (judge.KEYFRAME_VERDICTS, judge.KEYFRAMES_APPROVED):
+            if (previous or {}).get(key):
+                doc[key] = previous[key]
         doc.update({
             # Kept: an approval is derived stale by the fingerprint, never cleared here.
             "approved": previous["approved"] if previous else None,
@@ -2714,6 +2803,54 @@ class _Assets(voice_lines.LineMeasurement):
             return ec.store.write_episode_doc(ec.story_id, ec.ep, ASSETS_DOC, doc, now=now)
         except (schemas.SchemaError, ValueError, KeyError) as exc:
             raise StepFailed(f"Episode {ec.ep}'s {ASSETS_DOC} could not be written ({exc}).") from None
+
+    # ---------------------------------------------------- the keyframe judge
+
+    def before_vision(self, remaining) -> None:
+        """The cancel token, then the step budget: a J2 call starts only while
+        it still fits (``judge.STORY_VISION_CALL_SECONDS``); *remaining* are
+        the shots not judged yet."""
+        self.ctx.cancel.check()
+
+        def left():
+            many = len(remaining) > 1
+            return f"the keyframe check (J2) of shot{'s' if many else ''} {_and(remaining)}"
+
+        try:
+            self.budget.before_call(left, per_call=judge.STORY_VISION_CALL_SECONDS)
+        except StepFailed as exc:
+            raise voice_lines.BudgetSpent(str(exc) + self.also_failed()) from None
+
+    def judge_keyframes(self, doc) -> dict:
+        """J2 on a v2 episode (module docstring): every current keyframe
+        without a current verdict, ``keyframe_verdicts`` written after each
+        new one (a stop keeps what was judged) and once more at the end when
+        it moved. Returns ``assets.json`` as it stands after."""
+        ec = self.ec
+        written = {"doc": doc}
+
+        def write(verdicts):
+            current = written["doc"]
+            if verdicts == (current.get(judge.KEYFRAME_VERDICTS) or {}):
+                return
+            new = copy.deepcopy(current)
+            if verdicts:
+                new[judge.KEYFRAME_VERDICTS] = verdicts
+            else:
+                new.pop(judge.KEYFRAME_VERDICTS, None)
+            try:
+                written["doc"] = ec.store.write_episode_doc(ec.story_id, ec.ep, ASSETS_DOC, new,
+                                                            now=llm_call.utc_now())
+            except (schemas.SchemaError, ValueError, KeyError) as exc:
+                raise StepFailed(f"Episode {ec.ep}'s {ASSETS_DOC} could not be written ({exc}).") from None
+
+        verdicts, summary = judge.check_keyframes(
+            self.ctx, ec, keyframe_items(ec, self.storyboard, doc), doc.get(judge.KEYFRAME_VERDICTS) or {},
+            env=self.ctx.settings_env, ledger=self.gates.ledger, step=STEP, before_call=self.before_vision,
+            on_verdict=write, adapters=self.tools.adapters, transport=self.tools.transport)
+        self.keyframe_check = summary
+        write(verdicts)
+        return written["doc"]
 
     # ------------------------------------------------------------------- run
 
@@ -2732,7 +2869,11 @@ class _Assets(voice_lines.LineMeasurement):
             if video is not None:
                 # Tier >= 2 (a tier-1 plan has no video part: nothing below runs).
                 self.video = _video_summary(video, animate=animate)
-                if animate:
+                if animate and video.get("hold"):
+                    # Phase 7 stage 6b (RC-Q3): a v2 episode's clips wait for its keyframes' approval.
+                    self.video.update(planned=0, hold=video["hold"])
+                    ctx.on_log(f"🎬 No clip in this run: {video['hold']}.")
+                elif animate:
                     self.planned_video = video
             ctx.cancel.check()
             try:
@@ -2746,6 +2887,8 @@ class _Assets(voice_lines.LineMeasurement):
             except gencache.JournalError as exc:
                 raise self.journal_failed(exc) from None
             doc = self.write_assets_doc()
+            if media_policy.is_v2(ec.story):
+                doc = self.judge_keyframes(doc)
             if self.planned_video is not None:
                 # Last: the keyframes are final, the SFX/BGM and assets.json written.
                 try:
@@ -2811,6 +2954,9 @@ class _Assets(voice_lines.LineMeasurement):
         if self.video is not None:
             # Tier >= 2 (phase 6 stage 8): what the video phase did.
             result["video"] = dict(self.video, gone=self.video_gone.as_dict() if self.video_gone else None)
+        if self.keyframe_check is not None:
+            # A v2 story (phase 7 stage 6b): what J2 did, and where the keyframes' approval stands.
+            result["keyframes"] = dict(self.keyframe_check, approval=keyframes_state(ec, board, doc))
         return result
 
 

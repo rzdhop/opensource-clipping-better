@@ -1457,6 +1457,16 @@ async def approve(story_id: str, doc: str, req: Optional[StoryApproveRequest] = 
     completed. From phase 4 on, every episode approval waits for the
     episode's jobs, the render's and the fast track's included.
 
+    ``keyframes:<ep>`` (phase 7 stage 6b, a v2 story; body
+    ``{approve_anyway?}``): 400 for an episode number the season does not
+    plan; 409 while a step job of the episode is queued or running; then
+    ``workflow.approve_keyframes`` (409 for a legacy story, until the script
+    and the storyboard are approved and current, naming every shot with no
+    current keyframe, and -- unless ``approve_anyway`` -- every shot whose
+    keyframe check (J2) failed or has not run on it); ``assets.json`` gains
+    ``keyframes_approved {at, anyway, fingerprint}``, and until it is current
+    no clip of the episode is bought. No job awaits it.
+
     ``memory:<ep>``, ``feedback:<ep>`` (body ``{direction?}``, required and
     only there -- 400 with any other document), ``proposals:<ep>`` (phase 5,
     step 13): 400 for an episode number the season does not plan; 409 while a
@@ -1479,8 +1489,8 @@ async def approve(story_id: str, doc: str, req: Optional[StoryApproveRequest] = 
 
     word, sep, eid = doc.partition(":")
     anyway = bool(req is not None and req.approve_anyway)
-    if anyway and word != "script":
-        raise HTTPException(status_code=400, detail="approve_anyway applies to script:<ep> only.")
+    if anyway and word not in ("script", workflow.KEYFRAMES_APPROVAL):
+        raise HTTPException(status_code=400, detail="approve_anyway applies to script:<ep> and keyframes:<ep> only.")
     if sep and eid and word in workflow.EPISODE_APPROVALS:
         with _answering():
             ep = workflow.episode_bounds(stories, story, eid)
@@ -1493,6 +1503,15 @@ async def approve(story_id: str, doc: str, req: Optional[StoryApproveRequest] = 
             else:
                 workflow.approve_assets(stories, story_id, ep, now=_now())
         _complete_awaiting(story_id, f"{word}:{ep}")
+        # Off the event loop: the page's phase-4 part hashes the files that moved.
+        return await run_in_threadpool(_episode_page, stories, story, ep)
+
+    if sep and eid and word == workflow.KEYFRAMES_APPROVAL:
+        with _answering():
+            ep = workflow.episode_bounds(stories, story, eid)
+        _refuse_episode_busy(story_id, ep, f"approve {word}:{ep} once it is done, or cancel it first.")
+        with _answering():
+            workflow.approve_keyframes(stories, story_id, ep, approve_anyway=anyway, now=_now())
         # Off the event loop: the page's phase-4 part hashes the files that moved.
         return await run_in_threadpool(_episode_page, stories, story, ep)
 

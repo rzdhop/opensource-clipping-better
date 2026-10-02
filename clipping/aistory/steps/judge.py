@@ -25,8 +25,27 @@ script while the report is missing or stale (never approvable) or failed
 (unless "approve anyway"): :func:`unjudged_refusal`,
 :func:`issues_refusal`.
 
-A legacy story is never judged: nothing here runs for it, and its script
-never has the key.
+**J2, the keyframes** (:func:`check_keyframes`, stage 6b): in the assets
+step of a v2 story, once the keyframes exist, one vision call per shot on
+``VISION_CHAIN`` (free Gemini first; ``uploads.describe_upload``'s pattern:
+every gate of the generation runner, each answered call booked in the
+story's ledger, a reply that fails validation asked for once more) with the
+shot's keyframe, the previous shot's keyframe and what the shot must show
+(:func:`keyframe_brief`): ``{shows_beat, missing, continuity_issue}``,
+stored per shot in ``assets.json``'s optional ``keyframe_verdicts`` with the
+sha256 of both images. A verdict stays current while both images are the
+ones it saw (:func:`verdict_current`): a shot judged already is never asked
+again. A vision chain that cannot run skips J2 with a line in the feed.
+
+**The keyframe approval** (``workflow.approve_keyframes``):
+``assets.json``'s ``keyframes_approved {at, anyway, fingerprint}``, the
+fingerprint of the keyframe images (:func:`keyframes_fingerprint`): once
+it differs, the approval is stale (:func:`keyframes_state`) -- derived,
+never cleared (DEC-155's rule). No clip of a v2 episode is bought before it
+is current (``assets.clip_hold``, RC-Q3).
+
+A legacy story is never judged: nothing here runs for it, its script never
+has ``first_watch`` and its ``assets.json`` neither key.
 
 Stdlib only (DEC-012).
 """
@@ -34,8 +53,18 @@ Stdlib only (DEC-012).
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
+import re
 
-from .. import context, prompts
+from clipping.providers import adapters as adapters_mod
+from clipping.providers import budget as budget_mod
+from clipping.providers import gating, jsonx
+from clipping.providers import generation as gen
+from clipping.providers.registry import ChainError, describe
+
+from .. import context, prompting, prompts
+from .. import ledger as ledger_mod
 from . import episode_common, llm_call
 
 FIRST_WATCH = "first_watch"
@@ -217,3 +246,250 @@ def issues_refusal(script, ep):
     return (f"Episode {ep}'s first-watch check found {count} issue{'' if count == 1 else 's'}"
             f"{': ' + issues if issues else ''}.{took} Fix them (edit the script, or regenerate the scenes they "
             "name) and check again, or approve anyway.")
+
+
+# ------------------------------------------------------------------ J2
+
+J2 = "J2"
+KEYFRAME_VERDICTS = "keyframe_verdicts"
+KEYFRAMES_APPROVED = "keyframes_approved"
+KEYFRAMES_APPROVAL = "keyframes"  # the approval's word: keyframes:<ep>
+
+# How long one vision call may take, for the assets step's predictive budget.
+STORY_VISION_CALL_SECONDS = 120
+
+# The brief's parts are capped in characters, cut at a word (DEC-138: its
+# worst case is measured, tests/test_story_keyframe_gate.py): the action once
+# its tags are named, a character's or a prop's look (its descriptor's
+# start), a staging entry's facing and expression; a name keeps its own cap.
+_BRIEF_ACTION_CHARS = 320
+_BRIEF_LOOK_CHARS = 100
+_BRIEF_STAGING_CHARS = 60
+_TAG = re.compile(r"[@%#][a-z0-9_]+(?::[a-z][a-z0-9_]*)?")
+
+
+def _clipped(text, limit) -> str:
+    """*text* on one line, cut at the last whole word within *limit*
+    characters (one ellipsis added), or as it is when it fits."""
+    text = " ".join(str(text or "").split())
+    if len(text) <= limit:
+        return text
+    cut = text[:limit - 1]
+    if " " in cut:
+        cut = cut.rsplit(" ", 1)[0]
+    return cut.rstrip(" ,;:.") + "…"
+
+
+def _tag_name(ec, tag) -> str:
+    """A ``@char``/``%prop``/``#place:variant`` tag as its entity's name."""
+    body = tag[1:]
+    if tag[0] == "@":
+        doc = ec.entities["characters"].get(body)
+    elif tag[0] == "%":
+        doc = ec.entities["props"].get(body)
+    else:
+        doc = ec.entities["places"].get(body.partition(":")[0])
+    return (doc or {}).get("name") or body
+
+
+def keyframe_brief(ec, shot) -> str:
+    """What *shot* must show, for J2: its action with every tag named, its
+    framing, the place and its time, each character with the first words of
+    its look and the staging T1 v2 gave it, and each prop -- the storyboard
+    shot's own text, no prompt layer (the judge checks the frame against the
+    plan, not the prompt against itself). Each part is capped (the
+    ``_BRIEF_*_CHARS`` above)."""
+    tags = list(shot.get("subject_tags") or [])
+    action = _TAG.sub(lambda match: _tag_name(ec, match.group(0)), shot["action"])
+    lines = [f"What happens: {_clipped(action, _BRIEF_ACTION_CHARS)}"]
+    phrase = prompting.FRAMING_PHRASES.get(shot["framing"])
+    if phrase:
+        lines.append(f"Framing: {phrase}")
+    for tag in tags:
+        if tag.startswith("#"):
+            variant = tag.partition(":")[2]
+            lines.append(f"Where: {_tag_name(ec, tag)}" + (f", {variant}" if variant else ""))
+    staging = {entry["subject"]: entry for entry in shot.get("staging") or []}
+    people = [tag for tag in tags if tag.startswith("@")]
+    if people:
+        lines.append("Who is in it:")
+        for tag in people:
+            doc = ec.entities["characters"].get(tag[1:]) or {}
+            line = f"- {_tag_name(ec, tag)}: {_clipped(doc.get('descriptor'), _BRIEF_LOOK_CHARS)}"
+            place = staging.get(tag)
+            if place:
+                line += (f" -- {place['position']}, facing {_clipped(place['facing'], _BRIEF_STAGING_CHARS)}, "
+                         f"{_clipped(place['expression'], _BRIEF_STAGING_CHARS)}")
+            lines.append(line)
+    objects = [tag for tag in tags if tag.startswith("%")]
+    if objects:
+        lines.append("Objects that must be seen:")
+        for tag in objects:
+            doc = ec.entities["props"].get(tag[1:]) or {}
+            look = doc.get("descriptor") or doc.get("one_line")
+            lines.append(f"- {_tag_name(ec, tag)}: {_clipped(look, _BRIEF_LOOK_CHARS)}")
+    return "\n".join(lines)
+
+
+def verdict_current(entry, image_sha, previous_sha) -> bool:
+    """Whether a stored verdict judged these two images (the shot's
+    keyframe, the previous shot's -- None for the first shot)."""
+    return (entry is not None and image_sha is not None and entry.get("image_sha256") == image_sha
+            and entry.get("previous_sha256") == previous_sha)
+
+
+def verdict_passed(entry) -> bool:
+    """A verdict passes when the keyframe shows the beat, misses nothing and
+    keeps continuity with the shot before it."""
+    return bool(entry["shows_beat"]) and not entry["missing"] and not entry["continuity_issue"]
+
+
+def verdict_text(entry) -> str:
+    """One verdict's findings, for a refusal or the feed."""
+    found = []
+    if not entry["shows_beat"]:
+        found.append("does not show the beat")
+    if entry["missing"]:
+        found.append("missing " + "; ".join(entry["missing"]))
+    if entry["continuity_issue"]:
+        found.append(f"continuity: {entry['continuity_issue']}")
+    return ", ".join(found) or "passed"
+
+
+def keyframes_fingerprint(shas) -> str:
+    """sha256 over the keyframes a keyframe approval approves: *shas* is
+    ``[(shot_id, image sha256 | None)]`` in storyboard order."""
+    payload = {"v": 1, "keyframes": [[shot_id, sha] for shot_id, sha in shas]}
+    blob = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return hashlib.sha256(blob).hexdigest()
+
+
+def keyframes_state(approved, fingerprint) -> str:
+    """``none`` (never approved) | ``current`` (approved with *fingerprint*,
+    the keyframes as they are now) | ``stale`` (a keyframe changed since:
+    derived, never cleared)."""
+    if not approved:
+        return "none"
+    return "current" if approved["fingerprint"] == fingerprint else "stale"
+
+
+def _vision_units(answered, request, adapters):
+    """``(unit, qty)`` for the ledger: the adapter's own estimate when it has
+    one (a paid link), else the token count of the text and the images
+    (``uploads._units``' rule)."""
+    from clipping.providers import vision
+
+    adapter = gen.adapter_for(gen.VISION, answered.provider, adapters)
+    try:
+        estimate = adapter.estimate(answered, request) if adapter is not None else None
+    except Exception:  # noqa: BLE001 - a missing price must not lose the booking
+        estimate = None
+    unit, qty = getattr(estimate, "unit", None), getattr(estimate, "qty", None)
+    if unit in ledger_mod.UNITS and isinstance(qty, (int, float)):
+        return unit, qty
+    return "token", len(request.prompt or "") // 4 + vision.TOKENS_PER_IMAGE * len(request.images or ())
+
+
+def _reply_of(result, *, has_previous):
+    """``(verdict fields, errors)`` from one answer (``GenResult.meta["text"]``)."""
+    text = (result.meta or {}).get("text") or ""
+    try:
+        value = jsonx.extract_json(text)
+    except ValueError as exc:
+        return None, [str(exc)]
+    errors = prompts.validate_j2(value, has_previous=has_previous)
+    if errors:
+        return None, errors
+    return {"shows_beat": value["shows_beat"], "missing": [" ".join(item.split()) for item in value["missing"]],
+            "continuity_issue": " ".join(value["continuity_issue"].split()) if value["continuity_issue"] else None}, []
+
+
+def check_keyframes(ctx, ec, items, verdicts, *, env, ledger, step, before_call, on_verdict=None, adapters=None,
+                    transport=None):
+    """J2 over *items* (``[(shot, path, sha, previous_shot_id, previous_path,
+    previous_sha)]``, every shot with a current keyframe, in storyboard
+    order; the previous ones None for the first shot), keeping each verdict
+    of *verdicts* that is still current. Returns ``(verdicts, summary)``:
+    every current verdict by shot id, and ``{"judged": [...], "kept": [...],
+    "failed": [...], "unavailable": reason | None}``. *before_call(left)*
+    is the caller's cancel and budget check before each call (*left*: the
+    shot ids not judged yet); *on_verdict(verdicts)*, when given, is handed
+    every current verdict after each new one, so the caller keeps what was
+    judged should the run stop; each answered call is booked on *ledger*
+    (step *step*, the episode). Calls nothing for a shot judged already."""
+    kept, todo = {}, []
+    for item in items:
+        shot, _path, sha, _prev_id, _prev_path, prev_sha = item
+        entry = (verdicts or {}).get(shot["shot_id"])
+        if verdict_current(entry, sha, prev_sha):
+            kept[shot["shot_id"]] = entry
+        else:
+            todo.append(item)
+    summary = {"judged": [], "kept": list(kept), "failed": [], "unavailable": None}
+    if not todo:
+        return kept, summary
+
+    if adapters is None:
+        adapters_mod.load_all()
+    merged = gating.merged_env(env)
+    try:
+        chain = gen.chain_from_env(gen.VISION, merged)
+        budget_obj = gating.budget_of(merged)
+    except (ChainError, ValueError) as exc:
+        summary["unavailable"] = f"{gen.ENV_NAMES[gen.VISION]} cannot be used: {exc}"
+        ctx.on_log(f"👁 Keyframe check (J2) skipped: {summary['unavailable']}")
+        return kept, summary
+    check = gating.budget_check(budget_obj, story_spent=lambda: ledger.totals()["est_usd"])
+    limiter = gating.FreeTierLimiter()
+    route = ec.story["generation_profile"]["route"]
+    ctx.on_log(f"👁 Keyframe check (J2): {len(todo)} shot{'s' if len(todo) != 1 else ''}"
+               + (f" ({len(kept)} judged already, kept)" if kept else ""))
+    for index, (shot, path, sha, prev_id, prev_path, prev_sha) in enumerate(todo):
+        shot_id = shot["shot_id"]
+        before_call([item[0]["shot_id"] for item in todo[index:]])
+        has_previous = prev_path is not None
+        request = gen.GenRequest(
+            kind=gen.VISION, prompt=prompts.j2_prompt_text(shot_id=shot_id, brief=keyframe_brief(ec, shot),
+                                                           previous_shot_id=prev_id if has_previous else None),
+            images=(path, prev_path) if has_previous else (path,),
+            extra={"max_tokens": prompts.MAX_TOKENS[J2], "temperature": prompts.TEMPERATURE[J2]},
+        )
+        found, errors, answered = None, [], None
+        for attempt in (1, 2):
+            try:
+                result, answered = gen.run_generation_chain(
+                    gen.VISION, chain, request, env=merged, allow_paid=budget_obj.allow_paid, route=route,
+                    on_log=ctx.on_log, budget_check=check, limiter=limiter, adapters=adapters,
+                    transport=transport, cancel=ctx.cancel)
+            except gen.NoRunnableLink as exc:
+                reasons = "; ".join(f"{label}: {reason}" for label, reason in exc.failures) or str(exc)
+                summary["unavailable"] = f"no vision link could judge the keyframes ({reasons})"
+                ctx.on_log(f"👁 Keyframe check (J2) stopped: {summary['unavailable']}")
+                return dict(kept, **{sid: verdicts[sid] for sid in summary["judged"]}), summary
+            paid = bool(result.paid)
+            est = float(result.est_cost) if paid else 0.0
+            unit, qty = _vision_units(answered, request, adapters)
+            ledger.append(step=step, provider=answered.provider, model=gating.api_model_id(gen.VISION, answered),
+                          unit=unit, qty=qty, est_usd=est, paid=paid, ep=ec.ep)
+            if paid and result.est_cost > 0:
+                budget_mod.record(result.est_cost)
+            found, errors = _reply_of(result, has_previous=has_previous)
+            if found is not None:
+                break
+            if attempt == 1:
+                ctx.on_log(f"⚠️ {J2} reply for shot {shot_id} rejected ({'; '.join(errors[:2])}); asking once more")
+        if found is None:
+            summary["failed"].append(shot_id)
+            ctx.on_log(f"✖ Keyframe check of shot {shot_id} failed: the replies failed validation twice")
+            continue
+        verdicts = dict(verdicts or {})
+        verdicts[shot_id] = dict(found, image_sha256=sha, previous_sha256=prev_sha, link=describe(answered),
+                                 checked_at=llm_call.utc_now())
+        summary["judged"].append(shot_id)
+        entry = verdicts[shot_id]
+        ctx.on_log(f"👁 Shot {shot_id}: {'passed' if verdict_passed(entry) else verdict_text(entry)}")
+        if on_verdict is not None:
+            on_verdict(dict(kept, **{sid: verdicts[sid] for sid in summary["judged"]}))
+    result = dict(kept)
+    result.update({sid: verdicts[sid] for sid in summary["judged"]})
+    return result, summary

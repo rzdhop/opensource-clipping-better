@@ -294,6 +294,9 @@ def test_max_tokens():
         # Phase 7 stage 6a (DEC-230): re-pinned on purpose -- the first-watch judge (J1), measured on its
         # French worst case (tests/test_story_episode_prompt_budgets.py).
         "J1": 920,
+        # Phase 7 stage 6b (DEC-230): re-pinned on purpose -- the keyframe judge (J2), its English worst case,
+        # under the plan's 160 (same file).
+        "J2": 110,
     }
 
 
@@ -335,6 +338,8 @@ def test_schema_names():
         "L1": "continuity_ledger",
         # Phase 7 stage 6a (DEC-230): re-pinned on purpose -- the first-watch judge (J1).
         "J1": "first_watch_check",
+        # Phase 7 stage 6b (DEC-230): re-pinned on purpose -- the keyframe judge (J2).
+        "J2": "keyframe_check",
     }
 
 

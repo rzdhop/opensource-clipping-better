@@ -125,7 +125,9 @@ LATER_STEPS = ("import",)
 # phase 3 ``script:<ep>`` and ``storyboard:<ep>``; phase 4 ``assets:<ep>``;
 # phase 5 ``memory:<ep>``, ``feedback:<ep>`` (with a direction) and
 # ``proposals:<ep>`` (:data:`SERIES_APPROVALS`, :func:`approve_series`);
-# phase 7 stage 5b ``knowledge`` bare (:func:`approve_knowledge`, a v2 story).
+# phase 7 stage 5b ``knowledge`` bare (:func:`approve_knowledge`, a v2 story);
+# phase 7 stage 6b ``keyframes:<ep>`` (:func:`approve_keyframes`, a v2 story:
+# no step job writes it, so it is not one of :data:`EPISODE_APPROVALS`).
 # No approval of the grammar is a later phase's any more.
 LATER_APPROVALS_BARE = ()
 LATER_APPROVALS = ()
@@ -136,6 +138,8 @@ EPISODE_APPROVALS = ("script", "storyboard", "assets")
 # and the feedback item live in ``season.json``, the proposals in
 # ``episodes/ep<NN>/proposals.json``.
 SERIES_APPROVALS = ("memory", "feedback", "proposals")
+# A v2 episode's keyframe approval (phase 7 stage 6b, DEC-230).
+KEYFRAMES_APPROVAL = judge_step.KEYFRAMES_APPROVAL
 
 # Spec 9.2, regenerate grammar: every "<kind>:..." target of a later phase.
 # Phase 2's, phase 3's, phase 4's and phase 6's targets are
@@ -2683,8 +2687,12 @@ def _derive(ec, script, board, doc, manifest) -> dict:
                 "end_card": changes["end_card"], "timing_converted": changes["timing_converted"],
                 "summary": changes["summary"], "stages": changes["stages"], "inputs": changes["inputs"],
             }
-    return {"shots": shots, "lines": lines, "fingerprint": assets_approval_state(ec, board, script, doc),
-            "out_of_date": out_of_date, "reedit": reedit}
+    derived = {"shots": shots, "lines": lines, "fingerprint": assets_approval_state(ec, board, script, doc),
+               "out_of_date": out_of_date, "reedit": reedit}
+    if media_policy.is_v2(ec.story):
+        # Phase 7 stage 6b: a v2 episode's keyframe approval (hashes every image).
+        derived["keyframes"] = keyframes_approval_state(ec, board, doc)
+    return derived
 
 
 def _derived(stories, ec, script, board, doc, manifest) -> dict:
@@ -2743,8 +2751,16 @@ def _assets_view(ec, script, board, doc, derived) -> dict:
                 "has_audio": known["has_audio"], "target": assets_step.line_target(ep, line["line_id"]),
             })
     approved = (doc or {}).get("approved")
-    return {"doc": doc, "consistency": ec.consistency_mode, "fingerprint": derived["fingerprint"],
+    view = {"doc": doc, "consistency": ec.consistency_mode, "fingerprint": derived["fingerprint"],
             "approved_at": approved["at"] if approved else None, "shots": shots, "lines": lines}
+    if "keyframes" in derived:
+        # Phase 7 stage 6b, a v2 episode's page only: the keyframe approval
+        # (none | current | stale), when and whether "anyway"; the J2 verdicts
+        # are the document's own ``keyframe_verdicts``.
+        keyframes = (doc or {}).get(judge_step.KEYFRAMES_APPROVED) or {}
+        view["keyframes"] = {"approval": derived["keyframes"], "approved_at": keyframes.get("at"),
+                             "anyway": keyframes.get("anyway"), "target": f"{KEYFRAMES_APPROVAL}:{ep}"}
+    return view
 
 
 def _render_view(manifest, derived) -> dict:
@@ -2809,7 +2825,9 @@ def episode_outputs(stories, story, ep) -> dict:
                     "lines": [{line_id, scene_id, speaker, voiced, voice, words_source:
                                provider|alignment|even_split|null, aligned_by, approximate,
                                take: {id, note, audio_sha256} | null, note, pending: bool,
-                               has_audio: bool, target: "line:<ep>:<lid>"}]} | null,
+                               has_audio: bool, target: "line:<ep>:<lid>"}],
+                    "keyframes": {"approval": none|current|stale, "approved_at", "anyway",
+                                  "target": "keyframes:<ep>"} (a v2 story's only)} | null,
          "render": {"state": completed|failed|cancelled|incomplete, "profile", "params": {subtitles, encoder},
                     "duration_s", "loudness": {i, tp, lra}, "fps", "width", "height",
                     "output": {"file": "episode_final.mp4", "sha256"} | null,
@@ -3410,6 +3428,90 @@ def assets_approval_state(ec, board, script, doc) -> str:
         return "stale"
     current = assets_step.current_fingerprint(ec, board, script, doc) == approved["fingerprint"]
     return "current" if current else "stale"
+
+
+def approve_keyframes(stories, story_id, ep, *, approve_anyway=False, now) -> dict:
+    """Approve episode *ep*'s keyframes (phase 7 stage 6b, A16, DEC-230;
+    ``POST /approve/keyframes:<ep>``, CLI ``approve ID keyframes:<ep>``);
+    returns ``assets.json`` as written.
+
+    A v2 story's alone (``conflict`` for a legacy one: its assets approval
+    is the one it has). ``conflict`` before the script is approved and the
+    storyboard approved and current (``assets.require_approved``); without
+    an ``assets.json``; while a shot has no current keyframe (its image on
+    disk and current, or locked: ``assets.keyframe_problem``), naming each
+    and its regenerate target; and -- unless *approve_anyway* -- while a
+    shot's keyframe check (J2) failed or has no current verdict (none, or
+    one of other images: ``judge.verdict_current``), naming each with what
+    J2 found. Then ``assets.json`` gains ``keyframes_approved {at, anyway,
+    fingerprint}`` -- ``anyway`` true when it went over a failed or missing
+    verdict, the fingerprint of the keyframes as they are now
+    (``assets.keyframes_fingerprint``): once a keyframe changes, the
+    approval is stale (:func:`keyframes_approval_state`), derived, never
+    cleared (DEC-155). Until it is current no clip is bought (RC-Q3,
+    ``assets.clip_hold``). Nothing else moves: not the assets approval, not
+    the storyboard, not the story (RC-E2)."""
+    story = load(stories, story_id)
+    ep = episode_bounds(stories, story, ep)
+    if not media_policy.is_v2(story):
+        raise WorkflowError(CONFLICT, (f"Episode {ep}'s keyframes have no approval of their own: the keyframe "
+                                       "approval and its check (J2) are a v2 story's. Approve the assets "
+                                       f"(assets:{ep})."))
+    ec = _context(stories, story_id, ep)
+    try:
+        _script, board = assets_step.require_approved(ec)
+    except StepFailed as exc:
+        raise WorkflowError(CONFLICT, str(exc)) from None
+    doc = read_episode(stories, story_id, ep, ASSETS_DOC)
+    if doc is None:
+        raise WorkflowError(CONFLICT, f"Episode {ep} has no keyframes yet: make them first (the assets step).")
+    link = assets_step.recorded_image_link(doc)
+    missing = [shot["shot_id"] for shot in board["shots"]
+               if assets_step.keyframe_problem(ec, shot, link=link) is not None]
+    if missing:
+        targets = [assets_step.shot_target(ep, shot_id) for shot_id in missing]
+        raise WorkflowError(CONFLICT, (f"Episode {ep}'s shot{_plural_s(missing)} {_and(missing)} "
+                                       f"{'has' if len(missing) == 1 else 'have'} no current keyframe: make "
+                                       f"{'it' if len(missing) == 1 else 'them'} (the assets step, or regenerate "
+                                       f"{_and(targets)}) or lock {'it' if len(missing) == 1 else 'them'}, then "
+                                       "approve the keyframes."))
+    verdicts = doc.get(judge_step.KEYFRAME_VERDICTS) or {}
+    unjudged, failed = [], []
+    for shot, _path, sha, _prev_id, _prev_path, prev_sha in assets_step.keyframe_items(ec, board, doc):
+        entry = verdicts.get(shot["shot_id"])
+        if not judge_step.verdict_current(entry, sha, prev_sha):
+            unjudged.append(shot["shot_id"])
+        elif not judge_step.verdict_passed(entry):
+            failed.append(f"{shot['shot_id']} ({judge_step.verdict_text(entry)})")
+    if (unjudged or failed) and not approve_anyway:
+        found = []
+        if failed:
+            found.append(f"the keyframe check (J2) found issues in shot{_plural_s(failed)} {'; '.join(failed)}")
+        if unjudged:
+            found.append(f"shot{_plural_s(unjudged)} {_and(unjudged)} {'has' if len(unjudged) == 1 else 'have'} "
+                         "no current keyframe check (J2): run the assets step again (it checks them, free)")
+        raise WorkflowError(CONFLICT, (f"Episode {ep}'s keyframes are not approved: {'; and '.join(found)}. "
+                                       "Make the shots again (regenerate them, with a note) and check again, or "
+                                       "approve anyway."))
+    doc[judge_step.KEYFRAMES_APPROVED] = {"at": now, "anyway": bool(unjudged or failed),
+                                          "fingerprint": assets_step.keyframes_fingerprint(ec, board)}
+    try:
+        return stories.write_episode_doc(story_id, ep, ASSETS_DOC, doc, now=now)
+    except schemas.SchemaError as exc:
+        raise WorkflowError(CONFLICT, {"message": "The assets would not be valid with this keyframe approval.",
+                                       "errors": list(exc.errors)}) from None
+    except (KeyError, ValueError) as exc:
+        raise WorkflowError(CONFLICT, f"The assets cannot be written: {exc}.") from None
+
+
+def keyframes_approval_state(ec, board, doc) -> str:
+    """``none`` (no ``assets.json``, or the keyframes never approved) |
+    ``current`` (approved with the fingerprint of the keyframes as they are
+    now) | ``stale`` (a keyframe changed since: derived, never cleared,
+    DEC-155). Hashes every image."""
+    if not board:
+        return "none" if not (doc or {}).get(judge_step.KEYFRAMES_APPROVED) else "stale"
+    return assets_step.keyframes_state(ec, board, doc)
 
 
 def approved_episode_docs(stories, story_id, ep) -> list:

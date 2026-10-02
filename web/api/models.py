@@ -843,8 +843,10 @@ class StoryboardPatchRequest(BaseModel):
 
 class StoryApproveRequest(BaseModel):
     """POST /api/stories/{id}/approve/{doc}'s optional body. ``approve_anyway``
-    (``script:<ep>`` only) approves a script whose consistency check found
-    issues; the approval records it.
+    (``script:<ep>`` and, phase 7 stage 6b, ``keyframes:<ep>`` only)
+    approves a script whose consistency or first-watch check found issues,
+    or a v2 episode's keyframes whose check (J2) failed or did not run; the
+    approval records it.
 
     ``direction`` (phase 5, ``feedback:<ep>`` only, required there -- 0, 1, 2
     or null for none) chooses which of F1's three directions steers episode

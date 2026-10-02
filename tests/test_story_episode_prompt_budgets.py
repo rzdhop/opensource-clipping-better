@@ -1019,9 +1019,9 @@ def test_the_largest_french_l1_reply_fits_its_cap():
     assert cap == -(-round(needed * 1.15, 1) // 10) * 10
 
 
-# ================================================================ phase 7: J1 (the first-watch judge)
+# ================================================================ phase 7: J1 and J2 (the judges)
 #
-# Stage 6a (DEC-230, DEC-138's method). J1 reads what a first-time viewer
+# Stages 6a/6b (DEC-230, DEC-138's method). J1 reads what a first-time viewer
 # would: the 12-scene French script digest E4 and S3 read (this file's own
 # SCENES, its worst case), the previous episode's recap at its cap
 # (schemas.RECAP_MAX_WORDS), the hook's on-screen text (6 words) and the
@@ -1035,9 +1035,17 @@ def test_the_largest_french_l1_reply_fits_its_cap():
 # J1's reply: every stated limit hit in French (the three take-aways at 25,
 # 30 and 25 words, 6 issues with a 30-word fix, the longest kind and scene
 # id), chars/4 x 1.3, + 15 %, rounded up to ten.
+#
+# J2 (stage 6b; a vision call with no pack, so no INPUT_BUDGET entry, U1's
+# precedent): its reply in English (3 missing items of 6 words, a 25-word
+# continuity issue, words of 6 characters as D2/D3's English measures),
+# chars/4, + 15 %, rounded up to ten, under the plan's 160. Its text at its
+# own worst case (the brief at every cap of the shot it reads) is under the
+# default pack budget (tests/test_story_keyframe_gate.py).
 
 MEASURED_J1 = 3195
 MEASURED_J1_REPLY = 795.6
+MEASURED_J2_REPLY = 91
 _J1_PROPS = 10
 _J1_PROPS_PER_SCENE = 4
 
@@ -1083,3 +1091,21 @@ def test_the_largest_french_j1_reply_fits_its_cap():
     assert cap == -(-round(needed * 1.15, 1) // 10) * 10
     assert prompts.TEMPERATURE["J1"] is prompts.ANALYTIC_TEMPERATURE
 
+
+def _english(words):
+    return " ".join(["abcdef"] * words)
+
+
+def test_the_largest_j2_reply_fits_its_cap_under_the_plans_160():
+    import json
+
+    reply = {"shows_beat": False, "missing": [_english(prompts.J2_MISSING_MAX_WORDS)] * prompts.J2_MISSING_MAX,
+             "continuity_issue": _english(prompts.J2_CONTINUITY_MAX_WORDS)}
+    assert prompts.validate_j2(reply) == []
+    needed = context.estimate_tokens("", json.dumps(reply, ensure_ascii=False))
+    assert needed == pytest.approx(MEASURED_J2_REPLY, abs=0.05)
+    cap = prompts.MAX_TOKENS["J2"]
+    assert cap == -(-round(needed * 1.15, 1) // 10) * 10
+    assert cap <= 160
+    assert prompts.TEMPERATURE["J2"] is prompts.ANALYTIC_TEMPERATURE
+    assert "J2" not in prompts.INPUT_BUDGET

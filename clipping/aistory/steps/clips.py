@@ -343,7 +343,7 @@ def _still_rows(shots, flags, reason) -> list:
 
 
 def video_units(ec, script, storyboard, assets_doc, *, env, caps, committed_usd, adapters=None, probe_local=False,
-                transport=None, image_sha=None, booked=None) -> dict:
+                transport=None, image_sha=None, booked=None, hold=None) -> dict:
     """The ``video`` part of the assets estimate at tier >= 2, calling
     nothing but -- with *probe_local* -- a local ComfyUI's status::
 
@@ -377,7 +377,14 @@ def video_units(ec, script, storyboard, assets_doc, *, env, caps, committed_usd,
     ``over_cap`` (``video_plan.all_shots_refusal``: the whole plan is
     refused, ``assets.plan_refusal``); a shot longer than the longest clip
     the link sells is planned at that length, ``held_s`` on its row and in
-    the message (the render holds the clip's last frame, DEC-208)."""
+    the message (the render holds the clip's last frame, DEC-208).
+
+    Phase 7 stage 6b (RC-Q3): *hold* (``assets.clip_hold``: a v2 episode
+    whose keyframes' approval is not current) is the sentence a plan with
+    clips to buy is held by -- ``hold`` on the units and in the message; it
+    is shown and priced, never bought (the assets step makes no clip while
+    it holds). None (every legacy episode): no such key, the units byte for
+    byte as before."""
     tier = tier_of(ec)
     profile_name = ec.story["generation_profile"]["budget_profile"]
     route = ec.story["generation_profile"]["route"]
@@ -595,6 +602,9 @@ def video_units(ec, script, storyboard, assets_doc, *, env, caps, committed_usd,
     units["refused"] = refusal if count else None
     units["ready"] = units["refused"] is None
     units["message"] = _message(units, plan, current_ids, profile_name, booked_ids, resolution=resolution)
+    if hold and count:
+        units["hold"] = hold
+        units["message"] += f" Held: {hold}."
     return units
 
 
