@@ -709,6 +709,16 @@ async def create_story(req: StoryCreateRequest) -> dict:
         raise HTTPException(status_code=400, detail=str(exc)) from None
 
 
+@router.get("/new-profile")
+async def new_story_profile() -> dict:
+    """What a story created now would get (``media_policy.new_story_offer``):
+    ``{"profile", "quality", "missing_keys", "allow_paid"}`` -- the quality
+    preset (v2, every shot animated) when Settings hold FAL_KEY, else the
+    story defaults. The new-story form starts from it. Calls nothing, never
+    returns a key. Declared before ``GET /{story_id}`` (as ``/styles``)."""
+    return media_policy.new_story_offer(worker.get_settings_env())
+
+
 @router.get("/styles")
 async def list_styles() -> dict:
     """The seven shipped style templates (spec 5), for the style step's

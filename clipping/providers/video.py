@@ -41,7 +41,7 @@ from .gencache import RequestFailed
 from .generation import VIDEO, GenResult, register_adapter
 from .registry import describe
 from .transport import (
-    DEFAULT_TIMEOUT, data_url, read_b64, request_bytes, request_json, urllib_transport, write_output,
+    DEFAULT_TIMEOUT, HttpStatusError, data_url, read_b64, request_bytes, request_json, urllib_transport, write_output,
 )
 
 # ------------------------------------------------------------ model tables
@@ -330,6 +330,93 @@ class GeminiVeoAdapter:
         path = _write_clip(link, request, seed, data)
         return GenResult(provider="gemini", model=link.model, paths=(path,), seed=seed,
                          meta={"operation": queued["request_id"], **_meta(link, request)})
+
+
+# ------------------------------------------------------------ key check
+
+# fal's Platform API (not the queue): reading a model's price needs the key
+# and buys nothing, so it answers "is this key good, and is this model there".
+FAL_PLATFORM = "https://api.fal.ai/v1"
+KEY_CHECK_TIMEOUT = 20.0
+
+
+def _fal_price(answer, endpoint) -> dict | None:
+    """The ``{unit_price, unit, currency}`` fal's pricing answer gives
+    *endpoint*, or None when it lists none (read leniently: only these three
+    fields are used)."""
+    prices = answer.get("prices") if isinstance(answer, dict) else None
+    rows = [row for row in prices or [] if isinstance(row, dict)]
+    row = next((row for row in rows if row.get("endpoint_id") == endpoint), rows[0] if rows else None)
+    if row is None or row.get("unit_price") is None:
+        return None
+    return {"unit_price": row.get("unit_price"), "unit": row.get("unit"), "currency": row.get("currency") or "USD"}
+
+
+def check_key(link, credentials, *, transport=None) -> dict:
+    """Ask *link*'s provider whether its key is accepted and its model is
+    there, **without generating anything** (free; RC-V8 holds)::
+
+        {"status": "ok" | "bad_key" | "no_model" | "unreachable" | "failed",
+         "text": sentence, "endpoint": model id asked about, "price": {...} | None}
+
+    fal: ``GET /v1/models/pricing?endpoint_id=`` on the Platform API with
+    ``Authorization: Key`` (the price comes back with it). Gemini Veo:
+    ``GET /v1beta/models/{model}`` with ``x-goog-api-key`` -- it proves the
+    key and the model, not the billing, which only a paid request shows.
+    Through *transport* (default ``urllib_transport``: the key never follows
+    a redirect off its origin). Never raises for an answer; ``ValueError``
+    for a link this check does not know."""
+    transport = transport or urllib_transport
+    label = describe(link)
+    if link.provider == "fal":
+        endpoint = images.FAL_APPS.get(link.model)
+        if endpoint is None:
+            raise ValueError(f"{label}: no fal endpoint known for this model")
+        url = f"{FAL_PLATFORM}/models/pricing?endpoint_id={urllib.parse.quote(endpoint, safe='/')}"
+        headers = {"Authorization": f"Key {credentials['FAL_KEY']}"}
+        key_name = "FAL_KEY"
+    elif link.provider == "gemini" and link.model in GEMINI_VIDEO_MODELS:
+        endpoint = GEMINI_VIDEO_MODELS[link.model]
+        url = f"{images.GEMINI_BASE}/models/{endpoint}"
+        headers = {"x-goog-api-key": credentials["GEMINI_PAID_API_KEY"]}
+        key_name = "GEMINI_PAID_API_KEY"
+    else:
+        raise ValueError(f"{label}: no key check for this video link")
+    result = {"status": "failed", "text": "", "endpoint": endpoint, "price": None}
+    try:
+        answer = request_json(transport, "GET", url, headers=headers, timeout=KEY_CHECK_TIMEOUT)
+    except HttpStatusError as exc:
+        # Gemini answers a bad key with 400 (reason API_KEY_INVALID, message "API key not valid").
+        refused = any(marker in (exc.detail or "") for marker in ("API_KEY_INVALID", "API key not valid"))
+        detail = (exc.detail or "")[:160]
+        if exc.status_code in (401, 403) or refused:
+            result.update(status="bad_key", text=f"{label}: the provider refused {key_name} (HTTP {exc.status_code}"
+                                                 f"{': ' + detail if detail else ''}). Check the key in Settings.")
+        elif exc.status_code == 404:
+            result.update(status="no_model", text=f"{label}: the key was accepted but {endpoint} was not found "
+                                                  f"(HTTP 404): the model may be retired or renamed.")
+        else:
+            result["text"] = f"{label}: HTTP {exc.status_code} while checking ({detail or 'no detail'})."
+        return result
+    except Exception as exc:  # noqa: BLE001 - any failure to answer is reported, never raised
+        result.update(status="unreachable", text=f"{label}: the provider could not be reached "
+                                                 f"({type(exc).__name__}: {str(exc)[:160]}).")
+        return result
+    if link.provider == "fal":
+        price = _fal_price(answer, endpoint)
+        if price is None:
+            result.update(status="no_model", text=f"{label}: fal accepted FAL_KEY but lists no price for "
+                                                  f"{endpoint}: the model may be retired or renamed.")
+            return result
+        unit = f" per {price['unit']}" if price.get("unit") else ""
+        result.update(status="ok", price=price, text=(f"{label}: fal accepted FAL_KEY; {endpoint} is live at "
+                                                      f"{price['unit_price']} {price['currency']}{unit}."))
+        return result
+    methods = answer.get("supportedGenerationMethods") if isinstance(answer, dict) else None
+    result.update(status="ok", text=(f"{label}: Google accepted GEMINI_PAID_API_KEY and lists {endpoint}"
+                                     f"{' (' + ', '.join(methods) + ')' if methods else ''}; whether the key's "
+                                     "project is billed shows only on a paid request."))
+    return result
 
 
 # ------------------------------------------------------------ registration

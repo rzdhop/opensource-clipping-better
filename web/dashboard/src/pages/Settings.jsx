@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { fetchHardware, fetchSettings, testChain, testGenerationChain, updateSettings } from '../api'
+import { checkVideoKeys, fetchHardware, fetchSettings, testChain, testGenerationChain, updateSettings } from '../api'
 
 const PasswordInput = ({ value, onChange, placeholder, isSet }) => {
   const [show, setShow] = useState(false)
@@ -969,6 +969,67 @@ function GenerationChainResult({ result }) {
   )
 }
 
+const KEY_CHECK_GLYPH = { ok: '✅', bad_key: '✖', no_model: '⚠️', no_key: '⏭', unreachable: '✖', failed: '✖', skipped: '·' }
+
+/**
+ * Video links are never test-generated, so a wrong key used to show only on
+ * the first clip bought. This asks each keyed hosted link's provider (fal's
+ * pricing, Gemini's models.get) whether the key is accepted and the model
+ * live -- free, nothing generated (POST /api/settings/check-video-keys).
+ */
+function VideoKeyCheck() {
+  const [checking, setChecking] = useState(false)
+  const [result, setResult] = useState(null)
+  const [error, setError] = useState('')
+
+  const run = async () => {
+    setChecking(true)
+    setError('')
+    try {
+      setResult(await checkVideoKeys())
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setChecking(false)
+    }
+  }
+
+  return (
+    <div style={{ marginTop: '10px' }}>
+      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+        <button type="button" className="btn btn-secondary" disabled={checking} onClick={run}>
+          {checking ? <><span className="spinner"></span> Asking…</> : 'Ask the providers (free)'}
+        </button>
+        <span className="form-hint" style={{ margin: 0 }}>
+          Checks each video key and model with the provider itself; nothing is generated or billed.
+        </span>
+      </div>
+      {error && <p style={{ marginTop: '8px', fontSize: '13px', color: 'var(--error)' }}>{error}</p>}
+      {result && (
+        <div style={{ marginTop: '10px', fontSize: '13px' }}>
+          {result.results.map((row) => (
+            <div key={row.label} style={{ padding: '6px 0', borderBottom: '1px solid var(--border-color)' }}>
+              <span>{KEY_CHECK_GLYPH[row.status] || '·'}</span>{' '}
+              <code style={{ wordBreak: 'break-all' }}>{row.label}</code>
+              {row.text && (
+                <div className="form-hint" style={{
+                  marginLeft: '24px', wordBreak: 'break-word',
+                  color: row.status === 'ok' ? undefined : row.status === 'skipped' ? 'var(--text-tertiary)' : 'var(--error)',
+                }}>
+                  {row.text}
+                </div>
+              )}
+            </div>
+          ))}
+          <div style={{ marginTop: '10px', ...(GEN_VERDICT_STYLE[result.verdict] || GEN_VERDICT_STYLE.blocked) }}>
+            {result.verdict === 'ready' ? '✅' : '✖'} {result.message}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 /** One card per generation chain: its links as the runner sees them, a chain test, a test per paid link. */
 function ChainLinksPanel({ chains, usage, results, testing, error, onTest }) {
   const entries = Object.entries(chains || {})
@@ -1018,6 +1079,7 @@ function ChainLinksPanel({ chains, usage, results, testing, error, onTest }) {
           </div>
           {error && testing === null && <p style={{ marginTop: '8px', fontSize: '13px', color: 'var(--error)', whiteSpace: 'pre-wrap' }}>{error}</p>}
           {results[kind] && <GenerationChainResult result={results[kind]} />}
+          {kind === 'video' && <VideoKeyCheck />}
         </div>
       ))}
       <div className="settings-section">

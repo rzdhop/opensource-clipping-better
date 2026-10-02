@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { createStory, fetchStory, fetchStoryEstimate, fetchStyles, patchStory, styleNameOf } from '../../api'
+import {
+  createStory, fetchNewStoryProfile, fetchStory, fetchStoryEstimate, fetchStyles, patchStory, styleNameOf,
+} from '../../api'
 import { LiveActivity, useJobFeed } from '../../components/ActivityFeed'
 import RouteChip from '../../components/RouteChip'
 import { StepError } from './fields'
@@ -133,14 +135,42 @@ function CreateStoryForm() {
   const [route, setRoute] = useState(DEFAULT_GENERATION_PROFILE.route)
   const [consistencyMode, setConsistencyMode] = useState(DEFAULT_GENERATION_PROFILE.consistency_mode)
   const [budgetProfile, setBudgetProfile] = useState(DEFAULT_GENERATION_PROFILE.budget_profile)
+  const [pipeline, setPipeline] = useState('')
+  // What the server gives a story created now (GET /api/stories/new-profile):
+  // the quality preset -- v2, every shot animated -- when FAL_KEY is set.
+  const [offer, setOffer] = useState(null)
+  // False until the user changes a profile field: an untouched form sends no
+  // profile, so the server's choice applies (it used to send a v1, free,
+  // tier-1 profile over it, and a dashboard story could never animate).
+  const [profileChosen, setProfileChosen] = useState(false)
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')
 
   useEffect(() => {
     let cancelled = false
     fetchStyles().then((data) => { if (!cancelled) setStyles(data.styles || []) }).catch(() => {})
+    fetchNewStoryProfile().then((data) => {
+      if (cancelled) return
+      setOffer(data)
+      const profile = data.profile || {}
+      setTier(profile.tier ?? DEFAULT_GENERATION_PROFILE.tier)
+      setRoute(profile.route || DEFAULT_GENERATION_PROFILE.route)
+      setConsistencyMode(profile.consistency_mode || DEFAULT_GENERATION_PROFILE.consistency_mode)
+      setBudgetProfile(profile.budget_profile || DEFAULT_GENERATION_PROFILE.budget_profile)
+      setPipeline(profile.pipeline || '')
+    }).catch(() => {})
     return () => { cancelled = true }
   }, [])
+
+  // Every profile control goes through this, so a change marks the profile chosen.
+  const choose = (setter) => (value) => { setProfileChosen(true); setter(value) }
+  const handlePipeline = (value) => {
+    setProfileChosen(true)
+    setPipeline(value)
+    // A v2 story's images are edits of its references (DEC-221).
+    if (value === 'v2') setConsistencyMode('references')
+  }
+  const fullyAnimated = pipeline === 'v2' && budgetProfile === 'quality' && tier >= 2
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -155,12 +185,14 @@ function CreateStoryForm() {
         language,
         seed_text: seedText.trim() ? seedText : null,
         style_template_id: styleTemplateId || null,
-        generation_profile: {
+        // Untouched, null: the server picks (media_policy.new_story_profile).
+        generation_profile: profileChosen ? {
           tier,
           route,
           consistency_mode: consistencyMode,
           budget_profile: budgetProfile,
-        },
+          ...(pipeline ? { pipeline } : {}),
+        } : null,
       }
       const story = await createStory(createFields)
       navigate(`/story/${story.story_id}`)
@@ -244,20 +276,48 @@ function CreateStoryForm() {
             </div>
           </div>
 
+          <div className="form-group">
+            {fullyAnimated ? (
+              <p className="chip chip-wrap">
+                Fully animated: every shot is a video clip, with quality images (Quality — billed APIs).
+              </p>
+            ) : (
+              <p className="chip chip-warn chip-wrap">
+                Not fully animated: {tier < 2 ? 'tier 1 is stills with motion' : budgetProfile !== 'quality'
+                  ? `the ${budgetProfile} budget profile does not animate every shot`
+                  : 'the legacy pipeline keeps the old shot layout and image links'}.
+                {offer && !offer.quality && offer.missing_keys && offer.missing_keys.length > 0
+                  ? ` Add ${offer.missing_keys.join(', ')} in Settings to start stories fully animated.` : ''}
+              </p>
+            )}
+            {fullyAnimated && offer && !offer.allow_paid && (
+              <p className="form-hint">
+                Paid calls are off (Settings → allow paid): no image or clip is bought until you turn them on.
+              </p>
+            )}
+          </div>
+
           <details className="story-profile" open={showProfile} onToggle={(e) => setShowProfile(e.target.open)}>
             <summary>Generation profile</summary>
             <div className="story-profile-grid">
               <div className="form-group">
+                <label className="form-label">Pipeline</label>
+                <select className="form-select" value={pipeline} onChange={(e) => handlePipeline(e.target.value)}>
+                  <option value="v2">v2 — quality (6–10 shots, each a clip)</option>
+                  <option value="">Legacy (v1)</option>
+                </select>
+              </div>
+              <div className="form-group">
                 <label className="form-label">Tier</label>
-                <select className="form-select" value={tier} onChange={(e) => setTier(Number(e.target.value))}>
-                  <option value={1}>1 — stills</option>
-                  <option value={2}>2 — animated key shots</option>
-                  <option value={3}>3 — fully animated</option>
+                <select className="form-select" value={tier} onChange={(e) => choose(setTier)(Number(e.target.value))}>
+                  <option value={1}>1 — stills + motion (slideshow)</option>
+                  <option value={2}>2 — animated (image-to-video)</option>
+                  <option value={3}>3 — animated + model sound</option>
                 </select>
               </div>
               <div className="form-group">
                 <label className="form-label">Route</label>
-                <select className="form-select" value={route} onChange={(e) => setRoute(e.target.value)}>
+                <select className="form-select" value={route} onChange={(e) => choose(setRoute)(e.target.value)}>
                   <option value="auto">Auto</option>
                   <option value="local">Local</option>
                   <option value="api">API</option>
@@ -265,17 +325,19 @@ function CreateStoryForm() {
               </div>
               <div className="form-group">
                 <label className="form-label">Consistency mode</label>
-                <select className="form-select" value={consistencyMode} onChange={(e) => setConsistencyMode(e.target.value)}>
+                <select className="form-select" value={consistencyMode}
+                  onChange={(e) => choose(setConsistencyMode)(e.target.value)}>
                   <option value="references">References</option>
-                  <option value="prompt_only">Prompt only</option>
+                  <option value="prompt_only" disabled={pipeline === 'v2'}>Prompt only</option>
                 </select>
               </div>
               <div className="form-group">
                 <label className="form-label">Budget profile</label>
-                <select className="form-select" value={budgetProfile} onChange={(e) => setBudgetProfile(e.target.value)}>
-                  <option value="free">Free</option>
-                  <option value="one_dollar">$1 / episode</option>
-                  <option value="quality">Quality</option>
+                <select className="form-select" value={budgetProfile}
+                  onChange={(e) => choose(setBudgetProfile)(e.target.value)}>
+                  <option value="free">Free (no clip bought)</option>
+                  <option value="one_dollar">$1 / episode (key shots)</option>
+                  <option value="quality">Quality (billed APIs) — every shot animated</option>
                 </select>
               </div>
             </div>
@@ -372,6 +434,22 @@ function GenerationProfileCard({ storyId, story, nextEp, onChange }) {
   const handleTier = (value) => { setTier(value); save({ tier: value }) }
   const handleRoute = (value) => { setRoute(value); save({ route: value }) }
 
+  // Every shot a clip: the quality budget profile (animate all_shots) at tier
+  // >= 2 on the api route, on the v2 pipeline (the server sets its template and
+  // narrator, and refuses the switch once an episode has a script:
+  // workflow._follow_pipeline_switch -- its sentence shows as the card's error).
+  const isV2 = story.generation_profile.pipeline === 'v2'
+  const canSwitchToV2 = !isV2
+  const hasCast = (story.cast_ids || []).length > 0
+  const fullyAnimated = isV2 && story.generation_profile.budget_profile === 'quality' && tier >= 2
+  const makeFullyAnimated = () => {
+    const patch = { tier: Math.max(tier, 2), route: 'api', budget_profile: 'quality' }
+    if (canSwitchToV2) Object.assign(patch, { pipeline: 'v2', consistency_mode: 'references' })
+    setTier(patch.tier)
+    setRoute(patch.route)
+    save(patch)
+  }
+
   useEffect(() => {
     if (tier < 2 || !nextEp) { setRouteEstimates({}); setRouteErrors({}); return undefined }
     let cancelled = false
@@ -388,6 +466,25 @@ function GenerationProfileCard({ storyId, story, nextEp, onChange }) {
   return (
     <div className="card story-generation-profile" style={{ marginBottom: '16px' }}>
       <h3 className="card-title">Visual tier</h3>
+      <div className="form-group">
+        {fullyAnimated ? (
+          <span className="chip">Fully animated: every shot is a video clip.</span>
+        ) : (
+          <>
+            <p className="form-hint">
+              {canSwitchToV2
+                ? 'This story is not fully animated yet. Switch it to the quality pipeline: 6–10 shots, each a '
+                  + 'video clip, with quality images (billed).'
+                  + (hasCast ? ' Then run the Cast step again: it writes each character\'s dossier and look and '
+                    + 'redraws the sheets (its estimate shows the cost).' : '')
+                : 'Some shots of this story stay still. Animate every shot with the quality budget profile (billed).'}
+            </p>
+            <button type="button" className="btn btn-sm btn-primary" onClick={makeFullyAnimated} disabled={saving}>
+              Animate every shot
+            </button>
+          </>
+        )}
+      </div>
       <div className="form-group">
         <label className="form-label">Tier</label>
         <select className="form-select" value={tier} onChange={(e) => handleTier(Number(e.target.value))} disabled={saving}>

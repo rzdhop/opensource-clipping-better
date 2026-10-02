@@ -848,6 +848,62 @@ def _test_generation_links(kind, links, tested, env):
     return rows, verdict, message
 
 
+def _check_video_keys(links, merged) -> list:
+    """The blocking half of :func:`check_video_keys`: one row per link."""
+    from clipping.providers import generation as gen, video as video_providers
+
+    rows = []
+    for link in links:
+        row = {"label": gen.describe(link), "provider": link.provider, "model": link.model,
+               "status": "skipped", "text": "", "endpoint": None, "price": None}
+        missing = gen.missing_keys(link, merged)
+        if link.provider == "local":
+            row["text"] = "local: no key to check (the chain test asks ComfyUI's /object_info)."
+        elif missing:
+            row.update(status="no_key", text=f"{row['label']}: no API key ({' and '.join(missing)} not set).")
+        else:
+            try:
+                row.update(video_providers.check_key(link, gen.credentials_for(link, merged), transport=_TRANSPORT))
+            except ValueError as exc:
+                row["text"] = str(exc)
+        rows.append(row)
+    return rows
+
+
+@router.post("/api/settings/check-video-keys")
+async def check_video_keys() -> dict:
+    """Ask every hosted link of the video chain whether its key is accepted
+    and its model is there: one free metadata request per keyed link (fal's
+    pricing, Gemini's ``models.get``), nothing generated or billed
+    (``video.check_key``). The chain test itself stays call-free for hosted
+    video (RC-V8). ``{"results": [{label, provider, model, status, text,
+    endpoint, price}], "verdict": "ready" | "blocked", "message"}``; never a
+    key's value. Shares the chain tests' lock: one at a time."""
+    from clipping.providers import generation as gen
+    from clipping.providers.registry import ChainError
+
+    merged = _merged_env(worker.get_settings_env())
+    try:
+        links = gen.chain_from_env(gen.VIDEO, merged)
+    except ChainError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if _CHAIN_TEST_LOCK.locked():
+        raise HTTPException(status_code=409, detail="A chain test is already running.")
+    async with _CHAIN_TEST_LOCK:
+        try:
+            rows = await asyncio.wait_for(asyncio.to_thread(_check_video_keys, links, merged),
+                                          timeout=_CHAIN_TEST_CEILING_SECONDS)
+        except asyncio.TimeoutError:
+            raise HTTPException(status_code=504, detail="The video key check gave up.")
+    good = [row["label"] for row in rows if row["status"] == "ok"]
+    if good:
+        verdict, message = "ready", f"{', '.join(good)} answered: key accepted, model live. Nothing was generated."
+    else:
+        verdict = "blocked"
+        message = "No hosted video link answered with an accepted key; see each row. Nothing was generated."
+    return {"results": rows, "verdict": verdict, "message": message}
+
+
 @router.post("/api/settings/test-generation-chain")
 async def run_generation_chain_test(req: GenerationChainTestRequest) -> GenerationChainTestResponse:
     """Run a generation chain's free and local links; report the paid ones (DEC-103).

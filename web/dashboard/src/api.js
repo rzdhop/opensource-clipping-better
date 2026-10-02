@@ -288,6 +288,20 @@ export async function testChain(payload = {}) {
 }
 
 /**
+ * Ask each keyed hosted video link's provider whether its key is accepted and
+ * its model is live (fal pricing, Gemini models.get): free, nothing generated.
+ * `{results: [{label, provider, model, status, text, endpoint, price}], verdict, message}`.
+ */
+export async function checkVideoKeys() {
+  const res = await request('/settings/check-video-keys', { method: 'POST' })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail || 'The video key check failed')
+  }
+  return res.json()
+}
+
+/**
  * Run a generation chain's free and local links and report the paid ones;
  * `link` names one link to run (the only way a paid link is called, once).
  */
@@ -403,6 +417,18 @@ export function createSSEConnection(jobId, onMessage, onStatus) {
 export async function fetchStories() {
   const res = await request('/stories')
   if (!res.ok) throw await apiError(res, 'Failed to fetch stories')
+  return res.json()
+}
+
+/**
+ * What a story created now would get: `{profile, quality, missing_keys,
+ * allow_paid}` -- the quality preset (v2, every shot animated) when
+ * Settings hold FAL_KEY, else the story defaults. Not cached: adding a key
+ * in Settings must show on the next visit to the form.
+ */
+export async function fetchNewStoryProfile() {
+  const res = await request('/stories/new-profile')
+  if (!res.ok) throw await apiError(res, 'Failed to fetch the new-story profile')
   return res.json()
 }
 

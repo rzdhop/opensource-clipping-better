@@ -150,6 +150,26 @@ def video_resolution(story) -> str:
     return chosen if chosen in defaults.VIDEO_RESOLUTIONS else defaults.VIDEO_RESOLUTION_DEFAULT
 
 
+def fully_animated(story) -> bool:
+    """Whether every shot of *story* must be a video clip (the human, 2026-10-02:
+    "only fully animated episodes, no diaporama"): a v2 story at tier >= 2
+    whose budget profile animates all shots (``animate: all_shots``, the
+    quality preset). Such a story never shows a shot as a still with motion:
+    its assets approval and its render refuse while a shot the user did not
+    pin ``keep_still`` lacks a current clip. A profile that cannot be read
+    counts as one that does not animate every shot."""
+    if not is_v2(story):
+        return False
+    profile = story.get("generation_profile") or {}
+    if int(profile.get("tier") or 1) < 2:
+        return False
+    try:
+        settings = budget_mod.profile_settings(profile.get("budget_profile"))
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+    return settings.get("animate") == "all_shots"
+
+
 def quality_keys_present(merged) -> bool:
     """Whether *merged* holds every :data:`QUALITY_KEYS` value."""
     return all((merged.get(name) or "").strip() for name in QUALITY_KEYS)
@@ -164,6 +184,31 @@ def new_story_profile(settings_env):
     if quality_keys_present(gating.merged_env(settings_env)):
         return defaults.quality_generation_profile()
     return None
+
+
+def new_story_offer(settings_env) -> dict:
+    """What the new-story form starts from (``GET /api/stories/new-profile``)::
+
+        {"profile", "quality": bool, "missing_keys": [name, ...], "allow_paid": bool}
+
+    ``profile`` is the one a story created now without a profile gets
+    (:func:`new_story_profile`, else the store defaults); ``quality`` whether
+    the quality preset -- v2, every shot animated -- is that default,
+    ``missing_keys`` the :data:`QUALITY_KEYS` still unset, ``allow_paid``
+    whether paid calls may run at all (without it no clip is ever bought).
+    Never a key's value. Calls nothing."""
+    merged = gating.merged_env(settings_env)
+    try:
+        allow_paid = bool(gating.budget_of(merged).allow_paid)
+    except ValueError:
+        allow_paid = False
+    profile = new_story_profile(settings_env)
+    return {
+        "profile": profile if profile is not None else defaults.default_generation_profile(),
+        "quality": profile is not None,
+        "missing_keys": [name for name in QUALITY_KEYS if not (merged.get(name) or "").strip()],
+        "allow_paid": allow_paid,
+    }
 
 
 # The source crop of a v2 keyframe (A6): an exact 9:16 whose multiple of 9x16

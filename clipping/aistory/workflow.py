@@ -773,6 +773,7 @@ def patch_story(stories, story_id, fields, *, now) -> dict:
                 {**story["generation_profile"], **partial})
         except ValueError as exc:
             raise WorkflowError(INVALID, str(exc)) from None
+        _follow_pipeline_switch(stories, story, values)
 
     if "episode_template_id" in values:
         check_episode_template(stories, story, values["episode_template_id"])
@@ -789,6 +790,34 @@ def patch_story(stories, story_id, fields, *, now) -> dict:
             doc["approvals"]["bible"] = None
 
     return update(stories, story_id, mutate, now=now)
+
+
+def _follow_pipeline_switch(stories, story, values) -> None:
+    """When the patch *values* move *story* onto or off the v2 pipeline
+    (``generation_profile.pipeline``), make the rest of the story what
+    ``store.create`` gives a story of that pipeline, in place: the episode
+    template (``defaults.episode_template_for``) unless the patch names one,
+    and ``narrator.enabled`` (on for v2) unless the patch sets it.
+
+    ``conflict`` once an episode has a script: it was written for the other
+    pipeline's shot layout and keeps its template (:func:`check_episode_template`).
+    A cast made before the switch stays; the cast step run again on v2 writes
+    each character's dossier and look and redraws its sheets (DEC-226,
+    DEC-228). A patch that keeps the pipeline changes nothing here."""
+    profile = values["generation_profile"]
+    v2 = media_policy.is_v2({"generation_profile": profile})
+    if v2 == media_policy.is_v2(story):
+        return
+    written = episodes_with_script(stories, story["story_id"])
+    if written:
+        target = "the v2 (quality) pipeline" if v2 else "the legacy pipeline"
+        raise WorkflowError(CONFLICT, (f"This story cannot move to {target}: episode {written[0]} already has a "
+                                       "script, written for the other pipeline's shot layout. Create a new story "
+                                       "on the pipeline you want instead."))
+    values.setdefault("episode_template_id", defaults.episode_template_for(profile))
+    narrator = values.get("narrator")
+    if not (isinstance(narrator, dict) and "enabled" in narrator):
+        values["narrator"] = {**(narrator if isinstance(narrator, dict) else {}), "enabled": v2}
 
 
 # ================================================================== phase 2
@@ -3109,6 +3138,7 @@ def approve_assets(stories, story_id, ep, *, now) -> dict:
                                        f"{'has' if len(unvoiced) == 1 else 'have'} no audio in the speaker's pinned "
                                        f"voice: speak {'it' if len(unvoiced) == 1 else 'them'} (the assets step, or "
                                        f"regenerate {_and(targets)}), then approve."))
+    _require_every_clip(ec, script, board, doc)
     for shot in board["shots"]:
         shot["assets"]["approved"] = True
     _write(episode_common.write_storyboard, "storyboard", ec, board, script, now=now, code=CONFLICT)
@@ -3120,6 +3150,20 @@ def approve_assets(stories, story_id, ep, *, now) -> dict:
                                        "errors": list(exc.errors)}) from None
     except (KeyError, ValueError) as exc:
         raise WorkflowError(CONFLICT, f"The assets cannot be written: {exc}.") from None
+
+
+def _require_every_clip(ec, script, board, doc) -> None:
+    """A fully animated story's assets approval (``media_policy.fully_animated``:
+    v2, tier >= 2, every shot animated): ``conflict`` while a shot not kept
+    still has no current clip (``render.unanimated_shots``), naming each with
+    what to do (``render.fully_animated_refusal``). Any other story: nothing."""
+    if not media_policy.fully_animated(ec.story):
+        return
+    blocked, unmade = render_step.unanimated_shots(ec, script, board, doc)
+    if blocked or unmade:
+        link = (sticky_link.recorded(doc, sticky_link.VIDEO) or {}).get("link")
+        raise WorkflowError(CONFLICT, render_step.fully_animated_refusal(
+            ec, blocked, unmade, action="approved", script=script, doc=doc, link=link))
 
 
 def assets_approval_state(ec, board, script, doc) -> str:

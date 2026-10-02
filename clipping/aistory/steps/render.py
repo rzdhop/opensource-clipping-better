@@ -94,7 +94,7 @@ import time
 
 from clipping.cancel import Cancelled
 
-from .. import schemas, wordtiming
+from .. import media_policy, schemas, wordtiming
 from .. import store as store_mod
 from ..render import audio_assets, fonts, profiles
 from ..render import partial
@@ -275,6 +275,62 @@ def clip_refusal(ec, blocked, *, script=None, doc=None, link=None) -> str:
             f"on to give {them} Tier-1 motion instead.")
 
 
+def fully_animated_refusal(ec, blocked, unmade, *, action="rendered", script=None, doc=None, link=None) -> str:
+    """The refusal of a fully animated story's episode
+    (``media_policy.fully_animated``) while a shot not kept still has no
+    current clip: *blocked* ``[(shot, state)]`` whose clip record is not
+    current, *unmade* ``[shot id]`` never given a clip. Names each shot with
+    what to do; never offers Tier-1 motion (no shot of such a story is ever a
+    still with a zoom)."""
+    ep = ec.ep
+    said, fixes, held, targets = [], [], [], []
+    if unmade:
+        said.append(f"{_plural(unmade, 'shot', 'shots')} {_and(unmade)} {_plural(unmade, 'has', 'have')} no clip yet")
+        fixes.append("run the assets step (it buys every shot's clip, or collects one already bought, after the "
+                     "keyframes are approved)")
+    for shot, state in blocked:
+        shot_id = shot["shot_id"]
+        what, still = _clip_problem(ec, shot, state, script=script, doc=doc, link=link)
+        said.append(f"shot {shot_id}'s clip {what}")
+        if still:
+            held.append(shot_id)
+        else:
+            targets.append(assets_step.clip_target(ep, shot_id))
+    if targets:
+        fixes.append(f"make {_plural(targets, 'it', 'them')} again (regenerate {_and(targets)})")
+    if held:
+        fixes.append(f"for {_and(held)}, still generating: {assets_step.CONTINUE_ONLY}")
+    then = "approve the assets again, then render" if action == "rendered" else "then approve"
+    return (f"Episode {ep} cannot be {action}: every shot of this story is a video clip (fully animated) and "
+            f"{_and(said)}. To finish it, {'; '.join(fixes)}; {then}. Only a shot you keep still (keep_still) "
+            "may stay without a clip.")
+
+
+def unanimated_shots(ec, script, board, assets_doc) -> tuple:
+    """``(blocked, unmade)`` of *board*'s shots not kept still by their
+    effective flags (``clips.shot_flags``): *blocked* ``[(shot, state)]``
+    whose clip record is not current on the episode's recorded video link
+    (``clips.clip_state``), *unmade* the ids of those with no clip record.
+    What a fully animated story refuses to approve or render while either is
+    not empty. Hashes the shots' images; starts nothing."""
+    tier = clips.tier_of(ec)
+    link = (sticky_link.recorded(assets_doc, sticky_link.VIDEO) or {}).get("link")
+    blocked, unmade = [], []
+    for shot in board["shots"]:
+        flags = clips.shot_flags(shot, assets_doc)
+        if flags["keep_still"]:
+            continue
+        if not shot["assets"].get("clip"):
+            unmade.append(shot["shot_id"])
+            continue
+        image = assets_step.shot_image_path(ec, shot)
+        state = clips.clip_state(ec, shot, script, link=link, tier=tier if tier in (2, 3) else 2, flags=flags,
+                                 image_sha=assets_step._sha256_file(image) if image is not None else None)
+        if state != "current":
+            blocked.append((shot, state))
+    return blocked, unmade
+
+
 def silent_clip_note(shot) -> str:
     """The feed's note for a tier-3 shot that keeps its native audio but
     whose clip has no sound track: rendered as at tier 2, its lines spoken
@@ -307,6 +363,12 @@ def shot_clips(ec, script, board, assets_doc, *, fill_failed=False):
     if tier < 2:
         return None
     link = (sticky_link.recorded(assets_doc, sticky_link.VIDEO) or {}).get("link")
+    if media_policy.fully_animated(ec.story):
+        # Every shot a clip: a shot never animated, or one whose clip is not
+        # current, refuses the render -- fill_failed_with_motion included.
+        blocked, unmade = unanimated_shots(ec, script, board, assets_doc)
+        if blocked or unmade:
+            raise StepFailed(fully_animated_refusal(ec, blocked, unmade, script=script, doc=assets_doc, link=link))
     videos, keep_still, blocked, native, notes = {}, {}, [], [], []
     for shot in board["shots"]:
         shot_id = shot["shot_id"]
