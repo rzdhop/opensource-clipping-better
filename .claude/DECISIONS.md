@@ -4139,3 +4139,37 @@ loop for an unreproduced fault); the user re-renders, and the partial render reu
 - Images drawn from an old look are kept until regenerated, as after a descriptor edit.
 - Built in worktree `work/phase7-s7` (`385c98c`, `01ffdcf`, `297cdd4`, `067dafd`) and cherry-picked: `97bcc73`, `aa0331b`, `c24ea85`, `14147e8`. Combined full suites on `14147e8` (this container): local 6843 passed / 1 skipped, CI-like 6145 / 680 skipped, plus the container-only 2 root failures and 14 fastapi-fixture errors.
 - Follow-up: a look edit does not mark the sheets drawn from the old look stale; the dashboard cannot add/remove a relationship or a wardrobe set, nor edit `props_here`/`where_when` (the API can).
+
+## DEC-230 — The judges: J1 reads the script as a first-time viewer would, J2 checks each keyframe; a keyframe approval before any v2 clip (v2 stories; stages 6a and 6b)
+**Context.** E4's diagnosis: story A's climax line was spoken twice verbatim, a character was never introduced, and the episode's object was never shown. Story B shipped its hook with no on-screen text. E4 checks a script against the bible; nothing judged what a viewer takes away, or whether a keyframe shows its beat. The plan (A16) asked for a judge that can block approval, and a vision check of the keyframes before any clip is bought.
+**Decision.**
+- **J1** (new `steps/judge.py`, prompt `J1`, schema `first_watch_check`): one call on the story writing chain at the analytic temperature, after E4 in the script step. It reads only what a first-time viewer has: the script digest E4 reads, the objects and the scenes that show them, the hook text, the reveal, and the previous recap. It returns who wants what, what happens, why it matters, `passed`, and issues from `unclear_goal, unmotivated, unintroduced, object_unseen, repeated_line, no_hook_text`. Caps measured: 920 out, 3,680 in.
+- **Deterministic checks lead the same report** and fail it whatever J1 says: any two lines whose normalised-token Jaccard is 0.7 or more (3 words or more; accents, case and punctuation folded; at most 6 issues), and a hook with no on-screen text. The report is stored as `script.first_watch` (optional key, own commit `afce483`) and goes stale like the consistency report.
+- **`approve_script` (v2):** a missing or stale report is never approvable; a failed one is refused unless "approve anyway", which `approved_anyway` records.
+- **E2v2/E3v2 replies** that repeat a line of the episode are refused, so the retry and the chain's next links ask again. E3v2 also needs the hook's on-screen text whatever the hook style, and its ask says so (E3v2's budget 3,370 → 3,380).
+- **J2** (prompt `J2`, schema `keyframe_check`, 110 tokens out): in the assets step, once the keyframes exist, one vision call per shot on VISION_CHAIN (free Gemini first, `describe_upload`'s gates and booking). It sends the keyframe, the previous shot's keyframe and the shot's brief (action with names, framing, place, each character's look and staging, the props; capped, 831 tokens at worst), and gets back `{shows_beat, missing, continuity_issue}`. Stored in `assets.keyframe_verdicts` with both images' sha256 (own commit `94a10a8`), written after each call. A verdict current for the same images is never asked again. A vision chain that cannot run skips J2 with a line in the feed.
+- **`approve_keyframes`** (`keyframes:<ep>`: API route, no auth; CLI `approve ID keyframes:N [--anyway]`): every shot must have a current keyframe; "anyway" covers a failed or missing verdict, never a missing keyframe. It writes `assets.keyframes_approved {at, anyway, fingerprint}`, the fingerprint of the keyframe images. The approval is stale once one changes: derived, never cleared (DEC-155).
+- **RC-Q3:** while the approval is missing or stale, or a keyframe is still to make, a v2 episode's clip plan is held: shown and priced, out of the run's total, caps and readiness, like animate off. The assets step makes the keyframes and stops before the video phase, and a clip regenerate is refused, each saying "approve the keyframes first".
+**Consequence.**
+- Legacy stories are never judged, held or keyframe-approved: same prompts, estimates, runs, routes and pages.
+- A v2 episode now needs two human looks before money is spent on clips: the script (with J1) and the keyframes (with J2). DEC-202's "video last" becomes two assets runs with the keyframe approval between them.
+- Re-pins on purpose: the MAX_TOKENS / SCHEMA_NAMES / INPUT_BUDGET registries, E3v2's measured budget, and the v2 script-step test fixture (lines of each scene's own, a J1 answer).
+- J2's recall and false positives are unknown (A-117): "anyway" stays.
+- Follow-ups: the fast track on v2 should stop at the keyframe approval; a shot-image regenerate leaves J2 to the next assets run.
+- Built in worktree `work/phase7-s6` (`afce483`, `954ef6e`, `94a10a8`, `748841a`, `e227568`) and cherry-picked: `254f2c9`, `32dbd47` (one conflict in `approve_assets`: DEC-236's `_require_every_clip` kept before `_refuse_length`), `b46360c`, `03781f6`, `3088eb7`. Combined full suites on `3088eb7` (this container): local 6880 passed / 1 skipped, CI-like 6181 / 681 skipped, plus the container-only 2 root failures and 14 fastapi-fixture errors.
+
+## DEC-231 (part 2) — The hard length gate and the fill pass (v2 stories; stage 6a)
+**Context.** Story B shipped 9.9 s under its window's floor, with only a warning at render. The stage-4 dry check of story B made v2 measured 42.1 s, "under": v1-sized lines leave v2 body scenes short. The human (CLARIFY 7): a hard length gate.
+**Decision.**
+- `steps/gates.length_refusal` checks a v2 episode against its template's `window_s` (55–75 s for `serial_60s_v2`), using the timing the render cuts it to (`timing.episode_pass` with the storyboard, whole frames when the board is). There is no "anyway".
+- One-line calls: `approve_script` and `approve_storyboard` (estimated length), `approve_assets` and the render's last precondition (measured; the render's pre-job 409 says the same).
+- Each refusal states the length, how it was measured, the gap, the window and what to do: lengthen or shorten which scenes, then which approvals and steps to redo.
+- A legacy story keeps the render's warning.
+- **Fill pass** (script step, v2): once the script is complete and not approved, while its estimate is under the window, E2v2 runs again on the shortest body scenes. Each scene is first raised to its slot's top, so its word budget grows, and is asked to write fuller. At most 2 calls a run, stopping once inside.
+- The fill pass runs before E4 and J1, so they judge the filled script. On a script checked already, a rewritten scene goes through `mark_changed` like a regenerate.
+- It is logged with before and after values and recorded in the step result (`fill: {before_s, after_s, window_s, scenes, failed}`). A failed call keeps the scene as it was.
+**Consequence.**
+- A v2 episode outside its window can be neither approved nor rendered. Lengthening it means the fill pass (run the script step again), a regenerate with a note, or an edit.
+- Each re-run of an under-window, unapproved v2 script spends up to 2 E2v2 calls, plus E4 and J1 again when it was already checked.
+- The fill pass cannot add a scene: an episode whose scenes are all short after two fills still needs a writer's hand.
+- Commit `954ef6e` in the worktree, `32dbd47` on the branch.
