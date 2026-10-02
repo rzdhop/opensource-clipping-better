@@ -287,10 +287,12 @@ _RENDERING_V2_MAX_WORDS = 30
 _RENDERING_V2_MIN_WORDS = 8
 
 ROLE_TEXT_PORTRAIT = "Image 1 is this character's reference: keep identity, proportions and outfit exactly."
-CONSTRAINTS_ONE_CHARACTER = "Clean frame: no captions, logos or watermarks; one character."
-_CONSTRAINTS_SAME_CHARACTER = "Clean frame: no captions, logos or watermarks; the same single character throughout."
-_CONSTRAINTS_NO_PEOPLE = "Clean frame: no captions, logos or watermarks; no people."
-_CONSTRAINTS_OBJECT = ("Clean frame: no captions, logos or watermarks; no people, no hands; "
+# "lettering" (the W-mid walk, 2026-10-01: a 'P' badge on a vest despite "no
+# logos"; DEC-237): no letter, initial or sign text drawn anywhere.
+CONSTRAINTS_ONE_CHARACTER = "Clean frame: no captions, lettering, logos or watermarks; one character."
+_CONSTRAINTS_SAME_CHARACTER = "Clean frame: no captions, lettering, logos or watermarks; the same single character throughout."
+_CONSTRAINTS_NO_PEOPLE = "Clean frame: no captions, lettering, logos or watermarks; no people."
+_CONSTRAINTS_OBJECT = ("Clean frame: no captions, lettering, logos or watermarks; no people, no hands; "
                        "objects have no faces.")
 
 
@@ -460,7 +462,7 @@ LAYERED_V1 = schemas.STORYBOARD_PROMPT_LAYOUT_V1
 KEYFRAME_V2_MAX_WORDS = 220
 KEYFRAME_V2_MIN_WORDS = 130
 CLIP_V2_MAX_WORDS = 80
-CONSTRAINTS_KEYFRAME = "Clean frame: no captions, logos or watermarks; each character appears once."
+CONSTRAINTS_KEYFRAME = "Clean frame: no captions, lettering, logos or watermarks; each character appears once."
 CONSTRAINTS_KEYFRAME_NO_PEOPLE = _CONSTRAINTS_NO_PEOPLE
 STAYS_STILL = "The set, the lighting and every character's look stay exactly as in the first frame."
 
@@ -509,13 +511,19 @@ def fit_words(text: str, limit: int) -> str:
     return _fit(text, limit)
 
 
-def role_text(roles) -> str:
+def role_text(roles, *, compact=False) -> str:
     """What each reference image is, in the order the images are sent:
     *roles* is ``[(role, handle), ...]`` -- ``identity`` (a character's
     full-body sheet), ``expressions`` (its expression sheet, a close-up's
     identity image), ``set`` (the place's plate), ``turnaround`` (said
     against the character's own identity image) or ``prop``. Empty when
-    nothing is sent."""
+    nothing is sent.
+
+    *compact* (a crowded keyframe past its budget ladder): one sentence,
+    each image numbered with a few words and the keep-exactly rule said once
+    for all of them -- about half the words of the sentence per image."""
+    if compact:
+        return _compact_role_text(roles)
     sentences, identity_of = [], {}
     for number, (role, handle) in enumerate(roles, start=1):
         if role == ROLE_IDENTITY:
@@ -537,6 +545,28 @@ def role_text(roles) -> str:
         else:
             raise ValueError(f"unknown reference role: {role!r}")
     return " ".join(sentences)
+
+
+def _compact_role_text(roles) -> str:
+    """:func:`role_text`'s *compact* form."""
+    parts, identity_of = [], {}
+    for number, (role, handle) in enumerate(roles, start=1):
+        if role in (ROLE_IDENTITY, ROLE_EXPRESSIONS):
+            identity_of.setdefault(handle, number)
+            parts.append(f"{number} {handle}{'' if role == ROLE_IDENTITY else ' (expressions)'}")
+        elif role == ROLE_SET:
+            parts.append(f"{number} the set")
+        elif role == ROLE_TURNAROUND:
+            own = identity_of.get(handle)
+            parts.append(f"{number} image {own}'s turnaround" if own else f"{number} {handle}'s turnaround")
+        elif role == ROLE_PROP:
+            parts.append(f"{number} {handle}")
+        else:
+            raise ValueError(f"unknown reference role: {role!r}")
+    if not parts:
+        return ""
+    return (f"Reference images: {', '.join(parts)}; keep each identity, outfit, shape, layout and light "
+            "exactly.")
 
 
 def layered_lens_phrase(style_lock: dict, framing: str) -> str:

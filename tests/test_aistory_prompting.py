@@ -605,7 +605,7 @@ def test_portrait_v2_full_body_from_look(style_id):
     assert "chest-up" not in result
     # The look, its period stripped before the skeleton goes on.
     assert "wearing white linen shirt, thin gold chain, colours brown and green, with left-eyebrow scar" in result
-    assert result.endswith("Clean frame: no captions, logos or watermarks; one character.")
+    assert result.endswith("Clean frame: no captions, lettering, logos or watermarks; one character.")
     assert "Vertical 9:16." in result and f"Plain {style_lock['sheet_background']} background" in result
     assert len(result.split()) <= 130
     assert ".," not in result and ".." not in result and "  " not in result

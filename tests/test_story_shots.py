@@ -1097,7 +1097,7 @@ def test_refresh_prompts_changes_only_prompts_refs_and_resolved_from():
 # in that order. A legacy story resolves exactly as before (RC-Q1).
 
 CARTOON_FLAT = templates.load_style("cartoon_flat")
-_V2_CONSTRAINTS = "Clean frame: no captions, logos or watermarks; each character appears once."
+_V2_CONSTRAINTS = "Clean frame: no captions, lettering, logos or watermarks; each character appears once."
 _STAYS_STILL = "The set, the lighting and every character's look stay exactly as in the first frame."
 
 

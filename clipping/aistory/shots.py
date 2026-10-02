@@ -546,6 +546,44 @@ def _story_name_map(entities) -> dict:
     return names
 
 
+# Words a name may carry beside its noun without being a proper name.
+_ARTICLES = frozenset({"a", "an", "the", "of", "le", "la", "les", "l", "un", "une", "des", "du", "de", "d"})
+
+
+def _own_words(value) -> set:
+    """Every lower-case word of *value* (a string, or the strings of a look's
+    nested dicts and lists)."""
+    if isinstance(value, str):
+        return set(re.findall(r"\w+", value.lower()))
+    items = value.values() if isinstance(value, dict) else value if isinstance(value, (list, tuple)) else ()
+    words = set()
+    for item in items:
+        words |= _own_words(item)
+    return words
+
+
+def _descriptive_name(doc) -> bool:
+    """Whether an entity's name only says what it is: every word of it,
+    articles aside, is a word of its own descriptor or look ("Monocle" for
+    "a golden monocle on a thin chain"). Such a name is the thing's noun,
+    not a proper name, and stripping it garbles the entity's own handle."""
+    words = [word for word in re.findall(r"\w+", str(doc.get("name") or "").lower()) if word not in _ARTICLES]
+    own = _own_words(doc.get("descriptor") or "") | _own_words(doc.get("look") or {})
+    return bool(words) and all(word in own for word in words)
+
+
+def _v2_name_map(entities) -> dict:
+    """:func:`_story_name_map` without the descriptive names
+    (:func:`_descriptive_name`), for a v2 story (the W-mid walk: "lifts the
+    golden the object on a thin chain"). Every proper name is still in it."""
+    names = {}
+    for kind in ("characters", "places", "props"):
+        for doc in entities.get(kind, {}).values():
+            if not _descriptive_name(doc):
+                names.setdefault(doc["name"], _NEUTRAL_WORDS[kind])
+    return names
+
+
 # ------------------------------------------------- layered shots (phase 7, A8/A9)
 #
 # A v2 story's shot is resolved into the layered prompt of
@@ -574,6 +612,16 @@ _DELIVERY_MAX_WORDS = 8
 _LAYERED_BUDGETS = ((LOOK_MAX_WORDS, None, 30), (LOOK_MAX_WORDS, None, 8)) + tuple(
     (look, place, 8) for look, place in ((40, None), (40, 50), (34, 50), (34, 42), (28, 42), (28, 36), (24, 36),
                                          (24, 30), (21, 30), (21, 26), (18, 26), (18, 22), (14, 22), (14, 18)))
+# Past that ladder (the W-mid walk's crowded keyframes still ran 234-243
+# words, a three-character shot with two props 308): the reference roles said
+# compactly and the props in their short form, then the looks, the place and
+# the rendering cut further; last, what the sent images already show -- the
+# layout (the set image) and the prop sentences (each prop's image, named in
+# the roles and the beat) -- is left out. Looks keep 4 words: a look's
+# presentation leads it (stage 3d). A prompt that fits earlier never reaches
+# these rungs. Each: (look words, place words, rendering words, props).
+_LAYERED_LAST_RUNGS = ((14, 18, 8, "short"), (12, 14, 0, "short"), (10, 12, 0, "short"), (8, 10, 0, "short"),
+                       (6, 8, 0, "short"), (4, 6, 0, "short"), (4, 0, 0, "none"))
 _REFERENCES_MODE = "references"
 
 
@@ -721,7 +769,7 @@ def _staged(entry, resolve) -> str:
 
 
 def _staging(frame, frame_props, *, char_handles, look_words, staging=(), resolve=lambda text: text,
-             ledger=None) -> str:
+             ledger=None, props="full") -> str:
     """Each character of the frame by its handle, where it stands (left,
     right, centre in subject order) and its look -- its height said against
     the others in the frame --, two facing each other; then each prop of
@@ -736,7 +784,9 @@ def _staging(frame, frame_props, *, char_handles, look_words, staging=(), resolv
     *ledger* (phase 7 stage 5c: ``{char_id: state}`` when the episode
     starts, ``context.ledger_before``) dresses each character in its
     current wardrobe set and says who holds each prop; None: the look's
-    first set, the prop's ``where_when``, as before."""
+    first set, the prop's ``where_when``, as before. *props* (a crowded
+    keyframe, its prop images sent): ``"full"`` (``render_prop``),
+    ``"short"`` (its short form) or ``"none"`` (no prop sentence)."""
     sentences = []
     n = len(frame)
     positions = _POSITIONS.get(n) or tuple(f"Position {i} from the left" for i in range(1, n + 1))
@@ -756,9 +806,9 @@ def _staging(frame, frame_props, *, char_handles, look_words, staging=(), resolv
     if n == 2 and not any(f"@{cid}" in staged for cid, _doc in frame):
         sentences.append("They face each other.")
     frame_ids = {cid for cid, _doc in frame}
-    for pid, doc in frame_props:
+    for pid, doc in frame_props if props != "none" else ():
         held = _holder(doc, frame_ids, char_handles, ledger)
-        text = render_prop(doc)
+        text = render_prop(doc, short=props == "short")
         entry = staged.get(f"%{pid}")
         if entry is not None and entry.get("position") in _STAGED_POSITIONS:
             text = f"{_STAGED_POSITIONS[entry['position']]}, {text}"
@@ -829,8 +879,10 @@ def _layered(plan, *, scene, entities, style_lock, consistency_mode, video_actio
                                 places=places, props=props, char_handles=char_handles, prop_handles=prop_handles)
     # The roles are written from the very list stored and sent (capped to the
     # smallest per-link limit), so image N of the text is image N of the request.
-    roles = (prompting.role_text([(role, handle) for _path, role, handle in refs])
-             if consistency_mode == _REFERENCES_MODE else "")
+    sent = [(role, handle) for _path, role, handle in refs]
+    references = consistency_mode == _REFERENCES_MODE
+    roles = prompting.role_text(sent) if references else ""
+    compact_roles = prompting.role_text(sent, compact=True) if references else ""
 
     clause = _delivery_clause(_shot_lines(plan, scene), char_handles)
     beat = " ".join(part for part in (prompting.as_sentence(video_action), prompting.as_sentence(clause)) if part)
@@ -847,14 +899,16 @@ def _layered(plan, *, scene, entities, style_lock, consistency_mode, video_actio
         return resolve_action(text, char_handles=char_handles, prop_handles=prop_handles, place_names=place_names)
 
     staged = plan.get("staging") or ()
-    for look_words, place_words, rendering_words in _LAYERED_BUDGETS:
+    rungs = [budget + ("full",) for budget in _LAYERED_BUDGETS] + list(_LAYERED_LAST_RUNGS)
+    for look_words, place_words, rendering_words, props_said in rungs:
         staging = names_mod.without_names(
             _staging(frame, frame_props, char_handles=char_handles, look_words=look_words, staging=staged,
-                     resolve=resolve, ledger=ledger), name_map)
+                     resolve=resolve, ledger=ledger, props=props_said), name_map)
         place_text = place_full if place_words is None else _fit_place(place_full, place_words)
         image_prompt = prompting.layered_shot_prompt(
-            style_lock, roles_text=roles, beat=beat, staging=staging, composition=composition,
-            place_text=place_text, constraints=constraints, rendering_words=rendering_words)
+            style_lock, roles_text=roles if props_said == "full" else compact_roles, beat=beat, staging=staging,
+            composition=composition, place_text=place_text, constraints=constraints,
+            rendering_words=rendering_words)
         if len(image_prompt.split()) <= prompting.KEYFRAME_V2_MAX_WORDS:
             break
 
@@ -925,13 +979,15 @@ def resolve_shot(shot, *, scene, entities, style_lock, consistency_mode, v2=Fals
     # already resolved above) -- this is both the text an I2V clip prompt is
     # built from (video_plan.build_video_prompt) and the action sentence
     # image_prompt is assembled with, so neither a raw tag nor a leaked name
-    # ever reaches either prompt.
-    video_action = names_mod.without_names(resolved_action, _story_name_map(entities))
+    # ever reaches either prompt. A v2 story keeps a descriptive name (a
+    # prop's own noun) so a handle is never garbled (_v2_name_map).
+    name_map = _v2_name_map(entities) if v2 else _story_name_map(entities)
+    video_action = names_mod.without_names(resolved_action, name_map)
     if v2:
         layered = _layered(shot, scene=scene, entities=entities, style_lock=style_lock,
                            consistency_mode=consistency_mode, video_action=video_action,
                            char_handles=char_handles_map, prop_handles=prop_handles_map,
-                           name_map=_story_name_map(entities), ledger=ledger)
+                           name_map=name_map, ledger=ledger)
         return {
             "image_prompt": layered["image_prompt"],
             "video_action": video_action,
