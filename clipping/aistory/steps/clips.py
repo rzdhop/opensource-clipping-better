@@ -641,6 +641,10 @@ def _message(units, plan, current_ids, profile_name, booked_ids=(), *, resolutio
     if held:
         text += " " + " ".join(f"{row['shot_id']} runs {row['clip_s'] + row['held_s']:g} s: its {row['clip_s']} s "
                                f"clip is held on its last frame for {row['held_s']:g} s." for row in held)
+    if units["tier"] == 3 and video_providers.AUDIO.get(link) == "never":
+        # A-108: before any clip is bought, not only at the render's note.
+        text += (f" Tier 3 keeps a clip's own sound, but {link} makes clips with none: every shot is rendered as at "
+                 "tier 2, its lines spoken.")
     if units["over_cap"]:
         text += f" Over the cap: {units['over_cap']}."
     if units["refused"]:
