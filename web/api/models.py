@@ -697,6 +697,9 @@ class CharacterPatchRequest(BaseModel):
     ``"-5Hz"``). ``personality`` is merged onto the current one. A change to
     the descriptor or the signature items recomputes the prompt block; a
     change to the sample line, rate or pitch removes the voice sample.
+    ``look`` and ``dossier`` (phase 7, a v2 story only: 409 otherwise) are
+    merged onto the current blocks and checked by the character schema (400
+    with its errors, not 422, which is why they are plain objects here).
     """
     name: Optional[str] = None
     role: Optional[str] = None
@@ -709,25 +712,59 @@ class CharacterPatchRequest(BaseModel):
     sample_line: Optional[str] = None
     rate: Optional[str] = None
     pitch: Optional[str] = None
+    look: Optional[dict] = None
+    dossier: Optional[dict] = None
 
 
 class PlacePatchRequest(BaseModel):
     """PATCH /api/stories/{id}/places/{place_id}. A change to the descriptor
-    or the layout notes recomputes the prompt block."""
+    or the layout notes recomputes the prompt block. ``look`` (phase 7, a v2
+    story only) -- the layout map, the scale note, the light per time
+    variant, the props that live there -- is merged onto the current one."""
     name: Optional[str] = None
     one_line: Optional[str] = None
     descriptor: Optional[str] = None
     layout_notes: Optional[str] = None
+    look: Optional[dict] = None
 
 
 class PropPatchRequest(BaseModel):
     """PATCH /api/stories/{id}/props/{prop_id}. ``owner_char_id`` is one of
     the story's characters, or null. A change to the descriptor recomputes
-    the prompt block."""
+    the prompt block. ``look`` (phase 7, a v2 story only) is merged onto the
+    current one."""
     name: Optional[str] = None
     one_line: Optional[str] = None
     descriptor: Optional[str] = None
     owner_char_id: Optional[str] = None
+    look: Optional[dict] = None
+
+
+class KnowledgeBeatPatch(BaseModel):
+    """One beat of ``PATCH /knowledge``'s ``beats``, named by its episode and
+    its 1-based position in that episode's timeline entry; each field sent
+    replaces the beat's own (``place_id: null`` is "no place")."""
+    ep: int
+    beat: int
+    what: Optional[str] = None
+    place_id: Optional[str] = None
+    who: Optional[list[str]] = None
+    objects: Optional[list[str]] = None
+    knows_after: Optional[dict] = None
+
+
+class KnowledgePatchRequest(BaseModel):
+    """PATCH /api/stories/{id}/knowledge (phase 7 stage 7, a v2 story's
+    knowledge base). Only what is sent is applied (``model_fields_set``):
+    ``world`` merged onto the current one, ``beats`` by episode and position,
+    ``props_registry`` as a whole, ``ledger_seed`` merged per character.
+    Checked by the knowledge rules and every id against the story when it is
+    saved (400 with every error); any write moves ``rev``, so an approved
+    base must be approved again (``clipping.aistory.workflow.patch_knowledge``)."""
+    world: Optional[dict] = None
+    beats: Optional[list[KnowledgeBeatPatch]] = None
+    props_registry: Optional[list[str]] = None
+    ledger_seed: Optional[dict] = None
 
 
 # Phase 3 (spec 2.7, 2.8, 9.2): one episode's documents. Only what is sent is

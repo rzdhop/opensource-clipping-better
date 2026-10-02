@@ -854,13 +854,25 @@ SEASON_PARAMS = ("episodes",)
 KNOWLEDGE_PARAMS = ()
 
 # The fields an inline edit may set (the API's Character/Place/PropPatchRequest).
+# ``look`` and ``dossier`` (phase 7 stage 7, A19): the optional blocks the v2
+# writers produce (D1, D2, D3, R1v2), edited on a v2 story only.
 CHARACTER_PATCH_FIELDS = (
     "name", "role", "archetype", "one_line", "descriptor", "signature_items", "personality",
-    "voice_direction", "sample_line", "rate", "pitch",
+    "voice_direction", "sample_line", "rate", "pitch", "look", "dossier",
 )
-PLACE_PATCH_FIELDS = ("name", "one_line", "descriptor", "layout_notes")
-PROP_PATCH_FIELDS = ("name", "one_line", "descriptor", "owner_char_id")
+PLACE_PATCH_FIELDS = ("name", "one_line", "descriptor", "layout_notes", "look")
+PROP_PATCH_FIELDS = ("name", "one_line", "descriptor", "owner_char_id", "look")
 PATCH_FIELDS_BY_KIND = {CHARACTERS: CHARACTER_PATCH_FIELDS, PLACES: PLACE_PATCH_FIELDS, PROPS: PROP_PATCH_FIELDS}
+# The v2 blocks among them: each merged onto the entity's current block, as
+# ``personality`` is.
+V2_BLOCK_FIELDS = ("look", "dossier")
+
+# What a knowledge-base edit may set (the API's KnowledgePatchRequest, phase 7
+# stage 7): the world (merged), timeline beats named by episode and 1-based
+# position (each a ``KNOWLEDGE_BEAT_PATCH_FIELDS`` subset), the props registry
+# (the list as a whole) and ledger-seed entries (merged per character).
+KNOWLEDGE_PATCH_FIELDS = ("world", "beats", "props_registry", "ledger_seed")
+KNOWLEDGE_BEAT_PATCH_FIELDS = ("what", "place_id", "who", "objects", "knows_after")
 
 # The character_v1 caps a request is checked against before anything is written.
 NAME_MAX = 60
@@ -1643,6 +1655,120 @@ def approve_knowledge(stories, story_id, *, now) -> dict:
         raise StoryUnreadable(story_id, exc.name, exc.errors) from None
 
 
+def _is_int(value) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _edit_beats(doc, beats, errors) -> None:
+    """``beats`` ``[{ep, beat, <KNOWLEDGE_BEAT_PATCH_FIELDS>...}]`` into *doc*'s
+    timeline (in place): ``beat`` is the 1-based position in episode ``ep``'s
+    entry; each key sent replaces the beat's own. Shape errors into *errors*."""
+    if not isinstance(beats, list):
+        errors.append("beats: expected a list")
+        return
+    entries = {entry["ep"]: entry for entry in doc.get("timeline") or ()}
+    editable = ", ".join(KNOWLEDGE_BEAT_PATCH_FIELDS)
+    for i, item in enumerate(beats):
+        path = f"beats[{i}]"
+        if not isinstance(item, dict):
+            errors.append(f"{path}: expected an object {{ep, beat, {editable}}}")
+            continue
+        extra = sorted(set(item) - {"ep", "beat"} - set(KNOWLEDGE_BEAT_PATCH_FIELDS))
+        if extra:
+            errors.append(f"{path}: unknown key(s) {', '.join(extra)} (editable: {editable})")
+            continue
+        ep, position = item.get("ep"), item.get("beat")
+        entry = entries.get(ep) if _is_int(ep) else None
+        if entry is None:
+            errors.append(f"{path}.ep: the timeline has no episode {ep!r}")
+            continue
+        count = len(entry["beats"])
+        if not (_is_int(position) and 1 <= position <= count):
+            errors.append(f"{path}.beat: episode {ep} has no beat {position!r} (1-{count})")
+            continue
+        beat = entry["beats"][position - 1]
+        for key in KNOWLEDGE_BEAT_PATCH_FIELDS:
+            if key in item:
+                value = copy.deepcopy(item[key])
+                beat[key] = value.strip() if isinstance(value, str) else value
+
+
+def _edit_knowledge(doc, fields, errors) -> None:
+    """*fields* (``KNOWLEDGE_PATCH_FIELDS``) into the knowledge document *doc*,
+    in place; what is not even the right shape goes into *errors* (the rest
+    is the document's own rules, checked when it is written)."""
+    if "world" in fields:
+        world = fields["world"]
+        if isinstance(world, dict):
+            doc["world"] = {**(doc.get("world") or {}),
+                            **{key: value.strip() if isinstance(value, str) else copy.deepcopy(value)
+                               for key, value in world.items()}}
+        else:
+            errors.append("world: expected an object {geography?, period_details?, visual_motifs?}")
+    if "beats" in fields:
+        _edit_beats(doc, fields["beats"], errors)
+    if "props_registry" in fields:
+        doc["props_registry"] = copy.deepcopy(fields["props_registry"])
+    if "ledger_seed" in fields:
+        seed = fields["ledger_seed"]
+        if not isinstance(seed, dict):
+            errors.append("ledger_seed: expected an object {char_id: state}")
+            return
+        merged = dict(doc.get("ledger_seed") or {})
+        for char_id, state in seed.items():
+            if isinstance(state, dict):
+                merged[char_id] = {**(merged.get(char_id) or {}), **copy.deepcopy(state)}
+            else:
+                errors.append(f"ledger_seed.{char_id}: expected an object")
+        doc["ledger_seed"] = merged
+
+
+def patch_knowledge(stories, story_id, fields, *, now) -> dict:
+    """Edit a v2 story's knowledge base (phase 7 stage 7, A19; the API's
+    KnowledgePatchRequest); returns ``knowledge.json`` as written.
+
+    ``world`` is merged onto the current world; ``beats`` ``[{ep, beat,
+    what?, place_id?, who?, objects?, knows_after?}]`` names a beat by its
+    episode and 1-based position, each key sent replacing the beat's own
+    (``new_objects`` stays the knowledge step's); ``props_registry`` is the
+    registry as a whole; ``ledger_seed`` ``{char_id: {...}}`` is merged onto
+    that character's starting state (one not in the seed yet needs every
+    key). Checked as the knowledge step's writes are -- the document's rules
+    and every id against the story (``StoryStore.update_knowledge``) -- and
+    refused whole (``invalid`` with every error; nothing written). A write
+    moves ``rev``, so an approved base reads stale until it is approved again
+    (DEC-228 part 2); nothing sent, or nothing changed: nothing written.
+    ``conflict`` for a legacy story, or before the knowledge step wrote the
+    document."""
+    story = load(stories, story_id)
+    _unknown_fields(fields, KNOWLEDGE_PATCH_FIELDS, "knowledge base")
+    if not media_policy.is_v2(story):
+        raise WorkflowError(CONFLICT, "Only a v2 story has a knowledge base; this story is on the legacy pipeline.")
+    current = knowledge(stories, story_id)
+    if current is None:
+        raise WorkflowError(CONFLICT, "There is no knowledge base to edit yet: run the knowledge step first.")
+    if not fields:
+        return current
+    message = "The knowledge base would not be valid with these values."
+
+    def edit(doc):
+        if doc is None:
+            raise WorkflowError(CONFLICT, "There is no knowledge base to edit yet: run the knowledge step first.")
+        before = copy.deepcopy(doc)
+        errors = []
+        _edit_knowledge(doc, fields, errors)
+        if errors:
+            raise _invalid_values(message, errors)
+        return None if doc == before else doc
+
+    try:
+        return stories.update_knowledge(story_id, edit, now=now)
+    except KeyError:
+        raise not_found() from None
+    except schemas.SchemaError as exc:
+        raise _invalid_values(message, exc.errors) from None
+
+
 # -------------------------------------------------------------------- edits
 
 def _prompt_block(kind, lock, doc):
@@ -1674,6 +1800,15 @@ _SAMPLE_FIELDS = ("sample_line", "rate", "pitch")
 _STRIPPED = ("name", "archetype", "one_line", "descriptor", "layout_notes", "voice_direction", "sample_line")
 
 
+def _merge_block(doc, name, value, word) -> None:
+    """A v2 block (``look``, ``dossier``) sent as an object, merged onto the
+    entity's current one as ``personality`` is (a block not written yet is
+    started from what is sent: the schema then asks for every key)."""
+    if not isinstance(value, dict):
+        raise _invalid_values(f"The {word} would not be valid with these values.", [f"$.{name}: expected an object"])
+    doc[name] = {**(doc.get(name) or {}), **value}
+
+
 def _apply_character(doc, values) -> None:
     for name in ("name", "role", "archetype", "one_line", "descriptor", "signature_items"):
         if name in values:
@@ -1684,6 +1819,9 @@ def _apply_character(doc, values) -> None:
             raise _invalid_values("The character would not be valid with these values.",
                                   ["$.personality: expected an object"])
         doc["personality"] = {**doc["personality"], **personality}
+    for name in V2_BLOCK_FIELDS:
+        if name in values:
+            _merge_block(doc, name, values[name], ENTITY_WORDS[CHARACTERS])
     brief = [block for block in (doc["voice"], doc["voice_hints"]) if block]
     for field, key in (("voice_direction", "direction"), ("sample_line", "sample_line")):
         if field in values:
@@ -1706,7 +1844,10 @@ def _apply(kind, doc, values, *, lock, cast_ids) -> None:
         _apply_character(doc, values)
     else:
         for name, value in values.items():
-            doc[name] = value
+            if name in V2_BLOCK_FIELDS:
+                _merge_block(doc, name, value, ENTITY_WORDS[kind])
+            else:
+                doc[name] = value
         if kind == PROPS and "owner_char_id" in values:
             owner = values["owner_char_id"]
             if owner is not None and owner not in cast_ids:
@@ -1715,6 +1856,41 @@ def _apply(kind, doc, values, *, lock, cast_ids) -> None:
     if set(values) & set(_BLOCK_FIELDS[kind]):
         doc["prompt_block"] = _prompt_block(kind, lock, doc)
     doc["approved_at"] = None
+
+
+def _block_reference_errors(stories, story_id, kind, eid, doc, blocks, cast_ids) -> list:
+    """What the v2 *blocks* of *doc* (already valid on their own) name that
+    the story does not have: a dossier's relationships (its characters), a
+    place look's resident props, a prop look's holders and places -- the
+    store checks a knowledge write's ids the same way -- and a look that
+    drops the wardrobe set the knowledge base's ledger seed dresses the
+    character in (every later knowledge write would be refused)."""
+    errors = []
+    if kind == CHARACTERS and "dossier" in blocks:
+        for i, relationship in enumerate(doc["dossier"]["relationships"]):
+            if relationship["with"] not in cast_ids:
+                errors.append(f"$.dossier.relationships[{i}].with: {relationship['with']!r} is no character of "
+                              "this story")
+    if kind == CHARACTERS and "look" in blocks:
+        seed = ((knowledge(stories, story_id) or {}).get("ledger_seed") or {}).get(eid) or {}
+        worn = seed.get("wardrobe_set")
+        if worn is not None and worn not in {item["id"] for item in doc["look"]["wardrobe_sets"]}:
+            errors.append(f"$.look.wardrobe_sets: {worn!r} is what the knowledge base's ledger seed dresses "
+                          f"{doc['name']} in before episode 1; change the ledger seed first, or keep the set")
+    if kind == PLACES and "look" in blocks:
+        prop_ids = {item["prop_id"] for item in list_entities(stories, story_id, PROPS)}
+        for i, prop_id in enumerate(doc["look"]["props_here"]):
+            if prop_id not in prop_ids:
+                errors.append(f"$.look.props_here[{i}]: {prop_id!r} is no prop of this story")
+    if kind == PROPS and "look" in blocks:
+        place_ids = {item["place_id"] for item in list_entities(stories, story_id, PLACES)}
+        for i, entry in enumerate(doc["look"]["where_when"]):
+            path = f"$.look.where_when[{i}]"
+            if entry["holder_char_id"] is not None and entry["holder_char_id"] not in cast_ids:
+                errors.append(f"{path}.holder_char_id: {entry['holder_char_id']!r} is no character of this story")
+            if entry["place_id"] is not None and entry["place_id"] not in place_ids:
+                errors.append(f"{path}.place_id: {entry['place_id']!r} is no place of this story")
+    return errors
 
 
 def patch_entity(stories, story_id, kind, eid, fields, *, now) -> dict:
@@ -1733,8 +1909,17 @@ def patch_entity(stories, story_id, kind, eid, fields, *, now) -> dict:
     changed sample line, rate or pitch removes the voice sample, which no
     longer says or sounds like that. The entity is re-read (under the
     uploads' lock, for a character) right before it is written.
+
+    Phase 7 stage 7 (A19): a character's ``look`` and ``dossier``, a place's
+    and a prop's ``look`` -- the blocks the v2 writers produce -- are merged
+    onto the current ones (as ``personality`` is) and checked by the kind's
+    schema and against the story (:func:`_block_reference_errors`); an edit
+    clears the approval and moves ``updated_at`` like any other, so the
+    storyboard prompts resolved from the entity read outdated
+    (:func:`outdated_entities`). ``conflict`` on a legacy story, which is
+    never given one (RC-M3).
     """
-    load(stories, story_id)
+    story = load(stories, story_id)
     current = read_entity(stories, story_id, kind, eid)
     if not fields:
         return current
@@ -1743,6 +1928,10 @@ def patch_entity(stories, story_id, kind, eid, fields, *, now) -> dict:
     if unknown:
         raise WorkflowError(INVALID, (f"These {ENTITY_WORDS[kind]} fields cannot be edited: {', '.join(unknown)} "
                                       f"(editable: {', '.join(allowed)})."))
+    blocks = [name for name in V2_BLOCK_FIELDS if name in fields]
+    if blocks and not media_policy.is_v2(story):
+        raise WorkflowError(CONFLICT, (f"A {' or '.join(blocks)} belongs to a v2 story (the quality pipeline): "
+                                       "this story is on the legacy pipeline, whose prompts never read one."))
     values = {name: (value.strip() if name in _STRIPPED and isinstance(value, str) else copy.deepcopy(value))
               for name, value in fields.items()}
     lock = style_lock(stories, story_id)
@@ -1753,6 +1942,8 @@ def patch_entity(stories, story_id, kind, eid, fields, *, now) -> dict:
     trial = copy.deepcopy(current)
     _apply(kind, trial, values, lock=lock, cast_ids=cast_ids)
     errors = validator(trial)
+    if blocks and not errors:
+        errors = _block_reference_errors(stories, story_id, kind, eid, trial, blocks, cast_ids)
     if "name" in values and isinstance(values["name"], str):
         id_field = story_store.ENTITY_KINDS[kind].id_field
         key = entities_step.name_key(values["name"])

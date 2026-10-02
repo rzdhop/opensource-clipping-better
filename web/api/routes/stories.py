@@ -144,6 +144,7 @@ from ..models import (
     FastTrackStepParams,
     JobResponse,
     JobStatus,
+    KnowledgePatchRequest,
     PlacePatchRequest,
     PropPatchRequest,
     RenderStepParams,
@@ -2386,6 +2387,25 @@ async def patch_place(story_id: str, place_id: str, req: PlacePatchRequest) -> d
 async def patch_prop(story_id: str, prop_id: str, req: PropPatchRequest) -> dict:
     """Edit a prop inline (``PropPatchRequest``); see ``_patch_entity``."""
     return _patch_entity(story_id, PROPS, prop_id, req)
+
+
+@router.patch("/{story_id}/knowledge")
+async def patch_knowledge(story_id: str, req: KnowledgePatchRequest) -> dict:
+    """Edit a v2 story's knowledge base inline (``KnowledgePatchRequest``;
+    ``workflow.patch_knowledge`` says what each field does); answers
+    ``knowledge.json`` as written. 404 for an unknown story; nothing sent:
+    nothing written; 409 while a step of the story is queued or running (the
+    knowledge step writes the same document), for a legacy story and before
+    the knowledge step; 400 with ``{"message", "errors"}`` when the base
+    would not validate. A write moves ``rev``: an approved base must be
+    approved again (``POST /approve/knowledge``)."""
+    stories = _stories()
+    _load(stories, story_id)
+    sent = _sent(req)
+    if sent:
+        _refuse_busy(story_id, "edit the knowledge base once that step is done, or cancel it first.")
+    with _answering():
+        return workflow.patch_knowledge(stories, story_id, sent, now=_now())
 
 
 @router.delete("/{story_id}/characters/{char_id}")
