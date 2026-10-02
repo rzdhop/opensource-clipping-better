@@ -182,6 +182,92 @@ def test_gemini_tts_asks_for_audio_and_writes_a_wav(tmp_path):
     assert tts.GEMINI_TTS.estimate(Link("gemini", "flash-lite-tts"), request) is None
 
 
+def _gemini_answer(pcm, rate=24000):
+    return (200, {"candidates": [{"content": {"parts": [
+        {"inlineData": {"mimeType": f"audio/L16;codec=pcm;rate={rate}", "data": base64.b64encode(pcm).decode()}}]}}]})
+
+
+def test_gemini_tts_cuts_the_static_at_the_end_of_a_line_and_says_so(tmp_path):
+    """The known fault (a burst of static after the last word): the WAV is
+    the cleaned PCM, its duration the cleaned length, and the sidecar and
+    the result's meta carry the tail guard's report."""
+    import test_tts_tail as ttt
+
+    pcm = ttt.pcm(ttt.voiced(1.4), ttt.silence(0.1), ttt.static(0.5))
+    log = []
+    request = GenRequest(kind="tts", text="Bonjour", voice="Kore", out_dir=str(tmp_path), extra={"name": "line_03"})
+    result = tts.GEMINI_TTS.generate(Link("gemini", "flash-lite-tts"), request, credentials={"GOOGLE_API_KEY": "gk"},
+                                     on_log=log.append, transport=FakeTransport([_gemini_answer(pcm)]))
+
+    with wave.open(result.paths[0]) as wav:
+        frames = wav.getnframes()
+        kept = wav.readframes(frames)
+    timing = json.loads(pathlib.Path(result.paths[1]).read_text(encoding="utf-8"))
+    guard = timing["tail_guard"]
+    assert guard["version"] == 1 and guard["reason"] == "noise_after_gap"
+    assert guard["original_s"] == 2.0 and 1.4 <= guard["kept_s"] <= 1.46
+    assert timing["duration_s"] == guard["kept_s"] == round(frames / 24000, 3)
+    assert result.meta["duration_s"] == timing["duration_s"] and result.meta["tail_guard"] == guard
+    assert abs(ttt.samples_of(kept)[-1]) <= 50, "faded out at the new end"
+    notes = [line for line in log if "static" in line]
+    assert len(notes) == 1 and "gemini/flash-lite-tts" in notes[0] and f"{guard['trimmed_s']:.2f} s" in notes[0]
+
+
+def test_gemini_tts_a_clean_line_keeps_its_length_and_records_the_guard(tmp_path):
+    import test_tts_tail as ttt
+
+    pcm = ttt.pcm(ttt.voiced(1.2), ttt.silence(0.3))
+    log = []
+    request = GenRequest(kind="tts", text="Bonjour", voice="Kore", out_dir=str(tmp_path), extra={"name": "line_04"})
+    result = tts.GEMINI_TTS.generate(Link("gemini", "flash-lite-tts"), request, credentials={"GOOGLE_API_KEY": "gk"},
+                                     on_log=log.append, transport=FakeTransport([_gemini_answer(pcm)]))
+
+    timing = json.loads(pathlib.Path(result.paths[1]).read_text(encoding="utf-8"))
+    assert timing["duration_s"] == 1.5 and timing["tail_guard"]["reason"] == "none"
+    assert timing["tail_guard"]["trimmed_s"] == 0.0
+    assert not [line for line in log if "static" in line]
+
+
+def test_gemini_tts_a_suspect_line_is_kept_whole_and_said(tmp_path):
+    import test_tts_tail as ttt
+
+    pcm = ttt.pcm(ttt.static(1.0))
+    log = []
+    request = GenRequest(kind="tts", text="Ah", voice="Kore", out_dir=str(tmp_path), extra={"name": "line_05"})
+    result = tts.GEMINI_TTS.generate(Link("gemini", "flash-lite-tts"), request, credentials={"GOOGLE_API_KEY": "gk"},
+                                     on_log=log.append, transport=FakeTransport([_gemini_answer(pcm)]))
+
+    timing = json.loads(pathlib.Path(result.paths[1]).read_text(encoding="utf-8"))
+    assert timing["duration_s"] == 1.0 and timing["tail_guard"]["reason"] == "suspect"
+    assert any("left whole" in line for line in log)
+
+
+def test_edge_and_local_lines_carry_no_tail_guard(tmp_path, monkeypatch):
+    """Only Gemini has the fault: the other engines' sidecars are what they were."""
+    request = GenRequest(kind="tts", text="Bonjour", out_dir=str(tmp_path), extra={"name": "line_06"})
+    result = tts.EDGE.generate(Link("edge", "fr-FR-HenriNeural"), request, credentials={}, on_log=lambda *a: None,
+                               synthesize=fake_synth)
+    assert "tail_guard" not in json.loads(pathlib.Path(result.paths[1]).read_text(encoding="utf-8"))
+    assert "tail_guard" not in result.meta
+
+    monkeypatch.setattr(tts, "_installed", lambda name: True)
+
+    def fake_piper(text, voice, out_path, request, on_log):
+        with wave.open(out_path, "wb") as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(24000)
+            wav.writeframes(b"\x00\x10" * 2400)
+
+    monkeypatch.setitem(tts._LOCAL_SYNTH, "piper", fake_piper)
+    local = tts.LOCAL_TTS.generate(Link("local", "piper"), GenRequest(kind="tts", text="x", out_dir=str(tmp_path),
+                                                                     extra={"name": "line_07"}),
+                                   credentials={}, on_log=lambda *a: None)
+    assert "tail_guard" not in json.loads(pathlib.Path(local.paths[1]).read_text(encoding="utf-8"))
+    with wave.open(local.paths[0]) as wav:
+        assert wav.readframes(wav.getnframes()) == b"\x00\x10" * 2400, "a local engine's audio is untouched"
+
+
 def test_gemini_tts_reports_an_answer_without_audio(tmp_path):
     transport = FakeTransport([(200, {"candidates": [{"content": {"parts": [{"text": "no"}]}, "finishReason": "OTHER"}]})])
     with pytest.raises(errors.ProviderError) as excinfo:

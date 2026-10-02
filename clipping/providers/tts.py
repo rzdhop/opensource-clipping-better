@@ -4,7 +4,11 @@
   (``clipping.voiceover._synthesize_async`` -- the one place that drives
   ``edge-tts``; not forked, DEC-100), keeping the word timestamps it yields.
 * ``gemini/flash-lite-tts`` uses the REST speech generation endpoint and
-  writes a WAV from the PCM it returns.
+  writes a WAV from the PCM it returns -- cleaned first by the tail guard
+  (``tts_tail``): Gemini appends a burst of static after the last word (a
+  known fault of its TTS), which is cut, the line faded in and out, and the
+  guard's report kept in the sidecar and the result's meta (``tail_guard``).
+  Edge and the local engines have no such fault and are not touched.
 * ``local/piper``, ``local/kokoro`` and ``local/chatterbox`` are probed with
   ``importlib`` and imported only inside the call that synthesises; they are
   the ``[local-tts]`` extras of ``pyproject.toml``. Never XTTS: its licence is
@@ -36,7 +40,7 @@ import shutil
 import subprocess
 import wave
 
-from . import generation, pricing
+from . import generation, pricing, tts_tail
 from .errors import ProviderError
 from .generation import TTS, GenResult, register_adapter
 from .registry import describe
@@ -91,7 +95,7 @@ def _name(request, link) -> str:
     return name or f"{link.provider}_{link.model}".replace("/", "_")
 
 
-def _write_timing(out_dir, name, *, duration_s, words, source, provider, voice) -> str:
+def _write_timing(out_dir, name, *, duration_s, words, source, provider, voice, tail_guard=None) -> str:
     data = {
         "$schema": TIMING_SCHEMA,
         "provider": provider,
@@ -100,6 +104,9 @@ def _write_timing(out_dir, name, *, duration_s, words, source, provider, voice) 
         "source": source,
         "words": words,
     }
+    if tail_guard is not None:
+        # The tail guard's report (``tts_tail.clean``): Gemini only.
+        data["tail_guard"] = dict(tail_guard)
     return write_output(out_dir, name, json.dumps(data, indent=2, ensure_ascii=False).encode("utf-8"), "json")
 
 
@@ -233,6 +240,17 @@ def _pcm_rate(mime: str) -> int:
     return int(match.group(1)) if match else 24000
 
 
+def _log_tail_guard(link, guard, on_log) -> None:
+    """One line when the tail guard cut something, or left whole a line its
+    rules would have cut too much of; nothing for a clean line."""
+    if guard["trimmed_s"] > 0:
+        on_log(f"   🔇 {describe(link)}: {guard['trimmed_s']:.2f} s of static cut from the line's end "
+               f"({guard['reason']}, {guard['kept_s']:.2f} s kept)")
+    elif guard["reason"] == "suspect":
+        on_log(f"   ⚠️ {describe(link)}: the line's end looks odd (noise where the rules would cut more than "
+               f"{tts_tail.MAX_CUT_S:g} s or half the line): left whole")
+
+
 class GeminiTtsAdapter(_Adapter):
     provider = "gemini"
 
@@ -267,8 +285,12 @@ class GeminiTtsAdapter(_Adapter):
             reason = (candidates[0].get("finishReason") if candidates else None) or "unknown"
             raise ProviderError(f"{describe(link)}: the answer carried no audio (finishReason {reason})")
         mime = audio.get("mimeType") or audio.get("mime_type") or ""
-        pcm = base64.b64decode(audio["data"])
         rate = _pcm_rate(mime)
+        # The static after the last word is cut and the edges faded before
+        # anything is written: the duration, the sidecar and a cached answer
+        # are the cleaned line's.
+        pcm, guard = tts_tail.clean(base64.b64decode(audio["data"]), rate)
+        _log_tail_guard(link, guard, on_log)
         out_dir = _out_dir(request)
         name = _name(request, link)
         audio_path = os.path.join(out_dir, f"{name}.wav")
@@ -279,9 +301,10 @@ class GeminiTtsAdapter(_Adapter):
             wav.writeframes(pcm)
         duration = round(len(pcm) / 2 / rate, 3)
         timing_path = _write_timing(out_dir, name, duration_s=duration, words=[], source=SOURCE_DURATION,
-                                    provider="gemini", voice=voice)
+                                    provider="gemini", voice=voice, tail_guard=guard)
         return GenResult(provider="gemini", model=link.model, paths=(audio_path, timing_path),
-                         meta={"duration_s": duration, "voice": voice, "mime": mime, "source": SOURCE_DURATION})
+                         meta={"duration_s": duration, "voice": voice, "mime": mime, "source": SOURCE_DURATION,
+                               "tail_guard": guard})
 
 
 # -------------------------------------------------------------------- local
