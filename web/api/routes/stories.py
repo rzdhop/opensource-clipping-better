@@ -563,12 +563,35 @@ def _plural(count, word) -> str:
     return f"{count} {word}{'' if count == 1 else 's'}"
 
 
-def _generation_message(units, images, edit, refusals, *, story) -> str:
+def _llm_calls_sentence(calls, links, rows) -> str:
+    """The LLM part of a generation estimate's message (its ``est_usd``
+    counts the images and edits only): the calls, the link they run on and
+    what they may cost at ``pricing.LLM_PRICES`` -- $0 on a free link, "up to
+    $Z if the free links fail" when a billed link can be reached after it
+    (:func:`_paid_fallthrough`), the worst case on a billed first link. Only
+    for a chain :func:`_llm_route` does not refuse."""
+    calls_text = _plural(calls, "LLM call")
+    link, first = next((link, row) for link, row in zip(links, rows) if row["keyed"] and "skipped" not in row)
+    if not first["free"]:
+        try:
+            worst = calls * llm_spend.worst_call_usd(link)
+        except pricing.PriceUnknown:
+            return (f"{calls_text} on {first['link']}, which is billed and has no price in the LLM price table: "
+                    "the step refuses it before any call.")
+        return f"{calls_text} on {first['link']} (billed): up to ${worst:.4f}, not in est_usd."
+    labels, up_to, unpriced = _paid_fallthrough(links, rows, calls)
+    text = f"{calls_text} on {first['link']} (free tier): $0"
+    if up_to is not None:
+        text += f", up to ${up_to:.4f} if the free links fail ({', '.join(labels)}, billed; not in est_usd)"
+    return text + "." + _unpriced_sentence(unpriced)
+
+
+def _generation_message(units, images, edit, refusals, *, story, llm=None) -> str:
     if refusals:
         return " ".join(refusals)
     parts = []
     if units["llm_calls"]:
-        parts.append(f"{_plural(units['llm_calls'], 'LLM call')} (no LLM price table: not in est_usd).")
+        parts.append(llm)
     if units["images"]:
         parts.append(images["message"])
     if units["edit_images"]:
@@ -607,10 +630,13 @@ def _generation_estimate(stories, story, step, units, *, env, probe_local=False)
     images = _image_verdict(stories, story, units["images"], env=env)
     edit = workflow.edit_readiness(stories, story, env=env, qty=units["edit_images"], probe_local=probe_local)
     refusals = []
+    llm = None
     if units["llm_calls"]:
-        _links, _keys, refusal = _llm_gate(env)
+        links, rows, refusal = _llm_rows(env)
         if refusal:
             refusals.append(refusal)
+        else:
+            llm = _llm_calls_sentence(units["llm_calls"], links, rows)
     if units["images"] and not images["ready"]:
         refusals.append(images["message"])
     est = 0.0
@@ -622,7 +648,7 @@ def _generation_estimate(stories, story, step, units, *, env, probe_local=False)
         "step": step, "est_usd": round(est, 6), "units": dict(units),
         "route_class": images["route_class"], "link": images["link"], "links": images["links"],
         "edit": edit, "ready": not refusals,
-        "message": _generation_message(units, images, edit, refusals, story=story),
+        "message": _generation_message(units, images, edit, refusals, story=story, llm=llm),
     }
 
 
@@ -1640,7 +1666,33 @@ def _llm_calls(step, target):
     return 1
 
 
-def _estimate_message(rows, calls, refusal, *, label=None, per_call=None) -> str:
+def _paid_fallthrough(links, rows, calls):
+    """What *calls* calls could cost on the billed links a story step falls
+    through to after its first usable link: ``(labels, up_to_usd, unpriced)``
+    -- the keyed, not skipped billed links after the first, the dearest
+    one's worst case (``llm_spend.worst_call_usd``: the widest prompt and
+    reply cap at its ``pricing.LLM_PRICES`` row) times *calls*, None when
+    none is priced, and the ones with no row (each refused before any call)."""
+    usable = [(link, row) for link, row in zip(links, rows) if row["keyed"] and "skipped" not in row]
+    labels, worst, unpriced = [], [], []
+    for link, row in usable[1:]:
+        if row["free"]:
+            continue
+        try:
+            worst.append(llm_spend.worst_call_usd(link))
+        except pricing.PriceUnknown:
+            unpriced.append(row["link"])
+        else:
+            labels.append(row["link"])
+    return labels, (calls * max(worst) if worst else None), unpriced
+
+
+def _unpriced_sentence(unpriced) -> str:
+    return (f" {', '.join(unpriced)} (billed) {'has' if len(unpriced) == 1 else 'have'} no price in the LLM "
+            "price table: refused before any call.") if unpriced else ""
+
+
+def _estimate_message(rows, calls, refusal, *, label=None, per_call=None, fallthrough=None) -> str:
     if refusal:
         return refusal
     usable = [row for row in rows if row["keyed"] and "skipped" not in row]
@@ -1653,11 +1705,12 @@ def _estimate_message(rows, calls, refusal, *, label=None, per_call=None) -> str
                     "table: the step refuses it before any call.")
         return (f"{calls_text} on {first['link']}, which is billed: est_usd is the worst case, "
                 f"${per_call:.4f} a call (the widest prompt and reply cap at its price).")
-    paid_later = [row["link"] for row in usable[1:] if not row["free"]]
     text = f"{calls_text} on {first['link']} (free tier)."
-    if paid_later:
-        text += (f" If the free links before it fail, {', '.join(paid_later)} "
-                 f"(billed) may be reached. {note}")
+    labels, up_to, unpriced = fallthrough or ([], None, [])
+    if up_to is not None:
+        text += (f" Up to ${up_to:.4f} if the free links fail and {', '.join(labels)} (billed) "
+                 f"{'answers' if len(labels) == 1 else 'answer'}; {note}")
+    text += _unpriced_sentence(unpriced)
     skipped = list(dict.fromkeys(row["link"] for row in rows if row["keyed"] and "skipped" in row))
     if skipped:
         text += f" Not used: {', '.join(skipped)} (billed) -- {llm_call.PAID_SKIP_REASON}."
@@ -1924,9 +1977,10 @@ def _reedit_estimate(stories, story, ep) -> dict:
         return workflow.reedit_estimate(ec)
 
 
-def _llm_estimate(step, calls, *, env, label=None) -> dict:
-    """The LLM steps' estimate (see ``estimate``) of *calls* calls; *label*
-    says how many in the message when that is a range."""
+def _llm_rows(env):
+    """``(links, rows, refusal)``: the story chain under the Settings *env*
+    (:func:`_llm_route`) as the estimates list it, one row a link ``{"link",
+    "keyed", "free"[, "skipped": <reason>]}``, and why a step may not start."""
     links, keys, skipped, refusal = _llm_route(env)
     reasons = {link: reason for link, reason in skipped}
     rows = []
@@ -1939,6 +1993,13 @@ def _llm_estimate(step, calls, *, env, label=None) -> dict:
         if link in reasons:
             row["skipped"] = reasons[link]
         rows.append(row)
+    return links, rows, refusal
+
+
+def _llm_estimate(step, calls, *, env, label=None) -> dict:
+    """The LLM steps' estimate (see ``estimate``) of *calls* calls; *label*
+    says how many in the message when that is a range."""
+    links, rows, refusal = _llm_rows(env)
     first = next((row for row in rows if row["keyed"] and "skipped" not in row), None)
     if first is None:
         route_class = "blocked"
@@ -1962,7 +2023,8 @@ def _llm_estimate(step, calls, *, env, label=None) -> dict:
         "link": first["link"] if first else None,
         "links": rows,
         "ready": refusal is None,
-        "message": _estimate_message(rows, calls, refusal, label=label, per_call=per_call),
+        "message": _estimate_message(rows, calls, refusal, label=label, per_call=per_call,
+                                     fallthrough=_paid_fallthrough(links, rows, calls)),
     }
 
 

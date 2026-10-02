@@ -1,7 +1,10 @@
 // What a story step would cost, from GET /api/stories/{id}/estimate/{step}.
-// LLM steps always answer est_usd 0.0 (there is no LLM price table), which
-// reads as "$0.00"; a paid image step needs the extra digit, so a non-zero
-// amount keeps three decimals instead of rounding a sub-cent price away.
+// An LLM step on a free first link answers est_usd 0.0, which reads as
+// "$0.00" (the message says "up to $Z if the free links fail" when a billed
+// link can be reached after it); a billed first link is priced at its worst
+// call from the server's LLM price table (pricing.LLM_PRICES). A paid image
+// step needs the extra digit, so a non-zero amount keeps three decimals
+// instead of rounding a sub-cent price away.
 function formatUsd(value) {
   const amount = Number(value) || 0
   return amount === 0 ? '0.00' : amount.toFixed(3)
