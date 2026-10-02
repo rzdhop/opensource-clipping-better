@@ -976,6 +976,9 @@ const KEY_CHECK_GLYPH = { ok: '✅', bad_key: '✖', no_model: '⚠️', no_key:
  * the first clip bought. This asks each keyed hosted link's provider (fal's
  * pricing, Gemini's models.get) whether the key is accepted and the model
  * live -- free, nothing generated (POST /api/settings/check-video-keys).
+ * For a fal link it also reads the endpoint's public schema for the prompt
+ * limit it publishes (or "not published"); the server keeps what it read and
+ * refuses a longer prompt before sending it. Each row's text carries it.
  */
 function VideoKeyCheck() {
   const [checking, setChecking] = useState(false)
@@ -1001,7 +1004,8 @@ function VideoKeyCheck() {
           {checking ? <><span className="spinner"></span> Asking…</> : 'Ask the providers (free)'}
         </button>
         <span className="form-hint" style={{ margin: 0 }}>
-          Checks each video key and model with the provider itself; nothing is generated or billed.
+          Checks each video key and model with the provider itself, and reads fal's published prompt limit;
+          nothing is generated or billed.
         </span>
       </div>
       {error && <p style={{ marginTop: '8px', fontSize: '13px', color: 'var(--error)' }}>{error}</p>}

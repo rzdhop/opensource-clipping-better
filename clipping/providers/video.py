@@ -35,7 +35,7 @@ from __future__ import annotations
 import time
 import urllib.parse
 
-from . import images, pricing
+from . import images, pricing, prompt_limits
 from .errors import ProviderError
 from .gencache import RequestFailed
 from .generation import VIDEO, GenResult, register_adapter
@@ -357,7 +357,8 @@ def check_key(link, credentials, *, transport=None) -> dict:
     there, **without generating anything** (free; RC-V8 holds)::
 
         {"status": "ok" | "bad_key" | "no_model" | "unreachable" | "failed",
-         "text": sentence, "endpoint": model id asked about, "price": {...} | None}
+         "text": sentence, "endpoint": model id asked about, "price": {...} | None,
+         "prompt_limit": {...} | None}
 
     fal: ``GET /v1/models/pricing?endpoint_id=`` on the Platform API with
     ``Authorization: Key`` (the price comes back with it). Gemini Veo:
@@ -365,8 +366,40 @@ def check_key(link, credentials, *, transport=None) -> dict:
     key and the model, not the billing, which only a paid request shows.
     Through *transport* (default ``urllib_transport``: the key never follows
     a redirect off its origin). Never raises for an answer; ``ValueError``
-    for a link this check does not know."""
+    for a link this check does not know.
+
+    A fal link that answered also has its endpoint's public OpenAPI schema
+    read for the prompt limit it publishes (``prompt_limits.read_fal_schema``,
+    no key sent): ``prompt_limit`` is that read and the sentence ends with
+    it ("· prompt ≤ 2500 chars (fal's schema)", or the limit the app keeps
+    when fal publishes none). Storing it is the caller's
+    (``prompt_limits.record_live``). Veo publishes no schema: None."""
     transport = transport or urllib_transport
+    result = _check_key(link, credentials, transport=transport)
+    result["prompt_limit"] = None
+    if link.provider == "fal" and result["status"] != "unreachable":
+        read = prompt_limits.read_fal_schema(result["endpoint"], transport=transport)
+        result["prompt_limit"] = read
+        result["text"] = f"{result['text'].rstrip('.')} · {_prompt_limit_text(link, read)}"
+    return result
+
+
+def _prompt_limit_text(link, read) -> str:
+    """The key check's words for a schema *read*: what fal publishes, or the
+    limit the app keeps instead (the table's when fal publishes none; the
+    one in force, perhaps an earlier live read, when the schema failed)."""
+    if read["status"] == prompt_limits.PUBLISHED:
+        return read["text"]
+    kept = prompt_limits.table_limit(link) if read["status"] == prompt_limits.NOT_PUBLISHED \
+        else prompt_limits.limit_for(link)
+    if kept is None:
+        return read["text"]
+    origin = "published" if kept.verified else "its own estimate"
+    return f"{read['text']}; the app keeps {prompt_limits.describe_limit(kept)} ({origin})"
+
+
+def _check_key(link, credentials, *, transport) -> dict:
+    """:func:`check_key` without the schema read."""
     label = describe(link)
     if link.provider == "fal":
         endpoint = images.FAL_APPS.get(link.model)

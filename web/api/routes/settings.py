@@ -855,7 +855,7 @@ def _check_video_keys(links, merged) -> list:
     rows = []
     for link in links:
         row = {"label": gen.describe(link), "provider": link.provider, "model": link.model,
-               "status": "skipped", "text": "", "endpoint": None, "price": None}
+               "status": "skipped", "text": "", "endpoint": None, "price": None, "prompt_limit": None}
         missing = gen.missing_keys(link, merged)
         if link.provider == "local":
             row["text"] = "local: no key to check (the chain test asks ComfyUI's /object_info)."
@@ -870,15 +870,36 @@ def _check_video_keys(links, merged) -> list:
     return rows
 
 
+def _store_prompt_limits(rows) -> str:
+    """Keep the prompt limits fal's schemas published (or said they do not)
+    next to the Settings file, where the runner's check reads them
+    (``prompt_limits.record_live``). A schema that could not be read keeps
+    what was there. "" when stored or nothing to store, else why not."""
+    from clipping.providers import prompt_limits
+
+    reads = {row["label"]: row["prompt_limit"] for row in rows
+             if (row.get("prompt_limit") or {}).get("status") in (prompt_limits.PUBLISHED,
+                                                                   prompt_limits.NOT_PUBLISHED)}
+    if not reads:
+        return ""
+    try:
+        prompt_limits.record_live(reads)
+    except OSError as exc:
+        return f" The prompt limits read could not be stored ({type(exc).__name__}: {exc})."
+    return ""
+
+
 @router.post("/api/settings/check-video-keys")
 async def check_video_keys() -> dict:
     """Ask every hosted link of the video chain whether its key is accepted
     and its model is there: one free metadata request per keyed link (fal's
     pricing, Gemini's ``models.get``), nothing generated or billed
-    (``video.check_key``). The chain test itself stays call-free for hosted
-    video (RC-V8). ``{"results": [{label, provider, model, status, text,
-    endpoint, price}], "verdict": "ready" | "blocked", "message"}``; never a
-    key's value. Shares the chain tests' lock: one at a time."""
+    (``video.check_key``); for a fal link, its public schema's prompt limit
+    too, stored for the runner's check (``prompt_limits``). The chain test
+    itself stays call-free for hosted video (RC-V8). ``{"results": [{label,
+    provider, model, status, text, endpoint, price, prompt_limit}],
+    "verdict": "ready" | "blocked", "message"}``; never a key's value.
+    Shares the chain tests' lock: one at a time."""
     from clipping.providers import generation as gen
     from clipping.providers.registry import ChainError
 
@@ -895,13 +916,14 @@ async def check_video_keys() -> dict:
                                           timeout=_CHAIN_TEST_CEILING_SECONDS)
         except asyncio.TimeoutError:
             raise HTTPException(status_code=504, detail="The video key check gave up.")
+        not_stored = await asyncio.to_thread(_store_prompt_limits, rows)
     good = [row["label"] for row in rows if row["status"] == "ok"]
     if good:
         verdict, message = "ready", f"{', '.join(good)} answered: key accepted, model live. Nothing was generated."
     else:
         verdict = "blocked"
         message = "No hosted video link answered with an accepted key; see each row. Nothing was generated."
-    return {"results": rows, "verdict": verdict, "message": message}
+    return {"results": rows, "verdict": verdict, "message": message + not_stored}
 
 
 @router.post("/api/settings/test-generation-chain")

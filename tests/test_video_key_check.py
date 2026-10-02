@@ -42,10 +42,20 @@ class Transport:
         return Response(self.status, {}, body)
 
 
+FAL_SCHEMA = "fal.ai/api/openapi/queue/openapi.json"
+
+
 def _only_a_get(transport, host):
-    assert len(transport.calls) == 1
-    call = transport.calls[0]
-    assert call["method"] == "GET" and call["body"] is None and host in call["url"]
+    """The one keyed request, a GET; a fal check also GETs the endpoint's
+    public schema for its prompt limit (tests/test_prompt_limits_key_check.py),
+    never with the key."""
+    assert all(call["method"] == "GET" and call["body"] is None for call in transport.calls)
+    keyed = [call for call in transport.calls if FAL_SCHEMA not in call["url"]]
+    assert len(keyed) == 1
+    call = keyed[0]
+    assert host in call["url"]
+    for schema in [call for call in transport.calls if FAL_SCHEMA in call["url"]]:
+        assert "Authorization" not in schema["headers"]
     return call
 
 
@@ -151,6 +161,11 @@ def test_the_route_asks_each_keyed_hosted_video_link_and_never_generates(client)
     assert keyed and all(row["status"] in ("ok", "no_model") for row in keyed)
     assert rows["fal/seedance-1-pro-fast"]["status"] == "ok"
     assert data["verdict"] == "ready" and "Nothing was generated" in data["message"]
-    assert all(call["method"] == "GET" and "api.fal.ai" in call["url"] for call in transport.calls)
-    assert len(transport.calls) == len(keyed)
+    # One keyed GET to fal's Platform API per keyed link, and one keyless GET
+    # of its public schema for the prompt limit.
+    assert all(call["method"] == "GET" for call in transport.calls)
+    assert len([call for call in transport.calls if "api.fal.ai" in call["url"]]) == len(keyed)
+    schema_calls = [call for call in transport.calls if "fal.ai/api/openapi" in call["url"]]
+    assert len(schema_calls) == len(keyed) and len(transport.calls) == 2 * len(keyed)
+    assert all("Authorization" not in call["headers"] for call in schema_calls)
     assert "fal-test-key" not in response.text
