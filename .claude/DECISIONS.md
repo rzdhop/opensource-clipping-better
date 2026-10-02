@@ -4108,3 +4108,34 @@ measured (the runner tests' stand-in bytes). No plan stage was added, so no plan
 **Consequence.** Commit `ff7d3ee`. Proven on real ffmpeg 6.1.1 in the cloud container: the tier-1 golden measures
 4.75 s for every WAV and 142 frames and completes. A retry of stage A was not built (a rewrite of the runner's stage
 loop for an unreproduced fault); the user re-renders, and the partial render reuses every cached shot.
+
+## DEC-232 — Phase 7 stage 7: weak hosts are told the billed preset and its price; looks, dossiers and the knowledge base are editable (A18, A19)
+**Context.** DEC-219 asked the app to strongly recommend billed APIs when the host cannot run good models, but the hardware card listed only local models and free hosted chains. Phase 7's writers (D1 dossier, D2/D3/R1v2 looks, the knowledge step) produced documents the dashboard could only read: the Knowledge step was read-and-approve, and Cast and Places showed no look or dossier. The walk found the story page had no budget-profile control (F7), and a route planning 0 clips gave its reason only in a tooltip (F6). The cast and places estimates still said "no LLM price table" after DEC-224 added one.
+**Decision.**
+- `media_policy.preset_estimate(merged=None)` is pure: `pricing.py`, the `quality` profile and `serial_60s_v2`, nothing else.
+  - **An episode:** episode 1's shots (hook + `default_body_count` + cliffhanger, one each) cover `target_s` in equal shots. Each is a clip on the profile's first-in-chain hosted video link at its size, rounded per shot by `video_plan.requested_seconds` (DEC-208), plus one keyframe on the keyframe role's first link.
+  - **Once per story:** 3 characters × (portrait + 2 sheet edits), 2 plates, 3 props on the roles' links.
+  - **Output:** the assumptions are stated in words.
+  - **Today:** 8 shots, 64 s billed × $0.022 + 8 × $0.04 = $1.73 an episode; 14 × $0.04 = $0.56 once per story.
+- `hardware.recommendations_for` puts a billed-preset row first on cpu_only, container_no_gpu and low: the preset, its two numbers, FAL_KEY. It is built when asked, so it never states an old price. `new_story_offer` carries the same `estimate`. Settings' hardware card and the new-story form show them.
+- **Entity edits:** `PATCH` of a character takes `look` and `dossier`; a place or prop takes `look`. They are merged as `personality` is and checked by the schema and against the story's ids. A look may not drop the wardrobe set the ledger seed uses. The edit clears the entity's approval and outdates its prompts like any other edit. A legacy story is refused (409, RC-M3).
+- **Knowledge edits:** `PATCH /api/stories/{id}/knowledge` edits:
+  - the world (merged);
+  - a beat, named by its episode and 1-based position;
+  - the props registry (the whole list);
+  - a ledger-seed entry (merged).
+
+  Each write is checked as the knowledge step's writes are and moves `rev`, so the base must be approved again (DEC-228 part 2). Nothing changed: nothing written. 409 for a legacy story, before the knowledge step, and while a step runs.
+- **Dashboard:**
+  - Cast and Places edit the dossier and the looks (v2 only).
+  - Knowledge edits inline and says "Approve again" when stale.
+  - The Visual tier card gains the budget-profile select (F7) and shows the reason for a 0-clip plan (F6).
+- **Estimate sentences:** they price a billed LLM link a step can fall through to, "up to $Z if the free links fail", from `pricing.LLM_PRICES` (`llm_spend.worst_call_usd`). `est_usd` is unchanged.
+**Consequence.**
+- Legacy stories are unchanged: no field was added to their documents or prompts, and their estimate sentences differ only in the LLM wording.
+- No test was re-pinned. 29 new tests, each fail-first.
+- Full suites: local 6830 passed (plus the container's 2 root-only failures); CI-like 6132 passed / 680 skipped (plus the same 2 and the 14 fastapi-fixture errors).
+- Tier-2 at 375 px passed, 20/20 checks (stage-7 report).
+- Images drawn from an old look are kept until regenerated, as after a descriptor edit.
+- Built in worktree `work/phase7-s7` (`385c98c`, `01ffdcf`, `297cdd4`, `067dafd`) and cherry-picked: `97bcc73`, `aa0331b`, `c24ea85`, `14147e8`. Combined full suites on `14147e8` (this container): local 6843 passed / 1 skipped, CI-like 6145 / 680 skipped, plus the container-only 2 root failures and 14 fastapi-fixture errors.
+- Follow-up: a look edit does not mark the sheets drawn from the old look stale; the dashboard cannot add/remove a relationship or a wardrobe set, nor edit `props_here`/`where_when` (the API can).
