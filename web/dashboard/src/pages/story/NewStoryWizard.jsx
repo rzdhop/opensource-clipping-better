@@ -171,6 +171,10 @@ function CreateStoryForm() {
     if (value === 'v2') setConsistencyMode('references')
   }
   const fullyAnimated = pipeline === 'v2' && budgetProfile === 'quality' && tier >= 2
+  // What the quality preset costs (media_policy.preset_estimate, from the
+  // server's price table; phase 7 stage 7): shown whether or not it is the
+  // default yet, so a missing key is weighed against a price.
+  const estimate = offer && offer.estimate
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -279,7 +283,8 @@ function CreateStoryForm() {
           <div className="form-group">
             {fullyAnimated ? (
               <p className="chip chip-wrap">
-                Fully animated: every shot is a video clip, with quality images (Quality — billed APIs).
+                Fully animated: every shot is a video clip, with quality images (Quality — billed APIs)
+                {estimate ? `: ${estimate.summary}.` : '.'}
               </p>
             ) : (
               <p className="chip chip-warn chip-wrap">
@@ -287,8 +292,12 @@ function CreateStoryForm() {
                   ? `the ${budgetProfile} budget profile does not animate every shot`
                   : 'the legacy pipeline keeps the old shot layout and image links'}.
                 {offer && !offer.quality && offer.missing_keys && offer.missing_keys.length > 0
-                  ? ` Add ${offer.missing_keys.join(', ')} in Settings to start stories fully animated.` : ''}
+                  ? ` Add ${offer.missing_keys.join(', ')} in Settings to start stories fully animated`
+                    + (estimate ? `: ${estimate.summary}.` : '.') : ''}
               </p>
+            )}
+            {estimate && (fullyAnimated || (offer && !offer.quality)) && (
+              <p className="form-hint">{estimate.assumptions}</p>
             )}
             {fullyAnimated && offer && !offer.allow_paid && (
               <p className="form-hint">
@@ -413,6 +422,9 @@ function StoryJobList({ jobs }) {
 function GenerationProfileCard({ storyId, story, nextEp, onChange }) {
   const [tier, setTier] = useState(story.generation_profile.tier)
   const [route, setRoute] = useState(story.generation_profile.route)
+  // Phase 7 stage 7 (browser-check finding F7): the budget profile -- what a
+  // story may buy and how many shots it animates -- is chosen here too.
+  const [budgetProfile, setBudgetProfile] = useState(story.generation_profile.budget_profile)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [routeEstimates, setRouteEstimates] = useState({})
@@ -433,6 +445,7 @@ function GenerationProfileCard({ storyId, story, nextEp, onChange }) {
 
   const handleTier = (value) => { setTier(value); save({ tier: value }) }
   const handleRoute = (value) => { setRoute(value); save({ route: value }) }
+  const handleBudgetProfile = (value) => { setBudgetProfile(value); save({ budget_profile: value }) }
 
   // Every shot a clip: the quality budget profile (animate all_shots) at tier
   // >= 2 on the api route, on the v2 pipeline (the server sets its template and
@@ -447,6 +460,7 @@ function GenerationProfileCard({ storyId, story, nextEp, onChange }) {
     if (canSwitchToV2) Object.assign(patch, { pipeline: 'v2', consistency_mode: 'references' })
     setTier(patch.tier)
     setRoute(patch.route)
+    setBudgetProfile(patch.budget_profile)
     save(patch)
   }
 
@@ -461,7 +475,7 @@ function GenerationProfileCard({ storyId, story, nextEp, onChange }) {
         .catch((err) => { if (!cancelled) setRouteErrors((prev) => ({ ...prev, [r]: err.message })) })
     })
     return () => { cancelled = true }
-  }, [storyId, tier, nextEp])
+  }, [storyId, tier, budgetProfile, nextEp])
 
   return (
     <div className="card story-generation-profile" style={{ marginBottom: '16px' }}>
@@ -501,6 +515,15 @@ function GenerationProfileCard({ storyId, story, nextEp, onChange }) {
           <option value="api">API</option>
         </select>
       </div>
+      <div className="form-group">
+        <label className="form-label">Budget profile</label>
+        <select className="form-select" value={budgetProfile} onChange={(e) => handleBudgetProfile(e.target.value)}
+          disabled={saving}>
+          <option value="free">Free (no clip bought)</option>
+          <option value="one_dollar">$1 / episode (key shots)</option>
+          <option value="quality">Quality (billed APIs) — every shot animated</option>
+        </select>
+      </div>
       <StepError message={error} />
       {tier >= 2 && (
         <div className="story-generation-profile-routes">
@@ -525,7 +548,10 @@ function GenerationProfileCard({ storyId, story, nextEp, onChange }) {
                       ) : ''}
                     </span>
                     {est.video.link && <RouteChip routeClass={est.video.route_class} link={est.video.link} />}
-                    {!est.video.ready && est.video.message && <p className="form-hint">{est.video.message}</p>}
+                    {/* F6: a plan of 0 clips says why (the free profile, every shot kept still,
+                        no link...), not only in the chip's tooltip. */}
+                    {(!est.video.ready || est.video.count === 0) && est.video.message
+                      && <p className="form-hint">{est.video.message}</p>}
                   </>
                 ) : (
                   <span className="chip">estimating…</span>

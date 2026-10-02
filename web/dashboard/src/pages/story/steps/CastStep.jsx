@@ -413,9 +413,114 @@ function UploadsSection({ storyId, character, disabled, onChange }) {
   )
 }
 
+// ------------------------------------------------- look and dossier (v2 stories)
+//
+// Phase 7 stage 7 (A19): what D2 (the look) and D1 (the dossier) wrote, edited
+// field by field. Each save sends one block, `{ look: {...} }` or
+// `{ dossier: {...} }`, merged onto the stored one by the server
+// (workflow.patch_entity), checked by the character schema's word caps (its
+// errors show under the field), and -- like any edit -- clears the
+// character's approval and outdates the shot prompts made from it.
+
+const LOOK_TEXT_FIELDS = [
+  ['build', 'Build'], ['silhouette', 'Silhouette'], ['face', 'Face'], ['hair', 'Hair'],
+  ['skin_material', 'Skin / material'], ['presentation', 'Age & presentation'],
+]
+const DOSSIER_TEXT_FIELDS = [
+  ['backstory', 'Backstory', 3], ['goal', 'Goal', 1], ['need', 'Need', 1], ['fears', 'Fears', 1], ['arc', 'Arc', 2],
+]
+
+function BlockNotWritten({ what }) {
+  return <p className="form-hint">No {what} yet: the Cast step writes it (run it again to fill it).</p>
+}
+
+function LookSection({ storyId, character, disabled, onChange }) {
+  const look = character.look
+  const save = async (patch) => {
+    await patchCharacter(storyId, character.char_id, { look: patch })
+    onChange()
+  }
+  if (!look) return <BlockNotWritten what="look" />
+  const sets = look.wardrobe_sets || []
+  const saveSet = (index, key) => (value) => save({
+    wardrobe_sets: sets.map((set, i) => (i === index ? { ...set, [key]: value } : set)),
+  })
+  return (
+    <>
+      {LOOK_TEXT_FIELDS.map(([key, label]) => (
+        <EditableText key={key} label={label} value={look[key]} disabled={disabled} rows={1}
+          onSave={(value) => save({ [key]: value })} />
+      ))}
+      <EditableText
+        label="Height (cm, on the story's own scale)"
+        value={look.height_cm != null ? String(look.height_cm) : ''}
+        disabled={disabled}
+        rows={1}
+        onSave={(value) => save({ height_cm: /^\d+$/.test(value) ? Number(value) : value })}
+      />
+      <EditableList label="Palette (1–4 colours)" value={look.palette} disabled={disabled}
+        onSave={(value) => save({ palette: value })} />
+      {sets.map((set, index) => (
+        <div key={set.id} className="story-field">
+          <div className="story-field-label">Wardrobe “{set.id}”</div>
+          <EditableText label="When" value={set.context} disabled={disabled} rows={1} onSave={saveSet(index, 'context')} />
+          <EditableText label="Wears" value={set.items} disabled={disabled} rows={2} onSave={saveSet(index, 'items')} />
+        </div>
+      ))}
+      <EditableText
+        label="Season change (empty: none)"
+        value={look.season_change}
+        disabled={disabled}
+        rows={1}
+        emptyText="None."
+        onSave={(value) => save({ season_change: value || null })}
+      />
+    </>
+  )
+}
+
+function DossierSection({ storyId, character, castNames, disabled, onChange }) {
+  const dossier = character.dossier
+  const save = async (patch) => {
+    await patchCharacter(storyId, character.char_id, { dossier: patch })
+    onChange()
+  }
+  if (!dossier) return <BlockNotWritten what="dossier" />
+  const relationships = dossier.relationships || []
+  const voice = dossier.voice || { patterns: '', vocabulary: '', catchphrases: [] }
+  const saveRelationship = (index, key) => (value) => save({
+    relationships: relationships.map((item, i) => (i === index ? { ...item, [key]: value } : item)),
+  })
+  return (
+    <>
+      {DOSSIER_TEXT_FIELDS.map(([key, label, rows]) => (
+        <EditableText key={key} label={label} value={dossier[key]} disabled={disabled} rows={rows}
+          onSave={(value) => save({ [key]: value })} />
+      ))}
+      <EditableList label="Secrets (at most 2)" value={dossier.secrets} disabled={disabled}
+        onSave={(value) => save({ secrets: value })} />
+      {relationships.map((item, index) => (
+        <div key={item.with} className="story-field">
+          <div className="story-field-label">With {castNames[item.with] || item.with}</div>
+          <EditableText label="History" value={item.history} disabled={disabled} rows={2}
+            onSave={saveRelationship(index, 'history')} />
+          <EditableText label="Now" value={item.now} disabled={disabled} rows={1}
+            onSave={saveRelationship(index, 'now')} />
+        </div>
+      ))}
+      <EditableText label="Voice patterns" value={voice.patterns} disabled={disabled} rows={1}
+        onSave={(value) => save({ voice: { ...voice, patterns: value } })} />
+      <EditableText label="Vocabulary" value={voice.vocabulary} disabled={disabled} rows={1}
+        onSave={(value) => save({ voice: { ...voice, vocabulary: value } })} />
+      <EditableList label="Catchphrases (at most 2)" value={voice.catchphrases} disabled={disabled}
+        onSave={(value) => save({ voice: { ...voice, catchphrases: value } })} />
+    </>
+  )
+}
+
 // -------------------------------------------------------------- one character
 
-function CharacterCard({ storyId, character, info, pickVoiceIds, disabled, onChange, consistencyMode }) {
+function CharacterCard({ storyId, character, info, pickVoiceIds, disabled, onChange, consistencyMode, isV2, castNames }) {
   const [approveError, setApproveError] = useState('')
   const [approveErrors, setApproveErrors] = useState(null)
   const [approving, setApproving] = useState(false)
@@ -560,6 +665,20 @@ function CharacterCard({ storyId, character, info, pickVoiceIds, disabled, onCha
         rows={1}
       />
       <RegenerateControl disabled={cardBusy} onRegenerate={regenerateText} />
+
+      {isV2 && (
+        <>
+          <details className="story-profile">
+            <summary>Dossier — backstory, goal, secrets, relationships, voice</summary>
+            <DossierSection storyId={storyId} character={character} castNames={castNames} disabled={cardBusy}
+              onChange={onChange} />
+          </details>
+          <details className="story-profile">
+            <summary>Look — build, face, height, palette, wardrobe</summary>
+            <LookSection storyId={storyId} character={character} disabled={cardBusy} onChange={onChange} />
+          </details>
+        </>
+      )}
 
       <VoiceSection
         storyId={storyId}
@@ -717,6 +836,9 @@ export default function CastStep({ data, storyId, inFlightJob, onChange }) {
   const needsEditor = Object.values(charProgress).some((info) => info.needs_editor)
   const anyMissing = Object.values(charProgress).some((info) => (info.missing || []).length > 0)
   const pickVoiceIds = progress.pick_voice || []
+  // Only a v2 story has a dossier and a look (clipping.aistory.defaults.PIPELINE_V2).
+  const isV2 = story.generation_profile.pipeline === 'v2'
+  const castNames = Object.fromEntries(characters.map((c) => [c.char_id, c.name]))
 
   return (
     <div className="story-step-body">
@@ -746,6 +868,8 @@ export default function CastStep({ data, storyId, inFlightJob, onChange }) {
             disabled={busy}
             onChange={onChange}
             consistencyMode={consistencyMode}
+            isV2={isV2}
+            castNames={castNames}
           />
         ))}
       </div>

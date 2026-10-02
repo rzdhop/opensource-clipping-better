@@ -32,9 +32,11 @@ export function StepError({ message, errors, className }) {
  * A read/edit toggle for one plain-text story field. `onSave(value)` is
  * called with the new text; it is expected to call `patchStory` and re-throw
  * on failure so the error can be shown next to the field it belongs to,
- * rather than only at the top of the page.
+ * rather than only at the top of the page. `emptyText` is what an empty
+ * value reads as (default "Not written yet."; e.g. "Nothing there." for a
+ * layout side left empty on purpose).
  */
-export function EditableText({ label, value, placeholder, rows = 3, onSave, disabled }) {
+export function EditableText({ label, value, placeholder, rows = 3, onSave, disabled, emptyText = 'Not written yet.' }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(value || '')
   const [saving, setSaving] = useState(false)
@@ -45,7 +47,7 @@ export function EditableText({ label, value, placeholder, rows = 3, onSave, disa
     return (
       <div className="story-field">
         {label && <div className="story-field-label">{label}</div>}
-        <p className="story-field-value">{value ? value : <em>Not written yet.</em>}</p>
+        <p className="story-field-value">{value ? value : <em>{emptyText}</em>}</p>
         {!disabled && (
           <button
             type="button"

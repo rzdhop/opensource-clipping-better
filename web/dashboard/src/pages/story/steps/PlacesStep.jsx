@@ -17,6 +17,11 @@ const TIME_VARIANT_CHOICES = ['day', 'night', 'dusk', 'rain', 'dawn']
 // .schemas.PROPOSAL_MAX_ITEMS.
 const PROPOSAL_MAX_ITEMS = 6
 
+// A place look's layout map, one side each (clipping.aistory.schemas
+// .LAYOUT_MAP_KEYS; an empty side is "nothing there").
+const LAYOUT_MAP_KEYS = ['left', 'right', 'back', 'foreground', 'centre']
+const PROP_LOOK_TEXT_FIELDS = [['material', 'Material'], ['colour', 'Colour'], ['scale_phrase', 'Size, in words']]
+
 // -------------------------------------------------------------- consistency
 
 /** "base" (drawn without references, by design) is not worth a chip; a
@@ -305,9 +310,87 @@ function VariantSlot({ storyId, place, variantKey, imageRef, dayReady, textMissi
   )
 }
 
+// ------------------------------------------------- looks (v2 stories)
+//
+// Phase 7 stage 7 (A19): what D3 (a place's look) and R1v2 (a prop's look)
+// wrote, edited field by field. Each save sends `{ look: {...} }`, merged onto
+// the stored look by the server (workflow.patch_entity) and checked by the
+// schema; like any edit it clears the approval and outdates the shot prompts
+// made from the place or prop.
+
+function NoLookYet() {
+  return <p className="form-hint">No look yet: the Places step writes it (run it again to fill it).</p>
+}
+
+function PlaceLookSection({ storyId, place, propNames, disabled, onChange }) {
+  const look = place.look
+  const save = async (patch) => {
+    await patchPlace(storyId, place.place_id, { look: patch })
+    onChange()
+  }
+  if (!look) return <NoLookYet />
+  const layout = look.layout_map
+  const lighting = look.lighting || {}
+  const saveLight = (variant) => (value) => {
+    const next = { ...lighting }
+    if (value) next[variant] = value
+    else delete next[variant]
+    return save({ lighting: next })
+  }
+  return (
+    <>
+      <div className="story-field-label">Layout map</div>
+      {LAYOUT_MAP_KEYS.map((side) => (
+        <EditableText key={side} label={side} value={layout[side]} disabled={disabled} rows={1}
+          emptyText="Nothing there." onSave={(value) => save({ layout_map: { ...layout, [side]: value } })} />
+      ))}
+      <EditableText label="Scale" value={look.scale_note} disabled={disabled} rows={1}
+        onSave={(value) => save({ scale_note: value })} />
+      <div className="story-field-label">Light, per time variant</div>
+      {Object.keys(place.time_variants).map((variant) => (
+        <EditableText key={variant} label={variant} value={lighting[variant]} disabled={disabled} rows={1}
+          onSave={saveLight(variant)} />
+      ))}
+      {look.props_here.length > 0 && (
+        <p className="form-hint">Props that live here: {look.props_here.map((id) => propNames[id] || id).join(', ')}</p>
+      )}
+    </>
+  )
+}
+
+function PropLookSection({ storyId, prop, names, disabled, onChange }) {
+  const look = prop.look
+  const save = async (patch) => {
+    await patchProp(storyId, prop.prop_id, { look: patch })
+    onChange()
+  }
+  if (!look) return <NoLookYet />
+  return (
+    <>
+      <EditableText label="Real size (cm)" value={look.scale_cm != null ? String(look.scale_cm) : ''}
+        disabled={disabled} rows={1}
+        onSave={(value) => save({ scale_cm: /^\d+(\.\d+)?$/.test(value) ? Number(value) : value })} />
+      {PROP_LOOK_TEXT_FIELDS.map(([key, label]) => (
+        <EditableText key={key} label={label} value={look[key]} disabled={disabled} rows={1}
+          onSave={(value) => save({ [key]: value })} />
+      ))}
+      {look.where_when.length > 0 && (
+        <ul className="story-field-list">
+          {look.where_when.map((entry, i) => (
+            <li key={i}>
+              Ep {entry.ep}{entry.holder_char_id ? ` · held by ${names[entry.holder_char_id] || entry.holder_char_id}` : ''}
+              {entry.place_id ? ` · at ${names[entry.place_id] || entry.place_id}` : ''} · {entry.note}
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
+  )
+}
+
 // -------------------------------------------------------------- one place
 
-function PlaceCard({ storyId, place, missing, disabled, onChange, consistencyMode }) {
+function PlaceCard({ storyId, place, missing, disabled, onChange, consistencyMode, isV2, names }) {
   const [approveError, setApproveError] = useState('')
   const [approveErrors, setApproveErrors] = useState(null)
   const [approving, setApproving] = useState(false)
@@ -452,6 +535,12 @@ function PlaceCard({ storyId, place, missing, disabled, onChange, consistencyMod
         rows={2}
       />
       <RegenerateControl disabled={cardBusy} onRegenerate={regenerateText} />
+      {isV2 && (
+        <details className="story-profile">
+          <summary>Look — layout map, scale, light per variant</summary>
+          <PlaceLookSection storyId={storyId} place={place} propNames={names} disabled={cardBusy} onChange={onChange} />
+        </details>
+      )}
 
       <div className="story-step-actions">
         <button
@@ -528,7 +617,7 @@ function PropImage({ storyId, prop, disabled, onChange }) {
   )
 }
 
-function PropCard({ storyId, prop, characters, disabled, onChange }) {
+function PropCard({ storyId, prop, characters, disabled, onChange, isV2, names }) {
   const [approveError, setApproveError] = useState('')
   const [approveErrors, setApproveErrors] = useState(null)
   const [approving, setApproving] = useState(false)
@@ -618,6 +707,12 @@ function PropCard({ storyId, prop, characters, disabled, onChange }) {
         <EditableText value={prop.descriptor} onSave={saveDescriptor} disabled={cardBusy} rows={2} />
       </div>
       <RegenerateControl disabled={cardBusy} onRegenerate={regenerateText} />
+      {isV2 && (
+        <details className="story-profile">
+          <summary>Look — real size, material, colour</summary>
+          <PropLookSection storyId={storyId} prop={prop} names={names} disabled={cardBusy} onChange={onChange} />
+        </details>
+      )}
 
       <div className="story-step-actions">
         <button
@@ -771,6 +866,13 @@ export default function PlacesStep({ data, storyId, inFlightJob, onChange }) {
   const needsEditor = referencesMode && Boolean(readiness) && readiness.ready === false
   const anyMissing = Object.values(placeProgress).some((info) => (info.missing || []).length > 0)
     || Object.values(propProgress).some((info) => (info.missing || []).length > 0)
+  // Only a v2 story has looks (clipping.aistory.defaults.PIPELINE_V2).
+  const isV2 = story.generation_profile.pipeline === 'v2'
+  const names = Object.fromEntries([
+    ...(characters || []).map((c) => [c.char_id, c.name]),
+    ...places.map((p) => [p.place_id, p.name]),
+    ...props.map((p) => [p.prop_id, p.name]),
+  ])
 
   return (
     <div className="story-step-body">
@@ -797,6 +899,8 @@ export default function PlacesStep({ data, storyId, inFlightJob, onChange }) {
                 disabled={busy}
                 onChange={onChange}
                 consistencyMode={consistencyMode}
+                isV2={isV2}
+                names={names}
               />
             ))}
           </div>
@@ -815,6 +919,8 @@ export default function PlacesStep({ data, storyId, inFlightJob, onChange }) {
                 characters={characters}
                 disabled={busy}
                 onChange={onChange}
+                isV2={isV2}
+                names={names}
               />
             ))}
           </div>

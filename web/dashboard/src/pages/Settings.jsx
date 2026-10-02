@@ -1108,9 +1108,18 @@ const Row = ({ label, value }) => (
   </div>
 )
 
-/** What this machine can generate locally (GET /api/hardware, spec 8.2). */
+/**
+ * What this machine can generate locally (GET /api/hardware, spec 8.2). On a
+ * host that cannot run a good image or video model (no GPU, or under 8 GB:
+ * hardware.BILLED_PRESET_PROFILES) the first recommendation is the billed
+ * Quality preset (phase 7 stage 7, A18): its row carries the preset's
+ * estimate (media_policy.preset_estimate, priced from pricing.py) and the
+ * keys it needs, and is shown first, apart from the local models.
+ */
 function HardwarePanel({ hardware, loading, error, onRefresh }) {
-  const rows = hardware?.recommendations || []
+  const recommendations = hardware?.recommendations || []
+  const advice = recommendations.filter((r) => r.estimate)
+  const rows = recommendations.filter((r) => !r.estimate)
   return (
     <div className="settings-section">
       <h3>🖥️ Local hardware</h3>
@@ -1135,6 +1144,22 @@ function HardwarePanel({ hardware, loading, error, onRefresh }) {
               Probe errors: {hardware.errors.join(' · ')}
             </p>
           )}
+          {advice.map((r, index) => (
+            <div
+              key={`advice-${index}`}
+              style={{ margin: '14px 0 0', padding: '10px 12px', border: '1px solid var(--warning)',
+                borderRadius: '8px', fontSize: '13px' }}
+            >
+              <div><strong>💳 Recommended: {r.model}</strong></div>
+              <p style={{ margin: '6px 0', wordBreak: 'break-word' }}>{r.install_hint}</p>
+              <p className="form-hint" style={{ wordBreak: 'break-word' }}>{r.estimate.assumptions}</p>
+              {r.keys?.length > 0 && (
+                <p className="form-hint" style={{ wordBreak: 'break-word' }}>
+                  Keys: {r.keys.join(', ')} (Generation tab). Paid calls also need “Allow paid providers” (Budget tab).
+                </p>
+              )}
+            </div>
+          ))}
           <h4 style={{ margin: '14px 0 6px', fontSize: '13px' }}>Recommended locally</h4>
           <div style={{ fontSize: '13px' }}>
             {rows.map((r, index) => (

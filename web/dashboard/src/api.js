@@ -685,6 +685,23 @@ export async function patchProp(storyId, propId, payload) {
   return res.json()
 }
 
+/**
+ * Edit a v2 story's knowledge base inline (phase 7 stage 7): `world` (merged),
+ * `beats` ([{ep, beat, ...}], a beat by episode and 1-based position),
+ * `props_registry` (the whole list), `ledger_seed` (merged per character).
+ * Any write moves `rev`, so an approved base must be approved again. Answers
+ * knowledge.json as written.
+ */
+export async function patchKnowledge(storyId, payload) {
+  const res = await request(`/stories/${storyId}/knowledge`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) throw await apiError(res, 'Failed to update the knowledge base')
+  return res.json()
+}
+
 /** Delete a place (its folder, its id from the story); 409 while a step is in flight. */
 export async function deletePlace(storyId, placeId) {
   const res = await request(`/stories/${storyId}/places/${placeId}`, { method: 'DELETE' })
