@@ -29,6 +29,11 @@ Response = namedtuple("Response", "status headers body")
 
 DEFAULT_TIMEOUT = 120.0
 
+# The app's name for a request built outside request_json (stt's upload):
+# Cloudflare in front of Groq bans urllib's default "Python-urllib/3.x" with
+# 403 "error code: 1010", whatever the key.
+USER_AGENT = "rzdhop-ai (+https://github.com/rzdhop/opensource-clipping-better)"
+
 
 class HttpStatusError(Exception):
     """A 4xx/5xx answer. ``status_code`` is what the classifier reads."""

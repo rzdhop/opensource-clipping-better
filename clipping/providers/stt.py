@@ -269,6 +269,8 @@ def _post_multipart(url, api_key, file_path, fields):
         headers={
             "Authorization": f"Bearer {api_key}",
             "Content-Type": f"multipart/form-data; boundary={boundary}",
+            # Not urllib's default: Groq's Cloudflare answers it 403 "error code: 1010".
+            "User-Agent": transport.USER_AGENT,
         },
         method="POST",
     )
