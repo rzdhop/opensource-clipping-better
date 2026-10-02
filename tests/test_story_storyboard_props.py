@@ -67,6 +67,7 @@ def _v2_script_with_new_prop(store):
     rising = e1["scenes"][(["s00"] + eps.ALL_SCENES).index("s03")]
     assert rising["props"] == []  # the base fixture's s03 (rising) has no prop
     rising["props"] = [f"%{NEW_PROP_ID}"]
+    # Phase 7 stage 6a (DEC-230/231), re-pinned on purpose: the v2 fixture (no repeated line, J1 answered).
     llm = eps._script_llm(v2=True, E1=[e1], E3=[eps.E3_EP2], E4=[eps.E4_PASSED])
     eps._run(eps._new().script, store, story_id, llm=llm, ep=2)
 

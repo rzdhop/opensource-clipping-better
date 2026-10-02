@@ -189,6 +189,8 @@ def test_a_v2_episode_s_e2_call_receives_the_scene_slice(store):
                          "voice": {"patterns": "Court.", "vocabulary": "Mielleux.", "catchphrases": ["Moi ? Jamais."]},
                          "arc": "Du mensonge à l'aveu."}
     store.write_entity(story_id, "characters", copy.deepcopy(kiwilo), now=eps.NOW)
+    # Phase 7 stage 6a (DEC-230/231), re-pinned on purpose: a v2 script's replies may not repeat a line, and
+    # J1 judges the script -- the v2 fixture (its own lines per scene, J1's default answer).
     llm = eps._script_llm(v2=True)
 
     eps._run(eps._new().script, store, story_id, llm=llm)

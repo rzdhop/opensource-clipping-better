@@ -1024,6 +1024,8 @@ def test_a_v2_entry_gets_a_ledger_and_a_legacy_one_does_not(m, wf, store):
     assert "ledger" not in legacy_entry
 
     story_id = eps._ready_story(store, v2=True)
+    # Phase 7 stage 6a (DEC-230/231), re-pinned on purpose: the v2 fixture (lines of each scene's own, J1's
+    # default answer, inside the window), which approve_script now needs.
     eps._run(eps._new().script, store, story_id, llm=eps._script_llm(v2=True, E4=[eps.E4_PASSED]))
     wf.approve_script(store, story_id, 1, now=NOW)
     script = store.read_episode_doc(story_id, 1, "script.json")

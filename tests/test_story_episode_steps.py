@@ -1557,6 +1557,7 @@ def _continuity_story(store, *, entries=((1, EP1_ENTRY),), chosen=1, v2=False):
     story_id = _ready_story(store, v2=v2)
     # Episode 1's script, at the revision the entries record (1): the gate needs its memory fresh (plan 11
     # stage 4). Episode 1 is legacy-shaped even on a v2 story (new_objects is offered from episode 2 on).
+    # Phase 7 stage 6a (DEC-230/231), re-pinned on purpose: a v2 story's replies are the v2 fixture's.
     _run(_new().script, store, story_id, llm=_script_llm(v2=v2))
     season = store.read_doc(story_id, "season.json")
     for ep, entry in entries:
@@ -1637,6 +1638,7 @@ def test_a_v2_script_turns_new_objects_into_a_prop_stub_in_prop_ids(store):
     rising = e1["scenes"][(["s00"] + ALL_SCENES).index("s03")]
     assert rising["props"] == []  # the base fixture's s03 (rising) has no prop
     rising["props"] = ["%prop_giant_toaster"]
+    # Phase 7 stage 6a (DEC-230/231), re-pinned on purpose: the v2 fixture (no repeated line, J1 answered).
     llm = _script_llm(v2=True, E1=[e1], E3=[E3_EP2], E4=[E4_PASSED])
 
     assert "prop_giant_toaster" not in store.get(story_id)["prop_ids"]
