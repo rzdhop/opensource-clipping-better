@@ -230,3 +230,166 @@ def test_guard_outside_ambience_mode_the_quality_profile_still_buys_the_first_li
     assert video["link"] == SEEDANCE and "ambience" not in video
     if tier == 3:
         assert "rendered as at tier 2" in video["message"]  # A-108's opt-in sentence, as it was
+
+
+# ================================================= the audio brief (prompt)
+#
+# An ambience story's clip prompt says what the shot sounds like -- the
+# place's ambience, the shot's sound effects -- and that nobody is heard: Veo
+# takes no negative prompt (A-103), so the prompt ends on "no music, no
+# voices, nobody speaks or sings, no narration". A character who talks is
+# still shown (its TTS line plays over the shot), speaking silently. All of
+# it inside one word budget, never appended past it.
+
+CLOSING = "no music, no voices, nobody speaks or sings, no narration."
+VISUAL = ("The mango: leans across the table and says \"Give it back\" while pointing at the phone. The cylinder "
+          "reacts with a small natural movement. Slow push-in toward the subject. The set, the lighting and every "
+          "character's look stay exactly as in the first frame. Smooth cartoon motion.")
+
+
+def test_the_audio_brief_says_the_places_ambience_the_shots_effects_and_that_no_one_is_heard():
+    from clipping.aistory import prompting
+
+    prompt = prompting.clip_prompt_with_audio(
+        VISUAL, place="a cramped kitchen with checkered tiles (night, rain against the window)",
+        sfx=["door slam", "heartbeat"], speakers=["the mango"])
+
+    assert prompt.startswith("The mango: leans across the table")
+    assert "Sound: the natural ambience of a cramped kitchen with checkered tiles (night, rain against the window)." \
+        in prompt
+    assert "Sound effects: door slam, heartbeat." in prompt
+    assert "The mango speaks silently: their words are not heard." in prompt
+    assert prompt.endswith(CLOSING)
+    # The words are never asked for: the quote is gone, the verb made silent.
+    assert "Give it back" not in prompt and '"' not in prompt and "says silently" in prompt
+    assert len(prompt.split()) <= prompting.CLIP_AUDIO_MAX_WORDS <= 140
+
+
+def test_the_audio_brief_fits_the_budget_however_long_the_visual_and_the_place_are():
+    """The closing and the silence are never cut; a long visual is cut at a
+    clause boundary to leave the sound its room; the place is cut to what is
+    left; no sound effect, no speaker: those sentences are simply absent."""
+    from clipping.aistory import prompting
+
+    long_visual = ", ".join(f"the mango turns slowly toward window number {i}" for i in range(40)) + "."
+    long_place = ", ".join(f"shelf {i} full of jars" for i in range(30))
+    prompt = prompting.clip_prompt_with_audio(long_visual, place=long_place, sfx=[], speakers=[],
+                                              note="Make it snappier")
+    assert len(prompt.split()) <= prompting.CLIP_AUDIO_MAX_WORDS
+    assert prompt.endswith(CLOSING) and "Make it snappier." in prompt
+    assert "Sound: the natural ambience of shelf 0 full of jars" in prompt
+    assert "Sound effects" not in prompt and "silently" not in prompt
+
+    two = prompting.clip_prompt_with_audio("Two fruits argue by the pool.", place="a pool", sfx=["splash"],
+                                           speakers=["the mango", "the cylinder"])
+    assert "The mango and the cylinder speak silently: their words are not heard." in two
+
+
+@pytest.mark.parametrize("text,expected", [
+    ('The mango says "Give it back" and points.', "The mango says silently and points."),
+    ("The cylinder whispers to the mango, then shouts.", "The cylinder whispers silently to the mango, then shouts "
+                                                          "silently."),
+    ("They talk while the music plays.", "They talk silently while the music plays."),
+    ("The mango speaks silently.", "The mango speaks silently."),
+    ("The mango turns away.", "The mango turns away."),
+])
+def test_speech_in_the_visual_is_made_silent(text, expected):
+    from clipping.aistory import prompting
+
+    assert prompting.silent_speech(text) == expected
+
+
+def test_build_video_prompt_puts_the_brief_inside_the_clip_prompt_and_nothing_else_moves():
+    """``video_plan.build_video_prompt`` with an audio brief: the v2 shot's
+    stored clip prompt, the note, then the sound -- the speech cue of the
+    opt-in is never added; without a brief, the prompt is today's."""
+    from clipping.aistory import prompting, video_plan
+
+    style = {"motion_rules": {"tier2_prompt_suffix": "Smooth cartoon motion."}, "negative_prompt": "blurry"}
+    shot = {"shot_id": "sh01", "camera_motion": "push_in", "modifiers": [], "action": "x", "video_prompt": VISUAL,
+            "negative_prompt": ""}
+    audio = {"place": "a pool (day)", "sfx": ["splash"], "speakers": ["the mango"]}
+    prompt, negative = video_plan.build_video_prompt(shot, style, tier=3, note="Slower", audio=audio)
+    assert prompt == prompting.clip_prompt_with_audio(VISUAL, note="Slower", **audio)
+    assert "The character says" not in prompt and negative == video_plan.build_video_prompt(shot, style, tier=3)[1]
+    assert video_plan.build_video_prompt(shot, style, tier=3, note="Slower") == (
+        f"{VISUAL[:-1]}. Slower", negative)
+    with pytest.raises(ValueError):
+        video_plan.build_video_prompt(shot, style, tier=3, lines=("Hello",), audio=audio)
+    with pytest.raises(ValueError):
+        video_plan.build_video_prompt(shot, style, tier=2, audio=audio)
+
+
+def _board_shot(store, story_id, scene_id):
+    return next(shot for shot in tas._board(store, story_id)["shots"] if shot["scene_id"] == scene_id)
+
+
+def test_an_ambience_storys_clip_request_carries_its_shots_sound_brief_and_asks_for_sound(store, tmp_path):
+    """Fail-first. ``clips.clip_request_parts`` on a v2 tier-3 quality story:
+    the shot's place (its descriptor and time of day), its scene's sound
+    effects (a cue at the scene's start on the shot holding its first line,
+    a cue at a line on the shot holding that line), its speakers in frame
+    made silent, the closing; ``native_audio`` asked (a link whose sound is
+    optional makes it); a ``keep_native_audio`` pin never voices the lines
+    (the lines stay TTS); the hash moves with the brief."""
+    from clipping.aistory import shots as shots_mod
+    from clipping.aistory.steps import clips
+    import test_story_episode_steps as eps
+
+    story_id = _story(store, tmp_path)
+    ec = tas._ec(store, story_id)
+    script = eps._script(store, story_id)
+    scene = next(scene for scene in script["scenes"] if scene["sfx_cues"])
+    shot = _board_shot(store, story_id, scene["scene_id"])
+    place = ec.entities["places"][scene["place_id"]]
+    flags = {"keep_still": False, "animate": False, "keep_native_audio": True}
+
+    parts = clips.clip_request_parts(ec, shot, script, tier=3, flags=flags)
+    prompt = parts["prompt"]
+    sound = prompt.split("Sound:", 1)[1].lower()
+    assert f"ambience of {place['descriptor'].lower()} ({scene['time_variant'].replace('_', ' ')})" in sound
+    # The fixture's cues are a stinger and a crowd's gasp: never asked of a clip ("no music, no voices").
+    cues = {cue["cue"]: cue["at"] for cue in scene["sfx_cues"]}
+    assert set(cues) <= clips.CLIP_SFX_EXCLUDED and "Sound effects" not in prompt
+    from clipping.aistory import schemas
+    assert clips.CLIP_SFX_EXCLUDED <= {cue for pack in schemas.SFX_PACKS.values() for cue in pack}
+    scene["sfx_cues"] = [{"at": at, "cue": "door_slam" if cue == "dramatic_sting" else "heartbeat"}
+                         for cue, at in cues.items()]
+    with_effects = clips.clip_request_parts(ec, shot, script, tier=3, flags=flags)["prompt"]
+    for cue in scene["sfx_cues"]:
+        at = cue["at"]
+        expected = (at == "start" and shot["lines"][:1] == [scene["lines"][0]["line_id"]]) or at in shot["lines"]
+        assert (cue["cue"].replace("_", " ") in with_effects) is expected, (cue, shot["lines"])
+    assert "Sound effects:" in with_effects
+    handles = shots_mod.character_handles(ec.entities["characters"])
+    speaking = {line["speaker"] for line in scene["lines"] if line["line_id"] in shot["lines"]}
+    tagged = {tag[1:].split(":")[0] for tag in shot["subject_tags"] if tag.startswith("@")}
+    assert speaking & tagged
+    for char_id in speaking & tagged:
+        assert handles[char_id].lower() in sound and "silently: their words are not heard" in sound
+    assert prompt.endswith(CLOSING) and "The character says" not in prompt
+    assert parts["native_audio"] is True
+    assert parts["hash"] == clips.clip_prompt_hash(prompt, parts["negative"], native_audio=True)
+
+
+def test_guard_outside_ambience_mode_the_clip_request_is_todays(store, tmp_path):
+    """Tier 2 (and a legacy tier-3 story's opt-in): no brief, the prompt the
+    parent commit built, ``native_audio`` only for the opt-in's pin."""
+    from clipping.aistory import video_plan
+    from clipping.aistory.steps import clips
+    import test_story_episode_steps as eps
+
+    story_id = _story(store, tmp_path, tier=2)
+    ec = tas._ec(store, story_id)
+    script = eps._script(store, story_id)
+    shot = next(shot for shot in tas._board(store, story_id)["shots"] if shot["lines"])
+    flags = {"keep_still": False, "animate": False, "keep_native_audio": True}
+    parts = clips.clip_request_parts(ec, shot, script, tier=2, flags=flags)
+    assert parts["prompt"] == video_plan.build_video_prompt(shot, ec.style_lock, tier=2)[0]
+    assert parts["native_audio"] is False and "Sound:" not in parts["prompt"]
+
+    legacy = _story(store, tmp_path, tier=3, v2=False)
+    ec = tas._ec(store, legacy)
+    parts = clips.clip_request_parts(ec, shot, eps._script(store, legacy), tier=3, flags=flags)
+    assert parts["native_audio"] is True and "The character says" in parts["prompt"] and "Sound:" not in \
+        parts["prompt"]

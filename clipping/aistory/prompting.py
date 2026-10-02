@@ -675,3 +675,84 @@ def layered_clip_prompt(style_lock: dict, *, subject: str, motion: str, camera_p
         moving = f"{subject}: {moving}"
     lead = as_sentence(_fit(moving, room, stops=",;.") if _word_count(moving) > room else moving)
     return _collapse_ws(" ".join(part for part in [lead] + tail if part))
+
+
+# ============================================ phase 7 follow-up, stage E (a clip's sound)
+#
+# An ambience story's clip (``media_policy.ambience``: the video model's own
+# sound kept as ambience under the dialogue, never as dialogue) is asked what
+# its shot sounds like, inside its prompt's own word budget: the visual
+# prompt, the place's ambience, the shot's sound effects, who speaks
+# silently, and a closing sentence that says what must not be heard -- Veo
+# 3.1 lite takes no negative prompt (A-103), so the exclusions are said in
+# the prompt. A talking character is still shown (its TTS line plays over the
+# shot): the prompt never asks the model to voice words.
+
+# The whole prompt's cap: the visual's own (``CLIP_V2_MAX_WORDS``, 80) plus the
+# sound's, well under Veo's 1024 tokens (A-103).
+CLIP_AUDIO_MAX_WORDS = 140
+# The most the place's ambience and the sound effects take, and the least the
+# visual leaves the ambience when it must be cut.
+AMBIENCE_MAX_WORDS = 26
+SFX_MAX_WORDS = 14
+_AMBIENCE_MIN_WORDS = 10
+AMBIENCE_HEAD = "Sound: the natural ambience of"
+AUDIO_CLOSING = "Audio: ambience and sound effects only; no music, no voices, nobody speaks or sings, no narration."
+
+# The verbs of speech made silent in a clip's visual text (:func:`silent_speech`).
+_SPEECH_VERBS = re.compile(
+    r"\b(say|says|said|speak|speaks|spoke|speaking|talk|talks|talked|talking|whisper|whispers|whispered|"
+    r"whispering|shout|shouts|shouted|shouting|yell|yells|yelled|yelling|scream|screams|screamed|screaming|"
+    r"mutter|mutters|muttered|muttering|murmur|murmurs|murmured|murmuring|exclaim|exclaims|exclaimed|sing|sings|"
+    r"sang|singing|ask|asks|asked|asking|reply|replies|replied|replying|answer|answers|answered|answering)\b"
+    r"(?!\s+silently)", re.IGNORECASE)
+# Quoted words a model would voice: "...", “...”, «...».
+_QUOTED = re.compile(r"\s*(?:\"[^\"]*\"|“[^”]*”|«[^»]*»)")
+
+
+def silent_speech(text: str) -> str:
+    """*text* with nothing a video model would voice: every quotation left
+    out and every verb of speech followed by "silently" ("says silently",
+    "whispers silently to ..."). The mouths may move -- the TTS line plays
+    over the shot -- but no word is asked for."""
+    text = _QUOTED.sub("", text)
+    text = _SPEECH_VERBS.sub(lambda match: f"{match.group(1)} silently", text)
+    return _collapse_ws(text).replace(" ,", ",").replace(" .", ".")
+
+
+def _silent_speakers(speakers) -> str:
+    """Who speaks in the shot, made silent: one sentence, or ''."""
+    who = [speaker for speaker in dict.fromkeys(speakers) if speaker]
+    if not who:
+        return ""
+    names = who[0] if len(who) == 1 else ", ".join(who[:-1]) + " and " + who[-1]
+    return as_sentence(f"{names} {'speaks' if len(who) == 1 else 'speak'} silently: their words are not heard")
+
+
+def clip_prompt_with_audio(visual: str, *, place: str, sfx=(), speakers=(), note: str = "") -> str:
+    """An ambience clip's prompt, at most :data:`CLIP_AUDIO_MAX_WORDS`
+    words: the *visual* prompt with its speech made silent
+    (:func:`silent_speech`), the *note* (a re-animate's direction), the
+    natural ambience of *place* (its words, time of day and light: the
+    model hears room tone, weather, crowd, traffic or nature from them),
+    "Sound effects:" *sfx*, *speakers* speaking silently, then
+    :data:`AUDIO_CLOSING`. The closing and the silence are never cut; the
+    visual is cut at a clause boundary only when it would leave the
+    ambience under its least; the place and the effects are cut to what is
+    left (at most :data:`AMBIENCE_MAX_WORDS` and :data:`SFX_MAX_WORDS`)."""
+    silent = _silent_speakers(speakers)
+    note_text = as_sentence(note) if note else ""
+    room = CLIP_AUDIO_MAX_WORDS - _word_count(silent) - _word_count(AUDIO_CLOSING) - _word_count(note_text)
+    lead = silent_speech(visual)
+    head = _word_count(AMBIENCE_HEAD)
+    if _word_count(lead) > room - head - _AMBIENCE_MIN_WORDS:
+        lead = _fit(lead, room - head - _AMBIENCE_MIN_WORDS)
+    lead = as_sentence(lead)
+    room -= _word_count(lead)
+    ambience = _fit(place, min(room - head, AMBIENCE_MAX_WORDS))
+    ambience = as_sentence(f"{AMBIENCE_HEAD} {ambience}") if ambience else ""
+    room -= _word_count(ambience)
+    effects = _fit(", ".join(str(cue) for cue in sfx if cue), min(room - 2, SFX_MAX_WORDS)) if sfx else ""
+    effects = as_sentence(f"Sound effects: {effects}") if effects else ""
+    parts = [lead, note_text, ambience, effects, silent, AUDIO_CLOSING]
+    return _collapse_ws(" ".join(part for part in parts if part))

@@ -95,9 +95,19 @@ def build_video_prompt(
     tier: int,
     lines: Sequence[str] = (),
     note: str | None = None,
+    audio: Mapping | None = None,
 ) -> tuple[str, str]:
     """The (prompt, negative) pair an image-to-video adapter is called with
     for one shot.
+
+    *audio* (phase 7 follow-up, stage E: an ambience story,
+    ``media_policy.ambience``; tier 3 only) is the shot's sound brief --
+    ``{"place", "sfx", "speakers"}`` -- and the prompt is then
+    ``prompting.clip_prompt_with_audio`` of the visual part below and the
+    note: what the shot sounds like, inside the clip prompt's own word cap,
+    no word voiced. It never takes *lines* (``ValueError``): such a clip's
+    sound is heard under the shot's TTS lines, never in place of them.
+    Without it, everything below is as it was.
 
     A shot whose ``video_prompt`` is a non-empty string (a v2 shot, phase 7
     stage 3b: ``prompting.layered_clip_prompt``, written at resolve time)
@@ -133,6 +143,8 @@ def build_video_prompt(
     """
     if tier not in (2, 3):
         raise ValueError(f"tier must be 2 or 3, got {tier!r}")
+    if audio is not None and (tier != 3 or lines):
+        raise ValueError("a clip's sound brief is a tier-3 ambience clip's, which never voices a line")
 
     camera_motion = shot["camera_motion"]
     if camera_motion not in CAMERA_PHRASES:
@@ -157,10 +169,13 @@ def build_video_prompt(
         if speech:
             parts.append(f'The character says: "{speech}"')
 
-    if note:
-        parts.append(note)
-
-    prompt = _join_sentences(parts)
+    if audio is not None:
+        prompt = prompting.clip_prompt_with_audio(_join_sentences(parts), note=note or "", place=audio["place"],
+                                                  sfx=audio.get("sfx") or (), speakers=audio.get("speakers") or ())
+    else:
+        if note:
+            parts.append(note)
+        prompt = _join_sentences(parts)
 
     shot_negative = shot.get("negative_prompt") or ""
     base_negative = shot_negative if shot_negative.strip() else style_lock.get("negative_prompt", "")

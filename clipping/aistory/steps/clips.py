@@ -59,6 +59,7 @@ from clipping.providers import video as video_providers
 from clipping.providers.registry import ChainError, describe
 
 from .. import hardware, imaging, media_policy, schemas, video_plan
+from .. import shots as shots_mod
 from . import sticky_link
 
 CLIPS_KIND = "clips"
@@ -216,21 +217,82 @@ def clip_prompt_hash(prompt, negative, *, native_audio=False, resolution="720p")
     return _canonical_sha256(payload)
 
 
+# The cues of ``schemas.SFX_PACKS`` a clip is never asked for (stage E): a
+# stinger or a transition whoosh is not a sound of the place (and reads as
+# music), a crowd's gasp is voices -- each would contradict the prompt's "no
+# music, no voices". They stay the shipped sound's alone, at their anchors.
+CLIP_SFX_EXCLUDED = frozenset({"dramatic_sting", "record_scratch", "slide_whistle", "twinkle", "whoosh_sharp",
+                               "whoosh_soft", "gasp_crowd"})
+
+
+def audio_brief(ec, shot, script) -> dict:
+    """What an ambience story's *shot* should sound like (stage E;
+    ``video_plan.build_video_prompt``'s *audio*)::
+
+        {"place": "<its place's descriptor> (<time of day>, <its light>)",
+         "sfx": ["door slam", ...], "speakers": [handle, ...]}
+
+    The sound effects are its scene's cues (``sfx_cues``) that fall in the
+    shot: a cue at a line the shot holds, and a cue at the scene's start on
+    the shot holding the scene's first line (every shot of a scene with no
+    line) -- a shot alone does not say whether it is its scene's first, so
+    an establishing shot before the first line leaves it to the next; the
+    shipped sound still plays at its exact anchor -- but never one of
+    :data:`CLIP_SFX_EXCLUDED`. The speakers are the
+    shot's lines' characters that are in its frame (``subject_tags``), by
+    their handles, never a name (spec 2.3)."""
+    scene = next((item for item in script["scenes"] if item["scene_id"] == shot["scene_id"]), None) or {}
+    entities = getattr(ec, "entities", None) or {}
+    place = (entities.get("places") or {}).get(scene.get("place_id")) or {}
+    variant = scene.get("time_variant") or ""
+    light = ((place.get("look") or {}).get("lighting") or {}).get(variant) or ""
+    when = ", ".join(part.strip().rstrip(".") for part in (variant.replace("_", " "), light) if part.strip())
+    where = shots_mod._lower_first((place.get("descriptor") or "the place").strip().rstrip("."))
+    lines = scene.get("lines") or []
+    first = shot["lines"][:1] == [lines[0]["line_id"]] if lines else True
+    sfx = [cue["cue"].replace("_", " ") for cue in scene.get("sfx_cues") or ()
+           if ((cue["at"] == "start" and first) or cue["at"] in shot["lines"]) and cue["cue"] not in CLIP_SFX_EXCLUDED]
+    in_frame = set()
+    for tag in shot.get("subject_tags") or ():
+        try:
+            kind, entity_id, _variant = shots_mod.parse_tag(tag)
+        except ValueError:
+            continue
+        if kind == "char":
+            in_frame.add(entity_id)
+    characters = entities.get("characters") or {}
+    handles = shots_mod.character_handles(characters) if characters else {}
+    speakers = [handles[line["speaker"]] for line in lines
+                if line["line_id"] in shot["lines"] and line["speaker"] in in_frame and line["speaker"] in handles]
+    return {"place": f"{where} ({when})" if when else where, "sfx": list(dict.fromkeys(sfx)),
+            "speakers": list(dict.fromkeys(speakers))}
+
+
 def clip_request_parts(ec, shot, script, *, tier, flags, note=None) -> dict:
     """``{prompt, negative, native_audio, hash}`` of *shot*'s clip request
     now (``video_plan.build_video_prompt``): at tier 3 a shot that keeps its
     native audio (``keep_native_audio``) also says its lines; otherwise the
-    model's sound is discarded and the prompt carries none (DEC-201)."""
-    native = tier == 3 and bool(flags.get("keep_native_audio"))
+    model's sound is discarded and the prompt carries none (DEC-201).
+
+    An ambience story (stage E, ``media_policy.ambience``) asks every clip
+    for its sound (``native_audio``: a link whose sound is optional makes
+    it) with the shot's sound brief in its prompt (:func:`audio_brief`) and
+    never voices a line: ``keep_native_audio`` is not read -- every line is
+    heard in its pinned TTS voice."""
+    story = getattr(ec, "story", None)
+    ambient = tier == 3 and media_policy.ambience(story)
+    native = tier == 3 and bool(flags.get("keep_native_audio")) and not ambient
     lines = ()
     if native:
         texts = {line["line_id"]: line["text"] for scene in script["scenes"] for line in scene["lines"]}
         lines = [texts[line_id] for line_id in shot["lines"] if line_id in texts]
     prompt, negative = video_plan.build_video_prompt(shot, ec.style_lock, tier=tier if tier in (2, 3) else 2,
-                                                     lines=lines, note=note)
-    resolution = media_policy.video_resolution(getattr(ec, "story", None))
-    return {"prompt": prompt, "negative": negative, "native_audio": native,
-            "hash": clip_prompt_hash(prompt, negative, native_audio=native, resolution=resolution)}
+                                                     lines=lines, note=note,
+                                                     audio=audio_brief(ec, shot, script) if ambient else None)
+    resolution = media_policy.video_resolution(story)
+    asked = native or ambient
+    return {"prompt": prompt, "negative": negative, "native_audio": asked,
+            "hash": clip_prompt_hash(prompt, negative, native_audio=asked, resolution=resolution)}
 
 
 def clip_state(ec, shot, script, *, link, tier, flags, image_sha) -> str:
