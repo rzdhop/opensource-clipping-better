@@ -3200,6 +3200,33 @@ _EPISODE_LINKS_SCHEMA = _document({}, optional={"image": _EPISODE_LINK_SCHEMA, "
 SHOT_OVERRIDE_FLAGS = ("keep_still", "animate", "keep_native_audio")
 _EPISODE_ASSETS_SHOT_SCHEMA = _document({}, optional={flag: {"type": "boolean"} for flag in SHOT_OVERRIDE_FLAGS})
 
+# Phase 7 stage 6b (A16, DEC-230): a v2 episode's keyframe judge (J2), one
+# vision verdict per shot, keyed by shot id: does the keyframe show the
+# shot's beat, what it misses, and what changed from the previous shot's
+# keyframe that should not have. A verdict is current while the shot's
+# keyframe (``image_sha256``) and the previous shot's (``previous_sha256``,
+# null for the first shot) are the images it saw.
+KEYFRAME_MISSING_MAX = 3
+_EPISODE_ASSETS_KEYFRAME_VERDICT_SCHEMA = _document({
+    "image_sha256": _SHA256,
+    "previous_sha256": _or_null(_SHA256),
+    "shows_beat": {"type": "boolean"},
+    "missing": {"type": "array", "items": _text(120), "maxItems": KEYFRAME_MISSING_MAX},
+    "continuity_issue": {"type": ["string", "null"], "minLength": 1, "maxLength": 300},
+    "link": _text(160),
+    "checked_at": _NON_EMPTY_STRING,
+})
+
+# The keyframe approval (phase 7 stage 6b, DEC-230): when, whether it went
+# over a failed or missing verdict ("anyway"), and the fingerprint of the
+# keyframes it approved -- once the current fingerprint differs, the
+# approval is stale (derived, never cleared: DEC-155's rule).
+_EPISODE_ASSETS_KEYFRAMES_APPROVED_SCHEMA = _document({
+    "at": _NON_EMPTY_STRING,
+    "anyway": {"type": "boolean"},
+    "fingerprint": _SHA256,
+})
+
 EPISODE_ASSETS_SCHEMA = _document({
     "$schema": {"type": "string", "const": EPISODE_ASSETS_SCHEMA_NAME},
     "ep": _EP,
@@ -3214,6 +3241,10 @@ EPISODE_ASSETS_SCHEMA = _document({
     "links": _EPISODE_LINKS_SCHEMA,
     # keyed by shot id -> _EPISODE_ASSETS_SHOT_SCHEMA, checked in episode_assets_errors.
     "shots": {"type": "object"},
+    # Phase 7 stage 6b (DEC-230), a v2 episode's own: keyed by shot id ->
+    # _EPISODE_ASSETS_KEYFRAME_VERDICT_SCHEMA, checked in episode_assets_errors.
+    "keyframe_verdicts": {"type": "object"},
+    "keyframes_approved": _EPISODE_ASSETS_KEYFRAMES_APPROVED_SCHEMA,
 })
 
 
@@ -3224,8 +3255,9 @@ def episode_assets_errors(doc) -> list:
     the words were aligned, an SFX
     cue's file there exactly when it resolved, the BGM weights keyed by
     emotions with the dominant one the heaviest, a track's file, sha256
-    and licence recorded together, and the per-shot overrides (phase 6
-    stage 7) keyed by shot ids, none empty."""
+    and licence recorded together, the per-shot overrides (phase 6
+    stage 7) keyed by shot ids, none empty, and the keyframe verdicts (phase
+    7 stage 6b) keyed by shot ids."""
     errors = validate(doc, EPISODE_ASSETS_SCHEMA)
     if errors:
         return errors
@@ -3258,6 +3290,13 @@ def episode_assets_errors(doc) -> list:
             errors.extend(found)
         elif not entry:
             errors.append(f"{path}: an override names at least one of {', '.join(SHOT_OVERRIDE_FLAGS)}")
+
+    for key, entry in (doc.get("keyframe_verdicts") or {}).items():
+        path = f"$.keyframe_verdicts.{key}"
+        if not (isinstance(key, str) and _search(SHOT_ID_PATTERN, key)):
+            errors.append(f"$.keyframe_verdicts: {key!r} is not a shot id")
+            continue
+        errors.extend(validate(entry, _EPISODE_ASSETS_KEYFRAME_VERDICT_SCHEMA, path))
 
     for i, cue in enumerate(doc["sfx"]):
         if (cue["state"] == "resolved") != (cue["file"] is not None):

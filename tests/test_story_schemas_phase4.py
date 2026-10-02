@@ -278,6 +278,42 @@ def test_a_broken_episode_assets_document_names_its_rule(label):
     assert _has(errors, *keywords), errors
 
 
+def _verdict(**changes):
+    verdict = {"image_sha256": SHA_A, "previous_sha256": None, "shows_beat": True, "missing": [],
+               "continuity_issue": None, "link": "gemini/flash-lite", "checked_at": NOW}
+    verdict.update(changes)
+    return verdict
+
+
+def test_the_keyframe_keys_are_optional_and_checked_when_present():
+    """Phase 7 stage 6b (DEC-230): a v2 episode's keyframe verdicts (J2) and
+    its keyframe approval are optional keys -- every assets.json written
+    before them validates unchanged; present, each is checked."""
+    doc = _assets()
+    assert "keyframe_verdicts" not in doc and "keyframes_approved" not in doc
+    assert schemas.episode_assets_errors(doc) == []
+    judged = _assets(keyframe_verdicts={
+        "sh01": _verdict(),
+        "sh02": _verdict(previous_sha256=SHA_A, image_sha256=SHA_B, shows_beat=False,
+                         missing=["the coconut phone"], continuity_issue="Kiwilo's suit turned blue.")},
+        keyframes_approved={"at": NOW, "anyway": True, "fingerprint": SHA_C})
+    assert schemas.episode_assets_errors(judged) == []
+    breaks = {
+        "a verdict key not a shot id": (dict(keyframe_verdicts={"shot1": _verdict()}), "'shot1' is not a shot id"),
+        "a verdict without its image": (dict(keyframe_verdicts={"sh01": {
+            k: v for k, v in _verdict().items() if k != "image_sha256"}}), "image_sha256"),
+        "too many missing items": (dict(keyframe_verdicts={"sh01": _verdict(missing=["a", "b", "c", "d"])}),
+                                   "maxItems 3"),
+        "an extra verdict key": (dict(keyframe_verdicts={"sh01": _verdict(score=1)}), "additional property"),
+        "an approval without anyway": (dict(keyframes_approved={"at": NOW, "fingerprint": SHA_C}), "anyway"),
+        "an approval's fingerprint not a sha256": (dict(keyframes_approved={"at": NOW, "anyway": False,
+                                                                            "fingerprint": "abc"}), "does not match"),
+    }
+    for label, (changes, keyword) in breaks.items():
+        errors = schemas.episode_assets_errors(_assets(**changes))
+        assert any(keyword in error for error in errors), (label, errors)
+
+
 # ================================================================ render_manifest_v1
 
 def _stage(sid, kind, state="done", *, cache_key=None, output=None):
