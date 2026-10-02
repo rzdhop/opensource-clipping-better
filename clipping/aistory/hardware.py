@@ -32,6 +32,8 @@ from clipping.providers.local_comfyui import ComfyUIClient
 from clipping.providers.local_ollama import OllamaClient
 from clipping.providers.transport import APIConnectionError, APITimeoutError
 
+from . import media_policy
+
 PROFILES = ("cpu_only", "low", "mid", "high", "pro", "apple_mps", "container_no_gpu")
 GIB = 1024 ** 3
 COMMAND_TIMEOUT_SECONDS = 10
@@ -261,9 +263,34 @@ RECOMMENDATIONS = {
     "apple_mps": [r for r in _CPU_ROWS if r["task"] != "images"] + _APPLE_ROWS,
 }
 
+# The hosts that cannot run a good image or video model locally (no GPU, or
+# under 8 GB): their advice starts with the billed preset (phase 7 stage 7,
+# A18; DEC-219: "strongly recommend billed APIs" rather than falling through
+# to free links without a word).
+BILLED_PRESET_PROFILES = ("cpu_only", "container_no_gpu", "low")
 
-def recommendations_for(profile: str) -> list:
-    return [dict(row) for row in RECOMMENDATIONS.get(profile, _CPU_ROWS)]
+
+def billed_preset_row(env=None) -> dict:
+    """The first recommendation of a :data:`BILLED_PRESET_PROFILES` host: the
+    Quality (billed APIs) preset, what it costs (``media_policy.
+    preset_estimate``, computed now from ``pricing.py``, so the advice never
+    states an old price) and the keys it needs (``media_policy.
+    QUALITY_KEYS``). *env* is the merged Settings (for VIDEO_CHAIN)."""
+    estimate = media_policy.preset_estimate(env)
+    keys = list(media_policy.QUALITY_KEYS)
+    hint = (f"No good local image or video model on this host. Recommended: the {estimate['label']} preset, "
+            f"{estimate['summary']}. Add {', '.join(keys)} in Settings.")
+    return {"task": "billed APIs", "model": f"{estimate['label']} preset", "install_hint": hint,
+            "workflow": None, "keys": keys, "estimate": estimate}
+
+
+def recommendations_for(profile: str, env=None) -> list:
+    """What to run on a *profile* host: the billed preset first on a weak one
+    (:func:`billed_preset_row`), then the local models it can run."""
+    rows = [dict(row) for row in RECOMMENDATIONS.get(profile, _CPU_ROWS)]
+    if profile in BILLED_PRESET_PROFILES:
+        rows.insert(0, billed_preset_row(env))
+    return rows
 
 
 def profile_from_system_stats(stats: dict, *, in_container: bool = False):
@@ -485,7 +512,7 @@ def probe(*, run=None, read_file=None, platform=None, importer=None, container=N
     profile.ollama = {"reachable": bool(ok), "note": note, "url": ollama_url, "models": list(models or [])}
 
     profile.profile = classify(profile.vram_gb, profile.backend, profile.in_container)
-    profile.recommendations = recommendations_for(profile.profile)
+    profile.recommendations = recommendations_for(profile.profile, env)
     profile.probed_at = datetime.now(timezone.utc).isoformat()
     return profile
 

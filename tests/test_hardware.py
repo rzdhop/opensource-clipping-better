@@ -196,6 +196,37 @@ def test_every_profile_has_recommendations_whose_workflows_it_can_run(name):
         assert any("Piper" in r["model"] or "Kokoro" in r["model"] for r in rows)
 
 
+# The hosts that cannot run a good image or video model (phase 7, A18).
+WEAK_PROFILES = ("cpu_only", "container_no_gpu", "low")
+
+
+def test_weak_hosts_recommend_billed_preset_with_cost_and_keys():
+    """Phase 7 stage 7 (A18, DEC-219: "if the machine cannot run good image,
+    text or video generation, the app should strongly recommend billed
+    APIs"): a weak host's advice comes first and names the Quality (billed
+    APIs) preset, what it costs an episode and once per story -- the numbers
+    of ``media_policy.preset_estimate``, so they follow ``pricing.py`` -- and
+    the keys it needs (FAL_KEY only, DEC-235). A host that runs local models
+    gets no such row."""
+    from clipping.aistory import media_policy
+
+    estimate = media_policy.preset_estimate()
+    for name in WEAK_PROFILES:
+        advice = recommendations_for(name)[0]
+        text = advice["install_hint"]
+        assert text.startswith("No good local image or video model on this host."), (name, text)
+        assert "Recommended: the Quality (billed APIs) preset" in text
+        assert (f"≈ ${estimate['episode_usd']:.2f} an episode ({estimate['episode']['shots']} shots animated)"
+                in text), text
+        assert f"≈ ${estimate['story_usd']:.2f} once per story for sheets, plates and props" in text, text
+        assert "Add FAL_KEY" in text and "GEMINI_PAID_API_KEY" not in text
+        assert advice["keys"] == list(media_policy.QUALITY_KEYS) == ["FAL_KEY"]
+        assert advice["estimate"] == estimate and not advice.get("workflow")
+        assert advice["task"] != "video", "the local video rows keep their own checks (test_comfyui_video)"
+    for name in set(PROFILES) - set(WEAK_PROFILES):
+        assert not any("estimate" in row for row in recommendations_for(name)), name
+
+
 def test_the_profile_serialises_for_the_api():
     profile = probe(run=Runner({}), read_file=files(meminfo=fixture("meminfo_vps.txt")), platform="linux",
                     importer=lambda name: None, container=False, disk_free_gb=lambda: 80.0,

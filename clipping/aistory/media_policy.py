@@ -16,6 +16,10 @@ and the run alike -- asks :func:`role_chain`, so the two always agree
 (RC-V6), and the episode's sticky image link (DEC-204, ``steps/sticky_link``)
 is chosen from and pinned within the chain built here.
 
+What the Quality (billed APIs) preset costs (:func:`preset_estimate`, phase 7
+stage 7) is computed here too, from the price table, the quality profile and
+the v2 episode template, for the weak-host advice and the new-story form.
+
 Stdlib only (DEC-012).
 """
 
@@ -24,9 +28,11 @@ from __future__ import annotations
 from clipping.providers import budget as budget_mod
 from clipping.providers import gating
 from clipping.providers import generation as gen
+from clipping.providers import pricing
+from clipping.providers import video as video_providers
 from clipping.providers.registry import ChainError, describe
 
-from . import defaults
+from . import defaults, templates, video_plan
 
 ROLES = budget_mod.PROFILE_ROLES  # ("sheet", "plate", "prop", "keyframe")
 
@@ -189,14 +195,17 @@ def new_story_profile(settings_env):
 def new_story_offer(settings_env) -> dict:
     """What the new-story form starts from (``GET /api/stories/new-profile``)::
 
-        {"profile", "quality": bool, "missing_keys": [name, ...], "allow_paid": bool}
+        {"profile", "quality": bool, "missing_keys": [name, ...], "allow_paid": bool,
+         "estimate": <preset_estimate>}
 
     ``profile`` is the one a story created now without a profile gets
     (:func:`new_story_profile`, else the store defaults); ``quality`` whether
     the quality preset -- v2, every shot animated -- is that default,
     ``missing_keys`` the :data:`QUALITY_KEYS` still unset, ``allow_paid``
-    whether paid calls may run at all (without it no clip is ever bought).
-    Never a key's value. Calls nothing."""
+    whether paid calls may run at all (without it no clip is ever bought),
+    ``estimate`` what the preset costs (:func:`preset_estimate`, phase 7
+    stage 7: the numbers the weak-host advice says too), whether or not it
+    is the default yet. Never a key's value. Calls nothing."""
     merged = gating.merged_env(settings_env)
     try:
         allow_paid = bool(gating.budget_of(merged).allow_paid)
@@ -208,6 +217,151 @@ def new_story_offer(settings_env) -> dict:
         "quality": profile is not None,
         "missing_keys": [name for name in QUALITY_KEYS if not (merged.get(name) or "").strip()],
         "allow_paid": allow_paid,
+        "estimate": preset_estimate(merged),
+    }
+
+
+# ------------------------------------------------------ the preset's price
+
+# What a story's one-off images are counted on (DEC-235's count, the plan's
+# acceptance walk): a cast of three, two places with one master plate each,
+# three props. A story's own numbers come from its cast and places estimates;
+# this is the preset's price before any story exists.
+PRESET_STORY_CHARACTERS = 3
+PRESET_STORY_PLACES = 2
+PRESET_STORY_PROPS = 3
+# A character's sheets: the portrait (text to image), then the turnaround and
+# the expressions sheet, each an edit of it (refimages.CHARACTER_IMAGES).
+_SHEET_EDITS = 2
+
+
+def _preset_video_link(merged):
+    """The link the quality profile's ``video_link_policy`` (``first_in_chain``)
+    buys clips on: the first hosted link of *merged*'s VIDEO_CHAIN with an
+    adapter's table of clip lengths and a price per second -- as
+    ``steps/clips.hosted_rows`` qualifies one, keys aside (the advice is what
+    to add). A chain that cannot be read or holds no such link: the shipped
+    default chain's."""
+    def first(chain):
+        for link in chain:
+            label = describe(link)
+            if (link.provider == "local" or label in video_providers.REFUSED_LINKS
+                    or label not in video_providers.CLIP_LENGTHS):
+                continue
+            try:
+                price = pricing.price_for(link)
+            except pricing.PriceUnknown:
+                continue
+            if price.unit == "second":
+                return link
+        return None
+
+    try:
+        found = first(gen.chain_from_env(gen.VIDEO, merged or {}))
+    except ChainError:
+        found = None
+    return found or first(gen.parse_generation_chain(gen.VIDEO, gen.DEFAULT_CHAINS[gen.VIDEO]))
+
+
+def _usd(amount) -> str:
+    return f"${amount:.2f}"
+
+
+def preset_estimate(merged=None) -> dict:
+    """What the Quality (billed APIs) preset costs (phase 7 stage 7, A18),
+    from the price table (``pricing.py``), the quality budget profile and the
+    v2 episode template alone, so it can never drift from them::
+
+        {"profile", "label", "episode_usd", "story_usd", "keys": [...],
+         "summary": "≈ $X an episode (N shots animated) plus ≈ $Y once per story ...",
+         "assumptions": sentence,
+         "episode": {"shots", "seconds", "billed_seconds", "video_link", "resolution",
+                     "price_per_second", "video_usd", "keyframe_link", "keyframe_usd", "keyframes_usd"},
+         "story": {"characters", "places", "props", "images", "sheet_links", "plate_link",
+                   "prop_link", "sheets_usd", "plates_usd", "props_usd"},
+         "prices_as_of"}
+
+    An episode (episode 1: the hook, the template's default body scenes and
+    the cliffhanger, one shot each as T1 v2 plans them) covers the
+    template's target length in equal shots; each is a clip on the profile's
+    video link (:func:`_preset_video_link`, *merged*'s VIDEO_CHAIN) at the
+    profile's size, rounded up to a length the link sells exactly as the
+    planner rounds it (``video_plan.requested_seconds``, DEC-208), plus one
+    keyframe on the keyframe role's first link. Once per story: each
+    character's portrait on the sheet role's text-to-image link and its two
+    sheets on the edit link, a master plate per place, an image per prop
+    (:data:`PRESET_STORY_CHARACTERS` & co.). Calls nothing; never reads a
+    key's value."""
+    profile = defaults.quality_generation_profile()
+    settings = budget_mod.profile_settings(profile["budget_profile"])
+    story_doc = {"generation_profile": profile}
+    template = templates.load_episode_template(defaults.EPISODE_TEMPLATE_ID_V2)
+
+    def first_link(role, kind):
+        return role_chain(role, kind, merged or {}, story_doc)[0]
+
+    def price(link, resolution=None):
+        return float(pricing.price_for(link, resolution).usd)
+
+    # --- an episode
+    slots = template["slots"]
+    shots = sum(slot["count"][0] for name, slot in slots.items() if name not in ("recap", "body"))
+    shots += template["default_body_count"]
+    seconds = template["target_s"]
+    video_link = _preset_video_link(merged)
+    resolution = settings.get("video_resolution") or pricing.DEFAULT_RESOLUTION
+    per_second = price(video_link, resolution)
+    billed = shots * video_plan.requested_seconds(describe(video_link), seconds / shots)
+    keyframe_link = first_link("keyframe", gen.IMAGE_EDIT)
+    keyframe_usd = price(keyframe_link)
+    video_usd = billed * per_second
+    keyframes_usd = shots * keyframe_usd
+    episode_usd = video_usd + keyframes_usd
+
+    # --- once per story
+    portrait_link, sheet_edit_link = first_link("sheet", gen.IMAGE), first_link("sheet", gen.IMAGE_EDIT)
+    plate_link, prop_link = first_link("plate", gen.IMAGE), first_link("prop", gen.IMAGE)
+    sheets_usd = PRESET_STORY_CHARACTERS * (price(portrait_link) + _SHEET_EDITS * price(sheet_edit_link))
+    plates_usd = PRESET_STORY_PLACES * price(plate_link)
+    props_usd = PRESET_STORY_PROPS * price(prop_link)
+    story_usd = sheets_usd + plates_usd + props_usd
+    images = PRESET_STORY_CHARACTERS * (1 + _SHEET_EDITS) + PRESET_STORY_PLACES + PRESET_STORY_PROPS
+
+    label = settings.get("label") or profile["budget_profile"]
+    video_label = describe(video_link)
+    summary = (f"≈ {_usd(episode_usd)} an episode ({shots} shots animated) plus ≈ {_usd(story_usd)} once per "
+               "story for sheets, plates and props")
+    assumptions = (
+        f"An episode: {shots} shots over the v2 template's {seconds:g} s target, each a {video_label} clip at "
+        f"{resolution} rounded up to whole seconds ({billed} s billed at ${per_second:g} a second = "
+        f"{_usd(video_usd)}) and a keyframe on {describe(keyframe_link)} (${keyframe_usd:g} each = "
+        f"{_usd(keyframes_usd)}). Once per story: {PRESET_STORY_CHARACTERS} characters × {1 + _SHEET_EDITS} "
+        f"sheets, {PRESET_STORY_PLACES} plates and {PRESET_STORY_PROPS} props ({images} images on "
+        f"{' and '.join(dict.fromkeys(map(describe, (portrait_link, sheet_edit_link, plate_link, prop_link))))}"
+        f" = {_usd(story_usd)}). Prices from the table of "
+        f"{pricing.PRICES_AS_OF}. Writing is not counted: the story's writing chain tries its free links first.")
+    return {
+        "profile": profile["budget_profile"],
+        "label": label,
+        "episode_usd": round(episode_usd, 4),
+        "story_usd": round(story_usd, 4),
+        "keys": list(QUALITY_KEYS),
+        "summary": summary,
+        "assumptions": assumptions,
+        "episode": {
+            "shots": shots, "seconds": seconds, "billed_seconds": billed, "video_link": video_label,
+            "resolution": resolution, "price_per_second": per_second, "video_usd": round(video_usd, 4),
+            "keyframe_link": describe(keyframe_link), "keyframe_usd": keyframe_usd,
+            "keyframes_usd": round(keyframes_usd, 4),
+        },
+        "story": {
+            "characters": PRESET_STORY_CHARACTERS, "places": PRESET_STORY_PLACES, "props": PRESET_STORY_PROPS,
+            "images": images, "sheet_links": [describe(portrait_link), describe(sheet_edit_link)],
+            "plate_link": describe(plate_link), "prop_link": describe(prop_link),
+            "sheets_usd": round(sheets_usd, 4), "plates_usd": round(plates_usd, 4),
+            "props_usd": round(props_usd, 4),
+        },
+        "prices_as_of": pricing.PRICES_AS_OF,
     }
 
 
