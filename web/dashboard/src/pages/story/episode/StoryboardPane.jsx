@@ -1326,6 +1326,103 @@ function VideoPhaseHeader({ storyId, ep, episode, busy, onChange }) {
   )
 }
 
+/**
+ * A v2 episode's keyframe approval (phase 7 stage 6b, DEC-230): each shot's
+ * keyframe check (J2, `assets.doc.keyframe_verdicts` -- does the keyframe
+ * show the beat, what it misses, what changed from the previous shot), then
+ * the approval no clip is bought before (RC-Q3; `workflow.approve_keyframes`,
+ * `episode.assets.keyframes`: approval none | current | stale). A refusal
+ * shows the server's sentence and offers "Approve anyway", which goes over a
+ * failed or missing check, never over a missing keyframe. Null on a legacy
+ * episode (no `keyframes` in the payload).
+ */
+function ApproveKeyframes({ storyId, ep, episode, busy, onChange }) {
+  const [approving, setApproving] = useState(false)
+  const [error, setError] = useState('')
+  const [errors, setErrors] = useState(null)
+
+  const assets = episode.assets
+  if (!assets || !assets.doc || !assets.keyframes) return null
+
+  const keyframes = assets.keyframes
+  const approval = keyframes.approval
+  const approved = approval === 'current'
+  const verdicts = assets.doc.keyframe_verdicts || {}
+  const reason = busy ? 'A step is running.' : null
+
+  const handleApprove = async (anyway) => {
+    setApproving(true)
+    setError('')
+    setErrors(null)
+    try {
+      await approveStoryDoc(storyId, keyframes.target, anyway ? { approve_anyway: true } : undefined)
+      onChange()
+    } catch (err) {
+      setError(err.message)
+      setErrors(err.errors || null)
+    } finally {
+      setApproving(false)
+    }
+  }
+
+  return (
+    <div className="card story-keyframes-approve">
+      <h3 className="card-title">Keyframes</h3>
+      <p className="form-hint">
+        No clip is bought until the keyframes are approved: check each one shows its beat.
+      </p>
+      <div className="story-keyframe-verdicts">
+        {assets.shots.map((assetShot) => {
+          const verdict = verdicts[assetShot.shot_id]
+          let text = 'not checked yet (the assets step checks it, free)'
+          let chipClass = 'chip'
+          if (verdict) {
+            const issues = (verdict.missing || []).map((item) => `missing ${item}`)
+            if (verdict.continuity_issue) issues.push(verdict.continuity_issue)
+            const head = verdict.shows_beat ? 'shows its beat' : 'does not show its beat'
+            text = issues.length ? `${head}: ${issues.join('; ')}` : head
+            chipClass = verdict.shows_beat && !issues.length ? 'chip chip-accent' : 'chip chip-warn chip-wrap'
+          }
+          return (
+            <div key={assetShot.shot_id} className="story-step-actions" style={{ marginBottom: '6px' }}>
+              <span className="chip">{assetShot.shot_id}</span>
+              <span className={chipClass}>{text}</span>
+            </div>
+          )
+        })}
+      </div>
+      <div className="story-step-actions">
+        <button
+          type="button"
+          className="btn btn-primary"
+          onClick={() => handleApprove(false)}
+          disabled={approved || Boolean(reason) || approving}
+          title={reason || undefined}
+        >
+          {approving ? 'Approving…' : approved ? 'Keyframes approved' : 'Approve keyframes'}
+        </button>
+        {error && !approved && (
+          <button type="button" className="btn btn-secondary" onClick={() => handleApprove(true)}
+            disabled={Boolean(reason) || approving}>
+            Approve anyway
+          </button>
+        )}
+        <span className={`chip${approved ? ' chip-accent' : approval === 'stale' ? ' chip-warn' : ''}`}>
+          keyframes: {approval}{approved && keyframes.anyway ? ' (anyway)' : ''}
+        </span>
+        {reason && <span className="form-hint">{reason}</span>}
+      </div>
+      {keyframes.approved_at && (
+        <p className="form-hint">
+          {approved ? 'Approved' : 'Approved previously (a keyframe changed since)'}{' '}
+          {new Date(keyframes.approved_at).toLocaleString()}.
+        </p>
+      )}
+      <StepError message={error} errors={errors} className="story-step-error" />
+    </div>
+  )
+}
+
 /** The assets approve button: the fingerprint state (none | current | stale)
  * and, on a refusal, exactly what is still missing -- the server's own
  * sentence (`workflow.approve_assets`) names every shot or line and its
@@ -1458,6 +1555,7 @@ export default function StoryboardPane({ episode, characters, places, props, sto
 
           <AssetsHeader storyId={storyId} ep={ep} episode={episode} busy={busy} onChange={onChange} />
           <ImageOfferBanner storyId={storyId} ep={ep} episode={episode} busy={busy} onChange={onChange} />
+          <ApproveKeyframes storyId={storyId} ep={ep} episode={episode} busy={busy} onChange={onChange} />
           <VideoPhaseHeader storyId={storyId} ep={ep} episode={episode} busy={busy} onChange={onChange} />
           <ApproveAssets storyId={storyId} ep={ep} episode={episode} busy={busy} onChange={onChange} />
         </>
