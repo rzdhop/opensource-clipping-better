@@ -84,10 +84,14 @@ def quality_generation_profile() -> dict:
     """The profile a new story gets when the quality keys are set (phase 7,
     the human's answer: "tier 2 + the quality preset when the keys are
     present"): the v2 pipeline on the Quality (billed APIs) budget profile,
-    hosted links, reference images. ``StoryStore.create``'s own default
-    stays :func:`default_generation_profile`."""
+    hosted links, reference images. Tier 3 since the phase 7 follow-up
+    (stage E, the human's choice of 2026-10-02: every clip brings its own
+    ambience and sound effects): the quality profile keeps a clip's sound
+    as ambience under the dialogue, never in place of it
+    (``media_policy.ambience``). ``StoryStore.create``'s own default stays
+    :func:`default_generation_profile`."""
     return {
-        "tier": 2,
+        "tier": 3,
         "route": "api",
         "consistency_mode": "references",
         "budget_profile": "quality",

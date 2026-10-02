@@ -79,6 +79,10 @@ _KIND_EXCLUDES = {gen.IMAGE: EDIT_ONLY_LINKS, gen.IMAGE_EDIT: TEXT_ONLY_LINKS}
 # for nano-banana (DEC-222) but is no longer required to pick the preset).
 QUALITY_KEYS = ("FAL_KEY",)
 
+# ``tier3_native_audio``'s value for a clip's sound kept as ambience under the
+# dialogue (stage E; ``budget.TIER3_AUDIO_MODES``).
+AMBIENCE = "ambience"
+
 
 def is_v2(story) -> bool:
     """Whether *story* (a ``story.json`` document) is on the v2 pipeline."""
@@ -174,6 +178,31 @@ def fully_animated(story) -> bool:
     except (OSError, ValueError, KeyError, TypeError):
         return False
     return settings.get("animate") == "all_shots"
+
+
+def ambience(story) -> bool:
+    """Whether *story*'s clips bring their own ambience (phase 7 follow-up,
+    stage E; the human's choice of 2026-10-02: the video model's sound is
+    AMBIENCE + SFX ONLY, never dialogue): a v2 story at tier 3 whose budget
+    profile's ``tier3_native_audio`` is ``ambience`` (the quality preset).
+    Such a story buys every clip on a link that makes sound
+    (``video_link_policy: first_with_audio``), asks each clip for the
+    place's ambience and the shot's sound effects with no voice, and renders
+    each clip's sound under its shot's lines, ducked -- every line still in
+    its pinned TTS voice; the per-shot ``keep_native_audio`` opt-in is not
+    read. Tier 1 and 2 never keep a clip's sound; a legacy story at tier 3
+    keeps the opt-in (DEC-201). A profile that cannot be read counts as one
+    that says nothing."""
+    if not is_v2(story):
+        return False
+    profile = story.get("generation_profile") or {}
+    if int(profile.get("tier") or 1) != 3:
+        return False
+    try:
+        settings = budget_mod.profile_settings(profile.get("budget_profile"))
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+    return settings.get("tier3_native_audio") == AMBIENCE
 
 
 def quality_keys_present(merged) -> bool:

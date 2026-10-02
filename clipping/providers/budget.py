@@ -103,6 +103,17 @@ _REQUIRED_PROFILE_KEYS = ("cap_usd", "images", "tts", "animate")
 PROFILE_ROLES = ("sheet", "plate", "prop", "keyframe")
 QUALITY_ROLES_POLICY = "quality_roles"
 VIDEO_RESOLUTIONS = ("720p", "1080p")
+# ``video_link_policy``: which keyed hosted link of VIDEO_CHAIN an episode's
+# clips are bought on (``steps/clips.pick_hosted``) -- the cheapest, the first
+# in chain order, or (phase 7 follow-up, stage E) the first whose clips carry
+# their own sound when the story keeps it as ambience.
+VIDEO_LINK_POLICIES = ("cheapest_available", "first_in_chain", "first_with_audio")
+# ``tier3_native_audio``: what a tier-3 story does with a clip's own sound.
+# ``opt_in`` (phase 6 stage 10, DEC-201): a shot that keeps it hears it in
+# place of its lines; ``ambience`` (stage E, the human's choice of
+# 2026-10-02): every shot's clip sound is heard UNDER its lines, ducked, the
+# lines always in their pinned TTS voices (``media_policy.ambience``).
+TIER3_AUDIO_MODES = ("opt_in", "ambience")
 
 
 def _profile_errors(name, profile) -> list:
@@ -127,6 +138,9 @@ def _profile_errors(name, profile) -> list:
     if resolution is not None and resolution not in VIDEO_RESOLUTIONS:
         errors.append(f"profile {name!r}: video_resolution must be one of {', '.join(VIDEO_RESOLUTIONS)}, "
                       f"not {resolution!r}")
+    for key, known in (("video_link_policy", VIDEO_LINK_POLICIES), ("tier3_native_audio", TIER3_AUDIO_MODES)):
+        if key in profile and profile[key] not in known:
+            errors.append(f"profile {name!r}: {key} must be one of {', '.join(known)}, not {profile[key]!r}")
     return errors
 
 

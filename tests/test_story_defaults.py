@@ -179,7 +179,9 @@ def test_new_story_is_v2_quality_when_keys_present(monkeypatch, tmp_path, capsys
     from clipping.aistory import media_policy
     from clipping.aistory import store as story_store
 
-    quality = {"tier": 2, "route": "api", "consistency_mode": "references", "budget_profile": "quality",
+    # Re-pinned on purpose (phase 7 follow-up, stage E; the human's choice of 2026-10-02: every clip
+    # brings its own ambience): the preset is tier 3, its clips' sound kept as ambience under the lines.
+    quality = {"tier": 3, "route": "api", "consistency_mode": "references", "budget_profile": "quality",
                "pipeline": "v2"}
     assert defaults.quality_generation_profile() == quality
     for name in ("FAL_KEY", "GEMINI_PAID_API_KEY"):

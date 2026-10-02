@@ -72,9 +72,12 @@ LOCAL_LINK = "local/comfyui"
 CLIP_DERIVED_STATES = ("none", "current", "stale", "failed")
 
 # budget_profiles.json's ``video_link_policy`` values; a profile that names
-# none (``free``) takes the cheapest.
-CHEAPEST, FIRST = "cheapest_available", "first_in_chain"
-LINK_POLICIES = (CHEAPEST, FIRST)
+# none (``free``) takes the cheapest. ``first_with_audio`` (phase 7 follow-up,
+# stage E): an ambience story's (``media_policy.ambience``) first keyed link
+# whose clips always carry their own sound, else ``first_in_chain`` said.
+CHEAPEST, FIRST, FIRST_WITH_AUDIO = "cheapest_available", "first_in_chain", "first_with_audio"
+LINK_POLICIES = (CHEAPEST, FIRST, FIRST_WITH_AUDIO)
+assert LINK_POLICIES == budget_mod.VIDEO_LINK_POLICIES
 
 ETA_NONE = "no measured history"
 
@@ -317,14 +320,32 @@ def hosted_rows(chain, merged, adapters, *, resolution=None) -> list:
     return rows
 
 
-def pick_hosted(rows, policy):
+def makes_sound(link, *, asked=True) -> bool:
+    """Whether a clip of *link* (a label) carries the model's own sound
+    (``video.AUDIO``): always, or -- an optional one (LTX) -- when *asked*."""
+    audio = video_providers.AUDIO.get(link, "never")
+    return audio == "always" or (audio == "optional" and asked)
+
+
+def pick_hosted(rows, policy, *, want_sound=False):
     """The keyed hosted row *policy* picks: :data:`FIRST` the first in chain
     order; :data:`CHEAPEST` (the default) the lowest price per second, chain
-    order breaking a tie. None when no row is keyed."""
+    order breaking a tie; :data:`FIRST_WITH_AUDIO` with *want_sound* (an
+    ambience story, stage E) the first whose clips always carry sound
+    (``video.AUDIO`` ``always``: Veo), else -- none keyed -- the first in
+    chain order, which the estimate then says is silent; without
+    *want_sound* it is :data:`FIRST`. An optional sound (LTX) is not looked
+    for: its smallest size is 1080p, dearer than the episode's cap allows
+    for a whole episode, and its sound is unproven; once it is the
+    episode's link, its clips ask for sound (``clip_request_parts``). None
+    when no row is keyed."""
     keyed = [(index, row) for index, row in enumerate(rows) if row["status"] == "keyed"]
     if not keyed:
         return None
-    if policy == FIRST:
+    if policy == FIRST_WITH_AUDIO and want_sound:
+        sounding = [row for _index, row in keyed if video_providers.AUDIO.get(row["link"]) == "always"]
+        return sounding[0] if sounding else keyed[0][1]
+    if policy in (FIRST, FIRST_WITH_AUDIO):
         return keyed[0][1]
     return min(keyed, key=lambda pair: (pair[1]["price_per_second"], pair[0]))[1]
 
@@ -442,6 +463,8 @@ def video_units(ec, script, storyboard, assets_doc, *, env, caps, committed_usd,
         return local_info
 
     policy = settings.get("video_link_policy") or CHEAPEST
+    # Stage E: an ambience story's clips are bought where they make sound.
+    ambient = tier == 3 and media_policy.ambience(ec.story)
     # DEC-203: a profile that animates nothing paid (``free``) buys no clip:
     # it animates on a local ComfyUI only, at $0, and never plans on a hosted link.
     local_only = settings["animate"] == "none"
@@ -483,7 +506,7 @@ def video_units(ec, script, storyboard, assets_doc, *, env, caps, committed_usd,
         local_ready = False
         if route in ("auto", "local"):
             local_ready = bool(local_status()["ok"])
-        row = pick_hosted(rows, policy)
+        row = pick_hosted(rows, policy, want_sound=ambient)
         decided, why = video_plan.video_route(route, local_ready=local_ready, api_ready=row is not None,
                                               allow_paid=budget_obj.allow_paid)
         if decided == "local":
@@ -601,11 +624,36 @@ def video_units(ec, script, storyboard, assets_doc, *, env, caps, committed_usd,
 
     units["refused"] = refusal if count else None
     units["ready"] = units["refused"] is None
+    if ambient:
+        sound = makes_sound(link)
+        units["ambience"] = {"sound": sound, "note": None if sound else _silent_note(
+            ec, link, source=units["source"], chain=chain, merged=merged)}
     units["message"] = _message(units, plan, current_ids, profile_name, booked_ids, resolution=resolution)
     if hold and count:
         units["hold"] = hold
         units["message"] += f" Held: {hold}."
     return units
+
+
+def _silent_note(ec, link, *, source, chain, merged) -> str:
+    """Why an ambience story's clips on *link* carry no sound of their own,
+    and what would bring it (stage E: never a silent switch). *source* is
+    the units' (``record``: the episode's sticky link), *chain* the parsed
+    VIDEO_CHAIN, *merged* the settings over the environment."""
+    if source == "record":
+        return (f"No ambience: episode {ec.ep}'s clips are on {link}, which makes clips with no sound, and an "
+                "episode keeps its clips on one link; its lines are heard without it")
+    sounding = [item for item in chain if video_providers.AUDIO.get(describe(item)) == "always"]
+    if not sounding:
+        return (f"No ambience: {link} makes clips with no sound and no link of {gen.ENV_NAMES[gen.VIDEO]} makes "
+                "clips that always have it; add gemini/veo-3.1-lite to it (with GEMINI_PAID_API_KEY) for clips "
+                "with their own sound")
+    first = sounding[0]
+    missing = gen.missing_keys(first, merged)
+    if missing:
+        return (f"No ambience: {link} makes clips with no sound; add {' and '.join(missing)} for "
+                f"{describe(first)}'s sound")
+    return f"No ambience: {link} makes clips with no sound, and {describe(first)}, which has it, cannot serve now"
 
 
 def local_unasked(video) -> bool:
@@ -641,7 +689,12 @@ def _message(units, plan, current_ids, profile_name, booked_ids=(), *, resolutio
     if held:
         text += " " + " ".join(f"{row['shot_id']} runs {row['clip_s'] + row['held_s']:g} s: its {row['clip_s']} s "
                                f"clip is held on its last frame for {row['held_s']:g} s." for row in held)
-    if units["tier"] == 3 and video_providers.AUDIO.get(link) == "never":
+    ambience = units.get("ambience")
+    if ambience is not None:
+        # Stage E: the clips' own sound is ambience under the lines, or there is none, said.
+        text += (" Each clip brings its own ambience and sound effects, heard under the dialogue (every line in its "
+                 "own voice)." if ambience["sound"] else f" {ambience['note']}.")
+    elif units["tier"] == 3 and video_providers.AUDIO.get(link) == "never":
         # A-108: before any clip is bought, not only at the render's note.
         text += (f" Tier 3 keeps a clip's own sound, but {link} makes clips with none: every shot is rendered as at "
                  "tier 2, its lines spoken.")
