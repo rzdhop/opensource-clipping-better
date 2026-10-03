@@ -59,8 +59,9 @@ def _refused(call):
 
 def test_failed_first_watch_blocks_approval_unless_anyway(store):
     wf = _wf()
-    story_id, llm, summary, _log = _written(store, E4=[eps.E4_PASSED], J1=[eps.J1_ISSUES])
-    assert llm.prompts()[-2:] == ["E4", "J1"]
+    # Stage G: the step repairs s05 (its two passes, one call each) and J1 still finds the issue: the report stands.
+    story_id, llm, summary, _log = _written(store, E4=[eps.E4_PASSED] * 3, J1=[eps.J1_ISSUES] * 3)
+    assert llm.prompts()[12:] == ["E2v2", "E4", "J1"] * 2
     script = eps._script(store, story_id)
     report = script["first_watch"]
     assert report["passed"] is False and report["checked_rev"] == script["rev"] and report["stale"] is False
@@ -69,8 +70,8 @@ def test_failed_first_watch_blocks_approval_unless_anyway(store):
     assert summary["first_watch"] is False and summary["consistency"] is True
 
     message = _refused(lambda: wf.approve_script(store, story_id, 1, now=NOW))
-    assert message.startswith("Episode 1's first-watch check found 1 issue: s05 (unmotivated): Montrez pourquoi "
-                              "Kiwilo avoue son plan.")
+    assert message.startswith("Episode 1's first-watch check: after 2 repair passes, 1 issue remains: s05 "
+                              "(unmotivated): Montrez pourquoi Kiwilo avoue son plan.")
     assert "A first-time viewer took away: Kiwilo veut garder le pouvoir sur l'île." in message
     assert message.endswith("Fix them (edit the script, or regenerate the scenes they name) and check again, or "
                             "approve anyway.")
@@ -94,7 +95,8 @@ def test_a_passed_first_watch_approves_and_records_no_anyway(store):
 
 def test_a_missing_or_stale_first_watch_is_never_approvable(store):
     wf = _wf()
-    story_id, _llm, _summary, _log = _written(store, E4=[eps.E4_PASSED], J1=[eps.J1_ISSUES])
+    # Stage G: the step's two repair passes do not clear the issue (J1 finds it each time).
+    story_id, _llm, _summary, _log = _written(store, E4=[eps.E4_PASSED] * 3, J1=[eps.J1_ISSUES] * 3)
 
     # Stale: an edit rewrites the script (episode_common.mark_changed) -- E4's report goes stale too, and
     # is refused first; once it is fresh again, J1's staleness still refuses, "anyway" or not.
@@ -162,6 +164,8 @@ def test_repeated_lines_and_a_missing_hook_text_fail_the_report_whatever_j1_says
     an earlier one (normalised-token Jaccard >= 0.7) even when J1 misses it,
     and a hook with no on-screen text -- J1's own no_hook_text is then left
     out, so it is said once."""
+    from clipping.providers.errors import ProviderError
+
     story_id, _llm, _summary, _log = _written(store, E4=[eps.E4_PASSED])
     script = eps._script(store, story_id)
     s02, s05 = eps._scene(script, "s02"), eps._scene(script, "s05")
@@ -170,10 +174,16 @@ def test_repeated_lines_and_a_missing_hook_text_fail_the_report_whatever_j1_says
     del script["first_watch"]
     store.write_episode_doc(story_id, 1, "script.json", script, now=NOW)
 
-    llm = eps.FakeLLM(J1=[dict(eps.J1_PASSED, passed=False, issues=[
+    # Stage G: the step then tries to repair the hook (E3v2) and s05 (E2v2); both calls fail here, so the
+    # report under test is kept as J1 and the checks wrote it.
+    def down():
+        return ProviderError("down", [("gemini/gemini-test", "HTTP 503")])
+
+    llm = eps.FakeLLM(E2=[down()], E3=[down()], J1=[dict(eps.J1_PASSED, passed=False, issues=[
         {"scene_id": "s01", "kind": "no_hook_text", "fix": "Ajoutez un texte."},
         {"scene_id": None, "kind": "unclear_goal", "fix": "Dites ce que veut Mangella."}])])
     _summary, log = eps._run(eps._new().script, store, story_id, llm=llm)
+    assert llm.prompts() == ["J1", "E3v2", "E2v2"]
 
     report = eps._script(store, story_id)["first_watch"]
     line, first = s05["lines"][0]["line_id"], s02["lines"][0]["line_id"]
@@ -190,7 +200,7 @@ def test_repeated_lines_and_a_missing_hook_text_fail_the_report_whatever_j1_says
     script = eps._script(store, story_id)
     del script["first_watch"]
     store.write_episode_doc(story_id, 1, "script.json", script, now=NOW)
-    eps._run(eps._new().script, store, story_id, llm=eps.FakeLLM(J1=[eps.J1_PASSED]))
+    eps._run(eps._new().script, store, story_id, llm=eps.FakeLLM(E2=[down()], E3=[down()], J1=[eps.J1_PASSED]))
     report = eps._script(store, story_id)["first_watch"]
     assert report["passed"] is False and [issue["kind"] for issue in report["issues"]] == ["repeated_line",
                                                                                           "no_hook_text"]

@@ -2538,6 +2538,28 @@ _EPISODE_SCRIPT_FIRST_WATCH_SCHEMA = _document({
     "stale": {"type": "boolean"},
 })
 
+# Phase 7 follow-up, stage G: what the script step's repair pass tried on a
+# v2 script after J1 (``steps/script.py``, ``_Run.repair``): one record per
+# pass of the run that produced the current report -- the scenes written
+# again, each with the issue kinds that sent it and the framing part when
+# the partial E3 wrote it (null: E2), the report's issue count before the
+# pass and after its J1 (null while J1 has not answered again), and the
+# scenes whose call failed. Replaced by the next run that repairs.
+_EPISODE_SCRIPT_REPAIR_SCENE_SCHEMA = _document({
+    "scene_id": {"type": "string", "pattern": SCENE_ID_PATTERN},
+    "kinds": {"type": "array", "items": {"type": "string", "enum": list(FIRST_WATCH_ISSUE_KINDS)}, "minItems": 1,
+              "maxItems": len(FIRST_WATCH_ISSUE_KINDS)},
+    "part": {"type": ["string", "null"], "enum": ["hook", "cliffhanger", "recap", None]},
+})
+
+_EPISODE_SCRIPT_REPAIR_PASS_SCHEMA = _document({
+    "pass": {"type": "integer", "minimum": 1},
+    "scenes": {"type": "array", "items": _EPISODE_SCRIPT_REPAIR_SCENE_SCHEMA, "maxItems": 12},
+    "issues_before": {"type": "integer", "minimum": 0},
+    "issues_after": {"type": ["integer", "null"], "minimum": 0},
+    "failed": {"type": "array", "items": {"type": "string", "pattern": SCENE_ID_PATTERN}, "maxItems": 12},
+})
+
 EPISODE_SCRIPT_SCHEMA = _document({
     "$schema": {"type": "string", "const": EPISODE_SCRIPT_SCHEMA_NAME},
     "ep": {"type": "integer", "minimum": 1, "maximum": 99},
@@ -2559,6 +2581,9 @@ EPISODE_SCRIPT_SCHEMA = _document({
     # Phase 7 stage 6a (DEC-230): a v2 script's own, once J1 has run;
     # absent on every legacy script and on a v2 one not judged yet.
     "first_watch": _EPISODE_SCRIPT_FIRST_WATCH_SCHEMA,
+    # Phase 7 follow-up, stage G: the repair passes of the run that produced
+    # the first-watch report; absent until one ran on this script.
+    "repairs": {"type": "array", "items": _EPISODE_SCRIPT_REPAIR_PASS_SCHEMA, "maxItems": 10},
 })
 
 
