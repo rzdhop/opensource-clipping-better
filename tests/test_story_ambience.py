@@ -493,24 +493,34 @@ def test_a_fully_animated_v2_storyboard_plans_no_shot_longer_than_its_links_long
     for shot in eps._storyboard(store, story_id)["shots"]:
         per_scene[shot["scene_id"]] = per_scene.get(shot["scene_id"], 0) + 1
     for call, scene in zip(llm.calls, script["scenes"]):
-        asked = 2 if seconds[scene["scene_id"]] > 8 else 1
+        asked = tsp.two_beats(scene, seconds[scene["scene_id"]], cap_s=8)  # DEC-252 re-pin: + the rhythm
         assert per_scene[scene["scene_id"]] == asked, (scene["scene_id"], seconds[scene["scene_id"]])
         assert ("exactly 2 entries" if asked == 2 else "exactly 1 entry") in call["user"]
 
 
-def test_a_storyboard_planned_for_a_longer_clip_is_planned_again_where_a_scene_is_short_of_beat_shots(store):
+def test_a_storyboard_planned_for_a_longer_clip_is_planned_again_where_a_scene_is_short_of_beat_shots(
+        store, monkeypatch):
     """Planned on seedance (12 s), then the Veo key is set: the storyboard
     estimate counts, and the step plans again, exactly the scenes past 8 s
     that have one beat shot; a complete storyboard on its own link makes no
-    call (as before)."""
+    call (as before).
+
+    DEC-252 re-pin: the first plan is made one beat a scene, as before the
+    two-beat default (its rhythm switched off for that run): with it on,
+    the two long scenes would already be two beats on seedance and nothing
+    would be short. The re-plan of short scenes reads the clip-length rule
+    alone, so the default never re-plans this storyboard on its own link."""
     import test_story_episode_steps as eps
     import test_story_storyboard_props as tsp
     from clipping.aistory import workflow
+    from clipping.aistory.steps import storyboard
 
     m = eps._new()
     story_id = _v2_storyboard_story(store)
     llm = eps.FakeLLM(default={"T1v2": tsp.t1_v2_reply})
-    eps._run(m.storyboard, store, story_id, llm=llm, step="storyboard", settings=_plan_settings(**tas.FAL))
+    with monkeypatch.context() as patch:
+        patch.setattr(storyboard, "_two_beats", lambda *args, **kwargs: False)
+        eps._run(m.storyboard, store, story_id, llm=llm, step="storyboard", settings=_plan_settings(**tas.FAL))
     script = eps._script(store, story_id)
     seconds = {sid: entry["duration_s"] for sid, entry in script["timing"]["scenes"].items()}
     short = sorted(sid for sid, value in seconds.items() if 8 < value <= 12)

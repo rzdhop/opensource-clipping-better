@@ -484,8 +484,9 @@ def prop_prompt_v2(style_lock: dict, *, prop_text: str, budget=PROP_V2_MAX_WORDS
 # A v2 shot's keyframe prompt is layered (A8), in this order: the reference
 # roles (what each image sent is for, A9), the beat, the staging, the
 # composition, the place slice, the style tail and the constraints clause
-# (A7). Its clip prompt is the subject and what moves, one secondary motion,
-# the camera, a stays-still clause and the style's motion suffix. The texts
+# (A7). Its clip prompt is the subject and what moves, the performance (who
+# speaks, who reacts: DEC-252), the camera, the identity clause and the
+# style's v2 motion suffix. The texts
 # are rendered by ``shots.resolve_shot`` and stored on the shot, so what the
 # shot card shows is what is sent.
 
@@ -504,6 +505,12 @@ Budgets = namedtuple("Budgets", "keyframe clip image_link video_link",
 CONSTRAINTS_KEYFRAME = "Clean frame: no captions, lettering, logos or watermarks; each character appears once."
 CONSTRAINTS_KEYFRAME_NO_PEOPLE = _CONSTRAINTS_NO_PEOPLE
 STAYS_STILL = "The set, the lighting and every character's look stay exactly as in the first frame."
+# DEC-252: what a v2 clip says in place of STAYS_STILL (the human on the first
+# fully animated episode, 2026-10-03: "the video does not say things or do
+# movements"): the looks, the set and the light are kept, and the characters
+# are let move. STAYS_STILL itself is kept, unchanged, for anything reading it.
+IDENTITY_KEEPS = ("Keep every character's look, the set and the light as in the first frame; "
+                  "the characters move freely within it.")
 
 # Exactly ``schemas.CAMERA_MOTIONS`` (spec 6.3's closed list), each mapped to
 # a short English phrase a hosted or local image-to-video model is prompted
@@ -732,37 +739,52 @@ def layered_shot_prompt(style_lock: dict, *, roles_text: str, beat: str, staging
 
 # The clip prompt's context layers (stage F2), in the order they are dropped
 # when the whole is over budget -- the least valuable first: the camera's
-# intent, then the micro-actions, then the beat's emotion; only then is the
-# motion cut.
-_CLIP_DROP_ORDER = ("intent", "micro", "emotion")
+# intent, then the gestures (the slot stage F2 gave the micro-actions), then
+# the beat's emotion, then the performance (DEC-252: who speaks, who reacts);
+# only then is the motion cut.
+_CLIP_DROP_ORDER = ("intent", "micro", "emotion", "performance")
+
+
+def clip_motion_suffix(style_lock: dict) -> str:
+    """The style's motion suffix a v2 clip prompt ends on (DEC-252): its
+    ``motion_rules.tier2_prompt_suffix_v2`` -- lively, no stillness, no
+    camera --, else its ``tier2_prompt_suffix`` (a lock without the new
+    key). The legacy clip prompt (``video_plan.build_video_prompt``) never
+    reads this: it keeps ``tier2_prompt_suffix``, byte for byte (RC-Q1)."""
+    rules = style_lock["motion_rules"]
+    return rules.get("tier2_prompt_suffix_v2") or rules["tier2_prompt_suffix"]
 
 
 def layered_clip_prompt(style_lock: dict, *, subject: str, motion: str, camera_phrase: str, modifiers=(),
                         secondary: str = "", budget: int = CLIP_V2_MAX_WORDS, emotion: str = "", micro: str = "",
-                        intent: str = "") -> str:
+                        intent: str = "", performance: str = "") -> str:
     """A v2 shot's clip prompt (A8), at most *budget* words
     (``CLIP_V2_MAX_WORDS``, or the link's own -- stage F2): the subject and
     what moves (*motion*: the shot's resolved, name-free action, or the
     planned motion; it is said as it is when it already names the
-    *subject*), the beat's *emotion*, one *secondary* motion, the
-    characters' *micro* actions, the camera phrase with its *modifiers* and
-    the camera's *intent*, the stays-still clause, then the style's
-    ``tier2_prompt_suffix``. Over the budget, the three context layers go
-    first (:data:`_CLIP_DROP_ORDER`: the intent, the micro-actions, the
-    emotion), then the motion is cut at a clause boundary. With none of the
-    three given, the text it always was."""
-    suffix = as_sentence(style_lock["motion_rules"]["tier2_prompt_suffix"])
+    *subject*), the beat's *emotion*, the *performance* (DEC-252: who
+    speaks with the mouth moving, who reacts and how), a fixed *secondary*
+    sentence when one is given, the characters' gestures (*micro*), the
+    camera phrase with its *modifiers* and the camera's *intent*, the
+    identity clause (:data:`IDENTITY_KEEPS`: looks, set and light kept, the
+    characters free to move), then the style's v2 motion suffix
+    (:func:`clip_motion_suffix`). Over the budget, the four context layers
+    go first (:data:`_CLIP_DROP_ORDER`: the intent, the gestures, the
+    emotion, the performance), then the motion is cut at a clause
+    boundary."""
+    suffix = as_sentence(clip_motion_suffix(style_lock))
     moving = _collapse_ws(motion)
     if subject and subject.lower() not in moving.lower():
         moving = f"{subject}: {moving}"
-    extras = {"emotion": as_sentence(emotion), "micro": as_sentence(micro),
+    extras = {"emotion": as_sentence(emotion), "performance": as_sentence(performance), "micro": as_sentence(micro),
               "intent": _strip_trailing_period(_collapse_ws(intent))}
     for dropped in range(len(_CLIP_DROP_ORDER) + 1):
         kept = {name: text for name, text in extras.items() if text and name not in _CLIP_DROP_ORDER[:dropped]}
         camera = as_sentence(", ".join([_strip_trailing_period(camera_phrase)]
                                      + [_strip_trailing_period(m) for m in modifiers if m]
                                      + ([kept["intent"]] if "intent" in kept else [])))
-        tail = [kept.get("emotion", ""), as_sentence(secondary), kept.get("micro", ""), camera, STAYS_STILL, suffix]
+        tail = [kept.get("emotion", ""), kept.get("performance", ""), as_sentence(secondary), kept.get("micro", ""),
+                camera, IDENTITY_KEEPS, suffix]
         room = budget - sum(_word_count(part) for part in tail)
         if _word_count(moving) <= room or dropped == len(_CLIP_DROP_ORDER):
             break

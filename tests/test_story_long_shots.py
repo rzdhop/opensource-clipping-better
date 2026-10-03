@@ -161,7 +161,8 @@ def test_a_scene_is_measured_longer_than_its_estimate_when_its_voices_are_gemini
         assert expected == pytest.approx(plain + 0.35 * speech, abs=0.002)
         limit = (plain + expected) / 2  # a clip exactly this long: the estimate fits, the voices do not
         assert storyboard.beat_shot_count(ec, script, scene, limit_s=limit) == (2, 2)
-        assert storyboard.beat_shot_count(ec, script, scene, limit_s=expected + 0.01) == (1, 1)
+        assert storyboard.beat_shot_count(ec, script, scene, limit_s=expected + 0.01,
+                                         rhythm=False) == (1, 1)  # DEC-252 re-pin: the clip-length rule alone
         flipped += 1
     assert flipped == len(script["scenes"])
 
@@ -192,7 +193,7 @@ def test_the_storyboard_step_plans_two_beat_shots_where_the_voices_will_run_past
     for shot in eps._storyboard(store, story_id)["shots"]:
         per_scene[shot["scene_id"]] = per_scene.get(shot["scene_id"], 0) + 1
     for call, scene in zip(llm.calls, script["scenes"]):
-        asked = 2 if expected[scene["scene_id"]] > 12 else 1
+        asked = tsp.two_beats(scene, expected[scene["scene_id"]])  # DEC-252 re-pin: + the rhythm
         assert per_scene[scene["scene_id"]] == asked, (scene["scene_id"], plain, expected)
         assert ("exactly 2 entries" if asked == 2 else "exactly 1 entry") in call["user"]
     assert all(per_scene[sid] == 2 for sid in moved)

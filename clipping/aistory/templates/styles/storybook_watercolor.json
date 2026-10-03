@@ -50,7 +50,8 @@
       ],
       "summary": "pan_lr slow ±5 %, push_in ≤ 1.06, add paper_texture overlay option"
     },
-    "tier2_prompt_suffix": "very gentle motion, drifting particles, painterly, no morphing"
+    "tier2_prompt_suffix": "very gentle motion, drifting particles, painterly, no morphing",
+    "tier2_prompt_suffix_v2": "lively painterly motion, expressive faces, clear gestures, drifting particles, no morphing"
   },
   "typography": {
     "font_family": "Patrick Hand",

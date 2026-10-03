@@ -694,6 +694,20 @@ _CAMERA_INTENT = {"hold": "letting the moment breathe", "push_in": "closing on t
                   "pan_rl": "following the exchange right to left", "pan_ud": "settling on the detail below",
                   "pan_du": "rising to the face"}
 _LANDING_FUNCTIONS = ("peak", "turn", "cliffhanger")
+# DEC-252 (the human, 2026-10-03: "the video does not say things or do
+# movements, boring"): how the framed characters who do not speak react to a
+# line said with this emotion (``schemas.EMOTIONS``; neutral is not one: the
+# scene's emotion is read instead, then its function, :data:`_FUNCTION_REACTIONS`).
+# Each reads after "reacts visibly, ...".
+_REACTIONS = {"shocked": "stepping back, eyes widening", "tension": "leaning in, jaw set",
+              "scheming": "narrowing the eyes, a slow smile", "angry": "recoiling, then glaring back",
+              "sad": "lowering the eyes, shoulders sinking", "happy": "breaking into a grin",
+              "tender": "softening, leaning closer", "fear": "flinching back, hands rising",
+              "triumph": "lifting the chin, eyes bright"}
+_FUNCTION_REACTIONS = {"recap": "turning sharply toward the speaker", "hook": "turning sharply toward the speaker",
+                       "setup": "nodding, eyes on the speaker", "rising": "leaning in, jaw set",
+                       "peak": "stepping back, eyes widening", "turn": "freezing, then turning away",
+                       "cliffhanger": "freezing, eyes widening"}
 
 
 class PromptOverBudget(ValueError):
@@ -1146,19 +1160,65 @@ def _clip_emotion(scene, lines, frame, char_handles) -> str:
     return "; ".join(parts)
 
 
-def _micro_actions(frame, staged, char_handles, resolve) -> str:
-    """Each framed character's micro-actions for the clip (stage F2): the
-    breathing, a glance where its staging faces, the hands."""
+def _reaction(scene, lines) -> str:
+    """How the listeners of the shot react (DEC-252, :data:`_REACTIONS`): to
+    its first line said with an emotion other than neutral, else to the
+    scene's emotion, else as its function asks."""
+    for emotion in [line.get("emotion") for line in lines] + [scene.get("emotion")]:
+        if emotion in _REACTIONS:
+            return _REACTIONS[emotion]
+    return _FUNCTION_REACTIONS.get(scene.get("function"), "reacting with clear, readable gestures")
+
+
+def _performance(scene, lines, frame, char_handles) -> str:
+    """What the framed characters perform during the clip (DEC-252, in place
+    of stage F2's "reacts with a small natural movement"): whoever speaks
+    one of the shot's lines in frame speaks with the mouth moving on the
+    words -- never the words themselves (DEC-201: the TTS is the voice, and
+    quoted words would be drawn as lettering) --, the others react visibly
+    (:func:`_reaction`); with no line in the shot, everyone in frame acts
+    the moment out. '' with no one in frame."""
+    frame_ids = [cid for cid, _doc in frame]
+    speakers = [cid for cid in dict.fromkeys(line.get("speaker") for line in lines) if cid in frame_ids]
+    others = [cid for cid in frame_ids if cid not in speakers]
+    parts = []
+    if speakers:
+        who = _and_join([char_handles[cid] for cid in speakers])
+        parts.append(f"{who} speaks with the mouth moving on the words, face and brows carrying the emotion"
+                     if len(speakers) == 1 else
+                     f"{who} speak in turn, mouths moving on the words, faces and brows carrying the emotion")
+    if others:
+        who = _and_join([char_handles[cid] for cid in others])
+        one = len(others) == 1
+        if lines:
+            parts.append(f"{who} {'reacts' if one else 'react'} visibly, {_reaction(scene, lines)}")
+        else:
+            parts.append(f"{who} {'acts' if one else 'act'} the moment out with clear gestures, "
+                         f"{_reaction(scene, lines)}")
+    return "; ".join(parts)
+
+
+def _gestures(frame, frame_props, staged, char_handles, prop_handles, resolve, ledger=None) -> str:
+    """The framed characters' gestures for the clip (DEC-252, in the slot of
+    stage F2's micro-actions -- "breathes visibly, hands shift slightly"):
+    each one T1 v2 staged turns toward what it faces with its expression on
+    the face, and each prop a framed character holds is in its hands
+    (:func:`_holder`). '' when the staging and the props say nothing."""
     staging = {entry["subject"]: entry for entry in staged or () if entry.get("subject")}
+    frame_ids = {cid for cid, _doc in frame}
     parts = []
     for cid, _doc in frame:
-        bits = ["breathes visibly"]
-        facing = _collapse_ws(resolve((staging.get(f"@{cid}") or {}).get("facing") or ""))
-        if facing:
-            bits.append(f"a glance toward {_strip_period(facing)}")
-        bits.append("hands shift slightly")
-        parts.append(f"{char_handles[cid]} {', '.join(bits)}")
-    return "Micro-actions: " + "; ".join(parts) if parts else ""
+        entry = staging.get(f"@{cid}") or {}
+        facing = _strip_period(_collapse_ws(resolve(entry.get("facing") or "")))
+        expression = _strip_period(_collapse_ws(resolve(entry.get("expression") or "")))
+        bits = ([f"turns toward {facing}"] if facing else []) + ([f"face {expression}"] if expression else [])
+        if bits:
+            parts.append(f"{char_handles[cid]} {', '.join(bits)}")
+    for pid, doc in frame_props:
+        holder = _holder(doc, frame_ids, char_handles, ledger)
+        if holder:
+            parts.append(f"{holder}'s hands work {prop_handles[pid]}")
+    return "Gestures: " + "; ".join(parts) if parts else ""
 
 
 def _camera_intent(camera_motion, function) -> str:
@@ -1280,12 +1340,6 @@ def _layered(plan, *, scene, entities, style_lock, consistency_mode, video_actio
     camera_motion = plan.get("camera_motion")
     if camera_motion not in prompting.CAMERA_PHRASES:
         camera_motion = motion_for(framing, None, scene["function"], style_lock)["type"]
-    if len(handles) >= 2:
-        secondary = f"{handles[1]} reacts with a small natural movement"
-    elif handles:
-        secondary = "small natural idle movements in between"
-    else:
-        secondary = ""
     subject = _and_join(handles) or (held[0] if held else "the set")
     # T1 v2's motion (phase 7 stage 4: what the characters do during the clip,
     # in tags) when the plan has one, else the resolved action as before.
@@ -1294,14 +1348,16 @@ def _layered(plan, *, scene, entities, style_lock, consistency_mode, video_actio
     modifiers = [prompting.MODIFIER_PHRASES[m] for m in plan.get("modifiers") or () if m in prompting.MODIFIER_PHRASES]
     video_prompt = prompting.layered_clip_prompt(
         style_lock, subject=subject, motion=_strip_period(motion),
-        camera_phrase=prompting.CAMERA_PHRASES[camera_motion], modifiers=modifiers, secondary=secondary,
-        budget=budgets.clip,
-        # Stage F2: the beat's emotion, the micro-actions and the camera's intent, dropped first when over.
+        camera_phrase=prompting.CAMERA_PHRASES[camera_motion], modifiers=modifiers, budget=budgets.clip,
+        # Stage F2: the beat's emotion, the gestures and the camera's intent, dropped first when over;
+        # DEC-252: then the performance (who speaks with the mouth moving, who reacts), never idleness.
         emotion=names_mod.without_names(_clip_emotion(scene, lines, frame, char_handles), name_map),
-        micro=names_mod.without_names(_micro_actions(frame, staged, char_handles, resolve), name_map),
+        performance=names_mod.without_names(_performance(scene, lines, frame, char_handles), name_map),
+        micro=names_mod.without_names(
+            _gestures(frame, frame_props, staged, char_handles, prop_handles, resolve, ledger), name_map),
         intent=_camera_intent(camera_motion, scene["function"]))
     if len(video_prompt.split()) > budgets.clip:
-        # The motion is cut to the budget; the fixed parts (camera, stays-still, suffix) cannot be.
+        # The motion is cut to the budget; the fixed parts (camera, identity clause, suffix) cannot be.
         raise PromptOverBudget("clip", len(video_prompt.split()), budgets.clip)
 
     return {
@@ -1416,7 +1472,7 @@ def _clamp_zoom(value, zoom_max):
     return round(min(max(value, 1.0), zoom_max), 3)
 
 
-def motion_for(framing, camera_motion, scene_function, style_lock) -> dict:
+def motion_for(framing, camera_motion, scene_function, style_lock, *, v2=False) -> dict:
     """``{"type", "zoom_from", "zoom_to", "pan"}`` for one shot (spec 5's
     tier-1 motion): the TYPE is ``by_function[framing]`` if present, else
     ``by_function[scene_function]`` if present, else the given
@@ -1424,12 +1480,20 @@ def motion_for(framing, camera_motion, scene_function, style_lock) -> dict:
     zooms from ``zoom.dialogue`` to itself (``zoom.peak`` on a peak or
     cliffhanger scene); ``pull_out`` is the reverse; both clamp to
     ``zoom.max``. A ``pan_*`` type holds the zoom at 1.0 and pans that way;
-    ``hold`` holds the zoom at 1.0 with no pan."""
+    ``hold`` holds the zoom at 1.0 with no pan.
+
+    *v2* (DEC-252: a v2 shot is a clip, its camera T1 v2's choice, never the
+    previous shot's): a given *camera_motion* comes before the scene
+    function's rule ("push-in on peaks" made every peak, hook and
+    cliffhanger of fruit_drama a push-in, two in a row on a two-beat peak);
+    a framing's own rule (a wide shot's pan) still comes first."""
     tier1 = style_lock["motion_rules"]["tier1"]
     by_function = tier1["by_function"]
 
     if framing in by_function:
         motion_type = by_function[framing]
+    elif v2 and camera_motion is not None:
+        motion_type = camera_motion
     elif scene_function in by_function:
         motion_type = by_function[scene_function]
     elif camera_motion is not None:
@@ -1717,12 +1781,13 @@ def _apply_close_up_window(plans_by_scene, notes) -> None:
         )
 
 
-def _apply_motion_precedence(plans_by_scene, style_lock, notes) -> None:
+def _apply_motion_precedence(plans_by_scene, style_lock, notes, *, v2=False) -> None:
     """Rule (c): each plan's camera_motion becomes whatever motion_for's
-    precedence would pick for it -- the "push-in on peaks" rule."""
+    precedence would pick for it -- the "push-in on peaks" rule (on *v2*,
+    the plan's own motion before the scene function's, DEC-252)."""
     for scene, plans in plans_by_scene:
         for plan in plans:
-            motion = motion_for(plan["framing"], plan["camera_motion"], scene["function"], style_lock)
+            motion = motion_for(plan["framing"], plan["camera_motion"], scene["function"], style_lock, v2=v2)
             if motion["type"] != plan["camera_motion"]:
                 notes.append(
                     f"rule_pass: scene {scene['scene_id']}: camera motion changed "
@@ -1731,16 +1796,16 @@ def _apply_motion_precedence(plans_by_scene, style_lock, notes) -> None:
                 plan["camera_motion"] = motion["type"]
 
 
-def rule_pass(plans_by_scene, style_lock) -> tuple:
+def rule_pass(plans_by_scene, style_lock, *, v2=False) -> tuple:
     """The cross-scene rules applied to every scene's shot plans, on both the
     T1 and the fast path (spec 5): (a) no two consecutive shots in the whole
     episode share a framing (never changing an insert_prop shot or a scene's
     own opening wide_establishing -- the earlier shot moves instead); (b)
     every window of 3 consecutive scenes has a close_up or extreme_close_up,
     re-checking (a) afterwards; (c) each shot's camera motion follows
-    :func:`motion_for`'s precedence. Returns ``(plans_by_scene, notes)``, a
-    new structure -- *plans_by_scene* itself and its plan dicts are not
-    mutated."""
+    :func:`motion_for`'s precedence (*v2*: its own). Returns
+    ``(plans_by_scene, notes)``, a new structure -- *plans_by_scene* itself
+    and its plan dicts are not mutated."""
     plans_by_scene = [(scene, [dict(p) for p in plans]) for scene, plans in plans_by_scene]
     notes = []
 
@@ -1755,7 +1820,7 @@ def rule_pass(plans_by_scene, style_lock) -> tuple:
         if not _apply_no_repeat_framing(plans_by_scene, notes):
             break
 
-    _apply_motion_precedence(plans_by_scene, style_lock, notes)
+    _apply_motion_precedence(plans_by_scene, style_lock, notes, v2=v2)
 
     return plans_by_scene, notes
 
@@ -1996,7 +2061,7 @@ def build_storyboard(script, plans, sources, *, entities, style_lock, template, 
     scenes_in_order = [scene for scene in script["scenes"] if scene["scene_id"] in plans]
 
     plans_by_scene = [(scene, plans[scene["scene_id"]]) for scene in scenes_in_order]
-    plans_by_scene, notes = rule_pass(plans_by_scene, style_lock)
+    plans_by_scene, notes = rule_pass(plans_by_scene, style_lock, v2=v2)
 
     shots = []
     resolved_from = {}
@@ -2006,7 +2071,7 @@ def build_storyboard(script, plans, sources, *, entities, style_lock, template, 
             order += 1
             shot_id = f"sh{order:02d}"
             line_ids = [scene["lines"][n - 1]["line_id"] for n in plan["lines"]]
-            motion = motion_for(plan["framing"], plan["camera_motion"], scene["function"], style_lock)
+            motion = motion_for(plan["framing"], plan["camera_motion"], scene["function"], style_lock, v2=v2)
             try:
                 resolved = resolve_shot(plan, scene=scene, entities=entities, style_lock=style_lock,
                                         consistency_mode=consistency_mode, v2=v2, ledger=ledger,

@@ -51,7 +51,8 @@
       "overlays": [],
       "summary": "hold with jitter_stopmotion option (12 fps step, ±1 px) and push_in ≤ 1.05"
     },
-    "tier2_prompt_suffix": "stop-motion, 12 frames per second feel, handmade animation, no smooth CGI motion"
+    "tier2_prompt_suffix": "stop-motion, 12 frames per second feel, handmade animation, no smooth CGI motion",
+    "tier2_prompt_suffix_v2": "stop-motion, 12 frames per second feel, handmade animation, expressive clay faces, clear gestures, no smooth CGI motion"
   },
   "typography": {
     "font_family": "Chewy",

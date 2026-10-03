@@ -160,22 +160,41 @@ def t1_v2_reply(call):
         else ["medium_two_shot", "close_up"]
     if "\n- medium_two_shot / " in call["user"].split("Previous shots", 1)[-1][-200:]:
         framings.reverse()
+    # DEC-252: never the previous shot's camera motion (the last row of "Previous shots", then each other).
+    before = re.findall(r"\n- [a-z_]+ / ([a-z_]+)", call["user"].split("Previous shots", 1)[-1]) \
+        if "Previous shots" in call["user"] else []
+    cameras = ["hold", "push_in"] if before and before[-1] == "push_in" else ["push_in", "hold"]
     cut = (n_lines + 1) // 2 if count == 2 else n_lines
     spans = [list(range(1, cut + 1)), list(range(cut + 1, n_lines + 1))][:count]
     staged = [{"subject": tag, "position": pos, "facing": "the others", "expression": "tense"}
               for tag, pos in zip(who, ("left", "right", "centre", "back")) if tag.startswith("@")]
     return {"shots": [
-        {"framing": framings[i % 2], "camera_motion": "push_in", "modifiers": [],
+        {"framing": framings[i % 2], "camera_motion": cameras[i % 2], "modifiers": [],
          "action": " and ".join(who) + " settle the matter, and the stakes rise.",
          "motion": f"{who[0]} steps forward and points while the others turn", "staging": staged,
          "subjects": who, "lines": span} for i, span in enumerate(spans)]}
+
+
+def two_beats(scene, seconds, *, cap_s=12, min_shot_s=3.0):
+    """How many beat shots T1 v2 is asked for *scene* of *seconds*
+    (``storyboard.beat_shot_count``): two past the clip's *cap_s*, and --
+    DEC-252's rhythm -- two for a body scene with two lines or two
+    characters and room for two shots of *min_shot_s*; one otherwise."""
+    from clipping.aistory import schemas
+
+    rhythm = (scene["function"] in schemas.BODY_FUNCTIONS
+              and (len(scene["lines"]) >= 2 or len(scene["characters"]) >= 2) and seconds >= 2 * min_shot_s)
+    return 2 if seconds > cap_s or rhythm else 1
 
 
 def test_a_v2_story_plans_its_shots_with_t1_v2_one_beat_shot_a_scene(store):
     """The storyboard step on a v2 story written on serial_60s_v2: one T1 v2
     call per scene asking one beat shot (two only for a scene past 12 s),
     the stored shots carrying T1 v2's ``clip_motion`` and ``staging``, the
-    effective 1-2 range validated (not the style's 2-4)."""
+    effective 1-2 range validated (not the style's 2-4).
+
+    DEC-252 re-pin: a body scene with two lines or two characters and room
+    for two 3 s shots is asked two beat shots too (:func:`two_beats`)."""
     m = eps._new()
     story_id = eps._written_script(store)
     store.update(story_id, lambda doc: (doc["generation_profile"].update(pipeline="v2"),
@@ -197,7 +216,7 @@ def test_a_v2_story_plans_its_shots_with_t1_v2_one_beat_shot_a_scene(store):
         assert shot["clip_motion"].startswith("@char_") and shot["staging"]
         assert "@" not in shot["video_prompt"] and shot["prompt_layout"] == "layered_v1"
     for call, scene in zip(llm.calls, script["scenes"]):
-        asked = 2 if script["timing"]["scenes"][scene["scene_id"]]["duration_s"] > 12 else 1
+        asked = two_beats(scene, script["timing"]["scenes"][scene["scene_id"]]["duration_s"])
         assert per_scene[scene["scene_id"]] == asked, scene["scene_id"]
         assert ("exactly 2 entries" if asked == 2 else "exactly 1 entry") in call["user"]
         assert "- motion (English)" in call["user"]
@@ -251,6 +270,7 @@ def test_t1_v2_reply_repairs_an_allowed_tag_missing_from_subjects():
         framing="close_up",
         action="@char_kiwilo confronts @char_mangella by the pool, demanding answers once and for all.",
         lines=[],
+        camera_motion="hold",  # DEC-252 re-pin: not shot 1's camera (that repair has its own test)
     )
 
     # Unrepaired, shot 2's tag is refused as unlisted.

@@ -907,7 +907,9 @@ def _v2_episode(ep, *, body_lines=(3.5, 3.5), hook_line=3.0, cliff_line=4.0, pla
 def test_v2_template_passes_its_schema_and_an_episode_of_6_to_10_shots_lands_in_55_75_s():
     template = _v2_template()
     assert schemas.episode_template_errors(template) == []
-    assert (template["window_s"], template["scenes"], template["shots"]) == ([55, 75], [6, 10], [6, 10])
+    # DEC-252 re-pin: two beat shots per body scene by default, so the template's shots range is 6-18 (7 body
+    # scenes x 2, the recap, the hook and a cliffhanger past Veo's 8 s); the boards below stay one a scene.
+    assert (template["window_s"], template["scenes"], template["shots"]) == ([55, 75], [6, 10], [6, 18])
     assert (template["shots_per_scene"], template["max_shot_s"], template["min_shot_s"]) == ([1, 2], 12, 3.0)
     assert template["slots"]["hook"]["duration_s"] == [3.0, 6.0]
 

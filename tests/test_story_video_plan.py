@@ -157,7 +157,11 @@ def test_clip_prompt_has_no_entity_tags():
 
 
 
-_STAYS_STILL = "The set, the lighting and every character's look stay exactly as in the first frame."
+# DEC-252 re-pin: a v2 clip ends on the identity clause (the looks, set and light kept, the characters free
+# to move) and the style's tier2_prompt_suffix_v2, in place of the stays-still clause and tier2_prompt_suffix;
+# the legacy prompt below (video_prompt None) is byte for byte what it was.
+_STAYS_STILL = ("Keep every character's look, the set and the light as in the first frame; the characters move "
+                "freely within it.")
 
 
 def test_layered_clip_prompt_under_80_words():
@@ -184,8 +188,8 @@ def test_layered_clip_prompt_under_80_words():
         assert _STAYS_STILL in clip
         # Each part is its own sentence (sentence case): the camera, then the motion suffix last.
         assert video_plan.CAMERA_PHRASES["push_in"] in clip.lower()
-        assert clip.rstrip(".").lower().endswith(style["motion_rules"]["tier2_prompt_suffix"].lower())
-        assert clip.index(_STAYS_STILL) < clip.lower().index(style["motion_rules"]["tier2_prompt_suffix"].lower())
+        assert clip.rstrip(".").lower().endswith(style["motion_rules"]["tier2_prompt_suffix_v2"].lower())
+        assert clip.index(_STAYS_STILL) < clip.lower().index(style["motion_rules"]["tier2_prompt_suffix_v2"].lower())
         assert "@" not in clip and "#" not in clip and "%" not in clip
         assert ".." not in clip and ".," not in clip
 

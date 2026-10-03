@@ -286,7 +286,13 @@ def test_the_clip_prompt_says_the_emotion_the_micro_actions_and_the_cameras_inte
     """``prompting.layered_clip_prompt``: the emotion after the motion, the
     micro-actions after the secondary motion, the intent inside the camera
     sentence; dropped intent first, then micro-actions, then emotion, and
-    only then is the motion cut. With none given, today's text."""
+    only then is the motion cut. With none given, today's text.
+
+    DEC-252 re-pin: the closing is the identity clause and the style's v2
+    suffix (10 words longer than the stays-still clause and the old
+    suffix), so each threshold moves up by ten; the order is the same (the
+    new performance layer, not given here, has its own test in
+    tests/test_story_clip_performance.py)."""
     style = tss.CARTOON_FLAT
     motion = ("the tall yellow geometric cylinder lifts the monocle to his eye, squints, lowers it again and takes one "
               "slow step back toward the newsstand as the clock strikes")
@@ -299,25 +305,26 @@ def test_the_clip_prompt_says_the_emotion_the_micro_actions_and_the_cameras_inte
     assert full.startswith(f"{motion[0].upper()}{motion[1:]}. The mood is shocked. The triangle reacts with a small "
                            "movement. Micro-actions: the cylinder breathes visibly, hands shift slightly. Slow push-in "
                            "toward the subject, closing on the emotion. ")
-    assert prompting.STAYS_STILL in full and full.endswith("Snappy 2D animation, limited frames feel, bouncy motion.")
+    assert prompting.IDENTITY_KEEPS in full and full.endswith(
+        "Snappy 2D animation, limited frames feel, bouncy expressive motion, clear gestures, lively faces.")
 
     def present(prompt):
         return {name for name, marker in (("emotion", "The mood is shocked."), ("micro", "Micro-actions:"),
                                           ("intent", "closing on the emotion")) if marker in prompt}
 
     assert present(full) == {"emotion", "micro", "intent"}
-    # 28 words of motion, 38 of fixed parts, 4 + 8 + 4 of layers: all at 80, the intent gone at 75, the
-    # micro-actions at 70, the emotion at 60; only under that is the motion cut.
+    # 28 words of motion, 48 of fixed parts, 4 + 8 + 4 of layers: all at 90, the intent gone at 85, the
+    # micro-actions at 80, the emotion at 70; only under that is the motion cut.
+    at_90 = prompting.layered_clip_prompt(style, budget=90, **args)
+    assert present(at_90) == {"emotion", "micro", "intent"} and len(at_90.split()) <= 90
+    at_85 = prompting.layered_clip_prompt(style, budget=85, **args)
+    assert present(at_85) == {"emotion", "micro"} and "as the clock strikes" in at_85 and len(at_85.split()) <= 85
     at_80 = prompting.layered_clip_prompt(style, **args)
-    assert present(at_80) == {"emotion", "micro", "intent"} and len(at_80.split()) <= 80
-    at_75 = prompting.layered_clip_prompt(style, budget=75, **args)
-    assert present(at_75) == {"emotion", "micro"} and "as the clock strikes" in at_75 and len(at_75.split()) <= 75
-    at_70 = prompting.layered_clip_prompt(style, budget=70, **args)
-    assert present(at_70) == {"emotion"} and "as the clock strikes" in at_70 and len(at_70.split()) <= 70
-    at_55 = prompting.layered_clip_prompt(style, budget=55, **args)
-    assert present(at_55) == set() and "as the clock strikes" not in at_55 and len(at_55.split()) <= 55
+    assert present(at_80) == {"emotion"} and "as the clock strikes" in at_80 and len(at_80.split()) <= 80
+    at_65 = prompting.layered_clip_prompt(style, budget=65, **args)
+    assert present(at_65) == set() and "as the clock strikes" not in at_65 and len(at_65.split()) <= 65
     seen = []
-    for words in range(160, 54, -1):
+    for words in range(160, 64, -1):
         kept = present(prompting.layered_clip_prompt(style, budget=words, **args))
         assert not seen or kept <= seen[-1]
         seen.append(kept)
@@ -331,24 +338,32 @@ def test_the_clip_prompt_says_the_emotion_the_micro_actions_and_the_cameras_inte
 def test_a_v2_shots_clip_prompt_carries_the_beats_emotion_its_micro_actions_and_the_cameras_intent():
     """``shots.resolve_shot`` writes them from the scene, the staging and
     the camera motion: on Veo (160) all three; with no link known (80) the
-    fixture keeps the emotion, drops the rest; a staged glance is said."""
+    fixture keeps the emotion, drops the rest; a staged glance is said.
+
+    DEC-252 re-pin: the micro-actions ("breathes visibly, hands shift
+    slightly") are gone -- the gestures slot says only what the staging
+    says (a staged turn and face) -- and the performance (who speaks, who
+    reacts) follows the emotion; the closing is the identity clause. At 80
+    words the fixture now drops the emotion and the performance too (the
+    closing is ten words longer) and keeps its whole motion."""
     wide = _resolve(_plan("medium_single", SUBJECTS), budgets=WIDE)["video_prompt"]
     assert "The mood is shocked." in wide
-    assert (f"Micro-actions: {TALL} breathes visibly, hands shift slightly; {SHORT} breathes visibly, hands shift "
-            "slightly.") in wide
+    assert (f"The mood is shocked. {TALL[0].upper()}{TALL[1:]} speaks with the mouth moving on the words, face and "
+            f"brows carrying the emotion; {SHORT} reacts visibly, stepping back, eyes widening.") in wide
+    assert "Micro-actions" not in wide and "Gestures" not in wide  # nothing staged: no gesture invented
     assert "Static camera, locked-off shot, letting the moment breathe." in wide
-    assert prompting.STAYS_STILL in wide and len(wide.split()) <= 160
+    assert prompting.IDENTITY_KEEPS in wide and len(wide.split()) <= 160
     tss._no_v2_names(wide)
     narrow = _resolve(_plan("medium_single", SUBJECTS))["video_prompt"]
-    assert "The mood is shocked." in narrow and "Micro-actions" not in narrow and "letting the moment" not in narrow
-    assert len(narrow.split()) <= 80
+    assert "The mood is shocked." not in narrow and "speaks with" not in narrow and "letting the moment" not in narrow
+    assert "looking shocked at a giant toaster." in narrow and len(narrow.split()) <= 80
     staged = _plan("medium_single", SUBJECTS, camera_motion="push_in",
                    staging=[{"subject": "@char_captain_obvious", "position": "left", "facing": "the toaster",
                              "expression": "shocked"}])
     scene = tss._v2_scene()
     scene["function"] = "peak"
     clip = _resolve(staged, scene=scene, budgets=WIDE)["video_prompt"]
-    assert f"Micro-actions: {TALL} breathes visibly, a glance toward the toaster, hands shift slightly;" in clip
+    assert f"Gestures: {TALL} turns toward the toaster, face shocked." in clip
     assert "Slow push-in toward the subject, closing on the emotion to land the beat." in clip
     # A line's emotion other than the scene's names the speaker's.
     scene["emotion"] = "tension"

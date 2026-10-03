@@ -57,7 +57,8 @@
       "overlays": [],
       "summary": "default push_in 1.00→1.10 over the shot for dialogue, push_in 1.00→1.18 on peak/cliffhanger shots, pan_lr ±4 % on establishing shots, 30 fps, ease-in-out"
     },
-    "tier2_prompt_suffix": "subtle natural head and shoulder movement, realistic blinking, breathing, cloth sway, camera slowly pushes in, no morphing, no extra characters entering"
+    "tier2_prompt_suffix": "subtle natural head and shoulder movement, realistic blinking, breathing, cloth sway, camera slowly pushes in, no morphing, no extra characters entering",
+    "tier2_prompt_suffix_v2": "expressive character animation, clear gestures, lively faces, cloth sway, no morphing, no extra characters entering"
   },
   "typography": {
     "font_family": "Montserrat ExtraBold",

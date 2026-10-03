@@ -292,6 +292,8 @@ STYLE_TEMPLATE_SCHEMA = {
             "properties": {
                 "tier1": _MOTION_TIER1_SCHEMA,
                 "tier2_prompt_suffix": _NON_EMPTY_STRING,
+                # DEC-252: the v2 clip prompt's own suffix (optional; v1 reads the key above).
+                "tier2_prompt_suffix_v2": _NON_EMPTY_STRING,
             },
             "required": ["tier1", "tier2_prompt_suffix"],
             "additionalProperties": False,
@@ -397,6 +399,8 @@ STYLE_LOCK_SCHEMA = {
             "properties": {
                 "tier1": _MOTION_TIER1_SCHEMA,
                 "tier2_prompt_suffix": _NON_EMPTY_STRING,
+                # DEC-252: the v2 clip prompt's own suffix (optional; v1 reads the key above).
+                "tier2_prompt_suffix_v2": _NON_EMPTY_STRING,
             },
             "required": ["tier1", "tier2_prompt_suffix"],
             "additionalProperties": False,

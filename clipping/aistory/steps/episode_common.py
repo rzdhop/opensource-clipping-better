@@ -165,15 +165,36 @@ def _entry(season, ep):
     return next((entry for entry in season["arc"] if entry["ep"] == ep), None)
 
 
+def with_clip_suffix(lock) -> dict:
+    """*lock* with its shipped template's ``tier2_prompt_suffix_v2`` when it
+    has none (DEC-252): a story locked before the key existed still ends
+    its v2 clip prompts on the performance suffix, not on the stillness one
+    (``prompting.clip_motion_suffix``), whenever a shot is resolved again.
+    In memory only -- ``style_lock.json`` is never written -- and only that
+    key: a v1 prompt never reads it (RC-Q1). A new copy when it is filled,
+    *lock* itself otherwise (also for a template that cannot be read)."""
+    rules = lock.get("motion_rules") or {}
+    if rules.get("tier2_prompt_suffix_v2"):
+        return lock
+    try:
+        shipped = templates.load_style(lock.get("template_id"))["motion_rules"].get("tier2_prompt_suffix_v2")
+    except (KeyError, OSError, ValueError):
+        return lock
+    if not shipped:
+        return lock
+    return dict(lock, motion_rules=dict(rules, tier2_prompt_suffix_v2=shipped))
+
+
 def load_context(stores, story_id, ep) -> EpisodeContext:
     """The :class:`EpisodeContext` of episode *ep* of *story_id* in
     *stores*. ``StepFailed`` for a story that does not exist, a style that is
-    not locked, a season or an episode template that cannot be read."""
+    not locked, a season or an episode template that cannot be read. The
+    style lock carries its v2 clip suffix (:func:`with_clip_suffix`)."""
     try:
         story = stores.get(story_id)
     except KeyError:
         raise StepFailed(f"There is no story {story_id!r}.") from None
-    style_lock = entities.read_lock(stores, story_id)
+    style_lock = with_clip_suffix(entities.read_lock(stores, story_id))
     try:
         season = stores.read_doc(story_id, store_mod.SEASON_DOC)
     except schemas.SchemaError as exc:

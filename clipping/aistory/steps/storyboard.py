@@ -17,7 +17,9 @@ durations and transitions) and a re-timed script:
 - :func:`build_fast` -- every scene by ``shots.fast_plan``: deterministic, no
   call at all (DEC-109), so the web layer runs it inline;
 - :func:`run` (the job) -- **T1** (**T1 v2** on a v2 story, phase 7 stage 4:
-  one beat shot a scene, two past the template's ``max_shot_s``) for each
+  one beat shot a scene, two past the template's ``max_shot_s`` -- and,
+  DEC-252, two for a body scene with two lines or two characters and the
+  length for two, :func:`beat_shot_count`) for each
   scene with no plan, a stale plan
   (its scene was rewritten since) or a fast one; every other scene keeps its
   plan as it is (``shots.plans_from_storyboard``). The storyboard is written
@@ -37,7 +39,7 @@ import time
 
 from clipping.providers import pricing
 
-from .. import context, media_policy, prompts, shots, timing, voices
+from .. import context, media_policy, prompts, schemas, shots, timing, voices
 from .. import store as store_mod
 from . import clips, entities, episode_common, llm_call, voice_lines
 from . import script as script_step
@@ -280,12 +282,26 @@ def _assets_doc(ec):
         return None
 
 
-def beat_shot_count(ec, script, scene, *, limit_s=None):
-    """T1 v2's ``(lo, hi)`` for *scene* (phase 7 stage 4, A12): one beat shot,
-    two only when the scene runs past the template's ``max_shot_s`` (one clip
+def _two_beats(ec, scene, seconds) -> bool:
+    """DEC-252's rhythm (the human, 2026-10-03: "boring, no rhythm"): a body
+    scene (``schemas.BODY_FUNCTIONS``) with two lines or two characters is
+    two beat shots when its *seconds* hold two shots of the template's
+    ``min_shot_s`` each. The recap, the hook and the cliffhanger keep one."""
+    return (scene["function"] in schemas.BODY_FUNCTIONS
+            and (len(scene.get("lines") or ()) >= 2 or len(scene.get("characters") or ()) >= 2)
+            and seconds >= 2 * ec.template["min_shot_s"])
+
+
+def beat_shot_count(ec, script, scene, *, limit_s=None, rhythm=True):
+    """T1 v2's ``(lo, hi)`` for *scene* (phase 7 stage 4, A12): two beat
+    shots when the scene runs past the template's ``max_shot_s`` (one clip
     sells at most that much, DEC-208) -- or past *limit_s* when given
     (:func:`max_shot_s`, stage E) -- as its voices will measure it
-    (:func:`expected_scene_seconds`, DEC-250). A template with no
+    (:func:`expected_scene_seconds`, DEC-250); and, with *rhythm* (DEC-252,
+    the default), a body scene with the lines and the length for two
+    (:func:`_two_beats`); one otherwise. ``rhythm=False`` is the clip-length
+    rule alone: what :func:`short_of_beats` reads, so a storyboard planned
+    before DEC-252 is never planned again for it. A template with no
     ``max_shot_s`` keeps the episode's own pair."""
     max_shot = ec.template.get("max_shot_s")
     if max_shot is None:
@@ -294,22 +310,27 @@ def beat_shot_count(ec, script, scene, *, limit_s=None):
         max_shot = limit_s
     lo, hi = ec.episode_defaults["shots_per_scene"]
     # DEC-250: as the voices will measure it, not as the estimate says.
-    n = 2 if expected_scene_seconds(ec, script, scene) > max_shot else 1
+    seconds = expected_scene_seconds(ec, script, scene)
+    n = 2 if seconds > max_shot or (rhythm and _two_beats(ec, scene, seconds)) else 1
     n = min(max(n, lo), hi)
     return n, n
 
 
 def short_of_beats(ec, script, plans, limit_s) -> set:
     """The scenes of a fully animated v2 story whose plan has fewer beat
-    shots than :func:`beat_shot_count` asks under *limit_s* now (stage E: a
+    shots than one clip can cover under *limit_s* now (stage E: a
     storyboard planned for a longer clip than its link's, e.g. on seedance
-    before the Veo key was set): the step plans them again, the estimate
-    counts them. Empty for any other story, or without *limit_s*."""
+    before the Veo key was set; :func:`beat_shot_count` without its rhythm,
+    DEC-252 -- a scene planned as one beat before the two-beat default
+    still fits its clip, so it is not planned again for that): the step
+    plans them again, the estimate counts them. Empty for any other story,
+    or without *limit_s*."""
     if limit_s is None or not media_policy.fully_animated(ec.story):
         return set()
     return {scene["scene_id"] for scene in script["scenes"]
             if plans.get(scene["scene_id"])
-            and len(plans[scene["scene_id"]]) < beat_shot_count(ec, script, scene, limit_s=limit_s)[0]}
+            and len(plans[scene["scene_id"]]) < beat_shot_count(ec, script, scene, limit_s=limit_s,
+                                                                 rhythm=False)[0]}
 
 
 def shot_inputs_v2(ec, script, scene, *, limit_s=None) -> dict:
@@ -382,7 +403,38 @@ def plan_scene(ctx, ec, script, plans, scene, *, tools, announced, limit_s=None)
     return [dict(shot) for shot in reply["shots"]]
 
 
-def _repair_t1_v2_reply(reply, *, tags_allowed) -> list:
+# DEC-252: the order a repeated camera motion moves along (:func:`_repair_t1_v2_reply`):
+# from a motion to the next one here that neither neighbour has -- a push-in
+# becomes a pan, a pan a pull-out, and so on, rather than the same move again.
+_CAMERA_ROTATION = ("push_in", "pan_lr", "pull_out", "pan_rl", "hold", "pan_du", "pan_ud")
+
+
+def _repair_camera(reply, previous_camera) -> list:
+    """DEC-252's half of :func:`_repair_t1_v2_reply`: a shot whose
+    ``camera_motion`` repeats the shot's before it (the scene's first: the
+    episode's shot before the scene, *previous_camera*) moves to the next
+    motion of :data:`_CAMERA_ROTATION` that neither neighbour has. A motion
+    not in that list is left for the validator."""
+    fixed = []
+    shots_ = [shot for shot in reply["shots"] if isinstance(shot, dict)]
+    before = previous_camera
+    for i, shot in enumerate(shots_):
+        camera = shot.get("camera_motion")
+        if camera in _CAMERA_ROTATION and camera == before:
+            after = shots_[i + 1].get("camera_motion") if i + 1 < len(shots_) else None
+            start = _CAMERA_ROTATION.index(camera)
+            for step in range(1, len(_CAMERA_ROTATION)):
+                candidate = _CAMERA_ROTATION[(start + step) % len(_CAMERA_ROTATION)]
+                if candidate not in (before, after):
+                    shot["camera_motion"] = candidate
+                    fixed.append(f"shot {i + 1}: camera_motion {camera!r} repeated the previous shot's, now "
+                                 f"{candidate!r}")
+                    break
+        before = shot.get("camera_motion")
+    return fixed
+
+
+def _repair_t1_v2_reply(reply, *, tags_allowed, previous_camera=None) -> list:
     """Repair a T1 v2 reply in place before its validator runs (fix B,
     found when gemini kept failing T1 v2 twice on one scene): a
     @char/%prop/#place tag used in a shot's ``action``, ``motion`` or
@@ -393,11 +445,15 @@ def _repair_t1_v2_reply(reply, *, tags_allowed) -> list:
     :func:`clipping.aistory.prompts.validate_t1_v2` then refuses it as
     unlisted ("tag '@char_x' is used but not listed in subjects"). A tag
     not allowed in the scene at all is left untouched, for the validator to
-    refuse as it always has. Returns one description per tag added, for the
-    caller to log."""
+    refuse as it always has. DEC-252: a camera motion repeating the shot's
+    before it (*previous_camera* for the scene's first) is moved on
+    (:func:`_repair_camera`) rather than refused -- a retry costs a call,
+    the next motion costs nothing. Returns one description per repair, for
+    the caller to log."""
     added = []
     if not isinstance(reply, dict) or not isinstance(reply.get("shots"), list):
         return added
+    added.extend(_repair_camera(reply, previous_camera))
     allowed = set(tags_allowed)
     for i, shot in enumerate(reply["shots"]):
         if not isinstance(shot, dict) or not isinstance(shot.get("subjects"), list):
@@ -430,21 +486,26 @@ def plan_scene_v2(ctx, ec, script, plans, scene, *, tools, announced, limit_s=No
     (A13): the call also reads the ledger's wardrobe and holder facts for
     the scene (``context.slice_for_shot``; the previous shots' action and
     staging are T1 v2's own block already, so not repeated). Stage E: two
-    beat shots for a scene past *limit_s* (:func:`max_shot_s`)."""
+    beat shots for a scene past *limit_s* (:func:`max_shot_s`); DEC-252:
+    two for a body scene with the lines and the length for two, and no
+    shot repeating the camera motion of the shot before it."""
     inputs = shot_inputs_v2(ec, script, scene, limit_s=limit_s)
     pack = script_step._pack(ec, ctx, announced)
     continuity = context.slice_for_shot(ec, scene, None, None, ledger=script_step.ledger_of(ec))
-    system, user, schema = prompts.build_t1_v2(pack, scene=scene, previous_shots=_previous_shots(
-        script, plans, scene["scene_id"], v2=True), continuity=continuity, **_builder_kwargs(inputs))
+    previous = _previous_shots(script, plans, scene["scene_id"], v2=True)
+    # DEC-252: the scene's first shot never repeats the camera motion of the shot just before the scene.
+    previous_camera = previous[-1]["camera_motion"] if previous else None
+    system, user, schema = prompts.build_t1_v2(pack, scene=scene, previous_shots=previous, continuity=continuity,
+                                               **_builder_kwargs(inputs))
 
     def validate(reply):
-        added = _repair_t1_v2_reply(reply, tags_allowed=inputs["tags_allowed"])
+        added = _repair_t1_v2_reply(reply, tags_allowed=inputs["tags_allowed"], previous_camera=previous_camera)
         if added:
             ctx.on_log("🩹 T1 v2 reply repaired: " + "; ".join(added))
         return prompts.validate_t1_v2(reply, scene=scene, shots_per_scene=inputs["shots_per_scene"],
                                       modifiers_allowed=inputs["modifiers_allowed"],
                                       tags_allowed=inputs["tags_allowed"], n_lines=len(scene["lines"]),
-                                      names=inputs["names"])
+                                      names=inputs["names"], previous_camera=previous_camera)
 
     reply = llm_call.call_json(ctx, "T1v2", system, user, schema, validator=validate, runner=tools.runner,
                                time_fn=tools.time_fn)

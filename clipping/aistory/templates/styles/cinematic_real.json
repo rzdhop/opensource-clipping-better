@@ -52,7 +52,8 @@
       "overlays": [],
       "summary": "push_in 1.00→1.06 (slow), pan_lr ±3 %, add handheld micro-jitter option (±2 px sinusoidal) on tension scenes"
     },
-    "tier2_prompt_suffix": "photoreal, natural human motion, subtle handheld camera, film grain, no morphing"
+    "tier2_prompt_suffix": "photoreal, natural human motion, subtle handheld camera, film grain, no morphing",
+    "tier2_prompt_suffix_v2": "photoreal, natural expressive human motion, clear gestures, lively faces, film grain, no morphing"
   },
   "typography": {
     "font_family": "Bebas Neue",

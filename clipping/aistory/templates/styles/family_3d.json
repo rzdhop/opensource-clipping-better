@@ -54,7 +54,8 @@
       "overlays": [],
       "summary": "push_in 1.00→1.08 dialogue, pan_ud on tall sets, 30 fps"
     },
-    "tier2_prompt_suffix": "gentle character animation, squash-and-stretch feel, soft camera dolly, consistent character model"
+    "tier2_prompt_suffix": "gentle character animation, squash-and-stretch feel, soft camera dolly, consistent character model",
+    "tier2_prompt_suffix_v2": "lively character animation, squash-and-stretch feel, expressive faces, clear gestures, consistent character model"
   },
   "typography": {
     "font_family": "Fredoka Bold",

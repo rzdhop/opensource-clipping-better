@@ -2170,7 +2170,8 @@ def test_the_largest_t1_v2_replies_fit_their_caps_but_not_much_smaller_ones():
             "action": "@char_kiwilo and @char_mangella " + _fr_words(42), "motion": "@char_kiwilo " + _fr_words(24),
             "staging": staging, "subjects": tags, "lines": [1, 2]}
     names = {"char_kiwilo": "Kiwilo", "char_mangella": "Mangella", "char_broccolia": "Broccolia"}
-    t1 = {"shots": [shot, dict(shot, framing="close_up", lines=[3, 4])]}
+    # DEC-252 re-pin: the second shot's camera differs from the first's (a repeat is refused now).
+    t1 = {"shots": [shot, dict(shot, framing="close_up", camera_motion="pull_out", lines=[3, 4])]}
     assert prompts.validate_t1_v2(t1, scene=V2_SCENE, shots_per_scene=(2, 2), modifiers_allowed=["handheld"],
                                   tags_allowed=tags, n_lines=4, names=names) == []
     t1r = {"shot": dict(shot, framing="close_up", lines=[1])}

@@ -311,7 +311,8 @@ SCHEMA_NAMES = {
 # T1v2/T1rv2 (phase 7 stage 4, DEC-227): measured on the same live-sized data
 # with their own inputs at their caps (tests/test_story_episode_prompt_budgets.py):
 # T1v2 1,756, T1rv2 1,787; each the worst case + 15 %, rounded up to ten (the
-# plan's 2,000 was an estimate).
+# plan's 2,000 was an estimate). Re-measured for DEC-252 (the performance and
+# camera-variety asks): T1v2 1,865, T1rv2 1,852.
 #
 # D1 (phase 7 stage 5a, DEC-228): the bible past its cut, the world at B2's
 # caps, K1's text at its caps, 11 other cast members at their name and
@@ -354,7 +355,7 @@ SCHEMA_NAMES = {
 # its worst case fits the default pack budget (tests/test_story_keyframe_gate.py)
 # -- version 2 (phase 8 stage B: looks, sheets, the scene) too, at 1,145.
 INPUT_BUDGET = {"E1": 1820, "E2": 1660, "E3": 2530, "E4": 3900, "T1": 1270, "T1r": 1410, "S3": 3740, "F1": 3950, "N1": 3740,
-                "D2": 2420, "D3": 1940, "R1v2": 1170, "T1v2": 2020, "T1rv2": 2060, "D1": 3890,
+                "D2": 2420, "D3": 1940, "R1v2": 1170, "T1v2": 2150, "T1rv2": 2130, "D1": 3890,
                 "D4": 2270, "D5": 3930, "D6": 3560,
                 "E1v2": 2970, "E2v2": 2520, "E3v2": 3380, "L1": 3920, "J1": 3990}
 
@@ -3456,7 +3457,12 @@ def validate_t1r(reply, *, scene, shots, index, modifiers_allowed, tags_allowed,
 # never was: the beat's purpose, the place's descriptor, each line's delivery,
 # the scene's on-screen text and sound, the props' look, and the previous
 # shot's action and staging. New ids (T1v2, T1rv2): the v1 T1/T1r strings,
-# caps and budgets are untouched (RC-M1).
+# caps and budgets are untouched (RC-M1). DEC-252: the motion asks one clear
+# action per framed character and the speaker's mouth and face (never
+# "subtle", "small", "slight"), the camera motion never the previous shot's
+# (T1 v2 refuses a repeat, after storyboard._repair_t1_v2_reply moved it; T1r
+# v2, an author's re-plan of one shot, is asked only); and a body scene is two
+# beat shots when it has the lines and the length (storyboard.beat_shot_count).
 
 T1_V2_ACTION_WORDS = 45
 T1_V2_MOTION_WORDS = 25
@@ -3466,13 +3472,15 @@ _T1_V2_TIGHT = ("close_up", "extreme_close_up")
 
 _T1_V2_FIELDS = (
     "- framing: one of {framings}\n"
-    "- camera_motion: one of {camera_motions}\n"
+    "- camera_motion: one of {camera_motions}; never the previous shot's camera_motion\n"
     "- modifiers: zero or more of {modifiers} (an empty array if none apply)\n"
     "- action (English): the plot beat of this shot -- who does what to whom, and why it matters to the story -- "
     "in at most 45 words, not a pose; refer to people, the place and objects only by their tags ({tag_examples}), "
     "never by name\n"
-    "- motion (English): at most 25 words: what the characters physically do while the clip plays, with motion "
-    "verbs (turns, lifts, steps back), tags only; not the camera, which camera_motion already says\n"
+    "- motion (English): at most 25 words: what the characters physically do while the clip plays -- one clear "
+    "physical action for each character in the frame, with strong motion verbs (turns, lifts, steps back, slams, "
+    "points), and whoever speaks a line in this shot with the mouth moving on the words and the face showing it; "
+    "never 'subtle', 'small' or 'slight'; tags only; not the camera, which camera_motion already says\n"
     "- staging: 1 to 4 entries, one per character or object in the frame: subject (its tag), position (left, "
     "centre, right or back), facing (at most 4 words), expression (at most 4 words)\n"
     "- subjects: every tag visible in this shot, from {tags}\n"
@@ -3480,12 +3488,14 @@ _T1_V2_FIELDS = (
 
 _T1_V2_ASK_TEMPLATE = (
     "Plan this scene as animated beat shots: each shot becomes one video clip, so it carries a whole moment of "
-    "the story, not a pose.\n\n"
+    "the story, not a pose, and its characters act it: whoever speaks moves the mouth on the words, the others "
+    "react visibly, nobody stands idle.\n\n"
     "Give 'shots': {count}, each with:\n"
     + _T1_V2_FIELDS +
     "- lines: which of this scene's numbered lines (1-{n_lines}) are spoken during this shot, in order; every "
     "line belongs to exactly one shot\n\n"
-    "Vary the framing: never the previous shot's framing.{close_up_note}{insert_prop_note}\n\n"
+    "Vary the framing and the camera: never the previous shot's framing, never the previous shot's camera_motion."
+    "{close_up_note}{insert_prop_note}\n\n"
     "Never use real people, brands, studio names or copyrighted characters."
 )
 
@@ -3639,14 +3649,17 @@ def build_t1_v2(pack, *, scene, lines, characters, place, props, previous_shots,
     return _system(pack), user, t1_v2_schema((lo, hi), modifiers_allowed, tags_allowed)
 
 
-def _t1_v2_shot_errors(errors, path, shot, *, names, previous_framing, tags_allowed) -> None:
+def _t1_v2_shot_errors(errors, path, shot, *, names, previous_framing, tags_allowed, previous_camera=None) -> None:
     """:func:`_t1_shot_errors` at T1 v2's 45-word action, plus its own
     fields: ``motion`` (25 words, its tags in ``subjects``, no name),
     ``staging`` (at most 4 entries, each subject once and in ``subjects``,
-    facing and expression at most 4 words, their tags the scene's), and the
-    v2 ``insert_prop`` rule (a prop among the subjects, stage 3c)."""
+    facing and expression at most 4 words, their tags the scene's), the v2
+    ``insert_prop`` rule (a prop among the subjects, stage 3c), and no
+    repeat of *previous_camera* (DEC-252; None: not checked)."""
     _t1_shot_errors(errors, path, shot, names=names, previous_framing=previous_framing,
                     action_words=T1_V2_ACTION_WORDS)
+    if previous_camera is not None and shot["camera_motion"] == previous_camera:
+        errors.append(f"{path}.camera_motion: {shot['camera_motion']!r} repeats the previous shot's camera motion")
     subjects = set(shot["subjects"])
     _text_errors(errors, f"{path}.motion", shot["motion"], max_words=T1_V2_MOTION_WORDS)
     for tag in _TAG_PATTERN.findall(shot["motion"]):
@@ -3678,12 +3691,16 @@ def _t1_v2_shot_errors(errors, path, shot, *, names, previous_framing, tags_allo
         errors.append(f"{path}.subjects: framing 'insert_prop' needs a prop tag (%...) among the subjects")
 
 
-def validate_t1_v2(reply, *, scene, shots_per_scene, modifiers_allowed, tags_allowed, n_lines, names) -> list:
+def validate_t1_v2(reply, *, scene, shots_per_scene, modifiers_allowed, tags_allowed, n_lines, names,
+                   previous_camera=None) -> list:
     """Post-validation for a T1 v2 reply: :func:`validate_t1`'s rules (shot
     count, tags, names, line numbers once each and ascending, no framing
     repeated inside the scene) at T1 v2's caps, its own fields
     (:func:`_t1_v2_shot_errors`), and every line of the scene covered by a
-    shot (a beat shot carries its scene's lines)."""
+    shot (a beat shot carries its scene's lines). DEC-252: no shot repeats
+    the camera motion of the shot before it -- inside the scene, and the
+    first against *previous_camera* (the episode's shot just before this
+    scene; None: none)."""
     lo, hi = shots_per_scene
     errors = schemas.validate(reply, t1_v2_schema((lo, hi), modifiers_allowed, tags_allowed))
     if errors:
@@ -3698,8 +3715,9 @@ def validate_t1_v2(reply, *, scene, shots_per_scene, modifiers_allowed, tags_all
     for i, shot in enumerate(shots):
         path = f"$.shots[{i}]"
         _t1_v2_shot_errors(errors, path, shot, names=names, previous_framing=previous_framing,
-                           tags_allowed=tags_allowed)
+                           tags_allowed=tags_allowed, previous_camera=previous_camera)
         previous_framing = shot["framing"]
+        previous_camera = shot["camera_motion"]
         for line_no in shot["lines"]:
             if not (1 <= line_no <= n_lines):
                 errors.append(f"{path}.lines: {line_no} is not a valid line number (1-{n_lines})")
@@ -3752,7 +3770,9 @@ def build_t1r_v2(pack, *, scene, shots, index, note, lines, characters, place, p
 def validate_t1r_v2(reply, *, scene, shots, index, modifiers_allowed, tags_allowed, n_lines, names) -> list:
     """Post-validation for a T1r v2 reply: :func:`validate_t1r`'s rules (the
     same lines, no framing repeated with either neighbour) on a v2 shot
-    (:func:`_t1_v2_shot_errors`)."""
+    (:func:`_t1_v2_shot_errors`). The camera motion is asked to differ from
+    the shot before (the shared fields) but never refused here (DEC-252):
+    the author's note may ask for that very motion."""
     errors = schemas.validate(reply, t1r_v2_schema(modifiers_allowed, tags_allowed))
     if errors:
         return errors

@@ -51,7 +51,8 @@
       "overlays": [],
       "summary": "push_in 1.00→1.12, occasional pan_lr on wide shots, allow hold (no motion) on 'pillow shots'"
     },
-    "tier2_prompt_suffix": "limited animation feel, hair and cloth sway, slow camera push, no lip flapping"
+    "tier2_prompt_suffix": "limited animation feel, hair and cloth sway, slow camera push, no lip flapping",
+    "tier2_prompt_suffix_v2": "expressive limited animation, clear gestures, lively faces, hair and cloth sway"
   },
   "typography": {
     "font_family": "Bangers",

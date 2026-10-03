@@ -262,7 +262,10 @@ def test_t1r_worst_case_fits_its_budget():
 # v2: the scene's two shots so far at 45 words, a 60-word note). Measured
 # (chars / 4): T1v2 1,756, T1rv2 1,787; each budget the worst case + 15 %,
 # rounded up to ten. The v1 rows above are untouched (RC-M1).
-MEASURED_V2 = {"T1v2": 1756, "T1rv2": 1787}
+# DEC-252 re-pin (the performance and camera-variety asks, by DEC-138's method): T1v2 1,756 -> 1,865 (the
+# longer motion and camera fields, the "nobody stands idle" intro, the camera in the variety sentence), T1rv2
+# 1,787 -> 1,852 (the shared fields only); the budgets move to 2,150 and 2,130.
+MEASURED_V2 = {"T1v2": 1865, "T1rv2": 1852}
 _DENSITY = LIVE_CHARACTERS["char_kiwilo"]["descriptor"]  # the live descriptor's (words, characters)
 
 

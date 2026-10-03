@@ -4312,7 +4312,8 @@ def _resolve_again(ec, script, board, to_resolve, errors) -> None:
     for shot_id, (path, wanted, prompt) in to_resolve.items():
         shot = by_id[shot_id]
         scene = scenes[shot["scene_id"]]
-        motion = shots.motion_for(shot["framing"], wanted or shot["camera_motion"], scene["function"], lock)
+        # DEC-252: on a v2 story the shot's own camera comes before the scene function's rule.
+        motion = shots.motion_for(shot["framing"], wanted or shot["camera_motion"], scene["function"], lock, v2=v2)
         if wanted is not None and motion["type"] != wanted:
             what = (f"a {shot['framing']} shot" if shot["framing"] in by_function
                     else f"a {scene['function']} scene")

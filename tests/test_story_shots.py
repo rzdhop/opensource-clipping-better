@@ -1098,7 +1098,10 @@ def test_refresh_prompts_changes_only_prompts_refs_and_resolved_from():
 
 CARTOON_FLAT = templates.load_style("cartoon_flat")
 _V2_CONSTRAINTS = "Clean frame: no captions, lettering, logos or watermarks; each character appears once."
-_STAYS_STILL = "The set, the lighting and every character's look stay exactly as in the first frame."
+# DEC-252 re-pin: a v2 clip's closing is the identity clause now (prompting.IDENTITY_KEEPS), not the
+# stays-still one.
+_STAYS_STILL = ("Keep every character's look, the set and the light as in the first frame; the characters move "
+                "freely within it.")
 
 
 def _v2_look(**changes):

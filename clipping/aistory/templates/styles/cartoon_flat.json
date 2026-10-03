@@ -51,7 +51,8 @@
       "overlays": [],
       "summary": "pan_lr and hold preferred, push_in ≤ 1.05, 30 fps"
     },
-    "tier2_prompt_suffix": "snappy 2D animation, limited frames feel, bouncy motion"
+    "tier2_prompt_suffix": "snappy 2D animation, limited frames feel, bouncy motion",
+    "tier2_prompt_suffix_v2": "snappy 2D animation, limited frames feel, bouncy expressive motion, clear gestures, lively faces"
   },
   "typography": {
     "font_family": "Luckiest Guy",
