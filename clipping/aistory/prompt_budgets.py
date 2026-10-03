@@ -134,3 +134,17 @@ def over_sentence(kind, shot_id, link, text, *, budget, override=False, live=Non
     return (f"{head} ({words} words) is over {label}'s budget of {budget} words -- built for another link, or "
             f"{label}'s limit moved since: refresh the prompts (the storyboard's Refresh prompts, or the storyboard "
             f"step again) so they are built to {label}; nothing was sent.")
+
+
+def note_over_sentence(kind, shot_id, link, words, note_words, *, budget, shortest=None) -> str:
+    """Why the *kind* prompt of shot *shot_id* (*words* with its note, of
+    which *note_words* are the note's tail) cannot be sent to *link* even
+    resolved again to the room the note leaves (DEC-249): the ladder's last
+    rung (*shortest* words; None: not reached) is still over *budget* with
+    the note. Says how long a note fits; nothing is sent."""
+    label = _label(link)
+    room = max(budget - shortest, 0) if shortest is not None else None
+    fits = f" (about {room} words of note fit this shot on {label})" if room is not None else ""
+    return (f"shot {shot_id}'s {kind} prompt ({words} words, {note_words} of them its note) is over {label}'s budget "
+            f"of {budget} words even with its context shortened to make room for the note: shorten the note{fits}, or "
+            f"ask again without one; nothing was sent.")

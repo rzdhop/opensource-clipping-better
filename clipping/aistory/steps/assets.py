@@ -738,6 +738,68 @@ def continuity_source(ec, storyboard, shot):
     return (previous, path) if path is not None else None
 
 
+def _words(text) -> int:
+    return len(text.split())
+
+
+def fit_to_budget(ec, shot, note, link, *, budget, continuity=None) -> tuple:
+    """``(prompt, info)`` -- the prompt a layered *shot* is sent on *link*
+    when its stored prompt with *note* at its tail is over *budget* (DEC-249):
+    the shot resolved again (``shots.resolve_stored``) to the room the note
+    leaves, so the context layers make room and the note is kept whole; a
+    stored prompt built to another link's budget is fitted to this link's
+    the same way. *info*: ``{"from", "to", "note", "budget"}`` in words.
+    ``(None, shortest)`` when even the ladder's last rung is over with the
+    note (*shortest*: the words it got down to; None when the shot cannot be
+    resolved again -- the script or storyboard unreadable, the scene gone:
+    the stored prompt's own refusal stands). *continuity*: as
+    ``shots.resolve_stored``'s (None: as stored). The prompt hash is never
+    made of this prompt: it stays the stored one's, so what is current never
+    moves with the room a link leaves."""
+    stored = effective_prompt(shot, ec.entities, note)
+    note_words = _words(stored) - _words(effective_prompt(shot, ec.entities, None))
+    try:
+        script = episode_common.read_episode(ec, SCRIPT_DOC)
+        board = episode_common.read_episode(ec, STORYBOARD_DOC)
+    except StepFailed:
+        return None, None
+    if script is None:
+        return None, None
+    budgets = prompt_budgets.for_links(link)._replace(keyframe=budget - note_words)
+    try:
+        resolved = shots_mod.resolve_stored(shot, script=script, storyboard=board, entities=ec.entities,
+                                            style_lock=ec.style_lock, consistency_mode=ec.consistency_mode,
+                                            ledger=script_step.ledger_of(ec), budgets=budgets, continuity=continuity)
+    except shots_mod.PromptOverBudget as exc:
+        return None, exc.words
+    except (KeyError, ValueError):
+        return None, None
+    prompt = effective_prompt(dict(shot, image_prompt=resolved["image_prompt"]), ec.entities, note)
+    return prompt, {"from": _words(stored), "to": _words(prompt), "note": note_words, "budget": budget}
+
+
+def _fitted(ec, shot, note, link, *, budget, continuity=None) -> tuple:
+    """``(sent prompt, over, info)`` of a layered *shot* on *link*: its stored
+    prompt with *note* when it fits *budget* (``prompt_budgets.over_sentence``),
+    else :func:`fit_to_budget`'s; *over* why nothing can be sent when even
+    that fails, *info* the re-fit's when one was made (else None)."""
+    prompt = effective_prompt(shot, ec.entities, note)
+    override = bool(shot.get("prompt_override"))
+    over = prompt_budgets.over_sentence("keyframe", shot["shot_id"], link, prompt, budget=budget, override=override)
+    if not over or override:
+        return prompt, over, None
+    fitted, info = fit_to_budget(ec, shot, note, link, budget=budget, continuity=continuity)
+    if fitted is None:
+        note_words = _words(prompt) - _words(effective_prompt(shot, ec.entities, None))
+        if note_words:
+            over = prompt_budgets.note_over_sentence("keyframe", shot["shot_id"], link, _words(prompt), note_words,
+                                                     budget=budget, shortest=info)
+        return prompt, over, None
+    # By construction within the budget; the link's own limit (characters) is checked once more.
+    over = prompt_budgets.over_sentence("keyframe", shot["shot_id"], link, fitted, budget=budget)
+    return fitted, over, info
+
+
 def request_parts(ec, shot, *, note, link=None, continuity=None, alone=None) -> dict:
     """What *shot*'s image request is made of in the story's mode now:
     ``{kind, prompt, negative, consistency, size, references, missing,
@@ -762,41 +824,48 @@ def request_parts(ec, shot, *, note, link=None, continuity=None, alone=None) -> 
 
     ``over`` (stage F2): why a layered shot's prompt cannot be sent to
     *link* now (``prompt_budgets.over_sentence``: over the link's limit, or
-    over its word budget because it was built to another link's -- a
-    switch, or a limit that moved since), else None; the hash never moves
-    with it. :meth:`_Assets.make_image` refuses such a shot, calling
-    nothing; the dispatch check (F1) is the backstop."""
+    over its word budget), else None; the hash never moves with it.
+    :meth:`_Assets.make_image` refuses such a shot, calling nothing; the
+    dispatch check (F1) is the backstop. Before refusing, a stored prompt
+    that is over with its *note* at its tail (the keyframe auto-fix's, a
+    regenerate's: appended after the prompt was built to its budget), or
+    built to another link's budget, is resolved again to the room the link
+    leaves (DEC-249, :func:`fit_to_budget`): ``prompt`` is then the fitted
+    one, ``refit`` says from and to how many words (else None), and the
+    ``hash`` stays the stored prompt's, so nothing made before reads stale."""
     mode = ec.consistency_mode
     prompt = effective_prompt(shot, ec.entities, note)
     negative = shot["negative_prompt"]
-    over = (prompt_budgets.over_sentence("keyframe", shot["shot_id"], link, prompt,
-                                         budget=prompt_budgets.keyframe_words(link),
-                                         override=bool(shot.get("prompt_override")))
-            if link is not None and shot.get("prompt_layout") else None)
+    layered = link is not None and bool(shot.get("prompt_layout"))
+    budget = prompt_budgets.keyframe_words(link) if layered else None
+    # DEC-249: the stored prompt is what the hash is made of; what is sent is
+    # fitted to the link when the stored one, with its note, is over.
+    sent_prompt, over, refit = _fitted(ec, shot, note, link, budget=budget) if layered else (prompt, None, None)
     if mode == PROMPT_ONLY:
         kind, paths, missing, ref_shas = gen.IMAGE, [], [], []
-        return {"kind": kind, "prompt": prompt, "negative": negative, "consistency": mode, "size": SHOT_SIZE,
+        return {"kind": kind, "prompt": sent_prompt, "negative": negative, "consistency": mode, "size": SHOT_SIZE,
                 "references": paths, "missing": missing,
-                "hash": prompt_hash(prompt, negative, mode, SHOT_SIZE, ref_shas), "over": over}
+                "hash": prompt_hash(prompt, negative, mode, SHOT_SIZE, ref_shas), "over": over, "refit": refit}
     kind = gen.IMAGE_EDIT
     paths, missing = reference_paths(ec, shot, link=link)
     ref_shas = [_sha256_file(path) or f"unreadable:{path}" for path in paths] + [f"missing:{rel}"
                                                                                  for rel in missing]
     slot = continuity_slot(shot, link)
     if slot is None:
-        return {"kind": kind, "prompt": prompt, "negative": negative, "consistency": mode, "size": SHOT_SIZE,
+        return {"kind": kind, "prompt": sent_prompt, "negative": negative, "consistency": mode, "size": SHOT_SIZE,
                 "references": paths, "missing": missing,
-                "hash": prompt_hash(prompt, negative, mode, SHOT_SIZE, ref_shas), "over": over}
+                "hash": prompt_hash(prompt, negative, mode, SHOT_SIZE, ref_shas), "over": over, "refit": refit}
     digest = prompt_hash(prompt, negative, mode, SHOT_SIZE, ref_shas + [_CONTINUITY_HASH_TOKEN])
-    sent_prompt, sent = prompt, list(paths)
+    sent = list(paths)
     if continuity is not None:
         sent.insert(min(slot, len(sent)), continuity)
     elif alone is not None and not shot.get("prompt_override"):
         alone_shot = dict(shot, image_prompt=alone[0], reference_images=list(alone[1]))
-        sent_prompt = effective_prompt(alone_shot, ec.entities, note)
+        # Asked alone (no previous keyframe to send): fitted the same way, without the slot.
+        sent_prompt, over, refit = _fitted(ec, alone_shot, note, link, budget=budget, continuity=False)
         sent, missing = reference_paths(ec, alone_shot, link=link)
     return {"kind": kind, "prompt": sent_prompt, "negative": negative, "consistency": mode, "size": SHOT_SIZE,
-            "references": sent, "missing": missing, "hash": digest, "over": over}
+            "references": sent, "missing": missing, "hash": digest, "over": over, "refit": refit}
 
 
 def _read_assets_doc(ec):
@@ -2424,6 +2493,8 @@ class _Assets(voice_lines.LineMeasurement):
         continuity = ({"shot_id": source[0]["shot_id"], "image_sha256": _sha256_file(source[1])}
                       if source and _sha256_file(source[1]) else None)
         kind = parts["kind"]
+        if parts.get("refit"):
+            ctx.on_log(_refit_line(shot_id, "keyframe", self.link, parts["refit"]))
         if parts.get("over"):
             # Stage F2: a prompt the link cannot take is refused here, never sent to be refused there.
             raise ShotFailed(parts["over"])
@@ -2921,6 +2992,8 @@ class _Assets(voice_lines.LineMeasurement):
         def fail(reason, *, still=False):
             return ClipFailed(reason, record=record, still=still)
 
+        if parts.get("refit"):
+            ctx.on_log(_refit_line(shot_id, "clip", link, parts["refit"]))
         if parts.get("over"):
             # Stage F2: a prompt the link cannot take is refused here, never sent to be refused there.
             raise fail(parts["over"])
@@ -3666,6 +3739,15 @@ def run(ctx, *, adapters=None, transport=None, time_fn=time.monotonic, sleep_fn=
 
 def _noted(note) -> str:
     return f" (note: {note})" if note else ""
+
+
+def _refit_line(shot_id, kind, link, info) -> str:
+    """The feed line of a prompt fitted to its link at request time (DEC-249)."""
+    label = link if isinstance(link, str) else describe(link)
+    cause = (f"its note ({info['note']} words) takes it to {info['from']} words"
+             if info["note"] else f"it was built to another budget ({info['from']} words)")
+    return (f"ℹ️ Shot {shot_id}'s {kind} prompt: {cause}, over {label}'s budget of {info['budget']}; resolved again "
+            f"to {info['to']} words -- its context shortened, nothing of the note cut.")
 
 
 def regenerate_shot_image(ctx, ec, target, shot_id, note, *, tools, refuse) -> dict:

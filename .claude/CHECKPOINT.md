@@ -1,3 +1,24 @@
+## CURRENT STATE — the note fit (2026-10-03, local session, worktree `.claude/worktrees/note-fits-budget`, branch `fix/note-fits-the-budget` from `main` 3c66552)
+
+- **In-progress header:** phase IMPLEMENT (EXPLORE done by a Sonnet agent, CLARIFY: the human is away, assumptions
+  recorded; PLAN recorded here, not approved in chat — the human asked for the fix and its tests in two messages).
+  Stage 1 (the only one): `shots.resolve_stored`, `prompt_budgets.note_over_sentence`, the re-fit in
+  `assets.request_parts` and `clips.clip_request_parts`, feed lines in `make_image`/`make_clip`, tests
+  `tests/test_story_prompt_note_fit.py`. Next action: implement → selection (DEC-234) both envs → commit → DEC-249,
+  A-133, docs, this header → push the branch. Open questions: none blocking.
+- **The human's report (2026-10-03 12:29, story d0ee5ebd745d ep 1):** "Fast track stopped at the assets (step 4
+  of 6): … shot sh03's keyframe prompt (326 words) is over fal/seedream-4.5-edit's budget of 320 words -- built for
+  another link, or … limit moved since". **Root cause (verified on disk):** sh03's stored prompt is 308 words; the
+  keyframe auto-fix (DEC-243) redrew it with an 18-word correction note appended at send time
+  (`assets.with_note`), uncounted against any budget → 326 > 320 → `prompt_budgets.over_sentence` refused it, and
+  the message named two causes that were both wrong. The same tail exists for clips (`video_plan.build_video_prompt`).
+- **Checkpoint commit:** 3c66552 (clean tree). **Tier-1 baseline:** the DEC-234 selection on 3c66552 (12 files,
+  see the action log) — result recorded there when it ends.
+- **Regression contract at risk:** RC-Q1 (v1 prompts untouched: the re-fit runs on layered shots only), RC-M3
+  (stored stories re-render byte-identically: the prompt hash stays over the stored prompt + note), DEC-247's
+  "the hash never moves with the link" pin in `test_story_prompt_budgets.py`, the keyframe-fix pins
+  `redraw.prompt == image_prompt + " Author's note: …"` (unchanged when the note fits).
+
 ## CURRENT STATE — the fast-track fix (DEC-248, 2026-10-03, cloud session, branch `claude/fix-fast-track-j1` from `main` 1078a8d)
 
 - **The human's report:** "Fast track stopped at the script (step 1 of 6): … first-watch check (J1): after 2 repair

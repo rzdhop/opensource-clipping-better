@@ -247,6 +247,15 @@ distinctive marks (the look's new `bearing` field, written by the Cast
 step), the time of day; a clip adds the emotion, micro-actions and the
 camera's intent. A shot whose prompt cannot fit its link is refused when the
 storyboard is written, naming the shot and the link, never sent trimmed.
+When a prompt is asked with a note at its tail — the keyframe check's
+correction on a redraw, your own on a regenerate — and the two together run
+over the link's budget, the prompt is resolved again to the room the note
+leaves: the lowest context layers go first, the note is sent whole, and the
+feed says from and to how many words ("ℹ️ Shot sh03's keyframe prompt: its
+note (18 words) takes it to 326 words, over fal/seedream-4.5-edit's budget
+of 320; resolved again to 302 words"). A prompt built to a roomier link is
+fitted the same way. Only when even the shortest form cannot fit with the
+note is the shot refused, and the message then says how long a note fits.
 
 **Moving a written story to v2.** **Animate every shot** on a story whose
 episode already has a script offers **Regenerate episode N on v2**: the

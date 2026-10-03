@@ -60,7 +60,8 @@ from clipping.providers.registry import ChainError, describe
 
 from .. import hardware, imaging, media_policy, prompt_budgets, prompting, schemas, video_plan
 from .. import shots as shots_mod
-from . import sticky_link
+from . import episode_common, sticky_link
+from .llm_call import StepFailed
 
 CLIPS_KIND = "clips"
 CLIPS_DIR = schemas.SHOT_CLIP_DIR
@@ -302,12 +303,56 @@ def clip_request_parts(ec, shot, script, *, tier, flags, note=None, link=None) -
                                                      if ambient and link else None)
     resolution = media_policy.video_resolution(story)
     asked = native or ambient
-    over = None
+    over, refit, sent = None, None, prompt
     if link and shot.get("prompt_layout"):
         budget = prompt_budgets.clip_audio_words(link) if ambient else prompt_budgets.clip_words(link)
         over = prompt_budgets.over_sentence("clip", shot["shot_id"], link, prompt, budget=budget)
-    return {"prompt": prompt, "negative": negative, "native_audio": asked,
-            "hash": clip_prompt_hash(prompt, negative, native_audio=asked, resolution=resolution), "over": over}
+        if over and not ambient:
+            # DEC-249: over with its note at its tail (a re-animate's, appended after the stored prompt was
+            # built to its budget), or built to another link's budget: resolved again to the room left. The
+            # ambience prompt fits its brief and note itself (prompting.clip_prompt_with_audio).
+            sent, over, refit = _fitted_clip(ec, shot, script, prompt, note=note, link=link, budget=budget,
+                                             tier=tier, lines=lines, over=over)
+    return {"prompt": sent, "negative": negative, "native_audio": asked,
+            "hash": clip_prompt_hash(prompt, negative, native_audio=asked, resolution=resolution), "over": over,
+            "refit": refit}
+
+
+def _fitted_clip(ec, shot, script, prompt, *, note, link, budget, tier, lines, over) -> tuple:
+    """``(sent prompt, over, info)`` of a layered *shot*'s clip on *link*
+    when its stored ``video_prompt`` with *note* (*prompt*) is over *budget*
+    (DEC-249): the shot resolved again (``shots.resolve_stored``) to the
+    room the note leaves -- the clip's context layers go first, then the
+    motion is cut; the note is kept whole -- and the prompt built again
+    from it; *over* why nothing can be sent when even that fails; *info*
+    ``{"from", "to", "note", "budget"}`` in words. The hash is never made
+    of this prompt: it stays the stored one's."""
+    from . import script as script_step  # the step imports this module: a cycle at import time
+
+    tier = tier if tier in (2, 3) else 2
+    bare, _negative = video_plan.build_video_prompt(shot, ec.style_lock, tier=tier, lines=lines, note=None)
+    note_words = len(prompt.split()) - len(bare.split())
+    try:
+        board = episode_common.read_episode(ec, episode_common.STORYBOARD_DOC)
+    except StepFailed:
+        board = None
+    budgets = prompt_budgets.for_links(None, link)._replace(keyframe=prompt_budgets.KEYFRAME_CEILING_WORDS,
+                                                             clip=budget - note_words)
+    try:
+        resolved = shots_mod.resolve_stored(shot, script=script, storyboard=board, entities=ec.entities,
+                                            style_lock=ec.style_lock, consistency_mode=ec.consistency_mode,
+                                            ledger=script_step.ledger_of(ec), budgets=budgets)
+    except shots_mod.PromptOverBudget as exc:
+        if note_words:
+            over = prompt_budgets.note_over_sentence("clip", shot["shot_id"], link, len(prompt.split()), note_words,
+                                                     budget=budget, shortest=exc.words)
+        return prompt, over, None
+    except (KeyError, ValueError):
+        return prompt, over, None
+    sent, _negative = video_plan.build_video_prompt(dict(shot, video_prompt=resolved["video_prompt"]), ec.style_lock,
+                                                    tier=tier, lines=lines, note=note)
+    over = prompt_budgets.over_sentence("clip", shot["shot_id"], link, sent, budget=budget)
+    return sent, over, {"from": len(prompt.split()), "to": len(sent.split()), "note": note_words, "budget": budget}
 
 
 def clip_state(ec, shot, script, *, link, tier, flags, image_sha) -> str:

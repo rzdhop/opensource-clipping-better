@@ -483,6 +483,12 @@
   cannot follow, and its re-check after a repair converges; a real comprehension failure (who the main character is,
   what they want) is still called blocking. UNCONFIRMED until the human runs `tools/j1_calibrate.py` on the stuck
   episode (pass rate, blocking issues per run, their stability) and presses Generate episode again.
+- **A-133** — (DEC-249) On the live story d0ee5ebd745d, sh03's redraw with its 18-word correction note was the only
+  cause of "326 words over the budget of 320" (verified: the stored prompt is 308 words and built to
+  fal/seedream-4.5-edit); the re-fit drops at most the lowest context layers of such a shot (between, when, bearing,
+  since, mood) and never a role, the beat, the staging or the constraints, so a redrawn keyframe is not visibly
+  poorer than its first draw. UNCONFIRMED until the human presses Generate episode again on that episode and the
+  redraw passes J2 (the feed shows the ℹ️ line with the two word counts).
 
 ## Confirmed
 - **A-082** — fal.ai as measured in the paid test (2026-09-29, DEC-174):

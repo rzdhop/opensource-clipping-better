@@ -321,10 +321,15 @@ def test_the_assets_step_refuses_a_stored_prompt_the_link_cannot_take(store, tmp
     assert "fal/seedream-4.5-edit accepts 260 characters" in over["over"] and "refresh the prompts" in over["over"]
     assert over["hash"] == fine["hash"]  # what decides "current" never moves with the link
     prompt_limits.record_live({SEEDREAM_EDIT: {"status": prompt_limits.NOT_PUBLISHED, "endpoint": SEEDREAM_EDIT}})
-    # A prompt over the budget but under the limit (built for a roomier link): refused too, a user's override is not.
+    # A stored prompt over the budget but under the limit (built for a roomier link): resolved again to this
+    # link's budget and sent (DEC-249 -- until it, refused); the hash stays the stored prompt's. A user's override
+    # is sent as written.
     long_prompt = dict(shot, image_prompt=" ".join(["word"] * 330))
-    assert "over fal/seedream-4.5-edit's budget of 320 words" in assets.request_parts(
-        ec, long_prompt, note=None, link=SEEDREAM_EDIT)["over"]
+    fitted = assets.request_parts(ec, long_prompt, note=None, link=SEEDREAM_EDIT)
+    assert fitted["over"] is None and fitted["prompt"] == shot["image_prompt"]
+    assert fitted["refit"] == {"from": 330, "to": len(shot["image_prompt"].split()), "note": 0, "budget": 320}
+    assert fitted["hash"] != fine["hash"] and fitted["hash"] == assets.request_parts(
+        ec, long_prompt, note=None, link=None)["hash"]
     assert assets.request_parts(ec, dict(shot, prompt_override=" ".join(["word"] * 330)), note=None,
                                 link=SEEDREAM_EDIT)["over"] is None
     assert assets.request_parts(ec, long_prompt, note=None, link=None)["over"] is None

@@ -2117,6 +2117,35 @@ def refresh_prompts(storyboard, script, *, entities, style_lock, consistency_mod
     return new_doc
 
 
+def resolve_stored(shot, *, script, storyboard, entities, style_lock, consistency_mode, ledger=None, budgets=None,
+                   continuity=None) -> dict:
+    """A stored v2 *shot* resolved again, as :func:`refresh_prompts` resolves
+    it -- its scene from *script*, its plan from the shot itself
+    (:func:`plan_of`), the plan before it from *storyboard*'s order (None: no
+    "since" layer) -- to *budgets* (``prompting.Budgets``). What a request
+    re-fits its prompt with when the stored one cannot be sent as it is
+    (DEC-249): with a note at its tail, to the room the note leaves, so the
+    context layers make room and the note is kept whole; built to another
+    link's budget, to the link's own. *continuity*: the previous keyframe
+    among the references (None: as the stored shot has it). ``KeyError``
+    for a scene *script* no longer has; :class:`PromptOverBudget` naming the
+    shot when even the ladder's last rung is over."""
+    scene = {scene["scene_id"]: scene for scene in script["scenes"]}[shot["scene_id"]]
+    previous = None
+    if storyboard is not None:
+        ordered = storyboard["shots"]
+        index = next((i for i, item in enumerate(ordered) if item["shot_id"] == shot["shot_id"]), None)
+        previous = previous_plan(ordered, index) if index is not None else None
+    if continuity is None:
+        continuity = CONTINUITY_REFERENCE in (shot.get("reference_images") or ())
+    try:
+        return resolve_shot(plan_of(shot, v2=True), scene=scene, entities=entities, style_lock=style_lock,
+                            consistency_mode=consistency_mode, v2=True, ledger=ledger, continuity=continuity,
+                            budgets=budgets, previous_plan=previous)
+    except PromptOverBudget as exc:
+        raise _named(exc, shot["shot_id"], budgets) from None
+
+
 def plans_from_storyboard(storyboard, script) -> dict:
     """``{scene_id: [plan, ...]}``: the plans a storyboard was built from,
     read back from its shots (the reverse of :func:`build_storyboard`'s

@@ -4561,3 +4561,44 @@ Every v2 script not approved yet is judged once more on its next script run (one
 episode page's Script tab does not list the minor issues yet (the Review tab does); `script.repairs` from an earlier
 run is kept when a re-judged report passes without a pass (history, as DEC-245 says).
 
+## DEC-249 — A prompt over its link's budget at request time is resolved again to the room left, the note kept whole; refused only when no rung can make room (after DEC-248)
+**Context.** The human (2026-10-03), on the fresh v2 episode d0ee5ebd745d/ep01 right after DEC-248: "Fast track stopped
+at the assets (step 4 of 6): … shot sh03's keyframe prompt (326 words) is over fal/seedream-4.5-edit's budget of 320
+words -- built for another link, or fal/seedream-4.5-edit's limit moved since". Verified on disk: sh03's stored prompt
+is 308 words, built to the right link; the keyframe auto-fix (DEC-243) redrew it with an 18-word correction note
+that `assets.with_note` appends at send time, after the prompt was fitted to its budget and counted against none
+(up to `REGENERATE_NOTE_MAX` 300 characters, ~46 words); `prompt_budgets.over_sentence` then refused the shot and
+the fast track stopped, naming two causes that were both wrong. `video_plan.build_video_prompt` appends a
+re-animate's note to a stored clip prompt the same way (the ambience prompt alone fits its note itself, DEC-242).
+DEC-247 chose check-and-refuse over an automatic re-fit for the link-switch case and left the re-fit as a follow-up.
+**Decision.**
+- **`shots.resolve_stored`**: a stored v2 shot resolved again as `refresh_prompts` resolves it (its scene from the
+  script, its plan from itself, the plan before it from the storyboard's order, the continuity slot as stored unless
+  told), to given budgets; `PromptOverBudget` named with the shot and the link.
+- **At request time** (`assets.request_parts` → `_fitted`/`fit_to_budget`; `clips.clip_request_parts` →
+  `_fitted_clip`): a layered prompt that is over its link's budget — with its note, or built to another link's
+  budget, or over the link's character limit — is resolved again to the budget minus the note's words, so the
+  ladder's context layers (DEC-247's order) make room and the note is sent whole; the fitted prompt is what is sent,
+  `refit` says from and to how many words, and `make_image`/`make_clip` write a feed line ("ℹ️ Shot sh03's keyframe
+  prompt: its note (18 words) takes it to 326 words, over fal/seedream-4.5-edit's budget of 320; resolved again to
+  3xx words -- its context shortened, nothing of the note cut."). A user's `prompt_override` is sent as written.
+- **The hash never moves with it**: `prompt_hash` stays over the stored prompt with its note (as the continuity slot's
+  rule already had it: what filled the request never moves the hash), so a keyframe or clip made before reads
+  current and `shot_state`/`clip_state` agree with the step without reading the script.
+- **Refused only when even the ladder's last rung is over with the note**: `prompt_budgets.note_over_sentence`
+  names the note's words, how long a note fits this shot on this link, and what to do (shorten the note or ask
+  without one); a prompt over without any note keeps DEC-247's sentence. Nothing is sent either way.
+- **Tests**: `tests/test_story_prompt_note_fit.py` (the auto-fix end to end at a budget with no word to spare, the
+  request parts for keyframes and clips with and without room, the alone path, the refusal sentence, the legacy
+  guard, `resolve_stored` byte-identical on the storyboard's budgets); DEC-247's pin "a stored prompt over the
+  budget is refused" re-pinned on purpose to "resolved again to this link's budget, hash unchanged".
+**Rejected.** Cutting the note to the room left (the correction is the point of the redraw; the lowest context
+layer is worth less than it); storing a re-fitted `image_prompt` on the storyboard (the note is per attempt, the
+storyboard is the script's); falling through to the chain's next link (A-087: the episode's link alone).
+**Consequence.** The fast track no longer stops at the assets over a correction note; a stored prompt built to a
+roomier link is sent fitted rather than refused (DEC-247's follow-up closed). The fitted prompt depends on the
+entities, ledger and script at send time while the hash does not — the same standing as the continuity slot's;
+`require_approved` already refuses outdated entities. The refit reads the script and storyboard once per over-budget
+request only. Follow-up: the Keyframes card could show the fitted prompt a redraw was sent with (today the feed line
+says the numbers).
+
