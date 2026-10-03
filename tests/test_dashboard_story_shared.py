@@ -219,7 +219,7 @@ def test_the_wizard_polls_the_story_while_a_step_runs():
     # Found live: a refresh landed between the preview step's last write and
     # its job's flip to awaiting_approval; the feed had stopped, so the page
     # kept showing "Generating…" for a finished preview.
-    wizard = (DASHBOARD_SRC / "pages" / "story" / "NewStoryWizard.jsx").read_text(encoding="utf-8")
+    wizard = (DASHBOARD_SRC / "pages" / "story" / "StoryWorkspace.jsx").read_text(encoding="utf-8")
     assert "setInterval(refresh, STORY_POLL_MS)" in wizard
     assert "IN_FLIGHT.includes(j.status)" in wizard.split("setInterval(refresh", 1)[0]
 
@@ -232,7 +232,7 @@ def test_the_ready_card_is_keyed_on_the_derived_status_not_the_season_approval()
     # after the story was no longer ready. store.derive_status is the
     # server's own contiguous-prefix status, so it already reflects the
     # drop; the card must key off `story.status` instead.
-    wizard = (DASHBOARD_SRC / "pages" / "story" / "NewStoryWizard.jsx").read_text(encoding="utf-8")
+    wizard = (DASHBOARD_SRC / "pages" / "story" / "StoryWorkspace.jsx").read_text(encoding="utf-8")
     assert "const allDone = story.status === 'ready'" in wizard
     assert "Boolean(story.approvals.season)" not in wizard
 

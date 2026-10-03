@@ -10,14 +10,15 @@ It must instead prefer the latest episode with an *approved storyboard*
 (the assets step, and so the video estimate, can actually run on it), and
 only fall back to "the next one to work on" when no episode has one yet.
 
-Text contract over NewStoryWizard.jsx, like the rest of the dashboard test
+Text contract over GenerationProfileCard.jsx (the card moved out of NewStoryWizard.jsx
+with the story workspace, DEC-255), like the rest of the dashboard test
 suite (DEC-012: stdlib + pytest only, no JS runner).
 """
 
 import re
 from pathlib import Path
 
-WIZARD = Path(__file__).resolve().parent.parent / "web" / "dashboard" / "src" / "pages" / "story" / "NewStoryWizard.jsx"
+WIZARD = Path(__file__).resolve().parent.parent / "web" / "dashboard" / "src" / "pages" / "story" / "GenerationProfileCard.jsx"
 
 
 def _src():

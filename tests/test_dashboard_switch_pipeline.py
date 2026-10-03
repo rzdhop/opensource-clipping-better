@@ -28,7 +28,8 @@ from clipping.aistory import workflow
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SRC = ROOT / "web" / "dashboard" / "src"
 API_JS = SRC / "api.js"
-WIZARD = SRC / "pages" / "story" / "NewStoryWizard.jsx"
+# The card moved out of NewStoryWizard.jsx with the story workspace (DEC-255).
+WIZARD = SRC / "pages" / "story" / "GenerationProfileCard.jsx"
 MODELS = ROOT / "web" / "api" / "models.py"
 
 
@@ -78,7 +79,7 @@ def test_switch_pipeline_posts_to_its_route():
 def test_the_card_sends_what_the_switch_request_declares():
     src = _read(WIZARD)
     sites = re.findall(r"switchPipeline\(\s*storyId,\s*\{([^}]*)\}\s*\)", src)
-    assert sites, "no switchPipeline(storyId, {...}) call in NewStoryWizard.jsx"
+    assert sites, "no switchPipeline(storyId, {...}) call in GenerationProfileCard.jsx"
     for site in sites:
         keys = set(re.findall(r"([a-z_]+)\s*:", site))
         assert keys == _class_fields("StorySwitchPipelineRequest"), keys

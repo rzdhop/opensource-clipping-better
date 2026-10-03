@@ -28,7 +28,8 @@ PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[1]
 MODELS = PROJECT_ROOT / "web" / "api" / "models.py"
 API_JS = PROJECT_ROOT / "web" / "dashboard" / "src" / "api.js"
 SEASON_STEP = PROJECT_ROOT / "web" / "dashboard" / "src" / "pages" / "story" / "steps" / "SeasonStep.jsx"
-NEW_STORY_WIZARD = PROJECT_ROOT / "web" / "dashboard" / "src" / "pages" / "story" / "NewStoryWizard.jsx"
+# The story page shell: the story workspace since DEC-255 (it was NewStoryWizard.jsx).
+NEW_STORY_WIZARD = PROJECT_ROOT / "web" / "dashboard" / "src" / "pages" / "story" / "StoryWorkspace.jsx"
 INDEX_CSS = PROJECT_ROOT / "web" / "dashboard" / "src" / "index.css"
 
 FOLD_WARNING = "approving this character re-opens the cast approval"
@@ -517,7 +518,7 @@ def test_recap_and_digest_preserve_line_breaks_too():
 def test_the_wizard_defines_a_series_change_callback_that_never_clears_manual_step():
     src = NEW_STORY_WIZARD.read_text(encoding="utf-8")
     match = re.search(r"const afterSeriesAction = \(\) => \{([\s\S]*?)\n  \}", src)
-    assert match, "NewStoryWizard.jsx does not define afterSeriesAction"
+    assert match, "StoryWorkspace.jsx does not define afterSeriesAction"
     assert "setManualStep(null)" not in match.group(1), (
         "afterSeriesAction must never clear manualStep -- the Season step must stay open"
     )
@@ -527,7 +528,7 @@ def test_the_wizard_defines_a_series_change_callback_that_never_clears_manual_st
 def test_season_step_receives_the_series_change_callback_alongside_the_ordinary_one():
     src = NEW_STORY_WIZARD.read_text(encoding="utf-8")
     match = re.search(r"<SeasonStep\b([^>]*)/>", src)
-    assert match, "SeasonStep is not rendered in NewStoryWizard.jsx"
+    assert match, "SeasonStep is not rendered in StoryWorkspace.jsx"
     tag = match.group(1)
     assert "onSeriesChange={afterSeriesAction}" in tag, tag
     # Every other step's behaviour (and the season's own advance) is unchanged.

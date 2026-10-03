@@ -6,7 +6,7 @@ import { ArrowRight, BookOpen, Clapperboard, Sparkles, Trash2 } from '../../ui/i
 import { formatDateTime, formatRelativeTime } from '../../lib/format'
 
 // The story steps' names, by the step ids the list's `progress.next` carries
-// (NewStoryWizard's STEPS keys).
+// (storySteps.js STEPS keys).
 const STEP_LABELS = {
   concepts: 'Concepts',
   bible: 'Bible',
