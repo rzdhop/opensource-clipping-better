@@ -390,6 +390,50 @@ def test_the_fast_track_prices_the_fix_ceiling(store, tmp_path):
     assert verdict["verdict"] == fast_track.PAID_WITHIN_CAPS
 
 
+# ============================================================ 7. a manual regenerate
+
+def test_a_shot_regenerate_checks_that_shot_and_the_one_after_it_and_never_auto_fixes(store, tmp_path, monkeypatch):
+    """The known follow-up of DEC-239 closed: a single shot-image regenerate
+    of a v2 episode runs J2 on that shot and on the one after it (its
+    previous keyframe changed) once the image is drawn -- and only that:
+    the human asked for this very note, so a flagged result is never
+    redrawn on its own."""
+    story_id = _quality(store, tmp_path)
+    _run(store, story_id)
+    _seeds(monkeypatch)
+    image, judge = kc.SeededImage(price=PRICE), Judge({"sh05": None})
+
+    result = tas._regenerate_shot(store, story_id, "sh05", note="Mangella glares at Kiwilo",
+                                  adapters=_adapters(image, judge), settings=SETTINGS)
+
+    assert [request.extra["name"] for request in image.requests] == ["shot_05"]  # no auto-fix
+    assert judge.shots() == ["sh05", "sh06"]
+    doc = tas._assets_doc(store, story_id)
+    shot = _shot(store, story_id, "sh05")
+    verdict = doc["keyframe_verdicts"]["sh05"]
+    assert verdict["missing"] == [MISSING] and verdict["prompt_version"] == 2
+    from clipping.aistory.steps import assets
+
+    assert verdict["image_sha256"] == assets._sha256_file(assets.shot_image_path(tas._ec(store, story_id), shot))
+    assert doc["keyframe_verdicts"]["sh06"]["previous_sha256"] == verdict["image_sha256"]
+    assert "keyframe_fixes" not in doc
+    assert result["keyframes"] == {"judged": ["sh05", "sh06"], "kept": [], "failed": [], "unavailable": None}
+    assert shot["assets"]["note"] == "Mangella glares at Kiwilo"
+
+
+def test_a_legacy_shot_regenerate_asks_no_keyframe_check(store, tmp_path):
+    story_id = tas._episode(store, tmp_path)
+    tas._run(store, story_id, adapters=tas._adapters(image=tas.FakeImage()))
+    judge = Judge()
+    table = tas._adapters(image=tas.FakeImage())
+    table[("vision", "gemini")] = judge
+
+    result = tas._regenerate_shot(store, story_id, "sh05", adapters=table,
+                                  settings=tas._settings(VISION_CHAIN="gemini/flash-lite"))
+
+    assert judge.requests == [] and "keyframes" not in result
+
+
 # ============================================================ the data contract
 
 def test_the_episode_page_shows_each_shot_s_verdict_and_fix_and_the_fix_budget(store, tmp_path, monkeypatch):

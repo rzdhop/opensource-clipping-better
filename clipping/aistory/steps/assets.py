@@ -3194,6 +3194,29 @@ class _Assets(voice_lines.LineMeasurement):
                                                         before_call=self.before_vision)
         return held["doc"]
 
+    def judge_regenerated(self, shot_id):
+        """J2 after a shot-image regenerate of a v2 episode (phase 8 stage B,
+        DEC-239's follow-up): that shot and the one after it (its previous
+        keyframe changed), their verdicts written to ``assets.json``; never
+        an auto-fix -- the human asked for this very note. Returns J2's
+        summary, or None when the episode has no ``assets.json`` yet (the
+        assets step checks them). A step budget that cannot fit a check
+        leaves it to the next assets run, said."""
+        ec = self.ec
+        doc = _read_assets_doc(ec)
+        if doc is None:
+            return None
+        ids = [shot["shot_id"] for shot in self.storyboard["shots"]]
+        index = ids.index(shot_id)
+        link = recorded_image_link(doc)
+        items = [item for item in (keyframe_item(ec, self.storyboard, position, link=link)
+                                   for position in (index, index + 1)) if item is not None]
+        try:
+            return self.check_keyframe_items(items, {"doc": doc}, before_call=self.before_fix_vision)
+        except _FixStopped as exc:
+            self.ctx.on_log(f"👁 Keyframe check (J2) left to the next assets run: {exc}.")
+            return None
+
     # ------------------------------------------- the keyframe auto-fix (stage B)
 
     def before_fix_vision(self, remaining) -> None:
@@ -3542,7 +3565,11 @@ def regenerate_shot_image(ctx, ec, target, shot_id, note, *, tools, refuse) -> d
     so a retry (this regenerate again with the same note, or the assets step)
     asks for the same image and the generation cache serves or resumes it
     (DEC-154). A locked shot is refused ("unlock it first"). *refuse(reason)*
-    is the caller's ``StepFailed`` builder."""
+    is the caller's ``StepFailed`` builder.
+
+    On a v2 story (phase 8 stage B) the new keyframe is checked by J2 with
+    the shot after it (:meth:`_Assets.judge_regenerated`; the result's
+    ``keyframes``), and never auto-fixed: the human asked for this note."""
     host = _Assets(ctx, ec, tools=tools)
     try:
         host.script, host.storyboard = require_approved(ec)
@@ -3596,11 +3623,16 @@ def regenerate_shot_image(ctx, ec, target, shot_id, note, *, tools, refuse) -> d
                          "the assets step, to ask for the same image.") from None
         cached = record["_cached"]
         host.apply_image(shot, record)
+        # Phase 8 stage B: a v2 keyframe is checked (J2) with the shot after it -- never auto-fixed.
+        checked = host.judge_regenerated(shot_id) if media_policy.is_v2(ec.story) else None
     finally:
         host.write_ledger_view()
     ctx.on_log(f"🔁 Regenerated {target} (seed {shot['assets']['seed']}){_noted(note)}")
-    return {"target": target, "shot": shot_id, "seed": shot["assets"]["seed"], "provider": shot["assets"]["provider"],
-            "cached": cached}
+    result = {"target": target, "shot": shot_id, "seed": shot["assets"]["seed"],
+              "provider": shot["assets"]["provider"], "cached": cached}
+    if checked is not None:
+        result["keyframes"] = checked
+    return result
 
 
 def regenerate_shot_clip(ctx, ec, target, shot_id, note, *, tools, refuse) -> dict:
