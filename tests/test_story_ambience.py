@@ -393,3 +393,196 @@ def test_guard_outside_ambience_mode_the_clip_request_is_todays(store, tmp_path)
     parts = clips.clip_request_parts(ec, shot, eps._script(store, legacy), tier=3, flags=flags)
     assert parts["native_audio"] is True and "The character says" in parts["prompt"] and "Sound:" not in \
         parts["prompt"]
+
+
+# ================================================ shot length vs the link
+#
+# Veo sells 4, 6 and 8 s clips; a v2 shot runs 5-12 s (serial_60s_v2). A
+# story that animates every shot plans no beat shot longer than the longest
+# clip its planned link sells (the T1 v2 plan's max = min(template max, the
+# link's longest clip)): a scene past it is two shots. A storyboard planned
+# before (or for another link) is planned again where a scene is short of
+# beat shots; a shot that is still longer is refused by the clip estimate,
+# naming it and how to fix it, instead of buying a clip that cannot cover it.
+
+LONG_SCENES = ("s04", "s07")
+
+
+def _v2_storyboard_story(store, *, tier=3):
+    """A written v2 episode on serial_60s_v2, fully animated (the quality
+    profile at *tier*), its prop drawn, two of its scenes (:data:`LONG_SCENES`)
+    spoken at more length: ready for the storyboard step."""
+    import test_story_episode_steps as eps
+    import test_story_storyboard_props as tsp
+    from clipping.aistory.steps import episode_common
+
+    story_id = eps._written_script(store)
+
+    def v2(doc):
+        doc["generation_profile"].update(pipeline="v2", tier=tier, budget_profile="quality", route="api")
+        doc.update(episode_template_id="serial_60s_v2")
+
+    store.update(story_id, v2, now=NOW)
+    script = eps._script(store, story_id)
+    script["template_id"] = "serial_60s_v2"
+    # Two scenes spoken at more length (9-10 s): past Veo's 8 s, inside the template's 12 s.
+    longer = "Tu crois vraiment que je vais te suivre jusqu'au bout de cette île maudite, sans rien dire du tout ?"
+    for scene in script["scenes"]:
+        if scene["scene_id"] in LONG_SCENES:
+            scene["lines"][0]["text"] = longer
+    ec = episode_common.load_context(store, story_id, 1)
+    episode_common.retime(script, ec)
+    store.write_episode_doc(story_id, 1, "script.json", script, now=NOW)
+    tsp._plant_image(store, story_id, "props", eps.PHONE)
+    return story_id
+
+
+def _plan_settings(**keys):
+    import test_story_episode_steps as eps
+
+    return dict(eps.SETTINGS, VIDEO_CHAIN=CHAIN, **keys)
+
+
+def test_the_planned_link_is_the_episodes_or_the_profiles_keys_asked_then_aside(store, tmp_path):
+    """``clips.planned_link``: what the storyboard plans its shots for, as
+    the estimate would pick the link (calling nothing): the episode's
+    recorded link; else the profile's policy among the keyed links; none
+    keyed: among every hosted link, keys aside -- the link it will take
+    once its key is set. ``longest_clip_s`` is its longest sellable clip."""
+    from clipping.aistory import workflow
+    from clipping.aistory.steps import clips
+
+    story_id = _story(store, tmp_path)
+    ec = tas._ec(store, story_id)
+    assert clips.planned_link(ec, _plan_settings(**tas.FAL, **GEMINI)) == VEO
+    assert clips.planned_link(ec, _plan_settings(**tas.FAL)) == SEEDANCE
+    assert clips.planned_link(ec, _plan_settings()) == VEO
+    assert (clips.longest_clip_s(VEO), clips.longest_clip_s(SEEDANCE), clips.longest_clip_s("local/comfyui")) == (
+        8, 12, None)
+    tier2 = _story(store, tmp_path, tier=2)
+    assert clips.planned_link(tas._ec(store, tier2), _plan_settings(**tas.FAL, **GEMINI)) == SEEDANCE
+
+    settings = tas._settings(VIDEO_CHAIN=CHAIN, ALLOW_PAID="1", **tas.FAL, **GEMINI)
+    workflow.patch_assets(store, story_id, 1, {"links": {"video": KLING}}, now=tce.LATER, env=settings)
+    assert clips.planned_link(tas._ec(store, story_id), _plan_settings(**tas.FAL, **GEMINI),
+                              assets_doc=tas._assets_doc(store, story_id)) == KLING
+
+
+def test_a_fully_animated_v2_storyboard_plans_no_shot_longer_than_its_links_longest_clip(store):
+    """Fail-first. On Veo (8 s), T1 v2 is asked two beat shots for every
+    scene past 8 s, one for the rest; on seedance (12 s) as before. The
+    storyboard's shots then all fit their clip, and the length gate's
+    total is the script's (the scenes keep their lengths)."""
+    import test_story_episode_steps as eps
+    import test_story_storyboard_props as tsp
+    from clipping.aistory.steps import storyboard
+
+    m = eps._new()
+    story_id = _v2_storyboard_story(store)
+    ec = storyboard.episode_common.load_context(store, story_id, 1)
+    assert storyboard.max_shot_s(ec, _plan_settings(**tas.FAL, **GEMINI)) == 8
+    assert storyboard.max_shot_s(ec, _plan_settings(**tas.FAL)) == 12
+
+    llm = eps.FakeLLM(default={"T1v2": tsp.t1_v2_reply})
+    eps._run(m.storyboard, store, story_id, llm=llm, step="storyboard", settings=_plan_settings(**tas.FAL, **GEMINI))
+
+    script = eps._script(store, story_id)
+    seconds = {sid: entry["duration_s"] for sid, entry in script["timing"]["scenes"].items()}
+    assert any(8 < value <= 12 for value in seconds.values()), seconds  # the fixture reaches the new rule
+    per_scene = {}
+    for shot in eps._storyboard(store, story_id)["shots"]:
+        per_scene[shot["scene_id"]] = per_scene.get(shot["scene_id"], 0) + 1
+    for call, scene in zip(llm.calls, script["scenes"]):
+        asked = 2 if seconds[scene["scene_id"]] > 8 else 1
+        assert per_scene[scene["scene_id"]] == asked, (scene["scene_id"], seconds[scene["scene_id"]])
+        assert ("exactly 2 entries" if asked == 2 else "exactly 1 entry") in call["user"]
+
+
+def test_a_storyboard_planned_for_a_longer_clip_is_planned_again_where_a_scene_is_short_of_beat_shots(store):
+    """Planned on seedance (12 s), then the Veo key is set: the storyboard
+    estimate counts, and the step plans again, exactly the scenes past 8 s
+    that have one beat shot; a complete storyboard on its own link makes no
+    call (as before)."""
+    import test_story_episode_steps as eps
+    import test_story_storyboard_props as tsp
+    from clipping.aistory import workflow
+
+    m = eps._new()
+    story_id = _v2_storyboard_story(store)
+    llm = eps.FakeLLM(default={"T1v2": tsp.t1_v2_reply})
+    eps._run(m.storyboard, store, story_id, llm=llm, step="storyboard", settings=_plan_settings(**tas.FAL))
+    script = eps._script(store, story_id)
+    seconds = {sid: entry["duration_s"] for sid, entry in script["timing"]["scenes"].items()}
+    short = sorted(sid for sid, value in seconds.items() if 8 < value <= 12)
+    assert short
+
+    again = eps.FakeLLM(default={"T1v2": tsp.t1_v2_reply})
+    eps._run(m.storyboard, store, story_id, llm=again, step="storyboard", settings=_plan_settings(**tas.FAL))
+    assert again.calls == []
+    ec = workflow.episode_context(store, store.get(story_id), 1, step="storyboard")
+    assert workflow.storyboard_units(ec, env=_plan_settings(**tas.FAL))["scenes"] == []
+    units = workflow.storyboard_units(ec, env=_plan_settings(**tas.FAL, **GEMINI))
+    assert sorted(units["scenes"]) == short and units["t1_calls"] == len(short)
+
+    eps._run(m.storyboard, store, story_id, llm=again, step="storyboard",
+             settings=_plan_settings(**tas.FAL, **GEMINI))
+    assert len(again.calls) == len(short)
+    board = eps._storyboard(store, story_id)
+    for sid in short:
+        assert sum(1 for shot in board["shots"] if shot["scene_id"] == sid) == 2
+
+
+def _too_long_units(store, story_id, board, **keys):
+    from clipping.aistory.steps import assets
+    import test_story_episode_steps as eps
+
+    settings = tas._settings(VIDEO_CHAIN=CHAIN, ALLOW_PAID="1", PER_EPISODE_CAP_USD="40", **keys)
+    return assets.asset_units(tas._ec(store, story_id), eps._script(store, story_id), board, env=settings,
+                              adapters=tce._adapters())
+
+
+def test_the_clip_estimate_refuses_a_shot_longer_than_the_links_longest_clip_and_says_how_to_fix_it(
+        store, tmp_path):
+    """Fail-first. A fully animated story on Veo: a shot of 9.4 s cannot be
+    one 8 s clip -- the estimate names it, its length and the link's
+    longest clip, says to plan the storyboard again, and is not ready; the
+    assets step refuses before any call (keyframes included). A shot a few
+    frames past 8 s keeps DEC-208's held last frame (``held_s``)."""
+    import copy
+
+    from clipping.aistory.steps import assets
+
+    story_id = _story(store, tmp_path)
+    board = copy.deepcopy(tas._board(store, story_id))
+    long_shot, close_shot = board["shots"][1], board["shots"][2]
+    long_shot["duration_s"], close_shot["duration_s"] = 9.4, 8.3
+
+    units = _too_long_units(store, story_id, board, **tas.FAL, **GEMINI)
+    video = units["video"]
+    assert video["link"] == VEO and video["ready"] is False and units["ready"] is False
+    sentence = video["too_long"]
+    assert f"{long_shot['shot_id']} (9.4 s)" in sentence and "8 s" in sentence and VEO in sentence
+    assert close_shot["shot_id"] not in sentence
+    assert "plan the storyboard again" in sentence and sentence in video["message"]
+    rows = {row["shot_id"]: row for row in video["plan"]}
+    assert rows[close_shot["shot_id"]]["held_s"] == pytest.approx(0.3)
+    refusal = assets.plan_refusal(tas._ec(store, story_id), units)
+    assert refusal and sentence in refusal and "Nothing was generated or spent" in refusal
+
+    # The same storyboard on seedance (12 s): nothing is too long.
+    fine = _too_long_units(store, story_id, board, **tas.FAL)["video"]
+    assert fine["link"] == SEEDANCE and "too_long" not in fine
+
+
+def test_guard_a_story_that_does_not_animate_every_shot_keeps_the_held_last_frame(store, tmp_path):
+    """DEC-208 unchanged where a still may stand in: a key-shots story's
+    long shot is planned at the longest clip and held on its last frame."""
+    import copy
+
+    story_id = _story(store, tmp_path, budget_profile="one_dollar")
+    board = copy.deepcopy(tas._board(store, story_id))
+    board["shots"][1]["duration_s"] = 30.0
+    video = _too_long_units(store, story_id, board, **tas.FAL)["video"]
+    assert "too_long" not in video
+    held = [row for row in video["plan"] if row.get("held_s")]
+    assert all(row["shot_id"] == board["shots"][1]["shot_id"] for row in held)

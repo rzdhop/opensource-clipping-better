@@ -1327,7 +1327,7 @@ def asset_units(ec, script, storyboard, *, env, align_words=False, adapters=None
         "paid_links": paid_links, "caps": caps, "est_usd": total, "over_cap": over_cap,
         "ready": images["ready"] and voices_est["ready"] and over_cap is None,
     })
-    if video is not None and animate and not video.get("hold"):
+    if video is not None and animate and (not video.get("hold") or video.get("too_long")):
         units["ready"] = bool(units["ready"] and video["ready"])
     return units
 
@@ -1764,7 +1764,14 @@ def plan_refusal(ec, units, *, unprobed=False):
     (``check_plan``), and the web layer's before a job exists (*unprobed*:
     its plan asked no local server, so clips waiting only on the local
     ComfyUI's answer are left to the step). The episode's image link gone
-    for now stops first, with its offer (A-087, :class:`StickyLinkGone`)."""
+    for now stops first, with its offer (A-087, :class:`StickyLinkGone`).
+    A fully animated plan with a shot its link's longest clip cannot cover
+    (``video.too_long``, stage E) is refused even while its clips wait for
+    the keyframes: planning the shots again changes the keyframes too."""
+    video = units.get("video")
+    if video is not None and video.get("animate", True) and video.get("too_long"):
+        # Stage E: refused first, before any call, keyframes included -- planning the shots again changes them.
+        return (f"Episode {ec.ep}'s clips cannot be made: {video['too_long']}. Nothing was generated or spent.")
     images = units["images"]
     if images["count"] and not images["ready"]:
         gone = link_gone(units)
@@ -1778,7 +1785,6 @@ def plan_refusal(ec, units, *, unprobed=False):
                                              story=ec.story))
         return (f"Episode {ec.ep}'s shot images cannot be made: {images['message']} Nothing was generated or "
                 "spent.")
-    video = units.get("video")
     if (video is not None and video.get("animate", True) and not video.get("hold") and not video["ready"]
             and not (unprobed and clips.local_unasked(video))):
         return (f"Episode {ec.ep}'s clips cannot be made now: {video['message'].strip()} Nothing was generated "

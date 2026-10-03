@@ -4370,11 +4370,14 @@ def script_units(ec) -> dict:
             "llm_calls_range": [calls, calls]}
 
 
-def storyboard_units(ec) -> dict:
+def storyboard_units(ec, env=None) -> dict:
     """The T1 calls a storyboard step would make now: ``{"t1_calls",
     "scenes": [scene_id, ...], "refusal": sentence | None}`` -- one per scene
     with no plan, a stale plan or a fast one
-    (``storyboard.scenes_to_plan``). While the script is not complete the
+    (``storyboard.scenes_to_plan``), or -- a fully animated v2 story, *env*
+    the Settings values the step would run with (phase 7 follow-up, stage E)
+    -- too few beat shots for its link's longest clip
+    (``storyboard.short_of_beats``). While the script is not complete the
     step would be refused (``refusal``) and every scene it has is counted."""
     try:
         script = storyboard_step.require_complete_script(ec)
@@ -4390,7 +4393,9 @@ def storyboard_units(ec) -> dict:
     except StepFailed as exc:
         raise WorkflowError(CONFLICT, str(exc)) from None
     plans, sources, stale = storyboard_step.current_plans(board, script)
-    todo = [scene["scene_id"] for scene in storyboard_step.scenes_to_plan(script, plans, sources, stale)]
+    limit = storyboard_step.max_shot_s(ec, env) if media_policy.is_v2(ec.story) else None
+    short = storyboard_step.short_of_beats(ec, script, plans, limit)
+    todo = [scene["scene_id"] for scene in storyboard_step.scenes_to_plan(script, plans, sources, stale, short)]
     return {"t1_calls": len(todo), "scenes": todo, "refusal": None}
 
 

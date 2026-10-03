@@ -38,7 +38,8 @@ import time
 from clipping.providers import pricing
 
 from .. import context, media_policy, prompts, shots, timing
-from . import entities, episode_common, llm_call
+from .. import store as store_mod
+from . import clips, entities, episode_common, llm_call
 from . import script as script_step
 from .episode_common import SCRIPT_DOC, STORYBOARD_DOC
 from .llm_call import StepFailed
@@ -139,12 +140,14 @@ def current_plans(storyboard, script) -> tuple:
     return plans, sources, stale_scenes(storyboard, script) & set(plans)
 
 
-def scenes_to_plan(script, plans, sources, stale) -> list:
+def scenes_to_plan(script, plans, sources, stale, short=()) -> list:
     """The scenes of *script* T1 plans (``current_plans``' three): each with no
-    plan, a stale plan or a fast one, in the script's order. The step plans
-    them; the estimate counts them."""
+    plan, a stale plan or a fast one -- or, *short* (:func:`short_of_beats`,
+    stage E), too few beat shots for its link's longest clip -- in the
+    script's order. The step plans them; the estimate counts them."""
     return [scene for scene in script["scenes"]
-            if scene["scene_id"] not in plans or scene["scene_id"] in stale or sources.get(scene["scene_id"]) == FAST]
+            if scene["scene_id"] not in plans or scene["scene_id"] in stale or sources.get(scene["scene_id"]) == FAST
+            or scene["scene_id"] in short]
 
 
 def build(ec, script, plans, sources, previous, *, stale, now) -> tuple:
@@ -227,24 +230,61 @@ def scene_seconds(ec, script, scene) -> float:
     return float(timing.scene_timing(scene, ec.template, ec.language, style_lock=ec.style_lock)["duration_s"])
 
 
-def beat_shot_count(ec, script, scene):
+def max_shot_s(ec, env=None):
+    """The longest a v2 beat shot may run (phase 7 follow-up, stage E): the
+    template's ``max_shot_s`` -- and, on a story whose every shot is one clip
+    (``media_policy.fully_animated``), no longer than the longest clip its
+    planned link sells (``clips.planned_link``: the episode's link, else the
+    budget profile's, keys asked then aside; *env* the Settings values):
+    Veo 3.1 lite sells 8 s at most, so a scene past 8 s is two beat shots.
+    The template's 6-10 shots and 55-75 s still hold: every slot tops out
+    at 11 s, two shots of at most 8 s. None: a template without one."""
+    template_max = ec.template.get("max_shot_s")
+    if template_max is None or not media_policy.fully_animated(ec.story):
+        return template_max
+    try:
+        doc = episode_common.read_episode(ec, store_mod.EPISODE_ASSETS_DOC)
+    except StepFailed:
+        doc = None
+    longest = clips.longest_clip_s(clips.planned_link(ec, env, assets_doc=doc))
+    return min(template_max, longest) if longest else template_max
+
+
+def beat_shot_count(ec, script, scene, *, limit_s=None):
     """T1 v2's ``(lo, hi)`` for *scene* (phase 7 stage 4, A12): one beat shot,
     two only when the scene runs past the template's ``max_shot_s`` (one clip
-    sells at most that much, DEC-208). A template with no ``max_shot_s``
+    sells at most that much, DEC-208) -- or past *limit_s* when given
+    (:func:`max_shot_s`, stage E). A template with no ``max_shot_s``
     keeps the episode's own pair."""
     max_shot = ec.template.get("max_shot_s")
     if max_shot is None:
         return tuple(ec.episode_defaults["shots_per_scene"])
+    if limit_s is not None:
+        max_shot = limit_s
     lo, hi = ec.episode_defaults["shots_per_scene"]
     n = 2 if scene_seconds(ec, script, scene) > max_shot else 1
     n = min(max(n, lo), hi)
     return n, n
 
 
-def shot_inputs_v2(ec, script, scene) -> dict:
+def short_of_beats(ec, script, plans, limit_s) -> set:
+    """The scenes of a fully animated v2 story whose plan has fewer beat
+    shots than :func:`beat_shot_count` asks under *limit_s* now (stage E: a
+    storyboard planned for a longer clip than its link's, e.g. on seedance
+    before the Veo key was set): the step plans them again, the estimate
+    counts them. Empty for any other story, or without *limit_s*."""
+    if limit_s is None or not media_policy.fully_animated(ec.story):
+        return set()
+    return {scene["scene_id"] for scene in script["scenes"]
+            if plans.get(scene["scene_id"])
+            and len(plans[scene["scene_id"]]) < beat_shot_count(ec, script, scene, limit_s=limit_s)[0]}
+
+
+def shot_inputs_v2(ec, script, scene, *, limit_s=None) -> dict:
     """:func:`shot_inputs` for T1 v2 / T1r v2 (phase 7 stage 4): the lines
     with their ids and delivery, the place's descriptor, each prop's look
-    (``shots.render_prop``), and the scene's own beat-shot count."""
+    (``shots.render_prop``), and the scene's own beat-shot count (under
+    *limit_s*, :func:`beat_shot_count`)."""
     inputs = shot_inputs(ec, scene)
     sid = scene["scene_id"]
     place = _entity(ec, "places", scene["place_id"], sid)
@@ -255,7 +295,7 @@ def shot_inputs_v2(ec, script, scene) -> dict:
     inputs["place"] = dict(inputs["place"], descriptor=place.get("descriptor") or "")
     inputs["props"] = [dict(entry, look=shots.render_prop(doc)) if doc.get("descriptor") else entry
                        for entry, doc in zip(inputs["props"], props)]
-    inputs["shots_per_scene"] = beat_shot_count(ec, script, scene)
+    inputs["shots_per_scene"] = beat_shot_count(ec, script, scene, limit_s=limit_s)
     return inputs
 
 
@@ -288,11 +328,12 @@ def _previous_shots(script, plans, sid, *, v2=False) -> list:
     return out
 
 
-def plan_scene(ctx, ec, script, plans, scene, *, tools, announced) -> list:
+def plan_scene(ctx, ec, script, plans, scene, *, tools, announced, limit_s=None) -> list:
     """T1 for *scene*: its plans (not stored anywhere by this function). A v2
-    story's scene is planned by T1 v2 (:func:`plan_scene_v2`)."""
+    story's scene is planned by T1 v2 (:func:`plan_scene_v2`), its beat
+    shots under *limit_s* (:func:`max_shot_s`)."""
     if media_policy.is_v2(ec.story):
-        return plan_scene_v2(ctx, ec, script, plans, scene, tools=tools, announced=announced)
+        return plan_scene_v2(ctx, ec, script, plans, scene, tools=tools, announced=announced, limit_s=limit_s)
     inputs = shot_inputs(ec, scene)
     pack = script_step._pack(ec, ctx, announced)
     system, user, schema = prompts.build_t1(pack, scene=scene, previous_shots=_previous_shots(
@@ -351,13 +392,14 @@ def _repair_t1_v2_reply(reply, *, tags_allowed) -> list:
     return added
 
 
-def plan_scene_v2(ctx, ec, script, plans, scene, *, tools, announced) -> list:
+def plan_scene_v2(ctx, ec, script, plans, scene, *, tools, announced, limit_s=None) -> list:
     """T1 v2 for *scene* (phase 7 stage 4, A12): its beat shots as plans,
     each with T1 v2's ``clip_motion`` and ``staging``. Phase 7 stage 5c
     (A13): the call also reads the ledger's wardrobe and holder facts for
     the scene (``context.slice_for_shot``; the previous shots' action and
-    staging are T1 v2's own block already, so not repeated)."""
-    inputs = shot_inputs_v2(ec, script, scene)
+    staging are T1 v2's own block already, so not repeated). Stage E: two
+    beat shots for a scene past *limit_s* (:func:`max_shot_s`)."""
+    inputs = shot_inputs_v2(ec, script, scene, limit_s=limit_s)
     pack = script_step._pack(ec, ctx, announced)
     continuity = context.slice_for_shot(ec, scene, None, None, ledger=script_step.ledger_of(ec))
     system, user, schema = prompts.build_t1_v2(pack, scene=scene, previous_shots=_previous_shots(
@@ -426,7 +468,9 @@ def run(ctx, *, runner=None, time_fn=time.monotonic, budget=None) -> dict:
 
     board = episode_common.read_episode(ec, STORYBOARD_DOC)
     plans, sources, stale = current_plans(board, script)
-    todo = scenes_to_plan(script, plans, sources, stale)
+    # Stage E: a fully animated story's beat shots fit its link's longest clip.
+    limit = max_shot_s(ec, ctx.settings_env) if media_policy.is_v2(ec.story) else None
+    todo = scenes_to_plan(script, plans, sources, stale, short_of_beats(ec, script, plans, limit))
     total = len(script["scenes"])
     planned, failed, notes = [], [], []
 
@@ -442,7 +486,7 @@ def run(ctx, *, runner=None, time_fn=time.monotonic, budget=None) -> dict:
         ctx.on_log(f"🎞 Scene {script['scenes'].index(scene) + 1} of {total} ({sid}, {scene['function']}): "
                    "shots (T1)")
         try:
-            scene_plans = plan_scene(ctx, ec, script, plans, scene, tools=tools, announced=announced)
+            scene_plans = plan_scene(ctx, ec, script, plans, scene, tools=tools, announced=announced, limit_s=limit)
         except StepFailed as exc:
             failed.append((sid, exc.reason))
             ctx.on_log(f"✖ Scene {sid}'s shots failed: {exc.reason}")

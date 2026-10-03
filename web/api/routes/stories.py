@@ -2016,7 +2016,7 @@ def _episode_estimate(stories, story, step, ep, *, measure, env) -> dict:
             units = workflow.script_units(ec)
             block = workflow.measure_estimate(ec, env=env) if measure else None
         else:
-            units = workflow.storyboard_units(ec)
+            units = workflow.storyboard_units(ec, env=env)
     if step == "script":
         low, high = units["llm_calls_range"]
         label = None if low == high else f"{low}–{high}"

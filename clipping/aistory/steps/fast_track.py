@@ -727,7 +727,7 @@ def estimate(ec, *, env, storyboard=T1, adapters=None, transport=None, custom_fo
     if board_approved or mode == FAST:
         t1_calls = 0
     elif script and script["scenes"]:
-        t1_calls = workflow.storyboard_units(ec)["t1_calls"]
+        t1_calls = workflow.storyboard_units(ec, env=env)["t1_calls"]
     else:
         t1_calls = predicted_scenes(ec, script)
 

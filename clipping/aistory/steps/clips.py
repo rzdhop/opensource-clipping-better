@@ -412,7 +412,80 @@ def pick_hosted(rows, policy, *, want_sound=False):
     return min(keyed, key=lambda pair: (pair[1]["price_per_second"], pair[0]))[1]
 
 
+def longest_clip_s(link):
+    """The longest clip *link* (a label) sells (``video.CLIP_LENGTHS``), or
+    None: a local link, or one with no table."""
+    lengths = video_providers.CLIP_LENGTHS.get(link or "")
+    return max(lengths) if lengths else None
+
+
+# A placeholder key: what a hosted link would be picked as once its key is
+# set (:func:`planned_link`). Only ever read by ``hosted_rows``; never sent.
+_ASSUMED_KEY = "assumed-for-planning"
+
+
+def planned_link(ec, env, *, assets_doc=None, adapters=None):
+    """The hosted link *ec*'s episode will buy its clips on, as
+    :func:`video_units` picks it, calling nothing (stage E: what a fully
+    animated storyboard plans its shots for): the episode's recorded link
+    (*assets_doc*'s ``links.video``); else the budget profile's
+    ``video_link_policy`` among the keyed hosted links of VIDEO_CHAIN (with
+    sound wanted on an ambience story); none keyed: the same pick with the
+    keys assumed set -- the link the profile takes once its key is there.
+    None: a local link or route, a profile that buys no clip, a chain that
+    cannot be read, no hosted link at all."""
+    recorded = sticky_link.recorded(assets_doc, sticky_link.VIDEO)
+    if recorded is not None:
+        return None if recorded["link"].startswith("local/") else recorded["link"]
+    profile = ec.story["generation_profile"]
+    if profile.get("route") == "local":
+        return None
+    try:
+        settings = budget_mod.profile_settings(profile["budget_profile"])
+    except (OSError, ValueError, KeyError):
+        return None
+    if settings.get("animate") == "none":
+        return None
+    if adapters is None:
+        adapters_mod.load_all()
+    merged = gating.merged_env(env)
+    try:
+        chain = gen.chain_from_env(gen.VIDEO, merged)
+    except ChainError:
+        return None
+    resolution = media_policy.video_resolution(ec.story)
+    policy = settings.get("video_link_policy") or CHEAPEST
+    want = int(profile.get("tier") or 1) == 3 and media_policy.ambience(ec.story)
+    row = pick_hosted(hosted_rows(chain, merged, adapters, resolution=resolution), policy, want_sound=want)
+    if row is None:
+        assumed = dict(merged)
+        for link in chain:
+            assumed.update((name, _ASSUMED_KEY) for name in gen.missing_keys(link, merged))
+        row = pick_hosted(hosted_rows(chain, assumed, adapters, resolution=resolution), policy, want_sound=want)
+    return row["link"] if row is not None else None
+
+
 # ----------------------------------------------------------- the estimate
+
+# How much longer than its clip a shot of a fully animated story may run, its
+# clip held on its last frame (DEC-208); past it, the clip cannot cover the
+# shot and the plan is refused (stage E, ``too_long``).
+HOLD_TOLERANCE_S = 0.5
+
+
+def _too_long(rows, link) -> str | None:
+    """The refusal of a fully animated story's plan whose shots *rows*
+    (``plan`` rows) run longer than *link*'s longest clip by more than
+    :data:`HOLD_TOLERANCE_S`, naming them and the fix, or None."""
+    long = [row for row in rows if (row.get("held_s") or 0.0) > HOLD_TOLERANCE_S]
+    if not long:
+        return None
+    longest = longest_clip_s(link)
+    named = _and([f"{row['shot_id']} ({row['clip_s'] + row['held_s']:g} s)" for row in long])
+    return (f"shot{_s(len(long))} {named} {'runs' if len(long) == 1 else 'run'} longer than the {longest} s clip "
+            f"{link} sells, and every shot of this story is one clip: plan the storyboard again (the storyboard step "
+            f"plans a scene past {longest} s as two shots), approve it, then run the assets step again")
+
 
 def _local_note(note) -> str:
     """*note* about the local link, naming it once."""
@@ -461,6 +534,16 @@ def video_units(ec, script, storyboard, assets_doc, *, env, caps, committed_usd,
     refused, ``assets.plan_refusal``); a shot longer than the longest clip
     the link sells is planned at that length, ``held_s`` on its row and in
     the message (the render holds the clip's last frame, DEC-208).
+
+    Phase 7 follow-up, stage E: on a story that animates every shot
+    (``media_policy.fully_animated``) a shot longer than that by more than
+    :data:`HOLD_TOLERANCE_S` refuses the plan -- ``too_long``, the sentence
+    naming each such shot and the fix (plan the storyboard again: it plans a
+    scene past the link's longest clip as two shots), ``ready`` false --
+    instead of buying a clip that cannot cover it. On an ambience story
+    (``media_policy.ambience``) the units carry ``ambience``: ``{"sound":
+    bool, "note": sentence | None}`` -- whether the link's clips bring their
+    own sound, and if not, why and what would.
 
     Phase 7 stage 6b (RC-Q3): *hold* (``assets.clip_hold``: a v2 episode
     whose keyframes' approval is not current) is the sentence a plan with
@@ -684,7 +767,11 @@ def video_units(ec, script, storyboard, assets_doc, *, env, caps, committed_usd,
     else:
         units.update(eta_s=0.0, eta_note="no clip to make")
 
-    units["refused"] = refusal if count else None
+    # Stage E: a story that animates every shot buys no clip that cannot cover its shot.
+    too_long = _too_long(rows_out, link) if not local and media_policy.fully_animated(ec.story) else None
+    if too_long and count:
+        units["too_long"] = too_long
+    units["refused"] = (too_long or refusal) if count else None
     units["ready"] = units["refused"] is None
     if ambient:
         sound = makes_sound(link)
@@ -747,7 +834,8 @@ def _message(units, plan, current_ids, profile_name, booked_ids=(), *, resolutio
     else:
         size = f" at {resolution}" if resolution and resolution != pricing.DEFAULT_RESOLUTION else ""
         text = f"{clips}{size}, paid: est ${est:.3f}{tail}."
-    held = [row for row in units["plan"] if row.get("held_s")]
+    held = [row for row in units["plan"]
+            if row.get("held_s") and not (units.get("too_long") and row["held_s"] > HOLD_TOLERANCE_S)]
     if held:
         text += " " + " ".join(f"{row['shot_id']} runs {row['clip_s'] + row['held_s']:g} s: its {row['clip_s']} s "
                                f"clip is held on its last frame for {row['held_s']:g} s." for row in held)
