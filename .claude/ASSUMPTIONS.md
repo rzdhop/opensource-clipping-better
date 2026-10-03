@@ -453,6 +453,12 @@
   URL-encoded characters (v1 prompts of 1900–3000 encoded were served, so not "under 2000"); FLUX's T5 window 512
   tokens (a word budget, never a refusal). UNCONFIRMED until "Ask the providers (free)" reads each fal video link's
   `prompt.maxLength` (or "not published") into `data/provider_limits.json`.
+- **A-127** — (phase 7 follow-up, DEC-242) Veo 3.1 lite follows a text audio brief: it gives a clip the place's
+  ambience and the named effects and keeps voices, music and narration out when told "no music, no voices, nobody
+  speaks or sings, no narration" (it has no negative prompt, A-103); and the ambience mix constants (gain 0.5 on the
+  SFX bus, duck 0.06 / 3 / 50 ms / 600 ms, 80 ms fades) sit the clip's sound under the lines without pumping.
+  Measured only on the synthetic test episode (−9.6 dB under a line). UNCONFIRMED until the human hears a Veo
+  episode on the phone.
 
 ## Confirmed
 - **A-082** — fal.ai as measured in the paid test (2026-09-29, DEC-174):

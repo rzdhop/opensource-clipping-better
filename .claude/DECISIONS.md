@@ -4263,3 +4263,40 @@ says it). Places & props keep their approvals after a switch, so the page can sh
 are still to be written — the confirm and the hint say to run it again; it is not queued. Regenerating the text of a
 v2 character that has images but no look drops those images until the cast step redraws them. No CLI command for
 the switch yet. `ledger.mark_discarded` holds only the instance lock and relies on the route's in-flight refusal.
+
+## DEC-242 — Every clip brings its own ambience and effects (Veo 3.1 lite); the dialogue stays on the pinned voices (phase 7 follow-up, E)
+**Context.** The human (2026-10-02): "a lot of video providers provide audio with the videos directly, which is
+nice, only pre-prompted also". Their choices: the clip's sound is AMBIENCE + SFX only (each character keeps its
+pinned Gemini voice in every shot; a model's invented voice would change from shot to shot); the link is Veo 3.1
+lite on `GEMINI_PAID_API_KEY` ($0.05/s at 720p, sound always on, 4/6/8 s clips); the caps follow. Tier 3 so far
+(DEC-201) replaced a shot's TTS lines with the clip's sound, shot by shot on an opt-in flag, and the default link
+(seedance) makes no sound at all.
+**Decision** (`10ee32b`, `a8ccd4d`, `a93192b`, `98f57dd`, `414ae29`).
+- **The mode** `tier3_native_audio: "ambience"` (the quality profile; `"opt_in"` keeps DEC-201's replace mode; v1
+  and tiers 1–2 untouched) and `video_link_policy: "first_with_audio"`: the first keyed hosted link whose clips
+  always have sound (Veo); none keyed → the first keyed link (seedance, silent) with "No ambience: … add
+  GEMINI_PAID_API_KEY" in the estimate, never a silent switch; LTX is never picked on its own (its sound is unproven,
+  1080p-only at $0.06/s blows the cap) but an episode already recorded on it asks for sound. The preset is tier 3
+  now; on an ambience story the per-shot `keep_native_audio` is not read: every line stays TTS.
+- **The audio brief** inside the clip prompt's budget (140 words in all; the closing "no music, no voices, nobody
+  speaks or sings, no narration" and the "speaks silently" sentence are never cut): the place's sound from its
+  look/variant, the shot's SFX cues (`CLIP_SFX_EXCLUDED`: no stingers, whooshes or crowd gasps, which would
+  contradict "no voices"); speech in the visual text is made silent (quotes dropped, speech verbs "silently").
+- **The mix**: each ambience clip is a stem on the SFX bus (`_ambience_stems` / `_ambience_bus`), not a fourth stem,
+  so the three stem files and the Tier-2 ducking check stand; the dialogue stem and the ducked bed are byte-identical
+  to tier 2's. `AMBIENCE_GAIN 0.5` (about 8 dB under the lines with the bus's 0.8), its own gentler duck (threshold
+  0.06, ratio 3, attack 50 ms, release 600 ms: no pumping on syllables, no bounce in the 0.25 s between lines),
+  80 ms fades capped at half the shot. Measured on the test episode: half level 40 ms in, −9.6 dB under a line. A
+  clip without a sound track adds nothing and the render log says so.
+- **Shot length**: on a fully animated story the beat-shot limit is min(template max, the planned link's longest
+  clip) — 8 s on Veo; scenes planned longer are re-planned by the storyboard step (its estimate counts them); over
+  the limit a shot gets up to 0.5 s of held last frame, beyond that the estimate refuses the plan (`too_long`) with
+  the fix, and the assets step refuses before any keyframe is made. Other stories keep DEC-208's held frame.
+- **Caps** 4 / 12 / 40 (the 1:3:10 ratio of DEC-236's 2/6/20; saved Settings still override), the quality profile's
+  `cap_usd` 4.0; `preset_estimate` / `new_story_offer` price the preset on Veo when its key is set ($3.52 an episode
+  at 8 × 8 s; keyframes on fal) and name both keys.
+**Consequence.** Not heard on a live Veo clip yet (A-127): the brief's obedience and the mix constants wait for the
+human's walk. An episode near the cap (scenes split into two shots round up more; up to $0.40 of keyframe redraws,
+DEC-243) is refused whole when over. A shipped SFX cue still plays at its anchor, so a sound the clip also makes can
+be heard twice (follow-up: drop shipped cues on shots whose clip has sound); a scene-start cue goes to the shot that
+holds the scene's first line, so a silent establishing shot before it misses it.
