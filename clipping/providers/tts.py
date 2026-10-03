@@ -38,6 +38,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import wave
 
 from . import generation, pricing, tts_tail
@@ -108,6 +109,67 @@ def _write_timing(out_dir, name, *, duration_s, words, source, provider, voice, 
         # The tail guard's report (``tts_tail.clean``): Gemini only.
         data["tail_guard"] = dict(tail_guard)
     return write_output(out_dir, name, json.dumps(data, indent=2, ensure_ascii=False).encode("utf-8"), "json")
+
+
+def tail_guard_due(timing) -> bool:
+    """Whether a kept line's sidecar (``line_timing_v1``) names a Gemini take
+    the tail guard has not cleaned: made before the guard (a line voiced
+    then, or a cached answer kept then), or by an older guard version."""
+    if not isinstance(timing, dict) or timing.get("provider") != "gemini":
+        return False
+    guard = timing.get("tail_guard")
+    version = guard.get("version") if isinstance(guard, dict) else None
+    return not isinstance(version, int) or isinstance(version, bool) or version < tts_tail.TAIL_GUARD_VERSION
+
+
+def _atomic_json(path, data) -> None:
+    """*data* written to *path* so a reader sees the old file or the new one."""
+    handle, tmp = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(path)), prefix=".timing-", suffix=".tmp")
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=2, ensure_ascii=False)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def guard_kept_take(audio_path, timing_path, timing=None, *, speech_end_s=None):
+    """A kept take :func:`tail_guard_due` names, cleaned where it stands, for
+    free -- never spoken again, so the voice cannot change: the WAV cut and
+    faded in place (``tts_tail.clean_wav``), then its sidecar rewritten with
+    the cleaned ``duration_s``, the guard's report (``tail_guard``) and any
+    aligned word clamped into the shorter line. *timing* is the sidecar
+    already read (None: read here); *speech_end_s* the last aligned word's
+    end, when there is one. Returns the new sidecar, or None when nothing was
+    due or the take cannot be read (no sidecar, not a 16-bit mono WAV): left
+    exactly as it is. ``OSError`` when a write fails (the audio is written
+    first: a sidecar left behind is cleaned again next time)."""
+    if timing is None:
+        try:
+            with open(timing_path, encoding="utf-8") as fh:
+                timing = json.load(fh)
+        except (OSError, ValueError):
+            return None
+    if not tail_guard_due(timing):
+        return None
+    report = tts_tail.clean_wav(audio_path, speech_end_s=speech_end_s)
+    if report is None:
+        return None
+    kept = report["kept_s"]
+    words = [dict(word, start=min(word["start"], kept), end=min(word["end"], kept))
+             if isinstance(word, dict) and isinstance(word.get("start"), (int, float))
+             and isinstance(word.get("end"), (int, float)) else word
+             for word in timing.get("words") or []]
+    new = dict(timing, duration_s=kept, tail_guard=report, words=words)
+    _atomic_json(timing_path, new)
+    return new
 
 
 def _unknown_model(link, table):

@@ -759,8 +759,11 @@ def synthesize_line(gates, *, voice, text, dest_for, on_log, cancel, step=MEASUR
     engine wrote it) and its ``line_timing_v1`` sidecar at
     ``dest_for("json")``, each copied atomically. Returns ``{"ext",
     "duration_s", "source", "voice": "<provider>/<voice_id>", "link",
-    "paid", "est_usd", "cached"}`` (``cached``: a kept answer of *cache*,
-    no call made).
+    "paid", "est_usd", "cached", "tail_guard"}`` (``cached``: a kept answer
+    of *cache*, no call made; ``tail_guard``: the Gemini tail guard's report,
+    None for another engine). A Gemini answer *cache* kept from before the
+    tail guard is cleaned before it is kept (``tts.guard_kept_take``), so a
+    cache hit never brings its static back.
 
     ``VoiceError`` for a voice that pins nothing or a provider no chain link
     speaks for, a chain that could not run its one link (the refusal of a
@@ -838,6 +841,20 @@ def synthesize_line(gates, *, voice, text, dest_for, on_log, cancel, step=MEASUR
             est = round(float(result.est_cost) if result.paid else 0.0, 4)
         audio, ext, sidecar, data = _line_outputs(result, spoken)
         try:
+            # A Gemini answer the generation cache kept from before the tail
+            # guard comes back with its static: its scratch copy is cleaned
+            # before it is kept (the cache's own file stays as answered, so
+            # every later hit is cleaned the same way).
+            guarded = tts.guard_kept_take(audio, sidecar, data)
+        except OSError as exc:
+            raise VoiceError(f"{spoken} answered, but its static could not be cut "
+                             f"({type(exc).__name__}: {exc}).") from None
+        if guarded is not None:
+            data = guarded
+            if guarded["tail_guard"]["trimmed_s"] > 0:
+                on_log(f"   🔇 {spoken}: a take kept from before the tail guard; "
+                       f"{guarded['tail_guard']['trimmed_s']:.2f} s of static cut from its end")
+        try:
             _atomic_copy(audio, dest_for(ext))
             _atomic_copy(sidecar, dest_for("json"))
         except (KeyError, OSError, ValueError) as exc:
@@ -846,7 +863,7 @@ def synthesize_line(gates, *, voice, text, dest_for, on_log, cancel, step=MEASUR
 
     return {"ext": ext, "duration_s": round(float(data["duration_s"]), 3), "source": data["source"],
             "voice": label, "link": answered, "paid": bool(result.paid), "est_usd": est,
-            "cached": bool((result.meta or {}).get("cached"))}
+            "cached": bool((result.meta or {}).get("cached")), "tail_guard": data.get("tail_guard")}
 
 
 def _paid_off_reason(est, link, budget_obj) -> str:

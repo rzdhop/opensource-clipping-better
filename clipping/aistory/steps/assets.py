@@ -30,7 +30,12 @@ cancel token is checked before every call. It fills only what is missing
    lines, naming the character, and nothing else is tried (DEC-122). The
    script is re-timed and the storyboard's shot durations follow
    (``shots.retime_storyboard``): no revision moves and **no approval is
-   cleared** (DEC-135, DEC-155).
+   cleared** (DEC-135, DEC-155). Before them, a Gemini line voiced before
+   the tail guard (``providers.tts_tail``: the static Gemini appends after
+   the last word) is cleaned in place, for free, never spoken again, and
+   re-timed the same way (``voice_lines.LineMeasurement.guard_tails``); the
+   summary's ``tails`` (only when the guard saw a line) and one log line say
+   how many line endings were cleaned and how many seconds were cut.
 3. **Word timings** (spec 6.4, ``wordtiming``): the provider's words; with
    ``params.align_words`` (opt-in, DEC-165) a line without them is
    transcribed by the STT chain and its words aligned; otherwise the even
@@ -2171,6 +2176,9 @@ class _Assets(voice_lines.LineMeasurement):
         # and what the keyframe auto-fix did (None: it did not run).
         self.ledger_read = _READ
         self.keyframe_fix = None
+        # The Gemini tail guard's report of every line it saw in this run
+        # (spoken, or cleaned in place), by line id.
+        self.tails = {}
 
     # ---------------------------------------------------------- plumbing
 
@@ -2178,6 +2186,66 @@ class _Assets(voice_lines.LineMeasurement):
         """``voice_lines``' hook: the one-link chain's failures behind a
         line's ``VoiceError`` (none when it did not come from the chain)."""
         self.line_failures[line["line_id"]] = tuple(getattr(exc.__cause__, "failures", None) or ())
+
+    def tail_guarded(self, line, report) -> None:
+        """``voice_lines``' hook: what the Gemini tail guard did to *line*."""
+        self.tails[line["line_id"]] = report
+
+    def guard_kept_tails(self) -> None:
+        """``voice_lines``' :meth:`guard_tails` -- the lines voiced before the
+        Gemini tail guard, cleaned in place -- keeping each voice regenerate's
+        take on the file it made: ``assets.json`` holds a take only while the
+        line's audio is that file (its sha256, :meth:`line_entries`), so a
+        take whose audio was cleaned moves to the cleaned file's sha256 at
+        once, before anything else can stop the run."""
+        ec = self.ec
+        doc = _read_assets_doc(ec)
+        before = {}
+        for scene in self.script["scenes"]:
+            for line in scene["lines"]:
+                if ((doc or {}).get("lines", {}).get(line["line_id"]) or {}).get("take"):
+                    before[line["line_id"]] = (line, _sha256_file(line_audio_path(ec, line)))
+        moved = False
+        for line_id in self.guard_tails():
+            if line_id not in before:
+                continue
+            line, sha = before[line_id]
+            take = doc["lines"][line_id]["take"]
+            if sha is not None and take.get("audio_sha256") == sha:
+                take["audio_sha256"] = _sha256_file(line_audio_path(ec, line))
+                moved = True
+        if moved:
+            try:
+                ec.store.write_episode_doc(ec.story_id, ec.ep, ASSETS_DOC, doc, now=llm_call.utc_now())
+            except (schemas.SchemaError, ValueError, KeyError) as exc:
+                self.ctx.on_log(f"⚠️ {ASSETS_DOC} could not follow the cleaned lines' takes ({exc}); a voice "
+                                "regenerate's record of them is dropped.")
+
+    def tail_summary(self) -> dict:
+        """What the Gemini tail guard did in this run: ``{"checked", "cleaned",
+        "cut_s", "suspect"}`` -- the lines it saw, the ones it cut static
+        from, the seconds cut, and the ones it left whole (``suspect``)."""
+        cut = [report["trimmed_s"] for report in self.tails.values() if report["trimmed_s"] > 0]
+        return {"checked": len(self.tails), "cleaned": len(cut), "cut_s": round(sum(cut), 3),
+                "suspect": [line_id for line_id, report in self.tails.items() if report["reason"] == "suspect"]}
+
+    def tail_message(self, tails):
+        """The run's one line about the Gemini tail guard, or None."""
+        checked, cleaned = tails["checked"], tails["cleaned"]
+        if not checked:
+            return None
+        if cleaned:
+            message = (f"🔇 {cleaned} Gemini line ending{'s' if cleaned != 1 else ''} cleaned "
+                       f"({tails['cut_s']:.1f} s of static cut)")
+            if checked > cleaned:
+                message += f", {checked - cleaned} had none"
+        else:
+            message = f"🔇 {checked} Gemini line ending{'s' if checked != 1 else ''} checked: no static to cut"
+        if tails["suspect"]:
+            ids = tails["suspect"]
+            message += (f"; {_and(ids)} left whole, {'its end looks' if len(ids) == 1 else 'their ends look'} odd "
+                        f"('voice-tails {self.ec.story_id} --ep {self.ec.ep}' shows why)")
+        return message
 
     def failures(self) -> str:
         return "; ".join(f"{what} failed ({reason})" for what, _target, reason in self.failed)
@@ -3431,6 +3499,10 @@ class _Assets(voice_lines.LineMeasurement):
                 elif animate:
                     self.planned_video = video
             ctx.cancel.check()
+            # The lines voiced before the Gemini tail guard lose their static
+            # first, for free: the measurement, the words and the timing below
+            # read the cleaned lines.
+            self.guard_kept_tails()
             try:
                 self.measure(gates)
                 if align:
@@ -3470,6 +3542,10 @@ class _Assets(voice_lines.LineMeasurement):
         failures += [{"what": f"line {line_id}", "target": line_target(ec.ep, line_id),
                       "reason": f"{voice_lines.speaker_name(ec, speaker)}: {reason.rstrip('.')}"}
                      for line_id, speaker, reason in self.voice_failed]
+        tails = self.tail_summary()
+        tail_message = self.tail_message(tails)
+        if tail_message:
+            ctx.on_log(tail_message)
         ctx.on_log(episode_common.timing_line(self.script))
         if failures:
             targets = [item["target"] for item in failures if item["target"]]
@@ -3505,6 +3581,11 @@ class _Assets(voice_lines.LineMeasurement):
                                              for shot in board["shots"]),
             "fingerprint": current_fingerprint(ec, board, self.script, doc),
         }
+        if tails["checked"]:
+            # The Gemini tail guard in this run (lines spoken now, and lines
+            # voiced before it, cleaned in place): what it saw and what it cut.
+            # A run it saw no line of keeps the summary it always had.
+            result["tails"] = tails
         info = self.link_info or {}
         if self.link is not None or info.get("mixed"):
             # A-087: the link the images were asked of, a legacy mix, or the

@@ -38,14 +38,26 @@ scene a text-only edit marked ``retime_only`` is re-timed in place with the
 others, and its mark goes once its lines are all measured again
 (``shots.retime_storyboard``, phase 5 stage 7).
 
+**The Gemini tail guard** (``providers.tts_tail``): a new Gemini line comes
+cleaned from its adapter, and a cached answer kept from before the guard is
+cleaned as it lands (``voices.synthesize_line``). A line voiced before it
+keeps its static until :meth:`LineMeasurement.guard_tails` -- the assets
+step's, before it measures -- cleans its kept WAV in place, for free, never
+speaking it again (``tts.guard_kept_take``; an aligned line's last word
+gives the speech's end), and re-times the line exactly as a measurement
+does. A sixth hook, :meth:`tail_guarded`, hands the run each report.
+
 The story's own document is never read for writing (RC-E2).
 """
 
 from __future__ import annotations
 
+import json
 import os
 
-from .. import media_policy, schemas, shots, timing, voices
+from clipping.providers import tts
+
+from .. import media_policy, schemas, shots, timing, voices, wordtiming
 from .. import store as store_mod
 from . import episode_common, llm_call
 from .episode_common import STORYBOARD_DOC
@@ -228,6 +240,12 @@ class LineMeasurement:
         ran). Nothing here (the script step); the assets step keeps the
         chain's failures to pace a rate-limited voice."""
 
+    def tail_guarded(self, line, report) -> None:
+        """*line*'s audio went through the Gemini tail guard in this run --
+        spoken now, or cleaned in place (:meth:`guard_tails`) -- with
+        *report* (``tts_tail.clean``'s). Nothing here (the script step); the
+        assets step counts what was cut."""
+
     def voice_failures(self) -> str:
         return "; ".join(f"line {line_id} failed ({speaker_name(self.ec, speaker)}: {reason.rstrip('.')})"
                          for line_id, speaker, reason in self.voice_failed)
@@ -341,6 +359,8 @@ class LineMeasurement:
                     "audio": f"{VOICE_ASSETS}/{asset_name(line_id, spoken['ext'])}",
                 }
                 self.measured += 1
+                if spoken.get("tail_guard"):
+                    self.tail_guarded(line, spoken["tail_guard"])
                 self.save()
                 self.sync_storyboard()
                 self.drop_other_take(line_id, spoken["ext"])
@@ -349,6 +369,61 @@ class LineMeasurement:
                 return
         self.voice_failed.append((line_id, speaker, reason))
         ctx.on_log(f"✖ {line_id} {name}: {reason}")
+
+    def guard_tails(self) -> list:
+        """Every measured line whose kept take the Gemini tail guard has not
+        cleaned (``tts.tail_guard_due``: voiced before the guard), cleaned in
+        place, in reading order -- for free, never spoken again, so its voice
+        cannot change (module docstring). A line whose words were aligned
+        gives the guard its last word's end. The line's measured duration
+        becomes the cleaned one, and the script is re-timed and saved and
+        the storyboard follows after each line (:meth:`save`,
+        :meth:`sync_storyboard`: no revision moves, no approval is cleared),
+        as a measurement does -- a stop never leaves the script behind a
+        cleaned file. A take that cannot be read or written is left as it
+        is, said. Returns the ids of the lines cleaned."""
+        ec, ctx = self.ec, self.ctx
+        cleaned = []
+        for line in (line for scene in self.script["scenes"] for line in scene["lines"]):
+            if not is_measured(ec, line):
+                continue
+            ctx.cancel.check()
+            line_id = line["line_id"]
+            audio = line["timing"]["audio"]
+            try:
+                audio_path = ec.store.episode_asset_path(ec.story_id, ec.ep, "voice",
+                                                         audio[len(VOICE_ASSETS) + 1:])
+                timing_path = ec.store.episode_asset_path(ec.story_id, ec.ep, "voice", asset_name(line_id, "json"))
+            except KeyError:
+                continue
+            try:
+                with open(timing_path, encoding="utf-8") as fh:
+                    sidecar = json.load(fh)
+            except (OSError, ValueError):
+                continue
+            if not tts.tail_guard_due(sidecar):
+                continue
+            speech_end = None
+            if wordtiming.source_of(sidecar)[0] == wordtiming.ALIGNMENT:
+                speech_end = max((word["end"] for word in sidecar["words"] if isinstance(word, dict)
+                                  and isinstance(word.get("end"), (int, float))), default=None)
+            try:
+                new = tts.guard_kept_take(audio_path, timing_path, sidecar, speech_end_s=speech_end)
+            except OSError as exc:
+                ctx.on_log(f"⚠️ {line_id}: its static could not be cut ({exc}); the line is left as it is.")
+                continue
+            if new is None:
+                continue
+            report = new["tail_guard"]
+            line["timing"]["duration_s"] = new["duration_s"]
+            cleaned.append(line_id)
+            self.tail_guarded(line, report)
+            self.save()
+            self.sync_storyboard()
+            if report["trimmed_s"] > 0:
+                ctx.on_log(f"🔇 {line_id} {speaker_name(ec, line['speaker'])}: {report['trimmed_s']:.2f} s of "
+                           f"static cut from its end ({report['reason']}), {report['kept_s']:.2f} s kept")
+        return cleaned
 
     def open_gates(self):
         """``voices.LineGates`` for the episode; ``StepFailed`` saying the

@@ -268,6 +268,63 @@ def test_edge_and_local_lines_carry_no_tail_guard(tmp_path, monkeypatch):
         assert wav.readframes(wav.getnframes()) == b"\x00\x10" * 2400, "a local engine's audio is untouched"
 
 
+@pytest.mark.parametrize("timing,due", [
+    ({"provider": "gemini"}, True),
+    ({"provider": "gemini", "tail_guard": {"version": 0}}, True),
+    ({"provider": "gemini", "tail_guard": "odd"}, True),
+    ({"provider": "gemini", "tail_guard": {"version": 1}}, False),
+    ({"provider": "edge"}, False),
+    ({"provider": "local"}, False),
+    (None, False),
+])
+def test_a_kept_take_is_due_for_the_guard_when_gemini_made_it_before_this_version(timing, due):
+    assert tts.tail_guard_due(timing) is due
+
+
+def test_a_kept_gemini_take_is_cleaned_in_place_with_its_sidecar(tmp_path):
+    """A take made before the guard (no ``tail_guard``): the WAV cut and
+    faded where it stands, the sidecar's duration the cleaned length, the
+    report kept, aligned words clamped into the line; a second call does
+    nothing."""
+    import test_tts_tail as ttt
+
+    audio, timing_path = tmp_path / "line_02.wav", tmp_path / "line_02.json"
+    with wave.open(str(audio), "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(24000)
+        wav.writeframes(ttt.pcm(ttt.voiced(1.3), ttt.static(0.6)))
+    old = {"$schema": "line_timing_v1", "provider": "gemini", "voice": "Kore", "duration_s": 1.9,
+           "source": "audio_duration_only", "words_source": "alignment", "aligned_by": "groq/x",
+           "words": [{"word": "Oui", "start": 0.2, "end": 1.0}, {"word": "bon", "start": 1.1, "end": 1.9}]}
+    timing_path.write_text(json.dumps(old), encoding="utf-8")
+
+    new = tts.guard_kept_take(str(audio), str(timing_path), speech_end_s=1.25)
+
+    guard = new["tail_guard"]
+    assert guard["reason"] == "noise_run" and 1.3 <= guard["kept_s"] <= 1.43
+    assert new == dict(old, duration_s=guard["kept_s"], tail_guard=guard,
+                       words=[{"word": "Oui", "start": 0.2, "end": 1.0},
+                              {"word": "bon", "start": 1.1, "end": guard["kept_s"]}])
+    assert json.loads(timing_path.read_text(encoding="utf-8")) == new
+    with wave.open(str(audio)) as wav:
+        assert round(wav.getnframes() / 24000, 3) == guard["kept_s"]
+    before = audio.read_bytes()
+    assert tts.guard_kept_take(str(audio), str(timing_path)) is None and audio.read_bytes() == before
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["line_02.json", "line_02.wav"]
+
+
+def test_a_take_of_another_engine_or_format_is_left_alone(tmp_path):
+    audio, timing_path = tmp_path / "line_03.mp3", tmp_path / "line_03.json"
+    audio.write_bytes(b"ID3fake-mp3")
+    timing_path.write_text(json.dumps({"provider": "edge", "duration_s": 1.0}), encoding="utf-8")
+    assert tts.guard_kept_take(str(audio), str(timing_path)) is None
+    timing_path.write_text(json.dumps({"provider": "gemini", "duration_s": 1.0}), encoding="utf-8")
+    assert tts.guard_kept_take(str(audio), str(timing_path)) is None
+    assert json.loads(timing_path.read_text(encoding="utf-8")) == {"provider": "gemini", "duration_s": 1.0}
+    assert tts.guard_kept_take(str(audio), str(tmp_path / "missing.json")) is None
+
+
 def test_gemini_tts_reports_an_answer_without_audio(tmp_path):
     transport = FakeTransport([(200, {"candidates": [{"content": {"parts": [{"text": "no"}]}, "finishReason": "OTHER"}]})])
     with pytest.raises(errors.ProviderError) as excinfo:
