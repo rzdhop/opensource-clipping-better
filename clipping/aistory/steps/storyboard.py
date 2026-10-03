@@ -37,9 +37,9 @@ import time
 
 from clipping.providers import pricing
 
-from .. import context, media_policy, prompts, shots, timing
+from .. import context, media_policy, prompts, shots, timing, voices
 from .. import store as store_mod
-from . import clips, entities, episode_common, llm_call
+from . import clips, entities, episode_common, llm_call, voice_lines
 from . import script as script_step
 from .episode_common import SCRIPT_DOC, STORYBOARD_DOC
 from .llm_call import StepFailed
@@ -236,6 +236,25 @@ def scene_seconds(ec, script, scene) -> float:
     return float(timing.scene_timing(scene, ec.template, ec.language, style_lock=ec.style_lock)["duration_s"])
 
 
+def expected_scene_seconds(ec, script, scene) -> float:
+    """*scene*'s length as its voices will measure it (DEC-250):
+    :func:`scene_seconds` plus, for each line not measured yet
+    (``shots._measured_for_its_words``), what its speaker's TTS provider adds
+    over the estimate (``voices.speech_overrun``: Gemini's voices ran 1.35x
+    the estimate on the live story -- ``timing.estimate_line`` was measured
+    on Edge). A scene whose every line is measured is its measured length.
+    What :func:`beat_shot_count` reads: one clip must cover the shot once the
+    voices are real, not only on the estimate."""
+    seconds = scene_seconds(ec, script, scene)
+    for line in scene["lines"]:
+        if shots._measured_for_its_words(line):
+            continue
+        over = voices.speech_overrun(voice_lines.speaker_voice(ec, line["speaker"]))
+        if over > 1.0:
+            seconds += timing.estimate_line(line["text"], ec.language) * (over - 1.0)
+    return round(seconds, 3)
+
+
 def max_shot_s(ec, env=None):
     """The longest a v2 beat shot may run (phase 7 follow-up, stage E): the
     template's ``max_shot_s`` -- and, on a story whose every shot is one clip
@@ -265,15 +284,17 @@ def beat_shot_count(ec, script, scene, *, limit_s=None):
     """T1 v2's ``(lo, hi)`` for *scene* (phase 7 stage 4, A12): one beat shot,
     two only when the scene runs past the template's ``max_shot_s`` (one clip
     sells at most that much, DEC-208) -- or past *limit_s* when given
-    (:func:`max_shot_s`, stage E). A template with no ``max_shot_s``
-    keeps the episode's own pair."""
+    (:func:`max_shot_s`, stage E) -- as its voices will measure it
+    (:func:`expected_scene_seconds`, DEC-250). A template with no
+    ``max_shot_s`` keeps the episode's own pair."""
     max_shot = ec.template.get("max_shot_s")
     if max_shot is None:
         return tuple(ec.episode_defaults["shots_per_scene"])
     if limit_s is not None:
         max_shot = limit_s
     lo, hi = ec.episode_defaults["shots_per_scene"]
-    n = 2 if scene_seconds(ec, script, scene) > max_shot else 1
+    # DEC-250: as the voices will measure it, not as the estimate says.
+    n = 2 if expected_scene_seconds(ec, script, scene) > max_shot else 1
     n = min(max(n, lo), hi)
     return n, n
 

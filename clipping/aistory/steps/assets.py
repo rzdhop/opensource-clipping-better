@@ -2076,7 +2076,8 @@ def clip_quote(ec, script, storyboard, shot, *, env, adapters=None, probe_local=
     row = next((item for item in video["plan"] if item["shot_id"] == shot["shot_id"]), None)
     quote = {"video": video, "link": video["link"], "route_class": video["route_class"],
              "clip_s": row["clip_s"] if row else None, "est_usd": round(float(row["est_usd"]), 4) if row else 0.0,
-             "over_cap": None, "ready": False, "message": video["message"]}
+             "cover": row.get("cover") if row else None, "over_cap": None, "ready": False,
+             "message": video["message"]}
     if row is None or not video["ready"] or video.get("hold"):
         return quote
     keys = [(shot["assets"].get("clip") or {}).get("cache_key")]
@@ -2945,6 +2946,10 @@ class _Assets(voice_lines.LineMeasurement):
         kept = f" ({self.video['reused']} current, kept)" if self.video["reused"] else ""
         ctx.on_log(f"🎬 Animating {len(todo)} shot{'s' if len(todo) != 1 else ''} ({seconds} s) on "
                    f"{video['link']}{price}{kept}")
+        for row in todo:
+            if row.get("cover") == "stretch":
+                # DEC-250: said in the feed, as the estimate says it.
+                ctx.on_log(f"🎬 {clips.cover_sentence(row)}")
         if video["route_class"] == "local":
             self.free_comfyui()
         for index, row in enumerate(todo):
@@ -2955,7 +2960,7 @@ class _Assets(voice_lines.LineMeasurement):
                 record, info = self.make_clip(shot, video=video, clip_s=row["clip_s"], est_usd=row["est_usd"],
                                               seed=clip_seed(shot, story_id=ec.story_id, ep=ec.ep),
                                               note=clip_note(shot), flags=clips.shot_flags(shot, doc), tier=tier,
-                                              image_link=image_link)
+                                              image_link=image_link, cover=row.get("cover"))
             except ClipFailed as exc:
                 self.fail_clip(shot, exc)
                 continue
@@ -2963,13 +2968,15 @@ class _Assets(voice_lines.LineMeasurement):
         self.clip_todo = []
         return episode_common.read_episode(ec, ASSETS_DOC) or doc
 
-    def make_clip(self, shot, *, video, clip_s, est_usd, seed, note, flags, tier, image_link):
+    def make_clip(self, shot, *, video, clip_s, est_usd, seed, note, flags, tier, image_link, cover=None):
         """One clip of *shot* on the plan's one link (*video*: ``asset_units``'
         video part -- its ``link``, ``route_class``, ``template`` and
         ``profile``) through the story's generation cache, the gates of every
         paid call and the free-tier limiter; ``(record, info)``: the shot's
         ``assets.clip``, and what the call was (``cached``, ``resumed``,
-        ``fresh``, ``wall_s``, ``label``, ``seed``). :class:`ClipFailed` for
+        ``fresh``, ``wall_s``, ``label``, ``seed``). *cover* (the plan row's,
+        DEC-250): ``"stretch"`` when the clip is slowed at render to cover a
+        shot longer than it, recorded on the clip so the render knows. :class:`ClipFailed` for
         this shot alone -- never another link; ``gencache.JournalError``
         passes through."""
         ec, ctx, tools, gates = self.ec, self.ctx, self.tools, self.gates
@@ -2981,6 +2988,8 @@ class _Assets(voice_lines.LineMeasurement):
         record = {"state": "failed", "link": link, "route": video["route_class"], "clip_s": int(clip_s),
                   "est_usd": round(float(est_usd or 0.0), 4), "prompt_hash": None, "image_sha256": image_sha,
                   "cache_key": None, "generated_at": None, "note": note}
+        if cover:
+            record["cover"] = cover
         try:
             parts = clips.clip_request_parts(ec, shot, self.script, tier=tier, flags=flags, note=note, link=link)
         except (KeyError, ValueError) as exc:
@@ -3890,6 +3899,7 @@ def regenerate_shot_clip(ctx, ec, target, shot_id, note, *, tools, refuse) -> di
         ctx.cancel.check()
         try:
             record, info = host.make_clip(shot, video=video, clip_s=quote["clip_s"], est_usd=quote["est_usd"],
+                                          cover=quote.get("cover"),
                                           seed=seed, note=note, flags=flags, tier=tier,
                                           image_link=recorded_image_link(doc))
         except gencache.JournalError as exc:

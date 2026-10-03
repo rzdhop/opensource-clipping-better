@@ -562,23 +562,50 @@ def episode_budgets(ec, env, *, assets_doc=None) -> prompting.Budgets:
 # ----------------------------------------------------------- the estimate
 
 # How much longer than its clip a shot of a fully animated story may run, its
-# clip held on its last frame (DEC-208); past it, the clip cannot cover the
-# shot and the plan is refused (stage E, ``too_long``).
+# clip held on its last frame (DEC-208); past it the clip is slowed to cover
+# the shot (``cover: stretch``, DEC-250), at most :data:`MAX_STRETCH` times
+# its length -- a quarter slower, which a cartoon clip takes without a visible
+# seam (the live story's 14.133 s shot on a 12 s clip is 1.18x); past THAT
+# the plan is refused (stage E, ``too_long``).
 HOLD_TOLERANCE_S = 0.5
+MAX_STRETCH = 1.25
+
+
+def stretch_of(duration_s, clip_s) -> float | None:
+    """How much slower a *clip_s* clip plays to cover a shot of *duration_s*
+    (DEC-250), or None when it need not (within :data:`HOLD_TOLERANCE_S`:
+    held) or cannot (past :data:`MAX_STRETCH`)."""
+    if not clip_s or duration_s - clip_s <= HOLD_TOLERANCE_S:
+        return None
+    factor = round(float(duration_s) / float(clip_s), 4)
+    return factor if factor <= MAX_STRETCH else None
+
+
+def cover_sentence(row) -> str:
+    """How the render covers the shot of a plan *row* longer than its clip:
+    slowed to the shot's length (``cover: stretch``, DEC-250) or held on
+    its last frame (DEC-208), with the numbers."""
+    runs = f"{row['shot_id']} runs {row['clip_s'] + row['held_s']:g} s: its {row['clip_s']} s clip"
+    if row.get("cover") == "stretch":
+        return f"{runs} is slowed to cover it ({1 / row['stretch']:.2f}x speed)."
+    return f"{runs} is held on its last frame for {row['held_s']:g} s."
 
 
 def _too_long(rows, link) -> str | None:
     """The refusal of a fully animated story's plan whose shots *rows*
     (``plan`` rows) run longer than *link*'s longest clip by more than
-    :data:`HOLD_TOLERANCE_S`, naming them and the fix, or None."""
-    long = [row for row in rows if (row.get("held_s") or 0.0) > HOLD_TOLERANCE_S]
+    :data:`HOLD_TOLERANCE_S` and more than a clip can be slowed to cover
+    (:data:`MAX_STRETCH`, DEC-250), naming them and the fix, or None."""
+    long = [row for row in rows if (row.get("held_s") or 0.0) > HOLD_TOLERANCE_S and row.get("cover") != "stretch"]
     if not long:
         return None
     longest = longest_clip_s(link)
     named = _and([f"{row['shot_id']} ({row['clip_s'] + row['held_s']:g} s)" for row in long])
+    most = f"{longest * MAX_STRETCH:g}"
     return (f"shot{_s(len(long))} {named} {'runs' if len(long) == 1 else 'run'} longer than the {longest} s clip "
-            f"{link} sells, and every shot of this story is one clip: plan the storyboard again (the storyboard step "
-            f"plans a scene past {longest} s as two shots), approve it, then run the assets step again")
+            f"{link} sells can cover even slowed (at most {most} s), and every shot of this story is one clip: "
+            f"plan the storyboard again (the storyboard step plans such a scene as two shots), approve it, then run "
+            f"the assets step again -- or shorten the scene's lines")
 
 
 def _local_note(note) -> str:
@@ -846,8 +873,14 @@ def video_units(ec, script, storyboard, assets_doc, *, env, caps, committed_usd,
                "why": "booked" if entry["shot_id"] in booked_ids and entry["why"] != "pinned" else entry["why"]}
         held = round(durations[entry["shot_id"]] - entry["clip_s"], 3)
         if held > 0:
-            # Longer than the longest clip the link sells: the render holds its last frame (DEC-208).
+            # Longer than the longest clip the link sells: the render holds its last frame (DEC-208) -- or,
+            # on a story whose every shot is one clip, slows the clip to cover the shot (DEC-250).
             row["held_s"] = held
+            if not local and media_policy.fully_animated(ec.story):
+                factor = stretch_of(durations[entry["shot_id"]], entry["clip_s"])
+                if factor is not None:
+                    row["cover"] = "stretch"
+                    row["stretch"] = factor
         rows_out.append(row)
     units.update(plan=rows_out, still=list(plan.still), count=count, seconds=seconds, est_usd=est,
                  over_cap=video_plan.all_shots_refusal(plan, link=link, mode=mode))
@@ -929,10 +962,10 @@ def _message(units, plan, current_ids, profile_name, booked_ids=(), *, resolutio
         size = f" at {resolution}" if resolution and resolution != pricing.DEFAULT_RESOLUTION else ""
         text = f"{clips}{size}, paid: est ${est:.3f}{tail}."
     held = [row for row in units["plan"]
-            if row.get("held_s") and not (units.get("too_long") and row["held_s"] > HOLD_TOLERANCE_S)]
+            if row.get("held_s") and not (units.get("too_long") and row["held_s"] > HOLD_TOLERANCE_S
+                                          and row.get("cover") != "stretch")]
     if held:
-        text += " " + " ".join(f"{row['shot_id']} runs {row['clip_s'] + row['held_s']:g} s: its {row['clip_s']} s "
-                               f"clip is held on its last frame for {row['held_s']:g} s." for row in held)
+        text += " " + " ".join(cover_sentence(row) for row in held)
     ambience = units.get("ambience")
     if ambience is not None:
         # Stage E: the clips' own sound is ambience under the lines, or there is none, said.

@@ -387,7 +387,10 @@ def _build(*, script, storyboard, assets, style_lock, template, story, ep, input
             still = bool(board_shot.get("keep_still"))
         if video and not still and shot_id in video_inputs:
             rel = add_input("shot", shot_id, video_inputs[shot_id])
-            argv0 = filtergraph.tier2_clip_argv(rel, tl_shot, shot_profile, _OUT_TOKEN)
+            # DEC-250: a clip recorded ``cover: stretch`` is slowed to its shot's length.
+            clip = (board_shot.get("assets") or {}).get("clip") or {}
+            stretched = clip.get("clip_s") if clip.get("cover") == "stretch" else None
+            argv0 = filtergraph.tier2_clip_argv(rel, tl_shot, shot_profile, _OUT_TOKEN, clip_s=stretched)
             input_shas = {rel: video_inputs[shot_id]["sha256"]}
             shot_modes[shot_id] = ("video_native_audio" if shot_id in native
                                    else "video_ambience" if shot_id in ambience else "video")

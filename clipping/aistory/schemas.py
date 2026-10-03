@@ -2853,6 +2853,9 @@ _STORYBOARD_CLIP_SCHEMA = _or_null(_document({
     "note": _NOTE_OR_NULL,
     "pending": _STORYBOARD_PENDING_SCHEMA,
     "reason": {"type": ["string", "null"], "maxLength": 1000},
+    # How the render covers a shot longer than the clip (DEC-250): slowed to the shot's
+    # length (``stretch``); absent, held on its last frame (DEC-208).
+    "cover": {"type": ["string", "null"], "enum": ["stretch", None]},
 }))
 
 # The five keys of spec 2.8 stay required; phase 4's record of the image is

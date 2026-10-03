@@ -1,11 +1,18 @@
-## CURRENT STATE — the note fit (2026-10-03, local session, worktree `.claude/worktrees/note-fits-budget`, branch `fix/note-fits-the-budget` from `main` 3c66552)
+## CURRENT STATE — the note fit and the long shots: DONE on branch `fix/note-fits-the-budget` (2026-10-03, local session, worktree `.claude/worktrees/note-fits-budget`, from `main` 3c66552)
 
-- **In-progress header:** phase IMPLEMENT (EXPLORE done by a Sonnet agent, CLARIFY: the human is away, assumptions
-  recorded; PLAN recorded here, not approved in chat — the human asked for the fix and its tests in two messages).
-  Stage 1 (the only one): `shots.resolve_stored`, `prompt_budgets.note_over_sentence`, the re-fit in
-  `assets.request_parts` and `clips.clip_request_parts`, feed lines in `make_image`/`make_clip`, tests
-  `tests/test_story_prompt_note_fit.py`. Next action: implement → selection (DEC-234) both envs → commit → DEC-249,
-  A-133, docs, this header → push the branch. Open questions: none blocking.
+- **Done:** stage 1 (DEC-249, cd3dc14) and stage 2 (DEC-250, the commit after this header), both pushed to
+  `origin/fix/note-fits-the-budget`. Tier 1 per DEC-234: stage 1 selection 17 files (local 590, CI env 588 / 2
+  skipped); stage 2 selection 24 files (local 761, CI env 758 / 3 skipped); baseline on 3c66552 green. Tier 2 is the
+  human's: deploy at 0 jobs (`git merge --ff-only fix/note-fits-the-budget` on main; nothing under web/ changed,
+  the bind mount serves the Python, so a worker restart is enough — no dashboard rebuild), then
+  **Generate episode** on d0ee5ebd745d: the feed should show "ℹ️ Shot sh03's keyframe prompt: its note (18 words)…
+  resolved again to …" at the redraw (A-133) and "🎬 sh03 runs 14.133 s: its 12 s clip is slowed to cover it
+  (0.85x speed)" at the clips (A-135); the storyboard already planned stays one shot a scene until planned again.
+- **Next (the human):** the deploy and that run; the phone verdict on the slowed clips (A-135) and on the redrawn
+  keyframe (A-133); A-134's overrun on the next Gemini-voiced episode. Follow-ups in DEC-249/DEC-250's
+  Consequence (the speech-rate estimate learning from measured lines is the biggest: the length gate writes to an
+  estimate the voices beat by a third).
+- **Worktree:** remove with `git worktree remove .claude/worktrees/note-fits-budget` once merged.
 - **The human's report (2026-10-03 12:29, story d0ee5ebd745d ep 1):** "Fast track stopped at the assets (step 4
   of 6): … shot sh03's keyframe prompt (326 words) is over fal/seedream-4.5-edit's budget of 320 words -- built for
   another link, or … limit moved since". **Root cause (verified on disk):** sh03's stored prompt is 308 words; the

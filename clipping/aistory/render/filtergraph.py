@@ -235,7 +235,7 @@ def shot_argv(image_rel, shot, profile, style_overlays, out_rel, *, pan_pct=moti
 
 # ------------------------------------------------------------- tier >= 2
 
-def tier2_clip_argv(video_rel, shot, profile, out_rel) -> list:
+def tier2_clip_argv(video_rel, shot, profile, out_rel, *, clip_s=None) -> list:
     """The argv for a Tier >= 2 shot that already has its own ``.mp4``
     (spec 6.5): it covers ``profiles.WIDTH``x``profiles.HEIGHT`` and is
     centre-cropped (:func:`_cover_fill`, the rule the cover frames a shot's
@@ -256,6 +256,16 @@ def tier2_clip_argv(video_rel, shot, profile, out_rel) -> list:
     depends on probing the file -- and the ``trim`` after it cuts whatever
     is too long, the hold included.
 
+    **The stretch** (DEC-250). *clip_s*, the whole seconds the clip was
+    bought for, when the story animates every shot and the shot runs longer
+    than the longest clip its link sells (``assets.clip.cover ==
+    "stretch"``): the clip is slowed (``setpts``, before the fps resample)
+    by ``duration_s / clip_s`` -- at most ``clips.MAX_STRETCH``, the
+    estimate's rule -- so its motion covers the whole shot instead of a
+    frozen last frame; the hold and the trim after it still pin the exact
+    frames. None, or a clip at least as long as the shot: the argv it always
+    was.
+
     *shot* is a ``render.timeline`` entry, read here for ``duration_s`` and
     ``frames`` only (a Tier >= 2 clip carries no Tier-1 ``motion``).
     """
@@ -263,8 +273,12 @@ def tier2_clip_argv(video_rel, shot, profile, out_rel) -> list:
     _assert_relative(out_rel, what="out_rel")
 
     duration = _num(shot["duration_s"])
+    stretch = ""
+    if clip_s and float(shot["duration_s"]) > float(clip_s):
+        stretch = f"setpts={_num(round(float(shot['duration_s']) / float(clip_s), 4))}*PTS,"
     vf = (
         f"{_cover_fill()},"
+        f"{stretch}"
         f"fps={profiles.FPS},"
         f"tpad=stop_mode=clone:stop_duration={duration},"
         f"trim=duration={duration},"

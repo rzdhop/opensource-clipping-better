@@ -75,6 +75,23 @@ ALTERNATES_LIMIT = 6
 # What a line's ``timing.source`` says once it was measured (spec 6.4): the
 # engine's own word timestamps, or the length of the audio it wrote.
 MEASURED_SOURCES = (tts.SOURCE_WORDS, tts.SOURCE_DURATION)
+
+# How much longer a provider's voices speak a line than ``timing.estimate_line``
+# says (DEC-250): the French rate was measured on Edge voices; Gemini's
+# prebuilt voices ran 1.16-1.80x the estimate over the 18 lines of story
+# d0ee5ebd745d's first episode (2026-10-03; mean 1.35, speech alone, pauses
+# aside -- A-134). A provider not named speaks at the estimate (1.0). What the
+# storyboard step adds to a scene's estimated length before deciding whether
+# one clip can cover it (``storyboard.expected_scene_seconds``); a measured
+# line needs none.
+SPEECH_OVERRUN = {"gemini": 1.35}
+
+
+def speech_overrun(voice) -> float:
+    """The :data:`SPEECH_OVERRUN` of a character's *voice* (its ``voice``
+    document, or None): 1.0 for a provider not named, or no voice."""
+    provider = (voice or {}).get("provider") if isinstance(voice, dict) else None
+    return float(SPEECH_OVERRUN.get(provider, 1.0))
 _FILE_MODE = 0o644
 
 _RATE_RE = re.compile(schemas.VOICE_RATE_PATTERN)

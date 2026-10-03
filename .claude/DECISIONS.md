@@ -4602,3 +4602,51 @@ entities, ledger and script at send time while the hash does not — the same st
 request only. Follow-up: the Keyframes card could show the fitted prompt a redraw was sent with (today the feed line
 says the numbers).
 
+## DEC-250 — A shot longer than the longest clip its link sells is covered: planned on the voices' real length, else its clip slowed to the shot (at most 1.25x); refused only past that (after DEC-249)
+**Context.** The human (2026-10-03), the same episode d0ee5ebd745d/ep01, next stop: "Episode 1's clips cannot be made:
+shots sh04 (12.767 s) and sh03 (14.133 s) run longer than the 12 s clip fal/seedance-1-pro-fast sells, and every shot
+of this story is one clip: plan the storyboard again …". Verified on disk: the storyboard planned one beat shot a
+scene from the script's estimated timing (`timing.estimate_line`, a French rate measured on Edge voices); the assets
+step then made the Gemini voices and re-timed the shots from them (`voice_lines.sync_storyboard` →
+`shots.retime_storyboard`, which redistributes within the planned shots and never splits one); the measured speech ran
+1.16–1.80x the estimate (mean 1.35 over 18 lines), three scenes went `over`, and the fully animated plan refused past
+DEC-208's 0.5 s held frame. The human's only remedy was to plan the storyboard again by hand (new T1 calls, the scene's
+keyframes re-bought) and run the assets step again — after every one-click run.
+**Decision.**
+- **Plan time** (`storyboard.expected_scene_seconds`): a scene's length as its voices will measure it — the
+  script's timing plus, for each line not measured yet, its estimate times the speaker's TTS provider's overrun
+  (`voices.SPEECH_OVERRUN`: gemini 1.35, A-134; a provider not named 1.0; a measured line adds nothing).
+  `beat_shot_count` reads it, so T1 v2 is asked two beat shots for a scene the estimate puts under the clip's length
+  but the voices past it; `short_of_beats` and the next storyboard run follow the same number.
+- **Run time** (`clips.stretch_of`, `MAX_STRETCH` 1.25): on a fully animated story, a shot longer than the link's
+  longest clip by more than `HOLD_TOLERANCE_S` is covered by that clip slowed to the shot's length when the factor
+  is at most 1.25 — the plan row says `cover: stretch` and the factor, the estimate's message and the step's feed say
+  "shX runs 14.133 s: its 12 s clip is slowed to cover it (0.85x speed)", `make_clip` records `cover` on the clip
+  (`assets.clip.cover`, an optional key: every stored story validates unchanged, RC-M3), and the render
+  (`render/plan.py` → `filtergraph.tier2_clip_argv(clip_s=)`) adds `setpts=<duration/clip_s>*PTS` before the fps
+  resample; the hold and the trim after it still pin the exact frames. A clip at least as long as its shot, a record
+  without `cover`, a legacy story: the argv it always was (the tier-2 goldens hold). The factor is computed from the
+  shot's current duration at render, so a later re-time needs no new clip.
+- **Refused only past 1.25x** (`_too_long`): the sentence names the shot, the most a slowed clip covers ("even slowed
+  (at most 15 s)"), and both remedies (plan the scene as two shots; shorten its lines).
+- **Tests**: `tests/test_story_long_shots.py` (the live numbers on seedance, the refusal past 15 s, the key-shots
+  guard, `stretch_of`, the expected length with Gemini voices and measured lines, the storyboard step asking two
+  shots, the argv golden with and without a stretch, a real-ffmpeg check that a slowed clip keeps moving to the last
+  frame where a held one freezes, the clip schema, and the one click end to end: stop at the keyframes, the voices
+  re-time the shots, the sold lengths narrowed under them, Continue buys the slowed clips, records and renders them,
+  a second Continue repeats nothing). `test_story_ambience`'s refusal pin re-pinned on purpose: 9.4 s on Veo (8 s)
+  is now covered (1.175x), the refusal needs 10.5 s.
+**Rejected.** Holding the frozen last frame longer (a fully animated story shows no still, DEC-236); cutting or
+speeding the voices (quality); buying a second clip for the remainder from the clip's last frame (a seam, a second
+request, continuity risk — left as the follow-up for shots past 1.25x); re-planning and re-buying the scene's
+keyframes inside the assets step (bypasses the storyboard approval, costs images); recalibrating
+`timing.estimate_line` itself for Gemini voices (it drives the 55–75 s length gate and every window pass — a
+cross-cutting change with its own task; the overrun table is read by the beat-shot rule alone until then).
+**Consequence.** The one click no longer stops at the clips over a voice overrun: a scene the voices will carry past
+the clip is two beat shots from the start, and a shot still over is covered by its clip at 0.80–0.99x speed (A-135:
+whether that reads well on the phone is the human's verdict). Storyboards planned before this change keep their
+shots until planned again. Follow-ups: the speech-rate estimate itself (`RATE_PER_CHAR`) should learn from a
+story's measured lines (the length gate writes to an estimate the voices beat by a third); a shot past 1.25x could
+take a second clip from the first's last frame; `test_story_timing`'s "a v2 scene plus hold never exceeds 12 s"
+carve-out for `over` scenes now rests on the stretch, said in its docstring only.
+

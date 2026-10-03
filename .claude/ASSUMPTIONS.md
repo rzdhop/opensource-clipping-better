@@ -489,6 +489,15 @@
   since, mood) and never a role, the beat, the staging or the constraints, so a redrawn keyframe is not visibly
   poorer than its first draw. UNCONFIRMED until the human presses Generate episode again on that episode and the
   redraw passes J2 (the feed shows the ℹ️ line with the two word counts).
+- **A-134** — (DEC-250) Gemini's prebuilt TTS voices speak a French line about 1.35x longer than
+  `timing.estimate_line` says (measured on d0ee5ebd745d ep 1: 18 lines, 1.16–1.80, mean 1.35, speech alone); Edge
+  voices speak it at the estimate (the rate was measured on them). `voices.SPEECH_OVERRUN["gemini"] = 1.35`.
+  UNCONFIRMED beyond that one episode and language: confirmed when the next Gemini-voiced episodes' measured
+  scene lengths stay within the planned clip (no "slowed to cover it" line past ~1.1x), refuted if English or other
+  voices drift differently (then a per-language or per-voice table).
+- **A-135** — (DEC-250) A clip slowed to at most 1.25x (0.80x speed) to cover its shot reads as natural motion on
+  the phone for these cartoon clips, better than a frozen last frame or a hard stop. UNCONFIRMED until the human
+  watches an episode whose feed says "is slowed to cover it" (the live story's sh03 would play at 0.85x).
 
 ## Confirmed
 - **A-082** — fal.ai as measured in the paid test (2026-09-29, DEC-174):

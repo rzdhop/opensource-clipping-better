@@ -87,7 +87,15 @@ dossier and look and redraws the sheets).
 shot, the assets approval and the render refuse while a shot has no current
 clip — never made, failed, stale or still generating — naming each shot and
 what to do; no shot is ever shown as a still with a zoom. The one exemption
-is a shot you pin `keep_still` yourself.
+is a shot you pin `keep_still` yourself. A scene is planned as two beat shots
+when its voices will run past the longest clip the link sells (12 s on
+seedance, 8 s on Veo) — judged on the length the voices will measure, not on
+the text estimate alone: Gemini's voices speak about a third longer than it.
+A shot that still runs past the longest clip once the voices are measured is
+covered by that clip slowed to the shot's length, at most 1.25x (the estimate
+and the feed say "sh03 runs 14.133 s: its 12 s clip is slowed to cover it
+(0.85x speed)"); only a shot longer than that is refused, and the message
+then says to plan the scene as two shots or shorten its lines.
 
 **Images by role, never on draft links.** Character sheets, place plates and
 props are made on fal Seedream 4.5 (text-to-image, then edits of that image
