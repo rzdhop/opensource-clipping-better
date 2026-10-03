@@ -34,14 +34,20 @@ To go back to phase 6 later: `git merge --ff-only` cannot undo; note the hash yo
 
 ## 2. Settings (dashboard → Settings)
 
-1. Keys: `FAL_KEY` set (fal pays for every quality image and every clip, DEC-235).
+1. Keys: `FAL_KEY` set (fal pays for every quality image, DEC-235) and — since the follow-up wave of
+   2026-10-03 (DEC-242) — `GEMINI_PAID_API_KEY` (a Google AI Studio key on a billed project: it pays for the
+   clips on Veo 3.1 lite, the link whose clips carry their own sound). Without the Gemini key the clips go to
+   seedance, silent, and every estimate says "No ambience".
 2. **Allow paid: on.** Without it no image or clip is ever bought, whatever the story says.
-3. **Caps: episode 2.00 / day 6.00 / story 20.00.** Saved Settings override the new defaults, so 1 / 3 / 10
-   saved earlier still apply until changed here; an every-shot episode (≈ $1.73) is refused whole at $1.00.
+3. **Caps: episode 4.00 / day 12.00 / story 40.00** (DEC-242; they were 2 / 6 / 20 on 2026-10-02). Saved
+   Settings override the new defaults, so 1 / 3 / 10 or 2 / 6 / 20 saved earlier still apply until changed
+   here; an every-shot episode with sound (≈ $3.52) is refused whole at $2.00.
 4. Video card → **Ask the providers (free)**. Expected: `✅ fal/seedance-1-pro-fast: fal accepted FAL_KEY;
-   fal-ai/bytedance/seedance/v1/pro/fast/image-to-video is live at 0.022 USD per second` (the price is fal's
-   own answer). `✖ … refused FAL_KEY (HTTP 401)` means the key is wrong; `⚠️ … not found` means the model id
-   moved. The same from a shell:
+   fal-ai/bytedance/seedance/v1/pro/fast/image-to-video is live at 0.022 USD per second · prompt ≤ … chars`
+   (the price and the prompt limit are fal's own answers; "not published" is fine for seedance) and
+   `✅ gemini/veo-3.1-lite: Google accepted GEMINI_PAID_API_KEY and lists veo-3.1-lite-generate-preview`.
+   `✖ … refused FAL_KEY (HTTP 401)` means the key is wrong; `⚠️ … not found` means the model id moved. The
+   same from a shell:
 
    ```bash
    curl -s -X POST http://127.0.0.1:8000/api/settings/check-video-keys | python3 -m json.tool
