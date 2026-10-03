@@ -335,7 +335,9 @@ SCHEMA_NAMES = {
 # French (tests/test_story_episode_prompt_budgets.py): E1v2 2,490, E2v2 2,101
 # (its place line says the name only), E3v2 2,924 (in full; its partials
 # less) -- 2,939 since stage 6a (DEC-231): its hook ask says the on-screen
-# text is required. Each + 15 %, rounded up to ten, under the spec's 4,000 ceiling. T1v2's
+# text is required; E1v2 2,576 and E2v2 2,187 since the phase 7 follow-up's
+# stage G: each opens with the first-watch rules (FIRST_WATCH_RULES). Each
+# + 15 %, rounded up to ten, under the spec's 4,000 ceiling. T1v2's
 # continuity block (context.slice_for_shot) fits T1v2's own budget unchanged.
 #
 # J1 (phase 7 stage 6a, DEC-230): the 12-scene French digest E4 reads, the
@@ -350,7 +352,7 @@ SCHEMA_NAMES = {
 INPUT_BUDGET = {"E1": 1820, "E2": 1660, "E3": 2530, "E4": 3900, "T1": 1270, "T1r": 1410, "S3": 3740, "F1": 3950, "N1": 3740,
                 "D2": 2370, "D3": 1940, "R1v2": 1170, "T1v2": 2020, "T1rv2": 2060, "D1": 3890,
                 "D4": 2270, "D5": 3930, "D6": 3560,
-                "E1v2": 2870, "E2v2": 2420, "E3v2": 3380, "L1": 3920, "J1": 3680}
+                "E1v2": 2970, "E2v2": 2520, "E3v2": 3380, "L1": 3920, "J1": 3680}
 
 # The ``bible:<field>`` grammar of spec 9.2: which prompt a regenerate note
 # re-runs, and which of that prompt's fields it targets. "tone" also carries
@@ -1697,10 +1699,13 @@ def build_e1(pack, *, ep, arc_entry, template, episode_defaults, cast, places, p
 
 
 def _build_e1(pack, *, ep, arc_entry, template, episode_defaults, cast, places, props, memory, slots,
-              open_hooks=None, audience_direction=None, v2=False, slice_text=None, v2_lines=""):
+              open_hooks=None, audience_direction=None, v2=False, slice_text=None, v2_lines="",
+              first_watch_rules=False):
     """:func:`build_e1`'s body; *slice_text* (E1v2's episode slice) is shown
     after the rosters and *v2_lines* (E1v2's own asks) before the closing
-    sentences -- both empty for E1, whose prompt they leave byte for byte."""
+    sentences, and with *first_watch_rules* (E1v2) the prompt opens with
+    :data:`FIRST_WATCH_RULES` -- all empty / off for E1, whose prompt they
+    leave byte for byte."""
     hooks = offered_hooks(ep, open_hooks)
     new_objects = offers_new_objects(ep, v2)
     # Handed the hooks, the memory block shows none: they are listed once,
@@ -1709,7 +1714,8 @@ def _build_e1(pack, *, ep, arc_entry, template, episode_defaults, cast, places, 
     if was_cut:
         pack.trimmed.append("memory")
 
-    user = _arc_entry_block(arc_entry) + "\n\n"
+    user = FIRST_WATCH_RULES if first_watch_rules else ""
+    user += _arc_entry_block(arc_entry) + "\n\n"
     user += f"{memory_text}\n\n"
     if hooks:
         user += _e1_payoff_block(hooks) + "\n\n"
@@ -1990,14 +1996,16 @@ def build_e2(pack, *, scene, scene_number, outline, previous, word_budget, cast,
 
 
 def _build_e2(pack, *, scene, outline, previous, word_budget, cast, place, props, sfx_cues, narrator_enabled,
-              voice_direction, note=None, slice_text=None):
+              voice_direction, note=None, slice_text=None, first_watch_rules=False):
     """:func:`build_e2`'s body; *slice_text* given (E2v2, :func:`build_e2_v2`):
     the place line says its name only (the slice says its layout and light),
     the slice follows the props, the ask gains E2v2's lines and the schema's
-    ``sfx_cues[].at`` is an enum. None: E2, byte for byte."""
+    ``sfx_cues[].at`` is an enum; with *first_watch_rules* (E2v2) the prompt
+    opens with :data:`FIRST_WATCH_RULES`. None / off: E2, byte for byte."""
     v2 = slice_text is not None
     names = {c["char_id"]: c["name"] for c in cast}
-    user = context.outline_section(outline, names) + "\n\n"
+    user = FIRST_WATCH_RULES if first_watch_rules else ""
+    user += context.outline_section(outline, names) + "\n\n"
     if previous is None:
         user += "Previous scene: none -- this is the episode's first body scene.\n\n"
     else:
@@ -2466,6 +2474,17 @@ _E1_V2_LINES = (
     "beat happens on screen, and every object a beat names is in the props of the scene that shows it.\n"
     "The scene where a character first appears in this episode makes clear who they are and what they want.\n\n"
 )
+# Phase 7 follow-up, stage G: the first-watch judge's rules (J1's kinds,
+# ``steps/judge.py``) open every E1v2 and E2v2 prompt, so fewer issues are
+# born for J1 to find and the script step's repair pass to fix. The v1
+# prompts never carry it (RC-M1); E1v2's and E2v2's input budgets are
+# re-measured with it (tests/test_story_episode_prompt_budgets.py).
+FIRST_WATCH_RULES = (
+    "A first-time viewer knows only what this episode shows: state what each main character wants in their first "
+    "scene; give every action a reason the viewer saw; name a character before they act or speak; show an object "
+    "before the story turns on it; never repeat a line or paraphrase an earlier one; the hook's on-screen text "
+    "states the premise.\n\n"
+)
 # E2v2's sfx anchor: 'start' or a line number, as an enum (the free tier
 # filled the bare string with a line's text, a time or a cue name); a scene
 # has 1-4 lines (E2's own ask), so the numbers are "1".."4" -- the validator
@@ -2514,7 +2533,7 @@ def build_e1_v2(pack, *, ep, arc_entry, template, episode_defaults, cast, places
     return _build_e1(pack, ep=ep, arc_entry=arc_entry, template=template, episode_defaults=episode_defaults,
                      cast=cast, places=places, props=props, memory=memory, slots=slots, open_hooks=open_hooks,
                      audience_direction=audience_direction, v2=True, slice_text=slice_text or None,
-                     v2_lines=_E1_V2_LINES)
+                     v2_lines=_E1_V2_LINES, first_watch_rules=True)
 
 
 def build_e2_v2(pack, *, scene, scene_number, outline, previous, word_budget, cast, place, props, sfx_cues,
@@ -2529,7 +2548,7 @@ def build_e2_v2(pack, *, scene, scene_number, outline, previous, word_budget, ca
     ``validate_e2``, unchanged."""
     return _build_e2(pack, scene=scene, outline=outline, previous=previous, word_budget=word_budget, cast=cast,
                      place=place, props=props, sfx_cues=sfx_cues, narrator_enabled=narrator_enabled,
-                     voice_direction=voice_direction, note=note, slice_text=slice_text or "")
+                     voice_direction=voice_direction, note=note, slice_text=slice_text or "", first_watch_rules=True)
 
 
 def build_e3_v2(pack, *, ep, part=None, note=None, hook_scene, cliffhanger_scene, recap_scene, outline,

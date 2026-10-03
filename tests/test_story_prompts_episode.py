@@ -2287,6 +2287,31 @@ def test_e1_v2_reads_the_episode_slice_and_asks_to_stage_the_beats():
     assert _triple_sha(_ep1_e1()) == RC_M1_SHAS["E1"]  # v1 E1 unchanged
 
 
+def test_e1_v2_and_e2_v2_carry_the_first_watch_rules_up_front_and_v1_does_not():
+    """Stage G of the phase 7 follow-up: the first-watch judge's rules
+    (steps/judge.py's kinds) open every v2 beat-sheet and body-scene prompt,
+    so fewer issues are born; the v1 prompts stay byte for byte (RC-M1)."""
+    rules = prompts.FIRST_WATCH_RULES
+    assert rules.startswith("A first-time viewer knows only what this episode shows: ")
+    for clause in ("state what each main character wants in their first scene",
+                   "give every action a reason the viewer saw", "name a character before they act or speak",
+                   "show an object before the story turns on it", "never repeat a line or paraphrase an earlier one",
+                   "the hook's on-screen text states the premise"):
+        assert clause in rules
+    _system, user, _schema = prompts.build_e2_v2(_pack("fr"), slice_text=SLICE, **_e2_kwargs())
+    assert user.startswith(rules) and user.count("A first-time viewer knows only") == 1
+    kwargs = dict(ep=1, arc_entry=ARC_ENTRY, template=TEMPLATE, episode_defaults=EPISODE_DEFAULTS, cast=CAST_E1,
+                  places=PLACES_E1, props=PROPS_E1, memory=MEMORY_NONE, slots=SLOTS_EP1)
+    _system, user, _schema = prompts.build_e1_v2(_pack("fr"), slice_text="Episode plan: x", **kwargs)
+    assert user.startswith(rules)
+    # The same E1v2 call with no slice (nothing planned yet) still opens with the rules.
+    assert prompts.build_e1_v2(_pack("fr"), slice_text="", **kwargs)[1].startswith(rules)
+    assert rules not in prompts.build_e1(_pack("fr"), v2=True, **kwargs)[1]
+    v1 = prompts.build_e2(_pack("fr"), **_e2_kwargs())
+    assert rules not in v1[1] and _sha_call(v1) == _E2_V1_SHA256
+    assert _triple_sha(_ep1_e1()) == RC_M1_SHAS["E1"]
+
+
 def test_the_largest_french_e1_v2_replies_fit_their_caps():
     """DEC-138's method on E1v2's reply: E1's largest (12 scenes at every
     cap) plus 2 new objects (a 4-word name, a 15-word one-line, an owner),

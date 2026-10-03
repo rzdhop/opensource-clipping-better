@@ -822,7 +822,9 @@ from types import SimpleNamespace  # noqa: E402 -- this section's own names
 
 # Phase 7 stage 6a (DEC-231): E3v2 re-pinned on purpose, 2,924 -> 2,939 (budget 3,370 -> 3,380): its hook
 # ask now says the on-screen text is required whatever the hook style (story B shipped none).
-MEASURED_SLICED = {"E1v2": 2490, "E2v2": 2101, "E3v2": 2939}
+# Phase 7 follow-up, stage G: E1v2 and E2v2 re-pinned on purpose, 2,490 -> 2,576 and 2,101 -> 2,187 (budgets
+# 2,870 -> 2,970 and 2,420 -> 2,520): each opens with the first-watch rules (prompts.FIRST_WATCH_RULES).
+MEASURED_SLICED = {"E1v2": 2576, "E2v2": 2187, "E3v2": 2939}
 _PLACE_ID = LONGEST_PLACE["place_id"]
 
 
