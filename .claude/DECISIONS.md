@@ -4761,3 +4761,32 @@ Contracts moved (literal only, intent kept): `test_dashboard_clip_controls`, `te
 `window.confirm(`. The `✕` remove buttons and `↻ Regenerate` keep their glyphs (pinned by test_story_payload_contract).
 Bundle: JS 549.45 -> 568.92 kB (gzip 153.1 -> 158.7), CSS 41.4 -> 51.0 kB. A-138.
 
+## DEC-254 — The stories list shows cover cards: the list payload gains a cover, progress, episodes and a style label (dashboard overhaul stage 2, after DEC-253)
+**Context.** Stage 2 of `.claude/plans/dashboard/01-ai-story-ui-overhaul-plan.md`. The list card showed a title, a status
+chip, the raw style and a red Delete; `GET /api/stories` answered the seven index fields only, so a cover, the progress
+or the episodes would have cost one `GET /api/stories/{id}` per card.
+**Decision.**
+- **Payload** (`workflow.list_card(s)`, called by the route; `StoryStore.list()` and its seven fields unchanged, byte for
+  byte): each entry adds `cover` (the path under `/api` of the first character's portrait on disk, in `cast_order` --
+  leads first -- else null), `progress` `{steps_done, steps_total, next}` (the contiguous prefix of concept, bible, style,
+  cast, places, season, as `derive_status` counts; a v2 story adds `knowledge`, done while approved and current; `next`
+  a NewStoryWizard step id or null), `episodes` `{count, latest: {ep, state} | null}` (state `draft|written|planned|
+  assets|rendered`: an approved script, storyboard, assets, a render manifest with an output; four document reads at
+  most, never `episode_outputs`' hashing), `style_label` (the shipped name, English) and `pipeline`. Read through a
+  quiet store (a skipped entity folder is not printed on every visit); calls no provider; 12 live stories in ~100 ms
+  cold. A story whose story.json cannot be read keeps a null cover and zeros (`steps_total: 0`); each part fails alone.
+- **UI** `StoriesList.jsx`: a card grid (3 columns from 1100 px, 2 from 700 px, 1 below) of 4:5 covers (the portrait as
+  a blob through `fetchStoryCoverUrl`, which only accepts a `/stories/<id>/media/` path; else the style's palette as a
+  gradient with the title's initial), chips (language, style label, "Animated" on v2), a progress ribbon ("2 of 7
+  steps · Next: Style", or "Ready" with the latest episode's state), "Updated 2 h ago" (`lib/format.js
+  formatRelativeTime`), and an overflow menu (Open, Delete… through `useConfirm`, danger, today's wording). The title's
+  link stretches over the card; the menu sits above it (no button inside a link). A skeleton grid while loading; the
+  empty state and its text unchanged; the header counts the stories. The kit gains `ui/Menu.jsx` (menu button,
+  arrow keys, Escape, focus back on the trigger before the action runs).
+**Rejected.** One `GET /api/stories/{id}` per card (N requests, the whole story page's payload each); a signed cover URL
+(DEC-113: story media stays behind the token, fetched as a blob); "the first approved portrait" (the plan's wording) --
+a draft story's portrait is still the best cover; a menu local to the page (stages 3-4 need the same control).
+**Consequence.** No dashboard contract moved. New: `tests/test_stories_api_list.py` (route + rules) and
+`tests/test_dashboard_stories_list.py`. The status chip is gone from the card (the ribbon says it). Bundle: JS 576.75 kB
+(gzip 161.0), CSS 55.0 kB.
+
