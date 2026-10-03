@@ -1,3 +1,20 @@
+## CURRENT STATE — the AI Story dashboard overhaul: stage 1 DONE and deployed, stage 2 building (2026-10-03, local session)
+
+- **Stage 1 (DEC-253, Opus agent, branch feat/dashboard-foundation b24275a + ab7eb63, my tweak ef1edcc):** the
+  `src/ui/` kit, tokens, lucide-react 1.51.0 pinned, every story confirm an in-app dialog (Cancel focused first),
+  one formatUsd. Contracts: 4 literals moved (clip_controls, story_shared, switch_pipeline, story_payload_contract_series);
+  12 dashboard files 121 passed both envs (+ the series contract: 166). Build 568.9 kB JS / 51.0 kB CSS. Deployed by
+  `docker compose rm -sfv backend && up -d --build backend` at 0 jobs: bundle index-DaD2Hpxg.js served, health 200;
+  browser walk: list, episode tabs, the Delete alertdialog (Escape closes, nothing deleted). Note: the checkout's
+  `web/dashboard/dist` is root-owned — local builds go to the scratchpad (`npx vite build --outDir …`).
+- **Stage 2 (stories list)** building: Opus agent, branch feat/dashboard-stories-list (cover, progress, episodes
+  summary and style_label on the list payload + the card grid, kebab, skeleton, empty state).
+- Plan: `.claude/plans/dashboard/01-ai-story-ui-overhaul-plan.md` (5 stages; the human's answers: full redesign in
+  stages, refined dark studio, lucide-react only). EXPLORE by a Sonnet agent + my browser walk of the list, the
+  story page, the episode tabs, New story and Settings. Next action: on the go, stage 1 (foundation) by an Opus
+  agent in a worktree, then review, build, the 12 dashboard contracts, browser walk, image rebuild at 0 jobs.
+- Also pending: the human's verdict on probes A/B (lipsync).
+
 ## CURRENT STATE — stage C, performance and rhythm (DEC-252): DONE, deployed with this commit (2026-10-03, local session, on `main`)
 
 - **The human's go ("Ok go go") on the options of 2026-10-03:** C built now (an Opus agent in a worktree, branch
