@@ -140,16 +140,30 @@ shorter than 150 ms.
   why it matters — and flags an unclear goal, an unmotivated turn, an
   unintroduced character, an object never shown, a repeated line or a hook
   with no on-screen text (the last two are also checked without the LLM, and
-  a reply repeating a line is refused and asked again). When it finds
-  issues, the step repairs them itself before asking you: the scenes they
-  name are rewritten with the fix as the note (an unintroduced character or
+  a reply repeating a line is refused and asked again). It knows the format
+  (the episode's length and spoken words, that a scene's first line is what
+  is on screen) and that a serial keeps questions open on purpose — the
+  hook's tease, the cliffhanger's reveal, a secret kept for later are never
+  issues — and it marks each issue **blocking** (a first-time viewer cannot
+  follow who the main character is, what they want, what happens or why it
+  matters) or **minor** (they follow, but it could be clearer). The check
+  passes when nothing is blocking; the minor issues stay listed for you to
+  read (the Review tab shows them) and are never repaired. When something
+  is blocking, the step repairs it itself before asking you: the scenes
+  named are rewritten with the fix as the note (an unintroduced character or
   an unseen object also rewrites the earlier scene where it can be
-  introduced or shown), then the checks run again — at most two passes of
-  four rewrites, on the free writing chain; the writers also hear the
-  first-watch rules before they write. Only what is left after that reaches
-  you ("after 2 repair passes, 1 issue remains"). The script is not
-  approvable while the check is missing or out of date; with issues, only
-  with **Approve anyway**.
+  introduced or shown, and an unseen object that is one of the story's props
+  is listed on the scene so its keyframe shows it — an object that is not a
+  prop of the story is never added to the library), then the checks run
+  again — at most two passes of eight rewrites, on the free writing chain.
+  The check after a pass is a re-check: it is shown what the pass tried to
+  fix and keeps blocking only what is still there, so each pass can only
+  shrink the list. The writers also hear the first-watch rules before they
+  write. Only what is left after that reaches you ("after 2 repair passes, 1
+  blocking issue remains"). The script is not approvable while the check is
+  missing or out of date (a check made by the previous version of the judge
+  counts as out of date until the script is approved); with blocking issues,
+  only with **Approve anyway**.
 - *The length.* A v2 episode must land in its 55–75 s window: the script and
   the storyboard are refused outside it (estimated), the assets and the
   render too (measured) — there is no "anyway". A script that comes out short
@@ -958,8 +972,10 @@ kept — so pressing it again after a partial run, or after fixing whatever
 it stopped on, repeats nothing already done. Whatever it writes fresh is
 auto-approved only by that document's own approval rule (never "approve
 anyway"): a complete script with a fresh, passed consistency check inside
-the template's length window; a storyboard that covers it; a complete
-assets grid. Before making or spending anything it checks the plan against
+the template's length window (on a v2 story, a fresh first-watch check with
+nothing blocking — its minor issues are named in the feed's approval line
+and on the Review tab); a storyboard that covers it; a complete assets
+grid. Before making or spending anything it checks the plan against
 the budget and stops before any paid image or voice unless paid generation
 is allowed and every cap — the episode's, the day's and the story's — fits,
 naming the numbers.
@@ -1666,6 +1682,20 @@ scenes (edit them, or regenerate a scene with a note asking for more
 back-and-forth — a regenerate's own word budget caps how much longer that
 can make it) and run the fast track again, or approve the script yourself
 from the Script tab despite the warning.
+
+**"Fast track stopped at the script … first-watch check (J1): after 2 repair
+passes, N blocking issues remain"** — the first-watch check still finds
+something a first-time viewer cannot follow after the step's own repairs.
+The issues named are the blocking ones; fix them (edit the scene, or
+regenerate it with the fix as the note) and press **Generate episode**
+again, or approve the script yourself with **Approve anyway** if you judge
+them fine. A script stopped here by the judge's previous version (every
+issue blocking, "after 2 repair passes, 6 issues remain") is judged again by
+the current one when you press **Generate episode**: no edit is needed
+first. To see how the judge reads an episode — what it calls blocking, and
+how steady that is from one call to the next — run
+`python tools/j1_calibrate.py --story STORY_ID --ep 1 --runs 5 --settings`
+(read-only; it prints each verdict and a summary).
 
 **T1 plans too few shots for a one-line scene** — T1 sometimes plans a
 single shot for a scene with one short line, and the storyboard step

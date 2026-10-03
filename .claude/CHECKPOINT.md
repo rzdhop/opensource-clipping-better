@@ -1,3 +1,19 @@
+## CURRENT STATE — the fast-track fix (DEC-248, 2026-10-03, cloud session, branch `claude/fix-fast-track-j1` from `main` 1078a8d)
+
+- **The human's report:** "Fast track stopped at the script (step 1 of 6): … first-watch check (J1): after 2 repair
+  passes, 6 issues remain" on a fresh v2 episode. Root causes and the fix: DEC-248 (J1 version 2 with blocking/minor
+  severities and the format; the re-check after a repair converges; 8 repair calls a pass; notes fitted to the cap;
+  an unseen story prop listed on its scene, never a new library prop; the fast track and the approval pass over
+  minor issues, named in the feed and on the Review tab; `tools/j1_calibrate.py`). Assumption A-132.
+- **The human's answers (2026-10-03):** approve over minor issues and record them; minor/temporary objects never go
+  into the prop library; a new branch, pushed (no PR asked).
+- **Tests:** new `tests/test_story_first_watch_v2.py` (fail-first on 1078a8d); re-pinned on purpose: the J1 fixtures'
+  `severity`, the repair logs' "blocking", `REPAIR_CALLS_MAX` 8, J1 budgets (input 3680 → 3990, reply 920 → 970).
+  Dashboard vite build into scratch ok.
+- **Next (the human):** deploy at 0 jobs, then on the VPS `docker exec rzc-backend python tools/j1_calibrate.py
+  --story <STORY_ID> --ep 1 --runs 5 --settings` and paste the output (A-132); then **Generate episode** on the
+  stuck episode: its version-1 report is judged again with no edit needed.
+
 ## CURRENT STATE — AI Story **phase 7 IN PROGRESS** (the quality overhaul, DEC-219). Plan: `.claude/plans/ai-story/16-phase-7-plan.md` (APPROVED 2026-10-01)
 
 - **In-progress header** (keep current):

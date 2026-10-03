@@ -478,6 +478,11 @@
   nano-banana's windows are unpublished, so 320 is a tunable, and the measurements (DEC-247) show the core eats most
   of it. UNCONFIRMED until the human's walk compares the richer keyframes with phase 7's 220-word ones (looks hold,
   the mood reads, no lettering).
+- **A-132** — (DEC-248) J1 version 2 told the format and asked for a severity calls the human's six issues mostly
+  minor (the hook's premise, the cliffhanger's reveal, a backstory) and keeps blocking only what a first-time viewer
+  cannot follow, and its re-check after a repair converges; a real comprehension failure (who the main character is,
+  what they want) is still called blocking. UNCONFIRMED until the human runs `tools/j1_calibrate.py` on the stuck
+  episode (pass rate, blocking issues per run, their stability) and presses Generate episode again.
 
 ## Confirmed
 - **A-082** — fal.ai as measured in the paid test (2026-09-29, DEC-174):

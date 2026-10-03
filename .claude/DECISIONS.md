@@ -4503,3 +4503,61 @@ hair (shown by the sheets) before the mood rather than after, since the core eat
 re-fit after a link switch (today the refusal names the remedy); the dashboard's prompt-target chips still say
 220/80 (a per-link target needs the API to expose the budgets); workflow edits compute budgets from the process
 env alone (harmless while every hosted link's budget is its ceiling).
+
+## DEC-248 — J1 marks each issue blocking or minor and passes when nothing blocks; the re-check after a repair converges; the fast track approves over minor issues (after the phase 7 follow-up wave)
+**Context.** The human (2026-10-03), after deploying the wave: "the fast track does not work" — "Fast track stopped at
+the script (step 1 of 6): Episode 1's first-watch check (J1): after 2 repair passes, 6 issues remain: s01
+(unclear_goal): Montrer ou dire ce qu'est le CŒUR…; s02 (unmotivated) …; s04 (unintroduced): Présenter Kevin…; s05
+(object_unseen): Montrer les boutons de manchette…; s06 (unclear_goal) …; s08 (unintroduced): Introduire Madame
+Pamplemousse … avant le cliffhanger". Root causes found in the code: (1) J1 v1 failed on ANY issue and, asked for
+"at most 6", returned exactly 6 in both of the human's runs (DEC-245's and this one) — no severity, so a nitpick
+failed the script like a broken plot; (2) J1 did not know the format: s01 is the 3–6 s hook (5–10 words) asked to
+explain the premise, s08 is the cliffhanger whose reveal of a new character was called "unintroduced"; (3)
+`REPAIR_CALLS_MAX = 4` in scene order never reached s05, s06 and s08 (the plan was 6–7 scenes) — exactly the scenes
+still named, s05's issue already in DEC-245's run; (4) J1 reads each scene's summary and an objects list built from
+the scenes' `props`, which a line rewrite never changes; (5) the J1 after a pass was a fresh critique with no memory
+of what it had asked, so the loop had no reason to converge; (6) a note over the pack's 60 words was cut at its end,
+losing the earlier-scene ask. The human's answers: approve over minor issues and record them; never add a minor or
+temporary object to the story's prop library; a new branch.
+**Decision** (branch `claude/fix-fast-track-j1`).
+- **J1 version 2** (`prompts.J1_PROMPT_VERSION = 2`): the prompt opens with the format (the episode's estimated
+  seconds and spoken words; a scene's first line is what is on screen; the hook's tease, the cliffhanger's reveal —
+  someone first seen there is its point — and a secret kept for later are never issues; a detail the format has no
+  room for is minor at most); each issue has `severity` `blocking` (a first-time viewer cannot follow who the main
+  character is, what they want, what happens or why it matters) or `minor`; "none is a fine answer"; the issues come
+  before `passed` in the schema; `validate_j1` requires `passed` == no blocking issue. The deterministic checks'
+  issues (repeated line, no hook text) are blocking. The report gains `version` and each issue `severity` (optional
+  schema keys: an issue without one reads as blocking, a version-1 report keeps its meaning). **The report passes
+  when no issue is blocking** (`judge.blocking_issues`).
+- **Older reports**: `needs_first_watch` is true for a report of an older J1 on a script **not approved yet** — the
+  human's stuck episode is judged again by "Generate episode"/Continue with no edit; an approved script keeps its
+  report (RC-M3).
+- **The re-check**: after a repair pass, J1 is shown the blocking issues the pass tried (J1's own kinds, at most 6,
+  each fix cut to `J1_RECHECK_FIX_MAX_WORDS = 5` words) and asked to keep blocking only those still there; the judge
+  enforces it — a blocking issue of the re-check that is not one of them (same scene and kind) is kept as **minor**.
+  The blocking set can only shrink, so the loop converges; the deterministic checks still run on every call.
+- **The repair pass**: only the blocking issues are repaired (the minor ones never are); `REPAIR_CALLS_MAX` 4 → 8;
+  each note is fitted to the pack's 60-word cap by shortening J1's fixes evenly (a short fix whole), never the app's
+  asks (`script._fitted_note`); an `object_unseen` whose fix names one of the story's props that the scene does not
+  list gets it listed on the scene before the rewrite (within the schema's 4 props; unlisted again when the call
+  fails), recorded as `props_added` (optional key) and logged "🩹 Scene sNN now shows …" — an object that is not one
+  of the story's props is never added to the library (the human's answer): the rewrite shows it in the lines. The
+  repair record's `issues_before`/`issues_after` count the blocking issues; the logs say "N blocking issues".
+- **The approvals**: `approve_script` refuses only blocking issues (minor alone is no "anyway"); the refusals list
+  the blocking issues and count the minor ones ("(1 minor issue kept for review)"); a version-1 report still says
+  "issues". The fast track approves a script whose J1 found only minor issues, its feed line naming each
+  (`fast_track.script_detail`); "The fast track never approves over blocking issues".
+- **The Review tab**: `episode_review` gains `script_minor_issues`, shown under the repairs line.
+- **Budgets** (re-measured on the French worst case, the re-check at its bound): J1 input 3195 → 3463,
+  `INPUT_BUDGET["J1"]` 3680 → 3990 (under the spec's 4000 — the wording was tightened to fit); reply 795.6 → 842.4,
+  `MAX_TOKENS["J1"]` 920 → 970.
+- **`tools/j1_calibrate.py`**: J1 version 2 on a copy of a written episode N times (the step's own call, keys and
+  gates, `--settings` for the stored Settings), printing each verdict and a summary — read-only but for what a paid
+  link books in the ledger. For the human to run where the keys and the story live (A-132).
+**Consequence.** A v2 script can now be approved — by the fast track too — over issues the judge calls minor; they
+stay on the report and the Review tab, never repaired. A new blocking issue a repair introduces is kept as minor by
+the re-check (a repeated line or a missing hook text is still caught by the deterministic checks, and E4 runs again).
+Every v2 script not approved yet is judged once more on its next script run (one free J1 call). Follow-ups: the
+episode page's Script tab does not list the minor issues yet (the Review tab does); `script.repairs` from an earlier
+run is kept when a re-judged report passes without a pass (history, as DEC-245 says).
+
