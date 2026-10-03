@@ -4382,3 +4382,38 @@ reached this session: the detector was designed from the description and proven 
 run is the check; darker, pinkish noise (ZCR under ~0.23) would not be detected. After an in-place clean the assets
 approval is stale (the audio hashes changed), as after any measurement: approve again. Every story's mix render cache
 key changes once (the fades), so each re-render re-mixes once.
+
+## DEC-245 — The script step repairs what the first-watch check finds; the v2 writers hear the rules first (phase 7 follow-up, G)
+**Context.** The human (2026-10-03) generated an episode and got J1's six issues ("s01 (unclear goal): …; s04
+(unintroduced): Présenter Kevin avant qu'il n'entre…; s05 (object unseen): Montrer les boutons de manchette… ;
+s06 (repeated line) …") with "Fix them (edit the script, or regenerate the scenes they name) … or approve anyway" —
+"the purpose is that the generated content is always perfect". The step knew the scene and the fix of each issue
+and applied none; two of them (a character introduced too late, an object shown too late) need an EARLIER scene.
+**Decision** (G1–G3 below).
+- **The repair pass** (`script.repair_plan`, pure; `_Run.repair` after J1; v2 only; never on an approved script):
+  `repeated_line` → the later line's scene with a note for a different line that keeps the beat; `no_hook_text` →
+  `write_framing("hook")`; `unclear_goal`, `unmotivated` → the named scene; `unintroduced` / `object_unseen` → the
+  named scene AND the nearest earlier body scene where the character / prop the fix names (whole-word, the scene's
+  own cast/props first, then the story's) is present, with "X is in this scene, before sNN: say their name and who
+  they are here / show it on screen here"; a fix that names nothing matchable → the named scene alone (a wrong guess
+  would cost a call); a framing scene → its partial E3; a scene nobody can speak in, an unknown id or a null
+  `scene_id` → left in the report. Grouped per scene (one call per scene per pass, all its notes), in scene order,
+  `REPAIR_CALLS_MAX = 4` a pass, `REPAIR_PASSES_MAX = 2` a run (the free writing chain: the cost is time, checked by
+  `before_call`); after a pass `fill()` (its own rule), E4 and J1 again; the loop ends on a pass, nothing repaired,
+  the passes spent or the budget. Notes read "First-watch check -- Unclear goal: <fix verbatim>" (J1 writes the fix
+  in the story language) through the pack's 60-word note cap; the regenerate's own path is reused, so
+  `target_duration_s` and the slot rules do not move.
+- **The record**: `script["repairs"]` (optional schema key; replaced by the next run that repairs, kept as history
+  otherwise), `summary["repairs"]`, "🩹 Repair pass 1: N scenes rewritten for M issues (…)", "👀 First watch after
+  repair: passed | N issues remain"; the approve-script and fast-track refusals say "after N repair passes, N issues
+  remain" (`judge.issues_sentence`, every pass that ran counted) and end each fix once (the "urgent.." double period
+  is gone).
+- **Prevention**: E1v2 and E2v2 open with the first-watch rules (`prompts.FIRST_WATCH_RULES`: state what each main
+  character wants in their first scene; give every action a reason the viewer saw; name a character before they act
+  or speak; show an object before the story turns on it; never repeat or paraphrase a line; the hook's on-screen text
+  states the premise); v1 prompts byte-identical (their sha pins hold); E1v2/E2v2 input budgets re-pinned
+  2870 → 2970 / 2420 → 2520 on measured 2576 / 2187.
+**Consequence.** A fast-track or one-click episode gets the repairs for free (same step). Not shown on the episode
+page yet (`script.repairs` is available to it). A second `fill()` inside the loop overwrites `summary["fill"]` with
+the latest record. The repair pass runs even when E4 failed earlier in the run and then re-asks E4 (the fill pass's
+exposure). Three `test_story_judge` fixtures now queue the repair's replies, since the step repairs before refusing.
