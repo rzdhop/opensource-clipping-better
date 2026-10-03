@@ -584,6 +584,11 @@ def build_parser() -> argparse.ArgumentParser:
         help=(f"how the shots are planned, one of {', '.join(fast_track_step.STORYBOARD_CHOICES)} "
               f"(default: {fast_track_step.T1}, one T1 call per scene)"),
     )
+    fast_track_cmd.add_argument(
+        "--stop-at-keyframes", action="store_true", default=False,
+        help=("on a v2 story at tier 2 or 3: stop once the keyframes are made and checked (J2), for your own "
+              "'approve ID keyframes:N' (default: the fast track approves them itself and goes up to the render)"),
+    )
 
     # ---- feedback (phase 5, step 13: paste, then 'step ID feedback --ep N')
     feedback_cmd = commands.add_parser(
@@ -1533,6 +1538,10 @@ def _print_fast_track_summary(result) -> None:
         else:
             notes.append(f"{label} written")
     approved = f"; auto-approved {_and(result['auto_approved'])}" if result["auto_approved"] else ""
+    keyframes = result.get("keyframes") or {}
+    if keyframes.get("auto_approved") and keyframes.get("flagged"):
+        # Stage C: the one click went over these -- the review screen shows each.
+        approved += f" (keyframes anyway: {_and(keyframes['flagged'])} still flagged, review them)"
     print(f"⏩ Fast track of episode {result['ep']} done in {result['seconds'] / 60:.1f} min: "
           + ", ".join(notes) + approved + ".")
 
@@ -1551,6 +1560,8 @@ def _cmd_fast_track(args, stories) -> int:
         _err(refusal)
         return EXIT_FAILED
     params = {fast_track_step.STORYBOARD_PARAM: args.storyboard} if args.storyboard is not None else {}
+    if args.stop_at_keyframes:
+        params[fast_track_step.STOP_PARAM] = True
     interrupted, result = _run_step(stories, story_id, "fast-track", params, ep=ep)
     if interrupted:
         return interrupted

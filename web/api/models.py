@@ -906,8 +906,12 @@ class RenderStepParams(BaseModel):
 
 class FastTrackStepParams(BaseModel):
     """``POST /steps/fast-track``'s params: ``storyboard`` -- ``t1`` (one T1
-    call per scene) or ``fast`` (the deterministic plan, no call)."""
+    call per scene) or ``fast`` (the deterministic plan, no call);
+    ``stop_at_keyframes`` (stage C) stops a v2 episode once its keyframes are
+    made and checked, for the human's own approval, instead of the default:
+    the one click records that approval itself and goes up to the render."""
     storyboard: Optional[str] = None
+    stop_at_keyframes: Optional[bool] = None
 
 
 class AssetsShotPatch(BaseModel):

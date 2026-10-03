@@ -72,12 +72,15 @@ def test_on_v2_a_script_outside_its_window_is_never_approve_it_yourself():
 
 
 def test_the_fast_track_stops_at_the_keyframe_approval_and_buys_no_clip_until_it(store, tmp_path, built):
+    """Phase 7 follow-up stage C, re-pinned on purpose: the stop at the
+    keyframes is now the ``stop_at_keyframes`` param's (the default goes up
+    to the render, ``tests/test_story_fast_track_one_click.py``)."""
     story_id = kg._v2_keyframes(store, tmp_path, built)
     video = tvp.FakeVideo()
     fakes = tft.Fakes(tmp_path, runner=tft.no_llm())
     fakes.adapters = kg._adapters(video=video, vision=kg.FakeVision())
 
-    message = tft.stopped(store, story_id, fakes, settings=kg.SETTINGS)
+    message = tft.stopped(store, story_id, fakes, settings=kg.SETTINGS, params={"stop_at_keyframes": True})
 
     assert message.startswith("Fast track stopped at the assets (step 4 of 6): Episode 1's keyframes are made")
     assert "approve the keyframes first (keyframes:1)" in message

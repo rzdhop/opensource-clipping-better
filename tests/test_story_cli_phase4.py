@@ -145,6 +145,8 @@ def test_the_parser_choices_mirror_the_modules_own_closed_lists():
 
     fast_track_cmd = _subparser(parser, "fast-track")
     assert tuple(_option(fast_track_cmd, "--storyboard").choices) == fast_track_step.STORYBOARD_CHOICES
+    # Phase 7 follow-up stage C: the stop at the keyframes is opt-in (the default goes up to the render).
+    assert _option(fast_track_cmd, "--stop-at-keyframes").dest == "stop_at_keyframes"
 
 
 # ---------------------------------------------------------------- usage errors

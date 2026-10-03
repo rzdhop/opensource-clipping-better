@@ -582,6 +582,9 @@ def test_the_episode_page_and_the_story_pages_summary(api):
                   "assets_regenerate_blocked": None, "metadata_regenerate_blocked": None},
         "assets": None, "render": None, "metadata": None,
         "ledger": {"entries": [], "totals": {"est_usd": 0.0, "paid_usd": 0.0, "entries": 0}},
+        # Phase 7 follow-up stage C, re-pinned on purpose: the review block (workflow.episode_review),
+        # null before the episode has a storyboard to review.
+        "review": None,
         # Phase 5, stage 5: workflow.series_page's own fields (no memory, feedback or proposals yet;
         # the gate blocking episode 2 until episode 1's script is approved and its memory written).
         # F5, stage 13b: no propose-next job on record for this episode either -- proposals_approved

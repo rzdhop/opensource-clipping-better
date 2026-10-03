@@ -142,6 +142,9 @@ EPISODE_APPROVALS = ("script", "storyboard", "assets")
 SERIES_APPROVALS = ("memory", "feedback", "proposals")
 # A v2 episode's keyframe approval (phase 7 stage 6b, DEC-230).
 KEYFRAMES_APPROVAL = judge_step.KEYFRAMES_APPROVAL
+# Who recorded an approval of the assets or the keyframes (stage C,
+# ``schemas.APPROVED_BY``): the human, or the fast track's one click.
+USER_APPROVED, FAST_TRACK_APPROVED = schemas.APPROVED_BY
 
 # Spec 9.2, regenerate grammar: every "<kind>:..." target of a later phase.
 # Phase 2's, phase 3's, phase 4's and phase 6's targets are
@@ -3232,6 +3235,189 @@ def episode_clips(stories, story, ep, *, env=None) -> dict:
     return view
 
 
+# ---------------------------------------------------- the page, the review (stage C)
+
+# A shot's keyframe on the review screen: its check passed; it passed after
+# the auto-fix redrew it; it is still flagged (a current verdict that
+# failed); it has no verdict yet; or its verdict judged other images.
+REVIEW_VERDICT_STATES = ("passed", "fixed", "flagged", "unchecked", "not_current")
+# Where the episode stands for the human: nothing made yet; the keyframes
+# wait for their approval; the assets wait for theirs; approved but not
+# rendered (or rendered before a change); rendered with the files as they
+# are -- ready for review.
+REVIEW_STATUSES = ("not_made", "keyframes_pending", "assets_pending", "render_needed", "ready")
+
+
+def _review_verdict(shot) -> dict:
+    """One shot's keyframe verdict as the review shows it (see
+    :func:`episode_review`): ``{"state", "issue", "redraws", "gave_up"}``
+    from the per-shot assets view's ``keyframe_verdict`` and ``keyframe_fix``
+    (phase 8 stage B), each absent on a legacy episode."""
+    verdict = shot.get("keyframe_verdict")
+    fix = shot.get("keyframe_fix") or {}
+    redraws, gave_up = int(fix.get("redraws") or 0), bool(fix.get("gave_up"))
+    if verdict is None:
+        state, issue = "unchecked", None
+    elif not verdict["current"]:
+        state, issue = "not_current", None
+    elif verdict["passed"]:
+        state, issue = ("fixed" if redraws else "passed"), None
+    else:
+        state, issue = "flagged", judge_step.verdict_text(verdict)
+    return {"state": state, "issue": issue, "redraws": redraws, "gave_up": gave_up}
+
+
+def _review_spend(page) -> dict:
+    """The episode's spend by kind from its ledger rows (``episode_ledger``):
+    the shot images (the auto-fix's redraws apart, from
+    ``keyframe_fix_budget``), the voices, the clips, the rest, the total."""
+    by_unit = {}
+    for row in page["ledger"]["entries"]:
+        by_unit[row.get("unit")] = by_unit.get(row.get("unit"), 0.0) + float(row.get("est_usd") or 0.0)
+    doc = (page["assets"] or {}).get("doc") or {}
+    fixes = float((doc.get(assets_step.KEYFRAME_FIX_BUDGET) or {}).get("spent_usd") or 0.0)
+    images = max(0.0, by_unit.get("image", 0.0) - fixes)
+    voices, clips = by_unit.get("char", 0.0), by_unit.get("second", 0.0)
+    total = float(page["ledger"]["totals"]["est_usd"])
+    return {"images_usd": round(images, 4), "fixes_usd": round(fixes, 4), "voices_usd": round(voices, 4),
+            "clips_usd": round(clips, 4), "other_usd": round(max(0.0, total - images - fixes - voices - clips), 4),
+            "total_usd": round(total, 4)}
+
+
+def _review_headline(status, *, flagged, keyframes, render) -> str:
+    """One sentence for the top of the review screen."""
+    count = len(flagged)
+    still = f"{count} still flagged" if count else ""
+    if status == "not_made":
+        return "Nothing made yet: Generate episode makes the whole episode, up to the finished render."
+    if status == "keyframes_pending":
+        if keyframes and keyframes["approval"] == "stale":
+            head = "The keyframes changed since they were approved: approve them again, then the assets, then render"
+        else:
+            head = "Keyframes made and checked: approve them, then the assets, then render"
+        return f"{head} ({still})." if still else f"{head}."
+    if status == "assets_pending":
+        return "Keyframes approved: approve the assets, then render."
+    if status == "render_needed":
+        if render and render.get("out_of_date"):
+            return "Rendered, but something changed since: render again."
+        return "Everything is approved: render the episode."
+    return f"Ready for review — {still}." if still else "Ready for review."
+
+
+def episode_review(page) -> dict:
+    """The review block of the episode page (stage C: one screen to check
+    and approve what the fast track's one click made), read from the page
+    as the web layer assembled it (:func:`episode_view`,
+    :func:`episode_outputs`, each shot's ``clip`` merged from
+    :func:`episode_clips`): a pure function over what is computed already,
+    so it costs the page nothing more::
+
+        {"status": <REVIEW_STATUSES>, "ready": bool, "headline": sentence,
+         "auto_approved": ["keyframes", "assets"] (what the fast track approved: by == fast_track),
+         "pending": ["keyframes", "assets"] (what is still to approve, in this order),
+         "approvals": {"script": {"approved", "at", "anyway"}, "storyboard": {"approved", "at"},
+                       "keyframes": {"approval", "at", "anyway", "by", "flagged", "target"} | None (legacy),
+                       "assets": {"approval", "at", "by", "target"}},
+         "flagged": [shot ids whose current check failed], "unchecked": [no current check],
+         "fixed": [redrawn by the auto-fix and passing now],
+         "spend": {"images_usd", "fixes_usd", "voices_usd", "clips_usd", "other_usd", "total_usd"},
+         "render": {"state", "out_of_date", "duration_s", "finished_at", "file"} | None,
+         "metadata_current": bool | None,
+         "script_repairs": script.repairs | None (stage G; absent on older scripts),
+         "shots": [{"shot_id", "scene_id", "order", "image_name", "image_state", "locked", "target",
+                    "clip": {"name", "url", "state", "current", "target", "blocked", "continue"} | None,
+                    "verdict": {"state": <REVIEW_VERDICT_STATES>, "issue", "redraws", "gave_up"},
+                    "fix": keyframe_fixes[shot] | None,
+                    "lines": [{"line_id", "speaker", "text"}]}]}
+
+    ``pending`` lists the keyframes (a v2 episode's, while their approval is
+    not current) then the assets (while their fingerprint is not current);
+    ``status`` is the first of those, else the render's state. The clips
+    are the page's own (None at tier 1, or before the clips were merged)."""
+    script, board, assets = page.get("script"), page.get("storyboard"), page.get("assets") or {}
+    doc = assets.get("doc") or {}
+    keyframes_view = assets.get("keyframes")
+    approved = doc.get("approved") or {}
+    recorded = doc.get(judge_step.KEYFRAMES_APPROVED) or {}
+    approvals = {
+        "script": {"approved": bool(script and script.get("approved_at")),
+                   "at": (script or {}).get("approved_at"), "anyway": bool((script or {}).get("approved_anyway"))},
+        "storyboard": {"approved": bool(board and board.get("approved_at")), "at": (board or {}).get("approved_at")},
+        "keyframes": None,
+        "assets": {"approval": assets.get("fingerprint") or "none", "at": approved.get("at"),
+                   "by": approved.get("by"), "target": f"assets:{page['ep']}"},
+    }
+    if keyframes_view is not None:
+        approvals["keyframes"] = {"approval": keyframes_view["approval"], "at": keyframes_view["approved_at"],
+                                  "anyway": keyframes_view["anyway"], "by": recorded.get("by"),
+                                  "flagged": list(recorded.get("flagged") or []), "target": keyframes_view["target"]}
+    auto = [name for name in ("keyframes", "assets")
+            if approvals[name] and approvals[name]["by"] == FAST_TRACK_APPROVED
+            and approvals[name]["approval"] == "current"]
+    pending = []
+    if approvals["keyframes"] is not None and approvals["keyframes"]["approval"] != "current":
+        pending.append("keyframes")
+    if approvals["assets"]["approval"] != "current":
+        pending.append("assets")
+
+    lines = {line["line_id"]: {"line_id": line["line_id"], "speaker": line["speaker"], "text": line["text"]}
+             for scene in (script or {}).get("scenes") or [] for line in scene["lines"]}
+    fixes = doc.get(assets_step.KEYFRAME_FIXES) or {}
+    by_id = {shot["shot_id"]: shot for shot in assets.get("shots") or []}
+    shots, flagged, unchecked, fixed = [], [], [], []
+    for shot in sorted((board or {}).get("shots") or [], key=lambda item: item["order"]):
+        view = by_id.get(shot["shot_id"]) or {}
+        verdict = _review_verdict(view)
+        if verdict["state"] == "flagged":
+            flagged.append(shot["shot_id"])
+        elif verdict["state"] in ("unchecked", "not_current") and keyframes_view is not None:
+            unchecked.append(shot["shot_id"])
+        elif verdict["state"] == "fixed":
+            fixed.append(shot["shot_id"])
+        clip = view.get("clip")
+        shots.append({
+            "shot_id": shot["shot_id"], "scene_id": shot["scene_id"], "order": shot["order"],
+            "image_name": view.get("image_name"), "image_state": view.get("state") or "none",
+            "locked": bool(view.get("locked")), "target": assets_step.shot_target(page["ep"], shot["shot_id"]),
+            "clip": None if clip is None else {
+                "name": clip.get("name"), "url": clip.get("url"), "state": clip.get("state"),
+                "current": clip.get("state") == "current", "target": clip.get("target"),
+                "blocked": clip.get("blocked"), "continue": bool(clip.get("continue"))},
+            "verdict": verdict, "fix": fixes.get(shot["shot_id"]),
+            "lines": [lines[line_id] for line_id in shot["lines"] if line_id in lines],
+        })
+
+    render = page.get("render")
+    render_view = None
+    if render is not None:
+        render_view = {"state": render["state"], "out_of_date": render.get("out_of_date"),
+                       "duration_s": render.get("duration_s"), "finished_at": render.get("finished_at"),
+                       "file": (render.get("output") or {}).get("file")}
+    rendered = bool(render_view and render_view["state"] == "completed" and render_view["out_of_date"] is False)
+    if not doc:
+        status = "not_made"
+    elif "keyframes" in pending:
+        status = "keyframes_pending"
+    elif "assets" in pending:
+        status = "assets_pending"
+    elif not rendered:
+        status = "render_needed"
+    else:
+        status = "ready"
+    metadata = page.get("metadata")
+    return {
+        "status": status, "ready": status == "ready",
+        "headline": _review_headline(status, flagged=flagged, keyframes=approvals["keyframes"], render=render_view),
+        "auto_approved": auto, "pending": pending, "approvals": approvals,
+        "flagged": flagged, "unchecked": unchecked, "fixed": fixed,
+        "spend": _review_spend(page), "render": render_view,
+        "metadata_current": None if metadata is None else bool(metadata.get("current")),
+        "script_repairs": (script or {}).get(judge_step.REPAIRS) or None,
+        "shots": shots,
+    }
+
+
 # ------------------------------------------------------------------ targets
 
 def check_episode_target(stories, story, parsed) -> None:
@@ -3492,10 +3678,11 @@ def approve_storyboard(stories, story_id, ep, *, now) -> dict:
     return _write(episode_common.write_storyboard, "storyboard", ec, board, script, now=now, code=CONFLICT)
 
 
-def approve_assets(stories, story_id, ep, *, now) -> dict:
+def approve_assets(stories, story_id, ep, *, now, by=USER_APPROVED) -> dict:
     """Approve episode *ep*'s assets (phase 4; plan "API": ``POST
     /approve/assets:<ep>``, and the fast track's auto-approval); returns
-    ``assets.json`` as written.
+    ``assets.json`` as written. *by* (``schemas.APPROVED_BY``, stage C) is
+    who approves: the human, or the fast track's one click on their behalf.
 
     ``conflict`` before the script is approved and the storyboard approved
     and current (``assets.require_approved``, the step's own check); without
@@ -3549,7 +3736,7 @@ def approve_assets(stories, story_id, ep, *, now) -> dict:
     for shot in board["shots"]:
         shot["assets"]["approved"] = True
     _write(episode_common.write_storyboard, "storyboard", ec, board, script, now=now, code=CONFLICT)
-    doc["approved"] = {"at": now, "fingerprint": assets_step.current_fingerprint(ec, board, script, doc)}
+    doc["approved"] = {"at": now, "fingerprint": assets_step.current_fingerprint(ec, board, script, doc), "by": by}
     try:
         return stories.write_episode_doc(story_id, ep, ASSETS_DOC, doc, now=now)
     except schemas.SchemaError as exc:
@@ -3587,10 +3774,31 @@ def assets_approval_state(ec, board, script, doc) -> str:
     return "current" if current else "stale"
 
 
-def approve_keyframes(stories, story_id, ep, *, approve_anyway=False, now) -> dict:
+def keyframe_findings(ec, board, doc) -> dict:
+    """What stands between episode *ec.ep*'s keyframes and their approval,
+    shot by shot (the keyframe approval's own reading, shared with the fast
+    track's one click, stage C): ``{"failed": [(shot_id, what J2 found)],
+    "unjudged": [shot_id, ...]}`` -- a current verdict (J2) that failed, and
+    a shot with no current verdict (none, or one of other images:
+    ``judge.verdict_current``). Hashes every image."""
+    verdicts = (doc or {}).get(judge_step.KEYFRAME_VERDICTS) or {}
+    unjudged, failed = [], []
+    for shot, _path, sha, _prev_id, _prev_path, prev_sha in assets_step.keyframe_items(ec, board, doc):
+        entry = verdicts.get(shot["shot_id"])
+        if not judge_step.verdict_current(entry, sha, prev_sha):
+            unjudged.append(shot["shot_id"])
+        elif not judge_step.verdict_passed(entry):
+            failed.append((shot["shot_id"], judge_step.verdict_text(entry)))
+    return {"failed": failed, "unjudged": unjudged}
+
+
+def approve_keyframes(stories, story_id, ep, *, approve_anyway=False, now, by=USER_APPROVED) -> dict:
     """Approve episode *ep*'s keyframes (phase 7 stage 6b, A16, DEC-230;
     ``POST /approve/keyframes:<ep>``, CLI ``approve ID keyframes:<ep>``);
-    returns ``assets.json`` as written.
+    returns ``assets.json`` as written. *by* (``schemas.APPROVED_BY``, stage
+    C) is who approves: the human, or the fast track's one click on their
+    behalf -- the record then carries ``by`` and ``flagged``, the shots it
+    went over, so the review screen can show them.
 
     A v2 story's alone (``conflict`` for a legacy one: its assets approval
     is the one it has). ``conflict`` before the script is approved and the
@@ -3632,14 +3840,9 @@ def approve_keyframes(stories, story_id, ep, *, approve_anyway=False, now) -> di
                                        f"{'it' if len(missing) == 1 else 'them'} (the assets step, or regenerate "
                                        f"{_and(targets)}) or lock {'it' if len(missing) == 1 else 'them'}, then "
                                        "approve the keyframes."))
-    verdicts = doc.get(judge_step.KEYFRAME_VERDICTS) or {}
-    unjudged, failed = [], []
-    for shot, _path, sha, _prev_id, _prev_path, prev_sha in assets_step.keyframe_items(ec, board, doc):
-        entry = verdicts.get(shot["shot_id"])
-        if not judge_step.verdict_current(entry, sha, prev_sha):
-            unjudged.append(shot["shot_id"])
-        elif not judge_step.verdict_passed(entry):
-            failed.append(f"{shot['shot_id']} ({judge_step.verdict_text(entry)})")
+    findings = keyframe_findings(ec, board, doc)
+    unjudged = findings["unjudged"]
+    failed = [f"{shot_id} ({text})" for shot_id, text in findings["failed"]]
     if (unjudged or failed) and not approve_anyway:
         found = []
         if failed:
@@ -3650,8 +3853,13 @@ def approve_keyframes(stories, story_id, ep, *, approve_anyway=False, now) -> di
         raise WorkflowError(CONFLICT, (f"Episode {ep}'s keyframes are not approved: {'; and '.join(found)}. "
                                        "Make the shots again (regenerate them, with a note) and check again, or "
                                        "approve anyway."))
+    # The shots it goes over, in storyboard order (the failed and the unjudged are disjoint).
+    flagged = [shot["shot_id"] for shot in board["shots"]
+               if shot["shot_id"] in unjudged or any(shot_id == shot["shot_id"] for shot_id, _text in
+                                                      findings["failed"])]
     doc[judge_step.KEYFRAMES_APPROVED] = {"at": now, "anyway": bool(unjudged or failed),
-                                          "fingerprint": assets_step.keyframes_fingerprint(ec, board)}
+                                          "fingerprint": assets_step.keyframes_fingerprint(ec, board),
+                                          "by": by, "flagged": flagged}
     try:
         return stories.write_episode_doc(story_id, ep, ASSETS_DOC, doc, now=now)
     except schemas.SchemaError as exc:

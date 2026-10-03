@@ -3201,11 +3201,20 @@ _EPISODE_ASSETS_BGM_SCHEMA = _or_null(_document({
     "licence": {"type": ["string", "null"], "minLength": 1, "maxLength": 200},
 }))
 
+# Who recorded an approval of the episode's assets or keyframes (phase 7
+# follow-up, stage C): the human, or the fast track's one click, which
+# approves them on the human's behalf (the review screen says which).
+APPROVED_BY = ("user", "fast_track")
+_APPROVED_BY_SCHEMA = {"type": "string", "enum": list(APPROVED_BY)}
+
 # The grid approval, and the fingerprint of what it approved: once the
 # current fingerprint differs, the approval is stale (derived, never cleared).
 _EPISODE_ASSETS_APPROVED_SCHEMA = _or_null(_document({
     "at": _NON_EMPTY_STRING,
     "fingerprint": _SHA256,
+}, optional={
+    # Stage C: absent on an approval recorded before it (the human's).
+    "by": _APPROVED_BY_SCHEMA,
 }))
 
 # Phase 6 stage 6 (A-087): the one link an episode's shot images are made on
@@ -3290,6 +3299,12 @@ _EPISODE_ASSETS_KEYFRAMES_APPROVED_SCHEMA = _document({
     "at": _NON_EMPTY_STRING,
     "anyway": {"type": "boolean"},
     "fingerprint": _SHA256,
+}, optional={
+    # Stage C: who approved (the fast track's one click records its own),
+    # and the shots it went over -- a failed or missing keyframe check (J2)
+    # -- so the review can show them; absent on a stage-6b approval.
+    "by": _APPROVED_BY_SCHEMA,
+    "flagged": {"type": "array", "items": {"type": "string", "pattern": SHOT_ID_PATTERN}},
 })
 
 EPISODE_ASSETS_SCHEMA = _document({

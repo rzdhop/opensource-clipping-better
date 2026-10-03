@@ -240,7 +240,8 @@ def test_the_fast_storyboard_makes_no_t1_call_and_is_approved_by_its_own_rule(st
 
 @pytest.mark.parametrize("params, expected", [
     ({"storyboard": "slow"}, "The fast track's storyboard is one of t1, fast, not 'slow'."),
-    ({"subtitles": "none"}, "The fast track takes only storyboard; not 'subtitles'."),
+    # Phase 7 follow-up stage C, re-pinned on purpose: stop_at_keyframes joins the params.
+    ({"subtitles": "none"}, "The fast track takes only storyboard, stop_at_keyframes; not 'subtitles'."),
 ])
 def test_a_bad_param_is_refused_before_anything_runs(store, tmp_path, params, expected):
     story_id = _story(store)

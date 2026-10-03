@@ -1443,15 +1443,19 @@ def _episode_page(stories, story, ep) -> dict:
     (phase 5: the memory entry and its state, the audience feedback item, the
     proposals made for this episode, and the gate's current refusal text for
     the episode after it), ``workflow.episode_clips`` merged into the assets
-    (phase 6 stage 11, on the Settings: ``_merge_clips``) and the episode's
-    jobs in flight."""
+    (phase 6 stage 11, on the Settings: ``_merge_clips``), the review block
+    (stage C, ``workflow.episode_review``: read from the parts above, so it
+    costs nothing more; null before the episode has a storyboard) and the
+    episode's jobs in flight."""
     with _answering():
         page = workflow.episode_view(stories, story, ep)
         page.update(workflow.episode_outputs(stories, story, ep))
         page["series"] = _series_page(stories, story, ep)
+        page["review"] = None
         if page["assets"] is not None:
             _merge_clips(page["assets"], story["story_id"], ep,
                          workflow.episode_clips(stories, story, ep, env=worker.get_settings_env()))
+            page["review"] = workflow.episode_review(page)
     if page["render"] is not None:
         page["render"]["media"] = _episode_media(story["story_id"], ep, page["render"])
     page["jobs"] = _episode_jobs(story["story_id"], ep)

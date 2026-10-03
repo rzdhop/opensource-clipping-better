@@ -3,17 +3,24 @@ single job (spec 3 "Fast track"; AI Story phase 4, stage 10; DEC-161,
 DEC-162, A-076).
 
 ``ctx.ep`` is the episode; ``params.storyboard`` is ``t1`` (default: one T1
-call per scene) or ``fast`` (the deterministic plan, no call). Needs what
-every episode step needs (``episode_common.check_episode_preconditions``),
+call per scene) or ``fast`` (the deterministic plan, no call);
+``params.stop_at_keyframes`` (stage C, default false) stops a v2 episode
+once its keyframes are made and checked, for the human's own approval. Needs
+what every episode step needs (``episode_common.check_episode_preconditions``),
 and -- while it would write the script or the storyboard -- the memory of the
 episode before (the gate, ``episode_common.needs_memory``).
 
 **One job, not chained jobs** (the DEC-131 precedent): the step runners are
-called in-process, in order, under **one predictive budget** of
-:data:`FAST_TRACK_BUDGET_SECONDS` (``episode_common.Budget``, handed to each
-runner in place of its own), and the job keeps no orchestration state of its
-own -- everything it knows is read from the episode's documents, so a job
-that stopped is simply run again ("Continue"):
+called in-process, in order, under **one predictive budget**
+(``episode_common.Budget``, handed to each runner in place of its own) --
+:func:`budget_seconds`, derived from the plan: the free-chain hour of
+:data:`FAST_TRACK_BUDGET_SECONDS`, plus each clip's poll budget, each v2
+shot's keyframe check and the redraws the auto-fix may ask, under
+:data:`FAST_TRACK_BUDGET_CEILING_SECONDS` (stage C: a fully animated episode
+polls for minutes a clip, and never holds the worker slot past the ceiling)
+-- and the job keeps no orchestration state of its own -- everything it
+knows is read from the episode's documents, so a job that stopped is simply
+run again ("Continue"):
 
 1. **script** -- ``script.run`` fills what is missing. **Auto-approved**
    (``workflow.approve_script``, never ``approve_anyway``) only when
@@ -28,11 +35,23 @@ that stopped is simply run again ("Continue"):
    editor's status probe): :func:`paid_verdict`. A paid part needs ``allow_paid`` **and** must fit
    under the episode's, the day's and the story's caps; anything that
    cannot run stops too. A stop here is **before any generation call**,
-   with the numbers (RC-A3);
+   with the numbers (RC-A3). The check covers the **whole episode** (stage
+   C, :func:`whole_episode_units`): a v2 plan's clips, held for the keyframe
+   approval the run records itself, are counted with the keyframes, the
+   auto-fix's ceiling and the voices -- refused whole, never half-bought;
 4. **assets** -- ``assets.run`` fills what is missing; auto-approved
    (``workflow.approve_assets``: every shot imaged and current or locked,
    every line voiced; the fingerprint stored, each shot's ``approved`` set)
-   only when the step reports them complete;
+   only when the step reports them complete. On a v2 story at tier >= 2 the
+   step holds the clips until the keyframes are approved (RC-Q3, DEC-230):
+   once they are made, checked (J2) and auto-fixed, the fast track records
+   that approval itself (``workflow.approve_keyframes`` with ``by:
+   fast_track``, ``anyway`` and ``flagged`` naming the shots still flagged
+   -- the human's click on "Generate episode" is the approval, which the
+   confirm dialog says in words; stage C), runs the step again for the
+   clips, then approves the assets (``by: fast_track``). With
+   ``stop_at_keyframes`` it stops there instead, for the human's own
+   approval, as it did before stage C;
 5. **render** -- ``render.run``, unless the last render is still the one it
    would make (``render.current_render``); the budget is asked first for
    :func:`render_seconds`;
@@ -50,7 +69,9 @@ is checked between the sub-steps and by each runner before each of its calls
 sub-step and every auto-approval is a line in the activity feed. On success
 the job ends ``completed`` (``steps.ends_completed``, DEC-161) and returns
 ``{ep, storyboard, steps{script, storyboard, paid_check, assets, render,
-metadata}, auto_approved[...], seconds}``.
+metadata}, auto_approved[...], seconds}`` -- with ``keyframes {auto_approved,
+anyway, flagged, unchecked}`` when the run approved the keyframes itself
+(stage C), its last feed line then saying the episode is ready for review.
 
 :func:`estimate` is what the whole run would do and spend now, calling
 nothing (the fast-track estimate, ``GET /estimate/fast-track``).
@@ -85,16 +106,24 @@ from .llm_call import StepFailed
 STEP = "fast-track"
 ASSETS_DOC = store_mod.EPISODE_ASSETS_DOC
 
-# The step's one parameter: how the shots are planned.
+# The step's parameters: how the shots are planned, and (stage C) whether a
+# v2 episode stops at its keyframes for the human's own approval.
 STORYBOARD_PARAM = "storyboard"
+STOP_PARAM = "stop_at_keyframes"
 T1, FAST = storyboard_step.T1, storyboard_step.FAST
 STORYBOARD_CHOICES = (T1, FAST)
-PARAMS = (STORYBOARD_PARAM,)
+PARAMS = (STORYBOARD_PARAM, STOP_PARAM)
 
 # A-076: one hour holds a free-chain episode (about 14 LLM calls, two dozen
 # images, a voice per line, a render of a few minutes, 3 M1 calls), and
 # never holds the worker slot a clip render waits for longer than that.
+# Stage C: that hour is the base of :func:`budget_seconds`; a fully animated
+# v2 episode adds each clip's poll budget (ten minutes on a hosted link), a
+# keyframe check a shot and the redraws its auto-fix may ask, and stops at
+# the ceiling -- four hours, the most one click may hold the worker slot
+# (the predictive checks stop it before, keeping everything made so far).
 FAST_TRACK_BUDGET_SECONDS = 3600
+FAST_TRACK_BUDGET_CEILING_SECONDS = 4 * 3600
 
 # The sub-steps, in order, and how the feed names them.
 SUB_STEPS = ("script", "storyboard", "paid_check", "assets", "render", "metadata")
@@ -146,8 +175,9 @@ def _s(count) -> str:
 # ------------------------------------------------------------------- params
 
 def read_params(params) -> dict:
-    """``{"storyboard": "t1" | "fast"}`` from the step's params (default
-    ``t1``); ``StepFailed`` for another key or value, naming the choices."""
+    """``{"storyboard": "t1" | "fast", "stop_at_keyframes": bool}`` from the
+    step's params (defaults ``t1`` and false); ``StepFailed`` for another
+    key or value, naming the choices."""
     params = params or {}
     unknown = sorted(key for key in params if key not in PARAMS)
     if unknown:
@@ -156,7 +186,30 @@ def read_params(params) -> dict:
     mode = T1 if mode is None else mode
     if mode not in STORYBOARD_CHOICES:
         raise StepFailed(f"The fast track's storyboard is one of {', '.join(STORYBOARD_CHOICES)}, not {mode!r}.")
-    return {STORYBOARD_PARAM: mode}
+    stop = params.get(STOP_PARAM)
+    stop = False if stop is None else stop
+    if not isinstance(stop, bool):
+        raise StepFailed(f"The fast track's {STOP_PARAM} is true or false, not {stop!r}.")
+    return {STORYBOARD_PARAM: mode, STOP_PARAM: stop}
+
+
+# ------------------------------------------------------------------- budget
+
+def budget_seconds(*, shots, clips, v2=False, redraws=0) -> float:
+    """The fast track's time budget for an episode of *shots* shots whose
+    plan buys *clips* clips (stage C): the free-chain hour
+    (:data:`FAST_TRACK_BUDGET_SECONDS`), plus each clip's poll budget
+    (``assets.STORY_CLIP_CALL_SECONDS``: a hosted link is polled for up to
+    ten minutes), and on a *v2* story a keyframe check a shot
+    (``judge.STORY_VISION_CALL_SECONDS``) and, for each of the *redraws* the
+    auto-fix may ask at most, an image and the two checks after it; never
+    more than :data:`FAST_TRACK_BUDGET_CEILING_SECONDS`."""
+    seconds = FAST_TRACK_BUDGET_SECONDS + max(0, int(clips)) * assets_step.STORY_CLIP_CALL_SECONDS
+    if v2:
+        seconds += max(0, int(shots)) * judge_step.STORY_VISION_CALL_SECONDS
+        seconds += max(0, int(redraws)) * (assets_step.STORY_IMAGE_CALL_SECONDS
+                                           + 2 * judge_step.STORY_VISION_CALL_SECONDS)
+    return float(min(seconds, FAST_TRACK_BUDGET_CEILING_SECONDS))
 
 
 # ------------------------------------------------------------------- rules
@@ -376,6 +429,33 @@ def paid_verdict(units, *, ep, predicted=False, fully_animated=False) -> dict:
             "caps": caps, "over_cap": over, "stop": stop, "message": message}
 
 
+def whole_episode_units(ec, units, *, env) -> dict:
+    """*units* (``assets.asset_units``' shape) with a v2 episode's clip plan,
+    held for the keyframe approval (``video.hold``, RC-Q3), counted as the
+    run will buy it (stage C: the fast track records that approval itself,
+    then buys the clips -- so the check before anything is bought must see
+    them): the hold lifted, the clips' price in ``est_usd``, the caps asked
+    again for the whole (``assets.spending_caps``, the clips and the
+    auto-fix's ceiling named), ``ready`` theirs too. Any other estimate --
+    a legacy story, a plan with nothing to buy, one not held -- is returned
+    as it is: ``asset_units`` counted its clips already."""
+    video = units.get("video")
+    if not video or not video.get("hold") or not video.get("count"):
+        return units
+    video = dict(video)
+    hold = video.pop("hold")
+    video["message"] = str(video.get("message") or "").replace(f" Held: {hold}.", "")
+    paid = video.get("route_class") == "paid" and bool(video.get("ready"))
+    video_usd = float(video.get("est_usd") or 0.0) if paid else 0.0
+    total = round(float(units.get("est_usd") or 0.0) + video_usd, 4)
+    fix_usd = float((units.get("keyframe_fix") or {}).get("est_usd") or 0.0)
+    caps, over_cap = assets_step.spending_caps(ec, total, env=env, video=video if video_usd else None,
+                                               fix_usd=fix_usd)
+    whole = dict(units, video=video, est_usd=total, caps=caps, over_cap=over_cap)
+    whole["ready"] = bool(units.get("ready", True) and video.get("ready") and over_cap is None)
+    return whole
+
+
 def render_seconds(shots) -> float:
     """The render's predicted wall time for *shots* shots (the authored
     per-shot estimate, see :data:`RENDER_SECONDS_PER_SHOT`)."""
@@ -428,6 +508,8 @@ class _FastTrack:
         self.profile = profile
         self.budget = episode_common.Budget(time_fn, limit=FAST_TRACK_BUDGET_SECONDS)
         self.auto_approved = []
+        # Stage C: what the run did with the keyframes, once it approved them itself.
+        self.keyframes = None
 
     # ------------------------------------------------------------ plumbing
 
@@ -436,6 +518,36 @@ class _FastTrack:
 
     def context(self):
         return episode_common.load_episode_context(self.ctx)
+
+    def plan_budget(self, ec, *, clips=None, announce=False) -> None:
+        """The budget's limit from the plan as the documents show it now
+        (:func:`budget_seconds`, stage C): the storyboard's shots (else the
+        most E1 would write, as :func:`estimate` counts them), the clips the
+        paid check priced (*clips*; before it, every shot at tier >= 2) and,
+        on a v2 story, a check a shot and the redraws its auto-fix may ask.
+        A document that does not read keeps the base: its own sub-step says
+        why. *announce* says the budget in the feed."""
+        try:
+            board = episode_common.read_episode(ec, STORYBOARD_DOC)
+            script = episode_common.read_episode(ec, SCRIPT_DOC)
+        except StepFailed:
+            return
+        if board and board["shots"]:
+            shots = len(board["shots"])
+        else:
+            shots = predicted_scenes(ec, script) * int(ec.episode_defaults["shots_per_scene"][1])
+        if clips is None:
+            clips = shots if clips_step.tier_of(ec) >= 2 else 0
+        v2 = media_policy.is_v2(ec.story)
+        fix = media_policy.keyframe_fix(ec.story) if v2 else None
+        redraws = int(fix["max_redraws_per_shot"]) * shots if fix else 0
+        self.budget.limit = budget_seconds(shots=shots, clips=clips, v2=v2, redraws=redraws)
+        if announce:
+            what = [f"{shots} shot{_s(shots)}", f"{clips} clip{_s(clips)} to buy"]
+            if v2:
+                what.append("a keyframe check a shot" + (f", up to {redraws} redraws" if redraws else ""))
+            self.log(f"⏱ Plan: {_and(what)} -- the fast track runs under a {int(self.budget.limit // 60)}-minute "
+                     "budget.")
 
     def sub(self, step, params=None):
         """The context a runner is called with: this job's, under its own
@@ -452,6 +564,40 @@ class _FastTrack:
             raise StepFailed(f"Episode {ec.ep}'s {what} could not be approved: {exc}") from None
         self.auto_approved.append(what)
         self.log(f"✅ Fast track: episode {ec.ep}'s {what} auto-approved ({detail})")
+
+    def approve_keyframes(self, ec) -> None:
+        """Stage C: the keyframe approval the one click records on the
+        human's behalf, once the keyframes are made, checked (J2) and
+        auto-fixed -- ``anyway`` over the shots still flagged or not checked
+        (``workflow.keyframe_findings``), each named in the feed and kept in
+        ``self.keyframes`` for the summary; ``by: fast_track`` on the record,
+        so the review screen says who approved. A missing keyframe is still
+        the approval's own refusal: a stop with its reason."""
+        workflow = _workflow()
+        board = episode_common.read_episode(ec, STORYBOARD_DOC)
+        doc = episode_common.read_episode(ec, ASSETS_DOC)
+        findings = workflow.keyframe_findings(ec, board, doc)
+        failed = [shot_id for shot_id, _text in findings["failed"]]
+        unchecked = list(findings["unjudged"])
+        total = len(board["shots"])
+        if failed or unchecked:
+            found = []
+            if failed:
+                found.append("still flagged after the auto-fix: "
+                             + "; ".join(f"{shot_id} ({text})" for shot_id, text in findings["failed"]))
+            if unchecked:
+                found.append(f"not checked: {_and(unchecked)}")
+            detail = (f"anyway -- {total} keyframe{_s(total)} checked by J2, {'; '.join(found)}; review them on the "
+                      "finished episode")
+        else:
+            detail = f"{total} keyframe{_s(total)} checked by J2, every one passed"
+        self.approve(ec, "keyframes",
+                     lambda workflow, now: workflow.approve_keyframes(ec.store, ec.story_id, ec.ep,
+                                                                      approve_anyway=True, now=now,
+                                                                      by=workflow.FAST_TRACK_APPROVED),
+                     detail)
+        self.keyframes = {"auto_approved": True, "anyway": bool(failed or unchecked), "flagged": failed,
+                          "unchecked": unchecked}
 
     def stopped(self, number, name, exc) -> StepFailed:
         message = " ".join(str(exc).split())
@@ -523,20 +669,23 @@ class _FastTrack:
         # verdict is on the link that would really run.
         units = assets_step.asset_units(ec, script, board, env=self.ctx.settings_env, adapters=self.adapters,
                                         transport=self.transport, probe_local=True)
+        # Stage C: the clips a v2 plan holds for the keyframe approval this
+        # run records itself are checked now, with the rest -- never half-bought.
+        units = whole_episode_units(ec, units, env=self.ctx.settings_env)
         verdict = paid_verdict(units, ep=ec.ep, fully_animated=media_policy.fully_animated(ec.story))
         if verdict["stop"]:
             raise StepFailed(verdict["stop"])
         self.log(f"💲 {verdict['message']}")
+        video = units.get("video") or {}
+        clips = int(video.get("count") or 0) if video.get("animate", True) else 0
+        self.plan_budget(ec, clips=clips, announce=True)
         return {"kept": False, "verdict": verdict["verdict"], "est_usd": verdict["est_usd"],
-                "images": units["images"]["count"], "lines": units["voices"]["lines"]}
+                "images": units["images"]["count"], "lines": units["voices"]["lines"], "clips": clips}
 
-    def assets(self) -> dict:
+    def make_assets(self) -> dict:
+        """``assets.run`` on what is missing; a run that leaves the assets
+        incomplete is a stop naming what failed and what to do."""
         ec = self.context()
-        script, board = assets_step.require_approved(ec)
-        doc = episode_common.read_episode(ec, ASSETS_DOC)
-        if assets_current(ec, script, board, doc):
-            self.log(f"🖼 Episode {ec.ep}'s assets are approved and current: kept as they are.")
-            return {"kept": True, "made": 0}
         summary = assets_step.run(self.sub("assets"), adapters=self.adapters, transport=self.transport,
                                   time_fn=self.time_fn, sleep_fn=self.sleep_fn, transcribe=self.transcribe,
                                   budget=self.budget)
@@ -551,14 +700,30 @@ class _FastTrack:
                                  f"is kept: {redo}run the fast track again to ask only for what is missing.")
             raise StepFailed(f"Episode {ec.ep}'s assets are not complete (not every shot has a current image and "
                              "every line a voice): run the fast track again to make what is missing.")
+        return summary
+
+    def assets(self) -> dict:
+        ec = self.context()
+        script, board = assets_step.require_approved(ec)
+        doc = episode_common.read_episode(ec, ASSETS_DOC)
+        if assets_current(ec, script, board, doc):
+            self.log(f"🖼 Episode {ec.ep}'s assets are approved and current: kept as they are.")
+            return {"kept": True, "made": 0}
+        summary = self.make_assets()
         ec = self.context()
         wait = keyframes_wait(ec)
         if wait:
-            raise StepFailed(f"Episode {ec.ep}'s keyframes are made and checked (J2), and wait for you: {wait}. "
-                             "Look at each keyframe and its check on the storyboard, then Approve keyframes (or "
-                             "approve anyway); the clips are bought after that.")
+            if self.params[STOP_PARAM]:
+                raise StepFailed(f"Episode {ec.ep}'s keyframes are made and checked (J2), and wait for you: {wait}. "
+                                 "Look at each keyframe and its check on the storyboard, then Approve keyframes (or "
+                                 "approve anyway); the clips are bought after that.")
+            # Stage C: the human's click is the approval; the clips, held until now, are bought in the same run.
+            self.approve_keyframes(ec)
+            summary = self.make_assets()
+            ec = self.context()
         self.approve(ec, "assets",
-                     lambda workflow, now: workflow.approve_assets(ec.store, ec.story_id, ec.ep, now=now),
+                     lambda workflow, now: workflow.approve_assets(ec.store, ec.story_id, ec.ep, now=now,
+                                                                   by=workflow.FAST_TRACK_APPROVED),
                      f"{summary['shots']['total']} shots current or locked, every line voiced; fingerprint "
                      f"{summary['fingerprint'][:12]}")
         return dict(summary, kept=False)
@@ -596,8 +761,10 @@ class _FastTrack:
                                                    require_knowledge=episode_common.needs_knowledge(ec, STEP))
         ctx.cancel.check()
         mode = self.params[STORYBOARD_PARAM]
+        # Stage C: the budget from the plan the documents show now; the paid check derives it again, exactly.
+        self.plan_budget(ec)
         self.log(f"⏩ Fast track of episode {ec.ep}: script → storyboard ({mode}) → paid check → assets → render → "
-                 f"metadata, under a {FAST_TRACK_BUDGET_SECONDS // 60}-minute budget")
+                 f"metadata, under a {int(self.budget.limit // 60)}-minute budget")
         results = {}
         for number, name in enumerate(SUB_STEPS, start=1):
             ctx.cancel.check()
@@ -608,10 +775,21 @@ class _FastTrack:
                 raise self.stopped(number, name, exc) from None
         seconds = round(self.budget.elapsed(), 1)
         approved = f"; auto-approved: {_and(self.auto_approved)}" if self.auto_approved else ""
-        self.log(f"🏁 Fast track done: episode {ec.ep} is rendered with its metadata pack "
+        review = ""
+        if media_policy.is_v2(ec.story):
+            # Stage C: the one click's end is the human's review of the finished episode.
+            review = " and ready for review"
+            if self.keyframes is not None:
+                flagged = self.keyframes["flagged"] + self.keyframes["unchecked"]
+                review += (f" (the keyframes were approved for you anyway; still flagged: {_and(flagged)})"
+                           if flagged else " (the keyframes were approved for you: every check passed)")
+        self.log(f"🏁 Fast track done: episode {ec.ep} is rendered with its metadata pack{review} "
                  f"({seconds / 60:.1f} min{approved}).")
-        return {"ep": ec.ep, "storyboard": mode, "steps": results, "auto_approved": list(self.auto_approved),
-                "seconds": seconds}
+        result = {"ep": ec.ep, "storyboard": mode, "steps": results, "auto_approved": list(self.auto_approved),
+                  "seconds": seconds}
+        if self.keyframes is not None:
+            result["keyframes"] = dict(self.keyframes)
+        return result
 
 
 def run(ctx, *, runner=None, time_fn=time.monotonic, adapters=None, transport=None, sleep_fn=time.sleep,
@@ -681,6 +859,8 @@ def estimate(ec, *, env, storyboard=T1, adapters=None, transport=None, custom_fo
          "images": {"count", "exact", "route_class", "link", "est_usd", "ready", "message"},
          "tts": {"lines", "chars", "exact", "est_usd", "voices": [...]},
          "video": <the assets estimate's video part> (tier >= 2 only),
+         "keyframe_fix": <the assets estimate's auto-fix ceiling> (a story with one only),
+         "keyframes": {"v2": bool, "tier": 1 | 2 | 3, "approval": none|current|stale | None, "fix_usd": x},
          "render": {"needed", "shots", "seconds", "minutes", "basis"},
          "est_usd": x, "paid": <paid_verdict>, "stops_at": {"step", "reason"} | None}
 
@@ -697,6 +877,11 @@ def estimate(ec, *, env, storyboard=T1, adapters=None, transport=None, custom_fo
     part on the approved storyboard (``assets._video_units``), in the paid
     part and the total as the run's paid check counts them; before the
     storyboard is approved, ``video.count`` is None and nothing is priced.
+    ``keyframes`` (stage C) is what the one click does with the keyframes:
+    on a v2 story they are checked (J2), auto-fixed up to ``fix_usd`` and
+    -- at tier >= 2 -- approved by the run itself unless
+    ``stop_at_keyframes``; ``approval`` their approval's state now (None on
+    a legacy story, or before a storyboard).
     **Render** minutes from :func:`render_seconds` (an authored estimate
     until A-069), 0 when the last render is current. ``est_usd`` is the paid
     part (a paid link the gates would refuse included: the price of the
@@ -824,6 +1009,12 @@ def estimate(ec, *, env, storyboard=T1, adapters=None, transport=None, custom_fo
         if metadata_step.is_current(pack, script, manifest["output"]["sha256"]):
             m1_calls = sum(1 for platform in metadata_step.PLATFORMS if platform not in pack["platforms"])
 
+    # Stage C: what the one click does with the keyframes (the confirm says it in words).
+    v2 = media_policy.is_v2(ec.story)
+    keyframes = {"v2": v2, "tier": clips_step.tier_of(ec),
+                 "approval": assets_step.keyframes_state(ec, board, doc) if v2 and board is not None else None,
+                 "fix_usd": round(float(fix_paid), 4)}
+
     return {
         "ep": ep, "storyboard": mode,
         "llm_calls": {"script": script_calls, "storyboard": t1_calls, "metadata": m1_calls,
@@ -833,6 +1024,7 @@ def estimate(ec, *, env, storyboard=T1, adapters=None, transport=None, custom_fo
                 "est_usd": round(float(voices_paid), 4), "voices": voices_est["voices"]},
         **({"video": video} if video is not None else {}),
         **({"keyframe_fix": fix} if fix is not None else {}),
+        "keyframes": keyframes,
         "render": {"needed": not render_current, "shots": shots_total, "seconds": seconds,
                    "minutes": round(seconds / 60, 1),
                    "basis": (f"estimate: {RENDER_SECONDS_PER_SHOT:g} s a shot + {RENDER_TAIL_SECONDS:g} s "
