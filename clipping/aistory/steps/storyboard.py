@@ -150,25 +150,31 @@ def scenes_to_plan(script, plans, sources, stale, short=()) -> list:
             or scene["scene_id"] in short]
 
 
-def build(ec, script, plans, sources, previous, *, stale, now) -> tuple:
+def build(ec, script, plans, sources, previous, *, stale, now, env=None) -> tuple:
     """``shots.build_storyboard`` over every scene that has a plan; a scene
     in *stale* (planned from an older revision, not planned again) keeps its
     stale mark and the revision it was planned from. Should those old plans
     no longer fit their scene, they are left out (they are planned again by
     the next run). ``(storyboard, notes)``. A v2 story's shots are resolved
     with the episode's ledger (``script.ledger_of``: wardrobe sets and
-    holders, phase 7 stage 5c)."""
+    holders, phase 7 stage 5c) and built to the word budgets of the links
+    its images and clips go to (``clips.episode_budgets``; *env* the
+    Settings values; stage F2): a shot whose prompt cannot fit even at its
+    shortest fails the step, named with its link, and nothing is written."""
     ledger = script_step.ledger_of(ec)
+    budgets = clips.episode_budgets(ec, env, assets_doc=_assets_doc(ec))
 
     def attempt(chosen):
         return shots.build_storyboard(
             script, {sid: plans[sid] for sid in chosen}, {sid: sources[sid] for sid in chosen},
             entities=ec.entities, style_lock=ec.style_lock, template=ec.template, language=ec.language,
             consistency_mode=ec.consistency_mode, now=now, previous=previous, v2=media_policy.is_v2(ec.story),
-            shots_per_scene=ec.episode_defaults["shots_per_scene"], ledger=ledger)
+            shots_per_scene=ec.episode_defaults["shots_per_scene"], ledger=ledger, budgets=budgets)
 
     try:
         board, notes = attempt(list(plans))
+    except shots.PromptOverBudget as exc:
+        raise StepFailed(f"Episode {ec.ep}'s storyboard was not written: {exc}") from None
     except ValueError:
         if not stale:
             raise
@@ -242,12 +248,17 @@ def max_shot_s(ec, env=None):
     template_max = ec.template.get("max_shot_s")
     if template_max is None or not media_policy.fully_animated(ec.story):
         return template_max
-    try:
-        doc = episode_common.read_episode(ec, store_mod.EPISODE_ASSETS_DOC)
-    except StepFailed:
-        doc = None
-    longest = clips.longest_clip_s(clips.planned_link(ec, env, assets_doc=doc))
+    longest = clips.longest_clip_s(clips.planned_link(ec, env, assets_doc=_assets_doc(ec)))
     return min(template_max, longest) if longest else template_max
+
+
+def _assets_doc(ec):
+    """The episode's ``assets.json`` (its recorded links), or None -- also
+    for one that does not validate: a plan is never refused over it."""
+    try:
+        return episode_common.read_episode(ec, store_mod.EPISODE_ASSETS_DOC)
+    except StepFailed:
+        return None
 
 
 def beat_shot_count(ec, script, scene, *, limit_s=None):
@@ -495,7 +506,7 @@ def run(ctx, *, runner=None, time_fn=time.monotonic, budget=None) -> dict:
         stale.discard(sid)
         planned.append(sid)
         now = llm_call.utc_now()
-        board, notes = build(ec, script, plans, sources, board, stale=stale, now=now)
+        board, notes = build(ec, script, plans, sources, board, stale=stale, now=now, env=ctx.settings_env)
         save(ec, script, board, now=now)
 
     if board is not None and planned:

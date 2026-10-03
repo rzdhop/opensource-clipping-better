@@ -83,8 +83,9 @@ from datetime import datetime, timezone
 from clipping.providers import adapters as adapters_mod
 from clipping.providers import gating
 from clipping.providers import generation as gen
+from clipping.providers.registry import ChainError
 
-from . import imaging, media_policy, prompting, schemas, shots
+from . import imaging, media_policy, prompt_budgets, prompting, schemas, shots
 from . import names as names_mod
 from . import uploads as uploads_mod
 
@@ -309,6 +310,18 @@ def _derived(story, *, subject, prompt, size, seed, references, stem, step, sour
     return _Plan(subject, gen.IMAGE_EDIT, prompt, size, seed, tuple(references), REFERENCES, stem, step,
                  f"{media_policy.chain_name(role, gen.IMAGE_EDIT, story)} with {count} reference "
                  f"image{'' if count == 1 else 's'}", role=role)
+
+
+def _first_link(story, role, kind, env):
+    """The first link an image of *role* and *kind* goes to on *story*
+    (``media_policy.role_chain``): what its prompt's word budget is read
+    from (stage F2, ``prompt_budgets``). None when the chain cannot be read
+    -- :func:`_make` then says why, before anything is sent."""
+    try:
+        chain = media_policy.role_chain(role, kind, gating.merged_env(env), story)
+    except ChainError:
+        return None
+    return gen.describe(chain[0]) if chain else None
 
 
 def _remove_other_extensions(stories, story_id, kind, eid, stem, keep) -> None:
@@ -586,8 +599,13 @@ def character_image(stories, story_id, char_id, which, *, env, on_log, cancel, n
                             "make every image.")
     lock = imaging.read_lock(stories, story_id, error=RefImageError)
     if media_policy.is_v2(story) and character.get("look"):
+        # Stage F2: the sheet fills the budget of the link it goes to (the portrait text to image, the
+        # others edits of it -- text to image too in prompt-only mode, _derived).
+        edit = which != "portrait" and story["generation_profile"]["consistency_mode"] != PROMPT_ONLY
+        link = _first_link(story, "sheet", gen.IMAGE_EDIT if edit else gen.IMAGE, env)
         prompt = _CHARACTER_PROMPTS_V2[which](lock, look_text=shots.render_look(character),
-                                              signature_items=character["signature_items"])
+                                              signature_items=character["signature_items"],
+                                              budget=prompt_budgets.sheet_words(link))
     else:
         prompt = _CHARACTER_PROMPTS[which](lock, descriptor=character["descriptor"],
                                            signature_items=character["signature_items"])
@@ -676,7 +694,11 @@ def place_image(stories, story_id, place_id, variant, *, env, on_log, cancel, no
     if media_policy.is_v2(story) and place.get("look"):
         place_text = shots.render_place(place, variant, "wide_establishing",
                                         props=_props_here(stories, story_id, place["look"]))
-        prompt = prompting.plate_prompt_v2(lock, place_text=place_text, variant=variant)
+        # Stage F2: the plate fills the budget of its link (a variant is an edit of the master plate).
+        edit = variant != MASTER_PLATE and story["generation_profile"]["consistency_mode"] != PROMPT_ONLY
+        link = _first_link(story, "plate", gen.IMAGE_EDIT if edit else gen.IMAGE, env)
+        prompt = prompting.plate_prompt_v2(lock, place_text=place_text, variant=variant,
+                                           budget=prompt_budgets.plate_words(link))
     else:
         prompt = prompting.variant_prompt(lock, place_descriptor=place["descriptor"], variant=variant)
     prompt = _with_note(prompt, note, stories=stories, story_id=story_id)
@@ -748,7 +770,9 @@ def prop_image(stories, story_id, prop_id, *, env, on_log, cancel, note=None, se
         raise RefImageError(f"{name}: write the prop first -- its descriptor makes its image.")
     lock = imaging.read_lock(stories, story_id, error=RefImageError)
     if media_policy.is_v2(story) and prop.get("look"):
-        prompt = prompting.prop_prompt_v2(lock, prop_text=shots.render_prop(prop, for_reference=True))
+        # Stage F2: the prop's reference fills the budget of its link.
+        prompt = prompting.prop_prompt_v2(lock, prop_text=shots.render_prop(prop, for_reference=True),
+                                          budget=prompt_budgets.prop_words(_first_link(story, "prop", gen.IMAGE, env)))
     else:
         prompt = prompting.prop_image_prompt(lock, descriptor=prop["descriptor"])
     prompt = _with_note(prompt, note, stories=stories, story_id=story_id)

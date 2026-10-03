@@ -18,6 +18,7 @@ Stdlib only (DEC-012).
 from __future__ import annotations
 
 import re
+from collections import namedtuple
 
 from . import schemas
 
@@ -278,6 +279,12 @@ def prop_prompt_block(style_lock: dict, *, descriptor: str) -> str:
 # boundary and its design rules keep only the whole sentences that fit. The
 # image links of a v2 story take no negative prompt, so each ends on a short
 # positive constraints clause instead (A7).
+#
+# Phase 7 follow-up, stage F2: every cap below is the budget a prompt gets
+# when its link is not known -- the number every v2 prompt was built to until
+# then. A caller that knows the link passes its own ``budget``
+# (``prompt_budgets``: the link's limit bounded by a quality ceiling), and
+# the builder fills it the same way, the whole skeleton first.
 
 SHEET_V2_MAX_WORDS = 130
 PLATE_V2_MAX_WORDS = 150
@@ -364,48 +371,50 @@ def _styled(cap: int, *, before: str, after: str, rendering: str, rules: str = "
     return _collapse_ws(" ".join(part for part in parts if part))
 
 
-def _sheet_v2(style_lock, *, head, look_text, signature_items, tail, constraints, rules=True) -> str:
+def _sheet_v2(style_lock, *, head, look_text, signature_items, tail, constraints, rules=True,
+              budget=SHEET_V2_MAX_WORDS) -> str:
     look = _with_items(look_text, signature_items)
     before = f"{head}: {look}."
     after = f"{tail} {constraints}"
-    return _styled(SHEET_V2_MAX_WORDS, before=before, after=after, rendering=style_lock["rendering"],
+    return _styled(budget, before=before, after=after, rendering=style_lock["rendering"],
                    rules=style_lock["character_design_rules"] if rules else "")
 
 
-def portrait_prompt_v2(style_lock: dict, *, look_text: str, signature_items) -> str:
+def portrait_prompt_v2(style_lock: dict, *, look_text: str, signature_items, budget=SHEET_V2_MAX_WORDS) -> str:
     """A v2 character's base reference: full body, head to toe, front
     three-quarter, neutral pose, from its rendered look (``shots.render_look``)
-    -- at most ``SHEET_V2_MAX_WORDS`` words. A signature item the look does not
-    say yet is added with "with"."""
+    -- at most *budget* words (``SHEET_V2_MAX_WORDS``, or the link's own,
+    stage F2). A signature item the look does not say yet is added with
+    "with"."""
     return _sheet_v2(
         style_lock,
         head=("Full-body character reference sheet, head to toe, front three-quarter view, neutral standing "
               "pose, arms relaxed"),
         look_text=look_text, signature_items=signature_items,
         tail=f"Plain {style_lock['sheet_background']} background, even soft studio light. Vertical 9:16.",
-        constraints=CONSTRAINTS_ONE_CHARACTER,
+        constraints=CONSTRAINTS_ONE_CHARACTER, budget=budget,
     )
 
 
-def turnaround_prompt_v2(style_lock: dict, *, look_text: str, signature_items) -> str:
+def turnaround_prompt_v2(style_lock: dict, *, look_text: str, signature_items, budget=SHEET_V2_MAX_WORDS) -> str:
     """The v2 turnaround, an edit of the portrait (image 1): four full-body
-    views of the same character, at most ``SHEET_V2_MAX_WORDS`` words."""
+    views of the same character, at most *budget* words."""
     return _sheet_v2(
         style_lock,
         head=(f"{ROLE_TEXT_PORTRAIT} Turnaround sheet of this character, four full-body views side by side "
               "in one row, front, three-quarter, profile and back, head to toe in each"),
         look_text=look_text, signature_items=signature_items,
         tail=f"Plain {style_lock['sheet_background']} background, flat even light, no labels.",
-        constraints=_CONSTRAINTS_SAME_CHARACTER,
+        constraints=_CONSTRAINTS_SAME_CHARACTER, budget=budget,
     )
 
 
-def expressions_prompt_v2(style_lock: dict, *, look_text: str, signature_items) -> str:
+def expressions_prompt_v2(style_lock: dict, *, look_text: str, signature_items, budget=SHEET_V2_MAX_WORDS) -> str:
     """The v2 expression sheet, an edit of the portrait (image 1): six
-    head-and-shoulders portraits, at most ``SHEET_V2_MAX_WORDS`` words. A2:
-    a sentence right after the role text pins every cell to image 1's head,
-    and the grid count is spelled out ("exactly six cells") -- one sheet had
-    drifted to a human face in one cell, another came out with five cells."""
+    head-and-shoulders portraits, at most *budget* words. A2: a sentence
+    right after the role text pins every cell to image 1's head, and the
+    grid count is spelled out ("exactly six cells") -- one sheet had drifted
+    to a human face in one cell, another came out with five cells."""
     return _sheet_v2(
         style_lock,
         head=(f"{ROLE_TEXT_PORTRAIT} Every cell shows the same head as image 1, never a different face. "
@@ -414,38 +423,42 @@ def expressions_prompt_v2(style_lock: dict, *, look_text: str, signature_items) 
               "outfit in every cell"),
         look_text=look_text, signature_items=signature_items,
         tail=f"Plain {style_lock['sheet_background']} background, even soft light, no labels.",
-        constraints=_CONSTRAINTS_SAME_CHARACTER, rules=False,
+        constraints=_CONSTRAINTS_SAME_CHARACTER, rules=False, budget=budget,
     )
 
 
-def plate_prompt_v2(style_lock: dict, *, place_text: str, variant: str) -> str:
+def plate_prompt_v2(style_lock: dict, *, place_text: str, variant: str, budget=PLATE_V2_MAX_WORDS) -> str:
     """A v2 place's plate for one time variant: the place in words
     (``shots.render_place``: descriptor, layout map, the variant's light,
     the props that live there), no people, a wide camera, the style's
-    rendering and palette -- at most ``PLATE_V2_MAX_WORDS`` words."""
+    rendering and palette -- at most *budget* words (``PLATE_V2_MAX_WORDS``,
+    or the link's own, stage F2). The style's ``environment_rules``, as one
+    sentence, when the budget has room for it whole after the rendering."""
     if not isinstance(variant, str) or re.fullmatch(schemas.TIME_VARIANT_PATTERN, variant) is None:
         raise ValueError(f"not a time variant name: {variant!r}")
     head = f"Establishing wide shot of an empty set, {variant.replace('_', ' ')}, no people, no characters:"
     after = (f"Camera: wide, eye level, 24mm equivalent, deep focus. "
              f"Palette: {_strip_trailing_period(palette_line(style_lock))}. Vertical 9:16. {_CONSTRAINTS_NO_PEOPLE}")
-    room = PLATE_V2_MAX_WORDS - _word_count(head) - _word_count(after) - _RENDERING_V2_MIN_WORDS - 1
+    room = budget - _word_count(head) - _word_count(after) - _RENDERING_V2_MIN_WORDS - 1
     place = _fit(place_text, room)
     before = f"{head} {place}." if place else f"{head[:-1]}."
-    return _styled(PLATE_V2_MAX_WORDS, before=before, after=after, rendering=style_lock["rendering"])
+    return _styled(budget, before=before, after=after, rendering=style_lock["rendering"],
+                   rules=as_sentence(style_lock["environment_rules"]))
 
 
-def prop_prompt_v2(style_lock: dict, *, prop_text: str) -> str:
+def prop_prompt_v2(style_lock: dict, *, prop_text: str, budget=PROP_V2_MAX_WORDS) -> str:
     """A v2 prop's reference image (``shots.render_prop(..., for_reference=True)``:
     look, no scale -- A1, a scale phrase here invited a hand holding the
     object for a size reference), the object alone on a plain surface,
-    nothing holding it -- at most ``PROP_V2_MAX_WORDS``."""
+    nothing holding it -- at most *budget* words (``PROP_V2_MAX_WORDS``, or
+    the link's own, stage F2)."""
     head = "Reference image of the object alone on a plain surface, nothing holding it, centred"
     after = (f"Plain {style_lock['sheet_background']} background, even soft studio light. "
              f"{_CONSTRAINTS_OBJECT}")
-    room = PROP_V2_MAX_WORDS - _word_count(head) - _word_count(after) - _RENDERING_V2_MIN_WORDS - 2
+    room = budget - _word_count(head) - _word_count(after) - _RENDERING_V2_MIN_WORDS - 2
     prop = _fit(prop_text, room)
     before = f"{head}: {prop}." if prop else f"{head}."
-    return _styled(PROP_V2_MAX_WORDS, before=before, after=after, rendering=style_lock["rendering"])
+    return _styled(budget, before=before, after=after, rendering=style_lock["rendering"])
 
 
 # ============================================================ phase 7 (v2 keyframes and clips, stage 3b)
@@ -462,6 +475,14 @@ LAYERED_V1 = schemas.STORYBOARD_PROMPT_LAYOUT_V1
 KEYFRAME_V2_MAX_WORDS = 220
 KEYFRAME_V2_MIN_WORDS = 130
 CLIP_V2_MAX_WORDS = 80
+
+# Phase 7 follow-up, stage F2: the word budgets a v2 shot's two prompts are
+# built to, with the links they were derived from (``prompt_budgets.for_links``
+# derives them; ``shots`` reads the numbers, and names the link in a refusal).
+# The defaults are the fixed budgets above: what a shot gets when its links
+# are not known yet.
+Budgets = namedtuple("Budgets", "keyframe clip image_link video_link",
+                     defaults=(KEYFRAME_V2_MAX_WORDS, CLIP_V2_MAX_WORDS, None, None))
 CONSTRAINTS_KEYFRAME = "Clean frame: no captions, lettering, logos or watermarks; each character appears once."
 CONSTRAINTS_KEYFRAME_NO_PEOPLE = _CONSTRAINTS_NO_PEOPLE
 STAYS_STILL = "The set, the lighting and every character's look stay exactly as in the first frame."
@@ -684,10 +705,11 @@ def layered_shot_prompt(style_lock: dict, *, roles_text: str, beat: str, staging
 
 
 def layered_clip_prompt(style_lock: dict, *, subject: str, motion: str, camera_phrase: str, modifiers=(),
-                        secondary: str = "") -> str:
-    """A v2 shot's clip prompt (A8), at most ``CLIP_V2_MAX_WORDS`` words: the
-    subject and what moves (*motion*: the shot's resolved, name-free action,
-    or the planned motion; it is said as it is when it already names the
+                        secondary: str = "", budget: int = CLIP_V2_MAX_WORDS) -> str:
+    """A v2 shot's clip prompt (A8), at most *budget* words
+    (``CLIP_V2_MAX_WORDS``, or the link's own -- stage F2): the subject and
+    what moves (*motion*: the shot's resolved, name-free action, or the
+    planned motion; it is said as it is when it already names the
     *subject*), one *secondary* motion, the camera phrase and its *modifiers*,
     the stays-still clause, then the style's ``tier2_prompt_suffix``. The
     motion is cut at a clause boundary when the whole would be longer."""
@@ -695,7 +717,7 @@ def layered_clip_prompt(style_lock: dict, *, subject: str, motion: str, camera_p
     camera = as_sentence(", ".join([_strip_trailing_period(camera_phrase)]
                                  + [_strip_trailing_period(m) for m in modifiers if m]))
     tail = [as_sentence(secondary), camera, STAYS_STILL, suffix]
-    room = CLIP_V2_MAX_WORDS - sum(_word_count(part) for part in tail)
+    room = budget - sum(_word_count(part) for part in tail)
     moving = _collapse_ws(motion)
     if subject and subject.lower() not in moving.lower():
         moving = f"{subject}: {moving}"
@@ -715,8 +737,11 @@ def layered_clip_prompt(style_lock: dict, *, subject: str, motion: str, camera_p
 # shot): the prompt never asks the model to voice words.
 
 # The whole prompt's cap: the visual's own (``CLIP_V2_MAX_WORDS``, 80) plus the
-# sound's, well under Veo's 1024 tokens (A-103).
+# sound's, well under Veo's 1024 tokens (A-103). Stage F2: the sound's share
+# (60 words) is what an ambience clip's budget adds to its link's clip budget
+# (``prompt_budgets.clip_audio_words``); 140 is the whole with no link known.
 CLIP_AUDIO_MAX_WORDS = 140
+CLIP_AUDIO_SHARE_WORDS = CLIP_AUDIO_MAX_WORDS - CLIP_V2_MAX_WORDS
 # The most the place's ambience and the sound effects take, and the least the
 # visual leaves the ambience when it must be cut.
 AMBIENCE_MAX_WORDS = 26
@@ -755,20 +780,22 @@ def _silent_speakers(speakers) -> str:
     return as_sentence(f"{names} {'speaks' if len(who) == 1 else 'speak'} silently: their words are not heard")
 
 
-def clip_prompt_with_audio(visual: str, *, place: str, sfx=(), speakers=(), note: str = "") -> str:
-    """An ambience clip's prompt, at most :data:`CLIP_AUDIO_MAX_WORDS`
-    words: the *visual* prompt with its speech made silent
-    (:func:`silent_speech`), the *note* (a re-animate's direction), the
-    natural ambience of *place* (its words, time of day and light: the
-    model hears room tone, weather, crowd, traffic or nature from them),
-    "Sound effects:" *sfx*, *speakers* speaking silently, then
-    :data:`AUDIO_CLOSING`. The closing and the silence are never cut; the
-    visual is cut at a clause boundary only when it would leave the
-    ambience under its least; the place and the effects are cut to what is
-    left (at most :data:`AMBIENCE_MAX_WORDS` and :data:`SFX_MAX_WORDS`)."""
+def clip_prompt_with_audio(visual: str, *, place: str, sfx=(), speakers=(), note: str = "",
+                           budget: int = CLIP_AUDIO_MAX_WORDS) -> str:
+    """An ambience clip's prompt, at most *budget* words
+    (:data:`CLIP_AUDIO_MAX_WORDS`, or the link's own -- stage F2): the
+    *visual* prompt with its speech made silent (:func:`silent_speech`),
+    the *note* (a re-animate's direction), the natural ambience of *place*
+    (its words, time of day and light: the model hears room tone, weather,
+    crowd, traffic or nature from them), "Sound effects:" *sfx*, *speakers*
+    speaking silently, then :data:`AUDIO_CLOSING`. The closing and the
+    silence are never cut; the visual is cut at a clause boundary only when
+    it would leave the ambience under its least; the place and the effects
+    are cut to what is left (at most :data:`AMBIENCE_MAX_WORDS` and
+    :data:`SFX_MAX_WORDS`)."""
     silent = _silent_speakers(speakers)
     note_text = as_sentence(note) if note else ""
-    room = CLIP_AUDIO_MAX_WORDS - _word_count(silent) - _word_count(AUDIO_CLOSING) - _word_count(note_text)
+    room = budget - _word_count(silent) - _word_count(AUDIO_CLOSING) - _word_count(note_text)
     lead = silent_speech(visual)
     head = _word_count(AMBIENCE_HEAD)
     if _word_count(lead) > room - head - _AMBIENCE_MIN_WORDS:

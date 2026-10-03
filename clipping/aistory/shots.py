@@ -655,6 +655,35 @@ _LAYERED_LAST_RUNGS = ((14, 18, 8, "short"), (12, 14, 0, "short"), (10, 12, 0, "
 _REFERENCES_MODE = "references"
 
 
+class PromptOverBudget(ValueError):
+    """A v2 shot's prompt that is over its word budget even on the ladder's
+    last rung (phase 7 follow-up, stage F2): refused, never sent cut or over
+    its link's limit (until this stage the last rung was sent anyway).
+    ``kind`` (``"keyframe"`` or ``"clip"``), ``words`` (the shortest it got),
+    ``budget`` (``prompting.Budgets``' number for the kind); ``shot_id`` and
+    ``link`` once the caller knows them (:func:`build_storyboard`,
+    :func:`refresh_prompts` -- :meth:`named`). ``str()`` says all of it and
+    what to do. A ``ValueError``, so a caller that turns a shot it cannot
+    resolve into its own message still does."""
+
+    def __init__(self, kind, words, budget, *, shot_id=None, link=None):
+        self.kind, self.words, self.budget, self.shot_id, self.link = kind, words, budget, shot_id, link
+        super().__init__(self.sentence())
+
+    def named(self, shot_id, link) -> "PromptOverBudget":
+        """The same refusal, naming the shot and the link it was built for."""
+        return PromptOverBudget(self.kind, self.words, self.budget, shot_id=shot_id, link=link)
+
+    def sentence(self) -> str:
+        who = f"shot {self.shot_id}'s" if self.shot_id else "the shot's"
+        where = f"{self.link}'s" if self.link else "its link's"
+        shorten = "its looks or its place" if self.kind == "keyframe" else "its motion"
+        what = "images" if self.kind == "keyframe" else "clips"
+        return (f"{who} {self.kind} prompt cannot fit {where} budget of {self.budget} words: {self.words} words at "
+                f"its shortest. Shorten the shot's action, {shorten}, or make the episode's {what} on a link that "
+                f"accepts a longer prompt ('prompt-limits' lists each link's); nothing was sent.")
+
+
 def _frame_characters(subject_tags, characters) -> list:
     """``[(char_id, doc), ...]`` of the character tags, in subject order,
     each once. ``ValueError`` for a tag no character of the story has."""
@@ -912,12 +941,17 @@ def _outfits(frame, char_handles, ledger) -> dict:
 
 
 def _layered(plan, *, scene, entities, style_lock, consistency_mode, video_action, char_handles,
-             prop_handles, name_map, ledger=None, continuity=False) -> dict:
+             prop_handles, name_map, ledger=None, continuity=False, budgets=None) -> dict:
     """The v2 half of :func:`resolve_shot`: ``image_prompt`` (layered,
-    within ``KEYFRAME_V2_MAX_WORDS`` -- the looks, the place and the
-    rendering shortened in turn until it fits), ``video_prompt``,
-    ``reference_images`` and ``prompt_layout``. *continuity*: the previous
-    keyframe of the scene is one of the references (phase 8 stage B)."""
+    within its budget -- the looks, the place and the rendering shortened
+    in turn until it fits), ``video_prompt``, ``reference_images`` and
+    ``prompt_layout``. *continuity*: the previous keyframe of the scene is
+    one of the references (phase 8 stage B). *budgets*
+    (``prompting.Budgets``, stage F2: each prompt's words, from the links
+    the episode's images and clips go to; None: the fixed numbers).
+    :class:`PromptOverBudget` when even the ladder's last rung is over the
+    keyframe's budget, or the clip's fixed parts alone are over its own."""
+    budgets = budgets or prompting.Budgets()
     characters = entities.get("characters", {})
     places = entities.get("places", {})
     props = entities.get("props", {})
@@ -965,8 +999,11 @@ def _layered(plan, *, scene, entities, style_lock, consistency_mode, video_actio
             style_lock, roles_text=roles if props_said == "full" else compact_roles, beat=beat, staging=staging,
             composition=composition, place_text=place_text, constraints=constraints,
             rendering_words=rendering_words)
-        if len(image_prompt.split()) <= prompting.KEYFRAME_V2_MAX_WORDS:
+        if len(image_prompt.split()) <= budgets.keyframe:
             break
+    else:
+        # Stage F2: past the last rung the prompt is refused, never sent anyway.
+        raise PromptOverBudget("keyframe", len(image_prompt.split()), budgets.keyframe)
 
     camera_motion = plan.get("camera_motion")
     if camera_motion not in prompting.CAMERA_PHRASES:
@@ -985,7 +1022,11 @@ def _layered(plan, *, scene, entities, style_lock, consistency_mode, video_actio
     modifiers = [prompting.MODIFIER_PHRASES[m] for m in plan.get("modifiers") or () if m in prompting.MODIFIER_PHRASES]
     video_prompt = prompting.layered_clip_prompt(
         style_lock, subject=subject, motion=_strip_period(motion),
-        camera_phrase=prompting.CAMERA_PHRASES[camera_motion], modifiers=modifiers, secondary=secondary)
+        camera_phrase=prompting.CAMERA_PHRASES[camera_motion], modifiers=modifiers, secondary=secondary,
+        budget=budgets.clip)
+    if len(video_prompt.split()) > budgets.clip:
+        # The motion is cut to the budget; the fixed parts (camera, stays-still, suffix) cannot be.
+        raise PromptOverBudget("clip", len(video_prompt.split()), budgets.clip)
 
     return {
         "image_prompt": image_prompt,
@@ -996,7 +1037,7 @@ def _layered(plan, *, scene, entities, style_lock, consistency_mode, video_actio
 
 
 def resolve_shot(shot, *, scene, entities, style_lock, consistency_mode, v2=False, ledger=None,
-                 continuity=False) -> dict:
+                 continuity=False, budgets=None) -> dict:
     """*shot* (a plan: ``framing``/``action``/``subjects``) resolved into
     ``{"image_prompt", "video_action", "negative_prompt", "reference_images",
     "consistency"}``. Every entity name is stripped from the resolved action
@@ -1024,7 +1065,13 @@ def resolve_shot(shot, *, scene, entities, style_lock, consistency_mode, v2=Fals
 
     *continuity* (v2 only, phase 8 stage B: the shot is not the first of its
     scene, :func:`continues_scene`): the previous keyframe of the scene is
-    one of its references (:data:`CONTINUITY_REFERENCE`), with its role."""
+    one of its references (:data:`CONTINUITY_REFERENCE`), with its role.
+
+    *budgets* (v2 only, stage F2: ``prompting.Budgets``, the word budget of
+    the keyframe prompt and of the clip prompt from the links the episode's
+    images and clips go to -- ``steps/clips.episode_budgets``; None: the
+    fixed numbers every v2 prompt was built to before). A prompt that cannot
+    fit even on the ladder's last rung raises :class:`PromptOverBudget`."""
     characters = entities.get("characters", {})
     places = entities.get("places", {})
     props = entities.get("props", {})
@@ -1048,7 +1095,7 @@ def resolve_shot(shot, *, scene, entities, style_lock, consistency_mode, v2=Fals
         layered = _layered(shot, scene=scene, entities=entities, style_lock=style_lock,
                            consistency_mode=consistency_mode, video_action=video_action,
                            char_handles=char_handles_map, prop_handles=prop_handles_map,
-                           name_map=name_map, ledger=ledger, continuity=continuity)
+                           name_map=name_map, ledger=ledger, continuity=continuity, budgets=budgets)
         return {
             "image_prompt": layered["image_prompt"],
             "video_action": video_action,
@@ -1631,7 +1678,7 @@ def name_map(entities, *, v2=False) -> dict:
 
 
 def build_storyboard(script, plans, sources, *, entities, style_lock, template, language, consistency_mode,
-                     now, previous=None, v2=False, shots_per_scene=None, ledger=None) -> tuple:
+                     now, previous=None, v2=False, shots_per_scene=None, ledger=None, budgets=None) -> tuple:
     """*plans* (``{scene_id: [plan, ...]}``) and *sources* (``{scene_id:
     "t1"|"fast"}``) resolved into a complete ``storyboard_v1`` document:
     scenes in the script's own order (only the ones *plans* covers), the
@@ -1651,7 +1698,9 @@ def build_storyboard(script, plans, sources, *, entities, style_lock, template, 
     ``clip_motion`` and ``staging`` (T1 v2's) are kept on its shot.
     *ledger*: :func:`resolve_shot`'s (v2: wardrobe sets and holders).
     On *v2* every shot but the first of its scene carries the previous
-    keyframe of the scene as a reference (phase 8 stage B).
+    keyframe of the scene as a reference (phase 8 stage B). *budgets*:
+    :func:`resolve_shot`'s (v2, stage F2); a shot whose prompt cannot fit
+    raises :class:`PromptOverBudget` naming it and the link.
     """
     scenes_by_id = {scene["scene_id"]: scene for scene in script["scenes"]}
     scenes_in_order = [scene for scene in script["scenes"] if scene["scene_id"] in plans]
@@ -1668,9 +1717,12 @@ def build_storyboard(script, plans, sources, *, entities, style_lock, template, 
             shot_id = f"sh{order:02d}"
             line_ids = [scene["lines"][n - 1]["line_id"] for n in plan["lines"]]
             motion = motion_for(plan["framing"], plan["camera_motion"], scene["function"], style_lock)
-            resolved = resolve_shot(plan, scene=scene, entities=entities, style_lock=style_lock,
-                                    consistency_mode=consistency_mode, v2=v2, ledger=ledger,
-                                    continuity=v2 and index > 0)
+            try:
+                resolved = resolve_shot(plan, scene=scene, entities=entities, style_lock=style_lock,
+                                        consistency_mode=consistency_mode, v2=v2, ledger=ledger,
+                                        continuity=v2 and index > 0, budgets=budgets)
+            except PromptOverBudget as exc:
+                raise _named(exc, shot_id, budgets) from None
             _collect_resolved_from(resolved_from, plan["subjects"], scene, entities)
             shot = {
                 "shot_id": shot_id, "scene_id": scene["scene_id"], "order": order,
@@ -1722,7 +1774,17 @@ def build_storyboard(script, plans, sources, *, entities, style_lock, template, 
     return doc, notes
 
 
-def refresh_prompts(storyboard, script, *, entities, style_lock, consistency_mode, v2=False, ledger=None) -> dict:
+def _named(exc, shot_id, budgets) -> PromptOverBudget:
+    """*exc* (:class:`PromptOverBudget`) naming *shot_id* and the link its
+    kind's budget came from (*budgets*; None: no link known)."""
+    link = None
+    if budgets is not None:
+        link = budgets.image_link if exc.kind == "keyframe" else budgets.video_link
+    return exc.named(shot_id, link)
+
+
+def refresh_prompts(storyboard, script, *, entities, style_lock, consistency_mode, v2=False, ledger=None,
+                    budgets=None) -> dict:
     """*storyboard* with every shot's ``image_prompt``/``video_action``/
     ``negative_prompt``/``reference_images``/``consistency`` and the
     document's ``resolved_from`` re-resolved from *entities* as they are now
@@ -1731,16 +1793,20 @@ def refresh_prompts(storyboard, script, *, entities, style_lock, consistency_mod
     (used when an entity changes after the storyboard was built). *v2*:
     resolved layered, ``video_prompt`` and ``prompt_layout`` re-written too,
     every shot but a scene's first with its continuity reference (phase 8
-    stage B); *ledger* as :func:`resolve_shot`'s."""
+    stage B); *ledger* and *budgets* as :func:`resolve_shot`'s (a shot whose
+    prompt cannot fit raises :class:`PromptOverBudget` naming it)."""
     scenes_by_id = {scene["scene_id"]: scene for scene in script["scenes"]}
     resolved_from: dict = {}
     new_shots = []
     for index, shot in enumerate(storyboard["shots"]):
         scene = scenes_by_id[shot["scene_id"]]
         plan = plan_of(shot, v2=v2)
-        resolved = resolve_shot(plan, scene=scene, entities=entities, style_lock=style_lock,
-                                consistency_mode=consistency_mode, v2=v2, ledger=ledger,
-                                continuity=v2 and continues_scene(storyboard["shots"], index))
+        try:
+            resolved = resolve_shot(plan, scene=scene, entities=entities, style_lock=style_lock,
+                                    consistency_mode=consistency_mode, v2=v2, ledger=ledger,
+                                    continuity=v2 and continues_scene(storyboard["shots"], index), budgets=budgets)
+        except PromptOverBudget as exc:
+            raise _named(exc, shot["shot_id"], budgets) from None
         _collect_resolved_from(resolved_from, shot["subject_tags"], scene, entities)
         new_shot = dict(shot)
         new_shot["image_prompt"] = resolved["image_prompt"]

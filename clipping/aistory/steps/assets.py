@@ -172,8 +172,8 @@ from clipping.providers import gating, gen_timings, gencache, local_comfyui
 from clipping.providers import generation as gen
 from clipping.providers.registry import ChainError, Link, describe
 
-from .. import (defaults, hardware, imaging, media_policy, refimages, schemas, timing, video_plan, voices,
-               wordtiming)
+from .. import (defaults, hardware, imaging, media_policy, prompt_budgets, refimages, schemas, timing, video_plan,
+               voices, wordtiming)
 from .. import ledger as ledger_mod
 from .. import names as names_mod
 from .. import shots as shots_mod
@@ -758,15 +758,26 @@ def request_parts(ec, shot, *, note, link=None, continuity=None, alone=None) -> 
     image filled it -- or that none did -- never moves the hash, so a
     redrawn previous keyframe never makes this shot stale (no cascade of
     redraws). The record of what was sent is the shot's
-    ``assets.continuity``."""
+    ``assets.continuity``.
+
+    ``over`` (stage F2): why a layered shot's prompt cannot be sent to
+    *link* now (``prompt_budgets.over_sentence``: over the link's limit, or
+    over its word budget because it was built to another link's -- a
+    switch, or a limit that moved since), else None; the hash never moves
+    with it. :meth:`_Assets.make_image` refuses such a shot, calling
+    nothing; the dispatch check (F1) is the backstop."""
     mode = ec.consistency_mode
     prompt = effective_prompt(shot, ec.entities, note)
     negative = shot["negative_prompt"]
+    over = (prompt_budgets.over_sentence("keyframe", shot["shot_id"], link, prompt,
+                                         budget=prompt_budgets.keyframe_words(link),
+                                         override=bool(shot.get("prompt_override")))
+            if link is not None and shot.get("prompt_layout") else None)
     if mode == PROMPT_ONLY:
         kind, paths, missing, ref_shas = gen.IMAGE, [], [], []
         return {"kind": kind, "prompt": prompt, "negative": negative, "consistency": mode, "size": SHOT_SIZE,
                 "references": paths, "missing": missing,
-                "hash": prompt_hash(prompt, negative, mode, SHOT_SIZE, ref_shas)}
+                "hash": prompt_hash(prompt, negative, mode, SHOT_SIZE, ref_shas), "over": over}
     kind = gen.IMAGE_EDIT
     paths, missing = reference_paths(ec, shot, link=link)
     ref_shas = [_sha256_file(path) or f"unreadable:{path}" for path in paths] + [f"missing:{rel}"
@@ -775,7 +786,7 @@ def request_parts(ec, shot, *, note, link=None, continuity=None, alone=None) -> 
     if slot is None:
         return {"kind": kind, "prompt": prompt, "negative": negative, "consistency": mode, "size": SHOT_SIZE,
                 "references": paths, "missing": missing,
-                "hash": prompt_hash(prompt, negative, mode, SHOT_SIZE, ref_shas)}
+                "hash": prompt_hash(prompt, negative, mode, SHOT_SIZE, ref_shas), "over": over}
     digest = prompt_hash(prompt, negative, mode, SHOT_SIZE, ref_shas + [_CONTINUITY_HASH_TOKEN])
     sent_prompt, sent = prompt, list(paths)
     if continuity is not None:
@@ -785,7 +796,7 @@ def request_parts(ec, shot, *, note, link=None, continuity=None, alone=None) -> 
         sent_prompt = effective_prompt(alone_shot, ec.entities, note)
         sent, missing = reference_paths(ec, alone_shot, link=link)
     return {"kind": kind, "prompt": sent_prompt, "negative": negative, "consistency": mode, "size": SHOT_SIZE,
-            "references": sent, "missing": missing, "hash": digest}
+            "references": sent, "missing": missing, "hash": digest, "over": over}
 
 
 def _read_assets_doc(ec):
@@ -1490,7 +1501,7 @@ def clip_request(ec, shot, script, *, link, template, clip_s, seed, note, flags,
     seed, the local template in ``extra`` -- whose cache key is the one the
     generation journal keeps it under (``out_dir`` and the name are not in
     the key). ``ValueError`` for a prompt that cannot be built."""
-    parts = clips.clip_request_parts(ec, shot, script, tier=tier, flags=flags, note=note)
+    parts = clips.clip_request_parts(ec, shot, script, tier=tier, flags=flags, note=note, link=link)
     extra = {"name": f"shot_{shot['shot_id'][2:]}"}
     if template:
         extra["template"] = template
@@ -2413,6 +2424,9 @@ class _Assets(voice_lines.LineMeasurement):
         continuity = ({"shot_id": source[0]["shot_id"], "image_sha256": _sha256_file(source[1])}
                       if source and _sha256_file(source[1]) else None)
         kind = parts["kind"]
+        if parts.get("over"):
+            # Stage F2: a prompt the link cannot take is refused here, never sent to be refused there.
+            raise ShotFailed(parts["over"])
         if parts["missing"]:
             raise ShotFailed(f"its reference image{'s' if len(parts['missing']) > 1 else ''} "
                              f"{', '.join(parts['missing'])} {'are' if len(parts['missing']) > 1 else 'is'} not on "
@@ -2523,12 +2537,20 @@ class _Assets(voice_lines.LineMeasurement):
         try:
             resolved = shots_mod.resolve_shot(shots_mod.plan_of(shot, v2=True), scene=scene, entities=ec.entities,
                                               style_lock=ec.style_lock, consistency_mode=ec.consistency_mode,
-                                              v2=True, ledger=self.ledger_now())
+                                              v2=True, ledger=self.ledger_now(), budgets=self.budgets())
         except (KeyError, ValueError):
             return None, None
         self.ctx.on_log(f"ℹ️ Shot {shot['shot_id']}: the previous shot of its scene has no keyframe yet, so it is "
                         "asked without its continuity reference.")
         return None, (resolved["image_prompt"], resolved["reference_images"])
+
+    def budgets(self):
+        """The word budgets a shot resolved again in this run is built to
+        (stage F2, ``prompt_budgets.for_links``): its episode's image link,
+        else the one its keyframes are planned on -- what the storyboard
+        built the stored prompt to, so the two agree."""
+        link = self.link or clips.planned_image_link(self.ec, self.ctx.settings_env)
+        return prompt_budgets.for_links(link)
 
     def drop_other_images(self, shot_id, keep_ext) -> None:
         """The shot's image of another extension, left by an earlier take."""
@@ -2885,7 +2907,7 @@ class _Assets(voice_lines.LineMeasurement):
                   "est_usd": round(float(est_usd or 0.0), 4), "prompt_hash": None, "image_sha256": image_sha,
                   "cache_key": None, "generated_at": None, "note": note}
         try:
-            parts = clips.clip_request_parts(ec, shot, self.script, tier=tier, flags=flags, note=note)
+            parts = clips.clip_request_parts(ec, shot, self.script, tier=tier, flags=flags, note=note, link=link)
         except (KeyError, ValueError) as exc:
             record["prompt_hash"] = _canonical_sha256({"unusable": str(exc)})
             raise ClipFailed(f"its video prompt cannot be built ({exc}); no clip was asked", record=record) from None
@@ -2895,6 +2917,9 @@ class _Assets(voice_lines.LineMeasurement):
         def fail(reason, *, still=False):
             return ClipFailed(reason, record=record, still=still)
 
+        if parts.get("over"):
+            # Stage F2: a prompt the link cannot take is refused here, never sent to be refused there.
+            raise fail(parts["over"])
         problem = keyframe_problem(ec, shot, link=image_link)
         if problem:
             raise fail(f"its {problem}; no clip was asked")
@@ -3767,7 +3792,8 @@ def regenerate_shot_clip(ctx, ec, target, shot_id, note, *, tools, refuse) -> di
         if clip:
             shot["assets"]["clip"] = dict(clip, pending=requested)
         else:
-            parts = clips.clip_request_parts(ec, shot, host.script, tier=tier, flags=flags, note=note)
+            parts = clips.clip_request_parts(ec, shot, host.script, tier=tier, flags=flags, note=note,
+                                             link=video["link"])
             shot["assets"]["clip"] = {
                 "state": "failed", "link": video["link"], "route": video["route_class"],
                 "clip_s": int(quote["clip_s"]), "est_usd": quote["est_usd"], "prompt_hash": parts["hash"],

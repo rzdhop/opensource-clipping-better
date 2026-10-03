@@ -4267,6 +4267,26 @@ def _edit_storyboard(ec, script, board, fields, errors) -> tuple:
     return to_resolve, retime
 
 
+def _prompt_budgets(ec):
+    """The word budgets a v2 shot resolved again by an edit is built to
+    (stage F2, ``clips.episode_budgets``): the episode's links as the
+    storyboard step plans them -- its recorded ones, else the chains' first
+    -- read with the process environment alone (no Settings reach an edit;
+    every hosted link's budget is its kind's ceiling anyway)."""
+    try:
+        doc = episode_common.read_episode(ec, ASSETS_DOC)
+    except llm_call.StepFailed:
+        doc = None
+    return clips_step.episode_budgets(ec, None, assets_doc=doc)
+
+
+def _budget_link(budgets, exc):
+    """The link *exc*'s kind of prompt was built for, from *budgets*."""
+    if budgets is None:
+        return None
+    return budgets.image_link if exc.kind == "keyframe" else budgets.video_link
+
+
 def _resolve_again(ec, script, board, to_resolve, errors) -> None:
     """Each shot of *to_resolve* moved and -- when its framing, action or
     subjects changed -- resolved again, as the storyboard resolves it
@@ -4279,6 +4299,7 @@ def _resolve_again(ec, script, board, to_resolve, errors) -> None:
     lock = ec.style_lock
     v2 = media_policy.is_v2(ec.story)
     ledger = script_step.ledger_of(ec)
+    budgets = _prompt_budgets(ec) if v2 else None
     by_function = lock["motion_rules"]["tier1"]["by_function"]
     scenes = {scene["scene_id"]: scene for scene in script["scenes"]}
     by_id = {shot["shot_id"]: shot for shot in board["shots"]}
@@ -4305,7 +4326,11 @@ def _resolve_again(ec, script, board, to_resolve, errors) -> None:
             continuity = v2 and shots.continues_scene(board["shots"], board["shots"].index(shot))
             resolved = shots.resolve_shot(plan, scene=scene, entities=ec.entities, style_lock=lock,
                                           consistency_mode=ec.consistency_mode, v2=v2, ledger=ledger,
-                                          continuity=continuity)
+                                          continuity=continuity, budgets=budgets)
+        except shots.PromptOverBudget as exc:
+            # Stage F2: the edit would make a prompt its link cannot take; refused, nothing written.
+            errors.append(f"{path}: {exc.named(shot_id, _budget_link(budgets, exc))}")
+            continue
         except (KeyError, ValueError) as exc:
             raise WorkflowError(CONFLICT, (f"Shot {shot_id} names something the story no longer has ({exc}): plan "
                                            f"scene {scene['scene_id']} again (the storyboard step).")) from None
@@ -4393,9 +4418,13 @@ def patch_storyboard(stories, story_id, ep, fields, *, now) -> dict:
     if retime:
         shots.retime_storyboard(trial, script, template=ec.template, language=ec.language, style_lock=ec.style_lock)
     if refresh:
-        trial = shots.refresh_prompts(trial, script, entities=ec.entities, style_lock=ec.style_lock,
-                                      consistency_mode=ec.consistency_mode, v2=media_policy.is_v2(ec.story),
-                                      ledger=script_step.ledger_of(ec))
+        v2 = media_policy.is_v2(ec.story)
+        try:
+            trial = shots.refresh_prompts(trial, script, entities=ec.entities, style_lock=ec.style_lock,
+                                          consistency_mode=ec.consistency_mode, v2=v2,
+                                          ledger=script_step.ledger_of(ec), budgets=_prompt_budgets(ec) if v2 else None)
+        except shots.PromptOverBudget as exc:
+            raise _invalid_values(message, [f"refresh_prompts: {exc}"])
     if trial == board:
         return board
     trial["approved_at"] = None

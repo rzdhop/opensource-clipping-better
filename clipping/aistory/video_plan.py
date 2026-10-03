@@ -96,6 +96,7 @@ def build_video_prompt(
     lines: Sequence[str] = (),
     note: str | None = None,
     audio: Mapping | None = None,
+    audio_budget: int | None = None,
 ) -> tuple[str, str]:
     """The (prompt, negative) pair an image-to-video adapter is called with
     for one shot.
@@ -104,10 +105,12 @@ def build_video_prompt(
     ``media_policy.ambience``; tier 3 only) is the shot's sound brief --
     ``{"place", "sfx", "speakers"}`` -- and the prompt is then
     ``prompting.clip_prompt_with_audio`` of the visual part below and the
-    note: what the shot sounds like, inside the clip prompt's own word cap,
-    no word voiced. It never takes *lines* (``ValueError``): such a clip's
-    sound is heard under the shot's TTS lines, never in place of them.
-    Without it, everything below is as it was.
+    note: what the shot sounds like, inside the clip prompt's own word cap
+    (*audio_budget*, stage F2: the link's own, ``prompt_budgets.clip_audio_words``;
+    None: ``prompting.CLIP_AUDIO_MAX_WORDS``), no word voiced. It never
+    takes *lines* (``ValueError``): such a clip's sound is heard under the
+    shot's TTS lines, never in place of them. Without it, everything below
+    is as it was.
 
     A shot whose ``video_prompt`` is a non-empty string (a v2 shot, phase 7
     stage 3b: ``prompting.layered_clip_prompt``, written at resolve time)
@@ -171,7 +174,8 @@ def build_video_prompt(
 
     if audio is not None:
         prompt = prompting.clip_prompt_with_audio(_join_sentences(parts), note=note or "", place=audio["place"],
-                                                  sfx=audio.get("sfx") or (), speakers=audio.get("speakers") or ())
+                                                  sfx=audio.get("sfx") or (), speakers=audio.get("speakers") or (),
+                                                  budget=audio_budget or prompting.CLIP_AUDIO_MAX_WORDS)
     else:
         if note:
             parts.append(note)

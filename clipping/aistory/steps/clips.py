@@ -58,7 +58,7 @@ from clipping.providers import generation as gen
 from clipping.providers import video as video_providers
 from clipping.providers.registry import ChainError, describe
 
-from .. import hardware, imaging, media_policy, schemas, video_plan
+from .. import hardware, imaging, media_policy, prompt_budgets, prompting, schemas, video_plan
 from .. import shots as shots_mod
 from . import sticky_link
 
@@ -268,17 +268,26 @@ def audio_brief(ec, shot, script) -> dict:
             "speakers": list(dict.fromkeys(speakers))}
 
 
-def clip_request_parts(ec, shot, script, *, tier, flags, note=None) -> dict:
-    """``{prompt, negative, native_audio, hash}`` of *shot*'s clip request
-    now (``video_plan.build_video_prompt``): at tier 3 a shot that keeps its
-    native audio (``keep_native_audio``) also says its lines; otherwise the
-    model's sound is discarded and the prompt carries none (DEC-201).
+def clip_request_parts(ec, shot, script, *, tier, flags, note=None, link=None) -> dict:
+    """``{prompt, negative, native_audio, hash, over}`` of *shot*'s clip
+    request now (``video_plan.build_video_prompt``): at tier 3 a shot that
+    keeps its native audio (``keep_native_audio``) also says its lines;
+    otherwise the model's sound is discarded and the prompt carries none
+    (DEC-201).
 
     An ambience story (stage E, ``media_policy.ambience``) asks every clip
     for its sound (``native_audio``: a link whose sound is optional makes
     it) with the shot's sound brief in its prompt (:func:`audio_brief`) and
     never voices a line: ``keep_native_audio`` is not read -- every line is
-    heard in its pinned TTS voice."""
+    heard in its pinned TTS voice.
+
+    *link* (stage F2: the label of the link the clip goes to, when known):
+    the brief takes its share of that link's budget
+    (``prompt_budgets.clip_audio_words``) rather than a fixed 140 words, and
+    ``over`` says why a layered shot's prompt cannot be sent to it now
+    (``prompt_budgets.over_sentence``: over the link's limit, or over its
+    budget because it was built to another link's) -- None when it can, or
+    with no link known."""
     story = getattr(ec, "story", None)
     ambient = tier == 3 and media_policy.ambience(story)
     native = tier == 3 and bool(flags.get("keep_native_audio")) and not ambient
@@ -288,11 +297,17 @@ def clip_request_parts(ec, shot, script, *, tier, flags, note=None) -> dict:
         lines = [texts[line_id] for line_id in shot["lines"] if line_id in texts]
     prompt, negative = video_plan.build_video_prompt(shot, ec.style_lock, tier=tier if tier in (2, 3) else 2,
                                                      lines=lines, note=note,
-                                                     audio=audio_brief(ec, shot, script) if ambient else None)
+                                                     audio=audio_brief(ec, shot, script) if ambient else None,
+                                                     audio_budget=prompt_budgets.clip_audio_words(link)
+                                                     if ambient and link else None)
     resolution = media_policy.video_resolution(story)
     asked = native or ambient
+    over = None
+    if link and shot.get("prompt_layout"):
+        budget = prompt_budgets.clip_audio_words(link) if ambient else prompt_budgets.clip_words(link)
+        over = prompt_budgets.over_sentence("clip", shot["shot_id"], link, prompt, budget=budget)
     return {"prompt": prompt, "negative": negative, "native_audio": asked,
-            "hash": clip_prompt_hash(prompt, negative, native_audio=asked, resolution=resolution)}
+            "hash": clip_prompt_hash(prompt, negative, native_audio=asked, resolution=resolution), "over": over}
 
 
 def clip_state(ec, shot, script, *, link, tier, flags, image_sha) -> str:
@@ -310,7 +325,7 @@ def clip_state(ec, shot, script, *, link, tier, flags, image_sha) -> str:
         return "stale"
     if image_sha is None or clip["image_sha256"] != image_sha:
         return "stale"
-    expected = clip_request_parts(ec, shot, script, tier=tier, flags=flags, note=clip.get("note"))["hash"]
+    expected = clip_request_parts(ec, shot, script, tier=tier, flags=flags, note=clip.get("note"), link=link)["hash"]
     return "current" if clip["prompt_hash"] == expected else "stale"
 
 
@@ -463,6 +478,40 @@ def planned_link(ec, env, *, assets_doc=None, adapters=None):
             assumed.update((name, _ASSUMED_KEY) for name in gen.missing_keys(link, merged))
         row = pick_hosted(hosted_rows(chain, assumed, adapters, resolution=resolution), policy, want_sound=want)
     return row["link"] if row is not None else None
+
+
+def planned_image_link(ec, env, *, assets_doc=None):
+    """The link episode *ec*'s keyframes are made on, as a label, calling
+    nothing (stage F2: what the storyboard builds each keyframe prompt to):
+    the episode's recorded image link (*assets_doc*'s ``links.image``,
+    A-087), else the first link of its keyframe chain
+    (``media_policy.role_chain`` for the story's consistency mode: the
+    role's quality links on a v2 story, the env chain -- *env* the Settings
+    values -- on a legacy one). None when that chain cannot be read: the
+    assets step says why when it runs."""
+    recorded = sticky_link.recorded(assets_doc, sticky_link.IMAGE)
+    if recorded is not None:
+        return recorded["link"]
+    # ``refimages.PROMPT_ONLY``: a text-to-image chain; every other mode edits with references.
+    kind = gen.IMAGE if ec.consistency_mode == "prompt_only" else gen.IMAGE_EDIT
+    try:
+        chain = media_policy.role_chain("keyframe", kind, gating.merged_env(env), ec.story)
+    except ChainError:
+        return None
+    return describe(chain[0]) if chain else None
+
+
+def episode_budgets(ec, env, *, assets_doc=None) -> prompting.Budgets:
+    """The word budgets episode *ec*'s v2 prompts are built to (stage F2,
+    ``prompt_budgets.for_links``): the keyframe's from
+    :func:`planned_image_link`, the clip's from :func:`planned_link` (the
+    episode's recorded link, else the profile's pick, keys asked then
+    aside). A legacy story's prompts have no budget: the defaults, nothing
+    read."""
+    if not media_policy.is_v2(ec.story):
+        return prompting.Budgets()
+    return prompt_budgets.for_links(planned_image_link(ec, env, assets_doc=assets_doc),
+                                    planned_link(ec, env, assets_doc=assets_doc))
 
 
 # ----------------------------------------------------------- the estimate
