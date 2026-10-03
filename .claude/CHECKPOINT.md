@@ -1,4 +1,4 @@
-## CURRENT STATE — the AI Story dashboard overhaul: stages 1–2 DONE and deployed, stage 3 building (2026-10-03, local session)
+## CURRENT STATE — the AI Story dashboard overhaul: stages 1–3 DONE and deployed, stage 4 building (2026-10-03, local session)
 
 - **Stage 1 (DEC-253, Opus agent, branch feat/dashboard-foundation b24275a + ab7eb63, my tweak ef1edcc):** the
   `src/ui/` kit, tokens, lucide-react 1.51.0 pinned, every story confirm an in-app dialog (Cancel focused first),
@@ -14,8 +14,20 @@
   No contract moved. Tests: local 894, CI env 470 / 424 skipped (dashboard + stories API + store). Build 576.8 kB
   JS / 55.0 kB CSS. Deployed (rebuild at 0 jobs): health 200, the live payload carries the fields, the grid renders
   with the real portraits, no console error.
-- **Stage 3 (story workspace)** building: Opus agent, branch feat/dashboard-workspace from 96ecfad (routes
-  `/story/:id/:step`, the step rail, the sticky header, Cast/Places as expandable card grids).
+- **Stage 3 (DEC-255, Opus agent, feat/dashboard-workspace 7ac38a3 + 3a6f942, merged 8ef04b3):** `/story/:id/:step?`
+  → `StoryWorkspace` (redirect to the first step not done, else the last), `StoryHeader` (cover, chips, the Visual
+  tier popover = `GenerationProfileCard`, Open episode), `StepRail` (horizontal stepper ≤ 900 px), `EntityGallery`
+  (Cast/Places/Props tiles, one open at a time, `#id` deep link), `storySteps.js`; `NewStoryWizard.jsx` is the
+  new-story form only. Contracts: 5 files re-pointed to the new file paths (generation_profile, switch_pipeline,
+  phase7_editing, story_shared, story_payload_contract_series); literals unchanged; payload_contract's 4 `✕` and
+  `↻ Regenerate` kept. Tests: local 786, CI env 358 / 428 skipped (dashboard + payload contracts + stories API +
+  defaults/fully_animated/two_mode_routes/branding). Build 594.0 kB JS / 63.2 kB CSS. Deployed (rebuild at 0 jobs):
+  the live walk — `/story/d0ee5ebd745d` redirects to `/knowledge`, the cast tile opens its editor, 375 px shows the
+  horizontal stepper, no console error. Known: the rail may touch a two-line header between ~901 and 1100 px
+  (stage 5 sweep); dead `.stepper*`/`.story-cast-grid` CSS left for stage 5.
+- **Stage 4 (episode studio, the riskiest)** building: Opus agent, branch feat/dashboard-episode-studio from 8ef04b3
+  (the progress stepper from the payload, compact script lines, the storyboard split with a filmstrip, the review
+  hero).
 - Plan: `.claude/plans/dashboard/01-ai-story-ui-overhaul-plan.md` (5 stages; the human's answers: full redesign in
   stages, refined dark studio, lucide-react only). EXPLORE by a Sonnet agent + my browser walk of the list, the
   story page, the episode tabs, New story and Settings. Next action: on the go, stage 1 (foundation) by an Opus
