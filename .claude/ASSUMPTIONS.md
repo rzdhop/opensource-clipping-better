@@ -503,6 +503,14 @@
   measured without it) cuts it on every line and never a shouted last word. UNCONFIRMED beyond the 18 lines of
   d0ee5ebd745d/ep01 (all caught offline): confirmed when the human hears no "crshhh" on the re-rendered episode and
   no word end is clipped; `voice-tails <story> --ep 1` lists each cut.
+- **A-137** — (DEC-252) A v2 clip prompt that names who speaks ("speaks with the mouth moving on the words, face and
+  brows carrying the emotion"), who reacts and how, with "the characters move freely within it" in place of "stay
+  exactly as in the first frame" and a lively style suffix, makes seedance (and Veo) animate visible speech, reactions
+  and gestures WITHOUT breaking the characters' look, the set or the light (no morphing, no new characters), and two
+  beat shots per body scene read as rhythm rather than as choppy cuts. UNCONFIRMED until the human watches the next
+  fully animated episode planned after this change: confirmed if mouths move on the lines and the characters act while
+  staying on model; refuted if identity drifts (then the identity clause comes back stronger, or the reactions shorter)
+  or if the shorter shots feel cut up (then the rhythm rule asks three lines or a longer minimum).
 
 ## Confirmed
 - **A-082** — fal.ai as measured in the paid test (2026-09-29, DEC-174):

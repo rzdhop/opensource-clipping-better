@@ -4675,3 +4675,57 @@ would then eat a word's end); raising `NOISE_ZCR` (the burst's ZCR overlaps a vo
 The threshold rests on one episode's sample (A-136); `voice-tails` shows what version 2 cuts before anything is made
 again.
 
+## DEC-252 — v2 clips ask for a performance, never stillness; T1 v2 varies the camera; a body scene is two beat shots (after DEC-251)
+**Context.** The human (2026-10-03), on the first fully animated v2 episode (one seedance clip per shot, the TTS voices
+over it): "no lipsync, the video does not say things or do movements, boring, no rhythm". The clip prompt asked for
+idleness, and the model obeyed: `shots._layered` wrote "X reacts with a small natural movement" (or "small natural
+idle movements in between") and "Micro-actions: X breathes visibly, a glance toward Y, hands shift slightly" for every
+framed character; `prompting.layered_clip_prompt` closed on `STAYS_STILL` ("... stay exactly as in the first frame")
+and the style's `tier2_prompt_suffix` (fruit_drama: "subtle natural head and shoulder movement ... camera slowly pushes
+in"). T1 v2 asked a 25-word `motion` and a free camera, refused only a repeated framing, and `rule_pass` then made every
+hook, peak and cliffhanger of fruit_drama a push-in (`by_function`). `beat_shot_count` gave a scene one beat shot unless
+it ran past the clip (DEC-227, DEC-250), so every scene was one long clip.
+**Decision.** (v2 stories only; every legacy prompt and its clip hash byte-identical, RC-Q1.)
+- **The clip says a performance** (`shots._performance`): whoever speaks one of the shot's lines in frame "speaks with
+  the mouth moving on the words, face and brows carrying the emotion" (two speakers: "speak in turn"); the others
+  "react visibly, <reaction>" from `_REACTIONS` by the line's emotion, else the scene's, else `_FUNCTION_REACTIONS` by
+  its function (shocked: stepping back, eyes widening; tension: leaning in, jaw set; scheming: narrowing the eyes, a
+  slow smile; ...); with no line, everyone in frame "acts the moment out with clear gestures". The words are never in
+  it (DEC-201: the TTS is the voice; quoted words would be drawn). `_gestures` replaces the micro-actions: a staged
+  character "turns toward <facing>, face <expression>", a held prop is in its holder's hands; nothing staged, nothing
+  invented. `_CLIP_DROP_ORDER` is intent, gestures, emotion, performance -- the performance outlives the rest; only
+  then is the motion cut.
+- **Identity, not stillness**: `prompting.IDENTITY_KEEPS` ("Keep every character's look, the set and the light as in
+  the first frame; the characters move freely within it.") closes a v2 clip; `STAYS_STILL` and `MOTION_NEGATIVE` stay.
+- **A v2 suffix per style**: `motion_rules.tier2_prompt_suffix_v2` in all seven styles (no "subtle", no "gentle", no
+  camera: the camera sentence says it) and optional in both schemas; `prompting.clip_motion_suffix` reads it, else
+  the old key. `tier2_prompt_suffix` is untouched (v1 reads it). A story locked before the key existed takes its
+  shipped template's in memory (`episode_common.with_clip_suffix`, `style_lock.json` never written), so a re-plan of
+  an existing story ends on the lively suffix too. Template versions are not bumped (a bump would refuse every
+  draft's style overrides, `stylelock.apply_overrides`).
+- **T1 v2**: `motion` asks one clear physical action per framed character and the speaker's mouth and face, never
+  "subtle"/"small"/"slight" (asked, not validated); `camera_motion` never the previous shot's. `validate_t1_v2` refuses
+  a repeat (inside the scene, and the first shot against `previous_camera`, the episode's shot before it), but
+  `storyboard._repair_t1_v2_reply` first moves a repeat to the next motion of `_CAMERA_ROTATION` that neither neighbour
+  has and logs it -- a repair costs nothing, a retry a call. T1r v2 (an author's re-plan of one shot) is asked, not
+  refused: the note may want that very motion. On v2, `shots.motion_for(v2=True)` puts the shot's own camera before the
+  scene function's rule (a framing's own rule, the wide shot's pan, still wins), in `rule_pass`, `build_storyboard` and
+  the shot edit. Budgets re-measured: T1v2 1,865 -> 2,150, T1rv2 1,852 -> 2,130.
+- **Rhythm** (`storyboard._two_beats`): a body scene with two lines or two characters and at least 2 x `min_shot_s` is
+  two beat shots; the recap, the hook and the cliffhanger keep the clip-length rule. `short_of_beats` reads
+  `beat_shot_count(rhythm=False)`, so an existing storyboard is never planned again for the new default: only a fresh
+  plan, or a scene planned again (stale, fast, re-planned), takes it. `serial_60s_v2.shots` 6-10 -> 6-18 (7 body scenes
+  x 2, the recap, the hook, a cliffhanger past Veo's 8 s; the brief's 16 undercounted) and its notes.
+**Rejected.** Editing `tier2_prompt_suffix` (moves every v1 prompt and stored clip hash); keeping the performance as a
+fixed, never-dropped sentence (at 80 words, no link known, it pushes the motion out); refusing a repeated camera
+without a repair (a paid retry for a one-word fix); re-planning every one-beat scene of existing storyboards (re-buys
+keyframes the human approved); quoting the lines for lipsync (DEC-201; lipsync is another route).
+**Consequence.** A v2 clip names who talks and who reacts and lets them move; an episode runs up to 17-18 shorter shots instead of at most 10.
+Any v2 shot resolved again (a re-plan, an entity refresh) gets the new wording, so its stored clip goes stale and is
+made again on the next run. Tests: `tests/test_story_clip_performance.py` (13, each failing on the parent); re-pinned on
+purpose: `test_story_prompt_layers` (two clip tests), `test_story_shots` and `test_story_video_plan` (the closing
+clause and suffix), `test_story_prompts_episode` (the largest reply's second camera), `test_story_episode_prompt_budgets`
+(the measured budgets), `test_story_timing` (the shots range), `test_story_storyboard_props`, `test_story_ambience`,
+`test_story_long_shots` (the beat counts, via `test_story_storyboard_props.two_beats`; the short-of-beats test plans its
+first storyboard with the rhythm off). No v1 pin moved. A-137.
+

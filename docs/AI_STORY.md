@@ -80,7 +80,7 @@ every shot** on its Visual tier card, or by patching its
 exists, run the Cast step again afterwards (it writes each character's
 dossier and look and redraws the sheets).
 
-**Every shot is a clip.** An episode is 6–10 beat shots of 5–12 s (the hook
+**Every shot is a clip.** An episode is 6–18 beat shots of 3–12 s (the hook
 3–6 s) in a 55–75 s window, and each shot is one image-to-video clip on
 `fal/seedance-1-pro-fast` at 720p (1080p is a per-story switch,
 `generation_profile.video_resolution`). On a v2 story that animates every
@@ -96,6 +96,25 @@ covered by that clip slowed to the shot's length, at most 1.25x (the estimate
 and the feed say "sh03 runs 14.133 s: its 12 s clip is slowed to cover it
 (0.85x speed)"); only a shot longer than that is refused, and the message
 then says to plan the scene as two shots or shorten its lines.
+
+**The clips perform.** Each clip asks for a performance, not stillness:
+whoever speaks one of the shot's lines on screen speaks with the mouth moving
+on the words and the face carrying the emotion (the words themselves are never
+in the prompt — your TTS voice is the voice), the others react visibly with a
+reaction drawn from the line's emotion (shocked: stepping back, eyes widening;
+tense: leaning in, jaw set; scheming: narrowing the eyes, a slow smile), and
+the staging's turns, faces and held props follow. The clip keeps every
+character's look, the set and the light from the keyframe and lets the
+characters move; each style ends it on its own lively motion suffix
+(`tier2_prompt_suffix_v2`, no camera direction — the camera sentence says
+it). The storyboard asks each shot for one clear action per character and
+never the previous shot's camera motion (a repeat is moved to the next
+motion), and a shot's own camera beats the style's "push in on peaks". For
+rhythm, a body scene with two lines or two characters and room for two shots
+of at least 3 s is planned as **two beat shots** (the recap, hook and
+cliffhanger keep one unless they run past the clip), so an episode is now
+about 6–18 shots. A storyboard planned before keeps its shots; a scene takes
+the new count when it is planned again. Legacy stories are unchanged.
 
 **Images by role, never on draft links.** Character sheets, place plates and
 props are made on fal Seedream 4.5 (text-to-image, then edits of that image
