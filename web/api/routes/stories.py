@@ -91,6 +91,14 @@ A story is a folder under ``outputs/stories/<story_id>/`` kept by
   DEC-173), and the episode page carries each shot's clip, the tier, the
   episode's links and the video estimate (``workflow.episode_clips``).
 
+- The pipeline switch (2026-10-02): ``PATCH`` refuses to move a story onto
+  or off the v2 pipeline once an episode has a script, with a structured
+  409 (``{"message", "code": "pipeline_switch_has_scripts", "episodes"}``);
+  ``POST /{id}/switch-pipeline`` with ``regenerate_episodes`` archives those
+  episodes instead (``workflow.switch_pipeline``), settles the jobs that
+  waited on their documents (``discarded``) and queues the story-level step
+  the v2 story needs next (``workflow.next_v2_step``).
+
 Every ``{story_id}`` is checked against the store's id rule before anything
 else, so a malformed id is a 404 and never reaches a path; an unknown one is a
 404; a story whose files do not validate is a 500 with one short sentence and
@@ -157,6 +165,7 @@ from ..models import (
     StoryProposalDecisionRequest,
     StoryRegenerateRequest,
     StoryStepRequest,
+    StorySwitchPipelineRequest,
 )
 from . import jobs as jobs_routes
 
@@ -375,8 +384,11 @@ def _proposals_approved(story_id: str, ep: int) -> bool:
     episode (:func:`_episode_of`) is *ep*, completed. False without one (no
     job on record, or its latest one still awaiting approval); a later
     propose-next run for the same episode (a fresh job awaiting approval)
-    makes it not approved again."""
-    jobs = [job for job in store.list_step_jobs(story_id, step="propose-next") if _episode_of(job) == ep]
+    makes it not approved again. A job settled because its proposals were
+    archived with the episode they were written from (``discarded``,
+    ``POST /{id}/switch-pipeline``) approved nothing and is not counted."""
+    jobs = [job for job in store.list_step_jobs(story_id, step="propose-next")
+            if _episode_of(job) == ep and not job.get("discarded")]
     return bool(jobs) and _status_of(jobs[-1]) == JobStatus.COMPLETED.value
 
 
@@ -384,9 +396,12 @@ def _series_page(stories, story, ep) -> dict:
     """:func:`workflow.series_page` plus ``proposals_approved`` (F5, phase 5
     stage 13b): the workflow function stays pure (it has no job access), so
     the job-derived field is added here, where ``store.list_step_jobs``
-    naturally lives."""
+    naturally lives. No proposals on disk, none approved: an episode whose
+    proposals were archived (``switch-pipeline``) shows none until new ones
+    are written and approved."""
     page = workflow.series_page(stories, story, ep)
-    page["proposals_approved"] = _proposals_approved(story["story_id"], ep)
+    page["proposals_approved"] = (page["proposals"] is not None
+                                  and _proposals_approved(story["story_id"], ep))
     return page
 
 
@@ -884,7 +899,10 @@ async def patch_story(story_id: str, req: StoryPatchRequest) -> dict:
     checked against ``clipping.aistory.defaults`` (``workflow.patch_story``).
     409 while a step of the story is queued or running (its writes would race
     this one); 400 with ``{"message", "errors"}`` when the story would not
-    validate.
+    validate; 409 with ``{"message", "code": "pipeline_switch_has_scripts",
+    "episodes"}`` when the profile moves the story onto or off the v2
+    pipeline while episodes have a script (``POST /{id}/switch-pipeline``
+    regenerates them instead).
     """
     stories = _stories()
     story = _load(stories, story_id)
@@ -902,6 +920,92 @@ async def patch_story(story_id: str, req: StoryPatchRequest) -> dict:
     with _answering():
         return workflow.patch_story(
             stories, story_id, {name: getattr(req, name) for name in sent}, now=_now())
+
+
+# The params of the step queued after a pipeline switch: the places step
+# fills what the story's own places and props lack, with no list or proposal.
+_NEXT_STEP_PARAMS = {"places": {"places": [], "props": []}}
+
+
+@router.post("/{story_id}/switch-pipeline")
+async def switch_pipeline(story_id: str, req: StorySwitchPipelineRequest) -> dict:
+    """Move the story onto (or off) the v2 pipeline, regenerating the
+    episodes already written (the "Regenerate on v2" button, 2026-10-02)::
+
+        {"story": story.json,
+         "discarded": [{ep, archive, moved_to, proposals_archived, ledger_rows, cleared}, ...],
+         "jobs_cleared": [job ids],
+         "next_step": {"step", "job": <the queued job> | null, "refused": str | null} | null}
+
+    ``workflow.switch_pipeline``: ``generation_profile`` as ``PATCH``'s
+    (400 when it does not check); with ``regenerate_episodes`` the episodes
+    that have a script are archived (``StoryStore.discard_episode``: their
+    folder into ``episodes/_discarded/``, their memory, feedback, proposals
+    and episode spend cleared; cast, places, props, season and music kept),
+    without it the move is ``PATCH``'s structured 409. 409 first while a
+    step of the story is queued or running: nothing is archived then.
+
+    The step jobs still awaiting the approval of an archived document --
+    the episode's script, storyboard, assets, a regenerate of it, its memory
+    and feedback, the proposals written from it -- are completed, stamped
+    ``discarded`` with the archive (never ``approved_at``). Then the
+    story-level step a v2 story still needs (``workflow.next_v2_step``: the
+    cast, the places, the knowledge base) is queued as ``POST
+    /steps/{step}`` queues it, with every gate of ``_phase2_step``; when one
+    refuses (no key, no image link, the queue full...) the switch stands
+    and ``next_step.refused`` is the refusal's sentence. ``next_step`` is
+    null when nothing is needed (a legacy story included).
+    """
+    stories = _stories()
+    _load(stories, story_id)
+    busy = _in_flight(story_id)
+    if busy:
+        raise HTTPException(
+            status_code=409,
+            detail=_busy_detail(busy[0], "switch the pipeline once it is done, or cancel it first."),
+        )
+
+    with _answering():
+        result = workflow.switch_pipeline(stories, story_id, req.generation_profile,
+                                          regenerate_episodes=req.regenerate_episodes, now=_now())
+        story = result["story"]
+        step = workflow.next_v2_step(stories, story)
+    cleared = _settle_discarded(story_id, result["discarded"])
+
+    next_step = None
+    if step is not None:
+        next_step = {"step": step, "job": None, "refused": None}
+        try:
+            job = await _phase2_step(stories, story, step, dict(_NEXT_STEP_PARAMS.get(step, {})), None)
+        except HTTPException as exc:
+            detail = exc.detail
+            next_step["refused"] = str(detail.get("message", detail)) if isinstance(detail, dict) else str(detail)
+        else:
+            next_step["job"] = job.model_dump(mode="json")
+    return {"story": story, "discarded": result["discarded"], "jobs_cleared": cleared, "next_step": next_step}
+
+
+def _settle_discarded(story_id, reports) -> list:
+    """Complete every step job of *story_id* awaiting the approval of a
+    document archived with an episode (*reports*:
+    ``StoryStore.discard_episode``'s), stamped ``discarded`` with that
+    archive (``store.discard_step_job``); returns their ids. A job's
+    episode is :func:`_episode_of`'s: its ``proposals:<N>`` count with the
+    archive episode N's proposals went into, everything else with episode
+    N's own -- so the proposals an archived episode kept in place (written
+    from the one before) keep their job."""
+    archives = {report["ep"]: report["archive"] for report in reports}
+    proposals = {ep: report["archive"] for report in reports for ep in report["proposals_archived"]}
+    if not archives:
+        return []
+    done = []
+    for job in store.list_step_jobs(story_id, statuses=[JobStatus.AWAITING_APPROVAL]):
+        word = (_doc_of(job) or "").partition(":")[0]
+        ep = _episode_of(job)
+        archive = (proposals if word == "proposals" else archives).get(ep)
+        if archive is not None and store.discard_step_job(job["id"], archive) == "ok":
+            done.append(job["id"])
+    return done
 
 
 @router.delete("/{story_id}")

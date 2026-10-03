@@ -31,7 +31,10 @@ Then the step **fills what is missing**, for every character of the story
    does not hold back the look or the images;
 1b. on a v2 story (phase 7, A14), the look (no ``look`` yet): D2, shown K1's
    text and the build and height of every character whose look is written,
-   so the cast shares one height scale; the sheets are drawn from it;
+   so the cast shares one height scale; the sheets are drawn from it. A
+   portrait and sheets drawn before the look (a legacy story moved onto v2)
+   are dropped when it is written (:func:`apply_d2`), so parts 2-3 draw them
+   again from it;
 2. the portrait, then 3. the turnaround and the expressions sheet
    (``refimages``). A sheet with no editor to make it (``NeedsEditor``, spec
    8.1's "stop and ask", raised before any call) is **not** a failure: the
@@ -493,9 +496,22 @@ def write_dossier(ctx, store, char_id, *, tools, note=None, regenerate=False, an
 
 def apply_d2(doc, reply) -> None:
     """D2's reply into the character *doc* (in place) as its ``look``, and
-    clear its approval."""
+    clear its approval.
+
+    A character that had no look yet loses its portrait's and sheets' refs:
+    they were drawn without one (a legacy story moved onto v2,
+    ``workflow._follow_pipeline_switch``), so they no longer stand for the
+    character -- the run that writes the look draws them again from it
+    (:func:`_images` draws what is missing: the portrait, then the sheets
+    from it), and the estimate counts them before (``workflow.cast_units``).
+    The files stay until the new ones replace them; ``ref_seed`` stays. A
+    look written over a look keeps the images it was drawn from."""
+    first = not doc.get("look")
     doc["look"] = schemas.d2_look(reply)
     doc["approved_at"] = None
+    if first:
+        for which in ("portrait",) + SHEETS:
+            doc["refs"][which] = None
 
 
 def _look_line(doc) -> dict:

@@ -23,7 +23,9 @@ On a v2 story (phase 7, A14) each entity's ``look`` is written between its
 text and its image, when it has none: D3 for a place (layout map, scale,
 light per time variant, the props that live there), R1v2 for a prop (real
 size against its owner's height, material, colour). The plate and the prop
-image are then drawn from the look (``refimages``). A look that fails is a
+image are then drawn from the look (``refimages``) -- drawn again when they
+were drawn before it (a legacy story moved onto v2: :func:`apply_d3`,
+:func:`apply_r1v2` drop them as the look is written). A look that fails is a
 local failure like the text, finished by regenerating the text.
 
 The plates and the prop images are text to image (never an editor). Each
@@ -295,7 +297,16 @@ def write_prop_text(ctx, store, prop_id, *, tools, note=None, regenerate=False, 
 def apply_d3(doc, reply, *, props) -> None:
     """D3's reply into the place *doc* (in place) as its ``look`` -- the
     props named by D3 mapped to their ids (*props*: the story's prop
-    documents) -- and clear its approval."""
+    documents) -- and clear its approval.
+
+    A place that had no look yet loses its plates' refs (the ``cast.apply_d2``
+    rule: drawn without a look, before a legacy story moved onto v2): the run
+    that writes the look draws the day plate again from it, and the other
+    time variants, made from the old plate, are made again on demand (a shot
+    falls back to the day plate meanwhile). The variant names stay."""
+    first = not doc.get("look")
+    if first:
+        doc["time_variants"] = {name: None for name in doc["time_variants"]}
     ids = entities.by_name(props)
     doc["look"] = {
         "layout_map": {key: reply["layout_map"][key] for key in schemas.LAYOUT_MAP_KEYS},
@@ -352,7 +363,11 @@ def write_place_look(ctx, store, place_id, *, tools, note=None, regenerate=False
 def apply_r1v2(doc, reply, *, cast, places) -> None:
     """R1v2's reply into the prop *doc* (in place) as its ``look`` -- the
     holders and places named mapped to their ids, a name matching none
-    left null -- and clear its approval."""
+    left null -- and clear its approval. A prop that had no look yet loses
+    its image's ref (the ``cast.apply_d2`` rule): drawn again from the look
+    by the run that wrote it."""
+    if not doc.get("look"):
+        doc["image"] = None
     holders, rooms = entities.by_name(cast), entities.by_name(places)
 
     def mapped(index, name, field):

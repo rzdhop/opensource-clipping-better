@@ -348,6 +348,9 @@ class JobResponse(BaseModel):
     approved_at: Optional[datetime] = None
     # The id of the regenerated step job that replaced this one.
     superseded_by: Optional[str] = None
+    # The archive of the episode whose document this job awaited approval for
+    # (POST /api/stories/{id}/switch-pipeline): settled, never approved.
+    discarded: Optional[str] = None
 
 
 class JobListResponse(BaseModel):
@@ -650,6 +653,17 @@ class StoryPatchRequest(BaseModel):
     narrator: Optional[dict] = None
     generation_profile: Optional[dict] = None
     episode_template_id: Optional[str] = None
+
+
+class StorySwitchPipelineRequest(BaseModel):
+    """POST /api/stories/{id}/switch-pipeline: ``generation_profile`` as
+    ``StoryPatchRequest``'s (partial, merged, checked by the workflow: 400,
+    which is why it is a plain object here); ``regenerate_episodes`` archives
+    the episodes that have a script when the profile moves the story onto
+    or off the v2 pipeline (``workflow.switch_pipeline``) -- without it that
+    move is refused as ``PATCH`` refuses it (409)."""
+    generation_profile: dict
+    regenerate_episodes: bool = False
 
 
 class ConceptChooseRequest(BaseModel):

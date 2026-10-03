@@ -139,6 +139,7 @@ def _job_to_response(job: dict) -> JobResponse:
         params=job.get("params"),
         approved_at=job.get("approved_at"),
         superseded_by=job.get("superseded_by"),
+        discarded=job.get("discarded"),
     )
 
 

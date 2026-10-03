@@ -54,7 +54,9 @@ RESPONSE_KEYS_BEFORE = {
     "transcript_filename", "source_url", "url", "config", "progress", "clips",
     "error", "log", "events",
 }
-STORY_RESPONSE_KEYS = {"story_id", "ep", "step", "params", "approved_at", "superseded_by"}
+# 2026-10-02 (the pipeline switch's Regen button): re-pinned on purpose -- ``discarded``, the archive
+# of the episode whose document a settled job awaited (POST /api/stories/{id}/switch-pipeline).
+STORY_RESPONSE_KEYS = {"story_id", "ep", "step", "params", "approved_at", "superseded_by", "discarded"}
 
 
 # ------------------------------------------------------------ registry (CI)

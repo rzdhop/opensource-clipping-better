@@ -11,7 +11,9 @@ knows nothing about HTTP, argparse or the job store:
 - :class:`WorkflowError` -- the caller's request cannot be done. ``code`` is
   one of :data:`CODES` (the API answers ``not_found`` 404, ``conflict`` 409,
   ``invalid`` 400, ``later_phase`` 400); ``detail`` is the sentence, or
-  ``{"message", "errors"}`` where the API answers with a list.
+  ``{"message", "errors"}`` where the API answers with a list, or
+  ``{"message", "code", ...}`` where a client acts on the refusal (the
+  pipeline switch over written episodes: :func:`pipeline_switch_refusal`).
 - :class:`StoryUnreadable` -- a story document on disk does not validate (the
   API answers 500 with this one sentence and no traceback). Never repaired.
 
@@ -201,7 +203,8 @@ CODES = (NOT_FOUND, CONFLICT, INVALID, LATER_PHASE)
 
 class WorkflowError(Exception):
     """A request the story rules refuse. ``code`` says which kind (``CODES``),
-    ``detail`` says why: a sentence, or ``{"message", "errors"}``."""
+    ``detail`` says why: a sentence, or ``{"message", "errors"}``, or
+    ``{"message", "code", ...}`` (a refusal a client acts on)."""
 
     def __init__(self, code, detail):
         if code not in CODES:
@@ -750,7 +753,10 @@ def patch_story(stories, story_id, fields, *, now) -> dict:
     ``generation_profile`` and ``episode_template_id`` leave the approvals
     alone. ``narrator`` and ``generation_profile`` are merged onto the current
     values, the profile checked against ``clipping.aistory.defaults``
-    (``invalid``). ``episode_template_id`` is one of
+    (``invalid``); a profile moving the story onto or off the v2 pipeline
+    takes the template and the narrator with it, and is ``conflict`` while
+    an episode has a script (:func:`_follow_pipeline_switch`;
+    :func:`switch_pipeline` can archive them). ``episode_template_id`` is one of
     ``defaults.EPISODE_TEMPLATE_IDS`` (``invalid``) and changes only while no
     episode has a script (``conflict``: :func:`check_episode_template`). A
     story the schema would refuse is ``invalid`` with ``{"message",
@@ -806,24 +812,137 @@ def _follow_pipeline_switch(stories, story, values) -> None:
     and ``narrator.enabled`` (on for v2) unless the patch sets it.
 
     ``conflict`` once an episode has a script: it was written for the other
-    pipeline's shot layout and keeps its template (:func:`check_episode_template`).
-    A cast made before the switch stays; the cast step run again on v2 writes
-    each character's dossier and look and redraws its sheets (DEC-226,
-    DEC-228). A patch that keeps the pipeline changes nothing here."""
+    pipeline's shot layout and keeps its template (:func:`check_episode_template`)
+    -- a structured refusal (:func:`pipeline_switch_refusal`) naming the
+    episodes, which :func:`switch_pipeline` can archive instead.
+
+    The cast, places and props made before the switch stay. On v2 the cast
+    step run again writes each character's dossier and look (DEC-226,
+    DEC-228) and, a character whose images were drawn before it had a look,
+    draws its portrait and sheets again from the look (``cast.apply_d2``);
+    the places step does the same for a place's plate and a prop's image
+    (``places.apply_d3``, ``places.apply_r1v2``). Each estimate counts those
+    images first (:func:`cast_units`, :func:`places_units`). Nothing is drawn
+    by the switch itself. A patch that keeps the pipeline changes nothing
+    here."""
     profile = values["generation_profile"]
     v2 = media_policy.is_v2({"generation_profile": profile})
     if v2 == media_policy.is_v2(story):
         return
     written = episodes_with_script(stories, story["story_id"])
     if written:
-        target = "the v2 (quality) pipeline" if v2 else "the legacy pipeline"
-        raise WorkflowError(CONFLICT, (f"This story cannot move to {target}: episode {written[0]} already has a "
-                                       "script, written for the other pipeline's shot layout. Create a new story "
-                                       "on the pipeline you want instead."))
+        raise pipeline_switch_refusal(v2, written)
     values.setdefault("episode_template_id", defaults.episode_template_for(profile))
     narrator = values.get("narrator")
     if not (isinstance(narrator, dict) and "enabled" in narrator):
         values["narrator"] = {**(narrator if isinstance(narrator, dict) else {}), "enabled": v2}
+
+
+# The code of the structured refusal of a pipeline switch over written
+# episodes (the dashboard offers to regenerate them: switch_pipeline).
+PIPELINE_SWITCH_HAS_SCRIPTS = "pipeline_switch_has_scripts"
+
+
+def pipeline_switch_refusal(v2, written) -> WorkflowError:
+    """``conflict`` with ``{"message", "code": PIPELINE_SWITCH_HAS_SCRIPTS,
+    "episodes": [...]}``: the move onto (*v2*) or off the v2 pipeline is
+    refused while the episodes *written* have a script; the sentence names
+    them and the two ways out -- regenerate them on the new pipeline
+    (:func:`switch_pipeline`, which archives them), or a new story."""
+    written = sorted(written)
+    target = "the v2 (quality) pipeline" if v2 else "the legacy pipeline"
+    pipeline = "the v2 pipeline" if v2 else "the legacy pipeline"
+    if len(written) == 1:
+        has, regenerate, its = f"episode {written[0]} already has a script", "Regenerate the episode", "its"
+    else:
+        has = f"episodes {_and(str(ep) for ep in written)} already have a script"
+        regenerate, its = "Regenerate those episodes", "their"
+    message = (f"This story cannot move to {target}: {has}, written for the other pipeline's shot layout. "
+               f"{regenerate} on {pipeline} ({its} script, storyboard, images, clips and render are archived), "
+               "or create a new story.")
+    return WorkflowError(CONFLICT, {"message": message, "code": PIPELINE_SWITCH_HAS_SCRIPTS,
+                                    "episodes": list(written)})
+
+
+def switch_pipeline(stories, story_id, profile_patch, *, regenerate_episodes, now) -> dict:
+    """Patch the story's ``generation_profile`` with *profile_patch* as
+    :func:`patch_story` does (merged onto the current profile, checked, the
+    template and the narrator following a pipeline switch), with one way
+    past its refusal: when the patch moves the story onto or off the v2
+    pipeline while episodes have a script, and *regenerate_episodes* is
+    true, each of those episodes is archived first
+    (``StoryStore.discard_episode``: its folder moved into
+    ``episodes/_discarded/``, its memory entry, feedback and proposals
+    cleared, its spend kept for the story but no longer for the episode),
+    the latest first -- so no later memory entry is left closing a hook
+    an archived one opened -- and the story then switches as an unwritten
+    one does. The cast, places, props, season and music stay.
+
+    Without *regenerate_episodes* the refusal is :func:`patch_story`'s
+    (:func:`pipeline_switch_refusal`). The profile is checked before any
+    episode moves (``invalid``). Returns ``{"story", "discarded":
+    [discard_episode's reports, by episode]}``. The step jobs of the
+    archived episodes, and the one that comes next, are the caller's
+    (``POST /{id}/switch-pipeline``)."""
+    story = load(stories, story_id)
+    if not isinstance(profile_patch, dict):
+        raise WorkflowError(INVALID, "generation_profile must be an object.")
+    try:
+        profile = story_store._merge_generation_profile({**story["generation_profile"], **profile_patch})
+    except ValueError as exc:
+        raise WorkflowError(INVALID, str(exc)) from None
+    discarded = []
+    v2 = media_policy.is_v2({"generation_profile": profile})
+    if v2 != media_policy.is_v2(story):
+        written = episodes_with_script(stories, story_id)
+        if written and not regenerate_episodes:
+            raise pipeline_switch_refusal(v2, written)
+        for ep in sorted(written, reverse=True):
+            discarded.append(_discard_episode(stories, story_id, ep, now=now))
+    story = patch_story(stories, story_id, {"generation_profile": copy.deepcopy(profile_patch)}, now=now)
+    return {"story": story, "discarded": sorted(discarded, key=lambda report: report["ep"])}
+
+
+def _discard_episode(stories, story_id, ep, *, now) -> dict:
+    """``StoryStore.discard_episode``, its refusals as the workflow's."""
+    try:
+        return stories.discard_episode(story_id, ep, now=now)
+    except KeyError:
+        raise WorkflowError(NOT_FOUND, f"Episode {ep} has no folder to archive.") from None
+    except schemas.SchemaError as exc:
+        raise StoryUnreadable(story_id, exc.name, exc.errors) from None
+    except ValueError as exc:
+        raise WorkflowError(CONFLICT, f"Episode {ep} cannot be archived: {exc}") from None
+
+
+# What a v2 story needs, in order, before its first episode can be written
+# (a legacy story moved onto v2: next_v2_step).
+V2_STORY_STEPS = ("cast", "places", "knowledge")
+
+
+def next_v2_step(stories, story):
+    """The story-level step a v2 story still needs before an episode can be
+    written, the first of :data:`V2_STORY_STEPS` -- what a legacy story moved
+    onto v2 must run again (``POST /{id}/switch-pipeline`` queues it) -- or
+    None: ``cast`` while a character has no dossier or no look (its images
+    drawn before the look are drawn again from it: ``cast.apply_d2``);
+    ``places`` while a place or a prop has no look; ``knowledge`` while the
+    season is approved and the knowledge base is not complete
+    (``knowledge.left``: approving it is the user's, no step). None for a
+    legacy story. Calls nothing."""
+    if not media_policy.is_v2(story):
+        return None
+    story_id = story["story_id"]
+    if any(not doc.get("dossier") or not doc.get("look") for doc in list_entities(stories, story_id, CHARACTERS)):
+        return "cast"
+    if any(not doc.get("look") for kind in (PLACES, PROPS) for doc in list_entities(stories, story_id, kind)):
+        return "places"
+    if (story.get("approvals") or {}).get("season"):
+        arc = season(stories, story_id)
+        todo = knowledge_step.left(knowledge(stories, story_id), arc["episodes_planned"] if arc else 0)
+        if any(todo.values()):
+            return "knowledge"
+    return None
 
 
 # ================================================================== phase 2
@@ -1297,7 +1416,10 @@ def cast_units(stories, story, *, selected=(), custom=()) -> dict:
     :data:`SAMPLE_CHARS_ESTIMATE` characters. The sheets are edits in
     ``references`` mode and text-to-image in ``prompt_only`` mode. A v2
     story (phase 7) also counts D1 and D2 for each character with no
-    dossier and no look yet."""
+    dossier and no look yet -- and, for one with no look, its portrait and
+    both sheets whether they are there or not: drawn without a look (a
+    legacy story moved onto v2), they are drawn again once it is written
+    (``cast.apply_d2``)."""
     story_id = story["story_id"]
     prompt_only = story["generation_profile"]["consistency_mode"] == refimages.PROMPT_ONLY
     v2 = media_policy.is_v2(story)
@@ -1310,11 +1432,12 @@ def cast_units(stories, story, *, selected=(), custom=()) -> dict:
     names = {entities_step.name_key(doc["name"]) for doc in existing}
     for doc in existing:
         missing = character_missing(stories, story_id, doc)
+        redrawn = v2 and not doc.get("look")
         units["llm_calls"] += "text" in missing
         units["llm_calls"] += v2 and not doc.get("dossier")
-        units["llm_calls"] += v2 and not doc.get("look")
-        units["images"] += "portrait" in missing
-        sheets(sum(sheet in missing for sheet in SHEETS))
+        units["llm_calls"] += redrawn
+        units["images"] += redrawn or "portrait" in missing
+        sheets(sum(redrawn or sheet in missing for sheet in SHEETS))
         if "sample" in missing:
             units["tts_chars"] += _sample_chars(doc)
     for name in list(selected) + [entry.get("name") for entry in custom]:
@@ -1335,7 +1458,10 @@ def places_units(stories, story, params=None) -> dict:
     each item of the list (*params*, else the saved proposal) not created yet
     counts fully (one call, one image). Time variants are made on demand
     (``place:<id>:image:<variant>``) and are not counted. A v2 story (phase
-    7) also counts D3 / R1v2 for each place and prop with no look yet."""
+    7) also counts D3 / R1v2 for each place and prop with no look yet, and
+    its day plate or image whether it is there or not: drawn without a look
+    (a legacy story moved onto v2), it is drawn again once the look is
+    written (``places.apply_d3``, ``places.apply_r1v2``)."""
     story_id = story["story_id"]
     v2 = media_policy.is_v2(story)
     params = params or {}
@@ -1347,9 +1473,10 @@ def places_units(stories, story, params=None) -> dict:
         names = {entities_step.name_key(doc["name"]) for doc in existing}
         for doc in existing:
             missing = MISSING[kind](stories, story_id, doc)
+            redrawn = v2 and not doc.get("look")
             units["llm_calls"] += "text" in missing
-            units["llm_calls"] += v2 and not doc.get("look")
-            units["images"] += len(missing) - ("text" in missing)
+            units["llm_calls"] += redrawn
+            units["images"] += 1 if redrawn else len(missing) - ("text" in missing)
         for item in params.get(key) or ():
             name = item.get("name") if isinstance(item, dict) else None
             if not isinstance(name, str) or entities_step.name_key(name) in names:

@@ -1667,8 +1667,28 @@ def test_the_cast_estimate_on_a_v2_story_points_to_the_quality_keys_not_prompt_o
 
     # Phase 7 stage 3a (DEC-226) and 5a (DEC-228): a v2 run writes each
     # character's dossier (D1) and look (D2) before its sheets, and the
-    # estimate counts those 3 x 2 calls.
-    assert body["units"] == {"llm_calls": 6, "images": 0, "edit_images": 6, "tts_chars": 0}
+    # estimate counts those 3 x 2 calls. 2026-10-02 (the switch's hint made
+    # true): re-pinned on purpose -- the 3 portraits, drawn before the looks,
+    # are drawn again from them (cast.apply_d2), so they are counted too, and
+    # the quality portrait link's refusal (no FAL_KEY) is the estimate's.
+    assert body["units"] == {"llm_calls": 6, "images": 3, "edit_images": 6, "tts_chars": 0}
+    assert body["ready"] is False and body["edit"]["ready"] is False
+    assert "prompt-only" not in body["message"] and "prompt_only" not in body["message"]
+    assert "FAL_KEY" in body["message"] and "GEMINI_PAID_API_KEY" not in body["message"]
+
+    # Once the looks are written over the portraits they were drawn from, only
+    # the sheets wait: the edit's stop-and-ask.
+    for doc in api.store.list_entities(story_id, "characters"):
+        doc["look"] = schemas.d2_look({
+            "build": "lean human body", "silhouette": "upright", "face": "round fruit head", "hair": "none",
+            "skin_material": "fruit skin", "height_cm": 170, "palette": ["green"],
+            "wardrobe_sets": [{"id": "daily", "context": "every day", "items": "a suit"}], "season_change": ""})
+        doc["dossier"] = {"backstory": "Né sur l'île.", "goal": "Gagner.", "need": "Confiance.", "fears": "Perdre.",
+                          "secrets": [], "relationships": [], "arc": "Du menteur au loyal.",
+                          "voice": {"patterns": "Court.", "vocabulary": "Simple.", "catchphrases": []}}
+        api.store.write_entity(story_id, "characters", doc, now=NOW)
+    body = _estimate(api, story_id, "cast")
+    assert body["units"] == {"llm_calls": 0, "images": 0, "edit_images": 6, "tts_chars": 0}
     assert body["edit"]["ready"] is False
     assert "need an editor or prompt-only consistency" not in body["message"]
     assert "prompt-only" not in body["message"] and "prompt_only" not in body["message"]

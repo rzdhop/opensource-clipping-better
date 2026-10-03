@@ -532,8 +532,8 @@ def approve_step_job(job_id: str) -> str:
 
     ``"ok"`` (now COMPLETED, ``approved_at`` stamped), ``"missing"``, or
     ``"not_awaiting"`` for a job in any other status -- including one already
-    approved. With :func:`supersede_step_job`, the only way out of
-    AWAITING_APPROVAL.
+    approved. With :func:`supersede_step_job` and :func:`discard_step_job`,
+    the only way out of AWAITING_APPROVAL.
     """
     return _complete_awaiting_step(job_id, {"approved_at": _now().isoformat()})
 
@@ -545,6 +545,14 @@ def supersede_step_job(job_id: str, by_job_id: str) -> str:
     instead of ``approved_at``.
     """
     return _complete_awaiting_step(job_id, {"superseded_by": by_job_id})
+
+
+def discard_step_job(job_id: str, archive: str) -> str:
+    """The document this story step awaits approval for was archived with
+    its episode (*archive*: ``StoryStore.discard_episode``'s folder name):
+    nothing is left to approve. Same outcomes as :func:`approve_step_job`;
+    ``discarded`` is stamped instead of ``approved_at``."""
+    return _complete_awaiting_step(job_id, {"discarded": archive})
 
 
 def list_step_jobs(story_id: str, *, step: str | None = None, statuses=None) -> list[dict]:
