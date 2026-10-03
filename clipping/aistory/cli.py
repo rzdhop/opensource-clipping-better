@@ -18,6 +18,7 @@ options and defaults are untouched. Commands::
     main.py --ai-story feedback <story_id> --ep N --text-file F [--stats-file F] [options]
     main.py --ai-story approve <story_id> keyframes:N [--anyway]
     main.py --ai-story list
+    main.py --ai-story prompt-limits
 
 The story rules are ``clipping.aistory.workflow``'s, the ones the API applies,
 and a step runs in this process through the runner the web worker calls
@@ -380,7 +381,8 @@ def build_parser() -> argparse.ArgumentParser:
             f"  {PROG} step STORY_ID memory --ep 1 --auto-approve\n"
             f"  {PROG} feedback STORY_ID --ep 1 --text-file comments.txt --auto-approve\n"
             f"  {PROG} step STORY_ID propose-next --ep 1\n"
-            f"  {PROG} list"
+            f"  {PROG} list\n"
+            f"  {PROG} prompt-limits"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -392,7 +394,7 @@ def build_parser() -> argparse.ArgumentParser:
                              "(data/settings.json, or WEB_SETTINGS_FILE) over the environment")
 
     commands = parser.add_subparsers(dest="command",
-                                     metavar="{new,step,render,fast-track,feedback,approve,list}", required=True)
+                                     metavar="{new,step,render,fast-track,feedback,approve,list,prompt-limits}", required=True)
 
     # ---- new
     new = commands.add_parser(
@@ -612,6 +614,14 @@ def build_parser() -> argparse.ArgumentParser:
     # ---- list
     commands.add_parser("list", parents=[common], help="list the stories",
                         description="One line per story: id, status, language, title.")
+
+    # ---- prompt-limits
+    commands.add_parser(
+        "prompt-limits", parents=[common], help="list each generation link's prompt size limit",
+        description="One line per image, video and voice link: the prompt size it accepts (a longer prompt "
+                    "is refused before it is sent), the word budget that fits it, and where the number comes "
+                    "from -- the vendor's own, or our estimate where none is published.",
+    )
     return parser
 
 
@@ -1545,8 +1555,26 @@ def _cmd_approve(args, stories) -> int:
     return EXIT_OK
 
 
+def _cmd_prompt_limits(args, stories) -> int:
+    """Every link's prompt limit and its source (``prompt_limits.listing``),
+    with the live values fal's schemas published, read from the file the
+    dashboard's video key check writes (by path: the CLI never imports web)."""
+    from clipping.providers import prompt_limits
+
+    path = prompt_limits.live_path()
+    live = prompt_limits.read_live(path)
+    print("Prompt size limits per generation link: a prompt over its link's limit is refused before it is "
+          "sent, and the chain moves on.")
+    print(f"Live values ({len(live)} read) are kept in {path}; Settings > Video > 'Ask the providers (free)' "
+          "reads fal's schemas.")
+    for line in prompt_limits.listing(live=live):
+        print(f"  {line}")
+    return EXIT_OK
+
+
 _COMMANDS = {"new": _cmd_new, "step": _cmd_step, "render": _cmd_render, "fast-track": _cmd_fast_track,
-             "feedback": _cmd_feedback, "approve": _cmd_approve, "list": _cmd_list}
+             "feedback": _cmd_feedback, "approve": _cmd_approve, "list": _cmd_list,
+             "prompt-limits": _cmd_prompt_limits}
 
 
 def main(argv=None) -> int:

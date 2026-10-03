@@ -67,7 +67,7 @@ Limit = namedtuple("Limit", "max_chars max_words max_tokens source verified meas
 
 # --------------------------------------------------------------- the table
 
-_LTX2 = "fal's LTX-2 schema: prompt maxLength 5000"
+_LTX2 = "fal's LTX-2 schema's prompt maxLength, 5000"
 _FLUX_T5 = ("no API limit published; FLUX.1's T5-XXL text encoder reads 512 tokens (its max_sequence_length; "
             "schnell is often run at 256, which cuts earlier). Text past the window is ignored by the model, not "
             "refused by the API (v1 shot prompts of ~2200 characters were always sent), so the window bounds the "
@@ -78,11 +78,11 @@ TABLE = {
     "fal/kling-2.5-turbo-std": Limit(
         2500, source="fal's OpenAPI schema for fal-ai/kling-video/v2.5-turbo/standard/image-to-video: prompt "
                      "maxLength 2500 (the same cap on negative_prompt)", verified=True),
-    "fal/ltx-2-fast": Limit(5000, source=f"{_LTX2} (fal-ai/ltxv-2/image-to-video/fast; refused by the adapter, A-101)",
-                            verified=True),
+    "fal/ltx-2-fast": Limit(5000, source=f"{_LTX2} (fal-ai/ltxv-2/image-to-video/fast; refused by the adapter, "
+                                         "A-101)", verified=True),
     "fal/ltx-2.3-fast": Limit(
-        5000, source=f"assumed equal to {_LTX2}: fal-ai/ltx-2.3/image-to-video/fast's own is unpublished in our "
-                     "notes; the key check reads it live", verified=False),
+        5000, source=f"assumed equal to {_LTX2}; fal-ai/ltx-2.3/image-to-video/fast's own is not in our notes "
+                     "(the key check reads it live)", verified=False),
     "fal/seedance-1-pro-fast": Limit(
         1500, source="unpublished on fal (no maxLength in its schema, A-100/A-110); 56-77-word (~470-char) prompts "
                      "were accepted on 2026-10-01 (A-110); 1500 chars (~3x that) is our conservative cap, under the "
@@ -100,7 +100,7 @@ TABLE = {
     "pollinations/flux": Limit(
         4000, measure=URL, window_tokens=512,
         source="unpublished: the prompt rides in the URL path. Our cap of 4000 characters once URL-encoded is "
-               "about 1.3x the longest v1 shot prompts (187-283 words, up to ~3000 encoded) Pollinations served in "
+               "about 1.3x the longest v1 shot prompts (187-283 words, ~1900-3000 encoded) Pollinations served in "
                "the Tier-2 walks, and far under the 8-16 KB request lines HTTP servers and CDNs accept; FLUX's "
                "512-token T5 window bounds the word budget only", verified=False),
     "pollinations/*": Limit(
@@ -118,9 +118,9 @@ TABLE = {
                      "the 220-word prompts confirmed accepted on 2026-10-01 (A-111)", verified=False),
     "gemini/nano-banana-2-lite": Limit(
         max_tokens=8192, source="no stated prompt limit (A-112): the model's input context bounds it. Our cap: "
-                                "32768 input tokens (gemini-2.5-flash-image's, the smallest of the family, assumed "
-                                "no larger here) less up to 14 reference images at ~1290 tokens each, rounded "
-                                "down to 8192 for the text", verified=False),
+                                "32768 input tokens (gemini-2.5-flash-image's, the smallest of the family; the "
+                                "3.1 models assumed no smaller) less up to 14 reference images at ~1290 tokens "
+                                "each, rounded down to 8192 for the text", verified=False),
     "gemini/nano-banana-2": Limit(
         max_tokens=8192, source="no stated prompt limit (A-112); our cap, as gemini/nano-banana-2-lite: the "
                                 "input context less 14 reference images, 8192 tokens kept for the text",
@@ -133,7 +133,7 @@ TABLE = {
         max_tokens=8192, source="the TTS model's input tokens bound a line: 8192 is what gemini-2.5-flash-preview-"
                                 "tts publishes, assumed no smaller for gemini-3.8-flash-lite-tts; one line is far "
                                 "below it", verified=False),
-    "edge/*": Limit(source="no limit: edge-tts splits long text into requests itself (one voice per request)",
+    "edge/*": Limit(source="edge-tts splits long text into requests itself (one voice per request)",
                     verified=False),
 }
 
@@ -493,9 +493,11 @@ def listing(*, live=None) -> list:
     for label in sorted(TABLE):
         limit = limit_for(label, live=entries)
         words = budget_words(label, default=0, live=entries)
-        budget = f" (~{words} words)" if words else ""
+        if not words:
+            lines.append(f"{label}: {describe_limit(limit)} -- {limit.source}")
+            continue
         kind = "published" if limit.verified else "our estimate"
-        line = f"{label}: {describe_limit(limit)}{budget} -- {kind}: {limit.source}"
+        line = f"{label}: {describe_limit(limit)} (~{words} words) -- {kind}: {limit.source}"
         entry = entries.get(label) or {}
         if entry.get("status") == NOT_PUBLISHED:
             line += f"; fal's schema publishes none (read {str(entry.get('read_at') or '')[:10]})"

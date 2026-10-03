@@ -268,3 +268,31 @@ def test_an_unreadable_live_file_is_ignored(tmp_path, content):
     (tmp_path / "provider_limits.json").write_text(content, encoding="utf-8")
     assert prompt_limits.read_live() == {}
     assert prompt_limits.limit_for(KLING) == prompt_limits.limit_for(KLING, live=NO_LIVE)
+
+
+# --------------------------------------------------------------------- CLI
+
+def test_the_cli_lists_every_links_limit_and_source(tmp_path, capsys):
+    """``python main.py --ai-story prompt-limits``: one line per link, live
+    values included, and where they are kept."""
+    from clipping.aistory import cli
+
+    prompt_limits.record_live({"fal/seedance-1-pro-fast": {"endpoint": SEEDANCE_APP, "status": "published",
+                                                           "prompt_max_chars": 1800}},
+                              now="2026-10-02T10:00:00+00:00")
+    assert cli.main(["prompt-limits", "--outputs-dir", str(tmp_path / "outputs")]) == 0
+    out = capsys.readouterr().out
+    lines = {line.split(":", 1)[0].strip(): line for line in out.splitlines() if ":" in line}
+    for label in prompt_limits.TABLE:
+        assert label in lines, label
+    assert "2500 chars" in lines["fal/kling-2.5-turbo-std"] and "published" in lines["fal/kling-2.5-turbo-std"]
+    assert "1800 chars" in lines["fal/seedance-1-pro-fast"] and "fal's schema" in lines["fal/seedance-1-pro-fast"]
+    assert "1024 tokens" in lines["gemini/veo-3.1-lite"] and "~630 words" in lines["gemini/veo-3.1-lite"]
+    assert "our estimate" in lines["fal/seedream-4.5"]
+    assert str(tmp_path / "provider_limits.json") in out
+
+
+def test_the_cli_names_the_command_in_its_usage():
+    from clipping.aistory import cli
+
+    assert "prompt-limits" in cli.build_parser().format_usage()
