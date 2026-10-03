@@ -201,7 +201,9 @@ def test_the_fix_stops_where_a_cap_would_refuse_the_redraw(store, tmp_path, monk
 
     def spend(shot_id, count):
         if shot_id == "sh01" and count == 1:
-            tas._spent(store, story_id, 1.02)  # another job's spending, once the images are made
+            # Another job's spending, once the images are made: it fills the
+            # $4.00 episode cap (DEC-242's caps), so the first redraw is refused.
+            tas._spent(store, story_id, 3.02)
 
     image = kc.SeededImage(price=PRICE)
     summary, _log = _run(store, story_id, image=image, vision=Judge({"sh05": None}, on_call=spend))
@@ -210,7 +212,7 @@ def test_the_fix_stops_where_a_cap_would_refuse_the_redraw(store, tmp_path, monk
     assert len(image.requests) == shots_total  # no redraw
     stopped = summary["keyframes"]["fix"]["stopped"]
     assert stopped.startswith("refused: est $0.040 on episode 1's paid images and voices would bring this episode "
-                              "to $2.02 of its $2.00 cap"), stopped
+                              "to $4.02 of its $4.00 cap"), stopped
     assert summary["keyframes"]["fix"]["flagged"] == ["sh05"]
     assert tas._assets_doc(store, story_id)["keyframe_fixes"]["sh05"]["redraws"] == 0
 
