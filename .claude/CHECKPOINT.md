@@ -12,7 +12,10 @@
   keyframe (A-133); A-134's overrun on the next Gemini-voiced episode. Follow-ups in DEC-249/DEC-250's
   Consequence (the speech-rate estimate learning from measured lines is the biggest: the length gate writes to an
   estimate the voices beat by a third).
-- **Worktree:** remove with `git worktree remove .claude/worktrees/note-fits-budget` once merged.
+- **Deployed (2026-10-03, the human's word "deploy all"):** main fast-forwarded to cb210de and pushed (origin/main
+  192debf → cb210de, DEC-248 included); `rzc-backend` restarted at 0 jobs, health 200, the live Python answers
+  `clips.MAX_STRETCH 1.25`, `assets.fit_to_budget`, `shots.resolve_stored`. No dashboard rebuild (nothing under
+  web/). The worktree is removed. Next: the human's own test on the app (Generate episode on d0ee5ebd745d).
 - **The human's report (2026-10-03 12:29, story d0ee5ebd745d ep 1):** "Fast track stopped at the assets (step 4
   of 6): … shot sh03's keyframe prompt (326 words) is over fal/seedream-4.5-edit's budget of 320 words -- built for
   another link, or … limit moved since". **Root cause (verified on disk):** sh03's stored prompt is 308 words; the
