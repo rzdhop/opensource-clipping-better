@@ -291,8 +291,9 @@ def test_the_clip_prompt_says_the_emotion_the_micro_actions_and_the_cameras_inte
     motion = ("the tall yellow geometric cylinder lifts the monocle to his eye, squints, lowers it again and takes one "
               "slow step back toward the newsstand as the clock strikes")
     args = dict(subject="the tall yellow geometric cylinder", motion=motion,
-                camera_phrase=prompting.CAMERA_PHRASES["push_in"], secondary="the triangle reacts with a small movement",
-                emotion="The mood is shocked", micro="Micro-actions: the cylinder breathes visibly, hands shift slightly",
+                camera_phrase=prompting.CAMERA_PHRASES["push_in"],
+                secondary="the triangle reacts with a small movement", emotion="The mood is shocked",
+                micro="Micro-actions: the cylinder breathes visibly, hands shift slightly",
                 intent="closing on the emotion")
     full = prompting.layered_clip_prompt(style, budget=160, **args)
     assert full.startswith(f"{motion[0].upper()}{motion[1:]}. The mood is shocked. The triangle reacts with a small "

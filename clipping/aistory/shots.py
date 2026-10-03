@@ -1013,7 +1013,8 @@ def _mood(scene, lines, frame, char_handles, ledger) -> str:
     for cid in frame_ids:
         hurt = ((ledger or {}).get(cid) or {}).get("injuries")
         if hurt:
-            sentences.append(prompting.as_sentence(f"{char_handles[cid]} is hurt: {_cut(str(hurt), _INJURY_MAX_WORDS)}"))
+            sentences.append(prompting.as_sentence(
+                f"{char_handles[cid]} is hurt: {_cut(str(hurt), _INJURY_MAX_WORDS)}"))
     return " ".join(sentences)
 
 
@@ -1076,7 +1077,8 @@ def _since(previous_plan, plan, frame, frame_props, *, characters, props, char_h
         sentences.append(prompting.as_sentence("Since the previous shot: " + "; ".join(changes)))
     action = _collapse_ws(previous_plan.get("action") or "")
     if action:
-        sentences.append(prompting.as_sentence(f"Just before, {_lower_first(_cut(resolve(action), _BEFORE_MAX_WORDS))}"))
+        gist = _lower_first(_cut(resolve(action), _BEFORE_MAX_WORDS))
+        sentences.append(prompting.as_sentence(f"Just before, {gist}"))
     return " ".join(sentences)
 
 

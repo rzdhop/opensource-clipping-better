@@ -58,7 +58,8 @@ def test_look_bearing_is_optional_capped_and_asked_of_d2():
     assert "presentation" not in schema["required"] and "build" in schema["required"]
     reply = tsl._d2(175)
     assert "bearing" not in schemas.d2_look(reply)
-    assert schemas.d2_look(dict(reply, bearing="  slouches, hands in pockets ")) ["bearing"] == "slouches, hands in pockets"
+    kept = schemas.d2_look(dict(reply, bearing="  slouches, hands in pockets "))
+    assert kept["bearing"] == "slouches, hands in pockets"
     assert "bearing" not in schemas.d2_look(dict(reply, bearing="   "))
     assert schemas.d2_errors(dict(reply, bearing="walks like Kiwilo"), ["Kiwilo"]) == [
         "$.bearing: must not mention a name ('Kiwilo')"]
@@ -75,7 +76,8 @@ def test_visual_cues_are_the_descriptors_marks_the_look_does_not_say_and_the_bea
     signature items, then ``look.bearing``; '' when there is neither; never
     a name."""
     doc = _scarred()
-    assert shots.visual_cues(doc) == "Distinctive: a deep scar through the left eyebrow and a chipped corner at the base."
+    marks = "Distinctive: a deep scar through the left eyebrow and a chipped corner at the base."
+    assert shots.visual_cues(doc) == marks
     doc["look"]["bearing"] = "Stands rigidly straight, chin up"
     assert shots.visual_cues(doc) == ("Distinctive: a deep scar through the left eyebrow and a chipped corner at the "
                                       "base. Bearing: stands rigidly straight, chin up.")
