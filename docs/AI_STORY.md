@@ -313,6 +313,25 @@ reused) and the last good final stays in place.
 Open **AI Story** in the mode switch, or go to `/story`. It lists your
 stories as cards (title, status, style, language); **New story** starts one.
 
+### The dashboard
+
+- **Stories list** — one cover card per story (its lead's portrait, else the
+  style's colours), the steps done and the next one, the latest episode.
+- **Workspace** (`/story/<id>/<step>`) — one step per screen under a sticky
+  header (cover, title, language, style, the Visual tier popover, and the one
+  next action: the step to do, or *Open episode N* once the story is ready).
+- **Step rail** — the seven steps down the left (a strip above the step on a
+  narrow screen): done, to do or locked (hover for why), a spinner on the step
+  whose job runs. Cast and Places are tile grids; a tile opens its editor.
+- **Episode stepper** — on `/story/<id>/episodes/<n>`, Script → Storyboard →
+  Keyframes → Clips → Render → Review, each done, active or stale (a warning
+  mark); a click jumps to that part. *Generate episode* runs what is left.
+- **Review hero** — the rendered episode beside an approvals checklist (who
+  approved what, when, which shots are still flagged) and the spend.
+- **Activity feed** — a running job's log grouped by step, errors and warnings
+  tinted and opened, *Copy log*, *Jump to latest*. On a phone the menu button
+  in the top bar opens the navigation.
+
 ### 1. New story
 
 - **Language** — `Français` or `English`. Required: nothing is picked for
