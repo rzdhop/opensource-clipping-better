@@ -3028,3 +3028,156 @@ html, body {
     max-width: none;
   }
 }
+
+/* ============================================================
+   Review (phase 7 follow-up, stage C): the screen "Generate episode" ends
+   on -- the status card, a grid of keyframe tiles (three a row at 375 px:
+   104 px tiles and 8 px gaps inside the 343 px content box), the large view
+   as an overlay card. Additive, prefixed `story-review-` /
+   `episode-studio-review` / `episode-studio-stop`.
+   ============================================================ */
+
+.episode-studio-review {
+  margin-bottom: 14px;
+}
+
+.episode-studio-fast-track-bar {
+  width: 100%;
+}
+
+/* A sentence, not a short name: no capitalisation (the assets header's rule). */
+.episode-studio-stop {
+  text-transform: none;
+}
+
+.story-review-headline {
+  margin: 4px 0 8px;
+  font-size: 14px;
+}
+
+.story-review-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 8px;
+  margin: 14px 0;
+}
+
+/* A button (tap to see it large), styled as a card: the browser's button
+   font, colours and centring reset. */
+.story-review-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 6px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.story-review-tile:focus-visible {
+  outline: 2px solid var(--border-accent);
+}
+
+/* The verdict chip wraps inside a 104 px tile instead of riding .chip's nowrap. */
+.story-review-tile .chip {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  font-size: 10px;
+}
+
+.story-review-thumb {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 9 / 16;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  background: var(--bg-input);
+  overflow: hidden;
+}
+
+.story-review-clip-mark {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 10px;
+}
+
+.story-review-tile-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.story-review-line {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.story-review-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  overflow: auto;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.story-review-detail {
+  max-width: 520px;
+  margin: 0 auto;
+}
+
+.story-review-detail-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+/* The verdict chip wraps beside the shot id and Close stays on that first
+   line (a .chip-wrap is otherwise a full-width block of its own). */
+.story-review-detail-head .chip-wrap {
+  flex: 1 1 160px;
+  width: auto;
+}
+
+.story-review-close {
+  margin-left: auto;
+}
+
+.story-review-media {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.story-review-large {
+  flex: 1 1 140px;
+  max-width: 240px;
+  aspect-ratio: 9 / 16;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  background: var(--bg-input);
+  overflow: hidden;
+}
+
+.story-review-lines {
+  margin: 8px 0;
+}

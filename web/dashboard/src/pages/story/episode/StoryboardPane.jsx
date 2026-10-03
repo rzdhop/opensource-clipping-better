@@ -1327,13 +1327,14 @@ function VideoPhaseHeader({ storyId, ep, episode, busy, onChange }) {
 }
 
 /**
- * A v2 episode's keyframe approval (phase 7 stage 6b, DEC-230): each shot's
- * keyframe check (J2, `assets.doc.keyframe_verdicts` -- does the keyframe
- * show the beat, what it misses, what changed from the previous shot), then
- * the approval no clip is bought before (RC-Q3; `workflow.approve_keyframes`,
- * `episode.assets.keyframes`: approval none | current | stale). A refusal
- * shows the server's sentence and offers "Approve anyway", which goes over a
- * failed or missing check, never over a missing keyframe. Null on a legacy
+ * A v2 episode's keyframe approval (phase 7 stage 6b, DEC-230): the approval
+ * no clip is bought before (RC-Q3; `workflow.approve_keyframes`,
+ * `episode.assets.keyframes`: approval none | current | stale), for a story
+ * that stopped at the keyframes ("Stop at the keyframes for my review"). A
+ * refusal shows the server's sentence and offers "Approve anyway", which goes
+ * over a failed or missing check, never over a missing keyframe. Each shot's
+ * check (J2) is read, large, on the Review tab (stage C: `episode.review`,
+ * ReviewPane.jsx) -- this card only counts the flagged ones. Null on a legacy
  * episode (no `keyframes` in the payload).
  */
 function ApproveKeyframes({ storyId, ep, episode, busy, onChange }) {
@@ -1347,7 +1348,8 @@ function ApproveKeyframes({ storyId, ep, episode, busy, onChange }) {
   const keyframes = assets.keyframes
   const approval = keyframes.approval
   const approved = approval === 'current'
-  const verdicts = assets.doc.keyframe_verdicts || {}
+  const review = episode.review
+  const flagged = review ? review.flagged.length : 0
   const reason = busy ? 'A step is running.' : null
 
   const handleApprove = async (anyway) => {
@@ -1369,28 +1371,11 @@ function ApproveKeyframes({ storyId, ep, episode, busy, onChange }) {
     <div className="card story-keyframes-approve">
       <h3 className="card-title">Keyframes</h3>
       <p className="form-hint">
-        No clip is bought until the keyframes are approved: check each one shows its beat.
+        No clip is bought until the keyframes are approved.{' '}
+        {review
+          ? `${flagged} keyframe${flagged === 1 ? '' : 's'} still flagged by the check (J2) — see each one, large, on the Review tab.`
+          : 'Check each one shows its beat on the Review tab.'}
       </p>
-      <div className="story-keyframe-verdicts">
-        {assets.shots.map((assetShot) => {
-          const verdict = verdicts[assetShot.shot_id]
-          let text = 'not checked yet (the assets step checks it, free)'
-          let chipClass = 'chip'
-          if (verdict) {
-            const issues = (verdict.missing || []).map((item) => `missing ${item}`)
-            if (verdict.continuity_issue) issues.push(verdict.continuity_issue)
-            const head = verdict.shows_beat ? 'shows its beat' : 'does not show its beat'
-            text = issues.length ? `${head}: ${issues.join('; ')}` : head
-            chipClass = verdict.shows_beat && !issues.length ? 'chip chip-accent' : 'chip chip-warn chip-wrap'
-          }
-          return (
-            <div key={assetShot.shot_id} className="story-step-actions" style={{ marginBottom: '6px' }}>
-              <span className="chip">{assetShot.shot_id}</span>
-              <span className={chipClass}>{text}</span>
-            </div>
-          )
-        })}
-      </div>
       <div className="story-step-actions">
         <button
           type="button"
