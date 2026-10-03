@@ -4228,3 +4228,38 @@ sends its last rung over budget anyway (DEC-237), and a vendor's HTTP 400 or a s
 its cap is lifted in that file alone. Not covered: Kling's `negative_prompt` cap (negatives are ~40 words); the
 pre-call estimate (`gating.link_summary`) can still call a link runnable when the prompt would be refused — moot once
 F2's builders fit each link, pinned there by a test that every built v2 prompt `fits()` its planned link.
+
+## DEC-241 — A written episode moves to v2 by being regenerated, not by a new story (phase 7 follow-up, D)
+**Context.** The human (2026-10-02) pressed "Animate every shot" on a story whose episode 1 had a script and got
+"Create a new story on the pipeline you want instead" — a dead end: nothing could reset an episode, the card kept
+showing the values the server refused, and its hint promised redrawn sheets that `_images` never redraws.
+**Decision** (`7fc9b2c`, `f1b99fb`, `28a6b39`).
+- **Discard, never delete** (`store.discard_episode`): the episode folder moves to
+  `episodes/_discarded/epNN-<UTC stamp>[-k]/` (recoverable by hand; `list_episodes` lists `ep<NN>` folders only, so
+  the archive is never an episode); its `series_memory` entry and feedback leave `season.json`; the proposals it
+  wrote for N+1 go into its archive while its own `proposals.json` (written from N-1) is kept in a fresh `epNN/`.
+  Episodes are discarded latest first so no remaining memory entry closes a hook a removed one opened; a discard
+  that would leave that situation is refused before anything moves.
+- **Spend**: the ledger rows of a discarded episode are marked `discarded`; `totals(ep)`, `episode_entries(ep)`,
+  the bundle view and `workflow.episode_ledger` skip them (the new episode starts at $0 against its cap) while the
+  story total keeps them (the money was spent); the daily file is untouched. Every per-episode reader goes through
+  these helpers, never a hand-written `row["ep"] == ep`.
+- **`POST /api/stories/{id}/switch-pipeline`** `{generation_profile, regenerate_episodes: true}`
+  (`workflow.switch_pipeline`): refused 409 while a job of the story runs; discards every episode with a script,
+  applies the same patch as `patch_story` (template and narrator follow), completes the jobs left awaiting approval
+  on an archived document with a `discarded: <archive>` stamp (never `approved_at`; `JobResponse.discarded`), then
+  queues the next needed step itself — cast, else places, else knowledge; a refused gate leaves the switch standing
+  and says why in `next_step.refused`. The plain PATCH keeps its 409 but it is structured
+  (`{message, code: "pipeline_switch_has_scripts", episodes}`) and its sentence names the button.
+- **Redraw from the look, flag-free**: when a v2 look is written for an entity that had none (a legacy cast or place
+  moved to v2), its image refs are cleared (portrait and sheets; every plate; the prop image) and the same step run
+  draws them again from the look; the cast and places estimates count them. The card's hint says so and is true now.
+- **The card**: on the structured 409 it offers "Regenerate episode N on v2" with a confirm that lists what is
+  archived (script, storyboard, images, clips, render), kept (cast, places, props, season, music) and what runs next;
+  a refused save shows the server's values again (the optimistic tier/route/profile are reverted and the story
+  refreshed).
+**Consequence.** The auto-queued cast step runs without showing its estimate first (the caps still hold; the confirm
+says it). Places & props keep their approvals after a switch, so the page can show that step done while its looks
+are still to be written — the confirm and the hint say to run it again; it is not queued. Regenerating the text of a
+v2 character that has images but no look drops those images until the cast step redraws them. No CLI command for
+the switch yet. `ledger.mark_discarded` holds only the instance lock and relies on the route's in-flight refusal.
