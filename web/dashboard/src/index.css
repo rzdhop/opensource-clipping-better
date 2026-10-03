@@ -2612,9 +2612,11 @@ html, body {
   color: var(--text-primary);
 }
 
+/* Stage 4 of the dashboard overhaul (DEC-256): Script | Storyboard, two
+   columns; the Preview runs full width under them (.episode-studio-pane-wide). */
 .episode-studio-panes {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
   align-items: start;
 }
@@ -3940,5 +3942,798 @@ html, body {
   }
   .story-entity-grid-lg {
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ============================================================
+   Episode studio (dashboard overhaul stage 4, DEC-256): the progress
+   stepper, the compact script lines, the timing-warning panel, the
+   storyboard filmstrip and the review hero. Additive, prefixed
+   `episode-stepper-` / `story-filmstrip-` / `story-avatar` /
+   `story-review-hero` / `story-review-check`.
+   ============================================================ */
+
+/* A kit card header inside the studio wraps its actions under its title
+   when the column is narrow, instead of squeezing the title to nothing. */
+.episode-studio .ui-card-header {
+  flex-wrap: wrap;
+  padding: var(--space-3) var(--space-4);
+}
+
+.episode-studio .ui-card-header-text {
+  min-width: min(100%, 11rem);
+}
+
+.episode-studio .ui-card-body {
+  padding: var(--space-4);
+}
+
+.episode-studio .ui-card-title {
+  font-size: var(--text-md);
+}
+
+.episode-studio-header {
+  margin-bottom: var(--space-4);
+  align-items: flex-start;
+}
+
+.episode-studio-pane-wide {
+  margin-top: var(--space-6);
+}
+
+.episode-studio-pane-wide > .story-step-body {
+  max-width: 960px;
+}
+
+/* --- Progress stepper ------------------------------------------------------ */
+
+.episode-stepper {
+  margin: 0 0 var(--space-5);
+  min-width: 0;
+}
+
+.episode-stepper-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 4px;
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.episode-stepper-item {
+  flex: 1 1 0;
+  min-width: 112px;
+}
+
+.episode-stepper-node {
+  /* Contains its .sr-only text: an absolute box with no positioned ancestor
+     escapes the stepper's own scroller and widens the page. */
+  position: relative;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.episode-stepper-node:hover {
+  border-color: var(--border-color-hover);
+  background: var(--bg-card-hover);
+}
+
+.episode-stepper-node:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.episode-stepper-mark {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 1px solid var(--border-color-hover);
+  background: var(--bg-input);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.episode-stepper-done .episode-stepper-mark {
+  background: var(--success-dim);
+  border-color: rgba(16, 185, 129, 0.35);
+  color: var(--success);
+}
+
+.episode-stepper-active .episode-stepper-node {
+  border-color: var(--border-accent);
+  background: var(--accent-dim);
+}
+
+.episode-stepper-active .episode-stepper-mark {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.episode-stepper-stale .episode-stepper-mark {
+  background: var(--warning-dim);
+  border-color: rgba(245, 158, 11, 0.35);
+  color: var(--warning);
+}
+
+.episode-stepper-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.episode-stepper-label {
+  font-size: var(--text-sm);
+  font-weight: 650;
+  color: var(--text-primary);
+}
+
+.episode-stepper-pending .episode-stepper-label {
+  color: var(--text-secondary);
+}
+
+.episode-stepper-detail {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.episode-stepper-stale .episode-stepper-detail {
+  color: var(--warning);
+}
+
+.episode-stepper-spinner {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--accent-hover);
+}
+
+/* --- Script: timing warnings ------------------------------------------------ */
+
+.story-script-warnings {
+  margin: 14px 0;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: var(--radius-md);
+  background: var(--warning-dim);
+}
+
+.story-script-warnings-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  font-size: var(--text-sm);
+  font-weight: 650;
+  color: var(--warning);
+  cursor: pointer;
+  list-style: none;
+  border-radius: var(--radius-md);
+}
+
+.story-script-warnings-summary::-webkit-details-marker {
+  display: none;
+}
+
+.story-script-warnings-summary:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.story-script-warnings-icon {
+  flex-shrink: 0;
+}
+
+.story-script-warnings-chevron {
+  margin-left: auto;
+  flex-shrink: 0;
+  transition: transform var(--transition-fast);
+}
+
+.story-script-warnings[open] .story-script-warnings-chevron {
+  transform: rotate(90deg);
+}
+
+.story-script-warnings .duration-bar-flags {
+  margin: 0;
+  padding: 0 14px 12px 36px;
+}
+
+.story-script-warnings a {
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-decoration-color: rgba(245, 158, 11, 0.6);
+  text-underline-offset: 2px;
+}
+
+/* --- Script: scenes and compact lines --------------------------------------- */
+
+.story-script-scenes {
+  gap: 12px;
+}
+
+.story-script-scene .ui-card-title {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.story-script-scene .story-script-scene-header {
+  margin: 6px 0 0;
+}
+
+.story-script-scene .story-script-scene-characters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 0;
+}
+
+.story-script-cast-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 2px 9px 2px 2px;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.story-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--accent-dim);
+  color: var(--accent-hover);
+  font-weight: 700;
+}
+
+.story-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.story-avatar-md {
+  width: 28px;
+  height: 28px;
+  font-size: 12px;
+}
+
+.story-avatar-sm {
+  width: 20px;
+  height: 20px;
+  font-size: 10px;
+}
+
+.story-script-scene-body .story-script-lines {
+  gap: 4px;
+  margin: 8px 0;
+}
+
+.story-script-line {
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.02);
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.story-script-line:hover,
+.story-script-line:focus-within,
+.story-script-line-open {
+  border-color: var(--border-color);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.story-script-line .story-script-line-row {
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.story-script-line-who {
+  min-width: 0;
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-sm);
+  font-weight: 650;
+  color: var(--text-primary);
+}
+
+.story-script-line .story-script-line-emotion {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 0;
+  min-height: 28px;
+  padding: 3px 8px;
+  font-size: var(--text-xs);
+  border-radius: var(--radius-sm);
+}
+
+.story-script-line-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+
+/* The hover/focus toolbar: the details toggle (and the text's Edit button)
+   show on hover or keyboard focus inside the line, always on a touch screen. */
+.story-script-line-tools .ui-icon-btn:last-child,
+.story-script-line > .story-field > .btn {
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+
+.story-script-line:hover .story-script-line-tools .ui-icon-btn:last-child,
+.story-script-line:focus-within .story-script-line-tools .ui-icon-btn:last-child,
+.story-script-line-open .story-script-line-tools .ui-icon-btn:last-child,
+.story-script-line:hover > .story-field > .btn,
+.story-script-line:focus-within > .story-field > .btn {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .story-script-line-tools .ui-icon-btn:last-child,
+  .story-script-line > .story-field > .btn {
+    opacity: 1;
+  }
+}
+
+/* The line's text and its Edit button on one row while reading. */
+.story-script-line > .story-field {
+  margin-bottom: 0;
+}
+
+.story-script-line > .story-field:not(:has(textarea)) {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.story-script-line > .story-field:not(:has(textarea)) > .story-field-value {
+  flex: 1;
+  min-width: 0;
+}
+
+.story-script-line > .story-field:not(:has(textarea)) > .btn {
+  flex-shrink: 0;
+  padding: 2px 8px;
+}
+
+.story-script-line-details {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border-color-hover);
+}
+
+.story-script-line-details .story-field,
+.story-script-line-details .form-group {
+  margin-bottom: 0;
+}
+
+.story-script-line-details .story-script-line-speaker {
+  max-width: 18rem;
+  min-height: 32px;
+  padding: 5px 10px;
+}
+
+.story-script-line-details .story-script-line-asset {
+  margin-top: 0;
+}
+
+.story-script-line-details .story-script-line-asset > .chip {
+  align-self: flex-start;
+}
+
+.story-script-scene-more {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-color);
+}
+
+.story-script-scene-more > summary {
+  cursor: pointer;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.story-script-scene-more > summary:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.story-script-scene-more[open] > summary {
+  margin-bottom: 8px;
+}
+
+@media (max-width: 600px) {
+  .story-script-line .story-script-line-emotion {
+    flex-basis: auto;
+  }
+  .story-script-line-who {
+    max-width: 8rem;
+  }
+}
+
+/* --- Storyboard: filmstrip and the open shot -------------------------------- */
+
+.story-storyboard-board {
+  margin: 14px 0;
+}
+
+.story-storyboard-board .ui-card-body {
+  padding: var(--space-3) var(--space-4);
+}
+
+.story-filmstrip {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+  scrollbar-width: thin;
+}
+
+.story-filmstrip-scene {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* As wide as its shots, never wider: a one-shot scene's label truncates
+   instead of pushing its column (and the strip) wider. */
+.story-filmstrip-scene-label {
+  width: 0;
+  min-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--text-tertiary);
+}
+
+.story-filmstrip-shots {
+  display: flex;
+  gap: 6px;
+}
+
+.story-filmstrip-transition {
+  flex-shrink: 0;
+  align-self: center;
+  margin-top: 18px;
+  padding: 2px 7px;
+  border: 1px dashed var(--border-color-hover);
+  border-radius: 999px;
+  font-size: 10.5px;
+  white-space: nowrap;
+  color: var(--text-tertiary);
+}
+
+.story-filmstrip-thumb {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 78px;
+  padding: 3px;
+  border: 2px solid transparent;
+  border-radius: var(--radius-md);
+  background: var(--bg-input);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.story-filmstrip-thumb:hover {
+  border-color: var(--border-color-hover);
+}
+
+.story-filmstrip-thumb-selected,
+.story-filmstrip-thumb-selected:hover {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.story-filmstrip-thumb:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.story-filmstrip-image {
+  position: relative;
+  display: block;
+  aspect-ratio: 9 / 16;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+}
+
+.story-filmstrip-image img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.story-filmstrip-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  font-size: 10px;
+  text-align: center;
+  color: var(--text-tertiary);
+}
+
+.story-filmstrip-duration {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.story-filmstrip-id {
+  padding: 0 2px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+/* The state marks (image, keyframe check, clip) ride on the thumbnail's top
+   edge, on their own dark chip so they read over any image. */
+.story-filmstrip-marks {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.7);
+}
+
+.story-filmstrip-marks:empty {
+  display: none;
+}
+
+.story-filmstrip-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-secondary);
+}
+
+.story-filmstrip-mark-success { background: rgba(16, 185, 129, 0.28); color: #6ee7b7; }
+.story-filmstrip-mark-warning { background: rgba(245, 158, 11, 0.3); color: #fcd34d; }
+.story-filmstrip-mark-danger { background: rgba(239, 68, 68, 0.3); color: #fca5a5; }
+.story-filmstrip-mark-info { background: rgba(59, 130, 246, 0.3); color: #93c5fd; }
+
+.story-storyboard-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 14px 0;
+}
+
+.story-storyboard-detail .story-storyboard-scene-header {
+  margin: 0;
+}
+
+.story-storyboard-detail .story-storyboard-shot {
+  margin: 0;
+}
+
+.story-shot-media-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+  gap: 0 16px;
+}
+
+.story-storyboard-boundary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.story-storyboard-boundary .form-label {
+  margin: 0;
+}
+
+.story-storyboard-boundary .story-storyboard-transition {
+  margin: 0;
+}
+
+.story-storyboard-section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 14px 0;
+  scroll-margin-top: 16px;
+}
+
+.story-storyboard-section > * {
+  margin: 0;
+}
+
+/* --- Review: hero and checklist ---------------------------------------------- */
+
+.episode-studio .story-review-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 280px) minmax(0, 1fr);
+  gap: var(--space-5);
+  align-items: start;
+}
+
+.story-review-hero-media {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.story-review-hero-video,
+.story-review-hero-still,
+.story-review-hero-placeholder {
+  display: block;
+  width: 100%;
+  max-height: 70vh;
+  aspect-ratio: 9 / 16;
+  border-radius: var(--radius-md);
+  background: #000;
+  object-fit: contain;
+}
+
+.story-review-hero-placeholder {
+  background: var(--bg-input);
+}
+
+.story-review-hero-caption {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+.story-review-hero-side {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.story-review-hero-side .story-step-actions,
+.story-review-hero-side .form-hint {
+  margin: 0;
+}
+
+.story-review-checklist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+}
+
+.story-review-check {
+  display: grid;
+  grid-template-columns: 18px 6.5rem minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: var(--text-sm);
+}
+
+.story-review-check + .story-review-check {
+  border-top: 1px solid var(--border-color);
+}
+
+.story-review-check-icon {
+  margin-top: 1px;
+}
+
+.story-review-check-done .story-review-check-icon { color: var(--success); }
+.story-review-check-stale .story-review-check-icon { color: var(--warning); }
+.story-review-check-pending .story-review-check-icon { color: var(--text-tertiary); }
+
+.story-review-check-label {
+  font-weight: 650;
+  color: var(--text-primary);
+}
+
+.story-review-check-detail {
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.story-review-strip-title {
+  margin: 18px 0 8px;
+  font-size: var(--text-sm);
+  font-weight: 650;
+  color: var(--text-secondary);
+}
+
+/* --- Preview: the render controls in the card header ------------------------ */
+
+.story-render-header .ui-card-actions .story-step-actions {
+  margin: 0;
+}
+
+@media (max-width: 720px) {
+  .episode-studio .story-review-hero {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .story-review-hero-media {
+    max-width: 320px;
+    width: 100%;
+    margin: 0 auto;
+  }
+}
+
+@media (max-width: 480px) {
+  .story-review-check {
+    grid-template-columns: 18px minmax(0, 1fr);
+  }
+  .story-review-check-detail {
+    grid-column: 2;
+  }
+  .episode-stepper-item {
+    min-width: 124px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .episode-stepper-node,
+  .story-script-line,
+  .story-script-line-tools .ui-icon-btn:last-child,
+  .story-script-line > .story-field > .btn,
+  .story-script-warnings-chevron,
+  .story-filmstrip-thumb {
+    transition: none;
   }
 }

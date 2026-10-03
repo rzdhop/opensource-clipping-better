@@ -4827,3 +4827,42 @@ via `CARD`; `test_dashboard_story_shared` (polling, ready rule) and `test_story_
 the "New story" stepper row is gone (its language is a header chip). The old `.stepper*`, `.story-cast-grid` and
 `.story-places-grid` rules are unused (stage 5's sweep). Bundle: JS 594.04 kB (gzip 165.97), CSS 63.15 kB.
 
+
+## DEC-256 — The episode studio gets a progress stepper, compact script lines, a storyboard filmstrip and a review hero; StoryboardPane.jsx is split (dashboard overhaul stage 4, after DEC-255)
+**Context.** Stage 4 (the riskiest) of `.claude/plans/dashboard/01-ai-story-ui-overhaul-plan.md`. `/story/:id/episodes/:ep`
+showed no sense of where the episode stood; every script line carried its speaker select, emotion, delivery, timing
+label and re-voice control inline (18 lines, a wall of controls); the storyboard stacked every shot card in a
+1,550-line `StoryboardPane.jsx`; the review was a block of chips; three panes at 1100 px left ~280 px each.
+**Decision.**
+- **Stepper** (`episode/EpisodeStepper.jsx`, under the header): Script, Storyboard, Keyframes, Clips (Assets at tier 1),
+  Render, Review (Metadata on a legacy episode), each done / active (the first not done) / pending, from the episode
+  payload only: `script.approved_at`; `storyboard.approved_at`; `assets.keyframes.approval === 'current'` (legacy:
+  every shot image current, or the assets approved); `assets.fingerprint === 'current'`; a completed, current render
+  with an output; `review.ready` (legacy: metadata written and current). A stale approval (keyframes or fingerprint
+  `stale`, render out of date or failed, stale scenes or outdated prompts) shows a warning mark. A running job marks
+  its step from `job.step` (the one click marks the active step); the fast track's feed regex stays the button's text.
+  A click selects the tab below 1100 px (Keyframes / Clips: the Storyboard tab at `#episode-keyframes` /
+  `#episode-clips`, hash `#keyframes` / `#clips`, also on a reload) or scrolls to the section on the wide layout.
+- **Wide layout** (>= 1100 px, still `useIsWide`): the review on top, Script | Storyboard in two columns, the Preview
+  full width under them. Polling, the feed, the stop reason and the header (Generate, estimate, checkbox) unchanged.
+- **Script**: scenes are kit Cards (function, place, emotion and timing badges, the cast as avatar chips); a line is
+  one row (portrait avatar or initial, name, one emotion select, duration badge, play) plus its text; the speaker
+  select, delivery, timing source, take and "Re-voice this line" open from a toolbar toggle (aria-expanded; shown on
+  hover/focus, always on touch); sound cues, on-screen text and the scene's regenerate fold under "More". The timing
+  flags are a collapsible warning panel at the top. Portraits are fetched once per session (the route is `no-store`).
+- **Storyboard** split into `episode/storyboard/` {StoryboardPane (header, banners, filmstrip, open shot, approve),
+  ShotCard (+ TransitionSelect), ClipControls, AssetsCards (Assets, image offer, Keyframes, Video, Assets approval on
+  Card/Badge)}, code moved as it was. The filmstrip: 9:16 thumbnails grouped by scene with image / keyframe-check /
+  clip marks and the scene transitions; one selected shot opens below with its scene header and boundary select.
+- **Review**: a hero (the signed render player, else the first keyframe) beside an approvals checklist (who, when,
+  flagged shots), the spend, ApproveAll; the tile grid and its overlay kept (focus now lands on Close).
+- **Preview**: kit Cards, the Render button and estimate in the header actions; no behaviour change.
+**Rejected.** Three panes kept (unreadable at 1100 px); Preview and Review as tabs on the wide layout (hides the
+render behind a click); every shot card still stacked under the filmstrip (the endless pane stays); the overlay on
+the kit Dialog (moves the `role="dialog"` literal a contract pins; the overlay already traps Escape).
+**Consequence.** Every API call and payload is unchanged. Contracts moved (paths only, literals kept):
+`test_dashboard_episode_reedit`, `test_story_payload_contract_episode`, `test_dashboard_keyframes_approve`,
+`test_dashboard_generate_episode`, `test_story_defaults` read the storyboard/ file the code moved to;
+`test_dashboard_clip_controls` reads the four storyboard files as one text. Behaviour to know: one shot open at a time;
+the in-scene "cut" markers are gone; line and scene details start collapsed. Bundle: JS 611.63 kB (gzip 171.15),
+CSS 75.85 kB.

@@ -20,7 +20,14 @@ DASHBOARD_SRC = PROJECT_ROOT / "web" / "dashboard" / "src"
 
 FIELDS = DASHBOARD_SRC / "pages" / "story" / "fields.jsx"
 SCRIPT_PANE = DASHBOARD_SRC / "pages" / "story" / "episode" / "ScriptPane.jsx"
-STORYBOARD_PANE = DASHBOARD_SRC / "pages" / "story" / "episode" / "StoryboardPane.jsx"
+# Dashboard overhaul stage 4 (DEC-256) split StoryboardPane.jsx into the
+# storyboard/ folder: the shell, the shot card, the clip controls and the
+# keyframe / asset cards. Each check reads the file its code moved to.
+STORYBOARD_DIR = DASHBOARD_SRC / "pages" / "story" / "episode" / "storyboard"
+STORYBOARD_PANE = STORYBOARD_DIR / "StoryboardPane.jsx"
+SHOT_CARD = STORYBOARD_DIR / "ShotCard.jsx"
+ASSETS_CARDS = STORYBOARD_DIR / "AssetsCards.jsx"
+STORYBOARD_FILES = (STORYBOARD_PANE, SHOT_CARD, STORYBOARD_DIR / "ClipControls.jsx", ASSETS_CARDS)
 PREVIEW_PANE = DASHBOARD_SRC / "pages" / "story" / "episode" / "PreviewPane.jsx"
 EPISODE_STUDIO = DASHBOARD_SRC / "pages" / "story" / "EpisodeStudio.jsx"
 INDEX_CSS = DASHBOARD_SRC / "index.css"
@@ -100,7 +107,7 @@ def test_no_login_or_token_reference_added_to_script_pane():
 # ============================================================ StoryboardPane.jsx
 
 def test_a_stale_shot_reads_needs_a_new_image():
-    src = _read(STORYBOARD_PANE)
+    src = _read(SHOT_CARD)
     match = re.search(r"const SHOT_STATE_LABELS = \{(.*?)\}", src, re.DOTALL)
     assert match, "SHOT_STATE_LABELS not found in StoryboardPane.jsx"
     body = match.group(1)
@@ -115,15 +122,16 @@ def test_a_stale_shot_reads_needs_a_new_image():
 def test_framing_camera_motion_and_transition_controls_exist():
     """Motion/framing/transition controls (plan 11 stage 11's goal) were
     already built for phase 4; this only guards they were not lost."""
-    src = _read(STORYBOARD_PANE)
+    src = _read(SHOT_CARD)
     assert "saveFraming" in src and "FRAMINGS.map" in src
     assert "saveCameraMotion" in src and "CAMERA_MOTIONS.map" in src
     assert "TransitionSelect" in src and "TRANSITIONS.map" in src
 
 
 def test_no_login_or_token_reference_added_to_storyboard_pane():
-    src = _read(STORYBOARD_PANE)
-    assert "token" not in src.lower()
+    for path in STORYBOARD_FILES:
+        src = _read(path)
+        assert "token" not in src.lower(), path.name
 
 
 # ============================================================ PreviewPane.jsx
@@ -315,7 +323,7 @@ def test_assets_header_surfaces_a_blocked_estimate_instead_of_stalling():
     clears only the script's, stage 7) still 409s GET /estimate/assets even
     though AssetsHeader already gates the fetch on the storyboard's own
     approval alone."""
-    src = _read(STORYBOARD_PANE)
+    src = _read(ASSETS_CARDS)
     header = _header_body(src, "AssetsHeader")
     assert "estimateError" in header
     assert ".catch((err) => { setEstimate(null); setEstimateError(err.message)" in header
@@ -344,7 +352,7 @@ def test_every_estimate_error_chip_wraps_instead_of_riding_chip_nowrap():
     not be a short pill (stage-10 lesson, applied uniformly this round)."""
     for path, name in (
         (PREVIEW_PANE, "MetadataHeader"),
-        (STORYBOARD_PANE, "AssetsHeader"),
+        (ASSETS_CARDS, "AssetsHeader"),
         (EPISODE_STUDIO, "FastTrackHeader"),
         (SCRIPT_PANE, "MeasureVoices"),
     ):
@@ -433,14 +441,14 @@ def test_storyboard_pane_reads_the_assets_regenerate_blocked_field():
 
 
 def test_shot_image_block_takes_an_assets_blocked_prop():
-    src = _read(STORYBOARD_PANE)
+    src = _read(SHOT_CARD)
     match = re.search(r"function ShotImageBlock\(\{([^)]*)\}\)\s*\{", src)
     assert match, "ShotImageBlock not found"
     assert "assetsBlocked" in match.group(1), "ShotImageBlock does not take an assetsBlocked prop"
 
 
 def test_shot_images_regenerate_control_is_disabled_while_assets_regeneration_is_blocked():
-    src = _read(STORYBOARD_PANE)
+    src = _read(SHOT_CARD)
     block = _function_body(src, r"function ShotImageBlock\(\{[^)]*\}\)\s*\{", "ShotImageBlock")
     match = re.search(r"<RegenerateControl[\s\S]*?disabled=\{([^}]*)\}", block)
     assert match, "RegenerateControl not found in ShotImageBlock"
@@ -495,7 +503,7 @@ def test_no_login_or_token_reference_added_by_the_13b_polish_round():
     # token, DEC-163) unrelated to auth -- scoped to PlatformCard, the only
     # piece this round touches there, same reasoning as the stage-11 guard
     # above (test_no_login_or_token_reference_added_to_preview_pane).
-    for path in (SCRIPT_PANE, STORYBOARD_PANE):
+    for path in (SCRIPT_PANE, *STORYBOARD_FILES):
         src = _read(path)
         assert "token" not in src.lower()
         assert "sign in" not in src.lower() and "sign-in" not in src.lower()

@@ -5,6 +5,8 @@
 // cost ledger and a download link. Mirrors StoryboardPane.jsx's /
 // ScriptPane.jsx's shape and conventions (spec 10; DEC-164: the subtitles
 // toggle is a per-episode render parameter that re-runs only the final pass).
+// Dashboard overhaul stage 4 (DEC-256): each block is a kit Card, the render's
+// controls in its header's actions; no behaviour changed.
 
 import { useEffect, useRef, useState } from 'react'
 import { runStoryStep, regenerateStory, fetchStoryEstimate } from '../../../api'
@@ -12,6 +14,7 @@ import EstimateChip from '../../../components/EstimateChip'
 import RouteChip from '../../../components/RouteChip'
 import { RegenerateControl, StepError } from '../fields'
 import { formatUsd } from '../../../lib/format'
+import { Badge, Card, CardBody, CardHeader } from '../../../ui'
 
 // clipping.aistory.render.partial.RENDER_REUSE_REASONS / schemas.
 // RENDER_REUSE_REASONS, verbatim: one line per shot in "Changes since last
@@ -146,8 +149,31 @@ function RenderHeader({ storyId, ep, episode, assetsApproved, busy, onChange }) 
   }
 
   return (
-    <div className="card story-render-header">
-      <h4 className="card-title">Render</h4>
+    <Card className="story-render-header">
+      <CardHeader
+        title="Render"
+        actions={(
+          <div className="story-step-actions">
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={handleRun}
+              disabled={Boolean(reason) || Boolean(estimateError) || running}
+              title={reason || estimateError || undefined}
+            >
+              {running ? <><span className="spinner"></span> Rendering…</> : hasRender ? 'Render again' : 'Render'}
+            </button>
+            {estimate && !estimateError && (
+              <span className="chip" title={estimate.message || ''}>
+                est. ${formatUsd(estimate.est_usd)} · {estimate.units.shots} shot{estimate.units.shots === 1 ? '' : 's'}
+                {' · ~'}{estimate.minutes} min
+              </span>
+            )}
+            {estimate && !estimateError && <RouteChip routeClass={estimate.route_class} />}
+          </div>
+        )}
+      />
+      <CardBody>
       <div className="form-group story-render-subtitles">
         <label className="form-label">Subtitles</label>
         <select
@@ -171,31 +197,14 @@ function RenderHeader({ storyId, ep, episode, assetsApproved, busy, onChange }) 
         </label>
       )}
       {!fillFailedWithMotion && renderBlocked && <p className="form-hint">{renderBlocked}</p>}
-      <div className="story-step-actions">
-        <button
-          type="button"
-          className="btn btn-primary"
-          onClick={handleRun}
-          disabled={Boolean(reason) || Boolean(estimateError) || running}
-          title={reason || estimateError || undefined}
-        >
-          {running ? <><span className="spinner"></span> Rendering…</> : hasRender ? 'Render again' : 'Render'}
-        </button>
-        {estimate && !estimateError && (
-          <span className="chip" title={estimate.message || ''}>
-            est. ${formatUsd(estimate.est_usd)} · {estimate.units.shots} shot{estimate.units.shots === 1 ? '' : 's'}
-            {' · ~'}{estimate.minutes} min
-          </span>
-        )}
-        {estimate && !estimateError && <RouteChip routeClass={estimate.route_class} />}
-      </div>
       {reason && <p className="form-hint">{reason}</p>}
       <StepError
         message={estimateError || error}
         errors={estimateError ? estimateErrors : errors}
         className="story-step-error"
       />
-    </div>
+      </CardBody>
+    </Card>
   )
 }
 
@@ -227,9 +236,9 @@ function RenderMedia({ episode, assetsApproved, onChange }) {
         : "The episode's assets are not approved yet: approve them (the Storyboard tab) before rendering.")
       : `The last render ended ${render.state}: see the activity log above, or click Render again.`
     return (
-      <div className="card story-render-empty">
+      <Card padded className="story-render-empty">
         <p className="form-hint">{message}</p>
-      </div>
+      </Card>
     )
   }
 
@@ -241,7 +250,7 @@ function RenderMedia({ episode, assetsApproved, onChange }) {
   const stages = render.stages || {}
 
   return (
-    <div className="card story-render-media">
+    <Card padded className="story-render-media">
       {render.out_of_date && (
         <p className="chip chip-warn story-render-outdated">
           Out of date — the assets changed since this render; render again to pick them up.
@@ -289,7 +298,7 @@ function RenderMedia({ episode, assetsApproved, onChange }) {
       <a className="btn btn-secondary btn-sm" href={downloadUrl} download>
         ⬇ Download video
       </a>
-    </div>
+    </Card>
   )
 }
 
@@ -333,8 +342,9 @@ function ChangesSinceRender({ storyId, ep, episode, busy, onChange }) {
   }
 
   return (
-    <div className="card story-render-changes">
-      <h4 className="card-title">Changes since last render</h4>
+    <Card className="story-render-changes">
+      <CardHeader title="Changes since last render" />
+      <CardBody>
       {changes.blocked ? (
         <p className="form-hint">{changes.blocked}</p>
       ) : changes.current ? (
@@ -364,7 +374,8 @@ function ChangesSinceRender({ storyId, ep, episode, busy, onChange }) {
         </>
       )}
       <StepError message={error} errors={errors} className="story-step-error" />
-    </div>
+      </CardBody>
+    </Card>
   )
 }
 
@@ -414,8 +425,12 @@ function MetadataHeader({ storyId, ep, episode, renderReady, busy, onChange }) {
   }
 
   return (
-    <div className="card story-metadata-header">
-      <h4 className="card-title">Metadata</h4>
+    <Card className="story-metadata-header">
+      <CardHeader
+        title="Metadata"
+        subtitle="Title, description, hashtags and the hook text for each platform"
+      />
+      <CardBody>
       <div className="story-step-actions">
         <button
           type="button"
@@ -434,7 +449,8 @@ function MetadataHeader({ storyId, ep, episode, renderReady, busy, onChange }) {
       </div>
       {reason && <p className="form-hint">{reason}</p>}
       <StepError message={error} errors={errors} className="story-step-error" />
-    </div>
+      </CardBody>
+    </Card>
   )
 }
 
@@ -448,11 +464,12 @@ function PlatformCard({ storyId, ep, platform, entry, stale, metadataBlocked, bu
   }
 
   return (
-    <div className="card story-metadata-card">
-      <div className="story-metadata-card-header">
-        <span className="chip chip-accent">{PLATFORM_LABELS[platform] || platform}</span>
-        {stale && <span className="chip chip-warn">stale</span>}
-      </div>
+    <Card className="story-metadata-card">
+      <CardHeader
+        title={PLATFORM_LABELS[platform] || platform}
+        actions={stale ? <Badge tone="warning">stale</Badge> : null}
+      />
+      <CardBody>
 
       <div className="story-field">
         <div className="story-field-label">Title</div>
@@ -505,7 +522,8 @@ function PlatformCard({ storyId, ep, platform, entry, stale, metadataBlocked, bu
       </div>
 
       <RegenerateControl disabled={busy || Boolean(metadataBlocked)} onRegenerate={regenerate} />
-    </div>
+      </CardBody>
+    </Card>
   )
 }
 
@@ -513,10 +531,12 @@ function CoverImage({ episode }) {
   const render = episode.render
   if (!render || !render.media || !render.media.cover_url) return null
   return (
-    <div className="card story-render-cover">
-      <h4 className="card-title">Cover</h4>
-      <img className="story-render-cover-image" src={render.media.cover_url} alt="Episode cover" />
-    </div>
+    <Card className="story-render-cover">
+      <CardHeader title="Cover" />
+      <CardBody>
+        <img className="story-render-cover-image" src={render.media.cover_url} alt="Episode cover" />
+      </CardBody>
+    </Card>
   )
 }
 
@@ -526,8 +546,9 @@ function LedgerTable({ episode }) {
   const ledger = episode.ledger
   if (!ledger) return null
   return (
-    <div className="card story-ledger">
-      <h4 className="card-title">Cost ledger</h4>
+    <Card className="story-ledger">
+      <CardHeader title="Cost ledger" />
+      <CardBody>
       {ledger.entries.length === 0 ? (
         <p className="form-hint">No spending recorded for this episode yet.</p>
       ) : (
@@ -549,7 +570,8 @@ function LedgerTable({ episode }) {
         <span className="chip">est. ${formatUsd(ledger.totals.est_usd)}</span>
         <span className="chip">paid ${formatUsd(ledger.totals.paid_usd)}</span>
       </div>
-    </div>
+      </CardBody>
+    </Card>
   )
 }
 
@@ -602,12 +624,12 @@ export default function PreviewPane({ episode, storyId, ep, story, inFlightJob, 
           </div>
         </>
       ) : (
-        <div className="card story-metadata-empty">
+        <Card padded className="story-metadata-empty">
           <p className="form-hint">
             {renderReady ? 'No metadata written yet — click Write metadata above.'
               : 'Render the episode first, then write its metadata.'}
           </p>
-        </div>
+        </Card>
       )}
 
       <LedgerTable episode={episode} />

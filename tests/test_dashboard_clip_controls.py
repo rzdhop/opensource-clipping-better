@@ -6,7 +6,9 @@ clip control must show its reason as visible text, never only inside a
 ``title`` attribute (the F8 pattern, phase 5 stage 13b, carried forward: a
 ``title`` shows nothing on a phone).
 
-Text contracts over StoryboardPane.jsx, like the rest of the dashboard test
+Text contracts over the storyboard pane's sources (StoryboardPane.jsx, split
+into the storyboard/ folder by the dashboard overhaul's stage 4, DEC-256),
+read as one text, like the rest of the dashboard test
 suite (DEC-012: stdlib + pytest only, no JS runner -- the dashboard tests in
 this repo read JSX source as text).
 """
@@ -15,11 +17,12 @@ import re
 from pathlib import Path
 
 PANE = Path(__file__).resolve().parent.parent / "web" / "dashboard" / "src" / "pages" / "story" / "episode"
-STORYBOARD = PANE / "StoryboardPane.jsx"
+STORYBOARD_DIR = PANE / "storyboard"
+STORYBOARD_FILES = ("StoryboardPane.jsx", "ShotCard.jsx", "ClipControls.jsx", "AssetsCards.jsx")
 
 
 def _src():
-    return STORYBOARD.read_text(encoding="utf-8")
+    return "\n".join((STORYBOARD_DIR / name).read_text(encoding="utf-8") for name in STORYBOARD_FILES)
 
 
 def test_the_clip_block_exists_and_is_gated_on_tier_2_or_more():
