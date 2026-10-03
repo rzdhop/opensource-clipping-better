@@ -55,9 +55,17 @@ VIDEO_API = {"VIDEO_CHAIN": SEEDANCE, **tas.FAL}
 #   after_run:  ef1a91f980aa0457e607e985ee4415f7b4ebae5e984b535fcb6d1ce05008f264
 # The fingerprint constants (current_fingerprint, assets_fingerprint) take no
 # env/caps and are unchanged -- verified the same way, byte for byte.
-TIER1_PAID_UNITS_SHA = "25339e021855433006083e738c5fb2b549186873534993d40007b56ef7024d54"
-TIER1_FREE_UNITS_SHA = "275f78232679994ccc721d0a41c78cc6d7e7092bc1d1f9b5cbb2a62ddfeb45af"
-TIER1_UNITS_AFTER_RUN_SHA = "2c542ebfd346bc9bbbbb9665b4bbc3c40d20e2a89f125da397bdddf2d036813d"
+#
+# Phase 7 follow-up, stage E: recomputed again after the caps moved from 2/6/20
+# to 4/12/40, the same way: with DAILY_CAP_USD=6.00 / PER_STORY_CAP_USD=20.00
+# (and PER_EPISODE_CAP_USD=2.00 on the free call) forced through `env`, this
+# fixture reproduces the 2/6/20 values byte for byte:
+#   paid:       25339e021855433006083e738c5fb2b549186873534993d40007b56ef7024d54
+#   free:       275f78232679994ccc721d0a41c78cc6d7e7092bc1d1f9b5cbb2a62ddfeb45af
+#   after_run:  2c542ebfd346bc9bbbbb9665b4bbc3c40d20e2a89f125da397bdddf2d036813d
+TIER1_PAID_UNITS_SHA = "615cdd4ced635f114dcb0f07c4f983636165dd126664b2992de01284f79ba332"
+TIER1_FREE_UNITS_SHA = "e9a918d9f2e88c367db122aa1190760d383ccd800b0af0b2acff972f0c81cf69"
+TIER1_UNITS_AFTER_RUN_SHA = "159800e19ae5f5bf948faa7b85864d0037e8212f8aede6c7f57d382706f7fea5"
 TIER1_FP_AFTER_RUN = "ace3809bca051e4c02e5ac90cac73eead1a21e73a8f9cf50a0c47a649174dccd"
 TIER1_FP_WITHOUT_LINKS = "85401247ad999e25ea0edac11e06b194b85ce7195c27d4311c448622ae357c4b"
 PURE_FP = "8f4570c1156f97a1ef87dbfbf3a8f9d950e659583530e3765fdb4963f0b081eb"

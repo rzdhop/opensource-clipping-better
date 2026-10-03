@@ -224,8 +224,12 @@ def new_story_profile(settings_env):
 def new_story_offer(settings_env) -> dict:
     """What the new-story form starts from (``GET /api/stories/new-profile``)::
 
-        {"profile", "quality": bool, "missing_keys": [name, ...], "allow_paid": bool,
-         "estimate": <preset_estimate>}
+        {"profile", "quality": bool, "missing_keys": [name, ...], "sound_missing_keys": [name, ...],
+         "allow_paid": bool, "estimate": <preset_estimate>}
+
+    ``sound_missing_keys`` (stage E): the keys the preset's clips still need
+    for their own sound (GEMINI_PAID_API_KEY for Veo) -- the preset runs
+    without them, its clips silent, said in ``estimate.summary``.
 
     ``profile`` is the one a story created now without a profile gets
     (:func:`new_story_profile`, else the store defaults); ``quality`` whether
@@ -241,12 +245,15 @@ def new_story_offer(settings_env) -> dict:
     except ValueError:
         allow_paid = False
     profile = new_story_profile(settings_env)
+    estimate = preset_estimate(merged)
     return {
         "profile": profile if profile is not None else defaults.default_generation_profile(),
         "quality": profile is not None,
         "missing_keys": [name for name in QUALITY_KEYS if not (merged.get(name) or "").strip()],
+        "sound_missing_keys": [row["key"] for row in estimate["keys_needed"]
+                               if SOUND_LINK in row["for"] and not row["set"]],
         "allow_paid": allow_paid,
-        "estimate": preset_estimate(merged),
+        "estimate": estimate,
     }
 
 
@@ -264,18 +271,28 @@ PRESET_STORY_PROPS = 3
 _SHEET_EDITS = 2
 
 
-def _preset_video_link(merged):
-    """The link the quality profile's ``video_link_policy`` (``first_in_chain``)
-    buys clips on: the first hosted link of *merged*'s VIDEO_CHAIN with an
-    adapter's table of clip lengths and a price per second -- as
-    ``steps/clips.hosted_rows`` qualifies one, keys aside (the advice is what
-    to add). A chain that cannot be read or holds no such link: the shipped
-    default chain's."""
-    def first(chain):
+# The keys the preset's clips need for their own sound (stage E): the link
+# that makes it, Veo 3.1 lite, is billed on its own key (RC-V4).
+SOUND_LINK = "gemini/veo-3.1-lite"
+
+
+def _preset_video_link(merged, *, sound=False):
+    """The link the quality profile's ``video_link_policy`` buys clips on:
+    the first hosted link of *merged*'s VIDEO_CHAIN with an adapter's table
+    of clip lengths and a price per second -- as ``steps/clips.hosted_rows``
+    qualifies one, keys aside (the advice is what to add). With *sound*
+    (``first_with_audio`` on an ambience preset, stage E): the first such
+    link whose clips always carry sound and whose keys *merged* holds, else
+    the first as above (the estimate then says the clips are silent). A
+    chain that cannot be read or holds no such link: the shipped default
+    chain's."""
+    def first(chain, *, sounding=False):
         for link in chain:
             label = describe(link)
             if (link.provider == "local" or label in video_providers.REFUSED_LINKS
                     or label not in video_providers.CLIP_LENGTHS):
+                continue
+            if sounding and (video_providers.AUDIO.get(label) != "always" or gen.missing_keys(link, merged or {})):
                 continue
             try:
                 price = pricing.price_for(link)
@@ -286,10 +303,21 @@ def _preset_video_link(merged):
         return None
 
     try:
-        found = first(gen.chain_from_env(gen.VIDEO, merged or {}))
+        chain = gen.chain_from_env(gen.VIDEO, merged or {})
     except ChainError:
-        found = None
-    return found or first(gen.parse_generation_chain(gen.VIDEO, gen.DEFAULT_CHAINS[gen.VIDEO]))
+        chain = []
+    found = first(chain, sounding=True) if sound else None
+    return found or first(chain) or first(gen.parse_generation_chain(gen.VIDEO, gen.DEFAULT_CHAINS[gen.VIDEO]))
+
+
+def _keys_needed(merged, sound_link) -> list:
+    """What the preset needs, each key with what it is for and whether
+    *merged* holds it -- never its value."""
+    rows = [(name, "the images (sheets, plates, props, keyframes) and silent clips") for name in QUALITY_KEYS]
+    for name in gen.env_keys_for(gen.parse_generation_chain(gen.VIDEO, sound_link)[0]):
+        rows.append((name, f"clips with their own sound ({sound_link})"))
+    return [{"key": name, "for": what, "set": bool((((merged or {}).get(name)) or "").strip())}
+            for name, what in rows]
 
 
 def _usd(amount) -> str:
@@ -302,6 +330,7 @@ def preset_estimate(merged=None) -> dict:
     v2 episode template alone, so it can never drift from them::
 
         {"profile", "label", "episode_usd", "story_usd", "keys": [...],
+         "keys_needed": [{"key", "for", "set"}], "ambience": bool,
          "summary": "≈ $X an episode (N shots animated) plus ≈ $Y once per story ...",
          "assumptions": sentence,
          "episode": {"shots", "seconds", "billed_seconds", "video_link", "resolution",
@@ -320,7 +349,16 @@ def preset_estimate(merged=None) -> dict:
     character's portrait on the sheet role's text-to-image link and its two
     sheets on the edit link, a master plate per place, an image per prop
     (:data:`PRESET_STORY_CHARACTERS` & co.). Calls nothing; never reads a
-    key's value."""
+    key's value.
+
+    Phase 7 follow-up, stage E: the preset is an ambience story (tier 3,
+    ``video_link_policy: first_with_audio``), so its clips are priced on
+    Veo 3.1 lite (:data:`SOUND_LINK`) once *merged* holds its key, with
+    their own ambience (``ambience`` true, said in the summary); without
+    it, on the first link as above, the summary saying there is no
+    ambience and which key brings it. ``keys_needed`` names each key the
+    preset reads, what it is for and whether it is set (``keys`` stays the
+    keys a new story needs for the preset to be its default)."""
     profile = defaults.quality_generation_profile()
     settings = budget_mod.profile_settings(profile["budget_profile"])
     story_doc = {"generation_profile": profile}
@@ -337,7 +375,10 @@ def preset_estimate(merged=None) -> dict:
     shots = sum(slot["count"][0] for name, slot in slots.items() if name not in ("recap", "body"))
     shots += template["default_body_count"]
     seconds = template["target_s"]
-    video_link = _preset_video_link(merged)
+    # Stage E: an ambience preset prices its clips where they make sound once that key is set.
+    ambient = ambience(story_doc) and settings.get("video_link_policy") == "first_with_audio"
+    video_link = _preset_video_link(merged, sound=ambient)
+    sound_on = ambient and video_providers.AUDIO.get(describe(video_link), "never") != "never"
     resolution = settings.get("video_resolution") or pricing.DEFAULT_RESOLUTION
     per_second = price(video_link, resolution)
     billed = shots * video_plan.requested_seconds(describe(video_link), seconds / shots)
@@ -358,8 +399,15 @@ def preset_estimate(merged=None) -> dict:
 
     label = settings.get("label") or profile["budget_profile"]
     video_label = describe(video_link)
+    keys_needed = _keys_needed(merged, SOUND_LINK)
     summary = (f"≈ {_usd(episode_usd)} an episode ({shots} shots animated) plus ≈ {_usd(story_usd)} once per "
                "story for sheets, plates and props")
+    if sound_on:
+        summary += "; each clip brings its own ambience and sound effects"
+    elif ambient:
+        missing = [row["key"] for row in keys_needed if not row["set"] and SOUND_LINK in row["for"]]
+        summary += (f"; no ambience: add {' and '.join(missing)} for Veo's sound" if missing
+                    else f"; no ambience: {video_label} makes clips with no sound")
     assumptions = (
         f"An episode: {shots} shots over the v2 template's {seconds:g} s target, each a {video_label} clip at "
         f"{resolution} rounded up to whole seconds ({billed} s billed at ${per_second:g} a second = "
@@ -369,12 +417,18 @@ def preset_estimate(merged=None) -> dict:
         f"{' and '.join(dict.fromkeys(map(describe, (portrait_link, sheet_edit_link, plate_link, prop_link))))}"
         f" = {_usd(story_usd)}). Prices from the table of "
         f"{pricing.PRICES_AS_OF}. Writing is not counted: the story's writing chain tries its free links first.")
+    if ambient:
+        sound_keys = " and ".join(row["key"] for row in keys_needed if SOUND_LINK in row["for"])
+        assumptions += (f" Keys: {' and '.join(QUALITY_KEYS)} for the images; {sound_keys} for clips with their own "
+                        f"sound ({SOUND_LINK}: ambience and sound effects under the dialogue, never a voice).")
     return {
         "profile": profile["budget_profile"],
         "label": label,
         "episode_usd": round(episode_usd, 4),
         "story_usd": round(story_usd, 4),
         "keys": list(QUALITY_KEYS),
+        "keys_needed": keys_needed,
+        "ambience": bool(sound_on),
         "summary": summary,
         "assumptions": assumptions,
         "episode": {

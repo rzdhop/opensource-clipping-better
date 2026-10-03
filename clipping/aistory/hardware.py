@@ -278,8 +278,10 @@ def billed_preset_row(env=None) -> dict:
     QUALITY_KEYS``). *env* is the merged Settings (for VIDEO_CHAIN)."""
     estimate = media_policy.preset_estimate(env)
     keys = list(media_policy.QUALITY_KEYS)
+    sound = [row for row in estimate["keys_needed"] if row["key"] not in keys]
+    also = "".join(f", and {row['key']} for {row['for']}" for row in sound)
     hint = (f"No good local image or video model on this host. Recommended: the {estimate['label']} preset, "
-            f"{estimate['summary']}. Add {', '.join(keys)} in Settings.")
+            f"{estimate['summary']}. Add {', '.join(keys)} in Settings for the images{also}.")
     return {"task": "billed APIs", "model": f"{estimate['label']} preset", "install_hint": hint,
             "workflow": None, "keys": keys, "estimate": estimate}
 

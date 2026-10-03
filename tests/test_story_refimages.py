@@ -583,15 +583,15 @@ def test_no_editor_on_the_route_stops_before_any_call_of_any_kind(store, tmp_pat
     error, log = _refused(m.character_image, store, story_id, CHAR, "turnaround", env={**FREE, **GEMINI},
                           adapters=adapters, error=m.NeedsEditor)
 
-    # DEC-223 (AI Story phase 7 stage 2a): the default daily cap is now $6.00 (was $3.00).
+    # DEC-223 (AI Story phase 7 stage 2a): the default daily cap is now $6.00 (was $3.00); $12.00 since stage E (phase 7 follow-up).
     assert error.reasons == [
         "local/comfyui: route is api",
         "gemini/nano-banana-2-lite: refused: est $0.034 on gemini/nano-banana-2-lite; allow_paid is off "
-        "(today $0.00 of $6.00)",
+        "(today $0.00 of $12.00)",
         "fal/seedream-4-edit: no API key (FAL_KEY is not set)",
         "fal/flux-kontext-pro: no API key (FAL_KEY is not set)",
         "gemini/nano-banana-2: refused: est $0.067 on gemini/nano-banana-2; allow_paid is off "
-        "(today $0.00 of $6.00)",
+        "(today $0.00 of $12.00)",
     ]
     assert (error.readiness["ready"], error.readiness["route_class"], error.readiness["link"]) == (
         False, "blocked", None)
@@ -710,9 +710,9 @@ def test_paid_off_refuses_a_paid_editor_with_the_numbers_and_sends_nothing(store
     error, _log = _refused(m.character_image, store, story_id, CHAR, "turnaround", env=SEEDREAM,
                            transport=transport, error=m.NeedsEditor)
 
-    # DEC-223 (AI Story phase 7 stage 2a): the default daily cap is now $6.00 (was $3.00).
+    # DEC-223 (AI Story phase 7 stage 2a): the default daily cap is now $6.00 (was $3.00); $12.00 since stage E (phase 7 follow-up).
     assert error.reasons == [
-        "fal/seedream-4-edit: refused: est $0.030 on fal/seedream-4-edit; allow_paid is off (today $0.00 of $6.00)"]
+        "fal/seedream-4-edit: refused: est $0.030 on fal/seedream-4-edit; allow_paid is off (today $0.00 of $12.00)"]
     assert transport.calls == []  # RC-T3 / RC-P10
     assert _ledger(store, story_id) == [] and not _spend(tmp_path).exists()
 
@@ -837,12 +837,12 @@ def test_no_link_of_the_image_chain_names_every_reason_with_the_numbers(store, t
     error, log = _refused(m.character_image, store, story_id, CHAR, "portrait", env=env, transport=transport)
 
     assert not isinstance(error, m.NeedsEditor)
-    # DEC-223 (AI Story phase 7 stage 2a): the default daily cap is now $6.00 (was $3.00).
+    # DEC-223 (AI Story phase 7 stage 2a): the default daily cap is now $6.00 (was $3.00); $12.00 since stage E (phase 7 follow-up).
     assert error.reasons == [
         "gemini/nano-banana-2-lite: paid link; allow_paid is off (est $0.034 per image; today $0.00 of the "
-        "$6.00 daily cap)",
+        "$12.00 daily cap)",
         "fal/flux-schnell: paid link; allow_paid is off (est $0.003 per image; today $0.00 of the "
-        "$6.00 daily cap)",
+        "$12.00 daily cap)",
     ]
     assert "no link of IMAGE_CHAIN could make it on route auto" in str(error)
     assert transport.calls == [] and _ledger(store, story_id) == []

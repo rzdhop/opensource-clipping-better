@@ -18,7 +18,7 @@
     },
     "quality": {
       "label": "Quality (billed APIs)",
-      "cap_usd": 2.0,
+      "cap_usd": 4.0,
       "images": "quality_roles",
       "roles": {
         "sheet": ["fal/seedream-4.5", "fal/seedream-4.5-edit"],

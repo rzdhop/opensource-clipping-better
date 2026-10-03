@@ -434,9 +434,9 @@ class SettingsResponse(BaseModel):
     allow_slow_chain: bool = False
     # Budget (AI Story): five-place defaults, clipping/providers/budget.py
     allow_paid: bool = False
-    per_episode_cap_usd: float = 2.0
-    daily_cap_usd: float = 6.0
-    per_story_cap_usd: float = 20.0
+    per_episode_cap_usd: float = 4.0
+    daily_cap_usd: float = 12.0
+    per_story_cap_usd: float = 40.0
     budget_profile: str = ""
     effective_budget_profile: str = "free"
     spend_today_usd: float = 0.0

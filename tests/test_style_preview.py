@@ -441,9 +441,9 @@ def test_paid_off_refuses_the_only_paid_link_with_the_numbers_and_sends_nothing(
     message, log = _refused(store, story_id, {"IMAGE_CHAIN": "gemini/nano-banana-2-lite", **GEMINI}, transport)
 
     # The runner's refusal, verbatim, then the numbers.
-    # DEC-223 (AI Story phase 7 stage 2a): the default daily cap is now $6.00 (was $3.00).
+    # DEC-223 (AI Story phase 7 stage 2a): the default daily cap is now $6.00 (was $3.00); $12.00 since stage E (phase 7 follow-up).
     reason = ("gemini/nano-banana-2-lite: paid link; allow_paid is off "
-              "(est $0.034 per image; today $0.00 of the $6.00 daily cap)")
+              "(est $0.034 per image; today $0.00 of the $12.00 daily cap)")
     assert reason in message
     assert log.count("   ⏭ Skipping gemini/nano-banana-2-lite: paid link; allow_paid is off.") == 3
     assert transport.calls == []  # RC-P10
@@ -768,10 +768,10 @@ def test_the_estimate_is_blocked_when_nothing_can_run_and_says_why_per_link():
 
     assert (body["route_class"], body["ready"], body["link"], body["est_usd"]) == ("blocked", False, None, 0.0)
     reasons = [row["reason"] for row in body["links"]]
-    # DEC-223 (AI Story phase 7 stage 2a): the default daily cap is now $6.00 (was $3.00).
+    # DEC-223 (AI Story phase 7 stage 2a): the default daily cap is now $6.00 (was $3.00); $12.00 since stage E (phase 7 follow-up).
     assert reasons == [
-        "refused: est $0.101 on gemini/nano-banana-2-lite; allow_paid is off (today $0.00 of $6.00)",
-        "refused: est $0.009 on fal/flux-schnell; allow_paid is off (today $0.00 of $6.00)",
+        "refused: est $0.101 on gemini/nano-banana-2-lite; allow_paid is off (today $0.00 of $12.00)",
+        "refused: est $0.009 on fal/flux-schnell; allow_paid is off (today $0.00 of $12.00)",
     ]
     for label, reason in zip(("gemini/nano-banana-2-lite", "fal/flux-schnell"), reasons):
         assert f"{label}: {reason}" in body["message"]
@@ -923,9 +923,9 @@ def test_a_preview_nothing_can_make_is_refused_naming_each_link_and_no_job_exist
 
     assert response.status_code == 409
     detail = response.json()["detail"]
-    # DEC-223 (AI Story phase 7 stage 2a): the default daily cap is now $6.00 (was $3.00).
+    # DEC-223 (AI Story phase 7 stage 2a): the default daily cap is now $6.00 (was $3.00); $12.00 since stage E (phase 7 follow-up).
     assert ("gemini/nano-banana-2-lite: refused: est $0.101 on gemini/nano-banana-2-lite; allow_paid is off "
-            "(today $0.00 of $6.00)") in detail
+            "(today $0.00 of $12.00)") in detail
     assert "cloudflare/flux-1-schnell: no API key" in detail
     assert api.jobs.list_jobs() == [] and api.submitted == []
 

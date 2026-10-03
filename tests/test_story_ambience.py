@@ -586,3 +586,76 @@ def test_guard_a_story_that_does_not_animate_every_shot_keeps_the_held_last_fram
     assert "too_long" not in video
     held = [row for row in video["plan"] if row.get("held_s")]
     assert all(row["shot_id"] == board["shots"][1]["shot_id"] for row in held)
+
+
+# ===================================================== caps and the preset
+#
+# About $3.3-3.5 a 60 s episode on Veo (keyframes on fal, clips at $0.05 a
+# second with their sound): the episode cap goes to $4, the default caps to
+# 4 / 12 / 40 (the 1:3:10 ratio kept; the human's saved Settings override
+# them), and the preset is priced on the audio link once its key is set.
+
+def test_the_default_caps_are_4_12_40_and_the_quality_profile_caps_an_episode_at_4():
+    from clipping.providers import budget as budget_mod
+
+    caps = (budget_mod.PER_EPISODE_CAP_USD, budget_mod.DAILY_CAP_USD, budget_mod.PER_STORY_CAP_USD)
+    assert caps == (4.0, 12.0, 40.0) and caps[1] == 3 * caps[0] and caps[2] == 10 * caps[0]
+    assert budget_mod.budget_from_env({}) == budget_mod.Budget(False, 4.0, 12.0, 40.0, "free")
+    assert budget_mod.budget_from_env({"PER_EPISODE_CAP_USD": "2"}).per_episode_cap_usd == 2.0  # Settings win
+    assert budget_mod.profile_settings("quality")["cap_usd"] == 4.0
+
+
+def test_the_preset_is_priced_on_veo_with_its_sound_when_its_key_is_set():
+    """Fail-first. FAL_KEY and GEMINI_PAID_API_KEY set: the preset's clips
+    on Veo (720p, $0.05 a second, the template's shots rounded to Veo's
+    lengths), its keyframes on fal; the whole episode inside the quality
+    profile's $4 cap; the summary says each clip brings its own ambience;
+    the keys it needs are said, each with what it is for."""
+    from clipping.aistory import media_policy, templates, video_plan
+    from clipping.aistory import defaults
+    from clipping.providers import budget as budget_mod
+    from clipping.providers import pricing
+
+    merged = {**tas.FAL, **GEMINI}
+    estimate = media_policy.preset_estimate(merged)
+    episode = estimate["episode"]
+    template = templates.load_episode_template(defaults.EPISODE_TEMPLATE_ID_V2)
+    assert episode["video_link"] == VEO and episode["price_per_second"] == pricing.PRICES[VEO].usd
+    assert episode["billed_seconds"] == episode["shots"] * video_plan.requested_seconds(
+        VEO, template["target_s"] / episode["shots"])
+    assert estimate["episode_usd"] == pytest.approx(episode["billed_seconds"] * pricing.PRICES[VEO].usd
+                                                    + episode["shots"] * episode["keyframe_usd"])
+    assert 3.0 < estimate["episode_usd"] <= budget_mod.profile_settings("quality")["cap_usd"]
+    assert estimate["ambience"] is True
+    assert "each clip brings its own ambience and sound effects" in estimate["summary"]
+    assert estimate["keys"] == list(media_policy.QUALITY_KEYS)
+    assert [(row["key"], row["set"]) for row in estimate["keys_needed"]] == [
+        ("FAL_KEY", True), ("GEMINI_PAID_API_KEY", True)]
+    assert "images" in estimate["keys_needed"][0]["for"] and "sound" in estimate["keys_needed"][1]["for"]
+    assert "GEMINI_PAID_API_KEY for clips with their own sound" in estimate["assumptions"]
+    assert "test-gemini-paid-key" not in repr(estimate)
+
+
+def test_without_the_veo_key_the_preset_is_priced_on_the_silent_link_and_says_what_brings_the_sound():
+    from clipping.aistory import media_policy
+
+    estimate = media_policy.preset_estimate({**tas.FAL})
+    assert estimate["episode"]["video_link"] == SEEDANCE and estimate["ambience"] is False
+    assert estimate["summary"].endswith("no ambience: add GEMINI_PAID_API_KEY for Veo's sound")
+    assert [(row["key"], row["set"]) for row in estimate["keys_needed"]] == [
+        ("FAL_KEY", True), ("GEMINI_PAID_API_KEY", False)]
+
+    offer = media_policy.new_story_offer({**tas.FAL, "GEMINI_PAID_API_KEY": ""})
+    assert offer["quality"] is True and offer["missing_keys"] == []
+    assert offer["sound_missing_keys"] == ["GEMINI_PAID_API_KEY"]
+    assert offer["estimate"]["episode"]["video_link"] == SEEDANCE
+    keyed = media_policy.new_story_offer({**tas.FAL, **GEMINI})
+    assert keyed["sound_missing_keys"] == [] and keyed["estimate"]["episode"]["video_link"] == VEO
+
+
+def test_the_weak_host_advice_names_both_keys_and_what_each_is_for():
+    from clipping.aistory import hardware
+
+    text = hardware.recommendations_for("cpu_only")[0]["install_hint"]
+    assert "Add FAL_KEY in Settings for the images" in text
+    assert "GEMINI_PAID_API_KEY for clips with their own sound (gemini/veo-3.1-lite)" in text

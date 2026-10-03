@@ -29,10 +29,13 @@ from datetime import datetime, timezone
 
 ALLOW_PAID = False
 # DEC-223 (AI Story phase 7): 2 / 6 / 20, up from 1 / 3 / 10, so one episode
-# on the Quality (billed APIs) preset fits its cap. allow_paid stays off.
-PER_EPISODE_CAP_USD = 2.00   # the author's ceiling (spec 8.5)
-DAILY_CAP_USD = 6.00
-PER_STORY_CAP_USD = 20.00
+# on the Quality (billed APIs) preset fits its cap. Phase 7 follow-up, stage E
+# (the human's choice of 2026-10-02: clips with their own sound on Veo 3.1
+# lite, about $3.3-3.5 a 60 s episode): 4 / 12 / 40, the 1:3:10 ratio kept.
+# The saved Settings still override them. allow_paid stays off.
+PER_EPISODE_CAP_USD = 4.00   # the author's ceiling (spec 8.5)
+DAILY_CAP_USD = 12.00
+PER_STORY_CAP_USD = 40.00
 BUDGET_PROFILE = ""          # "" = resolved from allow_paid
 
 PROFILE_WHEN_FREE = "free"

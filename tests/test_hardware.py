@@ -219,7 +219,10 @@ def test_weak_hosts_recommend_billed_preset_with_cost_and_keys():
         assert (f"≈ ${estimate['episode_usd']:.2f} an episode ({estimate['episode']['shots']} shots animated)"
                 in text), text
         assert f"≈ ${estimate['story_usd']:.2f} once per story for sheets, plates and props" in text, text
-        assert "Add FAL_KEY" in text and "GEMINI_PAID_API_KEY" not in text
+        # Re-pinned (phase 7 follow-up, stage E): FAL_KEY still makes the preset the default; the advice
+        # also names GEMINI_PAID_API_KEY, which gives the preset's clips their own sound (Veo 3.1 lite).
+        assert "Add FAL_KEY in Settings for the images" in text
+        assert "GEMINI_PAID_API_KEY for clips with their own sound" in text
         assert advice["keys"] == list(media_policy.QUALITY_KEYS) == ["FAL_KEY"]
         assert advice["estimate"] == estimate and not advice.get("workflow")
         assert advice["task"] != "video", "the local video rows keep their own checks (test_comfyui_video)"
