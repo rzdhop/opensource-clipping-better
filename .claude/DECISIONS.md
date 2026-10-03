@@ -4790,3 +4790,40 @@ a draft story's portrait is still the best cover; a menu local to the page (stag
 `tests/test_dashboard_stories_list.py`. The status chip is gone from the card (the ribbon says it). Bundle: JS 576.75 kB
 (gzip 161.0), CSS 55.0 kB.
 
+## DEC-255 — A story opens in a routed workspace, one step per screen; the cast, places and props are tile grids (dashboard overhaul stage 3, after DEC-254)
+**Context.** Stage 3 of `.claude/plans/dashboard/01-ai-story-ui-overhaul-plan.md`. `/story/:storyId` was the 912-line
+`NewStoryWizard.jsx` shell: the Visual tier card on top, then every step stacked in one scroll, and the Cast step printed
+every field of every character (Places likewise), an endless page. Regex contracts (DEC-012) pin the shell's polling,
+its ready rule, the series callback and the Visual tier card.
+**Decision.**
+- **Routes**: `/story/:storyId/:step?` renders `StoryWorkspace.jsx`. No step, an unknown step, or `knowledge` on a v1
+  story redirects (replace) to the first step not done, else the last one (`storySteps.currentStepKey`). Step ids are the
+  `STEPS` keys (concepts, bible, style, cast, places, season, knowledge), the ones the list payload's `progress.next`
+  carries. `/story/new` stays `NewStoryWizard.jsx`, now the new-story form only (its contracts did not move);
+  `/story/:storyId/episodes/:ep` is unchanged and ranks above `:step`.
+- **Layout**: `StoryHeader.jsx` (sticky from 769 px up): the cover (the first portrait in cast order, through
+  `fetchStoryCoverUrl`, else the style swatch), the title, chips (language, style, "Animated" on v2, tier, a spinner chip
+  for a running job no step owns), the Visual tier card in a non-modal popover (kept mounted, so a refused switch's
+  "Regenerate on v2" offer survives closing it; Escape and an outside click close it), and one primary action: "Open
+  episode N" / "Generate episode" once `story.status === 'ready'`, else a link to the step to do, else (already there)
+  "Step n of N". `StepRail.jsx`: 240 px, one NavLink per step with its lucide icon, done / to do / locked (the reason as
+  `title`) and a spinner on the step whose job runs (`stepOfJob`, the steps' own `myJob` tests); under 900 px a
+  horizontal stepper above the content. The step renders in a kit `Card` whose header carries the title, a help line,
+  the status badge and "Next step" once done; a locked step shows an `EmptyState` with its `disabledReason` and a link
+  to the current step. A skeleton while the story loads. An advancing action (`onAdvance`) opens the step that unlocked.
+- **Cast / Places**: `EntityGallery.jsx` tiles (portrait 4:5, plate 16:9, prop 1:1; name, role, approval, voice /
+  variants / owner); a click opens the entity's existing card (`CharacterCard`, `PlaceCard`, `PropCard`, untouched)
+  under the tile's row, one at a time; the open entity is the URL hash (`#char_x`, replaced, not pushed), so it deep-links.
+- `StepError` is a danger alert block (icon, `role="alert"`). `GenerationProfileCard.jsx` and `storySteps.js` hold the
+  code moved out of the shell, verbatim; `pricedEpisode` is the shell's priced-episode rule as a function.
+**Rejected.** Keeping one scroll with a sticky table of contents (the endless page stays); a modal per character (loses
+the grid and stacks a dialog over the confirm dialogs); moving each step's estimate chip and primary action into its
+card header (it would rewrite every step's internals; stage 4 can revisit); renaming `NewStoryWizard.jsx` (four more
+contracts would move for a name).
+**Consequence.** Contracts moved (path only, literals unchanged): `test_dashboard_generation_profile` and
+`test_dashboard_switch_pipeline` read `GenerationProfileCard.jsx`; `test_dashboard_phase7_editing`'s card test reads it
+via `CARD`; `test_dashboard_story_shared` (polling, ready rule) and `test_story_payload_contract_series`
+(`afterSeriesAction`, `<SeasonStep`) read `StoryWorkspace.jsx`. The old stepper's `summaryFor` is now the rail's tooltip;
+the "New story" stepper row is gone (its language is a header chip). The old `.stepper*`, `.story-cast-grid` and
+`.story-places-grid` rules are unused (stage 5's sweep). Bundle: JS 594.04 kB (gzip 165.97), CSS 63.15 kB.
+
