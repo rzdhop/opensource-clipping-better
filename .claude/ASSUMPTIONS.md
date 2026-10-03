@@ -481,8 +481,12 @@
 - **A-132** — (DEC-248) J1 version 2 told the format and asked for a severity calls the human's six issues mostly
   minor (the hook's premise, the cliffhanger's reveal, a backstory) and keeps blocking only what a first-time viewer
   cannot follow, and its re-check after a repair converges; a real comprehension failure (who the main character is,
-  what they want) is still called blocking. UNCONFIRMED until the human runs `tools/j1_calibrate.py` on the stuck
-  episode (pass rate, blocking issues per run, their stability) and presses Generate episode again.
+  what they want) is still called blocking. PARTLY CONFIRMED 2026-10-03 (the human, VPS, `tools/j1_calibrate.py
+  --story d0ee5ebd745d --ep 1 --runs 5 --settings` on 3c66552): the stored version-1 report had 6 blocking issues;
+  version 2 passed 5 of 5 runs, 0 blocking and the same 4 minor issues every run (s01 unclear_goal, s04 and s08
+  unintroduced, s05 object_unseen — concrete one-line suggestions), its take-aways identical to version 1's (the
+  viewer always followed the episode). Still unconfirmed: that a real comprehension failure is called blocking, and
+  the re-check's convergence (no blocking issue to repair here); Generate episode on the stuck episode next.
 
 ## Confirmed
 - **A-082** — fal.ai as measured in the paid test (2026-09-29, DEC-174):
