@@ -204,7 +204,7 @@ def test_gemini_tts_cuts_the_static_at_the_end_of_a_line_and_says_so(tmp_path):
         kept = wav.readframes(frames)
     timing = json.loads(pathlib.Path(result.paths[1]).read_text(encoding="utf-8"))
     guard = timing["tail_guard"]
-    assert guard["version"] == 1 and guard["reason"] == "noise_after_gap"
+    assert guard["version"] == 2 and guard["reason"] == "noise_after_gap"
     assert guard["original_s"] == 2.0 and 1.4 <= guard["kept_s"] <= 1.46
     assert timing["duration_s"] == guard["kept_s"] == round(frames / 24000, 3)
     assert result.meta["duration_s"] == timing["duration_s"] and result.meta["tail_guard"] == guard
@@ -272,7 +272,8 @@ def test_edge_and_local_lines_carry_no_tail_guard(tmp_path, monkeypatch):
     ({"provider": "gemini"}, True),
     ({"provider": "gemini", "tail_guard": {"version": 0}}, True),
     ({"provider": "gemini", "tail_guard": "odd"}, True),
-    ({"provider": "gemini", "tail_guard": {"version": 1}}, False),
+    ({"provider": "gemini", "tail_guard": {"version": 1}}, True),  # version 1 missed the real burst (DEC-251)
+    ({"provider": "gemini", "tail_guard": {"version": 2}}, False),
     ({"provider": "edge"}, False),
     ({"provider": "local"}, False),
     (None, False),

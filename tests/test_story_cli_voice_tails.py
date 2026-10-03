@@ -61,7 +61,7 @@ def test_voice_tails_after_the_assets_run_reports_what_was_cut(cli, tmp_path):
     out = cli.capsys.readouterr().out
     assert code == 0
     for line_id, row in _rows(out, theirs).items():
-        assert "cleaned (v1): 0.4" in row and "s cut (noise_after_gap)" in row and "nothing more to cut" in row
+        assert "cleaned (v2): 0.4" in row and "s cut (noise_after_gap)" in row and "nothing more to cut" in row
     assert "5 Gemini lines: 5 cleaned, 0 to clean" in out
 
 

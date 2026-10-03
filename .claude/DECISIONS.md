@@ -4650,3 +4650,28 @@ story's measured lines (the length gate writes to an estimate the voices beat by
 take a second clip from the first's last frame; `test_story_timing`'s "a v2 scene plus hold never exceeds 12 s"
 carve-out for `over` scenes now rests on the stretch, said in its docstring only.
 
+## DEC-251 — The Gemini tail guard, version 2: the real burst is louder than the speech, after a gap, to the file's end (after DEC-250)
+**Context.** The human (2026-10-03), on the deployed episode: "À la fin de chaque réplique il y a encore le crshhhh des
+voix" — though the feed had said "18 Gemini line endings checked: no static to cut". DEC-244's guard was written with
+no real sample ("built on what that noise is: louder than the floor, noise-like, at the end"). Read from the 18 live
+lines (all identical): 60–250 ms of near-silence (−58 to −100 dBFS) after the last word, then ~120 ms at −6 dBFS RMS,
+clipping on its first sample, 2–8 dB LOUDER than the speech itself, zero-crossing rate 0.09–0.35 — a buzz, not white
+noise — running to the very last sample. Version 1 measured the speech level over all low-ZCR frames, so the burst set
+the level it was judged against, read as a loud voiced syllable, became "the end of speech", and nothing followed it.
+**Decision.** `tts_tail.analyse` first looks for an end burst (`_end_burst`): the final active stretch reaches the
+last frame, lasts at most `BURST_MAX_S` 0.20 s, follows a near-silent gap of at least `GAP_MIN_S`, and its median level
+is within `BURST_UNDER_SPEECH_DB` 3 dB of (or above) the speech level measured on the frames BEFORE the last 0.20 s —
+then reason `burst_at_end`, cut in the gap (`GAP_KEEP_S` after it starts), the old limits (`MAX_CUT_S`,
+`MIN_KEEP_RATIO`) kept. Speech never ends that way (every TTS leaves silence after the last word; a shouted last word
+is followed by it too), and a last word at the line's own level is not louder than its syllables. `TAIL_GUARD_VERSION`
+1 → 2, so `tts.tail_guard_due` re-cleans every line cleaned by version 1 on its next assets run, for free (the
+line's duration shrinks 0.26–0.47 s, the script and storyboard re-time, the render is no longer current and the fast
+track renders again). Tests: `tests/test_tts_tail.py` (the live pattern as a buzz and as short static after 80–250 ms
+gaps, why version 1 missed it, a shouted last word followed by silence kept, a last word at the speech level cut at
+the file's end kept, a long static left to the gap rule); the version pins moved to 2.
+**Rejected.** Cutting a fixed 150 ms off every Gemini line (the gap varies 60–250 ms and a future fix on Google's side
+would then eat a word's end); raising `NOISE_ZCR` (the burst's ZCR overlaps a vowel's at 0.09–0.17).
+**Consequence.** All 18 lines of d0ee5ebd745d/ep01 read `burst_at_end` under version 2 (checked offline on the files).
+The threshold rests on one episode's sample (A-136); `voice-tails` shows what version 2 cuts before anything is made
+again.
+

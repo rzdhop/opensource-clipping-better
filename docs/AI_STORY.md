@@ -236,10 +236,13 @@ its prompt, for the place's ambience and the shot's effects — and for no
 voice, music or narration. In the mix that sound sits under the lines,
 ducked like the music bed: every line is still spoken by its character's
 pinned voice, the same in every shot. The burst of static Gemini voices add
-after the last word ("crshhh") is cut and faded when a line is recorded;
-lines recorded before are cleaned on the next assets run without being
-spoken again (`voice-tails` shows what was cut), and every line fades at its
-edges in the mix.
+after the last word ("crshhh") is cut and faded when a line is recorded —
+the real burst, read from a live episode, is a short buzz louder than the
+speech itself after a moment of silence, running to the file's end, and the
+guard's second version looks for exactly that; lines recorded before, or
+cleaned by the first version, are cleaned on the next assets run without
+being spoken again (`voice-tails` shows what was cut), and every line fades
+at its edges in the mix.
 
 **Prompt size limits, and richer prompts within them.** Each link's prompt
 limit is known (`prompt-limits` lists them with their source) and a prompt

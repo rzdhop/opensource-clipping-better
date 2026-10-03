@@ -38,6 +38,20 @@ is then read as active stretches split by near-silent gaps of at least
   it (or where noise starts, if sooner), when what follows holds no voiced
   frame and something audible. An alignment never moves a cut the frames
   made: an STT's last word often stretches into the noise after it.
+- ``burst_at_end`` -- the real Gemini artifact, read on 2026-10-03 from the
+  18 lines of a live episode (every one the same): after the last word and
+  60-250 ms of near-silence, a burst of about 120 ms, 2-8 dB LOUDER than
+  the speech itself (clipping at its first sample), running to the very end
+  of the file with no trailing silence; its zero-crossing rate sits at
+  0.1-0.35 -- a buzz, not white noise -- so the rules above read it as a
+  loud voiced syllable and cut nothing. A stretch that reaches the last
+  frame, lasts :data:`BURST_MAX_S` or less, follows a gap of
+  :data:`GAP_MIN_S` or more and is louder than the speech level measured
+  without it (within :data:`BURST_UNDER_SPEECH_DB`) is that burst: cut in
+  the gap, :data:`GAP_KEEP_S` after it starts. Speech never ends that way --
+  a TTS leaves silence after the last word -- and a shouted last word is
+  not louder than the line's loudest syllables after a pause and cut dead
+  at the file's end.
 - ``suspect`` -- a cut that would remove more than :data:`MAX_CUT_S`, or
   leave less than :data:`MIN_KEEP_RATIO` of the line (an all-noise file):
   nothing is cut, and the report says so.
@@ -59,7 +73,9 @@ import sys
 import tempfile
 import wave
 
-TAIL_GUARD_VERSION = 1
+# 2 (DEC-251): the ``burst_at_end`` rule; every line cleaned by version 1 is
+# cleaned again on its next run (``tts.tail_guard_due``), for free.
+TAIL_GUARD_VERSION = 2
 
 FRAME_S = 0.010
 # A frame is noise-like at this zero-crossing rate or more (crossings per
@@ -95,11 +111,17 @@ MIN_BURST_S = 0.030
 ALIGNED_PAD_S = 0.150
 # The limits: never more than this cut, never less than this share kept.
 MAX_CUT_S = 1.5
+# The end burst (DEC-251): at most this long (the live one is ~120 ms; a
+# longer loud stretch is the gap rule's), and
+# no quieter than this under the speech level measured without it (the live
+# one is 2-8 dB over it).
+BURST_MAX_S = 0.20
+BURST_UNDER_SPEECH_DB = 3.0
 MIN_KEEP_RATIO = 0.5
 FADE_IN_S = 0.005
 FADE_OUT_S = 0.025
 
-REASONS = ("none", "noise_after_gap", "noise_run", "aligned_end", "suspect")
+REASONS = ("none", "burst_at_end", "noise_after_gap", "noise_run", "aligned_end", "suspect")
 
 _FULL_SCALE = 32768.0
 
@@ -208,6 +230,12 @@ def analyse(pcm: bytes, rate: int, *, speech_end_s=None) -> dict:
     threshold = min(max(floor_db + ACTIVE_OVER_FLOOR_DB, speech_db - ACTIVE_MAX_UNDER_SPEECH_DB),
                     speech_db - ACTIVE_MIN_UNDER_SPEECH_DB)
     active = [db >= threshold and db > SILENT_DB for db in dbs]
+    burst = _end_burst(frames, rate)
+    if burst is not None:
+        gap_start, gap_frames_seen, speech_before = burst
+        result.update(floor_db=round(floor_db, 1), speech_db=round(speech_before, 1))
+        keep = min(int(round(GAP_KEEP_S / FRAME_S)), gap_frames_seen // 2)
+        return _limited(result, gap_start + keep, "burst_at_end", n, size, rate)
     low = [act and zcr < NOISE_ZCR for act, (_db, zcr) in zip(active, frames)]
     count = len(frames)
     voiced = [False] * count
@@ -253,6 +281,13 @@ def analyse(pcm: bytes, rate: int, *, speech_end_s=None) -> dict:
 
     if cut is None or cut >= count:
         return result
+    return _limited(result, cut, reason, n, size, rate)
+
+
+def _limited(result, cut, reason, n, size, rate) -> dict:
+    """*result* with the cut at frame *cut* for *reason*, within the limits:
+    more than :data:`MAX_CUT_S` cut, or less than :data:`MIN_KEEP_RATIO`
+    kept, makes the line ``suspect`` and keeps it whole."""
     cut_sample = cut * size
     result["would_cut_s"] = round((n - cut_sample) / rate, 3)
     if (n - cut_sample) / rate > MAX_CUT_S + 1e-9 or cut_sample < MIN_KEEP_RATIO * n:
@@ -260,6 +295,49 @@ def analyse(pcm: bytes, rate: int, *, speech_end_s=None) -> dict:
         return result
     result.update(report=_report(reason, n, cut_sample, rate), cut_sample=cut_sample)
     return result
+
+
+def _end_burst(frames, rate):
+    """The Gemini end burst (module docstring, ``burst_at_end``) in *frames*,
+    or None: ``(gap start frame, gap frames, speech level without the
+    burst)``. The speech level is the 95th percentile of the low-ZCR frames
+    before the last :data:`BURST_MAX_S` -- the burst itself never sets the
+    level it is measured against (that is how version 1 missed it)."""
+    count = len(frames)
+    most = int(round(BURST_MAX_S / FRAME_S))
+    gap_min = max(1, int(round(GAP_MIN_S / FRAME_S)))
+    if count < most + gap_min + VOICED_MIN_FRAMES:
+        return None
+    before = frames[:count - most]
+    dbs_before = [db for db, _zcr in before]
+    voiced_before = [db for db, zcr in before if zcr < NOISE_ZCR]
+    speech_before = _percentile(voiced_before or dbs_before, SPEECH_PERCENTILE)
+    floor_before = _percentile(dbs_before, FLOOR_PERCENTILE)
+    threshold = min(max(floor_before + ACTIVE_OVER_FLOOR_DB, speech_before - ACTIVE_MAX_UNDER_SPEECH_DB),
+                    speech_before - ACTIVE_MIN_UNDER_SPEECH_DB)
+    if speech_before <= SILENT_DB:
+        return None
+    # The final stretch: every frame from the end back while it is active (the
+    # last frame may be a fade, so it is taken whatever its level).
+    end = count
+    start = count - 1
+    while start > 0 and frames[start - 1][0] >= threshold:
+        start -= 1
+    length = end - start
+    if length < max(1, int(round(MIN_BURST_S / FRAME_S))) or length > most:
+        return None
+    # The gap before it: near-silent frames, at least GAP_MIN_S of them.
+    gap_end = start
+    gap_start = gap_end
+    while gap_start > 0 and frames[gap_start - 1][0] < threshold:
+        gap_start -= 1
+    if gap_end - gap_start < gap_min or gap_start == 0:
+        return None
+    levels = sorted(db for db, _zcr in frames[start:end - 1] or frames[start:end])
+    median = levels[len(levels) // 2]
+    if median < speech_before - BURST_UNDER_SPEECH_DB:
+        return None
+    return gap_start, gap_end - gap_start, speech_before
 
 
 def _aligned_cut(speech_end_s, protected, active, voiced, count, size, rate):

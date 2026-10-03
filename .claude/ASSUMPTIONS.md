@@ -498,6 +498,11 @@
 - **A-135** — (DEC-250) A clip slowed to at most 1.25x (0.80x speed) to cover its shot reads as natural motion on
   the phone for these cartoon clips, better than a frozen last frame or a hard stop. UNCONFIRMED until the human
   watches an episode whose feed says "is slowed to cover it" (the live story's sh03 would play at 0.85x).
+- **A-136** — (DEC-251) Gemini's end-of-line artifact is always the same shape — a short burst louder than the
+  speech after a near-silent gap, to the file's end — so `burst_at_end` (≤ 0.20 s, within 3 dB of the speech level
+  measured without it) cuts it on every line and never a shouted last word. UNCONFIRMED beyond the 18 lines of
+  d0ee5ebd745d/ep01 (all caught offline): confirmed when the human hears no "crshhh" on the re-rendered episode and
+  no word end is clipped; `voice-tails <story> --ep 1` lists each cut.
 
 ## Confirmed
 - **A-082** — fal.ai as measured in the paid test (2026-09-29, DEC-174):

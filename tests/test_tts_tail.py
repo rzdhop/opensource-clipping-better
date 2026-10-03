@@ -67,6 +67,17 @@ def static(seconds, *, rate=RATE, amp=0.6, seed=2):
     return [amp * rng.uniform(-1.0, 1.0) for _ in range(int(seconds * rate))]
 
 
+def buzz(seconds, *, rate=RATE, amp=0.9, freq=2000.0, seed=4):
+    """The real Gemini end burst (DEC-251, read from 18 live lines): louder
+    than the speech, clipping at its start, a 2 kHz buzz with a little noise
+    -- a zero-crossing rate near 0.17, under :data:`NOISE_ZCR` -- cut dead
+    at the file's end."""
+    rng = random.Random(seed)
+    n = int(seconds * rate)
+    return [max(-1.0, min(1.0, amp * (math.sin(2 * math.pi * freq * i / rate) * 1.3 + 0.15 * rng.uniform(-1, 1))))
+            for i in range(n)]
+
+
 def silence(seconds, *, rate=RATE, seed=3):
     """Near-silence: a dither of +/- 2 LSB, as a codec leaves it."""
     rng = random.Random(seed)
@@ -90,6 +101,69 @@ def seconds(data: bytes, rate=RATE) -> float:
 
 # ------------------------------------------------------------- the detector
 
+# ---- the real artifact (DEC-251): a loud buzz after a gap, to the very end
+
+@pytest.mark.parametrize("gap_s,burst", [(0.08, "buzz"), (0.25, "buzz"), (0.12, "static"), (0.25, "static")])
+def test_the_live_gemini_burst_louder_than_the_speech_is_cut_in_the_gap_before_it(gap_s, burst):
+    """Read from the 18 lines of a live episode (2026-10-03): 60-250 ms of
+    near-silence after the last word, then ~120 ms of a burst 2-8 dB louder
+    than the speech, zero-crossing rate 0.1-0.35, running to the end of the
+    file. Version 1 took it for a loud voiced syllable (it set the speech
+    level it was measured against) and cut nothing; version 2 cuts it in
+    the gap, whatever its zero-crossing rate."""
+    tail = _tail()
+    tail_part = buzz(0.12) if burst == "buzz" else static(0.12, amp=0.95)
+    data = pcm(voiced(1.5), silence(gap_s), tail_part)
+    out, report = tail.clean(data, RATE)
+    assert report["reason"] == "burst_at_end"
+    assert report["version"] == tail.TAIL_GUARD_VERSION == 2
+    assert 1.5 <= report["kept_s"] <= 1.5 + min(gap_s / 2, 0.05) + 0.011
+    assert report["trimmed_s"] >= 0.12 and seconds(out) == report["kept_s"]
+    plan = tail.analyse(data, RATE)
+    assert plan["speech_db"] < -3.0  # the speech level, measured without the burst
+
+
+def test_version_one_took_the_live_burst_for_speech():
+    """Why version 1 missed it: with the burst in the frames, the speech level
+    is the burst's own and the burst is a voiced run to the end -- nothing
+    follows the "speech". The guard's rules of version 1 (every rule but
+    ``burst_at_end``) still say so; ``burst_at_end`` is what changed."""
+    tail = _tail()
+    data = pcm(voiced(1.5), silence(0.25), buzz(0.12))
+    plan = tail.analyse(data, RATE)
+    assert plan["report"]["reason"] == "burst_at_end"
+    without = tail._end_burst(tail._frames(tail._samples(data), tail._frame_size(RATE)), RATE)
+    assert without is not None and without[0] * tail.FRAME_S == pytest.approx(1.5, abs=0.02)
+
+
+def test_a_loud_last_word_after_a_pause_is_speech_when_silence_follows_it():
+    """A shouted last word after a pause, then the trailing silence every
+    TTS leaves: not a burst (nothing loud reaches the file's end)."""
+    tail = _tail()
+    data = pcm(voiced(1.0), silence(0.2), voiced(0.4, amp=0.9), silence(0.3))
+    _out, report = tail.clean(data, RATE)
+    assert report["reason"] == "none" and report["trimmed_s"] == 0.0
+
+
+def test_a_last_word_at_the_speech_level_cut_at_the_files_end_is_kept():
+    """A last word no louder than the line's own syllables, with the file
+    ending right on it: kept whole -- the burst is told by being louder than
+    every syllable before the gap."""
+    tail = _tail()
+    data = pcm(voiced(1.0), silence(0.2), voiced(0.3))
+    _out, report = tail.clean(data, RATE)
+    assert report["reason"] == "none" and report["trimmed_s"] == 0.0
+
+
+def test_a_burst_longer_than_a_burst_can_be_is_left_to_the_other_rules():
+    """Past BURST_MAX_S the final stretch is not the end burst: a long loud
+    static after a gap is still cut, by the gap rule."""
+    tail = _tail()
+    data = pcm(voiced(1.5), silence(0.2), static(0.6, amp=0.95))
+    _out, report = tail.clean(data, RATE)
+    assert report["reason"] == "noise_after_gap"
+
+
 @pytest.mark.parametrize("gap_s,static_s", [(0.08, 0.3), (0.12, 0.6), (0.2, 0.9)])
 def test_an_artifact_after_a_gap_is_cut_at_the_gap(gap_s, static_s):
     tail = _tail()
@@ -99,7 +173,7 @@ def test_an_artifact_after_a_gap_is_cut_at_the_gap(gap_s, static_s):
     out, report = tail.clean(data, RATE)
 
     assert report["reason"] == "noise_after_gap"
-    assert report["version"] == tail.TAIL_GUARD_VERSION == 1
+    assert report["version"] == tail.TAIL_GUARD_VERSION == 2
     kept = seconds(out)
     # Cut inside the gap: all of the speech kept, at most 50 ms of the gap.
     assert 1.4 <= kept <= 1.4 + min(gap_s, 0.06), kept
@@ -196,7 +270,7 @@ def test_a_clean_line_with_trailing_silence_is_only_faded():
 
     out, report = tail.clean(data, RATE)
 
-    assert report == {"version": 1, "trimmed_s": 0.0, "reason": "none", "original_s": 2.0, "kept_s": 2.0}
+    assert report == {"version": 2, "trimmed_s": 0.0, "reason": "none", "original_s": 2.0, "kept_s": 2.0}
     assert len(out) == len(data)
     before, after = samples_of(data), samples_of(out)
     middle = slice(int(0.5 * RATE), int(1.5 * RATE))

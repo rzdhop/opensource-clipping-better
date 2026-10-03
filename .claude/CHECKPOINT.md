@@ -1,3 +1,20 @@
+## CURRENT STATE — the Gemini tail guard, version 2 (DEC-251): DONE, deployed with this commit (2026-10-03, local session, on `main`)
+
+- **The human's report:** "À la fin de chaque réplique il y a encore le crshhhh" though the feed said "18 Gemini line
+  endings checked: no static to cut". Read from the 18 live files: a ~120 ms burst 2–8 dB LOUDER than the speech,
+  after 60–250 ms of near-silence, to the file's end, ZCR 0.09–0.35; version 1 took it for a loud syllable.
+  `tts_tail._end_burst` → reason `burst_at_end`, `TAIL_GUARD_VERSION` 2 (every line re-cleaned for free on the next
+  assets run; durations shrink 0.26–0.47 s; the render re-runs). Tests in `tests/test_tts_tail.py`; version pins moved
+  (tts_tail, voice_tails, cli_voice_tails, tts_adapters). Selection (5 files, both envs) green. A-136.
+- **Next (the human):** press Generate episode / Continue on d0ee5ebd745d: the feed should say "🔇 18 Gemini line
+  endings cleaned (… s of static cut)", then the render runs again; listen for the tail. Then the open design
+  question below (lipsync / the video's own voice / motion / rhythm), asked in chat with options and prices.
+- **Open design question (not decided, the human's):** "no lipsync, the video does not say things or move, boring, no
+  rhythm; use the video's voice by default". Mapped by an Explore agent: the clip prompts ask for idle motion and
+  "stay exactly as in the first frame" (DEC-225's consistency clause), T1 v2 is not asked for camera variety beyond
+  framing, every style defaults to push_in, one clip a scene (DEC-227), seedance carries no audio so tier 3's
+  "the character says" path can never lipsync on it (DEC-210). Options and prices in the chat message of 2026-10-03.
+
 ## CURRENT STATE — the note fit and the long shots: DONE on branch `fix/note-fits-the-budget` (2026-10-03, local session, worktree `.claude/worktrees/note-fits-budget`, from `main` 3c66552)
 
 - **Done:** stage 1 (DEC-249, cd3dc14) and stage 2 (DEC-250, the commit after this header), both pushed to

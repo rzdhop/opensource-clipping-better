@@ -153,7 +153,7 @@ def test_lines_voiced_before_the_guard_are_cleaned_in_place_on_the_next_assets_r
     for line_id in theirs:
         sidecar = _sidecar(store, story_id, line_id)
         guard = sidecar["tail_guard"]
-        assert guard["version"] == 1 and guard["reason"] == "noise_after_gap" and guard["original_s"] == 1.5
+        assert guard["version"] == 2 and guard["reason"] == "noise_after_gap" and guard["original_s"] == 1.5
         assert 1.0 <= guard["kept_s"] <= 1.05
         assert sidecar["duration_s"] == guard["kept_s"]
         assert round(_wav_seconds(_voice(store, story_id, f"line_{line_id[1:]}.wav")), 3) == guard["kept_s"]
