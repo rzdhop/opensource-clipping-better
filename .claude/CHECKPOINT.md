@@ -1,4 +1,4 @@
-## CURRENT STATE — the AI Story dashboard overhaul: stages 1–3 DONE and deployed, stage 4 building (2026-10-03, local session)
+## CURRENT STATE — the AI Story dashboard overhaul: stages 1–4 DONE and deployed, stage 5 (the last) building (2026-10-03, local session)
 
 - **Stage 1 (DEC-253, Opus agent, branch feat/dashboard-foundation b24275a + ab7eb63, my tweak ef1edcc):** the
   `src/ui/` kit, tokens, lucide-react 1.51.0 pinned, every story confirm an in-app dialog (Cancel focused first),
@@ -25,9 +25,19 @@
   the live walk — `/story/d0ee5ebd745d` redirects to `/knowledge`, the cast tile opens its editor, 375 px shows the
   horizontal stepper, no console error. Known: the rail may touch a two-line header between ~901 and 1100 px
   (stage 5 sweep); dead `.stepper*`/`.story-cast-grid` CSS left for stage 5.
-- **Stage 4 (episode studio, the riskiest)** building: Opus agent, branch feat/dashboard-episode-studio from 8ef04b3
-  (the progress stepper from the payload, compact script lines, the storyboard split with a filmstrip, the review
-  hero).
+- **Stage 4 (DEC-256, Opus agent, feat/dashboard-episode-studio 5ecd1cf, merged 5c9c147):** `EpisodeStepper` (Script →
+  Storyboard → Keyframes → Clips → Render → Review from the episode payload, never the log; the one-click sub-step
+  text stays on the button), compact script lines (portrait avatar, one emotion select, duration badge, play, a
+  toggle for delivery/timing/re-voice; scene "More" for cues/on-screen text/regenerate; timing warnings as a
+  collapsible panel), `episode/storyboard/{StoryboardPane,ShotCard,ClipControls,AssetsCards}.jsx` with the filmstrip
+  (one shot open at a time), the review hero, Preview in Cards; wide layout = Script | Storyboard with Preview under.
+  Contracts: paths re-pointed in episode_reedit, story_payload_contract_episode, clip_controls (reads the 4 files
+  joined), keyframes_approve, generate_episode, story_defaults; literals unchanged. Tests: local 786, CI env 358 /
+  428 skipped. Build 611.6 kB JS / 75.9 kB CSS. Deployed (rebuild at 0 jobs): live walk of the stepper, the script
+  lines, the filmstrip and the Review tab, no console error. Known: avatars load full portraits once per session
+  (stage 5 adds `?size=thumb`); two players of the same render on the wide layout.
+- **Stage 5 (feed timeline, settings cards, responsive, a11y, CSS sweep, thumbnails)** building: Opus agent, branch
+  feat/dashboard-polish from 5c9c147.
 - Plan: `.claude/plans/dashboard/01-ai-story-ui-overhaul-plan.md` (5 stages; the human's answers: full redesign in
   stages, refined dark studio, lucide-react only). EXPLORE by a Sonnet agent + my browser walk of the list, the
   story page, the episode tabs, New story and Settings. Next action: on the go, stage 1 (foundation) by an Opus
