@@ -219,10 +219,20 @@ lines recorded before are cleaned on the next assets run without being
 spoken again (`voice-tails` shows what was cut), and every line fades at its
 edges in the mix.
 
-**Prompt size limits.** Each link's prompt limit is known (`prompt-limits`
-lists them with their source) and a prompt over it is refused before
-anything is sent — the chain moves on to its next link. The free key check
-also reads the limit fal publishes for each video model and keeps it.
+**Prompt size limits, and richer prompts within them.** Each link's prompt
+limit is known (`prompt-limits` lists them with their source) and a prompt
+over it is refused before anything is sent — the chain moves on to its next
+link. The free key check also reads the limit fal publishes for each video
+model and keeps it. Within those limits every v2 prompt fills its own
+link's budget (a keyframe up to 320 words on the quality links, a clip up to
+160, 220 with its ambience brief; sheets 200, plates 220, props 120) with
+the story's richest context, dropped least valuable first when room runs
+out: the beat's mood and who is mid-sentence (never the words), what
+changed since the previous shot of the scene, the character's bearing and
+distinctive marks (the look's new `bearing` field, written by the Cast
+step), the time of day; a clip adds the emotion, micro-actions and the
+camera's intent. A shot whose prompt cannot fit its link is refused when the
+storyboard is written, naming the shot and the link, never sent trimmed.
 
 **Moving a written story to v2.** **Animate every shot** on a story whose
 episode already has a script offers **Regenerate episode N on v2**: the

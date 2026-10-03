@@ -472,6 +472,12 @@
   3600 s + 600 s a clip (a Veo or seedance clip polls for at most 10 minutes) + 120 s a J2 check + 540 s a redraw,
   4 hours at most (24 clips worst case); the predictive checks still stop early and Continue resumes. UNCONFIRMED
   until the human's first "Generate episode" on a Veo story (the feed announces the budget it derived).
+- **A-131** — (phase 7 follow-up, DEC-247) an image model reads a keyframe prompt of up to ~320 words whole and a
+  video model a clip prompt of up to ~160 (220 with the ambience brief) without diluting the picture: the keyframe
+  ceiling is FLUX's 512-token T5 window (the widest text window published whole); Seedream 4.5 edit's and
+  nano-banana's windows are unpublished, so 320 is a tunable, and the measurements (DEC-247) show the core eats most
+  of it. UNCONFIRMED until the human's walk compares the richer keyframes with phase 7's 220-word ones (looks hold,
+  the mood reads, no lettering).
 
 ## Confirmed
 - **A-082** — fal.ai as measured in the paid test (2026-09-29, DEC-174):

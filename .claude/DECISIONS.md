@@ -4450,3 +4450,56 @@ the Keyframes card was a text list with no thumbnail and no regenerate.
 **Consequence.** A story that opts for the stop keeps the old flow. The spend split of the review relies on the
 ledger's `unit` values (image / char / second), the fixes taken off the images by `keyframe_fix_budget.spent_usd`.
 Playwright at 375 and 1280 px: no horizontal scroll, no page error (`scratchpad/p8c/c-*.png`).
+
+## DEC-247 — Each v2 prompt fills its own link's budget with the story's richest context, ordered by value (phase 7 follow-up, F2)
+**Context.** The human (2026-10-02): "More prompt context is more accuracy and details that make the story good"
+and "some providers have limited prompt size so check that also". The v2 builders used one fixed budget for every
+link (keyframe 220 words, clip 80; sheets/plates/props 130/150/80) and the keyframe ladder sent its last rung over
+budget anyway; the keyframe never carried the beat's mood, the character's bearing, what changed since the previous
+shot or the time of day, and the clip never the emotion, micro-actions or the camera's intent.
+**Decision** (`40d101d`, `07bde58`, `1dfe8ed`, `b98a760`).
+- **Per-link budgets** (`clipping/aistory/prompt_budgets.py`): `<kind>_words(link)` = `prompt_limits.budget_words`
+  (DEC-240) bounded by a quality ceiling — keyframe 320 (≈ FLUX's 512-token T5 window, the widest text window known
+  whole; A-131), clip 160, ambience clip 160 + the brief's 60-word share (`CLIP_AUDIO_SHARE_WORDS`, DEC-242's brief
+  takes its share instead of a fixed 140), sheet 200, plate 220, prop 120; no link → today's numbers
+  (220/80/140/130/150/80). Every quality-preset link accepts more than its ceiling, so there the ceiling is the
+  budget; a live fal limit under it wins.
+- **The link is known at build time**: the storyboard step builds every shot to the episode's planned links
+  (`clips.episode_budgets`: the recorded sticky image link, else the keyframe role chain's head; `clips.planned_link`
+  for the clip) and fails, writing nothing, when a shot cannot fit even the last rung (`shots.PromptOverBudget`,
+  naming the shot and the link — no more "sent anyway"); workflow edits and `refresh_prompts` do the same. At request
+  time `assets.request_parts` / `clips.clip_request_parts(link=)` return `over` (over the link's limit by
+  `prompt_limits.check`, or built for another link's budget) and `make_image` / `make_clip` refuse that shot with
+  "refresh the prompts"; the prompt hash never moves with it; F1's dispatch check is the backstop. Check-and-refuse
+  rather than an automatic re-fit: the storyboard and assets steps derive the same link, so this fires only after
+  a link switch or a live-limit change.
+- **Keyframe layers** (`shots._layered`; dropped least valuable first — between, when, bearing, since, mood — after
+  the rendering cut and before any look or place shortening, so today's 220-word fixtures stay byte-identical):
+  **mood** (the scene's function and emotion; the first framed speaker "mid-sentence, asking a question /
+  exclaiming / speaking" — never the words, which could be drawn as lettering; the listeners; the ledger's
+  injuries); **between** (the dossier relationship's `now`); **since** (positions moved, who or what came into
+  frame, the previous action's gist — `resolve_shot(previous_plan=)` threaded through build, refresh, the workflow
+  and the assets re-resolution); **bearing** (`look.bearing`); **when** (the variant as time of day; light
+  direction is stored nowhere, so not said). Knowledge facts beyond the relationship's `now` are not drawable and
+  stay out.
+- **Clip layers**: the emotion, micro-actions (breathing, the staged glance, hands), the camera's intent; dropped
+  intent → micro → emotion before the motion is cut.
+- **Sheets, plates, props**: `shots.visual_cues` = the descriptor's clauses holding a mark word not already said by
+  the look or the items, plus the bearing (order: head / look / tail > cues > rendering ≥ 8 words > rules); plates
+  gain the style's `environment_rules` as one sentence when room allows. **`look.bearing`** (optional, ≤ 10 words;
+  D2 asks for it as it asks for `presentation`, A3's pattern): the dossier is story-language prose for the writers
+  with no visual field, the look is the English the image prompts render from — so the bearing lives there. D2
+  re-measured 2096 tokens, `INPUT_BUDGET["D2"]` 2370 → 2420. The Cast step's look editor gains the field.
+**Measured** (the 9-shot v2 fixture and the crowded 3-character shot): keyframes on seedream-4.5-edit /
+nano-banana / gpt-image at 320: max 312 words (crowded), mean 221.5, max 1875 characters, all fit (mood and since
+kept on the fixture; a two-character shot with 5–6 references runs ~300 words of core, so ~20 words of context fit
+at 320 — all five layers would need ~590); clips at 160: max 124 words, mean 94.7, 797 characters; ambience at 220:
+max 170 words, 1095 characters; micro-actions in 9 clips of 10, intent in 10; sheets at 200: max 196 words (cues on
+3 of 3), plate 181, prop 84.
+**Consequence.** An ambience story's stored clip prompts now hash with the link's budget (220 on Veo vs 140): a
+long-visual clip already bought at 140 reads stale and is re-bought; short visuals (the norm) are unchanged;
+existing keyframes and clips are untouched until their prompts are refreshed. Follow-ups: drop a look's palette or
+hair (shown by the sheets) before the mood rather than after, since the core eats most of the 320; an automatic
+re-fit after a link switch (today the refusal names the remedy); the dashboard's prompt-target chips still say
+220/80 (a per-link target needs the API to expose the budgets); workflow edits compute budgets from the process
+env alone (harmless while every hosted link's budget is its ceiling).
