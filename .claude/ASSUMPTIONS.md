@@ -442,6 +442,17 @@
   `API_KEY_INVALID` ("API key not valid"). Read from fal's docs as quoted by a web search and the Gemini API reference;
   this cloud session could not reach either host. `video.check_key` reads the answer leniently (a 200 without a price
   row is "no_model"). UNCONFIRMED until the human's first "Ask the providers (free)".
+- **A-126** — (phase 7 follow-up, DEC-240) the prompt size limits of `clipping/providers/prompt_limits.py`, read from
+  the vendors' docs as quoted by web searches (this cloud session could not reach fal.ai or Google). Published (V):
+  fal Kling 2.5 turbo 2500 characters (the same cap on `negative_prompt`); fal LTX-2 fast 5000; Veo 3.1 1024 tokens;
+  Cloudflare flux-1-schnell 2048 characters. Ours (U): fal LTX-2.3 fast 5000 (assumed equal to LTX-2; the key check
+  reads its own schema); fal Seedance 1 pro fast 1500 characters (unpublished; 56–77-word prompts accepted, A-110,
+  about 3× that); fal Seedream 4 edit / 4.5 / 4.5 edit 3000 characters (unpublished; 2× the confirmed 220 words,
+  A-111); Gemini nano-banana 2 / lite 8192 tokens (a 32768-token context less 14 reference images, A-112); OpenAI
+  gpt-image-2 32000 characters (gpt-image-1's published limit); Gemini flash-lite TTS 8192 tokens; Pollinations 4000
+  URL-encoded characters (v1 prompts of 1900–3000 encoded were served, so not "under 2000"); FLUX's T5 window 512
+  tokens (a word budget, never a refusal). UNCONFIRMED until "Ask the providers (free)" reads each fal video link's
+  `prompt.maxLength` (or "not published") into `data/provider_limits.json`.
 
 ## Confirmed
 - **A-082** — fal.ai as measured in the paid test (2026-09-29, DEC-174):

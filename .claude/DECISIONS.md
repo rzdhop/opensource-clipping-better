@@ -4199,3 +4199,32 @@ full suites on the branch head are recorded in the action log. Not done (follow-
 sheets drawn from the old look stale; regenerating one shot image does not run J2 (the next assets run does); each
 re-run of an unapproved, under-window v2 script spends up to 2 more fill calls; the dashboard cannot add or remove a
 relationship or a wardrobe set (the API can).
+
+## DEC-240 — Every generation link's prompt size limit is known, listed and enforced before a call (phase 7 follow-up, F1)
+**Context.** The human (2026-10-02): "some providers have limited prompt size so check that also". No adapter knew or
+enforced one; the v2 builders use one fixed word budget for every link (keyframe 220, clip 80), the keyframe ladder
+sends its last rung over budget anyway (DEC-237), and a vendor's HTTP 400 or a silent truncation was the only signal.
+**Decision** (`25b460a`, `d8f6633`, `c42223a`, `38b924f`).
+- `clipping/providers/prompt_limits.py`: one `Limit` per link label (or per provider: `edge/*`, `pollinations/*`): a
+  cap the API accepts in characters (URL-encoded for Pollinations, whose prompt rides in the URL path), tokens or
+  words, its source, and `verified` (the vendor publishes it) or ours (A-126). A text encoder's window (FLUX's T5, 512
+  tokens) is a separate `window_tokens`: it bounds the word budget but never refuses — the v1 fixture shot prompts
+  reach ~2200 characters and were always sent.
+- `budget_words(link, default)` = min(`max_words`, `max_chars / 6.5` (`/ 10` URL-encoded), `(max_tokens or
+  window_tokens) × 4 / 6.5`) for the prompt builders (stage F2 makes them fit each link); today's fixed budgets fit
+  every default link. Tokens are counted as `pacing.estimate_tokens` counts them everywhere (~4 characters).
+- One check point: `generation._run_candidates`, after the journal lookup (a kept answer or a resumed request was
+  accepted when sent) and before every gate. `PromptTooLong` (a `ProviderError`) names the link, the measured size
+  and the limit ("fal/kling-2.5-turbo-std accepts 2500 characters; this prompt is 3120; not sent"); the chain moves
+  on at no cost (no estimate, no budget check, no free-tier slot, no journal entry; `steps/pacing._UNSENT` and
+  `sticky_link` read it as "may still serve"). Never a silent truncation.
+- Live values: the free key check (DEC-236) also reads fal's published OpenAPI schema
+  (`https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=<id>`, no key sent) for each fal video link and keeps
+  `prompt.maxLength` in `data/provider_limits.json` (`provider_limits_v1`, next to the Settings file; the CLI reads
+  it by path, never importing `web`); a published value replaces the table's, "not published" leaves the table in
+  charge. `--ai-story prompt-limits` lists every link's limit and source.
+**Consequence.** Seedance's and Seedream's numbers are ours until fal publishes them (A-126).
+`test_story_sticky_link`'s fake Cloudflare accepted 2164–2176-character prompts the real Workers AI (2048) refuses:
+its cap is lifted in that file alone. Not covered: Kling's `negative_prompt` cap (negatives are ~40 words); the
+pre-call estimate (`gating.link_summary`) can still call a link runnable when the prompt would be refused — moot once
+F2's builders fit each link, pinned there by a test that every built v2 prompt `fits()` its planned link.
