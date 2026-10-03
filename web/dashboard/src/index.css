@@ -1264,8 +1264,7 @@ html, body {
   margin: 18px 0 10px;
 }
 
-/* --- Story grids: cards, concepts, style picker, previews --------------- */
-.story-grid,
+/* --- Story grids: concepts, style picker, previews ---------------------- */
 .story-concept-grid,
 .story-style-grid,
 .story-preview-grid {
@@ -1275,7 +1274,6 @@ html, body {
 }
 
 @media (min-width: 601px) {
-  .story-grid,
   .story-concept-grid,
   .story-style-grid,
   .story-preview-grid {
@@ -1284,56 +1282,235 @@ html, body {
 }
 
 @media (min-width: 1101px) {
-  .story-grid,
   .story-concept-grid,
   .story-style-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
-.story-card {
-  min-width: 0;
-  overflow-wrap: anywhere;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+/* --- The stories list (dashboard overhaul stage 2, DEC-254) -------------
+   Cover cards: 1 column below 700px, 2 from 700px, 3 from 1100px. The
+   title's link stretches over the whole card (::after); the overflow menu
+   sits above that layer so it stays its own control. */
+.story-list-count {
+  color: var(--text-primary);
+  font-weight: 600;
 }
 
-.story-card-link {
-  color: inherit;
-  text-decoration: none;
+.story-list-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-5);
+}
+
+@media (min-width: 700px) {
+  .story-list-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1100px) {
+  .story-list-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.story-list-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
+}
+
+.story-list-card:not(.story-list-card-skeleton):hover {
+  border-color: var(--border-color-hover);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+
+.story-list-card:focus-within {
+  border-color: var(--border-accent);
+}
+
+.story-list-card-busy {
+  opacity: 0.6;
+}
+
+.story-list-cover {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 4 / 5;
+  width: 100%;
+  overflow: hidden;
+  background: var(--bg-input);
+  border-radius: 0;
+}
+
+/* A portrait's face sits in its upper part: crop from there, not the middle. */
+.story-list-cover-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 50% 15%;
   display: block;
 }
 
-.story-card-header {
+.story-list-cover-initial {
+  font-size: 72px;
+  font-weight: 800;
+  line-height: 1;
+  color: rgba(255, 255, 255, 0.85);
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.35);
+  user-select: none;
+}
+
+/* A soft fade at the bottom of the cover into the card body. */
+.story-list-cover::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 30%;
+  background: linear-gradient(to bottom, transparent, rgba(10, 10, 15, 0.45));
+  pointer-events: none;
+}
+
+.story-list-body {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 6px;
-}
-
-.story-card-header h3 {
-  font-size: 15px;
-  font-weight: 700;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
   min-width: 0;
-  overflow-wrap: anywhere;
 }
 
-.story-card-meta {
+.story-list-title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.story-list-title {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-lg);
+  font-weight: 700;
+  line-height: var(--leading-tight);
+  overflow-wrap: anywhere;
+  padding-top: 4px;
+}
+
+.story-list-link {
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+.story-list-link::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: var(--radius-lg);
+}
+
+.story-list-link:focus-visible {
+  outline: none;
+}
+
+.story-list-link:focus-visible::after {
+  outline: var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.story-list-menu {
+  position: relative;
+  z-index: 2;
+}
+
+.story-list-chips {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-bottom: 6px;
 }
 
-.story-card-updated {
-  font-size: 11px;
+.story-list-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.story-list-progress-unknown {
   color: var(--text-tertiary);
 }
 
-.story-card-actions {
-  margin-top: 4px;
+.story-list-progress-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.story-list-progress-label {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.story-list-progress-ready-word {
+  color: var(--success);
+  font-weight: 700;
+}
+
+.story-list-progress-count {
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.story-list-progress-track {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--bg-input);
+  overflow: hidden;
+}
+
+.story-list-progress-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), var(--accent-hover));
+  transition: width var(--transition-normal);
+}
+
+.story-list-progress-ready .story-list-progress-fill {
+  background: var(--success);
+}
+
+.story-list-updated {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+/* One column on a phone: a full-width 4:5 cover would fill the screen. */
+@media (max-width: 699px) {
+  .story-list-cover {
+    max-height: 320px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .story-list-card:not(.story-list-card-skeleton):hover {
+    transform: none;
+  }
 }
 
 /* --- Concept cards -------------------------------------------------------- */

@@ -421,11 +421,33 @@ export function createSSEConnection(jobId, onMessage, onStatus) {
 // same as every other function in this file.
 // ---------------------------------------------------------------------------
 
-/** `{"stories": [index entries]}`, most recently updated first. */
+/**
+ * `{"stories": [index entries]}`, most recently updated first. Each entry
+ * also carries its card's fields (DEC-254): `cover` (an API path or null),
+ * `progress` `{steps_done, steps_total, next}`, `episodes` `{count, latest}`,
+ * `style_label` and `pipeline`.
+ */
 export async function fetchStories() {
   const res = await request('/stories')
   if (!res.ok) throw await apiError(res, 'Failed to fetch stories')
   return res.json()
+}
+
+/**
+ * A story card's cover -- the list entry's `cover`, an API path under
+ * `/stories/{id}/media/` -- as a blob URL: the media route is token-gated,
+ * so it is fetched with the auth header like `fetchStoryMediaUrl`, never
+ * used as an <img src>. Anything that is not such a path is refused. The
+ * caller is responsible for revoking the URL.
+ */
+export async function fetchStoryCoverUrl(cover) {
+  if (typeof cover !== 'string' || !/^\/stories\/[0-9a-f]{12}\/media\//.test(cover)) {
+    throw new Error('Not a story cover path')
+  }
+  const res = await request(cover)
+  if (!res.ok) throw await apiError(res, 'Failed to load the cover')
+  const blob = await res.blob()
+  return URL.createObjectURL(blob)
 }
 
 /**
