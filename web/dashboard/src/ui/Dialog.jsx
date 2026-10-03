@@ -156,6 +156,7 @@ let nextRequestId = 0
 
 function ConfirmDialog({ request, onSettle }) {
   const { title, message, confirmLabel, cancelLabel, tone } = request.options
+  // Focus starts on Cancel whatever the tone: an Enter never spends or deletes by accident.
   const cancelRef = useRef(null)
   const confirmRef = useRef(null)
   return (
@@ -167,7 +168,7 @@ function ConfirmDialog({ request, onSettle }) {
       tone={tone}
       hideClose
       // A destructive question starts on Cancel; any other on its confirm button.
-      initialFocusRef={tone === 'danger' ? cancelRef : confirmRef}
+      initialFocusRef={cancelRef}
       footer={(
         <>
           <Button ref={cancelRef} variant="secondary" onClick={() => onSettle(false)}>{cancelLabel}</Button>
