@@ -1,3 +1,23 @@
+## CURRENT STATE — stage C, performance and rhythm (DEC-252): DONE, deployed with this commit (2026-10-03, local session, on `main`)
+
+- **The human's go ("Ok go go") on the options of 2026-10-03:** C built now (an Opus agent in a worktree, branch
+  `feat/clip-performance` 6a36cde + 300122e, fast-forwarded into main; reviewed by me: legacy byte-identical,
+  four deviations accepted and in DEC-252: the lock's v2 suffix filled in memory for older stories, the shot's
+  camera before the style's by-function rule on v2, template shots [6, 18], re-resolved shots' clips go stale).
+  v2 clip prompts: who speaks "with the mouth moving on the words", who reacts and how, gestures from the staging,
+  `IDENTITY_KEEPS` instead of STAYS_STILL, `tier2_prompt_suffix_v2` per style; T1 v2 asks a clear action per
+  character and never the previous shot's camera (repaired, else refused); a body scene with two lines or two
+  characters is two beat shots (fresh plans only: `short_of_beats` keeps today's storyboards).
+  Verification after the merge (14 files, both envs): local 475 passed, CI env 473 / 2 skipped; the agent's own
+  125-file runs: local 5087, CI env 4506 / 581 skipped. A-137.
+- **Probes A and B** (the human's go; ~$3.23 outside the ledger): A = fal `veo3.1/image-to-video` speaking two
+  French lines from sh03's keyframe (8 s, 9:16, audio; 83 s); B = fal `kling-video/lipsync/audio-to-video` on sh01's
+  seedance clip with its cleaned Gemini line (72 s, not 12 min). Both delivered to the human; **awaiting the verdict
+  A / B / neither** before any lipsync stage is planned (costs: A ≈ $29 an episode and caps to raise; B ≈ $0.25).
+- **Next (the human):** on the live story, **Storyboard step: plan again** (the existing storyboard keeps its
+  one-shot scenes on purpose), approve, Generate episode — the clips are bought again with the performance prompts
+  (≈ $1.6–2.5 with the extra keyframes), the voices are re-cleaned (tail guard v2). Then the verdict on A/B.
+
 ## CURRENT STATE — the Gemini tail guard, version 2 (DEC-251): DONE, deployed with this commit (2026-10-03, local session, on `main`)
 
 - **The human's report:** "À la fin de chaque réplique il y a encore le crshhhh" though the feed said "18 Gemini line
