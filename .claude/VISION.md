@@ -32,6 +32,11 @@ to images, image editing, video, TTS and vision, with every paid call gated by a
 budget and every free call counted against its daily limit.
 
 ## Where it stands (2026-09-30)
+- **The AI Story dashboard was overhauled (2026-10-03, DEC-253…DEC-257):** a UI kit on the existing tokens
+  (lucide icons, in-app dialogs, toasts, cards), the stories list as cover cards with progress, a routed story
+  workspace with a step rail and one step per screen, the episode studio with a progress stepper, compact script
+  lines, a filmstrip storyboard and a review hero, a grouped activity timeline, Settings as status cards, phone
+  layouts and an accessibility pass — the same API, the same approvals and gates, no sign-in (RC-D1).
 - **Auth is opt-in** (DEC-173, done 2026-09-29): no sign-in unless `API_TOKEN` is set, as the human asked
   ("remove all access restrictions to the app"); the VPS runs open on its tailnet with no override, the public paths
   refuse to run open, and an open API refuses other websites' writes. Acknowledged by the human on the phone.

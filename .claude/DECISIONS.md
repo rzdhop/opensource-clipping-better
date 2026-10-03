@@ -4911,3 +4911,6 @@ would read every line); auto-expanding retry-only groups.
 **Consequence.** Contract moved: `test_settings_tabs` reads `title="Budget"` / `title="System info"` where it read
 `💰 Budget` / `💻 System Info`. New: `tests/test_stories_api_media_thumb.py` (22: 9 stdlib, 13 skip without Pillow or
 fastapi). Bundle: JS 611.63 -> 632.80 kB (gzip 171.15 -> 178.34), CSS 75.85 -> 81.93 kB. A-139.
+*Amended 2026-10-03 (the orchestrator, before the merge): `thumbs.THUMB_WIDTH` 160 → 480 — a 160 px thumbnail read
+soft on a ~340 px list cover; 480 stays sharp at 2x and is still a tenth of the full portrait (641ab2a; the thumb
+test re-pinned on purpose).*

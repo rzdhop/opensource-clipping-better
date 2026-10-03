@@ -1,4 +1,4 @@
-## CURRENT STATE — the AI Story dashboard overhaul: stages 1–4 DONE and deployed, stage 5 (the last) building (2026-10-03, local session)
+## CURRENT STATE — the AI Story dashboard overhaul: DONE — all 5 stages merged and deployed (2026-10-03, local session)
 
 - **Stage 1 (DEC-253, Opus agent, branch feat/dashboard-foundation b24275a + ab7eb63, my tweak ef1edcc):** the
   `src/ui/` kit, tokens, lucide-react 1.51.0 pinned, every story confirm an in-app dialog (Cancel focused first),
@@ -36,8 +36,21 @@
   428 skipped. Build 611.6 kB JS / 75.9 kB CSS. Deployed (rebuild at 0 jobs): live walk of the stepper, the script
   lines, the filmstrip and the Review tab, no console error. Known: avatars load full portraits once per session
   (stage 5 adds `?size=thumb`); two players of the same render on the wide layout.
-- **Stage 5 (feed timeline, settings cards, responsive, a11y, CSS sweep, thumbnails)** building: Opus agent, branch
-  feat/dashboard-polish from 5c9c147.
+- **Stage 5 (DEC-257, Opus agent, feat/dashboard-polish a807654 + 7630c81, merged dae1e71; my re-pin 641ab2a):** the
+  feed as a grouped timeline (icons, errors tinted and open, Copy log, Live badge, Jump to latest), Settings as Cards
+  with Tested/Set/Missing badges and the caps table, the phone drawer, the rail's sticky offset following the
+  header, skip link + landmarks + focus rings + reduced motion + 20 labels, `--text-tertiary` #848c9b (≥ 4.86:1),
+  the CSS sweep, `?size=thumb` on the media route (`clipping/aistory/thumbs.py`, Pillow, `<name>.thumb.jpg` beside
+  the original, 480 px wide after my re-pin; `tests/test_stories_api_media_thumb.py` 22 tests), the "The dashboard"
+  subsection in docs/AI_STORY.md. Contracts: `test_settings_tabs` (two headings → Card titles). Tests after the
+  merge + re-pin: local 968 + the thumb file 22, CI env 451 / 518 skipped. Build 632.8 kB JS / 81.9 kB CSS.
+  Deployed: the image rebuilt at 0 jobs (see the action log for the walk).
+- **Close-out:** artifacts — VISION.md (a "Where it stands" line), DECISIONS (DEC-253…257 + the 480 px amendment),
+  ASSUMPTIONS (A-138, A-139 unconfirmed: the human's verdict on the live app), the plan file, this header, the
+  action log. Tier 2 = the human's own look at the app on the phone and the desktop (A-139). Follow-ups left by
+  the stages (each in its DEC's Consequence): two players of one render on the wide layout; a design reference's
+  thumbnail is left behind on delete; the episode tabs wrap on a phone; the Script header cards keep the old look.
+- **Still pending from earlier today:** the human's verdict on the lipsync probes A/B.
 - Plan: `.claude/plans/dashboard/01-ai-story-ui-overhaul-plan.md` (5 stages; the human's answers: full redesign in
   stages, refined dark studio, lucide-react only). EXPLORE by a Sonnet agent + my browser walk of the list, the
   story page, the episode tabs, New story and Settings. Next action: on the go, stage 1 (foundation) by an Opus
