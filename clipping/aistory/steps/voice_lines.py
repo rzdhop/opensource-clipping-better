@@ -55,7 +55,7 @@ from __future__ import annotations
 import json
 import os
 
-from clipping.providers import tts
+from clipping.providers import tts, tts_tail
 
 from .. import media_policy, schemas, shots, timing, voices, wordtiming
 from .. import store as store_mod
@@ -210,6 +210,78 @@ def measure_estimate(ec, script, *, env=None, adapters=None) -> dict:
         "paid_links": verdict["paid_links"], "allow_paid": verdict["allow_paid"],
         "free_tier": verdict["free_tier"], "ready": verdict["ready"] and not unvoiced,
     }
+
+
+# ---------------------------------------------------------- the tail report
+
+def aligned_end(sidecar):
+    """The last aligned word's end of a line's sidecar -- the speech's end
+    the tail guard is handed -- or None when its words are not an
+    alignment's (Gemini times no word itself)."""
+    if wordtiming.source_of(sidecar)[0] != wordtiming.ALIGNMENT:
+        return None
+    return max((word["end"] for word in sidecar["words"] if isinstance(word, dict)
+                and isinstance(word.get("end"), (int, float)) and not isinstance(word.get("end"), bool)),
+               default=None)
+
+
+def _speaker_label(store, story_id, speaker) -> str:
+    if speaker == "narrator":
+        return "Narrator"
+    try:
+        return store.read_entity(story_id, "characters", speaker).get("name") or speaker
+    except Exception:  # noqa: BLE001 - a label only: the id stands in
+        return speaker
+
+
+def tail_report(store, story_id, ep, script) -> list:
+    """What the Gemini tail guard would cut, or cut, at the end of each line
+    of *script* (episode *ep*), reading the kept files and changing nothing
+    -- the ``voice-tails`` command's rows, in reading order::
+
+        {"line_id", "speaker", "voice", "file", "seconds", "provider",
+         "guard": the sidecar's tail_guard or None, "due": bool,
+         "analysis": tts_tail.analyse(...) of the file as it is now, or None}
+
+    ``file``/``seconds`` are None for a line with no kept audio; ``analysis``
+    is None for a file that is not a 16-bit mono WAV (an Edge mp3). An
+    aligned line's last word end is handed to the analysis, as
+    :meth:`LineMeasurement.guard_tails` hands it to the guard."""
+    rows = []
+    for line in (line for scene in script["scenes"] for line in scene["lines"]):
+        line_id, timing_doc = line["line_id"], line.get("timing") or {}
+        row = {"line_id": line_id, "speaker": _speaker_label(store, story_id, line["speaker"]),
+               "voice": timing_doc.get("voice"), "file": None, "seconds": None, "provider": None, "guard": None,
+               "due": False, "analysis": None}
+        rows.append(row)
+        audio = timing_doc.get("audio")
+        if not isinstance(audio, str) or not audio.startswith(f"{VOICE_ASSETS}/"):
+            continue
+        try:
+            audio_path = store.episode_asset_path(story_id, ep, "voice", audio[len(VOICE_ASSETS) + 1:])
+            timing_path = store.episode_asset_path(story_id, ep, "voice", asset_name(line_id, "json"))
+        except KeyError:
+            continue
+        if not os.path.isfile(audio_path):
+            continue
+        row["file"] = os.path.basename(audio_path)
+        try:
+            with open(timing_path, encoding="utf-8") as fh:
+                sidecar = json.load(fh)
+        except (OSError, ValueError):
+            sidecar = {}
+        sidecar = sidecar if isinstance(sidecar, dict) else {}
+        guard = sidecar.get("tail_guard")
+        row.update(provider=sidecar.get("provider"), guard=guard if isinstance(guard, dict) else None,
+                   due=tts.tail_guard_due(sidecar))
+        read = tts_tail.read_wav(audio_path)
+        if read is None:
+            row["seconds"] = sidecar.get("duration_s")
+            continue
+        pcm, rate = read
+        row["seconds"] = round(len(pcm) / 2 / rate, 3)
+        row["analysis"] = tts_tail.analyse(pcm, rate, speech_end_s=aligned_end(sidecar))
+    return rows
 
 
 # -------------------------------------------------------------------- the run
@@ -403,12 +475,8 @@ class LineMeasurement:
                 continue
             if not tts.tail_guard_due(sidecar):
                 continue
-            speech_end = None
-            if wordtiming.source_of(sidecar)[0] == wordtiming.ALIGNMENT:
-                speech_end = max((word["end"] for word in sidecar["words"] if isinstance(word, dict)
-                                  and isinstance(word.get("end"), (int, float))), default=None)
             try:
-                new = tts.guard_kept_take(audio_path, timing_path, sidecar, speech_end_s=speech_end)
+                new = tts.guard_kept_take(audio_path, timing_path, sidecar, speech_end_s=aligned_end(sidecar))
             except OSError as exc:
                 ctx.on_log(f"⚠️ {line_id}: its static could not be cut ({exc}); the line is left as it is.")
                 continue

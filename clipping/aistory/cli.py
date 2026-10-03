@@ -17,6 +17,7 @@ options and defaults are untouched. Commands::
     main.py --ai-story fast-track <story_id> --ep N [options]
     main.py --ai-story feedback <story_id> --ep N --text-file F [--stats-file F] [options]
     main.py --ai-story approve <story_id> keyframes:N [--anyway]
+    main.py --ai-story voice-tails <story_id> --ep N
     main.py --ai-story list
     main.py --ai-story prompt-limits
 
@@ -158,6 +159,12 @@ document approved by a command of its own: a person approves keyframes
 after looking at them, so no step's ``--auto-approve`` ever does. Any other
 document is refused, pointing at ``--auto-approve``.
 
+``voice-tails <story_id> --ep N`` (phase 7 follow-up) prints, per line of
+the episode, what the Gemini tail guard would cut -- or cut -- at the end of
+its kept audio (``voice_lines.tail_report``: the file's length, the cut, its
+reason), and changes nothing: the assets step is what cleans a line voiced
+before the guard, for free. A way for a person to check the "crshhh" fix.
+
 Limitation: the CLI and a running server do not coordinate step runs on the
 same story. The server's one-step-per-story rule lives in its job store
 (``web/api/store.py``), which the CLI does not read, so running a step here
@@ -180,6 +187,8 @@ import os
 import sys
 from datetime import datetime, timezone
 
+from clipping.providers import tts_tail
+
 from . import defaults, media_policy, refimages, schemas, templates, workflow
 from . import store as story_store
 from .steps import StepFailed
@@ -189,6 +198,7 @@ from .steps import episode_common
 from .steps import fast_track as fast_track_step
 from .steps import render as render_step
 from .steps import script as script_step
+from .steps import voice_lines
 
 PROG = "main.py --ai-story"
 
@@ -610,6 +620,18 @@ def build_parser() -> argparse.ArgumentParser:
     approve_cmd.add_argument("doc", metavar="keyframes:N", help="the document to approve: keyframes:N")
     approve_cmd.add_argument("--anyway", action="store_true",
                              help="approve over keyframe checks (J2) that failed or have not run")
+
+    # ---- voice-tails (phase 7 follow-up: the Gemini tail guard, read only)
+    tails_cmd = commands.add_parser(
+        "voice-tails", parents=[common], help="what the Gemini tail guard cuts from an episode's lines (read only)",
+        description=(
+            "Print, per line of episode --ep, its kept audio's length and what the Gemini tail guard would cut "
+            "(or cut) from its end -- the static Gemini TTS adds after the last word -- and why. Changes "
+            "nothing: the assets step cleans a line voiced before the guard, for free."
+        ),
+    )
+    tails_cmd.add_argument("story_id", help="the story's id (see 'list')")
+    tails_cmd.add_argument("--ep", type=int, required=True, metavar="N", help="the episode number to check")
 
     # ---- list
     commands.add_parser("list", parents=[common], help="list the stories",
@@ -1572,9 +1594,68 @@ def _cmd_prompt_limits(args, stories) -> int:
     return EXIT_OK
 
 
+def _tail_row(row) -> str:
+    """One line of ``voice-tails``: the line, its voice and file, and what
+    the tail guard did or would do to it."""
+    head = f"{row['line_id']} {row['speaker']}  {row['voice'] or '-'}"
+    if row["file"] is None:
+        return f"{head}  no kept audio (not voiced yet, or its text changed since)"
+    seconds = f"{row['seconds']:.2f} s" if isinstance(row["seconds"], (int, float)) else "? s"
+    head += f"  {row['file']} {seconds}"
+    if row["provider"] != "gemini":
+        return f"{head}  not checked: only Gemini adds static (the mix fades every line's edges)"
+    plan = row["analysis"]
+    if plan is None:
+        return f"{head}  not a 16-bit mono WAV: left as it is"
+    now = plan["report"]
+    if now["reason"] == "suspect":
+        would = f"left whole: its end looks odd (the rules would cut {plan['would_cut_s']:.2f} s, more than " \
+                f"{tts_tail.MAX_CUT_S:g} s or half the line)"
+    elif now["trimmed_s"] > 0:
+        would = f"would cut {now['trimmed_s']:.2f} s ({now['reason']}), {now['kept_s']:.2f} s kept"
+    else:
+        would = None
+    guard = row["guard"]
+    if row["due"] or guard is None:
+        return f"{head}  not cleaned yet: {would or 'nothing to cut'}"
+    done = (f"{guard['trimmed_s']:.2f} s cut ({guard['reason']})" if guard.get("trimmed_s") else
+            f"nothing cut ({guard.get('reason')})")
+    return f"{head}  cleaned (v{guard.get('version')}): {done}; now: {would or 'nothing more to cut'}"
+
+
+def _cmd_voice_tails(args, stories) -> int:
+    """``voice-tails``: what the Gemini tail guard would cut, or cut, from
+    each line of episode ``--ep`` (module docstring) -- read only."""
+    story = workflow.load(stories, args.story_id)
+    story_id = story["story_id"]
+    ep = workflow.episode_bounds(stories, story, args.ep)
+    try:
+        script = stories.read_episode_doc(story_id, ep, episode_common.SCRIPT_DOC)
+    except (KeyError, schemas.SchemaError) as exc:
+        _err(f"Episode {ep}'s script cannot be read ({exc}).")
+        return EXIT_FAILED
+    if script is None:
+        _err(f"Episode {ep} has no script yet: nothing is voiced.")
+        return EXIT_FAILED
+    rows = voice_lines.tail_report(stories, story_id, ep, script)
+    print(f"Episode {ep}'s line endings (Gemini tail guard v{tts_tail.TAIL_GUARD_VERSION}):")
+    for row in rows:
+        print(_tail_row(row))
+    gemini = [row for row in rows if row["provider"] == "gemini" and row["file"] is not None]
+    cleaned = [row for row in gemini if not row["due"] and row["guard"]]
+    todo = [row for row in gemini if row["due"]]
+    to_cut = sum(row["analysis"]["report"]["trimmed_s"] for row in todo if row["analysis"])
+    summary = f"{len(gemini)} Gemini line{'s' if len(gemini) != 1 else ''}: {len(cleaned)} cleaned, {len(todo)} to clean"
+    if todo:
+        summary += (f" ({to_cut:.2f} s of static to cut) -- the next assets run cleans "
+                    f"{'them' if len(todo) != 1 else 'it'}, for free, speaking nothing again")
+    print(summary + ".")
+    return EXIT_OK
+
+
 _COMMANDS = {"new": _cmd_new, "step": _cmd_step, "render": _cmd_render, "fast-track": _cmd_fast_track,
-             "feedback": _cmd_feedback, "approve": _cmd_approve, "list": _cmd_list,
-             "prompt-limits": _cmd_prompt_limits}
+             "feedback": _cmd_feedback, "approve": _cmd_approve, "voice-tails": _cmd_voice_tails,
+             "list": _cmd_list, "prompt-limits": _cmd_prompt_limits}
 
 
 def main(argv=None) -> int:
