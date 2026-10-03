@@ -1,4 +1,4 @@
-## CURRENT STATE — the AI Story dashboard overhaul: stage 1 DONE and deployed, stage 2 building (2026-10-03, local session)
+## CURRENT STATE — the AI Story dashboard overhaul: stages 1–2 DONE and deployed, stage 3 building (2026-10-03, local session)
 
 - **Stage 1 (DEC-253, Opus agent, branch feat/dashboard-foundation b24275a + ab7eb63, my tweak ef1edcc):** the
   `src/ui/` kit, tokens, lucide-react 1.51.0 pinned, every story confirm an in-app dialog (Cancel focused first),
@@ -7,8 +7,15 @@
   `docker compose rm -sfv backend && up -d --build backend` at 0 jobs: bundle index-DaD2Hpxg.js served, health 200;
   browser walk: list, episode tabs, the Delete alertdialog (Escape closes, nothing deleted). Note: the checkout's
   `web/dashboard/dist` is root-owned — local builds go to the scratchpad (`npx vite build --outDir …`).
-- **Stage 2 (stories list)** building: Opus agent, branch feat/dashboard-stories-list (cover, progress, episodes
-  summary and style_label on the list payload + the card grid, kebab, skeleton, empty state).
+- **Stage 2 (DEC-254, Opus agent, feat/dashboard-stories-list 4871bed + 606a732, merged 96ecfad):** the list payload
+  gains cover / progress / episodes / style_label / pipeline (`workflow.list_cards`, documents only, ~100 ms for 12
+  stories; `tests/test_stories_api_list.py` fail-first), the page is a cover-card grid (3/2/1 columns) with the
+  progress line, the overflow Menu (new kit component), Delete behind the danger dialog, Skeleton and EmptyState.
+  No contract moved. Tests: local 894, CI env 470 / 424 skipped (dashboard + stories API + store). Build 576.8 kB
+  JS / 55.0 kB CSS. Deployed (rebuild at 0 jobs): health 200, the live payload carries the fields, the grid renders
+  with the real portraits, no console error.
+- **Stage 3 (story workspace)** building: Opus agent, branch feat/dashboard-workspace from 96ecfad (routes
+  `/story/:id/:step`, the step rail, the sticky header, Cast/Places as expandable card grids).
 - Plan: `.claude/plans/dashboard/01-ai-story-ui-overhaul-plan.md` (5 stages; the human's answers: full redesign in
   stages, refined dark studio, lucide-react only). EXPLORE by a Sonnet agent + my browser walk of the list, the
   story page, the episode tabs, New story and Settings. Next action: on the go, stage 1 (foundation) by an Opus
