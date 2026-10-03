@@ -18,12 +18,26 @@ with no call, and lead the same report, failing it whatever J1 says:
 
 The report is ``script.json``'s optional ``first_watch`` (``{who_wants_what,
 what_happens, why_it_matters, passed, issues, checked_rev, checked_at,
-stale}``), stale like the consistency report: once the script is rewritten
-(``episode_common.mark_changed``) or its revision moved
+stale, version}``), stale like the consistency report: once the script is
+rewritten (``episode_common.mark_changed``) or its revision moved
 (:func:`needs_first_watch`). ``workflow.approve_script`` refuses a v2
 script while the report is missing or stale (never approvable) or failed
 (unless "approve anyway"): :func:`unjudged_refusal`,
 :func:`issues_refusal`.
+
+**J1 version 2** (``prompts.J1_PROMPT_VERSION``, DEC-248): J1 is told the
+format (the episode's length and spoken words) and gives each issue a
+severity, ``blocking`` or ``minor``; the deterministic checks' issues are
+blocking. The report **passes exactly when no issue is blocking**
+(:func:`blocking_issues`; an issue without a severity, a version-1 report's,
+reads as blocking), so the minor ones are kept for the human to read and
+neither the approval nor the fast track stops on them. After a repair pass
+the call is a **re-check** (*previous*): it is shown the blocking issues the
+pass tried to fix, and a blocking issue it names that is not one of them
+(the same scene and kind) is kept as minor -- the blocking set can only
+shrink, so the repair loop converges. An unapproved script whose report is
+of an older version is judged again (:func:`needs_first_watch`); an
+approved one keeps its report.
 
 **J2, the keyframes** (:func:`check_keyframes`, stage 6b): in the assets
 step of a v2 story, once the keyframes exist, one vision call per shot on
@@ -82,6 +96,8 @@ J1 = "J1"
 # The deterministic repeated-line issues one report holds at most (the stored
 # report holds 20; J1 adds at most 6, the hook check 1).
 DUPLICATE_ISSUES_MAX = 6
+# The kinds the deterministic checks find (they run before every J1 call).
+DETERMINISTIC_KINDS = ("repeated_line", "no_hook_text")
 
 # Each first-watch issue kind in words, for the messages and the repair notes.
 KIND_WORDS = {
@@ -106,9 +122,27 @@ def _and(items) -> str:
 def needs_first_watch(script) -> bool:
     """Whether *script*'s first-watch report is missing, marked stale, or of
     an older revision (the consistency report's rule,
-    ``script.needs_check``)."""
+    ``script.needs_check``) -- or, on a script not approved yet, judged by
+    an older J1 (``version``, absent: 1; DEC-248): an approved script keeps
+    the report it was approved on."""
     report = (script or {}).get(FIRST_WATCH)
-    return report is None or report["stale"] or report["checked_rev"] != script["rev"]
+    if report is None or report["stale"] or report["checked_rev"] != script["rev"]:
+        return True
+    return not script.get("approved_at") and report.get("version", 1) < prompts.J1_PROMPT_VERSION
+
+
+def is_blocking(issue) -> bool:
+    """Whether a first-watch *issue* fails the check: a blocking one, or one
+    without a severity (a version-1 report's: version 1 failed on any)."""
+    return issue.get("severity", "blocking") == "blocking"
+
+
+def blocking_issues(report) -> list:
+    return [issue for issue in (report or {}).get("issues") or [] if is_blocking(issue)]
+
+
+def minor_issues(report) -> list:
+    return [issue for issue in (report or {}).get("issues") or [] if not is_blocking(issue)]
 
 
 def first_watch_state(script) -> str:
@@ -122,11 +156,18 @@ def first_watch_state(script) -> str:
     return "passed" if report["passed"] else "issues"
 
 
+def _count(count, what) -> str:
+    return f"{count} {what} issue{'s' if count != 1 else ''}"
+
+
 def first_watch_line(report) -> str:
+    """``👀 First watch: passed`` -- with ``(2 minor issues)`` when it kept
+    some -- or ``👀 First watch: 3 blocking issues, 1 minor``."""
+    minor = len(minor_issues(report))
     if report["passed"]:
-        return "👀 First watch: passed"
-    count = len(report["issues"])
-    return f"👀 First watch: {count} issue{'s' if count != 1 else ''}"
+        return "👀 First watch: passed" + (f" ({_count(minor, 'minor')})" if minor else "")
+    blocking = len(blocking_issues(report))
+    return f"👀 First watch: {_count(blocking, 'blocking')}" + (f", {minor} minor" if minor else "")
 
 
 # ------------------------------------------------------ deterministic checks
@@ -145,7 +186,7 @@ def duplicate_issues(script) -> list:
             for first_id, first_text in earlier:
                 if prompts.near_duplicate(first_text, line["text"]):
                     issues.append({
-                        "scene_id": scene["scene_id"], "kind": "repeated_line",
+                        "scene_id": scene["scene_id"], "kind": "repeated_line", "severity": "blocking",
                         "fix": (f"Line {line['line_id']} repeats line {first_id} "
                                 f"({prompts.quoted_line(first_text)}): rewrite one of them."),
                     })
@@ -162,7 +203,7 @@ def hook_text_issues(script, ep) -> list:
     if (script.get("hook") or {}).get("on_screen_text"):
         return []
     hook = next((scene for scene in script["scenes"] if scene["function"] == "hook"), None)
-    return [{"scene_id": hook["scene_id"] if hook else None, "kind": "no_hook_text",
+    return [{"scene_id": hook["scene_id"] if hook else None, "kind": "no_hook_text", "severity": "blocking",
              "fix": f"The hook has no on-screen text: write it again (regenerate hook:{ep}) so it states the "
                     "premise on screen."}]
 
@@ -183,11 +224,18 @@ def _objects(ec, script) -> list:
     return names
 
 
-def check_first_watch(ctx, ec, script, *, tools, pack) -> dict:
+def spoken_words(script) -> int:
+    """The words of every line of *script*, for J1's format sentence."""
+    return sum(len(line["text"].split()) for scene in script["scenes"] for line in scene["lines"])
+
+
+def check_first_watch(ctx, ec, script, *, tools, pack, previous=None) -> dict:
     """J1 over the whole *script* with the deterministic checks merged in
     (module docstring); the report is set on *script* (in place; the caller
     writes it) and returned. *pack* is the step's own
-    (``context.build_pack``: the language)."""
+    (``context.build_pack``: the language). *previous*: the blocking issues
+    a repair pass just tried to fix (a re-check, module docstring); a
+    blocking issue of the reply that is not one of them is kept as minor."""
     pre = duplicate_issues(script) + hook_text_issues(script, ec.ep)
     if pre:
         ctx.on_log(f"👀 Repeated lines and hook text: {len(pre)} issue{'s' if len(pre) != 1 else ''}, added to "
@@ -197,23 +245,38 @@ def check_first_watch(ctx, ec, script, *, tools, pack) -> dict:
         "cast": ec.names,
     })
     recap = context.previous_recap(ec.season, ec.ep)
+    seconds = (script.get("timing") or {}).get("total_s") or ec.template.get("target_s")
+    previous = [{"scene_id": issue["scene_id"], "kind": issue["kind"], "fix": issue["fix"]}
+                for issue in previous or []]
+    # The deterministic checks run again on their own: J1 is shown its own kinds.
+    shown = [issue for issue in previous if issue["kind"] not in DETERMINISTIC_KINDS]
     system, user, schema = prompts.build_j1(
         pack, ep=ec.ep, script_digest=digest, objects=_objects(ec, script),
         hook_text=(script.get("hook") or {}).get("on_screen_text"), reveal=script["cliffhanger"]["reveal"],
-        previous_recap=recap)
+        previous_recap=recap, seconds=seconds, words=spoken_words(script), previous_issues=shown or None)
     scene_ids = [scene["scene_id"] for scene in script["scenes"]]
     pre_kinds = {issue["kind"] for issue in pre}
+    tried = {(issue["scene_id"], issue["kind"]) for issue in previous}
+
+    def severity_of(issue):
+        # A re-check keeps blocking only what the repair pass tried to fix.
+        if issue["severity"] == "blocking" and previous and (issue["scene_id"], issue["kind"]) not in tried:
+            return "minor"
+        return issue["severity"]
 
     def report_of(reply, checked_at):
         # The model's own no_hook_text is left out when the check found it.
-        found = [{"scene_id": issue["scene_id"], "kind": issue["kind"], "fix": issue["fix"].strip()}
+        found = [{"scene_id": issue["scene_id"], "kind": issue["kind"], "severity": severity_of(issue),
+                  "fix": issue["fix"].strip()}
                  for issue in reply["issues"]
                  if not (issue["kind"] == "no_hook_text" and "no_hook_text" in pre_kinds)]
+        issues = copy.deepcopy(pre) + found
         return {
             "who_wants_what": reply["who_wants_what"].strip(), "what_happens": reply["what_happens"].strip(),
             "why_it_matters": reply["why_it_matters"].strip(),
-            "passed": reply["passed"] and not pre, "issues": copy.deepcopy(pre) + found,
+            "passed": not any(is_blocking(issue) for issue in issues), "issues": issues,
             "checked_rev": script["rev"], "checked_at": checked_at, "stale": False,
+            "version": prompts.J1_PROMPT_VERSION,
         }
 
     def validate(reply):
@@ -240,6 +303,11 @@ def unjudged_refusal(script, ep):
         return (f"Episode {ep}'s script has not had its first-watch check yet (J1, a v2 story's judge): run "
                 "the script step again (it checks the script), then approve.")
     if state == "stale":
+        report = script[FIRST_WATCH]
+        if not report["stale"] and report["checked_rev"] == script["rev"]:
+            # Only its version is older (DEC-248): the judge changed, not the script.
+            return (f"Episode {ep}'s first-watch check was made by an older version of the judge: check it again "
+                    "(run the script step), then approve.")
         return (f"Episode {ep}'s first-watch check is out of date (the script changed since it ran): check it "
                 "again (run the script step), then approve.")
     return None
@@ -253,22 +321,30 @@ def issues_sentence(script, *, words=True) -> str:
     repair passes, 2 issues remain: ...``. Each fix is listed without its
     own final period, so the sentence ends once (``urgent..`` was shipped);
     one ending with ``!`` or ``?`` keeps it. *words*: each kind in words
-    (the approval's message), else as its id (the fast track's)."""
+    (the approval's message), else as its id (the fast track's).
+
+    J1 version 2 (DEC-248): only the blocking issues are listed and counted
+    -- ``2 blocking issues`` -- and the minor ones, which never refuse, are
+    counted after them: `` (1 minor issue kept for review)``."""
     report = script[FIRST_WATCH]
+    blocking, minor = blocking_issues(report), minor_issues(report)
+    what = "blocking issue" if minor or any("severity" in issue for issue in blocking) else "issue"
 
     def item(issue):
         kind = KIND_WORDS[issue["kind"]] if words else issue["kind"]
         return f"{issue['scene_id'] or 'the episode'} ({kind}): {issue['fix'].strip().rstrip('.')}"
 
-    issues = "; ".join(item(issue) for issue in report["issues"])
-    count = len(report["issues"])
+    issues = "; ".join(item(issue) for issue in blocking)
+    count = len(blocking)
     passes = len(script.get(REPAIRS) or [])
     if passes:
-        head = (f": after {passes} repair pass{'' if passes == 1 else 'es'}, {count} issue"
+        head = (f": after {passes} repair pass{'' if passes == 1 else 'es'}, {count} {what}"
                 f"{' remains' if count == 1 else 's remain'}")
     else:
-        head = f" found {count} issue{'' if count == 1 else 's'}"
+        head = f" found {count} {what}{'' if count == 1 else 's'}"
     text = head + (f": {issues}" if issues else "")
+    if minor:
+        text = text.rstrip(".") + f" ({_count(len(minor), 'minor')} kept for review)"
     return text if text.endswith(("!", "?")) else text + "."
 
 

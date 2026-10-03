@@ -463,8 +463,10 @@ E4_ISSUES = {"passed": False, "issues": [
 J1_PASSED = {"who_wants_what": "Kiwilo veut garder le pouvoir sur l'île.",
              "what_happens": "Le téléphone annonce un vote surprise et désigne Kiwilo.",
              "why_it_matters": "Le perdant du vote quitte l'île.", "passed": True, "issues": []}
+# J1 version 2 (DEC-248): each issue has its severity; a blocking one fails the report.
 J1_ISSUES = dict(J1_PASSED, passed=False, issues=[
-    {"scene_id": "s05", "kind": "unmotivated", "fix": "Montrez pourquoi Kiwilo avoue son plan."}])
+    {"scene_id": "s05", "kind": "unmotivated", "severity": "blocking",
+     "fix": "Montrez pourquoi Kiwilo avoue son plan."}])
 
 
 def e2_v2_reply(call, *, short=False):

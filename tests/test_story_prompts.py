@@ -292,8 +292,9 @@ def test_max_tokens():
         # ledger (L1), measured on its French worst case (tests/test_story_episode_prompt_budgets.py).
         "L1": 690,
         # Phase 7 stage 6a (DEC-230): re-pinned on purpose -- the first-watch judge (J1), measured on its
-        # French worst case (tests/test_story_episode_prompt_budgets.py).
-        "J1": 920,
+        # French worst case (tests/test_story_episode_prompt_budgets.py). DEC-248: re-pinned on purpose --
+        # J1 version 2's severity per issue (920 -> 970).
+        "J1": 970,
         # Phase 7 stage 6b (DEC-230): re-pinned on purpose -- the keyframe judge (J2), its English worst case,
         # under the plan's 160 (same file).
         "J2": 110,

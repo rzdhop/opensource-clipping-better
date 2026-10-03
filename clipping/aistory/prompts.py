@@ -151,6 +151,7 @@ C1_CALLS = 10
 # reply -- the three take-aways at 25, 30 and 25 words, 6 issues of the
 # longest kind with a 30-word fix -- needs 795.6 tokens (chars/4 x 1.3);
 # + 15 %, rounded up to ten (tests/test_story_episode_prompt_budgets.py).
+# J1 version 2 (DEC-248): each issue's severity, 842.4 -> 970.
 # J2 (stage 6b): its largest reply (English: 3 missing items of 6 words, a
 # 25-word continuity issue, 6-character words) needs 91 (chars/4), + 15 %,
 # rounded up to ten: 110, under the plan's 160.
@@ -166,7 +167,7 @@ MAX_TOKENS = {
     "D4": 430, "D5": 3330, "D6": 540,
     "E1v2": 1750, "E2v2": 600, "E3v2": 720,
     "L1": 690,
-    "J1": 920, "J2": 110,
+    "J1": 970, "J2": 110,
 }
 
 # E1's payoff variant (phase 5, plan 11 stage 3, DEC-138's method): from
@@ -346,13 +347,16 @@ SCHEMA_NAMES = {
 # characters: the registry's 8 and E1v2's 2 new objects); no bible, cast
 # notes or memory (a first-time viewer knows only the episode): 3,195;
 # + 15 %, rounded up to ten (tests/test_story_episode_prompt_budgets.py).
+# J1 version 2 (DEC-248): the format sentence, the severities and a
+# re-check's six earlier issues (each fix cut to J1_RECHECK_FIX_MAX_WORDS):
+# 3,463 -> 3,990, under the spec's 4,000.
 # J2 (stage 6b) is a vision call with no pack, as U1: no entry; its text at
 # its worst case fits the default pack budget (tests/test_story_keyframe_gate.py)
 # -- version 2 (phase 8 stage B: looks, sheets, the scene) too, at 1,145.
 INPUT_BUDGET = {"E1": 1820, "E2": 1660, "E3": 2530, "E4": 3900, "T1": 1270, "T1r": 1410, "S3": 3740, "F1": 3950, "N1": 3740,
                 "D2": 2420, "D3": 1940, "R1v2": 1170, "T1v2": 2020, "T1rv2": 2060, "D1": 3890,
                 "D4": 2270, "D5": 3930, "D6": 3560,
-                "E1v2": 2970, "E2v2": 2520, "E3v2": 3380, "L1": 3920, "J1": 3680}
+                "E1v2": 2970, "E2v2": 2520, "E3v2": 3380, "L1": 3920, "J1": 3990}
 
 # The ``bible:<field>`` grammar of spec 9.2: which prompt a regenerate note
 # re-runs, and which of that prompt's fields it targets. "tone" also carries
@@ -2830,10 +2834,30 @@ def validate_e4(reply, *, scene_ids, hook_payoff=False) -> list:
 # following, from a closed list of kinds (``schemas.FIRST_WATCH_ISSUE_KINDS``).
 # The script step merges its own deterministic checks (a repeated line, a
 # hook with no on-screen text) into the same report (``steps/judge.py``).
+#
+# J1 version 2 (the fast-track fix after the phase 7 follow-up wave, DEC-248):
+# version 1 failed on any issue, and asked for "at most 6" it always found 6
+# (both of the human's runs) -- a 3-6 s hook asked to explain the premise, a
+# cliffhanger's reveal called "unintroduced" -- so the repair pass could never
+# make it pass and the fast track always stopped. Version 2 is told the format
+# (the episode's length and spoken words; a summary says what is on screen;
+# the hook's tease, the cliffhanger's reveal and a secret kept for later are
+# never issues), gives each issue a severity -- ``blocking`` (a first-time
+# viewer cannot follow who the main character is, what they want, what
+# happens or why it matters) or ``minor`` -- and passes exactly when no issue
+# is blocking. After a repair pass it is a re-check (*previous_issues*): it
+# says which of the blocking issues the rewrite left, anything else is minor
+# (``steps/judge.py`` enforces it), so the repair loop converges.
 
+J1_PROMPT_VERSION = 2
+J1_SEVERITIES = schemas.FIRST_WATCH_SEVERITIES
 J1_SUMMARY_MAX_WORDS = {"who_wants_what": 25, "what_happens": 30, "why_it_matters": 25}
 J1_ISSUES_MAX = 6
 J1_FIX_MAX_WORDS = 30
+# A re-check lists at most J1_ISSUES_MAX earlier issues, each fix cut to this
+# many words (the scene and the kind say which; the input stays under the
+# spec's ceiling, tests/test_story_episode_prompt_budgets.py).
+J1_RECHECK_FIX_MAX_WORDS = 5
 
 _J1_SYSTEM_TEMPLATE = (
     "You are a first-time viewer of one episode of a serialized vertical-video fiction series, watching it once "
@@ -2842,14 +2866,27 @@ _J1_SYSTEM_TEMPLATE = (
     "following. Reply with JSON only, matching the schema. Write every field in {language_name}."
 )
 
+_J1_FORMAT_TEMPLATE = (
+    "The format: about {seconds} s and {words} spoken words in all. Under a scene's header, its first line is what "
+    "is on screen, then what is heard. A serial keeps questions open on purpose -- the hook's tease, the "
+    "cliffhanger's reveal (someone or something first seen there is its point), a secret kept for later: never an "
+    "issue. A detail the format has no room for is minor at most."
+)
+
+_J1_RECHECK_HEAD = "Blocking issues an earlier check found, their scenes since written again:"
+_J1_RECHECK_TAIL = "Keep blocking only those still there (same scene_id and kind); anything else is minor."
+
 _J1_ASK = (
     "Watch this episode once, as written above, then give:\n"
-    "- who_wants_what: who wants what, as you understood it (at most 25 words)\n"
+    "- who_wants_what: who wants what (at most 25 words)\n"
     "- what_happens: what happens (at most 30 words)\n"
-    "- why_it_matters: why it matters to them, what is at stake (at most 25 words)\n"
-    "- passed: true only when a first-time viewer can follow the episode and you found no issue\n"
-    "- issues: at most 6, each with scene_id (one of the script's own scene ids, or null when the issue is not "
-    "tied to one scene), kind and fix (at most 30 words, in the story language)\n\n"
+    "- why_it_matters: what is at stake for them (at most 25 words)\n"
+    "- issues: at most 6, only what kept you from following (none is fine), each with scene_id (a scene id above, "
+    "or null when not tied to one scene), kind, severity and fix (at most 30 words, in the story language, doable "
+    "in a line or two of that scene)\n"
+    "- passed: true exactly when no issue is blocking\n\n"
+    "Severity: blocking when, without the fix, a first-time viewer cannot follow who the main character is, what "
+    "they want, what happens or why it matters; else minor.\n\n"
     "The kinds:\n"
     "- unclear_goal: what a main character wants is never said or shown\n"
     "- unmotivated: someone acts with no reason the viewer saw\n"
@@ -2865,24 +2902,28 @@ def _j1_system(pack) -> str:
 
 
 def j1_schema() -> dict:
-    """The J1 output schema: the viewer's three take-aways, a pass/fail and
-    up to 6 issues of ``schemas.FIRST_WATCH_ISSUE_KINDS`` (``scene_id`` read
-    back from the model, checked by :func:`validate_j1`, as E4's)."""
+    """The J1 output schema: the viewer's three take-aways, up to 6 issues
+    of ``schemas.FIRST_WATCH_ISSUE_KINDS`` each with a severity
+    (:data:`J1_SEVERITIES`), then a pass/fail -- after the issues, so it is
+    decided once they are listed (``scene_id`` read back from the model,
+    checked by :func:`validate_j1`, as E4's)."""
     issue = _llm_obj({
         "scene_id": {"type": ["string", "null"], "description": "one of the script's own scene ids, or null"},
         "kind": {"type": "string", "enum": list(schemas.FIRST_WATCH_ISSUE_KINDS)},
+        "severity": {"type": "string", "enum": list(J1_SEVERITIES)},
         "fix": {"type": "string", "description": f"at most {J1_FIX_MAX_WORDS} words, in the story language"},
     })
     properties = {key: {"type": "string", "description": f"at most {words} words"}
                   for key, words in J1_SUMMARY_MAX_WORDS.items()}
     properties.update({
-        "passed": {"type": "boolean"},
         "issues": {"type": "array", "description": f"at most {J1_ISSUES_MAX} issues", "items": issue},
+        "passed": {"type": "boolean", "description": "true exactly when no issue is blocking"},
     })
     return _llm_obj(properties)
 
 
-def build_j1(pack, *, ep, script_digest, objects, hook_text, reveal, previous_recap=None):
+def build_j1(pack, *, ep, script_digest, objects, hook_text, reveal, previous_recap=None, seconds=None, words=None,
+             previous_issues=None):
     """The first-watch judge of episode *ep* (module section above).
 
     *script_digest* is :func:`script_digest`'s rendering of the script (the
@@ -2893,8 +2934,19 @@ def build_j1(pack, *, ep, script_digest, objects, hook_text, reveal, previous_re
     text and *reveal* the cliffhanger's (None: none written);
     *previous_recap* the previous episode's recap (episode 2 on), what a
     returning viewer remembers. No bible, cast notes or memory: the viewer
-    knows only the episode."""
+    knows only the episode.
+
+    Version 2: *seconds* and *words* (the episode's estimated length and
+    its spoken words) open the prompt with the format
+    (:data:`_J1_FORMAT_TEMPLATE`; left out when either is None);
+    *previous_issues* (``[{scene_id, kind, fix}]``, the blocking issues a
+    repair pass just tried to fix, J1's own kinds) makes it a re-check: the
+    first :data:`J1_ISSUES_MAX` are listed before the ask, each fix cut to
+    :data:`J1_RECHECK_FIX_MAX_WORDS` words, and the ask keeps only those
+    still there as blocking."""
     user = ""
+    if seconds is not None and words is not None:
+        user += _J1_FORMAT_TEMPLATE.format(seconds=round(seconds), words=words) + "\n\n"
     if previous_recap:
         user += f"Previously (episode {ep - 1}'s recap): {previous_recap}\n\n"
     user += f"{script_digest}\n\n"
@@ -2903,6 +2955,11 @@ def build_j1(pack, *, ep, script_digest, objects, hook_text, reveal, previous_re
             f"- {name}: {', '.join(scene_ids)}" for name, scene_ids in objects) + "\n\n"
     user += f"Hook on-screen text: {hook_text if hook_text else 'none'}\n"
     user += f"Cliffhanger reveal: {reveal if reveal else 'none'}\n\n"
+    if previous_issues:
+        user += _J1_RECHECK_HEAD + "\n" + "\n".join(
+            f"- {issue['scene_id'] or 'the episode'} ({issue['kind']}): "
+            f"{context.trim_words(issue['fix'], J1_RECHECK_FIX_MAX_WORDS)[0]}"
+            for issue in previous_issues[:J1_ISSUES_MAX]) + "\n" + _J1_RECHECK_TAIL + "\n\n"
     user += _J1_ASK
     return _j1_system(pack), user, j1_schema()
 
@@ -2910,8 +2967,9 @@ def build_j1(pack, *, ep, script_digest, objects, hook_text, reveal, previous_re
 def validate_j1(reply, *, scene_ids) -> list:
     """Post-validation for a J1 reply: the take-aways non-empty and within
     their caps, at most 6 issues, each ``scene_id`` null or one of the
-    script's own, each ``fix`` capped, and ``passed`` true exactly when
-    there is no issue (E4's rule)."""
+    script's own, each ``fix`` capped, and ``passed`` true exactly when no
+    issue is blocking (version 2; version 1 was E4's rule, no issue at
+    all)."""
     errors = schemas.validate(reply, j1_schema())
     if errors:
         return errors
@@ -2928,8 +2986,9 @@ def validate_j1(reply, *, scene_ids) -> list:
         if issue["scene_id"] is not None and issue["scene_id"] not in scene_id_set:
             errors.append(f"{path}.scene_id: {issue['scene_id']!r} is not one of the script's scene ids")
         _text_errors(errors, f"{path}.fix", issue["fix"], max_words=J1_FIX_MAX_WORDS)
-    if reply["passed"] != (len(issues) == 0):
-        errors.append(f"$.passed: {reply['passed']!r} does not agree with {len(issues)} issue(s)")
+    blocking = sum(1 for issue in issues if issue["severity"] == "blocking")
+    if reply["passed"] != (blocking == 0):
+        errors.append(f"$.passed: {reply['passed']!r} does not agree with {blocking} blocking issue(s)")
     return errors
 
 

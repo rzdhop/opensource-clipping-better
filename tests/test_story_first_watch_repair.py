@@ -31,6 +31,9 @@ LONG = eps.e2_v2_reply
 BASE_PROMPTS = ["E1v2"] + ["E2v2"] * 8 + ["E3v2", "E4", "J1"]
 NEW_HOOK = {"lines": [{"speaker": eps.MANGELLA, "text": "Personne ne dort ce soir.", "emotion": "tension",
                        "delivery": "icy"}], "on_screen_text": "Nuit blanche au parloir"}
+NEW_CLIFF = {"reveal": "Le téléphone se tait pour de bon.",
+             "lines": [{"speaker": eps.MANGELLA, "text": "Personne ne sortira d'ici.", "emotion": "shocked",
+                        "delivery": "cold"}]}
 
 
 def _wf():
@@ -51,8 +54,8 @@ def _judge():
     return judge
 
 
-def _issue(sid, kind, fix):
-    return {"scene_id": sid, "kind": kind, "fix": fix}
+def _issue(sid, kind, fix, severity="blocking"):
+    return {"scene_id": sid, "kind": kind, "severity": severity, "fix": fix}
 
 
 def _j1(*issues):
@@ -140,7 +143,7 @@ def test_j1_issues_are_repaired_with_their_fixes_as_notes_and_checked_again(stor
                "issues_before": 4, "issues_after": 0, "failed": []}]
     assert script["repairs"] == record and summary["repairs"] == record
     assert summary["calls"] == 18 and summary["first_watch"] is True
-    assert "🩹 Repair pass 1: 4 scenes rewritten for 4 issues (s01 no hook text, s02 unclear goal, " \
+    assert "🩹 Repair pass 1: 4 scenes rewritten for 4 blocking issues (s01 no hook text, s02 unclear goal, " \
            "s06 unintroduced, the episode unclear goal)" in log
     assert "👀 First watch after repair: passed" in log
     assert wf.approve_script(store, story_id, 1, now=NOW)["approved_anyway"] is None
@@ -170,7 +173,7 @@ def test_an_object_unseen_rewrites_the_earlier_scene_that_lists_the_prop_or_the_
     assert notes[3] == ("First-watch check -- Object unseen: Montrer le téléphone en noix de coco avant qu'il ne "
                         "sonne.")
     assert summary["repairs"][0]["scenes"][1] == {"scene_id": "s04", "kinds": ["object_unseen"], "part": None}
-    assert "🩹 Repair pass 1: 4 scenes rewritten for 3 issues (s03 unintroduced, s05 unintroduced, " \
+    assert "🩹 Repair pass 1: 4 scenes rewritten for 3 blocking issues (s03 unintroduced, s05 unintroduced, " \
            "s09 object unseen)" in log
 
 
@@ -200,51 +203,66 @@ def test_a_repeated_line_is_rewritten_on_the_later_scene(store):
     assert summary["repairs"] == [{"pass": 1, "scenes": [{"scene_id": "s05", "kinds": ["repeated_line"],
                                                            "part": None}],
                                    "issues_before": 1, "issues_after": 0, "failed": []}]
-    assert "🩹 Repair pass 1: 1 scene rewritten for 1 issue (s05 repeated line)" in log
+    assert "🩹 Repair pass 1: 1 scene rewritten for 1 blocking issue (s05 repeated line)" in log
 
 
 # ============================================================ the bounds
 
-def test_a_pass_is_at_most_four_calls_and_a_run_at_most_two_passes(store):
-    """Six issues on six scenes: pass 1 rewrites the first four in scene
-    order; J1 still names the last two, pass 2 rewrites them; J1 still finds
-    one, and the passes are spent -- the refusal says what was tried."""
+def test_a_pass_is_at_most_eight_calls_and_a_run_at_most_two_passes(store):
+    """Six issues -- the hook's, four characters met unintroduced (each also
+    sending the nearest earlier scene they are in: s02, s04, s06, s08) and
+    the cliffhanger's -- plan the ten scenes: pass 1 rewrites the first
+    eight in scene order (the hook's part, then s02-s08); J1 still names two,
+    pass 2 rewrites them (s09, then the cliffhanger's part); J1 still finds
+    one, and the passes are spent -- the refusal says what was tried.
+    DEC-248, re-pinned on purpose: four calls a pass left the late scenes --
+    the cliffhanger among them -- never written again."""
     wf = _wf()
     script_step = _script_step()
     story_id = eps._ready_story(store, v2=True)
-    six = _j1(*(_issue(sid, kind, f"Dire ce que veut Kiwilo en {sid}.") for sid, kind in (
-        ("s02", "unclear_goal"), ("s03", "unmotivated"), ("s05", "unclear_goal"), ("s06", "unmotivated"),
-        ("s08", "unclear_goal"), ("s09", "unmotivated"))))
-    two = _j1(_issue("s08", "unclear_goal", "Dire ce que veut Kiwilo en s08."),
-              _issue("s09", "unmotivated", "Dire ce que veut Kiwilo en s09."))
-    one = _j1(_issue("s09", "unmotivated", "Dire ce que veut Kiwilo ici."))
-    llm = eps._script_llm(v2=True, E2=[LONG] * 14, E4=[eps.E4_PASSED] * 3, J1=[six, two, one, eps.J1_PASSED])
+    scenes = [f"s{index:02d}" for index in range(1, 11)]
+    six = _j1(_issue("s01", "unclear_goal", "Dire ce que veut Kiwilo dès le hook."),
+              _issue("s03", "unintroduced", "Présenter Mangella avant qu'elle parle."),
+              _issue("s05", "unintroduced", "Présenter Kiwilo avant qu'il parle."),
+              _issue("s07", "unintroduced", "Présenter Mangella avant qu'elle parle."),
+              _issue("s09", "unintroduced", "Présenter Kiwilo avant qu'il parle."),
+              _issue("s10", "unmotivated", "Dire pourquoi le téléphone désigne Kiwilo."))
+    two = _j1(_issue("s09", "unintroduced", "Présenter le nouveau venu."),
+              _issue("s10", "unmotivated", "Dire pourquoi le téléphone désigne Kiwilo."))
+    one = _j1(_issue("s10", "unmotivated", "Dire pourquoi le téléphone sonne ici."))
+    llm = eps._script_llm(v2=True, E2=[LONG] * 18, E3=[eps.E3_FULL, {"hook": NEW_HOOK}, {"cliffhanger": NEW_CLIFF}],
+                          E4=[eps.E4_PASSED] * 3, J1=[six, two, one])
 
     summary, log = eps._run(eps._new().script, store, story_id, llm=llm)
 
-    assert script_step.REPAIR_CALLS_MAX == 4 and script_step.REPAIR_PASSES_MAX == 2
-    assert llm.prompts() == BASE_PROMPTS + ["E2v2"] * 4 + ["E4", "J1"] + ["E2v2"] * 2 + ["E4", "J1"]
-    assert [entry["scene_id"] for entry in summary["repairs"][0]["scenes"]] == ["s02", "s03", "s05", "s06"]
-    assert [entry["scene_id"] for entry in summary["repairs"][1]["scenes"]] == ["s08", "s09"]
+    assert script_step.REPAIR_CALLS_MAX == 8 and script_step.REPAIR_PASSES_MAX == 2
+    assert llm.prompts() == (BASE_PROMPTS + ["E3v2"] + ["E2v2"] * 7 + ["E4", "J1"]
+                             + ["E2v2", "E3v2"] + ["E4", "J1"])
+    assert [entry["scene_id"] for entry in summary["repairs"][0]["scenes"]] == scenes[:8]
+    assert [(entry["scene_id"], entry["part"]) for entry in summary["repairs"][1]["scenes"]] == \
+        [("s09", None), ("s10", "cliffhanger")]
     assert [(record["pass"], record["issues_before"], record["issues_after"]) for record in summary["repairs"]] \
         == [(1, 6, 2), (2, 2, 1)]
     script = eps._script(store, story_id)
-    assert script["rev"] == 7 and script["first_watch"]["checked_rev"] == 7 and script["first_watch"]["passed"] is False
+    assert script["cliffhanger"]["reveal"] == NEW_CLIFF["reveal"]
+    assert script["rev"] == 11 and script["first_watch"]["checked_rev"] == 11
+    assert script["first_watch"]["passed"] is False
     assert script["repairs"] == summary["repairs"] and summary["first_watch"] is False
-    assert "🩹 Repair pass 2: 2 scenes rewritten for 2 issues (s08 unclear goal, s09 unmotivated)" in log
-    assert "👀 First watch after repair: 1 issue remains" in log
+    assert "🩹 Repair pass 2: 2 scenes rewritten for 2 blocking issues (s09 unintroduced, s10 unmotivated)" in log
+    assert "👀 First watch after repair: 1 blocking issue remains" in log
 
     message = _refused(lambda: wf.approve_script(store, story_id, 1, now=NOW))
     assert message == (
-        "Episode 1's first-watch check: after 2 repair passes, 1 issue remains: s09 (unmotivated): Dire ce que veut "
-        "Kiwilo ici. A first-time viewer took away: Kiwilo veut garder le pouvoir sur l'île. Le téléphone annonce un "
-        "vote surprise et désigne Kiwilo. Le perdant du vote quitte l'île. Fix them (edit the script, or regenerate "
-        "the scenes they name) and check again, or approve anyway.")
+        "Episode 1's first-watch check: after 2 repair passes, 1 blocking issue remains: s10 (unmotivated): Dire "
+        "pourquoi le téléphone sonne ici. A first-time viewer took away: Kiwilo veut garder le pouvoir sur l'île. "
+        "Le téléphone annonce un vote surprise et désigne Kiwilo. Le perdant du vote quitte l'île. Fix them (edit "
+        "the script, or regenerate the scenes they name) and check again, or approve anyway.")
     from clipping.aistory.steps import fast_track
 
     fast = fast_track.script_refusal(script, 1, v2=True)
-    assert fast.startswith("Episode 1's first-watch check (J1): after 2 repair passes, 1 issue remains: s09 "
-                           "(unmotivated): Dire ce que veut Kiwilo ici. The fast track never approves over issues")
+    assert fast.startswith("Episode 1's first-watch check (J1): after 2 repair passes, 1 blocking issue remains: "
+                           "s10 (unmotivated): Dire pourquoi le téléphone sonne ici. The fast track never approves "
+                           "over blocking issues")
     assert ".." not in message and ".." not in fast
 
 
@@ -267,7 +285,7 @@ def test_a_failed_repair_keeps_the_scene_and_a_pass_that_repairs_nothing_ends_th
     script = eps._script(store, story_id)
     assert eps._scene(script, "s02")["rev"] == 1 and eps._scene(script, "s03")["rev"] == 2
     assert any(line.startswith("✖ Repair pass 1: scene s02 failed") and "keeps its lines" in line for line in log)
-    assert "🩹 Repair pass 1: 1 scene rewritten for 2 issues (s02 unclear goal, s03 unmotivated)" in log
+    assert "🩹 Repair pass 1: 1 scene rewritten for 2 blocking issues (s02 unclear goal, s03 unmotivated)" in log
 
     # The only repair fails: nothing was repaired, so the checks are not run again and the loop ends.
     story_id = eps._ready_story(store, v2=True)
@@ -295,8 +313,8 @@ def test_an_issue_with_no_scene_is_left_in_the_report_without_a_pass(store):
     assert "repairs" not in script and summary["repairs"] is None
     assert not any("Repair pass" in line for line in log)
     message = _refused(lambda: wf.approve_script(store, story_id, 1, now=NOW))
-    assert message.startswith("Episode 1's first-watch check found 1 issue: the episode (unclear goal): On ne sait "
-                              "pas ce que veut Mangella. A first-time viewer took away:")
+    assert message.startswith("Episode 1's first-watch check found 1 blocking issue: the episode (unclear goal): On "
+                              "ne sait pas ce que veut Mangella. A first-time viewer took away:")
     assert "repair" not in message and ".." not in message
 
 
@@ -350,9 +368,9 @@ def test_the_step_budget_ends_a_pass_before_a_call_naming_the_repairs_left_and_a
     assert script["first_watch"]["passed"] is False and script["first_watch"]["stale"] is False
     assert "repairs" not in script
 
-    again = eps.FakeLLM(E2=[LONG] * 4, E4=[eps.E4_PASSED], J1=[eps.J1_PASSED])
+    again = eps.FakeLLM(E2=[LONG] * 6, E4=[eps.E4_PASSED], J1=[eps.J1_PASSED])
     summary, _log = eps._run(m.script, store, story_id, llm=again)
-    assert again.prompts() == ["E2v2"] * 4 + ["E4", "J1"]
+    assert again.prompts() == ["E2v2"] * 6 + ["E4", "J1"]  # DEC-248: the six fit one pass of eight
     assert summary["first_watch"] is True and [r["pass"] for r in summary["repairs"]] == [1]
 
 
@@ -419,9 +437,11 @@ def test_the_repairs_record_validates_on_the_script_and_a_bad_kind_is_refused(st
 
 def test_the_refusal_names_the_repairs_tried_and_ends_each_fix_once():
     judge = _judge()
+    # A version-1 report (no severity): every issue blocks and the sentence says "issues", as it did.
     report = {"who_wants_what": "Ana veut la clé.", "what_happens": "Bo la cache.", "why_it_matters": "La porte.",
               "passed": False, "checked_rev": 1, "checked_at": NOW, "stale": False,
-              "issues": [_issue("s01", "unclear_goal", "Dire l'enjeu."), _issue(None, "unmotivated", "Montrer pourquoi")]}
+              "issues": [{"scene_id": "s01", "kind": "unclear_goal", "fix": "Dire l'enjeu."},
+                         {"scene_id": None, "kind": "unmotivated", "fix": "Montrer pourquoi"}]}
     script = {"rev": 1, "first_watch": report}
     assert judge.issues_refusal(script, 2) == (
         "Episode 2's first-watch check found 2 issues: s01 (unclear goal): Dire l'enjeu; the episode (unmotivated): "
@@ -431,10 +451,14 @@ def test_the_refusal_names_the_repairs_tried_and_ends_each_fix_once():
     assert judge.issues_refusal(script, 2).startswith(
         "Episode 2's first-watch check: after 1 repair pass, 2 issues remain: s01 (unclear goal): Dire l'enjeu; the "
         "episode (unmotivated): Montrer pourquoi. A first-time viewer took away:")
+    # Version 2 (DEC-248): the blocking issues are listed, the minor ones only counted.
     script["repairs"].append({"pass": 2, "scenes": [], "issues_before": 2, "issues_after": 1, "failed": []})
-    report["issues"] = [_issue("s01", "unclear_goal", "Pourquoi la clé ?")]
+    report["issues"] = [_issue("s01", "unclear_goal", "Pourquoi la clé ?"),
+                        _issue("s03", "unintroduced", "Dire qui est Bo.", severity="minor")]
     message = judge.issues_refusal(script, 2)
-    assert message.startswith("Episode 2's first-watch check: after 2 repair passes, 1 issue remains: s01 (unclear "
-                              "goal): Pourquoi la clé ? A first-time viewer took away:")
+    assert message.startswith("Episode 2's first-watch check: after 2 repair passes, 1 blocking issue remains: s01 "
+                              "(unclear goal): Pourquoi la clé ? (1 minor issue kept for review). A first-time viewer "
+                              "took away:")
+    assert "Dire qui est Bo" not in message
     assert ".." not in message and "?." not in message
     assert judge.issues_refusal({"rev": 1, "first_watch": dict(report, passed=True, issues=[])}, 2) is None

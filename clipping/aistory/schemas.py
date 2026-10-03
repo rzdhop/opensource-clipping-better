@@ -2529,11 +2529,17 @@ _EPISODE_SCRIPT_CONSISTENCY_REPORT_SCHEMA = _or_null(_document({
 FIRST_WATCH_ISSUE_KINDS = ("unclear_goal", "unmotivated", "unintroduced", "object_unseen", "repeated_line",
                            "no_hook_text")
 FIRST_WATCH_TEXT_MAX_CHARS = 300
+# J1 version 2 (DEC-248): each issue's severity, and the report passes
+# exactly when none is blocking. An issue without one (a version-1 report)
+# reads as blocking: version 1 failed on any issue.
+FIRST_WATCH_SEVERITIES = ("blocking", "minor")
 
 _EPISODE_SCRIPT_FIRST_WATCH_ISSUE_SCHEMA = _document({
     "scene_id": {"type": ["string", "null"]},
     "kind": {"type": "string", "enum": list(FIRST_WATCH_ISSUE_KINDS)},
     "fix": {"type": "string", "maxLength": FIRST_WATCH_TEXT_MAX_CHARS},
+}, optional={
+    "severity": {"type": "string", "enum": list(FIRST_WATCH_SEVERITIES)},
 })
 
 _EPISODE_SCRIPT_FIRST_WATCH_SCHEMA = _document({
@@ -2545,6 +2551,10 @@ _EPISODE_SCRIPT_FIRST_WATCH_SCHEMA = _document({
     "checked_rev": {"type": "integer"},
     "checked_at": {"type": "string"},
     "stale": {"type": "boolean"},
+}, optional={
+    # The J1 prompt version that judged it (``prompts.J1_PROMPT_VERSION``);
+    # absent: version 1.
+    "version": {"type": "integer", "minimum": 1},
 })
 
 # Phase 7 follow-up, stage G: what the script step's repair pass tried on a
@@ -2559,6 +2569,11 @@ _EPISODE_SCRIPT_REPAIR_SCENE_SCHEMA = _document({
     "kinds": {"type": "array", "items": {"type": "string", "enum": list(FIRST_WATCH_ISSUE_KINDS)}, "minItems": 1,
               "maxItems": len(FIRST_WATCH_ISSUE_KINDS)},
     "part": {"type": ["string", "null"], "enum": ["hook", "cliffhanger", "recap", None]},
+}, optional={
+    # DEC-248: the story props an object_unseen repair listed on the scene
+    # for its rewrite (never a new prop of the library).
+    "props_added": {"type": "array", "items": {"type": "string", "pattern": PROP_ID_PATTERN}, "minItems": 1,
+                    "maxItems": 4},
 })
 
 _EPISODE_SCRIPT_REPAIR_PASS_SCHEMA = _document({

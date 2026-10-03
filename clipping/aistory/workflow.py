@@ -3325,6 +3325,8 @@ def episode_review(page) -> dict:
          "render": {"state", "out_of_date", "duration_s", "finished_at", "file"} | None,
          "metadata_current": bool | None,
          "script_repairs": script.repairs | None (stage G; absent on older scripts),
+         "script_minor_issues": [{"scene_id", "kind", "fix"}] (DEC-248: the minor issues of a
+                                passed first-watch report, approved over and kept for the human to read),
          "shots": [{"shot_id", "scene_id", "order", "image_name", "image_state", "locked", "target",
                     "clip": {"name", "url", "state", "current", "target", "blocked", "continue"} | None,
                     "verdict": {"state": <REVIEW_VERDICT_STATES>, "issue", "redraws", "gave_up"},
@@ -3414,6 +3416,8 @@ def episode_review(page) -> dict:
         "spend": _review_spend(page), "render": render_view,
         "metadata_current": None if metadata is None else bool(metadata.get("current")),
         "script_repairs": (script or {}).get(judge_step.REPAIRS) or None,
+        "script_minor_issues": [{"scene_id": issue["scene_id"], "kind": issue["kind"], "fix": issue["fix"]}
+                                for issue in judge_step.minor_issues((script or {}).get(judge_step.FIRST_WATCH))],
         "shots": shots,
     }
 
@@ -3594,7 +3598,9 @@ def approve_script(stories, story_id, ep, *, approve_anyway=False, now) -> dict:
     estimated length inside the template's window (:func:`_refuse_length`,
     never "anyway"); then a first-watch report that found issues refuses,
     naming them, unless *approve_anyway* -- which ``approved_anyway``
-    records as it does over E4's."""
+    records as it does over E4's. J1 version 2 (DEC-248): a report passes
+    when none of its issues is blocking, so minor issues alone never refuse
+    and never make the approval an "anyway"."""
     story = load(stories, story_id)
     ep = episode_bounds(stories, story, ep)
     script = read_episode(stories, story_id, ep, SCRIPT_DOC)

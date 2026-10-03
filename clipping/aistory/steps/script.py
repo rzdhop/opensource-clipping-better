@@ -70,7 +70,16 @@ was paid for survives a failure, a cancel or the step's time budget:
   calls each, in scene order; the loop ends when J1 passes, a pass
   repaired nothing, the passes are spent or the budget is. Recorded as
   ``script.repairs`` and in the step's result (``repairs``); never on an
-  approved script.
+  approved script. J1 version 2 (DEC-248): only the **blocking** issues are
+  repaired (the minor ones stay in the report, for the human to read); the
+  J1 after a pass is a re-check shown the blocking issues it tried
+  (``judge.check_first_watch``'s *previous*), so the blocking set can only
+  shrink; each note is fitted to the pack's note cap by shortening the
+  fixes, never the asks (:func:`_fitted_note`); and an ``object_unseen``
+  whose fix names a prop of the story that the scene does not list gets it
+  listed on the scene before the rewrite (``props_added`` in the record) --
+  an object that is not one of the story's props is never added to the
+  library: the rewrite shows it in the lines.
 
 After each write the script is re-timed (``episode_common.retime``, with the
 storyboard when there is one). A complete script re-run makes no call. The
@@ -135,9 +144,17 @@ FILL_NOTE = ("This scene runs short of the episode's length: write it fuller, cl
 # The v2 repair pass (phase 7 follow-up, stage G): after J1, the scenes its
 # issues name are written again with the fix as the note -- at most this many
 # passes a run, each at most this many calls; every note opens with this.
+# DEC-248: 4 calls a pass left the late scenes -- the cliffhanger among them --
+# never written again (the human's run: s05, s06 and s08 still named after two
+# passes); 8 covers six issues and the earlier scenes they send.
 REPAIR_PASSES_MAX = 2
-REPAIR_CALLS_MAX = 4
+REPAIR_CALLS_MAX = 8
 REPAIR_NOTE_HEAD = "First-watch check -- "
+# A note longer than the pack's cap is cut at its end (``context.build_pack``),
+# which loses the last ask; a repair note is fitted to it first (DEC-248).
+REPAIR_NOTE_MAX_WORDS = context._NOTE_WORD_LIMIT
+# A scene lists at most this many props (the script schema's own bound).
+SCENE_PROPS_MAX = schemas.EPISODE_SCRIPT_SCHEMA["properties"]["scenes"]["items"]["properties"]["props"]["maxItems"]
 
 
 # ----------------------------------------------------------------- helpers
@@ -932,50 +949,86 @@ def _named_first(fix, names):
     return min(found)[1] if found else None
 
 
-def _earlier_scene(ec, script, scene, kind, fix):
-    """``(scene_id, name)`` of the nearest body scene before *scene* where
-    the character an ``unintroduced`` *fix* names is present, or the prop
-    an ``object_unseen`` one names is listed -- *scene*'s own cast / props
-    first (the fix usually names one of them), else any of the story's --
-    or None: the fix names none, or no earlier body scene has them."""
+def _named_entity(ec, scene, kind, fix):
+    """``(key, id, name)`` of the character an ``unintroduced`` *fix* names,
+    or the story prop an ``object_unseen`` one names -- *scene*'s own cast /
+    props first (the fix usually names one of them), else any of the
+    story's -- or None: it names none."""
     if kind == "unintroduced":
         key, names = "characters", dict(ec.names)
     else:
         key, names = "props", {pid: (doc or {}).get("name") or pid for pid, doc in ec.entities["props"].items()}
     own = {eid: names[eid] for eid in scene[key] if eid in names}
     eid = _named_first(fix, own) or _named_first(fix, names)
-    if eid is None:
+    return None if eid is None else (key, eid, names[eid])
+
+
+def _earlier_scene(ec, script, scene, kind, fix):
+    """``(scene_id, name)`` of the nearest body scene before *scene* where
+    the character an ``unintroduced`` *fix* names is present, or the prop
+    an ``object_unseen`` one names is listed (:func:`_named_entity`) -- or
+    None: the fix names none, or no earlier body scene has them."""
+    named = _named_entity(ec, scene, kind, fix)
+    if named is None:
         return None
+    key, eid, name = named
     index = script["scenes"].index(scene)
     for before in reversed(script["scenes"][:index]):
         if before["function"] in schemas.BODY_FUNCTIONS and eid in before[key]:
-            return before["scene_id"], names[eid]
+            return before["scene_id"], name
     return None
+
+
+def _fitted_note(items, limit=REPAIR_NOTE_MAX_WORDS) -> str:
+    """:data:`REPAIR_NOTE_HEAD` then each item ``(ask_before, fix,
+    ask_after)`` joined with single spaces -- within *limit* words when it
+    can be: the fixes (J1's words) are shortened, never the asks (the
+    app's), a short fix keeping all its words and the longer ones sharing
+    what is left evenly, each cut one ending with "…". Pure."""
+    fixes = [fix.split() for _before, fix, _after in items]
+    asks = len(REPAIR_NOTE_HEAD.split()) + sum(len(before.split()) + len(after.split())
+                                               for before, _fix, after in items)
+    room = limit - asks
+    if sum(len(words) for words in fixes) > room >= len(fixes):
+        caps, left, count = {}, room, len(fixes)
+        for index in sorted(range(len(fixes)), key=lambda i: len(fixes[i])):
+            caps[index] = min(len(fixes[index]), left // count)
+            left, count = left - caps[index], count - 1
+        fixes = [words if len(words) <= caps[i] else words[:caps[i] - 1] + [words[caps[i] - 1] + "…"]
+                 for i, words in enumerate(fixes)]
+    return REPAIR_NOTE_HEAD + " ".join(" ".join(part for part in (before, " ".join(words), after) if part)
+                                       for (before, _fix, after), words in zip(items, fixes))
 
 
 def repair_plan(ec, script, issues) -> list:
     """The repairs for a first-watch report's *issues* (the module
-    docstring's map), in scene order, each ``{scene_id, part, kinds,
-    note}``: *part* the framing part the partial E3 writes when the scene is
-    a framing one (None: E2); *kinds* the issue kinds that sent the scene,
-    each once; *note* the author's note -- :data:`REPAIR_NOTE_HEAD`, then
-    one item per issue: the kind in words and the fix as it is (the story
-    language), a ``repeated_line`` asking for a different line that keeps
-    the beat, an earlier scene's item saying which scene the issue is in and
-    what to do here. Not repairable, left out (the issue stays in the
-    report): an issue with no scene, one naming a scene the script no longer
-    has, a body scene nobody can speak in. Pure."""
+    docstring's map; the step hands in the blocking ones), in scene order,
+    each ``{scene_id, part, kinds, note, add_props}``: *part* the framing
+    part the partial E3 writes when the scene is a framing one (None: E2);
+    *kinds* the issue kinds that sent the scene, each once; *note* the
+    author's note -- :data:`REPAIR_NOTE_HEAD`, then one item per issue: the
+    kind in words and the fix as it is (the story language), a
+    ``repeated_line`` asking for a different line that keeps the beat, an
+    earlier scene's item saying which scene the issue is in and what to do
+    here -- fitted to :data:`REPAIR_NOTE_MAX_WORDS` (:func:`_fitted_note`);
+    *add_props* the story props an ``object_unseen`` fix names that the
+    scene does not list yet, within :data:`SCENE_PROPS_MAX` (DEC-248: never
+    an object that is not one of the story's props). Not repairable, left
+    out (the issue stays in the report): an issue with no scene, one naming
+    a scene the script no longer has, a body scene nobody can speak in.
+    Pure."""
     work = {}
 
     def add(sid, kind, item):
         scene = scene_of(script, sid)
         part = scene["function"] if scene["function"] in FRAMING_FUNCTIONS else None
         if part is None and not can_speak(ec, scene):
-            return
-        entry = work.setdefault(sid, {"part": part, "kinds": [], "items": []})
+            return None
+        entry = work.setdefault(sid, {"part": part, "kinds": [], "items": [], "add_props": []})
         if kind not in entry["kinds"]:
             entry["kinds"].append(kind)
         entry["items"].append(item)
+        return entry
 
     for issue in issues:
         sid, kind = issue["scene_id"], issue["kind"]
@@ -983,34 +1036,41 @@ def repair_plan(ec, script, issues) -> list:
         if scene is None:
             continue
         fix = _sentence(issue["fix"])
-        add(sid, kind, f"{_kind_words(kind)}: {fix}{_REPEATED_LINE_TAIL if kind == 'repeated_line' else ''}")
+        entry = add(sid, kind, (f"{_kind_words(kind)}:", fix,
+                                _REPEATED_LINE_TAIL.strip() if kind == "repeated_line" else ""))
+        if entry is not None and kind == "object_unseen":
+            named = _named_entity(ec, scene, kind, issue["fix"])
+            listed = scene["props"] + entry["add_props"]
+            if named is not None and named[1] not in listed and len(listed) < SCENE_PROPS_MAX:
+                entry["add_props"].append(named[1])
         if kind in _EARLIER_SCENE_ASKS:
             earlier = _earlier_scene(ec, script, scene, kind, issue["fix"])
             if earlier is not None:
                 before_sid, name = earlier
-                add(before_sid, kind, f"{_kind_words(kind)} in scene {sid}: {fix} {name} is in this scene, before "
-                                      f"{sid}: {_EARLIER_SCENE_ASKS[kind]}.")
+                add(before_sid, kind, (f"{_kind_words(kind)} in scene {sid}:", fix,
+                                       f"{name} is in this scene, before {sid}: {_EARLIER_SCENE_ASKS[kind]}."))
     order = {scene["scene_id"]: index for index, scene in enumerate(script["scenes"])}
-    return [{"scene_id": sid, "part": entry["part"], "kinds": entry["kinds"],
-             "note": REPAIR_NOTE_HEAD + " ".join(entry["items"])}
+    return [{"scene_id": sid, "part": entry["part"], "kinds": entry["kinds"], "note": _fitted_note(entry["items"]),
+             "add_props": entry["add_props"]}
             for sid, entry in sorted(work.items(), key=lambda item: order[item[0]])]
 
 
 def repairable(ec, script) -> list:
     """The scene ids a repair pass would write now: a fresh first-watch
-    report that found issues on an unapproved, complete script, else []."""
+    report that found blocking issues on an unapproved, complete script,
+    else []."""
     report = script.get(judge.FIRST_WATCH)
     if (report is None or judge.needs_first_watch(script) or report["passed"] or script["approved_at"]
             or not is_complete(script, ec.ep)):
         return []
-    return [repair["scene_id"] for repair in repair_plan(ec, script, report["issues"])]
+    return [repair["scene_id"] for repair in repair_plan(ec, script, judge.blocking_issues(report))]
 
 
-def issues_line(script, report) -> str:
-    """``s01 no hook text, s02 unclear goal, the episode unmotivated``: the
-    report's issues in scene order, the ones with no scene last."""
+def issues_line(script, issues) -> str:
+    """``s01 no hook text, s02 unclear goal, the episode unmotivated``:
+    *issues* in scene order, the ones with no scene last."""
     order = {scene["scene_id"]: index for index, scene in enumerate(script["scenes"])}
-    issues = sorted(report["issues"], key=lambda issue: (issue["scene_id"] is None, order.get(issue["scene_id"], 0)))
+    issues = sorted(issues, key=lambda issue: (issue["scene_id"] is None, order.get(issue["scene_id"], 0)))
     return ", ".join(f"{issue['scene_id'] or 'the episode'} {judge.KIND_WORDS[issue['kind']]}" for issue in issues)
 
 
@@ -1230,10 +1290,11 @@ class _Run(LineMeasurement):
         self.save()
         self.ctx.on_log(consistency_line(report))
 
-    def first_watch(self) -> None:
+    def first_watch(self, previous=None) -> None:
         """J1 on a complete v2 script whose first-watch report is missing,
-        stale or of an older revision (``steps/judge``); a failed call is a
-        failure of the step, like E4's."""
+        stale, of an older revision or of an older J1 (``steps/judge``); a
+        failed call is a failure of the step, like E4's. *previous*: the
+        blocking issues a repair pass just tried (a re-check, DEC-248)."""
         ec, script = self.ec, self.script
         if not media_policy.is_v2(ec.story) or not is_complete(script, ec.ep) or not judge.needs_first_watch(script):
             return
@@ -1241,7 +1302,7 @@ class _Run(LineMeasurement):
         self.ctx.on_log("👀 First-watch check (J1)")
         try:
             report = judge.check_first_watch(self.ctx, ec, script, tools=self.tools,
-                                             pack=_pack(ec, self.ctx, self.announced))
+                                             pack=_pack(ec, self.ctx, self.announced), previous=previous)
         except BudgetSpent:
             raise
         except StepFailed as exc:
@@ -1264,11 +1325,14 @@ class _Run(LineMeasurement):
         calls in scene order. The loop ends when J1 passes, a pass repaired
         nothing, the passes are spent, or the budget is (``before_call``, as
         the fill pass: the step ends failed and a run continues). A failed
-        call keeps the scene as it was; a rewrite goes through
-        ``episode_common.mark_changed`` like a regenerate. ``self.repairs``
-        -- the script's ``repairs`` too, replaced by this run's -- records
-        each pass: ``{pass, scenes: [{scene_id, kinds, part}],
-        issues_before, issues_after, failed}``."""
+        call keeps the scene as it was (the props it listed for the call
+        too); a rewrite goes through ``episode_common.mark_changed`` like a
+        regenerate. ``self.repairs`` -- the script's ``repairs`` too,
+        replaced by this run's -- records each pass: ``{pass, scenes:
+        [{scene_id, kinds, part, props_added?}], issues_before,
+        issues_after, failed}``, the issues counted the blocking ones (every
+        issue of a version-1 report). DEC-248: only the blocking issues are
+        repaired, and the J1 after a pass is their re-check."""
         ec, script = self.ec, self.script
         if not media_policy.is_v2(ec.story) or script["approved_at"] or not is_complete(script, ec.ep):
             return
@@ -1276,21 +1340,26 @@ class _Run(LineMeasurement):
             report = script.get(judge.FIRST_WATCH)
             if report is None or judge.needs_first_watch(script) or report["passed"]:
                 return
-            plan = repair_plan(ec, script, report["issues"])
+            blocking = judge.blocking_issues(report)
+            plan = repair_plan(ec, script, blocking)
             if not plan:
                 return
             if self.repairs is None:
                 self.repairs = script[judge.REPAIRS] = []
-            record = {"pass": number, "scenes": [], "issues_before": len(report["issues"]), "issues_after": None,
+            record = {"pass": number, "scenes": [], "issues_before": len(blocking), "issues_after": None,
                       "failed": []}
             self.repairs.append(record)
-            found = f"{len(report['issues'])} issue{'s' if len(report['issues']) != 1 else ''}"
+            found = f"{len(blocking)} blocking issue{'s' if len(blocking) != 1 else ''}"
             todo = plan[:REPAIR_CALLS_MAX]
-            self.ctx.on_log(f"🩹 Repair pass {number}: {found} ({issues_line(script, report)}); writing "
+            self.ctx.on_log(f"🩹 Repair pass {number}: {found} ({issues_line(script, blocking)}); writing "
                             f"{_and(repair['scene_id'] for repair in todo)} again")
             for repair in todo:
                 sid, part = repair["scene_id"], repair["part"]
                 self.before_call()
+                # An object the story turns on, listed on the scene for its rewrite (and its keyframes).
+                scene = scene_of(script, sid)
+                added = [pid for pid in repair["add_props"] if pid not in scene["props"]]
+                scene["props"].extend(added)
                 try:
                     if part is None:
                         write_body_scene(self.ctx, ec, script, sid, tools=self.tools, announced=self.announced,
@@ -1303,6 +1372,7 @@ class _Run(LineMeasurement):
                     raise
                 except StepFailed as exc:
                     self.calls += 1
+                    scene["props"] = [pid for pid in scene["props"] if pid not in added]
                     record["failed"].append(sid)
                     self.ctx.on_log(f"✖ Repair pass {number}: scene {sid} failed ({exc.reason}); it keeps its lines")
                     continue
@@ -1313,25 +1383,33 @@ class _Run(LineMeasurement):
                 if self.storyboard is not None:
                     episode_common.write_storyboard(ec, self.storyboard, script, now=now)
                 self.save()
-                record["scenes"].append({"scene_id": sid, "kinds": list(repair["kinds"]), "part": part})
+                entry = {"scene_id": sid, "kinds": list(repair["kinds"]), "part": part}
+                if added:
+                    entry["props_added"] = added
+                    self.ctx.on_log(f"🩹 Scene {sid} now shows {_and(self._prop_name(pid) for pid in added)}")
+                record["scenes"].append(entry)
             count = len(record["scenes"])
             self.ctx.on_log(f"🩹 Repair pass {number}: {count} scene{'s' if count != 1 else ''} rewritten for "
-                            f"{found} ({issues_line(script, report)})")
+                            f"{found} ({issues_line(script, blocking)})")
             if not record["scenes"]:
                 return
             self.fill()
             self.consistency()
-            self.first_watch()
+            self.first_watch(previous=blocking)
             after = script.get(judge.FIRST_WATCH)
             if after is None or judge.needs_first_watch(script):
                 return  # J1 failed: the step ends failed naming it (first_watch)
-            record["issues_after"] = len(after["issues"])
+            left = len(judge.blocking_issues(after))
+            record["issues_after"] = left
             self.save()
             if after["passed"]:
-                self.ctx.on_log("👀 First watch after repair: passed")
+                self.ctx.on_log(judge.first_watch_line(after).replace("First watch:", "First watch after repair:"))
             else:
-                left = len(after["issues"])
-                self.ctx.on_log(f"👀 First watch after repair: {left} issue{'s remain' if left != 1 else ' remains'}")
+                self.ctx.on_log(f"👀 First watch after repair: {left} blocking issue"
+                                f"{'s remain' if left != 1 else ' remains'}")
+
+    def _prop_name(self, pid) -> str:
+        return (self.ec.entities["props"].get(pid) or {}).get("name") or pid
 
     def run(self) -> dict:
         ec = self.ec

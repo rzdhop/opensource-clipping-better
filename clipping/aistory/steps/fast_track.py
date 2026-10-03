@@ -223,7 +223,9 @@ def script_refusal(script, ep, *, v2=False):
     *v2* (``media_policy.is_v2`` of the story; DEC-230, DEC-231 part 2): the
     first-watch report (J1) must be fresh and passed too, and a length
     outside the window is never offered to the user to approve -- a v2
-    episode outside its window is never approved."""
+    episode outside its window is never approved. J1 version 2 (DEC-248):
+    a report passes when no issue is blocking, so its minor issues never
+    refuse -- the approval's detail names them (:func:`script_detail`)."""
     if script is None or not script_step.is_complete(script, ep):
         return (f"Episode {ep}'s script is not complete: run it again (the fast track fills what is missing).")
     report = script.get("consistency_report")
@@ -246,8 +248,8 @@ def script_refusal(script, ep, *, v2=False):
         if watch == "issues":
             # What it found, after the script step's own repair passes when they ran (stage G).
             return (f"Episode {ep}'s first-watch check (J1){judge_step.issues_sentence(script, words=False)} The "
-                    "fast track never approves over issues: fix them (edit the script, or regenerate the scenes "
-                    "they name) so the check passes, or approve the script anyway yourself.")
+                    "fast track never approves over blocking issues: fix them (edit the script, or regenerate the "
+                    "scenes they name) so the check passes, or approve the script anyway yourself.")
     state = (script.get("timing") or {}).get("state")
     if state in TIMING_REFUSED:
         how = "shorten" if state == "over" else "lengthen"
@@ -261,6 +263,21 @@ def script_refusal(script, ep, *, v2=False):
                 f"fast track approves only a script inside it: {how} it (edit it, or regenerate a scene), or "
                 "approve it yourself.")
     return None
+
+
+def script_detail(script, *, v2=False) -> str:
+    """The script approval's line in the feed: complete, its checks and its
+    length -- on v2, the first watch's verdict with each minor issue it kept
+    (DEC-248: approved over, never repaired; the human reads them)."""
+    checks = "consistency passed"
+    if v2:
+        minor = judge_step.minor_issues(script.get(judge_step.FIRST_WATCH))
+        checks += ", first watch passed"
+        if minor:
+            checks += (f" with {len(minor)} minor issue{_s(len(minor))} kept for review ("
+                       + "; ".join(f"{issue['scene_id'] or 'the episode'} ({issue['kind']}): "
+                                   f"{issue['fix'].strip().rstrip('.')}" for issue in minor) + ")")
+    return f"complete, {checks}, {episode_common.timing_line(script)}"
 
 
 def keyframes_wait(ec):
@@ -626,7 +643,7 @@ class _FastTrack:
         self.approve(ec, "script",
                      lambda workflow, now: workflow.approve_script(ec.store, ec.story_id, ec.ep, approve_anyway=False,
                                                                    now=now),
-                     f"complete, consistency passed, {episode_common.timing_line(script)}")
+                     script_detail(script, v2=media_policy.is_v2(ec.story)))
         return dict(summary, kept=False)
 
     def storyboard(self) -> dict:

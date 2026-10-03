@@ -28,7 +28,7 @@ SCRIPT = {"scenes": [{"scene_id": "s01", "function": "hook", "state": "written"}
           "consistency_report": {"passed": True, "issues": [], "checked_rev": 3, "stale": False},
           "first_watch": {"who_wants_what": "a", "what_happens": "b", "why_it_matters": "c", "passed": True,
                           "issues": [], "checked_rev": 3, "checked_at": "2026-10-02T10:00:00+00:00",
-                          "stale": False},
+                          "stale": False, "version": 2},
           "timing": {"state": "ok", "total_s": 62.0, "window_s": [55, 75], "measured_lines": 0,
                      "estimated_lines": 2, "flags": []}}
 
@@ -51,7 +51,7 @@ def test_on_v2_the_first_watch_report_is_a_refusal_of_its_own():
         {"scene_id": "s03", "kind": "object_unseen", "fix": "Show the key before it matters."}]))
     message = ft.script_refusal(failed, 1, v2=True)
     assert "first-watch check (J1) found 1 issue: s03 (object_unseen): Show the key before it matters." in message
-    assert "never approves over issues" in message and "approve the script anyway yourself" in message
+    assert "never approves over blocking issues" in message and "approve the script anyway yourself" in message
     # A legacy script has no first-watch report and needs none.
     legacy = dict(SCRIPT)
     legacy.pop("first_watch")

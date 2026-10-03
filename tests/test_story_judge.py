@@ -70,7 +70,7 @@ def test_failed_first_watch_blocks_approval_unless_anyway(store):
     assert summary["first_watch"] is False and summary["consistency"] is True
 
     message = _refused(lambda: wf.approve_script(store, story_id, 1, now=NOW))
-    assert message.startswith("Episode 1's first-watch check: after 2 repair passes, 1 issue remains: s05 "
+    assert message.startswith("Episode 1's first-watch check: after 2 repair passes, 1 blocking issue remains: s05 "
                               "(unmotivated): Montrez pourquoi Kiwilo avoue son plan.")
     assert "A first-time viewer took away: Kiwilo veut garder le pouvoir sur l'île." in message
     assert message.endswith("Fix them (edit the script, or regenerate the scenes they name) and check again, or "
@@ -146,7 +146,7 @@ def test_j1_reads_what_a_first_time_viewer_would(store):
     call = llm.of("J1")[0]
     assert call["schema_name"] == "first_watch_check"
     assert call["temperature"] is prompts.ANALYTIC_TEMPERATURE
-    assert call["max_tokens"] == prompts.MAX_TOKENS["J1"] == 920
+    assert call["max_tokens"] == prompts.MAX_TOKENS["J1"] == 970  # DEC-248: J1 version 2's severities
     user = call["user"]
     assert "Scene s01 (hook) -- Le Parloir des Secrets, day -- characters: Kiwilo, Mangella" in user
     assert "Objects, and the scenes that show them:\n- Téléphone en noix de coco: s01, s04, s09, s10\n" in user
@@ -180,8 +180,8 @@ def test_repeated_lines_and_a_missing_hook_text_fail_the_report_whatever_j1_says
         return ProviderError("down", [("gemini/gemini-test", "HTTP 503")])
 
     llm = eps.FakeLLM(E2=[down()], E3=[down()], J1=[dict(eps.J1_PASSED, passed=False, issues=[
-        {"scene_id": "s01", "kind": "no_hook_text", "fix": "Ajoutez un texte."},
-        {"scene_id": None, "kind": "unclear_goal", "fix": "Dites ce que veut Mangella."}])])
+        {"scene_id": "s01", "kind": "no_hook_text", "severity": "blocking", "fix": "Ajoutez un texte."},
+        {"scene_id": None, "kind": "unclear_goal", "severity": "blocking", "fix": "Dites ce que veut Mangella."}])])
     _summary, log = eps._run(eps._new().script, store, story_id, llm=llm)
     assert llm.prompts() == ["J1", "E3v2", "E2v2"]
 
@@ -213,7 +213,7 @@ def test_duplicate_issues_are_pure_and_bounded():
     script = {"scenes": [{"scene_id": f"s{i:02d}", "lines": [{"line_id": f"l{i:02d}", "text": text}]}
                          for i, text in enumerate(lines, start=1)]}
     issues = judge.duplicate_issues(script)
-    assert issues == [{"scene_id": "s02", "kind": "repeated_line",
+    assert issues == [{"scene_id": "s02", "kind": "repeated_line", "severity": "blocking",
                        "fix": "Line l02 repeats line l01 (“Le téléphone désigne Kiwilo ce soir.”): rewrite one of "
                               "them."}]  # a two-word "Non." said twice is speech, not a repeated line
     many = {"scenes": [{"scene_id": "s01", "lines": [{"line_id": f"l{i:02d}", "text": lines[0]}

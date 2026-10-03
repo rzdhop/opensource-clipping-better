@@ -383,6 +383,17 @@ export default function ReviewPane({ episode, characters, storyId, ep, inFlightJ
             The script step repaired what the first-watch check found ({plural(review.script_repairs.length, 'pass')}).
           </p>
         )}
+        {review.script_minor_issues && review.script_minor_issues.length > 0 && (
+          <div className="form-hint">
+            The first-watch check passed with {plural(review.script_minor_issues.length, 'minor issue')} kept for
+            you to read (not blocking, not repaired):
+            <ul>
+              {review.script_minor_issues.map((issue, index) => (
+                <li key={index}>{issue.scene_id || 'the episode'} ({issue.kind.replace(/_/g, ' ')}): {issue.fix}</li>
+              ))}
+            </ul>
+          </div>
+        )}
         <ApproveAll storyId={storyId} ep={ep} review={review} busy={busy} onChange={onChange} />
         {review.status === 'render_needed' && <p className="form-hint">Then render it on the Preview tab.</p>}
       </div>

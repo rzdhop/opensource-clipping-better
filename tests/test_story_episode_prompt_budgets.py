@@ -1046,8 +1046,10 @@ def test_the_largest_french_l1_reply_fits_its_cap():
 # own worst case (the brief at every cap of the shot it reads) is under the
 # default pack budget (tests/test_story_keyframe_gate.py).
 
-MEASURED_J1 = 3195
-MEASURED_J1_REPLY = 795.6
+# J1 version 2 (DEC-248), re-pinned on purpose: the format sentence, the severities, a re-check's earlier
+# issues (3195 -> 3463), and each issue's severity in the reply (795.6 -> 842.4).
+MEASURED_J1 = 3463
+MEASURED_J1_REPLY = 842.4
 MEASURED_J2_REPLY = 91
 _J1_PROPS = 10
 _J1_PROPS_PER_SCENE = 4
@@ -1065,8 +1067,13 @@ def _j1():
             shown.setdefault(names[(i * _J1_PROPS_PER_SCENE + k) % _J1_PROPS], []).append(scene["scene_id"])
     objects = [(name, shown[name]) for name in names]
     assert sum(len(ids) for _name, ids in objects) == len(SCENES) * _J1_PROPS_PER_SCENE
+    # J1 version 2 (DEC-248): the format sentence at its widest numbers and a re-check's earlier issues at
+    # their bound, J1's longest kind each, their fixes cut to the re-check's cap.
+    kind = max(schemas.FIRST_WATCH_ISSUE_KINDS, key=len)
+    previous = [{"scene_id": "s11", "kind": kind, "fix": _fr(prompts.J1_FIX_MAX_WORDS)}] * prompts.J1_ISSUES_MAX
     return prompts.build_j1(_pack(), ep=2, script_digest=digest, objects=objects, hook_text=_fr(6),
-                            reveal=_fr(40), previous_recap=_fr(schemas.RECAP_MAX_WORDS))
+                            reveal=_fr(40), previous_recap=_fr(schemas.RECAP_MAX_WORDS), seconds=999, words=9999,
+                            previous_issues=previous)
 
 
 def test_j1_worst_case_measures_what_is_recorded_and_fits_its_budget():
@@ -1085,8 +1092,8 @@ def test_the_largest_french_j1_reply_fits_its_cap():
 
     kind = max(schemas.FIRST_WATCH_ISSUE_KINDS, key=len)
     reply = {key: _fr(words) for key, words in prompts.J1_SUMMARY_MAX_WORDS.items()}
-    reply.update(passed=False, issues=[{"scene_id": "s11", "kind": kind, "fix": _fr(prompts.J1_FIX_MAX_WORDS)}]
-                 * prompts.J1_ISSUES_MAX)
+    reply.update(passed=False, issues=[{"scene_id": "s11", "kind": kind, "severity": "blocking",
+                                        "fix": _fr(prompts.J1_FIX_MAX_WORDS)}] * prompts.J1_ISSUES_MAX)
     assert prompts.validate_j1(reply, scene_ids=[s["scene_id"] for s in SCENES]) == []
     needed = context.estimate_tokens("", json.dumps(reply, ensure_ascii=False)) * FRENCH_TOKEN_FACTOR
     assert needed == pytest.approx(MEASURED_J1_REPLY, abs=0.05)
