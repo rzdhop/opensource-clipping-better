@@ -328,6 +328,39 @@ def test_a_verdict_carries_the_j2_version_that_judged_it_and_an_old_one_still_va
         assert any(keyword in error for error in errors), (bad, errors)
 
 
+def _fix(**changes):
+    fix = {"redraws": 1, "spent_usd": 0.04, "gave_up": False, "history": [
+        {"image_sha256": SHA_A, "passed": False, "issue": "missing the phone", "note": None, "at": NOW},
+        {"image_sha256": SHA_B, "passed": True, "issue": None, "note": "Keyframe check: show the phone",
+         "at": NOW}]}
+    fix.update(changes)
+    return fix
+
+
+def test_the_keyframe_fix_records_are_optional_and_checked_when_present():
+    """Phase 8 stage B: ``keyframe_fixes`` (per shot) and
+    ``keyframe_fix_budget`` (the episode), the data contract the review
+    page reads; absent until the auto-fix met a flagged keyframe."""
+    budget = {"max_redraws_per_shot": 2, "cap_usd": 0.4, "spent_usd": 0.04}
+    assert schemas.episode_assets_errors(_assets(keyframe_fixes={"sh05": _fix()}, keyframe_fix_budget=budget)) == []
+    breaks = {
+        "a key not a shot id": (dict(keyframe_fixes={"shot5": _fix()}), "'shot5' is not a shot id"),
+        "no gave_up": (dict(keyframe_fixes={"sh05": {k: v for k, v in _fix().items() if k != "gave_up"}}),
+                       "gave_up"),
+        "a negative spend": (dict(keyframe_fixes={"sh05": _fix(spent_usd=-1)}), "minimum"),
+        "a history entry without its image": (dict(keyframe_fixes={"sh05": _fix(history=[
+            {"passed": True, "issue": None, "note": None, "at": NOW}])}), "image_sha256"),
+        "a note past its cap": (dict(keyframe_fixes={"sh05": _fix(history=[
+            {"image_sha256": SHA_A, "passed": False, "issue": "x", "note": "n" * 301, "at": NOW}])}), "maxLength"),
+        "a budget without its spend": (dict(keyframe_fix_budget={"max_redraws_per_shot": 2, "cap_usd": 0.4}),
+                                       "spent_usd"),
+        "an extra budget key": (dict(keyframe_fix_budget=dict(budget, per_shot=1)), "additional property"),
+    }
+    for label, (changes, keyword) in breaks.items():
+        errors = schemas.episode_assets_errors(_assets(**changes))
+        assert any(keyword in error for error in errors), (label, errors)
+
+
 # ================================================================ render_manifest_v1
 
 def _stage(sid, kind, state="done", *, cache_key=None, output=None):

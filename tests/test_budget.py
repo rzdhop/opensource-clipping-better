@@ -128,6 +128,38 @@ def test_the_shipped_profiles_match_the_spec():
     assert quality["video_resolution"] == "720p"
 
 
+def test_only_the_quality_profile_redraws_flagged_keyframes_and_its_key_is_checked(tmp_path):
+    """Phase 8 stage B (the human's choice: up to 2 redraws a flagged shot,
+    at most $0.40 an episode): ``keyframe_fix`` is the quality profile's
+    alone; a profile without it never redraws. Present, it is checked."""
+    profiles = load_profiles()
+    assert profiles["profiles"]["quality"]["keyframe_fix"] == {"max_redraws_per_shot": 2, "cap_usd": 0.40}
+    assert "keyframe_fix" not in profiles["profiles"]["free"]
+    assert "keyframe_fix" not in profiles["profiles"]["one_dollar"]
+
+    path = tmp_path / "budget_profiles.json"
+    for fix, keyword in (
+        ([2, 0.4], "must be an object"),
+        ({"max_redraws_per_shot": 2}, "must hold exactly max_redraws_per_shot, cap_usd"),
+        ({"max_redraws_per_shot": 2, "cap_usd": 0.4, "per_shot_usd": 1}, "must hold exactly"),
+        ({"max_redraws_per_shot": -1, "cap_usd": 0.4}, "max_redraws_per_shot must be a whole number from 0 to 5"),
+        ({"max_redraws_per_shot": 2.0, "cap_usd": 0.4}, "max_redraws_per_shot must be a whole number"),
+        ({"max_redraws_per_shot": True, "cap_usd": 0.4}, "max_redraws_per_shot must be a whole number"),
+        ({"max_redraws_per_shot": 2, "cap_usd": -0.1}, "cap_usd must be an amount in USD (0 or more)"),
+        ({"max_redraws_per_shot": 2, "cap_usd": "0.40"}, "cap_usd must be an amount"),
+    ):
+        broken = load_profiles()
+        broken["profiles"]["one_dollar"]["keyframe_fix"] = fix
+        path.write_text(json.dumps(broken), encoding="utf-8")
+        with pytest.raises(ValueError) as excinfo:
+            load_profiles(str(path))
+        assert "profile 'one_dollar': keyframe_fix" in str(excinfo.value) and keyword in str(excinfo.value), fix
+    fine = load_profiles()
+    fine["profiles"]["free"]["keyframe_fix"] = {"max_redraws_per_shot": 0, "cap_usd": 0}
+    path.write_text(json.dumps(fine), encoding="utf-8")
+    assert load_profiles(str(path))["profiles"]["free"]["keyframe_fix"]["max_redraws_per_shot"] == 0
+
+
 def test_a_broken_profiles_file_is_refused_not_patched(tmp_path):
     bad = tmp_path / "budget_profiles.json"
     bad.write_text(json.dumps({"$schema": "budget_profiles_v1", "profiles": {"free": {"cap_usd": 0}}}), encoding="utf-8")

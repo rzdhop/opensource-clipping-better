@@ -30,7 +30,8 @@
       "animate": "all_shots",
       "video_link_policy": "first_with_audio",
       "video_resolution": "720p",
-      "tier3_native_audio": "ambience"
+      "tier3_native_audio": "ambience",
+      "keyframe_fix": {"max_redraws_per_shot": 2, "cap_usd": 0.40}
     }
   }
 }

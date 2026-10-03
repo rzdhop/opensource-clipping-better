@@ -289,6 +289,11 @@ class ShotFailed(Exception):
         self.failures = tuple(failures)
 
 
+class _FixStopped(Exception):
+    """The keyframe auto-fix stops here (phase 8 stage B): the step budget
+    cannot fit its next check. The step itself goes on."""
+
+
 class ClipFailed(Exception):
     """One shot's clip was not made (phase 6 stage 8); ``reason`` says why
     and what to do. The phase goes on with the next planned shot. ``record``
@@ -348,17 +353,22 @@ def _name_map(entity_docs) -> dict:
     return names
 
 
-def with_note(prompt, note, entity_docs) -> str:
+def with_note(prompt, note, entity_docs, *, layered=False) -> str:
     """*prompt*, then ``Author's note: <note>.`` at its tail -- after the
     locked blocks, never in place of them -- with every entity name in the
     note replaced by a neutral word (no name enters an image prompt, spec
-    2.3; ``refimages._with_note``'s rule)."""
+    2.3; ``refimages._with_note``'s rule). On a *layered* (v2) shot, the
+    v2 prompt's own name map (``shots.name_map``: a descriptive name, a
+    prop's own noun, is kept), so a note that says who it is about by a
+    handle -- the keyframe auto-fix's (phase 8 stage B) -- is never
+    garbled."""
     if not note:
         return prompt
     text = " ".join(str(note).split())
     if not text:
         return prompt
-    text = names_mod.without_names(text, _name_map(entity_docs))
+    names = shots_mod.name_map(entity_docs, v2=True) if layered else _name_map(entity_docs)
+    text = names_mod.without_names(text, names)
     if text[-1] not in ".!?":
         text += "."
     return f"{prompt} Author's note: {text}"
@@ -369,9 +379,11 @@ def effective_prompt(shot, entity_docs, note=None) -> str:
     user wrote one (any entity name in it replaced, as in a note: the
     resolved ``image_prompt`` never carries one), else its ``image_prompt``;
     *note* at the tail."""
+    layered = bool(shot.get("prompt_layout"))
+    names = shots_mod.name_map(entity_docs, v2=True) if layered else _name_map(entity_docs)
     override = shot.get("prompt_override")
-    base = names_mod.without_names(override, _name_map(entity_docs)) if override else shot["image_prompt"]
-    return with_note(base, note, entity_docs)
+    base = names_mod.without_names(override, names) if override else shot["image_prompt"]
+    return with_note(base, note, entity_docs, layered=layered)
 
 
 def prompt_hash(prompt, negative, consistency, size, ref_shas) -> str:
@@ -1236,14 +1248,15 @@ def overridden_assets_doc(ec, doc, changes, *, now):
     return new
 
 
-def spending_caps(ec, total, *, env, ledger=None, video=None) -> tuple:
+def spending_caps(ec, total, *, env, ledger=None, video=None, fix_usd=0.0) -> tuple:
     """``(caps, over_cap)`` for a plan that would spend *total* paid
     dollars on episode *ec.ep*: ``caps`` is ``{"allow_paid", "episode"|"day"|
     "story": {"cap_usd", "spent_usd", "left_usd"}}`` (the three only when the
     budget settings read), ``over_cap`` the budget's refusal of *total* --
     the episode's cap included -- with the numbers, when paid is on; else
     None. Calls nothing. With *video* (``asset_units``' ``video`` part, phase
-    6 stage 7) the refusal names the clips' numbers too."""
+    6 stage 7) the refusal names the clips' numbers too; with *fix_usd* (the
+    keyframe auto-fix's ceiling in *total*, phase 8 stage B), that too."""
     ledger = ledger or _open_ledger(ec)
     story_spent = float(ledger.totals()["est_usd"])
     ep_spent = float(ledger.totals(ec.ep)["est_usd"])
@@ -1265,6 +1278,8 @@ def spending_caps(ec, total, *, env, ledger=None, video=None) -> tuple:
             count = video["count"]
             what = (f"paid images, voices and {count} clip{'' if count == 1 else 's'} ({video['seconds']} s on "
                     f"{video['link']}, est ${video['est_usd']:.3f})")
+        if fix_usd > 0:
+            what += f", with up to ${fix_usd:.2f} to redraw flagged keyframes"
         plan = SimpleNamespace(est_usd=total, link=f"episode {ec.ep}'s {what}")
         try:
             budget_mod.check(plan, None, budget=budget_obj, day_spent=day_spent, ep_spent=ep_spent,
@@ -1337,6 +1352,13 @@ def asset_units(ec, script, storyboard, *, env, align_words=False, adapters=None
 
     *route* (phase 6 stage 11) prices everything on that route instead of
     the story's own (:func:`on_route`), writing nothing.
+
+    A story whose budget profile redraws flagged keyframes (phase 8 stage B,
+    ``media_policy.keyframe_fix``) also has ``"keyframe_fix"``
+    (:func:`keyframe_fix_units`, after ``video``): its ceiling ("up to
+    $0.40 to redraw flagged keyframes") is in ``est_usd`` and ``over_cap``
+    like the rest of the paid part, and committed before the clips are
+    planned, so they never take the money it may spend.
     """
     ec = on_route(ec, route)
     ledger = ledger or _open_ledger(ec)
@@ -1375,10 +1397,19 @@ def asset_units(ec, script, storyboard, *, env, align_words=False, adapters=None
 
     images_paid = images["est_usd"] if images["route_class"] == "paid" else 0.0
     voices_paid = sum(row["est_usd"] for row in voices_est["voices"] if row["paid"])
+    # Phase 8 stage B: the keyframe auto-fix's ceiling is part of the paid plan
+    # and its caps, committed before any clip (None: a story with no auto-fix,
+    # its estimate byte for byte what it was).
+    fix, fix_paid = None, 0.0
+    if media_policy.keyframe_fix(ec.story) is not None:
+        fix = keyframe_fix_units(ec, storyboard, doc, env=env, story_spent=story_spent, adapters=adapters,
+                                 transport=transport, link_info=episode_image_link(ec, storyboard, env=env, doc=doc))
+        fix_paid = fix["est_usd"]
     video, video_paid = None, 0.0
     if clips.tier_of(ec) >= 2:
         video = _video_units(ec, script, storyboard, doc, env=env, ledger=ledger, adapters=adapters,
-                             probe_local=probe_local, transport=transport, committed=images_paid + voices_paid)
+                             probe_local=probe_local, transport=transport,
+                             committed=images_paid + voices_paid + fix_paid)
         video["animate"] = bool(animate)
         if not animate:
             video["message"] = f"Animate off: no clip is made in this run. {video['message']}".strip()
@@ -1388,8 +1419,9 @@ def asset_units(ec, script, storyboard, *, env, align_words=False, adapters=None
                                "reason": video["refused"] or "paid, allowed", "est_usd": video["est_usd"]})
             if video["ready"]:
                 video_paid = video["est_usd"]
-    total = round(images_paid + voices_paid + video_paid, 4)
-    caps, over_cap = spending_caps(ec, total, env=env, ledger=ledger, video=video if video_paid else None)
+    total = round(images_paid + voices_paid + fix_paid + video_paid, 4)
+    caps, over_cap = spending_caps(ec, total, env=env, ledger=ledger, video=video if video_paid else None,
+                                   fix_usd=fix_paid)
     units = {
         "images": images, "voices": voices_est,
         "alignment": {"opted_in": bool(align_words),
@@ -1397,6 +1429,8 @@ def asset_units(ec, script, storyboard, *, env, align_words=False, adapters=None
     }
     if video is not None:
         units["video"] = video
+    if fix is not None:
+        units["keyframe_fix"] = fix
     units.update({
         "paid_links": paid_links, "caps": caps, "est_usd": total, "over_cap": over_cap,
         "ready": images["ready"] and voices_est["ready"] and over_cap is None,
@@ -1545,6 +1579,151 @@ def keyframe_items(ec, storyboard, doc) -> list:
             items.append((shot, path, sha, prev_id, prev_path, prev_sha))
         previous = (shot["shot_id"], path, sha)
     return items
+
+
+def keyframe_item(ec, storyboard, index, *, link=None):
+    """:func:`keyframe_items`' item of shot *index* alone (phase 8 stage B:
+    the keyframe auto-fix judges a redrawn shot and the one after it without
+    hashing the whole episode), or None: no such shot, or no current
+    keyframe. *link*: the episode's recorded image link."""
+    if not 0 <= index < len(storyboard["shots"]):
+        return None
+    shot = storyboard["shots"][index]
+    path = shot_image_path(ec, shot)
+    if path is None or keyframe_problem(ec, shot, link=link) is not None:
+        return None
+    previous = storyboard["shots"][index - 1] if index else None
+    prev_path = shot_image_path(ec, previous) if previous is not None else None
+    if prev_path is None:
+        return shot, path, _sha256_file(path), None, None, None
+    return shot, path, _sha256_file(path), previous["shot_id"], prev_path, _sha256_file(prev_path)
+
+
+# --------------------------------------- the keyframe auto-fix (phase 8 stage B)
+#
+# On a v2 story whose budget profile has ``keyframe_fix`` (the quality
+# preset: up to 2 redraws a flagged shot, at most $0.40 an episode), the run
+# redraws each keyframe J2 flagged after its check (``_Assets.fix_keyframes``)
+# -- with a fresh seed and a note made of the verdict -- and checks it again,
+# with the shot after it, until it passes or the shot has used its redraws.
+# What it did is ``assets.json``'s ``keyframe_fixes`` (per shot) and
+# ``keyframe_fix_budget`` (the episode).
+
+KEYFRAME_FIXES = "keyframe_fixes"
+KEYFRAME_FIX_BUDGET = "keyframe_fix_budget"
+_ISSUE_MAX = 1000
+
+
+def _cut(text, limit) -> str:
+    """*text* within *limit* characters, cut at a word (one ellipsis)."""
+    if len(text) <= limit:
+        return text
+    cut = text[:limit - 1]
+    if " " in cut:
+        cut = cut.rsplit(" ", 1)[0]
+    return cut.rstrip(" ,;:.") + "…"
+
+
+def _note_names(entity_docs) -> dict:
+    """``{entity name: how the keyframe prompt says it}``: a character or a
+    prop by its handle (``shots.character_handles``/``prop_handles``, the
+    prompt's own words for it), a place as "the set"."""
+    names = {}
+    characters = entity_docs.get("characters") or {}
+    props = entity_docs.get("props") or {}
+    for cid, handle in shots_mod.character_handles(characters).items():
+        names.setdefault(characters[cid]["name"], handle)
+    for pid, handle in shots_mod.prop_handles(props).items():
+        names.setdefault(props[pid]["name"], handle)
+    for doc in (entity_docs.get("places") or {}).values():
+        names.setdefault(doc["name"], "the set")
+    return names
+
+
+def correction_note(entity_docs, verdict) -> str:
+    """The note a flagged keyframe is redrawn with: what J2 found -- the
+    beat not shown, what is missing, the continuity issue -- with every
+    entity name it used (its brief names them) said the way the prompt says
+    it (:func:`_note_names`): a note's names otherwise become "the
+    character" (:func:`with_note`), and the note no longer says who it is
+    about. Within the regenerate note's cap (``schemas.REGENERATE_NOTE_MAX``)."""
+    parts = []
+    if not verdict["shows_beat"]:
+        parts.append("show this shot's action clearly")
+    if verdict["missing"]:
+        parts.append("the frame must show " + _and(verdict["missing"]))
+    if verdict["continuity_issue"]:
+        parts.append(f"correct this: {verdict['continuity_issue']}")
+    text = " ".join(f"Keyframe check: {'; '.join(parts or ['draw it again'])}".split())
+    return _cut(names_mod.without_names(text, _note_names(entity_docs)), schemas.REGENERATE_NOTE_MAX)
+
+
+def fix_history_entry(sha, verdict, *, note, at, unchecked=None) -> dict:
+    """One ``keyframe_fixes`` history entry: the keyframe *sha*, whether its
+    *verdict* passed and what J2 found (``judge.verdict_text``), the *note*
+    it was drawn with; *unchecked* (no verdict yet: why) reads as not
+    passed."""
+    if verdict is None:
+        return {"image_sha256": sha, "passed": False, "issue": _cut(f"not checked: {unchecked}", _ISSUE_MAX),
+                "note": note, "at": at}
+    passed = judge.verdict_passed(verdict)
+    return {"image_sha256": sha, "passed": passed, "issue": None if passed else _cut(judge.verdict_text(verdict),
+                                                                                     _ISSUE_MAX),
+            "note": note, "at": at}
+
+
+def fix_message(summary, settings) -> str:
+    """What the auto-fix did, in one line: ``2 keyframes redrawn and fixed,
+    1 still flagged after 2 redraws, $0.12``."""
+    parts = []
+    fixed, gave_up, flagged = len(summary["fixed"]), len(summary["gave_up"]), len(summary["flagged"])
+    if fixed:
+        parts.append(f"{fixed} keyframe{'s' if fixed != 1 else ''} redrawn and fixed")
+    if gave_up:
+        most = settings["max_redraws_per_shot"]
+        parts.append(f"{gave_up} still flagged after {most} redraw{'s' if most != 1 else ''}")
+    if flagged:
+        parts.append(f"{flagged} still flagged")
+    if not parts:
+        parts.append("no keyframe redrawn")
+    text = f"{', '.join(parts)}, ${summary['spent_usd']:.2f}"
+    return f"{text} (stopped: {summary['stopped']})" if summary["stopped"] else text
+
+
+def keyframe_fix_units(ec, storyboard, doc, *, env, story_spent, adapters=None, transport=None, link_info=None,
+                       shots=None):
+    """What the keyframe auto-fix may spend in a run, calling nothing (phase
+    8 stage B), or None when the story has none (a legacy story, a profile
+    without ``keyframe_fix``)::
+
+        {"max_redraws_per_shot", "cap_usd", "spent_usd", "est_usd", "route_class", "link", "message"}
+
+    ``est_usd`` is its ceiling on a paid image link: what is left of the
+    episode's fix budget, or every shot (*storyboard*'s, else *shots*)
+    redrawn its most at one image's price (:func:`image_quote`), the lower
+    -- counted in the paid plan and its caps like the rest of it, so the
+    clips planned after it never take the money it may spend. Nothing while
+    the keyframes are approved and current (the run never redraws them)."""
+    settings = media_policy.keyframe_fix(ec.story)
+    if settings is None:
+        return None
+    most, cap = settings["max_redraws_per_shot"], settings["cap_usd"]
+    spent = float(((doc or {}).get(KEYFRAME_FIX_BUDGET) or {}).get("spent_usd") or 0.0)
+    base = {"max_redraws_per_shot": most, "cap_usd": cap, "spent_usd": round(spent, 4), "est_usd": 0.0,
+            "route_class": None, "link": None}
+    count = len(storyboard["shots"]) if storyboard is not None else int(shots or 0)
+    if storyboard is not None and doc is not None and keyframes_state(ec, storyboard, doc) == "current":
+        return dict(base, message="The keyframes are approved: none is redrawn on its own.")
+    if not most or not count:
+        return dict(base, message="No keyframe is redrawn on its own.")
+    quote = image_quote(ec, 1, env=env, story_spent=story_spent, adapters=adapters, transport=transport,
+                        storyboard=storyboard if link_info else None, link_info=link_info)
+    paid = quote["route_class"] == "paid"
+    each = float(quote["est_usd"] or 0.0) if paid else 0.0
+    est = round(min(max(0.0, cap - spent), each * most * count), 4) if paid else 0.0
+    message = (f"up to ${est:.2f} to redraw flagged keyframes (at most {most} redraws a shot, ${cap:.2f} an "
+               "episode)" if paid else f"flagged keyframes are redrawn free (at most {most} redraws a shot)")
+    return dict(base, est_usd=est, route_class=quote["route_class"], link=quote["link"], message=message)
 
 
 def keyframe_context(ec, storyboard, *, ledger=None):
@@ -1988,8 +2167,10 @@ class _Assets(voice_lines.LineMeasurement):
         self.local_image_ran = False
         # Phase 7 stage 6b: what the keyframe judge (J2) did in this run (None: not a v2 story).
         self.keyframe_check = None
-        # Phase 8 stage B: the episode's continuity ledger, read once (:meth:`ledger_now`).
+        # Phase 8 stage B: the episode's continuity ledger, read once (:meth:`ledger_now`),
+        # and what the keyframe auto-fix did (None: it did not run).
         self.ledger_read = _READ
+        self.keyframe_fix = None
 
     # ---------------------------------------------------------- plumbing
 
@@ -2934,10 +3115,10 @@ class _Assets(voice_lines.LineMeasurement):
         # The user's per-shot overrides (phase 6 stage 7): carried as they are.
         if (previous or {}).get("shots"):
             doc["shots"] = previous["shots"]
-        # A v2 episode's keyframe verdicts and approval (phase 7 stage 6b):
-        # carried as they are -- the approval goes stale by its fingerprint,
-        # never cleared here.
-        for key in (judge.KEYFRAME_VERDICTS, judge.KEYFRAMES_APPROVED):
+        # A v2 episode's keyframe verdicts and approval (phase 7 stage 6b) and
+        # its keyframe auto-fix records (phase 8 stage B): carried as they are
+        # -- the approval goes stale by its fingerprint, never cleared here.
+        for key in (judge.KEYFRAME_VERDICTS, judge.KEYFRAMES_APPROVED, KEYFRAME_FIXES, KEYFRAME_FIX_BUDGET):
             if (previous or {}).get(key):
                 doc[key] = previous[key]
         doc.update({
@@ -2967,37 +3148,241 @@ class _Assets(voice_lines.LineMeasurement):
         except StepFailed as exc:
             raise voice_lines.BudgetSpent(str(exc) + self.also_failed()) from None
 
+    def updated_doc(self, doc, changes) -> dict:
+        """*doc* (``assets.json`` as last written) with *changes* (``{key:
+        value}``; an empty or None value drops the key) written at once;
+        returns it as written (or *doc* when nothing moved)."""
+        ec = self.ec
+        new = copy.deepcopy(doc)
+        for key, value in changes.items():
+            if value:
+                new[key] = value
+            else:
+                new.pop(key, None)
+        if new == doc:
+            return doc
+        try:
+            return ec.store.write_episode_doc(ec.story_id, ec.ep, ASSETS_DOC, new, now=llm_call.utc_now())
+        except (schemas.SchemaError, ValueError, KeyError) as exc:
+            raise StepFailed(f"Episode {ec.ep}'s {ASSETS_DOC} could not be written ({exc}).") from None
+
+    def check_keyframe_items(self, items, held, *, before_call):
+        """``judge.check_keyframes`` over *items*, every verdict written into
+        ``held["doc"]`` (``assets.json`` as last written) after each new one
+        and once more at the end -- the episode's other verdicts kept.
+        Returns J2's summary."""
+        def write(found):
+            verdicts = dict(held["doc"].get(judge.KEYFRAME_VERDICTS) or {})
+            verdicts.update(found)
+            held["doc"] = self.updated_doc(held["doc"], {judge.KEYFRAME_VERDICTS: verdicts})
+
+        found, summary = judge.check_keyframes(
+            self.ctx, self.ec, items, held["doc"].get(judge.KEYFRAME_VERDICTS) or {},
+            env=self.ctx.settings_env, ledger=self.gates.ledger, step=STEP, before_call=before_call,
+            on_verdict=write, adapters=self.tools.adapters, transport=self.tools.transport,
+            context=keyframe_context(self.ec, self.storyboard, ledger=self.ledger_now()))
+        write(found)
+        return summary
+
     def judge_keyframes(self, doc) -> dict:
         """J2 on a v2 episode (module docstring): every current keyframe
         without a current verdict, ``keyframe_verdicts`` written after each
         new one (a stop keeps what was judged) and once more at the end when
         it moved. Returns ``assets.json`` as it stands after."""
-        ec = self.ec
-        written = {"doc": doc}
+        held = {"doc": doc}
+        self.keyframe_check = self.check_keyframe_items(keyframe_items(self.ec, self.storyboard, doc), held,
+                                                        before_call=self.before_vision)
+        return held["doc"]
 
-        def write(verdicts):
-            current = written["doc"]
-            if verdicts == (current.get(judge.KEYFRAME_VERDICTS) or {}):
-                return
-            new = copy.deepcopy(current)
-            if verdicts:
-                new[judge.KEYFRAME_VERDICTS] = verdicts
+    # ------------------------------------------- the keyframe auto-fix (stage B)
+
+    def before_fix_vision(self, remaining) -> None:
+        """A J2 call of the auto-fix starts only while it still fits the step
+        budget; else the fix stops (:class:`_FixStopped`), the step goes on.
+        The cancel token first."""
+        self.ctx.cancel.check()
+        if not self.fits(judge.STORY_VISION_CALL_SECONDS):
+            raise _FixStopped(f"the step's {int(self.budget.limit // 60)}-minute budget cannot fit the keyframe "
+                              f"check (J2) of {_and(remaining)}")
+
+    def fix_link_info(self):
+        """The episode's image link as :func:`image_quote` takes it, or None."""
+        if self.link is None:
+            return None
+        info = self.link_info or {}
+        return {"link": self.link, "source": "record" if self.link_kept else "derived",
+                "since": info.get("since"), "switched_from": info.get("switched_from")}
+
+    def fix_gate(self, settings, spent):
+        """Why the auto-fix asks for no other redraw now, or None (the
+        cancel token raises): the step budget cannot fit a redraw and its two
+        checks; the episode's image link is gone; the image cannot be made
+        (``allow_paid`` off for a paid link...); its estimate would go past
+        the episode's fix budget (*spent* of ``cap_usd``) or a cap -- the
+        gates every image of the run meets (:func:`image_quote`,
+        :func:`spending_caps`), then ``make_image``'s own at the call."""
+        ec, ctx = self.ec, self.ctx
+        ctx.cancel.check()
+        if not self.fits(STORY_IMAGE_CALL_SECONDS + 2 * judge.STORY_VISION_CALL_SECONDS):
+            return (f"the step's {int(self.budget.limit // 60)}-minute budget cannot fit another redraw and its "
+                    "check")
+        if self.link_gone is not None:
+            return self.gone_reason()
+        quote = image_quote(ec, 1, env=ctx.settings_env, story_spent=self.gates.spent(), adapters=self.tools.adapters,
+                            transport=self.tools.transport, storyboard=self.storyboard,
+                            link_info=self.fix_link_info())
+        if not quote["ready"]:
+            gone = (quote.get("sticky") or {}).get("gone")
+            return str((gone or {}).get("message") or quote["message"]).strip().rstrip(".")
+        est = float(quote["est_usd"] or 0.0) if quote["route_class"] == "paid" else 0.0
+        if spent + est > settings["cap_usd"] + 1e-9:
+            return (f"the episode's keyframe fix budget is spent (${spent:.2f} of ${settings['cap_usd']:.2f}; a "
+                    f"redraw is est ${est:.3f})")
+        _caps, over = spending_caps(ec, est, env=ctx.settings_env, ledger=self.gates.ledger)
+        return over
+
+    def fix_keyframes(self, doc) -> dict:
+        """The keyframe auto-fix of a v2 episode (phase 8 stage B): when the
+        story's budget profile has ``keyframe_fix`` and the keyframes are not
+        approved (an approval -- "anyway" included -- is the human's: never
+        redrawn under it), each shot whose current verdict fails, in
+        storyboard order, is redrawn with a fresh seed and a note made of its
+        verdict (:func:`correction_note`) and checked again with the shot
+        after it (whose previous keyframe changed), until it passes or used
+        its ``max_redraws_per_shot``. A locked shot, or one made with a note
+        of the user's (a regenerate), is left as it is. Stops -- the step
+        goes on -- once the episode's fix budget (``cap_usd``), a cap or the
+        paid gates refuse, the step budget cannot fit a redraw, or J2 cannot
+        check (:meth:`fix_gate`); a cancel stops the step. ``keyframe_fixes``
+        and ``keyframe_fix_budget`` are written after each redraw. Returns
+        ``assets.json`` as it stands after."""
+        ec, ctx, board = self.ec, self.ctx, self.storyboard
+        settings = media_policy.keyframe_fix(ec.story)
+        check = self.keyframe_check
+        if (settings is None or not settings["max_redraws_per_shot"] or check is None or check["unavailable"]
+                or keyframes_state(ec, board, doc) == "current"):
+            return doc
+        if self.link_info is None:
+            self.resolve_link(announce=False)
+        held = {"doc": doc, "fixes": copy.deepcopy(doc.get(KEYFRAME_FIXES) or {}),
+                "spent": float((doc.get(KEYFRAME_FIX_BUDGET) or {}).get("spent_usd") or 0.0)}
+        summary = {"fixed": [], "gave_up": [], "flagged": [], "redraws": 0, "spent_usd": 0.0, "stopped": None,
+                   "redrawn": []}
+        for index in range(len(board["shots"])):
+            self.fix_shot(index, settings, held, summary)
+            if summary["stopped"]:
+                break
+        doc = held["doc"]
+        verdicts = doc.get(judge.KEYFRAME_VERDICTS) or {}
+        for shot, _path, sha, _prev_id, _prev_path, prev_sha in keyframe_items(ec, board, doc):
+            shot_id, entry = shot["shot_id"], verdicts.get(shot["shot_id"])
+            if not judge.verdict_current(entry, sha, prev_sha):
+                continue
+            if judge.verdict_passed(entry):
+                if shot_id in summary["redrawn"]:
+                    summary["fixed"].append(shot_id)
+            elif (held["fixes"].get(shot_id) or {}).get("gave_up"):
+                summary["gave_up"].append(shot_id)
             else:
-                new.pop(judge.KEYFRAME_VERDICTS, None)
-            try:
-                written["doc"] = ec.store.write_episode_doc(ec.story_id, ec.ep, ASSETS_DOC, new,
-                                                            now=llm_call.utc_now())
-            except (schemas.SchemaError, ValueError, KeyError) as exc:
-                raise StepFailed(f"Episode {ec.ep}'s {ASSETS_DOC} could not be written ({exc}).") from None
+                summary["flagged"].append(shot_id)
+        summary["spent_usd"] = round(summary["spent_usd"], 4)
+        summary["message"] = fix_message(summary, settings)
+        self.keyframe_fix = summary
+        if summary["redrawn"] or summary["gave_up"] or summary["flagged"]:
+            ctx.on_log(f"🛠 Keyframe auto-fix: {summary['message']}")
+        return doc
 
-        verdicts, summary = judge.check_keyframes(
-            self.ctx, ec, keyframe_items(ec, self.storyboard, doc), doc.get(judge.KEYFRAME_VERDICTS) or {},
-            env=self.ctx.settings_env, ledger=self.gates.ledger, step=STEP, before_call=self.before_vision,
-            on_verdict=write, adapters=self.tools.adapters, transport=self.tools.transport,
-            context=keyframe_context(ec, self.storyboard, ledger=self.ledger_now()))
-        self.keyframe_check = summary
-        write(verdicts)
-        return written["doc"]
+    def save_fixes(self, held, settings) -> None:
+        """``keyframe_fixes`` and ``keyframe_fix_budget`` written as they stand."""
+        budget = {"max_redraws_per_shot": settings["max_redraws_per_shot"], "cap_usd": settings["cap_usd"],
+                  "spent_usd": round(held["spent"], 4)} if held["fixes"] else None
+        held["doc"] = self.updated_doc(held["doc"], {KEYFRAME_FIXES: held["fixes"], KEYFRAME_FIX_BUDGET: budget})
+
+    def fix_shot(self, index, settings, held, summary) -> None:
+        """:meth:`fix_keyframes` on shot *index*: redrawn and checked again
+        while its current verdict fails and it has redraws left."""
+        ec, ctx = self.ec, self.ctx
+        shot = self.storyboard["shots"][index]
+        shot_id = shot["shot_id"]
+        most = settings["max_redraws_per_shot"]
+        while True:
+            item = keyframe_item(ec, self.storyboard, index, link=recorded_image_link(held["doc"]))
+            if item is None or shot["assets"].get("locked"):
+                return
+            sha, prev_sha = item[2], item[5]
+            entry = (held["doc"].get(judge.KEYFRAME_VERDICTS) or {}).get(shot_id)
+            if not judge.verdict_current(entry, sha, prev_sha) or judge.verdict_passed(entry):
+                return
+            record = held["fixes"].get(shot_id)
+            if record is None or sha not in [step["image_sha256"] for step in record["history"]]:
+                # Another keyframe than the fix judged: a new start -- unless a note of the user's made it.
+                if shot["assets"].get("note"):
+                    return
+                record = {"redraws": 0, "spent_usd": 0.0, "gave_up": False,
+                          "history": [fix_history_entry(sha, entry, note=None, at=entry["checked_at"])]}
+                held["fixes"][shot_id] = record
+            if record["redraws"] >= most:
+                if not record["gave_up"]:
+                    record["gave_up"] = True
+                    self.save_fixes(held, settings)
+                return
+            stop = self.fix_gate(settings, held["spent"])
+            if stop:
+                summary["stopped"] = stop
+                self.save_fixes(held, settings)
+                return
+            note = correction_note(ec.entities, entry)
+            seed = entities.fresh_seed()
+            shot["assets"]["pending"] = {"seed": seed, "note": note, "requested_at": llm_call.utc_now()}
+            self.write_board()
+            ctx.on_log(f"🛠 Shot {shot_id} flagged by the keyframe check ({judge.verdict_text(entry)}): redraw "
+                       f"{record['redraws'] + 1} of {most} (seed {seed})")
+            try:
+                made = self.make_image(shot, seed=seed, note=note)
+            except ShotFailed as exc:
+                # The request is kept (pending): the next run asks for the same image.
+                self.shot_failures[shot_id] = exc.failures
+                self.failed.append((f"shot {shot_id}", shot_target(ec.ep, shot_id), exc.reason))
+                ctx.on_log(f"✖ Shot {shot_id}'s redraw failed: {exc.reason}")
+                if self.link_gone is not None:
+                    summary["stopped"] = self.gone_reason()
+                self.save_fixes(held, settings)
+                return
+            cost = 0.0 if made["_cached"] else float(made["est_usd"] or 0.0)
+            self.apply_image(shot, made)
+            new_sha = _sha256_file(shot_image_path(ec, shot))
+            record["redraws"] += 1
+            record["spent_usd"] = round(record["spent_usd"] + cost, 4)
+            record["history"].append(fix_history_entry(new_sha, None, note=note, at=llm_call.utc_now(),
+                                                       unchecked="not checked yet"))
+            record["history"] = record["history"][-schemas.KEYFRAME_FIX_HISTORY_MAX:]
+            held["spent"] = round(held["spent"] + cost, 4)
+            summary["redraws"] += 1
+            summary["spent_usd"] += cost
+            if shot_id not in summary["redrawn"]:
+                summary["redrawn"].append(shot_id)
+            self.save_fixes(held, settings)
+            # Checked again, with the shot after it: its previous keyframe changed.
+            items = [found for found in (keyframe_item(ec, self.storyboard, position,
+                                                       link=recorded_image_link(held["doc"]))
+                                         for position in (index, index + 1)) if found is not None]
+            try:
+                checked = self.check_keyframe_items(items, held, before_call=self.before_fix_vision)
+            except _FixStopped as exc:
+                summary["stopped"] = str(exc)
+                return
+            entry = (held["doc"].get(judge.KEYFRAME_VERDICTS) or {}).get(shot_id)
+            current = judge.verdict_current(entry, new_sha, prev_sha)
+            why = checked["unavailable"] or ("its replies failed validation twice" if shot_id in checked["failed"]
+                                            else None)
+            record["history"][-1] = fix_history_entry(new_sha, entry if current else None, note=note,
+                                                      at=record["history"][-1]["at"], unchecked=why)
+            self.save_fixes(held, settings)
+            if checked["unavailable"]:
+                summary["stopped"] = checked["unavailable"]
+                return
+            if not current:
+                return
 
     # ------------------------------------------------------------------- run
 
@@ -3036,6 +3421,11 @@ class _Assets(voice_lines.LineMeasurement):
             doc = self.write_assets_doc()
             if media_policy.is_v2(ec.story):
                 doc = self.judge_keyframes(doc)
+                # Phase 8 stage B: the flagged keyframes redrawn (the quality profile's keyframe_fix).
+                try:
+                    doc = self.fix_keyframes(doc)
+                except gencache.JournalError as exc:
+                    raise self.journal_failed(exc) from None
             if self.planned_video is not None:
                 # Last: the keyframes are final, the SFX/BGM and assets.json written.
                 try:
@@ -3104,6 +3494,9 @@ class _Assets(voice_lines.LineMeasurement):
         if self.keyframe_check is not None:
             # A v2 story (phase 7 stage 6b): what J2 did, and where the keyframes' approval stands.
             result["keyframes"] = dict(self.keyframe_check, approval=keyframes_state(ec, board, doc))
+            if self.keyframe_fix is not None:
+                # Phase 8 stage B: what the keyframe auto-fix did, with its one-line message.
+                result["keyframes"]["fix"] = dict(self.keyframe_fix)
         return result
 
 

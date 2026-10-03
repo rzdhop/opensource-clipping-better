@@ -333,8 +333,9 @@ def test_j2_sends_the_keyframe_the_previous_one_and_what_the_shot_must_show(stor
     assert verdict["link"] == "gemini/flash-lite" and verdict["checked_at"]
     # The page shows the approval (a v2 episode's only).
     page = _wf().episode_outputs(store, store.get(story_id), 1)
+    # Phase 8 stage B, re-pinned on purpose: the block gains the auto-fix budget (null: none ran).
     assert page["assets"]["keyframes"] == {"approval": "none", "approved_at": None, "anyway": None,
-                                           "target": "keyframes:1"}
+                                           "target": "keyframes:1", "fix_budget": None}
 
 
 def test_a_stop_mid_check_keeps_every_verdict_judged_so_far(store, tmp_path, built):

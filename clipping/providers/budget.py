@@ -117,6 +117,12 @@ VIDEO_LINK_POLICIES = ("cheapest_available", "first_in_chain", "first_with_audio
 # 2026-10-02): every shot's clip sound is heard UNDER its lines, ducked, the
 # lines always in their pinned TTS voices (``media_policy.ambience``).
 TIER3_AUDIO_MODES = ("opt_in", "ambience")
+# Phase 8 stage B: ``keyframe_fix`` -- a v2 story's keyframes flagged by the
+# keyframe check (J2) are redrawn by the assets step, at most
+# ``max_redraws_per_shot`` times a shot and ``cap_usd`` an episode. A profile
+# without it never redraws on its own.
+KEYFRAME_FIX_KEYS = ("max_redraws_per_shot", "cap_usd")
+KEYFRAME_FIX_MAX_REDRAWS = 5
 
 
 def _profile_errors(name, profile) -> list:
@@ -144,6 +150,30 @@ def _profile_errors(name, profile) -> list:
     for key, known in (("video_link_policy", VIDEO_LINK_POLICIES), ("tier3_native_audio", TIER3_AUDIO_MODES)):
         if key in profile and profile[key] not in known:
             errors.append(f"profile {name!r}: {key} must be one of {', '.join(known)}, not {profile[key]!r}")
+    if "keyframe_fix" in profile:
+        errors.extend(_keyframe_fix_errors(name, profile["keyframe_fix"]))
+    return errors
+
+
+def _keyframe_fix_errors(name, fix) -> list:
+    """What is wrong with profile *name*'s optional ``keyframe_fix``:
+    exactly ``max_redraws_per_shot`` (a whole number, 0 to
+    :data:`KEYFRAME_FIX_MAX_REDRAWS`) and ``cap_usd`` (an amount >= 0)."""
+    where = f"profile {name!r}: keyframe_fix"
+    if not isinstance(fix, dict):
+        return [f"{where} must be an object {{max_redraws_per_shot, cap_usd}}"]
+    errors = []
+    if sorted(fix) != sorted(KEYFRAME_FIX_KEYS):
+        errors.append(f"{where} must hold exactly {', '.join(KEYFRAME_FIX_KEYS)} (it holds "
+                      f"{', '.join(sorted(map(str, fix))) or 'nothing'})")
+    redraws = fix.get("max_redraws_per_shot")
+    if "max_redraws_per_shot" in fix and (isinstance(redraws, bool) or not isinstance(redraws, int)
+                                          or not 0 <= redraws <= KEYFRAME_FIX_MAX_REDRAWS):
+        errors.append(f"{where}.max_redraws_per_shot must be a whole number from 0 to {KEYFRAME_FIX_MAX_REDRAWS}, "
+                      f"not {redraws!r}")
+    cap = fix.get("cap_usd")
+    if "cap_usd" in fix and (isinstance(cap, bool) or not isinstance(cap, (int, float)) or cap < 0):
+        errors.append(f"{where}.cap_usd must be an amount in USD (0 or more), not {cap!r}")
     return errors
 
 

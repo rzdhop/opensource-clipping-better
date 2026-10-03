@@ -2819,6 +2819,13 @@ def _derive(ec, script, board, doc, manifest) -> dict:
     if media_policy.is_v2(ec.story):
         # Phase 7 stage 6b: a v2 episode's keyframe approval (hashes every image).
         derived["keyframes"] = keyframes_approval_state(ec, board, doc)
+        # Phase 8 stage B: which shot's J2 verdict judged the keyframes on disk now.
+        verdicts = (doc or {}).get(judge_step.KEYFRAME_VERDICTS) or {}
+        current = {}
+        if board:
+            for shot, _path, sha, _prev_id, _prev_path, prev_sha in assets_step.keyframe_items(ec, board, doc):
+                current[shot["shot_id"]] = judge_step.verdict_current(verdicts.get(shot["shot_id"]), sha, prev_sha)
+        derived["keyframe_current"] = current
     return derived
 
 
@@ -2855,6 +2862,14 @@ def _assets_view(ec, script, board, doc, derived) -> dict:
             "locked": bool(assets.get("locked")), "approved": bool(assets.get("approved")),
             "pending": bool(assets.get("pending")), "target": assets_step.shot_target(ep, shot["shot_id"]),
         })
+        if "keyframes" in derived:
+            # Phase 8 stage B, a v2 episode's page only: the shot's J2 verdict
+            # (current: it judged the keyframes on disk now) and what the
+            # keyframe auto-fix did for it; each null when there is none.
+            shots[-1]["keyframe_verdict"] = _keyframe_verdict_view(
+                (doc or {}).get(judge_step.KEYFRAME_VERDICTS, {}).get(shot["shot_id"]),
+                derived["keyframe_current"].get(shot["shot_id"], False))
+            shots[-1]["keyframe_fix"] = ((doc or {}).get(assets_step.KEYFRAME_FIXES) or {}).get(shot["shot_id"])
     lines = []
     for scene in (script or {}).get("scenes") or []:
         for line in scene["lines"]:
@@ -2886,8 +2901,21 @@ def _assets_view(ec, script, board, doc, derived) -> dict:
         # are the document's own ``keyframe_verdicts``.
         keyframes = (doc or {}).get(judge_step.KEYFRAMES_APPROVED) or {}
         view["keyframes"] = {"approval": derived["keyframes"], "approved_at": keyframes.get("at"),
-                             "anyway": keyframes.get("anyway"), "target": f"{KEYFRAMES_APPROVAL}:{ep}"}
+                             "anyway": keyframes.get("anyway"), "target": f"{KEYFRAMES_APPROVAL}:{ep}",
+                             # Phase 8 stage B: the episode's keyframe auto-fix budget, or null.
+                             "fix_budget": (doc or {}).get(assets_step.KEYFRAME_FIX_BUDGET)}
     return view
+
+
+def _keyframe_verdict_view(entry, current):
+    """A shot's J2 verdict as the episode page shows it (phase 8 stage B):
+    ``{passed, current, shows_beat, missing, continuity_issue, checked_at}``,
+    or None when the shot has none."""
+    if entry is None:
+        return None
+    return {"passed": judge_step.verdict_passed(entry), "current": bool(current),
+            "shows_beat": entry["shows_beat"], "missing": list(entry["missing"]),
+            "continuity_issue": entry["continuity_issue"], "checked_at": entry["checked_at"]}
 
 
 def _render_view(manifest, derived) -> dict:

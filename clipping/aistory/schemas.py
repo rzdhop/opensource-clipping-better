@@ -3230,6 +3230,33 @@ _EPISODE_ASSETS_KEYFRAME_VERDICT_SCHEMA = _document({
     "prompt_version": {"type": "integer", "minimum": 1},
 })
 
+# Phase 8 stage B: what the assets step's keyframe auto-fix did -- per shot
+# (keyed by shot id) how many times it redrew the keyframe, what that cost,
+# whether it gave up (still flagged after its redraws), and the history of
+# the keyframes it judged: the one J2 flagged first, then each redraw with
+# the correction note it was asked with; and per episode the budget it runs
+# under (the story's budget profile's ``keyframe_fix``) and what it spent.
+# Both optional: absent until the auto-fix met a flagged keyframe.
+KEYFRAME_FIX_HISTORY_MAX = 12
+_KEYFRAME_FIX_HISTORY_SCHEMA = _document({
+    "image_sha256": _SHA256,
+    "passed": {"type": "boolean"},
+    "issue": {"type": ["string", "null"], "minLength": 1, "maxLength": 1000},
+    "note": _NOTE_OR_NULL,
+    "at": _NON_EMPTY_STRING,
+})
+_EPISODE_ASSETS_KEYFRAME_FIX_SCHEMA = _document({
+    "redraws": {"type": "integer", "minimum": 0},
+    "spent_usd": {"type": "number", "minimum": 0},
+    "gave_up": {"type": "boolean"},
+    "history": {"type": "array", "items": _KEYFRAME_FIX_HISTORY_SCHEMA, "maxItems": KEYFRAME_FIX_HISTORY_MAX},
+})
+_EPISODE_ASSETS_KEYFRAME_FIX_BUDGET_SCHEMA = _document({
+    "max_redraws_per_shot": {"type": "integer", "minimum": 0},
+    "cap_usd": {"type": "number", "minimum": 0},
+    "spent_usd": {"type": "number", "minimum": 0},
+})
+
 # The keyframe approval (phase 7 stage 6b, DEC-230): when, whether it went
 # over a failed or missing verdict ("anyway"), and the fingerprint of the
 # keyframes it approved -- once the current fingerprint differs, the
@@ -3258,6 +3285,10 @@ EPISODE_ASSETS_SCHEMA = _document({
     # _EPISODE_ASSETS_KEYFRAME_VERDICT_SCHEMA, checked in episode_assets_errors.
     "keyframe_verdicts": {"type": "object"},
     "keyframes_approved": _EPISODE_ASSETS_KEYFRAMES_APPROVED_SCHEMA,
+    # Phase 8 stage B: keyed by shot id -> _EPISODE_ASSETS_KEYFRAME_FIX_SCHEMA,
+    # checked in episode_assets_errors; and the episode's fix budget.
+    "keyframe_fixes": {"type": "object"},
+    "keyframe_fix_budget": _EPISODE_ASSETS_KEYFRAME_FIX_BUDGET_SCHEMA,
 })
 
 
@@ -3310,6 +3341,13 @@ def episode_assets_errors(doc) -> list:
             errors.append(f"$.keyframe_verdicts: {key!r} is not a shot id")
             continue
         errors.extend(validate(entry, _EPISODE_ASSETS_KEYFRAME_VERDICT_SCHEMA, path))
+
+    for key, entry in (doc.get("keyframe_fixes") or {}).items():
+        path = f"$.keyframe_fixes.{key}"
+        if not (isinstance(key, str) and _search(SHOT_ID_PATTERN, key)):
+            errors.append(f"$.keyframe_fixes: {key!r} is not a shot id")
+            continue
+        errors.extend(validate(entry, _EPISODE_ASSETS_KEYFRAME_FIX_SCHEMA, path))
 
     for i, cue in enumerate(doc["sfx"]):
         if (cue["state"] == "resolved") != (cue["file"] is not None):

@@ -205,6 +205,26 @@ def ambience(story) -> bool:
     return settings.get("tier3_native_audio") == AMBIENCE
 
 
+def keyframe_fix(story):
+    """``{"max_redraws_per_shot", "cap_usd"}`` -- how a v2 story's assets
+    step redraws the keyframes the keyframe check (J2) flagged (phase 8
+    stage B: its budget profile's ``keyframe_fix``, the quality preset's
+    "up to 2 redraws a shot, at most $0.40 an episode") -- or None: a
+    legacy story, a profile without the key (free, one_dollar: never on its
+    own), or one that cannot be read."""
+    if not is_v2(story):
+        return None
+    profile = story.get("generation_profile") or {}
+    try:
+        settings = budget_mod.profile_settings(profile.get("budget_profile"))
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    fix = settings.get("keyframe_fix")
+    if not isinstance(fix, dict):
+        return None
+    return {"max_redraws_per_shot": int(fix["max_redraws_per_shot"]), "cap_usd": float(fix["cap_usd"])}
+
+
 def quality_keys_present(merged) -> bool:
     """Whether *merged* holds every :data:`QUALITY_KEYS` value."""
     return all((merged.get(name) or "").strip() for name in QUALITY_KEYS)
