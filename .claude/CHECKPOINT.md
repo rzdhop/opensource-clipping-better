@@ -8,13 +8,24 @@
     worktree by an Opus agent, cherry-picked here, fail-first, both suites): **F1** prompt limits (DEC-240), **D**
     regenerate on the v2 switch (DEC-241), **E** Veo ambience + caps 4/12/40 (DEC-242), **B** consistent keyframes +
     auto-fix (DEC-243), **A** the Gemini tail guard (DEC-244), **G** the J1 repair pass (DEC-245); records, A-126…
-    A-129, `docs/AI_STORY.md` and runbook §2 updated. **Building now:** C (one click to the finished render + the
-    review screen; `scratchpad/p8c-brief.md`) and F2 (per-link prompt budgets + richer context; `p8f2-brief.md`).
-    **Then:** cherry-pick C/F2, full suites both envs, runbook §3–4 (one click, Veo), CHECKPOINT close, the human's
-    deploy (`git merge --ff-only` at 0 jobs) and walk. Full suites on the merged head `8ad40bc`: local 7138 passed /
-    1 skipped (+ the 2 root-only failures), CI-like 6432 / 689 skipped (+ the 2 and the 14 fastapi-fixture errors).
-    Previously: IMPLEMENT DONE (2026-10-02) → the human's acceptance walk (runbook
-    `.claude/plans/ai-story/17-phase-7-fully-animated-runbook.md`); the human deployed `de883f1` on main.
+    A-129, then **C** one click to the finished render + the Review tab (DEC-246, A-130) and **F2** per-link
+    prompt budgets + the richest context (DEC-247, A-131). **WAVE DONE (2026-10-03):** every stage merged
+    (`38b924f`…`b98a760`), records DEC-240…DEC-247 and A-126…A-131, `docs/AI_STORY.md` and the runbook
+    (§2 keys/caps, §4 the one click, the phone verdict) updated. **Full suites on the final head `b98a760`:** local
+    7199 passed / 1 skipped (+ the 2 root-only `unwritable_directory` failures), CI-like 6490 / 691 skipped (+ the 2
+    and the 14 fastapi-fixture errors); dashboard vite build into scratch ok; GitHub CI green from `8ad40bc` on.
+    **Next (the human):** deploy at 0 jobs (`git fetch origin claude/phase-7-capability-upgrade-b0huym && git merge
+    --ff-only origin/claude/phase-7-capability-upgrade-b0huym`, rebuild the backend), Settings (allow paid, caps
+    4/12/40, `FAL_KEY` + `GEMINI_PAID_API_KEY`), "Ask the providers (free)", then **Generate episode** on a new
+    quality story and the phone verdict (runbook §4) — it confirms or refutes A-116…A-120 and A-125…A-131.
+    Follow-ups left by the wave (each in its DEC's Consequence): a shipped SFX cue can double a sound the clip
+    makes; a silent establishing shot misses the scene-start cue; a look's palette/hair could be dropped before the
+    mood in a crowded keyframe; no automatic prompt re-fit after a link switch; the prompt-target chips say 220/80;
+    no CLI switch-pipeline; the framing-edit re-resolve drops T1 v2 staging/clip_motion; `render_look`'s signature
+    items vs another set; `summary["fill"]` overwritten by a repair loop's second fill; the review's spend split
+    relies on the ledger's `unit` values. One agent worktree (`.claude/worktrees/agent-a76386506b912c441`) stays
+    locked by the harness: remove with `git worktree remove -f -f` once the session is over.
+    Previously: IMPLEMENT DONE (2026-10-02) → the human's acceptance walk; the human deployed `de883f1` on main.
   - **Current stage:** every code stage is done — 1, 2a–2d, 3a–3d, 4, W-mid, 5a–5d, 6a–6c, 7, the fully animated fix
     (DEC-236, the human's ask of 2026-10-02), the log sweep's bugs (DEC-237, DEC-238), the close-out fixes (DEC-239) — and
     stage 8's docs (`docs/AI_STORY.md` v2 section and CLI, MASTER-SPEC §16, ASSUMPTIONS statuses, DECISIONS). The
