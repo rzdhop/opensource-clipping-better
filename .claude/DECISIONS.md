@@ -4417,3 +4417,36 @@ and applied none; two of them (a character introduced too late, an object shown 
 page yet (`script.repairs` is available to it). A second `fill()` inside the loop overwrites `summary["fill"]` with
 the latest record. The repair pass runs even when E4 failed earlier in the run and then re-asks E4 (the fill pass's
 exposure). Three `test_story_judge` fixtures now queue the repair's replies, since the step repairs before refusing.
+
+## DEC-246 — One click makes the whole episode up to the finished render; one Review tab to check and approve it (phase 7 follow-up, C)
+**Context.** The human (2026-10-02): "I generate directly the whole thing at once, ready to read and approve"; their
+choice: the one click goes up to the finished render, no stop at the keyframes (stage B makes them consistent and
+redraws the flagged ones). DEC-239's fast track stopped at the keyframes on a v2 story and ended the job *failed*;
+the Keyframes card was a text list with no thumbnail and no regenerate.
+**Decision** (`96dbcb1`, `fea1e7c`).
+- **The fast track goes to the render** on a v2 story at tier ≥ 2: after the assets run that makes, checks (J2) and
+  auto-fixes the keyframes it records the keyframe approval itself (`keyframes_approved.by: "fast_track"`, `anyway`
+  only when shots are still flagged, named in `flagged`) — the human's "Generate episode" click is the consent and
+  the confirm says so — then runs the assets step again for the held clips, approves the assets (`by: "fast_track"`),
+  renders and writes the metadata; the last feed line says "ready for review". `stop_at_keyframes` (API; CLI
+  `--stop-at-keyframes`) keeps DEC-230's stop. Approval provenance (`by`) is written for keyframes and assets whoever
+  approves (v1 documents gain only the optional key), so the review can say what was auto-approved.
+- **The whole episode is checked against the caps before any call** (`whole_episode_units`: the keyframe hold is
+  lifted for the check so clips + the fix ceiling + voices + images are refused whole, never half-bought).
+- **The time budget follows the plan** (`budget_seconds`: 3600 + clips × 600 + J2 120 a shot + redraws × 540, ceiling
+  4 h — A-130), derived at the start and again exactly after the paid check, announced in the feed; legacy stays at
+  3600; the predictive checks still stop early and Continue resumes.
+- **`GET /episodes/{ep}` gains `review`** (`workflow.episode_review`, pure over the page already computed): per shot
+  the keyframe, the clip, the verdict state, the fix history, the lines; per episode the status and headline, what
+  was auto-approved, what is pending (in order), flagged / unchecked / fixed, the spend by kind, the render state,
+  `script_repairs` (DEC-245).
+- **The dashboard**: "Generate episode" (the Fast track button) with an explicit confirm (what runs, the caps, "no
+  stop for keyframe review — you review the finished episode") and a "stop at the keyframes" checkbox (off); the
+  running job shows its sub-step and a progress bar and the page switches to Review when it ends. The **Review tab**
+  (v2 episodes; added last so the first three tabs keep their contract): a 3-column tile grid at 375 px — keyframe,
+  verdict chip (passed / fixed after N / still flagged: issue / not current), the shot's line — an overlay with the
+  clip and both regenerate controls, the episode's status and spend above, and one "Approve keyframes and assets"
+  action ("Approve anyway" after a refusal). The Keyframes card is slimmed and points to Review.
+**Consequence.** A story that opts for the stop keeps the old flow. The spend split of the review relies on the
+ledger's `unit` values (image / char / second), the fixes taken off the images by `keyframe_fix_budget.spent_usd`.
+Playwright at 375 and 1280 px: no horizontal scroll, no page error (`scratchpad/p8c/c-*.png`).

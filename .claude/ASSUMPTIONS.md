@@ -468,6 +468,10 @@
   so `tts_tail`'s detector cuts it and leaves every word-final fricative. Designed from the forum reports and proven
   on synthetic signals only (no real sample reached this session). UNCONFIRMED until the human runs `--ai-story
   voice-tails STORY_ID --ep N` on a real episode before and after an assets run, and hears the result.
+- **A-130** — (phase 7 follow-up, DEC-246) a fully animated v2 episode fits the one click's plan-derived time budget:
+  3600 s + 600 s a clip (a Veo or seedance clip polls for at most 10 minutes) + 120 s a J2 check + 540 s a redraw,
+  4 hours at most (24 clips worst case); the predictive checks still stop early and Continue resumes. UNCONFIRMED
+  until the human's first "Generate episode" on a Veo story (the feed announces the budget it derived).
 
 ## Confirmed
 - **A-082** — fal.ai as measured in the paid test (2026-09-29, DEC-174):

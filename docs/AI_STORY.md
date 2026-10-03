@@ -172,9 +172,14 @@ shorter than 150 ms.
   current, no clip is bought, and a changed keyframe makes it stale.
   Regenerating one shot image by hand runs the check again on it and on the
   shot after it. Then run the assets step with animate on: it buys the clips.
-- *The fast track* follows the same rules: it stops at a script it cannot
-  approve (it never approves anyway, and never outside the window) and, on a
-  v2 episode, at the keyframes — approve them, then **Continue**.
+- *Generate episode* (the one click, "Fast track" below) follows the same
+  rules for the script — it stops at one it cannot approve, never approves
+  anyway and never outside the window — but not for the keyframes: once they
+  are made, checked and auto-fixed it approves them for you (your click is
+  the consent, the confirm says so; a shot still flagged is named), buys the
+  clips, approves the assets, renders and ends "ready for review" on the
+  **Review** tab. Tick "stop at the keyframes" in the confirm to keep the
+  stop — approve them on the Review tab, then **Continue**.
 
 **Editing what it writes.** On a v2 story the Cast step edits each
 character's dossier and look, Places & props each place's layout and light
@@ -929,13 +934,15 @@ The episode's **cost ledger** sits below the metadata cards: one row per
 call this episode has made — step, provider/model, quantity, cost, free or
 paid — with totals underneath.
 
-### Fast track
+### Fast track ("Generate episode")
 
-**Fast track**, in the episode page's header, runs the script, the
+**Generate episode**, in the episode page's header, runs the script, the
 storyboard (T1, one call per scene — the dashboard always plans this way;
-the fast, no-call storyboard is CLI-only), the assets, the render and the
-metadata as a single job, under a one-hour budget, picking up wherever the
-episode already stands: a document already approved is kept as it is,
+the fast, no-call storyboard is CLI-only), the assets (keyframes, their
+check and auto-fix, voices, then the clips), the render and the metadata as
+a single job, under a budget derived from the plan (an hour, plus ten
+minutes a clip and the checks' own time, four hours at most), picking up
+wherever the episode already stands: a document already approved is kept as it is,
 assets already approved and current are kept, a render already current is
 kept — so pressing it again after a partial run, or after fixing whatever
 it stopped on, repeats nothing already done. Whatever it writes fresh is
@@ -948,10 +955,20 @@ is allowed and every cap — the episode's, the day's and the story's — fits,
 naming the numbers.
 
 Pressing it asks you to confirm first, with the estimate's own split (LLM
-calls, images, voices, render minutes, a total) and the same
-"stops before any paid spending" line. If it stops partway — a script under
-the template's window, a plan over a cap, a scene T1 under-planned — it
-names the sub-step, what happened and what to do next, then **Fast track**
+calls, images and up to $0.40 of keyframe redraws, voices, every clip,
+render minutes, a total against the caps) and, on a v2 story, "no stop for
+keyframe review — you review the finished episode" with a checkbox to keep
+that stop. On a v2 story the whole episode is checked against every cap
+before the first call and refused whole when it would not fit. While it
+runs the header shows the sub-step and a progress bar; when it ends the
+page opens the **Review** tab: one tile per shot — the keyframe, its check
+(passed, fixed after N redraws, still flagged and why), its line — tap a
+tile for the keyframe large, the clip and the regenerate controls; above
+the grid the episode's status, what was auto-approved, what is still
+pending and the spend by kind; one **Approve keyframes and assets** for
+whatever is pending. If it stops partway — a script it could not approve
+after its repairs, a plan over a cap, a scene T1 under-planned — it names
+the sub-step, what happened and what to do next, then **Generate episode**
 again to continue exactly from there.
 
 ### The episode page
