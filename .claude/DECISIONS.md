@@ -4729,3 +4729,35 @@ clause and suffix), `test_story_prompts_episode` (the largest reply's second cam
 `test_story_long_shots` (the beat counts, via `test_story_storyboard_props.two_beats`; the short-of-beats test plans its
 first storyboard with the rhythm off). No v1 pin moved. A-137.
 
+## DEC-253 — The dashboard gets a UI kit, design tokens and lucide icons; every story confirm is the kit's dialog (dashboard overhaul stage 1, after DEC-252)
+**Context.** The human (2026-10-03): "upgrade the whole UI/UX of the AI Story pages", in stages, a refined dark studio
+(violet on slate kept), small dependencies allowed (lucide-react only). The dashboard had no primitives: emoji for
+icons, a `fmtUsd` pasted into six story files (a seventh copy, `formatUsd`, in EstimateChip), twelve `window.confirm()`
+calls whose native box drops every line break the messages carry, no toast, no empty state, no focus ring, and a
+`--font-mono` naming fonts that are never loaded. Plan: `.claude/plans/dashboard/01-ai-story-ui-overhaul-plan.md`.
+**Decision.**
+- **Dependency**: `lucide-react` pinned exactly at 1.51.0 (latest stable, React 19 peer); nothing else is added. Pages
+  take icons from `src/ui/icons.js` only (familiar names kept where lucide renamed one: Trash2, AlertTriangle,
+  Loader2, Wand2).
+- **Tokens** in `index.css :root`, every existing name kept: `--space-1..8` (4-48 px), `--text-xs..2xl` (12-28 px) with
+  `--leading-*`, `--focus-ring` (2 px violet, offset 2 px), `--z-sidebar/dropdown/dialog/toast`, `--surface-raised`,
+  `--backdrop`; `--font-mono` now names the system mono faces. No new font.
+- **Kit** `src/ui/` (+ `ui.css`, imported once from `main.jsx`): Button (the existing `.btn` classes, so a swap is
+  pixel-neutral, plus loading/icon/`as`), IconButton (aria-label required), Card slots, Badge, Chip (on `.chip`),
+  Dialog (role dialog/alertdialog, aria-modal, labelled and described, focus trap and return, Escape closes, the
+  backdrop closes unless `danger`), `DialogProvider` + `useConfirm()` + module-level `confirmDialog()` (both fall back
+  to `window.confirm` with no provider: a confirmation is never dropped), ToastProvider/`useToast()` (one
+  aria-live=polite region), EmptyState, Skeleton, Field (htmlFor, hint/error via aria-describedby), Money, and
+  `lib/format.js formatUsd` (the seven identical copies, deleted; same output for every value).
+- **Adopted**: the 12 story confirms (StoriesList, Cast x2, Places x3, Season x2, Storyboard x2, EpisodeStudio,
+  the wizard's pipeline switch) are `await confirm({title, message, confirmLabel, tone})` with their wording split into
+  title and message; deletes and the season re-plan are `danger` (focus starts on Cancel). Emoji become icons in the
+  sidebar, the phone top bar, ModeSwitch, RouteChip, the stepper's done marks and the stories list; labels unchanged.
+**Rejected.** Radix or another component kit, and a TypeScript rewrite (the source-text contracts, DEC-012, would all
+move at once); a confirm that silently resolves false without a provider; restyling the pages now (stages 2-5).
+**Consequence.** Clips mode pages are untouched (their two `window.confirm` stay, pinned by test_dashboard_job_controls).
+Contracts moved (literal only, intent kept): `test_dashboard_clip_controls`, `test_dashboard_story_shared`,
+`test_dashboard_switch_pipeline` and `test_story_payload_contract_series` now read `await confirm(` where they read
+`window.confirm(`. The `✕` remove buttons and `↻ Regenerate` keep their glyphs (pinned by test_story_payload_contract).
+Bundle: JS 549.45 -> 568.92 kB (gzip 153.1 -> 158.7), CSS 41.4 -> 51.0 kB. A-138.
+

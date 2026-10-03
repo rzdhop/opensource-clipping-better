@@ -511,6 +511,12 @@
   fully animated episode planned after this change: confirmed if mouths move on the lines and the characters act while
   staying on model; refuted if identity drifts (then the identity clause comes back stronger, or the reactions shorter)
   or if the shorter shots feel cut up (then the rhythm rule asks three lines or a longer minimum).
+- **A-138** — (DEC-253) The refined dark-studio direction (violet on slate kept; lucide line icons in place of emoji;
+  an in-app confirm dialog with the message's own line breaks in place of the browser's box; one focus ring) reads
+  better to the human on the live app than the emoji-and-native-dialog version, and the confirm's default focus
+  (Cancel for a delete or a re-plan, the confirm button otherwise, as the browser's own box did) matches how they
+  click. UNCONFIRMED until the human uses the deployed stage 1: confirmed if they keep the direction for stages 2-5;
+  refuted if they ask for the emoji back, a lighter theme or a different accent (then the tokens change, not the kit).
 
 ## Confirmed
 - **A-082** — fal.ai as measured in the paid test (2026-09-29, DEC-174):
