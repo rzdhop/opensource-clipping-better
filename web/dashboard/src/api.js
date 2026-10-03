@@ -438,12 +438,15 @@ export async function fetchStories() {
  * `/stories/{id}/media/` -- as a blob URL: the media route is token-gated,
  * so it is fetched with the auth header like `fetchStoryMediaUrl`, never
  * used as an <img src>. Anything that is not such a path is refused. The
- * caller is responsible for revoking the URL.
+ * caller is responsible for revoking the URL. A cover is drawn small (a card,
+ * the workspace header), so it asks for the route's cached 160 px thumbnail
+ * (`?size=thumb`, DEC-257) unless `{ thumb: false }`.
  */
-export async function fetchStoryCoverUrl(cover) {
+export async function fetchStoryCoverUrl(cover, { thumb = true } = {}) {
   if (typeof cover !== 'string' || !/^\/stories\/[0-9a-f]{12}\/media\//.test(cover)) {
     throw new Error('Not a story cover path')
   }
+  if (thumb) cover = `${cover}?size=thumb`
   const res = await request(cover)
   if (!res.ok) throw await apiError(res, 'Failed to load the cover')
   const blob = await res.blob()
@@ -777,9 +780,12 @@ export async function deleteCharacterUpload(storyId, charId, name) {
  * sample), as a blob URL -- same reasoning as `fetchStoryFileUrl`: the route
  * is token-gated, so it is fetched with the auth header rather than used
  * directly as a `src`. The caller is responsible for revoking the URL.
+ * `{ thumb: true }` asks for the route's cached 160 px-wide JPEG of an image
+ * (DEC-257) -- for an avatar or a tile; the editors keep the full image.
  */
-export async function fetchStoryMediaUrl(storyId, kind, eid, name) {
-  const res = await request(`/stories/${storyId}/media/${kind}/${eid}/${encodeURIComponent(name)}`)
+export async function fetchStoryMediaUrl(storyId, kind, eid, name, { thumb = false } = {}) {
+  const size = thumb ? '?size=thumb' : ''
+  const res = await request(`/stories/${storyId}/media/${kind}/${eid}/${encodeURIComponent(name)}${size}`)
   if (!res.ok) throw await apiError(res, 'Failed to load the file')
   const blob = await res.blob()
   return URL.createObjectURL(blob)

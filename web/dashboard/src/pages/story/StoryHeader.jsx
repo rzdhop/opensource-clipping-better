@@ -118,6 +118,31 @@ function VisualTierPopover({ storyId, story, nextEp, onChange }) {
 }
 
 /**
+ * The header's height, followed through resizes, as `--story-header-h` on
+ * the root: the step rail sticks under it and a deep-linked tile scrolls to
+ * below it. A long title or wrapped actions make the header two lines tall
+ * between ~900 and 1100 px, where a fixed offset let the rail touch it.
+ */
+function useHeaderHeightVar(ref) {
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return undefined
+    const root = document.documentElement
+    const write = () => root.style.setProperty('--story-header-h', `${Math.ceil(el.getBoundingClientRect().height)}px`)
+    write()
+    if (typeof ResizeObserver === 'undefined') {
+      return () => root.style.removeProperty('--story-header-h')
+    }
+    const observer = new ResizeObserver(write)
+    observer.observe(el)
+    return () => {
+      observer.disconnect()
+      root.style.removeProperty('--story-header-h')
+    }
+  }, [ref])
+}
+
+/**
  * The workspace's sticky header: the cover, the title, the story's chips,
  * the Visual tier popover and the one primary action -- the episode page once
  * the story is ready, else the step to do next.
@@ -128,6 +153,8 @@ export default function StoryHeader({ storyId, data, styles, allDone, currentKey
   const isV2 = story.generation_profile.pipeline === 'v2'
   const latest = episodes.length > 0 ? episodes[episodes.length - 1] : null
   const runningStep = stepOfJob(inFlightJob)
+  const headerRef = useRef(null)
+  useHeaderHeightVar(headerRef)
 
   let action = null
   if (allDone) {
@@ -154,7 +181,7 @@ export default function StoryHeader({ storyId, data, styles, allDone, currentKey
   }
 
   return (
-    <header className="story-header">
+    <header className="story-header" ref={headerRef}>
       <HeaderCover storyId={storyId} story={story} characters={data.characters} styles={styles} />
       <div className="story-header-text">
         <h2 className="story-header-title">{story.title || 'Untitled story'}</h2>

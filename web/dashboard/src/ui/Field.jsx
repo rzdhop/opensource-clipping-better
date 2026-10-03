@@ -5,8 +5,9 @@ import { Children, cloneElement, isValidElement, useId } from 'react'
  * (`htmlFor`), and the hint and the error are tied to it with
  * `aria-describedby`; an error also sets `aria-invalid`. With no `htmlFor`
  * an id is generated and given to the single child input when it has none.
+ * `aside` (a status badge) sits on the label's row, outside the label.
  */
-export function Field({ label, htmlFor, hint, error, required = false, className = '', children }) {
+export function Field({ label, htmlFor, hint, error, required = false, aside, className = '', children }) {
   const generated = useId()
   const only = Children.count(children) === 1 && isValidElement(children) ? children : null
   const inputId = htmlFor || (only && only.props.id) || `field-${generated}`
@@ -25,11 +26,20 @@ export function Field({ label, htmlFor, hint, error, required = false, className
 
   return (
     <div className={`ui-field${error ? ' ui-field-invalid' : ''} ${className}`.trim()}>
-      {label && (
+      {label && !aside && (
         <label className="ui-field-label" htmlFor={inputId}>
           {label}
           {required && <span className="ui-field-required" aria-hidden="true"> *</span>}
         </label>
+      )}
+      {label && aside && (
+        <div className="ui-field-label-row">
+          <label className="ui-field-label" htmlFor={inputId}>
+            {label}
+            {required && <span className="ui-field-required" aria-hidden="true"> *</span>}
+          </label>
+          {aside}
+        </div>
       )}
       {control}
       {hint && <p className="ui-field-hint" id={hintId}>{hint}</p>}

@@ -402,6 +402,7 @@ function UploadsSection({ storyId, character, disabled, onChange }) {
       )}
       <input
         type="file"
+        aria-label="Add a design reference"
         accept={ACCEPTED_UPLOAD_TYPES}
         onChange={handleFile}
         disabled={disabled || uploads.length >= MAX_UPLOADS || Boolean(progress)}
