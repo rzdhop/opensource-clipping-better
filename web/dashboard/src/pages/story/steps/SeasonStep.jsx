@@ -442,6 +442,7 @@ function FeedbackBox({ storyId, ep, feedback, disabled, onChange }) {
       {editing && (
         <>
           <textarea
+            aria-label="Audience comments"
             className="form-input story-season-feedback-textarea"
             rows={4}
             placeholder="Paste the audience comments"
@@ -452,6 +453,7 @@ function FeedbackBox({ storyId, ep, feedback, disabled, onChange }) {
           <p className="form-hint">{codePointLength(text)} / {FEEDBACK_TEXT_MAX_LENGTH}</p>
           {overText && <p className="story-error">{capMessage('feedback text', text, FEEDBACK_TEXT_MAX_LENGTH)}</p>}
           <textarea
+            aria-label="Audience stats (optional)"
             className="form-input story-season-feedback-textarea"
             rows={2}
             placeholder="Optional stats (views, likes, comments...)"

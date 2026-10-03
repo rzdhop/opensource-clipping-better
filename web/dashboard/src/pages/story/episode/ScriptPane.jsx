@@ -113,8 +113,9 @@ function ScriptHeader({ storyId, ep, episode, storyDoc, episodes, busy, onChange
   return (
     <div className="card episode-script-header">
       <div className="form-group">
-        <label className="form-label">Episode length</label>
+        <label className="form-label" htmlFor="episode-length">Episode length</label>
         <select
+          id="episode-length"
           className="form-select"
           value={storyDoc.episode_template_id}
           onChange={handleTemplateChange}
@@ -191,7 +192,7 @@ const portraitCache = new Map()
 function cachedPortraitUrl(storyId, charId, name) {
   const key = `${storyId}/${charId}/${name}`
   if (!portraitCache.has(key)) {
-    const pending = fetchStoryMediaUrl(storyId, 'characters', charId, name)
+    const pending = fetchStoryMediaUrl(storyId, 'characters', charId, name, { thumb: true })
     pending.catch(() => portraitCache.delete(key))
     portraitCache.set(key, pending)
   }

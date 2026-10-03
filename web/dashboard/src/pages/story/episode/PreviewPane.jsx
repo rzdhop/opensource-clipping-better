@@ -175,8 +175,9 @@ function RenderHeader({ storyId, ep, episode, assetsApproved, busy, onChange }) 
       />
       <CardBody>
       <div className="form-group story-render-subtitles">
-        <label className="form-label">Subtitles</label>
+        <label className="form-label" htmlFor="render-subtitles">Subtitles</label>
         <select
+          id="render-subtitles"
           className="form-select"
           value={subtitles}
           onChange={(e) => setSubtitles(e.target.value)}

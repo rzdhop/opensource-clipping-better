@@ -1,44 +1,103 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { checkVideoKeys, fetchHardware, fetchSettings, testChain, testGenerationChain, updateSettings } from '../api'
+import { Badge, Button, Card, CardBody, CardHeader, Field } from '../ui'
+import {
+  Brain, CircleCheck, CircleDollarSign, Cpu, Eye, EyeOff, Film, Gauge, ImageIcon, KeyRound, LinkIcon, Mic, Monitor,
+  Palette, RefreshCw, Save, Server, Wallet, Wand2,
+} from '../ui/icons'
 
-const PasswordInput = ({ value, onChange, placeholder, isSet }) => {
+/**
+ * A write-only secret: the server reports whether one is set, never its
+ * value. The kit's Field gives it its id and description, which it forwards
+ * to the input; the eye button shows or hides what is being typed.
+ */
+const PasswordInput = ({ value, onChange, placeholder, isSet, id, ...rest }) => {
   const [show, setShow] = useState(false)
   return (
-    <div style={{ position: 'relative' }}>
+    <div className="settings-secret">
       <input
+        {...rest}
+        id={id}
         className="form-input"
-        type={show ? "text" : "password"}
+        type={show ? 'text' : 'password'}
         placeholder={isSet ? '••••••••••••••••' : placeholder}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        style={{ paddingRight: '40px' }}
+        autoComplete="off"
+        spellCheck={false}
       />
       <button
         type="button"
+        className="settings-secret-toggle"
         onClick={() => setShow(!show)}
-        style={{
-          position: 'absolute',
-          right: '12px',
-          top: '50%',
-          transform: 'translateY(-50%)',
-          background: 'none',
-          border: 'none',
-          color: 'var(--text-secondary)',
-          cursor: 'pointer',
-          fontSize: '14px',
-          padding: '4px'
-        }}
-        title={show ? "Hide" : "Show"}
+        aria-label={show ? 'Hide the key' : 'Show the key'}
+        aria-pressed={show}
+        aria-controls={id}
+        title={show ? 'Hide' : 'Show'}
       >
-        {show ? '👀' : '👁️'}
+        {show ? <EyeOff size={16} aria-hidden="true" /> : <Eye size={16} aria-hidden="true" />}
       </button>
     </div>
   )
 }
 
-const SetBadge = ({ on }) => on
-  ? <span style={{ color: 'var(--success)', marginLeft: '8px' }}>✅ Set</span>
-  : null
+/**
+ * A provider key's state: "Tested" once a test on this page got an answer
+ * from one of its links, "Set" when the server holds one, else "Missing".
+ */
+const KeyBadge = ({ set, tested }) => {
+  if (tested) return <Badge tone="success" icon={CircleCheck}>Tested</Badge>
+  if (set) return <Badge tone="accent" dot>Set</Badge>
+  return <Badge tone="neutral">Missing</Badge>
+}
+
+/** One provider key: a labelled secret input (Field), its note, its badge and its hint. */
+const KeyField = ({ id, label, note, isSet, tested, value, onChange, placeholder, hint }) => (
+  <Field
+    className="settings-key"
+    label={<>{label}{note && <span className="settings-key-note"> — {note}</span>}</>}
+    aside={<KeyBadge set={isSet} tested={tested} />}
+    hint={hint}
+    htmlFor={id}
+  >
+    <PasswordInput id={id} value={value} onChange={onChange} placeholder={placeholder} isSet={isSet} />
+  </Field>
+)
+
+// Which tested links speak for which key: a chain test's row label is
+// "<provider>/<model>". Veo and the nano-banana images run on the paid
+// Gemini key (DEC-222), every other gemini/ link on the free one.
+const KEY_PROVIDERS = {
+  groq_api_key: 'groq',
+  nvidia_api_key: 'nvidia',
+  google_api_key: 'gemini',
+  openrouter_api_key: 'openrouter',
+  mistral_api_key: 'mistral',
+  openai_compat_api_key: 'custom',
+  fal_key: 'fal',
+  openai_api_key: 'openai',
+  cloudflare_api_token: 'cloudflare',
+  cloudflare_account_id: 'cloudflare',
+  pollinations_api_key: 'pollinations',
+  gemini_paid_api_key: 'gemini_paid',
+}
+
+function providerOfLabel(label) {
+  const text = String(label || '')
+  if (/^gemini\/(veo|nano-banana)/.test(text)) return 'gemini_paid'
+  return text.split('/')[0]
+}
+
+/** The providers a test on this page got a real answer from (status "ok"). */
+function testedProviders(testResult, genResults) {
+  const rows = [
+    ...((testResult && testResult.results) || []),
+    ...Object.values(genResults || {}).flatMap((result) => (result && result.results) || []),
+  ]
+  return new Set(rows.filter((row) => row.status === 'ok').map((row) => providerOfLabel(row.label)))
+}
+
+const linkStyle = { color: 'var(--accent-hover)' }
 
 /**
  * Base URLs for services that speak the OpenAI chat API.
@@ -57,10 +116,10 @@ const ENDPOINT_PRESETS = [
 
 // The four tabs of spec 8.6. The last one opened is remembered per browser.
 const SETTINGS_TABS = [
-  { id: 'providers', icon: '🔑', label: 'Providers' },
-  { id: 'generation', icon: '🎨', label: 'Generation' },
-  { id: 'hardware', icon: '💻', label: 'Local hardware' },
-  { id: 'budget', icon: '💰', label: 'Budget' },
+  { id: 'providers', icon: KeyRound, label: 'Providers' },
+  { id: 'generation', icon: Palette, label: 'Generation' },
+  { id: 'hardware', icon: Cpu, label: 'Local hardware' },
+  { id: 'budget', icon: Wallet, label: 'Budget' },
 ]
 const TAB_KEY = 'rzc_settings_tab'
 
@@ -71,6 +130,62 @@ function readTab() {
   } catch {
     return 'providers'
   }
+}
+
+/**
+ * The tab strip: a WAI-ARIA tablist (arrow keys, Home and End move between
+ * tabs; only the selected one is in the tab order). It scrolls sideways on a
+ * phone instead of wrapping.
+ */
+function SettingsTabs({ tab, onSelect }) {
+  const refs = useRef({})
+  // On a phone the strip scrolls: keep the open tab in view (the remembered
+  // one may be the last).
+  useEffect(() => {
+    const el = refs.current[tab]
+    const strip = el && el.parentElement
+    if (strip && strip.scrollWidth > strip.clientWidth) {
+      const offset = el.getBoundingClientRect().left - strip.getBoundingClientRect().left
+      strip.scrollLeft += offset - (strip.clientWidth - el.offsetWidth) / 2
+    }
+  }, [tab])
+  const onKeyDown = (event) => {
+    const index = SETTINGS_TABS.findIndex(t => t.id === tab)
+    let next = null
+    if (event.key === 'ArrowRight') next = (index + 1) % SETTINGS_TABS.length
+    else if (event.key === 'ArrowLeft') next = (index - 1 + SETTINGS_TABS.length) % SETTINGS_TABS.length
+    else if (event.key === 'Home') next = 0
+    else if (event.key === 'End') next = SETTINGS_TABS.length - 1
+    if (next == null) return
+    event.preventDefault()
+    const id = SETTINGS_TABS[next].id
+    onSelect(id)
+    if (refs.current[id]) refs.current[id].focus()
+  }
+  return (
+    <div className="settings-tabs" role="tablist" aria-label="Settings sections" onKeyDown={onKeyDown}>
+      {SETTINGS_TABS.map(t => {
+        const Icon = t.icon
+        return (
+          <button
+            key={t.id}
+            ref={(el) => { refs.current[t.id] = el }}
+            type="button"
+            role="tab"
+            id={`settings-tab-${t.id}`}
+            aria-selected={tab === t.id}
+            aria-controls={`settings-panel-${t.id}`}
+            tabIndex={tab === t.id ? 0 : -1}
+            className={`settings-tab${tab === t.id ? ' active' : ''}`}
+            onClick={() => onSelect(t.id)}
+          >
+            <Icon size={16} aria-hidden="true" />
+            {t.label}
+          </button>
+        )
+      })}
+    </div>
+  )
 }
 
 function Settings() {
@@ -308,9 +423,14 @@ function Settings() {
   const endpointReady = Boolean(
     settings?.openai_compat_api_key_set && compatUrl && compatModel
   )
+  const tested = testedProviders(testResult, genResults)
+  const isTested = (key) => tested.has(KEY_PROVIDERS[key])
+  const spentToday = Number(settings?.spend_today_usd || 0)
+  const dailyCapNow = Number(settings?.daily_cap_usd || 0)
+  const dailyShare = dailyCapNow > 0 ? Math.min(100, Math.round((spentToday / dailyCapNow) * 100)) : 0
 
   return (
-    <div className="fade-in">
+    <div className="fade-in settings-page">
       <div className="page-header">
         <div>
           <h2>Settings</h2>
@@ -319,180 +439,129 @@ function Settings() {
       </div>
 
       <form onSubmit={handleSave}>
-        <div className="settings-tabs" role="tablist">
-          {SETTINGS_TABS.map(t => (
-            <button
-              key={t.id}
-              type="button"
-              role="tab"
-              aria-selected={tab === t.id}
-              className={`settings-tab${tab === t.id ? ' active' : ''}`}
-              onClick={() => switchTab(t.id)}
-            >
-              {t.icon} {t.label}
-            </button>
-          ))}
-        </div>
+        <SettingsTabs tab={tab} onSelect={switchTab} />
 
         {tab === 'providers' && (
-          <div className="settings-grid">
+          <div className="settings-grid" role="tabpanel" id="settings-panel-providers" aria-labelledby="settings-tab-providers">
           {/* API keys */}
-          <div className="settings-section">
-            <h3>🔑 API Keys</h3>
-
-            <div className="form-group">
-              <label className="form-label">
-                Groq API Key
-                <span style={{ color: 'var(--text-tertiary)', marginLeft: '6px', fontWeight: 400 }}>
-                  — first link in the chain
-                </span>
-                <SetBadge on={settings?.groq_api_key_set} />
-              </label>
-              <PasswordInput
-                value={groqKey}
-                onChange={setGroqKey}
-                placeholder="Paste your Groq API key"
-                isSet={settings?.groq_api_key_set}
-              />
-              <p className="form-hint">
+          <Card className="settings-card">
+            <CardHeader icon={KeyRound} title="API keys" subtitle="The analysis chain, voice-over, B-roll and diarization." />
+            <CardBody>
+            <KeyField
+              id="settings-groq-key"
+              label="Groq API Key"
+              note="first link in the chain"
+              isSet={settings?.groq_api_key_set}
+              tested={isTested('groq_api_key')}
+              value={groqKey}
+              onChange={setGroqKey}
+              placeholder="Paste your Groq API key"
+              hint={<>
                 Free, and by far the fastest tier — analysis finishes in seconds
                 rather than minutes.{' '}
-                <a href="https://console.groq.com/keys" target="_blank" rel="noopener" style={{ color: 'var(--accent)' }}>Get a key →</a>
-              </p>
-            </div>
+                <a href="https://console.groq.com/keys" target="_blank" rel="noopener" style={linkStyle}>Get a key →</a>
+              </>}
+            />
 
-            <div className="form-group">
-              <label className="form-label">
-                NVIDIA API Key
-                <span style={{ color: 'var(--text-tertiary)', marginLeft: '6px', fontWeight: 400 }}>
-                  — last link, the floor
-                </span>
-                <SetBadge on={settings?.nvidia_api_key_set} />
-              </label>
-              <PasswordInput
-                value={nvidiaKey}
-                onChange={setNvidiaKey}
-                placeholder="Paste your NVIDIA NIM API key"
-                isSet={settings?.nvidia_api_key_set}
-              />
-              <p className="form-hint">
+            <KeyField
+              id="settings-nvidia-key"
+              label="NVIDIA API Key"
+              note="last link, the floor"
+              isSet={settings?.nvidia_api_key_set}
+              tested={isTested('nvidia_api_key')}
+              value={nvidiaKey}
+              onChange={setNvidiaKey}
+              placeholder="Paste your NVIDIA NIM API key"
+              hint={<>
                 Free, no credit card, but slow: ~12 tokens/s behind a queue that
                 can hold a request for a minute. On its own it cannot carry the
                 analysis, so a job with only this key is refused unless the
                 switch below is on.{' '}
-                <a href="https://build.nvidia.com/" target="_blank" rel="noopener" style={{ color: 'var(--accent)' }}>Get a key →</a>
-              </p>
-              <label style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', marginTop: '8px', fontSize: '13px', cursor: 'pointer' }}>
-                <input
-                  type="checkbox"
-                  checked={allowSlowChain}
-                  onChange={(e) => setAllowSlowChain(e.target.checked)}
-                  style={{ marginTop: '2px' }}
-                />
-                <span>
-                  Run on the slow chain anyway
-                  <span className="form-hint" style={{ display: 'block', marginTop: '2px' }}>
-                    Lets a job start when NVIDIA is the only keyed link. Expect
-                    the analysis to take tens of minutes, and windows to be
-                    skipped when the time budget runs out.
-                  </span>
-                </span>
-              </label>
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">
-                Google Gemini API Key
-                <SetBadge on={settings?.google_api_key_set} />
-              </label>
-              <PasswordInput
-                value={googleKey}
-                onChange={setGoogleKey}
-                placeholder="Paste your Gemini API key"
-                isSet={settings?.google_api_key_set}
+                <a href="https://build.nvidia.com/" target="_blank" rel="noopener" style={linkStyle}>Get a key →</a>
+              </>}
+            />
+            <label className="settings-check" htmlFor="settings-allow-slow-chain">
+              <input
+                id="settings-allow-slow-chain"
+                type="checkbox"
+                checked={allowSlowChain}
+                onChange={(e) => setAllowSlowChain(e.target.checked)}
+                aria-describedby="settings-allow-slow-chain-hint"
               />
-              <p className="form-hint">
+              <span>
+                Run on the slow chain anyway
+                <span className="form-hint" id="settings-allow-slow-chain-hint">
+                  Lets a job start when NVIDIA is the only keyed link. Expect
+                  the analysis to take tens of minutes, and windows to be
+                  skipped when the time budget runs out.
+                </span>
+              </span>
+            </label>
+
+            <KeyField
+              id="settings-google-key"
+              label="Google Gemini API Key"
+              isSet={settings?.google_api_key_set}
+              tested={isTested('google_api_key')}
+              value={googleKey}
+              onChange={setGoogleKey}
+              placeholder="Paste your Gemini API key"
+              hint={<>
                 Free, no credit card. Also the key voice-over uses.{' '}
-                <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" style={{ color: 'var(--accent)' }}>Get a key →</a>
-              </p>
-            </div>
+                <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" style={linkStyle}>Get a key →</a>
+              </>}
+            />
 
-            <div className="form-group">
-              <label className="form-label">
-                Pexels API Key
-                <SetBadge on={settings?.pexels_api_key_set} />
-              </label>
-              <PasswordInput
-                value={pexelsKey}
-                onChange={setPexelsKey}
-                placeholder="For B-roll footage (optional)"
-                isSet={settings?.pexels_api_key_set}
-              />
-              <p className="form-hint">
-                Without it, B-roll is skipped silently and the clips still render.
-              </p>
-            </div>
+            <KeyField
+              id="settings-pexels-key"
+              label="Pexels API Key"
+              isSet={settings?.pexels_api_key_set}
+              value={pexelsKey}
+              onChange={setPexelsKey}
+              placeholder="For B-roll footage (optional)"
+              hint="Without it, B-roll is skipped silently and the clips still render."
+            />
 
-            <div className="form-group">
-              <label className="form-label">
-                OpenRouter API Key
-                <span style={{ color: 'var(--text-tertiary)', marginLeft: '6px', fontWeight: 400 }}>
-                  — optional chain link
-                </span>
-                <SetBadge on={settings?.openrouter_api_key_set} />
-              </label>
-              <PasswordInput
-                value={openrouterKey}
-                onChange={setOpenrouterKey}
-                placeholder="Only needed if your chain names openrouter/..."
-                isSet={settings?.openrouter_api_key_set}
-              />
-              <p className="form-hint">
-                Not in the default chain. Add it with LLM_CHAIN or --llm-chain.
-              </p>
-            </div>
+            <KeyField
+              id="settings-openrouter-key"
+              label="OpenRouter API Key"
+              note="optional chain link"
+              isSet={settings?.openrouter_api_key_set}
+              tested={isTested('openrouter_api_key')}
+              value={openrouterKey}
+              onChange={setOpenrouterKey}
+              placeholder="Only needed if your chain names openrouter/..."
+              hint="Not in the default chain. Add it with LLM_CHAIN or --llm-chain."
+            />
 
-            <div className="form-group">
-              <label className="form-label">
-                Mistral API Key
-                <span style={{ color: 'var(--text-tertiary)', marginLeft: '6px', fontWeight: 400 }}>
-                  — optional chain link
-                </span>
-                <SetBadge on={settings?.mistral_api_key_set} />
-              </label>
-              <PasswordInput
-                value={mistralKey}
-                onChange={setMistralKey}
-                placeholder="Only needed if your chain names mistral/..."
-                isSet={settings?.mistral_api_key_set}
-              />
-              <p className="form-hint">
-                Also used by the hosted transcription chain
-                (mistral/voxtral-mini-latest).
-              </p>
-            </div>
+            <KeyField
+              id="settings-mistral-key"
+              label="Mistral API Key"
+              note="optional chain link"
+              isSet={settings?.mistral_api_key_set}
+              tested={isTested('mistral_api_key')}
+              value={mistralKey}
+              onChange={setMistralKey}
+              placeholder="Only needed if your chain names mistral/..."
+              hint="Also used by the hosted transcription chain (mistral/voxtral-mini-latest)."
+            />
 
-            <div className="form-group">
-              <label className="form-label">
-                HuggingFace Token
-                <SetBadge on={settings?.hf_token_set} />
-              </label>
-              <PasswordInput
-                value={hfToken}
-                onChange={setHfToken}
-                placeholder="For split-screen mode (optional)"
-                isSet={settings?.hf_token_set}
-              />
-              <p className="form-hint">
-                Only for speaker diarization. Split-screen can key off face
-                detection instead, which needs no token.
-              </p>
-            </div>
-          </div>
+            <KeyField
+              id="settings-hf-token"
+              label="HuggingFace Token"
+              isSet={settings?.hf_token_set}
+              value={hfToken}
+              onChange={setHfToken}
+              placeholder="For split-screen mode (optional)"
+              hint="Only for speaker diarization. Split-screen can key off face detection instead, which needs no token."
+            />
+            </CardBody>
+          </Card>
           {/* Chain test */}
-          <div className="settings-section">
-            <h3>🩺 Provider chain</h3>
-            <p className="form-hint" style={{ marginTop: '-6px', marginBottom: '14px' }}>
+          <Card className="settings-card">
+            <CardHeader icon={Brain} title="Provider chain" subtitle="Would a job on these keys work?" />
+            <CardBody>
+            <p className="form-hint settings-card-lead">
               Sends every keyed link one small real analysis request (a short
               test transcript with one clip in it), all providers at once,
               using the keys saved on the server — save new keys first. A job
@@ -512,24 +581,32 @@ function Settings() {
               </p>
             )}
             {testError && (
-              <p style={{ marginTop: '10px', fontSize: '13px', color: 'var(--error)', whiteSpace: 'pre-wrap' }}>
+              <p className="settings-error" role="alert">
                 {testError}
               </p>
             )}
             {testResult && <ChainTestResult result={testResult} />}
-          </div>
+            </CardBody>
+          </Card>
           {/* Custom OpenAI-compatible endpoint */}
-          <div className="settings-section">
-            <h3>🔌 Custom endpoint (optional)</h3>
-            <p className="form-hint" style={{ marginTop: '-6px', marginBottom: '14px' }}>
+          <Card className="settings-card">
+            <CardHeader
+              icon={LinkIcon}
+              title="Custom endpoint (optional)"
+              actions={endpointReady
+                ? <Badge tone="success" icon={CircleCheck}>Ready</Badge>
+                : <Badge tone="neutral">Not set up</Badge>}
+            />
+            <CardBody>
+            <p className="form-hint settings-card-lead">
               Point the analysis step at anything that speaks the OpenAI chat API.
               Only worth setting if you already have a key elsewhere — Groq and
               Gemini above are both free.
             </p>
 
-            <div className="form-group">
-              <label className="form-label">Preset</label>
+            <Field label="Preset" htmlFor="settings-compat-preset">
               <select
+                id="settings-compat-preset"
                 className="form-select"
                 value={ENDPOINT_PRESETS.find(p => p.url === compatUrl)?.url || ''}
                 onChange={(e) => { if (e.target.value) setCompatUrl(e.target.value) }}
@@ -539,124 +616,133 @@ function Settings() {
                   <option key={p.url} value={p.url}>{p.label}</option>
                 ))}
               </select>
-            </div>
+            </Field>
 
-            <div className="form-group">
-              <label className="form-label">Base URL</label>
+            <Field
+              label="Base URL"
+              htmlFor="settings-compat-url"
+              hint="Include the version path. Clearing the field falls back to whatever your .env holds."
+            >
               <input
+                id="settings-compat-url"
                 className="form-input"
                 type="text"
                 placeholder="https://openrouter.ai/api/v1"
                 value={compatUrl}
                 onChange={(e) => setCompatUrl(e.target.value)}
               />
-              <p className="form-hint">
-                Include the version path. Clearing the field falls back to whatever
-                your .env holds.
-              </p>
-            </div>
+            </Field>
 
-            <div className="form-group">
-              <label className="form-label">
-                API Key
-                <SetBadge on={settings?.openai_compat_api_key_set} />
-              </label>
-              <PasswordInput
-                value={compatKey}
-                onChange={setCompatKey}
-                placeholder="Paste the endpoint's API key"
-                isSet={settings?.openai_compat_api_key_set}
-              />
-              <p className="form-hint">
+            <KeyField
+              id="settings-compat-key"
+              label="API Key"
+              isSet={settings?.openai_compat_api_key_set}
+              tested={isTested('openai_compat_api_key')}
+              value={compatKey}
+              onChange={setCompatKey}
+              placeholder="Paste the endpoint's API key"
+              hint={<>
                 A local Ollama ignores this, but one is still required — type any
                 value, such as <code>ollama</code>.
-              </p>
-            </div>
+              </>}
+            />
 
-            <div className="form-group">
-              <label className="form-label">Model</label>
+            <Field
+              label="Model"
+              htmlFor="settings-compat-model"
+              hint="The exact model id the endpoint expects. It has to take a long transcript and answer in JSON."
+            >
               <input
+                id="settings-compat-model"
                 className="form-input"
                 type="text"
                 placeholder="meta-llama/llama-3.3-70b-instruct"
                 value={compatModel}
                 onChange={(e) => setCompatModel(e.target.value)}
               />
-              <p className="form-hint">
-                The exact model id the endpoint expects. It has to take a long
-                transcript and answer in JSON.
-              </p>
-            </div>
+            </Field>
 
-            <div style={{
-              fontSize: '13px',
-              color: endpointReady ? 'var(--success)' : 'var(--text-tertiary)',
-            }}>
+            <p className={`settings-status${endpointReady ? ' settings-status-ok' : ''}`}>
               {endpointReady
-                ? '✅ Ready. Pick "Custom endpoint" as the provider on a new job.'
-                : '⚪ Needs a base URL, a key and a model before it can be used.'}
-            </div>
-          </div>
+                ? 'Ready. Pick "Custom endpoint" as the provider on a new job.'
+                : 'Needs a base URL, a key and a model before it can be used.'}
+            </p>
+            </CardBody>
+          </Card>
           </div>
         )}
 
         {tab === 'generation' && (
-          <div className="settings-grid">
+          <div className="settings-grid" role="tabpanel" id="settings-panel-generation" aria-labelledby="settings-tab-generation">
           {/* Generation providers (AI Story, spec 8.6) */}
-          <div className="settings-section">
-            <h3>🎨 Generation providers</h3>
-            <p className="form-hint" style={{ marginTop: '-6px', marginBottom: '14px' }}>
-              Image, video and voice providers of the AI Story mode. Gemini reuses
-              the Google key above; OpenRouter its own. Paid links never run until
-              the Budget below allows them.
+          <Card className="settings-card">
+            <CardHeader icon={Palette} title="Generation providers" subtitle="Images, video and voices of the AI Story mode." />
+            <CardBody>
+            <p className="form-hint settings-card-lead">
+              Gemini reuses the Google key of the Providers tab; OpenRouter its own.
+              Paid links never run until the Budget tab allows them.
             </p>
-            <div className="form-group">
-              <label className="form-label">
-                fal.ai key
-                <span style={{ color: 'var(--text-tertiary)', marginLeft: '6px', fontWeight: 400 }}>— paid: images and video</span>
-                <SetBadge on={settings?.fal_key_set} />
-              </label>
-              <PasswordInput value={falKey} onChange={setFalKey} placeholder="Paste your fal.ai key" isSet={settings?.fal_key_set} />
-            </div>
-            <div className="form-group">
-              <label className="form-label">
-                OpenAI API key
-                <span style={{ color: 'var(--text-tertiary)', marginLeft: '6px', fontWeight: 400 }}>— paid: gpt-image-2</span>
-                <SetBadge on={settings?.openai_api_key_set} />
-              </label>
-              <PasswordInput value={openaiKey} onChange={setOpenaiKey} placeholder="Paste your OpenAI API key" isSet={settings?.openai_api_key_set} />
-            </div>
-            <div className="form-group">
-              <label className="form-label">
-                Cloudflare Workers AI token
-                <span style={{ color: 'var(--text-tertiary)', marginLeft: '6px', fontWeight: 400 }}>— free allowance, ~170 images a day</span>
-                <SetBadge on={settings?.cloudflare_api_token_set} />
-              </label>
-              <PasswordInput value={cloudflareToken} onChange={setCloudflareToken} placeholder="Paste your Cloudflare API token" isSet={settings?.cloudflare_api_token_set} />
-            </div>
-            <div className="form-group">
-              <label className="form-label">
-                Cloudflare account id
-                <SetBadge on={settings?.cloudflare_account_id_set} />
-              </label>
-              <PasswordInput value={cloudflareAccountId} onChange={setCloudflareAccountId} placeholder="The account id the token belongs to" isSet={settings?.cloudflare_account_id_set} />
-            </div>
-            <div className="form-group">
-              <label className="form-label">
-                Pollinations key
-                <span style={{ color: 'var(--text-tertiary)', marginLeft: '6px', fontWeight: 400 }}>— optional, keyless works slowly</span>
-                <SetBadge on={settings?.pollinations_api_key_set} />
-              </label>
-              <PasswordInput value={pollinationsKey} onChange={setPollinationsKey} placeholder="Paste your Pollinations key (optional)" isSet={settings?.pollinations_api_key_set} />
-            </div>
-            <div className="form-group">
-              <label className="form-label">
-                Gemini paid key (Veo and the nano-banana images — a separate billing-enabled Google project)
-                <SetBadge on={settings?.gemini_paid_api_key_set} />
-              </label>
-              <PasswordInput value={geminiPaidKey} onChange={setGeminiPaidKey} placeholder="Paste the billing-enabled project's key" isSet={settings?.gemini_paid_api_key_set} />
-            </div>
-          </div>
+            <KeyField
+              id="settings-fal-key"
+              label="fal.ai key"
+              note="paid: images and video"
+              isSet={settings?.fal_key_set}
+              tested={isTested('fal_key')}
+              value={falKey}
+              onChange={setFalKey}
+              placeholder="Paste your fal.ai key"
+            />
+            <KeyField
+              id="settings-openai-key"
+              label="OpenAI API key"
+              note="paid: gpt-image-2"
+              isSet={settings?.openai_api_key_set}
+              tested={isTested('openai_api_key')}
+              value={openaiKey}
+              onChange={setOpenaiKey}
+              placeholder="Paste your OpenAI API key"
+            />
+            <KeyField
+              id="settings-cloudflare-token"
+              label="Cloudflare Workers AI token"
+              note="free allowance, ~170 images a day"
+              isSet={settings?.cloudflare_api_token_set}
+              tested={isTested('cloudflare_api_token')}
+              value={cloudflareToken}
+              onChange={setCloudflareToken}
+              placeholder="Paste your Cloudflare API token"
+            />
+            <KeyField
+              id="settings-cloudflare-account"
+              label="Cloudflare account id"
+              isSet={settings?.cloudflare_account_id_set}
+              tested={isTested('cloudflare_account_id')}
+              value={cloudflareAccountId}
+              onChange={setCloudflareAccountId}
+              placeholder="The account id the token belongs to"
+            />
+            <KeyField
+              id="settings-pollinations-key"
+              label="Pollinations key"
+              note="optional, keyless works slowly"
+              isSet={settings?.pollinations_api_key_set}
+              tested={isTested('pollinations_api_key')}
+              value={pollinationsKey}
+              onChange={setPollinationsKey}
+              placeholder="Paste your Pollinations key (optional)"
+            />
+            <KeyField
+              id="settings-gemini-paid-key"
+              label="Gemini paid key"
+              note="Veo and the nano-banana images — a separate billing-enabled Google project"
+              isSet={settings?.gemini_paid_api_key_set}
+              tested={isTested('gemini_paid_api_key')}
+              value={geminiPaidKey}
+              onChange={setGeminiPaidKey}
+              placeholder="Paste the billing-enabled project's key"
+            />
+            </CardBody>
+          </Card>
           <ChainLinksPanel
             chains={settings?.generation_chains}
             usage={settings?.usage_today}
@@ -669,125 +755,143 @@ function Settings() {
         )}
 
         {tab === 'hardware' && (
-          <div className="settings-grid">
+          <div className="settings-grid" role="tabpanel" id="settings-panel-hardware" aria-labelledby="settings-tab-hardware">
           <HardwarePanel hardware={hardware} loading={hwLoading} error={hwError} onRefresh={loadHardware} />
 
-          <div className="settings-section">
-            <h3>🔗 Local servers</h3>
-            <p className="form-hint" style={{ marginTop: '-6px', marginBottom: '14px' }}>
-              Where ComfyUI and Ollama answer. Inside Docker the default is
-              host.docker.internal (the host's services); on a host it is
-              127.0.0.1. Empty = the default.
+          <Card className="settings-card">
+            <CardHeader icon={Server} title="Local servers" subtitle="Where ComfyUI and Ollama answer." />
+            <CardBody>
+            <p className="form-hint settings-card-lead">
+              Inside Docker the default is host.docker.internal (the host's
+              services); on a host it is 127.0.0.1. Empty = the default.
             </p>
-            <div className="form-group">
-              <label className="form-label">ComfyUI URL</label>
-              <input className="form-input" type="url" value={localComfyuiUrl}
+            <Field label="ComfyUI URL" htmlFor="settings-comfyui-url" hint={hardware?.comfyui?.note || undefined}>
+              <input id="settings-comfyui-url" className="form-input" type="url" value={localComfyuiUrl}
                 onChange={e => setLocalComfyuiUrl(e.target.value)} placeholder="http://127.0.0.1:8188" />
-              {hardware?.comfyui?.note && <p className="form-hint" style={{ wordBreak: 'break-word' }}>{hardware.comfyui.note}</p>}
-            </div>
-            <div className="form-group">
-              <label className="form-label">Ollama URL</label>
-              <input className="form-input" type="url" value={localOllamaUrl}
+            </Field>
+            <Field label="Ollama URL" htmlFor="settings-ollama-url" hint={hardware?.ollama?.note || undefined}>
+              <input id="settings-ollama-url" className="form-input" type="url" value={localOllamaUrl}
                 onChange={e => setLocalOllamaUrl(e.target.value)} placeholder="http://127.0.0.1:11434" />
-              {hardware?.ollama?.note && <p className="form-hint" style={{ wordBreak: 'break-word' }}>{hardware.ollama.note}</p>}
-            </div>
-          </div>
-          <div className="settings-section">
-            <h3>💻 System Info</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '13px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--text-secondary)' }}>GPU</span>
-                <span style={{ color: settings?.gpu_available ? 'var(--success)' : 'var(--text-tertiary)' }}>
-                  {settings?.gpu_available ? '✅ Available' : '⚪ Not available'}
-                </span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--text-secondary)' }}>Default Whisper</span>
-                <span>{settings?.default_whisper_model}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--text-secondary)' }}>Whisper device</span>
-                <span>{settings?.default_whisper_device}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--text-secondary)' }}>Default AI</span>
-                <span>{settings?.default_ai_provider}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--text-secondary)' }}>Custom endpoint</span>
-                <span style={{ color: endpointReady ? 'var(--success)' : 'var(--text-tertiary)' }}>
-                  {endpointReady ? '✅ Configured' : '⚪ Not configured'}
-                </span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--text-secondary)' }}>Default Ratio</span>
-                <span>{settings?.default_ratio}</span>
-              </div>
-            </div>
-          </div>
+            </Field>
+            </CardBody>
+          </Card>
+          <Card className="settings-card">
+            <CardHeader icon={Monitor} title="System info" />
+            <CardBody>
+            <dl className="settings-facts">
+              <Row label="GPU" value={settings?.gpu_available
+                ? <Badge tone="success" icon={CircleCheck}>Available</Badge>
+                : <Badge tone="neutral">Not available</Badge>} />
+              <Row label="Default Whisper" value={settings?.default_whisper_model} />
+              <Row label="Whisper device" value={settings?.default_whisper_device} />
+              <Row label="Default AI" value={settings?.default_ai_provider} />
+              <Row label="Custom endpoint" value={endpointReady
+                ? <Badge tone="success" icon={CircleCheck}>Configured</Badge>
+                : <Badge tone="neutral">Not configured</Badge>} />
+              <Row label="Default Ratio" value={settings?.default_ratio} />
+            </dl>
+            </CardBody>
+          </Card>
           </div>
         )}
 
         {tab === 'budget' && (
-          <div className="settings-grid">
+          <div className="settings-grid" role="tabpanel" id="settings-panel-budget" aria-labelledby="settings-tab-budget">
           {/* Budget (AI Story, DEC-097) */}
-          <div className="settings-section">
-            <h3>💰 Budget</h3>
-            <p className="form-hint" style={{ marginTop: '-6px', marginBottom: '14px' }}>
-              Paid generation providers are never called unless allowed here, and
-              never past these caps. Every estimate is shown before it is spent.
-            </p>
-            <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
+          <Card className="settings-card settings-card-wide">
+            <CardHeader
+              icon={Wallet}
+              title="Budget"
+              subtitle="Paid generation providers are never called unless allowed here, and never past these caps."
+              actions={allowPaid
+                ? <Badge tone="warning" icon={CircleDollarSign}>Paid allowed</Badge>
+                : <Badge tone="success">Free only</Badge>}
+            />
+            <CardBody>
+            <p className="form-hint settings-card-lead">Every estimate is shown before it is spent.</p>
+            <label className="settings-check" htmlFor="settings-allow-paid">
               <input
+                id="settings-allow-paid"
                 type="checkbox"
                 checked={allowPaid}
                 onChange={e => setAllowPaid(e.target.checked)}
               />
-              Allow paid providers (within the caps)
+              <span>Allow paid providers (within the caps)</span>
             </label>
-            <div className="settings-grid" style={{ marginTop: '12px' }}>
-              <div className="form-group">
-                <label className="form-label">Per episode cap (USD)</label>
-                <input className="form-input" type="number" min="0.01" step="0.01" inputMode="decimal"
-                  value={perEpisodeCap} onChange={e => setPerEpisodeCap(e.target.value)} />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Daily cap (USD)</label>
-                <input className="form-input" type="number" min="0.01" step="0.01" inputMode="decimal"
-                  value={dailyCap} onChange={e => setDailyCap(e.target.value)} />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Per story cap (USD)</label>
-                <input className="form-input" type="number" min="0.01" step="0.01" inputMode="decimal"
-                  value={perStoryCap} onChange={e => setPerStoryCap(e.target.value)} />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Budget profile</label>
-                <select className="form-input" value={budgetProfile} onChange={e => setBudgetProfile(e.target.value)}>
-                  <option value="">auto — free until paid is allowed, then one_dollar</option>
-                  <option value="free">free — $0.00: free chains or local, stills + motion</option>
-                  <option value="one_dollar">one_dollar — ≤ $1 per episode: reference images + key shots animated</option>
-                  <option value="quality">quality — Quality (billed APIs): ≤ $4 per episode, quality image links, every shot animated with its own ambience</option>
-                </select>
-                <p className="form-hint">
-                  In force now: <strong>{settings?.effective_budget_profile || 'free'}</strong>
-                  {' · '}spent today ${Number(settings?.spend_today_usd || 0).toFixed(2)} of ${Number(settings?.daily_cap_usd || 0).toFixed(2)}
-                </p>
-              </div>
+            <div className="settings-table-wrap">
+              <table className="settings-caps">
+                <caption className="sr-only">Spending caps, in US dollars, and the spend so far</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Cap</th>
+                    <th scope="col">Limit (USD)</th>
+                    <th scope="col">Spent so far</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <th scope="row"><label htmlFor="settings-cap-episode">Per episode</label></th>
+                    <td>
+                      <input id="settings-cap-episode" className="form-input" type="number" min="0.01" step="0.01" inputMode="decimal"
+                        value={perEpisodeCap} onChange={e => setPerEpisodeCap(e.target.value)} />
+                    </td>
+                    <td className="settings-caps-spend">On each episode's page</td>
+                  </tr>
+                  <tr>
+                    <th scope="row"><label htmlFor="settings-cap-daily">Daily</label></th>
+                    <td>
+                      <input id="settings-cap-daily" className="form-input" type="number" min="0.01" step="0.01" inputMode="decimal"
+                        value={dailyCap} onChange={e => setDailyCap(e.target.value)} />
+                    </td>
+                    <td className="settings-caps-spend">
+                      <span className="settings-caps-amount">${spentToday.toFixed(2)} of ${dailyCapNow.toFixed(2)} today</span>
+                      <span
+                        className={`settings-caps-meter${dailyShare >= 90 ? ' settings-caps-meter-high' : ''}`}
+                        role="img"
+                        aria-label={`${dailyShare}% of today's cap spent`}
+                      >
+                        <span style={{ width: `${dailyShare}%` }}></span>
+                      </span>
+                    </td>
+                  </tr>
+                  <tr>
+                    <th scope="row"><label htmlFor="settings-cap-story">Per story</label></th>
+                    <td>
+                      <input id="settings-cap-story" className="form-input" type="number" min="0.01" step="0.01" inputMode="decimal"
+                        value={perStoryCap} onChange={e => setPerStoryCap(e.target.value)} />
+                    </td>
+                    <td className="settings-caps-spend">On each story's episodes</td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
-          </div>
+            <Field
+              label="Budget profile"
+              htmlFor="settings-budget-profile"
+              hint={<>In force now: <strong>{settings?.effective_budget_profile || 'free'}</strong></>}
+            >
+              <select id="settings-budget-profile" className="form-input" value={budgetProfile} onChange={e => setBudgetProfile(e.target.value)}>
+                <option value="">auto — free until paid is allowed, then one_dollar</option>
+                <option value="free">free — $0.00: free chains or local, stills + motion</option>
+                <option value="one_dollar">one_dollar — ≤ $1 per episode: reference images + key shots animated</option>
+                <option value="quality">quality — Quality (billed APIs): ≤ $4 per episode, quality image links, every shot animated with its own ambience</option>
+              </select>
+            </Field>
+            </CardBody>
+          </Card>
           </div>
         )}
 
-        {msg && (
-          <div style={{ marginTop: '16px', fontSize: '13px', color: msg.startsWith('✅') ? 'var(--success)' : 'var(--error)' }}>
-            {msg}
-          </div>
-        )}
-
-        <button type="submit" className="btn btn-primary" disabled={saving} style={{ marginTop: '20px' }}>
-          {saving ? <><span className="spinner"></span> Saving...</> : '💾 Save Settings'}
-        </button>
+        <div className="settings-savebar">
+          <Button type="submit" variant="primary" icon={Save} loading={saving}>
+            {saving ? 'Saving…' : 'Save settings'}
+          </Button>
+          {msg && (
+            <p className={`settings-msg${msg.startsWith('✅') ? ' settings-msg-ok' : msg.startsWith('❌') ? ' settings-msg-error' : ''}`} role="status">
+              {msg}
+            </p>
+          )}
+        </div>
       </form>
     </div>
   )
@@ -1034,6 +1138,8 @@ function VideoKeyCheck() {
   )
 }
 
+const KIND_ICONS = { image: ImageIcon, image_edit: Wand2, video: Film, tts: Mic, vision: Eye }
+
 /** One card per generation chain: its links as the runner sees them, a chain test, a test per paid link. */
 function ChainLinksPanel({ chains, usage, results, testing, error, onTest }) {
   const entries = Object.entries(chains || {})
@@ -1041,26 +1147,28 @@ function ChainLinksPanel({ chains, usage, results, testing, error, onTest }) {
   return (
     <>
       {entries.map(([kind, chain]) => (
-        <div className="settings-section" key={kind}>
-          <h3>
-            {KIND_LABELS[kind] || kind}
-            <code style={{ fontSize: '11px', fontWeight: 400, color: 'var(--text-tertiary)' }}>{chain.env}</code>
-          </h3>
-          <p className="form-hint" style={{ marginTop: '-6px', marginBottom: '10px', wordBreak: 'break-all' }}>
+        <Card className="settings-card" key={kind}>
+          <CardHeader
+            icon={KIND_ICONS[kind] || Palette}
+            title={KIND_LABELS[kind] || kind}
+            actions={<code className="settings-env">{chain.env}</code>}
+          />
+          <CardBody>
+          <p className="form-hint settings-card-lead" style={{ wordBreak: 'break-all' }}>
             {chain.source === 'env' ? 'From the environment' : 'Shipped default'} · <code>{chain.chain}</code>
           </p>
-          {chain.error && <p style={{ color: 'var(--error)', fontSize: '13px' }}>{chain.error}</p>}
+          {chain.error && <p className="settings-error" role="alert">{chain.error}</p>}
           <div style={{ fontSize: '13px' }}>
             {(chain.links || []).map(row => (
               <div key={row.label} style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', padding: '6px 0', borderBottom: '1px solid var(--border-color)' }}>
-                <span>{linkGlyph(row)}</span>
+                <span aria-hidden="true">{linkGlyph(row)}</span>
                 <code style={{ wordBreak: 'break-all' }}>{row.label}</code>
                 <span className="link-chip">{row.paid ? `paid · est $${Number(row.est_usd).toFixed(3)}` : 'free'}</span>
                 {!row.adapter && <span className="link-chip">no adapter yet (phase 6)</span>}
                 {row.adapter && !row.keyed && (
                   <span className="link-chip">
                     no key: {row.missing_keys.join(', ')}
-                    {row.signup_url && <> · <a href={row.signup_url} target="_blank" rel="noopener" style={{ color: 'var(--accent)' }}>get one →</a></>}
+                    {row.signup_url && <> · <a href={row.signup_url} target="_blank" rel="noopener" style={linkStyle}>get one →</a></>}
                   </span>
                 )}
                 {row.paid && row.keyed && row.adapter && (row.allowed
@@ -1081,34 +1189,39 @@ function ChainLinksPanel({ chains, usage, results, testing, error, onTest }) {
               Runs the free and local links; a paid link is only reported here — test it from its row, once.
             </span>
           </div>
-          {error && testing === null && <p style={{ marginTop: '8px', fontSize: '13px', color: 'var(--error)', whiteSpace: 'pre-wrap' }}>{error}</p>}
+          {error && testing === null && <p className="settings-error" role="alert">{error}</p>}
           {results[kind] && <GenerationChainResult result={results[kind]} />}
           {kind === 'video' && <VideoKeyCheck />}
-        </div>
+          </CardBody>
+        </Card>
       ))}
-      <div className="settings-section">
-        <h3>📊 Free allowance today</h3>
-        <p className="form-hint" style={{ marginTop: '-6px', marginBottom: '10px' }}>
+      <Card className="settings-card">
+        <CardHeader icon={Gauge} title="Free allowance today" />
+        <CardBody>
+        <p className="form-hint settings-card-lead">
           Calls made today on each free tier, against its published daily limit (UTC day{usage?.day ? ` ${usage.day}` : ''}).
         </p>
-        <div style={{ fontSize: '13px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+        <dl className="settings-facts">
           {usageRows.map(([name, row]) => (
-            <div key={name} style={{ display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
-              <span style={{ color: 'var(--text-secondary)' }}>{name}</span>
-              <span>{row.calls} / {row.rpd} <span style={{ color: 'var(--text-tertiary)' }}>({row.left} left)</span></span>
-            </div>
+            <Row
+              key={name}
+              label={name}
+              value={<>{row.calls} / {row.rpd} <span style={{ color: 'var(--text-tertiary)' }}>({row.left} left)</span></>}
+            />
           ))}
-          {usageRows.length === 0 && <span className="form-hint">No daily limit to show.</span>}
-        </div>
-      </div>
+        </dl>
+        {usageRows.length === 0 && <span className="form-hint">No daily limit to show.</span>}
+        </CardBody>
+      </Card>
     </>
   )
 }
 
+/** One fact of a <dl className="settings-facts">: a term and its value on one row. */
 const Row = ({ label, value }) => (
-  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
-    <span style={{ color: 'var(--text-secondary)' }}>{label}</span>
-    <span style={{ textAlign: 'right', wordBreak: 'break-word' }}>{value}</span>
+  <div className="settings-fact">
+    <dt>{label}</dt>
+    <dd>{value}</dd>
   </div>
 )
 
@@ -1125,13 +1238,22 @@ function HardwarePanel({ hardware, loading, error, onRefresh }) {
   const advice = recommendations.filter((r) => r.estimate)
   const rows = recommendations.filter((r) => !r.estimate)
   return (
-    <div className="settings-section">
-      <h3>🖥️ Local hardware</h3>
-      {loading && <p className="form-hint"><span className="spinner"></span> Probing this machine…</p>}
-      {error && <p style={{ color: 'var(--error)', fontSize: '13px' }}>{error}</p>}
+    <Card className="settings-card">
+      <CardHeader
+        icon={Cpu}
+        title="Local hardware"
+        actions={(
+          <Button size="sm" icon={RefreshCw} disabled={loading} onClick={() => onRefresh(true)}>
+            Probe again
+          </Button>
+        )}
+      />
+      <CardBody>
+      {loading && <p className="form-hint" role="status"><span className="spinner"></span> Probing this machine…</p>}
+      {error && <p className="settings-error" role="alert">{error}</p>}
       {hardware && (
         <>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '13px' }}>
+          <dl className="settings-facts">
             <Row label="Profile" value={<strong>{hardware.profile}</strong>} />
             <Row label="GPU" value={hardware.gpu_name ? `${hardware.gpu_name}${hardware.vram_gb != null ? ` · ${hardware.vram_gb} GB` : ''}` : 'none found'} />
             <Row label="Backend" value={hardware.backend} />
@@ -1142,19 +1264,15 @@ function HardwarePanel({ hardware, loading, error, onRefresh }) {
             <Row label="Ollama" value={hardware.ollama?.reachable
               ? `${hardware.ollama.note}${hardware.ollama.models?.length ? ` — ${hardware.ollama.models.join(', ')}` : ''}`
               : hardware.ollama?.note} />
-          </div>
+          </dl>
           {hardware.errors?.length > 0 && (
             <p className="form-hint" style={{ color: 'var(--warning)', wordBreak: 'break-word' }}>
               Probe errors: {hardware.errors.join(' · ')}
             </p>
           )}
           {advice.map((r, index) => (
-            <div
-              key={`advice-${index}`}
-              style={{ margin: '14px 0 0', padding: '10px 12px', border: '1px solid var(--warning)',
-                borderRadius: '8px', fontSize: '13px' }}
-            >
-              <div><strong>💳 Recommended: {r.model}</strong></div>
+            <div key={`advice-${index}`} className="settings-advice">
+              <div><strong>Recommended: {r.model}</strong></div>
               <p style={{ margin: '6px 0', wordBreak: 'break-word' }}>{r.install_hint}</p>
               <p className="form-hint" style={{ wordBreak: 'break-word' }}>{r.estimate.assumptions}</p>
               {r.keys?.length > 0 && (
@@ -1164,7 +1282,7 @@ function HardwarePanel({ hardware, loading, error, onRefresh }) {
               )}
             </div>
           ))}
-          <h4 style={{ margin: '14px 0 6px', fontSize: '13px' }}>Recommended locally</h4>
+          <h4 className="settings-subheading">Recommended locally</h4>
           <div style={{ fontSize: '13px' }}>
             {rows.map((r, index) => (
               <div key={index} style={{ padding: '6px 0', borderBottom: '1px solid var(--border-color)' }}>
@@ -1175,10 +1293,8 @@ function HardwarePanel({ hardware, loading, error, onRefresh }) {
           </div>
         </>
       )}
-      <button type="button" className="btn btn-secondary btn-sm" style={{ marginTop: '10px' }} disabled={loading} onClick={() => onRefresh(true)}>
-        Probe again
-      </button>
-    </div>
+      </CardBody>
+    </Card>
   )
 }
 

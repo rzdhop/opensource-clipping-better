@@ -517,6 +517,12 @@
   (Cancel for a delete or a re-plan, the confirm button otherwise, as the browser's own box did) matches how they
   click. UNCONFIRMED until the human uses the deployed stage 1: confirmed if they keep the direction for stages 2-5;
   refuted if they ask for the emoji back, a lighter theme or a different accent (then the tokens change, not the kit).
+- **A-139** — (DEC-257) The whole overhaul (cover cards, the routed workspace and its rail, the episode stepper and
+  review hero, the grouped feed, Settings as status cards, the phone drawer) reads better to the human on the live app
+  at phone and desktop widths than the pages it replaced, and the 160 px thumbnails look sharp enough where they are
+  drawn (28 px avatars, ~200 px tiles, the stories-list covers up to ~340 px). UNCONFIRMED until the human uses the
+  deployed stage 5 on a phone and a desktop: confirmed if they keep it; refuted if a page reads worse (then that page's
+  layout changes, not the kit) or a cover looks soft (then the list asks `{ thumb: false }` or the width grows).
 
 ## Confirmed
 - **A-082** — fal.ai as measured in the paid test (2026-09-29, DEC-174):

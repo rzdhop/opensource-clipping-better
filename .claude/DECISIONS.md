@@ -4866,3 +4866,48 @@ the kit Dialog (moves the `role="dialog"` literal a contract pins; the overlay a
 `test_dashboard_clip_controls` reads the four storyboard files as one text. Behaviour to know: one shot open at a time;
 the in-scene "cut" markers are gone; line and scene details start collapsed. Bundle: JS 611.63 kB (gzip 171.15),
 CSS 75.85 kB.
+
+## DEC-257 — The activity feed is a grouped timeline, Settings are status cards, phones get a drawer, every control is labelled, and avatars and tiles load 160 px thumbnails (dashboard overhaul stage 5, the closing stage, after DEC-256)
+**Context.** Stage 5 of `.claude/plans/dashboard/01-ai-story-ui-overhaul-plan.md`. The feed was a flat wall of log lines
+(263 lines for one failed fast track, its errors buried); Settings were bare sections with inline styles and emoji
+headings; on a phone the sidebar was simply hidden (mode switch and a Settings icon only); the stage-3 rail stuck at a
+fixed 112 px and touched a two-line header between ~900 and 1100 px; inputs had labels without `htmlFor`; the tertiary
+text (#6b7280) read at 3.4-4.1:1 on the card surfaces; and a speaker avatar fetched a 550-640 kB portrait.
+**Decision.**
+- **Feed** (`ActivityFeed.jsx`; `useJobFeed`, `mergeEvents`, `TERMINAL`, `LiveActivity` unchanged in behaviour;
+  `ActivityConsole({events, live})`): pure `classifyLine` / `groupEvents`. A group opens at a worker step line, a
+  "⏩ Fast track N/6:" line, or (in a job with no fast track) a 🎬/🎙/🖼/👁/🛠 section start, a run of one section
+  staying one group. The leading emoji becomes a lucide icon (the raw line stays as the row's tooltip and in Copy log);
+  `✖`/`❌`/the error level are danger, `⚠️`/"failed"/"refused"/the warn level warning (a 🔁 retry is not), tinted with
+  an sr-only "Error:"/"Warning:", and their groups open with counts in the header; the newest group is open. Auto-scroll
+  pauses when scrolled up and offers "Jump to latest"; a sticky Live badge while running; Copy log is an IconButton with
+  a toast; the headline is the one `aria-live` line; the 🤖 provider marker is a Bot icon (no contract pinned it).
+- **Settings** (shared with Clips, payload unchanged): kit Cards with icons, a WAI-ARIA tablist with lucide icons
+  (arrow keys, scrolls sideways on a phone), `KeyField` = `Field` (label `htmlFor`, new `aside` slot) + a
+  Tested / Set / Missing badge (Tested = a chain test on the page got an "ok" from that provider's links), the caps as a
+  table with today's spend and a meter, a sticky save bar. Chain rows, glyphs and VideoKeyCheck keep their internals.
+- **Shell** (`App.jsx`): a skip link to `#main-content` (focus moved by script, so the router's hash is untouched),
+  landmarks (`aside` labelled, `nav` "Main", `main`, the phone top bar a `header`), and under 768 px the sidebar
+  itself is a drawer opened from a menu button in the top bar (Escape, backdrop, navigation close it; focus in and
+  back). Still two `<ModeSwitch`; the Settings icon left the top bar (it is in the drawer).
+- **Responsive**: `StoryHeader` writes its measured height to `--story-header-h` (ResizeObserver); the rail sticks at
+  that + 16 px and deep-linked tiles scroll below it. Checked at 375/768/1000/1366 on the four pages: no page overflow.
+- **Accessibility**: a zero-specificity `:where(...)` focus-visible ring on every interactive element, a global
+  `prefers-reduced-motion` stop, `--text-tertiary` #6b7280 -> #848c9b (4.86:1 on the raised surface up to 5.84:1),
+  placeholders on it too; 20 unlabelled controls found by an audit got a label or `aria-label` (episode length, shot
+  framing/motion, transition, subtitles, the regenerate note, style colours/font/subtitle mode, the season feedback,
+  the design-reference upload, the time variant, the prop owner, the visual-tier selects, the inline editors).
+- **CSS sweep**: unused `.stepper*`, `.story-cast-grid`, `.story-places-grid`, `.card-header`, `.progress-container`,
+  `.settings-section`, `.topbar-link`, `.ui-inline-icon`, four storyboard and two review/metadata leftovers removed
+  (each grepped first); the AI Story rules sit under one "AI STORY" banner; no token renamed.
+- **Thumbnails**: `GET .../media/{kind}/{eid}/{name}?size=thumb` (`clipping/aistory/thumbs.py`, Pillow, a declared
+  dependency, imported lazily) answers a 160 px-wide JPEG kept beside the original as `<name>.thumb.jpg`, stamped with
+  the original's mtime and remade when it changes; any other size, or a non-image, is a 400; a symlink in the thumb's
+  place is a 404, never followed nor replaced; no Pillow or an unreadable image serves the original. The speaker
+  avatars, the entity tiles and the covers (`fetchStoryCoverUrl` defaults to the thumb) use it; editors keep the full image.
+**Rejected.** ffmpeg for thumbnails (Pillow is declared; a subprocess per avatar is heavier); a second sidebar
+component for the drawer (a third ModeSwitch, two navs to keep in step); `role="log"` on the console (a screen reader
+would read every line); auto-expanding retry-only groups.
+**Consequence.** Contract moved: `test_settings_tabs` reads `title="Budget"` / `title="System info"` where it read
+`💰 Budget` / `💻 System Info`. New: `tests/test_stories_api_media_thumb.py` (22: 9 stdlib, 13 skip without Pillow or
+fastapi). Bundle: JS 611.63 -> 632.80 kB (gzip 171.15 -> 178.34), CSS 75.85 -> 81.93 kB. A-139.

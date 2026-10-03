@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Routes, Route, NavLink, Navigate, useLocation, useParams } from 'react-router-dom'
 import Dashboard from './pages/Dashboard'
 import NewJob from './pages/NewJob'
@@ -11,7 +11,50 @@ import StoryWorkspace from './pages/story/StoryWorkspace'
 import EpisodeStudio from './pages/story/EpisodeStudio'
 import ModeSwitch, { modeFromPath, readMode, rememberMode } from './components/ModeSwitch'
 import { checkToken, clearToken, getToken } from './api'
-import { BookOpen, Clapperboard, LayoutDashboard, Lock, Plus, Settings as SettingsIcon } from './ui/icons'
+import { BookOpen, Clapperboard, LayoutDashboard, Lock, MenuIcon, Plus, Settings as SettingsIcon, X } from './ui/icons'
+
+// Move focus into the page itself (the skip link's target): a plain #hash
+// link would also change the router's location, which the story pages read.
+function skipToContent(event) {
+  event.preventDefault()
+  const main = document.getElementById('main-content')
+  if (main) main.focus()
+}
+
+/**
+ * The phone's navigation drawer: under 768 px the sidebar is hidden (CSS)
+ * until the top bar's menu button opens it over the page. Escape, a click on
+ * the backdrop or a navigation closes it; focus goes into it on open and back
+ * to the menu button on close.
+ */
+function useNavDrawer(pathname) {
+  const [open, setOpen] = useState(false)
+  const buttonRef = useRef(null)
+  const drawerRef = useRef(null)
+  const wasOpen = useRef(false)
+
+  useEffect(() => { setOpen(false) }, [pathname])
+
+  useEffect(() => {
+    if (open) {
+      wasOpen.current = true
+      const first = drawerRef.current && drawerRef.current.querySelector('a[href], button')
+      if (first) first.focus()
+      const onKeyDown = (event) => { if (event.key === 'Escape') setOpen(false) }
+      document.addEventListener('keydown', onKeyDown)
+      document.body.classList.add('nav-drawer-open')
+      return () => {
+        document.removeEventListener('keydown', onKeyDown)
+        document.body.classList.remove('nav-drawer-open')
+      }
+    }
+    if (wasOpen.current && buttonRef.current) buttonRef.current.focus()
+    wasOpen.current = false
+    return undefined
+  }, [open])
+
+  return { open, setOpen, buttonRef, drawerRef }
+}
 
 // `/` and any unknown path open the last mode used (DEC-094).
 function ModeRedirect() {
@@ -50,6 +93,7 @@ function App() {
 
   // The URL decides the mode; storage only remembers it for next time.
   const mode = modeFromPath(location.pathname) || readMode()
+  const drawer = useNavDrawer(location.pathname)
   useEffect(() => {
     const current = modeFromPath(location.pathname)
     if (current) rememberMode(current)
@@ -71,14 +115,28 @@ function App() {
 
   return (
     <div className="app-layout">
-      {/* Sidebar */}
-      <aside className="sidebar">
+      <a href="#main-content" className="skip-link" onClick={skipToContent}>Skip to content</a>
+      {/* Sidebar; on a phone, the drawer the top bar's menu button opens. */}
+      <aside
+        id="app-sidebar"
+        className={`sidebar${drawer.open ? ' sidebar-open' : ''}`}
+        ref={drawer.drawerRef}
+        aria-label="Navigation"
+      >
         <div className="sidebar-brand">
           <h1><Clapperboard className="sidebar-brand-icon" size={18} aria-hidden="true" />rzdhop AI</h1>
           <p>clips &amp; AI stories, on free APIs</p>
           <ModeSwitch />
+          <button
+            type="button"
+            className="sidebar-close ui-icon-btn ui-icon-btn-ghost ui-icon-btn-md"
+            aria-label="Close navigation"
+            onClick={() => drawer.setOpen(false)}
+          >
+            <X size={18} aria-hidden="true" />
+          </button>
         </div>
-        <nav className="sidebar-nav">
+        <nav className="sidebar-nav" aria-label="Main">
           {mode === 'story' ? (
             <NavLink to="/story" end className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
               <span className="icon"><BookOpen size={18} aria-hidden="true" /></span>
@@ -109,20 +167,33 @@ function App() {
               Sign out
             </button>
           )}
-          <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+          <div style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
             rzdhop AI
           </div>
         </div>
       </aside>
+      {drawer.open && (
+        <div className="sidebar-backdrop" aria-hidden="true" onClick={() => drawer.setOpen(false)} />
+      )}
 
       {/* Main Content */}
-      <main className="main-content">
-        {/* The sidebar is hidden under 768 px; the mode switch and Settings stay reachable here. */}
-        <div className="mobile-topbar">
+      <main className="main-content" id="main-content" tabIndex={-1}>
+        {/* The sidebar is hidden under 768 px; the mode switch stays here and the menu opens it as a drawer. */}
+        <header className="mobile-topbar">
+          <button
+            type="button"
+            ref={drawer.buttonRef}
+            className="topbar-menu ui-icon-btn ui-icon-btn-ghost ui-icon-btn-md"
+            aria-label="Open navigation"
+            aria-expanded={drawer.open}
+            aria-controls="app-sidebar"
+            onClick={() => drawer.setOpen(true)}
+          >
+            <MenuIcon size={20} aria-hidden="true" />
+          </button>
           <span className="topbar-brand"><Clapperboard className="sidebar-brand-icon" size={16} aria-hidden="true" />rzdhop AI</span>
           <ModeSwitch compact />
-          <NavLink to="/settings" className="topbar-link" aria-label="Settings"><SettingsIcon size={20} aria-hidden="true" /></NavLink>
-        </div>
+        </header>
         <Routes>
           <Route path="/" element={<ModeRedirect />} />
           <Route path="/clips" element={<Dashboard />} />

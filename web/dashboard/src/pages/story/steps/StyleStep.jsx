@@ -89,6 +89,7 @@ function ColorListEditor({ label, colors, onChange, disabled, min = 1, max = 6 }
           <span key={i} className="story-swatch-edit">
             <input
               type="color"
+              aria-label={`${label}, colour ${i + 1}`}
               value={HEX_RE.test(hex) ? hex : '#000000'}
               disabled={disabled}
               onChange={(e) => setAt(i, e.target.value)}
@@ -269,8 +270,9 @@ export default function StyleStep({ data, storyId, inFlightJob, onChange, onAdva
       <ColorListEditor label="Accent palette" colors={accents} onChange={setAccents} disabled={locked || busy} />
 
       <div className="form-group">
-        <label className="form-label">Font family</label>
+        <label className="form-label" htmlFor="style-font-family">Font family</label>
         <input
+          id="style-font-family"
           className="form-input"
           type="text"
           value={fontFamily}
@@ -284,6 +286,7 @@ export default function StyleStep({ data, storyId, inFlightJob, onChange, onAdva
         <span className="story-swatch-edit">
           <input
             type="color"
+            aria-label="Highlight colour"
             value={HEX_RE.test(highlightColour) ? highlightColour : '#ffd400'}
             disabled={locked || busy}
             onChange={(e) => setHighlightColour(e.target.value)}
@@ -293,8 +296,9 @@ export default function StyleStep({ data, storyId, inFlightJob, onChange, onAdva
       </div>
 
       <div className="form-group">
-        <label className="form-label">Subtitle mode</label>
+        <label className="form-label" htmlFor="style-subtitle-mode">Subtitle mode</label>
         <select
+          id="style-subtitle-mode"
           className="form-select"
           value={subtitleMode}
           disabled={locked || busy}

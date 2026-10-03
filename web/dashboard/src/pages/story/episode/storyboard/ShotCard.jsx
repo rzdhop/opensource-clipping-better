@@ -365,8 +365,9 @@ function ShotCard({ storyId, ep, shot, assetShot, tier, scene, maps, assetsBlock
 
       <div className="story-shot-controls">
         <div className="form-group story-shot-control">
-          <label className="form-label">Framing</label>
+          <label className="form-label" htmlFor={`shot-${shot.shot_id}-framing`}>Framing</label>
           <select
+            id={`shot-${shot.shot_id}-framing`}
             className="form-select"
             value={shot.framing}
             onChange={(e) => saveFraming(e.target.value)}
@@ -376,8 +377,9 @@ function ShotCard({ storyId, ep, shot, assetShot, tier, scene, maps, assetsBlock
           </select>
         </div>
         <div className="form-group story-shot-control">
-          <label className="form-label">Camera motion</label>
+          <label className="form-label" htmlFor={`shot-${shot.shot_id}-motion`}>Camera motion</label>
           <select
+            id={`shot-${shot.shot_id}-motion`}
             className="form-select"
             value={shot.camera_motion}
             onChange={(e) => saveCameraMotion(e.target.value)}
@@ -569,6 +571,7 @@ function TransitionSelect({ storyId, ep, transition, busy, onChange }) {
   return (
     <div className="story-storyboard-transition story-storyboard-transition-select">
       <select
+        aria-label="Transition"
         className="form-select"
         value={transition.type}
         onChange={(e) => save(e.target.value)}

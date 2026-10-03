@@ -9,8 +9,6 @@
 .ui-chip-button:focus-visible,
 .nav-link:focus-visible,
 .mode-link:focus-visible,
-.topbar-link:focus-visible,
-.stepper-step-header:focus-visible,
 .ui-card-interactive:focus-visible {
   outline: var(--focus-ring);
   outline-offset: var(--focus-ring-offset);
@@ -30,8 +28,7 @@
 .chip svg,
 .ui-badge svg,
 .nav-link .icon svg,
-.mode-link svg,
-.stepper-step-index svg {
+.mode-link svg {
   flex-shrink: 0;
 }
 
@@ -54,24 +51,6 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-}
-
-.topbar-link {
-  display: inline-flex;
-  align-items: center;
-  color: var(--text-secondary);
-  border-radius: var(--radius-sm);
-}
-
-.topbar-link:hover,
-.topbar-link.active {
-  color: var(--text-primary);
-}
-
-.ui-inline-icon {
-  display: inline-block;
-  vertical-align: -0.15em;
-  flex-shrink: 0;
 }
 
 /* --- Button (the .btn classes) --- */
@@ -554,4 +533,21 @@
   .ui-dialog-footer > .btn {
     flex: 1;
   }
+}
+
+/* A Field whose label row also carries a status (a key's "Set" badge). */
+.ui-field-label-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.ui-field-label-row > .ui-field-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.ui-field-label-row > :not(.ui-field-label) {
+  flex-shrink: 0;
 }

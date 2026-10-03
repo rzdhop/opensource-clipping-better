@@ -231,24 +231,24 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
         )}
       </div>
       <div className="form-group">
-        <label className="form-label">Tier</label>
-        <select className="form-select" value={tier} onChange={(e) => handleTier(Number(e.target.value))} disabled={saving}>
+        <label className="form-label" htmlFor="story-profile-tier">Tier</label>
+        <select id="story-profile-tier" className="form-select" value={tier} onChange={(e) => handleTier(Number(e.target.value))} disabled={saving}>
           <option value={1}>1 — stills + motion</option>
           <option value={2}>2 — image-to-video</option>
           <option value={3}>3 — + native audio (experimental)</option>
         </select>
       </div>
       <div className="form-group">
-        <label className="form-label">Route</label>
-        <select className="form-select" value={route} onChange={(e) => handleRoute(e.target.value)} disabled={saving}>
+        <label className="form-label" htmlFor="story-profile-route">Route</label>
+        <select id="story-profile-route" className="form-select" value={route} onChange={(e) => handleRoute(e.target.value)} disabled={saving}>
           <option value="auto">Auto</option>
           <option value="local">Local</option>
           <option value="api">API</option>
         </select>
       </div>
       <div className="form-group">
-        <label className="form-label">Budget profile</label>
-        <select className="form-select" value={budgetProfile} onChange={(e) => handleBudgetProfile(e.target.value)}
+        <label className="form-label" htmlFor="story-profile-budget">Budget profile</label>
+        <select id="story-profile-budget" className="form-select" value={budgetProfile} onChange={(e) => handleBudgetProfile(e.target.value)}
           disabled={saving}>
           <option value="free">Free (no clip bought)</option>
           <option value="one_dollar">$1 / episode (key shots)</option>

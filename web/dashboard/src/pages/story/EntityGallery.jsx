@@ -14,14 +14,15 @@ import { ImageIcon, X } from '../../ui/icons'
  * One entity image as a blob URL (the media route is token-gated, so it is
  * fetched with the auth header, DEC-113), revoked when the name changes or
  * the tile unmounts. Null while loading, with no name, or on a failure.
+ * `thumb` asks for the route's cached 160 px thumbnail (DEC-257).
  */
-export function useStoryMediaUrl(storyId, kind, eid, name) {
+export function useStoryMediaUrl(storyId, kind, eid, name, { thumb = false } = {}) {
   const [url, setUrl] = useState(null)
   useEffect(() => {
     if (!name) return undefined
     let cancelled = false
     let current = null
-    fetchStoryMediaUrl(storyId, kind, eid, name).then((fresh) => {
+    fetchStoryMediaUrl(storyId, kind, eid, name, { thumb }).then((fresh) => {
       if (cancelled) { URL.revokeObjectURL(fresh); return }
       current = fresh
       setUrl(fresh)
@@ -31,7 +32,7 @@ export function useStoryMediaUrl(storyId, kind, eid, name) {
       if (current) URL.revokeObjectURL(current)
       setUrl(null)
     }
-  }, [storyId, kind, eid, name])
+  }, [storyId, kind, eid, name, thumb])
   return url
 }
 
@@ -73,7 +74,7 @@ function useGridColumns(ref) {
 
 function Tile({ storyId, item, open, editorId, tileId, onToggle }) {
   const thumb = item.thumb || {}
-  const url = useStoryMediaUrl(storyId, thumb.kind, thumb.eid, thumb.name)
+  const url = useStoryMediaUrl(storyId, thumb.kind, thumb.eid, thumb.name, { thumb: true })
   return (
     <button
       type="button"

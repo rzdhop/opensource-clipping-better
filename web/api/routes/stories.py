@@ -131,7 +131,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
 from starlette.concurrency import run_in_threadpool
 
-from clipping.aistory import media_policy, refimages, schemas, templates, workflow
+from clipping.aistory import media_policy, refimages, schemas, templates, thumbs, workflow
 from clipping.aistory import store as story_store
 from clipping.aistory import uploads as uploads_mod
 from clipping.aistory.steps import bible as bible_step
@@ -2836,7 +2836,7 @@ async def delete_reference(story_id: str, char_id: str, name: str) -> dict:
 # ---------------------------------------------------------------- media
 
 @router.get("/{story_id}/media/{kind}/{eid}/{name}")
-async def entity_media(story_id: str, kind: str, eid: str, name: str):
+async def entity_media(story_id: str, kind: str, eid: str, name: str, size: Optional[str] = Query(None)):
     """One file of a character, place or prop: a reference image, a design
     reference, a voice sample.
 
@@ -2849,7 +2849,16 @@ async def entity_media(story_id: str, kind: str, eid: str, name: str):
     symlink at any level. Anything else, another story's file included, is
     a 404. Behind the token like every story route (DEC-113: fetched as a
     blob); ``no-store``: a regenerated image reuses its name.
+
+    ``?size=thumb`` (an image only; any other size is a 400) answers a
+    160 px-wide JPEG kept next to the original as ``<name>.thumb.jpg``
+    (``thumbs.thumbnail``, DEC-257): made on the first request, made again
+    once the original changes. A symlink or a non-file where the thumbnail
+    goes is a 404, never followed nor replaced; with no thumbnail to be had
+    (no Pillow, an unreadable image) the original is served.
     """
+    if size is not None and (size not in thumbs.SIZES or not thumbs.is_image_name(name)):
+        raise HTTPException(status_code=400, detail="size must be 'thumb', and only for an image.")
     _check_id(story_id)
     if kind not in MEDIA_KINDS:
         raise HTTPException(status_code=404, detail="File not found")
@@ -2857,6 +2866,21 @@ async def entity_media(story_id: str, kind: str, eid: str, name: str):
         path = _stories().media_path(story_id, kind, eid, name)
     except KeyError:
         raise HTTPException(status_code=404, detail="File not found") from None
+    if size == "thumb":
+        try:
+            thumb = await run_in_threadpool(thumbs.thumbnail, path)
+        except thumbs.ThumbRefused:
+            raise HTTPException(status_code=404, detail="File not found") from None
+        except thumbs.ThumbUnavailable:
+            thumb = None
+        if thumb is not None:
+            return FileResponse(
+                thumb,
+                media_type="image/jpeg",
+                filename=thumbs.thumb_name(name),
+                content_disposition_type="inline",
+                headers={"Cache-Control": "no-store"},
+            )
     return FileResponse(
         path,
         media_type=_ENTITY_MEDIA_TYPES[os.path.splitext(name)[1]],

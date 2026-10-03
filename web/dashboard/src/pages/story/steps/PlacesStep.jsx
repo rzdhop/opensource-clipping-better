@@ -511,6 +511,7 @@ function PlaceCard({ storyId, place, missing, disabled, onChange, consistencyMod
       {availableToAdd.length > 0 && (
         <div className="story-places-add-variant">
           <select
+            aria-label="Add a time variant"
             className="form-select"
             value={addVariant}
             onChange={(e) => setAddVariant(e.target.value)}
@@ -705,6 +706,7 @@ function PropCard({ storyId, prop, characters, disabled, onChange, isV2, names }
       <div className="story-field">
         <div className="story-field-label">Owner</div>
         <select
+          aria-label="Owner"
           className="form-select"
           value={prop.owner_char_id || ''}
           onChange={(e) => saveOwner(e.target.value)}

@@ -86,6 +86,7 @@ export function EditableText({ label, value, placeholder, rows = 3, onSave, disa
     <div className="story-field">
       {label && <div className="story-field-label">{label}</div>}
       <textarea
+        aria-label={typeof label === 'string' ? label : 'Text'}
         className="form-input"
         rows={rows}
         value={draft}
@@ -161,6 +162,7 @@ export function EditableList({ label, value, onSave, exactLines, disabled, hint 
     <div className="story-field">
       {label && <div className="story-field-label">{label}</div>}
       <textarea
+        aria-label={typeof label === 'string' ? `${label} (one per line)` : 'One line each'}
         className="form-input"
         rows={Math.max(3, lines.length + 1)}
         value={draft}
@@ -234,6 +236,7 @@ export function RegenerateControl({ onRegenerate, disabled, estimateChip, empty,
   return (
     <div className="story-regenerate">
       <input
+        aria-label="Note for the regeneration (optional)"
         className="form-input story-regenerate-note"
         type="text"
         placeholder="Optional note, e.g. 'make it darker'"

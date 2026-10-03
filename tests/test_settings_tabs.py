@@ -76,8 +76,10 @@ def test_the_hardware_tab_is_fed_by_the_api_and_edits_the_local_urls():
 
 
 def test_the_budget_section_lives_in_its_tab_and_the_keys_keep_their_badges():
+    # The section headings are kit Card titles since DEC-257 (they were
+    # "💰 Budget" and "💻 System Info" headings with an emoji).
     budget = PAGE.index("tab === 'budget'")
-    assert PAGE.index("💰 Budget") > budget
+    assert PAGE.index('title="Budget"') > budget
     generation = PAGE.index("tab === 'generation'")
     assert PAGE.index("fal_key_set") > generation
-    assert PAGE.index("💻 System Info") > PAGE.index("tab === 'hardware'")
+    assert PAGE.index('title="System info"') > PAGE.index("tab === 'hardware'")
