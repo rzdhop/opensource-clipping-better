@@ -52,6 +52,8 @@ STORY_FUNCTIONS = [
     # reused unchanged for memory/feedback/propose-next (series steps run
     # through the generic dispatch and approve grammar, spec 9.1/9.2).
     "postEpisodeFeedback", "decideProposal",
+    # 2026-10-02 (the Visual tier card's "Regenerate on v2"): the pipeline switch.
+    "switchPipeline",
 ]
 
 
@@ -91,7 +93,7 @@ def _function_body(src: str, name: str) -> str:
 def test_the_readers_see_something():
     """A broken regex would make every assertion below pass for free."""
     assert len(_job_status_values()) >= 8
-    assert len(STORY_FUNCTIONS) == 30
+    assert len(STORY_FUNCTIONS) == 31  # 2026-10-02: + switchPipeline
 
 
 # --------------------------------------------------------- components/ActivityFeed.jsx

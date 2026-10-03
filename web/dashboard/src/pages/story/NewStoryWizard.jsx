@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   createStory, fetchNewStoryProfile, fetchStory, fetchStoryEstimate, fetchStyles, patchStory, styleNameOf,
+  switchPipeline,
 } from '../../api'
 import { LiveActivity, useJobFeed } from '../../components/ActivityFeed'
 import RouteChip from '../../components/RouteChip'
@@ -405,6 +406,57 @@ function StoryJobList({ jobs }) {
 
 // ----------------------------------------------------------- visual tier (phase 6)
 
+// clipping.aistory.workflow.PIPELINE_SWITCH_HAS_SCRIPTS: PATCH's 409 when a
+// pipeline switch meets episodes that already have a script (its detail names
+// them: `episodes`). tests/test_dashboard_switch_pipeline.py checks the value.
+const PIPELINE_SWITCH_HAS_SCRIPTS = 'pipeline_switch_has_scripts'
+
+/** "episode 1", "episodes 1–3", "episodes 1, 3". */
+function episodesLabel(episodes) {
+  const eps = [...episodes].sort((a, b) => a - b)
+  if (eps.length === 1) return `episode ${eps[0]}`
+  const contiguous = eps.every((ep, i) => i === 0 || ep === eps[i - 1] + 1)
+  return `episodes ${contiguous ? `${eps[0]}–${eps[eps.length - 1]}` : eps.join(', ')}`
+}
+
+function pipelineLabel(patch) {
+  return patch.pipeline === 'v2' ? 'v2' : 'the legacy pipeline'
+}
+
+/** The confirm before `switchPipeline` archives *episodes*: what goes, what stays, what runs next. */
+function regenerateConfirm(episodes, patch) {
+  const what = episodesLabel(episodes)
+  const next = patch.pipeline === 'v2'
+    ? 'Next: the Cast step starts right away, writing each character\'s dossier and look and drawing again, '
+      + 'from the look, the portrait and sheets drawn before it. Then Places & props (their looks; the plates '
+      + 'and prop images drawn again), the knowledge base, then the episode -- each of those shows its '
+      + 'estimate first, as usual.'
+    : 'Next: write the episode again; each step shows its estimate first, as usual.'
+  return [
+    `Regenerate ${what} on ${pipelineLabel(patch)}?`,
+    'Archived (moved to episodes/_discarded/ on the server, never deleted): '
+      + `the script, storyboard, images, clips and render of ${what}, `
+      + 'with its series memory, audience feedback and the proposals written from it. '
+      + 'What it already cost stays in the story\'s total, not in the new episode\'s.',
+    'Kept: the cast, places, props, season and music.',
+    next,
+  ].join('\n\n')
+}
+
+/** What `switchPipeline` did: the episodes archived, then the step it queued or why that step could not start. */
+function switchedSummary(result) {
+  const parts = []
+  const archived = (result.discarded || []).map((report) => report.ep)
+  if (archived.length > 0) parts.push(`Archived ${episodesLabel(archived)}.`)
+  const next = result.next_step
+  if (next) {
+    const label = (STEPS.find((s) => s.key === next.step) || { label: next.step }).label
+    if (next.job) parts.push(`The ${label} step is queued.`)
+    else if (next.refused) parts.push(`The ${label} step could not start: ${next.refused}`)
+  }
+  return parts.join(' ') || 'The story is on the new pipeline.'
+}
+
 /**
  * The story's generation profile's visual half: tier (1 stills + motion, 2
  * image-to-video, 3 + native audio) and route (auto/local/api), saved
@@ -420,21 +472,64 @@ function StoryJobList({ jobs }) {
  * finding F5); see the caller for the fallback when none does.
  */
 function GenerationProfileCard({ storyId, story, nextEp, onChange }) {
-  const [tier, setTier] = useState(story.generation_profile.tier)
-  const [route, setRoute] = useState(story.generation_profile.route)
+  // What the server holds, as last fetched: the selects start from it, follow
+  // it whenever the story is fetched again, and go back to it when a save is
+  // refused (they used to keep showing values the server never saved).
+  const profile = story.generation_profile
+  const [tier, setTier] = useState(profile.tier)
+  const [route, setRoute] = useState(profile.route)
   // Phase 7 stage 7 (browser-check finding F7): the budget profile -- what a
   // story may buy and how many shots it animates -- is chosen here too.
-  const [budgetProfile, setBudgetProfile] = useState(story.generation_profile.budget_profile)
+  const [budgetProfile, setBudgetProfile] = useState(profile.budget_profile)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  // A pipeline switch refused over written episodes (PATCH's structured 409):
+  // {episodes, patch}, what the "Regenerate on v2" button sends.
+  const [switchOffer, setSwitchOffer] = useState(null)
+  const [switched, setSwitched] = useState(null)
   const [routeEstimates, setRouteEstimates] = useState({})
   const [routeErrors, setRouteErrors] = useState({})
+
+  useEffect(() => {
+    setTier(profile.tier)
+    setRoute(profile.route)
+    setBudgetProfile(profile.budget_profile)
+  }, [profile.tier, profile.route, profile.budget_profile])
 
   const save = async (patch) => {
     setSaving(true)
     setError('')
+    setSwitchOffer(null)
+    setSwitched(null)
     try {
       await patchStory(storyId, { generation_profile: patch })
+      onChange()
+    } catch (err) {
+      // Nothing was saved: back to the server's values, and fetch the story again.
+      setTier(profile.tier)
+      setRoute(profile.route)
+      setBudgetProfile(profile.budget_profile)
+      setError(err.message)
+      if (err.status === 409 && err.code === PIPELINE_SWITCH_HAS_SCRIPTS && err.detail.episodes) {
+        setSwitchOffer({ episodes: err.detail.episodes, patch })
+      }
+      onChange()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // "Regenerate episode N on v2": the same profile, the written episodes
+  // archived first (POST /switch-pipeline); the server queues the step the
+  // story needs next (the cast's dossiers, looks and redraws, ...).
+  const regenerate = async () => {
+    if (!switchOffer || !window.confirm(regenerateConfirm(switchOffer.episodes, switchOffer.patch))) return
+    setSaving(true)
+    setError('')
+    try {
+      const result = await switchPipeline(storyId, { generation_profile: switchOffer.patch, regenerate_episodes: true })
+      setSwitchOffer(null)
+      setSwitched(result)
       onChange()
     } catch (err) {
       setError(err.message)
@@ -450,7 +545,8 @@ function GenerationProfileCard({ storyId, story, nextEp, onChange }) {
   // Every shot a clip: the quality budget profile (animate all_shots) at tier
   // >= 2 on the api route, on the v2 pipeline (the server sets its template and
   // narrator, and refuses the switch once an episode has a script:
-  // workflow._follow_pipeline_switch -- its sentence shows as the card's error).
+  // workflow._follow_pipeline_switch -- its sentence shows as the card's error,
+  // with the "Regenerate on v2" button that archives those episodes).
   const isV2 = story.generation_profile.pipeline === 'v2'
   const canSwitchToV2 = !isV2
   const hasCast = (story.cast_ids || []).length > 0
@@ -489,8 +585,9 @@ function GenerationProfileCard({ storyId, story, nextEp, onChange }) {
               {canSwitchToV2
                 ? 'This story is not fully animated yet. Switch it to the quality pipeline: 6–10 shots, each a '
                   + 'video clip, with quality images (billed).'
-                  + (hasCast ? ' Then run the Cast step again: it writes each character\'s dossier and look and '
-                    + 'redraws the sheets (its estimate shows the cost).' : '')
+                  + (hasCast ? ' Then run the Cast step and Places & props again: they write each character\'s, '
+                    + 'place\'s and prop\'s look and draw again, from it, the images drawn before it (each '
+                    + 'estimate shows the cost).' : '')
                 : 'Some shots of this story stay still. Animate every shot with the quality budget profile (billed).'}
             </p>
             <button type="button" className="btn btn-sm btn-primary" onClick={makeFullyAnimated} disabled={saving}>
@@ -525,6 +622,14 @@ function GenerationProfileCard({ storyId, story, nextEp, onChange }) {
         </select>
       </div>
       <StepError message={error} />
+      {switchOffer && (
+        <div className="story-step-actions">
+          <button type="button" className="btn btn-sm btn-primary" onClick={regenerate} disabled={saving}>
+            {`Regenerate ${episodesLabel(switchOffer.episodes)} on ${pipelineLabel(switchOffer.patch)}`}
+          </button>
+        </div>
+      )}
+      {switched && <p className="form-hint">{switchedSummary(switched)}</p>}
       {tier >= 2 && (
         <div className="story-generation-profile-routes">
           <p className="form-hint">Episode {nextEp}'s video estimate, per route:</p>

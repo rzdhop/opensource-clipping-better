@@ -104,10 +104,12 @@ export async function createJob(payload) {
 }
 
 /**
- * A response's `detail` as `{message, errors}`. `detail` is either a plain
- * string (most routes) or `{message, errors}` (the AI Story validation
- * routes, e.g. a story that would not pass its schema) -- `errors` is null
- * for the former.
+ * A response's `detail` as `{message, errors, code, detail}`. `detail` is
+ * either a plain string (most routes), `{message, errors}` (the AI Story
+ * validation routes, e.g. a story that would not pass its schema) or
+ * `{message, code, ...}` (a refusal the page acts on, e.g. PATCH's
+ * `pipeline_switch_has_scripts` naming its `episodes`) -- `errors`, `code`
+ * and `detail` (the object itself) are null for a plain string.
  */
 async function parseDetail(res, fallback) {
   try {
@@ -117,11 +119,13 @@ async function parseDetail(res, fallback) {
       return {
         message: detail.message != null ? String(detail.message) : fallback,
         errors: Array.isArray(detail.errors) ? detail.errors.map(String) : null,
+        code: typeof detail.code === 'string' ? detail.code : null,
+        detail,
       }
     }
-    if (detail != null) return { message: String(detail), errors: null }
+    if (detail != null) return { message: String(detail), errors: null, code: null, detail: null }
   } catch {}
-  return { message: fallback, errors: null }
+  return { message: fallback, errors: null, code: null, detail: null }
 }
 
 /** The API's own explanation of a refusal (409, 429, ...), else *fallback*.
@@ -135,21 +139,25 @@ async function detailOf(res, fallback) {
 /**
  * Thrown by the AI Story functions below: `message` (always a string, ready
  * to display), an optional `errors` list (the story schema's per-field
- * complaints, when the refusal had any), and the response's `status`.
+ * complaints, when the refusal had any), the response's `status`, and --
+ * for a refusal the page acts on -- its `code` and the whole `detail`
+ * object (null otherwise).
  */
 export class ApiError extends Error {
-  constructor(message, { errors = null, status = null } = {}) {
+  constructor(message, { errors = null, status = null, code = null, detail = null } = {}) {
     super(message)
     this.name = 'ApiError'
     this.errors = errors
     this.status = status
+    this.code = code
+    this.detail = detail
   }
 }
 
 /** Build the `ApiError` for a failed response, from the same parsing `detailOf` uses. */
 async function apiError(res, fallback) {
-  const { message, errors } = await parseDetail(res, fallback)
-  return new ApiError(message, { errors, status: res.status })
+  const { message, errors, code, detail } = await parseDetail(res, fallback)
+  return new ApiError(message, { errors, status: res.status, code, detail })
 }
 
 /**
@@ -493,6 +501,23 @@ export async function patchStory(storyId, payload) {
     body: JSON.stringify(payload),
   })
   if (!res.ok) throw await apiError(res, 'Failed to update the story')
+  return res.json()
+}
+
+/**
+ * Move the story onto (or off) the v2 pipeline (`{generation_profile,
+ * regenerate_episodes}`): with `regenerate_episodes` the episodes already
+ * written are archived first. Answers `{story, discarded, jobs_cleared,
+ * next_step: {step, job, refused} | null}`; 409 while a step of the story is
+ * in flight, or -- without `regenerate_episodes` -- PATCH's own refusal.
+ */
+export async function switchPipeline(storyId, body) {
+  const res = await request(`/stories/${storyId}/switch-pipeline`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) throw await apiError(res, 'Failed to switch the pipeline')
   return res.json()
 }
 
