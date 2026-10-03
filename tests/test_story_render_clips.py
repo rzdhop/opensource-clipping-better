@@ -41,9 +41,15 @@ from test_story_video_phase import timings_path  # noqa: F401 -- the measured cl
 # and the manifest, absolute paths, timestamps and the machine masked --
 # computed on the parent commit (3f2523a) with this file's fixture before any
 # stage-9 line existed: RC-M3's guard.
+# TIER1_PLAN_SHA and TIER1_MANIFEST_SHA re-pinned on purpose (phase 7
+# follow-up, a bug fix for every story): each dialogue line of the mix is
+# faded at its own file's edges (filtergraph.LINE_FADE_IN_S/LINE_FADE_OUT_S),
+# which moves the audio stage's argv and its cache key. With the fades taken
+# out of the mix argv the plan and the manifest still hash to the old values
+# 386a0330…c357 and 7af9d816…b20c, so nothing else moved.
 TIER1_INPUTS_SHA = "769b976e4032d0a4a8f460f70e4284ba82970e2e6f667691d6123c2902e1c8a7"
-TIER1_PLAN_SHA = "386a0330081f3c45a8cddaee51ac751951d12040f0093076ad027f1a2066c357"
-TIER1_MANIFEST_SHA = "7af9d81654f7acbadb97aa939811c4ddfb0690071d6d01f8ea6f105b4a94b20c"
+TIER1_PLAN_SHA = "ca1cec8dc3a73f5c9d658155792a5dbf205cb4218e24709a2ab3c14869b519b3"
+TIER1_MANIFEST_SHA = "d48dc052da0810b17ea22a9cd2e60a0a03e185848c5ff628bc0516fa7ed83c34"
 _VOLATILE = {"created_at", "updated_at", "started_at", "finished_at", "total_s", "seconds", "machine"}
 
 

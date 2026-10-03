@@ -43,6 +43,11 @@ from clipping.aistory.render import timeline as rt
 TEMPLATE = rtt.TEMPLATE
 EN = rtt.EN
 STEMS = {"dialogue": "stems/dialogue.wav", "bgm": "stems/bgm.wav", "sfx": "stems/sfx.wav"}
+# Every dialogue line, whatever its engine: 5 ms in at its file's start, 10 ms
+# out at its file's real end (reversed, so not at a duration_s that is only
+# the last word's end), so no line can click (phase 7 follow-up, a bug fix
+# for every story).
+LINE_FADES = "afade=t=in:d=0.005,areverse,afade=t=in:d=0.01,areverse"
 
 
 # ================================================================ fixtures
@@ -508,9 +513,9 @@ def test_audio_mix_argv_golden_ducking_graph():
         "-i", "in/whoosh.wav", "-i", "in/sting.wav",
         "-stream_loop", "-1", "-i", "in/bgm.mp3",
         "-filter_complex",
-        f"[0:a]{norm},adelay=delays=350:all=1[l0];"
-        f"[1:a]{norm},adelay=delays=4950:all=1[l1];"
-        f"[2:a]{norm},adelay=delays=8550:all=1[l2];"
+        f"[0:a]{norm},{LINE_FADES},adelay=delays=350:all=1[l0];"
+        f"[1:a]{norm},{LINE_FADES},adelay=delays=4950:all=1[l1];"
+        f"[2:a]{norm},{LINE_FADES},adelay=delays=8550:all=1[l2];"
         "anullsrc=r=48000:cl=stereo,atrim=duration=13.8[dlg_base];"
         "[dlg_base][l0][l1][l2]amix=inputs=4:normalize=0:duration=first,asplit=3[dlg_mix][dlg_stem][dlg_sc];"
         f"[3:a]{norm},adelay=delays=0:all=1[x0];"
@@ -536,15 +541,47 @@ def test_audio_mix_argv_golden_no_bgm_no_sfx():
     assert "-stream_loop" not in argv
     assert argv[4:10] == ["-i", "in/l01.mp3", "-i", "in/l02.mp3", "-i", "in/l03.mp3"]
     assert _graph(argv) == (
-        f"[0:a]{norm},adelay=delays=350:all=1[l0];"
-        f"[1:a]{norm},adelay=delays=4950:all=1[l1];"
-        f"[2:a]{norm},adelay=delays=8950:all=1[l2];"
+        f"[0:a]{norm},{LINE_FADES},adelay=delays=350:all=1[l0];"
+        f"[1:a]{norm},{LINE_FADES},adelay=delays=4950:all=1[l1];"
+        f"[2:a]{norm},{LINE_FADES},adelay=delays=8950:all=1[l2];"
         "anullsrc=r=48000:cl=stereo,atrim=duration=13.6[dlg_base];"
         "[dlg_base][l0][l1][l2]amix=inputs=4:normalize=0:duration=first,asplit=2[dlg_mix][dlg_stem];"
         "anullsrc=r=48000:cl=stereo,atrim=duration=13.6,asplit=2[sfx_mix][sfx_stem];"
         "anullsrc=r=48000:cl=stereo,atrim=duration=13.6,asplit=2[bgm_mix][bgm_stem];"
         "[dlg_mix][bgm_mix][sfx_mix]amix=inputs=3:weights=1 0.3 0.8:normalize=0:duration=first[mix]"
     )
+
+
+@pytest.mark.parametrize("builder", [p.values[0] for p in TIMELINES], ids=[p.id for p in TIMELINES])
+@pytest.mark.parametrize("ext", ["mp3", "wav"])
+def test_every_line_fades_in_and_out_at_its_own_file_edges_and_no_sfx_does(builder, ext):
+    """The fades sit between the resampling and the delay -- on the line's
+    own file, before it is placed -- for every line of any engine; the fade
+    out is done reversed, at the file's real end, never at ``duration_s``
+    (which Edge sets to its last word's end)."""
+    tl = builder()
+    graph = _graph(_mix(tl, line_inputs={line["line_id"]: f"in/{line['line_id']}.{ext}" for line in tl["lines"]}))
+    chains = re.findall(r"\[\d+:a\]([^;]*)\[l\d+\]", graph)
+    assert len(chains) == len(tl["lines"])
+    norm = "aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo"
+    for chain, line in zip(chains, tl["lines"]):
+        assert chain == f"{norm},{LINE_FADES},adelay=delays={round(line['start_s'] * 1000)}:all=1"
+        assert "st=" not in chain and str(line["duration_s"]) not in chain.split("adelay")[0]
+    assert all("afade" not in chain for chain in re.findall(r"\[\d+:a\]([^;]*)\[x\d+\]", graph))
+    assert filtergraph.LINE_FADE_IN_S == 0.005 and filtergraph.LINE_FADE_OUT_S == 0.01
+
+
+def test_tier_3_lines_fade_the_same_way_heard_or_feeding_the_ducking_only():
+    tl = _small_cut_to_black()
+    shot = tl["shots"][0]["shot_id"]
+    native = {shot: {"input": "in/clip.mp4", "lines": [tl["lines"][0]["line_id"]]}}
+    graph = _graph(_mix(tl, native_audio=native))
+    chains = re.findall(r"\[\d+:a\]([^;]*)\[[ls]\d+\]", graph)
+    assert len(chains) == len(tl["lines"])  # with a bed, the replaced line still feeds the sidechain
+    assert all(f",{LINE_FADES},adelay=delays=" in chain for chain in chains)
+    without_bed = _graph(_mix(tl, native_audio=native, bgm_input=None))
+    kept = re.findall(r"\[\d+:a\]([^;]*)\[l\d+\]", without_bed)
+    assert len(kept) == len(tl["lines"]) - 1 and all(f",{LINE_FADES},adelay=" in chain for chain in kept)
 
 
 def test_no_sfx_with_bgm_keeps_the_sidechain():

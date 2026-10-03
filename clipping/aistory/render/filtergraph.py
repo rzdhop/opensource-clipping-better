@@ -648,6 +648,20 @@ def _ms(seconds) -> int:
 # 6 stage 10), so a cut never clicks.
 NATIVE_FADE_S = 0.01
 
+# Every dialogue line, whatever its engine, fades in over LINE_FADE_IN_S from
+# its file's first sample and out over LINE_FADE_OUT_S to its file's last
+# (phase 7 follow-up: a bug fix for every story), so no line clicks in or out.
+# The fade out is made on the reversed stream: at the file's real end, never
+# at its ``duration_s`` -- Edge's is the last word's end, its file runs on.
+LINE_FADE_IN_S = 0.005
+LINE_FADE_OUT_S = 0.01
+
+
+def _line_fades() -> str:
+    """The fades of one dialogue line's own file, before it is placed."""
+    return (f"afade=t=in:d={_num(LINE_FADE_IN_S)},areverse,"
+            f"afade=t=in:d={_num(LINE_FADE_OUT_S)},areverse")
+
 
 def _native_stems(timeline, native_audio) -> list:
     """The tier-3 clip sounds of *native_audio* (phase 6 stage 10, DEC-201)
@@ -715,7 +729,7 @@ def _native_dialogue(argv, graph, lines, line_inputs, natives, *, sidechain, nor
         if not kept and not sidechain:
             continue
         argv += ["-i", line_inputs[line["line_id"]]]
-        chain = f"[{index}:a]{normalise},adelay=delays={_ms(line['start_s'])}:all=1"
+        chain = f"[{index}:a]{normalise},{_line_fades()},adelay=delays={_ms(line['start_s'])}:all=1"
         if kept and sidechain:
             graph.append(f"{chain},asplit=2[l{k}][s{k}]")
         else:
@@ -831,7 +845,10 @@ def audio_mix_argv(timeline, *, line_inputs, sfx_inputs, bgm_input, ending, out_
 
     - Every input is resampled to 48 kHz stereo float
       (``aresample=48000,aformat=...``).
-    - Dialogue: each line ``adelay``ed to its timeline start (integer ms,
+    - Dialogue: each line faded in and out at its own file's edges
+      (:data:`LINE_FADE_IN_S`, :data:`LINE_FADE_OUT_S`: the fade out on the
+      reversed stream, at the file's real end, whatever its engine), then
+      ``adelay``ed to its timeline start (integer ms,
       ``all=1``), summed (lines never overlap -- asserted) over a silent
       base of exactly ``total_s`` (``anullsrc`` + ``atrim``), ``amix
       normalize=0:duration=first`` -- so the stem is exactly ``total_s``.
@@ -940,7 +957,7 @@ def audio_mix_argv(timeline, *, line_inputs, sfx_inputs, bgm_input, ending, out_
         line_labels = []
         for k, line in enumerate(lines):
             argv += ["-i", line_inputs[line["line_id"]]]
-            graph.append(f"[{index}:a]{normalise},adelay=delays={_ms(line['start_s'])}:all=1[l{k}]")
+            graph.append(f"[{index}:a]{normalise},{_line_fades()},adelay=delays={_ms(line['start_s'])}:all=1[l{k}]")
             line_labels.append(f"[l{k}]")
             index += 1
         dialogue_outputs = "[dlg_mix][dlg_stem][dlg_sc]" if bgm_input is not None else "[dlg_mix][dlg_stem]"
