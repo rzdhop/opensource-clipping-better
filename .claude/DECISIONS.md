@@ -4389,7 +4389,7 @@ key changes once (the fades), so each re-render re-mixes once.
 s06 (repeated line) …") with "Fix them (edit the script, or regenerate the scenes they name) … or approve anyway" —
 "the purpose is that the generated content is always perfect". The step knew the scene and the fix of each issue
 and applied none; two of them (a character introduced too late, an object shown too late) need an EARLIER scene.
-**Decision** (G1–G3 below).
+**Decision** (`6997fd7`, `47197a0`, `f64b3ff`).
 - **The repair pass** (`script.repair_plan`, pure; `_Run.repair` after J1; v2 only; never on an approved script):
   `repeated_line` → the later line's scene with a note for a different line that keeps the beat; `no_hook_text` →
   `write_framing("hook")`; `unclear_goal`, `unmotivated` → the named scene; `unintroduced` / `object_unseen` → the
