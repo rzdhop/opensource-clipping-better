@@ -2705,6 +2705,136 @@ def episode_summaries(stories, story) -> list:
     return summaries
 
 
+# ------------------------------------------------------ the stories list
+#
+# What a card of the stories list shows beside the index entry (dashboard
+# overhaul stage 2, DEC-254): a cover, the story's progress through its steps,
+# its episodes and its style's label -- all read from the documents, calling
+# nothing, so the list stays a cheap read. A story whose documents cannot be
+# read keeps the empty values (no cover, zeros); the list never fails for one.
+
+# The story steps in the dashboard's order (NewStoryWizard's STEPS keys), each
+# with the approval that marks it done; a v2 story has the knowledge step too
+# (done while its knowledge base is approved and current).
+LIST_STORY_STEPS = (("concepts", "concept"), ("bible", "bible"), ("style", "style"), ("cast", "cast"),
+                    ("places", "places"), ("season", "season"))
+LIST_KNOWLEDGE_STEP = "knowledge"
+# An episode's furthest point: a render with an output, approved assets, an
+# approved storyboard, an approved script, else a draft.
+LIST_EPISODE_STATES = ("draft", "written", "planned", "assets", "rendered")
+_LIST_UNREADABLE = (KeyError, OSError, ValueError, TypeError, schemas.SchemaError, WorkflowError, StoryUnreadable)
+
+
+def style_label(template_id):
+    """The shipped style's human name (English, else French), the id itself
+    for a template that is not shipped, or None for a story with no style."""
+    if not template_id:
+        return None
+    try:
+        name = templates.load_style(template_id).get("name") or {}
+    except (KeyError, OSError, ValueError, schemas.SchemaError):
+        return template_id
+    return name.get("en") or name.get("fr") or template_id
+
+
+def list_cover(stories, story_id):
+    """The API path (under ``/api``) of the first character's portrait that
+    is on disk, in cast order (leads first: ``entities.cast_order``), or None."""
+    for doc in entities_step.cast_order(stories.list_entities(story_id, CHARACTERS)):
+        ref = (doc.get("refs") or {}).get("portrait")
+        if ref and _has(stories, story_id, CHARACTERS, doc["char_id"], ref):
+            return f"/stories/{story_id}/media/{CHARACTERS}/{doc['char_id']}/{ref['name']}"
+    return None
+
+
+def _knowledge_approved(stories, story_id) -> bool:
+    try:
+        return episode_common.knowledge_state(stories.read_knowledge(story_id)) == "approved"
+    except _LIST_UNREADABLE:
+        return False
+
+
+def list_progress(stories, story) -> dict:
+    """``{"steps_done", "steps_total", "next"}``: how many steps are done in
+    order (a contiguous prefix, as ``store.derive_status`` counts approvals)
+    and the first one that is not (a step id, None once every one is). An
+    unreadable knowledge base is a knowledge step not done."""
+    approvals = story.get("approvals") or {}
+    steps = [step for step, _key in LIST_STORY_STEPS]
+    done = [bool(approvals.get(key)) for _step, key in LIST_STORY_STEPS]
+    if media_policy.is_v2(story):
+        steps.append(LIST_KNOWLEDGE_STEP)
+        done.append(all(done) and _knowledge_approved(stories, story["story_id"]))
+    count = 0
+    while count < len(steps) and done[count]:
+        count += 1
+    return {"steps_done": count, "steps_total": len(steps), "next": steps[count] if count < len(steps) else None}
+
+
+def list_episode_state(stories, story_id, ep) -> str:
+    """One of :data:`LIST_EPISODE_STATES` for episode *ep* (four document
+    reads at most; ``draft`` when one of them cannot be read)."""
+    try:
+        manifest = stories.read_episode_doc(story_id, ep, MANIFEST_DOC)
+        if manifest and manifest.get("output"):
+            return "rendered"
+        assets = stories.read_episode_doc(story_id, ep, ASSETS_DOC)
+        if assets and assets.get("approved"):
+            return "assets"
+        board = stories.read_episode_doc(story_id, ep, STORYBOARD_DOC)
+        if board and board.get("approved_at"):
+            return "planned"
+        script = stories.read_episode_doc(story_id, ep, SCRIPT_DOC)
+        if script and script.get("approved_at"):
+            return "written"
+    except _LIST_UNREADABLE:
+        pass
+    return "draft"
+
+
+def list_episodes(stories, story_id) -> dict:
+    """``{"count", "latest": {"ep", "state"} | null}`` (the highest episode)."""
+    numbers = stories.list_episodes(story_id)
+    if not numbers:
+        return {"count": 0, "latest": None}
+    latest = numbers[-1]
+    return {"count": len(numbers), "latest": {"ep": latest, "state": list_episode_state(stories, story_id, latest)}}
+
+
+def list_card(stories, entry) -> dict:
+    """*entry* (an index entry, its fields kept as they are) with ``cover``,
+    ``progress``, ``episodes``, ``style_label`` and ``pipeline`` (the story's
+    ``generation_profile.pipeline``, None for a legacy story) added. Each
+    part is read on its own: one that cannot be read keeps its empty value."""
+    card = dict(entry)
+    card.update({
+        "cover": None,
+        "progress": {"steps_done": 0, "steps_total": 0, "next": None},
+        "episodes": {"count": 0, "latest": None},
+        "style_label": style_label(entry.get("style_template_id")),
+        "pipeline": None,
+    })
+    story_id = entry.get("story_id")
+    try:
+        story = stories.get(story_id)
+    except _LIST_UNREADABLE:
+        return card
+    card["pipeline"] = (story.get("generation_profile") or {}).get("pipeline") or None
+    for field, read in (("cover", lambda: list_cover(stories, story_id)),
+                        ("progress", lambda: list_progress(stories, story)),
+                        ("episodes", lambda: list_episodes(stories, story_id))):
+        try:
+            card[field] = read()
+        except _LIST_UNREADABLE:
+            pass
+    return card
+
+
+def list_cards(stories, entries) -> list:
+    """:func:`list_card` for each index entry, in their order."""
+    return [list_card(stories, entry) for entry in entries]
+
+
 # ------------------------------------------------------ the page, phase 4
 
 # What the phase-4 part of the episode page derives by hashing files -- each

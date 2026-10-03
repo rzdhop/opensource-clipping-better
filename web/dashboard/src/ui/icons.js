@@ -3,6 +3,7 @@
 // the set the app uses stays small, named consistently and easy to audit.
 // Where lucide renamed an icon, the familiar name is kept as the export.
 export {
+  ArrowRight,
   BookOpen,
   Brain,
   Calendar,
@@ -17,6 +18,7 @@ export {
   LayoutDashboard,
   Lock,
   MapPin,
+  MoreHorizontal,
   Monitor,
   Pencil,
   Play,

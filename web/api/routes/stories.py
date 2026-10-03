@@ -718,8 +718,18 @@ def _generation_gate(stories, story, units, *, env, llm=True, needs_editor=False
 async def list_stories() -> dict:
     """``{"stories": [index entries]}``, most recently updated first. Each
     entry: ``story_id, title, language, style_template_id, status,
-    created_at, updated_at``."""
-    return {"stories": _stories().list()}
+    created_at, updated_at`` as the index holds them, plus what the list's
+    card shows (``workflow.list_card``, DEC-254): ``cover`` (the API path of
+    the first character's portrait on disk, leads first, or null),
+    ``progress`` ``{steps_done, steps_total, next}``, ``episodes`` ``{count,
+    latest: {ep, state} | null}``, ``style_label`` and ``pipeline``. Read from
+    the documents, calling nothing; a story whose documents cannot be read
+    keeps a null cover and zeros. The cards are read through a quiet store:
+    a skipped entity folder is already reported by the story's own page, and
+    the list must not print it again on every visit."""
+    entries = _stories().list()
+    quiet = story_store.StoryStore(worker.OUTPUTS_ROOT, on_log=lambda line: None)
+    return {"stories": workflow.list_cards(quiet, entries)}
 
 
 @router.post("", status_code=201)
