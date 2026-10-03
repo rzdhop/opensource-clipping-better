@@ -767,7 +767,7 @@ function Settings() {
                   <option value="">auto — free until paid is allowed, then one_dollar</option>
                   <option value="free">free — $0.00: free chains or local, stills + motion</option>
                   <option value="one_dollar">one_dollar — ≤ $1 per episode: reference images + key shots animated</option>
-                  <option value="quality">quality — Quality (billed APIs): ≤ $2 per episode, quality image links, every shot animated</option>
+                  <option value="quality">quality — Quality (billed APIs): ≤ $4 per episode, quality image links, every shot animated with its own ambience</option>
                 </select>
                 <p className="form-hint">
                   In force now: <strong>{settings?.effective_budget_profile || 'free'}</strong>

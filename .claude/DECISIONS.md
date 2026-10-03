@@ -4300,3 +4300,85 @@ human's walk. An episode near the cap (scenes split into two shots round up more
 DEC-243) is refused whole when over. A shipped SFX cue still plays at its anchor, so a sound the clip also makes can
 be heard twice (follow-up: drop shipped cues on shots whose clip has sound); a scene-start cue goes to the shot that
 holds the scene's first line, so a silent establishing shot before it misses it.
+
+## DEC-243 — v2 keyframes consistent by construction; the ones the keyframe check flags are redrawn by the step (phase 7 follow-up, B)
+**Context.** The human (2026-10-02): "make it possible to avoid regenerating the shots that have consistency issues,
+make it so that it doesn't happen". Four causes in our own code: the character sheets are drawn in the FIRST
+wardrobe set while the keyframe text dresses the character in the ledger's set and the role text said "keep the
+outfit exactly" (the prompt contradicted its references); the previous keyframe of the scene was never a reference;
+J2 compared a shot only to the storyboard's previous shot — across scene changes, never to the sheets, and knew the
+characters by their descriptor, not their look; nothing redrew a flagged shot, and a manual regenerate did not re-run
+J2 (DEC-239's follow-up).
+**Decision** (`ad17e81`, `39bee68`, `cac23f6`).
+- **Roles follow the shot's outfit**: when the shot's wardrobe set differs from the set the sheets were drawn in, the
+  role text keeps face, hair, build and proportions exactly and names the set worn now; when they match, "outfit
+  exactly" stays.
+- **A continuity reference with a fixed slot**: the storyboard keeps a placeholder (`continuity/previous_shot`) in the
+  reference list, after the sheets and the plate, before the turnarounds and props (dropped first at the cap of 10);
+  at request time the previous same-scene keyframe fills it; the prompt hash counts the slot as one constant token
+  whatever image fills it, so redrawing a keyframe never makes the next shot stale (no cascade of paid redraws); what
+  was sent is recorded as `assets.continuity {shot_id, image_sha256}`, which plays no part in "current"; a previous
+  keyframe not yet on disk re-resolves the shot without the slot, its hash unchanged. v1 shots never get the slot.
+- **J2 prompt version 2** (`prompts.J2_PROMPT_VERSION`, stored per verdict): up to 4 identity sheets with the two
+  keyframes (6 images at most, A-128); each character described by its look and THIS shot's set; told whether the
+  previous shot is the same scene — across a change it compares only who the characters are, never set or light.
+  Older verdicts still validate but are not current: the next assets run re-checks them (free Gemini vision first)
+  and `approve_keyframes` refuses them until it does.
+- **Auto-fix** (the human's caps: 2 redraws a shot, $0.40 an episode; `budget_profiles.json` quality
+  `keyframe_fix`; profiles without it never redraw): after `judge_keyframes`, every failed current verdict is redrawn
+  with a fresh seed and a correction note built from the verdict (J2's names mapped to the prompt's own handles, a
+  place to "the set"; `with_note` uses the v2 name list so a descriptive name is not garbled), then re-judged with
+  the shot after it; until it passes or its redraws are spent; only while the keyframes are not approved (an
+  approval, "anyway" included, is never redrawn over); locked shots and shots drawn from a person's note are skipped;
+  the paid gates, the cancel and the time budget stop it. The redraws and the spend live in the episode's own
+  `assets.json` (`keyframe_fixes`, `keyframe_fix_budget`); per-episode spend is read through `ledger.totals(ep)`
+  (DEC-241). The estimate counts the ceiling (what is left of the $0.40, at most every shot twice; 0 once approved)
+  in the plan total and the cap check and takes it off before the clips are planned.
+- **A manual shot-image regenerate runs J2** on that shot and the one after it; it never auto-fixes (the person's
+  note is the correction).
+- **The contract for the review screen**: per shot `keyframe_verdict {passed, current, shows_beat, missing,
+  continuity_issue, checked_at}` and `keyframe_fix`; the episode's `keyframes.fix_budget`; the step result's
+  `keyframes.fix` and the log line "🛠 Keyframe auto-fix: …".
+**Consequence.** Shots resolved before this change have no continuity slot until their prompts are refreshed, which
+stales every shot after the first of its scene once. A tight episode cap can refuse a plan whose images alone would
+fit (the fix ceiling is reserved). Known and left: the framing-edit re-resolve still drops T1 v2 `staging` and
+`clip_motion`; `render_look` appends signature items that are not worn, so a clothing signature item can still
+contradict another set.
+
+## DEC-244 — Gemini voice lines lose the burst of static after their last word; every line fades at its edges (phase 7 follow-up, A)
+**Context.** The human (2026-10-02): "the sounds from Gemini are the best for now, but at the end we hear a big
+'crshhhh' at the end of each vocal". A known Gemini TTS fault (Google's forum: "static noise/artifact at the end of
+TTS generation", 2.5 flash/pro and 3.1 flash): a burst of broadband noise after the last word. The adapter wrote the
+PCM as it came (`tts.py`) and the mix placed each line's whole file with `adelay`, no trim, no fade. No real sample
+reached this session: the detector was designed from the description and proven on synthetic signals (A-129).
+**Decision** (`8a6a87e`, `c935906`, `46f01bc`, `78380c9`).
+- **`clipping/providers/tts_tail.py`** (stdlib: `array`, `math`, `wave`; `TAIL_GUARD_VERSION = 1`): 10 ms frames,
+  per-frame RMS and zero-crossing rate; the floor is the 10th percentile of frame levels, the speech level the 95th
+  percentile of the voiced-like (low-ZCR) frames; a frame is audible above floor + 10 dB (held between 40 and 30 dB
+  under the speech level, the 30 dB bound catching a burst 25 dB under speech in a line with no real silence),
+  noise-like at ZCR ≥ 0.25 (white noise ~0.5, voiced speech < 0.1), voiced only in runs of ≥ 3 frames. Cut rules:
+  noise glued to the speech for ≥ 250 ms is cut 120 ms after it starts (a final "s"/"ch" survives); noise after a
+  gap ≥ 60 ms is cut at most 50 ms into the gap, only when the noise runs ≥ 250 ms or the gap is ≥ 150 ms ("fax",
+  "texts" stay whole); never more than 1.5 s, never under 50 % of the line kept — else "suspect", nothing cut; pure
+  trailing silence is never cut (pacing unchanged); 5 ms in / 25 ms out fades in the file. An aligned last word's end
+  is used only where the detector found nothing (cut at word end + 150 ms when something audible follows): STT ends
+  stretch into trailing noise, so they never move a cut the detector made.
+- **The Gemini adapter** cleans the PCM before writing; the duration follows; the `line_timing_v1` sidecar and the
+  `GenResult.meta` carry `tail_guard` (the report). Edge and the local engines are not trimmed.
+- **Lines recorded before the fix** are cleaned in place, for free, on the next assets run (a Gemini sidecar without
+  `tail_guard` or of an older version): the file is rewritten atomically, the sidecar and the measured timing follow
+  as after any measurement (the storyboard re-timed, no approval cleared by the step itself); the generation cache
+  keeps Gemini's answers as sent and every copy is cleaned as it lands in `assets/voice/`, so a cache hit cannot
+  bring the noise back; a voice-regenerate take follows the cleaned file's sha256. The assets summary gets a `tails`
+  entry only when a Gemini line was seen (Edge-only runs keep their pinned summary hash); the log says "N Gemini line
+  endings cleaned (x s of static cut)" and names suspect lines.
+- **The mix** (every story, v1 included — a bug fix): each dialogue line fades 5 ms in and 10 ms out at its own
+  file's edges (`afade`, `areverse` pair) before its `adelay`, tier-3 path included, so no line can click; the
+  tier-1 RC-M3 render guard's plan and manifest hashes were re-pinned after proving that removing the fades restores
+  the old hashes exactly.
+- **`python main.py --ai-story voice-tails STORY_ID --ep N`** (read only): per line the length, the file, what was
+  cut or would be cut and why, and the summary "N Gemini lines: n cleaned, m to clean (x s of static)".
+**Consequence.** The thresholds wait for the human's real lines (A-129): `voice-tails` before and after an assets
+run is the check; darker, pinkish noise (ZCR under ~0.23) would not be detected. After an in-place clean the assets
+approval is stale (the audio hashes changed), as after any measurement: approve again. Every story's mix render cache
+key changes once (the fades), so each re-render re-mixes once.

@@ -459,6 +459,15 @@
   SFX bus, duck 0.06 / 3 / 50 ms / 600 ms, 80 ms fades) sit the clip's sound under the lines without pumping.
   Measured only on the synthetic test episode (−9.6 dB under a line). UNCONFIRMED until the human hears a Veo
   episode on the phone.
+- **A-128** — (phase 7 follow-up, DEC-243) every VISION_CHAIN link accepts 6 images in one request (J2's two keyframes
+  and up to 4 identity sheets), and Seedream 4.5 edit follows an "Image N is the previous shot of this scene" role
+  that sits in the middle of its reference list (after the sheets and the plate). UNCONFIRMED until the human's walk
+  (the J2 verdicts and the keyframes of a two-shot scene).
+- **A-129** — (phase 7 follow-up, DEC-244) Gemini TTS's end-of-clip static ("crshhh") is broadband, near-white noise
+  (ZCR ≥ 0.25) of roughly 250–900 ms, either glued to the last word or after a short gap, and never inside speech —
+  so `tts_tail`'s detector cuts it and leaves every word-final fricative. Designed from the forum reports and proven
+  on synthetic signals only (no real sample reached this session). UNCONFIRMED until the human runs `--ai-story
+  voice-tails STORY_ID --ep N` on a real episode before and after an assets run, and hears the result.
 
 ## Confirmed
 - **A-082** — fal.ai as measured in the paid test (2026-09-29, DEC-174):
