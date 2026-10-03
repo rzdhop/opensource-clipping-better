@@ -12,7 +12,7 @@ serialization: a style that is locked once and then injected into every
 image and voice prompt afterwards, and a season structure meant to make
 someone come back for episode 2. Generation runs on free hosted APIs by
 default (or on a local GPU when you point it at one); paid APIs are opt-in
-and capped per episode, per day and per story (**$2 / $6 / $20** by default,
+and capped per episode, per day and per story (**$4 / $12 / $40** by default,
 Settings → Budget). Nothing paid ever runs unless you turn it on. With a fal
 key, a new story starts on the **quality pipeline** — every shot a video
 clip, quality images — described in "The quality pipeline (v2)" below.
@@ -140,7 +140,14 @@ shorter than 150 ms.
   why it matters — and flags an unclear goal, an unmotivated turn, an
   unintroduced character, an object never shown, a repeated line or a hook
   with no on-screen text (the last two are also checked without the LLM, and
-  a reply repeating a line is refused and asked again). The script is not
+  a reply repeating a line is refused and asked again). When it finds
+  issues, the step repairs them itself before asking you: the scenes they
+  name are rewritten with the fix as the note (an unintroduced character or
+  an unseen object also rewrites the earlier scene where it can be
+  introduced or shown), then the checks run again — at most two passes of
+  four rewrites, on the free writing chain; the writers also hear the
+  first-watch rules before they write. Only what is left after that reaches
+  you ("after 2 repair passes, 1 issue remains"). The script is not
   approvable while the check is missing or out of date; with issues, only
   with **Approve anyway**.
 - *The length.* A v2 episode must land in its 55–75 s window: the script and
@@ -149,13 +156,22 @@ shorter than 150 ms.
   gets a fill pass (at most two rewrites of its shortest scenes) when the
   script step runs.
 - *The keyframes.* The assets step with **animate off** makes every keyframe
-  and voice, then a free vision check (J2) looks at each keyframe with the
-  previous one and says whether it shows its beat, what is missing, and what
-  changed that should not have. The storyboard's **Keyframes** card lists
-  each verdict; **Approve keyframes** (or **Approve anyway** after a
-  refusal) is the gate: until it is approved and current, no clip is bought,
-  and a changed keyframe makes it stale. Then run the assets step with
-  animate on: it buys the clips.
+  and voice. Each keyframe is drawn with the previous keyframe of its scene
+  among its references (set, light and positions carry over) and with the
+  character's outfit of that moment named — the sheets show the first
+  wardrobe set, the text says which set is worn now. Then a free vision
+  check (J2) looks at each keyframe next to the previous one and the
+  characters' sheets and says whether it shows its beat, what is missing,
+  and what changed that should not have (across a scene change it compares
+  only who the characters are). A flagged keyframe is redrawn by the step
+  itself with a correction taken from the verdict and checked again — up
+  to two redraws a shot and $0.40 an episode on the Quality profile, counted
+  in the estimate — so most never reach you. The storyboard's **Keyframes**
+  card lists each verdict and what was fixed; **Approve keyframes** (or
+  **Approve anyway** after a refusal) is the gate: until it is approved and
+  current, no clip is bought, and a changed keyframe makes it stale.
+  Regenerating one shot image by hand runs the check again on it and on the
+  shot after it. Then run the assets step with animate on: it buys the clips.
 - *The fast track* follows the same rules: it stops at a script it cannot
   approve (it never approves anyway, and never outside the window) and, on a
   v2 episode, at the keyframes — approve them, then **Continue**.
@@ -170,17 +186,47 @@ regenerate them.
 
 **Advice on weak hosts.** Settings' hardware card, on a host with no GPU,
 recommends the Quality preset with its price worked out from the price
-table — today ≈ $1.73 an episode (8 shots animated) and ≈ $0.56 once per
-story — and the key to add; the new-story form shows the same numbers.
+table — today ≈ $3.52 an episode (8 shots animated, with their own sound)
+and ≈ $0.56 once per story — and the keys to add; the new-story form shows
+the same numbers.
 
-**What it costs (fal, 720p).** Per episode ≈ $1.73: about 8 keyframes at
-$0.04 and about 60 s of seedance at $0.022/s, plus rounding each clip up to
-whole seconds — inside the default $2 episode cap. Once per story: sheets,
-plates and props at $0.04 each (≈ $0.5–1.0 for a small cast). Every paid step
-shows its estimate before it runs and is refused whole when it would go over
-a cap. Settings → **Allow paid** must be on, and caps saved earlier in
-Settings (1 / 3 / 10 before phase 7) win over the new defaults until you
-change them.
+**What it costs (720p).** Per episode ≈ $3.52: about 8 keyframes at $0.04
+on fal and about 60 s of Veo 3.1 lite at $0.05/s with its own sound (clips of
+8 s at most — a fully animated storyboard plans no shot longer than its link
+sells), plus rounding each clip up to whole seconds and up to $0.40 of
+keyframe redraws — inside the default $4 episode cap. Without
+`GEMINI_PAID_API_KEY` the clips go to seedance (silent, $0.022/s, ≈ $1.73 an
+episode) and the estimate says "No ambience". Once per story: sheets, plates
+and props at $0.04 each (≈ $0.5–1.0 for a small cast). Every paid step shows
+its estimate before it runs and is refused whole when it would go over a
+cap. Settings → **Allow paid** must be on, and caps saved earlier in
+Settings (1 / 3 / 10 or 2 / 6 / 20 before this) win over the new defaults
+until you change them.
+
+**Sound.** On the Quality preset (tier 3, `tier3_native_audio: ambience`)
+every clip is bought on a link whose clips carry sound (Veo) and asked, inside
+its prompt, for the place's ambience and the shot's effects — and for no
+voice, music or narration. In the mix that sound sits under the lines,
+ducked like the music bed: every line is still spoken by its character's
+pinned voice, the same in every shot. The burst of static Gemini voices add
+after the last word ("crshhh") is cut and faded when a line is recorded;
+lines recorded before are cleaned on the next assets run without being
+spoken again (`voice-tails` shows what was cut), and every line fades at its
+edges in the mix.
+
+**Prompt size limits.** Each link's prompt limit is known (`prompt-limits`
+lists them with their source) and a prompt over it is refused before
+anything is sent — the chain moves on to its next link. The free key check
+also reads the limit fal publishes for each video model and keeps it.
+
+**Moving a written story to v2.** **Animate every shot** on a story whose
+episode already has a script offers **Regenerate episode N on v2**: the
+episode's script, storyboard, images, clips and render are archived
+(`episodes/_discarded/`, recoverable by hand), its series memory and feedback
+cleared, and its spend no longer counted against the new episode's cap (it
+stays in the story's total); then the Cast step starts — dossiers, looks and
+the images drawn again from them — followed by Places & props, the knowledge
+base and the episode, each with its estimate first.
 
 **Checking the video keys.** Settings → Video → **Ask the providers (free)**
 asks fal (its pricing for the model's endpoint) and Gemini (`models.get` for
@@ -961,8 +1007,10 @@ is queued or running is refused (409), telling you to wait or cancel.
 ## From the CLI
 
 `python main.py --ai-story` covers all thirteen steps for scripting or
-testing, without a browser. Six subcommands: `new`, `step`, `render`,
-`fast-track`, `feedback`, `list`.
+testing, without a browser. Nine subcommands: `new`, `step`, `render`,
+`fast-track`, `feedback`, `approve`, `list`, `voice-tails` (what the Gemini
+tail guard cut, or would cut, from each line of an episode — read only) and
+`prompt-limits` (every link's prompt size limit and its source).
 
 Keys, chains, caps and `allow_paid` come from the environment (or `.env`);
 add **`--settings`** to any subcommand to read the ones the dashboard's
