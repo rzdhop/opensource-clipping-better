@@ -2,7 +2,7 @@
 
 A speaker avatar, a stories-list cover and an entity tile used to fetch the
 full portrait -- 550-640 kB -- to draw 28 to 340 px of it. ``GET
-/api/stories/{id}/media/{kind}/{eid}/{name}?size=thumb`` answers a 160 px-wide
+/api/stories/{id}/media/{kind}/{eid}/{name}?size=thumb`` answers a 480 px-wide
 JPEG instead, made on the first request and kept next to the original as
 ``<name>.thumb.jpg`` (``clipping/aistory/thumbs.py``); a later request serves
 the kept file until the original changes. Everything else about the route is
@@ -31,7 +31,7 @@ from test_stories_api_list import _character
 # ------------------------------------------------------------------ the rules
 
 def test_the_thumbnail_is_named_after_its_original_and_lives_beside_it():
-    assert thumbs.THUMB_WIDTH == 160
+    assert thumbs.THUMB_WIDTH == 480  # re-pinned on purpose: 160 read soft on the list covers
     assert thumbs.thumb_name("portrait.png") == "portrait.png.thumb.jpg"
     assert thumbs.SIZES == ("thumb",)
 
@@ -78,7 +78,7 @@ def _url(story_id, name="portrait.png", kind="characters", eid="char_kiwi"):
     return f"/api/stories/{story_id}/media/{kind}/{eid}/{name}"
 
 
-def test_the_route_serves_a_160_px_jpeg_and_keeps_it_beside_the_original(api):
+def test_the_route_serves_a_480_px_jpeg_and_keeps_it_beside_the_original(api):
     image_mod = pytest.importorskip("PIL.Image")
     original = _png(1080, 1920)
     story_id, refs = _story_with_portrait(api, original)
@@ -89,7 +89,7 @@ def test_the_route_serves_a_160_px_jpeg_and_keeps_it_beside_the_original(api):
     assert response.headers["content-type"] == "image/jpeg"
     assert response.headers["cache-control"] == "no-store"
     served = image_mod.open(io.BytesIO(response.content))
-    assert served.format == "JPEG" and served.size == (160, 284)
+    assert served.format == "JPEG" and served.size == (480, 853)
     assert len(response.content) < len(original)
     kept = os.path.join(refs, "portrait.png.thumb.jpg")
     assert os.path.isfile(kept) and not os.path.islink(kept)

@@ -33,7 +33,7 @@ from __future__ import annotations
 import os
 import tempfile
 
-THUMB_WIDTH = 160
+THUMB_WIDTH = 480  # sharp on a 340 px list cover at 2x; a tenth of the full portrait (DEC-257, the orchestrator's re-pin)
 # A 9:16 portrait at 160 px wide is 284 px tall; this only bounds a freak
 # panorama-in-portrait so the thumbnail stays small.
 THUMB_MAX_HEIGHT = THUMB_WIDTH * 4
