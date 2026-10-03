@@ -110,8 +110,7 @@ the keys, caps and `allow_paid` the dashboard stored, so no scratch driver is ne
 
 ```bash
 python main.py --ai-story prompt-limits                                         # every link's prompt limit
-python main.py --ai-story fast-track STORY_ID --ep 1 --settings --estimate      # the one click's price first
-python main.py --ai-story fast-track STORY_ID --ep 1 --settings                 # add --stop-at-keyframes to keep the stop
+python main.py --ai-story fast-track STORY_ID --ep 1 --settings                 # the one click (the dashboard's confirm shows its price; the CLI's --estimate is on 'step … assets'); add --stop-at-keyframes to keep the stop
 python main.py --ai-story voice-tails STORY_ID --ep 1                           # what the tail guard cut from each line
 # step by step instead:
 python main.py --ai-story step STORY_ID assets --ep 1 --no-animate --settings --estimate   # the price first
