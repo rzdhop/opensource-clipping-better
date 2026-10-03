@@ -57,7 +57,10 @@
     passed / 769 skipped / 0 failed (6602 collected); `compileall` clean. (First recorded as 6633/11 and 5839/771 from
     progress markers, which counted the two "bringing up nodes..." lines; corrected. Run with `-o addopts=""` so the
     summary line prints.)
-  - **Live state (as of 2026-10-01; this cloud session cannot see the VPS):** `main` = 30604dd deployed; health 200, 0 jobs; `allow_paid` false; caps 1/3/10 (the plan moves the
+  - **Live state (as of 2026-10-03, from the human's terminal log; this cloud session cannot see the VPS):** `main` =
+    1078a8d deployed (fast-forwarded from de883f1 at 0 jobs, backend image rebuilt with the dashboard, pushed to
+    GitHub) — the follow-up wave is live for the one-click walk; the Settings keys/caps below are those of
+    2026-10-01 until the human changes them. Before: `main` = de883f1 (2026-10-02), 30604dd (2026-10-01); health 200, 0 jobs; `allow_paid` false; caps 1/3/10 (the plan moves the
     defaults to 2/6/20 in stage 2a); keys set: google, fal, cloudflare, nvidia, openrouter; `GEMINI_PAID_API_KEY` to be
     added by the human before W-mid. All 9 stories kept; none is touched by this phase (RC-M3).
   - **Paid spend this phase:** W-mid $1.38 booked (2026-10-01); nothing since (this cloud session has no keys). Planned:
