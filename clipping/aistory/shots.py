@@ -654,6 +654,35 @@ _LAYERED_LAST_RUNGS = ((14, 18, 8, "short"), (12, 14, 0, "short"), (10, 12, 0, "
                        (6, 8, 0, "short"), (4, 6, 0, "short"), (4, 0, 0, "none"))
 _REFERENCES_MODE = "references"
 
+# ------------------------------------------- the context layers (stage F2)
+#
+# What a keyframe says beyond the roles, the beat, the staging, the
+# composition, the place and the style (the human, 2026-10-02: "more prompt
+# context is more accuracy and details"), each a sentence group written by
+# the functions below, in the order the budget ladder drops them -- the
+# least valuable first: what stands between two characters (the writers'
+# words), the time of day (the place's light says most of it), each
+# character's bearing, what changed since the previous shot (the continuity
+# image shows it; the words keep the model from copying its positions), and
+# last the beat's temperature with the faces and who is hurt. The ladder
+# (:func:`_rungs`) cuts the rendering first, as before (the references show
+# the style), then these, then the looks and the place.
+_CONTEXT_DROP_ORDER = ("between", "when", "bearing", "since", "mood")
+# A scene's function as the mood's first words.
+_FUNCTION_WORDS = {"recap": "a recap", "hook": "the opening hook", "setup": "a quiet setup", "rising": "rising tension",
+                   "peak": "the peak of the episode", "turn": "the turning point", "cliffhanger": "the cliffhanger"}
+_INJURY_MAX_WORDS = 8
+_RELATIONSHIP_MAX_WORDS = 15
+_BEARING_MAX_WORDS = 10
+_BEFORE_MAX_WORDS = 14
+# The clip's camera intent per camera motion (``prompting.CAMERA_PHRASES``'
+# keys), and the scene functions whose shot lands the beat.
+_CAMERA_INTENT = {"hold": "letting the moment breathe", "push_in": "closing on the emotion",
+                  "pull_out": "revealing the whole scene", "pan_lr": "following the exchange left to right",
+                  "pan_rl": "following the exchange right to left", "pan_ud": "settling on the detail below",
+                  "pan_du": "rising to the face"}
+_LANDING_FUNCTIONS = ("peak", "turn", "cliffhanger")
+
 
 class PromptOverBudget(ValueError):
     """A v2 shot's prompt that is over its word budget even on the ladder's
@@ -925,6 +954,191 @@ def _fit_place(text, max_words) -> str:
     return " ".join(kept[sentence] for sentence in sentences if sentence in kept)
 
 
+# The words a hard cut never ends on (``_cut``): a gist cut after "to" or
+# "and" reads as a broken sentence.
+_DANGLING = frozenset("a an the and or but to at in on of for with from by into over under toward towards as while "
+                      "her his its their his my our your than then".split())
+
+
+def _cut(text, max_words) -> str:
+    """*text* in at most *max_words* words: at a clause boundary when one
+    falls inside, else the first words, never ending on a dangling
+    article, preposition or conjunction."""
+    text = _strip_period(_collapse_ws(text))
+    fitted = prompting.fit_words(text, max_words)
+    if fitted:
+        return fitted
+    words = text.split()[:max_words]
+    while len(words) > 1 and words[-1].lower().strip(",;") in _DANGLING:
+        words.pop()
+    return " ".join(words).rstrip(",;")
+
+
+def _feeling(emotion) -> str:
+    return _EMOTION_WORDS.get(emotion or "", emotion or "")
+
+
+def _mood(scene, lines, frame, char_handles, ledger) -> str:
+    """The beat's temperature and the characters' state (stage F2): the
+    scene's function and emotion ("Mood: the opening hook, shocked."), the
+    first framed speaker mid-sentence -- asking a question, exclaiming or
+    speaking, never the words, which a model would draw as lettering -- and
+    who listens, then who is hurt (the ledger's ``injuries``, drawn)."""
+    feeling = _feeling(scene.get("emotion"))
+    function = _FUNCTION_WORDS.get(scene.get("function"), scene.get("function") or "")
+    sentences = [prompting.as_sentence(f"Mood: {function}" + (f", {feeling}" if feeling else ""))] if function else []
+    frame_ids = [cid for cid, _doc in frame]
+    speakers = [line["speaker"] for line in lines if line.get("speaker") in frame_ids]
+    if speakers:
+        first = speakers[0]
+        text = next((line.get("text") or "" for line in lines if line.get("speaker") == first), "").strip()
+        kind = "asking a question" if text.endswith("?") else "exclaiming" if text.endswith("!") else "speaking"
+        face = f"{char_handles[first]} is mid-sentence, {kind}"
+        listeners = [char_handles[cid] for cid in frame_ids if cid not in speakers]
+        if listeners:
+            face += f"; {_and_join(listeners)} {'listens' if len(listeners) == 1 else 'listen'}"
+        sentences.append(prompting.as_sentence(face))
+    for cid in frame_ids:
+        hurt = ((ledger or {}).get(cid) or {}).get("injuries")
+        if hurt:
+            sentences.append(prompting.as_sentence(f"{char_handles[cid]} is hurt: {_cut(str(hurt), _INJURY_MAX_WORDS)}"))
+    return " ".join(sentences)
+
+
+def _relationship_now(doc, other_id) -> str:
+    for item in ((doc.get("dossier") or {}).get("relationships") or ()):
+        if item.get("with") == other_id and item.get("now"):
+            return _strip_period(item["now"])
+    return ""
+
+
+def _between(frame, char_handles) -> str:
+    """What stands between the first two framed characters whose dossiers
+    relate them (stage F2; the first one's ``now``, else the other's -- the
+    writers' words, so the model draws the body language of it): "Between
+    the kiwi and the mango: rivals who pretend to be friends." '' with none."""
+    for i, (cid, doc) in enumerate(frame):
+        for other, other_doc in frame[i + 1:]:
+            now = _relationship_now(doc, other) or _relationship_now(other_doc, cid)
+            if now:
+                return prompting.as_sentence(f"Between {char_handles[cid]} and {char_handles[other]}: "
+                                             f"{_cut(now, _RELATIONSHIP_MAX_WORDS)}")
+    return ""
+
+
+def _positions(plan, frame) -> dict:
+    """``{char_id: "left" | "centre" | "right" | "background" | ...}``: where
+    each framed character of *plan* stands -- its staging entry's position,
+    else its place in subject order (``_POSITIONS``' last word)."""
+    staged = {entry["subject"]: entry for entry in plan.get("staging") or () if entry.get("subject")}
+    n = len(frame)
+    defaults = _POSITIONS.get(n) or tuple(f"position {i}" for i in range(1, n + 1))
+    out = {}
+    for (cid, _doc), where in zip(frame, defaults):
+        entry = staged.get(f"@{cid}")
+        position = entry.get("position") if entry is not None and entry.get("position") in _STAGED_POSITIONS else None
+        out[cid] = position or where.split()[-1].lower()
+    return out
+
+
+def _since(previous_plan, plan, frame, frame_props, *, characters, props, char_handles, prop_handles, resolve) -> str:
+    """What changed since the previous shot of the scene (stage F2;
+    *previous_plan*, None for a scene's first shot: ''): who moved where
+    (the staging positions, else subject order), who and which prop came
+    into frame, and what happened just before (the previous action's gist,
+    its tags resolved -- never the words a model would letter)."""
+    if previous_plan is None:
+        return ""
+    before = _frame_characters(previous_plan.get("subjects") or (), characters)
+    was, now = _positions(previous_plan, before), _positions(plan, frame)
+    changes = []
+    for cid, _doc in frame:
+        if cid not in was:
+            changes.append(f"{char_handles[cid]} has come into frame")
+        elif was[cid] != now[cid]:
+            changes.append(f"{char_handles[cid]} has moved to the {now[cid]}")
+    held_before = {pid for pid, _doc in _frame_props(previous_plan.get("subjects") or (), props)}
+    changes.extend(f"{prop_handles[pid]} is now in frame" for pid, _doc in frame_props if pid not in held_before)
+    sentences = []
+    if changes:
+        sentences.append(prompting.as_sentence("Since the previous shot: " + "; ".join(changes)))
+    action = _collapse_ws(previous_plan.get("action") or "")
+    if action:
+        sentences.append(prompting.as_sentence(f"Just before, {_lower_first(_cut(resolve(action), _BEFORE_MAX_WORDS))}"))
+    return " ".join(sentences)
+
+
+def _bearing(frame, char_handles) -> str:
+    """Each framed character's bearing (stage F2: ``look.bearing`` --
+    posture, how they hold themselves -- when the look has one): "Bearing:
+    the kiwi stands rigidly straight, chin up; the mango slouches." """
+    parts = []
+    for cid, doc in frame:
+        bearing = ((doc.get("look") or {}).get("bearing") or "").strip()
+        if bearing:
+            parts.append(f"{char_handles[cid]} {_lower_first(_cut(bearing, _BEARING_MAX_WORDS))}")
+    return prompting.as_sentence("Bearing: " + "; ".join(parts)) if parts else ""
+
+
+def _when(place_doc, variant) -> str:
+    """The time of day and weather of the place variant (stage F2), for a
+    place with a look -- whose slice says the variant's light in its own
+    words, not the variant; without a look the slice says "Light: night
+    light" already, so nothing is added."""
+    return prompting.as_sentence(f"Time: {variant.replace('_', ' ')}") if place_doc.get("look") else ""
+
+
+def _clip_emotion(scene, lines, frame, char_handles) -> str:
+    """The beat's emotion for the clip (stage F2): the scene's ("The mood is
+    tense"), and the first framed speaker's when its line's differs ("; the
+    kiwi looks shocked"); '' when both are neutral."""
+    scene_feeling = _feeling(scene.get("emotion"))
+    frame_ids = [cid for cid, _doc in frame]
+    line = next((line for line in lines if line.get("speaker") in frame_ids), None)
+    line_feeling = _feeling(line.get("emotion")) if line else ""
+    parts = [f"The mood is {scene_feeling}"] if scene_feeling else []
+    if line_feeling and line_feeling != scene_feeling:
+        parts.append(f"{char_handles[line['speaker']]} looks {line_feeling}")
+    return "; ".join(parts)
+
+
+def _micro_actions(frame, staged, char_handles, resolve) -> str:
+    """Each framed character's micro-actions for the clip (stage F2): the
+    breathing, a glance where its staging faces, the hands."""
+    staging = {entry["subject"]: entry for entry in staged or () if entry.get("subject")}
+    parts = []
+    for cid, _doc in frame:
+        bits = ["breathes visibly"]
+        facing = _collapse_ws(resolve((staging.get(f"@{cid}") or {}).get("facing") or ""))
+        if facing:
+            bits.append(f"a glance toward {_strip_period(facing)}")
+        bits.append("hands shift slightly")
+        parts.append(f"{char_handles[cid]} {', '.join(bits)}")
+    return "Micro-actions: " + "; ".join(parts) if parts else ""
+
+
+def _camera_intent(camera_motion, function) -> str:
+    """The camera's intent for the clip (stage F2): what its motion is for,
+    and that it lands the beat on a peak, a turn or the cliffhanger."""
+    intent = _CAMERA_INTENT.get(camera_motion, "")
+    return f"{intent} to land the beat" if intent and function in _LANDING_FUNCTIONS else intent
+
+
+def _rungs() -> list:
+    """The budget ladder of :func:`_layered`, each rung ``(look words, place
+    words, rendering words, props, context layers kept)``: the rendering cut
+    first (the references show the style), then the context layers dropped
+    one by one in :data:`_CONTEXT_DROP_ORDER`, then the looks and the place
+    shrunk in turn (``_LAYERED_BUDGETS``), then the last rungs."""
+    every = _CONTEXT_DROP_ORDER
+    first, second = _LAYERED_BUDGETS[0], _LAYERED_BUDGETS[1]
+    rungs = [first + ("full", every), second + ("full", every)]
+    rungs += [second + ("full", every[k:]) for k in range(1, len(every) + 1)]
+    rungs += [budget + ("full", ()) for budget in _LAYERED_BUDGETS[2:]]
+    rungs += [rung + ((),) for rung in _LAYERED_LAST_RUNGS]
+    return rungs
+
+
 def _outfits(frame, char_handles, ledger) -> dict:
     """``{handle: wardrobe items}`` of each character of *frame* the shot
     dresses in another set than its sheets show (:func:`sheet_wardrobe`,
@@ -941,14 +1155,17 @@ def _outfits(frame, char_handles, ledger) -> dict:
 
 
 def _layered(plan, *, scene, entities, style_lock, consistency_mode, video_action, char_handles,
-             prop_handles, name_map, ledger=None, continuity=False, budgets=None) -> dict:
+             prop_handles, name_map, ledger=None, continuity=False, budgets=None, previous_plan=None) -> dict:
     """The v2 half of :func:`resolve_shot`: ``image_prompt`` (layered,
-    within its budget -- the looks, the place and the rendering shortened
-    in turn until it fits), ``video_prompt``, ``reference_images`` and
-    ``prompt_layout``. *continuity*: the previous keyframe of the scene is
-    one of the references (phase 8 stage B). *budgets*
-    (``prompting.Budgets``, stage F2: each prompt's words, from the links
-    the episode's images and clips go to; None: the fixed numbers).
+    within its budget -- the context layers, the looks, the place and the
+    rendering shortened in turn until it fits, :func:`_rungs`),
+    ``video_prompt``, ``reference_images`` and ``prompt_layout``.
+    *continuity*: the previous keyframe of the scene is one of the
+    references (phase 8 stage B). *budgets* (``prompting.Budgets``, stage
+    F2: each prompt's words, from the links the episode's images and clips
+    go to; None: the fixed numbers). *previous_plan* (stage F2): the plan of
+    the shot before this one in its scene, what changed since it is said
+    (:func:`_since`); None for a scene's first shot.
     :class:`PromptOverBudget` when even the ladder's last rung is over the
     keyframe's budget, or the clip's fixed parts alone are over its own."""
     budgets = budgets or prompting.Budgets()
@@ -974,13 +1191,15 @@ def _layered(plan, *, scene, entities, style_lock, consistency_mode, video_actio
     roles = prompting.role_text(sent, outfits=outfits) if references else ""
     compact_roles = prompting.role_text(sent, compact=True, outfits=outfits) if references else ""
 
-    clause = _delivery_clause(_shot_lines(plan, scene), char_handles)
+    lines = _shot_lines(plan, scene)
+    clause = _delivery_clause(lines, char_handles)
     beat = " ".join(part for part in (prompting.as_sentence(video_action), prompting.as_sentence(clause)) if part)
     beat = names_mod.without_names(beat, name_map)
     composition = prompting.as_sentence(
         f"Camera: {prompting.layered_framing_phrase(framing, characters=handles, props=held)}, "
         f"{prompting.layered_lens_phrase(style_lock, framing)}")
-    place_full = _place_slice(places[scene["place_id"]], scene["time_variant"], framing, props)
+    place_doc = places[scene["place_id"]]
+    place_full = _place_slice(place_doc, scene["time_variant"], framing, props)
     constraints = (prompting.CONSTRAINTS_KEYFRAME if frame else prompting.CONSTRAINTS_KEYFRAME_NO_PEOPLE)
 
     place_names = {pid: doc.get("name") for pid, doc in places.items()}
@@ -989,8 +1208,17 @@ def _layered(plan, *, scene, entities, style_lock, consistency_mode, video_actio
         return resolve_action(text, char_handles=char_handles, prop_handles=prop_handles, place_names=place_names)
 
     staged = plan.get("staging") or ()
-    rungs = [budget + ("full",) for budget in _LAYERED_BUDGETS] + list(_LAYERED_LAST_RUNGS)
-    for look_words, place_words, rendering_words, props_said in rungs:
+    # The context layers (stage F2), each swept of names like the beat; the ladder keeps what fits.
+    context = {
+        "mood": names_mod.without_names(_mood(scene, lines, frame, char_handles, ledger), name_map),
+        "between": names_mod.without_names(_between(frame, char_handles), name_map),
+        "since": names_mod.without_names(
+            _since(previous_plan, plan, frame, frame_props, characters=characters, props=props,
+                   char_handles=char_handles, prop_handles=prop_handles, resolve=resolve), name_map),
+        "bearing": names_mod.without_names(_bearing(frame, char_handles), name_map),
+        "when": _when(place_doc, scene["time_variant"]),
+    }
+    for look_words, place_words, rendering_words, props_said, kept in _rungs():
         staging = names_mod.without_names(
             _staging(frame, frame_props, char_handles=char_handles, look_words=look_words, staging=staged,
                      resolve=resolve, ledger=ledger, props=props_said), name_map)
@@ -998,7 +1226,7 @@ def _layered(plan, *, scene, entities, style_lock, consistency_mode, video_actio
         image_prompt = prompting.layered_shot_prompt(
             style_lock, roles_text=roles if props_said == "full" else compact_roles, beat=beat, staging=staging,
             composition=composition, place_text=place_text, constraints=constraints,
-            rendering_words=rendering_words)
+            rendering_words=rendering_words, context={name: context[name] for name in kept})
         if len(image_prompt.split()) <= budgets.keyframe:
             break
     else:
@@ -1023,7 +1251,11 @@ def _layered(plan, *, scene, entities, style_lock, consistency_mode, video_actio
     video_prompt = prompting.layered_clip_prompt(
         style_lock, subject=subject, motion=_strip_period(motion),
         camera_phrase=prompting.CAMERA_PHRASES[camera_motion], modifiers=modifiers, secondary=secondary,
-        budget=budgets.clip)
+        budget=budgets.clip,
+        # Stage F2: the beat's emotion, the micro-actions and the camera's intent, dropped first when over.
+        emotion=names_mod.without_names(_clip_emotion(scene, lines, frame, char_handles), name_map),
+        micro=names_mod.without_names(_micro_actions(frame, staged, char_handles, resolve), name_map),
+        intent=_camera_intent(camera_motion, scene["function"]))
     if len(video_prompt.split()) > budgets.clip:
         # The motion is cut to the budget; the fixed parts (camera, stays-still, suffix) cannot be.
         raise PromptOverBudget("clip", len(video_prompt.split()), budgets.clip)
@@ -1037,7 +1269,7 @@ def _layered(plan, *, scene, entities, style_lock, consistency_mode, video_actio
 
 
 def resolve_shot(shot, *, scene, entities, style_lock, consistency_mode, v2=False, ledger=None,
-                 continuity=False, budgets=None) -> dict:
+                 continuity=False, budgets=None, previous_plan=None) -> dict:
     """*shot* (a plan: ``framing``/``action``/``subjects``) resolved into
     ``{"image_prompt", "video_action", "negative_prompt", "reference_images",
     "consistency"}``. Every entity name is stripped from the resolved action
@@ -1071,7 +1303,11 @@ def resolve_shot(shot, *, scene, entities, style_lock, consistency_mode, v2=Fals
     the keyframe prompt and of the clip prompt from the links the episode's
     images and clips go to -- ``steps/clips.episode_budgets``; None: the
     fixed numbers every v2 prompt was built to before). A prompt that cannot
-    fit even on the ladder's last rung raises :class:`PromptOverBudget`."""
+    fit even on the ladder's last rung raises :class:`PromptOverBudget`.
+
+    *previous_plan* (v2 only, stage F2: the plan of the shot before this one
+    in its scene -- :func:`previous_plan` reads it off a storyboard -- None
+    for a scene's first shot): the keyframe says what changed since it."""
     characters = entities.get("characters", {})
     places = entities.get("places", {})
     props = entities.get("props", {})
@@ -1095,7 +1331,8 @@ def resolve_shot(shot, *, scene, entities, style_lock, consistency_mode, v2=Fals
         layered = _layered(shot, scene=scene, entities=entities, style_lock=style_lock,
                            consistency_mode=consistency_mode, video_action=video_action,
                            char_handles=char_handles_map, prop_handles=prop_handles_map,
-                           name_map=name_map, ledger=ledger, continuity=continuity, budgets=budgets)
+                           name_map=name_map, ledger=ledger, continuity=continuity, budgets=budgets,
+                           previous_plan=previous_plan)
         return {
             "image_prompt": layered["image_prompt"],
             "video_action": video_action,
@@ -1656,6 +1893,15 @@ def continues_scene(shots_in_order, index) -> bool:
     return index > 0 and shots_in_order[index - 1]["scene_id"] == shots_in_order[index]["scene_id"]
 
 
+def previous_plan(shots_in_order, index):
+    """The plan (:func:`plan_of`, v2) of the shot before shot *index* when
+    it is of the same scene (:func:`continues_scene`), else None: what
+    :func:`resolve_shot` says changed since it (stage F2)."""
+    if not continues_scene(shots_in_order, index):
+        return None
+    return plan_of(shots_in_order[index - 1], v2=True)
+
+
 def plan_of(shot, *, v2=False) -> dict:
     """The plan a storyboard *shot* resolves from (:func:`resolve_shot`):
     its framing, action and subjects; on *v2* its lines, camera motion,
@@ -1720,7 +1966,8 @@ def build_storyboard(script, plans, sources, *, entities, style_lock, template, 
             try:
                 resolved = resolve_shot(plan, scene=scene, entities=entities, style_lock=style_lock,
                                         consistency_mode=consistency_mode, v2=v2, ledger=ledger,
-                                        continuity=v2 and index > 0, budgets=budgets)
+                                        continuity=v2 and index > 0, budgets=budgets,
+                                        previous_plan=scene_plans[index - 1] if v2 and index > 0 else None)
             except PromptOverBudget as exc:
                 raise _named(exc, shot_id, budgets) from None
             _collect_resolved_from(resolved_from, plan["subjects"], scene, entities)
@@ -1804,7 +2051,8 @@ def refresh_prompts(storyboard, script, *, entities, style_lock, consistency_mod
         try:
             resolved = resolve_shot(plan, scene=scene, entities=entities, style_lock=style_lock,
                                     consistency_mode=consistency_mode, v2=v2, ledger=ledger,
-                                    continuity=v2 and continues_scene(storyboard["shots"], index), budgets=budgets)
+                                    continuity=v2 and continues_scene(storyboard["shots"], index), budgets=budgets,
+                                    previous_plan=previous_plan(storyboard["shots"], index) if v2 else None)
         except PromptOverBudget as exc:
             raise _named(exc, shot["shot_id"], budgets) from None
         _collect_resolved_from(resolved_from, shot["subject_tags"], scene, entities)

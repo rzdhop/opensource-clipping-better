@@ -4323,10 +4323,12 @@ def _resolve_again(ec, script, board, to_resolve, errors) -> None:
             plan.update(lines=list(shot["lines"]), camera_motion=motion["type"], modifiers=list(shot["modifiers"]))
         try:
             # Phase 8 stage B: a v2 shot after another of its scene keeps its continuity reference.
-            continuity = v2 and shots.continues_scene(board["shots"], board["shots"].index(shot))
+            index = board["shots"].index(shot)
+            continuity = v2 and shots.continues_scene(board["shots"], index)
             resolved = shots.resolve_shot(plan, scene=scene, entities=ec.entities, style_lock=lock,
                                           consistency_mode=ec.consistency_mode, v2=v2, ledger=ledger,
-                                          continuity=continuity, budgets=budgets)
+                                          continuity=continuity, budgets=budgets,
+                                          previous_plan=shots.previous_plan(board["shots"], index) if v2 else None)
         except shots.PromptOverBudget as exc:
             # Stage F2: the edit would make a prompt its link cannot take; refused, nothing written.
             errors.append(f"{path}: {exc.named(shot_id, _budget_link(budgets, exc))}")

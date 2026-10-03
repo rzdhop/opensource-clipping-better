@@ -690,37 +690,64 @@ def layered_style_tail(style_lock: dict, *, rendering_words: int = _RENDERING_V2
 
 def layered_shot_prompt(style_lock: dict, *, roles_text: str, beat: str, staging: str, composition: str,
                         place_text: str, constraints: str,
-                        rendering_words: int = _RENDERING_V2_MAX_WORDS) -> str:
+                        rendering_words: int = _RENDERING_V2_MAX_WORDS, context=None) -> str:
     """A v2 keyframe prompt (A8), its layers in this fixed order: the
     reference roles (:func:`role_text`), the beat, the staging, the
     composition, the place, the style tail (:func:`layered_style_tail`) and
     the constraints clause. Each layer is one or more whole sentences; an
-    empty one is left out. The caller keeps it within
-    ``KEYFRAME_V2_MAX_WORDS`` (``shots.resolve_shot`` shortens the looks and
-    the place first)."""
-    layers = (roles_text, beat, staging, composition, place_text,
+    empty one is left out. The caller keeps it within its budget
+    (``shots.resolve_shot`` shortens the looks and the place first).
+
+    *context* (stage F2: ``shots._layered``'s context layers, by name, the
+    ones its budget keeps): ``mood`` (the beat's temperature, the faces, who
+    is hurt), ``between`` (what stands between two characters) and
+    ``since`` (what changed since the previous shot) after the beat;
+    ``bearing`` (each character's posture) after the staging; ``when`` (the
+    time of day) after the place. None or empty: the layers it always had."""
+    context = context or {}
+    layers = (roles_text, beat, context.get("mood", ""), context.get("between", ""), context.get("since", ""),
+              staging, context.get("bearing", ""), composition, place_text, context.get("when", ""),
               layered_style_tail(style_lock, rendering_words=rendering_words), constraints)
     text = _collapse_ws(" ".join(_collapse_ws(layer) for layer in layers if layer and layer.strip()))
     return text.replace(".,", ",").replace("..", ".")
 
 
+# The clip prompt's context layers (stage F2), in the order they are dropped
+# when the whole is over budget -- the least valuable first: the camera's
+# intent, then the micro-actions, then the beat's emotion; only then is the
+# motion cut.
+_CLIP_DROP_ORDER = ("intent", "micro", "emotion")
+
+
 def layered_clip_prompt(style_lock: dict, *, subject: str, motion: str, camera_phrase: str, modifiers=(),
-                        secondary: str = "", budget: int = CLIP_V2_MAX_WORDS) -> str:
+                        secondary: str = "", budget: int = CLIP_V2_MAX_WORDS, emotion: str = "", micro: str = "",
+                        intent: str = "") -> str:
     """A v2 shot's clip prompt (A8), at most *budget* words
     (``CLIP_V2_MAX_WORDS``, or the link's own -- stage F2): the subject and
     what moves (*motion*: the shot's resolved, name-free action, or the
     planned motion; it is said as it is when it already names the
-    *subject*), one *secondary* motion, the camera phrase and its *modifiers*,
-    the stays-still clause, then the style's ``tier2_prompt_suffix``. The
-    motion is cut at a clause boundary when the whole would be longer."""
+    *subject*), the beat's *emotion*, one *secondary* motion, the
+    characters' *micro* actions, the camera phrase with its *modifiers* and
+    the camera's *intent*, the stays-still clause, then the style's
+    ``tier2_prompt_suffix``. Over the budget, the three context layers go
+    first (:data:`_CLIP_DROP_ORDER`: the intent, the micro-actions, the
+    emotion), then the motion is cut at a clause boundary. With none of the
+    three given, the text it always was."""
     suffix = as_sentence(style_lock["motion_rules"]["tier2_prompt_suffix"])
-    camera = as_sentence(", ".join([_strip_trailing_period(camera_phrase)]
-                                 + [_strip_trailing_period(m) for m in modifiers if m]))
-    tail = [as_sentence(secondary), camera, STAYS_STILL, suffix]
-    room = budget - sum(_word_count(part) for part in tail)
     moving = _collapse_ws(motion)
     if subject and subject.lower() not in moving.lower():
         moving = f"{subject}: {moving}"
+    extras = {"emotion": as_sentence(emotion), "micro": as_sentence(micro),
+              "intent": _strip_trailing_period(_collapse_ws(intent))}
+    for dropped in range(len(_CLIP_DROP_ORDER) + 1):
+        kept = {name: text for name, text in extras.items() if text and name not in _CLIP_DROP_ORDER[:dropped]}
+        camera = as_sentence(", ".join([_strip_trailing_period(camera_phrase)]
+                                     + [_strip_trailing_period(m) for m in modifiers if m]
+                                     + ([kept["intent"]] if "intent" in kept else [])))
+        tail = [kept.get("emotion", ""), as_sentence(secondary), kept.get("micro", ""), camera, STAYS_STILL, suffix]
+        room = budget - sum(_word_count(part) for part in tail)
+        if _word_count(moving) <= room or dropped == len(_CLIP_DROP_ORDER):
+            break
     lead = as_sentence(_fit(moving, room, stops=",;.") if _word_count(moving) > room else moving)
     return _collapse_ws(" ".join(part for part in [lead] + tail if part))
 

@@ -2534,10 +2534,14 @@ class _Assets(voice_lines.LineMeasurement):
         scene = next((s for s in self.script["scenes"] if s["scene_id"] == shot["scene_id"]), None)
         if scene is None:
             return None, None
+        ordered = self.storyboard["shots"]
+        index = next((i for i, item in enumerate(ordered) if item["shot_id"] == shot["shot_id"]), None)
         try:
             resolved = shots_mod.resolve_shot(shots_mod.plan_of(shot, v2=True), scene=scene, entities=ec.entities,
                                               style_lock=ec.style_lock, consistency_mode=ec.consistency_mode,
-                                              v2=True, ledger=self.ledger_now(), budgets=self.budgets())
+                                              v2=True, ledger=self.ledger_now(), budgets=self.budgets(),
+                                              previous_plan=shots_mod.previous_plan(ordered, index)
+                                              if index is not None else None)
         except (KeyError, ValueError):
             return None, None
         self.ctx.on_log(f"ℹ️ Shot {shot['shot_id']}: the previous shot of its scene has no keyframe yet, so it is "
