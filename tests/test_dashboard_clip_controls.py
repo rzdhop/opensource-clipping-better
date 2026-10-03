@@ -122,10 +122,11 @@ def test_the_image_offer_banner_exists_with_a_confirmation_and_is_not_tier_gated
     generation exists from tier 1), unlike the video offer and every clip
     control which are tier >= 2 only -- so, unlike `ShotClipBlock`, its
     render call site must NOT sit behind the `tier >= 2` guard. Its switch
-    must be confirmed first, the same pattern as the video offer's own."""
+    must be confirmed first (the kit's confirm dialog, DEC-253), the same
+    pattern as the video offer's own."""
     src = _src()
     assert "function ImageOfferBanner" in src, "the image offer banner is missing"
-    assert re.search(r"function ImageOfferBanner[\s\S]*?window\.confirm\(", src), (
+    assert re.search(r"function ImageOfferBanner[\s\S]*?await confirm\(\{", src), (
         "the image offer's switch must be confirmed before it is sent, like the video offer's"
     )
     assert re.search(r"<ImageOfferBanner\b", src), "ImageOfferBanner must be rendered on the page"

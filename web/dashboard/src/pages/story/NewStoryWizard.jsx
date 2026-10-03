@@ -7,6 +7,9 @@ import {
 import { LiveActivity, useJobFeed } from '../../components/ActivityFeed'
 import RouteChip from '../../components/RouteChip'
 import { StepError } from './fields'
+import { formatUsd } from '../../lib/format'
+import { useConfirm } from '../../ui'
+import { Check } from '../../ui/icons'
 import ConceptsStep from './steps/ConceptsStep'
 import BibleStep from './steps/BibleStep'
 import StyleStep from './steps/StyleStep'
@@ -14,13 +17,6 @@ import CastStep from './steps/CastStep'
 import PlacesStep from './steps/PlacesStep'
 import SeasonStep from './steps/SeasonStep'
 import KnowledgeStep, { knowledgeState } from './steps/KnowledgeStep'
-
-// Same sub-cent formatting as the episode panes' fmtUsd (duplicated: this
-// page shares no component module with them).
-function fmtUsd(value) {
-  const amount = Number(value) || 0
-  return amount === 0 ? '0.00' : amount.toFixed(3)
-}
 
 const ROUTES = ['auto', 'local', 'api']
 
@@ -472,6 +468,7 @@ function switchedSummary(result) {
  * finding F5); see the caller for the fallback when none does.
  */
 function GenerationProfileCard({ storyId, story, nextEp, onChange }) {
+  const confirm = useConfirm()
   // What the server holds, as last fetched: the selects start from it, follow
   // it whenever the story is fetched again, and go back to it when a save is
   // refused (they used to keep showing values the server never saved).
@@ -523,7 +520,13 @@ function GenerationProfileCard({ storyId, story, nextEp, onChange }) {
   // archived first (POST /switch-pipeline); the server queues the step the
   // story needs next (the cast's dossiers, looks and redraws, ...).
   const regenerate = async () => {
-    if (!switchOffer || !window.confirm(regenerateConfirm(switchOffer.episodes, switchOffer.patch))) return
+    if (!switchOffer) return
+    const confirmed = await confirm({
+      title: `Regenerate ${episodesLabel(switchOffer.episodes)}`,
+      message: regenerateConfirm(switchOffer.episodes, switchOffer.patch),
+      confirmLabel: 'Regenerate',
+    })
+    if (!confirmed) return
     setSaving(true)
     setError('')
     try {
@@ -649,7 +652,7 @@ function GenerationProfileCard({ storyId, story, nextEp, onChange }) {
                       {est.video.count != null ? (
                         est.video.route_class === 'local' && est.video.eta_s != null
                           ? ` · ~${Math.round(est.video.eta_s)} s local${est.video.eta_note ? ` (${est.video.eta_note})` : ''}`
-                          : ` · $${fmtUsd(est.video.est_usd)}`
+                          : ` · $${formatUsd(est.video.est_usd)}`
                       ) : ''}
                     </span>
                     {est.video.link && <RouteChip routeClass={est.video.route_class} link={est.video.link} />}
@@ -808,7 +811,7 @@ function ExistingStory({ storyId }) {
       <div className="stepper">
         <div className="stepper-step stepper-step-done">
           <div className="stepper-step-header">
-            <span className="stepper-step-index">✓</span>
+            <span className="stepper-step-index"><Check size={14} strokeWidth={3} role="img" aria-label="done" /></span>
             <span className="stepper-step-label">New story</span>
           </div>
           <div className="stepper-summary">
@@ -835,7 +838,7 @@ function ExistingStory({ storyId }) {
                 disabled={!clickable}
                 onClick={() => clickable && setManualStep(isOpen ? null : step.key)}
               >
-                <span className="stepper-step-index">{status === 'done' ? '✓' : step.number}</span>
+                <span className="stepper-step-index">{status === 'done' ? <Check size={14} strokeWidth={3} role="img" aria-label="done" /> : step.number}</span>
                 <span className="stepper-step-label">{step.label}</span>
                 {status === 'disabled' && <span className="stepper-step-reason">{disabledReason(step.key)}</span>}
                 {reopenable && !isOpen && <span className="stepper-step-edit">Edit</span>}

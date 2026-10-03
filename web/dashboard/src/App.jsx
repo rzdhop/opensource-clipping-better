@@ -10,6 +10,7 @@ import NewStoryWizard from './pages/story/NewStoryWizard'
 import EpisodeStudio from './pages/story/EpisodeStudio'
 import ModeSwitch, { modeFromPath, readMode, rememberMode } from './components/ModeSwitch'
 import { checkToken, clearToken, getToken } from './api'
+import { BookOpen, Clapperboard, LayoutDashboard, Lock, Plus, Settings as SettingsIcon } from './ui/icons'
 
 // `/` and any unknown path open the last mode used (DEC-094).
 function ModeRedirect() {
@@ -72,30 +73,30 @@ function App() {
       {/* Sidebar */}
       <aside className="sidebar">
         <div className="sidebar-brand">
-          <h1>🎬 rzdhop AI</h1>
+          <h1><Clapperboard className="sidebar-brand-icon" size={18} aria-hidden="true" />rzdhop AI</h1>
           <p>clips &amp; AI stories, on free APIs</p>
           <ModeSwitch />
         </div>
         <nav className="sidebar-nav">
           {mode === 'story' ? (
             <NavLink to="/story" end className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-              <span className="icon">📖</span>
+              <span className="icon"><BookOpen size={18} aria-hidden="true" /></span>
               Stories
             </NavLink>
           ) : (
             <>
               <NavLink to="/clips" end className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-                <span className="icon">📊</span>
+                <span className="icon"><LayoutDashboard size={18} aria-hidden="true" /></span>
                 Dashboard
               </NavLink>
               <NavLink to="/clips/new" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-                <span className="icon">➕</span>
+                <span className="icon"><Plus size={18} aria-hidden="true" /></span>
                 New Job
               </NavLink>
             </>
           )}
           <NavLink to="/settings" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-            <span className="icon">⚙️</span>
+            <span className="icon"><SettingsIcon size={18} aria-hidden="true" /></span>
             Settings
           </NavLink>
         </nav>
@@ -103,7 +104,7 @@ function App() {
           {/* Only a deployment with a token has anything to sign out of. */}
           {getToken() && (
             <button type="button" className="nav-link sign-out" onClick={signOut}>
-              <span className="icon">🔒</span>
+              <span className="icon"><Lock size={18} aria-hidden="true" /></span>
               Sign out
             </button>
           )}
@@ -117,9 +118,9 @@ function App() {
       <main className="main-content">
         {/* The sidebar is hidden under 768 px; the mode switch and Settings stay reachable here. */}
         <div className="mobile-topbar">
-          <span className="topbar-brand">🎬 rzdhop AI</span>
+          <span className="topbar-brand"><Clapperboard className="sidebar-brand-icon" size={16} aria-hidden="true" />rzdhop AI</span>
           <ModeSwitch compact />
-          <NavLink to="/settings" className="topbar-link" aria-label="Settings">⚙️</NavLink>
+          <NavLink to="/settings" className="topbar-link" aria-label="Settings"><SettingsIcon size={20} aria-hidden="true" /></NavLink>
         </div>
         <Routes>
           <Route path="/" element={<ModeRedirect />} />

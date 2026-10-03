@@ -35,11 +35,48 @@
   --info: #3b82f6;
   --info-dim: rgba(59, 130, 246, 0.15);
 
-  /* Typography */
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+  /* A raised surface (menus, dialogs, toasts) sits one step above a card. */
+  --surface-raised: #1e1e2b;
+  --backdrop: rgba(5, 5, 10, 0.72);
 
-  /* Spacing */
+  /* Typography. Only Inter is loaded (index.html); the mono stack names the
+   * system faces the browser already has. */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* Type scale (DEC-253) */
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-md: 14px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+  --text-2xl: 28px;
+  --leading-tight: 1.25;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.65;
+
+  /* Spacing scale (DEC-253) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 48px;
+
+  /* Focus: every interactive primitive shows this ring on :focus-visible. */
+  --focus-ring-color: var(--accent);
+  --focus-ring: 2px solid var(--focus-ring-color);
+  --focus-ring-offset: 2px;
+
+  /* Stacking order */
+  --z-sidebar: 100;
+  --z-dropdown: 200;
+  --z-dialog: 1000;
+  --z-toast: 1100;
+
+  /* Radii */
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 14px;

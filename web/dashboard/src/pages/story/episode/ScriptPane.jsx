@@ -8,6 +8,7 @@ import EstimateChip from '../../../components/EstimateChip'
 import RouteChip from '../../../components/RouteChip'
 import { EditableText, RegenerateControl, StepError } from '../fields'
 import DurationBar from './DurationBar'
+import { formatUsd } from '../../../lib/format'
 
 // The episode lengths shipped (spec 6.2; serial_60s_v2 since phase 7, DEC-227:
 // 6-10 beat shots of 5-12 s, every shot animated): FR/EN-agnostic English labels,
@@ -36,11 +37,6 @@ const SCENE_FUNCTION_LABELS = {
 // (episode.assets.lines[].words_source / .approximate).
 const WORD_SOURCE_LABELS = {
   provider: 'provider timing', alignment: 'aligned timing',
-}
-
-function fmtUsd(value) {
-  const amount = Number(value) || 0
-  return amount === 0 ? '0.00' : amount.toFixed(3)
 }
 
 // ------------------------------------------------------------ length + write
@@ -522,7 +518,7 @@ function MeasureVoices({ storyId, ep, scriptComplete, checkNeeded, busy, onChang
           <span className="chip chip-warn chip-wrap">{estimateError}</span>
         ) : block && (
           <span className="chip" title={block.ready ? '' : 'Some lines have no pinned voice'}>
-            {block.lines} line{block.lines === 1 ? '' : 's'} · {block.chars} char{block.chars === 1 ? '' : 's'} · est. ${fmtUsd(block.est_usd)}
+            {block.lines} line{block.lines === 1 ? '' : 's'} · {block.chars} char{block.chars === 1 ? '' : 's'} · est. ${formatUsd(block.est_usd)}
           </span>
         )}
       </div>

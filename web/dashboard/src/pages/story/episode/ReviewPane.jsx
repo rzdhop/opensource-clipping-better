@@ -17,13 +17,7 @@ import {
 } from '../../../api'
 import EstimateChip from '../../../components/EstimateChip'
 import { RegenerateControl, StepError } from '../fields'
-
-// Same sub-cent formatting as StoryboardPane.jsx's fmtUsd (duplicated: the
-// panes share no component module).
-function fmtUsd(value) {
-  const amount = Number(value) || 0
-  return amount === 0 ? '0.00' : amount.toFixed(3)
-}
+import { formatUsd } from '../../../lib/format'
 
 /**
  * A blob URL for one media file (the shot image route, the clip route:
@@ -138,7 +132,7 @@ function ReviewTile({ storyId, ep, shot, characters, onOpen }) {
 
 /**
  * The clip's re-animate (StoryboardPane.jsx's ClipRegenerate, duplicated for
- * the same reason as fmtUsd): its own estimate first, never fetched while
+ * because the panes share no component module): its own estimate first, never fetched while
  * `clip.blocked` is set (browser-check finding F2).
  */
 function ClipRegenerate({ storyId, shot, disabled, onChange }) {
@@ -233,7 +227,7 @@ function ReviewDetail({ storyId, ep, shot, characters, assetsBlocked, busy, onCl
         {shot.verdict.issue && <p className="form-hint">Keyframe check (J2): {shot.verdict.issue}</p>}
         {shot.fix && (
           <p className="form-hint">
-            Auto-fix: {plural(shot.fix.redraws, 'redraw')}, ${fmtUsd(shot.fix.spent_usd)}
+            Auto-fix: {plural(shot.fix.redraws, 'redraw')}, ${formatUsd(shot.fix.spent_usd)}
             {shot.fix.gave_up ? ' — gave up, still flagged' : ''}
           </p>
         )}
@@ -357,9 +351,9 @@ export default function ReviewPane({ episode, characters, storyId, ep, inFlightJ
         <div className="story-step-actions">
           <span className={review.ready ? 'chip chip-accent' : 'chip chip-warn'}>{review.status.replace(/_/g, ' ')}</span>
           <span className="chip" title="What this episode spent so far, by kind">
-            spent ${fmtUsd(spend.total_usd)} · keyframes ${fmtUsd(spend.images_usd)}
-            {spend.fixes_usd > 0 ? ` · redraws $${fmtUsd(spend.fixes_usd)}` : ''}
-            {' · '}voices ${fmtUsd(spend.voices_usd)} · clips ${fmtUsd(spend.clips_usd)}
+            spent ${formatUsd(spend.total_usd)} · keyframes ${formatUsd(spend.images_usd)}
+            {spend.fixes_usd > 0 ? ` · redraws $${formatUsd(spend.fixes_usd)}` : ''}
+            {' · '}voices ${formatUsd(spend.voices_usd)} · clips ${formatUsd(spend.clips_usd)}
           </span>
           <span className={review.flagged.length ? 'chip chip-warn' : 'chip chip-accent'}>
             {plural(review.flagged.length, 'keyframe')} flagged

@@ -1,0 +1,35 @@
+// The one place the dashboard takes its icons from (lucide-react, pinned in
+// package.json). Pages import from here, never from lucide-react directly, so
+// the set the app uses stays small, named consistently and easy to audit.
+// Where lucide renamed an icon, the familiar name is kept as the export.
+export {
+  BookOpen,
+  Brain,
+  Calendar,
+  Check,
+  ChevronRight,
+  CircleCheck,
+  CircleX,
+  Clapperboard,
+  Film,
+  Gift,
+  Info,
+  LayoutDashboard,
+  Lock,
+  MapPin,
+  Monitor,
+  Pencil,
+  Play,
+  Plus,
+  RefreshCw,
+  Settings,
+  Sparkles,
+  Users,
+  Ban,
+  CircleDollarSign,
+  X,
+  Trash as Trash2,
+  TriangleAlert as AlertTriangle,
+  LoaderCircle as Loader2,
+  WandSparkles as Wand2,
+} from 'lucide-react'

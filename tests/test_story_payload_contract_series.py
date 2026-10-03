@@ -247,10 +247,11 @@ def test_a_decision_is_confirmed_before_it_is_sent():
     match = re.search(r"const decide = async \(accept\) => (\{[\s\S]*?\n  \})", src)
     assert match, "decide(accept) handler not found in SeasonStep.jsx"
     body = match.group(1)
-    assert "window.confirm(" in body
+    # The kit's confirm dialog (useConfirm, DEC-253) replaced window.confirm.
+    assert "await confirm(" in body
     assert "decideProposal(" in body
     # The confirm must run before the network call, not after.
-    assert body.index("window.confirm(") < body.index("decideProposal(")
+    assert body.index("await confirm(") < body.index("decideProposal(")
 
 
 def test_the_fold_warning_text_is_exact_and_gated_on_lead_or_support():

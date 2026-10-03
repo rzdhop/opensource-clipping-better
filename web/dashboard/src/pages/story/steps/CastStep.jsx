@@ -8,6 +8,7 @@ import EstimateChip from '../../../components/EstimateChip'
 import RouteChip from '../../../components/RouteChip'
 import { LiveActivity, useJobFeed } from '../../../components/ActivityFeed'
 import { EditableText, EditableList, RegenerateControl, StepError } from '../fields'
+import { useConfirm } from '../../../ui'
 
 // The character roles a custom entry may pick (spec 2.3): the closed list
 // clipping.aistory.schemas.CHARACTER_ROLES also uses.
@@ -521,6 +522,7 @@ function DossierSection({ storyId, character, castNames, disabled, onChange }) {
 // -------------------------------------------------------------- one character
 
 function CharacterCard({ storyId, character, info, pickVoiceIds, disabled, onChange, consistencyMode, isV2, castNames }) {
+  const confirm = useConfirm()
   const [approveError, setApproveError] = useState('')
   const [approveErrors, setApproveErrors] = useState(null)
   const [approving, setApproving] = useState(false)
@@ -574,7 +576,12 @@ function CharacterCard({ storyId, character, info, pickVoiceIds, disabled, onCha
   }
 
   const handleDelete = async () => {
-    if (!window.confirm(`Delete ${character.name}? This cannot be undone.`)) return
+    if (!(await confirm({
+      title: `Delete ${character.name}?`,
+      message: 'This cannot be undone.',
+      confirmLabel: 'Delete character',
+      tone: 'danger',
+    }))) return
     setDeleting(true)
     setDeleteError('')
     try {
@@ -712,14 +719,17 @@ function CharacterCard({ storyId, character, info, pickVoiceIds, disabled, onCha
 // ------------------------------------------------------------- needs an editor
 
 function NeedsEditorBanner({ storyId, editReadiness, disabled, onChange }) {
+  const confirm = useConfirm()
   const [switching, setSwitching] = useState(false)
   const [error, setError] = useState('')
 
   const switchToPromptOnly = async () => {
-    if (!window.confirm(
-      'Switch this story to prompt-only consistency? Shots will be prompted without reference images, so ' +
-      'characters and places may drift slightly across shots. This cannot be undone from here.',
-    )) return
+    if (!(await confirm({
+      title: 'Switch this story to prompt-only consistency?',
+      message: 'Shots will be prompted without reference images, so ' +
+        'characters and places may drift slightly across shots. This cannot be undone from here.',
+      confirmLabel: 'Switch to prompt-only',
+    }))) return
     setSwitching(true)
     setError('')
     try {

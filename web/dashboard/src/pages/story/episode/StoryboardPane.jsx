@@ -13,15 +13,8 @@ import {
 import EstimateChip from '../../../components/EstimateChip'
 import RouteChip from '../../../components/RouteChip'
 import { EditableText, RegenerateControl, StepError } from '../fields'
-
-// GET /estimate/assets's est_usd/its `voices`/`images` sub-estimates and the
-// fast-track split both carry sub-cent amounts; same formatting as
-// ScriptPane.jsx's fmtUsd (duplicated so this file stays independently
-// readable -- the two panes share no component module).
-function fmtUsd(value) {
-  const amount = Number(value) || 0
-  return amount === 0 ? '0.00' : amount.toFixed(3)
-}
+import { formatUsd } from '../../../lib/format'
+import { useConfirm } from '../../../ui'
 
 // clipping.aistory.schemas closed lists, verbatim (tests/test_story_payload_contract_episode.py).
 const FRAMINGS = [
@@ -1145,7 +1138,7 @@ function AssetsHeader({ storyId, ep, episode, busy, onChange }) {
                 ``video.ready`` is false -- allow_paid off, over a cap, ...). The
                 video part now gets its own chip with its own ready/cost reading. */}
             <span className="chip" title={estimate.message || ''}>
-              est. ${fmtUsd(estimate.est_usd)} · {estimate.images.count} image{estimate.images.count === 1 ? '' : 's'}
+              est. ${formatUsd(estimate.est_usd)} · {estimate.images.count} image{estimate.images.count === 1 ? '' : 's'}
               {' · '}{estimate.voices.lines} line{estimate.voices.lines === 1 ? '' : 's'}
             </span>
             {/* A RouteChip with no route_class (nothing left to route: every shot
@@ -1158,8 +1151,8 @@ function AssetsHeader({ storyId, ep, episode, busy, onChange }) {
                 {estimate.video.count} clip{estimate.video.count === 1 ? '' : 's'}
                 {' '}
                 {estimate.video.ready
-                  ? (estimate.video.route_class === 'local' ? '(local)' : `($${fmtUsd(estimate.video.est_usd)})`)
-                  : `(est $${fmtUsd(estimate.video.est_usd)}, not now)`}
+                  ? (estimate.video.route_class === 'local' ? '(local)' : `($${formatUsd(estimate.video.est_usd)})`)
+                  : `(est $${formatUsd(estimate.video.est_usd)}, not now)`}
               </span>
             )}
           </>
@@ -1216,6 +1209,7 @@ function AssetsHeader({ storyId, ep, episode, busy, onChange }) {
  * `patchEpisodeAssetsLinks`.
  */
 function ImageOfferBanner({ storyId, ep, episode, busy, onChange }) {
+  const confirm = useConfirm()
   const [switching, setSwitching] = useState(false)
   const [switchError, setSwitchError] = useState('')
   const offer = episode.assets && episode.assets.image_offer
@@ -1223,7 +1217,7 @@ function ImageOfferBanner({ storyId, ep, episode, busy, onChange }) {
 
   const handleSwitch = async () => {
     if (!offer.switch) return
-    if (!window.confirm(`${offer.message}\n\nSwitch now?`)) return
+    if (!(await confirm({ title: 'Switch now?', message: offer.message, confirmLabel: `Switch to ${offer.next_link}` }))) return
     setSwitching(true)
     setSwitchError('')
     try {
@@ -1270,6 +1264,7 @@ function ImageOfferBanner({ storyId, ep, episode, busy, onChange }) {
  * nothing rendered) before tier 2 or before a script/storyboard exist.
  */
 function VideoPhaseHeader({ storyId, ep, episode, busy, onChange }) {
+  const confirm = useConfirm()
   const [switching, setSwitching] = useState(false)
   const [switchError, setSwitchError] = useState('')
   const video = episode.assets && episode.assets.video
@@ -1277,7 +1272,7 @@ function VideoPhaseHeader({ storyId, ep, episode, busy, onChange }) {
 
   const handleSwitch = async () => {
     if (!video.offer || !video.offer.switch) return
-    if (!window.confirm(`${video.offer.message}\n\nSwitch now?`)) return
+    if (!(await confirm({ title: 'Switch now?', message: video.offer.message, confirmLabel: 'Switch' }))) return
     setSwitching(true)
     setSwitchError('')
     try {
@@ -1301,7 +1296,7 @@ function VideoPhaseHeader({ storyId, ep, episode, busy, onChange }) {
           {video.count != null ? (
             video.route_class === 'local' && video.eta_s != null
               ? ` · ~${Math.round(video.eta_s)} s local${video.eta_note ? ` (${video.eta_note})` : ''}`
-              : ` · $${fmtUsd(video.est_usd)}`
+              : ` · $${formatUsd(video.est_usd)}`
           ) : ''}
         </span>
       </div>

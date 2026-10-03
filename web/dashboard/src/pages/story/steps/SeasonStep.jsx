@@ -7,6 +7,7 @@ import EstimateChip from '../../../components/EstimateChip'
 import RouteChip from '../../../components/RouteChip'
 import { LiveActivity, useJobFeed } from '../../../components/ActivityFeed'
 import { RegenerateControl, StepError } from '../fields'
+import { useConfirm } from '../../../ui'
 
 // The season arc's function badges (spec 2.6): the closed list
 // clipping.aistory.schemas.ARC_FUNCTIONS also uses, and their human labels.
@@ -652,6 +653,7 @@ function ProposeNextControl({ storyId, ep, memoryApproved, disabled, onChange })
  * arrives.
  */
 function ProposalItem({ storyId, ep, item, kind, decision, disabled, onChange }) {
+  const confirm = useConfirm()
   const [role, setRole] = useState(kind === 'character' ? item.role : null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -662,9 +664,15 @@ function ProposalItem({ storyId, ep, item, kind, decision, disabled, onChange })
 
   const decide = async (accept) => {
     const subject = kind === 'character' ? item.name : `the twist for episode ${item.target_ep}`
-    let message = `${accept ? 'Accept' : 'Reject'} ${subject}? This decision is final.`
+    const question = `${accept ? 'Accept' : 'Reject'} ${subject}?`
+    let message = 'This decision is final.'
     if (accept && foldsCast) message += ` Heads up: ${ROLE_FOLD_WARNING}.`
-    if (!window.confirm(message)) return
+    const confirmed = await confirm({
+      title: question,
+      message,
+      confirmLabel: accept ? 'Accept' : 'Reject',
+    })
+    if (!confirmed) return
     setBusy(true)
     setError('')
     setErrors(null)
@@ -929,6 +937,7 @@ function SeriesMemoryPanel({ storyId, series, episodes, characters, totalEpisode
 // -------------------------------------------------------------- approve/re-plan
 
 function SeasonActions({ storyId, season, disabled, onChange }) {
+  const confirm = useConfirm()
   const [approving, setApproving] = useState(false)
   const [approveError, setApproveError] = useState('')
   const [approveErrors, setApproveErrors] = useState(null)
@@ -952,7 +961,12 @@ function SeasonActions({ storyId, season, disabled, onChange }) {
   }
 
   const handleReplan = async () => {
-    if (!window.confirm('Re-plan the season? This replaces the current arc entirely.')) return
+    if (!(await confirm({
+      title: 'Re-plan the season?',
+      message: 'This replaces the current arc entirely.',
+      confirmLabel: 'Re-plan',
+      tone: 'danger',
+    }))) return
     setReplanning(true)
     setReplanError('')
     setReplanErrors(null)

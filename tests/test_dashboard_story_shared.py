@@ -284,7 +284,8 @@ def test_the_prompt_only_switch_is_behind_a_confirm_call():
     src = CAST_STEP.read_text(encoding="utf-8")
     match = re.search(r"const switchToPromptOnly = async \(\) => \{([\s\S]*?)\n  \}", src)
     assert match, "switchToPromptOnly not found in CastStep.jsx"
-    assert "window.confirm(" in match.group(1)
+    # The kit's confirm dialog (useConfirm, DEC-253) replaced window.confirm.
+    assert "await confirm(" in match.group(1)
     assert "consistency_mode: 'prompt_only'" in match.group(1)
 
 

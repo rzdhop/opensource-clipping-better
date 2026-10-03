@@ -1,10 +1,19 @@
+import { Ban, CircleDollarSign, Gift, Monitor } from '../ui/icons'
+
 // Where a story step's generation would run, from an estimate's
 // `route_class` (GET /api/stories/{id}/estimate/{step}) or a story's `route`.
 const ROUTE_LABELS = {
-  local: '🖥 local',
-  free: '🆓 free',
-  paid: '💸 paid',
-  blocked: '⛔ blocked',
+  local: 'local',
+  free: 'free',
+  paid: 'paid',
+  blocked: 'blocked',
+}
+
+const ROUTE_ICONS = {
+  local: Monitor,
+  free: Gift,
+  paid: CircleDollarSign,
+  blocked: Ban,
 }
 
 /**
@@ -15,11 +24,13 @@ const ROUTE_LABELS = {
  */
 export default function RouteChip({ routeClass, link }) {
   const label = ROUTE_LABELS[routeClass] || routeClass || 'unknown'
+  const Icon = ROUTE_ICONS[routeClass]
   return (
     <span
       className={`chip${routeClass === 'blocked' ? ' chip-warn' : ''}`}
       title={link || undefined}
     >
+      {Icon && <Icon size={12} aria-hidden="true" />}
       {label}
       {link && <span className="chip-sub" title={link}>{link}</span>}
     </span>

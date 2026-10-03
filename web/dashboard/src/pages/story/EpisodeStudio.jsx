@@ -4,17 +4,12 @@ import { fetchEpisode, fetchStory, runStoryStep, fetchStoryEstimate } from '../.
 import { LiveActivity, useJobFeed } from '../../components/ActivityFeed'
 import Tabs from '../../components/Tabs'
 import { StepError } from './fields'
+import { formatUsd } from '../../lib/format'
+import { useConfirm } from '../../ui'
 import ScriptPane from './episode/ScriptPane'
 import StoryboardPane from './episode/StoryboardPane'
 import PreviewPane from './episode/PreviewPane'
 import ReviewPane from './episode/ReviewPane'
-
-// Same sub-cent formatting as ScriptPane.jsx's / StoryboardPane.jsx's fmtUsd
-// (duplicated: this file shares no component module with the panes).
-function fmtUsd(value) {
-  const amount = Number(value) || 0
-  return amount === 0 ? '0.00' : amount.toFixed(3)
-}
 
 // A cap is a round figure: two decimals, as the fast track's own caps line.
 function fmtCap(value) {
@@ -113,6 +108,7 @@ function fastTrackProgress(events) {
  * reports (`job`, `events`: the in-flight fast-track job and its feed).
  */
 function FastTrackHeader({ storyId, ep, busy, job, events, onChange }) {
+  const confirm = useConfirm()
   const [estimate, setEstimate] = useState(null)
   const [running, setRunning] = useState(false)
   const [stopAtKeyframes, setStopAtKeyframes] = useState(false)
@@ -150,21 +146,21 @@ function FastTrackHeader({ storyId, ep, busy, job, events, onChange }) {
       `Generate episode ${ep} — the whole thing, up to the finished render?`,
       `Script: ${plural(est.llm_calls.script, 'LLM call')} · Storyboard: ${plural(est.llm_calls.storyboard, 'T1 call')}` +
         ` · Metadata: ${plural(est.llm_calls.metadata, 'M1 call')}`,
-      `${v2 ? 'Keyframes' : 'Images'}: ${plural(est.images.count, 'shot image')}, est. $${fmtUsd(est.images.est_usd)}` +
+      `${v2 ? 'Keyframes' : 'Images'}: ${plural(est.images.count, 'shot image')}, est. $${formatUsd(est.images.est_usd)}` +
         (v2 ? ` — each checked (J2)${fix > 0
-          ? `, flagged ones redrawn automatically (up to $${fmtUsd(fix)} more)`
+          ? `, flagged ones redrawn automatically (up to $${formatUsd(fix)} more)`
           : ', flagged ones redrawn automatically when the profile allows it'}` : ''),
-      `Voices: ${plural(est.tts.lines, 'line')} / ${est.tts.chars} chars, est. $${fmtUsd(est.tts.est_usd)}`,
+      `Voices: ${plural(est.tts.lines, 'line')} / ${est.tts.chars} chars, est. $${formatUsd(est.tts.est_usd)}`,
     ]
     if (est.video) {
       lines.push(est.video.count != null
         ? `Clips: ${plural(est.video.count, 'clip')} (${est.video.seconds} s) on ${est.video.link || 'the video link'}, ` +
-          `est. $${fmtUsd(est.video.est_usd)}`
+          `est. $${formatUsd(est.video.est_usd)}`
         : 'Clips: planned once the storyboard is approved; the paid check prices them before any is bought')
     }
     lines.push(`Render: about ${est.render.minutes} min`)
     const caps = capsText(est.paid.caps)
-    lines.push(`Total: est. $${fmtUsd(est.est_usd)}${caps ? ` — caps: ${caps}` : ''}`)
+    lines.push(`Total: est. $${formatUsd(est.est_usd)}${caps ? ` — caps: ${caps}` : ''}`)
     if (v2 && kf.tier >= 2) {
       lines.push(stop
         ? 'It stops once the keyframes are made and checked (J2), for your review; the clips are bought after you approve them.'
@@ -175,7 +171,13 @@ function FastTrackHeader({ storyId, ep, busy, job, events, onChange }) {
   }
 
   const handleRun = async () => {
-    if (!estimate || !window.confirm(confirmMessage(estimate, stopAtKeyframes))) return
+    if (!estimate) return
+    const confirmed = await confirm({
+      title: `Generate episode ${ep}`,
+      message: confirmMessage(estimate, stopAtKeyframes),
+      confirmLabel: 'Generate episode',
+    })
+    if (!confirmed) return
     setRunning(true)
     setError('')
     setErrors(null)
@@ -213,7 +215,7 @@ function FastTrackHeader({ storyId, ep, busy, job, events, onChange }) {
         {estimateError ? (
           <span className="chip chip-warn chip-wrap">{estimateError}</span>
         ) : estimate && (
-          <span className="chip" title={estimate.message || ''}>est. ${fmtUsd(estimate.est_usd)} total</span>
+          <span className="chip" title={estimate.message || ''}>est. ${formatUsd(estimate.est_usd)} total</span>
         )}
       </div>
       {progress && (

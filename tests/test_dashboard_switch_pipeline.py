@@ -99,7 +99,8 @@ def test_the_card_offers_to_regenerate_the_episodes_the_refusal_names():
     assert "`episode ${" in label and "–" in label
     assert "Regenerate ${episodesLabel(" in src
     # Asked first, with what goes, what stays and what runs next.
-    assert "window.confirm(regenerateConfirm(" in card
+    # The kit's confirm dialog (useConfirm, DEC-253) carries regenerateConfirm's text as its message.
+    assert re.search(r"await confirm\(\{[\s\S]{0,300}?message: regenerateConfirm\(switchOffer\.episodes, switchOffer\.patch\)", card)
     confirm = _function(src, "regenerateConfirm")
     for words in ("script, storyboard, images, clips and render", "cast, places, props, season and music",
                   "dossier and look", "knowledge base", "estimate first"):

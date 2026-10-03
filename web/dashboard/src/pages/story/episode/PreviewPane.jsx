@@ -11,13 +11,7 @@ import { runStoryStep, regenerateStory, fetchStoryEstimate } from '../../../api'
 import EstimateChip from '../../../components/EstimateChip'
 import RouteChip from '../../../components/RouteChip'
 import { RegenerateControl, StepError } from '../fields'
-
-// Same sub-cent formatting as StoryboardPane.jsx's / ScriptPane.jsx's fmtUsd
-// (duplicated: the panes share no component module with each other).
-function fmtUsd(value) {
-  const amount = Number(value) || 0
-  return amount === 0 ? '0.00' : amount.toFixed(3)
-}
+import { formatUsd } from '../../../lib/format'
 
 // clipping.aistory.render.partial.RENDER_REUSE_REASONS / schemas.
 // RENDER_REUSE_REASONS, verbatim: one line per shot in "Changes since last
@@ -189,7 +183,7 @@ function RenderHeader({ storyId, ep, episode, assetsApproved, busy, onChange }) 
         </button>
         {estimate && !estimateError && (
           <span className="chip" title={estimate.message || ''}>
-            est. ${fmtUsd(estimate.est_usd)} · {estimate.units.shots} shot{estimate.units.shots === 1 ? '' : 's'}
+            est. ${formatUsd(estimate.est_usd)} · {estimate.units.shots} shot{estimate.units.shots === 1 ? '' : 's'}
             {' · ~'}{estimate.minutes} min
           </span>
         )}
@@ -543,7 +537,7 @@ function LedgerTable({ episode }) {
               <span className="chip">{row.step}</span>
               <span className="story-ledger-cell">{row.provider}/{row.model}</span>
               <span className="story-ledger-cell">{row.qty} {row.unit}{row.qty === 1 ? '' : 's'}</span>
-              <span className="story-ledger-cell">${fmtUsd(row.est_usd)}</span>
+              <span className="story-ledger-cell">${formatUsd(row.est_usd)}</span>
               <span className={`chip${row.paid ? ' chip-warn' : ''}`}>{row.paid ? 'paid' : 'free'}</span>
               {row.note && <span className="form-hint">{row.note}</span>}
             </div>
@@ -552,8 +546,8 @@ function LedgerTable({ episode }) {
       )}
       <div className="story-ledger-totals">
         <span className="chip">{ledger.totals.entries} row{ledger.totals.entries === 1 ? '' : 's'}</span>
-        <span className="chip">est. ${fmtUsd(ledger.totals.est_usd)}</span>
-        <span className="chip">paid ${fmtUsd(ledger.totals.paid_usd)}</span>
+        <span className="chip">est. ${formatUsd(ledger.totals.est_usd)}</span>
+        <span className="chip">paid ${formatUsd(ledger.totals.paid_usd)}</span>
       </div>
     </div>
   )

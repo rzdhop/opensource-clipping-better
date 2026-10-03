@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { fetchStories, deleteStory, fetchStyles, styleNameOf } from '../../api'
+import { Button, EmptyState, useConfirm } from '../../ui'
+import { BookOpen, Sparkles } from '../../ui/icons'
 
 const STATUS_LABELS = {
   draft: 'Draft',
@@ -24,6 +26,7 @@ export default function StoriesList() {
   const [error, setError] = useState('')
   const [deletingId, setDeletingId] = useState(null)
   const [deleteErrors, setDeleteErrors] = useState({})
+  const confirm = useConfirm()
 
   const load = () => {
     fetchStories().then((data) => setStories(data.stories || [])).catch((err) => setError(err.message))
@@ -35,7 +38,13 @@ export default function StoriesList() {
   }, [])
 
   const handleDelete = async (storyId, title) => {
-    if (!window.confirm(`Delete "${title || 'Untitled story'}"?\n\nThis cannot be undone.`)) return
+    const confirmed = await confirm({
+      title: `Delete "${title || 'Untitled story'}"?`,
+      message: 'This cannot be undone.',
+      confirmLabel: 'Delete',
+      tone: 'danger',
+    })
+    if (!confirmed) return
     setDeletingId(storyId)
     setDeleteErrors((prev) => ({ ...prev, [storyId]: '' }))
     try {
@@ -55,7 +64,7 @@ export default function StoriesList() {
           <h2>AI Story</h2>
           <p>Persistent story workspaces — a world, a style lock and a season arc.</p>
         </div>
-        <Link to="/story/new" className="btn btn-primary">✨ New story</Link>
+        <Button as={Link} to="/story/new" variant="primary" icon={Sparkles}>New story</Button>
       </div>
 
       {error && <p className="story-error">{error}</p>}
@@ -63,15 +72,15 @@ export default function StoriesList() {
       {stories === null ? (
         <div className="empty-state"><span className="spinner"></span></div>
       ) : stories.length === 0 ? (
-        <div className="empty-state">
-          <div className="icon">📖</div>
-          <h3>No stories yet</h3>
-          <p>
-            Start a persistent story workspace — a world, a cast and a style lock that
-            stays consistent across every episode.
-          </p>
-          <Link to="/story/new" className="btn btn-primary">✨ New story</Link>
-        </div>
+        <EmptyState
+          icon={BookOpen}
+          title="No stories yet"
+          text={
+            'Start a persistent story workspace — a world, a cast and a style lock that ' +
+            'stays consistent across every episode.'
+          }
+          action={<Button as={Link} to="/story/new" variant="primary" icon={Sparkles}>New story</Button>}
+        />
       ) : (
         <div className="story-grid">
           {stories.map((story) => (

@@ -7,6 +7,7 @@ import EstimateChip from '../../../components/EstimateChip'
 import RouteChip from '../../../components/RouteChip'
 import { LiveActivity, useJobFeed } from '../../../components/ActivityFeed'
 import { EditableText, RegenerateControl, StepError } from '../fields'
+import { useConfirm } from '../../../ui'
 
 // The place time-variant choices a user may add (spec 2.4): the closed list
 // clipping.aistory.schemas.TIME_VARIANT_CHOICES also uses. "day" is always
@@ -391,6 +392,7 @@ function PropLookSection({ storyId, prop, names, disabled, onChange }) {
 // -------------------------------------------------------------- one place
 
 function PlaceCard({ storyId, place, missing, disabled, onChange, consistencyMode, isV2, names }) {
+  const confirm = useConfirm()
   const [approveError, setApproveError] = useState('')
   const [approveErrors, setApproveErrors] = useState(null)
   const [approving, setApproving] = useState(false)
@@ -433,7 +435,12 @@ function PlaceCard({ storyId, place, missing, disabled, onChange, consistencyMod
   }
 
   const handleDelete = async () => {
-    if (!window.confirm(`Delete ${place.name}? This cannot be undone.`)) return
+    if (!(await confirm({
+      title: `Delete ${place.name}?`,
+      message: 'This cannot be undone.',
+      confirmLabel: 'Delete place',
+      tone: 'danger',
+    }))) return
     setDeleting(true)
     setDeleteError('')
     try {
@@ -618,6 +625,7 @@ function PropImage({ storyId, prop, disabled, onChange }) {
 }
 
 function PropCard({ storyId, prop, characters, disabled, onChange, isV2, names }) {
+  const confirm = useConfirm()
   const [approveError, setApproveError] = useState('')
   const [approveErrors, setApproveErrors] = useState(null)
   const [approving, setApproving] = useState(false)
@@ -664,7 +672,12 @@ function PropCard({ storyId, prop, characters, disabled, onChange, isV2, names }
   }
 
   const handleDelete = async () => {
-    if (!window.confirm(`Delete ${prop.name}? This cannot be undone.`)) return
+    if (!(await confirm({
+      title: `Delete ${prop.name}?`,
+      message: 'This cannot be undone.',
+      confirmLabel: 'Delete prop',
+      tone: 'danger',
+    }))) return
     setDeleting(true)
     setDeleteError('')
     try {
@@ -736,14 +749,17 @@ function PropCard({ storyId, prop, characters, disabled, onChange, isV2, names }
 // ------------------------------------------------------------- needs an editor
 
 function NeedsEditorBanner({ storyId, editReadiness, disabled, onChange }) {
+  const confirm = useConfirm()
   const [switching, setSwitching] = useState(false)
   const [error, setError] = useState('')
 
   const switchToPromptOnly = async () => {
-    if (!window.confirm(
-      'Switch this story to prompt-only consistency? Shots will be prompted without reference images, so ' +
-      'characters and places may drift slightly across shots. This cannot be undone from here.',
-    )) return
+    if (!(await confirm({
+      title: 'Switch this story to prompt-only consistency?',
+      message: 'Shots will be prompted without reference images, so ' +
+        'characters and places may drift slightly across shots. This cannot be undone from here.',
+      confirmLabel: 'Switch to prompt-only',
+    }))) return
     setSwitching(true)
     setError('')
     try {

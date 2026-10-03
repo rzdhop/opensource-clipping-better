@@ -1,4 +1,5 @@
 import { NavLink } from 'react-router-dom'
+import { Clapperboard, Sparkles } from '../ui/icons'
 
 // The two top-level modes of rzdhop AI (DEC-094). The URL is the source of
 // truth for the current mode; localStorage only remembers the last one so
@@ -32,8 +33,8 @@ export default function ModeSwitch({ compact = false }) {
   const link = ({ isActive }) => `mode-link${isActive ? ' active' : ''}`
   return (
     <nav className={`mode-switch${compact ? ' compact' : ''}`} aria-label="Mode">
-      <NavLink to="/clips" className={link}>🎬 Clips</NavLink>
-      <NavLink to="/story" className={link}>✨ AI Story</NavLink>
+      <NavLink to="/clips" className={link}><Clapperboard size={14} aria-hidden="true" />Clips</NavLink>
+      <NavLink to="/story" className={link}><Sparkles size={14} aria-hidden="true" />AI Story</NavLink>
     </nav>
   )
 }
