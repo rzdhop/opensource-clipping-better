@@ -31,6 +31,8 @@ API_JS = SRC / "api.js"
 SETTINGS = SRC / "pages" / "Settings.jsx"
 STORY = SRC / "pages" / "story"
 WIZARD = STORY / "NewStoryWizard.jsx"
+# The Visual tier card moved out of NewStoryWizard.jsx with the story workspace (DEC-255).
+CARD = STORY / "GenerationProfileCard.jsx"
 CAST = STORY / "steps" / "CastStep.jsx"
 PLACES = STORY / "steps" / "PlacesStep.jsx"
 KNOWLEDGE = STORY / "steps" / "KnowledgeStep.jsx"
@@ -83,7 +85,7 @@ def test_the_fully_animated_line_says_what_the_preset_costs():
 # ------------------------------------------------------------------ visual tier card
 
 def test_the_visual_tier_card_has_a_budget_profile_select_and_says_why_no_clip_is_planned():
-    card = _function(_read(WIZARD), "GenerationProfileCard")
+    card = _function(_read(CARD), "GenerationProfileCard")
     assert "save({ budget_profile: value })" in card
     options = set(re.findall(r'<option value="([a-z_]+)">', card))
     assert set(budget_mod.load_profiles()["profiles"]) <= options, options

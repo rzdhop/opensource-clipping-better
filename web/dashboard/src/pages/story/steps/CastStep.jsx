@@ -8,7 +8,9 @@ import EstimateChip from '../../../components/EstimateChip'
 import RouteChip from '../../../components/RouteChip'
 import { LiveActivity, useJobFeed } from '../../../components/ActivityFeed'
 import { EditableText, EditableList, RegenerateControl, StepError } from '../fields'
-import { useConfirm } from '../../../ui'
+import EntityGallery, { useHashAccordion } from '../EntityGallery'
+import { Badge, Chip, useConfirm } from '../../../ui'
+import { Mic } from '../../../ui/icons'
 
 // The character roles a custom entry may pick (spec 2.3): the closed list
 // clipping.aistory.schemas.CHARACTER_ROLES also uses.
@@ -808,11 +810,40 @@ function ContinueCast({ storyId, disabled, onChange, consistencyMode }) {
   )
 }
 
+// ------------------------------------------------------------ the card grid
+
+/** A character's tile in the cast grid: the portrait, the name, the role, the approval and the voice. */
+function characterTile(character, info, pickVoiceIds) {
+  const portrait = character.refs && character.refs.portrait
+  const missing = (info && info.missing) || []
+  const voice = character.voice
+  return {
+    id: character.char_id,
+    name: character.name,
+    shape: 'portrait',
+    thumb: portrait ? { kind: 'characters', eid: character.char_id, name: portrait.name } : null,
+    thumbEmpty: missing.includes('text') ? 'Not written yet' : 'No portrait yet',
+    meta: (
+      <>
+        <Badge>{character.role}</Badge>
+        {character.approved_at
+          ? <Badge tone="success" dot>Approved</Badge>
+          : <Badge tone="warning" dot>To approve</Badge>}
+        {voice
+          ? <Chip icon={Mic} title={`${voice.provider}/${voice.voice_id}`}>{voice.voice_id}</Chip>
+          : <Chip icon={Mic} tone={pickVoiceIds.includes(character.char_id) ? 'warning' : 'neutral'}>No voice</Chip>}
+      </>
+    ),
+  }
+}
+
 // --------------------------------------------------------------------- page
 
 export default function CastStep({ data, storyId, inFlightJob, onChange }) {
   const { story, characters, progress } = data
   const consistencyMode = story.generation_profile.consistency_mode
+  // The open character's editor: the URL's #char_id (one at a time).
+  const [openId, toggleOpen] = useHashAccordion((characters || []).map((c) => c.char_id))
 
   const myJob = inFlightJob && (
     inFlightJob.step === 'cast'
@@ -867,22 +898,30 @@ export default function CastStep({ data, storyId, inFlightJob, onChange }) {
           : <LiveActivity job={liveJob} events={events} streamState={streamState} />
       )}
 
-      <div className="story-cast-grid">
-        {characters.map((character) => (
-          <CharacterCard
-            key={character.char_id}
-            storyId={storyId}
-            character={character}
-            info={charProgress[character.char_id]}
-            pickVoiceIds={pickVoiceIds}
-            disabled={busy}
-            onChange={onChange}
-            consistencyMode={consistencyMode}
-            isV2={isV2}
-            castNames={castNames}
-          />
-        ))}
-      </div>
+      <EntityGallery
+        storyId={storyId}
+        label="Characters"
+        items={characters.map((character) => characterTile(character, charProgress[character.char_id], pickVoiceIds))}
+        openId={openId}
+        onToggle={toggleOpen}
+        renderEditor={(item) => {
+          const character = characters.find((c) => c.char_id === item.id)
+          return (
+            <CharacterCard
+              key={character.char_id}
+              storyId={storyId}
+              character={character}
+              info={charProgress[character.char_id]}
+              pickVoiceIds={pickVoiceIds}
+              disabled={busy}
+              onChange={onChange}
+              consistencyMode={consistencyMode}
+              isV2={isV2}
+              castNames={castNames}
+            />
+          )
+        }}
+      />
 
       {anyMissing && (
         <ContinueCast storyId={storyId} disabled={busy} onChange={onChange} consistencyMode={consistencyMode} />

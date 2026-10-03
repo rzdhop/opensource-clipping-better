@@ -7,7 +7,8 @@ import EstimateChip from '../../../components/EstimateChip'
 import RouteChip from '../../../components/RouteChip'
 import { LiveActivity, useJobFeed } from '../../../components/ActivityFeed'
 import { EditableText, RegenerateControl, StepError } from '../fields'
-import { useConfirm } from '../../../ui'
+import EntityGallery, { useHashAccordion } from '../EntityGallery'
+import { Badge, Chip, useConfirm } from '../../../ui'
 
 // The place time-variant choices a user may add (spec 2.4): the closed list
 // clipping.aistory.schemas.TIME_VARIANT_CHOICES also uses. "day" is always
@@ -838,10 +839,59 @@ function ContinuePlaces({ storyId, disabled, onChange, consistencyMode }) {
   )
 }
 
+// ------------------------------------------------------------ the card grids
+
+function approvalBadge(entity) {
+  return entity.approved_at
+    ? <Badge tone="success" dot>Approved</Badge>
+    : <Badge tone="warning" dot>To approve</Badge>
+}
+
+/** A place's tile: its day plate, the name, the approval and how many time variants it has. */
+function placeTile(place, missing) {
+  const plate = place.time_variants.day
+  const variantCount = Object.keys(place.time_variants).length
+  return {
+    id: place.place_id,
+    name: place.name,
+    shape: 'wide',
+    thumb: plate ? { kind: 'places', eid: place.place_id, name: plate.name } : null,
+    thumbEmpty: missing.includes('text') ? 'Not written yet' : 'No plate yet',
+    meta: (
+      <>
+        {approvalBadge(place)}
+        <Chip>{variantCount} variant{variantCount === 1 ? '' : 's'}</Chip>
+      </>
+    ),
+  }
+}
+
+/** A prop's tile: its image, the name, the approval and its owner. */
+function propTile(prop, ownerName) {
+  return {
+    id: prop.prop_id,
+    name: prop.name,
+    shape: 'square',
+    thumb: prop.image ? { kind: 'props', eid: prop.prop_id, name: prop.image.name } : null,
+    thumbEmpty: prop.descriptor ? 'No image yet' : 'Not written yet',
+    meta: (
+      <>
+        {approvalBadge(prop)}
+        {ownerName && <Chip>{ownerName}</Chip>}
+      </>
+    ),
+  }
+}
+
 // --------------------------------------------------------------------- page
 
 export default function PlacesStep({ data, storyId, inFlightJob, onChange }) {
   const { story, places, props, places_proposal: placesProposal, characters, progress } = data
+  // The open place's or prop's editor: the URL's #place_id / #prop_id (one at a time).
+  const [openId, toggleOpen] = useHashAccordion([
+    ...(places || []).map((p) => p.place_id),
+    ...(props || []).map((p) => p.prop_id),
+  ])
 
   const myJob = inFlightJob && (
     inFlightJob.step === 'places_proposal'
@@ -905,41 +955,59 @@ export default function PlacesStep({ data, storyId, inFlightJob, onChange }) {
       {places.length > 0 && (
         <>
           <h4 className="story-section-title">Places</h4>
-          <div className="story-places-grid">
-            {places.map((place) => (
-              <PlaceCard
-                key={place.place_id}
-                storyId={storyId}
-                place={place}
-                missing={(placeProgress[place.place_id] || {}).missing || []}
-                disabled={busy}
-                onChange={onChange}
-                consistencyMode={consistencyMode}
-                isV2={isV2}
-                names={names}
-              />
-            ))}
-          </div>
+          <EntityGallery
+            storyId={storyId}
+            label="Places"
+            size="lg"
+            items={places.map((place) => placeTile(place, (placeProgress[place.place_id] || {}).missing || []))}
+            openId={openId}
+            onToggle={toggleOpen}
+            renderEditor={(item) => {
+              const place = places.find((p) => p.place_id === item.id)
+              return (
+                <PlaceCard
+                  key={place.place_id}
+                  storyId={storyId}
+                  place={place}
+                  missing={(placeProgress[place.place_id] || {}).missing || []}
+                  disabled={busy}
+                  onChange={onChange}
+                  consistencyMode={consistencyMode}
+                  isV2={isV2}
+                  names={names}
+                />
+              )
+            }}
+          />
         </>
       )}
 
       {props.length > 0 && (
         <>
           <h4 className="story-section-title">Props</h4>
-          <div className="story-places-grid">
-            {props.map((prop) => (
-              <PropCard
-                key={prop.prop_id}
-                storyId={storyId}
-                prop={prop}
-                characters={characters}
-                disabled={busy}
-                onChange={onChange}
-                isV2={isV2}
-                names={names}
-              />
-            ))}
-          </div>
+          <EntityGallery
+            storyId={storyId}
+            label="Props"
+            size="sm"
+            items={props.map((prop) => propTile(prop, prop.owner_char_id ? names[prop.owner_char_id] : null))}
+            openId={openId}
+            onToggle={toggleOpen}
+            renderEditor={(item) => {
+              const prop = props.find((p) => p.prop_id === item.id)
+              return (
+                <PropCard
+                  key={prop.prop_id}
+                  storyId={storyId}
+                  prop={prop}
+                  characters={characters}
+                  disabled={busy}
+                  onChange={onChange}
+                  isV2={isV2}
+                  names={names}
+                />
+              )
+            }}
+          />
         </>
       )}
 

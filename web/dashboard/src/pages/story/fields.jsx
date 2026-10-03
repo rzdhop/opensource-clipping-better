@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { AlertTriangle } from '../../ui/icons'
 
 /**
  * One step or card's own error slot: the message plus, when present, the
@@ -16,14 +17,19 @@ export function StepError({ message, errors, className }) {
 
   if (!message) return null
 
+  // A danger alert block (dashboard overhaul stage 3, DEC-255): the kit's
+  // danger tone, an icon, and role="alert" so the failure is announced.
   return (
-    <div className={`story-error${className ? ` ${className}` : ''}`} ref={ref}>
-      {message}
-      {errors && errors.length > 0 && (
-        <ul className="story-field-list">
-          {errors.map((err, i) => <li key={i}>{err}</li>)}
-        </ul>
-      )}
+    <div className={`story-error story-alert${className ? ` ${className}` : ''}`} ref={ref} role="alert">
+      <AlertTriangle size={15} aria-hidden="true" className="story-alert-icon" />
+      <div className="story-alert-body">
+        {message}
+        {errors && errors.length > 0 && (
+          <ul className="story-field-list">
+            {errors.map((err, i) => <li key={i}>{err}</li>)}
+          </ul>
+        )}
+      </div>
     </div>
   )
 }
