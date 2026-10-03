@@ -69,7 +69,11 @@ EPISODE_STUDIO = PROJECT_ROOT / "web" / "dashboard" / "src" / "pages" / "story" 
 EPISODE_SRC = PROJECT_ROOT / "web" / "dashboard" / "src" / "pages" / "story" / "episode"
 SCRIPT_PANE = EPISODE_SRC / "ScriptPane.jsx"
 DURATION_BAR = EPISODE_SRC / "DurationBar.jsx"
-STORYBOARD_PANE = EPISODE_SRC / "StoryboardPane.jsx"
+# Dashboard overhaul stage 4 (DEC-256): StoryboardPane.jsx split into the
+# storyboard/ folder; each check reads the file its code moved to.
+STORYBOARD_PANE = EPISODE_SRC / "storyboard" / "StoryboardPane.jsx"
+SHOT_CARD = EPISODE_SRC / "storyboard" / "ShotCard.jsx"
+ASSETS_CARDS = EPISODE_SRC / "storyboard" / "AssetsCards.jsx"
 PREVIEW_PANE = EPISODE_SRC / "PreviewPane.jsx"
 INDEX_CSS = PROJECT_ROOT / "web" / "dashboard" / "src" / "index.css"
 
@@ -448,25 +452,25 @@ def _js_list_literal(src: str, const_name: str) -> set[str]:
 
 
 def test_framings_constant_equals_the_schema_exactly():
-    src = STORYBOARD_PANE.read_text(encoding="utf-8")
+    src = SHOT_CARD.read_text(encoding="utf-8")
     found = _js_list_literal(src, "FRAMINGS")
     assert found == set(schemas.FRAMINGS), (found, schemas.FRAMINGS)
 
 
 def test_camera_motions_constant_equals_the_schema_exactly():
-    src = STORYBOARD_PANE.read_text(encoding="utf-8")
+    src = SHOT_CARD.read_text(encoding="utf-8")
     found = _js_list_literal(src, "CAMERA_MOTIONS")
     assert found == set(schemas.CAMERA_MOTIONS), (found, schemas.CAMERA_MOTIONS)
 
 
 def test_modifiers_constant_equals_the_schema_exactly():
-    src = STORYBOARD_PANE.read_text(encoding="utf-8")
+    src = SHOT_CARD.read_text(encoding="utf-8")
     found = _js_list_literal(src, "MODIFIERS")
     assert found == set(schemas.MODIFIERS), (found, schemas.MODIFIERS)
 
 
 def test_transitions_constant_equals_the_schema_exactly():
-    src = STORYBOARD_PANE.read_text(encoding="utf-8")
+    src = SHOT_CARD.read_text(encoding="utf-8")
     found = _js_list_literal(src, "TRANSITIONS")
     assert found == set(schemas.TRANSITIONS), (found, schemas.TRANSITIONS)
 
@@ -517,7 +521,7 @@ def test_the_readers_see_phase4_things():
 # --------------------------------------------------- StoryboardPane.jsx: assetsParams
 
 def test_assets_params_equal_workflow_assets_params():
-    src = STORYBOARD_PANE.read_text(encoding="utf-8")
+    src = ASSETS_CARDS.read_text(encoding="utf-8")
     assets_params = _object_literal_keys(src, "assetsParams")
     declared = set(workflow.ASSETS_PARAMS)
     assert assets_params == declared, (assets_params, declared)
@@ -592,13 +596,13 @@ def test_shot_image_and_line_regenerate_targets_match_the_grammar_shapes():
 # --------------------------------------------------------------- error slots
 
 def test_assets_header_renders_its_own_error_slot():
-    src = STORYBOARD_PANE.read_text(encoding="utf-8")
+    src = ASSETS_CARDS.read_text(encoding="utf-8")
     body = src.split("function AssetsHeader", 1)[1].split("function ApproveAssets", 1)[0]
     assert "story-step-error" in body
 
 
 def test_approve_assets_renders_its_own_error_slot():
-    src = STORYBOARD_PANE.read_text(encoding="utf-8")
+    src = ASSETS_CARDS.read_text(encoding="utf-8")
     body = src.split("function ApproveAssets", 1)[1].split("function StoryboardPane", 1)[0]
     assert "story-step-error" in body
 

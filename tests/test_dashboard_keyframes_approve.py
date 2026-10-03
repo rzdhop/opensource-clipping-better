@@ -18,7 +18,10 @@ import pathlib
 import re
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-PANE = ROOT / "web" / "dashboard" / "src" / "pages" / "story" / "episode" / "StoryboardPane.jsx"
+# Dashboard overhaul stage 4 (DEC-256): the pane's shell and its keyframe card
+# moved into the storyboard/ folder.
+PANE = ROOT / "web" / "dashboard" / "src" / "pages" / "story" / "episode" / "storyboard" / "StoryboardPane.jsx"
+CARDS = ROOT / "web" / "dashboard" / "src" / "pages" / "story" / "episode" / "storyboard" / "AssetsCards.jsx"
 REVIEW = ROOT / "web" / "dashboard" / "src" / "pages" / "story" / "episode" / "ReviewPane.jsx"
 WORKFLOW = ROOT / "clipping" / "aistory" / "workflow.py"
 
@@ -30,7 +33,7 @@ def _component(src, name):
 
 
 def test_the_pane_approves_with_the_payloads_target_and_the_review_shows_each_check():
-    src = PANE.read_text(encoding="utf-8")
+    src = CARDS.read_text(encoding="utf-8")
     body = _component(src, "ApproveKeyframes")
 
     # The payload's keyframes block, as workflow.episode_view writes it.

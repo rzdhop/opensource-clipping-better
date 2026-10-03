@@ -25,7 +25,9 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 DASH = ROOT / "web" / "dashboard" / "src"
 EPISODE_STUDIO = DASH / "pages" / "story" / "EpisodeStudio.jsx"
 REVIEW_PANE = DASH / "pages" / "story" / "episode" / "ReviewPane.jsx"
-STORYBOARD_PANE = DASH / "pages" / "story" / "episode" / "StoryboardPane.jsx"
+# Dashboard overhaul stage 4 (DEC-256): the keyframe card moved out of
+# StoryboardPane.jsx into storyboard/AssetsCards.jsx.
+STORYBOARD_PANE = DASH / "pages" / "story" / "episode" / "storyboard" / "AssetsCards.jsx"
 INDEX_CSS = DASH / "index.css"
 
 

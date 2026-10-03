@@ -159,7 +159,8 @@ def test_the_clip_defaults_agree_in_the_step_the_api_the_cli_and_the_dashboard()
     # literal `true` in the params object (which now forwards the state
     # variable).
     pane = ROOT / "web" / "dashboard" / "src" / "pages" / "story" / "episode"
-    storyboard_src = (pane / "StoryboardPane.jsx").read_text(encoding="utf-8")
+    # The assets header moved to storyboard/AssetsCards.jsx (dashboard overhaul stage 4, DEC-256).
+    storyboard_src = (pane / "storyboard" / "AssetsCards.jsx").read_text(encoding="utf-8")
     assert re.search(r"const \[animate, setAnimate\] = useState\(true\)", storyboard_src)
     assert re.search(r"const assetsParams = \{[^}]*\banimate\b[^}]*\}", storyboard_src)
 

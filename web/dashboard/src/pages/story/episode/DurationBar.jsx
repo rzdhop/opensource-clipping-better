@@ -1,8 +1,12 @@
 // The episode's timing bar (spec 10): the template's window, its target and
 // tighten marks, one segment per scene (width proportional to its duration),
-// the running total and, below it, the timing state and its flags -- each
-// flag a real link to the scene or line it names, so a phone-width page can
-// jump straight to it instead of hunting the scene list.
+// the running total and the timing state. Its flags are TimingWarnings below
+// (dashboard overhaul stage 4, DEC-256: a collapsible warning panel at the
+// top of the Script pane) -- each flag a real link to the scene or line it
+// names, so a phone-width page can jump straight to it instead of hunting
+// the scene list.
+
+import { AlertTriangle, ChevronRight } from '../../../ui/icons'
 
 const SCENE_FUNCTION_LABELS = {
   recap: 'Recap', hook: 'Hook', setup: 'Setup', rising: 'Rising',
@@ -64,19 +68,36 @@ export default function DurationBar({ template, scenes, timing }) {
           <span className="chip chip-warn duration-bar-state">{TIMING_STATE_LABELS[timing.state] || timing.state}</span>
         )}
       </p>
-
-      {timing.flags.length > 0 && (
-        <ul className="story-field-list duration-bar-flags">
-          {timing.flags.map((flag, i) => {
-            const anchor = targetOf(flag)
-            return (
-              <li key={i}>
-                {anchor ? <a href={`#${anchor}`}>{flag.message}</a> : flag.message}
-              </li>
-            )
-          })}
-        </ul>
-      )}
     </div>
+  )
+}
+
+/**
+ * The timing flags as one collapsible warning panel: the count in its
+ * summary (a native <details>, so it opens from the keyboard too), and the
+ * same messages as before, each a link to the scene or line it names.
+ * Nothing at all while the episode has no flag.
+ */
+export function TimingWarnings({ timing }) {
+  const flags = (timing && timing.flags) || []
+  if (flags.length === 0) return null
+  return (
+    <details className="story-script-warnings">
+      <summary className="story-script-warnings-summary">
+        <AlertTriangle size={15} aria-hidden="true" className="story-script-warnings-icon" />
+        <span>{flags.length} timing warning{flags.length === 1 ? '' : 's'}</span>
+        <ChevronRight size={15} aria-hidden="true" className="story-script-warnings-chevron" />
+      </summary>
+      <ul className="story-field-list duration-bar-flags">
+        {flags.map((flag, i) => {
+          const anchor = targetOf(flag)
+          return (
+            <li key={i}>
+              {anchor ? <a href={`#${anchor}`}>{flag.message}</a> : flag.message}
+            </li>
+          )
+        })}
+      </ul>
+    </details>
   )
 }

@@ -7,9 +7,10 @@ import { StepError } from './fields'
 import { formatUsd } from '../../lib/format'
 import { useConfirm } from '../../ui'
 import ScriptPane from './episode/ScriptPane'
-import StoryboardPane from './episode/StoryboardPane'
+import StoryboardPane from './episode/storyboard/StoryboardPane'
 import PreviewPane from './episode/PreviewPane'
 import ReviewPane from './episode/ReviewPane'
+import EpisodeStepper, { episodeSteps, stepOfJob } from './episode/EpisodeStepper'
 
 // A cap is a round figure: two decimals, as the fast track's own caps line.
 function fmtCap(value) {
@@ -31,10 +32,33 @@ const WIDE_BREAKPOINT = 1100
 // latest one while the job runs (stage C).
 const FAST_TRACK_STEP_LINE = /⏩ Fast track (\d+)\/(\d+): (.+)/
 
+// Where each stepper node leads (dashboard overhaul stage 4, DEC-256): the
+// tab it selects below 1100 px, and the section it scrolls to -- on the wide
+// layout every section is on screen, so a click only scrolls. Keyframes and
+// Clips are cards inside the Storyboard tab, so they carry a hash of their
+// own (#keyframes, #clips) that opens that tab at that card, on a reload too.
+const STEP_TARGETS = {
+  script: { tab: 'script', anchor: 'episode-pane-script' },
+  storyboard: { tab: 'storyboard', anchor: 'episode-pane-storyboard' },
+  keyframes: { tab: 'storyboard', anchor: 'episode-keyframes', hash: 'keyframes' },
+  clips: { tab: 'storyboard', anchor: 'episode-clips', hash: 'clips' },
+  render: { tab: 'preview', anchor: 'episode-pane-preview' },
+  review: { tab: 'review', anchor: 'episode-review' },
+}
+const HASH_TARGETS = { keyframes: STEP_TARGETS.keyframes, clips: STEP_TARGETS.clips }
+
 function tabFromHash() {
   if (typeof window === 'undefined') return 'script'
   const id = window.location.hash.slice(1)
+  if (HASH_TARGETS[id]) return HASH_TARGETS[id].tab
   return TAB_IDS.includes(id) ? id : 'script'
+}
+
+/** The card a #keyframes / #clips hash names, to scroll to once the page has loaded. */
+function anchorFromHash() {
+  if (typeof window === 'undefined') return null
+  const target = HASH_TARGETS[window.location.hash.slice(1)]
+  return target ? target.anchor : null
 }
 
 /** Whether the episode has a review screen (stage C): a v2 episode's
@@ -67,7 +91,7 @@ function tabsFor(episode) {
   return tabs
 }
 
-/** Three panes side by side at >=1100px; Tabs below that -- tracked with
+/** Panes side by side at >=1100px; Tabs below that -- tracked with
  * matchMedia (not CSS alone) so only one layout is ever mounted: a pane
  * hidden by CSS would still hold a live job feed and poll the episode. */
 function useIsWide(breakpoint) {
@@ -258,6 +282,9 @@ export default function EpisodeStudio() {
   // is read on the review screen: switch (or scroll) to it once the page
   // has refreshed.
   const [reviewAfterJob, setReviewAfterJob] = useState(false)
+  // A section a stepper click (or a #keyframes / #clips hash) asked to
+  // scroll to, once the tab holding it has rendered.
+  const [pendingAnchor, setPendingAnchor] = useState(anchorFromHash)
 
   const refresh = useCallback(async () => {
     try {
@@ -326,6 +353,16 @@ export default function EpisodeStudio() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reviewAfterJob, episode, inFlightJob, wide])
 
+  useEffect(() => {
+    if (!pendingAnchor || !episode) return undefined
+    const frame = window.requestAnimationFrame(() => {
+      const section = document.getElementById(pendingAnchor)
+      if (section) section.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      setPendingAnchor(null)
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [pendingAnchor, episode, tab, wide])
+
   if (loading) {
     return <div className="fade-in"><div className="empty-state"><span className="spinner"></span></div></div>
   }
@@ -338,6 +375,20 @@ export default function EpisodeStudio() {
   const tabs = tabsFor(episode)
   const activeTab = tabs.some((entry) => entry.id === tab) ? tab : 'script'
   const fastTrackJob = inFlightJob && inFlightJob.step === 'fast-track' ? inFlightJob : null
+  const steps = episodeSteps(episode, hasReview(episode))
+
+  // A stepper click: the matching tab (and card) below 1100 px; on the wide
+  // layout, where every pane is on screen, a scroll to the matching section.
+  const selectStep = (key) => {
+    const target = STEP_TARGETS[key === 'review' && !hasReview(episode) ? 'render' : key]
+    if (!target) return
+    if (!wide) {
+      setTab(target.tab)
+      if (typeof window !== 'undefined') window.location.hash = target.hash || target.tab
+      if (!target.hash) return
+    }
+    setPendingAnchor(target.anchor)
+  }
 
   const panes = {
     review: (
@@ -401,6 +452,8 @@ export default function EpisodeStudio() {
           events={events} onChange={refresh} />
       </div>
 
+      <EpisodeStepper steps={steps} runningKey={stepOfJob(inFlightJob, steps)} onSelect={selectStep} />
+
       {inFlightJob && liveJob ? (
         liveJob.status === 'queued'
           ? <p className="form-hint">queued — waiting for the worker</p>
@@ -421,20 +474,22 @@ export default function EpisodeStudio() {
         <>
           {/* Stage C: the review screen above the three panes, full width. */}
           {hasReview(episode) && panes.review}
+          {/* Stage 4 (DEC-256): Script | Storyboard side by side, the Preview
+              (render, metadata, ledger) full width under them. */}
           <div className="episode-studio-panes">
-            <div className="episode-studio-pane">
+            <section className="episode-studio-pane" id="episode-pane-script">
               <h3 className="card-title episode-studio-pane-heading">{tabs[0].label}</h3>
               {panes.script}
-            </div>
-            <div className="episode-studio-pane">
+            </section>
+            <section className="episode-studio-pane" id="episode-pane-storyboard">
               <h3 className="card-title episode-studio-pane-heading">{tabs[1].label}</h3>
               {panes.storyboard}
-            </div>
-            <div className="episode-studio-pane">
-              <h3 className="card-title episode-studio-pane-heading">{tabs[2].label}</h3>
-              {panes.preview}
-            </div>
+            </section>
           </div>
+          <section className="episode-studio-pane episode-studio-pane-wide" id="episode-pane-preview">
+            <h3 className="card-title episode-studio-pane-heading">{tabs[2].label}</h3>
+            {panes.preview}
+          </section>
         </>
       ) : (
         <div className="episode-studio-tabs">
