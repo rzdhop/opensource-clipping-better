@@ -282,8 +282,9 @@ PHASE5_OPTIONAL = {
     ("PLACE_SCHEMA", "$"): {"look"},
     ("PROP_SCHEMA", "$"): {"look"},
     # Fix A3 (phase 7 quality overhaul): apparent age and gender presentation,
-    # optional on the character look -- absent on every look written before it.
-    ("CHARACTER_SCHEMA", "$.properties.look"): {"presentation"},
+    # optional on the character look -- absent on every look written before it;
+    # phase 7 follow-up, stage F2: the bearing (posture), the same way.
+    ("CHARACTER_SCHEMA", "$.properties.look"): {"presentation", "bearing"},
 }
 
 

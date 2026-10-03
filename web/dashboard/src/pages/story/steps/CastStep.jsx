@@ -424,7 +424,7 @@ function UploadsSection({ storyId, character, disabled, onChange }) {
 
 const LOOK_TEXT_FIELDS = [
   ['build', 'Build'], ['silhouette', 'Silhouette'], ['face', 'Face'], ['hair', 'Hair'],
-  ['skin_material', 'Skin / material'], ['presentation', 'Age & presentation'],
+  ['skin_material', 'Skin / material'], ['presentation', 'Age & presentation'], ['bearing', 'Bearing'],
 ]
 const DOSSIER_TEXT_FIELDS = [
   ['backstory', 'Backstory', 3], ['goal', 'Goal', 1], ['need', 'Need', 1], ['fears', 'Fears', 1], ['arc', 'Arc', 2],

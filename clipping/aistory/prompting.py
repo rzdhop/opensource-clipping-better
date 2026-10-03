@@ -354,11 +354,23 @@ def _with_items(look_text: str, signature_items) -> str:
     return look
 
 
-def _styled(cap: int, *, before: str, after: str, rendering: str, rules: str = "") -> str:
-    """``before`` + the rendering + the design rules + ``after``, at most *cap*
-    words: the rendering cut to what is left (at most
-    ``_RENDERING_V2_MAX_WORDS``), then the whole rule sentences that still fit."""
+def _styled(cap: int, *, before: str, after: str, rendering: str, rules: str = "", cues: str = "") -> str:
+    """``before`` + *cues* + the rendering + the design rules + ``after``, at
+    most *cap* words: *cues* (stage F2: a character's marks and bearing,
+    ``shots.visual_cues`` -- identity, so ahead of the style) whole when
+    they leave the rendering its least (``_RENDERING_V2_MIN_WORDS``), else
+    left out; the rendering cut to what is left (at most
+    ``_RENDERING_V2_MAX_WORDS``); then the whole rule sentences that still
+    fit."""
     left = cap - _word_count(before) - _word_count(after) - 1  # "Style:"
+    cue = ""
+    if cues:
+        # The cues only while the rendering still gets its least after them (a rendering whose first
+        # clause no longer fits is dropped whole by _fit).
+        with_cues = _fit(rendering, min(left - _word_count(cues), _RENDERING_V2_MAX_WORDS))
+        if _word_count(with_cues) >= _RENDERING_V2_MIN_WORDS:
+            cue = cues
+    left -= _word_count(cue)
     style = _fit(rendering, min(left, _RENDERING_V2_MAX_WORDS))
     left -= _word_count(style)
     kept = []
@@ -367,54 +379,60 @@ def _styled(cap: int, *, before: str, after: str, rendering: str, rules: str = "
             break
         kept.append(sentence)
         left -= _word_count(sentence)
-    parts = [before, f"Style: {style}." if style else "", " ".join(kept), after]
+    parts = [before, cue, f"Style: {style}." if style else "", " ".join(kept), after]
     return _collapse_ws(" ".join(part for part in parts if part))
 
 
 def _sheet_v2(style_lock, *, head, look_text, signature_items, tail, constraints, rules=True,
-              budget=SHEET_V2_MAX_WORDS) -> str:
+              budget=SHEET_V2_MAX_WORDS, cues="") -> str:
     look = _with_items(look_text, signature_items)
     before = f"{head}: {look}."
     after = f"{tail} {constraints}"
     return _styled(budget, before=before, after=after, rendering=style_lock["rendering"],
-                   rules=style_lock["character_design_rules"] if rules else "")
+                   rules=style_lock["character_design_rules"] if rules else "", cues=cues)
 
 
-def portrait_prompt_v2(style_lock: dict, *, look_text: str, signature_items, budget=SHEET_V2_MAX_WORDS) -> str:
+def portrait_prompt_v2(style_lock: dict, *, look_text: str, signature_items, budget=SHEET_V2_MAX_WORDS,
+                       cues: str = "") -> str:
     """A v2 character's base reference: full body, head to toe, front
     three-quarter, neutral pose, from its rendered look (``shots.render_look``)
     -- at most *budget* words (``SHEET_V2_MAX_WORDS``, or the link's own,
     stage F2). A signature item the look does not say yet is added with
-    "with"."""
+    "with". *cues* (stage F2, ``shots.visual_cues``: the character's
+    distinctive marks and bearing) follow the look when they fit."""
     return _sheet_v2(
         style_lock,
         head=("Full-body character reference sheet, head to toe, front three-quarter view, neutral standing "
               "pose, arms relaxed"),
         look_text=look_text, signature_items=signature_items,
         tail=f"Plain {style_lock['sheet_background']} background, even soft studio light. Vertical 9:16.",
-        constraints=CONSTRAINTS_ONE_CHARACTER, budget=budget,
+        constraints=CONSTRAINTS_ONE_CHARACTER, budget=budget, cues=cues,
     )
 
 
-def turnaround_prompt_v2(style_lock: dict, *, look_text: str, signature_items, budget=SHEET_V2_MAX_WORDS) -> str:
+def turnaround_prompt_v2(style_lock: dict, *, look_text: str, signature_items, budget=SHEET_V2_MAX_WORDS,
+                         cues: str = "") -> str:
     """The v2 turnaround, an edit of the portrait (image 1): four full-body
-    views of the same character, at most *budget* words."""
+    views of the same character, at most *budget* words; *cues* as
+    :func:`portrait_prompt_v2`'s."""
     return _sheet_v2(
         style_lock,
         head=(f"{ROLE_TEXT_PORTRAIT} Turnaround sheet of this character, four full-body views side by side "
               "in one row, front, three-quarter, profile and back, head to toe in each"),
         look_text=look_text, signature_items=signature_items,
         tail=f"Plain {style_lock['sheet_background']} background, flat even light, no labels.",
-        constraints=_CONSTRAINTS_SAME_CHARACTER, budget=budget,
+        constraints=_CONSTRAINTS_SAME_CHARACTER, budget=budget, cues=cues,
     )
 
 
-def expressions_prompt_v2(style_lock: dict, *, look_text: str, signature_items, budget=SHEET_V2_MAX_WORDS) -> str:
+def expressions_prompt_v2(style_lock: dict, *, look_text: str, signature_items, budget=SHEET_V2_MAX_WORDS,
+                          cues: str = "") -> str:
     """The v2 expression sheet, an edit of the portrait (image 1): six
-    head-and-shoulders portraits, at most *budget* words. A2: a sentence
-    right after the role text pins every cell to image 1's head, and the
-    grid count is spelled out ("exactly six cells") -- one sheet had drifted
-    to a human face in one cell, another came out with five cells."""
+    head-and-shoulders portraits, at most *budget* words; *cues* as
+    :func:`portrait_prompt_v2`'s. A2: a sentence right after the role text
+    pins every cell to image 1's head, and the grid count is spelled out
+    ("exactly six cells") -- one sheet had drifted to a human face in one
+    cell, another came out with five cells."""
     return _sheet_v2(
         style_lock,
         head=(f"{ROLE_TEXT_PORTRAIT} Every cell shows the same head as image 1, never a different face. "
@@ -423,7 +441,7 @@ def expressions_prompt_v2(style_lock: dict, *, look_text: str, signature_items, 
               "outfit in every cell"),
         look_text=look_text, signature_items=signature_items,
         tail=f"Plain {style_lock['sheet_background']} background, even soft light, no labels.",
-        constraints=_CONSTRAINTS_SAME_CHARACTER, rules=False, budget=budget,
+        constraints=_CONSTRAINTS_SAME_CHARACTER, rules=False, budget=budget, cues=cues,
     )
 
 

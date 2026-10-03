@@ -673,8 +673,20 @@ _FUNCTION_WORDS = {"recap": "a recap", "hook": "the opening hook", "setup": "a q
                    "peak": "the peak of the episode", "turn": "the turning point", "cliffhanger": "the cliffhanger"}
 _INJURY_MAX_WORDS = 8
 _RELATIONSHIP_MAX_WORDS = 15
-_BEARING_MAX_WORDS = 10
+_BEARING_MAX_WORDS = schemas.LOOK_BEARING_MAX_WORDS
 _BEFORE_MAX_WORDS = 14
+# The sheets' cues (:func:`visual_cues`): the words K1 and U1 use for a
+# character's distinctive marks (U1's ask: "accessories, distinctive
+# marks") -- a descriptor clause holding one is a mark the sheets must show
+# --, the words such a clause may open with, and the most the marks take.
+_MARK_WORDS = frozenset(
+    "scar scars scarred mark marks birthmark tattoo tattoos freckle freckles freckled mole moles patch eyepatch "
+    "chipped chip cracked crack dented dent missing bandage bandaged stitch stitches stitched notch notched torn "
+    "burn burnt burned scratch scratched stain stained wart warts bruise bruised limp hunched crooked bent broken "
+    "scuffed faded peeling rust rusty mended frayed".split())
+_CUE_OPENERS = ("with", "and", "wearing", "sporting", "bearing", "has", "having", "showing")
+_MARKS_MAX_WORDS = 20
+_CLAUSE_SPLIT = re.compile(r"[,;.!?]\s+|[.!?]$")
 # The clip's camera intent per camera motion (``prompting.CAMERA_PHRASES``'
 # keys), and the scene functions whose shot lands the beat.
 _CAMERA_INTENT = {"hold": "letting the moment breathe", "push_in": "closing on the emotion",
@@ -1078,6 +1090,36 @@ def _bearing(frame, char_handles) -> str:
         if bearing:
             parts.append(f"{char_handles[cid]} {_lower_first(_cut(bearing, _BEARING_MAX_WORDS))}")
     return prompting.as_sentence("Bearing: " + "; ".join(parts)) if parts else ""
+
+
+def visual_cues(doc) -> str:
+    """A character's visual cues for its sheets (stage F2;
+    ``refimages.character_image`` hands them to the v2 sheet builders): the
+    distinctive marks its descriptor names -- a clause with a word of
+    :data:`_MARK_WORDS` -- that its look and signature items do not say
+    already (:func:`_already_worn`), then its ``look.bearing``: "Distinctive:
+    a deep scar through the left eyebrow. Bearing: stands rigidly straight,
+    chin up." '' without a look (the legacy sheets), or with neither."""
+    look = doc.get("look")
+    if not look:
+        return ""
+    said = " ".join([render_look(doc)] + list(doc.get("signature_items") or ()))
+    marks = []
+    for clause in _CLAUSE_SPLIT.split(doc.get("descriptor") or ""):
+        words = clause.split()
+        while words and words[0].lower() in _CUE_OPENERS:
+            words = words[1:]
+        clause = " ".join(words).strip()
+        if not clause or not (set(_normal(clause).split()) & _MARK_WORDS) or _already_worn(clause, said):
+            continue
+        marks.append(_lower_first(clause))
+    sentences = []
+    if marks:
+        sentences.append(prompting.as_sentence("Distinctive: " + _cut(", ".join(marks), _MARKS_MAX_WORDS)))
+    bearing = (look.get("bearing") or "").strip()
+    if bearing:
+        sentences.append(prompting.as_sentence(f"Bearing: {_lower_first(_cut(bearing, _BEARING_MAX_WORDS))}"))
+    return " ".join(sentences)
 
 
 def _when(place_doc, variant) -> str:

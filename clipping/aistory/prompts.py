@@ -350,7 +350,7 @@ SCHEMA_NAMES = {
 # its worst case fits the default pack budget (tests/test_story_keyframe_gate.py)
 # -- version 2 (phase 8 stage B: looks, sheets, the scene) too, at 1,145.
 INPUT_BUDGET = {"E1": 1820, "E2": 1660, "E3": 2530, "E4": 3900, "T1": 1270, "T1r": 1410, "S3": 3740, "F1": 3950, "N1": 3740,
-                "D2": 2370, "D3": 1940, "R1v2": 1170, "T1v2": 2020, "T1rv2": 2060, "D1": 3890,
+                "D2": 2420, "D3": 1940, "R1v2": 1170, "T1v2": 2020, "T1rv2": 2060, "D1": 3890,
                 "D4": 2270, "D5": 3930, "D6": 3560,
                 "E1v2": 2970, "E2v2": 2520, "E3v2": 3380, "L1": 3920, "J1": 3680}
 
@@ -1002,7 +1002,9 @@ _D2_ASK = (
     "- season_change: how the look changes with the seasons, at most 20 words, or an empty string\n"
     "- presentation (optional, at most 8 words): apparent age and gender presentation, e.g. \"woman in her "
     "thirties\" -- give it whenever the build, face and species of the character would not already make this "
-    "clear on their own (a human-shaped character in particular)\n\n"
+    "clear on their own (a human-shaped character in particular)\n"
+    "- bearing (optional, at most 10 words): posture and how they carry themselves, e.g. \"stands very "
+    "straight, chin up\" or \"slouches, hands in pockets\" -- what every shot keeps\n\n"
     "Stay consistent with the descriptor and the signature items. Never use real people, brands, studio "
     "names or copyrighted characters."
 )

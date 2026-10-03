@@ -572,9 +572,10 @@ def test_memory_section_lists_the_hooks_it_is_handed():
 #
 # D2 re-measured for fix A3 (DEC-226's amendment): the ask gained a
 # presentation line (apparent age and gender presentation, optional, at most
-# 8 words), which grows the input a little.
+# 8 words), which grows the input a little; and again for stage F2 (phase 7
+# follow-up): a bearing line (posture, optional, at most 10 words).
 
-MEASURED_LOOK = {"D2": 2053, "D3": 1685, "R1v2": 1014}
+MEASURED_LOOK = {"D2": 2096, "D3": 1685, "R1v2": 1014}
 ALL_STYLES = [templates.load_style(style_id) for style_id in templates.list_style_ids()]
 _DESCRIPTOR_DENSITY = LIVE_CHARACTERS["char_kiwilo"]["descriptor"]
 

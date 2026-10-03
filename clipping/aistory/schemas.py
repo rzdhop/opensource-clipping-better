@@ -1305,6 +1305,11 @@ WARDROBE_SET_ID_PATTERN = r"^[a-z][a-z0-9_]{0,39}$"
 # descriptor and signature items leave its presentation unsaid (e.g. a fruit
 # head) was otherwise drawn as a default assumption.
 LOOK_PRESENTATION_MAX_WORDS = 8
+# Optional (phase 7 follow-up, stage F2): posture and how the character
+# carries themselves, asked for by D2 and said by every keyframe
+# (shots._bearing) and sheet (shots.visual_cues) -- a few words a model
+# keeps from shot to shot.
+LOOK_BEARING_MAX_WORDS = 10
 
 _LOOK_TEXT_FIELDS = (
     ("build", LOOK_BUILD_MAX_WORDS),
@@ -1337,6 +1342,8 @@ CHARACTER_LOOK_SCHEMA = _document({
     # Apparent age and gender presentation (A3); never required, so a look
     # written before this field existed still validates.
     "presentation": _NON_EMPTY_STRING,
+    # Posture and bearing (stage F2); optional for the same reason.
+    "bearing": _NON_EMPTY_STRING,
 })
 
 DOSSIER_BACKSTORY_MAX_WORDS = 60
@@ -1425,6 +1432,8 @@ def character_look_errors(look, path="$.look") -> list:
         _check_text(errors, f"{path}.season_change", look["season_change"], max_words=LOOK_SEASON_CHANGE_MAX_WORDS)
     if "presentation" in look:
         _check_text(errors, f"{path}.presentation", look["presentation"], max_words=LOOK_PRESENTATION_MAX_WORDS)
+    if "bearing" in look:
+        _check_text(errors, f"{path}.bearing", look["bearing"], max_words=LOOK_BEARING_MAX_WORDS)
     return errors
 
 
@@ -4469,8 +4478,9 @@ def _name_leaks(errors, haystacks, names) -> None:
 def d2_schema() -> dict:
     """The D2 output schema: one character's look (``CHARACTER_LOOK_SCHEMA``'s
     fields; ``season_change`` an empty string when the look does not change).
-    ``presentation`` (A3) is optional -- the model may leave it out entirely,
-    not just send it empty -- so it is not in the ``required`` list."""
+    ``presentation`` (A3) and ``bearing`` (stage F2) are optional -- the
+    model may leave them out entirely, not just send them empty -- so they
+    are not in the ``required`` list."""
     wardrobe = _llm_obj({
         "id": {"type": "string", "description": "lowercase slug, e.g. daily, night_out"},
         "context": {"type": "string", "description": "English, when it is worn, at most 8 words"},
@@ -4489,13 +4499,17 @@ def d2_schema() -> dict:
         "presentation": {"type": "string",
                          "description": "English, apparent age and gender presentation, e.g. "
                                         "'woman in her thirties', at most 8 words"},
+        "bearing": {"type": "string",
+                    "description": "English, posture and how they carry themselves, e.g. 'stands very straight, "
+                                   "chin up', at most 10 words"},
     }
-    return _llm_obj(properties, required=[key for key in properties if key != "presentation"])
+    return _llm_obj(properties, required=[key for key in properties if key not in ("presentation", "bearing")])
 
 
 def d2_look(doc) -> dict:
     """D2's reply as the stored ``look`` block (an empty season change is
-    null; ``presentation`` kept only when the reply has a non-empty one)."""
+    null; ``presentation`` and ``bearing`` kept only when the reply has a
+    non-empty one)."""
     season = (doc.get("season_change") or "").strip()
     look = {
         "build": doc["build"], "silhouette": doc["silhouette"], "face": doc["face"], "hair": doc["hair"],
@@ -4507,6 +4521,9 @@ def d2_look(doc) -> dict:
     presentation = (doc.get("presentation") or "").strip()
     if presentation:
         look["presentation"] = presentation
+    bearing = (doc.get("bearing") or "").strip()
+    if bearing:
+        look["bearing"] = bearing
     return look
 
 
@@ -4524,6 +4541,8 @@ def d2_errors(doc, names) -> list:
     haystacks.append(("$.season_change", doc["season_change"]))
     if doc.get("presentation"):
         haystacks.append(("$.presentation", doc["presentation"]))
+    if doc.get("bearing"):
+        haystacks.append(("$.bearing", doc["bearing"]))
     _name_leaks(errors, haystacks, names)
     return errors
 

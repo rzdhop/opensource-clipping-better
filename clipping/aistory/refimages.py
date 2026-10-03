@@ -605,7 +605,8 @@ def character_image(stories, story_id, char_id, which, *, env, on_log, cancel, n
         link = _first_link(story, "sheet", gen.IMAGE_EDIT if edit else gen.IMAGE, env)
         prompt = _CHARACTER_PROMPTS_V2[which](lock, look_text=shots.render_look(character),
                                               signature_items=character["signature_items"],
-                                              budget=prompt_budgets.sheet_words(link))
+                                              budget=prompt_budgets.sheet_words(link),
+                                              cues=shots.visual_cues(character))
     else:
         prompt = _CHARACTER_PROMPTS[which](lock, descriptor=character["descriptor"],
                                            signature_items=character["signature_items"])
