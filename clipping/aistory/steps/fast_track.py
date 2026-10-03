@@ -191,14 +191,10 @@ def script_refusal(script, ep, *, v2=False):
             return (f"Episode {ep}'s first-watch check (J1) has not run on this revision of the script: run it "
                     "again (the fast track checks it first).")
         if watch == "issues":
-            report = script[judge_step.FIRST_WATCH]
-            count = len(report["issues"])
-            issues = "; ".join(f"{issue['scene_id'] or 'the episode'} ({issue['kind']}): {issue['fix']}"
-                               for issue in report["issues"])
-            return (f"Episode {ep}'s first-watch check (J1) found {count} issue{_s(count)}"
-                    f"{': ' + issues if issues else ''}. The fast track never approves over issues: fix them (edit "
-                    "the script, or regenerate the scenes they name) so the check passes, or approve the script "
-                    "anyway yourself.")
+            # What it found, after the script step's own repair passes when they ran (stage G).
+            return (f"Episode {ep}'s first-watch check (J1){judge_step.issues_sentence(script, words=False)} The "
+                    "fast track never approves over issues: fix them (edit the script, or regenerate the scenes "
+                    "they name) so the check passes, or approve the script anyway yourself.")
     state = (script.get("timing") or {}).get("state")
     if state in TIMING_REFUSED:
         how = "shorten" if state == "over" else "lengthen"

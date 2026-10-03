@@ -83,10 +83,15 @@ J1 = "J1"
 # report holds 20; J1 adds at most 6, the hook check 1).
 DUPLICATE_ISSUES_MAX = 6
 
-_KIND_WORDS = {
+# Each first-watch issue kind in words, for the messages and the repair notes.
+KIND_WORDS = {
     "unclear_goal": "unclear goal", "unmotivated": "unmotivated", "unintroduced": "unintroduced",
     "object_unseen": "object unseen", "repeated_line": "repeated line", "no_hook_text": "no hook text",
 }
+
+# Phase 7 follow-up, stage G: the script step's repair passes on the script
+# (``script.repairs``, ``steps/script.py``), read by the refusals.
+REPAIRS = "repairs"
 
 
 def _and(items) -> str:
@@ -240,21 +245,45 @@ def unjudged_refusal(script, ep):
     return None
 
 
+def issues_sentence(script, *, words=True) -> str:
+    """The clause a refusal hangs on ``Episode N's first-watch check``: what
+    the report found -- `` found 2 issues: s01 (unclear goal): A; s02
+    (unmotivated): B.`` -- or, when the step's repair passes ran on this
+    script (``script.repairs``, stage G), what was tried first: ``: after 2
+    repair passes, 2 issues remain: ...``. Each fix is listed without its
+    own final period, so the sentence ends once (``urgent..`` was shipped);
+    one ending with ``!`` or ``?`` keeps it. *words*: each kind in words
+    (the approval's message), else as its id (the fast track's)."""
+    report = script[FIRST_WATCH]
+
+    def item(issue):
+        kind = KIND_WORDS[issue["kind"]] if words else issue["kind"]
+        return f"{issue['scene_id'] or 'the episode'} ({kind}): {issue['fix'].strip().rstrip('.')}"
+
+    issues = "; ".join(item(issue) for issue in report["issues"])
+    count = len(report["issues"])
+    passes = len(script.get(REPAIRS) or [])
+    if passes:
+        head = (f": after {passes} repair pass{'' if passes == 1 else 'es'}, {count} issue"
+                f"{' remains' if count == 1 else 's remain'}")
+    else:
+        head = f" found {count} issue{'' if count == 1 else 's'}"
+    text = head + (f": {issues}" if issues else "")
+    return text if text.endswith(("!", "?")) else text + "."
+
+
 def issues_refusal(script, ep):
     """``approve_script``'s refusal of a v2 script whose first-watch report
-    found issues -- unless "approve anyway" -- naming them and what a
-    viewer took away; None when it passed."""
+    found issues -- unless "approve anyway" -- naming them, the repair
+    passes that ran first (:func:`issues_sentence`) and what a viewer took
+    away; None when it passed."""
     report = (script or {}).get(FIRST_WATCH)
     if report is None or report["passed"]:
         return None
-    issues = "; ".join(f"{issue['scene_id'] or 'the episode'} ({_KIND_WORDS[issue['kind']]}): {issue['fix']}"
-                       for issue in report["issues"])
-    count = len(report["issues"])
     took = (f" A first-time viewer took away: {report['who_wants_what']} {report['what_happens']} "
             f"{report['why_it_matters']}").rstrip()
-    return (f"Episode {ep}'s first-watch check found {count} issue{'' if count == 1 else 's'}"
-            f"{': ' + issues if issues else ''}.{took} Fix them (edit the script, or regenerate the scenes they "
-            "name) and check again, or approve anyway.")
+    return (f"Episode {ep}'s first-watch check{issues_sentence(script)}{took} Fix them (edit the script, or "
+            "regenerate the scenes they name) and check again, or approve anyway.")
 
 
 # ------------------------------------------------------------------ J2
