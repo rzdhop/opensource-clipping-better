@@ -1,3 +1,19 @@
+## CURRENT STATE — the episode-2 walk is BLOCKED on the fal balance (2026-10-04, local session); DEC-259…262 landed on the way
+
+- **Where the walk stands (job ad275e8e90d0):** script approved anyway by me (62.5 s; J1 passed; 1 blocking E4
+  issue the judges repeat), storyboard 15 shots over 9 scenes auto-approved, paid check within caps (15 images
+  $0.60, 15 clips 73 s $1.61, 13 lip-syncs), assets: 18/18 lines measured (three Gemini 429s recovered in the retry
+  rounds; the tail guard v2 cut 0.2–0.5 s of burst on every line), 15/15 keyframes made ($0.64 on episode 2 so far),
+  J2 flagged 8 → the first redraw got **HTTP 403 "User is locked. Reason: TOP_UP"** from fal: the balance is out; the
+  request is journaled and resumes on the next run. **Next (the human):** top up fal, then Continue (Generate
+  episode) — it resumes at the redraws (≤ $0.32), the clips, the lipsync and the render.
+- **Rules added on the way (each deployed, main f3dfc72):** DEC-259 (a refused reply's retry and the next link are
+  told why; the v2 hook ask never shows the body line as the hook's own), DEC-260 (E4's issues repaired like J1's),
+  DEC-261 (E4 severities by kind: voice notes minor), DEC-262 (the hook's insert shot only with a prop; an insert
+  without one repaired to a close-up). By hand on the walk: s03/s04 regenerated shorter (the script was 79.6 s after
+  the repairs), the script approved anyway. Follow-ups logged: a trim pass for an over-window script; the
+  hook_payoff deterministic check's convergence under repair; E1v2 listing a prop on an insert hook scene.
+
 ## CURRENT STATE — lipsync (DEC-258, option B) merged and deployed; the episode-2 paid walk RUNNING (2026-10-04, local session)
 
 - **The human (2026-10-04):** "Decide for me for the A & B probes and make me a full generation of a video". Decided B
