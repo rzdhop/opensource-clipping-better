@@ -15,8 +15,8 @@
   deployed: the Settings card needs the image rebuild, batched with stage 4's. Caps set by the orchestrator on the
   human's word: **2 / 4 / 10** (the human: 10/20/60 "too high"); `GEMINI_PAID_API_KEY` set by the human and verified
   (A-145 confirmed); the STT key still missing.
-- **Stage 4 MERGED** on main `dbce458` (pushed; DEC-276; reviewed: 5 findings, 2 fixed, 3 recorded). The image is
-  being rebuilt at 0 running jobs for stages 1 + 4 (Settings card, the wizard's native-speech option).
+- **Stage 4 MERGED** on main `dbce458` (pushed; DEC-276; reviewed: 5 findings, 2 fixed, 3 recorded). **Deployed**:
+  the image rebuilt at 0 running jobs for stages 1 + 4, health 200, bundle index-Dul_PjDm.js.
 - **Running now:** stage 2 (Sonnet, `.claude/worktrees/plan22-s2`, `feat/plan22-concepts`; told to rebase onto main)
   and stage 5 (Opus, `.claude/worktrees/plan22-s5`, `feat/plan22-manual-link`, off dbce458: the manual link / bring
   your own clips). Next: on each report — review (code-review skill), rebase, selection in both envs, ff-merge gated
