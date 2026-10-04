@@ -23,10 +23,22 @@ DEFAULT_BUDGET_PROFILE = "free"
 TIERS = (1, 2, 3)
 ROUTES = ("auto", "local", "api")
 CONSISTENCY_MODES = ("references", "prompt_only")
-BUDGET_PROFILES = ("free", "one_dollar", "quality", "native_speech")
+BUDGET_PROFILES = ("free", "one_dollar", "quality", "native_speech", "native_speech_manual")
 # Plan 22: the native-speech budget profile (each character line spoken by
 # its own clip, ``media_policy.native_speech``).
 NATIVE_SPEECH_PROFILE = "native_speech"
+# Plan 22 stage 5: the same, every clip the human's own (``manual/upload``):
+# the app writes the shot brief, the human makes the clips on their own
+# subscription and uploads them. The profile a new story starts on when the
+# quality keys are set (``media_policy.new_story_profile``).
+NATIVE_SPEECH_MANUAL_PROFILE = "native_speech_manual"
+NATIVE_SPEECH_PROFILES = (NATIVE_SPEECH_PROFILE, NATIVE_SPEECH_MANUAL_PROFILE)
+
+# Plan 22 stage 5: the optional ``generation_profile.images``, the per-story
+# switch that makes the sheets, plates, props and keyframes the human's own
+# uploads too (``manual``). Absent: the budget profile's image links.
+IMAGES_MANUAL = "manual"
+IMAGE_MODES = (IMAGES_MANUAL,)
 
 # Phase 7 (DEC-221): the optional ``generation_profile.pipeline``. Absent is
 # the legacy pipeline; "v2" gates the quality-only image links per role
@@ -133,3 +145,12 @@ def quality_generation_profile() -> dict:
         "budget_profile": "quality",
         "pipeline": PIPELINE_V2,
     }
+
+
+def manual_speech_generation_profile() -> dict:
+    """The profile a new story gets when the quality keys are set (plan 22
+    stage 5: the manual mode is the default): the quality preset's (v2, tier
+    3, hosted image links, references) on the ``native_speech_manual``
+    budget profile -- every character line spoken by its own clip, every
+    clip the human's own upload, the keyframes made by the app."""
+    return dict(quality_generation_profile(), budget_profile=NATIVE_SPEECH_MANUAL_PROFILE)

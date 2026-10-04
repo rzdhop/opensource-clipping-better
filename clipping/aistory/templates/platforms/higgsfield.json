@@ -1,0 +1,58 @@
+{
+  "$schema": "platform_preset_v1",
+  "platform": "higgsfield",
+  "name": "Higgsfield / Freepik (multi-model)",
+  "checked_at": "2026-10-04",
+  "url": "https://higgsfield.ai",
+  "default_model": "veo-3.1",
+  "models": {
+    "veo-3.1": {
+      "label": "Veo 3.1",
+      "max_references": 3,
+      "lengths": [8],
+      "speech": true,
+      "languages": null,
+      "reference_syntax": "image {n} is {label}"
+    },
+    "seedance-2.0": {
+      "label": "Seedance 2.0",
+      "max_references": 9,
+      "lengths": [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+      "speech": true,
+      "languages": null,
+      "reference_syntax": "image {n} is {label}"
+    },
+    "kling-3.0": {
+      "label": "Kling 3.0",
+      "max_references": 4,
+      "lengths": [5, 10],
+      "speech": true,
+      "languages": ["en", "zh"],
+      "reference_syntax": "@Element{n} is {label}"
+    }
+  },
+  "aspect": "9:16",
+  "length_note": "Pick the length shown (the smallest the model sells that holds the line). The app keeps the clip's real length and cuts a speaking shot 0.3 s after its last word.",
+  "modes": {
+    "keyframe": "Image to video: image 1 (the keyframe) as the start frame; the others as references.",
+    "references": "Reference images: attach them in this order."
+  },
+  "prompt_order": ["cinematography", "subject", "action", "context", "style"],
+  "dialogue_syntax": "{speaker} looks at {listener} and says in {voice}, \"{line}\"",
+  "ambient_syntax": "Ambient noise: {ambience}.",
+  "sfx_syntax": "SFX: {sfx}.",
+  "closing": "No subtitles, no captions, no on-screen text.",
+  "prompt_notes": [
+    "For speech in French (or any language but English and Chinese) pick Veo 3.1 or Seedance 2.0, never Kling 3.0: Kling speaks English and Chinese only.",
+    "Attach the reference images in the order listed: the prompt names them by their number.",
+    "The spoken line stays in quotes, in the story's language: do not translate it."
+  ],
+  "where_to_paste": "Higgsfield → Video → pick the model shown → upload the reference images in order → 9:16 → paste the prompt → Generate. Download the take you like as MP4.",
+  "credits": {
+    "unit": "Higgsfield credits",
+    "per_clip": {},
+    "default": null,
+    "labels": {},
+    "note": "Credits per clip depend on the model and your plan: check the model's price in Higgsfield before generating."
+  }
+}

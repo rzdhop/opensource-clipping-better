@@ -90,10 +90,35 @@ def is_v2(story) -> bool:
     return profile.get("pipeline") == defaults.PIPELINE_V2
 
 
+def images_manual(story) -> bool:
+    """Whether *story*'s sheets, plates, props and keyframes are the human's
+    own uploads (plan 22 stage 5: ``generation_profile.images: "manual"``):
+    a v2 story whose every image role resolves to ``manual/upload``."""
+    profile = (story or {}).get("generation_profile") or {}
+    return is_v2(story) and profile.get("images") == defaults.IMAGES_MANUAL
+
+
+def is_manual_link(label) -> bool:
+    """Whether the link *label* is the human's own upload (``manual/upload``)."""
+    return isinstance(label, str) and gen.is_manual(label)
+
+
+def clips_manual(story) -> bool:
+    """Whether every clip of *story* is the human's own upload (plan 22 stage
+    5): a native-speech story whose speech link and silent link are both
+    ``manual/upload``."""
+    if not native_speech(story):
+        return False
+    return is_manual_link(speech_link(story)) and is_manual_link(silent_link(story))
+
+
 def _role_links(role, story):
     """The links the story's budget profile names for *role*, or None when
     its images policy is not ``quality_roles``. ``ChainError`` when the
-    profile cannot be read."""
+    profile cannot be read. Plan 22 stage 5: a story whose images are manual
+    (:func:`images_manual`) names ``manual/upload`` for every role."""
+    if images_manual(story):
+        return [gen.MANUAL_LINK]
     name = story["generation_profile"]["budget_profile"]
     try:
         settings = budget_mod.profile_settings(name)
@@ -355,13 +380,15 @@ def quality_keys_present(merged) -> bool:
 
 
 def new_story_profile(settings_env):
-    """The ``generation_profile`` a story created without one gets: the
-    quality preset (``defaults.quality_generation_profile``) when the
+    """The ``generation_profile`` a story created without one gets: when the
     Settings values *settings_env*, over the process environment, hold every
-    :data:`QUALITY_KEYS` value (FAL_KEY alone, stage 2c, DEC-235); else None
-    -- the store's own default."""
+    :data:`QUALITY_KEYS` value (FAL_KEY alone, stage 2c, DEC-235), the
+    manual native-speech profile (plan 22 stage 5: the manual mode is the
+    default -- v2, tier 3, the keyframes made by the app, every clip the
+    human's own upload; ``defaults.manual_speech_generation_profile``); else
+    None -- the store's own default."""
     if quality_keys_present(gating.merged_env(settings_env)):
-        return defaults.quality_generation_profile()
+        return defaults.manual_speech_generation_profile()
     return None
 
 
@@ -393,6 +420,8 @@ def new_story_offer(settings_env) -> dict:
     return {
         "profile": profile if profile is not None else defaults.default_generation_profile(),
         "quality": profile is not None,
+        # Plan 22 stage 5: the default is the manual native-speech profile (your own clips).
+        "manual": profile is not None,
         "missing_keys": [name for name in QUALITY_KEYS if not (merged.get(name) or "").strip()],
         "sound_missing_keys": [row["key"] for row in estimate["keys_needed"]
                                if SOUND_LINK in row["for"] and not row["set"]],
@@ -400,6 +429,9 @@ def new_story_offer(settings_env) -> dict:
         "estimate": estimate,
         # Plan 22: what the native-speech profile costs, for each speaking-clip model.
         "native_speech": native_speech_estimate(merged),
+        # Plan 22 stage 5: what the manual profile costs (keyframes and text; the clips are yours).
+        "native_speech_manual": native_speech_estimate(
+            merged, story={"generation_profile": native_speech_manual_profile()}),
     }
 
 
@@ -613,6 +645,13 @@ def native_speech_profile() -> dict:
     return dict(defaults.quality_generation_profile(), budget_profile=defaults.NATIVE_SPEECH_PROFILE)
 
 
+def native_speech_manual_profile() -> dict:
+    """The ``generation_profile`` of a native-speech story whose clips are
+    the human's own (plan 22 stage 5): the native_speech_manual budget
+    profile."""
+    return defaults.manual_speech_generation_profile()
+
+
 def link_price(label, resolution=None):
     """``(price per second, None)`` of the video link *label* at
     *resolution*, or ``(None, why)`` when it has none (a link that is not
@@ -655,6 +694,7 @@ def native_speech_estimate(merged=None, *, model=None, story=None) -> dict:
     says why (``priced`` false)."""
     story_doc = story if story is not None else {"generation_profile": native_speech_profile()}
     settings = _profile_of(story_doc)
+    profile_name = (story_doc.get("generation_profile") or {}).get("budget_profile") or defaults.NATIVE_SPEECH_PROFILE
     chosen = model if model in defaults.SPEECH_MODELS else speech_model(story_doc)
     speech, silent = speech_link(story_doc, chosen), silent_link(story_doc)
     resolution = video_resolution(story_doc)
@@ -680,16 +720,36 @@ def native_speech_estimate(merged=None, *, model=None, story=None) -> dict:
         row, _why = priced(which)
         by_model[which] = round(row["episode_usd"], 4) if row else None
     row, reason = priced(chosen)
-    keys = list(quality["keys_needed"][:len(QUALITY_KEYS)])
+    if images_manual(story_doc):
+        # Plan 22 stage 5: the keyframes (and the story's sheets, plates, props) are the human's own too.
+        keyframe_usd, keyframes_usd = 0.0, 0.0
+        if row is not None:
+            row = dict(row, episode_usd=row["clips_usd"] + retake_usd)
+        by_model = {which: (None if value is None else round(value - shots * float(
+            quality["episode"]["keyframe_usd"]), 4)) for which, value in by_model.items()}
+    keys = list(quality["keys_needed"][:len(QUALITY_KEYS)]) if not images_manual(story_doc) else []
     for label in dict.fromkeys(link for link in (speech, silent) if link):
         for entry in _link_keys(label, merged):
             if entry["key"] not in {item["key"] for item in keys}:
                 keys.append(entry)
     stt_missing = stt_missing_keys(merged)
     missing = [entry["key"] for entry in keys if not entry["set"]]
-    label = settings.get("label") or defaults.NATIVE_SPEECH_PROFILE
+    label = settings.get("label") or profile_name
+    manual = is_manual_link(speech) and is_manual_link(silent)
+    story_usd = 0.0 if images_manual(story_doc) else quality["story_usd"]
     if row is None:
         episode_usd, clips_usd, summary = 0.0, 0.0, f"Not priced: {reason}."
+    elif manual:
+        # Plan 22 stage 5: the clips are the human's own -- $0 here, their platform's credits there.
+        from . import platforms
+
+        episode_usd, clips_usd = row["episode_usd"], row["clips_usd"]
+        own = platforms.own_clips_phrase(shots)
+        made = ("every image your own too" if images_manual(story_doc) else
+                f"a keyframe each on {quality['episode']['keyframe_link']} = {_usd(keyframes_usd)}")
+        summary = (f"≈ {_usd(episode_usd)} an episode: {own}, {made}"
+                   + ("" if images_manual(story_doc) else
+                      f"; plus ≈ {_usd(story_usd)} once per story for sheets, plates and props"))
     else:
         episode_usd, clips_usd = row["episode_usd"], row["clips_usd"]
         summary = (f"≈ {_usd(episode_usd)} an episode ({PRESET_SPEECH_SHOTS} speaking clips on {speech}, "
@@ -704,10 +764,20 @@ def native_speech_estimate(merged=None, *, model=None, story=None) -> dict:
                    f"{quality['episode']['keyframe_link']} (${keyframe_usd:g} each = {_usd(keyframes_usd)}), and the "
                    f"retake budget ({_usd(retake_usd)}). No TTS and no lip-sync for the characters' lines; the "
                    f"narrator stays a free TTS voice-over. Prices from the table of {pricing.PRICES_AS_OF}.")
+    if manual:
+        assumptions = (f"An episode: {PRESET_SPEECH_SHOTS} character lines, each one clip that speaks it, and "
+                       f"{PRESET_SILENT_SHOTS} silent shots, every clip made by you on your own subscription from "
+                       f"the shot brief and uploaded ({gen.MANUAL_LINK}: no call, $0 here); "
+                       + ("every image uploaded by you too. " if images_manual(story_doc) else
+                          f"a keyframe each on {quality['episode']['keyframe_link']} (${keyframe_usd:g} each = "
+                          f"{_usd(keyframes_usd)}). ")
+                       + "No TTS and no lip-sync for the characters' lines; the narrator stays a free TTS "
+                       f"voice-over. Prices from the table of {pricing.PRICES_AS_OF}.")
     return {
-        "profile": defaults.NATIVE_SPEECH_PROFILE, "label": label, "speech_model": chosen,
+        "profile": profile_name, "label": label, "speech_model": chosen, "manual": manual,
+        "images_manual": images_manual(story_doc),
         "speech_link": speech, "silent_link": silent, "resolution": resolution,
-        "episode_usd": round(episode_usd, 4), "story_usd": quality["story_usd"],
+        "episode_usd": round(episode_usd, 4), "story_usd": story_usd,
         "clips_usd": round(clips_usd, 4), "retake_usd": round(retake_usd, 4), "keyframes_usd": round(keyframes_usd, 4),
         "by_model": by_model, "keys_needed": keys, "missing_keys": missing, "stt_missing_keys": stt_missing,
         "summary": summary, "assumptions": assumptions, "priced": row is not None, "reason": reason,

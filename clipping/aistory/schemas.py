@@ -597,6 +597,10 @@ _GENERATION_PROFILE_SCHEMA = {
         # Optional (plan 22): a native-speech story's speaking-clip model; absent,
         # the budget profile's (media_policy.speech_link).
         "speech_model": {"type": "string", "enum": list(defaults.SPEECH_MODELS)},
+        # Optional (plan 22 stage 5): "manual" makes the sheets, plates, props and
+        # keyframes the human's own uploads (media_policy.images_manual); absent,
+        # the budget profile's image links.
+        "images": {"type": "string", "enum": list(defaults.IMAGE_MODES)},
         # Optional (plan 21 stage 1): absent is Studio; "agent" lets the
         # story-fast-track job approve by rule (defaults.STORY_MODES).
         "mode": {"type": "string", "enum": list(defaults.STORY_MODES)},

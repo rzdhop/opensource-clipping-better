@@ -434,6 +434,10 @@ def clip_state(ec, shot, script, *, link, tier, flags, image_sha) -> str:
         link = class_link(ec.story, shot, _assets_doc_of(ec), link)
     if link is not None and not sticky_link.on_link(clip["link"], link):
         return "stale"
+    if gen.is_manual(clip["link"]):
+        # Plan 22 stage 5: an uploaded clip is the human's take, picked by eye -- a keyframe
+        # drawn again never makes it stale; its line or prompt changed does (the hash below).
+        image_sha = clip["image_sha256"]
     if image_sha is None or clip["image_sha256"] != image_sha:
         return "stale"
     expected = clip_request_parts(ec, shot, script, tier=tier, flags=flags, note=clip.get("note"), link=link)["hash"]
@@ -1161,6 +1165,10 @@ def link_row(label, merged, adapters, *, resolution=None) -> dict:
     if not label:
         row["reason"] = "the budget profile names no link"
         return row
+    if gen.is_manual(label) and label == gen.MANUAL_LINK:
+        # Plan 22 stage 5: the human's own upload is keyed always -- no key, no adapter call, $0.
+        row.update(status="keyed", reason="your own clips", price_per_second=0.0, manual=True)
+        return row
     try:
         link = gen.parse_generation_chain(gen.VIDEO, [label])[0]
     except (ChainError, IndexError) as exc:
@@ -1228,6 +1236,7 @@ def _speech_units(ec, script, shots, flags, assets_doc, *, units, settings, merg
     committed = float(committed_usd or 0.0)
     recorded = sticky_link.recorded(assets_doc, sticky_link.VIDEO_SPEECH) or sticky_link.recorded(
         assets_doc, sticky_link.VIDEO)
+    manual_labels = {label for label, row in rows.items() if row.get("manual")}
     units.update(mode=settings.get("animate") or "all_shots", link=speech_label, route_class="paid",
                  source="record" if recorded else "policy", links=list(rows.values()),
                  price_per_second=speech_row["price_per_second"])
@@ -1271,6 +1280,10 @@ def _speech_units(ec, script, shots, flags, assets_doc, *, units, settings, merg
     seconds = sum(row["clip_s"] for row in new)
     units.update(plan=plan, still=still, count=len(new), seconds=int(seconds), est_usd=est,
                  eta_s=0.0 if not new else None, eta_note="no clip to make" if not new else ETA_NONE)
+    manual_new = [row for row in new if row["link"] in manual_labels]
+    if new and len(manual_new) == len(new):
+        # Plan 22 stage 5: every clip still to make is the human's own upload: nothing is bought.
+        units["route_class"] = "manual"
     units["speech"] = {
         "speech_model": media_policy.speech_model(ec.story), "speech_link": speech_label, "silent_link": silent_label,
         "speech_price": speech_row["price_per_second"], "silent_price": silent_row["price_per_second"],
@@ -1278,7 +1291,8 @@ def _speech_units(ec, script, shots, flags, assets_doc, *, units, settings, merg
         "speech_seconds": sum(row["clip_s"] for row in speech_new),
         "silent_seconds": sum(row["clip_s"] for row in silent_new),
         "speech_usd": round(speech_usd, 4), "silent_usd": round(silent_usd, 4), "retake_usd": round(retake_usd, 4),
-        "retake": retake, "classes": [
+        "retake": retake, "manual_count": len(manual_new),
+        "manual_shots": [row["shot_id"] for row in manual_new], "classes": [
             {"class": "speech", "link": speech_label, "count": len(speech_new), "usd": round(speech_usd, 4),
              "row": speech_row},
             {"class": "silent", "link": silent_label, "count": len(silent_new), "usd": round(silent_usd, 4),
@@ -1322,6 +1336,14 @@ def _speech_message(units, current_ids, booked_ids, *, resolution=None) -> str:
 
     if not units["count"]:
         text = f"Every shot has its current clip: $0.00{tail}."
+    elif part.get("manual_count") == units["count"]:
+        # Plan 22 stage 5: every clip still missing is the human's own upload.
+        from .. import platforms
+
+        text = (f"{units['count']} clip{_s(units['count'])} ({units['seconds']} s) to upload: "
+                f"{part['speech_count']} speaking and {part['silent_count']} silent on {gen.MANUAL_LINK}, $0.00 -- "
+                f"{platforms.own_clips_phrase(units['count'])}; download the shot brief, make them and upload "
+                f"them{tail}.")
     else:
         text = (f"{units['count']} clip{_s(units['count'])} ({units['seconds']} s){size}: "
                 f"{part['speech_count']} speaking ({part['speech_seconds']} s on {part['speech_link']} at "

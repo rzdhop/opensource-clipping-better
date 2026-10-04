@@ -159,6 +159,16 @@ GEN_PROVIDERS = {
         signup_url="", base_url="",
         notes="ComfyUI, Ollama or a local TTS package on this machine or the Docker host.",
     ),
+    # Plan 22 stage 5: the human is a provider. ``manual/upload`` is a link no
+    # request is ever sent to: its adapter raises ``AwaitingUpload`` and the
+    # file arrives through an upload route. Never hosted, never probed, never
+    # paid, no key, $0 (RC-N4).
+    "manual": GenProvider(
+        name="manual",
+        env_keys=(), free_tier=True, rpm=None, rpd=None, probe_timeout=0.0,
+        signup_url="", base_url="",
+        notes="Your own clips and images, made on your own subscriptions and uploaded: no call, no charge.",
+    ),
     # Documented extension points (spec 8.1): in the table with a price, not in a default chain.
     "gcloud": GenProvider(
         name="gcloud",
@@ -183,9 +193,9 @@ GEN_PROVIDER_NAMES = tuple(GEN_PROVIDERS)
 # Which providers may appear in which chain. Refusing ``edge/x`` in
 # IMAGE_CHAIN at parse time is cheaper than discovering it at run time.
 KIND_PROVIDERS = {
-    IMAGE: ("cloudflare", "pollinations", "local", "fal", "openai", "gemini"),
-    IMAGE_EDIT: ("local", "gemini", "fal", "openai"),
-    VIDEO: ("local", "fal", "gemini"),
+    IMAGE: ("cloudflare", "pollinations", "local", "fal", "openai", "gemini", "manual"),
+    IMAGE_EDIT: ("local", "gemini", "fal", "openai", "manual"),
+    VIDEO: ("local", "fal", "gemini", "manual"),
     TTS: ("edge", "gemini", "local", "gcloud", "openai", "elevenlabs"),
     VISION: ("gemini", "openrouter", "local"),
     LIPSYNC: ("fal",),
@@ -210,6 +220,18 @@ FALLBACK_LINKS = {
     "gemini/flash-lite": ("gemini/flash-lite-latest",),
     f"openrouter/{OPENROUTER_VISION_DEFAULT_MODEL}": ("openrouter/google/gemma-4-31b:free",),
 }
+
+
+# Plan 22 stage 5: the one link of the ``manual`` provider (the human's upload).
+MANUAL = "manual"
+MANUAL_LINK = "manual/upload"
+MANUAL_KINDS = (IMAGE, IMAGE_EDIT, VIDEO)
+
+
+def is_manual(link) -> bool:
+    """Whether *link* (a ``Link`` or a label) is the human's own upload."""
+    provider = link.split("/", 1)[0] if isinstance(link, str) else getattr(link, "provider", None)
+    return provider == MANUAL
 
 
 def kinds_of(provider: str) -> tuple:
@@ -362,6 +384,19 @@ class NoRunnableLink(errors.ProviderError):
     """No link of the chain could run. Carries every (label, reason) pair."""
 
 
+class AwaitingUpload(errors.ProviderError):
+    """A ``manual/upload`` link was asked for a file (plan 22 stage 5): nothing
+    is sent, nothing is booked -- the human makes it and uploads it. *kind* is
+    the generation kind, *target* what is awaited (a shot id, an entity's
+    image), as the caller named it in ``request.extra["target"]``."""
+
+    def __init__(self, kind, target=None):
+        self.kind = kind
+        self.target = target
+        what = f" ({target})" if target else ""
+        super().__init__(f"{MANUAL_LINK}: awaiting your upload{what}; nothing was sent or booked")
+
+
 # --------------------------------------------------------------- adapters
 
 # ``(kind, provider) -> adapter``. An adapter is any object with
@@ -439,6 +474,19 @@ def run_generation_chain(
             cancel.check()
         label = describe(link)
         is_local = link.provider == "local"
+
+        if link.provider == MANUAL:
+            # Plan 22 stage 5 (RC-N4): the human's own upload -- no route, key,
+            # probe, budget, limiter or journal applies; nothing is sent or
+            # booked. Its adapter says so by raising ``AwaitingUpload``, which
+            # ends the chain here: a later link never stands in for the human.
+            adapter = adapter_for(kind, link.provider, adapters)
+            if adapter is None:
+                skip(label, f"no adapter yet for {link.provider} {kind}")
+                continue
+            on_log(f"   ✋ {label}: awaiting your upload; nothing is sent")
+            adapter.generate(link, request, credentials={}, on_log=on_log)
+            raise AwaitingUpload(kind, (request.extra or {}).get("target"))
 
         if route == "local" and not is_local:
             skip(label, "route is local")

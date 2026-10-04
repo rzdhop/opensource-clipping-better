@@ -5811,7 +5811,7 @@ def _agent_episode_usd(story, env) -> float:
         cap = float(budget_mod.profile_settings(profile).get("cap_usd") or 0.0)
     except (OSError, ValueError, KeyError, TypeError):
         cap = 0.0
-    if profile == defaults.NATIVE_SPEECH_PROFILE:
+    if profile in defaults.NATIVE_SPEECH_PROFILES:
         # Plan 22: a native-speech story's own figure (its speech model, links and retake budget).
         try:
             usd = float(media_policy.native_speech_estimate(gating.merged_env(env), story=story)["episode_usd"])

@@ -74,6 +74,11 @@ AUDIO = {
     "gemini/veo-3.1-lite": "always",
     "gemini/veo-3.1-fast": "always",
     "gemini/veo-3.1": "always",
+    # Plan 22 stage 5: an uploaded clip may carry sound or not (a speaking
+    # shot's must: the upload route refuses it otherwise). It has no entry in
+    # CLIP_LENGTHS: the plan's lengths are targets (native_speech.SPEECH_LENGTHS),
+    # the clip's real length is the shot's.
+    "manual/upload": "optional",
 }
 # Only seedance takes a seed; kling and LTX have no field, Veo is "not deterministic".
 SEED_HONOURED = frozenset({"fal/seedance-1-pro-fast"})

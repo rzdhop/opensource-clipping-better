@@ -79,6 +79,9 @@ FREE_PROVIDER_PRICES = {
     "openrouter": Price("token", 0.0, ":free model"),
     "pollinations": Price("image", 0.0, "pollen credits; keyless at the legacy rate"),
     "cloudflare": Price("image", 0.0, "free allowance"),
+    # Plan 22 stage 5: the human's own clips and images, uploaded (a clip is
+    # counted in seconds like every video link; nothing is ever charged).
+    "manual": Price("second", 0.0, "your own clips and images, uploaded: no call, no charge"),
 }
 
 Estimate = namedtuple("Estimate", "link unit qty price_usd est_usd paid")

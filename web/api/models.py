@@ -615,12 +615,15 @@ class GenerationProfileModel(BaseModel):
     tier: int = 1
     route: Literal["auto","local","api"] = "auto"
     consistency_mode: Literal["references","prompt_only"] = "references"
-    budget_profile: Literal["free","one_dollar","quality","native_speech"] = "free"
+    budget_profile: Literal["free","one_dollar","quality","native_speech","native_speech_manual"] = "free"
     # Optional (phase 7, DEC-221): left out, a story is on the legacy pipeline.
     pipeline: Optional[Literal["v2"]] = None
     # Optional (plan 22): a native-speech story's speaking-clip model; left
     # out, the budget profile's (media_policy.speech_link).
     speech_model: Optional[Literal["lite","fast","premium"]] = None
+    # Optional (plan 22 stage 5): "manual" -- the sheets, plates, props and
+    # keyframes are the human's own uploads; left out, the profile's links.
+    images: Optional[Literal["manual"]] = None
 
     @model_serializer(mode="wrap")
     def _without_unset_pipeline(self, handler):
@@ -630,6 +633,8 @@ class GenerationProfileModel(BaseModel):
             data.pop("pipeline", None)
         if isinstance(data, dict) and data.get("speech_model") is None:
             data.pop("speech_model", None)
+        if isinstance(data, dict) and data.get("images") is None:
+            data.pop("images", None)
         return data
 
 

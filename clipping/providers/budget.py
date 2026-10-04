@@ -41,7 +41,7 @@ BUDGET_PROFILE = ""          # "" = resolved from allow_paid
 
 PROFILE_WHEN_FREE = "free"
 PROFILE_WHEN_PAID = "one_dollar"
-PROFILE_NAMES = ("free", "one_dollar", "quality", "native_speech")
+PROFILE_NAMES = ("free", "one_dollar", "quality", "native_speech", "native_speech_manual")
 
 ENV_NAMES = ("ALLOW_PAID", "PER_EPISODE_CAP_USD", "DAILY_CAP_USD", "PER_STORY_CAP_USD", "BUDGET_PROFILE")
 

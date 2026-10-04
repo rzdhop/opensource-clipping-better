@@ -43,7 +43,7 @@ EXTRA_LIMITS = {
 def published_limits() -> dict:
     table = {}
     for name, provider in GEN_PROVIDERS.items():
-        if not provider.free_tier or name == "local":
+        if not provider.free_tier or name in ("local", "manual"):
             continue
         table[name] = Limit(rpm=provider.rpm, rpd=provider.rpd)
     table.update(EXTRA_LIMITS)
