@@ -587,6 +587,9 @@ _GENERATION_PROFILE_SCHEMA = {
         # Optional (phase 7 stage 4, DEC-227): the clips' size; absent, the
         # budget profile's, else 720p (media_policy.video_resolution).
         "video_resolution": {"type": "string", "enum": list(defaults.VIDEO_RESOLUTIONS)},
+        # Optional (DEC-258): the clips' lipsync for this story; absent, the
+        # budget profile's (media_policy.lipsync).
+        "lipsync": {"type": "string", "enum": list(defaults.LIPSYNC_MODES)},
     },
     "required": ["tier", "route", "consistency_mode", "budget_profile"],
     "additionalProperties": False,
@@ -2808,10 +2811,12 @@ _STORYBOARD_MOTION_SCHEMA = _document({
 SHOT_IMAGE_DIR = "assets/shots"
 SHOT_IMAGE_NAME_PATTERN = r"^shot_(0[1-9]|[1-9][0-9])\.(png|jpg|jpeg|webp)$"
 # A shot's clip (phase 6 stage 7, tier >= 2): assets/clips/shot_NN.mp4, named
-# the image's way. The only names store.EPISODE_ASSET_NAME_PATTERNS["clips"]
+# the image's way -- and (DEC-258) its lip-synced take beside it,
+# shot_NN.lipsync.mp4. The only names store.EPISODE_ASSET_NAME_PATTERNS["clips"]
 # holds.
 SHOT_CLIP_DIR = "assets/clips"
-SHOT_CLIP_NAME_PATTERN = r"^shot_(0[1-9]|[1-9][0-9])\.mp4$"
+SHOT_CLIP_NAME_PATTERN = r"^shot_(0[1-9]|[1-9][0-9])(\.lipsync)?\.mp4$"
+SHOT_LIPSYNC_SUFFIX = ".lipsync"
 # How an image was paid for: a free API link, a local engine, a paid link.
 IMAGE_ROUTES = ("free", "local", "paid")
 # A full sha256, hex (a prompt hash, a cache key, a file's digest).
@@ -2840,6 +2845,29 @@ _STORYBOARD_PENDING_SCHEMA = _or_null(_document({
 # label (EPISODE_LINK_PATTERN's rule); ``route`` how it is paid for.
 CLIP_STATES = ("current", "stale", "failed")
 CLIP_ROUTES = ("local", "paid")
+# DEC-258: the clip's lipsync, when its story lipsyncs (media_policy.lipsync)
+# and the shot holds a line spoken by a character in its frame. ``current``:
+# ``assets.video`` is the lip-synced take (SHOT_CLIP_DIR/shot_NN.lipsync.mp4),
+# made from the clip whose sha256 is ``clip_sha256`` and the dialogue track
+# whose inputs hash to ``track_hash`` (its bytes: ``audio_sha256``) on
+# ``link``; ``failed``: the plain clip stays ``assets.video`` and ``reason``
+# says why. Optional on the clip: every clip recorded before it validates.
+LIPSYNC_STATES = ("current", "failed")
+_STORYBOARD_LIPSYNC_SCHEMA = _or_null(_document({
+    "state": {"type": "string", "enum": list(LIPSYNC_STATES)},
+    "link": {"type": "string", "maxLength": 160, "pattern": r"^[a-z][a-z0-9_-]*/[^\s,*]+$"},
+    "clip_sha256": _SHA256,
+    "track_hash": _SHA256,
+    "audio_sha256": {"type": ["string", "null"], "pattern": SHA256_PATTERN},
+    "cache_key": {"type": ["string", "null"], "pattern": SHA256_PATTERN},
+    "est_usd": {"type": "number", "minimum": 0},
+    "generated_at": _TIMESTAMP_OR_NULL,
+}, optional={
+    # The lines the track carries (in-frame speakers only) and the seconds billed.
+    "lines": {"type": "array", "items": {"type": "string", "pattern": r"^l[0-9]{2}$"}, "maxItems": 60},
+    "billed_s": {"type": "integer", "minimum": 0},
+    "reason": {"type": ["string", "null"], "maxLength": 1000},
+}))
 _STORYBOARD_CLIP_SCHEMA = _or_null(_document({
     "state": {"type": "string", "enum": list(CLIP_STATES)},
     "link": {"type": "string", "maxLength": 160, "pattern": r"^[a-z][a-z0-9_-]*/[^\s,*]+$"},
@@ -2860,6 +2888,8 @@ _STORYBOARD_CLIP_SCHEMA = _or_null(_document({
     # How the render covers a shot longer than the clip (DEC-250): slowed to the shot's
     # length (``stretch``); absent, held on its last frame (DEC-208).
     "cover": {"type": ["string", "null"], "enum": ["stretch", None]},
+    # DEC-258: the clip's lipsync (_STORYBOARD_LIPSYNC_SCHEMA).
+    "lipsync": _STORYBOARD_LIPSYNC_SCHEMA,
 }))
 
 # The five keys of spec 2.8 stay required; phase 4's record of the image is
@@ -3049,15 +3079,21 @@ def storyboard_errors(doc, *, min_shot_s=0.8) -> list:
         video = shot["assets"]["video"]
         if video is not None:
             folder, _, name = video.rpartition("/")
+            plain = f"shot_{shot['shot_id'][2:]}.mp4"
+            synced = f"shot_{shot['shot_id'][2:]}{SHOT_LIPSYNC_SUFFIX}.mp4"
+            clip = shot["assets"].get("clip") or {}
             if (folder != SHOT_CLIP_DIR or _search(SHOT_CLIP_NAME_PATTERN, name) is None
-                    or name != f"shot_{shot['shot_id'][2:]}.mp4"):
+                    or name not in (plain, synced)):
                 errors.append(
                     f"$.shots[{i}].assets.video: {video!r} is not {shot['shot_id']}'s clip "
                     f"({SHOT_CLIP_DIR}/shot_NN.mp4)"
                 )
-            elif (shot["assets"].get("clip") or {}).get("state") != "current":
+            elif clip.get("state") != "current":
                 errors.append(f"$.shots[{i}].assets.video: set only with a current clip (assets.clip.state "
                               "'current')")
+            elif name == synced and (clip.get("lipsync") or {}).get("state") != "current":
+                errors.append(f"$.shots[{i}].assets.video: the lip-synced take is set only with a current lipsync "
+                              "(assets.clip.lipsync.state 'current')")
 
     seen_scenes = []
     for shot in shots:

@@ -205,6 +205,36 @@ def ambience(story) -> bool:
     return settings.get("tier3_native_audio") == AMBIENCE
 
 
+# DEC-258: the budget profiles' ``lipsync`` (and the story's own switch).
+LIPSYNC_KLING = "kling"
+assert defaults.LIPSYNC_MODES == budget_mod.LIPSYNC_MODES
+# The longest clip Kling LipSync takes (fal: 2-10 s of input video): a
+# lipsyncing story buys no longer clip, so its storyboard plans a scene past
+# it as two shots (DEC-250's stretch still covers a shot up to 12.5 s).
+LIPSYNC_MAX_CLIP_S = 10
+
+
+def lipsync(story) -> bool:
+    """Whether *story*'s clips get their characters' lips moved to the
+    dialogue once bought (DEC-258; the human: "decide for me", option B): a
+    fully animated story (:func:`fully_animated`: v2, tier >= 2, every shot
+    a clip) whose ``generation_profile.lipsync`` says ``kling`` -- or, absent,
+    whose budget profile's ``lipsync`` does (the quality preset). ``none`` on
+    the story turns it off whatever the profile says. A profile that cannot
+    be read counts as one that says nothing."""
+    if not fully_animated(story):
+        return False
+    profile = story.get("generation_profile") or {}
+    chosen = profile.get("lipsync")
+    if chosen in defaults.LIPSYNC_MODES:
+        return chosen == LIPSYNC_KLING
+    try:
+        settings = budget_mod.profile_settings(profile.get("budget_profile"))
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+    return settings.get("lipsync") == LIPSYNC_KLING
+
+
 def keyframe_fix(story):
     """``{"max_redraws_per_shot", "cap_usd"}`` -- how a v2 story's assets
     step redraws the keyframes the keyframe check (J2) flagged (phase 8

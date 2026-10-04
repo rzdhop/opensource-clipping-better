@@ -170,6 +170,7 @@ from types import SimpleNamespace
 from clipping.providers import budget as budget_mod
 from clipping.providers import gating, gen_timings, gencache, local_comfyui
 from clipping.providers import generation as gen
+from clipping.providers import lipsync as lipsync_providers
 from clipping.providers.registry import ChainError, Link, describe
 
 from .. import (defaults, hardware, imaging, media_policy, prompt_budgets, refimages, schemas, timing, video_plan,
@@ -180,6 +181,7 @@ from .. import shots as shots_mod
 from .. import store as store_mod
 from ..render import audio_assets, imagesize
 from . import clips, entities, episode_common, judge, llm_call, sticky_link, voice_lines
+from . import lipsync as lipsync_step
 from . import script as script_step
 from . import storyboard as storyboard_step
 from .episode_common import SCRIPT_DOC, STORYBOARD_DOC
@@ -207,6 +209,8 @@ STORY_STT_CALL_SECONDS = 60
 # A clip polls for up to ten minutes on a hosted link (fal, Veo); one that
 # runs longer is kept submitted and collected by the next run.
 STORY_CLIP_CALL_SECONDS = 600
+# DEC-258: a lipsync's poll budget is a clip's (``lipsync.FAL_LIPSYNC_POLL_BUDGET_SECONDS``).
+STORY_LIPSYNC_CALL_SECONDS = 600
 
 # What a clip still generating is offered -- never its regenerate target: a
 # new seed would buy a second clip while the first is billed (DEC-152).
@@ -1361,8 +1365,10 @@ def spending_caps(ec, total, *, env, ledger=None, video=None, fix_usd=0.0) -> tu
         what = "paid images and voices"
         if video:
             count = video["count"]
+            # DEC-258: the lipsync's price, inside the video part's, said apart.
+            clips_usd = video["est_usd"] - lipsync_step.counted_usd(video)
             what = (f"paid images, voices and {count} clip{'' if count == 1 else 's'} ({video['seconds']} s on "
-                    f"{video['link']}, est ${video['est_usd']:.3f})")
+                    f"{video['link']}, est ${clips_usd:.3f}{lipsync_step.clause(video)})")
         if fix_usd > 0:
             what += f", with up to ${fix_usd:.2f} to redraw flagged keyframes"
         plan = SimpleNamespace(est_usd=total, link=f"episode {ec.ep}'s {what}")
@@ -1499,9 +1505,18 @@ def asset_units(ec, script, storyboard, *, env, align_words=False, adapters=None
         if not animate:
             video["message"] = f"Animate off: no clip is made in this run. {video['message']}".strip()
         # A plan held for the keyframes' approval (phase 7 stage 6b, RC-Q3) is out of this run, as animate off.
-        elif video["route_class"] == "paid" and video["count"] and not video.get("hold"):
-            paid_links.append({"kind": gen.VIDEO, "link": video["link"], "allowed": video["ready"],
-                               "reason": video["refused"] or "paid, allowed", "est_usd": video["est_usd"]})
+        elif video["route_class"] == "paid" and clips.to_buy(video) and not video.get("hold"):
+            lip_usd = lipsync_step.counted_usd(video)
+            if video["count"]:
+                paid_links.append({"kind": gen.VIDEO, "link": video["link"], "allowed": video["ready"],
+                                   "reason": video["refused"] or "paid, allowed",
+                                   "est_usd": round(video["est_usd"] - lip_usd, 4)})
+            if lip_usd:
+                # DEC-258: the clips' lipsync, a paid link of its own.
+                lip = video["lipsync"]
+                paid_links.append({"kind": gen.LIPSYNC, "link": lip["link"],
+                                   "allowed": bool(video["ready"] and lip["ready"]),
+                                   "reason": video["refused"] or lip["reason"] or "paid, allowed", "est_usd": lip_usd})
             if video["ready"]:
                 video_paid = video["est_usd"]
     total = round(images_paid + voices_paid + fix_paid + video_paid, 4)
@@ -1547,9 +1562,23 @@ def _minimal_assets_doc(ec, now) -> dict:
 
 
 def _video_summary(video, *, animate) -> dict:
-    """The step summary's ``video`` before the phase: nothing made yet."""
-    return {"animate": bool(animate), "planned": len(video["plan"]) if animate else 0, "made": 0, "reused": 0,
-            "failed": [], "seconds": 0, "usd": 0.0, "link": video["link"], "route": video["route_class"]}
+    """The step summary's ``video`` before the phase: nothing made yet --
+    with ``lipsync`` (DEC-258) on a story whose clips are lipsynced."""
+    summary = {"animate": bool(animate), "planned": len(video["plan"]) if animate else 0, "made": 0, "reused": 0,
+               "failed": [], "seconds": 0, "usd": 0.0, "link": video["link"], "route": video["route_class"]}
+    if video.get("lipsync") is not None:
+        summary["lipsync"] = _lipsync_summary(video["lipsync"])
+    return summary
+
+
+def _lipsync_summary(part) -> dict:
+    """The step summary's ``video.lipsync`` before the phase (DEC-258): the
+    shots lipsynced in this run (``done``), kept current (``reused``), with
+    no in-frame line (``skipped``), failed (``{shot_id, reason}``), the
+    seconds billed and the dollars; ``unavailable`` the link's reason when it
+    cannot run (nothing is lipsynced then)."""
+    return {"link": part.get("link"), "done": [], "reused": 0, "skipped": [], "failed": [], "seconds": 0,
+            "usd": 0.0, "unavailable": None if part.get("available") else (part.get("reason") or "cannot run")}
 
 
 def clip_seed(shot, *, story_id, ep) -> int:
@@ -1991,7 +2020,8 @@ def pending_clip_keys(ec, script, shot, doc, *, link=None) -> list:
     for template, lengths in options:
         seconds = [int(clip["clip_s"])] if clip.get("clip_s") else []
         try:
-            seconds.insert(0, video_plan.requested_seconds(link, duration, lengths=lengths))
+            seconds.insert(0, video_plan.requested_seconds(link, duration,
+                                                           lengths=lengths or clips.sold_lengths(ec.story, link)))
         except ValueError:
             pass
         for clip_s in dict.fromkeys(seconds):
@@ -2207,6 +2237,8 @@ class _Assets(voice_lines.LineMeasurement):
     # The ffmpeg runner of a v2 keyframe's source crop (A6); None is
     # ``subprocess.run``, read when it runs (a test hands in a fake).
     crop_run = None
+    # The ffmpeg runner of the lipsync's dialogue track and take (DEC-258); None is ``subprocess.run``.
+    lipsync_run = None
 
     def __init__(self, ctx, ec, *, tools, transcribe=None, budget=None):
         self.ctx = ctx
@@ -2928,7 +2960,7 @@ class _Assets(voice_lines.LineMeasurement):
         image_link = recorded_image_link(doc)
         tier = clips.tier_of(ec)
         by_id = {shot["shot_id"]: shot for shot in self.storyboard["shots"]}
-        todo = []
+        todo, kept_ids = [], []
         for row in video["plan"]:
             shot = by_id[row["shot_id"]]
             state = clips.clip_state(ec, shot, self.script, link=video["link"], tier=tier,
@@ -2936,25 +2968,42 @@ class _Assets(voice_lines.LineMeasurement):
                                      image_sha=_sha256_file(shot_image_path(ec, shot)))
             if state == "current":
                 self.video["reused"] += 1
+                kept_ids.append(row["shot_id"])
             else:
                 todo.append(row)
-        if not todo:
+        # DEC-258: the lipsync of a kept clip that has none current yet (the step's
+        # earlier run, a line re-voiced or re-timed since); a new clip's follows it.
+        lip = video.get("lipsync")
+        lip_link = lip["link"] if lip is not None and lip.get("available") else None
+        lip_todo = self.lipsync_todo(kept_ids, by_id, lip_link) if lip is not None else set()
+        if lip is not None and lip_link is None and lip.get("count"):
+            ctx.on_log(f"👄 No lip-sync in this run: {lip.get('link') or gen.ENV_NAMES[gen.LIPSYNC]}: "
+                       f"{lip.get('reason') or 'cannot run'}; the clips are kept as they are.")
+        if not todo and not lip_todo:
             ctx.on_log(f"🎬 Every planned shot has its current clip on {video['link']}: no clip to make.")
+            self.lipsync_total()
             return doc
-        seconds = sum(int(row["clip_s"]) for row in todo)
-        price = f", est ${sum(row['est_usd'] for row in todo):.3f} paid" if video["route_class"] == "paid" else ""
-        kept = f" ({self.video['reused']} current, kept)" if self.video["reused"] else ""
-        ctx.on_log(f"🎬 Animating {len(todo)} shot{'s' if len(todo) != 1 else ''} ({seconds} s) on "
-                   f"{video['link']}{price}{kept}")
-        for row in todo:
-            if row.get("cover") == "stretch":
-                # DEC-250: said in the feed, as the estimate says it.
-                ctx.on_log(f"🎬 {clips.cover_sentence(row)}")
-        if video["route_class"] == "local":
-            self.free_comfyui()
-        for index, row in enumerate(todo):
-            self.clip_todo = [item["shot_id"] for item in todo[index:]]
+        if todo:
+            seconds = sum(int(row["clip_s"]) for row in todo)
+            price = f", est ${sum(row['est_usd'] for row in todo):.3f} paid" if video["route_class"] == "paid" else ""
+            kept = f" ({self.video['reused']} current, kept)" if self.video["reused"] else ""
+            ctx.on_log(f"🎬 Animating {len(todo)} shot{'s' if len(todo) != 1 else ''} ({seconds} s) on "
+                       f"{video['link']}{price}{kept}")
+            for row in todo:
+                if row.get("cover") == "stretch":
+                    # DEC-250: said in the feed, as the estimate says it.
+                    ctx.on_log(f"🎬 {clips.cover_sentence(row)}")
+            if video["route_class"] == "local":
+                self.free_comfyui()
+        todo_ids = [row["shot_id"] for row in todo]
+        for row in video["plan"]:
             shot = by_id[row["shot_id"]]
+            if row["shot_id"] in lip_todo:
+                self.lipsync_shot(shot, link=lip_link)
+                continue
+            if row["shot_id"] not in todo_ids:
+                continue
+            self.clip_todo = todo_ids[todo_ids.index(row["shot_id"]):]
             self.before_clip(self.clip_todo)
             try:
                 record, info = self.make_clip(shot, video=video, clip_s=row["clip_s"], est_usd=row["est_usd"],
@@ -2965,8 +3014,213 @@ class _Assets(voice_lines.LineMeasurement):
                 self.fail_clip(shot, exc)
                 continue
             self.apply_clip(shot, record, info, video=video)
+            if lip_link is not None:
+                self.lipsync_shot(shot, link=lip_link)
         self.clip_todo = []
+        self.lipsync_total()
         return episode_common.read_episode(ec, ASSETS_DOC) or doc
+
+    # ------------------------------------------------------------ the lipsync
+
+    def lipsync_todo(self, kept_ids, by_id, link) -> set:
+        """The kept clips of *kept_ids* whose lipsync (DEC-258) is to make on
+        the link labelled *link*: an in-frame line and no current lipsync;
+        the current ones are counted ``reused``, the ones with no in-frame
+        line ``skipped``. Nothing when *link* is None (the link cannot run:
+        :meth:`animate_clips` says so once)."""
+        summary = self.video.get("lipsync")
+        if summary is None or link is None:
+            return set()
+        try:
+            timeline = lipsync_step.episode_timeline(self.ec, self.script, self.storyboard)
+        except (lipsync_step.timeline_mod.TimelineError, KeyError, ValueError):
+            timeline = None
+        todo = set()
+        for shot_id in kept_ids:
+            shot = by_id[shot_id]
+            if not lipsync_step.spoken_lines(self.script, shot):
+                summary["skipped"].append(shot_id)
+            elif timeline is not None and lipsync_step.is_current(self.ec, self.script, self.storyboard, shot,
+                                                                  link=link, timeline=timeline):
+                summary["reused"] += 1
+            else:
+                todo.add(shot_id)
+        return todo
+
+    def before_lipsync(self, shot_id) -> None:
+        """The cancel token, then the step budget: a lipsync starts only while
+        its poll (:data:`STORY_LIPSYNC_CALL_SECONDS`) still fits."""
+        self.ctx.cancel.check()
+        try:
+            self.budget.before_call(lambda: f"the lipsync of shot {shot_id}", per_call=STORY_LIPSYNC_CALL_SECONDS)
+        except StepFailed as exc:
+            raise voice_lines.BudgetSpent(str(exc) + self.also_failed()) from None
+
+    def lipsync_shot(self, shot, *, link) -> None:
+        """*shot*'s current clip lipsynced on the link labelled *link*
+        (``lipsync`` module docstring): its dialogue track built, the clip and
+        the track sent through the story's generation cache and the gates of
+        every paid call (the caps, ``allow_paid``, the ledger in seconds,
+        rounded up to 5 s), the answer kept as ``assets/clips/shot_NN.lipsync.mp4``
+        with the clip's own sound, and ``assets.video`` naming it. A shot
+        with no in-frame line keeps its plain clip, unrecorded; a failure
+        records ``lipsync.state: failed`` with the reason and keeps the plain
+        clip as ``assets.video`` -- never a missing video, never another
+        link. ``gencache.JournalError`` passes through."""
+        ec, ctx, tools, gates = self.ec, self.ctx, self.tools, self.gates
+        shot_id = shot["shot_id"]
+        summary = self.video.setdefault("lipsync", _lipsync_summary({"link": link, "available": True}))
+        clip = shot["assets"].get("clip") or {}
+        plain = lipsync_step.plain_clip_path(ec, shot)
+        if clip.get("state") != "current" or plain is None:
+            return
+        try:
+            timeline = lipsync_step.episode_timeline(ec, self.script, self.storyboard)
+            spec = lipsync_step.track_spec(ec, self.script, self.storyboard, shot, timeline=timeline)
+        except (lipsync_step.timeline_mod.TimelineError, KeyError, ValueError, StopIteration) as exc:
+            self.fail_lipsync(shot, {"link": link, "clip_sha256": _sha256_file(plain), "track_hash": None},
+                              f"the episode's timeline cannot place its lines ({exc}); nothing was asked")
+            return
+        if spec is None:
+            # No line spoken by a character in its frame: the plain clip, no lipsync.
+            summary["skipped"].append(shot_id)
+            if clip.get("lipsync") is not None or shot["assets"].get("video") != clips.clip_rel(shot_id):
+                shot["assets"]["clip"] = {key: value for key, value in clip.items() if key != "lipsync"}
+                shot["assets"]["video"] = clips.clip_rel(shot_id)
+                self.write_board()
+            return
+        if lipsync_step.is_current(ec, self.script, self.storyboard, shot, link=link, spec=spec):
+            summary["reused"] += 1
+            return
+        clip_s = int(clip["clip_s"])
+        billed = lipsync_providers.billed_seconds(clip_s)
+        record = {"state": "failed", "link": link, "clip_sha256": _sha256_file(plain), "track_hash": spec["hash"],
+                  "audio_sha256": None, "cache_key": None, "est_usd": 0.0, "generated_at": None,
+                  "lines": [row["line_id"] for row in spec["lines"]], "billed_s": billed}
+        self.before_lipsync(shot_id)
+        try:
+            pinned = [lipsync_step.lipsync_link(gates.merged)]
+        except ChainError as exc:
+            self.fail_lipsync(shot, record, f"{gen.ENV_NAMES[gen.LIPSYNC]} cannot be used: {exc}")
+            return
+        if describe(pinned[0]) != link:
+            self.fail_lipsync(shot, record, f"{link} is not the link of {gen.ENV_NAMES[gen.LIPSYNC]} any more")
+            return
+        route = ec.story["generation_profile"]["route"]
+        name = f"shot_{shot_id[2:]}{schemas.SHOT_LIPSYNC_SUFFIX}"
+        with tempfile.TemporaryDirectory(prefix="shot-lipsync-") as work:
+            try:
+                track = lipsync_step.build_track(spec, os.path.join(work, f"shot_{shot_id[2:]}.dialogue.wav"),
+                                                 run=self.lipsync_run)
+            except lipsync_step.LipsyncError as exc:
+                self.fail_lipsync(shot, record, f"its dialogue track could not be built ({exc}); nothing was asked")
+                return
+            record["audio_sha256"] = track["sha256"]
+            incoming = os.path.join(work, "answer")
+            request = gen.GenRequest(kind=gen.LIPSYNC, references=(plain,), duration_s=clip_s, out_dir=incoming,
+                                     extra={"audio": track["path"], "name": name})
+            record["cache_key"] = gencache.request_key(gen.LIPSYNC, pinned[0], request)
+            cache = self.cache(gen.LIPSYNC, unit="second", qty=billed)
+            try:
+                result, answered = gen.run_generation_chain(
+                    gen.LIPSYNC, pinned, request, env=gates.merged, allow_paid=gates.budget.allow_paid, route=route,
+                    on_log=ctx.on_log, budget_check=gates.check, limiter=gates.limiter, adapters=tools.adapters,
+                    transport=tools.transport, sleep_fn=tools.sleep_fn, time_fn=tools.time_fn, cancel=ctx.cancel,
+                    cache=cache)
+            except gencache.JournalError:
+                raise
+            except gen.NoRunnableLink as exc:
+                reasons = "; ".join(f"{label}: {reason}" for label, reason in exc.failures) or str(exc)
+                self.fail_lipsync(shot, record, f"{reasons}; no other link was tried")
+                return
+            except Exception as exc:  # noqa: BLE001 - an adapter's bug fails this lipsync, named
+                self.fail_lipsync(shot, record, f"{type(exc).__name__}: {exc}; no other link was tried")
+                return
+            meta = result.meta or {}
+            if "booked" not in meta:
+                est = _book_answer(gates, result, answered, gen.LIPSYNC, unit="second", qty=billed)
+            else:
+                est = round(float((meta.get("booked") or {}).get("est_usd") or 0.0), 4) if result.paid else 0.0
+            record.update(est_usd=est, cache_key=meta.get("cache_key") or record["cache_key"])
+            produced = next((str(path) for path in result.paths if str(path).lower().endswith(".mp4")), None)
+            if produced is None:
+                self.fail_lipsync(shot, record, f"{describe(answered)} answered without an .mp4 clip (the call is "
+                                                "booked)")
+                return
+            try:
+                dest = ec.store.episode_asset_path(ec.story_id, ec.ep, clips.CLIPS_KIND,
+                                                   lipsync_step.lipsync_name(shot_id), create=True)
+            except KeyError:
+                self.fail_lipsync(shot, record, f"{lipsync_step.lipsync_rel(shot_id)} is not a real file or folder; it "
+                                                "is never followed (the call is booked and cached: move it away and "
+                                                "run the step again)")
+                return
+            try:
+                synced = lipsync_step.remux(produced, plain, os.path.join(work, "synced.mp4"),
+                                            plain_has_audio=clips.clip_has_audio(plain), run=self.lipsync_run)
+            except lipsync_step.LipsyncError as exc:
+                self.fail_lipsync(shot, record, f"{exc} (the call is booked and cached)")
+                return
+            _atomic_copy(synced, dest)
+        cached, resumed = bool(meta.get("cached")), bool(meta.get("resumed"))
+        record.update(state="current", generated_at=llm_call.utc_now())
+        shot["assets"]["clip"] = dict(clip, lipsync=record)
+        shot["assets"]["video"] = lipsync_step.lipsync_rel(shot_id)
+        self.write_board()
+        summary["done"].append(shot_id)
+        if not cached and not resumed:
+            summary["seconds"] += billed
+            summary["usd"] = round(summary["usd"] + est, 4)
+        count = len(record["lines"])
+        how = ("kept answer, no call" if cached else "collected, booked when it was sent" if resumed
+               else f"${est:.3f}")
+        ctx.on_log(f"👄 Shot {shot_id}: lips synced to {count} line{'' if count == 1 else 's'} ({clip_s} s, {how})")
+
+    def fail_lipsync(self, shot, record, reason) -> None:
+        """*shot*'s lipsync ``failed`` with *reason*: the plain clip stays its
+        ``assets.video``, the storyboard written, the shot named in the
+        summary and the feed (DEC-258)."""
+        shot_id = shot["shot_id"]
+        reason = reason if len(reason) <= 1000 else reason[:997] + "..."
+        clip = shot["assets"].get("clip") or {}
+        base = {"state": "failed", "link": record.get("link"), "clip_sha256": record.get("clip_sha256"),
+                "track_hash": record.get("track_hash"), "audio_sha256": record.get("audio_sha256"),
+                "cache_key": record.get("cache_key"), "est_usd": float(record.get("est_usd") or 0.0),
+                "generated_at": None}
+        for key in ("lines", "billed_s"):
+            if key in record:
+                base[key] = record[key]
+        base["reason"] = reason
+        if base["clip_sha256"] is None or base["track_hash"] is None or base["link"] is None:
+            # Nothing to record against (the clip or its lines unreadable): the plain clip alone.
+            shot["assets"]["clip"] = {key: value for key, value in clip.items() if key != "lipsync"}
+        else:
+            shot["assets"]["clip"] = dict(clip, lipsync=base)
+        shot["assets"]["video"] = clips.clip_rel(shot_id) if clip.get("state") == "current" else None
+        self.write_board()
+        summary = self.video.setdefault("lipsync", _lipsync_summary({"link": record.get("link"), "available": True}))
+        summary["failed"].append({"shot_id": shot_id, "reason": reason})
+        self.ctx.on_log(f"✖ Lip-sync {shot_id} failed: {reason}. Its plain clip is kept.")
+
+    def lipsync_total(self) -> None:
+        """The run's one line about the lipsync (DEC-258), when it did anything."""
+        summary = (self.video or {}).get("lipsync")
+        if not summary or not (summary["done"] or summary["failed"] or summary["reused"]):
+            return
+        parts = []
+        if summary["done"]:
+            count = len(summary["done"])
+            parts.append(f"{count} clip{'' if count == 1 else 's'} synced (${summary['usd']:.3f}, "
+                         f"{summary['seconds']} s billed)")
+        if summary["reused"]:
+            parts.append(f"{summary['reused']} kept current")
+        if summary["skipped"]:
+            count = len(summary["skipped"])
+            parts.append(f"{count} without an on-screen speaker")
+        if summary["failed"]:
+            failed = [item["shot_id"] for item in summary["failed"]]
+            parts.append(f"{len(failed)} failed ({_and(failed)}, plain clip kept)")
+        self.ctx.on_log(f"👄 Lip-sync on {summary['link']}: {', '.join(parts)}.")
 
     def make_clip(self, shot, *, video, clip_s, est_usd, seed, note, flags, tier, image_link, cover=None):
         """One clip of *shot* on the plan's one link (*video*: ``asset_units``'
@@ -3910,11 +4164,24 @@ def regenerate_shot_clip(ctx, ec, target, shot_id, note, *, tools, refuse) -> di
             raise refuse(f"{why}. The request is kept (seed {seed}): regenerate {target!r} again with the same "
                          "note, or run the assets step, to ask for the same clip.") from None
         host.apply_clip(shot, record, info, video=video)
+        if media_policy.lipsync(ec.story):
+            # DEC-258: a new clip is lipsynced again, on the same gates.
+            status = lipsync_step.link_status(gates.merged, tools.adapters, allow_paid=gates.budget.allow_paid)
+            host.video["lipsync"] = _lipsync_summary(status)
+            if status["available"]:
+                host.lipsync_shot(shot, link=status["link"])
+            else:
+                ctx.on_log(f"👄 No lip-sync: {status['link'] or gen.ENV_NAMES[gen.LIPSYNC]}: {status['reason']}; the "
+                           "clip is kept as it is.")
     finally:
         host.write_ledger_view()
     ctx.on_log(f"🔁 Regenerated {target} (seed {seed}){_noted(note)}")
-    return {"target": target, "shot": shot_id, "seed": seed, "link": record["link"], "clip_s": record["clip_s"],
-            "cached": info["cached"]}
+    result = {"target": target, "shot": shot_id, "seed": seed, "link": record["link"], "clip_s": record["clip_s"],
+              "cached": info["cached"]}
+    lipsync = (shot["assets"].get("clip") or {}).get("lipsync")
+    if media_policy.lipsync(ec.story):
+        result["lipsync"] = None if lipsync is None else lipsync["state"]
+    return result
 
 
 def regenerate_line_voice(ctx, ec, target, line_id, note, *, tools, refuse) -> dict:

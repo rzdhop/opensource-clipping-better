@@ -50,6 +50,9 @@ PRICES = {
     "fal/ltx-2-fast": Price("second", 0.04, "1080p, its smallest size, audio included; its output is locked to 16:9; its fal-ai/ltx-2 twin was deprecated on 2026-08-15 for LTX-2.3 fast ($0.06 a second at 1080p, with 9:16)"),
     "fal/ltx-2.3-fast": Price("second", 0.06, "fal-ai/ltx-2.3/image-to-video/fast, read on its fal page and schema on 2026-09-30: $0.06 a second at 1080p, its smallest size (9:16 is 1080x1920), $0.12 at 1440p, $0.24 at 2160p; audio not priced apart; a summary block on the same page says $0.04 at 1080p, the higher 'your request will cost' line is kept"),
     "fal/kling-2.5-turbo-std": Price("second", 0.042, "$0.21 per 5 s, $0.042 per extra second; 5 or 10 s; no audio"),
+    # --- the lipsync post-process of a made clip (DEC-258), per second of
+    # input video; the adapter's estimate rounds the clip up to 5 s.
+    "fal/kling-lipsync": Price("second", 0.0028, "fal-ai/kling-video/lipsync/audio-to-video: $0.014 per 5 s of input video, rounded up to 5 s; video 2-10 s at 720-1920 px, audio 2-60 s and at most 5 MB; read 2026-10-03"),
     "gemini/veo-3.1-lite": Price("second", 0.05, "veo-3.1-lite-generate-preview at 720p ($0.20 per 4 s), audio always on and included; $0.08 a second at 1080p (8 s only); no free tier"),
     # --- speech (appendix C)
     "gemini/flash-lite-tts": Price("second", 0.0, "free tier; $0.0015 per 10 s beyond"),

@@ -96,6 +96,7 @@ from . import assets as assets_step
 from . import clips as clips_step
 from . import episode_common, llm_call, voice_lines
 from . import judge as judge_step
+from . import lipsync as lipsync_step
 from . import metadata as metadata_step
 from . import render as render_step
 from . import script as script_step
@@ -381,10 +382,16 @@ def paid_verdict(units, *, ep, predicted=False, fully_animated=False) -> dict:
     video_usd = 0.0
     if video is not None:
         clips = video.get("count") or 0
-        if clips and video.get("route_class") == "paid":
+        # DEC-258: the clips' lipsync is in the video part's price, said apart.
+        lip_usd = lipsync_step.counted_usd(video)
+        if (clips or lip_usd) and video.get("route_class") == "paid":
             video_usd = float(video["est_usd"] or 0.0)
-            parts.append(f"{upto}{clips} clip{_s(clips)} ({video['seconds']} s) on {video['link']} "
-                         f"(est ${video_usd:.3f})")
+            if clips:
+                parts.append(f"{upto}{clips} clip{_s(clips)} ({video['seconds']} s) on {video['link']} "
+                             f"(est ${video_usd - lip_usd:.3f})")
+            if lip_usd:
+                lips = lipsync_step.counted_count(video)
+                parts.append(f"{upto}{lips} lip-sync{_s(lips)} on {video['lipsync']['link']} (est ${lip_usd:.3f})")
             if not video.get("ready") and video.get("refused"):
                 refused.append(f"{video['link']}: {video['refused']}")
         elif not video.get("ready"):

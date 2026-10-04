@@ -1,4 +1,4 @@
-"""Register every generation adapter (image, image edit, video, TTS, vision, local).
+"""Register every generation adapter (image, image edit, video, TTS, vision, local, lipsync).
 
 Importing an adapter module registers it with ``generation``; this is the one
 place that imports them all, so the settings route and the chain runner can
@@ -15,6 +15,6 @@ def load_all() -> None:
     global _LOADED
     if _LOADED:
         return
-    from . import images, local_comfyui, tts, video, vision  # noqa: F401 - registration on import
+    from . import images, lipsync, local_comfyui, tts, video, vision  # noqa: F401 - registration on import
 
     _LOADED = True

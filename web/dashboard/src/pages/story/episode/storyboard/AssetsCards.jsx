@@ -261,6 +261,14 @@ function VideoPhaseHeader({ storyId, ep, episode, busy, onChange }) {
           ) : ''}
         </span>
       </div>
+      {/* DEC-258: the clips' lipsync, priced apart (the message's "+ $x lip-sync (n clips)"). */}
+      {video.lipsync && video.lipsync.count > 0 && (
+        <p className="form-hint">
+          {video.lipsync.counted
+            ? `+ $${formatUsd(video.lipsync.est_usd)} lip-sync (${video.lipsync.count} clip${video.lipsync.count === 1 ? '' : 's'}) on ${video.lipsync.link}`
+            : `No lip-sync: ${video.lipsync.reason || 'the lipsync link cannot run'}`}
+        </p>
+      )}
       {!video.ready && video.message && <p className="form-hint">{video.message}</p>}
       {video.offer && (
         <div className="story-storyboard-banner">

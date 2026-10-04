@@ -117,6 +117,11 @@ VIDEO_LINK_POLICIES = ("cheapest_available", "first_in_chain", "first_with_audio
 # 2026-10-02): every shot's clip sound is heard UNDER its lines, ducked, the
 # lines always in their pinned TTS voices (``media_policy.ambience``).
 TIER3_AUDIO_MODES = ("opt_in", "ambience")
+# ``lipsync`` (DEC-258): whether a fully animated v2 story's clips get their
+# characters' lips moved to the dialogue after they are bought -- ``none``, or
+# ``kling`` (Kling LipSync on fal, LIPSYNC_CHAIN). A profile without the key
+# never lipsyncs.
+LIPSYNC_MODES = ("none", "kling")
 # Phase 8 stage B: ``keyframe_fix`` -- a v2 story's keyframes flagged by the
 # keyframe check (J2) are redrawn by the assets step, at most
 # ``max_redraws_per_shot`` times a shot and ``cap_usd`` an episode. A profile
@@ -147,7 +152,8 @@ def _profile_errors(name, profile) -> list:
     if resolution is not None and resolution not in VIDEO_RESOLUTIONS:
         errors.append(f"profile {name!r}: video_resolution must be one of {', '.join(VIDEO_RESOLUTIONS)}, "
                       f"not {resolution!r}")
-    for key, known in (("video_link_policy", VIDEO_LINK_POLICIES), ("tier3_native_audio", TIER3_AUDIO_MODES)):
+    for key, known in (("video_link_policy", VIDEO_LINK_POLICIES), ("tier3_native_audio", TIER3_AUDIO_MODES),
+                       ("lipsync", LIPSYNC_MODES)):
         if key in profile and profile[key] not in known:
             errors.append(f"profile {name!r}: {key} must be one of {', '.join(known)}, not {profile[key]!r}")
     if "keyframe_fix" in profile:

@@ -3229,14 +3229,22 @@ def _shot_clip(ec, script, shot, doc, *, link, tier, image_sha) -> dict:
     else:
         reason = assets_step.clip_target_refusal(ec, shot, doc=doc)
         blocked = f"Cannot regenerate '{target}': {reason}" if reason else None
-    return {
+    # DEC-258: the file the shot plays is ``assets.video`` -- its lip-synced take once that is current.
+    playing = clips_step.shot_clip_path(ec, shot)
+    lipsync = record.get("lipsync") or None
+    view = {
         "state": state, "link": record.get("link"), "route": record.get("route"), "clip_s": record.get("clip_s"),
         "est_usd": record.get("est_usd"), "generated_at": record.get("generated_at"),
-        "name": clips_step.clip_name(shot_id) if clips_step.shot_clip_path(ec, shot) is not None else None,
+        "name": os.path.basename(playing) if playing is not None else None,
         "note": assets_step.clip_note(shot), "reason": record.get("reason"), "pending": bool(record.get("pending")),
         "target": None if held is not None else target, "continue": held is not None, "blocked": blocked,
         "flags": dict(flags), "overrides": dict(video_plan.shot_overrides(doc, shot_id) or {}),
     }
+    if lipsync is not None:
+        view["lipsync"] = {"state": lipsync.get("state"), "link": lipsync.get("link"),
+                           "lines": list(lipsync.get("lines") or []), "est_usd": lipsync.get("est_usd"),
+                           "reason": lipsync.get("reason"), "generated_at": lipsync.get("generated_at")}
+    return view
 
 
 def _image_offer_view(ec, script, board, *, env):
@@ -3266,6 +3274,9 @@ def _video_view(ec, script, board, doc, *, env):
         return None
     video = units.get("video") or {}
     view = {name: copy.deepcopy(video.get(name)) for name in _VIDEO_FIELDS}
+    if video.get("lipsync") is not None:
+        # DEC-258: the clips' lipsync part, only on a story that lipsyncs.
+        view["lipsync"] = copy.deepcopy(video["lipsync"])
     try:
         render_step.shot_clips(ec, script, board, doc or {}, fill_failed=False)
         view["render_blocked"] = None

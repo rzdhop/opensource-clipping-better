@@ -50,6 +50,14 @@ NOW = tas.NOW
 SEEDANCE, VEO, GEMINI = amb.SEEDANCE, amb.VEO, amb.GEMINI
 
 
+def _without_lipsync(store, story_id):
+    """DEC-258 re-pin: the story turns the quality preset's lipsync off, so
+    DEC-250's 12 s seedance clip is what is pinned here (a lipsyncing story
+    buys 10 s at most: test_story_lipsync.py)."""
+    store.update(story_id, lambda doc: doc["generation_profile"].update(lipsync="none"), now=NOW)
+    return story_id
+
+
 # ======================================================== 1. the estimate
 
 def test_the_live_shots_are_covered_by_their_clips_slowed_and_the_estimate_says_so(store, tmp_path):
@@ -58,7 +66,7 @@ def test_the_live_shots_are_covered_by_their_clips_slowed_and_the_estimate_says_
     how much, the message says it in plain words, and nothing is refused."""
     from clipping.aistory.steps import assets
 
-    story_id = amb._story(store, tmp_path)
+    story_id = _without_lipsync(store, amb._story(store, tmp_path))
     board = copy.deepcopy(tas._board(store, story_id))
     long_a, long_b, short = board["shots"][1], board["shots"][2], board["shots"][0]
     long_a["duration_s"], long_b["duration_s"] = 14.133, 12.767
@@ -86,7 +94,7 @@ def test_a_shot_no_clip_can_cover_even_slowed_is_refused_naming_the_most_a_clip_
     """Past 1.25x the longest clip (15 s on seedance) the plan is refused as
     before, the sentence naming the shot, the most a slowed clip covers and
     the two remedies; the shots a slowed clip covers are not named."""
-    story_id = amb._story(store, tmp_path)
+    story_id = _without_lipsync(store, amb._story(store, tmp_path))
     board = copy.deepcopy(tas._board(store, story_id))
     too_long, slowed = board["shots"][1], board["shots"][2]
     too_long["duration_s"], slowed["duration_s"] = 16.0, 14.9

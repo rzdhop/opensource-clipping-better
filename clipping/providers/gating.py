@@ -81,10 +81,10 @@ class FreeTierLimiter:
 
 def api_model_id(kind, link) -> str:
     """The provider's own model id behind a chain link (for the ledger)."""
-    from . import images, tts, video, vision
+    from . import images, lipsync, tts, video, vision
 
     tables = {
-        "cloudflare": images.CLOUDFLARE_MODELS, "fal": images.FAL_APPS,
+        "cloudflare": images.CLOUDFLARE_MODELS, "fal": {**images.FAL_APPS, **lipsync.FAL_LIPSYNC_APPS},
         "gemini": {**images.GEMINI_MODELS, **tts.GEMINI_TTS_MODELS, **vision.GEMINI_VISION_MODELS,
                    **video.GEMINI_VIDEO_MODELS},
         "openai": {name: pair[0] for name, pair in images.OPENAI_MODELS.items()},

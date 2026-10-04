@@ -242,10 +242,14 @@ on fal and about 60 s of Veo 3.1 lite at $0.05/s with its own sound (clips of
 sells), plus rounding each clip up to whole seconds and up to $0.40 of
 keyframe redraws — inside the default $4 episode cap. Without
 `GEMINI_PAID_API_KEY` the clips go to seedance (silent, $0.022/s, ≈ $1.73 an
-episode) and the estimate says "No ambience". Once per story: sheets, plates
-and props at $0.04 each (≈ $0.5–1.0 for a small cast). Every paid step shows
-its estimate before it runs and is refused whole when it would go over a
-cap. Settings → **Allow paid** must be on, and caps saved earlier in
+episode) and the estimate says "No ambience". The lipsync of the clips with
+an on-screen line adds about $0.15–0.30 (see "Lips follow the voices"
+below): with Veo, the up-to-$0.40 redraw ceiling and the lipsync the paid
+check reaches about $4.1, over the default $4 episode cap -- raise
+`per_episode_cap_usd` (to $5, say) or turn the story's lipsync off. Once per
+story: sheets, plates and props at $0.04 each (≈ $0.5–1.0 for a small cast).
+Every paid step shows its estimate before it runs and is refused whole when
+it would go over a cap. Settings → **Allow paid** must be on, and caps saved earlier in
 Settings (1 / 3 / 10 or 2 / 6 / 20 before this) win over the new defaults
 until you change them.
 
@@ -262,6 +266,27 @@ guard's second version looks for exactly that; lines recorded before, or
 cleaned by the first version, are cleaned on the next assets run without
 being spoken again (`voice-tails` shows what was cut), and every line fades
 at its edges in the mix.
+
+**Lips follow the voices.** On the Quality preset every bought clip whose
+shot holds a line spoken by a character **in its frame** is sent once more,
+with a dialogue track, to Kling LipSync on fal (`fal/kling-lipsync`,
+`LIPSYNC_CHAIN`): the characters' mouths then move on your TTS voices. The
+track is a silent 24 kHz WAV exactly as long as the clip, with each of those
+lines at the moment the episode places it in the shot; a line said by
+someone off screen is left out (it would move the wrong mouth), and a shot
+with no such line keeps its plain clip. The lip-synced take is kept beside
+the clip as `assets/clips/shot_NN.lipsync.mp4` with the clip's own sound
+(never the track: your voices stay the only voices), and it is what the
+render uses; if a lipsync fails, the plain clip is kept and the shot is
+named in the feed ("✖ Lip-sync sh04 failed: …"). It costs $0.014 per started
+5 s of clip -- $0.014 for a clip of 5 s or less, $0.028 for 6-10 s, about
+$0.15-0.30 an episode -- shown in the estimate ("+ $0.280 lip-sync (8
+clips)") and counted against the caps; each one takes about a minute. A
+lipsyncing story buys no clip longer than 10 s (Kling's limit), so on
+seedance a scene past 10 s is planned as two shots. A re-voiced or re-timed
+line, or a new clip, is lipsynced again on the next assets run; nothing else
+is bought twice. To turn it off for one story, patch its profile:
+`{"generation_profile": {"lipsync": "none"}}` (`"kling"` turns it back on).
 
 **Prompt size limits, and richer prompts within them.** Each link's prompt
 limit is known (`prompt-limits` lists them with their source) and a prompt

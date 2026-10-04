@@ -28,6 +28,14 @@ function ClipStateBadge({ clip }) {
   return <Badge tone={clipStateTone(clip)}>{clipStatusLabel(clip)}</Badge>
 }
 
+// DEC-258: the clip's lipsync (`clip.lipsync`, workflow.episode_clips): its
+// lips moved to the shot's dialogue once bought ("Lip-synced"), or a lipsync
+// that failed -- the plain clip is kept and plays, the reason shown as text.
+function LipsyncBadge({ lipsync }) {
+  if (lipsync.state === 'current') return <Badge tone="success">Lip-synced</Badge>
+  return <Badge tone="warning">Lip-sync failed</Badge>
+}
+
 /** The kit tone a clip's state reads in (the filmstrip's dots use it too). */
 function clipStateTone(clip) {
   if (clip.continue || clip.pending) return 'info'
@@ -208,8 +216,12 @@ function ShotClipBlock({ storyId, ep, shotId, clip, tier, busy, onChange }) {
       <div className="story-shot-asset-meta">
         <ClipStateBadge clip={clip} />
         {clip.route && <RouteChip routeClass={clip.route} link={clip.link} />}
+        {clip.lipsync && <LipsyncBadge lipsync={clip.lipsync} />}
       </div>
       {clipStatusReason && <p className="form-hint">{clipStatusReason}</p>}
+      {clip.lipsync && clip.lipsync.state === 'failed' && (
+        <p className="form-hint">Lip-sync failed: {clip.lipsync.reason || 'no reason given'} (the plain clip plays)</p>
+      )}
       <div className="story-shot-asset-meta">
         <button
           type="button"

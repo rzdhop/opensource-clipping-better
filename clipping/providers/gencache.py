@@ -7,7 +7,9 @@ named by the request's key, with the request's outputs beside it:
   prompt, negative, the sha256 of each reference file's *bytes*, seed, size,
   text, voice, rate, pitch, template and take; a video request adds its
   clip's length (``clip_s``), frame rate and native audio, and its keyframe
-  is its one reference. Where the answer is written (``out_dir``,
+  is its one reference; a lipsync request (DEC-258) is keyed by its clip
+  (its one reference), the sha256 of its dialogue track
+  (``extra["audio"]``) and the clip's length. Where the answer is written (``out_dir``,
   ``extra["name"]``) is not part of it. An image or video request without a
   seed has **no key**: nothing is cached or journaled, and the runner takes
   exactly the path it takes without a cache (DEC-154). Neither has a video
@@ -64,10 +66,11 @@ FAILED = "failed"
 LOST = "lost"
 STATES = (SENDING, SUBMITTED, DONE, FAILED, LOST)
 
-# generation.IMAGE / IMAGE_EDIT / TTS / VIDEO, spelled out: generation imports this module.
-CACHED_KINDS = ("image", "image_edit", "tts", "video")
+# generation.IMAGE / IMAGE_EDIT / TTS / VIDEO / LIPSYNC, spelled out: generation imports this module.
+CACHED_KINDS = ("image", "image_edit", "tts", "video", "lipsync")
 SEEDED_KINDS = ("image", "image_edit", "video")
 VIDEO = "video"
+LIPSYNC = "lipsync"
 
 # Answers that prove the provider refused the request before doing (and
 # billing) any work (DEC-153). Any other failure after sending is booked.
@@ -122,7 +125,7 @@ def key_payload(kind, link, request):
         return None
     if kind in SEEDED_KINDS and request.seed is None:
         return None
-    if kind == VIDEO and request.duration_s is None:
+    if kind in (VIDEO, LIPSYNC) and request.duration_s is None:
         return None
     refs = []
     for path in request.references or ():
@@ -162,6 +165,17 @@ def key_payload(kind, link, request):
         resolution = extra.get("resolution")
         if resolution and resolution != "720p":
             payload["resolution"] = resolution
+    if kind == LIPSYNC:
+        # A new kind (DEC-258): no older key to keep. The clip is the one
+        # reference; the dialogue track is keyed by its bytes, never its path.
+        audio = extra.get("audio")
+        if not audio:
+            return None
+        try:
+            payload["audio"] = _sha256_file(audio)
+        except OSError:
+            return None
+        payload["clip_s"] = _number(request.duration_s)
     return payload
 
 

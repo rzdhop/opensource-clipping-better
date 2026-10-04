@@ -38,6 +38,12 @@ PIPELINES = (PIPELINE_V2,)
 VIDEO_RESOLUTION_DEFAULT = "720p"
 VIDEO_RESOLUTIONS = (VIDEO_RESOLUTION_DEFAULT, "1080p")
 
+# DEC-258: the optional ``generation_profile.lipsync``, the per-story switch of
+# the clips' lipsync -- ``none`` turns it off for that story, ``kling`` asks it
+# whatever the budget profile says. Absent: the budget profile's ``lipsync``
+# (``media_policy.lipsync``). The values are ``budget.LIPSYNC_MODES``.
+LIPSYNC_MODES = ("none", "kling")
+
 # ------------------------------------------------------------- story (spec 2.1, 6.2)
 
 EPISODE_TEMPLATE_ID = "serial_60s_v1"

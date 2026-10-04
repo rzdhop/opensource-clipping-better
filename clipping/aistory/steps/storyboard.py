@@ -265,11 +265,14 @@ def max_shot_s(ec, env=None):
     budget profile's, keys asked then aside; *env* the Settings values):
     Veo 3.1 lite sells 8 s at most, so a scene past 8 s is two beat shots.
     The template's 6-10 shots and 55-75 s still hold: every slot tops out
-    at 11 s, two shots of at most 8 s. None: a template without one."""
+    at 11 s, two shots of at most 8 s. None: a template without one.
+    DEC-258: a lipsyncing story's clips are at most 10 s
+    (``clips.longest_clip_s(story=)``), so on seedance a scene past 10 s is
+    two shots."""
     template_max = ec.template.get("max_shot_s")
     if template_max is None or not media_policy.fully_animated(ec.story):
         return template_max
-    longest = clips.longest_clip_s(clips.planned_link(ec, env, assets_doc=_assets_doc(ec)))
+    longest = clips.longest_clip_s(clips.planned_link(ec, env, assets_doc=_assets_doc(ec)), story=ec.story)
     return min(template_max, longest) if longest else template_max
 
 

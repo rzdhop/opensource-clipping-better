@@ -1,4 +1,5 @@
-"""Generation provider chains: image, image edit, video, TTS and vision.
+"""Generation provider chains: image, image edit, video, TTS and vision --
+and the lipsync post-process of a made clip (``LIPSYNC``, DEC-258).
 
 Same grammar and hop rules as ``LLM_CHAIN`` (DEC-096): an ordered list of
 ``<provider>/<model>`` links tried in order, a link that cannot run is skipped
@@ -41,6 +42,13 @@ VIDEO = "video"
 TTS = "tts"
 VISION = "vision"
 KINDS = (IMAGE, IMAGE_EDIT, VIDEO, TTS, VISION)
+# A post-process of a made clip, not a generation from a prompt (DEC-258):
+# the lips of a bought clip moved to its shot's dialogue. Its own chain, one
+# link by default, outside ``KINDS`` -- the Settings page's chain list and
+# its chain test cover the five generation kinds only.
+LIPSYNC = "lipsync"
+POST_KINDS = (LIPSYNC,)
+ALL_KINDS = KINDS + POST_KINDS
 
 ENV_NAMES = {
     IMAGE: "IMAGE_CHAIN",
@@ -48,6 +56,7 @@ ENV_NAMES = {
     VIDEO: "VIDEO_CHAIN",
     TTS: "TTS_CHAIN",
     VISION: "VISION_CHAIN",
+    LIPSYNC: "LIPSYNC_CHAIN",
 }
 
 # Candidate only: the OpenRouter free vision model is measured with
@@ -71,6 +80,7 @@ DEFAULT_CHAINS = {
     ),
     TTS: "edge/fr-FR-HenriNeural,gemini/flash-lite-tts,local/piper,local/kokoro,local/chatterbox",
     VISION: f"gemini/flash-lite,openrouter/{OPENROUTER_VISION_DEFAULT_MODEL},local/ollama-vision,gemini/flash",
+    LIPSYNC: "fal/kling-lipsync",
 }
 
 # -------------------------------------------------------------- providers
@@ -178,6 +188,7 @@ KIND_PROVIDERS = {
     VIDEO: ("local", "fal", "gemini"),
     TTS: ("edge", "gemini", "local", "gcloud", "openai", "elevenlabs"),
     VISION: ("gemini", "openrouter", "local"),
+    LIPSYNC: ("fal",),
 }
 
 # Links that cost money on a provider that is otherwise free (spec 8.1 ``*``).
@@ -200,13 +211,13 @@ FALLBACK_LINKS = {
 
 
 def kinds_of(provider: str) -> tuple:
-    return tuple(kind for kind in KINDS if provider in KIND_PROVIDERS[kind])
+    return tuple(kind for kind in ALL_KINDS if provider in KIND_PROVIDERS[kind])
 
 
 def parse_generation_chain(kind: str, chain) -> list:
     """``"a/b,c/d*"`` -> ``[Link, ...]`` for *kind*, with the paid marker stripped."""
-    if kind not in KINDS:
-        raise ChainError(f"Unknown generation kind {kind!r}. Known: {', '.join(KINDS)}.")
+    if kind not in ALL_KINDS:
+        raise ChainError(f"Unknown generation kind {kind!r}. Known: {', '.join(ALL_KINDS)}.")
     if isinstance(chain, str):
         parts = [p.strip().rstrip("*").strip() for p in chain.split(",") if p.strip()]
     else:
@@ -321,11 +332,11 @@ class GenRequest:
     width: int = 1080
     height: int = 1920
     seed: int | None = None
-    references: tuple = ()        # reference image paths (image_edit, video)
+    references: tuple = ()        # reference image paths (image_edit, video); the clip (lipsync)
     text: str = ""                # what to speak (tts)
     voice: str = ""               # voice id, when the link's model is not the voice
     images: tuple = ()            # frames to describe (vision)
-    duration_s: float | None = None  # the clip's length in seconds, as bought (video)
+    duration_s: float | None = None  # the clip's length in seconds, as bought (video, lipsync)
     fps: int | None = None        # the clip's frame rate (video)
     native_audio: bool = False    # the clip carries the model's own audio (video)
     out_dir: str = ""
@@ -628,10 +639,13 @@ def _attempt(link, request, *, adapter, credentials, transport, on_log, sleep_fn
 
 class _Sent:
     """The transport, counting the requests handed to it: a paid call that
-    failed with none counted provably sent nothing, so it is unbilled (DEC-153)."""
+    failed with none counted provably sent nothing, so it is unbilled (DEC-153).
+    ``free`` is the same transport, uncounted, for a request that bills
+    nothing on its own (the lipsync's uploads to fal storage, DEC-258)."""
 
     def __init__(self, transport):
         self._transport = transport or urllib_transport
+        self.free = self._transport
         self.calls = 0
 
     def __call__(self, *args, **kwargs):

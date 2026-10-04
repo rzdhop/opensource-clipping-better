@@ -408,10 +408,16 @@ def test_guard_outside_ambience_mode_the_clip_request_is_todays(store, tmp_path)
 LONG_SCENES = ("s04", "s07")
 
 
-def _v2_storyboard_story(store, *, tier=3):
+def _v2_storyboard_story(store, *, tier=3, lipsync="none"):
     """A written v2 episode on serial_60s_v2, fully animated (the quality
     profile at *tier*), its prop drawn, two of its scenes (:data:`LONG_SCENES`)
-    spoken at more length: ready for the storyboard step."""
+    spoken at more length: ready for the storyboard step.
+
+    DEC-258 re-pin: the story's ``generation_profile.lipsync`` is *lipsync*
+    (``none`` by default; None leaves the quality profile's ``kling``), so the
+    tests built on it keep pinning the clip-length planning of a story whose
+    clips are its link's own lengths (seedance 12 s, Veo 8 s) -- a
+    lipsyncing story buys 10 s at most, pinned in test_story_lipsync.py."""
     import test_story_episode_steps as eps
     import test_story_storyboard_props as tsp
     from clipping.aistory.steps import episode_common
@@ -420,6 +426,8 @@ def _v2_storyboard_story(store, *, tier=3):
 
     def v2(doc):
         doc["generation_profile"].update(pipeline="v2", tier=tier, budget_profile="quality", route="api")
+        if lipsync is not None:
+            doc["generation_profile"]["lipsync"] = lipsync
         doc.update(episode_template_id="serial_60s_v2")
 
     store.update(story_id, v2, now=NOW)

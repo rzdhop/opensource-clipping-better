@@ -61,6 +61,7 @@ from clipping.providers.registry import ChainError, describe
 from .. import hardware, imaging, media_policy, prompt_budgets, prompting, schemas, video_plan
 from .. import shots as shots_mod
 from . import episode_common, sticky_link
+from . import lipsync as lipsync_step
 from .llm_call import StepFailed
 
 CLIPS_KIND = "clips"
@@ -472,11 +473,26 @@ def pick_hosted(rows, policy, *, want_sound=False):
     return min(keyed, key=lambda pair: (pair[1]["price_per_second"], pair[0]))[1]
 
 
-def longest_clip_s(link):
+def longest_clip_s(link, *, story=None):
     """The longest clip *link* (a label) sells (``video.CLIP_LENGTHS``), or
-    None: a local link, or one with no table."""
-    lengths = video_providers.CLIP_LENGTHS.get(link or "")
+    None: a local link, or one with no table. With *story*, the longest its
+    plan may buy there (:func:`sold_lengths`: at most
+    ``media_policy.LIPSYNC_MAX_CLIP_S`` when it lipsyncs, DEC-258)."""
+    lengths = sold_lengths(story, link) if story is not None else None
+    lengths = lengths or video_providers.CLIP_LENGTHS.get(link or "")
     return max(lengths) if lengths else None
+
+
+def sold_lengths(story, link):
+    """The lengths *story*'s plan may buy on the hosted *link* when that is
+    fewer than the link sells, else None (the link's own table, as always):
+    a lipsyncing story (``media_policy.lipsync``, DEC-258) buys no clip longer
+    than Kling LipSync takes (``media_policy.LIPSYNC_MAX_CLIP_S``)."""
+    lengths = video_providers.CLIP_LENGTHS.get(link or "")
+    if not lengths or not media_policy.lipsync(story):
+        return None
+    capped = tuple(length for length in lengths if length <= media_policy.LIPSYNC_MAX_CLIP_S)
+    return capped if capped and capped != tuple(lengths) else None
 
 
 # A placeholder key: what a hosted link would be picked as once its key is
@@ -591,7 +607,7 @@ def cover_sentence(row) -> str:
     return f"{runs} is held on its last frame for {row['held_s']:g} s."
 
 
-def _too_long(rows, link) -> str | None:
+def _too_long(rows, link, *, story=None) -> str | None:
     """The refusal of a fully animated story's plan whose shots *rows*
     (``plan`` rows) run longer than *link*'s longest clip by more than
     :data:`HOLD_TOLERANCE_S` and more than a clip can be slowed to cover
@@ -599,7 +615,7 @@ def _too_long(rows, link) -> str | None:
     long = [row for row in rows if (row.get("held_s") or 0.0) > HOLD_TOLERANCE_S and row.get("cover") != "stretch"]
     if not long:
         return None
-    longest = longest_clip_s(link)
+    longest = longest_clip_s(link, story=story)
     named = _and([f"{row['shot_id']} ({row['clip_s'] + row['held_s']:g} s)" for row in long])
     most = f"{longest * MAX_STRETCH:g}"
     return (f"shot{_s(len(long))} {named} {'runs' if len(long) == 1 else 'run'} longer than the {longest} s clip "
@@ -671,7 +687,16 @@ def video_units(ec, script, storyboard, assets_doc, *, env, caps, committed_usd,
     clips to buy is held by -- ``hold`` on the units and in the message; it
     is shown and priced, never bought (the assets step makes no clip while
     it holds). None (every legacy episode): no such key, the units byte for
-    byte as before."""
+    byte as before.
+
+    DEC-258: on a story that lipsyncs (``media_policy.lipsync``) the plan
+    buys no clip longer than Kling LipSync takes (:func:`sold_lengths`:
+    10 s), and the units carry ``lipsync`` (``lipsync.lipsync_units``: the
+    planned clips with an in-frame line whose lipsync is not current,
+    priced on LIPSYNC_CHAIN's link); when that link could run it
+    (``counted``), its price is in ``est_usd`` and the message says
+    "+ $0.280 lip-sync (8 clips)". Every other story: no such key, the
+    units byte for byte as before."""
     tier = tier_of(ec)
     profile_name = ec.story["generation_profile"]["budget_profile"]
     route = ec.story["generation_profile"]["route"]
@@ -826,6 +851,8 @@ def video_units(ec, script, storyboard, assets_doc, *, env, caps, committed_usd,
             return stop(f"No clip can be planned on {link}: its workflow cannot be read ({exc}).", reason=str(exc))
     else:
         price = float(row["price_per_second"])
+        # DEC-258: a lipsyncing story buys no clip longer than the lipsync takes.
+        lengths = sold_lengths(ec.story, link)
     units.update(link=link, route_class="local" if local else "paid", price_per_second=price)
 
     tier_for_prompt = tier if tier in (2, 3) else 2
@@ -884,6 +911,15 @@ def video_units(ec, script, storyboard, assets_doc, *, env, caps, committed_usd,
         rows_out.append(row)
     units.update(plan=rows_out, still=list(plan.still), count=count, seconds=seconds, est_usd=est,
                  over_cap=video_plan.all_shots_refusal(plan, link=link, mode=mode))
+    if not local and media_policy.lipsync(ec.story):
+        # DEC-258: every clip bought or collected now is lipsynced again; a kept one, unless current.
+        lipsync = lipsync_step.lipsync_units(
+            ec, script, storyboard, rows_out, new_ids={entry["shot_id"] for entry in plan.selected
+                                                       if entry["shot_id"] not in current_ids},
+            merged=merged, adapters=adapters, allow_paid=budget_obj.allow_paid)
+        units["lipsync"] = lipsync
+        if lipsync["counted"]:
+            units["est_usd"] = round(est + lipsync["est_usd"], 4)
     if seconds:
         key = gen_timings.timing_key(link, units["template"], units["profile"])
         eta = gen_timings.eta_s(key, seconds)
@@ -895,7 +931,8 @@ def video_units(ec, script, storyboard, assets_doc, *, env, caps, committed_usd,
         units.update(eta_s=0.0, eta_note="no clip to make")
 
     # Stage E: a story that animates every shot buys no clip that cannot cover its shot.
-    too_long = _too_long(rows_out, link) if not local and media_policy.fully_animated(ec.story) else None
+    too_long = (_too_long(rows_out, link, story=ec.story) if not local and media_policy.fully_animated(ec.story)
+                else None)
     if too_long and count:
         units["too_long"] = too_long
     units["refused"] = (too_long or refusal) if count else None
@@ -932,6 +969,21 @@ def _silent_note(ec, link, *, source, chain, merged) -> str:
     return f"No ambience: {link} makes clips with no sound, and {describe(first)}, which has it, cannot serve now"
 
 
+def _lipsync_note(units) -> str:
+    """`` No lip-sync: <why>.`` when the story lipsyncs, clips with an
+    in-frame line are planned and the link cannot run them; else ''."""
+    part = units.get("lipsync")
+    if not part or part.get("counted") or not part.get("count"):
+        return ""
+    return f" No lip-sync: {part.get('link') or gen.ENV_NAMES[gen.LIPSYNC]}: {part.get('reason') or 'cannot run'}."
+
+
+def to_buy(video) -> bool:
+    """Whether a ``video`` part has anything to pay for: clips, or (DEC-258)
+    lipsyncs of clips already made."""
+    return bool((video or {}).get("count") or lipsync_step.counted_count(video))
+
+
 def local_unasked(video) -> bool:
     """Whether the ``video`` part *video* (:func:`video_units`) left the local
     ComfyUI unasked (made without *probe_local*): its readiness is then the
@@ -941,7 +993,10 @@ def local_unasked(video) -> bool:
 
 
 def _message(units, plan, current_ids, profile_name, booked_ids=(), *, resolution=None) -> str:
-    link, count, seconds, est = units["link"], units["count"], units["seconds"], units["est_usd"]
+    link, count, seconds = units["link"], units["count"], units["seconds"]
+    # DEC-258: the clips' own price, the lipsync's said apart.
+    est = round(units["est_usd"] - lipsync_step.counted_usd(units), 4)
+    lip = lipsync_step.clause(units)
     kept = [f"{len(current_ids)} current clip{_s(len(current_ids))} kept"] if current_ids else []
     if booked_ids:
         kept.append(f"{len(booked_ids)} bought already, collected at $0")
@@ -951,7 +1006,7 @@ def _message(units, plan, current_ids, profile_name, booked_ids=(), *, resolutio
     tail = f" ({_and(kept)})" if kept else ""
     if not count:
         if plan.selected:
-            return f"Every planned shot has its current clip on {link}: $0.00{tail}."
+            return f"Every planned shot has its current clip on {link}: $0.00{lip}{tail}.{_lipsync_note(units)}"
         return (f"No clip is planned: the {profile_name} budget profile animates no shot on {link} "
                 f"(mode {units['mode']}); pin one to animate it{tail}.")
     clips = f"{count} clip{_s(count)} ({seconds} s) on {link}"
@@ -960,7 +1015,7 @@ def _message(units, plan, current_ids, profile_name, booked_ids=(), *, resolutio
         text = f"{clips}{where}, on your own hardware: $0.00{tail}."
     else:
         size = f" at {resolution}" if resolution and resolution != pricing.DEFAULT_RESOLUTION else ""
-        text = f"{clips}{size}, paid: est ${est:.3f}{tail}."
+        text = f"{clips}{size}, paid: est ${est:.3f}{lip}{tail}.{_lipsync_note(units)}"
     held = [row for row in units["plan"]
             if row.get("held_s") and not (units.get("too_long") and row["held_s"] > HOLD_TOLERANCE_S
                                           and row.get("cover") != "stretch")]
