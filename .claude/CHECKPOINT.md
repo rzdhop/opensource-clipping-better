@@ -18,16 +18,17 @@
   GPU now (Pinokio documented for the later GPU box); Anthropic provider Sonnet 5.5 default / Opus 5.5 by name / server-side
   fallbacks ON (booked at the served model); universes (all ten, audience notes), two-view sheets at 1080×1920, variants,
   action prompts; NO doctrine prompt; nano-banana-2-lite on sheets; chatterbox before Fish Audio.
-- **Merged on main (all pushed; CI = baseline):** A1 `99a0d62` (the daily extra), B1 `3c3e024` (the stock library),
-  C1 `19ce37d` (fal/ltx-2.5-fast tables), A2 `75c2dd9` (the extra at every check site), D1 `e5ce133` (the Anthropic
-  provider — **needs the image rebuild**: `anthropic>=1.11.0` is in requirements.txt but not in the container; until the
-  rebuild a Claude link fails FATAL and the chain moves on; Settings.jsx changed too). A1/A2/B1/C1 are live through the bind
-  mount (additive; no restart done, 0 jobs). Deploy = rebuild at 0 running jobs after A3 + A6 land (one rebuild for all).
-- **Running now:** B6 (Opus, `feat/plan23-b6`, render geometry), A3 (Sonnet, `feat/plan23-a3`, the allow-today API),
-  D4 (Sonnet, `feat/plan23-d4`, two-view sheets + body rule). On each report: code-review skill, rebase, the Tier-1
-  selection in both envs, ff-merge with the exit code checked, action-log line, push.
-- **Next action:** after A3 → A4 + A5 (Opus) → A6 (dashboard) → deploy (rebuild) → A7 (Opus); C2 only on the human's go
-  ($0.54); D2, D6 (Sonnet), D5 after D4 (Opus); B2 after B1, B3, B5 after B6, B7 (Opus) after B6, B8 last.
+- **Merged on main (all pushed; CI = baseline):** A1 `99a0d62`, A2 `75c2dd9`, A3 `e598562` (the override API: `GET/POST/
+  DELETE /api/budget/today[/extra]` — the new router needs a restart to be live), B1 `3c3e024`, C1 `19ce37d`, D1 `e5ce133`
+  (the Anthropic provider — needs the image rebuild: `anthropic>=1.11.0` + Settings.jsx), B6 `a0b4f44` (render geometry;
+  CI's x86_64 keys for `framemd5_16x9/1x1.json` still to add from the CI annotation after this push). Nothing restarted or
+  rebuilt yet (0 running jobs; the bind mount carries the Python). One rebuild at 0 jobs after A6 lands covers A3 + D1 + A6.
+- **Running now:** D4 (Sonnet, `feat/plan23-d4`, two-view sheets + body rule), A4+A5 (Opus, `feat/plan23-a45`, the
+  three-number 409 + the full-cast gate, two commits), B5 (Sonnet, `feat/plan23-b5`, subtitle overrides). On each report:
+  code-review skill, rebase, the Tier-1 selection in both envs, ff-merge with the exit code checked, action-log line, push.
+- **Next action:** after A4+A5 → A6 (dashboard, Sonnet) → deploy (rebuild at 0 jobs: A3 + D1 + A6) → A7 (Opus) → A8 → A9;
+  C2 only on the human's go ($0.54); D2 + D6 (Sonnet) after D4, D5 (Opus) after D4; B2 + B3 (Sonnet), B7 (Opus) after B5,
+  B8 last; then D7 (the A/B) and the docs stage. Add CI's x86_64 golden keys when the annotation appears.
 - **Open questions:** none blocking. One reading to confirm with the human when they look: "No doctrine" was read as
   dropping only the doctrine prompt, keeping all ten universes (A-157).
 
