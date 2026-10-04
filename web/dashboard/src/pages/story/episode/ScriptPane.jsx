@@ -11,7 +11,7 @@ import DurationBar, { TimingWarnings } from './DurationBar'
 import { formatUsd } from '../../../lib/format'
 import { Badge, Card, CardBody, CardHeader, Chip, IconButton } from '../../../ui'
 import { EPISODE_TEMPLATES } from '../episodeTemplates'
-import { MapPin, Play, SlidersHorizontal, Volume2 } from '../../../ui/icons'
+import { BookOpen, MapPin, Play, SlidersHorizontal, Volume2 } from '../../../ui/icons'
 
 // The episode lengths shipped: one list with the new-story form's
 // "Episode format" (../episodeTemplates.js, plan 20 stage 1).
@@ -151,6 +151,33 @@ function ScriptHeader({ storyId, ep, episode, storyDoc, episodes, busy, onChange
         className="story-step-error"
       />
     </div>
+  )
+}
+
+// ------------------------------------------------------------------ the spine
+
+// Plan 22 stage 3 (writing v3): the episode's spine E1v3 writes before its
+// scenes (episode_script_v1's optional `spine`) -- its logline as "What
+// happens", the want, the stakes and the turn beneath. Nothing for a script
+// written before (no spine).
+const SPINE_ROWS = [['want', 'Wants'], ['stakes', 'At stake'], ['turn', 'Turn']]
+
+function SpineCard({ spine }) {
+  if (!spine) return null
+  return (
+    <Card className="story-script-spine">
+      <CardHeader icon={BookOpen} title="What happens" subtitle={spine.logline} />
+      <CardBody>
+        <dl className="story-script-spine-rows">
+          {SPINE_ROWS.map(([key, label]) => (
+            <div key={key} className="story-script-spine-row">
+              <dt>{label}</dt>
+              <dd>{spine[key]}</dd>
+            </div>
+          ))}
+        </dl>
+      </CardBody>
+    </Card>
   )
 }
 
@@ -810,6 +837,8 @@ export default function ScriptPane({ episode, storyDoc, characters, places, epis
           <div className="card">
             <DurationBar template={episode.template} scenes={script.scenes} timing={script.timing} />
           </div>
+
+          <SpineCard spine={script.spine} />
 
           <ConsistencyPanel report={script.consistency_report} state={episode.state.report} />
 

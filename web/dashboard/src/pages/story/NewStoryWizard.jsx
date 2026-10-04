@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { createStory, fetchNewStoryProfile, fetchStyles } from '../../api'
 import { Button } from '../../ui'
-import { EPISODE_TEMPLATES, pipelineDefaultTemplate, styleSuggestedTemplate } from './episodeTemplates'
+import {
+  EPISODE_TEMPLATES, pipelineDefaultTemplate, profileSuggestedTemplate, styleSuggestedTemplate,
+} from './episodeTemplates'
 
 // Plan 21 decision 4: the Mode choice's own label, Studio first (the
 // default).
@@ -106,9 +108,12 @@ function CreateStoryForm() {
   const estimate = offer && offer.estimate
   // Plan 20 stage 1: a style suggests an episode format
   // (episode_defaults.episode_template_id -- Fruit Drama the narrated drama)
-  // when it fits the pipeline; the story keeps whichever is sent.
+  // when it fits the pipeline; the story keeps whichever is sent. Plan 22
+  // stage 3: a native-speech profile suggests the confrontation format first
+  // (one shot per spoken line; defaults.episode_template_for), still a choice.
   const chosenStyle = styles.find((style) => style.template_id === styleTemplateId)
-  const suggestedTemplate = styleSuggestedTemplate(chosenStyle, pipeline)
+  const profileSuggestion = profileSuggestedTemplate(budgetProfile)
+  const suggestedTemplate = profileSuggestion || styleSuggestedTemplate(chosenStyle, pipeline)
   const episodeTemplateId = episodeTemplateChoice || suggestedTemplate || pipelineDefaultTemplate(pipeline)
   const episodeFormat = EPISODE_TEMPLATES.find((tpl) => tpl.id === episodeTemplateId)
 
@@ -260,7 +265,9 @@ function CreateStoryForm() {
             </select>
             <p className="form-hint">
               {episodeFormat ? episodeFormat.help : ''}
-              {!episodeTemplateChoice && suggestedTemplate ? ' Suggested by the style.' : ''}
+              {!episodeTemplateChoice && suggestedTemplate
+                ? (profileSuggestion ? ' Suggested for native speech: one shot per line.' : ' Suggested by the style.')
+                : ''}
             </p>
           </div>
 

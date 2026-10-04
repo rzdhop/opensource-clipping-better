@@ -3299,6 +3299,40 @@ button.activity-group-head:focus-visible {
   color: var(--accent-hover);
 }
 
+/* Plan 22 stage 3: the episode's spine (writing v3) -- "What happens" and,
+   beneath it, the want, the stakes and the turn as label / text rows. */
+.story-script-spine {
+  margin: 14px 0;
+}
+
+.story-script-spine-rows {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.story-script-spine-row {
+  display: grid;
+  grid-template-columns: 7rem 1fr;
+  gap: 8px;
+}
+
+.story-script-spine-row dt {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.story-script-spine-row dd {
+  margin: 0;
+}
+
+@media (max-width: 600px) {
+  .story-script-spine-row {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+}
+
 @media (max-width: 600px) {
   .story-script-line-speaker,
   .story-script-line-emotion {

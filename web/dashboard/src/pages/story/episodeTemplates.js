@@ -1,6 +1,7 @@
 // The episode formats shipped (spec 6.2; serial_60s_v2 since phase 7,
 // DEC-227: 6-10 beat shots of 5-12 s, every shot animated; serial_90s_v2 and
-// narrated_drama_60s_v2 since the fruit-drama pack, plan 20 stage 1): one
+// narrated_drama_60s_v2 since the fruit-drama pack, plan 20 stage 1;
+// confrontation_50s_v2 since plan 22 stage 3): one
 // list for the new-story form's "Episode format" and the episode page's
 // "Episode length". FR/EN-agnostic English labels, since the story's
 // language is the *cast's* language, not the workspace UI's (the template
@@ -19,7 +20,21 @@ export const EPISODE_TEMPLATES = [
     help: '8–12 scenes of beat shots over 80–100 s, each shot a clip.' },
   { id: 'narrated_drama_60s_v2', label: 'Narrated drama 60 s (58–78)', pipeline: 'v2',
     help: 'Narrated drama: one dramatic narrator, 2–4 character lines.' },
+  { id: 'confrontation_50s_v2', label: 'Confrontation 50 s (44–58)', pipeline: 'v2',
+    help: 'One place, real time: a confrontation, one shot per spoken line.' },
 ]
+
+// Plan 22 stage 3: the budget profiles whose characters speak in their own
+// clips (clipping.aistory.defaults.NATIVE_SPEECH_PROFILES) -- one shot per
+// character line, which the confrontation format is shaped for.
+const NATIVE_SPEECH_PROFILES = ['native_speech', 'native_speech_manual']
+
+// clipping.aistory.defaults.episode_template_for: on a native-speech
+// profile the confrontation format is suggested (still a choice, DEC-268);
+// null for any other profile.
+export function profileSuggestedTemplate(budgetProfile) {
+  return NATIVE_SPEECH_PROFILES.includes(budgetProfile) ? 'confrontation_50s_v2' : null
+}
 
 // clipping.aistory.defaults.episode_template_for: the template a story of
 // `pipeline` starts on when it names none.
