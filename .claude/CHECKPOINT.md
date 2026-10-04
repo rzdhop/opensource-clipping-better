@@ -1,3 +1,23 @@
+## CURRENT STATE — task A (plan 19) MERGED on main cf62c03 and pushed; task B (plan 20, the fruit-drama pack) in IMPLEMENT as three Opus agents in worktrees; episode 2 RENDERED, awaiting the human's verdict (2026-10-04, local session)
+
+- **In-progress header:** phase = IMPLEMENT of `.claude/plans/ai-story/20-fruit-drama-pack-plan.md` (DEC-263).
+  Checkpoint commit `cf62c03` (main = the three plan-19 stages, DEC-264…266; pushed). Stage 1 (narrated templates,
+  `feat/fruit-pack-s1`, `.claude/worktrees/fruit-pack-s1`), stage 2 (archetypes + concepts, `-s2`), stage 3 (the CTA,
+  `-s3`) run in parallel; merge order 1 → 2 → 3, each rebased on main (**`git merge --ff-only` checks its exit code:
+  a failed ff-merge once let the docs commit land before the code — re-check `git log` after every merge**).
+  In the background: the full local suite from main cf62c03; the backend image rebuilt at 0 jobs (dashboard files of
+  stages 1 and 3 changed). Next: on each report — review, rebase, Tier-1 selection, ff-merge, DEC-267…269, action
+  log; then the deploy (rebuild at 0 jobs), the Tier-2 walk (a new Fruit Drama story on the narrated template,
+  episode 1, ≈ $2.6 — **note the story cap: d0ee5ebd745d is at $8.05 of $10, so the walk is a new story**), push,
+  CHECKPOINT close-out; then task C (U3 agent mode: EXPLORE → plan 21).
+- **Episode 2 of d0ee5ebd745d is rendered** (job 5e2290b4b3b9, 41.7 min, 72.0 s, -14.2 LUFS, metadata pack written;
+  keyframes approved anyway, still flagged sh02 sh05 sh06 sh08 sh10 sh11 sh12; lip-sync 10 synced, sh09 sh10 sh13
+  no face; 4 clips and 2 lip-syncs served by the gencache → A-141 partly confirmed, F5 fixed since). Spend: today
+  $5.03 of $7, story $8.05 of $10. **The human judges A-133…A-141 on the phone.** Settings caps stay 6 / 7 for now
+  (DEC-263); the shipped defaults are unchanged.
+- **Tier-1 baseline:** full local suite running on cf62c03 (result in the action log when it ends); per-stage
+  selections all green in both envs (stage 1: 1186 / 881+305 sk; stage 3 + 1: 650; stages 1+2+3: 1238 / 1168+70 sk).
+
 ## CURRENT STATE — IMPLEMENT (2026-10-04, local session): task A (plan 19, the walk's six defects) runs as three Opus agents in three worktrees while episode 2 renders on the raised caps
 
 - **In-progress header:** phase = IMPLEMENT of `.claude/plans/ai-story/19-walk-defects-plan.md` (DEC-263; the
