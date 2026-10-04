@@ -286,15 +286,36 @@ def missing_clips(ec, script, storyboard, assets_doc=None) -> list:
             continue
         if shot_state(ec, script, shot, assets_doc) != "missing":
             continue
-        out.append({"shot_id": shot["shot_id"], "order": shot["order"], "speaks": bool(shot.get("speaks")),
+        out.append({"kind": "clip", "shot_id": shot["shot_id"], "order": shot["order"],
+                    "speaks": bool(shot.get("speaks")),
                     "clip_s": int(shot.get("clip_s") or round(float(shot.get("duration_s") or 0)) or 4),
                     "upload_slot": upload_slot(ec.story_id, ec.ep, shot["shot_id"])})
     return out
 
 
-def waiting_sentence(count, *, what="clip") -> str:
-    """"Waiting for 5 clips -- download the brief"."""
-    return f"Waiting for {count} {what}{'' if count == 1 else 's'} — download the brief"
+def missing_keyframes(ec, storyboard, assets_doc=None) -> list:
+    """On a story whose images are the user's own
+    (``media_policy.images_manual``): the shots with no current keyframe
+    (and not locked), ``[{kind: "keyframe", shot_id, order, upload_slot}]``."""
+    if not media_policy.images_manual(getattr(ec, "story", None)):
+        return []
+    from . import assets as assets_step  # the step imports this module: a cycle at import time
+
+    link = assets_step.recorded_image_link(assets_doc)
+    return [{"kind": "keyframe", "shot_id": shot["shot_id"], "order": shot["order"],
+             "upload_slot": keyframe_slot(ec.story_id, ec.ep, shot["shot_id"])}
+            for shot in assets_step.shots_to_make(ec, storyboard, link=link)]
+
+
+def waiting_sentence(count, *, what="clip", keyframes=0) -> str:
+    """"Waiting for 5 clips -- download the brief" (and the keyframes still
+    to upload, on a story whose images are the user's own)."""
+    parts = []
+    if keyframes:
+        parts.append(f"{keyframes} keyframe{'' if keyframes == 1 else 's'}")
+    if count or not keyframes:
+        parts.append(f"{count} {what}{'' if count == 1 else 's'}")
+    return f"Waiting for {' and '.join(parts)} — download the brief"
 
 
 # ------------------------------------------------------------------ the brief
@@ -351,8 +372,8 @@ def shot_entry(ec, script, shot, *, preset, assets_doc=None) -> dict:
                      voice_line=prompting.voice_line(character.get("voice_hints")))
     entry["checks"] = _checks(ec, shot, line if speaks else None, clip_s, length, preset)
     take = ((shot.get("assets") or {}).get("clip") or {}).get("native_speech")
-    if take:
-        entry["take"] = {key: take.get(key) for key in ("state", "matched", "heard", "start_s", "end_s", "reason")}
+    entry["take"] = ({key: take.get(key) for key in ("state", "matched", "heard", "start_s", "end_s", "reason")}
+                     if take else None)
     return entry
 
 
@@ -506,6 +527,118 @@ def brief_zip(ec, brief, *, image=False) -> bytes:
 
 
 # ============================================================ the image brief
+
+# The least an uploaded image may measure, by what it is: half the size the
+# app would make it at (``refimages``' sizes; a keyframe is the plate's 9:16).
+IMAGE_MIN_SIZES = {"portrait": (360, 640), "turnaround": (640, 360), "expressions": (600, 400),
+                   "plate": (360, 640), "prop": (512, 512), "keyframe": (360, 640)}
+IMAGE_SIZES = {"portrait": (720, 1280), "turnaround": (1280, 720), "expressions": (1200, 800),
+               "plate": (720, 1280), "prop": (1024, 1024), "keyframe": (1080, 1920)}
+
+
+def entity_image_slot(story_id, kind, eid, slot) -> str:
+    """The API path an entity's own image is uploaded to."""
+    if kind == "characters":
+        return f"/api/stories/{story_id}/cast/{eid}/sheet?which={slot}"
+    if kind == "places":
+        return f"/api/stories/{story_id}/places/{eid}/plate?variant={slot}"
+    return f"/api/stories/{story_id}/props/{eid}/image"
+
+
+def _entity_entries(stories, story, *, env):
+    """The image brief's entries for the cast sheets, place plates and props
+    (a refimages prompt each, as the cast and places steps would ask it)."""
+    from .. import imaging, refimages
+
+    story_id = story["story_id"]
+    lock = imaging.read_lock(stories, story_id, error=refimages.RefImageError)
+    entries = []
+    for character in stories.list_entities(story_id, "characters"):
+        if not character.get("descriptor") or not character.get("signature_items"):
+            continue
+        for which in refimages.CHARACTER_IMAGES:
+            entry = character["refs"].get(which)
+            entries.append({
+                "kind": "sheet", "entity": "characters", "id": character["char_id"], "slot": which,
+                "label": f"{character['name']} — {which}", "role": which,
+                "prompt": refimages.character_prompt(story, character, which, env=env, lock=lock),
+                "state": "uploaded" if entry else "missing",
+                "upload_slot": entity_image_slot(story_id, "characters", character["char_id"], which)})
+    for place in stories.list_entities(story_id, "places"):
+        if not place.get("descriptor"):
+            continue
+        variants = list(dict.fromkeys([refimages.MASTER_PLATE] + list(place.get("time_variants") or {})))
+        for variant in variants:
+            entries.append({
+                "kind": "plate", "entity": "places", "id": place["place_id"], "slot": variant,
+                "label": f"{place['name']} — {variant.replace('_', ' ')}", "role": "plate",
+                "prompt": refimages.place_prompt(stories, story, place, variant, env=env, lock=lock),
+                "state": "uploaded" if (place.get("time_variants") or {}).get(variant) else "missing",
+                "upload_slot": entity_image_slot(story_id, "places", place["place_id"], variant)})
+    for prop in stories.list_entities(story_id, "props"):
+        if not prop.get("descriptor"):
+            continue
+        entries.append({
+            "kind": "prop", "entity": "props", "id": prop["prop_id"], "slot": "image",
+            "label": f"{prop['name']} — object", "role": "prop",
+            "prompt": refimages.prop_prompt(story, prop, env=env, lock=lock),
+            "state": "uploaded" if prop.get("image") else "missing",
+            "upload_slot": entity_image_slot(story_id, "props", prop["prop_id"], "image")})
+    return entries
+
+
+def _keyframe_entries(ec, storyboard, assets_doc):
+    from . import assets as assets_step  # the step imports this module: a cycle at import time
+
+    link = assets_step.recorded_image_link(assets_doc)
+    missing = {item["shot_id"] for item in missing_keyframes(ec, storyboard, assets_doc)}
+    entries = []
+    for shot in sorted(storyboard["shots"], key=lambda item: item["order"]):
+        parts = assets_step.request_parts(ec, shot, note=None, link=link)
+        refs = []
+        for number, path in enumerate(shot.get("reference_images") or (), start=1):
+            bits = path.split("/")
+            if len(bits) != 4:
+                continue
+            refs.append({"kind": bits[0].rstrip("s"), "label": f"{bits[1]} — {bits[3]}", "path": path,
+                         "name": bits[3], "url": f"/api/stories/{ec.story_id}/media/{bits[0]}/{bits[1]}/{bits[3]}"})
+        entries.append({"kind": "keyframe", "entity": "shots", "id": shot["shot_id"], "slot": "keyframe",
+                        "label": f"Shot {shot['shot_id']} — keyframe", "role": "keyframe",
+                        "prompt": parts["prompt"], "negative_prompt": parts.get("negative") or "",
+                        "references": refs, "state": "missing" if shot["shot_id"] in missing else "uploaded",
+                        "upload_slot": keyframe_slot(ec.story_id, ec.ep, shot["shot_id"])})
+    return entries
+
+
+def image_brief(stories, story, *, env=None, ec=None) -> dict:
+    """The brief of the images a story makes by hand
+    (``media_policy.images_manual``): its cast sheets, place plates and
+    props, and -- with *ec*, an episode whose storyboard exists -- each
+    shot's keyframe; per image the prompt (the one the app would send),
+    the references, the size to make it at (and the least it may be), the
+    upload slot and whether it is there::
+
+        {"$schema": "image_brief_v1", "story_id", "ep" | None, "images": [...],
+         "counts": {"total", "uploaded", "missing"}}"""
+    entries = _entity_entries(stories, story, env=env or {})
+    if ec is not None:
+        board = episode_common.read_episode(ec, episode_common.STORYBOARD_DOC)
+        if board and board.get("shots"):
+            doc = episode_common.read_episode(ec, episode_common.store_mod.EPISODE_ASSETS_DOC)
+            entries += _keyframe_entries(ec, board, doc)
+    for number, entry in enumerate(entries, start=1):
+        entry["size"] = list(IMAGE_SIZES[entry["role"]])
+        entry["min_size"] = list(IMAGE_MIN_SIZES[entry["role"]])
+        entry.setdefault("negative_prompt", "")
+        refs = entry.setdefault("references", [])
+        for index, ref in enumerate(refs, start=1):
+            ref["number"] = index
+            ref["file"] = f"{entry['id']}_{index}_{ref['name']}"
+    missing = sum(1 for entry in entries if entry["state"] == "missing")
+    return {"$schema": IMAGE_SCHEMA, "story_id": story["story_id"], "ep": getattr(ec, "ep", None),
+            "title": story.get("title") or "", "images": entries,
+            "counts": {"total": len(entries), "uploaded": len(entries) - missing, "missing": missing}}
+
 
 def render_image_markdown(brief) -> str:
     """The image brief for a human: one numbered entry per image to make."""

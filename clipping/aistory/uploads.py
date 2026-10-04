@@ -282,7 +282,7 @@ def _target_mode(image) -> str:
     return "RGB"
 
 
-def _decode_and_save(Image, ImageOps, UnidentifiedImageError, src, dest) -> None:
+def _decode_and_save(Image, ImageOps, UnidentifiedImageError, src, dest, max_side=MAX_SIDE) -> None:
     bomb = (Image.DecompressionBombError, Image.DecompressionBombWarning)
 
     # 1. Identify with the allowed decoders only, and verify the file's structure.
@@ -330,8 +330,8 @@ def _decode_and_save(Image, ImageOps, UnidentifiedImageError, src, dest) -> None
     finally:
         upright.close()
     try:
-        if max(clean.size) > MAX_SIDE:
-            clean.thumbnail((MAX_SIDE, MAX_SIDE), Image.Resampling.LANCZOS)
+        if max(clean.size) > max_side:
+            clean.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
         # Nothing of the upload's own metadata reaches the file: the PNG writer
         # reads icc_profile, transparency and exif from info, text only from
         # the arguments of save(), which are none but the format.
@@ -341,18 +341,20 @@ def _decode_and_save(Image, ImageOps, UnidentifiedImageError, src, dest) -> None
         clean.close()
 
 
-def _reencode(src, dest) -> None:
+def _reencode(src, dest, *, max_side=MAX_SIDE) -> None:
     """Decode *src* (untrusted) and write it to *dest* as a clean PNG, or
     raise :class:`UploadError`. Pillow's ``MAX_IMAGE_PIXELS`` is held at
     ``MAX_PIXELS`` (never loosened) and its bomb warning raised as an error
-    for the duration, under a lock; both are restored after."""
+    for the duration, under a lock; both are restored after. *max_side*
+    (plan 22 stage 5: a user's own keyframe or sheet keeps up to 1920 px)
+    bounds the long side."""
     Image, ImageOps, UnidentifiedImageError = _pil()
     with _DECODE_LOCK, warnings.catch_warnings():
         warnings.simplefilter("error", Image.DecompressionBombWarning)
         saved = Image.MAX_IMAGE_PIXELS
         Image.MAX_IMAGE_PIXELS = MAX_PIXELS if saved is None else min(saved, MAX_PIXELS)
         try:
-            _decode_and_save(Image, ImageOps, UnidentifiedImageError, src, dest)
+            _decode_and_save(Image, ImageOps, UnidentifiedImageError, src, dest, max_side=max_side)
         finally:
             Image.MAX_IMAGE_PIXELS = saved
 

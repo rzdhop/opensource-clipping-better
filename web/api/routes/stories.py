@@ -1518,11 +1518,14 @@ async def _reedit_step(stories, story, step, params, ep) -> JobResponse:
 def _episode_jobs(story_id, ep) -> list:
     """The story's step jobs queued or running on episode *ep* (its
     documents', and its render, metadata and fast track), as ``GET /{id}``
-    lists jobs."""
+    lists jobs -- and (plan 22 stage 5) the ones paused awaiting the user's
+    own clips (``awaiting_uploads``, with what they wait for), last."""
+    jobs = [job for job in _in_flight(story_id) if _episode_of(job) == ep]
+    jobs += [job for job in _paused_jobs(story_id, ep) if job["id"] not in {item["id"] for item in jobs}]
     return [
         jobs_routes._job_to_response(job).model_dump(
             mode="json", exclude={"events", "log", "clips", "config", "progress"})
-        for job in _in_flight(story_id) if _episode_of(job) == ep
+        for job in jobs
     ]
 
 
@@ -2711,6 +2714,115 @@ async def upload_shot_clip(story_id: str, ep: str, shot_id: str, request: Reques
             pass
     result["resumed"] = await resume_after_upload(story_id, number, result)
     return result
+
+
+async def _accept_image_upload(request, folder, call) -> dict:
+    """Receive one image into *folder* (the story's own), hand it to *call*
+    (``manual_uploads.accept_image`` or ``accept_keyframe``, bound but for
+    the received path), and remove what is left of it."""
+    received = await _receive_upload(request, folder, limit=manual_uploads.MAX_IMAGE_BYTES)
+    try:
+        return await run_in_threadpool(call, received)
+    except manual_uploads.UploadRefused as exc:
+        raise _upload_refused(exc.status, str(exc)) from None
+    finally:
+        try:
+            os.unlink(received)
+        except OSError:
+            pass
+
+
+async def _entity_image_upload(story_id, kind, eid, slot, request) -> dict:
+    stories = _stories()
+    story = _load(stories, story_id)
+    _entity(stories, story_id, kind, eid)
+    refusal = manual_uploads._images_refusal(story)
+    if refusal:
+        raise _upload_refused(400, refusal)
+    _refuse_busy(story_id, "upload the image once that step is done, or cancel it first.")
+    try:
+        folder = stories.refs_dir(story_id, kind, eid, create=True)
+    except KeyError:
+        raise _upload_refused(409, "The refs/ folder is not a real folder (a symlink is never followed); move it "
+                                   "away and upload again.") from None
+    return await _accept_image_upload(request, folder, functools.partial(
+        lambda received: manual_uploads.accept_image(stories, story_id, kind, eid, slot, received, now=_now())))
+
+
+@router.post("/{story_id}/cast/{char_id}/sheet", status_code=201)
+async def upload_character_sheet(story_id: str, char_id: str, request: Request, which: str = "portrait") -> dict:
+    """The user's own character sheet (``which``: portrait, turnaround or
+    expressions) on a story whose images are manual (plan 22 stage 5):
+    multipart field ``file``, decoded and re-encoded clean, at least half
+    the app's size, stored as ``refs/<which>.png`` with ``source:
+    manual/upload``. 404 unknown story or character; 400 a story whose
+    images are the app's, a bad slot, an image too small; 415 not an image;
+    409 while a step runs."""
+    return await _entity_image_upload(story_id, CHARACTERS, char_id, which, request)
+
+
+@router.post("/{story_id}/places/{place_id}/plate", status_code=201)
+async def upload_place_plate(story_id: str, place_id: str, request: Request, variant: str = "day") -> dict:
+    """The user's own place plate (``variant``: day, the master plate, or a
+    time variant); the rules of the character sheet's upload."""
+    return await _entity_image_upload(story_id, PLACES, place_id, variant, request)
+
+
+@router.post("/{story_id}/props/{prop_id}/image", status_code=201)
+async def upload_prop_image(story_id: str, prop_id: str, request: Request) -> dict:
+    """The user's own prop image; the rules of the character sheet's upload."""
+    return await _entity_image_upload(story_id, PROPS, prop_id, "image", request)
+
+
+@router.post("/{story_id}/episodes/{ep}/shots/{shot_id}/keyframe", status_code=201)
+async def upload_shot_keyframe(story_id: str, ep: str, shot_id: str, request: Request) -> dict:
+    """The user's own keyframe of a shot on a story whose images are manual
+    (``manual_uploads.accept_keyframe``): 9:16 within 2 % (cropped to the
+    exact even 9:16), at least 360x640, stored as ``assets/shots/
+    shot_NN.png`` and recorded current; 409 before the storyboard is
+    approved; the refusals of the sheets' upload otherwise. Answers
+    ``{"shot_id", "image", "size", "state", "missing", "waiting",
+    "resumed"}``."""
+    stories = _stories()
+    story = _load(stories, story_id)
+    number = _episode_number(ep)
+    if _SHOT_ID.fullmatch(shot_id) is None:
+        raise HTTPException(status_code=404, detail=f"There is no shot {shot_id!r}.")
+    refusal = manual_uploads._images_refusal(story)
+    if refusal:
+        raise _upload_refused(400, refusal)
+    _refuse_busy(story_id, "upload the keyframe once that step is done, or cancel it first.")
+    try:
+        probe = stories.episode_asset_path(story_id, number, "shots", "shot_01.png", create=True)
+    except KeyError:
+        raise _upload_refused(409, "The episode's assets/shots folder is not a real folder.") from None
+    result = await _accept_image_upload(request, os.path.dirname(probe), functools.partial(
+        lambda received: manual_uploads.accept_keyframe(stories, story_id, number, shot_id, received,
+                                                        env=worker.get_settings_env(),
+                                                        on_log=_activity(stories, story_id), now=_now())))
+    result["resumed"] = await resume_after_upload(story_id, number, result)
+    return result
+
+
+@router.get("/{story_id}/image-brief")
+async def story_image_brief(story_id: str, ep: Optional[str] = None) -> dict:
+    """The brief of the images a story makes by hand (``steps.brief.
+    image_brief``): its cast sheets, place plates and props, and -- with
+    ``ep`` -- each shot's keyframe; per image the prompt, the references,
+    the size, the upload slot and whether it is there. Calls nothing."""
+    stories = _stories()
+    story = _load(stories, story_id)
+    ec = None
+    if ep is not None:
+        try:
+            ec = episode_common.load_context(stories, story_id, _episode_number(ep))
+        except llm_call.StepFailed as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from None
+    try:
+        return await run_in_threadpool(functools.partial(brief_step.image_brief, stories, story,
+                                                         env=worker.get_settings_env(), ec=ec))
+    except refimages.RefImageError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
 
 
 @router.get("/{story_id}/episodes/{ep}/voice/{name}")

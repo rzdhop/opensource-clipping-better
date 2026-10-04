@@ -227,7 +227,8 @@ def _host(stories, story_id, ep, *, env, on_log, transcribe, run):
     try:
         host.script, host.storyboard = assets_step.require_approved(ec)
     except StepFailed as exc:
-        raise UploadRefused(f"{exc} Clips are uploaded once the storyboard is approved.", status=409) from None
+        raise UploadRefused(f"{exc} A shot's clip or keyframe is uploaded once its storyboard is approved.",
+                            status=409) from None
     return host, ec
 
 
@@ -333,6 +334,198 @@ def accept_clip(stories, story_id, ep, shot_id, received, *, filename, env=None,
     return {"shot_id": shot_id, "clip": clip, "state": brief_mod.shot_state(ec, host.script, stored),
             "take": take, "duration_s": stored.get("duration_s"), "replaced": replaced, "missing": missing,
             "waiting": brief_mod.waiting_sentence(len(missing)) if missing else None}
+
+
+# ------------------------------------------------------------- the images
+
+MAX_IMAGE_BYTES = 20 * 1024 * 1024
+# A user's own image keeps up to the render's long side (1080x1920).
+IMAGE_MAX_SIDE = 1920
+ENTITY_KINDS = ("characters", "places", "props")
+
+
+def _image_size(path) -> tuple:
+    from PIL import Image
+
+    with Image.open(path) as image:
+        return image.size
+
+
+def _clean_image(received, folder, *, role, exact_916=False) -> tuple:
+    """*received* decoded, re-encoded as a clean PNG in *folder* (the
+    uploads module's own decoder: PNG, JPEG, WebP or GIF, no metadata) and
+    checked against the least size *role* takes; a keyframe is 9:16 within
+    :data:`ASPECT_TOLERANCE`, cropped to the exact even 9:16 the render
+    expects. ``(path, (width, height))``; :class:`UploadRefused` otherwise."""
+    import tempfile
+
+    from . import media_policy as policy
+    from . import uploads as uploads_mod
+    from .steps import brief as brief_mod
+
+    handle, cleaned = tempfile.mkstemp(dir=folder, prefix=".upload-", suffix=".png")
+    os.close(handle)
+    try:
+        try:
+            uploads_mod._reencode(received, cleaned, max_side=IMAGE_MAX_SIDE)
+        except uploads_mod.UploadError as exc:
+            raise UploadRefused(str(exc), status=exc.http_status) from None
+        width, height = _image_size(cleaned)
+        least = brief_mod.IMAGE_MIN_SIZES[role]
+        if width < least[0] or height < least[1]:
+            raise UploadRefused(f"The image is {width}x{height}: a {role} is at least {least[0]}x{least[1]} "
+                                f"(the app makes it at {'x'.join(map(str, brief_mod.IMAGE_SIZES[role]))}).")
+        if exact_916:
+            if abs(width / height - ASPECT) / ASPECT > ASPECT_TOLERANCE:
+                raise UploadRefused(f"The keyframe is {width}x{height} ({_ratio_name(width, height)}), not 9:16: "
+                                    "make it 9:16 (the render would crop the characters out of frame).")
+            crop = policy.keyframe_crop((width, height))
+            if crop is not None:
+                from PIL import Image
+
+                with Image.open(cleaned) as image:
+                    left, top = (width - crop[0]) // 2, (height - crop[1]) // 2
+                    image.crop((left, top, left + crop[0], top + crop[1])).save(cleaned, format="PNG")
+                width, height = crop
+        return cleaned, (width, height)
+    except BaseException:
+        try:
+            os.unlink(cleaned)
+        except OSError:
+            pass
+        raise
+
+
+def _images_refusal(story) -> str | None:
+    if media_policy.images_manual(story):
+        return None
+    return ("This story's images are made by the app: switch its images to your own uploads (the generation "
+            "profile's Images: manual) to upload them.")
+
+
+def accept_image(stories, story_id, kind, eid, slot, received, *, now=None) -> dict:
+    """The user's own image of an entity -- a character's ``portrait``,
+    ``turnaround`` or ``expressions`` sheet, a place's plate (``slot`` its
+    time variant: ``day`` is the master plate), a prop's ``image`` -- on a
+    story whose images are manual (``media_policy.images_manual``): decoded
+    and re-encoded clean (the uploads module's decoder), checked against
+    the least size its role takes, stored where the app keeps a made one
+    (``refs/<slot>.png``) and recorded as one, ``source: manual/upload``.
+    Returns ``{"kind", "id", "slot", "ref", "size"}``."""
+    from . import imaging, prompting, refimages
+
+    now = now or _utc_now()
+    if kind not in ENTITY_KINDS:
+        raise UploadRefused(f"{kind!r} has no images to upload.", status=404)
+    try:
+        story = stories.get(story_id)
+        doc = stories.read_entity(story_id, kind, eid)
+    except KeyError:
+        raise UploadRefused(f"This story has no {kind[:-1]} {eid!r}.", status=404) from None
+    refusal = _images_refusal(story)
+    if refusal:
+        raise UploadRefused(refusal)
+    if kind == "characters":
+        if slot not in refimages.CHARACTER_IMAGES:
+            raise UploadRefused(f"{slot!r} is not a character sheet ({', '.join(refimages.CHARACTER_IMAGES)}).")
+        stem, role, base = slot, slot, slot == "portrait"
+    elif kind == "places":
+        if not isinstance(slot, str) or not re.fullmatch(r"[a-z][a-z0-9_]{0,19}", slot or ""):
+            raise UploadRefused(f"{slot!r} is not a time variant name (day, night, golden_hour...).")
+        stem, role, base = f"variant_{slot}", "plate", slot == refimages.MASTER_PLATE
+    else:
+        stem, role, base = "image", "prop", True
+    try:
+        folder = stories.refs_dir(story_id, kind, eid, create=True)
+    except (KeyError, TypeError):
+        raise UploadRefused("The entity's refs/ folder is not a real folder (a symlink is never followed).",
+                            status=409) from None
+    cleaned, size = _clean_image(received, folder, role=role)
+    try:
+        name = f"{stem}.png"
+        try:
+            stories.write_media(story_id, kind, eid, name, cleaned)
+        except (KeyError, ValueError) as exc:
+            raise UploadRefused(f"The image could not be stored ({exc}).", status=409) from None
+    finally:
+        try:
+            os.unlink(cleaned)
+        except OSError:
+            pass
+    ref = {"name": name, "consistency": "base" if base else "references", "source": gen.MANUAL_LINK,
+           "seed": None, "created_at": now}
+    lock = imaging.read_lock(stories, story_id, error=refimages.RefImageError)
+    current = stories.read_entity(story_id, kind, eid)
+    if kind == "characters":
+        current["refs"][slot] = ref
+        if slot == "portrait" and current["descriptor"] and current["signature_items"]:
+            current["prompt_block"] = prompting.character_prompt_block(
+                lock, descriptor=current["descriptor"], signature_items=current["signature_items"])
+    elif kind == "places":
+        current["time_variants"][slot] = ref
+        if base and current["descriptor"] and current["layout_notes"]:
+            current["prompt_block"] = prompting.place_prompt_block(
+                lock, descriptor=current["descriptor"], layout_notes=current["layout_notes"])
+    else:
+        current["image"] = ref
+        if current["descriptor"]:
+            current["prompt_block"] = prompting.prop_prompt_block(lock, descriptor=current["descriptor"])
+    stories.write_entity(story_id, kind, current, now=now)
+    refimages._remove_other_extensions(stories, story_id, kind, eid, stem, name)
+    return {"kind": kind, "id": eid, "slot": slot, "ref": ref, "size": list(size), "name": doc.get("name")}
+
+
+def accept_keyframe(stories, story_id, ep, shot_id, received, *, env=None, on_log=None, now=None) -> dict:
+    """The user's own keyframe of a shot, on a story whose images are manual:
+    decoded clean, 9:16 within 2 % (cropped to the exact even 9:16), at
+    least 360x640, stored as ``assets/shots/shot_NN.png`` and recorded as a
+    made keyframe is -- ``provider: manual``, ``model: upload``, ``route: free``, $0, the
+    prompt hash it would be asked with now -- so it reads current; the
+    episode's image link recorded as ``manual/upload``. Returns ``{"shot_id",
+    "image", "size", "state", "missing"}``."""
+    from .steps import assets as assets_step
+    from .steps import brief as brief_mod
+    from .steps import sticky_link
+
+    on_log = on_log or (lambda _line: None)
+    now = now or _utc_now()
+    host, ec = _host(stories, story_id, ep, env=env, on_log=on_log, transcribe=None, run=None)
+    refusal = _images_refusal(ec.story)
+    if refusal:
+        raise UploadRefused(refusal)
+    shot = _shot_of(host, shot_id)
+    if shot["assets"].get("locked"):
+        raise UploadRefused(f"Shot {shot_id} is locked: unlock it first.", status=409)
+    name = f"shot_{shot_id[2:]}.png"
+    try:
+        dest = stories.episode_asset_path(story_id, ep, "shots", name, create=True)
+    except KeyError:
+        raise UploadRefused(f"assets/shots/{name} is not a real file (a symlink is never followed).",
+                            status=409) from None
+    cleaned, size = _clean_image(received, os.path.dirname(dest), role="keyframe", exact_916=True)
+    os.replace(cleaned, dest)
+    os.chmod(dest, 0o644)
+    host.drop_other_images(shot_id, "png")
+    doc = assets_step._read_assets_doc(ec)
+    link = assets_step.recorded_image_link(doc)
+    parts = assets_step.request_parts(ec, shot, note=None, link=link)
+    # An image paid for by nobody here: ``route: free`` (the image routes are free, local or paid).
+    shot["assets"].update({"image": f"{schemas.SHOT_IMAGE_DIR}/{name}", "seed": None, "provider": gen.MANUAL,
+                           "model": "upload", "consistency": parts["consistency"], "route": "free",
+                           "prompt_hash": parts["hash"], "est_usd": 0.0, "cache_key": None, "generated_at": now,
+                           "note": None, "pending": None})
+    host.write_board()
+    if sticky_link.recorded(doc, sticky_link.IMAGE) is None:
+        host.link_pending = sticky_link.record(gen.MANUAL_LINK, now=now)
+        try:
+            host.write_assets_doc()
+        except Exception as exc:  # noqa: BLE001 - the link is recorded by the next assets run
+            on_log(f"⚠️ The episode's image link could not be recorded now ({exc}).")
+    on_log(f"📥 Shot {shot_id}: your keyframe ({size[0]}x{size[1]}) is stored as assets/shots/{name}")
+    missing = brief_mod.missing_keyframes(ec, host.storyboard, assets_step._read_assets_doc(ec))
+    return {"shot_id": shot_id, "image": f"{schemas.SHOT_IMAGE_DIR}/{name}", "size": list(size),
+            "state": assets_step.shot_state(ec, shot), "missing": missing,
+            "waiting": brief_mod.waiting_sentence(0, keyframes=len(missing)) if missing else None}
 
 
 def _keep_old(stories, story_id, ep, shot_id, dest, now) -> str:

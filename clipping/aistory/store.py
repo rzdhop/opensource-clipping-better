@@ -306,7 +306,13 @@ _PROFILE_CHOICES = {
     "video_resolution": defaults.VIDEO_RESOLUTIONS,
     # Plan 21 stage 1: Studio (absent) or agent mode.
     "mode": defaults.STORY_MODES,
+    # Plan 22: a native-speech story's speaking-clip model (stage 4), and (stage 5)
+    # the switch that makes its images the user's own uploads.
+    "speech_model": defaults.SPEECH_MODELS,
+    "images": defaults.IMAGE_MODES,
 }
+# Plan 22: the optional keys a partial profile may clear by sending null.
+_PROFILE_CLEARABLE = ("speech_model", "images")
 
 _INDEX_ENTRY_SCHEMA = {
     "type": "object",
@@ -562,6 +568,9 @@ def _merge_generation_profile(partial) -> dict:
         if choices is None:
             raise ValueError(
                 f"generation_profile has no field {key!r} (known: {', '.join(_PROFILE_CHOICES)})")
+        if value is None and key in _PROFILE_CLEARABLE:
+            profile.pop(key, None)
+            continue
         # type() as well as membership: True == 1 and 1.0 == 1 in Python.
         if type(value) is not type(choices[0]) or value not in choices:
             raise ValueError(

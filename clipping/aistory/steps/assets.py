@@ -2384,8 +2384,10 @@ class _Assets(voice_lines.LineMeasurement):
         self.local_image_ran = False
         # Phase 7 stage 6b: what the keyframe judge (J2) did in this run (None: not a v2 story).
         self.keyframe_check = None
-        # Plan 22 stage 5: the human's clips still missing (None: nothing awaited).
+        # Plan 22 stage 5: the human's clips still missing (None: nothing awaited), and the
+        # keyframes still missing on a story whose images are the human's own.
         self.uploads = None
+        self.missing_keyframes = []
         # Phase 8 stage B: the episode's continuity ledger, read once (:meth:`ledger_now`),
         # and what the keyframe auto-fix did (None: it did not run).
         self.ledger_read = _READ
@@ -2886,6 +2888,12 @@ class _Assets(voice_lines.LineMeasurement):
         if not todo:
             ctx.on_log("🖼 Every shot has its image (or is locked): nothing to make.")
             return
+        if media_policy.images_manual(ec.story):
+            # Plan 22 stage 5: the keyframes are the user's own uploads -- none is asked of anything.
+            self.missing_keyframes = brief_step.missing_keyframes(ec, board, _read_assets_doc(ec))
+            ctx.on_log(f"✋ {len(self.missing_keyframes)} keyframe{'s' if len(self.missing_keyframes) != 1 else ''} "
+                       f"to upload (your own images, {gen.MANUAL_LINK}): nothing is sent or bought.")
+            return
         self.resolve_link()
         mode = ec.consistency_mode
         chain = chain_name(ec, gen.IMAGE if mode == PROMPT_ONLY else gen.IMAGE_EDIT)
@@ -3150,7 +3158,7 @@ class _Assets(voice_lines.LineMeasurement):
         missing = brief_step.missing_clips(ec, self.script, self.storyboard, doc)
         if not missing:
             return
-        self.uploads = uploads_record(ec, missing)
+        self.uploads = uploads_record(ec, self.missing_keyframes + missing)
         speaking = sum(1 for item in missing if item["speaks"])
         ctx.on_log(f"✋ {self.uploads['message']}: {len(missing)} of your own clip{'s' if len(missing) != 1 else ''} "
                    f"({speaking} speaking, {len(missing) - speaking} silent) on {gen.MANUAL_LINK} -- nothing is sent "
@@ -4353,6 +4361,9 @@ class _Assets(voice_lines.LineMeasurement):
 
     def finish(self, doc) -> dict:
         ec, ctx, board = self.ec, self.ctx, self.storyboard
+        if self.uploads is None and self.missing_keyframes:
+            # Plan 22 stage 5: the user's own keyframes first; their clips are asked once they are approved.
+            self.uploads = uploads_record(ec, self.missing_keyframes)
         link = recorded_image_link(doc)
         states = {shot["shot_id"]: shot_state(ec, shot, link=link) for shot in board["shots"]}
         native = media_policy.native_speech(ec.story)
@@ -4450,9 +4461,11 @@ def uploads_record(ec, missing, *, platform=None) -> dict:
     download the brief") and where the brief is."""
     base = f"/api/stories/{ec.story_id}/episodes/{ec.ep}/brief"
     query = f"?platform={platform}" if platform else ""
+    keyframes = sum(1 for item in missing if item.get("kind") == "keyframe")
     return {"state": steps_pkg.AWAITING_UPLOADS, "count": len(missing), "missing": list(missing),
-            "message": brief_step.waiting_sentence(len(missing)), "brief": f"{base}.zip{query}",
-            "brief_json": f"{base}{query}"}
+            "clips": len(missing) - keyframes, "keyframes": keyframes,
+            "message": brief_step.waiting_sentence(len(missing) - keyframes, keyframes=keyframes),
+            "brief": f"{base}.zip{query}", "brief_json": f"{base}{query}"}
 
 
 def _book_answer(gates, result, answered, kind, *, unit="image", qty=1) -> float:
