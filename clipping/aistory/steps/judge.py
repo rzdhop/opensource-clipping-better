@@ -103,6 +103,9 @@ DETERMINISTIC_KINDS = ("repeated_line", "no_hook_text")
 KIND_WORDS = {
     "unclear_goal": "unclear goal", "unmotivated": "unmotivated", "unintroduced": "unintroduced",
     "object_unseen": "object unseen", "repeated_line": "repeated line", "no_hook_text": "no hook text",
+    # The consistency check's (E4) kinds, repaired too since DEC-260.
+    "continuity": "continuity", "character": "out of character", "place": "place", "series_memory": "series memory",
+    "hook_payoff": "hook payoff", "other": "consistency",
 }
 
 # Phase 7 follow-up, stage G: the script step's repair passes on the script

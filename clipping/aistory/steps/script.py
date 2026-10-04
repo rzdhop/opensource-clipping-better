@@ -150,6 +150,10 @@ FILL_NOTE = ("This scene runs short of the episode's length: write it fuller, cl
 REPAIR_PASSES_MAX = 2
 REPAIR_CALLS_MAX = 8
 REPAIR_NOTE_HEAD = "First-watch check -- "
+# DEC-260: an issue of the consistency check (E4) is repaired the same way, its
+# note headed so the writer knows which check asks.
+CONSISTENCY_NOTE_HEAD = "Consistency check -- "
+CONSISTENCY_SOURCE = "consistency"
 # A note longer than the pack's cap is cut at its end (``context.build_pack``),
 # which loses the last ask; a repair note is fitted to it first (DEC-248).
 REPAIR_NOTE_MAX_WORDS = context._NOTE_WORD_LIMIT
@@ -979,15 +983,16 @@ def _earlier_scene(ec, script, scene, kind, fix):
     return None
 
 
-def _fitted_note(items, limit=REPAIR_NOTE_MAX_WORDS) -> str:
-    """:data:`REPAIR_NOTE_HEAD` then each item ``(ask_before, fix,
+def _fitted_note(items, limit=REPAIR_NOTE_MAX_WORDS, head=REPAIR_NOTE_HEAD) -> str:
+    """*head* (:data:`REPAIR_NOTE_HEAD`, or :data:`CONSISTENCY_NOTE_HEAD` for
+    E4's issues, DEC-260) then each item ``(ask_before, fix,
     ask_after)`` joined with single spaces -- within *limit* words when it
-    can be: the fixes (J1's words) are shortened, never the asks (the
+    can be: the fixes (the judge's words) are shortened, never the asks (the
     app's), a short fix keeping all its words and the longer ones sharing
     what is left evenly, each cut one ending with "…". Pure."""
     fixes = [fix.split() for _before, fix, _after in items]
-    asks = len(REPAIR_NOTE_HEAD.split()) + sum(len(before.split()) + len(after.split())
-                                               for before, _fix, after in items)
+    asks = len(head.split()) + sum(len(before.split()) + len(after.split())
+                                   for before, _fix, after in items)
     room = limit - asks
     if sum(len(words) for words in fixes) > room >= len(fixes):
         caps, left, count = {}, room, len(fixes)
@@ -996,7 +1001,7 @@ def _fitted_note(items, limit=REPAIR_NOTE_MAX_WORDS) -> str:
             left, count = left - caps[index], count - 1
         fixes = [words if len(words) <= caps[i] else words[:caps[i] - 1] + [words[caps[i] - 1] + "…"]
                  for i, words in enumerate(fixes)]
-    return REPAIR_NOTE_HEAD + " ".join(" ".join(part for part in (before, " ".join(words), after) if part)
+    return head + " ".join(" ".join(part for part in (before, " ".join(words), after) if part)
                                        for (before, _fix, after), words in zip(items, fixes))
 
 
@@ -1019,15 +1024,17 @@ def repair_plan(ec, script, issues) -> list:
     Pure."""
     work = {}
 
-    def add(sid, kind, item):
+    def add(sid, kind, item, source=None):
         scene = scene_of(script, sid)
         part = scene["function"] if scene["function"] in FRAMING_FUNCTIONS else None
         if part is None and not can_speak(ec, scene):
             return None
-        entry = work.setdefault(sid, {"part": part, "kinds": [], "items": [], "add_props": []})
+        entry = work.setdefault(sid, {"part": part, "kinds": [], "items": [], "add_props": [], "sources": []})
         if kind not in entry["kinds"]:
             entry["kinds"].append(kind)
         entry["items"].append(item)
+        if source not in entry["sources"]:
+            entry["sources"].append(source)
         return entry
 
     for issue in issues:
@@ -1036,8 +1043,9 @@ def repair_plan(ec, script, issues) -> list:
         if scene is None:
             continue
         fix = _sentence(issue["fix"])
+        source = issue.get("source")
         entry = add(sid, kind, (f"{_kind_words(kind)}:", fix,
-                                _REPEATED_LINE_TAIL.strip() if kind == "repeated_line" else ""))
+                                _REPEATED_LINE_TAIL.strip() if kind == "repeated_line" else ""), source)
         if entry is not None and kind == "object_unseen":
             named = _named_entity(ec, scene, kind, issue["fix"])
             listed = scene["props"] + entry["add_props"]
@@ -1050,20 +1058,50 @@ def repair_plan(ec, script, issues) -> list:
                 add(before_sid, kind, (f"{_kind_words(kind)} in scene {sid}:", fix,
                                        f"{name} is in this scene, before {sid}: {_EARLIER_SCENE_ASKS[kind]}."))
     order = {scene["scene_id"]: index for index, scene in enumerate(script["scenes"])}
-    return [{"scene_id": sid, "part": entry["part"], "kinds": entry["kinds"], "note": _fitted_note(entry["items"]),
-             "add_props": entry["add_props"]}
+    return [{"scene_id": sid, "part": entry["part"], "kinds": entry["kinds"],
+             "note": _fitted_note(entry["items"], head=_note_head(entry["sources"])), "add_props": entry["add_props"]}
             for sid, entry in sorted(work.items(), key=lambda item: order[item[0]])]
+
+
+def _note_head(sources) -> str:
+    """The note's head for a scene's items: the first-watch check's, the
+    consistency check's (DEC-260), or both when both checks sent the scene."""
+    watch = any(source != CONSISTENCY_SOURCE for source in sources)  # a J1 issue carries no source
+    check = CONSISTENCY_SOURCE in sources
+    if check and not watch:
+        return CONSISTENCY_NOTE_HEAD
+    if check and watch:
+        return REPAIR_NOTE_HEAD.rstrip(" -") + " and consistency check -- "
+    return REPAIR_NOTE_HEAD
+
+
+def consistency_issues(script) -> list:
+    """The consistency report's issues when it has not passed (DEC-260), each
+    marked ``source: consistency`` for the repair's note; [] otherwise."""
+    report = script.get("consistency_report")
+    if not report or report.get("passed") or needs_check(script):
+        return []
+    return [dict(issue, source=CONSISTENCY_SOURCE) for issue in report.get("issues") or []]
+
+
+def repair_issues(script) -> list:
+    """What a repair pass works on (DEC-260): the first-watch report's
+    blocking issues, then the consistency check's issues."""
+    report = script.get(judge.FIRST_WATCH)
+    watch = [] if (report is None or judge.needs_first_watch(script)) else judge.blocking_issues(report)
+    return list(watch) + consistency_issues(script)
 
 
 def repairable(ec, script) -> list:
     """The scene ids a repair pass would write now: a fresh first-watch
     report that found blocking issues on an unapproved, complete script,
     else []."""
-    report = script.get(judge.FIRST_WATCH)
-    if (report is None or judge.needs_first_watch(script) or report["passed"] or script["approved_at"]
-            or not is_complete(script, ec.ep)):
+    if script["approved_at"] or not is_complete(script, ec.ep):
         return []
-    return [repair["scene_id"] for repair in repair_plan(ec, script, judge.blocking_issues(report))]
+    report = script.get(judge.FIRST_WATCH)
+    if report is None or judge.needs_first_watch(script):
+        return []
+    return [repair["scene_id"] for repair in repair_plan(ec, script, repair_issues(script))]
 
 
 def issues_line(script, issues) -> str:
@@ -1338,9 +1376,12 @@ class _Run(LineMeasurement):
             return
         for number in range(1, REPAIR_PASSES_MAX + 1):
             report = script.get(judge.FIRST_WATCH)
-            if report is None or judge.needs_first_watch(script) or report["passed"]:
+            if report is None or judge.needs_first_watch(script):
                 return
-            blocking = judge.blocking_issues(report)
+            # DEC-260: J1's blocking issues and E4's issues, repaired together.
+            blocking = repair_issues(script)
+            if not blocking:
+                return
             plan = repair_plan(ec, script, blocking)
             if not plan:
                 return
@@ -1349,7 +1390,9 @@ class _Run(LineMeasurement):
             record = {"pass": number, "scenes": [], "issues_before": len(blocking), "issues_after": None,
                       "failed": []}
             self.repairs.append(record)
-            found = f"{len(blocking)} blocking issue{'s' if len(blocking) != 1 else ''}"
+            watch_count = len(blocking) - sum(1 for issue in blocking if issue.get("source") == CONSISTENCY_SOURCE)
+            found = (f"{len(blocking)} blocking issue{'s' if len(blocking) != 1 else ''}" if watch_count == len(blocking)
+                     else f"{len(blocking)} issue{'s' if len(blocking) != 1 else ''}")
             todo = plan[:REPAIR_CALLS_MAX]
             self.ctx.on_log(f"🩹 Repair pass {number}: {found} ({issues_line(script, blocking)}); writing "
                             f"{_and(repair['scene_id'] for repair in todo)} again")
@@ -1395,18 +1438,23 @@ class _Run(LineMeasurement):
                 return
             self.fill()
             self.consistency()
-            self.first_watch(previous=blocking)
+            self.first_watch(previous=[issue for issue in blocking if issue.get("source") != CONSISTENCY_SOURCE])
             after = script.get(judge.FIRST_WATCH)
             if after is None or judge.needs_first_watch(script):
                 return  # J1 failed: the step ends failed naming it (first_watch)
-            left = len(judge.blocking_issues(after))
-            record["issues_after"] = left
+            left_watch = len(judge.blocking_issues(after))
+            left_check = len(consistency_issues(script))
+            record["issues_after"] = left_watch + left_check
             self.save()
             if after["passed"]:
                 self.ctx.on_log(judge.first_watch_line(after).replace("First watch:", "First watch after repair:"))
             else:
-                self.ctx.on_log(f"👀 First watch after repair: {left} blocking issue"
-                                f"{'s remain' if left != 1 else ' remains'}")
+                self.ctx.on_log(f"👀 First watch after repair: {left_watch} blocking issue"
+                                f"{'s remain' if left_watch != 1 else ' remains'}")
+            if left_check:
+                self.ctx.on_log(f"🔍 Consistency after repair: {left_check} issue{'s remain' if left_check != 1 else ' remains'}")
+            elif any(issue.get("source") == CONSISTENCY_SOURCE for issue in blocking):
+                self.ctx.on_log("🔍 Consistency after repair: passed")
 
     def _prop_name(self, pid) -> str:
         return (self.ec.entities["props"].get(pid) or {}).get("name") or pid

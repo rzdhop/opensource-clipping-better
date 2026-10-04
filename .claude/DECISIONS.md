@@ -5005,3 +5005,28 @@ repairing the hook deterministically (a hook line is the writer's, not a templat
 costs one informed retry instead of a whole chain. Follow-up: the refusal text is English in a French story's
 prompt, as the rest of the ask already is.
 
+## DEC-260 — The consistency check's issues are repaired by the script step, like the first-watch ones (after DEC-259)
+**Context.** The episode-2 one click (job 709f16ee07f3, 2026-10-04) wrote the framing this time, then stopped: "the
+consistency check found 6 issues" — five `character` notes ("Pamplemousse would not introduce herself by her title",
+"Rida would not say … too heroic") and one `continuity` ("Kevin presses two ghost keys, inconsistent with the
+biometric interface"). The repair pass (DEC-245/248) rewrote only J1's blocking issue (s08, twice, in vain) and
+never touched E4's: the fast track never approves over E4 issues, so the human's only way was to edit or approve
+anyway.
+**Decision.**
+- `script.repair_issues(script)` = J1's blocking issues + `consistency_issues(script)` (the report's issues while it
+  has not passed, each marked `source: consistency`); the repair pass plans, writes and re-checks them together
+  (`repair_plan` unchanged in shape; an E4 issue with no scene stays in the report). The note's head says which
+  check asks: "Consistency check -- ", or "First-watch check and consistency check -- " when both name the scene;
+  `judge.KIND_WORDS` gains the E4 kinds ("out of character", "continuity", "place", "series memory", "hook payoff",
+  "consistency"); the `repairs` record's `kinds` enum takes them; `repairable` counts them. The feed: "🩹 Repair
+  pass 1: N issues (…)" and "🔍 Consistency after repair: passed / N issues remain". The pass caps (2 passes × 8
+  calls), the budget and the approval rule are unchanged: an E4 issue still standing after the passes still stops
+  the fast track.
+- Tests: `test_story_first_watch_repair.py` — E4 issues repaired and re-checked (fail-first), both checks on one
+  scene share one note with both heads, the schema takes an E4 kind (re-pinned: "bogus" is the refused kind).
+**Rejected.** Approving over E4's `character` notes as minor (E4 has no severity; a continuity issue is real);
+a separate E4 repair loop (one pass, one budget, one record).
+**Consequence.** A script now self-repairs on both checks; the one click reaches the storyboard on an episode
+whose writers and judges disagree on voice. A pass may now rewrite more scenes (E4 names up to six), still within
+8 calls. Follow-up: E4 could grade severity like J1 version 2 (DEC-248) so taste notes never block.
+

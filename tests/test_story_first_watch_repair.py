@@ -149,6 +149,50 @@ def test_j1_issues_are_repaired_with_their_fixes_as_notes_and_checked_again(stor
     assert wf.approve_script(store, story_id, 1, now=NOW)["approved_anyway"] is None
 
 
+def test_consistency_issues_are_repaired_like_first_watch_ones_and_checked_again(store):
+    """DEC-260 (the episode-2 one click of 2026-10-04 stopped on six E4
+    issues the step never touched): the consistency check's issues are
+    repaired by the same pass -- the named scene written again with
+    "Consistency check -- <kind>: <fix>" as the note -- then E4 and J1 run
+    again; an issue with no scene stays in the report; the record names
+    the E4 kind and the schema takes it."""
+    wf = _wf()
+    story_id = eps._ready_story(store, v2=True)
+    llm = eps._script_llm(v2=True, E2=[LONG] * 9, E4=[eps.E4_ISSUES, eps.E4_PASSED], J1=[eps.J1_PASSED, eps.J1_PASSED])
+
+    summary, log = eps._run(eps._new().script, store, story_id, llm=llm)
+
+    assert llm.prompts() == BASE_PROMPTS + ["E2v2", "E4", "J1"]
+    assert _notes(llm, "E2v2", 8) == ["Consistency check -- Out of character: Broccolia parle trop gentiment ici."]
+    assert _written(llm, 8) == ["s03"]
+    script = eps._script(store, story_id)
+    assert script["consistency_report"]["passed"] is True and script["first_watch"]["passed"] is True
+    record = [{"pass": 1, "scenes": [{"scene_id": "s03", "kinds": ["character"], "part": None}],
+               "issues_before": 2, "issues_after": 0, "failed": []}]
+    assert script["repairs"] == record and summary["repairs"] == record
+    assert "🩹 Repair pass 1: 1 scene rewritten for 2 issues (s03 out of character, the episode continuity)" in log
+    assert "🔍 Consistency after repair: passed" in log
+    assert wf.approve_script(store, story_id, 1, now=NOW)["approved_anyway"] is None
+
+
+def test_first_watch_and_consistency_issues_on_one_scene_share_a_note_with_both_heads(store):
+    """A scene both checks name is written once, its note headed by both."""
+    story_id = eps._ready_story(store, v2=True)
+    first = _j1(_issue("s03", "unclear_goal", "Dire ce que veut Broccolia."))
+    llm = eps._script_llm(v2=True, E2=[LONG] * 9, E4=[eps.E4_ISSUES, eps.E4_PASSED], J1=[first, eps.J1_PASSED])
+
+    eps._run(eps._new().script, store, story_id, llm=llm)
+
+    assert _written(llm, 8) == ["s03"]
+    (note,) = _notes(llm, "E2v2", 8)
+    assert note.startswith("First-watch check and consistency check -- ")
+    assert "Unclear goal: Dire ce que veut Broccolia." in note
+    assert "Out of character: Broccolia parle trop gentiment ici." in note
+    script = eps._script(store, story_id)
+    assert script["repairs"][0]["scenes"] == [{"scene_id": "s03", "kinds": ["unclear_goal", "character"], "part": None}]
+    assert script["repairs"][0]["issues_before"] == 3 and script["repairs"][0]["issues_after"] == 0
+
+
 def test_an_object_unseen_rewrites_the_earlier_scene_that_lists_the_prop_or_the_named_scene_alone(store):
     """object_unseen on s09 (the phone: listed in s04 before it) rewrites s04
     and s09; unintroduced on s03 (Broccolia's first scene) and one whose fix
@@ -431,7 +475,9 @@ def test_the_repairs_record_validates_on_the_script_and_a_bad_kind_is_refused(st
                                                 {"scene_id": "s01", "kinds": ["no_hook_text"], "part": "hook"}],
                           "issues_before": 2, "issues_after": None, "failed": ["s03"]}]
     assert schemas.episode_script_errors(script) == []
-    script["repairs"][0]["scenes"][0]["kinds"] = ["character"]
+    script["repairs"][0]["scenes"][0]["kinds"] = ["character"]  # an E4 kind: repaired too since DEC-260
+    assert schemas.episode_script_errors(script) == []
+    script["repairs"][0]["scenes"][0]["kinds"] = ["bogus"]
     assert schemas.episode_script_errors(script)
 
 

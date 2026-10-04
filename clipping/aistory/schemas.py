@@ -2573,8 +2573,10 @@ _EPISODE_SCRIPT_FIRST_WATCH_SCHEMA = _document({
 # scenes whose call failed. Replaced by the next run that repairs.
 _EPISODE_SCRIPT_REPAIR_SCENE_SCHEMA = _document({
     "scene_id": {"type": "string", "pattern": SCENE_ID_PATTERN},
-    "kinds": {"type": "array", "items": {"type": "string", "enum": list(FIRST_WATCH_ISSUE_KINDS)}, "minItems": 1,
-              "maxItems": len(FIRST_WATCH_ISSUE_KINDS)},
+    # DEC-260: a repair is also written for the consistency check's (E4) issues.
+    "kinds": {"type": "array", "items": {"type": "string",
+                                         "enum": list(FIRST_WATCH_ISSUE_KINDS) + list(CONSISTENCY_ISSUE_KINDS)},
+              "minItems": 1, "maxItems": len(FIRST_WATCH_ISSUE_KINDS) + len(CONSISTENCY_ISSUE_KINDS)},
     "part": {"type": ["string", "null"], "enum": ["hook", "cliffhanger", "recap", None]},
 }, optional={
     # DEC-248: the story props an object_unseen repair listed on the scene
