@@ -11,10 +11,15 @@
   **bring-your-own-clips mode**: the app writes crafted prompts + image shots, the human generates on Google Flow and
   Higgsfield/Freepik and uploads, the app builds the rest. Answers: Veo 3.1 Fast default / standard per story, French
   with a probe, Gemini 3.8 Flash for the important calls, caps 10 / 20 / 60, the API links optional after the manual mode.
-- **Running now:** stage 1 (Sonnet, worktree `.claude/worktrees/plan22-s1`, branch `feat/plan22-premium-chain`) and
-  stage 4 (Opus, `.claude/worktrees/plan22-s4`, `feat/plan22-native-speech`), both off 3c10560. Next: on each report —
-  review, rebase, Tier-1 selection (DEC-234, both envs), ff-merge gated on the exit code, DEC entry, deploy at 0 running
-  jobs (6 paused jobs are not running); then stage 2 (after 1), stage 5 (after 4), stage 3 (after 2).
+- **Stage 1 MERGED** on main `12821d8` (pushed; DEC-273; reviewed: 5 findings, 2 fixed, 3 recorded). Not yet
+  deployed: the Settings card needs the image rebuild, batched with stage 4's. Caps set by the orchestrator on the
+  human's word: **2 / 4 / 10** (the human: 10/20/60 "too high"); `GEMINI_PAID_API_KEY` set by the human and verified
+  (A-145 confirmed); the STT key still missing.
+- **Running now:** stage 2 (Sonnet, `.claude/worktrees/plan22-s2`, `feat/plan22-concepts`, based on 700ef46 — must be
+  rebased onto main 12821d8 before its merge) and stage 4 (Opus, `.claude/worktrees/plan22-s4`,
+  `feat/plan22-native-speech`, 4 commits so far, final tests running). Next: on stage 4's report — review (code-review
+  skill), rebase, Tier-1 selection, ff-merge gated on the exit code, DEC-276, the image rebuild at 0 running jobs (6
+  paused jobs are not running); then stage 5 (the manual link) off main; stage 3 after stage 2.
 - **Before stage 4 is used live (the human said yes):** `GEMINI_PAID_API_KEY` and a Groq (or Mistral) STT key in
   Settings; caps 10 / 20 / 60. Neither key is set today — Veo has never run on this host.
 - **Open questions:** none blocking. Assumptions A-145…A-150.
@@ -992,6 +997,7 @@
 | RC-V2 | Image and TTS cache keys are unchanged | stage-2 pinned-hex guard |
 | RC-V3 | No paid clip or LLM call without `allow_paid` and the caps; one submit per clip; every billed call booked | stage 3/5/8 tests |
 | RC-V4 | The free Gemini chain never reads `GEMINI_PAID_API_KEY`; Veo never reads `GOOGLE_API_KEY` | stage 2 |
+| RC-W1 | `gemini-paid` reads only `GEMINI_PAID_API_KEY`; `gemini` never reads it (DEC-273) | `tests/test_provider_registry.py::test_gemini_paid_reads_only_the_paid_key` |
 | RC-V5 | No silent mixing of image or video links inside an episode | stage 6/8 |
 | RC-V6 | The estimate and the run agree on the shots and the dollars | stage 8 |
 | RC-V7 | A failed or stale clip never renders unless "fill" is ticked | stage 9 |

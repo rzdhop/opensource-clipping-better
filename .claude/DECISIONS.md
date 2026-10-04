@@ -5275,3 +5275,45 @@ runner's last line and "Continue the agent run"; rendered, a link to episode 1's
 `sub_step`/`error` from the workspace's 4-second job poll, not SSE.
 **Rejected.** An SSE feed in the card (the poll suffices; the feed keeps the lines).
 **Consequence.** Bundle 639.6 kB JS / 82.0 kB CSS. Commit 551cc66 (main).
+
+## DEC-273 — The premium writing chain: the calls that matter are written on the paid Gemini project first (plan 22 stage 1, after DEC-272)
+**Context.** The human (2026-10-04): the characters' lines are "not well written, not humanly understandable"; "use better
+models for specific subjects that are important like the script"; "check the prices before". Every story call ran on
+free links (DEC-224: nemotron-3, mistral-medium under `allow_paid`, free flash-lite). A paid Gemini text model could not
+run on the `gemini` provider: `free_tier=True` makes `is_free_link` true and RC-V4 keeps `GEMINI_PAID_API_KEY` away from
+the free chains. Prices read 2026-10-04 at ai.google.dev/gemini-api/docs/pricing: Gemini 3.8 Flash $0.75 / $3.75 per M
+until 2026-12-31 then $1.50 / $7.50; 3.1 Pro $2 / $12. The human chose 3.8 Flash ("Gemini's good models", cheaper).
+**Decision** (`8465472`, `700ef46`, `12821d8`).
+- A sibling LLM provider `gemini-paid` (same base URL and shape as `gemini`, `env_key GEMINI_PAID_API_KEY`,
+  `free_tier=False`, rpm 60 / tpm 1 M as a conservative paid-tier floor); `PROVIDER_KEYS["gemini-paid"]`. RC-V4 holds
+  literally; new **RC-W1**: `gemini-paid` reads only the paid key, `gemini` never reads it.
+- `registry.PREMIUM_STORY_LLM_CHAIN = "gemini-paid/gemini-3.8-flash," + DEFAULT_STORY_LLM_CHAIN`;
+  `gemini-paid/gemini-3.1-pro-preview` priced and parseable, never a default. Model ids confirmed live (A-145).
+- `prompts.PREMIUM_PROMPT_IDS`: the families C1, B1, E1, E2, E3, J1 (exact id or `v<n>` suffix), computed from
+  `MAX_TOKENS`' keys; E4, J2, T1 and the rest stay on the story chain. `llm_call.resolve_premium_chain`: Settings
+  `STORY_LLM_PREMIUM_CHAIN`, then env, then `STORY_LLM_CHAIN` / `LLM_CHAIN` (Settings then env), then the premium
+  default; `story_chain(…, premium=)`; `call_json` decides from the prompt id. `allow_paid` off skips the paid link as
+  today (DEC-115).
+- Thinking room: `registry.MODEL_OUTPUT_HEADROOM` (3.8 Flash 2048, 3.1 Pro 4096) added to the cap sent when the
+  resolved chain names such a link; `llm._extra_body` returns `{"reasoning_effort": "low"}` for `gemini-paid` — the
+  second recorded RC-S4 exception (DEC-224 took the first).
+- `pricing.LLM_PRICES` rows for both models and `LLM_PRICE_CHANGES` (3.8 Flash → $1.50 / $7.50 on 2027-01-01, read by
+  `llm_price_for(link, today)`); the meter notes `reasoning_tokens` on the row, never books them twice (they are inside
+  `completion_tokens`).
+- The fast track's estimate carries `text_usd` (an upper bound: every LLM call of the concepts, bible and episode
+  parts), folded into `est_usd` and the cap refusals ("est $x.xx incl. $y.yy writing"); a run over the caps is refused
+  before its first call.
+- Settings: `STORY_LLM_PREMIUM_CHAIN` persisted and validated; a "Story premium writing chain" card on the Settings
+  page; `.env.example` documents it.
+**Rejected.** Claude via OpenRouter (the human asked for Gemini; no Anthropic provider exists). Routing the paid model
+through the `gemini` provider (breaks RC-V4). A strict three-level resolve (Settings → env → default) for the premium
+chain: it would have ignored every configured `STORY_LLM_CHAIN` / `LLM_CHAIN`, including the test suite's.
+**Consequence.** On this host (no story chain configured, the paid key set, `allow_paid` on) the concept, bible,
+episode script and first-watch judge now run on Gemini 3.8 Flash: ≈ $0.22 an episode, ≈ $0.25 more per new story.
+Known and accepted, for a later stage: the headroom is chain-wide (a free fallback link receives cap + 2048 when the
+paid link fails at runtime); a host that sets `STORY_LLM_CHAIN` never reaches the premium writer unless it also sets
+`STORY_LLM_PREMIUM_CHAIN`, and nothing says so; the per-step `/estimate/{step}` route prices B1/E1… on the story chain
+(not premium-aware); `C1J` (stage 2) must be added to the premium families. Review findings of the stage: 5, 2 fixed
+in `12821d8`, 3 recorded here. Tests: new `tests/test_story_llm_premium_chain.py` (12), extended registry, pricing,
+booking, fast-track tests; the 92-file selection 3011 passed locally, 2461 / 550 skipped on the CI env; preflight
+unedited. A-145 confirmed. Deployed with the stage-4 rebuild (the Settings card is in the dashboard bundle).

@@ -562,10 +562,12 @@
 ## Confirmed
 - **A-145** — (plan 22, stage 1) The paid writer's model id on Gemini's OpenAI-compatible endpoint is `gemini-3.8-flash`
   (priced $0.75 / $3.75 per M until 2026-12-31, then $1.50 / $7.50, read 2026-10-04 at ai.google.dev/gemini-api/docs/pricing).
-  UNCONFIRMED until one free `GET /v1beta/models` with the paid key lists it.
-- **A-146** — (plan 22) The caps stay global Settings (the human sets 10 / 20 / 60); the premium (Veo standard) speech
-  rung (≈ $17 an episode) is refused by the per-episode cap with the number until the human raises it for a story.
-  UNCONFIRMED (the human chose 10 / 20 / 60; the refusal wording is the stage-4 agent's).
+  **Confirmed 2026-10-04:** a free `GET /v1beta/models` with the human's paid key lists `gemini-3.8-flash`,
+  `gemini-3.1-pro-preview`, `gemini-3.5-transcribe` and the three Veo 3.1 ids (standard, fast, lite).
+- **A-146** — (plan 22) The caps stay global Settings at **2 / 4 / 10** (the human, 2026-10-04: 10 / 20 / 60 was "too high";
+  the manual mode costs ≈ $0.9–1.3 an episode in cash); every API clip episode (Lite ≈ $3.4, Fast ≈ $5.4, standard
+  ≈ $17) is refused by the per-episode cap with the number until the human raises it for a story. UNCONFIRMED only in
+  the refusal wording (the stage-4 agent's); the numbers are the human's.
 - **A-147** — (plan 22) Veo 3.1 speaks French acceptably on Lite or Fast ("English fully supported, other languages have
   not been evaluated", ai.google.dev/gemini-api/docs/veo, 2026-10-04). UNCONFIRMED until the human's Flow clips or the
   stage-6 probe are heard.
