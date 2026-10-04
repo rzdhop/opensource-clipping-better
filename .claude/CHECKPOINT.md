@@ -18,18 +18,19 @@
   GPU now (Pinokio documented for the later GPU box); Anthropic provider Sonnet 5.5 default / Opus 5.5 by name / server-side
   fallbacks ON (booked at the served model); universes (all ten, audience notes), two-view sheets at 1080×1920, variants,
   action prompts; NO doctrine prompt; nano-banana-2-lite on sheets; chatterbox before Fish Audio.
-- **Merged on main (all pushed; CI = baseline), 11 stages:** A1 `99a0d62`, A2 `75c2dd9`, A3 `e598562`, A4 `c898a94`,
-  A5 `455eb57` (the structured daily-cap 409 + the full-cast gate), B1 `3c3e024`, B5 `9f5285b` (subtitle overrides),
-  B6 `a0b4f44` (render geometry; CI's x86_64 golden keys still to add from the annotation), C1 `19ce37d`, D1 `e5ce133`
-  (Anthropic provider; needs the image rebuild for `anthropic>=1.11.0`), D4 (two-view sheets + body rule). Nothing
-  restarted or rebuilt yet (0 running jobs). **One rebuild at 0 jobs after A6 lands** covers A3's router, D1's dependency,
-  B5/D4/A6's dashboard. Compile the tree with the image's Python 3.11 first (the a7ba8dc rule).
-- **Running now:** B3 (Sonnet, `feat/plan23-b3`, ElevenLabs), A6 (Sonnet, `feat/plan23-a6`, the budget UI), D2 (Sonnet,
-  `feat/plan23-d2`, universes). On each report: code-review skill, rebase, the Tier-1 selection in both envs, ff-merge with
-  the exit code checked, action-log line, push.
-- **Next action:** after A6 → deploy (rebuild at 0 jobs) → the human's Tier-2 walk of the cast refusal panel; A7 (Opus) → A8
-  → A9; C2 only on the human's go ($0.54); D6 (Sonnet) and D5 (Opus) after D4; B2 (Sonnet), B7 (Opus), B8 last; then D7
-  (the A/B) and the docs stage. Add CI's x86_64 golden keys when the annotation appears.
+- **Merged on main (all pushed; CI = baseline), 14 stages:** A1–A6 (the whole cap track but A7–A9), B1, B2, B3, B5, B6,
+  C1, D1, D4. **Deployed 23:37 UTC** (image from 658eb5f + the bind-mounted Python of efa271a): health 200, bundle
+  index-C7PPNeAD.js, anthropic 1.11.0 in the image, `GET /api/budget/today` live. **Tier 2 (a) done on the live app:** the cast
+  of e7412a3efcc6 now answers HTTP 409 `budget_daily_cap` with the three numbers and `needed_usd` 4.99; the phone walk of
+  the panel (Allow $4.99 more today → Create cast again) is the human's. Pending for the next rebuild: B2's compose mount
+  and Settings card, and whatever lands next. CI's x86_64 golden keys (B6) still to add from the annotation.
+- **Running now:** D2 (Sonnet, universes), D6 (Sonnet, action prompts), A7 (Opus, the local-midnight day — riskiest). On each
+  report: code-review skill, rebase, the Tier-1 selection in both envs, ff-merge with the exit code checked, action-log line,
+  push.
+- **Next action:** A8 (nano-banana-2-lite on sheets, data) → A9 (gemini-first); D5 (Opus, variants) after D2/D6; B7 (Opus,
+  aspect through generation) → B8 (stock cutaways); C2 only on the human's go ($0.54); then D7 (the A/B on the human's
+  go, ≈ $1.60) and the docs stage (docs/AI_STORY.md, DEC entries per stage, the Pinokio/GPU runbook); a second rebuild at 0
+  jobs when the dashboard stages land. Add CI's x86_64 golden keys when the annotation appears.
 - **Open questions:** none blocking. One reading to confirm with the human when they look: "No doctrine" was read as
   dropping only the doctrine prompt, keeping all ten universes (A-157).
 
