@@ -5480,3 +5480,63 @@ A-150's per-story opt-in for existing stories is the `writing` key through PATCH
 `tests/test_story_concepts_brief.py` (17), B1 gate tests in `test_story_steps.py`, 17 default-profile pins re-pinned
 across the suite for the stamp; the finisher's selection 1245 local / 1071 + 174 skipped; the fix re-run 324 /
 318 + 6 skipped.
+
+## DEC-275 — Writing v3: an episode has a spine, every spoken line is a complete sentence that advances, and the 50 s confrontation format (plan 22 stage 3, after DEC-274)
+**Context.** The human (2026-10-04): the characters' lines are "not well written, not humanly understandable
+enough"; the reference is a 52 s one-place confrontation whose every sentence adds a demand, a reason, an
+inference, a threat. `_E2_ASK_TEMPLATE` asked "1 to 4 short spoken lines … at most 22 words; reference lines run 3-8
+words", the narrated template "2 to 4 short lines … each a punch", E1's summaries 15 words with no cause, each E2 call
+saw one previous line, J1 could not flag a line that adds nothing.
+**Decision** (`16bd3f6` … `538af04`, 7 commits; reviewed: 4 findings, all recorded).
+- **The gate** `media_policy.writing_v3(story)` (`generation_profile.writing == "v3"`, DEC-274's stamp; the
+  concepts and bible steps now read it too) and `judge.writes_v3(story, script)`: a v2 story on v3 whose beat sheet
+  has a `spine` or is not written yet; an episode begun on E1v2 keeps the v2 prompts and J1v2. **RC-W3**: a story
+  without the stamp writes, judges and times byte-identically (the E goldens unedited).
+- **E1v3**: the spine first (`logline` one complete sentence ≤ 30 words: who wants what, what they do, where it
+  leaves them; `want`, `obstacle`, `stakes` ≤ 15; `turn` ≤ 20), then the scenes; each summary "one or two complete
+  sentences, at most 30 words, saying what happens and why — what it follows from, what is done, what it changes for
+  the next scene. Never a mood, a title or a list. Read in order, the summaries retell spine.logline." On a
+  `single_place` template: one continuous scene in one place, in real time, the antagonist driving with demands and
+  accusations each with its reason, the target answering little, ending right before the threatened act. The spine
+  is stored on the script (optional, RC-M3).
+- **E2v3**: the spine, every line of the episode so far (the last 220 words, the cut named), this scene's and the
+  next scene's summary (the outline and the "previous scene" block are gone); "Each text is one or two complete
+  sentences in {language}, {w_lo} to {w_hi} words, that this person would say aloud right now. Each line does one job
+  the story needs — a demand, an accusation, a fact the viewer did not know, a refusal, a threat or a reveal — and
+  moves the scene toward the next. Say the reason behind every demand or accusation in the line itself ('because…',
+  'since you…', 'the more you…, the more…'). No filler (no lone 'Quoi ?', 'Écoute', a name alone), no line that
+  restates an earlier one, no stage directions in the text." On a native-speech story: "Each line is spoken on
+  camera by its speaker in one shot of at most 8 seconds: at most 17 words." `validate_e2_v3`: a character line
+  within the format's `line_words` (17 on native speech, else 22; at least 3 words, or the template's floor), a
+  narrator line ≤ 22, no repeat of an earlier line (accents and case folded), the scene total within v2's band.
+  `timing.word_budget_v3` spreads the template's `episode_words` over the scenes by duration share (without it:
+  target × 2.4 × (1 − silent share)); `word_budget` is byte-identical.
+- **E3v3**: the spine and the lines so far; on the confrontation format the cliffhanger's one line is the
+  antagonist's last and states the act about to happen; the narrator only in the template's `narrator_slots`
+  (checked after the call, `narrator_errors`). The narrated lines on v3 say "complete lines", never "short … punch".
+- **J1v3** (version 3; the spine in the digest): new kinds `line_no_progress`, `incomplete_sentence`,
+  `logline_mismatch`; deterministic `line_issues` before every call: a line over the format's words → blocking
+  `line_too_long`, under a template's own floor → blocking `incomplete_sentence`, under 3 words elsewhere → minor;
+  repaired like every other kind (DEC-245/260).
+- **The format** `confrontation_50s_v2`: window 44–58 s, target 50, scenes 4–6, shots 9–16 of 2–8 s, hook 4–8 s,
+  2–3 body scenes of 10–16 s, cliffhanger 6–10 s, recap 3–4 s from episode 2; the new optional template keys
+  `single_place`, `scene_transition: cut` (every boundary a cut, `timing.cuts_between_scenes`), `narrator_slots:
+  [recap]` (amends DEC-231 for this format), `line_words [5, 17]`, `episode_words [95, 125]`, `reaction_shots
+  [0, 1]`, `shots_per_scene [1, 2]`; `EPISODE_TEMPLATE_IDS` has six entries. **The default format of a new story on
+  a native-speech profile** (`defaults.episode_template_for`, DEC-268's suggestion: preselected in the wizard,
+  "Suggested for native speech: one shot per line", still a choice) — this makes DEC-277's default profile usable.
+- **Budgets** (measured, French worst case + 15 %): E1v3 3230 in / 2570 out (payoff 3190), E2v3 3030 / 700, E3v3
+  4000 / 720, J1v3 4700 / 990 — in a separate `WRITING_V3_INPUT_BUDGET` registry read through `prompts.input_budget`
+  (the RC-M1 file pins `list(INPUT_BUDGET)`).
+- **Dashboard**: "What happens" (the spine's logline, want, stakes, turn) above the scenes; the format listed.
+**Rejected.** Editing the v2 prompts in place (RC-M1). One E2 call for the whole episode (breaks per-scene repair).
+Keeping the outline in E2v3/E3v3 (E3v3's worst case ran over 4000 tokens; the spine replaces it).
+**Consequence.** New stories (manual native-speech by default, DEC-277) write on v3 and land on the confrontation
+format. Unverified until the walk: whether Gemini 3.8 Flash honours the 5–17-word complete-sentence rule (a writer
+that keeps producing fragments is refused by `validate_e2_v3`'s floor). Recorded for later: the style's
+`hook_style` (Fruit Drama `insert_prop`) still shapes the confrontation's hook — a template-level override is the
+fix; `narrator_errors` reads `narrator_slots` without a fallback; `defaults.speaks_natively` duplicates
+`media_policy.native_speech`. Tests: `tests/test_story_prompts_v3.py` (24), `test_story_confrontation_template.py`,
+3 judge tests; re-pins on purpose (the template count, the registry rows, the default format for a keyed story, the
+v2 fixtures' `writing` pin); the agent's 133-file selection 5207 local / 4681 + 529 skipped; the merge selection (28
+files) 1049 local, 874 / 175 skipped on the CI env.

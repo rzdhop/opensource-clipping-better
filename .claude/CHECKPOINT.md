@@ -22,9 +22,9 @@
 - **Stage 2 MERGED** on main `ef59c2d` (pushed; DEC-274; the stalled agent's work finished by a fresh Sonnet agent:
   rebase, 17 default-profile re-pins for the `writing: v3` stamp; reviewed: 5 findings, 3 fixed, 2 recorded). NOT
   deployed yet (deploys with 3 + 5).
-- **Running now:** stage 3 (Opus, `.claude/worktrees/plan22-s3`, `feat/plan22-writing-v3`, off 9d48494 — must rebase
-  onto main ef59c2d before its merge). **Next:** stage 3's report → review, rebase, selection, ff-merge, DEC-275;
-  deploy 2 + 3 + 5 at 0 running jobs; stage 7 docs (docs/AI_STORY.md, the gate consolidation); stage 8 the walk.
+- **Stage 3 MERGED** on main `538af04` (pushed; DEC-275; reviewed: 4 findings recorded). **Deploy of stages 2 + 3 + 5
+  running** (the image rebuilt at 0 running jobs). After it: the full local suite on main as the close-out baseline;
+  the docs placeholder filled; stage 8 = the human's walk in manual mode (needs the STT key).
 - **Before stage 4 is used live (the human said yes):** `GEMINI_PAID_API_KEY` and a Groq (or Mistral) STT key in
   Settings; caps 10 / 20 / 60. Neither key is set today — Veo has never run on this host.
 - **Open questions:** none blocking. Assumptions A-145…A-150.
@@ -1003,6 +1003,7 @@
 | RC-V3 | No paid clip or LLM call without `allow_paid` and the caps; one submit per clip; every billed call booked | stage 3/5/8 tests |
 | RC-V4 | The free Gemini chain never reads `GEMINI_PAID_API_KEY`; Veo never reads `GOOGLE_API_KEY` | stage 2 |
 | RC-W1 | `gemini-paid` reads only `GEMINI_PAID_API_KEY`; `gemini` never reads it (DEC-273) | `tests/test_provider_registry.py::test_gemini_paid_reads_only_the_paid_key` |
+| RC-W3 | A story without `writing: v3` writes, judges and times its episodes byte-identically (DEC-275) | `tests/test_story_prompts_episode.py` unedited; `tests/test_story_prompts_v3.py::…byte_identical` |
 | RC-W2 | A story without `writing: v3` (or without a seed) sends C1 and B1 prompts byte-identical to before (DEC-274) | `tests/test_story_concepts_brief.py::test_no_seed_or_no_stamp_keeps_c1_byte_identical`, `tests/test_story_steps.py::test_no_seed_or_no_stamp_keeps_b1_byte_identical` |
 | RC-N1 | Veo Lite's request body is byte-identical (DEC-276) | `tests/test_video_adapters.py::test_veo_lite_body_unchanged` |
 | RC-N2 | A non-speech story's storyboard, clips, estimate and render are byte-identical (DEC-276) | the goldens + `test_story_ambience.py`, `test_story_lipsync.py` unedited |

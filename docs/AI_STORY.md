@@ -563,15 +563,27 @@ the story's narrator on, the beat sheet and each body scene's dialogue are
 asked for exactly that. A style only suggests a format; the story keeps its
 own, and an episode keeps the one it was written against.
 
-**Writing v3 and the confrontation format (coming).** A sixth template,
-`confrontation_50s_v2`, is on its way: a continuous, one-place, real-time
-confrontation of about 50 seconds, close to the reference performance this
-round of changes was built against. It ships together with "writing v3" — a
-rewrite of the episode script's prompts around a dramatic spine (who wants
-what, who stands in the way, what is at stake) and a hard rule that every
-line is a complete, speakable sentence, so a format built for native speech
-never runs into the 17-word line cap by surprise. Neither is merged yet;
-this section will describe the format and the spine once they land.
+**Writing v3 and the confrontation format.** Every story created since
+plan 22 writes on "writing v3": the beat sheet opens with the episode's
+**spine** — a one-sentence logline (who wants what, what they do, where it
+leaves them), the want, the obstacle, the stakes and the turn — and each
+scene's summary is one or two complete sentences saying what happens and
+why. Each body scene's dialogue is written with the whole episode's lines so
+far in view, and every spoken line is one or two complete sentences that do
+one job (a demand, an accusation, a fact, a refusal, a threat, a reveal),
+with the reason inside the line; a fragment, a lone name or a repeat is
+refused and rewritten. The first-watch judge checks the same things (a line
+that adds nothing, an incomplete sentence, scenes that do not tell the
+logline), and the script pane shows the spine as "What happens" above the
+scenes. The sixth template, `confrontation_50s_v2`, is a continuous,
+one-place, real-time confrontation of about 50 seconds (4–6 scenes, 9–16
+shots of 2–8 s, 95–125 spoken words, lines of 5–17 words, every boundary a
+cut, the narrator only in a later episode's recap, the cliffhanger's last
+line stating the act about to happen). It is the format a new story on a
+native-speech profile starts on — preselected in the wizard, still a choice
+— because one shot per line only fits a script written for it. A story
+whose episodes began on the older prompts keeps them; an older story opts
+in through its generation profile's `writing: v3`.
 
 **Create story** opens the story page, a vertical stepper: New story (done),
 Concepts, Bible, Style. Each step unlocks once the one before it is
