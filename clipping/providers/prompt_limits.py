@@ -91,6 +91,12 @@ TABLE = {
     "gemini/veo-3.1-lite": Limit(
         max_tokens=1024, source="Google's Veo documentation: prompts of up to 1024 tokens (counted here at ~4 "
                                 "characters each)", verified=True),
+    "gemini/veo-3.1-fast": Limit(
+        max_tokens=1024, source="Google's Veo 3.1 documentation: prompts of up to 1024 tokens (counted here at ~4 "
+                                "characters each)", verified=True),
+    "gemini/veo-3.1": Limit(
+        max_tokens=1024, source="Google's Veo 3.1 documentation: prompts of up to 1024 tokens (counted here at ~4 "
+                                "characters each)", verified=True),
     # ---------------------------------------------------------------- images
     "cloudflare/flux-1-schnell": Limit(
         2048, source="Workers AI's model schema for @cf/black-forest-labs/flux-1-schnell: prompt maxLength 2048",

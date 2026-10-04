@@ -129,3 +129,17 @@ def test_gemini_paid_rows_are_priced():
     pro = llm_price_for(registry.parse_spec("gemini-paid/gemini-3.1-pro-preview", providers=None))
     assert (flash.input_usd_per_m, flash.output_usd_per_m) == (0.75, 3.75)
     assert (pro.input_usd_per_m, pro.output_usd_per_m) == (2.00, 12.00)
+
+
+def test_the_veo_speaking_links_are_priced_per_second_at_each_size():
+    """Plan 22 (read 2026-10-04 at ai.google.dev/gemini-api/docs/pricing):
+    Veo 3.1 Fast $0.10 a second at 720p and $0.12 at 1080p, Veo 3.1 $0.40 at
+    both, and lite's 1080p row ($0.08) beside its 720p one ($0.05)."""
+    rows = {("gemini/veo-3.1-fast", None): 0.10, ("gemini/veo-3.1-fast", "1080p"): 0.12,
+            ("gemini/veo-3.1", None): 0.40, ("gemini/veo-3.1", "1080p"): 0.40,
+            ("gemini/veo-3.1-lite", None): 0.05, ("gemini/veo-3.1-lite", "1080p"): 0.08}
+    for (spec, resolution), usd in rows.items():
+        price = price_for(link(spec), resolution)
+        assert (price.unit, price.usd) == ("second", usd), (spec, resolution)
+    assert estimate(link("gemini/veo-3.1-fast"), 6).est_usd == 0.6
+    assert estimate(link("gemini/veo-3.1"), 8, resolution="1080p").est_usd == 3.2

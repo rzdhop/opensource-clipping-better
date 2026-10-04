@@ -54,6 +54,11 @@ CLIP_LENGTHS: dict[str, tuple[int, ...]] = {
     "fal/ltx-2.3-fast": (6, 8, 10),
     "fal/kling-2.5-turbo-std": (5, 10),  # A-102
     "gemini/veo-3.1-lite": (4, 6, 8),  # A-103
+    # Plan 22 (the native-speech links, reachable by name from a budget
+    # profile's ``speech_links``; never in the default chain): 4, 6 or 8 s,
+    # 8 s forced at 1080p (ai.google.dev, read 2026-10-04).
+    "gemini/veo-3.1-fast": (4, 6, 8),
+    "gemini/veo-3.1": (4, 6, 8),
 }
 
 # Links kept parseable (an existing .env) and priced, but never sent: no silent swap.
@@ -67,13 +72,24 @@ AUDIO = {
     "fal/ltx-2.3-fast": "optional",
     "fal/kling-2.5-turbo-std": "never",
     "gemini/veo-3.1-lite": "always",
+    "gemini/veo-3.1-fast": "always",
+    "gemini/veo-3.1": "always",
 }
 # Only seedance takes a seed; kling and LTX have no field, Veo is "not deterministic".
 SEED_HONOURED = frozenset({"fal/seedance-1-pro-fast"})
 
 FAL_VIDEO_POLL_BUDGET_SECONDS = 600.0
 
-GEMINI_VIDEO_MODELS = {"veo-3.1-lite": "veo-3.1-lite-generate-preview"}
+GEMINI_VIDEO_MODELS = {"veo-3.1-lite": "veo-3.1-lite-generate-preview",
+                       "veo-3.1-fast": "veo-3.1-fast-generate-preview",
+                       "veo-3.1": "veo-3.1-generate-preview"}
+# The speaking links (plan 22): their body says the size the request asks, an
+# adult-only person policy and what must never be drawn or burned in. Veo 3.1
+# lite keeps the body it always sent, byte for byte (RC-N1: stored clips' keys).
+VEO_SPEECH_MODELS = frozenset({"veo-3.1-fast", "veo-3.1"})
+VEO_RESOLUTIONS = ("720p", "1080p")
+VEO_PERSON_GENERATION = "allow_adult"
+VEO_NEGATIVE_PROMPT = "subtitles, captions, on-screen text, watermark"
 GEMINI_API_HOST = "generativelanguage.googleapis.com"
 VEO_POLL_INTERVAL_SECONDS = 10.0
 VEO_POLL_BUDGET_SECONDS = 600.0
@@ -235,12 +251,27 @@ class GeminiVeoAdapter:
         # Not probed: the real request is the probe, and it costs money.
         return True, "key set; not probed (a request is the probe)"
 
-    def _body(self, request, seconds) -> dict:
+    def _body(self, request, seconds, link=None) -> dict:
         mime, data = read_b64(request.references[0])
+        if link is not None and link.model in VEO_SPEECH_MODELS:
+            return self._speech_body(link, request, seconds, mime, data)
         # No negativePrompt (undocumented for 3.1 lite, A-103) and no seed (not deterministic).
         return {
             "instances": [{"prompt": request.prompt, "image": veo_image(mime, data)}],
             "parameters": {"aspectRatio": "9:16", "resolution": "720p", "durationSeconds": VEO_DURATION_TYPE(seconds)},
+        }
+
+    def _speech_body(self, link, request, seconds, mime, data) -> dict:
+        """A speaking link's body (plan 22): the size the request asks
+        (``extra["resolution"]``, else 720p), adults only, and the negative
+        prompt that keeps captions and watermarks out of the clip."""
+        resolution = _resolution(request) or "720p"
+        if resolution not in VEO_RESOLUTIONS:
+            raise ValueError(f"{describe(link)}: clips of {' or '.join(VEO_RESOLUTIONS)}, not {resolution!r}")
+        return {
+            "instances": [{"prompt": request.prompt, "image": veo_image(mime, data)}],
+            "parameters": {"aspectRatio": "9:16", "resolution": resolution, "durationSeconds": VEO_DURATION_TYPE(seconds),
+                           "personGeneration": VEO_PERSON_GENERATION, "negativePrompt": VEO_NEGATIVE_PROMPT},
         }
 
     def generate(self, link, request, *, credentials, on_log, transport=None,
@@ -249,7 +280,7 @@ class GeminiVeoAdapter:
         transport = transport or urllib_transport
         model = GEMINI_VIDEO_MODELS[link.model]
         headers = {"x-goog-api-key": credentials["GEMINI_PAID_API_KEY"]}
-        body = self._body(request, seconds)
+        body = self._body(request, seconds, link)
         # Billed from here on, whatever happens next.
         answer = request_json(transport, "POST", f"{images.GEMINI_BASE}/models/{model}:predictLongRunning",
                               headers=headers, json_body=body, timeout=DEFAULT_TIMEOUT)

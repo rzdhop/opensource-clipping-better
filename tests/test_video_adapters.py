@@ -326,3 +326,66 @@ def test_guard_an_image_request_still_polls_for_300_seconds(tmp_path):
                             sleep_fn=clock.sleep, time_fn=clock.time)
     assert len(transport.calls) == 1 + 150  # one submit, then a poll every 2 s for 300 s
     assert images.FAL.poll_budget_seconds == 300.0 and video.FAL_VIDEO.poll_budget_seconds == 600.0
+
+
+# ------------------------------------------------- plan 22: the speaking links
+
+# sha256 of the Lite body's canonical JSON, computed with the parent commit's
+# GeminiVeoAdapter._body (74cfbcd) on this file's keyframe and prompt: stored
+# clips' keys depend on it never moving (RC-N1).
+LITE_BODY_SHA = "acf87404a1a44278607585101b97a1262cc86ad594eb83f010f9cfc7ba08a521"
+
+
+def _body_sha(body):
+    import hashlib
+    import json
+
+    return hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
+
+
+def test_veo_lite_body_unchanged(keyframe):
+    """RC-N1: Veo 3.1 lite's body is byte for byte the one it always sent --
+    720p, no person policy, no negative prompt -- whatever the request asks."""
+    for request in (clip(keyframe, duration_s=4), clip(keyframe, duration_s=4, extra={"name": "shot_01",
+                                                                                        "resolution": "1080p"})):
+        body = video.VEO._body(request, 4, link("gemini/veo-3.1-lite"))
+        assert _body_sha(body) == LITE_BODY_SHA
+        assert body == video.VEO._body(request, 4)
+
+
+@pytest.mark.parametrize("spec,model", [("gemini/veo-3.1-fast", "veo-3.1-fast-generate-preview"),
+                                        ("gemini/veo-3.1", "veo-3.1-generate-preview")])
+def test_veo_fast_body_says_the_size_adults_only_and_no_captions(keyframe, spec, model):
+    """The speaking links post to their own model with the request's size
+    (720p unless it asks 1080p), ``personGeneration: allow_adult`` and the
+    negative prompt that keeps subtitles and watermarks out."""
+    transport = FakeTransport([(200, {"name": f"models/{model}/operations/op-1"}),
+                               (200, {"name": f"models/{model}/operations/op-1", "done": True,
+                                      "response": {"generateVideoResponse": {"generatedSamples": [
+                                          {"video": {"uri": VEO_URI}}]}}}), (200, MP4)])
+    video.VEO.generate(link(spec), clip(keyframe, duration_s=6), credentials=ENV, on_log=lambda *a: None,
+                       transport=transport, sleep_fn=lambda s: None)
+    assert transport.urls()[0] == ("POST", f"{GEMINI}/models/{model}:predictLongRunning")
+    body = transport.json(0)
+    assert body["parameters"] == {"aspectRatio": "9:16", "resolution": "720p", "durationSeconds": video.VEO_DURATION_TYPE(6),
+                                  "personGeneration": "allow_adult",
+                                  "negativePrompt": "subtitles, captions, on-screen text, watermark"}
+    big = video.VEO._body(clip(keyframe, duration_s=8, extra={"name": "shot_01", "resolution": "1080p"}), 8, link(spec))
+    assert big["parameters"]["resolution"] == "1080p"
+
+
+def test_veo_fast_body_refuses_a_size_veo_does_not_sell(keyframe):
+    with pytest.raises(ValueError, match="720p or 1080p"):
+        video.VEO._body(clip(keyframe, duration_s=4, extra={"name": "shot_01", "resolution": "4k"}), 4,
+                        link("gemini/veo-3.1-fast"))
+
+
+def test_the_speaking_links_are_paid_on_the_paid_key_alone_and_sold_at_4_6_8_seconds():
+    from clipping.providers import generation
+
+    for spec in ("gemini/veo-3.1-fast", "gemini/veo-3.1"):
+        assert video.CLIP_LENGTHS[spec] == (4, 6, 8) and video.AUDIO[spec] == "always"
+        assert generation.is_paid(link(spec))
+        assert generation.env_keys_for(link(spec)) == ("GEMINI_PAID_API_KEY",)
+    # reachable by name only: never in the default chain
+    assert "veo-3.1-fast" not in DEFAULT_CHAINS["video"]

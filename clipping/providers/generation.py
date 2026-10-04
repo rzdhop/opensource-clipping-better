@@ -197,6 +197,8 @@ PAID_LINKS = frozenset({
     "gemini/nano-banana-2-lite",
     "gemini/nano-banana-2",
     "gemini/veo-3.1-lite",
+    "gemini/veo-3.1-fast",
+    "gemini/veo-3.1",
     "gemini/flash",
 })
 
@@ -261,6 +263,8 @@ def is_paid(link) -> bool:
 # moved to the paid key in AI Story phase 7, DEC-222, amending DEC-205).
 LINK_ENV_KEYS = {
     "gemini/veo-3.1-lite": ("GEMINI_PAID_API_KEY",),
+    "gemini/veo-3.1-fast": ("GEMINI_PAID_API_KEY",),
+    "gemini/veo-3.1": ("GEMINI_PAID_API_KEY",),
     "gemini/nano-banana-2": ("GEMINI_PAID_API_KEY",),
     "gemini/nano-banana-2-lite": ("GEMINI_PAID_API_KEY",),
 }
