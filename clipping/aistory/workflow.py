@@ -5899,6 +5899,62 @@ def _agent_llm_row(name, calls, *, llm_refusal, message="", exact=True) -> dict:
                       refusal=llm_refusal if calls else None, message=message)
 
 
+# Plan 22 stage 1 (DEC-273): which parts of the agent run's own rows write
+# at least one premium prompt (prompts.PREMIUM_PROMPT_IDS) -- the concept
+# (C1), the bible (B1, among B1/B2/B3) and episode 1's script (E1/E2/E3/J1,
+# among episode 1's own llm_calls total, which also counts E4 and T1).
+_PREMIUM_TEXT_PARTS = ("concepts", "bible", "episode")
+
+
+def _premium_text_estimate(pending_rows, env) -> dict:
+    """``{"usd", "calls", "message"}``: the extra cost of writing on
+    ``STORY_LLM_PREMIUM_CHAIN`` rather than the free chain, for
+    :func:`story_fast_track_estimate`'s summary line.
+
+    *calls* counts every ``llm_calls`` unit of the concept, bible and
+    episode-1 rows still pending -- an upper bound, not a per-prompt count:
+    those rows do not say which of their calls are the premium ids (C1; B1;
+    E1, E2, E3, J1) versus their free-tier neighbours (B2, B3; E4, T1), so
+    every call of the three parts is counted. 0 once none of them is still
+    pending. ``usd`` is 0 and ``message`` says why a call would still happen
+    but cannot be priced (no keyed paid link in the premium chain, or
+    ``allow_paid`` off) -- the same reasons :func:`llm_call.call_json` would
+    skip the link for, read ahead of time rather than guessed."""
+    calls = sum((row.get("units") or {}).get("llm_calls", 0)
+                for row in pending_rows if row.get("part") in _PREMIUM_TEXT_PARTS)
+    if not calls:
+        return {"usd": 0.0, "calls": 0, "message": ""}
+
+    chain = llm_call.resolve_premium_chain(env)
+    keys = llm_call.resolve_keys(env)
+    link = next((candidate for candidate in chain
+                 if keys.get(candidate.provider) and not llm_call.is_free_link(candidate)), None)
+    if link is None:
+        paid = next((candidate for candidate in chain if not llm_call.is_free_link(candidate)), None)
+        reason = (f"no key for {registry.PROVIDERS[paid.provider].env_key}" if paid is not None
+                  else "the premium chain has no paid link")
+        return {"usd": 0.0, "calls": calls, "message": f"No premium writing: {reason}."}
+    if not gating.budget_of(gating.merged_env(env)).allow_paid:
+        return {"usd": 0.0, "calls": calls, "message": "No premium writing: allow_paid is off."}
+
+    from clipping.providers import pricing
+
+    from .steps import llm_spend
+
+    try:
+        price = pricing.llm_price_for(link)
+        per_call = llm_spend.worst_call_usd(link)
+    except pricing.PriceUnknown as exc:
+        return {"usd": 0.0, "calls": calls, "message": f"No premium writing: {exc}"}
+    headroom = registry.MODEL_OUTPUT_HEADROOM.get((link.provider, link.model), 0)
+    if headroom:
+        per_call = llm_spend.ledger_usd(per_call + headroom * price.output_usd_per_m / 1_000_000)
+    usd = llm_spend.ledger_usd(per_call * calls)
+    return {"usd": usd, "calls": calls,
+            "message": f"+ ${usd:.2f} writing ({calls} premium call{'' if calls == 1 else 's'} on "
+                       f"{registry.describe(link)})."}
+
+
 def story_fast_track_estimate(stories, story, *, env, readiness=None, probe_local=False) -> dict:
     """What the agent run would do and spend now, calling nothing (``GET
     /estimate/story-fast-track``; the run asks it before its first part)::
@@ -5909,6 +5965,7 @@ def story_fast_track_estimate(stories, story, *, env, readiness=None, probe_loca
          "llm_calls", "est_usd", "exact", "paid": [part labels], "caps", "caps_line",
          "budget": {"seconds", "minutes", "ceiling_seconds", "basis"},
          "episode": <fast_track.estimate of episode 1> | None,
+         "text_usd": {"usd", "calls", "message"},
          "ready", "stops_at": {"part", "number", "reason"} | None, "message"}
 
     One row per part (``story_fast_track.PARTS``), each **kept** when its
@@ -5931,7 +5988,11 @@ def story_fast_track_estimate(stories, story, *, env, readiness=None, probe_loca
 
     Images are priced as the route's estimates price them (the image chain
     on the story's route, the editor for the sheets); LLM calls at $0 as
-    every LLM estimate counts them (free links first, DEC-115). ``est_usd``
+    every LLM estimate counts them (free links first, DEC-115). ``text_usd``
+    (plan 22 stage 1) is the separate, informational cost of writing the
+    concept, bible and episode-1 script on ``STORY_LLM_PREMIUM_CHAIN``
+    instead -- not folded into ``est_usd`` or the cap check below yet
+    (:func:`_premium_text_estimate`). ``est_usd``
     is the parts' sum; ``paid`` names the parts with a paid price. Not
     ``ready`` -- ``stops_at`` the first part that cannot run, with its
     reason: the key gate (*readiness*, the caller's DEC-073 rule; none by
@@ -6143,6 +6204,12 @@ def story_fast_track_estimate(stories, story, *, env, readiness=None, probe_loca
                         f"fast track's own budget for episode {agent_step.EPISODE}, never more than "
                         f"{agent_step.STORY_BUDGET_CEILING_SECONDS // 3600} h")}
     llm_calls = sum(row["units"]["llm_calls"] for row in pending)
+    # Plan 22 stage 1: the premium chain's own extra cost, informational only
+    # -- not folded into `total`/`sum_refusal`'s cap check (a future stage
+    # wires that up once the native-speech profile's own estimate work
+    # lands); the pending LLM calls above still price at $0, as they always
+    # have (DEC-115: free links first).
+    text_usd = _premium_text_estimate(pending, env)
 
     if stops_at is not None:
         message = stops_at["reason"]
@@ -6155,9 +6222,11 @@ def story_fast_track_estimate(stories, story, *, env, readiness=None, probe_loca
         message = (f"{len(pending)} part{'' if len(pending) == 1 else 's'} to do ({labels}): "
                    f"{llm_calls} LLM calls on the free links first ($0 here), est {upto}${total:.2f} -- {money}; "
                    f"about {budget['minutes']:g} min. {caps_line}").strip()
+        if text_usd["calls"]:
+            message = f"{message} {text_usd['message']}"
     return {
         "step": AGENT_STEP, "mode": defaults.MODE_AGENT, "ep": agent_step.EPISODE, "parts": rows,
         "llm_calls": llm_calls, "est_usd": total, "exact": exact, "paid": [row["label"] for row in paid_rows],
-        "caps": caps, "caps_line": caps_line, "budget": budget, "episode": ft,
+        "caps": caps, "caps_line": caps_line, "budget": budget, "episode": ft, "text_usd": text_usd,
         "ready": stops_at is None, "stops_at": stops_at, "message": message,
     }

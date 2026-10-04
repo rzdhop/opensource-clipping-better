@@ -384,6 +384,9 @@ class SettingsRequest(BaseModel):
     # validated as a chain (registry.parse_chain) before it is stored. No
     # dashboard field reads or writes this yet (stage 7).
     story_llm_chain: Optional[str] = None
+    # The premium writing chain (plan 22 stage 1, DEC-273): same validation
+    # and clearing rule as story_llm_chain above.
+    story_llm_premium_chain: Optional[str] = None
     # Defaults
     default_clips: Optional[int] = None
     default_ratio: Optional[AspectRatio] = None
@@ -435,6 +438,10 @@ class SettingsResponse(BaseModel):
     # Settings page needs its value to prefill. "" means AI Story falls
     # through to LLM_CHAIN, then to DEFAULT_STORY_LLM_CHAIN (resolve_chain).
     story_llm_chain: str = ""
+    # Echoed back like story_llm_chain above: "" means a premium prompt
+    # falls through to STORY_LLM_CHAIN, then LLM_CHAIN, then
+    # registry.PREMIUM_STORY_LLM_CHAIN (resolve_premium_chain).
+    story_llm_premium_chain: str = ""
     allow_slow_chain: bool = False
     # Budget (AI Story): five-place defaults, clipping/providers/budget.py
     allow_paid: bool = False

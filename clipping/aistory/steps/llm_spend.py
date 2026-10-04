@@ -121,6 +121,29 @@ def _amount(value):
     return value if math.isfinite(value) and value >= 0 else None
 
 
+def _reasoning_tokens(usage):
+    """``usage.completion_tokens_details.reasoning_tokens``, or None (plan 22
+    stage 1: the premium chain's reasoning model, ``gemini-paid``).
+
+    Read of the OpenAI-compatible shape every link here answers with (the
+    module docstring): OpenAI's own docs for ``completion_tokens_details.
+    reasoning_tokens`` say plainly that "these tokens are counted as output
+    tokens and are included in the completion_tokens total" -- a breakdown
+    of ``completion_tokens``, not an amount on top of it. Gemini's
+    OpenAI-compatible endpoint answers the same shape (the same
+    ``usage.completion_tokens``/``total_tokens`` fields :func:`book_reply`
+    already reads), so this project reads it the same way: the figure is
+    recorded on the ledger row for its own transparency, never added a
+    second time to ``qty`` or to the cost -- ``completion_tokens`` already
+    counted it once, at the output price, before this function is ever
+    called.
+    """
+    details = getattr(usage, "completion_tokens_details", None)
+    if details is None:
+        return None
+    return _count(getattr(details, "reasoning_tokens", None))
+
+
 class _Proxy:
     """*real* with some attributes replaced; every other one is *real*'s."""
 
@@ -227,7 +250,13 @@ class Meter:
 
     def book_reply(self, link, response, estimate_usd) -> None:
         """Book the reply a paid request returned: the provider's own cost,
-        else its usage at the table's price, else the estimate with a note."""
+        else its usage at the table's price, else the estimate with a note.
+
+        A reasoning reply's ``completion_tokens_details.reasoning_tokens``
+        (:func:`_reasoning_tokens`) is noted on the row for transparency,
+        never added to ``qty`` or to the cost: it is already inside
+        ``completion_tokens``, which prices it once, at the output rate,
+        below."""
         usage = getattr(response, "usage", None)
         tokens_in = _count(getattr(usage, "prompt_tokens", None))
         tokens_out = _count(getattr(usage, "completion_tokens", None))
@@ -235,11 +264,13 @@ class Meter:
         if total is None and tokens_in is not None and tokens_out is not None:
             total = tokens_in + tokens_out
         qty = total if total is not None else self.tokens_in + self.cap
+        reasoning = _reasoning_tokens(usage)
+        note = f"{reasoning} of the output tokens were reasoning (already inside completion_tokens)" if reasoning else None
         cost = _amount(getattr(usage, "cost", None))
         if cost is not None:
-            self.book(link, qty=qty, usd=ledger_usd(cost))
+            self.book(link, qty=qty, usd=ledger_usd(cost), note=note)
         elif tokens_in is not None and tokens_out is not None:
-            self.book(link, qty=qty, usd=ledger_usd(pricing.llm_cost(link, tokens_in, tokens_out)))
+            self.book(link, qty=qty, usd=ledger_usd(pricing.llm_cost(link, tokens_in, tokens_out)), note=note)
         else:
             self.book(link, qty=qty, usd=estimate_usd, note=NO_USAGE_NOTE)
 

@@ -116,6 +116,7 @@ async def get_settings() -> SettingsResponse:
         "OPENAI_COMPAT_MODEL", os.environ.get("OPENAI_COMPAT_MODEL", "")
     )
     story_chain = env.get("STORY_LLM_CHAIN", os.environ.get("STORY_LLM_CHAIN", ""))
+    story_premium_chain = env.get("STORY_LLM_PREMIUM_CHAIN", os.environ.get("STORY_LLM_PREMIUM_CHAIN", ""))
 
     return SettingsResponse(
         google_api_key_set=bool(google_key),
@@ -131,6 +132,7 @@ async def get_settings() -> SettingsResponse:
         openai_compat_base_url=compat_url,
         openai_compat_model=compat_model,
         story_llm_chain=story_chain,
+        story_llm_premium_chain=story_premium_chain,
         allow_slow_chain=env_flag(env, "ALLOW_SLOW_CHAIN"),
         **_budget_fields(env),
         **_generation_fields(env),
@@ -189,6 +191,18 @@ async def update_settings(req: SettingsRequest) -> SettingsResponse:
             except registry_mod.ChainError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from None
         env_updates["STORY_LLM_CHAIN"] = spec
+    if req.story_llm_premium_chain is not None:
+        # Same rule as story_llm_chain above (DEC-043 clearing; validated as
+        # a chain before it is stored).
+        spec = req.story_llm_premium_chain.strip()
+        if spec:
+            from clipping.providers import registry as registry_mod
+
+            try:
+                registry_mod.parse_chain(spec)
+            except registry_mod.ChainError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from None
+        env_updates["STORY_LLM_PREMIUM_CHAIN"] = spec
     if req.allow_slow_chain is not None:
         # "" removes the override (DEC-043). Storing "0" would read as off but
         # shadow an ALLOW_SLOW_CHAIN=1 in .env forever, with no way back from

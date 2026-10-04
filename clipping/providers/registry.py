@@ -130,6 +130,24 @@ PROVIDERS = {
         notes="Free 'Experiment' tier; exact limits live in the admin console.",
         signup_url="https://console.mistral.ai/",
     ),
+    "gemini-paid": Provider(
+        name="gemini-paid",
+        # Same base URL and OpenAI-compatible shape as "gemini"; a separate
+        # provider because its key is a separate, billing-enabled Google
+        # project (RC-V4 holds for this provider the way it holds for Veo
+        # and nano-banana, DEC-222: this link never reads GOOGLE_API_KEY, and
+        # the free "gemini" provider never reads GEMINI_PAID_API_KEY). Plan
+        # 22 stage 1: the premium writing chain's text model.
+        base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+        env_key="GEMINI_PAID_API_KEY",
+        rpm=10,
+        tpm=250000,
+        structured=("json_schema", "json_object"),
+        default_timeout=180,
+        notes="The paid Gemini project (RC-V4): billed, no free-tier allowance; not benchmarked for rpm/tpm.",
+        signup_url="https://aistudio.google.com/apikey",
+        free_tier=False,
+    ),
     "custom": Provider(
         name="custom",
         base_url="",  # resolved from LLM_CUSTOM_BASE_URL at build time
@@ -487,6 +505,41 @@ DEFAULT_STORY_LLM_CHAIN = (
     f"openrouter/{STORY_OPENROUTER_MODEL},"
     f"gemini/{GEMINI_DEFAULT_MODEL}"
 )
+
+
+# The premium writing chain (plan 22 stage 1, DEC-273): the calls the human
+# singled out as the ones that matter (concepts, the bible, the episode
+# script in every version, the first-watch judge -- prompts.PREMIUM_PROMPT_IDS)
+# are written on the paid Gemini project first, with DEFAULT_STORY_LLM_CHAIN
+# kept as its free tail -- the same chain a non-premium prompt runs on, so a
+# host with no paid key or allow_paid off still writes exactly as it does
+# today (the paid link is skipped like any other, DEC-115).
+#
+# gemini-3.8-flash and gemini-3.1-pro-preview (A-145): confirmed live
+# 2026-10-04 with a free GET /v1beta/models against the human's own
+# GEMINI_PAID_API_KEY, which also listed gemini-3.5-flash,
+# gemini-3.5-flash-lite, gemini-3.8-flash-tts and gemini-3.5-transcribe.
+# gemini-3.1-pro-preview is priced (pricing.LLM_PRICES) and parseable but
+# never a default link: it is the per-story "premium" switch stage 4 wires
+# up, not shipped in this chain.
+STORY_PREMIUM_MODEL = "gemini-3.8-flash"
+
+PREMIUM_STORY_LLM_CHAIN = f"gemini-paid/{STORY_PREMIUM_MODEL}," + DEFAULT_STORY_LLM_CHAIN
+
+# Thinking room (plan 22 stage 1): a reasoning reply on these links needs more
+# than the prompt's own word-limited answer to fit the cap it is sent with
+# the thinking tokens come out of the same max_tokens an OpenAI-compatible
+# request sends, so a reply that reasons at length before answering can be
+# cut off mid-JSON unless the cap leaves it room. Added to the cap
+# ``llm_call.call_json`` sends (and to the meter's estimate) only when the
+# resolved chain actually names one of these links -- a non-premium call
+# never carries this extra room, so its cap (and every pinned budget test)
+# is unchanged. Read with the price rows on 2026-10-04 at
+# ai.google.dev/gemini-api/docs/pricing (A-145/A-146).
+MODEL_OUTPUT_HEADROOM = {
+    ("gemini-paid", STORY_PREMIUM_MODEL): 2048,
+    ("gemini-paid", "gemini-3.1-pro-preview"): 4096,
+}
 
 
 def chain_from_env(default: str = DEFAULT_LLM_CHAIN) -> list:

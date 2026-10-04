@@ -199,11 +199,20 @@ def _extra_body(link):
     switched off, and on a provider measured at ~12-13 tokens/s that preamble is
     the difference between answering and hitting the gateway's ~300s cut-off --
     or, worse, between usable JSON and none.
+
+    ``gemini-paid`` (plan 22 stage 1, DEC-273 -- the same kind of RC-S4
+    exception DEC-224 recorded for the NIM links above): the premium writer
+    is a reasoning model, and a long preamble on a word-limited story prompt
+    risks the same cut-off, so thinking is asked to stay light rather than
+    switched fully off (the free "gemini" provider is never touched: this is
+    keyed on the provider name, not the model).
     """
     if link.provider == "nvidia":
         model = link.model.lower()
         if any(family in model for family in _NIM_REASONING_FAMILIES):
             return {"chat_template_kwargs": {"thinking": False}}
+    if link.provider == "gemini-paid":
+        return {"reasoning_effort": "low"}
     return None
 
 

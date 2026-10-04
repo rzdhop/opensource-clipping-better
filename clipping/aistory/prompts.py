@@ -372,6 +372,34 @@ INPUT_BUDGET = {"E1": 1820, "E2": 1660, "E3": 2530, "E4": 3900, "T1": 1270, "T1r
                 "D4": 2270, "D5": 3930, "D6": 3560,
                 "E1v2": 2970, "E2v2": 2520, "E3v2": 3420, "L1": 3920, "J1": 3990, "S1v2": 2650}
 
+# Plan 22 stage 1 (DEC-273): the prompts written on STORY_LLM_PREMIUM_CHAIN
+# rather than STORY_LLM_CHAIN -- the calls the human singled out as the ones
+# that matter: concepts (C1), the bible (B1), the episode script in every
+# version (E1/E2/E3 -- v1 and v2 today; a future v3 the same way, with no
+# second edit here) and the first-watch judge (J1). E4 (the consistency
+# check) and J2 (the keyframe judge) stay on the free chain: they check what
+# was written, not write it. A repair reuses its own prompt's id (E2/E3), so
+# it follows without its own entry.
+#
+# Matched by family, not listed one id at a time, so a new version of one of
+# these prompts (E1v3, ...) is premium the moment its MAX_TOKENS row exists
+# above -- the membership below is computed from MAX_TOKENS' own keys, never
+# maintained separately from them.
+_PREMIUM_PROMPT_FAMILIES = ("C1", "B1", "E1", "E2", "E3", "J1")
+
+
+def _is_premium_family(prompt_id: str) -> bool:
+    for family in _PREMIUM_PROMPT_FAMILIES:
+        if prompt_id == family:
+            return True
+        suffix = prompt_id[len(family):]
+        if prompt_id.startswith(family) and re.fullmatch(r"v\d+", suffix):
+            return True
+    return False
+
+
+PREMIUM_PROMPT_IDS = frozenset(prompt_id for prompt_id in MAX_TOKENS if _is_premium_family(prompt_id))
+
 # The ``bible:<field>`` grammar of spec 9.2: which prompt a regenerate note
 # re-runs, and which of that prompt's fields it targets. "tone" also carries
 # "genre_tags" because the two read as one editorial choice; "world" and

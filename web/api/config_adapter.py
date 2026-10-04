@@ -310,6 +310,9 @@ def build_config_from_payload(
             "OPENROUTER_API_KEY", os.environ.get("OPENROUTER_API_KEY", "")
         ),
         api_key_mistral=env.get("MISTRAL_API_KEY", os.environ.get("MISTRAL_API_KEY", "")),
+        # The premium LLM chain's writer (plan 22 stage 1, DEC-273): a
+        # separate, billing-enabled Google project, never GOOGLE_API_KEY.
+        api_key_gemini_paid=env.get("GEMINI_PAID_API_KEY", os.environ.get("GEMINI_PAID_API_KEY", "")),
         api_key_custom=env.get("LLM_CUSTOM_API_KEY", os.environ.get("LLM_CUSTOM_API_KEY", "")),
         nvidia_model=payload.get("nvidia_model", NVIDIA_MODEL),
         # Custom OpenAI-compatible endpoint (the legacy single-request path).

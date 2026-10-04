@@ -1033,6 +1033,11 @@ PROVIDER_KEYS = {
     "groq": ("api_key_groq", "GROQ_API_KEY"),
     "openrouter": ("api_key_openrouter", "OPENROUTER_API_KEY"),
     "mistral": ("api_key_mistral", "MISTRAL_API_KEY"),
+    # The premium LLM chain's writer (plan 22 stage 1): a separate, billing
+    # -enabled Google project, never GOOGLE_API_KEY (RC-V4's shape, now also
+    # for the LLM chain: "gemini" never reads this, "gemini-paid" never
+    # reads GOOGLE_API_KEY).
+    "gemini-paid": ("api_key_gemini_paid", "GEMINI_PAID_API_KEY"),
     "custom": ("api_key_custom", "LLM_CUSTOM_API_KEY"),
     # The legacy single-request path's own custom endpoint, kept alongside the
     # chain's "custom" link rather than folded into it: they are reached by
@@ -1606,6 +1611,9 @@ def build_config(argv: list[str] | None = None) -> SimpleNamespace:
         api_key_groq=os.environ.get("GROQ_API_KEY", ""),
         api_key_openrouter=os.environ.get("OPENROUTER_API_KEY", ""),
         api_key_mistral=os.environ.get("MISTRAL_API_KEY", ""),
+        # The premium LLM chain's writer (plan 22 stage 1, DEC-273): a
+        # separate, billing-enabled Google project, never GOOGLE_API_KEY.
+        api_key_gemini_paid=os.environ.get("GEMINI_PAID_API_KEY", ""),
         api_key_custom=os.environ.get("LLM_CUSTOM_API_KEY", ""),
         llm_chain=args.llm_chain,
         llm_timeout=args.llm_timeout,

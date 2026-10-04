@@ -14,6 +14,7 @@ Stdlib only.
 from __future__ import annotations
 
 from collections import namedtuple
+from datetime import date
 
 from .generation import is_paid
 from .registry import describe
@@ -104,6 +105,27 @@ LLM_PRICES = {
     # reply without one, and is never contacted while allow_paid is off
     # (DEC-115, story_chain/is_free_link).
     "openrouter/mistralai/mistral-medium-3.1": LlmPrice(0.44, 2.20, "the dearest host, read 2026-10-01 at https://openrouter.ai/api/v1/models/mistralai/mistral-medium-3.1/endpoints; the cheapest host lists $0.40 in / $2.00 out (A-115)"),
+    # The premium writing chain (plan 22 stage 1, DEC-273, A-145): the paid
+    # Gemini project. Read 2026-10-04 at ai.google.dev/gemini-api/docs/pricing
+    # -- re-read that page before relying on either row past its own date.
+    "gemini-paid/gemini-3.8-flash": LlmPrice(0.75, 3.75, "promo pricing through 2026-12-31; $1.50 / $7.50 from "
+                                             "2027-01-01 (LLM_PRICE_CHANGES); read 2026-10-04 at "
+                                             "ai.google.dev/gemini-api/docs/pricing"),
+    "gemini-paid/gemini-3.1-pro-preview": LlmPrice(2.00, 12.00, "priced and parseable; never a default link "
+                                          "(the per-story premium switch, stage 4); read 2026-10-04 at "
+                                          "ai.google.dev/gemini-api/docs/pricing"),
+}
+
+# Dated replacements of an LLM_PRICES row (plan 22 stage 1): the promo price
+# above ends 2026-12-31, and Google's own pricing page already states the
+# row that replaces it on 2027-01-01. ``llm_price_for`` returns the later row
+# once *today* reaches its date, so the estimate and every booking move
+# together the day the promo ends, with no separate deploy to flip them.
+LLM_PRICE_CHANGES = {
+    "gemini-paid/gemini-3.8-flash": (
+        "2027-01-01",
+        LlmPrice(1.50, 7.50, "the promo above ends; read 2026-10-04 at ai.google.dev/gemini-api/docs/pricing"),
+    ),
 }
 
 
@@ -161,8 +183,11 @@ def estimate(link, qty=1, *, width=None, height=None, resolution=None) -> Estima
     return Estimate(describe(link), price.unit, qty, round(unit_price, 6), est, paid)
 
 
-def llm_price_for(link) -> LlmPrice:
-    """The :class:`LlmPrice` of the LLM *link*; :class:`PriceUnknown` without a row."""
+def llm_price_for(link, today=None) -> LlmPrice:
+    """The :class:`LlmPrice` of the LLM *link*; :class:`PriceUnknown` without a
+    row. *today* (an ISO ``"YYYY-MM-DD"`` string or a :class:`datetime.date`;
+    the real date by default) picks the later row of :data:`LLM_PRICE_CHANGES`
+    once it is reached -- the estimate and every booking read the same clock."""
     label = describe(link)
     price = LLM_PRICES.get(label)
     if price is None:
@@ -170,12 +195,19 @@ def llm_price_for(link) -> LlmPrice:
             f"No price for {label} in the LLM price table dated {LLM_PRICES_AS_OF} "
             f"(clipping/providers/pricing.py, LLM_PRICES). Add it before calling a paid link."
         )
+    change = LLM_PRICE_CHANGES.get(label)
+    if change is not None:
+        effective, later = change
+        when = str(today) if today is not None else date.today().isoformat()
+        if when >= effective:
+            return later
     return price
 
 
-def llm_cost(link, tokens_in, tokens_out) -> float:
-    """What *tokens_in* prompt and *tokens_out* completion tokens on *link* cost, unrounded."""
-    price = llm_price_for(link)
+def llm_cost(link, tokens_in, tokens_out, *, today=None) -> float:
+    """What *tokens_in* prompt and *tokens_out* completion tokens on *link*
+    cost, unrounded, at the price in effect on *today* (:func:`llm_price_for`)."""
+    price = llm_price_for(link, today)
     return (tokens_in * price.input_usd_per_m + tokens_out * price.output_usd_per_m) / 1_000_000
 
 

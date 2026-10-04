@@ -56,6 +56,9 @@ PERSISTED_KEYS = frozenset({
     # this set. LLM_CHAIN has only ever been a per-job or process-env value;
     # STORY_LLM_CHAIN is the first chain spec a Settings save can persist.
     "STORY_LLM_CHAIN",
+    # The premium writing chain (plan 22 stage 1, DEC-273): same shape and
+    # the same "not a secret" reasoning as STORY_LLM_CHAIN above.
+    "STORY_LLM_PREMIUM_CHAIN",
     # Not a secret: a switch. Stored as "1" or not at all (DEC-043, DEC-073).
     "ALLOW_SLOW_CHAIN",
     # Budget (AI Story, DEC-097): a switch stored like ALLOW_SLOW_CHAIN, three

@@ -85,6 +85,9 @@ const KEY_PROVIDERS = {
 function providerOfLabel(label) {
   const text = String(label || '')
   if (/^gemini\/(veo|nano-banana)/.test(text)) return 'gemini_paid'
+  // The premium writing chain's own provider (plan 22 stage 1): the same
+  // paid, billing-enabled Google project as Veo and nano-banana above.
+  if (/^gemini-paid\//.test(text)) return 'gemini_paid'
   return text.split('/')[0]
 }
 
@@ -231,6 +234,11 @@ function Settings() {
   // The endpoint URL and model are not secrets, so they are prefilled.
   const [compatUrl, setCompatUrl] = useState('')
   const [compatModel, setCompatModel] = useState('')
+  // AI Story's premium writing chain (plan 22 stage 1, DEC-273): not a
+  // secret, like compatUrl/compatModel above -- prefilled, sent only when it
+  // changed, "" falls through to STORY_LLM_CHAIN, then LLM_CHAIN, then the
+  // shipped default (the paid Gemini writer first).
+  const [storyLlmPremiumChain, setStoryLlmPremiumChain] = useState('')
 
   // Run a job even when only the slow floor (NVIDIA) has a key. Prefilled.
   const [allowSlowChain, setAllowSlowChain] = useState(false)
@@ -307,6 +315,7 @@ function Settings() {
         setSettings(data)
         setCompatUrl(data.openai_compat_base_url || '')
         setCompatModel(data.openai_compat_model || '')
+        setStoryLlmPremiumChain(data.story_llm_premium_chain || '')
         setAllowSlowChain(Boolean(data.allow_slow_chain))
         setAllowPaid(Boolean(data.allow_paid))
         setPerEpisodeCap(String(data.per_episode_cap_usd ?? ''))
@@ -350,6 +359,9 @@ function Settings() {
       if (compatModel !== (settings?.openai_compat_model || '')) {
         payload.openai_compat_model = compatModel.trim()
       }
+      if (storyLlmPremiumChain.trim() !== (settings?.story_llm_premium_chain || '')) {
+        payload.story_llm_premium_chain = storyLlmPremiumChain.trim()
+      }
       // Same rule: turning it OFF must be sent too, or it could never be undone.
       if (allowSlowChain !== Boolean(settings?.allow_slow_chain)) {
         payload.allow_slow_chain = allowSlowChain
@@ -389,6 +401,7 @@ function Settings() {
       setSettings(updated)
       setCompatUrl(updated.openai_compat_base_url || '')
       setCompatModel(updated.openai_compat_model || '')
+      setStoryLlmPremiumChain(updated.story_llm_premium_chain || '')
       setAllowSlowChain(Boolean(updated.allow_slow_chain))
       setAllowPaid(Boolean(updated.allow_paid))
       setPerEpisodeCap(String(updated.per_episode_cap_usd ?? ''))
@@ -586,6 +599,39 @@ function Settings() {
               </p>
             )}
             {testResult && <ChainTestResult result={testResult} />}
+            </CardBody>
+          </Card>
+          {/* AI Story's premium writing chain (plan 22 stage 1, DEC-273) */}
+          <Card className="settings-card">
+            <CardHeader icon={Brain} title="Story premium writing chain"
+              subtitle="Concepts, the bible, the episode script and the first-watch judge." />
+            <CardBody>
+            <p className="form-hint settings-card-lead">
+              The rest of AI Story's writing stays on the provider chain
+              above. Empty uses the paid Gemini project (the key on the
+              Generation tab) first, then today's chain, free links included.
+            </p>
+            <Field
+              label="Premium chain"
+              aside={<KeyBadge set={Boolean(storyLlmPremiumChain || settings?.story_llm_premium_chain)}
+                               tested={false} />}
+              hint="e.g. gemini-paid/gemini-3.8-flash,gemini/gemini-3.5-flash-lite — a provider/model list, same grammar as LLM_CHAIN."
+              htmlFor="settings-story-premium-chain"
+            >
+              <input
+                id="settings-story-premium-chain"
+                className="form-input"
+                type="text"
+                value={storyLlmPremiumChain}
+                onChange={(e) => setStoryLlmPremiumChain(e.target.value)}
+                placeholder="gemini-paid/gemini-3.8-flash,nvidia/nvidia/nemotron-3-ultra-550b-a55b,gemini/gemini-3.5-flash-lite"
+                spellCheck={false}
+              />
+            </Field>
+            <p className="form-hint">
+              Not a secret, and never spent by "Test provider chain" above:
+              that button only probes LLM_CHAIN, never this one.
+            </p>
             </CardBody>
           </Card>
           {/* Custom OpenAI-compatible endpoint */}

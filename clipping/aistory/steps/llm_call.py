@@ -70,6 +70,7 @@ __all__ = [
     "require_concept",
     "resolve_chain",
     "resolve_keys",
+    "resolve_premium_chain",
     "story_chain",
     "utc_now",
 ]
@@ -105,6 +106,24 @@ _TRIMMED_LABELS = {
 
 # ------------------------------------------------------------- chain + keys
 
+def _first_spec(settings_env, *names) -> str:
+    """The first non-blank value of *names*, Settings then the process env,
+    checking each name fully before moving to the next -- the precedence
+    :func:`resolve_chain` and :func:`resolve_premium_chain` share. A blank
+    value at one level falls through to the next, as it does for a clip job
+    (the web layer passes ``""`` on and ``chain_from_env`` then reads the
+    process env)."""
+    env = settings_env or {}
+    for name in names:
+        spec = str(env.get(name) or "").strip()
+        if spec:
+            return spec
+        spec = os.environ.get(name, "").strip()
+        if spec:
+            return spec
+    return ""
+
+
 def resolve_chain(settings_env) -> list:
     """The chain a story step runs: ``STORY_LLM_CHAIN`` in Settings, then
     ``STORY_LLM_CHAIN`` in the process env, then ``LLM_CHAIN`` in Settings,
@@ -119,20 +138,26 @@ def resolve_chain(settings_env) -> list:
     inheriting Clips' chain (DEFAULT_LLM_CHAIN), which was never benchmarked
     against a story-writing prompt.
 
-    A blank value at one level falls through to the next, as it does for a
-    clip job (the web layer passes ``""`` on and ``chain_from_env`` then
-    reads the process env). A malformed chain raises ``ChainError``: that is
-    a configuration error, not a failed call, and is not retried.
+    A malformed chain raises ``ChainError``: that is a configuration error,
+    not a failed call, and is not retried.
     """
-    env = settings_env or {}
-    spec = str(env.get("STORY_LLM_CHAIN") or "").strip()
-    if not spec:
-        spec = os.environ.get("STORY_LLM_CHAIN", "").strip()
-    if not spec:
-        spec = str(env.get("LLM_CHAIN") or "").strip()
-    if not spec:
-        spec = os.environ.get("LLM_CHAIN", "").strip()
+    spec = _first_spec(settings_env, "STORY_LLM_CHAIN", "LLM_CHAIN")
     return registry.parse_chain(spec or registry.DEFAULT_STORY_LLM_CHAIN)
+
+
+def resolve_premium_chain(settings_env) -> list:
+    """The chain a premium prompt runs on (plan 22 stage 1, DEC-273):
+    ``STORY_LLM_PREMIUM_CHAIN`` in Settings, then in the process env, then
+    whatever :func:`resolve_chain` would already resolve to -- so an
+    operator who configured ``STORY_LLM_CHAIN`` or ``LLM_CHAIN`` is not
+    disturbed, exactly as a clip job configured on ``LLM_CHAIN`` is not
+    disturbed by ``STORY_LLM_CHAIN`` existing at all -- and only once
+    nothing at any level is configured does a premium prompt fall to its own
+    shipped default (``registry.PREMIUM_STORY_LLM_CHAIN``) rather than the
+    non-premium one.
+    """
+    spec = _first_spec(settings_env, "STORY_LLM_PREMIUM_CHAIN", "STORY_LLM_CHAIN", "LLM_CHAIN")
+    return registry.parse_chain(spec or registry.PREMIUM_STORY_LLM_CHAIN)
 
 
 def resolve_keys(settings_env) -> dict:
@@ -172,9 +197,13 @@ def is_free_link(link) -> bool:
     return link.provider == "openrouter" and str(link.model).endswith(":free")
 
 
-def story_chain(settings_env) -> tuple:
+def story_chain(settings_env, *, premium=False) -> tuple:
     """``(usable, skipped)``: the links of the chain a story step may call, in
     the chain's order, and the links it leaves out, each as ``(link, reason)``.
+
+    *premium* (plan 22 stage 1) resolves ``resolve_premium_chain`` instead of
+    ``resolve_chain`` -- the only difference it makes: the filtering below is
+    the same for either chain.
 
     While ``allow_paid`` is off -- the budget of the Settings values over the
     process environment (``gating.merged_env``/``budget_of``, DEC-097) -- every
@@ -191,7 +220,7 @@ def story_chain(settings_env) -> tuple:
     Raises ``ChainError`` for a chain that cannot be parsed and ``ValueError``
     for a budget cap that is not an amount.
     """
-    links = resolve_chain(settings_env)
+    links = resolve_premium_chain(settings_env) if premium else resolve_chain(settings_env)
     budget = gating.budget_of(gating.merged_env(settings_env))
     if budget.allow_paid:
         return list(links), []
@@ -305,8 +334,14 @@ def call_json(
 
         runner = llm_mod.run_chain
 
+    # Plan 22 stage 1: the prompts the human singled out as the ones that
+    # matter are written on the premium chain; everything else keeps today's
+    # STORY_LLM_CHAIN. Deciding this from the prompt id alone, here, means no
+    # step runner has to know or care which chain its own prompt is written
+    # on.
+    premium = prompt_id in prompts.PREMIUM_PROMPT_IDS
     try:
-        chain, skipped = story_chain(ctx.settings_env)
+        chain, skipped = story_chain(ctx.settings_env, premium=premium)
     except registry.ChainError:
         raise
     except ValueError as exc:
@@ -323,6 +358,14 @@ def call_json(
         reason = paid_off_message(keyed, chain)
         raise StepFailed(f"{prompt_id}: {reason}", reason=reason)
     cap = prompts.MAX_TOKENS[prompt_id] if max_tokens is None else max_tokens
+    # Thinking room (registry.MODEL_OUTPUT_HEADROOM): added only when the
+    # resolved chain actually names a link that wants it, so a non-premium
+    # call -- and a premium call whose chain fell through to free links only
+    # -- sends exactly the cap it always has (every pinned budget test is
+    # unaffected). The meter below estimates with the cap already raised.
+    headroom = max((registry.MODEL_OUTPUT_HEADROOM.get((link.provider, link.model), 0) for link in chain),
+                   default=0)
+    cap += headroom
     # No keyword at all for a run without a token (the CLI's NEVER), as the
     # analyzer does it.
     cancel_kwargs = cancel_mod.kwargs_for(ctx.cancel)
