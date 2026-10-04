@@ -2,7 +2,8 @@
 
 - **In-progress header:** phase = DOCUMENT / close-out. Checkpoint commit `ae79f08` (main; pushed after this commit).
   In the background: the image rebuilt at 0 jobs (the Mode choice, the Agent run card); the full local suite on
-  ae79f08 (the Tier-1 baseline of the close-out; result in the action log). Nothing else runs.
+  ae79f08: **7510 passed, 1 skipped, 0 failed** (the close-out's Tier-1 baseline). Deployed: bundle index-yjy-Iy50.js,
+  health 200. Nothing else runs.
 - **What the human judges on the phone (A-133…A-144):** (1) episode 2 of *Fruit Business : Guerre Cœur*
   (d0ee5ebd745d, 72 s, lip-sync on 10 shots, 3 without a face); (2) episode 1 of *Le Sceau Pourri* (d16026f12e77,
   62.9 s, the narrated Fruit Drama made by agent mode in 90 min for $3.36: is the story clear, does the narrator
