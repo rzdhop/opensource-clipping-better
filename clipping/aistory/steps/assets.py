@@ -3639,7 +3639,7 @@ class _Assets(voice_lines.LineMeasurement):
             if self.video is not None else {"ok": [], "flagged": [], "approximate": [], "retaken": []}
         return summary
 
-    def native_take_shot(self, shot, *, video=None, row=None, image_link=None) -> None:
+    def native_take_shot(self, shot, *, video=None, row=None, image_link=None, sha=None) -> None:
         """*shot*'s clip taken (``native_take`` module docstring), free, after
         it is kept: a speaking shot's sound transcribed and aligned against
         its line, the line's audio and timing written from it and the take
@@ -3649,7 +3649,8 @@ class _Assets(voice_lines.LineMeasurement):
         (``mismatch``, ``no_speech``) is flagged; with *video* and *row* (the
         clip just bought) an agent story buys it once more within its
         budget's ``speech_retake`` (:meth:`retake_shot`). Nothing is asked of
-        a take already current for this very clip."""
+        a take already current for this very clip. *sha* (plan 22 stage 5:
+        an upload hashed the clip as it stored it) spares hashing it again."""
         ec, ctx = self.ec, self.ctx
         shot_id = shot["shot_id"]
         clip = shot["assets"].get("clip") or {}
@@ -3662,7 +3663,7 @@ class _Assets(voice_lines.LineMeasurement):
         _scene, line = clips.speech_line(self.script, shot)
         if line is None:
             return
-        sha = _sha256_file(path)
+        sha = sha or _sha256_file(path)
         if take_mod.is_current(clip.get("native_speech"), clip_sha256=sha, line_id=line["line_id"]) and (
                 clip["native_speech"]["state"] not in native_speech.TAKES_WITH_SPEECH
                 or voice_lines.is_measured(ec, line)):

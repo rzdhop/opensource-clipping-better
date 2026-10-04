@@ -109,13 +109,18 @@ def _clip(tmp_path, name, seconds, *, size="64x112", sound=True):
 
 # ================================================================ a valid clip
 
-def test_a_valid_clip_is_stored_recorded_and_taken(api):
+def test_a_valid_clip_is_stored_recorded_and_taken(api, monkeypatch):
     """Fail-first: the route did not exist. The clip lands as
     shot_NN.manual.mp4 with link manual/upload, \\$0, its sha256 and real
     length; the take hears the line; the response says what is missing."""
+    from clipping.aistory.steps import assets
+
     story_id = _manual(api.store)
     shot = _shot(api.store, story_id)
     api.heard["words"] = tnt.words(_line_text(api.store, story_id, shot), start=1.0)
+    hashed = []
+    real_sha = assets._sha256_file
+    monkeypatch.setattr(assets, "_sha256_file", lambda path: hashed.append(str(path)) or real_sha(path))
     response = _post(api, story_id, shot["shot_id"], _clip(api.tmp_path, "ok.mp4", 8), name="Rouge take 2.mp4")
     assert response.status_code == 201, response.text
     body = response.json()
@@ -128,6 +133,8 @@ def test_a_valid_clip_is_stored_recorded_and_taken(api):
     assert stored["assets"]["video"] == f"assets/clips/shot_{shot['shot_id'][2:]}.manual.mp4"
     assert body["missing"] and all(item["shot_id"] != shot["shot_id"] for item in body["missing"])
     assert body["waiting"].startswith(f"Waiting for {len(body['missing'])} clips")
+    # The stored clip is hashed once, as it is stored: the take reads that sha256.
+    assert not [path for path in hashed if path.endswith(".manual.mp4")]
     # Nothing booked: a manual clip is never a ledger row.
     ledger = tas._ledger(api.store, story_id)
     assert not [row for row in ledger if row.get("unit") == "second"]
@@ -311,3 +318,30 @@ def test_an_image_upload_is_refused_with_its_reason(api):
     refused = _post_image(api, _png(api.tmp_path, "p.png", (720, 1280)),
                           f"/api/stories/{app_story}/cast/char_kiwilo/sheet?which=portrait")
     assert refused.status_code == 400 and "made by the app" in refused.json()["detail"]["message"]
+
+
+def test_a_step_started_while_the_clip_arrives_refuses_it_and_writes_nothing(api, monkeypatch):
+    """The in-flight check runs again once the body is in, right before the
+    first write: a step queued meanwhile (Continue, or a parallel upload
+    that resumed the run) answers 409 with the busy wording, the received
+    file is deleted, the storyboard and the clips folder are untouched."""
+    from web.api.routes import stories as routes
+
+    story_id = _manual(api.store)
+    shot = _shot(api.store, story_id)
+    before = tas._board(api.store, story_id)
+    real_receive = routes._receive_upload
+
+    async def receive_then_start_a_step(*args, **kwargs):
+        received = await real_receive(*args, **kwargs)
+        api.jobs.create_job(kind=api.jobs.KIND_STORY_STEP, story_id=story_id, step="assets", ep=1, params={})
+        return received
+
+    monkeypatch.setattr(routes, "_receive_upload", receive_then_start_a_step)
+    response = _post(api, story_id, shot["shot_id"], _clip(api.tmp_path, "late.mp4", 8))
+    assert response.status_code == 409, response.text
+    message = response.json()["detail"]["message"]
+    assert "Story step 'assets'" in message and "upload the clip once that step is done" in message
+    assert tas._board(api.store, story_id) == before
+    folder = os.path.dirname(api.store.episode_asset_path(story_id, 1, "clips", "shot_01.mp4"))
+    assert [name for name in os.listdir(folder) if not os.path.isdir(os.path.join(folder, name))] == []

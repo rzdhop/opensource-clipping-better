@@ -59,7 +59,6 @@ MIN_CLIP_S = 2.0
 ASPECT = 9 / 16
 ASPECT_TOLERANCE = 0.02
 FILENAME_MAX = 200
-ALLOWED_CLIP_EXTS = (".mp4", ".mov", ".m4v", ".webm")
 
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9._ -]+")
 
@@ -253,14 +252,17 @@ def upload_target_refusal(ec, shot, doc) -> str | None:
 
 
 def accept_clip(stories, story_id, ep, shot_id, received, *, filename, env=None, on_log=None, now=None,
-                transcribe=None, run=None) -> dict:
+                transcribe=None, run=None, guard=None) -> dict:
     """The uploaded file *received* (a path inside the episode's clips folder,
     :func:`clips_folder`; consumed: moved into place, or left for the caller
     to delete on a refusal) as shot *shot_id*'s clip (module docstring).
     Returns ``{"shot_id", "clip": <the record>, "state", "take": <the take> |
     None, "duration_s", "replaced": bool, "missing": [...], "waiting":
     sentence | None}``. *transcribe* and *run* are the take's STT and
-    ffmpeg/ffprobe seams (tests)."""
+    ffmpeg/ffprobe seams (tests). *guard()*, when given, is called once the
+    checks pass and right before anything is written: it raises
+    :class:`UploadRefused` (409) when a step of the story started while the
+    file was arriving, so nothing writes the storyboard beside it."""
     from .steps import assets as assets_step
     from .steps import brief as brief_mod
     from .steps import clips, sticky_link
@@ -290,6 +292,8 @@ def accept_clip(stories, story_id, ep, shot_id, received, *, filename, env=None,
     image_sha = (assets_step._sha256_file(image) if image else
                  assets_step._canonical_sha256({"manual": shot_id, "image": shot["assets"].get("image")}))
 
+    if guard is not None:
+        guard()
     name = manual_clip_name(shot_id)
     try:
         dest = stories.episode_asset_path(story_id, ep, "clips", name, create=True)
@@ -321,7 +325,7 @@ def accept_clip(stories, story_id, ep, shot_id, received, *, filename, env=None,
            f"{', with sound' if info['audio'] else ''}) is stored as {manual_clip_rel(shot_id)}"
            + (" (the one before is kept in assets/clips/takes/)" if replaced else ""))
     # The take, free: the clip's sound becomes its line; any shot lasts its clip's real length.
-    host.native_take_shot(shot)
+    host.native_take_shot(shot, sha=sha)
     if (host.video or {}).get("takes"):
         try:
             host.write_assets_doc()
@@ -403,7 +407,7 @@ def _images_refusal(story) -> str | None:
             "profile's Images: manual) to upload them.")
 
 
-def accept_image(stories, story_id, kind, eid, slot, received, *, now=None) -> dict:
+def accept_image(stories, story_id, kind, eid, slot, received, *, now=None, guard=None) -> dict:
     """The user's own image of an entity -- a character's ``portrait``,
     ``turnaround`` or ``expressions`` sheet, a place's plate (``slot`` its
     time variant: ``day`` is the master plate), a prop's ``image`` -- on a
@@ -442,6 +446,8 @@ def accept_image(stories, story_id, kind, eid, slot, received, *, now=None) -> d
                             status=409) from None
     cleaned, size = _clean_image(received, folder, role=role)
     try:
+        if guard is not None:
+            guard()
         name = f"{stem}.png"
         try:
             stories.write_media(story_id, kind, eid, name, cleaned)
@@ -475,7 +481,8 @@ def accept_image(stories, story_id, kind, eid, slot, received, *, now=None) -> d
     return {"kind": kind, "id": eid, "slot": slot, "ref": ref, "size": list(size), "name": doc.get("name")}
 
 
-def accept_keyframe(stories, story_id, ep, shot_id, received, *, env=None, on_log=None, now=None) -> dict:
+def accept_keyframe(stories, story_id, ep, shot_id, received, *, env=None, on_log=None, now=None,
+                    guard=None) -> dict:
     """The user's own keyframe of a shot, on a story whose images are manual:
     decoded clean, 9:16 within 2 % (cropped to the exact even 9:16), at
     least 360x640, stored as ``assets/shots/shot_NN.png`` and recorded as a
@@ -503,6 +510,12 @@ def accept_keyframe(stories, story_id, ep, shot_id, received, *, env=None, on_lo
         raise UploadRefused(f"assets/shots/{name} is not a real file (a symlink is never followed).",
                             status=409) from None
     cleaned, size = _clean_image(received, os.path.dirname(dest), role="keyframe", exact_916=True)
+    if guard is not None:
+        try:
+            guard()
+        except UploadRefused:
+            os.unlink(cleaned)
+            raise
     os.replace(cleaned, dest)
     os.chmod(dest, 0o644)
     host.drop_other_images(shot_id, "png")

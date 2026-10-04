@@ -2662,6 +2662,18 @@ async def resume_after_upload(story_id, ep, result) -> Optional[dict]:
     return {"job_id": new_id, "step": job["step"]}
 
 
+def _busy_guard(story_id, what_to_do):
+    """``guard()`` for an upload's accept: the in-flight check again, once the
+    body has arrived and right before anything is written -- a step started
+    meanwhile (Continue, or a parallel upload that resumed the run) must not
+    write the storyboard beside it. 409 with :func:`_refuse_busy`'s words."""
+    def guard():
+        busy = _in_flight(story_id)
+        if busy:
+            raise manual_uploads.UploadRefused(_busy_detail(busy[0], what_to_do), status=409)
+    return guard
+
+
 def _activity(stories, story_id):
     def log(line):
         try:
@@ -2693,7 +2705,8 @@ async def upload_shot_clip(story_id: str, ep: str, shot_id: str, request: Reques
     number = _episode_number(ep)
     if _SHOT_ID.fullmatch(shot_id) is None:
         raise HTTPException(status_code=404, detail=f"There is no shot {shot_id!r}.")
-    _refuse_busy(story_id, "upload the clip once that step is done, or cancel it first.")
+    clip_busy = "upload the clip once that step is done, or cancel it first."
+    _refuse_busy(story_id, clip_busy)
     try:
         folder = await run_in_threadpool(manual_uploads.clips_folder, stories, story_id, number)
     except KeyError:
@@ -2704,7 +2717,8 @@ async def upload_shot_clip(story_id: str, ep: str, shot_id: str, request: Reques
     try:
         result = await run_in_threadpool(functools.partial(
             manual_uploads.accept_clip, stories, story_id, number, shot_id, received, filename=sent.get("filename"),
-            env=worker.get_settings_env(), on_log=_activity(stories, story_id), now=_now()))
+            env=worker.get_settings_env(), on_log=_activity(stories, story_id), now=_now(),
+            guard=_busy_guard(story_id, clip_busy)))
     except manual_uploads.UploadRefused as exc:
         raise _upload_refused(exc.status, str(exc)) from None
     finally:
@@ -2739,14 +2753,16 @@ async def _entity_image_upload(story_id, kind, eid, slot, request) -> dict:
     refusal = manual_uploads._images_refusal(story)
     if refusal:
         raise _upload_refused(400, refusal)
-    _refuse_busy(story_id, "upload the image once that step is done, or cancel it first.")
+    image_busy = "upload the image once that step is done, or cancel it first."
+    _refuse_busy(story_id, image_busy)
     try:
         folder = stories.refs_dir(story_id, kind, eid, create=True)
     except KeyError:
         raise _upload_refused(409, "The refs/ folder is not a real folder (a symlink is never followed); move it "
                                    "away and upload again.") from None
     return await _accept_image_upload(request, folder, functools.partial(
-        lambda received: manual_uploads.accept_image(stories, story_id, kind, eid, slot, received, now=_now())))
+        lambda received: manual_uploads.accept_image(stories, story_id, kind, eid, slot, received, now=_now(),
+                                                     guard=_busy_guard(story_id, image_busy))))
 
 
 @router.post("/{story_id}/cast/{char_id}/sheet", status_code=201)
@@ -2791,7 +2807,8 @@ async def upload_shot_keyframe(story_id: str, ep: str, shot_id: str, request: Re
     refusal = manual_uploads._images_refusal(story)
     if refusal:
         raise _upload_refused(400, refusal)
-    _refuse_busy(story_id, "upload the keyframe once that step is done, or cancel it first.")
+    keyframe_busy = "upload the keyframe once that step is done, or cancel it first."
+    _refuse_busy(story_id, keyframe_busy)
     try:
         probe = stories.episode_asset_path(story_id, number, "shots", "shot_01.png", create=True)
     except KeyError:
@@ -2799,7 +2816,8 @@ async def upload_shot_keyframe(story_id: str, ep: str, shot_id: str, request: Re
     result = await _accept_image_upload(request, os.path.dirname(probe), functools.partial(
         lambda received: manual_uploads.accept_keyframe(stories, story_id, number, shot_id, received,
                                                         env=worker.get_settings_env(),
-                                                        on_log=_activity(stories, story_id), now=_now())))
+                                                        on_log=_activity(stories, story_id), now=_now(),
+                                                        guard=_busy_guard(story_id, keyframe_busy))))
     result["resumed"] = await resume_after_upload(story_id, number, result)
     return result
 
