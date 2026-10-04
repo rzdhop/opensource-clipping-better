@@ -1,3 +1,24 @@
+## CURRENT STATE — plan 22 (the quality overhaul) APPROVED; phase IMPLEMENT of stages 1 (the premium writing chain) and 4 (the native-speech core) in worktrees (2026-10-04, local session)
+
+- **In-progress header:** phase = IMPLEMENT. Checkpoint commit `3c10560` (main, clean tree; `FETCH_HEAD` untracked, left
+  alone). Tier-1 baseline: the full local suite on ae79f08 = **7510 passed, 1 skipped, 0 failed** (3c10560 is docs-only
+  since). Plan: `.claude/plans/ai-story/22-quality-overhaul-plan.md` (8 stages; track A = 1 → 2 → 3 text, track B = 4 → 5
+  → 6 video; 7 docs; 8 the walk in manual mode). Jobs on the server: 6 `awaiting_approval`, none running.
+- **The human's feedback of today (supersedes the pending verdicts A-133…A-144):** the texts are poor and unstructured
+  ("the content line" = the characters' spoken lines, "not humanly understandable"); the lipsync is trash — use native
+  speech; concept proposals must match the user's description; check prices, spend less, better models only for what
+  matters (script, generation); the reference video (TikTok lipstick confrontation, 52 s) sets the quality bar; and a
+  **bring-your-own-clips mode**: the app writes crafted prompts + image shots, the human generates on Google Flow and
+  Higgsfield/Freepik and uploads, the app builds the rest. Answers: Veo 3.1 Fast default / standard per story, French
+  with a probe, Gemini 3.8 Flash for the important calls, caps 10 / 20 / 60, the API links optional after the manual mode.
+- **Running now:** stage 1 (Sonnet, worktree `.claude/worktrees/plan22-s1`, branch `feat/plan22-premium-chain`) and
+  stage 4 (Opus, `.claude/worktrees/plan22-s4`, `feat/plan22-native-speech`), both off 3c10560. Next: on each report —
+  review, rebase, Tier-1 selection (DEC-234, both envs), ff-merge gated on the exit code, DEC entry, deploy at 0 running
+  jobs (6 paused jobs are not running); then stage 2 (after 1), stage 5 (after 4), stage 3 (after 2).
+- **Before stage 4 is used live (the human said yes):** `GEMINI_PAID_API_KEY` and a Groq (or Mistral) STT key in
+  Settings; caps 10 / 20 / 60. Neither key is set today — Veo has never run on this host.
+- **Open questions:** none blocking. Assumptions A-145…A-150.
+
 ## CURRENT STATE — tasks A, B, C of DEC-263 DONE on main ae79f08 (plans 19, 20, 21 merged; the Tier-2 agent-mode walk rendered episode 1); CLOSE-OUT pending the human's verdicts (2026-10-04, local session)
 
 - **In-progress header:** phase = DOCUMENT / close-out. Checkpoint commit `ae79f08` (main; pushed after this commit).

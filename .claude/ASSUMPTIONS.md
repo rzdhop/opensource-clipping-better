@@ -560,6 +560,23 @@
   "stop after the cast" switch, like the fast track's stop at the keyframes).
 
 ## Confirmed
+- **A-145** — (plan 22, stage 1) The paid writer's model id on Gemini's OpenAI-compatible endpoint is `gemini-3.8-flash`
+  (priced $0.75 / $3.75 per M until 2026-12-31, then $1.50 / $7.50, read 2026-10-04 at ai.google.dev/gemini-api/docs/pricing).
+  UNCONFIRMED until one free `GET /v1beta/models` with the paid key lists it.
+- **A-146** — (plan 22) The caps stay global Settings (the human sets 10 / 20 / 60); the premium (Veo standard) speech
+  rung (≈ $17 an episode) is refused by the per-episode cap with the number until the human raises it for a story.
+  UNCONFIRMED (the human chose 10 / 20 / 60; the refusal wording is the stage-4 agent's).
+- **A-147** — (plan 22) Veo 3.1 speaks French acceptably on Lite or Fast ("English fully supported, other languages have
+  not been evaluated", ai.google.dev/gemini-api/docs/veo, 2026-10-04). UNCONFIRMED until the human's Flow clips or the
+  stage-6 probe are heard.
+- **A-148** — (plan 22, stage 4) Spoken French on a generated clip runs at `SPEECH_WPS` = 2.4 words a second with 0.7 s
+  of lead-in and tail, so a 4 / 6 / 8 s clip holds 7 / 12 / 17 words. UNCONFIRMED until measured on real takes.
+- **A-149** — (plan 22, stage 5) The human generates on Google Flow (≤ 3 reference images, 8 s clips, Veo 3.1 native
+  speech) and Higgsfield/Freepik (per-model references, 4–10 s); the brief presets follow those limits and the platforms
+  are used by hand only (their terms forbid automation). UNCONFIRMED: the presets' wording is checked on the walk.
+- **A-150** — (plan 22, stage 3) Writing v3 stamps new stories; an existing story opts in per story on its generation
+  profile card; the confrontation format is the wizard's suggestion when native speech is picked, always a choice.
+  UNCONFIRMED (the human's walk tells whether existing stories should move by default).
 - **A-082** — fal.ai as measured in the paid test (2026-09-29, DEC-174):
   - 35 requests with 0 failures: 13 `fal-ai/flux/schnell` (4–13 s each; booked $0.0028 at 720x1280, $0.0018 for a
     style-preview image) and 22 `seedream-4-edit` (30–40 s each; $0.03).
