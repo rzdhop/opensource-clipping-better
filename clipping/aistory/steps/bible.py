@@ -107,7 +107,43 @@ def validator_for(story, part, keys=None):
     return validate
 
 
-def run(ctx, *, runner=None, time_fn=time.monotonic) -> dict:
+# ``why_come_back`` is complete with its three lines (``workflow.WHY_COME_BACK_LINES``).
+WHY_COME_BACK_LINES = 3
+
+
+def missing_parts(story) -> list:
+    """The parts whose fields are still missing or empty, in :data:`PARTS`
+    order: what a run must still write for the bible to be complete
+    (``workflow.missing_bible_fields``' rule, by part: B2's is the world)."""
+    missing = []
+    for part in PARTS:
+        if part == WORLD_PART:
+            empty = _empty(story.get("world"))
+        else:
+            empty = any(_empty(story.get(key)) for key in FIELDS[part] if key != "why_come_back")
+            if "why_come_back" in FIELDS[part]:
+                lines = [line for line in story.get("why_come_back") or [] if isinstance(line, str) and line.strip()]
+                empty = empty or len(lines) != WHY_COME_BACK_LINES
+        if empty:
+            missing.append(part)
+    return missing
+
+
+def _empty(value) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return not value.strip()
+    if isinstance(value, dict):
+        return all(_empty(v) for v in value.values())
+    if isinstance(value, list):
+        return all(_empty(v) for v in value)
+    return False
+
+
+def run(ctx, *, runner=None, time_fn=time.monotonic, parts=None) -> dict:
+    """B1, B2, B3 -- or, with *parts* (plan 21 stage 1: the agent run's
+    Continue, :func:`missing_parts`), only those, in order."""
     store, story = llm_call.open_story(ctx)
     llm_call.require_concept(story)
 
@@ -115,7 +151,7 @@ def run(ctx, *, runner=None, time_fn=time.monotonic) -> dict:
     failed = []  # (part, reason)
     announced = set()
 
-    for part in PARTS:
+    for part in (PARTS if parts is None else [part for part in PARTS if part in parts]):
         ctx.cancel.check()
         # The story as it now stands: what the previous part wrote, and any
         # edit the user made meanwhile.

@@ -56,7 +56,9 @@ RESPONSE_KEYS_BEFORE = {
 }
 # 2026-10-02 (the pipeline switch's Regen button): re-pinned on purpose -- ``discarded``, the archive
 # of the episode whose document a settled job awaited (POST /api/stories/{id}/switch-pipeline).
-STORY_RESPONSE_KEYS = {"story_id", "ep", "step", "params", "approved_at", "superseded_by", "discarded"}
+# Plan 21 stage 1: re-pinned on purpose -- ``sub_step``, the part the agent run is on (null on a clip job).
+STORY_RESPONSE_KEYS = {"story_id", "ep", "step", "params", "approved_at", "superseded_by", "discarded",
+                       "sub_step"}
 
 
 # ------------------------------------------------------------ registry (CI)

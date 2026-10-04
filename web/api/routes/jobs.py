@@ -140,6 +140,7 @@ def _job_to_response(job: dict) -> JobResponse:
         approved_at=job.get("approved_at"),
         superseded_by=job.get("superseded_by"),
         discarded=job.get("discarded"),
+        sub_step=job.get("sub_step"),
     )
 
 

@@ -594,6 +594,9 @@ _GENERATION_PROFILE_SCHEMA = {
         # Optional (DEC-258): the clips' lipsync for this story; absent, the
         # budget profile's (media_policy.lipsync).
         "lipsync": {"type": "string", "enum": list(defaults.LIPSYNC_MODES)},
+        # Optional (plan 21 stage 1): absent is Studio; "agent" lets the
+        # story-fast-track job approve by rule (defaults.STORY_MODES).
+        "mode": {"type": "string", "enum": list(defaults.STORY_MODES)},
     },
     "required": ["tier", "route", "consistency_mode", "budget_profile"],
     "additionalProperties": False,
@@ -611,6 +614,22 @@ _NARRATOR_SCHEMA = {
 
 # An approval is the timestamp it was given at; null until then.
 _APPROVAL = {"type": ["string", "null"], "minLength": 1}
+
+# Plan 21 stage 1 (agent mode): who recorded an approval of a story
+# document when it was not the human -- the agent run (``story-fast-track``)
+# -- written beside the approval it marks: ``approved_by`` on story.json (a
+# map from the approval's key), on a character, a place, a prop, the season
+# arc and the knowledge base. Absent on the human's approvals. It speaks for
+# the approval while that approval stands: every ``workflow.approve_*`` sets
+# it (the agent) or removes it (the human), and nothing else approves.
+AGENT_APPROVED = "agent"
+_AGENT_APPROVED_SCHEMA = {"type": "string", "enum": [AGENT_APPROVED]}
+STORY_AGENT_APPROVALS = ("concept", "bible", "style", "season")
+_STORY_APPROVED_BY_SCHEMA = {
+    "type": "object",
+    "properties": {key: _AGENT_APPROVED_SCHEMA for key in STORY_AGENT_APPROVALS},
+    "additionalProperties": False,
+}
 
 # In the order the story moves through them (store._APPROVAL_STEPS). The last
 # three arrived with phase 2; a phase-1 story.json without them is upgraded in
@@ -665,6 +684,8 @@ STORY_BIBLE_SCHEMA = {
         "status": {"type": "string", "enum": list(defaults.STATUSES)},
         "created_at": _NON_EMPTY_STRING,
         "updated_at": _NON_EMPTY_STRING,
+        # Optional (plan 21 stage 1): the approvals the agent run recorded.
+        "approved_by": _STORY_APPROVED_BY_SCHEMA,
     },
     "required": [
         "$schema", "story_id", "title", "language", "seed_text", "concept_id", "concept",
@@ -1568,6 +1589,8 @@ CHARACTER_SCHEMA = _document({
     # Phase 7, a v2 story: D2's look (A10) and D1's dossier.
     "look": CHARACTER_LOOK_SCHEMA,
     "dossier": CHARACTER_DOSSIER_SCHEMA,
+    # Plan 21 stage 1: approved by the agent run (see AGENT_APPROVED).
+    "approved_by": _AGENT_APPROVED_SCHEMA,
 })
 
 
@@ -1641,6 +1664,8 @@ PLACE_SCHEMA = _document({
 }, optional={
     # Phase 7, a v2 story: D3's look (A10).
     "look": PLACE_LOOK_SCHEMA,
+    # Plan 21 stage 1: approved by the agent run (see AGENT_APPROVED).
+    "approved_by": _AGENT_APPROVED_SCHEMA,
 })
 
 
@@ -1700,6 +1725,8 @@ PROP_SCHEMA = _document({
 }, optional={
     # Phase 7, a v2 story: R1v2's look (A10).
     "look": PROP_LOOK_SCHEMA,
+    # Plan 21 stage 1: approved by the agent run (see AGENT_APPROVED).
+    "approved_by": _AGENT_APPROVED_SCHEMA,
 })
 
 
@@ -1893,6 +1920,8 @@ SEASON_ARC_SCHEMA = _document({
         "primary": {"type": "string", "pattern": _ID_PATTERN},
         "secondary": {"type": ["string", "null"], "pattern": _ID_PATTERN},
     }),
+    # Plan 21 stage 1: approved by the agent run (see AGENT_APPROVED).
+    "approved_by": _AGENT_APPROVED_SCHEMA,
 })
 
 
@@ -2193,6 +2222,8 @@ KNOWLEDGE_SCHEMA = _document({
     "props_registry": dict(_id_array(PROP_ID_PATTERN), maxItems=KNOWLEDGE_PROPS_MAX),
     # char id -> LEDGER_STATE_SCHEMA, checked in knowledge_errors.
     "ledger_seed": {"type": "object"},
+    # Plan 21 stage 1: approved by the agent run (see AGENT_APPROVED).
+    "approved_by": _AGENT_APPROVED_SCHEMA,
 })
 
 

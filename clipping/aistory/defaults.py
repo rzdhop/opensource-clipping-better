@@ -44,6 +44,15 @@ VIDEO_RESOLUTIONS = (VIDEO_RESOLUTION_DEFAULT, "1080p")
 # (``media_policy.lipsync``). The values are ``budget.LIPSYNC_MODES``.
 LIPSYNC_MODES = ("none", "kling")
 
+# Plan 21 stage 1 (agent mode): the optional ``generation_profile.mode``.
+# Absent is Studio -- every step waits for the human's approval, as always;
+# ``agent`` lets one ``story-fast-track`` job take the story from its seed
+# to episode 1, approving each document by rule. Never in the fresh profile
+# below: a story is in agent mode only when it is created (or patched) so.
+MODE_STUDIO = "studio"
+MODE_AGENT = "agent"
+STORY_MODES = (MODE_STUDIO, MODE_AGENT)
+
 # ------------------------------------------------------------- story (spec 2.1, 6.2)
 
 EPISODE_TEMPLATE_ID = "serial_60s_v1"

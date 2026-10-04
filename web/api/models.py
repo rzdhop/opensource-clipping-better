@@ -351,6 +351,10 @@ class JobResponse(BaseModel):
     # The archive of the episode whose document this job awaited approval for
     # (POST /api/stories/{id}/switch-pipeline): settled, never approved.
     discarded: Optional[str] = None
+    # Plan 21 stage 1: the part a chained story step is on (the agent run,
+    # ``story-fast-track``: ``steps.story_fast_track.PARTS``); null for every
+    # other job.
+    sub_step: Optional[str] = None
 
 
 class JobListResponse(BaseModel):
@@ -628,6 +632,10 @@ class StoryCreateRequest(BaseModel):
     # "Episode format", pre-filled from the style's suggestion); left out,
     # the pipeline's default. An unshipped id is a 400 (store.create).
     episode_template_id: Optional[str] = None
+    # Plan 21 stage 1: Studio (every step waits for your approval, the
+    # default) or agent mode (one story-fast-track job approves by rule),
+    # stored as ``generation_profile.mode`` -- an agent story only.
+    mode: Literal["studio", "agent"] = "studio"
 
 
 class StoryPatchRequest(BaseModel):
@@ -679,6 +687,13 @@ class ConceptChooseRequest(BaseModel):
     """
     concept_id: Optional[str] = None
     concept: Optional[dict] = None
+
+
+class ConceptsGenerateRequest(BaseModel):
+    """POST /api/stories/{id}/concepts/generate (optional body, plan 21
+    stage 1): ``count``, the number of concepts to write, 1 to 10 (checked by
+    ``workflow.concepts_request``: 400, not 422); left out, ten."""
+    count: Optional[Any] = None
 
 
 class StoryStepRequest(BaseModel):

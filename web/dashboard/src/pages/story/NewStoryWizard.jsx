@@ -92,6 +92,9 @@ function CreateStoryForm() {
         // Picked or suggested by the style; else null: the server starts the
         // story on its pipeline's format (defaults.episode_template_for).
         episode_template_id: episodeTemplateChoice || suggestedTemplate || null,
+        // Plan 21: Studio (every step waits for your approval). The wizard's
+        // Mode choice (agent mode) arrives with the dashboard stage.
+        mode: 'studio',
         // Untouched, null: the server picks (media_policy.new_story_profile).
         generation_profile: profileChosen ? {
           tier,

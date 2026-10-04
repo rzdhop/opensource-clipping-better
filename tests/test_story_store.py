@@ -154,9 +154,11 @@ def test_a_complete_bible_validates():
 def test_every_fixed_object_of_the_bible_is_closed():
     schema = schemas.STORY_BIBLE_SCHEMA
     assert schema["additionalProperties"] is False
-    for key in ("world", "audience", "generation_profile", "narrator", "approvals"):
+    for key in ("world", "audience", "generation_profile", "narrator", "approvals", "approved_by"):
         assert schema["properties"][key]["additionalProperties"] is False, key
-    assert set(schema["required"]) == set(schema["properties"])
+    # Plan 21 stage 1, re-pinned on purpose: ``approved_by`` (the agent run's marks beside the approvals
+    # it gave) is the one optional field -- absent on every Studio story, whose story.json stays as it was.
+    assert set(schema["required"]) == set(schema["properties"]) - {"approved_by"}
 
 
 @pytest.mark.parametrize("changes", [
@@ -240,7 +242,9 @@ def test_create_then_get_round_trips(stories, outputs):
 def test_a_new_story_has_every_field_as_a_draft(stories):
     doc = stories.create(language="en", now=NOW)
 
-    assert set(doc) == set(schemas.STORY_BIBLE_SCHEMA["properties"])
+    # Plan 21 stage 1, re-pinned on purpose: every field but the optional ``approved_by``, which only the
+    # agent run's approvals write.
+    assert set(doc) == set(schemas.STORY_BIBLE_SCHEMA["properties"]) - {"approved_by"}
     assert schemas.story_bible_errors(doc) == []
     assert store.STORY_ID_PATTERN.fullmatch(doc["story_id"])
     assert doc["language"] == "en"
@@ -270,7 +274,8 @@ def test_story_json_keeps_a_readable_field_order(stories, outputs):
     """Never sort_keys: a human reads story.json top to bottom."""
     doc = stories.create(language="fr", now=NOW)
     text = _story_path(outputs, doc["story_id"]).read_text(encoding="utf-8")
-    assert list(json.loads(text)) == list(schemas.STORY_BIBLE_SCHEMA["properties"])
+    # Plan 21 stage 1, re-pinned on purpose: the optional ``approved_by`` (last) is not on a new story.
+    assert list(json.loads(text)) == [key for key in schemas.STORY_BIBLE_SCHEMA["properties"] if key != "approved_by"]
     assert text.endswith("}\n")
 
 

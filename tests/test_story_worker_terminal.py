@@ -22,8 +22,9 @@ from clipping.aistory import steps
 from clipping.cancel import CancelToken
 from test_story_step_jobs import _messages, _register, _step_job, job_store, worker  # noqa: F401 -- fixtures
 
-# Phase 5 stage 8 adds the re-render (DEC-161: nothing to approve).
-COMPLETED = ("render", "metadata", "fast-track", "rerender")
+# Phase 5 stage 8 adds the re-render (DEC-161: nothing to approve); plan 21 stage 1, re-pinned on purpose,
+# the agent run (it ends with episode 1 rendered: nothing left to approve).
+COMPLETED = ("render", "metadata", "fast-track", "rerender", "story-fast-track")
 AWAITING = ("concepts", "bible", "style_preview", "cast", "places_proposal", "places", "season", "script",
             "storyboard", "assets", "regenerate")
 

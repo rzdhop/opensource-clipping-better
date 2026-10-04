@@ -252,6 +252,8 @@ def _execute_story_step(job_id: str, job: dict, token: CancelToken) -> None:
             outputs_dir=OUTPUTS_ROOT,
             # Through the tee, like everything the clip pipeline prints.
             on_log=print,
+            # Plan 21 stage 1: the part a chained step is on, on the job record.
+            on_sub_step=lambda name: store.update_job(job_id, sub_step=name),
         )
         steps.run(step, ctx)
 
@@ -291,12 +293,30 @@ def _execute_story_step(job_id: str, job: dict, token: CancelToken) -> None:
     finally:
         if step in APPROVING_STEPS:
             _complete_approved_jobs(story_id, job.get("ep"))
+        elif step in AGENT_STEPS:
+            _complete_agent_jobs(story_id)
         _mirror_to_story_log(job_id, story_id, step, first_seq)
 
 
 # The story steps that approve episode documents in-process: the fast track
 # auto-approves the script, the storyboard and the assets it makes (DEC-162).
 APPROVING_STEPS = ("fast-track",)
+# Plan 21 stage 1: the agent run approves the story's documents and, through
+# the fast track, episode 1's (``story-fast-track``).
+AGENT_STEPS = ("story-fast-track",)
+
+
+def _complete_agent_jobs(story_id) -> None:
+    """Once an agent run has ended, the older step jobs still awaiting a
+    document it approved are completed (``routes.stories.
+    complete_agent_jobs``). Best effort, as :func:`_complete_approved_jobs`."""
+    try:
+        from .routes import stories as story_routes  # the story routes import this module
+
+        story_routes.complete_agent_jobs(story_id)
+    except Exception as exc:  # noqa: BLE001 - the step itself is done
+        print(f"[Worker] Story {story_id}: the jobs awaiting the documents the agent run approved were not "
+              f"completed ({type(exc).__name__}: {exc}).", file=sys.stderr)
 
 
 def _complete_approved_jobs(story_id, ep) -> None:

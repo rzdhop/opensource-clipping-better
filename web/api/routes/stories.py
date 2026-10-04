@@ -131,7 +131,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
 from starlette.concurrency import run_in_threadpool
 
-from clipping.aistory import media_policy, refimages, schemas, templates, thumbs, workflow
+from clipping.aistory import defaults, media_policy, refimages, schemas, templates, thumbs, workflow
 from clipping.aistory import store as story_store
 from clipping.aistory import uploads as uploads_mod
 from clipping.aistory.steps import bible as bible_step
@@ -139,6 +139,7 @@ from clipping.aistory.steps import concepts as concepts_step
 from clipping.aistory.steps import entities as entities_step
 from clipping.aistory.steps import llm_call, llm_spend
 from clipping.aistory.steps import regenerate as regenerate_step
+from clipping.aistory.steps import story_fast_track as agent_step
 from clipping.aistory.steps import style_preview as preview_step
 from clipping.providers import pricing, registry
 
@@ -149,6 +150,7 @@ from ..models import (
     AssetsStepParams,
     CharacterPatchRequest,
     ConceptChooseRequest,
+    ConceptsGenerateRequest,
     FastTrackStepParams,
     JobResponse,
     JobStatus,
@@ -373,6 +375,9 @@ def _episode_of(job) -> Optional[int]:
     if step == "regenerate":
         parsed = regenerate_step.parse_episode_target((job.get("params") or {}).get("target"))
         return parsed[1] if parsed is not None else None
+    if step in workflow.AGENT_STEPS:
+        # Plan 21 stage 1: the agent run makes episode 1 (its job carries no ep).
+        return agent_step.EPISODE
     return None
 
 
@@ -436,6 +441,20 @@ def _complete_awaiting(story_id, doc) -> list:
             if store.approve_step_job(job["id"]) == "ok":
                 done.append(job["id"])
     return done
+
+
+def complete_agent_jobs(story_id) -> list:
+    """Plan 21 stage 1: once an agent run (``story-fast-track``) has ended --
+    completed, or stopped after approving some documents -- complete the
+    step jobs still awaiting a story document it approved in-process (the
+    concept's cards, the bible, the style's preview, the cast, the places,
+    the season, the knowledge base: ``workflow.agent_approved_docs``) and
+    those of its episode 1 (:func:`complete_approved_jobs`), as approving
+    each would; returns their ids."""
+    done = []
+    for doc in workflow.agent_approved_docs(_stories(), story_id):
+        done.extend(_complete_awaiting(story_id, doc))
+    return done + complete_approved_jobs(story_id, agent_step.EPISODE)
 
 
 def complete_approved_jobs(story_id, ep) -> list:
@@ -746,11 +765,17 @@ async def create_story(req: StoryCreateRequest) -> dict:
     (``media_policy.new_story_profile``, ``media_policy.QUALITY_KEYS``;
     stage 2c, DEC-235), else on the story defaults; a profile that is sent
     is honoured as sent.
+
+    ``mode`` (plan 21 stage 1): ``studio`` (the default: nothing is added)
+    or ``agent``, stored as ``generation_profile.mode`` on top of the profile
+    above -- the story the ``story-fast-track`` step may run on.
     """
     if req.generation_profile is not None:
         profile = req.generation_profile.model_dump()
     else:
         profile = media_policy.new_story_profile(worker.get_settings_env())
+    if req.mode == defaults.MODE_AGENT:
+        profile = dict(profile or {}, mode=defaults.MODE_AGENT)
     try:
         return _stories().create(
             language=req.language,
@@ -1099,10 +1124,15 @@ async def list_concepts(story_id: str, language: Optional[str] = None,
 
 
 @router.post("/{story_id}/concepts/generate", status_code=201)
-async def generate_concepts(story_id: str) -> JobResponse:
-    """"Generate 10 more": a ``concepts`` step job (as ``POST /steps/concepts``)."""
+async def generate_concepts(story_id: str, req: Optional[ConceptsGenerateRequest] = None) -> JobResponse:
+    """"Generate 10 more": a ``concepts`` step job (as ``POST /steps/concepts``).
+    Plan 21 stage 1: an optional body ``{count}`` asks for 1 to 10 (400
+    otherwise); the job's params carry it only when it is sent."""
     _load(_stories(), story_id)
-    return await _create_step_job(story_id, "concepts", {})
+    params = {} if req is None or req.count is None else {"count": req.count}
+    with _answering():
+        workflow.concepts_request(params)
+    return await _create_step_job(story_id, "concepts", params)
 
 
 @router.post("/{story_id}/concepts/choose")
@@ -1169,8 +1199,11 @@ async def run_step(story_id: str, step: str, response: Response,
     refused before any job exists with a finished render's own sentence
     (``rerender.require_finished_render``) or the render's own (``render.
     require_renderable``, naming an outdated shot's regenerate target), no
-    key gate (it calls nothing, like the render step). A step of 9.1 still a
-    later phase's (``workflow.LATER_STEPS``): 400. Anything else: 404.
+    key gate (it calls nothing, like the render step). ``story-fast-track``
+    (plan 21 stage 1, an agent-mode story only): 201 with the queued job of
+    the agent run (see ``_agent_step``). ``concepts`` takes ``{count?}`` (1 to
+    10, 400 otherwise). A step of 9.1 still a later phase's
+    (``workflow.LATER_STEPS``): 400. Anything else: 404.
     """
     stories = _stories()
     story = _load(stories, story_id)
@@ -1178,7 +1211,11 @@ async def run_step(story_id: str, step: str, response: Response,
     ep = req.ep if req is not None else None
 
     if step == "concepts":
+        with _answering():
+            workflow.concepts_request(params)
         return await _create_step_job(story_id, step, params, ep=ep)
+    if step in workflow.AGENT_STEPS:
+        return await _agent_step(stories, story, step, params, ep)
     if step == "bible":
         _require_concept(story)
         return await _create_step_job(story_id, step, params, ep=ep)
@@ -1209,6 +1246,56 @@ async def run_step(story_id: str, step: str, response: Response,
         return await _reedit_step(stories, story, step, params, ep)
     with _answering():
         workflow.refuse_step(step)
+
+
+def _agent_checks(stories, story, params, ep, env):
+    """The checks of the agent run before a job exists (see
+    ``_agent_step``); returns its gate. Blocking (the estimate reads every
+    document), so it runs off the event loop."""
+    with _answering():
+        workflow.require_agent_mode(story)
+        workflow.agent_request(params)
+    if ep is not None:
+        raise HTTPException(status_code=400, detail=(
+            f"'{workflow.AGENT_STEP}' works on episode {agent_step.EPISODE} itself: send no ep."))
+
+    def gate():
+        _links, _keys, refusal = _llm_gate(env)
+        if refusal:
+            raise HTTPException(status_code=400, detail=refusal)
+        with _answering():
+            body = workflow.story_fast_track_estimate(stories, story, env=env,
+                                                      readiness=_llm_readiness(env))
+        if body["stops_at"] is not None:
+            raise HTTPException(status_code=409, detail=agent_step.stop_message(
+                body["stops_at"]["number"], body["stops_at"]["part"], body["stops_at"]["reason"]))
+
+    return gate
+
+
+async def _agent_step(stories, story, step, params, ep) -> JobResponse:
+    """``story-fast-track`` (plan 21 stage 1): the agent run, one job from
+    the story's seed to episode 1 rendered, approving by rule.
+
+    Refused before any job exists, in this order: a Studio story (409), any
+    parameter or an ``ep`` (400: it works on episode 1 itself), then what
+    every job meets (``_create_step_job``: 409 while a step of the story is
+    in flight; its gate -- the key gate (400), then the summed estimate's
+    first refusal (409, ``workflow.story_fast_track_estimate``: a part that
+    cannot run, a paid part while ``allow_paid`` is off or over a cap,
+    named with the numbers; RC-A3); the queue cap, 429). The job carries no
+    ep and no params; it ends completed. Run again, it continues where it
+    stopped and repeats nothing already done.
+    """
+    env = worker.get_settings_env()
+    gate = await run_in_threadpool(_agent_checks, stories, story, params, ep, env)
+    return await _create_step_job(story["story_id"], step, {}, ep=None, gate=gate)
+
+
+def _llm_readiness(env):
+    """The DEC-073 slow-floor rule of ``POST /api/jobs``, as
+    ``workflow.llm_route`` asks it (``_llm_route``'s)."""
+    return lambda links, _keys: jobs_routes._chain_readiness_refusal(links, env)
 
 
 async def _phase2_step(stories, story, step, params, ep) -> JobResponse:
@@ -1957,6 +2044,11 @@ async def estimate(story_id: str, step: str, target: Optional[str] = None,
     (``workflow.reedit_estimate``, stage 8's predicate, RC-M8) --
     ``shots_total``, ``rebuild``, ``reuse``, ``reasons`` and ``current``.
 
+    ``story-fast-track`` (plan 21 stage 1, an agent-mode story only, 409
+    otherwise): ``workflow.story_fast_track_estimate`` -- every part still to
+    do, summed into one ``est_usd`` with the paid parts named, the caps line,
+    the time budget, and ``stops_at``, the first part that cannot run.
+
     A later step: 400; anything else: 404.
     """
     stories = _stories()
@@ -1971,6 +2063,8 @@ async def estimate(story_id: str, step: str, target: Optional[str] = None,
         }
     if step == PREVIEW_STEP:
         return _preview_estimate(stories, story)
+    if step in workflow.AGENT_STEPS:
+        return await run_in_threadpool(_agent_estimate, stories, story, env)
     if step == "cast":
         with _answering():
             names = list(selected or [])
@@ -2029,6 +2123,15 @@ async def estimate(story_id: str, step: str, target: Optional[str] = None,
             return _generation_estimate(stories, story, step, units, env=env)
 
     return _llm_estimate(step, _llm_calls(step, target), env=env)
+
+
+def _agent_estimate(stories, story, env) -> dict:
+    """``workflow.story_fast_track_estimate`` (plan 21 stage 1) with the key
+    gate's DEC-073 rule and a local editor's status probe, as the cast and
+    places estimates ask it; 409 for a Studio story. Blocking."""
+    with _answering():
+        return workflow.story_fast_track_estimate(stories, story, env=env, readiness=_llm_readiness(env),
+                                                  probe_local=True)
 
 
 def _episode_estimate(stories, story, step, ep, *, measure, env) -> dict:

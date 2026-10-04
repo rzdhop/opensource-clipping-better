@@ -1156,6 +1156,69 @@ under-planned — it names
 the sub-step, what happened and what to do next, then **Generate episode**
 again to continue exactly from there.
 
+### Agent mode (one job from the idea to episode 1)
+
+A story is in **Studio** mode unless you ask otherwise: every step waits for
+your approval, exactly as this page describes. A story created in **agent
+mode** (`POST /api/stories` with `"mode": "agent"`, stored as
+`generation_profile.mode`; a PATCH of `generation_profile.mode` switches an
+existing story) can instead be taken from its one-line seed to episode 1
+rendered with its metadata pack by **one job**, `story-fast-track` (`POST
+/api/stories/{id}/steps/story-fast-track`, no parameters; refused with a 409
+on a Studio story). The dashboard's Mode choice and the CLI command arrive
+in the next stages of plan 21; the backend is there now.
+
+The job runs nine parts in order, each a line `⏩ Agent n/9: <part>` in the
+feed and the job's `sub_step`: the **concept** (the concepts step asked for
+one card from the seed — the idea is the concept — then chosen), the
+**bible**, the **style** (built from the story's style, else the concept's,
+with its preview strip), the **cast** (the concept's cast sketch, at most
+five, voices pinned by the cast step), the **places proposal**, the
+**places** (the proposal made), the **season** (eight episodes), the
+**knowledge base** (v2 only; any prop it adds is drawn by the places step
+too) and **episode 1** — handed to the fast track above with its usual
+rules (no stop at the keyframes or at the script's leftover issues), on the
+story's own episode format.
+
+**What it approves without a taste check.** Each document is approved by
+the same rule as your own click — complete, nothing missing — and recorded
+as approved by the agent (`approved_by: "agent"` on story.json's approvals,
+on each character, place and prop, on the season and the knowledge base;
+episode 1's documents say `fast_track`, as the fast track's always do). The
+**style, the portraits and the plates are approved as soon as they are
+complete — nobody looks at them first.** That is the trade-off: one click
+instead of a dozen, in exchange for reviewing the looks afterwards. Open the
+story in Studio when it is done: every document stays editable, every
+regenerate stays available, and your own approval replaces the agent's mark.
+Script and keyframes keep their judges (E4, J1, J2) and the fast track's
+rules.
+
+**One estimate first.** `GET /api/stories/{id}/estimate/story-fast-track`
+sums every part still to do — LLM calls (on the free links first, $0 here as
+every LLM estimate counts them), the preview strip, the cast's portraits and
+sheets, the places' plates and props, the props the knowledge base may add,
+and episode 1 (priced exactly once the pre-production is approved, before
+that from the budget profile: nothing on the free profile, the Quality
+preset's own figure, the profile's cap otherwise) — into one `est_usd`, names
+the **paid** parts, shows the caps line, and gives a time budget (a quarter
+of an hour a part of pre-production, the fast track's own for episode 1, six
+hours at most). What cannot be counted yet is an upper bound ("up to"): five
+characters before the concept exists, three places and three props before
+the proposal. The job asks the same estimate before its first part and
+**stops before anything is called or bought** when a part cannot run: no
+key, a concept with no style or no cast sketch, an image chain or editor that
+cannot run, paid parts while `allow_paid` is off, or the sum over the day's
+or the story's cap (episode 1's predicted price against its own cap) — each
+named with its numbers. The route refuses the job with the same sentence
+(409) before it exists.
+
+**Continue.** Every stop ends the job with "Agent run stopped at <part> (n
+of 9): <reason>. Continue the agent run: it picks up here and repeats
+nothing already done." Fix the reason and run the same job again: a part
+whose document is approved is kept as it is, and each step fills only what
+is missing (the bible's missing parts, the season's entries not written yet,
+the characters' missing images) — nothing paid for is bought twice.
+
 ### The episode page
 
 The episode header carries the episode's number and, beside it, the

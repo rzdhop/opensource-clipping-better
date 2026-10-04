@@ -14,6 +14,10 @@ and every card so far -- is sent as "do not repeat", newest cards first, and
 each accepted call adds its own before the next one. The context pack caps
 that list (``context._AVOID_TITLE_LIMIT``) and says so; the library titles
 come first so they are never the ones cut.
+
+``params.count`` (plan 21 stage 1, agent mode: "the idea is the concept")
+asks for fewer cards: 1 to ``CALLS``, one call each; absent, ``CALLS``
+(:func:`read_count`). Nothing else changes.
 """
 
 from __future__ import annotations
@@ -28,6 +32,9 @@ from .llm_call import StepFailed
 CALLS = prompts.C1_CALLS
 CONCEPTS_PER_CALL = prompts.C1_CONCEPTS_PER_CALL
 CONCEPTS_FILENAME = "concepts.json"
+# Plan 21 stage 1: the step's one parameter, the number of concepts to write.
+COUNT_PARAM = "count"
+PARAMS = (COUNT_PARAM,)
 
 _GENERATED_ID = re.compile(schemas.GENERATED_CONCEPT_ID_PATTERN)
 
@@ -79,6 +86,23 @@ def _existing_cards(store, story_id) -> list:
     return list(doc["concepts"])
 
 
+def read_count(params) -> int:
+    """How many concepts the step writes (``params.count``, 1 to
+    :data:`CALLS`; absent or null, :data:`CALLS`); ``StepFailed`` for another
+    key or value, naming the range."""
+    params = params or {}
+    unknown = sorted(key for key in params if key not in PARAMS)
+    if unknown:
+        raise StepFailed(f"The concepts step takes only {', '.join(PARAMS)}; not {', '.join(map(repr, unknown))}.")
+    value = params.get(COUNT_PARAM)
+    if value is None:
+        return CALLS
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= CALLS:
+        raise StepFailed(f"The concepts step's count is the number of concepts to write, 1 to {CALLS}, "
+                         f"not {value!r}.")
+    return value
+
+
 def _library_titles(language) -> list:
     return [concept["title"][language] for concept in templates.load_concepts()]
 
@@ -88,7 +112,10 @@ def run(ctx, *, note=None, runner=None, time_fn=time.monotonic) -> dict:
 
     *note* is a regenerate's author's note (``regenerate`` target
     ``concepts``); *runner*/*time_fn* are handed to ``llm_call.call_json``.
+    ``ctx.params`` may hold ``count`` (:func:`read_count`); a regenerate's
+    params are its own (its target and note), so it writes :data:`CALLS`.
     """
+    calls = CALLS if note is not None or ctx.step == "regenerate" else read_count(ctx.params)
     store, story = llm_call.open_story(ctx)
     language = story["language"]
     template_id = story.get("style_template_id")
@@ -114,7 +141,7 @@ def run(ctx, *, note=None, runner=None, time_fn=time.monotonic) -> dict:
     failed = []  # (call, reason)
     announced = set()
 
-    for call in range(1, CALLS + 1):
+    for call in range(1, calls + 1):
         ctx.cancel.check()
         pack = context.build_pack(
             language=language,
@@ -123,7 +150,7 @@ def run(ctx, *, note=None, runner=None, time_fn=time.monotonic) -> dict:
             avoid_titles=library_titles + generated_titles[::-1],
         )
         llm_call.announce_trimmed(ctx, pack, announced)
-        system, user, schema = prompts.build_c1(pack, style_ids=style_ids, batch=call, of=CALLS)
+        system, user, schema = prompts.build_c1(pack, style_ids=style_ids, batch=call, of=calls)
 
         try:
             reply = llm_call.call_json(
@@ -132,7 +159,7 @@ def run(ctx, *, note=None, runner=None, time_fn=time.monotonic) -> dict:
             )
         except StepFailed as exc:
             failed.append((call, exc.reason))
-            ctx.on_log(f"✖ C1 call {call}/{CALLS} failed: {exc.reason}")
+            ctx.on_log(f"✖ C1 call {call}/{calls} failed: {exc.reason}")
             continue
 
         now = llm_call.utc_now()
@@ -165,11 +192,11 @@ def run(ctx, *, note=None, runner=None, time_fn=time.monotonic) -> dict:
         generated_titles.extend(card["title"] for card in call_cards)
         new_ids.extend(card["concept_id"] for card in call_cards)
         titles = " · ".join(card["title"] for card in call_cards)
-        ctx.on_log(f"💡 C1 call {call}/{CALLS}: {titles}")
+        ctx.on_log(f"💡 C1 call {call}/{calls}: {titles}")
 
-    wanted = CALLS * CONCEPTS_PER_CALL
+    wanted = calls * CONCEPTS_PER_CALL
     if not new_ids:
-        detail = "; ".join(f"call {call}/{CALLS}: {reason}" for call, reason in failed)
+        detail = "; ".join(f"call {call}/{calls}: {reason}" for call, reason in failed)
         raise StepFailed(f"No concept was generated: every C1 call failed ({detail}).")
 
     if failed:

@@ -83,6 +83,9 @@ from .steps import rerender as rerender_step
 from .steps import script as script_step
 from .steps import season as season_step
 from .steps import storyboard as storyboard_step
+from .steps import bible as bible_step
+from .steps import story_fast_track as agent_step
+from .steps import style_preview as preview_step
 from .steps import voice_lines
 from .steps.llm_call import StepFailed
 
@@ -145,6 +148,14 @@ KEYFRAMES_APPROVAL = judge_step.KEYFRAMES_APPROVAL
 # Who recorded an approval of the assets or the keyframes (stage C,
 # ``schemas.APPROVED_BY``): the human, or the fast track's one click.
 USER_APPROVED, FAST_TRACK_APPROVED = schemas.APPROVED_BY
+# Plan 21 stage 1 (agent mode): the agent run's own mark on the story
+# documents it approves (``schemas.AGENT_APPROVED``: story.json's
+# ``approved_by`` map, and ``approved_by`` on a character, a place, a prop,
+# the season arc and the knowledge base). The episode documents of its
+# episode 1 are approved by the fast track it hands over to, as
+# ``FAST_TRACK_APPROVED``.
+AGENT_APPROVED = schemas.AGENT_APPROVED
+STORY_APPROVERS = (USER_APPROVED, AGENT_APPROVED)
 
 # Spec 9.2, regenerate grammar: every "<kind>:..." target of a later phase.
 # Phase 2's, phase 3's, phase 4's and phase 6's targets are
@@ -413,6 +424,56 @@ def require_style_draft(stories, story_id) -> dict:
     return lock
 
 
+# ------------------------------------------------------- who approved (plan 21)
+
+def _check_approver(by) -> None:
+    """*by* is the human (``USER_APPROVED``) or the agent run
+    (``AGENT_APPROVED``); a programming error otherwise."""
+    if by not in STORY_APPROVERS:
+        raise ValueError(f"a story approval is given by one of {', '.join(STORY_APPROVERS)}, not {by!r}")
+
+
+def _mark_story_approval(doc, key, by) -> None:
+    """story.json's ``approved_by[key]``: set for the agent run, removed for
+    the human (the map itself removed once empty, so a Studio story's
+    story.json never gains the key). In place."""
+    marks = dict(doc.get("approved_by") or {})
+    if by == AGENT_APPROVED:
+        marks[key] = AGENT_APPROVED
+    else:
+        marks.pop(key, None)
+    if marks:
+        doc["approved_by"] = marks
+    else:
+        doc.pop("approved_by", None)
+
+
+def _mark_doc_approval(doc, by) -> None:
+    """A document's own ``approved_by``: set for the agent run, removed for
+    the human. In place."""
+    if by == AGENT_APPROVED:
+        doc["approved_by"] = AGENT_APPROVED
+    else:
+        doc.pop("approved_by", None)
+
+
+def approved_by(doc, key=None):
+    """Who gave the approval that stands now: ``AGENT_APPROVED`` when the
+    agent run recorded it, ``USER_APPROVED`` otherwise, None while there is
+    none. *doc* is story.json with *key* (``concept``, ``bible``, ``style``,
+    ``season``), or a document with its own ``approved_at`` (a character, a
+    place, a prop, the season arc, the knowledge base) with no *key*."""
+    if doc is None:
+        return None
+    if key is None:
+        if not doc.get("approved_at"):
+            return None
+        return AGENT_APPROVED if doc.get("approved_by") == AGENT_APPROVED else USER_APPROVED
+    if not (doc.get("approvals") or {}).get(key):
+        return None
+    return AGENT_APPROVED if (doc.get("approved_by") or {}).get(key) == AGENT_APPROVED else USER_APPROVED
+
+
 # ------------------------------------------------------------- the key gate
 
 def no_key_message(links, *, where="in Settings") -> str:
@@ -497,7 +558,7 @@ def check_concept_choice(concept_id, concept) -> None:
         )
 
 
-def choose_concept(stories, story_id, *, concept_id=None, concept=None, now) -> dict:
+def choose_concept(stories, story_id, *, concept_id=None, concept=None, now, by=USER_APPROVED) -> dict:
     """Choose the story's concept; returns the story.
 
     Exactly one of *concept_id* (a library id, or a generated card's
@@ -508,8 +569,11 @@ def choose_concept(stories, story_id, *, concept_id=None, concept=None, now) -> 
     Writes a snapshot of the concept in the story's language, ``concept_id``
     (the library id, or ``"custom"``: the snapshot of a generated card keeps
     its ``gen_NN``), the concept's title, and ``approvals.concept``; a
-    different concept than before clears the bible approval.
+    different concept than before clears the bible approval. *by* (plan 21):
+    the human (default) or the agent run, recorded beside the approval
+    (:func:`_mark_story_approval`).
     """
+    _check_approver(by)
     story = load(stories, story_id)
     check_concept_choice(concept_id, concept)
 
@@ -549,6 +613,7 @@ def choose_concept(stories, story_id, *, concept_id=None, concept=None, now) -> 
         doc["concept"] = snapshot
         doc["title"] = title
         doc["approvals"]["concept"] = now
+        _mark_story_approval(doc, "concept", by)
 
     return update(stories, story_id, mutate, now=now)
 
@@ -704,9 +769,11 @@ def missing_bible_fields(story) -> list:
     return missing
 
 
-def approve_bible(stories, story_id, *, now) -> dict:
+def approve_bible(stories, story_id, *, now, by=USER_APPROVED) -> dict:
     """Set ``approvals.bible``; returns the story. ``conflict`` without a
-    chosen concept, or listing every bible field still missing or empty."""
+    chosen concept, or listing every bible field still missing or empty.
+    *by* (plan 21): the human (default) or the agent run."""
+    _check_approver(by)
     story = load(stories, story_id)
     require_concept(story)
     missing = missing_bible_fields(story)
@@ -718,14 +785,17 @@ def approve_bible(stories, story_id, *, now) -> dict:
 
     def mutate(doc):
         doc["approvals"]["bible"] = now
+        _mark_story_approval(doc, "bible", by)
 
     return update(stories, story_id, mutate, now=now)
 
 
-def approve_style(stories, story_id, *, now) -> dict:
+def approve_style(stories, story_id, *, now, by=USER_APPROVED) -> dict:
     """Freeze the draft style lock (``locked_at``) and set
     ``approvals.style``; returns the story. ``conflict`` without a
-    ``style_lock.json``, or when it is already locked."""
+    ``style_lock.json``, or when it is already locked. *by* (plan 21): the
+    human (default) or the agent run."""
+    _check_approver(by)
     current = style_lock(stories, story_id)
     if current is None:
         raise WorkflowError(CONFLICT, "There is no style to approve yet: run the style step first.")
@@ -741,6 +811,7 @@ def approve_style(stories, story_id, *, now) -> dict:
 
     def mutate(doc):
         doc["approvals"]["style"] = now
+        _mark_story_approval(doc, "style", by)
 
     return update(stories, story_id, mutate, now=now)
 
@@ -1680,14 +1751,16 @@ def check_entity_target(stories, story, parsed, *, voice=None, env=None):
 
 # ---------------------------------------------------------------- approvals
 
-def approve_entity(stories, story_id, kind, eid, *, now) -> dict:
+def approve_entity(stories, story_id, kind, eid, *, now, by=USER_APPROVED) -> dict:
     """Approve one character, place or prop; returns the story.
 
     ``not_found`` for an unknown one; ``conflict`` listing what it still
     lacks (:func:`character_missing` & co.). Its ``approved_at`` becomes
     *now* (the character re-read and written under the uploads' lock), and
-    the store re-folds ``approvals.cast`` / ``approvals.places``.
+    the store re-folds ``approvals.cast`` / ``approvals.places``. *by* (plan
+    21): the human (default) or the agent run, recorded on the entity.
     """
+    _check_approver(by)
     load(stories, story_id)
     doc = read_entity(stories, story_id, kind, eid)
     missing = MISSING[kind](stories, story_id, doc)
@@ -1697,6 +1770,7 @@ def approve_entity(stories, story_id, kind, eid, *, now) -> dict:
 
     def approve(current):
         current["approved_at"] = now
+        _mark_doc_approval(current, by)
 
     try:
         entities_step.write_entity(stories, story_id, kind, eid, approve, now=now)
@@ -1707,7 +1781,7 @@ def approve_entity(stories, story_id, kind, eid, *, now) -> dict:
     return load(stories, story_id)
 
 
-def approve_season(stories, story_id, *, now) -> dict:
+def approve_season(stories, story_id, *, now, by=USER_APPROVED) -> dict:
     """Approve the season arc; returns the story, now ``ready``.
 
     ``conflict`` until the places and props are approved (the status is a
@@ -1715,8 +1789,10 @@ def approve_season(stories, story_id, *, now) -> dict:
     hold ``episodes_planned`` entries each with a summary. Sets the arc's
     ``approved_at`` -- on ``season.json`` re-read under the store lock
     (``StoryStore.update_doc``), so a series step's write landing meanwhile
-    is kept -- and ``approvals.season``.
+    is kept -- and ``approvals.season``. *by* (plan 21): the human (default)
+    or the agent run, recorded on both.
     """
+    _check_approver(by)
     story = load(stories, story_id)
     if not reached(story, "places_approved"):
         raise WorkflowError(CONFLICT, "Approve the cast, the places and the props first.")
@@ -1735,6 +1811,7 @@ def approve_season(stories, story_id, *, now) -> dict:
         if current is None:
             raise WorkflowError(CONFLICT, "There is no season arc to approve yet: run the season step first.")
         current["approved_at"] = now
+        _mark_doc_approval(current, by)
         return current
 
     try:
@@ -1746,11 +1823,12 @@ def approve_season(stories, story_id, *, now) -> dict:
 
     def mutate(story_doc):
         story_doc["approvals"]["season"] = now
+        _mark_story_approval(story_doc, "season", by)
 
     return update(stories, story_id, mutate, now=now)
 
 
-def approve_knowledge(stories, story_id, *, now) -> dict:
+def approve_knowledge(stories, story_id, *, now, by=USER_APPROVED) -> dict:
     """Approve the story's knowledge base (phase 7 stage 5b, DEC-228); returns
     ``knowledge.json`` as written.
 
@@ -1761,7 +1839,9 @@ def approve_knowledge(stories, story_id, *, now) -> dict:
     ``approved_at`` and ``approved_rev`` (the ``rev`` approved), re-read
     under the store lock, without moving ``rev``: a later write moves it, and
     the episode gate then asks for the approval again. Never the story's
-    approvals or status (no seventh approval key, A14)."""
+    approvals or status (no seventh approval key, A14). *by* (plan 21): the
+    human (default) or the agent run, recorded on the knowledge base."""
+    _check_approver(by)
     story = load(stories, story_id)
     _step_refusal(knowledge_step.require_runnable, story)
     arc = season(stories, story_id)
@@ -1781,6 +1861,7 @@ def approve_knowledge(stories, story_id, *, now) -> dict:
                                            "run the knowledge step again first."))
         current["approved_at"] = now
         current["approved_rev"] = current["rev"]
+        _mark_doc_approval(current, by)
         return current
 
     try:
@@ -5513,3 +5594,566 @@ def series_page(stories, story, ep) -> dict:
     view = series_view(stories, story, ep)
     view["next_episode_gate"] = next_episode_gate(stories, story, ep)
     return view
+
+
+# ================================================================ agent mode
+#
+# Plan 21 stage 1 (U3; DEC-263's task C): a story created with ``mode:
+# "agent"`` (``generation_profile.mode``) can be taken from its seed to
+# episode 1 rendered by one job, ``story-fast-track``
+# (``steps/story_fast_track.py``), which approves each document by the rules
+# above, ``by: agent``. A Studio story (the default; no ``mode`` key) is
+# untouched: every function here refuses it or is never called for it.
+
+AGENT_STEP = agent_step.STEP
+AGENT_STEPS = (AGENT_STEP,)
+CONCEPTS_PARAMS = concepts_step.PARAMS
+
+
+def story_mode(story) -> str:
+    """The story's mode: ``agent``, or ``studio`` (no ``mode`` key: every
+    story created before plan 21, and every Studio story)."""
+    return (story.get("generation_profile") or {}).get("mode") or defaults.MODE_STUDIO
+
+
+def require_agent_mode(story) -> None:
+    """``conflict`` unless the story was created (or patched) in agent mode."""
+    if story_mode(story) != defaults.MODE_AGENT:
+        raise WorkflowError(CONFLICT, (
+            "The agent run is for a story in agent mode: this story is in Studio mode, where each step waits for "
+            "your approval. Run its steps one by one, or create a story with mode agent."))
+
+
+# The story documents a step job awaits approval for (the web layer's
+# ``_job_doc``), by the approval that settles each.
+AGENT_JOB_DOCS = (("concepts", "concept"), ("bible", "bible"), ("style", "style"), ("cast", "cast"),
+                  ("places", "places"), ("season", "season"))
+
+
+def agent_approved_docs(stories, story_id) -> list:
+    """The story documents whose approval stands now -- ``concepts``,
+    ``bible``, ``style``, ``cast``, ``places``, ``season``, and
+    ``knowledge`` once approved at its revision: the jobs awaiting them are
+    settled once an agent run, which approves them in-process, has ended."""
+    story = load(stories, story_id)
+    docs = [doc for doc, key in AGENT_JOB_DOCS if story["approvals"].get(key)]
+    if knowledge_current(knowledge(stories, story_id)):
+        docs.append("knowledge")
+    return docs
+
+
+def agent_request(params) -> dict:
+    """The agent run's params: none (``invalid`` otherwise)."""
+    if params:
+        raise WorkflowError(INVALID, f"'{AGENT_STEP}' takes no parameters.")
+    return {}
+
+
+def concepts_request(params) -> int:
+    """A concepts step's *params* (``{count?}``, 1 to
+    ``concepts.CALLS``; absent, ``concepts.CALLS``): the number of concepts
+    it writes; ``invalid`` otherwise (``concepts.read_count``'s rule)."""
+    _unknown_keys(params, CONCEPTS_PARAMS, "concepts")
+    return _step_refusal_as(INVALID, concepts_step.read_count, params)
+
+
+def _step_refusal_as(code, call, *args, **kwargs):
+    """*call*, its ``StepFailed`` a *code* refusal with the step's sentence."""
+    try:
+        return call(*args, **kwargs)
+    except StepFailed as exc:
+        raise WorkflowError(code, str(exc)) from None
+
+
+def agent_cast_pick(stories, story) -> list:
+    """The cast the agent run picks (plan 21 decision 2): the chosen
+    concept's ``cast_sketch`` names in its order, at most
+    ``story_fast_track.CAST_PICK_MAX``, and never more new characters than
+    :data:`MAX_CAST` leaves room for beside the story's own (a name the story
+    has is included at no cost). Empty for a concept with no sketch:
+    :func:`cast_request` then refuses it."""
+    existing = list_entities(stories, story["story_id"], CHARACTERS)
+    have = {entities_step.name_key(doc["name"]) for doc in existing}
+    room = MAX_CAST - len(existing)
+    pick, seen = [], set()
+    for name in sketch_names(story):
+        key = entities_step.name_key(name)
+        if key in seen:
+            continue
+        if len(pick) >= agent_step.CAST_PICK_MAX:
+            break
+        if key not in have:
+            if room <= 0:
+                continue
+            room -= 1
+        seen.add(key)
+        pick.append(name)
+    return pick
+
+
+def agent_preview_needed(stories, story_id) -> bool:
+    """Whether the style still needs its preview strip: no
+    ``style_preview.json``, or one with no image made."""
+    doc = read_doc(stories, story_id, preview_step.DOC_NAME, schemas.style_preview_errors)
+    return doc is None or not doc["images"]
+
+
+def _preview_verdict(stories, story, *, env) -> dict:
+    return preview_step.estimate(env, route=story["generation_profile"]["route"],
+                                 story_spent=cost_total(stories, story["story_id"]))
+
+
+def agent_preview_refusal(stories, story, *, env):
+    """Why the preview strip cannot be made now (its estimate's sentence:
+    the route's gate of ``style_preview``), or None."""
+    verdict = _preview_verdict(stories, story, env=env)
+    return None if verdict["ready"] else verdict["message"]
+
+
+def agent_season_todo(doc) -> list:
+    """The arc entries of season.json *doc* S2 has not expanded yet (S1's
+    skeleton leaves their ``open_hooks_out`` empty; S2 writes one to three),
+    in order."""
+    return [entry["ep"] for entry in (doc or {}).get("arc") or () if not entry.get("open_hooks_out")]
+
+
+def knowledge_current(doc) -> bool:
+    """Whether the knowledge base *doc* is approved at its current
+    revision (the episode gate's rule, ``episode_common.knowledge_refusal``)."""
+    return bool(doc and doc.get("approved_at") and doc.get("approved_rev") == doc.get("rev"))
+
+
+def _verdict_money(verdict) -> tuple:
+    """``(est_usd, paid)`` of an image verdict (``imaging.estimate``'s
+    shape): the first runnable link's paid price, or -- while it is not
+    ready -- the price of the paid link the gates refuse (the paid way the
+    images would take: ``fast_track.paid_verdict``'s rule)."""
+    if verdict["ready"]:
+        paid = verdict.get("route_class") == "paid"
+        return (float(verdict.get("est_usd") or 0.0) if paid else 0.0), paid
+    refused = [row for row in verdict.get("links") or []
+               if row.get("paid") and str(row.get("reason") or "").startswith("refused")]
+    if refused:
+        return float(refused[0].get("est_usd") or 0.0), True
+    return 0.0, False
+
+
+def _agent_generation(stories, story, units, *, env, probe_local=False) -> dict:
+    """A part's images and edits as the route's gate and estimate read them
+    (``_generation_gate``, ``_generation_estimate``)::
+
+        {"est_usd", "paid": bool, "refusal": sentence | None, "message": sentence}
+
+    -- ``IMAGE_CHAIN``'s verdict on the images (a v2 story's quality links),
+    then the editor's on the edits (``edit_readiness``, with the advice the
+    route gives). Calls nothing but, with *probe_local*, a local editor's
+    status probe."""
+    est, paid, refusals, words = 0.0, False, [], []
+    if units.get("images"):
+        verdict = image_verdict(stories, story, units["images"], env=env)
+        usd, is_paid = _verdict_money(verdict)
+        est, paid = est + usd, paid or is_paid
+        (words if verdict["ready"] else refusals).append(verdict["message"])
+    if units.get("edit_images"):
+        edit = edit_readiness(stories, story, env=env, qty=units["edit_images"], probe_local=probe_local)
+        usd, is_paid = _verdict_money(edit)
+        est, paid = est + usd, paid or is_paid
+        if edit["ready"]:
+            words.append(f"Then {units['edit_images']} reference image{'' if units['edit_images'] == 1 else 's'} "
+                         f"edited from the portraits: {edit['message']}")
+        else:
+            refusals.append(f"{edit['message']} {refimages.editor_advice(story, edit)}")
+    return {"est_usd": round(est, 4), "paid": paid, "refusal": refusals[0] if refusals else None,
+            "message": " ".join(words)}
+
+
+def agent_generation_refusal(stories, story, units, *, env, readiness=None, probe_local=False):
+    """Why a part of the agent run that makes *units* (``_units``' shape)
+    cannot start now, or None: the key gate when it calls the LLM chain
+    (:func:`llm_route`; *readiness* the caller's DEC-073 rule, none by
+    default), then the image chain's verdict and the editor's
+    (:func:`_agent_generation`) -- the gates the route's job of that step
+    meets before it exists."""
+    if units.get("llm_calls"):
+        refusal = llm_route(env, readiness=readiness or (lambda _links, _keys: None))[3]
+        if refusal:
+            return refusal
+    return _agent_generation(stories, story, units, env=env, probe_local=probe_local)["refusal"]
+
+
+def _agent_episode_usd(story, env) -> float:
+    """What episode 1 may spend before the story is ready to price it
+    exactly: nothing on the free budget profile; the Quality preset's own
+    figure (``media_policy.preset_estimate``, with the keyframe auto-fix's
+    ceiling) on the quality one; the profile's ``cap_usd`` otherwise."""
+    profile = (story.get("generation_profile") or {}).get("budget_profile")
+    if profile == defaults.DEFAULT_BUDGET_PROFILE:
+        return 0.0
+    try:
+        cap = float(budget_mod.profile_settings(profile).get("cap_usd") or 0.0)
+    except (OSError, ValueError, KeyError, TypeError):
+        cap = 0.0
+    if profile != "quality":
+        return round(cap, 4)
+    try:
+        usd = float(media_policy.preset_estimate(gating.merged_env(env))["episode_usd"])
+    except Exception:  # noqa: BLE001 - a predicted figure falls back to the profile's own
+        usd = cap
+    fix = media_policy.keyframe_fix(story)
+    return round(usd + (float(fix["cap_usd"]) if fix else 0.0), 4)
+
+
+def _agent_episode_calls(story) -> int:
+    """The most LLM calls episode 1's fast track makes before its script
+    exists: E1, an E2 a body scene, E3, E4, a T1 a scene, an M1 a platform."""
+    try:
+        slots = timing.episode_slots(templates.load_episode_template(story["episode_template_id"]), agent_step.EPISODE)
+    except (KeyError, ValueError, TypeError, OSError):
+        return 0
+    body = sum(1 for slot in slots if slot == "body")
+    return 1 + body + 2 + len(slots) + fast_track_step.M1_CALLS
+
+
+def _agent_episode_seconds(story, ft=None) -> float:
+    """Episode 1's time budget: the fast track's own (``budget_seconds``,
+    from its estimate *ft* when there is one), else its free-chain hour, or
+    its ceiling once clips are bought (tier >= 2)."""
+    tier = int((story.get("generation_profile") or {}).get("tier") or 1)
+    if ft is None:
+        return float(fast_track_step.FAST_TRACK_BUDGET_CEILING_SECONDS if tier >= 2
+                     else fast_track_step.FAST_TRACK_BUDGET_SECONDS)
+    shots = int(ft["render"]["shots"] or 0)
+    clips = (ft.get("video") or {}).get("count")
+    clips = (shots if tier >= 2 else 0) if clips is None else int(clips)
+    v2 = media_policy.is_v2(story)
+    fix = media_policy.keyframe_fix(story) if v2 else None
+    redraws = int(fix["max_redraws_per_shot"]) * shots if fix else 0
+    return fast_track_step.budget_seconds(shots=shots, clips=clips, v2=v2, redraws=redraws)
+
+
+def _agent_caps(stories, story, *, env) -> tuple:
+    """``(caps, budget, spent)``: the fast track's ``caps`` shape
+    (``{"allow_paid", "episode"|"day"|"story": {"cap_usd", "spent_usd",
+    "left_usd"}}``, episode 1's ledger rows for the episode), the budget
+    settings (None when they cannot be read) and ``{"episode", "day",
+    "story"}`` already spent."""
+    story_id = story["story_id"]
+    try:
+        budget_obj = gating.budget_of(gating.merged_env(env))
+    except ValueError:
+        budget_obj = None
+    story_spent = cost_total(stories, story_id)
+    ep_spent = 0.0
+    path = os.path.join(stories.story_dir(story_id), COST_LEDGER)
+    if os.path.isfile(path) and not os.path.islink(path):
+        try:
+            ep_spent = float(CostLedger(path).totals(agent_step.EPISODE)["est_usd"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise StoryUnreadable(story_id, f"{story_store.STORIES_DIRNAME}/{story_id}/{COST_LEDGER}",
+                                  [f"{type(exc).__name__}: {exc}"]) from None
+    day_spent = budget_mod.day_spent()
+    spent = {"episode": ep_spent, "day": day_spent, "story": story_spent}
+    caps = {"allow_paid": bool(budget_obj and budget_obj.allow_paid)}
+    if budget_obj is not None:
+        for name, cap in (("episode", budget_obj.per_episode_cap_usd), ("day", budget_obj.daily_cap_usd),
+                          ("story", budget_obj.per_story_cap_usd)):
+            caps[name] = {"cap_usd": cap, "spent_usd": round(spent[name], 4),
+                          "left_usd": round(max(0.0, cap - spent[name]), 4)}
+    return caps, budget_obj, spent
+
+
+def _agent_row(name, *, kept, units=None, est_usd=0.0, paid=False, exact=True, refusal=None, message="",
+               seconds=None) -> dict:
+    """One part of the agent run's estimate (see
+    :func:`story_fast_track_estimate`)."""
+    counted = _units()
+    counted.update(units or {})
+    return {
+        "part": name, "number": agent_step.PARTS.index(name) + 1, "label": agent_step.LABELS[name],
+        "kept": kept, "exact": exact, "units": counted,
+        "est_usd": 0.0 if kept else round(float(est_usd), 4), "paid": bool(paid) and not kept,
+        "seconds": 0.0 if kept else float(agent_step.PART_BUDGET_SECONDS if seconds is None else seconds),
+        "refusal": None if kept else refusal, "message": message,
+    }
+
+
+def _agent_generation_row(stories, story, name, units, *, env, llm_refusal, probe_local, exact=True,
+                          message="") -> dict:
+    """A part still to do that makes *units*: the key gate when it calls the
+    LLM chain, then :func:`_agent_generation`'s price and refusal."""
+    gen_part = _agent_generation(stories, story, units, env=env, probe_local=probe_local)
+    refusal = (llm_refusal if units.get("llm_calls") else None) or gen_part["refusal"]
+    text = " ".join(part for part in (message, gen_part["message"]) if part)
+    return _agent_row(name, kept=False, units=units, est_usd=gen_part["est_usd"], paid=gen_part["paid"],
+                      exact=exact, refusal=refusal, message=text)
+
+
+def _agent_llm_row(name, calls, *, llm_refusal, message="", exact=True) -> dict:
+    """A part still to do that calls only the LLM chain (*calls* calls):
+    refused by the key gate when it calls it at all."""
+    return _agent_row(name, kept=False, units={"llm_calls": calls}, exact=exact,
+                      refusal=llm_refusal if calls else None, message=message)
+
+
+def story_fast_track_estimate(stories, story, *, env, readiness=None, probe_local=False) -> dict:
+    """What the agent run would do and spend now, calling nothing (``GET
+    /estimate/story-fast-track``; the run asks it before its first part)::
+
+        {"step": "story-fast-track", "mode": "agent", "ep": 1,
+         "parts": [{"part", "number", "label", "kept", "exact", "units": {llm_calls, images, edit_images,
+                    tts_chars}, "est_usd", "paid", "seconds", "refusal", "message"}, ...],
+         "llm_calls", "est_usd", "exact", "paid": [part labels], "caps", "caps_line",
+         "budget": {"seconds", "minutes", "ceiling_seconds", "basis"},
+         "episode": <fast_track.estimate of episode 1> | None,
+         "ready", "stops_at": {"part", "number", "reason"} | None, "message"}
+
+    One row per part (``story_fast_track.PARTS``), each **kept** when its
+    document is approved already (the run keeps it as it is). The units are
+    the steps' own counts of what is missing: the concept 1 C1 call (0 when a
+    generated card waits to be chosen), the bible its 3 calls (0 once
+    written), the style's preview strip (``style_preview.estimate``: 3
+    images, unless one is made), the cast (:func:`cast_units` for
+    :func:`agent_cast_pick`), the places proposal (1 call), the places
+    (:func:`places_units` on the saved proposal), the season (1 + 8 calls,
+    or S2 for the entries not expanded), the knowledge base on a v2 story
+    (:func:`knowledge_calls`, and the props its D6 may add: up to
+    ``schemas.D6_NEW_PROPS_MAX``, each written and drawn) and episode 1
+    (:func:`fast_track_estimate`). What cannot be counted exactly yet is an
+    upper bound, ``exact`` false: before the concept, the cast is five new
+    characters; before the proposal, the places are P0's most (3 places, 3
+    props); before the pre-production is approved, episode 1 is priced from
+    the budget profile (:func:`_agent_episode_usd`) -- its exact price, and
+    the fast track's paid check, come once the story is ready.
+
+    Images are priced as the route's estimates price them (the image chain
+    on the story's route, the editor for the sheets); LLM calls at $0 as
+    every LLM estimate counts them (free links first, DEC-115). ``est_usd``
+    is the parts' sum; ``paid`` names the parts with a paid price. Not
+    ``ready`` -- ``stops_at`` the first part that cannot run, with its
+    reason: the key gate (*readiness*, the caller's DEC-073 rule; none by
+    default) for a part that calls the LLM, a part's own refusal (a concept
+    with no style or no cast sketch, the image chain, the editor, the fast
+    track's ``stops_at``), and then the sum (RC-A3): paid parts while
+    ``allow_paid`` is off, or over the day's or the story's cap (episode 1's
+    predicted price against its episode cap too) -- named, with the numbers
+    and the fast track's caps line. ``budget`` is the sum of the parts'
+    budgets: ``story_fast_track.PART_BUDGET_SECONDS`` a part of
+    pre-production, the fast track's own for episode 1, never more than
+    ``story_fast_track.STORY_BUDGET_CEILING_SECONDS``. ``conflict`` for a
+    Studio story."""
+    require_agent_mode(story)
+    story_id = story["story_id"]
+    approvals = story["approvals"]
+    v2 = media_policy.is_v2(story)
+    llm_refusal = llm_route(env, readiness=readiness or (lambda _links, _keys: None))[3]
+    rows = []
+
+    # 1. the concept
+    if approvals.get("concept"):
+        rows.append(_agent_row("concepts", kept=True, message=f"Chosen: {story.get('title') or 'the concept'}."))
+    elif generated_cards(stories, story_id):
+        rows.append(_agent_row("concepts", kept=False, message="The newest generated concept is chosen."))
+    else:
+        rows.append(_agent_llm_row("concepts", agent_step.CONCEPT_COUNT, llm_refusal=llm_refusal,
+                                   message="One concept written from the seed (C1), then chosen."))
+
+    # 2. the bible
+    if approvals.get("bible"):
+        rows.append(_agent_row("bible", kept=True))
+    else:
+        calls = len(bible_step.missing_parts(story))
+        rows.append(_agent_llm_row("bible", calls, llm_refusal=llm_refusal,
+                                   message="Approved once every field is written."))
+
+    # 3. the style and its preview strip
+    if approvals.get("style"):
+        rows.append(_agent_row("style", kept=True))
+    else:
+        refusal = None
+        template_id = story.get("style_template_id") or concept_style(story.get("concept"))
+        if story.get("concept") and style_lock(stories, story_id) is None and (
+                not template_id or template_id not in templates.list_style_ids()):
+            refusal = ("The concept suggests no shipped style and the story has none: build the style in Studio "
+                       f"(shipped: {', '.join(templates.list_style_ids())}), then continue the agent run.")
+        units, est, paid, message = {}, 0.0, False, "The style lock is built from its template."
+        if agent_preview_needed(stories, story_id):
+            verdict = _preview_verdict(stories, story, env=env)
+            est, paid = _verdict_money(verdict)
+            units = {"images": preview_step.SAMPLES}
+            message += f" Its preview strip: {verdict['message']}"
+            refusal = refusal or (None if verdict["ready"] else verdict["message"])
+        rows.append(_agent_row("style", kept=False, units=units, est_usd=est, paid=paid, refusal=refusal,
+                               message=message + " Approved with no taste check."))
+
+    # 4. the cast
+    if approvals.get("cast"):
+        rows.append(_agent_row("cast", kept=True))
+    elif story.get("concept"):
+        pick = agent_cast_pick(stories, story)
+        try:
+            cast_request(stories, story, {"selected": pick})
+        except WorkflowError as exc:
+            rows.append(_agent_row("cast", kept=False, refusal=str(exc)))
+        else:
+            units = cast_units(stories, story, selected=pick)
+            rows.append(_agent_generation_row(
+                stories, story, "cast", units, env=env, llm_refusal=llm_refusal, probe_local=probe_local,
+                message=f"{len(pick)} character{'' if len(pick) == 1 else 's'} from the concept's sketch: "
+                        f"{_and(pick)}; approved with no taste check."))
+    else:
+        names = [f"Character {n}" for n in range(1, agent_step.CAST_PICK_MAX + 1)]
+        units = cast_units(stories, story, selected=names)
+        rows.append(_agent_generation_row(
+            stories, story, "cast", units, env=env, llm_refusal=llm_refusal, probe_local=probe_local, exact=False,
+            message=f"Up to {agent_step.CAST_PICK_MAX} characters from the concept's sketch, once it is written."))
+
+    # 5. the places proposal, 6. the places
+    proposal = places_proposal(stories, story_id)
+    listed = (proposal is not None or list_entities(stories, story_id, PLACES)
+              or list_entities(stories, story_id, PROPS))
+    if approvals.get("places") or listed:
+        rows.append(_agent_row("places_proposal", kept=True))
+    else:
+        rows.append(_agent_llm_row("places_proposal", 1, llm_refusal=llm_refusal,
+                                   message="P0 proposes the places and props from the bible and the cast."))
+    if approvals.get("places"):
+        rows.append(_agent_row("places", kept=True))
+    elif listed:
+        units = places_units(stories, story)
+        rows.append(_agent_generation_row(stories, story, "places", units, env=env, llm_refusal=llm_refusal,
+                                          probe_local=probe_local,
+                                          message="The saved proposal, made; approved with no taste check."))
+    else:
+        items = schemas.P0_PLACES_RANGE[1] + schemas.P0_PROPS_MAX
+        units = dict(_units(), llm_calls=items * (2 if v2 else 1), images=items)
+        rows.append(_agent_generation_row(
+            stories, story, "places", units, env=env, llm_refusal=llm_refusal, probe_local=probe_local, exact=False,
+            message=(f"Up to {schemas.P0_PLACES_RANGE[1]} places and {schemas.P0_PROPS_MAX} props, as P0 "
+                     "proposes them.")))
+
+    # 7. the season
+    arc = season(stories, story_id)
+    if approvals.get("season"):
+        rows.append(_agent_row("season", kept=True))
+    else:
+        calls = 1 + season_step.DEFAULT_EPISODES if arc is None else len(agent_season_todo(arc))
+        planned = season_step.DEFAULT_EPISODES if arc is None else arc["episodes_planned"]
+        rows.append(_agent_llm_row("season", calls, llm_refusal=llm_refusal,
+                                   message=f"{planned} episodes, each written; then approved."))
+
+    # 8. the knowledge base (v2)
+    if not v2:
+        rows.append(_agent_row("knowledge", kept=True, message="A legacy story has no knowledge base."))
+    else:
+        doc = knowledge(stories, story_id)
+        if knowledge_current(doc):
+            rows.append(_agent_row("knowledge", kept=True))
+        else:
+            planned = arc["episodes_planned"] if arc else season_step.DEFAULT_EPISODES
+            calls = knowledge_step.calls_left(doc, planned)
+            units = dict(_units(), llm_calls=calls)
+            exact = True
+            message = "D4, D5 per episode, D6; then approved."
+            if doc is None or "props_registry" not in doc:
+                new = schemas.D6_NEW_PROPS_MAX
+                units.update(llm_calls=calls + 2 * new, images=new)
+                exact = False
+                message += f" D6 may add up to {new} props, each written and drawn by the places step."
+            rows.append(_agent_generation_row(stories, story, "knowledge", units, env=env, llm_refusal=llm_refusal,
+                                              probe_local=probe_local, exact=exact, message=message))
+
+    # 9. episode 1
+    ft = None
+    if all(row["kept"] for row in rows):
+        try:
+            ec = episode_context(stories, story, agent_step.EPISODE, step=fast_track_step.STEP)
+            ft = fast_track_estimate(ec, env=env)
+        except WorkflowError as exc:
+            rows.append(_agent_row("episode", kept=False, refusal=str(exc),
+                                   seconds=_agent_episode_seconds(story)))
+        else:
+            calls = ft["llm_calls"]["total"]
+            kept = not ft["render"]["needed"] and not calls
+            reason = (ft["stops_at"] or {}).get("reason")
+            rows.append(_agent_row("episode", kept=kept, units={"llm_calls": calls, "images": ft["images"]["count"]},
+                                   est_usd=ft["est_usd"], paid=ft["paid"]["paid"], refusal=reason,
+                                   message=ft["paid"]["message"], seconds=_agent_episode_seconds(story, ft)))
+    else:
+        usd = _agent_episode_usd(story, env)
+        profile = story["generation_profile"]["budget_profile"]
+        rows.append(_agent_row(
+            "episode", kept=False, units={"llm_calls": _agent_episode_calls(story)}, est_usd=usd, paid=usd > 0,
+            exact=False, seconds=_agent_episode_seconds(story),
+            message=(f"Priced from the {profile} budget profile until the pre-production is approved (up to "
+                     f"${usd:.2f}); the fast track's paid check prices it exactly before anything of episode "
+                     f"{agent_step.EPISODE} is bought.")))
+
+    # --- the sum, the caps (RC-A3)
+    pending = [row for row in rows if not row["kept"]]
+    paid_rows = [row for row in pending if row["paid"]]
+    total = round(sum(row["est_usd"] for row in pending), 4)
+    paid_total = round(sum(row["est_usd"] for row in paid_rows), 4)
+    exact = all(row["exact"] for row in pending)
+    caps, budget_obj, spent = _agent_caps(stories, story, env=env)
+    caps_line = fast_track_step._caps_line(caps)
+    named = _and(f"{row['label']} (est {'' if row['exact'] else 'up to '}${row['est_usd']:.3f})"
+                 for row in paid_rows)
+    sum_refusal = None
+    if paid_rows and paid_total > 0:
+        if budget_obj is None:
+            sum_refusal = "The budget settings cannot be used: fix them in Settings first."
+        elif not budget_obj.allow_paid:
+            sum_refusal = (f"The agent run needs paid generation -- {named}, est ${paid_total:.3f} in all -- and "
+                           f"allow_paid is off. {caps_line} Nothing was generated or spent: turn allow_paid on in "
+                           "Settings (the episode, day and story caps must all fit), or choose free links.")
+        else:
+            over = []
+            episode_row = rows[-1]
+            if episode_row["paid"] and not episode_row["exact"] and (
+                    spent["episode"] + episode_row["est_usd"] > budget_obj.per_episode_cap_usd):
+                over.append(f"episode {agent_step.EPISODE} to ${spent['episode'] + episode_row['est_usd']:.2f} "
+                            f"of its ${budget_obj.per_episode_cap_usd:.2f} cap")
+            if spent["day"] + paid_total > budget_obj.daily_cap_usd:
+                over.append(f"today to ${spent['day'] + paid_total:.2f} of the ${budget_obj.daily_cap_usd:.2f} "
+                            "daily cap")
+            if spent["story"] + paid_total > budget_obj.per_story_cap_usd:
+                over.append(f"this story to ${spent['story'] + paid_total:.2f} of its "
+                            f"${budget_obj.per_story_cap_usd:.2f} cap")
+            if over:
+                sum_refusal = (f"The agent run would go over a cap -- {named}, est ${paid_total:.3f} in all: it "
+                               f"would bring {_and(over)}. {caps_line} Nothing was generated or spent: raise that "
+                               "cap in Settings, or choose free links.")
+    candidates = [(row["number"], row["part"], row["refusal"]) for row in pending if row["refusal"]]
+    if sum_refusal:
+        candidates.append((paid_rows[0]["number"], paid_rows[0]["part"], sum_refusal))
+    stops_at = None
+    if candidates:
+        number, part, reason = min(candidates, key=lambda item: item[0])
+        stops_at = {"part": part, "number": number, "reason": " ".join(str(reason).split())}
+
+    raw = sum(row["seconds"] for row in pending)
+    seconds = float(min(raw, agent_step.STORY_BUDGET_CEILING_SECONDS))
+    budget = {"seconds": seconds, "minutes": round(seconds / 60, 1),
+              "ceiling_seconds": agent_step.STORY_BUDGET_CEILING_SECONDS,
+              "basis": (f"{agent_step.PART_BUDGET_SECONDS // 60} min a part of pre-production still to do, the "
+                        f"fast track's own budget for episode {agent_step.EPISODE}, never more than "
+                        f"{agent_step.STORY_BUDGET_CEILING_SECONDS // 3600} h")}
+    llm_calls = sum(row["units"]["llm_calls"] for row in pending)
+
+    if stops_at is not None:
+        message = stops_at["reason"]
+    elif not pending:
+        message = f"Nothing left to do: episode {agent_step.EPISODE} is rendered with its metadata pack."
+    else:
+        upto = "" if exact else "up to "
+        money = f"paid: {named}" if paid_rows else "nothing paid"
+        labels = _and(row["label"] for row in pending)
+        message = (f"{len(pending)} part{'' if len(pending) == 1 else 's'} to do ({labels}): "
+                   f"{llm_calls} LLM calls on the free links first ($0 here), est {upto}${total:.2f} -- {money}; "
+                   f"about {budget['minutes']:g} min. {caps_line}").strip()
+    return {
+        "step": AGENT_STEP, "mode": defaults.MODE_AGENT, "ep": agent_step.EPISODE, "parts": rows,
+        "llm_calls": llm_calls, "est_usd": total, "exact": exact, "paid": [row["label"] for row in paid_rows],
+        "caps": caps, "caps_line": caps_line, "budget": budget, "episode": ft,
+        "ready": stops_at is None, "stops_at": stops_at, "message": message,
+    }

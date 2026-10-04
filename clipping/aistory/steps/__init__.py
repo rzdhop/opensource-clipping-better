@@ -21,15 +21,18 @@ adds ``script`` and ``storyboard`` (and the episode targets); phase 4 adds
 call ending awaiting approval, and ``rerender`` (stage 8: the render again,
 making only the shot clips that changed since the last good render); phase 7
 (stage 5b) adds ``knowledge``, a v2 story's knowledge base, ending awaiting
-approval like the season. Each is
+approval like the season; plan 21 (agent mode) adds ``story-fast-track``
+(module ``story_fast_track``): an agent-mode story from its seed to episode
+1 in one job, ending completed. Each is
 registered by module name and imported on its first run, never here:
 importing this package must not pull in the prompt catalogue, the LLM chain
 or the generation chains, so the worker's dispatch and a test that only
 needs the registry stay as light as they were.
 
 How a step's job ends is :func:`ends_completed`'s answer (DEC-161, amending
-DEC-108): ``render``, ``metadata``, ``fast-track``, ``rerender`` and a
-regenerate of ``metadata:<ep>:<platform>`` leave nothing to approve and end
+DEC-108): ``render``, ``metadata``, ``fast-track``, ``rerender``,
+``story-fast-track`` (plan 21) and a regenerate of
+``metadata:<ep>:<platform>`` leave nothing to approve and end
 ``completed``; every other step ends ``awaiting_approval``, as it always did.
 
 A runner that fails in a way the user can act on raises :class:`StepFailed`
@@ -63,6 +66,10 @@ class StepContext:
     # The outputs/ directory; the story lives in outputs/stories/<story_id>/.
     outputs_dir: str
     on_log: Callable[[str], None] = print
+    # Plan 21 stage 1: a runner that chains parts (``story-fast-track``) says
+    # which one it is on; the worker records it as the job's ``sub_step``.
+    # None (the default, and every other caller): nobody is told.
+    on_sub_step: Optional[Callable[[Optional[str]], None]] = None
 
 
 class UnknownStep(KeyError):
@@ -126,12 +133,13 @@ RUNNERS: dict[str, Callable[[StepContext], object]] = {
     "feedback": _deferred("feedback"),
     "propose-next": _deferred("propose_next"),
     "rerender": _deferred("rerender"),
+    "story-fast-track": _deferred("story_fast_track"),
 }
 
 # DEC-161: the steps with nothing to approve, whose job ends ``completed``;
 # and the first word of the regenerate targets that end so too
 # (``metadata:<ep>:<platform>``). Every other step ends awaiting approval.
-COMPLETED_STEPS = ("render", "metadata", "fast-track", "rerender")
+COMPLETED_STEPS = ("render", "metadata", "fast-track", "rerender", "story-fast-track")
 COMPLETED_TARGET_KINDS = ("metadata",)
 
 

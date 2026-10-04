@@ -295,6 +295,8 @@ _PROFILE_CHOICES = {
     "budget_profile": defaults.BUDGET_PROFILES,
     "pipeline": defaults.PIPELINES,
     "video_resolution": defaults.VIDEO_RESOLUTIONS,
+    # Plan 21 stage 1: Studio (absent) or agent mode.
+    "mode": defaults.STORY_MODES,
 }
 
 _INDEX_ENTRY_SCHEMA = {

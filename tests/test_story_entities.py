@@ -281,9 +281,13 @@ PHASE5_OPTIONAL = {
                                                                      "chosen_direction"},
     # Phase 7 stage 3a (DEC-226): the structured look and the dossier are
     # optional blocks, absent on every stored story.
-    ("CHARACTER_SCHEMA", "$"): {"look", "dossier"},
-    ("PLACE_SCHEMA", "$"): {"look"},
-    ("PROP_SCHEMA", "$"): {"look"},
+    # Plan 21 stage 1, re-pinned on purpose: ``approved_by`` -- the agent run's
+    # mark beside an approval it gave -- is optional on each, absent on every
+    # approval a human gave.
+    ("CHARACTER_SCHEMA", "$"): {"look", "dossier", "approved_by"},
+    ("PLACE_SCHEMA", "$"): {"look", "approved_by"},
+    ("PROP_SCHEMA", "$"): {"look", "approved_by"},
+    ("SEASON_ARC_SCHEMA", "$"): {"approved_by"},
     # Fix A3 (phase 7 quality overhaul): apparent age and gender presentation,
     # optional on the character look -- absent on every look written before it;
     # phase 7 follow-up, stage F2: the bearing (posture), the same way.
