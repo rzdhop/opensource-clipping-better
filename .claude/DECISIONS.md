@@ -5112,3 +5112,32 @@ double billing on the re-send). Retrying the face-detection 422 on another seed 
 (rollback needs the entry removed by hand); the lipsync badge reads "No face to lip-sync". Follow-up: if fal ever
 purges a request that did complete before the poll, its booking would be released wrongly — RC-A3 now rests on that
 behaviour of fal's queue. Commit 33e7dec (main).
+
+## DEC-265 — The redraw note ends with the shot's own framing and J2 names a framing issue; a check-only script run; the one click approves over repeated blocking issues once the repairs are spent (plan 19 stage 3, F3 + F6 + F4, after DEC-264)
+**Context.** On the episode-2 walk 7 of 15 keyframes were flagged "medium shot instead of tight close-up" and ten
+redraws ($0.40) fixed one: the note only echoed J2's prose at the prompt's tail, and J2 had no field for framing.
+A text-only line edit staled E4, and `approve_anyway` cannot waive staleness; the only refresh was the script step,
+which also rewrote scenes. The repair loop found the same two blocking issues after both passes and the fast track
+stopped; the human approved anyway three times on one episode.
+**Decision.** F3: the redraw note always ends with an order built from the shot's own plan — "Frame this as
+{FRAMING_PHRASES[framing]}, nothing wider." (no "nothing wider" on the widest framing; J2's text is cut first so the
+order fits the 300-character cap); `_J2_ASK` gains an optional `framing_issue` that fails the verdict and shows as
+"framing: …" in the log, the fix history, the review and the episode page; the brief, the v1 prompts and J2's version
+(2) are unchanged on purpose (a bump would re-check every judged keyframe). F6: `POST /steps/script` with
+`params.check_only` runs E4 and, on v2, J1 on the script as it stands — writes, fills and repairs nothing; 409 for an
+incomplete script, 400 with `measure_voices`; `workflow.SCRIPT_CHECK_PARAMS` is its own closed list; the stale message
+says "run the script step with check only"; the dashboard's "Check again" and the CLI's `--check-only` send it. F4
+(amends DEC-162/248 as DEC-246 did for the keyframes): on a v2 story, once this run's repair passes number
+`REPAIR_PASSES_MAX` and only blocking issues remain — checks fresh, J1 version ≥ 2, the length inside its window — the
+fast track approves the script anyway, records `approved_by: fast_track` and `approved_over` (the issues) and names
+them in the feed, the last line and the review; `params.stop_on_script_issues` (a dashboard checkbox, CLI
+`--stop-on-script-issues`) keeps the stop; a legacy story, a version-1 report, an unspent pass, a stale check or a
+script outside its window still stop.
+**Rejected.** Appending the framing order only on a framing mismatch (J2 files framing under `missing` or
+`continuity_issue` too often; the order never contradicts the plan). Bumping J2 to version 3 (re-judges every
+keyframe). Letting `approve_anyway` waive a stale check (the check must have read this revision).
+**Consequence.** Three tests re-pinned on purpose: the two fast-track rules (renamed, the new rule pinned as a pure
+function `script_anyway_issues`), and three script-approval messages left stale by DEC-261 (a minor character note is
+"kept for review", neither counted nor quoted) — found failing on main before this stage. J2's text budget is at
+1194 of 1200. Follow-ups: `MAX_TOKENS["J2"]` (110) could cut a reply with every field at its maximum; the fast-track
+estimate still predicts a stop for a v2 script with blocking issues before the repairs ran. Commits f11ed8d, 74a4db9.
