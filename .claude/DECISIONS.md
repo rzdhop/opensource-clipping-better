@@ -5440,3 +5440,43 @@ Fast, downloads the MP4 with its audio and uploads it on the Shot list. Tests: `
 and resume (+2); re-pins on purpose: the profile lists, the new-story default, the job response, the feed's terminal
 statuses, `test_story_native_speech_clips.py` (a nonexistent provider instead of `manual`). The agent's 194-file
 selection 6364 local / 5520 + 813 skipped; the merge selection (32 files) 731 local, 483 / 248 skipped on the CI env.
+
+## DEC-274 — Concept fidelity: the user's idea is a binding brief; every card tells it from one of ten angles, is rule-checked and judged, and shows whether it kept the brief (plan 22 stage 2, after DEC-277)
+**Context.** The human (2026-10-04): "the concept proposing — it's always generated to match the user's description
+of the wanted story." `build_c1` said "Invent exactly 1 original concept" at temperature 0.9; the seed was one data
+line cut at 120 words between the style line and a 24-title avoid list; nothing checked a card against it.
+**Decision** (`12eb7b2`, `7f3f3a8`, `4cd006a`, `ef59c2d`; reviewed: 5 findings, 3 fixed, 2 recorded).
+- **Gate**: a non-empty `seed_text` and `generation_profile.writing == "v3"` — a new optional profile key
+  (`defaults.WRITING_VERSIONS`), stamped `v3` by `store.create` on every story created from now on unless the caller
+  names a version. Without the gate C1 and B1 are byte-identical to before (**RC-W2**, tests on both prompts).
+- **The brief**: `context.Pack.brief`, read in full up to `_BRIEF_WORD_LIMIT` 400 words (the old seed line keeps 120),
+  rendered first and fenced; with a brief the avoid list keeps only this story's own cards.
+- **C1v2** (`prompts.build_c1_v2`, temperature 0.7, `C1_ANGLES` ten angles, call n → angle n; `count: 1` → "the brief
+  played straight"): "The brief is binding. Keep exactly what it gives: every named character (same name, role and
+  relationships), the setting, the premise and its central conflict, the genre, the tone, and every event it
+  describes. Invent only what it leaves open. Never rename, replace or drop a named character, never move the story
+  elsewhere, never change what the conflict is about. This call's angle: {angle} …" with the logline as "who wants
+  what, who stands in the way, and what is at stake".
+- **The rule check** inside the call's validator (DEC-259's told-why retry): `context.brief_entities` — capitalised
+  words that do not open their sentence (a stop-list of articles, pronouns, months and days), a quoted span only when
+  short (≤ 4 words) and capitalised, the capitalised word after "appelé(e)/named/called" — each must appear
+  accent- and case-folded in the card's title, logline, world or cast; error "$.cast_sketch: the brief names X; the
+  concept never does -- keep it".
+- **The judge C1J** (premium chain, `MAX_TOKENS` 200): `kept` + `missing[]`; not kept → the same C1v2 call asked
+  once more with the misses as refusal reasons → judged again; still not kept (or the re-judge fails) → the card is
+  stored with `brief_fit = {kept: false, missing, checked_by: "C1J", checked_at}` — never silently; no usable
+  premium link → the judge is skipped, said once per batch, `brief_fit` absent.
+- **B1v3**: the brief under the concept, "Keep the brief's names, setting and conflict"; a bible-field regenerate
+  keeps plain B1.
+- **Agent mode** (DEC-270 amended): a drifted card stops the run with "The concept drifted from your brief: …".
+- **Dashboard**: the card shows "✓ Kept to your brief" or "⚠ Drifted: …". Budgets measured: C1v2 1690 / 700, C1J
+  1240 / 200, B1v3 1480 / 400; `SCHEMA_NAMES` distinct per version ("story_concepts_v2", "bible_core_v3").
+**Rejected.** A strict entity rule binding every quoted span (a brief quoting a line of dialogue refused every
+card — fixed in review). Checking fidelity only by prompt (no judge).
+**Consequence.** On this host every new story's concepts and bible read the brief; ≈ $0.02 of judge calls per
+batch. Recorded for later: with `allow_paid` off the judge runs on the free tail (the weak writers judge
+themselves); `_writing_gate` lives in two steps (stage 3 adds `media_policy.writing_v3`; stage 7 consolidates);
+A-150's per-story opt-in for existing stories is the `writing` key through PATCH (no card control yet). Tests:
+`tests/test_story_concepts_brief.py` (17), B1 gate tests in `test_story_steps.py`, 17 default-profile pins re-pinned
+across the suite for the stamp; the finisher's selection 1245 local / 1071 + 174 skipped; the fix re-run 324 /
+318 + 6 skipped.
