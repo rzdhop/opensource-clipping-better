@@ -983,7 +983,9 @@ def test_the_estimate_route_follows_the_story_route_and_its_ledger(api):
     url = f"/api/stories/{story_id}/estimate/style_preview"
 
     body = api.client.get(url).json()
-    assert set(body) == {"step", "est_usd", "units", "route_class", "link", "links", "ready", "message"}
+    # Re-pinned on purpose (plan 23 A4): the route adds today's paid spending to every estimate.
+    assert set(body) == {"step", "est_usd", "units", "route_class", "link", "links", "ready", "message", "today"}
+    assert body["today"]["spent_usd"] == 0.0
     assert (body["step"], body["units"], body["route_class"], body["link"], body["est_usd"]) == (
         "style_preview", {"images": 3}, "free", "pollinations/flux", 0.0)
 

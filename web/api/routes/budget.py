@@ -56,15 +56,19 @@ def _resets_at(day: str) -> str:
 
 def today_block(env=None) -> dict:
     """The ``GET /api/budget/today`` body as a plain dict. Never raises on an
-    unreadable story: a ledger it cannot read counts for nothing."""
+    unreadable story: a ledger it cannot read counts for nothing.
+
+    Plan 23 A4: also ``story_count``, how many stories spent today (the
+    response model leaves it out; the stories' 409 and estimate carry it)."""
     env = worker.get_settings_env() if env is None else env
     state = budget_mod.day_state()
     cap = _daily_cap(env)
     try:
         sources = day_report.story_sources(story_store.StoryStore(worker.OUTPUTS_ROOT))
-        stories = day_report.day_contributors(sources, day=state.day, limit=CONTRIBUTORS_SHOWN)
+        every = day_report.day_contributors(sources, day=state.day, limit=len(sources))
     except Exception:
-        stories = []
+        every = []
+    stories = every[:CONTRIBUTORS_SHOWN]
     return {
         "day": state.day,
         "zone": state.zone,
@@ -75,6 +79,7 @@ def today_block(env=None) -> dict:
         "effective_cap_usd": round(cap + state.extra, 4),
         "cap_below_spend": state.spent > cap,
         "stories": stories,
+        "story_count": len(every),
         "other_usd": day_report.other_usd(state.spent, stories),
         "grants_today": budget_mod.default_spend().grants_today(),
         "resets_at": _resets_at(state.day),

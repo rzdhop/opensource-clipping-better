@@ -1368,7 +1368,7 @@ def overridden_assets_doc(ec, doc, changes, *, now):
     return new
 
 
-def spending_caps(ec, total, *, env, ledger=None, video=None, fix_usd=0.0) -> tuple:
+def spending_caps(ec, total, *, env, ledger=None, video=None, fix_usd=0.0, with_refusal=False) -> tuple:
     """``(caps, over_cap)`` for a plan that would spend *total* paid
     dollars on episode *ec.ep*: ``caps`` is ``{"allow_paid", "episode"|"day"|
     "story": {"cap_usd", "spent_usd", "left_usd"}}`` (the three only when the
@@ -1376,7 +1376,9 @@ def spending_caps(ec, total, *, env, ledger=None, video=None, fix_usd=0.0) -> tu
     the episode's cap included -- with the numbers, when paid is on; else
     None. Calls nothing. With *video* (``asset_units``' ``video`` part, phase
     6 stage 7) the refusal names the clips' numbers too; with *fix_usd* (the
-    keyframe auto-fix's ceiling in *total*, phase 8 stage B), that too."""
+    keyframe auto-fix's ceiling in *total*, phase 8 stage B), that too.
+    With *with_refusal* (plan 23 A4) a third item: the refusal's numbers
+    (``BudgetRefused.as_dict``), None when nothing refused."""
     ledger = ledger or _open_ledger(ec)
     story_spent = float(ledger.totals()["est_usd"])
     ep_spent = float(ledger.totals(ec.ep)["est_usd"])
@@ -1396,7 +1398,7 @@ def spending_caps(ec, total, *, env, ledger=None, video=None, fix_usd=0.0) -> tu
         if day_extra > 0:
             # Plan 23 A2: today's allowance counts in the day's left_usd; the saved cap_usd stays what it is.
             caps["day"]["extra_usd"] = round(day_extra, 4)
-    over_cap = None
+    over_cap = refusal = None
     if budget_obj is not None and budget_obj.allow_paid and total > 0:
         what = "paid images and voices"
         if video:
@@ -1418,7 +1420,9 @@ def spending_caps(ec, total, *, env, ledger=None, video=None, fix_usd=0.0) -> tu
             budget_mod.check(plan, None, budget=budget_obj, day_spent=day_spent, day_extra=day_extra,
                              ep_spent=ep_spent, story_spent=story_spent)
         except budget_mod.BudgetRefused as exc:
-            over_cap = str(exc)
+            over_cap, refusal = str(exc), exc.as_dict()
+    if with_refusal:
+        return caps, over_cap, refusal
     return caps, over_cap
 
 
@@ -2224,11 +2228,12 @@ def clip_quote(ec, script, storyboard, shot, *, env, adapters=None, probe_local=
         quote["message"] = still_generating(shot, entry)
         return quote
     paid = video["route_class"] == "paid"
-    _caps, over = spending_caps(ec, quote["est_usd"] if paid else 0.0, env=env, ledger=ledger)
+    _caps, over, refusal = spending_caps(ec, quote["est_usd"] if paid else 0.0, env=env, ledger=ledger,
+                                         with_refusal=True)
     what = f"1 clip ({row['clip_s']} s) of shot {shot['shot_id']} on {video['link']}"
     if over:
-        quote.update(over_cap=over, message=f"{what} would go over a cap, so nothing would be generated or spent: "
-                                             f"{over}.")
+        quote.update(over_cap=over, refusal=refusal,
+                     message=f"{what} would go over a cap, so nothing would be generated or spent: {over}.")
         return quote
     price = f"paid: est ${quote['est_usd']:.3f}" if paid else "on your own hardware: $0.00"
     quote.update(ready=True, message=f"{what}, {price}.")

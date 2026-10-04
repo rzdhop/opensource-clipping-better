@@ -100,7 +100,9 @@ def link_summary(kind, link, merged, budget_obj, request, *, qty=1, story_spent=
     runner will check -- times *qty* (0.0 for a free link, and for a paid one
     with no price). ``allowed`` is false without a key, and for a paid link
     while ``allow_paid`` is off or when the budget refuses the estimate;
-    ``reason`` then carries the refusal with its numbers. The route, the local
+    ``reason`` then carries the refusal with its numbers, and ``refusal`` the
+    same numbers as ``BudgetRefused.as_dict`` (``{cap, usd, spent, cap_usd,
+    extra}``; None without a budget refusal; plan 23 A4). The route, the local
     probe and the free-tier limiter are the caller's to add: they depend on
     where the call would run.
     """
@@ -123,6 +125,7 @@ def link_summary(kind, link, merged, budget_obj, request, *, qty=1, story_spent=
             est = round(est * qty, 6)
     allowed = not missing
     reason = None
+    refusal = None
     if allowed and paid:
         state = budget_mod.day_state()
         day_spent = state.spent
@@ -131,16 +134,18 @@ def link_summary(kind, link, merged, budget_obj, request, *, qty=1, story_spent=
             allowed = False
             reason = (f"refused: est ${est:.3f} on {gen.describe(link)}; allow_paid is off "
                       f"(today ${day_spent:.2f} of ${budget_obj.daily_cap_usd:.2f})")
+            refusal = budget_mod.BudgetRefused(reason, cap="allow_paid", usd=est, spent=day_spent,
+                                               cap_usd=budget_obj.daily_cap_usd, extra=state.extra).as_dict()
         else:
             try:
                 budget_mod.check(est, link, budget=budget_obj, day_spent=day_spent, story_spent=story_spent,
                                  day_extra=state.extra)
             except budget_mod.BudgetRefused as exc:
-                allowed, reason = False, str(exc)
+                allowed, reason, refusal = False, str(exc), exc.as_dict()
     return {
         "label": gen.describe(link), "provider": link.provider, "model": link.model,
         "paid": paid, "keyed": not missing, "missing_keys": missing,
         "adapter": adapter is not None,
-        "allowed": allowed, "est_usd": est, "reason": reason,
+        "allowed": allowed, "est_usd": est, "reason": reason, "refusal": refusal,
         "env_keys": list(gen.env_keys_for(link)), "signup_url": provider.signup_url,
     }

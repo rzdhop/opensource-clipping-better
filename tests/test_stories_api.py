@@ -1057,11 +1057,15 @@ def test_the_estimate_of_each_phase_one_step(api):
 
     for step, calls in (("concepts", 10), ("bible", 3), ("regenerate", 1)):
         body = api.client.get(f"{url}/{step}").json()
+        # Re-pinned on purpose (plan 23 A4): every estimate carries today's paid spending
+        # (routes/budget.today_block), added in one place in the route.
         assert body == {
             "step": step, "est_usd": 0.0, "units": {"llm_calls": calls}, "route_class": "free",
             "link": "gemini/gemini-test", "links": [link], "ready": True, "message": body["message"],
+            "today": body["today"],
         }
         assert "gemini/gemini-test" in body["message"]
+        assert (body["today"]["spent_usd"], body["today"]["extra_usd"], body["today"]["stories"]) == (0.0, 0.0, [])
 
     assert api.client.get(f"{url}/regenerate", params={"target": "concepts"}).json()["units"] == {"llm_calls": 10}
     assert api.client.get(f"{url}/regenerate", params={"target": "bible:tone"}).json()["units"] == {"llm_calls": 1}

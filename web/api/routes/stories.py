@@ -124,6 +124,7 @@ import re
 import tempfile
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Optional
 from urllib.parse import quote
 
@@ -144,7 +145,9 @@ from clipping.aistory.steps import llm_call, llm_spend
 from clipping.aistory.steps import regenerate as regenerate_step
 from clipping.aistory.steps import story_fast_track as agent_step
 from clipping.aistory.steps import style_preview as preview_step
-from clipping.providers import pricing, registry
+from clipping.aistory import imaging
+from clipping.providers import budget as budget_mod
+from clipping.providers import gating, pricing, registry
 
 from .. import store, worker
 from ..auth import require_token, story_media_url
@@ -173,6 +176,7 @@ from ..models import (
     StoryStepRequest,
     StorySwitchPipelineRequest,
 )
+from . import budget as budget_routes
 from . import jobs as jobs_routes
 
 router = APIRouter(prefix="/api/stories", tags=["stories"], dependencies=[Depends(require_token)])
@@ -699,38 +703,200 @@ def _clip_estimate(stories, story, parsed, env) -> dict:
         return workflow.regenerate_clip_estimate(stories, story, parsed, env=env, probe_local=True)
 
 
-def _clip_gate(estimate):
+# ------------------------------------------- plan 23 A4: the daily-cap refusal
+
+DAILY_CAP_CODE = "budget_daily_cap"
+
+# What a refusal calls the job, and its image and edit parts (singular, plural).
+_JOB_NOUNS = {"cast": "this cast", "places": "these places and props", "regenerate": "this regenerate",
+              "clip": "this clip"}
+_IMAGE_WORDS = {"cast": ("portrait", "portraits"), "places": ("image", "images"), "clip": ("clip", "clips")}
+_EDIT_WORDS = {"cast": ("sheet edit", "sheet edits")}
+_DEFAULT_IMAGE_WORDS = ("image", "images")
+_DEFAULT_EDIT_WORDS = ("edit", "edits")
+
+
+def _part(words, qty, usd, link) -> dict:
+    return {"what": words[0] if qty == 1 else words[1], "qty": qty, "usd": round(float(usd), 6), "link": link}
+
+
+def _would_cost(verdict):
+    """``(usd, link)`` an image verdict would spend if the budget let it run:
+    the first runnable link's estimate; for a verdict blocked by the daily
+    cap alone (its ``budget`` block), the first refused link's; else
+    ``(0.0, None)`` -- nothing to price, the step stops another way."""
+    if verdict.get("ready"):
+        return float(verdict.get("est_usd") or 0.0), verdict.get("link")
+    if verdict.get("budget"):
+        row = imaging.day_refused_rows(verdict.get("links") or [])[0]
+        return float(row["est_usd"] or 0.0), row["link"]
+    return 0.0, None
+
+
+def _estimate_parts(step, units, images, edit) -> list:
+    """The paid parts of a step that makes images, as a refusal names them:
+    ``[{what, qty, usd, link}]`` -- its images (``images``, the image chain's
+    verdict) and its edits (``edit``, the editor's), each priced by
+    :func:`_would_cost`; a part that costs nothing is left out."""
+    parts = []
+    if units.get("images") and images is not None:
+        usd, link = _would_cost(images)
+        if usd > 0:
+            parts.append(_part(_IMAGE_WORDS.get(step, _DEFAULT_IMAGE_WORDS), units["images"], usd, link))
+    if units.get("edit_images") and edit is not None:
+        usd, link = _would_cost(edit)
+        if usd > 0:
+            parts.append(_part(_EDIT_WORDS.get(step, _DEFAULT_EDIT_WORDS), units["edit_images"], usd, link))
+    return parts
+
+
+def _llm_worst_usd(units, env) -> float:
+    """The worst the step's LLM calls may add to today: its calls times
+    ``llm_spend.worst_call_usd`` of the first usable link of the story chain
+    when that link is billed; 0.0 when it is free, when there is no call,
+    and when the chain is refused or unpriced (the key gate refuses it)."""
+    calls = int(units.get("llm_calls") or 0)
+    if not calls:
+        return 0.0
+    links, rows, refusal = _llm_rows(env)
+    if refusal:
+        return 0.0
+    usable = [(link, row) for link, row in zip(links, rows) if row["keyed"] and "skipped" not in row]
+    if not usable or usable[0][1]["free"]:
+        return 0.0
+    try:
+        return round(calls * llm_spend.worst_call_usd(usable[0][0]), 6)
+    except pricing.PriceUnknown:
+        return 0.0
+
+
+def _other_cap_refusal(usd, *, noun, env, story_spent, ep_spent=0.0, day_spent=0.0):
+    """The refusal *usd* would still meet with an unlimited day (the episode's
+    or the story's cap, in DEC-097's words), or None: what an extra for today
+    would not lift."""
+    try:
+        budget_obj = gating.budget_of(gating.merged_env(env))
+    except ValueError:
+        return None
+    unlimited = budget_obj._replace(daily_cap_usd=float("inf"))
+    plan = SimpleNamespace(est_usd=usd, link=noun)
+    try:
+        budget_mod.check(plan, None, budget=unlimited, day_spent=day_spent, ep_spent=ep_spent,
+                         story_spent=story_spent, day_extra=0.0)
+    except budget_mod.BudgetRefused as exc:
+        return str(exc)
+    return None
+
+
+def _daily_cap_detail(*, noun, parts, errors, env, story_spent, llm_worst=0.0, ep_spent=0.0) -> dict:
+    """The 409 ``detail`` of a job refused by the daily cap alone (plan 23,
+    Track A's Wording): ``{message, code: "budget_daily_cap", errors, today,
+    estimate, cap, needed_usd, other_cap_refusal}``. ``today`` and ``cap``
+    are ``routes/budget.today_block``'s; ``needed_usd`` is today's spend +
+    the estimate + the LLM calls' worst case - the effective cap, to the cent
+    above; ``other_cap_refusal`` what the job would still meet with an
+    unlimited day (:func:`_other_cap_refusal`)."""
+    block = budget_routes.today_block(env)
+    est = round(sum(part["usd"] for part in parts), 6)
+    spent, cap, extra = block["spent_usd"], block["daily_cap_usd"], block["extra_usd"]
+    effective = block["effective_cap_usd"]
+    needed = budget_mod.ceil_cent(spent + est + llm_worst - effective)
+    cap_text = f"${cap:.2f} daily cap" + (f" + ${extra:.2f} allowed today" if extra > 0 else "")
+    if spent > effective:
+        head = f"Today's paid spending is already ${spent:.2f}, over the {cap_text}"
+    else:
+        head = f"Today's paid spending is ${spent:.2f} of the {cap_text}"
+    listed = " + ".join(f"{part['qty']} {part['what']} ${part['usd']:.2f}" for part in parts)
+    priced = f"est ${est:.2f}: {listed}" if listed else f"est ${est:.2f}"
+    message = (f"{head}: {noun} ({priced}) would bring it to ${spent + est:.2f}. Allow ${needed:.2f} more for "
+               f"today only, raise the daily cap in Settings, or wait for the day to reset at 00:00 "
+               f"{block['zone']}.")
+    return {
+        "message": message,
+        "code": DAILY_CAP_CODE,
+        "errors": list(errors),
+        "today": {key: block[key] for key in ("day", "zone", "spent_usd", "extra_usd", "stories", "story_count",
+                                              "other_usd")},
+        "estimate": {"usd": est, "parts": parts, "llm_worst_usd": round(llm_worst, 6)},
+        "cap": {"daily_usd": cap, "effective_usd": effective},
+        "needed_usd": needed,
+        "other_cap_refusal": _other_cap_refusal(est + llm_worst, noun=noun, env=env, story_spent=story_spent,
+                                                ep_spent=ep_spent, day_spent=spent),
+    }
+
+
+def _episode_spent(stories, story_id, ep) -> float:
+    """Episode *ep*'s ledger total (``workflow.episode_ledger``)."""
+    with _answering():
+        return float(workflow.episode_ledger(stories, story_id, ep)["totals"]["est_usd"])
+
+
+def _link_reasons(verdict) -> list:
+    """Each link's reason of a verdict, as ``no_link_message`` names them."""
+    return [f"{row['link']}: {row['reason']}" for row in verdict.get("links") or ()]
+
+
+def _clip_gate(estimate, stories=None, story=None, *, env=None):
     """The gate of a shot's clip regenerate: 409 with its estimate's sentence
-    when the clip cannot run now or would go over a cap."""
+    when the clip cannot run now or would go over a cap -- the structured
+    daily-cap ``detail`` (:func:`_daily_cap_detail`) when the daily cap
+    alone refuses it (plan 23 A4)."""
 
     def gate():
-        if not estimate["ready"]:
-            raise HTTPException(status_code=409, detail=estimate["message"])
+        if estimate["ready"]:
+            return
+        refusal = estimate.get("refusal") or {}
+        if refusal.get("cap") == "day" and story is not None:
+            ep = int(str(estimate.get("target") or "shot:0").split(":")[1])
+            parts = [_part(_IMAGE_WORDS["clip"], 1, estimate["est_usd"] or refusal["usd"], estimate.get("link"))]
+            raise HTTPException(status_code=409, detail=_daily_cap_detail(
+                noun=_JOB_NOUNS["clip"], parts=parts, errors=[estimate["message"]], env=env,
+                story_spent=_cost_total(stories, story["story_id"]),
+                ep_spent=_episode_spent(stories, story["story_id"], ep)))
+        raise HTTPException(status_code=409, detail=estimate["message"])
 
     return gate
 
 
-def _generation_gate(stories, story, units, *, env, llm=True, needs_editor=False):
+def _generation_gate(stories, story, units, *, env, llm=True, needs_editor=False, step=None):
     """The gate of a phase-2 job, before it exists (``_create_step_job``):
     the key gate when it calls the LLM (400, as phase 1), then
     ``IMAGE_CHAIN``'s verdict when it makes an image (409, every link's
-    reason), then -- for a job that *is* an edit -- the editor's (409)."""
+    reason), then -- for a job that *is* an edit -- the editor's (409).
+
+    Plan 23 A4: a 409 the daily cap alone decides carries the structured
+    ``detail`` (:func:`_daily_cap_detail`, *step* naming the job); every
+    other refusal keeps its plain sentence."""
 
     def gate():
         if llm:
             _links, _keys, refusal = _llm_gate(env)
             if refusal:
                 raise HTTPException(status_code=400, detail=refusal)
+        images = edit = None
         if units["images"]:
-            verdict = _image_verdict(stories, story, units["images"], env=env)
-            if not verdict["ready"]:
-                raise HTTPException(status_code=409, detail=verdict["message"])
+            images = _image_verdict(stories, story, units["images"], env=env)
+            if not images["ready"]:
+                if images.get("budget"):
+                    if units["edit_images"]:
+                        edit = workflow.edit_readiness(stories, story, env=env, qty=units["edit_images"])
+                    raise _daily_cap_refusal(step, units, images, edit, errors=_link_reasons(images))
+                raise HTTPException(status_code=409, detail=images["message"])
         if needs_editor:
             edit = workflow.edit_readiness(stories, story, env=env, qty=max(units["edit_images"], 1))
             if not edit["ready"]:
+                if edit.get("budget"):
+                    raise _daily_cap_refusal(step, dict(units, edit_images=max(units["edit_images"], 1)),
+                                             images, edit, errors=_link_reasons(edit))
                 # DEC-117's offer for a legacy story; the keys and allow_paid for a v2 one.
                 raise HTTPException(status_code=409, detail=(
                     f"{edit['message']} {refimages.editor_advice(story, edit)}"))
+
+    def _daily_cap_refusal(job_step, job_units, images, edit, *, errors):
+        return HTTPException(status_code=409, detail=_daily_cap_detail(
+            noun=_JOB_NOUNS.get(job_step, "this step"), parts=_estimate_parts(job_step, job_units, images, edit),
+            errors=errors, env=env, story_spent=_cost_total(stories, story["story_id"]),
+            llm_worst=_llm_worst_usd(job_units, env)))
 
     return gate
 
@@ -1379,7 +1545,7 @@ async def _phase2_step(stories, story, step, params, ep) -> JobResponse:
             workflow.require_cast_approved(story)
             workflow.season_request(params)
     no_images = {"images": 0, "edit_images": 0}
-    gate = _generation_gate(stories, story, units or no_images, env=env)
+    gate = _generation_gate(stories, story, units or no_images, env=env, step=step)
     return await _create_step_job(story_id, step, params, ep=ep, gate=gate)
 
 
@@ -1922,10 +2088,10 @@ async def regenerate(story_id: str, req: StoryRegenerateRequest) -> JobResponse:
         needs_editor = workflow.target_needs_editor(story, parsed)
     if parsed[0] == regenerate_step.SHOT_VIDEO_KIND:
         clip = await run_in_threadpool(_clip_estimate, stories, story, parsed, env)
-        gate = _clip_gate(clip)
+        gate = _clip_gate(clip, stories, story, env=env)
     else:
         gate = _generation_gate(stories, story, units, env=env, llm=bool(units["llm_calls"]),
-                                needs_editor=needs_editor)
+                                needs_editor=needs_editor, step="regenerate")
     return await _create_step_job(story_id, "regenerate", {"target": target, "note": req.note, "voice": voice},
                                   gate=gate)
 
@@ -2002,6 +2168,21 @@ async def estimate(story_id: str, step: str, target: Optional[str] = None,
                    subtitles: Optional[str] = None, encoder: Optional[str] = None,
                    storyboard: Optional[str] = None, route: Optional[str] = None,
                    fill_failed_with_motion: bool = False) -> dict:
+    """:func:`_estimate_body` (what a step would cost and where it would
+    run), with ``today`` added in this one place (plan 23 A4): today's paid
+    spending against the daily cap, ``routes/budget.today_block``."""
+    body = await _estimate_body(story_id, step, target=target, selected=selected, episodes=episodes, place=place,
+                                prop=prop, ep=ep, measure=measure, align_words=align_words, subtitles=subtitles,
+                                encoder=encoder, storyboard=storyboard, route=route,
+                                fill_failed_with_motion=fill_failed_with_motion)
+    if isinstance(body, dict):
+        body = dict(body, today=await run_in_threadpool(budget_routes.today_block, worker.get_settings_env()))
+    return body
+
+
+async def _estimate_body(story_id, step, *, target=None, selected=None, episodes=None, place=None, prop=None,
+                         ep=None, measure=False, align_words=False, subtitles=None, encoder=None,
+                         storyboard=None, route=None, fill_failed_with_motion=False) -> dict:
     """What a step would cost and where it would run::
 
         {"step", "est_usd", "units": {"llm_calls": n},
@@ -2472,7 +2653,7 @@ async def post_proposal_decision(story_id: str, ep: str, item_id: str,
     gate = None
     if preview.get("cast") is not None:
         units = workflow.cast_units(stories, story, selected=(), custom=preview["cast"]["params"]["custom"])
-        gate = _generation_gate(stories, story, units, env=env)
+        gate = _generation_gate(stories, story, units, env=env, step="cast")
         gate()  # before anything is decided: an accept that cannot be fulfilled records nothing
     _refuse_busy(story_id, "decide it once that step is done, or cancel it first.")
     with _answering():

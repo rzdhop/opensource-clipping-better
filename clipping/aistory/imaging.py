@@ -175,6 +175,11 @@ def estimate_row(kind, link, merged, budget_obj, request, *, qty, route, story_s
             row.update(status="runnable", reason="paid, allowed")
         else:
             row["reason"] = summary["reason"]
+            if (summary.get("refusal") or {}).get("cap") == "day":
+                # Plan 23 A4: only a daily-cap refusal carries its numbers in the
+                # row (the one "allow more for today" can lift); every other row
+                # keeps its shape.
+                row["refusal"] = summary["refusal"]
     else:
         spent = allowance_spent(link.provider)
         if spent:
@@ -248,16 +253,48 @@ def estimate(kind, settings_env, *, route, request, qty=1, story_spent=0.0, adap
                    chain_name=None if name == gen.ENV_NAMES[kind] else name)
 
 
+def day_refused_rows(rows) -> list:
+    """The rows :func:`estimate_row` skipped on the daily cap alone (they
+    carry ``refusal``), in chain order."""
+    return [row for row in rows if (row.get("refusal") or {}).get("cap") == "day"]
+
+
+def day_cap_block(rows):
+    """``{cap: "day", spent, cap_usd, extra, needed_usd_for_this_call}`` when
+    every link the budget refused was refused by the daily cap (and at least
+    one was), else None. ``needed_usd_for_this_call`` is what today would
+    have to be raised by, to the cent above, for the first such link's
+    estimate to fit (plan 23 A4). A link refused by another cap, or while
+    ``allow_paid`` is off, is one an extra for today would not let run."""
+    day = day_refused_rows(rows)
+    other = [row for row in rows if row not in day and row["status"] == "skipped"
+             and str(row.get("reason") or "").startswith("refused: ")]
+    if not day or other:
+        return None
+    refusal = day[0]["refusal"]
+    needed = refusal["spent"] + refusal["usd"] - refusal["cap_usd"] - refusal["extra"]
+    return {"cap": "day", "spent": refusal["spent"], "cap_usd": refusal["cap_usd"], "extra": refusal["extra"],
+            "needed_usd_for_this_call": budget_mod.ceil_cent(needed)}
+
+
 def verdict(kind, rows, *, route, qty, step, what, when, chain_name=None) -> dict:
     """:func:`estimate`'s answer from its rows (:func:`estimate_row`): the
     first runnable link decides the class, the price and the message; none
     is ``blocked``. A caller that learns more than the estimate knew -- a
     local server that does not answer its probe -- marks that row
-    ``skipped`` and asks again."""
+    ``skipped`` and asks again.
+
+    Plan 23 A4: a ``blocked`` answer whose links were all refused by the
+    daily cap also carries ``budget`` (:func:`day_cap_block`); the message is
+    :func:`no_link_message`'s, unchanged."""
     first = next((row for row in rows if row["status"] == "runnable"), None)
     if first is None:
-        return blocked(step, qty, rows, no_link_message(kind, rows, what=what, route=route,
+        body = blocked(step, qty, rows, no_link_message(kind, rows, what=what, route=route,
                                                         chain_name=chain_name))
+        budget = day_cap_block(rows)
+        if budget is not None:
+            body["budget"] = budget
+        return body
 
     label = first["link"]
     if first["paid"]:

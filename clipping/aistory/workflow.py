@@ -3852,18 +3852,22 @@ def regenerate_clip_estimate(stories, story, parsed, *, env, adapters=None, prob
     One clip's seconds times the price per second on the episode's video
     link -- its recorded ``links.video``, else the one the planner would take
     (``assets.clip_quote``) -- ``ready`` false when it cannot run now or
-    would go over a cap. Calls nothing but, with *probe_local*, a local
-    ComfyUI's status."""
+    would go over a cap, then with ``refusal`` (the cap's numbers, plan 23
+    A4). Calls nothing but, with *probe_local*, a local ComfyUI's status."""
     ep = parsed[1]
     episode_context(stories, story, ep, step="regenerate", require_memory=False)
     ec, script, board, shot = _clip_shot(stories, story["story_id"], ep, parsed)
     quote = assets_step.clip_quote(ec, script, board, shot, env=env, adapters=adapters, probe_local=probe_local)
     paid = quote["route_class"] == "paid"
-    return {"step": "regenerate", "target": f"shot:{ep}:{shot['shot_id']}:video",
+    body = {"step": "regenerate", "target": f"shot:{ep}:{shot['shot_id']}:video",
             "est_usd": quote["est_usd"] if paid else 0.0,
             "units": {"clips": 1, "seconds": quote["clip_s"]}, "route_class": quote["route_class"],
             "link": quote["link"], "links": quote["video"]["links"], "ready": quote["ready"],
             "message": quote["message"]}
+    if quote.get("refusal"):
+        # Plan 23 A4: a cap's refusal with its numbers (``BudgetRefused.as_dict``).
+        body["refusal"] = quote["refusal"]
+    return body
 
 
 # ---------------------------------------------------------------- approvals

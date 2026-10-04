@@ -20,6 +20,7 @@ Stdlib only.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import tempfile
@@ -57,7 +58,32 @@ DayState = namedtuple("DayState", "day zone spent extra")
 
 
 class BudgetRefused(Exception):
-    """A paid call the caps or the switch do not allow. The message has the numbers."""
+    """A paid call the caps or the switch do not allow. The message has the numbers.
+
+    Plan 23 A4: the numbers are attributes too, so a caller can act on them
+    without reading the text back. ``cap`` names what refused (``"allow_paid"``,
+    ``"episode"``, ``"day"`` or ``"story"``; None for a refusal raised without
+    them), ``usd`` the estimate, ``spent`` what that limit already holds
+    (today's total for ``allow_paid`` and ``day``), ``cap_usd`` the limit
+    (the saved daily cap for ``allow_paid`` and ``day``, never with the extra
+    added) and ``extra`` today's allowance on top of the daily cap (0.0 when
+    none). The text is DEC-097's, unchanged.
+    """
+
+    CAPS = ("allow_paid", "episode", "day", "story")
+
+    def __init__(self, message="", *, cap=None, usd=0.0, spent=0.0, cap_usd=0.0, extra=0.0):
+        super().__init__(message)
+        self.cap = cap
+        self.usd = float(usd or 0.0)
+        self.spent = float(spent or 0.0)
+        self.cap_usd = float(cap_usd or 0.0)
+        self.extra = float(extra or 0.0)
+
+    def as_dict(self) -> dict:
+        """``{cap, usd, spent, cap_usd, extra}``, rounded for a JSON body."""
+        return {"cap": self.cap, "usd": round(self.usd, 6), "spent": round(self.spent, 4),
+                "cap_usd": round(self.cap_usd, 4), "extra": round(self.extra, 4)}
 
 
 # ------------------------------------------------------------- resolution
@@ -317,28 +343,41 @@ def check(estimate, link=None, *, budget: Budget, day_spent=0.0, ep_spent=0.0, s
     if usd <= 0:
         return
     label = _label(estimate, link)
+    day_extra = max(0.0, float(day_extra or 0.0))
+    day = {"spent": day_spent, "cap_usd": budget.daily_cap_usd}
     if not budget.allow_paid:
         raise BudgetRefused(
             f"refused: est ${usd:.3f} on {label}; allow_paid is off "
-            f"(today ${day_spent:.2f} of ${budget.daily_cap_usd:.2f})"
+            f"(today ${day_spent:.2f} of ${budget.daily_cap_usd:.2f})",
+            cap="allow_paid", usd=usd, extra=day_extra, **day,
         )
     if ep_spent + usd > budget.per_episode_cap_usd:
         raise BudgetRefused(
             f"refused: est ${usd:.3f} on {label} would bring this episode to "
-            f"${ep_spent + usd:.2f} of its ${budget.per_episode_cap_usd:.2f} cap"
+            f"${ep_spent + usd:.2f} of its ${budget.per_episode_cap_usd:.2f} cap",
+            cap="episode", usd=usd, spent=ep_spent, cap_usd=budget.per_episode_cap_usd, extra=day_extra,
         )
-    day_extra = max(0.0, float(day_extra or 0.0))
     if day_spent + usd > budget.daily_cap_usd + day_extra:
         allowed = f" + ${day_extra:.2f} allowed today" if day_extra > 0 else ""
         raise BudgetRefused(
             f"refused: est ${usd:.3f} on {label} would bring today to "
-            f"${day_spent + usd:.2f} of the ${budget.daily_cap_usd:.2f} daily cap{allowed}"
+            f"${day_spent + usd:.2f} of the ${budget.daily_cap_usd:.2f} daily cap{allowed}",
+            cap="day", usd=usd, extra=day_extra, **day,
         )
     if story_spent + usd > budget.per_story_cap_usd:
         raise BudgetRefused(
             f"refused: est ${usd:.3f} on {label} would bring this story to "
-            f"${story_spent + usd:.2f} of its ${budget.per_story_cap_usd:.2f} cap"
+            f"${story_spent + usd:.2f} of its ${budget.per_story_cap_usd:.2f} cap",
+            cap="story", usd=usd, spent=story_spent, cap_usd=budget.per_story_cap_usd, extra=day_extra,
         )
+
+
+def ceil_cent(usd) -> float:
+    """*usd* rounded up to the next cent (never below 0.00): what to allow so
+    a refused amount fits. Float noise below a millionth of a cent does not
+    round up (``8.98 - 4.00`` is $4.98, not $4.99)."""
+    cents = math.ceil(round(float(usd) * 100, 6))
+    return max(0, cents) / 100
 
 
 # ------------------------------------------------------------ daily spend
