@@ -1244,6 +1244,95 @@ def edit_readiness(stories, story, *, env, qty, probe_local=False):
         return imaging.blocked(refimages.READINESS_STEP, qty, [], str(exc))
 
 
+def _would_cost(verdict):
+    """``{qty, usd, link}`` an image verdict (:func:`image_verdict`,
+    :func:`edit_readiness`) would spend if the budget let it run: its first
+    runnable link's estimate; for a verdict blocked by the daily cap alone
+    (``imaging.verdict``'s ``budget`` block), its first refused link's; else
+    None -- the step stops another way (no link, ``allow_paid`` off, another
+    cap) and that refusal is the verdict's own."""
+    qty = (verdict.get("units") or {}).get("images", 0)
+    if verdict.get("ready"):
+        return {"qty": qty, "usd": round(float(verdict.get("est_usd") or 0.0), 6), "link": verdict.get("link")}
+    if verdict.get("budget"):
+        row = imaging.day_refused_rows(verdict.get("links") or [])[0]
+        return {"qty": qty, "usd": round(float(row["est_usd"] or 0.0), 6), "link": row["link"]}
+    return None
+
+
+def _refused_row(verdict) -> bool:
+    """Whether a link of *verdict* was refused by the budget (a ``refused: ``
+    reason: ``allow_paid`` off or a cap)."""
+    return any(row.get("status") == "skipped" and str(row.get("reason") or "").startswith("refused: ")
+               for row in verdict.get("links") or ())
+
+
+def generation_budget(stories, story, units, images, edit, *, env) -> dict:
+    """What a step that makes images would spend, in one sum, and the one
+    budget check of that sum (plan 23 A5) -- the total the estimate shows
+    and the gate checks before the job exists (RC-V6: one function, two
+    callers)::
+
+        {"usd", "images": {qty, usd, link} | None, "edits": {qty, usd, link} | None,
+         "refusal": <BudgetRefused.as_dict() + "message"> | None,
+         "edit_refused": bool, "blocks": bool, "message": str | None}
+
+    *units* are :func:`cast_units` / :func:`places_units` /
+    :func:`target_units`; *images* the image chain's verdict on
+    ``units["images"]`` (:func:`image_verdict`), *edits* the editor's on
+    ``units["edit_images"]`` (:func:`edit_readiness`), either None when the
+    step makes none. The images count when their link can run (or the daily
+    cap alone refuses it); the edits when the editor can run -- and, on a v2
+    story, when the daily cap alone refuses it too, since a v2 cast buys its
+    portraits and its sheets as one. ``refusal`` is ``budget.check`` on the
+    sum with the story's ledger total and today's spend and extra.
+
+    ``edit_refused``: a v2 story whose editor has a ``refused: `` row (the
+    budget refuses an edit). ``blocks``: a v2 story the gate refuses before
+    any portrait is bought -- ``refusal`` or ``edit_refused``; ``message``
+    then the sentence of a refusal other than the daily cap's. A legacy story
+    never blocks here: DEC-117's stop-and-ask before its edits stays the
+    step's. Books nothing, calls nothing; ``refimages`` still checks each
+    image as it runs, so every dollar is checked twice and booked once."""
+    v2 = media_policy.is_v2(story)
+    image_part = _would_cost(images) if images is not None and units.get("images") else None
+    edit_part = None
+    if edit is not None and units.get("edit_images"):
+        if edit.get("ready") or (v2 and edit.get("budget")):
+            edit_part = _would_cost(edit)
+    usd = round(sum(part["usd"] for part in (image_part, edit_part) if part), 6)
+
+    things = []
+    if image_part:
+        things.append(f"{image_part['qty']} reference image{'' if image_part['qty'] == 1 else 's'}")
+    if edit_part:
+        things.append(f"{edit_part['qty']} edit{'' if edit_part['qty'] == 1 else 's'}")
+    label = " and ".join(things) or "this step's images"
+    refusal = None
+    try:
+        budget_obj = gating.budget_of(gating.merged_env(env))
+    except ValueError:
+        budget_obj = None  # the verdicts already say why; nothing more to check
+    if budget_obj is not None and usd > 0:
+        state = budget_mod.day_state()
+        try:
+            budget_mod.check(types.SimpleNamespace(est_usd=usd, link=label), None, budget=budget_obj,
+                             day_spent=state.spent, day_extra=state.extra,
+                             story_spent=cost_total(stories, story["story_id"]))
+        except budget_mod.BudgetRefused as exc:
+            refusal = dict(exc.as_dict(), message=str(exc))
+
+    edit_refused = bool(v2 and edit is not None and units.get("edit_images") and not edit.get("ready")
+                        and _refused_row(edit))
+    blocks = bool(v2 and (refusal or edit_refused))
+    message = None
+    if v2 and refusal:
+        message = (f"The {label} would go over a cap, so nothing would be generated or spent: "
+                   f"{refusal['message']}.")
+    return {"usd": usd, "images": image_part, "edits": edit_part, "refusal": refusal,
+            "edit_refused": edit_refused, "blocks": blocks, "message": message}
+
+
 def progress(stories, story, *, env, probe_local=False) -> dict:
     """What each entity of the story still lacks, derived, calling nothing
     (but a local editor's status probe, with *probe_local*)::

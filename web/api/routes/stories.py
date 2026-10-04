@@ -663,14 +663,21 @@ def _generation_estimate(stories, story, step, units, *, env, probe_local=False)
 
     ``est_usd`` = the images times the first runnable image link's price
     (0.0 on a free or local link) + the edits times the editor's, when it
-    can run (spec 8.1: without one the step stops and asks before any edit).
-    Not ``ready``: the LLM chain is refused (when a call is counted), or no
-    image link can run (when an image is counted). Nothing is called, but a
+    can run (spec 8.1: without one the step stops and asks before any edit)
+    -- ``workflow.generation_budget``'s sum, the one the gate checks (plan 23
+    A5, RC-V6), which also prices a part the daily cap alone refuses (and a
+    v2 story's edits then). Not ``ready``: the LLM chain is refused (when a
+    call is counted), no image link can run (when an image is counted), or
+    -- on a v2 story -- the sum goes over a cap or the budget refuses an edit
+    (the gate's refusals before any portrait). Nothing is called, but a
     local editor's status probe with *probe_local* (the cast and places
     estimates: ``workflow.edit_readiness``).
     """
     images = _image_verdict(stories, story, units["images"], env=env)
     edit = workflow.edit_readiness(stories, story, env=env, qty=units["edit_images"], probe_local=probe_local)
+    # Plan 23 A5: the gate's own sum (RC-V6: one function, two callers).
+    budget = _generation_budget(stories, story, units, images if units["images"] else None,
+                                edit if units["edit_images"] else None, env=env)
     refusals = []
     llm = None
     if units["llm_calls"]:
@@ -681,13 +688,12 @@ def _generation_estimate(stories, story, step, units, *, env, probe_local=False)
             llm = _llm_calls_sentence(units["llm_calls"], links, rows)
     if units["images"] and not images["ready"]:
         refusals.append(images["message"])
-    est = 0.0
-    if units["images"] and images["ready"]:
-        est += images["est_usd"]
-    if units["edit_images"] and edit["ready"]:
-        est += edit["est_usd"]
+    elif budget["refusal"] and budget["blocks"]:
+        refusals.append(budget["message"])
+    elif budget["edit_refused"]:
+        refusals.append(f"{edit['message']} {refimages.editor_advice(story, edit)}")
     return {
-        "step": step, "est_usd": round(est, 6), "units": dict(units),
+        "step": step, "est_usd": budget["usd"], "units": dict(units),
         "route_class": images["route_class"], "link": images["link"], "links": images["links"],
         "edit": edit, "ready": not refusals,
         "message": _generation_message(units, images, edit, refusals, story=story, llm=llm),
@@ -720,33 +726,24 @@ def _part(words, qty, usd, link) -> dict:
     return {"what": words[0] if qty == 1 else words[1], "qty": qty, "usd": round(float(usd), 6), "link": link}
 
 
-def _would_cost(verdict):
-    """``(usd, link)`` an image verdict would spend if the budget let it run:
-    the first runnable link's estimate; for a verdict blocked by the daily
-    cap alone (its ``budget`` block), the first refused link's; else
-    ``(0.0, None)`` -- nothing to price, the step stops another way."""
-    if verdict.get("ready"):
-        return float(verdict.get("est_usd") or 0.0), verdict.get("link")
-    if verdict.get("budget"):
-        row = imaging.day_refused_rows(verdict.get("links") or [])[0]
-        return float(row["est_usd"] or 0.0), row["link"]
-    return 0.0, None
+def _generation_budget(stories, story, units, images, edit, *, env) -> dict:
+    """``workflow.generation_budget``: the one sum the estimate shows and the
+    gate checks (plan 23 A5). A ledger that cannot be read is a 500 with one
+    sentence."""
+    with _answering():
+        return workflow.generation_budget(stories, story, units, images, edit, env=env)
 
 
-def _estimate_parts(step, units, images, edit) -> list:
-    """The paid parts of a step that makes images, as a refusal names them:
-    ``[{what, qty, usd, link}]`` -- its images (``images``, the image chain's
-    verdict) and its edits (``edit``, the editor's), each priced by
-    :func:`_would_cost`; a part that costs nothing is left out."""
+def _estimate_parts(step, budget) -> list:
+    """The paid parts of :func:`_generation_budget`'s sum, as a refusal names
+    them: ``[{what, qty, usd, link}]`` -- its images then its edits, in the
+    step's words; a part that costs nothing is left out."""
     parts = []
-    if units.get("images") and images is not None:
-        usd, link = _would_cost(images)
-        if usd > 0:
-            parts.append(_part(_IMAGE_WORDS.get(step, _DEFAULT_IMAGE_WORDS), units["images"], usd, link))
-    if units.get("edit_images") and edit is not None:
-        usd, link = _would_cost(edit)
-        if usd > 0:
-            parts.append(_part(_EDIT_WORDS.get(step, _DEFAULT_EDIT_WORDS), units["edit_images"], usd, link))
+    for key, words in (("images", _IMAGE_WORDS.get(step, _DEFAULT_IMAGE_WORDS)),
+                       ("edits", _EDIT_WORDS.get(step, _DEFAULT_EDIT_WORDS))):
+        part = budget.get(key)
+        if part and part["usd"] > 0:
+            parts.append(_part(words, part["qty"], part["usd"], part["link"]))
     return parts
 
 
@@ -866,7 +863,14 @@ def _generation_gate(stories, story, units, *, env, llm=True, needs_editor=False
 
     Plan 23 A4: a 409 the daily cap alone decides carries the structured
     ``detail`` (:func:`_daily_cap_detail`, *step* naming the job); every
-    other refusal keeps its plain sentence."""
+    other refusal keeps its plain sentence.
+
+    Plan 23 A5: the images and the edits are checked as one sum
+    (:func:`_generation_budget`, the estimate's own): on a v2 story an edit
+    the budget refuses, or a sum over a cap, is refused here, before any
+    portrait is bought; a legacy story keeps DEC-117's stop-and-ask before
+    its edits. Nothing is booked here; each image is checked again as it
+    runs (``refimages``), and booked once."""
 
     def gate():
         if llm:
@@ -876,27 +880,29 @@ def _generation_gate(stories, story, units, *, env, llm=True, needs_editor=False
         images = edit = None
         if units["images"]:
             images = _image_verdict(stories, story, units["images"], env=env)
-            if not images["ready"]:
-                if images.get("budget"):
-                    if units["edit_images"]:
-                        edit = workflow.edit_readiness(stories, story, env=env, qty=units["edit_images"])
-                    raise _daily_cap_refusal(step, units, images, edit, errors=_link_reasons(images))
+            if not images["ready"] and not images.get("budget"):
                 raise HTTPException(status_code=409, detail=images["message"])
-        if needs_editor:
+        if units["edit_images"] or needs_editor:
             edit = workflow.edit_readiness(stories, story, env=env, qty=max(units["edit_images"], 1))
-            if not edit["ready"]:
-                if edit.get("budget"):
-                    raise _daily_cap_refusal(step, dict(units, edit_images=max(units["edit_images"], 1)),
-                                             images, edit, errors=_link_reasons(edit))
-                # DEC-117's offer for a legacy story; the keys and allow_paid for a v2 one.
-                raise HTTPException(status_code=409, detail=(
-                    f"{edit['message']} {refimages.editor_advice(story, edit)}"))
+        job_units = dict(units, edit_images=max(units["edit_images"], 1)) if needs_editor else units
+        budget = _generation_budget(stories, story, job_units, images, edit, env=env)
+        if images is not None and not images["ready"]:
+            raise _daily_cap_refusal(job_units, budget, errors=_link_reasons(images))
+        if budget["refusal"] and budget["blocks"]:
+            if budget["refusal"]["cap"] == "day":
+                raise _daily_cap_refusal(job_units, budget, errors=[budget["refusal"]["message"]])
+            raise HTTPException(status_code=409, detail=budget["message"])
+        if (budget["edit_refused"] or needs_editor) and not edit["ready"]:
+            if edit.get("budget"):
+                raise _daily_cap_refusal(job_units, budget, errors=_link_reasons(edit))
+            # DEC-117's offer for a legacy story; the keys and allow_paid for a v2 one.
+            raise HTTPException(status_code=409, detail=(
+                f"{edit['message']} {refimages.editor_advice(story, edit)}"))
 
-    def _daily_cap_refusal(job_step, job_units, images, edit, *, errors):
+    def _daily_cap_refusal(job_units, budget, *, errors):
         return HTTPException(status_code=409, detail=_daily_cap_detail(
-            noun=_JOB_NOUNS.get(job_step, "this step"), parts=_estimate_parts(job_step, job_units, images, edit),
-            errors=errors, env=env, story_spent=_cost_total(stories, story["story_id"]),
-            llm_worst=_llm_worst_usd(job_units, env)))
+            noun=_JOB_NOUNS.get(step, "this step"), parts=_estimate_parts(step, budget), errors=errors, env=env,
+            story_spent=_cost_total(stories, story["story_id"]), llm_worst=_llm_worst_usd(job_units, env)))
 
     return gate
 
