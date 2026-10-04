@@ -76,6 +76,9 @@ PERSISTED_KEYS = frozenset({
     "POLLINATIONS_API_KEY",
     # Veo only: a separate, billing-enabled Google project (RC-V4).
     "GEMINI_PAID_API_KEY",
+    # Claude on the Anthropic API, the premium writing chain's links (plan 23
+    # stage D1): billed per request.
+    "ANTHROPIC_API_KEY",
     "LOCAL_COMFYUI_URL",
     "LOCAL_OLLAMA_URL",
 })
@@ -100,6 +103,7 @@ SECRET_KEYS = frozenset({
     "CLOUDFLARE_ACCOUNT_ID",
     "POLLINATIONS_API_KEY",
     "GEMINI_PAID_API_KEY",
+    "ANTHROPIC_API_KEY",
 })
 
 

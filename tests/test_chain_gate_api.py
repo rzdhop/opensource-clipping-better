@@ -458,6 +458,8 @@ def test_every_status_and_verdict_the_backend_sends_is_drawn_by_the_page():
     statuses = _literal_values(models, "ChainLinkResult", "status")
     verdicts = _literal_values(models, "ChainTestResponse", "verdict")
 
-    assert statuses == {"ok", "alive", "failed", "no_key", "unused"}
+    # "listed" (plan 23 stage D1): a billed-per-request provider asked only
+    # its free model lookup -- re-pinned on purpose, this read five statuses.
+    assert statuses == {"ok", "alive", "failed", "no_key", "unused", "listed"}
     assert statuses <= _js_object_keys(page, "STATUS_GLYPH")
     assert verdicts <= _js_object_keys(page, "VERDICT_STYLE")

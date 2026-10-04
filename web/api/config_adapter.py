@@ -313,6 +313,8 @@ def build_config_from_payload(
         # The premium LLM chain's writer (plan 22 stage 1, DEC-273): a
         # separate, billing-enabled Google project, never GOOGLE_API_KEY.
         api_key_gemini_paid=env.get("GEMINI_PAID_API_KEY", os.environ.get("GEMINI_PAID_API_KEY", "")),
+        # Claude on the Anthropic API (plan 23 stage D1): billed per request.
+        api_key_anthropic=env.get("ANTHROPIC_API_KEY", os.environ.get("ANTHROPIC_API_KEY", "")),
         api_key_custom=env.get("LLM_CUSTOM_API_KEY", os.environ.get("LLM_CUSTOM_API_KEY", "")),
         nvidia_model=payload.get("nvidia_model", NVIDIA_MODEL),
         # Custom OpenAI-compatible endpoint (the legacy single-request path).

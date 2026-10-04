@@ -17,7 +17,8 @@ per process, and the level that worked is remembered. Being wrong costs one 400,
 not a run.
 
 ``openai`` is imported lazily inside the client factory, so this module stays
-importable in the pytest-only CI environment (DEC-012).
+importable in the pytest-only CI environment (DEC-012). So is ``anthropic``,
+behind ``anthropic_llm`` (plan 23 stage D1).
 """
 
 from __future__ import annotations
@@ -216,11 +217,24 @@ def _extra_body(link):
     return None
 
 
-def build_client(link, *, api_key, timeout):
-    """Construct the OpenAI SDK client for *link*. Substituted by tests."""
+def build_client(link, *, api_key, timeout, effort=None):
+    """Construct the OpenAI SDK client for *link*. Substituted by tests.
+
+    A provider whose ``api`` is "anthropic" (plan 23 stage D1, the third
+    recorded RC-S4 exception after DEC-224 and DEC-273) gets
+    ``anthropic_llm``'s adapter instead: the same ``.chat.completions.create``
+    surface over the Messages API, so nothing below this function changes.
+    *effort* is that adapter's ``output_config.effort``; every other provider
+    ignores it.
+    """
+    provider = provider_for(link)
+    if getattr(provider, "api", "openai") == "anthropic":
+        from . import anthropic_llm
+
+        return anthropic_llm.build_client(link, api_key=api_key, timeout=timeout, effort=effort)
+
     from openai import OpenAI
 
-    provider = provider_for(link)
     return OpenAI(
         base_url=provider.base_url,
         api_key=api_key,
@@ -734,12 +748,13 @@ def probe_chain(chain, keys, *, timeout=None, on_log=print,
             link, keys[link.provider], probe_timeout(link, timeout),
             on_log=on_log, client_factory=client_factory, time_fn=time_fn,
         )
+        kind = "listed" if _free_probe(link) else "ping"
         if reason is not None:
-            results.append((label, reason, elapsed, "ping"))
+            results.append((label, reason, elapsed, kind))
             on_log(f"   ✖ {label} did not answer after {elapsed:.0f}s | {reason}")
             continue
 
-        results.append((label, "ok", elapsed, "ping"))
+        results.append((label, "ok", elapsed, kind))
         on_log(f"   ✅ {label} answered in {elapsed:.1f}s.")
         if stop_at_first or work is not None:
             return link, results, None
@@ -778,13 +793,28 @@ def _through_models(link, api_key, once, *, on_log, time_fn):
     ), used, exc
 
 
+def _free_probe(link):
+    """Whether *link*'s provider is asked its liveness question through its
+    free model lookup rather than a completion (``Provider.free_probe``)."""
+    return getattr(PROVIDERS.get(link.provider), "free_probe", "") == "models"
+
+
 def _ping_once(candidate, api_key, timeout, *, on_log, client_factory):
-    """One plain completion to *candidate*: ``(None, exc)``, exc None on success."""
+    """One plain completion to *candidate*: ``(None, exc)``, exc None on success.
+
+    For a provider whose every completion is billed (``free_probe ==
+    "models"``, plan 23 stage D1) the question is the adapter's free
+    ``check_model()`` instead -- the key is accepted and the model listed --
+    and no completion is sent.
+    """
     client = LlmClient(
         candidate, api_key=api_key, timeout=timeout,
         client_factory=client_factory, on_log=on_log,
     )
     try:
+        if _free_probe(candidate):
+            client.client.check_model()
+            return None, None
         client.client.chat.completions.create(
             model=candidate.model,
             messages=[{"role": "user", "content": PROBE_PROMPT}],
@@ -860,7 +890,9 @@ def _work_probe(link, api_key, work, *, on_log, client_factory, time_fn):
 # explains a diagnostic's results unchanged.
 #
 #   kind        "skipped" (no key), "work" (the real request's answer stands),
-#               "ping" (the real request failed; this is the ping after it)
+#               "ping" (the real request failed; this is the ping after it),
+#               "listed" (a provider whose every request is billed: only its
+#               free model lookup was asked, never a request -- plan 23 D1)
 #   reason      "ok", or why the last question asked failed
 #   value       the parsed answer to the real request, when it succeeded
 #   used_model  the model that was asked last -- differs from the link's own
@@ -940,6 +972,19 @@ def _diagnose_link(link, api_key, work, *, judge, on_log, client_factory, time_f
     label = describe(link)
     allowance = diagnostic_timeout(link)
     started = time_fn()
+
+    if _free_probe(link):
+        # Every request on this provider is billed: the diagnostic asks only
+        # its free model lookup and says so ("listed"), never *work*.
+        def listed(candidate):
+            return _ping_once(candidate, api_key, min(probe_timeout(link), allowance),
+                              on_log=on_log, client_factory=client_factory)
+
+        _none, elapsed, reason, used, _exc = _through_models(
+            link, api_key, listed, on_log=on_log, time_fn=time_fn
+        )
+        return LinkProbe(label, "ok" if reason is None else reason, elapsed, "listed",
+                         None, used.model, None, None, None)
 
     def once(candidate):
         return _work_once(candidate, api_key, work, allowance,

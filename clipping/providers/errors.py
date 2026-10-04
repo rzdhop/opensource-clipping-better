@@ -32,13 +32,18 @@ RETRYABLE_EXC_NAMES = frozenset({
     "APIStatusError",
 })
 
-# Retrying these cannot help. A bad key stays bad.
+# Retrying these cannot help. A bad key stays bad. The last two are this
+# module's own (plan 23 stage D1): a model that declined the request, or a
+# reply cut off at max_tokens with no JSON in it, answers the same way to the
+# same request -- another sample would be billed in full and fail again.
 FATAL_EXC_NAMES = frozenset({
     "AuthenticationError",
     "PermissionDeniedError",
     "NotFoundError",
     "BadRequestError",
     "UnprocessableEntityError",
+    "ModelRefusedError",
+    "OutputTruncatedError",
 })
 
 RETRY = "retry"
@@ -139,9 +144,14 @@ def rejects_structured_output(exc: Exception) -> bool:
         return False
 
     message = str(exc).lower()
+    # "output_config" / "output_format": the Anthropic Messages API names its
+    # schema there (plan 23 stage D1). A bare "format" is deliberately not
+    # matched: it would read an unrelated 400 ("invalid request format") as a
+    # refused schema and silently strip it.
     if not any(
         name in message
-        for name in ("response_format", "json_schema", "guided_json", "response_schema")
+        for name in ("response_format", "json_schema", "guided_json", "response_schema",
+                     "output_config", "output_format")
     ):
         return False
 
@@ -257,3 +267,24 @@ class ProviderError(RuntimeError):
     def __init__(self, message: str, failures=None):
         super().__init__(message)
         self.failures = list(failures or [])
+
+
+class _ReplyError(RuntimeError):
+    """A provider answered, the answer is unusable, and the request was
+    billed. *reply* is the OpenAI-shaped reply (``usage`` and ``model``
+    included), so a meter books what the request really cost."""
+
+    def __init__(self, message: str, reply=None):
+        super().__init__(message)
+        self.reply = reply
+
+
+class ModelRefusedError(_ReplyError):
+    """The model declined the request (Anthropic ``stop_reason: "refusal"``,
+    after any server-side fallback also declined). FATAL for the link: the
+    same request is declined again, so the chain moves to its next link."""
+
+
+class OutputTruncatedError(_ReplyError):
+    """The reply stopped at ``max_tokens`` with no parseable JSON in it.
+    FATAL for the link: the same cap truncates the same reply again."""

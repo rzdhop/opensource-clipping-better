@@ -413,13 +413,14 @@ def test_every_signup_url_is_the_one_env_example_documents():
             assert provider.signup_url in text, name
 
 
-def test_only_openrouter_and_gemini_paid_are_marked_paid():
+def test_only_openrouter_gemini_paid_and_anthropic_are_marked_paid():
     """The default OpenRouter model is billed per token, and so is every
     gemini-paid model (plan 22 stage 1, DEC-273: a message that calls either
-    free would send someone to add a card they did not expect to need).
-    Re-pinned on purpose: this used to read ``["openrouter"]`` alone."""
+    free would send someone to add a card they did not expect to need), and
+    every Anthropic request (plan 23 stage D1). Re-pinned on purpose: this
+    read ``["openrouter"]`` alone, then ``["gemini-paid", "openrouter"]``."""
     paid = sorted(n for n, p in registry.PROVIDERS.items() if not p.free_tier)
-    assert paid == ["gemini-paid", "openrouter"]
+    assert paid == ["anthropic", "gemini-paid", "openrouter"]
 
 
 def test_gemini_paid_reads_only_the_paid_key_gemini_never_reads_it(monkeypatch):
@@ -453,3 +454,99 @@ def test_gemini_paid_is_otherwise_shaped_like_gemini():
     assert paid.structured == gemini.structured
     assert paid.env_key == "GEMINI_PAID_API_KEY" and paid.env_key != gemini.env_key
     assert paid.free_tier is False and gemini.free_tier is True
+
+
+# ------------------------------------------------- the Anthropic provider
+# Plan 23 stage D1: Claude as a writer.
+
+def test_the_anthropic_row():
+    """Billed, structured outputs only, its own wire shape and a free probe;
+    the two new trailing fields default so no earlier row changed."""
+    row = registry.PROVIDERS["anthropic"]
+    assert row.env_key == "ANTHROPIC_API_KEY"
+    assert row.free_tier is False
+    assert row.structured == ("json_schema",)
+    assert (row.default_timeout, row.rpm, row.tpm) == (240, 50, 400_000)
+    assert (row.api, row.free_probe) == ("anthropic", "models")
+    assert row.base_url == "https://api.anthropic.com"
+    for name, provider in registry.PROVIDERS.items():
+        if name != "anthropic":
+            assert (provider.api, provider.free_probe) == ("openai", ""), name
+
+
+def test_anthropic_reads_only_its_key_and_no_other_provider_reads_it(monkeypatch):
+    """RC-W4: the anthropic link is keyed on ANTHROPIC_API_KEY and nothing
+    else; no other provider's link ever reads it."""
+    from clipping.aistory.steps import llm_call
+    from clipping.config import PROVIDER_KEYS
+
+    assert PROVIDER_KEYS["anthropic"] == ("api_key_anthropic", "ANTHROPIC_API_KEY")
+    assert [name for name, (_attr, env) in PROVIDER_KEYS.items() if env == "ANTHROPIC_API_KEY"] == ["anthropic"]
+    for _name, (_attr, env_name) in PROVIDER_KEYS.items():
+        monkeypatch.delenv(env_name, raising=False)
+
+    assert llm_call.resolve_keys({"ANTHROPIC_API_KEY": "test-anthropic-key"}) == {"anthropic": "test-anthropic-key"}
+    # Every other key set, the Anthropic one not: the link is simply unkeyed.
+    others = {env: "other" for name, (_attr, env) in PROVIDER_KEYS.items() if name != "anthropic"}
+    assert "anthropic" not in llm_call.resolve_keys(others)
+
+
+def test_the_anthropic_client_passes_only_its_key_and_the_pinned_base_url(monkeypatch):
+    """The SDK is handed the key explicitly (so it reads no credential from
+    the environment), the registry's base URL (so ANTHROPIC_BASE_URL cannot
+    redirect the key) and max_retries=0 (DEC-019)."""
+    from clipping.providers import anthropic_llm, llm
+
+    seen = {}
+    monkeypatch.setattr(anthropic_llm, "_sdk_client", lambda **kwargs: seen.update(kwargs) or object())
+    client = llm.build_client(Link("anthropic", "claude-sonnet-5-5"), api_key="test-anthropic-key", timeout=240)
+    assert isinstance(client, anthropic_llm.AnthropicChat)
+    client.client  # noqa: B018 - built on first use
+    assert seen == {"api_key": "test-anthropic-key", "timeout": 240, "base_url": "https://api.anthropic.com"}
+
+
+def test_the_sdk_client_disables_its_own_retries():
+    """DEC-019 on the real constructor call (read as text: CI has no SDK)."""
+    text = (pathlib.Path(__file__).resolve().parents[1] / "clipping/providers/anthropic_llm.py").read_text(
+        encoding="utf-8")
+    body = text[text.index("def _sdk_client"):text.index("def _field")]
+    assert "max_retries=0" in body and "api_key=api_key" in body and "base_url=base_url" in body
+
+
+@pytest.mark.parametrize("spec,model,effort", [
+    ("anthropic/claude-sonnet-5-5", "claude-sonnet-5-5", None),
+    ("anthropic/claude-opus-5-5@xhigh", "claude-opus-5-5", "xhigh"),
+    ("anthropic/claude-opus-5-5@low", "claude-opus-5-5", "low"),
+])
+def test_an_anthropic_link_may_carry_its_effort(spec, model, effort):
+    link = registry.parse_spec(spec)
+    assert registry.split_effort(link) == (model, effort)
+
+
+@pytest.mark.parametrize("spec", ["anthropic/claude-opus-5-5@max", "anthropic/claude-opus-5-5@", "anthropic/@high"])
+def test_an_unknown_effort_is_a_chain_error(spec):
+    with pytest.raises(ChainError):
+        registry.parse_spec(spec)
+
+
+def test_an_at_sign_means_nothing_on_another_provider():
+    link = registry.parse_spec("openrouter/some/model@v2")
+    assert registry.split_effort(link) == ("some/model@v2", None)
+
+
+def test_effort_precedence_and_the_thinking_room():
+    """The link's suffix, then the prompt's family effort, then the model's
+    default; the room follows the effort (thinking counts against max_tokens)."""
+    assert registry.MODEL_OUTPUT_HEADROOM_BY_EFFORT == {"low": 1024, "medium": 3072, "high": 6144, "xhigh": 12288}
+    opus, sonnet = Link("anthropic", "claude-opus-5-5"), Link("anthropic", "claude-sonnet-5-5")
+    pinned = Link("anthropic", "claude-opus-5-5@xhigh")
+    assert registry.anthropic_effort(pinned, "low") == "xhigh"
+    assert registry.anthropic_effort(opus, "low") == "low"
+    assert registry.anthropic_effort(opus) is None
+    assert registry.output_headroom(pinned, "low") == 12288
+    assert registry.output_headroom(opus, "high") == 6144
+    assert registry.output_headroom(opus) == 3072      # Opus 5.5 defaults to medium
+    assert registry.output_headroom(sonnet) == 6144    # Sonnet 5.5 defaults to high
+    # Every other link keeps its MODEL_OUTPUT_HEADROOM row, effort or not.
+    assert registry.output_headroom(Link("gemini-paid", "gemini-3.8-flash"), "low") == 2048
+    assert registry.output_headroom(Link("gemini", "gemini-3.5-flash-lite"), "high") == 0

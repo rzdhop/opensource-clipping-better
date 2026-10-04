@@ -10,6 +10,7 @@ dependencies = [
     "tqdm",  # the transcription progress bar: clipping/engine.py
     "google-genai",
     "openai>=2.24.0,<3",  # OpenAI-compatible client for every provider in clipping/providers/
+    "anthropic>=1.11.0,<2",  # Claude on the Anthropic API: clipping/providers/anthropic_llm.py
     "numpy<2.0.0",
     "mediapipe",
     "opencv-python",

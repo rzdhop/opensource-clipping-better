@@ -456,6 +456,24 @@ def _is_premium_family(prompt_id: str) -> bool:
 
 PREMIUM_PROMPT_IDS = frozenset(prompt_id for prompt_id in MAX_TOKENS if _is_premium_family(prompt_id))
 
+# Plan 23 stage D1: how hard Claude thinks on each premium family when the
+# link names no effort of its own (``anthropic/<model>@<effort>`` outranks
+# this; neither = the model's own default). The episode script is the call
+# the human cares most about (high); concepts and the bible are a creative
+# but shorter ask (medium); the concept judge and the first-watch judge read
+# and score (low). Matched by family like PREMIUM_PROMPT_IDS, so E1v3 is E1's.
+ANTHROPIC_EFFORT = {"E1": "high", "E2": "high", "E3": "high", "C1": "medium", "B1": "medium",
+                    "C1J": "low", "J1": "low"}
+
+
+def anthropic_effort(prompt_id):
+    """*prompt_id*'s family effort (:data:`ANTHROPIC_EFFORT`), or None."""
+    for family, effort in ANTHROPIC_EFFORT.items():
+        if prompt_id == family or (prompt_id.startswith(family)
+                                   and re.fullmatch(r"v\d+", prompt_id[len(family):])):
+            return effort
+    return None
+
 # Plan 22 stage 3 (writing v3): the input budgets, measured as the v2 rows
 # above were -- the French worst case of tests/test_story_episode_prompt_budgets.py
 # (12 scenes, every input at its cap, the v2 slices, a 60-word note) with what

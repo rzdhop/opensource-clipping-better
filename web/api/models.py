@@ -426,6 +426,8 @@ class SettingsRequest(BaseModel):
     # response half (``gemini_paid_api_key_set``) has reported this since
     # stage 2; this is the save side (phase 6 stage 12).
     gemini_paid_api_key: Optional[str] = None
+    # Claude on the Anthropic API (plan 23 stage D1): billed per request.
+    anthropic_api_key: Optional[str] = None
     local_comfyui_url: Optional[str] = None
     local_ollama_url: Optional[str] = None
 
@@ -471,6 +473,7 @@ class SettingsResponse(BaseModel):
     # Veo's and nano-banana's key (a separate, billing-enabled Google project). Reported
     # here; the field that sets it arrives with its Settings control.
     gemini_paid_api_key_set: bool = False
+    anthropic_api_key_set: bool = False
     local_comfyui_url: str = ""
     local_ollama_url: str = ""
     generation_chains: dict = {}
@@ -507,12 +510,14 @@ class ChainLinkResult(BaseModel):
     ``status``: ``ok`` completed the real request; ``alive`` failed it but
     answered a ping (reachable, cannot do the job); ``failed`` neither;
     ``no_key`` skipped; ``unused`` a key that is set for a provider the chain
-    does not name -- never contacted (DEC-023).
+    does not name -- never contacted (DEC-023); ``listed`` a provider whose
+    every request is billed: its key was accepted and its model listed by
+    the free model lookup, and no request was sent (plan 23 stage D1).
     """
     label: str
     provider: str
     model: str
-    status: Literal["ok", "alive", "failed", "no_key", "unused"]
+    status: Literal["ok", "alive", "failed", "no_key", "unused", "listed"]
     latency_seconds: Optional[float] = None
     reason: Optional[str] = None
     probe_timeout_seconds: float
@@ -522,7 +527,7 @@ class ChainLinkResult(BaseModel):
     env_key: str
     signup_url: str = ""
     # Which question the row's status answers.
-    kind: Optional[Literal["work", "ping"]] = None
+    kind: Optional[Literal["work", "ping", "listed"]] = None
     # What the real request found in the test transcript.
     candidates: Optional[int] = None
     found_moment: Optional[bool] = None

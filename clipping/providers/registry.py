@@ -1,9 +1,11 @@
 """The catalogue of OpenAI-compatible LLM providers, and how a chain is spelled.
 
 Every provider here speaks the OpenAI chat-completions API, which is why one
-client class can drive all of them. What differs is the base URL, which env var
-holds the key, what the free tier allows, and whether the model accepts a
-structured-output schema.
+client class can drive all of them -- except ``anthropic`` (plan 23 stage D1),
+which speaks the Messages API behind an adapter that answers the same
+``.chat.completions.create`` call (``anthropic_llm.py``). What differs is the
+base URL, which env var holds the key, what the free tier allows, and whether
+the model accepts a structured-output schema.
 
 A *chain* is an ordered, explicitly configured list of links:
 
@@ -36,11 +38,20 @@ DEFAULT_PROBE_TIMEOUT = 45.0
 # order, on the SAME key when the configured one answers "this model is not
 # available" -- and only then (DEC-089). All five are trailing and defaulted
 # so a Provider built without them still works.
+#
+# Plan 23 stage D1 added two more, trailing and defaulted the same way so no
+# existing row changes: ``api`` is the wire shape the provider speaks --
+# "openai" (every row above "anthropic") or "anthropic" (the Messages API,
+# reached through ``anthropic_llm``'s adapter, which still answers
+# ``.chat.completions.create`` so the chain runner, its ladder and the meter
+# are unchanged); ``free_probe`` is how a liveness question is asked without
+# spending -- "" sends the usual tiny completion, "models" asks the provider's
+# free model lookup instead, for a provider where every completion is billed.
 Provider = namedtuple(
     "Provider",
     "name base_url env_key rpm tpm structured default_timeout notes "
-    "probe_timeout primary signup_url free_tier fallback_models",
-    defaults=(DEFAULT_PROBE_TIMEOUT, True, "", True, ()),
+    "probe_timeout primary signup_url free_tier fallback_models api free_probe",
+    defaults=(DEFAULT_PROBE_TIMEOUT, True, "", True, (), "openai", ""),
 )
 
 # ``structured`` lists the response_format levels the provider is known to
@@ -157,6 +168,30 @@ PROVIDERS = {
         signup_url="https://aistudio.google.com/apikey",
         free_tier=False,
     ),
+    "anthropic": Provider(
+        name="anthropic",
+        # Pinned rather than left to the SDK: an ANTHROPIC_BASE_URL in the
+        # process env must never redirect this key elsewhere (RC-W4).
+        base_url="https://api.anthropic.com",
+        env_key="ANTHROPIC_API_KEY",
+        # A conservative floor, not a measured tier (plan 23 stage D1): the
+        # premium chain sends ~20 calls an episode, far inside either number.
+        rpm=50,
+        tpm=400_000,
+        # Structured outputs (``output_config.format``); json_object has no
+        # Anthropic equivalent, so a schema 400 steps straight to a rung the
+        # adapter sends prompt-only.
+        structured=("json_schema",),
+        # A writing call with thinking room (effort high) runs well past the
+        # 180 s the OpenAI-compatible tiers get.
+        default_timeout=240,
+        notes="Claude on the Anthropic API: every request is billed, so the liveness check reads the free "
+              "model lookup (models.retrieve) and never sends a completion.",
+        signup_url="https://platform.claude.com/settings/keys",
+        free_tier=False,
+        api="anthropic",
+        free_probe="models",
+    ),
     "custom": Provider(
         name="custom",
         base_url="",  # resolved from LLM_CUSTOM_BASE_URL at build time
@@ -215,6 +250,13 @@ def parse_spec(spec: str, providers=None) -> Link:
         )
     if not model:
         raise ChainError(f"{text!r} names a provider but no model.")
+    if getattr(table[provider], "api", "openai") == "anthropic" and "@" in model:
+        base, _sep, effort = model.partition("@")
+        if not base or effort not in ANTHROPIC_EFFORTS:
+            raise ChainError(
+                f"{text!r}: the effort after '@' must be one of {', '.join(ANTHROPIC_EFFORTS)} "
+                f"(e.g. 'anthropic/claude-opus-5-5@xhigh')."
+            )
 
     return Link(provider, model)
 
@@ -551,6 +593,56 @@ MODEL_OUTPUT_HEADROOM = {
 }
 
 
+# Claude as a writer (plan 23 stage D1). An Anthropic link may carry its
+# effort as a suffix -- ``anthropic/claude-opus-5-5@xhigh`` -- which outranks
+# the per-prompt effort (``prompts.ANTHROPIC_EFFORT``); without either, the
+# model's own default runs. The suffix is never part of the model id the API
+# is sent, the price row or the headroom lookup (``split_effort``).
+ANTHROPIC_EFFORTS = ("low", "medium", "high", "xhigh")
+ANTHROPIC_DEFAULT_MODEL = "claude-sonnet-5-5"
+# Each model's own default effort, read from the claude-api reference on
+# 2026-10-04: Opus 5.5 defaults to medium, Sonnet 5.5 to high. Used only to
+# size the thinking room when neither the link nor the prompt names one.
+ANTHROPIC_DEFAULT_EFFORT = {"claude-opus-5-5": "medium", "claude-sonnet-5-5": "high"}
+# Thinking counts against max_tokens on these models (adaptive thinking is
+# on: Opus 5.5 cannot switch it off), so the cap a call sends gains this
+# room by effort, as MODEL_OUTPUT_HEADROOM does for the paid Gemini writer.
+MODEL_OUTPUT_HEADROOM_BY_EFFORT = {"low": 1024, "medium": 3072, "high": 6144, "xhigh": 12288}
+
+
+def split_effort(link):
+    """``(model, effort)`` for *link*: an Anthropic link's ``@effort`` suffix
+    split off (``effort`` None without one); every other link's model as it
+    is, with None."""
+    model = str(link.model)
+    provider = PROVIDERS.get(link.provider)
+    if getattr(provider, "api", "openai") != "anthropic" or "@" not in model:
+        return model, None
+    base, _sep, effort = model.partition("@")
+    return base, (effort or None)
+
+
+def anthropic_effort(link, prompt_effort=None):
+    """The effort an Anthropic *link* is sent with: its ``@`` suffix, else
+    *prompt_effort* (``prompts.anthropic_effort``), else None -- the model's
+    own default, sent by omitting ``output_config.effort``."""
+    _model, suffix = split_effort(link)
+    return suffix or prompt_effort or None
+
+
+def output_headroom(link, effort=None) -> int:
+    """The thinking room added to a call's cap for *link*: an Anthropic link's
+    by its effort (:func:`anthropic_effort`, the model's default when none is
+    named, ``high``'s for an unknown model), every other link's
+    ``MODEL_OUTPUT_HEADROOM`` row (0 without one)."""
+    provider = PROVIDERS.get(link.provider)
+    if getattr(provider, "api", "openai") == "anthropic":
+        model, _suffix = split_effort(link)
+        level = anthropic_effort(link, effort) or ANTHROPIC_DEFAULT_EFFORT.get(model, "high")
+        return MODEL_OUTPUT_HEADROOM_BY_EFFORT.get(level, MODEL_OUTPUT_HEADROOM_BY_EFFORT["xhigh"])
+    return MODEL_OUTPUT_HEADROOM.get((link.provider, link.model), 0)
+
+
 def chain_from_env(default: str = DEFAULT_LLM_CHAIN) -> list:
     """The chain named by ``LLM_CHAIN``, or the shipped default."""
     return parse_chain(os.environ.get("LLM_CHAIN", "").strip() or default)
@@ -564,6 +656,7 @@ def default_model(provider):
         "openrouter": OPENROUTER_DEFAULT_MODEL,
         "mistral": MISTRAL_DEFAULT_MODEL,
         "nvidia": NVIDIA_DEFAULT_MODEL,
+        "anthropic": ANTHROPIC_DEFAULT_MODEL,
     }.get(provider)
 
 

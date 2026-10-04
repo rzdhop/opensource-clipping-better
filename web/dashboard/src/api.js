@@ -300,6 +300,17 @@ export async function testChain(payload = {}) {
  * its model is live (fal pricing, Gemini models.get): free, nothing generated.
  * `{results: [{label, provider, model, status, text, endpoint, price}], verdict, message}`.
  */
+// Plan 23 stage D1: free -- one models.retrieve per anthropic/ link of the
+// story premium writing chain, never a completion (every request is billed).
+export async function checkAnthropicKey() {
+  const res = await request('/settings/check-anthropic-key', { method: 'POST' })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail || 'The Anthropic key check failed')
+  }
+  return res.json()
+}
+
 export async function checkVideoKeys() {
   const res = await request('/settings/check-video-keys', { method: 'POST' })
   if (!res.ok) {

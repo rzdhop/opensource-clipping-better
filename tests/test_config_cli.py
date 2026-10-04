@@ -264,6 +264,8 @@ def test_llm_timeout_flag(video):
         ("openrouter", "OPENROUTER_API_KEY"),
         ("mistral", "MISTRAL_API_KEY"),
         ("custom", "LLM_CUSTOM_API_KEY"),
+        # Plan 23 stage D1: a chain-only link like gemini-paid.
+        ("anthropic", "ANTHROPIC_API_KEY"),
     ],
 )
 def test_chain_provider_keys_are_read_from_the_environment(
@@ -323,8 +325,10 @@ PROVIDER_CASES = [
 # values, so the gate reaches them through its chain branch like any other link.
 # gemini-paid joined it with the premium writing chain (plan 22 stage 1,
 # DEC-273): a chain-only link from the day it was added, never a CLI value.
+# anthropic joined it the same way (plan 23 stage D1): the premium chain's
+# Claude links, never an --ai-provider value.
 CHAIN_ONLY_PROVIDERS = {"groq", "openrouter", "mistral", "custom",
-                        "nvidia", "gemini", "gemini-paid"}
+                        "nvidia", "gemini", "gemini-paid", "anthropic"}
 
 
 @pytest.mark.parametrize("provider,key_attr,env_name", PROVIDER_CASES)

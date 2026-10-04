@@ -1038,6 +1038,9 @@ PROVIDER_KEYS = {
     # for the LLM chain: "gemini" never reads this, "gemini-paid" never
     # reads GOOGLE_API_KEY).
     "gemini-paid": ("api_key_gemini_paid", "GEMINI_PAID_API_KEY"),
+    # Claude on the Anthropic API (plan 23 stage D1): billed per request,
+    # read by the "anthropic" provider and by nothing else (RC-W4).
+    "anthropic": ("api_key_anthropic", "ANTHROPIC_API_KEY"),
     "custom": ("api_key_custom", "LLM_CUSTOM_API_KEY"),
     # The legacy single-request path's own custom endpoint, kept alongside the
     # chain's "custom" link rather than folded into it: they are reached by
@@ -1614,6 +1617,7 @@ def build_config(argv: list[str] | None = None) -> SimpleNamespace:
         # The premium LLM chain's writer (plan 22 stage 1, DEC-273): a
         # separate, billing-enabled Google project, never GOOGLE_API_KEY.
         api_key_gemini_paid=os.environ.get("GEMINI_PAID_API_KEY", ""),
+        api_key_anthropic=os.environ.get("ANTHROPIC_API_KEY", ""),
         api_key_custom=os.environ.get("LLM_CUSTOM_API_KEY", ""),
         llm_chain=args.llm_chain,
         llm_timeout=args.llm_timeout,

@@ -5968,13 +5968,17 @@ def _premium_text_estimate(pending_rows, env) -> dict:
     from .steps import llm_spend
 
     try:
-        price = pricing.llm_price_for(link)
+        pricing.llm_price_for(link)  # PriceUnknown without a row
         per_call = llm_spend.worst_call_usd(link)
     except pricing.PriceUnknown as exc:
         return {"usd": 0.0, "calls": calls, "message": f"No premium writing: {exc}"}
-    headroom = registry.MODEL_OUTPUT_HEADROOM.get((link.provider, link.model), 0)
+    # The thinking room a call on *link* is sent with; an Anthropic link's
+    # follows its effort (plan 23 stage D1), so the widest of the premium
+    # families' efforts is counted -- an upper bound, as this whole sum is.
+    efforts = set(prompts.ANTHROPIC_EFFORT.values()) | {None}
+    headroom = max(registry.output_headroom(link, effort) for effort in efforts)
     if headroom:
-        per_call = llm_spend.ledger_usd(per_call + headroom * price.output_usd_per_m / 1_000_000)
+        per_call = llm_spend.ledger_usd(per_call + pricing.llm_estimate_cost(link, 0, headroom))
     usd = llm_spend.ledger_usd(per_call * calls)
     return {"usd": usd, "calls": calls,
             "message": f"+ ${usd:.2f} writing ({calls} premium call{'' if calls == 1 else 's'} on "

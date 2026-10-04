@@ -160,3 +160,67 @@ def test_ltx25_price_ladder():
     assert estimate(link(ltx), 6).est_usd == pytest.approx(0.54)
     assert estimate(link(ltx), 6, resolution="1080p").est_usd == pytest.approx(0.96)
     assert "A-151" in pricing.PRICES[ltx].note and "2026-10-04" in pricing.PRICES[ltx].note
+
+
+# ------------------------------------------------- Claude (plan 23 stage D1)
+
+def _claude(model):
+    return registry.parse_spec(f"anthropic/{model}")
+
+
+@pytest.mark.parametrize("model,rates", [
+    ("claude-sonnet-5-5", (2.00, 10.00, 0.20, 2.50)),
+    ("claude-opus-5-5", (4.00, 20.00, 0.20, 5.00)),
+    ("claude-opus-5", (5.00, 25.00, 0.50, 6.25)),
+    ("claude-opus-4-8", (5.00, 25.00, 0.50, 6.25)),
+    ("claude-sonnet-5", (2.00, 10.00, 0.20, 2.50)),
+    ("claude-haiku-4-5", (1.00, 5.00, 0.10, 1.25)),
+])
+def test_every_claude_row_is_priced_with_its_cache_rates(model, rates):
+    price = pricing.llm_price_for(_claude(model))
+    assert (price.input_usd_per_m, price.output_usd_per_m, price.cache_read_usd_per_m,
+            price.cache_write_usd_per_m) == rates
+
+
+def test_the_effort_suffix_is_not_part_of_the_price_key():
+    assert pricing.llm_price_for(_claude("claude-opus-5-5@xhigh")) == pricing.llm_price_for(_claude("claude-opus-5-5"))
+
+
+def test_rows_without_cache_rates_price_the_cache_at_input():
+    """The two new fields default to None, so every earlier row is unchanged,
+    and a cache token on such a row costs what an input token does."""
+    link = registry.parse_spec("gemini-paid/gemini-3.8-flash")
+    price = pricing.llm_price_for(link, today="2026-12-01")
+    assert (price.cache_read_usd_per_m, price.cache_write_usd_per_m) == (None, None)
+    assert pricing.llm_cost_cached(link, 100, 50, cache_read=200, cache_write=300, today="2026-12-01") == \
+        pytest.approx(pricing.llm_cost(link, 600, 50, today="2026-12-01"))
+
+
+def test_cache_reads_and_writes_are_priced_at_their_own_rates():
+    link = _claude("claude-sonnet-5-5")
+    cost = pricing.llm_cost_cached(link, 1_000_000, 1_000_000, cache_read=1_000_000, cache_write=1_000_000)
+    assert cost == pytest.approx(2.00 + 10.00 + 0.20 + 2.50)
+
+
+def test_the_claude_estimate_is_never_low():
+    """Input at the dearest family row's cache-WRITE rate, scaled by Claude's
+    tokenizer factor; output at the dearest family row (Opus 5.5 may fall back
+    to Opus 5 / 4.8 at $5 / $25)."""
+    opus = _claude("claude-opus-5-5")
+    assert pricing.llm_estimate_cost(opus, 1000, 100) == pytest.approx((1350 * 6.25 + 100 * 25.00) / 1e6)
+    sonnet = _claude("claude-sonnet-5-5")
+    assert pricing.llm_estimate_cost(sonnet, 1000, 100) == pytest.approx((1350 * 2.50 + 100 * 10.00) / 1e6)
+    # Every other link: exactly llm_cost.
+    paid = registry.parse_spec("openrouter/mistralai/mistral-medium-3.1")
+    assert pricing.llm_estimate_cost(paid, 1000, 100) == pricing.llm_cost(paid, 1000, 100)
+
+
+def test_a_reply_is_priced_at_the_served_model():
+    opus = _claude("claude-opus-5-5")
+    assert pricing.served_price(opus, "claude-opus-5-5") == (pricing.llm_price_for(opus), None)
+    assert pricing.served_price(opus, "claude-opus-5-5-20261001")[1] is None   # a dated snapshot of itself
+    price, note = pricing.served_price(opus, "claude-opus-4-8")
+    assert (price.input_usd_per_m, note) == (5.00, None)
+    price, note = pricing.served_price(opus, "claude-future-9")
+    assert (price.input_usd_per_m, price.output_usd_per_m, price.cache_write_usd_per_m) == (5.00, 25.00, 6.25)
+    assert note.startswith("FLAGGED") and "claude-future-9" in note

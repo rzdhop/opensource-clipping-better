@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { checkVideoKeys, fetchHardware, fetchSettings, testChain, testGenerationChain, updateSettings } from '../api'
+import { checkAnthropicKey, checkVideoKeys, fetchHardware, fetchSettings, testChain, testGenerationChain, updateSettings } from '../api'
 import { Badge, Button, Card, CardBody, CardHeader, Field } from '../ui'
 import {
   Brain, CircleCheck, CircleDollarSign, Cpu, Eye, EyeOff, Film, Gauge, ImageIcon, KeyRound, LinkIcon, Mic, Monitor,
@@ -80,6 +80,7 @@ const KEY_PROVIDERS = {
   cloudflare_account_id: 'cloudflare',
   pollinations_api_key: 'pollinations',
   gemini_paid_api_key: 'gemini_paid',
+  anthropic_api_key: 'anthropic',
 }
 
 function providerOfLabel(label) {
@@ -230,6 +231,8 @@ function Settings() {
   const [pollinationsKey, setPollinationsKey] = useState('')
   // Veo and nano-banana: a separate, billing-enabled Google project (phase 6 stage 12, RC-V4; DEC-222).
   const [geminiPaidKey, setGeminiPaidKey] = useState('')
+  // Claude on the Anthropic API, for anthropic/ links of the premium writing chain (plan 23 stage D1).
+  const [anthropicKey, setAnthropicKey] = useState('')
 
   // The endpoint URL and model are not secrets, so they are prefilled.
   const [compatUrl, setCompatUrl] = useState('')
@@ -349,6 +352,7 @@ function Settings() {
       if (cloudflareAccountId) payload.cloudflare_account_id = cloudflareAccountId
       if (pollinationsKey) payload.pollinations_api_key = pollinationsKey
       if (geminiPaidKey) payload.gemini_paid_api_key = geminiPaidKey
+      if (anthropicKey) payload.anthropic_api_key = anthropicKey
 
       // Sent whenever they differ from what the server holds, including when
       // cleared: an empty value removes the override and falls back to .env,
@@ -632,6 +636,18 @@ function Settings() {
               Not a secret, and never spent by "Test provider chain" above:
               that button only probes LLM_CHAIN, never this one.
             </p>
+            <KeyField
+              id="settings-anthropic-key"
+              label="Anthropic API key"
+              note="paid, for anthropic/ links"
+              isSet={settings?.anthropic_api_key_set}
+              tested={isTested('anthropic_api_key')}
+              value={anthropicKey}
+              onChange={setAnthropicKey}
+              placeholder="sk-ant-…"
+              hint="Claude as the writer: add anthropic/claude-sonnet-5-5 (or anthropic/claude-opus-5-5) to the premium chain above. Every request is billed and booked; allow_paid must be on."
+            />
+            <AnthropicKeyCheck />
             </CardBody>
           </Card>
           {/* Custom OpenAI-compatible endpoint */}
@@ -944,7 +960,7 @@ function Settings() {
 }
 
 // One per ChainLinkResult.status in web/api/models.py (a test keeps them in step).
-const STATUS_GLYPH = { ok: '✅', alive: '⚠️', failed: '✖', no_key: '⏭', unused: '·' }
+const STATUS_GLYPH = { ok: '✅', alive: '⚠️', failed: '✖', no_key: '⏭', unused: '·', listed: '🔑' }
 
 // The verdict's colour and headline. The rule itself is the server's (DEC-073,
 // DEC-090); this only says it.
@@ -1169,6 +1185,65 @@ function VideoKeyCheck() {
                 <div className="form-hint" style={{
                   marginLeft: '24px', wordBreak: 'break-word',
                   color: row.status === 'ok' ? undefined : row.status === 'skipped' ? 'var(--text-tertiary)' : 'var(--error)',
+                }}>
+                  {row.text}
+                </div>
+              )}
+            </div>
+          ))}
+          <div style={{ marginTop: '10px', ...(GEN_VERDICT_STYLE[result.verdict] || GEN_VERDICT_STYLE.blocked) }}>
+            {result.verdict === 'ready' ? '✅' : '✖'} {result.message}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Plan 23 stage D1: is ANTHROPIC_API_KEY accepted, and is each anthropic/ link
+ * of the premium chain available? One free models.retrieve per link (POST
+ * /api/settings/check-anthropic-key) -- never a completion, since every
+ * request on this provider is billed. Save the key first.
+ */
+function AnthropicKeyCheck() {
+  const [checking, setChecking] = useState(false)
+  const [result, setResult] = useState(null)
+  const [error, setError] = useState('')
+
+  const run = async () => {
+    setChecking(true)
+    setError('')
+    try {
+      setResult(await checkAnthropicKey())
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setChecking(false)
+    }
+  }
+
+  return (
+    <div style={{ marginTop: '10px' }}>
+      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+        <button type="button" className="btn btn-secondary" disabled={checking} onClick={run}>
+          {checking ? <><span className="spinner"></span> Asking…</> : 'Check the Anthropic key (free)'}
+        </button>
+        <span className="form-hint" style={{ margin: 0 }}>
+          Proves: key valid, model available — not exercised: every request is billed, so only a free model lookup is sent.
+        </span>
+      </div>
+      {error && <p style={{ marginTop: '8px', fontSize: '13px', color: 'var(--error)' }}>{error}</p>}
+      {result && (
+        <div style={{ marginTop: '10px', fontSize: '13px' }}>
+          {result.results.map((row) => (
+            <div key={row.label} style={{ padding: '6px 0', borderBottom: '1px solid var(--border-color)' }}>
+              <span>{KEY_CHECK_GLYPH[row.status] || '·'}</span>{' '}
+              <code style={{ wordBreak: 'break-all' }}>{row.label}</code>
+              {row.text && (
+                <div className="form-hint" style={{
+                  marginLeft: '24px', wordBreak: 'break-word',
+                  color: row.status === 'ok' ? undefined : 'var(--error)',
                 }}>
                   {row.text}
                 </div>

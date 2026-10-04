@@ -86,7 +86,7 @@ def worst_call_usd(link) -> float:
     pairs.append((prompts.INPUT_BUDGET.get("E1", context.PACK_TOKEN_BUDGET), prompts.E1_PAYOFF_MAX_TOKENS))
     pairs.append((prompts.INPUT_BUDGET["E1v2"], prompts.E1V2_PAYOFF_MAX_TOKENS))  # its v2 twin (stage 5c)
     pairs.append((prompts.input_budget("E1v3"), prompts.E1V3_PAYOFF_MAX_TOKENS))  # writing v3 (plan 22 stage 3)
-    return ledger_usd(max(pricing.llm_cost(link, tokens_in, tokens_out) for tokens_in, tokens_out in pairs))
+    return ledger_usd(max(pricing.llm_estimate_cost(link, tokens_in, tokens_out) for tokens_in, tokens_out in pairs))
 
 
 def open_meter(ctx, prompt_id, *, system, user, cap) -> "Meter":
@@ -173,6 +173,12 @@ class _MeteredCompletions:
         try:
             response = self._real.create(**body)
         except Exception as exc:
+            reply = getattr(exc, "reply", None)
+            if reply is not None:
+                # The provider answered and billed it (a refusal, a reply cut
+                # at max_tokens: plan 23 stage D1): booked at its real usage.
+                meter.book_reply(link, reply, usd, note=f"{type(exc).__name__}: booked at the reply's own usage")
+                raise
             billed, note = gencache.billing_verdict(exc, sent=None)
             if billed:
                 meter.book(link, qty=meter.tokens_in + meter.cap, usd=usd, note=note)
@@ -197,8 +203,11 @@ class Meter:
 
     def estimate(self, link) -> float:
         """One request on the paid *link*, rounded up to the ledger's
-        precision; ``pricing.PriceUnknown`` without a price."""
-        return ledger_usd(pricing.llm_cost(link, self.tokens_in, self.cap))
+        precision; ``pricing.PriceUnknown`` without a price. An Anthropic link
+        is priced never low (``pricing.llm_estimate_cost``: the cache-write
+        rate, Claude's tokenizer factor, the dearest row of its fallback
+        family)."""
+        return ledger_usd(pricing.llm_estimate_cost(link, self.tokens_in, self.cap))
 
     def _numbers(self, usd) -> str:
         return f"≈{self.tokens_in} tokens in + {self.cap} out = ${usd:.4f}"
@@ -235,20 +244,25 @@ class Meter:
             raise StepFailed(f"{self.prompt_id}: {reason}", reason=reason)
         return runnable
 
-    def factory(self, link, *, api_key, timeout):
+    def factory(self, link, *, api_key, timeout, effort=None):
         """``client_factory`` for ``run_chain``: ``llm.build_client``'s client,
         metered when *link* is paid (the link that answers: a DEC-089 fallback
-        model is priced on its own, refused without a price)."""
+        model is priced on its own, refused without a price). *effort* is the
+        prompt's family effort (``llm_call`` captures it): an Anthropic link
+        is built with its own ``@effort`` or that one; no other link sees it."""
         from clipping.providers import llm as llm_mod
 
         if is_free_link(link):
             return llm_mod.build_client(link, api_key=api_key, timeout=timeout)
         self.estimate(link)
-        client = llm_mod.build_client(link, api_key=api_key, timeout=timeout)
+        extra = {}
+        if registry.PROVIDERS[link.provider].api == "anthropic":
+            extra["effort"] = registry.anthropic_effort(link, effort)
+        client = llm_mod.build_client(link, api_key=api_key, timeout=timeout, **extra)
         chat = client.chat
         return _Proxy(client, chat=_Proxy(chat, completions=_MeteredCompletions(self, link, chat.completions)))
 
-    def book_reply(self, link, response, estimate_usd) -> None:
+    def book_reply(self, link, response, estimate_usd, note=None) -> None:
         """Book the reply a paid request returned: the provider's own cost,
         else its usage at the table's price, else the estimate with a note.
 
@@ -256,7 +270,14 @@ class Meter:
         (:func:`_reasoning_tokens`) is noted on the row for transparency,
         never added to ``qty`` or to the cost: it is already inside
         ``completion_tokens``, which prices it once, at the output rate,
-        below."""
+        below.
+
+        An Anthropic reply has its own path (:meth:`_book_anthropic`): cache
+        reads and writes at their rates, every attempt at the model that ran
+        it. *note* (a refused or truncated reply) is added to the row."""
+        if registry.PROVIDERS[link.provider].api == "anthropic":
+            self._book_anthropic(link, response, estimate_usd, note)
+            return
         usage = getattr(response, "usage", None)
         tokens_in = _count(getattr(usage, "prompt_tokens", None))
         tokens_out = _count(getattr(usage, "completion_tokens", None))
@@ -265,7 +286,10 @@ class Meter:
             total = tokens_in + tokens_out
         qty = total if total is not None else self.tokens_in + self.cap
         reasoning = _reasoning_tokens(usage)
+        extra_note = note
         note = f"{reasoning} of the output tokens were reasoning (already inside completion_tokens)" if reasoning else None
+        if extra_note:
+            note = f"{extra_note}; {note}" if note else extra_note
         cost = _amount(getattr(usage, "cost", None))
         if cost is not None:
             self.book(link, qty=qty, usd=ledger_usd(cost), note=note)
@@ -273,6 +297,68 @@ class Meter:
             self.book(link, qty=qty, usd=ledger_usd(pricing.llm_cost(link, tokens_in, tokens_out)), note=note)
         else:
             self.book(link, qty=qty, usd=estimate_usd, note=NO_USAGE_NOTE)
+
+    def _book_anthropic(self, link, response, estimate_usd, extra_note=None) -> None:
+        """Book an Anthropic reply (plan 23 stage D1, ``anthropic_llm``'s shape).
+
+        Each attempt is priced at the model that ran it: without a
+        server-side fallback the reply's own usage at the served ``model``'s
+        row; with one (a ``fallback_message`` entry in ``iterations``) every
+        attempt it lists -- the declined ones included, so the ledger never
+        under-reports -- at its own model's row. Uncached input, cache reads,
+        cache writes and output each at their rate
+        (``pricing.llm_cost_cached``); the model's thinking is inside the
+        output count, booked once. A served model with no price row is booked
+        at the dearest row of the requested model's family, flagged on the
+        row. The ledger row names the served model; a fallback is also
+        printed on the story's activity line."""
+        usage = getattr(response, "usage", None)
+        requested, _effort = registry.split_effort(link)
+        served = str(getattr(response, "model", None) or requested)
+        notes = [extra_note] if extra_note else []
+        iterations = list(getattr(response, "iterations", None) or [])
+        fell_back = any(row.get("type") == "fallback_message" for row in iterations)
+        if fell_back:
+            attempts = [row for row in iterations if row.get("type") in ("message", "fallback_message")]
+        elif usage is not None and _count(getattr(usage, "completion_tokens", None)) is not None:
+            attempts = [{"model": served,
+                         "input_tokens": _count(getattr(usage, "input_tokens", None)) or 0,
+                         "cache_read_input_tokens": _count(getattr(usage, "cache_read_input_tokens", None)) or 0,
+                         "cache_creation_input_tokens":
+                             _count(getattr(usage, "cache_creation_input_tokens", None)) or 0,
+                         "output_tokens": _count(getattr(usage, "completion_tokens", None)) or 0}]
+        else:
+            attempts = []
+        served_link = link._replace(model=served) if hasattr(link, "_replace") else link
+        if not attempts:
+            notes.append(NO_USAGE_NOTE)
+            self.book(served_link, qty=self.tokens_in + self.cap, usd=estimate_usd, note="; ".join(notes))
+            return
+        usd, qty, cache_read, cache_write = 0.0, 0, 0, 0
+        for row in attempts:
+            price, flag = pricing.served_price(link, row.get("model") or requested)
+            if flag and flag not in notes:
+                notes.append(flag)
+            usd += pricing.llm_cost_cached(link, row["input_tokens"], row["output_tokens"],
+                                           cache_read=row["cache_read_input_tokens"],
+                                           cache_write=row["cache_creation_input_tokens"], price=price)
+            qty += (row["input_tokens"] + row["cache_read_input_tokens"] + row["cache_creation_input_tokens"]
+                    + row["output_tokens"])
+            cache_read += row["cache_read_input_tokens"]
+            cache_write += row["cache_creation_input_tokens"]
+        if cache_read or cache_write:
+            notes.append(f"prompt cache: {cache_read} read, {cache_write} written")
+        thinking = _count(getattr(usage, "thinking_tokens", None)) if usage is not None else None
+        if thinking:
+            notes.append(f"{thinking} of the output tokens were thinking (already inside the output count)")
+        switches = list(getattr(response, "fallbacks", None) or [])
+        if fell_back or switches:
+            hops = "; ".join(f"{hop.get('from')} declined, {hop.get('to')} continued" for hop in switches) \
+                or f"{requested} declined, {served} served"
+            notes.append(f"server-side fallback: {hops} ({len(attempts)} attempt(s) booked)")
+            self.ctx.on_log(f"   ↪ {registry.describe(link)}: server-side fallback ({hops}); booked at "
+                            f"{served}'s price")
+        self.book(served_link, qty=qty, usd=ledger_usd(usd), note="; ".join(notes) or None)
 
     def book(self, link, *, qty, usd, note=None) -> None:
         """One ledger row of the story (the step, its episode), and today's

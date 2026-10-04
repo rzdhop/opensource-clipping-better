@@ -44,6 +44,7 @@ Stdlib only (DEC-012); the provider modules it reaches are stdlib at import.
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 import time
@@ -364,8 +365,11 @@ def call_json(
     # call -- and a premium call whose chain fell through to free links only
     # -- sends exactly the cap it always has (every pinned budget test is
     # unaffected). The meter below estimates with the cap already raised.
-    headroom = max((registry.MODEL_OUTPUT_HEADROOM.get((link.provider, link.model), 0) for link in chain),
-                   default=0)
+    # An Anthropic link's room follows its effort (plan 23 stage D1,
+    # registry.output_headroom): the link's "@effort", else this prompt's
+    # family effort, else the model's default.
+    effort = prompts.anthropic_effort(prompt_id)
+    headroom = max((registry.output_headroom(link, effort) for link in chain), default=0)
     cap += headroom
     # No keyword at all for a run without a token (the CLI's NEVER), as the
     # analyzer does it.
@@ -409,7 +413,13 @@ def call_json(
                        "(AI Story spends only on opt-in).")
         run_links, metered = attempt_chain, {}
         if meter is not None:
-            run_links, metered = meter.plan(attempt_chain, keys), {"client_factory": meter.factory}
+            # The factory captures this prompt's effort for an Anthropic link
+            # (no run_chain signature change); every other link is built
+            # exactly as before.
+            factory = meter.factory
+            if any(registry.PROVIDERS[link.provider].api == "anthropic" for link in attempt_chain):
+                factory = functools.partial(meter.factory, effort=effort)
+            run_links, metered = meter.plan(attempt_chain, keys), {"client_factory": factory}
         try:
             value, link = runner(
                 run_links,

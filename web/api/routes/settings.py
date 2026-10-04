@@ -234,6 +234,7 @@ async def update_settings(req: SettingsRequest) -> SettingsResponse:
                         ("CLOUDFLARE_ACCOUNT_ID", req.cloudflare_account_id),
                         ("POLLINATIONS_API_KEY", req.pollinations_api_key),
                         ("GEMINI_PAID_API_KEY", req.gemini_paid_api_key),
+                        ("ANTHROPIC_API_KEY", req.anthropic_api_key),
                         ("LOCAL_COMFYUI_URL", req.local_comfyui_url), ("LOCAL_OLLAMA_URL", req.local_ollama_url)):
         if value is not None:
             env_updates[name] = value.strip()
@@ -451,6 +452,8 @@ def _link_row(registry, link, probe, busy):
     judgement = probe.judgement
     if probe.kind == "skipped":
         status = "no_key"
+    elif probe.reason == "ok" and probe.kind == "listed":
+        status = "listed"
     elif probe.reason == "ok":
         status = "ok" if probe.kind == "work" else "alive"
     else:
@@ -469,6 +472,8 @@ def _link_row(registry, link, probe, busy):
             "The key works, but the model could not complete the real "
             "analysis request."
         )
+    if status == "listed":
+        notes.append(ANTHROPIC_LISTED_TEXT)
     if busy and link.provider == "nvidia" and status != "no_key":
         notes.append(
             "A job is running. NVIDIA answers one request at a time per key, "
@@ -602,6 +607,7 @@ def _generation_fields(env) -> dict:
         "cloudflare_account_id_set": bool(merged.get("CLOUDFLARE_ACCOUNT_ID")),
         "pollinations_api_key_set": bool(merged.get("POLLINATIONS_API_KEY")),
         "gemini_paid_api_key_set": bool(merged.get("GEMINI_PAID_API_KEY")),
+        "anthropic_api_key_set": bool(merged.get("ANTHROPIC_API_KEY")),
         "local_comfyui_url": gen.local_url("comfyui", merged),
         "local_ollama_url": gen.local_url("ollama", merged),
         "generation_chains": chains,
@@ -938,6 +944,84 @@ async def check_video_keys() -> dict:
         verdict = "blocked"
         message = "No hosted video link answered with an accepted key; see each row. Nothing was generated."
     return {"results": rows, "verdict": verdict, "message": message + not_stored}
+
+
+# What a free Anthropic check proves, and what it does not (plan 23 stage D1).
+ANTHROPIC_LISTED_TEXT = "key valid, model available — not exercised: every request is billed"
+
+
+def _check_anthropic_links(links, key) -> list:
+    """The blocking half of :func:`check_anthropic_key`: one free
+    ``models.retrieve`` per link (``AnthropicChat.check_model``), one row
+    each. Never a completion."""
+    from clipping.providers import errors as provider_errors, llm, registry
+
+    rows = []
+    for link in links:
+        label = registry.describe(link)
+        row = {"label": label, "provider": link.provider, "model": link.model, "status": "skipped", "text": ""}
+        if not key:
+            env_key = registry.PROVIDERS[link.provider].env_key
+            row.update(status="no_key", text=f"{label}: no API key ({env_key} is not set).")
+            rows.append(row)
+            continue
+        try:
+            llm.build_client(link, api_key=key, timeout=registry.probe_timeout(link)).check_model()
+        except Exception as exc:  # noqa: BLE001 - every failure is reported on its row
+            status = provider_errors.status_code(exc)
+            name = type(exc).__name__
+            if status in (401, 403) or name in ("AuthenticationError", "PermissionDeniedError"):
+                kind = "bad_key"
+            elif status == 404 or name == "NotFoundError":
+                kind = "no_model"
+            elif name in ("APIConnectionError", "APITimeoutError"):
+                kind = "unreachable"
+            else:
+                kind = "failed"
+            row.update(status=kind, text=f"{label}: {name}: {' '.join(str(exc).split())}")
+        else:
+            row.update(status="ok", text=f"{label}: {ANTHROPIC_LISTED_TEXT}.")
+        rows.append(row)
+    return rows
+
+
+@router.post("/api/settings/check-anthropic-key")
+async def check_anthropic_key() -> dict:
+    """Ask Anthropic whether ``ANTHROPIC_API_KEY`` is accepted and each
+    ``anthropic/`` link of the story premium writing chain is available: one
+    free ``models.retrieve`` per link, never a completion -- every request on
+    this provider is billed, so the check proves the key and the model and
+    nothing else. ``{"results": [{label, provider, model, status, text}],
+    "verdict": "ready" | "blocked", "message"}``; never the key's value.
+    Shares the chain tests' lock: one at a time."""
+    from clipping.aistory.steps import llm_call
+    from clipping.providers import registry
+
+    env = worker.get_settings_env()
+    try:
+        chain = llm_call.resolve_premium_chain(env)
+    except registry.ChainError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    links = [link for link in chain if registry.PROVIDERS[link.provider].api == "anthropic"]
+    if not links:
+        return {"results": [], "verdict": "blocked",
+                "message": "The story premium writing chain names no anthropic/ link, so nothing was checked."}
+    key = llm_call.resolve_keys(env).get("anthropic", "")
+    if _CHAIN_TEST_LOCK.locked():
+        raise HTTPException(status_code=409, detail="A chain test is already running.")
+    async with _CHAIN_TEST_LOCK:
+        try:
+            rows = await asyncio.wait_for(asyncio.to_thread(_check_anthropic_links, links, key),
+                                          timeout=_CHAIN_TEST_CEILING_SECONDS)
+        except asyncio.TimeoutError:
+            raise HTTPException(status_code=504, detail="The Anthropic key check gave up.")
+    good = [row["label"] for row in rows if row["status"] == "ok"]
+    if good and len(good) == len(rows):
+        verdict, message = "ready", f"{', '.join(good)}: {ANTHROPIC_LISTED_TEXT}. Nothing was billed."
+    else:
+        verdict = "blocked"
+        message = "At least one Anthropic link did not pass the free check; see each row. Nothing was billed."
+    return {"results": rows, "verdict": verdict, "message": message}
 
 
 @router.post("/api/settings/test-generation-chain")

@@ -13,11 +13,13 @@ Stdlib only.
 
 from __future__ import annotations
 
+import math
+import re
 from collections import namedtuple
 from datetime import date
 
 from .generation import is_paid
-from .registry import describe
+from .registry import PROVIDERS, describe, split_effort
 
 PRICES_AS_OF = "2026-09-25"
 
@@ -107,7 +109,13 @@ Estimate = namedtuple("Estimate", "link unit qty price_usd est_usd paid")
 # the estimate, and a reply without it.
 LLM_PRICES_AS_OF = "2026-09-30"
 
-LlmPrice = namedtuple("LlmPrice", "input_usd_per_m output_usd_per_m note")
+# ``cache_read_usd_per_m`` / ``cache_write_usd_per_m`` (plan 23 stage D1):
+# what a prompt-cache read and a cache write cost per M tokens, for a
+# provider that reports them (Anthropic's ``cache_read_input_tokens`` /
+# ``cache_creation_input_tokens``). Trailing and defaulted to None -- "the
+# input price" -- so every row written before them is unchanged.
+LlmPrice = namedtuple("LlmPrice", "input_usd_per_m output_usd_per_m note cache_read_usd_per_m cache_write_usd_per_m",
+                      defaults=(None, None))
 
 LLM_PRICES = {
     "openrouter/mistralai/mistral-small-3.2-24b-instruct": LlmPrice(0.10, 0.30, "the dearest of 4 hosts (Mistral's own), read on 2026-09-30 at https://openrouter.ai/api/v1/models/mistralai/mistral-small-3.2-24b-instruct/endpoints; the model's listed price at https://openrouter.ai/api/v1/models is $0.09375 in / $0.25 out, DeepInfra $0.075 / $0.20 the cheapest"),
@@ -129,7 +137,42 @@ LLM_PRICES = {
     "gemini-paid/gemini-3.1-pro-preview": LlmPrice(2.00, 12.00, "priced and parseable; never a default link "
                                           "(the per-story premium switch, stage 4); read 2026-10-04 at "
                                           "ai.google.dev/gemini-api/docs/pricing"),
+    # Claude as a writer (plan 23 stage D1): the two premium links, then
+    # every model the server-side fallback ("default" mode) may plausibly
+    # serve a declined request on, so a fallback reply is booked at the
+    # SERVED model's own row (``llm_spend``). Base prices read 2026-10-04 in
+    # the claude-api reference's model table (cached 2026-09-25; Anthropic
+    # first-party API rates). Cache reads are 0.1x input (0.05x on Opus 5.5:
+    # $0.20) and 5-minute cache writes 1.25x input, as the same reference
+    # states for prompt caching.
+    "anthropic/claude-sonnet-5-5": LlmPrice(2.00, 10.00, "the premium writer's default; read 2026-10-04 "
+                                            "(claude-api reference)", 0.20, 2.50),
+    "anthropic/claude-opus-5-5": LlmPrice(4.00, 20.00, "the premium writer by name; read 2026-10-04 "
+                                          "(claude-api reference)", 0.20, 5.00),
+    "anthropic/claude-opus-5": LlmPrice(5.00, 25.00, "a server-side fallback target of Opus 5.5; read "
+                                        "2026-10-04 (claude-api reference)", 0.50, 6.25),
+    "anthropic/claude-opus-4-8": LlmPrice(5.00, 25.00, "a server-side fallback target of Opus 5.5; read "
+                                          "2026-10-04 (claude-api reference)", 0.50, 6.25),
+    "anthropic/claude-sonnet-5": LlmPrice(2.00, 10.00, "the server-side fallback target of Sonnet 5.5; read "
+                                          "2026-10-04 (claude-api reference)", 0.20, 2.50),
+    "anthropic/claude-haiku-4-5": LlmPrice(1.00, 5.00, "priced in case a fallback serves on it; read "
+                                           "2026-10-04 (claude-api reference)", 0.10, 1.25),
 }
+
+# The rows a request to each Anthropic model may be billed at: the model
+# itself and the models its server-side fallback may serve a declined request
+# on (Sonnet 5.5 falls back to Sonnet 5; Opus 5.5 is expected to fall back to
+# Opus 5 / Opus 4.8 -- claude-api reference, 2026-10-04). The pre-call
+# estimate prices a request at the DEAREST of these rows, and a reply served
+# by a model with no row is booked at it with a flagged note: never low.
+ANTHROPIC_FALLBACK_FAMILIES = {
+    "claude-sonnet-5-5": ("claude-sonnet-5-5", "claude-sonnet-5"),
+    "claude-opus-5-5": ("claude-opus-5-5", "claude-opus-5", "claude-opus-4-8"),
+}
+# Claude's tokenizer counts French well above ``pacing.estimate_tokens``'s
+# chars/4 (the claude-api reference: the newer tokenizer uses up to ~1.35x as
+# many tokens), so the estimate scales its input count by this.
+CLAUDE_TOKENS_FACTOR = 1.35
 
 # Dated replacements of an LLM_PRICES row (plan 22 stage 1): the promo price
 # above ends 2026-12-31, and Google's own pricing page already states the
@@ -198,12 +241,19 @@ def estimate(link, qty=1, *, width=None, height=None, resolution=None) -> Estima
     return Estimate(describe(link), price.unit, qty, round(unit_price, 6), est, paid)
 
 
+def _llm_label(link) -> str:
+    """*link*'s price-table key: an Anthropic link's ``@effort`` suffix is not
+    part of it (``registry.split_effort``)."""
+    model, _effort = split_effort(link)
+    return f"{link.provider}/{model}"
+
+
 def llm_price_for(link, today=None) -> LlmPrice:
     """The :class:`LlmPrice` of the LLM *link*; :class:`PriceUnknown` without a
     row. *today* (an ISO ``"YYYY-MM-DD"`` string or a :class:`datetime.date`;
     the real date by default) picks the later row of :data:`LLM_PRICE_CHANGES`
     once it is reached -- the estimate and every booking read the same clock."""
-    label = describe(link)
+    label = _llm_label(link)
     price = LLM_PRICES.get(label)
     if price is None:
         raise PriceUnknown(
@@ -224,6 +274,80 @@ def llm_cost(link, tokens_in, tokens_out, *, today=None) -> float:
     cost, unrounded, at the price in effect on *today* (:func:`llm_price_for`)."""
     price = llm_price_for(link, today)
     return (tokens_in * price.input_usd_per_m + tokens_out * price.output_usd_per_m) / 1_000_000
+
+
+def llm_cost_cached(link, tokens_in, tokens_out, *, cache_read=0, cache_write=0, today=None,
+                    price=None) -> float:
+    """What a reply with *tokens_in* uncached prompt tokens, *cache_read* and
+    *cache_write* prompt-cache tokens and *tokens_out* completion tokens (the
+    model's thinking included) costs, unrounded: each at its own rate of
+    *price* (the link's row by default, :func:`llm_price_for`), a cache rate
+    the row leaves None at the input price."""
+    price = price or llm_price_for(link, today)
+    read = price.input_usd_per_m if price.cache_read_usd_per_m is None else price.cache_read_usd_per_m
+    write = price.input_usd_per_m if price.cache_write_usd_per_m is None else price.cache_write_usd_per_m
+    return (tokens_in * price.input_usd_per_m + cache_read * read + cache_write * write
+            + tokens_out * price.output_usd_per_m) / 1_000_000
+
+
+def _is_anthropic(link) -> bool:
+    return getattr(PROVIDERS.get(link.provider), "api", "openai") == "anthropic"
+
+
+def dearest_family_price(link, today=None) -> LlmPrice:
+    """The dearest rate of every row an Anthropic *link* may be billed at
+    (:data:`ANTHROPIC_FALLBACK_FAMILIES`; the link's own row alone for a
+    model with no family), each rate taken separately. :class:`PriceUnknown`
+    when the link's own row is missing."""
+    model, _effort = split_effort(link)
+    rows = [llm_price_for(link, today)]
+    for member in ANTHROPIC_FALLBACK_FAMILIES.get(model, ()):
+        price = LLM_PRICES.get(f"{link.provider}/{member}")
+        if price is not None:
+            rows.append(price)
+
+    def rate(price, name):
+        value = getattr(price, name)
+        return price.input_usd_per_m if value is None else value
+
+    return LlmPrice(
+        max(p.input_usd_per_m for p in rows), max(p.output_usd_per_m for p in rows),
+        f"the dearest row of {model}'s fallback family",
+        max(rate(p, "cache_read_usd_per_m") for p in rows), max(rate(p, "cache_write_usd_per_m") for p in rows),
+    )
+
+
+def served_price(link, served_model, today=None):
+    """``(price, note)`` for a reply to *link* that *served_model* produced: the
+    served model's own row and None, or -- for a model with no row -- the
+    dearest row of the requested model's family and a note saying so."""
+    model, _effort = split_effort(link)
+    # A dated snapshot id of the requested model itself ("<model>-YYYYMMDD")
+    # is the requested model, not a fallback.
+    if served_model and re.fullmatch(re.escape(model) + r"-\d{8}", str(served_model)):
+        served_model = model
+    if served_model and served_model != model:
+        price = LLM_PRICES.get(f"{link.provider}/{served_model}")
+        if price is None:
+            return dearest_family_price(link, today), (
+                f"FLAGGED: served by {served_model}, which has no price row; booked at the dearest row of "
+                f"{model}'s fallback family")
+        return llm_price_for(type(link)(link.provider, served_model), today), None
+    return llm_price_for(link, today), None
+
+
+def llm_estimate_cost(link, tokens_in, tokens_out, *, today=None) -> float:
+    """The pre-call estimate of one request to *link*: :func:`llm_cost` for
+    every link but an Anthropic one, which is priced never low -- its input at
+    the cache-WRITE rate (the dearer of the two a first request pays), scaled
+    by :data:`CLAUDE_TOKENS_FACTOR`, and both halves at the dearest row of
+    its fallback family (:func:`dearest_family_price`)."""
+    if not _is_anthropic(link):
+        return llm_cost(link, tokens_in, tokens_out, today=today)
+    price = dearest_family_price(link, today)
+    write = max(price.input_usd_per_m, price.cache_write_usd_per_m or 0.0)
+    scaled_in = math.ceil(tokens_in * CLAUDE_TOKENS_FACTOR)
+    return (scaled_in * write + tokens_out * price.output_usd_per_m) / 1_000_000
 
 
 def price_table() -> list:
