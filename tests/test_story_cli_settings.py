@@ -47,7 +47,8 @@ def test_with_settings_a_new_story_sees_the_stored_fal_key(cli, capsys):
 
     story = _new(module, outputs, "--settings")
 
-    assert story["generation_profile"] == defaults.quality_generation_profile()
+    # Re-pinned on purpose (plan 22 stage 5): the default with the keys is the manual native-speech profile.
+    assert story["generation_profile"] == defaults.manual_speech_generation_profile()
     out = capsys.readouterr()
     assert "stored Settings" in out.out and FAL not in out.out + out.err
 

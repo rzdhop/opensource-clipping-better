@@ -54,8 +54,8 @@ def test_the_generation_profile_defaults_are_written_as_the_agreement_test_reads
         '    tier: int = 1\n',
         '    route: Literal["auto","local","api"] = "auto"\n',
         '    consistency_mode: Literal["references","prompt_only"] = "references"\n',
-        # Re-pinned on purpose (plan 22, stage 4): the native-speech profile.
-        '    budget_profile: Literal["free","one_dollar","quality","native_speech"] = "free"\n',
+        # Re-pinned on purpose (plan 22, stage 4): the native-speech profile; (stage 5) its manual twin.
+        '    budget_profile: Literal["free","one_dollar","quality","native_speech","native_speech_manual"] = "free"\n',
     ):
         assert line in body, line
 

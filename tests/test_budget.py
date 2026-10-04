@@ -107,8 +107,9 @@ def test_an_unknown_profile_is_refused():
 def test_the_shipped_profiles_match_the_spec():
     profiles = load_profiles()
     assert profiles["$schema"] == "budget_profiles_v1"
-    # Re-pinned on purpose (plan 22, stage 4): the native-speech profile joins the three.
-    assert set(profiles["profiles"]) == {"free", "one_dollar", "quality", "native_speech"}
+    # Re-pinned on purpose (plan 22, stage 4): the native-speech profile joins the three;
+    # (stage 5) and its manual twin, every clip the human's own upload.
+    assert set(profiles["profiles"]) == {"free", "one_dollar", "quality", "native_speech", "native_speech_manual"}
     one = profiles["profiles"]["one_dollar"]
     assert one["cap_usd"] == 1.0
     assert one["animate_priority"] == ["hook", "cliffhanger", "peak", "turn", "longest_dialogue"]

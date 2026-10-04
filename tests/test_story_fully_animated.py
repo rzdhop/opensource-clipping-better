@@ -155,7 +155,9 @@ def test_the_new_profile_route_offers_the_quality_preset_only_with_fal_key(api):
 
     api.monkeypatch.setattr(api.worker, "_settings_env", {"FAL_KEY": "test-fal-key", "ALLOW_PAID": "true"})
     body = api.client.get("/api/stories/new-profile").json()
-    assert body["profile"] == defaults.quality_generation_profile()
+    # Re-pinned on purpose (plan 22 stage 5): the default with the keys is the manual native-speech
+    # profile -- the quality preset's v2, tier 3, image links, every clip the human's own.
+    assert body["profile"] == defaults.manual_speech_generation_profile()
     assert body["quality"] is True and body["missing_keys"] == []
     assert body["allow_paid"] is True
     # The route is a real one, not read as a malformed story id.
@@ -166,7 +168,8 @@ def test_a_story_created_without_a_profile_is_fully_animated_when_fal_is_keyed(a
     api.monkeypatch.setattr(api.worker, "_settings_env", {"FAL_KEY": "test-fal-key"})
     story = api.client.post("/api/stories", json={"language": "fr"}).json()
     assert story["generation_profile"]["pipeline"] == "v2"
-    assert story["generation_profile"]["budget_profile"] == "quality"
+    # Re-pinned on purpose (plan 22 stage 5): the manual native-speech profile is the default.
+    assert story["generation_profile"]["budget_profile"] == "native_speech_manual"
     assert story["generation_profile"]["tier"] >= 2
     assert story["episode_template_id"] == defaults.EPISODE_TEMPLATE_ID_V2
 

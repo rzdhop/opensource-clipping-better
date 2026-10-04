@@ -77,20 +77,22 @@ def test_speaking_shots_are_priced_on_the_speech_link_and_silent_ones_on_the_sil
 
 
 def test_a_speech_link_that_cannot_run_yet_refuses_the_plan_naming_it(store, monkeypatch, tmp_path):
-    """Resolved by name: a link with no provider yet (stage 5's
-    ``manual/upload``) is a plan shown and refused, never a silent switch."""
+    """Resolved by name: a link with no provider yet is a plan shown and
+    refused, never a silent switch. Re-pinned on purpose (plan 22 stage 5):
+    ``manual/upload`` has its provider now, so a provider-less label stands
+    in for it (``nowhere/upload``)."""
     import json
 
     from clipping.providers import budget as budget_mod
 
     data = budget_mod.load_profiles()
-    data["profiles"]["native_speech"]["speech_links"]["fast"] = "manual/upload"
+    data["profiles"]["native_speech"]["speech_links"]["fast"] = "nowhere/upload"
     path = tmp_path / "profiles.json"
     path.write_text(json.dumps(data), encoding="utf-8")
     monkeypatch.setattr(budget_mod, "PROFILES_PATH", str(path))
     story_id = nsp.planned_story(store)
     video = _video(store, story_id)
-    assert video["ready"] is False and video["refused"].startswith("manual/upload: ")
+    assert video["ready"] is False and video["refused"].startswith("nowhere/upload: ")
 
 
 def test_each_class_of_shot_keeps_its_own_sticky_link_and_its_own_switch(store):
