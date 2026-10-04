@@ -82,10 +82,10 @@ def worst_call_usd(link) -> float:
     input budget a prompt may be sent with (``context.check_budget`` refuses
     more) and the widest reply cap (E1's payoff variant counted), at its
     price, rounded up as a booking is. ``pricing.PriceUnknown`` without one."""
-    pairs = [(prompts.INPUT_BUDGET.get(prompt_id, context.PACK_TOKEN_BUDGET), cap)
-             for prompt_id, cap in prompts.MAX_TOKENS.items()]
+    pairs = [(prompts.input_budget(prompt_id), cap) for prompt_id, cap in prompts.MAX_TOKENS.items()]
     pairs.append((prompts.INPUT_BUDGET.get("E1", context.PACK_TOKEN_BUDGET), prompts.E1_PAYOFF_MAX_TOKENS))
     pairs.append((prompts.INPUT_BUDGET["E1v2"], prompts.E1V2_PAYOFF_MAX_TOKENS))  # its v2 twin (stage 5c)
+    pairs.append((prompts.input_budget("E1v3"), prompts.E1V3_PAYOFF_MAX_TOKENS))  # writing v3 (plan 22 stage 3)
     return ledger_usd(max(pricing.llm_cost(link, tokens_in, tokens_out) for tokens_in, tokens_out in pairs))
 
 

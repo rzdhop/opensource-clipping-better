@@ -87,18 +87,25 @@ from clipping.providers import gating, jsonx
 from clipping.providers import generation as gen
 from clipping.providers.registry import ChainError, describe
 
-from .. import context, prompting, prompts, shots
+from .. import context, media_policy, prompting, prompts, schemas, shots, timing
 from .. import ledger as ledger_mod
 from . import episode_common, llm_call
 
 FIRST_WATCH = "first_watch"
 J1 = "J1"
+# Plan 22 stage 3 (writing v3): the judge of a writing-v3 episode.
+J1V3 = "J1v3"
 
 # The deterministic repeated-line issues one report holds at most (the stored
 # report holds 20; J1 adds at most 6, the hook check 1).
 DUPLICATE_ISSUES_MAX = 6
 # The kinds the deterministic checks find (they run before every J1 call).
 DETERMINISTIC_KINDS = ("repeated_line", "no_hook_text")
+# Plan 22 stage 3: the line checks a writing-v3 episode's J1 runs first --
+# a line past the format's words a line (``line_too_long``) or short of them
+# (``incomplete_sentence``), at most this many issues (the stored report
+# holds 20: 6 repeated lines, 1 hook text, these 6 and J1's 6 fit).
+LINE_ISSUES_MAX = 6
 
 # Each first-watch issue kind in words, for the messages and the repair notes.
 KIND_WORDS = {
@@ -107,6 +114,9 @@ KIND_WORDS = {
     # The consistency check's (E4) kinds, repaired too since DEC-260.
     "continuity": "continuity", "character": "out of character", "place": "place", "series_memory": "series memory",
     "hook_payoff": "hook payoff", "other": "consistency",
+    # Plan 22 stage 3 (J1v3's kinds and the line-length check).
+    "line_no_progress": "line adds nothing", "incomplete_sentence": "incomplete sentence",
+    "logline_mismatch": "logline not told", "line_too_long": "line too long",
 }
 
 # Phase 7 follow-up, stage G: the script step's repair passes on the script
@@ -123,16 +133,36 @@ def _and(items) -> str:
 
 # ------------------------------------------------------------- the report
 
-def needs_first_watch(script) -> bool:
+def writes_v3(story, script=None) -> bool:
+    """Whether an episode of *story* is written and judged on writing v3
+    (plan 22 stage 3): a v2 story whose ``generation_profile.writing`` is
+    "v3" (``media_policy.writing_v3``) and -- given its *script* -- one
+    whose beat sheet is E1v3's (``spine``) or not written yet. An episode
+    beat-sheeted before the story turned v3 keeps the prompts and the judge
+    it began with."""
+    if not (media_policy.is_v2(story) and media_policy.writing_v3(story)):
+        return False
+    return script is None or not script.get("scenes") or script.get("spine") is not None
+
+
+def j1_version(story, script=None) -> int:
+    """The J1 version that judges *script* of *story*: 3 on writing v3
+    (:func:`writes_v3`), else 2 (``prompts.J1_PROMPT_VERSION``)."""
+    return prompts.J1_V3_PROMPT_VERSION if writes_v3(story, script) else prompts.J1_PROMPT_VERSION
+
+
+def needs_first_watch(script, version=None) -> bool:
     """Whether *script*'s first-watch report is missing, marked stale, or of
     an older revision (the consistency report's rule,
     ``script.needs_check``) -- or, on a script not approved yet, judged by
-    an older J1 (``version``, absent: 1; DEC-248): an approved script keeps
-    the report it was approved on."""
+    an older J1 (``version``, absent: 1; DEC-248) than *version* (the
+    story's, :func:`j1_version`; None: ``prompts.J1_PROMPT_VERSION``): an
+    approved script keeps the report it was approved on."""
     report = (script or {}).get(FIRST_WATCH)
     if report is None or report["stale"] or report["checked_rev"] != script["rev"]:
         return True
-    return not script.get("approved_at") and report.get("version", 1) < prompts.J1_PROMPT_VERSION
+    wanted = prompts.J1_PROMPT_VERSION if version is None else version
+    return not script.get("approved_at") and report.get("version", 1) < wanted
 
 
 def is_blocking(issue) -> bool:
@@ -149,13 +179,14 @@ def minor_issues(report) -> list:
     return [issue for issue in (report or {}).get("issues") or [] if not is_blocking(issue)]
 
 
-def first_watch_state(script) -> str:
+def first_watch_state(script, version=None) -> str:
     """``none`` | ``stale`` | ``passed`` | ``issues`` (``workflow.
-    report_state``'s, for the first-watch report)."""
+    report_state``'s, for the first-watch report; *version* as
+    :func:`needs_first_watch`'s)."""
     report = (script or {}).get(FIRST_WATCH)
     if report is None:
         return "none"
-    if needs_first_watch(script):
+    if needs_first_watch(script, version):
         return "stale"
     return "passed" if report["passed"] else "issues"
 
@@ -212,6 +243,46 @@ def hook_text_issues(script, ep) -> list:
                     "premise on screen."}]
 
 
+def line_issues(script, template, *, native=False) -> list:
+    """The line checks of a writing-v3 episode (plan 22 stage 3; pure): for
+    each character line, in script order, at most :data:`LINE_ISSUES_MAX`
+    issues --
+
+    - a line past the format's words a line (``timing.line_words_v3``: the
+      template's ``line_words``, else 17 on a native-speech story, else 22):
+      blocking ``line_too_long`` -- one shot cannot speak it;
+    - on a template with ``line_words``, a line under its low end: blocking
+      ``incomplete_sentence``; on any other, a line under
+      ``prompts.LINE_FLOOR_WORDS`` (3) words: minor ``incomplete_sentence``
+      (an interjection a free format may keep).
+
+    A narrator line is never checked here (it is heard over the picture)."""
+    lo, hi = timing.line_words_v3(template, native=native)
+    strict = bool((template or {}).get("line_words"))
+    issues = []
+    for scene in script["scenes"]:
+        for line in scene["lines"]:
+            if line["speaker"] == "narrator":
+                continue
+            count = len(line["text"].split())
+            quoted = prompts.quoted_line(line["text"])
+            if count > hi:
+                issues.append({"scene_id": scene["scene_id"], "kind": "line_too_long", "severity": "blocking",
+                               "fix": (f"Line {line['line_id']} {quoted} has {count} words; a line here holds at "
+                                       f"most {hi}: say it shorter or split it in two lines.")})
+            elif strict and count < lo:
+                issues.append({"scene_id": scene["scene_id"], "kind": "incomplete_sentence", "severity": "blocking",
+                               "fix": (f"Line {line['line_id']} {quoted} has {count} word{'s' if count != 1 else ''}; "
+                                       f"a line here is a complete sentence of {lo} to {hi} words: write it whole.")})
+            elif not strict and count < prompts.LINE_FLOOR_WORDS:
+                issues.append({"scene_id": scene["scene_id"], "kind": "incomplete_sentence", "severity": "minor",
+                               "fix": (f"Line {line['line_id']} {quoted} is a fragment: make it a sentence a person "
+                                       "would say.")})
+            if len(issues) >= LINE_ISSUES_MAX:
+                return issues
+    return issues
+
+
 # ------------------------------------------------------------------ J1
 
 def _objects(ec, script) -> list:
@@ -240,10 +311,18 @@ def check_first_watch(ctx, ec, script, *, tools, pack, previous=None) -> dict:
     (``context.build_pack``: the language). *previous*: the blocking issues
     a repair pass just tried to fix (a re-check, module docstring); a
     blocking issue of the reply that is not one of them is kept as minor."""
+    v3 = writes_v3(ec.story, script)
     pre = duplicate_issues(script) + hook_text_issues(script, ec.ep)
     if pre:
         ctx.on_log(f"👀 Repeated lines and hook text: {len(pre)} issue{'s' if len(pre) != 1 else ''}, added to "
                    "the first-watch report")
+    if v3:
+        # Plan 22 stage 3: each character line's words against the format's.
+        lines = line_issues(script, ec.template, native=media_policy.native_speech(ec.story))
+        if lines:
+            ctx.on_log(f"👀 Line lengths: {len(lines)} issue{'s' if len(lines) != 1 else ''}, added to the "
+                       "first-watch report")
+        pre += lines
     digest = prompts.script_digest(script, {
         "places": {pid: doc["name"] for pid, doc in ec.entities["places"].items()},
         "cast": ec.names,
@@ -253,13 +332,20 @@ def check_first_watch(ctx, ec, script, *, tools, pack, previous=None) -> dict:
     previous = [{"scene_id": issue["scene_id"], "kind": issue["kind"], "fix": issue["fix"]}
                 for issue in previous or []]
     # The deterministic checks run again on their own: J1 is shown its own kinds.
-    shown = [issue for issue in previous if issue["kind"] not in DETERMINISTIC_KINDS]
-    system, user, schema = prompts.build_j1(
-        pack, ep=ec.ep, script_digest=digest, objects=_objects(ec, script),
-        hook_text=(script.get("hook") or {}).get("on_screen_text"), reveal=script["cliffhanger"]["reveal"],
-        previous_recap=recap, seconds=seconds, words=spoken_words(script), previous_issues=shown or None)
+    deterministic = DETERMINISTIC_KINDS + (schemas.FIRST_WATCH_DETERMINISTIC_KINDS_V3 if v3 else ())
+    shown = [issue for issue in previous if issue["kind"] not in deterministic]
+    j1_kwargs = dict(ep=ec.ep, script_digest=digest, objects=_objects(ec, script),
+                     hook_text=(script.get("hook") or {}).get("on_screen_text"),
+                     reveal=script["cliffhanger"]["reveal"], previous_recap=recap, seconds=seconds,
+                     words=spoken_words(script), previous_issues=shown or None)
+    if v3:
+        system, user, schema = prompts.build_j1_v3(pack, spine=script.get("spine"), **j1_kwargs)
+    else:
+        system, user, schema = prompts.build_j1(pack, **j1_kwargs)
     scene_ids = [scene["scene_id"] for scene in script["scenes"]]
     pre_kinds = {issue["kind"] for issue in pre}
+    # Plan 22 stage 3: a scene the line check flagged a fragment in is not flagged again by the judge.
+    pre_fragments = {issue["scene_id"] for issue in pre if issue["kind"] == "incomplete_sentence"}
     tried = {(issue["scene_id"], issue["kind"]) for issue in previous}
 
     def severity_of(issue):
@@ -273,36 +359,38 @@ def check_first_watch(ctx, ec, script, *, tools, pack, previous=None) -> dict:
         found = [{"scene_id": issue["scene_id"], "kind": issue["kind"], "severity": severity_of(issue),
                   "fix": issue["fix"].strip()}
                  for issue in reply["issues"]
-                 if not (issue["kind"] == "no_hook_text" and "no_hook_text" in pre_kinds)]
+                 if not (issue["kind"] == "no_hook_text" and "no_hook_text" in pre_kinds)
+                 and not (issue["kind"] == "incomplete_sentence" and issue["scene_id"] in pre_fragments)]
         issues = copy.deepcopy(pre) + found
         return {
             "who_wants_what": reply["who_wants_what"].strip(), "what_happens": reply["what_happens"].strip(),
             "why_it_matters": reply["why_it_matters"].strip(),
             "passed": not any(is_blocking(issue) for issue in issues), "issues": issues,
             "checked_rev": script["rev"], "checked_at": checked_at, "stale": False,
-            "version": prompts.J1_PROMPT_VERSION,
+            "version": prompts.J1_V3_PROMPT_VERSION if v3 else prompts.J1_PROMPT_VERSION,
         }
 
     def validate(reply):
-        errors = prompts.validate_j1(reply, scene_ids=scene_ids)
+        errors = (prompts.validate_j1_v3 if v3 else prompts.validate_j1)(reply, scene_ids=scene_ids)
         if errors:
             return errors
         trial = copy.deepcopy(script)
         trial[FIRST_WATCH] = report_of(reply, llm_call.utc_now())
         return episode_common.trial_errors(ec, trial)
 
-    reply = llm_call.call_json(ctx, J1, system, user, schema, validator=validate, runner=tools.runner,
-                               time_fn=tools.time_fn)
+    reply = llm_call.call_json(ctx, J1V3 if v3 else J1, system, user, schema, validator=validate,
+                               runner=tools.runner, time_fn=tools.time_fn)
     script[FIRST_WATCH] = report_of(reply, llm_call.utc_now())
     return script[FIRST_WATCH]
 
 
 # --------------------------------------------------------------- refusals
 
-def unjudged_refusal(script, ep):
+def unjudged_refusal(script, ep, version=None):
     """``approve_script``'s refusal of a v2 script whose first-watch report
-    is missing or stale -- never approvable, "anyway" or not -- or None."""
-    state = first_watch_state(script)
+    is missing or stale -- never approvable, "anyway" or not -- or None
+    (*version* as :func:`needs_first_watch`'s)."""
+    state = first_watch_state(script, version)
     if state == "none":
         return (f"Episode {ep}'s script has not had its first-watch check yet (J1, a v2 story's judge): run "
                 "the script step again (it checks the script), then approve.")

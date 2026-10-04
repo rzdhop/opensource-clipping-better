@@ -360,12 +360,89 @@ def word_budget(function: str, target_hint: float, language: str, template: dict
     return max(3, words)
 
 
+# ---------------------------------------------------- writing v3 (plan 22 stage 3)
+#
+# The word budget a writing-v3 call states (E2v3, E3v3): words for the scene,
+# lines for it and words a line. :func:`word_budget` above stays byte for
+# byte what it was (every v1/v2 call reads it, RC-W3).
+
+# Words a second of speech, the native-speech shot plan's measure
+# (``native_speech.SPEECH_WPS``, A-148; kept here as a number so this module
+# keeps its imports): 4 s hold 7 words, 6 s 12, 8 s 17.
+SPEECH_WPS_V3 = 2.4
+# A line's [lo, hi] words when the template names none: a native-speech line
+# is one shot of at most 8 s (17 words); any other line keeps the v2 cap.
+LINE_WORDS_NATIVE = (5, 17)
+LINE_WORDS_DEFAULT = (5, 22)
+# A scene's line count: at most the script's four lines a scene.
+V3_LINES_MAX = 4
+# Below this share of its budget a scene's ask starts (the v2 ask's 0.7).
+V3_WORDS_FLOOR_SHARE = 0.75
+
+
+def line_words_v3(template: dict, *, native: bool = False) -> tuple:
+    """A line's ``(lo, hi)`` words on a writing-v3 story: the template's
+    ``line_words``, else :data:`LINE_WORDS_NATIVE` on a native-speech story
+    (*native*), else :data:`LINE_WORDS_DEFAULT`."""
+    pair = (template or {}).get("line_words")
+    if pair:
+        return int(pair[0]), int(pair[1])
+    return LINE_WORDS_NATIVE if native else LINE_WORDS_DEFAULT
+
+
+def word_budget_v3(scene: dict, template: dict, episode_words=None, *, total_s: float = None,
+                   native: bool = False) -> dict:
+    """The words a writing-v3 call asks of *scene* (plan 22 stage 3)::
+
+        {"words": [lo, hi], "lines": [lo, hi], "line_words": [lo, hi]}
+
+    With *episode_words* (the template's ``episode_words``, ``[lo, hi]``)
+    the episode's spoken words are spread over its scenes by their share of
+    its length: this scene's ``target_duration_s`` over *total_s* (the sum
+    of every scene's target; the template's ``target_s`` when not given) --
+    the low end rounded up and the high end down, so the scenes' budgets
+    sum inside *episode_words* whenever the high end leaves a word a scene
+    of room. Without it: ``target_duration_s x 2.4 x (1 - silent share)``,
+    the silent share the scene's pre-roll and tail over its length (at most
+    half), the low end :data:`V3_WORDS_FLOOR_SHARE` of it. The lines follow
+    from the words and :func:`line_words_v3`: at least the words over a
+    line's high end, at most the words over a line's middle, within
+    1-:data:`V3_LINES_MAX`. Never fewer than 3 words. Pure."""
+    target = float(scene["target_duration_s"])
+    line_lo, line_hi = line_words_v3(template, native=native)
+    if episode_words:
+        total = float(total_s or template["target_s"]) or 1.0
+        share = target / total
+        lo = math.ceil(episode_words[0] * share - 1e-9)
+        hi = math.floor(episode_words[1] * share + 1e-9)
+    else:
+        pauses = template["pauses_s"]
+        silent = pauses["before_first_line"] + tail_for(scene["function"], template)
+        silent_share = min(0.5, silent / target) if target > 0 else 0.5
+        hi = math.floor(target * SPEECH_WPS_V3 * (1 - silent_share) + 1e-9)
+        lo = math.floor(hi * V3_WORDS_FLOOR_SHARE + 1e-9)
+    hi = max(3, hi)
+    lo = min(max(3, lo), hi)
+    middle = (line_lo + line_hi) / 2
+    lines_lo = min(V3_LINES_MAX, max(1, math.ceil(lo / line_hi - 1e-9)))
+    lines_hi = min(V3_LINES_MAX, max(lines_lo, math.ceil(hi / middle - 1e-9)))
+    return {"words": [lo, hi], "lines": [lines_lo, lines_hi], "line_words": [line_lo, line_hi]}
+
+
 # --------------------------------------------------------------- transitions
 
 def _boundary_kind(prev_place_id: str, next_place_id: str) -> str:
     """The spec 6.3 grammar between two scenes: same place dissolves, a
     place change fades to black."""
     return "dissolve" if prev_place_id == next_place_id else "fadeblack"
+
+
+def cuts_between_scenes(template: dict) -> bool:
+    """Whether *template* cuts at every scene boundary (plan 22 stage 3: its
+    ``scene_transition`` is ``"cut"`` -- one continuous scene in real time,
+    no time jump to blend). Absent on every other template: their
+    boundaries keep the spec 6.3 grammar, byte for byte."""
+    return (template or {}).get("scene_transition") == "cut"
 
 
 def plan_transitions(shots: list, scenes_by_id: dict, template: dict, *, cuts_only: bool = False) -> list:
@@ -376,9 +453,11 @@ def plan_transitions(shots: list, scenes_by_id: dict, template: dict, *, cuts_on
     ``transitions_s``. The end card (not a shot) is never listed here.
     *cuts_only* (plan 22, a native-speech board): every boundary a cut, so
     every second a clip was bought for is seen and no line plays under a
-    blend.
+    blend. A template whose ``scene_transition`` is ``"cut"`` (plan 22 stage
+    3, :func:`cuts_between_scenes`) cuts every boundary too.
     """
     transitions_s = template["transitions_s"]
+    cuts_only = cuts_only or cuts_between_scenes(template)
     result = []
     for prev_shot, next_shot in zip(shots, shots[1:]):
         if cuts_only or prev_shot["scene_id"] == next_shot["scene_id"]:
@@ -500,7 +579,8 @@ def _boundary_transitions(scenes: list, template: dict, storyboard: dict = None)
     transitions_s = template["transitions_s"]
     result = []
     for prev_scene, next_scene in zip(scenes, scenes[1:]):
-        kind = _boundary_kind(prev_scene["place_id"], next_scene["place_id"])
+        kind = "cut" if cuts_between_scenes(template) else _boundary_kind(prev_scene["place_id"],
+                                                                           next_scene["place_id"])
         result.append((kind, transitions_s[kind]))
     return result
 

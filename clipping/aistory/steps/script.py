@@ -302,8 +302,73 @@ def _word_budget(ec, scene) -> int:
                               style_lock=ec.style_lock)
 
 
+# ------------------------------------------------- writing v3 (plan 22 stage 3)
+
+def writes_v3(ec, script=None) -> bool:
+    """Whether episode *ec* is written on the v3 prompts (E1v3/E2v3/E3v3,
+    J1v3): a v2 story whose ``generation_profile.writing`` is "v3"
+    (``media_policy.writing_v3``) -- and, given its *script*, one whose beat
+    sheet is E1v3's (it has a ``spine``) or not written yet: an episode
+    beat-sheeted before the story turned v3 is finished, and judged, on the
+    prompts that began it (``judge.j1_version``). Every other story writes,
+    judges and times as before (RC-W3)."""
+    return judge.writes_v3(ec.story, script)
+
+
+def _word_budget_v3(ec, script, scene) -> dict:
+    """``timing.word_budget_v3`` for *scene*: the template's
+    ``episode_words`` spread over the episode's scene targets, the line
+    words a native-speech story's (``media_policy.native_speech``)."""
+    total = sum(other["target_duration_s"] for other in script["scenes"]) or None
+    return timing.word_budget_v3(scene, ec.template, ec.template.get("episode_words"), total_s=total,
+                                 native=media_policy.native_speech(ec.story))
+
+
+def narrator_in(ec, scene) -> bool:
+    """Whether the narrator may speak in *scene*: the story's narrator is on
+    and -- plan 22 stage 3 -- the template's ``narrator_slots``, when it has
+    them (the confrontation format: the recap only; amends DEC-231 for that
+    format), hold the scene's slot. A template without the key: every slot,
+    as before."""
+    if not ec.narrator:
+        return False
+    slots = ec.template.get("narrator_slots")
+    return slots is None or timing.slot_name(scene["function"], ec.template) in slots
+
+
+def narrator_errors(ec, reply, scenes_by_part) -> list:
+    """A framing reply's narrator lines in a part whose scene the narrator
+    may not speak in (:func:`narrator_in`), one error each: the E3 call's
+    speakers are one list for every part it writes, so the slot rule is
+    checked here."""
+    errors = []
+    for part, scene in scenes_by_part.items():
+        block = reply.get(part) if isinstance(reply, dict) else None
+        if scene is None or not isinstance(block, dict) or narrator_in(ec, scene):
+            continue
+        for i, line in enumerate(block.get("lines") or []):
+            if isinstance(line, dict) and line.get("speaker") == "narrator":
+                errors.append(f"$.{part}.lines[{i}].speaker: the narrator speaks only in the "
+                              f"{_and(ec.template['narrator_slots'])} on this format, never in the {part}")
+    return errors
+
+
+def _so_far(ec, script, scene=None, *, skip=()) -> list:
+    """``[(scene_id, speaker name, text)]``: every line of *script* in scene
+    order -- before *scene* when given, else all -- leaving out the scenes
+    in *skip* (the ones a call writes again)."""
+    out = []
+    for other in script["scenes"]:
+        if scene is not None and other["scene_id"] == scene["scene_id"]:
+            break
+        if other["scene_id"] in skip:
+            continue
+        out.extend((other["scene_id"], speaker_name(ec, line["speaker"]), line["text"]) for line in other["lines"])
+    return out
+
+
 def _speakers(ec, scene) -> list:
-    return list(scene["characters"]) + (["narrator"] if ec.narrator else [])
+    return list(scene["characters"]) + (["narrator"] if narrator_in(ec, scene) else [])
 
 
 def _fr_text(ec, text: str) -> str:
@@ -352,6 +417,11 @@ def _repair_e1_reply(ec, reply, *, new_objects_offered=False) -> None:
     reply["title"] = prompts.repair_fr_elisions(reply["title"])
     for scene in reply["scenes"]:
         scene["summary"] = prompts.repair_fr_elisions(scene["summary"])
+    spine = reply.get("spine")  # E1v3 (plan 22 stage 3)
+    if isinstance(spine, dict):
+        for key, value in spine.items():
+            if isinstance(value, str):
+                spine[key] = prompts.repair_fr_elisions(value)
 
 
 def _repair_e2_reply(ec, reply) -> None:
@@ -569,6 +639,11 @@ def apply_e1(ec, script, reply) -> tuple:
     before, after = _normalize_episode_targets(ec, scenes)
     script["title"] = _fr_text(ec, reply["title"])
     script["scenes"] = scenes
+    # Plan 22 stage 3: E1v3's spine (an E1/E1v2 reply has none, and leaves none).
+    if isinstance(reply.get("spine"), dict):
+        script["spine"] = {key: _fr_text(ec, reply["spine"][key]) for key in schemas.SPINE_KEYS}
+    else:
+        script.pop("spine", None)
     return before, after
 
 
@@ -622,7 +697,15 @@ def write_beat_sheet(ctx, ec, script, *, tools, announced) -> None:
         props=[{"prop_id": pid, "name": ec.entities["props"][pid]["name"]} for pid in ec.prop_ids],
         memory=ec.season, slots=slots, open_hooks=hooks, audience_direction=audience_direction(ec),
     )
-    if v2:
+    v3 = writes_v3(ec)  # a new beat sheet: the story's own choice
+    if v3:
+        # Plan 22 stage 3: E1v3 -- the spine first, cause-and-effect summaries.
+        prompt_id = "E1v3"
+        slice_text = context.slice_for_episode(ec, knowledge=knowledge_of(ec),
+                                               char_ids=[doc["char_id"] for doc in cast])
+        system, user, schema = prompts.build_e1_v3(
+            pack, slice_text=slice_text, narration=prompts.narration_of(ec.template, ec.narrator), **kwargs)
+    elif v2:
         # Phase 7 stage 5c (A13): E1v2, with the episode's slice of the knowledge base.
         prompt_id = "E1v2"
         slice_text = context.slice_for_episode(ec, knowledge=knowledge_of(ec),
@@ -637,9 +720,15 @@ def write_beat_sheet(ctx, ec, script, *, tools, announced) -> None:
 
     def validate(reply):
         _repair_e1_reply(ec, reply, new_objects_offered=new_objects_offered)
-        errors = prompts.validate_e1(reply, ep=ec.ep, template=ec.template, episode_defaults=ec.episode_defaults,
-                                     cast_ids=[doc["char_id"] for doc in cast], places=ec.places,
-                                     prop_ids=ec.prop_ids, open_hooks=hooks, v2=v2)
+        if v3:
+            errors = prompts.validate_e1_v3(reply, ep=ec.ep, template=ec.template,
+                                            episode_defaults=ec.episode_defaults,
+                                            cast_ids=[doc["char_id"] for doc in cast], places=ec.places,
+                                            prop_ids=ec.prop_ids, open_hooks=hooks)
+        else:
+            errors = prompts.validate_e1(reply, ep=ec.ep, template=ec.template, episode_defaults=ec.episode_defaults,
+                                         cast_ids=[doc["char_id"] for doc in cast], places=ec.places,
+                                         prop_ids=ec.prop_ids, open_hooks=hooks, v2=v2)
         if errors:
             return errors
         trial = copy.deepcopy(script)
@@ -648,7 +737,8 @@ def write_beat_sheet(ctx, ec, script, *, tools, announced) -> None:
 
     # The payoff ask (episode 2 on, a hook offered) has a larger reply, and
     # its own measured cap; every other E1 call keeps the registry's.
-    payoff_cap = prompts.E1V2_PAYOFF_MAX_TOKENS if v2 else prompts.E1_PAYOFF_MAX_TOKENS
+    payoff_cap = (prompts.E1V3_PAYOFF_MAX_TOKENS if v3 else prompts.E1V2_PAYOFF_MAX_TOKENS if v2
+                  else prompts.E1_PAYOFF_MAX_TOKENS)
     cap = payoff_cap if prompts.offered_hooks(ec.ep, hooks) else None
     reply = llm_call.call_json(ctx, prompt_id, system, user, schema, validator=validate, runner=tools.runner,
                                time_fn=tools.time_fn, max_tokens=cap)
@@ -710,11 +800,29 @@ def write_body_scene(ctx, ec, script, sid, *, tools, announced, note=None) -> bo
         narration=prompts.narration_of(ec.template, ec.narrator),
     )
     v2 = media_policy.is_v2(ec.story)
+    # Plan 22 stage 3: the narrator only in the template's narrator_slots
+    # (none of them a body slot on the confrontation format).
+    kwargs["narrator_enabled"] = narrator_in(ec, scene)
     # Phase 7 stage 6a (DEC-231): a v2 reply may not repeat a line the episode
     # already has (its other scenes'); a v1 call is validated as before.
     episode_lines = ([line["text"] for other in script["scenes"] if other["scene_id"] != sid
                       for line in other["lines"]] if v2 else None)
-    if v2:
+    v3 = writes_v3(ec, script)
+    if v3:
+        # Plan 22 stage 3: E2v3 -- every line so far, the spine, this scene's
+        # and the next scene's summary, the line rule.
+        prompt_id = "E2v3"
+        budget3 = _word_budget_v3(ec, script, scene)
+        index = script["scenes"].index(scene)
+        next_scene = script["scenes"][index + 1] if index + 1 < len(script["scenes"]) else None
+        system, user, schema = prompts.build_e2_v3(
+            pack, scene=scene, outline=script["scenes"], next_scene=next_scene, so_far=_so_far(ec, script, scene),
+            spine=script.get("spine"), budget=budget3, cast=cast, place=kwargs["place"], props=props,
+            sfx_cues=ec.sfx_cues, narrator_enabled=kwargs["narrator_enabled"],
+            voice_direction=kwargs["voice_direction"], note=pack.note, narration=kwargs["narration"],
+            slice_text=context.slice_for_scene(ec, scene, knowledge=knowledge_of(ec)),
+            native=media_policy.native_speech(ec.story))
+    elif v2:
         # Phase 7 stage 5c (A13): E2v2, with the scene's slice of the knowledge base.
         prompt_id = "E2v2"
         system, user, schema = prompts.build_e2_v2(
@@ -738,8 +846,13 @@ def write_body_scene(ctx, ec, script, sid, *, tools, announced, note=None) -> bo
         attempt["n"] += 1
         _repair_e2_reply(ec, reply)
         extra = {} if episode_lines is None else {"episode_lines": episode_lines}
-        errors = prompts.validate_e2(reply, scene=scene, narrator_enabled=ec.narrator, sfx_cues=ec.sfx_cues,
-                                     word_budget=budget, **extra)
+        if v3:
+            errors = prompts.validate_e2_v3(reply, scene=scene, narrator_enabled=kwargs["narrator_enabled"],
+                                            sfx_cues=ec.sfx_cues, budget=budget3,
+                                            floor=prompts.line_floor_v3(ec.template), episode_lines=episode_lines)
+        else:
+            errors = prompts.validate_e2(reply, scene=scene, narrator_enabled=kwargs["narrator_enabled"],
+                                         sfx_cues=ec.sfx_cues, word_budget=budget, **extra)
         word_count_only = bool(errors) and all(
             e.startswith(prompts.E2_WORD_FLOOR_PREFIX) or e.startswith(prompts.E2_WORD_CEILING_PREFIX)
             for e in errors
@@ -822,14 +935,37 @@ def write_framing(ctx, ec, script, part, *, tools, announced, note=None) -> list
         narrator_enabled=ec.narrator, open_hooks=episode_open_hooks(ec),
     )
     v2 = media_policy.is_v2(ec.story)
+    # Plan 22 stage 3: with narrator_slots (the confrontation format) the
+    # narrator is offered only when a part this call writes is one of them,
+    # and refused in the others (narrator_errors).
+    parts = {key: scene for key, scene in (("hook", hook), ("cliffhanger", cliff), ("recap", recap))
+             if key in keys and scene is not None}
+    if "narrator_slots" in ec.template:
+        kwargs["narrator_enabled"] = any(narrator_in(ec, scene) for scene in parts.values())
     # Phase 7 stage 6a (DEC-231): a v2 reply needs the hook's on-screen text and
     # may not repeat a line of the scenes this call does not rewrite.
-    rewritten = {scene["scene_id"] for key, scene in (("hook", hook), ("cliffhanger", cliff), ("recap", recap))
-                 if key in keys and scene is not None}
+    rewritten = {scene["scene_id"] for scene in parts.values()}
     v2_checks = ({"v2": True, "episode_lines": [line["text"] for scene in script["scenes"]
                                                  if scene["scene_id"] not in rewritten for line in scene["lines"]]}
                  if v2 else {})
-    if v2:
+    v3 = writes_v3(ec, script)
+    if v3:
+        # Plan 22 stage 3: E3v3 -- E3v2, the spine, the lines so far, the line rule.
+        prompt_id = "E3v3"
+        native = media_policy.native_speech(ec.story)
+        line_words = timing.line_words_v3(ec.template, native=native)
+        sliced = _framing_slice_scene(script, part)
+        slice_text = context.slice_for_scene(ec, sliced, knowledge=knowledge_of(ec)) if sliced else ""
+        kwargs["word_budgets"] = {key: _word_budget_v3(ec, script, scene)["words"][1]
+                                  for key, scene in (("hook", hook), ("cliffhanger", cliff), ("recap", recap))
+                                  if scene is not None}
+        narrator_parts = ([key for key, scene in parts.items() if narrator_in(ec, scene)]
+                          if "narrator_slots" in ec.template else None)
+        system, user, schema = prompts.build_e3_v3(
+            pack, slice_text=slice_text, so_far=_so_far(ec, script, skip=rewritten), spine=script.get("spine"),
+            line_words=line_words, single_place=bool(ec.template.get("single_place")), native=native,
+            narrator_parts=narrator_parts, **kwargs)
+    elif v2:
         # Phase 7 stage 5c (A13): E3v2, with the slice of the scene it mostly writes.
         prompt_id = "E3v2"
         sliced = _framing_slice_scene(script, part)
@@ -842,9 +978,19 @@ def write_framing(ctx, ec, script, part, *, tools, announced, note=None) -> list
 
     def validate(reply):
         _repair_e3_reply(ec, reply)
-        errors = prompts.validate_e3(reply, ep=ec.ep, part=part, hook_scene=hook, cliffhanger_scene=cliff,
-                                     recap_scene=recap, narrator_enabled=ec.narrator,
-                                     episode_defaults=ec.episode_defaults, **v2_checks)
+        if v3:
+            errors = prompts.validate_e3_v3(reply, ep=ec.ep, part=part, hook_scene=hook, cliffhanger_scene=cliff,
+                                            recap_scene=recap, narrator_enabled=kwargs["narrator_enabled"],
+                                            episode_defaults=ec.episode_defaults, line_words=line_words,
+                                            floor=prompts.line_floor_v3(ec.template),
+                                            single_place=bool(ec.template.get("single_place")),
+                                            episode_lines=v2_checks["episode_lines"])
+        else:
+            errors = prompts.validate_e3(reply, ep=ec.ep, part=part, hook_scene=hook, cliffhanger_scene=cliff,
+                                         recap_scene=recap, narrator_enabled=kwargs["narrator_enabled"],
+                                         episode_defaults=ec.episode_defaults, **v2_checks)
+        if "narrator_slots" in ec.template:
+            errors = list(errors) + narrator_errors(ec, reply, parts)
         if errors:
             return errors
         trial = copy.deepcopy(script)
@@ -1149,11 +1295,12 @@ def consistency_issues(script) -> list:
     return [dict(issue, source=CONSISTENCY_SOURCE) for issue in consistency_blocking_issues(report)]
 
 
-def repair_issues(script) -> list:
+def repair_issues(script, version=None) -> list:
     """What a repair pass works on (DEC-260): the first-watch report's
-    blocking issues, then the consistency check's issues."""
+    blocking issues, then the consistency check's issues (*version*: the
+    story's J1 version, ``judge.j1_version``)."""
     report = script.get(judge.FIRST_WATCH)
-    watch = [] if (report is None or judge.needs_first_watch(script)) else judge.blocking_issues(report)
+    watch = [] if (report is None or judge.needs_first_watch(script, version)) else judge.blocking_issues(report)
     return list(watch) + consistency_issues(script)
 
 
@@ -1164,9 +1311,10 @@ def repairable(ec, script) -> list:
     if script["approved_at"] or not is_complete(script, ec.ep):
         return []
     report = script.get(judge.FIRST_WATCH)
-    if report is None or judge.needs_first_watch(script):
+    version = judge.j1_version(ec.story, script)
+    if report is None or judge.needs_first_watch(script, version):
         return []
-    return [repair["scene_id"] for repair in repair_plan(ec, script, repair_issues(script))]
+    return [repair["scene_id"] for repair in repair_plan(ec, script, repair_issues(script, version))]
 
 
 def issues_line(script, issues) -> str:
@@ -1223,7 +1371,8 @@ class _Run(LineMeasurement):
             parts.append(f"the first-watch repairs of {_and(repairs)}")
         if stubs or missing or needs_check(script) or repairs:
             parts.append("the consistency check (E4)")
-        if v2 and (stubs or missing or judge.needs_first_watch(script) or repairs):
+        unjudged = judge.needs_first_watch(script, judge.j1_version(self.ec.story, script))
+        if v2 and (stubs or missing or unjudged or repairs):
             parts.append("the first-watch check (J1)")
         return _and(parts) or "nothing"
 
@@ -1399,7 +1548,8 @@ class _Run(LineMeasurement):
         failed call is a failure of the step, like E4's. *previous*: the
         blocking issues a repair pass just tried (a re-check, DEC-248)."""
         ec, script = self.ec, self.script
-        if not media_policy.is_v2(ec.story) or not is_complete(script, ec.ep) or not judge.needs_first_watch(script):
+        if (not media_policy.is_v2(ec.story) or not is_complete(script, ec.ep)
+                or not judge.needs_first_watch(script, judge.j1_version(ec.story, script))):
             return
         self.before_call()
         self.ctx.on_log("👀 First-watch check (J1)")
@@ -1441,10 +1591,11 @@ class _Run(LineMeasurement):
             return
         for number in range(1, REPAIR_PASSES_MAX + 1):
             report = script.get(judge.FIRST_WATCH)
-            if report is None or judge.needs_first_watch(script):
+            version = judge.j1_version(ec.story, script)
+            if report is None or judge.needs_first_watch(script, version):
                 return
             # DEC-260: J1's blocking issues and E4's issues, repaired together.
-            blocking = repair_issues(script)
+            blocking = repair_issues(script, version)
             if not blocking:
                 return
             plan = repair_plan(ec, script, blocking)
@@ -1505,7 +1656,7 @@ class _Run(LineMeasurement):
             self.consistency()
             self.first_watch(previous=[issue for issue in blocking if issue.get("source") != CONSISTENCY_SOURCE])
             after = script.get(judge.FIRST_WATCH)
-            if after is None or judge.needs_first_watch(script):
+            if after is None or judge.needs_first_watch(script, version):
                 return  # J1 failed: the step ends failed naming it (first_watch)
             left_watch = len(judge.blocking_issues(after))
             left_check = len(consistency_issues(script))

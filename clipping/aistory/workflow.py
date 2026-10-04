@@ -2780,7 +2780,8 @@ def episode_view(stories, story, ep) -> dict:
         },
     }
     if media_policy.is_v2(story):
-        view["state"]["first_watch"] = judge_step.first_watch_state(script)
+        view["state"]["first_watch"] = judge_step.first_watch_state(script,
+                                                                    judge_step.j1_version(story, script))
     return view
 
 
@@ -3914,7 +3915,7 @@ def approve_script(stories, story_id, ep, *, approve_anyway=False, now, by=USER_
                                        "since it ran): check it again (run the script step with check only)."))
     v2 = media_policy.is_v2(story)
     if v2:
-        unjudged = judge_step.unjudged_refusal(script, ep)
+        unjudged = judge_step.unjudged_refusal(script, ep, judge_step.j1_version(story, script))
         if unjudged:
             raise WorkflowError(CONFLICT, unjudged)
         _refuse_length(_context(stories, story_id, ep), script,

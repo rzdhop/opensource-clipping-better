@@ -265,6 +265,27 @@ SCHEMA_NAMES = {
     "C1v2": "story_concepts_v2", "C1J": "concept_brief_check", "B1v3": "bible_core_v3",
 }
 
+# Plan 22 stage 3 (writing v3, ``media_policy.writing_v3``): E1v3/E2v3/E3v3
+# and J1v3, each its own id, so every v1/v2 row above stays as it was
+# (RC-M1, RC-W3). Kept in their own statements rather than inside the
+# literals above. Reply caps (DEC-138's method, French, chars/4 x 1.3, + 15 %,
+# rounded up to ten; tests/test_story_prompts_v3.py): E1v3's largest reply --
+# the spine at its caps (30/15/15/15/20 words), 12 scenes (the 90 s format
+# from episode 2) each with a 30-word summary, and E1v2's two new objects --
+# needs 2,232.1, its payoff variant (every scene naming a 120-character hook)
+# 2,770.3 (E1V3_PAYOFF_MAX_TOKENS below); the plan's 2,100 was an estimate,
+# under a 12-scene French reply. E2v3 and E3v3 reply in E2's and E3's shape
+# with lines no longer than theirs (22 words at most): E3v3 keeps E3's 720,
+# E2v3 takes the plan's 700 (100 over E2's measured 600). J1v3's longer kinds
+# ("incomplete_sentence") on 6 issues: 854.1. Input budgets: INPUT_BUDGET's
+# update after PREMIUM_PROMPT_IDS below.
+MAX_TOKENS.update({"E1v3": 2570, "E2v3": 700, "E3v3": 720, "J1v3": 990})
+E1V3_PAYOFF_MAX_TOKENS = 3190
+TEMPERATURE.update({"E1v3": WRITING_TEMPERATURE, "E2v3": WRITING_TEMPERATURE, "E3v3": WRITING_TEMPERATURE,
+                    "J1v3": ANALYTIC_TEMPERATURE})
+SCHEMA_NAMES.update({"E1v3": "episode_beat_sheet_v3", "E2v3": "episode_scene_dialogue_v3",
+                     "E3v3": "episode_framing_scenes_v3", "J1v3": "first_watch_check_v3"})
+
 # E4's input is the whole script, not a small pack -- it needs a wider
 # budget of its own; every other new prompt fits context.PACK_TOKEN_BUDGET
 # (checked by its own French worst-case fixture test, like phase 1/2's
@@ -434,6 +455,31 @@ def _is_premium_family(prompt_id: str) -> bool:
 
 
 PREMIUM_PROMPT_IDS = frozenset(prompt_id for prompt_id in MAX_TOKENS if _is_premium_family(prompt_id))
+
+# Plan 22 stage 3 (writing v3): the input budgets, measured as the v2 rows
+# above were -- the French worst case of tests/test_story_episode_prompt_budgets.py
+# (12 scenes, every input at its cap, the v2 slices, a 60-word note) with what
+# v3 adds at its caps (the spine, 30-word summaries, the lines so far at their
+# 220 words with the cut named, the next scene's summary, the line rule, the
+# native-speech and narrated lines; tests/test_story_prompts_v3.py): E1v3
+# 2,807 (the 90 s format; the confrontation format's single-place ask 2,779),
+# E2v3 2,628, E3v3 3,475 (its spine stands in for the outline), J1v3 4,083 --
+# each + 15 %, rounded up to ten. J1v3's 4,700 passes the spec's 4,000-token
+# ceiling: it reads the whole 12-scene script with 30-word summaries and the
+# spine, on the premium chain first (DEC-273); nothing is trimmed to fit.
+# Kept beside INPUT_BUDGET rather than in it: that registry's rows, in order,
+# are pinned by the RC-M1 file (tests/test_story_prompts_episode.py), which
+# stays unedited; every reader goes through :func:`input_budget`.
+WRITING_V3_INPUT_BUDGET = {"E1v3": 3230, "E2v3": 3030, "E3v3": 4000, "J1v3": 4700}
+
+
+def input_budget(prompt_id) -> int:
+    """The input budget *prompt_id* is sent with (``context.check_budget``):
+    its :data:`INPUT_BUDGET` row, else its :data:`WRITING_V3_INPUT_BUDGET`
+    row, else the default pack budget."""
+    if prompt_id in INPUT_BUDGET:
+        return INPUT_BUDGET[prompt_id]
+    return WRITING_V3_INPUT_BUDGET.get(prompt_id, context.PACK_TOKEN_BUDGET)
 
 # The ``bible:<field>`` grammar of spec 9.2: which prompt a regenerate note
 # re-runs, and which of that prompt's fields it targets. "tone" also carries
@@ -4780,3 +4826,645 @@ def build_n1(pack, *, memory_ep, arc, cast, memory, direction=None, open_hooks=N
         twists_line=twists_line, french_line=_french_block(pack),
     )
     return _system(pack), user, schemas.n1_schema(target_eps)
+
+
+# ======================================================== writing v3 (plan 22 stage 3)
+#
+# The human (2026-10-04), on the agent-mode episodes: the lines the characters
+# say are "not well written, not humanly understandable", and the episode's
+# content line does not explain the story. The v2 asks were the cause:
+# E2 asked for "1 to 4 short spoken lines ... reference lines run 3-8 words",
+# the narrated template for "short lines ... each a punch", E1 for a 15-word
+# summary with no cause or effect, each E2 call saw only the previous scene's
+# last line, and nothing asked for complete sentences or the reason behind a
+# demand. A story whose ``generation_profile.writing`` is "v3"
+# (``media_policy.writing_v3``; the script step reads it on a v2 story) writes
+# on these instead, for any format:
+#
+# - **E1v3**: the episode's **spine** first (a one-sentence logline: who wants
+#   what, what they do, where it leaves them; the want, the obstacle, the
+#   stakes, the turn), then the scenes, each summary one or two sentences of
+#   cause and effect that, read in order, retell the logline; on a
+#   ``single_place`` template (the confrontation format) one continuous
+#   scene in one place, in real time;
+# - **E2v3**: every line of the episode so far (its last
+#   :data:`DIALOGUE_SO_FAR_MAX_WORDS` words, the cut named), the spine, this
+#   scene's and the next scene's summary, and the line rule (:data:`LINE_RULE_V3`):
+#   each line one or two complete sentences a person would say aloud, doing
+#   one job the story needs, with the reason behind each demand or
+#   accusation; on a native-speech story at most 17 words (one shot of 8 s);
+# - **E3v3**: E3v2 with the same rule, the spine and the dialogue so far; on
+#   the confrontation format the cliffhanger's one line states the act the
+#   antagonist is about to do;
+# - **J1v3**: J1v2 reading the spine too, with three more kinds
+#   (``schemas.FIRST_WATCH_ISSUE_KINDS_V3``).
+#
+# New ids, built beside the v2 builders (which they copy, never call with a
+# changed argument): every v1/v2 prompt is byte for byte what it was (RC-M1,
+# RC-W3, the goldens of tests/test_story_prompts_episode.py).
+
+SPINE_MAX_WORDS = {"logline": 30, "want": 15, "obstacle": 15, "stakes": 15, "turn": 20}
+SUMMARY_V3_MAX_WORDS = schemas.SCENE_SUMMARY_V3_MAX_WORDS
+DIALOGUE_SO_FAR_MAX_WORDS = 220
+# A line under this many words is no sentence a person says (unless the
+# template's own line_words allows it); a narrator line keeps the v2 cap.
+LINE_FLOOR_WORDS = 3
+NARRATOR_LINE_MAX_WORDS = 22
+# A scene has at most the script's four lines (``schemas``' scene ``lines``).
+E2_V3_LINES_MAX = 4
+
+LINE_RULE_V3 = (
+    "Each line does one job the story needs — a demand, an accusation, a fact the viewer did not know, a "
+    "refusal, a threat or a reveal — and moves the scene toward the next. Say the reason behind every demand or "
+    "accusation in the line itself ('because…', 'since you…', 'the more you…, the more…'). No filler (no lone "
+    "'Quoi ?', 'Écoute', a name alone), no line that restates an earlier one, no stage directions in the text."
+)
+NATIVE_LINE_V3 = ("Each line is spoken on camera by its speaker in one shot of at most 8 seconds: at most {hi} "
+                  "words.")
+NATIVE_LINE_NARRATOR_V3 = ("Each character line is spoken on camera by its speaker in one shot of at most 8 "
+                           "seconds: at most {hi} words; the narrator is heard over the picture.")
+NO_REPEAT_SENTENCE_V3 = ("Never repeat or paraphrase a line already spoken in this episode; the lines so far are "
+                         "shown so you can continue from them, not echo them.")
+SUMMARY_V3_ASK = (
+    "one or two complete sentences, at most 30 words, saying what happens and why — what it follows from, what "
+    "is done, what it changes for the next scene. Never a mood, a title or a list."
+)
+SINGLE_PLACE_V3 = (
+    "The episode is one continuous scene in one place, in real time; the scenes are its beats, cut together with "
+    "no time jump. The antagonist drives it with demands and accusations, each with its reason; the target answers "
+    "little; it ends right before the threatened act happens."
+)
+CLIFFHANGER_ACT_V3 = ("This is the confrontation's last beat: its one line is the antagonist's last, and it states "
+                      "the act they are about to do; the episode ends right before it happens.")
+NARRATED_E1_LINE_V3 = (
+    "Narrated drama: the narrator carries {share_lo}-{share_hi}% of this episode's words, in a telenovela tone; "
+    "the characters speak {lines_lo}–{lines_hi} complete lines in the whole episode -- plan the scenes so the "
+    "narration tells the story and each of those lines moves it.\n\n"
+)
+NARRATED_E2_LINE_V3 = (
+    "Narrated drama: the narrator carries {share_lo}-{share_hi}% of this episode's words, in a telenovela tone "
+    "(dramatic, slightly over the top, never explaining what the picture shows); the characters speak "
+    "{lines_lo}–{lines_hi} complete lines in the whole episode -- here at most one character line, where it moves "
+    "the story most.\n\n"
+)
+
+
+def narration_e1_line_v3(narration) -> str:
+    """E1v3's narrated-drama line (:data:`NARRATED_E1_LINE_V3`), "" without *narration*."""
+    return NARRATED_E1_LINE_V3.format(**_narration_values(narration)) if narration else ""
+
+
+def narration_e2_line_v3(narration) -> str:
+    """E2v3's narrated-drama line (:data:`NARRATED_E2_LINE_V3`), "" without *narration*."""
+    return NARRATED_E2_LINE_V3.format(**_narration_values(narration)) if narration else ""
+
+
+def spine_block(spine) -> str:
+    """The episode's spine as the v3 calls read it, "" without one (a script
+    written before writing v3)."""
+    if not spine:
+        return ""
+    return ("The episode's spine:\n"
+            f"- logline: {spine['logline']}\n- want: {spine['want']}\n- obstacle: {spine['obstacle']}\n"
+            f"- stakes: {spine['stakes']}\n- turn: {spine['turn']}")
+
+
+def dialogue_so_far(lines, max_words=DIALOGUE_SO_FAR_MAX_WORDS) -> str:
+    """Every line of the episode so far, in order -- *lines* ``[(scene_id,
+    speaker name, text)]`` -- as E2v3/E3v3 read it: the last *max_words*
+    words (whole lines, the last line always), the lines left out named."""
+    if not lines:
+        return "The episode's lines so far: none yet -- this scene speaks first."
+    kept, words = [], 0
+    for sid, name, text in reversed(list(lines)):
+        count = len(text.split())
+        if kept and words + count > max_words:
+            break
+        kept.append((sid, name, text))
+        words += count
+    kept.reverse()
+    cut = len(lines) - len(kept)
+    head = "The episode's lines so far, in order"
+    if cut:
+        head += (f" (the first {cut} line{'s' if cut != 1 else ''} left out: only the last {max_words} words are "
+                 "shown)")
+    return head + ":\n" + "\n".join(f"- {sid} {name}: {text}" for sid, name, text in kept)
+
+
+def _scene_v3_line(label, scene) -> str:
+    return f"{label} ({scene['scene_id']}, {scene['function']}, emotion: {scene['emotion']}): {scene['summary']}"
+
+
+# ------------------------------------------------------------------ E1v3
+
+_E1_V3_ASK_TEMPLATE = (
+    "Write the beat sheet for episode {ep}: first its spine, then its scenes.\n\n"
+    "Give:\n"
+    "- spine: the one story this episode tells, written before the scenes:\n"
+    "  - logline: one complete sentence, at most 30 words: who wants what, what they do, and where it leaves them\n"
+    "  - want: what the main character wants in this episode, at most 15 words\n"
+    "  - obstacle: who or what stands in their way, at most 15 words\n"
+    "  - stakes: what they lose if they fail, at most 15 words\n"
+    "  - turn: the moment the episode turns, at most 20 words\n"
+    "- title: the episode's own title, at most 8 words\n"
+    "- scenes: exactly {n} entries, one for each of these, in order:\n"
+    "{scene_list}\n"
+    "{new_objects_line}\n"
+    "Each scene:\n"
+    "- function: one of {functions}\n"
+    "{place_line}"
+    "- time_variant: one of that place's own listed variants\n"
+    "- characters: 0 to 6 of the existing cast\n"
+    "{props_line}"
+    "- summary: {summary_ask}\n"
+    "- emotion: one of {emotions}\n"
+    "- target_duration_s: a hint inside its own slot's range -- {slot_ranges}\n"
+    "{payoff_line}\n"
+    "Read in order, the summaries retell spine.logline.\n\n"
+    "Aim for the upper half of each range so the scenes sum near {target_s} s.\n\n"
+    "{shape_line}"
+    "The hook scene: {hook_style_line}.\n\n"
+    "The cliffhanger scene: {cliffhanger_style_line}; it should leave one of this episode's own hooks open.\n\n"
+    "{v2_lines}"
+    "{french_line}"
+    "Never use real people, brands, studio names or copyrighted characters."
+)
+_E1_V3_PLACE_LINE = ("- place_id: one of the existing places, at most {max_places} distinct places across the whole "
+                     "episode\n")
+_E1_V3_SINGLE_PLACE_LINE = "- place_id: one of the existing places, the same one in every scene\n"
+_E1_V3_SHAPE_LINE = (
+    "Across the body scenes: open with setup, escalate with rising, include at least one peak, and land a turn "
+    "right before the cliffhanger; one of them may be a quiet scene with no dialogue.\n\n"
+)
+_E1_V3_SINGLE_PLACE_SHAPE = (
+    SINGLE_PLACE_V3 + " Across the body scenes: open with setup, escalate with rising, include at least one peak, "
+    "and land a turn right before the cliffhanger.\n\n"
+)
+
+
+def e1_v3_schema(cast_ids, place_ids, prop_ids, payoff_hooks=None, new_objects_allowed=False) -> dict:
+    """E1v2's schema (:func:`e1_schema`, v2) with the ``spine`` first and the
+    scene ``summary`` described as v3 asks it."""
+    base = e1_schema(cast_ids, place_ids, prop_ids, payoff_hooks=payoff_hooks, new_objects_allowed=new_objects_allowed)
+    scene = base["properties"]["scenes"]["items"]
+    scene["properties"]["summary"] = {
+        "type": "string", "description": "one or two complete sentences, at most 30 words: what happens and why"}
+    spine = _llm_obj({key: {"type": "string", "description": f"at most {words} words"}
+                      for key, words in SPINE_MAX_WORDS.items()})
+    return _llm_obj({"spine": spine, **base["properties"]})
+
+
+def build_e1_v3(pack, *, ep, arc_entry, template, episode_defaults, cast, places, props, memory, slots,
+                slice_text, open_hooks=None, audience_direction=None, narration=None):
+    """E1 for a writing-v3 story (module section above): E1v2's inputs
+    (:func:`build_e1_v2`, the episode slice and the first-watch rules), the
+    spine asked first, the v3 summary, and -- on a ``single_place``
+    template -- the one continuous place in real time. *narration*
+    (:func:`narration_of`) adds the v3 narrated line
+    (:func:`narration_e1_line_v3`)."""
+    hooks = offered_hooks(ep, open_hooks)
+    new_objects = offers_new_objects(ep, True)
+    memory_text, was_cut = context.memory_section(memory, ep, open_hooks=None if open_hooks is None else [])
+    if was_cut:
+        pack.trimmed.append("memory")
+
+    user = FIRST_WATCH_RULES
+    user += _arc_entry_block(arc_entry) + "\n\n"
+    user += f"{memory_text}\n\n"
+    if hooks:
+        user += _e1_payoff_block(hooks) + "\n\n"
+    if audience_direction:
+        user += _audience_block(audience_direction) + "\n\n"
+    if cast:
+        user += "Existing cast:\n" + _id_name_block(cast, "char_id") + "\n\n"
+    if places:
+        user += "Existing places:\n" + _place_variant_block(places) + "\n\n"
+    if props:
+        user += "Existing props:\n" + _id_name_block(props, "prop_id") + "\n\n"
+    if slice_text:
+        user += slice_text + "\n\n"
+
+    single_place = bool(template.get("single_place"))
+    user += _E1_V3_ASK_TEMPLATE.format(
+        ep=ep, n=len(slots), scene_list=_e1_scene_list(slots),
+        functions=", ".join(schemas.SCENE_FUNCTIONS),
+        place_line=(_E1_V3_SINGLE_PLACE_LINE if single_place
+                    else _E1_V3_PLACE_LINE.format(max_places=episode_defaults["max_places"])),
+        emotions=", ".join(schemas.EMOTIONS),
+        summary_ask=SUMMARY_V3_ASK,
+        slot_ranges=_slot_ranges_line(template),
+        target_s=template["target_s"],
+        shape_line=_E1_V3_SINGLE_PLACE_SHAPE if single_place else _E1_V3_SHAPE_LINE,
+        hook_style_line=_HOOK_STYLE_LINES[episode_defaults["hook_style"]],
+        cliffhanger_style_line=_CLIFFHANGER_STYLE_LINES[episode_defaults["cliffhanger_style"]],
+        french_line=_french_block(pack),
+        props_line=_E1_PROPS_LINE_V2 if new_objects else (_E1_PROPS_LINE if props else _E1_NO_PROPS_LINE),
+        new_objects_line=_E1_NEW_OBJECTS_LINE if new_objects else "",
+        payoff_line=_E1_PAYOFF_LINE if hooks else "",
+        v2_lines=_E1_V2_LINES + narration_e1_line_v3(narration),
+    )
+    cast_ids = [c["char_id"] for c in cast]
+    place_ids = [p["place_id"] for p in places]
+    prop_ids = [p["prop_id"] for p in props]
+    return _system(pack), user, e1_v3_schema(cast_ids, place_ids, prop_ids, payoff_hooks=hooks,
+                                             new_objects_allowed=new_objects)
+
+
+def validate_e1_v3(reply, *, ep, template, episode_defaults, cast_ids, places, prop_ids, open_hooks=None) -> list:
+    """Post-validation for an E1v3 reply: its schema (:func:`e1_v3_schema`),
+    the spine's caps (:data:`SPINE_MAX_WORDS`), each summary within
+    :data:`SUMMARY_V3_MAX_WORDS` words, then every check of
+    :func:`validate_e1` (v2) on the scenes -- run on a copy without the
+    spine whose summaries are cut to E1v2's 15 words, their own cap checked
+    here."""
+    hooks = offered_hooks(ep, open_hooks)
+    schema = e1_v3_schema(list(cast_ids), list(places), list(prop_ids), payoff_hooks=hooks,
+                          new_objects_allowed=offers_new_objects(ep, True))
+    errors = schemas.validate(reply, schema)
+    if errors:
+        return errors
+    errors = []
+    for key, words in SPINE_MAX_WORDS.items():
+        _text_errors(errors, f"$.spine.{key}", reply["spine"][key], max_words=words)
+    for i, scene in enumerate(reply["scenes"]):
+        _text_errors(errors, f"$.scenes[{i}].summary", scene["summary"], max_words=SUMMARY_V3_MAX_WORDS)
+    scenes = [dict(scene, summary=" ".join(scene["summary"].split()[:15]) or scene["summary"])
+              for scene in reply["scenes"]]
+    v2_reply = {key: value for key, value in reply.items() if key != "spine"}
+    v2_reply["scenes"] = scenes
+    errors += [error for error in validate_e1(v2_reply, ep=ep, template=template, episode_defaults=episode_defaults,
+                                              cast_ids=cast_ids, places=places, prop_ids=prop_ids,
+                                              open_hooks=open_hooks, v2=True)
+               if ".summary:" not in error]
+    return errors
+
+
+# ------------------------------------------------------------------ E2v3
+
+_E2_V3_ASK_TEMPLATE = (
+    "Write this scene's dialogue.\n\n"
+    "Give:\n"
+    "- lines: {n_lo} to {n_hi} lines, each with speaker (one of {speakers}), text, emotion (one of {emotions}) and "
+    "delivery (English, at most 12 words; the story's voice performance is {voice_direction}). Each text is one "
+    "or two complete sentences in {language}, {w_lo} to {w_hi} words, that this person would say aloud right "
+    "now.\n"
+    "- sfx_cues: 0 or more, each with at ('start' or a line number 1-n) and cue (one of {sfx_cues})\n"
+    "- on_screen_text: null unless the scene truly needs one (at most 6 words, story language)\n\n"
+    "{line_rule}\n\n"
+    "{native_line}"
+    "Write {t_lo}-{t_hi} words of dialogue in total: not fewer than {t_lo}, not more than {t_hi}.\n\n"
+    "{v3_lines}"
+    "{french_line}"
+    "Never use real people, brands, studio names or copyrighted characters."
+)
+
+
+def _count_range(lo, hi) -> str:
+    return f"{lo}" if lo == hi else f"{lo} to {hi}"
+
+
+def e2_v3_schema(speakers, sfx_cue_names, *, lines=(1, E2_V3_LINES_MAX), line_words=(5, 22)) -> dict:
+    """E2v2's schema (:func:`e2_v2_schema`) with the lines described as v3
+    asks them."""
+    schema = e2_v2_schema(speakers, sfx_cue_names)
+    lines_schema = schema["properties"]["lines"]
+    lines_schema["description"] = f"{lines[0]}-{lines[1]} lines"
+    lines_schema["items"]["properties"]["text"] = {
+        "type": "string",
+        "description": f"one or two complete sentences in the story language, {line_words[0]}-{line_words[1]} words"}
+    return schema
+
+
+def _native_line(native, speakers, hi) -> str:
+    if not native:
+        return ""
+    template = NATIVE_LINE_NARRATOR_V3 if "narrator" in speakers else NATIVE_LINE_V3
+    return template.format(hi=hi) + "\n\n"
+
+
+def build_e2_v3(pack, *, scene, outline, next_scene, so_far, spine, budget, cast, place, props, sfx_cues,
+                narrator_enabled, voice_direction, slice_text, native=False, note=None, narration=None):
+    """One body scene's dialogue on a writing-v3 story (module section
+    above). *so_far* is every line of the episode before this scene,
+    ``[(scene_id, speaker name, text)]`` in order (:func:`dialogue_so_far`
+    keeps its last :data:`DIALOGUE_SO_FAR_MAX_WORDS` words); *spine* the
+    script's (None: none written); *next_scene* the stub after *scene*
+    (None: it is the last). *budget* is ``timing.word_budget_v3``'s answer
+    (the scene's words, lines and words a line); *native* (a native-speech
+    story) adds the one-shot line. The rest as :func:`build_e2_v2`'s; the
+    place is said by name (the slice holds its layout and light)."""
+    names = {c["char_id"]: c["name"] for c in cast}
+    user = FIRST_WATCH_RULES
+    spine_text = spine_block(spine)
+    if spine_text:
+        user += spine_text + "\n\n"
+    user += dialogue_so_far(so_far) + "\n\n"
+    user += _scene_v3_line("This scene", scene) + "\n"
+    if next_scene is None:
+        user += "Next scene: none -- this is the episode's last scene.\n\n"
+    else:
+        user += _scene_v3_line("Next scene", next_scene) + "\n\n"
+    if cast:
+        user += "Characters present:\n" + _personality_block(cast) + "\n\n"
+    user += f"Place: {place['name']}\n\n"
+    if props:
+        user += "Props present:\n" + _id_name_block(props, "prop_id") + "\n\n"
+    if slice_text:
+        user += slice_text + "\n\n"
+    if note:
+        user += f"Follow the author's note: {note}\n\n"
+
+    speakers = [c["char_id"] for c in cast] + (["narrator"] if narrator_enabled else [])
+    sfx_cue_names = list(sfx_cues)
+    t_lo, t_hi = budget["words"]
+    n_lo, n_hi = budget["lines"]
+    w_lo, w_hi = budget["line_words"]
+    lines = [NO_REPEAT_SENTENCE_V3, FIRST_APPEARANCE_SENTENCE]
+    new = [names.get(cid, cid) for cid in first_appearances(scene, outline)]
+    if new:
+        lines.append(f"First time on screen in this episode: {', '.join(new)} -- say or show who they are and "
+                     "what they want.")
+    user += _E2_V3_ASK_TEMPLATE.format(
+        n_lo=n_lo, n_hi=n_hi, speakers=", ".join(speakers), emotions=", ".join(schemas.EMOTIONS),
+        voice_direction=voice_direction, language=pack.language_name, w_lo=w_lo, w_hi=w_hi,
+        sfx_cues=", ".join(sfx_cue_names) if sfx_cue_names else "none available for this story",
+        line_rule=LINE_RULE_V3, native_line=_native_line(native, speakers, w_hi), t_lo=t_lo, t_hi=t_hi,
+        v3_lines="\n".join(lines) + "\n\n" + narration_e2_line_v3(narration),
+        french_line=_french_block(pack),
+    )
+    return _system(pack), user, e2_v3_schema(speakers, sfx_cue_names, lines=(n_lo, n_hi), line_words=(w_lo, w_hi))
+
+
+def line_floor_v3(template) -> int:
+    """The fewest words a v3 character line may have: the template's own
+    ``line_words`` low end when it sets one (the confrontation format: 5),
+    else :data:`LINE_FLOOR_WORDS`."""
+    pair = (template or {}).get("line_words")
+    return int(pair[0]) if pair else LINE_FLOOR_WORDS
+
+
+def _v3_line_errors(errors, path, line, *, line_words, floor) -> None:
+    """A v3 line's own words: a character line within *floor* and
+    ``line_words``' high end, a narrator line within
+    :data:`NARRATOR_LINE_MAX_WORDS` and :data:`LINE_FLOOR_WORDS`."""
+    text = line.get("text") if isinstance(line, dict) else None
+    if not (isinstance(text, str) and text.strip()):
+        return  # the schema's / the v2 checks' own error
+    count = _word_count(text)
+    narrator = line.get("speaker") == "narrator"
+    hi = NARRATOR_LINE_MAX_WORDS if narrator else line_words[1]
+    lo = LINE_FLOOR_WORDS if narrator else floor
+    if count > hi:
+        why = " (one line, one shot of at most 8 s)" if not narrator and hi <= 17 else ""
+        errors.append(f"{path}.text: {count} words, expected at most {hi}{why}")
+    elif count < lo:
+        errors.append(f"{path}.text: {count} word{'s' if count != 1 else ''}, expected at least {lo}: a line is one "
+                      "or two complete sentences a person would say, never a fragment")
+
+
+def validate_e2_v3(reply, *, scene, narrator_enabled, sfx_cues, budget, floor, episode_lines=()) -> list:
+    """Post-validation for an E2v3 reply: its schema, 1 to
+    :data:`E2_V3_LINES_MAX` lines, each line's words (:func:`_v3_line_errors`:
+    at most the budget's ``line_words`` high end; at least *floor*,
+    :func:`line_floor_v3`), the delivery, the sfx anchors and the on-screen
+    text as E2's, the scene's total words against its budget's high end as
+    :func:`validate_e2`'s (half to 1.5x, the same prefixes, so the script
+    step's second-attempt leniency reads them), and no line repeating
+    another of the episode (*episode_lines*) or of the reply."""
+    speakers = list(scene["characters"]) + (["narrator"] if narrator_enabled else [])
+    errors = schemas.validate(reply, e2_v3_schema(speakers, list(sfx_cues)))
+    if errors:
+        return errors
+    errors = []
+    lines = reply["lines"]
+    if not (1 <= len(lines) <= E2_V3_LINES_MAX):
+        errors.append(f"$.lines: {len(lines)} line(s), expected 1-{E2_V3_LINES_MAX}")
+    for i, line in enumerate(lines):
+        path = f"$.lines[{i}]"
+        _text_errors(errors, f"{path}.text", line["text"])
+        _v3_line_errors(errors, path, line, line_words=budget["line_words"], floor=floor)
+        _text_errors(errors, f"{path}.delivery", line["delivery"], max_words=12)
+    n = len(lines)
+    for i, cue in enumerate(reply["sfx_cues"]):
+        at = cue["at"]
+        if at != "start" and not (at.isdigit() and 1 <= int(at) <= n):
+            errors.append(f"$.sfx_cues[{i}].at: {at!r} is not 'start' or a line number 1-{n}")
+    _nullable_text_errors(errors, "$.on_screen_text", reply["on_screen_text"], 6)
+    word_budget = budget["words"][1]
+    total_words = sum(_word_count(line["text"]) for line in lines)
+    floor_total, ceiling = (word_budget + 1) // 2, (3 * word_budget) // 2
+    if total_words < floor_total:
+        errors.append(f"{E2_WORD_FLOOR_PREFIX}: {total_words} in total, expected at least {floor_total} (half of the "
+                      f"{word_budget}-word budget)")
+    if total_words > ceiling:
+        errors.append(f"{E2_WORD_CEILING_PREFIX}: {total_words} in total, expected at most {ceiling} (1.5x the "
+                      f"{word_budget}-word budget)")
+    _duplicate_line_errors(errors, "$.lines", [line["text"] for line in lines], episode_lines or ())
+    return errors
+
+
+# ------------------------------------------------------------------ E3v3
+
+_E3_V3_KEY_ASKS = {
+    "hook": ("- hook: lines (1-2) and on_screen_text (story language, at most {words} words, required whatever the "
+             "hook style: the premise, on screen from the first frame)"),
+    "cliffhanger": "- cliffhanger: reveal (story language, at most 40 words) and lines (0-1)",
+    "cliffhanger_act": ("- cliffhanger: reveal (story language, at most 40 words) and lines (exactly 1: the "
+                        "antagonist's last line, which states the act they are about to do -- the episode ends right "
+                        "before it happens)"),
+    "recap": "- recap: lines (0-1) and on_screen_text (story language, at most 6 words, null unless needed)",
+    "teaser": "- teaser: one sentence about the next episode, at most 15 words, story language",
+}
+_E3_V3_LINE_SHAPE = ("Each line: speaker (one of {speakers}), text (one or two complete sentences in {language}, "
+                     "{w_lo} to {w_hi} words, that this person would say aloud right now), emotion (one of "
+                     "{emotions}), delivery (English, at most 12 words).")
+
+
+def _e3_v3_ask(keys, speakers, *, language, line_words, hook_words, act, native, narrator_note,
+               french_line="") -> str:
+    out = ["Write " + ", ".join(keys) + ".", "", "Give:"]
+    for key in keys:
+        ask = "cliffhanger_act" if key == "cliffhanger" and act else key
+        out.append(_E3_V3_KEY_ASKS[ask].format(words=hook_words))
+    out.append("")
+    if any(key != "teaser" for key in keys):
+        out.append(_E3_V3_LINE_SHAPE.format(speakers=", ".join(speakers), language=language, w_lo=line_words[0],
+                                            w_hi=line_words[1], emotions=", ".join(schemas.EMOTIONS)))
+        out.append("")
+        out.append(LINE_RULE_V3)
+        out.append("")
+        native_line = _native_line(native, speakers, line_words[1]).strip()
+        if native_line:
+            out.append(native_line)
+            out.append("")
+        if narrator_note:
+            out.append(narrator_note)
+            out.append("")
+    out.append(FIRST_APPEARANCE_SENTENCE)
+    out.append("")
+    if french_line:
+        out.append(french_line)
+        out.append("")
+    out.append("Never use real people, brands, studio names or copyrighted characters.")
+    return "\n".join(out)
+
+
+def build_e3_v3(pack, *, ep, part=None, note=None, hook_scene, cliffhanger_scene, recap_scene, outline,
+                first_body_line, last_body_line, arc_entry, next_arc_entry, memory, episode_defaults,
+                word_budgets, cast, narrator_enabled, slice_text, so_far, spine, line_words, single_place=False,
+                native=False, narrator_parts=None, open_hooks=None):
+    """The framing scenes on a writing-v3 story (module section above):
+    E3v2's blocks (:func:`build_e3_v2`) with the spine first in place of
+    the outline (the spine says what the episode tells; the outline's
+    30-word summaries would cost 900 tokens on a 12-scene episode), the
+    episode's lines so far (*so_far*, as :func:`build_e2_v3`'s;
+    :func:`dialogue_so_far`)
+    and the v3 line rule over *line_words*; on a *single_place* template
+    (the confrontation format) the cliffhanger has exactly one line, the
+    antagonist's last, stating the act they are about to do. *narrator_parts*
+    (the template's ``narrator_slots`` among the framing parts; None: every
+    part) is said when the narrator may speak in some parts only. The schema
+    is E3's."""
+    keys = _e3_keys(part, ep)
+    speakers = [c["char_id"] for c in cast] + (["narrator"] if narrator_enabled else [])
+    word_budgets = word_budgets or {}
+
+    user = ""
+    spine_text = spine_block(spine)
+    if spine_text:
+        user += spine_text + "\n\n"
+    user += dialogue_so_far(so_far) + "\n\n"
+    if "hook" in keys:
+        user += _e3_hook_block(hook_scene, first_body_line, episode_defaults, word_budgets.get("hook"),
+                               v2=True) + "\n\n"
+    if "cliffhanger" in keys:
+        block = _e3_cliffhanger_block(cliffhanger_scene, last_body_line, arc_entry, episode_defaults,
+                                      word_budgets.get("cliffhanger"), v2=True)
+        user += block + ("\n" + CLIFFHANGER_ACT_V3 if single_place else "") + "\n\n"
+    if "recap" in keys:
+        memory_text, was_cut = context.memory_section(memory, ep, open_hooks=open_hooks)
+        if was_cut:
+            pack.trimmed.append("memory")
+        user += f"{memory_text}\n\n"
+        recap = context.previous_recap(memory, ep)
+        user += _e3_recap_block(recap_scene, word_budgets.get("recap"),
+                                (ep - 1, recap) if recap else None) + "\n\n"
+    if "teaser" in keys:
+        user += _e3_teaser_block(next_arc_entry) + "\n\n"
+    if cast:
+        user += "Characters who may speak:\n" + _personality_block(cast) + "\n\n"
+    if slice_text:
+        user += slice_text + "\n\n"
+    if note:
+        user += f"Follow the author's note: {note}\n\n"
+
+    narrator_note = ""
+    line_keys = [key for key in keys if key != "teaser"]
+    if narrator_enabled and narrator_parts is not None and any(key not in narrator_parts for key in line_keys):
+        allowed = [key for key in ("recap", "hook", "cliffhanger") if key in narrator_parts]
+        narrator_note = (f"The narrator speaks only in the {' and the '.join(allowed)}." if allowed
+                         else "The narrator never speaks here.")
+    user += _e3_v3_ask(keys, speakers, language=pack.language_name, line_words=line_words,
+                       hook_words=hook_text_max_words(episode_defaults), act=single_place, native=native,
+                       narrator_note=narrator_note,
+                       french_line=_FR_ELISION_SENTENCE if pack.language_name == "French" else "")
+    return _system(pack), user, e3_schema(part, ep, speakers)
+
+
+def validate_e3_v3(reply, *, ep, part, hook_scene, cliffhanger_scene, recap_scene, narrator_enabled,
+                   episode_defaults, line_words, floor, single_place=False, episode_lines=()) -> list:
+    """Post-validation for an E3v3 reply: every check of :func:`validate_e3`
+    (v2: the hook's on-screen text, no line repeating another), each line's
+    words (:func:`_v3_line_errors`), and on a *single_place* template the
+    cliffhanger's one line."""
+    errors = validate_e3(reply, ep=ep, part=part, hook_scene=hook_scene, cliffhanger_scene=cliffhanger_scene,
+                         recap_scene=recap_scene, narrator_enabled=narrator_enabled, episode_defaults=episode_defaults,
+                         v2=True, episode_lines=list(episode_lines or ()))
+    keys = _e3_keys(part, ep)
+    extra = []
+    for key in ("hook", "cliffhanger", "recap"):
+        if key not in keys or not isinstance(reply, dict) or not isinstance(reply.get(key), dict):
+            continue
+        for i, line in enumerate(reply[key].get("lines") or []):
+            _v3_line_errors(extra, f"$.{key}.lines[{i}]", line, line_words=line_words, floor=floor)
+    if single_place and "cliffhanger" in keys and isinstance(reply, dict) and isinstance(reply.get("cliffhanger"),
+                                                                                          dict):
+        if len(reply["cliffhanger"].get("lines") or []) != 1:
+            extra.append("$.cliffhanger.lines: exactly 1 line on this format -- the antagonist's last, stating the "
+                         "act they are about to do")
+    return errors + [error for error in extra if error not in errors]
+
+
+# ------------------------------------------------------------------ J1v3
+
+J1_V3_PROMPT_VERSION = 3
+J1_V3_KINDS = schemas.FIRST_WATCH_ISSUE_KINDS + schemas.FIRST_WATCH_ISSUE_KINDS_V3
+_J1_V3_KIND_LINES = (
+    "\n- line_no_progress: a line adds nothing: no new fact, demand, refusal, threat or reveal"
+    "\n- incomplete_sentence: a line is a fragment, not a sentence a person would say"
+    "\n- logline_mismatch: the scenes do not tell the episode's logline"
+)
+_J1_V3_ASK = _J1_ASK + _J1_V3_KIND_LINES
+
+
+def _j1_spine_block(spine) -> str:
+    return spine_block(spine).replace("The episode's spine:", "What the episode sets out to tell (its spine):", 1)
+
+
+def j1_v3_schema() -> dict:
+    """J1's schema (:func:`j1_schema`) with the v3 kinds (:data:`J1_V3_KINDS`)."""
+    schema = j1_schema()
+    schema["properties"]["issues"]["items"]["properties"]["kind"] = {"type": "string", "enum": list(J1_V3_KINDS)}
+    return schema
+
+
+def build_j1_v3(pack, *, ep, script_digest, objects, hook_text, reveal, spine=None, previous_recap=None,
+                seconds=None, words=None, previous_issues=None):
+    """The first-watch judge of a writing-v3 episode: :func:`build_j1`'s
+    prompt (version 2: the format, the severities, the re-check) with the
+    episode's spine before the script (*spine*: the script's, None for a
+    script written before writing v3) and three more kinds
+    (``schemas.FIRST_WATCH_ISSUE_KINDS_V3``)."""
+    user = ""
+    if seconds is not None and words is not None:
+        user += _J1_FORMAT_TEMPLATE.format(seconds=round(seconds), words=words) + "\n\n"
+    if previous_recap:
+        user += f"Previously (episode {ep - 1}'s recap): {previous_recap}\n\n"
+    if spine:
+        user += _j1_spine_block(spine) + "\n\n"
+    user += f"{script_digest}\n\n"
+    if objects:
+        user += "Objects, and the scenes that show them:\n" + "\n".join(
+            f"- {name}: {', '.join(scene_ids)}" for name, scene_ids in objects) + "\n\n"
+    user += f"Hook on-screen text: {hook_text if hook_text else 'none'}\n"
+    user += f"Cliffhanger reveal: {reveal if reveal else 'none'}\n\n"
+    if previous_issues:
+        user += _J1_RECHECK_HEAD + "\n" + "\n".join(
+            f"- {issue['scene_id'] or 'the episode'} ({issue['kind']}): "
+            f"{context.trim_words(issue['fix'], J1_RECHECK_FIX_MAX_WORDS)[0]}"
+            for issue in previous_issues[:J1_ISSUES_MAX]) + "\n" + _J1_RECHECK_TAIL + "\n\n"
+    user += _J1_V3_ASK
+    return _j1_system(pack), user, j1_v3_schema()
+
+
+def validate_j1_v3(reply, *, scene_ids) -> list:
+    """:func:`validate_j1`'s checks on a J1v3 reply (its schema the v3 kinds')."""
+    errors = schemas.validate(reply, j1_v3_schema())
+    if errors:
+        return errors
+    errors = []
+    for key, words in J1_SUMMARY_MAX_WORDS.items():
+        _text_errors(errors, f"$.{key}", reply[key], max_words=words)
+    issues = reply["issues"]
+    if len(issues) > J1_ISSUES_MAX:
+        errors.append(f"$.issues: {len(issues)} issue(s), expected at most {J1_ISSUES_MAX}")
+    scene_id_set = set(scene_ids)
+    for i, issue in enumerate(issues):
+        path = f"$.issues[{i}]"
+        if issue["scene_id"] is not None and issue["scene_id"] not in scene_id_set:
+            errors.append(f"{path}.scene_id: {issue['scene_id']!r} is not one of the script's scene ids")
+        _text_errors(errors, f"{path}.fix", issue["fix"], max_words=J1_FIX_MAX_WORDS)
+    blocking = sum(1 for issue in issues if issue["severity"] == "blocking")
+    if reply["passed"] != (blocking == 0):
+        errors.append(f"$.passed: {reply['passed']!r} does not agree with {blocking} blocking issue(s)")
+    return errors

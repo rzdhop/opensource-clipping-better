@@ -2450,7 +2450,28 @@ EPISODE_TEMPLATE_SCHEMA = _document({
                        "minItems": 2, "maxItems": 2},
     "character_lines": _RANGE_INT,
     "end_card_cta": {"type": "boolean"},
+    # Plan 22 stage 3 (the confrontation format, confrontation_50s_v2): the
+    # episode is one continuous scene in one place (E1 is told so and
+    # max_places is 1, ``EpisodeContext.episode_defaults``); every boundary
+    # a cut (``timing.plan_transitions``); the narrator offered only in
+    # these slots (``steps/script.py``); a line's [lo, hi] words and the
+    # episode's spoken [lo, hi] words (writing v3, ``timing.word_budget_v3``);
+    # the silent reaction shots a scene of a native-speech board may have
+    # (``shots.speech_shot_plan``). Each absent on every other template, whose
+    # prompts, transitions and timing stay byte for byte (RC-M1, RC-M2).
+    "single_place": {"type": "boolean"},
+    "scene_transition": {"type": "string", "enum": ["cut"]},
+    "narrator_slots": {"type": "array", "items": {"type": "string", "enum": list(EPISODE_TEMPLATE_SLOTS)},
+                       "minItems": 1, "maxItems": len(EPISODE_TEMPLATE_SLOTS)},
+    "line_words": _RANGE_INT,
+    "episode_words": _RANGE_INT,
+    "reaction_shots": _RANGE_INT,
 })
+
+# The longest line one native-speech shot can speak (``native_speech.capacity``
+# of its longest sold length, 8 s at 2.4 words/s): a template's line_words
+# never asks for more.
+TEMPLATE_LINE_WORDS_MAX = 17
 
 
 def _range_pair_errors(errors, path, pair) -> None:
@@ -2495,6 +2516,21 @@ def episode_template_errors(doc) -> list:
             _range_pair_errors(errors, f"$.{key}", doc[key])
     if ("narrator_share" in doc) != ("character_lines" in doc):
         errors.append("$: narrator_share and character_lines come together (a narrated template) or not at all")
+    # Plan 22 stage 3: the confrontation format's keys.
+    for key in ("line_words", "episode_words", "reaction_shots"):
+        if key in doc:
+            _range_pair_errors(errors, f"$.{key}", doc[key])
+    if "line_words" in doc:
+        lo, hi = doc["line_words"]
+        if lo < 1 or hi > TEMPLATE_LINE_WORDS_MAX:
+            errors.append(f"$.line_words: [{lo}, {hi}] must lie within [1, {TEMPLATE_LINE_WORDS_MAX}] (one "
+                          "line, one shot of at most 8 s)")
+        if "episode_words" in doc and doc["episode_words"][1] < lo:
+            errors.append(f"$.episode_words: {doc['episode_words']} cannot hold one line of line_words {lo}")
+    if len(set(doc.get("narrator_slots") or ())) != len(doc.get("narrator_slots") or ()):
+        errors.append("$.narrator_slots: each slot at most once")
+    if doc.get("single_place") is False:
+        errors.append("$.single_place: true or absent (absent: the style's max_places)")
     if "max_shot_s" in doc and doc["max_shot_s"] < doc["min_shot_s"]:
         errors.append(f"$.max_shot_s: {doc['max_shot_s']} is below min_shot_s ({doc['min_shot_s']})")
 
@@ -2666,6 +2702,11 @@ PAYOFF_HOOKS_MAX = 4
 # report valid.
 CONSISTENCY_ISSUE_KINDS = ("continuity", "character", "place", "series_memory", "hook_payoff", "other")
 
+SCENE_SUMMARY_MAX_CHARS = 400
+# A writing-v3 summary's words (E1v3: one or two sentences of cause and
+# effect); every other script keeps 15 (``episode_script_errors``).
+SCENE_SUMMARY_V3_MAX_WORDS = 30
+
 _EPISODE_SCRIPT_SCENE_SCHEMA = _document({
     "scene_id": {"type": "string", "pattern": SCENE_ID_PATTERN},
     "function": {"type": "string", "enum": list(SCENE_FUNCTIONS)},
@@ -2673,7 +2714,9 @@ _EPISODE_SCRIPT_SCENE_SCHEMA = _document({
     "time_variant": {"type": "string", "pattern": SCENE_TIME_VARIANT_PATTERN},
     "characters": {"type": "array", "items": {"type": "string", "pattern": CHAR_ID_PATTERN}, "maxItems": 6},
     "props": {"type": "array", "items": {"type": "string", "pattern": PROP_ID_PATTERN}, "maxItems": 4},
-    "summary": {"type": "string", "maxLength": 200},
+    # Plan 22 stage 3: 400 (was 200) -- a writing-v3 summary is one or two
+    # sentences of up to 30 words; widening keeps every stored script valid.
+    "summary": {"type": "string", "maxLength": SCENE_SUMMARY_MAX_CHARS},
     "emotion": {"type": "string", "enum": list(EMOTIONS)},
     "target_duration_s": {"type": "number", "minimum": 0.5, "maximum": 20},
     "lines": {"type": "array", "items": _EPISODE_SCRIPT_LINE_SCHEMA, "maxItems": 4},
@@ -2748,6 +2791,16 @@ _EPISODE_SCRIPT_CONSISTENCY_REPORT_SCHEMA = _or_null(_document({
 # report's: ``checked_rev``, and ``stale`` once the script is rewritten.
 FIRST_WATCH_ISSUE_KINDS = ("unclear_goal", "unmotivated", "unintroduced", "object_unseen", "repeated_line",
                            "no_hook_text")
+# Plan 22 stage 3 (writing v3, J1 version 3): the kinds J1v3 adds -- a line
+# that adds nothing, a line that is a fragment, scenes that do not tell the
+# episode's logline -- and ``line_too_long``, the script step's own
+# deterministic check of a line past the format's words per line. J1v2's
+# list above is unchanged (its prompt and schema are pinned); a stored report
+# takes either list (:data:`FIRST_WATCH_ALL_KINDS`), so every older one stays
+# valid.
+FIRST_WATCH_ISSUE_KINDS_V3 = ("line_no_progress", "incomplete_sentence", "logline_mismatch")
+FIRST_WATCH_DETERMINISTIC_KINDS_V3 = ("line_too_long",)
+FIRST_WATCH_ALL_KINDS = FIRST_WATCH_ISSUE_KINDS + FIRST_WATCH_ISSUE_KINDS_V3 + FIRST_WATCH_DETERMINISTIC_KINDS_V3
 FIRST_WATCH_TEXT_MAX_CHARS = 300
 # J1 version 2 (DEC-248): each issue's severity, and the report passes
 # exactly when none is blocking. An issue without one (a version-1 report)
@@ -2756,7 +2809,7 @@ FIRST_WATCH_SEVERITIES = ("blocking", "minor")
 
 _EPISODE_SCRIPT_FIRST_WATCH_ISSUE_SCHEMA = _document({
     "scene_id": {"type": ["string", "null"]},
-    "kind": {"type": "string", "enum": list(FIRST_WATCH_ISSUE_KINDS)},
+    "kind": {"type": "string", "enum": list(FIRST_WATCH_ALL_KINDS)},
     "fix": {"type": "string", "maxLength": FIRST_WATCH_TEXT_MAX_CHARS},
 }, optional={
     "severity": {"type": "string", "enum": list(FIRST_WATCH_SEVERITIES)},
@@ -2788,8 +2841,8 @@ _EPISODE_SCRIPT_REPAIR_SCENE_SCHEMA = _document({
     "scene_id": {"type": "string", "pattern": SCENE_ID_PATTERN},
     # DEC-260: a repair is also written for the consistency check's (E4) issues.
     "kinds": {"type": "array", "items": {"type": "string",
-                                         "enum": list(FIRST_WATCH_ISSUE_KINDS) + list(CONSISTENCY_ISSUE_KINDS)},
-              "minItems": 1, "maxItems": len(FIRST_WATCH_ISSUE_KINDS) + len(CONSISTENCY_ISSUE_KINDS)},
+                                         "enum": list(FIRST_WATCH_ALL_KINDS) + list(CONSISTENCY_ISSUE_KINDS)},
+              "minItems": 1, "maxItems": len(FIRST_WATCH_ALL_KINDS) + len(CONSISTENCY_ISSUE_KINDS)},
     "part": {"type": ["string", "null"], "enum": ["hook", "cliffhanger", "recap", None]},
 }, optional={
     # DEC-248: the story props an object_unseen repair listed on the scene
@@ -2815,10 +2868,18 @@ _EPISODE_SCRIPT_REPAIR_PASS_SCHEMA = _document({
 SCRIPT_APPROVED_OVER_CHECKS = ("consistency", "first_watch")
 _EPISODE_SCRIPT_APPROVED_OVER_SCHEMA = _document({
     "scene_id": {"type": ["string", "null"]},
-    "kind": {"type": "string", "enum": sorted(set(CONSISTENCY_ISSUE_KINDS) | set(FIRST_WATCH_ISSUE_KINDS))},
+    "kind": {"type": "string", "enum": sorted(set(CONSISTENCY_ISSUE_KINDS) | set(FIRST_WATCH_ALL_KINDS))},
     "fix": {"type": "string", "maxLength": 300},
     "check": {"type": "string", "enum": list(SCRIPT_APPROVED_OVER_CHECKS)},
 })
+
+# Plan 22 stage 3 (writing v3, E1v3): the episode's spine -- its logline (one
+# complete sentence: who wants what, what they do, where it leaves them),
+# what the main character wants, what stands in the way, what is at stake and
+# the turn -- word-capped by the prompt (``prompts.SPINE_MAX_WORDS``), bounded
+# here in characters.
+SPINE_KEYS = ("logline", "want", "obstacle", "stakes", "turn")
+_EPISODE_SCRIPT_SPINE_SCHEMA = _document({key: _text(300) for key in SPINE_KEYS})
 
 EPISODE_SCRIPT_SCHEMA = _document({
     "$schema": {"type": "string", "const": EPISODE_SCRIPT_SCHEMA_NAME},
@@ -2847,6 +2908,9 @@ EPISODE_SCRIPT_SCHEMA = _document({
     # Plan 19 stage 3 (F4): the fast track's own approval (see above).
     "approved_by": {"type": "string", "enum": ["fast_track"]},
     "approved_over": {"type": "array", "items": _EPISODE_SCRIPT_APPROVED_OVER_SCHEMA, "maxItems": 40},
+    # Plan 22 stage 3 (writing v3): the episode's dramatic spine E1v3 writes
+    # before its scenes; absent on every script written before (RC-M3).
+    "spine": _EPISODE_SCRIPT_SPINE_SCHEMA,
 })
 
 
@@ -2948,7 +3012,9 @@ def episode_script_errors(doc) -> list:
         if scene["state"] == "stub" and scene["lines"]:
             errors.append(f"$.scenes[{scene['scene_id']}]: a stub scene must have no lines")
 
-        _word_cap_errors(errors, f"$.scenes[{scene['scene_id']}].summary", scene["summary"], 15)
+        # Plan 22 stage 3: a writing-v3 script (it has a spine) summarises a scene in up to 30 words.
+        summary_words = SCENE_SUMMARY_V3_MAX_WORDS if doc.get("spine") is not None else 15
+        _word_cap_errors(errors, f"$.scenes[{scene['scene_id']}].summary", scene["summary"], summary_words)
         _word_cap_errors(errors, f"$.scenes[{scene['scene_id']}].on_screen_text", scene["on_screen_text"], 6)
 
         paid = scene.get("pays_off") or []

@@ -251,7 +251,7 @@ _BLOCKING_STOP = ("The fast track never approves over blocking issues before the
                   "passes, or approve the script anyway yourself.")
 
 
-def script_refusal(script, ep, *, v2=False):
+def script_refusal(script, ep, *, v2=False, j1_version=None):
     """Why the fast track will not approve *script* (DEC-162), or None when
     it may: complete, its consistency report fresh and passed, its timing
     neither over nor under the template's window. A report with blocking
@@ -264,7 +264,9 @@ def script_refusal(script, ep, *, v2=False):
     outside the window is never offered to the user to approve -- a v2
     episode outside its window is never approved. J1 version 2 (DEC-248):
     a report passes when no issue is blocking, so its minor issues never
-    refuse -- the approval's detail names them (:func:`script_detail`)."""
+    refuse -- the approval's detail names them (:func:`script_detail`).
+    *j1_version*: the story's (``judge.j1_version``; plan 22 stage 3: 3 on a
+    writing-v3 story), None for ``prompts.J1_PROMPT_VERSION``."""
     if script is None or not script_step.is_complete(script, ep):
         return (f"Episode {ep}'s script is not complete: run it again (the fast track fills what is missing).")
     report = script.get("consistency_report")
@@ -281,7 +283,7 @@ def script_refusal(script, ep, *, v2=False):
         return (f"Episode {ep}'s consistency check found {count} blocking issue{_s(count)}"
                 f"{': ' + issues if issues else ''}{end} {_BLOCKING_STOP}")
     if v2:
-        watch = judge_step.first_watch_state(script)
+        watch = judge_step.first_watch_state(script, j1_version)
         if watch in ("none", "stale"):
             return (f"Episode {ep}'s first-watch check (J1) has not run on this revision of the script: run it "
                     "again (the fast track checks it first).")
@@ -304,7 +306,7 @@ def script_refusal(script, ep, *, v2=False):
     return None
 
 
-def script_anyway_issues(script, ep, *, v2=False, repairs=None):
+def script_anyway_issues(script, ep, *, v2=False, repairs=None, j1_version=None):
     """The blocking issues the one click approves *script* over (plan 19
     stage 3, amending DEC-162/248 as DEC-246 did for the keyframes), or None
     when it does not: only on a *v2* story, once this run's repair passes
@@ -324,7 +326,7 @@ def script_anyway_issues(script, ep, *, v2=False, repairs=None):
         return None
     if script is None or not script_step.is_complete(script, ep) or script_step.needs_check(script):
         return None
-    if judge_step.first_watch_state(script) not in ("passed", "issues"):
+    if judge_step.first_watch_state(script, j1_version) not in ("passed", "issues"):
         return None
     report = script[judge_step.FIRST_WATCH]
     if report.get("version", 1) < 2:
@@ -730,11 +732,13 @@ class _FastTrack:
         ec = self.context()
         script = episode_common.read_episode(ec, SCRIPT_DOC)
         v2 = media_policy.is_v2(ec.story)
-        refusal = script_refusal(script, ec.ep, v2=v2)
+        j1_version = judge_step.j1_version(ec.story, script)
+        refusal = script_refusal(script, ec.ep, v2=v2, j1_version=j1_version)
         if refusal:
             # Plan 19 stage 3: once the repair passes are spent, the one click
             # approves over what they could not fix -- unless asked to stop.
-            issues = script_anyway_issues(script, ec.ep, v2=v2, repairs=summary.get("repairs"))
+            issues = script_anyway_issues(script, ec.ep, v2=v2, repairs=summary.get("repairs"),
+                                          j1_version=j1_version)
             if issues is None:
                 raise StepFailed(refusal)
             if self.params[SCRIPT_STOP_PARAM]:

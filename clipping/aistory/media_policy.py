@@ -90,6 +90,16 @@ def is_v2(story) -> bool:
     return profile.get("pipeline") == defaults.PIPELINE_V2
 
 
+def writing_v3(story) -> bool:
+    """Whether *story* writes on the v3 prompts (plan 22 stages 2-3,
+    ``generation_profile.writing == "v3"``; ``store.create`` stamps it on
+    every new story): an episode's spine and cause-and-effect scene
+    summaries (E1v3), complete spoken sentences that each move the story
+    (E2v3/E3v3), judged for it (J1v3). Absent or "v2": every prompt as it
+    was (RC-W3). The script step reads it on a v2 story only."""
+    return ((story or {}).get("generation_profile") or {}).get("writing") == "v3"
+
+
 def images_manual(story) -> bool:
     """Whether *story*'s sheets, plates, props and keyframes are the human's
     own uploads (plan 22 stage 5: ``generation_profile.images: "manual"``):

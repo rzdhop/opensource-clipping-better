@@ -99,8 +99,14 @@ EPISODE_TEMPLATE_ID_V2 = "serial_60s_v2"
 # character_lines) -- both chosen per story, never a pipeline default.
 EPISODE_TEMPLATE_ID_90_V2 = "serial_90s_v2"
 EPISODE_TEMPLATE_ID_NARRATED = "narrated_drama_60s_v2"
+# Plan 22 stage 3: a ~50 s confrontation in one place, in real time -- one
+# shot a character line on a native-speech story (line_words 5-17, every
+# boundary a cut, the narrator in the recap only). The format a new story on
+# a native-speech profile starts on when it names none (episode_template_for).
+EPISODE_TEMPLATE_ID_CONFRONTATION = "confrontation_50s_v2"
 EPISODE_TEMPLATE_IDS = ("serial_60s_v1", "serial_90s_v1", EPISODE_TEMPLATE_ID_V2,
-                        EPISODE_TEMPLATE_ID_90_V2, EPISODE_TEMPLATE_ID_NARRATED)
+                        EPISODE_TEMPLATE_ID_90_V2, EPISODE_TEMPLATE_ID_NARRATED,
+                        EPISODE_TEMPLATE_ID_CONFRONTATION)
 
 # In order, each derived from a contiguous prefix of ``approvals``
 # (store.derive_status): concept, bible, style, then -- phase 2 -- cast,
@@ -126,14 +132,29 @@ def default_generation_profile() -> dict:
     }
 
 
+def speaks_natively(profile) -> bool:
+    """Whether *profile* (a ``generation_profile``) is a native-speech one --
+    the v2 pipeline at tier 3 on :data:`NATIVE_SPEECH_PROFILES` -- read from
+    the profile alone (``media_policy.native_speech`` reads the budget
+    profile's settings too; both native profiles say ``speech``)."""
+    profile = profile or {}
+    return (profile.get("pipeline") == PIPELINE_V2 and int(profile.get("tier") or 1) == 3
+            and profile.get("budget_profile") in NATIVE_SPEECH_PROFILES)
+
+
 def episode_template_for(profile, chosen=None) -> str:
     """The episode template a story created with *profile* starts on: the
     story's own *chosen* one when it names a shipped template (plan 20
     stage 1: the new-story form sends it, pre-filled from the style's
-    suggestion), else the v2 one for a v2 pipeline (DEC-227), else
-    :data:`EPISODE_TEMPLATE_ID`."""
+    suggestion), else -- plan 22 stage 3 -- the confrontation format on a
+    native-speech profile (:func:`speaks_natively`: one shot a character
+    line, which a 60 s beat-shot format's long lines do not fit; DEC-268: a
+    suggestion, the story may name another), else the v2 one for a v2
+    pipeline (DEC-227), else :data:`EPISODE_TEMPLATE_ID`."""
     if chosen in EPISODE_TEMPLATE_IDS:
         return chosen
+    if speaks_natively(profile):
+        return EPISODE_TEMPLATE_ID_CONFRONTATION
     if (profile or {}).get("pipeline") == PIPELINE_V2:
         return EPISODE_TEMPLATE_ID_V2
     return EPISODE_TEMPLATE_ID
