@@ -332,3 +332,20 @@ def test_a_story_whose_images_are_yours_awaits_its_keyframes_and_asks_nothing(st
     assert result["uploads"]["message"] == f"Waiting for {len(shots)} keyframes — download the brief"
     assert {item["kind"] for item in result["uploads"]["missing"]} == {"keyframe"}
     assert any(line.startswith(f"✋ {len(shots)} keyframes to upload") for line in log)
+
+
+def test_a_story_switches_its_images_to_yours_and_back_and_keeps_its_speech_model(store):
+    """The profile merge takes the stage-5 switch (``images: manual``; null
+    clears it) and stage 4's ``speech_model``, as a PATCH sends them."""
+    from clipping.aistory import defaults, media_policy, workflow
+
+    story_id = store.create(language="fr", generation_profile=defaults.manual_speech_generation_profile(),
+                            now=NOW)["story_id"]
+    story = workflow.patch_story(store, story_id, {"generation_profile": {"images": "manual", "speech_model": "lite"}},
+                                 now=NOW)
+    assert story["generation_profile"]["images"] == "manual" and media_policy.images_manual(story)
+    assert story["generation_profile"]["speech_model"] == "lite"
+    story = workflow.patch_story(store, story_id, {"generation_profile": {"images": None}}, now=NOW)
+    assert "images" not in story["generation_profile"] and not media_policy.images_manual(story)
+    with pytest.raises(workflow.WorkflowError):
+        workflow.patch_story(store, story_id, {"generation_profile": {"images": "robot"}}, now=NOW)
