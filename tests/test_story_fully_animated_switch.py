@@ -101,9 +101,10 @@ def test_regenerating_archives_every_written_episode_and_moves_the_story_to_v2(s
     result = wf.switch_pipeline(store, story_id, QUALITY_V2, regenerate_episodes=True, now=LATER)
 
     story = result["story"]
-    # Re-pinned on purpose (plan 22 stage 2, DEC-274): the story's own "writing": "v3" (stamped at
-    # creation) is merged onto the switch's patch, not replaced by it (the patch never names "writing").
-    assert story["generation_profile"] == dict(QUALITY_V2, writing=defaults.WRITING_V3)
+    # Re-pinned on purpose (plan 22 stage 2, DEC-274): the story's own "writing" is merged onto the switch's
+    # patch, not replaced by it (the patch never names "writing"). Plan 22 stage 3: the phase-3 fixture pins
+    # "writing": "v2" (tests/test_story_episode_steps.py::_ready_story), so that is the value kept.
+    assert story["generation_profile"] == dict(QUALITY_V2, writing=defaults.WRITING_V2)
     # What an unwritten story's switch does (_follow_pipeline_switch): the template and the narrator follow.
     assert story["episode_template_id"] == defaults.EPISODE_TEMPLATE_ID_V2 and story["narrator"]["enabled"] is True
     [report] = result["discarded"]
@@ -125,9 +126,10 @@ def test_a_switch_with_nothing_written_is_the_patch_and_archives_nothing(store):
 
     result = wf.switch_pipeline(store, story_id, QUALITY_V2, regenerate_episodes=True, now=LATER)
 
-    # Re-pinned on purpose (plan 22 stage 2, DEC-274): the story is stamped "writing": "v3" at creation.
+    # Re-pinned on purpose (plan 22 stage 2, DEC-274): the story's own "writing" is kept -- plan 22 stage 3:
+    # "v2", the phase-3 fixture's pin (tests/test_story_episode_steps.py::_ready_story).
     assert result["discarded"] == [] and result["story"]["generation_profile"] == dict(
-        QUALITY_V2, writing=defaults.WRITING_V3)
+        QUALITY_V2, writing=defaults.WRITING_V2)
     with pytest.raises(wf.WorkflowError) as info:
         wf.switch_pipeline(store, story_id, {"tier": 9}, regenerate_episodes=True, now=LATER)
     assert info.value.code == wf.INVALID
