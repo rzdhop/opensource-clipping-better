@@ -269,8 +269,9 @@ def _execute_story_step(job_id: str, job: dict, token: CancelToken) -> None:
             if current.get("status") == JobStatus.CANCELLED.value:
                 raise Cancelled("The job was cancelled.")
             waiting = uploads.get("message") or "waiting for your clips"
-            store.append_event(job_id, f"Story step '{step}' is paused: {waiting} ({uploads.get('brief') or 'the shot '
-                                       'brief'}). It goes on by itself once every clip is uploaded.", "step", "worker")
+            brief = uploads.get("brief") or "the shot brief"
+            store.append_event(job_id, f"Story step '{step}' is paused: {waiting} ({brief}). It goes on by itself "
+                                       "once every clip is uploaded.", "step", "worker")
             return
         completed = steps.ends_completed(step, job.get("params"))
         store.set_status(job_id, JobStatus.COMPLETED if completed else JobStatus.AWAITING_APPROVAL)
