@@ -5164,3 +5164,21 @@ a new id (sh21+ on a 20-shot board). Five tests' lookups changed from id to posi
 nine tests added. Follow-ups: the dashboard falls back to the first shot when a selected id disappears after a T1r;
 ids run out at sh999 with a plain error; a hand-edited transition is still lost on a re-plan (as before). Commit
 (rebased) on main.
+
+## DEC-267 — The pinned comment calls for "PART N" in the comments; the end card carries the same call only when the episode template says so (plan 20 stage 3, after DEC-266)
+**Context.** The fruit-drama formula (plan 18 §3) ends every part with an explicit "comment PART 2" ask; the pack's
+pinned comment said only "PART {n} →" and the end card only "PART N" + the title. The golden render never exercises
+the end card, but every shipped template renders one.
+**Decision.** `metadata.PART_CALL` becomes EN `Comment "PART {n}" for the next one →`, FR `Commente « PARTIE {n} »
+pour la suite →` — once per platform, in the pinned comment (the M1 prompt never asks for a CTA; the description keeps
+the teaser). `render/subtitles.end_card_ass(..., cta=False)`: with the flag on, one line under "PART N" (y = 960,
+between the part at 864 and the title at 1056), the card's font and colours, sized from 44 down to no less than 24 by
+a generous width estimate (41–44 for parts 2–999, 560–630 px measured in Montserrat Black and Luckiest Guy), the same
+words without the arrow (only Montserrat-Black of the six shipped fonts has the glyph; on a black card it points at
+nothing); `render/plan.py` turns it on only for a literal `end_card_cta: true` on the episode template (a new cache
+key for the card alone; `filtergraph.py` untouched). No shipped template carries the flag yet: stage 1's narrated
+templates will.
+**Rejected.** The arrow on the card (font coverage); the CTA in the platform descriptions too (it would appear twice).
+**Consequence.** Six pinned strings in `tests/test_story_metadata_step.py` changed in lockstep; a test ties the card's
+text to `PART_CALL` minus the arrow; the golden render and `framemd5.json` are unedited (RC-M2), RC-M8 holds. Known
+and older: a long title can overflow the card. Commit 87afd4d (main).
