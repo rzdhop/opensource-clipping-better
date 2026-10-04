@@ -1384,13 +1384,18 @@ def spending_caps(ec, total, *, env, ledger=None, video=None, fix_usd=0.0) -> tu
         budget_obj = gating.budget_of(gating.merged_env(env))
     except ValueError:
         budget_obj = None
-    day_spent = budget_mod.day_spent()
+    state = budget_mod.day_state()
+    day_spent, day_extra = state.spent, state.extra
     caps = {"allow_paid": bool(budget_obj and budget_obj.allow_paid)}
     if budget_obj is not None:
-        for name, cap, spent in (("episode", budget_obj.per_episode_cap_usd, ep_spent),
-                                 ("day", budget_obj.daily_cap_usd, day_spent),
-                                 ("story", budget_obj.per_story_cap_usd, story_spent)):
-            caps[name] = {"cap_usd": cap, "spent_usd": round(spent, 4), "left_usd": round(max(0.0, cap - spent), 4)}
+        for name, cap, spent, extra in (("episode", budget_obj.per_episode_cap_usd, ep_spent, 0.0),
+                                        ("day", budget_obj.daily_cap_usd, day_spent, day_extra),
+                                        ("story", budget_obj.per_story_cap_usd, story_spent, 0.0)):
+            caps[name] = {"cap_usd": cap, "spent_usd": round(spent, 4),
+                          "left_usd": round(max(0.0, cap + extra - spent), 4)}
+        if day_extra > 0:
+            # Plan 23 A2: today's allowance counts in the day's left_usd; the saved cap_usd stays what it is.
+            caps["day"]["extra_usd"] = round(day_extra, 4)
     over_cap = None
     if budget_obj is not None and budget_obj.allow_paid and total > 0:
         what = "paid images and voices"
@@ -1410,8 +1415,8 @@ def spending_caps(ec, total, *, env, ledger=None, video=None, fix_usd=0.0) -> tu
             what += f", with up to ${fix_usd:.2f} to redraw flagged keyframes"
         plan = SimpleNamespace(est_usd=total, link=f"episode {ec.ep}'s {what}")
         try:
-            budget_mod.check(plan, None, budget=budget_obj, day_spent=day_spent, ep_spent=ep_spent,
-                             story_spent=story_spent)
+            budget_mod.check(plan, None, budget=budget_obj, day_spent=day_spent, day_extra=day_extra,
+                             ep_spent=ep_spent, story_spent=story_spent)
         except budget_mod.BudgetRefused as exc:
             over_cap = str(exc)
     return caps, over_cap

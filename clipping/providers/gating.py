@@ -61,7 +61,8 @@ def budget_check(budget_obj, *, story_spent=None):
 
     def check(estimate, link):
         extra = {} if story_spent is None else {"story_spent": float(story_spent())}
-        budget_mod.check(estimate, link, budget=budget_obj, day_spent=budget_mod.day_spent(), **extra)
+        state = budget_mod.day_state()
+        budget_mod.check(estimate, link, budget=budget_obj, day_spent=state.spent, day_extra=state.extra, **extra)
 
     return check
 
@@ -123,7 +124,8 @@ def link_summary(kind, link, merged, budget_obj, request, *, qty=1, story_spent=
     allowed = not missing
     reason = None
     if allowed and paid:
-        day_spent = budget_mod.day_spent()
+        state = budget_mod.day_state()
+        day_spent = state.spent
         if not budget_obj.allow_paid:
             # The runner's first gate (DEC-097), whatever the amount.
             allowed = False
@@ -131,7 +133,8 @@ def link_summary(kind, link, merged, budget_obj, request, *, qty=1, story_spent=
                       f"(today ${day_spent:.2f} of ${budget_obj.daily_cap_usd:.2f})")
         else:
             try:
-                budget_mod.check(est, link, budget=budget_obj, day_spent=day_spent, story_spent=story_spent)
+                budget_mod.check(est, link, budget=budget_obj, day_spent=day_spent, story_spent=story_spent,
+                                 day_extra=state.extra)
             except budget_mod.BudgetRefused as exc:
                 allowed, reason = False, str(exc)
     return {

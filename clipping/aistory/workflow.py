@@ -5863,7 +5863,7 @@ def _agent_caps(stories, story, *, env) -> tuple:
     (``{"allow_paid", "episode"|"day"|"story": {"cap_usd", "spent_usd",
     "left_usd"}}``, episode 1's ledger rows for the episode), the budget
     settings (None when they cannot be read) and ``{"episode", "day",
-    "story"}`` already spent."""
+    "story", "day_extra"}`` already spent (and today's extra on the daily cap)."""
     story_id = story["story_id"]
     try:
         budget_obj = gating.budget_of(gating.merged_env(env))
@@ -5878,14 +5878,17 @@ def _agent_caps(stories, story, *, env) -> tuple:
         except (KeyError, TypeError, ValueError) as exc:
             raise StoryUnreadable(story_id, f"{story_store.STORIES_DIRNAME}/{story_id}/{COST_LEDGER}",
                                   [f"{type(exc).__name__}: {exc}"]) from None
-    day_spent = budget_mod.day_spent()
-    spent = {"episode": ep_spent, "day": day_spent, "story": story_spent}
+    state = budget_mod.day_state()
+    spent = {"episode": ep_spent, "day": state.spent, "story": story_spent, "day_extra": state.extra}
     caps = {"allow_paid": bool(budget_obj and budget_obj.allow_paid)}
     if budget_obj is not None:
-        for name, cap in (("episode", budget_obj.per_episode_cap_usd), ("day", budget_obj.daily_cap_usd),
-                          ("story", budget_obj.per_story_cap_usd)):
+        for name, cap, extra in (("episode", budget_obj.per_episode_cap_usd, 0.0),
+                                 ("day", budget_obj.daily_cap_usd, state.extra),
+                                 ("story", budget_obj.per_story_cap_usd, 0.0)):
             caps[name] = {"cap_usd": cap, "spent_usd": round(spent[name], 4),
-                          "left_usd": round(max(0.0, cap - spent[name]), 4)}
+                          "left_usd": round(max(0.0, cap + extra - spent[name]), 4)}
+        if state.extra > 0:
+            caps["day"]["extra_usd"] = round(state.extra, 4)
     return caps, budget_obj, spent
 
 
@@ -6215,9 +6218,10 @@ def story_fast_track_estimate(stories, story, *, env, readiness=None, probe_loca
                     spent["episode"] + episode_row["est_usd"] > budget_obj.per_episode_cap_usd):
                 over.append(f"episode {agent_step.EPISODE} to ${spent['episode'] + episode_row['est_usd']:.2f} "
                             f"of its ${budget_obj.per_episode_cap_usd:.2f} cap")
-            if spent["day"] + paid_total > budget_obj.daily_cap_usd:
+            if spent["day"] + paid_total > budget_obj.daily_cap_usd + spent["day_extra"]:
+                allowed = f" + ${spent['day_extra']:.2f} allowed today" if spent["day_extra"] > 0 else ""
                 over.append(f"today to ${spent['day'] + paid_total:.2f} of the ${budget_obj.daily_cap_usd:.2f} "
-                            "daily cap")
+                            f"daily cap{allowed}")
             if spent["story"] + paid_total > budget_obj.per_story_cap_usd:
                 over.append(f"this story to ${spent['story'] + paid_total:.2f} of its "
                             f"${budget_obj.per_story_cap_usd:.2f} cap")

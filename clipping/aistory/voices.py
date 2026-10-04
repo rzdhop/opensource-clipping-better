@@ -627,7 +627,8 @@ class LineGates:
 
     def check(self, estimate, link) -> None:
         ep_spent = self.spent(self.ep) if self.ep is not None else 0.0
-        budget_mod.check(estimate, link, budget=self.budget, day_spent=budget_mod.day_spent(),
+        state = budget_mod.day_state()
+        budget_mod.check(estimate, link, budget=self.budget, day_spent=state.spent, day_extra=state.extra,
                          ep_spent=ep_spent, story_spent=self.spent())
 
     def booker(self, kind, *, step, unit, qty):
@@ -997,9 +998,10 @@ def estimate_lines(stories, story_id, items, *, env, ep=None, adapters=None) -> 
                 row.update(allowed=False, reason=_paid_off_reason(row["est_usd"], link, budget_obj))
             else:
                 try:
+                    state = budget_mod.day_state()
                     budget_mod.check(row["est_usd"], link, budget=budget_obj,
-                                     day_spent=budget_mod.day_spent() + pending, ep_spent=ep_spent + pending,
-                                     story_spent=story_spent + pending)
+                                     day_spent=state.spent + pending, day_extra=state.extra,
+                                     ep_spent=ep_spent + pending, story_spent=story_spent + pending)
                 except budget_mod.BudgetRefused as exc:
                     row.update(allowed=False, reason=str(exc))
                 else:
