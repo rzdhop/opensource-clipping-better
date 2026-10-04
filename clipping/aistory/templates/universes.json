@@ -1,0 +1,226 @@
+{
+  "$schema": "universes_v1",
+  "universes": [
+    {
+      "id": "fruits",
+      "label": {
+        "en": "Fruits",
+        "fr": "Fruits"
+      },
+      "species": [
+        "strawberry",
+        "banana",
+        "apple",
+        "lemon",
+        "orange",
+        "cherry",
+        "peach",
+        "watermelon",
+        "blueberry",
+        "grape",
+        "kiwi",
+        "mango",
+        "pineapple",
+        "coconut",
+        "avocado",
+        "raspberry",
+        "pear",
+        "lime"
+      ],
+      "material_rule": "the character's own fruit flesh with hyper-detailed natural texture, subsurface scattering, pores, seeds, juice reflections and small imperfections",
+      "subject_phrase": "an anthropomorphic fruit"
+    },
+    {
+      "id": "vegetables",
+      "label": {
+        "en": "Vegetables",
+        "fr": "Légumes"
+      },
+      "species": [
+        "broccoli",
+        "carrot",
+        "corn",
+        "potato",
+        "tomato",
+        "onion",
+        "pepper",
+        "cucumber",
+        "eggplant",
+        "pumpkin",
+        "mushroom"
+      ],
+      "material_rule": "the character's own vegetable flesh with hyper-detailed natural texture, subsurface scattering, pores, skin blemishes, soil dust and small imperfections",
+      "subject_phrase": "an anthropomorphic vegetable"
+    },
+    {
+      "id": "drinks_sodas",
+      "label": {
+        "en": "Drinks and sodas",
+        "fr": "Boissons et sodas"
+      },
+      "species": [
+        "cola can",
+        "orange soda",
+        "lemon-lime soda",
+        "cherry-pepper soda",
+        "energy-drink can",
+        "sports-drink bottle",
+        "takeaway coffee cup",
+        "juice box",
+        "milk carton"
+      ],
+      "material_rule": "the can or bottle's own glossy aluminium, glass or plastic with condensation and printed-label texture",
+      "subject_phrase": "an anthropomorphic drink container"
+    },
+    {
+      "id": "tech_gadgets",
+      "label": {
+        "en": "Tech gadgets",
+        "fr": "Gadgets tech"
+      },
+      "species": [
+        "smartphone",
+        "laptop",
+        "headset",
+        "wireless earbuds",
+        "USB key",
+        "smartwatch",
+        "handheld console",
+        "game controller"
+      ],
+      "material_rule": "the device's own glass, brushed metal and matte plastic with screen glow",
+      "subject_phrase": "an anthropomorphic gadget"
+    },
+    {
+      "id": "snacks_sweets",
+      "label": {
+        "en": "Snacks and sweets",
+        "fr": "Snacks et sucreries"
+      },
+      "species": [
+        "chocolate bar",
+        "donut",
+        "cupcake",
+        "cookie",
+        "gummy bear",
+        "popcorn",
+        "pretzel",
+        "hard candy",
+        "popsicle",
+        "ice-cream cone",
+        "marshmallow",
+        "lollipop"
+      ],
+      "material_rule": "the treat's own glossy glaze, crumb, sugar crystals and sticky sheen with tiny imperfections",
+      "subject_phrase": "an anthropomorphic snack or sweet"
+    },
+    {
+      "id": "fast_food",
+      "label": {
+        "en": "Fast food",
+        "fr": "Fast-food"
+      },
+      "species": [
+        "burger",
+        "hot dog",
+        "fries",
+        "pizza slice",
+        "taco",
+        "croissant",
+        "bagel",
+        "sushi roll",
+        "nugget",
+        "sandwich"
+      ],
+      "material_rule": "the dish's own crisp crust, melted cheese, steam, grease sheen and sauce, with appetising texture",
+      "subject_phrase": "an anthropomorphic fast-food item"
+    },
+    {
+      "id": "bottles",
+      "label": {
+        "en": "Bottles",
+        "fr": "Bouteilles"
+      },
+      "species": [
+        "wine bottle",
+        "beer bottle",
+        "champagne bottle",
+        "whisky bottle",
+        "vodka bottle",
+        "tequila bottle",
+        "rum bottle"
+      ],
+      "material_rule": "the bottle's own thick glass with liquid glow, condensation, embossed glass and printed-label texture",
+      "subject_phrase": "an anthropomorphic bottle",
+      "audience_note": {
+        "en": "alcohol: adult audience, no drinking shown as a reward",
+        "fr": "alcool : public adulte, aucune consommation montrée comme une récompense"
+      }
+    },
+    {
+      "id": "household_objects",
+      "label": {
+        "en": "Household objects",
+        "fr": "Objets du quotidien"
+      },
+      "species": [
+        "light bulb",
+        "candle",
+        "book",
+        "pencil",
+        "eraser",
+        "ruler",
+        "clock",
+        "mirror",
+        "soap bar",
+        "key",
+        "toothbrush",
+        "pillow"
+      ],
+      "material_rule": "the object's own everyday material (glass, wax, paper, wood, metal, rubber, fabric) with worn edges, scuffs and fine surface detail",
+      "subject_phrase": "an anthropomorphic household object"
+    },
+    {
+      "id": "melting_materials",
+      "label": {
+        "en": "Melting materials",
+        "fr": "Matières qui fondent"
+      },
+      "species": [
+        "chocolate",
+        "ice cream",
+        "ice cube",
+        "butter",
+        "snowman",
+        "candle wax",
+        "sugar cube",
+        "marshmallow"
+      ],
+      "material_rule": "the material's own softening, dripping surface mid-melt",
+      "subject_phrase": "an anthropomorphic melting thing"
+    },
+    {
+      "id": "gross_funny",
+      "label": {
+        "en": "Gross and funny",
+        "fr": "Humour crado"
+      },
+      "species": [
+        "poop",
+        "fart cloud",
+        "booger",
+        "pimple",
+        "sock",
+        "underwear",
+        "toenail",
+        "armpit hair"
+      ],
+      "material_rule": "the thing's own cartoon-clean glossy matter with exaggerated lumpy texture, never realistic and never wet",
+      "subject_phrase": "an anthropomorphic gross-out character",
+      "audience_note": {
+        "en": "gross-out humour: keep it cartoon-clean, no bodily fluids shown",
+        "fr": "humour trash : rester propre façon dessin animé, aucun fluide corporel montré"
+      }
+    }
+  ]
+}

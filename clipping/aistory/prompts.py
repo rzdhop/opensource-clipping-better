@@ -599,6 +599,8 @@ def _data_block(pack, sections) -> str:
             parts.append(f"Do not repeat or closely imitate these existing titles: {value}")
         elif name == "character_design_rules":
             parts.append(f"Character design rule: {value}")
+        elif name == "universe":
+            parts.append(value)
         else:
             parts.append(value)
     block = "\n\n".join(parts)
@@ -677,7 +679,9 @@ def build_c1_v2(pack, *, style_ids, batch, of, angle):
     cards, ``avoid`` of this story's own titles only (the caller never sends
     the library's)."""
     style_ids = list(style_ids)
-    data_block = _data_block(pack, ("brief", "style", "avoid"))
+    # Plan 23 stage D2: a story with a universe adds its species block (pack.universe) between the
+    # style and the avoid list; without one the block is empty and these bytes are what they were.
+    data_block = _data_block(pack, ("brief", "style", "universe", "avoid"))
     styles_list = ", ".join(style_ids)
 
     user = (
@@ -713,7 +717,7 @@ def build_c1_v2(pack, *, style_ids, batch, of, angle):
         "Never use real people, brands, studio names or copyrighted "
         "characters."
     )
-    return _system(pack), user, schemas.c1_schema(style_ids)
+    return _system(pack), user, schemas.c1_schema(style_ids, species=bool(pack.universe))
 
 
 def _c1v2_search_text(concept) -> str:
@@ -722,17 +726,21 @@ def _c1v2_search_text(concept) -> str:
                      cast_text])
 
 
-def c1v2_errors(doc, *, style_ids, brief) -> list:
+def c1v2_errors(doc, *, style_ids, brief, universe=False) -> list:
     """C1v2's post-validation (plan 22 stage 2): ``schemas.c1_errors``'s own
     checks, then the rule check -- every name :func:`context.brief_entities`
     finds in *brief* must appear (accent- and case-folded,
     :func:`context._fold`) in the card's title, logline, world or
     cast_sketch; DEC-259's told-why retry then fixes exactly the name a
-    reply dropped."""
-    errors = schemas.c1_errors(doc, style_ids)
+    reply dropped.
+
+    Plan 23 stage D2: with *universe* (the story has one) the cast members
+    also carry a species, and a brand name anywhere in the card
+    (``schemas.BRAND_DENYLIST``) is a told-why retry too."""
+    errors = schemas.c1_errors(doc, style_ids, species=universe)
     if errors:
         return errors
-    errors = []
+    errors = schemas.brand_errors(doc) if universe else []
     for concept in doc["concepts"]:
         haystack = context._fold(_c1v2_search_text(concept))
         for name in context.brief_entities(brief):

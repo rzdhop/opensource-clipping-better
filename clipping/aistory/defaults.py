@@ -7,11 +7,16 @@ There is deliberately **no default language**: a story must name ``fr`` or
 ``en``. A silent default would be exactly the "silent fallback" spec 0
 forbids -- a French user who forgot a field would get an English season.
 
-Constants only, no imports: ``schemas.py`` builds the ``story_bible_v1``
-enums from these tuples, so this module must not import it back.
+Constants only, no imports of the package: ``schemas.py`` builds the
+``story_bible_v1`` enums from these tuples, so this module must not import it
+back. (The one file it reads is ``templates/universes.json``, with the
+standard library, for the ``UNIVERSES`` ids below.)
 """
 
 from __future__ import annotations
+
+import json
+from pathlib import Path
 
 # ------------------------------------------------------ generation profile (spec 8)
 
@@ -106,6 +111,20 @@ SHEET_MODES = (SHEET_THREE, SHEET_TWO_VIEW, SHEET_TWO_VIEW_EXPRESSIONS)
 BODY_HUMAN = "human_body"
 BODY_ALL_MATTER = "all_matter"
 BODY_RULES = (BODY_HUMAN, BODY_ALL_MATTER)
+
+
+def _universe_ids() -> tuple:
+    path = Path(__file__).resolve().parent / "templates" / "universes.json"
+    with open(path, encoding="utf-8") as fh:
+        return tuple(entry["id"] for entry in json.load(fh)["universes"])
+
+
+# Plan 23 stage D2: the optional ``generation_profile.universe``, what the
+# story's cast is made of (a fruit, a drink can, a gadget...), one of the ids
+# of ``templates/universes.json``. Absent is the style's own
+# ``default_universe``, else none (``media_policy.universe``); a style
+# accepts only the universes its template lists (``store.create``).
+UNIVERSES = _universe_ids()
 
 # ------------------------------------------------------------- story (spec 2.1, 6.2)
 

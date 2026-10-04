@@ -43,7 +43,7 @@ from __future__ import annotations
 import copy
 import time
 
-from .. import context, media_policy, prompting, prompts, refimages, schemas
+from .. import context, media_policy, prompting, prompts, refimages, schemas, universes
 from .. import store as store_mod
 from . import entities, llm_call
 from .entities import CHARACTERS, PLACES, PROPS
@@ -203,7 +203,7 @@ def write_place_text(ctx, store, place_id, *, tools, note=None, regenerate=False
                                             places_so_far=written, regenerate=regen)
 
     def validate(reply):
-        errors = schemas.p1_errors(reply)
+        errors = schemas.p1_errors(reply) or universes.brand_gate(story, reply)
         if errors:
             return errors
         trial = copy.deepcopy(place)
@@ -270,7 +270,7 @@ def write_prop_text(ctx, store, prop_id, *, tools, note=None, regenerate=False, 
     keep_owner = not regenerate
 
     def validate(reply):
-        errors = schemas.r1_errors(reply)
+        errors = schemas.r1_errors(reply) or universes.brand_gate(story, reply)
         if errors:
             return errors
         trial = copy.deepcopy(prop)
@@ -347,7 +347,7 @@ def write_place_look(ctx, store, place_id, *, tools, note=None, regenerate=False
     names = [doc["name"] for doc in cast] + [place["name"]]
 
     def validate(reply):
-        errors = schemas.d3_errors(reply, variants, prop_names, names)
+        errors = schemas.d3_errors(reply, variants, prop_names, names) or universes.brand_gate(story, reply)
         if errors:
             return errors
         trial = copy.deepcopy(place)
@@ -420,7 +420,7 @@ def write_prop_look(ctx, store, prop_id, *, tools, note=None, regenerate=False, 
     names = [doc["name"] for doc in cast]
 
     def validate(reply):
-        errors = schemas.r1v2_errors(reply, names)
+        errors = schemas.r1v2_errors(reply, names) or universes.brand_gate(story, reply)
         if errors:
             return errors
         trial = copy.deepcopy(prop)

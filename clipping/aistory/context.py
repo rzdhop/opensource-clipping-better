@@ -219,6 +219,9 @@ class Pack:
     # Phase 2: existing cast / places, short lines (K1/P0/R1/S1/S2).
     cast: str | None = None
     places: str | None = None
+    # Plan 23 stage D2: a story with a universe (``media_policy.universe``) carries its data block
+    # (``universes.species_block``): the species pool and this card's lead species. None otherwise.
+    universe: str | None = None
     trimmed: list = field(default_factory=list)
 
 
@@ -234,6 +237,7 @@ def build_pack(
     avoid_titles=None,
     cast=None,
     places=None,
+    universe=None,
 ) -> Pack:
     """Assemble a ``Pack`` for one prompt call. Nothing here is a silent
     fallback: every section that had to be cut to fit is named in
@@ -305,6 +309,7 @@ def build_pack(
         character_design_rules=character_design_rules,
         cast=cast_text,
         places=places_text,
+        universe=universe or None,
         trimmed=trimmed,
     )
 

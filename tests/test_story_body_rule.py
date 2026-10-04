@@ -45,7 +45,9 @@ ALL_MATTER = (
     "Fully dressed from shoulders to feet: a complete top, a complete bottom below the knee and shoes; no bare "
     "legs, no visible underwear.")
 NEW_KEYS = ("body_rules", "default_material", "default_body_rule")
-OTHER_STYLES = [style for style in templates.list_style_ids() if style != "fruit_drama"]
+# Re-pinned on purpose (plan 23 stage D2): viral_3d, the subject-neutral style, defines the all_matter rule and
+# defaults to it (tests/test_story_universes.py); the six others are as they were.
+OTHER_STYLES = [style for style in templates.list_style_ids() if style not in ("fruit_drama", "viral_3d")]
 
 
 # ================================================================ the template

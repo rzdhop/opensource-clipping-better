@@ -34,6 +34,15 @@ anyway with ``brief_fit.kept`` false, never silently. Without a usable link
 on the premium chain the judge is skipped (and ``brief_fit`` left off every
 card of the batch) -- said once, not once per card. Without the gate, every
 card is written exactly as it always was (RC-W2).
+
+**Plan 23 stage D2, a story with a universe** (``media_policy.universe``): the
+C1v2 prompt gains one data block, the universe's species pool and this card's
+assigned lead species (:func:`universes.species_block`), the ten cards of a
+batch rotating through the pool deterministically
+(:func:`universes.assign_species`, seeded by the story and the batch); each
+cast member names its species, a brand name is a told-why retry
+(``schemas.BRAND_DENYLIST``), and the card records ``universe`` (its id and the
+assigned lead species). A story without a universe, or one on C1, is untouched.
 """
 
 from __future__ import annotations
@@ -41,7 +50,7 @@ from __future__ import annotations
 import re
 import time
 
-from .. import context, media_policy, prompts, schemas, templates
+from .. import context, media_policy, prompts, schemas, templates, universes
 from . import llm_call
 from .llm_call import StepFailed
 
@@ -244,6 +253,8 @@ def run(ctx, *, note=None, runner=None, time_fn=time.monotonic) -> dict:
     seed = _seed_with_note(story.get("seed_text"), note)
     style_ids = templates.list_style_ids()
     use_brief = _writing_gate(story)
+    # Plan 23 stage D2: what the cast is made of -- only on the brief-faithful prompt.
+    universe = universes.universe_of(story) if use_brief else None
 
     cards = _existing_cards(store, ctx.story_id)
     number = _next_number(cards)
@@ -257,6 +268,13 @@ def run(ctx, *, note=None, runner=None, time_fn=time.monotonic) -> dict:
 
     for call in range(1, calls + 1):
         ctx.cancel.check()
+        lead_species = None
+        species_text = None
+        if universe is not None:
+            batch_number, position = universes.card_slot(len(cards), 1)
+            batch_species = universes.assign_species(ctx.story_id, batch_number, universe["species"])
+            lead_species = batch_species[position]
+            species_text = universes.species_block(universe, batch_species=batch_species, position=position)
         if use_brief:
             pack = context.build_pack(
                 language=language,
@@ -265,6 +283,7 @@ def run(ctx, *, note=None, runner=None, time_fn=time.monotonic) -> dict:
                 # DEC-274: the library's titles compete with the brief, not
                 # with this story's own cards -- left out here.
                 avoid_titles=generated_titles[::-1],
+                universe=species_text,
             )
         else:
             pack = context.build_pack(
@@ -280,8 +299,8 @@ def run(ctx, *, note=None, runner=None, time_fn=time.monotonic) -> dict:
             system, user, schema = prompts.build_c1_v2(pack, style_ids=style_ids, batch=call, of=calls, angle=angle)
             prompt_id = "C1v2"
 
-            def validator(reply, _brief=pack.brief):
-                return prompts.c1v2_errors(reply, style_ids=style_ids, brief=_brief)
+            def validator(reply, _brief=pack.brief, _universe=universe is not None):
+                return prompts.c1v2_errors(reply, style_ids=style_ids, brief=_brief, universe=_universe)
         else:
             system, user, schema = prompts.build_c1(pack, style_ids=style_ids, batch=call, of=calls)
             prompt_id = "C1"
@@ -319,6 +338,8 @@ def run(ctx, *, note=None, runner=None, time_fn=time.monotonic) -> dict:
             card.update({field: concept[field] for field in _CARD_FIELDS})
             if brief_fit is not None:
                 card["brief_fit"] = brief_fit
+            if universe is not None:
+                card["universe"] = {"id": universe["id"], "lead_species": lead_species}
             call_cards.append(card)
             number += 1
 

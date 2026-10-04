@@ -545,6 +545,25 @@ export async function fetchStyles() {
   return stylesCache
 }
 
+// Plan 23 stage D2: what the cast can be made of (templates/universes.json) and which style takes which,
+// for the new-story form's Universe select. Fixed while the server runs, so cached like the styles.
+let universesCache = null
+
+/** `{universes: [{id, label: {en, fr}, audience_note?}], by_style: {style_id: {universes, default}}}`. */
+export async function fetchUniverses() {
+  if (!universesCache) {
+    universesCache = (async () => {
+      const res = await request('/stories/universes')
+      if (!res.ok) throw await apiError(res, 'Failed to fetch universes')
+      return res.json()
+    })().catch((err) => {
+      universesCache = null
+      throw err
+    })
+  }
+  return universesCache
+}
+
 /**
  * A style template's display name -- English, falling back to the id itself
  * when the templates have not loaded yet or the id is unknown. Every place

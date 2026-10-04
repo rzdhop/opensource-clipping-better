@@ -667,6 +667,9 @@ class GenerationProfileModel(BaseModel):
     # turnaround, expressions) and the style's own body rules.
     sheet_mode: Optional[Literal["three_sheet","two_view","two_view_expressions"]] = None
     body_rule: Optional[Literal["human_body","all_matter"]] = None
+    # Optional (plan 23 stage D2): what the cast is made of, an id of templates/universes.json;
+    # left out, the style's default universe, else none. The store refuses one the style lacks.
+    universe: Optional[str] = None
 
     @model_serializer(mode="wrap")
     def _without_unset_pipeline(self, handler):
@@ -678,7 +681,7 @@ class GenerationProfileModel(BaseModel):
             data.pop("speech_model", None)
         if isinstance(data, dict) and data.get("images") is None:
             data.pop("images", None)
-        for key in ("sheet_mode", "body_rule"):
+        for key in ("sheet_mode", "body_rule", "universe"):
             if isinstance(data, dict) and data.get(key) is None:
                 data.pop(key, None)
         return data

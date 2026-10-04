@@ -1010,6 +1010,29 @@ async def list_styles() -> dict:
     return {"styles": styles}
 
 
+@router.get("/universes")
+async def list_universes() -> dict:
+    """The universes of ``templates/universes.json`` (plan 23 stage D2) and
+    which style takes which, for the new-story form's Universe select:
+    ``{"universes": [{id, label, audience_note?}, ...], "by_style":
+    {style_id: {"universes": [id, ...], "default": id | null}}}`` -- a style
+    that lists none is absent from ``by_style``. Declared before ``GET
+    /{story_id}`` (as ``/styles``)."""
+    entries = []
+    for universe in templates.load_universes():
+        entry = {"id": universe["id"], "label": universe["label"]}
+        if universe.get("audience_note"):
+            entry["audience_note"] = universe["audience_note"]
+        entries.append(entry)
+    by_style = {}
+    for template_id in templates.list_style_ids():
+        template = templates.load_style(template_id)
+        if template.get("universes"):
+            by_style[template_id] = {"universes": list(template["universes"]),
+                                     "default": template.get("default_universe")}
+    return {"universes": entries, "by_style": by_style}
+
+
 @router.get("/{story_id}")
 async def get_story(story_id: str) -> dict:
     """Everything the story page shows::

@@ -153,8 +153,11 @@ EXPECTED_STYLE_IDS = (
 )
 
 
-def test_exactly_the_seven_shipped_style_ids():
-    assert tuple(templates.list_style_ids()) == EXPECTED_STYLE_IDS
+def test_exactly_the_seven_spec_styles_and_viral_3d_are_shipped():
+    """Re-pinned on purpose (plan 23 stage D2): ``viral_3d``, the creators' subject-neutral look, joins the
+    seven styles of the spec; it has no block in the spec to be compared to, so the spec-derived tests below
+    keep the seven (``tests/test_story_universes.py`` validates it)."""
+    assert tuple(templates.list_style_ids()) == EXPECTED_STYLE_IDS + ("viral_3d",)
 
 
 @pytest.mark.parametrize("template_id", EXPECTED_STYLE_IDS)

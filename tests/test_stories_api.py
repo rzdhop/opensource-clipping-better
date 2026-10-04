@@ -1232,14 +1232,14 @@ def test_the_story_page_lists_its_jobs_without_their_feeds(api):
 
 # ================================================== GET /api/stories/styles
 
-def test_get_styles_lists_the_seven_shipped_templates(api):
+def test_get_styles_lists_the_eight_shipped_templates(api):
     response = api.client.get("/api/stories/styles")
     assert response.status_code == 200
     body = response.json()
     ids = [s["template_id"] for s in body["styles"]]
 
     assert ids == sorted(templates.list_style_ids())
-    assert len(ids) == 7
+    assert len(ids) == 8  # re-pinned on purpose (plan 23 stage D2): the seven + viral_3d
     for style in body["styles"]:
         assert set(style) == {"template_id", "version", "name", "palette", "typography", "episode_defaults"}
         assert set(style["name"]) == {"fr", "en"}

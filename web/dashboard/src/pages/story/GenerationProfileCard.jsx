@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { fetchStoryEstimate, patchStory, switchPipeline } from '../../api'
+import { fetchStoryEstimate, fetchUniverses, patchStory, switchPipeline } from '../../api'
 import RouteChip from '../../components/RouteChip'
 import { StepError } from './fields'
 import { formatUsd } from '../../lib/format'
@@ -124,6 +124,9 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
   // Plan 23 stage D4: the characters' sheets and bodies (absent: three sheets, the style's own rules).
   const [sheetMode, setSheetMode] = useState(profile.sheet_mode || 'three_sheet')
   const [bodyRule, setBodyRule] = useState(profile.body_rule || '')
+  // Plan 23 stage D2: what the cast is made of -- the profile's universe, else the style's default
+  // (shown, not edited here: it is chosen when the story is created and frozen with the style).
+  const [universeCatalogue, setUniverseCatalogue] = useState(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   // A pipeline switch refused over written episodes (PATCH's structured 409):
@@ -138,6 +141,12 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
     setRoute(profile.route)
     setBudgetProfile(profile.budget_profile)
   }, [profile.tier, profile.route, profile.budget_profile])
+
+  useEffect(() => {
+    let cancelled = false
+    fetchUniverses().then((data) => { if (!cancelled) setUniverseCatalogue(data) }).catch(() => {})
+    return () => { cancelled = true }
+  }, [])
 
   useEffect(() => { setSpeechModel(profile.speech_model || 'fast') }, [profile.speech_model])
   useEffect(() => { setSheetMode(profile.sheet_mode || 'three_sheet') }, [profile.sheet_mode])
@@ -225,6 +234,10 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
   const imagesOwn = story.generation_profile.images === 'manual'
   // The style's rules are written into its lock once, when it is approved.
   const styleLocked = Boolean(story.approvals && story.approvals.style)
+  const styleUniverses = universeCatalogue && universeCatalogue.by_style[story.style_template_id]
+  const universeId = profile.universe || (styleUniverses ? styleUniverses.default : null)
+  const universeEntry = universeId && universeCatalogue
+    ? universeCatalogue.universes.find((universe) => universe.id === universeId) : null
   const fullyAnimated = isV2 && (story.generation_profile.budget_profile === 'quality' || nativeSpeech) && tier >= 2
   const makeFullyAnimated = () => {
     const patch = { tier: Math.max(tier, 2), route: 'api', budget_profile: 'quality' }
@@ -328,6 +341,15 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
         </select>
         {styleLocked && <p className="form-hint">Written into the style when it was approved: it cannot change now.</p>}
       </div>
+      {universeEntry && (
+        <div className="form-group">
+          <span className="form-label">Universe</span>
+          <p className="story-profile-universe">{universeEntry.label[story.language] || universeEntry.label.en}</p>
+          {universeEntry.audience_note && (
+            <p className="form-hint">{universeEntry.audience_note[story.language] || universeEntry.audience_note.en}</p>
+          )}
+        </div>
+      )}
       {nativeSpeech && !manualClips && (
         <div className="form-group">
           <label className="form-label" htmlFor="story-profile-speech-model">Speaking clips</label>

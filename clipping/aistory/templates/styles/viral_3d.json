@@ -1,34 +1,34 @@
 {
   "$schema": "style_template_v1",
-  "template_id": "fruit_drama",
+  "template_id": "viral_3d",
   "version": 1,
   "name": {
-    "en": "Fruit Drama",
-    "fr": "Drame fruité"
+    "en": "Viral 3D",
+    "fr": "3D virale"
   },
-  "rendering": "photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin, visible pores and fuzz, glossy highlights, high-end CGI commercial quality, Octane-style render",
-  "camera": "telenovela coverage: medium two-shots for dialogue, tight close-ups for reactions, slow push-in on reveals, 50mm look, shallow depth of field",
-  "lighting": "warm key light with a soft cool fill, golden-hour or practical interior lamps, dramatic rim light on reveals",
-  "character_design_rules": "The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Keep exact fruit species, ripeness, colour and outfit identical in every image.",
-  "environment_rules": "real-world sets — manor gates, gravel courtyards, derelict interiors with chandeliers, beach camps, villa kitchens, restaurants — photographed like a reality-TV show or a live-action comedy, props at human scale; exteriors in golden hour, interiors cold blue-grey with warm candle or lamp practicals",
-  "negative_prompt": "cartoon, 2D, flat shading, anime, fruit with stick limbs, fruit bowl, food photography, human head",
+  "rendering": "high-end cinematic 3D render between Pixar/DreamWorks animation and hyperrealism, dramatic cinematic lighting with volumetric rays and light atmospheric haze, rich saturated palette, layered depth, light depth of field, main character sharp",
+  "camera": "cinematic coverage: medium two-shots for dialogue, tight close-ups for reactions, slow push-in on reveals, 35-50mm look, light depth of field",
+  "lighting": "dramatic cinematic key light with visible volumetric rays and a light atmospheric haze, warm key with a cool rim light, soft practical glows",
+  "character_design_rules": "The head is one recognisable whole item of the character's universe at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). Keep the exact species, colour, finish and outfit identical in every image. Realistic adult proportions, never chibi.",
+  "environment_rules": "real-world sets at human scale, lit with volumetric light and a light haze, with a clear foreground, midground and background for layered depth; props at human scale",
+  "negative_prompt": "flat shading, 2D, anime, low detail, human head, human face, chibi, text, watermark",
   "sheet_background": "light grey",
   "quality_tail": "ultra detailed, 8k, sharp focus",
   "palette": {
     "primary": [
-      "#F2C14E",
-      "#E4572E",
-      "#3A7D44"
+      "#F2A33A",
+      "#D9482B",
+      "#2F6FA8"
     ],
     "accents": [
       "#FFFFFF",
-      "#1E1E24"
+      "#15151C"
     ],
     "forbidden": [
       "neon green",
-      "hot pink backgrounds"
+      "muddy desaturated tones"
     ],
-    "palette_line": "saturated natural fruit colours against warm neutral sets"
+    "palette_line": "rich saturated colours with warm light against cool haze"
   },
   "motion_rules": {
     "tier1": {
@@ -61,8 +61,8 @@
     "tier2_prompt_suffix_v2": "expressive character animation, clear gestures, lively faces, cloth sway, no morphing, no extra characters entering"
   },
   "typography": {
-    "font_family": "Montserrat ExtraBold",
-    "font_fallback": "Inter Black",
+    "font_family": "Luckiest Guy",
+    "font_fallback": "Montserrat Black",
     "subtitle_mode": "word_pop",
     "subtitle_style": "white fill, black 3 px outline, yellow #FFD400 karaoke highlight, 62 px at 1080 wide, bottom 18 %",
     "highlight_colour": "#FFD400",
@@ -77,7 +77,7 @@
       4
     ],
     "max_places": 2,
-    "episode_template_id": "narrated_drama_60s_v2"
+    "episode_template_id": "confrontation_50s_v2"
   },
   "audio": {
     "bgm_moods": [
@@ -106,12 +106,19 @@
   "body_rules": {
     "all_matter": "The entire body including arms, hands, legs and feet is made of {material}; no human skin anywhere. Real hair. Realistic adult proportions, never chibi, never baby-cartoon. Realistic eyes with a detailed iris. Fully dressed from shoulders to feet: a complete top, a complete bottom below the knee and shoes; no bare legs, no visible underwear."
   },
-  "default_material": "the character's own fruit or vegetable flesh with hyper-detailed natural texture, subsurface scattering, pores, seeds, juice reflections and small imperfections",
-  "default_body_rule": "human_body",
+  "default_material": "the character's own matter",
+  "default_body_rule": "all_matter",
   "universes": [
     "fruits",
-    "vegetables"
+    "vegetables",
+    "drinks_sodas",
+    "tech_gadgets",
+    "snacks_sweets",
+    "fast_food",
+    "bottles",
+    "household_objects",
+    "melting_materials",
+    "gross_funny"
   ],
-  "default_universe": "fruits",
-  "notes": "The spec attaches this aside to hook_style: insert_prop -- \"a sign, a contract, a phone screen that states the premise in ≤ 5 words\" -- describing what the diegetic prop should communicate; it is guidance for writing hook content, not prompt text itself."
+  "default_universe": "fruits"
 }

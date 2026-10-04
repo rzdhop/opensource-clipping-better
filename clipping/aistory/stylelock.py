@@ -139,8 +139,9 @@ def build_style_lock(template: dict, overrides: dict | None = None, *, now: str)
     lock = copy.deepcopy(template)
     name = lock.pop("name")
     lock.pop("notes", None)
-    # Plan 23 stage D4: the body-rule hooks stay on the template (``lock_style`` reads them there).
-    for key in ("body_rules", "default_material", "default_body_rule"):
+    # Plan 23 stages D4/D2: the body-rule and universe hooks stay on the template (``lock_style``
+    # and ``media_policy`` read them there).
+    for key in ("body_rules", "default_material", "default_body_rule", "universes", "default_universe"):
         lock.pop(key, None)
     lock.pop("$schema", None)
     template_id = lock.pop("template_id")
@@ -231,7 +232,16 @@ def all_matter_rules(template_id: str, *, material: str | None = None) -> str | 
     return text
 
 
-def lock_style(lock: dict, *, now: str, body_rule: str | None = None, material: str | None = None) -> dict:
+def universe_record(universe: dict) -> dict:
+    """The ``universe`` a lock records (plan 23 stage D2): the id, the label,
+    the species pool and the subject phrase of a ``templates/universes.json``
+    entry -- what the cast is made of, frozen with the style."""
+    return {"id": universe["id"], "label": copy.deepcopy(universe["label"]),
+            "species": list(universe["species"]), "subject_phrase": universe["subject_phrase"]}
+
+
+def lock_style(lock: dict, *, now: str, body_rule: str | None = None, material: str | None = None,
+               universe: dict | None = None) -> dict:
     """Return a copy of ``lock`` with ``locked_at`` set to ``now``.
 
     Refuses when already locked — locking twice would silently discard the
@@ -243,6 +253,10 @@ def lock_style(lock: dict, *, now: str, body_rule: str | None = None, material: 
     the rules change: a lock already frozen is never touched, and any other
     *body_rule* (None, ``"human_body"``) leaves them as the template wrote
     them. ``StyleLockError`` when the style has no such rule.
+
+    Plan 23 stage D2: with a *universe* (a ``templates/universes.json``
+    entry) the copy records it (``universe``, :func:`universe_record`); the
+    caller passes the universe's ``material_rule`` as *material*.
     """
     if lock.get("locked_at") is not None:
         raise StyleLockError("style is locked", ["style_lock is already locked"])
@@ -253,5 +267,7 @@ def lock_style(lock: dict, *, now: str, body_rule: str | None = None, material: 
             raise StyleLockError("body rule", [
                 f"the {lock['template_id']!r} style has no all_matter body rule (body_rules.all_matter)"])
         new_lock["character_design_rules"] = rules
+    if universe is not None:
+        new_lock["universe"] = universe_record(universe)
     new_lock["locked_at"] = now
     return new_lock

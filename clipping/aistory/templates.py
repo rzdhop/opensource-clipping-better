@@ -1,6 +1,6 @@
 """Loaders for the AI Story data templates: style templates (spec 5), the
 curated concept library (spec 7), the episode templates (spec 6.2) and the
-plot-archetype library (plan 20 stage 2).
+plot-archetype library (plan 20 stage 2) and the universes (plan 23 stage D2).
 
 Templates are data, not code, and are located relative to this file (no
 package-data mechanism exists in this repo). Every loader validates against
@@ -177,6 +177,30 @@ def _flatten_bilingual(value, language: str):
     if isinstance(value, list):
         return [_flatten_bilingual(v, language) for v in value]
     return value
+
+
+@functools.lru_cache(maxsize=1)
+def _load_universes_cached() -> tuple:
+    with open(TEMPLATES_DIR / "universes.json", encoding="utf-8") as fh:
+        data = json.load(fh)
+    errors = schemas.universes_errors(data)
+    if errors:
+        raise schemas.SchemaError("universes", errors)
+    return tuple(data["universes"])
+
+
+def load_universes() -> list:
+    """Every universe of templates/universes.json (plan 23 stage D2), in the
+    file's order, validated against ``schemas.UNIVERSES_SCHEMA``."""
+    return [copy.deepcopy(u) for u in _load_universes_cached()]
+
+
+def universe(universe_id: str) -> dict:
+    """One universe by id; ``KeyError`` for an id the file lacks."""
+    for entry in _load_universes_cached():
+        if entry["id"] == universe_id:
+            return copy.deepcopy(entry)
+    raise KeyError(universe_id)
 
 
 def localize_concept(concept: dict, language: str) -> dict:

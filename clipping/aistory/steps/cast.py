@@ -81,7 +81,7 @@ from __future__ import annotations
 import copy
 import time
 
-from .. import context, media_policy, prompting, prompts, refimages, schemas, series_memory, voices
+from .. import context, media_policy, prompting, prompts, refimages, schemas, series_memory, universes, voices
 from .. import store as store_mod
 from .. import uploads as uploads_mod
 from . import entities, episode_common, llm_call, pacing, voice_lines
@@ -398,7 +398,7 @@ def write_text(ctx, store, char_id, *, tools, note=None, regenerate=False, annou
     )
 
     def validate(reply):
-        errors = schemas.k1_errors(reply, character["name"])
+        errors = schemas.k1_errors(reply, character["name"]) or universes.brand_gate(story, reply)
         if errors:
             return errors
         trial = copy.deepcopy(character)
@@ -544,7 +544,7 @@ def write_look(ctx, store, char_id, *, tools, note=None, regenerate=False, annou
     names = [doc["name"] for doc in cast]
 
     def validate(reply):
-        errors = schemas.d2_errors(reply, names)
+        errors = schemas.d2_errors(reply, names) or universes.brand_gate(story, reply)
         if errors:
             return errors
         trial = copy.deepcopy(character)

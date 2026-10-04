@@ -83,7 +83,7 @@ def test_build_c1_golden_fr_fruit_drama():
         "- retention_mechanics: why someone comes back for episode 2\n"
         "- style_fit: the visual style that best fits this concept, one "
         "of anime, cartoon_flat, cinematic_real, claymation, family_3d, "
-        "fruit_drama, storybook_watercolor\n\n"
+        "fruit_drama, storybook_watercolor, viral_3d\n\n"
         "Never use real people, brands, studio names or copyrighted "
         "characters."
     )

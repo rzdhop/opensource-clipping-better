@@ -808,8 +808,13 @@ def approve_style(stories, story_id, *, now, by=USER_APPROVED) -> dict:
     # (a lock already frozen is never touched); any other rule leaves the template's own.
     story = load(stories, story_id)
     body = media_policy.body_rule(story, current["template_id"])
+    # Plan 23 stage D2: a story with a universe records it in the lock, and its material rule
+    # fills the all_matter rule's slot.
+    chosen = media_policy.universe(story, current["template_id"], explicit=True)
+    universe = templates.universe(chosen) if chosen else None
     try:
-        locked = stylelock.lock_style(current, now=now, body_rule=body)
+        locked = stylelock.lock_style(current, now=now, body_rule=body, universe=universe,
+                                      material=universe["material_rule"] if universe else None)
     except stylelock.StyleLockError as exc:
         if body == defaults.BODY_ALL_MATTER:
             raise WorkflowError(
@@ -872,6 +877,8 @@ def patch_story(stories, story_id, fields, *, now) -> dict:
             # The store's own check, on the current profile with the sent keys over it.
             values["generation_profile"] = story_store._merge_generation_profile(
                 {**story["generation_profile"], **partial})
+            # Plan 23 stage D2: a universe the story's style accepts.
+            story_store.check_universe(values["generation_profile"], story.get("style_template_id"))
         except ValueError as exc:
             raise WorkflowError(INVALID, str(exc)) from None
         _follow_pipeline_switch(stories, story, values)

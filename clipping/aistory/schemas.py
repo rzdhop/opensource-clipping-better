@@ -319,6 +319,12 @@ STYLE_TEMPLATE_SCHEMA = {
         },
         "default_material": _NON_EMPTY_STRING,
         "default_body_rule": {"type": "string", "enum": list(defaults.BODY_RULES)},
+        # Optional (plan 23 stage D2): the universes (templates/universes.json ids) a story of this
+        # style may take, and the one a story with no ``generation_profile.universe`` gets. Like the
+        # body-rule hooks, neither reaches a lock (``stylelock.build_style_lock`` drops them).
+        "universes": {"type": "array", "items": {"type": "string", "enum": list(defaults.UNIVERSES)},
+                      "minItems": 1},
+        "default_universe": {"type": "string", "enum": list(defaults.UNIVERSES)},
     },
     "required": [
         "$schema", "template_id", "version", "name", "rendering", "camera", "lighting",
@@ -390,7 +396,12 @@ def style_template_errors(tpl) -> list:
     errors = validate(tpl, STYLE_TEMPLATE_SCHEMA)
     if errors:
         return errors
-    return _style_prose_extra_errors(tpl)
+    errors = _style_prose_extra_errors(tpl)
+    # Plan 23 stage D2: the default universe is one the style accepts.
+    default = tpl.get("default_universe")
+    if default is not None and default not in tpl.get("universes", ()):
+        errors.append(f"$.default_universe: {default!r} is not in this style's universes")
+    return errors
 
 
 # --------------------------------------------------------------- style_lock_v1 (spec 2.2)
@@ -427,6 +438,19 @@ STYLE_LOCK_SCHEMA = {
         "audio": _AUDIO_SCHEMA,
         # Dotted override path -> value, as actually applied (stylelock.OVERRIDABLE).
         "overrides": {"type": "object"},
+        # Optional (plan 23 stage D2): what the story's cast is made of, copied from
+        # templates/universes.json when the style is approved (``stylelock.lock_style``).
+        "universe": {
+            "type": "object",
+            "properties": {
+                "id": {"type": "string", "pattern": _ID_PATTERN},
+                "label": bilingual(),
+                "species": {"type": "array", "items": _NON_EMPTY_STRING, "minItems": 1},
+                "subject_phrase": _NON_EMPTY_STRING,
+            },
+            "required": ["id", "label", "species", "subject_phrase"],
+            "additionalProperties": False,
+        },
         # None until stylelock.lock_style() freezes the document.
         "locked_at": {"type": ["string", "null"]},
         "updated_at": _NON_EMPTY_STRING,
@@ -454,6 +478,122 @@ def style_lock_errors(lock) -> list:
     if errors:
         return errors
     return _style_prose_extra_errors(lock)
+
+
+# ------------------------------------------------------- universes_v1 (plan 23 stage D2)
+#
+# templates/universes.json: what a story's cast can be made of. A universe is
+# the matter of the cast (a fruit, a drink can, a gadget...), not a rendering:
+# the look stays the style's. ``species`` are generic names -- never a brand
+# (:data:`BRAND_DENYLIST`); ``material_rule`` fills the ``{material}`` slot of a
+# style's ``body_rules.all_matter``; ``subject_phrase`` says what the head is in
+# a prompt; ``audience_note`` is shown under the wizard's select.
+
+UNIVERSE_SCHEMA_NAME = "universes_v1"
+
+_UNIVERSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "id": {"type": "string", "pattern": _ID_PATTERN},
+        "label": bilingual(),
+        "species": {"type": "array", "items": _NON_EMPTY_STRING, "minItems": 1},
+        "material_rule": _NON_EMPTY_STRING,
+        "subject_phrase": _NON_EMPTY_STRING,
+        "audience_note": bilingual(),
+    },
+    "required": ["id", "label", "species", "material_rule", "subject_phrase"],
+    "additionalProperties": False,
+}
+
+UNIVERSES_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "$schema": {"type": "string", "const": UNIVERSE_SCHEMA_NAME},
+        "universes": {"type": "array", "items": _UNIVERSE_SCHEMA, "minItems": 1},
+    },
+    "required": ["$schema", "universes"],
+    "additionalProperties": False,
+}
+
+# Plan 23 stage D2: the brand names no generated text may carry once a story has a
+# universe (every one of them is a real product a universe's generic species stands
+# in for); checked in the C1v2, K1, D2, P1, R1, R1v2 and D3 validators
+# (:func:`brand_errors`), a told-why retry (DEC-259).
+BRAND_DENYLIST = (
+    "coca", "pepsi", "fanta", "sprite", "dr pepper", "mountain dew", "red bull", "monster", "gatorade",
+    "starbucks", "iphone", "samsung", "airpods", "playstation", "nintendo", "xbox", "oreo", "nutella",
+    "haribo", "m&m", "kinder", "lego",
+)
+# Ordinary English words that are also a brand: flagged only beside a word that
+# makes the brand reading (a monster in the story is not a drink).
+_BRAND_CONTEXT = {
+    "monster": ("energy", "drink", "can", "ultra"),
+    "sprite": ("soda", "can", "bottle", "drink", "zero", "cola"),
+}
+
+
+def _fold_brand(text) -> str:
+    folded = unicodedata.normalize("NFKD", str(text).lower())
+    return "".join(ch for ch in folded if not unicodedata.combining(ch))
+
+
+def _brand_pattern(brand) -> re.Pattern:
+    body = r"[\s\-]+".join(re.escape(part) for part in brand.split(" "))
+    after = ""
+    if brand in _BRAND_CONTEXT:
+        after = r"[\s\-]+(?:" + "|".join(_BRAND_CONTEXT[brand]) + ")"
+    return re.compile(r"(?<![a-z0-9])" + body + (after if after else "") + r"(?![a-z0-9])")
+
+
+_BRAND_PATTERNS = tuple((brand, _brand_pattern(brand)) for brand in BRAND_DENYLIST)
+
+
+def _strings_of(value):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from _strings_of(item)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            yield from _strings_of(item)
+
+
+def brand_hits(value) -> list:
+    """The :data:`BRAND_DENYLIST` names found (whole words, accent- and
+    case-folded) in every string of *value* (a string, or a reply's nested
+    dicts and lists), in the list's order, each once."""
+    text = "\n".join(_fold_brand(item) for item in _strings_of(value))
+    return [brand for brand, pattern in _BRAND_PATTERNS if pattern.search(text)]
+
+
+def brand_errors(value, path="$") -> list:
+    """One told-why sentence per brand *value* names: the reply is asked again
+    with the brand replaced by what it is (DEC-259)."""
+    return [f"{path}: names the brand {brand!r}; write the generic thing instead (no brand names, "
+            "no trademarked products)" for brand in brand_hits(value)]
+
+
+def universes_errors(doc) -> list:
+    """``validate()`` against ``UNIVERSES_SCHEMA``, plus: ids unique, a
+    universe's species unique and brand-free."""
+    errors = validate(doc, UNIVERSES_SCHEMA)
+    if errors:
+        return errors
+    seen = set()
+    for i, universe in enumerate(doc["universes"]):
+        path = f"$.universes[{i}]"
+        if universe["id"] in seen:
+            errors.append(f"{path}.id: {universe['id']!r} is used twice")
+        seen.add(universe["id"])
+        species = universe["species"]
+        if len(set(map(_fold_brand, species))) != len(species):
+            errors.append(f"{path}.species: a species is listed twice")
+        for brand in brand_hits(species):
+            errors.append(f"{path}.species: names the brand {brand!r}; species are generic")
+        if brand_hits(universe["material_rule"]) or brand_hits(universe["subject_phrase"]):
+            errors.append(f"{path}: the material rule and the subject phrase name no brand")
+    return errors
 
 
 # ------------------------------------------------------------- concept_v1 (spec 7)
@@ -629,6 +769,9 @@ _GENERATION_PROFILE_SCHEMA = {
         # "all_matter" draws the whole body in the character's own matter
         # (defaults.BODY_RULES).
         "body_rule": {"type": "string", "enum": list(defaults.BODY_RULES)},
+        # Optional (plan 23 stage D2): what the cast is made of, an id of
+        # templates/universes.json; absent is the style's default_universe, else none.
+        "universe": {"type": "string", "enum": list(defaults.UNIVERSES)},
     },
     "required": ["tier", "route", "consistency_mode", "budget_profile"],
     "additionalProperties": False,
@@ -821,18 +964,24 @@ def _llm_obj(properties, required=None) -> dict:
     }
 
 
-def c1_schema(style_ids) -> dict:
+def c1_schema(style_ids, *, species=False) -> dict:
     """The C1 output schema (spec 4.2, row C1): ``{"concepts": [...]}`` with
     ``C1_CONCEPTS_PER_CALL`` concept(s) -- the envelope a card is made from.
 
     ``style_fit`` is constrained to *style_ids* (the shipped style templates),
     passed in by the caller so this module needs no import of ``templates``.
+
+    Plan 23 stage D2: with *species* (a story that has a universe) each cast
+    member also names its ``species``; without it the schema is what it always was.
     """
-    cast_member = _llm_obj({
+    member = {
         "name": {"type": "string", "description": "the character's name"},
         "role": {"type": "string", "enum": list(_CAST_SKETCH_ROLES)},
         "one_line": {"type": "string", "description": "one sentence describing this character"},
-    })
+    }
+    if species:
+        member["species"] = {"type": "string", "description": "what this character is, from the species pool"}
+    cast_member = _llm_obj(member)
     concept = _llm_obj({
         "title": {"type": "string", "description": "at most 8 words"},
         "logline": {"type": "string", "description": "one sentence, at most 30 words"},
@@ -925,9 +1074,14 @@ def _check_chars(errors, path, value, max_chars) -> None:
         errors.append(f"{path}: {len(value)} characters, expected at most {max_chars}")
 
 
-def c1_errors(doc, style_ids) -> list:
+def c1_errors(doc, style_ids, *, species=False) -> list:
     """Post-validation for a C1 response, beyond what ``c1_schema`` can express."""
-    schema = c1_schema(style_ids)
+    schema = c1_schema(style_ids, species=species)
+    if species:
+        # The model is asked for a species (strict mode wants every key); a reply without one is
+        # still a card, its species is optional (``_GENERATED_CAST_MEMBER_SCHEMA``).
+        member = schema["properties"]["concepts"]["items"]["properties"]["cast_sketch"]["items"]
+        member["required"] = [key for key in member["required"] if key != "species"]
     errors = validate(doc, schema)
     if errors:
         return errors
@@ -954,6 +1108,8 @@ def c1_errors(doc, style_ids) -> list:
             member_path = f"{path}.cast_sketch[{j}]"
             _check_text(errors, f"{member_path}.name", member["name"])
             _check_text(errors, f"{member_path}.one_line", member["one_line"], max_words=25)
+            if species and "species" in member:
+                _check_text(errors, f"{member_path}.species", member["species"], max_words=4)
 
         style_fit = concept["style_fit"]
         if style_fit not in allowed_styles:
@@ -1063,8 +1219,22 @@ _GENERATED_CAST_MEMBER_SCHEMA = {
         "name": _NON_EMPTY_STRING,
         "role": {"type": "string", "enum": list(_CAST_SKETCH_ROLES)},
         "one_line": _NON_EMPTY_STRING,
+        # Optional (plan 23 stage D2): what this character is, in a story with a universe.
+        "species": _NON_EMPTY_STRING,
     },
     "required": ["name", "role", "one_line"],
+    "additionalProperties": False,
+}
+
+# Plan 23 stage D2: a card of a story with a universe records which one and the
+# species its lead was assigned (``universes.assign_species``); optional, absent on every other card.
+_CARD_UNIVERSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "id": {"type": "string", "pattern": _ID_PATTERN},
+        "lead_species": _NON_EMPTY_STRING,
+    },
+    "required": ["id", "lead_species"],
     "additionalProperties": False,
 }
 
@@ -1102,6 +1272,7 @@ STORY_CONCEPT_CARD_SCHEMA = {
         # here, so retiring a style later cannot invalidate an old file.
         "style_fit": {"type": "string", "pattern": _ID_PATTERN},
         "brief_fit": _BRIEF_FIT_SCHEMA,
+        "universe": _CARD_UNIVERSE_SCHEMA,
     },
     "required": [
         "concept_id", "source", "prompt_version", "created_at", "language", "title",

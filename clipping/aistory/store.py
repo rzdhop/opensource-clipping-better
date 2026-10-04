@@ -316,9 +316,11 @@ _PROFILE_CHOICES = {
     # the style's own body rules).
     "sheet_mode": defaults.SHEET_MODES,
     "body_rule": defaults.BODY_RULES,
+    # Plan 23 stage D2: what the cast is made of (a universe of templates/universes.json).
+    "universe": defaults.UNIVERSES,
 }
 # Plan 22: the optional keys a partial profile may clear by sending null.
-_PROFILE_CLEARABLE = ("speech_model", "images", "sheet_mode", "body_rule")
+_PROFILE_CLEARABLE = ("speech_model", "images", "sheet_mode", "body_rule", "universe")
 
 _INDEX_ENTRY_SCHEMA = {
     "type": "object",
@@ -591,6 +593,27 @@ def _merge_generation_profile(partial) -> dict:
     return profile
 
 
+def check_universe(profile, style_template_id) -> None:
+    """``ValueError`` naming both when *profile*'s ``universe`` is not one the
+    style *style_template_id* lists (plan 23 stage D2: ``universes`` of its
+    template; a style that lists none, or no style yet, accepts none). No
+    ``universe`` in the profile: nothing to check."""
+    chosen = (profile or {}).get("universe")
+    if chosen is None:
+        return
+    allowed = []
+    if style_template_id:
+        try:
+            allowed = list(templates.load_style(style_template_id).get("universes") or [])
+        except KeyError:
+            allowed = []
+    if chosen not in allowed:
+        shown = ", ".join(allowed) if allowed else "none"
+        raise ValueError(
+            f"universe {chosen!r} does not fit the style {style_template_id or '(no style chosen)'!r}, "
+            f"which accepts: {shown}; pick a universe of that list or another style")
+
+
 def _index_entry(doc: dict) -> dict:
     return {key: doc[key] for key in INDEX_FIELDS}
 
@@ -810,6 +833,8 @@ class StoryStore:
                 f"unknown episode template {episode_template_id!r} "
                 f"(shipped: {', '.join(defaults.EPISODE_TEMPLATE_IDS)})")
         profile = _merge_generation_profile(generation_profile)
+        # Plan 23 stage D2: the universe is one the style accepts.
+        check_universe(profile, style_template_id)
         # Plan 22 stage 2 (DEC-274): every story created from now on writes
         # on the brief-faithful v3 prompts (the concepts/bible steps still
         # gate on a non-empty seed_text too) -- unless the caller named a

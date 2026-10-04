@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { createStory, fetchNewStoryProfile, fetchStyles } from '../../api'
+import { createStory, fetchNewStoryProfile, fetchStyles, fetchUniverses } from '../../api'
 import { Button } from '../../ui'
 import {
   EPISODE_TEMPLATES, pipelineDefaultTemplate, profileSuggestedTemplate, styleSuggestedTemplate,
@@ -68,6 +68,9 @@ function CreateStoryForm() {
   // Plan 23 stage D4: the characters' sheets and bodies; the defaults send nothing.
   const [sheetMode, setSheetMode] = useState('three_sheet')
   const [bodyRule, setBodyRule] = useState('')
+  // Plan 23 stage D2: what the cast is made of; '' sends nothing (the style's default universe).
+  const [universeChoice, setUniverseChoice] = useState('')
+  const [universeCatalogue, setUniverseCatalogue] = useState({ universes: [], by_style: {} })
   // The episode format the user picked; '' until they pick one, so the
   // select follows the style's suggestion, else the pipeline's default.
   const [episodeTemplateChoice, setEpisodeTemplateChoice] = useState('')
@@ -84,6 +87,7 @@ function CreateStoryForm() {
   useEffect(() => {
     let cancelled = false
     fetchStyles().then((data) => { if (!cancelled) setStyles(data.styles || []) }).catch(() => {})
+    fetchUniverses().then((data) => { if (!cancelled) setUniverseCatalogue(data) }).catch(() => {})
     fetchNewStoryProfile().then((data) => {
       if (cancelled) return
       setOffer(data)
@@ -135,6 +139,21 @@ function CreateStoryForm() {
   const suggestedTemplate = profileSuggestion || styleSuggestedTemplate(chosenStyle, pipeline)
   const episodeTemplateId = episodeTemplateChoice || suggestedTemplate || pipelineDefaultTemplate(pipeline)
   const episodeFormat = EPISODE_TEMPLATES.find((tpl) => tpl.id === episodeTemplateId)
+  // Plan 23 stage D2: the Universe select lists what the chosen style takes (hidden when it lists none);
+  // a pick the style does not list is dropped, the style's default shows instead.
+  const styleUniverses = universeCatalogue.by_style[styleTemplateId]
+  const universeOptions = styleUniverses
+    ? styleUniverses.universes
+      .map((id) => universeCatalogue.universes.find((universe) => universe.id === id))
+      .filter(Boolean)
+    : []
+  const universeId = universeOptions.some((universe) => universe.id === universeChoice) ? universeChoice : ''
+  const shownUniverse = universeId || (styleUniverses ? styleUniverses.default : '') || ''
+  const shownUniverseEntry = universeOptions.find((universe) => universe.id === shownUniverse)
+  const universeLabel = (universe) => universe.label[language || 'en']
+  // The select always shows a universe (the pick, else the style's default), so the story is created with
+  // it: its profile is sent as the form shows it (the form starts from the server's own offer).
+  useEffect(() => { if (shownUniverse) setProfileChosen(true) }, [shownUniverse])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -167,6 +186,7 @@ function CreateStoryForm() {
           ...(manualClips && imagesOwn ? { images: 'manual' } : {}),
           ...(pipeline === 'v2' && sheetMode !== 'three_sheet' ? { sheet_mode: sheetMode } : {}),
           ...(bodyRule ? { body_rule: bodyRule } : {}),
+          ...(shownUniverse ? { universe: shownUniverse } : {}),
         } : null,
       }
       const story = await createStory(createFields)
@@ -273,6 +293,22 @@ function CreateStoryForm() {
               ))}
             </div>
           </div>
+
+          {universeOptions.length > 0 && (
+            <div className="form-group">
+              <label className="form-label" htmlFor="new-story-universe">Universe</label>
+              <select id="new-story-universe" className="form-select" value={shownUniverse}
+                onChange={(e) => choose(setUniverseChoice)(e.target.value)}>
+                {universeOptions.map((universe) => (
+                  <option key={universe.id} value={universe.id}>{universeLabel(universe)}</option>
+                ))}
+              </select>
+              <p className="form-hint">What the characters are made of: each concept leads with another species of it.</p>
+              {shownUniverseEntry && shownUniverseEntry.audience_note && (
+                <p className="form-hint">{shownUniverseEntry.audience_note[language || 'en']}</p>
+              )}
+            </div>
+          )}
 
           <div className="form-group">
             <label className="form-label" htmlFor="new-story-episode-format">Episode format</label>

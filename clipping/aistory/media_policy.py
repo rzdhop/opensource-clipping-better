@@ -158,6 +158,36 @@ def body_rule(story, style_id=None) -> str:
     return defaults.BODY_HUMAN
 
 
+def universe(story, style_id=None, *, explicit=False):
+    """What *story*'s cast is made of (plan 23 stage D2,
+    ``generation_profile.universe``): the id of a ``templates/universes.json``
+    entry -- its own choice, else the default of the style *style_id* (else
+    the story's ``style_template_id``), the template's ``default_universe``
+    -- else None: no universe.
+
+    With *explicit* only the story's own choice counts. Everything that
+    changes what is written or frozen -- the concepts' species block, the
+    brand check, the universe the style lock records -- reads it that way, so
+    a story that never chose a universe (every story made before this stage,
+    Fruit Drama's included) is written and locked byte for byte as it always
+    was (RC-W2); the style's default is what the new-story form pre-selects
+    and the profile card shows."""
+    chosen = ((story or {}).get("generation_profile") or {}).get("universe")
+    if chosen in defaults.UNIVERSES:
+        return chosen
+    if explicit:
+        return None
+    style_id = style_id or (story or {}).get("style_template_id")
+    if style_id:
+        try:
+            fallback = templates.load_style(style_id).get("default_universe")
+        except KeyError:
+            fallback = None
+        if fallback in defaults.UNIVERSES:
+            return fallback
+    return None
+
+
 def is_manual_link(label) -> bool:
     """Whether the link *label* is the human's own upload (``manual/upload``)."""
     return isinstance(label, str) and gen.is_manual(label)
