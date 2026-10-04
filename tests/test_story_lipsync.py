@@ -563,8 +563,9 @@ def test_the_quality_preset_lipsyncs_a_fully_animated_v2_story_unless_the_story_
 
     m = _mods()
     profiles = budget.load_profiles()["profiles"]
+    # Re-pinned on purpose (plan 22, stage 4): the native-speech profile never lipsyncs.
     assert {name: profile.get("lipsync") for name, profile in profiles.items()} == {
-        "free": "none", "one_dollar": "none", "quality": "kling"}
+        "free": "none", "one_dollar": "none", "quality": "kling", "native_speech": "none"}
     story_id = oc._v2_unmade(store, tmp_path)
     story = store.get(story_id)
     assert m.policy.fully_animated(story) and m.policy.lipsync(story)
