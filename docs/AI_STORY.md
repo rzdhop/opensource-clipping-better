@@ -767,7 +767,14 @@ the shots:
   as tags, never as names. A scene whose call fails is named and left as it
   was; **"Plan remaining with T1"** (the button relabels itself once a board
   exists) finishes only the scenes still missing, stale, or built fast — not
-  the whole board again.
+  the whole board again. Every scene it does not plan again keeps its shots
+  exactly as they are, with their keyframes, clips, locks, notes and
+  verdicts: re-planning three scenes never throws away the images and clips
+  already bought for the other ones. A scene that is planned again gets new
+  shots with new numbers (the next ones free — a number is never given out
+  twice), so a shot's number is its name, not its place in the episode: the
+  filmstrip and the render follow the script's order. Building the fast
+  board again plans every scene again.
 
 Shots are grouped by scene. Each shot's card has editable **framing** and
 **camera motion** (closed-list selects — a motion the style fixes for that
@@ -778,7 +785,9 @@ editing it shows the raw tag text with a hint listing the scene's own tags),
 a **prompt accordion** (the resolved image and negative prompts, plus an
 editable prompt override), **reference thumbnails** (the character/place/
 prop images the shot would send), and its own **regenerate** — T1 re-plans
-just that one shot, the rest of the scene held fixed, with an optional note.
+just that one shot, the rest of the scene held fixed, with an optional note
+(the shot it makes is a new one, with a new number; every other shot keeps
+its own and its image).
 Between two shots of the same scene the transition is a fixed `cut`; at a
 scene boundary it's an editable select (`cut`, `dissolve`, `fadeblack`,
 `fadewhite`, `wipeleft`, `wiperight`, `slideup`). A shot made under

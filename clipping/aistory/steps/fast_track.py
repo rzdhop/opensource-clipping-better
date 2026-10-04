@@ -579,7 +579,8 @@ def assets_current(ec, script, board, doc) -> bool:
 def fast_board_current(ec, board, script) -> bool:
     """Whether *board* is already the fast plan of *script*: it covers it,
     every scene planned fast from its current revision, no prompt outdated.
-    Rebuilding it would change nothing but its revision."""
+    Rebuilding it would change nothing but its revision -- and its shots,
+    every scene planned again (new ids, no images: walk follow-up F5)."""
     if board is None or not board["shots"] or not episode_common.covers(board, script):
         return False
     if storyboard_step.stale_scenes(board, script):

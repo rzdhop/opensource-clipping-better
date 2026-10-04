@@ -1051,6 +1051,120 @@ def test_build_storyboard_previous_bumps_rev_and_keeps_created_at():
     assert second["updated_at"] == later
 
 
+# Walk follow-up F5: sha256 of json.dumps([doc, notes], ensure_ascii=False,
+# indent=2) for the two builds below, as the code before stable shot ids
+# (main 5dfc598) made them -- a storyboard built with no previous board is
+# byte-identical to what it always was (RC-M3).
+_NO_PREVIOUS_GOLDEN = {
+    "fast": "ade94e03d1b84a2a30edaa585ba95ea0bd895cdc8df96f6493e73722dd40f28e",
+    "v2": "1b60b21c5f5a6e9ce62580e85bfb90f61585a96c5649d06dfb0167722d5c74fc",
+}
+
+
+def _golden_sha(doc, notes) -> str:
+    import hashlib
+    import json
+
+    return hashlib.sha256(json.dumps([doc, notes], ensure_ascii=False, indent=2).encode("utf-8")).hexdigest()
+
+
+def test_a_storyboard_built_with_no_previous_board_is_byte_identical_to_before_stable_ids():
+    import test_story_prompt_layers as layers
+
+    plans, sources = _fast_plans_for_script(SCRIPT, FRUIT_DRAMA)
+    doc, notes = shots.build_storyboard(SCRIPT, plans, sources, entities=ENTITIES, style_lock=FRUIT_DRAMA,
+                                        template=TEMPLATE, language=EN, consistency_mode="references", now=NOW)
+    assert [shot["shot_id"] for shot in doc["shots"]] == [f"sh{n:02d}" for n in range(1, len(doc["shots"]) + 1)]
+    assert _golden_sha(doc, notes) == _NO_PREVIOUS_GOLDEN["fast"]
+
+    template_v2 = templates.load_episode_template("serial_60s_v2")
+    script, v2_plans = _v2_script(), _v2_plans()
+    doc, notes = shots.build_storyboard(script, v2_plans, {sid: "t1" for sid in v2_plans}, entities=ENTITIES,
+                                        style_lock=FRUIT_DRAMA, template=template_v2, language=EN,
+                                        consistency_mode="references", now=NOW, v2=True,
+                                        shots_per_scene=template_v2["shots_per_scene"], budgets=layers.WIDE)
+    assert _golden_sha(doc, notes) == _NO_PREVIOUS_GOLDEN["v2"]
+
+
+def _made(doc):
+    """*doc* with every shot carrying a made image's record and one user edit."""
+    doc = copy.deepcopy(doc)
+    for shot in doc["shots"]:
+        shot["assets"] = dict(shot["assets"], image=f"assets/shots/shot_{shot['shot_id'][2:]}.png", seed=7,
+                              provider="fake/image", approved=True, locked=True)
+    doc["shots"][-1]["keep_still"] = True
+    return doc
+
+
+def test_build_storyboard_keeps_the_shots_it_is_told_to_and_gives_new_ones_never_used_ids():
+    """Walk follow-up F5: *keep* carries a previous shot whole (id, assets,
+    user flags; its derived fields resolved again, the same); every other
+    shot gets the next number after the highest of *previous* and
+    *reserved*, in timeline order; ``order`` is the position."""
+    plans, sources = _fast_plans_for_script(SCRIPT, FRUIT_DRAMA)
+    kwargs = dict(entities=ENTITIES, style_lock=FRUIT_DRAMA, template=TEMPLATE, language=EN,
+                  consistency_mode="references")
+    first, _notes = shots.build_storyboard(SCRIPT, plans, sources, now=NOW, **kwargs)
+    previous = _made(first)
+    by_scene = {}
+    for shot in previous["shots"]:
+        by_scene.setdefault(shot["scene_id"], []).append(shot["shot_id"])
+    replanned = SCRIPT["scenes"][1]["scene_id"]
+    keep = {sid: ids for sid, ids in by_scene.items() if sid != replanned}
+    top = len(previous["shots"])
+
+    doc, _notes = shots.build_storyboard(SCRIPT, plans, sources, now=NOW, previous=previous, keep=keep,
+                                         reserved=[f"sh{top + 2:02d}"], **kwargs)
+
+    new_ids = [f"sh{top + 3 + n:02d}" for n in range(len(by_scene[replanned]))]
+    expected = [new_ids.pop(0) if shot["scene_id"] == replanned else shot["shot_id"] for shot in previous["shots"]]
+    assert [shot["shot_id"] for shot in doc["shots"]] == expected
+    assert [shot["order"] for shot in doc["shots"]] == list(range(1, len(expected) + 1))
+    old = {shot["shot_id"]: shot for shot in previous["shots"]}
+    for shot in doc["shots"]:
+        if shot["scene_id"] == replanned:
+            assert shot["assets"]["image"] is None and shot["keep_still"] is False
+        else:
+            assert shot == old[shot["shot_id"]]
+    assert doc["rev"] == previous["rev"] + 1
+
+    # Nothing kept: every shot is new, numbered past the previous board.
+    fresh, _notes = shots.build_storyboard(SCRIPT, plans, sources, now=NOW, previous=previous, **kwargs)
+    assert [shot["shot_id"] for shot in fresh["shots"]] == [f"sh{top + n:02d}" for n in range(1, top + 1)]
+    assert all(shot["assets"]["image"] is None for shot in fresh["shots"])
+
+
+def test_rule_pass_moves_a_planned_shot_rather_than_a_kept_one():
+    """Walk follow-up F5: a repeated framing across a scene boundary moves
+    the later shot -- unless it is kept from the previous storyboard (its
+    keyframe was drawn for that framing): then the earlier one moves. With
+    nothing pinned, the rules are what they always were."""
+    plans, _sources = _fast_plans_for_script(SCRIPT, FRUIT_DRAMA)
+    first, second = SCRIPT["scenes"][0], SCRIPT["scenes"][1]
+    plans[first["scene_id"]][-1].update(framing="medium_single")
+    plans[second["scene_id"]][0].update(framing="medium_single")
+    ordered = [(first, plans[first["scene_id"]]), (second, plans[second["scene_id"]])]
+
+    moved, _notes = shots.rule_pass(ordered, FRUIT_DRAMA)
+    assert moved[0][1][-1]["framing"] == "medium_single" and moved[1][1][0]["framing"] == "close_up"
+    assert shots.rule_pass(ordered, FRUIT_DRAMA, pinned=frozenset()) == (moved, _notes)
+
+    pinned, _notes = shots.rule_pass(ordered, FRUIT_DRAMA, pinned=frozenset({(second["scene_id"], 0)}))
+    assert pinned[1][1][0]["framing"] == "medium_single" and pinned[0][1][-1]["framing"] != "medium_single"
+
+
+def test_shot_ids_phrase_keeps_the_old_words_for_an_old_board():
+    def board(*ids):
+        return [{"shot_id": shot_id} for shot_id in ids]
+
+    assert shots.shot_ids_phrase(board(*[f"sh{n:02d}" for n in range(1, 16)])) == "sh01 to sh15"
+    assert shots.shot_ids_phrase(board("sh01", "sh02", "sh03", "sh16", "sh17", "sh06", "sh07", "sh08", "sh09")) == (
+        "sh01 to sh03, sh16, sh17, sh06 to sh09")
+    assert shots.shot_id_for(7) == "sh07" and shots.shot_id_for(120) == "sh120" and shots.shot_number("sh120") == 120
+    with pytest.raises(ValueError):
+        shots.shot_id_for(shots.SHOT_NUMBER_MAX + 1)
+
+
 def test_build_storyboard_raises_valueerror_on_an_invalid_result():
     plans, sources = _fast_plans_for_script(SCRIPT, FRUIT_DRAMA)
     # An out-of-range shots_per_scene on the style makes storyboard_context_errors fail.

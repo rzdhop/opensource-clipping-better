@@ -30,6 +30,7 @@ Stdlib only (DEC-012).
 
 from __future__ import annotations
 
+import copy
 import re
 
 from . import names as names_mod
@@ -1718,8 +1719,17 @@ def _is_protected(shot_index, plan) -> bool:
     return plan["framing"] == "insert_prop" or (shot_index == 0 and plan["framing"] == "wide_establishing")
 
 
-def _apply_no_repeat_framing(plans_by_scene, notes) -> bool:
-    """One pass of rule (a); returns whether anything changed."""
+def _movable(shot_index, plan) -> bool:
+    """Whether rule (a) may change *plan*'s framing at all."""
+    return not _is_protected(shot_index, plan) and plan["framing"] in _FRAMING_SUBSTITUTES
+
+
+def _apply_no_repeat_framing(plans_by_scene, notes, pinned=frozenset()) -> bool:
+    """One pass of rule (a); returns whether anything changed. *pinned*
+    (``{(scene_id, shot_index)}``: a shot kept from the previous storyboard,
+    its keyframe and clip with it) moves only when the other shot of the
+    pair cannot: with nothing pinned, the later shot moves, else the earlier
+    one, as always."""
     items = _flatten(plans_by_scene)
     changed = False
     for k in range(1, len(items)):
@@ -1727,7 +1737,14 @@ def _apply_no_repeat_framing(plans_by_scene, notes) -> bool:
         _psi, ppi, pscene, pplan = items[k - 1]
         if plan["framing"] != pplan["framing"]:
             continue
-        if not _is_protected(pi, plan) and plan["framing"] in _FRAMING_SUBSTITUTES:
+        later = _movable(pi, plan)
+        earlier = _movable(ppi, pplan)
+        if pinned and later and earlier:
+            later_pinned = (scene["scene_id"], pi) in pinned
+            earlier_pinned = (pscene["scene_id"], ppi) in pinned
+            if later_pinned and not earlier_pinned:
+                later = False
+        if later:
             new_framing = _FRAMING_SUBSTITUTES[plan["framing"]]
             notes.append(
                 f"rule_pass: scene {scene['scene_id']} shot {pi + 1}: framing changed "
@@ -1735,7 +1752,7 @@ def _apply_no_repeat_framing(plans_by_scene, notes) -> bool:
             )
             plan["framing"] = new_framing
             changed = True
-        elif not _is_protected(ppi, pplan) and pplan["framing"] in _FRAMING_SUBSTITUTES:
+        elif earlier:
             new_framing = _FRAMING_SUBSTITUTES[pplan["framing"]]
             notes.append(
                 f"rule_pass: scene {pscene['scene_id']} shot {ppi + 1}: framing changed "
@@ -1756,10 +1773,13 @@ def _apply_no_repeat_framing(plans_by_scene, notes) -> bool:
     return changed
 
 
-def _apply_close_up_window(plans_by_scene, notes) -> None:
+def _apply_close_up_window(plans_by_scene, notes, pinned=frozenset()) -> None:
     """Rule (b): every window of 3 consecutive scenes has a close_up or
     extreme_close_up somewhere in it; otherwise the last non-insert_prop shot
-    of the window's third scene becomes one."""
+    of the window's third scene becomes one. With *pinned* shots
+    (:func:`_apply_no_repeat_framing`'s): the last such shot not pinned, of
+    the third scene, else the second, else the first; every one pinned, the
+    third scene's as always."""
     n = len(plans_by_scene)
     for start in range(0, max(0, n - 2)):
         window = plans_by_scene[start:start + 3]
@@ -1770,14 +1790,20 @@ def _apply_close_up_window(plans_by_scene, notes) -> None:
         candidates = [p for p in third_plans if p["framing"] != "insert_prop"]
         if not candidates:
             continue
-        target = candidates[-1]
+        target, which = candidates[-1], "its last shot"
+        if pinned:
+            free = [(scene, plan) for scene, plans in reversed(window)
+                    for index, plan in reversed(list(enumerate(plans)))
+                    if plan["framing"] != "insert_prop" and (scene["scene_id"], index) not in pinned]
+            if free and free[0][1] is not target:
+                (third_scene, target), which = free[0], "a shot not kept from the previous storyboard"
         target["framing"] = "close_up"
         has_char_tag = any(t.startswith("@") for t in target["subjects"])
         if not has_char_tag and third_scene["characters"]:
             target["subjects"] = list(target["subjects"]) + [f"@{third_scene['characters'][0]}"]
         notes.append(
             f"rule_pass: scene {third_scene['scene_id']}: no close_up/extreme_close_up in this 3-scene "
-            "window, its last shot was forced to close_up"
+            f"window, {which} was forced to close_up"
         )
 
 
@@ -1796,28 +1822,32 @@ def _apply_motion_precedence(plans_by_scene, style_lock, notes, *, v2=False) -> 
                 plan["camera_motion"] = motion["type"]
 
 
-def rule_pass(plans_by_scene, style_lock, *, v2=False) -> tuple:
+def rule_pass(plans_by_scene, style_lock, *, v2=False, pinned=frozenset()) -> tuple:
     """The cross-scene rules applied to every scene's shot plans, on both the
     T1 and the fast path (spec 5): (a) no two consecutive shots in the whole
     episode share a framing (never changing an insert_prop shot or a scene's
     own opening wide_establishing -- the earlier shot moves instead); (b)
     every window of 3 consecutive scenes has a close_up or extreme_close_up,
     re-checking (a) afterwards; (c) each shot's camera motion follows
-    :func:`motion_for`'s precedence (*v2*: its own). Returns
-    ``(plans_by_scene, notes)``, a new structure -- *plans_by_scene* itself
-    and its plan dicts are not mutated."""
+    :func:`motion_for`'s precedence (*v2*: its own). *pinned*
+    (``{(scene_id, shot_index)}``): the shots a re-plan keeps from the
+    previous storyboard (:func:`build_storyboard`'s *keep*) -- (a) and (b)
+    move another shot instead whenever one can be moved, so a kept keyframe
+    stays the shot it was drawn for; empty, every rule is as it always was.
+    Returns ``(plans_by_scene, notes)``, a new structure -- *plans_by_scene*
+    itself and its plan dicts are not mutated."""
     plans_by_scene = [(scene, [dict(p) for p in plans]) for scene, plans in plans_by_scene]
     notes = []
 
     guard = len(_flatten(plans_by_scene)) + 2
     for _ in range(guard):
-        if not _apply_no_repeat_framing(plans_by_scene, notes):
+        if not _apply_no_repeat_framing(plans_by_scene, notes, pinned):
             break
 
-    _apply_close_up_window(plans_by_scene, notes)
+    _apply_close_up_window(plans_by_scene, notes, pinned)
 
     for _ in range(guard):
-        if not _apply_no_repeat_framing(plans_by_scene, notes):
+        if not _apply_no_repeat_framing(plans_by_scene, notes, pinned):
             break
 
     _apply_motion_precedence(plans_by_scene, style_lock, notes, v2=v2)
@@ -2033,11 +2063,12 @@ def name_map(entities, *, v2=False) -> dict:
 
 
 def build_storyboard(script, plans, sources, *, entities, style_lock, template, language, consistency_mode,
-                     now, previous=None, v2=False, shots_per_scene=None, ledger=None, budgets=None) -> tuple:
+                     now, previous=None, v2=False, shots_per_scene=None, ledger=None, budgets=None, keep=None,
+                     reserved=()) -> tuple:
     """*plans* (``{scene_id: [plan, ...]}``) and *sources* (``{scene_id:
     "t1"|"fast"}``) resolved into a complete ``storyboard_v1`` document:
     scenes in the script's own order (only the ones *plans* covers), the
-    cross-scene :func:`rule_pass`, ``sh01..`` ids, every shot resolved
+    cross-scene :func:`rule_pass`, stable shot ids (below), every shot resolved
     (:func:`resolve_shot`), durations from the episode-level
     :func:`timing.episode_pass` + :func:`timing.allocate_shots`
     (:func:`_time_shots`) in whole frames (the document says so:
@@ -2056,12 +2087,37 @@ def build_storyboard(script, plans, sources, *, entities, style_lock, template, 
     keyframe of the scene as a reference (phase 8 stage B). *budgets*:
     :func:`resolve_shot`'s (v2, stage F2); a shot whose prompt cannot fit
     raises :class:`PromptOverBudget` naming it and the link.
+
+    Shot ids are stable keys (walk follow-up F5): a shot's position on the
+    timeline is its place in ``shots`` (and its ``order``), never its id.
+    *keep* (``{scene_id: [shot_id | None, ...]}``, one entry per plan of the
+    scene; only with *previous*) names the shot of *previous* each plan IS
+    -- a plan that was not planned again: that shot keeps its id, its
+    ``assets``, ``prompt_override``, ``keep_still`` and every other key the
+    build does not derive, while its plan-derived fields (framing, prompts,
+    references, motion, duration, order) are resolved again exactly as a
+    new shot's are (unchanged when nothing around it changed; a prompt that
+    moved makes its image outdated, never lost). :func:`rule_pass` moves
+    another shot rather than a kept one whenever it can. Every other shot is
+    new: its id is the next free number after the highest id of *previous*
+    and of *reserved* (ids other per-shot records still name), never one
+    used before, given in timeline order. With no *previous* and nothing
+    reserved, the ids are ``sh01..`` in order, as they always were.
     """
     scenes_by_id = {scene["scene_id"]: scene for scene in script["scenes"]}
     scenes_in_order = [scene for scene in script["scenes"] if scene["scene_id"] in plans]
+    previous_shots = {shot["shot_id"]: shot for shot in previous["shots"]} if previous is not None else {}
+    carried = {}
+    for sid, ids in (keep or {}).items():
+        for index, shot_id in enumerate(ids or ()):
+            shot = previous_shots.get(shot_id)
+            if shot is not None and shot["scene_id"] == sid and index < len(plans.get(sid) or ()):
+                carried[(sid, index)] = shot
+    next_number = max((shot_number(shot_id) for shot_id in [*previous_shots, *reserved]
+                       if is_shot_id(shot_id)), default=0) + 1
 
     plans_by_scene = [(scene, plans[scene["scene_id"]]) for scene in scenes_in_order]
-    plans_by_scene, notes = rule_pass(plans_by_scene, style_lock, v2=v2)
+    plans_by_scene, notes = rule_pass(plans_by_scene, style_lock, v2=v2, pinned=frozenset(carried))
 
     shots = []
     resolved_from = {}
@@ -2069,7 +2125,12 @@ def build_storyboard(script, plans, sources, *, entities, style_lock, template, 
     for scene, scene_plans in plans_by_scene:
         for index, plan in enumerate(scene_plans):
             order += 1
-            shot_id = f"sh{order:02d}"
+            kept = carried.get((scene["scene_id"], index))
+            if kept is not None:
+                shot_id = kept["shot_id"]
+            else:
+                shot_id = shot_id_for(next_number)
+                next_number += 1
             line_ids = [scene["lines"][n - 1]["line_id"] for n in plan["lines"]]
             motion = motion_for(plan["framing"], plan["camera_motion"], scene["function"], style_lock, v2=v2)
             try:
@@ -2095,6 +2156,8 @@ def build_storyboard(script, plans, sources, *, entities, style_lock, template, 
             if "prompt_layout" in resolved:
                 shot["prompt_layout"] = resolved["prompt_layout"]
             _keep_t1_v2(shot, plan)
+            if kept is not None:
+                shot = _carried_shot(kept, shot)
             shots.append(shot)
 
     transitions = timing.plan_transitions(shots, scenes_by_id, template)
@@ -2128,6 +2191,71 @@ def build_storyboard(script, plans, sources, *, entities, style_lock, template, 
         raise ValueError(f"build_storyboard produced an invalid storyboard: {'; '.join(errors)}")
 
     return doc, notes
+
+
+# The keys of a storyboard shot that are the shot's own record, never derived
+# from its plan: a shot kept by a re-plan (build_storyboard's *keep*) carries
+# them as they are -- with every key the build does not write at all.
+_SHOT_RECORD_KEYS = ("shot_id", "scene_id", "prompt_override", "keep_still", "assets")
+# The derived keys a build writes only sometimes: dropped from a kept shot
+# when the build no longer writes them.
+_SHOT_OPTIONAL_DERIVED_KEYS = ("prompt_layout", "clip_motion", "staging")
+
+
+def _carried_shot(previous_shot, built) -> dict:
+    """*previous_shot* (a kept shot of the previous storyboard, not changed)
+    with *built*'s derived fields over it: its own record
+    (:data:`_SHOT_RECORD_KEYS`, and any key the build does not write) kept,
+    in its own key order."""
+    shot = copy.deepcopy(previous_shot)
+    for key in _SHOT_OPTIONAL_DERIVED_KEYS:
+        if key not in built:
+            shot.pop(key, None)
+    shot.update({key: value for key, value in built.items() if key not in _SHOT_RECORD_KEYS})
+    return shot
+
+
+SHOT_NUMBER_MAX = 999
+
+
+def is_shot_id(value) -> bool:
+    """Whether *value* is a shot id (``schemas.SHOT_ID_PATTERN``)."""
+    return isinstance(value, str) and re.fullmatch(schemas.SHOT_ID_PATTERN, value) is not None
+
+
+def shot_number(shot_id) -> int:
+    """The number of shot id *shot_id* (``sh07`` -> 7): a stable key, never a
+    position on the timeline (the shot's place in ``shots`` is)."""
+    return int(shot_id[2:])
+
+
+def shot_id_for(number) -> str:
+    """The shot id of *number* (7 -> ``sh07``, 120 -> ``sh120``)."""
+    if not 1 <= number <= SHOT_NUMBER_MAX:
+        raise ValueError(f"build_storyboard ran out of shot ids: sh{number:02d} is past sh{SHOT_NUMBER_MAX}")
+    return f"sh{number:02d}"
+
+
+def shot_ids_phrase(shots) -> str:
+    """The ids of *shots* (storyboard shots, in order) for a sentence:
+    ``sh01 to sh12`` when they are ``sh01..`` in order (every storyboard
+    built before ids were stable keys, and any never re-planned) -- the
+    words these messages always had -- else each run of three or more
+    consecutive numbers that way, comma-separated, in timeline order
+    (``sh01 to sh04, sh13, sh14, sh07 to sh12``)."""
+    ids = [shot["shot_id"] for shot in shots]
+    if ids == [f"sh{n:02d}" for n in range(1, len(ids) + 1)]:
+        return f"sh01 to sh{len(ids):02d}"
+    runs = []
+    for shot_id in ids:
+        if runs and shot_number(shot_id) == shot_number(runs[-1][-1]) + 1:
+            runs[-1].append(shot_id)
+        else:
+            runs.append([shot_id])
+    parts = []
+    for run in runs:
+        parts.extend([f"{run[0]} to {run[-1]}"] if len(run) > 2 else run)
+    return ", ".join(parts)
 
 
 def _named(exc, shot_id, budgets) -> PromptOverBudget:

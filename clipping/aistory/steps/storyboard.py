@@ -22,7 +22,9 @@ durations and transitions) and a re-timed script:
   length for two, :func:`beat_shot_count`) for each
   scene with no plan, a stale plan
   (its scene was rewritten since) or a fast one; every other scene keeps its
-  plan as it is (``shots.plans_from_storyboard``). The storyboard is written
+  plan as it is (``shots.plans_from_storyboard``) and its shots with it --
+  ids, keyframes, clips, verdicts (walk follow-up F5, :func:`build`); a
+  scene planned again gets new shots with never-used ids. The storyboard is written
   after every accepted call; a scene whose T1 fails keeps what it had (a
   stale scene stays marked stale) and the step ends failed naming it.
   Budget and cancel as in the script step. A complete T1 storyboard re-run
@@ -152,26 +154,69 @@ def scenes_to_plan(script, plans, sources, stale, short=()) -> list:
             or scene["scene_id"] in short]
 
 
-def build(ec, script, plans, sources, previous, *, stale, now, env=None) -> tuple:
+def kept_shots(previous, plans, *, replanned=(), replanned_shots=()) -> dict:
+    """``shots.build_storyboard``'s *keep*: for each scene of *plans* that
+    *previous* has shots for and that was not planned again (not in
+    *replanned*), the ids of those shots, one per plan -- None for a shot
+    planned again on its own (*replanned_shots*: T1r). A scene whose plan
+    count is not its old shot count is new throughout. ``{}`` with no
+    *previous*."""
+    if previous is None:
+        return {}
+    by_scene: dict = {}
+    for shot in previous["shots"]:
+        by_scene.setdefault(shot["scene_id"], []).append(shot["shot_id"])
+    keep = {}
+    for sid, scene_plans in plans.items():
+        ids = by_scene.get(sid)
+        if sid in replanned or ids is None or len(ids) != len(scene_plans):
+            continue
+        keep[sid] = [None if shot_id in replanned_shots else shot_id for shot_id in ids]
+    return keep
+
+
+def reserved_shot_ids(assets_doc) -> list:
+    """The shot ids *assets_doc* (``assets.json``, or None) still keys a
+    per-shot record by (``schemas.EPISODE_ASSETS_SHOT_MAPS``): ids a new
+    shot is never given, whether or not the storyboard still has them."""
+    found = set()
+    for name in schemas.EPISODE_ASSETS_SHOT_MAPS:
+        found.update((assets_doc or {}).get(name) or {})
+    return sorted(found)
+
+
+def build(ec, script, plans, sources, previous, *, stale, now, env=None, replanned=(), replanned_shots=()) -> tuple:
     """``shots.build_storyboard`` over every scene that has a plan; a scene
     in *stale* (planned from an older revision, not planned again) keeps its
     stale mark and the revision it was planned from. Should those old plans
     no longer fit their scene, they are left out (they are planned again by
-    the next run). ``(storyboard, notes)``. A v2 story's shots are resolved
+    the next run). ``(storyboard, notes)``.
+
+    Shot ids are stable keys (walk follow-up F5): every scene of *previous*
+    not in *replanned* (the scenes this build planned again) keeps its shots
+    -- ids, keyframes, clips, verdicts, overrides (:func:`kept_shots`; a
+    shot in *replanned_shots* alone is new); a scene planned again gets new
+    shots whose ids were never used (after the highest of *previous* and of
+    the episode's ``assets.json`` records, :func:`reserved_shot_ids`). The
+    ``shots`` list follows the script's scene order. A v2 story's shots are resolved
     with the episode's ledger (``script.ledger_of``: wardrobe sets and
     holders, phase 7 stage 5c) and built to the word budgets of the links
     its images and clips go to (``clips.episode_budgets``; *env* the
     Settings values; stage F2): a shot whose prompt cannot fit even at its
     shortest fails the step, named with its link, and nothing is written."""
     ledger = script_step.ledger_of(ec)
-    budgets = clips.episode_budgets(ec, env, assets_doc=_assets_doc(ec))
+    assets_doc = _assets_doc(ec)
+    budgets = clips.episode_budgets(ec, env, assets_doc=assets_doc)
+    keep = kept_shots(previous, plans, replanned=replanned, replanned_shots=replanned_shots)
+    reserved = reserved_shot_ids(assets_doc)
 
     def attempt(chosen):
         return shots.build_storyboard(
             script, {sid: plans[sid] for sid in chosen}, {sid: sources[sid] for sid in chosen},
             entities=ec.entities, style_lock=ec.style_lock, template=ec.template, language=ec.language,
             consistency_mode=ec.consistency_mode, now=now, previous=previous, v2=media_policy.is_v2(ec.story),
-            shots_per_scene=ec.episode_defaults["shots_per_scene"], ledger=ledger, budgets=budgets)
+            shots_per_scene=ec.episode_defaults["shots_per_scene"], ledger=ledger, budgets=budgets,
+            keep={sid: keep[sid] for sid in chosen if sid in keep}, reserved=reserved)
 
     try:
         board, notes = attempt(list(plans))
@@ -566,7 +611,8 @@ def build_fast(stores, story_id, ep, *, now, on_log) -> dict:
             scene, lines=scene["lines"], entities=ec.entities, episode_defaults=ec.episode_defaults,
             style_lock=ec.style_lock, first_at_place=scene["place_id"] not in seen)
         seen.add(scene["place_id"])
-    board, notes = build(ec, script, plans, {sid: FAST for sid in plans}, previous, stale=set(), now=now)
+    board, notes = build(ec, script, plans, {sid: FAST for sid in plans}, previous, stale=set(), now=now,
+                         replanned=set(plans))
     save(ec, script, board, now=now)
     for note in notes:
         on_log(f"📐 {note}")
@@ -619,7 +665,8 @@ def run(ctx, *, runner=None, time_fn=time.monotonic, budget=None) -> dict:
         stale.discard(sid)
         planned.append(sid)
         now = llm_call.utc_now()
-        board, notes = build(ec, script, plans, sources, board, stale=stale, now=now, env=ctx.settings_env)
+        board, notes = build(ec, script, plans, sources, board, stale=stale, now=now, env=ctx.settings_env,
+                             replanned={sid})
         save(ec, script, board, now=now)
 
     if board is not None and planned:

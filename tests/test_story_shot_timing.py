@@ -230,8 +230,10 @@ def test_replanning_one_scene_or_one_shot_keeps_every_scene_at_its_episode_lengt
     assert not any(entry["stale"] for entry in board["scenes"].values())
     _assert_shots_follow_the_script(board, script)
 
-    # One shot planned again (T1r).
-    eps._regenerate(store, story_id, "shot:1:sh05:plan", llm=eps.FakeLLM(T1r=[eps.t1r_reply]))
+    # One shot planned again (T1r): the fifth, s03's first -- a new id since
+    # s03 was planned again (walk follow-up F5), so it is named by position.
+    fifth = board["shots"][4]["shot_id"]
+    eps._regenerate(store, story_id, f"shot:1:{fifth}:plan", llm=eps.FakeLLM(T1r=[eps.t1r_reply]))
     _assert_shots_follow_the_script(eps._storyboard(store, story_id), eps._script(store, story_id))
 
 

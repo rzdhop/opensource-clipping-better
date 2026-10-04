@@ -1236,7 +1236,9 @@ def test_a_storyboard_never_touches_the_scripts_approval_or_revision(store):
 
     m.storyboard.build_fast(store, story_id, 1, now=NOW, on_log=Log())
     _run(m.storyboard, store, story_id, llm=FakeLLM(default={"T1": t1_reply}), step="storyboard")
-    _regenerate(store, story_id, "shot:1:sh02:plan", llm=FakeLLM(T1r=[t1r_reply]))
+    # The T1 run planned the fast shots again: new ids (walk follow-up F5), so the second shot is named.
+    second = _storyboard(store, story_id)["shots"][1]["shot_id"]
+    _regenerate(store, story_id, f"shot:1:{second}:plan", llm=FakeLLM(T1r=[t1r_reply]))
 
     after = _script(store, story_id)
     assert after["approved_at"] == NOW and after["rev"] == 1
@@ -1274,6 +1276,148 @@ def test_a_t1_run_replans_only_what_is_fast_and_a_complete_rerun_makes_no_call(s
     again = FakeLLM()
     _run(m.storyboard, store, story_id, llm=again, step="storyboard")
     assert again.calls == []
+
+
+def _with_made_shots(store, story_id):
+    """Episode 1's storyboard with every shot carrying what a made keyframe
+    and the user's edits leave on it (an image, a seed, a prompt hash, a
+    lock, a note; one prompt override, one kept still), written back.
+    Returns it."""
+    board = _storyboard(store, story_id)
+    for shot in board["shots"]:
+        number = shot["shot_id"][2:]
+        shot["assets"] = {
+            "image": f"assets/shots/shot_{number}.png", "video": None, "seed": 1000 + int(number),
+            "provider": "fake/image", "approved": True,
+            "prompt_hash": hashlib.sha256(shot["image_prompt"].encode("utf-8")).hexdigest(),
+            "locked": number == "09", "note": f"note {number}", "generated_at": NOW}
+    board["shots"][0]["prompt_override"] = "a hand-written prompt"
+    board["shots"][-1]["keep_still"] = True
+    store.write_episode_doc(story_id, 1, "storyboard.json", board, now=NOW)
+    return _storyboard(store, story_id)
+
+
+def _t1_three_shots(call):
+    """:func:`t1_reply` with its last shot split in two: the scene grows by one shot."""
+    reply = t1_reply(call)
+    wide, talk = reply["shots"]
+    if len(talk["lines"]) < 2:
+        return reply
+    close = dict(talk, framing="close_up", camera_motion="push_in", subjects=talk["subjects"][:1],
+                 action=f"{talk['subjects'][0]} leans in.", lines=talk["lines"][1:])
+    return {"shots": [wide, dict(talk, lines=talk["lines"][:1]), close]}
+
+
+def _replan_s03(store, story_id, t1):
+    """Scene s03 rewritten (E2, so its storyboard scene is stale), then a T1
+    run: ``(board before the run, board after)``."""
+    m = _new()
+    _regenerate(store, story_id, "scene:1:s03",
+                llm=FakeLLM(E2=[functools.partial(e2_reply, text="Je sais tout, Mangella.")]))
+    before = _storyboard(store, story_id)
+    assert before["scenes"]["s03"]["stale"] is True
+    llm = FakeLLM(T1=[t1])
+    _run(m.storyboard, store, story_id, llm=llm, step="storyboard")
+    assert llm.prompts() == ["T1"]
+    return before, _storyboard(store, story_id)
+
+
+def _record(shot) -> str:
+    """A shot's own record (id, assets, override, still flag) as canonical JSON."""
+    return json.dumps({key: shot[key] for key in ("shot_id", "scene_id", "assets", "prompt_override", "keep_still")},
+                      sort_keys=True, ensure_ascii=False)
+
+
+def test_a_partial_t1_replan_keeps_every_other_scenes_shots_ids_and_assets(store):
+    """Walk follow-up F5 (the episode-2 walk: a 3-scene repair dropped 15
+    bought keyframes and clips): a T1 re-plan of one scene keeps every other
+    scene's shots byte for byte -- ids, assets, overrides, prompts -- and
+    gives the scene planned again new ids, the next free numbers, in its
+    place on the timeline."""
+    m = _new()
+    story_id = _written_script(store)
+    _run(m.storyboard, store, story_id, llm=FakeLLM(default={"T1": t1_reply}), step="storyboard")
+    made = _with_made_shots(store, story_id)
+    ids = [shot["shot_id"] for shot in made["shots"]]
+    assert ids == [f"sh{n:02d}" for n in range(1, len(ids) + 1)]  # no previous board: sh01.. as always
+
+    before, board = _replan_s03(store, story_id, t1_reply)
+
+    old_s03 = [shot["shot_id"] for shot in before["shots"] if shot["scene_id"] == "s03"]
+    new_s03 = [shot["shot_id"] for shot in board["shots"] if shot["scene_id"] == "s03"]
+    assert new_s03 == [f"sh{len(ids) + n:02d}" for n in range(1, len(new_s03) + 1)]
+    assert not set(new_s03) & set(ids)
+    assert [shot["shot_id"] for shot in board["shots"]] == [
+        shot_id for shot_id in ids if shot_id not in old_s03][:ids.index(old_s03[0])] + new_s03 + [
+        shot_id for shot_id in ids if shot_id not in old_s03][ids.index(old_s03[0]):]
+    assert [shot["order"] for shot in board["shots"]] == list(range(1, len(board["shots"]) + 1))
+    assert [scene for scene in dict.fromkeys(shot["scene_id"] for shot in board["shots"])] == ALL_SCENES
+    by_id = {shot["shot_id"]: shot for shot in before["shots"]}
+    for shot in board["shots"]:
+        if shot["scene_id"] == "s03":
+            assert shot["assets"] == {"image": None, "video": None, "seed": None, "provider": None,
+                                      "approved": False}
+            continue
+        assert _record(shot) == _record(by_id[shot["shot_id"]])
+        assert shot == by_id[shot["shot_id"]], shot["shot_id"]
+    assert board["scenes"]["s03"] == {"source": "t1", "script_rev": 2, "stale": False}
+
+    # A complete re-run plans nothing and moves nothing.
+    again = FakeLLM()
+    _run(m.storyboard, store, story_id, llm=again, step="storyboard")
+    assert again.calls == [] and _storyboard(store, story_id)["shots"] == board["shots"]
+
+
+def test_a_scene_that_grows_on_a_replan_takes_new_ids_and_every_later_scene_keeps_its_own(store):
+    """Walk follow-up F5: s03 planned again with three shots instead of two
+    -- the later scenes' shots keep their ids and assets (their positions
+    move by one), the three new shots get the next free numbers, and the
+    list follows the script."""
+    m = _new()
+    story_id = _written_script(store)
+    _run(m.storyboard, store, story_id, llm=FakeLLM(default={"T1": t1_reply}), step="storyboard")
+    made = _with_made_shots(store, story_id)
+    ids = [shot["shot_id"] for shot in made["shots"]]
+
+    before, board = _replan_s03(store, story_id, _t1_three_shots)
+
+    old_s03 = [shot["shot_id"] for shot in before["shots"] if shot["scene_id"] == "s03"]
+    new_s03 = [shot["shot_id"] for shot in board["shots"] if shot["scene_id"] == "s03"]
+    assert len(old_s03) == 2 and new_s03 == [f"sh{len(ids) + n:02d}" for n in (1, 2, 3)]
+    first = ids.index(old_s03[0])
+    assert [shot["shot_id"] for shot in board["shots"]] == ids[:first] + new_s03 + ids[first + 2:]
+    assert len(board["shots"]) == len(ids) + 1
+    assert [shot["order"] for shot in board["shots"]] == list(range(1, len(ids) + 2))
+    by_id = {shot["shot_id"]: shot for shot in before["shots"]}
+    later = [shot for shot in board["shots"][first + 3:]]
+    assert later and all(by_id[shot["shot_id"]]["order"] + 1 == shot["order"] for shot in later)
+    for shot in board["shots"]:
+        if shot["scene_id"] != "s03":
+            assert _record(shot) == _record(by_id[shot["shot_id"]])
+    transitions = {t["after"] for t in board["transitions"]}
+    assert transitions == {shot["shot_id"] for shot in board["shots"][:-1]}
+
+
+def test_a_shot_planned_again_alone_takes_a_new_id_and_its_scene_keeps_the_others(store):
+    """Walk follow-up F5, T1r (``shot:<ep>:<id>:plan``): only that shot is
+    new (a fresh id in its place); every other shot -- its own scene's
+    included -- keeps its id and assets."""
+    m = _new()
+    story_id = _written_script(store)
+    _run(m.storyboard, store, story_id, llm=FakeLLM(default={"T1": t1_reply}), step="storyboard")
+    made = _with_made_shots(store, story_id)
+    ids = [shot["shot_id"] for shot in made["shots"]]
+
+    _regenerate(store, story_id, "shot:1:sh06:plan", llm=FakeLLM(T1r=[t1r_reply]))
+
+    board = _storyboard(store, story_id)
+    fresh = f"sh{len(ids) + 1:02d}"
+    assert [shot["shot_id"] for shot in board["shots"]] == [fresh if i == "sh06" else i for i in ids]
+    by_id = {shot["shot_id"]: shot for shot in made["shots"]}
+    for shot in board["shots"]:
+        if shot["shot_id"] != fresh:
+            assert _record(shot) == _record(by_id[shot["shot_id"]])
+    assert board["shots"][ids.index("sh06")]["assets"]["image"] is None
 
 
 def test_a_failed_t1_keeps_the_other_scenes_and_names_the_scene(store):

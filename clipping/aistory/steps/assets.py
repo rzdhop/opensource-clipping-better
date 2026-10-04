@@ -4111,8 +4111,8 @@ def regenerate_shot_image(ctx, ec, target, shot_id, note, *, tools, refuse) -> d
     board = host.storyboard
     shot = next((s for s in board["shots"] if s["shot_id"] == shot_id), None)
     if shot is None:
-        raise refuse(f"episode {ec.ep}'s storyboard has no shot {shot_id!r} (it has sh01 to "
-                     f"sh{len(board['shots']):02d}).")
+        raise refuse(f"episode {ec.ep}'s storyboard has no shot {shot_id!r} (it has "
+                     f"{shots_mod.shot_ids_phrase(board['shots'])}).")
     if shot["assets"].get("locked"):
         raise refuse(f"shot {shot_id} is locked: unlock it first.")
     if note is not None and len(note) > schemas.REGENERATE_NOTE_MAX:
@@ -4189,8 +4189,8 @@ def regenerate_shot_clip(ctx, ec, target, shot_id, note, *, tools, refuse) -> di
     board = host.storyboard
     shot = next((s for s in board["shots"] if s["shot_id"] == shot_id), None)
     if shot is None:
-        raise refuse(f"episode {ec.ep}'s storyboard has no shot {shot_id!r} (it has sh01 to "
-                     f"sh{len(board['shots']):02d}).")
+        raise refuse(f"episode {ec.ep}'s storyboard has no shot {shot_id!r} (it has "
+                     f"{shots_mod.shot_ids_phrase(board['shots'])}).")
     if note is not None and len(note) > schemas.REGENERATE_NOTE_MAX:
         raise refuse(f"a note is at most {schemas.REGENERATE_NOTE_MAX} characters ({len(note)} given).")
     doc = _read_assets_doc(ec)

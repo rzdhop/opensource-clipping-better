@@ -45,7 +45,7 @@ from __future__ import annotations
 
 import time
 
-from .. import media_policy, prompts
+from .. import media_policy, prompts, shots
 from .. import store as store_mod
 from . import entities, episode_common, llm_call
 from . import script as script_step
@@ -162,8 +162,8 @@ def _replan_shot(ctx, ec, target, shot_id, note, script, board, tools, refuse) -
         raise refuse(f"episode {ec.ep} has no storyboard yet; plan its shots first (the storyboard step).")
     shot = next((s for s in board["shots"] if s["shot_id"] == shot_id), None)
     if shot is None:
-        raise refuse(f"episode {ec.ep}'s storyboard has no shot {shot_id!r} (it has sh01 to "
-                     f"sh{len(board['shots']):02d}).")
+        raise refuse(f"episode {ec.ep}'s storyboard has no shot {shot_id!r} (it has "
+                     f"{shots.shot_ids_phrase(board['shots'])}).")
     sid = shot["scene_id"]
     plans, sources, stale = storyboard_step.current_plans(board, script)
     if sid in stale:
@@ -206,7 +206,8 @@ def _replan_shot(ctx, ec, target, shot_id, note, script, board, tools, refuse) -
     plans[sid] = scene_plans[:index] + [new_plan] + scene_plans[index + 1:]
 
     now = llm_call.utc_now()
-    new_board, notes = storyboard_step.build(ec, script, plans, sources, board, stale=stale, now=now)
+    new_board, notes = storyboard_step.build(ec, script, plans, sources, board, stale=stale, now=now,
+                                             replanned_shots={shot_id})
     storyboard_step.save(ec, script, new_board, now=now)
     for line in notes:
         ctx.on_log(f"📐 {line}")

@@ -3643,8 +3643,8 @@ def check_episode_target(stories, story, parsed) -> None:
             raise _no_storyboard(ep)
         shot = next((s for s in board["shots"] if s["shot_id"] == parsed[2]), None)
         if shot is None:
-            raise WorkflowError(NOT_FOUND, (f"Episode {ep}'s storyboard has no shot {parsed[2]!r} (it has sh01 to "
-                                            f"sh{len(board['shots']):02d})."))
+            raise WorkflowError(NOT_FOUND, (f"Episode {ep}'s storyboard has no shot {parsed[2]!r} (it has "
+                                            f"{shots.shot_ids_phrase(board['shots'])})."))
         if shot["scene_id"] in storyboard_step.stale_scenes(board, script):
             raise WorkflowError(CONFLICT, (f"Scene {shot['scene_id']} was rewritten since its shots were planned: "
                                            "plan it again first (the storyboard step)."))
@@ -3676,8 +3676,8 @@ def _check_asset_target(stories, story_id, ep, parsed, script) -> None:
             raise _no_storyboard(ep)
         shot = next((s for s in board["shots"] if s["shot_id"] == what), None)
         if shot is None:
-            raise WorkflowError(NOT_FOUND, (f"Episode {ep}'s storyboard has no shot {what!r} (it has sh01 to "
-                                            f"sh{len(board['shots']):02d})."))
+            raise WorkflowError(NOT_FOUND, (f"Episode {ep}'s storyboard has no shot {what!r} (it has "
+                                            f"{shots.shot_ids_phrase(board['shots'])})."))
     else:
         line = next((ln for scene in script["scenes"] for ln in scene["lines"] if ln["line_id"] == what), None)
         if line is None:
@@ -3703,8 +3703,8 @@ def _clip_shot(stories, story_id, ep, parsed):
         raise _no_storyboard(ep)
     shot = next((s for s in board["shots"] if s["shot_id"] == parsed[2]), None)
     if shot is None:
-        raise WorkflowError(NOT_FOUND, (f"Episode {ep}'s storyboard has no shot {parsed[2]!r} (it has sh01 to "
-                                        f"sh{len(board['shots']):02d})."))
+        raise WorkflowError(NOT_FOUND, (f"Episode {ep}'s storyboard has no shot {parsed[2]!r} (it has "
+                                        f"{shots.shot_ids_phrase(board['shots'])})."))
     ec = _context(stories, story_id, ep)
     try:
         script, board = assets_step.require_approved(ec)

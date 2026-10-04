@@ -239,7 +239,13 @@ def test_a_v2_story_plans_its_shots_with_t1_v2_one_beat_shot_a_scene(store):
     replan = eps.FakeLLM(T1rv2=[t1r_v2_reply])
     eps._regenerate(store, story_id, "shot:1:sh02:plan", llm=replan)
     assert replan.prompts() == ["T1rv2"]
-    sh02 = next(shot for shot in eps._storyboard(store, story_id)["shots"] if shot["shot_id"] == "sh02")
+    # Walk follow-up F5: the shot planned again is a new shot in sh02's place
+    # (a fresh id, never a used one); every other shot keeps its id.
+    after = eps._storyboard(store, story_id)["shots"]
+    sh02 = after[1]
+    assert sh02["shot_id"] == f"sh{len(board['shots']) + 1:02d}"
+    others = [s["shot_id"] for s in board["shots"][:1] + board["shots"][2:]]
+    assert [s["shot_id"] for s in after[:1] + after[2:]] == others
     assert sh02["clip_motion"] == "@char_kiwilo slams a hand on the table" and "slams a hand" in sh02["video_prompt"]
 
 

@@ -2384,7 +2384,10 @@ EPISODE_SCRIPT_SCHEMA_NAME = "episode_script_v1"
 
 SCENE_ID_PATTERN = r"^s[0-9]{2}$"
 LINE_ID_PATTERN = r"^l[0-9]{2}$"
-SHOT_ID_PATTERN = r"^sh[0-9]{2}$"
+# A shot id is a stable key, never a position (walk follow-up F5): a re-plan
+# gives new shots the next free numbers, so an episode can pass sh99 --
+# sh100..sh999 are ids too. Every id of the two-digit form still is one.
+SHOT_ID_PATTERN = r"^sh([0-9]{2}|[1-9][0-9]{2})$"
 SPEAKER_PATTERN = r"^(char_[a-z0-9_]{1,40}|narrator)$"
 SFX_AT_PATTERN = r"^(start|l[0-9]{2})$"
 TEXT_HASH_PATTERN = r"^[0-9a-f]{16}$"
@@ -2825,16 +2828,17 @@ _STORYBOARD_MOTION_SCHEMA = _document({
 })
 
 # A shot's image (phase 4, DEC-155): assets/shots/shot_NN.<ext> in the
-# episode's folder, NN the shot's own number (sh03 -> shot_03). The only names
+# episode's folder, NN the shot's own number (sh03 -> shot_03, sh112 ->
+# shot_112: a stable id, never the shot's position). The only names
 # store.EPISODE_ASSET_NAME_PATTERNS["shots"] holds.
 SHOT_IMAGE_DIR = "assets/shots"
-SHOT_IMAGE_NAME_PATTERN = r"^shot_(0[1-9]|[1-9][0-9])\.(png|jpg|jpeg|webp)$"
+SHOT_IMAGE_NAME_PATTERN = r"^shot_(0[1-9]|[1-9][0-9]{1,2})\.(png|jpg|jpeg|webp)$"
 # A shot's clip (phase 6 stage 7, tier >= 2): assets/clips/shot_NN.mp4, named
 # the image's way -- and (DEC-258) its lip-synced take beside it,
 # shot_NN.lipsync.mp4. The only names store.EPISODE_ASSET_NAME_PATTERNS["clips"]
 # holds.
 SHOT_CLIP_DIR = "assets/clips"
-SHOT_CLIP_NAME_PATTERN = r"^shot_(0[1-9]|[1-9][0-9])(\.lipsync)?\.mp4$"
+SHOT_CLIP_NAME_PATTERN = r"^shot_(0[1-9]|[1-9][0-9]{1,2})(\.lipsync)?\.mp4$"
 SHOT_LIPSYNC_SUFFIX = ".lipsync"
 # How an image was paid for: a free API link, a local engine, a paid link.
 IMAGE_ROUTES = ("free", "local", "paid")
@@ -3049,8 +3053,9 @@ STORYBOARD_SCHEMA = _document({
 
 def storyboard_errors(doc, *, min_shot_s=0.8) -> list:
     """``validate()`` against ``STORYBOARD_SCHEMA``, plus the cross-field
-    checks the subset schema cannot express (spec 2.8, 6.4): shot id/order
-    sequencing, scene references and contiguity, line references, transition
+    checks the subset schema cannot express (spec 2.8, 6.4): unique shot ids
+    (stable keys, in any order: walk follow-up F5) and order sequencing
+    (``order`` is the shot's position), scene references and contiguity, line references, transition
     references, a non-cut transition sitting only on a scene boundary (spec
     6.3: ``cut`` inside a scene), the per-shot minimum length once timed, the
     motion type matching the shot's own camera motion, and a shot's image
@@ -3072,10 +3077,13 @@ def storyboard_errors(doc, *, min_shot_s=0.8) -> list:
         errors.extend(validate(entry, _STORYBOARD_SCENE_ENTRY_SCHEMA, f"$.scenes.{key}"))
 
     shot_ids = [shot["shot_id"] for shot in shots]
+    first_index = {}
     for i, shot_id in enumerate(shot_ids):
-        expected = f"sh{i + 1:02d}"
-        if shot_id != expected:
-            errors.append(f"$.shots[{i}].shot_id: {shot_id!r}, expected {expected!r}")
+        if shot_id in first_index:
+            errors.append(f"$.shots[{i}].shot_id: {shot_id!r} is not unique (shot {first_index[shot_id] + 1} "
+                          "has it too)")
+        else:
+            first_index[shot_id] = i
 
     for i, shot in enumerate(shots):
         if shot["order"] != i + 1:
@@ -3423,6 +3431,10 @@ EPISODE_ASSETS_SCHEMA = _document({
     "keyframe_fixes": {"type": "object"},
     "keyframe_fix_budget": _EPISODE_ASSETS_KEYFRAME_FIX_BUDGET_SCHEMA,
 })
+# The maps of assets.json keyed by shot id (above): the ids a storyboard
+# re-plan never gives a new shot (walk follow-up F5), so no override, verdict
+# or fix record of a shot gone is ever read as a new shot's.
+EPISODE_ASSETS_SHOT_MAPS = ("shots", "keyframe_verdicts", "keyframe_fixes")
 
 
 def episode_assets_errors(doc) -> list:

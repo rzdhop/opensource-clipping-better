@@ -560,6 +560,31 @@ def test_a_shot_with_a_not_yet_timed_duration_is_not_flagged():
     assert schemas.storyboard_errors(doc) == []
 
 
+def test_shot_ids_are_stable_keys_in_any_order_and_may_pass_sh99():
+    """Walk follow-up F5: a re-plan keeps the shots it did not plan again
+    and gives new ones the next free numbers, so ids need be neither
+    sh01.. in order nor two digits; ``order`` still is the position. Images
+    and clips are named by the id (sh112 -> shot_112)."""
+    ids = ["sh01", "sh02", "sh09", "sh112", "sh05", "sh06", "sh07", "sh999"]
+
+    def renumber(doc):
+        for shot, shot_id in zip(doc["shots"], ids):
+            shot["shot_id"] = shot_id
+        doc["shots"][3]["assets"]["image"] = "assets/shots/shot_112.png"
+        doc["transitions"] = [{"after": s["shot_id"], "type": "cut", "duration_s": 0.0} for s in doc["shots"][:-1]]
+
+    doc = _mutate(_storyboard(), renumber)
+    assert schemas.storyboard_errors(doc) == []
+    for bad in ("sh1000", "sh012", "sh1", "shot01"):
+        broken = _mutate(doc, lambda d, bad=bad: d["shots"][2].__setitem__("shot_id", bad))
+        assert schemas.storyboard_errors(broken), bad
+    for name, pattern in (("shot_112.png", schemas.SHOT_IMAGE_NAME_PATTERN),
+                          ("shot_112.mp4", schemas.SHOT_CLIP_NAME_PATTERN),
+                          ("shot_112.lipsync.mp4", schemas.SHOT_CLIP_NAME_PATTERN)):
+        assert schemas._search(pattern, name), name
+        assert not schemas._search(pattern, name.replace("112", "1120")), name
+
+
 def _sb_duplicate_shot_id(doc):
     doc["shots"][1]["shot_id"] = "sh01"
 
@@ -609,7 +634,9 @@ def _sb_motion_mismatch(doc):
 
 
 STORYBOARD_BREAKS = {
-    "duplicate shot id": (_sb_duplicate_shot_id, "expected 'sh02'"),
+    # Walk follow-up F5: ids are stable keys, no longer positions -- a
+    # duplicate is refused for being a duplicate, not for breaking sh01.. order.
+    "duplicate shot id": (_sb_duplicate_shot_id, "'sh01' is not unique"),
     "order mismatch": (_sb_order_mismatch, "expected 3"),
     "scene not a key of scenes": (_sb_scene_not_a_key, "is not a key of scenes"),
     "shots of a scene not contiguous": (_sb_shots_not_contiguous, "are not contiguous"),

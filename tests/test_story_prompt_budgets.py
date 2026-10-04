@@ -291,7 +291,10 @@ def test_the_storyboard_step_builds_to_the_planned_links_and_refuses_what_cannot
     with pytest.raises(steps.StepFailed) as caught:
         m.storyboard.build_fast(store, story_id, 1, now=NOW, on_log=eps.Log())
     message = str(caught.value)
-    assert "shot sh01's keyframe prompt cannot fit fal/seedream-4.5-edit's budget of 40 words" in message
+    # Walk follow-up F5: building fast again plans every scene again, so the
+    # first shot is a new one, numbered after the board's highest id.
+    first = f"sh{max(shots.shot_number(shot['shot_id']) for shot in board['shots']) + 1:02d}"
+    assert f"shot {first}'s keyframe prompt cannot fit fal/seedream-4.5-edit's budget of 40 words" in message
     assert tas._board(store, story_id)["rev"] == rev
 
 

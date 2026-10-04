@@ -291,7 +291,9 @@ def test_a_bad_story_id_is_refused_before_any_filesystem_access(tripwired, story
 
 BAD_SHOT_NAMES = ["shot_1.png", "../x", "shot_01.gif", "shot_00.png", "shot_001.png", "SHOT_01.png",
                   "shot_01.PNG", "shot_01.png\n", "shot_01", "shots/shot_01.png", "/tmp/shot_01.png",
-                  ".shot_01.png", "shot_0١.png", "line_01.mp3", "shot_01.png.exe", "", None, 7]
+                  ".shot_01.png", "shot_0١.png", "line_01.mp3", "shot_01.png.exe", "", None, 7,
+                  # Walk follow-up F5: ids may pass sh99 (shot_112.png is a name), never four digits.
+                  "shot_1000.png", "shot_012.png"]
 
 
 @pytest.mark.parametrize("name", BAD_SHOT_NAMES)

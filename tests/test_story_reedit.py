@@ -884,8 +884,10 @@ def test_no_re_edit_path_rebuilds_the_storyboard_and_untouched_shots_keep_their_
         store, tmp_path, built, monkeypatch):
     """Every re-edit of this stage in turn, ``shots.build_storyboard`` made to
     fail: none calls it, and after each one every shot the edit did not
-    name keeps its ``assets`` byte for byte (a T1 re-plan would have wiped
-    them all, locks and notes included)."""
+    name keeps its ``assets`` byte for byte (a T1 re-plan used to wipe them
+    all, locks and notes included; since walk follow-up F5 it keeps every
+    shot of the scenes it does not plan again:
+    :func:`test_a_t1_replan_of_one_scene_keeps_every_other_shots_assets_and_current_images`)."""
     wf = _wf()
     story_id = _episode(store, tmp_path, built)
     wf.patch_assets(store, story_id, 1, {"shots": [{"shot_id": "sh09", "locked": True}]}, now=NOW)
@@ -917,6 +919,44 @@ def test_no_re_edit_path_rebuilds_the_storyboard_and_untouched_shots_keep_their_
     step(lambda: wf.patch_storyboard(store, story_id, 1, {"transitions": [
         {"after": "sh05", "type": "cut" if between["type"] != "cut" else "dissolve"}]}, now=LATER))
     assert _shot(_board(store, story_id), "sh09")["assets"]["locked"] is True
+
+
+def test_a_t1_replan_of_one_scene_keeps_every_other_shots_assets_and_current_images(store, tmp_path, built):
+    """The T1 path beside the re-edits above (walk follow-up F5): a T1 re-plan
+    *does* rebuild the storyboard, and it used to wipe every shot's assets
+    (the episode-2 walk lost 15 bought keyframes and clips to a 3-scene
+    repair). Now the one scene planned again gets new shots (new ids, no
+    assets) and every other shot keeps its id and its ``assets`` byte for
+    byte -- the lock included -- and its image stays current."""
+    wf, m = _wf(), _m()
+    story_id = _episode(store, tmp_path, built)
+    wf.patch_assets(store, story_id, 1, {"shots": [{"shot_id": "sh09", "locked": True}]}, now=NOW)
+    board = _board(store, story_id)
+    # A T1 storyboard (a fast one is planned again whole), its scene s03 marked stale.
+    for sid, entry in board["scenes"].items():
+        entry["source"] = "t1"
+    board["scenes"]["s03"]["stale"] = True
+    store.write_episode_doc(story_id, 1, "storyboard.json", board, now=NOW)
+    before, states_before = _board(store, story_id), _states(store, story_id)
+    old_s03 = [shot["shot_id"] for shot in before["shots"] if shot["scene_id"] == "s03"]
+    assert "sh09" not in old_s03 and all(state == "current" for state in states_before.values())
+
+    llm = eps.FakeLLM(T1=[eps.t1_reply])
+    ctx, _log = eps._ctx(store, story_id, step="storyboard", ep=1)
+    m.storyboard.run(ctx, runner=llm, time_fn=eps.Clock(100.0))
+    assert llm.prompts() == ["T1"]
+
+    after = _board(store, story_id)
+    kept_before = {k: v for k, v in _assets_bytes(before).items() if k not in old_s03}
+    assert {k: v for k, v in _assets_bytes(after).items() if k in kept_before} == kept_before
+    new_s03 = [shot["shot_id"] for shot in after["shots"] if shot["scene_id"] == "s03"]
+    top = max(shots.shot_number(shot["shot_id"]) for shot in before["shots"])
+    assert new_s03 == [f"sh{top + n:02d}" for n in range(1, len(new_s03) + 1)]
+    assert set(_assets_bytes(after)) == set(kept_before) | set(new_s03)
+    assert _shot(after, "sh09")["assets"]["locked"] is True
+    states = _states(store, story_id)
+    assert {k: v for k, v in states.items() if k in kept_before} == {k: states_before[k] for k in kept_before}
+    assert all(states[shot_id] == "none" for shot_id in new_s03)
 
 
 # ============================================== 9. F8 regenerate-blocked (13b)
