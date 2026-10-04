@@ -233,14 +233,16 @@ def script_refusal(script, ep, *, v2=False):
     if report is None or script_step.needs_check(script):
         return (f"Episode {ep}'s consistency check (E4) has not run on this revision of the script: run it again "
                 "(the fast track checks it first).")
-    if not report["passed"]:
-        count = len(report["issues"])
+    blocking = script_step.consistency_blocking_issues(report)
+    if blocking:
+        # DEC-261: only a blocking issue stops it; the minor notes are approved over and named in the feed.
+        count = len(blocking)
         issues = "; ".join(f"{issue['scene_id'] or 'the episode'} ({issue['kind']}): {issue['fix']}"
-                           for issue in report["issues"])
-        return (f"Episode {ep}'s consistency check found {count} issue{_s(count)}"
-                f"{': ' + issues if issues else ''}. The fast track never approves over issues: fix them (edit the "
-                "script, or regenerate the scenes they name) so the check passes, or approve the script anyway "
-                "yourself.")
+                           for issue in blocking)
+        return (f"Episode {ep}'s consistency check found {count} blocking issue{_s(count)}"
+                f"{': ' + issues if issues else ''}. The fast track never approves over blocking issues: fix them "
+                "(edit the script, or regenerate the scenes they name) so the check passes, or approve the script "
+                "anyway yourself.")
     if v2:
         watch = judge_step.first_watch_state(script)
         if watch in ("none", "stale"):
@@ -271,6 +273,12 @@ def script_detail(script, *, v2=False) -> str:
     length -- on v2, the first watch's verdict with each minor issue it kept
     (DEC-248: approved over, never repaired; the human reads them)."""
     checks = "consistency passed"
+    notes = script_step.consistency_minor_issues(script.get("consistency_report"))
+    if notes:
+        # DEC-261: the voice notes the judge kept, approved over, for the human to read.
+        checks += (f" with {len(notes)} minor note{_s(len(notes))} kept for review ("
+                   + "; ".join(f"{issue['scene_id'] or 'the episode'} ({issue['kind']}): "
+                               f"{issue['fix'].strip().rstrip('.')}" for issue in notes) + ")")
     if v2:
         minor = judge_step.minor_issues(script.get(judge_step.FIRST_WATCH))
         checks += ", first watch passed"

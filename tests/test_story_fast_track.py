@@ -258,9 +258,12 @@ def test_a_consistency_check_with_issues_stops_at_the_script_and_is_never_approv
 
     message = stopped(store, story_id, fakes)
 
+    # DEC-261, re-pinned on purpose: the s03 voice note is minor (approved over, named in the detail); the
+    # continuity issue with no scene is the blocking one that stops the fast track.
     assert message.startswith("Fast track stopped at the script (step 1 of 6): Episode 1's consistency check "
-                              "found 2 issues: s03 (character): Broccolia parle trop gentiment ici.")
-    assert "The fast track never approves over issues" in message
+                              "found 1 blocking issue: the episode (continuity): Le vote surprise n'est jamais "
+                              "expliqué.")
+    assert "The fast track never approves over blocking issues" in message
     assert message.endswith("Then Continue the fast track: it picks up here and repeats nothing already done.")
     script = _doc(store, story_id, "script.json")
     assert script["approved_at"] is None and script["approved_anyway"] is None
@@ -326,8 +329,13 @@ def test_the_auto_approval_rule_is_pure_and_never_approves_anyway():
     assert ft.script_refusal(script, 1) is None
     stale = dict(script, consistency_report=dict(script["consistency_report"], stale=True))
     assert "has not run on this revision" in ft.script_refusal(stale, 1)
-    failed = dict(script, consistency_report=dict(script["consistency_report"], passed=False, issues=[]))
-    assert "never approves over issues" in ft.script_refusal(failed, 1)
+    # DEC-261, re-pinned on purpose: a blocking issue refuses; a report of minor notes alone (or of none) passes.
+    failed = dict(script, consistency_report=dict(script["consistency_report"], passed=False, issues=[
+        {"scene_id": "s01", "kind": "continuity", "fix": "Le vote n'est jamais expliqué."}]))
+    assert "never approves over blocking issues" in ft.script_refusal(failed, 1)
+    notes = dict(script, consistency_report=dict(script["consistency_report"], passed=False, issues=[
+        {"scene_id": "s01", "kind": "character", "fix": "Broccolia parle trop gentiment."}]))
+    assert ft.script_refusal(notes, 1) is None
     assert "not complete" in ft.script_refusal(None, 1)
 
 
@@ -613,7 +621,7 @@ def test_the_estimate_names_a_script_the_auto_approval_would_refuse(store, tmp_p
 
     assert estimate["llm_calls"]["script"] == 0 and estimate["llm_calls"]["storyboard"] == SCENES
     assert estimate["stops_at"]["step"] == "script"
-    assert "never approves over issues" in estimate["stops_at"]["reason"]
+    assert "never approves over blocking issues" in estimate["stops_at"]["reason"]  # DEC-261 wording
     assert estimate["tts"]["exact"] is True and estimate["images"]["exact"] is False
 
 

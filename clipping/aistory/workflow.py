@@ -3766,14 +3766,18 @@ def approve_script(stories, story_id, ep, *, approve_anyway=False, now) -> dict:
             raise WorkflowError(CONFLICT, unjudged)
         _refuse_length(_context(stories, story_id, ep), script,
                        read_episode(stories, story_id, ep, STORYBOARD_DOC), "script")
-    over_issues = not report["passed"]
+    # DEC-261: a minor consistency note (a voice taste) never refuses; a blocking issue does.
+    blocking = script_step.consistency_blocking_issues(report)
+    over_issues = bool(blocking)
     if over_issues and not approve_anyway:
         issues = "; ".join(f"{issue['scene_id'] or 'the episode'} ({issue['kind']}): {issue['fix']}"
-                           for issue in report["issues"])
-        count = len(report["issues"])
+                           for issue in blocking)
+        count = len(blocking)
+        minor = len(script_step.consistency_minor_issues(report))
+        notes = f" ({minor} minor note{'' if minor == 1 else 's'} kept for review)" if minor else ""
         raise WorkflowError(CONFLICT, (f"Episode {ep}'s consistency check found {count} issue"
-                                       f"{'' if count == 1 else 's'}{': ' + issues if issues else ''}. Fix them and "
-                                       "check again, or approve anyway."))
+                                       f"{'' if count == 1 else 's'}{': ' + issues if issues else ''}{notes}. Fix "
+                                       "them and check again, or approve anyway."))
     over_first_watch = v2 and not script[judge_step.FIRST_WATCH]["passed"]
     if over_first_watch and not approve_anyway:
         raise WorkflowError(CONFLICT, judge_step.issues_refusal(script, ep))

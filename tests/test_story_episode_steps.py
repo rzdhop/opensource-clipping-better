@@ -634,7 +634,7 @@ def test_a_full_script_is_one_e1_one_e2_per_body_scene_one_e3_and_one_e4(store):
     assert "🎬 Episode 1: beat sheet (E1)" in log
     assert "📝 Scene 2 of 10 (s02, setup)" in log
     assert any(line.startswith("⏱ ") and "estimated" in line for line in log)
-    assert "🔍 Consistency: 2 issues" in log
+    assert "🔍 Consistency: 2 issues, 1 blocking" in log  # DEC-261: the line says how many block
     assert sum(line.startswith("✍️ E2 via gemini/gemini-test") for line in log) == len(BODY)
     # E2 was given its word budget, the outline and the previous scene's last line.
     second = llm.of("E2")[1]["user"]
@@ -1560,9 +1560,7 @@ def _continuity_story(store, *, entries=((1, EP1_ENTRY),), chosen=1, v2=False):
     # Episode 1's script, at the revision the entries record (1): the gate needs its memory fresh (plan 11
     # stage 4). Episode 1 is legacy-shaped even on a v2 story (new_objects is offered from episode 2 on).
     # Phase 7 stage 6a (DEC-230/231), re-pinned on purpose: a v2 story's replies are the v2 fixture's.
-    # DEC-260, re-pinned on purpose: on v2 the default E4 reply's s03 issue would now be repaired (and E4 asked
-    # again); episode 1 of a continuity story passes its check, which is what the gate needs.
-    _run(_new().script, store, story_id, llm=_script_llm(v2=v2, E4=[E4_PASSED]) if v2 else _script_llm(v2=v2))
+    _run(_new().script, store, story_id, llm=_script_llm(v2=v2))
     season = store.read_doc(story_id, "season.json")
     for ep, entry in entries:
         season = series_memory.merge_entry(season, ep, entry)

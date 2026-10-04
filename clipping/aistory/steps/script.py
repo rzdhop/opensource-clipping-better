@@ -154,6 +154,31 @@ REPAIR_NOTE_HEAD = "First-watch check -- "
 # note headed so the writer knows which check asks.
 CONSISTENCY_NOTE_HEAD = "Consistency check -- "
 CONSISTENCY_SOURCE = "consistency"
+# DEC-261: E4's kinds by severity (E4 itself grades none). A voice note ("X
+# would not say it that way") is a taste the judge finds anew on every rewrite
+# -- the live episode got six on each of three passes -- so it is minor: kept
+# on the report for the human, never repaired, never a refusal. A continuity,
+# place, series-memory or hook-payoff issue is blocking: repaired, and refused
+# while it stands.
+CONSISTENCY_MINOR_KINDS = ("character", "other")
+
+
+def is_consistency_blocking(issue) -> bool:
+    return issue.get("kind") not in CONSISTENCY_MINOR_KINDS
+
+
+def consistency_blocking_issues(report) -> list:
+    return [issue for issue in (report or {}).get("issues") or [] if is_consistency_blocking(issue)]
+
+
+def consistency_minor_issues(report) -> list:
+    return [issue for issue in (report or {}).get("issues") or [] if not is_consistency_blocking(issue)]
+
+
+def consistency_passes(report) -> bool:
+    """Whether a consistency *report* lets the script through (DEC-261): it
+    passed, or every issue it found is minor."""
+    return bool(report) and (bool(report.get("passed")) or not consistency_blocking_issues(report))
 # A note longer than the pack's cap is cut at its end (``context.build_pack``),
 # which loses the last ask; a repair note is fitted to it first (DEC-248).
 REPAIR_NOTE_MAX_WORDS = context._NOTE_WORD_LIMIT
@@ -918,7 +943,9 @@ def consistency_line(report) -> str:
     if report["passed"]:
         return "🔍 Consistency: passed"
     count = len(report["issues"])
-    return f"🔍 Consistency: {count} issue{'s' if count != 1 else ''}"
+    blocking = len(consistency_blocking_issues(report))
+    tail = ", none blocking" if not blocking else f", {blocking} blocking"
+    return f"🔍 Consistency: {count} issue{'s' if count != 1 else ''}{tail}"
 
 
 # ------------------------------------- the repair pass (phase 7 follow-up, stage G)
@@ -1076,12 +1103,13 @@ def _note_head(sources) -> str:
 
 
 def consistency_issues(script) -> list:
-    """The consistency report's issues when it has not passed (DEC-260), each
-    marked ``source: consistency`` for the repair's note; [] otherwise."""
+    """The consistency report's blocking issues when it has not passed
+    (DEC-260, DEC-261: never a minor one), each marked ``source:
+    consistency`` for the repair's note; [] otherwise."""
     report = script.get("consistency_report")
     if not report or report.get("passed") or needs_check(script):
         return []
-    return [dict(issue, source=CONSISTENCY_SOURCE) for issue in report.get("issues") or []]
+    return [dict(issue, source=CONSISTENCY_SOURCE) for issue in consistency_blocking_issues(report)]
 
 
 def repair_issues(script) -> list:
@@ -1452,7 +1480,8 @@ class _Run(LineMeasurement):
                 self.ctx.on_log(f"👀 First watch after repair: {left_watch} blocking issue"
                                 f"{'s remain' if left_watch != 1 else ' remains'}")
             if left_check:
-                self.ctx.on_log(f"🔍 Consistency after repair: {left_check} issue{'s remain' if left_check != 1 else ' remains'}")
+                self.ctx.on_log(f"🔍 Consistency after repair: {left_check} blocking issue"
+                                f"{'s remain' if left_check != 1 else ' remains'}")
             elif any(issue.get("source") == CONSISTENCY_SOURCE for issue in blocking):
                 self.ctx.on_log("🔍 Consistency after repair: passed")
 

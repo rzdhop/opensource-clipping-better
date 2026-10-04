@@ -5030,3 +5030,26 @@ a separate E4 repair loop (one pass, one budget, one record).
 whose writers and judges disagree on voice. A pass may now rewrite more scenes (E4 names up to six), still within
 8 calls. Follow-up: E4 could grade severity like J1 version 2 (DEC-248) so taste notes never block.
 
+## DEC-261 — The consistency check's issues have a severity by kind: voice notes are minor, approved over and never repaired; continuity, place, series-memory and hook-payoff issues block (after DEC-260)
+**Context.** With DEC-260 the one click (job 8b801894cc6e, 2026-10-04) repaired E4's issues — and E4 (nemotron ultra)
+found six new `character` notes on every rewrite ("Pamplemousse would not say 'mon jus'", "Rida … too heroic"),
+three passes in a row: a taste critic that never passes, so the repair loop cannot converge and the fast track
+stopped again. DEC-248 solved the same thing for J1 with severities; E4 grades none.
+**Decision.** `script.CONSISTENCY_MINOR_KINDS = ("character", "other")`; the other kinds (`continuity`, `place`,
+`series_memory`, `hook_payoff`) are blocking. `consistency_issues` (the repair) takes the blocking ones only;
+`workflow.approve_script` refuses on a blocking issue only ("found N issue(s): … (M minor notes kept for review)"),
+`approved_anyway` stays None over minor notes; the fast track's `script_refusal` stops on blocking issues only ("never
+approves over blocking issues") and `script_detail` names the minor notes kept ("with N minor notes kept for review
+(s03 (character): …)"); the feed line says "🔍 Consistency: N issues, K blocking / none blocking". The report itself is
+unchanged (the judge's `passed` and its issues), so the Script tab still lists every note. Tests: the DEC-260 tests
+re-pinned to a blocking `continuity` issue; a new one (minor notes alone: no repair, no refusal, approved without
+anyway, named in the detail; a blocking issue beside them still refuses); four wording/count pins moved
+(`test_story_fast_track` ×3, `test_story_episode_steps` ×1); the `_continuity_story` fixture back to its original
+(its default E4 note is now minor).
+**Rejected.** Asking E4 for a severity (a new E4v2 prompt: the v1 E4 bytes are pinned, and the judge's own grading
+proved unstable on J1 until DEC-248 told it the format); dropping the voice notes (the human reads them on the Script
+tab, where they are useful as notes).
+**Consequence.** A script converges: the repair pass works on what can be fixed by a rewrite and the one click goes
+on over taste. A `continuity` note that is really a taste ("inconsistent with the interface") still blocks and is
+repaired — up to two passes, then the fast track stops and the human approves anyway (the live s07 case).
+

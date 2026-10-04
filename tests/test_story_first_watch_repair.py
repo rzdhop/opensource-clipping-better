@@ -158,28 +158,75 @@ def test_consistency_issues_are_repaired_like_first_watch_ones_and_checked_again
     the E4 kind and the schema takes it."""
     wf = _wf()
     story_id = eps._ready_story(store, v2=True)
-    llm = eps._script_llm(v2=True, E2=[LONG] * 9, E4=[eps.E4_ISSUES, eps.E4_PASSED], J1=[eps.J1_PASSED, eps.J1_PASSED])
+    found = {"passed": False, "issues": [
+        {"scene_id": "s03", "kind": "continuity", "fix": "Broccolia a déjà quitté la pièce en s02."},
+        {"scene_id": None, "kind": "continuity", "fix": "Le vote surprise n'est jamais expliqué."},
+        {"scene_id": "s04", "kind": "character", "fix": "Mangella parle trop gentiment ici."},
+    ]}
+    llm = eps._script_llm(v2=True, E2=[LONG] * 9, E4=[found, eps.E4_PASSED], J1=[eps.J1_PASSED, eps.J1_PASSED])
 
     summary, log = eps._run(eps._new().script, store, story_id, llm=llm)
 
+    # The blocking continuity issue of s03 is repaired; the voice note on s04 is minor (DEC-261): never rewritten.
     assert llm.prompts() == BASE_PROMPTS + ["E2v2", "E4", "J1"]
-    assert _notes(llm, "E2v2", 8) == ["Consistency check -- Out of character: Broccolia parle trop gentiment ici."]
+    assert _notes(llm, "E2v2", 8) == ["Consistency check -- Continuity: Broccolia a déjà quitté la pièce en s02."]
     assert _written(llm, 8) == ["s03"]
     script = eps._script(store, story_id)
     assert script["consistency_report"]["passed"] is True and script["first_watch"]["passed"] is True
-    record = [{"pass": 1, "scenes": [{"scene_id": "s03", "kinds": ["character"], "part": None}],
+    record = [{"pass": 1, "scenes": [{"scene_id": "s03", "kinds": ["continuity"], "part": None}],
                "issues_before": 2, "issues_after": 0, "failed": []}]
     assert script["repairs"] == record and summary["repairs"] == record
-    assert "🩹 Repair pass 1: 1 scene rewritten for 2 issues (s03 out of character, the episode continuity)" in log
+    assert "🩹 Repair pass 1: 1 scene rewritten for 2 issues (s03 continuity, the episode continuity)" in log
+    assert "🔍 Consistency: 3 issues, 2 blocking" in log
     assert "🔍 Consistency after repair: passed" in log
     assert wf.approve_script(store, story_id, 1, now=NOW)["approved_anyway"] is None
+
+
+def test_minor_consistency_notes_are_never_repaired_and_the_script_is_approved_over_them(store):
+    """DEC-261: a report of voice notes alone (kind character / other) is no
+    repair and no refusal -- the step writes nothing again, the approval
+    passes without approve_anyway, and the fast track's detail names them."""
+    wf = _wf()
+    from clipping.aistory.steps import fast_track
+    story_id = eps._ready_story(store, v2=True)
+    notes = {"passed": False, "issues": [
+        {"scene_id": "s03", "kind": "character", "fix": "Broccolia parle trop gentiment ici."},
+        {"scene_id": "s05", "kind": "other", "fix": "Le ton est un peu plat."},
+    ]}
+    llm = eps._script_llm(v2=True, E2=[LONG] * 9, E4=[notes], J1=[eps.J1_PASSED])
+
+    summary, log = eps._run(eps._new().script, store, story_id, llm=llm)
+
+    assert llm.prompts() == BASE_PROMPTS
+    assert "🔍 Consistency: 2 issues, none blocking" in log and summary.get("repairs") in (None, [])
+    script = eps._script(store, story_id)
+    assert script["consistency_report"]["passed"] is False and script.get("repairs") in (None, [])
+    assert fast_track.script_refusal(script, 1, v2=True) is None
+    assert "with 2 minor notes kept for review (s03 (character): Broccolia parle trop gentiment ici; s05 (other): " \
+           "Le ton est un peu plat)" in fast_track.script_detail(script, v2=True)
+    approved = wf.approve_script(store, story_id, 1, now=NOW)
+    assert approved["approved_at"] == NOW and approved["approved_anyway"] is None
+    # A blocking issue beside them still refuses, naming it and the notes kept.
+    other = eps._ready_story(store, v2=True)
+    blocking = dict(notes, issues=notes["issues"] + [{"scene_id": None, "kind": "continuity", "fix": "Jamais expliqué."}])
+    eps._run(eps._new().script, store, other, llm=eps._script_llm(v2=True, E2=[LONG] * 9, E4=[blocking] * 3,
+                                                                   J1=[eps.J1_PASSED] * 3))
+    message = _refused(lambda: wf.approve_script(store, other, 1, now=NOW))
+    assert "found 1 issue: the episode (continuity): Jamais expliqué. (2 minor notes kept for review)" in message
+    refusal = fast_track.script_refusal(eps._script(store, other), 1, v2=True)
+    assert refusal.startswith("Episode 1's consistency check found 1 blocking issue: the episode (continuity)")
+
+
 
 
 def test_first_watch_and_consistency_issues_on_one_scene_share_a_note_with_both_heads(store):
     """A scene both checks name is written once, its note headed by both."""
     story_id = eps._ready_story(store, v2=True)
     first = _j1(_issue("s03", "unclear_goal", "Dire ce que veut Broccolia."))
-    llm = eps._script_llm(v2=True, E2=[LONG] * 9, E4=[eps.E4_ISSUES, eps.E4_PASSED], J1=[first, eps.J1_PASSED])
+    found = {"passed": False, "issues": [
+        {"scene_id": "s03", "kind": "continuity", "fix": "Broccolia a déjà quitté la pièce en s02."},
+        {"scene_id": None, "kind": "continuity", "fix": "Le vote surprise n'est jamais expliqué."}]}
+    llm = eps._script_llm(v2=True, E2=[LONG] * 9, E4=[found, eps.E4_PASSED], J1=[first, eps.J1_PASSED])
 
     eps._run(eps._new().script, store, story_id, llm=llm)
 
@@ -187,9 +234,9 @@ def test_first_watch_and_consistency_issues_on_one_scene_share_a_note_with_both_
     (note,) = _notes(llm, "E2v2", 8)
     assert note.startswith("First-watch check and consistency check -- ")
     assert "Unclear goal: Dire ce que veut Broccolia." in note
-    assert "Out of character: Broccolia parle trop gentiment ici." in note
+    assert "Continuity: Broccolia a déjà quitté la pièce en s02." in note
     script = eps._script(store, story_id)
-    assert script["repairs"][0]["scenes"] == [{"scene_id": "s03", "kinds": ["unclear_goal", "character"], "part": None}]
+    assert script["repairs"][0]["scenes"] == [{"scene_id": "s03", "kinds": ["unclear_goal", "continuity"], "part": None}]
     assert script["repairs"][0]["issues_before"] == 3 and script["repairs"][0]["issues_after"] == 0
 
 
