@@ -5069,3 +5069,23 @@ that does not exist); listing a prop on the hook scene from the step (the writer
 **Consequence.** A hook scene without a prop is a close-up on its object; the one click goes on. Follow-up: E1v2
 could be asked to list a prop on the hook scene when the style's hook is an insert.
 
+
+## DEC-263 — After the competitive analysis: the walk's defects first, then the fruit-drama pack, then agent mode; the caps for this walk 6 / 7 (after DEC-262)
+**Context.** The human asked (2026-10-04) what differs between this version, TrendStory, the Kings-Fruits content and
+the AI-story apps, for an analysis and upgrades (`.claude/plans/ai-story/18-competitive-analysis-2026-10-04.md`),
+then "decide for me and go". The episode-2 walk had just stopped at the paid check: a two-scene script repair
+re-planned the whole storyboard and the bought keyframes and clips fell off (F5), after a purged journaled request
+failed a shot (F1), Kling refused three fruit heads as "no face" (F2), 7 of 15 keyframes were flagged for framing
+(F3), the judges did not converge in two repair passes (F4) and a stale check refused approve-anyway (F6).
+**Decision.** (1) The caps for this walk: `per_episode_cap_usd` 4 → 6, `daily_cap_usd` 5 → 7, set in Settings; the
+shipped defaults are unchanged. Episode 2 is finished on the raised caps (≈ $2.6 more). (2) Order of work: task A =
+the six walk defects F1–F6 (they cost real money and block every walk; F5 first), task B = U4 the fruit-drama pack
+(the output format is what makes these videos perform; the narrator-led template is a per-story switch that the
+Fruit Drama style turns on by default), task C = U3 agent mode. (3) Deferred, not rejected: U5's Seedance 2.5 A/B
+until the human has judged episode 2 on the phone; U7 publishing until the human registers the TikTok developer app;
+U6, U8–U11 after A–C. (4) Code work during a running job happens in a worktree; main is merged and the container
+restarted only at 0 jobs (the deploy bind mount).
+**Rejected.** Agent mode first (it would speed up a pipeline whose output the human has not yet judged good);
+raising the shipped cap defaults (DEC-223 stands: the raise is this walk's, in Settings).
+**Consequence.** Task A's plan: `.claude/plans/ai-story/19-walk-defects-plan.md`. Each defect gets its test in the
+same stage. The human judges episode 2 (A-133…A-141) when it renders.
