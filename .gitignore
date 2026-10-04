@@ -28,6 +28,10 @@ custom_fonts/
 render_manifest*.json
 metadata_preview.json
 
+# Your own B-roll clips (plan 23 stage B2): the folder is tracked, the clips are not.
+broll/*
+!broll/.gitkeep
+
 # Secrets
 .env
 # Written by web/api/settings_store.py: the API keys entered on the

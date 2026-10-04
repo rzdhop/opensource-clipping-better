@@ -382,6 +382,13 @@ export async function fetchHardware(refresh = false) {
   return res.json()
 }
 
+// What the B-roll sources can answer now: usable sources and the local folder's clip count.
+export async function fetchBrollStatus() {
+  const res = await request('/broll/status')
+  if (!res.ok) throw new Error('Failed to fetch the B-roll status')
+  return res.json()
+}
+
 export async function fetchHealth() {
   // Public: no token needed, so the login screen can show system status.
   const res = await fetch(`${API_BASE}/health`)

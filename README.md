@@ -87,6 +87,8 @@ job.
 | `OPENROUTER_API_KEY` | OpenRouter. Paid, a few tenths of a cent per job, and reliable. Used after Groq and Gemini. [Get one](https://openrouter.ai/keys) |
 | `MISTRAL_API_KEY` | Mistral. Free tier, used after OpenRouter. [Get one](https://console.mistral.ai/) |
 | `PEXELS_API_KEY` | B-roll. Optional. |
+| `PIXABAY_API_KEY` | B-roll from Pixabay. Optional. |
+| `BROLL_SOURCES`, `BROLL_LOCAL_DIR` | B-roll source order (default `local,pexels,pixabay`; a source with no key or folder is skipped) and your own clips folder: drop `mp4`/`mov`/`webm` files in `./broll` (`/app/broll` in Docker), plus an optional `<name>.json` next to a clip with `keywords`, `licence`, `author`, `source_url`. |
 | `HF_TOKEN` | Speaker diarization for split-screen. Optional. |
 
 ## ✨ Features

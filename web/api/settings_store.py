@@ -44,6 +44,12 @@ PERSISTED_KEYS = frozenset({
     "OPENAI_COMPAT_API_KEY",
     "OPENAI_COMPAT_MODEL",
     "PEXELS_API_KEY",
+    # B-roll sources (plan 23 stage B2): the Pixabay key is a secret; the source
+    # order and the local folder are not (BROLL_LOCAL_DIR is validated under the
+    # B-roll root before it is stored).
+    "PIXABAY_API_KEY",
+    "BROLL_SOURCES",
+    "BROLL_LOCAL_DIR",
     "HF_TOKEN",
     "DEFAULT_CLIPS",
     "DEFAULT_RATIO",
@@ -96,6 +102,7 @@ SECRET_KEYS = frozenset({
     "LLM_CUSTOM_API_KEY",
     "OPENAI_COMPAT_API_KEY",
     "PEXELS_API_KEY",
+    "PIXABAY_API_KEY",
     "HF_TOKEN",
     # Generation providers. The Cloudflare account id is not a credential on
     # its own, but it is half of one and names the account: redacted too.

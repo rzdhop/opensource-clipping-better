@@ -212,6 +212,9 @@ def build_config_from_payload(
         api_key_gemini=env.get("GOOGLE_API_KEY", os.environ.get("GOOGLE_API_KEY", "")),
         hf_token=env.get("HF_TOKEN", os.environ.get("HF_TOKEN", "")),
         pexels_api_key=env.get("PEXELS_API_KEY", os.environ.get("PEXELS_API_KEY", "")),
+        pixabay_api_key=env.get("PIXABAY_API_KEY", os.environ.get("PIXABAY_API_KEY", "")),
+        broll_sources=env.get("BROLL_SOURCES", os.environ.get("BROLL_SOURCES", "")),
+        broll_local_dir=env.get("BROLL_LOCAL_DIR", os.environ.get("BROLL_LOCAL_DIR", "")),
         # Main settings
         jumlah_clip=payload.get("clips", 7),
         pilihan_rasio=payload.get("ratio", "9:16"),

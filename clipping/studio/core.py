@@ -43,6 +43,7 @@ siapkan_font_tipografi = typography.siapkan_font_tipografi
 from . import audio_bgm
 get_local_bgm_file = audio_bgm.get_local_bgm_file
 build_bgm_filter = audio_bgm.build_bgm_filter
+from .. import stock
 from . import broll
 download_pexels_broll = broll.download_pexels_broll
 crop_center_broll = broll.crop_center_broll
@@ -186,6 +187,7 @@ def proses_klip(
         "duration": round(m_end - m_start, 2),
         "alasan": clip.get("alasan", ""),
         "broll_list": clip.get("broll_list", []),
+        "broll_credits": [],
         "typography_plan": clip.get("typography_plan", []),
     }
 
@@ -239,14 +241,17 @@ def proses_klip(
     broll_list = clip.get("broll_list", [])
     broll_aktif = []
     if cfg.use_broll and broll_list:
-        print(f"   🎥 Downloading {len(broll_list)} B-Roll video(s) from Pexels...")
+        print(f"   🎥 Downloading {len(broll_list)} B-Roll video(s) from the stock sources...")
         for i, br in enumerate(broll_list):
             q = br.get("search_query", "nature")
             file_broll = f"temp_broll_{rank}_{i}.mp4"
-            if download_pexels_broll(q, rasio, file_broll, cfg.pexels_api_key):
+            fetched = stock.fetch_for_clips(q, rasio, file_broll, cfg)
+            if fetched:
                 br_copy = dict(br)
                 br_copy["filepath"] = file_broll
+                br_copy["stock"] = fetched[1]
                 broll_aktif.append(br_copy)
+                manifest_item["broll_credits"].append(fetched[1])
 
     std_p = get_ts_encode_args(video_encoder, fps=30)
 

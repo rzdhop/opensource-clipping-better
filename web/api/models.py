@@ -381,6 +381,12 @@ class SettingsRequest(BaseModel):
     """Settings update payload."""
     google_api_key: Optional[str] = None
     pexels_api_key: Optional[str] = None
+    # B-roll sources (plan 23 stage B2). Empty clears, like every value here
+    # (DEC-043); the order is validated against the three source names and the
+    # folder against the B-roll root before they are stored.
+    pixabay_api_key: Optional[str] = None
+    broll_sources: Optional[str] = None
+    broll_local_dir: Optional[str] = None
     hf_token: Optional[str] = None
     nvidia_api_key: Optional[str] = None
     groq_api_key: Optional[str] = None
@@ -438,6 +444,13 @@ class SettingsResponse(BaseModel):
     """Current settings (keys are masked)."""
     google_api_key_set: bool = False
     pexels_api_key_set: bool = False
+    pixabay_api_key_set: bool = False
+    # Echoed back (not secrets): "" means the default order / no local folder.
+    broll_sources: str = ""
+    broll_local_dir: str = ""
+    # Whether any configured B-roll source can answer a query right now (a key, or
+    # a local folder with clips): New Job warns when it is false.
+    broll_available: bool = False
     hf_token_set: bool = False
     nvidia_api_key_set: bool = False
     groq_api_key_set: bool = False

@@ -27,6 +27,9 @@ services:
       - ./outputs:/app/outputs
       - ./uploads:/app/uploads
       - ./custom_fonts:/app/custom_fonts
+      # Your own B-roll clips (plan 23 stage B2), read-only. Set BROLL_LOCAL_DIR
+      # to /app/broll (Settings or .env) to use them.
+      - ./broll:/app/broll:ro
       # Settings entered in the dashboard (API keys) live here. Without this
       # mount they are lost on every `docker compose up --build`.
       - ./data:/app/data
@@ -37,6 +40,9 @@ services:
     environment:
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - PEXELS_API_KEY=${PEXELS_API_KEY:-}
+      - PIXABAY_API_KEY=${PIXABAY_API_KEY:-}
+      - BROLL_SOURCES=${BROLL_SOURCES:-}
+      - BROLL_LOCAL_DIR=${BROLL_LOCAL_DIR:-}
       - HF_TOKEN=${HF_TOKEN:-}
       - NVIDIA_API_KEY=${NVIDIA_API_KEY:-}
       - OPENAI_COMPAT_BASE_URL=${OPENAI_COMPAT_BASE_URL:-}

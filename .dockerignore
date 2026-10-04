@@ -31,3 +31,4 @@ web/dashboard/dist/
 # which turned a rebuild into most of an hour. docker-compose bind-mounts the
 # project anyway, so nothing inside the running container changes.
 .claude/
+broll/*

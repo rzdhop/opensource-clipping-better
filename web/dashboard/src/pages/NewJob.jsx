@@ -819,10 +819,11 @@ function NewJob() {
           <div className="config-section">
             <h4>✨ Features</h4>
             <ToggleRow label="B-Roll Footage" desc="Insert stock footage" checked={useBroll} onChange={setUseBroll} />
-            {useBroll && settings && !settings.pexels_api_key_set && (
+            {useBroll && settings && !settings.broll_available && (
               <Notice>
-                ℹ️ No Pexels key, so B-roll will be skipped and the clips render
-                without it. Add one in Settings, or turn this off.
+                ℹ️ No B-roll source, so B-roll will be skipped and the clips render
+                without it. Add a Pexels or Pixabay key, or a folder of your own
+                clips, in Settings, or turn this off.
               </Notice>
             )}
             <ToggleRow label="Hook Glitch" desc="Glitch transition intro" checked={useHookGlitch} onChange={setUseHookGlitch} />

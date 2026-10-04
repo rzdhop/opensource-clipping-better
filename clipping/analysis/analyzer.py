@@ -30,6 +30,7 @@ import time
 from collections import namedtuple
 from concurrent.futures import ThreadPoolExecutor
 
+from .. import stock
 from . import beats as beats_mod
 from . import cache as cache_mod
 from . import derive, prompts, schema, snap
@@ -617,9 +618,9 @@ def _pass_c(spans, all_beats, words, cfg, preset, language, ask, on_log, time_fn
             deadline, floor):
     """Describe each selected clip, then build its legacy dict."""
     on_log(f"   [3/3] Writing metadata for {len(spans)} clip(s)...")
-    want_broll = bool(getattr(cfg, "use_broll", True)) and bool(
-        getattr(cfg, "pexels_api_key", "")
-    )
+    # Queries are only worth writing when some B-roll source can answer them: a
+    # Pexels or Pixabay key, or a local folder holding clips (plan 23 stage B2).
+    want_broll = bool(getattr(cfg, "use_broll", True)) and stock.any_source_available(cfg)
 
     clips = []
     for rank, span in enumerate(sorted(spans, key=lambda s: -s.score), start=1):

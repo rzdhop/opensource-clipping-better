@@ -373,6 +373,19 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Start time in seconds for the custom hook video",
     )
     p.add_argument("--no-broll", action="store_true", help="Disable B-roll footage")
+    p.add_argument(
+        "--broll-sources",
+        default=None,
+        help="B-roll sources in the order tried: any of local,pexels,pixabay "
+        "(default: BROLL_SOURCES or local,pexels,pixabay). A source with no key "
+        "or folder is skipped.",
+    )
+    p.add_argument(
+        "--broll-local-dir",
+        default=None,
+        help="Folder of your own B-roll clips (mp4/mov/webm) for the 'local' source "
+        "(default: BROLL_LOCAL_DIR)",
+    )
     # --hook-glitch turns it ON now that the default is off. --no-hook is kept
     # and still wins, so an existing script that disables it explicitly keeps
     # working and does not silently start enabling it.
@@ -1536,6 +1549,9 @@ def build_config(argv: list[str] | None = None) -> SimpleNamespace:
         api_key_gemini=os.environ.get("GOOGLE_API_KEY", ""),
         hf_token=os.environ.get("HF_TOKEN", ""),
         pexels_api_key=os.environ.get("PEXELS_API_KEY", ""),
+        pixabay_api_key=os.environ.get("PIXABAY_API_KEY", ""),
+        broll_sources=args.broll_sources or os.environ.get("BROLL_SOURCES", ""),
+        broll_local_dir=args.broll_local_dir or os.environ.get("BROLL_LOCAL_DIR", ""),
         # Main settings
         jumlah_clip=args.clips,
         pilihan_rasio=args.ratio,

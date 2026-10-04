@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import {
-  checkAnthropicKey, checkVideoKeys, clearTodayExtra, fetchHardware, fetchSettings, testChain, testGenerationChain,
+  checkAnthropicKey, checkVideoKeys, clearTodayExtra, fetchBrollStatus, fetchHardware, fetchSettings, testChain, testGenerationChain,
   updateSettings,
 } from '../api'
 import { Badge, Button, Card, CardBody, CardHeader, Field } from '../ui'
@@ -200,6 +200,13 @@ function SettingsTabs({ tab, onSelect }) {
   )
 }
 
+// The three B-roll sources (plan 23 stage B2), the same names the server accepts.
+const BROLL_SOURCE_NAMES = ['local', 'pexels', 'pixabay']
+
+/** The names in a typed source order that are not a source; [] when it is valid or empty. */
+const unknownBrollSources = (text) =>
+  text.split(',').map(s => s.trim().toLowerCase()).filter(s => s && !BROLL_SOURCE_NAMES.includes(s))
+
 function Settings() {
   const [settings, setSettings] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -243,6 +250,11 @@ function Settings() {
   const [anthropicKey, setAnthropicKey] = useState('')
   // ElevenLabs voices, billed per character (plan 23 stage B3).
   const [elevenlabsKey, setElevenlabsKey] = useState('')
+  // B-roll sources (plan 23 stage B2): the Pixabay key is a secret; the order and the folder are prefilled.
+  const [pixabayKey, setPixabayKey] = useState('')
+  const [brollSources, setBrollSources] = useState('')
+  const [brollLocalDir, setBrollLocalDir] = useState('')
+  const [brollStatus, setBrollStatus] = useState(null)
 
   // The endpoint URL and model are not secrets, so they are prefilled.
   const [compatUrl, setCompatUrl] = useState('')
@@ -325,10 +337,17 @@ function Settings() {
     if (tab === 'hardware' && !hardware && !hwLoading) loadHardware()
   }, [tab]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  const loadBrollStatus = () => {
+    fetchBrollStatus().then(setBrollStatus).catch(() => setBrollStatus(null))
+  }
+
   useEffect(() => {
+    loadBrollStatus()
     fetchSettings()
       .then(data => {
         setSettings(data)
+        setBrollSources(data.broll_sources || '')
+        setBrollLocalDir(data.broll_local_dir || '')
         setCompatUrl(data.openai_compat_base_url || '')
         setCompatModel(data.openai_compat_model || '')
         setStoryLlmPremiumChain(data.story_llm_premium_chain || '')
@@ -367,6 +386,21 @@ function Settings() {
       if (geminiPaidKey) payload.gemini_paid_api_key = geminiPaidKey
       if (anthropicKey) payload.anthropic_api_key = anthropicKey
       if (elevenlabsKey) payload.elevenlabs_api_key = elevenlabsKey
+      if (pixabayKey) payload.pixabay_api_key = pixabayKey
+
+      // B-roll order and folder: sent when changed; "" restores the default order / clears the folder.
+      const badSources = unknownBrollSources(brollSources)
+      if (badSources.length) {
+        setMsg(`❌ Unknown B-roll source: ${badSources.join(', ')}. Use ${BROLL_SOURCE_NAMES.join(', ')}.`)
+        setSaving(false)
+        return
+      }
+      if (brollSources.trim() !== (settings?.broll_sources || '')) {
+        payload.broll_sources = brollSources.trim()
+      }
+      if (brollLocalDir.trim() !== (settings?.broll_local_dir || '')) {
+        payload.broll_local_dir = brollLocalDir.trim()
+      }
 
       // Sent whenever they differ from what the server holds, including when
       // cleared: an empty value removes the override and falls back to .env,
@@ -442,6 +476,10 @@ function Settings() {
       setCloudflareAccountId('')
       setPollinationsKey('')
       setElevenlabsKey('')
+      setPixabayKey('')
+      setBrollSources(updated.broll_sources || '')
+      setBrollLocalDir(updated.broll_local_dir || '')
+      loadBrollStatus()
       setMsg('✅ Saved on the server. These now survive a restart.')
     } catch (err) {
       setMsg('❌ Failed to save: ' + err.message)
@@ -585,7 +623,7 @@ function Settings() {
               value={pexelsKey}
               onChange={setPexelsKey}
               placeholder="For B-roll footage (optional)"
-              hint="Without it, B-roll is skipped silently and the clips still render."
+              hint="With no B-roll source at all, B-roll is skipped silently and the clips still render."
             />
 
             <KeyField
@@ -777,6 +815,77 @@ function Settings() {
               {endpointReady
                 ? 'Ready. Pick "Custom endpoint" as the provider on a new job.'
                 : 'Needs a base URL, a key and a model before it can be used.'}
+            </p>
+            </CardBody>
+          </Card>
+          {/* B-roll sources for Clips mode (plan 23 stage B2) */}
+          <Card className="settings-card">
+            <CardHeader
+              icon={Film}
+              title="B-roll sources"
+              actions={settings?.broll_available
+                ? <Badge tone="success" icon={CircleCheck}>Ready</Badge>
+                : <Badge tone="neutral">No source</Badge>}
+            />
+            <CardBody>
+            <p className="form-hint settings-card-lead">
+              Clips mode tries the sources in order and credits the footage in the
+              render manifest. A source with no key or folder is skipped; the
+              Pexels key above is the third.
+            </p>
+
+            <KeyField
+              id="settings-pixabay-key"
+              label="Pixabay API Key"
+              isSet={settings?.pixabay_api_key_set}
+              value={pixabayKey}
+              onChange={setPixabayKey}
+              placeholder="For Pixabay footage (optional)"
+              hint={<>
+                Free.{' '}
+                <a href="https://pixabay.com/api/docs/" target="_blank" rel="noopener" style={linkStyle}>Get a key →</a>
+              </>}
+            />
+
+            <Field
+              label="Source order"
+              htmlFor="settings-broll-sources"
+              hint="Any of local, pexels, pixabay, comma separated. Empty means local,pexels,pixabay."
+              error={unknownBrollSources(brollSources).length ? `Unknown source: ${unknownBrollSources(brollSources).join(', ')}` : undefined}
+            >
+              <input
+                id="settings-broll-sources"
+                className="form-input"
+                type="text"
+                placeholder="local,pexels,pixabay"
+                value={brollSources}
+                onChange={(e) => setBrollSources(e.target.value)}
+              />
+            </Field>
+
+            <Field
+              label="Local folder"
+              htmlFor="settings-broll-dir"
+              hint={<>
+                Your own clips (mp4, mov, webm). It has to be{' '}
+                <code>{brollStatus?.root || '/app/broll'}</code> or a folder inside it.
+              </>}
+            >
+              <input
+                id="settings-broll-dir"
+                className="form-input"
+                type="text"
+                placeholder={brollStatus?.root || '/app/broll'}
+                value={brollLocalDir}
+                onChange={(e) => setBrollLocalDir(e.target.value)}
+              />
+            </Field>
+            <p className={`settings-status${brollStatus?.local_clips ? ' settings-status-ok' : ''}`}>
+              {!brollStatus
+                ? 'Folder status unavailable.'
+                : !brollStatus.local_dir
+                  ? 'No local folder set.'
+                  : `Found ${brollStatus.local_clips} clip${brollStatus.local_clips === 1 ? '' : 's'} in ${brollStatus.local_dir}.`}
             </p>
             </CardBody>
           </Card>

@@ -13,7 +13,7 @@
     "clipping/studio/__init__.py": "72bd93dc62605ea16b4bc91050cec672b7fbeb59747f991b39a0eb4629756a54",
     "clipping/studio/audio_bgm.py": "b7245893fcc640323d3ecfa45d383360128177a590d90b9c72f771b6c93794a4",
     "clipping/studio/broll.py": "9c6d4de9f52fe803e78d1c1531c8a5b13677ebfbd72cb91e83d26be00a0f0d07",
-    "clipping/studio/core.py": "f01ec0333aedc8d30cced65539e30c0b7b9de1349f792a7bbb24754bc7f952bf",
+    "clipping/studio/core.py": "710ffc6237475ffe9d4a3a5b33347507a72d22b2395eb63933d6a4bfb7f203da",
     "clipping/studio/edge_glow.py": "a72fc21035b5e52ecc1b3346c0ff608bb42ebbfca173e43e42eece0b83fae34f",
     "clipping/studio/effects.py": "32e8daa7d459f01443d1de64ef03747ab7238cc8ebbf35929a01e75b95f0dc31",
     "clipping/studio/face_detection.py": "a20b308ed5bcd54faa33dfbf5087c4669352a784a2cf78d6a3946bd0ecdf447f",

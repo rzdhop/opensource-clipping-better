@@ -28,6 +28,7 @@ from ..models import (
     SettingsResponse,
     SystemHealthResponse,
 )
+from clipping import stock
 from .. import settings_store
 from .. import store as job_store
 from .. import worker
@@ -126,9 +127,14 @@ async def get_settings() -> SettingsResponse:
     story_chain = env.get("STORY_LLM_CHAIN", os.environ.get("STORY_LLM_CHAIN", ""))
     story_premium_chain = env.get("STORY_LLM_PREMIUM_CHAIN", os.environ.get("STORY_LLM_PREMIUM_CHAIN", ""))
 
+    merged = _merged_env(env)
     return SettingsResponse(
         google_api_key_set=bool(google_key),
         pexels_api_key_set=bool(pexels_key),
+        pixabay_api_key_set=bool(merged.get("PIXABAY_API_KEY")),
+        broll_sources=merged.get("BROLL_SOURCES", ""),
+        broll_local_dir=merged.get("BROLL_LOCAL_DIR", ""),
+        broll_available=await asyncio.to_thread(stock.any_source_available, merged),
         hf_token_set=bool(hf_token),
         nvidia_api_key_set=bool(nvidia_key),
         groq_api_key_set=bool(groq_key),
@@ -162,6 +168,24 @@ async def get_settings() -> SettingsResponse:
     )
 
 
+@router.get("/api/broll/status")
+async def broll_status() -> dict:
+    """What the B-roll sources can answer right now: the order, which sources are
+    usable and how many clips the local folder holds (plan 23 stage B2)."""
+    merged = _merged_env(worker.get_settings_env())
+
+    def probe() -> dict:
+        return {
+            "sources": list(stock.base.parse_sources(merged.get("BROLL_SOURCES"))),
+            "available": stock.available_sources(merged),
+            "local_dir": merged.get("BROLL_LOCAL_DIR", ""),
+            "local_clips": stock.local_clip_count(merged),
+            "root": stock.local_root(),
+        }
+
+    return await asyncio.to_thread(probe)
+
+
 @router.put("/api/settings")
 async def update_settings(req: SettingsRequest) -> SettingsResponse:
     """Update settings (API keys and defaults)."""
@@ -171,6 +195,25 @@ async def update_settings(req: SettingsRequest) -> SettingsResponse:
         env_updates["GOOGLE_API_KEY"] = req.google_api_key
     if req.pexels_api_key is not None:
         env_updates["PEXELS_API_KEY"] = req.pexels_api_key
+    if req.pixabay_api_key is not None:
+        env_updates["PIXABAY_API_KEY"] = req.pixabay_api_key.strip()
+    if req.broll_sources is not None:
+        # "" restores the default order (DEC-043); otherwise every name must be a source.
+        names = [part.strip().lower() for part in req.broll_sources.split(",") if part.strip()]
+        unknown = [name for name in names if name not in stock.DEFAULT_SOURCES]
+        if unknown:
+            raise HTTPException(
+                status_code=400,
+                detail=f"BROLL_SOURCES: unknown source {', '.join(unknown)}; use {', '.join(stock.DEFAULT_SOURCES)}",
+            )
+        env_updates["BROLL_SOURCES"] = ",".join(dict.fromkeys(names))
+    if req.broll_local_dir is not None:
+        # "" clears it; anything else must resolve to the B-roll root or below it, so
+        # the Settings page cannot point the indexer at an arbitrary folder.
+        try:
+            env_updates["BROLL_LOCAL_DIR"] = stock.resolve_local_dir(req.broll_local_dir)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
     if req.hf_token is not None:
         env_updates["HF_TOKEN"] = req.hf_token
     if req.nvidia_api_key is not None:
