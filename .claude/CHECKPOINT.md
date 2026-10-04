@@ -1,3 +1,19 @@
+## CURRENT STATE — IMPLEMENT (2026-10-04, local session): task A (plan 19, the walk's six defects) runs as three Opus agents in three worktrees while episode 2 renders on the raised caps
+
+- **In-progress header:** phase = IMPLEMENT of `.claude/plans/ai-story/19-walk-defects-plan.md` (DEC-263; the
+  human: "decide for me and go"). Checkpoint commit `5dfc598` (main; docs only since the deployed `fb0bb38`).
+  Stage 1 (F1+F2, `fix/walk-defects-s1`, `.claude/worktrees/walk-defects-s1`), stage 2 (F5, `-s2`), stage 3
+  (F3+F6+F4, `-s3`) run in parallel; **merge order 1 → 2 → 3**, each rebased on main, Tier 1 re-run after each merge,
+  the full local suite once before the deploy; the image rebuilt and the container restarted **only at 0 jobs**.
+  Next action: on each agent's report — review its diff, run its Tier-1 selection from main, merge by fast-forward
+  or rebase, write its DEC (DEC-264…266), action-log line. Then task B (U4, the fruit-drama pack: EXPLORE → plan 20).
+- **Episode 2 (job 5e2290b4b3b9):** caps raised in Settings for this walk (`per_episode_cap_usd` 6, `daily_cap_usd` 7,
+  DEC-263); 15 keyframes made and approved anyway (J2 flags remain, redraw budget spent earlier), clips buying
+  (est $1.39 for 82 s — the gencache served part of them: A-141 partly confirmed), then lip-syncs, render, metadata.
+  The human judges A-133…A-141 on the phone when it is rendered.
+- **Tier-1 baseline:** the last full runs — local 7320 / 1 skipped, CI env 6487 / 804 skipped (DEC-258's agent,
+  2026-10-04 morning); nothing in code changed on main since.
+
 ## CURRENT STATE — PAUSED on a cap decision (2026-10-04, local session): episode 2's clips were bought once, then a script repair re-planned the whole storyboard; continuing needs the episode cap raised to ≥ $6
 
 - **In-progress header:** phase = the paid walk of episode 2 of story d0ee5ebd745d. **Where it stands:** script
