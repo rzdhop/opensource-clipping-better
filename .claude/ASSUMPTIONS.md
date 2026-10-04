@@ -581,6 +581,11 @@
 - **A-159** — (plan 23, A7) The pinned `tzdata` wheel (or the apt package) gives `ZoneInfo("Europe/Paris")` on the
   aarch64 `python:3.11-slim` image deliberately, not by accident of the base image. UNCONFIRMED until A7's deploy check.
 
+- **A-160** — (plan 23, B3) The eight ElevenLabs premade voice ids in `voices.json` (Rachel, Adam, Antoni, Bella, Domi,
+  Elli, Josh, Sam) still exist on the human's key; confirm with `GET /v1/voices` before the first paid line. UNCONFIRMED.
+- **A-161** — (plan 23, B3) `language_code` is accepted by Flash v2.5 only and refused by Multilingual v2 (from the docs);
+  the adapter sends it for `flash` alone. UNCONFIRMED on a key.
+
 ## Confirmed
 - **A-145** — (plan 22, stage 1) The paid writer's model id on Gemini's OpenAI-compatible endpoint is `gemini-3.8-flash`
   (priced $0.75 / $3.75 per M until 2026-12-31, then $1.50 / $7.50, read 2026-10-04 at ai.google.dev/gemini-api/docs/pricing).
