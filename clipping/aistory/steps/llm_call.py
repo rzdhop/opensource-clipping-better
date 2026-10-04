@@ -348,11 +348,16 @@ def call_json(
     pos = 0
     retry_available = True
     tried_labels = []
+    asked = user
     while True:
         attempt_chain = chain[pos:]
         if not attempt_chain:
             break
         ctx.cancel.check()
+        # DEC-259: after a refusal the next try -- the same link's retry or the
+        # next link -- is told why, under the unchanged prompt, so it fixes that
+        # and nothing else (a blind retry gave the same reply on four links).
+        asked = user if not errors else refused_prompt(user, errors)
         # The chain's own hop lines follow these: a paid link left out is
         # printed like a keyless one, never silently dropped (spec 0).
         for link in paid:
@@ -365,7 +370,7 @@ def call_json(
             value, link = runner(
                 run_links,
                 system=system,
-                user=user,
+                user=asked,
                 schema=schema,
                 schema_name=prompts.SCHEMA_NAMES[prompt_id],
                 max_tokens=cap,
@@ -428,6 +433,24 @@ def call_json(
         reason = (f"every link's reply failed validation ({len(tried_labels)} tried: {tried}); "
                   f"the last reply ({tried_labels[-1]}): {shown}")
     raise StepFailed(f"{prompt_id}: {reason}", reason=reason)
+
+
+REFUSED_PROMPT_HEAD = "Your previous reply was refused"
+# How many of the refusal's errors the next try is told (the log line's count).
+_ERRORS_IN_RETRY = 3
+
+
+def refused_prompt(user, errors) -> str:
+    """*user* with the refusal of the last reply under it (DEC-259): the
+    first :data:`_ERRORS_IN_RETRY` *errors*, one sentence each, and the ask
+    to fix exactly those. The prompt above is byte-identical, so a budget
+    measured on it still holds (a refusal adds a few dozen tokens)."""
+    shown = "; ".join(str(error) for error in errors[:_ERRORS_IN_RETRY])
+    more = len(errors) - _ERRORS_IN_RETRY
+    if more > 0:
+        shown += f"; and {more} more"
+    return (f"{user}\n\n{REFUSED_PROMPT_HEAD}: {shown}. Answer again in the same format, fixing exactly that and "
+            "keeping everything else as it was.")
 
 
 # ---------------------------------------------------- shared story helpers

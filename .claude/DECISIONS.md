@@ -4979,3 +4979,29 @@ long-shot tests and two clip-performance tests) and two `test_story_long_shots.p
 (`_without_lipsync`). New: `tests/test_story_lipsync.py` (19). Left for later: the clip-regenerate quote and the
 new-story preset estimate do not add the lipsync; a re-voiced line leaves the old take in `assets.video` until the
 next assets run. A-140.
+
+## DEC-259 — A refused reply's next try is told why; the v2 hook ask names the body line it shows as not the hook's own (after DEC-258)
+**Context.** The episode-2 one click (job be8a763c9199, 2026-10-04) stopped at the script: E3v2 (recap, hook,
+cliffhanger, teaser) was refused on every link — nemotron ultra (twice), nemotron super, mistral medium, gemini
+flash-lite — each time for the same thing: `$.hook.lines[0].text` repeated Kevin's first body line ("C-cœur bat...
+pour deux. Impossible."). The hook block shows that line ("The next scene opens with -- …") so the hook can lead into
+it, and every model took it for the hook's line; the retry and each next link got the very same prompt (a blind
+retry), so they answered the same.
+**Decision.**
+- `llm_call.refused_prompt(user, errors)`: after a validator refusal, the same link's retry and every next link get
+  the prompt as built plus, under it, "Your previous reply was refused: <the first 3 errors; and N more>. Answer
+  again in the same format, fixing exactly that and keeping everything else as it was." The first try is
+  byte-identical; the measured budgets hold (a refusal adds a few dozen tokens). Every validated call benefits
+  (word floors, enums, duplicates, caps).
+- `prompts.HOOK_LINE_NEW_SENTENCE` in the v2 hook block only, after the shown line: "That line belongs to the next
+  scene: the hook's own line must be new, never that line or a paraphrase of it." E3v2 re-measured 2,939 → 2,966,
+  `INPUT_BUDGET["E3v2"]` 3,380 → 3,420; v1 E3 byte-identical (RC-M1, the sha pin).
+- Tests: `test_story_steps.py::test_a_retry_and_the_next_link_are_told_why_the_reply_was_refused`,
+  `test_story_prompts_episode.py::test_e3_v2_hook_block_says_the_shown_body_line_is_never_the_hooks_own`; the
+  budget pin moved.
+**Rejected.** Dropping the duplicate rule for the hook (DEC-230 found a climax line spoken twice as a defect);
+repairing the hook deterministically (a hook line is the writer's, not a template's).
+**Consequence.** The fast track's Continue on episode 2 writes the framing again with the body kept; a refusal now
+costs one informed retry instead of a whole chain. Follow-up: the refusal text is English in a French story's
+prompt, as the rest of the ask already is.
+

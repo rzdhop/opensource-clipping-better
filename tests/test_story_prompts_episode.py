@@ -2255,6 +2255,28 @@ def test_e2_v2_asks_never_to_repeat_a_line_and_its_sfx_at_is_an_enum():
     assert NO_REPEAT not in v1[1] and "enum" not in v1[2]["properties"]["sfx_cues"]["items"]["properties"]["at"]
 
 
+def test_e3_v2_hook_block_says_the_shown_body_line_is_never_the_hooks_own():
+    """DEC-259: four links in a row answered the live hook with the body line
+    the block shows ("The next scene opens with -- …"), and the no-repeat
+    check refused every one. The v2 hook block names it: that line belongs
+    to the next scene, the hook's own line is new. A hook part alone carries
+    it; with no first body line there is nothing to say; v1 E3 is byte for
+    byte what it was (RC-M1)."""
+    _system, user, _schema = prompts.build_e3_v2(_pack("fr"), slice_text=SLICE, **_e3_kwargs())
+
+    block = user.split("Hook scene (", 1)[1].split("\n\n", 1)[0]
+    assert "The next scene opens with -- Kiwilo: Je n'ai rien fait." in block
+    assert block.index(prompts.HOOK_LINE_NEW_SENTENCE) > block.index("The next scene opens with")
+    assert prompts.HOOK_LINE_NEW_SENTENCE == ("That line belongs to the next scene: the hook's own line must be new, "
+                                              "never that line or a paraphrase of it.")
+    _s, part_user, _ = prompts.build_e3_v2(_pack("fr"), slice_text=SLICE, **_e3_kwargs(part="hook"))
+    assert prompts.HOOK_LINE_NEW_SENTENCE in part_user
+    _s, bare, _ = prompts.build_e3_v2(_pack("fr"), slice_text=SLICE, **_e3_kwargs(first_body_line=None))
+    assert prompts.HOOK_LINE_NEW_SENTENCE not in bare and "The next scene has no line yet." in bare
+    v1 = prompts.build_e3(_pack("fr"), **_e3_kwargs())
+    assert _sha_call(v1) == _E3_V1_EP2_SHA256 and prompts.HOOK_LINE_NEW_SENTENCE not in v1[1]
+
+
 def test_e3_v2_cliffhanger_block_says_never_to_repeat_and_to_show_the_reveal():
     _system, user, schema = prompts.build_e3_v2(_pack("fr"), slice_text=SLICE, **_e3_kwargs())
 

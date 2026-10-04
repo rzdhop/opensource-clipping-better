@@ -853,6 +853,30 @@ def test_a_reply_that_fails_validation_twice_falls_through_to_the_next_link(tmp_
     assert log[-1].startswith("✍️ B1 via groq/groq-test")
 
 
+def test_a_retry_and_the_next_link_are_told_why_the_reply_was_refused(tmp_path):
+    """DEC-259: the first call gets the prompt as built; the same link's
+    retry and every next link get it with the refusal under it -- the first
+    errors and the ask to fix exactly those -- so a blind retry (the live
+    hook written as the body's first line by four links in a row) ends."""
+    m = _new()
+    ctx, _log = _bare_ctx(tmp_path, settings_env=_TWO_LINK_SETTINGS)
+    runner = _QueueRunner((INVALID_B1, LINK), (INVALID_B1, LINK), (B1_REPLY, _GROQ_LINK))
+    system, user, schema = _b1_prompt()
+
+    value = m.llm_call.call_json(ctx, "B1", system, user, schema, validator=schemas.b1_errors, runner=runner)
+
+    assert value == B1_REPLY
+    errors = schemas.b1_errors(INVALID_B1)
+    first, retry, next_link = [call["user"] for call in runner.calls]
+    assert first == user
+    for asked in (retry, next_link):
+        assert asked.startswith(user + "\n\n" + m.llm_call.REFUSED_PROMPT_HEAD + ": ")
+        assert errors[0] in asked and errors[1] in asked and errors[2] in asked
+        assert asked.endswith("Answer again in the same format, fixing exactly that and keeping everything else as it was.")
+    assert [call["system"] for call in runner.calls] == [system] * 3
+    assert m.llm_call.refused_prompt("P", ["a", "b", "c", "d", "e"]).count("; and 2 more") == 1
+
+
 def test_every_link_failing_validation_still_fails_the_call(tmp_path):
     m = _new()
     ctx, log = _bare_ctx(tmp_path, settings_env=_TWO_LINK_SETTINGS)

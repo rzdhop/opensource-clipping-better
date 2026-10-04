@@ -828,7 +828,9 @@ from types import SimpleNamespace  # noqa: E402 -- this section's own names
 # ask now says the on-screen text is required whatever the hook style (story B shipped none).
 # Phase 7 follow-up, stage G: E1v2 and E2v2 re-pinned on purpose, 2,490 -> 2,576 and 2,101 -> 2,187 (budgets
 # 2,870 -> 2,970 and 2,420 -> 2,520): each opens with the first-watch rules (prompts.FIRST_WATCH_RULES).
-MEASURED_SLICED = {"E1v2": 2576, "E2v2": 2187, "E3v2": 2939}
+# DEC-259: E3v2 re-pinned on purpose, 2,939 -> 2,966 (budget 3,380 -> 3,420): the hook block's
+# "that line belongs to the next scene" sentence.
+MEASURED_SLICED = {"E1v2": 2576, "E2v2": 2187, "E3v2": 2966}
 _PLACE_ID = LONGEST_PLACE["place_id"]
 
 

@@ -357,7 +357,7 @@ SCHEMA_NAMES = {
 INPUT_BUDGET = {"E1": 1820, "E2": 1660, "E3": 2530, "E4": 3900, "T1": 1270, "T1r": 1410, "S3": 3740, "F1": 3950, "N1": 3740,
                 "D2": 2420, "D3": 1940, "R1v2": 1170, "T1v2": 2150, "T1rv2": 2130, "D1": 3890,
                 "D4": 2270, "D5": 3930, "D6": 3560,
-                "E1v2": 2970, "E2v2": 2520, "E3v2": 3380, "L1": 3920, "J1": 3990}
+                "E1v2": 2970, "E2v2": 2520, "E3v2": 3420, "L1": 3920, "J1": 3990}
 
 # The ``bible:<field>`` grammar of spec 9.2: which prompt a regenerate note
 # re-runs, and which of that prompt's fields it targets. "tone" also carries
@@ -2192,13 +2192,22 @@ def e3_schema(part, ep, speakers) -> dict:
     return _llm_obj(properties)
 
 
-def _e3_hook_block(hook_scene, first_body_line, episode_defaults, word_budget) -> str:
+# DEC-259 (E3v2 only; the v1 block is byte-identical, RC-M1): four links in a row
+# answered the hook with the body line the block shows, and the no-repeat check
+# refused every one.
+HOOK_LINE_NEW_SENTENCE = ("That line belongs to the next scene: the hook's own line must be new, never that line "
+                          "or a paraphrase of it.")
+
+
+def _e3_hook_block(hook_scene, first_body_line, episode_defaults, word_budget, *, v2=False) -> str:
     lines = [_scene_stub_line(hook_scene).replace("Scene (", "Hook scene (")]
     lines.append(f"Hook style: {_HOOK_STYLE_LINES[episode_defaults['hook_style']]}")
     if first_body_line is None:
         lines.append("The next scene has no line yet.")
     else:
         lines.append(f"The next scene opens with -- {first_body_line['speaker_name']}: {first_body_line['text']}")
+        if v2:
+            lines.append(HOOK_LINE_NEW_SENTENCE)
     if word_budget is not None:
         lines.append(f"Keep the hook's dialogue within {word_budget} words.")
     return "\n".join(lines)
@@ -2336,7 +2345,8 @@ def _build_e3(pack, *, ep, part=None, note=None, hook_scene, cliffhanger_scene, 
     user = context.outline_section(outline, names) + "\n\n"
 
     if "hook" in keys:
-        user += _e3_hook_block(hook_scene, first_body_line, episode_defaults, word_budgets.get("hook")) + "\n\n"
+        user += _e3_hook_block(hook_scene, first_body_line, episode_defaults, word_budgets.get("hook"),
+                               v2=v2) + "\n\n"
     if "cliffhanger" in keys:
         user += _e3_cliffhanger_block(
             cliffhanger_scene, last_body_line, arc_entry, episode_defaults, word_budgets.get("cliffhanger"), v2=v2,
