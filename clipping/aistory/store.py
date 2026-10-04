@@ -109,7 +109,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Callable, NamedTuple
 
-from . import defaults, media_policy, schemas, series_memory, templates
+from . import defaults, media_policy, schemas, series_memory, subtitle_style, templates
 from .ledger import CostLedger
 
 STORY_ID_PATTERN = re.compile(r"^[0-9a-f]{12}$")
@@ -910,6 +910,31 @@ class StoryStore:
             messages = self._save_story(doc, now=now)
         self._log(messages)
         return copy.deepcopy(doc)
+
+    def set_subtitle_style(self, story_id, style, *, now) -> dict:
+        """Set (or clear) the story's own subtitle look (plan 23 stage B5): a
+        ``subtitle_style`` object, or ``None`` / ``{}`` to remove the key.
+
+        Checked first (``subtitle_style.validate``: the ranges, the shipped
+        fonts, the 4.5 contrast between the text and its outline or box):
+        ``SchemaError`` named ``"subtitle_style"`` with every error, nothing
+        written. Written under the story lock like every story mutation
+        (:meth:`update`): atomic, ``updated_at`` moved, the approvals left
+        alone -- the look is render-only, editable after the style lock
+        froze. Returns the story."""
+        if style is not None:
+            errors = subtitle_style.validate(style)
+            if errors:
+                raise schemas.SchemaError("subtitle_style", errors)
+        stored = subtitle_style.normalise(style)
+
+        def mutate(doc):
+            if stored is None:
+                doc.pop("subtitle_style", None)
+            else:
+                doc["subtitle_style"] = stored
+
+        return self.update(story_id, mutate, now=now)
 
     # ----------------------------------------------------- other documents
 

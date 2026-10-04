@@ -105,7 +105,7 @@ import time
 
 from clipping.cancel import Cancelled
 
-from .. import media_policy, schemas, wordtiming
+from .. import media_policy, schemas, subtitle_style, wordtiming
 from .. import store as store_mod
 from ..render import audio_assets, fonts, profiles
 from ..render import partial
@@ -519,7 +519,11 @@ def render_inputs(ec, script, board, assets_doc, *, custom_fonts_dir=None, fill_
                              "picked it: run the assets step again and approve the assets.")
         bgm = record
 
-    font = fonts.resolve_font(ec.style_lock["typography"]["font_family"], custom_fonts_dir=custom_fonts_dir)
+    # One font for every text layer (DEC-159): the story's own pick when it has
+    # a subtitle look (plan 23 stage B5), else the style lock's.
+    look = subtitle_style.look_for(ec.style_lock, ec.story)
+    family = look.font_family if look is not None else ec.style_lock["typography"]["font_family"]
+    font = fonts.resolve_font(family, custom_fonts_dir=custom_fonts_dir)
     inputs = {"shots": shots, "lines": lines, "sfx": sfx, "bgm": bgm, "overlay": runner_mod.paper_texture_record(),
               "font": font, "word_timings": word_timings}
     resolved = (shot_clips(ec, script, board, assets_doc, fill_failed=fill_failed_with_motion)
@@ -538,7 +542,9 @@ def plan_args(ec, script, board, assets_doc, inputs, *, subtitles, encoder, vide
     """The keyword arguments of ``plan.build_render_plan`` (but ``ffmpeg``
     and ``profile``) for this episode: its documents, the story's id, title
     and language (the end card's title), the resolved *inputs* and the
-    step's params (``fill_failed_with_motion`` passed only when on)."""
+    step's params (``fill_failed_with_motion`` passed only when on) and, for
+    a story with a ``subtitle_style``, its resolved look (``look``; absent
+    otherwise, so the plan is what it always was)."""
     args = {
         "script": script, "storyboard": board, "assets": assets_doc, "style_lock": ec.style_lock,
         "template": ec.template, "ep": ec.ep, "inputs": inputs,
@@ -547,6 +553,9 @@ def plan_args(ec, script, board, assets_doc, inputs, *, subtitles, encoder, vide
     }
     if fill_failed_with_motion:
         args["fill_failed_with_motion"] = True
+    look = subtitle_style.look_for(ec.style_lock, ec.story)
+    if look is not None:
+        args["look"] = look
     return args
 
 

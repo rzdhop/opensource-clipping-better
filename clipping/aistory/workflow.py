@@ -878,6 +878,27 @@ def patch_story(stories, story_id, fields, *, now) -> dict:
     return update(stories, story_id, mutate, now=now)
 
 
+def set_subtitle_style(stories, story_id, style, *, now) -> dict:
+    """Set the story's own subtitle look, or clear it with ``None`` (plan 23
+    stage B5; ``PATCH /api/stories/{id}/subtitle-style``); returns the story.
+
+    A render-only setting, so it is allowed at any time -- also after the
+    style lock froze -- and clears no approval; the caller refuses it while a
+    render of the story runs. ``invalid`` with ``{"message", "errors"}`` when
+    ``subtitle_style.validate`` refuses it (a range, a font the app does not
+    ship, a text/outline or text/box contrast below 4.5 -- the message names
+    the ratio); nothing is written then."""
+    load(stories, story_id)
+    try:
+        return stories.set_subtitle_style(story_id, style, now=now)
+    except KeyError:
+        raise not_found() from None
+    except schemas.SchemaError as exc:
+        if exc.name == "subtitle_style":
+            raise _invalid_values("The subtitle style is not valid: " + "; ".join(exc.errors), exc.errors) from None
+        raise StoryUnreadable(story_id, exc.name, exc.errors) from None
+
+
 def _follow_pipeline_switch(stories, story, values) -> None:
     """When the patch *values* move *story* onto or off the v2 pipeline
     (``generation_profile.pipeline``), make the rest of the story what

@@ -167,6 +167,7 @@ from ..models import (
     StoryCreateRequest,
     StoryEpisodeFeedbackRequest,
     StoryPatchRequest,
+    SubtitleStylePatchRequest,
     StoryProposalDecisionRequest,
     StoryRegenerateRequest,
     StoryStepRequest,
@@ -964,6 +965,42 @@ async def patch_story(story_id: str, req: StoryPatchRequest) -> dict:
     with _answering():
         return workflow.patch_story(
             stories, story_id, {name: getattr(req, name) for name in sent}, now=_now())
+
+
+# The steps that read the subtitle look (the render, a re-render, and the
+# fast tracks that render): a look edit waits for them (plan 23 stage B5).
+_RENDERING_STEPS = ("render", "rerender", "fast-track", "story-fast-track")
+
+
+@router.patch("/{story_id}/subtitle-style")
+async def patch_subtitle_style(story_id: str, req: Optional[SubtitleStylePatchRequest] = None) -> dict:
+    """Set the story's own subtitle look, or clear it (plan 23 stage B5);
+    answers the story.
+
+    The body is the whole ``subtitle_style`` object (``font_family``,
+    ``size_pct``, ``position_pct``, ``text_colour``, ``highlight_colour``,
+    ``outline_px``, ``outline_colour``, ``box``; every field optional) -- it
+    replaces the stored one -- or ``null`` / ``{}`` to clear it
+    (``clipping.aistory.subtitle_style`` says what each does). It is a
+    render-only setting, so it is allowed at any time, the style lock's
+    freeze included, and clears no approval; the next render burns it.
+    404 for an unknown story; 409 while a render of the story is queued or
+    running (the look it reads would change under it); 400 with
+    ``{"message", "errors"}`` when the look is refused -- a value out of its
+    range, a font the app does not ship, a text colour the outline or the
+    box would make unreadable (contrast below 4.5, the ratio named).
+    """
+    stories = _stories()
+    _load(stories, story_id)
+    busy = [job for job in _in_flight(story_id) if job.get("step") in _RENDERING_STEPS]
+    if busy:
+        raise HTTPException(
+            status_code=409,
+            detail=_busy_detail(busy[0], "change the subtitles once it is done, or cancel it first."),
+        )
+    style = None if req is None else req.model_dump(exclude_unset=True)
+    with _answering():
+        return workflow.set_subtitle_style(stories, story_id, style, now=_now())
 
 
 # The params of the step queued after a pipeline switch: the places step

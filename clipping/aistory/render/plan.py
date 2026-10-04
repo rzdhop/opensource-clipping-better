@@ -221,7 +221,7 @@ def loudness_apply_argv(stage: dict, measured: dict) -> list:
 def build_render_plan(*, script: dict, storyboard: dict, assets: dict, style_lock: dict, template: dict,
                       story: dict, ep: int, inputs: dict, ffmpeg: dict, profile: str = "final",
                       subtitles=None, encoder: str = "libx264", video_encoder=None,
-                      fill_failed_with_motion: bool = False, aspect: str = "9:16") -> dict:
+                      fill_failed_with_motion: bool = False, aspect: str = "9:16", look=None) -> dict:
     """The plan of one render (module docstring).
 
     - *story*: ``{"story_id", "title", "language"}`` (the end card's title).
@@ -255,6 +255,13 @@ def build_render_plan(*, script: dict, storyboard: dict, assets: dict, style_loc
       layer are drawn to it and ``expected`` carries its size; it is
       recorded in ``params`` only when it is not ``"9:16"``, so a 9:16
       plan (and its manifest, its cache keys) is the one it always was.
+    - *look* (plan 23 stage B5): the story's resolved subtitle look
+      (``subtitle_style.Look``), handed to the subtitle builders; ``None``
+      (a story without ``subtitle_style``) is the plan this always built,
+      cache keys included. A look only changes ``subtitles.ass`` (the final
+      pass reads it) and, through *inputs*' ``font`` (the render step
+      resolves the look's family), the end card's font: no shot stage's argv
+      or key moves.
     - *ffmpeg*: ``runner.preflight``'s ``{"version", "machine"}``.
     - *subtitles*: ``None``/``"style"`` (the style lock's mode) or one of
       ``schemas.SUBTITLE_MODES``. *encoder*: ``"libx264"``, or ``"auto"``
@@ -279,7 +286,7 @@ def build_render_plan(*, script: dict, storyboard: dict, assets: dict, style_loc
         return _build(script=script, storyboard=storyboard, assets=assets, style_lock=style_lock,
                       template=template, story=story, ep=ep, inputs=inputs, ffmpeg=ffmpeg, profile=profile,
                       subtitles=subtitles, encoder=encoder, video_encoder=video_encoder,
-                      fill=bool(fill_failed_with_motion), aspect=aspect)
+                      fill=bool(fill_failed_with_motion), aspect=aspect, look=look)
     except PlanError:
         raise
     except (ValueError, KeyError) as exc:
@@ -310,7 +317,7 @@ def _final_encoder(encoder, video_encoder, profile):
 
 
 def _build(*, script, storyboard, assets, style_lock, template, story, ep, inputs, ffmpeg, profile, subtitles,
-           encoder, video_encoder, fill, aspect) -> dict:
+           encoder, video_encoder, fill, aspect, look=None) -> dict:
     if profile not in _STAGE_PROFILES:
         raise PlanError(f"unknown render profile {profile!r}, expected one of {list(_STAGE_PROFILES)}")
     geometry = profiles.GEOMETRIES.get(aspect) if isinstance(aspect, str) else None
@@ -535,7 +542,8 @@ def _build(*, script, storyboard, assets, style_lock, template, story, ep, input
     subtitles_text, meta = subtitles_mod.build_subtitles_ass(
         timeline=timeline, script=script, subtitle_mode=mode, language=language,
         hook_style=style_lock["episode_defaults"]["hook_style"], ai_label_enabled=bool(typography_doc.get("ai_label")),
-        palette=style_lock["palette"], typography=typography, word_timings=word_timings, geometry=geometry)
+        palette=style_lock["palette"], typography=typography, word_timings=word_timings, geometry=geometry,
+        look=look)
     files.insert(0, {"path": SUBTITLES_REL, "text": subtitles_text})
     stages.append(_stage("F", "final", filtergraph.final_pass_argv(
         timeline, shot_inputs=shot_outputs, end_card_input=end_card_output, ass_rel=SUBTITLES_REL,

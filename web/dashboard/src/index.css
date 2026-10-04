@@ -5302,3 +5302,43 @@ button.activity-group-head:focus-visible {
   align-items: center;
   gap: var(--space-1);
 }
+
+/* ============================================================
+   Subtitle look (plan 23 stage B5): the editor of a story's own subtitle
+   size, position, colours, outline and box, with an approximate one-line
+   preview (pages/story/SubtitleStyleEditor.jsx). Controls and a 270 x 480
+   frame side by side; the frame drops under the controls on a phone.
+   ============================================================ */
+
+.story-subtitle-style-panel {
+  margin: 14px 0;
+}
+
+.story-subtitle-style-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 270px;
+  gap: 20px;
+  align-items: start;
+  margin-bottom: 12px;
+}
+
+@media (max-width: 700px) {
+  .story-subtitle-style-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.story-subtitle-preview-frame {
+  position: relative;
+  width: 270px;
+  max-width: 100%;
+  aspect-ratio: 9 / 16;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  overflow: hidden;
+  background: linear-gradient(160deg, #3a7d44 0%, #1d3b4a 100%);
+}
+
+.story-subtitle-preview-line {
+  box-sizing: border-box;
+}

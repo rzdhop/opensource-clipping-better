@@ -51,7 +51,7 @@ import shutil
 import subprocess
 import time
 
-from .. import context, prompts, schemas
+from .. import context, prompts, schemas, subtitle_style
 from .. import store as store_mod
 from ..render import filtergraph, fonts
 from ..render import plan as plan_mod
@@ -296,7 +296,10 @@ def make_cover(ctx, ec, script, text, *, run_process=subprocess.run, custom_font
                          "file or folder; it is never followed: move it away first.") from None
 
     typography = dict(ec.style_lock["typography"])
-    font = fonts.resolve_font(typography["font_family"], custom_fonts_dir=custom_fonts_dir)
+    # One font for every text layer (DEC-159): the story's own pick when it has a subtitle look (plan 23 stage B5).
+    look = subtitle_style.look_for(ec.style_lock, ec.story)
+    font = fonts.resolve_font(look.font_family if look is not None else typography["font_family"],
+                              custom_fonts_dir=custom_fonts_dir)
     typography["font_family"] = font["family"]
     image_rel = _stage_image(image, render_dir)
     try:

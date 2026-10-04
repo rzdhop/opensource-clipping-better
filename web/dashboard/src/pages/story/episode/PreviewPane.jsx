@@ -13,6 +13,7 @@ import { runStoryStep, regenerateStory, fetchStoryEstimate } from '../../../api'
 import EstimateChip from '../../../components/EstimateChip'
 import RouteChip from '../../../components/RouteChip'
 import { RegenerateControl, StepError } from '../fields'
+import SubtitleStyleEditor from '../SubtitleStyleEditor'
 import { formatUsd } from '../../../lib/format'
 import { Badge, Card, CardBody, CardHeader } from '../../../ui'
 
@@ -299,6 +300,69 @@ function RenderMedia({ episode, assetsApproved, onChange }) {
       <a className="btn btn-secondary btn-sm" href={downloadUrl} download>
         ⬇ Download video
       </a>
+    </Card>
+  )
+}
+
+// ------------------------------------------------------------- subtitles
+
+/**
+ * The story's own subtitle look (plan 23 stage B5): font, size, position,
+ * colours, outline and box, with an approximate preview of one line, saved
+ * with PATCH /stories/{id}/subtitle-style (render-only: allowed after the
+ * style lock froze). "Render again" runs the existing re-render of this
+ * episode (`rerender`: the last render's own params), which re-runs only the
+ * end card and the final pass -- the shots come from the cache. Disabled
+ * while a step runs, before there is a render to repeat, and while the form
+ * holds edits not saved yet (the render burns what is stored).
+ */
+function SubtitlesPanel({ storyId, ep, episode, story, busy, onChange }) {
+  const [running, setRunning] = useState(false)
+  const [error, setError] = useState('')
+  const [errors, setErrors] = useState(null)
+  const hasRender = Boolean(episode.render && episode.render.output)
+
+  const handleRenderAgain = async () => {
+    setRunning(true)
+    setError('')
+    setErrors(null)
+    try {
+      await runStoryStep(storyId, 'rerender', { ep })
+      onChange()
+    } catch (err) {
+      setError(err.message)
+      setErrors(err.errors || null)
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  return (
+    <Card className="story-subtitle-style-panel">
+      <CardHeader title="Subtitles" />
+      <CardBody>
+        <SubtitleStyleEditor
+          storyId={storyId}
+          story={story && story.story}
+          styleLock={story && story.style_lock}
+          busy={busy}
+          onChange={onChange}
+          actions={({ dirty }) => (
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={handleRenderAgain}
+              disabled={busy || running || !hasRender || dirty}
+              title={!hasRender ? 'Render the episode once first.'
+                : dirty ? 'Save the subtitles first: the render burns the saved ones.'
+                : 'Re-render this episode with the saved subtitles.'}
+            >
+              {running ? <><span className="spinner"></span> Rendering…</> : 'Render again'}
+            </button>
+          )}
+        />
+        <StepError message={error} errors={errors} className="story-step-error" />
+      </CardBody>
     </Card>
   )
 }
@@ -597,6 +661,7 @@ export default function PreviewPane({ episode, storyId, ep, story, inFlightJob, 
     <div className="story-step-body">
       <RenderHeader storyId={storyId} ep={ep} episode={episode} assetsApproved={assetsApproved} busy={busy} onChange={onChange} />
       <RenderMedia episode={episode} assetsApproved={assetsApproved} onChange={onChange} />
+      <SubtitlesPanel storyId={storyId} ep={ep} episode={episode} story={story} busy={busy} onChange={onChange} />
       <ChangesSinceRender storyId={storyId} ep={ep} episode={episode} busy={busy} onChange={onChange} />
 
       <MetadataHeader storyId={storyId} ep={ep} episode={episode} renderReady={renderReady} busy={busy} onChange={onChange} />

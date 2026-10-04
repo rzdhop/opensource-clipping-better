@@ -54,6 +54,24 @@ Backslash is replaced FIRST, so the hard line breaks this function inserts
 for a real newline are never themselves re-escaped. French text (accents,
 ``'``/``’``) is untouched -- UTF-8 throughout, no ASCII folding.
 
+**The story's own look** (plan 23 stage B5, ``clipping/aistory/subtitle_style.py``).
+:func:`word_pop_dialogue`, :func:`two_line_dialogue`, :func:`hook_overlay_events`
+and :func:`build_subtitles_ass` take an optional ``look`` -- the resolved
+``Look`` of ``story.json``'s ``subtitle_style``, read by attribute so this
+module imports nothing of it. ``look=None`` (every story without the key, every
+golden) is byte for byte the output the builders always gave. A look changes
+the dialogue only: size (a percentage of the style's own size), position (a
+percentage of the frame's height: the word's centre for word_pop, the block's
+bottom edge for two_line), the text colour (word_pop; two_line keeps its
+per-speaker accents), the highlight colour (two_line), the outline's width and
+colour, and a box. The font reaches every text layer through ``typography``
+(DEC-159: one font per render), never through the look. A **box** is libass's
+``BorderStyle 3`` (an opaque box drawn in the style's *outline* colour, its
+alpha the box's opacity, with the ``Outline`` field as its padding), so turning
+the box on turns the outline off: the box colour is the OutlineColour and the
+outline's own width and colour are not used. The hook overlay keeps its own
+look: the look's only reach there is the font, which it already has.
+
 Stdlib only (DEC-012): no PIL import here, ever (subtitles are pure text;
 ``render/fonts.py`` is the one module in this package allowed a late,
 optional PIL import).
@@ -88,6 +106,12 @@ WORD_POP_PRIMARY_HEX = "#FFFFFF"
 WORD_POP_OUTLINE_HEX = "#000000"
 WORD_POP_OUTLINE_PX = 3
 WORD_POP_POP_TAG = r"\fscx80\fscy80\t(0,90,\fscx100\fscy100)"
+
+# A box (a look's ``box``, plan 23 stage B5): libass ``BorderStyle 3``, where the
+# style's ``Outline`` field is the padding between the text and the box's edge.
+BORDER_STYLE_OUTLINE = 1
+BORDER_STYLE_BOX = 3
+BOX_PADDING_PX = 10
 
 # two_line (spec 6.4.1: "one ASS Style per character (colour accent) ...
 # max 2 lines, <= 32 chars per line, bottom 18 % safe area"; plan: "no \k").
@@ -519,16 +543,54 @@ def _wrap_word_indices(word_count: int, word_lengths, max_chars: int, max_lines:
 # ------------------------------------------------------------------- styles
 
 def _style_line(name, font_family, size, primary_hex, outline_hex, *, bold=True, italic=False,
-                 outline_px=2, shadow=0, alignment=5, margin_l=0, margin_r=0, margin_v=0) -> str:
+                 outline_px=2, shadow=0, alignment=5, margin_l=0, margin_r=0, margin_v=0,
+                 border_style=1, back=None, outline_alpha="00") -> str:
+    """One ``Style:`` line. *border_style* is ASS's own (1 outline, 3 opaque
+    box), *back* a ready ``&HAABBGGRR`` BackColour (default: black at alpha
+    ``80``) and *outline_alpha* the OutlineColour's alpha byte; the defaults
+    give the line this function always gave."""
     primary = _ass_style_color(primary_hex)
-    outline = _ass_style_color(outline_hex)
-    back = _ass_style_color("#000000", alpha="80")
+    outline = _ass_style_color(outline_hex, alpha=outline_alpha)
+    if back is None:
+        back = _ass_style_color("#000000", alpha="80")
     b = -1 if bold else 0
     i = -1 if italic else 0
     return (
         f"Style: {name},{font_family},{size},{primary},{primary},{outline},{back},"
-        f"{b},{i},0,0,100,100,0,0,1,{outline_px},{shadow},{alignment},{margin_l},{margin_r},{margin_v},1"
+        f"{b},{i},0,0,100,100,0,0,{border_style},{outline_px},{shadow},{alignment},{margin_l},{margin_r},{margin_v},1"
     )
+
+
+def _alpha_byte(opacity_pct) -> str:
+    """ASS's inverted alpha byte (``"00"`` opaque, ``"FF"`` clear) of a box
+    opacity in percent."""
+    return f"{round(255 * (100 - opacity_pct) / 100):02X}"
+
+
+def _dialogue_paint(look, *, outline_hex: str, outline_px: int) -> dict:
+    """The ``_style_line`` keywords (and the outline colour, as ``outline_hex``)
+    of a dialogue style under *look*: its box when it has one (module
+    docstring: BorderStyle 3, the box colour as the OutlineColour, the padding
+    as the Outline field), else its outline's width and colour over the given
+    defaults. No look: the defaults, and nothing else."""
+    box = getattr(look, "box", None) if look is not None else None
+    if box:
+        alpha = _alpha_byte(box.opacity_pct)
+        return {"outline_hex": box.colour, "outline_px": BOX_PADDING_PX, "border_style": BORDER_STYLE_BOX,
+                "back": _ass_style_color(box.colour, alpha=alpha), "outline_alpha": alpha}
+    paint = {"outline_hex": outline_hex, "outline_px": outline_px}
+    if look is not None:
+        if look.outline_colour is not None:
+            paint["outline_hex"] = look.outline_colour
+        if look.outline_px is not None:
+            paint["outline_px"] = look.outline_px
+    return paint
+
+
+def _scaled_size(base: int, look) -> int:
+    """*base* font size under a look's ``size_pct`` (a percentage of it)."""
+    pct = getattr(look, "size_pct", None) if look is not None else None
+    return base if pct in (None, 100) else max(1, round(base * pct / 100))
 
 
 def _document(*, title: str, styles: list, events: list, geometry=profiles.PORTRAIT) -> str:
@@ -627,7 +689,8 @@ def _apply_word_card_floor(spans: list, min_card_s: float) -> list:
     return result
 
 
-def word_pop_dialogue(lines: list, *, word_timings=None, typography: dict, geometry=profiles.PORTRAIT) -> tuple:
+def word_pop_dialogue(lines: list, *, word_timings=None, typography: dict, geometry=profiles.PORTRAIT,
+                      look=None) -> tuple:
     """``(style_lines, event_lines, approx_by_line)`` for ``subtitle_mode
     == "word_pop"`` (module constants for the exact numbers): one
     uppercase Dialogue event per word, each visible for its own span
@@ -643,12 +706,22 @@ def word_pop_dialogue(lines: list, *, word_timings=None, typography: dict, geome
 
     *geometry* (plan 23 stage B6) places the word at the same fraction of
     its own frame (:func:`_layout`); the default is the portrait position.
+
+    *look* (plan 23 stage B6's sibling, B5; module docstring) sets the word's
+    size, centre (``position_pct`` of the frame's height), colour, outline
+    and box; ``None`` is the output above, byte for byte.
     """
     layout = _layout(geometry)
+    text_hex = (look.text_colour if look is not None and look.text_colour else None) or WORD_POP_PRIMARY_HEX
+    paint = _dialogue_paint(look, outline_hex=WORD_POP_OUTLINE_HEX, outline_px=WORD_POP_OUTLINE_PX)
+    outline_hex = paint.pop("outline_hex")
+    word_y = layout.word_pop_y
+    if look is not None and look.position_pct is not None:
+        word_y = round(layout.height * look.position_pct / 100)
     style_lines = [_style_line(
-        WORD_POP_STYLE_NAME, typography["font_family"], WORD_POP_FONT_SIZE,
-        WORD_POP_PRIMARY_HEX, WORD_POP_OUTLINE_HEX,
-        bold=True, italic=True, outline_px=WORD_POP_OUTLINE_PX, alignment=5,
+        WORD_POP_STYLE_NAME, typography["font_family"], _scaled_size(WORD_POP_FONT_SIZE, look),
+        text_hex, outline_hex,
+        bold=True, italic=True, alignment=5, **paint,
     )]
     event_lines = []
     approx_by_line = {}
@@ -656,7 +729,7 @@ def word_pop_dialogue(lines: list, *, word_timings=None, typography: dict, geome
     min_card_ms = typography.get("word_min_card_ms")
     min_card_s = min_card_ms / 1000.0 if min_card_ms else 0.0
 
-    override = f"{{\\an5\\pos({layout.center_x},{layout.word_pop_y}){WORD_POP_POP_TAG}}}"
+    override = f"{{\\an5\\pos({layout.center_x},{word_y}){WORD_POP_POP_TAG}}}"
 
     for line in lines:
         spans, is_approx = _line_word_spans(line["text"], line["duration_s"], word_timings.get(line["line_id"]))
@@ -679,15 +752,18 @@ def _speaker_style_name(speaker: str) -> str:
     return f"TwoLine_{slug}"
 
 
-def _is_readable(color: str) -> bool:
-    """*color* clears :data:`TWO_LINE_MIN_CONTRAST_RATIO` against
-    :data:`TWO_LINE_OUTLINE_HEX` -- the outline colour every two_line style
-    is actually built with (:func:`two_line_dialogue`'s own ``_style_line``
-    call), read from that one constant rather than a fresh literal."""
-    return _contrast_ratio(color, TWO_LINE_OUTLINE_HEX) >= TWO_LINE_MIN_CONTRAST_RATIO
+def _is_readable(color: str, plate: str = TWO_LINE_OUTLINE_HEX) -> bool:
+    """*color* clears :data:`TWO_LINE_MIN_CONTRAST_RATIO` against *plate* --
+    :data:`TWO_LINE_OUTLINE_HEX` by default, the outline colour every two_line
+    style is actually built with (:func:`two_line_dialogue`'s own
+    ``_style_line`` call), read from that one constant rather than a fresh
+    literal; under a look (plan 23 stage B5) the outline or box colour the
+    speaker's text is drawn on."""
+    return _contrast_ratio(color, plate) >= TWO_LINE_MIN_CONTRAST_RATIO
 
 
-def _pick_next_accent(candidates: list, highlight_hex: str, already_chosen: list) -> str:
+def _pick_next_accent(candidates: list, highlight_hex: str, already_chosen: list,
+                      plate: str = TWO_LINE_OUTLINE_HEX) -> str:
     """The next speaker's accent colour, deterministic for fixed inputs
     (module constants' own docstring): the first *candidates* entry that is
     readable against the outline (:func:`_is_readable`), clears
@@ -706,7 +782,7 @@ def _pick_next_accent(candidates: list, highlight_hex: str, already_chosen: list
     ramp is built to always clear both) is plain white, itself readable
     against any outline this module ever builds."""
     for color in candidates:
-        if not _is_readable(color):
+        if not _is_readable(color, plate):
             continue
         if _color_distance(color, highlight_hex) < TWO_LINE_MIN_COLOR_DISTANCE:
             continue
@@ -714,12 +790,16 @@ def _pick_next_accent(candidates: list, highlight_hex: str, already_chosen: list
             continue
         return color
     for color in candidates:
-        if _is_readable(color) and _color_distance(color, highlight_hex) >= TWO_LINE_MIN_COLOR_DISTANCE:
+        if _is_readable(color, plate) and _color_distance(color, highlight_hex) >= TWO_LINE_MIN_COLOR_DISTANCE:
             return color
-    return "#FFFFFF"
+    # White on the default black plate; on a light plate (a look's box or
+    # outline) whichever of white and black reads better.
+    if _contrast_ratio("#FFFFFF", plate) >= _contrast_ratio("#000000", plate):
+        return "#FFFFFF"
+    return "#000000"
 
 
-def _speaker_accents(lines: list, palette: dict, highlight_hex: str) -> dict:
+def _speaker_accents(lines: list, palette: dict, highlight_hex: str, plate: str = TWO_LINE_OUTLINE_HEX) -> dict:
     """``{speaker: hex_colour}``, one entry per distinct speaker in *lines*,
     assigned in first-appearance order (deterministic for a fixed script)
     from ``palette["primary"] + palette["accents"]`` (plan: "accent taken
@@ -735,7 +815,7 @@ def _speaker_accents(lines: list, palette: dict, highlight_hex: str) -> dict:
         speaker = line["speaker"]
         if speaker in accents:
             continue
-        color = _pick_next_accent(candidates, highlight_hex, chosen)
+        color = _pick_next_accent(candidates, highlight_hex, chosen, plate)
         accents[speaker] = color
         chosen.append(color)
     return accents
@@ -758,7 +838,7 @@ def _two_line_render_text(wrap_lines, word_texts, highlight_idx, highlight_ass_c
 
 
 def two_line_dialogue(lines: list, *, word_timings=None, palette: dict, typography: dict,
-                      geometry=profiles.PORTRAIT) -> tuple:
+                      geometry=profiles.PORTRAIT, look=None) -> tuple:
     """``(style_lines, event_lines, approx_by_line)`` for ``subtitle_mode
     == "two_line"``: one ``Style`` per speaker (:func:`_speaker_accents`,
     each accent kept clearly distinct from the highlight colour and from
@@ -769,19 +849,31 @@ def two_line_dialogue(lines: list, *, word_timings=None, palette: dict, typograp
     a small scale pop, reset with a bare ``\\r`` (never ``\\k`` -- plan:
     "no \\k") so later words in the same event fall back to the speaker
     Style's own colour. *geometry*'s frame sets the bottom margin
-    (:func:`_layout`)."""
+    (:func:`_layout`).
+
+    *look* (plan 23 stage B5; module docstring) sets the size, the block's
+    bottom edge (``position_pct`` of the frame's height), the highlight
+    colour, the outline and the box; the speakers' accents stay, picked
+    readable against the look's outline or box colour. ``None`` is the
+    output above, byte for byte."""
     layout = _layout(geometry)
     word_timings = word_timings or {}
-    highlight_hex = typography.get("highlight_colour") or TWO_LINE_DEFAULT_HIGHLIGHT_HEX
+    highlight_hex = (look.highlight_colour if look is not None and look.highlight_colour else None) \
+        or typography.get("highlight_colour") or TWO_LINE_DEFAULT_HIGHLIGHT_HEX
     highlight_ass_color = _ass_override_color(highlight_hex)
+    paint = _dialogue_paint(look, outline_hex=TWO_LINE_OUTLINE_HEX, outline_px=TWO_LINE_OUTLINE_PX)
+    outline_hex = paint.pop("outline_hex")
+    margin_v = layout.two_line_margin_v
+    if look is not None and look.position_pct is not None:
+        margin_v = round(layout.height * (100 - look.position_pct) / 100)
 
-    accents = _speaker_accents(lines, palette, highlight_hex)
+    accents = _speaker_accents(lines, palette, highlight_hex, outline_hex)
     style_names = {speaker: _speaker_style_name(speaker) for speaker in accents}
     style_lines = [
         _style_line(
-            style_names[speaker], typography["font_family"], TWO_LINE_FONT_SIZE,
-            hex_color, TWO_LINE_OUTLINE_HEX, bold=True, italic=False,
-            outline_px=TWO_LINE_OUTLINE_PX, alignment=2, margin_v=layout.two_line_margin_v,
+            style_names[speaker], typography["font_family"], _scaled_size(TWO_LINE_FONT_SIZE, look),
+            hex_color, outline_hex, bold=True, italic=False,
+            alignment=2, margin_v=margin_v, **paint,
         )
         for speaker, hex_color in accents.items()
     ]
@@ -810,13 +902,19 @@ def two_line_dialogue(lines: list, *, word_timings=None, palette: dict, typograp
 # --------------------------------------------------------------- hook / label
 
 def hook_overlay_events(hook_text: str, duration_s: float, *, typography: dict,
-                        geometry=profiles.PORTRAIT) -> tuple:
+                        geometry=profiles.PORTRAIT, look=None) -> tuple:
     """``(style_lines, event_lines)`` for the hook's on-screen text (spec
     6.4.1: "a separate top-third style"), uppercase, from the episode's own
     ``0.0`` s for *duration_s* (the hook scene's own span, module
     docstring / plan: "from 0.0 s for the hook scene's duration"). Returns
     ``([], [])`` for empty/``None`` *hook_text* -- a caller never needs to
-    guard this itself."""
+    guard this itself.
+
+    *look* (plan 23 stage B5) is accepted so every dialogue-adjacent builder
+    takes the same keyword, and changes nothing here: the hook keeps its own
+    size, place, colours and outline (a story's outline or text colour chosen
+    for the dialogue could leave this white text unreadable), and its font is
+    already the one the whole render uses (``typography``, DEC-159)."""
     if not hook_text:
         return [], []
     style_lines = [_style_line(
@@ -952,7 +1050,7 @@ def _scene_span(timeline: dict, scene_id: str) -> tuple:
 
 def build_subtitles_ass(*, timeline: dict, script: dict, subtitle_mode: str, language: str,
                          hook_style: str, ai_label_enabled: bool, palette: dict, typography: dict,
-                         word_timings=None, geometry=profiles.PORTRAIT) -> tuple:
+                         word_timings=None, geometry=profiles.PORTRAIT, look=None) -> tuple:
     """The full episode ``subtitles.ass`` document (everything burned by
     the final pass's ``ass=subtitles.ass:fontsdir=fonts`` in one file,
     spec 6.5): dialogue text for *subtitle_mode* (``word_pop``/
@@ -966,7 +1064,8 @@ def build_subtitles_ass(*, timeline: dict, script: dict, subtitle_mode: str, lan
     to label "approximate timing" in the UI (spec 6.4.1c). Raises
     :class:`SubtitleError` for an unknown *subtitle_mode*. *geometry* is the
     episode's frame (PlayRes and every position, :func:`_layout`; the
-    portrait document by default).
+    portrait document by default). *look* is the story's resolved subtitle
+    look (module docstring), ``None`` for the document this always built.
     """
     if subtitle_mode not in SUBTITLE_MODES:
         raise SubtitleError(f"unknown subtitle_mode {subtitle_mode!r}, expected one of {SUBTITLE_MODES}")
@@ -977,13 +1076,14 @@ def build_subtitles_ass(*, timeline: dict, script: dict, subtitle_mode: str, lan
     approx_by_line: dict = {}
 
     if subtitle_mode == "word_pop":
-        s, e, a = word_pop_dialogue(lines, word_timings=word_timings, typography=typography, geometry=geometry)
+        s, e, a = word_pop_dialogue(lines, word_timings=word_timings, typography=typography, geometry=geometry,
+                                    look=look)
         style_lines += s
         event_lines += e
         approx_by_line.update(a)
     elif subtitle_mode == "two_line":
         s, e, a = two_line_dialogue(lines, word_timings=word_timings, palette=palette, typography=typography,
-                                    geometry=geometry)
+                                    geometry=geometry, look=look)
         style_lines += s
         event_lines += e
         approx_by_line.update(a)
@@ -995,7 +1095,8 @@ def build_subtitles_ass(*, timeline: dict, script: dict, subtitle_mode: str, lan
         if hook_text and hook_scene is not None:
             start, end = _scene_span(timeline, hook_scene["scene_id"])
             hook_duration = end - start
-            s, e = hook_overlay_events(hook_text, hook_duration, typography=typography, geometry=geometry)
+            s, e = hook_overlay_events(hook_text, hook_duration, typography=typography, geometry=geometry,
+                                       look=look)
             style_lines += s
             event_lines += e
 

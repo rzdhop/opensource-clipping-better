@@ -541,6 +541,24 @@ export async function patchStory(storyId, payload) {
 }
 
 /**
+ * Set the story's own subtitle look (plan 23 stage B5): the whole
+ * `subtitle_style` object (`font_family`, `size_pct`, `position_pct`,
+ * `text_colour`, `highlight_colour`, `outline_px`, `outline_colour`, `box`),
+ * or `null` to clear it. Render-only, so allowed after the style lock; answers
+ * the story. 409 while a render of the story runs; 400 `{message, errors}`
+ * for a value out of range or a text colour unreadable on its outline or box.
+ */
+export async function patchSubtitleStyle(storyId, style) {
+  const res = await request(`/stories/${storyId}/subtitle-style`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(style),
+  })
+  if (!res.ok) throw await apiError(res, 'Failed to save the subtitles')
+  return res.json()
+}
+
+/**
  * Move the story onto (or off) the v2 pipeline (`{generation_profile,
  * regenerate_episodes}`): with `regenerate_episodes` the episodes already
  * written are archived first. Answers `{story, discarded, jobs_cleared,

@@ -8,7 +8,7 @@ import enum
 from datetime import datetime
 from typing import Any, Literal, Optional, Union
 
-from pydantic import BaseModel, Field, model_serializer
+from pydantic import BaseModel, ConfigDict, Field, model_serializer
 
 # Render defaults are sourced from the CLI config so the API and the CLI cannot
 # drift apart: config_adapter falls back to these same constants.
@@ -705,6 +705,29 @@ class StoryPatchRequest(BaseModel):
     narrator: Optional[dict] = None
     generation_profile: Optional[dict] = None
     episode_template_id: Optional[str] = None
+
+
+class SubtitleStylePatchRequest(BaseModel):
+    """PATCH /api/stories/{id}/subtitle-style (plan 23 stage B5): the story's
+    own subtitle look as a whole -- the body replaces it -- or a JSON ``null``
+    (or ``{}``) to clear it.
+
+    Every field is optional and typed loosely on purpose, and an unknown key
+    is kept: the values are checked once, by ``clipping.aistory.
+    subtitle_style.validate`` (400 with ``{"message", "errors"}``, the
+    contrast ratio named), not by pydantic (a 422). ``box`` is ``{colour,
+    opacity_pct}`` or ``null`` (no box).
+    """
+    model_config = ConfigDict(extra="allow")
+
+    font_family: Any = None
+    size_pct: Any = None
+    position_pct: Any = None
+    text_colour: Any = None
+    highlight_colour: Any = None
+    outline_px: Any = None
+    outline_colour: Any = None
+    box: Any = None
 
 
 class StorySwitchPipelineRequest(BaseModel):

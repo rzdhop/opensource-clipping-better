@@ -659,6 +659,48 @@ _APPROVALS_SCHEMA = {
 }
 
 
+# Optional (plan 23 stage B5): the story's own subtitle look, a render-only
+# setting edited at any time -- also after the style lock froze, which is why
+# it lives here and not in the lock. Every field is optional; absent, the
+# style lock's typography and the render's own numbers apply, so a story
+# without the key renders exactly as before. The font is one of the families
+# ``assets/fonts/fonts_index.json`` ships (tests/test_story_subtitle_style.py
+# keeps the two in step); the contrast rule between the text and its outline
+# or box is ``subtitle_style.validate``'s, since it reads two fields at once.
+SUBTITLE_FONT_FAMILIES = ("Montserrat", "Bangers", "Luckiest Guy", "Bebas Neue", "Chewy", "Patrick Hand")
+SUBTITLE_SIZE_PCT = (60, 160)
+# word_pop: the word's centre; two_line: the block's bottom edge -- both a
+# percentage of the frame's height measured from the top.
+SUBTITLE_POSITION_PCT = (15, 95)
+SUBTITLE_OUTLINE_PX = (0, 8)
+SUBTITLE_BOX_OPACITY_PCT = (0, 100)
+
+SUBTITLE_STYLE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "font_family": {"type": "string", "enum": list(SUBTITLE_FONT_FAMILIES)},
+        "size_pct": {"type": "integer", "minimum": SUBTITLE_SIZE_PCT[0], "maximum": SUBTITLE_SIZE_PCT[1]},
+        "position_pct": {"type": "number", "minimum": SUBTITLE_POSITION_PCT[0],
+                         "maximum": SUBTITLE_POSITION_PCT[1]},
+        "text_colour": {"type": "string", "pattern": HEX_COLOUR},
+        "highlight_colour": {"type": "string", "pattern": HEX_COLOUR},
+        "outline_px": {"type": "integer", "minimum": SUBTITLE_OUTLINE_PX[0], "maximum": SUBTITLE_OUTLINE_PX[1]},
+        "outline_colour": {"type": "string", "pattern": HEX_COLOUR},
+        "box": {
+            "type": ["object", "null"],
+            "properties": {
+                "colour": {"type": "string", "pattern": HEX_COLOUR},
+                "opacity_pct": {"type": "integer", "minimum": SUBTITLE_BOX_OPACITY_PCT[0],
+                                "maximum": SUBTITLE_BOX_OPACITY_PCT[1]},
+            },
+            "required": ["colour", "opacity_pct"],
+            "additionalProperties": False,
+        },
+    },
+    "additionalProperties": False,
+}
+
+
 def _id_array(pattern) -> dict:
     return {"type": "array", "items": {"type": "string", "pattern": pattern}}
 
@@ -697,6 +739,8 @@ STORY_BIBLE_SCHEMA = {
         "updated_at": _NON_EMPTY_STRING,
         # Optional (plan 21 stage 1): the approvals the agent run recorded.
         "approved_by": _STORY_APPROVED_BY_SCHEMA,
+        # Optional (plan 23 stage B5): the subtitle look; absent = today's.
+        "subtitle_style": SUBTITLE_STYLE_SCHEMA,
     },
     "required": [
         "$schema", "story_id", "title", "language", "seed_text", "concept_id", "concept",

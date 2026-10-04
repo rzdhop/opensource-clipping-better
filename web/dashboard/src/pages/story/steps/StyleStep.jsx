@@ -6,6 +6,8 @@ import EstimateChip from '../../../components/EstimateChip'
 import RouteChip from '../../../components/RouteChip'
 import { LiveActivity, useJobFeed } from '../../../components/ActivityFeed'
 import { StepError } from '../fields'
+import SubtitleStyleEditor from '../SubtitleStyleEditor'
+import { SUBTITLE_FONT_FAMILIES } from '../subtitleStyle'
 
 const HEX_RE = /^#[0-9a-fA-F]{6}$/
 const SUBTITLE_MODES = [
@@ -271,14 +273,20 @@ export default function StyleStep({ data, storyId, inFlightJob, onChange, onAdva
 
       <div className="form-group">
         <label className="form-label" htmlFor="style-font-family">Font family</label>
-        <input
+        <select
           id="style-font-family"
-          className="form-input"
-          type="text"
+          className="form-select"
           value={fontFamily}
           disabled={locked || busy}
           onChange={(e) => setFontFamily(e.target.value)}
-        />
+        >
+          {/* A template's own family the app does not ship (Fredoka Bold, Montserrat ExtraBold) stays
+              pickable as it is: it is drawn with the committed fallback font. */}
+          {fontFamily && !SUBTITLE_FONT_FAMILIES.includes(fontFamily) && (
+            <option value={fontFamily}>{fontFamily} (template font)</option>
+          )}
+          {SUBTITLE_FONT_FAMILIES.map((family) => <option key={family} value={family}>{family}</option>)}
+        </select>
       </div>
 
       <div className="form-group">
@@ -322,6 +330,22 @@ export default function StyleStep({ data, storyId, inFlightJob, onChange, onAdva
           />
           <span className="toggle-slider"></span>
         </label>
+      </div>
+
+      <div className="form-group story-subtitle-look">
+        <label className="form-label">Subtitle look</label>
+        <p className="form-hint">
+          Size, position, colours, outline and box of the subtitles. Saved on its own and editable any time,
+          the lock included: it only changes the next render.
+        </p>
+        <SubtitleStyleEditor
+          storyId={storyId}
+          story={story}
+          styleLock={styleLock}
+          busy={busy}
+          onChange={onChange}
+          showFont={false}
+        />
       </div>
 
       <div className="form-group">
