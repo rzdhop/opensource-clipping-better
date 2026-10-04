@@ -366,6 +366,11 @@ stories as cards (title, status, style, language); **New story** starts one.
 - **Activity feed** — a running job's log grouped by step, errors and warnings
   tinted and opened, *Copy log*, *Jump to latest*. On a phone the menu button
   in the top bar opens the navigation.
+- **Agent run** — on a story created in Agent mode, a card above the rail with
+  one button, *Run the agent*, that shows the summed estimate and the caps
+  before it runs. While it runs the card and the rail follow the job's part
+  ("Agent 4/9: cast"); a stop shows the runner's last line and offers to
+  *Continue the agent run*, and episode 1 rendered links to its Review tab.
 
 ### 1. New story
 

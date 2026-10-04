@@ -35,6 +35,33 @@ export function stepLabel(key) {
   return (STEPS.find((s) => s.key === key) || { label: key }).label
 }
 
+// Plan 21 stage 3: the agent run's parts, in order (``story_fast_track.
+// PARTS``, read as text by tests/test_dashboard_agent_run.py so this list
+// never drifts from the runner's own), each the rail key its sub_step drives
+// (``places_proposal`` -> ``places``; ``episode`` has no rail step -- episode
+// 1 itself) and the label the feed names it ("Agent n/9: <label>",
+// ``story_fast_track.LABELS``).
+export const AGENT_PARTS = [
+  { subStep: 'concepts', railKey: 'concepts', label: 'concept' },
+  { subStep: 'bible', railKey: 'bible', label: 'bible' },
+  { subStep: 'style', railKey: 'style', label: 'style' },
+  { subStep: 'cast', railKey: 'cast', label: 'cast' },
+  { subStep: 'places_proposal', railKey: 'places', label: 'places proposal' },
+  { subStep: 'places', railKey: 'places', label: 'places' },
+  { subStep: 'season', railKey: 'season', label: 'season' },
+  { subStep: 'knowledge', railKey: 'knowledge', label: 'knowledge' },
+  { subStep: 'episode', railKey: null, label: 'episode 1' },
+]
+
+/** The agent run's part a job's `sub_step` names -- `{subStep, railKey,
+ * label, number, total}` -- or null (no sub_step yet, or one this map does
+ * not carry). */
+export function agentPartOf(subStep) {
+  const index = AGENT_PARTS.findIndex((part) => part.subStep === subStep)
+  if (index < 0) return null
+  return { ...AGENT_PARTS[index], number: index + 1, total: AGENT_PARTS.length }
+}
+
 export function statusOf(key, story, data) {
   if (key === 'concepts') return story.approvals.concept ? 'done' : 'active'
   if (key === 'bible') {
@@ -122,6 +149,12 @@ export function stepOfJob(job) {
   if (!job) return null
   const target = job.params && typeof job.params.target === 'string' ? job.params.target : ''
   switch (job.step) {
+    // Plan 21 stage 3: the agent run names its own rail step by its
+    // sub_step (AGENT_PARTS), not by its own job step name.
+    case 'story-fast-track': {
+      const part = agentPartOf(job.sub_step)
+      return part ? part.railKey : null
+    }
     case 'concepts': return 'concepts'
     case 'bible': return 'bible'
     case 'style_preview': return 'style'

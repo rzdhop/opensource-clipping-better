@@ -5,9 +5,10 @@ it and adds, per story, what a card shows: ``cover`` (the API path of the
 first character's portrait on disk, leads first), ``progress`` (the steps
 done in order, out of six -- seven on a v2 story, which has the knowledge
 step -- and the next one), ``episodes`` (how many, and the latest one's
-furthest point), ``style_label`` and ``pipeline``. All of it is read from the
-documents (``workflow.list_cards``), calling nothing; a story whose documents
-cannot be read keeps no cover and zeros, and never fails the list.
+furthest point), ``style_label``, ``pipeline`` and ``mode`` (plan 21 stage 3:
+``studio`` or ``agent``, the dashboard's "Agent" chip). All of it is read
+from the documents (``workflow.list_cards``), calling nothing; a story whose
+documents cannot be read keeps no cover and zeros, and never fails the list.
 
 The route tests use the app fixture of ``tests/test_stories_api.py`` (they
 skip where fastapi is not installed, DEC-012); the rule-level tests at the
@@ -29,7 +30,7 @@ NOW = "2026-10-03T10:00:00+00:00"
 LATER = "2026-10-03T11:00:00+00:00"
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 24
 INDEX_FIELDS = ("story_id", "title", "language", "style_template_id", "status", "created_at", "updated_at")
-CARD_FIELDS = ("cover", "progress", "episodes", "style_label", "pipeline")
+CARD_FIELDS = ("cover", "progress", "episodes", "style_label", "pipeline", "mode")
 
 
 def _portrait_ref(name="portrait.png"):
@@ -93,6 +94,13 @@ def test_a_story_with_a_portrait_has_the_first_lead_portrait_on_disk_as_its_cove
     assert card["progress"] == {"steps_done": 1, "steps_total": 6, "next": "bible"}
     assert card["episodes"] == {"count": 0, "latest": None}
     assert card["pipeline"] is None
+    assert card["mode"] == "studio"
+
+
+def test_a_story_in_agent_mode_names_it_on_its_card(api):
+    story_id = tsa._create(api, "fr", mode="agent")["story_id"]
+
+    assert _cards(api)[story_id]["mode"] == "agent"
 
 
 def test_a_story_without_a_portrait_has_no_cover_and_starts_at_the_concepts_step(api):

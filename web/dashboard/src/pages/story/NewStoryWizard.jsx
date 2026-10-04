@@ -1,7 +1,16 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { createStory, fetchNewStoryProfile, fetchStyles } from '../../api'
+import { Button } from '../../ui'
 import { EPISODE_TEMPLATES, pipelineDefaultTemplate, styleSuggestedTemplate } from './episodeTemplates'
+
+// Plan 21 decision 4: the Mode choice's own label, Studio first (the
+// default).
+const MODE_HELP = {
+  studio: 'Approve each step yourself.',
+  agent: ('One run from the idea to episode 1; the agent approves the style, the cast and the places as soon as '
+    + 'they are complete -- no taste check; review them in Studio afterwards, every regenerate stays available.'),
+}
 
 // The new-story form (`/story/new`). An existing story opens in the story
 // workspace (StoryWorkspace.jsx, dashboard overhaul stage 3, DEC-255).
@@ -17,6 +26,7 @@ function CreateStoryForm() {
   // No default: a language a user forgot to pick must never silently become
   // one, matching StoryCreateRequest and the CLI's --lang.
   const [language, setLanguage] = useState(null)
+  const [mode, setMode] = useState('studio')
   const [seedText, setSeedText] = useState('')
   const [styleTemplateId, setStyleTemplateId] = useState('')
   const [styles, setStyles] = useState([])
@@ -92,9 +102,10 @@ function CreateStoryForm() {
         // Picked or suggested by the style; else null: the server starts the
         // story on its pipeline's format (defaults.episode_template_for).
         episode_template_id: episodeTemplateChoice || suggestedTemplate || null,
-        // Plan 21: Studio (every step waits for your approval). The wizard's
-        // Mode choice (agent mode) arrives with the dashboard stage.
-        mode: 'studio',
+        // Plan 21 stage 3: the Mode choice below -- studio (every step waits
+        // for your approval, the default) or agent (one story-fast-track job
+        // approves by rule).
+        mode,
         // Untouched, null: the server picks (media_policy.new_story_profile).
         generation_profile: profileChosen ? {
           tier,
@@ -143,6 +154,29 @@ function CreateStoryForm() {
               </button>
             </div>
             <p className="form-hint">Required — nothing is picked for you.</p>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Mode</label>
+            <div className="story-segmented" role="group" aria-label="Mode">
+              <Button
+                type="button"
+                variant={mode === 'studio' ? 'primary' : 'secondary'}
+                size="sm"
+                onClick={() => setMode('studio')}
+              >
+                Studio
+              </Button>
+              <Button
+                type="button"
+                variant={mode === 'agent' ? 'primary' : 'secondary'}
+                size="sm"
+                onClick={() => setMode('agent')}
+              >
+                Agent
+              </Button>
+            </div>
+            <p className="form-hint">{MODE_HELP[mode]}</p>
           </div>
 
           <div className="form-group">

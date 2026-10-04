@@ -2912,9 +2912,11 @@ def list_episodes(stories, story_id) -> dict:
 
 def list_card(stories, entry) -> dict:
     """*entry* (an index entry, its fields kept as they are) with ``cover``,
-    ``progress``, ``episodes``, ``style_label`` and ``pipeline`` (the story's
-    ``generation_profile.pipeline``, None for a legacy story) added. Each
-    part is read on its own: one that cannot be read keeps its empty value."""
+    ``progress``, ``episodes``, ``style_label``, ``pipeline`` (the story's
+    ``generation_profile.pipeline``, None for a legacy story) and ``mode``
+    (plan 21 stage 3: ``studio`` or ``agent``, :func:`story_mode`'s default)
+    added. Each part is read on its own: one that cannot be read keeps its
+    empty value."""
     card = dict(entry)
     card.update({
         "cover": None,
@@ -2922,6 +2924,7 @@ def list_card(stories, entry) -> dict:
         "episodes": {"count": 0, "latest": None},
         "style_label": style_label(entry.get("style_template_id")),
         "pipeline": None,
+        "mode": defaults.MODE_STUDIO,
     })
     story_id = entry.get("story_id")
     try:
@@ -2929,6 +2932,7 @@ def list_card(stories, entry) -> dict:
     except _LIST_UNREADABLE:
         return card
     card["pipeline"] = (story.get("generation_profile") or {}).get("pipeline") or None
+    card["mode"] = story_mode(story)
     for field, read in (("cover", lambda: list_cover(stories, story_id)),
                         ("progress", lambda: list_progress(stories, story)),
                         ("episodes", lambda: list_episodes(stories, story_id))):

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { fetchStories, deleteStory, fetchStyles, styleNameOf, fetchStoryCoverUrl } from '../../api'
 import { Button, Chip, EmptyState, Menu, Skeleton, useConfirm } from '../../ui'
-import { ArrowRight, BookOpen, Clapperboard, Sparkles, Trash2 } from '../../ui/icons'
+import { ArrowRight, Bot, BookOpen, Clapperboard, Sparkles, Trash2 } from '../../ui/icons'
 import { formatDateTime, formatRelativeTime } from '../../lib/format'
 
 // The story steps' names, by the step ids the list's `progress.next` carries
@@ -238,6 +238,7 @@ export default function StoriesList() {
                     <Chip>{story.language === 'fr' ? 'FR' : 'EN'}</Chip>
                     {styleLabel && <Chip>{styleLabel}</Chip>}
                     {story.pipeline === 'v2' && <Chip tone="accent" icon={Clapperboard}>Animated</Chip>}
+                    {story.mode === 'agent' && <Chip tone="accent" icon={Bot}>Agent</Chip>}
                   </div>
                   <ProgressRibbon progress={story.progress} episodes={story.episodes} />
                   <div className="story-list-updated" title={formatDateTime(story.updated_at)}>

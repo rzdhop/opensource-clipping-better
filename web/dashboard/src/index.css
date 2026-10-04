@@ -3956,6 +3956,11 @@ button.activity-group-head:focus-visible {
   }
 }
 
+/* --- Agent run card (plan 21 stage 3) --------------------------------------- */
+.story-agent-run-card {
+  margin-bottom: var(--space-5);
+}
+
 /* --- Rail + content -------------------------------------------------------- */
 .story-workspace {
   display: grid;

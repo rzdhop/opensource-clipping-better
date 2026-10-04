@@ -34,7 +34,7 @@ import ast
 import pathlib
 import re
 
-from clipping.aistory import prompts, refimages, schemas, workflow
+from clipping.aistory import defaults, prompts, refimages, schemas, workflow
 from clipping.aistory.steps import regenerate as regenerate_step
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -89,6 +89,22 @@ def test_create_fields_matches_story_create_request_exactly():
     sent = _create_fields()
     declared = _class_fields("StoryCreateRequest")
     assert sent == declared, (sent, declared)
+
+
+# ------------------------------------------------- NewStoryWizard.jsx: the Mode choice
+
+def test_the_wizard_offers_both_modes_and_sends_the_choice():
+    """Plan 21 stage 3: the "Mode" choice (Studio, the default; Agent) sends
+    `mode`, both of StoryCreateRequest's own values reachable from the form
+    -- kit `Button`s, not a plain `<button>` (DEC-253)."""
+    assert len(defaults.STORY_MODES) == 2  # non-vacuity
+    src = NEW_STORY_WIZARD.read_text(encoding="utf-8")
+    assert "from '../../ui'" in src  # the kit, not a hand-written button
+    assert "const [mode, setMode] = useState('studio')" in src
+    for value in defaults.STORY_MODES:
+        assert f"setMode('{value}')" in src, (value, src)
+    create = re.search(r"const createFields = \{(.*?)\n      \}", src, re.DOTALL).group(1)
+    assert re.search(r"^ {8}mode,\s*$", create, re.MULTILINE), create
 
 
 # ------------------------------------------------------- StyleStep.jsx: styleParams

@@ -5,6 +5,7 @@ import { LiveActivity, useJobFeed } from '../../components/ActivityFeed'
 import { Badge, Button, Card, CardBody, CardHeader, EmptyState, Skeleton } from '../../ui'
 import { ArrowRight, Film, Lock } from '../../ui/icons'
 import StoryHeader from './StoryHeader'
+import AgentRunCard from './AgentRunCard'
 import StepRail from './StepRail'
 import {
   IN_FLIGHT, currentStepKey, disabledReason, stepLabel, stepOfJob, stepsFor, statusOf, summaryFor,
@@ -200,6 +201,9 @@ export default function StoryWorkspace() {
   const index = steps.indexOf(active)
   const nextStep = index < steps.length - 1 ? steps[index + 1] : null
   const badge = STATUS_BADGES[status]
+  // Plan 21 stage 3: an agent-mode story (generation_profile.mode, DEC-270)
+  // gets the agent run card; a Studio story sees nothing new here.
+  const isAgentStory = Boolean(story.generation_profile && story.generation_profile.mode === 'agent')
 
   const headerActions = (
     <>
@@ -224,6 +228,8 @@ export default function StoryWorkspace() {
         inFlightJob={inFlightJob}
         onChange={refresh}
       />
+
+      {isAgentStory && <AgentRunCard storyId={storyId} data={data} onChange={refresh} />}
 
       <div className="story-workspace">
         <StepRail storyId={storyId} steps={railSteps} activeKey={active.key} runningKey={runningKey} />
