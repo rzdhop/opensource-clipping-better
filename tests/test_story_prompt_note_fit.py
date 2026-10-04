@@ -88,7 +88,9 @@ def test_the_keyframe_auto_fix_s_note_makes_room_in_the_prompt_instead_of_stoppi
     assert any(line.startswith(f"ℹ️ Shot {flagged['shot_id']}'s keyframe prompt: its note") and "resolved again"
                in line for line in log)
     shot = kf._shot(store, story_id, flagged["shot_id"])
-    assert shot["assets"]["note"] == note and shot["assets"]["pending"] is None
+    # DEC-265: the stored note is J2's text followed by the framing order.
+    assert shot["assets"]["note"].startswith(f"{note}. Frame this as ") and shot["assets"]["note"].endswith(", nothing wider.")
+    assert shot["assets"]["pending"] is None
     assert assets.shot_state(tas._ec(store, story_id), shot) == "current"
     assert summary["keyframes"]["fix"]["fixed"] == [flagged["shot_id"]]
 
