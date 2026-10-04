@@ -2426,3 +2426,67 @@ def test_e3_v2_asks_for_the_hook_text_v1_unchanged():
     # RC-M1: v1 E3 is byte for byte what it was.
     v1 = prompts.build_e3(_pack("fr"), **_e3_kwargs())
     assert _sha_call(v1) == _E3_V1_EP2_SHA256 and "required whatever the hook style" not in v1[1]
+
+
+# ============================================ the narrated drama (plan 20 stage 1)
+#
+# narrated_drama_60s_v2 carries narrator_share and character_lines; with the
+# story's narrator on, E1v2 and E2 each gain one ask line. Every other
+# template carries neither, so prompts.narration_of answers None and every
+# prompt is byte for byte what it was: the ep-1 goldens above stay unedited
+# (RC-M1) and are re-checked here on the same calls.
+
+NARRATED = templates.load_episode_template("narrated_drama_60s_v2")
+NARRATED_E2 = ("Narrated drama: the narrator carries 60-85% of this episode's words, in a telenovela tone (dramatic, "
+               "slightly over the top, never explaining what the picture shows); the characters speak at most 4 "
+               "short lines in the whole episode, each a punch -- here at most one character line, and only where "
+               "it hits hardest.")
+NARRATED_E1 = ("Narrated drama: the narrator carries 60-85% of this episode's words, in a telenovela tone; the "
+               "characters speak only 2 to 4 short lines in the whole episode -- plan the scenes so the narration "
+               "tells the story and those few lines land as punches.")
+
+
+def test_narration_comes_from_the_narrated_template_only_and_only_with_the_narrator_on():
+    narration = prompts.narration_of(NARRATED)
+    assert narration == {"narrator_share": [0.6, 0.85], "character_lines": [2, 4]}
+    assert prompts.narration_of(NARRATED, narrator_enabled=False) is None
+    for template_id in ("serial_60s_v1", "serial_60s_v2", "serial_90s_v1", "serial_90s_v2"):
+        assert prompts.narration_of(templates.load_episode_template(template_id)) is None, template_id
+    assert prompts.narration_e1_line(None) == "" and prompts.narration_e2_line(None) == ""
+
+
+def test_the_narrated_template_adds_one_ask_line_to_e2_and_e1_v2_and_nothing_else_changes():
+    narration = prompts.narration_of(NARRATED)
+    kwargs = _e2_kwargs(narrator_enabled=True)
+
+    # E2v2: the line once, after the v2 asks and before the closing sentences; the schema is unchanged.
+    plain = prompts.build_e2_v2(_pack("fr"), slice_text=SLICE, **kwargs)
+    told = prompts.build_e2_v2(_pack("fr"), slice_text=SLICE, narration=narration, **kwargs)
+    assert told[1].count(NARRATED_E2) == 1 and NARRATED_E2 not in plain[1]
+    assert told[1].index(NO_REPEAT) < told[1].index(NARRATED_E2) < told[1].index("Never use real people")
+    assert told[1].replace(NARRATED_E2 + "\n\n", "") == plain[1]
+    assert told[0] == plain[0] and told[2] == plain[2]
+    assert prompts.build_e2_v2(_pack("fr"), slice_text=SLICE, narration=None, **kwargs) == plain
+
+    # E2 (v1, through the same _build_e2): the same line, and None is byte for byte the golden.
+    v1 = prompts.build_e2(_pack("fr"), **_e2_kwargs())
+    assert _sha_call(v1) == _E2_V1_SHA256
+    assert prompts.build_e2(_pack("fr"), narration=None, **_e2_kwargs()) == v1
+    told_v1 = prompts.build_e2(_pack("fr"), narration=narration, **kwargs)
+    assert told_v1[1].count(NARRATED_E2) == 1
+
+    # E1v2: its own line, after the v2 asks; the schema is unchanged.
+    e1_kwargs = dict(ep=1, arc_entry=ARC_ENTRY, template=NARRATED, episode_defaults=EPISODE_DEFAULTS,
+                     cast=CAST_E1, places=PLACES_E1, props=PROPS_E1, memory=MEMORY_NONE,
+                     slots=timing.episode_slots(NARRATED, 1))
+    e1_plain = prompts.build_e1_v2(_pack("fr"), slice_text="Episode plan: x", **e1_kwargs)
+    e1_told = prompts.build_e1_v2(_pack("fr"), slice_text="Episode plan: x", narration=narration, **e1_kwargs)
+    assert e1_told[1].count(NARRATED_E1) == 1 and NARRATED_E1 not in e1_plain[1]
+    assert e1_told[1].index("Stage the planned beats above") < e1_told[1].index(NARRATED_E1)
+    assert e1_told[1].replace(NARRATED_E1 + "\n\n", "") == e1_plain[1] and e1_told[2] == e1_plain[2]
+    # The narrated template's own episode 1 is six scenes: hook, four body passages, cliffhanger.
+    assert "exactly 6 entries" in e1_plain[1]
+
+    # RC-M1: the ep-1 goldens are untouched.
+    assert _triple_sha(_ep1_e1()) == RC_M1_SHAS["E1"]
+    assert _triple_sha(_ep1_e3()) == RC_M1_SHAS["E3"]

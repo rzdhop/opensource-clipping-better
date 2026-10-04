@@ -2087,3 +2087,47 @@ def test_rc_m1_an_episode_1_script_run_sends_the_same_e1_e3_e4_as_head(store):
 
     assert {prompt: _request_sha(llm.of(prompt)[0]) for prompt in ("E1", "E3", "E4")} == RC_M1_STEP_SHAS
     assert all("pays_off" not in scene for scene in _script(store, story_id)["scenes"])
+
+
+# ============================================ the narrated drama (plan 20 stage 1)
+
+def _e1_reply_for(template):
+    """E1_REPLY cut to *template*'s episode 1 (``timing.episode_slots``):
+    its hook, its first body scenes, its cliffhanger, each duration hint the
+    middle of its own slot's range."""
+    scenes = E1_REPLY["scenes"]
+    n_body = timing.episode_slots(template, 1).count("body")
+
+    def hinted(scene, slot):
+        lo, hi = template["slots"][slot]["duration_s"]
+        return dict(scene, target_duration_s=(lo + hi) / 2)
+
+    body = [hinted(scene, "body") for scene in scenes[1:1 + n_body]]
+    return dict(E1_REPLY, scenes=[hinted(scenes[0], "hook")] + body + [hinted(scenes[-1], "cliffhanger")])
+
+
+@pytest.mark.parametrize("template_id,narrator,narrated", [
+    ("narrated_drama_60s_v2", True, True),
+    ("narrated_drama_60s_v2", False, False),  # a narrator that cannot speak carries no share
+    ("serial_60s_v2", True, False),
+])
+def test_a_narrated_story_s_beat_sheet_and_scenes_are_asked_for_the_narration(store, template_id, narrator,
+                                                                               narrated):
+    """The script step hands E1v2 and E2v2 the narration of the story's own
+    template (``prompts.narration_of``): the narrated drama's calls carry its
+    ask line while the narrator is on; with it off, or on serial_60s_v2, they
+    carry none (those prompts are what they were)."""
+    story_id = _ready_story(store, v2=True)
+    store.update(story_id, lambda doc: doc.update(episode_template_id=template_id,
+                                                  narrator=dict(doc["narrator"], enabled=narrator)), now=NOW)
+    e1 = _e1_reply_for(templates.load_episode_template(template_id))
+    llm = _script_llm(v2=True, E1=[e1], E2=[e2_v2_reply] * 12, E4=[E4_PASSED])
+    _run(_new().script, store, story_id, llm=llm)
+    narration = prompts.narration_of(templates.load_episode_template("narrated_drama_60s_v2"))
+    e1_line, e2_line = prompts.narration_e1_line(narration), prompts.narration_e2_line(narration)
+    (e1_call,) = llm.of("E1v2")
+    e2_calls = llm.of("E2v2")
+    assert e2_calls
+    assert (e1_line in e1_call["user"]) is narrated
+    assert all((e2_line in call["user"]) is narrated for call in e2_calls)
+    assert _script(store, story_id)["template_id"] == template_id

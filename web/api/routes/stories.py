@@ -737,7 +737,9 @@ async def create_story(req: StoryCreateRequest) -> dict:
     """Create a draft story; 201 with the whole ``story.json``.
 
     ``language`` is required (422 without it). An unknown
-    ``style_template_id`` is a 400 naming the shipped ones.
+    ``style_template_id`` or ``episode_template_id`` is a 400 naming the
+    shipped ones; without ``episode_template_id`` the story starts on its
+    pipeline's template (``defaults.episode_template_for``).
 
     Without a ``generation_profile`` the story is on the quality preset (v2,
     tier 2, api, references, quality) when Settings hold FAL_KEY
@@ -755,6 +757,7 @@ async def create_story(req: StoryCreateRequest) -> dict:
             seed_text=req.seed_text,
             style_template_id=req.style_template_id,
             generation_profile=profile,
+            episode_template_id=req.episode_template_id,
             now=_now(),
         )
     except ValueError as exc:
@@ -798,6 +801,9 @@ async def list_styles() -> dict:
             "episode_defaults": {
                 "hook_style": template["episode_defaults"]["hook_style"],
                 "cliffhanger_style": template["episode_defaults"]["cliffhanger_style"],
+                # The style's suggested episode format (plan 20 stage 1): the
+                # new-story form pre-fills it when it fits the pipeline.
+                "episode_template_id": template["episode_defaults"]["episode_template_id"],
             },
         })
     return {"styles": styles}

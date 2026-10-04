@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { createStory, fetchNewStoryProfile, fetchStyles } from '../../api'
+import { EPISODE_TEMPLATES, pipelineDefaultTemplate, styleSuggestedTemplate } from './episodeTemplates'
 
 // The new-story form (`/story/new`). An existing story opens in the story
 // workspace (StoryWorkspace.jsx, dashboard overhaul stage 3, DEC-255).
@@ -25,6 +26,9 @@ function CreateStoryForm() {
   const [consistencyMode, setConsistencyMode] = useState(DEFAULT_GENERATION_PROFILE.consistency_mode)
   const [budgetProfile, setBudgetProfile] = useState(DEFAULT_GENERATION_PROFILE.budget_profile)
   const [pipeline, setPipeline] = useState('')
+  // The episode format the user picked; '' until they pick one, so the
+  // select follows the style's suggestion, else the pipeline's default.
+  const [episodeTemplateChoice, setEpisodeTemplateChoice] = useState('')
   // What the server gives a story created now (GET /api/stories/new-profile):
   // the quality preset -- v2, every shot animated -- when FAL_KEY is set.
   const [offer, setOffer] = useState(null)
@@ -64,6 +68,13 @@ function CreateStoryForm() {
   // server's price table; phase 7 stage 7): shown whether or not it is the
   // default yet, so a missing key is weighed against a price.
   const estimate = offer && offer.estimate
+  // Plan 20 stage 1: a style suggests an episode format
+  // (episode_defaults.episode_template_id -- Fruit Drama the narrated drama)
+  // when it fits the pipeline; the story keeps whichever is sent.
+  const chosenStyle = styles.find((style) => style.template_id === styleTemplateId)
+  const suggestedTemplate = styleSuggestedTemplate(chosenStyle, pipeline)
+  const episodeTemplateId = episodeTemplateChoice || suggestedTemplate || pipelineDefaultTemplate(pipeline)
+  const episodeFormat = EPISODE_TEMPLATES.find((tpl) => tpl.id === episodeTemplateId)
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -78,6 +89,9 @@ function CreateStoryForm() {
         language,
         seed_text: seedText.trim() ? seedText : null,
         style_template_id: styleTemplateId || null,
+        // Picked or suggested by the style; else null: the server starts the
+        // story on its pipeline's format (defaults.episode_template_for).
+        episode_template_id: episodeTemplateChoice || suggestedTemplate || null,
         // Untouched, null: the server picks (media_policy.new_story_profile).
         generation_profile: profileChosen ? {
           tier,
@@ -167,6 +181,22 @@ function CreateStoryForm() {
                 </button>
               ))}
             </div>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="new-story-episode-format">Episode format</label>
+            <select
+              id="new-story-episode-format"
+              className="form-select"
+              value={episodeTemplateId}
+              onChange={(e) => setEpisodeTemplateChoice(e.target.value)}
+            >
+              {EPISODE_TEMPLATES.map((tpl) => <option key={tpl.id} value={tpl.id}>{tpl.label}</option>)}
+            </select>
+            <p className="form-hint">
+              {episodeFormat ? episodeFormat.help : ''}
+              {!episodeTemplateChoice && suggestedTemplate ? ' Suggested by the style.' : ''}
+            </p>
           </div>
 
           <div className="form-group">

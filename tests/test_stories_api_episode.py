@@ -462,6 +462,38 @@ def test_the_episode_length_is_a_story_edit_until_an_episode_is_written(api):
     assert response.status_code == 409 and "episode 1 has a script" in response.json()["detail"]
 
 
+def test_the_episode_format_is_chosen_on_creation_and_patched_until_an_episode_is_written(api):
+    """Plan 20 stage 1: ``POST /api/stories`` takes ``episode_template_id``
+    (the new-story form's "Episode format") and stores it whatever the
+    pipeline; an unshipped id is a 400 and creates nothing; left out, the
+    pipeline's default as before. ``PATCH`` moves a story onto a new format
+    until an episode has a script (409 after)."""
+    created = api.client.post("/api/stories", json={"language": "fr", "style_template_id": "fruit_drama",
+                                                    "episode_template_id": "narrated_drama_60s_v2"})
+    assert created.status_code == 201, created.text
+    story = created.json()
+    assert story["episode_template_id"] == "narrated_drama_60s_v2"
+    assert api.store.get(story["story_id"])["episode_template_id"] == "narrated_drama_60s_v2"
+
+    before = sorted(p.name for p in (api.outputs / "stories").iterdir())
+    refused = api.client.post("/api/stories", json={"language": "fr", "episode_template_id": "serial_45s_v1"})
+    assert refused.status_code == 400 and "serial_45s_v1" in refused.json()["detail"]
+    assert sorted(p.name for p in (api.outputs / "stories").iterdir()) == before
+
+    legacy = api.client.post("/api/stories", json={"language": "en", "generation_profile": {"tier": 1}}).json()
+    assert legacy["episode_template_id"] == "serial_60s_v1"
+
+    story_id = _ready_story(api.store)
+    for template_id in ("serial_90s_v2", "narrated_drama_60s_v2", "serial_60s_v1"):
+        response = api.client.patch(_url(story_id), json={"episode_template_id": template_id})
+        assert response.status_code == 200 and response.json()["episode_template_id"] == template_id
+    job = _post_step(api, story_id, "script", ep=1).json()
+    assert _run(api, job["id"], _script_llm())["status"] == "awaiting_approval"
+    response = api.client.patch(_url(story_id), json={"episode_template_id": "narrated_drama_60s_v2"})
+    assert response.status_code == 409 and "episode 1 has a script" in response.json()["detail"]
+    assert api.store.get(story_id)["episode_template_id"] == "serial_60s_v1"
+
+
 # ============================================================= regenerate
 
 def test_each_episode_step_and_target_is_a_job_of_its_document(api):

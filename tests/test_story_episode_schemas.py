@@ -43,8 +43,11 @@ def _mutate(doc, fn):
 
 # Re-pinned on purpose (DEC-227, phase 7 stage 4): serial_60s_v2, the template a
 # v2 story is created on, is the third shipped one (count 2 -> 3); the v1 two
-# are unchanged.
-EXPECTED_EPISODE_TEMPLATE_IDS = ("serial_60s_v1", "serial_60s_v2", "serial_90s_v1")
+# are unchanged. Re-pinned on purpose again (plan 20 stage 1, the fruit-drama
+# pack): narrated_drama_60s_v2 and serial_90s_v2 join them (count 3 -> 5); the
+# three before are unchanged.
+EXPECTED_EPISODE_TEMPLATE_IDS = ("narrated_drama_60s_v2", "serial_60s_v1", "serial_60s_v2", "serial_90s_v1",
+                                 "serial_90s_v2")
 
 
 def test_exactly_the_two_shipped_episode_template_ids():
@@ -165,6 +168,86 @@ def test_default_body_count_clamped_slot_list_length_matches_timing_episode_slot
 def test_story_bible_episode_template_id_stays_an_enum_of_shipped_ids():
     schema = schemas.STORY_BIBLE_SCHEMA["properties"]["episode_template_id"]
     assert set(schema["enum"]) == set(defaults.EPISODE_TEMPLATE_IDS)
+
+
+# ------------------------------------------------- 1c. the fruit-drama pack (plan 20 stage 1)
+
+@pytest.mark.parametrize("template_id,ep1,ep2", [
+    ("narrated_drama_60s_v2", 6, 7),  # hook+4 longer body passages+cliffhanger; +recap from ep2
+    ("serial_90s_v2", 10, 11),        # hook+8 body+cliffhanger; +recap from ep2 (12 is the script's cap)
+])
+def test_the_new_templates_slot_lists(template_id, ep1, ep2):
+    from clipping.aistory import timing
+
+    tpl = templates.load_episode_template(template_id)
+    assert len(timing.episode_slots(tpl, 1)) == ep1
+    assert len(timing.episode_slots(tpl, tpl["recap_from_episode"])) == ep2
+    assert ep2 <= schemas.EPISODE_SCRIPT_SCHEMA["properties"]["scenes"]["maxItems"]
+
+
+def test_the_narrated_template_carries_the_narration_and_the_others_do_not():
+    narrated = templates.load_episode_template("narrated_drama_60s_v2")
+    assert narrated["narrator_share"] == [0.6, 0.85]
+    assert narrated["character_lines"] == [2, 4]
+    assert narrated["end_card_cta"] is True
+    assert narrated["window_s"][0] <= 60 and narrated["tighten_above_s"] == 75
+    v2 = templates.load_episode_template("serial_60s_v2")
+    # Fewer, longer body passages than the v2 template it comes from.
+    assert narrated["default_body_count"] < v2["default_body_count"]
+    assert narrated["slots"]["body"]["duration_s"][0] > v2["slots"]["body"]["duration_s"][0]
+    for key in ("shots_per_scene", "max_shot_s", "min_shot_s", "pauses_s", "transitions_s"):
+        assert narrated[key] == v2[key], key
+    # RC-M1: the narration fields exist on the narrated template only.
+    for template_id in ("serial_60s_v1", "serial_60s_v2", "serial_90s_v1", "serial_90s_v2"):
+        tpl = templates.load_episode_template(template_id)
+        assert {"narrator_share", "character_lines", "end_card_cta"}.isdisjoint(tpl), template_id
+
+
+def test_serial_90s_v2_is_the_60s_v2_shape_at_80_to_100_s():
+    ninety, sixty = (templates.load_episode_template(t) for t in ("serial_90s_v2", "serial_60s_v2"))
+    assert ninety["window_s"] == [80, 100] and ninety["target_s"] == 90
+    for key in ("min_shot_s", "max_shot_s", "shots_per_scene", "pauses_s", "transitions_s", "recap_from_episode"):
+        assert ninety[key] == sixty[key], key
+    for slot in ("recap", "hook", "body", "cliffhanger"):
+        assert ninety["slots"][slot]["duration_s"] == sixty["slots"][slot]["duration_s"], slot
+    assert ninety["slots"]["body"]["count"][1] > sixty["slots"]["body"]["count"][1]
+    assert ninety["shots"][1] > sixty["shots"][1]
+
+
+def _narration_reversed(doc):
+    doc["narrator_share"] = [0.9, 0.6]
+
+
+def _narration_alone(doc):
+    del doc["character_lines"]
+
+
+def _narration_over_one(doc):
+    doc["narrator_share"] = [0.6, 1.2]
+
+
+@pytest.mark.parametrize("mutate,keyword", [
+    (_narration_reversed, "must satisfy 0 <= lo <= hi"),
+    (_narration_alone, "come together"),
+    (_narration_over_one, "narrator_share"),
+])
+def test_a_broken_narration_is_refused(mutate, keyword):
+    doc = _mutate(templates.load_episode_template("narrated_drama_60s_v2"), mutate)
+    errors = schemas.episode_template_errors(doc)
+    assert any(keyword in e for e in errors), errors
+
+
+def test_a_style_suggests_any_shipped_template_and_no_other():
+    """The style's episode_defaults.episode_template_id was the const
+    serial_60s_v1 (never read); plan 20 stage 1 lifted it to the shipped ids:
+    a suggestion the new-story form pre-fills."""
+    style = templates.load_style("fruit_drama")
+    assert style["episode_defaults"]["episode_template_id"] == "narrated_drama_60s_v2"
+    for template_id in defaults.EPISODE_TEMPLATE_IDS:
+        doc = _mutate(style, lambda d, t=template_id: d["episode_defaults"].__setitem__("episode_template_id", t))
+        assert schemas.style_template_errors(doc) == [], template_id
+    doc = _mutate(style, lambda d: d["episode_defaults"].__setitem__("episode_template_id", "serial_45s_v1"))
+    assert any("episode_template_id" in e for e in schemas.style_template_errors(doc))
 
 
 # ======================================================== 2a. episode_script_v1

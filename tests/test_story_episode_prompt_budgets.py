@@ -921,6 +921,22 @@ def test_v2_writing_worst_cases_measure_what_is_recorded_and_fit_their_budgets(p
     assert budget > v1  # the slice needs room of its own; the v1 rows are untouched (RC-M1)
 
 
+def test_the_narrated_drama_line_still_fits_the_e1v2_e2v2_and_e2_worst_cases():
+    """Plan 20 stage 1: a narrated template (narrated_drama_60s_v2) adds one
+    ask line to E1v2 and to E2 (v1 and v2); the measured worst cases above,
+    each with that line added, still fit the budgets they were sized on --
+    none is re-pinned."""
+    from clipping.aistory import templates
+
+    narration = prompts.narration_of(templates.load_episode_template("narrated_drama_60s_v2"))
+    for prompt_id, triple, line in (("E1v2", _e1v2(), prompts.narration_e1_line(narration)),
+                                    ("E2v2", _e2v2(), prompts.narration_e2_line(narration)),
+                                    ("E2", _e2(), prompts.narration_e2_line(narration))):
+        assert line
+        system, user = triple[:2]
+        _fits(prompt_id, system, user + line)
+
+
 def test_t1_v2_asks_an_insert_only_when_the_hook_scene_has_a_prop():
     """DEC-262 (the live hook scene listed no prop and every link's reply was
     refused as an insert without one): with a prop the hook ask demands

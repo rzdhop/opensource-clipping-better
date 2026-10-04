@@ -377,6 +377,11 @@ stories as cards (title, status, style, language); **New story** starts one.
   "Decide later" and pick it at step 4. The seven: Fruit Drama, 3D Animated
   Family Film, Anime/Manga, Realistic Cinematic, 2D Cartoon/Flat, Storybook
   Watercolor, Claymation/Stop-motion.
+- **Episode format** — the episode template the story is written on (see
+  "Episode formats" below). It follows the style's suggestion when the
+  suggestion fits the pipeline (Fruit Drama suggests the narrated drama on
+  v2), else the pipeline's default; a one-line hint says what each format
+  is. Change it here, or on the episode page until an episode has a script.
 - **Generation profile** (collapsible; it starts from what the server would
   give a new story — the quality pipeline when `FAL_KEY` is set — and is sent
   only if you change it): pipeline (`v2` quality / legacy), tier (`1` =
@@ -389,6 +394,19 @@ stories as cards (title, status, style, language); **New story** starts one.
   `one_dollar` animates key shots, `quality` — "Quality (billed APIs)" —
   animates every shot). A line above it says whether the story will be fully
   animated, and why not.
+
+**Episode formats.** Five templates ship, each a story-level choice
+(`episode_template_id`, sent on creation or patched while no episode has a
+script): `serial_60s_v1` (60 s, 55–80) and `serial_90s_v1` (90 s, 75–100)
+for the legacy pipeline; `serial_60s_v2` (6–10 beat shots in 55–75 s, the
+v2 default), `serial_90s_v2` (the same shape at 80–100 s, target 90) and
+`narrated_drama_60s_v2` (58–78 s, 5–7 longer scenes) for v2. The narrated
+drama is told by one narrator in a telenovela tone: its template carries the
+narrator's share of the words (60–85 %) and 2–4 short character lines an
+episode — the only lines in frame, so the only ones lip-synced — and, with
+the story's narrator on, the beat sheet and each body scene's dialogue are
+asked for exactly that. A style only suggests a format; the story keeps its
+own, and an episode keeps the one it was written against.
 
 **Create story** opens the story page, a vertical stepper: New story (done),
 Concepts, Bible, Style. Each step unlocks once the one before it is
@@ -656,8 +674,9 @@ started). An episode opens at its own three-pane page, `/story/<id>/episodes/<ep
 (Script, Storyboard, Preview — see "The episode page" below).
 
 **Episode length**, before any episode has a script: `60 s (55–80)`
-(`serial_60s_v1`, target 60, tightens above 75) or `90 s (75–100)`
-(`serial_90s_v1`, target 85, tightens above 95). Once *any* episode of the
+(`serial_60s_v1`, target 60, tightens above 75), `90 s (75–100)`
+(`serial_90s_v1`, target 85, tightens above 95), or one of the v2 formats
+(see "Episode formats" under 1. New story). Once *any* episode of the
 story has a script, the length is fixed for the whole story — the select
 disables itself and says so.
 

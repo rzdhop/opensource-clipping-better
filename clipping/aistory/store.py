@@ -763,8 +763,14 @@ class StoryStore:
         _atomic_write_json(os.path.join(directory, STORY_FILENAME), doc)
         return self._upsert_index(doc, now=now)
 
-    def create(self, *, language, seed_text=None, style_template_id=None, generation_profile=None, now) -> dict:
-        """Create a draft story. There is no default language (``defaults``)."""
+    def create(self, *, language, seed_text=None, style_template_id=None, generation_profile=None,
+               episode_template_id=None, now) -> dict:
+        """Create a draft story. There is no default language (``defaults``).
+
+        *episode_template_id* (plan 20 stage 1): the story's own episode
+        template, one of ``defaults.EPISODE_TEMPLATE_IDS`` (else
+        ``ValueError``); None, the pipeline's default
+        (``defaults.episode_template_for``)."""
         if not isinstance(language, str) or language not in schemas.LANGUAGES:
             raise ValueError(f"language must be one of {list(schemas.LANGUAGES)}, not {language!r}")
         if seed_text is not None and not isinstance(seed_text, str):
@@ -773,6 +779,10 @@ class StoryStore:
             raise ValueError(
                 f"unknown style template {style_template_id!r} "
                 f"(shipped: {', '.join(templates.list_style_ids())})")
+        if episode_template_id is not None and episode_template_id not in defaults.EPISODE_TEMPLATE_IDS:
+            raise ValueError(
+                f"unknown episode template {episode_template_id!r} "
+                f"(shipped: {', '.join(defaults.EPISODE_TEMPLATE_IDS)})")
         profile = _merge_generation_profile(generation_profile)
 
         approvals = {key: None for key, _ in _APPROVAL_STEPS}
@@ -796,8 +806,9 @@ class StoryStore:
             "place_ids": [],
             "prop_ids": [],
             "style_template_id": style_template_id,
-            # A v2 story starts on the v2 template (DEC-227); a legacy one as before.
-            "episode_template_id": defaults.episode_template_for(profile),
+            # The one chosen at creation (plan 20 stage 1), else a v2 story
+            # starts on the v2 template (DEC-227); a legacy one as before.
+            "episode_template_id": defaults.episode_template_for(profile, episode_template_id),
             "generation_profile": profile,
             # A v2 story opens with the narrator on (phase 7 stage 6c, the
             # human's CLARIFY answer 7); legacy stays off as before. The cast

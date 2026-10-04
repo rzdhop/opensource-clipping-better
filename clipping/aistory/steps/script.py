@@ -627,7 +627,9 @@ def write_beat_sheet(ctx, ec, script, *, tools, announced) -> None:
         prompt_id = "E1v2"
         slice_text = context.slice_for_episode(ec, knowledge=knowledge_of(ec),
                                                char_ids=[doc["char_id"] for doc in cast])
-        system, user, schema = prompts.build_e1_v2(pack, slice_text=slice_text, **kwargs)
+        # Plan 20 stage 1: a narrated template, the narrator on, adds its ask line.
+        system, user, schema = prompts.build_e1_v2(
+            pack, slice_text=slice_text, narration=prompts.narration_of(ec.template, ec.narrator), **kwargs)
     else:
         prompt_id = "E1"
         system, user, schema = prompts.build_e1(pack, v2=v2, **kwargs)
@@ -704,6 +706,8 @@ def write_body_scene(ctx, ec, script, sid, *, tools, announced, note=None) -> bo
         place={"place_id": place["place_id"], "name": place["name"], "layout_notes": place["layout_notes"] or ""},
         props=props, sfx_cues=ec.sfx_cues, narrator_enabled=ec.narrator,
         voice_direction=ec.style_lock["audio"]["voice_direction"], note=pack.note,
+        # Plan 20 stage 1: a narrated template, the narrator on, adds its ask line.
+        narration=prompts.narration_of(ec.template, ec.narrator),
     )
     v2 = media_policy.is_v2(ec.story)
     # Phase 7 stage 6a (DEC-231): a v2 reply may not repeat a line the episode

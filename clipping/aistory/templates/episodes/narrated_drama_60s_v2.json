@@ -1,0 +1,31 @@
+{
+  "$schema": "episode_template_v1",
+  "template_id": "narrated_drama_60s_v2",
+  "version": 1,
+  "label": {"fr": "Drame raconté de 60 secondes (plans animés)", "en": "60-second narrated drama (animated beats)"},
+  "window_s": [58, 78],
+  "target_s": 66,
+  "tighten_above_s": 75,
+  "scenes": [5, 8],
+  "shots": [5, 14],
+  "min_shot_s": 3.0,
+  "recap_from_episode": 2,
+  "default_body_count": 4,
+  "shots_per_scene": [1, 2],
+  "max_shot_s": 12,
+  "slots": {
+    "recap":       {"functions": ["recap"], "count": [1, 1], "duration_s": [3.0, 4.0]},
+    "hook":        {"functions": ["hook"], "count": [1, 1], "duration_s": [3.0, 6.0]},
+    "body":        {"functions": ["setup", "rising", "peak", "turn"], "count": [3, 5], "duration_s": [9.0, 13.0]},
+    "cliffhanger": {"functions": ["cliffhanger"], "count": [1, 1], "duration_s": [4.0, 10.0]}
+  },
+  "pauses_s": {"before_first_line": 0.35, "between_lines": 0.25, "tail": 0.6, "tail_peak": 1.2, "tail_floor": 0.3},
+  "tail_peak_functions": ["peak", "cliffhanger"],
+  "hold_extension_max_s": 1.0,
+  "end_card_s": 1.0,
+  "transitions_s": {"cut": 0.0, "dissolve": 0.4, "fadeblack": 0.4, "fadewhite": 0.3, "wipeleft": 0.3, "wiperight": 0.3, "slideup": 0.3},
+  "narrator_share": [0.6, 0.85],
+  "character_lines": [2, 4],
+  "end_card_cta": true,
+  "notes": "Fruit-drama pack stage 1 (plan 20, DEC-263): serial_60s_v2's beat shots told by one narrator, the telenovela shape of the reference fruit dramas. Fewer, longer body passages (3-5 body scenes of 9-13 s, 4 by default: 6 scenes on episode 1, 7 with the recap) in a 58-78 s window, tightening above 75 s; a body scene past max_shot_s is two beat shots. narrator_share is the narrator's share of the episode's words and character_lines the short character lines an episode carries (the only lines in frame, so the only ones lip-synced): E1v2 and E2 turn both into one ask line while the story's narrator is on. end_card_cta opts the end card into the call to action (stage 3). No BGM field: the template schema has no BGM hook, the style's emotion_to_mood picks the music (fruit_drama: telenovela_tension for tension, tropical_drama for tender)."
+}

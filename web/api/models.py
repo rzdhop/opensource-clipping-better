@@ -624,6 +624,10 @@ class StoryCreateRequest(BaseModel):
     seed_text: Optional[str] = Field(None, max_length=2000)
     style_template_id: Optional[str] = None
     generation_profile: Optional[GenerationProfileModel] = None
+    # Plan 20 stage 1: the story's own episode template (the new-story form's
+    # "Episode format", pre-filled from the style's suggestion); left out,
+    # the pipeline's default. An unshipped id is a 400 (store.create).
+    episode_template_id: Optional[str] = None
 
 
 class StoryPatchRequest(BaseModel):

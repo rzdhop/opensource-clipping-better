@@ -51,8 +51,14 @@ EPISODE_TEMPLATE_ID = "serial_60s_v1"
 # shots of 5-12 s, one clip each. A legacy story keeps EPISODE_TEMPLATE_ID.
 EPISODE_TEMPLATE_ID_V2 = "serial_60s_v2"
 # The episode templates shipped in templates/episodes/ (spec 6.2), in the
-# order story_bible_v1.episode_template_id's enum lists them.
-EPISODE_TEMPLATE_IDS = ("serial_60s_v1", "serial_90s_v1", EPISODE_TEMPLATE_ID_V2)
+# order story_bible_v1.episode_template_id's enum lists them. Plan 20 stage 1
+# (the fruit-drama pack): serial_90s_v2, the v2 shape at 80-100 s, and
+# narrated_drama_60s_v2, the v2 beats told by one narrator (narrator_share,
+# character_lines) -- both chosen per story, never a pipeline default.
+EPISODE_TEMPLATE_ID_90_V2 = "serial_90s_v2"
+EPISODE_TEMPLATE_ID_NARRATED = "narrated_drama_60s_v2"
+EPISODE_TEMPLATE_IDS = ("serial_60s_v1", "serial_90s_v1", EPISODE_TEMPLATE_ID_V2,
+                        EPISODE_TEMPLATE_ID_90_V2, EPISODE_TEMPLATE_ID_NARRATED)
 
 # In order, each derived from a contiguous prefix of ``approvals``
 # (store.derive_status): concept, bible, style, then -- phase 2 -- cast,
@@ -78,9 +84,14 @@ def default_generation_profile() -> dict:
     }
 
 
-def episode_template_for(profile) -> str:
-    """The episode template a story created with *profile* starts on: the v2
-    one for a v2 pipeline (DEC-227), else :data:`EPISODE_TEMPLATE_ID`."""
+def episode_template_for(profile, chosen=None) -> str:
+    """The episode template a story created with *profile* starts on: the
+    story's own *chosen* one when it names a shipped template (plan 20
+    stage 1: the new-story form sends it, pre-filled from the style's
+    suggestion), else the v2 one for a v2 pipeline (DEC-227), else
+    :data:`EPISODE_TEMPLATE_ID`."""
+    if chosen in EPISODE_TEMPLATE_IDS:
+        return chosen
     if (profile or {}).get("pipeline") == PIPELINE_V2:
         return EPISODE_TEMPLATE_ID_V2
     return EPISODE_TEMPLATE_ID

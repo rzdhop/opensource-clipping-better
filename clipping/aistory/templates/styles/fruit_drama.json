@@ -77,7 +77,7 @@
       4
     ],
     "max_places": 2,
-    "episode_template_id": "serial_60s_v1"
+    "episode_template_id": "narrated_drama_60s_v2"
   },
   "audio": {
     "bgm_moods": [

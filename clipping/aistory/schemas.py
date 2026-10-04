@@ -248,7 +248,11 @@ _EPISODE_DEFAULTS_SCHEMA = {
         "cliffhanger_style": {"type": "string", "enum": list(CLIFFHANGER_STYLES)},
         "shots_per_scene": {"type": "array", "items": {"type": "integer"}, "minItems": 2, "maxItems": 2},
         "max_places": {"type": "integer", "minimum": 1, "maximum": 4},
-        "episode_template_id": {"type": "string", "const": "serial_60s_v1"},
+        # The episode template the style suggests for a new story (the
+        # new-story form pre-fills it when it fits the story's pipeline;
+        # plan 20 stage 1 lifted the const to the shipped ids). A suggestion,
+        # never read by the pipeline: the story keeps its own.
+        "episode_template_id": {"type": "string", "enum": list(defaults.EPISODE_TEMPLATE_IDS)},
         "scene_clamp_s": {"type": "object"},
     },
     "required": [
@@ -2245,6 +2249,16 @@ EPISODE_TEMPLATE_SCHEMA = _document({
     # longest shot one clip covers; absent on the v1 templates.
     "shots_per_scene": {"type": "array", "items": {"type": "integer", "minimum": 1}, "minItems": 2, "maxItems": 2},
     "max_shot_s": {"type": "number", "minimum": 0},
+    # Fruit-drama pack stage 1 (plan 20): a narrated template's [lo, hi]
+    # share of the episode's words the narrator carries, and the short
+    # character lines an episode has (the ones in frame, so lip-synced);
+    # E1v2 and E2 turn them into one ask line (prompts.narration_of). The
+    # end card's call to action is opt-in per template (stage 3). Absent on
+    # every other template, whose prompts stay byte for byte (RC-M1).
+    "narrator_share": {"type": "array", "items": {"type": "number", "minimum": 0, "maximum": 1},
+                       "minItems": 2, "maxItems": 2},
+    "character_lines": _RANGE_INT,
+    "end_card_cta": {"type": "boolean"},
 })
 
 
@@ -2285,6 +2299,11 @@ def episode_template_errors(doc) -> list:
     _range_pair_errors(errors, "$.shots", doc["shots"])
     if "shots_per_scene" in doc:
         _range_pair_errors(errors, "$.shots_per_scene", doc["shots_per_scene"])
+    for key in ("narrator_share", "character_lines"):
+        if key in doc:
+            _range_pair_errors(errors, f"$.{key}", doc[key])
+    if ("narrator_share" in doc) != ("character_lines" in doc):
+        errors.append("$: narrator_share and character_lines come together (a narrated template) or not at all")
     if "max_shot_s" in doc and doc["max_shot_s"] < doc["min_shot_s"]:
         errors.append(f"$.max_shot_s: {doc['max_shot_s']} is below min_shot_s ({doc['min_shot_s']})")
 

@@ -1235,7 +1235,9 @@ def test_get_styles_lists_the_seven_shipped_templates(api):
         assert set(style["palette"]) == {"primary", "accents", "forbidden", "palette_line"}
         assert set(style["typography"]) == {
             "font_family", "font_fallback", "subtitle_mode", "highlight_colour"}
-        assert set(style["episode_defaults"]) == {"hook_style", "cliffhanger_style"}
+        # Plan 20 stage 1 (the rule changed): the style's suggested episode
+        # format joins, for the new-story form to pre-fill.
+        assert set(style["episode_defaults"]) == {"hook_style", "cliffhanger_style", "episode_template_id"}
 
 
 def test_get_styles_matches_the_loaded_templates(api):
@@ -1250,6 +1252,8 @@ def test_get_styles_matches_the_loaded_templates(api):
         assert entry["palette"] == template["palette"]
         assert entry["typography"]["font_family"] == template["typography"]["font_family"]
         assert entry["episode_defaults"]["hook_style"] == template["episode_defaults"]["hook_style"]
+        assert entry["episode_defaults"]["episode_template_id"] == template["episode_defaults"]["episode_template_id"]
+    assert by_id["fruit_drama"]["episode_defaults"]["episode_template_id"] == "narrated_drama_60s_v2"
 
 
 def test_the_styles_route_does_not_shadow_an_unknown_story_id(api):

@@ -18,7 +18,9 @@ version of this guard), extended to the episode page:
   ``clipping.aistory.steps.regenerate.EPISODE_TARGETS``.
 - The JS ``EMOTIONS`` constant against ``clipping.aistory.schemas.EMOTIONS``.
 - The JS ``EPISODE_TEMPLATES`` ids against
-  ``clipping.aistory.defaults.EPISODE_TEMPLATE_IDS``.
+  ``clipping.aistory.defaults.EPISODE_TEMPLATE_IDS`` (the list moved to
+  ``pages/story/episodeTemplates.js`` in plan 20 stage 1, shared with the
+  new-story form; ScriptPane.jsx imports it).
 - ``ScriptPane.jsx`` renders a ``story-step-error`` slot.
 - ``Tabs.jsx`` carries the ARIA tabs roles.
 - The new route is declared in ``App.jsx`` before its catch-alls.
@@ -68,6 +70,8 @@ TABS = PROJECT_ROOT / "web" / "dashboard" / "src" / "components" / "Tabs.jsx"
 EPISODE_STUDIO = PROJECT_ROOT / "web" / "dashboard" / "src" / "pages" / "story" / "EpisodeStudio.jsx"
 EPISODE_SRC = PROJECT_ROOT / "web" / "dashboard" / "src" / "pages" / "story" / "episode"
 SCRIPT_PANE = EPISODE_SRC / "ScriptPane.jsx"
+# Plan 20 stage 1: the episode formats, shared by ScriptPane.jsx and the new-story form.
+EPISODE_TEMPLATES_JS = PROJECT_ROOT / "web" / "dashboard" / "src" / "pages" / "story" / "episodeTemplates.js"
 DURATION_BAR = EPISODE_SRC / "DurationBar.jsx"
 # Dashboard overhaul stage 4 (DEC-256): StoryboardPane.jsx split into the
 # storyboard/ folder; each check reads the file its code moved to.
@@ -104,7 +108,8 @@ def test_the_readers_see_something():
     assert len(workflow.SCRIPT_PARAMS) == 1
     assert len(schemas.EMOTIONS) >= 5
     # Phase 7 stage 4 (DEC-227): serial_60s_v2 joins the two v1 templates.
-    assert len(defaults.EPISODE_TEMPLATE_IDS) == 3
+    # Plan 20 stage 1 (on purpose): serial_90s_v2 and narrated_drama_60s_v2 join them.
+    assert len(defaults.EPISODE_TEMPLATE_IDS) == 5
 
 
 # -------------------------------------------------- ScriptPane.jsx: scriptParams
@@ -247,11 +252,16 @@ def test_emotions_constant_equals_the_schema_exactly():
 
 
 def test_episode_templates_ids_equal_the_defaults_exactly():
-    src = SCRIPT_PANE.read_text(encoding="utf-8")
-    match = re.search(r"const EPISODE_TEMPLATES = \[(.*?)\]\n", src, re.DOTALL)
-    assert match, "EPISODE_TEMPLATES not found in ScriptPane.jsx"
+    # Re-pointed (plan 20 stage 1): the literal moved out of ScriptPane.jsx
+    # into episodeTemplates.js, which ScriptPane.jsx imports.
+    src = EPISODE_TEMPLATES_JS.read_text(encoding="utf-8")
+    match = re.search(r"export const EPISODE_TEMPLATES = \[(.*?)\]\n", src, re.DOTALL)
+    assert match, "EPISODE_TEMPLATES not found in episodeTemplates.js"
     found = set(re.findall(r"id:\s*'([a-z0-9_]+)'", match.group(1)))
     assert found == set(defaults.EPISODE_TEMPLATE_IDS), (found, defaults.EPISODE_TEMPLATE_IDS)
+    pane = SCRIPT_PANE.read_text(encoding="utf-8")
+    assert "import { EPISODE_TEMPLATES } from '../episodeTemplates'" in pane
+    assert "const EPISODE_TEMPLATES" not in pane  # one list, never a second copy
 
 
 # --------------------------------------------------------------- error slot

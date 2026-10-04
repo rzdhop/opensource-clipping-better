@@ -20,6 +20,8 @@ import importlib
 import pathlib
 import re
 
+import pytest
+
 from clipping.aistory import defaults, schemas
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -240,3 +242,34 @@ def test_a_v2_story_is_created_on_the_v2_episode_template(tmp_path):
         assert "video_resolution" in str(exc)
     else:
         raise AssertionError("an unknown video_resolution must be refused")
+
+
+def test_episode_template_for_reads_the_story_s_own_choice_first_then_the_pipeline(tmp_path):
+    """Plan 20 stage 1: the story's own ``episode_template_id`` (sent on
+    creation) when it names a shipped template, else the pipeline's default
+    as before -- an unknown value never reaches the story (``store.create``
+    refuses it: ValueError, the API's 400)."""
+    from clipping.aistory import store as story_store
+
+    v2 = defaults.quality_generation_profile()
+    assert defaults.episode_template_for(None) == defaults.EPISODE_TEMPLATE_ID == "serial_60s_v1"
+    assert defaults.episode_template_for(v2) == defaults.EPISODE_TEMPLATE_ID_V2
+    assert defaults.episode_template_for(v2, None) == defaults.EPISODE_TEMPLATE_ID_V2
+    assert defaults.episode_template_for(v2, "narrated_drama_60s_v2") == "narrated_drama_60s_v2"
+    assert defaults.episode_template_for({}, "serial_90s_v2") == "serial_90s_v2"
+    assert defaults.episode_template_for(v2, "serial_45s_v1") == defaults.EPISODE_TEMPLATE_ID_V2
+    assert defaults.episode_template_for({}, "serial_45s_v1") == defaults.EPISODE_TEMPLATE_ID
+    assert defaults.EPISODE_TEMPLATE_ID_NARRATED == "narrated_drama_60s_v2"
+    assert defaults.EPISODE_TEMPLATE_ID_90_V2 == "serial_90s_v2"
+
+    stories = story_store.StoryStore(tmp_path / "outputs", on_log=lambda *a: None)
+    now = "2026-10-04T10:00:00+00:00"
+    narrated = stories.create(language="fr", style_template_id="fruit_drama", generation_profile=v2,
+                              episode_template_id="narrated_drama_60s_v2", now=now)
+    assert narrated["episode_template_id"] == "narrated_drama_60s_v2"
+    assert stories.get(narrated["story_id"]) == narrated and schemas.story_bible_errors(narrated) == []
+    # The style alone never picks the format: the server takes what is sent.
+    styled = stories.create(language="fr", style_template_id="fruit_drama", generation_profile=v2, now=now)
+    assert styled["episode_template_id"] == defaults.EPISODE_TEMPLATE_ID_V2
+    with pytest.raises(ValueError, match="serial_45s_v1"):
+        stories.create(language="fr", episode_template_id="serial_45s_v1", now=now)

@@ -1975,7 +1975,7 @@ def e2_schema(speakers, sfx_cue_names) -> dict:
 
 
 def build_e2(pack, *, scene, scene_number, outline, previous, word_budget, cast, place, props, sfx_cues,
-             narrator_enabled, voice_direction, note=None):
+             narrator_enabled, voice_direction, note=None, narration=None):
     """One body scene's dialogue (spec 2.7, 4.2, row E2): 1-4 lines within
     *word_budget* words total (``timing.word_budget``, computed by the
     caller so this module stays free of a ``timing`` import), optional sfx
@@ -1996,19 +1996,26 @@ def build_e2(pack, *, scene, scene_number, outline, previous, word_budget, cast,
     author's note of a ``scene:<ep>:<sid>`` regenerate, shown the way
     :func:`build_e3` and :func:`build_t1r` show theirs (none: the prompt is
     byte-identical to one built without it).
+
+    *narration* (plan 20 stage 1) is :func:`narration_of`'s answer for the
+    episode's template: given, the ask gains the narrated-drama line
+    (:func:`narration_e2_line`); None -- every template but a narrated one,
+    or the narrator off -- the prompt is byte for byte what it was (RC-M1).
     """
     return _build_e2(pack, scene=scene, outline=outline, previous=previous, word_budget=word_budget, cast=cast,
                      place=place, props=props, sfx_cues=sfx_cues, narrator_enabled=narrator_enabled,
-                     voice_direction=voice_direction, note=note)
+                     voice_direction=voice_direction, note=note, narration=narration)
 
 
 def _build_e2(pack, *, scene, outline, previous, word_budget, cast, place, props, sfx_cues, narrator_enabled,
-              voice_direction, note=None, slice_text=None, first_watch_rules=False):
+              voice_direction, note=None, slice_text=None, first_watch_rules=False, narration=None):
     """:func:`build_e2`'s body; *slice_text* given (E2v2, :func:`build_e2_v2`):
     the place line says its name only (the slice says its layout and light),
     the slice follows the props, the ask gains E2v2's lines and the schema's
     ``sfx_cues[].at`` is an enum; with *first_watch_rules* (E2v2) the prompt
-    opens with :data:`FIRST_WATCH_RULES`. None / off: E2, byte for byte."""
+    opens with :data:`FIRST_WATCH_RULES`. None / off: E2, byte for byte.
+    *narration* given (a narrated template, the narrator on), the
+    narrated-drama line follows the v2 lines (:func:`narration_e2_line`)."""
     v2 = slice_text is not None
     names = {c["char_id"]: c["name"] for c in cast}
     user = FIRST_WATCH_RULES if first_watch_rules else ""
@@ -2045,7 +2052,7 @@ def _build_e2(pack, *, scene, outline, previous, word_budget, cast, place, props
         word_budget_lo=lo, word_budget_hi=hi,
         voice_direction=voice_direction,
         french_line=_french_block(pack),
-        v2_lines=_e2_v2_lines(scene, outline, names) if v2 else "",
+        v2_lines=(_e2_v2_lines(scene, outline, names) if v2 else "") + narration_e2_line(narration),
     )
     if v2:
         return _system(pack), user, e2_v2_schema(speakers, sfx_cue_names)
@@ -2529,6 +2536,55 @@ def _e2_v2_lines(scene, outline, names) -> str:
     return "\n".join(lines) + "\n\n"
 
 
+# Plan 20 stage 1 (the fruit-drama pack): a narrated episode template
+# (``narrator_share``, ``character_lines``: narrated_drama_60s_v2) turns into
+# one ask line in E1v2's beat sheet and in E2's body scenes, the narrator
+# carrying most of the words in a telenovela tone and the characters a few
+# short lines -- the ones in frame, so the only ones lip-synced
+# (steps/lipsync.py). Every other template carries neither field, and its
+# prompts stay byte for byte (RC-M1).
+NARRATED_E1_LINE = (
+    "Narrated drama: the narrator carries {share_lo}-{share_hi}% of this episode's words, in a telenovela tone; "
+    "the characters speak only {lines_lo} to {lines_hi} short lines in the whole episode -- plan the scenes so "
+    "the narration tells the story and those few lines land as punches.\n\n"
+)
+NARRATED_E2_LINE = (
+    "Narrated drama: the narrator carries {share_lo}-{share_hi}% of this episode's words, in a telenovela tone "
+    "(dramatic, slightly over the top, never explaining what the picture shows); the characters speak at most "
+    "{lines_hi} short lines in the whole episode, each a punch -- here at most one character line, and only "
+    "where it hits hardest.\n\n"
+)
+
+
+def narration_of(template, narrator_enabled=True):
+    """``{"narrator_share": [lo, hi], "character_lines": [lo, hi]}`` when the
+    episode *template* is a narrated one and the story's narrator is on
+    (*narrator_enabled*; a narrator that cannot speak carries no share),
+    else None -- what :func:`build_e1_v2`, :func:`build_e2` and
+    :func:`build_e2_v2` take as ``narration``."""
+    if not narrator_enabled or "narrator_share" not in (template or {}):
+        return None
+    return {"narrator_share": list(template["narrator_share"]),
+            "character_lines": list(template["character_lines"])}
+
+
+def _narration_values(narration) -> dict:
+    share_lo, share_hi = narration["narrator_share"]
+    lines_lo, lines_hi = narration["character_lines"]
+    return {"share_lo": round(share_lo * 100), "share_hi": round(share_hi * 100),
+            "lines_lo": lines_lo, "lines_hi": lines_hi}
+
+
+def narration_e1_line(narration) -> str:
+    """E1v2's narrated-drama ask line (:data:`NARRATED_E1_LINE`), "" without *narration*."""
+    return NARRATED_E1_LINE.format(**_narration_values(narration)) if narration else ""
+
+
+def narration_e2_line(narration) -> str:
+    """E2's narrated-drama ask line (:data:`NARRATED_E2_LINE`), "" without *narration*."""
+    return NARRATED_E2_LINE.format(**_narration_values(narration)) if narration else ""
+
+
 def e2_v2_schema(speakers, sfx_cue_names) -> dict:
     """E2's schema with ``sfx_cues[].at`` an enum of 'start' and the line
     numbers (:data:`E2_V2_SFX_AT`), the same closed vocabulary as ``cue``."""
@@ -2540,21 +2596,23 @@ def e2_v2_schema(speakers, sfx_cue_names) -> dict:
 
 
 def build_e1_v2(pack, *, ep, arc_entry, template, episode_defaults, cast, places, props, memory, slots,
-                slice_text, open_hooks=None, audience_direction=None):
+                slice_text, open_hooks=None, audience_direction=None, narration=None):
     """E1 for a v2 story (phase 7 stage 5c): :func:`build_e1` with ``v2``
     (``new_objects`` from episode 2 on), plus *slice_text*
     (``context.slice_for_episode``: the planned beats, who wants what, where
     things stand) after the rosters, and the asks to stage the beats in
     order and introduce each character where it first appears. The schema
-    is E1's (v2)."""
+    is E1's (v2). *narration* (plan 20 stage 1, :func:`narration_of`)
+    given, the asks end with the narrated-drama line
+    (:func:`narration_e1_line`); None, the prompt is what it was."""
     return _build_e1(pack, ep=ep, arc_entry=arc_entry, template=template, episode_defaults=episode_defaults,
                      cast=cast, places=places, props=props, memory=memory, slots=slots, open_hooks=open_hooks,
                      audience_direction=audience_direction, v2=True, slice_text=slice_text or None,
-                     v2_lines=_E1_V2_LINES, first_watch_rules=True)
+                     v2_lines=_E1_V2_LINES + narration_e1_line(narration), first_watch_rules=True)
 
 
 def build_e2_v2(pack, *, scene, scene_number, outline, previous, word_budget, cast, place, props, sfx_cues,
-                narrator_enabled, voice_direction, slice_text, note=None):
+                narrator_enabled, voice_direction, slice_text, note=None, narration=None):
     """E2 for a v2 story (phase 7 stage 5c): :func:`build_e2`'s structure,
     the scene's *slice_text* (``context.slice_for_scene``) after the props
     (the place line then says its name only: the slice holds its layout and
@@ -2562,10 +2620,11 @@ def build_e2_v2(pack, *, scene, scene_number, outline, previous, word_budget, ca
     previous line is shown to continue from), each character's first
     appearance introduced (:func:`first_appearances` named), and
     ``sfx_cues[].at`` an enum (:func:`e2_v2_schema`). The validator is
-    ``validate_e2``, unchanged."""
+    ``validate_e2``, unchanged. *narration* as :func:`build_e2`'s."""
     return _build_e2(pack, scene=scene, outline=outline, previous=previous, word_budget=word_budget, cast=cast,
                      place=place, props=props, sfx_cues=sfx_cues, narrator_enabled=narrator_enabled,
-                     voice_direction=voice_direction, note=note, slice_text=slice_text or "", first_watch_rules=True)
+                     voice_direction=voice_direction, note=note, slice_text=slice_text or "", first_watch_rules=True,
+                     narration=narration)
 
 
 def build_e3_v2(pack, *, ep, part=None, note=None, hook_scene, cliffhanger_scene, recap_scene, outline,
