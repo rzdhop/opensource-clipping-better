@@ -38,6 +38,17 @@ function LipsyncBadge({ lipsync }) {
   return <Badge tone="warning">Lip-sync failed</Badge>
 }
 
+// Plan 22: a native-speech shot's take (`clip.take`, workflow.episode_clips):
+// how much of its line its clip speaks ("🗣 matched 92 %"), flagged when it
+// misses the line or says nothing, approximate when no STT key could check it.
+function TakeBadge({ take }) {
+  const matched = take.matched != null ? ` ${Math.round(take.matched * 100)} %` : ''
+  if (take.state === 'ok') return <Badge tone="success">{`🗣 matched${matched}`}</Badge>
+  if (take.state === 'stt_unavailable') return <Badge tone="neutral">🗣 unchecked (approximate)</Badge>
+  if (take.state === 'no_speech') return <Badge tone="danger">🗣 no speech</Badge>
+  return <Badge tone="warning">{`🗣 mismatch${matched}`}</Badge>
+}
+
 /** The kit tone a clip's state reads in (the filmstrip's dots use it too). */
 function clipStateTone(clip) {
   if (clip.continue || clip.pending) return 'info'
@@ -219,7 +230,14 @@ function ShotClipBlock({ storyId, ep, shotId, clip, tier, busy, onChange }) {
         <ClipStateBadge clip={clip} />
         {clip.route && <RouteChip routeClass={clip.route} link={clip.link} />}
         {clip.lipsync && <LipsyncBadge lipsync={clip.lipsync} />}
+        {clip.speaks != null && <Badge tone="neutral">{clip.speaks ? 'speaks' : 'silent'}</Badge>}
+        {clip.take && <TakeBadge take={clip.take} />}
       </div>
+      {clip.take && clip.take.state !== 'ok' && (clip.take.heard || clip.take.reason) && (
+        <p className="form-hint">
+          {clip.take.heard ? `Heard: “${clip.take.heard}”. ` : ''}{clip.take.reason || ''}
+        </p>
+      )}
       {clipStatusReason && <p className="form-hint">{clipStatusReason}</p>}
       {clip.lipsync && clip.lipsync.state === 'failed' && (
         <p className="form-hint">Lip-sync failed: {clip.lipsync.reason || 'no reason given'} (the plain clip plays)</p>

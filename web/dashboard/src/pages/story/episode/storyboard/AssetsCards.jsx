@@ -261,6 +261,23 @@ function VideoPhaseHeader({ storyId, ep, episode, busy, onChange }) {
           ) : ''}
         </span>
       </div>
+      {/* Plan 22: a native-speech episode's two links, one a class of shot, each priced. */}
+      {video.speech && (
+        <div className="story-step-actions">
+          <span className="chip" title="Each character line is spoken by its own clip">
+            {`🗣 ${video.speech.speech_count} speaking · ${video.speech.speech_seconds} s on ${video.speech.speech_link}`}
+            {video.speech.speech_price != null ? ` at $${video.speech.speech_price}/s` : ''}
+          </span>
+          <span className="chip" title="Reactions and the narrator's voice-over: clips with their ambience">
+            {`${video.speech.silent_count} silent · ${video.speech.silent_seconds} s on ${video.speech.silent_link}`}
+            {video.speech.silent_price != null ? ` at $${video.speech.silent_price}/s` : ''}
+          </span>
+          {video.speech.retake_usd > 0 && (
+            <span className="chip">{`+ up to $${formatUsd(video.speech.retake_usd)} of retakes`}</span>
+          )}
+        </div>
+      )}
+      {video.over_cap && <p className="form-hint">Over the cap: {video.over_cap}.</p>}
       {/* DEC-258: the clips' lipsync, priced apart (the message's "+ $x lip-sync (n clips)"). */}
       {video.lipsync && video.lipsync.count > 0 && (
         <p className="form-hint">

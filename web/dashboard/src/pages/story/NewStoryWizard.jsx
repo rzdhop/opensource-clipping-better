@@ -21,6 +21,14 @@ const MODE_HELP = {
 // clipping.aistory.defaults.default_generation_profile().
 const DEFAULT_GENERATION_PROFILE = { tier: 1, route: 'auto', consistency_mode: 'references', budget_profile: 'free' }
 
+// Plan 22: the native-speech profile's speaking-clip models (its
+// speech_links), cheapest first; the profile's own default is fast.
+const SPEECH_MODELS = [
+  { id: 'lite', label: 'Lite (Veo 3.1 lite)' },
+  { id: 'fast', label: 'Fast (Veo 3.1 Fast)' },
+  { id: 'premium', label: 'Premium (Veo 3.1)' },
+]
+
 function CreateStoryForm() {
   const navigate = useNavigate()
   // No default: a language a user forgot to pick must never silently become
@@ -36,6 +44,7 @@ function CreateStoryForm() {
   const [consistencyMode, setConsistencyMode] = useState(DEFAULT_GENERATION_PROFILE.consistency_mode)
   const [budgetProfile, setBudgetProfile] = useState(DEFAULT_GENERATION_PROFILE.budget_profile)
   const [pipeline, setPipeline] = useState('')
+  const [speechModel, setSpeechModel] = useState('fast')
   // The episode format the user picked; '' until they pick one, so the
   // select follows the style's suggestion, else the pipeline's default.
   const [episodeTemplateChoice, setEpisodeTemplateChoice] = useState('')
@@ -73,7 +82,20 @@ function CreateStoryForm() {
     // A v2 story's images are edits of its references (DEC-221).
     if (value === 'v2') setConsistencyMode('references')
   }
-  const fullyAnimated = pipeline === 'v2' && budgetProfile === 'quality' && tier >= 2
+  // Plan 22: the native-speech profile is a v2 story at tier 3 -- each character line spoken by its own clip.
+  const nativeSpeech = budgetProfile === 'native_speech'
+  const handleBudgetProfile = (value) => {
+    setProfileChosen(true)
+    setBudgetProfile(value)
+    if (value === 'native_speech') {
+      setPipeline('v2')
+      setTier(3)
+      setConsistencyMode('references')
+    }
+  }
+  const fullyAnimated = pipeline === 'v2' && (budgetProfile === 'quality' || nativeSpeech) && tier >= 2
+  // What the native-speech profile costs per speaking-clip model, and the keys it still needs.
+  const speech = offer && offer.native_speech
   // What the quality preset costs (media_policy.preset_estimate, from the
   // server's price table; phase 7 stage 7): shown whether or not it is the
   // default yet, so a missing key is weighed against a price.
@@ -113,6 +135,7 @@ function CreateStoryForm() {
           consistency_mode: consistencyMode,
           budget_profile: budgetProfile,
           ...(pipeline ? { pipeline } : {}),
+          ...(nativeSpeech ? { speech_model: speechModel } : {}),
         } : null,
       }
       const story = await createStory(createFields)
@@ -237,7 +260,12 @@ function CreateStoryForm() {
           </div>
 
           <div className="form-group">
-            {fullyAnimated ? (
+            {nativeSpeech ? (
+              <p className="chip chip-wrap">
+                Native speech (Veo): each character line is spoken on camera by its own clip, lips and voice one
+                take; the narrator stays a voice-over{speech ? `: ${speech.summary}.` : '.'}
+              </p>
+            ) : fullyAnimated ? (
               <p className="chip chip-wrap">
                 Fully animated: every shot is a video clip, with quality images (Quality — billed APIs)
                 {estimate ? `: ${estimate.summary}.` : '.'}
@@ -252,7 +280,19 @@ function CreateStoryForm() {
                     + (estimate ? `: ${estimate.summary}.` : '.') : ''}
               </p>
             )}
-            {estimate && (fullyAnimated || (offer && !offer.quality)) && (
+            {nativeSpeech && speech && (
+              <>
+                <p className="form-hint">{speech.assumptions}</p>
+                {(speech.missing_keys.length > 0 || speech.stt_missing_keys.length > 0) && (
+                  <p className="form-hint">
+                    Missing in Settings: {[...speech.missing_keys,
+                      ...(speech.stt_missing_keys.length > 0
+                        ? [`${speech.stt_missing_keys.join(' or ')} (the speech check)`] : [])].join(', ')}.
+                  </p>
+                )}
+              </>
+            )}
+            {!nativeSpeech && estimate && (fullyAnimated || (offer && !offer.quality)) && (
               <p className="form-hint">{estimate.assumptions}</p>
             )}
             {fullyAnimated && offer && !offer.allow_paid && (
@@ -299,12 +339,29 @@ function CreateStoryForm() {
               <div className="form-group">
                 <label className="form-label">Budget profile</label>
                 <select className="form-select" value={budgetProfile}
-                  onChange={(e) => choose(setBudgetProfile)(e.target.value)}>
+                  onChange={(e) => handleBudgetProfile(e.target.value)}>
                   <option value="free">Free (no clip bought)</option>
                   <option value="one_dollar">$1 / episode (key shots)</option>
                   <option value="quality">Quality (billed APIs) — every shot animated</option>
+                  <option value="native_speech">Native speech (Veo) — characters speak in their clips</option>
                 </select>
               </div>
+              {nativeSpeech && (
+                <div className="form-group">
+                  <label className="form-label" htmlFor="new-story-speech-model">Speaking clips</label>
+                  <select id="new-story-speech-model" className="form-select" value={speechModel}
+                    onChange={(e) => choose(setSpeechModel)(e.target.value)}>
+                    {SPEECH_MODELS.map((model) => {
+                      const usd = speech && speech.by_model ? speech.by_model[model.id] : null
+                      return (
+                        <option key={model.id} value={model.id}>
+                          {model.label}{usd != null ? ` — ≈ $${usd.toFixed(2)} an episode` : ''}
+                        </option>
+                      )
+                    })}
+                  </select>
+                </div>
+              )}
             </div>
           </details>
         </div>

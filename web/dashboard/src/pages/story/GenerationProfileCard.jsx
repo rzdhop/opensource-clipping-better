@@ -11,6 +11,8 @@ import { stepLabel } from './storySteps'
 // opens it as a popover. Same props, same calls, same text.
 
 const ROUTES = ['auto', 'local', 'api']
+// Plan 22: a native-speech story's speaking-clip models (generation_profile.speech_model).
+const SPEECH_MODELS = { lite: 'Lite (Veo 3.1 lite)', fast: 'Fast (Veo 3.1 Fast)', premium: 'Premium (Veo 3.1)' }
 
 /**
  * The episode the Visual tier card prices its video estimate for
@@ -109,6 +111,8 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
   // Phase 7 stage 7 (browser-check finding F7): the budget profile -- what a
   // story may buy and how many shots it animates -- is chosen here too.
   const [budgetProfile, setBudgetProfile] = useState(profile.budget_profile)
+  // Plan 22: the per-story switch of a native-speech story's speaking clips (absent: the profile's, fast).
+  const [speechModel, setSpeechModel] = useState(profile.speech_model || 'fast')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   // A pipeline switch refused over written episodes (PATCH's structured 409):
@@ -124,6 +128,8 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
     setBudgetProfile(profile.budget_profile)
   }, [profile.tier, profile.route, profile.budget_profile])
 
+  useEffect(() => { setSpeechModel(profile.speech_model || 'fast') }, [profile.speech_model])
+
   const save = async (patch) => {
     setSaving(true)
     setError('')
@@ -137,6 +143,7 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
       setTier(profile.tier)
       setRoute(profile.route)
       setBudgetProfile(profile.budget_profile)
+      setSpeechModel(profile.speech_model || 'fast')
       setError(err.message)
       if (err.status === 409 && err.code === PIPELINE_SWITCH_HAS_SCRIPTS && err.detail.episodes) {
         setSwitchOffer({ episodes: err.detail.episodes, patch })
@@ -174,7 +181,17 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
 
   const handleTier = (value) => { setTier(value); save({ tier: value }) }
   const handleRoute = (value) => { setRoute(value); save({ route: value }) }
-  const handleBudgetProfile = (value) => { setBudgetProfile(value); save({ budget_profile: value }) }
+  const handleBudgetProfile = (value) => {
+    setBudgetProfile(value)
+    // Plan 22: native speech is a v2 story at tier 3 (its clips speak the lines).
+    if (value === 'native_speech') {
+      setTier(3)
+      save({ budget_profile: value, tier: 3, route: 'api', ...(isV2 ? {} : { pipeline: 'v2', consistency_mode: 'references' }) })
+    } else {
+      save({ budget_profile: value })
+    }
+  }
+  const handleSpeechModel = (value) => { setSpeechModel(value); save({ speech_model: value }) }
 
   // Every shot a clip: the quality budget profile (animate all_shots) at tier
   // >= 2 on the api route, on the v2 pipeline (the server sets its template and
@@ -184,7 +201,8 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
   const isV2 = story.generation_profile.pipeline === 'v2'
   const canSwitchToV2 = !isV2
   const hasCast = (story.cast_ids || []).length > 0
-  const fullyAnimated = isV2 && story.generation_profile.budget_profile === 'quality' && tier >= 2
+  const nativeSpeech = story.generation_profile.budget_profile === 'native_speech'
+  const fullyAnimated = isV2 && (story.generation_profile.budget_profile === 'quality' || nativeSpeech) && tier >= 2
   const makeFullyAnimated = () => {
     const patch = { tier: Math.max(tier, 2), route: 'api', budget_profile: 'quality' }
     if (canSwitchToV2) Object.assign(patch, { pipeline: 'v2', consistency_mode: 'references' })
@@ -212,7 +230,10 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
       <h3 className="card-title">Visual tier</h3>
       <div className="form-group">
         {fullyAnimated ? (
-          <span className="chip">Fully animated: every shot is a video clip.</span>
+          <span className="chip">
+            {nativeSpeech ? 'Native speech: every character line is spoken by its own clip.'
+              : 'Fully animated: every shot is a video clip.'}
+          </span>
         ) : (
           <>
             <p className="form-hint">
@@ -253,8 +274,18 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
           <option value="free">Free (no clip bought)</option>
           <option value="one_dollar">$1 / episode (key shots)</option>
           <option value="quality">Quality (billed APIs) — every shot animated</option>
+          <option value="native_speech">Native speech (Veo) — characters speak in their clips</option>
         </select>
       </div>
+      {nativeSpeech && (
+        <div className="form-group">
+          <label className="form-label" htmlFor="story-profile-speech-model">Speaking clips</label>
+          <select id="story-profile-speech-model" className="form-select" value={speechModel}
+            onChange={(e) => handleSpeechModel(e.target.value)} disabled={saving}>
+            {Object.entries(SPEECH_MODELS).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+          </select>
+        </div>
+      )}
       <StepError message={error} />
       {switchOffer && (
         <div className="story-step-actions">
