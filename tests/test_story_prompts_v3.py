@@ -566,19 +566,8 @@ def test_the_largest_french_v3_replies_fit_their_caps():
 
 # ================================================================ the selection (RC-W3)
 
-def _writing_key(monkeypatch):
-    """The story schema's ``generation_profile.writing`` (plan 22 stage 2's
-    key, DEC-274), set here so this file's v3 stories can be stored on a
-    tree where that stage is not merged yet; the same definition."""
-    monkeypatch.setitem(schemas._GENERATION_PROFILE_SCHEMA["properties"], "writing",
-                        {"type": "string", "enum": ["v2", "v3"]})
-
-
-def _v3_story(store, monkeypatch, writing="v3"):
-    _writing_key(monkeypatch)
-    story_id = eps._ready_story(store, v2=True)
-    store.update(story_id, lambda doc: doc["generation_profile"].update(writing=writing), now=eps.NOW)
-    return story_id
+def _v3_story(store, writing="v3"):
+    return eps._ready_story(store, v2=True, writing=writing)
 
 
 def _tag(call, label):
@@ -609,8 +598,8 @@ def _v3_llm():
                        default={"E2v3": e2_v3_reply, "J1v3": eps.J1_PASSED})
 
 
-def test_a_v3_story_writes_and_judges_on_the_v3_prompts_and_keeps_the_spine(store, monkeypatch):
-    story_id = _v3_story(store, monkeypatch)
+def test_a_v3_story_writes_and_judges_on_the_v3_prompts_and_keeps_the_spine(store):
+    story_id = _v3_story(store)
     llm = _v3_llm()
     summary, _log = eps._run(eps._new().script, store, story_id, llm=llm)
     used = set(llm.prompts())
@@ -627,14 +616,11 @@ def test_a_v3_story_writes_and_judges_on_the_v3_prompts_and_keeps_the_spine(stor
     assert j1_spine in llm.of("J1v3")[0]["user"]
 
 
-def test_a_story_without_the_stamp_builds_e1v2_byte_identical(store, monkeypatch):
-    """RC-W3: a v2 story without ``writing: v3`` (or with "v2") sends E1v2
-    exactly as the v2 builder makes it, and judges on J1 version 2."""
+def test_a_story_without_the_stamp_builds_e1v2_byte_identical(store):
+    """RC-W3: a v2 story without ``writing: v3`` (no key, or "v2") sends
+    E1v2 exactly as the v2 builder makes it, and judges on J1 version 2."""
     for writing in (None, "v2"):
-        if writing is None:
-            story_id = eps._ready_story(store, v2=True)
-        else:
-            story_id = _v3_story(store, monkeypatch, writing=writing)
+        story_id = _v3_story(store, writing=writing)
         llm = eps._script_llm(v2=True, E4=[eps.E4_PASSED])
         eps._run(eps._new().script, store, story_id, llm=llm)
         assert "E1v2" in llm.prompts() and not any(p.endswith("v3") for p in llm.prompts())
@@ -660,13 +646,12 @@ def test_a_story_without_the_stamp_builds_e1v2_byte_identical(store, monkeypatch
         assert "spine" not in eps._script(store, story_id)
 
 
-def test_an_episode_begun_before_the_stamp_is_finished_and_judged_on_v2(store, monkeypatch):
+def test_an_episode_begun_before_the_stamp_is_finished_and_judged_on_v2(store):
     """An episode beat-sheeted on E1v2 (no spine) whose story turns v3
     keeps the prompts and the judge it began with: E2v2/E3v2, J1 version 2,
     its version-2 report not judged again."""
-    story_id = eps._ready_story(store, v2=True)
+    story_id = _v3_story(store, writing="v2")
     eps._run(eps._new().script, store, story_id, llm=eps._script_llm(v2=True, E4=[eps.E4_PASSED]))
-    _writing_key(monkeypatch)
     store.update(story_id, lambda doc: doc["generation_profile"].update(writing="v3"), now=eps.NOW)
     from clipping.aistory.steps import judge
 

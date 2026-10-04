@@ -304,6 +304,9 @@ def test_max_tokens():
         # Plan 22 stage 2 (DEC-274): re-pinned on purpose -- the brief-faithful concept prompts, new ids (C1's
         # own row is unchanged): C1v2 and B1v3 answer their v1 schemas (= their caps); C1J is a short verdict.
         "C1v2": 700, "C1J": 200, "B1v3": 400,
+        # Plan 22 stage 3: re-pinned on purpose -- writing v3, new ids (the v1/v2 rows unchanged): E1v3 and
+        # J1v3 measured on their French worst cases, E2v3/E3v3 reply as E2/E3 (tests/test_story_prompts_v3.py).
+        "E1v3": 2570, "E2v3": 700, "E3v3": 720, "J1v3": 990,
     }
 
 
@@ -352,6 +355,9 @@ def test_schema_names():
         # Plan 22 stage 2 (DEC-274): re-pinned on purpose -- C1v2/B1v3 answer their v1 schemas but keep their own
         # schema name (every versioned prompt does, a test fixture's schema_name -> prompt_id lookup relies on it).
         "C1v2": "story_concepts_v2", "C1J": "concept_brief_check", "B1v3": "bible_core_v3",
+        # Plan 22 stage 3: re-pinned on purpose -- writing v3's prompts, each its own schema name.
+        "E1v3": "episode_beat_sheet_v3", "E2v3": "episode_scene_dialogue_v3", "E3v3": "episode_framing_scenes_v3",
+        "J1v3": "first_watch_check_v3",
     }
 
 

@@ -217,7 +217,8 @@ def _lock():
     return stylelock.lock_style(draft, now=NOW)
 
 
-def _ready_story(store, *, recaps=None, relationships=None, with_prop=True, v2=False, knowledge=True):
+def _ready_story(store, *, recaps=None, relationships=None, with_prop=True, v2=False, knowledge=True,
+                 writing=defaults.WRITING_V2):
     """A French Tentafruit story whose derived status is ``ready`` (with no
     prop at all when *with_prop* is False). *v2* (phase 7 stage 3c, A11)
     puts the story on the v2 pipeline (``media_policy.is_v2``), the only
@@ -226,7 +227,14 @@ def _ready_story(store, *, recaps=None, relationships=None, with_prop=True, v2=F
     Phase 7 stage 5b (DEC-228), re-pinned on purpose: a v2 story's script is
     written only from an approved, current knowledge base (the episode
     gate), so a v2 story here gets one (:func:`_approved_knowledge`) unless
-    *knowledge* is False; a legacy story never has one."""
+    *knowledge* is False; a legacy story never has one.
+
+    Plan 22 stage 3, re-pinned on purpose: ``store.create`` stamps every new
+    story ``writing: "v3"`` (DEC-274), which routes a v2 story's script to
+    the writing-v3 prompts; this fixture's stories pin *writing* -- "v2" by
+    default, the prompts these tests were written for; "v3" for the v3
+    tests (tests/test_story_prompts_v3.py); None removes the key (a story
+    from before the stamp)."""
     story_id = store.create(language="fr", seed_text=None, style_template_id="fruit_drama", now=NOW)["story_id"]
     concept = templates.localize_concept(
         next(c for c in templates.load_concepts() if c["concept_id"] == "tentafruit_island"), "fr")
@@ -239,6 +247,10 @@ def _ready_story(store, *, recaps=None, relationships=None, with_prop=True, v2=F
         doc["premise"] = "Chaque semaine, un couple est éliminé. Le téléphone en noix de coco annonce le vote."
         doc["tone"] = "Sombre, cynique, satirique"
         doc["generation_profile"]["consistency_mode"] = "prompt_only"
+        if writing is None:
+            doc["generation_profile"].pop("writing", None)
+        else:
+            doc["generation_profile"]["writing"] = writing
         if v2:
             doc["generation_profile"]["pipeline"] = defaults.PIPELINE_V2
         for key in ("concept", "bible", "style"):

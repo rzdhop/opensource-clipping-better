@@ -174,7 +174,9 @@ def test_a_story_created_without_a_profile_is_fully_animated_when_fal_is_keyed(a
     # Re-pinned on purpose (plan 22 stage 5): the manual native-speech profile is the default.
     assert story["generation_profile"]["budget_profile"] == "native_speech_manual"
     assert story["generation_profile"]["tier"] >= 2
-    assert story["episode_template_id"] == defaults.EPISODE_TEMPLATE_ID_V2
+    # Re-pinned on purpose (plan 22 stage 3): a native-speech profile starts on the confrontation format,
+    # whose one-shot-per-line board its lines fit (defaults.episode_template_for).
+    assert story["episode_template_id"] == defaults.EPISODE_TEMPLATE_ID_CONFRONTATION
 
 
 def test_the_wizard_starts_from_the_servers_profile_and_offers_quality():
