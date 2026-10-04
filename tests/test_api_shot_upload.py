@@ -239,3 +239,75 @@ def test_the_last_missing_clip_starts_the_paused_run_again(api):
     assert (job["step"], job["ep"], job["params"], job["status"]) == ("fast-track", 1, {"storyboard": "fast"}, "queued")
     old = api.jobs.get_job(paused)
     assert (old["status"], old["resumed_by"]) == ("completed", new_id)
+
+
+# ================================================================ your own images
+
+def _png(tmp_path, name, size):
+    image_module = pytest.importorskip("PIL.Image")
+    path = tmp_path / name
+    image_module.new("RGB", size, (200, 40, 60)).save(path, format="PNG")
+    return os.fspath(path)
+
+
+def _post_image(api, path, url):
+    with open(path, "rb") as fh:
+        return api.client.post(url, files={"file": (os.path.basename(path), fh, "image/png")})
+
+
+def _manual_images(store):
+    story_id = _manual(store)
+    store.update(story_id, lambda doc: doc["generation_profile"].update(images="manual"), now=tas.NOW)
+    return story_id
+
+
+def test_your_own_sheets_plates_props_and_keyframes_are_stored_as_made_ones(api):
+    story_id = _manual_images(api.store)
+    shot_id = tas._board(api.store, story_id)["shots"][0]["shot_id"]
+    keyframe = _post_image(api, _png(api.tmp_path, "kf.png", (1080, 1920)),
+                           f"/api/stories/{story_id}/episodes/1/shots/{shot_id}/keyframe")
+    assert keyframe.status_code == 201, keyframe.text
+    body = keyframe.json()
+    assert body["state"] == "current" and body["size"] == [1080, 1920]
+    assert all(item["shot_id"] != shot_id for item in body["missing"]) and body["missing"]
+    assert body["waiting"].startswith(f"Waiting for {len(body['missing'])} keyframes")
+    stored = tas._board(api.store, story_id)["shots"][0]["assets"]
+    assert (stored["provider"], stored["model"], stored["route"], stored["est_usd"]) == ("manual", "upload",
+                                                                                       "free", 0.0)
+    brief = api.client.get(f"/api/stories/{story_id}/image-brief?ep=1").json()
+    assert {entry["kind"] for entry in brief["images"]} == {"sheet", "plate", "prop", "keyframe"}
+    assert all(entry["upload_slot"] and entry["prompt"] for entry in brief["images"])
+
+    sheet = _post_image(api, _png(api.tmp_path, "rouge.png", (720, 1280)),
+                        f"/api/stories/{story_id}/cast/char_kiwilo/sheet?which=portrait")
+    assert sheet.status_code == 201, sheet.text
+    assert sheet.json()["ref"] == {"name": "portrait.png", "consistency": "base", "source": "manual/upload",
+                                   "seed": None, "created_at": sheet.json()["ref"]["created_at"]}
+    portrait = api.store.read_entity(story_id, "characters", "char_kiwilo")["refs"]["portrait"]
+    assert portrait["source"] == "manual/upload"
+    plate = _post_image(api, _png(api.tmp_path, "night.png", (720, 1280)),
+                        f"/api/stories/{story_id}/places/place_le_parloir_des_secrets/plate?variant=night")
+    assert plate.status_code == 201 and plate.json()["ref"]["consistency"] == "references"
+    prop = _post_image(api, _png(api.tmp_path, "phone.png", (1024, 1024)),
+                       f"/api/stories/{story_id}/props/{tas.eps.PHONE}/image")
+    assert prop.status_code == 201, prop.text
+
+
+def test_an_image_upload_is_refused_with_its_reason(api):
+    story_id = _manual_images(api.store)
+    small = _post_image(api, _png(api.tmp_path, "small.png", (200, 300)),
+                        f"/api/stories/{story_id}/cast/char_kiwilo/sheet?which=portrait")
+    assert small.status_code == 400 and "at least 360x640" in small.json()["detail"]["message"]
+    shot_id = tas._board(api.store, story_id)["shots"][0]["shot_id"]
+    wide = _post_image(api, _png(api.tmp_path, "wide.png", (1920, 1080)),
+                       f"/api/stories/{story_id}/episodes/1/shots/{shot_id}/keyframe")
+    assert wide.status_code == 400 and "not 9:16" in wide.json()["detail"]["message"]
+    text = api.tmp_path / "notes.png"
+    text.write_text("not an image", encoding="utf-8")
+    bad = _post_image(api, os.fspath(text), f"/api/stories/{story_id}/props/{tas.eps.PHONE}/image")
+    assert bad.status_code == 415
+    # A story whose images are the app's own takes none.
+    app_story = _manual(api.store)
+    refused = _post_image(api, _png(api.tmp_path, "p.png", (720, 1280)),
+                          f"/api/stories/{app_story}/cast/char_kiwilo/sheet?which=portrait")
+    assert refused.status_code == 400 and "made by the app" in refused.json()["detail"]["message"]

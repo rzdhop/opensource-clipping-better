@@ -315,3 +315,20 @@ def test_an_8_s_upload_on_a_4_s_plan_is_judged_on_its_real_length(store, tmp_pat
     assert out["take"]["state"] == "ok" and out["take"]["end_s"] == pytest.approx(5.0)
     assert out["take"]["clip_real_s"] == pytest.approx(8.0, abs=0.05)
     assert out["duration_s"] == pytest.approx(5.3, abs=1 / 30)
+
+
+def test_a_story_whose_images_are_yours_awaits_its_keyframes_and_asks_nothing(store):
+    """``images: manual``: no keyframe is asked of anything (the image
+    adapters are never called); the step waits for the keyframes first --
+    the clips follow once they are approved."""
+    story_id = manual_story(store)
+    store.update(story_id, lambda doc: doc["generation_profile"].update(images="manual"), now=NOW)
+    host, log = _host(store, story_id)
+    host.images()
+    result = host.finish(host.write_assets_doc())
+    shots = tas._board(store, story_id)["shots"]
+    assert result["state"] == "awaiting_uploads" and result["uploads"]["keyframes"] == len(shots)
+    assert result["uploads"]["clips"] == 0 and result["failed"] == []
+    assert result["uploads"]["message"] == f"Waiting for {len(shots)} keyframes — download the brief"
+    assert {item["kind"] for item in result["uploads"]["missing"]} == {"keyframe"}
+    assert any(line.startswith(f"✋ {len(shots)} keyframes to upload") for line in log)
