@@ -3032,6 +3032,15 @@ J2_PROMPT_VERSION = 2
 J2_MISSING_MAX = 3
 J2_MISSING_MAX_WORDS = 6
 J2_CONTINUITY_MAX_WORDS = 25
+# Plan 19 stage 3 (F3): the framing image 1 has when it is not the one asked
+# ("a medium shot, not a close-up"), its own field so a framing mismatch
+# stops overloading ``missing`` and ``continuity_issue``. Optional in the
+# reply (a reply without it reads as none). J2_PROMPT_VERSION stays 2 on
+# purpose, against its convention: a stored verdict without the field still
+# says what it found (a framing miss it put in ``missing`` or
+# ``continuity_issue`` still fails it), so a bump would only re-ask every
+# judged keyframe -- and redraw what the new ask flags -- for nothing wrong.
+J2_FRAMING_MAX_WORDS = 8
 # The most identity sheets one J2 call sends beside the two keyframes (a
 # frame's staging holds at most 4 characters): six images a call, which
 # every link of VISION_CHAIN takes.
@@ -3048,6 +3057,8 @@ _J2_ASK = (
     "- shows_beat: true when image 1 shows what happens in this shot, with the people and objects above\n"
     "- missing: what the shot must show that image 1 does not (a character, an object, an action), at most "
     f"{J2_MISSING_MAX} items of at most {J2_MISSING_MAX_WORDS} words each; [] when nothing is missing\n"
+    "- framing_issue: image 1's framing if not the one asked (\"medium shot, not close-up\"), at most "
+    f"{J2_FRAMING_MAX_WORDS} words, never in missing or continuity_issue; else null\n"
 )
 _J2_CONTINUITY_ASK = (
     "- continuity_issue: what changed from image 2 to image 1 that should not have (a character's face, outfit "
@@ -3086,14 +3097,17 @@ def _j2_continuity_ask(*, has_previous, same_scene, sheets, outfit) -> str:
 
 
 def j2_schema() -> dict:
-    """The J2 output schema: ``{shows_beat, missing, continuity_issue}``."""
+    """The J2 output schema: ``{shows_beat, missing, framing_issue?,
+    continuity_issue}`` -- ``framing_issue`` (plan 19 stage 3) asked, never
+    required: a reply without it reads as no framing issue."""
     return _llm_obj({
         "shows_beat": {"type": "boolean"},
         "missing": {"type": "array", "description": f"at most {J2_MISSING_MAX} items",
                     "items": {"type": "string", "description": f"at most {J2_MISSING_MAX_WORDS} words"}},
+        "framing_issue": {"type": ["string", "null"]},
         "continuity_issue": {"type": ["string", "null"],
                              "description": f"at most {J2_CONTINUITY_MAX_WORDS} words, or null"},
-    })
+    }, required=("shows_beat", "missing", "continuity_issue"))
 
 
 def build_j2(*, shot_id, brief, previous_shot_id=None, same_scene=None, sheets=(), outfit=True):
@@ -3142,7 +3156,8 @@ def j2_prompt_text(*, shot_id, brief, previous_shot_id=None, same_scene=None, sh
 
 def validate_j2(reply, *, has_previous=True) -> list:
     """Post-validation for a J2 reply: at most :data:`J2_MISSING_MAX`
-    missing items within their word cap, a continuity issue within its cap
+    missing items within their word cap, a framing issue (when given)
+    within :data:`J2_FRAMING_MAX_WORDS`, a continuity issue within its cap
     -- and null when there is nothing to compare image 1 with (*has_previous*
     false: the first shot, with no character sheet sent)."""
     errors = schemas.validate(reply, j2_schema())
@@ -3155,6 +3170,9 @@ def validate_j2(reply, *, has_previous=True) -> list:
         errors.append(f"$.missing: {len(missing)} item(s), expected at most {J2_MISSING_MAX}")
     for i, item in enumerate(missing):
         _text_errors(errors, f"$.missing[{i}]", item, max_words=J2_MISSING_MAX_WORDS)
+    framing = reply.get("framing_issue")
+    if framing is not None:
+        _text_errors(errors, "$.framing_issue", framing, max_words=J2_FRAMING_MAX_WORDS)
     issue = reply["continuity_issue"]
     if issue is not None:
         if not has_previous:

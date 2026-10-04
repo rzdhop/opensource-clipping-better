@@ -1259,8 +1259,10 @@ async def _episode_step(stories, story, step, params, ep, response):
     does not plan; 409 from episode 2 on while the series memory of the one
     before is not written, approved and fresh, naming which -- the gate,
     DEC-130 as amended by plan 11 stage 4), then the parameters (400: ``script``
-    ``{measure_voices?}``, ``storyboard`` ``{fast?}``, closed lists), then --
-    the storyboard -- a complete script (409 naming what is missing), then
+    ``{measure_voices?, check_only?}`` -- not both --, ``storyboard`` ``{fast?}``,
+    closed lists), then -- the storyboard, and the script with
+    ``params.check_only`` (plan 19 stage 3: the checks alone, nothing written)
+    -- a complete script (409 naming what is missing), then
     what every job meets (``_create_step_job``: 409 while a step of the story
     is in flight, the key gate 400, the queue cap 429). The job carries
     *ep*; a newer one supersedes the one awaiting approval for the same
@@ -1276,6 +1278,8 @@ async def _episode_step(stories, story, step, params, ep, response):
         ec = workflow.episode_context(stories, story, ep, step=step)
         if step == "script":
             workflow.script_request(params)
+            if workflow.script_check_only(params):
+                workflow.require_checkable_script(ec)
             fast = False
         else:
             fast = workflow.storyboard_request(params)

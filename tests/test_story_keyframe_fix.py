@@ -31,7 +31,7 @@ import test_story_clip_estimate as tce
 import test_story_episode_steps as eps
 import test_story_keyframe_consistency as kc
 import test_story_keyframe_gate as kg
-from clipping.aistory import shots
+from clipping.aistory import prompting, shots
 from clipping.cancel import Cancelled
 from test_story_assets_step import hermetic, store  # noqa: F401 -- stage 8's fixtures, used as they are
 from test_story_keyframe_gate import unpaced  # noqa: F401 -- the free Gemini tier's pacing lifted
@@ -49,10 +49,12 @@ class Judge(kg.FakeVision):
     every one) with *MISSING* missing, then passes; every other shot
     passes. *on_call(shot_id, count)* runs before each answer."""
 
-    def __init__(self, fails=None, *, on_call=None, issue=None):
+    def __init__(self, fails=None, *, on_call=None, issue=None, framing=None):
         self.fails = dict(fails or {})
         self.on_call = on_call
         self.issue = issue
+        # Plan 19 stage 3: {shot_id: framing_issue} -- such a shot fails on its framing alone.
+        self.framing = dict(framing or {})
         self.seen = {}
         super().__init__(answer=self.reply)
 
@@ -63,6 +65,9 @@ class Judge(kg.FakeVision):
             self.on_call(shot_id, self.seen[shot_id])
         left = self.fails.get(shot_id, 0)
         if left is None or self.seen[shot_id] <= left:
+            if shot_id in self.framing:
+                return json.dumps({"shows_beat": True, "missing": [], "framing_issue": self.framing[shot_id],
+                                   "continuity_issue": None})
             return json.dumps({"shows_beat": True, "missing": [MISSING],
                                "continuity_issue": self.issue.get(shot_id) if self.issue else None})
         return kg.PASS
@@ -117,10 +122,14 @@ def test_a_flagged_keyframe_is_redrawn_with_a_fresh_seed_and_its_verdict_s_note_
     shots_total = len(tas._shots(store, story_id))
     assert len(image.requests) == shots_total + 1
     redraw = image.requests[-1]
-    note = f"Keyframe check: the frame must show {_kiwi(store, story_id)}'s coconut phone"
+    # Plan 19 stage 3, re-pinned on purpose: the note ends with the shot's own framing as an order (F3).
+    phrase = prompting.FRAMING_PHRASES[_shot(store, story_id, "sh05")["framing"]]
+    note = (f"Keyframe check: the frame must show {_kiwi(store, story_id)}'s coconut phone. Frame this as {phrase}, "
+            "nothing wider.")
     assert redraw.extra["name"] == "shot_05" and redraw.seed == 4242
-    # The note says who it is about in the prompt's own words, never "the character".
-    assert redraw.prompt == _shot(store, story_id, "sh05")["image_prompt"] + f" Author's note: {note}."
+    # The note says who it is about in the prompt's own words, never "the character" (it ends with its own
+    # period now: the framing order's).
+    assert redraw.prompt == _shot(store, story_id, "sh05")["image_prompt"] + f" Author's note: {note}"
     # Checked again, with the shot after it (its previous keyframe changed).
     assert judge.seen["sh05"] == 2 and judge.seen["sh06"] == 2 and judge.seen["sh04"] == 1
     shot = _shot(store, story_id, "sh05")
@@ -287,6 +296,54 @@ def test_the_note_says_who_a_continuity_issue_is_about_in_the_prompt_s_terms():
     # A legacy shot's note is swept as it always was.
     assert "the coconut the object" in assets.effective_prompt({"image_prompt": "Prompt."}, entities, note)
     assert len(assets.correction_note(entities, dict(verdict, continuity_issue="x " * 200))) <= 300
+    # Plan 19 stage 3 (F3): with the flagged shot, the note ends with its framing as an order -- whatever J2
+    # found -- and the order survives the cap (J2's part is cut first, once).
+    close_up = {"framing": "close_up", "image_prompt": "Prompt.", "prompt_layout": "layered_v1"}
+    framed = assets.correction_note(entities, verdict, close_up)
+    assert framed == f"{note}. Frame this as tight close-up on the face, nothing wider."
+    assert assets.effective_prompt(close_up, entities, framed) == f"Prompt. Author's note: {framed}"
+    long = assets.correction_note(entities, dict(verdict, continuity_issue="x " * 200), close_up)
+    assert len(long) <= 300 and long.endswith("x… Frame this as tight close-up on the face, nothing wider.")
+    assert long.count("…") == 1
+    # A shot without a known framing gets the note as before.
+    assert assets.correction_note(entities, verdict, {"framing": None}) == note
+
+
+def test_a_framing_mismatch_note_restates_the_required_framing(store, tmp_path, monkeypatch):
+    """Plan 19 stage 3 (F3): the live walk flagged 7 of 15 keyframes for
+    their framing, and 10 redraws whose note echoed J2's prose ("correct
+    this: Framing is medium shot instead of tight close-up") fixed one. J2
+    names a framing miss in ``framing_issue``; the redraw's note restates
+    the framing the shot asks, from the shot's own data, in the prompt's own
+    words -- never J2's prose -- with "nothing wider" (not on the widest
+    framing, where it means nothing)."""
+    from clipping.aistory.steps import assets
+
+    entities = {"characters": {}, "places": {}, "props": {}}
+    verdict = {"shows_beat": True, "missing": [], "continuity_issue": None,
+               "framing_issue": "a medium shot, not a close-up"}
+    for framing, phrase in prompting.FRAMING_PHRASES.items():
+        note = assets.correction_note(entities, verdict, {"framing": framing})
+        tail = "." if framing == "wide_establishing" else ", nothing wider."
+        assert note == f"Keyframe check: draw it again with the framing asked. Frame this as {phrase}{tail}"
+        assert "medium shot, not a close-up" not in note
+
+    story_id = _quality(store, tmp_path)
+    _seeds(monkeypatch)
+    image, judge = kc.SeededImage(price=PRICE), Judge({"sh05": 1}, framing={"sh05": "a wide shot, not this"})
+
+    _summary, log = _run(store, story_id, image=image, vision=judge)
+
+    shot = _shot(store, story_id, "sh05")
+    phrase = prompting.FRAMING_PHRASES[shot["framing"]]
+    tail = "." if shot["framing"] == "wide_establishing" else ", nothing wider."
+    note = f"Keyframe check: draw it again with the framing asked. Frame this as {phrase}{tail}"
+    assert image.requests[-1].prompt == shot["image_prompt"] + f" Author's note: {note}"
+    fix = tas._assets_doc(store, story_id)["keyframe_fixes"]["sh05"]
+    first, second = fix["history"]
+    # J2's own field, kept on the verdict and named in the feed and the history like the other findings.
+    assert first["issue"] == "framing: a wide shot, not this" and (second["passed"], second["note"]) == (True, note)
+    assert any("Shot sh05: framing: a wide shot, not this" in line for line in log)
 
 
 # ============================================================ who never redraws

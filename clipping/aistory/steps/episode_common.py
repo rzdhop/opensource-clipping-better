@@ -556,7 +556,8 @@ def timing_line(script) -> str:
 def mark_changed(script, storyboard, *, scene_ids, now, plan_kept=None, keep_approval=False) -> None:
     """What rewriting part of a script does to both documents (in place; the
     caller writes them): ``script.rev`` and each rewritten scene's ``rev``
-    move on, ``approved_at`` and ``approved_anyway`` are cleared, a
+    move on, ``approved_at`` and ``approved_anyway`` are cleared (and the
+    fast track's ``approved_by``/``approved_over`` dropped), a
     consistency report becomes stale; a storyboard loses its approval and
     every one of its scenes planned from another revision of its scene --
     or from a scene the script no longer has -- becomes stale. *now*
@@ -583,6 +584,9 @@ def mark_changed(script, storyboard, *, scene_ids, now, plan_kept=None, keep_app
             scene["rev"] += 1
     script["approved_at"] = None
     script["approved_anyway"] = None
+    # Plan 19 stage 3: the fast track's record of its approval goes with it.
+    script.pop("approved_by", None)
+    script.pop("approved_over", None)
     if script.get("consistency_report") is not None:
         script["consistency_report"]["stale"] = True
     # Phase 7 stage 6a (DEC-230): a v2 script's first-watch report goes stale

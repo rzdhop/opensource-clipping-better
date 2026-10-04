@@ -56,6 +56,23 @@ def test_the_header_is_generate_episode_with_the_stop_at_keyframes_checkbox_off(
     assert 'type="checkbox"' in header and "Stop at the keyframes for my review" in header
 
 
+def test_the_header_sends_stop_on_script_issues_off_by_default_and_the_review_names_the_script_s_issues():
+    """Plan 19 stage 3 (F4): once the repair passes are spent the one click
+    approves the script anyway; a second checkbox keeps the stop, the confirm
+    says which, and the review names the issues as it names the keyframes'."""
+    src = EPISODE_STUDIO.read_text(encoding="utf-8")
+    header = _component(src, "FastTrackHeader")
+    assert f"{fast_track.SCRIPT_STOP_PARAM}: stopOnScriptIssues" in header
+    assert "useState(false)" in header.split("[stopOnScriptIssues, setStopOnScriptIssues]", 1)[1][:30]
+    assert "Stop at the script if its repairs leave issues" in header
+    confirm = header[header.index("const confirmMessage"):header.index("const handleRun")]
+    assert "approved anyway and named for your review" in confirm and "It stops at the script" in confirm
+    review = REVIEW_PANE.read_text(encoding="utf-8")
+    checklist = _component(review, "ApprovalsChecklist")
+    assert "BY_LABELS[script.by]" in checklist and "script.issues" in checklist
+    assert "The script was approved for you anyway" in review
+
+
 def test_the_confirm_says_what_the_click_does_and_costs():
     """The confirm reads the estimate (GET /estimate/fast-track) as
     fast_track.estimate shapes it: the keyframes block (stage C), the auto-fix

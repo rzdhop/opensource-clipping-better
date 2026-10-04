@@ -2146,6 +2146,10 @@ METADATA_PACK_DOC = story_store.EPISODE_METADATA_PACK_DOC
 # The keys ``params`` of the episode steps may carry (closed lists).
 SCRIPT_PARAMS = (script_step.MEASURE_PARAM,)
 STORYBOARD_PARAMS = ("fast",)
+# Plan 19 stage 3 (F6): the script step's check-only run, a closed list of
+# its own (the dashboard's "Check again" sends it, ``checkParams``); the
+# script step takes SCRIPT_PARAMS + SCRIPT_CHECK_PARAMS.
+SCRIPT_CHECK_PARAMS = (script_step.CHECK_ONLY_PARAM,)
 
 # Phase 4's params (closed lists; the runners' own: ``assets.PARAMS``,
 # ``render.PARAMS``, ``fast_track.PARAMS``; the metadata takes none) and the
@@ -2310,10 +2314,34 @@ def _flag(params, key) -> bool:
 
 
 def script_request(params) -> bool:
-    """A script step's *params* (``{measure_voices?}``, a closed list;
-    ``invalid`` otherwise): whether to measure the lines with real voices."""
-    _unknown_keys(params, SCRIPT_PARAMS, "script")
-    return _flag(params, script_step.MEASURE_PARAM)
+    """A script step's *params* (``{measure_voices?, check_only?}``, a closed
+    list; ``invalid`` otherwise, and for both at once: a check-only run
+    measures nothing): whether to measure the lines with real voices."""
+    _unknown_keys(params, SCRIPT_PARAMS + SCRIPT_CHECK_PARAMS, "script")
+    measure = _flag(params, script_step.MEASURE_PARAM)
+    if _flag(params, script_step.CHECK_ONLY_PARAM) and measure:
+        raise WorkflowError(INVALID, script_step.CHECK_ONLY_MEASURE_REFUSAL)
+    return measure
+
+
+def script_check_only(params) -> bool:
+    """Whether a script step's *params* ask the check-only run (plan 19
+    stage 3; :func:`script_request` checks them)."""
+    return params.get(script_step.CHECK_ONLY_PARAM) is True
+
+
+def require_checkable_script(ec) -> dict:
+    """The episode's script, complete, for a check-only run (plan 19 stage
+    3): ``conflict`` with ``script.check_only_refusal``'s sentence -- a run
+    that writes nothing never fills a stub."""
+    try:
+        script = episode_common.read_episode(ec, SCRIPT_DOC)
+    except StepFailed as exc:
+        raise WorkflowError(CONFLICT, str(exc)) from None
+    refusal = script_step.check_only_refusal(script, ec.ep)
+    if refusal:
+        raise WorkflowError(CONFLICT, refusal)
+    return script
 
 
 def storyboard_request(params) -> bool:
@@ -3042,13 +3070,18 @@ def _assets_view(ec, script, board, doc, derived) -> dict:
 
 def _keyframe_verdict_view(entry, current):
     """A shot's J2 verdict as the episode page shows it (phase 8 stage B):
-    ``{passed, current, shows_beat, missing, continuity_issue, checked_at}``,
-    or None when the shot has none."""
+    ``{passed, current, shows_beat, missing, continuity_issue, checked_at}``
+    -- and ``framing_issue`` when J2 named one (plan 19 stage 3; the review's
+    verdict text reads it, ``judge.verdict_text``) -- or None when the shot
+    has none."""
     if entry is None:
         return None
-    return {"passed": judge_step.verdict_passed(entry), "current": bool(current),
+    view = {"passed": judge_step.verdict_passed(entry), "current": bool(current),
             "shows_beat": entry["shows_beat"], "missing": list(entry["missing"]),
             "continuity_issue": entry["continuity_issue"], "checked_at": entry["checked_at"]}
+    if entry.get("framing_issue"):
+        view["framing_issue"] = entry["framing_issue"]
+    return view
 
 
 def _render_view(manifest, derived) -> dict:
@@ -3457,7 +3490,7 @@ def episode_review(page) -> dict:
         {"status": <REVIEW_STATUSES>, "ready": bool, "headline": sentence,
          "auto_approved": ["keyframes", "assets"] (what the fast track approved: by == fast_track),
          "pending": ["keyframes", "assets"] (what is still to approve, in this order),
-         "approvals": {"script": {"approved", "at", "anyway"}, "storyboard": {"approved", "at"},
+         "approvals": {"script": {"approved", "at", "anyway", "by", "issues"}, "storyboard": {"approved", "at"},
                        "keyframes": {"approval", "at", "anyway", "by", "flagged", "target"} | None (legacy),
                        "assets": {"approval", "at", "by", "target"}},
          "flagged": [shot ids whose current check failed], "unchecked": [no current check],
@@ -3485,7 +3518,11 @@ def episode_review(page) -> dict:
     recorded = doc.get(judge_step.KEYFRAMES_APPROVED) or {}
     approvals = {
         "script": {"approved": bool(script and script.get("approved_at")),
-                   "at": (script or {}).get("approved_at"), "anyway": bool((script or {}).get("approved_anyway"))},
+                   "at": (script or {}).get("approved_at"), "anyway": bool((script or {}).get("approved_anyway")),
+                   # Plan 19 stage 3: who approved, and the blocking issues the fast track approved over.
+                   "by": (script or {}).get("approved_by") or (USER_APPROVED if (script or {}).get("approved_at")
+                                                              else None),
+                   "issues": list((script or {}).get("approved_over") or [])},
         "storyboard": {"approved": bool(board and board.get("approved_at")), "at": (board or {}).get("approved_at")},
         "keyframes": None,
         "assets": {"approval": assets.get("fingerprint") or "none", "at": approved.get("at"),
@@ -3722,7 +3759,21 @@ def _refuse_length(ec, script, board, stage) -> None:
         raise WorkflowError(CONFLICT, refusal)
 
 
-def approve_script(stories, story_id, ep, *, approve_anyway=False, now) -> dict:
+def script_blocking_issues(script) -> list:
+    """The blocking issues an approval of *script* goes over (plan 19 stage
+    3): E4's blocking ones (DEC-261) then, on a failed first-watch report,
+    J1's (DEC-248) -- ``[{scene_id, kind, fix, check}]``, ``check`` naming
+    the report (``schemas.SCRIPT_APPROVED_OVER_CHECKS``)."""
+    found = [{"scene_id": issue["scene_id"], "kind": issue["kind"], "fix": issue["fix"], "check": "consistency"}
+             for issue in script_step.consistency_blocking_issues(script.get("consistency_report"))]
+    report = script.get(judge_step.FIRST_WATCH)
+    if report is not None and not report["passed"]:
+        found += [{"scene_id": issue["scene_id"], "kind": issue["kind"], "fix": issue["fix"], "check": "first_watch"}
+                  for issue in judge_step.blocking_issues(report)]
+    return found
+
+
+def approve_script(stories, story_id, ep, *, approve_anyway=False, now, by=USER_APPROVED) -> dict:
     """Approve episode *ep*'s script; returns it as written.
 
     ``conflict`` without a script; listing what is not written yet (every
@@ -3741,7 +3792,13 @@ def approve_script(stories, story_id, ep, *, approve_anyway=False, now) -> dict:
     naming them, unless *approve_anyway* -- which ``approved_anyway``
     records as it does over E4's. J1 version 2 (DEC-248): a report passes
     when none of its issues is blocking, so minor issues alone never refuse
-    and never make the approval an "anyway"."""
+    and never make the approval an "anyway".
+
+    *by* (plan 19 stage 3, ``schemas.APPROVED_BY``): the fast track's one
+    click records ``approved_by: "fast_track"`` and, over an "anyway",
+    ``approved_over`` -- the blocking issues it went over
+    (:func:`script_blocking_issues`), which the review names; the human's
+    approval records neither (and drops a fast track's record)."""
     story = load(stories, story_id)
     ep = episode_bounds(stories, story, ep)
     script = read_episode(stories, story_id, ep, SCRIPT_DOC)
@@ -3758,7 +3815,7 @@ def approve_script(stories, story_id, ep, *, approve_anyway=False, now) -> dict:
                                        "again (it checks the script's consistency)."))
     if script_step.needs_check(script):
         raise WorkflowError(CONFLICT, (f"Episode {ep}'s consistency check is out of date (the script changed "
-                                       "since it ran): check it again (run the script step)."))
+                                       "since it ran): check it again (run the script step with check only)."))
     v2 = media_policy.is_v2(story)
     if v2:
         unjudged = judge_step.unjudged_refusal(script, ep)
@@ -3783,7 +3840,14 @@ def approve_script(stories, story_id, ep, *, approve_anyway=False, now) -> dict:
         raise WorkflowError(CONFLICT, judge_step.issues_refusal(script, ep))
     ec = _context(stories, story_id, ep)
     script["approved_at"] = now
-    script["approved_anyway"] = now if over_issues or over_first_watch else None
+    anyway = over_issues or over_first_watch
+    script["approved_anyway"] = now if anyway else None
+    script.pop("approved_by", None)
+    script.pop("approved_over", None)
+    if by == FAST_TRACK_APPROVED:
+        script["approved_by"] = FAST_TRACK_APPROVED
+        if anyway:
+            script["approved_over"] = script_blocking_issues(script)
     return _write(episode_common.write_script, "script", ec, script, now=now, code=CONFLICT)
 
 

@@ -2593,6 +2593,20 @@ _EPISODE_SCRIPT_REPAIR_PASS_SCHEMA = _document({
     "failed": {"type": "array", "items": {"type": "string", "pattern": SCENE_ID_PATTERN}, "maxItems": 12},
 })
 
+# Plan 19 stage 3 (F4): who approved the script when the fast track did
+# (``approved_by: "fast_track"``, ``APPROVED_BY``'s value, written out here:
+# the tuple is defined further down) and, over an approval "anyway", the
+# blocking issues it went over -- E4's (``check: consistency``) and J1's
+# (``check: first_watch``) -- so the review names them. Absent on the
+# human's approvals; cleared with the approval (``episode_common.mark_changed``).
+SCRIPT_APPROVED_OVER_CHECKS = ("consistency", "first_watch")
+_EPISODE_SCRIPT_APPROVED_OVER_SCHEMA = _document({
+    "scene_id": {"type": ["string", "null"]},
+    "kind": {"type": "string", "enum": sorted(set(CONSISTENCY_ISSUE_KINDS) | set(FIRST_WATCH_ISSUE_KINDS))},
+    "fix": {"type": "string", "maxLength": 300},
+    "check": {"type": "string", "enum": list(SCRIPT_APPROVED_OVER_CHECKS)},
+})
+
 EPISODE_SCRIPT_SCHEMA = _document({
     "$schema": {"type": "string", "const": EPISODE_SCRIPT_SCHEMA_NAME},
     "ep": {"type": "integer", "minimum": 1, "maximum": 99},
@@ -2617,6 +2631,9 @@ EPISODE_SCRIPT_SCHEMA = _document({
     # Phase 7 follow-up, stage G: the repair passes of the run that produced
     # the first-watch report; absent until one ran on this script.
     "repairs": {"type": "array", "items": _EPISODE_SCRIPT_REPAIR_PASS_SCHEMA, "maxItems": 10},
+    # Plan 19 stage 3 (F4): the fast track's own approval (see above).
+    "approved_by": {"type": "string", "enum": ["fast_track"]},
+    "approved_over": {"type": "array", "items": _EPISODE_SCRIPT_APPROVED_OVER_SCHEMA, "maxItems": 40},
 })
 
 
@@ -3335,6 +3352,9 @@ _EPISODE_ASSETS_KEYFRAME_VERDICT_SCHEMA = _document({
     # (prompts.J2_PROMPT_VERSION); absent on a stage-6b verdict (version 1),
     # which stays readable and is asked again (judge.verdict_current).
     "prompt_version": {"type": "integer", "minimum": 1},
+    # Plan 19 stage 3 (F3): the framing the keyframe has when it is not the
+    # one asked; absent when J2 named none, and on every older verdict.
+    "framing_issue": {"type": "string", "minLength": 1, "maxLength": 200},
 })
 
 # Phase 8 stage B: what the assets step's keyframe auto-fix did -- per shot

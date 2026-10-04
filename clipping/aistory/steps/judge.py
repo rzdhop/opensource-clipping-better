@@ -45,8 +45,9 @@ step of a v2 story, once the keyframes exist, one vision call per shot on
 every gate of the generation runner, each answered call booked in the
 story's ledger, a reply that fails validation asked for once more) with the
 shot's keyframe, the previous shot's keyframe and what the shot must show
-(:func:`keyframe_brief`): ``{shows_beat, missing, continuity_issue}``,
-stored per shot in ``assets.json``'s optional ``keyframe_verdicts`` with the
+(:func:`keyframe_brief`): ``{shows_beat, missing, continuity_issue}`` --
+plus ``framing_issue`` when the keyframe's framing is not the one asked
+(plan 19 stage 3; absent otherwise, and on every older verdict) -- stored per shot in ``assets.json``'s optional ``keyframe_verdicts`` with the
 sha256 of both images. A verdict stays current while both images are the
 ones it saw (:func:`verdict_current`): a shot judged already is never asked
 again. A vision chain that cannot run skips J2 with a line in the feed.
@@ -524,9 +525,12 @@ def verdict_current(entry, image_sha, previous_sha) -> bool:
 
 
 def verdict_passed(entry) -> bool:
-    """A verdict passes when the keyframe shows the beat, misses nothing and
-    keeps continuity with the shot before it."""
-    return bool(entry["shows_beat"]) and not entry["missing"] and not entry["continuity_issue"]
+    """A verdict passes when the keyframe shows the beat, misses nothing, has
+    the framing asked (``framing_issue``, plan 19 stage 3: absent on an older
+    verdict, which reads as none) and keeps continuity with the shot before
+    it."""
+    return (bool(entry["shows_beat"]) and not entry["missing"] and not entry.get("framing_issue")
+            and not entry["continuity_issue"])
 
 
 def verdict_text(entry) -> str:
@@ -536,6 +540,8 @@ def verdict_text(entry) -> str:
         found.append("does not show the beat")
     if entry["missing"]:
         found.append("missing " + "; ".join(entry["missing"]))
+    if entry.get("framing_issue"):
+        found.append(f"framing: {entry['framing_issue']}")
     if entry["continuity_issue"]:
         found.append(f"continuity: {entry['continuity_issue']}")
     return ", ".join(found) or "passed"
@@ -585,8 +591,12 @@ def _reply_of(result, *, has_previous):
     errors = prompts.validate_j2(value, has_previous=has_previous)
     if errors:
         return None, errors
-    return {"shows_beat": value["shows_beat"], "missing": [" ".join(item.split()) for item in value["missing"]],
-            "continuity_issue": " ".join(value["continuity_issue"].split()) if value["continuity_issue"] else None}, []
+    found = {"shows_beat": value["shows_beat"], "missing": [" ".join(item.split()) for item in value["missing"]],
+             "continuity_issue": " ".join(value["continuity_issue"].split()) if value["continuity_issue"] else None}
+    if value.get("framing_issue"):
+        # Plan 19 stage 3: kept only when J2 names one (a verdict without it reads as none).
+        found["framing_issue"] = " ".join(value["framing_issue"].split())
+    return found, []
 
 
 def j2_request(ec, shot, path, prev_id, prev_path, context=None):

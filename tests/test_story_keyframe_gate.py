@@ -364,7 +364,9 @@ def test_a_stop_mid_check_keeps_every_verdict_judged_so_far(store, tmp_path, bui
     assert vision.shots() == shots[3:]
 
 
-MEASURED_J2_TEXT = 831
+# Plan 19 stage 3, re-measured on purpose: the ask gains the framing_issue line and the schema its
+# property (831 -> 879; still well inside the pack budget).
+MEASURED_J2_TEXT = 879
 
 
 def test_the_j2_text_at_its_worst_case_fits_the_default_pack_budget():
@@ -399,7 +401,9 @@ def test_the_j2_text_at_its_worst_case_fits_the_default_pack_budget():
     assert schemas.KEYFRAME_MISSING_MAX == prompts.J2_MISSING_MAX
 
 
-MEASURED_J2_V2_TEXT = 1145
+# Plan 19 stage 3, re-measured on purpose: the framing_issue line and property (1145 -> 1194, inside 1200 --
+# the ask was written short to stay inside it).
+MEASURED_J2_V2_TEXT = 1194
 
 
 def test_the_j2_v2_text_at_its_worst_case_fits_the_default_pack_budget():
@@ -439,6 +443,43 @@ def test_the_j2_v2_text_at_its_worst_case_fits_the_default_pack_budget():
     tokens = context.estimate_tokens(request.prompt, "")
     assert tokens == MEASURED_J2_V2_TEXT
     assert tokens <= context.PACK_TOKEN_BUDGET
+
+
+def test_j2_asks_a_framing_issue_of_its_own_and_its_brief_is_unchanged():
+    """Plan 19 stage 3 (F3): the brief already says "Framing: tight close-up
+    on the face", but the ask defined ``missing`` as a character, an object
+    or an action and ``continuity_issue`` as what changed between the images
+    -- J2 crammed a framing miss into both. It gets a field of its own,
+    nullable and not required (a reply without it reads as none, so J2's
+    version and every stored verdict stand); the brief is unchanged."""
+    from clipping.aistory import prompts
+    from clipping.aistory.steps import judge
+
+    ec = SimpleNamespace(entities={"characters": {"char_k": {"name": "Kiwilo", "descriptor": "A kiwi head"}},
+                                   "places": {"place_p": {"name": "Le Parloir"}}, "props": {}})
+    shot = {"shot_id": "sh02", "framing": "close_up", "subject_tags": ["@char_k", "#place_p:day"],
+            "action": "@char_k frowns at the phone."}
+    brief = judge.keyframe_brief(ec, shot)
+    assert brief == ("What happens: Kiwilo frowns at the phone.\nFraming: tight close-up on the face\n"
+                     "Where: Le Parloir, day\nWho is in it:\n- Kiwilo: A kiwi head")
+    system, user, schema = prompts.build_j2(shot_id="sh02", brief=brief, previous_shot_id="sh01")
+    assert ('- framing_issue: image 1\'s framing if not the one asked ("medium shot, not close-up"), at most 8 '
+            "words, never in missing or continuity_issue; else null\n") in user
+    assert user.index("- missing:") < user.index("- framing_issue:") < user.index("- continuity_issue:")
+    assert schema["properties"]["framing_issue"] == {"type": ["string", "null"]}
+    assert schema["required"] == ["shows_beat", "missing", "continuity_issue"]
+    assert prompts.J2_PROMPT_VERSION == 2
+
+    base = {"shows_beat": True, "missing": [], "continuity_issue": None}
+    assert prompts.validate_j2(base) == []  # a reply without the field still validates
+    assert prompts.validate_j2(dict(base, framing_issue=None)) == []
+    assert prompts.validate_j2(dict(base, framing_issue="a medium shot, not a close-up")) == []
+    assert prompts.validate_j2(dict(base, framing_issue="a b c d e f g h i")) == [
+        "$.framing_issue: 9 words, expected at most 8"]
+    # A framing issue fails the verdict and is named in its text; an older verdict without the field passes.
+    found = dict(base, framing_issue="a medium shot, not a close-up")
+    assert judge.verdict_passed(base) is True and judge.verdict_passed(found) is False
+    assert judge.verdict_text(found) == "framing: a medium shot, not a close-up"
 
 
 # ============================================================ the API and the CLI

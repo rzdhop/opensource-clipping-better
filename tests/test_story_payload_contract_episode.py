@@ -130,6 +130,16 @@ def test_measure_params_sends_measure_voices_true():
     assert "const measureParams = { measure_voices: true }" in src
 
 
+def test_check_params_send_exactly_the_check_only_run():
+    """Plan 19 stage 3 (F6): the script header's "Check again" sends the
+    check-only run (``workflow.SCRIPT_CHECK_PARAMS``, a closed list of its
+    own: ``SCRIPT_PARAMS`` and its pin above are unchanged)."""
+    src = SCRIPT_PANE.read_text(encoding="utf-8")
+    assert _object_literal_keys(src, "checkParams") == set(workflow.SCRIPT_CHECK_PARAMS) == {"check_only"}
+    assert "const checkParams = { check_only: true }" in src
+    assert "params: checkOnly ? checkParams : scriptParams" in src
+
+
 # -------------------------------------------------- ScriptPane.jsx: patchEpisodeScript
 
 def _patch_episode_script_call_sites() -> list[str]:
@@ -514,8 +524,9 @@ def test_the_readers_see_phase4_things():
     assert len(_class_fields("AssetsShotPatch")) >= 2
     assert len(_class_fields("AssetsPatchRequest")) >= 1
     assert len(workflow.ASSETS_PARAMS) == 2
-    # Phase 7 follow-up stage C: storyboard and stop_at_keyframes.
-    assert len(workflow.FAST_TRACK_PARAMS) == 2
+    # Phase 7 follow-up stage C: storyboard and stop_at_keyframes; plan 19 stage 3, re-pinned on purpose:
+    # stop_on_script_issues.
+    assert len(workflow.FAST_TRACK_PARAMS) == 3
 
 
 # --------------------------------------------------- StoryboardPane.jsx: assetsParams

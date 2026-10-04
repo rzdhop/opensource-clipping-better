@@ -203,9 +203,11 @@ shorter than 150 ms.
   wardrobe set, the text says which set is worn now. Then a free vision
   check (J2) looks at each keyframe next to the previous one and the
   characters' sheets and says whether it shows its beat, what is missing,
-  and what changed that should not have (across a scene change it compares
-  only who the characters are). A flagged keyframe is redrawn by the step
-  itself with a correction taken from the verdict and checked again — up
+  whether its framing is the one planned, and what changed that should not
+  have (across a scene change it compares only who the characters are). A
+  flagged keyframe is redrawn by the step itself with a correction taken
+  from the verdict, ending with the shot's own framing as an order ("Frame
+  this as tight close-up on the face, nothing wider."), and checked again — up
   to two redraws a shot and $0.40 an episode on the Quality profile, counted
   in the estimate — so most never reach you. The storyboard's **Keyframes**
   card lists each verdict and what was fixed; **Approve keyframes** (or
@@ -214,8 +216,11 @@ shorter than 150 ms.
   Regenerating one shot image by hand runs the check again on it and on the
   shot after it. Then run the assets step with animate on: it buys the clips.
 - *Generate episode* (the one click, "Fast track" below) follows the same
-  rules for the script — it stops at one it cannot approve, never approves
-  anyway and never outside the window — but not for the keyframes: once they
+  rules for the script — it stops at one it cannot approve and never
+  approves outside the window — except once the script step's two repair
+  passes are spent: then it approves the script anyway over the blocking
+  issues they could not fix and names them on the **Review** tab (tick "stop
+  at the script" to keep the stop). The keyframes likewise: once they
   are made, checked and auto-fixed it approves them for you (your click is
   the consent, the confirm says so; a shot still flagged is named), buys the
   clips, approves the assets, renders and ends "ready for review" on the
@@ -658,8 +663,14 @@ disables itself and says so.
 
 **Write / Continue / Check again** is one button whose label follows the
 episode's own state: `Write episode 1` with nothing yet, `Continue writing`
-mid-run, `Check again` once everything is written (re-running only the
-consistency check). Its estimate chip reads `est. $0.00 · N LLM calls` — the
+mid-run, `Check again` once everything is written and the check is out of
+date — after an edit or a regenerate. `Check again` is a check-only run
+(`params.check_only`, CLI `step ID script --ep N --check-only`): the
+consistency check and, on a v2 story, the first-watch check on the script
+exactly as it stands — nothing is written, filled or repaired, so your edit
+is never rewritten; a script with a scene still unwritten is refused (409)
+naming it. Approving a script whose check is out of date says "check it
+again (run the script step with check only)". Its estimate chip reads `est. $0.00 · N LLM calls` — the
 exact number of calls the beat sheet's own request will make, not a worst
 case — and its tooltip names the 8–12 legal range a first 60-second episode
 could still land in, plus any paid link the run would skip rather than call.
@@ -1058,12 +1069,20 @@ wherever the episode already stands: a document already approved is kept as it i
 assets already approved and current are kept, a render already current is
 kept — so pressing it again after a partial run, or after fixing whatever
 it stopped on, repeats nothing already done. Whatever it writes fresh is
-auto-approved only by that document's own approval rule (never "approve
-anyway"): a complete script with a fresh, passed consistency check inside
-the template's length window (on a v2 story, a fresh first-watch check with
-nothing blocking — its minor issues are named in the feed's approval line
-and on the Review tab); a storyboard that covers it; a complete assets
-grid. Before making or spending anything it checks the plan against
+auto-approved by that document's own approval rule: a complete script with
+a fresh, passed consistency check inside the template's length window (on a
+v2 story, a fresh first-watch check with nothing blocking — its minor issues
+are named in the feed's approval line and on the Review tab); a storyboard
+that covers it; a complete assets grid. On a v2 story it approves two
+things **anyway**, naming what it went over: the keyframes still flagged
+after their auto-fix, and the script once the script step's two repair
+passes are spent and only blocking issues remain (both checks fresh, the
+length inside the window) — the same issues found again on every pass are
+a judgement for you, not for a third pass. The Review tab's checklist says
+"Approved anyway by Generate episode — still found: s00 (continuity), …"
+and lists each fix. Tick **Stop at the script if its repairs leave issues**
+(`stop_on_script_issues`, CLI `fast-track --stop-on-script-issues`) to keep
+the stop instead; a legacy story always stops there. Before making or spending anything it checks the plan against
 the budget and stops before any paid image or voice unless paid generation
 is allowed and every cap — the episode's, the day's and the story's — fits,
 naming the numbers.
@@ -1080,8 +1099,9 @@ page opens the **Review** tab: one tile per shot — the keyframe, its check
 tile for the keyframe large, the clip and the regenerate controls; above
 the grid the episode's status, what was auto-approved, what is still
 pending and the spend by kind; one **Approve keyframes and assets** for
-whatever is pending. If it stops partway — a script it could not approve
-after its repairs, a plan over a cap, a scene T1 under-planned — it names
+whatever is pending. If it stops partway — a script outside its window or
+with a check it could not refresh, a plan over a cap, a scene T1
+under-planned — it names
 the sub-step, what happened and what to do next, then **Generate episode**
 again to continue exactly from there.
 
@@ -1779,7 +1799,10 @@ from the Script tab despite the warning.
 
 **"Fast track stopped at the script … first-watch check (J1): after 2 repair
 passes, N blocking issues remain"** — the first-watch check still finds
-something a first-time viewer cannot follow after the step's own repairs.
+something a first-time viewer cannot follow after the step's own repairs,
+and the run was asked to stop there (`stop_on_script_issues`; without it, a
+v2 episode is approved anyway at this point and the issues are named on the
+Review tab).
 The issues named are the blocking ones; fix them (edit the scene, or
 regenerate it with the fix as the note) and press **Generate episode**
 again, or approve the script yourself with **Approve anyway** if you judge

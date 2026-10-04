@@ -107,8 +107,9 @@ def _page(store, story_id):
 
 def test_the_fast_track_takes_stop_at_keyframes_true_or_false():
     ft = _ft()
-    assert ft.PARAMS == ("storyboard", "stop_at_keyframes")
-    assert ft.read_params(None) == {"storyboard": "t1", "stop_at_keyframes": False}
+    # Plan 19 stage 3, re-pinned on purpose: stop_on_script_issues joins the params (off by default).
+    assert ft.PARAMS == ("storyboard", "stop_at_keyframes", "stop_on_script_issues")
+    assert ft.read_params(None) == {"storyboard": "t1", "stop_at_keyframes": False, "stop_on_script_issues": False}
     assert ft.read_params({"stop_at_keyframes": True})["stop_at_keyframes"] is True
     try:
         ft.read_params({"stop_at_keyframes": "yes"})

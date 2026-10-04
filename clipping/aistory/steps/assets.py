@@ -173,8 +173,8 @@ from clipping.providers import generation as gen
 from clipping.providers import lipsync as lipsync_providers
 from clipping.providers.registry import ChainError, Link, describe
 
-from .. import (defaults, hardware, imaging, media_policy, prompt_budgets, refimages, schemas, timing, video_plan,
-               voices, wordtiming)
+from .. import (defaults, hardware, imaging, media_policy, prompt_budgets, prompting, refimages, schemas, timing,
+               video_plan, voices, wordtiming)
 from .. import ledger as ledger_mod
 from .. import names as names_mod
 from .. import shots as shots_mod
@@ -1757,13 +1757,41 @@ def _note_names(entity_docs) -> dict:
     return names
 
 
-def correction_note(entity_docs, verdict) -> str:
+def framing_order(shot):
+    """The imperative a redrawn keyframe ends with (plan 19 stage 3, F3):
+    the framing the shot asks, in the prompt's own words
+    (``prompting.FRAMING_PHRASES``) -- ``Frame this as tight close-up on the
+    face, nothing wider.`` -- or None for a shot without a known framing.
+    "nothing wider" is left off the wide establishing shot, the widest there
+    is. Built from the shot's own data, never from J2's prose: the live walk
+    flagged 7 of 15 keyframes for their framing, and 10 redraws whose note
+    only echoed J2 ("Framing is medium shot instead of tight close-up")
+    fixed one."""
+    framing = (shot or {}).get("framing")
+    phrase = prompting.FRAMING_PHRASES.get(framing)
+    if not phrase:
+        return None
+    return f"Frame this as {phrase}." if framing == "wide_establishing" else f"Frame this as {phrase}, nothing wider."
+
+
+def correction_note(entity_docs, verdict, shot=None) -> str:
     """The note a flagged keyframe is redrawn with: what J2 found -- the
     beat not shown, what is missing, the continuity issue -- with every
     entity name it used (its brief names them) said the way the prompt says
     it (:func:`_note_names`): a note's names otherwise become "the
     character" (:func:`with_note`), and the note no longer says who it is
-    about. Within the regenerate note's cap (``schemas.REGENERATE_NOTE_MAX``)."""
+    about. Within the regenerate note's cap (``schemas.REGENERATE_NOTE_MAX``).
+
+    Plan 19 stage 3 (F3): with the flagged *shot*, the note always ends with
+    :func:`framing_order` -- whatever J2 found, its framing ``framing_issue``
+    included (never echoed: the order says it in the prompt's words). Always,
+    not only on a framing mismatch: a redraw asked to show more ("the frame
+    must show the coconut phone") drifts wider, and J2 often names a framing
+    miss in ``missing`` or ``continuity_issue`` instead of its own field, so
+    no test of its prose would catch every one. The order is the shot's own
+    plan, so it never contradicts the rest; the J2 part is cut first, so the
+    order is never lost to the cap. Only the auto-fix of a v2 (layered) shot
+    calls this (J2 judges no legacy keyframe): no v1 prompt changes."""
     parts = []
     if not verdict["shows_beat"]:
         parts.append("show this shot's action clearly")
@@ -1771,8 +1799,15 @@ def correction_note(entity_docs, verdict) -> str:
         parts.append("the frame must show " + _and(verdict["missing"]))
     if verdict["continuity_issue"]:
         parts.append(f"correct this: {verdict['continuity_issue']}")
+    if not parts and verdict.get("framing_issue") and shot is not None:
+        parts.append("draw it again with the framing asked")
     text = " ".join(f"Keyframe check: {'; '.join(parts or ['draw it again'])}".split())
-    return _cut(names_mod.without_names(text, _note_names(entity_docs)), schemas.REGENERATE_NOTE_MAX)
+    text = names_mod.without_names(text, _note_names(entity_docs))
+    order = framing_order(shot)
+    if order is None:
+        return _cut(text, schemas.REGENERATE_NOTE_MAX)
+    head = _cut(text, schemas.REGENERATE_NOTE_MAX - len(order) - 2)
+    return f"{head} {order}" if head.endswith(("…", ".", "!", "?")) else f"{head}. {order}"
 
 
 def fix_history_entry(sha, verdict, *, note, at, unchecked=None) -> dict:
@@ -3830,7 +3865,7 @@ class _Assets(voice_lines.LineMeasurement):
                 summary["stopped"] = stop
                 self.save_fixes(held, settings)
                 return
-            note = correction_note(ec.entities, entry)
+            note = correction_note(ec.entities, entry, shot)
             seed = entities.fresh_seed()
             shot["assets"]["pending"] = {"seed": seed, "note": note, "requested_at": llm_call.utc_now()}
             self.write_board()

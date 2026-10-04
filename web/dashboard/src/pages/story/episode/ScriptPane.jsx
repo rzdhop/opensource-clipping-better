@@ -87,7 +87,13 @@ function ScriptHeader({ storyId, ep, episode, storyDoc, episodes, busy, onChange
     }
   }
 
-  const needsWrite = state.missing.length > 0 || state.report === 'stale'
+  // A v2 script's first-watch check (J1) goes stale with it, or alone when
+  // the judge's version moved (episode.state.first_watch, v2 only).
+  const needsWrite = state.missing.length > 0 || state.report === 'stale' || state.first_watch === 'stale'
+  // A complete script whose check is out of date (an edit, a regenerate) is
+  // checked as it stands -- never rewritten by the step's repair passes
+  // (plan 19 stage 3: params.check_only, steps/script.py).
+  const checkOnly = state.script !== 'none' && state.missing.length === 0
   const actionLabel = state.script === 'none' ? `Write episode ${ep}`
     : state.script === 'writing' ? 'Continue writing'
     : 'Check again'
@@ -97,10 +103,12 @@ function ScriptHeader({ storyId, ep, episode, storyDoc, episodes, busy, onChange
     setError('')
     setErrors(null)
     try {
-      // Writing, continuing and re-checking all send no parameters --
-      // MeasureVoices below is the only script-step call that does.
+      // Writing and continuing send no parameters; "Check again" sends
+      // check_only (workflow.SCRIPT_CHECK_PARAMS) -- MeasureVoices below
+      // sends measure_voices.
       const scriptParams = {}
-      await runStoryStep(storyId, 'script', { ep, params: scriptParams })
+      const checkParams = { check_only: true }
+      await runStoryStep(storyId, 'script', { ep, params: checkOnly ? checkParams : scriptParams })
       onChange()
     } catch (err) {
       setError(err.message)
@@ -136,6 +144,7 @@ function ScriptHeader({ storyId, ep, episode, storyDoc, episodes, busy, onChange
             className="btn btn-primary"
             onClick={handleRun}
             disabled={busy || running || Boolean(estimateError)}
+            title={checkOnly ? 'Run the consistency and first-watch checks on the script as it stands: nothing is rewritten' : undefined}
           >
             {running ? <><span className="spinner"></span> {actionLabel}…</> : actionLabel}
           </button>

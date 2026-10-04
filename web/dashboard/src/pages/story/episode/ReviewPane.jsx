@@ -338,10 +338,15 @@ function ApprovalsChecklist({ review }) {
   const { script, storyboard, keyframes, assets } = review.approvals
   const render = review.render
   const rendered = Boolean(render && render.state === 'completed' && !render.out_of_date)
+  // Plan 19 stage 3: the blocking issues the one click approved the script over, named as the keyframes' are.
+  const scriptIssues = script.issues && script.issues.length
+    ? ` — still found: ${script.issues.map((issue) => `${issue.scene_id || 'the episode'} (${issue.kind})`).join(', ')}` : ''
   const rows = [
     {
       key: 'script', label: 'Script', done: script.approved, stale: false,
-      detail: script.approved ? `Approved${script.anyway ? ' anyway' : ''} ${whenText(script.at)}` : 'Not approved',
+      detail: script.approved
+        ? `Approved${script.anyway ? ' anyway' : ''} ${BY_LABELS[script.by] || ''} ${whenText(script.at)}${scriptIssues}`
+        : 'Not approved',
     },
     {
       key: 'storyboard', label: 'Storyboard', done: storyboard.approved, stale: false,
@@ -471,6 +476,8 @@ export default function ReviewPane({ episode, characters, storyId, ep, inFlightJ
   const busy = Boolean(inFlightJob)
   const spend = review.spend
   const keyframes = review.approvals.keyframes
+  const scriptApproval = review.approvals.script
+  const scriptIssues = scriptApproval.issues || []
   const shot = open ? review.shots.find((item) => item.shot_id === open) : null
 
   return (
@@ -502,6 +509,12 @@ export default function ReviewPane({ episode, characters, storyId, ep, inFlightJ
                 Approved for you by Generate episode: {review.auto_approved.join(' and ')}
                 {keyframes && keyframes.anyway && keyframes.flagged.length
                   ? ` (the keyframes anyway — still flagged: ${keyframes.flagged.join(', ')})` : ''}.
+              </p>
+            )}
+            {scriptApproval.by === 'fast_track' && scriptApproval.anyway && scriptIssues.length > 0 && (
+              <p className="form-hint">
+                The script was approved for you anyway — its repair passes left:{' '}
+                {scriptIssues.map((issue) => `${issue.scene_id || 'the episode'} (${issue.kind}): ${issue.fix}`).join('; ')}
               </p>
             )}
             {review.script_repairs && review.script_repairs.length > 0 && (

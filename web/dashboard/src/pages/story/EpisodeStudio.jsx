@@ -126,7 +126,10 @@ function fastTrackProgress(events) {
  * On a v2 episode the keyframes are checked (J2) and auto-fixed, then
  * approved by the run itself with the assets -- the click is the approval,
  * which the confirm says in words -- unless "Stop at the keyframes" is
- * ticked (the fast track's `stop_at_keyframes`). The confirm dialog lists the
+ * ticked (the fast track's `stop_at_keyframes`). Plan 19 stage 3: once the
+ * script step's repair passes are spent, the run approves the script anyway
+ * over the blocking issues they could not fix, naming them for the review --
+ * unless "Stop at the script" is ticked (`stop_on_script_issues`). The confirm dialog lists the
  * estimate's split (GET /estimate/fast-track) before the click starts
  * anything; while the job runs the button names the sub-step its feed
  * reports (`job`, `events`: the in-flight fast-track job and its feed).
@@ -136,6 +139,7 @@ function FastTrackHeader({ storyId, ep, busy, job, events, onChange }) {
   const [estimate, setEstimate] = useState(null)
   const [running, setRunning] = useState(false)
   const [stopAtKeyframes, setStopAtKeyframes] = useState(false)
+  const [stopOnScriptIssues, setStopOnScriptIssues] = useState(false)
   const [error, setError] = useState('')
   const [errors, setErrors] = useState(null)
   // As every other estimate-driven header (stage-10 lesson, browser-check
@@ -162,7 +166,7 @@ function FastTrackHeader({ storyId, ep, busy, job, events, onChange }) {
   // shape (fast_track.estimate): the keyframes block (stage C) says whether
   // this is a v2 episode whose keyframes are checked, auto-fixed and
   // approved by the run itself.
-  const confirmMessage = (est, stop) => {
+  const confirmMessage = (est, stop, scriptStop) => {
     const kf = est.keyframes || {}
     const v2 = Boolean(kf.v2)
     const fix = Number(kf.fix_usd) || 0
@@ -190,6 +194,11 @@ function FastTrackHeader({ storyId, ep, busy, job, events, onChange }) {
         ? 'It stops once the keyframes are made and checked (J2), for your review; the clips are bought after you approve them.'
         : 'No stop for keyframe review — this click approves the keyframes and the assets for you; you review the finished episode.')
     }
+    if (v2) {
+      lines.push(scriptStop
+        ? 'It stops at the script if its checks still find blocking issues after the repair passes.'
+        : 'Script issues the repair passes cannot fix are approved anyway and named for your review.')
+    }
     lines.push('It stops before any paid spending, unless paid generation is allowed and every cap fits.')
     return lines.join('\n')
   }
@@ -198,7 +207,7 @@ function FastTrackHeader({ storyId, ep, busy, job, events, onChange }) {
     if (!estimate) return
     const confirmed = await confirm({
       title: `Generate episode ${ep}`,
-      message: confirmMessage(estimate, stopAtKeyframes),
+      message: confirmMessage(estimate, stopAtKeyframes, stopOnScriptIssues),
       confirmLabel: 'Generate episode',
     })
     if (!confirmed) return
@@ -206,7 +215,7 @@ function FastTrackHeader({ storyId, ep, busy, job, events, onChange }) {
     setError('')
     setErrors(null)
     try {
-      const fastTrackParams = { storyboard: 't1', stop_at_keyframes: stopAtKeyframes }
+      const fastTrackParams = { storyboard: 't1', stop_at_keyframes: stopAtKeyframes, stop_on_script_issues: stopOnScriptIssues }
       await runStoryStep(storyId, 'fast-track', { ep, params: fastTrackParams })
       onChange()
     } catch (err) {
@@ -255,6 +264,15 @@ function FastTrackHeader({ storyId, ep, busy, job, events, onChange }) {
           disabled={busy || running}
         />
         Stop at the keyframes for my review
+      </label>
+      <label className="story-checkbox episode-studio-stop">
+        <input
+          type="checkbox"
+          checked={stopOnScriptIssues}
+          onChange={(e) => setStopOnScriptIssues(e.target.checked)}
+          disabled={busy || running}
+        />
+        Stop at the script if its repairs leave issues
       </label>
       <StepError message={error} errors={errors} className="story-step-error" />
     </div>

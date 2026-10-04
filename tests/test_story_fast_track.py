@@ -240,8 +240,11 @@ def test_the_fast_storyboard_makes_no_t1_call_and_is_approved_by_its_own_rule(st
 
 @pytest.mark.parametrize("params, expected", [
     ({"storyboard": "slow"}, "The fast track's storyboard is one of t1, fast, not 'slow'."),
-    # Phase 7 follow-up stage C, re-pinned on purpose: stop_at_keyframes joins the params.
-    ({"subtitles": "none"}, "The fast track takes only storyboard, stop_at_keyframes; not 'subtitles'."),
+    # Phase 7 follow-up stage C, re-pinned on purpose: stop_at_keyframes joins the params; plan 19 stage 3,
+    # re-pinned on purpose: stop_on_script_issues too.
+    ({"subtitles": "none"}, "The fast track takes only storyboard, stop_at_keyframes, stop_on_script_issues; not "
+                            "'subtitles'."),
+    ({"stop_on_script_issues": "yes"}, "The fast track's stop_on_script_issues is true or false, not 'yes'."),
 ])
 def test_a_bad_param_is_refused_before_anything_runs(store, tmp_path, params, expected):
     story_id = _story(store)
@@ -252,7 +255,13 @@ def test_a_bad_param_is_refused_before_anything_runs(store, tmp_path, params, ex
 
 # ================================================================ the script
 
-def test_a_consistency_check_with_issues_stops_at_the_script_and_is_never_approved_anyway(store, tmp_path):
+def test_a_consistency_check_with_issues_stops_a_legacy_script_and_is_never_approved_anyway(store, tmp_path):
+    """Revised on purpose (plan 19 stage 3): the fast track now approves a
+    v2 script anyway once the script step's repair passes are spent
+    (:func:`test_the_fast_track_approves_anyway_after_the_repair_passes_are_spent`);
+    this story is a legacy one -- no first-watch check, no repair pass -- so
+    it still stops, and its sentence now says when the one click would go
+    over the issues instead of "never"."""
     story_id = _story(store)
     fakes = Fakes(tmp_path, runner=llm(e4=eps.E4_ISSUES))
 
@@ -262,8 +271,10 @@ def test_a_consistency_check_with_issues_stops_at_the_script_and_is_never_approv
     # continuity issue with no scene is the blocking one that stops the fast track.
     assert message.startswith("Fast track stopped at the script (step 1 of 6): Episode 1's consistency check "
                               "found 1 blocking issue: the episode (continuity): Le vote surprise n'est jamais "
-                              "expliqué.")
-    assert "The fast track never approves over blocking issues" in message
+                              "expliqué. The fast track never approves over blocking issues before the script "
+                              "step's repair passes are spent on a v2 story: fix them (edit the script, or "
+                              "regenerate the scenes they name) so the check passes, or approve the script anyway "
+                              "yourself.")
     assert message.endswith("Then Continue the fast track: it picks up here and repeats nothing already done.")
     script = _doc(store, story_id, "script.json")
     assert script["approved_at"] is None and script["approved_anyway"] is None
@@ -319,7 +330,12 @@ def test_a_script_over_its_window_stops_at_the_script(store, tmp_path, monkeypat
     assert _doc(store, story_id, "script.json")["approved_at"] is None and fakes.generation_calls() == 0
 
 
-def test_the_auto_approval_rule_is_pure_and_never_approves_anyway():
+def test_the_auto_approval_rule_is_pure_and_approves_anyway_only_over_spent_repairs():
+    """Revised on purpose (plan 19 stage 3; was ``..._and_never_approves_anyway``):
+    :func:`script_refusal` refuses exactly as before; the new
+    :func:`script_anyway_issues` names the blocking issues the one click
+    approves over -- only on a v2 story whose run spent the repair passes,
+    with both checks fresh and the length inside the window -- else None."""
     ft = _ft()
     script = {"scenes": [{"scene_id": "s01", "function": "hook", "state": "written"}], "rev": 3,
               "next_episode_teaser": "x", "cliffhanger": {"reveal": "y"},
@@ -337,6 +353,142 @@ def test_the_auto_approval_rule_is_pure_and_never_approves_anyway():
         {"scene_id": "s01", "kind": "character", "fix": "Broccolia parle trop gentiment."}]))
     assert ft.script_refusal(notes, 1) is None
     assert "not complete" in ft.script_refusal(None, 1)
+
+    # Plan 19 stage 3: the one exception, pure. A v2 script whose run spent its repair passes.
+    spent = [{"pass": 1}, {"pass": 2}]
+    report = {"who_wants_what": "a", "what_happens": "b", "why_it_matters": "c", "passed": False,
+              "issues": [{"scene_id": "s01", "kind": "unmotivated", "severity": "blocking", "fix": "Dire pourquoi."},
+                         {"scene_id": "s01", "kind": "unclear_goal", "severity": "minor", "fix": "Un détail."}],
+              "checked_rev": 3, "checked_at": NOW, "stale": False, "version": 2}
+    v2 = dict(failed, first_watch=report)
+    assert ft.script_refusal(v2, 1, v2=True) is not None  # the refusal itself is unchanged
+    assert ft.script_anyway_issues(v2, 1, v2=True, repairs=spent) == [
+        {"scene_id": "s01", "kind": "continuity", "fix": "Le vote n'est jamais expliqué.", "check": "consistency"},
+        {"scene_id": "s01", "kind": "unmotivated", "fix": "Dire pourquoi.", "check": "first_watch"}]
+    # Never for a legacy story, passes not spent, a stale check or a length outside the window.
+    assert ft.script_anyway_issues(failed, 1, repairs=spent) is None
+    assert ft.script_anyway_issues(v2, 1, v2=False, repairs=spent) is None
+    assert ft.script_anyway_issues(v2, 1, v2=True, repairs=spent[:1]) is None
+    assert ft.script_anyway_issues(v2, 1, v2=True, repairs=None) is None
+    stale_v2 = dict(v2, first_watch=dict(report, stale=True))
+    assert ft.script_anyway_issues(stale_v2, 1, v2=True, repairs=spent) is None
+    under = dict(v2, timing=dict(v2["timing"], state="under"))
+    assert ft.script_anyway_issues(under, 1, v2=True, repairs=spent) is None
+    assert ft.script_anyway_issues(None, 1, v2=True, repairs=spent) is None
+    # Nothing blocking: nothing to approve over (the plain approval's case).
+    passed = dict(script, first_watch=dict(report, passed=True, issues=[]))
+    assert ft.script_anyway_issues(passed, 1, v2=True, repairs=spent) is None
+
+
+def test_a_legacy_first_watch_report_keeps_the_stop_whatever_the_repairs():
+    """Plan 19 stage 3: only a report carrying severities (J1 version >= 2,
+    DEC-248; E4's by kind, DEC-261) is approved over -- a version-1 report,
+    every issue blocking for want of a severity, keeps the stop."""
+    ft = _ft()
+    script = {"scenes": [{"scene_id": "s01", "function": "hook", "state": "written"}], "rev": 3,
+              "next_episode_teaser": "x", "cliffhanger": {"reveal": "y"},
+              "consistency_report": {"passed": True, "issues": [], "checked_rev": 3, "stale": False},
+              "first_watch": {"who_wants_what": "a", "what_happens": "b", "why_it_matters": "c", "passed": False,
+                              "issues": [{"scene_id": "s01", "kind": "unmotivated", "fix": "Dire pourquoi."}],
+                              "checked_rev": 3, "checked_at": NOW, "stale": False},
+              "timing": {"state": "ok", "total_s": 62.0, "window_s": [55, 75], "measured_lines": 0,
+                         "estimated_lines": 2, "flags": []},
+              "approved_at": "2026-10-03T10:00:00+00:00"}  # approved: a version-1 report is still current
+    spent = [{"pass": 1}, {"pass": 2}]
+    assert ft.script_anyway_issues(script, 1, v2=True, repairs=spent) is None
+    versioned = dict(script, first_watch=dict(script["first_watch"], version=2, issues=[
+        dict(script["first_watch"]["issues"][0], severity="blocking")]))
+    assert ft.script_anyway_issues(versioned, 1, v2=True, repairs=spent) == [
+        {"scene_id": "s01", "kind": "unmotivated", "fix": "Dire pourquoi.", "check": "first_watch"}]
+
+
+# Plan 19 stage 3: a v2 episode whose script keeps two blocking issues through both repair passes -- E4's
+# continuity issue with no scene (no pass can rewrite it) and J1's s05, named again by each re-check.
+_STUCK_J1 = dict(eps.J1_PASSED, passed=False, issues=[
+    {"scene_id": "s05", "kind": "unmotivated", "severity": "blocking", "fix": "Montrer pourquoi Kiwilo avoue."}])
+_STUCK_PROMPTS = ["E1v2"] + ["E2v2"] * 8 + ["E3v2", "E4", "J1"] + ["E2v2", "E4", "J1"] * 2
+
+
+def _stuck(store, monkeypatch):
+    """A v2 story, the LLM of a script stuck on two blocking issues, and the
+    storyboard sub-step stopped (what comes after the script is not this
+    test's)."""
+    ft = _ft()
+    story_id = eps._ready_story(store, v2=True)
+
+    def no_storyboard(self):
+        raise steps.StepFailed("the storyboard is not part of this test.")
+
+    monkeypatch.setattr(ft._FastTrack, "storyboard", no_storyboard)
+    runner = eps._script_llm(v2=True, E2=[eps.e2_v2_reply] * 14, E4=[eps.E4_ISSUES] * 3, J1=[_STUCK_J1] * 3)
+    return story_id, runner
+
+
+def test_the_fast_track_approves_anyway_after_the_repair_passes_are_spent(store, tmp_path, monkeypatch):
+    """Plan 19 stage 3 (F4, amending DEC-162/248 as DEC-246 did for the
+    keyframes): the live walk -- the human approved anyway three times on
+    one episode over the same two issues. Once the script step spent its
+    repair passes and only blocking issues remain, the one click approves
+    the script anyway (``by: fast_track``, the issues kept on the script),
+    names them in the feed and on the review, and goes on; it never asks a
+    third pass."""
+    from clipping.aistory import workflow
+
+    story_id, runner = _stuck(store, monkeypatch)
+    story_before = store.get(story_id)
+    fakes = Fakes(tmp_path, runner=runner)
+
+    ctx, log = _ctx(store, story_id)
+    with pytest.raises(steps.StepFailed) as caught:
+        _ft().run(ctx, **fakes.kwargs())
+
+    assert str(caught.value).startswith("Fast track stopped at the storyboard (step 2 of 6): the storyboard is not "
+                                        "part of this test.")
+    assert runner.prompts() == _STUCK_PROMPTS  # two passes, no third
+    script = _doc(store, story_id, "script.json")
+    assert len(script["repairs"]) == 2 and script["first_watch"]["passed"] is False
+    assert script["approved_at"] and script["approved_anyway"] == script["approved_at"]
+    over = [{"scene_id": None, "kind": "continuity", "fix": "Le vote surprise n'est jamais expliqué.",
+             "check": "consistency"},
+            {"scene_id": "s05", "kind": "unmotivated", "fix": "Montrer pourquoi Kiwilo avoue.", "check": "first_watch"}]
+    assert script["approved_by"] == "fast_track" and script["approved_over"] == over
+    assert ("✅ Fast track: episode 1's script auto-approved (anyway -- after 2 repair passes, 2 blocking issues "
+            "remain: the episode (continuity): Le vote surprise n'est jamais expliqué; s05 (unmotivated): Montrer "
+            "pourquoi Kiwilo avoue; review them on the finished episode)") in log
+    assert store.get(story_id) == story_before  # RC-E2: the story's own document is never written
+
+    # The review names them, as it names the keyframes' "anyway".
+    story = store.get(story_id)
+    page = workflow.episode_view(store, story, 1)
+    page.update(workflow.episode_outputs(store, story, 1))
+    approval = workflow.episode_review(page)["approvals"]["script"]
+    assert approval == {"approved": True, "at": script["approved_at"], "anyway": True, "by": "fast_track",
+                        "issues": over}
+
+    # An edit clears the fast track's record with the approval.
+    workflow.patch_script(store, story_id, 1, {"lines": [{"line_id": script["scenes"][1]["lines"][0]["line_id"],
+                                                          "text": "Une autre réplique, tout à fait neuve."}]},
+                          now=NOW)
+    edited = _doc(store, story_id, "script.json")
+    assert edited["approved_at"] is None and "approved_by" not in edited and "approved_over" not in edited
+
+
+def test_stop_on_script_issues_keeps_the_stop(store, tmp_path, monkeypatch):
+    """Plan 19 stage 3: ``params.stop_on_script_issues`` keeps today's stop
+    at the script, after the same repair passes, naming the param."""
+    story_id, runner = _stuck(store, monkeypatch)
+
+    message = stopped(store, story_id, Fakes(tmp_path, runner=runner), params={"stop_on_script_issues": True})
+
+    assert message.startswith("Fast track stopped at the script (step 1 of 6): Episode 1's consistency check "
+                              "found 1 blocking issue: the episode (continuity): Le vote surprise n'est jamais "
+                              "expliqué. The fast track never approves over blocking issues before")
+    assert ("It stops here: stop_on_script_issues is on (without it, once the repair passes are spent, the fast "
+            "track approves the script anyway and names the issues for your review).") in message
+    assert runner.prompts() == _STUCK_PROMPTS
+    script = _doc(store, story_id, "script.json")
+    assert script["approved_at"] is None and script["approved_anyway"] is None
+    assert "approved_by" not in script and "approved_over" not in script
 
 
 # ============================================================ the paid check

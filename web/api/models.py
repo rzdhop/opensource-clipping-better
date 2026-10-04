@@ -909,9 +909,13 @@ class FastTrackStepParams(BaseModel):
     call per scene) or ``fast`` (the deterministic plan, no call);
     ``stop_at_keyframes`` (stage C) stops a v2 episode once its keyframes are
     made and checked, for the human's own approval, instead of the default:
-    the one click records that approval itself and goes up to the render."""
+    the one click records that approval itself and goes up to the render.
+    ``stop_on_script_issues`` (plan 19 stage 3) stops a v2 episode at its
+    script over blocking issues its repair passes could not fix, instead of
+    the default: once they are spent, the one click approves it anyway."""
     storyboard: Optional[str] = None
     stop_at_keyframes: Optional[bool] = None
+    stop_on_script_issues: Optional[bool] = None
 
 
 class AssetsShotPatch(BaseModel):

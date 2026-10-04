@@ -81,6 +81,14 @@ was paid for survives a failure, a cancel or the step's time budget:
   an object that is not one of the story's props is never added to the
   library: the rewrite shows it in the lines.
 
+**Check only** (``params.check_only``, plan 19 stage 3): E4 and, on a v2
+story, J1 on the script as it stands, each when its report is missing or
+stale -- nothing written (no scene, no framing part, no fill pass), never
+the repair pass, never a measurement; a script not complete yet is refused
+naming what is missing (:func:`check_only_refusal`). What a human's edit
+needs before the approval (``workflow.approve_script`` says so when the
+check is out of date): the edit checked, never rewritten.
+
 After each write the script is re-timed (``episode_common.retime``, with the
 storyboard when there is one). A complete script re-run makes no call. The
 step ends failed, after everything else it could do, naming each part that
@@ -134,6 +142,11 @@ from .voice_lines import (  # noqa: F401 -- re-exported
 FRAMING_FUNCTIONS = ("recap", "hook", "cliffhanger")
 
 MEASURE_PARAM = "measure_voices"
+# Plan 19 stage 3 (F6): ``params.check_only`` -- E4 and, on v2, J1 on the
+# script as it stands; nothing written, nothing repaired (:func:`check_only_refusal`).
+CHECK_ONLY_PARAM = "check_only"
+CHECK_ONLY_MEASURE_REFUSAL = (f"A check-only run measures nothing: send {CHECK_ONLY_PARAM} without {MEASURE_PARAM}, "
+                              "or measure the voices in a run of their own.")
 
 # The v2 fill pass (phase 7 stage 6a, A17): at most this many E2v2 calls a
 # run, on the shortest body scenes, with this note.
@@ -230,6 +243,26 @@ def is_complete(script, ep) -> bool:
 def needs_check(script) -> bool:
     report = script.get("consistency_report")
     return report is None or report["stale"] or report["checked_rev"] != script["rev"]
+
+
+def check_only_refusal(script, ep, params=None):
+    """Why a check-only run (``params.check_only``, plan 19 stage 3) will not
+    run, or None: it writes nothing, so the script must be complete -- a stub
+    scene or a missing framing part is never filled by it, the run refuses
+    instead, naming them -- and it measures nothing (``measure_voices`` with
+    it is refused). The API and the CLI refuse with this sentence before any
+    job exists (``workflow.require_checkable_script``); the runner again."""
+    if (params or {}).get(MEASURE_PARAM):
+        return CHECK_ONLY_MEASURE_REFUSAL
+    if script is None or not script["scenes"]:
+        return (f"Episode {ep} has no script yet, and a check-only run writes nothing: write it first (the script "
+                "step).")
+    missing = [scene["scene_id"] for scene in body_scenes(script) if scene["state"] == "stub"]
+    missing += [f"the {part}" for part in missing_parts(script, ep)]
+    if missing:
+        return (f"Episode {ep}'s script is not complete ({_and(missing)} not written yet), and a check-only run "
+                "writes nothing: run the script step to finish it (it checks it too).")
+    return None
 
 
 def target_for(ep, sid) -> str:
@@ -1488,24 +1521,44 @@ class _Run(LineMeasurement):
     def _prop_name(self, pid) -> str:
         return (self.ec.entities["props"].get(pid) or {}).get("name") or pid
 
+    def check_only(self) -> None:
+        """Plan 19 stage 3 (F6): the checks alone on the script as it stands --
+        E4 and, on a v2 story, J1, each only when its report is missing,
+        stale or of an older revision (as a full run) -- never the writing,
+        the fill pass or :meth:`repair`: a human's edit is checked, never
+        rewritten. An incomplete script is refused (:func:`check_only_refusal`)."""
+        ec = self.ec
+        refusal = check_only_refusal(self.script, ec.ep, self.ctx.params)
+        if refusal:
+            raise StepFailed(refusal)
+        self.ctx.on_log(f"🔍 Episode {ec.ep}: check only -- the script is checked as it stands; nothing is written "
+                        "or repaired")
+        self.consistency()
+        self.first_watch()
+
     def run(self) -> dict:
         ec = self.ec
         self.script = episode_common.read_episode(ec, SCRIPT_DOC)
-        if self.script is None:
-            self.script = skeleton(ec, now=llm_call.utc_now())
-        if not self.script["scenes"]:
-            self.beat_sheet()
-        self.body()
-        self.framing()
-        self.fill()
-        self.consistency()
-        self.first_watch()
-        self.repair()
+        checking = bool(self.ctx.params.get(CHECK_ONLY_PARAM))
+        if checking:
+            self.check_only()
+        else:
+            if self.script is None:
+                self.script = skeleton(ec, now=llm_call.utc_now())
+            if not self.script["scenes"]:
+                self.beat_sheet()
+            self.body()
+            self.framing()
+            self.fill()
+            self.consistency()
+            self.first_watch()
+            self.repair()
 
         script = self.script
         if self.calls == 0 and not self.failed:
-            self.ctx.on_log(f"✅ Episode {ec.ep}'s script is complete and checked: nothing to write.")
-        measuring = bool(self.ctx.params.get(MEASURE_PARAM))
+            self.ctx.on_log(f"✅ Episode {ec.ep}'s script is checked already: nothing to check." if checking
+                            else f"✅ Episode {ec.ep}'s script is complete and checked: nothing to write.")
+        measuring = bool(self.ctx.params.get(MEASURE_PARAM)) and not checking
         if measuring:
             self.measure()
         self.ctx.on_log(episode_common.timing_line(script))
@@ -1530,6 +1583,8 @@ class _Run(LineMeasurement):
         }
         if measuring:
             summary["measured"] = self.measured
+        if checking:
+            summary["check_only"] = True
         if media_policy.is_v2(ec.story):
             # Phase 7 stage 6a: the first-watch report's verdict and the fill pass's record.
             first_watch = script.get(judge.FIRST_WATCH)

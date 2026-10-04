@@ -5,7 +5,10 @@ DEC-162, A-076).
 ``ctx.ep`` is the episode; ``params.storyboard`` is ``t1`` (default: one T1
 call per scene) or ``fast`` (the deterministic plan, no call);
 ``params.stop_at_keyframes`` (stage C, default false) stops a v2 episode
-once its keyframes are made and checked, for the human's own approval. Needs
+once its keyframes are made and checked, for the human's own approval;
+``params.stop_on_script_issues`` (plan 19 stage 3, default false) stops a
+v2 episode at its script over blocking issues its repair passes could not
+fix, instead of approving it anyway (step 1 below). Needs
 what every episode step needs (``episode_common.check_episode_preconditions``),
 and -- while it would write the script or the storyboard -- the memory of the
 episode before (the gate, ``episode_common.needs_memory``).
@@ -22,11 +25,21 @@ polls for minutes a clip, and never holds the worker slot past the ceiling)
 knows is read from the episode's documents, so a job that stopped is simply
 run again ("Continue"):
 
-1. **script** -- ``script.run`` fills what is missing. **Auto-approved**
-   (``workflow.approve_script``, never ``approve_anyway``) only when
-   :func:`script_refusal` finds nothing: the script complete, its
-   consistency report (E4) fresh and **passed**, and its timing not
-   ``over`` or ``under`` the template's window;
+1. **script** -- ``script.run`` fills what is missing (on v2, its repair
+   passes included). **Auto-approved** (``workflow.approve_script`` with
+   ``by: fast_track``) when :func:`script_refusal` finds nothing: the script
+   complete, its consistency report (E4) fresh and **passed** (no blocking
+   issue, DEC-261), on v2 its first-watch report (J1) too (DEC-248), and its
+   timing not ``over`` or ``under`` the template's window. Plan 19 stage 3
+   (amending DEC-162/248 as DEC-246 did for the keyframes): on a v2 story
+   whose run spent ``script.REPAIR_PASSES_MAX`` repair passes, when only
+   blocking issues stand in the way (:func:`script_anyway_issues`: both
+   checks fresh, a J1 report with severities, the length inside the
+   window), the one click approves the script **anyway**
+   (``approve_anyway``, ``approved_over`` naming each issue), names them in
+   the feed and in the last line, and goes on; ``stop_on_script_issues``
+   keeps the stop. A legacy story, a version-1 J1 report, passes not spent,
+   a stale check or a length outside the window always stop;
 2. **storyboard** -- ``t1``: ``storyboard.run`` fills what is missing;
    ``fast``: ``storyboard.build_fast`` unless the board already is the
    fast plan of this script. Auto-approved by its own rule
@@ -71,7 +84,9 @@ the job ends ``completed`` (``steps.ends_completed``, DEC-161) and returns
 ``{ep, storyboard, steps{script, storyboard, paid_check, assets, render,
 metadata}, auto_approved[...], seconds}`` -- with ``keyframes {auto_approved,
 anyway, flagged, unchecked}`` when the run approved the keyframes itself
-(stage C), its last feed line then saying the episode is ready for review.
+(stage C), and ``script {auto_approved, anyway, issues}`` when it approved
+the script anyway (plan 19 stage 3), its last feed line then saying the
+episode is ready for review and naming what it approved over.
 
 :func:`estimate` is what the whole run would do and spend now, calling
 nothing (the fast-track estimate, ``GET /estimate/fast-track``).
@@ -107,13 +122,16 @@ from .llm_call import StepFailed
 STEP = "fast-track"
 ASSETS_DOC = store_mod.EPISODE_ASSETS_DOC
 
-# The step's parameters: how the shots are planned, and (stage C) whether a
-# v2 episode stops at its keyframes for the human's own approval.
+# The step's parameters: how the shots are planned, (stage C) whether a v2
+# episode stops at its keyframes for the human's own approval, and (plan 19
+# stage 3) whether it stops at the script over blocking issues its repair
+# passes could not fix, instead of approving it anyway.
 STORYBOARD_PARAM = "storyboard"
 STOP_PARAM = "stop_at_keyframes"
+SCRIPT_STOP_PARAM = "stop_on_script_issues"
 T1, FAST = storyboard_step.T1, storyboard_step.FAST
 STORYBOARD_CHOICES = (T1, FAST)
-PARAMS = (STORYBOARD_PARAM, STOP_PARAM)
+PARAMS = (STORYBOARD_PARAM, STOP_PARAM, SCRIPT_STOP_PARAM)
 
 # A-076: one hour holds a free-chain episode (about 14 LLM calls, two dozen
 # images, a voice per line, a render of a few minutes, 3 M1 calls), and
@@ -173,12 +191,18 @@ def _s(count) -> str:
     return "" if count == 1 else "s"
 
 
+def _issue_label(issue) -> str:
+    """``s00 (continuity)``: an issue the script was approved over, short."""
+    return f"{issue['scene_id'] or 'the episode'} ({issue['kind']})"
+
+
 # ------------------------------------------------------------------- params
 
 def read_params(params) -> dict:
-    """``{"storyboard": "t1" | "fast", "stop_at_keyframes": bool}`` from the
-    step's params (defaults ``t1`` and false); ``StepFailed`` for another
-    key or value, naming the choices."""
+    """``{"storyboard": "t1" | "fast", "stop_at_keyframes": bool,
+    "stop_on_script_issues": bool}`` from the step's params (defaults ``t1``,
+    false and false); ``StepFailed`` for another key or value, naming the
+    choices."""
     params = params or {}
     unknown = sorted(key for key in params if key not in PARAMS)
     if unknown:
@@ -187,11 +211,14 @@ def read_params(params) -> dict:
     mode = T1 if mode is None else mode
     if mode not in STORYBOARD_CHOICES:
         raise StepFailed(f"The fast track's storyboard is one of {', '.join(STORYBOARD_CHOICES)}, not {mode!r}.")
-    stop = params.get(STOP_PARAM)
-    stop = False if stop is None else stop
-    if not isinstance(stop, bool):
-        raise StepFailed(f"The fast track's {STOP_PARAM} is true or false, not {stop!r}.")
-    return {STORYBOARD_PARAM: mode, STOP_PARAM: stop}
+    flags = {}
+    for name in (STOP_PARAM, SCRIPT_STOP_PARAM):
+        value = params.get(name)
+        value = False if value is None else value
+        if not isinstance(value, bool):
+            raise StepFailed(f"The fast track's {name} is true or false, not {value!r}.")
+        flags[name] = value
+    return {STORYBOARD_PARAM: mode, **flags}
 
 
 # ------------------------------------------------------------------- budget
@@ -215,11 +242,21 @@ def budget_seconds(*, shots, clips, v2=False, redraws=0) -> float:
 
 # ------------------------------------------------------------------- rules
 
+# What the fast track's refusal says about a blocking issue (DEC-261/248, as
+# plan 19 stage 3 amends DEC-162): it approves over one only once the repairs
+# are spent (:func:`script_anyway_issues`).
+_BLOCKING_STOP = ("The fast track never approves over blocking issues before the script step's repair passes are "
+                  "spent on a v2 story: fix them (edit the script, or regenerate the scenes they name) so the check "
+                  "passes, or approve the script anyway yourself.")
+
+
 def script_refusal(script, ep, *, v2=False):
     """Why the fast track will not approve *script* (DEC-162), or None when
     it may: complete, its consistency report fresh and passed, its timing
-    neither over nor under the template's window. Never approve-anyway: a
-    report with issues is a refusal, whatever the issues.
+    neither over nor under the template's window. A report with blocking
+    issues is a refusal here, whatever the issues; the one exception -- a v2
+    script whose repair passes are spent -- is :func:`script_anyway_issues`'
+    (plan 19 stage 3), which the run asks after this refusal.
 
     *v2* (``media_policy.is_v2`` of the story; DEC-230, DEC-231 part 2): the
     first-watch report (J1) must be fresh and passed too, and a length
@@ -237,12 +274,11 @@ def script_refusal(script, ep, *, v2=False):
     if blocking:
         # DEC-261: only a blocking issue stops it; the minor notes are approved over and named in the feed.
         count = len(blocking)
-        issues = "; ".join(f"{issue['scene_id'] or 'the episode'} ({issue['kind']}): {issue['fix']}"
-                           for issue in blocking)
+        # Each fix without its own final period, so the sentence ends once (plan 19 stage 3: "expliqué..").
+        issues = _issues_line(blocking)
+        end = "" if issues.endswith(("!", "?")) else "."
         return (f"Episode {ep}'s consistency check found {count} blocking issue{_s(count)}"
-                f"{': ' + issues if issues else ''}. The fast track never approves over blocking issues: fix them "
-                "(edit the script, or regenerate the scenes they name) so the check passes, or approve the script "
-                "anyway yourself.")
+                f"{': ' + issues if issues else ''}{end} {_BLOCKING_STOP}")
     if v2:
         watch = judge_step.first_watch_state(script)
         if watch in ("none", "stale"):
@@ -250,9 +286,8 @@ def script_refusal(script, ep, *, v2=False):
                     "again (the fast track checks it first).")
         if watch == "issues":
             # What it found, after the script step's own repair passes when they ran (stage G).
-            return (f"Episode {ep}'s first-watch check (J1){judge_step.issues_sentence(script, words=False)} The "
-                    "fast track never approves over blocking issues: fix them (edit the script, or regenerate the "
-                    "scenes they name) so the check passes, or approve the script anyway yourself.")
+            return (f"Episode {ep}'s first-watch check (J1){judge_step.issues_sentence(script, words=False)} "
+                    f"{_BLOCKING_STOP}")
     state = (script.get("timing") or {}).get("state")
     if state in TIMING_REFUSED:
         how = "shorten" if state == "over" else "lengthen"
@@ -266,6 +301,44 @@ def script_refusal(script, ep, *, v2=False):
                 f"fast track approves only a script inside it: {how} it (edit it, or regenerate a scene), or "
                 "approve it yourself.")
     return None
+
+
+def script_anyway_issues(script, ep, *, v2=False, repairs=None):
+    """The blocking issues the one click approves *script* over (plan 19
+    stage 3, amending DEC-162/248 as DEC-246 did for the keyframes), or None
+    when it does not: only on a *v2* story, once this run's repair passes
+    (*repairs*: the script step's ``repairs`` record) number
+    ``script.REPAIR_PASSES_MAX`` -- the step tried everything it may -- and
+    only when the blocking issues are all that stands in the way: the script
+    complete, both checks fresh, its first-watch report one with severities
+    (J1 version >= 2, DEC-248; E4's by kind, DEC-261) and its length inside
+    the window (never approved outside it, "anyway" or not). A legacy story,
+    a version-1 report or a pass not spent keeps the stop. The live walk:
+    the human approved anyway three times on one episode, over the same two
+    issues (s00 continuity, s04 hook_payoff) every pass found again.
+
+    ``[{scene_id, kind, fix, check}]`` (``workflow.script_blocking_issues``'s
+    shape), E4's first."""
+    if not v2 or len(repairs or []) < script_step.REPAIR_PASSES_MAX:
+        return None
+    if script is None or not script_step.is_complete(script, ep) or script_step.needs_check(script):
+        return None
+    if judge_step.first_watch_state(script) not in ("passed", "issues"):
+        return None
+    report = script[judge_step.FIRST_WATCH]
+    if report.get("version", 1) < 2:
+        return None  # a legacy report: every issue reads as blocking, no severity was asked
+    if (script.get("timing") or {}).get("state") in TIMING_REFUSED:
+        return None
+    issues = _workflow().script_blocking_issues(script)
+    return issues or None
+
+
+def _issues_line(issues) -> str:
+    """``s00 (continuity): <fix>; s04 (hook_payoff): <fix>`` -- each fix
+    without its own final period, so a sentence ends once."""
+    return "; ".join(f"{issue['scene_id'] or 'the episode'} ({issue['kind']}): {issue['fix'].strip().rstrip('.')}"
+                     for issue in issues)
 
 
 def script_detail(script, *, v2=False) -> str:
@@ -542,6 +615,8 @@ class _FastTrack:
         self.auto_approved = []
         # Stage C: what the run did with the keyframes, once it approved them itself.
         self.keyframes = None
+        # Plan 19 stage 3: the blocking issues the run approved the script over, once it did.
+        self.script_anyway = None
 
     # ------------------------------------------------------------ plumbing
 
@@ -652,14 +727,43 @@ class _FastTrack:
                                   budget=self.budget)
         ec = self.context()
         script = episode_common.read_episode(ec, SCRIPT_DOC)
-        refusal = script_refusal(script, ec.ep, v2=media_policy.is_v2(ec.story))
+        v2 = media_policy.is_v2(ec.story)
+        refusal = script_refusal(script, ec.ep, v2=v2)
         if refusal:
-            raise StepFailed(refusal)
+            # Plan 19 stage 3: once the repair passes are spent, the one click
+            # approves over what they could not fix -- unless asked to stop.
+            issues = script_anyway_issues(script, ec.ep, v2=v2, repairs=summary.get("repairs"))
+            if issues is None:
+                raise StepFailed(refusal)
+            if self.params[SCRIPT_STOP_PARAM]:
+                raise StepFailed(f"{refusal} It stops here: {SCRIPT_STOP_PARAM} is on (without it, once the repair "
+                                 "passes are spent, the fast track approves the script anyway and names the issues "
+                                 "for your review).")
+            self.approve_script_anyway(ec, script, issues, passes=len(summary["repairs"]))
+            return dict(summary, kept=False)
         self.approve(ec, "script",
                      lambda workflow, now: workflow.approve_script(ec.store, ec.story_id, ec.ep, approve_anyway=False,
-                                                                   now=now),
-                     script_detail(script, v2=media_policy.is_v2(ec.story)))
+                                                                   now=now, by=workflow.FAST_TRACK_APPROVED),
+                     script_detail(script, v2=v2))
         return dict(summary, kept=False)
+
+    def approve_script_anyway(self, ec, script, issues, *, passes) -> None:
+        """Plan 19 stage 3: the script approval the one click records over
+        the blocking issues *passes* repair passes could not fix
+        (:func:`script_anyway_issues`) -- ``approved_anyway``,
+        ``approved_by: fast_track`` and ``approved_over`` naming each issue
+        (``workflow.approve_script``), named in the feed as the keyframes'
+        "anyway" is (:meth:`approve_keyframes`) and kept in
+        ``self.script_anyway`` for the summary and the last feed line."""
+        count = len(issues)
+        detail = (f"anyway -- after {passes} repair pass{'' if passes == 1 else 'es'}, {count} blocking issue"
+                  f"{' remains' if count == 1 else 's remain'}: {_issues_line(issues)}; review "
+                  f"{'it' if count == 1 else 'them'} on the finished episode")
+        self.approve(ec, "script",
+                     lambda workflow, now: workflow.approve_script(ec.store, ec.story_id, ec.ep, approve_anyway=True,
+                                                                   now=now, by=workflow.FAST_TRACK_APPROVED),
+                     detail)
+        self.script_anyway = [dict(issue) for issue in issues]
 
     def storyboard(self) -> dict:
         ec = self.context()
@@ -811,6 +915,9 @@ class _FastTrack:
         if media_policy.is_v2(ec.story):
             # Stage C: the one click's end is the human's review of the finished episode.
             review = " and ready for review"
+            if self.script_anyway:
+                review += (" (the script was approved for you anyway; still found: "
+                           f"{_and(_issue_label(issue) for issue in self.script_anyway)})")
             if self.keyframes is not None:
                 flagged = self.keyframes["flagged"] + self.keyframes["unchecked"]
                 review += (f" (the keyframes were approved for you anyway; still flagged: {_and(flagged)})"
@@ -821,6 +928,8 @@ class _FastTrack:
                   "seconds": seconds}
         if self.keyframes is not None:
             result["keyframes"] = dict(self.keyframes)
+        if self.script_anyway:
+            result["script"] = {"auto_approved": True, "anyway": True, "issues": list(self.script_anyway)}
         return result
 
 

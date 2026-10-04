@@ -69,7 +69,10 @@ exist). Preconditions, parameters and approvals are ``workflow``'s alone
 episode 2 on -- the previous episode's series memory written, approved and
 fresh (the memory step; DEC-130 as amended by plan 11 stage 4). ``script`` takes
 ``--measure-voices`` (after writing, every line is spoken through its
-character's pinned voice and the audio kept); ``storyboard`` needs a complete
+character's pinned voice and the audio kept) or ``--check-only`` (plan 19
+stage 3: the consistency check and, on v2, the first-watch check on the
+script as it stands -- nothing written or repaired; a script not complete
+is refused); ``storyboard`` needs a complete
 script and takes ``--fast`` (every scene's shots planned deterministically,
 in this process, with no LLM call and so no key gate -- otherwise the step
 runs through the worker's registry like any other LLM step). A short summary
@@ -325,6 +328,7 @@ _STEP_ONLY = (
     ("ep", "--ep", workflow.PHASE3_STEPS + _PHASE4_JOB_STEPS + workflow.SERIES_STEPS + workflow.REEDIT_STEPS),
     ("fast", "--fast", ("storyboard",)),
     ("measure_voices", "--measure-voices", ("script",)),
+    ("check_only", "--check-only", ("script",)),
     ("align_words", "--align-words", ("assets",)),
     ("tier", "--tier", ("assets",)),
     ("route", "--route", ("assets",)),
@@ -503,6 +507,10 @@ def build_parser() -> argparse.ArgumentParser:
     step.add_argument("--measure-voices", action="store_true",
                       help=("script only: after writing, measure every line with its speaker's pinned "
                             "voice and keep the audio"))
+    step.add_argument("--check-only", action="store_true",
+                      help=("script only: check the script as it stands (the consistency check, and on a v2 "
+                            "story the first-watch check) -- nothing written or repaired; refused for a script "
+                            "not complete yet"))
     step.add_argument("--align-words", action="store_true",
                       help=("assets only: opt-in forced-alignment word timings (the STT chain) instead "
                             "of an even split, stored per line"))
@@ -572,7 +580,8 @@ def build_parser() -> argparse.ArgumentParser:
         "fast-track", parents=[common], help="one episode, script through metadata, in a single job",
         description=(
             "Run episode --ep from its script to its metadata pack in a single job (DEC-162): "
-            "auto-approves only what passes the workflow's own rule (never 'approve anyway'), and "
+            "auto-approves what passes the workflow's own rule -- on a v2 story also the keyframes, and the "
+            "script once its repair passes are spent, 'anyway', naming what is still flagged -- and "
             "stops before any paid generation call unless allow_paid is on and every cap fits."
         ),
     )
@@ -588,6 +597,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--stop-at-keyframes", action="store_true", default=False,
         help=("on a v2 story at tier 2 or 3: stop once the keyframes are made and checked (J2), for your own "
               "'approve ID keyframes:N' (default: the fast track approves them itself and goes up to the render)"),
+    )
+    fast_track_cmd.add_argument(
+        "--stop-on-script-issues", action="store_true", default=False,
+        help=("on a v2 story: stop at the script over blocking issues its repair passes could not fix (default: "
+              "once the repair passes are spent, the fast track approves the script anyway and names the issues)"),
     )
 
     # ---- feedback (phase 5, step 13: paste, then 'step ID feedback --ep N')
@@ -1145,7 +1159,11 @@ def _phase3_step(args, stories, story) -> int:
     ec = workflow.episode_context(stories, story, ep, step=step)
     if step == "script":
         params = {script_step.MEASURE_PARAM: True} if args.measure_voices else {}
+        if args.check_only:
+            params[script_step.CHECK_ONLY_PARAM] = True
         workflow.script_request(params)
+        if workflow.script_check_only(params):
+            workflow.require_checkable_script(ec)
         fast = False
     else:
         params = {"fast": True} if args.fast else {}
@@ -1562,6 +1580,8 @@ def _cmd_fast_track(args, stories) -> int:
     params = {fast_track_step.STORYBOARD_PARAM: args.storyboard} if args.storyboard is not None else {}
     if args.stop_at_keyframes:
         params[fast_track_step.STOP_PARAM] = True
+    if args.stop_on_script_issues:
+        params[fast_track_step.SCRIPT_STOP_PARAM] = True
     interrupted, result = _run_step(stories, story_id, "fast-track", params, ep=ep)
     if interrupted:
         return interrupted

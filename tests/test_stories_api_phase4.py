@@ -83,7 +83,8 @@ def test_the_phase_4_request_models_declare_exactly_the_workflows_closed_lists()
     assert workflow.ASSETS_PARAMS == ("align_words", "animate")
     assert workflow.RENDER_PARAMS == ("subtitles", "encoder", "fill_failed_with_motion")  # phase 6 stage 9
     assert workflow.METADATA_PARAMS == ()
-    assert workflow.FAST_TRACK_PARAMS == ("storyboard", "stop_at_keyframes")  # phase 7 follow-up, stage C
+    # Phase 7 follow-up stage C; plan 19 stage 3, re-pinned on purpose: stop_on_script_issues joins them.
+    assert workflow.FAST_TRACK_PARAMS == ("storyboard", "stop_at_keyframes", "stop_on_script_issues")
     assert _class_fields("AssetsStepParams") == list(workflow.ASSETS_PARAMS)
     assert _class_fields("RenderStepParams") == list(workflow.RENDER_PARAMS)
     assert _class_fields("FastTrackStepParams") == list(workflow.FAST_TRACK_PARAMS)
@@ -393,8 +394,10 @@ def test_a_step_is_refused_before_any_job_outside_its_episode(api, episodes, ste
      "The subtitles must be one of style, word_pop, two_line, none, not 'karaoke'."),
     ("render", {"encoder": "nvenc"}, "The encoder must be one of libx264, auto, not 'nvenc'."),
     ("metadata", {"platforms": ["tiktok"]}, "'metadata' takes no parameters."),
-    # Phase 7 follow-up stage C, re-pinned on purpose: stop_at_keyframes joins the fast track's params.
-    ("fast-track", {"nope": 1}, "Unknown fast-track parameter(s) nope (known: storyboard, stop_at_keyframes)."),
+    # Phase 7 follow-up stage C, re-pinned on purpose: stop_at_keyframes joins the fast track's params; plan 19
+    # stage 3, re-pinned on purpose: stop_on_script_issues too.
+    ("fast-track", {"nope": 1}, "Unknown fast-track parameter(s) nope (known: storyboard, stop_at_keyframes, "
+                                "stop_on_script_issues)."),
     ("fast-track", {"storyboard": "slow"}, "The fast track's storyboard is one of t1, fast, not 'slow'."),
     ("fast-track", {"stop_at_keyframes": "yes"}, "The fast track's stop_at_keyframes is true or false, not 'yes'."),
 ])
