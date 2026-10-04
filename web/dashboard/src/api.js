@@ -1019,3 +1019,91 @@ export async function decideProposal(storyId, ep, itemId, payload) {
   if (!res.ok) throw await apiError(res, 'Failed to decide the proposal')
   return res.json()
 }
+
+// ------------------------------------------------- the manual link (plan 22 stage 5)
+
+/**
+ * The episode's shot brief for `platform` (`flow` or `higgsfield`): per shot
+ * its purpose, the prompt to paste, the length, the references, the line,
+ * the checks, the upload slot and the state (`GET .../episodes/{ep}/brief`).
+ */
+export async function fetchShotBrief(storyId, ep, platform = 'flow') {
+  const res = await request(`/stories/${storyId}/episodes/${ep}/brief?platform=${encodeURIComponent(platform)}`)
+  if (!res.ok) throw await apiError(res, 'Failed to load the shot brief')
+  return res.json()
+}
+
+/**
+ * The image brief of a story whose images are your own (`GET
+ * /stories/{id}/image-brief`): the sheets, plates, props and, with `ep`,
+ * each shot's keyframe.
+ */
+export async function fetchImageBrief(storyId, ep = null) {
+  const query = ep != null ? `?ep=${encodeURIComponent(ep)}` : ''
+  const res = await request(`/stories/${storyId}/image-brief${query}`)
+  if (!res.ok) throw await apiError(res, 'Failed to load the image brief')
+  return res.json()
+}
+
+/**
+ * Save the shot brief's zip (the `.md`, the `.json` and the reference
+ * images) -- fetched with the auth header (DEC-113), then handed to the
+ * browser as a download.
+ */
+export async function downloadShotBriefZip(storyId, ep, platform = 'flow') {
+  const res = await request(`/stories/${storyId}/episodes/${ep}/brief.zip?platform=${encodeURIComponent(platform)}`)
+  if (!res.ok) throw await apiError(res, 'Failed to download the brief')
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `shot_brief_ep${String(ep).padStart(2, '0')}_${platform}.zip`
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+/**
+ * Upload your own file to an upload slot the brief names (`upload_slot`,
+ * `/api/stories/...`): a shot's clip or keyframe, a sheet, a plate, a prop
+ * image (multipart, field `file`), reporting progress -- XHR for the same
+ * reason as `uploadCharacterReference`. Resolves with the route's answer
+ * (a clip's `{state, take, missing, waiting, resumed, ...}`); rejects with
+ * its refusal's reason.
+ */
+export function uploadToSlot(slot, file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    const path = slot.startsWith(API_BASE) ? slot.slice(API_BASE.length) : slot
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', `${API_BASE}${path}`)
+    const token = getToken()
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+    xhr.upload.addEventListener('progress', (event) => {
+      if (!onProgress) return
+      const total = event.lengthComputable ? event.total : 0
+      onProgress({ loaded: event.loaded, total, percent: total ? (event.loaded / total) * 100 : null, done: false })
+    })
+    xhr.addEventListener('load', () => {
+      let body = {}
+      try {
+        body = JSON.parse(xhr.responseText)
+      } catch {
+        body = {}
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        if (onProgress) onProgress({ loaded: file.size, total: file.size, percent: 100, done: true })
+        resolve(body)
+        return
+      }
+      const detail = body && body.detail
+      const message = detail && typeof detail === 'object' ? detail.message : detail
+      reject(new ApiError(message || `Upload failed (HTTP ${xhr.status})`, { status: xhr.status }))
+    })
+    xhr.addEventListener('error', () => reject(new Error('Upload failed: the connection dropped before the server replied.')))
+    xhr.addEventListener('abort', () => reject(new Error('Upload cancelled')))
+    xhr.send(formData)
+  })
+}

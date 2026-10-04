@@ -10,7 +10,9 @@ import ScriptPane from './episode/ScriptPane'
 import StoryboardPane from './episode/storyboard/StoryboardPane'
 import PreviewPane from './episode/PreviewPane'
 import ReviewPane from './episode/ReviewPane'
+import ShotListPane from './episode/ShotListPane'
 import EpisodeStepper, { episodeSteps, stepOfJob } from './episode/EpisodeStepper'
+import { imagesManual } from './ManualUploadSlot'
 
 // A cap is a round figure: two decimals, as the fast track's own caps line.
 function fmtCap(value) {
@@ -21,7 +23,25 @@ function plural(count, word) {
   return `${count} ${word}${count === 1 ? '' : 's'}`
 }
 
-const TAB_IDS = ['script', 'storyboard', 'preview', 'review']
+const TAB_IDS = ['script', 'storyboard', 'preview', 'review', 'shots']
+
+// Plan 22 stage 5: the budget profile whose clips are the user's own uploads.
+const MANUAL_PROFILE = 'native_speech_manual'
+const MANUAL_LINK = 'manual/upload'
+
+/** Whether the episode's clips are the user's own (the manual link): the
+ * story's profile, or the speech link its clips estimate names. */
+export function clipsManual(storyDoc, episode) {
+  const profile = storyDoc && storyDoc.generation_profile
+  if (profile && profile.budget_profile === MANUAL_PROFILE) return true
+  const speech = episode && episode.assets && episode.assets.video && episode.assets.video.speech
+  return Boolean(speech && speech.speech_link === MANUAL_LINK)
+}
+
+/** The episode's job paused awaiting the user's clips (status `awaiting_uploads`), or null. */
+export function pausedJobOf(episode) {
+  return ((episode && episode.jobs) || []).find((job) => job.status === 'awaiting_uploads') || null
+}
 
 const IN_FLIGHT = ['queued', 'running']
 const EPISODE_POLL_MS = 4000
@@ -79,7 +99,7 @@ function hasReview(episode) {
  * keep their places (the wide layout reads tabs[0..2] for its headings); it
  * is where "Generate episode" ends, switched to when the job does.
  */
-function tabsFor(episode) {
+function tabsFor(episode, manual = false) {
   const scriptApproved = Boolean(episode.script && episode.script.approved_at)
   const storyboardApproved = Boolean(episode.storyboard && episode.storyboard.approved_at)
   const tabs = [
@@ -88,6 +108,8 @@ function tabsFor(episode) {
     { id: 'preview', label: 'Preview' },
   ]
   if (hasReview(episode)) tabs.push({ id: 'review', label: `Review${episode.review.ready ? ' ✓' : ''}` })
+  // Plan 22 stage 5: your own clips, shot by shot -- last, so the three panes keep their places.
+  if (manual && episode.storyboard) tabs.push({ id: 'shots', label: 'Shot list' })
   return tabs
 }
 
@@ -107,6 +129,16 @@ function useIsWide(breakpoint) {
     return () => mq.removeEventListener('change', onChange)
   }, [breakpoint])
   return wide
+}
+
+/** "Waiting for 5 clips" (and keyframes, when the images are the user's own too). */
+export function waitingLabel(uploads) {
+  const clips = uploads.clips != null ? uploads.clips : uploads.count
+  const keyframes = uploads.keyframes || 0
+  const parts = []
+  if (keyframes) parts.push(plural(keyframes, 'keyframe'))
+  if (clips || !keyframes) parts.push(plural(clips, 'clip'))
+  return `Waiting for ${parts.join(' and ')}`
 }
 
 /** The latest sub-step the fast track's feed named, or null. */
@@ -134,7 +166,7 @@ function fastTrackProgress(events) {
  * anything; while the job runs the button names the sub-step its feed
  * reports (`job`, `events`: the in-flight fast-track job and its feed).
  */
-function FastTrackHeader({ storyId, ep, busy, job, events, onChange }) {
+function FastTrackHeader({ storyId, ep, busy, job, events, paused, onChange }) {
   const confirm = useConfirm()
   const [estimate, setEstimate] = useState(null)
   const [running, setRunning] = useState(false)
@@ -228,6 +260,8 @@ function FastTrackHeader({ storyId, ep, busy, job, events, onChange }) {
 
   const progress = job ? fastTrackProgress(events) : null
   const generating = Boolean(job) || running
+  // Plan 22 stage 5: a run paused for the user's own clips goes on by itself once they are uploaded.
+  const waiting = paused && paused.uploads && paused.uploads.count > 0 ? paused.uploads : null
 
   return (
     <div className="episode-studio-fast-track">
@@ -236,14 +270,14 @@ function FastTrackHeader({ storyId, ep, busy, job, events, onChange }) {
           type="button"
           className="btn btn-primary"
           onClick={handleRun}
-          disabled={busy || running || !estimate || Boolean(estimateError)}
+          disabled={busy || running || !estimate || Boolean(estimateError) || Boolean(waiting)}
         >
           {generating ? (
             <>
               <span className="spinner"></span> Generating…
               {progress ? ` ${progress.number}/${progress.total} ${progress.label}` : ''}
             </>
-          ) : 'Generate episode'}
+          ) : waiting ? waitingLabel(waiting) : 'Generate episode'}
         </button>
         {estimateError ? (
           <span className="chip chip-warn chip-wrap">{estimateError}</span>
@@ -390,7 +424,9 @@ export default function EpisodeStudio() {
   if (!story || !episode) return null
 
   const arcEntry = ((story.season && story.season.arc) || []).find((entry) => entry.ep === epNumber)
-  const tabs = tabsFor(episode)
+  const manual = clipsManual(story.story, episode)
+  const pausedJob = pausedJobOf(episode)
+  const tabs = tabsFor(episode, manual)
   const activeTab = tabs.some((entry) => entry.id === tab) ? tab : 'script'
   const fastTrackJob = inFlightJob && inFlightJob.step === 'fast-track' ? inFlightJob : null
   const steps = episodeSteps(episode, hasReview(episode))
@@ -446,6 +482,16 @@ export default function EpisodeStudio() {
         onChange={refresh}
       />
     ),
+    shots: (
+      <ShotListPane
+        storyId={storyId}
+        ep={epNumber}
+        inFlightJob={inFlightJob}
+        pausedJob={pausedJob}
+        keyframes={imagesManual(story.story)}
+        onChange={refresh}
+      />
+    ),
     preview: (
       <PreviewPane
         episode={episode}
@@ -467,7 +513,7 @@ export default function EpisodeStudio() {
           {arcEntry && <p>{arcEntry.summary}</p>}
         </div>
         <FastTrackHeader storyId={storyId} ep={epNumber} busy={Boolean(inFlightJob)} job={fastTrackJob}
-          events={events} onChange={refresh} />
+          events={events} paused={pausedJob} onChange={refresh} />
       </div>
 
       <EpisodeStepper steps={steps} runningKey={stepOfJob(inFlightJob, steps)} onSelect={selectStep} />
@@ -504,6 +550,12 @@ export default function EpisodeStudio() {
               {panes.storyboard}
             </section>
           </div>
+          {manual && episode.storyboard && (
+            <section className="episode-studio-pane episode-studio-pane-wide" id="episode-pane-shots">
+              <h3 className="card-title episode-studio-pane-heading">Shot list</h3>
+              {panes.shots}
+            </section>
+          )}
           <section className="episode-studio-pane episode-studio-pane-wide" id="episode-pane-preview">
             <h3 className="card-title episode-studio-pane-heading">{tabs[2].label}</h3>
             {panes.preview}

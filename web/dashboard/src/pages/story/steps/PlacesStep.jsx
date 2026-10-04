@@ -8,6 +8,7 @@ import RouteChip from '../../../components/RouteChip'
 import { LiveActivity, useJobFeed } from '../../../components/ActivityFeed'
 import { EditableText, RegenerateControl, StepError } from '../fields'
 import EntityGallery, { useHashAccordion } from '../EntityGallery'
+import { EntityImageSlots, imagesManual } from '../ManualUploadSlot'
 import { Badge, Chip, useConfirm } from '../../../ui'
 
 // The place time-variant choices a user may add (spec 2.4): the closed list
@@ -967,6 +968,12 @@ export default function PlacesStep({ data, storyId, inFlightJob, onChange }) {
             renderEditor={(item) => {
               const place = places.find((p) => p.place_id === item.id)
               return (
+                <>
+                  {imagesManual(story) && (
+                    // Plan 22 stage 5: the story's images are the user's own -- an upload slot per plate.
+                    <EntityImageSlots storyId={storyId} kind="places" entity={place} disabled={busy}
+                      onChange={onChange} />
+                  )}
                 <PlaceCard
                   key={place.place_id}
                   storyId={storyId}
@@ -978,6 +985,7 @@ export default function PlacesStep({ data, storyId, inFlightJob, onChange }) {
                   isV2={isV2}
                   names={names}
                 />
+                </>
               )
             }}
           />
@@ -997,6 +1005,11 @@ export default function PlacesStep({ data, storyId, inFlightJob, onChange }) {
             renderEditor={(item) => {
               const prop = props.find((p) => p.prop_id === item.id)
               return (
+                <>
+                  {imagesManual(story) && (
+                    <EntityImageSlots storyId={storyId} kind="props" entity={prop} disabled={busy}
+                      onChange={onChange} />
+                  )}
                 <PropCard
                   key={prop.prop_id}
                   storyId={storyId}
@@ -1007,6 +1020,7 @@ export default function PlacesStep({ data, storyId, inFlightJob, onChange }) {
                   isV2={isV2}
                   names={names}
                 />
+                </>
               )
             }}
           />

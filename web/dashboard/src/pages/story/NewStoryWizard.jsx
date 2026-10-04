@@ -45,6 +45,8 @@ function CreateStoryForm() {
   const [budgetProfile, setBudgetProfile] = useState(DEFAULT_GENERATION_PROFILE.budget_profile)
   const [pipeline, setPipeline] = useState('')
   const [speechModel, setSpeechModel] = useState('fast')
+  // Plan 22 stage 5: on "your own clips", the sheets, plates, props and keyframes may be yours too.
+  const [imagesOwn, setImagesOwn] = useState(false)
   // The episode format the user picked; '' until they pick one, so the
   // select follows the style's suggestion, else the pipeline's default.
   const [episodeTemplateChoice, setEpisodeTemplateChoice] = useState('')
@@ -83,11 +85,13 @@ function CreateStoryForm() {
     if (value === 'v2') setConsistencyMode('references')
   }
   // Plan 22: the native-speech profile is a v2 story at tier 3 -- each character line spoken by its own clip.
-  const nativeSpeech = budgetProfile === 'native_speech'
+  // Stage 5: its manual twin (every clip your own upload, from the shot brief) is the default with the keys set.
+  const manualClips = budgetProfile === 'native_speech_manual'
+  const nativeSpeech = budgetProfile === 'native_speech' || manualClips
   const handleBudgetProfile = (value) => {
     setProfileChosen(true)
     setBudgetProfile(value)
-    if (value === 'native_speech') {
+    if (value === 'native_speech' || value === 'native_speech_manual') {
       setPipeline('v2')
       setTier(3)
       setConsistencyMode('references')
@@ -95,7 +99,7 @@ function CreateStoryForm() {
   }
   const fullyAnimated = pipeline === 'v2' && (budgetProfile === 'quality' || nativeSpeech) && tier >= 2
   // What the native-speech profile costs per speaking-clip model, and the keys it still needs.
-  const speech = offer && offer.native_speech
+  const speech = offer && (manualClips ? offer.native_speech_manual : offer.native_speech)
   // What the quality preset costs (media_policy.preset_estimate, from the
   // server's price table; phase 7 stage 7): shown whether or not it is the
   // default yet, so a missing key is weighed against a price.
@@ -136,6 +140,7 @@ function CreateStoryForm() {
           budget_profile: budgetProfile,
           ...(pipeline ? { pipeline } : {}),
           ...(nativeSpeech ? { speech_model: speechModel } : {}),
+          ...(manualClips && imagesOwn ? { images: 'manual' } : {}),
         } : null,
       }
       const story = await createStory(createFields)
@@ -260,7 +265,13 @@ function CreateStoryForm() {
           </div>
 
           <div className="form-group">
-            {nativeSpeech ? (
+            {manualClips ? (
+              <p className="chip chip-wrap">
+                Native speech — your own clips: each character line is spoken on camera by its own clip, which you
+                make on Google Flow or Higgsfield from the app's shot brief and upload; the app writes, draws the
+                keyframes, times the subtitles and renders{speech ? `: ${speech.summary}.` : '.'}
+              </p>
+            ) : nativeSpeech ? (
               <p className="chip chip-wrap">
                 Native speech (Veo): each character line is spoken on camera by its own clip, lips and voice one
                 take; the narrator stays a voice-over{speech ? `: ${speech.summary}.` : '.'}
@@ -344,9 +355,17 @@ function CreateStoryForm() {
                   <option value="one_dollar">$1 / episode (key shots)</option>
                   <option value="quality">Quality (billed APIs) — every shot animated</option>
                   <option value="native_speech">Native speech (Veo) — characters speak in their clips</option>
+                  <option value="native_speech_manual">Native speech — your own clips (Flow / Higgsfield)</option>
                 </select>
               </div>
-              {nativeSpeech && (
+              {manualClips && (
+                <label className="story-checkbox">
+                  <input type="checkbox" checked={imagesOwn}
+                    onChange={(e) => { setProfileChosen(true); setImagesOwn(e.target.checked) }} />
+                  My own images too (sheets, plates, props and keyframes, from the image brief)
+                </label>
+              )}
+              {nativeSpeech && !manualClips && (
                 <div className="form-group">
                   <label className="form-label" htmlFor="new-story-speech-model">Speaking clips</label>
                   <select id="new-story-speech-model" className="form-select" value={speechModel}

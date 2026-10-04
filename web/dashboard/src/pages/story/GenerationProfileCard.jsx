@@ -183,8 +183,9 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
   const handleRoute = (value) => { setRoute(value); save({ route: value }) }
   const handleBudgetProfile = (value) => {
     setBudgetProfile(value)
-    // Plan 22: native speech is a v2 story at tier 3 (its clips speak the lines).
-    if (value === 'native_speech') {
+    // Plan 22: native speech is a v2 story at tier 3 (its clips speak the lines); stage 5: so is its
+    // manual twin, every clip your own upload.
+    if (value === 'native_speech' || value === 'native_speech_manual') {
       setTier(3)
       save({ budget_profile: value, tier: 3, route: 'api', ...(isV2 ? {} : { pipeline: 'v2', consistency_mode: 'references' }) })
     } else {
@@ -201,7 +202,9 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
   const isV2 = story.generation_profile.pipeline === 'v2'
   const canSwitchToV2 = !isV2
   const hasCast = (story.cast_ids || []).length > 0
-  const nativeSpeech = story.generation_profile.budget_profile === 'native_speech'
+  const manualClips = story.generation_profile.budget_profile === 'native_speech_manual'
+  const nativeSpeech = story.generation_profile.budget_profile === 'native_speech' || manualClips
+  const imagesOwn = story.generation_profile.images === 'manual'
   const fullyAnimated = isV2 && (story.generation_profile.budget_profile === 'quality' || nativeSpeech) && tier >= 2
   const makeFullyAnimated = () => {
     const patch = { tier: Math.max(tier, 2), route: 'api', budget_profile: 'quality' }
@@ -275,9 +278,17 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
           <option value="one_dollar">$1 / episode (key shots)</option>
           <option value="quality">Quality (billed APIs) — every shot animated</option>
           <option value="native_speech">Native speech (Veo) — characters speak in their clips</option>
+          <option value="native_speech_manual">Native speech — your own clips (Flow / Higgsfield)</option>
         </select>
       </div>
-      {nativeSpeech && (
+      {manualClips && (
+        <label className="story-checkbox">
+          <input type="checkbox" checked={imagesOwn} disabled={saving}
+            onChange={(e) => save({ images: e.target.checked ? 'manual' : null })} />
+          My own images too (sheets, plates, props and keyframes: upload them on their tiles)
+        </label>
+      )}
+      {nativeSpeech && !manualClips && (
         <div className="form-group">
           <label className="form-label" htmlFor="story-profile-speech-model">Speaking clips</label>
           <select id="story-profile-speech-model" className="form-select" value={speechModel}

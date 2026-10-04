@@ -9,6 +9,7 @@ import RouteChip from '../../../components/RouteChip'
 import { LiveActivity, useJobFeed } from '../../../components/ActivityFeed'
 import { EditableText, EditableList, RegenerateControl, StepError } from '../fields'
 import EntityGallery, { useHashAccordion } from '../EntityGallery'
+import { EntityImageSlots, imagesManual } from '../ManualUploadSlot'
 import { Badge, Chip, useConfirm } from '../../../ui'
 import { Mic } from '../../../ui/icons'
 
@@ -908,6 +909,12 @@ export default function CastStep({ data, storyId, inFlightJob, onChange }) {
         renderEditor={(item) => {
           const character = characters.find((c) => c.char_id === item.id)
           return (
+            <>
+              {imagesManual(story) && (
+                // Plan 22 stage 5: the story's images are the user's own -- an upload slot per sheet.
+                <EntityImageSlots storyId={storyId} kind="characters" entity={character} disabled={busy}
+                  onChange={onChange} />
+              )}
             <CharacterCard
               key={character.char_id}
               storyId={storyId}
@@ -920,6 +927,7 @@ export default function CastStep({ data, storyId, inFlightJob, onChange }) {
               isV2={isV2}
               castNames={castNames}
             />
+            </>
           )
         }}
       />
