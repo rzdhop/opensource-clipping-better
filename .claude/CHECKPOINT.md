@@ -1,3 +1,48 @@
+## CURRENT STATE — PAUSED on a cap decision (2026-10-04, local session): episode 2's clips were bought once, then a script repair re-planned the whole storyboard; continuing needs the episode cap raised to ≥ $6
+
+- **In-progress header:** phase = the paid walk of episode 2 of story d0ee5ebd745d. **Where it stands:** script
+  approved (anyway, 69.2 s; E4 still names 2 blocking issues after 2 repair passes, the known non-convergence),
+  storyboard **revision 12 approved** (15 shots over 9 scenes), assets: **every shot without a current keyframe or
+  clip** (the re-plan replaced all 15 shots' asset records), no render. Episode spend **$3.24 of $4.00**, today
+  $3.24 of $5.00, story $6.27 of $10.00. The fast-track estimate: **up to $2.59 more** (15 keyframes $0.60, 15 clips
+  79 s $1.74, 13 lip-syncs $0.25) → $5.83 of the $4.00 cap: **refused at the paid check, nothing spent**.
+- **To resume (the human's call, a spending decision):** in Settings raise `per_episode_cap_usd` 4 → 6 and
+  `daily_cap_usd` 5 → 7 (or wait for tomorrow's daily reset and raise only the episode cap), then **Generate
+  episode** on episode 2 (`stop_at_keyframes` off): keyframes → J2 (redraw budget already spent: $0.40, so flagged
+  ones are approved anyway and named) → clips → lip-syncs → render → metadata, ≈ 25 min. Then judge A-133…A-140 on
+  the phone. Alternative that spends nothing: stop episode 2 here; episode 1 is rendered and judged.
+- **What this session did on the walk (jobs 2307df1b6b29, b9e2cd0a83bf, 312eeb365663, 844a7514ce28, 51888d5c024e):**
+  after the fal top-up the first resume redrew 10 flagged keyframes ($0.40; 1 fixed, 7 still flagged, all but one
+  for "medium shot instead of the tight close-up") and failed shot sh02 because its journaled request from the locked
+  run had been purged by fal (HTTP 404; the booking stayed); sh02 regenerated alone ($0.04, J2 passed); the second
+  resume approved the keyframes anyway, bought **15 clips (86 s, $1.89) and 10 lip-syncs ($0.22)** — Kling refused
+  3 shots (sh08, sh09, sh13) with `face_detection_error` ("No face detected", the fruit heads), their plain clips
+  kept — then **stopped at the assets approval: 76.4 s measured, 1.4 s over the 55–75 s window** (the v2 hard gate
+  never approves over it). A text-only trim of four lines (l00, l17, l18, l21; 67.2 s estimated) kept the storyboard
+  approval, but the approval of the script needed a fresh E4, which only the script step gives; the third resume
+  re-ran E4 + J1 and **repaired s02, s04 and the cliffhanger (DEC-260)**, then stopped on 2 blocking issues again;
+  approved anyway; the storyboard step **re-planned all 15 shots** (not only the 3 stale scenes) and the bought
+  keyframes and clips fell off the asset document. The gencache may still serve byte-identical requests at $0, but
+  T1 rewrote every shot's action and camera, so count on the estimate.
+- **Defects found (follow-ups for their own FULL tasks, not fixed mid-walk):**
+  F1 a journaled fal request answering 404 fails the shot and keeps its booking — re-submit once and release;
+  F2 Kling's `face_detection_error` (422) is deterministic yet "kept for the next run; it stays booked" — make it
+  final, release the booking, and skip lipsync on shots whose keyframe shows no detectable face (or try sync.so);
+  F3 7 of 15 J2 flags were "medium shot instead of tight close-up": the keyframe prompt does not enforce the
+  storyboard framing (or J2 is over-strict on framing) — fix the prompt's framing clause before spending redraws;
+  F4 E4/J1 non-convergence under repair (known, DEC-248/260 follow-up) — after 2 passes the fast track should offer
+  approve-anyway instead of failing, since the human did so three times on this episode;
+  F5 **a script repair of 2 scenes re-plans the whole storyboard and discards every bought keyframe and clip** —
+  the storyboard step must keep the shots of unchanged scenes (docs/AI_STORY.md promises it) and the estimate must
+  count gencache hits; this cost ≈ $2.5 of re-buys on this episode;
+  F6 `approve_anyway` is refused when the check is merely stale, and the only way to refresh E4 is the script step,
+  which also rewrites scenes — a check-only mode (E4 + J1, no repair) is missing.
+- **Also this session:** the competitive analysis `.claude/plans/ai-story/18-competitive-analysis-2026-10-04.md`
+  (TrendStory, the Kings-Fruits formula, 30 apps, prices; 11 ordered upgrades U1–U11), committed as a86acf8.
+- **Open questions for the human:** (1) raise the caps and finish episode 2 (≈ $2.6), or stop here; (2) the analysis'
+  section 6 (U3 agent mode vs U4 fruit-drama pack first; narrator-led default; a Seedance 2.5 A/B; the TikTok
+  developer app for U7).
+
 ## CURRENT STATE — PAUSED by the human (2026-10-04): the episode-2 walk waits for a fal top-up (or a paid Gemini key)
 
 - **In-progress header:** phase = the paid walk of episode 2 of story d0ee5ebd745d (job ad275e8e90d0 failed at

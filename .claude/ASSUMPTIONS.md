@@ -529,6 +529,15 @@
   Kling picks the face itself). UNCONFIRMED until the human watches the first lipsynced episode: confirmed if the lips
   follow the voices and the faces stay on model; refuted if faces smear or the wrong face speaks (then two-character
   shots skip the lipsync, or the track is split per speaker, or option A comes back for those shots).
+  *Evidence 2026-10-04 (episode 2 walk, job 312eeb365663):* 10 of 13 speaking shots synced ($0.22); Kling refused
+  sh08, sh09 and sh13 with `face_detection_error` ("No face detected") — the detector sees no face on some fruit-head
+  framings; their plain clips were kept. The 10 synced takes were then discarded by the storyboard re-plan (F5)
+  before any watch, so the verdict still waits.
+- **A-141** — (walk 2026-10-04) A storyboard re-plan after a script repair keeps the shots — and so the bought
+  keyframes and clips — of the scenes the repair did not touch. UNCONFIRMED and **contradicted by the walk**: the
+  step re-planned all 15 shots (revision 12) and every shot lost its current keyframe and clip; whether the gencache
+  serves the unchanged ones at $0 is unknown until the next assets run. Refuted outright if that run pays for shots of
+  untouched scenes (then F5 in CHECKPOINT becomes a FULL task: re-plan only stale scenes; count cache hits).
 
 ## Confirmed
 - **A-082** — fal.ai as measured in the paid test (2026-09-29, DEC-174):
