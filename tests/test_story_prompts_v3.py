@@ -616,6 +616,25 @@ def test_a_v3_story_writes_and_judges_on_the_v3_prompts_and_keeps_the_spine(stor
     assert j1_spine in llm.of("J1v3")[0]["user"]
 
 
+def test_the_repair_pass_rewrites_a_scene_j1v3_finds_a_line_adding_nothing_in(store):
+    """DEC-245/260: a blocking issue of a v3 kind is repaired like the
+    others -- its scene written again on E2v3 with the kind in words and the
+    fix as the note -- and J1v3 checks again."""
+    story_id = _v3_story(store)
+    issue = {"scene_id": "s03", "kind": "line_no_progress", "severity": "blocking",
+             "fix": "Mangella doit dire ce qu'elle exige de Broccolia et pourquoi."}
+    llm = eps.FakeLLM(E1v3=[E1V3_REPLY], E3v3=[eps.E3_FULL], E4=[eps.E4_PASSED, eps.E4_PASSED],
+                      J1v3=[dict(eps.J1_PASSED, passed=False, issues=[issue])],
+                      default={"E2v3": e2_v3_reply, "J1v3": eps.J1_PASSED})
+    summary, _log = eps._run(eps._new().script, store, story_id, llm=llm)
+    repaired = [call for call in llm.of("E2v3") if "Follow the author's note: " in call["user"]]
+    assert len(repaired) == 1 and "This scene (s03," in repaired[0]["user"]
+    assert ("Follow the author's note: First-watch check -- Line adds nothing: Mangella doit dire ce qu'elle exige "
+            "de Broccolia et pourquoi.") in repaired[0]["user"]
+    assert summary["repairs"][0]["scenes"] == [{"scene_id": "s03", "kinds": ["line_no_progress"], "part": None}]
+    assert len(llm.of("J1v3")) == 2 and summary["first_watch"] is True
+
+
 def test_a_story_without_the_stamp_builds_e1v2_byte_identical(store):
     """RC-W3: a v2 story without ``writing: v3`` (no key, or "v2") sends
     E1v2 exactly as the v2 builder makes it, and judges on J1 version 2."""
