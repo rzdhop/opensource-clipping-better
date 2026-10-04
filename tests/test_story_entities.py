@@ -274,7 +274,8 @@ def test_an_unwritten_character_may_have_up_to_three_items(change):
 PHASE5_OPTIONAL = {
     # Plan 20 stage 2, re-pinned on purpose: the plot archetypes a v2 story's
     # S1 chose (the season's, and each entry's), absent on every season before.
-    ("SEASON_ARC_SCHEMA", "$"): {"archetypes"},
+    # (plan 21 stage 1 adds ``approved_by`` to the same object: one entry, two keys)
+    ("SEASON_ARC_SCHEMA", "$"): {"archetypes", "approved_by"},
     ("SEASON_ARC_SCHEMA", "$.properties.arc.items"): {"history", "archetype"},
     ("SEASON_ARC_SCHEMA", "$.properties.series_memory"): {"entries"},
     ("SEASON_ARC_SCHEMA", "$.properties.audience_feedback.items"): {"stats", "digest", "directions",
@@ -287,7 +288,6 @@ PHASE5_OPTIONAL = {
     ("CHARACTER_SCHEMA", "$"): {"look", "dossier", "approved_by"},
     ("PLACE_SCHEMA", "$"): {"look", "approved_by"},
     ("PROP_SCHEMA", "$"): {"look", "approved_by"},
-    ("SEASON_ARC_SCHEMA", "$"): {"approved_by"},
     # Fix A3 (phase 7 quality overhaul): apparent age and gender presentation,
     # optional on the character look -- absent on every look written before it;
     # phase 7 follow-up, stage F2: the bearing (posture), the same way.
