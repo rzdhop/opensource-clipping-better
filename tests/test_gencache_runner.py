@@ -46,6 +46,20 @@ RESPONSE = ("GET", BASE)
 DOWNLOAD = ("GET", CDN)
 FAL_CALLS = [POST, STATUS, STATUS, STATUS, RESPONSE, DOWNLOAD]  # today's sequence (test_image_adapters.py:215)
 
+# A second request id: the same request sent again after its first was voided.
+BASE2 = f"https://queue.fal.run/{APP}/requests/req-2"
+SUBMIT2 = (200, {"request_id": "req-2", "status_url": BASE2 + "/status", "response_url": BASE2})
+STATUS2 = ("GET", BASE2 + "/status")
+RESPONSE2 = ("GET", BASE2)
+# fal's answer for a request it no longer holds (the walk of 2026-10-04, sh02).
+PURGED = (404, {"status": "NOT_FOUND"})
+# Kling LipSync's refusal of a clip with no face in it, as fal answers the request (job 312eeb365663).
+NO_FACE = (422, {"detail": [{"loc": ["body", "video_url"],
+                             "msg": "No face detected in the image/video. Please ensure the image/video contains "
+                                    "a clearly visible face.",
+                             "type": "face_detection_error", "url": "https://docs.fal.ai/errors#face_detection_error",
+                             "input": "https://v3b.fal.media/files/b/0aad043b/" + "x" * 300}]})
+
 FAL_LINK = Link("fal", "flux-schnell")
 FAL_ONLY = {("image", "fal"): images.FAL}
 FAL_PRICE = images.FAL.estimate(FAL_LINK, GenRequest(kind="image")).est_usd
@@ -97,6 +111,20 @@ class Books(list):
         self.append(copy.deepcopy(entry))
         if self.crash == "after":
             raise Crash()
+
+
+class Releases(list):
+    """The caller's ``release(entry)``: what the story side turns into a
+    negative ledger row and ``budget.release``."""
+
+    def __init__(self, *, fail=None):
+        super().__init__()
+        self.fail = fail
+
+    def __call__(self, entry):
+        if self.fail is not None:
+            raise self.fail
+        self.append(copy.deepcopy(entry))
 
 
 class Budget(list):
@@ -371,9 +399,8 @@ def test_a_cancel_mid_poll_keeps_the_request_submitted_for_the_next_run(tmp_path
 @pytest.mark.parametrize("answer,state", [
     ((200, {"status": "FAILED", "error": "content policy"}), "failed"),
     ((200, {"status": "CANCELLED"}), "failed"),
-    ((404, {"detail": "Request not found"}), "lost"),
     ((410, {"detail": "Request expired"}), "lost"),
-], ids=["failed", "cancelled", "404", "410"])
+], ids=["failed", "cancelled", "410"])
 def test_a_settled_or_lost_request_stays_booked_the_link_ends_and_the_next_link_is_gated(tmp_path, answer, state):
     transport = FakeTransport([SUBMIT, answer])
     openai = SyncAdapter(est=0.04)
@@ -390,6 +417,133 @@ def test_a_settled_or_lost_request_stays_booked_the_link_ends_and_the_next_link_
     entry = entry_of(cache, "fal/flux-schnell")
     assert entry["state"] == state and entry["booked"]["est_usd"] == pytest.approx(FAL_PRICE)
     assert any("stays booked" in line for line in log)
+
+
+# ------------------------------------------- void: proven never run (F1, F2)
+
+def test_a_purged_404_request_is_voided_and_resubmitted_once_in_the_same_run(tmp_path):
+    transport = FakeTransport([SUBMIT, PURGED, SUBMIT2, COMPLETED, ANSWER, IMAGE])
+    books, releases, budget = Books(), Releases(), Budget()
+    cache = gencache.GenCache(tmp_path / "gen", book=books, release=releases)
+    result, link, log = run("fal/flux-schnell", adapters=FAL_ONLY, out_dir=tmp_path, cache=cache,
+                            transport=transport, budget=budget)
+    assert link == FAL_LINK and pathlib.Path(result.paths[0]).read_bytes() == PNG
+    assert transport.urls() == [POST, STATUS, POST, STATUS2, RESPONSE2, DOWNLOAD]
+    # The re-send is a new submit: gated again and booked again (RC-A3), the first booking given back.
+    assert budget == [(FAL_PRICE, "fal/flux-schnell")] * 2
+    assert [(b["state"], b["request"]["request_id"]) for b in books] == [("submitted", "req-1"),
+                                                                         ("submitted", "req-2")]
+    assert [(r["state"], r["request"]["request_id"], r["booked"]["est_usd"]) for r in releases] == [
+        ("void", "req-1", pytest.approx(FAL_PRICE))]
+    assert "HTTP 404" in releases[0]["note"] and "never run" in releases[0]["note"]
+    assert result.paid is True and result.meta["booked"]["est_usd"] == pytest.approx(FAL_PRICE)
+    entry = entry_of(cache, "fal/flux-schnell")
+    assert entry["state"] == "done" and entry["request"]["request_id"] == "req-2"
+    events = [a["event"] for a in entry["attempts"]]
+    assert events == ["sending", "submitted", "booked", "void", "released", "sending", "submitted", "booked", "done"]
+    assert f"   ↩ fal/flux-schnell: request req-1 was never run by the provider (HTTP 404); its booking of " \
+           f"${FAL_PRICE:.3f} is released" in log
+    assert not any("stays booked" in line for line in log)
+
+
+def test_a_purged_request_found_by_the_next_run_is_voided_and_sent_again_only_through_the_gates(tmp_path):
+    books, releases = Books(), Releases()
+    cache = gencache.GenCache(tmp_path / "gen", book=books, release=releases)
+    with pytest.raises(NoRunnableLink):
+        run("fal/flux-schnell", adapters=FAL_ONLY, out_dir=tmp_path, cache=cache, budget=Budget(),
+            transport=FakeTransport([SUBMIT, APITimeoutError("status timed out"), APITimeoutError("again")]))
+    assert entry_of(cache, "fal/flux-schnell")["state"] == "submitted" and len(books) == 1
+
+    # The next run, paid off: the purged request is voided and released, and nothing is sent again.
+    later = FakeTransport([PURGED])
+    with pytest.raises(NoRunnableLink) as excinfo:
+        run("fal/flux-schnell", adapters=FAL_ONLY, out_dir=tmp_path, cache=cache, transport=later,
+            budget=Budget(), allow_paid=False)
+    assert later.urls() == [STATUS] and "allow_paid is off" in str(excinfo.value)
+    assert len(books) == 1 and [r["request"]["request_id"] for r in releases] == ["req-1"]
+    assert entry_of(cache, "fal/flux-schnell")["state"] == "void"
+
+    # Paid on: a void entry is a fresh call, gated and booked; nothing is released twice.
+    budget = Budget()
+    result, _, _ = run("fal/flux-schnell", adapters=FAL_ONLY, out_dir=tmp_path, cache=cache, budget=budget,
+                       transport=FakeTransport([SUBMIT2, COMPLETED, ANSWER, IMAGE]))
+    assert budget == [(FAL_PRICE, "fal/flux-schnell")] and len(books) == 2 and len(releases) == 1
+    assert "resumed" not in result.meta and entry_of(cache, "fal/flux-schnell")["state"] == "done"
+
+
+def test_a_request_purged_again_after_its_one_re_send_ends_the_link(tmp_path):
+    transport = FakeTransport([SUBMIT, PURGED, SUBMIT2, (404, {"status": "NOT_FOUND"})])
+    openai = SyncAdapter(est=0.04)
+    books, releases, budget = Books(), Releases(), Budget()
+    cache = gencache.GenCache(tmp_path / "gen", book=books, release=releases)
+    _result, link, log = run("fal/flux-schnell,openai/gpt-image-2-low",
+                             adapters={("image", "fal"): images.FAL, ("image", "openai"): openai},
+                             out_dir=tmp_path, cache=cache, transport=transport, budget=budget, log=[])
+    assert link == Link("openai", "gpt-image-2-low")
+    assert transport.urls() == [POST, STATUS, POST, STATUS2]  # sent again once, never a third time
+    assert [r["request"]["request_id"] for r in releases] == ["req-1", "req-2"]
+    assert [b["link"] for b in books] == ["fal/flux-schnell", "fal/flux-schnell", "openai/gpt-image-2-low"]
+    assert entry_of(cache, "fal/flux-schnell")["state"] == "void"
+    assert sum(1 for line in log if "sending the request again, once" in line) == 1
+
+
+def test_a_422_refusal_voids_the_request_releases_its_booking_and_is_not_sent_again(tmp_path):
+    transport = FakeTransport([SUBMIT, COMPLETED, NO_FACE])
+    books, releases = Books(), Releases()
+    cache = gencache.GenCache(tmp_path / "gen", book=books, release=releases)
+    log = []
+    with pytest.raises(NoRunnableLink) as excinfo:
+        run("fal/flux-schnell", adapters=FAL_ONLY, out_dir=tmp_path, cache=cache, transport=transport,
+            budget=Budget(), log=log)
+    assert transport.urls() == [POST, STATUS, RESPONSE]  # one submit: the same input would be refused again
+    assert len(books) == 1 and [r["request"]["request_id"] for r in releases] == ["req-1"]
+    entry = entry_of(cache, "fal/flux-schnell")
+    assert entry["state"] == "void" and entry["released"]["est_usd"] == pytest.approx(FAL_PRICE)
+    (label, reason), = excinfo.value.failures
+    # The provider's error type survives a detail cut at 300 characters.
+    assert label == "fal/flux-schnell" and "[error type: face_detection_error]" in reason
+    assert "refused, never run" in reason and "released" in reason
+    assert "kept for the next run" not in reason and "stays booked" not in reason
+    assert any(line.startswith("   ↩ fal/flux-schnell: request req-1 was never run by the provider (HTTP 422)")
+               for line in log)
+
+
+def test_a_404_after_the_request_completed_stays_lost_and_booked(tmp_path):
+    # Not from the status URL: the provider ran it (COMPLETED), so it may be billed.
+    transport = FakeTransport([SUBMIT, COMPLETED, (404, {"detail": "Request not found"})])
+    books, releases = Books(), Releases()
+    cache = gencache.GenCache(tmp_path / "gen", book=books, release=releases)
+    with pytest.raises(NoRunnableLink) as excinfo:
+        run("fal/flux-schnell", adapters=FAL_ONLY, out_dir=tmp_path, cache=cache, transport=transport,
+            budget=Budget())
+    assert transport.urls() == [POST, STATUS, RESPONSE] and len(books) == 1 and releases == []
+    assert entry_of(cache, "fal/flux-schnell")["state"] == "lost" and "stays booked" in str(excinfo.value)
+
+
+@pytest.mark.parametrize("answer", [(401, {"detail": "invalid key"}), (403, {"detail": "forbidden"}),
+                                    (429, {"detail": "slow down"})], ids=["401", "403", "429"])
+def test_a_refused_poll_proves_nothing_about_the_request_and_is_never_voided(tmp_path, answer):
+    transport = FakeTransport([SUBMIT, answer, answer])
+    books, releases = Books(), Releases()
+    cache = gencache.GenCache(tmp_path / "gen", book=books, release=releases)
+    with pytest.raises(NoRunnableLink):
+        run("fal/flux-schnell", adapters=FAL_ONLY, out_dir=tmp_path, cache=cache, transport=transport,
+            budget=Budget())
+    assert len(transport.posts()) == 1 and len(books) == 1 and releases == []
+    assert entry_of(cache, "fal/flux-schnell")["state"] == "submitted"
+
+
+def test_a_void_without_a_release_hook_or_with_a_failing_one_stays_booked(tmp_path):
+    for releases in (None, Releases(fail=OSError(28, "No space left on device"))):
+        root = tmp_path / ("none" if releases is None else "failing")
+        books, log = Books(), []
+        cache = gencache.GenCache(root / "gen", book=books, release=releases)
+        with pytest.raises(NoRunnableLink):
+            run("fal/flux-schnell", adapters=FAL_ONLY, out_dir=root, cache=cache, budget=Budget(), log=log,
+                transport=FakeTransport([SUBMIT, COMPLETED, NO_FACE]))
+        entry = entry_of(cache, "fal/flux-schnell")
+        assert entry["state"] == "void" and entry["booked"] is not None and "released" not in entry
+        assert any("stays (it could not be released)" in line for line in log)
 
 
 @pytest.mark.parametrize("after", [

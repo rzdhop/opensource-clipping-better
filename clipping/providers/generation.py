@@ -490,81 +490,109 @@ def _parse_fallback(spec):
 def _run_candidates(kind, candidates, request, *, adapter, credentials, allow_paid,
                     budget_check, limiter, transport, on_log, sleep_fn, time_fn, failures,
                     extra_kwargs=None, cache=None):
-    """Run *candidates[0]*, swapping to the next one only on "model not available"."""
+    """Run *candidates[0]*, swapping to the next one only on "model not available".
+
+    A journaled request the provider proves it never ran (``gencache.resume_verdict``:
+    a 404 from its own status URL) is voided, its booking released, and the
+    same request is sent once more on the same link in this run -- a new
+    submit, through every gate again and booked again (RC-A3)."""
     for index, link in enumerate(candidates):
         label = describe(link)
         paid = is_paid(link)
-        estimate = None
-        journal = cache.journal(kind, link, request, paid=paid, on_log=on_log) if cache is not None else None
-        if journal is not None:
-            # What an earlier run left comes first: a kept answer or a request
-            # to resume costs nothing more, so it passes no gate (DEC-152).
-            found = journal.lookup()
-            if found == gencache.DONE:
-                paths = journal.restore(request)
-                if paths is not None:
-                    return _kept(link, journal, paths, on_log), link
-            elif found == gencache.SUBMITTED:
-                result = _resume(link, request, journal, adapter=adapter, credentials=credentials,
-                                 transport=transport, on_log=on_log, sleep_fn=sleep_fn, time_fn=time_fn,
-                                 failures=failures, extra_kwargs=extra_kwargs or {})
-                if result is None:
-                    return None
-                result.paid = bool(journal.entry.get("paid"))
-                result.est_cost = float(journal.entry.get("est_usd") or 0.0)
-                return result, link
-        refusal = _prompt_refusal(kind, link, request)
-        if refusal is not None:
-            # Free: nothing was sent, so no estimate, no budget verdict, no
-            # free-tier slot and no journal entry; the link stays usable for
-            # a shorter prompt.
-            on_log(f"   ⏭ Skipping {label}: {refusal}.")
-            failures.append((label, refusal))
-            return None
-        if paid:
-            if not allow_paid:
-                on_log(f"   ⏭ Skipping {label}: paid link; allow_paid is off.")
-                failures.append((label, "paid link; allow_paid is off"))
+        resent = False
+        while True:
+            estimate = None
+            journal = cache.journal(kind, link, request, paid=paid, on_log=on_log) if cache is not None else None
+            if journal is not None:
+                # What an earlier run left comes first: a kept answer or a request
+                # to resume costs nothing more, so it passes no gate (DEC-152).
+                found = journal.lookup()
+                if found == gencache.DONE:
+                    paths = journal.restore(request)
+                    if paths is not None:
+                        return _kept(link, journal, paths, on_log), link
+                elif found == gencache.SUBMITTED:
+                    result = _resume(link, request, journal, adapter=adapter, credentials=credentials,
+                                     transport=transport, on_log=on_log, sleep_fn=sleep_fn, time_fn=time_fn,
+                                     failures=failures, extra_kwargs=extra_kwargs or {})
+                    if isinstance(result, _Voided):
+                        # The earlier run's request was never run: this run sends it, once, gated.
+                        resent = True
+                        on_log(f"   ↩ {label}: sending the request again, once, through the gates")
+                    elif result is None:
+                        return None
+                    else:
+                        result.paid = bool(journal.entry.get("paid"))
+                        result.est_cost = float(journal.entry.get("est_usd") or 0.0)
+                        return result, link
+            refusal = _prompt_refusal(kind, link, request)
+            if refusal is not None:
+                # Free: nothing was sent, so no estimate, no budget verdict, no
+                # free-tier slot and no journal entry; the link stays usable for
+                # a shorter prompt.
+                on_log(f"   ⏭ Skipping {label}: {refusal}.")
+                failures.append((label, refusal))
                 return None
-            estimate = adapter.estimate(link, request)
-            if budget_check is not None:
-                try:
-                    budget_check(estimate, link)
-                except Exception as exc:  # noqa: BLE001 - the refusal is the reason
-                    reason = str(exc) or type(exc).__name__
-                    on_log(f"   ⏭ Skipping {label}: {reason}.")
+            if paid:
+                if not allow_paid:
+                    on_log(f"   ⏭ Skipping {label}: paid link; allow_paid is off.")
+                    failures.append((label, "paid link; allow_paid is off"))
+                    return None
+                estimate = adapter.estimate(link, request)
+                if budget_check is not None:
+                    try:
+                        budget_check(estimate, link)
+                    except Exception as exc:  # noqa: BLE001 - the refusal is the reason
+                        reason = str(exc) or type(exc).__name__
+                        on_log(f"   ⏭ Skipping {label}: {reason}.")
+                        failures.append((label, reason))
+                        return None
+                on_log(f"   💸 {label}: est ${_usd(estimate):.3f} (paid, allowed)")
+            elif limiter is not None:
+                reason = limiter.acquire(link.provider)
+                if reason:
+                    on_log(f"   ⏳ {label}: {reason}")
                     failures.append((label, reason))
                     return None
-            on_log(f"   💸 {label}: est ${_usd(estimate):.3f} (paid, allowed)")
-        elif limiter is not None:
-            reason = limiter.acquire(link.provider)
-            if reason:
-                on_log(f"   ⏳ {label}: {reason}")
-                failures.append((label, reason))
-                return None
 
-        if journal is not None:
-            journal.begin(_usd(estimate) if paid else 0.0)
-        outcome = _attempt(link, request, adapter=adapter, credentials=credentials,
-                           transport=transport, on_log=on_log, sleep_fn=sleep_fn,
-                           time_fn=time_fn, failures=failures, extra_kwargs=extra_kwargs or {},
-                           paid=paid, journal=journal, limiter=limiter)
-        if outcome is _SWAP:
-            nxt = candidates[index + 1] if index + 1 < len(candidates) else None
-            if nxt is None:
+            if journal is not None:
+                journal.begin(_usd(estimate) if paid else 0.0)
+            outcome = _attempt(link, request, adapter=adapter, credentials=credentials,
+                               transport=transport, on_log=on_log, sleep_fn=sleep_fn,
+                               time_fn=time_fn, failures=failures, extra_kwargs=extra_kwargs or {},
+                               paid=paid, journal=journal, limiter=limiter)
+            if isinstance(outcome, _Voided):
+                if resent:
+                    failures.append((label, f"{outcome.reason} (voided; it was already sent again once in "
+                                            "this run)"))
+                    return None
+                resent = True
+                on_log(f"   ↩ {label}: sending the request again, once, through the gates")
+                continue
+            if outcome is _SWAP:
+                nxt = candidates[index + 1] if index + 1 < len(candidates) else None
+                if nxt is None:
+                    return None
+                on_log(f"   ↪ {label}: model not available on this key → trying {describe(nxt)}")
+                break
+            if outcome is None:
                 return None
-            on_log(f"   ↪ {label}: model not available on this key → trying {describe(nxt)}")
-            continue
-        if outcome is None:
-            return None
-        result = outcome
-        result.paid = paid
-        result.est_cost = _usd(estimate) if paid else 0.0
-        return result, link
+            result = outcome
+            result.paid = paid
+            result.est_cost = _usd(estimate) if paid else 0.0
+            return result, link
     return None
 
 
 _SWAP = object()
+
+
+class _Voided:
+    """:func:`_resume`'s word that the journaled request was proven never run
+    and voided (its booking released), and is worth sending once more."""
+
+    def __init__(self, reason):
+        self.reason = reason
 
 
 def _prompt_refusal(kind, link, request):
@@ -714,7 +742,10 @@ def _resume(link, request, journal, *, adapter, credentials, transport, on_log, 
     so it is retried and never gated again. The answer, or ``None`` when the
     link ends: the provider settled the request (``failed``) or it is gone
     (``lost``), both still booked; or it is kept ``submitted`` for the next run
-    (a poll budget spent, a fatal error, the attempts used up)."""
+    (a poll budget spent, a fatal error, the attempts used up). A refusal that
+    proves the request never ran (``gencache.resume_verdict``) voids it and
+    releases its booking (:func:`_void`): a :class:`_Voided` when the same
+    request is worth sending once more (a purged 404), else ``None``."""
     label = describe(link)
     request_id = journal.request_id
     resume = getattr(adapter, "resume", None)
@@ -722,6 +753,9 @@ def _resume(link, request, journal, *, adapter, credentials, transport, on_log, 
     while True:
         if failure is not None:
             reason = f"{type(failure).__name__}: {failure}"
+            verdict = gencache.resume_verdict(failure, (journal.entry or {}).get("request"))
+            if verdict is not None:
+                return _void(link, journal, failure, reason, verdict, on_log=on_log, failures=failures)
             settled = None
             if errors.status_code(failure) in (404, 410):
                 settled = gencache.LOST
@@ -759,6 +793,35 @@ def _resume(link, request, journal, *, adapter, credentials, transport, on_log, 
         result = _journaled_answer(link, journal, result, started=started, on_log=on_log, time_fn=time_fn)
         result.meta["resumed"] = True
         return result
+
+
+def _void(link, journal, failure, reason, verdict, *, on_log, failures):
+    """The submitted request *failure* proves never run: written ``void``, its
+    booking released (``Journal.void``), said in one line. A :class:`_Voided`
+    when it is worth sending once more (*verdict*'s ``resend``), else the
+    link ends here (``None``) with the refusal as its reason -- unbilled, so
+    neither kept for the next run nor booked."""
+    label = describe(link)
+    status, resend = verdict
+    request_id = journal.request_id
+    types = tuple(getattr(failure, "error_types", ()) or ())
+    if types:
+        # The provider's own error type, whole: a cut detail never hides it.
+        reason += f" [error type: {', '.join(types)}]"
+    est = float((journal.booked or {}).get("est_usd") or 0.0)
+    was_booked = journal.booked is not None
+    released = journal.void(f"HTTP {status}: request {request_id} was never run by the provider; unbilled")
+    if released is not None:
+        booking = f"its booking of ${released:.3f} is released"
+    elif was_booked:
+        booking = f"its booking of ${est:.3f} stays (it could not be released)"
+    else:
+        booking = "nothing was booked for it"
+    on_log(f"   ↩ {label}: request {request_id} was never run by the provider (HTTP {status}); {booking}")
+    if resend:
+        return _Voided(reason)
+    failures.append((label, f"{reason} (request {request_id} refused, never run: {booking})"))
+    return None
 
 
 def _journaled_answer(link, journal, result, *, started, on_log, time_fn):

@@ -36,12 +36,16 @@ USER_AGENT = "rzdhop-ai (+https://github.com/rzdhop/opensource-clipping-better)"
 
 
 class HttpStatusError(Exception):
-    """A 4xx/5xx answer. ``status_code`` is what the classifier reads."""
+    """A 4xx/5xx answer. ``status_code`` is what the classifier reads;
+    ``error_types`` the machine-readable types its JSON body names (fal:
+    ``detail[].type``, e.g. ``face_detection_error``), whole even when the
+    detail is cut."""
 
-    def __init__(self, status_code, url, detail=""):
+    def __init__(self, status_code, url, detail="", *, error_types=()):
         self.status_code = int(status_code)
         self.url = url
         self.detail = detail or ""
+        self.error_types = tuple(error_types or ())
         message = f"HTTP {self.status_code} from {url}"
         super().__init__(f"{message}: {detail}" if detail else message)
 
@@ -135,6 +139,32 @@ def _detail(text: str) -> str:
     return text[:300]
 
 
+def _error_types(text: str) -> tuple:
+    """The ``type`` of each error a JSON error body names, in order, once
+    each: fal's ``detail`` list (or object) and an ``error`` object. Empty
+    for anything else."""
+    try:
+        payload = json.loads((text or "").strip() or "null")
+    except ValueError:
+        return ()
+    if not isinstance(payload, dict):
+        return ()
+    items = []
+    detail = payload.get("detail")
+    if isinstance(detail, list):
+        items.extend(item for item in detail if isinstance(item, dict))
+    elif isinstance(detail, dict):
+        items.append(detail)
+    if isinstance(payload.get("error"), dict):
+        items.append(payload["error"])
+    found = []
+    for item in items:
+        value = item.get("type")
+        if isinstance(value, str) and value and value not in found:
+            found.append(value[:80])
+    return tuple(found[:10])
+
+
 def request_json(transport, method, url, *, headers=None, json_body=None, body=None, timeout=DEFAULT_TIMEOUT) -> dict:
     """Send and parse a JSON answer; a 4xx/5xx raises :class:`HttpStatusError`."""
     headers = dict(headers or {})
@@ -145,7 +175,7 @@ def request_json(transport, method, url, *, headers=None, json_body=None, body=N
     response = transport(method, url, headers=headers, body=body, timeout=timeout)
     text = response.body.decode("utf-8", "replace") if response.body else ""
     if response.status >= 400:
-        raise HttpStatusError(response.status, url, _detail(text))
+        raise HttpStatusError(response.status, url, _detail(text), error_types=_error_types(text))
     if not text.strip():
         return {}
     try:
@@ -157,7 +187,8 @@ def request_json(transport, method, url, *, headers=None, json_body=None, body=N
 def request_bytes(transport, method, url, *, headers=None, body=None, timeout=DEFAULT_TIMEOUT) -> bytes:
     response = transport(method, url, headers=dict(headers or {}), body=body, timeout=timeout)
     if response.status >= 400:
-        raise HttpStatusError(response.status, url, _detail(response.body.decode("utf-8", "replace") if response.body else ""))
+        text = response.body.decode("utf-8", "replace") if response.body else ""
+        raise HttpStatusError(response.status, url, _detail(text), error_types=_error_types(text))
     return response.body or b""
 
 

@@ -2853,8 +2853,12 @@ CLIP_ROUTES = ("local", "paid")
 # made from the clip whose sha256 is ``clip_sha256`` and the dialogue track
 # whose inputs hash to ``track_hash`` (its bytes: ``audio_sha256``) on
 # ``link``; ``failed``: the plain clip stays ``assets.video`` and ``reason``
-# says why. Optional on the clip: every clip recorded before it validates.
-LIPSYNC_STATES = ("current", "failed")
+# says why; ``no_face``: the link found no face in that clip (Kling's
+# ``face_detection_error``) -- final for the clip whose sha256 is
+# ``clip_sha256`` on ``link``, never sent again (a new clip clears it), the
+# plain clip the take, its booking released. Optional on the clip: every clip
+# recorded before it validates.
+LIPSYNC_STATES = ("current", "failed", "no_face")
 _STORYBOARD_LIPSYNC_SCHEMA = _or_null(_document({
     "state": {"type": "string", "enum": list(LIPSYNC_STATES)},
     "link": {"type": "string", "maxLength": 160, "pattern": r"^[a-z][a-z0-9_-]*/[^\s,*]+$"},

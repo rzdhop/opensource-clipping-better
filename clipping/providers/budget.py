@@ -322,6 +322,25 @@ class DailySpend:
             self._write(data)
             return total
 
+    def release(self, usd: float, *, day=None) -> float:
+        """Give back *usd* booked on *day* (``YYYY-MM-DD``, UTC; today when
+        None): a booking proven unbilled. Never below zero -- a day is never
+        given back more than it holds. Returns that day's total."""
+        usd = float(usd)
+        if usd < 0:
+            raise ValueError(f"a release gives back a booked amount, not {usd!r}")
+        with self._lock:
+            data = self._load()
+            day = day or self.today()
+            held = float(data["days"].get(day, 0.0))
+            if day not in data["days"] or usd == 0:
+                return round(held, 4)
+            total = round(max(0.0, held - usd), 4)
+            data["days"][day] = total
+            data["updated_at"] = datetime.fromtimestamp(self._time(), tz=timezone.utc).isoformat()
+            self._write(data)
+            return total
+
 
 _DEFAULT_SPEND = None
 _DEFAULT_SPEND_LOCK = threading.Lock()
@@ -354,3 +373,15 @@ def record(estimate, *, spend=None) -> float:
     if usd <= 0:
         return store.today_total() if os.path.exists(store.path) else 0.0
     return store.add(usd)
+
+
+def release(estimate, *, day=None, spend=None) -> float:
+    """Give back a paid estimate :func:`record` booked on *day* (UTC
+    ``YYYY-MM-DD``; today when None) once the request is proven unbilled
+    (the generation journal's ``void``). Never below zero. Returns that day's
+    total; a free one gives back nothing."""
+    usd = _usd(estimate)
+    store = spend or default_spend()
+    if usd <= 0:
+        return store.today_total() if os.path.exists(store.path) else 0.0
+    return store.release(usd, day=day)

@@ -18,8 +18,9 @@ named by the request's key, with the request's outputs beside it:
 * the **entry** (``gen_journal_v1``) follows one request through
   ``sending`` (a paid call is about to go out) -> ``submitted`` (a queue
   acknowledged it with a request id) -> ``done`` (its outputs are kept here),
-  or ends ``failed`` (the provider refused or settled it) or ``lost`` (its
-  outcome can no longer be known).
+  or ends ``failed`` (the provider refused or settled it), ``lost`` (its
+  outcome can no longer be known) or ``void`` (proven never run, so never
+  billed: its booking is released).
 
 **Booking.** The journal books through the caller's ``book(entry)``: a ledger
 row, and ``budget.record`` when paid, live on the caller's side. It books a
@@ -35,6 +36,16 @@ times.
 
 **Resuming** a ``submitted`` request polls and fetches the same request id: it
 is not a new submit, so it passes no gate again (DEC-152).
+
+**Voiding** (:func:`resume_verdict`, :meth:`Journal.void`): a poll or a fetch
+of a submitted request that the provider answers with a refusal proving it
+never ran the request -- a 404 from the request's own status URL (it holds no
+such request), or a 400/413/422 (its model refused the input before any billed
+work) -- writes the entry ``void``, then releases its booking through the
+caller's ``release(entry)`` (a negative ledger row, and today's spend given
+back). Written before the release and never released on sight: a crash in
+between leaves it booked, never released twice. A 404 from anywhere else (the
+answer, the CDN: the work was done) and a 410 still end ``lost``, booked.
 
 Stdlib only, and story-agnostic: the root and the booking are the caller's
 (DEC-012). ``generation.run_generation_chain(cache=...)`` drives it; without a
@@ -64,7 +75,8 @@ SUBMITTED = "submitted"
 DONE = "done"
 FAILED = "failed"
 LOST = "lost"
-STATES = (SENDING, SUBMITTED, DONE, FAILED, LOST)
+VOID = "void"
+STATES = (SENDING, SUBMITTED, DONE, FAILED, LOST, VOID)
 
 # generation.IMAGE / IMAGE_EDIT / TTS / VIDEO / LIPSYNC, spelled out: generation imports this module.
 CACHED_KINDS = ("image", "image_edit", "tts", "video", "lipsync")
@@ -75,6 +87,12 @@ LIPSYNC = "lipsync"
 # Answers that prove the provider refused the request before doing (and
 # billing) any work (DEC-153). Any other failure after sending is booked.
 UNBILLED_STATUSES = frozenset({400, 401, 403, 404, 409, 413, 422, 429})
+
+# Of those, the ones that refuse a *poll* of an accepted request rather than
+# the request itself (our key, a conflict, a rate limit): they prove nothing
+# about the request, which may still run and be billed, so a resume never
+# voids on them (:func:`resume_verdict`).
+POLL_REFUSALS = frozenset({401, 403, 409, 429})
 
 NOTE_CRASH = "unknown outcome: the process stopped during the call"
 
@@ -208,6 +226,30 @@ def billing_verdict(exc, *, sent) -> tuple:
     return True, f"no usable answer after sending ({name}): may be billed"
 
 
+def resume_verdict(exc, request) -> tuple:
+    """``(status, resend)`` when *exc*, raised by a poll or a fetch of the
+    submitted request *request* (the journal's ``request``: its ids and URLs),
+    proves the provider never ran it -- so never billed it -- else ``None``.
+
+    A status of :data:`UNBILLED_STATUSES` that is not one of
+    :data:`POLL_REFUSALS`; a 404 only when it answers the request's own
+    ``status_url`` (the provider holds no such request: purged before it ran),
+    since a 404 from its answer or the CDN comes after the work. *resend*: the
+    request itself was fine (a 404), so the same request is worth sending once
+    more; a 400/413/422 refused its input, and the same input would be refused
+    again."""
+    status = errors.status_code(exc)
+    if status not in UNBILLED_STATUSES or status in POLL_REFUSALS:
+        return None
+    if status == 404:
+        url = getattr(exc, "url", None)
+        status_url = (request or {}).get("status_url")
+        if not url or not status_url or url != status_url:
+            return None
+        return status, True
+    return status, False
+
+
 # ------------------------------------------------------------------- storage
 
 def _atomic_write_json(path: str, data) -> None:
@@ -278,16 +320,21 @@ def _json_safe(meta) -> dict:
 
 class GenCache:
     """The entries under *root*; *book(entry)* books one request (the caller's
-    ledger row, and ``budget.record`` when ``entry["paid"]``). A cache is cheap:
-    a caller whose row needs more than the entry holds (a step, an episode, a
-    line's length) closes over it and makes one per call. Every cache on the
-    same root shares one lock."""
+    ledger row, and ``budget.record`` when ``entry["paid"]``); *release(entry)*,
+    when given, gives back the booking of a request proven never run (a
+    negative ledger row, and today's spend less it) -- without it a voided
+    request stays booked. A cache is cheap: a caller whose row needs more than
+    the entry holds (a step, an episode, a line's length) closes over it and
+    makes one per call. Every cache on the same root shares one lock."""
 
-    def __init__(self, root, *, book, time_fn=None):
+    def __init__(self, root, *, book, release=None, time_fn=None):
         if not callable(book):
             raise TypeError("book must be callable: the journal books every request through it")
+        if release is not None and not callable(release):
+            raise TypeError("release must be callable or None")
         self.root = str(root)
         self.book = book
+        self.release = release
         self._time = time_fn or time.time
         self.lock = _lock_for(self.root)
 
@@ -518,6 +565,39 @@ class Journal:
         """A submitted, booked request ends ``failed`` or ``lost``; it stays booked."""
         self.entry["note"] = note
         self._move(state, note)
+
+    def void(self, note):
+        """A submitted request proven never run (:func:`resume_verdict`) ends
+        ``void`` and its booking is released through the cache's ``release``.
+        The state is written first: a crash before the release leaves it
+        booked (over-counted, never under), and nothing releases on sight, so
+        a booking is released once at most. Returns the dollars released, or
+        ``None`` when nothing was (no booking, no ``release``, or it failed:
+        then it stays booked, said once in the feed). A next run finds it
+        ``void`` and starts a fresh call, through the gates."""
+        stamp = dict(self.booked or {})
+        self.entry["note"] = note
+        self._move(VOID, note)
+        if not stamp:
+            return None
+        release = self.cache.release
+        if release is None:
+            return None
+        try:
+            release(copy.deepcopy(self.entry))
+        except Exception as exc:  # noqa: BLE001 - an unreleased booking over-counts, it never loses money
+            self.on_log(f"   ⚠️ {self.label}: its booking could not be released ({type(exc).__name__}: {exc}); "
+                        "it stays booked")
+            return None
+        usd = round(float(stamp.get("est_usd") or 0.0), 4)
+        self.entry["released"] = {"at": self.cache.now(), "est_usd": usd, "note": note}
+        self._event("released", note)
+        try:
+            self._write()
+        except JournalError as exc:
+            # Released already; the entry on disk still says void, which is never released again.
+            self.on_log(f"   ⚠️ {self.label}: {exc}; its booking is released all the same")
+        return usd
 
     def answered(self, paths, *, seed, meta):
         """Keep the answer's files beside the entry, write it ``done``, then book

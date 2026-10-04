@@ -30,9 +30,11 @@ function ClipStateBadge({ clip }) {
 
 // DEC-258: the clip's lipsync (`clip.lipsync`, workflow.episode_clips): its
 // lips moved to the shot's dialogue once bought ("Lip-synced"), or a lipsync
-// that failed -- the plain clip is kept and plays, the reason shown as text.
+// that failed -- the plain clip is kept and plays, the reason shown as text --
+// or a clip the lipsync link finds no face in (`no_face`: final for that clip).
 function LipsyncBadge({ lipsync }) {
   if (lipsync.state === 'current') return <Badge tone="success">Lip-synced</Badge>
+  if (lipsync.state === 'no_face') return <Badge tone="neutral">No face to lip-sync</Badge>
   return <Badge tone="warning">Lip-sync failed</Badge>
 }
 

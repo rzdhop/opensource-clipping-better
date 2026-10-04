@@ -1574,11 +1574,14 @@ def _video_summary(video, *, animate) -> dict:
 def _lipsync_summary(part) -> dict:
     """The step summary's ``video.lipsync`` before the phase (DEC-258): the
     shots lipsynced in this run (``done``), kept current (``reused``), with
-    no in-frame line (``skipped``), failed (``{shot_id, reason}``), the
-    seconds billed and the dollars; ``unavailable`` the link's reason when it
-    cannot run (nothing is lipsynced then)."""
-    return {"link": part.get("link"), "done": [], "reused": 0, "skipped": [], "failed": [], "seconds": 0,
-            "usd": 0.0, "unavailable": None if part.get("available") else (part.get("reason") or "cannot run")}
+    no in-frame line (``skipped``), failed (``{shot_id, reason}``), whose
+    clip the link finds no face in (``no_face``: final for that clip, its
+    plain clip the take), the seconds billed and the dollars;
+    ``unavailable`` the link's reason when it cannot run (nothing is
+    lipsynced then)."""
+    return {"link": part.get("link"), "done": [], "reused": 0, "skipped": [], "failed": [], "no_face": [],
+            "seconds": 0, "usd": 0.0,
+            "unavailable": None if part.get("available") else (part.get("reason") or "cannot run")}
 
 
 def clip_seed(shot, *, story_id, ep) -> int:
@@ -2387,8 +2390,10 @@ class _Assets(voice_lines.LineMeasurement):
                              "followed: move it away first.") from None
 
     def cache(self, kind, *, unit, qty) -> gencache.GenCache:
-        """The story's generation cache, booking through the gates' ledger."""
-        return gencache.GenCache(self.cache_root(), book=self.gates.booker(kind, step=STEP, unit=unit, qty=qty))
+        """The story's generation cache, booking through the gates' ledger --
+        and giving a booking back there when its request is proven never run."""
+        return gencache.GenCache(self.cache_root(), book=self.gates.booker(kind, step=STEP, unit=unit, qty=qty),
+                                 release=self.gates.releaser(kind, step=STEP, unit=unit, qty=qty))
 
     def voice_cache(self, gates, line):
         return self.cache(gen.TTS, unit="char", qty=len(line["text"]))
@@ -3026,8 +3031,9 @@ class _Assets(voice_lines.LineMeasurement):
         """The kept clips of *kept_ids* whose lipsync (DEC-258) is to make on
         the link labelled *link*: an in-frame line and no current lipsync;
         the current ones are counted ``reused``, the ones with no in-frame
-        line ``skipped``. Nothing when *link* is None (the link cannot run:
-        :meth:`animate_clips` says so once)."""
+        line ``skipped``, the ones whose very clip the link found no face in
+        ``no_face`` (never sent again). Nothing when *link* is None (the
+        link cannot run: :meth:`animate_clips` says so once)."""
         summary = self.video.get("lipsync")
         if summary is None or link is None:
             return set()
@@ -3040,6 +3046,8 @@ class _Assets(voice_lines.LineMeasurement):
             shot = by_id[shot_id]
             if not lipsync_step.spoken_lines(self.script, shot):
                 summary["skipped"].append(shot_id)
+            elif lipsync_step.is_no_face(self.ec, shot, link=link):
+                summary.setdefault("no_face", []).append(shot_id)
             elif timeline is not None and lipsync_step.is_current(self.ec, self.script, self.storyboard, shot,
                                                                   link=link, timeline=timeline):
                 summary["reused"] += 1
@@ -3066,7 +3074,10 @@ class _Assets(voice_lines.LineMeasurement):
         with no in-frame line keeps its plain clip, unrecorded; a failure
         records ``lipsync.state: failed`` with the reason and keeps the plain
         clip as ``assets.video`` -- never a missing video, never another
-        link. ``gencache.JournalError`` passes through."""
+        link; a link that finds no face in the clip (a 422
+        ``face_detection_error``) records ``no_face`` instead
+        (:meth:`no_face_lipsync`): final for that clip, its booking released
+        by the journal. ``gencache.JournalError`` passes through."""
         ec, ctx, tools, gates = self.ec, self.ctx, self.tools, self.gates
         shot_id = shot["shot_id"]
         summary = self.video.setdefault("lipsync", _lipsync_summary({"link": link, "available": True}))
@@ -3091,6 +3102,10 @@ class _Assets(voice_lines.LineMeasurement):
             return
         if lipsync_step.is_current(ec, self.script, self.storyboard, shot, link=link, spec=spec):
             summary["reused"] += 1
+            return
+        if lipsync_step.is_no_face(ec, shot, link=link):
+            if shot_id not in summary.setdefault("no_face", []):
+                summary["no_face"].append(shot_id)
             return
         clip_s = int(clip["clip_s"])
         billed = lipsync_providers.billed_seconds(clip_s)
@@ -3130,6 +3145,10 @@ class _Assets(voice_lines.LineMeasurement):
             except gencache.JournalError:
                 raise
             except gen.NoRunnableLink as exc:
+                no_face = lipsync_step.no_face_reason(exc.failures)
+                if no_face is not None:
+                    self.no_face_lipsync(shot, record, no_face)
+                    return
                 reasons = "; ".join(f"{label}: {reason}" for label, reason in exc.failures) or str(exc)
                 self.fail_lipsync(shot, record, f"{reasons}; no other link was tried")
                 return
@@ -3181,12 +3200,35 @@ class _Assets(voice_lines.LineMeasurement):
         ``assets.video``, the storyboard written, the shot named in the
         summary and the feed (DEC-258)."""
         shot_id = shot["shot_id"]
+        reason = self.end_lipsync(shot, record, reason, state="failed")
+        summary = self.video.setdefault("lipsync", _lipsync_summary({"link": record.get("link"), "available": True}))
+        summary["failed"].append({"shot_id": shot_id, "reason": reason})
+        self.ctx.on_log(f"✖ Lip-sync {shot_id} failed: {reason}. Its plain clip is kept.")
+
+    def no_face_lipsync(self, shot, record, reason) -> None:
+        """*shot*'s lipsync ended ``no_face``: the link found no face in this
+        clip (``lipsync_step.no_face_reason``). Final for this clip on this
+        link -- never retried, never priced again, until a new clip -- the
+        plain clip the take (DEC-258); the refusal was unbilled and the
+        journal released its booking, so the record holds $0."""
+        shot_id = shot["shot_id"]
+        self.end_lipsync(shot, record, reason, state=lipsync_step.NO_FACE)
+        summary = self.video.setdefault("lipsync", _lipsync_summary({"link": record.get("link"), "available": True}))
+        summary.setdefault("no_face", []).append(shot_id)
+        self.ctx.on_log(f"👄 Shot {shot_id}: no face for the lip-sync (its head is not a face to "
+                        f"{record.get('link')}); its plain clip is the take, and this clip is not sent again")
+
+    def end_lipsync(self, shot, record, reason, *, state) -> str:
+        """*shot*'s lipsync recorded *state* (``failed`` or ``no_face``) with
+        *reason* (cut to 1000 characters, returned): the plain clip stays its
+        ``assets.video``, the storyboard written."""
+        shot_id = shot["shot_id"]
         reason = reason if len(reason) <= 1000 else reason[:997] + "..."
         clip = shot["assets"].get("clip") or {}
-        base = {"state": "failed", "link": record.get("link"), "clip_sha256": record.get("clip_sha256"),
+        est = 0.0 if state == lipsync_step.NO_FACE else float(record.get("est_usd") or 0.0)
+        base = {"state": state, "link": record.get("link"), "clip_sha256": record.get("clip_sha256"),
                 "track_hash": record.get("track_hash"), "audio_sha256": record.get("audio_sha256"),
-                "cache_key": record.get("cache_key"), "est_usd": float(record.get("est_usd") or 0.0),
-                "generated_at": None}
+                "cache_key": record.get("cache_key"), "est_usd": est, "generated_at": None}
         for key in ("lines", "billed_s"):
             if key in record:
                 base[key] = record[key]
@@ -3198,14 +3240,13 @@ class _Assets(voice_lines.LineMeasurement):
             shot["assets"]["clip"] = dict(clip, lipsync=base)
         shot["assets"]["video"] = clips.clip_rel(shot_id) if clip.get("state") == "current" else None
         self.write_board()
-        summary = self.video.setdefault("lipsync", _lipsync_summary({"link": record.get("link"), "available": True}))
-        summary["failed"].append({"shot_id": shot_id, "reason": reason})
-        self.ctx.on_log(f"✖ Lip-sync {shot_id} failed: {reason}. Its plain clip is kept.")
+        return reason
 
     def lipsync_total(self) -> None:
         """The run's one line about the lipsync (DEC-258), when it did anything."""
         summary = (self.video or {}).get("lipsync")
-        if not summary or not (summary["done"] or summary["failed"] or summary["reused"]):
+        no_face = (summary.get("no_face") or []) if summary else []
+        if not summary or not (summary["done"] or summary["failed"] or summary["reused"] or no_face):
             return
         parts = []
         if summary["done"]:
@@ -3220,6 +3261,8 @@ class _Assets(voice_lines.LineMeasurement):
         if summary["failed"]:
             failed = [item["shot_id"] for item in summary["failed"]]
             parts.append(f"{len(failed)} failed ({_and(failed)}, plain clip kept)")
+        if no_face:
+            parts.append(f"{len(no_face)} with no face to sync ({_and(no_face)}, plain clip kept)")
         self.ctx.on_log(f"👄 Lip-sync on {summary['link']}: {', '.join(parts)}.")
 
     def make_clip(self, shot, *, video, clip_s, est_usd, seed, note, flags, tier, image_link, cover=None):

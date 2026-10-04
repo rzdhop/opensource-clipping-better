@@ -5,7 +5,11 @@ table at call time -- kept next to the story as ``cost_ledger.json`` and
 filtered per episode into ``episodes/epNN/cost_ledger.json`` for the bundle.
 Totals feed the budget caps and the story page. Stdlib only, atomic writes.
 
-A row is never removed or repriced. The one change a row takes is its
+A row is never removed or repriced. A booking proven unbilled after the
+fact (the generation journal's ``void``) is given back by a row of
+its own: the same step, link and episode, a negative ``est_usd`` and ``qty``,
+and ``void`` saying why -- so the totals drop back and the history stays.
+The one change a row takes is its
 ``discarded`` mark (:meth:`CostLedger.mark_discarded`): the episode it was
 spent on was archived (``StoryStore.discard_episode``, the pipeline switch's
 "Regenerate on v2"), so the money still counts for the story -- it was
@@ -68,10 +72,12 @@ class CostLedger:
 
     # ------------------------------------------------------------- public
 
-    def append(self, *, step, provider, model, unit, qty, est_usd, paid, ep=None, note=None) -> dict:
+    def append(self, *, step, provider, model, unit, qty, est_usd, paid, ep=None, note=None, void=None) -> dict:
         """One row. *note* says why a request was booked without an answer (the
         generation journal's conservative rule, DEC-153); a row has no ``note``
-        key unless one is given."""
+        key unless one is given. *void* marks the row that gives back a booking
+        proven unbilled (its ``est_usd`` negative) and says why; absent
+        otherwise."""
         if unit not in UNITS:
             raise ValueError(f"unit must be one of {', '.join(UNITS)}, not {unit!r}")
         entry = {
@@ -87,6 +93,8 @@ class CostLedger:
         }
         if note is not None:
             entry["note"] = str(note)
+        if void is not None:
+            entry["void"] = str(void)
         with self._lock:
             data = self._load()
             data["entries"].append(entry)

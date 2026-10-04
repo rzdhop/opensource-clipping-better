@@ -651,6 +651,30 @@ class LineGates:
 
         return book
 
+    def releaser(self, kind, *, step, unit, qty):
+        """``release(entry)`` for a generation cache: gives back what
+        :meth:`booker` booked for a request proven never run (the journal's
+        ``void``) -- one row on this ledger mirroring the booking (negative
+        ``est_usd`` and ``qty``, ``void`` saying why), and the booked day's
+        spend less it (``budget.release``, never below zero) -- so this
+        episode's, this story's and the day's spending drop back for the
+        caps."""
+
+        def release(entry) -> None:
+            provider, _, model = str(entry["link"]).partition("/")
+            paid = bool(entry.get("paid"))
+            est = float(entry.get("est_usd") or 0.0) if paid else 0.0
+            back = -qty if isinstance(qty, (int, float)) else qty
+            reason = entry.get("note") or "proven never run by the provider: unbilled"
+            self.ledger.append(step=step, provider=provider,
+                               model=gating.api_model_id(kind, Link(provider, model)), unit=unit, qty=back,
+                               est_usd=-est, paid=paid, ep=self.ep, void=reason)
+            if paid and est > 0:
+                booked_at = str((entry.get("booked") or {}).get("at") or "")
+                budget_mod.release(est, day=booked_at[:10] or None)
+
+        return release
+
 
 def _atomic_copy(src, dest) -> None:
     """Copy *src* to *dest* so a reader sees the old file or the new one (a

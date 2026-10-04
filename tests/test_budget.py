@@ -251,6 +251,31 @@ def test_paid_spend_accumulates_per_utc_day_and_is_atomic(tmp_path):
     assert budget.day_spent(spend=spend) == 0.05
 
 
+def test_a_release_gives_back_the_booked_day_and_never_drives_it_below_zero(tmp_path):
+    clock = Clock()
+    spend = DailySpend(str(tmp_path / "spend.json"), time_fn=clock)
+    record(Est(0.03), spend=spend)
+    record(Est(0.07), spend=spend)
+    booked_day = spend.today()
+    assert budget.release(Est(0.03), spend=spend) == 0.07  # today's spend drops back
+    assert budget.day_spent(spend=spend) == 0.07
+    # A booking of yesterday is given back to yesterday, never to today.
+    clock.now += 86_400
+    record(Est(0.05), spend=spend)
+    assert budget.release(Est(0.07), day=booked_day, spend=spend) == 0.0
+    assert budget.day_spent(spend=spend) == 0.05
+    on_disk = json.loads((tmp_path / "spend.json").read_text(encoding="utf-8"))
+    assert on_disk["days"] == {booked_day: 0.0, spend.today(): 0.05}
+    # Never below zero, never a day it holds nothing for, never a free estimate.
+    assert budget.release(Est(1.0), spend=spend) == 0.0
+    assert budget.release(Est(0.5), day="2020-01-01", spend=spend) == 0.0
+    assert budget.release(Est(0.0), spend=spend) == 0.0
+    assert json.loads((tmp_path / "spend.json").read_text(encoding="utf-8"))["days"] == {booked_day: 0.0,
+                                                                                         spend.today(): 0.0}
+    with pytest.raises(ValueError):
+        spend.release(-0.01)
+
+
 def test_a_free_result_records_nothing(tmp_path):
     spend = DailySpend(str(tmp_path / "spend.json"))
     assert record(Est(0.0), spend=spend) == 0.0

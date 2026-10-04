@@ -36,10 +36,19 @@ without ffmpeg), and its file is there. A new clip, a re-voiced or re-timed
 line, or another link makes it stale: it is made again (a kept answer in the
 generation journal is served for free).
 
+**No face** (:func:`no_face_reason`, :func:`is_no_face`): a link that finds
+no face in a clip (Kling on fal answers 422 ``face_detection_error``, "No face
+detected": a fruit head is not a face to it) refuses that clip for good. The
+refusal is unbilled, so its booking is released (the generation journal's
+``void``); the record says ``no_face`` against the clip's sha256 and the
+link, the plain clip stays the take (DEC-258), and neither the video phase nor
+the estimate asks for that clip again -- a new clip, or another link, does.
+
 **The estimate** (:func:`lipsync_units`): every planned clip with at least
-one in-frame line whose lipsync is not current, priced on the link
-(``lipsync.estimate_for``: rounded up to 5 s). ``clips.video_units`` adds it
-to the clips' ``est_usd`` when the link could run it.
+one in-frame line whose lipsync is not current (nor ``no_face`` for that
+very clip), priced on the link (``lipsync.estimate_for``: rounded up to 5 s).
+``clips.video_units`` adds it to the clips' ``est_usd`` when the link could
+run it.
 
 Stdlib + ffmpeg on PATH (DEC-012).
 """
@@ -320,6 +329,37 @@ def is_current(ec, script, storyboard, shot, *, link, timeline=None, spec=None) 
     return spec is not None and record.get("track_hash") == spec["hash"]
 
 
+# A face-detection refusal as the chain reports it: fal's error type, or
+# Kling's message when the type was not kept.
+NO_FACE = "no_face"
+NO_FACE_MARKERS = ("face_detection_error", "no face detected")
+
+
+def no_face_reason(failures):
+    """The ``"<link>: <reason>"`` of the chain failure (``NoRunnableLink.failures``)
+    that says the link found no face in the clip -- an HTTP 422 naming
+    ``face_detection_error`` or "No face detected" -- or None."""
+    for label, reason in failures or ():
+        text = str(reason)
+        lower = text.lower()
+        if "422" in text and any(marker in lower for marker in NO_FACE_MARKERS):
+            return f"{label}: {text}"
+    return None
+
+
+def is_no_face(ec, shot, *, link) -> bool:
+    """Whether *shot*'s lipsync on the link labelled *link* ended ``no_face``
+    for the very clip on disk (its sha256): then it is never asked again."""
+    record = recorded(shot)
+    clip = shot["assets"].get("clip") or {}
+    if not record or record.get("state") != NO_FACE or clip.get("state") != "current":
+        return False
+    if record.get("link") != link:
+        return False
+    sha = sha256_file(plain_clip_path(ec, shot))
+    return sha is not None and record.get("clip_sha256") == sha
+
+
 # ------------------------------------------------------------------ the link
 
 def lipsync_link(merged):
@@ -364,20 +404,22 @@ def lipsync_units(ec, script, storyboard, plan_rows, *, new_ids, merged, adapter
     """The lipsync part of the clips' estimate (``clips.video_units``)::
 
         {"link", "count", "seconds", "est_usd", "plan": [{"shot_id", "clip_s", "billed_s", "est_usd"}],
-         "current": n, "skipped": [shot_id, ...], "available", "ready", "reason", "counted"}
+         "current": n, "skipped": [shot_id, ...], "no_face": [shot_id, ...], "available", "ready", "reason",
+         "counted"}
 
     over the plan's rows (*plan_rows*: ``{"shot_id", "clip_s", ...}``):
     every planned clip with at least one in-frame line (:func:`spoken_lines`
     -- the lines' audio need not exist yet: the fast track prices it before
     the voices) is lipsynced, unless it is a clip kept (not in *new_ids*,
     the clips to buy or collect) whose lipsync is current. ``skipped``:
-    the planned shots with no in-frame line. ``counted``: the price belongs
+    the planned shots with no in-frame line; ``no_face``: the kept clips the
+    link found no face in (:func:`is_no_face`), never asked again. ``counted``: the price belongs
     in the clips' ``est_usd`` -- the link could run it (``available``),
     even while ``allow_paid`` is off (priced, as a refused clip is)."""
     status = link_status(merged, adapters, allow_paid=allow_paid)
     by_id = {shot["shot_id"]: shot for shot in storyboard["shots"]}
     units = {"link": status["link"], "count": 0, "seconds": 0, "est_usd": 0.0, "plan": [], "current": 0,
-             "skipped": [], "available": status["available"], "ready": status["ready"],
+             "skipped": [], "no_face": [], "available": status["available"], "ready": status["ready"],
              "reason": status["reason"], "counted": False}
     timeline = None
     for row in plan_rows:
@@ -388,6 +430,9 @@ def lipsync_units(ec, script, storyboard, plan_rows, *, new_ids, merged, adapter
             units["skipped"].append(row["shot_id"])
             continue
         if row["shot_id"] not in new_ids and status["link"]:
+            if is_no_face(ec, shot, link=status["link"]):
+                units["no_face"].append(row["shot_id"])
+                continue
             if timeline is None:
                 try:
                     timeline = episode_timeline(ec, script, storyboard)

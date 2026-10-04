@@ -224,6 +224,40 @@ class FakeLipsync:
         return [request.extra["name"] for request in self.requests]
 
 
+class NoFaceLipsync(FakeLipsync):
+    """Kling finding no face in the clips named in *no_face_for* (the fruit
+    heads of the walk of 2026-10-04): fal accepts the request (journaled,
+    booked), then answers its result with HTTP 422 ``face_detection_error``
+    -- the error as ``transport.request_json`` raises it from fal's body."""
+
+    def __init__(self, source, *, no_face_for=()):
+        super().__init__(source)
+        self.no_face_for = set(no_face_for)
+
+    def generate(self, link, request, *, credentials, on_log, transport=None, on_submit=None, **kwargs):
+        if request.extra["name"] not in self.no_face_for:
+            return super().generate(link, request, credentials=credentials, on_log=on_log, transport=transport,
+                                    on_submit=on_submit, **kwargs)
+        from clipping.providers import transport as transport_mod
+
+        _mods().lp.check_request(link, request)
+        self.requests.append(copy.copy(request))
+        self.audio.append(_sha(request.extra["audio"]))
+        request_id = f"lip-{len(self.requests)}"
+        response_url = f"https://queue.fal.run/fal-ai/kling-video/requests/{request_id}"
+        if on_submit is not None:
+            on_submit({"request_id": request_id, "status_url": response_url + "/status",
+                       "response_url": response_url})
+        body = json.dumps({"detail": [{
+            "loc": ["body", "video_url"],
+            "msg": "No face detected in the image/video. Please ensure the image/video contains a clearly visible "
+                   "face.",
+            "type": "face_detection_error", "url": "https://docs.fal.ai/errors#face_detection_error",
+            "input": "https://v3b.fal.media/files/b/0aad043b/" + "Q" * 200}]})
+        raise transport_mod.HttpStatusError(422, response_url, transport_mod._detail(body),
+                                            error_types=transport_mod._error_types(body))
+
+
 def _fakes(tmp_path, media, *, lip=None, video=None, llm=True, tone=300):
     """The quality episode's one-click seams (``oc._quality_fakes``) with real
     voices (from *tone*), real clips and the lipsync link."""
@@ -714,6 +748,96 @@ def test_a_failed_lipsync_keeps_the_plain_clip_names_the_shot_and_the_render_goe
     assert staged[failing] == f"assets/clips/shot_{failing[2:]}.mp4"
 
 
+def _no_face_made(store, tmp_path, media):
+    """The quality episode made by the one click while Kling finds no face in
+    the first speaking shot's clip: ``(story_id, shot_id, seams, summary, log)``."""
+    story_id = oc._v2_unmade(store, tmp_path)
+    target = _spoken(store, story_id)[0]
+    lip = NoFaceLipsync(media.synced, no_face_for={f"shot_{target[2:]}.lipsync"})
+    seams = _fakes(tmp_path, media, lip=lip)
+    summary, log = tft.run(store, story_id, seams.fakes, settings=QUALITY)
+    return story_id, target, seams, summary, log
+
+
+def test_a_face_detection_422_is_final_voids_the_booking_and_is_never_retried(store, tmp_path, media):
+    from clipping.providers import budget
+
+    m = _mods()
+    story_id = oc._v2_unmade(store, tmp_path)
+    spoken = _spoken(store, story_id)
+    before = tce._units(store, story_id, QUALITY, adapters=_fakes(tmp_path, media, llm=False).fakes.adapters)
+    assert before["video"]["lipsync"]["count"] == len(spoken)
+    target = spoken[0]
+    lip = NoFaceLipsync(media.synced, no_face_for={f"shot_{target[2:]}.lipsync"})
+    seams = _fakes(tmp_path, media, lip=lip)
+
+    summary, log = tft.run(store, story_id, seams.fakes, settings=QUALITY)
+
+    # DEC-258 holds: the plain clip is the take and the render goes on.
+    assert summary["steps"]["render"]["state"] == "completed"
+    board = tas._board(store, story_id)
+    shot = next(s for s in board["shots"] if s["shot_id"] == target)
+    plain = _clip_file(store, story_id, f"shot_{target[2:]}.mp4")
+    record = shot["assets"]["clip"]["lipsync"]
+    assert record["state"] == "no_face" and record["clip_sha256"] == _sha(plain)
+    assert record["link"] == LIPSYNC_LINK and record["est_usd"] == 0.0
+    assert "face_detection_error" in record["reason"] and "HTTP 422" in record["reason"]
+    assert shot["assets"]["video"] == f"assets/clips/shot_{target[2:]}.mp4"
+    assert m.schemas.storyboard_errors(board) == []
+    lip_summary = summary["steps"]["assets"]["video"]["lipsync"]
+    assert lip_summary["no_face"] == [target] and lip_summary["failed"] == []
+    assert sorted(lip_summary["done"]) == sorted(set(spoken) - {target})
+    assert any(line.startswith(f"👄 Shot {target}: no face for the lip-sync") and "plain clip is the take" in line
+               for line in log)
+    assert not any(line.startswith(f"✖ Lip-sync {target} failed") for line in log)
+    assert any(f"request lip-{lip.names().index(f'shot_{target[2:]}.lipsync') + 1} was never run by the "
+               "provider (HTTP 422); its booking of $" in line and "is released" in line for line in log)
+    assert any("with no face to sync" in line for line in log if line.startswith("👄 Lip-sync on"))
+    # The booking is given back: one row booked when fal took it, one void row giving it back.
+    rows = _lip_rows(store, story_id)
+    voided = [row for row in rows if row.get("void")]
+    assert len(rows) == len(spoken) + 1 and len(voided) == 1
+    assert voided[0]["est_usd"] < 0 and voided[0]["qty"] < 0 and "HTTP 422" in voided[0]["void"]
+    # The lipsync rows add up to the synced takes alone: the refused one costs nothing.
+    synced = [shot_id for shot_id in spoken if shot_id != target]
+    assert sum(row["est_usd"] for row in rows) == pytest.approx(
+        sum(next(s for s in board["shots"] if s["shot_id"] == shot_id)["assets"]["clip"]["lipsync"]["est_usd"]
+            for shot_id in synced))
+    # Today's spend is the ledger's paid total: the voided dollars were given back there too.
+    paid = sum(row["est_usd"] for row in tas._ledger(store, story_id) if row.get("paid"))
+    assert budget.day_spent() == pytest.approx(paid)
+
+    # Never retried, never priced again while the clip is the same.
+    after = tce._units(store, story_id, QUALITY, adapters=_fakes(tmp_path, media, llm=False).fakes.adapters)
+    assert after["video"]["lipsync"]["count"] == 0 and after["video"]["lipsync"]["no_face"] == [target]
+    again = _fakes(tmp_path, media, llm=False, lip=NoFaceLipsync(media.synced))
+    second, _log = tas._run(store, story_id, adapters=again.fakes.adapters, settings=QUALITY)
+    assert again.lip.requests == [] and again.video.requests == []
+    assert second["video"]["lipsync"]["no_face"] == [target] and second["video"]["lipsync"]["failed"] == []
+    assert len(_lip_rows(store, story_id)) == len(spoken) + 1
+
+
+def test_a_new_clip_clears_no_face_and_its_lipsync_is_asked_again(store, tmp_path, media, monkeypatch):
+    from clipping.aistory.steps import entities, regenerate
+
+    story_id, target, _seams, _summary, _log = _no_face_made(store, tmp_path, media)
+    ec = tas._ec(store, story_id)
+    shot = next(s for s in tas._board(store, story_id)["shots"] if s["shot_id"] == target)
+    assert _mods().lipsync.is_no_face(ec, shot, link=LIPSYNC_LINK) is True
+    assert _mods().lipsync.is_no_face(ec, shot, link="fal/another-lipsync") is False  # another link may see a face
+
+    monkeypatch.setattr(entities, "fresh_seed", lambda: 4242)
+    again = _fakes(tmp_path, media, llm=False)  # this clip has a face Kling sees
+    ctx, _log = eps._ctx(store, story_id, step="regenerate", settings=QUALITY,
+                         params={"target": f"shot:1:{target}:video", "note": "a closer framing"})
+    result = regenerate.run(ctx, adapters=again.fakes.adapters, time_fn=eps.Clock(0.0), sleep_fn=lambda _s: None)
+    assert result["lipsync"] == "current" and again.lip.names() == [f"shot_{target[2:]}.lipsync"]
+    shot = next(s for s in tas._board(store, story_id)["shots"] if s["shot_id"] == target)
+    assert shot["assets"]["clip"]["lipsync"]["clip_sha256"] == _sha(_clip_file(store, story_id,
+                                                                             f"shot_{target[2:]}.mp4"))
+    assert shot["assets"]["video"] == f"assets/clips/shot_{target[2:]}.lipsync.mp4"
+
+
 def test_a_regenerated_clip_and_a_re_voiced_line_are_lipsynced_again_and_nothing_else(store, tmp_path, media,
                                                                                      monkeypatch):
     from clipping.aistory.steps import entities, regenerate
@@ -821,6 +945,7 @@ def test_the_dashboard_badge_reads_the_clips_lipsync():
     cards = (pane / "storyboard" / "AssetsCards.jsx").read_text(encoding="utf-8")
     assert re.search(r"lipsync\.state === 'current'\)\s*return <Badge tone=\"success\">Lip-synced</Badge>", controls)
     assert '<Badge tone="warning">Lip-sync failed</Badge>' in controls
+    assert "lipsync.state === 'no_face') return <Badge tone=\"neutral\">No face to lip-sync</Badge>" in controls
     assert "{clip.lipsync && <LipsyncBadge lipsync={clip.lipsync} />}" in controls
     # The reason reaches visible text, never only a title (the F8 pattern).
     assert re.search(r"<p className=\"form-hint\">Lip-sync failed: \{clip\.lipsync\.reason", controls)

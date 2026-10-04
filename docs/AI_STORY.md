@@ -278,7 +278,12 @@ with no such line keeps its plain clip. The lip-synced take is kept beside
 the clip as `assets/clips/shot_NN.lipsync.mp4` with the clip's own sound
 (never the track: your voices stay the only voices), and it is what the
 render uses; if a lipsync fails, the plain clip is kept and the shot is
-named in the feed ("✖ Lip-sync sh04 failed: …"). It costs $0.014 per started
+named in the feed ("✖ Lip-sync sh04 failed: …"). If Kling finds no face in a
+clip (a fruit head is not always a face to it), that clip is never sent
+again: the plain clip is the take, the feed says so once ("👄 Shot sh08: no
+face for the lip-sync …"), the refusal costs nothing (its booking is given
+back), and the next estimate no longer counts it — only a new clip of that
+shot is tried again. It costs $0.014 per started
 5 s of clip -- $0.014 for a clip of 5 s or less, $0.028 for 6-10 s, about
 $0.15-0.30 an episode -- shown in the estimate ("+ $0.280 lip-sync (8
 clips)") and counted against the caps; each one takes about a minute. A
@@ -1437,7 +1442,13 @@ regenerated or re-run shot or line that asks for exactly the same image or
 voice again — the same prompt, seed and references, or the same pinned
 voice and text — costs nothing and calls nothing: it is served from the
 cache instead. Every call this makes, cached or not, free or paid, is one
-row of the story's cost ledger, tagged with the episode it belongs to.
+row of the story's cost ledger, tagged with the episode it belongs to. A
+paid request is booked the moment the provider accepts it and stays booked
+if it then fails or its outcome is lost — unless the provider proves it
+never ran it (it no longer knows the request, or it refused its input):
+then the booking is given back by a negative "void" row, today's spend and
+the episode's drop back, and a request the provider lost before running it
+is sent once more in the same run, gated and booked again.
 
 **Settings → Budget**:
 

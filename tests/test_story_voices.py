@@ -643,3 +643,39 @@ def test_v2_line_prosody_legacy_request_identical(store, monkeypatch):
     assert speak(v2=True) == {"rate": "+2%", "pitch": "-1Hz"}
     # Both given: prosody_for's own combined rate/pitch.
     assert speak(line=line, v2=True) == {"rate": "+8%", "pitch": "+1Hz"}
+
+
+# ------------------------------------------------ a booking proven unbilled (F1)
+
+def test_a_released_booking_is_a_negative_void_row_and_the_day_and_the_episode_drop_back(store):
+    """``LineGates.releaser`` mirrors ``booker``: a request the generation
+    journal voids (proven never run) is given back by a row of its own --
+    negative ``est_usd`` and ``qty``, ``void`` saying why -- and the day it
+    was booked on is given its dollars back, so the episode's, the story's
+    and today's spending drop back for the caps."""
+    from clipping.providers import budget
+
+    story_id = store.create(language="fr", seed_text="x", now=NOW)["story_id"]
+    gates = voices.LineGates(store, story_id, env={}, ep=2)
+    book = gates.booker("lipsync", step="assets", unit="second", qty=10)
+    release = gates.releaser("lipsync", step="assets", unit="second", qty=10)
+    kept = {"link": "fal/kling-lipsync", "paid": True, "est_usd": 0.028, "note": None, "state": "submitted"}
+    voided = dict(kept)
+    book(kept)
+    book(voided)
+    assert gates.spent(2) == pytest.approx(0.056) and budget.day_spent() == pytest.approx(0.056)
+    stamp = {"at": budget.default_spend().today() + "T10:28:53+00:00", "est_usd": 0.028}
+    release(dict(voided, state="void", booked=stamp,
+                 note="HTTP 422: request rq-2 was never run by the provider; unbilled"))
+    rows = gates.ledger.entries()
+    assert [(row["est_usd"], row["qty"], row["ep"], row.get("void")) for row in rows] == [
+        (0.028, 10, 2, None), (0.028, 10, 2, None),
+        (-0.028, -10, 2, "HTTP 422: request rq-2 was never run by the provider; unbilled")]
+    assert rows[-1]["model"] == rows[0]["model"] and rows[-1]["unit"] == "second" and rows[-1]["paid"] is True
+    assert "note" not in rows[-1]
+    # The episode's, the story's and today's spending: one booking left.
+    assert gates.spent(2) == pytest.approx(0.028) and gates.spent() == pytest.approx(0.028)
+    assert budget.day_spent() == pytest.approx(0.028)
+    # A free request books $0 and gives back $0; nothing touches the day.
+    release({"link": "edge/fr-FR-HenriNeural", "paid": False, "est_usd": 0.0, "note": "x", "booked": stamp})
+    assert gates.spent(2) == pytest.approx(0.028) and budget.day_spent() == pytest.approx(0.028)
