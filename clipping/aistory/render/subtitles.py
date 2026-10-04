@@ -63,6 +63,7 @@ from __future__ import annotations
 
 import math
 import re
+from typing import NamedTuple
 
 from . import profiles
 from .. import wordtiming
@@ -187,8 +188,10 @@ END_CARD_LABEL_STYLE_NAME = "EndCardLabel"
 END_CARD_TITLE_STYLE_NAME = "EndCardTitle"
 END_CARD_LABEL_FONT_SIZE = 64
 END_CARD_TITLE_FONT_SIZE = 44
-END_CARD_LABEL_Y = round(_HEIGHT * 0.45)
-END_CARD_TITLE_Y = round(_HEIGHT * 0.55)
+END_CARD_LABEL_Y_FRACTION = 0.45
+END_CARD_TITLE_Y_FRACTION = 0.55
+END_CARD_LABEL_Y = round(_HEIGHT * END_CARD_LABEL_Y_FRACTION)
+END_CARD_TITLE_Y = round(_HEIGHT * END_CARD_TITLE_Y_FRACTION)
 END_CARD_PRIMARY_HEX = "#FFFFFF"
 END_CARD_OUTLINE_HEX = "#000000"
 END_CARD_OUTLINE_PX = 3
@@ -202,7 +205,8 @@ END_CARD_OUTLINE_PX = 3
 # glyph (libass would fall back to whatever font the machine has).
 END_CARD_CTA_STYLE_NAME = "EndCardCta"
 END_CARD_CTA = {"en": 'Comment "PART {n}" for the next one', "fr": "Commente « PARTIE {n} » pour la suite"}
-END_CARD_CTA_Y = round(_HEIGHT * 0.50)
+END_CARD_CTA_Y_FRACTION = 0.50
+END_CARD_CTA_Y = round(_HEIGHT * END_CARD_CTA_Y_FRACTION)
 # WrapStyle 2 never wraps, so the line is sized to fit 1080 px: it starts at
 # the title's size and only shrinks (the "PART N" line never does). The
 # width estimate is deliberately wide: 0.62 em a character covers the widest
@@ -221,6 +225,47 @@ COVER_PRIMARY_HEX = "#FFFFFF"
 COVER_OUTLINE_HEX = "#000000"
 COVER_OUTLINE_PX = 3
 COVER_EVENT_DURATION_S = 5.0  # generous: only a single frame is ever extracted from this document
+
+
+# ------------------------------------------------------------------ layout
+
+class Layout(NamedTuple):
+    """Where the text layers sit in one frame (plan 23 stage B6). Every
+    position is the same fraction of the frame's height as the portrait
+    constants above; the font sizes stay in pixels (the short side is 1080
+    in every frame ``profiles.GEOMETRIES`` names)."""
+
+    width: int
+    height: int
+    center_x: int
+    word_pop_y: int
+    two_line_margin_v: int
+    hook_y: int
+    end_card_label_y: int
+    end_card_title_y: int
+    end_card_cta_y: int
+    cover_y: int
+
+
+def _layout(geometry=profiles.PORTRAIT) -> Layout:
+    """The text layout of *geometry*'s frame: PlayRes, the centre, the
+    word_pop Y, the two_line bottom margin, the hook, end-card and cover
+    Ys. For :data:`profiles.PORTRAIT` these are exactly the module
+    constants (``WORD_POP_Y``, ``TWO_LINE_MARGIN_V``, ``HOOK_Y``, ...), so
+    every 9:16 document is byte for byte the one it always was."""
+    width, height = geometry.width, geometry.height
+    return Layout(
+        width=width,
+        height=height,
+        center_x=round(width / 2),
+        word_pop_y=round(height * WORD_POP_Y_FRACTION),
+        two_line_margin_v=round(height * TWO_LINE_SAFE_AREA_FRACTION),
+        hook_y=round(height * HOOK_Y_FRACTION),
+        end_card_label_y=round(height * END_CARD_LABEL_Y_FRACTION),
+        end_card_title_y=round(height * END_CARD_TITLE_Y_FRACTION),
+        end_card_cta_y=round(height * END_CARD_CTA_Y_FRACTION),
+        cover_y=round(height * COVER_Y_FRACTION),
+    )
 
 
 # ------------------------------------------------------------------- errors
@@ -486,15 +531,15 @@ def _style_line(name, font_family, size, primary_hex, outline_hex, *, bold=True,
     )
 
 
-def _document(*, title: str, styles: list, events: list) -> str:
+def _document(*, title: str, styles: list, events: list, geometry=profiles.PORTRAIT) -> str:
     lines = [
         "[Script Info]",
         f"Title: {title}",
         "ScriptType: v4.00+",
         "WrapStyle: 2",
         "ScaledBorderAndShadow: yes",
-        f"PlayResX: {_WIDTH}",
-        f"PlayResY: {_HEIGHT}",
+        f"PlayResX: {geometry.width}",
+        f"PlayResY: {geometry.height}",
         "",
         "[V4+ Styles]",
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, "
@@ -582,7 +627,7 @@ def _apply_word_card_floor(spans: list, min_card_s: float) -> list:
     return result
 
 
-def word_pop_dialogue(lines: list, *, word_timings=None, typography: dict) -> tuple:
+def word_pop_dialogue(lines: list, *, word_timings=None, typography: dict, geometry=profiles.PORTRAIT) -> tuple:
     """``(style_lines, event_lines, approx_by_line)`` for ``subtitle_mode
     == "word_pop"`` (module constants for the exact numbers): one
     uppercase Dialogue event per word, each visible for its own span
@@ -595,7 +640,11 @@ def word_pop_dialogue(lines: list, *, word_timings=None, typography: dict) -> tu
     are built. Absent (every shipped template, every legacy lock, and
     render/golden.py's STYLE_LOCK -- RC-M2), nothing here changes: byte-for-
     byte the same output as before this key existed.
+
+    *geometry* (plan 23 stage B6) places the word at the same fraction of
+    its own frame (:func:`_layout`); the default is the portrait position.
     """
+    layout = _layout(geometry)
     style_lines = [_style_line(
         WORD_POP_STYLE_NAME, typography["font_family"], WORD_POP_FONT_SIZE,
         WORD_POP_PRIMARY_HEX, WORD_POP_OUTLINE_HEX,
@@ -607,7 +656,7 @@ def word_pop_dialogue(lines: list, *, word_timings=None, typography: dict) -> tu
     min_card_ms = typography.get("word_min_card_ms")
     min_card_s = min_card_ms / 1000.0 if min_card_ms else 0.0
 
-    override = f"{{\\an5\\pos({_CENTER_X},{WORD_POP_Y}){WORD_POP_POP_TAG}}}"
+    override = f"{{\\an5\\pos({layout.center_x},{layout.word_pop_y}){WORD_POP_POP_TAG}}}"
 
     for line in lines:
         spans, is_approx = _line_word_spans(line["text"], line["duration_s"], word_timings.get(line["line_id"]))
@@ -708,7 +757,8 @@ def _two_line_render_text(wrap_lines, word_texts, highlight_idx, highlight_ass_c
     return r"\N".join(rendered_lines)
 
 
-def two_line_dialogue(lines: list, *, word_timings=None, palette: dict, typography: dict) -> tuple:
+def two_line_dialogue(lines: list, *, word_timings=None, palette: dict, typography: dict,
+                      geometry=profiles.PORTRAIT) -> tuple:
     """``(style_lines, event_lines, approx_by_line)`` for ``subtitle_mode
     == "two_line"``: one ``Style`` per speaker (:func:`_speaker_accents`,
     each accent kept clearly distinct from the highlight colour and from
@@ -718,7 +768,9 @@ def two_line_dialogue(lines: list, *, word_timings=None, palette: dict, typograp
     being spoken drawn in the style template's own ``highlight_colour`` and
     a small scale pop, reset with a bare ``\\r`` (never ``\\k`` -- plan:
     "no \\k") so later words in the same event fall back to the speaker
-    Style's own colour."""
+    Style's own colour. *geometry*'s frame sets the bottom margin
+    (:func:`_layout`)."""
+    layout = _layout(geometry)
     word_timings = word_timings or {}
     highlight_hex = typography.get("highlight_colour") or TWO_LINE_DEFAULT_HIGHLIGHT_HEX
     highlight_ass_color = _ass_override_color(highlight_hex)
@@ -729,7 +781,7 @@ def two_line_dialogue(lines: list, *, word_timings=None, palette: dict, typograp
         _style_line(
             style_names[speaker], typography["font_family"], TWO_LINE_FONT_SIZE,
             hex_color, TWO_LINE_OUTLINE_HEX, bold=True, italic=False,
-            outline_px=TWO_LINE_OUTLINE_PX, alignment=2, margin_v=TWO_LINE_MARGIN_V,
+            outline_px=TWO_LINE_OUTLINE_PX, alignment=2, margin_v=layout.two_line_margin_v,
         )
         for speaker, hex_color in accents.items()
     ]
@@ -757,7 +809,8 @@ def two_line_dialogue(lines: list, *, word_timings=None, palette: dict, typograp
 
 # --------------------------------------------------------------- hook / label
 
-def hook_overlay_events(hook_text: str, duration_s: float, *, typography: dict) -> tuple:
+def hook_overlay_events(hook_text: str, duration_s: float, *, typography: dict,
+                        geometry=profiles.PORTRAIT) -> tuple:
     """``(style_lines, event_lines)`` for the hook's on-screen text (spec
     6.4.1: "a separate top-third style"), uppercase, from the episode's own
     ``0.0`` s for *duration_s* (the hook scene's own span, module
@@ -773,7 +826,8 @@ def hook_overlay_events(hook_text: str, duration_s: float, *, typography: dict) 
     )]
     start_tc, end_tc = event_time_pair(0.0, duration_s)
     text = escape_ass_text(str(hook_text).upper())
-    override = f"{{\\an5\\pos({_CENTER_X},{HOOK_Y})}}"
+    layout = _layout(geometry)
+    override = f"{{\\an5\\pos({layout.center_x},{layout.hook_y})}}"
     event_lines = [f"Dialogue: 0,{start_tc},{end_tc},{HOOK_STYLE_NAME},,0,0,0,,{override}{text}"]
     return style_lines, event_lines
 
@@ -804,18 +858,18 @@ def end_card_cta_text(language: str, next_ep: int) -> str:
     return END_CARD_CTA["fr" if language == "fr" else "en"].format(n=next_ep)
 
 
-def end_card_cta_font_size(text: str) -> int:
+def end_card_cta_font_size(text: str, *, geometry=profiles.PORTRAIT) -> int:
     """The largest size, at most :data:`END_CARD_CTA_MAX_FONT_SIZE`, at
-    which *text* fits the 1080 px card between its side margins and
-    outline (:data:`END_CARD_CTA_CHAR_EM`'s estimate); never below
-    :data:`END_CARD_CTA_MIN_FONT_SIZE`."""
-    usable = _WIDTH - 2 * END_CARD_CTA_SIDE_MARGIN - 2 * END_CARD_OUTLINE_PX
+    which *text* fits the card's width (1080 px by default, *geometry*'s)
+    between its side margins and outline (:data:`END_CARD_CTA_CHAR_EM`'s
+    estimate); never below :data:`END_CARD_CTA_MIN_FONT_SIZE`."""
+    usable = geometry.width - 2 * END_CARD_CTA_SIDE_MARGIN - 2 * END_CARD_OUTLINE_PX
     fitting = math.floor(usable / (max(1, len(text)) * END_CARD_CTA_CHAR_EM))
     return max(END_CARD_CTA_MIN_FONT_SIZE, min(END_CARD_CTA_MAX_FONT_SIZE, fitting))
 
 
 def end_card_ass(language: str, next_ep: int, story_title: str, typography: dict, duration_s: float, *,
-                 cta: bool = False) -> str:
+                 cta: bool = False, geometry=profiles.PORTRAIT) -> str:
     """A standalone ASS document for the 1.0 s end card (spec 6.2/6.4,
     plan: "PART {n+1} / PARTIE {n+1} + the story title, centered, style
     typography"): burned by ``render/filtergraph.py``'s ``end_card_argv``
@@ -825,7 +879,9 @@ def end_card_ass(language: str, next_ep: int, story_title: str, typography: dict
     With *cta* (the episode template's ``end_card_cta``), one more line
     under "PART N": :func:`end_card_cta_text`, sized by
     :func:`end_card_cta_font_size`. Without it the document is exactly
-    what it always was."""
+    what it always was. *geometry* is the card's frame (:func:`_layout`;
+    the portrait card by default)."""
+    layout = _layout(geometry)
     label_word = "PARTIE" if language == "fr" else "PART"
     label_text = escape_ass_text(f"{label_word} {next_ep}")
     title_text = escape_ass_text(story_title)
@@ -843,32 +899,34 @@ def end_card_ass(language: str, next_ep: int, story_title: str, typography: dict
     start_tc, end_tc = event_time_pair(0.0, duration_s)
     events = [
         f"Dialogue: 0,{start_tc},{end_tc},{END_CARD_LABEL_STYLE_NAME},,0,0,0,,"
-        f"{{\\an5\\pos({_CENTER_X},{END_CARD_LABEL_Y})}}{label_text}",
+        f"{{\\an5\\pos({layout.center_x},{layout.end_card_label_y})}}{label_text}",
         f"Dialogue: 1,{start_tc},{end_tc},{END_CARD_TITLE_STYLE_NAME},,0,0,0,,"
-        f"{{\\an5\\pos({_CENTER_X},{END_CARD_TITLE_Y})}}{title_text}",
+        f"{{\\an5\\pos({layout.center_x},{layout.end_card_title_y})}}{title_text}",
     ]
     styles = [label_style, title_style]
     if cta:
         cta_text = end_card_cta_text(language, next_ep)
         styles.append(_style_line(
-            END_CARD_CTA_STYLE_NAME, typography["font_family"], end_card_cta_font_size(cta_text),
+            END_CARD_CTA_STYLE_NAME, typography["font_family"], end_card_cta_font_size(cta_text, geometry=geometry),
             END_CARD_PRIMARY_HEX, END_CARD_OUTLINE_HEX, bold=False, italic=False,
             outline_px=END_CARD_OUTLINE_PX, alignment=5,
         ))
         events.append(
             f"Dialogue: 2,{start_tc},{end_tc},{END_CARD_CTA_STYLE_NAME},,0,0,0,,"
-            f"{{\\an5\\pos({_CENTER_X},{END_CARD_CTA_Y})}}{escape_ass_text(cta_text)}"
+            f"{{\\an5\\pos({layout.center_x},{layout.end_card_cta_y})}}{escape_ass_text(cta_text)}"
         )
-    return _document(title="End Card", styles=styles, events=events)
+    return _document(title="End Card", styles=styles, events=events, geometry=geometry)
 
 
-def cover_ass(text: str, typography: dict) -> str:
+def cover_ass(text: str, typography: dict, *, geometry=profiles.PORTRAIT) -> str:
     """A standalone ASS document for the cover's overlay text (spec 6.2,
     plan: "the cover's overlay text (upper third, uppercase, <= 6 words
     shown as given)"): the word cap is enforced by the caller/schema
     (``schemas._word_cap_errors``, hook/M1 text), never re-truncated here
     -- *text* is shown as given, only uppercased for display. Burned over
-    the hook shot's single extracted frame."""
+    the hook shot's single extracted frame, in *geometry*'s frame (the
+    portrait one by default)."""
+    layout = _layout(geometry)
     style = _style_line(
         COVER_STYLE_NAME, typography["font_family"], COVER_FONT_SIZE,
         COVER_PRIMARY_HEX, COVER_OUTLINE_HEX, bold=True, italic=False,
@@ -877,8 +935,8 @@ def cover_ass(text: str, typography: dict) -> str:
     start_tc, end_tc = event_time_pair(0.0, COVER_EVENT_DURATION_S)
     rendered = escape_ass_text(str(text).upper())
     events = [f"Dialogue: 0,{start_tc},{end_tc},{COVER_STYLE_NAME},,0,0,0,,"
-              f"{{\\an5\\pos({_CENTER_X},{COVER_Y})}}{rendered}"]
-    return _document(title="Cover", styles=[style], events=events)
+              f"{{\\an5\\pos({layout.center_x},{layout.cover_y})}}{rendered}"]
+    return _document(title="Cover", styles=[style], events=events, geometry=geometry)
 
 
 # --------------------------------------------------------------- composition
@@ -894,7 +952,7 @@ def _scene_span(timeline: dict, scene_id: str) -> tuple:
 
 def build_subtitles_ass(*, timeline: dict, script: dict, subtitle_mode: str, language: str,
                          hook_style: str, ai_label_enabled: bool, palette: dict, typography: dict,
-                         word_timings=None) -> tuple:
+                         word_timings=None, geometry=profiles.PORTRAIT) -> tuple:
     """The full episode ``subtitles.ass`` document (everything burned by
     the final pass's ``ass=subtitles.ass:fontsdir=fonts`` in one file,
     spec 6.5): dialogue text for *subtitle_mode* (``word_pop``/
@@ -906,7 +964,9 @@ def build_subtitles_ass(*, timeline: dict, script: dict, subtitle_mode: str, lan
     -- the sorted ids of every line whose word timing was an even split
     rather than real provider timestamps (module docstring), for a caller
     to label "approximate timing" in the UI (spec 6.4.1c). Raises
-    :class:`SubtitleError` for an unknown *subtitle_mode*.
+    :class:`SubtitleError` for an unknown *subtitle_mode*. *geometry* is the
+    episode's frame (PlayRes and every position, :func:`_layout`; the
+    portrait document by default).
     """
     if subtitle_mode not in SUBTITLE_MODES:
         raise SubtitleError(f"unknown subtitle_mode {subtitle_mode!r}, expected one of {SUBTITLE_MODES}")
@@ -917,12 +977,13 @@ def build_subtitles_ass(*, timeline: dict, script: dict, subtitle_mode: str, lan
     approx_by_line: dict = {}
 
     if subtitle_mode == "word_pop":
-        s, e, a = word_pop_dialogue(lines, word_timings=word_timings, typography=typography)
+        s, e, a = word_pop_dialogue(lines, word_timings=word_timings, typography=typography, geometry=geometry)
         style_lines += s
         event_lines += e
         approx_by_line.update(a)
     elif subtitle_mode == "two_line":
-        s, e, a = two_line_dialogue(lines, word_timings=word_timings, palette=palette, typography=typography)
+        s, e, a = two_line_dialogue(lines, word_timings=word_timings, palette=palette, typography=typography,
+                                    geometry=geometry)
         style_lines += s
         event_lines += e
         approx_by_line.update(a)
@@ -934,7 +995,7 @@ def build_subtitles_ass(*, timeline: dict, script: dict, subtitle_mode: str, lan
         if hook_text and hook_scene is not None:
             start, end = _scene_span(timeline, hook_scene["scene_id"])
             hook_duration = end - start
-            s, e = hook_overlay_events(hook_text, hook_duration, typography=typography)
+            s, e = hook_overlay_events(hook_text, hook_duration, typography=typography, geometry=geometry)
             style_lines += s
             event_lines += e
 
@@ -943,6 +1004,6 @@ def build_subtitles_ass(*, timeline: dict, script: dict, subtitle_mode: str, lan
         style_lines += s
         event_lines += e
 
-    document = _document(title="Episode Subtitles", styles=style_lines, events=event_lines)
+    document = _document(title="Episode Subtitles", styles=style_lines, events=event_lines, geometry=geometry)
     meta = {"approx_line_ids": sorted(line_id for line_id, is_approx in approx_by_line.items() if is_approx)}
     return document, meta

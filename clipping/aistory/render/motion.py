@@ -190,7 +190,7 @@ def zoompan_expr(motion: dict, frames: int, *, modifiers=(), pan_pct: float = PA
 
 def handheld_margin_px() -> int:
     """The extra width/height zoompan must render beyond
-    ``profiles.WIDTH``x``profiles.HEIGHT`` so a following ``crop`` has room
+    the frame (``geometry``) so a following ``crop`` has room
     for the +/-:data:`HANDHELD_PX` sinusoidal offset on both axes (spec
     6.3's ``handheld`` modifier): ``2*HANDHELD_PX`` per axis (so the crop
     window can sit anywhere from 0 to the full margin without ever asking
@@ -198,22 +198,25 @@ def handheld_margin_px() -> int:
     return int(2 * HANDHELD_PX)
 
 
-def zoompan_canvas(modifiers) -> tuple:
+def zoompan_canvas(modifiers, *, geometry=profiles.PORTRAIT) -> tuple:
     """``(width, height)`` zoompan itself renders to (its own ``s=``
-    option): the profile's own frame size, or with
+    option): *geometry*'s frame size, or with
     :func:`handheld_margin_px` added on each axis when ``"handheld"`` is
     one of the shot's modifiers -- so the ``crop`` that follows always has
-    exactly the room it needs, never negative and never short."""
+    exactly the room it needs, never negative and never short.
+
+    The zoompan expressions themselves (:func:`zoompan_expr`) read only
+    ``iw``/``ih``/``zoom``, so they hold for any frame (plan 23 stage B6)."""
     if "handheld" in modifiers:
         margin = handheld_margin_px()
-        return profiles.WIDTH + margin, profiles.HEIGHT + margin
-    return profiles.WIDTH, profiles.HEIGHT
+        return geometry.width + margin, geometry.height + margin
+    return geometry.width, geometry.height
 
 
-def handheld_crop_expr(frames: int) -> dict:
+def handheld_crop_expr(frames: int, *, geometry=profiles.PORTRAIT) -> dict:
     """``{"w", "h", "x", "y"}`` for the ``crop`` filter spec 6.3's
     ``handheld`` modifier adds right after zoompan: a static
-    ``profiles.WIDTH``x``profiles.HEIGHT`` window sliding +/-
+    *geometry*-sized window (``profiles.PORTRAIT`` by default) sliding +/-
     :data:`HANDHELD_PX` inside the extra canvas :func:`zoompan_canvas`
     rendered, on two independent sinusoids (a single shared one would move
     both axes in lockstep, an unconvincing handheld look) -- one full cycle
@@ -230,7 +233,7 @@ def handheld_crop_expr(frames: int) -> dict:
     n = max(frames, 1)
     x = f"({_num(cx)}+{_num(HANDHELD_PX)}*sin(2*PI*n/{n}))"
     y = f"({_num(cy)}+{_num(HANDHELD_PX)}*sin(3*PI*n/{n}))"
-    return {"w": str(profiles.WIDTH), "h": str(profiles.HEIGHT), "x": _quoted(x), "y": _quoted(y)}
+    return {"w": str(geometry.width), "h": str(geometry.height), "x": _quoted(x), "y": _quoted(y)}
 
 
 def jitter_stopmotion_frames(duration_s: float) -> int:

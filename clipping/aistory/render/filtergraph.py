@@ -13,6 +13,14 @@ hands in, not just documents it).
 These builders touch no filesystem and run no subprocess -- "pure" in the
 same sense ``clipping.aistory.shots``/``timing`` are: same inputs, same
 argv, every time (golden-testable, spec 13).
+
+**The frame** (plan 23 stage B6). Every builder that draws a picture takes
+``geometry=`` (a ``profiles.Geometry``, default ``profiles.PORTRAIT``):
+:func:`shot_argv`, :func:`tier2_clip_argv`, :func:`end_card_argv`,
+:func:`cover_argv` and their helpers. Left at its default, every argv is
+byte for byte the one before the keyword existed (the shot cache keys hash
+the argv, and the golden digests pin the frames). The final pass and the
+audio mix read the clips these made and carry no size of their own.
 """
 
 from __future__ import annotations
@@ -64,13 +72,13 @@ def _assert_relative(path, *, what: str = "path") -> None:
         raise ValueError(f"{what} must be relative, not a Windows absolute path: {path!r}")
 
 
-def _cover_fill() -> str:
-    """The one cover rule: scale to cover ``profiles.WIDTH``x``profiles.HEIGHT``
-    and centre-crop the overflow (``crop``'s default ``x``/``y``), square
-    pixels -- never letterboxed, never stretched. The cover's image
+def _cover_fill(*, geometry=profiles.PORTRAIT) -> str:
+    """The one cover rule: scale to cover *geometry*'s frame (1080x1920 by
+    default) and centre-crop the overflow (``crop``'s default ``x``/``y``),
+    square pixels -- never letterboxed, never stretched. The cover's image
     (:func:`cover_argv`) and a Tier >= 2 clip (:func:`tier2_clip_argv`) are
     framed by it."""
-    w, h = profiles.WIDTH, profiles.HEIGHT
+    w, h = geometry.width, geometry.height
     return f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},setsar=1"
 
 
@@ -80,11 +88,13 @@ def _cover_fill() -> str:
 STILL_ASPECT_TOLERANCE = 0.02
 
 
-def still_crop(image_size):
+def still_crop(image_size, *, geometry=profiles.PORTRAIT):
     """``(width, height)`` of the centre crop that makes a still of
-    *image_size* (``(w, h)`` in pixels, or None: unknown) 9:16 in its own
-    pixels; None when it needs none -- its aspect is within
-    :data:`STILL_ASPECT_TOLERANCE` of 9:16 -- or its size is unknown.
+    *image_size* (``(w, h)`` in pixels, or None: unknown) the aspect of
+    *geometry* (9:16 by default) in its own pixels; None when it needs none
+    -- its aspect is within :data:`STILL_ASPECT_TOLERANCE` of the frame's --
+    or its size is unknown. The crop's unit is the frame's own reduced ratio
+    (``gcd``): 9x16, 16x9 or 1x1.
 
     The crop is the largest exact 9:16 that fits, an even multiple of 9x16
     (1024x1024 -> 576x1024): even on both axes (a 4:2:0 picture is cropped
@@ -95,20 +105,22 @@ def still_crop(image_size):
     if not image_size:
         return None
     width, height = image_size
-    if abs((width / height) / (profiles.WIDTH / profiles.HEIGHT) - 1) <= STILL_ASPECT_TOLERANCE:
+    if abs((width / height) / (geometry.width / geometry.height) - 1) <= STILL_ASPECT_TOLERANCE:
         return None
-    unit = math.gcd(profiles.WIDTH, profiles.HEIGHT)
-    unit_w, unit_h = profiles.WIDTH // unit, profiles.HEIGHT // unit
+    unit = math.gcd(geometry.width, geometry.height)
+    unit_w, unit_h = geometry.width // unit, geometry.height // unit
     k = min(width // unit_w, height // unit_h)
     k -= k % 2
     return (unit_w * k, unit_h * k) if k else None
 
 
-def _base_chain(image_rel, shot, profile, *, pan_pct=motion_mod.PAN_PCT, image_size=None) -> tuple:
+def _base_chain(image_rel, shot, profile, *, pan_pct=motion_mod.PAN_PCT, image_size=None,
+                geometry=profiles.PORTRAIT) -> tuple:
     """``(chain_fragments, zoompan_frames, zoompan_fps)`` for one shot: a
-    centre ``crop`` to 9:16 when the still is not 9:16 (:func:`still_crop`
-    on *image_size* -- never letterboxed, never stretched), ``scale`` (per
-    *profile*'s upscale), then ``zoompan`` (eased per
+    centre ``crop`` to the frame's aspect when the still is not that aspect
+    (:func:`still_crop` on *image_size* -- never letterboxed, never
+    stretched), ``scale`` to *geometry*'s width times *profile*'s upscale,
+    then ``zoompan`` (eased per
     ``shot["motion"]``/``shot["modifiers"]``, its pan travel room per
     *pan_pct* -- phase 5 stage 12, DEC-183), then the ``handheld`` crop
     when present. Does not include overlays or ``format`` -- those are
@@ -123,11 +135,11 @@ def _base_chain(image_rel, shot, profile, *, pan_pct=motion_mod.PAN_PCT, image_s
     zoompan_frames = motion_mod.jitter_stopmotion_frames(duration_s) if jittered else shot["frames"]
 
     z = motion_mod.zoompan_expr(motion, zoompan_frames, modifiers=modifiers, pan_pct=pan_pct)
-    canvas_w, canvas_h = motion_mod.zoompan_canvas(modifiers)
-    scaled_w = profiles.WIDTH * profile.upscale
+    canvas_w, canvas_h = motion_mod.zoompan_canvas(modifiers, geometry=geometry)
+    scaled_w = geometry.width * profile.upscale
 
     chain = []
-    cover = still_crop(image_size)
+    cover = still_crop(image_size, geometry=geometry)
     if cover is not None:
         chain.append(f"crop={cover[0]}:{cover[1]}")
     chain.append(f"scale={scaled_w}:-2")
@@ -142,7 +154,7 @@ def _base_chain(image_rel, shot, profile, *, pan_pct=motion_mod.PAN_PCT, image_s
         # shot's normal 30 fps target -- never the raw 12 fps zoompan_frames
         # jitter_stopmotion may have used upstream (crop's own "n" variable
         # counts frames on ITS OWN input, not zoompan's "on").
-        crop = motion_mod.handheld_crop_expr(shot["frames"])
+        crop = motion_mod.handheld_crop_expr(shot["frames"], geometry=geometry)
         chain.append(f"crop={crop['w']}:{crop['h']}:x={crop['x']}:y={crop['y']}")
 
     return chain, zoompan_frames, zoompan_fps
@@ -165,7 +177,7 @@ def _overlay_fragments(style_overlays) -> list:
 # -------------------------------------------------------------------- shot
 
 def shot_argv(image_rel, shot, profile, style_overlays, out_rel, *, pan_pct=motion_mod.PAN_PCT,
-              image_size=None) -> list:
+              image_size=None, geometry=profiles.PORTRAIT) -> list:
     """The argv for one shot's image -> clip render (spec 6.5): a looped
     still image, scaled by *profile*'s own upscale factor, an eased
     zoompan driven by ``shot["motion"]`` and ``shot["modifiers"]``
@@ -192,6 +204,11 @@ def shot_argv(image_rel, shot, profile, style_overlays, out_rel, *, pan_pct=moti
     A 9:16 still, a near-9:16 one and one of unknown size get no crop: their
     argv is byte-for-byte the one before this keyword existed.
 
+    *geometry* (plan 23 stage B6) is the output frame: the scale, the
+    zoompan canvas, the handheld window, the still's crop and the paper
+    texture all follow it. The default, ``profiles.PORTRAIT``, is the argv
+    it always was.
+
     *shot* is a ``render.timeline`` shot entry: ``{"duration_s", "frames",
     "motion", "modifiers", ...}`` (``build_timeline``'s per-shot dict --
     ``frames`` there is the shot's own exact 30 fps frame count). The graph
@@ -210,14 +227,14 @@ def shot_argv(image_rel, shot, profile, style_overlays, out_rel, *, pan_pct=moti
     _assert_relative(out_rel, what="out_rel")
 
     chain, _zoompan_frames, _zoompan_fps = _base_chain(image_rel, shot, profile, pan_pct=pan_pct,
-                                                       image_size=image_size)
+                                                       image_size=image_size, geometry=geometry)
     chain.extend(_overlay_fragments(style_overlays))
     main_chain = ",".join(chain)
 
     if "paper_texture" in style_overlays:
         filter_complex = (
             f"[0:v]{main_chain}[base];"
-            f"movie={PAPER_TEXTURE_REL},scale={profiles.WIDTH}:{profiles.HEIGHT}[tex];"
+            f"movie={PAPER_TEXTURE_REL},scale={geometry.width}:{geometry.height}[tex];"
             f"[base][tex]blend=all_mode={PAPER_TEXTURE_BLEND_MODE}:all_opacity={_num(PAPER_TEXTURE_OPACITY)}[blended];"
             f"[blended]format={profile.pix_fmt}[out]"
         )
@@ -235,9 +252,9 @@ def shot_argv(image_rel, shot, profile, style_overlays, out_rel, *, pan_pct=moti
 
 # ------------------------------------------------------------- tier >= 2
 
-def tier2_clip_argv(video_rel, shot, profile, out_rel, *, clip_s=None) -> list:
+def tier2_clip_argv(video_rel, shot, profile, out_rel, *, clip_s=None, geometry=profiles.PORTRAIT) -> list:
     """The argv for a Tier >= 2 shot that already has its own ``.mp4``
-    (spec 6.5): it covers ``profiles.WIDTH``x``profiles.HEIGHT`` and is
+    (spec 6.5): it covers *geometry*'s frame (1080x1920 by default) and is
     centre-cropped (:func:`_cover_fill`, the rule the cover frames a shot's
     image with -- never letterboxed, never stretched: a square Kling clip
     once came out between black bars, T2-P6-F1), resampled to a 30 fps CFR
@@ -277,7 +294,7 @@ def tier2_clip_argv(video_rel, shot, profile, out_rel, *, clip_s=None) -> list:
     if clip_s and float(shot["duration_s"]) > float(clip_s):
         stretch = f"setpts={_num(round(float(shot['duration_s']) / float(clip_s), 4))}*PTS,"
     vf = (
-        f"{_cover_fill()},"
+        f"{_cover_fill(geometry=geometry)},"
         f"{stretch}"
         f"fps={profiles.FPS},"
         f"tpad=stop_mode=clone:stop_duration={duration},"
@@ -296,9 +313,9 @@ def tier2_clip_argv(video_rel, shot, profile, out_rel, *, clip_s=None) -> list:
 
 # ------------------------------------------------------------------ end card
 
-def end_card_argv(ass_rel, fontsdir_rel, duration_s, profile, out_rel) -> list:
+def end_card_argv(ass_rel, fontsdir_rel, duration_s, profile, out_rel, *, geometry=profiles.PORTRAIT) -> list:
     """The argv for the 1.0 s end card (spec 6.2/6.4/6.5): a black
-    ``color`` source at ``profiles.WIDTH``x``profiles.HEIGHT``/30 fps for
+    ``color`` source at *geometry*'s size (1080x1920 by default)/30 fps for
     *duration_s* seconds, with the card's ``ass_rel`` burned in via
     ``fontsdir_rel`` (``render/fonts.py``'s staged font directory, stage
     5). ``-frames:v`` is the exact ``round(duration_s * fps)`` (floored at
@@ -316,7 +333,7 @@ def end_card_argv(ass_rel, fontsdir_rel, duration_s, profile, out_rel) -> list:
     argv = list(_ARGV_PREFIX)
     argv += profile.global_bitexact_args()
     argv += ["-f", "lavfi", "-i",
-             f"color=black:s={profiles.WIDTH}x{profiles.HEIGHT}:r={profiles.FPS}:d={_num(duration_s)}"]
+             f"color=black:s={geometry.width}x{geometry.height}:r={profiles.FPS}:d={_num(duration_s)}"]
     argv += ["-vf", vf]
     argv += profile.video_encode_args()
     argv += ["-r", str(profiles.FPS), "-frames:v", str(frames), "-an", out_rel]
@@ -1043,10 +1060,10 @@ def audio_mix_argv(timeline, *, line_inputs, sfx_inputs, bgm_input, ending, out_
 COVER_JPEG_QSCALE = 2
 
 
-def cover_argv(image_rel, ass_rel, fontsdir_rel, out_rel) -> list:
+def cover_argv(image_rel, ass_rel, fontsdir_rel, out_rel, *, geometry=profiles.PORTRAIT) -> list:
     """The argv that makes ``cover.jpg`` (plan: "the hook shot +
     ``ass=cover.ass``, one frame, saved as jpg"): the hook scene's first
-    shot image, scaled to fill ``profiles.WIDTH``x``profiles.HEIGHT`` and
+    shot image, scaled to fill *geometry*'s frame (1080x1920 by default) and
     centre-cropped (never letterboxed, never stretched), square pixels,
     the cover text of *ass_rel* (``subtitles.cover_ass``) burned with the
     staged font of *fontsdir_rel*, then exactly one frame written as a
@@ -1057,7 +1074,7 @@ def cover_argv(image_rel, ass_rel, fontsdir_rel, out_rel) -> list:
         _assert_relative(value, what=what)
     ass_value = motion_mod.escape_expr(ass_rel)
     fontsdir_value = motion_mod.escape_expr(fontsdir_rel)
-    vf = f"{_cover_fill()},ass={ass_value}:fontsdir={fontsdir_value}"
+    vf = f"{_cover_fill(geometry=geometry)},ass={ass_value}:fontsdir={fontsdir_value}"
     argv = list(_ARGV_PREFIX)
     argv += ["-i", image_rel, "-vf", vf, "-frames:v", "1", "-update", "1", "-q:v", str(COVER_JPEG_QSCALE),
              out_rel]

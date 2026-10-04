@@ -6,6 +6,7 @@ parity key and framemd5 digest (spec 13; DEC-156).
     python3 tools/render_golden.py --record       # ... and record this key
     python3 tools/render_golden.py --workdir DIR  # keep the render in DIR
     python3 tools/render_golden.py --tier2 ...    # the tier-2 fixture instead
+    python3 tools/render_golden.py --aspect 16:9  # the fixture in another frame
 
 The fixture is ``clipping/aistory/render/golden.py``'s, the same one
 ``tests/test_aistory_render_golden.py`` renders. Look at the frames
@@ -14,7 +15,10 @@ replaces this machine's key in ``tests/fixtures/aistory_golden/framemd5.json``
 and keeps every other key. ``--tier2`` renders
 ``clipping/aistory/render/golden_tier2.py``'s fixture (a shot cut from its
 own clip; ``tests/test_aistory_render_golden_tier2.py``) against
-``tests/fixtures/aistory_golden_tier2/framemd5.json``.
+``tests/fixtures/aistory_golden_tier2/framemd5.json``. ``--aspect 16:9`` or
+``--aspect 1:1`` renders the tier-1 fixture in that frame against its own
+keys file (``framemd5_16x9.json`` / ``framemd5_1x1.json`` beside
+``framemd5.json``; plan 23 stage B6); the tier-2 fixture is 9:16 only.
 
 Exit status: 0 the digest matches (or was recorded), 1 the render failed,
 2 the digest differs from the recorded one, 3 no digest is recorded for this
@@ -39,12 +43,23 @@ def main(argv=None) -> int:
     parser.add_argument("--workdir", help="render here and keep the files (default: a temporary folder)")
     parser.add_argument("--tier2", action="store_true", help="the tier-2 fixture (a shot cut from its own clip)")
     parser.add_argument("--keys", help="the framemd5 keys file (default: the fixture's own)")
+    parser.add_argument("--aspect", choices=golden.ASPECTS, default="9:16",
+                        help="the frame of the tier-1 fixture (default 9:16)")
     args = parser.parse_args(argv)
-    fixture = golden_tier2 if args.tier2 else golden
-    keys_path = args.keys or str(fixture.KEYS_PATH)
+    if args.tier2 and args.aspect != "9:16":
+        parser.error("the tier-2 fixture is 9:16 only")
+    if args.tier2:
+        keys_path = args.keys or str(golden_tier2.KEYS_PATH)
+        command = golden_tier2.RECORD_COMMAND
+    else:
+        keys_path = args.keys or str(golden.keys_path(args.aspect))
+        command = golden.record_command(args.aspect)
 
     workdir = args.workdir or tempfile.mkdtemp(prefix="aistory-golden-")
-    result = fixture.render_fixture(workdir)
+    if args.tier2:
+        result = golden_tier2.render_fixture(workdir)
+    else:
+        result = golden.render_fixture(workdir, aspect=args.aspect)
     if result["state"] != "completed":
         print(f"render {result['state']}: {result['error']}", file=sys.stderr)
         manifest = result.get("manifest") or {}
@@ -66,7 +81,7 @@ def main(argv=None) -> int:
         print(f"recorded {key} in {keys_path}")
         return 0
     keys = golden.load_keys(keys_path)
-    problem = golden.parity_problem(key, digest, keys, command=fixture.RECORD_COMMAND)
+    problem = golden.parity_problem(key, digest, keys, command=command)
     if problem is None:
         print("status:  matches the recorded digest")
         return 0

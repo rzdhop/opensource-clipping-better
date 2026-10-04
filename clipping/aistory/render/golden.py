@@ -32,6 +32,15 @@ sha256 of the ``.framemd5`` file of the video. An unknown key is a failure,
 never a pass: ``tools/render_golden.py --record`` adds one after the frames
 have been looked at.
 
+**Aspects** (plan 23 stage B6). ``render_fixture(aspect="16:9")`` and
+``aspect="1:1"`` render the same episode in another frame: the shot images
+are 192x108 / 108x108 (:data:`IMAGE_SIZES`, drawn with the same picture
+laid out for that size) and the plan draws every shot, the end card and the
+text to that frame. Each aspect has its own keys file (:data:`KEYS_PATHS`:
+``framemd5_16x9.json``, ``framemd5_1x1.json``), recorded with
+``tools/render_golden.py --record --aspect <aspect>``. The 9:16 fixture,
+its keys and its digests are the ones they always were.
+
 Stdlib + this package (DEC-012): usable by the test, by
 ``tools/render_golden.py`` and inside the deployed container (no pytest).
 """
@@ -55,6 +64,13 @@ from . import audio_assets, fonts, plan as plan_mod, runner
 REPO_ROOT = fonts.REPO_ROOT
 KEYS_PATH = REPO_ROOT / "tests" / "fixtures" / "aistory_golden" / "framemd5.json"
 RECORD_COMMAND = "python3 tools/render_golden.py --record"
+# One keys file per frame (plan 23 stage B6); 9:16 keeps the original file.
+ASPECTS = ("9:16", "16:9", "1:1")
+KEYS_PATHS = {
+    "9:16": KEYS_PATH,
+    "16:9": KEYS_PATH.with_name("framemd5_16x9.json"),
+    "1:1": KEYS_PATH.with_name("framemd5_1x1.json"),
+}
 
 EP = 1
 STORY = {"story_id": "0123456789ab", "title": "Golden Fixture", "language": "en"}
@@ -62,6 +78,7 @@ SFX_PACK = "soap"
 SFX_CUE = "dramatic_sting"
 
 IMAGE_SIZE = (108, 192)
+IMAGE_SIZES = {"9:16": IMAGE_SIZE, "16:9": (192, 108), "1:1": (108, 108)}
 LINE_RATE = 24000
 LINE_S = 0.8
 BED_RATE = 44100
@@ -138,15 +155,22 @@ def png_bytes(width: int, height: int, pixel) -> bytes:
         + chunk(b"IEND", b"")
 
 
-def _shot_pixel(index: int, variant: int):
+def _shot_pixel(index: int, variant: int, size=IMAGE_SIZE):
     """A gradient backdrop, a sun disc and a floor band, coloured per shot;
-    *variant* shifts the colours (the cache test's "changed image")."""
+    *variant* shifts the colours (the cache test's "changed image"). The
+    disc's centre and the floor's top are laid out for *size* (``(w, h)``):
+    at the 108x192 of the 9:16 fixture they are exactly the pixels they
+    always were."""
     base = ((200, 90, 40), (40, 110, 190), (60, 150, 80))[index]
     shift = 70 * variant
-    cx, cy, radius = 30 + 24 * index, 60 + 20 * index, 18
+    width, height = size
+    cx = (30 + 24 * index) * width // IMAGE_SIZE[0]
+    cy = (60 + 20 * index) * height // IMAGE_SIZE[1]
+    floor = 150 * height // IMAGE_SIZE[1]
+    radius = 18
 
     def pixel(x, y):
-        if y > 150:
+        if y > floor:
             return (30, 30, 36)
         if (x - cx) ** 2 + (y - cy) ** 2 <= radius * radius:
             return (250, 225, 120)
@@ -248,11 +272,12 @@ def build_documents(*, line_seconds=None) -> dict:
             "template": copy.deepcopy(TEMPLATE)}
 
 
-def write_sources(workdir, *, variant_shot=None, line_seconds=None) -> dict:
+def write_sources(workdir, *, variant_shot=None, line_seconds=None, aspect="9:16") -> dict:
     """Write the fixture's media under ``<workdir>/sources/`` and return the
     plan's ``inputs`` (hashed). *variant_shot* (a shot id) gets different
     colours; *line_seconds* (``{line_id: seconds}``) makes those lines'
-    blips that long."""
+    blips that long; *aspect* sizes the shot images (:data:`IMAGE_SIZES`)."""
+    size = IMAGE_SIZES[aspect]
     src = Path(workdir) / "sources"
     for sub in ("shots", "voice", "bgm", "custom_fonts"):
         (src / sub).mkdir(parents=True, exist_ok=True)
@@ -260,7 +285,7 @@ def write_sources(workdir, *, variant_shot=None, line_seconds=None) -> dict:
     shots = {}
     for index, (shot_id, _scene, _d, _m) in enumerate(SHOTS):
         path = src / "shots" / f"shot_{index + 1:02d}.png"
-        path.write_bytes(png_bytes(*IMAGE_SIZE, _shot_pixel(index, 1 if shot_id == variant_shot else 0)))
+        path.write_bytes(png_bytes(*size, _shot_pixel(index, 1 if shot_id == variant_shot else 0, size)))
         shots[shot_id] = runner.file_record(path, f"fixture/shots/{path.name}")
 
     lines = {}
@@ -287,21 +312,24 @@ def write_sources(workdir, *, variant_shot=None, line_seconds=None) -> dict:
     }
 
 
-def render_fixture(workdir, *, variant_shot=None, line_seconds=None, run=subprocess.run, popen=subprocess.Popen,
-                   on_log=None) -> dict:
+def render_fixture(workdir, *, aspect="9:16", variant_shot=None, line_seconds=None, run=subprocess.run,
+                   popen=subprocess.Popen, on_log=None) -> dict:
     """Write the fixture into *workdir* and render it with the real runner
     (GOLDEN profile): ``render/`` is the working folder,
     ``render_manifest.json`` (and, once a render completed,
     ``render_manifest.last_good.json``) and ``episode_final.mp4`` sit
     beside it. *variant_shot* and *line_seconds*: module docstring,
-    "Variants". Returns the runner's result plus ``seconds`` and ``key``."""
+    "Variants". *aspect*: module docstring, "Aspects". Returns the runner's
+    result plus ``seconds`` and ``key``."""
+    if aspect not in IMAGE_SIZES:
+        raise ValueError(f"unknown aspect {aspect!r}, expected one of {list(IMAGE_SIZES)}")
     workdir = Path(workdir)
     workdir.mkdir(parents=True, exist_ok=True)
     docs = build_documents(line_seconds=line_seconds)
-    inputs = write_sources(workdir, variant_shot=variant_shot, line_seconds=line_seconds)
+    inputs = write_sources(workdir, variant_shot=variant_shot, line_seconds=line_seconds, aspect=aspect)
     started = time.monotonic()
     result = runner.render(
-        plan_args={**docs, "story": dict(STORY), "ep": EP, "inputs": inputs},
+        plan_args={**docs, "story": dict(STORY), "ep": EP, "inputs": inputs, "aspect": aspect},
         profile="golden", render_dir=workdir / "render", manifest_path=workdir / "render_manifest.json",
         final_path=workdir / plan_mod.FINAL_REL, run=run, popen=popen, on_log=on_log)
     result["seconds"] = round(time.monotonic() - started, 2)
@@ -311,6 +339,16 @@ def render_fixture(workdir, *, variant_shot=None, line_seconds=None, run=subproc
 
 
 # --------------------------------------------------------------- parity keys
+
+def keys_path(aspect: str = "9:16"):
+    """The keys file of *aspect*'s fixture (:data:`KEYS_PATHS`)."""
+    return KEYS_PATHS[aspect]
+
+
+def record_command(aspect: str = "9:16") -> str:
+    """The command that records a key of *aspect*'s fixture."""
+    return RECORD_COMMAND if aspect == "9:16" else f"{RECORD_COMMAND} --aspect {aspect}"
+
 
 def parity_key(ffmpeg: dict) -> str:
     """``"<ffmpeg version>/<machine>"`` (DEC-156)."""
@@ -342,13 +380,17 @@ def record_key(key: str, digest: str, path=KEYS_PATH) -> dict:
     return keys
 
 
-def github_annotation(problem: str) -> str:
+def github_annotation(problem: str, *, title: str = "AI-Story golden render") -> str:
     """*problem* as a GitHub Actions ``::error`` workflow command. CI's logs
     need a sign-in to read, but an annotation is public through the
     check-runs API, so an unrecorded CI key and its digest can be read and
-    recorded from the machine that pushed (plan phase 4, Q5)."""
+    recorded from the machine that pushed (plan phase 4, Q5). *title* names
+    the fixture (the 16:9 and 1:1 fixtures name their aspect; a property
+    value escapes ``:`` and ``,`` as well)."""
     message = problem.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
-    return f"::error title=AI-Story golden render::{message}"
+    title = title.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A").replace(":", "%3A")
+    title = title.replace(",", "%2C")
+    return f"::error title={title}::{message}"
 
 
 def parity_problem(key: str, digest: str, keys: dict, *, command: str = RECORD_COMMAND):

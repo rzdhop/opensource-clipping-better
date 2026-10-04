@@ -26,8 +26,14 @@ fast, tiny and byte-reproducible, spec 13's framemd5 parity). Concretely:
   encoder/container nondeterminism (timestamps aside, spec 13's own
   concern). Used for every stage of a "golden" render, not only shots.
 
-``WIDTH``/``HEIGHT``/``FPS`` are the one frame geometry every profile
-renders to (spec 6.2: 1080x1920, 30 fps, 9:16 only -- v1 non-goal 1.2).
+``WIDTH``/``HEIGHT``/``FPS`` are the default frame every profile renders
+to (spec 6.2: 1080x1920, 30 fps, 9:16). Plan 23 stage B6 adds the frame as
+a :class:`Geometry` -- :data:`PORTRAIT` (9:16, the default of every
+builder), :data:`LANDSCAPE` (16:9) and :data:`SQUARE` (1:1), keyed by name
+in :data:`GEOMETRIES` -- so the renderer can draw 1920x1080 and 1080x1080
+while every 9:16 argv stays byte for byte what it was. The short side is
+1080 in all three, which is why text sizes stay in pixels.
+``WIDTH``/``HEIGHT`` stay the portrait values.
 
 The audio-mix constants (DEC-157: the amix weights, the
 ``sidechaincompress`` ducking values, the bed fade-outs per ending, the
@@ -51,6 +57,23 @@ from typing import Optional
 WIDTH = 1080
 HEIGHT = 1920
 FPS = 30
+
+
+@dataclass(frozen=True)
+class Geometry:
+    """One output frame: its aspect name (``"9:16"``) and its size in
+    pixels. Every render builder takes one as ``geometry=`` (default
+    :data:`PORTRAIT`)."""
+
+    name: str
+    width: int
+    height: int
+
+
+PORTRAIT = Geometry("9:16", WIDTH, HEIGHT)
+LANDSCAPE = Geometry("16:9", 1920, 1080)
+SQUARE = Geometry("1:1", 1080, 1080)
+GEOMETRIES = {geometry.name: geometry for geometry in (PORTRAIT, LANDSCAPE, SQUARE)}
 
 
 @dataclass(frozen=True)

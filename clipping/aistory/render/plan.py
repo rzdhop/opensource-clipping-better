@@ -221,7 +221,7 @@ def loudness_apply_argv(stage: dict, measured: dict) -> list:
 def build_render_plan(*, script: dict, storyboard: dict, assets: dict, style_lock: dict, template: dict,
                       story: dict, ep: int, inputs: dict, ffmpeg: dict, profile: str = "final",
                       subtitles=None, encoder: str = "libx264", video_encoder=None,
-                      fill_failed_with_motion: bool = False) -> dict:
+                      fill_failed_with_motion: bool = False, aspect: str = "9:16") -> dict:
     """The plan of one render (module docstring).
 
     - *story*: ``{"story_id", "title", "language"}`` (the end card's title).
@@ -250,6 +250,11 @@ def build_render_plan(*, script: dict, storyboard: dict, assets: dict, style_loc
       ``filtergraph.audio_mix_argv``'s *ambience*).
     - *fill_failed_with_motion*: the render step's param, recorded in the
       plan's ``params`` only when it is on.
+    - *aspect* (plan 23 stage B6): the frame, a ``profiles.GEOMETRIES`` name
+      (``"9:16"`` by default). Every shot, the end card and every text
+      layer are drawn to it and ``expected`` carries its size; it is
+      recorded in ``params`` only when it is not ``"9:16"``, so a 9:16
+      plan (and its manifest, its cache keys) is the one it always was.
     - *ffmpeg*: ``runner.preflight``'s ``{"version", "machine"}``.
     - *subtitles*: ``None``/``"style"`` (the style lock's mode) or one of
       ``schemas.SUBTITLE_MODES``. *encoder*: ``"libx264"``, or ``"auto"``
@@ -274,7 +279,7 @@ def build_render_plan(*, script: dict, storyboard: dict, assets: dict, style_loc
         return _build(script=script, storyboard=storyboard, assets=assets, style_lock=style_lock,
                       template=template, story=story, ep=ep, inputs=inputs, ffmpeg=ffmpeg, profile=profile,
                       subtitles=subtitles, encoder=encoder, video_encoder=video_encoder,
-                      fill=bool(fill_failed_with_motion))
+                      fill=bool(fill_failed_with_motion), aspect=aspect)
     except PlanError:
         raise
     except (ValueError, KeyError) as exc:
@@ -305,9 +310,12 @@ def _final_encoder(encoder, video_encoder, profile):
 
 
 def _build(*, script, storyboard, assets, style_lock, template, story, ep, inputs, ffmpeg, profile, subtitles,
-           encoder, video_encoder, fill) -> dict:
+           encoder, video_encoder, fill, aspect) -> dict:
     if profile not in _STAGE_PROFILES:
         raise PlanError(f"unknown render profile {profile!r}, expected one of {list(_STAGE_PROFILES)}")
+    geometry = profiles.GEOMETRIES.get(aspect) if isinstance(aspect, str) else None
+    if geometry is None:
+        raise PlanError(f"unknown aspect {aspect!r}, expected one of {list(profiles.GEOMETRIES)}")
     if encoder not in schemas.RENDER_ENCODERS:
         raise PlanError(f"unknown encoder {encoder!r}, expected one of {list(schemas.RENDER_ENCODERS)}")
     hardware_args = _final_encoder(encoder, video_encoder, profile)
@@ -393,7 +401,8 @@ def _build(*, script, storyboard, assets, style_lock, template, story, ep, input
             # DEC-250: a clip recorded ``cover: stretch`` is slowed to its shot's length.
             clip = (board_shot.get("assets") or {}).get("clip") or {}
             stretched = clip.get("clip_s") if clip.get("cover") == "stretch" else None
-            argv0 = filtergraph.tier2_clip_argv(rel, tl_shot, shot_profile, _OUT_TOKEN, clip_s=stretched)
+            argv0 = filtergraph.tier2_clip_argv(rel, tl_shot, shot_profile, _OUT_TOKEN, clip_s=stretched,
+                                                geometry=geometry)
             input_shas = {rel: video_inputs[shot_id]["sha256"]}
             shot_modes[shot_id] = ("video_native_audio" if shot_id in native
                                    else "video_ambience" if shot_id in ambience else "video")
@@ -405,7 +414,7 @@ def _build(*, script, storyboard, assets, style_lock, template, story, ep, input
             # (an unreadable size keeps the argv it always had)
             size = imagesize.image_size(shot_inputs[shot_id].get("path"))
             argv0 = filtergraph.shot_argv(rel, tl_shot, shot_profile, overlays, _OUT_TOKEN, pan_pct=pan_pct,
-                                          image_size=size)
+                                          image_size=size, geometry=geometry)
             input_shas = {rel: shot_inputs[shot_id]["sha256"]}
             if overlay_sha is not None:
                 input_shas[filtergraph.PAPER_TEXTURE_REL] = overlay_sha
@@ -431,9 +440,10 @@ def _build(*, script, storyboard, assets, style_lock, template, story, ep, input
     if timeline["end_card"] is not None:
         card_s = timeline["end_card"]["duration_s"]
         card_text = subtitles_mod.end_card_ass(language, ep + 1, story["title"], typography, card_s,
-                                               cta=template.get("end_card_cta") is True)
+                                               cta=template.get("end_card_cta") is True, geometry=geometry)
         files.append({"path": END_CARD_ASS_REL, "text": card_text})
-        argv0 = filtergraph.end_card_argv(END_CARD_ASS_REL, FONTS_DIR, card_s, card_profile, _OUT_TOKEN)
+        argv0 = filtergraph.end_card_argv(END_CARD_ASS_REL, FONTS_DIR, card_s, card_profile, _OUT_TOKEN,
+                                          geometry=geometry)
         stage = _cached_stage("E", "end_card", argv0,
                               input_shas={END_CARD_ASS_REL: _sha256_text(card_text), font_rel: font["sha256"]},
                               render_profile=profile, ffmpeg_version=version)
@@ -525,7 +535,7 @@ def _build(*, script, storyboard, assets, style_lock, template, story, ep, input
     subtitles_text, meta = subtitles_mod.build_subtitles_ass(
         timeline=timeline, script=script, subtitle_mode=mode, language=language,
         hook_style=style_lock["episode_defaults"]["hook_style"], ai_label_enabled=bool(typography_doc.get("ai_label")),
-        palette=style_lock["palette"], typography=typography, word_timings=word_timings)
+        palette=style_lock["palette"], typography=typography, word_timings=word_timings, geometry=geometry)
     files.insert(0, {"path": SUBTITLES_REL, "text": subtitles_text})
     stages.append(_stage("F", "final", filtergraph.final_pass_argv(
         timeline, shot_inputs=shot_outputs, end_card_input=end_card_output, ass_rel=SUBTITLES_REL,
@@ -547,6 +557,8 @@ def _build(*, script, storyboard, assets, style_lock, template, story, ep, input
     params = {"subtitles": mode, "encoder": encoder}
     if fill:
         params[schemas.RENDER_FILL_PARAM] = True
+    if geometry is not profiles.PORTRAIT:
+        params[schemas.RENDER_ASPECT_PARAM] = geometry.name
     plan = {
         "ep": ep,
         "profile": profile,
@@ -554,7 +566,7 @@ def _build(*, script, storyboard, assets, style_lock, template, story, ep, input
         "ffmpeg": {"version": ffmpeg["version"], "machine": ffmpeg["machine"]},
         "font": {key: font[key] for key in ("family", "file", "sha256", "reason")},
         "timeline": timeline,
-        "expected": {"duration_s": timeline["total_s"], "width": profiles.WIDTH, "height": profiles.HEIGHT,
+        "expected": {"duration_s": timeline["total_s"], "width": geometry.width, "height": geometry.height,
                      "fps": f"{profiles.FPS}/1"},
         "length_window_s": [window[0], template.get("tighten_above_s", window[1])],
         "inputs": records,

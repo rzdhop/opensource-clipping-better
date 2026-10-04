@@ -3907,6 +3907,11 @@ RENDER_INPUT_ROLES = ("shot", "line", "sfx", "bgm", "overlay", "clip_audio")
 # the shot's lines (``video_ambience``).
 RENDER_SHOT_MODES = ("video", "motion", "motion_keep_still", "motion_fill", "video_native_audio", "video_ambience")
 RENDER_FILL_PARAM = "fill_failed_with_motion"
+# Plan 23 stage B6: the frame a render drew when it is not 9:16
+# (``render.profiles.GEOMETRIES`` less the portrait default). A 9:16 render
+# records no aspect, so every manifest written before stays as it was.
+RENDER_ASPECT_PARAM = "aspect"
+RENDER_ASPECTS = ("16:9", "1:1")
 RENDER_STAGE_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_:.-]{0,39}$"
 STDERR_TAIL_MAX = 4000
 
@@ -3942,6 +3947,8 @@ _RENDER_PARAMS_SCHEMA = _document({
     # Phase 6 stage 9: recorded only when it is on (a render without it is
     # the one it always was).
     RENDER_FILL_PARAM: {"type": "boolean", "const": True},
+    # Plan 23 stage B6: recorded only when the frame is not 9:16.
+    RENDER_ASPECT_PARAM: {"type": "string", "enum": list(RENDER_ASPECTS)},
 })
 
 # The framemd5 parity key is "<version>/<machine>" (DEC-156).
