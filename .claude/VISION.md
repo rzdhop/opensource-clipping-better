@@ -32,6 +32,13 @@ to images, image editing, video, TTS and vision, with every paid call gated by a
 budget and every free call counted against its daily limit.
 
 ## Where it stands (2026-09-30)
+- **2026-10-04 — three tasks after the competitive analysis (plan 18, DEC-263):** the episode-2 walk's six defects
+  fixed (bookings released on unbilled refusals, stable shot ids across re-plans, framing orders in redraws, a check-only
+  script run, the one click approving over spent repairs; DEC-264…266); the **fruit-drama pack** (narrated-drama and
+  90 s v2 formats, a style suggests a format, seven plot archetypes steering the season, fourteen concepts, the
+  "Comment PART N" call; DEC-267…269); **agent mode** — one job, one CLI command or one dashboard card takes a story
+  from a one-line idea to episode 1 rendered, approving by rule under one shown estimate (DEC-270…272). Verified live:
+  *Le Sceau Pourri* episode 1 in 90 min for $3.36. Studio mode and the no-auth rule are unchanged.
 - **The AI Story dashboard was overhauled (2026-10-03, DEC-253…DEC-257):** a UI kit on the existing tokens
   (lucide icons, in-app dialogs, toasts, cards), the stories list as cover cards with progress, a routed story
   workspace with a step rail and one step per screen, the episode studio with a progress stepper, compact script

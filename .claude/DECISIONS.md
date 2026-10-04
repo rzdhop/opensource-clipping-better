@@ -5247,3 +5247,31 @@ documents the agent approved. Looks are approved without a taste check, and the 
 worker's terminal kinds, the job response keys); the wizard sends `mode: studio` (contract). Episode 1's price is
 predicted from the budget profile until the story is ready (conservative; may refuse a run that would fit); a v2
 story's knowledge part counts up to 3 props as paid images. Stages 2 (CLI) and 3 (dashboard) follow. Commit fe2d5d0.
+
+## DEC-271 — The CLI creates agent stories and runs the agent in one command (plan 21 stage 2, after DEC-270)
+**Context.** Agent mode existed only through the API; the CLI (`--ai-story`) had `new`, `step`, `fast-track` and
+`--auto-approve` for Studio.
+**Decision.** `new --mode studio|agent` and `new --format <episode_template_id>` (exit 2 naming the list on an
+unknown id); `step <id> story-fast-track [--estimate]` with the API's gates (`workflow.require_agent_mode` first, the
+Studio refusal sentence verbatim, then the key gate; `--estimate` prints the summed message and runs nothing); one
+`agent` command = `new --mode agent …` then `step story-fast-track`, the story's line printed first, the exit codes of
+`step`; `step <id> concepts --count N`; `story-fast-track` in `_NOT_AUTO_APPROVABLE` ("approves by itself, by:
+agent"). `workflow.AGENT_STEPS` is appended after `REEDIT_STEPS` (two closed-list pins re-pointed).
+**Rejected.** `--allow-slow-chain` for the agent job (the API has no such override either; `ALLOW_SLOW_CHAIN=1`
+applies as for `fast-track`); `agent --concept` (the idea is the concept; two calls do it).
+**Consequence.** Two end-to-end CLI tests drive the fakes to a rendered episode 1. Commit ae79f08 (main).
+
+## DEC-272 — The dashboard's Mode choice and the Agent run card; the rail follows the job's part; the list shows an Agent chip (plan 21 stage 3, after DEC-271)
+**Context.** Agent mode needed a place on the phone: the new-story form, the workspace while the one job runs nine
+parts, the stories list.
+**Decision.** The form's Mode choice (kit Buttons: Studio, default, "approve each step yourself"; Agent, "one run from
+the idea to episode 1; the agent approves the style, the cast and the places as soon as they are complete — no taste
+check; review them in Studio afterwards"), sent as `mode`. On an agent story the workspace shows an "Agent run" card
+(`AgentRunCard.jsx`): the estimate's message, paid total and caps line in the kit's confirm dialog (Cancel focused
+first), then `POST /steps/story-fast-track`; while running, the part from the job's `sub_step` (`storySteps.js
+AGENT_PARTS` pinned against `story_fast_track.PARTS`/`LABELS`) and the StepRail marks it running; stopped, the
+runner's last line and "Continue the agent run"; rendered, a link to episode 1's Review tab. The list payload gains
+`mode` (`workflow.list_card`) and the card an "Agent" chip. Studio stories see nothing new. The card reads
+`sub_step`/`error` from the workspace's 4-second job poll, not SSE.
+**Rejected.** An SSE feed in the card (the poll suffices; the feed keeps the lines).
+**Consequence.** Bundle 639.6 kB JS / 82.0 kB CSS. Commit 551cc66 (main).

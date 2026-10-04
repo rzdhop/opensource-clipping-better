@@ -1,3 +1,23 @@
+## CURRENT STATE — tasks A, B, C of DEC-263 DONE on main ae79f08 (plans 19, 20, 21 merged; the Tier-2 agent-mode walk rendered episode 1); CLOSE-OUT pending the human's verdicts (2026-10-04, local session)
+
+- **In-progress header:** phase = DOCUMENT / close-out. Checkpoint commit `ae79f08` (main; pushed after this commit).
+  In the background: the image rebuilt at 0 jobs (the Mode choice, the Agent run card); the full local suite on
+  ae79f08 (the Tier-1 baseline of the close-out; result in the action log). Nothing else runs.
+- **What the human judges on the phone (A-133…A-144):** (1) episode 2 of *Fruit Business : Guerre Cœur*
+  (d0ee5ebd745d, 72 s, lip-sync on 10 shots, 3 without a face); (2) episode 1 of *Le Sceau Pourri* (d16026f12e77,
+  62.9 s, the narrated Fruit Drama made by agent mode in 90 min for $3.36: is the story clear, does the narrator
+  carry it, are the looks approved by rule acceptable); (3) the dashboard: the Mode choice, the Agent run card, the
+  format select, the Agent chip. Caps in Settings today: per-episode 6, daily 12, per-story 10 (DEC-263's rule; the
+  shipped defaults unchanged) — **the human may want them back to 4 / 5 / 10 tomorrow**.
+- **Next tasks (DEC-263's order, deferred items):** U5 Seedance 2.x / Kling 3.0 rungs with an A/B episode (after the
+  verdicts); U6 cross-story character library on the export bundle; U7 publish + schedule (needs the human's TikTok
+  developer app); U8 trend intake; U9 docs of the moat; U10 Horror/Animals/Objects universes; U11 LoRA.
+  Follow-ups logged in DEC-264…272's Consequence lines (J2's 110-token cap, the fast-track estimate predicting a stop,
+  the dashboard archetype display, legacy S1/S2 budgets, the agent estimate's conservative episode price, the title
+  overflow on the end card).
+- **Shipped today:** plan 18 (the competitive analysis), plan 19 (F1–F6, DEC-264…266), plan 20 (the fruit-drama
+  pack, DEC-267…269), plan 21 (agent mode, DEC-270…272); full suite on ae28eba 7461 / 1 skipped.
+
 ## CURRENT STATE — plan 21 stage 1 (agent mode) MERGED and DEPLOYED (main 036abda); stages 2 (CLI) and 3 (dashboard) in worktrees; the Tier-2 walk = one agent-mode story RUNNING (2026-10-04, local session)
 
 - **In-progress header:** phase = IMPLEMENT of plan 21 stages 2 and 3 (Sonnet agents, `feat/agent-mode-s2`,
