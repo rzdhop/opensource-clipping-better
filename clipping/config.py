@@ -865,6 +865,7 @@ def _build_parser() -> argparse.ArgumentParser:
     # dashboard's AI Story mode (DEC-095) ---
     story_group = p.add_argument_group("Story Clip (assembly)")
     # --- Budget (AI Story): five-place defaults, see clipping/providers/budget.py ---
+    # (BUDGET_TIMEZONE, the zone of the daily cap's day, is a setting with no flag: budget.TIMEZONE_ENV.)
     budget_group = p.add_argument_group("Budget (AI Story)")
     budget_group.add_argument(
         "--allow-paid",
@@ -882,7 +883,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--daily-cap-usd",
         type=float,
         default=DAILY_CAP_USD,
-        help="Most all stories together may spend per UTC day, in USD.",
+        help="Most all stories together may spend per budget day, in USD. The day runs in BUDGET_TIMEZONE (an IANA name such as Europe/Paris; UTC when unset).",
     )
     budget_group.add_argument(
         "--per-story-cap-usd",

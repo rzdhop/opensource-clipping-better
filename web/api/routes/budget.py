@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import math
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -47,13 +47,6 @@ def _daily_cap(env) -> float:
     return budget_mod.budget_from_env(merged).daily_cap_usd
 
 
-def _resets_at(day: str) -> str:
-    """The next 00:00 UTC after the day *day*, ISO. The spend file's zone is
-    UTC today and so is its day key, so the two agree by construction."""
-    began = datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-    return (began + timedelta(days=1)).isoformat()
-
-
 def today_block(env=None) -> dict:
     """The ``GET /api/budget/today`` body as a plain dict. Never raises on an
     unreadable story: a ledger it cannot read counts for nothing.
@@ -72,7 +65,8 @@ def today_block(env=None) -> dict:
     return {
         "day": state.day,
         "zone": state.zone,
-        "zone_error": None,
+        # Plan 23 A7: why the configured BUDGET_TIMEZONE is not in force (the day is UTC meanwhile).
+        "zone_error": budget_mod.zone_error,
         "spent_usd": round(state.spent, 4),
         "extra_usd": round(state.extra, 4),
         "daily_cap_usd": cap,
@@ -82,7 +76,7 @@ def today_block(env=None) -> dict:
         "story_count": len(every),
         "other_usd": day_report.other_usd(state.spent, stories),
         "grants_today": budget_mod.default_spend().grants_today(),
-        "resets_at": _resets_at(state.day),
+        "resets_at": budget_mod.next_reset(),
     }
 
 

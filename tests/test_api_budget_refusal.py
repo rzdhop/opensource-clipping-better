@@ -113,6 +113,24 @@ def test_cast_409_daily_cap_detail_has_today_estimate_and_cap(api, day):
     assert day.today_total() == 8.38
 
 
+def test_the_409_names_the_configured_zone_s_midnight(api, day):
+    """Plan 23 A7: with BUDGET_TIMEZONE set in Settings the message, ``today``
+    and the day key follow it (noon UTC is 14:00 in Paris: the same day)."""
+    from clipping.providers import budget
+
+    story_id = _v2_story(api, dict(QUALITY, BUDGET_TIMEZONE="Europe/Paris"))
+    budget.set_settings_reader(api.worker.get_settings_env)
+    _today(api, day, 8.38)
+
+    detail = _cast(api, story_id).json()["detail"]
+
+    assert detail["message"].endswith(
+        "Allow $4.98 more for today only, raise the daily cap in Settings, or wait for the day to reset at "
+        "00:00 Europe/Paris.")
+    assert (detail["today"]["day"], detail["today"]["zone"]) == (DAY, "Europe/Paris")
+    assert detail["today"]["spent_usd"] == 8.38 and detail["today"]["story_count"] == 2
+
+
 def test_under_cap_message_variant(api, day):
     """Under the cap the portraits alone go over it: "is $X of the cap"; an
     extra already allowed for today is named next to the saved cap."""

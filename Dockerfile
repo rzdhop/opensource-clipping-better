@@ -34,7 +34,8 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install FFmpeg, OpenCV dependencies, and Node.js (for yt-dlp JS challenges)
+# Install FFmpeg, OpenCV dependencies, Node.js (for yt-dlp JS challenges) and
+# the zone files (BUDGET_TIMEZONE; the tzdata wheel of requirements.txt too)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libgl1 \
@@ -45,6 +46,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxext6 \
     libxrender1 \
     nodejs \
+    tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy virtual env from builder

@@ -74,6 +74,8 @@ PERSISTED_KEYS = frozenset({
     "DAILY_CAP_USD",
     "PER_STORY_CAP_USD",
     "BUDGET_PROFILE",
+    # The budget day's zone (plan 23 A7): an IANA name, not a secret.
+    "BUDGET_TIMEZONE",
     # Generation providers (AI Story, spec 8.6): keys, and the two local URLs.
     "FAL_KEY",
     "OPENAI_API_KEY",

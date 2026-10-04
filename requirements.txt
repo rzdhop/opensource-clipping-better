@@ -24,3 +24,4 @@ uvicorn
 python-multipart
 pydantic
 edge-tts
+tzdata==2026.5  # the IANA zone files zoneinfo reads when the OS has none: BUDGET_TIMEZONE (clipping/providers/budget.py)

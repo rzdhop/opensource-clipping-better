@@ -1,7 +1,7 @@
 """Paid spending is opt-in and capped (DEC-097).
 
 ``allow_paid`` is off until the user turns it on; three caps bound what a
-paid call may add -- per episode, per UTC day, per story -- and a refusal
+paid call may add -- per episode, per budget day, per story -- and a refusal
 always carries the numbers. The budget *profile* decides where the money
 goes (``budget_profiles.json``); the caps decide whether it is spent at all.
 ``free`` is the profile until paid is on, ``one_dollar`` from then on, unless
@@ -14,7 +14,32 @@ form agree. Daily paid spend is kept in ``data/spend.json``, apart from the
 free-tier counters of ``limits.py`` (``data/usage.json``), so "a paid call
 never touches the free counters" is a byte comparison.
 
-Stdlib only.
+The budget day (plan 23 A7). The daily cap's day runs from 00:00 to 24:00 in
+``BUDGET_TIMEZONE`` (an IANA name such as ``Europe/Paris``; UTC when unset,
+empty or invalid -- an invalid name is reported in :data:`zone_error`, never
+raised). The value is read from the Settings through a registered reader
+(:func:`set_settings_reader`: the web worker's and the story CLI's stored
+Settings), else from the process environment. It is kept out of
+:data:`ENV_NAMES` and :class:`Budget` on purpose: it decides which day a
+dollar belongs to, not whether it may be spent.
+
+``spend.json`` is not migrated when the zone changes: it holds one total per
+day, not the bookings' instants, so its history cannot be re-split by hour.
+The first write under a new zone records ``zone`` and appends
+``zone_changes: [{at, from, to}]``; the days already stored stay as they
+were. So at most one boundary moves (two hours, for Paris): the switch day
+may hold a little more or less than one local day's spending. A release of a
+booking made before the switch, in the hours the two zones' days disagree
+(22:00-24:00 UTC for Paris in summer), is keyed by :func:`day_key_at` in the
+new zone and may land on the neighbour day; :meth:`DailySpend.release` never
+takes a day below zero, nor gives back to a day it holds nothing for.
+
+Left on UTC on purpose: the free-tier counters (``limits.py``: the providers
+reset their own quotas at 00:00 UTC), ``pricing``'s ``date.today()``, and the
+ledger / generation-cache ``ts`` and ``at`` stamps (instants, not day keys).
+
+Stdlib only (``zoneinfo``; the ``tzdata`` wheel supplies the zone files where
+the OS has none).
 """
 
 from __future__ import annotations
@@ -27,7 +52,8 @@ import tempfile
 import threading
 import time
 from collections import namedtuple
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 ALLOW_PAID = False
 # DEC-223 (AI Story phase 7): 2 / 6 / 20, up from 1 / 3 / 10, so one episode
@@ -49,6 +75,10 @@ PROFILE_WHEN_PAID = "one_dollar"
 PROFILE_NAMES = ("free", "one_dollar", "quality", "native_speech", "native_speech_manual")
 
 ENV_NAMES = ("ALLOW_PAID", "PER_EPISODE_CAP_USD", "DAILY_CAP_USD", "PER_STORY_CAP_USD", "BUDGET_PROFILE")
+
+# Plan 23 A7: the zone of the budget day. Not one of ENV_NAMES (module docstring).
+TIMEZONE_ENV = "BUDGET_TIMEZONE"
+DEFAULT_TIMEZONE = "UTC"
 
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 PROFILES_PATH = os.path.join(_ROOT, "clipping", "aistory", "templates", "budget_profiles.json")
@@ -380,6 +410,144 @@ def ceil_cent(usd) -> float:
     return max(0, cents) / 100
 
 
+# -------------------------------------------------------------- the day
+
+_settings_reader = None
+# (name, tzinfo, error) of the last zone resolved; None until the first read.
+_zone_cache = None
+_ZONE_LOCK = threading.Lock()
+# Why the configured BUDGET_TIMEZONE could not be used (None when it could, or
+# when none is set); the day is UTC meanwhile. The API reports it.
+zone_error = None
+
+
+def set_settings_reader(fn) -> None:
+    """Register *fn*, a callable returning the Settings mapping (name ->
+    value) the running process uses: the web worker's ``get_settings_env``,
+    the story CLI's ``_settings_env``. :func:`day_zone` reads
+    ``BUDGET_TIMEZONE`` from it first, then from the process environment.
+    None unregisters."""
+    global _settings_reader
+    _settings_reader = fn
+
+
+def zone_setting() -> str:
+    """The configured ``BUDGET_TIMEZONE``, stripped: the Settings value (via
+    the registered reader), else the process environment's, else ``""``."""
+    value = None
+    reader = _settings_reader
+    if reader is not None:
+        try:
+            value = (reader() or {}).get(TIMEZONE_ENV)
+        except Exception:
+            value = None
+    if value in (None, ""):
+        value = os.environ.get(TIMEZONE_ENV, "")
+    return str(value or "").strip()
+
+
+def check_zone_name(name) -> str:
+    """*name* stripped when it is an IANA time zone (``ZoneInfo`` knows it),
+    ``""`` for an empty one; ``ValueError`` naming the variable otherwise."""
+    text = str(name or "").strip()
+    if not text:
+        return ""
+    try:
+        ZoneInfo(text)
+    except Exception:
+        raise ValueError(f"{TIMEZONE_ENV} must be an IANA time zone such as Europe/Paris, not {text!r}") from None
+    return text
+
+
+def _resolve_zone(name: str):
+    """``(name in force, tzinfo, error)`` for the configured *name*."""
+    if not name or name == DEFAULT_TIMEZONE:
+        return DEFAULT_TIMEZONE, timezone.utc, None
+    try:
+        return name, ZoneInfo(check_zone_name(name)), None
+    except ValueError as exc:
+        return DEFAULT_TIMEZONE, timezone.utc, f"{exc}; the budget day is UTC until it is fixed"
+
+
+def _zone():
+    """``(name, tzinfo)`` of the budget day, resolved once per setting value."""
+    global _zone_cache, zone_error
+    name = zone_setting()
+    cached = _zone_cache
+    if cached is not None and cached[0] == name:
+        return cached[1], cached[2]
+    with _ZONE_LOCK:
+        resolved, tzinfo, error = _resolve_zone(name)
+        _zone_cache = (name, resolved, tzinfo)
+        zone_error = error
+        if error:
+            print(f"[budget] {error}")
+        return resolved, tzinfo
+
+
+def day_zone():
+    """The tzinfo of the budget day: ``ZoneInfo(BUDGET_TIMEZONE)``, UTC when
+    unset or invalid (see :data:`zone_error`). Cached per setting value."""
+    return _zone()[1]
+
+
+def zone_name() -> str:
+    """The name of the budget day's zone in force (``"UTC"`` by default and
+    while the configured one is invalid)."""
+    return _zone()[0]
+
+
+def _instant(value):
+    """*value* (an ISO timestamp, an epoch second or a datetime) as an aware
+    datetime; a naive one is UTC. None when it cannot be read."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, datetime):
+        moment = value
+    elif isinstance(value, (int, float)):
+        try:
+            moment = datetime.fromtimestamp(float(value), tz=timezone.utc)
+        except (OverflowError, OSError, ValueError):
+            return None
+    else:
+        text = str(value).strip()
+        if not text:
+            return None
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        try:
+            moment = datetime.fromisoformat(text)
+        except ValueError:
+            return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment
+
+
+def day_key_at(when):
+    """The budget day (``YYYY-MM-DD`` in the configured zone) the instant
+    *when* belongs to -- an ISO timestamp (naive = UTC) or an epoch second.
+    None for an empty or unreadable value (a caller then means today)."""
+    moment = _instant(when)
+    if moment is None:
+        return None
+    return moment.astimezone(day_zone()).strftime("%Y-%m-%d")
+
+
+def day_began_at(day: str) -> float:
+    """The epoch second at which the budget day *day* (``YYYY-MM-DD``) began
+    in the configured zone."""
+    began = datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=day_zone())
+    return began.timestamp()
+
+
+def _next_midnight(now: float) -> str:
+    zone = day_zone()
+    local = datetime.fromtimestamp(now, tz=zone)
+    following = local.date() + timedelta(days=1)
+    return datetime(following.year, following.month, following.day, tzinfo=zone).isoformat()
+
+
 # ------------------------------------------------------------ daily spend
 
 def default_spend_path() -> str:
@@ -387,7 +555,9 @@ def default_spend_path() -> str:
 
 
 class DailySpend:
-    """Paid dollars per UTC day, on disk (``spend_v1``). Never the free counters' file."""
+    """Paid dollars per budget day (``BUDGET_TIMEZONE``, UTC by default), on
+    disk (``spend_v1``). Never the free counters' file. *time_fn* is the clock
+    (epoch seconds), a seam for tests."""
 
     SCHEMA = "spend_v1"
 
@@ -397,7 +567,27 @@ class DailySpend:
         self._lock = threading.Lock()
 
     def today(self) -> str:
-        return datetime.fromtimestamp(self._time(), tz=timezone.utc).strftime("%Y-%m-%d")
+        """Today's key, ``YYYY-MM-DD`` in the budget day's zone."""
+        return datetime.fromtimestamp(self._time(), tz=day_zone()).strftime("%Y-%m-%d")
+
+    def next_reset(self) -> str:
+        """When today ends: the next local midnight in the budget day's zone, ISO with its offset."""
+        return _next_midnight(self._time())
+
+    def _note_zone(self, data: dict) -> None:
+        """Record the zone this write is keyed in (module docstring): the
+        first write under a new zone sets ``zone`` and appends one
+        ``zone_changes`` entry; the days already stored are left as they are.
+        A file without ``zone`` was written on UTC days."""
+        zone = zone_name()
+        before = str(data.get("zone") or DEFAULT_TIMEZONE)
+        if before == zone:
+            return
+        changes = data.get("zone_changes")
+        changes = changes if isinstance(changes, list) else []
+        changes.append({"at": self._now_iso(), "from": before, "to": zone})
+        data["zone_changes"] = changes
+        data["zone"] = zone
 
     def _load(self) -> dict:
         try:
@@ -436,6 +626,7 @@ class DailySpend:
             day = self.today()
             total = round(float(data["days"].get(day, 0.0)) + float(usd), 4)
             data["days"][day] = total
+            self._note_zone(data)
             data["updated_at"] = self._now_iso()
             self._write(data)
             return total
@@ -454,13 +645,14 @@ class DailySpend:
             return float(self._extra_map(self._load()).get(self.today(), 0.0) or 0.0)
 
     def day_state(self) -> DayState:
-        """Today's day, zone, paid total and extra, read from the file once."""
+        """Today's day, the budget day's zone in force, the paid total and the
+        extra, read from the file once."""
         with self._lock:
             data = self._load()
             day = self.today()
             return DayState(
                 day,
-                str(data.get("zone") or "UTC"),
+                zone_name(),
                 float(data["days"].get(day, 0.0)),
                 float(self._extra_map(data).get(day, 0.0) or 0.0),
             )
@@ -484,7 +676,8 @@ class DailySpend:
                 )
             extra[day] = total
             data["extra"] = extra
-            data.setdefault("zone", "UTC")
+            self._note_zone(data)
+            data.setdefault("zone", zone_name())
             grants = data.get("grants")
             grants = grants if isinstance(grants, list) else []
             grants.append({"day": day, "at": self._now_iso(), "usd": round(usd, 4),
@@ -514,14 +707,18 @@ class DailySpend:
             if held == 0.0:
                 return 0.0
             data["extra"] = extra
+            self._note_zone(data)
             data["updated_at"] = self._now_iso()
             self._write(data)
             return held
 
     def release(self, usd: float, *, day=None) -> float:
-        """Give back *usd* booked on *day* (``YYYY-MM-DD``, UTC; today when
-        None): a booking proven unbilled. Never below zero -- a day is never
-        given back more than it holds. Returns that day's total."""
+        """Give back *usd* booked on *day* (``YYYY-MM-DD``, a budget day --
+        :func:`day_key_at` of the booking's instant; today when None): a
+        booking proven unbilled. Never below zero -- a day is never given back
+        more than it holds, nor anything when it holds nothing (a pre-switch
+        booking keyed onto the neighbour day, module docstring). Returns that
+        day's total."""
         usd = float(usd)
         if usd < 0:
             raise ValueError(f"a release gives back a booked amount, not {usd!r}")
@@ -533,6 +730,7 @@ class DailySpend:
                 return round(held, 4)
             total = round(max(0.0, held - usd), 4)
             data["days"][day] = total
+            self._note_zone(data)
             data["updated_at"] = self._now_iso()
             self._write(data)
             return total
@@ -552,10 +750,28 @@ def default_spend() -> DailySpend:
 
 
 def reset() -> None:
-    """Drop the cached default spend store. For tests."""
-    global _DEFAULT_SPEND
+    """Drop the cached default spend store, the settings reader and the
+    resolved zone (and its error). For tests: ``tests/conftest.py`` calls it
+    around every test so no module state leaks between them."""
+    global _DEFAULT_SPEND, _settings_reader, _zone_cache, zone_error
     with _DEFAULT_SPEND_LOCK:
         _DEFAULT_SPEND = None
+    with _ZONE_LOCK:
+        _settings_reader = None
+        _zone_cache = None
+        zone_error = None
+
+
+def today(*, spend=None) -> str:
+    """Today's budget day key (``YYYY-MM-DD`` in ``BUDGET_TIMEZONE``), on
+    the spend store's clock."""
+    return (spend or default_spend()).today()
+
+
+def next_reset(*, spend=None) -> str:
+    """When the budget day ends: the next local midnight in its zone, ISO
+    with the zone's offset, on the spend store's clock."""
+    return (spend or default_spend()).next_reset()
 
 
 def day_spent(*, spend=None) -> float:
@@ -577,8 +793,9 @@ def record(estimate, *, spend=None) -> float:
 
 
 def release(estimate, *, day=None, spend=None) -> float:
-    """Give back a paid estimate :func:`record` booked on *day* (UTC
-    ``YYYY-MM-DD``; today when None) once the request is proven unbilled
+    """Give back a paid estimate :func:`record` booked on *day* (a budget day
+    ``YYYY-MM-DD``, :func:`day_key_at` of the booking; today when None) once
+    the request is proven unbilled
     (the generation journal's ``void``). Never below zero. Returns that day's
     total; a free one gives back nothing."""
     usd = _usd(estimate)

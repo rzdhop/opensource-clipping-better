@@ -208,6 +208,7 @@ import os
 import sys
 from datetime import datetime, timezone
 
+from clipping.providers import budget as budget_mod
 from clipping.providers import tts_tail
 
 from . import defaults, media_policy, refimages, schemas, templates, workflow
@@ -270,6 +271,8 @@ def _load_settings() -> None:
     stored = stored_settings()
     _SETTINGS_ENV.clear()
     _SETTINGS_ENV.update(stored)
+    # The budget day's zone (BUDGET_TIMEZONE, plan 23 A7) is read from these too.
+    budget_mod.set_settings_reader(_settings_env)
     print(f"Using the stored Settings: {len(stored)} value{'' if len(stored) == 1 else 's'} from "
           f"{settings_file()}, over the environment (no value is printed).")
 

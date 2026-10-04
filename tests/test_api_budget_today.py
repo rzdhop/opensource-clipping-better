@@ -233,3 +233,62 @@ def test_contributors_ignore_rows_from_other_days(api):
     body = api.client.get("/api/budget/today").json()
     assert body["stories"] == [{"story_id": story_id, "title": "The cast", "usd": 1.25}]
     assert body["other_usd"] == 0.0
+
+
+# ------------------------------------- the budget day's zone (plan 23, stage A7)
+
+ZONE_REFUSAL = "BUDGET_TIMEZONE must be an IANA time zone such as Europe/Paris, not 'Mars/Olympus'"
+
+
+def test_put_settings_rejects_an_unknown_zone(api):
+    response = api.client.put("/api/settings", json={"budget_timezone": "Mars/Olympus"})
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == ZONE_REFUSAL
+    assert "BUDGET_TIMEZONE" not in api.worker.get_settings_env()
+    settings_file = api.tmp_path / "settings.json"
+    assert not settings_file.exists() or "BUDGET_TIMEZONE" not in settings_file.read_text(encoding="utf-8")
+
+
+def test_the_zone_is_persisted_not_secret_and_today_follows_it(api, capsys):
+    from web.api import settings_store
+
+    saved = api.client.put("/api/settings", json={"budget_timezone": " Europe/Paris "})
+    assert saved.status_code == 200, saved.text
+    body = saved.json()
+    assert body["budget_timezone"] == "Europe/Paris" and body["spend_zone"] == "Europe/Paris"
+    assert body["spend_day"] == DAY and body["spend_zone_error"] is None     # noon UTC is 14:00 in Paris
+    on_disk = json.loads((api.tmp_path / "settings.json").read_text(encoding="utf-8"))
+    assert on_disk["BUDGET_TIMEZONE"] == "Europe/Paris"
+    assert settings_store.redact(on_disk)["BUDGET_TIMEZONE"] == "Europe/Paris"
+
+    today = api.client.get("/api/budget/today").json()
+    assert (today["zone"], today["zone_error"]) == ("Europe/Paris", None)
+    assert today["resets_at"] == "2026-10-05T00:00:00+02:00"
+    api.client.post("/api/budget/today/extra", json={"usd": 1})
+    assert "[budget] allowed $1.00 more for 2026-10-04 Europe/Paris" in capsys.readouterr().out
+
+    # 22:30 UTC is already the next day in Paris.
+    api.spend._time = lambda: datetime(2026, 10, 4, 22, 30, tzinfo=timezone.utc).timestamp()
+    late = api.client.get("/api/budget/today").json()
+    assert late["day"] == "2026-10-05" and late["resets_at"] == "2026-10-06T00:00:00+02:00"
+
+    # Rollback: clearing the value is the UTC day again, no code change.
+    cleared = api.client.put("/api/settings", json={"budget_timezone": ""})
+    assert cleared.status_code == 200 and cleared.json()["budget_timezone"] == ""
+    assert cleared.json()["spend_zone"] == "UTC" and cleared.json()["spend_day"] == DAY
+    assert api.client.get("/api/budget/today").json()["resets_at"] == "2026-10-05T00:00:00+00:00"
+    assert "BUDGET_TIMEZONE" not in json.loads((api.tmp_path / "settings.json").read_text(encoding="utf-8"))
+
+
+def test_today_and_settings_report_an_unusable_zone(api):
+    from clipping.providers import budget
+
+    api.worker._settings_env["BUDGET_TIMEZONE"] = "Mars/Olympus"    # e.g. a hand-edited settings.json
+    budget.set_settings_reader(api.worker.get_settings_env)
+    today = api.client.get("/api/budget/today").json()
+    assert today["zone"] == "UTC" and today["day"] == DAY
+    assert today["zone_error"].startswith(ZONE_REFUSAL)
+    assert today["resets_at"] == "2026-10-05T00:00:00+00:00"
+    settings = api.client.get("/api/settings").json()
+    assert settings["budget_timezone"] == "Mars/Olympus" and settings["spend_zone"] == "UTC"
+    assert settings["spend_zone_error"].startswith(ZONE_REFUSAL)

@@ -97,3 +97,20 @@ def test_the_cli_reads_the_file_the_dashboard_writes(tmp_path, monkeypatch):
     assert cli_module.stored_settings(str(tmp_path / "missing.json")) == {}
     (tmp_path / "bad.json").write_text("{not json", encoding="utf-8")
     assert cli_module.stored_settings(str(tmp_path / "bad.json")) == {}
+
+
+def test_the_cli_settings_reader_sets_the_budget_day_zone(cli, tmp_path, monkeypatch, capsys):
+    """Plan 23 A7: ``--settings`` hands the stored Settings to the budget, so
+    the CLI keys spending on the same day as the dashboard."""
+    from clipping.providers import budget
+
+    module, _outputs = cli
+    settings = tmp_path / "settings.json"
+    settings.write_text(json.dumps({"FAL_KEY": FAL, "BUDGET_TIMEZONE": "Europe/Paris"}), encoding="utf-8")
+    assert budget.zone_name() == "UTC"                       # nothing loaded: the process env (none)
+
+    module._load_settings()
+
+    assert budget.zone_name() == "Europe/Paris"
+    assert budget.day_key_at("2026-10-04T22:30:00+00:00") == "2026-10-05"
+    assert FAL not in capsys.readouterr().out

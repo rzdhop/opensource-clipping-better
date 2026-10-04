@@ -6,8 +6,10 @@ module says which stories it went to, from the stories' own cost ledgers
 never raises on a file it cannot read: a missing, half-written or foreign
 ledger simply counts for nothing.
 
-A ledger row's ``ts`` is an ISO UTC timestamp, so a row belongs to the day its
-first ten characters name -- the same ``YYYY-MM-DD`` key ``spend.json`` uses. A
+A ledger row's ``ts`` is an ISO UTC timestamp, an instant: a row belongs to
+the budget day that instant falls on in ``BUDGET_TIMEZONE``
+(``budget.day_key_at``, plan 23 A7) -- the same ``YYYY-MM-DD`` key
+``spend.json`` uses. A
 booking given back after the fact is a row of its own with a negative
 ``est_usd`` (``void`` says why), so summing the paid rows of a day lets a void
 cancel the booking it mirrors when both fall on that day.
@@ -17,14 +19,16 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, timezone
+
+from clipping.providers import budget as budget_mod
 
 LEDGER_FILENAME = "cost_ledger.json"
 
 
 def day_start_epoch(day: str) -> float:
-    """The epoch second at which UTC day *day* (``YYYY-MM-DD``) began."""
-    return datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp()
+    """The epoch second at which the budget day *day* (``YYYY-MM-DD``) began,
+    in the configured zone (UTC by default)."""
+    return budget_mod.day_began_at(day)
 
 
 def story_sources(store) -> list:
@@ -60,7 +64,7 @@ def _paid_usd_on(path: str, day: str) -> float:
     for row in rows:
         if not isinstance(row, dict) or not row.get("paid"):
             continue
-        if str(row.get("ts") or "")[:10] != day:
+        if budget_mod.day_key_at(row.get("ts")) != day:
             continue
         try:
             total += float(row.get("est_usd") or 0.0)

@@ -691,8 +691,10 @@ class LineGates:
                                model=gating.api_model_id(kind, Link(provider, model)), unit=unit, qty=back,
                                est_usd=-est, paid=paid, ep=self.ep, void=reason)
             if paid and est > 0:
-                booked_at = str((entry.get("booked") or {}).get("at") or "")
-                budget_mod.release(est, day=booked_at[:10] or None)
+                # The budget day the booking fell on, in the configured zone
+                # (plan 23 A7); None (today) when the journal has no stamp.
+                booked_at = (entry.get("booked") or {}).get("at")
+                budget_mod.release(est, day=budget_mod.day_key_at(booked_at))
 
         return release
 

@@ -273,6 +273,8 @@ function Settings() {
   const [dailyCap, setDailyCap] = useState('')
   const [perStoryCap, setPerStoryCap] = useState('')
   const [budgetProfile, setBudgetProfile] = useState('')
+  // The budget day's zone (plan 23 A7): an IANA name, '' = UTC.
+  const [budgetTimezone, setBudgetTimezone] = useState('')
   // Today's extra (plan 23): what was allowed for today only, and taking it back.
   const [extraBusy, setExtraBusy] = useState(false)
   const [extraError, setExtraError] = useState('')
@@ -357,6 +359,7 @@ function Settings() {
         setDailyCap(String(data.daily_cap_usd ?? ''))
         setPerStoryCap(String(data.per_story_cap_usd ?? ''))
         setBudgetProfile(data.budget_profile || '')
+        setBudgetTimezone(data.budget_timezone || '')
         setLocalComfyuiUrl(data.local_comfyui_url || '')
         setLocalOllamaUrl(data.local_ollama_url || '')
         setLoading(false)
@@ -435,6 +438,10 @@ function Settings() {
       if (budgetProfile !== (settings?.budget_profile || '')) {
         payload.budget_profile = budgetProfile
       }
+      // The zone is sent when it changed; '' clears it (the day is UTC again).
+      if (budgetTimezone.trim() !== (settings?.budget_timezone || '')) {
+        payload.budget_timezone = budgetTimezone.trim()
+      }
       // Local servers (spec 8.1): sent when changed; "" clears back to the default.
       if (localComfyuiUrl.trim() !== (settings?.local_comfyui_url || '')) {
         payload.local_comfyui_url = localComfyuiUrl.trim()
@@ -460,6 +467,7 @@ function Settings() {
       setDailyCap(String(updated.daily_cap_usd ?? ''))
       setPerStoryCap(String(updated.per_story_cap_usd ?? ''))
       setBudgetProfile(updated.budget_profile || '')
+      setBudgetTimezone(updated.budget_timezone || '')
       setLocalComfyuiUrl(updated.local_comfyui_url || '')
       setLocalOllamaUrl(updated.local_ollama_url || '')
       setGoogleKey('')
@@ -498,6 +506,7 @@ function Settings() {
         ...prev,
         spend_day: day.day,
         spend_zone: day.zone,
+        spend_zone_error: day.zone_error || null,
         spend_today_usd: day.spent_usd,
         day_extra_usd: day.extra_usd,
         daily_cap_below_spend: day.cap_below_spend,
@@ -522,6 +531,7 @@ function Settings() {
   const dailyShare = dailyCapNow > 0 ? Math.min(100, Math.round((spentToday / dailyCapNow) * 100)) : 0
   // The budget day (plan 23): its zone, what was allowed for today only, who spent it.
   const dayZone = settings?.spend_zone || 'UTC'
+  const zoneError = settings?.spend_zone_error || ''
   const dayLabel = formatBudgetDay(settings?.spend_day)
   const extraToday = Number(settings?.day_extra_usd || 0)
   const contributors = settings?.day_contributors || []
@@ -1102,6 +1112,7 @@ function Settings() {
             </div>
             <div className="settings-budget-day">
               <p className="form-hint">Day of {dayLabel} ({dayZone}); it resets at 00:00 {dayZone}.</p>
+              {zoneError && <p className="settings-budget-error" role="alert">{zoneError}</p>}
               {extraToday > 0 && (
                 <p className="settings-budget-extra">
                   Allowed for today only: +{formatCents(extraToday)}
@@ -1132,6 +1143,14 @@ function Settings() {
                 </div>
               )}
             </div>
+            <Field
+              label="Day time zone"
+              htmlFor="settings-budget-timezone"
+              hint="IANA name, e.g. Europe/Paris; empty = UTC"
+            >
+              <input id="settings-budget-timezone" className="form-input" type="text" autoComplete="off" spellCheck={false}
+                placeholder="UTC" value={budgetTimezone} onChange={e => setBudgetTimezone(e.target.value)} />
+            </Field>
             <Field
               label="Budget profile"
               htmlFor="settings-budget-profile"

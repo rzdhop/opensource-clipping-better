@@ -15,6 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
 from clipping.cancel import Cancelled, CancelToken
+from clipping.providers import budget as budget_mod
 
 from .config_adapter import build_config_from_payload
 from . import children
@@ -157,6 +158,9 @@ def set_settings_env(env: dict[str, str], *, persist: bool = True) -> None:
             _settings_env.pop(name, None)
         else:
             _settings_env[name] = value
+    # The budget day's zone is a Settings value (plan 23 A7): the budget
+    # module reads it through this process's Settings, not the process env.
+    budget_mod.set_settings_reader(get_settings_env)
 
     if persist:
         # Write through, so the value is on disk before the response says it is set.
@@ -166,6 +170,11 @@ def set_settings_env(env: dict[str, str], *, persist: bool = True) -> None:
 def get_settings_env() -> dict[str, str]:
     """Get current settings environment."""
     return dict(_settings_env)
+
+
+# Registered at import too, so a process that never loads the stored Settings
+# still has the budget read them (empty: the process environment decides).
+budget_mod.set_settings_reader(get_settings_env)
 
 
 def load_settings_env() -> int:

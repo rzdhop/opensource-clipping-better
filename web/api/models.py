@@ -421,6 +421,9 @@ class SettingsRequest(BaseModel):
     daily_cap_usd: Optional[float] = None
     per_story_cap_usd: Optional[float] = None
     budget_profile: Optional[str] = None
+    # The budget day's zone (plan 23 A7): an IANA name such as Europe/Paris,
+    # validated before it is stored; "" clears it (the day is UTC again).
+    budget_timezone: Optional[str] = None
     # Generation providers (spec 8.6). Empty clears, like every key (DEC-043).
     fal_key: Optional[str] = None
     openai_api_key: Optional[str] = None
@@ -483,6 +486,10 @@ class SettingsResponse(BaseModel):
     # below what today already spent, and the stories that spent it.
     spend_day: str = ""
     spend_zone: str = "UTC"
+    # Plan 23 A7: the saved BUDGET_TIMEZONE as typed ("" = UTC), and why it is
+    # not in force when it cannot be used (spend_zone is then UTC).
+    budget_timezone: str = ""
+    spend_zone_error: Optional[str] = None
     day_extra_usd: float = 0.0
     daily_cap_below_spend: bool = False
     day_contributors: list = []
@@ -1127,8 +1134,10 @@ class BudgetTodayResponse(BaseModel):
     ``extra_usd`` is what was allowed for today on top of ``daily_cap_usd``;
     ``effective_cap_usd`` is their sum. ``cap_below_spend`` is true when the
     saved cap is below what today already spent. ``stories`` are the biggest
-    contributors, ``other_usd`` the rest of ``spent_usd``. ``zone_error`` is
-    null unless the spend file's zone could not be used."""
+    contributors, ``other_usd`` the rest of ``spent_usd``. ``zone`` is the
+    budget day's zone in force (``BUDGET_TIMEZONE``, UTC by default);
+    ``zone_error`` is null unless the configured zone could not be used (the
+    day is UTC meanwhile). ``resets_at`` is the next local midnight, ISO."""
     day: str
     zone: str = "UTC"
     zone_error: Optional[str] = None

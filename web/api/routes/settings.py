@@ -96,6 +96,10 @@ def _budget_fields(env) -> dict:
         # Response only, never settings (plan 23 A3).
         "spend_day": today["day"],
         "spend_zone": today["zone"],
+        # Plan 23 A7: the saved zone as typed, and why it is not in force.
+        "budget_timezone": str(env.get(budget_mod.TIMEZONE_ENV, os.environ.get(budget_mod.TIMEZONE_ENV, ""))
+                               or "").strip(),
+        "spend_zone_error": today["zone_error"],
         "day_extra_usd": today["extra_usd"],
         "daily_cap_below_spend": today["cap_below_spend"],
         "day_contributors": today["stories"],
@@ -278,6 +282,15 @@ async def update_settings(req: SettingsRequest) -> SettingsResponse:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from None
         env_updates["BUDGET_PROFILE"] = req.budget_profile.strip().lower()
+    if req.budget_timezone is not None:
+        # The budget day's zone (plan 23 A7): "" clears it (UTC again, DEC-043);
+        # anything else must be a zone ZoneInfo knows before it is stored.
+        from clipping.providers.budget import check_zone_name
+
+        try:
+            env_updates["BUDGET_TIMEZONE"] = check_zone_name(req.budget_timezone)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
     # Generation providers (spec 8.6): keys clear on "" like every key; the
     # local URLs are stored as typed and normalised when read.
     for name, value in (("FAL_KEY", req.fal_key), ("OPENAI_API_KEY", req.openai_api_key),

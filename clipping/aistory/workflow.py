@@ -36,7 +36,6 @@ import json
 import os
 import re
 import threading
-import time
 import types
 
 from clipping.providers import budget as budget_mod
@@ -3458,7 +3457,7 @@ def episode_outputs(stories, story, ep) -> dict:
 # same way as ``_DERIVED_CACHE``, under a key that also holds what the
 # estimate reads: the clips' files, the generation journal's files, the
 # story's ledger, the day's spend, the measured clip timings, the Settings
-# values (hashed) and the UTC day.
+# values (hashed) and the budget day (``budget.today()``, BUDGET_TIMEZONE).
 _CLIPS_CACHE: dict = {}
 
 # The fields of ``asset_units()["video"]`` the page carries.
@@ -3476,7 +3475,7 @@ def _clips_key(ec, script, board, doc, env) -> tuple:
     settings = hashlib.sha256(json.dumps(sorted(merged.items()), ensure_ascii=False).encode("utf-8")).hexdigest()
     return (_derived_key(ec, script, board, doc, None), clip_files, journal, ledger, settings,
             _file_stamp(budget_mod.default_spend_path()), _file_stamp(gen_timings.default_timings_path()),
-            time.strftime("%Y-%m-%d", time.gmtime()))
+            budget_mod.today())
 
 
 def _shot_clip(ec, script, shot, doc, *, link, tier, image_sha) -> dict:
