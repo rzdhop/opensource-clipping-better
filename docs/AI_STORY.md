@@ -60,6 +60,28 @@ unlocks episode N+1's script, storyboard and fast track, so the season can
 carry on past episode 1. A line, or one shot, can then be changed and
 re-rendered on its own, without rebuilding the whole episode.
 
+**2026-10-04.** A round prompted by watching the agent-mode episodes
+against a reference performance answered four complaints: the spoken lines
+read poorly and the story was hard to follow; the lipsync looked wrong,
+since a clip's invented mouth movement was glued, after the fact, to a flat
+text-to-speech read; a concept card could drift from the idea typed into
+the seed; and the pipeline spent more for a worse result than a creator
+picking a take by eye. Four changes follow — each described in full where
+it belongs below: the writing calls that matter most (concepts, the bible,
+the episode script, the first-watch judge) now run on a **premium Gemini
+chain** when its key is set, not the free chain alone ("Costs and
+providers"); every concept card is now checked and judged against the seed
+as a **binding brief**, never free to drift ("Concepts"); each character's
+spoken line can now be its own clip that **speaks it on camera**, lips and
+voice one take, instead of a silent clip relipped afterwards (the **native
+speech** profile, "Native speech (API route)"); and, because a hosted clip
+able to speak costs several times a subscription's per-clip credit price, **a
+new story on a host with its quality keys set now defaults to the manual
+mode** — the app writes a crafted shot brief per clip and the human makes it
+on their own Google Flow or Higgsfield / Freepik subscription and uploads it
+("Your own clips (the manual mode)"). The fully automated Veo API route for
+native speech is still there, a per-story switch, bounded by the same caps.
+
 ## The quality pipeline (v2)
 
 Phase 7 rebuilt how an episode looks and reads, after the first episodes
@@ -343,6 +365,134 @@ pass, its frames are counted against the timeline. A music bed cut short or a
 final missing frames fails the render (render again; cached shots are
 reused) and the last good final stays in place.
 
+## Native speech (API route)
+
+The **Native speech (Veo)** budget profile (`native_speech`; v2, tier 3) gives
+each character's spoken line its own clip instead of a silent clip whose
+mouth is guessed and relipped afterward. The storyboard plans one `speaks`
+shot per line — the speaker in frame, the listener reacting beside them —
+sized to the shortest sold length (4, 6 or 8 s) that holds the line's words;
+a narrator line, or a reaction with nobody speaking, stays a silent shot on
+the cheaper Lite link. Each speaking shot's prompt follows Google's own Veo
+syntax in one sentence: who looks at whom and says the line, in which voice,
+over the place's camera and style, closing with "Audio: only {speaker}'s
+voice speaking {language}… no music, no narrator, no other voice. No
+subtitles, no captions, no on-screen text." — the quoted line and that audio
+sentence are never dropped.
+
+No text-to-speech and no lipsync run for an on-screen line: Veo's own clip is
+the voice and the lips together, one take. The narrator, when the story has
+one, stays exactly as before — a voice-over read by its own TTS voice, never
+a shot of its own. Subtitles are never guessed from the written line: the
+clip's own soundtrack is transcribed and aligned word by word (the **native
+take**), so the burned-in words follow what the clip actually says, and the
+shot's final length follows the take, trimmed to the last word plus 0.3 s.
+
+The per-story **speaking-clips model** (the generation profile's
+`speech_model`, a select on the story's Visual tier card and the new-story
+wizard) picks which link speaks: **Lite** (Veo 3.1 Lite, the cheapest,
+unproven for speech until the probe), **Fast** (Veo 3.1 Fast, the default)
+or **Premium** (the full Veo 3.1). Silent shots always use Lite regardless.
+Each choice's estimate shows the split before anything runs: speaking
+seconds × its link's price, plus silent seconds × Lite's, plus a small
+per-shot retake contingency (one free retake of a mismatched take, bounded
+by its own small cap) and the premium text cost.
+
+**Why it is refused, and how to allow it.** Caps are global Settings →
+Budget numbers (per-episode / daily / per-story); this host's are set to
+**$2 / $4 / $10**. Every native-speech API price is well over the $2
+per-episode cap (Lite ≈ $3.4, Fast ≈ $5.4, Premium ≈ $17.4, for a 50 s
+episode), so the step refuses before buying anything: *"estimated $5.40 over
+the per-episode cap $2.00; raise PER_EPISODE_CAP_USD or use your own
+clips."* To run one story on the automated route anyway, raise
+`per_episode_cap_usd` in Settings before that story's assets step (caps are
+global, so set it back afterwards if you don't want every story reaching
+that high) — or switch the story to the **manual mode** below, which never
+buys a clip at all.
+
+## Your own clips (the manual mode)
+
+A hosted clip able to speak costs four to eight times what a Google Flow or
+Higgsfield credit does at subscription prices, and the people making videos
+like the reference performance this plan was built against already pick
+their takes by eye rather than trust the first one a model renders. The
+**native speech — your own clips** profile (`native_speech_manual`) makes
+the human the clip provider: the app still writes the concept, bible, cast,
+places, script and storyboard, draws every keyframe, times the subtitles and
+renders the final video — only the clip itself comes from your own
+subscription. It is the **default for a new story** on a host whose quality
+keys (`FAL_KEY`) are set; pick a different budget profile on the new-story
+form, or the Visual tier card, if you'd rather not.
+
+**The walkthrough.**
+
+1. Start a new story on the default profile (or switch an existing one to
+   **"Native speech — your own clips (Flow / Higgsfield)"** on its Visual
+   tier card). Concepts, bible, cast and places & props work exactly as
+   described above.
+2. Write the episode's script, then its storyboard, as usual.
+3. Run **Generate assets**. The app makes every keyframe and voices the
+   narrator's lines, then stops: with no clip to buy, the step ends
+   **"Waiting for N clips — download the brief"** rather than failing — the
+   Generate button itself reads this once a storyboard exists.
+4. Open the episode's **Shot list** tab. Per shot it shows: its **purpose**
+   (one sentence — what the shot must show, so you can judge a take by eye),
+   the **prompt** with a copy button, the **reference images** (the
+   keyframe, the speaker's and listener's sheets, the place's plate — each
+   downloadable), the **line** in the story's language with its character's
+   **voice** direction, the **length to pick**, and the **checks** to make
+   before uploading. A platform select switches every prompt between Flow's
+   and Higgsfield's own phrasing; **"Download brief (zip)"** saves the
+   `.md`, the `.json` and every reference image in one file.
+5. On **Google Flow**: set the project to **9:16**, use **Frames to Video**
+   with the shot's keyframe as the first frame when one exists (else
+   **Ingredients to Video** with the character and place sheets), paste the
+   prompt, and generate on **Veo 3.1 Fast** (20 Flow credits a clip on AI
+   Pro, 10 on Ultra). Download the take you like as an MP4 — Flow always
+   renders 8 s; the app keeps the clip's real length and trims a speaking
+   shot to 0.3 s past its last word.
+6. Upload the file on the shot's slot (or `aistory upload-clip <story> <ep>
+   <shot_id> <file>`). The upload is checked before it is stored and
+   refused, with the reason, rather than silently cropped or accepted: not
+   an **MP4 or MOV** ("the clip is not an MP4 (or MOV): download the take
+   from the platform as MP4 and send that"), shorter than **2 s**, not
+   **9:16 within 2 %** (the render would crop any other shape, cutting the
+   characters out of frame — refused instead of cropped), or a speaking
+   shot's clip with **no sound track**.
+7. Once stored, the clip is **taken** for free: its audio is transcribed and
+   aligned against the line, and the shot badges the result — **"🗣 matched
+   92 %"** when most of the line was heard and ends in time, a **mismatch**
+   badge when it wasn't (one retake is yours to try, nothing stops the run
+   otherwise), or **"approximate"** when no speech-to-text key is set to
+   check it at all (the subtitles still show, evenly split over the clip;
+   set a **Groq** — free — or **Mistral** key in Settings for a checked take
+   instead).
+8. The run **resumes by itself**: the upload that leaves nothing missing
+   restarts the paused assets step as a new job, with nothing already made
+   bought or built again. When every shot and every line is in place,
+   approve the assets and render exactly as any other episode.
+
+**Higgsfield / Freepik.** The same brief, rephrased for Higgsfield's own
+reference syntax, offers **Veo 3.1**, **Seedance 2.0** or **Kling 3.0**. For
+a French story (or any language but English and Chinese) pick **Veo 3.1 or
+Seedance 2.0** — **Kling 3.0 speaks English and Chinese only** and is named
+by the preset's own notes as the wrong pick for anything else.
+
+**Your own images too.** A manual-mode story can also make its **cast
+sheets, place plates, props and keyframes** by hand — a checkbox on the
+Visual tier card ("My own images too"), the per-story `images: "manual"`
+switch. Each tile (a character's sheet, a place's plate, a prop's image)
+then carries an upload slot the same way a shot's clip does, and `GET
+/api/stories/{id}/image-brief` (or `ep=` for one episode's keyframes) lists
+every one still missing, with its own prompt, size and upload slot — the
+same brief the Shot list reads from for clips.
+
+**The CLI.** `aistory brief STORY_ID EP [--platform flow|higgsfield] [--zip
+PATH]` prints (or zips) the shot brief without calling anything; `aistory
+upload-clip STORY_ID EP SHOT_ID FILE` uploads one clip through the same
+checks the API route runs, then prints the take's result and what is still
+missing.
+
 ## Walkthrough (dashboard)
 
 Open **AI Story** in the mode switch, or go to `/story`. It lists your
@@ -413,6 +563,16 @@ the story's narrator on, the beat sheet and each body scene's dialogue are
 asked for exactly that. A style only suggests a format; the story keeps its
 own, and an episode keeps the one it was written against.
 
+**Writing v3 and the confrontation format (coming).** A sixth template,
+`confrontation_50s_v2`, is on its way: a continuous, one-place, real-time
+confrontation of about 50 seconds, close to the reference performance this
+round of changes was built against. It ships together with "writing v3" — a
+rewrite of the episode script's prompts around a dramatic spine (who wants
+what, who stands in the way, what is at stake) and a hard rule that every
+line is a complete, speakable sentence, so a format built for native speech
+never runs into the 17-word line cap by surprise. Neither is merged yet;
+this section will describe the format and the spine once they land.
+
 **Create story** opens the story page, a vertical stepper: New story (done),
 Concepts, Bible, Style. Each step unlocks once the one before it is
 approved; a locked step shows why ("Approve the bible first.").
@@ -443,6 +603,22 @@ cards to pick from — the activity feed shows which calls failed and why.
 
 Picking a different concept than before clears the bible (a bible written
 for one concept does not carry over to another).
+
+**Keeping to your idea.** With a seed typed in step 1, every generated card
+is written against it as a **binding brief**: the same named characters
+(name, role, relationships), the same setting, premise, central conflict,
+genre and tone as the brief gives them — the ten calls differ only in which
+angle of the brief each one leads with (played straight, opened on its first
+confrontation, from the antagonist's want, a ticking clock, and so on), never
+in the premise itself. Each card is rule-checked as it is written (a named
+entity missing from its title, logline, world or cast is refused and asked
+again) and then judged by a second model call; the card shows **"✓ Kept to
+your brief"**, or **"⚠ Drifted: …"** naming what the brief gave that the card
+dropped, when even a second try could not fix it — never silently. In **agent
+mode** a drifted card stops the run with "The concept drifted from your
+brief: …" rather than carrying on with it. A seed is capped at 400 words for
+this check (the full 2000-character seed from step 1 is still kept and
+shown; only this much of it is read back to the writer and the judge).
 
 ### 3. Bible
 
@@ -1493,6 +1669,25 @@ this way is still printed (`⏭ Skipping openrouter/...: paid link, allow_paid
 is off`), never silently dropped, and if the chain's *only* keyed link is
 paid, the step refuses up front and names which free key to add instead.
 
+**The premium writing chain.** Once a paid Gemini key is set
+(`GEMINI_PAID_API_KEY` in Settings → Providers or `.env`, kept apart from
+`GOOGLE_API_KEY`), the calls that matter most for how the episode reads — the
+concepts (C1, C1v2), the concept judge (C1J), the bible (B1v3), the episode
+script (E1, E2, E3) and the first-watch judge (J1) — move off the free
+`STORY_LLM_CHAIN` onto `STORY_LLM_PREMIUM_CHAIN`: default
+`gemini-paid/gemini-3.8-flash`, then today's chain as its fallback. Settings
+→ **"Story premium writing chain"** sets a different one (same
+provider/model grammar as the chain field above); empty uses the default,
+and the field is never spent by "Test provider chain" — that button still
+probes `LLM_CHAIN` alone. Gemini 3.8 Flash prices at $0.75 / $3.75 per
+million input/output tokens until 2026-12-31, then $1.50 / $7.50 — about
+**$0.22 of premium writing an episode** today (about $0.45 after the price
+change), plus about $0.25 more for a new story's premium concepts, judges
+and bible. `allow_paid` off skips the paid link exactly as any other paid
+link, printed rather than silently dropped, and the free chain still writes
+the whole episode; the estimate's `text_usd` line counts every premium call
+before the step runs.
+
 **Image calls** — the style preview, a character's portrait, a place's day
 plate, a prop's image — go through `IMAGE_CHAIN` (text to image). The
 shipped default is:
@@ -1576,6 +1771,19 @@ always on and included, with no free tier, through its own
 keeps the **input keyframe's own aspect ratio** rather than a requested
 one — measured live: a 1024×1024 keyframe gave a 960×960 clip (see
 "Framing" under Render, above).
+
+**Two more Veo links, for native speech.** Alongside `gemini/veo-3.1-lite`
+above, the **native speech** budget profile also reaches
+`gemini/veo-3.1-fast` ($0.10/s at 720p, $0.12/s at 1080p) and
+`gemini/veo-3.1` ($0.40/s), both audio always on, no free tier, clip lengths
+4, 6 or 8 s. Which one speaks a character's lines is the per-story
+**speaking-clips model** (`generation_profile.speech_model`): **Lite** (the
+cheapest, ≈ $2.6 of clips for a 50 s episode), **Fast** (the default, ≈
+$4.6) or **Premium** (the full model, ≈ $16.6); silent shots (the narrator,
+a reaction) always use Lite. See "Native speech (API route)" above for the
+shot plan and the prompt these links are asked with, and "Your own clips
+(the manual mode)" for the `manual/upload` link that replaces all of them at
+$0 cash when the clips are the human's own.
 
 A clip never costs more than the length actually sent: each shot's own
 length is rounded up to the nearest length the chosen link offers, and the
@@ -1962,3 +2170,51 @@ name that is already the plain word for the thing itself (a character
 called "Egg", say) can fail that check indefinitely: a description of an
 egg has no particular reason to contain the word "Egg". Give the character
 a name that is not also its own description, and try again.
+
+**"line shNN has N words, more than an 8 s clip can speak (17 words at
+most)"** — on a native-speech story (API or manual), a character line longer
+than the longest sold clip's capacity (17 words at 2.4 words/s, the figure
+until the probe measures it for real) cannot become one speaking shot, and
+the storyboard refuses it naming the line and the fix: shorten it, or split
+it into two lines, in the script. This gate runs for every speech story
+today — a format built to keep every line under it (the confrontation
+format, plan 22 stage 3) is not merged yet; until then, keep an eye on line
+length yourself when you write for native speech.
+
+**"estimated $X.XX over the per-episode cap $Y.YY; raise
+PER_EPISODE_CAP_USD or use your own clips"** — a native-speech episode on
+the API route (see "Native speech (API route)" above) was priced over the
+per-episode cap before anything was bought — expected under tight caps (this
+host's are $2 / $4 / $10): every API speech price is over a $2 cap. Raise
+`per_episode_cap_usd` in Settings → Budget for that story's run (caps are
+global; lower it again afterwards if you don't want every story reaching
+that high), or switch the story to **"Native speech — your own clips"**,
+which buys no clip at all.
+
+**"Waiting for N clips — download the brief"** — a manual-mode episode's
+assets step has made every keyframe and narrator voice line it can and is
+now waiting for you: open the episode's **Shot list** tab, make the clips on
+your own Flow or Higgsfield subscription from the brief's prompts, and
+upload each on its shot (see "Your own clips (the manual mode)" above). The
+job frees the worker and survives a restart while it waits; the upload that
+leaves nothing missing starts it again by itself.
+
+**An upload refused** (a shot's clip, a keyframe, a cast sheet, a place
+plate or a prop image on a manual-mode story) — the reason is always named,
+never a silent crop or a partial save: not an **MP4 or MOV** for a clip
+("download the take from the platform as MP4 and send that"), shorter than
+**2 s**, not **9:16 within 2 %** (cropping would cut a character out of
+frame, so it is refused rather than cropped), a speaking shot's clip with
+**no sound track**, or an image under half the size the app would have made
+it at. A step already running on the story refuses an upload with 409 until
+it finishes; try again once it has.
+
+**A take marked "approximate"** — a speaking shot's clip was accepted, but
+no speech-to-text key is set (Settings → Providers: a **Groq** key, free, or
+a **Mistral** key) to check what it actually says against the line, so its
+subtitles are split evenly over the clip's planned window instead of timed
+to the words actually heard. Add either key and re-upload the clip (or run
+the assets step again) for a checked take instead — a **mismatch** or **no
+speech** badge, by contrast, means a key did check it and the clip did not
+match the line well enough; one retake is yours to try from the shot's
+card.

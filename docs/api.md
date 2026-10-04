@@ -68,8 +68,25 @@ python tools/rzclips-fetch.py --url "https://..." --server $BASE --token $API_TO
 | `DELETE` | `/api/jobs/{id}` | Delete the job, its `outputs/{id}/` and the uploads no other job uses. `200` with `removed`/`kept` lists; `202` for a running job, which is cancelled first and removed once it stops. |
 | `GET` | `/api/outputs/{id}` | List a job's output files. Header-only; a media signature never opens it. |
 | `GET` | `/api/outputs/{id}/{file}` | Serve one, including `.srt`. Served `inline` so a `<video>` or `poster` can use it; add `?download=1` for `Content-Disposition: attachment`. Accepts a header **or** an `?exp=&sig=` pair. Range requests are supported, so seeking works. |
-| `GET`/`PUT` | `/api/settings` | API keys (write-only), defaults, `allow_slow_chain`, and `chain_blocked_reason` (why a chain job would be refused right now, or `""`). |
+| `GET`/`PUT` | `/api/settings` | API keys (write-only), defaults, `allow_slow_chain`, `chain_blocked_reason` (why a chain job would be refused right now, or `""`), and AI Story's `story_llm_premium_chain` (the provider/model chain the premium writing calls run on; empty uses the default). |
 | `POST` | `/api/settings/test-chain` | Send every keyed link a small real analysis request and report each one. Can take a few minutes. |
+
+### AI Story: the manual link's routes (plan 22)
+
+A story whose clips are its own (the `native_speech_manual` profile) is served by a few extra routes under `/api/stories/{id}`:
+
+| Method | Path | What it does |
+|---|---|---|
+| `GET` | `/episodes/{ep}/brief?platform=flow\|higgsfield` | The episode's shot brief (prompts, references, the line, the checks, each shot's state). `200`; `404` unknown story/episode; `400` unknown platform; `409` no storyboard yet. |
+| `GET` | `/episodes/{ep}/brief.zip?platform=…` | The brief as a zip (`.md`, `.json`, every reference image). Same refusals as `.../brief`. |
+| `GET` | `/image-brief?ep=` | The brief for a story's own cast sheets, place plates, props (and, with `ep`, one episode's keyframes). `200`; `409` while the style lock cannot be read. |
+| `POST` | `/episodes/{ep}/shots/{shot_id}/clip` | Upload a shot's clip (multipart `file`). `201`; `404` unknown story/episode/shot; `409` a step running, or the storyboard not yet approved; `413` over the 500 MB cap; `400` with the reason (not MP4/MOV, under 2 s, not 9:16 within 2 %, no sound for a speaking shot). |
+| `POST` | `/cast/{char_id}/sheet?which=portrait\|turnaround\|expressions` | Upload a character's own sheet. `201`; `404` unknown story/character; `400` a story whose images are the app's, a bad slot, an image too small; `415` not an image; `409` a step running. |
+| `POST` | `/places/{place_id}/plate?variant=day\|…` | Upload a place's own plate; the rules of the sheet upload above. |
+| `POST` | `/props/{prop_id}/image` | Upload a prop's own image; the rules of the sheet upload above. |
+| `POST` | `/episodes/{ep}/shots/{shot_id}/keyframe` | Upload a shot's own keyframe (9:16 within 2 %, cropped to the exact even 9:16). `201`; `409` storyboard not yet approved; the sheet upload's refusals otherwise. |
+
+Each upload answers `{"...", "missing", "waiting", "resumed"}`: `missing` and `waiting` describe what the episode still needs ("Waiting for N clips"), and `resumed` is the paused job the upload restarted, if any (see "Job statuses" below).
 
 ## Creating a job
 
