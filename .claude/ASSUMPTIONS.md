@@ -539,6 +539,20 @@
   serves the unchanged ones at $0 is unknown until the next assets run. Refuted outright if that run pays for shots of
   untouched scenes (then F5 in CHECKPOINT becomes a FULL task: re-plan only stale scenes; count cache hits).
 
+- **A-142** — (plan 20, DEC-268/269) A first-time viewer follows a narrated-drama episode (narrator 60–85 % of the
+  words, 2–4 character lines, an archetype spine) better than the dialogue-led v2 episodes the human judged hard to
+  follow (DEC-219). UNCONFIRMED until the human watches the Tier-2 agent-mode story's episode 1 on the phone:
+  confirmed if "the story is clear and the narrator carries it"; refuted if the narration reads as a summary over
+  pictures (then the E2v2 narration line asks for showing, not telling, and the share drops to [0.5, 0.7]).
+- **A-143** — (DEC-267) The pinned comment "Comment "PART N" for the next one →" / "Commente « PARTIE N » pour la
+  suite →" and the end-card line are what the fruit-drama audience answers to. UNCONFIRMED until posted episodes
+  gather comments; the wording is one string per language to change.
+- **A-141 evidence (2026-10-04, job 5e2290b4b3b9):** after the re-plan, 4 of 15 clips and 2 of 10 lip-syncs were
+  served by the gencache at $0 (identical prompt, seed and references); the other kept-scene shots were re-bought
+  because T1 rewrote their action or camera. DEC-266 now keeps kept scenes' shots verbatim, so the next re-plan
+  should re-buy only the planned scenes: confirmed on the next repair walk if the assets step says "nothing to make"
+  for untouched scenes.
+
 ## Confirmed
 - **A-082** — fal.ai as measured in the paid test (2026-09-29, DEC-174):
   - 35 requests with 0 failures: 13 `fal-ai/flux/schnell` (4–13 s each; booked $0.0028 at 720x1280, $0.0018 for a

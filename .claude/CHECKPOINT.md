@@ -1,3 +1,22 @@
+## CURRENT STATE — plan 20 (the fruit-drama pack) MERGED on main ae28eba and pushed (DEC-267…269); plan 21 (agent mode) stage 1 in IMPLEMENT; the backend rebuilding; episode 2 awaits the human's verdict (2026-10-04, local session)
+
+- **In-progress header:** phase = IMPLEMENT of `.claude/plans/ai-story/21-agent-mode-plan.md` (DEC-263 task C), stage 1
+  (the `story-fast-track` runner, `mode: agent`, the summed estimate; Opus agent, `feat/agent-mode-s1`,
+  `.claude/worktrees/agent-mode-s1` off 695f268). Checkpoint commit `ae28eba` (main: plans 19 + 20; pushed d519ffd).
+  In the background: the full local suite on ae28eba; the image rebuilt at 0 jobs (the wizard's format select, the
+  new templates). Next: on stage 1's report — review, rebase, Tier-1 selection, ff-merge (check the exit code),
+  DEC-270, deploy at 0 jobs; then stages 2 (CLI) and 3 (dashboard) in parallel worktrees; then **the Tier-2 walk =
+  one agent-mode story** (a one-line fruit-drama idea, Fruit Drama style, `narrated_drama_60s_v2`) from the idea to
+  episode 1 rendered — it verifies plans 20 and 21 at once (≈ $4–5: sheets, plates, props, episode 1). Today's spend
+  is $5.03 of the $7 daily cap: the walk raises `daily_cap_usd` to 12 for the day (DEC-263's cap rule, recorded in the
+  action log), the per-story cap stays 10 (a new story). The human judges A-133…A-143 on the phone.
+- **Shipped by plan 20:** `narrated_drama_60s_v2` and `serial_90s_v2` formats, a style suggests a format (Fruit
+  Drama → narrated), the "Episode format" select, the narration ask line (gated), seven plot archetypes + S1v2,
+  four fruit-kingdom concepts (14), the "Comment PART N" pinned comment, the opt-in end-card CTA.
+- **Episode 2 of d0ee5ebd745d:** rendered (see the previous header); the human's verdict pending.
+- **Regression-contract additions this session:** RC-G1 (planned with plan 21: the agent run writes story approvals
+  only through `workflow.approve_*` with `by: agent`); DEC-266 made shot ids stable keys (RC-A8 kept for old boards).
+
 ## CURRENT STATE — task A (plan 19) MERGED on main cf62c03 and pushed; task B (plan 20, the fruit-drama pack) in IMPLEMENT as three Opus agents in worktrees; episode 2 RENDERED, awaiting the human's verdict (2026-10-04, local session)
 
 - **In-progress header:** phase = IMPLEMENT of `.claude/plans/ai-story/20-fruit-drama-pack-plan.md` (DEC-263).
