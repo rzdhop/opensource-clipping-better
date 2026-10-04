@@ -455,6 +455,15 @@ class DailySpend:
             self._write(data)
             return total
 
+    def grants_today(self) -> list:
+        """The grants logged for today, oldest first (copies)."""
+        with self._lock:
+            grants = self._load().get("grants")
+            day = self.today()
+        if not isinstance(grants, list):
+            return []
+        return [dict(g) for g in grants if isinstance(g, dict) and g.get("day") == day]
+
     def clear_extra(self) -> float:
         """Take today's extra back (the grants log keeps what was allowed).
         Returns the amount that was cleared."""

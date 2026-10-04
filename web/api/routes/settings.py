@@ -32,6 +32,7 @@ from .. import settings_store
 from .. import store as job_store
 from .. import worker
 from . import files as files_route
+from .budget import today_block as _today_block
 from ..config_adapter import env_flag, resolve_provider_keys
 
 router = APIRouter(tags=["settings"], dependencies=[Depends(require_token)])
@@ -82,6 +83,7 @@ def _budget_fields(env) -> dict:
 
     merged = {name: env.get(name, os.environ.get(name, "")) for name in budget_mod.ENV_NAMES}
     resolved = budget_mod.budget_from_env(merged)
+    today = _today_block(env)
     return {
         "allow_paid": resolved.allow_paid,
         "per_episode_cap_usd": resolved.per_episode_cap_usd,
@@ -90,6 +92,12 @@ def _budget_fields(env) -> dict:
         "budget_profile": str(merged.get("BUDGET_PROFILE") or "").strip().lower(),
         "effective_budget_profile": resolved.profile,
         "spend_today_usd": budget_mod.day_spent(),
+        # Response only, never settings (plan 23 A3).
+        "spend_day": today["day"],
+        "spend_zone": today["zone"],
+        "day_extra_usd": today["extra_usd"],
+        "daily_cap_below_spend": today["cap_below_spend"],
+        "day_contributors": today["stories"],
     }
 
 

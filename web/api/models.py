@@ -463,6 +463,14 @@ class SettingsResponse(BaseModel):
     budget_profile: str = ""
     effective_budget_profile: str = "free"
     spend_today_usd: float = 0.0
+    # Plan 23 A3, response only (never settings): today's day key and zone, what
+    # was allowed on top of the daily cap for today, whether the saved cap is
+    # below what today already spent, and the stories that spent it.
+    spend_day: str = ""
+    spend_zone: str = "UTC"
+    day_extra_usd: float = 0.0
+    daily_cap_below_spend: bool = False
+    day_contributors: list = []
     # Generation providers (spec 8.6): keys as booleans, the effective local
     # URLs, every chain's links as the runner sees them, today's free usage.
     fal_key_set: bool = False
@@ -1029,3 +1037,58 @@ class StoryProposalDecisionRequest(BaseModel):
     CHARACTER_ROLES``; sent otherwise, the workflow answers 400)."""
     accept: Any
     role: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Budget: today's spending and the "allow more for today" override (plan 23 A3)
+# ---------------------------------------------------------------------------
+
+class BudgetExtraRequest(BaseModel):
+    """POST /api/budget/today/extra: allow ``usd`` more for today only.
+
+    Every limit is the route's own 400, not pydantic's 422: ``usd`` must be
+    positive and keep today's extra within ``budget.DAY_EXTRA_MAX_USD`` (the
+    ledger's ``ValueError`` message is the answer), ``story_id`` must name an
+    existing story (the grant is then logged in its activity log), ``note`` is
+    at most 200 characters, ``estimate_usd`` (what the refused call needed) is
+    not negative."""
+    usd: float
+    story_id: Optional[str] = None
+    note: Optional[str] = None
+    estimate_usd: Optional[float] = None
+
+
+class BudgetStoryUsd(BaseModel):
+    story_id: str
+    title: str = ""
+    usd: float = 0.0
+
+
+class BudgetGrant(BaseModel):
+    day: str = ""
+    at: str = ""
+    usd: float = 0.0
+    story_id: Optional[str] = None
+    note: str = ""
+
+
+class BudgetTodayResponse(BaseModel):
+    """Today's paid spending against the daily cap (``GET /api/budget/today``).
+
+    ``extra_usd`` is what was allowed for today on top of ``daily_cap_usd``;
+    ``effective_cap_usd`` is their sum. ``cap_below_spend`` is true when the
+    saved cap is below what today already spent. ``stories`` are the biggest
+    contributors, ``other_usd`` the rest of ``spent_usd``. ``zone_error`` is
+    null unless the spend file's zone could not be used."""
+    day: str
+    zone: str = "UTC"
+    zone_error: Optional[str] = None
+    spent_usd: float = 0.0
+    extra_usd: float = 0.0
+    daily_cap_usd: float = 0.0
+    effective_cap_usd: float = 0.0
+    cap_below_spend: bool = False
+    stories: list[BudgetStoryUsd] = []
+    other_usd: float = 0.0
+    grants_today: list[BudgetGrant] = []
+    resets_at: str = ""
