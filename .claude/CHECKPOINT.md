@@ -1,3 +1,21 @@
+## CURRENT STATE — plan 21 stage 1 (agent mode) MERGED and DEPLOYED (main 036abda); stages 2 (CLI) and 3 (dashboard) in worktrees; the Tier-2 walk = one agent-mode story RUNNING (2026-10-04, local session)
+
+- **In-progress header:** phase = IMPLEMENT of plan 21 stages 2 and 3 (Sonnet agents, `feat/agent-mode-s2`,
+  `feat/agent-mode-s3`, worktrees `.claude/worktrees/agent-mode-s{2,3}` off 036abda) + the Tier-2 walk of plans 20 and
+  21: story **d16026f12e77** (FR, Fruit Drama, `narrated_drama_60s_v2`, mode agent, profile tier 3 / api / references /
+  quality / v2 — the server's default with FAL_KEY), one `story-fast-track` job (its id in the action log when it
+  ends), estimate before the run: 9 parts, 73 free LLM calls, **est up to $3.09** (cast $0.60, places $0.24, knowledge
+  $0.12, episode 1 $2.13), about 360 min of budget. Caps for the walk: `daily_cap_usd` 7 → 12 (today $5.03 before the
+  run), per-episode 6, per-story 10 (DEC-263's cap rule). Checkpoint commit `036abda` (pushed).
+- **Rules while the job runs:** no edit of main's source, no restart (the bind mount); stages 2 and 3 land in their
+  worktrees and are merged + deployed only at 0 jobs, after the walk ends.
+- **Next:** on the walk's end — the human judges A-133…A-143 on the phone (episode 2 of d0ee5ebd745d; episode 1 of
+  d16026f12e77: the story is clear, the narrator carries it, the looks approved by the agent are acceptable); on the
+  agents' reports — review, rebase, Tier-1, ff-merge (**check the exit code**), DEC-271/272, deploy at 0 jobs, push,
+  close-out of tasks A, B, C in CHECKPOINT/VISION/ASSUMPTIONS.
+- **Shipped today (main 036abda):** plan 19 (DEC-264…266), plan 20 (DEC-267…269), plan 21 stage 1 (DEC-270); the
+  competitive analysis (plan 18); full suite on ae28eba 7461 passed / 1 skipped.
+
 ## CURRENT STATE — plan 20 (the fruit-drama pack) MERGED on main ae28eba and pushed (DEC-267…269); plan 21 (agent mode) stage 1 in IMPLEMENT; the backend rebuilding; episode 2 awaits the human's verdict (2026-10-04, local session)
 
 - **In-progress header:** phase = IMPLEMENT of `.claude/plans/ai-story/21-agent-mode-plan.md` (DEC-263 task C), stage 1
