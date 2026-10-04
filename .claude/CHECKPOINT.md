@@ -22,9 +22,12 @@
 - **Stage 2 MERGED** on main `ef59c2d` (pushed; DEC-274; the stalled agent's work finished by a fresh Sonnet agent:
   rebase, 17 default-profile re-pins for the `writing: v3` stamp; reviewed: 5 findings, 3 fixed, 2 recorded). NOT
   deployed yet (deploys with 3 + 5).
-- **Stage 3 MERGED** on main `538af04` (pushed; DEC-275; reviewed: 4 findings recorded). **Deploy of stages 2 + 3 + 5
-  running** (the image rebuilt at 0 running jobs). After it: the full local suite on main as the close-out baseline;
-  the docs placeholder filled; stage 8 = the human's walk in manual mode (needs the STT key).
+- **Stage 3 MERGED** on main `538af04` (pushed; DEC-275; reviewed: 4 findings recorded). **Deployed** (stages 2 + 3 + 5,
+  main a7ba8dc, health 200, bundle index-aqOel0O_.js) after a ≈ 10 min restart loop: a Python 3.12-only f-string in
+  `web/api/worker.py` (the container runs 3.11; the test envs run 3.12) — fixed in a7ba8dc. **Rule from now on: before
+  every deploy, compile the tree with the image's python** (`docker run --rm --entrypoint python -v $PWD:/src:ro
+  <image> -c '…compile()…'`, see the action log). The full local suite on main runs as the close-out baseline; the
+  docs section is filled. **Stage 8 = the human's walk** in manual mode (needs the STT key).
 - **Before stage 4 is used live (the human said yes):** `GEMINI_PAID_API_KEY` and a Groq (or Mistral) STT key in
   Settings; caps 10 / 20 / 60. Neither key is set today — Veo has never run on this host.
 - **Open questions:** none blocking. Assumptions A-145…A-150.
