@@ -140,11 +140,20 @@ PROVIDERS = {
         # 22 stage 1: the premium writing chain's text model.
         base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
         env_key="GEMINI_PAID_API_KEY",
-        rpm=10,
-        tpm=250000,
+        # A paid-tier value, not the free tier's 10/250,000 (reviewed on
+        # 2026-10-04: those were copied from "gemini" above and pacing.py
+        # paces every request against them, so an episode's ~20 premium
+        # calls would have idled behind the free tier's own rpm for
+        # minutes). Google's published Tier 1 limits for this model are
+        # higher than both numbers below; these are a conservative floor
+        # picked without a live measurement, re-pickable with
+        # tools/bench_llm.py once the paid key has been exercised.
+        rpm=60,
+        tpm=1_000_000,
         structured=("json_schema", "json_object"),
         default_timeout=180,
-        notes="The paid Gemini project (RC-V4): billed, no free-tier allowance; not benchmarked for rpm/tpm.",
+        notes="The paid Gemini project (RC-V4): billed, no free-tier allowance; rpm/tpm are a conservative "
+              "paid-tier floor, not measured live (see the rpm= comment above).",
         signup_url="https://aistudio.google.com/apikey",
         free_tier=False,
     ),

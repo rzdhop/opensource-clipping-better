@@ -614,6 +614,36 @@ def test_the_estimate_sums_every_part_still_to_do(store):
     assert refused.value.code == wf.CONFLICT
 
 
+def test_the_premium_writing_cost_is_folded_into_the_sum_and_the_cap(store):
+    """Plan 22 stage 1, amended on review: the premium chain's own cost is a
+    real spend, so it is folded into est_usd and the cap check like any
+    paid image -- a story whose images are all free but whose writing is
+    premium must still be refused once that alone goes over a cap."""
+    wf = _wf()
+    story_id = _story(store)
+    premium = dict(SETTINGS, STORY_LLM_PREMIUM_CHAIN="gemini-paid/gemini-3.8-flash",
+                   GEMINI_PAID_API_KEY="test-paid-key", ALLOW_PAID="1")
+
+    body = wf.story_fast_track_estimate(store, store.get(story_id), env=premium)
+
+    usd = body["text_usd"]["usd"]
+    assert usd > 0 and body["text_usd"]["calls"] > 0
+    pending_sum = round(sum(row["est_usd"] for row in body["parts"] if not row["kept"]) + usd, 4)
+    assert body["est_usd"] == pending_sum
+    assert body["ready"] is True
+    assert f"incl. ${usd:.2f} writing" in body["message"]
+    assert "writing (est $" in body["message"]
+
+    # The images stay free in this story (SETTINGS), so a cap too small for
+    # the writing cost alone is enough to refuse the whole run.
+    tiny = dict(premium, PER_STORY_CAP_USD=f"{usd / 2:.4f}")
+    stopped_body = wf.story_fast_track_estimate(store, store.get(story_id), env=tiny)
+
+    assert stopped_body["ready"] is False
+    reason = stopped_body["stops_at"]["reason"]
+    assert "writing (est $" in reason and "this story to $" in reason and "of its" in reason
+
+
 def test_the_estimate_refuses_at_the_first_part_that_cannot_run(store):
     wf = _wf()
     story_id = _story(store)

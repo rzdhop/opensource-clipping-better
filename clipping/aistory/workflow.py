@@ -5989,10 +5989,12 @@ def story_fast_track_estimate(stories, story, *, env, readiness=None, probe_loca
     Images are priced as the route's estimates price them (the image chain
     on the story's route, the editor for the sheets); LLM calls at $0 as
     every LLM estimate counts them (free links first, DEC-115). ``text_usd``
-    (plan 22 stage 1) is the separate, informational cost of writing the
-    concept, bible and episode-1 script on ``STORY_LLM_PREMIUM_CHAIN``
-    instead -- not folded into ``est_usd`` or the cap check below yet
-    (:func:`_premium_text_estimate`). ``est_usd``
+    (plan 22 stage 1, :func:`_premium_text_estimate`) is the extra cost of
+    writing the concept, bible and episode-1 script on
+    ``STORY_LLM_PREMIUM_CHAIN`` instead -- folded into ``est_usd`` and the
+    cap check below like any other paid part, named once in the summary
+    line ("est $x.xx incl. $y.yy writing") rather than given its own row,
+    since it is not its own part of the run. ``est_usd``
     is the parts' sum; ``paid`` names the parts with a paid price. Not
     ``ready`` -- ``stops_at`` the first part that cannot run, with its
     reason: the key gate (*readiness*, the caller's DEC-073 rule; none by
@@ -6156,15 +6158,27 @@ def story_fast_track_estimate(stories, story, *, env, readiness=None, probe_loca
     # --- the sum, the caps (RC-A3)
     pending = [row for row in rows if not row["kept"]]
     paid_rows = [row for row in pending if row["paid"]]
-    total = round(sum(row["est_usd"] for row in pending), 4)
-    paid_total = round(sum(row["est_usd"] for row in paid_rows), 4)
-    exact = all(row["exact"] for row in pending)
     caps, budget_obj, spent = _agent_caps(stories, story, env=env)
     caps_line = fast_track_step._caps_line(caps)
-    named = _and(f"{row['label']} (est {'' if row['exact'] else 'up to '}${row['est_usd']:.3f})"
-                 for row in paid_rows)
+    # Plan 22 stage 1 (folded in on review): the premium chain's own cost is
+    # a real spend like any paid image, so it is summed and capped the same
+    # way -- an unchecked cost here is exactly the bug RC-A3 exists to
+    # prevent (a run that passes the image-only check hitting the daily cap
+    # on its first C1 call and silently falling to the free writer
+    # mid-story). ``calls`` is itself an upper bound (see
+    # :func:`_premium_text_estimate`), so a nonzero amount here makes the
+    # whole estimate inexact too.
+    text_usd = _premium_text_estimate(pending, env)
+    total = round(sum(row["est_usd"] for row in pending) + text_usd["usd"], 4)
+    paid_total = round(sum(row["est_usd"] for row in paid_rows) + text_usd["usd"], 4)
+    exact = all(row["exact"] for row in pending) and not text_usd["usd"]
+    paid_labels = [f"{row['label']} (est {'' if row['exact'] else 'up to '}${row['est_usd']:.3f})"
+                   for row in paid_rows]
+    if text_usd["usd"] > 0:
+        paid_labels.append(f"writing (est ${text_usd['usd']:.2f})")
+    named = _and(paid_labels)
     sum_refusal = None
-    if paid_rows and paid_total > 0:
+    if paid_total > 0:
         if budget_obj is None:
             sum_refusal = "The budget settings cannot be used: fix them in Settings first."
         elif not budget_obj.allow_paid:
@@ -6190,7 +6204,13 @@ def story_fast_track_estimate(stories, story, *, env, readiness=None, probe_loca
                                "cap in Settings, or choose free links.")
     candidates = [(row["number"], row["part"], row["refusal"]) for row in pending if row["refusal"]]
     if sum_refusal:
-        candidates.append((paid_rows[0]["number"], paid_rows[0]["part"], sum_refusal))
+        # paid_rows can be empty while the cap is still over it -- the
+        # premium writing cost alone (text_usd) is enough (plan 22 stage 1).
+        # Anchored on the first part that writes on the premium chain, else
+        # (defensively) the first pending part at all.
+        anchor = paid_rows[0] if paid_rows else next(
+            (row for row in pending if row["part"] in _PREMIUM_TEXT_PARTS), pending[0])
+        candidates.append((anchor["number"], anchor["part"], sum_refusal))
     stops_at = None
     if candidates:
         number, part, reason = min(candidates, key=lambda item: item[0])
@@ -6204,12 +6224,6 @@ def story_fast_track_estimate(stories, story, *, env, readiness=None, probe_loca
                         f"fast track's own budget for episode {agent_step.EPISODE}, never more than "
                         f"{agent_step.STORY_BUDGET_CEILING_SECONDS // 3600} h")}
     llm_calls = sum(row["units"]["llm_calls"] for row in pending)
-    # Plan 22 stage 1: the premium chain's own extra cost, informational only
-    # -- not folded into `total`/`sum_refusal`'s cap check (a future stage
-    # wires that up once the native-speech profile's own estimate work
-    # lands); the pending LLM calls above still price at $0, as they always
-    # have (DEC-115: free links first).
-    text_usd = _premium_text_estimate(pending, env)
 
     if stops_at is not None:
         message = stops_at["reason"]
@@ -6217,12 +6231,20 @@ def story_fast_track_estimate(stories, story, *, env, readiness=None, probe_loca
         message = f"Nothing left to do: episode {agent_step.EPISODE} is rendered with its metadata pack."
     else:
         upto = "" if exact else "up to "
-        money = f"paid: {named}" if paid_rows else "nothing paid"
+        money = f"paid: {named}" if paid_labels else "nothing paid"
         labels = _and(row["label"] for row in pending)
+        # Named once, in the total (plan 22 stage 1): `named`/`money` above
+        # already lists "writing" among the paid parts when it costs
+        # something, so this is only the short form for the common case of
+        # one line rather than a second sentence repeating it.
+        incl = f" incl. ${text_usd['usd']:.2f} writing" if text_usd["usd"] > 0 else ""
         message = (f"{len(pending)} part{'' if len(pending) == 1 else 's'} to do ({labels}): "
-                   f"{llm_calls} LLM calls on the free links first ($0 here), est {upto}${total:.2f} -- {money}; "
-                   f"about {budget['minutes']:g} min. {caps_line}").strip()
-        if text_usd["calls"]:
+                   f"{llm_calls} LLM calls on the free links first ($0 here), est {upto}${total:.2f}{incl} -- "
+                   f"{money}; about {budget['minutes']:g} min. {caps_line}").strip()
+        if text_usd["calls"] and not text_usd["usd"]:
+            # Calls are still pending but nothing could be priced (no keyed
+            # paid link, or allow_paid off): say why, since the total above
+            # says nothing about them.
             message = f"{message} {text_usd['message']}"
     return {
         "step": AGENT_STEP, "mode": defaults.MODE_AGENT, "ep": agent_step.EPISODE, "parts": rows,
