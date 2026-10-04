@@ -1,3 +1,32 @@
+## CURRENT STATE — plan 23 (the upgrade ideas of 2026-10-04) APPROVED; phase IMPLEMENT — stages A1, D1, B1 in worktrees (2026-10-04, local session)
+
+- **In-progress header:** phase = IMPLEMENT. Checkpoint commit `50914c7` (main, clean tree; code identical to the deployed
+  `a7ba8dc`; `FETCH_HEAD` untracked, left alone). Tier-1 baseline: CI on the pushed main `50914c7` (DEC-278; no local full
+  run). Plan: `.claude/plans/ai-story/23-upgrade-ideas-plan.md` — four tracks, ≈ 30 stages: **A** the daily cap (A1 extra in
+  spend.json → A2 call sites → A3 override API → A4 structured 409 → A5 full-cast gate → A6 dashboard → A7 local-midnight day
+  [riskiest overall] → A8 nano-banana-2-lite on sheets → A9 gemini-first), **B** stock B-roll / ElevenLabs / chatterbox
+  cloning / subtitle overrides / geometry + aspect / stock cutaways (B1–B8), **C** LTX-2.5 Fast on fal (C1 tables → C2 the
+  $0.54 FR probe on the human's go → C3 chain → C4/C5 only if the probe passes → C6 docs → C7 Pro conditional), **D** the
+  Anthropic provider (D1), universes (D2; the doctrine D3 REMOVED by the human), two-view sheets (D4), variants (D5),
+  action-dense clip prompts (D6), the A/B + docs (D7). Jobs on the server: 0 running (343 total, 6 awaiting_approval).
+- **Priority one, diagnosed:** the refusal "would bring today to $8.58 of the $4.00 daily cap" was correct arithmetic —
+  today's spend is $8.384 (d0ee5ebd745d $5.027 + d16026f12e77 $3.357, both before the cap was lowered 12 → 4 at 16:25 UTC);
+  the cast costs $0.60; the day key is UTC. Nothing double counted (spend.json = the two ledgers). The human can unblock
+  today by raising `DAILY_CAP_USD` ≥ 9.00 or waiting for 00:00 UTC; track A makes this legible and adds "allow today".
+- **The human's decisions (this session, DEC-279):** all four cap items; LTX-2.5 hosted on fal only; stock sources + local
+  folder, more voices (ElevenLabs + chatterbox cloning with consent), subtitle controls + 16:9/1:1; NO batch generation; no
+  GPU now (Pinokio documented for the later GPU box); Anthropic provider Sonnet 5.5 default / Opus 5.5 by name / server-side
+  fallbacks ON (booked at the served model); universes (all ten, audience notes), two-view sheets at 1080×1920, variants,
+  action prompts; NO doctrine prompt; nano-banana-2-lite on sheets; chatterbox before Fish Audio.
+- **Running now:** A1 (Sonnet, `feat/plan23-a1`, `.claude/worktrees/plan23-a1`), D1 (Opus, `feat/plan23-d1`), B1 (Sonnet,
+  `feat/plan23-b1`), all off 50914c7, disjoint files. Merge order as they land: A1 first (track A is priority one), then D1,
+  B1; each rebased on main, Tier-1 selection in both envs, ff-merge with the exit code checked, DEC entry, action-log line.
+  Deploys batched at 0 running jobs; every .py compiled with the image's Python 3.11 before a deploy (the a7ba8dc rule).
+- **Next action:** on each agent's report — review with the code-review skill, rebase, tests, merge; then A2 + A3 (Sonnet)
+  and C1 (Sonnet); A4/A5/A7, D5, B7 are Opus stages.
+- **Open questions:** none blocking. One reading to confirm with the human when they look: "No doctrine" was read as
+  dropping only the doctrine prompt, keeping all ten universes (A-157).
+
 ## CURRENT STATE — plan 22 (the quality overhaul) APPROVED; phase IMPLEMENT of stages 1 (the premium writing chain) and 4 (the native-speech core) in worktrees (2026-10-04, local session)
 
 - **In-progress header:** phase = IMPLEMENT. Checkpoint commit `3c10560` (main, clean tree; `FETCH_HEAD` untracked, left

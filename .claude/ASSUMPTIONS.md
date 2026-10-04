@@ -559,6 +559,28 @@
   the phone: confirmed if no look is regenerated before episode 2; refuted if several are (then agent mode gains a
   "stop after the cast" switch, like the fast track's stop at the keyframes).
 
+- **A-151** — (plan 23, track C) fal bills `fal-ai/ltx-2.5/image-to-video/fast` at $0.09/s at 720p and ≤ $0.16/s at
+  1080p, audio included; fal's own page shows only a "$0 per compute second" placeholder. UNCONFIRMED: the Settings key
+  check reads fal's pricing API before C1 is committed and raises the rows if higher.
+- **A-152** — (plan 23, track C) fal picks a random seed per LTX-2.5 call (the endpoint has no `seed` field), so a
+  retake with the same body yields a new clip. UNCONFIRMED; bounded by the $1 per-episode retake cap.
+- **A-153** — (plan 23, D1) The model ids `claude-sonnet-5-5` and `claude-opus-5-5` are served on the human's
+  `ANTHROPIC_API_KEY`; confirmed by a free `models.list()` at D1's end. UNCONFIRMED.
+- **A-154** — (plan 23, D1) With server-side fallbacks on (`fallbacks: "default"`, beta
+  `server-side-fallback-2026-07-01`), `response.model` names the model that served the reply, so the ledger can book at
+  the served model's row. UNCONFIRMED until the first live call.
+- **A-155** — (plan 23, D2) The generic species names (cola can, energy-drink can, smartphone, handheld console…) and the
+  `BRAND_DENYLIST` are enough to keep trademarks out of concepts, bibles and sheets. UNCONFIRMED.
+- **A-156** — (plan 23, D4) seedream-4.5 draws a two-view front+back sheet at 1080×1920 without cropping or joining the
+  halves, and the keyframe editor draws the character once from it with the "shown twice, draw once" role text.
+  UNCONFIRMED until the first two-view cast.
+- **A-157** — (plan 23) The human's answer "No doctrine" drops only the doctrine prompt (D3) and keeps all ten universes
+  with audience notes on alcohol and gross. UNCONFIRMED: to confirm when the human looks at D2.
+- **A-158** — (plan 23, B3) ElevenLabs API prices as read on 2026-10-04: Flash/Turbo $0.04 and Multilingual v2/v3 $0.08
+  per 1k characters; the stale $0.05 row over-estimates (safe). UNCONFIRMED until re-read at B3.
+- **A-159** — (plan 23, A7) The pinned `tzdata` wheel (or the apt package) gives `ZoneInfo("Europe/Paris")` on the
+  aarch64 `python:3.11-slim` image deliberately, not by accident of the base image. UNCONFIRMED until A7's deploy check.
+
 ## Confirmed
 - **A-145** — (plan 22, stage 1) The paid writer's model id on Gemini's OpenAI-compatible endpoint is `gemini-3.8-flash`
   (priced $0.75 / $3.75 per M until 2026-12-31, then $1.50 / $7.50, read 2026-10-04 at ai.google.dev/gemini-api/docs/pricing).

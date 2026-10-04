@@ -5551,3 +5551,32 @@ areas), in both environments at the same time, and nothing more. The close-out b
 on the pushed main, named in CHECKPOINT by commit.
 **Consequence.** The full run started on a7ba8dc was stopped at 29 %; the worker fix was verified by its three
 test files instead. CHECKPOINT's Tier-1 baseline from now on reads "CI on <commit>" rather than a local count.
+
+## DEC-279 — Plan 23 (the upgrade ideas of 2026-10-04) approved: the daily-cap clarity, LTX-2.5 hosted only, three MoneyPrinterTurbo gaps, the creators' method without its doctrine, an optional Claude writer (after DEC-278)
+**Context.** The human brought five things: MoneyPrinterTurbo's ideas, LTX-2.5 "to generate videos without paying
+providers", a cast refusal reading "$8.58 of the $4.00 daily cap" for images alone ("why not Gemini, this price has no
+sense"), TikTok creators' prompts (a brain-rot doctrine, a 10-universe menu, a two-view character sheet, action-dense
+Flow prompts, before/after versions, Claude Opus as the writer), and Pinokio "to produce videos for free". Diagnosis:
+today's spend was really $8.384 (two stories, booked before the cap was lowered 12 → 4); the cast costs $0.60; the message
+adds today and the call; the day is UTC; Gemini sheet links were fal-only since DEC-235 and are paid too. This host is an
+Oracle Ampere A1 (aarch64, 4 cores, 23 GB, no GPU): LTX-2.5 (16 GB VRAM minimum) cannot run here; hosted on fal it costs
+Veo-Fast money ($0.09/s at 720p) with a 6 s floor. Pinokio needs the human's own GPU machine.
+**Decision.** Plan 23 (`.claude/plans/ai-story/23-upgrade-ideas-plan.md`), four tracks, as the human chose: (A) a
+three-number refusal + a today chip, a `BUDGET_TIMEZONE` day key (default UTC), a per-day "allow today" extra stored in
+`spend.json` (never the saved cap), the full cast cost gated before any portrait, `gemini/nano-banana-2-lite` as the
+second sheet/plate/prop link (amends DEC-235) and a per-story gemini-first preference; (B) a `clipping/stock` package
+(Pexels carried over, Pixabay, a local folder, credits) for Clips and opt-in AI Story stock cutaways, an ElevenLabs
+adapter, a per-character voice reference with a consent checkbox for chatterbox cloning (amends DEC-118), per-story
+subtitle overrides, a parameterised render geometry and a create-only 16:9 / 1:1 aspect; (C) `fal/ltx-2.5-fast` as a
+hosted link appended last, a $0.54 French speech probe on the human's go, and the `ltx` speaking model only if it passes
+— never an automatic pick; (D) an `anthropic` provider (Sonnet 5.5 default, Opus 5.5 by name, server-side fallbacks ON
+with booking at the served model, the free Models API for the Settings probe; the third recorded RC-S4 exception),
+universes (all ten, with audience notes; a subject-neutral `viral_3d` style), a `two_view` sheet mode at 1080×1920 and an
+`all_matter` body rule as optional profile keys, character variants as edits of the base sheet, and an `action` clip-prompt
+style in `clips.*_request_parts` (not brief-only, because the clip hash lives there). Declined by the human: batch
+generation, a rented GPU, the brain-rot doctrine prompt (D3 removed). Pinokio: documented for the later GPU box only.
+**Consequence.** Every new knob is an optional `generation_profile` / story key, absent = byte-identical (RC-W2/W3 way);
+goldens are never re-pinned by these tracks except where a stage names the pin. Track A ships first (priority one); A7 is
+the riskiest stage overall. Six DECs are amended by name in the plan (235, 221, 118, 115, 003 — the explicit chain is no
+longer the only fallback on Anthropic links — and 263's cap rule gains the logged per-day extra). Rejected alternatives per
+track are in the plan. Until A3 lands, the human unblocks a refused day by raising `DAILY_CAP_USD` or waiting for 00:00 UTC.
