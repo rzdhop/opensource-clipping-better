@@ -5089,3 +5089,26 @@ restarted only at 0 jobs (the deploy bind mount).
 raising the shipped cap defaults (DEC-223 stands: the raise is this walk's, in Settings).
 **Consequence.** Task A's plan: `.claude/plans/ai-story/19-walk-defects-plan.md`. Each defect gets its test in the
 same stage. The human judges episode 2 (A-133…A-141) when it renders.
+
+## DEC-264 — A refusal that proves a request never ran releases its booking; a purged request is re-sent once; a Kling "no face" ends that clip's lip-sync (plan 19 stage 1, F1 + F2, after DEC-263)
+**Context.** On the episode-2 walk a fal request journaled during the account lock answered HTTP 404 `NOT_FOUND` on its
+own status URL at the resume: the step marked it lost, kept its $0.04 booking and failed the shot. Kling LipSync
+refused three fruit-head clips with a 422 `face_detection_error`; the request was "kept for the next run" and
+re-failed identically on every run while its booking stayed. `gencache.UNBILLED_STATUSES` already named 404 and 422
+as unbilled, but only `billing_verdict()` read it, never the resume path.
+**Decision.** A journal entry whose provider answer proves the request never ran is **voided**: a new state `VOID`,
+a `release` hook mirroring `book` (a negative `void` ledger row naming why, `DailySpend.release` on the booking's own
+day, never below zero), written before the release so a crash can over-count but never release twice. Proof = a 404
+from the request's own status URL (purged), or 400 / 413 / 422 (the input is refused). A purged request is sent again
+once per run on the same link, through `allow_paid`, the budget check and a new booking (RC-A3 holds); a second 404
+ends the link. 401 / 403 / 409 / 429 on a poll prove nothing about the request (`gencache.POLL_REFUSALS`) and keep
+today's behaviour; 410 and a 404 from the result URL or the CDN stay `LOST` and booked. A 422 naming
+`face_detection_error` ends the shot's lip-sync as `no_face`, keyed on the clip's sha256 and the link: `lipsync_todo`,
+the currency checks and the estimate skip it while the clip is unchanged; a new clip or another link tries again; the
+plain clip stays the take (DEC-258). `HttpStatusError` carries fal's `error_types` so the type survives the 300-char cut.
+**Rejected.** Voiding on every `UNBILLED_STATUSES` code (a refused poll can hide a request that still runs and bills:
+double billing on the re-send). Retrying the face-detection 422 on another seed (the clip, not the seed, has no face).
+**Consequence.** Unbilled refusals stop eating the caps; a VOID entry is unreadable to code older than this commit
+(rollback needs the entry removed by hand); the lipsync badge reads "No face to lip-sync". Follow-up: if fal ever
+purges a request that did complete before the poll, its booking would be released wrongly — RC-A3 now rests on that
+behaviour of fal's queue. Commit 33e7dec (main).
