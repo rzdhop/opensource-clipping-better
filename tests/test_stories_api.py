@@ -262,7 +262,8 @@ def test_create_choose_bible_approve_style_approve(api):
     story = response.json()
     story_id = story["story_id"]
     assert (story["status"], story["language"], story["seed_text"]) == ("draft", "fr", "Des fruits sur une île.")
-    assert story["generation_profile"] == defaults.default_generation_profile()
+    # Re-pinned on purpose (plan 22 stage 2, DEC-274): every new story is stamped "writing": "v3".
+    assert story["generation_profile"] == dict(defaults.default_generation_profile(), writing=defaults.WRITING_V3)
     assert [e["story_id"] for e in c.get("/api/stories").json()["stories"]] == [story_id]
 
     # Step 2: the library in French, the fruit_drama ones, then a choice.
@@ -785,8 +786,10 @@ def test_an_unknown_style_template_is_a_400_naming_the_shipped_ones(api):
 
 def test_a_generation_profile_is_taken_at_creation(api):
     story = _create(api, "en", generation_profile={"route": "local", "tier": 2})
+    # Re-pinned on purpose (plan 22 stage 2, DEC-274): every new story is stamped "writing": "v3".
     assert story["generation_profile"] == {
-        "tier": 2, "route": "local", "consistency_mode": "references", "budget_profile": "free"}
+        "tier": 2, "route": "local", "consistency_mode": "references", "budget_profile": "free",
+        "writing": "v3"}
     response = api.client.post("/api/stories", json={"language": "en", "generation_profile": {"route": "cloud"}})
     assert response.status_code == 422
 
@@ -823,7 +826,9 @@ def test_a_bible_field_clears_the_bible_approval_and_a_title_does_not(api):
     }).json()
     assert story["approvals"]["bible"] and story["status"] == "bible_approved"
     assert story["narrator"] == {"enabled": True, "voice": None}
-    assert story["generation_profile"] == {**defaults.default_generation_profile(), "route": "api"}
+    # Re-pinned on purpose (plan 22 stage 2, DEC-274): _with_bible's own story is stamped "writing": "v3".
+    assert story["generation_profile"] == {
+        **defaults.default_generation_profile(), "route": "api", "writing": defaults.WRITING_V3}
 
     story = api.client.patch(f"/api/stories/{story_id}", json={"tone": "sombre et rapide"}).json()
     assert story["tone"] == "sombre et rapide"

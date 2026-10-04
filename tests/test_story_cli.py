@@ -205,14 +205,18 @@ def test_new_creates_a_valid_story_with_the_concept_chosen_in_its_language(cli):
 
 def test_new_takes_the_story_defaults_unless_told_otherwise(cli):
     story_id = _new(cli)
-    assert cli.story(story_id)["generation_profile"] == defaults.default_generation_profile()
+    # Re-pinned on purpose (plan 22 stage 2, DEC-274): every new story is stamped "writing": "v3".
+    assert cli.story(story_id)["generation_profile"] == dict(
+        defaults.default_generation_profile(), writing=defaults.WRITING_V3
+    )
 
     assert cli.run("new", "--lang", "en", "--tier", "2", "--route", "local",
                    "--consistency-mode", "prompt_only", "--budget-profile", "quality") == 0
     other = cli.capsys.readouterr().out.split()[0]
     story = cli.story(other)
     assert story["generation_profile"] == {
-        "tier": 2, "route": "local", "consistency_mode": "prompt_only", "budget_profile": "quality"}
+        "tier": 2, "route": "local", "consistency_mode": "prompt_only", "budget_profile": "quality",
+        "writing": "v3"}
     assert (story["status"], story["title"], story["concept"]) == ("draft", "", None)
 
 

@@ -541,6 +541,51 @@ def test_bible_runs_b1_b2_b3_in_order_and_writes_after_each(story_store):
     assert [line.rsplit(" (", 1)[1] for line in written] == ["cap 400)", "cap 520)", "cap 300)"]
 
 
+def test_no_seed_or_no_stamp_keeps_b1_byte_identical(story_store):
+    """RC-W2: without the gate (no seed, or no "writing": "v3"), the bible
+    step writes B1 exactly as it always was -- never B1v3 (plan 22 stage 2,
+    DEC-274; the concepts step's own version of this is
+    ``tests/test_story_concepts_brief.py::test_no_seed_or_no_stamp_keeps_c1_byte_identical``)."""
+    m = _new()
+    brief = "Rouge coince Nude dans le couloir et exige qu'elle avoue son secret."
+
+    no_seed = _story(story_store, seed=None, generation_profile={"writing": "v3"})
+    ctx, _log = _ctx(story_store, no_seed, step="bible")
+    runner = FakeRunner(B1_REPLY, B2_REPLY, B3_REPLY)
+    m.bible.run(ctx, runner=runner)
+    assert runner.calls[0]["schema_name"] == "bible_core"
+    assert "brief" not in runner.calls[0]["user"].lower()
+
+    no_stamp = _story(story_store, seed=brief, generation_profile={"writing": "v2"})
+    ctx, _log = _ctx(story_store, no_stamp, step="bible")
+    runner = FakeRunner(B1_REPLY, B2_REPLY, B3_REPLY)
+    m.bible.run(ctx, runner=runner)
+    assert runner.calls[0]["schema_name"] == "bible_core"
+    assert brief not in runner.calls[0]["user"]
+
+
+def test_bible_writes_b1v3_with_the_brief_when_the_gate_is_on(story_store):
+    """The gate's positive case (plan 22 stage 2, DEC-274): a non-empty seed
+    and "writing": "v3" switch B1 to B1v3, the brief under the concept, the
+    "keep the brief" sentence appended -- B2/B3 unchanged, never seeing it."""
+    m = _new()
+    brief = "Rouge coince Nude dans le couloir et exige qu'elle avoue son secret."
+    story_id = _story(story_store, seed=brief, generation_profile={"writing": "v3"})
+
+    ctx, _log = _ctx(story_store, story_id, step="bible")
+    runner = FakeRunner(B1_REPLY, B2_REPLY, B3_REPLY)
+    m.bible.run(ctx, runner=runner)
+
+    assert runner.calls[0]["schema_name"] == "bible_core_v3"
+    assert brief in runner.calls[0]["user"]
+    assert "Keep the brief's names, setting and conflict." in runner.calls[0]["user"]
+    # B2 and B3 never read the brief (bible.pack_for: brief=True only for B1).
+    assert brief not in runner.calls[1]["user"]
+    assert brief not in runner.calls[2]["user"]
+    assert runner.calls[1]["schema_name"] == "bible_world"
+    assert runner.calls[2]["schema_name"] == "bible_values"
+
+
 def test_rewriting_an_approved_bible_clears_its_approval_and_leaves_style(story_store):
     m = _new()
     story_id = _story(story_store)

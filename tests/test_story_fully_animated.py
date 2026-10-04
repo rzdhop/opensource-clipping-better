@@ -73,7 +73,9 @@ def test_a_story_switched_to_v2_before_its_cast_takes_the_v2_template_and_the_na
 
     story = wf.patch_story(stories, story_id, {"generation_profile": QUALITY_V2}, now=LATER)
 
-    assert story["generation_profile"] == QUALITY_V2
+    # Re-pinned on purpose (plan 22 stage 2, DEC-274): the story's own "writing": "v3" (stamped at
+    # creation) is merged onto the patch, not replaced by it (the patch never names "writing").
+    assert story["generation_profile"] == dict(QUALITY_V2, writing=defaults.WRITING_V3)
     # What store.create gives a v2 story: the v2 template and the narrator on.
     assert story["episode_template_id"] == defaults.EPISODE_TEMPLATE_ID_V2
     assert story["narrator"]["enabled"] is True
@@ -95,7 +97,8 @@ def test_a_patch_that_keeps_the_pipeline_moves_nothing_else(wf, stories):
     story = wf.patch_story(stories, story_id, {"generation_profile": {"tier": 3}}, now=LATER)
     assert story["episode_template_id"] == before["episode_template_id"]
     assert story["narrator"] == before["narrator"]
-    assert story["generation_profile"] == {**QUALITY_V2, "tier": 3}
+    # Re-pinned on purpose (plan 22 stage 2, DEC-274): the story is stamped "writing": "v3" at creation.
+    assert story["generation_profile"] == {**QUALITY_V2, "tier": 3, "writing": defaults.WRITING_V3}
 
 
 def test_a_story_with_a_cast_may_still_switch_before_any_script(wf, stories):

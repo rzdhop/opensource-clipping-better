@@ -210,14 +210,17 @@ def test_new_story_is_v2_quality_when_keys_present(monkeypatch, tmp_path, capsys
         newest = max(stories.list(), key=lambda entry: entry["created_at"] + entry["story_id"])
         return stories.get(newest["story_id"])["generation_profile"]
 
-    assert created() == defaults.default_generation_profile()
+    # Re-pinned on purpose (plan 22 stage 2, DEC-274): the CLI goes through ``store.create``,
+    # which stamps every new story "writing": "v3" -- ``media_policy.new_story_profile`` above
+    # does not (it never reaches ``store.create``), so only these three gain the key.
+    assert created() == dict(defaults.default_generation_profile(), writing=defaults.WRITING_V3)
     monkeypatch.setenv("FAL_KEY", "fk")
-    assert created() == manual  # re-pinned (DEC-235): FAL_KEY alone is enough
-    assert created("--tier", "1") == defaults.default_generation_profile()
+    assert created() == dict(manual, writing=defaults.WRITING_V3)  # re-pinned (DEC-235): FAL_KEY alone is enough
+    assert created("--tier", "1") == dict(defaults.default_generation_profile(), writing=defaults.WRITING_V3)
 
     # 3. the store's own default is today's
     assert stories.create(language="fr", now="2026-10-01T10:00:00+00:00")["generation_profile"] == \
-        defaults.default_generation_profile()
+        dict(defaults.default_generation_profile(), writing=defaults.WRITING_V3)
 
 
 def test_a_v2_story_is_created_on_the_v2_episode_template(tmp_path):

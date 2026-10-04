@@ -48,7 +48,10 @@ def test_with_settings_a_new_story_sees_the_stored_fal_key(cli, capsys):
     story = _new(module, outputs, "--settings")
 
     # Re-pinned on purpose (plan 22 stage 5): the default with the keys is the manual native-speech profile.
-    assert story["generation_profile"] == defaults.manual_speech_generation_profile()
+    # Re-pinned again (plan 22 stage 2, DEC-274): every new story is stamped "writing": "v3".
+    assert story["generation_profile"] == dict(
+        defaults.manual_speech_generation_profile(), writing=defaults.WRITING_V3
+    )
     out = capsys.readouterr()
     assert "stored Settings" in out.out and FAL not in out.out + out.err
 
@@ -58,7 +61,10 @@ def test_without_settings_the_cli_reads_the_environment_only(cli, capsys):
 
     story = _new(module, outputs)
 
-    assert story["generation_profile"] == defaults.default_generation_profile()
+    # Re-pinned on purpose (plan 22 stage 2, DEC-274): every new story is stamped "writing": "v3".
+    assert story["generation_profile"] == dict(
+        defaults.default_generation_profile(), writing=defaults.WRITING_V3
+    )
     assert FAL not in "".join(capsys.readouterr())
 
 

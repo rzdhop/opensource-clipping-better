@@ -194,7 +194,9 @@ def test_the_generation_profile_is_merged_and_checked(wf, stories):
     story_id = _story(stories)
 
     story = wf.patch_story(stories, story_id, {"generation_profile": {"route": "local"}}, now=LATER)
-    assert story["generation_profile"] == {**defaults.default_generation_profile(), "route": "local"}
+    # Re-pinned on purpose (plan 22 stage 2, DEC-274): _story's own story is stamped "writing": "v3" at creation.
+    assert story["generation_profile"] == {
+        **defaults.default_generation_profile(), "route": "local", "writing": defaults.WRITING_V3}
 
     assert "route" in _refused(wf, "invalid", wf.patch_story, stories, story_id,
                                {"generation_profile": {"route": "cloud"}}, now=LATER)

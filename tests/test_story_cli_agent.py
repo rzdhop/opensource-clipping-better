@@ -88,6 +88,27 @@ def _new_studio(cli, *extra):
     return out.split()[0]
 
 
+def _pin_writing_v2(cli):
+    """Pin every story this test creates to "writing": "v2" (plan 22 stage 2,
+    DEC-274): ``store.create`` stamps "v3" on a new story by default, which
+    (with this file's non-empty seed) would switch the concepts step from C1
+    to the brief-faithful C1v2/C1J -- this file drives the CLI surface of
+    the agent run end to end, not concept fidelity (covered by
+    ``tests/test_story_concepts_brief.py``), and ``tfts.llm()``'s queue is
+    built for C1's reply. The CLI has no ``--writing`` flag, so the pin goes
+    on ``StoryStore.create`` itself, the same way ``test_story_fast_track_story.py``
+    and ``test_story_steps.py`` pin it on the profile dict they pass directly."""
+    from clipping.aistory.store import StoryStore
+
+    real_create = StoryStore.create
+
+    def create_v2(self, *args, **kwargs):
+        kwargs["generation_profile"] = {"writing": "v2", **(kwargs.get("generation_profile") or {})}
+        return real_create(self, *args, **kwargs)
+
+    cli.monkeypatch.setattr(StoryStore, "create", create_v2)
+
+
 def _bind_agent_fakes(cli, tmp_path):
     """Bind ``test_story_fast_track.Fakes`` to the agent step's own module
     (``_patch_run``, the CLI's seam, module docstring): the LLM, the images,
@@ -184,6 +205,7 @@ def test_story_fast_track_is_not_auto_approvable_with_its_own_sentence(cli):
 
 
 def test_story_fast_track_runs_the_agent_to_episode_1_rendered(cli, tmp_path):
+    _pin_writing_v2(cli)
     story_id = _new_agent(cli)
     _keyed(cli)
     _free_route(cli)
@@ -205,6 +227,7 @@ def test_agent_command_creates_and_runs_to_episode_1_printing_the_story_id_first
     in one call: the fakes allow the whole chain through to episode 1
     rendered (module docstring), and the story's own line -- its id first
     -- is printed before the agent run's lines."""
+    _pin_writing_v2(cli)
     _keyed(cli)
     _free_route(cli)
     _bind_agent_fakes(cli, tmp_path)

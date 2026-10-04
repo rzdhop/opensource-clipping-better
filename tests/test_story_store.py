@@ -252,7 +252,8 @@ def test_a_new_story_has_every_field_as_a_draft(stories):
                                 "cast": None, "places": None, "season": None}
     assert doc["status"] == "draft"
     assert doc["created_at"] == doc["updated_at"] == NOW
-    assert doc["generation_profile"] == defaults.default_generation_profile()
+    # Re-pinned on purpose (plan 22 stage 2, DEC-274): every new story is stamped "writing": "v3".
+    assert doc["generation_profile"] == dict(defaults.default_generation_profile(), writing=defaults.WRITING_V3)
     assert doc["episode_template_id"] == "serial_60s_v1"
     assert doc["narrator"] == {"enabled": False, "voice": None}
     assert doc["title"] == "" and doc["seed_text"] is None and doc["style_template_id"] is None
@@ -307,8 +308,10 @@ def test_an_unknown_style_template_is_refused(stories, outputs, style_id):
 
 def test_a_partial_generation_profile_is_merged_onto_the_defaults(stories):
     doc = stories.create(language="fr", generation_profile={"route": "local", "tier": 2}, now=NOW)
+    # Re-pinned on purpose (plan 22 stage 2, DEC-274): every new story is stamped "writing": "v3".
     assert doc["generation_profile"] == {
         "tier": 2, "route": "local", "consistency_mode": "references", "budget_profile": "free",
+        "writing": "v3",
     }
 
 
