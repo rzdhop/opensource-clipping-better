@@ -110,7 +110,8 @@ def test_terminal_is_shared_and_gains_awaiting_approval():
     match = re.search(r"export const TERMINAL = \[(.*?)\]", src)
     assert match, "TERMINAL not exported from ActivityFeed.jsx"
     values = set(re.findall(r"'([a-z_]+)'", match.group(1)))
-    assert values == {"completed", "failed", "cancelled", "awaiting_approval"}
+    # Re-pinned on purpose (plan 22 stage 5): a step waiting for the user's own clips is over for the feed too.
+    assert values == {"completed", "failed", "cancelled", "awaiting_approval", "awaiting_uploads"}
 
 
 def test_job_detail_imports_the_shared_pieces():

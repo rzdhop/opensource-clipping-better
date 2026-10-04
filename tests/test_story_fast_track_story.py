@@ -805,3 +805,64 @@ def test_the_worker_records_the_part_the_agent_run_is_on(worker, job_store, monk
     _register(monkeypatch, "bible", lambda ctx: None)
     worker._run_pipeline_sync(other, {}, CancelToken())
     assert job_store.get_job(other).get("sub_step") is None
+
+
+# ================================================== plan 22 stage 5: paused for the user's clips
+
+PAUSED = {"state": "awaiting_uploads", "count": 3, "missing": [{"shot_id": "sh02"}, {"shot_id": "sh04"},
+                                                                {"shot_id": "sh07"}],
+          "message": "Waiting for 3 clips — download the brief",
+          "brief": "/api/stories/x/episodes/1/brief.zip"}
+
+
+def test_the_agent_run_pauses_at_episode_1_for_the_users_clips_and_goes_on_when_run_again(store, tmp_path,
+                                                                                           monkeypatch):
+    """Fail-first. Episode 1's fast track waiting for the user's own clips
+    (the manual link) pauses the run -- a result awaiting uploads, never a
+    stop -- with the brief named; run again (an upload that leaves nothing
+    missing starts it), it keeps every part and goes on from episode 1."""
+    from clipping.aistory.steps import fast_track as fast_track_step
+
+    agent = _agent()
+    story_id = _story(store)
+    calls = []
+
+    def paused(ctx, **_kwargs):
+        calls.append("paused")
+        return {"ep": 1, "state": "awaiting_uploads", "uploads": dict(PAUSED), "paused_at": "assets", "steps": {}}
+
+    monkeypatch.setattr(fast_track_step, "run", paused)
+    summary, log, seen = run(store, story_id, _fakes(tmp_path))
+    assert steps.awaiting_uploads(summary) and summary["uploads"]["count"] == 3 and summary["paused_at"] == "episode"
+    assert log[-1].startswith("⏸ Agent run paused at episode 1 (9 of 9): Waiting for 3 clips — download the brief.")
+    assert seen == list(PARTS) and store.get(story_id)["status"] == "ready"
+
+    def done(ctx, **_kwargs):
+        calls.append("done")
+        return {"ep": 1, "steps": {}, "auto_approved": ["assets"], "seconds": 1.0}
+
+    monkeypatch.setattr(fast_track_step, "run", done)
+    again = tft.Fakes(tmp_path, runner=tft.no_llm(), image=tas.NeverImage())
+    summary, log, _seen = run(store, story_id, again)
+    assert not steps.awaiting_uploads(summary) and calls == ["paused", "done"]
+    assert again.runner.calls == [] and again.image.requests == []
+    assert all(summary["parts"][name]["kept"] for name in PARTS[:-1])
+    assert agent.STEP == "story-fast-track"
+
+
+def test_the_worker_ends_a_step_waiting_for_the_users_clips_awaiting_uploads(worker, job_store, monkeypatch):
+    """The job ends ``awaiting_uploads`` with what it waits for -- finished
+    for the worker (a cancel is refused), never failed, kept over a restart."""
+    _register(monkeypatch, "story-fast-track", lambda ctx: {"ep": 1, "state": "awaiting_uploads",
+                                                            "uploads": dict(PAUSED)})
+    job_id = _step_job(job_store, step="story-fast-track", story_id=worker.story_id)
+
+    worker._run_pipeline_sync(job_id, {}, CancelToken())
+
+    job = job_store.get_job(job_id)
+    assert job["status"] == "awaiting_uploads" and job["uploads"]["count"] == 3 and not job.get("error")
+    assert "is paused: Waiting for 3 clips — download the brief" in job_store.last_event(job_id)["message"]
+    assert job_store.request_cancel(job_id) == "terminal"
+    assert job_id not in job_store.fail_stale_jobs()
+    assert job_store.resume_step_job(job_id, "job_new") == "ok"
+    assert job_store.get_job(job_id)["status"] == "completed" and job_store.get_job(job_id)["resumed_by"] == "job_new"
