@@ -162,7 +162,8 @@ def test_v2_edit_budget_refusal_blocks_before_portraits(api, day):
     assert isinstance(detail, str)
     assert detail.startswith(f"No link of the quality sheet links (quality budget profile) can make a reference "
                              f"image on route auto: {EDITS}: refused: est $0.400 on {EDITS} would bring this story "
-                             "to $0.40 of its $0.30 cap.")
+                             "to $0.40 of its $0.30 cap; gemini/nano-banana-2-lite: no API key "
+                             "(GEMINI_PAID_API_KEY is not set).")  # re-pinned (plan 23 A8, DEC-280): lite is the 2nd link
     assert "allow paid providers" in detail and "prompt-only" not in detail
     _nothing_happened(api, day, 0.0)
     estimate = p2._estimate(api, story_id, "cast", selected=SKETCH)

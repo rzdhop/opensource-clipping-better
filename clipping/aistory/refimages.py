@@ -511,13 +511,17 @@ def _probe_locals(readiness, chain, merged, *, route, adapters, transport, chain
 # ---------------------------------------------------------------------- make
 
 def _make(stories, story, plan, *, entity, eid, lock, env, on_log, cancel, adapters, transport,
-          sleep_fn, time_fn):
+          sleep_fn, time_fn, sticky=None):
     """Make one image of *plan* and store its file in the entity's refs/;
     ``(image ref, link label, est_usd, paid)``. The entity's document is the
-    caller's to write."""
+    caller's to write. *sticky*, a dict one cast or places job shares (DEC-280): the
+    provider that answered first is tried first for the rest of the job, so one cast
+    does not drift between providers once a link has been refused."""
     story_id = story["story_id"]
     route = story["generation_profile"]["route"]
     merged, chain, budget_obj = imaging.resolve(plan.kind, env, error=RefImageError, role=plan.role, story=story)
+    if sticky and sticky.get("provider"):
+        chain = sorted(chain, key=lambda link: link.provider != sticky["provider"])  # stable
     name = media_policy.chain_name(plan.role, plan.kind, story)
     if adapters is None:
         adapters_mod.load_all()
@@ -574,6 +578,8 @@ def _make(stories, story, plan, *, entity, eid, lock, env, on_log, cancel, adapt
         # Answered: booked first, whatever becomes of the file.
         est = imaging.book(ledger, result, answered, kind=plan.kind, step=plan.step)
         label = gen.describe(answered)
+        if sticky is not None:
+            sticky.setdefault("provider", answered.provider)
         try:
             produced, ext = imaging.produced_image(result)
         except imaging.NotKept as exc:
@@ -629,7 +635,8 @@ def character_prompt(story, character, which, *, env, lock) -> str:
 
 
 def character_image(stories, story_id, char_id, which, *, env, on_log, cancel, note=None, seed=None,
-                    adapters=None, transport=None, sleep_fn=time.sleep, time_fn=time.monotonic) -> dict:
+                    adapters=None, transport=None, sleep_fn=time.sleep, time_fn=time.monotonic,
+                    sticky=None) -> dict:
     """Make one of a character's three reference images; returns its image
     ref ``{name, consistency, source, seed, created_at}``.
 
@@ -704,7 +711,7 @@ def character_image(stories, story_id, char_id, which, *, env, on_log, cancel, n
 
     ref, label, est, paid = _make(stories, story, plan, entity=CHARACTERS, eid=char_id, lock=lock, env=env,
                                   on_log=on_log, cancel=cancel, adapters=adapters, transport=transport,
-                                  sleep_fn=sleep_fn, time_fn=time_fn)
+                                  sleep_fn=sleep_fn, time_fn=time_fn, sticky=sticky)
 
     # Re-read right before writing, under the uploads' own lock: an upload
     # appended while the image was being made must not be lost.
@@ -738,7 +745,8 @@ def place_prompt(stories, story, place, variant, *, env, lock) -> str:
 
 
 def place_image(stories, story_id, place_id, variant, *, env, on_log, cancel, note=None, seed=None,
-                adapters=None, transport=None, sleep_fn=time.sleep, time_fn=time.monotonic) -> dict:
+                adapters=None, transport=None, sleep_fn=time.sleep, time_fn=time.monotonic,
+                sticky=None) -> dict:
     """Make one time variant of a place; returns its image ref, now
     ``time_variants[variant]``.
 
@@ -788,7 +796,7 @@ def place_image(stories, story_id, place_id, variant, *, env, on_log, cancel, no
 
     ref, label, est, paid = _make(stories, story, plan, entity=PLACES, eid=place_id, lock=lock, env=env,
                                   on_log=on_log, cancel=cancel, adapters=adapters, transport=transport,
-                                  sleep_fn=sleep_fn, time_fn=time_fn)
+                                  sleep_fn=sleep_fn, time_fn=time_fn, sticky=sticky)
 
     current = stories.read_entity(story_id, PLACES, place_id)
     current["time_variants"][variant] = ref
@@ -827,7 +835,7 @@ def prop_prompt(story, prop, *, env, lock) -> str:
 
 
 def prop_image(stories, story_id, prop_id, *, env, on_log, cancel, note=None, seed=None, adapters=None,
-               transport=None, sleep_fn=time.sleep, time_fn=time.monotonic) -> dict:
+               transport=None, sleep_fn=time.sleep, time_fn=time.monotonic, sticky=None) -> dict:
     """Make a prop's image (IMAGE_CHAIN, text to image, ``base``, saved as
     ``image.<ext>``; its ``prompt_block`` is set); returns its image ref.
     *seed* overrides the seed as in :func:`character_image`; the rules and
@@ -852,7 +860,7 @@ def prop_image(stories, story_id, prop_id, *, env, on_log, cancel, note=None, se
 
     ref, label, est, paid = _make(stories, story, plan, entity=PROPS, eid=prop_id, lock=lock, env=env,
                                   on_log=on_log, cancel=cancel, adapters=adapters, transport=transport,
-                                  sleep_fn=sleep_fn, time_fn=time_fn)
+                                  sleep_fn=sleep_fn, time_fn=time_fn, sticky=sticky)
 
     current = stories.read_entity(story_id, PROPS, prop_id)
     current["image"] = ref

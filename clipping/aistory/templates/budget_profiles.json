@@ -23,9 +23,9 @@
       "cap_usd": 4.0,
       "images": "quality_roles",
       "roles": {
-        "sheet": ["fal/seedream-4.5", "fal/seedream-4.5-edit"],
-        "plate": ["fal/seedream-4.5", "fal/seedream-4.5-edit"],
-        "prop": ["fal/seedream-4.5", "fal/seedream-4.5-edit"],
+        "sheet": ["fal/seedream-4.5", "fal/seedream-4.5-edit", "gemini/nano-banana-2-lite"],
+        "plate": ["fal/seedream-4.5", "fal/seedream-4.5-edit", "gemini/nano-banana-2-lite"],
+        "prop": ["fal/seedream-4.5", "fal/seedream-4.5-edit", "gemini/nano-banana-2-lite"],
         "keyframe": ["fal/seedream-4.5-edit", "gemini/nano-banana-2-lite"]
       },
       "tts": "free_or_local",
@@ -41,9 +41,9 @@
       "cap_usd": 10.0,
       "images": "quality_roles",
       "roles": {
-        "sheet": ["fal/seedream-4.5", "fal/seedream-4.5-edit"],
-        "plate": ["fal/seedream-4.5", "fal/seedream-4.5-edit"],
-        "prop": ["fal/seedream-4.5", "fal/seedream-4.5-edit"],
+        "sheet": ["fal/seedream-4.5", "fal/seedream-4.5-edit", "gemini/nano-banana-2-lite"],
+        "plate": ["fal/seedream-4.5", "fal/seedream-4.5-edit", "gemini/nano-banana-2-lite"],
+        "prop": ["fal/seedream-4.5", "fal/seedream-4.5-edit", "gemini/nano-banana-2-lite"],
         "keyframe": ["fal/seedream-4.5-edit", "gemini/nano-banana-2-lite"]
       },
       "tts": "free_or_local",
@@ -63,9 +63,9 @@
       "cap_usd": 2.0,
       "images": "quality_roles",
       "roles": {
-        "sheet": ["fal/seedream-4.5", "fal/seedream-4.5-edit"],
-        "plate": ["fal/seedream-4.5", "fal/seedream-4.5-edit"],
-        "prop": ["fal/seedream-4.5", "fal/seedream-4.5-edit"],
+        "sheet": ["fal/seedream-4.5", "fal/seedream-4.5-edit", "gemini/nano-banana-2-lite"],
+        "plate": ["fal/seedream-4.5", "fal/seedream-4.5-edit", "gemini/nano-banana-2-lite"],
+        "prop": ["fal/seedream-4.5", "fal/seedream-4.5-edit", "gemini/nano-banana-2-lite"],
         "keyframe": ["fal/seedream-4.5-edit", "gemini/nano-banana-2-lite"]
       },
       "tts": "free_or_local",

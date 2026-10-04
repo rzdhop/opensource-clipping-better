@@ -70,6 +70,9 @@ _RATIOS = ("1:1", "9:16", "16:9", "3:4", "4:3", "2:3", "3:2", "4:5", "5:4", "21:
 # Gemini's ``generationConfig.imageConfig.imageSize`` (phase 7, A-113/A-121):
 # the 1K tier the price table's nano-banana rows are read at.
 GEMINI_IMAGE_SIZE = "1K"
+# Reference images one Gemini image request carries (nano-banana 2 / lite accept
+# up to 14, A-112); callers send fewer (refimages.MAX_REFERENCES), this is the bound.
+GEMINI_MAX_REFERENCES = 14
 
 # fal seedream v4.5, edit and text-to-image alike (schema read 2026-10-01,
 # A-111; the text-to-image endpoint's bounds read 2026-10-01, DEC-235): a
@@ -218,7 +221,7 @@ class GeminiImageAdapter(_Adapter):
         key = credentials[generation.env_keys_for(link)[0]]
         seed = _seed(request)
         parts = [{"text": request.prompt}]
-        for path in request.references or ():
+        for path in tuple(request.references or ())[:GEMINI_MAX_REFERENCES]:
             mime, text = read_b64(path)
             parts.append({"inline_data": {"mime_type": mime, "data": text}})
         body = {

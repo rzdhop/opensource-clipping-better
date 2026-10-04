@@ -49,7 +49,9 @@ def test_the_episode_is_the_v2_templates_shots_on_the_profiles_links_at_the_tabl
     # text-to-image link and its two sheets on the edit link, one plate a
     # place and one image a prop (DEC-235: fal Seedream 4.5).
     story = estimate["story"]
-    assert story["sheet_links"] == roles["sheet"] and story["plate_link"] == roles["plate"][0]
+    # Re-pinned (plan 23 stage A8, DEC-280): the roles lists gain lite as a third link; the estimate
+    # prices the first link of each kind (fal), so these are the first two links.
+    assert story["sheet_links"] == roles["sheet"][:2] and story["plate_link"] == roles["plate"][0]
     assert story["prop_link"] == roles["prop"][0]
     expected = (story["characters"] * (pricing.PRICES[roles["sheet"][0]].usd + 2 * pricing.PRICES[roles["sheet"][1]].usd)
                 + story["places"] * pricing.PRICES[roles["plate"][0]].usd

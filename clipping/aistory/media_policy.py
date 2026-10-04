@@ -45,10 +45,13 @@ LOW_QUALITY_LINKS = frozenset({
     "openai/gpt-image-2-low",
 })
 
+# DEC-280 (plan 23 stage A8): the quality roles' sheet/plate/prop lists end with
+# gemini/nano-banana-2-lite (amends DEC-235); lite is in none of the sets below, so
+# role_chain keeps it for both kinds and skips it as "no key" without a paid Gemini key.
 # Links that only edit (need at least one reference image) and so can never
 # answer a gen.IMAGE (text-to-image) request. A role's links may name one of
 # these next to its text-to-image sibling (stage 2c, DEC-235: the quality
-# sheet/plate/prop roles are ``[fal/seedream-4.5, fal/seedream-4.5-edit]``),
+# sheet/plate/prop roles end with gemini/nano-banana-2-lite, DEC-280),
 # and role_chain keeps only the one that serves the request's kind. A link in
 # neither this set nor TEXT_ONLY_LINKS (e.g. a nano-banana link) serves
 # gen.IMAGE and gen.IMAGE_EDIT alike.

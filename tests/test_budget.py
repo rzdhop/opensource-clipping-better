@@ -118,13 +118,14 @@ def test_the_shipped_profiles_match_the_spec():
     # real cap, the quality_roles images policy with its roles table, and 720p video.
     # Re-pinned (stage 2c, DEC-235: "fal only", no Google billing): sheet/plate/prop moved from
     # gemini/nano-banana-2 to fal (its text-to-image link, then its edit sibling).
+    # Re-pinned again (plan 23 stage A8, DEC-280): gemini/nano-banana-2-lite is their second link.
     quality = profiles["profiles"]["quality"]
     assert quality["cap_usd"] == 4.0  # stage E: Veo's clips with sound, about $3.3-3.5 an episode
     assert quality["images"] == "quality_roles"
     assert quality["roles"] == {
-        "sheet": ["fal/seedream-4.5", "fal/seedream-4.5-edit"],
-        "plate": ["fal/seedream-4.5", "fal/seedream-4.5-edit"],
-        "prop": ["fal/seedream-4.5", "fal/seedream-4.5-edit"],
+        "sheet": ["fal/seedream-4.5", "fal/seedream-4.5-edit", "gemini/nano-banana-2-lite"],
+        "plate": ["fal/seedream-4.5", "fal/seedream-4.5-edit", "gemini/nano-banana-2-lite"],
+        "prop": ["fal/seedream-4.5", "fal/seedream-4.5-edit", "gemini/nano-banana-2-lite"],
         "keyframe": ["fal/seedream-4.5-edit", "gemini/nano-banana-2-lite"],
     }
     assert quality["video_resolution"] == "720p"

@@ -56,13 +56,15 @@ def test_v2_roles_never_use_low_quality_links(monkeypatch, tmp_path):
     # Re-pinned on purpose (DEC-235): the quality sheet/plate/prop roles moved
     # from gemini/nano-banana-2 to fal (text-to-image on IMAGE, its edit
     # sibling on IMAGE_EDIT).
-    assert labels(media_policy.role_chain("sheet", gen.IMAGE, CHEAP_FIRST, story)) == ["fal/seedream-4.5"]
+    # Re-pinned (plan 23 stage A8, DEC-280): lite follows fal as the second link of sheet/plate/prop.
+    assert labels(media_policy.role_chain("sheet", gen.IMAGE, CHEAP_FIRST, story)) == [
+        "fal/seedream-4.5", "gemini/nano-banana-2-lite"]
     assert labels(media_policy.role_chain("keyframe", gen.IMAGE_EDIT, CHEAP_FIRST, story)) == [
         "fal/seedream-4.5-edit", "gemini/nano-banana-2-lite"]
 
     # The chain every image site resolves is the role's (RC-V6: the estimate and the run agree).
     _merged, chain, _budget = imaging.resolve(gen.IMAGE, CHEAP_FIRST, error=RuntimeError, role="plate", story=story)
-    assert labels(chain) == ["fal/seedream-4.5"]  # re-pinned (DEC-235)
+    assert labels(chain) == ["fal/seedream-4.5", "gemini/nano-banana-2-lite"]  # re-pinned (DEC-235, DEC-280)
     estimate = imaging.estimate(gen.IMAGE_EDIT, CHEAP_FIRST, route="api", request=gen.GenRequest(
         kind=gen.IMAGE_EDIT, width=720, height=1280), step="t", what="w", when="w", role="keyframe", story=story,
         adapters={})
@@ -94,11 +96,17 @@ def test_v2_sheet_role_uses_fal_text_to_image_then_edit():
     keeps only the link each kind can actually run: the edit-only link is
     dropped for gen.IMAGE (it needs references gen.IMAGE never sends), the
     text-only link for gen.IMAGE_EDIT (it has no image_urls field).
-    plate/prop are the same roles list and behave identically."""
+    plate/prop are the same roles list and behave identically.
+
+    Re-pinned (plan 23 stage A8, DEC-280): the roles list ends with
+    ``gemini/nano-banana-2-lite``, which serves both kinds, so each chain is
+    the fal link of its kind, then lite."""
     story = v2_story()
     for role in ("sheet", "plate", "prop"):
-        assert labels(media_policy.role_chain(role, gen.IMAGE, CHEAP_FIRST, story)) == ["fal/seedream-4.5"]
-        assert labels(media_policy.role_chain(role, gen.IMAGE_EDIT, CHEAP_FIRST, story)) == ["fal/seedream-4.5-edit"]
+        assert labels(media_policy.role_chain(role, gen.IMAGE, CHEAP_FIRST, story)) == [
+            "fal/seedream-4.5", "gemini/nano-banana-2-lite"]
+        assert labels(media_policy.role_chain(role, gen.IMAGE_EDIT, CHEAP_FIRST, story)) == [
+            "fal/seedream-4.5-edit", "gemini/nano-banana-2-lite"]
         for kind in (gen.IMAGE, gen.IMAGE_EDIT):
             chain = labels(media_policy.role_chain(role, kind, CHEAP_FIRST, story))
             assert not set(chain) & media_policy.LOW_QUALITY_LINKS

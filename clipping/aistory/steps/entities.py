@@ -28,7 +28,7 @@ from __future__ import annotations
 import os
 import secrets
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, Optional
 
 from .. import defaults, imaging, schemas
@@ -58,13 +58,15 @@ class Tools:
     sleep_fn: Callable[[float], None] = time.sleep
     adapters: Optional[dict] = None
     transport: Optional[Callable] = None
+    # One cast or places job's first-answering image provider (DEC-280; refimages._make).
+    sticky: dict = field(default_factory=dict)
 
     def image_kwargs(self, ctx) -> dict:
         """The keyword arguments every ``refimages`` call takes from the step."""
         return {
             "env": ctx.settings_env, "on_log": ctx.on_log, "cancel": ctx.cancel,
             "adapters": self.adapters, "transport": self.transport,
-            "sleep_fn": self.sleep_fn, "time_fn": self.time_fn,
+            "sleep_fn": self.sleep_fn, "time_fn": self.time_fn, "sticky": self.sticky,
         }
 
     def voice_kwargs(self, ctx) -> dict:
