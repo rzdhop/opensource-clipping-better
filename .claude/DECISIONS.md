@@ -5182,3 +5182,25 @@ templates will.
 **Consequence.** Six pinned strings in `tests/test_story_metadata_step.py` changed in lockstep; a test ties the card's
 text to `PART_CALL` minus the arrow; the golden render and `framemd5.json` are unedited (RC-M2), RC-M8 holds. Known
 and older: a long title can overflow the card. Commit 87afd4d (main).
+
+## DEC-268 — Episode formats are a per-story choice; the narrated drama and a 90 s v2 ship; a style only suggests a format (plan 20 stage 1, after DEC-267)
+**Context.** The fruit-drama formula is carried by one dramatic narrator with 2–4 character lines, yet the pipeline
+offered only the dialogue-led `serial_60s_v2`; `defaults.episode_template_for` read the pipeline alone, and a style's
+`episode_defaults.episode_template_id` was a schema const nothing read.
+**Decision.** Two formats: `narrated_drama_60s_v2` (58–78 s, target 66, 3–5 body scenes of 9–13 s, `narrator_share:
+[0.6, 0.85]`, `character_lines: [2, 4]`, `end_card_cta: true`) and `serial_90s_v2` (80–100 s, target 90, the 60 s v2
+shape scaled). `prompts.narration_of(template, narrator_enabled)` adds one ask line to E1v2 and E2/E2v2 only when the
+template carries `narrator_share` and the story's narrator is on; every other template's prompts are byte-identical
+(RC-M1). `episode_template_for(profile, chosen)` uses the story's own `episode_template_id` when it is a shipped id,
+else the pipeline default. The style's `episode_defaults.episode_template_id` is the enum: Fruit Drama suggests the
+narrated drama; the six others keep `serial_60s_v1`; `GET /styles` returns the suggestion. `POST /api/stories`
+accepts `episode_template_id` (400 for an unknown id, nothing created); PATCH keeps its 409 once an episode has a
+script. The new-story form's "Episode format" select takes the style's suggestion only when it fits the chosen
+pipeline (else the pipeline default), sends null when nothing was chosen so the server decides. The
+`EPISODE_TEMPLATES` literal moved to `episodeTemplates.js`, its contract test re-pointed.
+**Rejected.** Forcing the format by style (a style is a look; DEC-263: suggest, never force). Enforcing the share and
+the line count on the model's reply (asked for in the prompt, judged by J1; a counter is a follow-up).
+**Consequence.** `EXPECTED_EPISODE_TEMPLATE_IDS` 3 → 5 on purpose. Follow-ups: E3 (hook, cliffhanger, recap) and
+legacy E1 get no narration line; no CLI flag for the format; English labels only in the wizard; the backend does not
+check that a format fits the pipeline (as before); BGM preference stays with the style's `emotion_to_mood`. Commit
+0feb342 (main).
