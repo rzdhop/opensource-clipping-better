@@ -14,6 +14,7 @@
   Drama → narrated), the "Episode format" select, the narration ask line (gated), seven plot archetypes + S1v2,
   four fruit-kingdom concepts (14), the "Comment PART N" pinned comment, the opt-in end-card CTA.
 - **Episode 2 of d0ee5ebd745d:** rendered (see the previous header); the human's verdict pending.
+- **Tier-1 baseline:** full local suite on ae28eba (plans 19 + 20): **7461 passed, 1 skipped, 0 failed**.
 - **Regression-contract additions this session:** RC-G1 (planned with plan 21: the agent run writes story approvals
   only through `workflow.approve_*` with `by: agent`); DEC-266 made shot ids stable keys (RC-A8 kept for old boards).
 
