@@ -99,7 +99,7 @@ function hasReview(episode) {
  * keep their places (the wide layout reads tabs[0..2] for its headings); it
  * is where "Generate episode" ends, switched to when the job does.
  */
-function tabsFor(episode, manual = false) {
+function tabsFor(episode) {
   const scriptApproved = Boolean(episode.script && episode.script.approved_at)
   const storyboardApproved = Boolean(episode.storyboard && episode.storyboard.approved_at)
   const tabs = [
@@ -108,8 +108,6 @@ function tabsFor(episode, manual = false) {
     { id: 'preview', label: 'Preview' },
   ]
   if (hasReview(episode)) tabs.push({ id: 'review', label: `Review${episode.review.ready ? ' ✓' : ''}` })
-  // Plan 22 stage 5: your own clips, shot by shot -- last, so the three panes keep their places.
-  if (manual && episode.storyboard) tabs.push({ id: 'shots', label: 'Shot list' })
   return tabs
 }
 
@@ -426,7 +424,9 @@ export default function EpisodeStudio() {
   const arcEntry = ((story.season && story.season.arc) || []).find((entry) => entry.ep === epNumber)
   const manual = clipsManual(story.story, episode)
   const pausedJob = pausedJobOf(episode)
-  const tabs = tabsFor(episode, manual)
+  const tabs = tabsFor(episode)
+  // Plan 22 stage 5: your own clips, shot by shot -- last, so the three panes keep their places.
+  if (manual && episode.storyboard) tabs.push({ id: 'shots', label: 'Shot list' })
   const activeTab = tabs.some((entry) => entry.id === tab) ? tab : 'script'
   const fastTrackJob = inFlightJob && inFlightJob.step === 'fast-track' ? inFlightJob : null
   const steps = episodeSteps(episode, hasReview(episode))

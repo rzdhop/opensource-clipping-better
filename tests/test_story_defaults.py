@@ -187,12 +187,16 @@ def test_new_story_is_v2_quality_when_keys_present(monkeypatch, tmp_path, capsys
     quality = {"tier": 3, "route": "api", "consistency_mode": "references", "budget_profile": "quality",
                "pipeline": "v2"}
     assert defaults.quality_generation_profile() == quality
+    # Re-pinned on purpose (plan 22 stage 5: the manual mode is the default): with the keys, a new story
+    # starts on the quality preset's v2 profile on the native_speech_manual budget profile (your own clips).
+    manual = dict(quality, budget_profile="native_speech_manual")
+    assert defaults.manual_speech_generation_profile() == manual
     for name in ("FAL_KEY", "GEMINI_PAID_API_KEY"):
         monkeypatch.delenv(name, raising=False)
 
     # 1. the API route's helper, on the Settings values
-    assert media_policy.new_story_profile({"FAL_KEY": "fk", "GEMINI_PAID_API_KEY": "pk"}) == quality
-    assert media_policy.new_story_profile({"FAL_KEY": "fk"}) == quality  # re-pinned (DEC-235): FAL_KEY alone suffices
+    assert media_policy.new_story_profile({"FAL_KEY": "fk", "GEMINI_PAID_API_KEY": "pk"}) == manual
+    assert media_policy.new_story_profile({"FAL_KEY": "fk"}) == manual  # re-pinned (DEC-235): FAL_KEY alone suffices
     assert media_policy.new_story_profile({"GEMINI_PAID_API_KEY": "pk"}) is None
     assert media_policy.new_story_profile({}) is None  # the no-key case, unchanged
 
@@ -208,7 +212,7 @@ def test_new_story_is_v2_quality_when_keys_present(monkeypatch, tmp_path, capsys
 
     assert created() == defaults.default_generation_profile()
     monkeypatch.setenv("FAL_KEY", "fk")
-    assert created() == quality  # re-pinned (DEC-235): FAL_KEY alone is enough
+    assert created() == manual  # re-pinned (DEC-235): FAL_KEY alone is enough
     assert created("--tier", "1") == defaults.default_generation_profile()
 
     # 3. the store's own default is today's
