@@ -553,6 +553,12 @@
   should re-buy only the planned scenes: confirmed on the next repair walk if the assets step says "nothing to make"
   for untouched scenes.
 
+- **A-144** — (DEC-270, plan 21 decision 4) Looks approved on completeness by the agent run — the style lock, the
+  five portraits and sheets, the plates and props of *Le Sceau Pourri* — are acceptable to the human without a taste
+  check, given that every regenerate stays available in Studio. UNCONFIRMED until the human reviews d16026f12e77 on
+  the phone: confirmed if no look is regenerated before episode 2; refuted if several are (then agent mode gains a
+  "stop after the cast" switch, like the fast track's stop at the keyframes).
+
 ## Confirmed
 - **A-082** — fal.ai as measured in the paid test (2026-09-29, DEC-174):
   - 35 requests with 0 failures: 13 `fal-ai/flux/schnell` (4–13 s each; booked $0.0028 at 720x1280, $0.0018 for a
