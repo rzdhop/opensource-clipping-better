@@ -1,3 +1,23 @@
+## CURRENT STATE — lipsync (DEC-258, option B) merged and deployed; the episode-2 paid walk RUNNING (2026-10-04, local session)
+
+- **The human (2026-10-04):** "Decide for me for the A & B probes and make me a full generation of a video". Decided B
+  (Kling lipsync on the Gemini voices: cheap, fast, reversible; Veo = ~$29/episode, caps, French unheard) — DEC-258,
+  A-140. Built by an Opus agent (feat/lipsync-kling 7f7a55e + bf0c3c2, fast-forwarded into main): kind LIPSYNC +
+  `clipping/providers/lipsync.py` (fal storage uploads, the key on the initiate call only, the submit journaled),
+  `steps/lipsync.py` (the dialogue track from the in-frame lines at their timeline offsets, 24 kHz, exactly clip_s;
+  the kept take = Kling's picture + the plain clip's own sound), `assets.clip.lipsync` (optional key), `assets.video`
+  → `shot_NN.lipsync.mp4`, the estimate part, the 10 s clip cap on a lipsyncing story, the `lipsync: none|kling`
+  profile key (quality = kling; per-story `generation_profile.lipsync`), the dashboard badge. Full suites by the
+  agent: local 7320 / 1 skipped, CI env 6487 / 804 skipped; my selection after the merge 100 passed. Re-pins: six
+  tests' fixture story set to `lipsync="none"` (they pin the 12 s clip), two long-shot tests likewise.
+- **Deployed:** image rebuilt at 0 jobs (bf0c3c2), health 200. Settings: `per_episode_cap_usd` 3 → 4 (the shipped
+  default; seedance ≈ $2.4 + the $0.40 redraw ceiling + ≈ $0.3 lipsync would not fit $3) — said to the human.
+- **The walk:** episode 1's series memory written (job af484b9c7685, free) and approved; the one click on episode 2
+  of d0ee5ebd745d = job **be8a763c9199** (storyboard t1, no stop at the keyframes): estimate before clips $1.12
+  (18 keyframes $0.72 + $0.40 redraws), clips ≈ $1.6 + lipsync ≈ $0.3. Monitored from this session; the human judges
+  the video (A-137 performance prompts, A-140 lipsync, A-135 slowed clips if any).
+- **Pending verdicts:** A-133…A-140 all wait on this episode and the human's eyes on the app.
+
 ## CURRENT STATE — the AI Story dashboard overhaul: DONE — all 5 stages merged and deployed (2026-10-03, local session)
 
 - **Stage 1 (DEC-253, Opus agent, branch feat/dashboard-foundation b24275a + ab7eb63, my tweak ef1edcc):** the
