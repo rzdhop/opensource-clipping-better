@@ -5053,3 +5053,19 @@ tab, where they are useful as notes).
 on over taste. A `continuity` note that is really a taste ("inconsistent with the interface") still blocks and is
 repaired — up to two passes, then the fast track stops and the human approves anyway (the live s07 case).
 
+## DEC-262 — The hook's insert shot is asked only when the scene has a prop; an insert without one is repaired to a close-up (after DEC-261)
+**Context.** The episode-2 one click (job 890427495856, 2026-10-04) planned 14 shots over 8 scenes — the two-beat
+rule, the camera repair and the informed retry all at work — then stopped on the hook: the style's `hook_style` is
+`insert_prop`, the T1 v2 ask said "exactly one shot must use framing insert_prop", and the validator requires a prop
+tag among an insert's subjects — but the hook scene listed no prop, so every reply on every link was impossible.
+**Decision.** In `build_t1_v2` the insert note is written only when the scene's allowed tags hold a prop; with none
+it says "it lists no prop, so never use framing insert_prop: frame its object or screen as a close_up" (the v1 ask
+is untouched, RC-M1). `storyboard._repair_insert_prop` (part of `_repair_t1_v2_reply`): an `insert_prop` shot with no
+prop tag gets the scene's first prop when it has one, else its framing becomes `close_up`, logged like the other
+repairs. Tests: the repair (both branches, the validator then passes) in `test_story_storyboard_props.py`; the ask
+in `test_story_episode_prompt_budgets.py`.
+**Rejected.** Making the validator accept an insert without a prop (the storyboard would then resolve a prop role
+that does not exist); listing a prop on the hook scene from the step (the writer decides the scene's props).
+**Consequence.** A hook scene without a prop is a close-up on its object; the one click goes on. Follow-up: E1v2
+could be asked to list a prop on the hook scene when the style's hook is an insert.
+

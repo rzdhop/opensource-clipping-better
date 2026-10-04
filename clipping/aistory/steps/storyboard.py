@@ -412,6 +412,33 @@ def plan_scene(ctx, ec, script, plans, scene, *, tools, announced, limit_s=None)
 _CAMERA_ROTATION = ("push_in", "pan_lr", "pull_out", "pan_rl", "hold", "pan_du", "pan_ud")
 
 
+INSERT_PROP_FALLBACK_FRAMING = "close_up"
+
+
+def _repair_insert_prop(reply, tags_allowed) -> list:
+    """DEC-262's half of :func:`_repair_t1_v2_reply`: a shot framed
+    ``insert_prop`` with no prop tag among its subjects gets the scene's
+    first prop tag when the scene has one (the insert is on it), else its
+    framing becomes :data:`INSERT_PROP_FALLBACK_FRAMING` -- the validator
+    would refuse it on every link (the live hook scene listed no prop)."""
+    fixed = []
+    props = [tag for tag in tags_allowed if isinstance(tag, str) and tag.startswith("%")]
+    for i, shot in enumerate(reply["shots"]):
+        if not isinstance(shot, dict) or shot.get("framing") != "insert_prop":
+            continue
+        subjects = shot.get("subjects")
+        if not isinstance(subjects, list) or any(isinstance(t, str) and t.startswith("%") for t in subjects):
+            continue
+        if props:
+            subjects.append(props[0])
+            fixed.append(f"shot {i + 1}: framing 'insert_prop' listed no prop, now on {props[0]}")
+        else:
+            shot["framing"] = INSERT_PROP_FALLBACK_FRAMING
+            fixed.append(f"shot {i + 1}: framing 'insert_prop' in a scene with no prop, now "
+                         f"'{INSERT_PROP_FALLBACK_FRAMING}'")
+    return fixed
+
+
 def _repair_camera(reply, previous_camera) -> list:
     """DEC-252's half of :func:`_repair_t1_v2_reply`: a shot whose
     ``camera_motion`` repeats the shot's before it (the scene's first: the
@@ -457,6 +484,7 @@ def _repair_t1_v2_reply(reply, *, tags_allowed, previous_camera=None) -> list:
     if not isinstance(reply, dict) or not isinstance(reply.get("shots"), list):
         return added
     added.extend(_repair_camera(reply, previous_camera))
+    added.extend(_repair_insert_prop(reply, tags_allowed))
     allowed = set(tags_allowed)
     for i, shot in enumerate(reply["shots"]):
         if not isinstance(shot, dict) or not isinstance(shot.get("subjects"), list):

@@ -289,6 +289,32 @@ def test_t1_v2_reply_repairs_an_allowed_tag_missing_from_subjects():
     assert prompts.validate_t1_v2(reply, **check) == []
 
 
+def test_t1_v2_reply_repairs_an_insert_prop_shot_without_a_prop():
+    """DEC-262 (the live hook scene listed no prop and every link's reply was
+    refused): an insert_prop shot with no prop tag among its subjects gets
+    the scene's first prop when the scene has one, else becomes a close_up;
+    either way the validator then passes."""
+    check = _t1_v2_check()
+    shot = tpe._good_t1_v2_shot(framing="insert_prop")
+    shot["subjects"] = [t for t in shot["subjects"] if not t.startswith("%")]
+    assert any("needs a prop tag" in e for e in prompts.validate_t1_v2({"shots": [copy.deepcopy(shot)]}, **check))
+
+    with_prop = {"shots": [copy.deepcopy(shot)]}
+    props = [t for t in check["tags_allowed"] if t.startswith("%")]
+    assert props
+    added = storyboard._repair_t1_v2_reply(with_prop, tags_allowed=check["tags_allowed"])
+    assert with_prop["shots"][0]["framing"] == "insert_prop" and props[0] in with_prop["shots"][0]["subjects"]
+    assert any("listed no prop, now on " + props[0] in line for line in added)
+    assert not any("needs a prop tag" in e for e in prompts.validate_t1_v2(with_prop, **check))
+
+    no_prop_tags = [t for t in check["tags_allowed"] if not t.startswith("%")]
+    without = {"shots": [copy.deepcopy(shot)]}
+    added = storyboard._repair_t1_v2_reply(without, tags_allowed=no_prop_tags)
+    assert without["shots"][0]["framing"] == storyboard.INSERT_PROP_FALLBACK_FRAMING == "close_up"
+    assert any("in a scene with no prop, now 'close_up'" in line for line in added)
+    assert not any("insert_prop" in e for e in prompts.validate_t1_v2(without, **dict(check, tags_allowed=no_prop_tags)))
+
+
 def test_t1_v2_reply_leaves_a_tag_outside_the_scene_for_the_validator():
     check = _t1_v2_check()
     shot = tpe._good_t1_v2_shot(

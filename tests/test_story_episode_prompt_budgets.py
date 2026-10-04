@@ -921,6 +921,25 @@ def test_v2_writing_worst_cases_measure_what_is_recorded_and_fit_their_budgets(p
     assert budget > v1  # the slice needs room of its own; the v1 rows are untouched (RC-M1)
 
 
+def test_t1_v2_asks_an_insert_only_when_the_hook_scene_has_a_prop():
+    """DEC-262 (the live hook scene listed no prop and every link's reply was
+    refused as an insert without one): with a prop the hook ask demands
+    exactly one insert_prop shot, as before; with none it says never to use
+    insert_prop and to frame the object as a close_up. The v1 ask is
+    untouched (RC-M1)."""
+    kwargs = _t1_v2_kwargs()
+    hook = dict(kwargs["scene"], function="hook")
+    _s, with_prop, _ = prompts.build_t1_v2(_pack(), previous_shots=[], **dict(kwargs, scene=hook,
+                                                                              hook_style="insert_prop"))
+    assert "exactly one shot must use framing insert_prop" in with_prop
+    _s, without, _ = prompts.build_t1_v2(_pack(), previous_shots=[], **dict(kwargs, scene=hook, props=[],
+                                                                            hook_style="insert_prop"))
+    assert "exactly one shot must use framing insert_prop" not in without
+    assert "it lists no prop, so never use framing insert_prop: frame its object or screen as a close_up" in without
+    _s, body, _ = prompts.build_t1_v2(_pack(), previous_shots=[], **dict(kwargs, props=[], hook_style="insert_prop"))
+    assert "insert_prop:" not in body.split("Give 'shots'")[0] or "never use framing insert_prop" not in body
+
+
 def test_t1_v2_with_the_continuity_slice_fits_its_budget():
     ec, knowledge = _sliced_ec()
     ledger = context.ledger_before(knowledge, ec.season, ec.ep)

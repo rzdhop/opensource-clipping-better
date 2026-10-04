@@ -3638,7 +3638,13 @@ def build_t1_v2(pack, *, scene, lines, characters, place, props, previous_shots,
 
     insert_prop_note = ""
     if scene["function"] == "hook" and hook_style == "insert_prop":
-        insert_prop_note = " This is the hook scene: exactly one shot must use framing insert_prop."
+        if any(tag.startswith("%") for tag in tags_allowed):
+            insert_prop_note = " This is the hook scene: exactly one shot must use framing insert_prop."
+        else:
+            # DEC-262: a hook scene with no prop cannot be an insert on one (every link's reply failed on the
+            # live episode); its object or screen is a close-up instead. The v1 ask (RC-M1) is untouched.
+            insert_prop_note = (" This is the hook scene; it lists no prop, so never use framing insert_prop: "
+                                "frame its object or screen as a close_up.")
     close_up_note = ""
     if len(previous_shots or ()) >= 2 and not any(s["framing"] in _T1_V2_TIGHT for s in previous_shots[-2:]):
         close_up_note = (" The two shots before this scene hold no close-up: frame one of this scene's shots "
