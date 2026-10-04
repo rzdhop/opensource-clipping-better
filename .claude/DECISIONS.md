@@ -5317,3 +5317,66 @@ paid link fails at runtime); a host that sets `STORY_LLM_CHAIN` never reaches th
 in `12821d8`, 3 recorded here. Tests: new `tests/test_story_llm_premium_chain.py` (12), extended registry, pricing,
 booking, fast-track tests; the 92-file selection 3011 passed locally, 2461 / 550 skipped on the CI env; preflight
 unedited. A-145 confirmed. Deployed with the stage-4 rebuild (the Settings card is in the dashboard bundle).
+
+## DEC-276 — Native speech: each character line is one shot whose clip speaks it; two links per episode by shot class; the native take times the subtitles; the Veo 3.1 Fast and standard links exist (plan 22 stage 4, after DEC-273)
+**Context.** The human (2026-10-04): "the lipsync is trash … use more expensive video generation with native audio";
+the reference video (a 52 s lipstick confrontation) speaks every line on camera. DEC-258 had chosen Kling LipSync over
+Veo's own speech ("may come back as an opt-in once heard"); DEC-242 kept Veo Lite for ambience only ("no voices").
+On this host Veo never ran: the paid key was not set, so the quality preset silently fell back to seedance + Kling.
+The human's answers: Veo 3.1 Fast by default, standard per story, French, caps 2 / 4 / 10, and clips from their own
+Flow / Higgsfield subscriptions by default (stage 5) — so the API links are optional.
+**Decision** (`7d671cc`, `e97475f`, `b42a50c`, `e031295`, `dbce458`; reviewed, 5 findings, 2 fixed in `dbce458`).
+- **Links.** `gemini/veo-3.1-fast` ($0.10/s 720p, $0.12/s 1080p) and `gemini/veo-3.1` ($0.40/s), lengths 4/6/8 s,
+  sound always on, paid key only, prompt limit 1024 tokens, never in the default chain; their body carries the
+  story's resolution, `personGeneration: allow_adult` and `negativePrompt: "subtitles, captions, on-screen text,
+  watermark"`. **RC-N1:** Lite's body is byte-identical (its sha256 pinned); Lite keeps one price ($0.05/s) because
+  its body still asks 720p (the 1080p row was removed in review: it over-booked by 60 %).
+- **The profile** `native_speech` (cap 10, `video_link_policy: speech_by_shot`, `speech_links` lite/fast/premium,
+  `speech_model: fast`, `silent_link: gemini/veo-3.1-lite`, `tier3_native_audio: speech`, `speech_retake` 1 per shot
+  under $1, `lipsync: none`); per-story `generation_profile.speech_model`; `media_policy.native_speech/speech_link/
+  silent_link/speech_retake/stt_missing_keys/native_speech_estimate`. The new values live in `TIER3_AUDIO_VALUES` and
+  `VIDEO_LINK_POLICY_VALUES` (the old tuples stay pinned by `test_story_ambience.py`); link labels are checked by shape
+  only, so stage 5's `manual/upload` loads before its provider exists.
+- **The shot plan** (`shots.speech_shot_plan`, `clipping/aistory/native_speech.py`): one `speaks` shot per character
+  line (speaker subject, listener secondary), `clip_s` = the smallest sold length whose capacity holds the line
+  (`floor((L − 0.7) × 2.4)`: 4 s → 7 words, 6 → 12, 8 → 17; A-148); narrator lines → silent shots sized to the
+  narration; ≤ `reaction_shots` (default [0, 1]) silent 4 s shots a scene; every shot `duration_s == clip_s`; all
+  boundaries cuts; the board stamps `timing_mode: native_speech`; a line over 17 words is refused before any LLM call.
+- **Two links per episode by class** (`clips.class_link`): speaking shots on `assets.links.video_speech`, silent shots
+  on `assets.links.video`, each sticky with its own switch. **RC-V5 amended** on purpose.
+- **The speech prompt** (`prompting.speech_clip_prompt`, ≤ 200 words, Google's own Veo syntax): camera; "{Speaker},
+  {look}, {action}, looks at {listener} and says in {language}, in {voice line}, "{line}". {Listener} listens without
+  speaking, mouth closed, {reaction}." place; identity; style; "Audio: only {speaker}'s voice speaking {language},
+  close and clear, lips in sync with the words. Ambient noise: {place}, low underneath. No music, no narrator, no
+  other voice. No subtitles, no captions, no on-screen text." — the quoted line, the voice line and the audio sentences
+  are never dropped; `voice_line(character)` is identical in every clip of that character.
+- **No TTS and no lipsync for on-screen lines** (`voice_lines.spoken_by_clip`); the narrator stays TTS voice-over.
+- **The native take** (`steps/native_take.py`, `assets._Assets.native_take_shot`, free): the clip's sound extracted,
+  transcribed by the default STT link in the story's language, aligned to the line (`wordtiming.align`); `ok` when
+  ≥ 75 % of the words are heard and the last ends ≥ 0.1 s before the clip's **real** end; `mismatch` / `no_speech`
+  flagged (agent mode retakes once within `speech_retake`); `stt_unavailable` → even split over the planned window,
+  approximate, the missing key named. A take with speech becomes the line's audio (`voice/line_NN.wav` + a
+  `line_timing_v1` sidecar, `words_source: alignment`), so `is_measured` and the render precondition hold unchanged.
+  The shot's length follows the clip's real length, trimmed to the last word + 0.3 s only past 1 s of silence.
+- **Timing and render**: `timing.native_pass` only on a native board (fixed durations, lines at their takes' start);
+  speaking clips in DEC-201's `video_native_audio` mode, silent clips as ambience under the narrator, both allowed in
+  one mix (`audio_mix_argv(speech=True)`), transitions all cuts, the transition-window rule skipped on native boards.
+- **Estimate**: speaking seconds × the speech link + silent seconds × the silent link + the retake contingency; the
+  generic cap refusal "estimated $x.xx over the per-episode cap $y.yy; raise PER_EPISODE_CAP_USD or use your own
+  clips"; `new_story_offer` and `_agent_episode_usd` price the profile. Shipped caps unchanged.
+- **Dashboard**: "Native speech (Veo)" in the wizard (forces v2 and tier 3; the speaking-clips select with ≈ $ per
+  model; the missing keys named), the profile card, both links on the Video card, speaks/silent and take badges.
+**Rejected.** A mode inside `quality` (five things change at once; a profile keeps every quality story byte-identical).
+Reference images instead of keyframes (8 s forced; +≈ $3 an episode). Seedance as the silent link (a different look;
+left as a per-story override, not built). Best-of-N takes.
+**Consequence.** Under the live caps (2 / 4 / 10) every API speech episode (Lite ≈ $3.4, Fast ≈ $5.4) is refused
+before buying: the profile runs through stage 5's manual link until the human raises a cap for a story. Native
+episodes need short scripts (one shot per line): stage 3's confrontation format and 17-word cap make them fit; until
+then the length gate refuses a `serial_60s_v2` script cut one shot per line. A speaker still needs a pinned voice
+(`is_measured` keys on the TTS label — recorded, stage 7 or later: key clip-spoken lines on the clip's sha instead);
+the take loop saves the board once per shot; `matched_ratio` duplicates `evaluate_take`'s matching. A-147 and A-148
+stay unconfirmed until real takes are heard. Tests: 6 new files + adapter, pricing, budget, lipsync-map re-pins
+(`test_story_lipsync.py`'s profile map gained `native_speech: none`); the agent's 179-file selection 5992 / 5281
+(696 skipped); the merge selection on the final tip (30 files) 696 passed locally, 524 / 172 skipped on the CI env.
+New **RC-N2** (a non-speech story's storyboard, clips, estimate and render byte-identical) and **RC-N3** (every
+bought second rendered or trimmed by the rule; every speaking clip has a take record before render).

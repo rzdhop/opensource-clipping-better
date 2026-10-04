@@ -15,11 +15,12 @@
   deployed: the Settings card needs the image rebuild, batched with stage 4's. Caps set by the orchestrator on the
   human's word: **2 / 4 / 10** (the human: 10/20/60 "too high"); `GEMINI_PAID_API_KEY` set by the human and verified
   (A-145 confirmed); the STT key still missing.
-- **Running now:** stage 2 (Sonnet, `.claude/worktrees/plan22-s2`, `feat/plan22-concepts`, based on 700ef46 — must be
-  rebased onto main 12821d8 before its merge) and stage 4 (Opus, `.claude/worktrees/plan22-s4`,
-  `feat/plan22-native-speech`, 4 commits so far, final tests running). Next: on stage 4's report — review (code-review
-  skill), rebase, Tier-1 selection, ff-merge gated on the exit code, DEC-276, the image rebuild at 0 running jobs (6
-  paused jobs are not running); then stage 5 (the manual link) off main; stage 3 after stage 2.
+- **Stage 4 MERGED** on main `dbce458` (pushed; DEC-276; reviewed: 5 findings, 2 fixed, 3 recorded). The image is
+  being rebuilt at 0 running jobs for stages 1 + 4 (Settings card, the wizard's native-speech option).
+- **Running now:** stage 2 (Sonnet, `.claude/worktrees/plan22-s2`, `feat/plan22-concepts`; told to rebase onto main)
+  and stage 5 (Opus, `.claude/worktrees/plan22-s5`, `feat/plan22-manual-link`, off dbce458: the manual link / bring
+  your own clips). Next: on each report — review (code-review skill), rebase, selection in both envs, ff-merge gated
+  on the exit code, DEC-274 / DEC-277, deploy; then stage 3 (writing v3) off main after stage 2.
 - **Before stage 4 is used live (the human said yes):** `GEMINI_PAID_API_KEY` and a Groq (or Mistral) STT key in
   Settings; caps 10 / 20 / 60. Neither key is set today — Veo has never run on this host.
 - **Open questions:** none blocking. Assumptions A-145…A-150.
@@ -998,7 +999,10 @@
 | RC-V3 | No paid clip or LLM call without `allow_paid` and the caps; one submit per clip; every billed call booked | stage 3/5/8 tests |
 | RC-V4 | The free Gemini chain never reads `GEMINI_PAID_API_KEY`; Veo never reads `GOOGLE_API_KEY` | stage 2 |
 | RC-W1 | `gemini-paid` reads only `GEMINI_PAID_API_KEY`; `gemini` never reads it (DEC-273) | `tests/test_provider_registry.py::test_gemini_paid_reads_only_the_paid_key` |
-| RC-V5 | No silent mixing of image or video links inside an episode | stage 6/8 |
+| RC-N1 | Veo Lite's request body is byte-identical (DEC-276) | `tests/test_video_adapters.py::test_veo_lite_body_unchanged` |
+| RC-N2 | A non-speech story's storyboard, clips, estimate and render are byte-identical (DEC-276) | the goldens + `test_story_ambience.py`, `test_story_lipsync.py` unedited |
+| RC-N3 | On a speech story every bought second is rendered or trimmed by the rule; every speaking clip has a take before render (DEC-276) | `tests/test_story_native_take.py`, `tests/test_story_render_native_speech.py` |
+| RC-V5 | No silent mixing of image or video links inside an episode — amended by DEC-276: a native-speech episode keeps two sticky video links, one per shot class, both shown | stage 6/8; `tests/test_story_native_speech_clips.py` |
 | RC-V6 | The estimate and the run agree on the shots and the dollars | stage 8 |
 | RC-V7 | A failed or stale clip never renders unless "fill" is ticked | stage 9 |
 | RC-V8 | Settings "Test chain" never buys a clip | stage 4 |
