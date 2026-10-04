@@ -1454,9 +1454,11 @@ def test_input_budget_names_every_episode_prompt():
     # Phase 7 stage 5d (DEC-229): re-pinned on purpose -- the memory step's second call, the continuity
     # ledger (L1), measured the same way.
     # Phase 7 stage 6a (DEC-230): re-pinned on purpose -- the first-watch judge (J1), measured the same way.
+    # Plan 20 stage 2: re-pinned on purpose -- a v2 story's S1 with the plot archetypes (S1v2), measured the
+    # same way (tests/test_story_season_archetypes.py); S1 itself stays on the pack budget.
     assert list(prompts.INPUT_BUDGET) == ["E1", "E2", "E3", "E4", "T1", "T1r", "S3", "F1", "N1", "D2", "D3", "R1v2",
                                           "T1v2", "T1rv2", "D1", "D4", "D5", "D6", "E1v2", "E2v2", "E3v2", "L1",
-                                          "J1"]
+                                          "J1", "S1v2"]
 
 
 @pytest.mark.parametrize(

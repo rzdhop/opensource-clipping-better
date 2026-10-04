@@ -1753,6 +1753,10 @@ _ARC_ENTRY_SCHEMA = _document({
     "characters": _id_array(CHAR_ID_PATTERN),
 }, optional={
     "history": {"type": "array", "items": _ARC_HISTORY_ITEM_SCHEMA},
+    # Plan 20 stage 2 (a v2 story's S1): the plot archetype whose beat this
+    # episode plays, the season's primary or its secondary
+    # (``templates/archetypes``); checked against the library in season_arc_errors.
+    "archetype": {"type": "string", "pattern": _ID_PATTERN},
 })
 
 # series_memory.entries (phase 5): what the memory step (S3) wrote for each
@@ -1882,6 +1886,13 @@ SEASON_ARC_SCHEMA = _document({
     "audience_feedback": {"type": "array", "items": _AUDIENCE_FEEDBACK_SCHEMA},
     "approved_at": _TIMESTAMP_OR_NULL,
     "updated_at": _NON_EMPTY_STRING,
+}, optional={
+    # Plan 20 stage 2: the plot archetypes a v2 story's S1 chose for the
+    # season's spine -- one primary, at most one secondary (null when none).
+    "archetypes": _document({
+        "primary": {"type": "string", "pattern": _ID_PATTERN},
+        "secondary": {"type": ["string", "null"], "pattern": _ID_PATTERN},
+    }),
 })
 
 
@@ -1994,6 +2005,128 @@ def season_arc_errors(doc) -> list:
     for i, item in enumerate(doc["audience_feedback"]):
         _audience_feedback_errors(errors, f"$.audience_feedback[{i}]", item)
     _series_memory_errors(errors, doc["series_memory"])
+    _season_archetype_errors(errors, doc)
+    return errors
+
+
+def _season_archetype_errors(errors, doc) -> None:
+    """The season's plot archetypes (plan 20 stage 2), when it names any:
+    every id one of the shipped library's (``templates/archetypes``), the
+    secondary not the primary, and each entry's ``archetype`` one the season
+    chose. An entry may name one only when the season chose its archetypes.
+    A season naming none (every v1 story's, and v2 ones written before)
+    reads no file at all."""
+    chosen = doc.get("archetypes")
+    named = [(i, entry["archetype"]) for i, entry in enumerate(doc["arc"]) if "archetype" in entry]
+    if chosen is None and not named:
+        return
+
+    from . import templates  # it builds on this module, so it is imported here, not at the top
+
+    library = set(templates.list_archetype_ids())
+    allowed = set()
+    if chosen is not None:
+        for key in ("primary", "secondary"):
+            value = chosen[key]
+            if value is None:
+                continue
+            if value not in library:
+                errors.append(f"$.archetypes.{key}: {value!r} is not a shipped plot archetype")
+            allowed.add(value)
+        if chosen["secondary"] is not None and chosen["secondary"] == chosen["primary"]:
+            errors.append("$.archetypes.secondary: must differ from the primary")
+    for i, archetype in named:
+        if chosen is None:
+            errors.append(f"$.arc[{i}].archetype: the season chose no archetypes")
+        elif archetype not in allowed:
+            errors.append(f"$.arc[{i}].archetype: {archetype!r} is neither the season's primary nor its secondary")
+
+
+# ------------------------------------------------------------ archetype_v1 (plan 20 stage 2)
+#
+# The plot-archetype library (``templates/archetypes/*.json``): the
+# telenovela engines a v2 story's season arc is built on. One beat per arc
+# function, in ARC_FUNCTIONS' order, so each episode of the season plays one
+# beat; three twists the writer may reach for; the payoff the season lands
+# on; and the archetypes it pairs well with as a secondary line. Every text
+# in French and English; each capped in words so the S1 pick-list and the
+# S2/D5 beat lines stay inside their prompt budgets.
+ARCHETYPE_SCHEMA_NAME = "archetype_v1"
+ARCHETYPE_PREMISE_MAX_WORDS = 20
+ARCHETYPE_BEAT_MAX_WORDS = 25
+ARCHETYPE_TWIST_MAX_WORDS = 15
+ARCHETYPE_PAYOFF_MAX_WORDS = 25
+ARCHETYPE_TWISTS = 3
+
+ARCHETYPE_SCHEMA = _document({
+    "$schema": {"type": "string", "const": ARCHETYPE_SCHEMA_NAME},
+    "id": {"type": "string", "pattern": _ID_PATTERN},
+    "label": bilingual(),
+    "premise": bilingual(),
+    "beats": {
+        "type": "array",
+        "items": _document({
+            "function": {"type": "string", "enum": list(ARC_FUNCTIONS)},
+            "beat": bilingual(),
+        }),
+        "minItems": len(ARC_FUNCTIONS),
+        "maxItems": len(ARC_FUNCTIONS),
+    },
+    "twists": {"type": "array", "items": bilingual(), "minItems": ARCHETYPE_TWISTS, "maxItems": ARCHETYPE_TWISTS},
+    "payoff": bilingual(),
+    "pairs_well_with": {"type": "array", "items": {"type": "string", "pattern": _ID_PATTERN}},
+})
+
+
+def archetype_errors(archetype) -> list:
+    """``validate()`` against ``ARCHETYPE_SCHEMA``, plus: the beats name the
+    arc functions exactly in ``ARC_FUNCTIONS``' order; every text non-blank
+    in both languages and within its word cap; ``pairs_well_with`` neither
+    names the archetype itself nor any id twice. Whether the pairs resolve
+    is the library's check (``archetype_library_errors``)."""
+    errors = validate(archetype, ARCHETYPE_SCHEMA)
+    if errors:
+        return errors
+
+    errors = []
+    functions = [beat["function"] for beat in archetype["beats"]]
+    if functions != list(ARC_FUNCTIONS):
+        errors.append(f"$.beats: functions {functions} must be exactly {list(ARC_FUNCTIONS)} in order")
+    for language in LANGUAGES:
+        _check_text(errors, f"$.label.{language}", archetype["label"][language])
+        _check_text(errors, f"$.premise.{language}", archetype["premise"][language],
+                    max_words=ARCHETYPE_PREMISE_MAX_WORDS)
+        for i, beat in enumerate(archetype["beats"]):
+            _check_text(errors, f"$.beats[{i}].beat.{language}", beat["beat"][language],
+                        max_words=ARCHETYPE_BEAT_MAX_WORDS)
+        for i, twist in enumerate(archetype["twists"]):
+            _check_text(errors, f"$.twists[{i}].{language}", twist[language], max_words=ARCHETYPE_TWIST_MAX_WORDS)
+        _check_text(errors, f"$.payoff.{language}", archetype["payoff"][language],
+                    max_words=ARCHETYPE_PAYOFF_MAX_WORDS)
+    pairs = archetype["pairs_well_with"]
+    if archetype["id"] in pairs:
+        errors.append("$.pairs_well_with: an archetype cannot pair with itself")
+    for pair in sorted({pair for pair in pairs if pairs.count(pair) > 1}):
+        errors.append(f"$.pairs_well_with: {pair!r} is listed twice")
+    return errors
+
+
+def archetype_library_errors(archetypes) -> list:
+    """The library as a whole: ids unique, and every ``pairs_well_with`` id
+    one of the library's, the pairing mutual (a secondary that pairs well
+    with a primary is paired back)."""
+    errors = []
+    by_id = {}
+    for archetype in archetypes:
+        if archetype["id"] in by_id:
+            errors.append(f"{archetype['id']}: listed twice")
+        by_id[archetype["id"]] = archetype
+    for archetype_id, archetype in by_id.items():
+        for pair in archetype["pairs_well_with"]:
+            if pair not in by_id:
+                errors.append(f"{archetype_id}.pairs_well_with: {pair!r} is not an archetype of the library")
+            elif archetype_id not in by_id[pair]["pairs_well_with"]:
+                errors.append(f"{archetype_id}.pairs_well_with: {pair!r} does not pair back")
     return errors
 
 
@@ -4803,6 +4936,58 @@ def s1_errors(doc, episodes) -> list:
         if "midpoint_twist" not in [entry["function"] for entry in arc]:
             errors.append("$.arc: no episode has function 'midpoint_twist'")
 
+    return errors
+
+
+def s1_archetype_schema(episodes, archetype_ids) -> dict:
+    """S1's output schema on a v2 story (plan 20 stage 2): the season's plot
+    archetypes first -- a primary and a secondary (null for none), each
+    among *archetype_ids* -- then ``s1_schema``'s entries, each naming the
+    archetype whose beat it plays."""
+    ids = list(archetype_ids)
+    entry = _llm_obj({
+        "ep": {"type": "integer", "description": "the episode number, 1-based"},
+        "function": {"type": "string", "enum": list(ARC_FUNCTIONS)},
+        "archetype": {"type": "string", "enum": ids, "description": "the primary or the secondary"},
+        "summary": {"type": "string", "description": "story language, at most 25 words"},
+    })
+    return _llm_obj({
+        "archetypes": _llm_obj({
+            "primary": {"type": "string", "enum": ids},
+            "secondary": {"type": ["string", "null"], "enum": ids + [None],
+                          "description": "one that pairs well with the primary, or null"},
+        }),
+        "arc": {"type": "array", "description": f"exactly {episodes} entries, one per episode", "items": entry},
+    })
+
+
+def s1_archetype_errors(doc, episodes, pairs) -> list:
+    """Post-validation for S1's v2 reply: ``s1_errors``' rules on the arc,
+    plus (*pairs*: ``{archetype id: [ids it pairs well with]}``, the
+    library) the secondary, when named, one the primary pairs well with;
+    each entry on the primary or the secondary; episode 1 and the last on
+    the primary (the spine opens and closes the season); a named secondary
+    playing at least one episode."""
+    errors = validate(doc, s1_archetype_schema(episodes, list(pairs)))
+    if errors:
+        return errors
+
+    arc = [{key: entry[key] for key in ("ep", "function", "summary")} for entry in doc["arc"]]
+    errors = s1_errors({"arc": arc}, episodes)
+    primary, secondary = doc["archetypes"]["primary"], doc["archetypes"]["secondary"]
+    if secondary is not None and secondary not in pairs[primary]:
+        errors.append(f"$.archetypes.secondary: {secondary!r} does not pair with {primary!r} "
+                      f"(it pairs with {', '.join(pairs[primary]) or 'none'})")
+    chosen = [primary] if secondary is None else [primary, secondary]
+    for i, entry in enumerate(doc["arc"]):
+        if entry["archetype"] not in chosen:
+            errors.append(f"$.arc[{i}].archetype: {entry['archetype']!r} is neither the primary nor the secondary")
+    if doc["arc"]:
+        for i in sorted({0, len(doc["arc"]) - 1}):
+            if doc["arc"][i]["archetype"] != primary:
+                errors.append(f"$.arc[{i}].archetype: the first and the last episode follow the primary, {primary!r}")
+        if secondary is not None and secondary not in [entry["archetype"] for entry in doc["arc"]]:
+            errors.append(f"$.archetypes.secondary: {secondary!r} plays no episode; give it one or name none")
     return errors
 
 

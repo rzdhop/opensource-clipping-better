@@ -155,6 +155,10 @@ C1_CALLS = 10
 # J2 (stage 6b): its largest reply (English: 3 missing items of 6 words, a
 # 25-word continuity issue, 6-character words) needs 91 (chars/4), + 15 %,
 # rounded up to ten: 110, under the plan's 160.
+# S1v2 (plan 20 stage 2, a v2 story's S1, DEC-138's method): its largest
+# French reply -- 12 entries at 25 words, each naming the longest archetype
+# id, and the primary and secondary chosen -- needs 997.1 tokens (chars/4 x
+# 1.3); + 15 %, rounded up to ten (tests/test_story_season_archetypes.py).
 MAX_TOKENS = {
     "C1": 700, "B1": 400, "B2": 520, "B3": 300,
     "K1": 750, "P0": 420, "P1": 260, "R1": 100, "S1": 950, "S2": 350, "U1": 120,
@@ -168,6 +172,7 @@ MAX_TOKENS = {
     "E1v2": 1750, "E2v2": 600, "E3v2": 720,
     "L1": 690,
     "J1": 970, "J2": 110,
+    "S1v2": 1150,
 }
 
 # E1's payoff variant (phase 5, plan 11 stage 3, DEC-138's method): from
@@ -220,6 +225,7 @@ TEMPERATURE = {
     "L1": ANALYTIC_TEMPERATURE,
     "J1": ANALYTIC_TEMPERATURE,
     "J2": ANALYTIC_TEMPERATURE,
+    "S1v2": WRITING_TEMPERATURE,
 }
 SCHEMA_NAMES = {
     "C1": "story_concepts", "B1": "bible_core", "B2": "bible_world", "B3": "bible_values",
@@ -237,6 +243,7 @@ SCHEMA_NAMES = {
     "E1v2": "episode_beat_sheet_v2", "E2v2": "episode_scene_dialogue_v2", "E3v2": "episode_framing_scenes_v2",
     "L1": "continuity_ledger",
     "J1": "first_watch_check", "J2": "keyframe_check",
+    "S1v2": "season_arc_skeleton_v2",
 }
 
 # E4's input is the whole script, not a small pack -- it needs a wider
@@ -354,10 +361,16 @@ SCHEMA_NAMES = {
 # J2 (stage 6b) is a vision call with no pack, as U1: no entry; its text at
 # its worst case fits the default pack budget (tests/test_story_keyframe_gate.py)
 # -- version 2 (phase 8 stage B: looks, sheets, the scene) too, at 1,145.
+#
+# S1v2 (plan 20 stage 2): S1 plus the plot-archetype pick-list (the seven
+# premises in French, each with its pairs), on a French worst case -- the
+# bible past its 120-word cut, the world at B2's caps, 12 cast and 8 places
+# with 20-word one-lines -- 2,301; + 15 %, rounded up to ten
+# (tests/test_story_season_archetypes.py).
 INPUT_BUDGET = {"E1": 1820, "E2": 1660, "E3": 2530, "E4": 3900, "T1": 1270, "T1r": 1410, "S3": 3740, "F1": 3950, "N1": 3740,
                 "D2": 2420, "D3": 1940, "R1v2": 1170, "T1v2": 2150, "T1rv2": 2130, "D1": 3890,
                 "D4": 2270, "D5": 3930, "D6": 3560,
-                "E1v2": 2970, "E2v2": 2520, "E3v2": 3420, "L1": 3920, "J1": 3990}
+                "E1v2": 2970, "E2v2": 2520, "E3v2": 3420, "L1": 3920, "J1": 3990, "S1v2": 2650}
 
 # The ``bible:<field>`` grammar of spec 9.2: which prompt a regenerate note
 # re-runs, and which of that prompt's fields it targets. "tone" also carries
@@ -909,7 +922,7 @@ def _knowledge_places_block(places) -> str:
     return "Places:\n" + "\n".join(lines) + "\n\n"
 
 
-def build_d5(pack, *, ep, planned, entry, previous, cast, others, places, props):
+def build_d5(pack, *, ep, planned, entry, previous, cast, others, places, props, archetype=None):
     """One episode's beats (phase 7 stage 5b, D5): episode *ep*'s arc entry
     (of *planned*), what happens in the episode before (*previous*: its
     beats' ``what``, or None), the episode's characters in short form
@@ -920,10 +933,16 @@ def build_d5(pack, *, ep, planned, entry, previous, cast, others, places, props)
 
     Not the bible, the world or D4's notes: the arc entry and the dossiers
     were written from them, and with them the French worst case (5 dossiers
-    at their caps, 8 beats before) passes the spec's 4,000-token ceiling."""
+    at their caps, 8 beats before) passes the spec's 4,000-token ceiling.
+
+    *archetype* (plan 20 stage 2): ``{label, beat}`` when the season put the
+    entry on a plot archetype -- one line after the arc entry; None renders
+    exactly today's prompt."""
     cast = list(cast)[:D5_CAST_DETAILED_MAX]
     others = list(others)[:context._CAST_MAX_MEMBERS - len(cast)]
     user = _arc_entry_block(entry, label=f"Season arc, episode {ep} of {planned}") + "\n\n"
+    if archetype is not None:
+        user += f"Plot archetype: {archetype['label']}; this episode's beat: {archetype['beat']}\n\n"
     user += _previous_beats_block(ep, previous)
     user += _d5_cast_block(cast, others)
     user += _knowledge_places_block(places)
@@ -1152,14 +1171,55 @@ _S1_ASK_TEMPLATE = (
 )
 
 
-def build_s1(pack, *, episodes, cast, places):
-    """Season arc skeleton for N episodes (spec 4.2, row S1)."""
+# A v2 story's S1 (plan 20 stage 2, prompt id S1v2: its own reply cap and
+# input budget): the plot-archetype pick-list, then the same skeleton with
+# each entry on the primary's or the secondary's beat. A legacy story's ask
+# above is unchanged, byte for byte.
+_S1_ARCHETYPES_ASK_TEMPLATE = (
+    "Write the season arc skeleton for {episodes} episodes, built on the plot archetypes above.\n\n"
+    "First choose, in `archetypes`:\n"
+    "- primary: the one archetype the whole season runs on\n"
+    "- secondary: at most one more, among those the primary pairs with, for a second line of drama; "
+    "or null\n\n"
+    "Then give exactly {episodes} entries in `arc`, one per episode, each with:\n"
+    "- ep: the episode number, 1 to {episodes}\n"
+    "- function: one of {functions}\n"
+    "- archetype: the primary or the secondary, whose beat this episode plays\n"
+    "- summary: at most 25 words\n\n"
+    "Episode 1 must be `setup`. Episode {episodes} must be `climax_and_reset`. Exactly one "
+    "episode near the middle must be `midpoint_twist`. Episode 1 and episode {episodes} follow the "
+    "primary; a secondary you name plays at least one episode.\n\n"
+    "Never use real people, brands, studio names or copyrighted characters."
+)
+
+
+def _archetype_list_section(archetypes) -> str:
+    lines = []
+    for item in archetypes:
+        pairs = ", ".join(item["pairs_well_with"]) or "none"
+        lines.append(f"- {item['id']}: {item['premise']} Pairs with: {pairs}.")
+    return "Plot archetypes:\n" + "\n".join(lines) + "\n\n"
+
+
+def build_s1(pack, *, episodes, cast, places, archetypes=None):
+    """Season arc skeleton for N episodes (spec 4.2, row S1).
+
+    *archetypes* (a v2 story, plan 20 stage 2): the plot-archetype library,
+    each ``{id, premise, pairs_well_with}`` with the premise in the story's
+    language; the ask then has the writer pick the season's primary and at
+    most one secondary, and put every entry on one of them
+    (``schemas.s1_archetype_schema``; sent as prompt id ``S1v2``). None (a
+    legacy story) renders exactly today's prompt and schema."""
     user = _data_block(pack, ("bible", "world"))
     user += _cast_section(cast)
     user += _places_section(places)
     functions = ", ".join(schemas.ARC_FUNCTIONS)
-    user += _S1_ASK_TEMPLATE.format(episodes=episodes, functions=functions)
-    return _system(pack), user, schemas.s1_schema(episodes)
+    if archetypes is None:
+        user += _S1_ASK_TEMPLATE.format(episodes=episodes, functions=functions)
+        return _system(pack), user, schemas.s1_schema(episodes)
+    user += _archetype_list_section(archetypes)
+    user += _S1_ARCHETYPES_ASK_TEMPLATE.format(episodes=episodes, functions=functions)
+    return _system(pack), user, schemas.s1_archetype_schema(episodes, [item["id"] for item in archetypes])
 
 
 # ------------------------------------------------------------------------- S2
@@ -1183,11 +1243,26 @@ def _arc_overview_block(arc, ep) -> str:
     return "\n".join(lines)
 
 
-def build_s2(pack, *, entry, arc, cast, regenerate=None):
-    """Expand one arc entry into full detail (spec 4.2, row S2)."""
+def _archetype_beat_block(archetype, function) -> str:
+    """The plot archetype an arc entry plays and its beat for *function*
+    (plan 20 stage 2): *archetype* is ``{label, beat}``, in the story's
+    language."""
+    return (f"Plot archetype of this episode: {archetype['label']}. Its `{function}` beat: {archetype['beat']}\n"
+            "Build this entry on that beat, with this story's own characters and world.\n\n")
+
+
+def build_s2(pack, *, entry, arc, cast, regenerate=None, archetype=None):
+    """Expand one arc entry into full detail (spec 4.2, row S2).
+
+    *archetype* (an entry a v2 story's S1 put on a plot archetype, plan 20
+    stage 2): ``{label, beat}``, the archetype and its beat for the entry's
+    function, so the entry sits on that beat. None renders exactly today's
+    prompt."""
     user = _data_block(pack, ("bible",))
     user += _cast_section(cast)
     user += _arc_overview_block(arc, entry["ep"]) + "\n\n"
+    if archetype is not None:
+        user += _archetype_beat_block(archetype, entry["function"])
     if regenerate is not None:
         user += _regenerate_block(regenerate)
     user += _S2_ASK

@@ -266,8 +266,10 @@ def test_create_choose_bible_approve_style_approve(api):
 
     # Step 2: the library in French, the fruit_drama ones, then a choice.
     body = c.get(f"/api/stories/{story_id}/concepts", params={"style": "fruit_drama"}).json()
+    # Plan 20 stage 2: re-pinned on purpose -- the four fruit-drama pack concepts join the filter.
     assert [card["concept_id"] for card in body["library"]] == [
-        "midnight_fridge", "orchard_inheritance", "tentafruit_island"]
+        "citrus_ball", "kitchen_heir", "midnight_fridge", "orchard_inheritance", "pineapple_crown",
+        "seeds_of_the_past", "tentafruit_island"]
     card = body["library"][-1]
     assert card["title"] == TENTAFRUIT["title"]["fr"]
     assert card["logline"] == TENTAFRUIT["logline"]["fr"]

@@ -32,7 +32,7 @@ see "Where it stands" below for what is not here yet.
 | # | Step | What it produces | Status |
 |---|---|---|---|
 | 1 | New story | a draft story (language, optional seed text, optional style) | available |
-| 2 | Concepts | ten concept cards to choose from, or generate ten more | available |
+| 2 | Concepts | fourteen library concept cards to choose from, or generate ten more | available |
 | 3 | Bible | logline, premise, tone, world, themes, audience | available |
 | 4 | Style | a locked style (palette, typography, consistency mode) + a preview strip | available |
 | 5 | Cast | characters: reference sheets, voices | available |
@@ -414,8 +414,13 @@ approved; a locked step shows why ("Approve the bible first.").
 
 ### 2. Concepts
 
-Two sources: the **library** (the ten shipped concepts, filterable by
-style) and **Generated** (anything you've asked for). Each card shows a
+Two sources: the **library** (the fourteen shipped concepts, filterable by
+style) and **Generated** (anything you've asked for). Filtered on the Fruit
+Drama style it shows seven: *Tentafruit Island* (a rigged reality-show
+contest), *The Orchard Inheritance*, *Midnight Fridge*, and the four of the
+fruit-drama pack, each a fruit kingdom on its own plot archetype — *The
+Citrus Ball* (infidelity), *The Pineapple Crown* (betrayal), *Seeds of the
+Past* (forgiveness) and *The Kitchen Heir* (a secret child). Each card shows a
 title, logline and "value" (the substance the story carries) up front;
 "Details" expands the world, cast sketch, hook formula and retention
 mechanics. **Pick this concept** chooses it — no separate approval step; the
@@ -424,7 +429,8 @@ awaiting approval.
 
 **Generate 10 more** queues a job of ten LLM calls, one concept each, each
 told not to repeat a title the story already has (library titles first,
-then every one it has generated). The estimate chip reads something like
+then every one it has generated; up to 24 titles, so a first run never
+drops one). The estimate chip reads something like
 `est. $0.00 · 10 LLM calls`; the route chip next to it names where they'll
 run (see "Estimate and route chips", below). Cards land on disk as each
 call returns, so a couple of failed calls out of the ten still leave you
@@ -612,6 +618,20 @@ full (at most 60 words), the hooks it resolves and the ones it leaves open,
 and which characters appear in it. Each entry is saved as it is written, so
 a run that fails partway keeps every entry already expanded; an entry whose
 S2 failed keeps its S1 outline (see "Troubleshooting").
+
+**Plot archetypes (v2 stories).** On a v2 story the skeleton is built on a
+library of seven telenovela plot archetypes — infidelity, inheritance,
+betrayal, forgiveness, secret child, rigged contest, reality-show parody —
+each with one beat per arc function (the midpoint is always a reversal, the
+crisis a cliffhanger-ready corner), three twists and a payoff, in French and
+English. S1 picks the season's **primary** archetype and at most one
+**secondary** that pairs well with it, and puts every episode on one of the
+two (episode 1 and the finale on the primary); S2 is then told the beat its
+episode plays. The choice is saved in `season.json` (`archetypes`, and each
+entry's `archetype`), the log line names it ("plot archetypes: infidelity +
+secret_child"), and the knowledge step and the episodes' series-memory block
+mention it on one line. A legacy (v1) story's season is planned exactly as
+before. The archetypes live in `clipping/aistory/templates/archetypes/`.
 
 The timeline shows one card per episode: its number, its function badge,
 its summary, any hooks in/out, the characters in it, and a **Regenerate**

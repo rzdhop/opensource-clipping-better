@@ -1,5 +1,6 @@
 """Loaders for the AI Story data templates: style templates (spec 5), the
-curated concept library (spec 7) and the episode templates (spec 6.2).
+curated concept library (spec 7), the episode templates (spec 6.2) and the
+plot-archetype library (plan 20 stage 2).
 
 Templates are data, not code, and are located relative to this file (no
 package-data mechanism exists in this repo). Every loader validates against
@@ -115,6 +116,57 @@ def _load_concepts_cached() -> tuple:
 def load_concepts() -> list:
     """Load and validate every concept in templates/concepts/, sorted by id."""
     return [copy.deepcopy(c) for c in _load_concepts_cached()]
+
+
+@functools.lru_cache(maxsize=1)
+def _load_archetypes_cached() -> tuple:
+    archetypes_dir = TEMPLATES_DIR / "archetypes"
+    archetypes = []
+    if archetypes_dir.is_dir():
+        for path in sorted(archetypes_dir.glob("*.json")):
+            with open(path, encoding="utf-8") as fh:
+                data = json.load(fh)
+            errors = schemas.archetype_errors(data)
+            if not errors and data["id"] != path.stem:
+                errors = [f"$.id: {data['id']!r} does not match its file name {path.name!r}"]
+            if errors:
+                raise schemas.SchemaError(path.stem, errors)
+            archetypes.append(data)
+    errors = schemas.archetype_library_errors(archetypes)
+    if errors:
+        raise schemas.SchemaError("archetypes", errors)
+    archetypes.sort(key=lambda a: a["id"])
+    return tuple(archetypes)
+
+
+def load_archetypes() -> list:
+    """Load and validate every plot archetype in templates/archetypes/, sorted by id."""
+    return [copy.deepcopy(a) for a in _load_archetypes_cached()]
+
+
+def list_archetype_ids() -> list:
+    """Every shipped plot-archetype id, sorted."""
+    return [a["id"] for a in _load_archetypes_cached()]
+
+
+def load_archetype(archetype_id: str) -> dict:
+    """One plot archetype by id; ``KeyError`` for an id the library lacks."""
+    for archetype in _load_archetypes_cached():
+        if archetype["id"] == archetype_id:
+            return copy.deepcopy(archetype)
+    raise KeyError(archetype_id)
+
+
+def localize_archetype(archetype: dict, language: str) -> dict:
+    """Flatten every bilingual field of *archetype* to a single language."""
+    if language not in schemas.LANGUAGES:
+        raise ValueError(f"language must be one of {schemas.LANGUAGES}, not {language!r}")
+    return _flatten_bilingual(archetype, language)
+
+
+def archetype_beat(archetype: dict, function: str):
+    """The beat (a localized archetype's) that plays arc *function*, or None."""
+    return next((beat["beat"] for beat in archetype["beats"] if beat["function"] == function), None)
 
 
 def _flatten_bilingual(value, language: str):

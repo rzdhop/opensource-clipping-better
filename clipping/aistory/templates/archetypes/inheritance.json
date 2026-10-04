@@ -1,0 +1,79 @@
+{
+  "$schema": "archetype_v1",
+  "id": "inheritance",
+  "label": {
+    "fr": "L'héritage",
+    "en": "Inheritance"
+  },
+  "premise": {
+    "fr": "La fortune du patriarche est à prendre, et ses héritiers sont prêts à mentir et comploter pour l'avoir.",
+    "en": "A patriarch's fortune is up for grabs, and the heirs will lie, scheme and dig up secrets to claim it."
+  },
+  "beats": [
+    {
+      "function": "setup",
+      "beat": {
+        "fr": "Le roi tombe malade ou s'éteint ; les héritiers se réunissent pour le testament, tout sourire, mâchoires serrées.",
+        "en": "The king falls ill or dies; the heirs gather for the reading of the will, smiling through clenched teeth."
+      }
+    },
+    {
+      "function": "escalation",
+      "beat": {
+        "fr": "Le testament avantage l'héritier que personne n'attendait, et l'enfant chéri jure que c'est un faux.",
+        "en": "The will favours the least expected heir, and the favourite child swears it is a forgery."
+      }
+    },
+    {
+      "function": "complication",
+      "beat": {
+        "fr": "Une clause impose une condition, un mariage, un aveu, un an de service, qui coupe la famille en deux.",
+        "en": "A clause sets a condition, a marriage, a confession, a year of service, that splits the family in two."
+      }
+    },
+    {
+      "function": "midpoint_twist",
+      "beat": {
+        "fr": "Retournement : un second testament refait surface, ou la fortune n'est qu'une montagne de dettes maquillée en or.",
+        "en": "Reversal: a second will surfaces, or the fortune turns out to be debts dressed up as gold."
+      }
+    },
+    {
+      "function": "crisis",
+      "beat": {
+        "fr": "Un héritier est accusé d'avoir hâté la fin du patriarche ; les gardes arrivent et la famille le lâche.",
+        "en": "One heir is accused of hastening the patriarch's end; the guards arrive and the family turns its back."
+      }
+    },
+    {
+      "function": "climax_and_reset",
+      "beat": {
+        "fr": "Le véritable héritier est nommé devant tous, mais la couronne cache un secret qui relance toute l'histoire.",
+        "en": "The rightful heir is named before everyone, but the crown comes with a secret that relaunches the story."
+      }
+    }
+  ],
+  "twists": [
+    {
+      "fr": "Le patriarche a simulé sa mort pour voir qui le trahirait.",
+      "en": "The patriarch faked his death to see who would betray him."
+    },
+    {
+      "fr": "L'humble servante est une héritière légitime dont personne ne soupçonnait l'existence.",
+      "en": "The humble servant is a legitimate heir nobody knew about."
+    },
+    {
+      "fr": "Le notaire qui lit le testament a été acheté par l'un des héritiers.",
+      "en": "The notary reading the will was bought by one of the heirs."
+    }
+  ],
+  "payoff": {
+    "fr": "La cupidité est démasquée, et l'héritier qui ne voulait rien finit par mériter tout l'héritage.",
+    "en": "Greed is unmasked, and the heir who never wanted the fortune is the one who ends up deserving it."
+  },
+  "pairs_well_with": [
+    "secret_child",
+    "betrayal",
+    "forgiveness"
+  ]
+}

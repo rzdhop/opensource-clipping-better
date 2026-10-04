@@ -1,0 +1,80 @@
+{
+  "$schema": "archetype_v1",
+  "id": "betrayal",
+  "label": {
+    "fr": "La trahison",
+    "en": "Betrayal"
+  },
+  "premise": {
+    "fr": "Un allié juré vend le héros pour le pouvoir, et celui-ci doit riposter sans devenir traître à son tour.",
+    "en": "A sworn ally sells the hero out for power, and the hero must strike back without becoming a traitor too."
+  },
+  "beats": [
+    {
+      "function": "setup",
+      "beat": {
+        "fr": "Deux alliés scellent un pacte, une poignée de main, un secret partagé ; puis l'un d'eux sourit seul, trop longtemps.",
+        "en": "Two allies seal a pact with a handshake and a shared secret; then one of them smiles alone, too long."
+      }
+    },
+    {
+      "function": "escalation",
+      "beat": {
+        "fr": "Les fuites commencent : les plans du héros arrivent chez l'ennemi, et il soupçonne la mauvaise personne.",
+        "en": "The leaks begin: the hero's plans reach the enemy, and the hero suspects the wrong person."
+      }
+    },
+    {
+      "function": "complication",
+      "beat": {
+        "fr": "Le héros punit un ami innocent, pendant que le vrai traître le console et gagne encore sa confiance.",
+        "en": "The hero punishes an innocent friend while the real traitor comforts them and wins even more trust."
+      }
+    },
+    {
+      "function": "midpoint_twist",
+      "beat": {
+        "fr": "Retournement : le héros surprend l'accord de l'allié avec l'ennemi ; la trahison est réelle, et date du premier jour.",
+        "en": "Reversal: the hero overhears the ally's deal with the enemy; the betrayal is real, and began on day one."
+      }
+    },
+    {
+      "function": "crisis",
+      "beat": {
+        "fr": "Le traître frappe le premier : le héros perd son titre, son toit ou son amour, acculé, sans personne à qui se fier.",
+        "en": "The traitor strikes first: the hero loses title, home or love, cornered, with no one left to trust."
+      }
+    },
+    {
+      "function": "climax_and_reset",
+      "beat": {
+        "fr": "Le héros démasque le traître devant toute la cour ; son dernier murmure laisse entendre qu'il n'agissait pas seul.",
+        "en": "The hero unmasks the traitor before the whole court; the traitor's last whisper says they were not alone."
+      }
+    }
+  ],
+  "twists": [
+    {
+      "fr": "Le traître a vendu le héros pour le protéger d'un ennemi bien pire.",
+      "en": "The traitor sold the hero out to shield them from a worse enemy."
+    },
+    {
+      "fr": "L'ami puni à tort devient le pire rival du héros.",
+      "en": "The wrongly punished friend becomes the hero's fiercest rival."
+    },
+    {
+      "fr": "L'ennemi payait deux traîtres, et un seul a été démasqué.",
+      "en": "The enemy paid two traitors, and only one has been found."
+    }
+  ],
+  "payoff": {
+    "fr": "La loyauté est éprouvée jusqu'à l'os : le héros reprend sa place, et comprend que la confiance se mérite.",
+    "en": "Loyalty is tested to the bone: the hero takes back their place and learns that trust is earned, not sworn."
+  },
+  "pairs_well_with": [
+    "infidelity",
+    "inheritance",
+    "rigged_contest",
+    "forgiveness"
+  ]
+}

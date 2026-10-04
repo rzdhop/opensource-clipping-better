@@ -30,7 +30,10 @@ LANGUAGE_NAMES = {"fr": "French", "en": "English"}
 _SEED_WORD_LIMIT = 120
 _NOTE_WORD_LIMIT = 60
 _BIBLE_WORD_LIMIT = 120
-_AVOID_TITLE_LIMIT = 20
+# C1's "do not repeat" titles: the library's (14 since plan 20 stage 2) and
+# the 9 cards one "Generate 10 more" run writes before its last call all fit
+# (23), so a first run never cuts; was 20 with the ten-concept library.
+_AVOID_TITLE_LIMIT = 24
 
 # Phase 2 (spec 4.1): the existing cast / places, rendered as short lines for
 # continuity and visual distinctness (K1's relationships and "don't repeat
@@ -343,6 +346,29 @@ def previous_recap(season, ep):
     return (memory.get("recaps") or {}).get(f"ep{ep - 1:02d}")
 
 
+def archetype_line(season):
+    """The line "- Plot archetypes: <primary> (primary), <secondary>
+    (secondary)" for a season whose S1 chose them (plan 20 stage 2), else
+    None. English labels, the language the arc functions are named in in
+    every prompt; an id the library no longer ships is shown as the id."""
+    chosen = (season or {}).get("archetypes")
+    if not chosen:
+        return None
+    from . import templates  # the library; a lazy import keeps this module's load light
+
+    names = []
+    for key in ("primary", "secondary"):
+        archetype_id = chosen.get(key)
+        if not archetype_id:
+            continue
+        try:
+            label = templates.load_archetype(archetype_id)["label"]["en"]
+        except KeyError:
+            label = archetype_id
+        names.append(f"{label} ({key})")
+    return "- Plot archetypes: " + ", ".join(names)
+
+
 def memory_section(season, ep, open_hooks=None):
     """``(text, was_cut)`` for E1/E3's series-memory block (spec 2.6, 4.2).
 
@@ -356,6 +382,10 @@ def memory_section(season, ep, open_hooks=None):
     field rather than omitting it silently. Cut to ``_MEMORY_WORD_LIMIT``
     words like every other pack section, the cut named exactly as
     ``cast``/``places`` are.
+
+    A season whose S1 chose plot archetypes (a v2 story, plan 20 stage 2)
+    names them on one line right under the header, read-only
+    (:func:`archetype_line`). A season without them renders as before.
 
     *open_hooks* (phase 5 stage 3) is the list the "Open hooks" line shows:
     the caller's -- the hooks open when episode *ep* starts,
@@ -374,6 +404,9 @@ def memory_section(season, ep, open_hooks=None):
     pairs = relationship_pairs(memory.get("relationship_state"))
 
     lines = ["Series memory:"]
+    archetypes = archetype_line(season)
+    if archetypes:
+        lines.append(archetypes)
     lines.append(f"- Previous recap: {recap}" if recap else "- Previous recap: none recorded")
     if open_hooks:
         lines.append("- Open hooks: " + "; ".join(open_hooks))

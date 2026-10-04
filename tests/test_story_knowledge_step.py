@@ -217,6 +217,34 @@ def test_step_resumes_after_each_call(store):
     assert third.calls == [] and store.read_knowledge(story_id)["rev"] == doc["rev"]
 
 
+def test_d5_names_the_seasons_plot_archetype_and_the_episodes_beat(store):
+    """Plan 20 stage 2: a season whose S1 chose plot archetypes shows D5, on
+    one line, the archetype each entry plays and its beat for the entry's
+    function (read-only: the season is not written by the knowledge step)."""
+    from clipping.aistory import templates
+
+    story_id = eps._ready_story(store, v2=True, knowledge=False)
+    season = store.read_doc(story_id, "season.json")
+    season["archetypes"] = {"primary": "rigged_contest", "secondary": None}
+    for entry in season["arc"]:
+        entry["archetype"] = "rigged_contest"
+    store.write_doc(story_id, "season.json", season, now=NOW)
+    before = store.read_doc(story_id, "season.json")
+    llm = _llm()
+
+    _run_knowledge(store, story_id, llm)
+
+    archetype = templates.localize_archetype(templates.load_archetype("rigged_contest"), "fr")
+    calls = {_episode_of(call): call["user"] for call in llm.of("D5")}
+    assert sorted(calls) == list(range(1, season["episodes_planned"] + 1))
+    for ep, user in calls.items():
+        beat = templates.archetype_beat(archetype, season["arc"][ep - 1]["function"])
+        assert beat
+        assert f"Plot archetype: Le concours truqué; this episode's beat: {beat}\n\n" in user
+    assert "Plot archetype" not in llm.of("D4")[0]["user"]
+    assert store.read_doc(story_id, "season.json") == before
+
+
 # ============================================================ deletion
 
 def test_deleting_a_place_drops_it_from_knowledge_and_unapproves(store):

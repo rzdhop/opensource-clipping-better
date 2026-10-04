@@ -1,0 +1,80 @@
+{
+  "$schema": "archetype_v1",
+  "id": "forgiveness",
+  "label": {
+    "fr": "Le pardon",
+    "en": "Forgiveness"
+  },
+  "premise": {
+    "fr": "Une vieille blessure sépare deux êtres, et une saison de règlements de comptes décide si le pardon est possible.",
+    "en": "An old wrong has torn two people apart, and a season of reckoning decides whether they can ever forgive."
+  },
+  "beats": [
+    {
+      "function": "setup",
+      "beat": {
+        "fr": "La personne blessée revient après des années, au pire moment, et celle qui l'a trahie devient livide.",
+        "en": "The wronged one returns after years away, at the worst possible moment, and the one who hurt them goes pale."
+      }
+    },
+    {
+      "function": "escalation",
+      "beat": {
+        "fr": "Vengeance froide : le revenant reprend ce qu'on lui a volé, un poste, une amie, un amour, coup après coup.",
+        "en": "Cold revenge: the returnee takes back what was lost, a job, a friend, a lover, one move at a time."
+      }
+    },
+    {
+      "function": "complication",
+      "beat": {
+        "fr": "Le coupable tente de s'excuser, mais chaque tentative est sabotée par quelqu'un qui profite de la guerre.",
+        "en": "The guilty one tries to apologise, but every attempt is twisted by someone who profits from the feud."
+      }
+    },
+    {
+      "function": "midpoint_twist",
+      "beat": {
+        "fr": "Retournement : la vieille faute n'est pas celle qu'on croyait ; le coupable a porté le chapeau pour protéger quelqu'un.",
+        "en": "Reversal: the old wrong is not what everyone believed; the guilty one took the blame to protect someone."
+      }
+    },
+    {
+      "function": "crisis",
+      "beat": {
+        "fr": "La vengeance va trop loin et blesse un innocent ; tous deux doivent choisir entre leur orgueil et le sauver.",
+        "en": "The revenge goes too far and hurts an innocent; both must choose between their pride and saving them."
+      }
+    },
+    {
+      "function": "climax_and_reset",
+      "beat": {
+        "fr": "Des excuses devant tous, des larmes, une étreinte ; mais celui qui a orchestré la brouille observe encore.",
+        "en": "An apology before everyone, tears, an embrace; but the one who staged the feud is still watching."
+      }
+    }
+  ],
+  "twists": [
+    {
+      "fr": "La personne protégée par le mensonge est le propre parent du revenant.",
+      "en": "The person the lie protected is the returnee's own parent."
+    },
+    {
+      "fr": "Le pardon est offert, puis refusé au pied de l'autel.",
+      "en": "Forgiveness is offered, then refused at the altar."
+    },
+    {
+      "fr": "Celui qui sabote chaque excuse est le nouveau compagnon du coupable.",
+      "en": "Whoever sabotages every apology is the guilty one's new partner."
+    }
+  ],
+  "payoff": {
+    "fr": "Deux ennemis se choisissent à nouveau : pardonner coûte plus cher que se venger, et demande bien plus de courage.",
+    "en": "Two enemies choose each other again, and the season shows that forgiving costs more, and takes more courage, than revenge."
+  },
+  "pairs_well_with": [
+    "infidelity",
+    "inheritance",
+    "betrayal",
+    "secret_child"
+  ]
+}

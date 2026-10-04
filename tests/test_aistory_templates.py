@@ -9,10 +9,14 @@ Three layers, in order:
    "spec parity" tests re-read ``00-MASTER-SPEC.md`` directly and diff the
    JSON's prose fields against the spec's own quoted text, so a template can
    never silently drift from the document that authored it.
-3. The ten curated concepts (spec 7), written by a parallel agent against
+3. The curated concepts (spec 7), written by a parallel agent against
    ``CONCEPT_SCHEMA``. These fail loudly -- not skip -- if that work has not
    landed yet; that is the expected state while both halves of stage 1 are
-   in flight.
+   in flight. Ten from spec 7, four more fruit-drama ones from plan 20 stage 2
+   (one per plot archetype: infidelity, betrayal, forgiveness, secret child).
+4. The plot-archetype library (plan 20 stage 2, ``archetype_v1``): seven
+   archetypes, one beat per arc function in order, both languages, mutual
+   pairings.
 """
 
 from __future__ import annotations
@@ -353,7 +357,16 @@ EXPECTED_CONCEPT_IDS = (
     "tentafruit_island", "orchard_inheritance", "midnight_fridge", "last_bus_3am",
     "detective_dawn", "grandmas_rules", "two_minutes_heroes", "clay_town_confessions",
     "the_interview", "last_ramen_shop",
+    # Plan 20 stage 2 (fruit-drama pack), on purpose: one fruit-world concept per
+    # archetype the library had none for -- infidelity, betrayal, forgiveness, secret child.
+    "citrus_ball", "pineapple_crown", "seeds_of_the_past", "kitchen_heir",
 )
+
+# Each plan-20 concept and the plot archetype it is written on.
+_FRUIT_PACK_ARCHETYPES = {
+    "citrus_ball": "infidelity", "pineapple_crown": "betrayal",
+    "seeds_of_the_past": "forgiveness", "kitchen_heir": "secret_child",
+}
 
 # Title (English) and Style column, transcribed from 00-MASTER-SPEC.md section
 # 7's table. style_fit.default must equal styles[0], alternatives styles[1:].
@@ -368,6 +381,11 @@ _CONCEPT_TABLE = {
     "clay_town_confessions": {"title_en": "Clay Town Confessions", "styles": ["claymation"]},
     "the_interview": {"title_en": "The Interview", "styles": ["cinematic_real"]},
     "last_ramen_shop": {"title_en": "The Last Ramen Shop", "styles": ["anime", "storybook_watercolor"]},
+    # Plan 20 stage 2 (not in spec 7's table): the fruit-drama pack.
+    "citrus_ball": {"title_en": "The Citrus Ball", "styles": ["fruit_drama"]},
+    "pineapple_crown": {"title_en": "The Pineapple Crown", "styles": ["fruit_drama"]},
+    "seeds_of_the_past": {"title_en": "Seeds of the Past", "styles": ["fruit_drama", "family_3d"]},
+    "kitchen_heir": {"title_en": "The Kitchen Heir", "styles": ["fruit_drama", "family_3d"]},
 }
 
 # Proper nouns the spec's "World & cast" column names explicitly, per concept.
@@ -386,6 +404,11 @@ _REQUIRED_CAST_KEYWORDS = {
     "clay_town_confessions": ["Mayor Dough", "Baker Pim", "Mailbox"],
     "the_interview": [],
     "last_ramen_shop": ["Hana", "Bo"],
+    # Plan 20 stage 2: each pack concept's pun-named fruit cast, a king or queen among them.
+    "citrus_ball": ["Clementina", "Prince Pomelo", "Mandarina", "King Lemonor", "Captain Kumquat"],
+    "pineapple_crown": ["King Ananor", "Coconello", "Papayette", "Queen Duriana"],
+    "seeds_of_the_past": ["Watermelia", "Cherrisa", "King Cantaloupe", "Grenadin", "Little Pip"],
+    "kitchen_heir": ["Apricotta", "Aprium", "Queen Peara", "King Pommerol", "Sir Blueberro"],
 }
 
 
@@ -395,8 +418,34 @@ def _concepts_by_id() -> dict:
     return {c["concept_id"]: c for c in templates.load_concepts()}
 
 
-def test_exactly_the_ten_shipped_concept_ids():
+def test_exactly_the_fourteen_shipped_concept_ids():
+    # Plan 20 stage 2, on purpose: ten (spec 7) + the four fruit-drama pack concepts.
+    assert len(EXPECTED_CONCEPT_IDS) == 14
     assert set(_concepts_by_id()) == set(EXPECTED_CONCEPT_IDS)
+
+
+@pytest.mark.parametrize("concept_id", sorted(_FRUIT_PACK_ARCHETYPES))
+def test_each_fruit_pack_concept_is_a_fruit_drama_on_its_own_archetype(concept_id):
+    """Plan 20 stage 2: the four pack concepts live in a fruit kingdom (a king
+    or queen in the cast), each on a different plot archetype of the library,
+    written in both languages within C1's own caps (title 8, logline 30,
+    world 60 words; a cast line 25), with 4 seeds and a freeze-frame hook."""
+    concept = _concepts_by_id()[concept_id]
+    assert _FRUIT_PACK_ARCHETYPES[concept_id] in templates.list_archetype_ids()
+    assert len(set(_FRUIT_PACK_ARCHETYPES.values())) == len(_FRUIT_PACK_ARCHETYPES)
+    assert concept["style_fit"]["default"] == "fruit_drama"
+    words = lambda text: len(text.split())  # noqa: E731
+    for language in ("fr", "en"):
+        assert words(concept["title"][language]) <= 8
+        assert words(concept["logline"][language]) <= 30
+        assert words(concept["world"][language]) <= 60
+        assert all(words(member["one_line"][language]) <= 25 for member in concept["cast_sketch"])
+        names = " ".join(member["name"][language] for member in concept["cast_sketch"])
+        assert re.search(r"\b(Roi|Reine|King|Queen)\b", names), f"{concept_id}: no king or queen in {names}"
+        assert concept["title"][language] != concept["title"]["en" if language == "fr" else "fr"]
+    assert len(concept["episode_seed"]) == 4
+    assert "freeze-frame" in concept["hook_formula"]["en"] or "frozen" in concept["hook_formula"]["en"]
+    assert concept["content_flags"]["age"] in ("10+", "13+")
 
 
 @pytest.mark.parametrize("concept_id", EXPECTED_CONCEPT_IDS)
@@ -448,3 +497,91 @@ def test_a_dollar_anchor_does_not_accept_a_trailing_newline():
     assert schemas.validate("fruit_drama", schema) == []
     assert schemas.validate("fruit_drama\n", schema) != []
     assert schemas.validate("price $", {"type": "string", "pattern": r"\$"}) == []
+
+
+# ============================================== 4. plot archetypes (plan 20 stage 2)
+
+EXPECTED_ARCHETYPE_IDS = (
+    "infidelity", "inheritance", "betrayal", "forgiveness", "secret_child", "rigged_contest", "reality_show_parody",
+)
+
+
+def _archetypes_by_id() -> dict:
+    return {a["id"]: a for a in templates.load_archetypes()}
+
+
+def test_exactly_the_seven_shipped_archetype_ids():
+    assert templates.list_archetype_ids() == sorted(EXPECTED_ARCHETYPE_IDS)
+
+
+@pytest.mark.parametrize("archetype_id", EXPECTED_ARCHETYPE_IDS)
+def test_every_archetype_passes_its_schema_with_one_beat_per_arc_function_in_order(archetype_id):
+    archetype = _archetypes_by_id()[archetype_id]
+    assert schemas.archetype_errors(archetype) == []
+    assert archetype["$schema"] == "archetype_v1"
+    assert [beat["function"] for beat in archetype["beats"]] == list(schemas.ARC_FUNCTIONS)
+    assert len(archetype["twists"]) == 3
+
+
+@pytest.mark.parametrize("archetype_id", EXPECTED_ARCHETYPE_IDS)
+def test_every_archetype_text_is_written_in_both_languages_not_copied(archetype_id):
+    archetype = _archetypes_by_id()[archetype_id]
+    texts = [archetype["label"], archetype["premise"], archetype["payoff"]]
+    texts += [beat["beat"] for beat in archetype["beats"]] + list(archetype["twists"])
+    for text in texts:
+        assert text["fr"].strip() and text["en"].strip()
+        assert text["fr"] != text["en"]
+    # A playable midpoint: every archetype's midpoint beat is a reversal.
+    midpoint = archetype["beats"][schemas.ARC_FUNCTIONS.index("midpoint_twist")]["beat"]
+    assert midpoint["en"].startswith("Reversal:") and midpoint["fr"].startswith("Retournement :")
+
+
+def test_archetype_pairings_resolve_and_are_mutual():
+    by_id = _archetypes_by_id()
+    assert schemas.archetype_library_errors(list(by_id.values())) == []
+    for archetype_id, archetype in by_id.items():
+        assert archetype["pairs_well_with"], f"{archetype_id} pairs with nothing"
+        for pair in archetype["pairs_well_with"]:
+            assert pair in by_id and archetype_id in by_id[pair]["pairs_well_with"]
+
+
+def test_archetype_errors_reject_a_beat_out_of_order_a_missing_language_and_a_self_pair():
+    good = _archetypes_by_id()["betrayal"]
+    swapped = json.loads(json.dumps(good))
+    swapped["beats"][1], swapped["beats"][2] = swapped["beats"][2], swapped["beats"][1]
+    assert any("must be exactly" in e for e in schemas.archetype_errors(swapped))
+    no_french = json.loads(json.dumps(good))
+    del no_french["premise"]["fr"]
+    assert schemas.archetype_errors(no_french) != []
+    blank = json.loads(json.dumps(good))
+    blank["twists"][0]["en"] = "   "
+    assert any("twists[0].en" in e for e in schemas.archetype_errors(blank))
+    long_beat = json.loads(json.dumps(good))
+    long_beat["beats"][0]["beat"]["fr"] = "mot " * (schemas.ARCHETYPE_BEAT_MAX_WORDS + 1)
+    assert any("beats[0].beat.fr" in e for e in schemas.archetype_errors(long_beat))
+    self_pair = json.loads(json.dumps(good))
+    self_pair["pairs_well_with"].append("betrayal")
+    assert any("itself" in e for e in schemas.archetype_errors(self_pair))
+
+
+def test_archetype_library_errors_reject_an_unknown_and_a_one_sided_pair():
+    by_id = _archetypes_by_id()
+    unknown = json.loads(json.dumps(by_id["betrayal"]))
+    unknown["pairs_well_with"].append("amnesia")
+    errors = schemas.archetype_library_errors([unknown] + [a for k, a in by_id.items() if k != "betrayal"])
+    assert any("'amnesia' is not an archetype of the library" in e for e in errors)
+    one_sided = json.loads(json.dumps(by_id["rigged_contest"]))
+    one_sided["pairs_well_with"].append("secret_child")
+    errors = schemas.archetype_library_errors([one_sided] + [a for k, a in by_id.items() if k != "rigged_contest"])
+    assert errors == ["rigged_contest.pairs_well_with: 'secret_child' does not pair back"]
+
+
+def test_localize_archetype_flattens_to_one_language_and_finds_a_beat():
+    archetype = templates.localize_archetype(templates.load_archetype("secret_child"), "fr")
+    assert archetype["label"] == "L'enfant caché"
+    assert archetype["pairs_well_with"] == ["infidelity", "inheritance", "forgiveness"]
+    assert templates.archetype_beat(archetype, "midpoint_twist").startswith("Retournement : le père supposé")
+    with pytest.raises(KeyError):
+        templates.load_archetype("amnesia")
+    with pytest.raises(ValueError):
+        templates.localize_archetype(templates.load_archetype("secret_child"), "de")

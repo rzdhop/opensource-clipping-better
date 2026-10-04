@@ -1,0 +1,159 @@
+{
+  "$schema": "concept_v1",
+  "concept_id": "kitchen_heir",
+  "version": 1,
+  "title": {
+    "fr": "L'Enfant des cuisines",
+    "en": "The Kitchen Heir"
+  },
+  "logline": {
+    "fr": "Depuis sept ans, la cuisinière du palais élève un enfant qui porte la tige verte du roi ; ce matin, la reine l'a remarqué.",
+    "en": "For seven years the palace cook has raised a child with the king's green stem; this morning, the queen noticed."
+  },
+  "world": {
+    "fr": "Au Royaume des Pommes, seul un enfant à la tige verte royale peut hériter du trône, et la reine n'en a pas. Dans les cuisines du palais, un garçon de sept ans porte justement cette tige.",
+    "en": "In the Apple Kingdom, only a child with the royal green stem can inherit the throne, and the queen has none. Down in the palace kitchens, a seven-year-old has that very stem."
+  },
+  "cast_sketch": [
+    {
+      "name": {
+        "fr": "Abricotine",
+        "en": "Apricotta"
+      },
+      "role": "lead",
+      "archetype": {
+        "fr": "cuisinière qui cache un enfant royal",
+        "en": "cook hiding a royal child"
+      },
+      "one_line": {
+        "fr": "Abricotine ment à tout le palais pour protéger son fils, et chaque mensonge l'enferme un peu plus.",
+        "en": "Apricotta lies to the whole palace to protect her son, and every lie traps her a little deeper."
+      },
+      "signature_hint": {
+        "fr": "un tablier fariné avec une poche secrète",
+        "en": "a flour-dusted apron with a hidden pocket"
+      }
+    },
+    {
+      "name": {
+        "fr": "Aprium",
+        "en": "Aprium"
+      },
+      "role": "lead",
+      "archetype": {
+        "fr": "enfant hybride qui ignore tout",
+        "en": "hybrid child who knows nothing"
+      },
+      "one_line": {
+        "fr": "Aprium, mi-prune mi-abricot, rêve de voir le roi de près, sans savoir qu'il lui ressemble trait pour trait.",
+        "en": "Aprium, half plum and half apricot, dreams of seeing the king up close, unaware he looks exactly like him."
+      },
+      "signature_hint": {
+        "fr": "une casquette trop grande qui cache sa tige verte",
+        "en": "an oversized cap hiding his green stem"
+      }
+    },
+    {
+      "name": {
+        "fr": "Reine Poirette",
+        "en": "Queen Peara"
+      },
+      "role": "lead",
+      "archetype": {
+        "fr": "reine sans héritier, prête à tout",
+        "en": "heirless queen who will stop at nothing"
+      },
+      "one_line": {
+        "fr": "La reine Poirette a besoin d'un héritier pour garder sa place, et l'enfant des cuisines pourrait la sauver ou la perdre.",
+        "en": "Queen Peara needs an heir to keep her place, and the kitchen boy could either save her or ruin her."
+      },
+      "signature_hint": {
+        "fr": "une broche en émeraude en forme de poire",
+        "en": "a pear-shaped emerald brooch"
+      }
+    },
+    {
+      "name": {
+        "fr": "Roi Pommerol",
+        "en": "King Pommerol"
+      },
+      "role": "recurring",
+      "archetype": {
+        "fr": "roi charmeur à la mémoire courte",
+        "en": "charming king with a short memory"
+      },
+      "one_line": {
+        "fr": "Le roi Pommerol a oublié un été vieux de huit ans, mais le palais, lui, n'a rien oublié.",
+        "en": "King Pommerol has forgotten a summer eight years ago, but the palace has not."
+      },
+      "signature_hint": {
+        "fr": "un sceptre surmonté d'une pomme dorée",
+        "en": "a scepter topped with a golden apple"
+      }
+    },
+    {
+      "name": {
+        "fr": "Sire Myrtillo",
+        "en": "Sir Blueberro"
+      },
+      "role": "support",
+      "archetype": {
+        "fr": "chambellan maître chanteur",
+        "en": "blackmailing chamberlain"
+      },
+      "one_line": {
+        "fr": "Sire Myrtillo note tout dans son carnet bleu, et chaque secret qu'il y inscrit a un prix.",
+        "en": "Sir Blueberro writes everything down in his blue notebook, and every secret in it has a price."
+      },
+      "signature_hint": {
+        "fr": "un petit carnet relié de cuir bleu",
+        "en": "a small notebook bound in blue leather"
+      }
+    }
+  ],
+  "main_line": {
+    "fr": "Abricotine ment pour protéger Aprium pendant que Sire Myrtillo la fait chanter et que la reine approche, jusqu'à l'épreuve du sang royal devant la cour.",
+    "en": "Apricotta lies to protect Aprium while Sir Blueberro blackmails her and the queen closes in, until the royal blood test before the whole court."
+  },
+  "hook_formula": {
+    "fr": "Chaque partie s'ouvre sur une preuve du secret figée à l'écran — une tige verte sous une casquette, un acte de naissance, un pli scellé — en moins de deux secondes.",
+    "en": "Each part opens on a frozen piece of evidence — a green stem under a cap, a birth record, a sealed letter — in under two seconds."
+  },
+  "retention_mechanics": {
+    "fr": "Un secret que le public connaît et que la cour ignore ; qui le découvrira ensuite ; un mensonge par partie.",
+    "en": "A secret the audience knows and the court doesn't; who finds out next; one lie per part."
+  },
+  "value": {
+    "fr": "La maternité, la vérité, et ce qui fait une famille.",
+    "en": "Motherhood, truth, and what makes a family."
+  },
+  "style_fit": {
+    "default": "fruit_drama",
+    "alternatives": [
+      "family_3d"
+    ]
+  },
+  "episode_seed": [
+    {
+      "fr": "La casquette d'Aprium tombe devant la reine Poirette : dessous, une tige verte royale.",
+      "en": "Aprium's cap falls off in front of Queen Peara: underneath, a royal green stem."
+    },
+    {
+      "fr": "Abricotine jure que l'enfant est son neveu ; Sire Myrtillo l'écrit dans son carnet bleu.",
+      "en": "Apricotta swears the boy is her nephew; Sir Blueberro writes it down in his blue notebook."
+    },
+    {
+      "fr": "Un billet glissé sous la porte des cuisines annonce le prix du silence.",
+      "en": "A note slipped under the kitchen door names the price of silence."
+    },
+    {
+      "fr": "Le roi Pommerol ordonne une épreuve du sang royal pour chaque enfant du palais.",
+      "en": "King Pommerol orders a royal blood test for every child in the palace."
+    }
+  ],
+  "content_flags": {
+    "violence": "none",
+    "romance": "mild",
+    "age": "10+"
+  }
+}

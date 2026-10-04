@@ -272,7 +272,10 @@ def test_an_unwritten_character_may_have_up_to_three_items(change):
 # optional, so a season on disk without them still validates. Every other
 # property of every object stays required.
 PHASE5_OPTIONAL = {
-    ("SEASON_ARC_SCHEMA", "$.properties.arc.items"): {"history"},
+    # Plan 20 stage 2, re-pinned on purpose: the plot archetypes a v2 story's
+    # S1 chose (the season's, and each entry's), absent on every season before.
+    ("SEASON_ARC_SCHEMA", "$"): {"archetypes"},
+    ("SEASON_ARC_SCHEMA", "$.properties.arc.items"): {"history", "archetype"},
     ("SEASON_ARC_SCHEMA", "$.properties.series_memory"): {"entries"},
     ("SEASON_ARC_SCHEMA", "$.properties.audience_feedback.items"): {"stats", "digest", "directions",
                                                                      "chosen_direction"},

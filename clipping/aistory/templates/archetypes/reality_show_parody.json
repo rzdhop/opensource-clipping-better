@@ -1,0 +1,78 @@
+{
+  "$schema": "archetype_v1",
+  "id": "reality_show_parody",
+  "label": {
+    "fr": "Parodie de téléréalité",
+    "en": "Reality-show parody"
+  },
+  "premise": {
+    "fr": "Sur une île de téléréalité, les candidats jouent l'amour pour les caméras ; le vrai drame se joue hors antenne.",
+    "en": "Contestants on a love-island show perform romance for the cameras, while the real drama happens off air."
+  },
+  "beats": [
+    {
+      "function": "setup",
+      "beat": {
+        "fr": "Arrivée sur l'île : présentations face caméra, sourires forcés, et un couple formé pour l'audience, pas par amour.",
+        "en": "Arrival on the island: confession-booth introductions, forced smiles, and a couple formed for ratings, not love."
+      }
+    },
+    {
+      "function": "escalation",
+      "beat": {
+        "fr": "Une bombe débarque au ralenti et jette son dévolu sur le couple le plus solide.",
+        "en": "A bombshell newcomer walks in, in slow motion, and sets her sights on the strongest couple."
+      }
+    },
+    {
+      "function": "complication",
+      "beat": {
+        "fr": "Les confidences face caméra contredisent ce qui se passe la nuit ; le public voit tout, les candidats rien.",
+        "en": "Confession-booth lies contradict what happens at night; the audience sees both, the contestants do not."
+      }
+    },
+    {
+      "function": "midpoint_twist",
+      "beat": {
+        "fr": "Retournement : le faux couple tombe vraiment amoureux, au moment où la production décide de le séparer.",
+        "en": "Reversal: the fake couple falls in love for real, just as the producers decide to split them up."
+      }
+    },
+    {
+      "function": "crisis",
+      "beat": {
+        "fr": "Cérémonie de recouplage autour du feu : il faut choisir en direct, et c'est le mauvais prénom qui sort.",
+        "en": "A recoupling ceremony by firelight: one partner must choose live, and the wrong name comes out."
+      }
+    },
+    {
+      "function": "climax_and_reset",
+      "beat": {
+        "fr": "La finale couronne un couple ; les caméras s'éteignent, et les premiers mots hors script révèlent la vérité.",
+        "en": "The finale crowns a couple; the cameras cut, and the winners' first unscripted words reveal the truth."
+      }
+    }
+  ],
+  "twists": [
+    {
+      "fr": "La bombe est une recrue de la production, payée pour briser les couples.",
+      "en": "The bombshell is a production plant, paid to break couples."
+    },
+    {
+      "fr": "L'ex d'un candidat est le prochain à débarquer.",
+      "en": "A contestant's ex is the next one to walk in."
+    },
+    {
+      "fr": "Le public envoie le couple le plus heureux droit au bûcher.",
+      "en": "Viewers vote the happiest couple straight to the elimination fire."
+    }
+  ],
+  "payoff": {
+    "fr": "Le vrai sentiment bat le script : le couple le plus faux de l'émission finit comme le seul sincère.",
+    "en": "Real feeling beats the script: the show's fakest couple ends up the only honest one."
+  },
+  "pairs_well_with": [
+    "rigged_contest",
+    "infidelity"
+  ]
+}

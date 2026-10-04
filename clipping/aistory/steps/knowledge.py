@@ -12,8 +12,10 @@ failure, a cancel or the step's time budget:
 - D5, one call per planned episode: up to 8 beats ``{what, place, who,
   objects, knows_after}`` -- from that episode's arc entry, the beats of the
   episode before (when written), the dossiers in short form, the places and
-  the props. A beat may name up to 2 new objects an episode (no prop of the
-  story yet), kept by name (``new_objects``) for D6;
+  the props, and -- when the season put the entry on a plot archetype (plan
+  20 stage 2) -- one line naming it and the beat the episode plays. A beat
+  may name up to 2 new objects an episode (no prop of the story yet), kept
+  by name (``new_objects``) for D6;
 - D6, the props registry (once the timeline is complete): which props
   matter, and up to 3 new props for the new objects the timeline needs (at
   most 8 registered in all). A new prop is created through the places step's
@@ -51,6 +53,7 @@ from clipping.providers import pricing
 from .. import context, media_policy, prompts, schemas
 from . import entities, episode_common, llm_call
 from . import places as places_step
+from . import season as season_step
 from .entities import CHARACTERS, PLACES, PROPS
 from .llm_call import StepFailed
 
@@ -302,7 +305,8 @@ def write_episode(ctx, store, story, season, ep, *, tools, announced) -> dict:
         cast=[_short_dossier(doc, names) for doc in detailed],
         others=[{"name": doc["name"], "role": doc["role"]} for doc in others],
         places=[{"name": doc["name"], "one_line": doc["one_line"]} for doc in known.places],
-        props=_prop_lines(known.props, known.cast))
+        props=_prop_lines(known.props, known.cast),
+        archetype=season_step.entry_archetype(entry, story["language"]))
 
     def validate(reply):
         errors = schemas.d5_errors(reply)

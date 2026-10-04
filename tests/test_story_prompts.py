@@ -298,6 +298,9 @@ def test_max_tokens():
         # Phase 7 stage 6b (DEC-230): re-pinned on purpose -- the keyframe judge (J2), its English worst case,
         # under the plan's 160 (same file).
         "J2": 110,
+        # Plan 20 stage 2: re-pinned on purpose -- a v2 story's S1 with the plot archetypes, a new id (the S1
+        # row is unchanged), measured on its French worst case (tests/test_story_season_archetypes.py).
+        "S1v2": 1150,
     }
 
 
@@ -341,6 +344,8 @@ def test_schema_names():
         "J1": "first_watch_check",
         # Phase 7 stage 6b (DEC-230): re-pinned on purpose -- the keyframe judge (J2).
         "J2": "keyframe_check",
+        # Plan 20 stage 2: re-pinned on purpose -- a v2 story's S1 with the plot archetypes, a new id.
+        "S1v2": "season_arc_skeleton_v2",
     }
 
 
@@ -547,7 +552,9 @@ def test_build_pack_trims_seed_note_and_avoid():
     assert "avoid" in pack.trimmed
     assert len(pack.seed.split()) == 120
     assert len(pack.note.split()) == 60
-    assert pack.avoid.count(",") == 19  # 20 titles kept
+    # Plan 20 stage 2: re-pinned on purpose -- the cap grew from 20 to 24 with the 14-concept library
+    # (14 library titles + the 9 cards one run writes before its last call never cut).
+    assert pack.avoid.count(",") == 23  # 24 titles kept
 
 
 def test_build_pack_bible_trim_is_named():

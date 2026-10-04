@@ -20,6 +20,13 @@ then ends failed naming it and its ``season:<ep>`` target (DEC-027).
 The other entries are shown to S2 as short lines -- each summary at most
 S1's own length -- so twelve expanded entries still fit the pack budget; the
 cut is printed once (spec 0: never silent).
+
+Plot archetypes (plan 20 stage 2): on a v2 story (``media_policy.is_v2``) S1
+is shown the archetype library (``templates/archetypes``) and picks the
+season's primary and at most one secondary that pairs with it; each entry
+names the one whose beat it plays (prompt id ``S1v2``). ``season.json``
+keeps the choice (``archetypes``) and each entry's ``archetype``; S2 is then
+told its entry's beat. A legacy story's S1 and S2 are exactly as before.
 """
 
 from __future__ import annotations
@@ -27,7 +34,7 @@ from __future__ import annotations
 import copy
 import time
 
-from .. import context, prompts, schemas
+from .. import context, media_policy, prompts, schemas, templates
 from .. import store as store_mod
 from . import entities, llm_call
 from .entities import CHARACTERS, PLACES
@@ -75,20 +82,49 @@ def _clear_approval(store, story_id, *, now) -> None:
 # ------------------------------------------------------------------------ S1
 
 def _skeleton(reply, episodes, previous, *, now) -> dict:
+    """``season.json`` from S1's *reply*; the archetypes, when the reply
+    chose them (a v2 story), on the document and on each entry."""
     previous = previous or {}
-    return {
+    arc = []
+    for entry in reply["arc"]:
+        item = {"ep": entry["ep"], "function": entry["function"], "summary": entry["summary"],
+                "open_hooks_in": [], "open_hooks_out": [], "characters": []}
+        if "archetype" in entry:
+            item["archetype"] = entry["archetype"]
+        arc.append(item)
+    doc = {
         "$schema": schemas.SEASON_ARC_SCHEMA_NAME,
         "episodes_planned": episodes,
-        "arc": [
-            {"ep": entry["ep"], "function": entry["function"], "summary": entry["summary"],
-             "open_hooks_in": [], "open_hooks_out": [], "characters": []}
-            for entry in reply["arc"]
-        ],
+        "arc": arc,
         "series_memory": copy.deepcopy(previous.get("series_memory") or _EMPTY_MEMORY),
         "audience_feedback": copy.deepcopy(previous.get("audience_feedback") or []),
         "approved_at": None,
         "updated_at": now,
     }
+    if "archetypes" in reply:
+        doc["archetypes"] = {"primary": reply["archetypes"]["primary"],
+                             "secondary": reply["archetypes"]["secondary"]}
+    return doc
+
+
+def _archetype_pick_list(language) -> list:
+    """The library as S1 is shown it: id, premise (in *language*), pairs."""
+    return [{"id": item["id"], "premise": item["premise"], "pairs_well_with": list(item["pairs_well_with"])}
+            for item in (templates.localize_archetype(a, language) for a in templates.load_archetypes())]
+
+
+def entry_archetype(entry, language):
+    """``{label, beat}`` of the plot archetype arc *entry* plays, its beat
+    for the entry's function, in *language*; None when the entry names none
+    (or one the library no longer ships: the season's validation names it)."""
+    archetype_id = entry.get("archetype")
+    if not archetype_id:
+        return None
+    try:
+        archetype = templates.localize_archetype(templates.load_archetype(archetype_id), language)
+    except KeyError:
+        return None
+    return {"label": archetype["label"], "beat": templates.archetype_beat(archetype, entry["function"])}
 
 
 # ------------------------------------------------------------------------ S2
@@ -170,7 +206,7 @@ def expand_entry(ctx, store, ep, *, tools, note=None, regenerate=False, announce
                    "for the prompt (the context pack is budgeted).")
     regen = {"field": "text", "current": _entry_current(entry, cast), "note": pack.note} if regenerate else None
     system, user, schema = prompts.build_s2(pack, entry=view[ep - 1], arc=view, cast=_cast_lines(cast),
-                                            regenerate=regen)
+                                            regenerate=regen, archetype=entry_archetype(entry, story["language"]))
 
     def validate(reply):
         errors = schemas.s2_errors(reply)
@@ -211,23 +247,34 @@ def run(ctx, *, runner=None, time_fn=time.monotonic) -> dict:
     announced = set()
     pack = context.build_pack(language=story["language"], story=story)
     llm_call.announce_trimmed(ctx, pack, announced)
+    archetypes = _archetype_pick_list(story["language"]) if media_policy.is_v2(story) else None
     system, user, schema = prompts.build_s1(
         pack, episodes=episodes, cast=_cast_lines(cast),
         places=[{"name": doc["name"], "one_line": doc["one_line"]} for doc in places],
+        archetypes=archetypes,
     )
+    pairs = {item["id"]: item["pairs_well_with"] for item in archetypes or ()}
 
     def validate(reply):
-        errors = schemas.s1_errors(reply, episodes)
+        if archetypes is None:
+            errors = schemas.s1_errors(reply, episodes)
+        else:
+            errors = schemas.s1_archetype_errors(reply, episodes, pairs)
         if errors:
             return errors
         return schemas.season_arc_errors(_skeleton(reply, episodes, previous, now=llm_call.utc_now()))
 
-    reply = llm_call.call_json(ctx, "S1", system, user, schema, validator=validate, runner=runner,
-                               time_fn=time_fn)
+    reply = llm_call.call_json(ctx, "S1" if archetypes is None else "S1v2", system, user, schema,
+                               validator=validate, runner=runner, time_fn=time_fn)
     now = llm_call.utc_now()
     store.write_doc(ctx.story_id, store_mod.SEASON_DOC, _skeleton(reply, episodes, previous, now=now), now=now)
     _clear_approval(store, ctx.story_id, now=now)
-    ctx.on_log(f"📅 Season arc: {episodes} episodes outlined")
+    chosen = reply.get("archetypes")
+    if chosen is None:
+        ctx.on_log(f"📅 Season arc: {episodes} episodes outlined")
+    else:
+        spine = chosen["primary"] + (f" + {chosen['secondary']}" if chosen["secondary"] else "")
+        ctx.on_log(f"📅 Season arc: {episodes} episodes outlined (plot archetypes: {spine})")
 
     expanded, failed = [], []
     for ep in range(1, episodes + 1):
