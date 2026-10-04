@@ -5225,3 +5225,25 @@ twists in a prompt now (propose-next is the natural reader; a follow-up).
 **Consequence.** The dashboard does not show the archetype yet; legacy S1/S2 have no input budget of their own (an
 older gap, measured at ~1,886 tokens on true-cap inputs); a v2 story switched back to v1 keeps its archetype lines
 (they read the season data). Commit ae28eba (main).
+
+## DEC-270 — Agent mode: one `story-fast-track` job takes an agent story from its idea to episode 1 rendered, approving on completeness by rule, under one shown estimate (plan 21 stage 1, after DEC-269)
+**Context.** TrendStory's biggest lead over this product is time-to-first-video: one prompt, five minutes. Here a new
+story needed eight gated steps before episode 1 (plan 18 §2, plan 21). The fast track already proved one job can
+chain steps and approve by rule (DEC-131/246/265); only script and keyframes have judges; the earlier approvals are
+completeness or taste.
+**Decision.** `StoryCreateRequest.mode: studio | agent` (studio default; stored as `generation_profile.mode` on agent
+stories only, so Studio documents are unchanged). The concepts step takes `count` (1–10). On an agent story one job
+`story-fast-track` runs nine parts — concept (count 1 from the seed, or the newest card), bible, style (+ preview),
+cast (the sketch's names up to 5, then `MAX_CAST`), places proposal, places, season (8), knowledge (v2), episode 1
+through the fast track with the story's format — each part kept when its document is approved (a resume repeats
+nothing: the bible rewrites only its missing parts, the season expands only unwritten entries), every approval through
+`workflow.approve_*` with `by: agent`, recorded as `approved_by` beside the approval and removed by a human approval
+(RC-G1). `workflow.story_fast_track_estimate` sums the parts' units with episode 1's predicted price and is asked
+before anything runs: a part that cannot run, a paid part with `allow_paid` off, or a cap stops the run before any
+call (RC-A3). The job record gains `sub_step` (null on clip jobs, RC-S2); the worker settles older jobs awaiting the
+documents the agent approved. Looks are approved without a taste check, and the docs say so.
+**Rejected.** A concept ranker (the idea is the concept); running without a summed estimate (DEC-174's rule).
+**Consequence.** Four tests re-pinned (`approved_by` optional on `story.json`, the entities' optional keys, the
+worker's terminal kinds, the job response keys); the wizard sends `mode: studio` (contract). Episode 1's price is
+predicted from the budget profile until the story is ready (conservative; may refuse a run that would fit); a v2
+story's knowledge part counts up to 3 props as paid images. Stages 2 (CLI) and 3 (dashboard) follow. Commit fe2d5d0.
