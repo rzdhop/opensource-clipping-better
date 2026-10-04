@@ -49,6 +49,8 @@ function NoCastYet({ storyId, story, onChange }) {
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')
   const [errors, setErrors] = useState(null)
+  const [errorCode, setErrorCode] = useState(null)
+  const [errorDetail, setErrorDetail] = useState(null)
 
   const selected = sketch.filter((entry) => checked.has(entry.name)).map((entry) => entry.name)
 
@@ -79,6 +81,8 @@ function NoCastYet({ storyId, story, onChange }) {
     setCreating(true)
     setError('')
     setErrors(null)
+    setErrorCode(null)
+    setErrorDetail(null)
     try {
       // The cast step's own request payload: the payload contract test reads
       // this literal and checks its keys against clipping.aistory.workflow
@@ -89,6 +93,8 @@ function NoCastYet({ storyId, story, onChange }) {
     } catch (err) {
       setError(err.message)
       setErrors(err.errors || null)
+      setErrorCode(err.code || null)
+      setErrorDetail(err.detail || null)
     } finally {
       setCreating(false)
     }
@@ -161,7 +167,8 @@ function NoCastYet({ storyId, story, onChange }) {
       {estimate && estimate.edit && estimate.edit.ready === false && (
         <p className="form-hint">Sheets will need an editor or prompt-only consistency.</p>
       )}
-      <StepError message={error} errors={errors} className="story-step-error" />
+      <StepError message={error} errors={errors} code={errorCode} detail={errorDetail}
+        storyId={storyId} retryLabel="Create cast" className="story-step-error" />
     </div>
   )
 }
@@ -229,6 +236,7 @@ function ImageSlot({ storyId, character, slot, info, disabled, onChange, consist
         <ConsistencyChip consistency={ref && ref.consistency} />
       </div>
       <RegenerateControl
+        storyId={storyId}
         disabled={disabled}
         onRegenerate={regenerate}
         estimateChip={<EstimateChip estimate={estimate} />}
@@ -776,6 +784,8 @@ function ContinueCast({ storyId, disabled, onChange, consistencyMode }) {
   const [running, setRunning] = useState(false)
   const [error, setError] = useState('')
   const [errors, setErrors] = useState(null)
+  const [errorCode, setErrorCode] = useState(null)
+  const [errorDetail, setErrorDetail] = useState(null)
 
   useEffect(() => {
     // consistencyMode is not a request parameter, but it flips missing
@@ -789,12 +799,16 @@ function ContinueCast({ storyId, disabled, onChange, consistencyMode }) {
     setRunning(true)
     setError('')
     setErrors(null)
+    setErrorCode(null)
+    setErrorDetail(null)
     try {
       await runStoryStep(storyId, 'cast', { params: {} })
       onChange()
     } catch (err) {
       setError(err.message)
       setErrors(err.errors || null)
+      setErrorCode(err.code || null)
+      setErrorDetail(err.detail || null)
     } finally {
       setRunning(false)
     }
@@ -807,7 +821,8 @@ function ContinueCast({ storyId, disabled, onChange, consistencyMode }) {
       </button>
       <EstimateChip estimate={estimate} />
       {estimate && <RouteChip routeClass={estimate.route_class} link={estimate.link} />}
-      <StepError message={error} errors={errors} className="story-step-error" />
+      <StepError message={error} errors={errors} code={errorCode} detail={errorDetail}
+        storyId={storyId} retryLabel="Continue cast" className="story-step-error" />
     </div>
   )
 }

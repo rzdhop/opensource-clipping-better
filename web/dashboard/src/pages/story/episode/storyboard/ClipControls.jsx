@@ -98,6 +98,7 @@ function ClipRegenerate({ storyId, ep, clip, disabled, onChange }) {
 
   return (
     <RegenerateControl
+      storyId={storyId}
       disabled={disabled || !clip.target}
       onRegenerate={regenerate}
       estimateChip={clip.blocked ? null : <EstimateChip estimate={estimate} />}

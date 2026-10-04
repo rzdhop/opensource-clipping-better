@@ -43,6 +43,8 @@ function NoProposalYet({ storyId, onChange }) {
   const [running, setRunning] = useState(false)
   const [error, setError] = useState('')
   const [errors, setErrors] = useState(null)
+  const [errorCode, setErrorCode] = useState(null)
+  const [errorDetail, setErrorDetail] = useState(null)
 
   useEffect(() => {
     fetchStoryEstimate(storyId, 'places_proposal').then(setEstimate).catch(() => setEstimate(null))
@@ -52,12 +54,16 @@ function NoProposalYet({ storyId, onChange }) {
     setRunning(true)
     setError('')
     setErrors(null)
+    setErrorCode(null)
+    setErrorDetail(null)
     try {
       await runStoryStep(storyId, 'places_proposal')
       onChange()
     } catch (err) {
       setError(err.message)
       setErrors(err.errors || null)
+      setErrorCode(err.code || null)
+      setErrorDetail(err.detail || null)
     } finally {
       setRunning(false)
     }
@@ -73,7 +79,8 @@ function NoProposalYet({ storyId, onChange }) {
         <EstimateChip estimate={estimate} />
         {estimate && <RouteChip routeClass={estimate.route_class} link={estimate.link} />}
       </div>
-      <StepError message={error} errors={errors} className="story-step-error" />
+      <StepError message={error} errors={errors} code={errorCode} detail={errorDetail}
+        storyId={storyId} retryLabel="Propose places & props" className="story-step-error" />
     </div>
   )
 }
@@ -91,6 +98,8 @@ function ProposalEditor({ storyId, proposal, characters, onChange }) {
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')
   const [errors, setErrors] = useState(null)
+  const [errorCode, setErrorCode] = useState(null)
+  const [errorDetail, setErrorDetail] = useState(null)
 
   // The names on screen right now, not the saved proposal: the user may have
   // dropped or added places/props since it was proposed, and the estimate
@@ -135,6 +144,8 @@ function ProposalEditor({ storyId, proposal, characters, onChange }) {
     setCreating(true)
     setError('')
     setErrors(null)
+    setErrorCode(null)
+    setErrorDetail(null)
     try {
       const places = placeDrafts
         .filter((p) => p.name.trim())
@@ -151,6 +162,8 @@ function ProposalEditor({ storyId, proposal, characters, onChange }) {
     } catch (err) {
       setError(err.message)
       setErrors(err.errors || null)
+      setErrorCode(err.code || null)
+      setErrorDetail(err.detail || null)
     } finally {
       setCreating(false)
     }
@@ -237,7 +250,8 @@ function ProposalEditor({ storyId, proposal, characters, onChange }) {
         <EstimateChip estimate={estimate} />
         {estimate && <RouteChip routeClass={estimate.route_class} link={estimate.link} />}
       </div>
-      <StepError message={error} errors={errors} className="story-step-error" />
+      <StepError message={error} errors={errors} code={errorCode} detail={errorDetail}
+        storyId={storyId} retryLabel="Create places & props" className="story-step-error" />
     </div>
   )
 }
@@ -303,6 +317,7 @@ function VariantSlot({ storyId, place, variantKey, imageRef, dayReady, textMissi
         <ConsistencyChip consistency={imageRef && imageRef.consistency} />
       </div>
       <RegenerateControl
+        storyId={storyId}
         disabled={slotDisabled}
         onRegenerate={regenerate}
         estimateChip={<EstimateChip estimate={estimate} />}
@@ -617,6 +632,7 @@ function PropImage({ storyId, prop, disabled, onChange }) {
         <ConsistencyChip consistency={prop.image && prop.image.consistency} />
       </div>
       <RegenerateControl
+        storyId={storyId}
         disabled={disabled}
         onRegenerate={regenerate}
         estimateChip={<EstimateChip estimate={estimate} />}
@@ -806,6 +822,8 @@ function ContinuePlaces({ storyId, disabled, onChange, consistencyMode }) {
   const [running, setRunning] = useState(false)
   const [error, setError] = useState('')
   const [errors, setErrors] = useState(null)
+  const [errorCode, setErrorCode] = useState(null)
+  const [errorDetail, setErrorDetail] = useState(null)
 
   useEffect(() => {
     // consistencyMode is not a request parameter, but it can flip missing
@@ -819,12 +837,16 @@ function ContinuePlaces({ storyId, disabled, onChange, consistencyMode }) {
     setRunning(true)
     setError('')
     setErrors(null)
+    setErrorCode(null)
+    setErrorDetail(null)
     try {
       await runStoryStep(storyId, 'places', { params: {} })
       onChange()
     } catch (err) {
       setError(err.message)
       setErrors(err.errors || null)
+      setErrorCode(err.code || null)
+      setErrorDetail(err.detail || null)
     } finally {
       setRunning(false)
     }
@@ -837,7 +859,8 @@ function ContinuePlaces({ storyId, disabled, onChange, consistencyMode }) {
       </button>
       <EstimateChip estimate={estimate} />
       {estimate && <RouteChip routeClass={estimate.route_class} link={estimate.link} />}
-      <StepError message={error} errors={errors} className="story-step-error" />
+      <StepError message={error} errors={errors} code={errorCode} detail={errorDetail}
+        storyId={storyId} retryLabel="Continue places & props" className="story-step-error" />
     </div>
   )
 }

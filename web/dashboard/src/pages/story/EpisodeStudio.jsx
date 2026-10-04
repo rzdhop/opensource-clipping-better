@@ -172,6 +172,8 @@ function FastTrackHeader({ storyId, ep, busy, job, events, paused, onChange }) {
   const [stopOnScriptIssues, setStopOnScriptIssues] = useState(false)
   const [error, setError] = useState('')
   const [errors, setErrors] = useState(null)
+  const [errorCode, setErrorCode] = useState(null)
+  const [errorDetail, setErrorDetail] = useState(null)
   // As every other estimate-driven header (stage-10 lesson, browser-check
   // finding): a 409 must show its own sentence, not leave the button
   // disabled with nothing said about why (fast_track.estimate does refuse a
@@ -244,6 +246,8 @@ function FastTrackHeader({ storyId, ep, busy, job, events, paused, onChange }) {
     setRunning(true)
     setError('')
     setErrors(null)
+    setErrorCode(null)
+    setErrorDetail(null)
     try {
       const fastTrackParams = { storyboard: 't1', stop_at_keyframes: stopAtKeyframes, stop_on_script_issues: stopOnScriptIssues }
       await runStoryStep(storyId, 'fast-track', { ep, params: fastTrackParams })
@@ -251,6 +255,8 @@ function FastTrackHeader({ storyId, ep, busy, job, events, paused, onChange }) {
     } catch (err) {
       setError(err.message)
       setErrors(err.errors || null)
+      setErrorCode(err.code || null)
+      setErrorDetail(err.detail || null)
     } finally {
       setRunning(false)
     }
@@ -306,7 +312,8 @@ function FastTrackHeader({ storyId, ep, busy, job, events, paused, onChange }) {
         />
         Stop at the script if its repairs leave issues
       </label>
-      <StepError message={error} errors={errors} className="story-step-error" />
+      <StepError message={error} errors={errors} code={errorCode} detail={errorDetail}
+        storyId={storyId} retryLabel="Generate episode" className="story-step-error" />
     </div>
   )
 }

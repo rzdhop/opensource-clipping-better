@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { AlertTriangle } from '../../ui/icons'
+import BudgetRefusal, { isBudgetRefusal } from './BudgetRefusal'
 
 /**
  * One step or card's own error slot: the message plus, when present, the
@@ -7,13 +8,32 @@ import { AlertTriangle } from '../../ui/icons'
  * new error appears -- without this, on a phone-width page, the control that
  * failed could be a full screen away from the only place the error was shown
  * (spec 10 finding 1).
+ *
+ * `code` and `detail` are the `ApiError`'s own (plan 23, Track A): a refusal
+ * with `code === "budget_daily_cap"` is drawn as the BudgetRefusal panel
+ * (what was spent today, what this job costs, the cap, and "Allow $X more
+ * today"). `storyId` names the grant in the story's log; `retryLabel` is the
+ * step's own button, which the panel tells the person to press again (the
+ * allow button only grants, it never re-runs the step).
  */
-export function StepError({ message, errors, className }) {
+export function StepError({ message, errors, className, code, detail, storyId, retryLabel }) {
   const ref = useRef(null)
 
   useEffect(() => {
     if (message && ref.current) ref.current.scrollIntoView({ block: 'nearest' })
   }, [message])
+
+  if (message && isBudgetRefusal(code, detail)) {
+    return (
+      <BudgetRefusal
+        detail={detail}
+        storyId={storyId}
+        retryLabel={retryLabel}
+        className={className}
+        panelRef={ref}
+      />
+    )
+  }
 
   if (!message) return null
 
@@ -193,24 +213,32 @@ export function EditableList({ label, value, onSave, exactLines, disabled, hint 
  * the same either way, so a first make and a later regenerate cost the same.
  * `actionLabel` overrides the non-empty button's default "↻ Regenerate" text
  * (e.g. ScriptPane.jsx's "Re-voice this line", plan 11 stage 11) -- every
- * other caller keeps the generic wording.
+ * other caller keeps the generic wording. A refusal keeps its `code` and
+ * `detail` (plan 23): the daily cap's 409 is drawn as the BudgetRefusal
+ * panel, whose grant is logged against `storyId` when given.
  */
-export function RegenerateControl({ onRegenerate, disabled, estimateChip, empty, label, actionLabel }) {
+export function RegenerateControl({ onRegenerate, disabled, estimateChip, empty, label, actionLabel, storyId }) {
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [errors, setErrors] = useState(null)
+  const [errorCode, setErrorCode] = useState(null)
+  const [errorDetail, setErrorDetail] = useState(null)
 
   const run = async (withNote) => {
     setBusy(true)
     setError('')
     setErrors(null)
+    setErrorCode(null)
+    setErrorDetail(null)
     try {
       await onRegenerate(withNote)
       setNote('')
     } catch (err) {
       setError(err.message)
       setErrors(err.errors || null)
+      setErrorCode(err.code || null)
+      setErrorDetail(err.detail || null)
     } finally {
       setBusy(false)
     }
@@ -228,7 +256,8 @@ export function RegenerateControl({ onRegenerate, disabled, estimateChip, empty,
           {busy ? 'Making…' : `Make ${label}`}
         </button>
         {estimateChip}
-        <StepError message={error} errors={errors} />
+        <StepError message={error} errors={errors} code={errorCode} detail={errorDetail}
+          storyId={storyId} retryLabel={`Make ${label}`} />
       </div>
     )
   }
@@ -248,7 +277,8 @@ export function RegenerateControl({ onRegenerate, disabled, estimateChip, empty,
         {busy ? 'Regenerating…' : (actionLabel || '↻ Regenerate')}
       </button>
       {estimateChip}
-      <StepError message={error} errors={errors} />
+      <StepError message={error} errors={errors} code={errorCode} detail={errorDetail}
+        storyId={storyId} retryLabel={actionLabel || 'Regenerate'} />
     </div>
   )
 }

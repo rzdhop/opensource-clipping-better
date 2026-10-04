@@ -12,6 +12,30 @@ export function formatUsd(value) {
   return amount === 0 ? '0.00' : amount.toFixed(3)
 }
 
+/**
+ * A dollar amount to the cent, with its "$": "$8.38". The daily cap is read
+ * in whole cents (the budget rounds a needed extra up to the cent), so the
+ * refusal panel, the chip and the Settings card all print this, not the
+ * three-decimal estimate form of `formatUsd`.
+ */
+export function formatCents(value) {
+  return `$${(Number(value) || 0).toFixed(2)}`
+}
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/**
+ * The budget day a `YYYY-MM-DD` key names, as "4 Oct" (read off the key
+ * itself, not through a Date, so no timezone can move it). Anything that is
+ * not a day key comes back as it was.
+ */
+export function formatBudgetDay(day) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(day || ''))
+  if (!match) return String(day || '')
+  const month = MONTHS[Number(match[2]) - 1]
+  return month ? `${Number(match[3])} ${month}` : String(day)
+}
+
 const MINUTE = 60 * 1000
 const HOUR = 60 * MINUTE
 const DAY = 24 * HOUR

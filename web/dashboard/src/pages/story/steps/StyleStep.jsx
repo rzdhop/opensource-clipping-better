@@ -138,6 +138,8 @@ export default function StyleStep({ data, storyId, inFlightJob, onChange, onAdva
 
   const [saveError, setSaveError] = useState('')
   const [saveErrors, setSaveErrors] = useState(null)
+  const [saveErrorCode, setSaveErrorCode] = useState(null)
+  const [saveErrorDetail, setSaveErrorDetail] = useState(null)
   const [saving, setSaving] = useState(false)
   const [approveError, setApproveError] = useState('')
   const [approveErrors, setApproveErrors] = useState(null)
@@ -145,6 +147,8 @@ export default function StyleStep({ data, storyId, inFlightJob, onChange, onAdva
   const [previewEstimate, setPreviewEstimate] = useState(null)
   const [previewError, setPreviewError] = useState('')
   const [previewErrors, setPreviewErrors] = useState(null)
+  const [previewErrorCode, setPreviewErrorCode] = useState(null)
+  const [previewErrorDetail, setPreviewErrorDetail] = useState(null)
 
   useEffect(() => {
     fetchStyles().then((d) => setStyles(d.styles || [])).catch(() => {})
@@ -197,6 +201,8 @@ export default function StyleStep({ data, storyId, inFlightJob, onChange, onAdva
     setSaving(true)
     setSaveError('')
     setSaveErrors(null)
+    setSaveErrorCode(null)
+    setSaveErrorDetail(null)
     try {
       const template = styles.find((s) => s.template_id === templateId)
       const overrides = overridesAgainst(template, {
@@ -208,6 +214,8 @@ export default function StyleStep({ data, storyId, inFlightJob, onChange, onAdva
     } catch (err) {
       setSaveError(err.message)
       setSaveErrors(err.errors || null)
+      setSaveErrorCode(err.code || null)
+      setSaveErrorDetail(err.detail || null)
     } finally {
       setSaving(false)
     }
@@ -216,12 +224,16 @@ export default function StyleStep({ data, storyId, inFlightJob, onChange, onAdva
   const handlePreview = async () => {
     setPreviewError('')
     setPreviewErrors(null)
+    setPreviewErrorCode(null)
+    setPreviewErrorDetail(null)
     try {
       await runStoryStep(storyId, 'style_preview')
       onChange()
     } catch (err) {
       setPreviewError(err.message)
       setPreviewErrors(err.errors || null)
+      setPreviewErrorCode(err.code || null)
+      setPreviewErrorDetail(err.detail || null)
     }
   }
 
@@ -378,7 +390,8 @@ export default function StyleStep({ data, storyId, inFlightJob, onChange, onAdva
               {saving ? 'Saving…' : 'Save draft'}
             </button>
           </div>
-          <StepError message={saveError} errors={saveErrors} className="story-step-error" />
+          <StepError message={saveError} errors={saveErrors} code={saveErrorCode} detail={saveErrorDetail}
+            storyId={storyId} retryLabel="Save draft" className="story-step-error" />
         </>
       )}
 
@@ -389,6 +402,8 @@ export default function StyleStep({ data, storyId, inFlightJob, onChange, onAdva
         onGenerate={handlePreview}
         error={previewError}
         errors={previewErrors}
+        errorCode={previewErrorCode}
+        errorDetail={previewErrorDetail}
         busy={busy}
         myJob={myJob}
         liveJob={liveJob}
@@ -411,7 +426,7 @@ export default function StyleStep({ data, storyId, inFlightJob, onChange, onAdva
   )
 }
 
-function PreviewStrip({ storyId, stylePreview, estimate, onGenerate, error, errors, busy, myJob, liveJob, events, streamState }) {
+function PreviewStrip({ storyId, stylePreview, estimate, onGenerate, error, errors, errorCode, errorDetail, busy, myJob, liveJob, events, streamState }) {
   const [urls, setUrls] = useState({})
   const urlsRef = useRef({})
 
@@ -457,7 +472,8 @@ function PreviewStrip({ storyId, stylePreview, estimate, onGenerate, error, erro
         {estimate && <RouteChip routeClass={estimate.route_class} link={estimate.link} />}
       </div>
       {!ready && estimate && <p className="form-hint">{estimate.message}</p>}
-      <StepError message={error} errors={errors} className="story-step-error" />
+      <StepError message={error} errors={errors} code={errorCode} detail={errorDetail}
+        storyId={storyId} retryLabel="Generate preview" className="story-step-error" />
 
       {myJob && liveJob && (
         liveJob.status === 'queued'

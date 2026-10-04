@@ -1,4 +1,5 @@
 import { formatUsd } from '../lib/format'
+import TodayChip from './TodayChip'
 
 // What a story step would cost, from GET /api/stories/{id}/estimate/{step}.
 // An LLM step on a free first link answers est_usd 0.0, which reads as
@@ -56,7 +57,9 @@ export function unitsLabel(units) {
  * step "est. $0.00 · 5 LLM · 5 images · 10 edits · voice ~180 chars". Warn
  * styled when the step is not ready to run (the key gate refuses it,
  * `estimate.ready === false`);
- * `estimate.message` explains why, as the chip's title. A neutral
+ * `estimate.message` explains why, as the chip's title. Beside it, the
+ * "today $8.38 / $4.00" chip (TodayChip) when the estimate carries its
+ * `today` block. A neutral
  * "estimating…" placeholder covers the gap before the estimate arrives.
  */
 export default function EstimateChip({ estimate, loading }) {
@@ -64,12 +67,17 @@ export default function EstimateChip({ estimate, loading }) {
     return <span className="chip" title="Fetching the estimate">estimating…</span>
   }
   const label = `est. $${formatUsd(estimate.est_usd)} · ${unitsLabel(estimate.units)}`
+  // The day's spending against the daily cap sits beside the estimate (plan
+  // 23, Track A): the estimate carries the block, so it costs no request.
   return (
-    <span
-      className={`chip${estimate.ready ? '' : ' chip-warn'}`}
-      title={estimate.message || ''}
-    >
-      {label}
-    </span>
+    <>
+      <span
+        className={`chip${estimate.ready ? '' : ' chip-warn'}`}
+        title={estimate.message || ''}
+      >
+        {label}
+      </span>
+      {estimate.today && <TodayChip today={estimate.today} />}
+    </>
   )
 }

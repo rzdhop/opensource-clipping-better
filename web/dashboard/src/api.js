@@ -279,6 +279,45 @@ export async function updateSettings(payload) {
 }
 
 /**
+ * Today's paid spending against the daily cap (`GET /api/budget/today`, plan
+ * 23): `{day, zone, spent_usd, extra_usd, daily_cap_usd, effective_cap_usd,
+ * cap_below_spend, stories, other_usd, grants_today, resets_at}`.
+ */
+export async function fetchBudgetToday() {
+  const res = await request('/budget/today')
+  if (!res.ok) throw await apiError(res, 'Failed to fetch today\'s spending')
+  return res.json()
+}
+
+/**
+ * Allow `usd` more for today only (`POST /api/budget/today/extra`): the saved
+ * daily cap stays as it is, the extra ends with the day. `story_id` and
+ * `note` name the grant in the story's activity log, `estimate_usd` is what
+ * the refused call needed. This only grants: it never runs the refused step,
+ * a person still presses it again. Resolves with the day's new totals.
+ */
+export async function allowTodayExtra({ usd, story_id, note, estimate_usd }) {
+  const body = { usd }
+  if (story_id) body.story_id = story_id
+  if (note) body.note = note
+  if (estimate_usd != null) body.estimate_usd = estimate_usd
+  const res = await request('/budget/today/extra', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) throw await apiError(res, 'Failed to allow more for today')
+  return res.json()
+}
+
+/** Take today's extra back (`DELETE /api/budget/today/extra`); the saved cap applies again. */
+export async function clearTodayExtra() {
+  const res = await request('/budget/today/extra', { method: 'DELETE' })
+  if (!res.ok) throw await apiError(res, 'Failed to remove today\'s extra')
+  return res.json()
+}
+
+/**
  * Ping every link of the provider chain and report each one. Can take a couple
  * of minutes: NVIDIA's free tier queues, and its probe is allowed 120s.
  */

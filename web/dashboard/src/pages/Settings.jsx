@@ -1,8 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
-import { checkAnthropicKey, checkVideoKeys, fetchHardware, fetchSettings, testChain, testGenerationChain, updateSettings } from '../api'
-import { Badge, Button, Card, CardBody, CardHeader, Field } from '../ui'
 import {
-  Brain, CircleCheck, CircleDollarSign, Cpu, Eye, EyeOff, Film, Gauge, ImageIcon, KeyRound, LinkIcon, Mic, Monitor,
+  checkAnthropicKey, checkVideoKeys, clearTodayExtra, fetchHardware, fetchSettings, testChain, testGenerationChain,
+  updateSettings,
+} from '../api'
+import { Badge, Button, Card, CardBody, CardHeader, Field } from '../ui'
+import { formatBudgetDay, formatCents } from '../lib/format'
+import {
+  AlertTriangle, Brain, CircleCheck, CircleDollarSign, Cpu, Eye, EyeOff, Film, Gauge, ImageIcon, KeyRound, LinkIcon, Mic, Monitor,
   Palette, RefreshCw, Save, Server, Wallet, Wand2,
 } from '../ui/icons'
 
@@ -128,6 +132,9 @@ const SETTINGS_TABS = [
 const TAB_KEY = 'rzc_settings_tab'
 
 function readTab() {
+  // A link to "/settings#budget" (the refusal panel's "Budget settings") opens that tab.
+  const hashed = (window.location.hash || '').replace(/^#/, '')
+  if (SETTINGS_TABS.some(t => t.id === hashed)) return hashed
   try {
     const stored = localStorage.getItem(TAB_KEY)
     return SETTINGS_TABS.some(t => t.id === stored) ? stored : 'providers'
@@ -251,6 +258,9 @@ function Settings() {
   const [dailyCap, setDailyCap] = useState('')
   const [perStoryCap, setPerStoryCap] = useState('')
   const [budgetProfile, setBudgetProfile] = useState('')
+  // Today's extra (plan 23): what was allowed for today only, and taking it back.
+  const [extraBusy, setExtraBusy] = useState(false)
+  const [extraError, setExtraError] = useState('')
 
   // The chain test. It can take a couple of minutes, so it counts seconds
   // while it runs: a bare spinner reads as "hung" long before NVIDIA answers.
@@ -435,6 +445,28 @@ function Settings() {
     }
   }
 
+  // Take today's extra back; the day's new totals replace the budget fields.
+  const removeExtra = async () => {
+    setExtraBusy(true)
+    setExtraError('')
+    try {
+      const day = await clearTodayExtra()
+      setSettings(prev => ({
+        ...prev,
+        spend_day: day.day,
+        spend_zone: day.zone,
+        spend_today_usd: day.spent_usd,
+        day_extra_usd: day.extra_usd,
+        daily_cap_below_spend: day.cap_below_spend,
+        day_contributors: day.stories || [],
+      }))
+    } catch (err) {
+      setExtraError(err.message)
+    } finally {
+      setExtraBusy(false)
+    }
+  }
+
   if (loading) return <div className="empty-state"><div className="spinner"></div></div>
 
   const endpointReady = Boolean(
@@ -445,6 +477,18 @@ function Settings() {
   const spentToday = Number(settings?.spend_today_usd || 0)
   const dailyCapNow = Number(settings?.daily_cap_usd || 0)
   const dailyShare = dailyCapNow > 0 ? Math.min(100, Math.round((spentToday / dailyCapNow) * 100)) : 0
+  // The budget day (plan 23): its zone, what was allowed for today only, who spent it.
+  const dayZone = settings?.spend_zone || 'UTC'
+  const dayLabel = formatBudgetDay(settings?.spend_day)
+  const extraToday = Number(settings?.day_extra_usd || 0)
+  const contributors = settings?.day_contributors || []
+  // While the cap field is edited the warning follows the field live; saved, it
+  // follows the server's own flag. An extra that covers the spending lifts it.
+  const capDraft = Number(dailyCap)
+  const capEdited = dailyCap !== String(settings?.daily_cap_usd ?? '')
+  const capBelowSpend = capEdited
+    ? capDraft > 0 && spentToday > capDraft + extraToday
+    : Boolean(settings?.daily_cap_below_spend) && spentToday > dailyCapNow + extraToday
 
   return (
     <div className="fade-in settings-page">
@@ -900,13 +944,18 @@ function Settings() {
                     <td className="settings-caps-spend">On each episode's page</td>
                   </tr>
                   <tr>
-                    <th scope="row"><label htmlFor="settings-cap-daily">Daily</label></th>
+                    <th scope="row">
+                      <label htmlFor="settings-cap-daily">Daily</label>
+                      <span className="settings-caps-zone" title={`The day runs from 00:00 to 24:00 ${dayZone}`}>{dayZone} day</span>
+                    </th>
                     <td>
                       <input id="settings-cap-daily" className="form-input" type="number" min="0.01" step="0.01" inputMode="decimal"
                         value={dailyCap} onChange={e => setDailyCap(e.target.value)} />
                     </td>
                     <td className="settings-caps-spend">
-                      <span className="settings-caps-amount">${spentToday.toFixed(2)} of ${dailyCapNow.toFixed(2)} today</span>
+                      <span className="settings-caps-amount">
+                        ${spentToday.toFixed(2)} of ${dailyCapNow.toFixed(2)}{extraToday > 0 ? ` + ${formatCents(extraToday)}` : ''} today
+                      </span>
                       <span
                         className={`settings-caps-meter${dailyShare >= 90 ? ' settings-caps-meter-high' : ''}`}
                         role="img"
@@ -926,6 +975,38 @@ function Settings() {
                   </tr>
                 </tbody>
               </table>
+            </div>
+            <div className="settings-budget-day">
+              <p className="form-hint">Day of {dayLabel} ({dayZone}); it resets at 00:00 {dayZone}.</p>
+              {extraToday > 0 && (
+                <p className="settings-budget-extra">
+                  Allowed for today only: +{formatCents(extraToday)}
+                  <Button size="sm" variant="ghost" loading={extraBusy} onClick={removeExtra}>Remove</Button>
+                </p>
+              )}
+              {extraError && <p className="settings-budget-error" role="alert">{extraError}</p>}
+              {capBelowSpend && (
+                <p className="settings-budget-warning" role="status">
+                  <AlertTriangle size={14} aria-hidden="true" />
+                  <span>
+                    This cap is below what was already spent today ({formatCents(spentToday)}). Every paid call is
+                    refused until 00:00 {dayZone} unless you allow more for today.
+                  </span>
+                </p>
+              )}
+              {contributors.length > 0 && (
+                <div className="settings-budget-stories">
+                  <p className="settings-budget-stories-title">Spent today, by story</p>
+                  <ul>
+                    {contributors.map(story => (
+                      <li key={story.story_id}>
+                        <span className="settings-budget-story-title">{story.title || story.story_id}</span>
+                        <span className="settings-budget-story-usd">{formatCents(story.usd)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
             <Field
               label="Budget profile"
