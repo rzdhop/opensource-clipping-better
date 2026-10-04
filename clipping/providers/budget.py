@@ -397,7 +397,7 @@ class DailySpend:
             day = self.today()
             total = round(float(data["days"].get(day, 0.0)) + float(usd), 4)
             data["days"][day] = total
-            data["updated_at"] = datetime.fromtimestamp(self._time(), tz=timezone.utc).isoformat()
+            data["updated_at"] = self._now_iso()
             self._write(data)
             return total
 
@@ -485,7 +485,7 @@ class DailySpend:
                 return round(held, 4)
             total = round(max(0.0, held - usd), 4)
             data["days"][day] = total
-            data["updated_at"] = datetime.fromtimestamp(self._time(), tz=timezone.utc).isoformat()
+            data["updated_at"] = self._now_iso()
             self._write(data)
             return total
 
