@@ -78,16 +78,19 @@ def test_the_pipeline_default_and_the_style_suggestion_mirror_the_backend():
 
 def test_the_wizard_renders_the_episode_format_select_and_sends_the_choice():
     src = _read(WIZARD)
-    assert ("import { EPISODE_TEMPLATES, pipelineDefaultTemplate, styleSuggestedTemplate } from "
-            "'./episodeTemplates'") in src
+    # Re-pinned on purpose (plan 22 stage 3): the wizard also imports the native-speech profile's suggestion
+    # (tests/test_story_confrontation_template.py).
+    assert ("import {\n  EPISODE_TEMPLATES, pipelineDefaultTemplate, profileSuggestedTemplate, styleSuggestedTemplate,\n"
+            "} from './episodeTemplates'") in src
     assert '<label className="form-label" htmlFor="new-story-episode-format">Episode format</label>' in src
     select = src.split('id="new-story-episode-format"', 1)[1].split("</select>", 1)[0]
     assert "value={episodeTemplateId}" in select
     assert "onChange={(e) => setEpisodeTemplateChoice(e.target.value)}" in select
     assert "EPISODE_TEMPLATES.map((tpl) => <option key={tpl.id} value={tpl.id}>{tpl.label}</option>)" in select
     assert "{episodeFormat ? episodeFormat.help : ''}" in src
-    # Pre-filled: the user's pick, else the style's suggestion, else the pipeline's default.
-    assert "const suggestedTemplate = styleSuggestedTemplate(chosenStyle, pipeline)" in src
+    # Pre-filled: the user's pick, else the style's suggestion, else the pipeline's default. Re-pinned on
+    # purpose (plan 22 stage 3): a native-speech profile's suggestion comes before the style's.
+    assert "const suggestedTemplate = profileSuggestion || styleSuggestedTemplate(chosenStyle, pipeline)" in src
     assert ("const episodeTemplateId = episodeTemplateChoice || suggestedTemplate || "
             "pipelineDefaultTemplate(pipeline)") in src
     # Sent: the pick or the suggestion; else null, so the server picks by pipeline.

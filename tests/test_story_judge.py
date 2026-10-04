@@ -231,3 +231,75 @@ def test_a_failed_j1_fails_the_step_naming_it_and_keeps_the_script(store):
     script = eps._script(store, story_id)
     assert script["consistency_report"]["passed"] is True and "first_watch" not in script
     assert any(line.startswith("✖ The first-watch check failed") for line in log)
+
+
+# ============================================================ J1 version 3 (plan 22 stage 3)
+#
+# Writing v3: J1v3 judges a v3 script (it reads the spine; three more kinds)
+# after the script step's line checks -- a character line past the format's
+# words a line is a blocking ``line_too_long``, one short of a template's
+# own floor a blocking ``incomplete_sentence``, a line under 3 words on a
+# format with no line_words a minor one. Stored reports of every older
+# version stay valid; the repair pass rewrites the scenes these name.
+
+def _v3_script(*texts, speaker="char_kiwilo"):
+    lines = [{"line_id": f"l{k:02d}", "speaker": speaker, "text": text, "emotion": "angry", "delivery": "cold",
+              "timing": {"duration_s": 1.0, "source": "estimated"}} for k, text in enumerate(texts)]
+    return {"scenes": [{"scene_id": "s02", "function": "setup", "lines": lines}]}
+
+
+def test_the_line_checks_flag_a_line_one_shot_cannot_speak_and_a_fragment():
+    judge = _judge()
+    from clipping.aistory import templates
+
+    confrontation = templates.load_episode_template("confrontation_50s_v2")
+    serial = templates.load_episode_template("serial_60s_v2")
+    good = "Depuis ton inscription, tu n'as jamais ouvert ton capuchon devant nous."
+    long = " ".join(["mot"] * 18)
+    issues = judge.line_issues(_v3_script(good, long, "Non, jamais."), confrontation)
+    assert [(issue["kind"], issue["severity"]) for issue in issues] == [("line_too_long", "blocking"),
+                                                                       ("incomplete_sentence", "blocking")]
+    assert issues[0]["fix"].startswith("Line l01 “mot mot") and "a line here holds at most 17" in issues[0]["fix"]
+    assert "a complete sentence of 5 to 17 words" in issues[1]["fix"]
+    # A format with no line_words: 22 words a line (17 on a native-speech story), a fragment is minor.
+    assert judge.line_issues(_v3_script(good, long, "Non, jamais."), serial) == [
+        {"scene_id": "s02", "kind": "incomplete_sentence", "severity": "minor",
+         "fix": "Line l02 “Non, jamais.” is a fragment: make it a sentence a person would say."}]
+    assert [i["kind"] for i in judge.line_issues(_v3_script(long), serial, native=True)] == ["line_too_long"]
+    # The narrator is heard over the picture: never checked here.
+    assert judge.line_issues(_v3_script("Non.", speaker="narrator"), confrontation) == []
+    many = judge.line_issues(_v3_script(*[long] * 9), confrontation)
+    assert len(many) == judge.LINE_ISSUES_MAX
+
+
+def test_the_v3_kinds_are_stored_worded_and_repaired_like_the_others():
+    judge = _judge()
+    from clipping.aistory import schemas
+    from clipping.aistory.steps import script as script_step
+
+    for kind in ("line_no_progress", "incomplete_sentence", "logline_mismatch", "line_too_long"):
+        assert kind in schemas.FIRST_WATCH_ALL_KINDS and judge.KIND_WORDS[kind]
+    # J1v2's own list is unchanged (its prompt and schema are pinned).
+    assert schemas.FIRST_WATCH_ISSUE_KINDS == ("unclear_goal", "unmotivated", "unintroduced", "object_unseen",
+                                               "repeated_line", "no_hook_text")
+    report = {"who_wants_what": "x", "what_happens": "y", "why_it_matters": "z", "passed": False,
+              "issues": [{"scene_id": "s02", "kind": "line_no_progress", "severity": "blocking", "fix": "Dire X."},
+                         {"scene_id": None, "kind": "logline_mismatch", "severity": "minor", "fix": "Raconter Y."}],
+              "checked_rev": 1, "checked_at": NOW, "stale": False, "version": 3}
+    assert schemas.validate(report, schemas._EPISODE_SCRIPT_FIRST_WATCH_SCHEMA) == []
+    assert script_step._kind_words("line_no_progress") == "Line adds nothing"
+
+
+def test_an_unapproved_v3_script_judged_by_j1_version_2_is_judged_again():
+    judge = _judge()
+    script = {"rev": 3, "approved_at": None,
+              "first_watch": {"stale": False, "checked_rev": 3, "version": 2, "passed": True, "issues": []}}
+    assert not judge.needs_first_watch(script)  # a v2 story: version 2 is current (RC-W3)
+    assert judge.needs_first_watch(script, 3) and judge.first_watch_state(script, 3) == "stale"
+    assert "older version of the judge" in judge.unjudged_refusal(script, 1, 3)
+    approved = dict(script, approved_at=NOW)
+    assert not judge.needs_first_watch(approved, 3)  # an approved script keeps its report (RC-M3)
+    v3 = {"generation_profile": {"pipeline": "v2", "writing": "v3"}}
+    assert judge.j1_version(v3) == 3 and judge.j1_version(v3, {"scenes": [{"scene_id": "s01"}]}) == 2
+    assert judge.j1_version(v3, {"scenes": [{"scene_id": "s01"}], "spine": {}}) == 3
+    assert judge.j1_version({"generation_profile": {"writing": "v3"}}) == 2  # a legacy story is never v3

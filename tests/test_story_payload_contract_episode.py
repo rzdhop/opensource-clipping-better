@@ -109,7 +109,8 @@ def test_the_readers_see_something():
     assert len(schemas.EMOTIONS) >= 5
     # Phase 7 stage 4 (DEC-227): serial_60s_v2 joins the two v1 templates.
     # Plan 20 stage 1 (on purpose): serial_90s_v2 and narrated_drama_60s_v2 join them.
-    assert len(defaults.EPISODE_TEMPLATE_IDS) == 5
+    # Plan 22 stage 3 (on purpose): confrontation_50s_v2 joins them.
+    assert len(defaults.EPISODE_TEMPLATE_IDS) == 6
 
 
 # -------------------------------------------------- ScriptPane.jsx: scriptParams

@@ -45,9 +45,11 @@ def _mutate(doc, fn):
 # v2 story is created on, is the third shipped one (count 2 -> 3); the v1 two
 # are unchanged. Re-pinned on purpose again (plan 20 stage 1, the fruit-drama
 # pack): narrated_drama_60s_v2 and serial_90s_v2 join them (count 3 -> 5); the
-# three before are unchanged.
-EXPECTED_EPISODE_TEMPLATE_IDS = ("narrated_drama_60s_v2", "serial_60s_v1", "serial_60s_v2", "serial_90s_v1",
-                                 "serial_90s_v2")
+# three before are unchanged. Re-pinned on purpose (plan 22 stage 3): the
+# confrontation format confrontation_50s_v2 (count 5 -> 6); the five before are
+# unchanged.
+EXPECTED_EPISODE_TEMPLATE_IDS = ("confrontation_50s_v2", "narrated_drama_60s_v2", "serial_60s_v1", "serial_60s_v2",
+                                 "serial_90s_v1", "serial_90s_v2")
 
 
 def test_exactly_the_two_shipped_episode_template_ids():
