@@ -1,3 +1,25 @@
+## CURRENT STATE — PAUSED by the human (2026-10-04): the episode-2 walk waits for a fal top-up (or a paid Gemini key)
+
+- **In-progress header:** phase = the paid walk of episode 2 of story d0ee5ebd745d (job ad275e8e90d0 failed at
+  the assets: fal HTTP 403 "User is locked. Reason: TOP_UP" on the first keyframe redraw). The human: "save the
+  state, I'll do that later, go on with another session". **To resume (the human):** (1) top up fal, or set
+  `GEMINI_PAID_API_KEY` (a Google AI Studio key with billing) in Settings and accept the image-link offer on the
+  episode page — then (2) **Generate episode** on episode 2: it resumes at the redraws (≤ $0.32), the 15 clips
+  (73 s, ≈ $1.61 on seedance), the 13 lip-syncs (≈ $0.25, fal only), the render and the metadata; ≈ $2.2 more,
+  within the $4 cap (raised from $3 for this walk). (3) Judge the video: A-133…A-140 (the performance prompts, the
+  two-beat rhythm, the slowed clips if any, the lipsync on fruit heads, the Gemini overrun). Open questions:
+  none blocking. The Gemini fallback (keyframes: nano-banana-2-lite $0.034/image; clips: Veo 3.1 lite $0.05/s;
+  no lipsync equivalent) exists behind that key; an automatic switch without the offer step is a small rule the
+  human may ask for.
+- **Everything else is merged, pushed and deployed** (main at this commit; backend restarted on it): the note fit
+  (DEC-249), long shots (DEC-250), tail guard v2 (DEC-251), performance and rhythm (DEC-252), the dashboard
+  overhaul (DEC-253…257), lipsync on Kling (DEC-258), the informed retry and the hook ask (DEC-259), E4 repairs
+  (DEC-260), E4 severities (DEC-261), the hook insert without a prop (DEC-262).
+- **Follow-ups logged for a later task** (in the DECs' Consequence and the action log): a trim pass for an
+  over-window script; the hook_payoff deterministic check under repair; E1v2 listing a prop on an insert hook
+  scene; the speech-rate estimate learning from measured lines; a second clip for shots past 1.25x; a design
+  reference's thumbnail left behind on delete; two players of one render on the wide layout; Veo as an opt-in.
+
 ## CURRENT STATE — the episode-2 walk is BLOCKED on the fal balance (2026-10-04, local session); DEC-259…262 landed on the way
 
 - **Where the walk stands (job ad275e8e90d0):** script approved anyway by me (62.5 s; J1 passed; 1 blocking E4
