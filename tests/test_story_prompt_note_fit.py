@@ -77,7 +77,9 @@ def test_the_keyframe_auto_fix_s_note_makes_room_in_the_prompt_instead_of_stoppi
     redraw = image.requests[-1]
     note = f"Keyframe check: the frame must show {kf._kiwi(store, story_id)}'s coconut phone"
     assert redraw.extra["name"] == f"shot_{flagged['shot_id'][2:]}"
-    assert redraw.prompt.endswith(f" Author's note: {note}.")
+    # DEC-265: the note ends with the shot's own framing as an order, after J2's text.
+    assert f" Author's note: {note}. Frame this as " in redraw.prompt
+    assert redraw.prompt.endswith(", nothing wider.")
     assert _words(redraw.prompt) <= budget
     assert redraw.prompt != flagged["image_prompt"] + f" Author's note: {note}."  # the context made room
     # The roles, the beat and the constraints are what the prompt is for: never the part that goes.
