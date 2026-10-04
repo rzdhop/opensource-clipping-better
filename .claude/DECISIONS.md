@@ -5141,3 +5141,26 @@ function `script_anyway_issues`), and three script-approval messages left stale 
 "kept for review", neither counted nor quoted) — found failing on main before this stage. J2's text budget is at
 1194 of 1200. Follow-ups: `MAX_TOKENS["J2"]` (110) could cut a reply with every field at its maximum; the fast-track
 estimate still predicts a stop for a v2 script with blocking issues before the repairs ran. Commits f11ed8d, 74a4db9.
+
+## DEC-266 — Shot ids are stable keys, not positions: a storyboard re-plan keeps the shots, ids and assets of every scene it does not plan again (plan 19 stage 2, F5, after DEC-265)
+**Context.** On the episode-2 walk a repair of three scenes re-planned the storyboard; `shots.build_storyboard`
+rebuilt every shot with empty assets and renumbered `sh01…`, so 15 bought keyframes and 15 clips (≈ $2.5) fell off
+the episode, and since `derive_seed` keys on the id the renumbering also changed the seeds and missed the gencache.
+docs/AI_STORY.md had promised the opposite.
+**Decision.** A scene not planned again keeps its shots verbatim (id, `assets`, prompt override, keep-still, every
+stored key); a scene or shot planned again (a T1 scene, every scene of a fast build, a single T1r shot) takes ids
+after the highest id of the previous board and of `assets.json`'s per-shot maps — an id is never reused, so an old
+verdict or fix record never attaches to a new shot; the `shots` list follows the script and `order` is the position;
+the rule pass moves a newly planned shot rather than a kept one. Schemas: ids must be unique, not contiguous
+(`sh100`–`sh999` and `shot_NNN.*` allowed; old contiguous boards still validate, RC-A8); the "sh01 to shNN" messages
+keep their old words for a contiguous board (`shots.shot_ids_phrase`). A board built with no previous one is
+byte-identical to before (sha256 goldens from the 5dfc598 code, RC-M3); the prompt goldens are unedited (RC-M1).
+**Rejected.** Renaming `shot_NN` files on renumber (fragile). A cache-aware estimate: an image request references the
+scene's previous keyframe, which the same run may redraw, and a clip request embeds a keyframe not yet made — pricing
+only the computable cases would make the estimate and the run disagree (RC-V6); with kept shots no longer re-bought,
+the loss it would have shown is gone.
+**Consequence.** Two behaviour changes: building the fast board again, or a T1 run on a fast board, gives every shot
+a new id (sh21+ on a 20-shot board). Five tests' lookups changed from id to position on purpose (none loosened);
+nine tests added. Follow-ups: the dashboard falls back to the first shot when a selected id disappears after a T1r;
+ids run out at sh999 with a plain error; a hand-edited transition is still lost on a re-plan (as before). Commit
+(rebased) on main.
