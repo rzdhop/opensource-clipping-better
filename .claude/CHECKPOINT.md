@@ -18,12 +18,14 @@
   GPU now (Pinokio documented for the later GPU box); Anthropic provider Sonnet 5.5 default / Opus 5.5 by name / server-side
   fallbacks ON (booked at the served model); universes (all ten, audience notes), two-view sheets at 1080×1920, variants,
   action prompts; NO doctrine prompt; nano-banana-2-lite on sheets; chatterbox before Fish Audio.
-- **Running now:** A1 (Sonnet, `feat/plan23-a1`, `.claude/worktrees/plan23-a1`), D1 (Opus, `feat/plan23-d1`), B1 (Sonnet,
-  `feat/plan23-b1`), all off 50914c7, disjoint files. Merge order as they land: A1 first (track A is priority one), then D1,
-  B1; each rebased on main, Tier-1 selection in both envs, ff-merge with the exit code checked, DEC entry, action-log line.
-  Deploys batched at 0 running jobs; every .py compiled with the image's Python 3.11 before a deploy (the a7ba8dc rule).
-- **Next action:** on each agent's report — review with the code-review skill, rebase, tests, merge; then A2 + A3 (Sonnet)
-  and C1 (Sonnet); A4/A5/A7, D5, B7 are Opus stages.
+- **Merged on main:** A1 `99a0d62` (the daily extra; reviewed, 1 of 3 findings fixed), B1 `3c3e024` (the stock library;
+  reviewed, 3 of 3 fixed). Both additive and uncalled: live through the bind mount, no restart needed, pushed (CI = baseline).
+- **Running now:** D1 (Opus, `feat/plan23-d1`, off 513c59a), A2 (Sonnet, `feat/plan23-a2`, off main 1e86a93), C1 (Sonnet,
+  `feat/plan23-c1`, off main 1e86a93); disjoint files. On each report: code-review skill, rebase, the Tier-1 selection in
+  both envs, ff-merge with the exit code checked, action-log line, push. Deploys batched at 0 running jobs; every .py
+  compiled with the image's Python 3.11 before a deploy (the a7ba8dc rule).
+- **Next action:** after A2 → A3 (Sonnet) then A4 + A5 (Opus); after C1 → C2 only on the human's go ($0.54); after D1 →
+  D2 / D4 (Sonnet) and D6; A7, D5, B7 are Opus stages; B2 after B1 (Sonnet).
 - **Open questions:** none blocking. One reading to confirm with the human when they look: "No doctrine" was read as
   dropping only the doctrine prompt, keeping all ten universes (A-157).
 
