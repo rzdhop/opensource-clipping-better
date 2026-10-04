@@ -82,9 +82,18 @@ class Log(list):
         self.append(str(line))
 
 
-def _story(store, *, chosen=True, language="fr", style="fruit_drama", seed=None):
-    """A draft story, with ``tentafruit_island`` chosen unless *chosen* is off."""
-    story_id = store.create(language=language, seed_text=seed, style_template_id=style, now=NOW)["story_id"]
+def _story(store, *, chosen=True, language="fr", style="fruit_drama", seed=None, generation_profile=None):
+    """A draft story, with ``tentafruit_island`` chosen unless *chosen* is off.
+
+    Plan 22 stage 2 (DEC-274): ``store.create`` now stamps every new story
+    "writing": "v3", which, with a non-empty *seed*, would switch C1/B1 to
+    C1v2/B1v3 -- this file's existing concept/bible tests are about today's
+    C1/B1 (and their own FakeRunner queues are built for it), so this helper
+    pins "v2" unless a caller asks for the v3 behaviour explicitly.
+    """
+    profile = {"writing": "v2", **(generation_profile or {})}
+    story_id = store.create(language=language, seed_text=seed, style_template_id=style,
+                            generation_profile=profile, now=NOW)["story_id"]
     if chosen:
         concept = templates.localize_concept(TENTAFRUIT, language)
 

@@ -171,8 +171,17 @@ class Failing:
 # ------------------------------------------------------------------ the story
 
 def _story(store, *, mode="agent", seed=SEED, **profile):
-    """A French agent story on the free chain, prompt-only, on fruit_drama."""
-    generation_profile = {"consistency_mode": "prompt_only", **profile}
+    """A French agent story on the free chain, prompt-only, on fruit_drama.
+
+    Plan 22 stage 2 (DEC-274): ``store.create`` now stamps every new story
+    "writing": "v3", which (with this fixture's own non-empty *seed*) would
+    switch C1 to C1v2 and add a C1J judge call -- this file tests the
+    fast-track orchestration end to end, not concept-fidelity, and its whole
+    ``FakeLLM`` queue is built for C1's reply; pinned to "v2" here unless a
+    test overrides it, so every existing assertion (``C1``'s prompt, its
+    reply queue depth) stays exactly as it was.
+    """
+    generation_profile = {"consistency_mode": "prompt_only", "writing": "v2", **profile}
     if mode is not None:
         generation_profile["mode"] = mode
     return store.create(language="fr", seed_text=seed, style_template_id="fruit_drama",

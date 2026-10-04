@@ -94,8 +94,11 @@ VALID = {"ok": True}
 # ======================================================== PREMIUM_PROMPT_IDS
 
 def test_premium_prompt_ids_are_the_writing_and_judge_families():
+    # Plan 22 stage 2 (DEC-274): re-pinned on purpose -- C1v2/B1v3 match the
+    # C1/B1 family by their version suffix; C1J (the brief judge) is listed
+    # on its own (its suffix is not a version number of C1).
     assert prompts.PREMIUM_PROMPT_IDS == frozenset(
-        {"C1", "B1", "E1", "E1v2", "E2", "E2v2", "E3", "E3v2", "J1"}
+        {"C1", "C1v2", "C1J", "B1", "B1v3", "E1", "E1v2", "E2", "E2v2", "E3", "E3v2", "J1"}
     )
     # E4 (the consistency check) and J2 (the keyframe judge) check what was
     # written; they stay on the free chain.

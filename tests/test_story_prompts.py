@@ -301,6 +301,9 @@ def test_max_tokens():
         # Plan 20 stage 2: re-pinned on purpose -- a v2 story's S1 with the plot archetypes, a new id (the S1
         # row is unchanged), measured on its French worst case (tests/test_story_season_archetypes.py).
         "S1v2": 1150,
+        # Plan 22 stage 2 (DEC-274): re-pinned on purpose -- the brief-faithful concept prompts, new ids (C1's
+        # own row is unchanged): C1v2 and B1v3 answer their v1 schemas (= their caps); C1J is a short verdict.
+        "C1v2": 700, "C1J": 200, "B1v3": 400,
     }
 
 
@@ -346,6 +349,9 @@ def test_schema_names():
         "J2": "keyframe_check",
         # Plan 20 stage 2: re-pinned on purpose -- a v2 story's S1 with the plot archetypes, a new id.
         "S1v2": "season_arc_skeleton_v2",
+        # Plan 22 stage 2 (DEC-274): re-pinned on purpose -- C1v2/B1v3 answer their v1 schemas but keep their own
+        # schema name (every versioned prompt does, a test fixture's schema_name -> prompt_id lookup relies on it).
+        "C1v2": "story_concepts_v2", "C1J": "concept_brief_check", "B1v3": "bible_core_v3",
     }
 
 
@@ -2106,3 +2112,29 @@ def test_build_pack_character_design_rules_comes_from_the_template():
 def test_build_pack_character_design_rules_is_none_without_a_template():
     pack = context.build_pack(language="en")
     assert pack.character_design_rules is None
+
+
+# ================================================= C1v2 budget (plan 22 stage 2)
+
+def test_c1v2_budget_with_a_400_word_brief():
+    """C1v2's own worst case (DEC-274, DEC-138's method): a 400-word French
+    brief (``context._BRIEF_WORD_LIMIT``, never cut), the widest style line,
+    and the story-own avoid list at its cap (``context._AVOID_TITLE_LIMIT``,
+    24 titles of 8 words each -- a brief drops the library's titles). Fits
+    ``prompts.INPUT_BUDGET["C1v2"]``, which was sized on this same
+    measurement (the module's own comment names the number)."""
+    import test_story_episode_prompt_budgets as budgets
+
+    brief = budgets._filler(400, round(400 * 5.8))
+    avoid = [budgets._filler(8, round(8 * 5.8)) for _ in range(24)]
+    pack = context.build_pack(
+        language="fr",
+        template=FRUIT_DRAMA,
+        brief_text=brief,
+        avoid_titles=avoid,
+    )
+    assert pack.trimmed == []  # the worst case must not itself be cut
+    system, user, schema = prompts.build_c1_v2(pack, style_ids=STYLE_IDS, batch=10, of=10,
+                                               angle=prompts.C1_ANGLES[-1])
+    tokens = estimate_tokens(system, user)
+    assert tokens <= prompts.INPUT_BUDGET["C1v2"]
