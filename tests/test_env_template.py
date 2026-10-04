@@ -64,3 +64,10 @@ def test_the_getting_started_guide_names_a_primary_key():
     guide = (ROOT / "wiki" / "2-Getting-Started.md").read_text(encoding="utf-8")
     assert "cp .env.example .env" in guide
     assert "GROQ_API_KEY" in guide
+
+
+def test_the_elevenlabs_key_is_documented_as_paid_and_shipped_empty():
+    """Plan 23 stage B3: a keyless install skips the ElevenLabs link, so the key is documented, empty, and says it bills."""
+    text = TEMPLATE.read_text(encoding="utf-8")
+    assert re.search(r"^ELEVENLABS_API_KEY=\s*$", text, re.MULTILINE)
+    assert "PAID per character" in text[:text.index("ELEVENLABS_API_KEY=")][-600:]

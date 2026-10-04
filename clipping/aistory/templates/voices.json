@@ -1,6 +1,6 @@
 {
   "$schema": "voices_v1",
-  "note": "Curated voices per provider (spec 11). Edge short names are edge-tts voice ids; Gemini names are prebuilt voices of the speech endpoint; Piper ids are the rhasspy/piper-voices model names; Kokoro has one French voice.",
+  "note": "Curated voices per provider (spec 11). Edge short names are edge-tts voice ids; Gemini names are prebuilt voices of the speech endpoint; Piper ids are the rhasspy/piper-voices model names; Kokoro has one French voice. ElevenLabs entries are PAID (per character) and are never proposed on their own; their ids are the well-known premade voices and must be confirmed with GET /v1/voices on the key in use (ASSUMPTIONS A-160).",
   "providers": {
     "edge": [
       {"voice_id": "fr-FR-HenriNeural", "lang": "fr-FR", "gender": "m", "age": "adult", "style_tags": ["warm", "confident"]},
@@ -30,6 +30,16 @@
       {"voice_id": "Leda", "lang": "multi", "gender": "f", "age": "young", "style_tags": ["youthful"]},
       {"voice_id": "Orus", "lang": "multi", "gender": "m", "age": "adult", "style_tags": ["firm"]},
       {"voice_id": "Zephyr", "lang": "multi", "gender": "f", "age": "adult", "style_tags": ["bright"]}
+    ],
+    "elevenlabs": [
+      {"voice_id": "21m00Tcm4TlvDq8ikWAM", "lang": "multi", "gender": "f", "age": "young", "style_tags": ["calm", "narration"], "paid": true},
+      {"voice_id": "pNInz6obpgDQGcFmaJgB", "lang": "multi", "gender": "m", "age": "adult", "style_tags": ["deep", "narration"], "paid": true},
+      {"voice_id": "ErXwobaYiN019PkySvjV", "lang": "multi", "gender": "m", "age": "young", "style_tags": ["well-rounded", "friendly"], "paid": true},
+      {"voice_id": "EXAVITQu4vr4xnSDxMaL", "lang": "multi", "gender": "f", "age": "young", "style_tags": ["soft", "warm"], "paid": true},
+      {"voice_id": "AZnzlk1XvdvUeBnXmlld", "lang": "multi", "gender": "f", "age": "young", "style_tags": ["strong", "confident"], "paid": true},
+      {"voice_id": "MF3mGyEYCl7XYWbV9V6O", "lang": "multi", "gender": "f", "age": "young", "style_tags": ["emotional", "calm"], "paid": true},
+      {"voice_id": "TxGEqnHstvcIWBHdeHsY", "lang": "multi", "gender": "m", "age": "young", "style_tags": ["deep", "dramatic"], "paid": true},
+      {"voice_id": "yoZ06aMxZJJ28mfd3POQ", "lang": "multi", "gender": "m", "age": "young", "style_tags": ["raspy", "casual"], "paid": true}
     ],
     "piper": [
       {"voice_id": "fr_FR-tom-medium", "lang": "fr-FR", "gender": "m", "age": "adult", "style_tags": ["neutral"]},

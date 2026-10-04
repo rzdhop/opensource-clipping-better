@@ -91,8 +91,20 @@ def test_the_one_dollar_profile_fits_the_ceiling_as_the_appendix_computes_it():
 
 
 def test_the_extension_points_are_priced_too():
-    for spec in ("gcloud/neural2", "openai/gpt-4o-mini-tts", "elevenlabs/flash"):
+    # Re-pinned (plan 23 stage B3): elevenlabs/flash has an adapter now and is no
+    # longer an extension point; its rows are pinned in the next test.
+    for spec in ("gcloud/neural2", "openai/gpt-4o-mini-tts"):
         assert price_for(link(spec)).usd > 0
+
+
+def test_elevenlabs_is_priced_per_character_from_the_page_read_on_2026_10_04():
+    flash, multilingual = price_for(link("elevenlabs/flash")), price_for(link("elevenlabs/multilingual-v2"))
+    assert (flash.unit, flash.usd) == ("char", 0.00004)  # $0.04 per 1k characters (was a stale $0.05)
+    assert (multilingual.unit, multilingual.usd) == ("char", 0.00008)  # $0.08 per 1k characters
+    for row in (flash, multilingual):
+        assert "2026-10-04" in row.note and "extension point" not in row.note
+    assert estimate(link("elevenlabs/flash"), 1000).est_usd == 0.04
+    assert estimate(link("elevenlabs/multilingual-v2"), 1000).est_usd == 0.08
 
 
 # ================================================== LLM_PRICE_CHANGES (plan 22)

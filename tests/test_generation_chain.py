@@ -25,6 +25,16 @@ def test_every_default_chain_parses_and_every_link_offers_its_kind(kind):
         assert link.provider in generation.KIND_PROVIDERS[kind], (kind, link)
 
 
+def test_the_tts_default_chain_ends_with_the_paid_elevenlabs_link():
+    """Plan 23 stage B3: elevenlabs/flash is appended LAST, so a keyless install (and an
+    allow_paid-off one) skips it and every link before it keeps its place."""
+    assert DEFAULT_CHAINS["tts"] == (
+        "edge/fr-FR-HenriNeural,gemini/flash-lite-tts,local/piper,local/kokoro,local/chatterbox,elevenlabs/flash")
+    links = parse_generation_chain("tts", DEFAULT_CHAINS["tts"])
+    assert links[-1] == Link("elevenlabs", "flash") and generation.is_paid(links[-1])
+    assert not any(generation.is_paid(link) for link in links[:-1])
+
+
 def test_the_spec_notation_for_a_paid_link_is_tolerated_and_stripped():
     links = parse_generation_chain("image", "pollinations/flux, fal/flux-schnell*")
     assert links == [Link("pollinations", "flux"), Link("fal", "flux-schnell")]

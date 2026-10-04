@@ -2710,6 +2710,11 @@ button.activity-group-head:focus-visible {
   color: var(--text-tertiary);
 }
 
+.story-cast-voice-paid {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
 .story-cast-uploads ul.story-field-list li {
   display: flex;
   align-items: center;

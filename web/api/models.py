@@ -428,6 +428,8 @@ class SettingsRequest(BaseModel):
     gemini_paid_api_key: Optional[str] = None
     # Claude on the Anthropic API (plan 23 stage D1): billed per request.
     anthropic_api_key: Optional[str] = None
+    # ElevenLabs voices (plan 23 stage B3): billed per character.
+    elevenlabs_api_key: Optional[str] = None
     local_comfyui_url: Optional[str] = None
     local_ollama_url: Optional[str] = None
 
@@ -482,6 +484,7 @@ class SettingsResponse(BaseModel):
     # here; the field that sets it arrives with its Settings control.
     gemini_paid_api_key_set: bool = False
     anthropic_api_key_set: bool = False
+    elevenlabs_api_key_set: bool = False
     local_comfyui_url: str = ""
     local_ollama_url: str = ""
     generation_chains: dict = {}

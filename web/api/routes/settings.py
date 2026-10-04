@@ -243,6 +243,7 @@ async def update_settings(req: SettingsRequest) -> SettingsResponse:
                         ("POLLINATIONS_API_KEY", req.pollinations_api_key),
                         ("GEMINI_PAID_API_KEY", req.gemini_paid_api_key),
                         ("ANTHROPIC_API_KEY", req.anthropic_api_key),
+                        ("ELEVENLABS_API_KEY", req.elevenlabs_api_key),
                         ("LOCAL_COMFYUI_URL", req.local_comfyui_url), ("LOCAL_OLLAMA_URL", req.local_ollama_url)):
         if value is not None:
             env_updates[name] = value.strip()
@@ -616,6 +617,7 @@ def _generation_fields(env) -> dict:
         "pollinations_api_key_set": bool(merged.get("POLLINATIONS_API_KEY")),
         "gemini_paid_api_key_set": bool(merged.get("GEMINI_PAID_API_KEY")),
         "anthropic_api_key_set": bool(merged.get("ANTHROPIC_API_KEY")),
+        "elevenlabs_api_key_set": bool(merged.get("ELEVENLABS_API_KEY")),
         "local_comfyui_url": gen.local_url("comfyui", merged),
         "local_ollama_url": gen.local_url("ollama", merged),
         "generation_chains": chains,

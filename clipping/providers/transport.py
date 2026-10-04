@@ -59,7 +59,8 @@ class APITimeoutError(Exception):
 
 
 # Header names (lower case) that carry a provider credential.
-CREDENTIAL_HEADERS = frozenset({"authorization", "proxy-authorization", "x-goog-api-key", "x-api-key"})
+CREDENTIAL_HEADERS = frozenset({"authorization", "proxy-authorization", "x-goog-api-key", "x-api-key",
+                                 "xi-api-key"})
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 
 

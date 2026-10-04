@@ -1762,12 +1762,18 @@ def _pinned_by_others(stories, story_id, char_id) -> dict:
     return taken
 
 
-def _voice_json(voice) -> dict:
-    return {
+def _voice_json(voice, *, env=None) -> dict:
+    body = {
         "provider": voice.provider, "voice_id": voice.voice_id, "lang": voice.lang,
         "gender": voice.gender, "age": voice.age, "style_tags": list(voice.style_tags),
         "link": registry.describe(voice.link),
     }
+    if voice.paid:
+        # Plan 23 stage B3: a paid voice carries its price for a reference
+        # episode and the gates' verdict (allow_paid, caps), for the cast step's
+        # badge; a free voice's payload is exactly what it was.
+        body.update(paid=True, **voices.paid_voice_summary(voice, env=env))
+    return body
 
 
 def character_voices(stories, story, char_id, *, env) -> dict:
@@ -1792,7 +1798,7 @@ def character_voices(stories, story, char_id, *, env) -> dict:
                              v2=media_policy.is_v2(story))
     return {
         "pinned": pinned,
-        "alternates": [_voice_json(voice) for voice in pool],
+        "alternates": [_voice_json(voice, env=env) for voice in pool],
         "taken": sorted(f"{provider}/{voice_id}" for provider, voice_id in taken),
     }
 

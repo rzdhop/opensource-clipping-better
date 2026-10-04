@@ -85,6 +85,7 @@ const KEY_PROVIDERS = {
   pollinations_api_key: 'pollinations',
   gemini_paid_api_key: 'gemini_paid',
   anthropic_api_key: 'anthropic',
+  elevenlabs_api_key: 'elevenlabs',
 }
 
 function providerOfLabel(label) {
@@ -240,6 +241,8 @@ function Settings() {
   const [geminiPaidKey, setGeminiPaidKey] = useState('')
   // Claude on the Anthropic API, for anthropic/ links of the premium writing chain (plan 23 stage D1).
   const [anthropicKey, setAnthropicKey] = useState('')
+  // ElevenLabs voices, billed per character (plan 23 stage B3).
+  const [elevenlabsKey, setElevenlabsKey] = useState('')
 
   // The endpoint URL and model are not secrets, so they are prefilled.
   const [compatUrl, setCompatUrl] = useState('')
@@ -363,6 +366,7 @@ function Settings() {
       if (pollinationsKey) payload.pollinations_api_key = pollinationsKey
       if (geminiPaidKey) payload.gemini_paid_api_key = geminiPaidKey
       if (anthropicKey) payload.anthropic_api_key = anthropicKey
+      if (elevenlabsKey) payload.elevenlabs_api_key = elevenlabsKey
 
       // Sent whenever they differ from what the server holds, including when
       // cleared: an empty value removes the override and falls back to .env,
@@ -437,6 +441,7 @@ function Settings() {
       setCloudflareToken('')
       setCloudflareAccountId('')
       setPollinationsKey('')
+      setElevenlabsKey('')
       setMsg('✅ Saved on the server. These now survive a restart.')
     } catch (err) {
       setMsg('❌ Failed to save: ' + err.message)
@@ -846,6 +851,16 @@ function Settings() {
               value={geminiPaidKey}
               onChange={setGeminiPaidKey}
               placeholder="Paste the billing-enabled project's key"
+            />
+            <KeyField
+              id="settings-elevenlabs-key"
+              label="ElevenLabs key"
+              note="paid per character: voices, with word timestamps"
+              isSet={settings?.elevenlabs_api_key_set}
+              tested={isTested('elevenlabs_api_key')}
+              value={elevenlabsKey}
+              onChange={setElevenlabsKey}
+              placeholder="Paste your ElevenLabs API key"
             />
             </CardBody>
           </Card>

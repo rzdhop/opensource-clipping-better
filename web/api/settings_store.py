@@ -79,6 +79,8 @@ PERSISTED_KEYS = frozenset({
     # Claude on the Anthropic API, the premium writing chain's links (plan 23
     # stage D1): billed per request.
     "ANTHROPIC_API_KEY",
+    # ElevenLabs voices (plan 23 stage B3): billed per character.
+    "ELEVENLABS_API_KEY",
     "LOCAL_COMFYUI_URL",
     "LOCAL_OLLAMA_URL",
 })
@@ -104,6 +106,7 @@ SECRET_KEYS = frozenset({
     "POLLINATIONS_API_KEY",
     "GEMINI_PAID_API_KEY",
     "ANTHROPIC_API_KEY",
+    "ELEVENLABS_API_KEY",
 })
 
 

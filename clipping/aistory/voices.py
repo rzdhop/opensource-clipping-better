@@ -120,9 +120,9 @@ class VoiceError(Exception):
 class Voice:
     """One catalogued voice. Immutable; compares and hashes by its fields."""
 
-    __slots__ = ("provider", "voice_id", "lang", "gender", "age", "style_tags", "link")
+    __slots__ = ("provider", "voice_id", "lang", "gender", "age", "style_tags", "link", "paid")
 
-    def __init__(self, *, provider, voice_id, lang, gender, age, style_tags, link):
+    def __init__(self, *, provider, voice_id, lang, gender, age, style_tags, link, paid=False):
         self.provider = provider
         self.voice_id = voice_id
         self.lang = lang
@@ -130,9 +130,13 @@ class Voice:
         self.age = age
         self.style_tags = tuple(style_tags)
         self.link = link
+        # A voice whose link bills per character (``voices.json``'s ``paid``):
+        # offered to the human with its price, never proposed on its own.
+        self.paid = bool(paid)
 
     def _key(self):
-        return (self.provider, self.voice_id, self.lang, self.gender, self.age, self.style_tags, self.link)
+        return (self.provider, self.voice_id, self.lang, self.gender, self.age, self.style_tags, self.link,
+                self.paid)
 
     def __eq__(self, other):
         return isinstance(other, Voice) and self._key() == other._key()
@@ -171,6 +175,11 @@ def _chain_link(provider: str, voice_id: str) -> Link:
     if provider == "gemini":
         model = next(iter(tts.GEMINI_TTS_MODELS))
         return Link("gemini", model)
+    if provider == "elevenlabs":
+        # One model per link, the voice id as ``GenRequest.voice``: Flash, the
+        # cheaper one, is the link a voice speaks through (plan 23 stage B3).
+        model = next(iter(tts.ELEVENLABS_MODELS))
+        return Link("elevenlabs", model)
     if provider in tts.LOCAL_ENGINES:
         return Link("local", provider)
     raise VoiceError(f"{provider!r} is not a TTS provider this module knows how to build a chain link for.")
@@ -197,8 +206,9 @@ def catalogue(language, *, env, v2=False) -> list:
 
     Every entry of ``voices.json`` for each link's provider, kept only when
     that engine can run here right now WITHOUT a network call: Gemini needs
-    ``GOOGLE_API_KEY``, a local engine needs its package installed
-    (``tts.LOCAL_ENGINES``), Edge needs neither (it ships as a base
+    ``GOOGLE_API_KEY``, ElevenLabs needs ``ELEVENLABS_API_KEY`` (its voices
+    are ``paid``: :func:`propose` never picks one), a local engine needs its
+    package installed (``tts.LOCAL_ENGINES``), Edge needs neither (it ships as a base
     dependency, never an extra). Filtered to *language* (``"fr"`` matches
     ``"fr-FR"``/``"fr-CA"``; a ``"multi"`` voice -- Gemini's prebuilt voices,
     Chatterbox's zero-shot clone -- counts for every language). With *v2*
@@ -224,13 +234,17 @@ def catalogue(language, *, env, v2=False) -> list:
             key = "gemini"
             if generation.missing_keys(link, merged):
                 continue
+        elif link.provider == "elevenlabs":
+            key = "elevenlabs"
+            if generation.missing_keys(link, merged):
+                continue
         elif link.provider == "local":
             key = link.model
             package = tts.LOCAL_ENGINES.get(link.model)
             if package is None or not _installed(package):
                 continue
         else:
-            continue  # not a TTS provider this catalogue knows (gcloud/openai/elevenlabs: no table yet)
+            continue  # not a TTS provider this catalogue knows (gcloud/openai: no table yet)
         if key in seen:
             continue
         seen.add(key)
@@ -245,6 +259,7 @@ def catalogue(language, *, env, v2=False) -> list:
                 provider=key, voice_id=voice_id, lang=entry.get("lang", ""),
                 gender=entry.get("gender", ""), age=entry.get("age", ""),
                 style_tags=entry.get("style_tags") or (), link=_chain_link(key, voice_id),
+                paid=bool(entry.get("paid")),
             ))
     return voices
 
@@ -314,12 +329,15 @@ def propose(characters, language, *, env, taken=(), on_log=print, v2=False) -> d
 
     *taken* is ``{(provider, voice_id)}`` already pinned by characters left
     out of *characters* (the cast step proposes only for the unpinned ones):
-    those voices are never proposed fresh. *on_log* prints the two lines
+    those voices are never proposed fresh. A ``paid`` voice (ElevenLabs's) is
+    never proposed at all: it can only be chosen, through :func:`alternates`. *on_log* prints the two lines
     (``print`` by default; a step hands its own log). *v2* keeps the pool to
     the story's default locale (:func:`catalogue`); legacy (default) is
     unchanged.
     """
-    pool = catalogue(language, env=env, v2=v2)
+    # A paid voice is the human's choice (the alternates list shows its price),
+    # never an automatic one: the proposal's pool holds free voices only.
+    pool = [voice for voice in catalogue(language, env=env, v2=v2) if not voice.paid]
     ordered = sorted(
         characters,
         key=lambda c: (_ROLE_ORDER.get(c.get("role"), len(_ROLE_ORDER)), c.get("created_at") or "",
@@ -531,6 +549,8 @@ def synthesize_sample(stories, story_id, char_id, *, env, on_log, cancel, adapte
         kind=generation.TTS, text=sample_line, voice=voice_id,
         extra={"rate": voice.get("rate"), "pitch": voice.get("pitch")},
     )
+    if link.provider == "elevenlabs":
+        request.extra["language"] = story["language"]
 
     if adapters is None:
         adapters_mod.load_all()
@@ -782,7 +802,8 @@ def prosody_for(voice: dict, line: dict) -> tuple:
 
 
 def synthesize_line(gates, *, voice, text, dest_for, on_log, cancel, step=MEASURE_STEP, adapters=None,
-                    transport=None, cache=None, take=None, direction=None, line=None, v2=False) -> dict:
+                    transport=None, cache=None, take=None, direction=None, line=None, v2=False,
+                    language=None) -> dict:
     """*text* spoken by the pinned *voice* (a character's ``voice`` block,
     or the narrator's) through a single-link chain built from that voice
     ALONE (DEC-122: never another provider, never another voice, never
@@ -836,6 +857,10 @@ def synthesize_line(gates, *, voice, text, dest_for, on_log, cancel, step=MEASUR
     *voice*'s own raw ``rate``/``pitch``. Either missing (the default), the
     request is exactly what it always was: *voice*'s own ``rate``/``pitch``,
     unchanged by this parameter pair.
+
+    *language* (plan 23 stage B3: the story's, ``fr``) joins the request as
+    ``extra["language"]`` for an ElevenLabs link only -- the one engine that
+    is told the language; every other request is exactly what it was.
     """
     label = voice_label(voice)
     if label is None:
@@ -851,6 +876,8 @@ def synthesize_line(gates, *, voice, text, dest_for, on_log, cancel, step=MEASUR
         extra["take"] = take
     if direction:
         extra["direction"] = direction
+    if language and link.provider == "elevenlabs":
+        extra["language"] = language
     request = generation.GenRequest(kind=generation.TTS, text=text, voice=voice["voice_id"], extra=extra)
     if adapters is None:
         adapters_mod.load_all()
@@ -913,6 +940,34 @@ def _paid_off_reason(est, link, budget_obj) -> str:
     amount summed over several lines (the runner's first gate, DEC-097)."""
     return (f"refused: est ${est:.3f} on {describe(link)}; allow_paid is off "
             f"(today ${budget_mod.day_spent():.2f} of ${budget_obj.daily_cap_usd:.2f})")
+
+
+# What a paid voice is priced for in the cast step's alternates list, where no
+# script exists yet: a reference episode of this many characters of speech (about
+# two minutes at 15 characters a second), all of it in that one voice -- the
+# dearest case, so the figure is never low. Once a script exists the
+# estimate is :func:`estimate_lines`'s, from its real lines.
+PAID_VOICE_EPISODE_CHARS = 1800
+
+
+def paid_voice_summary(voice: Voice, *, env, adapters=None) -> dict:
+    """``{"est_usd", "allowed", "reason"}`` for a paid *voice* speaking
+    :data:`PAID_VOICE_EPISODE_CHARS` characters, from the runner's own gates
+    (``gating.link_summary``, nothing called): the adapter's estimate, and
+    the refusal -- ``allow_paid`` off, a cap, a missing key -- with its
+    numbers. ``allowed`` False with the budget error as its reason when the
+    budget settings cannot be read."""
+    if adapters is None:
+        adapters_mod.load_all()
+    merged = gating.merged_env(env)
+    try:
+        budget_obj = gating.budget_of(merged)
+    except ValueError as exc:
+        return {"est_usd": 0.0, "allowed": False, "reason": f"The budget settings cannot be used: {exc}"}
+    request = generation.GenRequest(kind=generation.TTS, text="x" * PAID_VOICE_EPISODE_CHARS, voice=voice.voice_id)
+    summary = gating.link_summary(generation.TTS, voice.link, merged, budget_obj, request, adapters=adapters)
+    return {"est_usd": round(float(summary["est_usd"]), 4), "allowed": bool(summary["allowed"]),
+            "reason": summary["reason"]}
 
 
 def estimate_lines(stories, story_id, items, *, env, ep=None, adapters=None) -> dict:

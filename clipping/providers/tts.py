@@ -9,6 +9,12 @@
   known fault of its TTS), which is cut, the line faded in and out, and the
   guard's report kept in the sidecar and the result's meta (``tail_guard``).
   Edge and the local engines have no such fault and are not touched.
+* ``elevenlabs/<model>`` (plan 23 stage B3) is PAID on every link: the
+  ``with-timestamps`` REST endpoint answers the MP3 and a per-character
+  alignment, grouped here into words, so the sidecar says ``SOURCE_WORDS``
+  and the subtitles are exact. The voice id travels as ``request.voice``.
+  Like Gemini it cannot apply a rate, a pitch or a spoken direction: they are
+  recorded on the result (``meta["not_applied"]``) with a warning line.
 * ``local/piper``, ``local/kokoro`` and ``local/chatterbox`` are probed with
   ``importlib`` and imported only inside the call that synthesises; they are
   the ``[local-tts]`` extras of ``pyproject.toml``. Never XTTS: its licence is
@@ -39,6 +45,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import urllib.parse
 import wave
 
 from . import generation, pricing, tts_tail
@@ -50,6 +57,14 @@ from .transport import DEFAULT_TIMEOUT, HttpStatusError, request_json, urllib_tr
 GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta"
 GEMINI_TTS_MODELS = {"flash-lite-tts": "gemini-3.8-flash-lite-tts"}
 GEMINI_DEFAULT_VOICE = "Kore"
+
+ELEVENLABS_BASE = "https://api.elevenlabs.io"
+ELEVENLABS_MODELS = {"flash": "eleven_flash_v2_5", "multilingual-v2": "eleven_multilingual_v2"}
+ELEVENLABS_OUTPUT_FORMAT = "mp3_44100_128"
+# The link models whose API accepts ``language_code`` (Flash v2.5, Turbo v2.5):
+# Multilingual v2 reads the language off the text, and a request that names
+# one is refused (A-161: from ElevenLabs' docs, not yet exercised on a key).
+ELEVENLABS_LANGUAGE_MODELS = frozenset({"flash"})
 
 # link model -> the importable package that provides the engine
 LOCAL_ENGINES = {"piper": "piper", "kokoro": "kokoro", "chatterbox": "chatterbox"}
@@ -369,6 +384,122 @@ class GeminiTtsAdapter(_Adapter):
                                "tail_guard": guard})
 
 
+# --------------------------------------------------------------- elevenlabs
+
+def _eleven_words(alignment):
+    """Words from an ElevenLabs character alignment (``characters`` with
+    ``character_start_times_seconds`` / ``character_end_times_seconds``): a
+    word is a run of non-space characters, from its first character's start
+    to its last character's end. ``[]`` for an alignment that is missing or
+    whose three lists disagree in length (never a guessed timing)."""
+    if not isinstance(alignment, dict):
+        return []
+    chars = alignment.get("characters")
+    starts = alignment.get("character_start_times_seconds")
+    ends = alignment.get("character_end_times_seconds")
+    if not (isinstance(chars, list) and isinstance(starts, list) and isinstance(ends, list)):
+        return []
+    if not (len(chars) == len(starts) == len(ends)):
+        return []
+    words, current, start, end = [], [], 0.0, 0.0
+    for char, begin, finish in zip(chars, starts, ends):
+        char = str(char)
+        if not char.strip():
+            if current:
+                words.append({"word": "".join(current), "start": round(float(start), 3), "end": round(float(end), 3)})
+                current = []
+            continue
+        if not current:
+            start = begin
+        current.append(char)
+        end = finish
+    if current:
+        words.append({"word": "".join(current), "start": round(float(start), 3), "end": round(float(end), 3)})
+    return words
+
+
+def _eleven_language(request):
+    """The two-letter language of the request (``extra["language"]``: ``fr``,
+    ``fr-FR``), or None."""
+    language = str((request.extra or {}).get("language") or "").strip().lower()
+    return language.split("-")[0].split("_")[0] or None
+
+
+def _eleven_refusal(link, exc):
+    """*exc* (a 4xx/5xx of ElevenLabs) with what it means named in its detail,
+    the status kept (``errors.classify`` and the free-slot release read it):
+    a refused key, a spent character quota (ElevenLabs answers it 401 with
+    ``quota_exceeded``), a rate or concurrency limit."""
+    detail = exc.detail or ""
+    lowered = detail.lower()
+    status = exc.status_code
+    if "quota_exceeded" in lowered or ("quota" in lowered and status in (401, 402, 429)):
+        why = (f"the character quota of this ElevenLabs account is used up ({detail}); wait for the reset or "
+               "top the plan up")
+    elif status in (401, 403):
+        why = (f"ELEVENLABS_API_KEY was refused (HTTP {status}); check the key and that it may use "
+               f"text-to-speech{': ' + detail if detail else ''}")
+    elif status == 429:
+        why = (f"ElevenLabs is rate limiting this key (HTTP 429, too many requests or concurrent requests for "
+               f"the plan){': ' + detail if detail else ''}")
+    else:
+        return exc
+    return HttpStatusError(status, exc.url, why, error_types=exc.error_types)
+
+
+class ElevenLabsTtsAdapter(_Adapter):
+    provider = "elevenlabs"
+
+    def generate(self, link, request, *, credentials, on_log, transport=None, probe_duration=None, **_):
+        transport = transport or urllib_transport
+        model = ELEVENLABS_MODELS.get(link.model) or _unknown_model(link, ELEVENLABS_MODELS)
+        text = _text(request)
+        voice = (request.voice or "").strip()
+        if not voice:
+            raise ValueError(f"{describe(link)} needs a voice id (GenRequest.voice): none is chosen for it")
+        rate, pitch = _rate_pitch(request)
+        _warn_unsupported_rate_pitch(request, link, on_log)
+        _warn_unsupported_direction(request, link, on_log)
+        body = {"text": text, "model_id": model}
+        language = _eleven_language(request)
+        if language and link.model in ELEVENLABS_LANGUAGE_MODELS:
+            body["language_code"] = language
+        url = (f"{ELEVENLABS_BASE}/v1/text-to-speech/{urllib.parse.quote(voice, safe='')}/with-timestamps"
+               f"?output_format={ELEVENLABS_OUTPUT_FORMAT}")
+        try:
+            payload = request_json(transport, "POST", url, headers={"xi-api-key": credentials["ELEVENLABS_API_KEY"]},
+                                   json_body=body, timeout=DEFAULT_TIMEOUT)
+        except HttpStatusError as exc:
+            raise _eleven_refusal(link, exc) from exc
+        encoded = payload.get("audio_base64") or payload.get("audio_base_64")
+        if not encoded:
+            raise ProviderError(f"{describe(link)}: the answer carried no audio")
+        try:
+            audio = base64.b64decode(encoded, validate=True)
+        except ValueError as exc:
+            raise ProviderError(f"{describe(link)}: the audio in the answer is not valid base64") from exc
+        if not audio:
+            raise ProviderError(f"{describe(link)}: the answer carried no audio")
+        out_dir = _out_dir(request)
+        name = _name(request, link)
+        audio_path = write_output(out_dir, name, audio, "mp3")
+        words = _eleven_words(payload.get("alignment") or payload.get("normalized_alignment"))
+        measured = (probe_duration or audio_duration)(audio_path)
+        if words:
+            duration, source = round(max(max(w["end"] for w in words), measured or 0.0), 3), SOURCE_WORDS
+        else:
+            duration, source = measured, SOURCE_DURATION
+            on_log(f"   ⚠️ {describe(link)}: no character alignment came back; timing is the audio duration only")
+        timing_path = _write_timing(out_dir, name, duration_s=duration, words=words, source=source,
+                                    provider="elevenlabs", voice=voice)
+        meta = {"duration_s": duration, "voice": voice, "words": len(words), "source": source}
+        not_applied = {key: value for key, value in (("rate", rate), ("pitch", pitch), ("direction", _direction(request)))
+                       if value}
+        if not_applied:
+            meta["not_applied"] = not_applied
+        return GenResult(provider="elevenlabs", model=link.model, paths=(audio_path, timing_path), meta=meta)
+
+
 # -------------------------------------------------------------------- local
 
 def _synthesize_piper(text, voice, out_path, request, on_log):
@@ -469,8 +600,10 @@ def voices_for(provider: str, lang: str, path=None) -> list:
 
 EDGE = EdgeTtsAdapter()
 GEMINI_TTS = GeminiTtsAdapter()
+ELEVENLABS_TTS = ElevenLabsTtsAdapter()
 LOCAL_TTS = LocalTtsAdapter()
 
 register_adapter(TTS, "edge", EDGE)
 register_adapter(TTS, "gemini", GEMINI_TTS)
+register_adapter(TTS, "elevenlabs", ELEVENLABS_TTS)
 register_adapter(TTS, "local", LOCAL_TTS)

@@ -86,6 +86,7 @@ def api_model_id(kind, link) -> str:
 
     tables = {
         "cloudflare": images.CLOUDFLARE_MODELS, "fal": {**images.FAL_APPS, **lipsync.FAL_LIPSYNC_APPS},
+        "elevenlabs": tts.ELEVENLABS_MODELS,
         "gemini": {**images.GEMINI_MODELS, **tts.GEMINI_TTS_MODELS, **vision.GEMINI_VISION_MODELS,
                    **video.GEMINI_VIDEO_MODELS},
         "openai": {name: pair[0] for name, pair in images.OPENAI_MODELS.items()},

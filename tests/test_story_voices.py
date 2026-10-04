@@ -37,7 +37,7 @@ GEN_VARS = (
     "IMAGE_CHAIN", "IMAGE_EDIT_CHAIN", "VIDEO_CHAIN", "TTS_CHAIN", "VISION_CHAIN",
     "LOCAL_COMFYUI_URL", "LOCAL_OLLAMA_URL",
     "ALLOW_PAID", "PER_EPISODE_CAP_USD", "DAILY_CAP_USD", "PER_STORY_CAP_USD", "BUDGET_PROFILE",
-    "LLM_CHAIN", "ALLOW_SLOW_CHAIN", "MAX_QUEUED_JOBS",
+    "LLM_CHAIN", "ALLOW_SLOW_CHAIN", "MAX_QUEUED_JOBS", "ELEVENLABS_API_KEY",
 )
 REAL_FILES = tuple(ROOT / "data" / name for name in ("usage.json", "spend.json", "chain_test_ledger.json"))
 REAL_STORIES = (ROOT / "outputs" / "stories", ROOT / "outputs" / "stories.json")
@@ -679,3 +679,150 @@ def test_a_released_booking_is_a_negative_void_row_and_the_day_and_the_episode_d
     # A free request books $0 and gives back $0; nothing touches the day.
     release({"link": "edge/fr-FR-HenriNeural", "paid": False, "est_usd": 0.0, "note": "x", "booked": stamp})
     assert gates.spent(2) == pytest.approx(0.028) and budget.day_spent() == pytest.approx(0.028)
+
+
+# ------------------------------------------------- ElevenLabs (plan 23 stage B3)
+
+ELEVEN_KEY = {"ELEVENLABS_API_KEY": "test-xi-key"}
+ELEVEN_IDS = {"21m00Tcm4TlvDq8ikWAM", "pNInz6obpgDQGcFmaJgB", "ErXwobaYiN019PkySvjV", "EXAVITQu4vr4xnSDxMaL",
+              "AZnzlk1XvdvUeBnXmlld", "MF3mGyEYCl7XYWbV9V6O", "TxGEqnHstvcIWBHdeHsY", "yoZ06aMxZJJ28mfd3POQ"}
+
+
+def test_catalogue_offers_the_paid_elevenlabs_voices_only_with_the_key(monkeypatch):
+    monkeypatch.setenv("TTS_CHAIN", "edge/fr-FR-HenriNeural,elevenlabs/flash")
+    keyed = voices.catalogue("fr", env=ELEVEN_KEY)
+    eleven = [v for v in keyed if v.provider == "elevenlabs"]
+    assert {v.voice_id for v in eleven} == ELEVEN_IDS
+    assert all(v.paid and v.link == Link("elevenlabs", "flash") and v.lang == "multi" for v in eleven)
+    assert not any(v.paid for v in keyed if v.provider == "edge")
+    assert [v.provider for v in keyed][-8:] == ["elevenlabs"] * 8, "chain order: its link is last"
+    assert {v.voice_id for v in voices.catalogue("en", env=ELEVEN_KEY) if v.provider == "elevenlabs"} == ELEVEN_IDS
+    assert {v.voice_id for v in voices.catalogue("fr", env=ELEVEN_KEY, v2=True) if v.provider == "elevenlabs"} == ELEVEN_IDS
+
+    keyless = voices.catalogue("fr", env={"ELEVENLABS_API_KEY": ""})
+    assert keyless and all(v.provider != "elevenlabs" for v in keyless)
+
+
+def test_the_default_chain_reaches_elevenlabs_only_with_a_key():
+    assert all(v.provider != "elevenlabs" for v in voices.catalogue("fr", env={}))
+    assert any(v.provider == "elevenlabs" for v in voices.catalogue("fr", env=ELEVEN_KEY))
+
+
+def test_the_elevenlabs_voice_is_a_flash_link_with_the_voice_id_sent_as_the_voice():
+    assert voices._chain_link("elevenlabs", "21m00Tcm4TlvDq8ikWAM") == Link("elevenlabs", "flash")
+
+
+def test_a_free_voice_is_not_paid_and_the_catalogue_file_marks_every_eleven_voice_paid():
+    assert EDGE_VOICE.paid is False
+    providers = tts.load_voices()["providers"]
+    assert len(providers["elevenlabs"]) == 8
+    assert all(entry["paid"] is True and entry["lang"] == "multi" for entry in providers["elevenlabs"])
+    assert not any(entry.get("paid") for name, rows in providers.items() if name != "elevenlabs" for entry in rows)
+    assert "A-160" in tts.load_voices()["note"] and "GET /v1/voices" in tts.load_voices()["note"]
+
+
+def test_propose_never_picks_a_paid_voice_even_when_it_is_the_only_one(monkeypatch, capsys):
+    monkeypatch.setenv("TTS_CHAIN", "elevenlabs/flash")
+    result = voices.propose([_char("char_a", role="lead", name="Ada", voice=_k1_voice(gender="female", age="young"))],
+                            "fr", env=ELEVEN_KEY)
+    assert result == {"char_a": None}
+    assert "pick a voice for Ada" in capsys.readouterr().out
+    assert voices.catalogue("fr", env=ELEVEN_KEY), "the voices are in the catalogue: they can be chosen, not proposed"
+
+
+def test_propose_leaves_a_paid_voice_unused_when_the_free_ones_run_out(monkeypatch, capsys):
+    monkeypatch.setenv("TTS_CHAIN", "edge/fr-FR-HenriNeural,elevenlabs/flash")
+    leads = [_char(f"char_lead{n}", role="lead", name=f"Lead{n}", created_at=f"2026-09-26T10:00:{n:02d}+00:00",
+                   voice=_k1_voice(gender="female", age="young", style_tags=["calm", "narration"])) for n in range(9)]
+    guest = _char("char_guest", role="guest", created_at="2026-09-26T10:00:30+00:00", name="Guest")
+    result = voices.propose(leads + [guest], "fr", env=ELEVEN_KEY)
+    assert not any(voice is not None and voice.paid for voice in result.values())
+    assert result["char_lead8"] is None, "a ninth lead gets no voice rather than a paid one"
+    assert result["char_guest"] is not None and result["char_guest"].provider == "edge"
+
+
+def test_a_paid_voice_stays_available_as_an_alternate(monkeypatch):
+    monkeypatch.setenv("TTS_CHAIN", "edge/fr-FR-HenriNeural,elevenlabs/flash")
+    taken = {("edge", v.voice_id) for v in voices.catalogue("fr", env=ELEVEN_KEY) if v.provider == "edge"}
+    alts = voices.alternates(_char("char_x", role="lead"), "fr", env=ELEVEN_KEY, taken=taken)
+    assert alts and all(v.provider == "elevenlabs" and v.paid for v in alts)
+    assert len(alts) == voices.ALTERNATES_LIMIT
+
+
+def _eleven_voice(voice_id="21m00Tcm4TlvDq8ikWAM"):
+    return next(v for v in voices.catalogue("fr", env=ELEVEN_KEY) if v.voice_id == voice_id)
+
+
+class PaidFakeAdapter(FakeAdapter):
+    """A paid TTS adapter priced like the real one."""
+
+    def estimate(self, link, request):
+        from clipping.providers import pricing
+
+        return pricing.estimate(link, len(request.text))
+
+
+def test_a_pinned_paid_voice_makes_no_call_while_allow_paid_is_off(store, monkeypatch):
+    monkeypatch.setenv("TTS_CHAIN", "elevenlabs/flash")
+    story_id = store.create(language="fr", seed_text="x", now=NOW)["story_id"]
+    voice = _eleven_voice()
+    _write_char(store, story_id, "char_kiwi", name="Kiwi",
+                voice=voices.pin(_char("char_kiwi", voice=_k1_voice(sample_line="Salut !")), voice))
+    fake = PaidFakeAdapter()
+    with pytest.raises(voices.VoiceError) as excinfo:
+        voices.synthesize_sample(store, story_id, "char_kiwi", env=ELEVEN_KEY, on_log=lambda l: None,
+                                 cancel=CancelToken(), adapters={("tts", "elevenlabs"): fake})
+    assert "allow_paid is off" in str(excinfo.value) and fake.calls == []
+
+
+def test_a_pinned_paid_voice_is_spoken_booked_and_told_the_language_when_allow_paid_is_on(store, monkeypatch):
+    import json
+
+    monkeypatch.setenv("TTS_CHAIN", "elevenlabs/flash")
+    story_id = store.create(language="fr", seed_text="x", now=NOW)["story_id"]
+    voice = _eleven_voice()
+    _write_char(store, story_id, "char_kiwi", name="Kiwi",
+                voice=voices.pin(_char("char_kiwi", voice=_k1_voice(sample_line="Salut !")), voice))
+    fake = PaidFakeAdapter()
+    env = dict(ELEVEN_KEY, ALLOW_PAID="1")
+    result = voices.synthesize_sample(store, story_id, "char_kiwi", env=env, on_log=lambda l: None,
+                                      cancel=CancelToken(), adapters={("tts", "elevenlabs"): fake})
+    assert result["provider"] == "elevenlabs" and result["voice_id"] == voice.voice_id
+    [call] = fake.calls
+    assert call.voice == voice.voice_id and call.text == "Salut !" and call.extra["language"] == "fr"
+    entries = json.loads(open(os.path.join(store.story_dir(story_id), "cost_ledger.json"), encoding="utf-8").read())["entries"]
+    assert entries[0]["provider"] == "elevenlabs" and entries[0]["model"] == "eleven_flash_v2_5"
+    assert entries[0]["paid"] is True and entries[0]["est_usd"] == 0.0003 and entries[0]["qty"] == len("Salut !")
+
+
+def test_a_free_voice_request_never_carries_a_language(store):
+    story_id = store.create(language="fr", seed_text="x", now=NOW)["story_id"]
+    _write_char(store, story_id, "char_kiwi", name="Kiwi",
+                voice=voices.pin(_char("char_kiwi", voice=_k1_voice(sample_line="Salut !")), EDGE_VOICE))
+    fake = FakeAdapter()
+    voices.synthesize_sample(store, story_id, "char_kiwi", env={}, on_log=lambda l: None, cancel=CancelToken(),
+                             adapters={("tts", "edge"): fake})
+    assert fake.calls[0].extra == {"rate": None, "pitch": None}, "RC-T2: the Edge request is what it always was"
+
+
+def test_the_paid_voice_summary_is_the_gates_verdict_for_a_reference_episode(monkeypatch):
+    monkeypatch.setenv("TTS_CHAIN", "elevenlabs/flash")
+    voice = _eleven_voice()
+    off = voices.paid_voice_summary(voice, env=ELEVEN_KEY)
+    assert off["est_usd"] == round(0.00004 * voices.PAID_VOICE_EPISODE_CHARS, 4) == 0.072
+    assert off["allowed"] is False and "allow_paid is off" in off["reason"]
+    on = voices.paid_voice_summary(voice, env=dict(ELEVEN_KEY, ALLOW_PAID="1"))
+    assert on["allowed"] is True and on["reason"] is None and on["est_usd"] == 0.072
+    bad = voices.paid_voice_summary(voice, env=dict(ELEVEN_KEY, DAILY_CAP_USD="lots"))
+    assert bad["allowed"] is False and "budget settings" in bad["reason"]
+
+
+def test_the_voice_picker_payload_marks_a_paid_voice_and_leaves_a_free_one_as_it_was(monkeypatch):
+    from clipping.aistory import workflow
+
+    monkeypatch.setenv("TTS_CHAIN", "edge/fr-FR-HenriNeural,elevenlabs/flash")
+    free = workflow._voice_json(EDGE_VOICE, env=ELEVEN_KEY)
+    assert set(free) == {"provider", "voice_id", "lang", "gender", "age", "style_tags", "link"}
+    paid = workflow._voice_json(_eleven_voice(), env=ELEVEN_KEY)
+    assert paid["paid"] is True and paid["est_usd"] == 0.072 and paid["allowed"] is False
+    assert "allow_paid is off" in paid["reason"] and paid["link"] == "elevenlabs/flash"

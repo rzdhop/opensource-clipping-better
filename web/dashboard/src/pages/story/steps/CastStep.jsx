@@ -341,6 +341,12 @@ function VoiceSection({ storyId, character, pickVoiceIds, disabled, onChange }) 
               <span className="story-cast-voice-tags">
                 {alt.gender}, {alt.age}{alt.style_tags.length ? `, ${alt.style_tags.join(', ')}` : ''}
               </span>
+              {alt.paid && (
+                <span className="story-cast-voice-paid">
+                  {' '}paid · ≈ ${Number(alt.est_usd || 0).toFixed(2)} per episode
+                  {alt.allowed === false && alt.reason ? ` — ${alt.reason}` : ''}
+                </span>
+              )}
             </li>
           ))}
         </ul>

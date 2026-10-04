@@ -21,7 +21,7 @@ from clipping.providers.transport import APIConnectionError, Response
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
 GEN_VARS = ("FAL_KEY", "OPENAI_API_KEY", "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID", "POLLINATIONS_API_KEY",
-            "IMAGE_CHAIN", "IMAGE_EDIT_CHAIN", "VIDEO_CHAIN", "TTS_CHAIN", "VISION_CHAIN",
+            "ELEVENLABS_API_KEY", "IMAGE_CHAIN", "IMAGE_EDIT_CHAIN", "VIDEO_CHAIN", "TTS_CHAIN", "VISION_CHAIN",
             "LOCAL_COMFYUI_URL", "LOCAL_OLLAMA_URL",
             "ALLOW_PAID", "PER_EPISODE_CAP_USD", "DAILY_CAP_USD", "PER_STORY_CAP_USD", "BUDGET_PROFILE")
 
@@ -160,10 +160,26 @@ def test_a_paid_link_is_never_summarised_as_allowed_while_paid_is_off(client):
     assert rows["gemini/flash"]["allowed"] is True
 
 
+def test_the_elevenlabs_key_round_trips_and_its_tts_link_is_listed_paid_and_refused_while_paid_is_off(client, tmp_path):
+    """Plan 23 stage B3: the key is a persisted secret, the TTS chain's last link shows its price per
+    1,000 characters' worth of line, and a keyed link is still refused until allow_paid is on."""
+    rows = {r["label"]: r for r in client.get("/api/settings").json()["generation_chains"]["tts"]["links"]}
+    assert list(rows)[-1] == "elevenlabs/flash"
+    assert rows["elevenlabs/flash"]["keyed"] is False and rows["elevenlabs/flash"]["paid"] is True
+    assert rows["elevenlabs/flash"]["adapter"] is True and rows["elevenlabs/flash"]["missing_keys"] == ["ELEVENLABS_API_KEY"]
+    updated = client.put("/api/settings", json={"elevenlabs_api_key": "xi"}).json()
+    assert updated["elevenlabs_api_key_set"] is True
+    assert json.loads((tmp_path / "settings.json").read_text(encoding="utf-8"))["ELEVENLABS_API_KEY"] == "xi"
+    row = next(r for r in updated["generation_chains"]["tts"]["links"] if r["label"] == "elevenlabs/flash")
+    assert row["keyed"] is True and row["allowed"] is False and "allow_paid is off" in row["reason"]
+    assert client.put("/api/settings", json={"elevenlabs_api_key": ""}).json()["elevenlabs_api_key_set"] is False
+
+
 def test_the_new_secrets_are_persisted_and_redacted():
     from web.api import settings_store
 
-    for name in ("FAL_KEY", "OPENAI_API_KEY", "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID", "POLLINATIONS_API_KEY"):
+    for name in ("FAL_KEY", "OPENAI_API_KEY", "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID", "POLLINATIONS_API_KEY",
+                 "ELEVENLABS_API_KEY"):
         assert name in settings_store.PERSISTED_KEYS and name in settings_store.SECRET_KEYS, name
     for name in ("LOCAL_COMFYUI_URL", "LOCAL_OLLAMA_URL"):
         assert name in settings_store.PERSISTED_KEYS and name not in settings_store.SECRET_KEYS, name
@@ -323,7 +339,7 @@ def test_compose_passes_every_generation_variable_and_the_host_gateway():
 def test_env_example_documents_the_generation_surface():
     text = (ROOT / ".env.example").read_text(encoding="utf-8")
     for name in ("FAL_KEY", "OPENAI_API_KEY", "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID", "POLLINATIONS_API_KEY",
-                 "IMAGE_CHAIN", "IMAGE_EDIT_CHAIN", "VIDEO_CHAIN", "TTS_CHAIN", "VISION_CHAIN", "LOCAL_COMFYUI_URL", "LOCAL_OLLAMA_URL"):
+                 "ELEVENLABS_API_KEY", "IMAGE_CHAIN", "IMAGE_EDIT_CHAIN", "VIDEO_CHAIN", "TTS_CHAIN", "VISION_CHAIN", "LOCAL_COMFYUI_URL", "LOCAL_OLLAMA_URL"):
         assert re.search(rf"^{name}=", text, re.M), name
 
 

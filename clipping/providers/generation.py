@@ -78,7 +78,10 @@ DEFAULT_CHAINS = {
         "local/comfyui,fal/seedance-1-pro-fast,fal/ltx-2.3-fast,"
         "fal/kling-2.5-turbo-std,gemini/veo-3.1-lite"
     ),
-    TTS: "edge/fr-FR-HenriNeural,gemini/flash-lite-tts,local/piper,local/kokoro,local/chatterbox",
+    # elevenlabs/flash is last and paid: a keyless install skips it, and so does
+    # allow_paid off (plan 23 stage B3), so nothing changes without a key.
+    TTS: ("edge/fr-FR-HenriNeural,gemini/flash-lite-tts,local/piper,local/kokoro,local/chatterbox,"
+          "elevenlabs/flash"),
     VISION: f"gemini/flash-lite,openrouter/{OPENROUTER_VISION_DEFAULT_MODEL},local/ollama-vision,gemini/flash",
     LIPSYNC: "fal/kling-lipsync",
 }
@@ -169,7 +172,7 @@ GEN_PROVIDERS = {
         signup_url="", base_url="",
         notes="Your own clips and images, made on your own subscriptions and uploaded: no call, no charge.",
     ),
-    # Documented extension points (spec 8.1): in the table with a price, not in a default chain.
+    # Documented extension point (spec 8.1): in the table with a price, not in a default chain.
     "gcloud": GenProvider(
         name="gcloud",
         env_keys=("GOOGLE_CLOUD_TTS_API_KEY",),
@@ -183,8 +186,8 @@ GEN_PROVIDERS = {
         env_keys=("ELEVENLABS_API_KEY",),
         free_tier=False, rpm=30, rpd=None, probe_timeout=60.0,
         signup_url="https://elevenlabs.io/app/settings/api-keys",
-        base_url="https://api.elevenlabs.io/v1",
-        notes="Extension point: ElevenLabs Flash voices.",
+        base_url="https://api.elevenlabs.io",
+        notes="Billed per character, on every link (plan 23 stage B3): Flash and Multilingual v2 voices with word timestamps.",
     ),
 }
 

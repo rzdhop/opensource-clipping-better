@@ -430,7 +430,8 @@ class LineMeasurement:
                 spoken = voices.synthesize_line(gates, voice=voice, text=line["text"], dest_for=dest_for,
                                                 on_log=ctx.on_log, cancel=ctx.cancel, step=self.measure_step,
                                                 adapters=self.tools.adapters, transport=self.tools.transport,
-                                                line=line, v2=media_policy.is_v2(ec.story), **extra)
+                                                line=line, v2=media_policy.is_v2(ec.story),
+                                                language=ec.language, **extra)
             except voices.VoiceError as exc:
                 reason = str(exc)
                 self.voice_refused(line, exc)

@@ -73,7 +73,11 @@ PRICES = {
     "gemini/flash-lite-tts": Price("second", 0.0, "free tier; $0.0015 per 10 s beyond"),
     "gcloud/neural2": Price("char", 0.000016, "$16 per million characters; extension point"),
     "openai/gpt-4o-mini-tts": Price("second", 0.00025, "about $0.015 per minute; extension point"),
-    "elevenlabs/flash": Price("char", 0.00005, "$0.05 per 1k characters; extension point"),
+    # Plan 23 stage B3: read 2026-10-04 at elevenlabs.io/pricing/api (the API tab): Flash/Turbo $0.04 and
+    # Multilingual v2 (and v3) $0.08 per 1,000 characters; the page's v4 promotion ("72% off until Oct 12")
+    # is not used, and the flat per-character rate is what an estimate checked against a cap needs.
+    "elevenlabs/flash": Price("char", 0.00004, "eleven_flash_v2_5: $0.04 per 1k characters; read 2026-10-04 at elevenlabs.io/pricing/api"),
+    "elevenlabs/multilingual-v2": Price("char", 0.00008, "eleven_multilingual_v2: $0.08 per 1k characters; read 2026-10-04 at elevenlabs.io/pricing/api"),
     # --- text and vision (appendix D)
     "gemini/flash-lite": Price("token", 0.0, "free tier"),
     "gemini/flash": Price("token", 0.0000003, "not in the appendix: Flash-class input tokens at about $0.30 per million on ai.google.dev pricing -- verify before relying on it"),
