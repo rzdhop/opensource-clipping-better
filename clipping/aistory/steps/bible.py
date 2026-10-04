@@ -24,7 +24,7 @@ from __future__ import annotations
 import copy
 import time
 
-from .. import context, defaults, prompts, schemas
+from .. import context, media_policy, prompts, schemas
 from . import llm_call
 from .llm_call import StepFailed
 
@@ -62,7 +62,7 @@ def _writing_gate(story) -> bool:
     "v3"``. Without either, B1 is built exactly as it always was (RC-W2)."""
     if not story.get("seed_text"):
         return False
-    return (story.get("generation_profile") or {}).get("writing") == defaults.WRITING_V3
+    return media_policy.writing_v3(story)
 
 
 def pack_for(story, *, note=None, brief=False):

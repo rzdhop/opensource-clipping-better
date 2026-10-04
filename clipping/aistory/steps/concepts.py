@@ -41,7 +41,7 @@ from __future__ import annotations
 import re
 import time
 
-from .. import context, defaults, prompts, schemas, templates
+from .. import context, media_policy, prompts, schemas, templates
 from . import llm_call
 from .llm_call import StepFailed
 
@@ -134,7 +134,7 @@ def _writing_gate(story) -> bool:
     was (RC-W2)."""
     if not story.get("seed_text"):
         return False
-    return (story.get("generation_profile") or {}).get("writing") == defaults.WRITING_V3
+    return media_policy.writing_v3(story)
 
 
 def _judge_usable(ctx) -> bool:

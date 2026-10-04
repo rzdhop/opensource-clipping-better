@@ -96,8 +96,10 @@ def writing_v3(story) -> bool:
     every new story): an episode's spine and cause-and-effect scene
     summaries (E1v3), complete spoken sentences that each move the story
     (E2v3/E3v3), judged for it (J1v3). Absent or "v2": every prompt as it
-    was (RC-W3). The script step reads it on a v2 story only."""
-    return ((story or {}).get("generation_profile") or {}).get("writing") == "v3"
+    was (RC-W2, RC-W3). The one gate: the concepts and bible steps read it
+    with a non-empty ``seed_text`` (stage 2), the script step on a v2 story
+    (stage 3)."""
+    return ((story or {}).get("generation_profile") or {}).get("writing") == defaults.WRITING_V3
 
 
 def images_manual(story) -> bool:
