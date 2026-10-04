@@ -16,7 +16,7 @@ the shot plan, the take and the timing read the clip and its record only.
 - **The take** (:func:`evaluate_take`): the clip's own sound transcribed and
   aligned against the line (``wordtiming.align``): ``ok`` when at least
   :data:`MIN_MATCHED` of the line's words are heard and the last one ends
-  :data:`END_MARGIN_S` before the clip does; ``mismatch`` otherwise;
+  :data:`END_MARGIN_S` before the clip's real end; ``mismatch`` otherwise;
   ``no_speech`` when nothing is heard; ``stt_unavailable`` when no STT link
   can run (the words then split evenly over the planned window,
   :func:`planned_window`, labelled approximate).
@@ -163,7 +163,8 @@ def evaluate_take(text, stt_words, *, clip_real_s, clip_s, aligned_by=None) -> d
     clip's sound from ``start_s`` to ``end_s``); None when nothing is heard."""
     clip_real_s = float(clip_real_s)
     if stt_words is None:
-        start, end = planned_window(min(float(clip_s), clip_real_s))
+        # The planned window inside the clip as it really is (an uploaded clip may run past the plan).
+        start, end = planned_window(clip_real_s)
         return {"state": TAKE_STT_UNAVAILABLE, "matched": None, "heard": None, "start_s": start, "end_s": end,
                 "aligned_by": None, "words": None}
     heard = [word for word in stt_words if isinstance(word, dict) and str(word.get("word") or "").strip()]
@@ -182,7 +183,9 @@ def evaluate_take(text, stt_words, *, clip_real_s, clip_s, aligned_by=None) -> d
     window = [dict(word, start=max(0.0, float(word["start"]) - start), end=max(0.0, float(word["end"]) - start))
               for word in heard[pairs[0][1]:pairs[-1][1] + 1]]
     aligned = wordtiming.align(text, window, end - start) or []
-    ok = matched >= MIN_MATCHED and end <= float(clip_s) - END_MARGIN_S + 1e-9 and end <= clip_real_s
+    # Judged against the clip's REAL length: a clip longer than planned (an 8 s upload for a 4 s line) may
+    # speak past the planned length; ``clip_s`` is only what the plan bought.
+    ok = matched >= MIN_MATCHED and end <= clip_real_s - END_MARGIN_S + 1e-9
     words = [{"word": word["word"], "start": word["start"], "end": word["end"]} for word in aligned]
     return {"state": TAKE_OK if ok else TAKE_MISMATCH, "matched": matched, "heard": heard_text(heard),
             "start_s": round(start, 3), "end_s": round(end, 3), "aligned_by": aligned_by, "words": words}

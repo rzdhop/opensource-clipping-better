@@ -55,9 +55,8 @@ PRICES = {
     # input video; the adapter's estimate rounds the clip up to 5 s.
     "fal/kling-lipsync": Price("second", 0.0028, "fal-ai/kling-video/lipsync/audio-to-video: $0.014 per 5 s of input video, rounded up to 5 s; video 2-10 s at 720-1920 px, audio 2-60 s and at most 5 MB; read 2026-10-03"),
     "gemini/veo-3.1-lite": Price("second", 0.05, "veo-3.1-lite-generate-preview at 720p ($0.20 per 4 s), audio always on and included; $0.08 a second at 1080p (8 s only); no free tier"),
-    # Plan 22: the 1080p row of lite (the per-resolution shape above), and the
-    # speaking links (read 2026-10-04 at https://ai.google.dev/gemini-api/docs/pricing).
-    "gemini/veo-3.1-lite@1080p": Price("second", 0.08, "veo-3.1-lite-generate-preview at 1080p (8 s only), audio included; read 2026-10-04 at ai.google.dev/gemini-api/docs/pricing"),
+    # Plan 22: the speaking links (read 2026-10-04 at https://ai.google.dev/gemini-api/docs/pricing).
+    # Lite keeps its one price: its body asks 720p whatever the story's size (RC-N1).
     "gemini/veo-3.1-fast": Price("second", 0.10, "veo-3.1-fast-generate-preview at 720p, audio always on and included; $0.12 a second at 1080p (8 s only); no free tier; read 2026-10-04 at ai.google.dev/gemini-api/docs/pricing"),
     "gemini/veo-3.1-fast@1080p": Price("second", 0.12, "veo-3.1-fast-generate-preview at 1080p (8 s only), audio included; read 2026-10-04 at ai.google.dev/gemini-api/docs/pricing"),
     "gemini/veo-3.1": Price("second", 0.40, "veo-3.1-generate-preview at 720p or 1080p, audio always on and included; no free tier; read 2026-10-04 at ai.google.dev/gemini-api/docs/pricing"),

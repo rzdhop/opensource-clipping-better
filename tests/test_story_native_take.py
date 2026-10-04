@@ -210,6 +210,29 @@ def test_a_clip_that_runs_at_most_a_second_past_its_last_word_keeps_its_length(s
     assert stored["duration_s"] == pytest.approx(6.0, abs=0.05)
 
 
+def test_a_clip_longer_than_planned_is_judged_against_its_real_length(store, tmp_path):
+    """An 8 s clip (an upload) for a line planned at 4 s, its speech ending at
+    5.0 s -- past the planned length, inside the clip: ``ok``; the shot is
+    cut 0.3 s after the last word."""
+    _require_ffmpeg()
+    story_id = nsp.planned_story(store)
+    probe_host, _log = _host(store, story_id)
+    shot = _shot(probe_host, 4)
+    text = _line(probe_host, shot)["text"]
+    count = len(words(text))
+    heard = words(text, start=5.0 - 0.3 * count + 0.02)
+    assert heard[-1]["end"] == pytest.approx(5.0)
+    host, _log = _host(store, story_id, transcribe=Transcriber(heard))
+    shot = _shot(host, 4)
+    _put_clip(store, story_id, host, shot, make_clip(tmp_path / "upload.mp4", 8))
+    host.native_take_shot(shot)
+    stored = next(item for item in tas._board(store, story_id)["shots"] if item["shot_id"] == shot["shot_id"])
+    record = stored["assets"]["clip"]["native_speech"]
+    assert (record["state"], record["end_s"]) == ("ok", pytest.approx(5.0))
+    assert record["clip_real_s"] == pytest.approx(8.0, abs=0.05)
+    assert stored["duration_s"] == pytest.approx(5.3, abs=1 / 30)
+
+
 # =================================================================== flagged
 
 def test_a_take_that_does_not_speak_its_line_is_flagged_and_a_studio_story_is_told_how_to_retake(store, tmp_path):
