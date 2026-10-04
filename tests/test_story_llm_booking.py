@@ -103,7 +103,7 @@ def _hermetic(monkeypatch, tmp_path):
 
     for _name, (_attr, env_name) in PROVIDER_KEYS.items():
         monkeypatch.delenv(env_name, raising=False)
-    for name in ("LLM_CHAIN", "ALLOW_SLOW_CHAIN", *budget.ENV_NAMES):
+    for name in ("LLM_CHAIN", "STORY_LLM_CHAIN", "STORY_LLM_PREMIUM_CHAIN", "ALLOW_SLOW_CHAIN", *budget.ENV_NAMES):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("SPEND_PATH", str(tmp_path / "spend.json"))
     budget.reset()
@@ -136,7 +136,16 @@ def story(tmp_path, monkeypatch):
 
 
 def _settings(*links, **extra):
-    return {"LLM_CHAIN": ",".join(describe(link) for link in links), **KEYS, **extra}
+    spec = ",".join(describe(link) for link in links)
+    # B1 is premium since plan 22 stage 1 (prompts.PREMIUM_PROMPT_IDS), and
+    # every test in this file exercises the generic booking mechanics
+    # through call_json("B1", ...). resolve_premium_chain does not fall
+    # through to LLM_CHAIN on its own (STORY_LLM_PREMIUM_CHAIN is its own
+    # override, like STORY_LLM_CHAIN, not a derivative of it), so the same
+    # spec is set as STORY_LLM_PREMIUM_CHAIN too: a premium prompt resolves
+    # to exactly the chain these tests build, as it did before B1 became
+    # premium.
+    return {"LLM_CHAIN": spec, "STORY_LLM_PREMIUM_CHAIN": spec, **KEYS, **extra}
 
 
 def _call(ctx, validator=lambda value: []):
@@ -167,6 +176,26 @@ def test_a_paid_reply_is_booked_from_its_usage_on_the_ledger_and_todays_spend(st
     assert usd <= row["est_usd"] < usd + 0.0001
     assert budget.day_spent() == row["est_usd"]
     assert story.fake.sent == [describe(PAID)]
+
+
+def test_reasoning_tokens_are_booked(story):
+    """Plan 22 stage 1: ``completion_tokens_details.reasoning_tokens`` is a
+    BREAKDOWN of ``completion_tokens`` (OpenAI's own docs: "these tokens are
+    counted as output tokens and are included in the completion_tokens
+    total"), so the row is noted but the dollar amount is exactly what
+    ``completion_tokens`` alone already prices -- adding the reasoning
+    figure a second time would double-count it."""
+    details = SimpleNamespace(reasoning_tokens=120)
+    story.fake.answer("openrouter", (VALID, usage(1000, 500, completion_tokens_details=details)))
+    ctx, _log = story.ctx(_settings(PAID, ALLOW_PAID="1"), ep=2)
+
+    assert _call(ctx) == {"ok": True}
+
+    [row] = story.ledger.entries()
+    assert row["qty"] == 1500
+    usd = _cost(PAID, 1000, 500)
+    assert usd <= row["est_usd"] < usd + 0.0001
+    assert row["note"] == "120 of the output tokens were reasoning (already inside completion_tokens)"
 
 
 def test_over_the_episode_cap_the_paid_link_is_skipped_with_the_numbers_and_a_free_one_answers(story):

@@ -413,8 +413,43 @@ def test_every_signup_url_is_the_one_env_example_documents():
             assert provider.signup_url in text, name
 
 
-def test_only_openrouter_is_marked_paid():
-    """The default OpenRouter model is billed per token. A message that calls
-    it free would send someone to add a card they did not expect to need."""
+def test_only_openrouter_and_gemini_paid_are_marked_paid():
+    """The default OpenRouter model is billed per token, and so is every
+    gemini-paid model (plan 22 stage 1, DEC-273: a message that calls either
+    free would send someone to add a card they did not expect to need).
+    Re-pinned on purpose: this used to read ``["openrouter"]`` alone."""
     paid = sorted(n for n, p in registry.PROVIDERS.items() if not p.free_tier)
-    assert paid == ["openrouter"]
+    assert paid == ["gemini-paid", "openrouter"]
+
+
+def test_gemini_paid_reads_only_the_paid_key_gemini_never_reads_it(monkeypatch):
+    """RC-V4's shape, now also for the LLM chain (plan 22 stage 1): the paid
+    writer and the free "gemini" provider never share a key."""
+    from clipping.aistory.steps import llm_call
+    from clipping.config import PROVIDER_KEYS
+
+    assert PROVIDER_KEYS["gemini-paid"] == ("api_key_gemini_paid", "GEMINI_PAID_API_KEY")
+    assert PROVIDER_KEYS["gemini"] == ("api_key_gemini", "GOOGLE_API_KEY")
+
+    for _name, (_attr, env_name) in PROVIDER_KEYS.items():
+        monkeypatch.delenv(env_name, raising=False)
+
+    env = {"GOOGLE_API_KEY": "free-key", "GEMINI_PAID_API_KEY": "paid-key"}
+    keys = llm_call.resolve_keys(env)
+    assert keys["gemini"] == "free-key"
+    assert keys["gemini-paid"] == "paid-key"
+
+    # Only one of the two set: the other provider's link is simply unkeyed,
+    # never falls back to the key that IS set.
+    assert llm_call.resolve_keys({"GOOGLE_API_KEY": "free-key"}) == {"gemini": "free-key"}
+    assert llm_call.resolve_keys({"GEMINI_PAID_API_KEY": "paid-key"}) == {"gemini-paid": "paid-key"}
+
+
+def test_gemini_paid_is_otherwise_shaped_like_gemini():
+    """Same base URL and structured-output capability, a separate provider
+    only for the key (plan 22 stage 1)."""
+    gemini, paid = registry.PROVIDERS["gemini"], registry.PROVIDERS["gemini-paid"]
+    assert paid.base_url == gemini.base_url
+    assert paid.structured == gemini.structured
+    assert paid.env_key == "GEMINI_PAID_API_KEY" and paid.env_key != gemini.env_key
+    assert paid.free_tier is False and gemini.free_tier is True

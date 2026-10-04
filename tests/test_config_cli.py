@@ -321,8 +321,10 @@ PROVIDER_CASES = [
 # deleted. Their KEYS are still needed -- they are ordinary chain links, and the
 # shipped default chain names both -- but they are no longer --ai-provider
 # values, so the gate reaches them through its chain branch like any other link.
+# gemini-paid joined it with the premium writing chain (plan 22 stage 1,
+# DEC-273): a chain-only link from the day it was added, never a CLI value.
 CHAIN_ONLY_PROVIDERS = {"groq", "openrouter", "mistral", "custom",
-                        "nvidia", "gemini"}
+                        "nvidia", "gemini", "gemini-paid"}
 
 
 @pytest.mark.parametrize("provider,key_attr,env_name", PROVIDER_CASES)

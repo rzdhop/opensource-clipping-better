@@ -93,3 +93,39 @@ def test_the_one_dollar_profile_fits_the_ceiling_as_the_appendix_computes_it():
 def test_the_extension_points_are_priced_too():
     for spec in ("gcloud/neural2", "openai/gpt-4o-mini-tts", "elevenlabs/flash"):
         assert price_for(link(spec)).usd > 0
+
+
+# ================================================== LLM_PRICE_CHANGES (plan 22)
+
+def test_gemini_38_flash_price_changes_on_2027_01_01():
+    """The promo ends 2027-01-01 (plan 22 stage 1, DEC-273): the estimate and
+    every booking move to the next row the day Google's own pricing page
+    says they do, with no separate deploy."""
+    from clipping.providers.pricing import LLM_PRICE_CHANGES, llm_price_for
+
+    link = registry.parse_spec("gemini-paid/gemini-3.8-flash", providers=None)
+    before = llm_price_for(link, today="2026-12-31")
+    on_day = llm_price_for(link, today="2027-01-01")
+    after = llm_price_for(link, today="2027-06-01")
+
+    assert (before.input_usd_per_m, before.output_usd_per_m) == (0.75, 3.75)
+    assert (on_day.input_usd_per_m, on_day.output_usd_per_m) == (1.50, 7.50)
+    assert on_day == after
+    assert LLM_PRICE_CHANGES["gemini-paid/gemini-3.8-flash"][0] == "2027-01-01"
+
+    # A date object works the same way a string does.
+    import datetime
+    assert llm_price_for(link, today=datetime.date(2027, 1, 1)) == on_day
+
+    # A link with no change row is unaffected by *today* at all.
+    pro = registry.parse_spec("gemini-paid/gemini-3.1-pro-preview", providers=None)
+    assert llm_price_for(pro, today="2030-01-01") == llm_price_for(pro)
+
+
+def test_gemini_paid_rows_are_priced():
+    from clipping.providers.pricing import llm_price_for
+
+    flash = llm_price_for(registry.parse_spec("gemini-paid/gemini-3.8-flash", providers=None))
+    pro = llm_price_for(registry.parse_spec("gemini-paid/gemini-3.1-pro-preview", providers=None))
+    assert (flash.input_usd_per_m, flash.output_usd_per_m) == (0.75, 3.75)
+    assert (pro.input_usd_per_m, pro.output_usd_per_m) == (2.00, 12.00)
