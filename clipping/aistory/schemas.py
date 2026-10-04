@@ -3803,7 +3803,7 @@ _METADATA_PLATFORM_SCHEMA = _document({
     "description": _text(5000),
     "hashtags": _HASHTAGS,
     "hook_text": _text(150),
-    # The teaser + "PART n+1 ->" / "PARTIE n+1 ->".
+    # The teaser + the call to comment "PART n+1" (steps/metadata.PART_CALL).
     "pinned_comment": _text(500),
     # Relative to the episode's folder.
     "cover": _RELATIVE_PATH,

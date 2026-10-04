@@ -1044,7 +1044,10 @@ YouTube Shorts, Instagram Reels — for a title, a description, hashtags (3
 to 5 on TikTok and Instagram Reels, exactly 3 on YouTube Shorts) and the
 cover's hook text; Python builds the rest: the description ends with the
 script's own next-episode teaser, and the pinned comment is that same
-teaser followed by "PART 2 →" ("PARTIE 2 →" in French). A French story's
+teaser followed by the call to comment `Comment "PART 2" for the next one →`
+(`Commente « PARTIE 2 » pour la suite →` in French), and an episode template
+that opts in with `end_card_cta: true` puts the same call, without the
+arrow, on the end card under "PART 2". A French story's
 cards also carry an English title and English hashtags.
 
 The **cover** — the hook scene's first shot, filled to 1080×1920, with its

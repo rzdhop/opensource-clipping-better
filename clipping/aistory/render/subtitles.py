@@ -193,6 +193,26 @@ END_CARD_PRIMARY_HEX = "#FFFFFF"
 END_CARD_OUTLINE_HEX = "#000000"
 END_CARD_OUTLINE_PX = 3
 
+# The end card's call to action (fruit-drama pack stage 3): opt-in per
+# episode template (``end_card_cta: true``, read by ``render/plan.py``), a
+# second line under "PART N", between it and the title, in the card's own
+# font and colours. The words are the metadata pack's pinned comment's
+# (``steps/metadata.PART_CALL``) without its trailing arrow: on the card the
+# arrow points at nothing, and five of the six shipped fonts have no "→"
+# glyph (libass would fall back to whatever font the machine has).
+END_CARD_CTA_STYLE_NAME = "EndCardCta"
+END_CARD_CTA = {"en": 'Comment "PART {n}" for the next one', "fr": "Commente « PARTIE {n} » pour la suite"}
+END_CARD_CTA_Y = round(_HEIGHT * 0.50)
+# WrapStyle 2 never wraps, so the line is sized to fit 1080 px: it starts at
+# the title's size and only shrinks (the "PART N" line never does). The
+# width estimate is deliberately wide: 0.62 em a character covers the widest
+# shipped font (Montserrat Black, measured 0.59 em on these words), and an
+# ASS font size is at least the em of every shipped font.
+END_CARD_CTA_MAX_FONT_SIZE = END_CARD_TITLE_FONT_SIZE
+END_CARD_CTA_MIN_FONT_SIZE = 24
+END_CARD_CTA_SIDE_MARGIN = 60
+END_CARD_CTA_CHAR_EM = 0.62
+
 COVER_STYLE_NAME = "Cover"
 COVER_FONT_SIZE = 84
 COVER_Y_FRACTION = HOOK_Y_FRACTION
@@ -777,12 +797,35 @@ def ai_label_events(total_s: float, *, language: str, typography: dict) -> tuple
 
 # --------------------------------------------------------- end card / cover
 
-def end_card_ass(language: str, next_ep: int, story_title: str, typography: dict, duration_s: float) -> str:
+def end_card_cta_text(language: str, next_ep: int) -> str:
+    """The end card's call to action for episode *next_ep*
+    (:data:`END_CARD_CTA`; English for any language but French, as the
+    "PART" label)."""
+    return END_CARD_CTA["fr" if language == "fr" else "en"].format(n=next_ep)
+
+
+def end_card_cta_font_size(text: str) -> int:
+    """The largest size, at most :data:`END_CARD_CTA_MAX_FONT_SIZE`, at
+    which *text* fits the 1080 px card between its side margins and
+    outline (:data:`END_CARD_CTA_CHAR_EM`'s estimate); never below
+    :data:`END_CARD_CTA_MIN_FONT_SIZE`."""
+    usable = _WIDTH - 2 * END_CARD_CTA_SIDE_MARGIN - 2 * END_CARD_OUTLINE_PX
+    fitting = math.floor(usable / (max(1, len(text)) * END_CARD_CTA_CHAR_EM))
+    return max(END_CARD_CTA_MIN_FONT_SIZE, min(END_CARD_CTA_MAX_FONT_SIZE, fitting))
+
+
+def end_card_ass(language: str, next_ep: int, story_title: str, typography: dict, duration_s: float, *,
+                 cta: bool = False) -> str:
     """A standalone ASS document for the 1.0 s end card (spec 6.2/6.4,
     plan: "PART {n+1} / PARTIE {n+1} + the story title, centered, style
     typography"): burned by ``render/filtergraph.py``'s ``end_card_argv``
     over a plain ``color=black`` source. ``typography["font_family"]`` is
-    the resolved ASS Fontname (module docstring's font contract)."""
+    the resolved ASS Fontname (module docstring's font contract).
+
+    With *cta* (the episode template's ``end_card_cta``), one more line
+    under "PART N": :func:`end_card_cta_text`, sized by
+    :func:`end_card_cta_font_size`. Without it the document is exactly
+    what it always was."""
     label_word = "PARTIE" if language == "fr" else "PART"
     label_text = escape_ass_text(f"{label_word} {next_ep}")
     title_text = escape_ass_text(story_title)
@@ -804,7 +847,19 @@ def end_card_ass(language: str, next_ep: int, story_title: str, typography: dict
         f"Dialogue: 1,{start_tc},{end_tc},{END_CARD_TITLE_STYLE_NAME},,0,0,0,,"
         f"{{\\an5\\pos({_CENTER_X},{END_CARD_TITLE_Y})}}{title_text}",
     ]
-    return _document(title="End Card", styles=[label_style, title_style], events=events)
+    styles = [label_style, title_style]
+    if cta:
+        cta_text = end_card_cta_text(language, next_ep)
+        styles.append(_style_line(
+            END_CARD_CTA_STYLE_NAME, typography["font_family"], end_card_cta_font_size(cta_text),
+            END_CARD_PRIMARY_HEX, END_CARD_OUTLINE_HEX, bold=False, italic=False,
+            outline_px=END_CARD_OUTLINE_PX, alignment=5,
+        ))
+        events.append(
+            f"Dialogue: 2,{start_tc},{end_tc},{END_CARD_CTA_STYLE_NAME},,0,0,0,,"
+            f"{{\\an5\\pos({_CENTER_X},{END_CARD_CTA_Y})}}{escape_ass_text(cta_text)}"
+        )
+    return _document(title="End Card", styles=styles, events=events)
 
 
 def cover_ass(text: str, typography: dict) -> str:

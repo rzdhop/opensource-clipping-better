@@ -164,7 +164,7 @@ def test_the_pack_is_one_m1_call_per_platform_and_python_builds_the_rest(store, 
         assert entry["title"] == f"Le coco sonne deux fois ({platform})"
         # the teaser appended by Python, the elision repaired (F1)
         assert entry["description"] == f"Kiwilo cache un secret et l'alliance vacille.\n\n{TEASER}"
-        assert entry["pinned_comment"] == f"{TEASER} PARTIE 2 →"
+        assert entry["pinned_comment"] == f"{TEASER} Commente « PARTIE 2 » pour la suite →"
         # every tag carries its "#", one word
         assert entry["hashtags"] == ["#tentafruit", "#coco", "#téléréalité"]
         assert entry["title_en"] == f"The coconut rings twice ({platform})"
@@ -255,7 +255,7 @@ def test_an_english_story_gets_part_and_no_english_fields(store, tmp_path, built
     doc = pack(store, story_id)
     assert doc["language"] == "en"
     for entry in doc["platforms"].values():
-        assert entry["pinned_comment"] == f"{TEASER} PART 2 →"
+        assert entry["pinned_comment"] == f"{TEASER} Comment \"PART 2\" for the next one →"
         assert "title_en" not in entry and "hashtags_en" not in entry
         # English prose is never "repaired" as French
         assert entry["description"].startswith("Kiwilo cache un secret et l alliance vacille.")
@@ -477,12 +477,19 @@ def test_the_cover_argv_golden():
 
 
 @pytest.mark.parametrize("language, teaser, expected", [
-    ("fr", TEASER, f"{TEASER} PARTIE 2 →"),
-    ("en", "Tomorrow, he plays his last card.", "Tomorrow, he plays his last card. PART 2 →"),
-    ("en", None, "PART 2 →"),
+    ("fr", TEASER, f"{TEASER} Commente « PARTIE 2 » pour la suite →"),
+    ("en", "Tomorrow, he plays his last card.",
+     'Tomorrow, he plays his last card. Comment "PART 2" for the next one →'),
+    ("en", None, 'Comment "PART 2" for the next one →'),
 ])
 def test_the_pinned_comment_is_the_teaser_and_the_next_part(language, teaser, expected):
     assert _meta().pinned_comment(teaser, 1, language) == expected
+
+
+@pytest.mark.parametrize("language", ["en", "fr"])
+def test_the_end_cards_cta_says_the_pinned_comments_words_without_the_arrow(language):
+    from clipping.aistory.render import subtitles
+    assert _meta().PART_CALL[language] == subtitles.END_CARD_CTA[language] + " →"
 
 
 def test_platform_entry_builds_what_python_owns():
@@ -491,7 +498,8 @@ def test_platform_entry_builds_what_python_owns():
     entry = _meta().platform_entry(reply, ep=4, language="fr", teaser="Demain tout change.", now=NOW)
     assert entry == {"title": "Le coco", "description": "Un secret.\n\nDemain tout change.",
                      "hashtags": ["#ab", "#c", "#d"], "hook_text": "Vote",
-                     "pinned_comment": "Demain tout change. PARTIE 5 →", "cover": "cover.jpg", "written_at": NOW,
+                     "pinned_comment": "Demain tout change. Commente « PARTIE 5 » pour la suite →",
+                     "cover": "cover.jpg", "written_at": NOW,
                      "title_en": "The coconut", "hashtags_en": ["#x", "#y", "#z"]}
     no_teaser = _meta().platform_entry(dict(reply), ep=1, language="en", teaser=None, now=NOW)
     assert no_teaser["description"] == "Un secret." and "title_en" not in no_teaser

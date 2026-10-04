@@ -503,6 +503,72 @@ def test_end_card_escapes_the_title():
     assert "{Weird}" not in doc
 
 
+# The call to action (fruit-drama pack stage 3): opt-in per episode template.
+END_CARD_OFF_EVENTS = [
+    r"Dialogue: 0,0:00:00.00,0:00:01.00,EndCardLabel,,0,0,0,,{\an5\pos(540,864)}PART 2",
+    r"Dialogue: 1,0:00:00.00,0:00:01.00,EndCardTitle,,0,0,0,,{\an5\pos(540,1056)}My Story",
+]
+
+
+def _events(doc):
+    return [line for line in doc.splitlines() if line.startswith("Dialogue:")]
+
+
+def _styles(doc):
+    return {line.split(",")[0][len("Style: "):]: line for line in doc.splitlines() if line.startswith("Style:")}
+
+
+def test_end_card_without_the_cta_is_the_card_it_always_was():
+    default = sub.end_card_ass(EN, 2, "My Story", TYPOGRAPHY, 1.0)
+    assert sub.end_card_ass(EN, 2, "My Story", TYPOGRAPHY, 1.0, cta=False) == default
+    assert _events(default) == END_CARD_OFF_EVENTS
+    assert list(_styles(default)) == [sub.END_CARD_LABEL_STYLE_NAME, sub.END_CARD_TITLE_STYLE_NAME]
+    assert "Comment" not in default and sub.END_CARD_CTA_STYLE_NAME not in default
+
+
+@pytest.mark.parametrize("language, next_ep, label, cta", [
+    (EN, 2, "PART 2", 'Comment "PART 2" for the next one'),
+    (FR, 3, "PARTIE 3", "Commente « PARTIE 3 » pour la suite"),
+])
+def test_end_card_with_the_cta_adds_one_line_under_part_n(language, next_ep, label, cta):
+    off = sub.end_card_ass(language, next_ep, "My Story", TYPOGRAPHY, 1.0)
+    on = sub.end_card_ass(language, next_ep, "My Story", TYPOGRAPHY, 1.0, cta=True)
+    # the PART line and the title are untouched; one more line, between them
+    assert _events(on)[:2] == _events(off)
+    assert _events(on)[2] == (f"Dialogue: 2,0:00:00.00,0:00:01.00,{sub.END_CARD_CTA_STYLE_NAME},,0,0,0,,"
+                              f"{{\\an5\\pos(540,{sub.END_CARD_CTA_Y})}}{cta}")
+    assert sub.END_CARD_LABEL_Y < sub.END_CARD_CTA_Y < sub.END_CARD_TITLE_Y
+    assert f"}}{label}" in _events(on)[0]
+    assert "→" not in on
+    styles = _styles(on)
+    assert [styles[name] for name in (sub.END_CARD_LABEL_STYLE_NAME, sub.END_CARD_TITLE_STYLE_NAME)] == \
+        list(_styles(off).values())
+    # the card's own font and colours; only the size is the CTA's own
+    expected = styles[sub.END_CARD_TITLE_STYLE_NAME].replace(sub.END_CARD_TITLE_STYLE_NAME,
+                                                               sub.END_CARD_CTA_STYLE_NAME)
+    expected = expected.replace(f",{sub.END_CARD_TITLE_FONT_SIZE},", f",{sub.end_card_cta_font_size(cta)},", 1)
+    assert styles[sub.END_CARD_CTA_STYLE_NAME] == expected
+    assert sub.end_card_cta_text(language, next_ep) == cta
+
+
+@pytest.mark.parametrize("language", [EN, FR])
+@pytest.mark.parametrize("next_ep", [2, 9, 10, 99, 100, 999])
+def test_the_cta_line_fits_the_card_and_only_it_shrinks(language, next_ep):
+    text = sub.end_card_cta_text(language, next_ep)
+    size = sub.end_card_cta_font_size(text)
+    assert sub.END_CARD_CTA_MIN_FONT_SIZE < size <= sub.END_CARD_TITLE_FONT_SIZE < sub.END_CARD_LABEL_FONT_SIZE
+    width = len(text) * sub.END_CARD_CTA_CHAR_EM * size + 2 * sub.END_CARD_OUTLINE_PX
+    assert width <= 1080 - 2 * sub.END_CARD_CTA_SIDE_MARGIN
+    doc = sub.end_card_ass(language, next_ep, "My Story", TYPOGRAPHY, 1.0, cta=True)
+    assert f",{sub.END_CARD_LABEL_FONT_SIZE}," in _styles(doc)[sub.END_CARD_LABEL_STYLE_NAME]
+
+
+def test_the_cta_size_shrinks_with_the_line_and_any_other_language_reads_english():
+    assert sub.end_card_cta_font_size("x" * 80) < sub.end_card_cta_font_size("x" * 30)
+    assert sub.end_card_cta_font_size("x" * 500) == sub.END_CARD_CTA_MIN_FONT_SIZE
+    assert sub.end_card_cta_text("de", 4) == 'Comment "PART 4" for the next one'
+
+
 def test_cover_ass_is_uppercase_and_standalone():
     doc = sub.cover_ass("a shocking secret", TYPOGRAPHY)
     assert "A SHOCKING SECRET" in doc

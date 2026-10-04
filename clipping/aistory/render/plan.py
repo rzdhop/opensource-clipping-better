@@ -30,7 +30,10 @@ for the version the cache keys need, and hands the plan to
   literal, e.g. ``render/golden.py``) -- both shipped MVP styles' own
   ``pan_pct`` already equals that constant, so their argv never moves.
 - ``E`` (``end_card``) -- only under ``cut_to_black``:
-  ``filtergraph.end_card_argv`` over ``end_card.ass``.
+  ``filtergraph.end_card_argv`` over ``end_card.ass``; the card carries the
+  call to action under "PART N" only when the episode template says
+  ``end_card_cta: true`` (read defensively: absent or anything else is off,
+  so every template without it renders the card it always did).
 - ``A`` (``audio_mix``) -- ``filtergraph.audio_mix_argv`` -> ``mix.wav`` and
   ``stems/``; at tier 3 a shot that keeps its clip's sound (the inputs'
   ``native_audio``, phase 6 stage 10) gives it one more stem there, in place
@@ -427,7 +430,8 @@ def _build(*, script, storyboard, assets, style_lock, template, story, ep, input
     end_card_output = None
     if timeline["end_card"] is not None:
         card_s = timeline["end_card"]["duration_s"]
-        card_text = subtitles_mod.end_card_ass(language, ep + 1, story["title"], typography, card_s)
+        card_text = subtitles_mod.end_card_ass(language, ep + 1, story["title"], typography, card_s,
+                                               cta=template.get("end_card_cta") is True)
         files.append({"path": END_CARD_ASS_REL, "text": card_text})
         argv0 = filtergraph.end_card_argv(END_CARD_ASS_REL, FONTS_DIR, card_s, card_profile, _OUT_TOKEN)
         stage = _cached_stage("E", "end_card", argv0,

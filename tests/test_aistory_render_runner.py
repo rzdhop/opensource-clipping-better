@@ -380,6 +380,48 @@ def test_the_end_card_key_follows_its_text_and_font(tmp_path):
     assert first != second
 
 
+def _card_text(plan):
+    return next(f["text"] for f in plan["files"] if f["path"] == plan_mod.END_CARD_ASS_REL)
+
+
+@pytest.mark.parametrize("flag", [False, None, "true", 1])
+def test_the_end_card_cta_is_off_unless_the_template_says_true(tmp_path, flag):
+    base = _plan(tmp_path / "base")
+    template = dict(golden.TEMPLATE, end_card_cta=flag)
+    other = _plan(tmp_path / "other", template=template)
+    assert "end_card_cta" not in golden.TEMPLATE
+    assert _card_text(other) == _card_text(base)
+    assert [s["cache_key"] for s in other["stages"]] == [s["cache_key"] for s in base["stages"]]
+
+
+def test_the_end_card_cta_flows_from_the_template_into_the_card_only(tmp_path):
+    base = _plan(tmp_path / "base")
+    on = _plan(tmp_path / "on", template=dict(golden.TEMPLATE, end_card_cta=True))
+    text = _card_text(on)
+    assert f'Comment "PART {golden.EP + 1}" for the next one' in text
+    assert text != _card_text(base) and "Comment" not in _card_text(base)
+    base_stages = {s["id"]: s for s in base["stages"]}
+    on_stages = {s["id"]: s for s in on["stages"]}
+    assert list(on_stages) == list(base_stages)
+    # the card is a new clip under a new key; its argv (frame count) is the same
+    assert on_stages["E"]["cache_key"] != base_stages["E"]["cache_key"]
+    card_argv = [base_stages["E"]["write"] if token == on_stages["E"]["write"] else token
+                 for token in on_stages["E"]["argv"]]
+    assert card_argv == base_stages["E"]["argv"]
+    # every other stage is untouched, the final pass only names the new card clip
+    for stage_id, stage in base_stages.items():
+        if stage_id in ("E", "F"):
+            continue
+        assert on_stages[stage_id] == stage, stage_id
+    swapped = [base_stages["E"]["output"] if token == on_stages["E"]["output"] else token
+               for token in on_stages["F"]["argv"]]
+    assert swapped == base_stages["F"]["argv"]
+    assert on["expected"] == base["expected"]
+    # the subtitles document of the episode does not carry the card
+    subs = {f["path"]: f["text"] for f in on["files"]}
+    assert subs[plan_mod.SUBTITLES_REL] == {f["path"]: f["text"] for f in base["files"]}[plan_mod.SUBTITLES_REL]
+
+
 def test_final_mode_uses_the_shot_and_final_profiles(tmp_path):
     args = _plan_args(tmp_path)
     plan = plan_mod.build_render_plan(**args, ffmpeg=dict(FFMPEG), profile="final")

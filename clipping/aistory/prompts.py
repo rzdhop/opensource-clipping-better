@@ -3835,8 +3835,8 @@ def validate_t1r_v2(reply, *, scene, shots, index, modifiers_allowed, tags_allow
 # description, hashtags and the cover's hook text (plus an English title and
 # English hashtags for a French story, spec 6.1). Python builds everything
 # else (``steps/metadata.py``): the next-episode teaser appended to the
-# description, the pinned comment ("<teaser> PART n+1 ->"), the "#" on every
-# tag, the cover image.
+# description, the pinned comment (the teaser and a call to comment
+# "PART n+1"), the "#" on every tag, the cover image.
 
 # A-078: the per-platform limits the prompt states and ``validate_m1``
 # checks, authored as of 2026-09 and kept conservative on purpose -- each sits

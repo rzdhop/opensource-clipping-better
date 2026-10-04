@@ -15,8 +15,8 @@ hashtags and the cover's hook text (and, for a French story, ``title_en``
 and ``hashtags_en``); **Python builds the rest** (:func:`platform_entry`):
 every tag carries its ``#`` (``prompts.normalize_hashtags``); the
 description ends with the script's ``next_episode_teaser``; the pinned
-comment is the teaser and ``PART {n+1} →`` / ``PARTIE {n+1} →``; French
-prose gets its dropped elisions repaired (F1, as the script step does).
+comment is the teaser and the call to comment "PART {n+1}" (:data:`PART_CALL`);
+French prose gets its dropped elisions repaired (F1, as the script step does).
 
 ``metadata_pack.json`` (``metadata_pack_v1``) records the ``script_rev`` and
 the ``render_sha256`` it was written from and is written after every
@@ -74,8 +74,10 @@ PLATFORMS = schemas.PLATFORMS
 # The regenerate kind of ``metadata:<ep>:<platform>`` (``episode_regenerate``).
 METADATA_KIND = "metadata"
 
-# The call to the next episode, after the teaser in the pinned comment.
-PART_CALL = {"en": "PART {n} →", "fr": "PARTIE {n} →"}
+# The call to the next episode, after the teaser in the pinned comment: a
+# call to comment (fruit-drama pack stage 3). The end card's opt-in line
+# says the same words without the arrow (``subtitles.END_CARD_CTA``).
+PART_CALL = {"en": 'Comment "PART {n}" for the next one →', "fr": "Commente « PARTIE {n} » pour la suite →"}
 
 # The cover's work files, inside render/ (the ffmpeg working folder).
 COVER_ASS_REL = "cover.ass"
@@ -171,7 +173,8 @@ def _prose(text, language) -> str:
 
 
 def pinned_comment(teaser, ep, language) -> str:
-    """The teaser, then ``PART {ep+1} →`` (``PARTIE`` in French)."""
+    """The teaser, then :data:`PART_CALL` for episode ``ep+1``
+    (``Comment "PART n" for the next one →``; ``PARTIE`` in French)."""
     call = PART_CALL[language].format(n=ep + 1)
     teaser = " ".join(str(teaser or "").split())
     return f"{teaser} {call}" if teaser else call
