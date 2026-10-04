@@ -48,7 +48,7 @@ _last_persist = 0.0
 # approve_step_job / supersede_step_job move it on, to COMPLETED.
 _TERMINAL = frozenset({
     JobStatus.COMPLETED.value, JobStatus.FAILED.value, JobStatus.CANCELLED.value,
-    JobStatus.AWAITING_APPROVAL.value,
+    JobStatus.AWAITING_APPROVAL.value, JobStatus.AWAITING_UPLOADS.value,
 })
 
 # What a job is. Every record carries one; a record written before kinds
@@ -152,7 +152,7 @@ def fail_stale_jobs(reason="Interrupted by a server restart.") -> list[str]:
         JobStatus.FAILED,
         JobStatus.CANCELLED,
     }
-    waiting_for_the_user = {JobStatus.AWAITING_APPROVAL}
+    waiting_for_the_user = {JobStatus.AWAITING_APPROVAL, JobStatus.AWAITING_UPLOADS}
     changed: list[str] = []
     with _lock:
         for job_id, job in _jobs.items():
@@ -508,17 +508,19 @@ def request_cancel(job_id: str) -> str:
         return "cancelled"
 
 
-def _complete_awaiting_step(job_id: str, stamp: dict) -> str:
-    """Move a story step out of AWAITING_APPROVAL, to COMPLETED, with *stamp*.
+def _complete_awaiting_step(job_id: str, stamp: dict, *, status=None) -> str:
+    """Move a story step out of AWAITING_APPROVAL (or *status*), to
+    COMPLETED, with *stamp*.
 
     Not a worker write, so DEC-076's rule for a cancelled job does not come
     into it: a cancelled job is not awaiting, and is refused like any other.
     """
+    awaited = (status or JobStatus.AWAITING_APPROVAL).value
     with _lock:
         job = _jobs.get(job_id)
         if job is None:
             return "missing"
-        if _status_value(job) != JobStatus.AWAITING_APPROVAL.value:
+        if _status_value(job) != awaited:
             return "not_awaiting"
         job.update(stamp)
         job["status"] = JobStatus.COMPLETED.value
@@ -545,6 +547,14 @@ def supersede_step_job(job_id: str, by_job_id: str) -> str:
     instead of ``approved_at``.
     """
     return _complete_awaiting_step(job_id, {"superseded_by": by_job_id})
+
+
+def resume_step_job(job_id: str, by_job_id: str) -> str:
+    """Plan 22 stage 5: a story step that awaited the user's clips is taken
+    over by *by_job_id*, the same step run again now that nothing is missing.
+    ``"ok"`` (now COMPLETED, ``resumed_by`` stamped), ``"missing"``, or
+    ``"not_awaiting"`` for a job not AWAITING_UPLOADS."""
+    return _complete_awaiting_step(job_id, {"resumed_by": by_job_id}, status=JobStatus.AWAITING_UPLOADS)
 
 
 def discard_step_job(job_id: str, archive: str) -> str:

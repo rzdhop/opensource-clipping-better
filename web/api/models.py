@@ -44,6 +44,12 @@ class JobStatus(str, enum.Enum):
     # the user, and it survives a restart. Approving it, or superseding it with
     # a regenerated step, moves it on to COMPLETED; nothing else does.
     AWAITING_APPROVAL = "awaiting_approval"
+    # Plan 22 stage 5 (the manual link): a story step that waits for the
+    # user's own clips (the assets step, or the fast track or agent run paused
+    # there). Finished for the worker, as AWAITING_APPROVAL is; an upload that
+    # leaves nothing missing runs the step again and moves this one on to
+    # COMPLETED (``resumed_by``). It survives a restart.
+    AWAITING_UPLOADS = "awaiting_uploads"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
@@ -355,6 +361,10 @@ class JobResponse(BaseModel):
     # ``story-fast-track``: ``steps.story_fast_track.PARTS``); null for every
     # other job.
     sub_step: Optional[str] = None
+    # Plan 22 stage 5: what a job awaiting uploads waits for ({count, missing,
+    # message, brief}), and the job an upload started to go on with it.
+    uploads: Optional[dict] = None
+    resumed_by: Optional[str] = None
 
 
 class JobListResponse(BaseModel):

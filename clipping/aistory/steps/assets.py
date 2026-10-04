@@ -178,8 +178,10 @@ from .. import (defaults, hardware, imaging, media_policy, native_speech, prompt
 from .. import ledger as ledger_mod
 from .. import names as names_mod
 from .. import shots as shots_mod
+from .. import steps as steps_pkg
 from .. import store as store_mod
 from ..render import audio_assets, imagesize
+from . import brief as brief_step
 from . import clips, entities, episode_common, judge, llm_call, sticky_link, voice_lines
 from . import lipsync as lipsync_step
 from . import native_take as take_mod
@@ -2382,6 +2384,8 @@ class _Assets(voice_lines.LineMeasurement):
         self.local_image_ran = False
         # Phase 7 stage 6b: what the keyframe judge (J2) did in this run (None: not a v2 story).
         self.keyframe_check = None
+        # Plan 22 stage 5: the human's clips still missing (None: nothing awaited).
+        self.uploads = None
         # Phase 8 stage B: the episode's continuity ledger, read once (:meth:`ledger_now`),
         # and what the keyframe auto-fix did (None: it did not run).
         self.ledger_read = _READ
@@ -3084,6 +3088,12 @@ class _Assets(voice_lines.LineMeasurement):
             # Plan 22: a kept speaking clip whose take is not current is taken now (free).
             for shot_id in kept_ids:
                 self.native_take_shot(by_id[shot_id])
+        # Plan 22 stage 5: a clip on manual/upload is the human's to make -- never asked of anything; the
+        # step lists it and ends awaiting the uploads (RC-N4: nothing sent, nothing booked).
+        manual_rows = [row for row in todo if gen.is_manual(row.get("link") or video["link"])]
+        if manual_rows:
+            todo = [row for row in todo if row not in manual_rows]
+            self.await_uploads(doc)
         if not todo and not lip_todo:
             ctx.on_log(f"🎬 Every planned shot has its current clip on {video['link']}: no clip to make.")
             self.lipsync_total()
@@ -3130,6 +3140,22 @@ class _Assets(voice_lines.LineMeasurement):
         self.lipsync_total()
         self.take_total()
         return episode_common.read_episode(ec, ASSETS_DOC) or doc
+
+    def await_uploads(self, doc) -> None:
+        """Plan 22 stage 5: the clips on ``manual/upload`` still missing
+        (``brief.missing_clips``), recorded on the run's summary as its
+        ``uploads`` and said once; the step then ends ``awaiting_uploads``
+        (:meth:`finish`)."""
+        ec, ctx = self.ec, self.ctx
+        missing = brief_step.missing_clips(ec, self.script, self.storyboard, doc)
+        if not missing:
+            return
+        self.uploads = uploads_record(ec, missing)
+        speaking = sum(1 for item in missing if item["speaks"])
+        ctx.on_log(f"✋ {self.uploads['message']}: {len(missing)} of your own clip{'s' if len(missing) != 1 else ''} "
+                   f"({speaking} speaking, {len(missing) - speaking} silent) on {gen.MANUAL_LINK} -- nothing is sent "
+                   f"or bought. Make them from the shot brief ({self.uploads['brief']}) and upload each on its shot: "
+                   "the run continues once every clip is there.")
 
     # ------------------------------------------------------------ the lipsync
 
@@ -4353,7 +4379,9 @@ class _Assets(voice_lines.LineMeasurement):
         if tail_message:
             ctx.on_log(tail_message)
         ctx.on_log(episode_common.timing_line(self.script))
-        if failures:
+        if self.uploads is not None and not failures:
+            ctx.on_log(f"⏸ Episode {ec.ep}'s assets wait for your clips: {self.uploads['message']}.")
+        elif failures:
             targets = [item["target"] for item in failures if item["target"]]
             advice = f"regenerate {entities.quoted_list(targets)} or run the assets step again" if targets else ""
             held = [item["what"] for item in failures if not item["target"]]
@@ -4402,6 +4430,10 @@ class _Assets(voice_lines.LineMeasurement):
         if self.video is not None:
             # Tier >= 2 (phase 6 stage 8): what the video phase did.
             result["video"] = dict(self.video, gone=self.video_gone.as_dict() if self.video_gone else None)
+        if self.uploads is not None:
+            # Plan 22 stage 5: the step ends awaiting the human's clips.
+            result["state"] = steps_pkg.AWAITING_UPLOADS
+            result["uploads"] = dict(self.uploads)
         if self.keyframe_check is not None:
             # A v2 story (phase 7 stage 6b): what J2 did, and where the keyframes' approval stands.
             result["keyframes"] = dict(self.keyframe_check, approval=keyframes_state(ec, board, doc))
@@ -4409,6 +4441,18 @@ class _Assets(voice_lines.LineMeasurement):
                 # Phase 8 stage B: what the keyframe auto-fix did, with its one-line message.
                 result["keyframes"]["fix"] = dict(self.keyframe_fix)
         return result
+
+
+def uploads_record(ec, missing, *, platform=None) -> dict:
+    """``{"state", "count", "missing", "message", "brief", "brief_md"}``: what
+    an episode waits for from the human (plan 22 stage 5) -- the shots
+    ``brief.missing_clips`` lists, the sentence ("Waiting for 5 clips --
+    download the brief") and where the brief is."""
+    base = f"/api/stories/{ec.story_id}/episodes/{ec.ep}/brief"
+    query = f"?platform={platform}" if platform else ""
+    return {"state": steps_pkg.AWAITING_UPLOADS, "count": len(missing), "missing": list(missing),
+            "message": brief_step.waiting_sentence(len(missing)), "brief": f"{base}.zip{query}",
+            "brief_json": f"{base}{query}"}
 
 
 def _book_answer(gates, result, answered, kind, *, unit="image", qty=1) -> float:

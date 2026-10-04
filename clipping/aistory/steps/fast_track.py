@@ -105,6 +105,7 @@ import subprocess
 import time
 
 from .. import media_policy
+from .. import steps as steps_pkg
 from .. import store as store_mod
 from .. import timing, voices
 from . import assets as assets_step
@@ -826,6 +827,9 @@ class _FastTrack:
         summary = assets_step.run(self.sub("assets"), adapters=self.adapters, transport=self.transport,
                                   time_fn=self.time_fn, sleep_fn=self.sleep_fn, transcribe=self.transcribe,
                                   budget=self.budget)
+        if steps_pkg.awaiting_uploads(summary) and not summary["failed"]:
+            # Plan 22 stage 5: the human's clips are missing -- a pause, never a failure.
+            raise steps_pkg.AwaitingUploads(summary["uploads"])
         if summary["failed"] or not summary["complete"]:
             failures = summary["failed"]
             if failures:
@@ -908,6 +912,15 @@ class _FastTrack:
             self.log(f"⏩ Fast track {number}/{len(SUB_STEPS)}: {LABELS[name]}")
             try:
                 results[name] = getattr(self, name)()
+            except steps_pkg.AwaitingUploads as paused:
+                # Plan 22 stage 5: paused, not stopped -- the job ends awaiting_uploads and an upload that
+                # leaves nothing missing runs it again (it repeats nothing already done).
+                self.log(f"⏸ Fast track paused at {LABELS[name]} ({number} of {len(SUB_STEPS)}): "
+                         f"{paused.uploads.get('message')}. It goes on by itself once every clip is uploaded.")
+                return {"ep": ec.ep, "state": steps_pkg.AWAITING_UPLOADS, "uploads": paused.uploads,
+                        "paused_at": name, "storyboard": mode, "steps": results,
+                        "auto_approved": list(self.auto_approved),
+                        "seconds": round(self.budget.elapsed(), 1)}
             except StepFailed as exc:
                 raise self.stopped(number, name, exc) from None
         seconds = round(self.budget.elapsed(), 1)

@@ -141,6 +141,8 @@ def _job_to_response(job: dict) -> JobResponse:
         superseded_by=job.get("superseded_by"),
         discarded=job.get("discarded"),
         sub_step=job.get("sub_step"),
+        uploads=job.get("uploads"),
+        resumed_by=job.get("resumed_by"),
     )
 
 
@@ -457,6 +459,7 @@ async def job_status_sse(job_id: str):
             JobStatus.FAILED.value,
             JobStatus.CANCELLED.value,
             JobStatus.AWAITING_APPROVAL.value,
+            JobStatus.AWAITING_UPLOADS.value,
         }
 
         def feed_frame():

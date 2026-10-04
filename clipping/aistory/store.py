@@ -252,6 +252,15 @@ EPISODE_ASSET_NAME_PATTERNS = {
     "clips": re.compile(schemas.SHOT_CLIP_NAME_PATTERN),
 }
 
+# Plan 22 stage 5: the shot brief of an episode whose clips are the human's
+# own (``steps/brief.py``), in assets/brief/, and the uploaded clips a new
+# upload replaced, kept in assets/clips/takes/ -- each folder with its own
+# closed list of names (``episode_brief_path``, ``episode_take_path``).
+EPISODE_BRIEF_DIR = ("assets", "brief")
+EPISODE_BRIEF_NAMES = ("shot_brief.json", "shot_brief.md", "image_brief.json", "image_brief.md")
+EPISODE_TAKES_DIR = ("assets", "clips", "takes")
+EPISODE_TAKE_NAME_PATTERN = re.compile(r"^shot_(0[1-9]|[1-9][0-9]{1,2})\.manual\.[0-9]{8}T[0-9]{6}Z(-[0-9]+)?\.mp4$")
+
 # The files at the top of an episode's folder besides its documents -- the
 # renderer's and the metadata step's outputs and the episode's view of the
 # cost ledger -- and nothing else: a name is checked against this list
@@ -1750,6 +1759,34 @@ class StoryStore:
             path = os.path.join(folder, filename)
             if os.path.islink(path) or (os.path.lexists(path) and not os.path.isfile(path)):
                 raise KeyError(f"{label}{filename}")
+        return path
+
+    def episode_brief_path(self, story_id, ep, name, *, create=False) -> str:
+        """The path of ``<story>/episodes/ep<NN>/assets/brief/<name>``, one of
+        :data:`EPISODE_BRIEF_NAMES` (plan 22 stage 5: the shot brief), with
+        :meth:`episode_asset_path`'s rules: the name, episode and story id
+        checked first, every folder a real one, nothing a symlink."""
+        if not isinstance(name, str) or name not in EPISODE_BRIEF_NAMES:
+            raise KeyError(name)
+        return self._episode_sub_path(story_id, ep, EPISODE_BRIEF_DIR, name, create=create)
+
+    def episode_take_path(self, story_id, ep, name, *, create=False) -> str:
+        """The path of ``<story>/episodes/ep<NN>/assets/clips/takes/<name>``
+        (:data:`EPISODE_TAKE_NAME_PATTERN`: an uploaded clip a later upload
+        replaced, kept), with :meth:`episode_asset_path`'s rules."""
+        if not isinstance(name, str) or EPISODE_TAKE_NAME_PATTERN.fullmatch(name) is None:
+            raise KeyError(name)
+        return self._episode_sub_path(story_id, ep, EPISODE_TAKES_DIR, name, create=create)
+
+    def _episode_sub_path(self, story_id, ep, folders, name, *, create) -> str:
+        ep = check_episode(ep)
+        self._check_id(story_id)
+        label = f"{self._episode_label(story_id, ep)}{'/'.join(folders)}/"
+        with self._lock:
+            folder = _descend(self.episode_dir(story_id, ep, create=create), folders, create=create, label=label)
+            path = os.path.join(folder, name)
+            if os.path.islink(path) or (os.path.lexists(path) and not os.path.isfile(path)):
+                raise KeyError(f"{label}{name}")
         return path
 
     def episode_file_path(self, story_id, ep, name, *, create=False) -> str:

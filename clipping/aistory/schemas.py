@@ -3028,8 +3028,12 @@ SHOT_IMAGE_NAME_PATTERN = r"^shot_(0[1-9]|[1-9][0-9]{1,2})\.(png|jpg|jpeg|webp)$
 # shot_NN.lipsync.mp4. The only names store.EPISODE_ASSET_NAME_PATTERNS["clips"]
 # holds.
 SHOT_CLIP_DIR = "assets/clips"
-SHOT_CLIP_NAME_PATTERN = r"^shot_(0[1-9]|[1-9][0-9]{1,2})(\.lipsync)?\.mp4$"
+SHOT_CLIP_NAME_PATTERN = r"^shot_(0[1-9]|[1-9][0-9]{1,2})(\.lipsync|\.manual)?\.mp4$"
 SHOT_LIPSYNC_SUFFIX = ".lipsync"
+# Plan 22 stage 5: a clip the human uploaded (``manual/upload``) is kept as
+# shot_NN.manual.mp4, named only while its clip record's link is that one.
+SHOT_MANUAL_SUFFIX = ".manual"
+MANUAL_LINK = "manual/upload"
 # How an image was paid for: a free API link, a local engine, a paid link.
 IMAGE_ROUTES = ("free", "local", "paid")
 # A full sha256, hex (a prompt hash, a cache key, a file's digest).
@@ -3057,7 +3061,7 @@ _STORYBOARD_PENDING_SCHEMA = _or_null(_document({
 # current: the renderer reads it (render/plan.py). ``link`` is a chain link's
 # label (EPISODE_LINK_PATTERN's rule); ``route`` how it is paid for.
 CLIP_STATES = ("current", "stale", "failed")
-CLIP_ROUTES = ("local", "paid")
+CLIP_ROUTES = ("local", "paid", "manual")
 # DEC-258: the clip's lipsync, when its story lipsyncs (media_policy.lipsync)
 # and the shot holds a line spoken by a character in its frame. ``current``:
 # ``assets.video`` is the lip-synced take (SHOT_CLIP_DIR/shot_NN.lipsync.mp4),
@@ -3135,6 +3139,12 @@ _STORYBOARD_CLIP_SCHEMA = _or_null(_document({
     "native_speech": _STORYBOARD_NATIVE_TAKE_SCHEMA,
     # Plan 22: how many times the clip was bought again for its take (a retake).
     "retakes": {"type": "integer", "minimum": 0},
+    # Plan 22 stage 5: a clip the human uploaded (link manual/upload): its
+    # file's sha256, when it landed, its real length and the name it was sent as.
+    "sha256": _SHA256,
+    "uploaded_at": _NON_EMPTY_STRING,
+    "duration_s": {"type": "number", "minimum": 0},
+    "filename": {"type": "string", "maxLength": 200},
 }))
 
 # The five keys of spec 2.8 stay required; phase 4's record of the image is
@@ -3341,9 +3351,10 @@ def storyboard_errors(doc, *, min_shot_s=0.8) -> list:
             folder, _, name = video.rpartition("/")
             plain = f"shot_{shot['shot_id'][2:]}.mp4"
             synced = f"shot_{shot['shot_id'][2:]}{SHOT_LIPSYNC_SUFFIX}.mp4"
+            manual = f"shot_{shot['shot_id'][2:]}{SHOT_MANUAL_SUFFIX}.mp4"
             clip = shot["assets"].get("clip") or {}
             if (folder != SHOT_CLIP_DIR or _search(SHOT_CLIP_NAME_PATTERN, name) is None
-                    or name not in (plain, synced)):
+                    or name not in (plain, synced, manual)):
                 errors.append(
                     f"$.shots[{i}].assets.video: {video!r} is not {shot['shot_id']}'s clip "
                     f"({SHOT_CLIP_DIR}/shot_NN.mp4)"
@@ -3354,6 +3365,9 @@ def storyboard_errors(doc, *, min_shot_s=0.8) -> list:
             elif name == synced and (clip.get("lipsync") or {}).get("state") != "current":
                 errors.append(f"$.shots[{i}].assets.video: the lip-synced take is set only with a current lipsync "
                               "(assets.clip.lipsync.state 'current')")
+            elif name == manual and clip.get("link") != MANUAL_LINK:
+                errors.append(f"$.shots[{i}].assets.video: an uploaded clip is set only with a clip on {MANUAL_LINK} "
+                              f"(assets.clip.link {MANUAL_LINK!r})")
 
     seen_scenes = []
     for shot in shots:

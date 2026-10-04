@@ -78,6 +78,7 @@ import subprocess
 import time
 
 from .. import media_policy, schemas
+from .. import steps as steps_pkg
 from . import bible as bible_step
 from . import cast as cast_step
 from . import concepts as concepts_step
@@ -506,6 +507,17 @@ class _AgentRun:
                 results[name] = getattr(self, name)()
             except StepFailed as exc:
                 raise StepFailed(stop_message(number, name, exc), reason=getattr(exc, "reason", str(exc))) from None
+            if steps_pkg.awaiting_uploads(results[name]):
+                # Plan 22 stage 5: episode 1 waits for the human's own clips -- the run pauses (the job ends
+                # awaiting_uploads) and an upload that leaves nothing missing starts it again.
+                uploads = results[name]["uploads"]
+                self.log(f"⏸ Agent run paused at {STOP_LABELS[name]} ({number} of {len(PARTS)}): "
+                         f"{uploads.get('message')}. It goes on by itself once every clip is uploaded; nothing "
+                         "done so far is repeated.")
+                return {"ep": EPISODE, "state": steps_pkg.AWAITING_UPLOADS, "uploads": uploads, "paused_at": name,
+                        "parts": {key: results[key] for key in PRE_PRODUCTION_PARTS if key in results},
+                        "episode": results[name], "approved": list(self.approved),
+                        "seconds": round(self.time_fn() - self.started, 1)}
         seconds = round(self.time_fn() - self.started, 1)
         approved = f"; approved by rule: {_and(self.approved)}" if self.approved else ""
         self.log(f"🏁 Agent run done: episode {EPISODE} is rendered with its metadata pack ({seconds / 60:.1f} min"

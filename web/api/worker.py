@@ -255,10 +255,23 @@ def _execute_story_step(job_id: str, job: dict, token: CancelToken) -> None:
             # Plan 21 stage 1: the part a chained step is on, on the job record.
             on_sub_step=lambda name: store.update_job(job_id, sub_step=name),
         )
-        steps.run(step, ctx)
+        result = steps.run(step, ctx)
 
         # A result that lands after a cancel is not offered for approval.
         token.check()
+        if steps.awaiting_uploads(result):
+            # Plan 22 stage 5: the step waits for the user's own clips; an upload that leaves
+            # nothing missing runs it again (routes.stories.resume_after_upload).
+            uploads = result.get("uploads") or {}
+            store.update_job(job_id, uploads=uploads)
+            store.set_status(job_id, JobStatus.AWAITING_UPLOADS)
+            current = store.get_job(job_id) or {}
+            if current.get("status") == JobStatus.CANCELLED.value:
+                raise Cancelled("The job was cancelled.")
+            waiting = uploads.get("message") or "waiting for your clips"
+            store.append_event(job_id, f"Story step '{step}' is paused: {waiting} ({uploads.get('brief') or 'the shot '
+                                       'brief'}). It goes on by itself once every clip is uploaded.", "step", "worker")
+            return
         completed = steps.ends_completed(step, job.get("params"))
         store.set_status(job_id, JobStatus.COMPLETED if completed else JobStatus.AWAITING_APPROVAL)
         # The cancel can also land between that check and the write, which the

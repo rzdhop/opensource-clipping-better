@@ -143,6 +143,30 @@ COMPLETED_STEPS = ("render", "metadata", "fast-track", "rerender", "story-fast-t
 COMPLETED_TARGET_KINDS = ("metadata",)
 
 
+# Plan 22 stage 5 (the manual link): a step that waits for the human's own
+# clips ends ``awaiting_uploads`` instead -- the assets step on a story whose
+# clips are on ``manual/upload``, and the fast track or the agent run paused
+# there. Its runner returns ``{"state": AWAITING_UPLOADS, "uploads": {count,
+# missing, message, brief}, ...}`` (:func:`awaiting_uploads`); the worker ends
+# the job so, and an upload that leaves nothing missing starts it again.
+AWAITING_UPLOADS = "awaiting_uploads"
+
+
+class AwaitingUploads(Exception):
+    """Raised inside a chained runner (the fast track) when its assets step
+    waits for the human's clips; carries the step's ``uploads`` record. The
+    chain turns it into its own paused result, never a failure."""
+
+    def __init__(self, uploads):
+        self.uploads = dict(uploads or {})
+        super().__init__(self.uploads.get("message") or "waiting for your clips")
+
+
+def awaiting_uploads(result) -> bool:
+    """Whether a runner's *result* says it waits for the human's uploads."""
+    return isinstance(result, dict) and result.get("state") == AWAITING_UPLOADS
+
+
 def ends_completed(step, params=None) -> bool:
     """Whether a job of *step* (with its *params*) ends ``completed`` rather
     than ``awaiting_approval`` once its runner returns: :data:`COMPLETED_STEPS`,

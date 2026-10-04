@@ -173,6 +173,17 @@ An AI Story step is a job too, with `"kind": "story_step"` (a clip job says
 gets `409`; it survives a restart, where a `running` step is marked `failed`.
 Approving the step, or regenerating it, moves it on to `completed`.
 
+A step whose clips are the user's own (the `native_speech_manual` profile:
+every clip on `manual/upload`) ends `awaiting_uploads` instead when clips are
+missing -- the assets step, or the fast track or agent run paused there -- with
+`uploads` (`count`, `missing`, `message`, `brief`) on the job. Like
+`awaiting_approval` it frees the worker, ends the status stream and survives a
+restart. `GET /api/stories/{id}/episodes/{ep}/brief?platform=flow|higgsfield`
+(JSON) and `.../brief.zip` hand out the shot brief; each clip goes to
+`POST /api/stories/{id}/episodes/{ep}/shots/{shot_id}/clip` (multipart, field
+`file`), and the upload that leaves nothing missing runs the paused step
+again as a new job (the paused one moves on to `completed`, `resumed_by` it).
+
 ## Watching a job
 
 `GET /api/jobs/{id}/status` is Server-Sent Events. `EventSource` cannot send

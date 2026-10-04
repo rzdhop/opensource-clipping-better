@@ -17,6 +17,8 @@ const STATUS_LABELS = {
   rendering: 'Rendering',
   running: 'Running',
   awaiting_approval: 'Awaiting approval',
+  // Plan 22 stage 5: a story step that waits for the user's own clips.
+  awaiting_uploads: 'Waiting for your clips',
   completed: 'Completed',
   failed: 'Failed',
   cancelled: 'Cancelled',
@@ -36,7 +38,7 @@ const RUNNING = ['queued', 'downloading', 'transcribing', 'analyzing', 'renderin
 // A story-step job is never a clip card (its own story page, stage 11, owns
 // it); it earns a line above the grid only while it is still something the
 // user would want to know about here -- queued, at work, or waiting on them.
-const STORY_STEP_ACTIVE = ['queued', 'running', 'awaiting_approval']
+const STORY_STEP_ACTIVE = ['queued', 'running', 'awaiting_approval', 'awaiting_uploads']
 
 /**
  * The list view's answer to "is anything wrong with that one?".

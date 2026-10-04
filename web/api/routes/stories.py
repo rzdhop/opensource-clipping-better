@@ -131,9 +131,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
 from starlette.concurrency import run_in_threadpool
 
-from clipping.aistory import defaults, media_policy, refimages, schemas, templates, thumbs, workflow
+from clipping.aistory import defaults, media_policy, platforms, refimages, schemas, templates, thumbs, workflow
+from clipping.aistory import manual_uploads
 from clipping.aistory import store as story_store
 from clipping.aistory import uploads as uploads_mod
+from clipping.aistory.steps import brief as brief_step
+from clipping.aistory.steps import episode_common
 from clipping.aistory.steps import bible as bible_step
 from clipping.aistory.steps import concepts as concepts_step
 from clipping.aistory.steps import entities as entities_step
@@ -2550,6 +2553,166 @@ async def episode_clip(story_id: str, ep: str, name: str):
     )
 
 
+# ------------------------------------------------- the manual link (plan 22 stage 5)
+
+_SHOT_ID = re.compile(schemas.SHOT_ID_PATTERN)
+
+
+def _episode_number(ep) -> int:
+    if _EPISODE_IN_PATH.fullmatch(str(ep)) is None:
+        raise HTTPException(status_code=404, detail=f"There is no episode {ep!r}.")
+    return int(ep)
+
+
+def _brief_of(stories, story_id, ep, platform):
+    """``(ec, brief)`` of episode *ep* for *platform*; 404 / 400 / 409 as the
+    brief's own refusals say."""
+    try:
+        ec = episode_common.load_context(stories, story_id, ep)
+    except llm_call.StepFailed as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from None
+    try:
+        return ec, brief_step.shot_brief(ec, platform=platform)
+    except platforms.PresetError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    except llm_call.StepFailed as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+
+
+@router.get("/{story_id}/episodes/{ep}/brief")
+async def episode_brief(story_id: str, ep: str, platform: Optional[str] = None) -> dict:
+    """The episode's shot brief (``steps.brief.shot_brief``) for *platform*
+    (``flow``, the default, or ``higgsfield``): what the human needs to make
+    each clip on their own subscription -- per shot its purpose, the prompt
+    rephrased for the platform, the negative prompt, the length to pick, the
+    aspect, the reference images (with their URLs), the line and its voice,
+    the checks, the upload slot and the shot's state. Kept as
+    ``assets/brief/shot_brief.json`` and ``.md`` (best effort). Calls
+    nothing. 404 for an unknown story or episode, 400 for an unknown
+    platform, 409 while the episode has no storyboard."""
+    stories = _stories()
+    _load(stories, story_id)
+    number = _episode_number(ep)
+    ec, brief = await run_in_threadpool(_brief_of, stories, story_id, number, platform)
+    try:
+        brief["files"] = await run_in_threadpool(brief_step.write_brief, ec, brief)
+    except (OSError, KeyError):
+        brief["files"] = None
+    query = f"?platform={brief['platform']['platform']}"
+    brief["zip_url"] = f"/api/stories/{story_id}/episodes/{number}/brief.zip{query}"
+    return brief
+
+
+@router.get("/{story_id}/episodes/{ep}/brief.zip")
+async def episode_brief_zip(story_id: str, ep: str, platform: Optional[str] = None):
+    """The shot brief as a zip: ``shot_brief.md``, ``shot_brief.json`` and
+    every reference image it names under ``references/`` (the file names
+    the ``.md`` gives them). The refusals of ``GET .../brief``."""
+    stories = _stories()
+    _load(stories, story_id)
+    number = _episode_number(ep)
+    ec, brief = await run_in_threadpool(_brief_of, stories, story_id, number, platform)
+    data = await run_in_threadpool(brief_step.brief_zip, ec, brief)
+    name = f"shot_brief_ep{number:02d}_{brief['platform']['platform']}.zip"
+    return Response(content=data, media_type="application/zip",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"', "Cache-Control": "no-store"})
+
+
+def _paused_jobs(story_id, ep) -> list:
+    """The story's step jobs awaiting the user's clips for episode *ep*
+    (the agent run works on its episode 1), oldest first."""
+    return [job for job in store.list_step_jobs(story_id, statuses=[JobStatus.AWAITING_UPLOADS])
+            if job.get("ep") == ep or (job.get("step") == agent_step.STEP and ep == agent_step.EPISODE)]
+
+
+async def resume_after_upload(story_id, ep, result) -> Optional[dict]:
+    """Plan 22 stage 5: after an upload, the step a job paused awaiting the
+    user's clips. Clips still missing: each paused job's ``uploads`` follows
+    the count (``{"waiting", "jobs"}``). None missing: the newest paused job
+    is run again -- the same step, episode and params, as a new job (it
+    repeats nothing already done) -- and every paused job of the episode is
+    completed, ``resumed_by`` it (``{"job_id", "step"}``); not while another
+    step of the story runs or the queue is full (``{"held": reason}``: the
+    next upload, or Continue, starts it). None when nothing was paused."""
+    paused = _paused_jobs(story_id, ep)
+    if not paused:
+        return None
+    missing = result.get("missing") or []
+    if missing:
+        for job in paused:
+            uploads = dict(job.get("uploads") or {}, count=len(missing), missing=missing, message=result["waiting"])
+            store.update_job(job["id"], uploads=uploads)
+        return {"waiting": result["waiting"], "jobs": [job["id"] for job in paused]}
+    busy = _in_flight(story_id)
+    if busy:
+        return {"held": _busy_detail(busy[0], "the paused run starts once it is done (Continue)")}
+    full = jobs_routes._queue_refusal()
+    if full:
+        return {"held": full}
+    job = paused[-1]
+    new_id = store.create_job(kind=store.KIND_STORY_STEP, story_id=story_id, step=job["step"], ep=job.get("ep"),
+                              params=dict(job.get("params") or {}))
+    for old in paused:
+        store.resume_step_job(old["id"], new_id)
+        store.append_event(old["id"], f"Every clip is uploaded: job {new_id} goes on with it.", "step", "worker")
+    await worker.submit_job(new_id, {})
+    return {"job_id": new_id, "step": job["step"]}
+
+
+def _activity(stories, story_id):
+    def log(line):
+        try:
+            stories.append_activity(story_id, f"{_now()} [upload] {line}")
+        except Exception:  # noqa: BLE001 - the activity log is best effort
+            pass
+    return log
+
+
+@router.post("/{story_id}/episodes/{ep}/shots/{shot_id}/clip", status_code=201)
+async def upload_shot_clip(story_id: str, ep: str, shot_id: str, request: Request) -> dict:
+    """The user's own clip for shot *shot_id* (multipart, field ``file``):
+    stored, recorded and taken (``manual_uploads.accept_clip``); 201 with
+    ``{"shot_id", "clip", "state", "take", "duration_s", "replaced",
+    "missing", "waiting", "resumed"}`` -- ``resumed`` the paused step it
+    started (:func:`resume_after_upload`).
+
+    Refused before the body is read: 404 for an unknown story, episode or
+    shot id; 409 while a step of the story is queued or running; 413 for a
+    declared size over ``manual_uploads.MAX_CLIP_BYTES``. Then the body is
+    streamed into the episode's ``assets/clips/`` (413 the moment it passes
+    the cap) and checked: 409 before the storyboard is approved, 404 for a
+    shot not on it, 400 with the reason for a shot whose clip is not the
+    user's to upload, a file with no video stream, shorter than 2 s, not
+    9:16 (within 2 %), not an MP4, or a speaking shot's clip with no sound.
+    No auth, as every story route (the app stays open by design)."""
+    stories = _stories()
+    _load(stories, story_id)
+    number = _episode_number(ep)
+    if _SHOT_ID.fullmatch(shot_id) is None:
+        raise HTTPException(status_code=404, detail=f"There is no shot {shot_id!r}.")
+    _refuse_busy(story_id, "upload the clip once that step is done, or cancel it first.")
+    try:
+        folder = await run_in_threadpool(manual_uploads.clips_folder, stories, story_id, number)
+    except KeyError:
+        raise _upload_refused(409, "The episode's assets/clips folder is not a real folder (a symlink is never "
+                                   "followed); move it away and upload again.") from None
+    sent = {}
+    received = await _receive_upload(request, folder, limit=manual_uploads.MAX_CLIP_BYTES, what="clip", sent=sent)
+    try:
+        result = await run_in_threadpool(functools.partial(
+            manual_uploads.accept_clip, stories, story_id, number, shot_id, received, filename=sent.get("filename"),
+            env=worker.get_settings_env(), on_log=_activity(stories, story_id), now=_now()))
+    except manual_uploads.UploadRefused as exc:
+        raise _upload_refused(exc.status, str(exc)) from None
+    finally:
+        try:
+            os.unlink(received)
+        except OSError:
+            pass
+    result["resumed"] = await resume_after_upload(story_id, number, result)
+    return result
+
+
 @router.get("/{story_id}/episodes/{ep}/voice/{name}")
 async def episode_voice(story_id: str, ep: str, name: str):
     """One line's measured take, ``line_NN.mp3`` or ``line_NN.wav`` (the
@@ -2767,10 +2930,10 @@ def _upload_refused(status, message, reasons=()) -> HTTPException:
     return HTTPException(status_code=status, detail=detail)
 
 
-def _too_large() -> HTTPException:
-    limit = uploads_mod.MAX_UPLOAD_BYTES
+def _too_large(limit=None, what="image") -> HTTPException:
+    limit = limit or uploads_mod.MAX_UPLOAD_BYTES
     return _upload_refused(uploads_mod.HTTP_STATUS["too_large"],
-                           f"The image is larger than {limit / (1024 * 1024):g} MB.")
+                           f"The {what} is larger than {limit / (1024 * 1024):g} MB.")
 
 
 def _multipart():
@@ -2783,7 +2946,7 @@ def _multipart():
     return MultipartParser, parse_options_header
 
 
-async def _receive_upload(request: Request, folder: str) -> str:
+async def _receive_upload(request: Request, folder: str, *, limit=None, what="image", sent=None) -> str:
     """The form field ``file`` of a multipart request, streamed chunk by chunk
     into a hidden temp file in *folder* (the character's ``refs/uploads/``);
     returns its path. The body is never held in memory and never read past
@@ -2791,17 +2954,19 @@ async def _receive_upload(request: Request, folder: str) -> str:
     multipart envelope) is refused before a byte is read, and the stream is
     left the moment the file passes the cap. 413 then; 400 for a body that is
     not ``multipart/form-data`` with one file in ``file``. The temp file
-    never outlives a refusal."""
+    never outlives a refusal. Plan 22 stage 5: *limit* and *what* (a clip's
+    own cap and word; the image's by default), and *sent* -- a dict that
+    receives the file's name as the form gave it (``filename``)."""
     MultipartParser, parse_options_header = _multipart()
-    limit = uploads_mod.MAX_UPLOAD_BYTES
-    ask = f"Send the image as multipart/form-data, in a field named '{UPLOAD_FIELD}'."
+    limit = limit or uploads_mod.MAX_UPLOAD_BYTES
+    ask = f"Send the {what} as multipart/form-data, in a field named '{UPLOAD_FIELD}'."
     mime, options = parse_options_header(request.headers.get("content-type") or "")
     boundary = options.get(b"boundary")
     if mime.lower() != b"multipart/form-data" or not boundary:
         raise _upload_refused(400, ask)
     length = request.headers.get("content-length") or ""
     if length.isdigit() and int(length) > limit + UPLOAD_OVERHEAD_BYTES:
-        raise _too_large()
+        raise _too_large(limit, what)
 
     part = {"header": b"", "value": b"", "disposition": b"", "file": False}
     state = {"files": 0, "size": 0, "other": 0}
@@ -2827,18 +2992,20 @@ async def _receive_upload(request: Request, folder: str) -> str:
         if part["file"]:
             state["files"] += 1
             if state["files"] > 1:
-                raise _upload_refused(400, f"Send one image at a time. {ask}")
+                raise _upload_refused(400, f"Send one {what} at a time. {ask}")
+            if sent is not None:
+                sent["filename"] = params.get(b"filename", b"").decode("utf-8", "replace")
 
     def on_part_data(data, start, end):
         if part["file"]:
             state["size"] += end - start
             if state["size"] > limit:
-                raise _too_large()
+                raise _too_large(limit, what)
             pending.append(bytes(data[start:end]))
         else:
             state["other"] += end - start
             if state["other"] > _UPLOAD_OTHER_FIELDS_BYTES:
-                raise _upload_refused(400, f"The form carries more than the image. {ask}")
+                raise _upload_refused(400, f"The form carries more than the {what}. {ask}")
 
     def on_part_end():
         part["file"] = False
@@ -2857,7 +3024,7 @@ async def _receive_upload(request: Request, folder: str) -> str:
             async for chunk in request.stream():
                 received += len(chunk)
                 if received > limit + UPLOAD_OVERHEAD_BYTES:
-                    raise _too_large()
+                    raise _too_large(limit, what)
                 try:
                     parser.write(chunk)
                 except HTTPException:
@@ -2873,7 +3040,7 @@ async def _receive_upload(request: Request, folder: str) -> str:
             except Exception:  # noqa: BLE001
                 raise _upload_refused(400, f"The request body is not valid multipart/form-data. {ask}") from None
         if not state["files"]:
-            raise _upload_refused(400, f"No image was sent. {ask}")
+            raise _upload_refused(400, f"No {what} was sent. {ask}")
     except BaseException:
         try:
             os.unlink(tmp)

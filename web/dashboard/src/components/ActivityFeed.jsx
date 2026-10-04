@@ -16,7 +16,7 @@ import {
  * stop polling it exactly like a completed job, even though the *story* is
  * not done.
  */
-export const TERMINAL = ['completed', 'failed', 'cancelled', 'awaiting_approval']
+export const TERMINAL = ['completed', 'failed', 'cancelled', 'awaiting_approval', 'awaiting_uploads']
 
 /**
  * Merge incoming events into the events already held, by `seq`. Pure, so the
