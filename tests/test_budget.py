@@ -288,3 +288,101 @@ def test_the_default_spend_file_lives_in_data(monkeypatch):
     monkeypatch.delenv("SPEND_PATH", raising=False)
     assert budget.default_spend_path().endswith(os.path.join("data", "spend.json"))
     assert budget.default_spend_path() != budget.__dict__.get("USAGE_PATH", "")
+
+
+# ------------------------------------------- the daily extra (plan 23, stage A1)
+
+def _day_message(**kwargs):
+    on = Budget(True, 4.0, 4.0, 40.0, "one_dollar")
+    with pytest.raises(BudgetRefused) as excinfo:
+        check(Est(0.30), budget=on, day_spent=3.90, **kwargs)
+    return str(excinfo.value)
+
+
+def test_check_with_no_extra_is_byte_identical():
+    expected = ("refused: est $0.300 on fal/seedream-4-edit would bring today to "
+                "$4.20 of the $4.00 daily cap")
+    assert _day_message() == expected
+    assert _day_message(day_extra=0.0) == expected
+    assert _day_message(day_extra=-1.0) == expected  # a negative extra is no extra
+
+
+def test_day_extra_raises_the_effective_daily_cap_only():
+    on = Budget(True, 4.0, 4.0, 40.0, "one_dollar")
+    check(Est(0.30), budget=on, day_spent=3.90, day_extra=0.30)  # $4.20 <= $4.30 effective: fits
+    with pytest.raises(BudgetRefused):
+        check(Est(0.30), budget=on, day_spent=3.90, day_extra=0.19)  # $4.20 > $4.19 effective
+    # the per-episode and per-story clauses do not move, and keep their text
+    with pytest.raises(BudgetRefused) as ep:
+        check(Est(0.30), budget=on, ep_spent=3.90, day_extra=5.0)
+    assert "episode to $4.20 of its $4.00 cap" in str(ep.value)
+    with pytest.raises(BudgetRefused) as story:
+        check(Est(0.30), budget=on, story_spent=39.90, day_extra=5.0)
+    assert "story to $40.20 of its $40.00 cap" in str(story.value)
+    # allow_paid off still refuses, extra or not
+    with pytest.raises(BudgetRefused) as off:
+        check(Est(0.30), budget=Budget(False, 4.0, 4.0, 40.0, "free"), day_extra=5.0)
+    assert "allow_paid is off" in str(off.value)
+
+
+def test_extra_refusal_names_the_allowed_amount():
+    assert _day_message(day_extra=0.10) == (
+        "refused: est $0.300 on fal/seedream-4-edit would bring today to "
+        "$4.20 of the $4.00 daily cap + $0.10 allowed today")
+
+
+def test_extra_is_keyed_by_day_and_expires_at_the_next_day(tmp_path):
+    clock = Clock()
+    spend = DailySpend(str(tmp_path / "spend.json"), time_fn=clock)
+    assert spend.extra_today() == 0.0
+    assert spend.add_extra(5.0, story_id="s1", note="finish the cast") == 5.0
+    assert spend.extra_today() == 5.0
+    record(Est(0.5), spend=spend)
+    state = budget.day_state(spend=spend)
+    assert state == budget.DayState(spend.today(), "UTC", 0.5, 5.0)
+    granted_day = spend.today()
+    clock.now += 86_400
+    assert spend.extra_today() == 0.0
+    assert budget.day_state(spend=spend) == budget.DayState(spend.today(), "UTC", 0.0, 0.0)
+    on_disk = json.loads((tmp_path / "spend.json").read_text(encoding="utf-8"))
+    assert on_disk["extra"] == {granted_day: 5.0}          # the old day keeps its own key
+    assert on_disk["zone"] == "UTC"
+    assert [(g["day"], g["usd"], g["story_id"], g["note"]) for g in on_disk["grants"]] == [
+        (granted_day, 5.0, "s1", "finish the cast")]
+    assert "at" in on_disk["grants"][0]
+    spend.add_extra(1.0)
+    assert spend.clear_extra() == 1.0                       # clears today only
+    assert spend.clear_extra() == 0.0
+    assert json.loads((tmp_path / "spend.json").read_text(encoding="utf-8"))["extra"] == {granted_day: 5.0}
+
+
+def test_add_extra_accumulates_and_is_capped(tmp_path):
+    spend = DailySpend(str(tmp_path / "spend.json"), time_fn=Clock())
+    assert spend.add_extra(4.98) == 4.98
+    assert spend.add_extra(0.02) == 5.0                     # the same day accumulates
+    for bad in (0, -1.0):
+        with pytest.raises(ValueError):
+            spend.add_extra(bad)
+    assert spend.add_extra(budget.DAY_EXTRA_MAX_USD - 5.0) == budget.DAY_EXTRA_MAX_USD
+    with pytest.raises(ValueError):
+        spend.add_extra(0.01)                               # over the ceiling: refused, nothing written
+    assert spend.extra_today() == budget.DAY_EXTRA_MAX_USD == 25.0
+    # the grants log keeps the last 200
+    other = DailySpend(str(tmp_path / "many.json"), time_fn=Clock())
+    for _ in range(budget.GRANTS_KEPT + 5):
+        other.add_extra(0.01)
+    assert len(json.loads((tmp_path / "many.json").read_text(encoding="utf-8"))["grants"]) == 200
+
+
+def test_old_reader_keeps_extra_keys_on_add(tmp_path):
+    clock = Clock()
+    spend = DailySpend(str(tmp_path / "spend.json"), time_fn=clock)
+    spend.add_extra(3.0, story_id="s9")
+    before = json.loads((tmp_path / "spend.json").read_text(encoding="utf-8"))
+    assert record(Est(0.25), spend=spend) == 0.25
+    assert budget.release(Est(0.05), spend=spend) == 0.2
+    after = json.loads((tmp_path / "spend.json").read_text(encoding="utf-8"))
+    assert after["$schema"] == "spend_v1"
+    for key in ("extra", "grants", "zone"):
+        assert after[key] == before[key]
+    assert after["days"][spend.today()] == 0.2

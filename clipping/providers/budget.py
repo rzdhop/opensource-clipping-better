@@ -38,6 +38,10 @@ PER_EPISODE_CAP_USD = 4.00   # the author's ceiling (spec 8.5)
 DAILY_CAP_USD = 12.00
 PER_STORY_CAP_USD = 40.00
 BUDGET_PROFILE = ""          # "" = resolved from allow_paid
+# Plan 23 A1: what one day may be raised by, in total, on top of the daily cap
+# (an "allow more for today" grant; it ends with the day).
+DAY_EXTRA_MAX_USD = 25.00
+GRANTS_KEPT = 200
 
 PROFILE_WHEN_FREE = "free"
 PROFILE_WHEN_PAID = "one_dollar"
@@ -49,6 +53,7 @@ _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 PROFILES_PATH = os.path.join(_ROOT, "clipping", "aistory", "templates", "budget_profiles.json")
 
 Budget = namedtuple("Budget", "allow_paid per_episode_cap_usd daily_cap_usd per_story_cap_usd profile")
+DayState = namedtuple("DayState", "day zone spent extra")
 
 
 class BudgetRefused(Exception):
@@ -297,12 +302,16 @@ def _label(estimate, link) -> str:
     return "this call"
 
 
-def check(estimate, link=None, *, budget: Budget, day_spent=0.0, ep_spent=0.0, story_spent=0.0) -> None:
+def check(estimate, link=None, *, budget: Budget, day_spent=0.0, ep_spent=0.0, story_spent=0.0,
+          day_extra=0.0) -> None:
     """Raise :class:`BudgetRefused` unless *estimate* may be spent right now.
 
     A free call (``$0.00``) is never refused: the budget governs money, not
     requests. Every refusal names the estimate, the cap and what is already
     spent, so the user can decide with the numbers in front of them.
+
+    *day_extra* is today's allowance on top of the daily cap (plan 23 A1); with
+    none, the refusal text is exactly the one DEC-097 pinned.
     """
     usd = _usd(estimate)
     if usd <= 0:
@@ -318,10 +327,12 @@ def check(estimate, link=None, *, budget: Budget, day_spent=0.0, ep_spent=0.0, s
             f"refused: est ${usd:.3f} on {label} would bring this episode to "
             f"${ep_spent + usd:.2f} of its ${budget.per_episode_cap_usd:.2f} cap"
         )
-    if day_spent + usd > budget.daily_cap_usd:
+    day_extra = max(0.0, float(day_extra or 0.0))
+    if day_spent + usd > budget.daily_cap_usd + day_extra:
+        allowed = f" + ${day_extra:.2f} allowed today" if day_extra > 0 else ""
         raise BudgetRefused(
             f"refused: est ${usd:.3f} on {label} would bring today to "
-            f"${day_spent + usd:.2f} of the ${budget.daily_cap_usd:.2f} daily cap"
+            f"${day_spent + usd:.2f} of the ${budget.daily_cap_usd:.2f} daily cap{allowed}"
         )
     if story_spent + usd > budget.per_story_cap_usd:
         raise BudgetRefused(
@@ -390,6 +401,75 @@ class DailySpend:
             self._write(data)
             return total
 
+    def _now_iso(self) -> str:
+        return datetime.fromtimestamp(self._time(), tz=timezone.utc).isoformat()
+
+    @staticmethod
+    def _extra_map(data: dict) -> dict:
+        extra = data.get("extra")
+        return extra if isinstance(extra, dict) else {}
+
+    def extra_today(self) -> float:
+        """What today may be raised by, on top of the daily cap (0.0 when nothing was allowed)."""
+        with self._lock:
+            return float(self._extra_map(self._load()).get(self.today(), 0.0) or 0.0)
+
+    def day_state(self) -> DayState:
+        """Today's day, zone, paid total and extra, read from the file once."""
+        with self._lock:
+            data = self._load()
+            day = self.today()
+            return DayState(
+                day,
+                str(data.get("zone") or "UTC"),
+                float(data["days"].get(day, 0.0)),
+                float(self._extra_map(data).get(day, 0.0) or 0.0),
+            )
+
+    def add_extra(self, usd: float, *, story_id=None, note="") -> float:
+        """Allow *usd* more for today only, on top of any earlier grant of the
+        same day. Refuses ``usd <= 0`` and a day total over ``DAY_EXTRA_MAX_USD``
+        (``ValueError``, nothing written). Logs the grant (last ``GRANTS_KEPT``).
+        Returns today's extra."""
+        usd = float(usd)
+        if not usd > 0:
+            raise ValueError(f"a daily extra is a positive amount, not {usd!r}")
+        with self._lock:
+            data = self._load()
+            day = self.today()
+            extra = self._extra_map(data)
+            total = round(float(extra.get(day, 0.0) or 0.0) + usd, 4)
+            if total > DAY_EXTRA_MAX_USD:
+                raise ValueError(
+                    f"today's extra would be ${total:.2f}, over the ${DAY_EXTRA_MAX_USD:.2f} ceiling"
+                )
+            extra[day] = total
+            data["extra"] = extra
+            data.setdefault("zone", "UTC")
+            grants = data.get("grants")
+            grants = grants if isinstance(grants, list) else []
+            grants.append({"day": day, "at": self._now_iso(), "usd": round(usd, 4),
+                           "story_id": story_id, "note": str(note or "")})
+            data["grants"] = grants[-GRANTS_KEPT:]
+            data["updated_at"] = self._now_iso()
+            self._write(data)
+            return total
+
+    def clear_extra(self) -> float:
+        """Take today's extra back (the grants log keeps what was allowed).
+        Returns the amount that was cleared."""
+        with self._lock:
+            data = self._load()
+            extra = self._extra_map(data)
+            day = self.today()
+            held = float(extra.pop(day, 0.0) or 0.0)
+            if held == 0.0:
+                return 0.0
+            data["extra"] = extra
+            data["updated_at"] = self._now_iso()
+            self._write(data)
+            return held
+
     def release(self, usd: float, *, day=None) -> float:
         """Give back *usd* booked on *day* (``YYYY-MM-DD``, UTC; today when
         None): a booking proven unbilled. Never below zero -- a day is never
@@ -432,6 +512,11 @@ def reset() -> None:
 
 def day_spent(*, spend=None) -> float:
     return (spend or default_spend()).today_total()
+
+
+def day_state(*, spend=None) -> DayState:
+    """Today's day, zone, paid total and extra, from one read of the spend file."""
+    return (spend or default_spend()).day_state()
 
 
 def record(estimate, *, spend=None) -> float:
