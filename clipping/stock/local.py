@@ -193,15 +193,16 @@ class LocalIndex:
             stamp = [stat.st_size, stat.st_mtime_ns]
             cached = self._probes.get(rel)
             if isinstance(cached, dict) and cached.get("stamp") == stamp and isinstance(cached.get("info"), dict):
-                info = cached["info"]
+                info = cached["info"] or None
             else:
                 self.probe_calls += 1
                 info = self._probe(path)
                 changed = True
                 if not info:
                     logger.warning("stock: %s is not a readable video, skipped", rel)
-                    continue
-            seen[rel] = {"stamp": stamp, "info": info}
+            seen[rel] = {"stamp": stamp, "info": info or {}}
+            if not info:
+                continue
             if folder not in folder_index:
                 data = _read_json(os.path.join(folder, "index.json"), self.root_real)
                 folder_index[folder] = data.get("files") if isinstance(data.get("files"), dict) else data
@@ -220,7 +221,7 @@ class LocalIndex:
             clips.append(StockClip(
                 provider="local", id=digest, url=os.path.realpath(path),
                 width=int(info["width"]), height=int(info["height"]), duration_s=float(info.get("duration_s") or 0.0),
-                tags=tuple(dict.fromkeys(tokens(stem_name) + [stem(w.lower()) for w in words])),
+                tags=tuple(dict.fromkeys(tokens(stem_name) + [t for w in words for t in tokens(w)])),
                 author=str(meta.get("author") or ""), author_url="", page_url=_http(meta.get("source_url")),
                 licence=str(meta.get("licence") or UNKNOWN_LICENCE), licence_url=""))
         if changed or set(seen) != set(self._probes):

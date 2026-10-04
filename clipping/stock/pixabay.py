@@ -5,7 +5,7 @@ travels in the query string, so it is removed from every log line and exception
 message (:func:`base.redact`). The API has no video orientation filter: the
 rendition is the biggest of large/medium that matches the wanted orientation,
 chosen client-side. Responses are cached 24 h (Pixabay's terms require caching)
-under ``<cache>/pixabay/<sha256(q + aspect)>.json``."""
+under ``<cache>/pixabay/<sha256(q)>.json`` (one entry per query, every aspect)."""
 
 from __future__ import annotations
 
@@ -28,8 +28,10 @@ PER_PAGE = 50
 QUERY_MAX = 100  # the API's limit
 
 
-def cache_file(env, query, aspect) -> str:
-    digest = hashlib.sha256(f"{query}\x00{aspect}".encode("utf-8")).hexdigest()
+def cache_file(env, query, aspect=None) -> str:
+    """One entry per query: the request does not depend on the aspect (the
+    orientation is filtered client-side), so both frames share a fetch."""
+    digest = hashlib.sha256(str(query).encode("utf-8")).hexdigest()
     return os.path.join(base.cache_root(env), "pixabay", f"{digest}.json")
 
 

@@ -10,7 +10,7 @@ import pytest
 
 from clipping import stock
 from clipping.stock import local
-from clipping.stock.local import LocalIndex
+from clipping.stock.local import LocalIndex, rank
 
 
 class FakeProbe:
@@ -175,3 +175,24 @@ def test_probe_video_reads_ffprobe_json_and_applies_rotation(tmp_path):
         raise FileNotFoundError("ffprobe")
 
     assert local.probe_video("x.mp4", run=missing) is None
+
+
+def test_a_multi_word_sidecar_keyword_matches_each_of_its_words(tmp_path):
+    # review finding (B1): "night city street" must become three tags, not one
+    touch(tmp_path / "street.mp4")
+    (tmp_path / "street.json").write_text(json.dumps({"keywords": ["night City street"]}), encoding="utf-8")
+    clips = LocalIndex(tmp_path, probe=FakeProbe()).scan()
+    assert set(clips[0].tags) >= {"night", "city", "street"}
+    assert [c.url for c in rank(clips, "city at night", aspect="9:16")] == [clips[0].url]
+
+
+def test_an_unreadable_file_is_probed_once_and_cached_as_unreadable(tmp_path):
+    touch(tmp_path / "good.mp4")
+    touch(tmp_path / "bad.mp4")
+    probe = FakeProbe()
+    index = LocalIndex(tmp_path, probe=lambda p: None if p.endswith("bad.mp4") else probe(p),
+                       cache_file=str(tmp_path / ".cache" / "idx.json"))
+    assert names(index.scan()) == ["good.mp4"]
+    first = index.probe_calls
+    assert names(index.scan()) == ["good.mp4"]
+    assert index.probe_calls == first  # bad.mp4 is not probed again
